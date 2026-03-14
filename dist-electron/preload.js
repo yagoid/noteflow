@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 const api = {
+    // Identification
+    windowId: () => electron_1.ipcRenderer.sendSync('window:get-id'),
     // File system
     listNotes: () => electron_1.ipcRenderer.invoke('fs:list-notes'),
     readNote: (filePath) => electron_1.ipcRenderer.invoke('fs:read-note', filePath),
@@ -12,6 +14,7 @@ const api = {
     openNotesFolder: () => electron_1.ipcRenderer.invoke('app:open-notes-folder'),
     chooseNotesDir: () => electron_1.ipcRenderer.invoke('app:choose-notes-dir'),
     // Window controls
+    openSticky: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-sticky', noteId, sectionId),
     minimize: () => electron_1.ipcRenderer.send('window:minimize'),
     maximize: () => electron_1.ipcRenderer.send('window:maximize'),
     close: () => electron_1.ipcRenderer.send('window:close'),
@@ -19,6 +22,11 @@ const api = {
     onNewNote: (cb) => {
         electron_1.ipcRenderer.on('new-note', cb);
         return () => electron_1.ipcRenderer.removeListener('new-note', cb);
+    },
+    onNotesUpdated: (cb) => {
+        const wrapper = (_event, path, senderId) => cb(path, senderId);
+        electron_1.ipcRenderer.on('notes-updated', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('notes-updated', wrapper);
     },
 };
 electron_1.contextBridge.exposeInMainWorld('noteflow', api);

@@ -2,6 +2,14 @@ import { create } from 'zustand'
 import type { Note, NoteSection } from '../types'
 import { parseNote, serializeNote, createEmptyNote, noteFilename, extractTags } from '../lib/noteUtils'
 
+/** Normalize a string: lowercase + strip diacritical marks (accents) */
+function normalize(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+}
+
 interface NotesState {
   notes: Note[]
   activeNoteId: string | null
@@ -27,6 +35,7 @@ interface NotesState {
   setFilterTag: (tag: string | null) => void
   setShowArchived: (v: boolean) => void
   setCommandPaletteOpen: (v: boolean) => void
+  syncNote: (filePath: string) => Promise<void>
   pruneEmptyNote: (id: string) => Promise<void>
 
   // Derived helpers
@@ -68,6 +77,30 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     } catch (err) {
       console.error('Failed to load notes:', err)
       set({ isLoading: false })
+    }
+  },
+  
+  syncNote: async (filePath: string) => {
+    try {
+      const raw = await window.noteflow.readNote(filePath)
+      if (!raw) return
+      
+      const incomingNote = parseNote(raw, filePath)
+      const existingNote = get().notes.find(n => n.id === incomingNote.id)
+      
+      if (!existingNote) {
+        // New note created in another window
+        set(s => ({ notes: [incomingNote, ...s.notes] }))
+      } else {
+        // Compare raw content to avoid unnecessary updates
+        if (existingNote.raw === incomingNote.raw) return
+        
+        set(s => ({
+          notes: s.notes.map(n => n.id === incomingNote.id ? incomingNote : n)
+        }))
+      }
+    } catch (err) {
+      console.error('Failed to sync note:', err)
     }
   },
 
@@ -195,11 +228,11 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       .filter((n) => !filterTag || n.tags.includes(filterTag))
       .filter((n) => {
         if (!searchQuery.trim()) return true
-        const q = searchQuery.toLowerCase()
+        const q = normalize(searchQuery)
         return (
-          n.title.toLowerCase().includes(q) ||
-          n.sections.some((s) => s.content.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)) ||
-          n.tags.some((t) => t.includes(q))
+          normalize(n.title).includes(q) ||
+          n.sections.some((s) => normalize(s.content).includes(q) || normalize(s.name).includes(q)) ||
+          n.tags.some((t) => normalize(t).includes(q))
         )
       })
       .sort((a, b) => {

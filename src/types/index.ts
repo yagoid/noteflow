@@ -47,7 +47,10 @@ declare global {
       minimize: () => void
       maximize: () => void
       close: () => void
+      openSticky: (noteId: string, sectionId: string) => void
       onNewNote: (cb: () => void) => () => void
+      onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => () => void
+      windowId: () => number
     }
   }
 }

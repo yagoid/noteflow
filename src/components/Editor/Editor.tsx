@@ -30,9 +30,16 @@ interface EditorProps {
   onChange: (markdown: string) => void
   placeholder?: string
   readOnly?: boolean
+  hideToolbar?: boolean
 }
 
-export function Editor({ content, onChange, placeholder = 'Start typing...', readOnly = false }: EditorProps) {
+export function Editor({
+  content,
+  onChange,
+  placeholder = 'Start typing...',
+  readOnly = false,
+  hideToolbar = false,
+}: EditorProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const editor = useEditor({
@@ -103,7 +110,7 @@ export function Editor({ content, onChange, placeholder = 'Start typing...', rea
         const { state } = editor
         const { selection } = state
         const { $from } = selection
-        
+
         // Check if we are right after a horizontal rule
         const nodeBefore = $from.nodeBefore
         if (nodeBefore && nodeBefore.type.name === 'horizontalRule') {
@@ -121,7 +128,7 @@ export function Editor({ content, onChange, placeholder = 'Start typing...', rea
 
   return (
     <div className="flex flex-col h-full" onKeyDown={handleKeyDown}>
-      {!readOnly && <EditorToolbar editor={editor} />}
+      {!readOnly && !hideToolbar && <EditorToolbar editor={editor} />}
       <div className="flex-1 overflow-y-auto">
         <EditorContent
           editor={editor}

@@ -1,11 +1,11 @@
 {
   "name": "noteflow",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.1.0",
   "description": "Fast notes for software engineers",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev": "concurrently -k \"vite\" \"tsc -p tsconfig.electron.json && wait-on http://localhost:5173 && electron .\"",
     "build": "tsc -b && vite build && tsc -p tsconfig.electron.json",
     "build:electron": "tsc -p tsconfig.electron.json",
     "preview": "vite preview",

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef, useEffect } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import type { Note } from '../../types'
 import { Archive, Search, Tag, Pin, PanelLeftClose } from 'lucide-react'
@@ -10,7 +10,7 @@ interface SidebarProps {
 
 function formatNoteDate(iso: string): string {
   const d = new Date(iso)
-  if (isToday(d))     return format(d, 'HH:mm')
+  if (isToday(d)) return format(d, 'HH:mm')
   if (isYesterday(d)) return 'Yesterday'
   return format(d, 'MMM d')
 }
@@ -30,20 +30,40 @@ function hasAnyContent(note: Note): boolean {
   return note.sections.some((s) => s.content.trim().length > 0)
 }
 
+/** Normalize a string: lowercase + strip diacritical marks (accents) */
+function normalize(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+}
+
 export function Sidebar({ onCollapse }: SidebarProps) {
-  const rawNotes     = useNotesStore((s) => s.notes)
+  const rawNotes = useNotesStore((s) => s.notes)
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
-  const searchQuery  = useNotesStore((s) => s.searchQuery)
+  const searchQuery = useNotesStore((s) => s.searchQuery)
   const filterSection = useNotesStore((s) => s.filterSection)
-  const filterTag    = useNotesStore((s) => s.filterTag)
+  const filterTag = useNotesStore((s) => s.filterTag)
   const showArchived = useNotesStore((s) => s.showArchived)
 
-  const setActiveNote       = useNotesStore((s) => s.setActiveNote)
-  const setSearchQuery      = useNotesStore((s) => s.setSearchQuery)
-  const setFilterSection    = useNotesStore((s) => s.setFilterSection)
-  const setFilterTag        = useNotesStore((s) => s.setFilterTag)
-  const setShowArchived     = useNotesStore((s) => s.setShowArchived)
-  const createNote          = useNotesStore((s) => s.createNote)
+  const setActiveNote = useNotesStore((s) => s.setActiveNote)
+  const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
+  const setFilterSection = useNotesStore((s) => s.setFilterSection)
+  const setFilterTag = useNotesStore((s) => s.setFilterTag)
+  const setShowArchived = useNotesStore((s) => s.setShowArchived)
+  const createNote = useNotesStore((s) => s.createNote)
+
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  // ── Focus search via Ctrl+F custom event ──────────────────────────────────
+  useEffect(() => {
+    const handler = () => {
+      searchRef.current?.focus()
+      searchRef.current?.select()
+    }
+    window.addEventListener('noteflow:focus-search', handler)
+    return () => window.removeEventListener('noteflow:focus-search', handler)
+  }, [])
 
   // Stable derived values — only recomputed when the underlying primitives change
   const notes = useMemo(() => {
@@ -58,11 +78,11 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       .filter((n) => !filterTag || n.tags.includes(filterTag))
       .filter((n) => {
         if (!searchQuery.trim()) return true
-        const q = searchQuery.toLowerCase()
+        const q = normalize(searchQuery)
         return (
-          n.title.toLowerCase().includes(q) ||
-          n.sections.some((s) => s.content.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)) ||
-          n.tags.some((t) => t.includes(q))
+          normalize(n.title).includes(q) ||
+          n.sections.some((s) => normalize(s.content).includes(q) || normalize(s.name).includes(q)) ||
+          n.tags.some((t) => normalize(t).includes(q))
         )
       })
       .sort((a, b) => {
@@ -89,8 +109,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         <div className="relative flex-1">
           <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
           <input
+            ref={searchRef}
             type="text"
-            placeholder="Search..."
+            placeholder="Search... (Ctrl+F)"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-7 pr-2 py-1.5 bg-surface-2 border border-border rounded text-xs
@@ -100,7 +121,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         </div>
         <button
           onClick={onCollapse}
-          title="Collapse sidebar (Ctrl+B)"
+          title="Collapse sidebar (Ctrl+')"
           className="flex-shrink-0 p-1.5 rounded text-text-muted/50 hover:text-text-muted
                      hover:bg-surface-2 transition-colors"
         >

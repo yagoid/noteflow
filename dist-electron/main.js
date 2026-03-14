@@ -55,6 +55,39 @@ function createWindow() {
     });
     return win;
 }
+function createStickyWindow(noteId, sectionId) {
+    const win = new electron_1.BrowserWindow({
+        width: 300,
+        height: 300,
+        minWidth: 200,
+        minHeight: 200,
+        frame: false,
+        transparent: false,
+        backgroundColor: '#1a1b26',
+        titleBarStyle: 'hidden',
+        show: false,
+        alwaysOnTop: true,
+        icon: path_1.default.join(__dirname, '../public/icon.ico'),
+        webPreferences: {
+            preload: path_1.default.join(__dirname, 'preload.js'),
+            contextIsolation: true,
+            nodeIntegration: false,
+        },
+    });
+    // Hash routing pattern for the sticky page
+    const hash = `#sticky?noteId=${encodeURIComponent(noteId)}&sectionId=${encodeURIComponent(sectionId)}`;
+    if (isDev) {
+        win.loadURL(`http://localhost:5173/${hash}`);
+    }
+    else {
+        // In production, file:// URLs need the hash at the end
+        win.loadFile(path_1.default.join(__dirname, '../dist/index.html'), { hash });
+    }
+    win.once('ready-to-show', () => {
+        win.show();
+    });
+    return win;
+}
 function createTray() {
     // Create a minimal 16x16 tray icon programmatically
     const iconPath = path_1.default.join(__dirname, '../public/tray-icon.png');
@@ -154,9 +187,14 @@ electron_1.ipcMain.handle('fs:read-note', (_event, filePath) => {
         return null;
     }
 });
-electron_1.ipcMain.handle('fs:write-note', (_event, filePath, content) => {
+electron_1.ipcMain.handle('fs:write-note', (event, filePath, content) => {
     try {
         fs_1.default.writeFileSync(filePath, content, 'utf-8');
+        // Broadcast to all windows
+        electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+            // Send the filePath and the sender's webContents ID
+            win.webContents.send('notes-updated', filePath, event.sender.id);
+        });
         return { ok: true };
     }
     catch (err) {
@@ -166,6 +204,9 @@ electron_1.ipcMain.handle('fs:write-note', (_event, filePath, content) => {
 electron_1.ipcMain.handle('fs:delete-note', (_event, filePath) => {
     try {
         fs_1.default.unlinkSync(filePath);
+        electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+            win.webContents.send('notes-updated');
+        });
         return { ok: true };
     }
     catch (err) {
@@ -175,6 +216,9 @@ electron_1.ipcMain.handle('fs:delete-note', (_event, filePath) => {
 electron_1.ipcMain.handle('fs:rename-note', (_event, oldPath, newPath) => {
     try {
         fs_1.default.renameSync(oldPath, newPath);
+        electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+            win.webContents.send('notes-updated');
+        });
         return { ok: true };
     }
     catch (err) {
@@ -191,16 +235,35 @@ electron_1.ipcMain.handle('app:choose-notes-dir', async () => {
     return result.canceled ? null : result.filePaths[0];
 });
 // Window controls
-electron_1.ipcMain.on('window:minimize', () => mainWindow?.minimize());
+electron_1.ipcMain.on('window:minimize', (event) => {
+    electron_1.BrowserWindow.fromWebContents(event.sender)?.minimize();
+});
+electron_1.ipcMain.on('window:get-id', (event) => {
+    event.returnValue = event.sender.id;
+});
 electron_1.ipcMain.on('window:maximize', () => {
     if (mainWindow?.isMaximized())
         mainWindow.unmaximize();
     else
         mainWindow?.maximize();
 });
-electron_1.ipcMain.on('window:close', () => mainWindow?.hide());
+electron_1.ipcMain.on('window:close', (event) => {
+    // Check if it's the main window or a sticky window
+    const win = electron_1.BrowserWindow.fromWebContents(event.sender);
+    if (win && win !== mainWindow) {
+        win.close(); // Truly close sticky windows
+    }
+    else {
+        mainWindow?.hide(); // Just hide the main window
+    }
+});
+electron_1.ipcMain.on('window:open-sticky', (_event, noteId, sectionId) => {
+    createStickyWindow(noteId, sectionId);
+});
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 electron_1.app.whenReady().then(() => {
+    // Remove default menu for all windows
+    electron_1.Menu.setApplicationMenu(null);
     mainWindow = createWindow();
     createTray();
     registerGlobalShortcut();

@@ -70,6 +70,43 @@ function createWindow(): BrowserWindow {
   return win
 }
 
+function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 300,
+    height: 300,
+    minWidth: 200,
+    minHeight: 200,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#1a1b26',
+    titleBarStyle: 'hidden',
+    show: false,
+    alwaysOnTop: true,
+    icon: path.join(__dirname, '../public/icon.ico'),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  // Hash routing pattern for the sticky page
+  const hash = `#sticky?noteId=${encodeURIComponent(noteId)}&sectionId=${encodeURIComponent(sectionId)}`
+
+  if (isDev) {
+    win.loadURL(`http://localhost:5173/${hash}`)
+  } else {
+    // In production, file:// URLs need the hash at the end
+    win.loadFile(path.join(__dirname, '../dist/index.html'), { hash })
+  }
+
+  win.once('ready-to-show', () => {
+    win.show()
+  })
+
+  return win
+}
+
 function createTray() {
   // Create a minimal 16x16 tray icon programmatically
   const iconPath = path.join(__dirname, '../public/tray-icon.png')
@@ -173,9 +210,14 @@ ipcMain.handle('fs:read-note', (_event, filePath: string) => {
   }
 })
 
-ipcMain.handle('fs:write-note', (_event, filePath: string, content: string) => {
+ipcMain.handle('fs:write-note', (event, filePath: string, content: string) => {
   try {
     fs.writeFileSync(filePath, content, 'utf-8')
+    // Broadcast to all windows
+    BrowserWindow.getAllWindows().forEach((win) => {
+      // Send the filePath and the sender's webContents ID
+      win.webContents.send('notes-updated', filePath, event.sender.id)
+    })
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
@@ -185,6 +227,9 @@ ipcMain.handle('fs:write-note', (_event, filePath: string, content: string) => {
 ipcMain.handle('fs:delete-note', (_event, filePath: string) => {
   try {
     fs.unlinkSync(filePath)
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send('notes-updated')
+    })
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
@@ -194,6 +239,9 @@ ipcMain.handle('fs:delete-note', (_event, filePath: string) => {
 ipcMain.handle('fs:rename-note', (_event, oldPath: string, newPath: string) => {
   try {
     fs.renameSync(oldPath, newPath)
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send('notes-updated')
+    })
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
@@ -213,16 +261,37 @@ ipcMain.handle('app:choose-notes-dir', async () => {
 })
 
 // Window controls
-ipcMain.on('window:minimize', () => mainWindow?.minimize())
+ipcMain.on('window:minimize', (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize()
+})
+
+ipcMain.on('window:get-id', (event) => {
+  event.returnValue = event.sender.id
+})
 ipcMain.on('window:maximize', () => {
   if (mainWindow?.isMaximized()) mainWindow.unmaximize()
   else mainWindow?.maximize()
 })
-ipcMain.on('window:close', () => mainWindow?.hide())
+ipcMain.on('window:close', (event) => {
+  // Check if it's the main window or a sticky window
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win && win !== mainWindow) {
+    win.close() // Truly close sticky windows
+  } else {
+    mainWindow?.hide() // Just hide the main window
+  }
+})
+
+ipcMain.on('window:open-sticky', (_event, noteId: string, sectionId: string) => {
+  createStickyWindow(noteId, sectionId)
+})
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
+  // Remove default menu for all windows
+  Menu.setApplicationMenu(null)
+  
   mainWindow = createWindow()
   createTray()
   registerGlobalShortcut()

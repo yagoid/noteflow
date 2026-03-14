@@ -5,15 +5,18 @@ import { Sidebar } from './components/Sidebar/Sidebar'
 import { NoteEditor } from './components/Editor/NoteEditor'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { PanelLeftOpen } from 'lucide-react'
+import { StickyApp } from './components/StickyApp'
 
 const SIDEBAR_MIN = 180
 const SIDEBAR_MAX = 480
 const SIDEBAR_DEFAULT = 256
 
 export function App() {
+  const [isSticky] = useState(() => window.location.hash.startsWith('#sticky'))
+
   const { loadNotes, isLoading, createNote, setCommandPaletteOpen } = useNotesStore()
 
-  const [sidebarWidth, setSidebarWidth]     = useState(SIDEBAR_DEFAULT)
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const isDragging = useRef(false)
   const dragStartX = useRef(0)
@@ -22,43 +25,69 @@ export function App() {
   // ── Initial load ──────────────────────────────────────────────────────────
   useEffect(() => { loadNotes() }, [loadNotes])
 
-  // ── Global keyboard shortcuts ─────────────────────────────────────────────
+  // ── Global keyboard shortcuts (capture phase — works even inside editors) ─
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement
-      const isEditing =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-
+      // Ctrl+P — command palette
       if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
         e.preventDefault(); setCommandPaletteOpen(true); return
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'n' && !isEditing) {
+      // Ctrl+N — new note (always, even when editing)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
         e.preventDefault(); createNote(); return
       }
-      // Ctrl+B — toggle sidebar
-      if ((e.ctrlKey || e.metaKey) && e.key === 'b' && !isEditing) {
+      // Ctrl+' — toggle sidebar (Spanish keyboards often have ' on the key next to 0)
+      if ((e.ctrlKey || e.metaKey) && (e.key === "'" || e.code === 'Quote' || e.code === 'Minus')) {
         e.preventDefault(); setSidebarVisible((v) => !v); return
       }
-      if ((e.ctrlKey || e.metaKey) && !isEditing) {
-        const map: Record<string, () => void> = {
-          '1': () => createNote(),
-          '2': () => createNote(),
-          '3': () => createNote(),
-        }
-        if (map[e.key]) { e.preventDefault(); map[e.key]() }
+      // Ctrl+T — new tab in active note
+      if ((e.ctrlKey || e.metaKey) && e.key === 't') {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('noteflow:add-tab'))
+        return
+      }
+      // Ctrl+W — close active tab
+      if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('noteflow:close-tab'))
+        return
+      }
+      // Ctrl+F — focus search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('noteflow:focus-search'))
+        return
       }
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [createNote, setCommandPaletteOpen])
+    // Use capture phase so shortcuts work even inside editors that stopPropagation
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
+  }, [createNote, setCommandPaletteOpen, setSidebarVisible])
 
   // ── Global shortcuts (via IPC) ─────────────────────────────────────────────
   useEffect(() => {
     if (!window.noteflow?.onNewNote) return
-    return window.noteflow.onNewNote(() => createNote())
-  }, [createNote])
+    const unbindNew = window.noteflow.onNewNote(() => createNote())
+
+    // Sync with other windows
+    const currentWindowId = typeof window.noteflow?.windowId === 'function' ? window.noteflow.windowId() : null
+    const unbindUpdate = window.noteflow.onNotesUpdated((filePath, senderId) => {
+      // Ignore updates sent by this same window to avoid race conditions and focus loss
+      if (currentWindowId !== null && senderId === currentWindowId) return
+
+      // Reload granularly if we have a path, otherwise reload everything
+      if (filePath) {
+        useNotesStore.getState().syncNote(filePath)
+      } else {
+        loadNotes()
+      }
+    })
+
+    return () => {
+      unbindNew()
+      unbindUpdate()
+    }
+  }, [createNote, loadNotes])
 
   // ── Resize drag handlers ──────────────────────────────────────────────────
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -74,7 +103,7 @@ export function App() {
     const onMove = (e: MouseEvent) => {
       if (!isDragging.current) return
       const delta = e.clientX - dragStartX.current
-      const next  = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, dragStartW.current + delta))
+      const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, dragStartW.current + delta))
       setSidebarWidth(next)
     }
     const onUp = () => {
@@ -90,6 +119,10 @@ export function App() {
       window.removeEventListener('mouseup', onUp)
     }
   }, [])
+
+  if (isSticky) {
+    return <StickyApp />
+  }
 
   return (
     <div className="flex flex-col h-screen bg-surface-0 text-text overflow-hidden">
@@ -117,7 +150,7 @@ export function App() {
         {!sidebarVisible && (
           <button
             onClick={() => setSidebarVisible(true)}
-            title="Show sidebar (Ctrl+B)"
+            title="Show sidebar (Ctrl+')"
             className="flex-shrink-0 flex items-center justify-center w-7 h-full
                        text-text-muted/40 hover:text-text-muted hover:bg-surface-2
                        border-r border-border transition-colors"

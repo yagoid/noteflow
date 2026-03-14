@@ -10,6 +10,9 @@ export type NoteFileMeta = {
 export type FsResult = { ok: boolean; error?: string }
 
 const api = {
+  // Identification
+  windowId: (): number => ipcRenderer.sendSync('window:get-id'),
+  
   // File system
   listNotes: (): Promise<NoteFileMeta[]> => ipcRenderer.invoke('fs:list-notes'),
   readNote: (filePath: string): Promise<string | null> => ipcRenderer.invoke('fs:read-note', filePath),
@@ -23,6 +26,7 @@ const api = {
   chooseNotesDir: (): Promise<string | null> => ipcRenderer.invoke('app:choose-notes-dir'),
 
   // Window controls
+  openSticky: (noteId: string, sectionId: string) => ipcRenderer.send('window:open-sticky', noteId, sectionId),
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
@@ -31,6 +35,11 @@ const api = {
   onNewNote: (cb: () => void) => {
     ipcRenderer.on('new-note', cb)
     return () => ipcRenderer.removeListener('new-note', cb)
+  },
+  onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => {
+    const wrapper = (_event: any, path?: string, senderId?: number) => cb(path, senderId)
+    ipcRenderer.on('notes-updated', wrapper)
+    return () => ipcRenderer.removeListener('notes-updated', wrapper)
   },
 }
 

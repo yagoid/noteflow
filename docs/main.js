@@ -9,9 +9,9 @@
   const TYPE_PHRASES = [
     'your workflow.',
     'your focus.',
-    'every sprint.',
+    'sticky notes.',
     'dev mode.',
-    'your thoughts.',
+    'fast captures.',
   ];
 
   const typeEl = document.getElementById('typewriter');

@@ -1,11 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NoteFlow — Fast Notes for Windows Developers</title>
-  <meta name="description" content="NoteFlow is a keyboard-first note-taking app for Windows developers. Markdown support, task lists, tabs, and fast search. No clutter, no cloud, no nonsense." />
-  <meta name="keywords" content="noteflow, windows notes app, developer notes, markdown notes windows, quick notes developer, electron notes app" />
+  <title>NoteFlow — Fast Notes & Sticky Notes for Windows Developers</title>
+  <meta name="description"
+    content="NoteFlow is a keyboard-first note-taking app for Windows developers. Markdown support, task lists, floating sticky notes, tabs, and fast search. No cloud, no nonsense." />
+  <meta name="keywords"
+    content="noteflow, windows notes app, developer notes, markdown notes windows, quick notes developer, electron notes app" />
   <meta name="author" content="yagoid" />
   <link rel="canonical" href="https://yagoid.github.io/noteflow/" />
 
@@ -17,7 +20,8 @@
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
   <meta property="og:title" content="NoteFlow — Fast Notes for Windows Developers" />
-  <meta property="og:description" content="Keyboard-first notes for developers. Markdown, task lists, tabs. No cloud, no fluff." />
+  <meta property="og:description"
+    content="Keyboard-first notes for developers. Markdown, task lists, tabs. No cloud, no fluff." />
   <meta property="og:url" content="https://yagoid.github.io/noteflow/" />
   <meta property="og:image" content="https://yagoid.github.io/noteflow/og-image.png" />
   <meta property="og:image:width" content="1200" />
@@ -26,7 +30,8 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="NoteFlow — Fast Notes for Windows Developers" />
-  <meta name="twitter:description" content="Keyboard-first notes for developers. Markdown, task lists, tabs. No cloud, no fluff." />
+  <meta name="twitter:description"
+    content="Keyboard-first notes for developers. Markdown, task lists, tabs. No cloud, no fluff." />
   <meta name="twitter:image" content="https://yagoid.github.io/noteflow/og-image.png" />
 
   <!-- Structured Data: SoftwareApplication -->
@@ -58,10 +63,13 @@
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&family=DM+Sans:wght@300;400;500;600&display=swap"
+    rel="stylesheet" />
 
   <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
 
   <!-- ─── NAV ─────────────────────────────────────────────────────────── -->
@@ -76,8 +84,12 @@
         <li><a href="#preview" class="nav__link">Preview</a></li>
         <li><a href="#download" class="nav__link">Download</a></li>
         <li>
-          <a href="https://github.com/yagoid/noteflow" class="nav__link nav__link--github" target="_blank" rel="noopener noreferrer" aria-label="NoteFlow on GitHub">
-            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12c0-5.523-4.477-10-10-10z"/></svg>
+          <a href="https://github.com/yagoid/noteflow" class="nav__link nav__link--github" target="_blank"
+            rel="noopener noreferrer" aria-label="NoteFlow on GitHub">
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12c0-5.523-4.477-10-10-10z" />
+            </svg>
             GitHub
           </a>
         </li>
@@ -102,22 +114,32 @@
           <span class="hero__title-line1">Notes that</span>
           <span class="hero__title-line2">
             keep up with<br>
-            <span class="hero__typewriter" id="typewriter" aria-label="your thought process"></span><span class="hero__cursor" aria-hidden="true">_</span>
+            <span class="hero__typewriter" id="typewriter" aria-label="your thought process"></span><span
+              class="hero__cursor" aria-hidden="true">_</span>
           </span>
         </h1>
 
         <p class="hero__subtitle">
           A keyboard-first note tool for Windows developers.<br>
-          Markdown, tabs, task lists. No cloud. No clutter.
+          Markdown, tabs, <strong>floating sticky notes</strong>. No cloud. No clutter.
         </p>
 
         <div class="hero__actions">
-          <a href="https://github.com/yagoid/noteflow/releases/latest" class="btn btn--primary" id="hero-download-btn" target="_blank" rel="noopener noreferrer">
-            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <a href="https://github.com/yagoid/noteflow/releases/latest" class="btn btn--primary" id="hero-download-btn"
+            target="_blank" rel="noopener noreferrer">
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
             Download for Windows
           </a>
           <a href="https://github.com/yagoid/noteflow" class="btn btn--ghost" target="_blank" rel="noopener noreferrer">
-            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12c0-5.523-4.477-10-10-10z"/></svg>
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12c0-5.523-4.477-10-10-10z" />
+            </svg>
             View Source
           </a>
         </div>
@@ -134,8 +156,8 @@
         </p>
       </div>
 
-      <div class="hero__window-wrap" aria-label="NoteFlow app screenshot">
-        <div class="hero__window">
+      <div class="hero__window-wrap" aria-label="NoteFlow app screenshots">
+        <div class="hero__window hero__window--main">
           <div class="hero__window-chrome" aria-hidden="true">
             <span class="hero__window-title">NOTEFLOW</span>
             <div class="hero__window-controls">
@@ -143,15 +165,26 @@
             </div>
           </div>
           <div class="hero__window-body">
-            <img
-              src="screenshots/app-main.png"
+            <img src="screenshots/app-main.png"
               alt="NoteFlow app — main editor showing a developer task list with markdown and checkboxes"
-              class="hero__screenshot"
-              width="800"
-              height="530"
-            />
+              class="hero__screenshot" width="800" height="530" />
           </div>
         </div>
+
+        <div class="hero__window hero__window--sticky">
+          <div class="hero__window-chrome" aria-hidden="true">
+            <span class="hero__window-title">STICKY NOTE</span>
+            <div class="hero__window-controls">
+              <span class="hero__window-ctrl--close"></span>
+            </div>
+          </div>
+          <div class="hero__window-body">
+            <img src="screenshots/sticky-note.png"
+              alt="NoteFlow sticky note — a floating window with a development roadmap" class="hero__screenshot"
+              width="300" height="300" />
+          </div>
+        </div>
+
         <div class="hero__window-glow" aria-hidden="true"></div>
       </div>
     </header>
@@ -169,55 +202,92 @@
 
           <article class="feature-card" role="listitem">
             <div class="feature-card__icon" aria-hidden="true">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
+              </svg>
             </div>
             <h3 class="feature-card__title">Markdown-first editor</h3>
-            <p class="feature-card__desc">Write with full Markdown support — headings, bold, italic, strikethrough, inline code, and code blocks. The toolbar is always one click away.</p>
+            <p class="feature-card__desc">Write with full Markdown support — headings, bold, italic, strikethrough,
+              inline code, and code blocks. The toolbar is always one click away.</p>
             <code class="feature-card__code"># Title<br>**bold** · *italic* · `code`</code>
           </article>
 
           <article class="feature-card" role="listitem">
             <div class="feature-card__icon" aria-hidden="true">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <line x1="3" y1="9" x2="21" y2="9" />
+                <line x1="9" y1="21" x2="9" y2="9" />
+              </svg>
             </div>
-            <h3 class="feature-card__title">Task lists with checkboxes</h3>
-            <p class="feature-card__desc">Add interactive task lists to any note. Check off items as you go. Completed tasks are visually struck through so the remaining work stays clear.</p>
-            <code class="feature-card__code"><span class="code-done">☑ Deploy to production</span><br>☐ Write unit tests</code>
+            <h3 class="feature-card__title">Floating sticky notes</h3>
+            <p class="feature-card__desc">Launch any note as a compact, independent floating window. Keep your most
+              important data always on top while you work in other apps.</p>
+            <code class="feature-card__code">noteflow --sticky "tasks"</code>
           </article>
 
           <article class="feature-card" role="listitem">
             <div class="feature-card__icon" aria-hidden="true">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 11 12 14 22 4" />
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+              </svg>
+            </div>
+            <h3 class="feature-card__title">Task lists with checkboxes</h3>
+            <p class="feature-card__desc">Add interactive task lists to any note. Check off items as you go. Completed
+              tasks are visually struck through so the remaining work stays clear.</p>
+            <code
+              class="feature-card__code"><span class="code-done">☑ Deploy to production</span><br>☐ Write unit tests</code>
+          </article>
+
+          <article class="feature-card" role="listitem">
+            <div class="feature-card__icon" aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
             </div>
             <h3 class="feature-card__title">Multi-tab workflow</h3>
-            <p class="feature-card__desc">Open multiple notes at once with a tabbed interface. Switch context instantly without losing your place. Tabs persist between sessions.</p>
+            <p class="feature-card__desc">Open multiple notes at once with a tabbed interface. Switch context instantly
+              without losing your place. Tabs persist between sessions.</p>
             <code class="feature-card__code">Note <span class="tab-active">Questions</span> +</code>
           </article>
 
-          <article class="feature-card" role="listitem">
-            <div class="feature-card__icon" aria-hidden="true">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            </div>
-            <h3 class="feature-card__title">Instant search</h3>
-            <p class="feature-card__desc">Find any note by title or content in milliseconds. No indexing delays, no spinners. The sidebar updates as you type.</p>
-            <code class="feature-card__code">$ grep -r "your query" notes/</code>
-          </article>
 
           <article class="feature-card" role="listitem">
             <div class="feature-card__icon" aria-hidden="true">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
             </div>
             <h3 class="feature-card__title">100% local & private</h3>
-            <p class="feature-card__desc">Your notes never leave your machine. No accounts, no sync, no telemetry. Everything is stored locally on Windows. Period.</p>
+            <p class="feature-card__desc">Your notes never leave your machine. No accounts, no sync, no telemetry.
+              Everything is stored locally on Windows. Period.</p>
             <code class="feature-card__code">%APPDATA%\noteflow\notes\</code>
           </article>
 
           <article class="feature-card" role="listitem">
             <div class="feature-card__icon" aria-hidden="true">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
             </div>
             <h3 class="feature-card__title">Dev-native aesthetics</h3>
-            <p class="feature-card__desc">Dark theme, monospace font, minimal chrome. Feels at home next to your IDE. Not another Notion clone with a light grey background.</p>
+            <p class="feature-card__desc">Dark theme, monospace font, minimal chrome. Feels at home next to your IDE.
+              Not another Notion clone with a light grey background.</p>
             <code class="feature-card__code">theme: dark · font: mono</code>
           </article>
 
@@ -246,14 +316,9 @@
               <div class="preview__chrome-right"></div>
             </div>
             <div class="preview__body">
-              <img
-                src="screenshots/app-main.png"
+              <img src="screenshots/app-main.png"
                 alt="NoteFlow main editor: sidebar with notes list, tabbed editor, markdown task list with checkboxes"
-                class="preview__img"
-                loading="lazy"
-                width="1100"
-                height="730"
-              />
+                class="preview__img" loading="lazy" width="1100" height="730" />
             </div>
           </div>
           <div class="preview__glow" aria-hidden="true"></div>
@@ -293,9 +358,9 @@
                 <td><span class="cross" aria-label="No">✗</span></td>
               </tr>
               <tr>
-                <td>Task lists / checkboxes</td>
+                <td>Sticky notes</td>
                 <td class="compare__col--highlight"><span class="check" aria-label="Yes">✓</span></td>
-                <td><span class="cross" aria-label="No">✗</span></td>
+                <td><span class="check" aria-label="yes">✓</span></td>
                 <td><span class="cross" aria-label="No">✗</span></td>
               </tr>
               <tr>
@@ -343,7 +408,8 @@
             <span class="section-label">// get it</span>
             <h2 class="download__title">Ready to focus?</h2>
             <p class="download__desc">
-              Download the <strong>.exe installer</strong> from GitHub Releases. Run it, and NoteFlow opens in seconds — no account, no setup wizard, no telemetry.
+              Download the <strong>.exe installer</strong> from GitHub Releases. Run it, and NoteFlow opens in seconds —
+              no account, no setup wizard, no telemetry.
             </p>
 
             <div class="download__steps" aria-label="Installation steps">
@@ -362,29 +428,32 @@
             </div>
 
             <div class="download__actions">
-              <a
-                href="https://github.com/yagoid/noteflow/releases/latest"
-                class="btn btn--primary btn--large"
-                id="main-download-btn"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <a href="https://github.com/yagoid/noteflow/releases/latest" class="btn btn--primary btn--large"
+                id="main-download-btn" target="_blank" rel="noopener noreferrer">
+                <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
                 Download NoteFlow.exe
               </a>
-              <a
-                href="https://github.com/yagoid/noteflow"
-                class="btn btn--ghost"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12c0-5.523-4.477-10-10-10z"/></svg>
+              <a href="https://github.com/yagoid/noteflow" class="btn btn--ghost" target="_blank"
+                rel="noopener noreferrer">
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path
+                    d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12c0-5.523-4.477-10-10-10z" />
+                </svg>
                 View on GitHub
               </a>
             </div>
 
             <p class="download__compat">
-              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <path d="M8 21h8M12 17v4" />
+              </svg>
               Windows 10 / 11 · x64 · ~80 MB
             </p>
           </div>
@@ -398,7 +467,8 @@
                 <span class="terminal__title">bash</span>
               </div>
               <div class="terminal__body">
-                <p class="terminal__line"><span class="terminal__prompt">$</span> git clone https://github.com/yagoid/noteflow.git</p>
+                <p class="terminal__line"><span class="terminal__prompt">$</span> git clone
+                  https://github.com/yagoid/noteflow.git</p>
                 <p class="terminal__line terminal__line--comment"># or just download the .exe from Releases</p>
                 <p class="terminal__line terminal__line--blank">&nbsp;</p>
                 <p class="terminal__line"><span class="terminal__prompt">$</span> cd noteflow && npm install</p>
@@ -433,7 +503,8 @@
         </nav>
 
         <p class="footer__copy">
-          Built by <a href="https://github.com/yagoid" target="_blank" rel="noopener noreferrer">yagoid</a> · MIT License
+          Built by <a href="https://github.com/yagoid" target="_blank" rel="noopener noreferrer">yagoid</a> · MIT
+          License
         </p>
       </div>
     </div>
@@ -441,4 +512,5 @@
 
   <script src="main.js"></script>
 </body>
+
 </html>
