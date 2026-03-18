@@ -86,11 +86,14 @@ export function NoteEditor() {
         const { newlyCreatedNoteId: updatedNewlyCreatedNoteId } = store
 
         if (updatedNewlyCreatedNoteId && updatedNewlyCreatedNoteId === currentNoteId) {
-          const titleElement = document.querySelector(`input[placeholder="Untitled"]`)
-          if (titleElement && titleElement instanceof HTMLInputElement && document.activeElement !== titleElement) {
-            titleElement.focus()
-            titleElement.select()
-            store.setNewlyCreatedNoteId(null)
+          try {
+            if (titleRef.current && document.activeElement !== titleRef.current) {
+              titleRef.current.focus()
+              titleRef.current.select()
+              store.setNewlyCreatedNoteId(null)
+            }
+          } catch (error) {
+            console.error('Failed to focus title element:', error)
           }
         }
       }, 0)
