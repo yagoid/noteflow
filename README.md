@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/screenshots/app-main.png" alt="NoteFlow Screenshot" width="800">
+  <img src="docs/screenshots/app-main-midnightblue.png" alt="NoteFlow Screenshot" width="800">
 
   # NoteFlow
 
