@@ -22,6 +22,7 @@ interface NotesState {
   showArchived: boolean
   commandPaletteOpen: boolean
   isLoading: boolean
+  newlyCreatedNoteId: string | null
 
   // Actions
   loadNotes: () => Promise<void>
@@ -54,6 +55,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   showArchived: false,
   commandPaletteOpen: false,
   isLoading: false,
+  newlyCreatedNoteId: null,
 
   loadNotes: async () => {
     set({ isLoading: true })
@@ -113,7 +115,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const note: Note = { ...draft, filePath, raw }
 
     await window.noteflow.writeNote(filePath, raw)
-    set((s) => ({ notes: [note, ...s.notes], activeNoteId: note.id }))
+    set((s) => ({ notes: [note, ...s.notes], activeNoteId: note.id, newlyCreatedNoteId: note.id }))
     return note
   },
 
