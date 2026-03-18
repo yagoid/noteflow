@@ -2,7 +2,7 @@
 
 **Date:** 2025-03-18
 **Status:** Approved Design
-**Author:** Contributing Developer
+**Author:** callysthenes
 **Target:** Version 1.2.0
 
 ## Overview
@@ -44,6 +44,7 @@ Add a mechanism to detect newly created notes and automatically focus the title 
 - Only focus on newly created notes, not when switching between existing notes
 - Handle case where note is deleted before effect runs
 - Skip if title is already focused (prevent redundant focus)
+- **Rapid note creation:** If user creates multiple notes quickly (Ctrl+N twice), the first note might be pruned via `pruneEmptyNote` before the focus effect runs. The effect must check if the note still exists before attempting focus.
 
 ### Success Criteria
 - Pressing `Ctrl+N` immediately shows "Untitled" selected in title field
@@ -89,7 +90,9 @@ Add a mechanism to detect newly created notes and automatically focus the title 
 
 ### Desktop Entry File
 
-Create `public/noteflow.desktop` following freedesktop.org standards:
+**Note:** electron-builder will auto-generate the `.desktop` file from the `package.json` `linux.desktop` configuration. No manual `.desktop` file creation is needed. The configuration in `package.json` (shown above) is sufficient.
+
+For reference, the generated file will follow freedesktop.org standards:
 ```ini
 [Desktop Entry]
 Name=NoteFlow
@@ -111,6 +114,25 @@ MimeType=text/markdown;
 - Register `text/markdown` MIME type handler
 - Allow opening `.md` files directly in NoteFlow
 - Use existing freedesktop.org standards
+
+### Icon Configuration
+
+**Note:** The `public/icon.png` file (1.7MB, already exists in codebase) will be used for Linux. electron-builder automatically generates multiple icon sizes (16x16, 32x32, 48x48, 256x256, etc.) from the source PNG during package build. No manual icon set creation is required.
+
+### Platform-Specific Icon Handling
+
+**Current Issue:** `electron/main.ts` (lines 45, 85) hardcodes Windows icon paths:
+```typescript
+icon: path.join(__dirname, '../public/icon.ico')
+```
+
+**Required Fix:** Update to dynamically load the correct icon based on platform:
+```typescript
+const iconExt = process.platform === 'win32' ? 'ico' : 'png'
+const iconPath = path.join(__dirname, `../public/icon.${iconExt}`)
+```
+
+This change must be made in both the main window creation (~line 45) and sticky window creation (~line 85).
 
 ### Success Criteria
 - Running `npm run dist` generates `.deb` file in `release/` directory
@@ -193,16 +215,45 @@ steps:
     with:
       name: ${{ matrix.os }}-build
       path: release/*
+
+# Separate release job that depends on both builds
+release:
+  needs: build
+  runs-on: ubuntu-latest
+  if: startsWith(github.ref, 'refs/tags/')
+
+  steps:
+    - name: Download Windows artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-latest-build
+        path: release-windows
+
+    - name: Download Linux artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: ubuntu-latest-build
+        path: release-linux
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          release-windows/*
+          release-linux/*
 ```
 
 ### Release Process
 
 1. Create GitHub release with tag (e.g., `v1.2.0`)
-2. Workflow triggers on both Windows and Ubuntu runners
+2. Workflow triggers on both Windows and Ubuntu runners (build job)
 3. Each runner builds its respective package:
    - Windows: `.exe` installer
    - Linux: `.deb` package
-4. Artifacts uploaded to release automatically
+4. Build artifacts are uploaded to GitHub Actions
+5. Release job downloads both sets of artifacts
+6. Release job creates GitHub release with all artifacts attached
+7. Users can download either platform from the release page
 
 ### Error Handling
 
@@ -348,14 +399,16 @@ Artifact uploaded to GitHub release
 
 ### Phase 2: Linux Packaging
 - [ ] Add Linux build config to `package.json`
-- [ ] Create `public/noteflow.desktop` file
-- [ ] Verify icon exists at `public/icon.png`
+- [ ] Update icon paths in `electron/main.ts` for platform detection
+- [ ] Verify `public/icon.png` exists
 - [ ] Test local build with `npm run dist`
+- [ ] Verify `.deb` package is generated
 - [ ] Install and test on Kubuntu
 
 ### Phase 3: Linux Features
-- [ ] Add theme detection in `electron/main.ts`
-- [ ] Add theme listener in React app
+- [ ] Add theme detection in `electron/main.ts` (after createWindow function)
+- [ ] Add theme listener in React app (App.tsx or dedicated theme provider)
+- [ ] Verify keyboard shortcuts don't conflict with KDE (avoid: Ctrl+Alt+Esc, Ctrl+Esc)
 - [ ] Implement native notifications where appropriate
 - [ ] Verify keyboard shortcuts
 - [ ] Test dark/light mode switching
@@ -368,7 +421,10 @@ Artifact uploaded to GitHub release
 
 ### Phase 5: Testing & Documentation
 - [ ] Complete manual testing checklist
-- [ ] Update README.md with Linux install instructions
+- [ ] Update README.md:
+  - Change "built exclusively for Windows" to platform-agnostic language
+  - Add Linux installation instructions alongside Windows
+  - Add `.deb` package download link to releases section
 - [ ] Test on fresh Kubuntu installation
 - [ ] Create pull request
 
