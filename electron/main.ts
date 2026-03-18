@@ -72,6 +72,13 @@ function createWindow(): BrowserWindow {
     win.hide()
   })
 
+  // Handle opening markdown files from file manager
+  app.on('open-file', (event: Electron.Event, path: string) => {
+    event.preventDefault()
+    // TODO: Implement file open logic - will be added in future task
+    console.log('Open file requested:', path)
+  })
+
   return win
 }
 
