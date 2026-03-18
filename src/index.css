@@ -5,21 +5,21 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Tokyo Night palette ─────────────────────────────────────────────────── */
+/* ── Tokyo Night palette (fallback; runtime values set by themeStore) ────── */
 :root {
-  --bg-0:        #13141e;   /* deepest bg */
-  --bg-1:        #1a1b26;   /* main bg */
-  --bg-2:        #24283b;   /* sidebar / surface */
-  --bg-3:        #2f3449;   /* hover / elevated */
-  --border:      #2f3449;
-  --text:        #c0caf5;
-  --text-muted:  #565f89;
-  --accent:      #7aa2f7;   /* blue */
-  --accent-2:    #9ece6a;   /* green */
-  --accent-3:    #e0af68;   /* yellow */
-  --red:         #f7768e;
-  --cyan:        #7dcfff;
-  --purple:      #bb9af7;
+  --bg-0:        19 20 30;    /* #13141e deepest bg */
+  --bg-1:        26 27 38;    /* #1a1b26 main bg */
+  --bg-2:        36 40 59;    /* #24283b sidebar / surface */
+  --bg-3:        47 52 73;    /* #2f3449 hover / elevated */
+  --border:      47 52 73;    /* #2f3449 */
+  --text:        192 202 245; /* #c0caf5 */
+  --text-muted:  86 95 137;   /* #565f89 */
+  --accent:      122 162 247; /* #7aa2f7 blue */
+  --accent-2:    158 206 106; /* #9ece6a green */
+  --accent-3:    224 175 104; /* #e0af68 yellow */
+  --red:         247 118 142; /* #f7768e */
+  --cyan:        125 207 255; /* #7dcfff */
+  --purple:      187 154 247; /* #bb9af7 */
 
   color-scheme: dark;
   font-synthesis: none;
@@ -41,8 +41,8 @@ html, body, #root {
 
 body {
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-  background: var(--bg-1);
-  color: var(--text);
+  background: rgb(var(--bg-1));
+  color: rgb(var(--text));
   font-size: 13px;
   line-height: 1.6;
 }
@@ -57,8 +57,14 @@ button {
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--text-muted) / 0.7); }
+
+/* ── Tab active color (themed) ───────────────────────────────────────────── */
+.tab-active-text     { color: rgb(var(--tab-active)); }
+.tab-active-bg       { background: rgb(var(--tab-active) / 0.1); border-color: rgb(var(--tab-active) / 0.25); }
+.tab-active-border-l { border-left-color: rgb(var(--tab-active)); }
+.tab-active-caret    { caret-color: rgb(var(--tab-active)); }
 
 /* ── TipTap editor styles ────────────────────────────────────────────────── */
 .prose-editor {
@@ -73,13 +79,13 @@ button {
   font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
   line-height: 1.75;
-  color: var(--text);
-  caret-color: var(--accent);
+  color: rgb(var(--text));
+  caret-color: rgb(var(--accent));
 }
 
 .prose-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
-  color: var(--text-muted);
+  color: rgb(var(--text-muted));
   opacity: 0.4;
   pointer-events: none;
   float: left;
@@ -96,30 +102,30 @@ button {
   line-height: 1.3;
 }
 
-.prose-editor .ProseMirror h1 { font-size: 1.5rem; color: var(--accent); }
-.prose-editor .ProseMirror h2 { font-size: 1.2rem; color: var(--cyan); }
-.prose-editor .ProseMirror h3 { font-size: 1rem;   color: var(--text); }
+.prose-editor .ProseMirror h1 { font-size: 1.5rem; color: rgb(var(--accent)); }
+.prose-editor .ProseMirror h2 { font-size: 1.2rem; color: rgb(var(--cyan)); }
+.prose-editor .ProseMirror h3 { font-size: 1rem;   color: rgb(var(--text)); }
 
 .prose-editor .ProseMirror p { margin-bottom: 0.25rem; }
 
-.prose-editor .ProseMirror strong { color: var(--accent-3); font-weight: 600; }
-.prose-editor .ProseMirror em    { color: var(--purple); font-style: italic; }
-.prose-editor .ProseMirror s     { color: var(--text-muted); text-decoration: line-through; }
+.prose-editor .ProseMirror strong { color: rgb(var(--accent-3) / 0.75); font-weight: 600; }
+.prose-editor .ProseMirror em    { color: rgb(var(--purple)); font-style: italic; }
+.prose-editor .ProseMirror s     { color: rgb(var(--text-muted)); text-decoration: line-through; }
 
 .prose-editor .ProseMirror code {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.85em;
-  background: var(--bg-0);
-  color: var(--red);
-  border: 1px solid var(--border);
+  background: rgb(var(--bg-0));
+  color: rgb(var(--red));
+  border: 1px solid rgb(var(--border));
   border-radius: 3px;
   padding: 0.1em 0.35em;
 }
 
 .prose-editor .ProseMirror pre {
-  background: var(--bg-0);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
+  background: rgb(var(--bg-0));
+  border: 1px solid rgb(var(--border));
+  border-left: 3px solid rgb(var(--accent-2));
   border-radius: 4px;
   padding: 1rem;
   margin: 1rem 0;
@@ -131,7 +137,7 @@ button {
   border: none;
   padding: 0;
   font-size: 0.85em;
-  color: var(--text);
+  color: rgb(var(--text));
 }
 
 .prose-editor .ProseMirror ul,
@@ -175,7 +181,7 @@ button {
   appearance: none;
   width: 14px;
   height: 14px;
-  border: 1.5px solid var(--text-muted);
+  border: 1.5px solid rgb(var(--text-muted));
   border-radius: 3px;
   background: transparent;
   cursor: pointer;
@@ -184,8 +190,8 @@ button {
 }
 
 .prose-editor .ProseMirror ul[data-type="taskList"] li input[type="checkbox"]:checked {
-  background: var(--accent-2);
-  border-color: var(--accent-2);
+  background: transparent;
+  border-color: rgb(var(--accent-2));
 }
 
 .prose-editor .ProseMirror ul[data-type="taskList"] li input[type="checkbox"]:checked::after {
@@ -194,12 +200,12 @@ button {
   top: -2px;
   left: 1px;
   font-size: 10px;
-  color: var(--bg-0);
+  color: rgb(var(--accent-2));
   font-weight: bold;
 }
 
 .prose-editor .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
-  color: var(--text-muted);
+  color: rgb(var(--text-muted));
   text-decoration: line-through;
 }
 
@@ -210,7 +216,7 @@ button {
 
 /* Links */
 .prose-editor .ProseMirror a {
-  color: var(--cyan);
+  color: rgb(var(--cyan));
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -218,7 +224,7 @@ button {
 /* Horizontal Rule */
 .prose-editor .ProseMirror hr {
   border: none;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid rgb(var(--border));
   margin: 2rem 0;
   border-radius: 1px;
 }

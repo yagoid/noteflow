@@ -4,6 +4,7 @@ import type { Note } from '../../types'
 import { Archive, Search, Tag, Pin, PanelLeftClose, Trash2, PinOff } from 'lucide-react'
 import { format, isToday, isYesterday } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
+import { tagStyle, getTagColor } from '../../lib/tagColors'
 
 interface SidebarProps {
   onCollapse: () => void
@@ -43,7 +44,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const rawNotes = useNotesStore((s) => s.notes)
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
   const searchQuery = useNotesStore((s) => s.searchQuery)
-  const filterSection = useNotesStore((s) => s.filterSection)
+  const filterDate = useNotesStore((s) => s.filterDate)
   const filterTag = useNotesStore((s) => s.filterTag)
   const showArchived = useNotesStore((s) => s.showArchived)
 
@@ -52,7 +53,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const archiveNote = useNotesStore((s) => s.archiveNote)
   const deleteNote = useNotesStore((s) => s.deleteNote)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
-  const setFilterSection = useNotesStore((s) => s.setFilterSection)
+  const setFilterDate = useNotesStore((s) => s.setFilterDate)
   const setFilterTag = useNotesStore((s) => s.setFilterTag)
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
   const createNote = useNotesStore((s) => s.createNote)
@@ -95,10 +96,19 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     return rawNotes
       .filter((n) => showArchived || !n.archived)
       .filter((n) => {
-        if (filterSection === 'all') return true
-        return n.sections.some(
-          (s) => s.name.toLowerCase() === filterSection.toLowerCase() && s.content.trim().length > 0
-        )
+        if (filterDate === 'all') return true
+        const updated = new Date(n.updated)
+        const now = new Date()
+        if (filterDate === 'today') return isToday(updated)
+        if (filterDate === 'week') {
+          const weekAgo = new Date(now); weekAgo.setDate(now.getDate() - 7)
+          return updated >= weekAgo
+        }
+        if (filterDate === 'month') {
+          const monthAgo = new Date(now); monthAgo.setMonth(now.getMonth() - 1)
+          return updated >= monthAgo
+        }
+        return true
       })
       .filter((n) => !filterTag || n.tags.includes(filterTag))
       .filter((n) => {
@@ -114,17 +124,11 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
         return new Date(b.updated).getTime() - new Date(a.updated).getTime()
       })
-  }, [rawNotes, showArchived, filterSection, filterTag, searchQuery])
+  }, [rawNotes, showArchived, filterDate, filterTag, searchQuery])
 
   const allTags = useMemo(() => {
     const all = rawNotes.flatMap((n) => n.tags)
     return [...new Set(all)].sort()
-  }, [rawNotes])
-
-  const allSectionNames = useMemo(() => {
-    const names = new Set<string>()
-    rawNotes.forEach((n) => n.sections.forEach((sec) => names.add(sec.name)))
-    return Array.from(names).sort()
   }, [rawNotes])
 
   return (
@@ -164,34 +168,26 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         </button>
       </div>
 
-      {/* ── Section filters ────────────────────────────────────────── */}
-      {allSectionNames.length > 0 && (
-        <div className="flex gap-1 px-3 py-2 border-b border-border flex-wrap">
-          <button
-            onClick={() => setFilterSection('all')}
-            className={`px-2 py-0.5 rounded text-xs font-mono transition-colors
-              ${filterSection === 'all'
-                ? 'bg-accent/20 text-accent border border-accent/30'
-                : 'text-text-muted hover:text-text border border-transparent'
-              }`}
-          >
-            All
-          </button>
-          {allSectionNames.map((name) => (
+      {/* ── Date filter ────────────────────────────────────────────── */}
+      <div className="flex gap-1 px-3 py-2 border-b border-border">
+        {(['all', 'today', 'week', 'month'] as const).map((opt) => {
+          const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
+          const active = filterDate === opt
+          return (
             <button
-              key={name}
-              onClick={() => setFilterSection(filterSection === name ? 'all' : name)}
-              className={`px-2 py-0.5 rounded text-xs font-mono transition-colors
-                ${filterSection === name
-                  ? 'bg-accent/20 text-accent border border-accent/30'
-                  : 'text-text-muted hover:text-text border border-transparent'
-                }`}
+              key={opt}
+              onClick={() => setFilterDate(opt)}
+              className="flex-1 py-0.5 rounded text-xs font-mono transition-colors"
+              style={active
+                ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
+                : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
+              }
             >
-              {name}
+              {labels[opt]}
             </button>
-          ))}
-        </div>
-      )}
+          )
+        })}
+      </div>
 
       {/* ── Tags ───────────────────────────────────────────────────── */}
       {allTags.length > 0 && (
@@ -200,16 +196,13 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             <Tag size={10} className="text-text-muted" />
             <span className="text-xs font-mono text-text-muted uppercase tracking-wider">Tags</span>
           </div>
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-1 max-h-[72px] overflow-y-auto">
             {allTags.slice(0, 12).map((tag) => (
               <button
                 key={tag}
                 onClick={() => setFilterTag(filterTag === tag ? null : tag)}
-                className={`text-xs font-mono px-1.5 py-0.5 rounded transition-colors
-                  ${filterTag === tag
-                    ? 'bg-accent/20 text-accent border border-accent/30'
-                    : 'text-text-muted/70 hover:text-text-muted border border-border'
-                  }`}
+                className="text-xs font-mono px-1.5 py-0.5 rounded transition-colors"
+                style={tagStyle(tag, filterTag === tag)}
               >
                 #{tag}
               </button>
@@ -271,20 +264,17 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                       {formatNoteDate(note.updated)}
                     </span>
                   </div>
-                  {hasAnyContent(note) ? (
-                    <p className="text-[11px] font-mono text-text-muted/50 truncate mt-0.5 leading-tight">
-                      {noteExcerpt(note)}
-                    </p>
-                  ) : (
-                    <p className="text-[11px] font-mono text-text-muted/30 italic mt-0.5 leading-tight">
-                      No content
-                    </p>
-                  )}
-                  {note.archived && (
-                    <span className="flex items-center gap-0.5 text-[10px] font-mono text-text-muted/40 mt-0.5 leading-none">
-                      <Archive size={8} /> archived
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
+                    {note.sections.map((section) => (
+                      <span
+                        key={section.id}
+                        className="text-[9px] font-mono px-1 rounded flex-shrink-0 leading-[1.6]"
+                        style={getTagColor(section.name)}
+                      >
+                        {section.name}
+                      </span>
+                    ))}
+                  </div>
                 </button>
               </li>
             ))}

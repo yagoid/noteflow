@@ -141,7 +141,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
             className={`p-1.5 rounded text-xs transition-colors font-mono
               ${btn.isActive
                 ? 'bg-accent/20 text-accent'
-                : 'text-text-muted hover:text-text hover:bg-surface-2'
+                : 'text-text-muted hover:text-text hover:bg-surface-3'
               }`}
           >
             {btn.icon}

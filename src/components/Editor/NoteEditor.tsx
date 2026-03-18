@@ -455,11 +455,11 @@ export function NoteEditor() {
                   onDragLeave={() => setDragOverSectionId(null)}
                   className={`group flex items-center gap-1 flex-shrink-0 rounded px-0.5 transition-all duration-200 cursor-grab active:cursor-grabbing
                      ${isActive
-                      ? 'bg-yellow-400/10 border border-yellow-400/25'
+                      ? 'tab-active-bg border'
                       : 'border border-border/40 hover:border-border/70'
                     }
                     ${draggedSectionId === section.id ? 'opacity-30' : 'opacity-100'}
-                    ${dragOverSectionId === section.id ? 'border-l-2 border-l-yellow-400 pl-1' : ''}
+                    ${dragOverSectionId === section.id ? 'border-l-2 tab-active-border-l pl-1' : ''}
                   `}
                 >
                   {isRenaming ? (
@@ -472,11 +472,11 @@ export function NoteEditor() {
                         onKeyDown={handleRenameKeyDown}
                         onBlur={handleCommitRename}
                         className="w-20 bg-surface-0 border border-yellow-400/40 rounded px-1
-                                   text-xs font-mono text-text outline-none caret-yellow-400"
+                                   text-xs font-mono text-text outline-none tab-active-caret"
                       />
                       <button
                         onMouseDown={(e) => { e.preventDefault(); handleCommitRename() }}
-                        className="text-yellow-400 hover:text-yellow-400 p-0.5 rounded"
+                        className="tab-active-text p-0.5 rounded"
                       >
                         <Check size={12} />
                       </button>
@@ -487,7 +487,7 @@ export function NoteEditor() {
                       onClick={() => handleSwitchSection(section.id)}
                       onDoubleClick={() => handleStartRename(section)}
                       className={`px-2 py-0.5 text-xs font-mono transition-colors
-                        ${isActive ? 'text-yellow-400' : 'text-text-muted'}`}
+                        ${isActive ? 'tab-active-text' : 'text-text-muted'}`}
                     >
                       {section.name}
                     </button>
@@ -523,7 +523,7 @@ export function NoteEditor() {
               onClick={handleAddSection}
               title="Add section (Ctrl+T)"
               className="flex items-center justify-center w-6 h-6 rounded flex-shrink-0
-                         text-text-muted/60 hover:text-text-muted hover:bg-surface-2
+                         text-text-muted/60 hover:text-text-muted hover:bg-surface-3
                          border border-transparent hover:border-border transition-colors"
             >
               <Plus size={13} />
@@ -537,7 +537,7 @@ export function NoteEditor() {
               className={`p-1.5 rounded text-xs transition-colors
                 ${rawMode
                   ? 'text-accent bg-accent/10 border border-accent/20'
-                  : 'text-text-muted hover:text-text hover:bg-surface-2 border border-transparent'
+                  : 'text-text-muted hover:text-text hover:bg-surface-3 border border-transparent'
                 }`}
             >
               {rawMode ? <Edit3 size={13} /> : <Eye size={13} />}
@@ -545,7 +545,7 @@ export function NoteEditor() {
             <button
               onClick={handleCopyAllText}
               title="Copy note text to clipboard"
-              className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+              className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
             >
               <Copy size={13} />
             </button>
@@ -556,7 +556,7 @@ export function NoteEditor() {
                 }
               }}
               title="Pop out section as Sticky Note"
-              className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+              className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
             >
               <ExternalLink size={13} />
             </button>
@@ -564,14 +564,14 @@ export function NoteEditor() {
               onClick={() => updateNote(note.id, { pinned: !note.pinned })}
               title={note.pinned ? 'Unpin note' : 'Pin note'}
               className={`p-1.5 rounded text-xs transition-colors
-                ${note.pinned ? 'text-yellow-400 bg-yellow-400/10' : 'text-text-muted hover:text-text hover:bg-surface-2'}`}
+                ${note.pinned ? 'text-yellow-400 bg-yellow-400/10' : 'text-text-muted hover:text-text hover:bg-surface-3'}`}
             >
               <Pin size={13} />
             </button>
             <button
               onClick={() => archiveNote(note.id)}
               title={note.archived ? 'Unarchive note' : 'Archive note'}
-              className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+              className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
             >
               <Archive size={13} />
             </button>

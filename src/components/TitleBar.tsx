@@ -1,6 +1,11 @@
-import { Minus, Square, X } from 'lucide-react'
+import { Check, Minus, Palette, Square, X } from 'lucide-react'
+import { THEMES } from '../lib/themes'
+import { useThemeStore } from '../stores/themeStore'
+import { TitleBarMenu } from './TitleBarMenu'
 
 export function TitleBar() {
+  const { activeThemeId, setTheme } = useThemeStore()
+
   return (
     <div
       className="flex items-center h-8 bg-surface-0 border-b border-border select-none flex-shrink-0"
@@ -19,6 +24,22 @@ export function TitleBar() {
         className="flex items-center h-full"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
+        <TitleBarMenu
+          trigger={<Palette size={11} />}
+          groups={[
+            {
+              label: 'Tema',
+              items: THEMES.map((t) => ({
+                id: t.id,
+                label: t.label,
+                indicator: activeThemeId === t.id
+                  ? <Check size={10} className="text-accent" />
+                  : undefined,
+                action: () => setTheme(t.id),
+              })),
+            },
+          ]}
+        />
         <div className="flex">
           <button
             onClick={() => window.noteflow.minimize()}

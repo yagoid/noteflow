@@ -18,6 +18,7 @@ interface NotesState {
   // UI state
   searchQuery: string
   filterSection: string  // section name filter, or 'all'
+  filterDate: 'all' | 'today' | 'week' | 'month'
   filterTag: string | null
   showArchived: boolean
   commandPaletteOpen: boolean
@@ -32,6 +33,7 @@ interface NotesState {
   setActiveNote: (id: string | null) => void
   setSearchQuery: (q: string) => void
   setFilterSection: (s: string) => void
+  setFilterDate: (f: 'all' | 'today' | 'week' | 'month') => void
   setFilterTag: (tag: string | null) => void
   setShowArchived: (v: boolean) => void
   setCommandPaletteOpen: (v: boolean) => void
@@ -50,6 +52,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   notesDir: '',
   searchQuery: '',
   filterSection: 'all',
+  filterDate: 'all',
   filterTag: null,
   showArchived: false,
   commandPaletteOpen: false,
@@ -186,6 +189,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
   setSearchQuery:       (q)   => set({ searchQuery: q }),
   setFilterSection:     (s)   => set({ filterSection: s }),
+  setFilterDate:        (f)   => set({ filterDate: f }),
   setFilterTag:         (tag) => set({ filterTag: tag }),
   setShowArchived:      (v)   => set({ showArchived: v }),
   setCommandPaletteOpen:(v)   => set({ commandPaletteOpen: v }),

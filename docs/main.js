@@ -150,6 +150,59 @@
     document.querySelectorAll('.fade-up:not(.visible)').forEach((el) => obs2.observe(el));
   }
 
+  // ── Hero screenshot auto-cycle ──────────────
+  const heroShot = document.getElementById('hero-screenshot');
+  if (heroShot) {
+    const HERO_THEMES = [
+      'screenshots/app-main-carbon.png',
+      'screenshots/app-main-midnightblue.png',
+      'screenshots/app-main-tokionight.png',
+      'screenshots/app-main-articday.png',
+    ];
+    let heroIdx = 1;
+    setInterval(() => {
+      heroIdx = (heroIdx + 1) % HERO_THEMES.length;
+      heroShot.classList.add('fading');
+      setTimeout(() => {
+        heroShot.src = HERO_THEMES[heroIdx];
+        heroShot.classList.remove('fading');
+      }, 620);
+    }, 3500);
+  }
+
+  // ── Sticky note auto-cycle ──────────────────
+  const heroSticky = document.getElementById('hero-sticky');
+  if (heroSticky) {
+    const STICKY_THEMES = [
+      'screenshots/sticky-note-carbon.png',
+      'screenshots/sticky-note-tokionight.png',
+      'screenshots/sticky-note-arcticday.png',
+    ];
+    let stickyIdx = 0;
+    setInterval(() => {
+      stickyIdx = (stickyIdx + 1) % STICKY_THEMES.length;
+      heroSticky.classList.add('fading');
+      setTimeout(() => {
+        heroSticky.src = STICKY_THEMES[stickyIdx];
+        heroSticky.classList.remove('fading');
+      }, 620);
+    }, 4200);
+  }
+
+  // ── Theme picker ────────────────────────────
+  const previewImg = document.getElementById('preview-img');
+  const themeBtns = document.querySelectorAll('.theme-btn');
+  if (previewImg && themeBtns.length) {
+    themeBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        themeBtns.forEach((b) => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
+        btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
+        previewImg.src = btn.dataset.img;
+      });
+    });
+  }
+
   // ── Download button click tracking (console) ─
   ['hero-download-btn', 'main-download-btn'].forEach((id) => {
     const btn = document.getElementById(id);

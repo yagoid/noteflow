@@ -56,7 +56,7 @@
       "url": "https://github.com/yagoid"
     },
     "softwareVersion": "1.0",
-    "screenshot": "https://yagoid.github.io/noteflow/screenshots/app-main.png"
+    "screenshot": "https://yagoid.github.io/noteflow/screenshots/app-main-carbon.png"
   }
   </script>
 
@@ -165,9 +165,9 @@
             </div>
           </div>
           <div class="hero__window-body">
-            <img src="screenshots/app-main.png"
+            <img src="screenshots/app-main-midnightblue.png"
               alt="NoteFlow app — main editor showing a developer task list with markdown and checkboxes"
-              class="hero__screenshot" width="800" height="530" />
+              class="hero__screenshot" id="hero-screenshot" width="800" height="530" />
           </div>
         </div>
 
@@ -179,9 +179,9 @@
             </div>
           </div>
           <div class="hero__window-body">
-            <img src="screenshots/sticky-note.png"
+            <img src="screenshots/sticky-note-carbon.png"
               alt="NoteFlow sticky note — a floating window with a development roadmap" class="hero__screenshot"
-              width="300" height="300" />
+              id="hero-sticky" width="300" height="300" />
           </div>
         </div>
 
@@ -286,9 +286,9 @@
               </svg>
             </div>
             <h3 class="feature-card__title">Dev-native aesthetics</h3>
-            <p class="feature-card__desc">Dark theme, monospace font, minimal chrome. Feels at home next to your IDE.
+            <p class="feature-card__desc">4 built-in themes, monospace font, minimal chrome. Feels at home next to your IDE.
               Not another Notion clone with a light grey background.</p>
-            <code class="feature-card__code">theme: dark · font: mono</code>
+            <code class="feature-card__code">carbon · midnight-blue · tokio-night · artic-day</code>
           </article>
 
         </div>
@@ -304,6 +304,21 @@
           <p class="section-desc">Clean. Fast. Exactly what you need — nothing more.</p>
         </div>
 
+        <div class="theme-picker" role="group" aria-label="Theme selector">
+          <button class="theme-btn active" data-img="screenshots/app-main-carbon.png" aria-pressed="true">
+            <span class="theme-dot theme-dot--carbon" aria-hidden="true"></span>Carbon
+          </button>
+          <button class="theme-btn" data-img="screenshots/app-main-midnightblue.png" aria-pressed="false">
+            <span class="theme-dot theme-dot--midnight" aria-hidden="true"></span>Midnight Blue
+          </button>
+          <button class="theme-btn" data-img="screenshots/app-main-tokionight.png" aria-pressed="false">
+            <span class="theme-dot theme-dot--tokio" aria-hidden="true"></span>Tokio Night
+          </button>
+          <button class="theme-btn" data-img="screenshots/app-main-articday.png" aria-pressed="false">
+            <span class="theme-dot theme-dot--artic" aria-hidden="true"></span>Arctic Day
+          </button>
+        </div>
+
         <div class="preview__wrapper">
           <div class="preview__window" role="img" aria-label="NoteFlow showing a developer task note">
             <div class="preview__chrome" aria-hidden="true">
@@ -316,9 +331,9 @@
               <div class="preview__chrome-right"></div>
             </div>
             <div class="preview__body">
-              <img src="screenshots/app-main.png"
+              <img src="screenshots/app-main-carbon.png"
                 alt="NoteFlow main editor: sidebar with notes list, tabbed editor, markdown task list with checkboxes"
-                class="preview__img" loading="lazy" width="1100" height="730" />
+                class="preview__img" id="preview-img" loading="lazy" width="1100" height="730" />
             </div>
           </div>
           <div class="preview__glow" aria-hidden="true"></div>
@@ -382,7 +397,7 @@
                 <td><span class="check" aria-label="Yes">✓</span></td>
               </tr>
               <tr>
-                <td>Developer aesthetic / dark mode</td>
+                <td>Multiple themes (4 built-in)</td>
                 <td class="compare__col--highlight"><span class="check" aria-label="Yes">✓</span></td>
                 <td><span class="cross" aria-label="No">✗</span></td>
                 <td><span class="cross" aria-label="No">✗</span></td>

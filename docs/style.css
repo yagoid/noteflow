@@ -373,7 +373,7 @@ ul, ol { list-style: none; }
 
 .hero__window--sticky {
   position: absolute;
-  width: 260px;
+  width: 190px;
   right: -20px;
   bottom: -40px;
   z-index: 2;
@@ -419,7 +419,9 @@ ul, ol { list-style: none; }
   width: 100%;
   height: auto;
   display: block;
+  transition: opacity 0.6s ease;
 }
+.hero__screenshot.fading { opacity: 0; }
 
 .hero__window-glow {
   position: absolute;
@@ -600,6 +602,49 @@ ul, ol { list-style: none; }
 .callout--1 { top: 16%; }
 .callout--2 { top: 36%; }
 .callout--3 { top: 60%; }
+
+/* ─── THEME PICKER ──────────────────────────────────────────────────────── */
+.theme-picker {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.theme-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-2);
+  border: 1px solid var(--border-2);
+  padding: 6px 14px;
+  border-radius: 99px;
+  cursor: pointer;
+  background: transparent;
+  transition: color 0.2s var(--ease), border-color 0.2s var(--ease), background 0.2s var(--ease);
+  letter-spacing: 0.04em;
+}
+.theme-btn:hover { color: var(--text-0); border-color: var(--text-2); }
+.theme-btn.active {
+  color: var(--text-0);
+  border-color: var(--text-1);
+  background: var(--bg-3);
+}
+
+.theme-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.theme-dot--carbon   { background: #7c8491; }
+.theme-dot--midnight { background: #4a7cc4; }
+.theme-dot--tokio    { background: #7aa2f7; }
+.theme-dot--artic    { background: #68c8d4; }
 
 /* ─── COMPARE ───────────────────────────────────────────────────────────── */
 .compare {
