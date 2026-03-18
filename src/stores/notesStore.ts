@@ -36,6 +36,7 @@ interface NotesState {
   setFilterTag: (tag: string | null) => void
   setShowArchived: (v: boolean) => void
   setCommandPaletteOpen: (v: boolean) => void
+  setNewlyCreatedNoteId: (id: string | null) => void
   syncNote: (filePath: string) => Promise<void>
   pruneEmptyNote: (id: string) => Promise<void>
 
@@ -191,6 +192,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   setFilterTag:         (tag) => set({ filterTag: tag }),
   setShowArchived:      (v)   => set({ showArchived: v }),
   setCommandPaletteOpen:(v)   => set({ commandPaletteOpen: v }),
+  setNewlyCreatedNoteId:(id) => set({ newlyCreatedNoteId: id }),
 
   pruneEmptyNote: async (id) => {
     const note = get().notes.find((n) => n.id === id)

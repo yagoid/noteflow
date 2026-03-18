@@ -75,6 +75,28 @@ export function NoteEditor() {
     setRenamingId(null)
   }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Auto-focus title field when new note is created ───────────────────────
+  useEffect(() => {
+    const newlyCreatedNoteId = useNotesStore.getState().newlyCreatedNoteId
+    const currentNoteId = note?.id
+
+    if (currentNoteId === newlyCreatedNoteId) {
+      setTimeout(() => {
+        const store = useNotesStore.getState()
+        const { newlyCreatedNoteId: updatedNewlyCreatedNoteId } = store
+
+        if (updatedNewlyCreatedNoteId && updatedNewlyCreatedNoteId === currentNoteId) {
+          const titleElement = document.querySelector(`input[placeholder="Untitled"]`)
+          if (titleElement && titleElement instanceof HTMLInputElement && document.activeElement !== titleElement) {
+            titleElement.focus()
+            titleElement.select()
+            store.setNewlyCreatedNoteId(null)
+          }
+        }
+      }, 0)
+    }
+  }, [note?.id])
+
   // ── Sync raw buffer with store updates (external changes) ──────────────────
   useEffect(() => {
     if (activeSection && activeSection.content !== rawContent) {
