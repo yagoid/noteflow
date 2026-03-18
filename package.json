@@ -10,7 +10,7 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "preview": "vite preview",
     "lint": "eslint .",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "npm run build && electron-builder"
   },
   "dependencies": {
     "@tiptap/core": "^2.27.2",
@@ -77,6 +77,31 @@
     "win": {
       "target": "nsis",
       "icon": "public/icon.ico"
+    },
+    "linux": {
+      "target": ["deb"],
+      "category": "Utility",
+      "icon": "public/icon.png",
+      "desktop": {
+        "Name": "NoteFlow",
+        "Comment": "Fast notes for software engineers",
+        "Keywords": "notes;markdown;text;",
+        "Categories": "Utility;TextEditor;"
+      }
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libdrm2",
+        "libgbm1",
+        "libxkbcommon0"
+      ]
     },
     "files": [
       "dist/**/*",
