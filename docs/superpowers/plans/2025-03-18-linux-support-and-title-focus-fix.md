@@ -128,17 +128,28 @@ useEffect(() => {
 
 - [ ] **Step 2: Add setNewlyCreatedNoteId to store actions**
 
-First, add the action signature to `NotesState` in `src/stores/notesStore.ts` (around line 38):
+First, add the action signature to the `NotesState` interface in `src/stores/notesStore.ts` (around line 38). This goes in the interface definition where all other actions are declared:
 
 ```typescript
-// Actions
-loadNotes: () => Promise<void>
-createNote: () => Promise<Note>
-// ... other actions
-setNewlyCreatedNoteId: (id: string | null) => void  // ADD THIS LINE
+interface NotesState {
+  notes: Note[]
+  activeNoteId: string | null
+  notesDir: string
+  newlyCreatedNoteId: string | null
+
+  // UI state
+  searchQuery: string
+  // ... other UI state fields
+
+  // Actions - ADD THIS NEW ACTION HERE
+  setActiveNote: (id: string | null) => void
+  setNewlyCreatedNoteId: (id: string | null) => void  // ADD THIS LINE
+  setSearchQuery: (q: string) => void
+  // ... other actions
+}
 ```
 
-Then add the implementation (around line 191):
+Then add the implementation in the store creation (around line 191):
 
 ```typescript
 setActiveNote:         (id)   => set({ activeNoteId: id }),
@@ -235,7 +246,7 @@ Expected: No errors
 
 ```bash
 git add electron/main.ts
-git commit -m "feat: load platform-specific icon (Windows: .ico, Linux: .mac)
+git commit -m "feat: load platform-specific icon (Windows: .ico, Linux: .png)
 
 Electron apps need different icon formats per platform.
 This change dynamically loads the correct icon based on
@@ -287,8 +298,7 @@ In `package.json`, update the `build` section (around line 71) to include Linux 
       "libatspi2.0-0",
       "libdrm2",
       "libgbm1",
-      "libxkbcommon0",
-      "libgbm-dev"
+      "libxkbcommon0"
     ]
   },
   "files": [
@@ -298,19 +308,36 @@ In `package.json`, update the `build` section (around line 71) to include Linux 
 }
 ```
 
-- [ ] **Step 2: Validate package.json syntax**
+- [ ] **Step 2: Update dist script to build for all platforms**
+
+In `package.json`, update the `scripts` section (around line 13). Change:
+
+```json
+"dist": "npm run build && electron-builder --win"
+```
+
+To:
+
+```json
+"dist": "npm run build && electron-builder"
+```
+
+This removes the `--win` flag so electron-builder builds for all configured platforms (Windows and Linux). For local development on Windows, you can still build Windows-only with `npm run dist -- --win`.
+
+- [ ] **Step 3: Validate package.json syntax**
 
 Run: `node -e "console.log(JSON.stringify(require('./package.json'), null, 2))"`
 Expected: No JSON parse errors
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add package.json
 git commit -m "build: add Linux packaging configuration
 
 Adds electron-builder configuration for .deb package generation
-on Debian/Ubuntu/Kubuntu systems. Includes desktop integration
+on Debian/Ubuntu/Kubuntu systems. Updates dist script to build
+for all configured platforms. Includes desktop integration
 metadata and system library dependencies."
 ```
 
@@ -353,7 +380,104 @@ Actual implementation deferred to maintain task isolation."
 
 ---
 
-## Task 6: Update GitHub Actions for Multi-Platform Builds
+## Task 6: Add System Theme Detection
+
+**Files:**
+- Modify: `electron/main.ts`
+- Modify: `src/main.tsx`
+
+- [ ] **Step 1: Import nativeTheme in electron/main.ts**
+
+At the top of `electron/main.ts`, add to the existing electron imports (around line 5):
+
+```typescript
+import { app, BrowserWindow, nativeTheme } from 'electron'
+```
+
+- [ ] **Step 2: Add theme detection in createWindow()**
+
+In `electron/main.ts`, add this code in the `createWindow` function after `win.once('ready-to-show', ...)` (around line 63):
+
+```typescript
+// Send initial theme to renderer
+const sendTheme = () => {
+  const isDark = nativeTheme.shouldUseDarkColors
+  win.webContents.send('theme-changed', isDark)
+}
+
+// Send theme on window ready
+win.once('ready-to-show', () => {
+  sendTheme()
+})
+
+// Listen for system theme changes
+nativeTheme.on('updated', sendTheme)
+```
+
+- [ ] **Step 3: Add theme listener in React app**
+
+In `src/main.tsx`, add the theme listener inside the main component or root (around line 10):
+
+```typescript
+import { useEffect } from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.tsx'
+import './index.css'
+
+// Listen for system theme changes from Electron
+useEffect(() => {
+  const handleThemeChange = (event: Event) => {
+    const customEvent = event as CustomEvent<boolean>
+    const isDark = customEvent.detail
+    // Apply theme to document root for CSS variables
+    document.documentElement.dataset.theme = isDark ? 'dark' : 'light'
+  }
+
+  window.addEventListener('theme-changed', handleThemeChange as EventListener)
+  return () => {
+    window.removeEventListener('theme-changed', handleThemeChange as EventListener)
+  }
+}, [])
+```
+
+Note: This is basic infrastructure. Full theme integration with CSS variables can be added later.
+
+- [ ] **Step 4: Test TypeScript compilation**
+
+Run: `npm run build:electron`
+Expected: No errors
+
+Also run: `npm run build`
+Expected: No errors in React code
+
+- [ ] **Step 5: Verify theme detection works**
+
+Run: `npm run dev`
+
+On Linux:
+1. Change system theme from dark to light in KDE settings
+2. Check browser console - should see "theme-changed" events
+3. Verify `document.documentElement.dataset.theme` updates
+
+On Windows:
+1. Change system theme in Settings > Personalization > Colors
+2. Check browser console for theme events
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add electron/main.ts src/main.tsx
+git commit -m "feat: add system theme detection
+
+Detects KDE/GNOME/Windows system theme preference (dark/light)
+and communicates to renderer process. Infrastructure for
+theme-aware UI - full CSS integration to be implemented later.
+Uses Electron's nativeTheme API for cross-platform support."
+```
+
+---
+
+## Task 7: Update GitHub Actions for Multi-Platform Builds
 
 **Files:**
 - Modify: `.github/workflows/release.yml`
@@ -443,7 +567,6 @@ Expected: No syntax errors (if yamllint is available)
 
 ```bash
 git add .github/workflows/release.yml
-git add .github/workflows/release.yml
 git commit -m "ci: add multi-platform build matrix with Linux support
 
 GitHub Actions now builds for both Windows and Linux in parallel.
@@ -454,7 +577,7 @@ fails (fail-fast: false)."
 
 ---
 
-## Task 7: Update README for Platform Support
+## Task 8: Update README for Platform Support
 
 **Files:**
 - Modify: `README.md`
@@ -529,7 +652,7 @@ instructions alongside existing Windows documentation."
 
 ---
 
-## Task 8: Manual Testing and Verification
+## Task 9: Manual Testing and Verification
 
 **Files:**
 - None (testing only)
@@ -545,7 +668,35 @@ Test checklist:
 - [ ] Switch to existing note → title NOT focused
 - [ ] Create note, switch, create another → first note pruned, second note title focused
 
-- [ ] **Step 2: Test Linux build (if on Linux)**
+- [ ] **Step 2: Test system theme detection**
+
+Run: `npm run dev`
+Open browser console (F12)
+
+On Linux (KDE):
+1. Open System Settings → Appearance → Global Theme
+2. Switch between light and dark themes
+3. Check console - should see theme-changed events
+4. Check `document.documentElement.dataset.theme` in console
+5. Verify it updates to "dark" or "light"
+
+On Windows:
+1. Open Settings → Personalization → Colors
+2. Toggle "Choose your mode" (Light/Dark)
+3. Check console for theme-changed events
+4. Verify dataset.theme updates
+
+- [ ] **Step 3: Test keyboard shortcuts on Linux**
+
+On Linux (Kubuntu):
+1. Test all app shortcuts work correctly
+2. Verify no conflicts with KDE system shortcuts:
+   - `Ctrl+N` - New note (should work)
+   - `Ctrl+F` - Search (should work)
+   - `Ctrl+Q` - Quit (should work)
+   - Avoid: `Ctrl+Esc`, `Ctrl+Alt+Esc` (KDE reserved)
+
+- [ ] **Step 4: Test Linux build (if on Linux)**
 
 Run: `npm run dist`
 
@@ -557,7 +708,7 @@ Verify:
 - [ ] Run: `noteflow` → app launches
 - [ ] Check application menu → NoteFlow appears under Utilities/Text Editor
 
-- [ ] **Step 3: Test Windows build (if on Windows)**
+- [ ] **Step 5: Test Windows build (if on Windows)**
 
 Run: `npm run dist`
 
@@ -566,12 +717,12 @@ Verify:
 - [ ] App installs and runs correctly
 - [ ] Icon displays correctly
 
-- [ ] **Step 4: Verify no regressions**
+- [ ] **Step 6: Verify no regressions**
 
 Run: `npm run lint`
 Expected: No new errors or warnings
 
-- [ ] **Step 5: Create test notes**
+- [ ] **Step 7: Create test notes**
 
 Test data integrity:
 - [ ] Create note with title and content
@@ -583,7 +734,7 @@ Test data integrity:
 
 ---
 
-## Task 9: Create Pull Request
+## Task 10: Create Pull Request
 
 **Files:**
 - None (git operations)
@@ -646,6 +797,7 @@ Expected: PR details displayed
 After completing all tasks, you should have:
 
 ✅ New notes auto-focus title with "Untitled" selected
+✅ System theme detection infrastructure in place
 ✅ Linux .deb package builds successfully with `npm run dist`
 ✅ Package installs cleanly with `dpkg -i`
 ✅ Application appears in desktop menu
@@ -656,8 +808,8 @@ After completing all tasks, you should have:
 
 ## Notes for Future Enhancements
 
-- System theme detection (dark/light mode) not implemented - requires additional Electron nativeTheme integration
-- Native notifications infrastructure in place but not actively used
-- File open handler placeholder added - full .md file opening can be added later
+- Full theme integration with CSS variables - system theme detection is in place but full UI theming can be added later
+- Native notifications infrastructure can be used when needed - Electron Notification API available
+- File open handler placeholder added - full .md file opening with MIME type registration to be implemented
 - Consider AppImage for universal Linux support in future
 - Auto-updates for Linux builds not configured (requires update server)
