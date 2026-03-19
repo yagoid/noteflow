@@ -23,6 +23,7 @@ interface NotesState {
   showArchived: boolean
   commandPaletteOpen: boolean
   isLoading: boolean
+  newlyCreatedNoteId: string | null
 
   // Actions
   loadNotes: () => Promise<void>
@@ -37,6 +38,7 @@ interface NotesState {
   setFilterTag: (tag: string | null) => void
   setShowArchived: (v: boolean) => void
   setCommandPaletteOpen: (v: boolean) => void
+  setNewlyCreatedNoteId: (id: string | null) => void
   syncNote: (filePath: string) => Promise<void>
   pruneEmptyNote: (id: string) => Promise<void>
 
@@ -57,6 +59,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   showArchived: false,
   commandPaletteOpen: false,
   isLoading: false,
+  newlyCreatedNoteId: null,
 
   loadNotes: async () => {
     set({ isLoading: true })
@@ -116,7 +119,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const note: Note = { ...draft, filePath, raw }
 
     await window.noteflow.writeNote(filePath, raw)
-    set((s) => ({ notes: [note, ...s.notes], activeNoteId: note.id }))
+    set((s) => ({ notes: [note, ...s.notes], activeNoteId: note.id, newlyCreatedNoteId: note.id }))
     return note
   },
 
@@ -193,6 +196,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   setFilterTag:         (tag) => set({ filterTag: tag }),
   setShowArchived:      (v)   => set({ showArchived: v }),
   setCommandPaletteOpen:(v)   => set({ commandPaletteOpen: v }),
+  setNewlyCreatedNoteId:(id) => set({ newlyCreatedNoteId: id }),
 
   pruneEmptyNote: async (id) => {
     const note = get().notes.find((n) => n.id === id)

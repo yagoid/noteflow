@@ -13,6 +13,11 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 
+function getIconPath(): string {
+  const iconExt = process.platform === 'win32' ? 'ico' : 'png'
+  return path.join(__dirname, `../public/icon.${iconExt}`)
+}
+
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
 let mainWindow: BrowserWindow | null = null
@@ -42,7 +47,7 @@ function createWindow(): BrowserWindow {
     backgroundColor: '#1a1b26',
     titleBarStyle: 'hidden',
     show: false,
-    icon: path.join(__dirname, '../public/icon.ico'),
+    icon: getIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -67,6 +72,13 @@ function createWindow(): BrowserWindow {
     win.hide()
   })
 
+  // Handle opening markdown files from file manager
+  app.on('open-file', (event: Electron.Event, path: string) => {
+    event.preventDefault()
+    // TODO: Implement file open logic - will be added in future task
+    console.log('Open file requested:', path)
+  })
+
   return win
 }
 
@@ -82,7 +94,7 @@ function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
     titleBarStyle: 'hidden',
     show: false,
     alwaysOnTop: true,
-    icon: path.join(__dirname, '../public/icon.ico'),
+    icon: getIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
