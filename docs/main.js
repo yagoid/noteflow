@@ -179,13 +179,30 @@
       'screenshots/sticky-note-arcticday.png',
     ];
     let stickyIdx = 0;
+    const stickyBody = heroSticky.closest('.hero__window-body');
+
     setInterval(() => {
       stickyIdx = (stickyIdx + 1) % STICKY_THEMES.length;
-      heroSticky.classList.add('fading');
-      setTimeout(() => {
-        heroSticky.src = STICKY_THEMES[stickyIdx];
-        heroSticky.classList.remove('fading');
-      }, 620);
+      const nextSrc = STICKY_THEMES[stickyIdx];
+
+      // Preload next image to know target height before swapping
+      const preload = new Image();
+      preload.onload = function () {
+        // Lock current height so CSS can animate from it
+        stickyBody.style.height = stickyBody.offsetHeight + 'px';
+
+        heroSticky.classList.add('fading');
+
+        const renderedWidth = heroSticky.offsetWidth;
+        const newHeight = Math.round((preload.naturalHeight / preload.naturalWidth) * renderedWidth);
+
+        setTimeout(() => {
+          heroSticky.src = nextSrc;
+          stickyBody.style.height = newHeight + 'px';
+          heroSticky.classList.remove('fading');
+        }, 400);
+      };
+      preload.src = nextSrc;
     }, 4200);
   }
 

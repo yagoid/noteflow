@@ -162,8 +162,9 @@ export function App() {
         {/* ── Main editor ──────────────────────────────────────────── */}
         <main className="flex-1 overflow-hidden" style={{ background: 'rgb(var(--bg-editor))' }}>
           {isLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-xs font-mono text-text-muted animate-pulse">Loading notes...</div>
+            <div className="flex flex-col items-center justify-center h-full gap-3">
+              <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+              <div className="text-xs font-mono text-text-muted">Loading notes...</div>
             </div>
           ) : (
             <NoteEditor />

@@ -38,6 +38,7 @@ declare global {
     noteflow: {
       listNotes: () => Promise<NoteFileMeta[]>
       readNote: (filePath: string) => Promise<string | null>
+      readAllNotes: () => Promise<{ path: string; content: string | null }[]>
       writeNote: (filePath: string, content: string) => Promise<{ ok: boolean; error?: string }>
       deleteNote: (filePath: string) => Promise<{ ok: boolean; error?: string }>
       renameNote: (oldPath: string, newPath: string) => Promise<{ ok: boolean; error?: string }>

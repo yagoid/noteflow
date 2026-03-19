@@ -67,13 +67,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       const dir = await window.noteflow.getNotesDir()
       set({ notesDir: dir })
 
-      const fileMetas = await window.noteflow.listNotes()
-      const notes: Note[] = []
-
-      for (const meta of fileMetas) {
-        const raw = await window.noteflow.readNote(meta.path)
-        if (raw) notes.push(parseNote(raw, meta.path))
-      }
+      const allFiles = await window.noteflow.readAllNotes()
+      const notes: Note[] = allFiles
+        .filter(({ content }) => content !== null)
+        .map(({ path, content }) => parseNote(content!, path))
 
       set({ notes, isLoading: false })
 

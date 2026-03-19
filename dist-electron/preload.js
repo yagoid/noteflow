@@ -7,6 +7,7 @@ const api = {
     // File system
     listNotes: () => electron_1.ipcRenderer.invoke('fs:list-notes'),
     readNote: (filePath) => electron_1.ipcRenderer.invoke('fs:read-note', filePath),
+    readAllNotes: () => electron_1.ipcRenderer.invoke('fs:read-all-notes'),
     writeNote: (filePath, content) => electron_1.ipcRenderer.invoke('fs:write-note', filePath, content),
     deleteNote: (filePath) => electron_1.ipcRenderer.invoke('fs:delete-note', filePath),
     renameNote: (oldPath, newPath) => electron_1.ipcRenderer.invoke('fs:rename-note', oldPath, newPath),

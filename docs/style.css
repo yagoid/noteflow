@@ -415,6 +415,11 @@ ul, ol { list-style: none; }
 
 .hero__window-body { background: #0d1018; }
 
+.hero__window--sticky .hero__window-body {
+  overflow: hidden;
+  transition: height 0.5s var(--ease);
+}
+
 .hero__screenshot {
   width: 100%;
   height: auto;

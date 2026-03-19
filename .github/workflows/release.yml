@@ -25,6 +25,34 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Derive app version from tag
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag.StartsWith('v')) {
+            throw "Tag '$tag' must start with 'v'"
+          }
+
+          $version = $tag.Substring(1)
+          if (-not $version) {
+            throw "Tag '$tag' does not contain a version"
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "Version '$version' is not a valid semver-like value"
+          }
+
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Using app version '$version' from tag '$tag'"
+
+      - name: Sync package.json version
+        run: |
+          npm pkg set version=$env:APP_VERSION
+          $pkgVersion = node -p "require('./package.json').version"
+          if ($pkgVersion -ne $env:APP_VERSION) {
+            throw "package.json version '$pkgVersion' does not match '$env:APP_VERSION'"
+          }
+          Write-Host "package.json version synced to '$pkgVersion'"
+
       - name: Build Electron App
         run: npm run dist
         env:

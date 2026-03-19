@@ -7,9 +7,14 @@ const electron_1 = require("electron");
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const os_1 = __importDefault(require("os"));
+function getIconPath() {
+    const iconExt = process.platform === 'win32' ? 'ico' : 'png';
+    return path_1.default.join(__dirname, `../public/icon.${iconExt}`);
+}
 const isDev = process.env.NODE_ENV === 'development' || !electron_1.app.isPackaged;
 let mainWindow = null;
 let tray = null;
+let isQuitting = false;
 const OLD_NOTES_DIR = path_1.default.join(os_1.default.homedir(), 'scratch-notes');
 const NOTES_DIR = path_1.default.join(os_1.default.homedir(), 'noteflow-notes');
 // Migrate old notes folder to new name if it exists AND the new one doesn't
@@ -31,7 +36,7 @@ function createWindow() {
         backgroundColor: '#1a1b26',
         titleBarStyle: 'hidden',
         show: false,
-        icon: path_1.default.join(__dirname, '../public/icon.ico'),
+        icon: getIconPath(),
         webPreferences: {
             preload: path_1.default.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -50,8 +55,10 @@ function createWindow() {
     });
     // Hide instead of close — keeps the process alive for fast re-open
     win.on('close', (e) => {
-        e.preventDefault();
-        win.hide();
+        if (!isQuitting) {
+            e.preventDefault();
+            win.hide();
+        }
     });
     return win;
 }
@@ -67,7 +74,7 @@ function createStickyWindow(noteId, sectionId) {
         titleBarStyle: 'hidden',
         show: false,
         alwaysOnTop: true,
-        icon: path_1.default.join(__dirname, '../public/icon.ico'),
+        icon: getIconPath(),
         webPreferences: {
             preload: path_1.default.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -123,7 +130,7 @@ function createTray() {
         {
             label: 'Quit',
             click: () => {
-                electron_1.app.exit(0);
+                electron_1.app.quit();
             },
         },
     ]);
@@ -225,6 +232,23 @@ electron_1.ipcMain.handle('fs:rename-note', (_event, oldPath, newPath) => {
         return { ok: false, error: String(err) };
     }
 });
+electron_1.ipcMain.handle('fs:read-all-notes', () => {
+    try {
+        const files = fs_1.default.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'));
+        return files.map((f) => {
+            const fullPath = path_1.default.join(NOTES_DIR, f);
+            try {
+                return { path: fullPath, content: fs_1.default.readFileSync(fullPath, 'utf-8') };
+            }
+            catch {
+                return { path: fullPath, content: null };
+            }
+        });
+    }
+    catch {
+        return [];
+    }
+});
 electron_1.ipcMain.handle('fs:notes-dir', () => NOTES_DIR);
 electron_1.ipcMain.handle('app:open-notes-folder', () => electron_1.shell.openPath(NOTES_DIR));
 electron_1.ipcMain.handle('app:choose-notes-dir', async () => {
@@ -269,6 +293,9 @@ electron_1.app.whenReady().then(() => {
     registerGlobalShortcut();
     electron_1.app.on('activate', () => {
         showWindow();
+    });
+    electron_1.app.on('before-quit', () => {
+        isQuitting = true;
     });
 });
 electron_1.app.on('window-all-closed', () => {

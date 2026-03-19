@@ -22,6 +22,7 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+let isQuitting = false
 
 const OLD_NOTES_DIR = path.join(os.homedir(), 'scratch-notes')
 const NOTES_DIR = path.join(os.homedir(), 'noteflow-notes')
@@ -68,15 +69,10 @@ function createWindow(): BrowserWindow {
 
   // Hide instead of close — keeps the process alive for fast re-open
   win.on('close', (e) => {
-    e.preventDefault()
-    win.hide()
-  })
-
-  // Handle opening markdown files from file manager
-  app.on('open-file', (event: Electron.Event, path: string) => {
-    event.preventDefault()
-    // TODO: Implement file open logic - will be added in future task
-    console.log('Open file requested:', path)
+    if (!isQuitting) {
+      e.preventDefault()
+      win.hide()
+    }
   })
 
   return win
@@ -156,7 +152,7 @@ function createTray() {
     {
       label: 'Quit',
       click: () => {
-        app.exit(0)
+        app.quit()
       },
     },
   ])
@@ -260,6 +256,22 @@ ipcMain.handle('fs:rename-note', (_event, oldPath: string, newPath: string) => {
   }
 })
 
+ipcMain.handle('fs:read-all-notes', () => {
+  try {
+    const files = fs.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'))
+    return files.map((f) => {
+      const fullPath = path.join(NOTES_DIR, f)
+      try {
+        return { path: fullPath, content: fs.readFileSync(fullPath, 'utf-8') }
+      } catch {
+        return { path: fullPath, content: null }
+      }
+    })
+  } catch {
+    return []
+  }
+})
+
 ipcMain.handle('fs:notes-dir', () => NOTES_DIR)
 
 ipcMain.handle('app:open-notes-folder', () => shell.openPath(NOTES_DIR))
@@ -310,6 +322,10 @@ app.whenReady().then(() => {
 
   app.on('activate', () => {
     showWindow()
+  })
+
+  app.on('before-quit', () => {
+    isQuitting = true
   })
 })
 

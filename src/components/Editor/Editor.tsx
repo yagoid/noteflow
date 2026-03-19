@@ -184,39 +184,12 @@ function htmlFromMarkdown(md: string): string {
       continue
     }
 
-    // ── List block ───────────────────────────────────────────────────────────
-    const isUl = lines.every((l) => /^[-*+] /.test(l) || l === '')
-    const isOl = lines.every((l) => /^\d+\. /.test(l) || l === '')
-    const isTask = lines.every((l) => /^- \[[ x]\] /.test(l) || l === '')
+    // ── List block (supports nested/indented items) ───────────────────────────
+    const firstMeaningfulLine = lines.find(l => l.trim())
+    const isListBlock = !!firstMeaningfulLine && /^\s*(?:[-*+]|\d+\.)[ \t]/.test(firstMeaningfulLine)
 
-    if (isTask) {
-      const items = lines
-        .filter((l) => l.trim())
-        .map((l) => {
-          const checked = l.startsWith('- [x]')
-          const text = l.replace(/^- \[[ x]\] /, '')
-          return `<li data-checked="${checked}" data-type="taskItem"><label><input type="checkbox"${checked ? ' checked' : ''}></label><p>${inlineToHtml(text)}</p></li>`
-        })
-        .join('')
-      htmlBlocks.push(`<ul data-type="taskList">${items}</ul>`)
-      continue
-    }
-
-    if (isUl) {
-      const items = lines
-        .filter((l) => l.trim())
-        .map((l) => `<li><p>${inlineToHtml(l.replace(/^[-*+] /, ''))}</p></li>`)
-        .join('')
-      htmlBlocks.push(`<ul>${items}</ul>`)
-      continue
-    }
-
-    if (isOl) {
-      const items = lines
-        .filter((l) => l.trim())
-        .map((l) => `<li><p>${inlineToHtml(l.replace(/^\d+\. /, ''))}</p></li>`)
-        .join('')
-      htmlBlocks.push(`<ol>${items}</ol>`)
+    if (isListBlock) {
+      htmlBlocks.push(mdListBlockToHtml(lines))
       continue
     }
 
@@ -242,72 +215,112 @@ function htmlFromMarkdown(md: string): string {
   return htmlBlocks.join('') || '<p></p>'
 }
 
-function htmlToMarkdown(html: string): string {
-  // Normalise self-closing and void tags
-  const md = html
-    // Hard breaks
-    .replace(/<br\s*\/?>/gi, '\n')
-    // Code blocks (must come before inline code)
-    .replace(/<pre><code(?:\s+class="language-(\w*)")?>([\s\S]*?)<\/code><\/pre>/gi,
-      (_m, lang, code) => `\`\`\`${lang || ''}\n${unescapeHtml(code).trimEnd()}\n\`\`\``)
-    // Inline code
-    .replace(/<code>(.*?)<\/code>/gi, '`$1`')
-    // Headings — wrap with double newlines so they always separate from adjacent blocks
-    .replace(/<h1>(.*?)<\/h1>/gi, '\n\n# $1\n\n')
-    .replace(/<h2>(.*?)<\/h2>/gi, '\n\n## $1\n\n')
-    .replace(/<h3>(.*?)<\/h3>/gi, '\n\n### $1\n\n')
-    // Horizontal Rule
-    .replace(/<hr\s*\/?>/gi, '\n\n---\n\n')
-    // Bold + italic
-    .replace(/<strong><em>(.*?)<\/em><\/strong>/gi, '***$1***')
-    .replace(/<strong>(.*?)<\/strong>/gi, '**$1**')
-    .replace(/<em>(.*?)<\/em>/gi, '*$1*')
-    // Strike
-    .replace(/<s>(.*?)<\/s>/gi, '~~$1~~')
-    // Task items (before generic li)
-    .replace(/<li[^>]*data-type="taskItem"[^>]*>([\s\S]*?)<\/li>/gi, (m, inner) => {
-      const isChecked = m.includes('data-checked="true"') || inner.includes('checked="checked"') || inner.includes('checked')
-      const text = m.replace(/<[^>]+>/g, '').trim()
-      return isChecked ? `- [x] ${text}\n` : `- [ ] ${text}\n`
-    })
-    // Ordered list items
-    .replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, inner) => {
-      let i = 1
-      return '\n' + inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m: string, content: string) => {
-        const text = content.replace(/<[^>]+>/g, '').trim()
-        return `${i++}. ${text}\n`
-      }) + '\n'
-    })
-    // Unordered list items — also wrap with newlines
-    .replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner) =>
-      '\n' + inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m: string, content: string) => {
-        const text = content.replace(/<[^>]+>/g, '').trim()
-        return `- ${text}\n`
-      }) + '\n'
-    )
-    // Paragraphs → double newline between them
-    .replace(/<\/p>\s*<p>/gi, '\n\n')
-    .replace(/<p>([\s\S]*?)<\/p>/gi, '$1')
-    // Strip remaining tags
-    .replace(/<[^>]+>/g, '')
-    // Unescape HTML entities
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    // Collapse 3+ newlines to 2
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+// ── htmlToMarkdown: DOM-based walker to preserve nested list structure ────────
 
-  return md
+function htmlToMarkdown(html: string): string {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(`<body>${html}</body>`, 'text/html')
+  let result = ''
+  for (const child of doc.body.childNodes) {
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      result += blockElToMd(child as Element)
+    }
+  }
+  return result.trim().replace(/\n{3,}/g, '\n\n')
+}
+
+function blockElToMd(el: Element): string {
+  const tag = el.tagName.toLowerCase()
+  if (tag === 'p') return inlineElToMd(el) + '\n\n'
+  if (tag === 'h1') return `# ${inlineElToMd(el)}\n\n`
+  if (tag === 'h2') return `## ${inlineElToMd(el)}\n\n`
+  if (tag === 'h3') return `### ${inlineElToMd(el)}\n\n`
+  if (tag === 'hr') return `---\n\n`
+  if (tag === 'pre') {
+    const codeEl = el.querySelector('code')
+    const lang = (codeEl?.className ?? '').replace('language-', '')
+    const code = codeEl?.textContent ?? ''
+    return `\`\`\`${lang}\n${code.trimEnd()}\n\`\`\`\n\n`
+  }
+  if (tag === 'ul' || tag === 'ol') return listElToMd(el, 0) + '\n'
+  let out = ''
+  for (const c of el.childNodes) {
+    if (c.nodeType === Node.ELEMENT_NODE) out += blockElToMd(c as Element)
+  }
+  return out
+}
+
+function inlineElToMd(el: Element): string {
+  let result = ''
+  for (const child of el.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      result += child.textContent ?? ''
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      const c = child as Element
+      const tag = c.tagName.toLowerCase()
+      if (tag === 'strong' || tag === 'b') result += `**${inlineElToMd(c)}**`
+      else if (tag === 'em' || tag === 'i') result += `*${inlineElToMd(c)}*`
+      else if (tag === 's') result += `~~${inlineElToMd(c)}~~`
+      else if (tag === 'code') result += `\`${c.textContent}\``
+      else if (tag === 'br') result += '\n'
+      else result += inlineElToMd(c)
+    }
+  }
+  return result
+}
+
+function listElToMd(listEl: Element, depth: number): string {
+  const prefix = '  '.repeat(depth)
+  const isTaskList = listEl.getAttribute('data-type') === 'taskList'
+  const isOl = listEl.tagName.toLowerCase() === 'ol'
+  let result = ''
+  let olIndex = 1
+
+  for (const li of listEl.children) {
+    const isTaskItem = li.getAttribute('data-type') === 'taskItem'
+    let text = ''
+    const nestedListEls: Element[] = []
+
+    for (const child of li.childNodes) {
+      if (child.nodeType !== Node.ELEMENT_NODE) continue
+      const c = child as Element
+      const tag = c.tagName.toLowerCase()
+      if (tag === 'p') {
+        text += inlineElToMd(c)
+      } else if (tag === 'div') {
+        // TipTap may wrap task item content in a <div>
+        for (const gc of c.childNodes) {
+          if (gc.nodeType !== Node.ELEMENT_NODE) continue
+          const gcEl = gc as Element
+          const gcTag = gcEl.tagName.toLowerCase()
+          if (gcTag === 'p') text += inlineElToMd(gcEl)
+          else if (gcTag === 'ul' || gcTag === 'ol') nestedListEls.push(gcEl)
+        }
+      } else if (tag === 'ul' || tag === 'ol') {
+        nestedListEls.push(c)
+      }
+      // <label> and <input> are intentionally skipped
+    }
+
+    if (isTaskItem || isTaskList) {
+      const checked = li.getAttribute('data-checked') === 'true'
+      result += `${prefix}- [${checked ? 'x' : ' '}] ${text}\n`
+    } else if (isOl) {
+      result += `${prefix}${olIndex++}. ${text}\n`
+    } else {
+      result += `${prefix}- ${text}\n`
+    }
+
+    for (const nested of nestedListEls) {
+      result += listElToMd(nested, depth + 1)
+    }
+  }
+
+  return result
 }
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-function unescapeHtml(s: string): string {
-  return s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
 }
 
 /** Convert inline markdown (bold, italic, code, etc.) to HTML */
@@ -320,4 +333,78 @@ function inlineToHtml(s: string): string {
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/__(.+?)__/g, '<strong>$1</strong>')
     .replace(/~~(.+?)~~/g, '<s>$1</s>')
+}
+
+// ── Nested markdown list parsing (htmlFromMarkdown helpers) ──────────────────
+
+interface MdListItem {
+  type: 'ul' | 'ol' | 'task'
+  checked: boolean
+  text: string
+  children: MdListItem[]
+}
+
+function parseMdListItems(lines: string[]): MdListItem[] {
+  const result: MdListItem[] = []
+  const stack: { depth: number; node: MdListItem }[] = []
+
+  for (const line of lines) {
+    if (!line.trim()) continue
+
+    const indentLen = line.match(/^(\s*)/)?.[1].length ?? 0
+    const depth = Math.floor(indentLen / 2)
+
+    const taskMatch = line.match(/^\s*- \[([ x])\] (.*)$/)
+    const olMatch = line.match(/^\s*(\d+)\. (.*)$/)
+    const ulMatch = line.match(/^\s*[-*+] (.*)$/)
+
+    let item: MdListItem
+    if (taskMatch) {
+      item = { type: 'task', checked: taskMatch[1] === 'x', text: taskMatch[2], children: [] }
+    } else if (olMatch) {
+      item = { type: 'ol', checked: false, text: olMatch[2], children: [] }
+    } else if (ulMatch) {
+      item = { type: 'ul', checked: false, text: ulMatch[1], children: [] }
+    } else {
+      continue
+    }
+
+    while (stack.length > 0 && stack[stack.length - 1].depth >= depth) {
+      stack.pop()
+    }
+
+    if (stack.length === 0) {
+      result.push(item)
+    } else {
+      stack[stack.length - 1].node.children.push(item)
+    }
+
+    stack.push({ depth, node: item })
+  }
+
+  return result
+}
+
+function renderMdListItems(items: MdListItem[]): string {
+  if (items.length === 0) return ''
+
+  const firstType = items[0].type
+  const isTask = firstType === 'task'
+  const isOl = firstType === 'ol'
+
+  const innerHtml = items.map(item => {
+    const childHtml = item.children.length > 0 ? renderMdListItems(item.children) : ''
+    if (item.type === 'task') {
+      return `<li data-checked="${item.checked}" data-type="taskItem"><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${inlineToHtml(item.text)}</p>${childHtml}</li>`
+    }
+    return `<li><p>${inlineToHtml(item.text)}</p>${childHtml}</li>`
+  }).join('')
+
+  if (isTask) return `<ul data-type="taskList">${innerHtml}</ul>`
+  if (isOl) return `<ol>${innerHtml}</ol>`
+  return `<ul>${innerHtml}</ul>`
+}
+
+function mdListBlockToHtml(lines: string[]): string {
+  return renderMdListItems(parseMdListItems(lines))
 }

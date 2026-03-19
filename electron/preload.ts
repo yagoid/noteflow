@@ -7,6 +7,11 @@ export type NoteFileMeta = {
   ctime: string
 }
 
+export type NoteFileContent = {
+  path: string
+  content: string | null
+}
+
 export type FsResult = { ok: boolean; error?: string }
 
 const api = {
@@ -16,6 +21,7 @@ const api = {
   // File system
   listNotes: (): Promise<NoteFileMeta[]> => ipcRenderer.invoke('fs:list-notes'),
   readNote: (filePath: string): Promise<string | null> => ipcRenderer.invoke('fs:read-note', filePath),
+  readAllNotes: (): Promise<NoteFileContent[]> => ipcRenderer.invoke('fs:read-all-notes'),
   writeNote: (filePath: string, content: string): Promise<FsResult> =>
     ipcRenderer.invoke('fs:write-note', filePath, content),
   deleteNote: (filePath: string): Promise<FsResult> => ipcRenderer.invoke('fs:delete-note', filePath),
