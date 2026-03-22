@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNotesStore } from '../stores/notesStore'
 import { Editor } from './Editor/Editor'
-import { X, Minus } from 'lucide-react'
+import { X, Minus, Lock, Loader2 } from 'lucide-react'
+import { decryptSections } from '../lib/cryptoUtils'
+import type { NoteSection } from '../types'
 
 // Custom TitleBar for the sticky window
 function StickyTitleBar({ title }: { title: string }) {
@@ -38,6 +40,13 @@ export function StickyApp() {
   const [sectionId, setSectionId] = useState<string | null>(null)
   const [rawContent, setRawContent] = useState('')
   const { loadNotes, isLoading, notes, updateNote } = useNotesStore()
+
+  // Encrypted note unlock state (local — no store interaction)
+  const [unlockedSections, setUnlockedSections] = useState<NoteSection[] | null>(null)
+  const [unlockPassword, setUnlockPassword] = useState('')
+  const [unlockError, setUnlockError] = useState('')
+  const [unlockLoading, setUnlockLoading] = useState(false)
+  const passwordRef = useRef<HTMLInputElement>(null)
 
   // Parse hash and load notes
   useEffect(() => {
@@ -76,7 +85,11 @@ export function StickyApp() {
   }, [loadNotes])
 
   const note = notes.find(n => n.id === noteId)
-  const section = note?.sections.find(s => s.id === sectionId)
+
+  // Use locally unlocked sections if available, otherwise store sections
+  const section = unlockedSections
+    ? unlockedSections.find(s => s.id === sectionId)
+    : note?.sections.find(s => s.id === sectionId)
 
   // Sync local buffer when section changes or store updates
   useEffect(() => {
@@ -85,12 +98,67 @@ export function StickyApp() {
     }
   }, [section?.id, section?.content]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Focus password input when encrypted note is detected
+  useEffect(() => {
+    if (note?.encryption && !unlockedSections) {
+      setTimeout(() => passwordRef.current?.focus(), 100)
+    }
+  }, [note?.id, note?.encryption, unlockedSections]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleUnlock = async () => {
+    if (!note?.encryption || !unlockPassword || unlockLoading) return
+    setUnlockLoading(true)
+    setUnlockError('')
+    try {
+      const sections = await decryptSections(note.encryption, unlockPassword)
+      setUnlockedSections(sections)
+    } catch {
+      setUnlockError('Wrong password. Try again.')
+    } finally {
+      setUnlockLoading(false)
+    }
+  }
+
   if (isLoading || !noteId || !sectionId) {
     return (
       <div className="flex flex-col h-screen bg-surface-0">
         <StickyTitleBar title="Loading..." />
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="text-xs font-mono text-text-muted animate-pulse">Loading sticky note...</div>
+        </div>
+      </div>
+    )
+  }
+
+  // Encrypted note — show unlock form
+  if (note?.encryption && !unlockedSections) {
+    return (
+      <div className="flex flex-col h-screen bg-surface-0 overflow-hidden border border-border">
+        <StickyTitleBar title={note.title || 'Untitled'} />
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 p-4">
+          <Lock size={20} className="text-text-muted opacity-30" />
+          <p className="text-xs font-mono text-text-muted text-center">This note is encrypted</p>
+          <input
+            ref={passwordRef}
+            type="password"
+            value={unlockPassword}
+            onChange={(e) => { setUnlockPassword(e.target.value); setUnlockError('') }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleUnlock() }}
+            placeholder="Enter password"
+            className="w-full bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-accent transition-colors"
+            autoComplete="off"
+          />
+          {unlockError && (
+            <p className="text-xs font-mono text-red-400 text-center">{unlockError}</p>
+          )}
+          <button
+            onClick={handleUnlock}
+            disabled={!unlockPassword || unlockLoading}
+            className="flex items-center gap-1.5 w-full justify-center px-3 py-1.5 text-xs font-mono bg-accent text-bg rounded hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+          >
+            {unlockLoading && <Loader2 size={11} className="animate-spin" />}
+            Unlock
+          </button>
         </div>
       </div>
     )
@@ -108,8 +176,12 @@ export function StickyApp() {
     )
   }
 
+  // Read-only mode for unlocked encrypted notes (changes can't be persisted
+  // since the sticky window's store has no session password for re-encryption)
+  const isReadOnly = !!unlockedSections
+
   const handleContentChange = (content: string) => {
-    if (section.content === content) return
+    if (isReadOnly || section.content === content) return
     updateNote(note.id, {
       sections: note.sections.map((s) =>
         s.id === section.id ? { ...s, content } : s,
@@ -118,6 +190,7 @@ export function StickyApp() {
   }
 
   const handleRawChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (isReadOnly) return
     const content = e.target.value
     setRawContent(content)
     if (section && section.content === content) return
@@ -131,13 +204,21 @@ export function StickyApp() {
   return (
     <div className="flex flex-col h-screen bg-surface-0 overflow-hidden border border-border">
       <StickyTitleBar title={section.name === 'New' || section.name === 'Main' ? note.title : `${note.title} - ${section.name}`} />
+      {isReadOnly && (
+        <div className="flex items-center gap-1 px-2 py-1 bg-amber-500/10 border-b border-amber-500/20">
+          <Lock size={9} className="text-amber-400 flex-shrink-0" />
+          <span className="text-[10px] font-mono text-amber-400/80">read-only</span>
+        </div>
+      )}
       <div className="flex-1 overflow-hidden" onKeyDown={(e) => e.stopPropagation()}>
-        {section.isRawMode ? (
+        {(section.isRawMode || isReadOnly) ? (
           <textarea
-            value={rawContent}
+            value={isReadOnly ? section.content : rawContent}
             onChange={handleRawChange}
-            className="w-full h-full p-3 bg-transparent text-xs font-mono text-text
-                       border-none outline-none resize-none caret-accent leading-relaxed"
+            readOnly={isReadOnly}
+            className={`w-full h-full p-3 bg-transparent text-xs font-mono text-text
+                       border-none outline-none resize-none caret-accent leading-relaxed
+                       ${isReadOnly ? 'select-all cursor-default' : ''}`}
             spellCheck={false}
           />
         ) : (

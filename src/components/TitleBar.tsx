@@ -65,7 +65,7 @@ export function TitleBar() {
                   id: 'font-size',
                   node: (
                     <div className="flex items-center justify-between w-full">
-                      <span className="text-text-muted/70">Font size</span>
+                      <span className="text-text-muted">Font size</span>
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => changeFontSize(-1)}

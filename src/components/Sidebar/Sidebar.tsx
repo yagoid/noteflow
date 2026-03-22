@@ -1,10 +1,10 @@
 import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
-import { Archive, Search, Tag, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy } from 'lucide-react'
+import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy } from 'lucide-react'
 import { format, isToday, isYesterday } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
-import { tagStyle, getTagColor } from '../../lib/tagColors'
+import { getTagColor } from '../../lib/tagColors'
 
 interface SidebarProps {
   onCollapse: () => void
@@ -45,7 +45,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setFilterDate = useNotesStore((s) => s.setFilterDate)
-  const setFilterTag = useNotesStore((s) => s.setFilterTag)
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
   const createNote = useNotesStore((s) => s.createNote)
   const duplicateNote = useNotesStore((s) => s.duplicateNote)
@@ -73,6 +72,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     mode: 'encrypt' | 'unlock' | 'remove'
     noteId: string
   } | null>(null)
+
+  // noteId to delete after a successful unlock (for delete-encrypted-note flow)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   // ── Close context menu on click elsewhere ──────────────────────────────────
   useEffect(() => {
@@ -124,12 +126,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       })
   }, [rawNotes, showArchived, filterDate, filterTag, searchQuery])
 
-  const allTags = useMemo(() => {
-    const all = rawNotes.flatMap((n) => n.tags)
-    return [...new Set(all)].sort()
-  }, [rawNotes])
-
-  return (
+return (
     <div className="flex flex-col h-full border-r border-border bg-surface-1">
       {modal && (
         <ConfirmModal
@@ -153,12 +150,28 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 await encryptNote(encModal.noteId, password, options)
               } else if (encModal.mode === 'unlock') {
                 await unlockNote(encModal.noteId, password)
+                // If this unlock was triggered from a delete action, show delete confirm next
+                if (pendingDeleteId === encModal.noteId) {
+                  const target = rawNotes.find(n => n.id === pendingDeleteId)
+                  setPendingDeleteId(null)
+                  setEncModal(null)
+                  if (target) {
+                    setModal({
+                      title: 'Delete note',
+                      message: `"${target.title || 'Untitled'}" will be permanently deleted.`,
+                      confirmLabel: 'Delete',
+                      danger: true,
+                      onConfirm: () => { setModal(null); deleteNote(target.id) },
+                    })
+                  }
+                  return
+                }
               } else {
                 await removeNoteEncryption(encModal.noteId, password)
               }
               setEncModal(null)
             }}
-            onCancel={() => setEncModal(null)}
+            onCancel={() => { setPendingDeleteId(null); setEncModal(null) }}
           />
         )
       })()}
@@ -173,7 +186,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-7 pr-2 py-1.5 bg-surface-2 border border-border rounded text-xs
-                       font-mono text-text placeholder-text-muted/50 outline-none
+                       font-mono text-text placeholder-text-muted/40 outline-none
                        focus:border-accent/50 transition-colors caret-accent"
           />
         </div>
@@ -208,27 +221,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         })}
       </div>
 
-      {/* ── Tags ───────────────────────────────────────────────────── */}
-      {allTags.length > 0 && (
-        <div className="px-3 py-2 border-b border-border">
-          <div className="flex items-center gap-1 mb-1.5">
-            <Tag size={10} className="text-text-muted" />
-            <span className="text-xs font-mono text-text-muted uppercase tracking-wider">Tags</span>
-          </div>
-          <div className="flex flex-wrap gap-1 max-h-[72px] overflow-y-auto">
-            {allTags.slice(0, 12).map((tag) => (
-              <button
-                key={tag}
-                onClick={() => setFilterTag(filterTag === tag ? null : tag)}
-                className="text-xs font-mono px-1.5 py-0.5 rounded transition-colors"
-                style={tagStyle(tag, filterTag === tag)}
-              >
-                #{tag}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ── New note button ─────────────────────────────────────────── */}
       <div className="px-3 py-2 border-b border-border">
@@ -406,6 +398,12 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             <button
               onClick={() => {
                 setContextMenu(null)
+                // Encrypted + locked: require unlock before delete
+                if (note.encryption && !sessionPasswords[note.id]) {
+                  setPendingDeleteId(note.id)
+                  setEncModal({ mode: 'unlock', noteId: note.id })
+                  return
+                }
                 setModal({
                   title: 'Delete note',
                   message: `"${note.title || 'Untitled'}" will be permanently deleted.`,

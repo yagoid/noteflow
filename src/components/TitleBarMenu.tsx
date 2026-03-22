@@ -56,7 +56,7 @@ export function TitleBarMenu({ trigger, groups }: TitleBarMenuProps) {
           {groups.map((group, gi) => (
             <div key={gi} className={gi > 0 ? 'border-t border-border' : ''}>
               {group.label && (
-                <div className="px-3 pt-2 pb-1 text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">
+                <div className="px-3 pt-2 pb-1 text-[10px] font-mono text-text-muted/80 uppercase tracking-widest">
                   {group.label}
                 </div>
               )}

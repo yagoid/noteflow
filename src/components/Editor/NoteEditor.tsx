@@ -747,18 +747,6 @@ export function NoteEditor() {
           />
         </div>
 
-        {note.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 px-4 pb-2 flex-shrink-0">
-            {note.tags.map((tag) => (
-              <span
-                key={tag}
-                className="text-xs font-mono text-accent/70 bg-accent/5 border border-accent/20 px-1.5 py-0.5 rounded"
-              >
-                #{tag}
-              </span>
-            ))}
-          </div>
-        )}
 
         <div className="px-4 pb-2 flex-shrink-0">
           <span className="text-xs font-mono text-text-muted/50">
