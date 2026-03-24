@@ -64,13 +64,20 @@ const api = {
     lastSync?: string
     error?: string
   }> => ipcRenderer.invoke('sync:get-status'),
-  connectGitHub: (
-    token: string,
+  initiateGitHubAuth: (
     repo: string
-  ): Promise<{ ok: boolean; owner?: string; repo?: string; error?: string }> =>
-    ipcRenderer.invoke('sync:connect', token, repo),
+  ): Promise<{ ok: boolean; userCode?: string; verificationUri?: string; error?: string }> =>
+    ipcRenderer.invoke('sync:initiate', repo),
+  cancelGitHubAuth: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:cancel-auth'),
   disconnectGitHub: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:disconnect'),
   pullNotes: (): Promise<{ pulled: number; errors: string[] }> => ipcRenderer.invoke('sync:pull'),
+  onSyncAuthComplete: (
+    cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void
+  ) => {
+    const wrapper = (_event: any, result: { ok: boolean; owner?: string; repo?: string; error?: string }) => cb(result)
+    ipcRenderer.on('sync-auth-complete', wrapper)
+    return () => ipcRenderer.removeListener('sync-auth-complete', wrapper)
+  },
 
   // Events from main → renderer
   onNewNote: (cb: () => void) => {

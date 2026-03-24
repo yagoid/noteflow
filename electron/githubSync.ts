@@ -57,6 +57,8 @@ function decryptToken(encrypted: string): string {
   return Buffer.from(encrypted, 'base64').toString('utf-8')
 }
 
+const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
+
 // ── GitHub REST API (raw https, no external deps) ─────────────────────────────
 
 async function githubRequest(
@@ -109,6 +111,41 @@ async function githubRequest(
       reject(new Error('GitHub API request timed out'))
     })
     if (payload) req.write(payload)
+    req.end()
+  })
+}
+
+// Auth requests go to github.com (not api.github.com) with form-encoded body
+async function githubAuthPost(path: string, params: Record<string, string>): Promise<Record<string, string>> {
+  return new Promise((resolve, reject) => {
+    const payload = new URLSearchParams(params).toString()
+    const req = https.request(
+      {
+        hostname: 'github.com',
+        path,
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(payload),
+          'User-Agent': 'NoteFlow-App',
+        },
+      },
+      (res) => {
+        let raw = ''
+        res.on('data', (chunk) => (raw += chunk))
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(raw) as Record<string, string>)
+          } catch {
+            reject(new Error(`Auth request failed: ${raw}`))
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Auth request timed out')) })
+    req.write(payload)
     req.end()
   })
 }
@@ -237,6 +274,18 @@ let syncError: string | undefined
 // Pending push timers per filename (debounce)
 const pushTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+// In-progress Device Flow
+interface DeviceFlowState {
+  deviceCode: string
+  userCode: string
+  verificationUri: string
+  expiresAt: number
+  interval: number
+  pendingRepo: string
+  pollTimer?: ReturnType<typeof setTimeout>
+}
+let deviceFlow: DeviceFlowState | null = null
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function loadSyncSettings(): GitHubSyncSettings {
@@ -257,35 +306,125 @@ export function getSyncStatus(): SyncStatus {
   }
 }
 
-export async function connectGitHub(
-  token: string,
+// Starts Device Flow. Returns the user_code to display + verification URL to open.
+// onComplete is called when auth succeeds or fails (from background polling).
+export async function initiateDeviceFlow(
   repo: string,
-  notesDir: string
-): Promise<{ ok: boolean; owner?: string; repo?: string; error?: string }> {
+  notesDir: string,
+  onComplete: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void
+): Promise<{ ok: boolean; userCode?: string; verificationUri?: string; error?: string }> {
+  // Cancel any existing flow
+  cancelDeviceFlow()
+
   try {
-    const owner = await validateToken(token)
-    await ensureRepo(token, owner, repo)
+    const data = await githubAuthPost('/login/device/code', {
+      client_id: GITHUB_CLIENT_ID,
+      scope: 'repo',
+    })
 
-    syncSettings = {
-      enabled: true,
-      encryptedToken: encryptToken(token),
-      owner,
-      repo,
+    if (data.error) {
+      return { ok: false, error: data.error_description ?? data.error }
     }
-    syncError = undefined
 
-    const settings = readSettings()
-    settings.githubSync = syncSettings
-    writeSettings(settings)
+    deviceFlow = {
+      deviceCode: data.device_code,
+      userCode: data.user_code,
+      verificationUri: data.verification_uri,
+      expiresAt: Date.now() + parseInt(data.expires_in) * 1000,
+      interval: parseInt(data.interval) || 5,
+      pendingRepo: repo,
+    }
 
-    await pullNotes(notesDir)
+    // Start polling in background
+    schedulePoll(notesDir, onComplete)
 
-    return { ok: true, owner, repo }
+    return {
+      ok: true,
+      userCode: data.user_code,
+      verificationUri: data.verification_uri,
+    }
   } catch (err: unknown) {
     const error = err instanceof Error ? err.message : String(err)
-    syncError = error
     return { ok: false, error }
   }
+}
+
+function schedulePoll(
+  notesDir: string,
+  onComplete: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void
+): void {
+  if (!deviceFlow) return
+
+  const intervalMs = deviceFlow.interval * 1000
+
+  deviceFlow.pollTimer = setTimeout(async () => {
+    if (!deviceFlow) return
+
+    if (Date.now() > deviceFlow.expiresAt) {
+      deviceFlow = null
+      onComplete({ ok: false, error: 'Authorization code expired. Please try again.' })
+      return
+    }
+
+    try {
+      const data = await githubAuthPost('/login/oauth/access_token', {
+        client_id: GITHUB_CLIENT_ID,
+        device_code: deviceFlow.deviceCode,
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+      })
+
+      if (data.access_token) {
+        // Auth complete — finalize connection
+        const token = data.access_token
+        const repo = deviceFlow.pendingRepo
+        deviceFlow = null
+
+        try {
+          const owner = await validateToken(token)
+          await ensureRepo(token, owner, repo)
+
+          syncSettings = {
+            enabled: true,
+            encryptedToken: encryptToken(token),
+            owner,
+            repo,
+          }
+          syncError = undefined
+
+          const settings = readSettings()
+          settings.githubSync = syncSettings
+          writeSettings(settings)
+
+          await pullNotes(notesDir)
+          onComplete({ ok: true, owner, repo })
+        } catch (err: unknown) {
+          const error = err instanceof Error ? err.message : String(err)
+          syncError = error
+          onComplete({ ok: false, error })
+        }
+      } else if (data.error === 'authorization_pending') {
+        // Still waiting — keep polling
+        schedulePoll(notesDir, onComplete)
+      } else if (data.error === 'slow_down') {
+        // Increase interval as requested
+        deviceFlow.interval += 5
+        schedulePoll(notesDir, onComplete)
+      } else {
+        // access_denied or other terminal error
+        const error = data.error_description ?? data.error ?? 'Authorization failed'
+        deviceFlow = null
+        onComplete({ ok: false, error })
+      }
+    } catch (err: unknown) {
+      // Network error — retry
+      schedulePoll(notesDir, onComplete)
+    }
+  }, intervalMs)
+}
+
+export function cancelDeviceFlow(): void {
+  if (deviceFlow?.pollTimer) clearTimeout(deviceFlow.pollTimer)
+  deviceFlow = null
 }
 
 export function disconnectGitHub(): void {

@@ -406,8 +406,20 @@ ipcMain.handle('sync:get-status', () => {
   return githubSync.getSyncStatus()
 })
 
-ipcMain.handle('sync:connect', async (_event, token: string, repo: string) => {
-  return githubSync.connectGitHub(token, repo, NOTES_DIR)
+ipcMain.handle('sync:initiate', async (_event, repo: string) => {
+  return githubSync.initiateDeviceFlow(repo, NOTES_DIR, (result) => {
+    BrowserWindow.getAllWindows().forEach((win) =>
+      win.webContents.send('sync-auth-complete', result)
+    )
+    if (result.ok) {
+      BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
+    }
+  })
+})
+
+ipcMain.handle('sync:cancel-auth', () => {
+  githubSync.cancelDeviceFlow()
+  return { ok: true }
 })
 
 ipcMain.handle('sync:disconnect', () => {

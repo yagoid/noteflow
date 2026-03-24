@@ -96,9 +96,11 @@ declare global {
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
       // GitHub Sync
       getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string }>
-      connectGitHub: (token: string, repo: string) => Promise<{ ok: boolean; owner?: string; repo?: string; error?: string }>
+      initiateGitHubAuth: (repo: string) => Promise<{ ok: boolean; userCode?: string; verificationUri?: string; error?: string }>
+      cancelGitHubAuth: () => Promise<{ ok: boolean }>
       disconnectGitHub: () => Promise<{ ok: boolean }>
       pullNotes: () => Promise<{ pulled: number; errors: string[] }>
+      onSyncAuthComplete: (cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void) => () => void
     }
   }
 }

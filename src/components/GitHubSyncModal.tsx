@@ -15,50 +15,81 @@ interface Props {
   onClose: () => void
 }
 
-type Step = 'status' | 'connecting' | 'pulling'
+type Step = 'idle' | 'waiting-auth' | 'completing' | 'pulling'
 
 export function GitHubSyncModal({ onClose }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const loadNotes = useNotesStore((s) => s.loadNotes)
 
   const [status, setStatus] = useState<SyncStatus | null>(null)
-  const [step, setStep] = useState<Step>('status')
+  const [step, setStep] = useState<Step>('idle')
   const [error, setError] = useState<string | null>(null)
-
-  // Form state
-  const [token, setToken] = useState('')
   const [repo, setRepo] = useState('noteflow-notes')
-
-  // Pull result
+  const [userCode, setUserCode] = useState<string | null>(null)
+  const [verificationUri, setVerificationUri] = useState<string | null>(null)
   const [pullResult, setPullResult] = useState<{ pulled: number; errors: string[] } | null>(null)
 
   useEffect(() => {
     window.noteflow.getSyncStatus().then(setStatus)
   }, [])
 
+  // Listen for auth completion from main process
+  useEffect(() => {
+    const unsub = window.noteflow.onSyncAuthComplete(async (result) => {
+      if (result.ok) {
+        setStep('completing')
+        setUserCode(null)
+        const updated = await window.noteflow.getSyncStatus()
+        setStatus(updated)
+        await loadNotes()
+        setStep('idle')
+      } else {
+        setError(result.error ?? 'Authorization failed')
+        setUserCode(null)
+        setStep('idle')
+      }
+    })
+    return unsub
+  }, [loadNotes])
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); onClose() }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        handleClose()
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  }, [userCode])
 
-  async function handleConnect() {
-    if (!token.trim() || !repo.trim()) return
-    setStep('connecting')
-    setError(null)
-    const result = await window.noteflow.connectGitHub(token.trim(), repo.trim())
-    if (result.ok) {
-      const updated = await window.noteflow.getSyncStatus()
-      setStatus(updated)
-      setStep('status')
-      setToken('')
-      await loadNotes()
-    } else {
-      setError(result.error ?? 'Connection failed')
-      setStep('status')
+  function handleClose() {
+    if (userCode) {
+      window.noteflow.cancelGitHubAuth()
     }
+    onClose()
+  }
+
+  async function handleInitiate() {
+    if (!repo.trim()) return
+    setStep('waiting-auth')
+    setError(null)
+    const result = await window.noteflow.initiateGitHubAuth(repo.trim())
+    if (result.ok && result.userCode && result.verificationUri) {
+      setUserCode(result.userCode)
+      setVerificationUri(result.verificationUri)
+      window.noteflow.openUrl(result.verificationUri)
+    } else {
+      setError(result.error ?? 'Failed to start authorization')
+      setStep('idle')
+    }
+  }
+
+  async function handleCancel() {
+    await window.noteflow.cancelGitHubAuth()
+    setUserCode(null)
+    setVerificationUri(null)
+    setStep('idle')
   }
 
   async function handlePull() {
@@ -66,7 +97,7 @@ export function GitHubSyncModal({ onClose }: Props) {
     setError(null)
     const result = await window.noteflow.pullNotes()
     setPullResult(result)
-    setStep('status')
+    setStep('idle')
     if (result.pulled > 0) await loadNotes()
     const updated = await window.noteflow.getSyncStatus()
     setStatus(updated)
@@ -79,12 +110,12 @@ export function GitHubSyncModal({ onClose }: Props) {
     setPullResult(null)
   }
 
-  const isLoading = step === 'connecting' || step === 'pulling'
+  const isLoading = step !== 'idle'
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         ref={containerRef}
@@ -95,7 +126,7 @@ export function GitHubSyncModal({ onClose }: Props) {
         <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-border">
           <Github size={13} className="text-accent flex-shrink-0" />
           <span className="text-xs font-mono text-text font-medium flex-1">GitHub Sync</span>
-          <button onClick={onClose} className="text-text-muted hover:text-text transition-colors">
+          <button onClick={handleClose} className="text-text-muted hover:text-text transition-colors">
             <X size={13} />
           </button>
         </div>
@@ -130,7 +161,6 @@ export function GitHubSyncModal({ onClose }: Props) {
             </div>
           )}
 
-          {/* Last sync */}
           {status?.lastSync && (
             <p className="text-[11px] font-mono text-text-muted">
               Last sync: {new Date(status.lastSync).toLocaleString()}
@@ -160,8 +190,62 @@ export function GitHubSyncModal({ onClose }: Props) {
             </div>
           )}
 
-          {/* Connected: actions */}
-          {status?.connected && (
+          {/* ── Waiting for user to authorize in browser ── */}
+          {userCode && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-[11px] font-mono text-text-muted mb-3">
+                  Go to{' '}
+                  <a
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      window.noteflow.openUrl(verificationUri ?? 'https://github.com/login/device')
+                    }}
+                    className="text-accent hover:underline"
+                  >
+                    github.com/login/device
+                  </a>{' '}
+                  and enter this code:
+                </p>
+                <div className="flex items-center justify-center py-3">
+                  <span className="text-2xl font-mono font-bold text-text tracking-widest bg-surface-0 border border-border px-6 py-3 rounded-lg">
+                    {userCode}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-text-muted">
+                <Loader size={12} className="animate-spin flex-shrink-0" />
+                <span className="text-[11px] font-mono">Waiting for authorization...</span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => window.noteflow.openUrl(verificationUri ?? 'https://github.com/login/device')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-accent/15 hover:bg-accent/25 text-accent border border-accent/30 transition-colors"
+                >
+                  <ExternalLink size={11} />
+                  Open browser
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Completing connection ── */}
+          {step === 'completing' && !userCode && (
+            <div className="flex items-center gap-2 text-text-muted">
+              <Loader size={12} className="animate-spin" />
+              <span className="text-xs font-mono">Connecting...</span>
+            </div>
+          )}
+
+          {/* ── Connected: actions ── */}
+          {status?.connected && !userCode && step !== 'completing' && (
             <div className="flex gap-2">
               <button
                 onClick={handlePull}
@@ -186,66 +270,37 @@ export function GitHubSyncModal({ onClose }: Props) {
             </div>
           )}
 
-          {/* Not connected: setup form */}
-          {status && !status.connected && (
+          {/* ── Not connected: setup form ── */}
+          {status && !status.connected && !userCode && step !== 'completing' && (
             <div className="space-y-3 pt-1">
               <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-                Connect a GitHub account to sync notes across machines via a private repo.
-                Create a{' '}
-                <a
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    window.noteflow.openUrl('https://github.com/settings/tokens/new?scopes=repo&description=NoteFlow+Sync')
-                  }}
-                  className="text-accent hover:underline"
-                >
-                  Personal Access Token
-                </a>{' '}
-                with <code className="text-text">repo</code> scope.
+                Sync notes across machines via a private GitHub repository.
+                The repo will be created automatically if it doesn&apos;t exist.
               </p>
-
-              <div className="space-y-2">
-                <div>
-                  <label className="block text-[10px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-                    Personal Access Token
-                  </label>
-                  <input
-                    type="password"
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    placeholder="ghp_..."
-                    className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-accent/50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-                    Repository name
-                  </label>
-                  <input
-                    type="text"
-                    value={repo}
-                    onChange={(e) => setRepo(e.target.value)}
-                    placeholder="noteflow-notes"
-                    className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-accent/50"
-                  />
-                  <p className="text-[10px] font-mono text-text-muted/60 mt-1">
-                    Will be created as private if it doesn&apos;t exist.
-                  </p>
-                </div>
+              <div>
+                <label className="block text-[10px] font-mono text-text-muted mb-1 uppercase tracking-wider">
+                  Repository name
+                </label>
+                <input
+                  type="text"
+                  value={repo}
+                  onChange={(e) => setRepo(e.target.value)}
+                  placeholder="noteflow-notes"
+                  disabled={isLoading}
+                  className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-accent/50 disabled:opacity-40"
+                />
               </div>
-
               <button
-                onClick={handleConnect}
-                disabled={isLoading || !token.trim() || !repo.trim()}
+                onClick={handleInitiate}
+                disabled={isLoading || !repo.trim()}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-accent/15 hover:bg-accent/25 text-accent border border-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {step === 'connecting' ? (
+                {step === 'waiting-auth' && !userCode ? (
                   <Loader size={11} className="animate-spin" />
                 ) : (
                   <Github size={11} />
                 )}
-                {step === 'connecting' ? 'Connecting...' : 'Connect'}
+                Connect with GitHub
               </button>
             </div>
           )}
