@@ -244,10 +244,10 @@
       .then((json) => {
         const latest = (json.tag_name || '').replace(/^v/, '');
         if (!latest) throw new Error('No tag found');
-        const downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-Setup-${latest}.exe`;
+        const downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-Setup.exe`;
         const a = document.createElement('a');
         a.href = downloadUrl;
-        a.download = `NoteFlow-Setup-${latest}.exe`;
+        a.download = `NoteFlow-${latest}-Setup.exe`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
