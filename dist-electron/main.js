@@ -41,6 +41,7 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const https_1 = __importDefault(require("https"));
 const os_1 = __importDefault(require("os"));
+const child_process_1 = require("child_process");
 const githubSync = __importStar(require("./githubSync"));
 function getIconPath() {
     const iconExt = process.platform === 'win32' ? 'ico' : 'png';
@@ -529,7 +530,20 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
             writer.on('finish', resolve);
             writer.on('error', reject);
         });
-        await electron_1.shell.openPath(dest);
+        if (process.platform === 'linux') {
+            await new Promise((resolve) => {
+                const proc = (0, child_process_1.spawn)('pkexec', ['dpkg', '-i', dest], { detached: true, stdio: 'ignore' });
+                proc.on('error', () => {
+                    // pkexec not available, fall back to xdg-open
+                    electron_1.shell.openPath(dest);
+                    resolve();
+                });
+                proc.on('spawn', () => { proc.unref(); resolve(); });
+            });
+        }
+        else {
+            await electron_1.shell.openPath(dest);
+        }
         return { success: true };
     }
     catch (err) {

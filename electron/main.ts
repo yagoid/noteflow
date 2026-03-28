@@ -15,6 +15,7 @@ import path from 'path'
 import fs from 'fs'
 import https from 'https'
 import os from 'os'
+import { spawn } from 'child_process'
 import * as githubSync from './githubSync'
 
 function getIconPath(): string {
@@ -537,7 +538,19 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
       writer.on('error', reject)
     })
 
-    await shell.openPath(dest)
+    if (process.platform === 'linux') {
+      await new Promise<void>((resolve) => {
+        const proc = spawn('pkexec', ['dpkg', '-i', dest], { detached: true, stdio: 'ignore' })
+        proc.on('error', () => {
+          // pkexec not available, fall back to xdg-open
+          shell.openPath(dest)
+          resolve()
+        })
+        proc.on('spawn', () => { proc.unref(); resolve() })
+      })
+    } else {
+      await shell.openPath(dest)
+    }
     return { success: true }
   } catch (err) {
     return { success: false, error: String(err) }
