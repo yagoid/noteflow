@@ -65,8 +65,8 @@ export function parseNote(raw: string, filePath: string): Note {
     updated:  String(data.updated ?? new Date().toISOString()),
     archived: Boolean(data.archived ?? false),
     pinned:   Boolean(data.pinned   ?? false),
-    ...(data.group && typeof data.group === 'string' && { group: data.group }),
-    ...(encryption && { encryption }),
+    ...(typeof data.group === 'string' && data.group ? { group: data.group } : {}),
+    ...(encryption ? { encryption } : {}),
   }
 
   // Encrypted notes have no readable sections — skip parsing
