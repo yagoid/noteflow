@@ -411,12 +411,7 @@ electron_1.ipcMain.handle('fs:write-note', (event, filePath, content) => {
         });
         if (githubSync.getSyncStatus().connected) {
             const filename = path_1.default.basename(filePath);
-            pendingPushFiles.add(filename);
-            notifyPushState();
-            githubSync.schedulePush(filePath, content, () => {
-                pendingPushFiles.delete(filename);
-                notifyPushState();
-            });
+            githubSync.schedulePush(filePath, content, () => { pendingPushFiles.add(filename); notifyPushState(); }, () => { pendingPushFiles.delete(filename); notifyPushState(); });
         }
         else {
             githubSync.schedulePush(filePath, content);

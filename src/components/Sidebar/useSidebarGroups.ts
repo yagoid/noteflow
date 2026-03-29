@@ -2,20 +2,19 @@ import { useMemo } from 'react'
 import type { Note, NoteGroup } from '../../types'
 
 export type SidebarItem =
-  | { kind: 'group-header'; group: NoteGroup; visibleCount: number }
-  | { kind: 'note'; note: Note; inGroup: boolean }
+  | { kind: 'group'; group: NoteGroup; notes: Note[]; visibleCount: number }
+  | { kind: 'note'; note: Note }  // ungrouped
 
 export function useSidebarGroups(
   notes: Note[],
   groups: NoteGroup[],
-  collapsedGroupIds: Set<string>
 ): SidebarItem[] {
   return useMemo(() => {
     const items: SidebarItem[] = []
 
     if (groups.length === 0) {
       for (const note of notes) {
-        items.push({ kind: 'note', note, inGroup: false })
+        items.push({ kind: 'note', note })
       }
       return items
     }
@@ -41,19 +40,14 @@ export function useSidebarGroups(
     const sortedGroups = [...groups].sort((a, b) => a.order - b.order)
     for (const group of sortedGroups) {
       const groupNotes = notesByGroup.get(group.id) ?? []
-      items.push({ kind: 'group-header', group, visibleCount: groupNotes.length })
-      if (!collapsedGroupIds.has(group.id)) {
-        for (const note of groupNotes) {
-          items.push({ kind: 'note', note, inGroup: true })
-        }
-      }
+      items.push({ kind: 'group', group, notes: groupNotes, visibleCount: groupNotes.length })
     }
 
     // Ungrouped notes at the bottom
     for (const note of ungrouped) {
-      items.push({ kind: 'note', note, inGroup: false })
+      items.push({ kind: 'note', note })
     }
 
     return items
-  }, [notes, groups, collapsedGroupIds])
+  }, [notes, groups])
 }

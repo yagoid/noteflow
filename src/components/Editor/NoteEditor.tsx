@@ -597,7 +597,7 @@ export function NoteEditor() {
         }}
       >
         <div className="flex items-center gap-3 px-3 pt-3 pb-2 border-b border-border min-h-0 flex-shrink-0">
-          <div className="flex items-center gap-1.5 flex-1 overflow-x-auto min-w-0 pr-1">
+          <div className="flex items-center gap-1.5 flex-1 overflow-x-auto min-w-0 pr-1 tabs-scroll">
             {note.sections.map((section) => {
               const isActive = section.id === (activeSection?.id)
               const isRenaming = renamingId === section.id
@@ -651,9 +651,8 @@ export function NoteEditor() {
                   )}
 
                   {!isRenaming && (
-                    <div className={`flex items-center gap-0.5 pr-1
-                      ${isActive ? 'visible' : 'invisible group-hover:visible'}`}
-                    >
+                    <div className="flex items-center gap-0.5 pr-1 invisible group-hover:visible">
+
                       <button
                         onClick={() => handleStartRename(section)}
                         title="Rename section"

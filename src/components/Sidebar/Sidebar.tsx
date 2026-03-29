@@ -163,7 +163,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       })
   }, [rawNotes, showArchived, filterDate, filterTag, searchQuery])
 
-  const items = useSidebarGroups(notes, groups, collapsedGroupIds)
+  const items = useSidebarGroups(notes, groups)
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function getNoteGroupDirect(noteId: string) {
@@ -176,6 +176,81 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     setGroupContextMenu(null)
     setGroupPickerNoteId(null)
     setGroupNameInput(null)
+  }
+
+  function renderNoteButton(note: (typeof rawNotes)[0], group?: { id: string; color: string } | null) {
+    const isActive = activeNoteId === note.id
+    return (
+      <li key={note.id}>
+        <button
+          onClick={() => setActiveNote(note.id)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            setContextMenu({
+              x: e.clientX,
+              y: Math.min(e.clientY, window.innerHeight - 260),
+              noteId: note.id,
+              sectionId: null,
+            })
+          }}
+          className={`relative w-full text-left px-4 py-2 transition-colors h-[64px] flex flex-col justify-center
+            ${isActive ? 'bg-accent/10' : 'hover:bg-surface-2'}`}
+          style={{
+            borderRight: group
+              ? `1px solid rgb(var(${group.color}) / 0.6)`
+              : '2px solid transparent',
+          }}
+        >
+          {isActive && (
+            <div className="absolute left-1 top-2.5 bottom-2.5 w-[1px] bg-accent rounded-full" />
+          )}
+          <div className="flex items-center gap-1 min-w-0">
+            {note.pinned && <Pin size={9} className="text-yellow-400 flex-shrink-0" />}
+            {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
+            <span className={`text-[13px] font-mono font-medium truncate flex-1
+              ${activeNoteId === note.id ? 'text-text' : 'text-text/80'}`}>
+              {note.title || 'Untitled'}
+            </span>
+            <span className="text-xs font-mono text-text-muted/50 flex-shrink-0 ml-1">
+              {formatNoteDate(note.updated)}
+            </span>
+          </div>
+          <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
+            {note.sections.map((section) => (
+              <span
+                key={section.id}
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  window.dispatchEvent(new CustomEvent('noteflow:request-section', {
+                    detail: { noteId: note.id, sectionId: section.id }
+                  }))
+                  setActiveNote(note.id)
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setContextMenu({
+                    x: e.clientX,
+                    y: Math.min(e.clientY, window.innerHeight - 260),
+                    noteId: note.id,
+                    sectionId: section.id,
+                  })
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
+                }}
+                className="text-[10px] font-mono px-1 rounded flex-shrink-0 leading-[1.6] hover:opacity-70 transition-opacity cursor-pointer"
+                style={getTagColor(section.name)}
+              >
+                {section.name}
+              </span>
+            ))}
+          </div>
+        </button>
+      </li>
+    )
   }
 
   return (
@@ -296,10 +371,12 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         ) : (
           <ul className="pt-2 pb-1">
             {items.map((item) => {
-              if (item.kind === 'group-header') {
-                const { group } = item
+              if (item.kind === 'group') {
+                const { group, notes: groupNotes } = item
+                const collapsed = collapsedGroupIds.has(group.id)
                 return (
                   <li key={`group-${group.id}`}>
+                    {/* Group header / rename input */}
                     {editingGroupId === group.id ? (
                       <div className="flex items-center gap-2 px-3 py-1.5">
                         <span
@@ -329,89 +406,34 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                       <NoteGroupHeader
                         group={group}
                         noteCount={item.visibleCount}
-                        collapsed={collapsedGroupIds.has(group.id)}
+                        collapsed={collapsed}
                         onToggle={() => toggleGroupCollapsed(group.id)}
                         onContextMenu={(e) => {
                           setGroupContextMenu({ x: e.clientX, y: Math.min(e.clientY, window.innerHeight - 120), groupId: group.id })
                         }}
                       />
                     )}
+
+                    {/* Animated container with vertical line */}
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateRows: collapsed ? '0fr' : '1fr',
+                        transition: 'grid-template-rows 180ms ease',
+                      }}
+                    >
+                      <div style={{ overflow: 'hidden' }}>
+                        <div>
+                          {groupNotes.map((note) => renderNoteButton(note, group))}
+                        </div>
+                      </div>
+                    </div>
                   </li>
                 )
               }
 
-              // kind === 'note'
-              const { note, inGroup } = item
-              return (
-                <li key={note.id}>
-                  <button
-                    onClick={() => setActiveNote(note.id)}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      setContextMenu({
-                        x: e.clientX,
-                        y: Math.min(e.clientY, window.innerHeight - 260),
-                        noteId: note.id,
-                        sectionId: null,
-                      })
-                    }}
-                    className={`relative w-full text-left py-2 transition-colors h-[64px] flex flex-col justify-center
-                      ${inGroup ? 'px-7' : 'px-4'}
-                      ${activeNoteId === note.id
-                        ? 'bg-accent/10 border-r-2 border-accent'
-                        : 'hover:bg-surface-2 border-r-2 border-transparent'
-                      }`}
-                  >
-                    {activeNoteId === note.id && (
-                      <div className="absolute left-1 top-2.5 bottom-2.5 w-[1px] bg-accent rounded-full" />
-                    )}
-                    <div className="flex items-center gap-1 min-w-0">
-                      {note.pinned && <Pin size={9} className="text-yellow-400 flex-shrink-0" />}
-                      {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
-                      <span className={`text-[13px] font-mono font-medium truncate flex-1
-                        ${activeNoteId === note.id ? 'text-text' : 'text-text/80'}`}>
-                        {note.title || 'Untitled'}
-                      </span>
-                      <span className="text-xs font-mono text-text-muted/50 flex-shrink-0 ml-1">
-                        {formatNoteDate(note.updated)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
-                      {note.sections.map((section) => (
-                        <span
-                          key={section.id}
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            window.dispatchEvent(new CustomEvent('noteflow:request-section', {
-                              detail: { noteId: note.id, sectionId: section.id }
-                            }))
-                            setActiveNote(note.id)
-                          }}
-                          onContextMenu={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            setContextMenu({
-                              x: e.clientX,
-                              y: Math.min(e.clientY, window.innerHeight - 260),
-                              noteId: note.id,
-                              sectionId: section.id,
-                            })
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
-                          }}
-                          className="text-[10px] font-mono px-1 rounded flex-shrink-0 leading-[1.6] hover:opacity-70 transition-opacity cursor-pointer"
-                          style={getTagColor(section.name)}
-                        >
-                          {section.name}
-                        </span>
-                      ))}
-                    </div>
-                  </button>
-                </li>
-              )
+              // kind === 'note' (ungrouped)
+              return renderNoteButton(item.note, null)
             })}
           </ul>
         )}

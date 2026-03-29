@@ -408,12 +408,10 @@ ipcMain.handle('fs:write-note', (event, filePath: string, content: string) => {
     })
     if (githubSync.getSyncStatus().connected) {
       const filename = path.basename(filePath)
-      pendingPushFiles.add(filename)
-      notifyPushState()
-      githubSync.schedulePush(filePath, content, () => {
-        pendingPushFiles.delete(filename)
-        notifyPushState()
-      })
+      githubSync.schedulePush(filePath, content,
+        () => { pendingPushFiles.add(filename); notifyPushState() },
+        () => { pendingPushFiles.delete(filename); notifyPushState() }
+      )
     } else {
       githubSync.schedulePush(filePath, content)
     }

@@ -478,7 +478,7 @@ async function pushAllNotes(notesDir) {
     }
     return { pushed, errors };
 }
-function schedulePush(filePath, content, onComplete) {
+function schedulePush(filePath, content, onStart, onComplete) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
         onComplete?.();
@@ -486,12 +486,13 @@ function schedulePush(filePath, content, onComplete) {
     }
     const filename = path_1.default.basename(filePath);
     // Debounce: reset timer if already queued for this file.
-    // Previous onComplete is intentionally discarded — the new call supersedes it.
+    // Previous callbacks are intentionally discarded — the new call supersedes them.
     const existing = pushTimers.get(filename);
     if (existing)
         clearTimeout(existing);
     const timer = setTimeout(async () => {
         pushTimers.delete(filename);
+        onStart?.(); // timer fired → HTTP request is about to start
         try {
             const token = decryptToken(s.encryptedToken);
             await upsertRemoteFile(token, s.owner, s.repo, filename, content);
@@ -507,7 +508,7 @@ function schedulePush(filePath, content, onComplete) {
             console.error('[GitHubSync] push failed:', syncError);
             onComplete?.(syncError);
         }
-    }, 3000); // 3s debounce — avoids spamming API while typing
+    }, 5000); // 5s debounce — avoids spamming API while typing
     pushTimers.set(filename, timer);
 }
 async function scheduleDelete(filePath) {
