@@ -63,17 +63,32 @@ function writeSettings(data: Record<string, unknown>): void {
 
 // ── Token encryption ──────────────────────────────────────────────────────────
 
+// Prefix to distinguish safeStorage-encrypted tokens from plain base64 fallback.
+// Without this, if safeStorage availability changes between encryption and
+// decryption (common on Linux where keyring availability can vary), the wrong
+// method would be used, causing "Ciphertext does not appear to be encrypted".
+const SAFE_STORAGE_PREFIX = 'safe:'
+
 function encryptToken(token: string): string {
   if (safeStorage.isEncryptionAvailable()) {
-    return safeStorage.encryptString(token).toString('base64')
+    return SAFE_STORAGE_PREFIX + safeStorage.encryptString(token).toString('base64')
   }
   // Fallback: base64 only (less secure, but avoids blocking the feature)
   return Buffer.from(token).toString('base64')
 }
 
 function decryptToken(encrypted: string): string {
+  if (encrypted.startsWith(SAFE_STORAGE_PREFIX)) {
+    return safeStorage.decryptString(Buffer.from(encrypted.slice(SAFE_STORAGE_PREFIX.length), 'base64'))
+  }
+  // Legacy token (no prefix): could be safeStorage-encrypted or plain base64.
+  // Try safeStorage first; if it fails, fall back to plain base64.
   if (safeStorage.isEncryptionAvailable()) {
-    return safeStorage.decryptString(Buffer.from(encrypted, 'base64'))
+    try {
+      return safeStorage.decryptString(Buffer.from(encrypted, 'base64'))
+    } catch {
+      // Not a safeStorage ciphertext — treat as plain base64 fallback
+    }
   }
   return Buffer.from(encrypted, 'base64').toString('utf-8')
 }
