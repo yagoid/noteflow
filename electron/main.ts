@@ -555,13 +555,19 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
 
     if (process.platform === 'linux') {
       await new Promise<void>((resolve) => {
-        const proc = spawn('pkexec', ['dpkg', '-i', dest], { detached: true, stdio: 'ignore' })
+        const proc = spawn('pkexec', ['dpkg', '-i', dest], { stdio: 'ignore' })
         proc.on('error', () => {
           // pkexec not available, fall back to xdg-open
           shell.openPath(dest)
           resolve()
         })
-        proc.on('spawn', () => { proc.unref(); resolve() })
+        proc.on('close', (code) => {
+          if (code === 0) {
+            app.relaunch()
+            app.quit()
+          }
+          resolve()
+        })
       })
     } else {
       await shell.openPath(dest)

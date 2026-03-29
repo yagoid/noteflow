@@ -542,13 +542,19 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
         });
         if (process.platform === 'linux') {
             await new Promise((resolve) => {
-                const proc = (0, child_process_1.spawn)('pkexec', ['dpkg', '-i', dest], { detached: true, stdio: 'ignore' });
+                const proc = (0, child_process_1.spawn)('pkexec', ['dpkg', '-i', dest], { stdio: 'ignore' });
                 proc.on('error', () => {
                     // pkexec not available, fall back to xdg-open
                     electron_1.shell.openPath(dest);
                     resolve();
                 });
-                proc.on('spawn', () => { proc.unref(); resolve(); });
+                proc.on('close', (code) => {
+                    if (code === 0) {
+                        electron_1.app.relaunch();
+                        electron_1.app.quit();
+                    }
+                    resolve();
+                });
             });
         }
         else {
