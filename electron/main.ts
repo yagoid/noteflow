@@ -176,7 +176,7 @@ const stickyWindows = new Set<BrowserWindow>()
 // Tracks currently folded sticky windows to stack their pills vertically
 const foldedWindows = new Set<BrowserWindow>()
 
-function getFoldedPosition(display: Electron.Display, foldedW: number, foldedH: number): { x: number; y: number } {
+function getFoldedPosition(display: Electron.Display, foldedW: number, _foldedH: number): { x: number; y: number } {
   const { x, y, width } = display.workArea
   const targetX = x + width - foldedW - 8
   const GAP = 4
@@ -193,7 +193,7 @@ function getFoldedPosition(display: Electron.Display, foldedW: number, foldedH: 
   return { x: targetX, y: nextY }
 }
 
-function getStickyInitialPosition(winWidth: number, winHeight: number): { x: number; y: number } {
+function getStickyInitialPosition(winWidth: number, _winHeight: number): { x: number; y: number } {
   const display = screen.getPrimaryDisplay()
   const { x: wa_x, y: wa_y, width: wa_w } = display.workArea
   const BASE_X = wa_x + Math.round((wa_w - winWidth) / 2)
@@ -741,10 +741,16 @@ ipcMain.handle('groups:get', () => {
   } catch { return [] }
 })
 
-ipcMain.handle('groups:set', (_event, groups: unknown[]) => {
+ipcMain.handle('groups:set', (event, groups: unknown[]) => {
   const groupsPath = path.join(NOTES_DIR, 'groups.json')
   const content = JSON.stringify(groups, null, 2)
   fs.writeFileSync(groupsPath, content, 'utf-8')
+  // Broadcast to other windows so their groups reload immediately
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (win.webContents.id !== event.sender.id) {
+      win.webContents.send('notes-updated')
+    }
+  })
   githubSync.schedulePush(groupsPath, content)
 })
 

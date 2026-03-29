@@ -82,6 +82,7 @@ export function App() {
         useNotesStore.getState().syncNote(filePath)
       } else {
         loadNotes()
+        loadGroups()
       }
     })
 
@@ -89,7 +90,7 @@ export function App() {
       unbindNew()
       unbindUpdate()
     }
-  }, [createNote, loadNotes])
+  }, [createNote, loadNotes, loadGroups])
 
   // ── Resize drag handlers ──────────────────────────────────────────────────
   const handleDragStart = useCallback((e: React.MouseEvent) => {

@@ -187,7 +187,7 @@ const prevBoundsMap = new Map();
 const stickyWindows = new Set();
 // Tracks currently folded sticky windows to stack their pills vertically
 const foldedWindows = new Set();
-function getFoldedPosition(display, foldedW, foldedH) {
+function getFoldedPosition(display, foldedW, _foldedH) {
     const { x, y, width } = display.workArea;
     const targetX = x + width - foldedW - 8;
     const GAP = 4;
@@ -204,7 +204,7 @@ function getFoldedPosition(display, foldedW, foldedH) {
     }
     return { x: targetX, y: nextY };
 }
-function getStickyInitialPosition(winWidth, winHeight) {
+function getStickyInitialPosition(winWidth, _winHeight) {
     const display = electron_1.screen.getPrimaryDisplay();
     const { x: wa_x, y: wa_y, width: wa_w } = display.workArea;
     const BASE_X = wa_x + Math.round((wa_w - winWidth) / 2);
@@ -715,10 +715,16 @@ electron_1.ipcMain.handle('groups:get', () => {
         return [];
     }
 });
-electron_1.ipcMain.handle('groups:set', (_event, groups) => {
+electron_1.ipcMain.handle('groups:set', (event, groups) => {
     const groupsPath = path_1.default.join(NOTES_DIR, 'groups.json');
     const content = JSON.stringify(groups, null, 2);
     fs_1.default.writeFileSync(groupsPath, content, 'utf-8');
+    // Broadcast to other windows so their groups reload immediately
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+        if (win.webContents.id !== event.sender.id) {
+            win.webContents.send('notes-updated');
+        }
+    });
     githubSync.schedulePush(groupsPath, content);
 });
 // Window controls

@@ -423,11 +423,12 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                       }}
                     >
                       <div style={{ overflow: 'hidden' }}>
-                        <div>
+                        <ul>
                           {groupNotes.map((note) => renderNoteButton(note, group))}
-                        </div>
+                        </ul>
                       </div>
                     </div>
+                    <div className="border-b border-border/40" />
                   </li>
                 )
               }
