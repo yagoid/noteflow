@@ -463,21 +463,20 @@ electron_1.ipcMain.handle('fs:rename-note', (_event, oldPath, newPath) => {
     }
 });
 electron_1.ipcMain.handle('fs:read-all-notes', () => {
-    try {
-        const files = fs_1.default.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'));
-        return files.map((f) => {
-            const fullPath = path_1.default.join(NOTES_DIR, f);
-            try {
-                return { path: fullPath, content: fs_1.default.readFileSync(fullPath, 'utf-8') };
-            }
-            catch {
-                return { path: fullPath, content: null };
-            }
-        });
-    }
-    catch {
-        return [];
-    }
+    // Do NOT catch outer errors — let them propagate so the renderer can
+    // distinguish a genuine empty directory from a transient FS failure
+    // (e.g. OS still waking up after suspend). If this throws, ipcRenderer.invoke
+    // will reject and loadNotes() will go to its catch block without wiping notes.
+    const files = fs_1.default.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'));
+    return files.map((f) => {
+        const fullPath = path_1.default.join(NOTES_DIR, f);
+        try {
+            return { path: fullPath, content: fs_1.default.readFileSync(fullPath, 'utf-8') };
+        }
+        catch {
+            return { path: fullPath, content: null };
+        }
+    });
 });
 electron_1.ipcMain.handle('fs:notes-dir', () => NOTES_DIR);
 electron_1.ipcMain.handle('app:open-notes-folder', () => electron_1.shell.openPath(NOTES_DIR).catch(err => console.error('Failed to open notes folder:', err)));
@@ -842,6 +841,15 @@ electron_1.app.whenReady().then(() => {
     });
     electron_1.app.on('before-quit', () => {
         isQuitting = true;
+    });
+    // After system resume from sleep, reload notes with a short delay to let
+    // the OS fully wake up (filesystem and network may not be immediately ready).
+    electron_1.powerMonitor.on('resume', () => {
+        setTimeout(() => {
+            electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+                win.webContents.send('notes-updated');
+            });
+        }, 1500);
     });
 });
 electron_1.app.on('window-all-closed', () => {

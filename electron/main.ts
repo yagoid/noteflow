@@ -10,6 +10,7 @@ import {
   dialog,
   net,
   screen,
+  powerMonitor,
 } from 'electron'
 import path from 'path'
 import fs from 'fs'
@@ -464,19 +465,19 @@ ipcMain.handle('fs:rename-note', (_event, oldPath: string, newPath: string) => {
 })
 
 ipcMain.handle('fs:read-all-notes', () => {
-  try {
-    const files = fs.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'))
-    return files.map((f) => {
-      const fullPath = path.join(NOTES_DIR, f)
-      try {
-        return { path: fullPath, content: fs.readFileSync(fullPath, 'utf-8') }
-      } catch {
-        return { path: fullPath, content: null }
-      }
-    })
-  } catch {
-    return []
-  }
+  // Do NOT catch outer errors — let them propagate so the renderer can
+  // distinguish a genuine empty directory from a transient FS failure
+  // (e.g. OS still waking up after suspend). If this throws, ipcRenderer.invoke
+  // will reject and loadNotes() will go to its catch block without wiping notes.
+  const files = fs.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'))
+  return files.map((f) => {
+    const fullPath = path.join(NOTES_DIR, f)
+    try {
+      return { path: fullPath, content: fs.readFileSync(fullPath, 'utf-8') }
+    } catch {
+      return { path: fullPath, content: null }
+    }
+  })
 })
 
 ipcMain.handle('fs:notes-dir', () => NOTES_DIR)
@@ -876,6 +877,16 @@ app.whenReady().then(() => {
 
   app.on('before-quit', () => {
     isQuitting = true
+  })
+
+  // After system resume from sleep, reload notes with a short delay to let
+  // the OS fully wake up (filesystem and network may not be immediately ready).
+  powerMonitor.on('resume', () => {
+    setTimeout(() => {
+      BrowserWindow.getAllWindows().forEach((win) => {
+        win.webContents.send('notes-updated')
+      })
+    }, 1500)
   })
 })
 
