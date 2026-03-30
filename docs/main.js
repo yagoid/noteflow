@@ -290,13 +290,19 @@
           const latest = (json.tag_name || '').replace(/^v/, '');
           if (!latest) throw new Error('No tag found');
           const url = cfg.getUrl(latest);
+          if (typeof gtag === 'function') {
+            gtag('event', 'download_click', {
+              event_category: 'download',
+              event_label: selectedOS,
+              button_id: 'hero-download-btn',
+            });
+          }
           const a = document.createElement('a');
           a.href = url;
           a.download = cfg.getFilename(latest);
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
-          console.log('[NoteFlow] Download triggered:', url);
         })
         .catch(() => {
           window.open('https://github.com/yagoid/noteflow/releases/latest', '_blank', 'noopener,noreferrer');
@@ -312,7 +318,13 @@
   const mainDownloadBtn = document.getElementById('main-download-btn');
   if (mainDownloadBtn) {
     mainDownloadBtn.addEventListener('click', () => {
-      console.log('[NoteFlow] Releases link clicked from: main-download-btn');
+      if (typeof gtag === 'function') {
+        gtag('event', 'download_click', {
+          event_category: 'download',
+          event_label: 'releases_page',
+          button_id: 'main-download-btn',
+        });
+      }
     });
   }
 
