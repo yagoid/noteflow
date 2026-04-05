@@ -108,7 +108,7 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
       </label>
 
       <div className="task-item-body group">
-        <NodeViewContent as="div" />
+        <NodeViewContent as="div" className="task-content" />
 
         <button
           ref={triggerRef}
@@ -124,7 +124,7 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
               {alarm && <> ⏰{alarm}</>}
             </span>
           ) : (
-            <Calendar size={15} className="task-deadline-icon" />
+            <Calendar size={14} className="task-deadline-icon" />
           )}
         </button>
       </div>

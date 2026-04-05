@@ -231,7 +231,7 @@ button {
 /* The NodeView renders label + task-item-body side by side inside the <li> */
 .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] > div.task-item-body {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.4rem;
   flex: 1;
   min-width: 0;
@@ -242,6 +242,12 @@ button {
   flex-shrink: 0;
   margin-top: 2px;
   user-select: none;
+}
+
+/* Task text content — expands to fill available width so clicks in empty space land on the text */
+.task-content {
+  flex: 1;
+  min-width: 0;
 }
 
 /* Calendar icon trigger — hidden by default, visible on group hover or when a date is set */
@@ -257,7 +263,7 @@ button {
   opacity: 0;
   transition: opacity 0.12s ease;
   line-height: 1;
-  align-self: center;
+  align-self: flex-start;
 }
 .group:hover .task-deadline-trigger,
 .task-deadline-trigger.has-due {
@@ -415,6 +421,17 @@ button {
 /* Sticky note: compact padding override */
 .sticky-editor .ProseMirror {
   padding: 0.5rem 0.75rem 1rem;
+}
+
+/* Sticky note: deadline badge wraps below text to avoid squeezing the content */
+.sticky-editor .task-item-body {
+  flex-wrap: wrap;
+}
+.sticky-editor .task-content {
+  flex-basis: 100%;
+}
+.sticky-editor .task-deadline-trigger {
+  margin-top: 1px;
 }
 
 /* Syntax highlight (lowlight) — VS Code Dark+ inspired */
