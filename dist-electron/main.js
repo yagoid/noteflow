@@ -167,7 +167,6 @@ if (!fs_1.default.existsSync(NOTES_DIR)) {
     fs_1.default.mkdirSync(NOTES_DIR, { recursive: true });
 }
 function createWindow(hidden = false) {
-    const scaleFactor = electron_1.screen.getPrimaryDisplay().scaleFactor;
     const win = new electron_1.BrowserWindow({
         width: 1100,
         height: 720,
@@ -183,7 +182,6 @@ function createWindow(hidden = false) {
             preload: path_1.default.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
-            zoomFactor: scaleFactor,
         },
     });
     if (isDev) {
@@ -314,7 +312,6 @@ function animateStickyWindow(win, from, to, duration, onComplete) {
     }, 16);
 }
 function createStickyWindow(noteId, sectionId) {
-    const scaleFactor = electron_1.screen.getPrimaryDisplay().scaleFactor;
     const win = new electron_1.BrowserWindow({
         width: 300,
         height: 300,
@@ -331,7 +328,6 @@ function createStickyWindow(noteId, sectionId) {
             preload: path_1.default.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
-            zoomFactor: scaleFactor,
         },
     });
     // Hash routing pattern for the sticky page

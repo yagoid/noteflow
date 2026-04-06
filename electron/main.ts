@@ -165,7 +165,6 @@ if (!fs.existsSync(NOTES_DIR)) {
 }
 
 function createWindow(hidden = false): BrowserWindow {
-  const scaleFactor = screen.getPrimaryDisplay().scaleFactor
   const win = new BrowserWindow({
     width: 1100,
     height: 720,
@@ -181,7 +180,6 @@ function createWindow(hidden = false): BrowserWindow {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      zoomFactor: scaleFactor,
     },
   })
 
@@ -318,7 +316,6 @@ function animateStickyWindow(
 }
 
 function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
-  const scaleFactor = screen.getPrimaryDisplay().scaleFactor
   const win = new BrowserWindow({
     width: 300,
     height: 300,
@@ -335,7 +332,6 @@ function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      zoomFactor: scaleFactor,
     },
   })
 
