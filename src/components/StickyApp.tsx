@@ -100,13 +100,22 @@ export function StickyApp() {
   useEffect(() => {
     // Expected hash: #sticky?noteId=xxx&sectionId=yyy
     const hash = window.location.hash
+    let parsedNoteId: string | null = null
     if (hash.startsWith('#sticky')) {
       const q = hash.split('?')[1]
       const params = new URLSearchParams(q)
-      setNoteId(params.get('noteId'))
+      parsedNoteId = params.get('noteId')
+      setNoteId(parsedNoteId)
       setSectionId(params.get('sectionId'))
     }
-    loadNotes()
+    loadNotes().then(() => {
+      // On Linux, there can be a brief timing issue on first startup (filesystem
+      // settling after migration or IPC warmup). If the note isn't found after
+      // the initial load, retry once after a short delay.
+      if (parsedNoteId && !useNotesStore.getState().notes.find(n => n.id === parsedNoteId)) {
+        setTimeout(() => loadNotes(), 1500)
+      }
+    })
 
     // Sync from other windows
     const currentWindowId = typeof window.noteflow?.windowId === 'function' ? window.noteflow.windowId() : null
