@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://yagoid.github.io/noteflow/sitemap.xml

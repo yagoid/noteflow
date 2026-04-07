@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NoteFlow CLI — Terminal Note-Taking for Headless Linux, RPi & Windows</title>
+  <meta name="description"
+    content="Complete reference for the NoteFlow CLI — a zero-dependency Node.js command-line companion for the NoteFlow note-taking app. Works on Windows, Linux desktop, and headless Raspberry Pi. Includes GitHub sync, JSON output for AI agents, and scripting workflows." />
+  <meta name="keywords"
+    content="noteflow cli, headless notes, raspberry pi notes, markdown cli, terminal notes app, linux notes cli, ssh notes, ai agent notes, device flow github" />
+  <meta name="author" content="yagoid" />
+  <meta name="robots" content="index,follow" />
+  <link rel="canonical" href="https://yagoid.github.io/noteflow/cli.html" />
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="favicon.png" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="article" />
+  <meta property="og:title" content="NoteFlow CLI — Terminal Note-Taking for Developers" />
+  <meta property="og:description"
+    content="A zero-dependency command-line companion for NoteFlow. Capture notes over SSH, sync with GitHub, and integrate with AI agents." />
+  <meta property="og:url" content="https://yagoid.github.io/noteflow/cli.html" />
+  <meta property="og:image" content="https://yagoid.github.io/noteflow/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="NoteFlow CLI — Terminal Note-Taking for Developers" />
+  <meta name="twitter:description"
+    content="A zero-dependency command-line companion for NoteFlow. Headless-friendly. Works over SSH, on Raspberry Pi, and with AI agents." />
+  <meta name="twitter:image" content="https://yagoid.github.io/noteflow/og-image.png" />
+
+  <!-- Structured Data: TechArticle -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "NoteFlow CLI — Complete Reference",
+    "description": "Complete command-line reference for the NoteFlow CLI — a zero-dependency Node.js companion for the NoteFlow note-taking app.",
+    "author": {
+      "@type": "Person",
+      "name": "yagoid",
+      "url": "https://github.com/yagoid"
+    },
+    "publisher": {
+      "@type": "Person",
+      "name": "yagoid"
+    },
+    "datePublished": "2026-04-06",
+    "dateModified": "2026-04-06",
+    "url": "https://yagoid.github.io/noteflow/cli.html",
+    "image": "https://yagoid.github.io/noteflow/og-image.png",
+    "about": "NoteFlow command-line interface",
+    "proficiencyLevel": "Beginner"
+  }
+  </script>
+
+  <!-- Structured Data: BreadcrumbList -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "Home",     "item": "https://yagoid.github.io/noteflow/" },
+      { "@type": "ListItem", "position": 2, "name": "CLI Docs", "item": "https://yagoid.github.io/noteflow/cli.html" }
+    ]
+  }
+  </script>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&family=DM+Sans:wght@300;400;500;600&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-VFXVHWSQGD"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VFXVHWSQGD');
+  </script>
+</head>
+
+<body class="body--docs">
+
+  <!-- ─── NAV ─────────────────────────────────────────────────────────── -->
+  <nav class="nav" id="nav" role="navigation" aria-label="Main navigation">
+    <div class="nav__inner">
+      <a href="index.html" class="nav__logo" aria-label="NoteFlow home">
+        <span class="nav__logo-icon" aria-hidden="true">■</span>
+        <span>NOTEFLOW</span>
+      </a>
+      <ul class="nav__links">
+        <li><a href="index.html#features" class="nav__link">Features</a></li>
+        <li><a href="index.html#preview" class="nav__link">Preview</a></li>
+        <li><a href="index.html#download" class="nav__link">Download</a></li>
+        <li><a href="cli.html" class="nav__link nav__link--active">Docs</a></li>
+        <li>
+          <a href="https://github.com/yagoid/noteflow" class="nav__link nav__link--github" target="_blank"
+            rel="noopener noreferrer" aria-label="NoteFlow on GitHub">
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12c0-5.523-4.477-10-10-10z" />
+            </svg>
+            GitHub
+          </a>
+        </li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ─── DOCS HERO ────────────────────────────────────────────────────── -->
+  <header class="docs-hero">
+    <div class="container">
+      <div class="docs-hero__breadcrumb">
+        <a href="index.html">Home</a> <span aria-hidden="true">/</span> <span>CLI Docs</span>
+      </div>
+      <div class="docs-hero__badge">
+        <span class="hero__badge-dot" aria-hidden="true"></span>
+        v1.5.0 · Node ≥ 18 · zero deps
+      </div>
+      <h1 class="docs-hero__title">NoteFlow <span class="docs-hero__title-accent">CLI</span></h1>
+      <p class="docs-hero__subtitle">
+        A standalone Node.js command-line companion for the NoteFlow desktop app.
+        Reads and writes the same notes directory as the GUI — use it over SSH, from cron, on a Raspberry Pi, or as a tool for AI agents.
+      </p>
+
+      <div class="docs-hero__tabs" role="tablist" aria-label="Install method">
+        <button class="docs-tab active" data-tab="rpi" role="tab" aria-selected="true">Linux headless / RPi</button>
+        <button class="docs-tab" data-tab="desktop" role="tab" aria-selected="false">Linux desktop</button>
+        <button class="docs-tab" data-tab="win" role="tab" aria-selected="false">Windows</button>
+      </div>
+      <div class="docs-tab-panels">
+        <div class="docs-tab-panel active" data-panel="rpi">
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>install.sh</span>
+              <button class="docs__copy-btn" type="button" aria-label="Copy">copy</button>
+            </div>
+            <pre><code>curl -fsSL https://raw.githubusercontent.com/yagoid/noteflow/main/cli/install-cli.sh | sudo bash</code></pre>
+          </div>
+          <p class="docs-hero__tab-note">Installs <code>noteflow</code> to <code>/usr/local/bin</code>. No GUI needed. Works on Debian, Ubuntu, Raspberry Pi OS.</p>
+        </div>
+        <div class="docs-tab-panel" data-panel="desktop">
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button" aria-label="Copy">copy</button>
+            </div>
+            <pre><code>sudo apt install ./noteflow_1.4.2_amd64.deb</code></pre>
+          </div>
+          <p class="docs-hero__tab-note">Installing the <code>.deb</code> from Releases automatically symlinks the CLI to <code>/usr/local/bin/noteflow</code>. No extra steps.</p>
+        </div>
+        <div class="docs-tab-panel" data-panel="win">
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>PowerShell</span>
+              <button class="docs__copy-btn" type="button" aria-label="Copy">copy</button>
+            </div>
+            <pre><code>.\NoteFlow-1.4.2-Setup.exe</code></pre>
+          </div>
+          <p class="docs-hero__tab-note">The Windows installer adds the CLI directory to your user <code>PATH</code>. Open a new terminal and run <code>noteflow help</code>.</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── DOCS BODY ────────────────────────────────────────────────────── -->
+  <main class="docs">
+    <div class="container docs__grid">
+
+      <!-- TOC -->
+      <aside class="docs__toc" aria-label="Table of contents">
+        <p class="docs__toc-label">// contents</p>
+        <ul>
+          <li><a href="#installation" class="docs__toc-link">Installation</a></li>
+          <li><a href="#notes-directory" class="docs__toc-link">Notes directory</a></li>
+          <li><a href="#note-format" class="docs__toc-link">Note format</a></li>
+          <li><a href="#commands" class="docs__toc-link">Commands</a>
+            <ul>
+              <li><a href="#cmd-add" class="docs__toc-link docs__toc-link--sub">add</a></li>
+              <li><a href="#cmd-new" class="docs__toc-link docs__toc-link--sub">new</a></li>
+              <li><a href="#cmd-list" class="docs__toc-link docs__toc-link--sub">list</a></li>
+              <li><a href="#cmd-get" class="docs__toc-link docs__toc-link--sub">get</a></li>
+              <li><a href="#cmd-sections" class="docs__toc-link docs__toc-link--sub">sections</a></li>
+              <li><a href="#cmd-delete" class="docs__toc-link docs__toc-link--sub">delete</a></li>
+              <li><a href="#cmd-rename" class="docs__toc-link docs__toc-link--sub">rename</a></li>
+              <li><a href="#cmd-pin" class="docs__toc-link docs__toc-link--sub">pin</a></li>
+              <li><a href="#cmd-archive" class="docs__toc-link docs__toc-link--sub">archive</a></li>
+            </ul>
+          </li>
+          <li><a href="#groups" class="docs__toc-link">Groups</a></li>
+          <li><a href="#github-sync" class="docs__toc-link">GitHub sync</a></li>
+          <li><a href="#self-update" class="docs__toc-link">self-update</a></li>
+          <li><a href="#flags" class="docs__toc-link">Global flags</a></li>
+          <li><a href="#ai-integration" class="docs__toc-link">AI / scripts</a></li>
+          <li><a href="#troubleshooting" class="docs__toc-link">Troubleshooting</a></li>
+        </ul>
+      </aside>
+
+      <!-- ARTICLE -->
+      <article class="docs__body">
+
+        <section id="installation">
+          <h2>Installation</h2>
+          <p>NoteFlow CLI is a single Node.js script (<code>cli/noteflow.js</code>) with <strong>zero npm dependencies</strong>. It only requires Node.js 18 or later.</p>
+
+          <h3>Linux headless / Raspberry Pi</h3>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>curl -fsSL https://raw.githubusercontent.com/yagoid/noteflow/main/cli/install-cli.sh | sudo bash</code></pre>
+          </div>
+
+          <h3>Linux desktop &amp; Windows</h3>
+          <p>The CLI is bundled with the <code>.deb</code> and <code>.exe</code> installers. No extra steps — open a terminal after installing the app and run <code>noteflow help</code>.</p>
+
+          <div class="docs__callout">
+            <strong>Requirement:</strong> Node.js ≥ 18. Verify with <code>node --version</code>. The CLI does not bundle a Node runtime; on headless systems, install it with <code>sudo apt install nodejs</code>.
+          </div>
+        </section>
+
+        <section id="notes-directory">
+          <h2>Notes directory</h2>
+          <p>The CLI reads and writes the exact same directory as the desktop app:</p>
+          <table class="docs__table">
+            <thead>
+              <tr><th>Platform</th><th>Path</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Linux</td><td><code>~/.local/share/noteflow-notes/</code></td></tr>
+              <tr><td>Windows / macOS</td><td><code>~/noteflow-notes/</code></td></tr>
+            </tbody>
+          </table>
+          <p>Changes made from the CLI are picked up live by any running desktop instance — and vice-versa.</p>
+        </section>
+
+        <section id="note-format">
+          <h2>Note format</h2>
+          <p>Each note is a plain Markdown file with a YAML frontmatter header:</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>31-03-2026.md</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>---
+id: "abc12345"
+title: "31-03-2026"
+tags: ["urgent", "backend"]
+created: "2026-03-31T10:00:00.000Z"
+updated: "2026-03-31T10:05:00.000Z"
+sections:
+  - id: "sec001"
+    name: "Note"
+    content: "texto aquí"
+    isRawMode: true
+  - id: "sec002"
+    name: "Tasks"
+    content: "- [ ] tarea pendiente"
+    isRawMode: true
+---
+texto aquí</code></pre>
+          </div>
+          <ul class="docs__list">
+            <li>The body after <code>---</code> is always the first section's content (for readability outside the app).</li>
+            <li><code>isRawMode: true</code> = Markdown/raw mode. <code>false</code> = rich text (TipTap HTML).</li>
+            <li>Notes with <code>encryption:</code> in the frontmatter are <strong>ignored</strong> by the CLI — they can only be decrypted in the desktop app.</li>
+          </ul>
+        </section>
+
+        <section id="commands">
+          <h2>Commands</h2>
+          <p>All commands take the form <code>noteflow &lt;command&gt; [args] [flags]</code>. Run <code>noteflow help &lt;command&gt;</code> for detailed per-command help.</p>
+
+          <h3 id="cmd-add"><code>add</code> — Append text to a note</h3>
+          <p>Appends text to today's daily note (title <code>DD-MM-YYYY</code>). Creates the note if it doesn't exist.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow add "Fix: CORS on /api/notes"
+noteflow add "Review server logs" --section "Tasks" --tag urgent
+noteflow add "Client meeting" --title "Project Alpha" --section "Meetings"
+noteflow add "new feature" --group backend</code></pre>
+          </div>
+          <table class="docs__table">
+            <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>--title &lt;title&gt;</code></td><td>Write to a note with that title instead of today's</td></tr>
+              <tr><td><code>--section &lt;name&gt;</code></td><td>Target section / tab. Created if missing. Default: <code>Note</code></td></tr>
+              <tr><td><code>--tag &lt;tag&gt;</code></td><td>Add this metadata tag to the note</td></tr>
+              <tr><td><code>--group &lt;name&gt;</code></td><td>Assign the note to a group (only on creation)</td></tr>
+              <tr><td><code>--rich</code></td><td>Create the new section in rich-text mode</td></tr>
+            </tbody>
+          </table>
+
+          <h3 id="cmd-new"><code>new</code> — Create an empty note</h3>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow new "Project Alpha"
+noteflow new "Sprint 14" --group backend --section "Planning"
+noteflow new "My note" --json</code></pre>
+          </div>
+
+          <h3 id="cmd-list"><code>list</code> — List notes</h3>
+          <p>Shows notes sorted by <code>updated</code> desc. Archived notes are excluded by default.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow list
+noteflow list --group backend
+noteflow list --tag urgent --json
+noteflow list --archived</code></pre>
+          </div>
+
+          <h3 id="cmd-get"><code>get</code> — View a note's content</h3>
+          <p>Title can be partial — if multiple notes match, the CLI lists them and asks you to be more specific.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow get "Project Alpha"
+noteflow get "Project Alpha" --section Tasks
+noteflow get "31-03" --json</code></pre>
+          </div>
+
+          <h3 id="cmd-sections"><code>sections</code> — List sections of a note</h3>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow sections "Project Alpha"
+# Sections of "Project Alpha":
+#   Note   (3 lines, raw/markdown)
+#   Tasks  (5 lines, raw/markdown)</code></pre>
+          </div>
+
+          <h3 id="cmd-delete"><code>delete</code> — Delete a note</h3>
+          <p>Asks for confirmation unless <code>--yes</code> is passed. If GitHub sync is connected, the note is also removed from the remote repository.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow delete "Temporary draft" --yes</code></pre>
+          </div>
+
+          <h3 id="cmd-rename"><code>rename</code> — Rename a note</h3>
+          <p>Updates the <code>title</code> field in the frontmatter. The filename (which contains the note id) is unchanged.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow rename "Meeting" "Client meeting — Q2"</code></pre>
+          </div>
+
+          <h3 id="cmd-pin"><code>pin</code> — Pin or unpin</h3>
+          <p>Toggle: if the note is pinned it becomes unpinned, and vice-versa. Pinned notes appear at the top of the sidebar in the desktop app.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow pin "Project Alpha"</code></pre>
+          </div>
+
+          <h3 id="cmd-archive"><code>archive</code> — Archive or unarchive</h3>
+          <p>Toggle the <code>archived</code> state. Archived notes are hidden from <code>list</code> unless <code>--archived</code> is passed.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow archive "Old draft"</code></pre>
+          </div>
+        </section>
+
+        <section id="groups">
+          <h2>Groups</h2>
+          <p>Groups are color-coded categories shown in the desktop app sidebar. Every note can belong to one group.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow groups                              # list groups
+noteflow group create backend --color cyan   # create a group
+noteflow group create "Client projects" --color orange
+noteflow group delete backend --yes          # delete (notes are kept, just unassigned)</code></pre>
+          </div>
+          <p>Available colors: <code>accent</code>, <code>accent-2</code>, <code>red</code>, <code>cyan</code>, <code>purple</code>, <code>text</code>, <code>orange</code>, <code>pink</code>.</p>
+        </section>
+
+        <section id="github-sync">
+          <h2>GitHub sync</h2>
+          <p>The CLI uses the same <strong>Device Flow OAuth</strong> mechanism as the desktop app — no personal access tokens, no secrets in config files. Because the desktop app encrypts its token with Electron's <code>safeStorage</code>, the CLI needs its own separate <code>login</code>.</p>
+
+          <h3><code>login</code> — Connect to GitHub</h3>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow login                        # default repo: noteflow-notes
+noteflow login my-private-notes       # custom repo name</code></pre>
+          </div>
+          <p>Displays a one-time code and a URL. On a headless system, open the URL from another device to complete authorization.</p>
+
+          <h3><code>logout</code> / <code>push</code> / <code>pull</code> / <code>status</code></h3>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow push      # upload all notes to the remote repo
+noteflow pull      # download notes (only overwrites if remote is newer)
+noteflow update    # alias for pull
+noteflow status    # current sync state
+noteflow logout    # disconnect</code></pre>
+          </div>
+        </section>
+
+        <section id="self-update">
+          <h2><code>self-update</code></h2>
+          <p>Downloads the latest <code>cli/noteflow.js</code> from GitHub and replaces the current script in place. Useful on headless Raspberry Pi systems where there's no installer to run. Does not require being logged in to GitHub sync.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow self-update
+# Checking for updates...
+# Updated successfully → /usr/local/bin/noteflow</code></pre>
+          </div>
+        </section>
+
+        <section id="flags">
+          <h2>Global flags</h2>
+          <table class="docs__table">
+            <thead>
+              <tr><th>Flag</th><th>Applies to</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>--json</code></td><td><code>list</code>, <code>get</code>, <code>new</code>, <code>groups</code>, <code>status</code></td><td>Machine-readable JSON output</td></tr>
+              <tr><td><code>--yes</code></td><td><code>delete</code>, <code>group delete</code></td><td>Skip interactive confirmation</td></tr>
+              <tr><td><code>--archived</code></td><td><code>list</code></td><td>Include archived notes</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="ai-integration">
+          <h2>Integration with AI agents &amp; scripts</h2>
+          <p>Every read command supports <code>--json</code> for machine-readable output. stdout carries data, stderr carries errors, exit code is <code>0</code> on success and <code>1</code> on failure — a standard Unix contract that plays well with shell pipelines, cron jobs, and LLM tool-use loops.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>typical agent flow</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code># 1. Survey what notes exist
+noteflow list --json
+
+# 2. Read a full note with all its sections
+noteflow get "title" --json
+
+# 3. Append information to a specific section
+noteflow add "new content" --title "title" --section "Section"
+
+# 4. Sync
+noteflow push</code></pre>
+          </div>
+          <div class="docs__callout">
+            A Claude/Agent skill definition (<code>cli/SKILL.md</code>) ships in the repository — drop it into your agent's skills directory to let an LLM use the CLI as a tool.
+          </div>
+        </section>
+
+        <section id="troubleshooting">
+          <h2>Troubleshooting</h2>
+          <ul class="docs__list">
+            <li><strong>"command not found"</strong> after <code>.deb</code> install: open a new terminal. The post-install script creates the symlink, but running shells don't reload <code>PATH</code>.</li>
+            <li><strong>CLI can't read the app's GitHub token:</strong> expected. The desktop app encrypts its token with Electron <code>safeStorage</code>, which the CLI cannot decrypt. Run <code>noteflow login</code> separately.</li>
+            <li><strong>Encrypted notes don't show up in <code>list</code>:</strong> by design. The CLI cannot decrypt them; use the desktop app.</li>
+            <li><strong>Auto-sync conflicts:</strong> the desktop app syncs every 5 minutes. If it runs at the same time as CLI operations and both are connected to the same repo, the last writer wins — same as git.</li>
+          </ul>
+        </section>
+
+        <footer class="docs__footer-links">
+          <a href="index.html" class="btn btn--ghost">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+            Back to home
+          </a>
+          <a href="https://github.com/yagoid/noteflow/blob/main/cli/noteflow.js" target="_blank" rel="noopener noreferrer" class="btn btn--ghost">View source on GitHub</a>
+        </footer>
+
+      </article>
+    </div>
+  </main>
+
+  <!-- ─── FOOTER ───────────────────────────────────────────────────────── -->
+  <footer class="footer" role="contentinfo">
+    <div class="container">
+      <div class="footer__inner">
+        <div class="footer__brand">
+          <span class="footer__logo">
+            <span class="nav__logo-icon" aria-hidden="true">■</span> NOTEFLOW
+          </span>
+          <p class="footer__tagline">Fast. Private. Developer-native.</p>
+        </div>
+
+        <nav class="footer__links" aria-label="Footer links">
+          <a href="index.html">Home</a>
+          <a href="cli.html">CLI Docs</a>
+          <a href="https://github.com/yagoid/noteflow" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/yagoid/noteflow/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+        </nav>
+
+        <p class="footer__copy">
+          Built by <a href="https://github.com/yagoid" target="_blank" rel="noopener noreferrer">yagoid</a> · MIT License
+        </p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="main.js"></script>
+</body>
+
+</html>

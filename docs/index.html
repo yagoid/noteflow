@@ -4,11 +4,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NoteFlow — Fast Notes & Sticky Notes for Developers</title>
+  <title>NoteFlow — Fast Notes, Sticky Notes & CLI for Developers</title>
   <meta name="description"
-    content="NoteFlow is a keyboard-first note-taking app for Windows developers. Markdown support, task lists, floating sticky notes, tabs, fast search, and optional private GitHub sync. Your notes, your data." />
+    content="NoteFlow is a keyboard-first note-taking app for Windows & Linux developers. Markdown, floating sticky notes, multi-tab editing, encrypted notes, note groups with deadlines, and a zero-dependency CLI for headless servers and Raspberry Pi. Local files, optional private GitHub sync." />
   <meta name="keywords"
-    content="noteflow, windows notes app, developer notes, markdown notes windows, quick notes developer, electron notes app" />
+    content="noteflow, windows notes app, linux notes app, developer notes, markdown notes windows, quick notes developer, electron notes app, noteflow cli, headless notes, raspberry pi notes, markdown cli, terminal notes app, github notes sync" />
   <meta name="author" content="yagoid" />
   <link rel="canonical" href="https://yagoid.github.io/noteflow/" />
 
@@ -40,9 +40,9 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "NoteFlow",
-    "operatingSystem": "Windows",
+    "operatingSystem": "Windows, Linux",
     "applicationCategory": "ProductivityApplication",
-    "description": "Keyboard-first note-taking app for Windows developers. Markdown support, task lists, multi-tab editing, and fast search.",
+    "description": "Keyboard-first note-taking app for Windows and Linux developers. Markdown, floating sticky notes, multi-tab editing, encrypted notes, note groups with deadlines, optional private GitHub sync, and a zero-dependency CLI for headless servers and Raspberry Pi.",
     "offers": {
       "@type": "Offer",
       "price": "0",
@@ -55,8 +55,40 @@
       "name": "yagoid",
       "url": "https://github.com/yagoid"
     },
-    "softwareVersion": "1.0",
-    "screenshot": "https://yagoid.github.io/noteflow/screenshots/app-main-carbon.png"
+    "softwareVersion": "1.4.2",
+    "screenshot": "https://yagoid.github.io/noteflow/screenshots/app-main-carbon.png",
+    "featureList": [
+      "Markdown-first editor with toolbar",
+      "Floating sticky notes always on top",
+      "Multi-tab editing with persistent sessions",
+      "Encrypted notes with password protection",
+      "Note groups with colors and task deadlines",
+      "Private GitHub sync via Device Flow OAuth",
+      "Zero-dependency CLI for headless Linux, Raspberry Pi and Windows",
+      "Four built-in developer themes"
+    ]
+  }
+  </script>
+
+  <!-- Structured Data: BreadcrumbList -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "name": "Home",
+        "item": "https://yagoid.github.io/noteflow/"
+      },
+      {
+        "@type": "ListItem",
+        "position": 2,
+        "name": "CLI Docs",
+        "item": "https://yagoid.github.io/noteflow/cli.html"
+      }
+    ]
   }
   </script>
 
@@ -90,8 +122,10 @@
       </a>
       <ul class="nav__links">
         <li><a href="#features" class="nav__link">Features</a></li>
+        <li><a href="#cli" class="nav__link">CLI</a></li>
         <li><a href="#preview" class="nav__link">Preview</a></li>
         <li><a href="#download" class="nav__link">Download</a></li>
+        <li><a href="cli.html" class="nav__link">Docs</a></li>
         <li>
           <a href="https://github.com/yagoid/noteflow" class="nav__link nav__link--github" target="_blank"
             rel="noopener noreferrer" aria-label="NoteFlow on GitHub">
@@ -130,7 +164,7 @@
 
         <p class="hero__subtitle">
           A keyboard-first note tool for Windows & Linux developers.<br>
-          Markdown, tabs, <strong>floating sticky notes</strong>. Local files, optional <strong>private GitHub sync</strong>. No clutter.
+          Markdown, tabs, <strong>floating sticky notes</strong>, and a zero-dep <strong>CLI</strong> for headless servers. Local files, optional <strong>private GitHub sync</strong>.
         </p>
 
         <div class="hero__actions">
@@ -262,6 +296,35 @@
             <code class="feature-card__code">noteflow --sticky "tasks"</code>
           </article>
 
+          <a class="feature-card feature-card--link" role="listitem" href="#cli" aria-label="Headless CLI — jump to section">
+            <div class="feature-card__icon" aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 17 10 11 4 5" />
+                <line x1="12" y1="19" x2="20" y2="19" />
+              </svg>
+            </div>
+            <h3 class="feature-card__title">Headless CLI</h3>
+            <p class="feature-card__desc">A zero-dependency Node.js CLI that shares the same notes directory as the app. Capture, list and sync notes from SSH, cron jobs, or a Raspberry Pi — <strong>no GUI required</strong>.</p>
+            <code class="feature-card__code">$ noteflow add "fix CORS bug"</code>
+          </a>
+
+          <article class="feature-card" role="listitem">
+            <div class="feature-card__icon" aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+                <path d="M9 16l2 2 4-4" />
+              </svg>
+            </div>
+            <h3 class="feature-card__title">Groups &amp; deadlines</h3>
+            <p class="feature-card__desc">Organize notes into color-coded groups in the sidebar, and attach deadlines to any task. Due dates surface when they matter — no calendar app required.</p>
+            <code class="feature-card__code">[ ] ship v2 <span class="tab-active">@2026-04-12</span></code>
+          </article>
+
           <article class="feature-card" role="listitem">
             <div class="feature-card__icon" aria-hidden="true">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -280,45 +343,86 @@
             <div class="feature-card__icon" aria-hidden="true">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                 stroke-linecap="round" stroke-linejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                <line x1="8" y1="21" x2="16" y2="21" />
-                <line x1="12" y1="17" x2="12" y2="21" />
+                <path d="M12 2a10 10 0 1 0 10 10" />
+                <path d="M22 2L12 12" />
+                <path d="M16 2h6v6" />
               </svg>
             </div>
-            <h3 class="feature-card__title">Multi-tab workflow</h3>
-            <p class="feature-card__desc">Open multiple notes at once with a tabbed interface. Switch context instantly
-              without losing your place. Tabs persist between sessions.</p>
-            <code class="feature-card__code">Note <span class="tab-active">Questions</span> +</code>
+            <h3 class="feature-card__title">Private GitHub sync</h3>
+            <p class="feature-card__desc">Sync notes to a <strong>private GitHub repository that only you control</strong> using Device Flow OAuth — no personal access tokens, no third-party cloud, no telemetry. Your files stay plain <code>.md</code>.</p>
+            <code class="feature-card__code">device flow · your repo only</code>
           </article>
 
 
-          <article class="feature-card" role="listitem">
-            <div class="feature-card__icon" aria-hidden="true">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-            </div>
-            <h3 class="feature-card__title">Private by design</h3>
-            <p class="feature-card__desc">Notes are stored as plain <code>.md</code> files on your machine. Optionally sync to a <strong>private GitHub repository that only you control</strong> — no third-party cloud, no shared servers, no telemetry.</p>
-            <code class="feature-card__code">~/noteflow-notes/*.md  ↔  github.com/you/repo</code>
-          </article>
+        </div>
+      </div>
+    </section>
 
-          <article class="feature-card" role="listitem">
-            <div class="feature-card__icon" aria-hidden="true">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="16 18 22 12 16 6" />
-                <polyline points="8 6 2 12 8 18" />
-              </svg>
-            </div>
-            <h3 class="feature-card__title">Dev-native aesthetics</h3>
-            <p class="feature-card__desc">4 built-in themes, monospace font, minimal chrome. Feels at home next to your IDE.
-              Not another Notion clone with a light grey background.</p>
-            <code class="feature-card__code">carbon · midnight-blue · tokio-night · artic-day</code>
-          </article>
+    <!-- ─── CLI SHOWCASE ──────────────────────────────────────────────── -->
+    <section class="cli-section" id="cli" aria-label="NoteFlow CLI">
+      <div class="cli-section__bg" aria-hidden="true"></div>
+      <div class="container">
+        <div class="cli-section__inner">
+          <div class="cli-section__text">
+            <span class="section-label">// cli</span>
+            <h2 class="cli-section__title">From the terminal.<br>From anywhere.</h2>
+            <p class="cli-section__desc">
+              A zero-dependency companion CLI that writes to the same notes directory as the desktop app.
+              Capture thoughts over SSH, automate daily logs from cron, or run NoteFlow on a headless Raspberry Pi —
+              <strong>no GUI required</strong>.
+            </p>
 
+            <ul class="cli-section__chips" aria-label="Supported platforms">
+              <li class="cli-chip">Linux</li>
+              <li class="cli-chip">Windows</li>
+              <li class="cli-chip">Raspberry Pi</li>
+              <li class="cli-chip">headless SSH</li>
+              <li class="cli-chip">AI agents</li>
+            </ul>
+
+            <div class="cli-section__actions">
+              <a href="cli.html" class="btn btn--primary">
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="4 17 10 11 4 5" />
+                  <line x1="12" y1="19" x2="20" y2="19" />
+                </svg>
+                Read CLI Docs
+              </a>
+              <a href="https://github.com/yagoid/noteflow/blob/main/cli/noteflow.js" class="btn btn--ghost" target="_blank" rel="noopener noreferrer">
+                View source
+              </a>
+            </div>
+
+            <p class="cli-section__install">
+              <span class="cli-section__install-label">Headless install:</span>
+              <code>curl -fsSL https://raw.githubusercontent.com/yagoid/noteflow/main/cli/install-cli.sh | sudo bash</code>
+            </p>
+          </div>
+
+          <div class="cli-section__terminal" aria-label="Example CLI session">
+            <div class="terminal">
+              <div class="terminal__header" aria-hidden="true">
+                <span class="terminal__dot terminal__dot--r"></span>
+                <span class="terminal__dot terminal__dot--y"></span>
+                <span class="terminal__dot terminal__dot--g"></span>
+                <span class="terminal__title">~/pi@rpi</span>
+              </div>
+              <div class="terminal__body">
+                <p class="terminal__line"><span class="terminal__prompt">$</span> noteflow add "fix CORS bug" --tag urgent</p>
+                <p class="terminal__line terminal__line--success">✓ Appended to 06-04-2026</p>
+                <p class="terminal__line terminal__line--blank">&nbsp;</p>
+                <p class="terminal__line"><span class="terminal__prompt">$</span> noteflow list --group backend --json</p>
+                <p class="terminal__line"><span style="color:var(--amber)">[{ "title": "Sprint 14", ... }]</span></p>
+                <p class="terminal__line terminal__line--blank">&nbsp;</p>
+                <p class="terminal__line"><span class="terminal__prompt">$</span> noteflow push</p>
+                <p class="terminal__line terminal__line--success">✓ Synced 12 notes → github.com/you/notes</p>
+                <p class="terminal__line terminal__line--blank">&nbsp;</p>
+                <p class="terminal__line"><span class="terminal__prompt">$</span> noteflow new "Retro" --json</p>
+                <p class="terminal__line terminal__line--comment"># { "id": "k4n7x2", "title": "Retro" }</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -407,18 +511,6 @@
                 <td><span class="cross" aria-label="No">✗</span></td>
               </tr>
               <tr>
-                <td>Multi-tab editing</td>
-                <td class="compare__col--highlight"><span class="check" aria-label="Yes">✓</span></td>
-                <td><span class="cross" aria-label="No">✗</span></td>
-                <td><span class="cross" aria-label="No">✗</span></td>
-              </tr>
-              <tr>
-                <td>Search across notes</td>
-                <td class="compare__col--highlight"><span class="check" aria-label="Yes">✓</span></td>
-                <td><span class="cross" aria-label="No">✗</span></td>
-                <td><span class="cross" aria-label="No">✗</span></td>
-              </tr>
-              <tr>
                 <td>No third-party cloud accounts</td>
                 <td class="compare__col--highlight"><span class="check" aria-label="Yes">✓</span></td>
                 <td><span class="cross" aria-label="No">✗</span></td>
@@ -431,7 +523,7 @@
                 <td><span class="cross" aria-label="No">✗</span></td>
               </tr>
               <tr>
-                <td>Multiple themes (4 built-in)</td>
+                <td>Headless CLI / SSH usable</td>
                 <td class="compare__col--highlight"><span class="check" aria-label="Yes">✓</span></td>
                 <td><span class="cross" aria-label="No">✗</span></td>
                 <td><span class="cross" aria-label="No">✗</span></td>
@@ -545,6 +637,7 @@
         </div>
 
         <nav class="footer__links" aria-label="Footer links">
+          <a href="cli.html">CLI Docs</a>
           <a href="https://github.com/yagoid/noteflow" target="_blank" rel="noopener noreferrer">GitHub</a>
           <a href="https://github.com/yagoid/noteflow/releases" target="_blank" rel="noopener noreferrer">Releases</a>
           <a href="https://github.com/yagoid/noteflow/issues" target="_blank" rel="noopener noreferrer">Issues</a>

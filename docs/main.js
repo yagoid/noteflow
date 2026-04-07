@@ -10,6 +10,7 @@
     'your workflow.',
     'your focus.',
     'sticky notes.',
+    'your terminal.',
     'dev mode.',
     'fast captures.',
   ];
@@ -326,6 +327,91 @@
         });
       }
     });
+  }
+
+  // ── DOCS PAGE: copy buttons, scroll-spy, install tabs ──────────────
+  if (document.querySelector('.docs') || document.querySelector('.docs-hero')) {
+
+    // Copy-to-clipboard for every code block
+    document.querySelectorAll('.docs__copy-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const block = btn.closest('.docs__cmd');
+        if (!block) return;
+        const code = block.querySelector('pre')?.innerText || '';
+        const done = () => {
+          const original = btn.textContent;
+          btn.textContent = '✓ copied';
+          btn.classList.add('copied');
+          setTimeout(() => {
+            btn.textContent = original;
+            btn.classList.remove('copied');
+          }, 1200);
+        };
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(code).then(done).catch(() => {});
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = code;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); done(); } catch (_) {}
+          document.body.removeChild(ta);
+        }
+      });
+    });
+
+    // Install tabs (Linux headless / Linux desktop / Windows)
+    const tabs = document.querySelectorAll('.docs-tab');
+    const panels = document.querySelectorAll('.docs-tab-panel');
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const key = tab.dataset.tab;
+        tabs.forEach((t) => {
+          const on = t === tab;
+          t.classList.toggle('active', on);
+          t.setAttribute('aria-selected', String(on));
+        });
+        panels.forEach((p) => {
+          p.classList.toggle('active', p.dataset.panel === key);
+        });
+      });
+    });
+
+    // TOC scroll-spy
+    const tocLinks = Array.from(document.querySelectorAll('.docs__toc-link'));
+    if (tocLinks.length && 'IntersectionObserver' in window) {
+      const idToLink = new Map();
+      tocLinks.forEach((link) => {
+        const id = (link.getAttribute('href') || '').replace('#', '');
+        if (id) idToLink.set(id, link);
+      });
+
+      const visible = new Set();
+      const setActive = (id) => {
+        tocLinks.forEach((l) => l.classList.remove('active'));
+        const link = idToLink.get(id);
+        if (link) link.classList.add('active');
+      };
+
+      const spy = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) visible.add(entry.target.id);
+            else visible.delete(entry.target.id);
+          });
+          // Pick the topmost visible heading
+          const order = Array.from(document.querySelectorAll('.docs__body section[id], .docs__body h3[id]'))
+            .map((el) => el.id);
+          const active = order.find((id) => visible.has(id));
+          if (active) setActive(active);
+        },
+        { rootMargin: '-80px 0px -65% 0px', threshold: 0 }
+      );
+
+      document.querySelectorAll('.docs__body section[id], .docs__body h3[id]').forEach((el) => spy.observe(el));
+    }
   }
 
 })();
