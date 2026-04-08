@@ -757,16 +757,54 @@ electron_1.ipcMain.handle('app:get-login-item', () => {
     const openAtLogin = (readSettings().openAtLogin ?? false);
     return { openAtLogin };
 });
-electron_1.ipcMain.handle('app:set-login-item', (_event, enabled) => {
-    const settings = readSettings();
-    settings.openAtLogin = enabled;
-    writeSettings(settings);
-    try {
+function applyLoginItemSettings(enabled) {
+    if (process.platform === 'linux') {
+        // On Linux, manually manage the autostart .desktop file so that the
+        // --noteflow-startup arg is reliably included. app.setLoginItemSettings
+        // depends on finding the system .desktop file as a template and may drop
+        // the args if the file name/path doesn't match exactly.
+        const autostartDir = path_1.default.join(os_1.default.homedir(), '.config', 'autostart');
+        const desktopFile = path_1.default.join(autostartDir, 'noteflow.desktop');
+        if (enabled) {
+            fs_1.default.mkdirSync(autostartDir, { recursive: true });
+            const content = [
+                '[Desktop Entry]',
+                'Type=Application',
+                'Name=NoteFlow',
+                'Comment=Fast notes for software engineers',
+                `Exec=${process.execPath} --noteflow-startup`,
+                'Hidden=false',
+                'NoDisplay=false',
+                'X-GNOME-Autostart-enabled=true',
+                // Wait for the Wayland compositor and GNOME Shell to finish their
+                // startup animations before NoteFlow tries to map windows.
+                // 15 s covers even slower machines; sticky windows that appear
+                // during the login animation are immediately hidden by the shell.
+                'X-GNOME-Autostart-Delay=15',
+            ].join('\n') + '\n';
+            fs_1.default.writeFileSync(desktopFile, content, 'utf-8');
+        }
+        else {
+            try {
+                fs_1.default.unlinkSync(desktopFile);
+            }
+            catch { /* already gone */ }
+        }
+    }
+    else {
         electron_1.app.setLoginItemSettings({
             openAtLogin: enabled,
             path: process.execPath,
             args: enabled ? ['--noteflow-startup'] : [],
         });
+    }
+}
+electron_1.ipcMain.handle('app:set-login-item', (_event, enabled) => {
+    const settings = readSettings();
+    settings.openAtLogin = enabled;
+    writeSettings(settings);
+    try {
+        applyLoginItemSettings(enabled);
         return { ok: true };
     }
     catch (err) {
@@ -887,12 +925,36 @@ electron_1.app.whenReady().then(() => {
         startAutoSync();
     const isStartupMode = process.argv.includes('--noteflow-startup');
     const startupStickies = (readSettings().startupStickies ?? []);
-    if (isStartupMode && startupStickies.length > 0) {
-        // Launched at system startup with sticky notes configured:
-        // keep main window hidden in tray and open the selected sticky notes
+    // Refresh login item registration on every launch so it stays current after
+    // app updates (binary path or args may have changed since the user first
+    // enabled the feature).
+    const savedOpenAtLogin = (readSettings().openAtLogin ?? false);
+    if (savedOpenAtLogin) {
+        try {
+            applyLoginItemSettings(true);
+        }
+        catch (err) {
+            console.error('Failed to refresh login item on startup:', err);
+        }
+    }
+    if (isStartupMode) {
+        // Launched at system startup: always keep the main window hidden in tray
+        // and open any configured startup sticky notes.
         mainWindow = createWindow(true);
+        const stickyWins = [];
         for (const { noteId, sectionId } of startupStickies) {
-            createStickyWindow(noteId, sectionId);
+            stickyWins.push(createStickyWindow(noteId, sectionId));
+        }
+        // Fallback for Wayland: the compositor may not honour ready-to-show, or
+        // the window may be obscured by GNOME Shell's startup animation.
+        // Force-show any sticky that is still not visible 5 s after creation.
+        if (stickyWins.length > 0) {
+            setTimeout(() => {
+                stickyWins.forEach(w => {
+                    if (!w.isDestroyed() && !w.isVisible())
+                        w.show();
+                });
+            }, 5000);
         }
     }
     else {

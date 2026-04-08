@@ -108,14 +108,23 @@ export function StickyApp() {
       setNoteId(parsedNoteId)
       setSectionId(params.get('sectionId'))
     }
-    loadNotes().then(() => {
-      // On Linux, there can be a brief timing issue on first startup (filesystem
-      // settling after migration or IPC warmup). If the note isn't found after
-      // the initial load, retry once after a short delay.
-      if (parsedNoteId && !useNotesStore.getState().notes.find(n => n.id === parsedNoteId)) {
-        setTimeout(() => loadNotes(), 1500)
-      }
-    })
+    // At system startup the OS filesystem may not be fully ready when the
+    // sticky window first loads (this affects both Windows and Linux). If the
+    // note isn't found after the initial load, retry with increasing delays.
+    const retryDelays = [1500, 3000, 5000]
+    let retryIndex = 0
+    const tryLoad = () => {
+      loadNotes().then(() => {
+        if (
+          parsedNoteId &&
+          !useNotesStore.getState().notes.find(n => n.id === parsedNoteId) &&
+          retryIndex < retryDelays.length
+        ) {
+          setTimeout(tryLoad, retryDelays[retryIndex++])
+        }
+      })
+    }
+    tryLoad()
 
     // Sync from other windows
     const currentWindowId = typeof window.noteflow?.windowId === 'function' ? window.noteflow.windowId() : null
