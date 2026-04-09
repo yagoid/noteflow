@@ -133,6 +133,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
 
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => startOfMonth(new Date()))
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null)
+  const [calendarExpanded, setCalendarExpanded] = useState(false)
 
   // ── Close menus on click elsewhere ────────────────────────────────────────
   useEffect(() => {
@@ -401,121 +402,154 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       {/* ── Date filter ────────────────────────────────────────────────────── */}
       <div className="border-b border-border">
         <div className="flex gap-1 px-3 py-2">
-          {(['all', 'today', 'week', 'month'] as const).map((opt) => {
-            const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
-            const active = !selectedDayKey && filterDate === opt
-            return (
-              <button
-                key={opt}
-                onClick={() => {
-                  setFilterDate(opt)
-                  setSelectedDayKey(null)
-                }}
-                className="flex-1 py-0.5 rounded text-xs font-mono transition-colors"
-                style={active
-                  ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
-                  : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
-                }
-              >
-                {labels[opt]}
-              </button>
-            )
-          })}
+          <div className="flex gap-1 flex-1 min-w-0">
+            {(['all', 'today', 'week', 'month'] as const).map((opt) => {
+              const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
+              const active = !selectedDayKey && filterDate === opt
+              return (
+                <button
+                  key={opt}
+                  onClick={() => {
+                    setFilterDate(opt)
+                    setSelectedDayKey(null)
+                  }}
+                  className="flex-1 py-0.5 rounded text-xs font-mono transition-colors"
+                  style={active
+                    ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
+                    : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
+                  }
+                >
+                  {labels[opt]}
+                </button>
+              )
+            })}
+          </div>
+          <button
+            onClick={() => setCalendarExpanded((prev) => !prev)}
+            className="px-2 py-0.5 rounded text-xs font-mono transition-colors flex items-center gap-1"
+            style={calendarExpanded
+              ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
+              : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
+            }
+            title={calendarExpanded ? 'Hide calendar' : 'Show calendar'}
+          >
+            <CalendarDays size={10} />
+            Cal
+          </button>
         </div>
 
-        <div className="px-3 pb-2">
-          <div className="rounded border border-border bg-surface-2/30 p-2">
-            <div className="flex items-center justify-between mb-1.5">
-              <button
-                onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, -1)))}
-                className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
-                title="Previous month"
-              >
-                <ChevronLeft size={12} />
-              </button>
-              <div className="flex items-center gap-1.5 text-[10px] font-mono text-text-muted uppercase tracking-wider">
-                <CalendarDays size={10} />
-                <span>{format(calendarMonth, 'MMMM yyyy')}</span>
-              </div>
-              <button
-                onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, 1)))}
-                className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
-                title="Next month"
-              >
-                <ChevronRight size={12} />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-7 gap-1 mb-1">
-              {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((label) => (
-                <div key={label} className="text-[9px] font-mono text-text-muted/60 text-center">
-                  {label}
-                </div>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-7 gap-1">
-              {calendarDays.map((day) => {
-                const dayKey = toDayKey(day)
-                const marker = dayMarkers.get(dayKey)
-                const isSelected = selectedDayKey === dayKey
-                const inMonth = isSameMonth(day, calendarMonth)
-                const today = isToday(day)
-                const hasActivity = Boolean(marker && (marker.created > 0 || marker.updated > 0))
-
-                return (
-                  <button
-                    key={dayKey}
-                    onClick={() => setSelectedDayKey((prev) => (prev === dayKey ? null : dayKey))}
-                    title={hasActivity
-                      ? `${format(day, 'PPP')} · created ${marker?.created ?? 0}, updated ${marker?.updated ?? 0}`
-                      : format(day, 'PPP')
-                    }
-                    className="h-7 rounded text-[10px] font-mono transition-colors flex flex-col items-center justify-center"
-                    style={isSelected
-                      ? {
-                          background: 'rgb(var(--accent) / 0.22)',
-                          border: '1px solid rgb(var(--accent) / 0.5)',
-                          color: 'rgb(var(--accent))',
-                        }
-                      : {
-                          background: inMonth ? 'transparent' : 'rgb(var(--surface-1) / 0.45)',
-                          border: today ? '1px solid rgb(var(--accent) / 0.35)' : '1px solid rgb(var(--border) / 0.4)',
-                          color: inMonth ? 'rgb(var(--text-muted))' : 'rgb(var(--text-muted) / 0.45)',
-                        }
-                    }
-                  >
-                    <span>{format(day, 'd')}</span>
-                    <span className="h-[3px] flex items-center gap-[2px] mt-[1px]">
-                      {marker && marker.created > 0 && (
-                        <span className="w-[4px] h-[4px] rounded-full bg-emerald-400" />
-                      )}
-                      {marker && marker.updated > 0 && (
-                        <span className="w-[4px] h-[4px] rounded-full bg-accent" />
-                      )}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-
-            <div className="flex items-center justify-between mt-2 text-[9px] font-mono text-text-muted/70">
-              <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />Created</span>
-                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-accent" />Updated</span>
-              </div>
-              {selectedDayKey && (
+        {calendarExpanded && (
+          <div className="px-3 pb-2">
+            <div className="rounded border border-border bg-surface-2/30 p-2">
+              <div className="flex items-center justify-between mb-1.5">
                 <button
-                  onClick={() => setSelectedDayKey(null)}
-                  className="text-accent hover:text-text transition-colors"
-                  title="Clear day filter"
+                  onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, -1)))}
+                  className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+                  title="Previous month"
                 >
-                  {format(dayKeyToDate(selectedDayKey), 'MMM d')} · clear
+                  <ChevronLeft size={12} />
                 </button>
-              )}
+                <div className="flex items-center gap-1.5 text-[10px] font-mono text-text-muted uppercase tracking-wider">
+                  <CalendarDays size={10} />
+                  <span>{format(calendarMonth, 'MMMM yyyy')}</span>
+                </div>
+                <button
+                  onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, 1)))}
+                  className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+                  title="Next month"
+                >
+                  <ChevronRight size={12} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-7 gap-1 mb-1">
+                {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((label) => (
+                  <div key={label} className="text-[9px] font-mono text-text-muted/60 text-center">
+                    {label}
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-7 gap-1">
+                {calendarDays.map((day) => {
+                  const dayKey = toDayKey(day)
+                  const marker = dayMarkers.get(dayKey)
+                  const isSelected = selectedDayKey === dayKey
+                  const inMonth = isSameMonth(day, calendarMonth)
+                  const today = isToday(day)
+                  const hasActivity = Boolean(marker && (marker.created > 0 || marker.updated > 0))
+
+                  return (
+                    <button
+                      key={dayKey}
+                      onClick={() => setSelectedDayKey((prev) => (prev === dayKey ? null : dayKey))}
+                      title={hasActivity
+                        ? `${format(day, 'PPP')} · created ${marker?.created ?? 0}, updated ${marker?.updated ?? 0}`
+                        : format(day, 'PPP')
+                      }
+                      className="h-7 rounded text-[10px] font-mono transition-colors flex flex-col items-center justify-center"
+                      style={isSelected
+                        ? {
+                            background: 'rgb(var(--accent) / 0.22)',
+                            border: '1px solid rgb(var(--accent) / 0.5)',
+                            color: 'rgb(var(--accent))',
+                          }
+                        : {
+                            background: inMonth ? 'transparent' : 'rgb(var(--surface-1) / 0.45)',
+                            border: today ? '1px solid rgb(var(--accent) / 0.35)' : '1px solid rgb(var(--border) / 0.4)',
+                            color: inMonth ? 'rgb(var(--text-muted))' : 'rgb(var(--text-muted) / 0.45)',
+                          }
+                      }
+                    >
+                      <span>{format(day, 'd')}</span>
+                      <span className="h-[3px] flex items-center gap-[2px] mt-[1px]">
+                        {marker && marker.created > 0 && (
+                          <span className="w-[4px] h-[4px] rounded-full bg-emerald-400" />
+                        )}
+                        {marker && marker.updated > 0 && (
+                          <span className="w-[4px] h-[4px] rounded-full bg-accent" />
+                        )}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="flex items-center justify-between mt-2 text-[9px] font-mono text-text-muted/70">
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />Created</span>
+                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-accent" />Updated</span>
+                </div>
+                {selectedDayKey && (
+                  <button
+                    onClick={() => setSelectedDayKey(null)}
+                    className="text-accent hover:text-text transition-colors"
+                    title="Clear day filter"
+                  >
+                    {format(dayKeyToDate(selectedDayKey), 'MMM d')} · clear
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {!calendarExpanded && selectedDayKey && (
+          <div className="px-3 pb-2">
+            <button
+              onClick={() => setSelectedDayKey(null)}
+              className="w-full rounded text-xs font-mono py-1 transition-colors"
+              style={{
+                color: 'rgb(var(--accent))',
+                background: 'rgb(var(--accent) / 0.12)',
+                border: '1px solid rgb(var(--accent) / 0.3)',
+              }}
+              title="Clear day filter"
+            >
+              Day: {format(dayKeyToDate(selectedDayKey), 'MMM d')} · clear
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── New note / new group buttons ────────────────────────────────────── */}

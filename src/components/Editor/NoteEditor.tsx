@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
+import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { Editor } from './Editor'
-import type { NoteSection } from '../../types'
+import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Pin, Trash2, Copy, Eye, Edit3,
@@ -11,6 +12,7 @@ import {
 import { format } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
+import { getTagColor, normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
 
 // ---------------------------------------------------------------------------
 // Confirm modal state type
@@ -32,6 +34,9 @@ export function NoteEditor() {
   const deleteNote = useNotesStore((s) => s.deleteNote)
   const unlockNote = useNotesStore((s) => s.unlockNote)
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
+  const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
+  const setSectionTagColor = useSectionTagColorsStore((s) => s.setSectionTagColor)
+  const clearSectionTagColor = useSectionTagColorsStore((s) => s.clearSectionTagColor)
 
   // Active section by id (not index — stable across reorders)
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
@@ -68,6 +73,7 @@ export function NoteEditor() {
   // Drag and drop state
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null)
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null)
+  const [sectionColorPickerId, setSectionColorPickerId] = useState<string | null>(null)
 
   const titleRef = useRef<HTMLInputElement>(null)
   const pendingSectionRef = useRef<string | null>(null)
@@ -97,8 +103,15 @@ export function NoteEditor() {
     setRawContent(note.sections.find((s) => s.id === targetId)?.content ?? '')
     setTitleDraft(note.title)
     setRenamingId(null)
+    setSectionColorPickerId(null)
     if (targetId) window.noteflow.setUiState({ activeSectionId: targetId })
   }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const close = () => setSectionColorPickerId(null)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [])
 
   // ── Handle section request from sidebar ────────────────────────────────────
   useEffect(() => {
@@ -402,6 +415,7 @@ export function NoteEditor() {
 
   const handleSwitchSection = (sectionId: string) => {
     if (sectionId === activeSectionId) return
+    setSectionColorPickerId(null)
 
     if (rawMode && activeSection) {
       if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
@@ -470,6 +484,24 @@ export function NoteEditor() {
     if (e.key === 'Enter') { e.preventDefault(); handleCommitRename() }
     if (e.key === 'Escape') { setRenamingId(null) }
   }
+
+  const handleSetSectionColor = async (sectionName: string, color: GroupColor) => {
+    await setSectionTagColor(sectionName, color)
+    setSectionColorPickerId(null)
+  }
+
+  const handleClearSectionColor = async (sectionName: string) => {
+    await clearSectionTagColor(sectionName)
+    setSectionColorPickerId(null)
+  }
+
+  const colorPickerSection = sectionColorPickerId
+    ? note.sections.find((s) => s.id === sectionColorPickerId) ?? null
+    : null
+
+  const colorPickerOverride = colorPickerSection
+    ? sectionTagColors[normalizeTagColorKey(colorPickerSection.name)]
+    : undefined
 
   const handleRawChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newDisplay = e.target.value
@@ -608,6 +640,7 @@ export function NoteEditor() {
             {note.sections.map((section) => {
               const isActive = section.id === (activeSection?.id)
               const isRenaming = renamingId === section.id
+              const colorStyle = getTagColor(section.name, sectionTagColors)
               return (
                 <div
                   key={section.id}
@@ -617,7 +650,7 @@ export function NoteEditor() {
                   onDrop={(e) => handleDrop(e, section.id)}
                   onDragEnd={handleDragEnd}
                   onDragLeave={() => setDragOverSectionId(null)}
-                  className={`group flex items-center gap-1 flex-shrink-0 rounded px-0.5 transition-all duration-200 cursor-grab active:cursor-grabbing
+                  className={`relative group flex items-center gap-1 flex-shrink-0 rounded px-0.5 transition-all duration-200 cursor-grab active:cursor-grabbing
                      ${isActive
                       ? 'tab-active-bg border'
                       : 'border border-border/40 hover:border-border/70'
@@ -625,10 +658,24 @@ export function NoteEditor() {
                     ${draggedSectionId === section.id ? 'opacity-30' : 'opacity-100'}
                     ${dragOverSectionId === section.id ? 'border-l-2 tab-active-border-l pl-1' : ''}
                   `}
+                  style={{
+                    border: colorStyle.border,
+                    ...(isActive ? { background: colorStyle.background } : {}),
+                  }}
                 >
                   {isRenaming ? (
                     // Inline rename input
                     <div className="flex items-center gap-0.5 px-1.5 py-1">
+                      <button
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSectionColorPickerId((prev) => (prev === section.id ? null : section.id))
+                        }}
+                        title="Section color"
+                        className="w-4 h-4 rounded-full border border-border/60 flex items-center justify-center"
+                        style={{ background: colorStyle.color }}
+                      />
                       <input
                         ref={renameRef}
                         value={renameValue}
@@ -652,13 +699,27 @@ export function NoteEditor() {
                       onDoubleClick={() => handleStartRename(section)}
                       className={`px-2 py-0.5 text-xs font-mono transition-colors
                         ${isActive ? 'tab-active-text' : 'text-text-muted'}`}
+                      style={isActive ? { color: colorStyle.color } : undefined}
                     >
-                      {section.name}
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: colorStyle.color }} />
+                        {section.name}
+                      </span>
                     </button>
                   )}
 
                   {!isRenaming && (
-                    <div className="flex items-center gap-0.5 pr-1 invisible group-hover:visible">
+                    <div className={`flex items-center gap-0.5 pr-1 ${isActive ? 'visible' : 'invisible group-hover:visible'}`}>
+                      <button
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSectionColorPickerId((prev) => (prev === section.id ? null : section.id))
+                        }}
+                        title="Section color"
+                        className="w-4 h-4 rounded-full border border-border/60 flex items-center justify-center"
+                        style={{ background: colorStyle.color }}
+                      />
 
                       <button
                         onClick={() => handleStartRename(section)}
@@ -740,6 +801,48 @@ export function NoteEditor() {
             </button>
           </div>
         </div>
+
+        {colorPickerSection && (
+          <div
+            className="px-3 py-2 border-b border-border/60 flex items-center justify-between gap-3 bg-surface-1/40"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-[10px] font-mono uppercase tracking-wider text-text-muted/70 min-w-0 truncate">
+              Section color · {colorPickerSection.name}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex gap-1.5 flex-wrap max-w-[160px]">
+                {TAG_COLOR_VARS.map((color) => (
+                  <button
+                    key={`tab-color-panel-${colorPickerSection.id}-${color}`}
+                    title={color.replace('--', '')}
+                    onClick={() => { void handleSetSectionColor(colorPickerSection.name, color) }}
+                    className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${colorPickerOverride === color ? 'ring-1 ring-white/60 ring-offset-1 ring-offset-surface-2' : ''}`}
+                    style={{ background: `rgb(var(${color}))` }}
+                  />
+                ))}
+              </div>
+              <button
+                onClick={() => { void handleClearSectionColor(colorPickerSection.name) }}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                  colorPickerOverride
+                    ? 'text-text-muted border-border hover:text-text hover:border-accent/40'
+                    : 'text-accent border-accent/50 bg-accent/10'
+                }`}
+              >
+                Auto
+              </button>
+              <button
+                onClick={() => setSectionColorPickerId(null)}
+                className="p-0.5 rounded text-text-muted/70 hover:text-text transition-colors"
+                title="Close color picker"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="px-4 pt-3 pb-1 flex-shrink-0">
           <input
