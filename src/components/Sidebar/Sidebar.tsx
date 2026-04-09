@@ -2,7 +2,7 @@ import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, CalendarDays, X, FilterX } from 'lucide-react'
+import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, CalendarDays, X, FilterX } from 'lucide-react'
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, isYesterday, startOfMonth, startOfWeek } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
@@ -277,6 +277,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const hasArchivedFilter = showArchived
   const hasActiveFilters = hasSearchFilter || hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
   const hasVisibleFilterChips = hasSearchFilter || hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
+  const hasSearchResults = hasSearchFilter && visibleNoteIds.length > 0
   const scopedTotal = rawNotes.filter((n) => showArchived || !n.archived).length
   const activeSearchNoteId =
     hasSearchFilter && keyboardResultIndex >= 0 && keyboardResultIndex < visibleNoteIds.length
@@ -320,28 +321,43 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     setKeyboardResultIndex(-1)
   }
 
+  function moveSearchSelection(direction: 1 | -1) {
+    if (visibleNoteIds.length === 0) return
+    setKeyboardResultIndex((prev) => {
+      if (prev < 0) return direction === 1 ? 0 : visibleNoteIds.length - 1
+      const next = prev + direction
+      if (next < 0) return visibleNoteIds.length - 1
+      if (next >= visibleNoteIds.length) return 0
+      return next
+    })
+  }
+
+  function openSelectedSearchResult() {
+    const targetId = activeSearchNoteId ?? visibleNoteIds[0]
+    if (!targetId) return
+    setOpenNoteIds([targetId])
+    setActiveNote(targetId)
+  }
+
   function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return
     if (visibleNoteIds.length === 0) return
 
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setKeyboardResultIndex((prev) => (prev + 1) % visibleNoteIds.length)
+      moveSearchSelection(1)
       return
     }
 
     if (e.key === 'ArrowUp') {
       e.preventDefault()
-      setKeyboardResultIndex((prev) => (prev <= 0 ? visibleNoteIds.length - 1 : prev - 1))
+      moveSearchSelection(-1)
       return
     }
 
     if (e.key === 'Enter') {
-      const targetId = activeSearchNoteId ?? visibleNoteIds[0]
-      if (!targetId) return
       e.preventDefault()
-      setOpenNoteIds([targetId])
-      setActiveNote(targetId)
+      openSelectedSearchResult()
     }
   }
 
@@ -545,23 +561,58 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       </div>
 
       <div className="px-3 pb-2 border-b border-border flex items-center justify-between gap-2">
-        <span className="text-[10px] font-mono text-text-muted/70">
-          {notes.length} result{notes.length === 1 ? '' : 's'}
-          {hasSearchFilter && activeSearchNoteId ? ` · ${keyboardResultIndex + 1}/${notes.length}` : ''}
-        </span>
-        {hasSearchFilter && notes.length > 0 && (
-          <span className="text-[10px] font-mono text-text-muted/50">↑↓ select · Enter open</span>
-        )}
-        {hasActiveFilters && (
-          <button
-            onClick={clearAllFilters}
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-text-muted border border-border hover:text-accent hover:border-accent/50 transition-colors"
-            title="Clear all active filters"
-          >
-            <FilterX size={10} />
-            Clear all
-          </button>
-        )}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[10px] font-mono text-text-muted/70">
+            {notes.length} result{notes.length === 1 ? '' : 's'}
+          </span>
+          {hasSearchResults && activeSearchNoteId && (
+            <span className="text-[10px] font-mono text-accent/80 border border-accent/30 rounded px-1 py-0.5">
+              {keyboardResultIndex + 1}/{visibleNoteIds.length}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {hasSearchFilter && (
+            <>
+              <button
+                onClick={() => moveSearchSelection(-1)}
+                disabled={!hasSearchResults}
+                className="p-1 rounded border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors disabled:opacity-40 disabled:hover:text-text-muted"
+                title="Resultado anterior (Flecha arriba)"
+              >
+                <ChevronUp size={10} />
+              </button>
+              <button
+                onClick={() => moveSearchSelection(1)}
+                disabled={!hasSearchResults}
+                className="p-1 rounded border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors disabled:opacity-40 disabled:hover:text-text-muted"
+                title="Resultado siguiente (Flecha abajo)"
+              >
+                <ChevronDown size={10} />
+              </button>
+              <button
+                onClick={openSelectedSearchResult}
+                disabled={!hasSearchResults}
+                className="px-1.5 py-1 rounded border border-border text-[10px] font-mono text-text-muted hover:text-text hover:border-accent/40 transition-colors disabled:opacity-40 disabled:hover:text-text-muted"
+                title="Abrir resultado seleccionado (Enter)"
+              >
+                Abrir
+              </button>
+            </>
+          )}
+
+          {hasActiveFilters && (
+            <button
+              onClick={clearAllFilters}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-text-muted border border-border hover:text-accent hover:border-accent/50 transition-colors"
+              title="Clear all active filters"
+            >
+              <FilterX size={10} />
+              Clear all
+            </button>
+          )}
+        </div>
       </div>
 
       {hasVisibleFilterChips && (
