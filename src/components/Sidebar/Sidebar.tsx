@@ -70,6 +70,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setFilterDate = useNotesStore((s) => s.setFilterDate)
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
+  const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
+  const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const createNote = useNotesStore((s) => s.createNote)
   const duplicateNote = useNotesStore((s) => s.duplicateNote)
 
@@ -251,7 +253,14 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     return (
       <li key={note.id}>
         <button
-          onClick={() => setActiveNote(note.id)}
+          onClick={(e) => {
+            if (e.ctrlKey || e.metaKey) {
+              openNoteInSplit(note.id)
+              return
+            }
+            setOpenNoteIds([note.id])
+            setActiveNote(note.id)
+          }}
           onContextMenu={(e) => {
             e.preventDefault()
             setContextMenu({
@@ -269,6 +278,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               : '2px solid transparent',
             ...(isActive && group ? { background: `rgb(var(${group.color}) / 0.1)` } : {}),
           }}
+          title="Ctrl/Cmd + click to open side by side"
         >
           {isActive && (
             <div
@@ -298,6 +308,11 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                   window.dispatchEvent(new CustomEvent('noteflow:request-section', {
                     detail: { noteId: note.id, sectionId: section.id }
                   }))
+                  if (e.ctrlKey || e.metaKey) {
+                    openNoteInSplit(note.id)
+                    return
+                  }
+                  setOpenNoteIds([note.id])
                   setActiveNote(note.id)
                 }}
                 onContextMenu={(e) => {
@@ -742,6 +757,27 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 Remove encryption
               </button>
             )}
+            <button
+              onClick={() => {
+                openNoteInSplit(note.id)
+                closeAllMenus()
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+            >
+              <ExternalLink size={12} />
+              Open side by side
+            </button>
+            <button
+              onClick={() => {
+                setOpenNoteIds([note.id])
+                setActiveNote(note.id)
+                closeAllMenus()
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+            >
+              <PanelLeftClose size={12} />
+              Open only this note
+            </button>
             <button
               onClick={() => { duplicateNote(note.id); closeAllMenus() }}
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"

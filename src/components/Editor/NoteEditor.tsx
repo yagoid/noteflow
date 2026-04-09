@@ -25,11 +25,22 @@ interface ModalState {
   onConfirm: () => void
 }
 
+interface NoteEditorProps {
+  noteId?: string
+}
+
 // ---------------------------------------------------------------------------
 // NoteEditor
 // ---------------------------------------------------------------------------
-export function NoteEditor() {
-  const note = useNotesStore((s) => s.notes.find((n) => n.id === s.activeNoteId) ?? null)
+export function NoteEditor({ noteId }: NoteEditorProps) {
+  const globalActiveNoteId = useNotesStore((s) => s.activeNoteId)
+  const resolvedNoteId = noteId ?? globalActiveNoteId
+  const isPaneActive = Boolean(resolvedNoteId && globalActiveNoteId === resolvedNoteId)
+  const note = useNotesStore((s) => {
+    const targetId = noteId ?? s.activeNoteId
+    return s.notes.find((n) => n.id === targetId) ?? null
+  })
+  const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const updateNote = useNotesStore((s) => s.updateNote)
   const deleteNote = useNotesStore((s) => s.deleteNote)
   const unlockNote = useNotesStore((s) => s.unlockNote)
@@ -104,8 +115,8 @@ export function NoteEditor() {
     setTitleDraft(note.title)
     setRenamingId(null)
     setSectionColorPickerId(null)
-    if (targetId) window.noteflow.setUiState({ activeSectionId: targetId })
-  }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (targetId && isPaneActive) window.noteflow.setUiState({ activeSectionId: targetId })
+  }, [note?.id, isPaneActive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const close = () => setSectionColorPickerId(null)
@@ -116,22 +127,22 @@ export function NoteEditor() {
   // ── Handle section request from sidebar ────────────────────────────────────
   useEffect(() => {
     const handler = (e: Event) => {
-      const { noteId, sectionId } = (e as CustomEvent<{ noteId: string; sectionId: string }>).detail
-      if (noteRef.current?.id === noteId) {
+      const { noteId: targetNoteId, sectionId } = (e as CustomEvent<{ noteId: string; sectionId: string }>).detail
+      if (noteRef.current?.id === targetNoteId) {
         // Same note: switch section directly
         const section = noteRef.current.sections.find((s) => s.id === sectionId)
         if (section) {
           setRawContent(section.content)
           setActiveSectionId(sectionId)
         }
-      } else {
+      } else if (!noteId) {
         // Different note: store for when the note.id effect fires
         pendingSectionRef.current = sectionId
       }
     }
     window.addEventListener('noteflow:request-section', handler)
     return () => window.removeEventListener('noteflow:request-section', handler)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [noteId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-focus title field when new note is created ───────────────────────
   useEffect(() => {
@@ -188,10 +199,10 @@ export function NoteEditor() {
 
   // Auto-show unlock modal when switching to a locked encrypted note
   useEffect(() => {
-    if (note?.encryption && !sessionPasswords[note.id]) {
+    if (isPaneActive && note?.encryption && !sessionPasswords[note.id]) {
       setShowUnlockModal(true)
     }
-  }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [note?.id, isPaneActive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-focus editor on new note ──────────────────────────────────────────
   useEffect(() => {
@@ -256,6 +267,7 @@ export function NoteEditor() {
 
   // ── Delete key on the note (only when editor is NOT focused) ──────────────
   useEffect(() => {
+    if (!isPaneActive) return
     if (!note) return
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
@@ -270,10 +282,11 @@ export function NoteEditor() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [note, openDeleteNoteModal])
+  }, [note, openDeleteNoteModal, isPaneActive])
 
   // ── Ctrl+T / Ctrl+W via custom events ────────────────────────────────────
   useEffect(() => {
+    if (!isPaneActive) return
     const handleAddTab = () => {
       if (!noteRef.current) return
       const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', isRawMode: true }
@@ -310,7 +323,7 @@ export function NoteEditor() {
       window.removeEventListener('noteflow:add-tab', handleAddTab)
       window.removeEventListener('noteflow:close-tab', handleCloseTab)
     }
-  }, [updateNote])
+  }, [updateNote, isPaneActive])
 
   // ── Early exit ─────────────────────────────────────────────────────────────
   if (!note) {
@@ -415,6 +428,11 @@ export function NoteEditor() {
 
   const handleSwitchSection = (sectionId: string) => {
     if (sectionId === activeSectionId) return
+
+    if (resolvedNoteId && !isPaneActive) {
+      setActiveNote(resolvedNoteId)
+    }
+
     setSectionColorPickerId(null)
 
     if (rawMode && activeSection) {
@@ -429,7 +447,7 @@ export function NoteEditor() {
     const newContent = note.sections.find((s) => s.id === sectionId)?.content ?? ''
     setRawContent(newContent)
     setActiveSectionId(sectionId)
-    window.noteflow.setUiState({ activeSectionId: sectionId })
+    if (isPaneActive) window.noteflow.setUiState({ activeSectionId: sectionId })
   }
 
   const handleAddSection = () => {
@@ -581,7 +599,12 @@ export function NoteEditor() {
   if (note.encryption && !sessionPasswords[note.id]) {
     return (
       <>
-        <div className="flex flex-col h-full">
+        <div
+          className="flex flex-col h-full"
+          onMouseDownCapture={() => {
+            if (resolvedNoteId && !isPaneActive) setActiveNote(resolvedNoteId)
+          }}
+        >
           <div className="px-4 pt-3 pb-2 border-b border-border flex-shrink-0">
             <span className="text-xl font-bold font-mono text-text">
               {note.title || 'Untitled'}
@@ -628,6 +651,9 @@ export function NoteEditor() {
 
       <div
         className="flex flex-col h-full"
+        onMouseDownCapture={() => {
+          if (resolvedNoteId && !isPaneActive) setActiveNote(resolvedNoteId)
+        }}
         onKeyDown={(e) => {
           e.stopPropagation()
           if (e.ctrlKey && (e.key === '=' || e.key === '+')) { e.preventDefault(); changeFontSize(1) }

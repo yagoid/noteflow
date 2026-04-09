@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useNotesStore } from './stores/notesStore'
 import { useGroupsStore } from './stores/groupsStore'
 import { useSectionTagColorsStore } from './stores/sectionTagColorsStore'
@@ -6,7 +6,7 @@ import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { NoteEditor } from './components/Editor/NoteEditor'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
-import { PanelLeftOpen } from 'lucide-react'
+import { PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
 
 const SIDEBAR_MIN = 180
@@ -17,6 +17,10 @@ export function App() {
   const [isSticky] = useState(() => window.location.hash.startsWith('#sticky'))
 
   const { loadNotes, isLoading, createNote, setCommandPaletteOpen } = useNotesStore()
+  const notes = useNotesStore((s) => s.notes)
+  const activeNoteId = useNotesStore((s) => s.activeNoteId)
+  const openNoteIds = useNotesStore((s) => s.openNoteIds)
+  const closeOpenNote = useNotesStore((s) => s.closeOpenNote)
   const loadGroups = useGroupsStore((s) => s.loadGroups)
   const loadSectionTagColors = useSectionTagColorsStore((s) => s.loadSectionTagColors)
 
@@ -126,6 +130,14 @@ export function App() {
     }
   }, [])
 
+  const visibleOpenNoteIds = useMemo(() => {
+    const existingIds = new Set(notes.map((note) => note.id))
+    const validOpen = openNoteIds.filter((id) => existingIds.has(id))
+    if (validOpen.length > 0) return validOpen
+    if (activeNoteId && existingIds.has(activeNoteId)) return [activeNoteId]
+    return []
+  }, [notes, openNoteIds, activeNoteId])
+
   if (isSticky) {
     return <StickyApp />
   }
@@ -173,7 +185,31 @@ export function App() {
               <div className="text-xs font-mono text-text-muted">Loading notes...</div>
             </div>
           ) : (
-            <NoteEditor />
+            visibleOpenNoteIds.length <= 1 ? (
+              <NoteEditor noteId={visibleOpenNoteIds[0]} />
+            ) : (
+              <div className="h-full overflow-x-auto overflow-y-hidden">
+                <div className="h-full min-w-full flex">
+                  {visibleOpenNoteIds.map((noteId) => (
+                    <section
+                      key={noteId}
+                      className={`relative h-full min-w-[420px] flex-1 border-r border-border/70 last:border-r-0 ${
+                        noteId === activeNoteId ? 'ring-1 ring-inset ring-accent/30' : ''
+                      }`}
+                    >
+                      <button
+                        onClick={() => closeOpenNote(noteId)}
+                        className="absolute top-2 right-2 z-20 p-1 rounded border border-border/80 bg-surface-1/90 text-text-muted/70 hover:text-text hover:border-accent/40 transition-colors"
+                        title="Close pane"
+                      >
+                        <X size={12} />
+                      </button>
+                      <NoteEditor noteId={noteId} />
+                    </section>
+                  ))}
+                </div>
+              </div>
+            )
           )}
         </main>
       </div>
