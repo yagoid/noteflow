@@ -2,7 +2,7 @@ import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react'
+import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, CalendarDays, X, FilterX } from 'lucide-react'
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, isYesterday, startOfMonth, startOfWeek } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
@@ -69,6 +69,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setFilterDate = useNotesStore((s) => s.setFilterDate)
+  const setFilterTag = useNotesStore((s) => s.setFilterTag)
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
@@ -234,6 +235,14 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   }, [baseNotes])
 
   const items = useSidebarGroups(notes, groups)
+  const hasSearchFilter = searchQuery.trim().length > 0
+  const hasDateFilter = filterDate !== 'all'
+  const hasTagFilter = Boolean(filterTag)
+  const hasDayFilter = Boolean(selectedDayKey)
+  const hasArchivedFilter = showArchived
+  const hasActiveFilters = hasSearchFilter || hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
+  const hasVisibleFilterChips = hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
+  const scopedTotal = rawNotes.filter((n) => showArchived || !n.archived).length
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function getNoteGroupDirect(noteId: string) {
@@ -246,6 +255,15 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     setGroupContextMenu(null)
     setGroupPickerNoteId(null)
     setGroupNameInput(null)
+  }
+
+  function clearAllFilters() {
+    setSearchQuery('')
+    setFilterDate('all')
+    setFilterTag(null)
+    setSelectedDayKey(null)
+    setCalendarExpanded(false)
+    setShowArchived(false)
   }
 
   function handleNoteDragStart(e: React.DragEvent<HTMLButtonElement>, noteId: string) {
@@ -408,7 +426,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       })()}
 
       {/* ── Search + collapse ──────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+      <div className="flex items-center gap-2 px-3 py-2.5">
         <div className="relative flex-1">
           <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
           <input
@@ -417,10 +435,19 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             placeholder="Search... (Ctrl+F)"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-7 pr-2 py-1.5 bg-surface-2 border border-border rounded text-xs
+            className="w-full pl-7 pr-7 py-1.5 bg-surface-2 border border-border rounded text-xs
                        font-mono text-text placeholder-text-muted/40 outline-none
                        focus:border-accent/50 transition-colors caret-accent"
           />
+          {hasSearchFilter && (
+            <button
+              onClick={() => setSearchQuery('')}
+              title="Clear search"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
+            >
+              <X size={11} />
+            </button>
+          )}
         </div>
         <button
           onClick={onCollapse}
@@ -431,6 +458,64 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           <PanelLeftClose size={13} />
         </button>
       </div>
+
+      <div className="px-3 pb-2 border-b border-border flex items-center justify-between gap-2">
+        <span className="text-[10px] font-mono text-text-muted/70">
+          {notes.length} result{notes.length === 1 ? '' : 's'}
+        </span>
+        {hasActiveFilters && (
+          <button
+            onClick={clearAllFilters}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-text-muted border border-border hover:text-accent hover:border-accent/50 transition-colors"
+            title="Clear all active filters"
+          >
+            <FilterX size={10} />
+            Clear all
+          </button>
+        )}
+      </div>
+
+      {hasVisibleFilterChips && (
+        <div className="px-3 py-2 border-b border-border flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-mono text-text-muted/60 uppercase tracking-wider">Filters</span>
+          {hasDateFilter && (
+            <button
+              onClick={() => setFilterDate('all')}
+              className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors"
+              title="Clear date range filter"
+            >
+              Date: {filterDate}
+            </button>
+          )}
+          {hasDayFilter && selectedDayKey && (
+            <button
+              onClick={() => setSelectedDayKey(null)}
+              className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors"
+              title="Clear selected day filter"
+            >
+              Day: {format(dayKeyToDate(selectedDayKey), 'MMM d')}
+            </button>
+          )}
+          {hasTagFilter && (
+            <button
+              onClick={() => setFilterTag(null)}
+              className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors"
+              title="Clear tag filter"
+            >
+              Tag: {filterTag}
+            </button>
+          )}
+          {hasArchivedFilter && (
+            <button
+              onClick={() => setShowArchived(false)}
+              className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors"
+              title="Hide archived notes"
+            >
+              Archived
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Date filter ────────────────────────────────────────────────────── */}
       <div className="border-b border-border">
@@ -595,7 +680,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                        bg-accent/10 text-accent border border-accent/20
                        hover:bg-accent/20 hover:border-accent/40"
           >
-            + New note
+            + New note · Ctrl+N
           </button>
           <button
             onClick={() => { setNewGroupInput(true); setNewGroupName('') }}
@@ -634,7 +719,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-text-muted gap-2">
             <span className="text-2xl opacity-20">∅</span>
-            <span className="text-xs font-mono">No notes</span>
+            <span className="text-xs font-mono">{rawNotes.length > 0 ? 'No notes match current filters' : 'No notes'}</span>
           </div>
         ) : (
           <ul className="pt-2 pb-1">
@@ -1054,7 +1139,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           <Archive size={10} />
           {showArchived ? 'Hide archived' : 'Show archived'}
         </button>
-        <span className="text-xs font-mono text-text-muted/40">{notes.length} notes</span>
+        <span className="text-xs font-mono text-text-muted/40">
+          {notes.length}{hasActiveFilters ? ` / ${scopedTotal}` : ''} notes
+        </span>
       </div>
     </div>
   )

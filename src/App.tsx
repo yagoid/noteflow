@@ -58,28 +58,36 @@ export function App() {
   // ── Global keyboard shortcuts (capture phase — works even inside editors) ─
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const isAccel = e.ctrlKey || e.metaKey
+      if (!isAccel || e.altKey) return
+      const key = e.key.toLowerCase()
+
       // Ctrl+N — new note (always, even when editing)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+      if (!e.shiftKey && (key === 'n' || e.code === 'KeyN')) {
         e.preventDefault(); createNote(); return
       }
+      // Ctrl+P — toggle command palette
+      if (!e.shiftKey && (key === 'p' || e.code === 'KeyP')) {
+        e.preventDefault(); setCommandPaletteOpen(!useNotesStore.getState().commandPaletteOpen); return
+      }
       // Ctrl+' — toggle sidebar (Spanish keyboards often have ' on the key next to 0)
-      if ((e.ctrlKey || e.metaKey) && (e.key === "'" || e.code === 'Quote' || e.code === 'Minus')) {
+      if (!e.shiftKey && (e.key === "'" || e.key === '´' || e.code === 'Quote' || e.code === 'Minus')) {
         e.preventDefault(); setSidebarVisible((v) => !v); return
       }
       // Ctrl+T — new tab in active note
-      if ((e.ctrlKey || e.metaKey) && e.key === 't') {
+      if (!e.shiftKey && (key === 't' || e.code === 'KeyT')) {
         e.preventDefault()
         window.dispatchEvent(new CustomEvent('noteflow:add-tab'))
         return
       }
       // Ctrl+W — close active tab
-      if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
+      if (!e.shiftKey && (key === 'w' || e.code === 'KeyW')) {
         e.preventDefault()
         window.dispatchEvent(new CustomEvent('noteflow:close-tab'))
         return
       }
       // Ctrl+F — focus search
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      if (!e.shiftKey && (key === 'f' || e.code === 'KeyF')) {
         e.preventDefault()
         window.dispatchEvent(new CustomEvent('noteflow:focus-search'))
         return

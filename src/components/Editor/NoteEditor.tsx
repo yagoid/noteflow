@@ -656,9 +656,17 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         }}
         onKeyDown={(e) => {
           e.stopPropagation()
-          if (e.ctrlKey && (e.key === '=' || e.key === '+')) { e.preventDefault(); changeFontSize(1) }
-          if (e.ctrlKey && e.key === '-') { e.preventDefault(); changeFontSize(-1) }
-          if (e.ctrlKey && e.key === '0') { e.preventDefault(); resetFontSize() }
+          const isAccel = e.ctrlKey || e.metaKey
+          const key = e.key.toLowerCase()
+
+          if (isAccel && e.shiftKey && key === 'e') {
+            e.preventDefault()
+            handleRawToggle()
+            return
+          }
+          if (isAccel && (e.key === '=' || e.key === '+')) { e.preventDefault(); changeFontSize(1) }
+          if (isAccel && e.key === '-') { e.preventDefault(); changeFontSize(-1) }
+          if (isAccel && e.key === '0') { e.preventDefault(); resetFontSize() }
         }}
       >
         <div className="flex items-center gap-3 px-3 pt-3 pb-2 border-b border-border min-h-0 flex-shrink-0">
@@ -783,14 +791,15 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           <div className="flex items-center gap-0.5 flex-shrink-0">
             <button
               onClick={handleRawToggle}
-              title={rawMode ? 'Editor mode (Markdown view)' : 'Raw markdown mode'}
-              className={`p-1.5 rounded text-xs transition-colors
+              title={rawMode ? 'Switch to editor mode (Ctrl+Shift+E)' : 'Switch to raw markdown mode (Ctrl+Shift+E)'}
+              className={`p-1.5 rounded text-xs transition-colors inline-flex items-center gap-1
                 ${rawMode
                   ? 'text-accent bg-accent/10 border border-accent/20'
                   : 'text-text-muted hover:text-text hover:bg-surface-3 border border-transparent'
                 }`}
             >
               {rawMode ? <Edit3 size={13} /> : <Eye size={13} />}
+              <span className="text-[10px] font-mono">{rawMode ? 'Editor' : 'Raw'}</span>
             </button>
             <button
               onClick={handleCopyAllText}
@@ -884,9 +893,18 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         </div>
 
 
-        <div className="px-4 pb-2 flex-shrink-0">
+        <div className="px-4 pb-2 flex-shrink-0 flex items-center justify-between gap-3">
           <span className="text-xs font-mono text-text-muted/50">
             {format(new Date(note.updated), 'MMM d, yyyy · HH:mm')}
+          </span>
+          <span
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded border"
+            style={rawMode
+              ? { color: 'rgb(var(--accent))', borderColor: 'rgb(var(--accent) / 0.35)', background: 'rgb(var(--accent) / 0.12)' }
+              : { color: 'rgb(var(--text-muted))', borderColor: 'rgb(var(--border))', background: 'transparent' }}
+            title="Toggle mode with Ctrl+Shift+E"
+          >
+            {rawMode ? 'Raw mode · Ctrl+Shift+E' : 'Editor mode · Ctrl+Shift+E'}
           </span>
         </div>
 

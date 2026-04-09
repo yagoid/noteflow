@@ -35,10 +35,7 @@ export function CommandPalette() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
-        e.preventDefault()
-        setCommandPaletteOpen(!commandPaletteOpen)
-      }
+      if (e.defaultPrevented) return
       if (e.key === 'Escape' && commandPaletteOpen) {
         setCommandPaletteOpen(false)
       }
@@ -60,7 +57,7 @@ export function CommandPalette() {
     {
       id: 'new-note',
       label: 'New Note',
-      description: 'Create a blank note',
+      description: 'Create a blank note · Ctrl+N',
       icon: <Plus size={12} className="text-blue-400" />,
       action: () => { createNote(); setCommandPaletteOpen(false) },
       category: 'create',
@@ -137,7 +134,7 @@ export function CommandPalette() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search notes or run command..."
+            placeholder="Search notes or run command... (Ctrl+P)"
             className="flex-1 bg-transparent text-sm font-mono text-text placeholder-text-muted/50
                        outline-none caret-accent"
           />
@@ -193,7 +190,7 @@ export function CommandPalette() {
 
         {/* Footer */}
         <div className="px-4 py-2 border-t border-border flex gap-3">
-          {[['↑↓', 'navigate'], ['↵', 'select'], ['esc', 'close']].map(([key, label]) => (
+          {[['↑↓', 'navigate'], ['↵', 'select'], ['esc', 'close'], ['Ctrl+P', 'toggle']].map(([key, label]) => (
             <span key={key} className="flex items-center gap-1 text-xs font-mono text-text-muted/50">
               <kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded text-xs">{key}</kbd>
               {label}
