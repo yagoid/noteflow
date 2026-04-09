@@ -311,39 +311,52 @@ export function App() {
             ) : (
               <div className="h-full overflow-x-auto overflow-y-hidden">
                 <div className="h-full min-w-full flex">
-                  {visibleOpenNoteIds.map((noteId) => (
-                    <section
-                      key={noteId}
-                      onDragOver={(e) => handlePaneDragOver(e, noteId)}
-                      onDrop={(e) => handlePaneDrop(e, noteId)}
-                      className={`relative h-full min-w-[420px] flex-1 border-r border-border/70 last:border-r-0 ${
-                        noteId === activeNoteId ? 'ring-1 ring-inset ring-accent/30' : ''
-                      } ${
-                        paneDropTargetId === noteId && draggingPaneId && draggingPaneId !== noteId
-                          ? 'ring-1 ring-inset ring-accent/60'
-                          : ''
-                      }`}
-                    >
-                      <button
-                        draggable
-                        onDragStart={(e) => handlePaneDragStart(e, noteId)}
-                        onDragEnd={handlePaneDragEnd}
-                        onClick={(e) => e.preventDefault()}
-                        className="absolute top-2 right-8 z-20 p-1 rounded border border-border/80 bg-surface-1/90 text-text-muted/70 hover:text-text hover:border-accent/40 cursor-grab active:cursor-grabbing transition-colors"
-                        title="Drag to reorder columns"
+                  {visibleOpenNoteIds.map((noteId) => {
+                    const paneNote = notes.find((n) => n.id === noteId)
+                    const paneTitle = paneNote?.title?.trim() || 'Untitled'
+                    return (
+                      <section
+                        key={noteId}
+                        onDragOver={(e) => handlePaneDragOver(e, noteId)}
+                        onDrop={(e) => handlePaneDrop(e, noteId)}
+                        className={`h-full min-w-[420px] flex-1 flex flex-col border-r border-border/70 last:border-r-0 ${
+                          noteId === activeNoteId ? 'ring-1 ring-inset ring-accent/30' : ''
+                        } ${
+                          paneDropTargetId === noteId && draggingPaneId && draggingPaneId !== noteId
+                            ? 'ring-1 ring-inset ring-accent/60'
+                            : ''
+                        }`}
                       >
-                        <GripVertical size={12} />
-                      </button>
-                      <button
-                        onClick={() => closeOpenNote(noteId)}
-                        className="absolute top-2 right-2 z-20 p-1 rounded border border-border/80 bg-surface-1/90 text-text-muted/70 hover:text-text hover:border-accent/40 transition-colors"
-                        title="Close pane"
-                      >
-                        <X size={12} />
-                      </button>
-                      <NoteEditor noteId={noteId} />
-                    </section>
-                  ))}
+                        <div className="h-9 px-2 border-b border-border/70 bg-surface-1/70 flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-mono text-text-muted truncate" title={paneTitle}>
+                            {paneTitle}
+                          </span>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <button
+                              draggable
+                              onDragStart={(e) => handlePaneDragStart(e, noteId)}
+                              onDragEnd={handlePaneDragEnd}
+                              onClick={(e) => e.preventDefault()}
+                              className="px-2 py-1 rounded border border-accent/40 bg-accent/15 text-accent hover:bg-accent/25 hover:border-accent/70 cursor-grab active:cursor-grabbing transition-colors"
+                              title="Reorder columns"
+                            >
+                              <GripVertical size={13} />
+                            </button>
+                            <button
+                              onClick={() => closeOpenNote(noteId)}
+                              className="px-2 py-1 rounded border border-red-400/40 bg-red-400/15 text-red-300 hover:bg-red-400/25 hover:border-red-400/70 transition-colors"
+                              title="Close pane"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex-1 min-h-0">
+                          <NoteEditor noteId={noteId} />
+                        </div>
+                      </section>
+                    )
+                  })}
                 </div>
               </div>
             )
