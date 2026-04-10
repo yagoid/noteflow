@@ -122,6 +122,7 @@ export function serializeNote(note: Pick<Note, keyof NoteMeta | 'sections'>): st
     }
     if (note.archived) fm.archived = true
     if (note.pinned)   fm.pinned   = true
+    if (note.group)    fm.group    = note.group
     const yamlStr = yaml.dump(fm, { lineWidth: -1, quotingType: '"' })
     return `---\n${yamlStr}---\n`
   }

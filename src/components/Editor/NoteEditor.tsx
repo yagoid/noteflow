@@ -321,11 +321,27 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       if (!sectionId) return
       deleteSectionWithUndo(sectionId)
     }
+    const handleOpenStickySection = () => {
+      if (!isPaneActive) return
+      const n = noteRef.current
+      const sectionId = activeSectionIdRef.current ?? n?.sections[0]?.id
+      if (n && sectionId) window.noteflow.openSticky(n.id, sectionId)
+    }
+    const handleOpenStickyAll = () => {
+      if (!isPaneActive) return
+      const n = noteRef.current
+      if (!n) return
+      n.sections.forEach((s) => window.noteflow.openSticky(n.id, s.id))
+    }
     window.addEventListener('noteflow:add-tab', handleAddTab)
     window.addEventListener('noteflow:close-tab', handleCloseTab)
+    window.addEventListener('noteflow:open-sticky-section', handleOpenStickySection)
+    window.addEventListener('noteflow:open-sticky-all', handleOpenStickyAll)
     return () => {
       window.removeEventListener('noteflow:add-tab', handleAddTab)
       window.removeEventListener('noteflow:close-tab', handleCloseTab)
+      window.removeEventListener('noteflow:open-sticky-section', handleOpenStickySection)
+      window.removeEventListener('noteflow:open-sticky-all', handleOpenStickyAll)
     }
   }, [updateNote, isPaneActive])
 

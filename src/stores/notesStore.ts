@@ -97,6 +97,14 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         .filter(({ content }) => content !== null)
         .map(({ path, content }) => parseNote(content!, path))
 
+      // Safety guard: if we got 0 notes but already had notes in memory, this is
+      // likely a transient FS issue (e.g. Windows returning an empty dir on OS
+      // wake from sleep). Don't wipe in-memory notes — they're still on disk.
+      if (notes.length === 0 && get().notes.length > 0) {
+        set({ isLoading: false })
+        return
+      }
+
       const savedNoteId = uiState.activeNoteId
       const activeNoteId = (savedNoteId && notes.find((n) => n.id === savedNoteId))
         ? savedNoteId

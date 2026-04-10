@@ -2,7 +2,7 @@ import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, Columns2, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, CalendarDays, X, FilterX } from 'lucide-react'
+import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, Columns2, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, CalendarDays, X, Plus } from 'lucide-react'
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, isYesterday, startOfMonth, startOfWeek } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
@@ -91,9 +91,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setFilterDate = useNotesStore((s) => s.setFilterDate)
-  const setFilterTag = useNotesStore((s) => s.setFilterTag)
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
-  const clearFilters = useNotesStore((s) => s.clearFilters)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const createNote = useNotesStore((s) => s.createNote)
@@ -276,8 +274,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const hasDayFilter = Boolean(selectedDayKey)
   const hasArchivedFilter = showArchived
   const hasActiveFilters = hasSearchFilter || hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
-  const hasVisibleFilterChips = hasSearchFilter || hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
-  const hasSearchResults = hasSearchFilter && visibleNoteIds.length > 0
   const scopedTotal = rawNotes.filter((n) => showArchived || !n.archived).length
   const activeSearchNoteId =
     hasSearchFilter && keyboardResultIndex >= 0 && keyboardResultIndex < visibleNoteIds.length
@@ -314,12 +310,12 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     setGroupNameInput(null)
   }
 
-  function clearAllFilters() {
-    clearFilters()
-    setSelectedDayKey(null)
-    setCalendarExpanded(false)
-    setKeyboardResultIndex(-1)
+  async function createNoteInGroup(groupId: string) {
+    const note = await createNote()
+    await updateNote(note.id, { group: groupId })
+    closeAllMenus()
   }
+
 
   function moveSearchSelection(direction: 1 | -1) {
     if (visibleNoteIds.length === 0) return
@@ -749,7 +745,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       </div>
 
       {/* ── Notes list ──────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto notes-list-scroll">
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-text-muted gap-2">
             <span className="text-2xl opacity-20">∅</span>
@@ -813,6 +809,17 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                       <div style={{ overflow: 'hidden' }}>
                         <ul>
                           {groupNotes.map((note) => renderNoteButton(note, group))}
+                          {groupNotes.length === 0 && (
+                            <li>
+                              <button
+                                onClick={() => createNoteInGroup(group.id)}
+                                className="w-full text-left px-4 py-2 text-xs font-mono text-text-muted hover:text-accent flex items-center gap-1.5 transition-colors"
+                              >
+                                <Plus size={10} />
+                                New note
+                              </button>
+                            </li>
+                          )}
                         </ul>
                       </div>
                     </div>
@@ -1091,6 +1098,14 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <button
+              onClick={(e) => { e.stopPropagation(); createNoteInGroup(group.id) }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+            >
+              <Plus size={12} />
+              New note
+            </button>
+            <div className="h-px bg-border my-1" />
+            <button
               onClick={(e) => {
                 e.stopPropagation()
                 setEditingGroupId(group.id)
@@ -1104,7 +1119,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
 
             {/* Color picker */}
             <div className="px-3 py-2">
-              <div className="flex gap-1.5 flex-wrap">
+              <div className="flex gap-1">
                 {GROUP_COLORS.map((color) => (
                   <button
                     key={color}

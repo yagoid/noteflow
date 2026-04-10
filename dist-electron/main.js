@@ -44,8 +44,12 @@ const os_1 = __importDefault(require("os"));
 const child_process_1 = require("child_process");
 const githubSync = __importStar(require("./githubSync"));
 function getIconPath() {
-    const iconExt = process.platform === 'win32' ? 'ico' : 'png';
-    return path_1.default.join(__dirname, `../public/icon.${iconExt}`);
+    if (process.platform === 'win32')
+        return path_1.default.join(__dirname, '../public/icon.ico');
+    // In dev, the icon lives in public/; in production Vite copies it to dist/
+    // (only dist/ and dist-electron/ are packed into the ASAR, not public/)
+    const dir = electron_1.app.isPackaged ? '../dist' : '../public';
+    return path_1.default.join(__dirname, `${dir}/icon.png`);
 }
 const isDev = process.env.NODE_ENV === 'development' || !electron_1.app.isPackaged;
 let mainWindow = null;
@@ -618,12 +622,20 @@ electron_1.ipcMain.handle('fs:rename-note', (_event, oldPath, newPath) => {
         return { ok: false, error: String(err) };
     }
 });
-electron_1.ipcMain.handle('fs:read-all-notes', () => {
+electron_1.ipcMain.handle('fs:read-all-notes', async () => {
     // Do NOT catch outer errors — let them propagate so the renderer can
-    // distinguish a genuine empty directory from a transient FS failure
-    // (e.g. OS still waking up after suspend). If this throws, ipcRenderer.invoke
-    // will reject and loadNotes() will go to its catch block without wiping notes.
-    const files = fs_1.default.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'));
+    // distinguish a genuine empty directory from a transient FS failure.
+    // On Windows, readdirSync can return [] without throwing when the filesystem
+    // isn't ready yet (e.g. OS waking from sleep, app starting at boot).
+    // Retry up to 3 times so we don't mistake a transient empty result for no notes.
+    let files = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0)
+            await new Promise((r) => setTimeout(r, 600));
+        files = fs_1.default.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'));
+        if (files.length > 0)
+            break;
+    }
     return files.map((f) => {
         const fullPath = path_1.default.join(NOTES_DIR, f);
         try {

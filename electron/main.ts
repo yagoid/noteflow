@@ -22,8 +22,11 @@ import * as githubSync from './githubSync'
 
 
 function getIconPath(): string {
-  const iconExt = process.platform === 'win32' ? 'ico' : 'png'
-  return path.join(__dirname, `../public/icon.${iconExt}`)
+  if (process.platform === 'win32') return path.join(__dirname, '../public/icon.ico')
+  // In dev, the icon lives in public/; in production Vite copies it to dist/
+  // (only dist/ and dist-electron/ are packed into the ASAR, not public/)
+  const dir = app.isPackaged ? '../dist' : '../public'
+  return path.join(__dirname, `${dir}/icon.png`)
 }
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
@@ -628,12 +631,18 @@ ipcMain.handle('fs:rename-note', (_event, oldPath: string, newPath: string) => {
   }
 })
 
-ipcMain.handle('fs:read-all-notes', () => {
+ipcMain.handle('fs:read-all-notes', async () => {
   // Do NOT catch outer errors — let them propagate so the renderer can
-  // distinguish a genuine empty directory from a transient FS failure
-  // (e.g. OS still waking up after suspend). If this throws, ipcRenderer.invoke
-  // will reject and loadNotes() will go to its catch block without wiping notes.
-  const files = fs.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'))
+  // distinguish a genuine empty directory from a transient FS failure.
+  // On Windows, readdirSync can return [] without throwing when the filesystem
+  // isn't ready yet (e.g. OS waking from sleep, app starting at boot).
+  // Retry up to 3 times so we don't mistake a transient empty result for no notes.
+  let files: string[] = []
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise<void>((r) => setTimeout(r, 600))
+    files = fs.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'))
+    if (files.length > 0) break
+  }
   return files.map((f) => {
     const fullPath = path.join(NOTES_DIR, f)
     try {

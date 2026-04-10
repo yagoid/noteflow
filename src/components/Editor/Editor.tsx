@@ -76,7 +76,7 @@ export function Editor({
       ListItem,
       TaskList,
       DeadlineTaskItem.configure({ nested: true }),
-      Link.configure({ openOnClick: false }),
+      Link.configure({ openOnClick: false, autolink: false }),
       ResizableImage.configure({ inline: true, allowBase64: true }),
       HorizontalRule,
       HardBreak,

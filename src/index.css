@@ -470,3 +470,7 @@ button {
 .tabs-scroll::-webkit-scrollbar { height: 4px; }
 .tabs-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; }
 .tabs-scroll:hover::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); }
+
+/* ── Sidebar notes list: scrollbar visible only on hover ─────────────────── */
+.notes-list-scroll::-webkit-scrollbar-thumb { background: transparent; }
+.notes-list-scroll:hover::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); }

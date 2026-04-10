@@ -89,6 +89,18 @@ export function App() {
         window.dispatchEvent(new CustomEvent('noteflow:focus-search'))
         return
       }
+      // Ctrl+S — open current section as sticky note
+      if (!e.shiftKey && (key === 's' || e.code === 'KeyS')) {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('noteflow:open-sticky-section'))
+        return
+      }
+      // Ctrl+G — open all sections of current note as sticky notes
+      if (!e.shiftKey && (key === 'g' || e.code === 'KeyG')) {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('noteflow:open-sticky-all'))
+        return
+      }
     }
     // Use capture phase so shortcuts work even inside editors that stopPropagation
     window.addEventListener('keydown', handler, true)

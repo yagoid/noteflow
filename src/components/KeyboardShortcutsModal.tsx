@@ -30,6 +30,13 @@ const SECTIONS: ShortcutSection[] = [
     ],
   },
   {
+    title: 'Sticky notes',
+    shortcuts: [
+      { keys: ['Ctrl', 'S'], description: 'Open current section as sticky' },
+      { keys: ['Ctrl', 'G'], description: 'Open all sections as sticky' },
+    ],
+  },
+  {
     title: 'Editor',
     shortcuts: [
       { keys: ['Ctrl', 'Z'], description: 'Undo' },
