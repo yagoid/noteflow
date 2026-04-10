@@ -7,7 +7,7 @@ import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Pin, Trash2, Copy, Eye, Edit3,
-  Plus, X, Check, Pencil, ExternalLink, GripVertical, Lock, RotateCcw,
+  Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
@@ -573,8 +573,12 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     ? note.sections.find((s) => s.id === sectionColorPickerId) ?? null
     : null
 
-  const colorPickerOverride = colorPickerSection
-    ? sectionTagColors[normalizeTagColorKey(colorPickerSection.name)]
+  const lastColorPickerSectionRef = useRef(colorPickerSection)
+  if (colorPickerSection) lastColorPickerSectionRef.current = colorPickerSection
+  const visibleColorPickerSection = colorPickerSection ?? lastColorPickerSectionRef.current
+
+  const colorPickerOverride = visibleColorPickerSection
+    ? sectionTagColors[normalizeTagColorKey(visibleColorPickerSection.name)]
     : undefined
 
   const handleRawChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -741,6 +745,10 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                   onDrop={(e) => handleDrop(e, section.id)}
                   onDragEnd={handleDragEnd}
                   onDragLeave={() => setDragOverSectionId(null)}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setSectionColorPickerId((prev) => (prev === section.id ? null : section.id))
+                  }}
                   className={`relative group flex items-center gap-1 flex-shrink-0 rounded px-0.5 transition-all duration-200 cursor-grab active:cursor-grabbing
                      ${isActive
                       ? 'tab-active-bg border'
@@ -749,24 +757,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                     ${draggedSectionId === section.id ? 'opacity-30' : 'opacity-100'}
                     ${dragOverSectionId === section.id ? 'border-l-2 tab-active-border-l pl-1 bg-accent/10 border-dashed' : ''}
                   `}
-                  style={{
-                    border: colorStyle.border,
-                    ...(isActive ? { background: colorStyle.background } : {}),
-                  }}
+                  style={isActive
+                    ? { border: colorStyle.border, background: colorStyle.background }
+                    : {}
+                  }
                 >
                   {isRenaming ? (
                     // Inline rename input
                     <div className="flex items-center gap-0.5 px-1.5 py-1">
-                      <button
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSectionColorPickerId((prev) => (prev === section.id ? null : section.id))
-                        }}
-                        title="Section color"
-                        className="w-4 h-4 rounded-full border border-border/60 flex items-center justify-center"
-                        style={{ background: colorStyle.color }}
-                      />
                       <input
                         ref={renameRef}
                         value={renameValue}
@@ -792,27 +790,12 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                         ${isActive ? 'tab-active-text' : 'text-text-muted'}`}
                       style={isActive ? { color: colorStyle.color } : undefined}
                     >
-                      <span className="inline-flex items-center gap-1.5">
-                        <GripVertical size={11} className="opacity-40" />
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: colorStyle.color }} />
-                        {section.name}
-                      </span>
+                      {section.name}
                     </button>
                   )}
 
                   {!isRenaming && (
-                    <div className={`flex items-center gap-0.5 pr-1 ${isActive ? 'visible' : 'invisible group-hover:visible'}`}>
-                      <button
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSectionColorPickerId((prev) => (prev === section.id ? null : section.id))
-                        }}
-                        title="Section color"
-                        className="w-4 h-4 rounded-full border border-border/60 flex items-center justify-center"
-                        style={{ background: colorStyle.color }}
-                      />
-
+                    <div className="flex items-center gap-0.5 pr-1 invisible group-hover:visible">
                       <button
                         onClick={() => handleStartRename(section)}
                         title="Rename section"
@@ -849,15 +832,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           <div className="flex items-center gap-0.5 flex-shrink-0">
             <button
               onClick={handleRawToggle}
-              title={rawMode ? 'Switch to editor mode (Ctrl+Shift+E)' : 'Switch to raw markdown mode (Ctrl+Shift+E)'}
-              className={`p-1.5 rounded text-xs transition-colors inline-flex items-center gap-1
+              title={rawMode ? 'Editor mode (Markdown view)' : 'Raw markdown mode'}
+              className={`p-1.5 rounded text-xs transition-colors
                 ${rawMode
                   ? 'text-accent bg-accent/10 border border-accent/20'
                   : 'text-text-muted hover:text-text hover:bg-surface-3 border border-transparent'
                 }`}
             >
               {rawMode ? <Edit3 size={13} /> : <Eye size={13} />}
-              <span className="text-[10px] font-mono">{rawMode ? 'Editor' : 'Raw'}</span>
             </button>
             <button
               onClick={handleCopyAllText}
@@ -895,47 +877,6 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           </div>
         </div>
 
-        {colorPickerSection && (
-          <div
-            className="px-3 py-2 border-b border-border/60 flex items-center justify-between gap-3 bg-surface-1/40"
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="text-[10px] font-mono uppercase tracking-wider text-text-muted/70 min-w-0 truncate">
-              Section color · {colorPickerSection.name}
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex gap-1.5 flex-wrap max-w-[160px]">
-                {TAG_COLOR_VARS.map((color) => (
-                  <button
-                    key={`tab-color-panel-${colorPickerSection.id}-${color}`}
-                    title={color.replace('--', '')}
-                    onClick={() => { void handleSetSectionColor(colorPickerSection.name, color) }}
-                    className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${colorPickerOverride === color ? 'ring-1 ring-white/60 ring-offset-1 ring-offset-surface-2' : ''}`}
-                    style={{ background: `rgb(var(${color}))` }}
-                  />
-                ))}
-              </div>
-              <button
-                onClick={() => { void handleClearSectionColor(colorPickerSection.name) }}
-                className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
-                  colorPickerOverride
-                    ? 'text-text-muted border-border hover:text-text hover:border-accent/40'
-                    : 'text-accent border-accent/50 bg-accent/10'
-                }`}
-              >
-                Auto
-              </button>
-              <button
-                onClick={() => setSectionColorPickerId(null)}
-                className="p-0.5 rounded text-text-muted/70 hover:text-text transition-colors"
-                title="Close color picker"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          </div>
-        )}
 
         {sectionUndo && sectionUndo.noteId === note.id && (
           <div className="mx-3 mt-2 px-3 py-2 rounded border border-amber-300/35 bg-amber-300/10 flex items-center justify-between gap-2">
@@ -952,6 +893,52 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           </div>
         )}
 
+        <div
+          className="overflow-hidden transition-all duration-200 ease-in-out border-border/60 bg-surface-1/40"
+          style={{
+            maxHeight: colorPickerSection ? '60px' : '0px',
+            opacity: colorPickerSection ? 1 : 0,
+            borderBottomWidth: colorPickerSection ? '1px' : '0px',
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {visibleColorPickerSection && (
+            <div className="px-3 py-2 flex items-center justify-between gap-2">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-text-muted/70 min-w-0 truncate flex-shrink-0">
+                {visibleColorPickerSection.name}
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {TAG_COLOR_VARS.map((color) => (
+                  <button
+                    key={`tab-color-${visibleColorPickerSection.id}-${color}`}
+                    title={color.replace('--', '')}
+                    onClick={() => { void handleSetSectionColor(visibleColorPickerSection.name, color) }}
+                    className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${colorPickerOverride === color ? 'ring-1 ring-white/60 ring-offset-1 ring-offset-surface-2' : ''}`}
+                    style={{ background: `rgb(var(${color}))` }}
+                  />
+                ))}
+                <button
+                  onClick={() => { void handleClearSectionColor(visibleColorPickerSection.name) }}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                    colorPickerOverride
+                      ? 'text-text-muted border-border hover:text-text hover:border-accent/40'
+                      : 'text-accent border-accent/50 bg-accent/10'
+                  }`}
+                >
+                  Auto
+                </button>
+                <button
+                  onClick={() => setSectionColorPickerId(null)}
+                  className="p-0.5 rounded text-text-muted/70 hover:text-text transition-colors"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="px-4 pt-3 pb-1 flex-shrink-0">
           <input
             ref={titleRef}
@@ -966,19 +953,9 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         </div>
 
 
-        <div className="px-4 pb-2 flex-shrink-0 flex items-center justify-between gap-3">
+        <div className="px-4 pb-2 flex-shrink-0">
           <span className="text-xs font-mono text-text-muted/50">
             {format(new Date(note.updated), 'MMM d, yyyy · HH:mm')}
-          </span>
-          <span
-            className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded border"
-            style={rawMode
-              ? { color: 'rgb(var(--accent))', borderColor: 'rgb(var(--accent) / 0.45)', background: 'rgb(var(--accent) / 0.2)' }
-              : { color: 'rgb(var(--text-muted))', borderColor: 'rgb(var(--border))', background: 'rgb(var(--surface-1) / 0.45)' }}
-            title="Toggle mode with Ctrl+Shift+E"
-          >
-            {rawMode ? <Edit3 size={11} /> : <Eye size={11} />}
-            {rawMode ? 'RAW SOURCE · Ctrl+Shift+E' : 'RICH EDITOR · Ctrl+Shift+E'}
           </span>
         </div>
 

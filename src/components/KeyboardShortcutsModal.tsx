@@ -12,50 +12,41 @@ interface ShortcutSection {
 
 const SECTIONS: ShortcutSection[] = [
   {
-    title: 'Quick start',
-    shortcuts: [
-      { keys: ['Ctrl/Cmd', 'P'], description: 'Open command palette' },
-      { keys: ['Ctrl/Cmd', 'N'], description: 'New note' },
-      { keys: ['Ctrl/Cmd', 'F'], description: 'Focus sidebar search' },
-      { keys: ['Ctrl/Cmd', 'Shift', 'E'], description: 'Toggle editor/raw mode' },
-    ],
-  },
-  {
     title: 'App',
     shortcuts: [
       { keys: ['Ctrl', 'Shift', 'Space'], description: 'Show / hide app (global)' },
-      { keys: ['Ctrl/Cmd', 'N'], description: 'New note' },
-      { keys: ['Ctrl/Cmd', 'F'], description: 'Focus search' },
-      { keys: ['Ctrl/Cmd', '\''], description: 'Toggle sidebar' },
+      { keys: ['Ctrl', 'N'], description: 'New note' },
+      { keys: ['Ctrl', 'F'], description: 'Focus search' },
+      { keys: ['Ctrl', '\''], description: 'Toggle sidebar' },
+      { keys: ['Ctrl', 'Click'], description: 'Open note side by side' },
     ],
   },
   {
     title: 'Sections',
     shortcuts: [
-      { keys: ['Ctrl/Cmd', 'T'], description: 'New section' },
-      { keys: ['Ctrl/Cmd', 'W'], description: 'Close/delete section' },
+      { keys: ['Ctrl', 'T'], description: 'New section' },
+      { keys: ['Ctrl', 'W'], description: 'Delete section' },
       { keys: ['Delete'], description: 'Delete selected note (when not editing)' },
     ],
   },
   {
     title: 'Editor',
     shortcuts: [
-      { keys: ['Ctrl/Cmd', 'Z'], description: 'Undo' },
-      { keys: ['Ctrl/Cmd', 'Y'], description: 'Redo' },
-      { keys: ['Ctrl/Cmd', 'B'], description: 'Bold' },
-      { keys: ['Ctrl/Cmd', 'I'], description: 'Italic' },
-      { keys: ['Ctrl/Cmd', 'U'], description: 'Underline' },
-      { keys: ['Ctrl/Cmd', 'E'], description: 'Inline code' },
-      { keys: ['Ctrl/Cmd', 'Shift', 'B'], description: 'Code block' },
-      { keys: ['Ctrl/Cmd', 'Shift', 'E'], description: 'Toggle raw/editor mode' },
+      { keys: ['Ctrl', 'Z'], description: 'Undo' },
+      { keys: ['Ctrl', 'Y'], description: 'Redo' },
+      { keys: ['Ctrl', 'B'], description: 'Bold' },
+      { keys: ['Ctrl', 'I'], description: 'Italic' },
+      { keys: ['Ctrl', 'U'], description: 'Underline' },
+      { keys: ['Ctrl', 'E'], description: 'Inline code' },
+      { keys: ['Ctrl', 'Shift', 'B'], description: 'Code block' },
     ],
   },
   {
     title: 'Font size',
     shortcuts: [
-      { keys: ['Ctrl/Cmd', '+'], description: 'Increase font size' },
-      { keys: ['Ctrl/Cmd', '-'], description: 'Decrease font size' },
-      { keys: ['Ctrl/Cmd', '0'], description: 'Reset font size' },
+      { keys: ['Ctrl', '+'], description: 'Increase font size' },
+      { keys: ['Ctrl', '-'], description: 'Decrease font size' },
+      { keys: ['Ctrl', '0'], description: 'Reset font size' },
     ],
   },
 ]
@@ -84,9 +75,6 @@ export function KeyboardShortcutsModal({ onClose }: Props) {
 
         {/* Content */}
         <div className="overflow-y-auto p-4 space-y-4">
-          <div className="rounded border border-accent/30 bg-accent/8 px-3 py-2 text-[11px] font-mono text-text-muted">
-            Tip: shortcuts marked as Ctrl/Cmd work on Windows/Linux with Ctrl and on macOS with Cmd.
-          </div>
           {SECTIONS.map((section) => (
             <div key={section.title}>
               <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">

@@ -28,62 +28,6 @@ export function TitleBar() {
 
   const refreshSyncStatus = () => window.noteflow.getSyncStatus().then(setSyncStatus)
 
-  const syncLabel = syncing
-    ? 'Syncing'
-    : pushing
-    ? 'Uploading'
-    : syncStatus.error
-    ? 'Sync error'
-    : syncStatus.connected
-    ? 'Synced'
-    : 'Sync off'
-
-  const syncTone = syncing || pushing
-    ? 'text-accent border-accent/35 bg-accent/10'
-    : syncStatus.error
-    ? 'text-amber-300 border-amber-300/35 bg-amber-300/10'
-    : syncStatus.connected
-    ? 'text-emerald-300 border-emerald-300/35 bg-emerald-300/10'
-    : 'text-text-muted border-border bg-surface-1'
-
-  const syncTooltip = syncing
-    ? 'Syncing notes...'
-    : pushing
-    ? 'Uploading local changes to GitHub...'
-    : syncStatus.error
-    ? `Sync error: ${syncStatus.error}`
-    : syncStatus.connected
-    ? `${syncStatus.owner}/${syncStatus.repo} · Last sync: ${formatLastSync(syncStatus.lastSync)}\nClick to sync now`
-    : 'GitHub sync is not connected. Open settings to configure it.'
-
-  const updateLabel = downloading
-    ? `Downloading ${downloadProgress > 0 ? `${downloadProgress}%` : '...'}`
-    : checkingUpdate
-    ? 'Checking updates'
-    : updateInfo
-    ? `Update v${updateInfo.latestVersion}`
-    : upToDate
-    ? 'Up to date'
-    : 'Check updates'
-
-  const updateTone = downloading || checkingUpdate
-    ? 'text-accent border-accent/35 bg-accent/10'
-    : updateInfo
-    ? 'text-sky-300 border-sky-300/35 bg-sky-300/10'
-    : upToDate
-    ? 'text-emerald-300 border-emerald-300/35 bg-emerald-300/10'
-    : 'text-text-muted border-border bg-surface-1 hover:text-text'
-
-  const updateTooltip = downloading
-    ? `Downloading update... ${downloadProgress > 0 ? `${downloadProgress}%` : ''}`
-    : checkingUpdate
-    ? 'Checking for updates...'
-    : updateInfo
-    ? `Update available: v${updateInfo.latestVersion}\nClick to download and install`
-    : upToDate
-    ? 'App is up to date'
-    : 'Check for updates'
-
   useEffect(() => {
     window.noteflow.checkUpdate().then((result) => {
       if (result.hasUpdate && result.latestVersion && result.downloadUrl) {
@@ -167,40 +111,46 @@ export function TitleBar() {
         className="flex items-center h-full"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        <button
-          onClick={updateInfo ? handleUpdate : handleCheckUpdate}
-          disabled={downloading || checkingUpdate}
-          className={`mx-1 inline-flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-mono transition-colors disabled:opacity-60 ${updateTone}`}
-          title={updateTooltip}
-        >
-          {downloading || checkingUpdate ? (
-            <RefreshCw size={11} className="animate-spin" />
-          ) : updateInfo ? (
-            <Download size={11} />
-          ) : upToDate ? (
-            <Check size={11} />
-          ) : (
-            <RefreshCw size={11} />
-          )}
-          <span>{updateLabel}</span>
-        </button>
-
-        <button
-          onClick={syncStatus.connected ? handleSync : () => setSyncModal(true)}
-          disabled={syncing || pushing}
-          className={`mx-1 inline-flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-mono transition-colors disabled:opacity-60 ${syncTone}`}
-          title={syncTooltip}
-        >
-          {syncing ? (
-            <RefreshCw size={11} className="animate-spin" />
-          ) : syncStatus.connected ? (
-            <Cloud size={11} className={pushing ? 'animate-pulse' : ''} />
-          ) : (
-            <CloudOff size={11} />
-          )}
-          <span>{syncLabel}</span>
-        </button>
-
+        {updateInfo && (
+          <button
+            onClick={handleUpdate}
+            disabled={downloading}
+            className="flex items-center gap-1 px-2 h-full text-accent hover:text-text transition-colors disabled:opacity-60"
+            title={downloading ? `Downloading... ${downloadProgress > 0 ? `${downloadProgress}%` : ''}` : `Update available: v${updateInfo.latestVersion}`}
+          >
+            {downloading ? (
+              <span className="text-[10px] font-mono">{downloadProgress > 0 ? `${downloadProgress}%` : '…'}</span>
+            ) : (
+              <Download size={12} />
+            )}
+          </button>
+        )}
+        {syncStatus.connected && (
+          <button
+            onClick={handleSync}
+            disabled={syncing || pushing}
+            className="flex items-center gap-1 px-2 h-full text-text-muted hover:text-text transition-colors disabled:opacity-60"
+            title={
+              syncing
+                ? 'Syncing...'
+                : pushing
+                ? 'Uploading changes...'
+                : syncStatus.error
+                ? `Sync error: ${syncStatus.error}`
+                : `${syncStatus.owner}/${syncStatus.repo} · Last sync: ${formatLastSync(syncStatus.lastSync)}\nClick to sync`
+            }
+          >
+            {syncing ? (
+              <RefreshCw size={12} className="animate-spin text-accent" />
+            ) : pushing ? (
+              <Cloud size={12} className="animate-pulse text-green-400" />
+            ) : syncStatus.error ? (
+              <Cloud size={12} className="text-amber-400" />
+            ) : (
+              <Cloud size={12} className="text-green-400" />
+            )}
+          </button>
+        )}
         <TitleBarMenu
           trigger={<Settings size={12} />}
           groups={[

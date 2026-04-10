@@ -2,7 +2,7 @@ import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, CalendarDays, X, FilterX } from 'lucide-react'
+import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, Columns2, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, CalendarDays, X, FilterX } from 'lucide-react'
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, isYesterday, startOfMonth, startOfWeek } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
@@ -560,152 +560,66 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         </button>
       </div>
 
-      <div className="px-3 pb-2 border-b border-border flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[10px] font-mono text-text-muted/70">
-            {notes.length} result{notes.length === 1 ? '' : 's'}
-          </span>
-          {hasSearchResults && activeSearchNoteId && (
-            <span className="text-[10px] font-mono text-accent/80 border border-accent/30 rounded px-1 py-0.5">
-              {keyboardResultIndex + 1}/{visibleNoteIds.length}
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1 flex-shrink-0">
-          {hasSearchFilter && (
-            <>
-              <button
-                onClick={() => moveSearchSelection(-1)}
-                disabled={!hasSearchResults}
-                className="p-1 rounded border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors disabled:opacity-40 disabled:hover:text-text-muted"
-                title="Resultado anterior (Flecha arriba)"
-              >
-                <ChevronUp size={10} />
-              </button>
-              <button
-                onClick={() => moveSearchSelection(1)}
-                disabled={!hasSearchResults}
-                className="p-1 rounded border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors disabled:opacity-40 disabled:hover:text-text-muted"
-                title="Resultado siguiente (Flecha abajo)"
-              >
-                <ChevronDown size={10} />
-              </button>
-              <button
-                onClick={openSelectedSearchResult}
-                disabled={!hasSearchResults}
-                className="px-1.5 py-1 rounded border border-border text-[10px] font-mono text-text-muted hover:text-text hover:border-accent/40 transition-colors disabled:opacity-40 disabled:hover:text-text-muted"
-                title="Abrir resultado seleccionado (Enter)"
-              >
-                Abrir
-              </button>
-            </>
-          )}
-
-          {hasActiveFilters && (
-            <button
-              onClick={clearAllFilters}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-text-muted border border-border hover:text-accent hover:border-accent/50 transition-colors"
-              title="Clear all active filters"
-            >
-              <FilterX size={10} />
-              Clear all
-            </button>
-          )}
-        </div>
-      </div>
-
-      {hasVisibleFilterChips && (
-        <div className="px-3 py-2 border-b border-border flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] font-mono text-text-muted/60 uppercase tracking-wider">Filters</span>
-          {hasSearchFilter && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors"
-              title="Clear search filter"
-            >
-              Search: {searchQuery.slice(0, 16)}{searchQuery.length > 16 ? '…' : ''}
-            </button>
-          )}
-          {hasDateFilter && (
-            <button
-              onClick={() => setFilterDate('all')}
-              className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors"
-              title="Clear date range filter"
-            >
-              Date: {filterDate}
-            </button>
-          )}
-          {hasDayFilter && selectedDayKey && (
-            <button
-              onClick={() => setSelectedDayKey(null)}
-              className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors"
-              title="Clear selected day filter"
-            >
-              Day: {format(dayKeyToDate(selectedDayKey), 'MMM d')}
-            </button>
-          )}
-          {hasTagFilter && (
-            <button
-              onClick={() => setFilterTag(null)}
-              className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors"
-              title="Clear tag filter"
-            >
-              Tag: {filterTag}
-            </button>
-          )}
-          {hasArchivedFilter && (
-            <button
-              onClick={() => setShowArchived(false)}
-              className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors"
-              title="Hide archived notes"
-            >
-              Archived
-            </button>
-          )}
-        </div>
-      )}
-
       {/* ── Date filter ────────────────────────────────────────────────────── */}
-      <div className="border-b border-border">
+      <div className="border-t border-b border-border">
         <div className="flex gap-1 px-3 py-2">
-          <div className="flex gap-1 flex-1 min-w-0">
-            {(['all', 'today', 'week', 'month'] as const).map((opt) => {
-              const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
-              const active = !selectedDayKey && filterDate === opt
-              return (
-                <button
-                  key={opt}
-                  onClick={() => {
-                    setFilterDate(opt)
-                    setSelectedDayKey(null)
-                  }}
-                  className="flex-1 py-0.5 rounded text-xs font-mono transition-colors"
-                  style={active
-                    ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
-                    : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
-                  }
-                >
-                  {labels[opt]}
-                </button>
-              )
-            })}
-          </div>
+          {(['all', 'today', 'week', 'month'] as const).map((opt) => {
+            const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
+            const active = !selectedDayKey && filterDate === opt
+            return (
+              <button
+                key={opt}
+                onClick={() => {
+                  setFilterDate(opt)
+                  setSelectedDayKey(null)
+                }}
+                className="flex-1 py-0.5 rounded text-xs font-mono transition-colors"
+                style={active
+                  ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
+                  : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
+                }
+              >
+                {labels[opt]}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="px-3 pb-2 flex items-center gap-1">
           <button
             onClick={() => setCalendarExpanded((prev) => !prev)}
-            className="px-2 py-0.5 rounded text-xs font-mono transition-colors flex items-center gap-1"
-            style={calendarExpanded
+            className="flex-1 flex items-center justify-center py-0.5 rounded text-xs font-mono transition-colors"
+            style={calendarExpanded || selectedDayKey
               ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
               : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
             }
             title={calendarExpanded ? 'Hide calendar' : 'Show calendar'}
           >
-            <CalendarDays size={10} />
-            Cal
+            <CalendarDays size={14} />
           </button>
+          {selectedDayKey && (
+            <button
+              onClick={() => setSelectedDayKey(null)}
+              className="p-0.5 rounded transition-colors"
+              style={{ color: 'rgb(var(--accent))' }}
+              title="Clear day filter"
+            >
+              <X size={13} />
+            </button>
+          )}
         </div>
+        {selectedDayKey && !calendarExpanded && (
+          <div className="px-3 pb-2">
+            <span className="text-[10px] font-mono text-accent">
+              {format(dayKeyToDate(selectedDayKey), 'EEEE, MMM d')}
+            </span>
+          </div>
+        )}
 
-        {calendarExpanded && (
+        <div
+          className="overflow-hidden transition-all duration-200 ease-in-out"
+          style={{ maxHeight: calendarExpanded ? '400px' : '0px', opacity: calendarExpanded ? 1 : 0 }}
+        >
           <div className="px-3 pb-2">
             <div className="rounded border border-border bg-surface-2/30 p-2">
               <div className="flex items-center justify-between mb-1.5">
@@ -749,7 +663,10 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                   return (
                     <button
                       key={dayKey}
-                      onClick={() => setSelectedDayKey((prev) => (prev === dayKey ? null : dayKey))}
+                      onClick={() => {
+                        setSelectedDayKey((prev) => (prev === dayKey ? null : dayKey))
+                        setCalendarExpanded(false)
+                      }}
                       title={hasActivity
                         ? `${format(day, 'PPP')} · created ${marker?.created ?? 0}, updated ${marker?.updated ?? 0}`
                         : format(day, 'PPP')
@@ -782,41 +699,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 })}
               </div>
 
-              <div className="flex items-center justify-between mt-2 text-[9px] font-mono text-text-muted/70">
-                <div className="flex items-center gap-2">
-                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />Created</span>
-                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-accent" />Updated</span>
-                </div>
-                {selectedDayKey && (
-                  <button
-                    onClick={() => setSelectedDayKey(null)}
-                    className="text-accent hover:text-text transition-colors"
-                    title="Clear day filter"
-                  >
-                    {format(dayKeyToDate(selectedDayKey), 'MMM d')} · clear
-                  </button>
-                )}
-              </div>
             </div>
           </div>
-        )}
-
-        {!calendarExpanded && selectedDayKey && (
-          <div className="px-3 pb-2">
-            <button
-              onClick={() => setSelectedDayKey(null)}
-              className="w-full rounded text-xs font-mono py-1 transition-colors"
-              style={{
-                color: 'rgb(var(--accent))',
-                background: 'rgb(var(--accent) / 0.12)',
-                border: '1px solid rgb(var(--accent) / 0.3)',
-              }}
-              title="Clear day filter"
-            >
-              Day: {format(dayKeyToDate(selectedDayKey), 'MMM d')} · clear
-            </button>
-          </div>
-        )}
+        </div>
       </div>
 
       {/* ── New note / new group buttons ────────────────────────────────────── */}
@@ -829,7 +714,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                        bg-accent/10 text-accent border border-accent/20
                        hover:bg-accent/20 hover:border-accent/40"
           >
-            + New note · Ctrl+N
+            + New note
           </button>
           <button
             onClick={() => { setNewGroupInput(true); setNewGroupName('') }}
@@ -876,6 +761,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               if (item.kind === 'group') {
                 const { group, notes: groupNotes } = item
                 const collapsed = collapsedGroupIds.has(group.id)
+                if (hasActiveFilters && groupNotes.length === 0) return null
                 return (
                   <li key={`group-${group.id}`}>
                     {/* Group header / rename input */}
@@ -1016,19 +902,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               }}
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
             >
-              <ExternalLink size={12} />
-              Open side by side
-            </button>
-            <button
-              onClick={() => {
-                setOpenNoteIds([note.id])
-                setActiveNote(note.id)
-                closeAllMenus()
-              }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
-            >
-              <PanelLeftClose size={12} />
-              Open only this note
+              <Columns2 size={12} />
+              Open alongside
             </button>
             <button
               onClick={() => { duplicateNote(note.id); closeAllMenus() }}
