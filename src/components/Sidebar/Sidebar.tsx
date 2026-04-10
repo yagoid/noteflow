@@ -1,11 +1,12 @@
 import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
-import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, ExternalLink, FolderPlus, FolderMinus, ChevronRight } from 'lucide-react'
-import { format, isToday, isYesterday } from 'date-fns'
+import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
+import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, Columns2, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, CalendarDays, X, FilterX } from 'lucide-react'
+import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, isYesterday, startOfMonth, startOfWeek } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
-import { getTagColor } from '../../lib/tagColors'
+import { getTagColor, normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
 import { NoteGroupHeader } from './NoteGroupHeader'
 import { useSidebarGroups } from './useSidebarGroups'
 import type { GroupColor } from '../../types'
@@ -29,10 +30,47 @@ function normalize(s: string): string {
     .replace(/\p{Diacritic}/gu, '')
 }
 
-const GROUP_COLORS: GroupColor[] = [
-  '--accent', '--accent-2', '--red', '--cyan',
-  '--purple', '--text', '--orange', '--pink',
-]
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function renderHighlightedText(text: string, query: string) {
+  const trimmed = query.trim()
+  if (!trimmed) return text
+  const matcher = new RegExp(`(${escapeRegExp(trimmed)})`, 'ig')
+  const parts = text.split(matcher)
+  if (parts.length <= 1) return text
+
+  return parts.map((part, index) => (
+    index % 2 === 1
+      ? (
+        <mark key={`${part}-${index}`} className="bg-accent/25 text-accent rounded px-[1px]">
+          {part}
+        </mark>
+      )
+      : <span key={`${part}-${index}`}>{part}</span>
+  ))
+}
+
+function toDayKey(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function toDayKeyFromIso(iso: string): string | null {
+  const parsed = new Date(iso)
+  if (Number.isNaN(parsed.getTime())) return null
+  return toDayKey(parsed)
+}
+
+function dayKeyToDate(dayKey: string): Date {
+  const [y, m, d] = dayKey.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+const GROUP_COLORS: GroupColor[] = [...TAG_COLOR_VARS]
 
 export function Sidebar({ onCollapse }: SidebarProps) {
   const rawNotes = useNotesStore((s) => s.notes)
@@ -53,9 +91,17 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setFilterDate = useNotesStore((s) => s.setFilterDate)
+  const setFilterTag = useNotesStore((s) => s.setFilterTag)
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
+  const clearFilters = useNotesStore((s) => s.clearFilters)
+  const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
+  const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const createNote = useNotesStore((s) => s.createNote)
   const duplicateNote = useNotesStore((s) => s.duplicateNote)
+
+  const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
+  const setSectionTagColor = useSectionTagColorsStore((s) => s.setSectionTagColor)
+  const clearSectionTagColor = useSectionTagColorsStore((s) => s.clearSectionTagColor)
 
   const groups = useGroupsStore((s) => s.groups)
   const collapsedGroupIds = useGroupsStore((s) => s.collapsedGroupIds)
@@ -111,6 +157,11 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   // noteId to delete after a successful unlock (for delete-encrypted-note flow)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => startOfMonth(new Date()))
+  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null)
+  const [calendarExpanded, setCalendarExpanded] = useState(false)
+  const [keyboardResultIndex, setKeyboardResultIndex] = useState(-1)
+
   // ── Close menus on click elsewhere ────────────────────────────────────────
   useEffect(() => {
     const close = () => {
@@ -132,25 +183,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     return () => window.removeEventListener('noteflow:focus-search', handler)
   }, [])
 
-  // ── Filtered + sorted notes ────────────────────────────────────────────────
-  const notes = useMemo(() => {
+  const baseNotes = useMemo(() => {
     return rawNotes
       .filter((n) => showArchived || !n.archived)
-      .filter((n) => {
-        if (filterDate === 'all') return true
-        const updated = new Date(n.updated)
-        const now = new Date()
-        if (filterDate === 'today') return isToday(updated)
-        if (filterDate === 'week') {
-          const weekAgo = new Date(now); weekAgo.setDate(now.getDate() - 7)
-          return updated >= weekAgo
-        }
-        if (filterDate === 'month') {
-          const monthAgo = new Date(now); monthAgo.setMonth(now.getMonth() - 1)
-          return updated >= monthAgo
-        }
-        return true
-      })
       .filter((n) => !filterTag || n.tags.includes(filterTag))
       .filter((n) => {
         if (!searchQuery.trim()) return true
@@ -165,9 +200,106 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
         return new Date(b.updated).getTime() - new Date(a.updated).getTime()
       })
-  }, [rawNotes, showArchived, filterDate, filterTag, searchQuery])
+  }, [rawNotes, showArchived, filterTag, searchQuery])
+
+  const notes = useMemo(() => {
+    if (selectedDayKey) {
+      return baseNotes.filter((note) => {
+        const createdDay = toDayKeyFromIso(note.created)
+        const updatedDay = toDayKeyFromIso(note.updated)
+        return createdDay === selectedDayKey || updatedDay === selectedDayKey
+      })
+    }
+
+    return baseNotes.filter((n) => {
+      if (filterDate === 'all') return true
+      const updated = new Date(n.updated)
+      const now = new Date()
+      if (filterDate === 'today') return isToday(updated)
+      if (filterDate === 'week') {
+        const weekAgo = new Date(now)
+        weekAgo.setDate(now.getDate() - 7)
+        return updated >= weekAgo
+      }
+      if (filterDate === 'month') {
+        const monthAgo = new Date(now)
+        monthAgo.setMonth(now.getMonth() - 1)
+        return updated >= monthAgo
+      }
+      return true
+    })
+  }, [baseNotes, filterDate, selectedDayKey])
+
+  const calendarDays = useMemo(() => {
+    const monthStart = startOfMonth(calendarMonth)
+    const monthEnd = endOfMonth(calendarMonth)
+    const rangeStart = startOfWeek(monthStart, { weekStartsOn: 1 })
+    const rangeEnd = endOfWeek(monthEnd, { weekStartsOn: 1 })
+    return eachDayOfInterval({ start: rangeStart, end: rangeEnd })
+  }, [calendarMonth])
+
+  const dayMarkers = useMemo(() => {
+    const markers = new Map<string, { created: number; updated: number }>()
+    for (const note of baseNotes) {
+      const createdKey = toDayKeyFromIso(note.created)
+      if (createdKey) {
+        const current = markers.get(createdKey) ?? { created: 0, updated: 0 }
+        current.created += 1
+        markers.set(createdKey, current)
+      }
+
+      const updatedKey = toDayKeyFromIso(note.updated)
+      if (updatedKey) {
+        const current = markers.get(updatedKey) ?? { created: 0, updated: 0 }
+        current.updated += 1
+        markers.set(updatedKey, current)
+      }
+    }
+    return markers
+  }, [baseNotes])
 
   const items = useSidebarGroups(notes, groups)
+  const visibleNoteIds = useMemo(() => {
+    const ids: string[] = []
+    for (const item of items) {
+      if (item.kind === 'group') {
+        ids.push(...item.notes.map((note) => note.id))
+      } else {
+        ids.push(item.note.id)
+      }
+    }
+    return ids
+  }, [items])
+  const hasSearchFilter = searchQuery.trim().length > 0
+  const hasDateFilter = filterDate !== 'all'
+  const hasTagFilter = Boolean(filterTag)
+  const hasDayFilter = Boolean(selectedDayKey)
+  const hasArchivedFilter = showArchived
+  const hasActiveFilters = hasSearchFilter || hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
+  const hasVisibleFilterChips = hasSearchFilter || hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
+  const hasSearchResults = hasSearchFilter && visibleNoteIds.length > 0
+  const scopedTotal = rawNotes.filter((n) => showArchived || !n.archived).length
+  const activeSearchNoteId =
+    hasSearchFilter && keyboardResultIndex >= 0 && keyboardResultIndex < visibleNoteIds.length
+      ? visibleNoteIds[keyboardResultIndex]
+      : null
+
+  useEffect(() => {
+    if (!hasSearchFilter || visibleNoteIds.length === 0) {
+      setKeyboardResultIndex(-1)
+      return
+    }
+    setKeyboardResultIndex((prev) => {
+      if (prev >= 0 && prev < visibleNoteIds.length) return prev
+      return 0
+    })
+  }, [hasSearchFilter, visibleNoteIds])
+
+  useEffect(() => {
+    if (!activeSearchNoteId) return
+    const target = document.querySelector<HTMLElement>(`[data-note-id="${activeSearchNoteId}"]`)
+    target?.scrollIntoView({ block: 'nearest' })
+  }, [activeSearchNoteId])
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function getNoteGroupDirect(noteId: string) {
@@ -182,12 +314,86 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     setGroupNameInput(null)
   }
 
+  function clearAllFilters() {
+    clearFilters()
+    setSelectedDayKey(null)
+    setCalendarExpanded(false)
+    setKeyboardResultIndex(-1)
+  }
+
+  function moveSearchSelection(direction: 1 | -1) {
+    if (visibleNoteIds.length === 0) return
+    setKeyboardResultIndex((prev) => {
+      if (prev < 0) return direction === 1 ? 0 : visibleNoteIds.length - 1
+      const next = prev + direction
+      if (next < 0) return visibleNoteIds.length - 1
+      if (next >= visibleNoteIds.length) return 0
+      return next
+    })
+  }
+
+  function openSelectedSearchResult() {
+    const targetId = activeSearchNoteId ?? visibleNoteIds[0]
+    if (!targetId) return
+    setOpenNoteIds([targetId])
+    setActiveNote(targetId)
+  }
+
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return
+    if (visibleNoteIds.length === 0) return
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      moveSearchSelection(1)
+      return
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      moveSearchSelection(-1)
+      return
+    }
+
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      openSelectedSearchResult()
+    }
+  }
+
+  function handleNoteDragStart(e: React.DragEvent<HTMLButtonElement>, noteId: string) {
+    e.dataTransfer.setData('application/x-noteflow-note-id', noteId)
+    e.dataTransfer.setData('text/plain', noteId)
+    e.dataTransfer.effectAllowed = 'copyMove'
+    window.dispatchEvent(new CustomEvent('noteflow:note-drag', {
+      detail: { active: true, noteId },
+    }))
+  }
+
+  function handleNoteDragEnd() {
+    window.dispatchEvent(new CustomEvent('noteflow:note-drag', {
+      detail: { active: false },
+    }))
+  }
+
   function renderNoteButton(note: (typeof rawNotes)[0], group?: { id: string; color: string } | null) {
     const isActive = activeNoteId === note.id
+    const isSearchTarget = activeSearchNoteId === note.id
     return (
       <li key={note.id}>
         <button
-          onClick={() => setActiveNote(note.id)}
+          data-note-id={note.id}
+          draggable
+          onDragStart={(e) => handleNoteDragStart(e, note.id)}
+          onDragEnd={handleNoteDragEnd}
+          onClick={(e) => {
+            if (e.ctrlKey || e.metaKey) {
+              openNoteInSplit(note.id)
+              return
+            }
+            setOpenNoteIds([note.id])
+            setActiveNote(note.id)
+          }}
           onContextMenu={(e) => {
             e.preventDefault()
             setContextMenu({
@@ -198,13 +404,17 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             })
           }}
           className={`relative w-full text-left px-4 py-2 transition-colors h-[64px] flex flex-col justify-center
-            ${isActive && !group ? 'bg-accent/10' : ''} ${!isActive ? 'hover:bg-surface-2' : ''}`}
+            ${isActive && !group ? 'bg-accent/10' : ''}
+            ${!isActive ? 'hover:bg-surface-2' : ''}
+            ${isSearchTarget ? 'ring-1 ring-inset ring-accent/50' : ''}`}
           style={{
             borderRight: group
               ? `1px solid rgb(var(${group.color}) / 0.6)`
               : '2px solid transparent',
             ...(isActive && group ? { background: `rgb(var(${group.color}) / 0.1)` } : {}),
+            ...(isSearchTarget && !isActive ? { background: 'rgb(var(--accent) / 0.08)' } : {}),
           }}
+          title="Ctrl/Cmd + click to open side by side"
         >
           {isActive && (
             <div
@@ -217,7 +427,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
             <span className={`text-[13px] font-mono font-medium truncate flex-1
               ${activeNoteId === note.id ? 'text-text' : 'text-text/80'}`}>
-              {note.title || 'Untitled'}
+              {renderHighlightedText(note.title || 'Untitled', searchQuery)}
             </span>
             <span className="text-xs font-mono text-text-muted/50 flex-shrink-0 ml-1">
               {formatNoteDate(note.updated)}
@@ -234,6 +444,11 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                   window.dispatchEvent(new CustomEvent('noteflow:request-section', {
                     detail: { noteId: note.id, sectionId: section.id }
                   }))
+                  if (e.ctrlKey || e.metaKey) {
+                    openNoteInSplit(note.id)
+                    return
+                  }
+                  setOpenNoteIds([note.id])
                   setActiveNote(note.id)
                 }}
                 onContextMenu={(e) => {
@@ -250,9 +465,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                   if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
                 }}
                 className="text-[10px] font-mono px-1 rounded flex-shrink-0 leading-[1.6] hover:opacity-70 transition-opacity cursor-pointer"
-                style={getTagColor(section.name)}
+                style={getTagColor(section.name, sectionTagColors)}
               >
-                {section.name}
+                {renderHighlightedText(section.name, searchQuery)}
               </span>
             ))}
           </div>
@@ -311,7 +526,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       })()}
 
       {/* ── Search + collapse ──────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+      <div className="flex items-center gap-2 px-3 py-2.5">
         <div className="relative flex-1">
           <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
           <input
@@ -320,10 +535,20 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             placeholder="Search... (Ctrl+F)"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-7 pr-2 py-1.5 bg-surface-2 border border-border rounded text-xs
+            onKeyDown={handleSearchKeyDown}
+            className="w-full pl-7 pr-7 py-1.5 bg-surface-2 border border-border rounded text-xs
                        font-mono text-text placeholder-text-muted/40 outline-none
                        focus:border-accent/50 transition-colors caret-accent"
           />
+          {hasSearchFilter && (
+            <button
+              onClick={() => setSearchQuery('')}
+              title="Clear search"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
+            >
+              <X size={11} />
+            </button>
+          )}
         </div>
         <button
           onClick={onCollapse}
@@ -336,24 +561,147 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       </div>
 
       {/* ── Date filter ────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 px-3 py-2 border-b border-border">
-        {(['all', 'today', 'week', 'month'] as const).map((opt) => {
-          const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
-          const active = filterDate === opt
-          return (
+      <div className="border-t border-b border-border">
+        <div className="flex gap-1 px-3 py-2">
+          {(['all', 'today', 'week', 'month'] as const).map((opt) => {
+            const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
+            const active = !selectedDayKey && filterDate === opt
+            return (
+              <button
+                key={opt}
+                onClick={() => {
+                  setFilterDate(opt)
+                  setSelectedDayKey(null)
+                }}
+                className="flex-1 py-0.5 rounded text-xs font-mono transition-colors"
+                style={active
+                  ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
+                  : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
+                }
+              >
+                {labels[opt]}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="px-3 pb-2 flex items-center gap-1">
+          <button
+            onClick={() => setCalendarExpanded((prev) => !prev)}
+            className="flex-1 flex items-center justify-center py-0.5 rounded text-xs font-mono transition-colors"
+            style={calendarExpanded || selectedDayKey
+              ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
+              : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
+            }
+            title={calendarExpanded ? 'Hide calendar' : 'Show calendar'}
+          >
+            <CalendarDays size={14} />
+          </button>
+          {selectedDayKey && (
             <button
-              key={opt}
-              onClick={() => setFilterDate(opt)}
-              className="flex-1 py-0.5 rounded text-xs font-mono transition-colors"
-              style={active
-                ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
-                : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
-              }
+              onClick={() => setSelectedDayKey(null)}
+              className="p-0.5 rounded transition-colors"
+              style={{ color: 'rgb(var(--accent))' }}
+              title="Clear day filter"
             >
-              {labels[opt]}
+              <X size={13} />
             </button>
-          )
-        })}
+          )}
+        </div>
+        {selectedDayKey && !calendarExpanded && (
+          <div className="px-3 pb-2">
+            <span className="text-[10px] font-mono text-accent">
+              {format(dayKeyToDate(selectedDayKey), 'EEEE, MMM d')}
+            </span>
+          </div>
+        )}
+
+        <div
+          className="overflow-hidden transition-all duration-200 ease-in-out"
+          style={{ maxHeight: calendarExpanded ? '400px' : '0px', opacity: calendarExpanded ? 1 : 0 }}
+        >
+          <div className="px-3 pb-2">
+            <div className="rounded border border-border bg-surface-2/30 p-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <button
+                  onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, -1)))}
+                  className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+                  title="Previous month"
+                >
+                  <ChevronLeft size={12} />
+                </button>
+                <div className="flex items-center gap-1.5 text-[10px] font-mono text-text-muted uppercase tracking-wider">
+                  <CalendarDays size={10} />
+                  <span>{format(calendarMonth, 'MMMM yyyy')}</span>
+                </div>
+                <button
+                  onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, 1)))}
+                  className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+                  title="Next month"
+                >
+                  <ChevronRight size={12} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-7 gap-1 mb-1">
+                {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((label) => (
+                  <div key={label} className="text-[9px] font-mono text-text-muted/60 text-center">
+                    {label}
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-7 gap-1">
+                {calendarDays.map((day) => {
+                  const dayKey = toDayKey(day)
+                  const marker = dayMarkers.get(dayKey)
+                  const isSelected = selectedDayKey === dayKey
+                  const inMonth = isSameMonth(day, calendarMonth)
+                  const today = isToday(day)
+                  const hasActivity = Boolean(marker && (marker.created > 0 || marker.updated > 0))
+
+                  return (
+                    <button
+                      key={dayKey}
+                      onClick={() => {
+                        setSelectedDayKey((prev) => (prev === dayKey ? null : dayKey))
+                        setCalendarExpanded(false)
+                      }}
+                      title={hasActivity
+                        ? `${format(day, 'PPP')} · created ${marker?.created ?? 0}, updated ${marker?.updated ?? 0}`
+                        : format(day, 'PPP')
+                      }
+                      className="h-7 rounded text-[10px] font-mono transition-colors flex flex-col items-center justify-center"
+                      style={isSelected
+                        ? {
+                            background: 'rgb(var(--accent) / 0.22)',
+                            border: '1px solid rgb(var(--accent) / 0.5)',
+                            color: 'rgb(var(--accent))',
+                          }
+                        : {
+                            background: inMonth ? 'transparent' : 'rgb(var(--surface-1) / 0.45)',
+                            border: today ? '1px solid rgb(var(--accent) / 0.35)' : '1px solid rgb(var(--border) / 0.4)',
+                            color: inMonth ? 'rgb(var(--text-muted))' : 'rgb(var(--text-muted) / 0.45)',
+                          }
+                      }
+                    >
+                      <span>{format(day, 'd')}</span>
+                      <span className="h-[3px] flex items-center gap-[2px] mt-[1px]">
+                        {marker && marker.created > 0 && (
+                          <span className="w-[4px] h-[4px] rounded-full bg-emerald-400" />
+                        )}
+                        {marker && marker.updated > 0 && (
+                          <span className="w-[4px] h-[4px] rounded-full bg-accent" />
+                        )}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ── New note / new group buttons ────────────────────────────────────── */}
@@ -405,7 +753,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-text-muted gap-2">
             <span className="text-2xl opacity-20">∅</span>
-            <span className="text-xs font-mono">No notes</span>
+            <span className="text-xs font-mono">{rawNotes.length > 0 ? 'No notes match current filters' : 'No notes'}</span>
           </div>
         ) : (
           <ul className="pt-2 pb-1">
@@ -413,6 +761,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               if (item.kind === 'group') {
                 const { group, notes: groupNotes } = item
                 const collapsed = collapsedGroupIds.has(group.id)
+                if (hasActiveFilters && groupNotes.length === 0) return null
                 return (
                   <li key={`group-${group.id}`}>
                     {/* Group header / rename input */}
@@ -484,6 +833,12 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         const note = rawNotes.find(n => n.id === contextMenu.noteId)
         if (!note) return null
         const currentGroup = getNoteGroupDirect(note.id)
+        const currentSection = contextMenu.sectionId
+          ? note.sections.find((section) => section.id === contextMenu.sectionId) ?? null
+          : null
+        const currentSectionColor = currentSection
+          ? sectionTagColors[normalizeTagColorKey(currentSection.name)]
+          : undefined
         return (
           <div
             className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-48 overflow-hidden animate-in fade-in zoom-in duration-100"
@@ -541,12 +896,62 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               </button>
             )}
             <button
+              onClick={() => {
+                openNoteInSplit(note.id)
+                closeAllMenus()
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+            >
+              <Columns2 size={12} />
+              Open alongside
+            </button>
+            <button
               onClick={() => { duplicateNote(note.id); closeAllMenus() }}
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
             >
               <Copy size={12} />
               Duplicate note
             </button>
+
+            {currentSection && (
+              <>
+                <div className="h-px bg-border my-1" />
+                <div className="px-3 pt-1 text-[10px] font-mono text-text-muted uppercase tracking-wider">
+                  Section color
+                </div>
+                <div className="px-3 py-2">
+                  <div className="flex gap-1.5 flex-wrap">
+                    {GROUP_COLORS.map((color) => (
+                      <button
+                        key={`section-color-${color}`}
+                        title={color.replace('--', '')}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void setSectionTagColor(currentSection.name, color)
+                          closeAllMenus()
+                        }}
+                        className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${currentSectionColor === color ? 'ring-1 ring-white/50 ring-offset-1 ring-offset-surface-2' : ''}`}
+                        style={{ background: `rgb(var(${color}))` }}
+                      />
+                    ))}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void clearSectionTagColor(currentSection.name)
+                        closeAllMenus()
+                      }}
+                      className={`px-1.5 h-4 rounded text-[9px] font-mono border transition-colors ${
+                        currentSectionColor
+                          ? 'text-text-muted border-border hover:text-text hover:border-accent/40'
+                          : 'text-accent border-accent/50 bg-accent/10'
+                      }`}
+                    >
+                      Auto
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* ── Group section ── */}
             <div className="h-px bg-border my-1" />
@@ -758,7 +1163,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           <Archive size={10} />
           {showArchived ? 'Hide archived' : 'Show archived'}
         </button>
-        <span className="text-xs font-mono text-text-muted/40">{notes.length} notes</span>
+        <span className="text-xs font-mono text-text-muted/40">
+          {notes.length}{hasActiveFilters ? ` / ${scopedTotal}` : ''} notes
+        </span>
       </div>
     </div>
   )

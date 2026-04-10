@@ -25,6 +25,8 @@ const api = {
     setUiState: (patch) => electron_1.ipcRenderer.invoke('settings:set-ui-state', patch),
     getGroups: () => electron_1.ipcRenderer.invoke('groups:get'),
     setGroups: (groups) => electron_1.ipcRenderer.invoke('groups:set', groups),
+    getSectionTagColors: () => electron_1.ipcRenderer.invoke('section-colors:get'),
+    setSectionTagColors: (colors) => electron_1.ipcRenderer.invoke('section-colors:set', colors),
     // Window controls
     openSticky: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-sticky', noteId, sectionId),
     minimize: () => electron_1.ipcRenderer.send('window:minimize'),

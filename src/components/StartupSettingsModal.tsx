@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bookmark, Monitor, X } from 'lucide-react'
 import { useNotesStore } from '../stores/notesStore'
 import { getTagColor } from '../lib/tagColors'
+import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
 
 interface StartupSticky {
   noteId: string
@@ -14,6 +15,7 @@ interface StartupSettingsModalProps {
 
 export function StartupSettingsModal({ onClose }: StartupSettingsModalProps) {
   const notes = useNotesStore((s) => s.notes)
+  const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
   const [openAtLogin, setOpenAtLogin] = useState(false)
   const [startupStickies, setStartupStickies] = useState<StartupSticky[]>([])
   const [loading, setLoading] = useState(true)
@@ -148,8 +150,8 @@ export function StartupSettingsModal({ onClose }: StartupSettingsModalProps) {
                                 className="text-[9px] font-mono px-1.5 py-0.5 rounded transition-all"
                                 style={
                                   active
-                                    ? { ...getTagColor(section.name), opacity: 1, outline: '1px solid currentColor' }
-                                    : { ...getTagColor(section.name), opacity: 0.35 }
+                                    ? { ...getTagColor(section.name, sectionTagColors), opacity: 1, outline: '1px solid currentColor' }
+                                    : { ...getTagColor(section.name, sectionTagColors), opacity: 0.35 }
                                 }
                               >
                                 {section.name}

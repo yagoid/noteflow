@@ -115,6 +115,8 @@ declare global {
       setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }) => Promise<void>
       getGroups: () => Promise<NoteGroup[]>
       setGroups: (groups: NoteGroup[]) => Promise<void>
+      getSectionTagColors: () => Promise<Record<string, GroupColor>>
+      setSectionTagColors: (colors: Record<string, GroupColor>) => Promise<void>
       checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }>
       openUrl: (url: string) => Promise<void>
       downloadAndInstall: (url: string) => Promise<{ success: boolean; error?: string }>
@@ -127,7 +129,14 @@ declare global {
       initiateGitHubAuth: (repo: string) => Promise<{ ok: boolean; userCode?: string; verificationUri?: string; error?: string }>
       cancelGitHubAuth: () => Promise<{ ok: boolean }>
       disconnectGitHub: () => Promise<{ ok: boolean }>
-      pullNotes: () => Promise<{ pulled: number; errors: string[] }>
+      pullNotes: () => Promise<{
+        pulled: number
+        deleted: number
+        errors: string[]
+        updatedFiles: string[]
+        hadDeletions: boolean
+        hadMetadataChanges: boolean
+      }>
       onSyncAuthComplete: (cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void) => () => void
       onSyncPushState: (cb: (state: 'pushing' | 'idle') => void) => () => void
       scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) => void

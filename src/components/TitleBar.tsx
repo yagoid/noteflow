@@ -41,10 +41,16 @@ export function TitleBar() {
       setPushing(state === 'pushing')
       if (state === 'idle') refreshSyncStatus()
     })
-    return () => { unsubNotes(); unsubPush() }
+    const openShortcutsHandler = () => setShortcutsModal(true)
+    window.addEventListener('noteflow:open-shortcuts', openShortcutsHandler)
+    return () => {
+      unsubNotes()
+      unsubPush()
+      window.removeEventListener('noteflow:open-shortcuts', openShortcutsHandler)
+    }
   }, [])
 
-  const formatLastSync = (iso?: string) => {
+  function formatLastSync(iso?: string) {
     if (!iso) return 'Never'
     const d = new Date(iso)
     const now = new Date()

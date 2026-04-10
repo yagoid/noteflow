@@ -1,4 +1,6 @@
-const COLOR_VARS = [
+import type { GroupColor } from '../types'
+
+export const TAG_COLOR_VARS: readonly GroupColor[] = [
   '--accent',
   '--accent-2',
   '--red',
@@ -9,14 +11,26 @@ const COLOR_VARS = [
   '--pink',
 ] as const
 
+export type TagColorMap = Partial<Record<string, GroupColor>>
+
+export function normalizeTagColorKey(name: string): string {
+  return name.trim().toLowerCase()
+}
+
 function hashString(s: string): number {
   let h = 0
   for (let i = 0; i < s.length; i++) h = ((h * 31) + s.charCodeAt(i)) >>> 0
   return h
 }
 
-function colorVar(name: string): string {
-  return COLOR_VARS[hashString(name) % COLOR_VARS.length]
+function colorVar(name: string): GroupColor {
+  return TAG_COLOR_VARS[hashString(name) % TAG_COLOR_VARS.length]
+}
+
+function resolveColorVar(name: string, overrides?: TagColorMap): GroupColor {
+  const key = normalizeTagColorKey(name)
+  const override = key ? overrides?.[key] : undefined
+  return override ?? colorVar(name)
 }
 
 export interface TagColorStyle {
@@ -26,8 +40,8 @@ export interface TagColorStyle {
 }
 
 /** Colores para estado inactivo (opacidad baja) */
-export function getTagColor(name: string): TagColorStyle {
-  const v = colorVar(name)
+export function getTagColor(name: string, overrides?: TagColorMap): TagColorStyle {
+  const v = resolveColorVar(name, overrides)
   return {
     color:      `rgb(var(${v}))`,
     background: `rgb(var(${v}) / 0.12)`,
@@ -36,8 +50,8 @@ export function getTagColor(name: string): TagColorStyle {
 }
 
 /** Colores para estado activo/seleccionado (opacidad alta) */
-export function getTagColorActive(name: string): TagColorStyle {
-  const v = colorVar(name)
+export function getTagColorActive(name: string, overrides?: TagColorMap): TagColorStyle {
+  const v = resolveColorVar(name, overrides)
   return {
     color:      `rgb(var(${v}))`,
     background: `rgb(var(${v}) / 0.22)`,
@@ -46,7 +60,7 @@ export function getTagColorActive(name: string): TagColorStyle {
 }
 
 /** Devuelve el style object a pasar como prop `style` */
-export function tagStyle(name: string, active: boolean): React.CSSProperties {
-  const c = active ? getTagColorActive(name) : getTagColor(name)
+export function tagStyle(name: string, active: boolean, overrides?: TagColorMap): React.CSSProperties {
+  const c = active ? getTagColorActive(name, overrides) : getTagColor(name, overrides)
   return { color: c.color, background: c.background, border: c.border }
 }

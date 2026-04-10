@@ -16,6 +16,7 @@ function normalize(s: string): string {
 interface NotesState {
   notes: Note[]
   activeNoteId: string | null
+  openNoteIds: string[]
   notesDir: string
 
   // UI state
@@ -42,11 +43,15 @@ interface NotesState {
   deleteNote: (id: string) => Promise<void>
   archiveNote: (id: string) => Promise<void>
   setActiveNote: (id: string | null) => void
+  setOpenNoteIds: (ids: string[]) => void
+  openNoteInSplit: (id: string) => void
+  closeOpenNote: (id: string) => void
   setSearchQuery: (q: string) => void
   setFilterSection: (s: string) => void
   setFilterDate: (f: 'all' | 'today' | 'week' | 'month') => void
   setFilterTag: (tag: string | null) => void
   setShowArchived: (v: boolean) => void
+  clearFilters: () => void
   setCommandPaletteOpen: (v: boolean) => void
   setNewlyCreatedNoteId: (id: string | null) => void
   syncNote: (filePath: string) => Promise<void>
@@ -65,6 +70,7 @@ interface NotesState {
 export const useNotesStore = create<NotesState>((set, get) => ({
   notes: [],
   activeNoteId: null,
+  openNoteIds: [],
   notesDir: '',
   searchQuery: '',
   filterSection: 'all',
@@ -100,6 +106,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         notes,
         isLoading: false,
         activeNoteId,
+        openNoteIds: activeNoteId ? [activeNoteId] : [],
         pendingInitialSectionId: uiState.activeSectionId ?? null,
       })
 
@@ -114,7 +121,44 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   syncNote: async (filePath: string) => {
     try {
       const raw = await window.noteflow.readNote(filePath)
-      if (!raw) return
+      if (!raw) {
+        const targetFilename = filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase()
+        if (!targetFilename) return
+
+        set((s) => {
+          const removedIds = s.notes
+            .filter((n) => n.filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase() === targetFilename)
+            .map((n) => n.id)
+
+          if (removedIds.length === 0) return {}
+
+          const removedSet = new Set(removedIds)
+          const remaining = s.notes.filter((n) => !removedSet.has(n.id))
+          const nextActiveId =
+            (s.activeNoteId && !removedSet.has(s.activeNoteId) ? s.activeNoteId : null) ??
+            remaining.find((n) => !n.archived)?.id ??
+            remaining[0]?.id ??
+            null
+
+          const nextOpen = s.openNoteIds
+            .filter((openId) => !removedSet.has(openId))
+            .filter((openId) => remaining.some((n) => n.id === openId))
+
+          if (nextActiveId && !nextOpen.includes(nextActiveId)) nextOpen.unshift(nextActiveId)
+
+          const nextSessionPasswords = Object.fromEntries(
+            Object.entries(s.sessionPasswords).filter(([noteId]) => !removedSet.has(noteId))
+          )
+
+          return {
+            notes: remaining,
+            activeNoteId: nextActiveId,
+            openNoteIds: nextOpen,
+            sessionPasswords: nextSessionPasswords,
+          }
+        })
+        return
+      }
       
       const incomingNote = parseNote(raw, filePath)
       const existingNote = get().notes.find(n => n.id === incomingNote.id)
@@ -144,7 +188,12 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const note: Note = { ...draft, filePath, raw }
 
     await window.noteflow.writeNote(filePath, raw)
-    set((s) => ({ notes: [note, ...s.notes], activeNoteId: note.id, newlyCreatedNoteId: note.id }))
+    set((s) => ({
+      notes: [note, ...s.notes],
+      activeNoteId: note.id,
+      openNoteIds: [note.id],
+      newlyCreatedNoteId: note.id,
+    }))
     return note
   },
 
@@ -169,7 +218,12 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const raw = serializeNote(draft as Note)
     const note: Note = { ...draft, filePath, raw }
     await window.noteflow.writeNote(filePath, raw)
-    set((s) => ({ notes: [note, ...s.notes], activeNoteId: note.id, newlyCreatedNoteId: note.id }))
+    set((s) => ({
+      notes: [note, ...s.notes],
+      activeNoteId: note.id,
+      openNoteIds: [note.id],
+      newlyCreatedNoteId: note.id,
+    }))
     return note
   },
 
@@ -238,7 +292,16 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       const remaining = s.notes.filter((n) => n.id !== id)
       const nextActive = remaining.find((n) => !n.archived) ?? remaining[0] ?? null
       const { [id]: _, ...sessionPasswords } = s.sessionPasswords
-      return { notes: remaining, activeNoteId: nextActive?.id ?? null, sessionPasswords }
+      const nextOpen = s.openNoteIds
+        .filter((openId) => openId !== id)
+        .filter((openId) => remaining.some((n) => n.id === openId))
+      if (nextActive?.id && !nextOpen.includes(nextActive.id)) nextOpen.unshift(nextActive.id)
+      return {
+        notes: remaining,
+        activeNoteId: nextActive?.id ?? null,
+        openNoteIds: nextOpen,
+        sessionPasswords,
+      }
     })
   },
 
@@ -269,14 +332,73 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         }
       }
     }
-    set({ activeNoteId: id })
+    set((s) => {
+      if (!id) return { activeNoteId: null }
+      if (s.openNoteIds.includes(id)) return { activeNoteId: id }
+      return { activeNoteId: id, openNoteIds: [id] }
+    })
     if (id) window.noteflow.setUiState({ activeNoteId: id })
+  },
+  setOpenNoteIds: (ids) => {
+    set((s) => {
+      const existing = new Set(s.notes.map((n) => n.id))
+      const unique = [...new Set(ids.filter((id) => existing.has(id)))]
+      if (unique.length === 0) {
+        const fallbackId =
+          (s.activeNoteId && existing.has(s.activeNoteId) ? s.activeNoteId : null) ??
+          s.notes.find((n) => !n.archived)?.id ??
+          s.notes[0]?.id ??
+          null
+        return fallbackId
+          ? { openNoteIds: [fallbackId], activeNoteId: fallbackId }
+          : { openNoteIds: [], activeNoteId: null }
+      }
+      const nextActive = s.activeNoteId && unique.includes(s.activeNoteId)
+        ? s.activeNoteId
+        : unique[0]
+      return { openNoteIds: unique, activeNoteId: nextActive }
+    })
+  },
+  openNoteInSplit: (id) => {
+    set((s) => {
+      if (!s.notes.some((n) => n.id === id)) return {}
+      const nextOpen = s.openNoteIds.includes(id) ? s.openNoteIds : [...s.openNoteIds, id]
+      return { openNoteIds: nextOpen, activeNoteId: id }
+    })
+    window.noteflow.setUiState({ activeNoteId: id })
+  },
+  closeOpenNote: (id) => {
+    set((s) => {
+      const nextOpen = s.openNoteIds.filter((openId) => openId !== id)
+      if (nextOpen.length === 0) {
+        const fallbackId =
+          s.notes.find((n) => n.id !== id && !n.archived)?.id ??
+          s.notes.find((n) => n.id !== id)?.id ??
+          null
+        return fallbackId
+          ? { openNoteIds: [fallbackId], activeNoteId: fallbackId }
+          : { openNoteIds: [], activeNoteId: null }
+      }
+
+      const nextActive = s.activeNoteId === id
+        ? nextOpen[nextOpen.length - 1]
+        : (s.activeNoteId && nextOpen.includes(s.activeNoteId) ? s.activeNoteId : nextOpen[0])
+
+      return { openNoteIds: nextOpen, activeNoteId: nextActive }
+    })
   },
   setSearchQuery:       (q)   => set({ searchQuery: q }),
   setFilterSection:     (s)   => set({ filterSection: s }),
   setFilterDate:        (f)   => set({ filterDate: f }),
   setFilterTag:         (tag) => set({ filterTag: tag }),
   setShowArchived:      (v)   => set({ showArchived: v }),
+  clearFilters:         ()    => set({
+    searchQuery: '',
+    filterSection: 'all',
+    filterDate: 'all',
+    filterTag: null,
+    showArchived: false,
+  }),
   setCommandPaletteOpen:(v)   => set({ commandPaletteOpen: v }),
   setNewlyCreatedNoteId:(id) => set({ newlyCreatedNoteId: id }),
 
@@ -295,9 +417,13 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       const nextActive = s.activeNoteId === id
         ? (remaining.find((n) => !n.archived) ?? remaining[0] ?? null)
         : null
+      const nextOpen = s.openNoteIds
+        .filter((openId) => openId !== id)
+        .filter((openId) => remaining.some((n) => n.id === openId))
+      if (nextActive?.id && !nextOpen.includes(nextActive.id)) nextOpen.unshift(nextActive.id)
       return nextActive !== null
-        ? { notes: remaining, activeNoteId: nextActive.id }
-        : { notes: remaining }
+        ? { notes: remaining, activeNoteId: nextActive.id, openNoteIds: nextOpen }
+        : { notes: remaining, openNoteIds: nextOpen }
     })
   },
 

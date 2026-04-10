@@ -18,6 +18,7 @@ const SECTIONS: ShortcutSection[] = [
       { keys: ['Ctrl', 'N'], description: 'New note' },
       { keys: ['Ctrl', 'F'], description: 'Focus search' },
       { keys: ['Ctrl', '\''], description: 'Toggle sidebar' },
+      { keys: ['Ctrl', 'Click'], description: 'Open note side by side' },
     ],
   },
   {

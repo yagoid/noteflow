@@ -44,6 +44,8 @@ const api = {
     ipcRenderer.invoke('settings:set-ui-state', patch),
   getGroups: (): Promise<unknown[]> => ipcRenderer.invoke('groups:get'),
   setGroups: (groups: unknown[]): Promise<void> => ipcRenderer.invoke('groups:set', groups),
+  getSectionTagColors: (): Promise<Record<string, string>> => ipcRenderer.invoke('section-colors:get'),
+  setSectionTagColors: (colors: Record<string, string>): Promise<void> => ipcRenderer.invoke('section-colors:set', colors),
 
   // Window controls
   openSticky: (noteId: string, sectionId: string) => ipcRenderer.send('window:open-sticky', noteId, sectionId),
@@ -90,7 +92,14 @@ const api = {
     ipcRenderer.invoke('sync:initiate', repo),
   cancelGitHubAuth: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:cancel-auth'),
   disconnectGitHub: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:disconnect'),
-  pullNotes: (): Promise<{ pulled: number; errors: string[] }> => ipcRenderer.invoke('sync:pull'),
+  pullNotes: (): Promise<{
+    pulled: number
+    deleted: number
+    errors: string[]
+    updatedFiles: string[]
+    hadDeletions: boolean
+    hadMetadataChanges: boolean
+  }> => ipcRenderer.invoke('sync:pull'),
   onSyncAuthComplete: (
     cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void
   ) => {

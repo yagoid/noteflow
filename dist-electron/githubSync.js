@@ -35,6 +35,9 @@ This repository is **private**. As long as it stays that way, nobody else can se
 
 You are reading this note inside NoteFlow. It lives in your GitHub repository as \`README.md\` and will stay in sync like any other note.
 `;
+const GROUPS_FILENAME = 'groups.json';
+const SECTION_COLORS_FILENAME = 'section-colors.json';
+const METADATA_FILENAMES = [GROUPS_FILENAME, SECTION_COLORS_FILENAME];
 // ── Settings helpers ──────────────────────────────────────────────────────────
 function getSettingsPath() {
     return path_1.default.join(electron_1.app.getPath('userData'), 'settings.json');
@@ -384,13 +387,30 @@ function disconnectGitHub() {
 async function pullNotes(notesDir) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
-        return { pulled: 0, deleted: 0, errors: [], updatedFiles: [], hadDeletions: false };
+        return { pulled: 0, deleted: 0, errors: [], updatedFiles: [], hadDeletions: false, hadMetadataChanges: false };
     }
-    const token = decryptToken(s.encryptedToken);
+    let token;
+    try {
+        token = decryptToken(s.encryptedToken);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const userFacingError = `Failed to decrypt GitHub token. Please reconnect GitHub sync. (${msg})`;
+        syncError = userFacingError;
+        return {
+            pulled: 0,
+            deleted: 0,
+            errors: [userFacingError],
+            updatedFiles: [],
+            hadDeletions: false,
+            hadMetadataChanges: false,
+        };
+    }
     let pulled = 0;
     let deleted = 0;
     const errors = [];
     const updatedFiles = [];
+    let hadMetadataChanges = false;
     try {
         const remoteFiles = await listRemoteNotes(token, s.owner, s.repo);
         for (const file of remoteFiles) {
@@ -403,8 +423,10 @@ async function pullNotes(notesDir) {
                     const localContent = fs_1.default.readFileSync(localPath, 'utf-8');
                     const localUpdated = extractUpdatedTimestamp(localContent);
                     const remoteUpdated = extractUpdatedTimestamp(remote.content);
+                    const localUpdatedTs = parseUpdatedTimestamp(localUpdated);
+                    const remoteUpdatedTs = parseUpdatedTimestamp(remoteUpdated);
                     // Skip if local is newer or equal
-                    if (localUpdated && remoteUpdated && remoteUpdated <= localUpdated)
+                    if (localUpdatedTs !== null && remoteUpdatedTs !== null && remoteUpdatedTs <= localUpdatedTs)
                         continue;
                 }
                 fs_1.default.writeFileSync(localPath, remote.content, 'utf-8');
@@ -435,9 +457,10 @@ async function pullNotes(notesDir) {
                 try {
                     const localContent = fs_1.default.readFileSync(localPath, 'utf-8');
                     const localUpdated = extractUpdatedTimestamp(localContent);
-                    if (!localUpdated)
+                    const localUpdatedTime = parseUpdatedTimestamp(localUpdated);
+                    if (localUpdatedTime === null)
                         continue; // can't determine age — skip to be safe
-                    if (new Date(localUpdated).getTime() > lastSyncTime)
+                    if (localUpdatedTime > lastSyncTime)
                         continue; // created locally after last sync, not yet pushed
                     fs_1.default.unlinkSync(localPath);
                     deleted++;
@@ -445,14 +468,25 @@ async function pullNotes(notesDir) {
                 catch { /* ignore */ }
             }
         }
-        // Pull groups.json if it exists in the remote repo
-        try {
-            const remoteGroups = await getRemoteFile(token, s.owner, s.repo, 'groups.json');
-            if (remoteGroups) {
-                fs_1.default.writeFileSync(path_1.default.join(notesDir, 'groups.json'), remoteGroups.content, 'utf-8');
+        // Pull optional metadata JSON files used by non-note features.
+        for (const metadataFilename of METADATA_FILENAMES) {
+            try {
+                const remoteMetadata = await getRemoteFile(token, s.owner, s.repo, metadataFilename);
+                if (!remoteMetadata)
+                    continue;
+                const metadataPath = path_1.default.join(notesDir, metadataFilename);
+                const localContent = fs_1.default.existsSync(metadataPath)
+                    ? fs_1.default.readFileSync(metadataPath, 'utf-8')
+                    : null;
+                if (localContent !== remoteMetadata.content) {
+                    fs_1.default.writeFileSync(metadataPath, remoteMetadata.content, 'utf-8');
+                    hadMetadataChanges = true;
+                }
+            }
+            catch {
+                // Optional metadata file is missing or unreadable remotely.
             }
         }
-        catch { /* ignore — groups.json is optional */ }
         syncSettings = { ...s, lastSync: new Date().toISOString() };
         const settings = readSettings();
         settings.githubSync = syncSettings;
@@ -464,23 +498,41 @@ async function pullNotes(notesDir) {
         syncError = msg;
         errors.push(msg);
     }
-    return { pulled, deleted, errors, updatedFiles, hadDeletions: deleted > 0 };
+    return {
+        pulled,
+        deleted,
+        errors,
+        updatedFiles,
+        hadDeletions: deleted > 0,
+        hadMetadataChanges,
+    };
 }
 async function pushAllNotes(notesDir) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo)
         return { pushed: 0, errors: [] };
-    const token = decryptToken(s.encryptedToken);
+    let token;
+    try {
+        token = decryptToken(s.encryptedToken);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const userFacingError = `Failed to decrypt GitHub token. Please reconnect GitHub sync. (${msg})`;
+        syncError = userFacingError;
+        return { pushed: 0, errors: [userFacingError] };
+    }
     let pushed = 0;
     const errors = [];
-    let files;
+    let filesToPush;
     try {
-        files = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md'));
+        const noteFiles = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md'));
+        const metadataFiles = METADATA_FILENAMES.filter((filename) => fs_1.default.existsSync(path_1.default.join(notesDir, filename)));
+        filesToPush = [...noteFiles, ...metadataFiles];
     }
     catch {
         return { pushed: 0, errors: [] };
     }
-    for (const filename of files) {
+    for (const filename of filesToPush) {
         try {
             const content = fs_1.default.readFileSync(path_1.default.join(notesDir, filename), 'utf-8');
             await upsertRemoteFile(token, s.owner, s.repo, filename, content);
@@ -547,6 +599,12 @@ async function scheduleDelete(filePath) {
 }
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function extractUpdatedTimestamp(content) {
-    const match = content.match(/^updated:\s*['"]?([^'">\n]+)['"]?\s*$/m);
+    const match = content.match(/^updated:\s*['"]?([^'"\n]+)['"]?\s*$/m);
     return match ? match[1].trim() : null;
+}
+function parseUpdatedTimestamp(value) {
+    if (!value)
+        return null;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
 }

@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid'
 import { useNotesStore } from '../stores/notesStore'
 import { noteFilename, parseNote, serializeNote } from '../lib/noteUtils'
 import { getTagColor } from '../lib/tagColors'
+import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
 import type { ImportConflictStrategy, ImportPreviewEntry, NoteflowExportEntry } from '../types'
 
 interface Props {
@@ -73,6 +74,7 @@ export function ExportImportModal({ mode: initialMode, onClose }: Props) {
 
 function ExportPanel({ onClose }: { onClose: () => void }) {
   const { notes, activeNoteId } = useNotesStore()
+  const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
   const [step, setStep] = useState<ExportStep>('select')
   const [successPath, setSuccessPath] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
@@ -270,8 +272,8 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
                           className="text-[9px] font-mono px-1.5 py-0.5 rounded transition-all"
                           style={
                             active
-                              ? { ...getTagColor(section.name), opacity: 1, outline: '1px solid currentColor' }
-                              : { ...getTagColor(section.name), opacity: 0.35 }
+                              ? { ...getTagColor(section.name, sectionTagColors), opacity: 1, outline: '1px solid currentColor' }
+                              : { ...getTagColor(section.name, sectionTagColors), opacity: 0.35 }
                           }
                         >
                           {section.name}

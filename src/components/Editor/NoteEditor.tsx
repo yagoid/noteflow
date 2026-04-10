@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
+import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { Editor } from './Editor'
-import type { NoteSection } from '../../types'
+import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Pin, Trash2, Copy, Eye, Edit3,
-  Plus, X, Check, Pencil, ExternalLink, Lock,
+  Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
+import { getTagColor, normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
 
 // ---------------------------------------------------------------------------
 // Confirm modal state type
@@ -23,15 +25,36 @@ interface ModalState {
   onConfirm: () => void
 }
 
+interface SectionUndoState {
+  noteId: string
+  sectionName: string
+  previousSections: NoteSection[]
+  previousActiveSectionId: string | null
+}
+
+interface NoteEditorProps {
+  noteId?: string
+}
+
 // ---------------------------------------------------------------------------
 // NoteEditor
 // ---------------------------------------------------------------------------
-export function NoteEditor() {
-  const note = useNotesStore((s) => s.notes.find((n) => n.id === s.activeNoteId) ?? null)
+export function NoteEditor({ noteId }: NoteEditorProps) {
+  const globalActiveNoteId = useNotesStore((s) => s.activeNoteId)
+  const resolvedNoteId = noteId ?? globalActiveNoteId
+  const isPaneActive = Boolean(resolvedNoteId && globalActiveNoteId === resolvedNoteId)
+  const note = useNotesStore((s) => {
+    const targetId = noteId ?? s.activeNoteId
+    return s.notes.find((n) => n.id === targetId) ?? null
+  })
+  const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const updateNote = useNotesStore((s) => s.updateNote)
   const deleteNote = useNotesStore((s) => s.deleteNote)
   const unlockNote = useNotesStore((s) => s.unlockNote)
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
+  const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
+  const setSectionTagColor = useSectionTagColorsStore((s) => s.setSectionTagColor)
+  const clearSectionTagColor = useSectionTagColorsStore((s) => s.clearSectionTagColor)
 
   // Active section by id (not index — stable across reorders)
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
@@ -68,10 +91,13 @@ export function NoteEditor() {
   // Drag and drop state
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null)
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null)
+  const [sectionColorPickerId, setSectionColorPickerId] = useState<string | null>(null)
+  const [sectionUndo, setSectionUndo] = useState<SectionUndoState | null>(null)
 
   const titleRef = useRef<HTMLInputElement>(null)
   const pendingSectionRef = useRef<string | null>(null)
   const rawTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const sectionUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Derived state ──────────────────────────────────────────────────────────
   const activeSection: NoteSection | undefined = note?.sections.find(
@@ -97,28 +123,43 @@ export function NoteEditor() {
     setRawContent(note.sections.find((s) => s.id === targetId)?.content ?? '')
     setTitleDraft(note.title)
     setRenamingId(null)
-    if (targetId) window.noteflow.setUiState({ activeSectionId: targetId })
-  }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+    setSectionColorPickerId(null)
+    if (targetId && isPaneActive) window.noteflow.setUiState({ activeSectionId: targetId })
+  }, [note?.id, isPaneActive]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => {
+      if (sectionUndoTimerRef.current) {
+        clearTimeout(sectionUndoTimerRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const close = () => setSectionColorPickerId(null)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [])
 
   // ── Handle section request from sidebar ────────────────────────────────────
   useEffect(() => {
     const handler = (e: Event) => {
-      const { noteId, sectionId } = (e as CustomEvent<{ noteId: string; sectionId: string }>).detail
-      if (noteRef.current?.id === noteId) {
+      const { noteId: targetNoteId, sectionId } = (e as CustomEvent<{ noteId: string; sectionId: string }>).detail
+      if (noteRef.current?.id === targetNoteId) {
         // Same note: switch section directly
         const section = noteRef.current.sections.find((s) => s.id === sectionId)
         if (section) {
           setRawContent(section.content)
           setActiveSectionId(sectionId)
         }
-      } else {
+      } else if (!noteId) {
         // Different note: store for when the note.id effect fires
         pendingSectionRef.current = sectionId
       }
     }
     window.addEventListener('noteflow:request-section', handler)
     return () => window.removeEventListener('noteflow:request-section', handler)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [noteId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-focus title field when new note is created ───────────────────────
   useEffect(() => {
@@ -175,10 +216,10 @@ export function NoteEditor() {
 
   // Auto-show unlock modal when switching to a locked encrypted note
   useEffect(() => {
-    if (note?.encryption && !sessionPasswords[note.id]) {
+    if (isPaneActive && note?.encryption && !sessionPasswords[note.id]) {
       setShowUnlockModal(true)
     }
-  }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [note?.id, isPaneActive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-focus editor on new note ──────────────────────────────────────────
   useEffect(() => {
@@ -243,6 +284,7 @@ export function NoteEditor() {
 
   // ── Delete key on the note (only when editor is NOT focused) ──────────────
   useEffect(() => {
+    if (!isPaneActive) return
     if (!note) return
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
@@ -257,10 +299,11 @@ export function NoteEditor() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [note, openDeleteNoteModal])
+  }, [note, openDeleteNoteModal, isPaneActive])
 
   // ── Ctrl+T / Ctrl+W via custom events ────────────────────────────────────
   useEffect(() => {
+    if (!isPaneActive) return
     const handleAddTab = () => {
       if (!noteRef.current) return
       const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', isRawMode: true }
@@ -276,20 +319,7 @@ export function NoteEditor() {
       if (!n || n.sections.length <= 1) return
       const sectionId = activeSectionIdRef.current
       if (!sectionId) return
-      const sectionName = n.sections.find((s) => s.id === sectionId)?.name ?? 'this'
-      setModal({
-        title: 'Delete section',
-        message: `Delete the "${sectionName}" section? Its content will be lost.`,
-        confirmLabel: 'Delete',
-        danger: true,
-        onConfirm: () => {
-          setModal(null)
-          const sections = noteRef.current!.sections.filter((s) => s.id !== sectionId)
-          updateNote(noteRef.current!.id, { sections })
-          setActiveSectionId(sections[0]?.id ?? null)
-          setRawContent(sections[0]?.content ?? '')
-        },
-      })
+      deleteSectionWithUndo(sectionId)
     }
     window.addEventListener('noteflow:add-tab', handleAddTab)
     window.addEventListener('noteflow:close-tab', handleCloseTab)
@@ -297,7 +327,7 @@ export function NoteEditor() {
       window.removeEventListener('noteflow:add-tab', handleAddTab)
       window.removeEventListener('noteflow:close-tab', handleCloseTab)
     }
-  }, [updateNote])
+  }, [updateNote, isPaneActive])
 
   // ── Early exit ─────────────────────────────────────────────────────────────
   if (!note) {
@@ -403,6 +433,12 @@ export function NoteEditor() {
   const handleSwitchSection = (sectionId: string) => {
     if (sectionId === activeSectionId) return
 
+    if (resolvedNoteId && !isPaneActive) {
+      setActiveNote(resolvedNoteId)
+    }
+
+    setSectionColorPickerId(null)
+
     if (rawMode && activeSection) {
       if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
       updateNote(note.id, {
@@ -415,7 +451,7 @@ export function NoteEditor() {
     const newContent = note.sections.find((s) => s.id === sectionId)?.content ?? ''
     setRawContent(newContent)
     setActiveSectionId(sectionId)
-    window.noteflow.setUiState({ activeSectionId: sectionId })
+    if (isPaneActive) window.noteflow.setUiState({ activeSectionId: sectionId })
   }
 
   const handleAddSection = () => {
@@ -428,24 +464,76 @@ export function NoteEditor() {
     setRenameValue('New')
   }
 
-  const handleDeleteSection = (sectionId: string) => {
-    if (note.sections.length <= 1) return
-    const sectionName = note.sections.find((s) => s.id === sectionId)?.name ?? 'this'
-    setModal({
-      title: 'Delete section',
-      message: `Delete the "${sectionName}" section? Its content will be lost.`,
-      confirmLabel: 'Delete',
-      danger: true,
-      onConfirm: () => {
-        setModal(null)
-        const sections = noteRef.current!.sections.filter((s) => s.id !== sectionId)
-        updateNote(noteRef.current!.id, { sections })
-        if (activeSectionId === sectionId) {
-          setActiveSectionId(sections[0]?.id ?? null)
-          setRawContent(sections[0]?.content ?? '')
-        }
-      },
+  const deleteSectionWithUndo = (sectionId: string) => {
+    const currentNote = noteRef.current
+    if (!currentNote || currentNote.sections.length <= 1) return
+
+    const removeIndex = currentNote.sections.findIndex((s) => s.id === sectionId)
+    if (removeIndex === -1) return
+
+    const previousSections = currentNote.sections.map((section) => ({ ...section }))
+    const nextSections = currentNote.sections.filter((s) => s.id !== sectionId)
+    const removedSection = currentNote.sections[removeIndex]
+    const previousActiveSectionId = activeSectionIdRef.current
+
+    const fallbackSection = previousActiveSectionId === sectionId
+      ? nextSections[Math.min(removeIndex, nextSections.length - 1)] ?? nextSections[0]
+      : nextSections.find((s) => s.id === previousActiveSectionId) ?? nextSections[0]
+
+    void updateNote(currentNote.id, { sections: nextSections })
+
+    if (previousActiveSectionId === sectionId) {
+      const nextActiveId = fallbackSection?.id ?? null
+      setActiveSectionId(nextActiveId)
+      setRawContent(fallbackSection?.content ?? '')
+      if (nextActiveId && isPaneActive) window.noteflow.setUiState({ activeSectionId: nextActiveId })
+    }
+
+    if (sectionUndoTimerRef.current) {
+      clearTimeout(sectionUndoTimerRef.current)
+    }
+
+    setSectionUndo({
+      noteId: currentNote.id,
+      sectionName: removedSection.name,
+      previousSections,
+      previousActiveSectionId,
     })
+
+    sectionUndoTimerRef.current = setTimeout(() => {
+      sectionUndoTimerRef.current = null
+      setSectionUndo(null)
+    }, 6000)
+  }
+
+  const undoSectionDelete = () => {
+    if (!sectionUndo) return
+    const currentNote = noteRef.current
+    if (!currentNote || currentNote.id !== sectionUndo.noteId) {
+      setSectionUndo(null)
+      return
+    }
+
+    if (sectionUndoTimerRef.current) {
+      clearTimeout(sectionUndoTimerRef.current)
+      sectionUndoTimerRef.current = null
+    }
+
+    const restoredSections = sectionUndo.previousSections.map((section) => ({ ...section }))
+    void updateNote(currentNote.id, { sections: restoredSections })
+
+    const restoreActiveId = sectionUndo.previousActiveSectionId && restoredSections.some((s) => s.id === sectionUndo.previousActiveSectionId)
+      ? sectionUndo.previousActiveSectionId
+      : restoredSections[0]?.id ?? null
+
+    setActiveSectionId(restoreActiveId)
+    setRawContent(restoredSections.find((s) => s.id === restoreActiveId)?.content ?? '')
+    if (restoreActiveId && isPaneActive) window.noteflow.setUiState({ activeSectionId: restoreActiveId })
+    setSectionUndo(null)
+  }
+
+  const handleDeleteSection = (sectionId: string) => {
+    deleteSectionWithUndo(sectionId)
   }
 
   const handleStartRename = (section: NoteSection) => {
@@ -470,6 +558,28 @@ export function NoteEditor() {
     if (e.key === 'Enter') { e.preventDefault(); handleCommitRename() }
     if (e.key === 'Escape') { setRenamingId(null) }
   }
+
+  const handleSetSectionColor = async (sectionName: string, color: GroupColor) => {
+    await setSectionTagColor(sectionName, color)
+    setSectionColorPickerId(null)
+  }
+
+  const handleClearSectionColor = async (sectionName: string) => {
+    await clearSectionTagColor(sectionName)
+    setSectionColorPickerId(null)
+  }
+
+  const colorPickerSection = sectionColorPickerId
+    ? note.sections.find((s) => s.id === sectionColorPickerId) ?? null
+    : null
+
+  const lastColorPickerSectionRef = useRef(colorPickerSection)
+  if (colorPickerSection) lastColorPickerSectionRef.current = colorPickerSection
+  const visibleColorPickerSection = colorPickerSection ?? lastColorPickerSectionRef.current
+
+  const colorPickerOverride = visibleColorPickerSection
+    ? sectionTagColors[normalizeTagColorKey(visibleColorPickerSection.name)]
+    : undefined
 
   const handleRawChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newDisplay = e.target.value
@@ -549,7 +659,12 @@ export function NoteEditor() {
   if (note.encryption && !sessionPasswords[note.id]) {
     return (
       <>
-        <div className="flex flex-col h-full">
+        <div
+          className="flex flex-col h-full"
+          onMouseDownCapture={() => {
+            if (resolvedNoteId && !isPaneActive) setActiveNote(resolvedNoteId)
+          }}
+        >
           <div className="px-4 pt-3 pb-2 border-b border-border flex-shrink-0">
             <span className="text-xl font-bold font-mono text-text">
               {note.title || 'Untitled'}
@@ -596,11 +711,22 @@ export function NoteEditor() {
 
       <div
         className="flex flex-col h-full"
+        onMouseDownCapture={() => {
+          if (resolvedNoteId && !isPaneActive) setActiveNote(resolvedNoteId)
+        }}
         onKeyDown={(e) => {
           e.stopPropagation()
-          if (e.ctrlKey && (e.key === '=' || e.key === '+')) { e.preventDefault(); changeFontSize(1) }
-          if (e.ctrlKey && e.key === '-') { e.preventDefault(); changeFontSize(-1) }
-          if (e.ctrlKey && e.key === '0') { e.preventDefault(); resetFontSize() }
+          const isAccel = e.ctrlKey || e.metaKey
+          const key = e.key.toLowerCase()
+
+          if (isAccel && e.shiftKey && key === 'e') {
+            e.preventDefault()
+            handleRawToggle()
+            return
+          }
+          if (isAccel && (e.key === '=' || e.key === '+')) { e.preventDefault(); changeFontSize(1) }
+          if (isAccel && e.key === '-') { e.preventDefault(); changeFontSize(-1) }
+          if (isAccel && e.key === '0') { e.preventDefault(); resetFontSize() }
         }}
       >
         <div className="flex items-center gap-3 px-3 pt-3 pb-2 border-b border-border min-h-0 flex-shrink-0">
@@ -608,23 +734,33 @@ export function NoteEditor() {
             {note.sections.map((section) => {
               const isActive = section.id === (activeSection?.id)
               const isRenaming = renamingId === section.id
+              const colorStyle = getTagColor(section.name, sectionTagColors)
               return (
                 <div
                   key={section.id}
                   draggable
+                  title="Drag to reorder section"
                   onDragStart={(e) => handleDragStart(e, section.id)}
                   onDragOver={(e) => handleDragOver(e, section.id)}
                   onDrop={(e) => handleDrop(e, section.id)}
                   onDragEnd={handleDragEnd}
                   onDragLeave={() => setDragOverSectionId(null)}
-                  className={`group flex items-center gap-1 flex-shrink-0 rounded px-0.5 transition-all duration-200 cursor-grab active:cursor-grabbing
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setSectionColorPickerId((prev) => (prev === section.id ? null : section.id))
+                  }}
+                  className={`relative group flex items-center gap-1 flex-shrink-0 rounded px-0.5 transition-all duration-200 cursor-grab active:cursor-grabbing
                      ${isActive
                       ? 'tab-active-bg border'
                       : 'border border-border/40 hover:border-border/70'
                     }
                     ${draggedSectionId === section.id ? 'opacity-30' : 'opacity-100'}
-                    ${dragOverSectionId === section.id ? 'border-l-2 tab-active-border-l pl-1' : ''}
+                    ${dragOverSectionId === section.id ? 'border-l-2 tab-active-border-l pl-1 bg-accent/10 border-dashed' : ''}
                   `}
+                  style={isActive
+                    ? { border: colorStyle.border, background: colorStyle.background }
+                    : {}
+                  }
                 >
                   {isRenaming ? (
                     // Inline rename input
@@ -652,6 +788,7 @@ export function NoteEditor() {
                       onDoubleClick={() => handleStartRename(section)}
                       className={`px-2 py-0.5 text-xs font-mono transition-colors
                         ${isActive ? 'tab-active-text' : 'text-text-muted'}`}
+                      style={isActive ? { color: colorStyle.color } : undefined}
                     >
                       {section.name}
                     </button>
@@ -659,7 +796,6 @@ export function NoteEditor() {
 
                   {!isRenaming && (
                     <div className="flex items-center gap-0.5 pr-1 invisible group-hover:visible">
-
                       <button
                         onClick={() => handleStartRename(section)}
                         title="Rename section"
@@ -739,6 +875,68 @@ export function NoteEditor() {
               <Trash2 size={13} />
             </button>
           </div>
+        </div>
+
+
+        {sectionUndo && sectionUndo.noteId === note.id && (
+          <div className="mx-3 mt-2 px-3 py-2 rounded border border-amber-300/35 bg-amber-300/10 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-mono text-text-muted min-w-0 truncate">
+              Section "{sectionUndo.sectionName}" deleted
+            </span>
+            <button
+              onClick={undoSectionDelete}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono border border-amber-300/45 text-amber-200 hover:bg-amber-300/15 transition-colors"
+            >
+              <RotateCcw size={10} />
+              Undo
+            </button>
+          </div>
+        )}
+
+        <div
+          className="overflow-hidden transition-all duration-200 ease-in-out border-border/60 bg-surface-1/40"
+          style={{
+            maxHeight: colorPickerSection ? '60px' : '0px',
+            opacity: colorPickerSection ? 1 : 0,
+            borderBottomWidth: colorPickerSection ? '1px' : '0px',
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {visibleColorPickerSection && (
+            <div className="px-3 py-2 flex items-center justify-between gap-2">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-text-muted/70 min-w-0 truncate flex-shrink-0">
+                {visibleColorPickerSection.name}
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {TAG_COLOR_VARS.map((color) => (
+                  <button
+                    key={`tab-color-${visibleColorPickerSection.id}-${color}`}
+                    title={color.replace('--', '')}
+                    onClick={() => { void handleSetSectionColor(visibleColorPickerSection.name, color) }}
+                    className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${colorPickerOverride === color ? 'ring-1 ring-white/60 ring-offset-1 ring-offset-surface-2' : ''}`}
+                    style={{ background: `rgb(var(${color}))` }}
+                  />
+                ))}
+                <button
+                  onClick={() => { void handleClearSectionColor(visibleColorPickerSection.name) }}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                    colorPickerOverride
+                      ? 'text-text-muted border-border hover:text-text hover:border-accent/40'
+                      : 'text-accent border-accent/50 bg-accent/10'
+                  }`}
+                >
+                  Auto
+                </button>
+                <button
+                  onClick={() => setSectionColorPickerId(null)}
+                  className="p-0.5 rounded text-text-muted/70 hover:text-text transition-colors"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="px-4 pt-3 pb-1 flex-shrink-0">

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
 import type { NoteGroup, GroupColor } from '../types'
+import { useNotesStore } from './notesStore'
 
 interface GroupsState {
   groups: NoteGroup[]
@@ -49,7 +50,16 @@ export const useGroupsStore = create<GroupsState>((set, get) => ({
 
   deleteGroup: async (id) => {
     const updated = get().groups.filter((g) => g.id !== id)
-    set({ groups: updated })
+    const nextCollapsed = new Set(get().collapsedGroupIds)
+    nextCollapsed.delete(id)
+
+    set({ groups: updated, collapsedGroupIds: nextCollapsed })
+    await window.noteflow.setUiState({ collapsedGroupIds: [...nextCollapsed] })
+
+    const notesStore = useNotesStore.getState()
+    const notesToUngroup = notesStore.notes.filter((n) => n.group === id)
+    await Promise.all(notesToUngroup.map((n) => notesStore.updateNote(n.id, { group: undefined })))
+
     await window.noteflow.setGroups(updated)
   },
 

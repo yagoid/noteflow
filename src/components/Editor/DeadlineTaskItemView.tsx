@@ -73,7 +73,7 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
     // Keep popover inside horizontal viewport
     const left = Math.min(rect.left, window.innerWidth - 230)
     setPopoverPos({ top, left })
-    setDraftDue(due ?? new Date().toISOString().slice(0, 10))
+    setDraftDue(due ?? '')
     setDraftAlarm(alarm ?? '')
     setPopoverOpen(true)
   }
