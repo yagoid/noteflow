@@ -12,7 +12,11 @@ interface NoteGroupHeaderProps {
 export function NoteGroupHeader({ group, noteCount, collapsed, onToggle, onContextMenu }: NoteGroupHeaderProps) {
   return (
     <div
-      className="flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none hover:bg-surface-2 transition-colors"
+      className="flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none transition-colors hover:bg-surface-2"
+      style={!collapsed ? {
+        background: `rgb(var(${group.color}) / 0.07)`,
+        borderBottom: `1px solid rgb(var(${group.color}) / 0.2)`,
+      } : undefined}
       onClick={onToggle}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e) }}
     >

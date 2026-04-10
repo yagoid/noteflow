@@ -152,9 +152,11 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           setRawContent(section.content)
           setActiveSectionId(sectionId)
         }
-      } else if (!noteId) {
-        // Different note: store for when the note.id effect fires
+      } else {
+        // Different note: pre-set activeSectionId so the first render with the new note
+        // already shows the correct section (avoids flash on sections[0])
         pendingSectionRef.current = sectionId
+        setActiveSectionId(sectionId)
       }
     }
     window.addEventListener('noteflow:request-section', handler)
@@ -996,9 +998,10 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                 e.preventDefault()
                 handleRawImageInsert(files)
               }}
+              placeholder={`${activeSection?.name ?? 'Section'} — start writing...`}
               style={{ fontSize: `${fontSize}px` }}
               className="w-full h-full p-4 bg-transparent font-mono text-text
-                         border-none outline-none resize-none caret-accent leading-relaxed"
+                         placeholder-text-muted/30 border-none outline-none resize-none caret-accent leading-relaxed"
               spellCheck={false}
             />
           ) : (

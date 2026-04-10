@@ -404,9 +404,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             ${!isActive ? 'hover:bg-surface-2' : ''}
             ${isSearchTarget ? 'ring-1 ring-inset ring-accent/50' : ''}`}
           style={{
-            borderRight: group
-              ? `1px solid rgb(var(${group.color}) / 0.6)`
-              : '2px solid transparent',
+            borderRight: group ? 'none' : '2px solid transparent',
             ...(isActive && group ? { background: `rgb(var(${group.color}) / 0.1)` } : {}),
             ...(isSearchTarget && !isActive ? { background: 'rgb(var(--accent) / 0.08)' } : {}),
           }}
@@ -760,45 +758,57 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 if (hasActiveFilters && groupNotes.length === 0) return null
                 return (
                   <li key={`group-${group.id}`}>
-                    {/* Group header / rename input */}
-                    {editingGroupId === group.id ? (
-                      <div className="flex items-center gap-2 px-3 py-1.5">
-                        <span
-                          className="w-2 h-2 rounded-full flex-shrink-0"
-                          style={{ background: `rgb(var(${group.color}))` }}
-                        />
-                        <input
-                          autoFocus
-                          value={editingGroupName}
-                          onChange={(e) => setEditingGroupName(e.target.value)}
-                          onBlur={() => {
-                            if (editingGroupName.trim()) renameGroup(group.id, editingGroupName.trim())
-                            setEditingGroupId(null)
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
+                    {/* Group header / rename input — with right border that fades in when expanded */}
+                    <div style={{ position: 'relative' }}>
+                      <div style={{
+                        position: 'absolute',
+                        top: 0, right: 0, bottom: 0,
+                        width: '1px',
+                        background: `rgb(var(${group.color}) / 0.5)`,
+                        opacity: collapsed ? 0 : 1,
+                        transition: 'opacity 180ms ease',
+                        pointerEvents: 'none',
+                        zIndex: 1,
+                      }} />
+                      {editingGroupId === group.id ? (
+                        <div className="flex items-center gap-2 px-3 py-1.5">
+                          <span
+                            className="w-2 h-2 rounded-full flex-shrink-0"
+                            style={{ background: `rgb(var(${group.color}))` }}
+                          />
+                          <input
+                            autoFocus
+                            value={editingGroupName}
+                            onChange={(e) => setEditingGroupName(e.target.value)}
+                            onBlur={() => {
                               if (editingGroupName.trim()) renameGroup(group.id, editingGroupName.trim())
                               setEditingGroupId(null)
-                            }
-                            if (e.key === 'Escape') setEditingGroupId(null)
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                if (editingGroupName.trim()) renameGroup(group.id, editingGroupName.trim())
+                                setEditingGroupId(null)
+                              }
+                              if (e.key === 'Escape') setEditingGroupId(null)
+                            }}
+                            className="flex-1 text-[11px] font-mono bg-surface-1 border border-accent/50 rounded px-1 outline-none text-text"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </div>
+                      ) : (
+                        <NoteGroupHeader
+                          group={group}
+                          noteCount={item.visibleCount}
+                          collapsed={collapsed}
+                          onToggle={() => toggleGroupCollapsed(group.id)}
+                          onContextMenu={(e) => {
+                            setGroupContextMenu({ x: e.clientX, y: Math.min(e.clientY, window.innerHeight - 120), groupId: group.id })
                           }}
-                          className="flex-1 text-[11px] font-mono bg-surface-1 border border-accent/50 rounded px-1 outline-none text-text"
-                          onClick={(e) => e.stopPropagation()}
                         />
-                      </div>
-                    ) : (
-                      <NoteGroupHeader
-                        group={group}
-                        noteCount={item.visibleCount}
-                        collapsed={collapsed}
-                        onToggle={() => toggleGroupCollapsed(group.id)}
-                        onContextMenu={(e) => {
-                          setGroupContextMenu({ x: e.clientX, y: Math.min(e.clientY, window.innerHeight - 120), groupId: group.id })
-                        }}
-                      />
-                    )}
+                      )}
+                    </div>
 
-                    {/* Animated container with vertical line */}
+                    {/* Animated container */}
                     <div
                       style={{
                         display: 'grid',
@@ -806,7 +816,26 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                         transition: 'grid-template-rows 180ms ease',
                       }}
                     >
-                      <div style={{ overflow: 'hidden' }}>
+                      {/* overflow:hidden clips the line and cap, revealing them top→bottom as the grid expands */}
+                      <div style={{ overflow: 'hidden', position: 'relative' }}>
+                        {/* Right border line */}
+                        <div style={{
+                          position: 'absolute',
+                          top: 0, right: 0, bottom: 0,
+                          width: '1px',
+                          background: `rgb(var(${group.color}) / 0.5)`,
+                          pointerEvents: 'none',
+                          zIndex: 1,
+                        }} />
+                        {/* Bottom cap */}
+                        <div style={{
+                          position: 'absolute',
+                          bottom: 0, right: 0,
+                          width: '25px', height: '1px',
+                          background: `rgb(var(${group.color}) / 0.5)`,
+                          pointerEvents: 'none',
+                          zIndex: 1,
+                        }} />
                         <ul>
                           {groupNotes.map((note) => renderNoteButton(note, group))}
                           {groupNotes.length === 0 && (
