@@ -952,6 +952,13 @@ function cmdHelp(topic) {
     --json                Machine-readable JSON output
     --yes                 Skip confirmation prompts
 
+  AI agent integration:
+    NoteFlow ships with an AI agent skill that teaches LLMs how to use this CLI.
+    Install it into your agent (Claude Code, Cursor, etc.) with:
+      npx skills add yagoid/noteflow/cli/noteflow-cli
+    Or fetch the raw skill definition directly:
+      https://raw.githubusercontent.com/yagoid/noteflow/main/cli/noteflow-cli/SKILL.md
+
   Run 'noteflow help <command>' for details on a specific command.
 
   Examples:
