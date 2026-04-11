@@ -376,7 +376,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     const isActive = activeNoteId === note.id
     const isSearchTarget = activeSearchNoteId === note.id
     return (
-      <li key={note.id}>
+      <li key={note.id} className="border-b border-border/30">
         <button
           data-note-id={note.id}
           draggable
