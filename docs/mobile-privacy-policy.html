@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NoteFlow Mobile – Privacy Policy</title>
+  <!-- Not linked from the main site; noindex prevents search engine indexing -->
+  <meta name="robots" content="noindex, nofollow" />
+
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-0:      #090b10;
+      --bg-1:      #0d1018;
+      --bg-2:      #121620;
+      --bg-3:      #1a1f2e;
+      --border:    #252b3b;
+      --text-0:    #e8ecf4;
+      --text-1:    #a8b3c8;
+      --text-2:    #6b7795;
+      --cyan:      #3de8c2;
+      --cyan-glow: rgba(61, 232, 194, 0.12);
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --font-body: 'DM Sans', system-ui, sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg-0);
+      color: var(--text-1);
+      line-height: 1.75;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Layout ── */
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 64px 24px 100px;
+    }
+
+    /* ── Header ── */
+    .header {
+      margin-bottom: 52px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    .app-tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--cyan);
+      margin-bottom: 14px;
+    }
+    h1 {
+      font-family: var(--font-body);
+      font-size: 32px;
+      font-weight: 600;
+      color: var(--text-0);
+      line-height: 1.25;
+      margin-bottom: 12px;
+    }
+    .meta {
+      font-size: 13px;
+      color: var(--text-2);
+      font-family: var(--font-mono);
+    }
+
+    /* ── Summary box ── */
+    .summary {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--cyan);
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin-bottom: 48px;
+      font-size: 14px;
+      color: var(--text-1);
+    }
+    .summary strong { color: var(--text-0); }
+
+    /* ── Sections ── */
+    section { margin-bottom: 44px; }
+
+    h2 {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--cyan);
+      margin-bottom: 14px;
+    }
+
+    p { font-size: 15px; margin-bottom: 12px; color: var(--text-1); }
+    p:last-child { margin-bottom: 0; }
+
+    ul {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 12px;
+    }
+    ul li {
+      font-size: 15px;
+      color: var(--text-1);
+      padding: 5px 0 5px 18px;
+      position: relative;
+    }
+    ul li::before {
+      content: '–';
+      position: absolute;
+      left: 0;
+      color: var(--text-2);
+    }
+    ul li strong { color: var(--text-0); }
+
+    /* ── Table ── */
+    .permission-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      margin-top: 4px;
+    }
+    .permission-table th {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--text-2);
+      text-align: left;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .permission-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--bg-3);
+      color: var(--text-1);
+      vertical-align: top;
+    }
+    .permission-table td:first-child {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-0);
+      white-space: nowrap;
+    }
+    .permission-table tr:last-child td { border-bottom: none; }
+
+    /* ── Footer ── */
+    .footer {
+      margin-top: 60px;
+      padding-top: 28px;
+      border-top: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--text-2);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .footer a { color: var(--cyan); }
+    .footer a:hover { text-decoration: underline; }
+
+    a { color: var(--cyan); }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Header -->
+  <div class="header">
+    <p class="app-tag">NoteFlow Mobile · Android</p>
+    <h1>Privacy Policy</h1>
+    <p class="meta">Last updated: April 12, 2026</p>
+  </div>
+
+  <!-- TL;DR -->
+  <div class="summary">
+    <strong>Summary:</strong> NoteFlow Mobile stores all your notes locally on your device.
+    We do not collect, transmit, or sell any personal data. No account required.
+  </div>
+
+  <!-- 1 -->
+  <section>
+    <h2>1. Who We Are</h2>
+    <p>
+      NoteFlow Mobile is an independent note-taking application for Android.
+      For questions about this policy, contact us at
+      <a href="mailto:yago.igle@gmail.com">yago.igle@gmail.com</a>.
+    </p>
+  </section>
+
+  <!-- 2 -->
+  <section>
+    <h2>2. Data We Collect</h2>
+    <p><strong style="color:var(--text-0)">We collect no personal data whatsoever.</strong></p>
+    <p>NoteFlow Mobile does not:</p>
+    <ul>
+      <li>Require an account or registration</li>
+      <li>Ask for your name, email, or any personal information</li>
+      <li>Track or log your usage, behaviour, or app interactions</li>
+      <li>Send analytics or telemetry to any server</li>
+      <li>Display advertisements</li>
+      <li>Share or sell any data to third parties</li>
+    </ul>
+  </section>
+
+  <!-- 3 -->
+  <section>
+    <h2>3. Data Stored on Your Device</h2>
+    <p>
+      All notes, groups, and preferences are stored exclusively on your device using the
+      following local technologies:
+    </p>
+    <ul>
+      <li><strong>SQLite</strong> — local database for notes and note groups</li>
+      <li><strong>Expo SecureStore</strong> — encrypted storage for optional note-level encryption passwords</li>
+    </ul>
+    <p>
+      None of this data is transmitted anywhere unless you explicitly choose to share or
+      export it using the built-in share function.
+    </p>
+  </section>
+
+  <!-- 4 -->
+  <section>
+    <h2>4. Optional GitHub Sync</h2>
+    <p>
+      NoteFlow offers an optional feature to sync your notes with a private GitHub
+      repository that you own and control. This feature is entirely opt-in.
+      If you enable it:
+    </p>
+    <ul>
+      <li>Your GitHub personal access token is stored locally using encrypted storage and never leaves your device except in API calls made directly to GitHub</li>
+      <li>Notes are synced directly between your device and your own GitHub repository — NoteFlow has no intermediary server</li>
+      <li>You can revoke access at any time by removing the token in the app settings or deleting it from your GitHub account</li>
+    </ul>
+    <p>
+      When using GitHub sync, GitHub's
+      <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">privacy policy</a>
+      applies to data stored in your repository.
+    </p>
+  </section>
+
+  <!-- 5 -->
+  <section>
+    <h2>5. Android Permissions</h2>
+    <table class="permission-table">
+      <thead>
+        <tr>
+          <th>Permission</th>
+          <th>Why it is needed</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>INTERNET</td>
+          <td>Required only for the optional GitHub sync feature. Not used if sync is disabled.</td>
+        </tr>
+        <tr>
+          <td>READ_EXTERNAL_STORAGE<br/><span style="color:var(--text-2);font-size:12px">(Android 12 and below)</span></td>
+          <td>Allows importing note files from local storage.</td>
+        </tr>
+        <tr>
+          <td>WRITE_EXTERNAL_STORAGE<br/><span style="color:var(--text-2);font-size:12px">(Android 12 and below)</span></td>
+          <td>Allows exporting notes to local storage.</td>
+        </tr>
+        <tr>
+          <td>VIBRATE</td>
+          <td>Used for haptic feedback on user interactions.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 6 -->
+  <section>
+    <h2>6. Third-Party Services</h2>
+    <p>
+      NoteFlow Mobile does not integrate any third-party analytics, crash reporting,
+      advertising, or tracking SDKs. The only optional external communication is the
+      direct device-to-GitHub API call described in section 4.
+    </p>
+  </section>
+
+  <!-- 7 -->
+  <section>
+    <h2>7. Children's Privacy</h2>
+    <p>
+      NoteFlow Mobile is not directed at children under 13 years of age, and we do not
+      knowingly collect any information from children.
+    </p>
+  </section>
+
+  <!-- 8 -->
+  <section>
+    <h2>8. Changes to This Policy</h2>
+    <p>
+      If this policy changes, the date at the top of this page will be updated.
+      Continued use of the app after changes constitutes acceptance of the updated policy.
+    </p>
+  </section>
+
+  <!-- 9 -->
+  <section>
+    <h2>9. Contact</h2>
+    <p>
+      For any questions or concerns regarding this privacy policy:<br/>
+      <a href="mailto:yago.igle@gmail.com">yago.igle@gmail.com</a>
+    </p>
+  </section>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span>NoteFlow Mobile · Privacy Policy</span>
+    <a href="https://yagoid.github.io/noteflow/">← NoteFlow website</a>
+  </div>
+
+</div>
+</body>
+</html>
