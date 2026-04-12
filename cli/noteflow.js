@@ -761,28 +761,35 @@ async function cmdPush() {
   out(`\n  Done: ${pushed} pushed, ${errors} errors`)
 }
 
-async function cmdPull() {
+async function cmdPull(opts = {}) {
   const sync = getSyncSettings()
   if (!sync.enabled || !sync.owner || !sync.repo) { err('Not connected. Run: noteflow login'); process.exit(1) }
   const token = getToken()
   if (!token) { err('Token unavailable (encrypted by desktop app). Run: noteflow login'); process.exit(1) }
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
-  out(`  Pulling from ${sync.owner}/${sync.repo}...`)
+  const force = opts.force === true
+  out(`  Pulling from ${sync.owner}/${sync.repo}...${force ? ' (--force)' : ''}`)
   let remoteFiles = []
   try {
     const files = await githubRequest(token, 'GET', `/repos/${sync.owner}/${sync.repo}/contents/`)
     remoteFiles = Array.isArray(files) ? files.filter(f => f.type === 'file' && f.name.endsWith('.md')) : []
-  } catch { /* empty repo */ }
-  let pulled = 0
+  } catch (e) {
+    // 404 means the repo is empty (just initialized); any other error is real
+    if (e.message && !e.message.includes('404') && !e.message.toLowerCase().includes('not found')) {
+      err(`Could not list remote files: ${e.message}`)
+      process.exit(1)
+    }
+  }
+  let pulled = 0, skipped = 0
   for (const file of remoteFiles) {
     try {
       const remote = await githubRequest(token, 'GET', `/repos/${sync.owner}/${sync.repo}/contents/${encodeURIComponent(file.name)}`)
       const content = Buffer.from(remote.content.replace(/\n/g, ''), 'base64').toString('utf-8')
       const localPath = path.join(NOTES_DIR, file.name)
-      if (fs.existsSync(localPath)) {
+      if (!force && fs.existsSync(localPath)) {
         const localContent = fs.readFileSync(localPath, 'utf-8')
         const lu = extractUpdatedTimestamp(localContent), ru = extractUpdatedTimestamp(content)
-        if (lu && ru && ru <= lu) continue
+        if (lu && ru && ru <= lu) { skipped++; continue }
       }
       fs.writeFileSync(localPath, content, 'utf-8'); pulled++; out(`  ${file.name}`)
     } catch (e) { err(`${file.name}: ${e.message}`) }
@@ -795,7 +802,7 @@ async function cmdPull() {
   const settings = readSettings()
   settings.githubSync = { ...sync, lastSync: new Date().toISOString() }
   writeSettings(settings)
-  out(`  Done: ${pulled} notes pulled`)
+  out(`  Done: ${pulled} pulled${skipped ? `, ${skipped} skipped (local is newer — use --force to override)` : ''}`)
 }
 
 const SELF_UPDATE_URL = 'https://raw.githubusercontent.com/yagoid/noteflow/main/cli/noteflow.js'
@@ -944,7 +951,7 @@ function cmdHelp(topic) {
     login [repo]          Connect to GitHub
     logout                Disconnect from GitHub
     push                  Push all notes to GitHub
-    pull / update         Pull notes from GitHub
+    pull / update         Pull notes from GitHub  [--force: overwrite even if local is newer]
     status                Show notes and sync status
     self-update           Update this CLI script to the latest version
 
@@ -1065,7 +1072,7 @@ async function main() {
     case 'logout':  cmdLogout(); break
     case 'push':    await cmdPush(); break
     case 'pull':
-    case 'update':        await cmdPull(); break
+    case 'update':        await cmdPull(flags); break
     case 'self-update':   await cmdSelfUpdate(); break
     case 'status':  cmdStatus(flags); break
     default:

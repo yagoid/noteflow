@@ -13,9 +13,9 @@ export function NoteGroupHeader({ group, noteCount, collapsed, onToggle, onConte
   return (
     <div
       className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none transition-colors ${collapsed ? 'hover:bg-surface-2' : 'bg-surface-2 hover:bg-surface-2/80'}`}
-      style={!collapsed ? {
-        borderBottom: '1px solid rgb(var(--border))',
-      } : undefined}
+      style={{
+        borderBottom: `1px solid ${collapsed ? 'transparent' : 'rgb(var(--border))'}`,
+      }}
       onClick={onToggle}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e) }}
     >
