@@ -121,7 +121,7 @@ declare global {
       openUrl: (url: string) => Promise<void>
       downloadAndInstall: (url: string) => Promise<{ success: boolean; error?: string }>
       onUpdateProgress: (callback: (percent: number) => void) => void
-      exportNotes: (entries: NoteflowExportEntry[]) => Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }>
+      exportNotes: (entries: NoteflowExportEntry[], format: string, hint?: string) => Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }>
       parseImportFile: () => Promise<{ ok: boolean; file?: NoteflowExportFile; error?: string; canceled?: boolean }>
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
       // GitHub Sync

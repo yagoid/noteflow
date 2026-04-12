@@ -72,12 +72,37 @@ export function ExportImportModal({ mode: initialMode, onClose }: Props) {
 
 // ── Export ────────────────────────────────────────────────────────────────────
 
+type ExportFormat = 'noteflow' | 'md' | 'txt'
+
+function sanitizeFilename(name: string): string {
+  return name.replace(/[^a-z0-9 ._-]/gi, '').trim().replace(/\s+/g, '-') || 'note'
+}
+
+function buildPlainContent(
+  note: ReturnType<typeof useNotesStore.getState>['notes'][0],
+  sectionFilter: Set<string> | undefined,
+  format: 'txt' | 'md',
+): string {
+  const sections = sectionFilter
+    ? note.sections.filter((s) => sectionFilter.has(s.id))
+    : note.sections
+  if (sections.length === 1) return sections[0].content ?? ''
+  return sections
+    .map((s) =>
+      format === 'md'
+        ? `## ${s.name}\n\n${s.content ?? ''}`
+        : `=== ${s.name} ===\n\n${s.content ?? ''}`
+    )
+    .join('\n\n')
+}
+
 function ExportPanel({ onClose }: { onClose: () => void }) {
   const { notes, activeNoteId } = useNotesStore()
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
   const [step, setStep] = useState<ExportStep>('select')
   const [successPath, setSuccessPath] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('noteflow')
 
   // Which note IDs are selected
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(
@@ -146,9 +171,6 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
     return entry.size
   }
 
-  const totalSelectedSections = visibleNotes
-    .filter((n) => selectedNoteIds.has(n.id))
-    .reduce((acc, n) => acc + countSelectedSections(n.id), 0)
 
   async function handleExport() {
     setStep('exporting')
@@ -156,17 +178,25 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
       .filter((n) => selectedNoteIds.has(n.id))
       .map((n) => {
         const sectionFilter = selectedSections.get(n.id)
+        if (exportFormat === 'txt' || exportFormat === 'md') {
+          const content = buildPlainContent(n, sectionFilter, exportFormat)
+          const filename = `${sanitizeFilename(n.title || 'Untitled')}.${exportFormat}`
+          return { filename, content }
+        }
         if (!sectionFilter) {
-          // All sections — use raw as-is
           return { filename: noteFilename(n.id, n.title), content: n.raw }
         }
-        // Partial sections — re-serialize
         const filteredSections = n.sections.filter((s) => sectionFilter.has(s.id))
         const content = serializeNote({ ...n, sections: filteredSections })
         return { filename: noteFilename(n.id, n.title), content }
       })
 
-    const result = await window.noteflow.exportNotes(entries)
+    const singleNote = selectedNoteIds.size === 1
+      ? visibleNotes.find((n) => selectedNoteIds.has(n.id))
+      : null
+    const hint = singleNote?.title || undefined
+
+    const result = await window.noteflow.exportNotes(entries, exportFormat, hint)
     if (result.canceled) {
       setStep('select')
     } else if (result.ok && result.filePath) {
@@ -290,9 +320,22 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
 
       {/* Footer */}
       <div className="flex items-center justify-between px-4 py-3 border-t border-border flex-shrink-0">
-        <span className="text-xs font-mono text-text-muted/60">
-          {selectedNoteIds.size} notes · {totalSelectedSections} sections
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono text-text-muted/60">Format:</span>
+          {(['noteflow', 'md', 'txt'] as ExportFormat[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setExportFormat(f)}
+              className={`px-2 py-0.5 rounded text-xs font-mono transition-colors border ${
+                exportFormat === f
+                  ? 'bg-accent/15 text-accent border-accent/30'
+                  : 'text-text-muted border-transparent hover:border-border hover:text-text'
+              }`}
+            >
+              .{f}
+            </button>
+          ))}
+        </div>
         <div className="flex gap-2">
           <button
             onClick={onClose}
@@ -305,7 +348,7 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
             onClick={handleExport}
             className="px-3 py-1.5 rounded text-xs font-mono bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Export to file...
+            Export{exportFormat !== 'noteflow' && selectedNoteIds.size > 1 ? ' to folder...' : ' to file...'}
           </button>
         </div>
       </div>

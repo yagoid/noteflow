@@ -43,7 +43,7 @@ const api = {
         electron_1.ipcRenderer.on('update:download-progress', (_event, percent) => callback(percent));
     },
     // Export / Import
-    exportNotes: (entries) => electron_1.ipcRenderer.invoke('notes:export', entries),
+    exportNotes: (entries, format, hint) => electron_1.ipcRenderer.invoke('notes:export', entries, format, hint),
     parseImportFile: () => electron_1.ipcRenderer.invoke('notes:parse-import-file'),
     writeImportedNotes: (entries) => electron_1.ipcRenderer.invoke('notes:write-imported', entries),
     // GitHub Sync

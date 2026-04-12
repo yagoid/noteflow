@@ -70,8 +70,8 @@ const api = {
   },
 
   // Export / Import
-  exportNotes: (entries: Array<{ filename: string; content: string }>): Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }> =>
-    ipcRenderer.invoke('notes:export', entries),
+  exportNotes: (entries: Array<{ filename: string; content: string }>, format: string, hint?: string): Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }> =>
+    ipcRenderer.invoke('notes:export', entries, format, hint),
   parseImportFile: (): Promise<{ ok: boolean; file?: { version: number; exported: string; app: string; notes: Array<{ filename: string; content: string }> }; error?: string; canceled?: boolean }> =>
     ipcRenderer.invoke('notes:parse-import-file'),
   writeImportedNotes: (entries: Array<{ filename: string; content: string }>): Promise<{ written: string[]; errors: string[] }> =>

@@ -42,6 +42,7 @@ const fs_1 = __importDefault(require("fs"));
 const https_1 = __importDefault(require("https"));
 const os_1 = __importDefault(require("os"));
 const child_process_1 = require("child_process");
+const crypto_1 = require("crypto");
 const githubSync = __importStar(require("./githubSync"));
 function getIconPath() {
     if (process.platform === 'win32')
@@ -465,14 +466,16 @@ function createStickyWindow(noteId, sectionId) {
     return win;
 }
 function createTray() {
-    // Create a minimal 16x16 tray icon programmatically
-    const iconPath = path_1.default.join(__dirname, '../public/tray-icon.png');
-    let icon;
-    if (fs_1.default.existsSync(iconPath)) {
-        icon = electron_1.nativeImage.createFromPath(iconPath);
+    // On Windows use the .ico (multi-resolution); on other platforms use the PNG
+    const iconPath = process.platform === 'win32'
+        ? path_1.default.join(__dirname, '../public/icon.ico')
+        : path_1.default.join(__dirname, '../public/tray-icon.png');
+    let icon = electron_1.nativeImage.createFromPath(iconPath);
+    // Resize to 16×16 so Windows renders it correctly in the system tray
+    if (!icon.isEmpty()) {
+        icon = icon.resize({ width: 16, height: 16 });
     }
     else {
-        // Fallback: empty icon
         icon = electron_1.nativeImage.createEmpty();
     }
     tray = new electron_1.Tray(icon);
@@ -755,11 +758,46 @@ electron_1.ipcMain.handle('app:choose-notes-dir', async () => {
     });
     return result.canceled ? null : result.filePaths[0];
 });
-electron_1.ipcMain.handle('notes:export', async (_event, entries) => {
+electron_1.ipcMain.handle('notes:export', async (_event, entries, format, hint) => {
     try {
+        const safeHint = hint
+            ? hint.replace(/[^a-z0-9 ._-]/gi, '').trim().replace(/\s+/g, '-') || 'note'
+            : null;
+        if (format === 'txt' || format === 'md') {
+            if (entries.length === 1) {
+                const defaultName = safeHint ? `${safeHint}.${format}` : entries[0].filename;
+                const result = await electron_1.dialog.showSaveDialog(mainWindow, {
+                    title: 'Export note',
+                    defaultPath: path_1.default.join(os_1.default.homedir(), defaultName),
+                    filters: [{ name: format === 'txt' ? 'Plain Text' : 'Markdown', extensions: [format] }],
+                });
+                if (result.canceled || !result.filePath)
+                    return { ok: false, canceled: true };
+                fs_1.default.writeFileSync(result.filePath, entries[0].content, 'utf-8');
+                return { ok: true, filePath: result.filePath };
+            }
+            else {
+                const result = await electron_1.dialog.showOpenDialog(mainWindow, {
+                    title: 'Choose destination folder',
+                    properties: ['openDirectory'],
+                });
+                if (result.canceled || result.filePaths.length === 0)
+                    return { ok: false, canceled: true };
+                const dir = result.filePaths[0];
+                for (const entry of entries) {
+                    fs_1.default.writeFileSync(path_1.default.join(dir, entry.filename), entry.content, 'utf-8');
+                }
+                return { ok: true, filePath: dir };
+            }
+        }
+        // .noteflow (default)
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const defaultNoteflowName = safeHint
+            ? `${safeHint}.noteflow`
+            : `noteflow-export-${dateStr}.noteflow`;
         const result = await electron_1.dialog.showSaveDialog(mainWindow, {
             title: 'Export notes',
-            defaultPath: path_1.default.join(os_1.default.homedir(), `noteflow-export-${new Date().toISOString().slice(0, 10)}.noteflow`),
+            defaultPath: path_1.default.join(os_1.default.homedir(), defaultNoteflowName),
             filters: [
                 { name: 'NoteFlow Export', extensions: ['noteflow'] },
                 { name: 'JSON', extensions: ['json'] },
@@ -786,15 +824,53 @@ electron_1.ipcMain.handle('notes:parse-import-file', async () => {
         const result = await electron_1.dialog.showOpenDialog(mainWindow, {
             title: 'Import notes',
             filters: [
-                { name: 'NoteFlow Export', extensions: ['noteflow'] },
-                { name: 'JSON', extensions: ['json'] },
+                { name: 'All supported', extensions: ['noteflow', 'json', 'txt', 'md'] },
+                { name: 'NoteFlow Export', extensions: ['noteflow', 'json'] },
+                { name: 'Text / Markdown', extensions: ['txt', 'md'] },
             ],
             properties: ['openFile'],
         });
         if (result.canceled || result.filePaths.length === 0) {
             return { ok: false, canceled: true, error: 'Canceled' };
         }
-        const raw = fs_1.default.readFileSync(result.filePaths[0], 'utf-8');
+        const filePath = result.filePaths[0];
+        const ext = path_1.default.extname(filePath).toLowerCase().slice(1);
+        if (ext === 'txt' || ext === 'md') {
+            const textContent = fs_1.default.readFileSync(filePath, 'utf-8');
+            const title = path_1.default.basename(filePath, path_1.default.extname(filePath));
+            const id = (0, crypto_1.randomBytes)(4).toString('hex');
+            const secId = (0, crypto_1.randomBytes)(3).toString('hex');
+            const now = new Date().toISOString();
+            const safeTitle = title.replace(/"/g, '\\"');
+            const indentedContent = textContent.split('\n').map((l) => `      ${l}`).join('\n');
+            const noteContent = [
+                '---',
+                `id: ${id}`,
+                `title: "${safeTitle}"`,
+                'tags: []',
+                `created: ${now}`,
+                `updated: ${now}`,
+                'sections:',
+                `  - id: ${secId}`,
+                '    name: Note',
+                '    content: |',
+                indentedContent,
+                '---',
+                textContent,
+            ].join('\n');
+            const slug = title.replace(/[^a-z0-9 ]/gi, '').trim().replace(/\s+/g, '-').toLowerCase() || 'note';
+            const filename = `${id}-${slug}.md`;
+            return {
+                ok: true,
+                file: {
+                    version: 1,
+                    exported: now,
+                    app: 'noteflow',
+                    notes: [{ filename, content: noteContent }],
+                },
+            };
+        }
+        const raw = fs_1.default.readFileSync(filePath, 'utf-8');
         const parsed = JSON.parse(raw);
         if (parsed.version !== 1 || parsed.app !== 'noteflow' || !Array.isArray(parsed.notes)) {
             return { ok: false, error: 'Invalid .noteflow file format' };

@@ -96,6 +96,8 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
 
   const titleRef = useRef<HTMLInputElement>(null)
   const pendingSectionRef = useRef<string | null>(null)
+  const tabsScrollRef = useRef<HTMLDivElement>(null)
+  const [tabsOverflow, setTabsOverflow] = useState(false)
   const rawTextareaRef = useRef<HTMLTextAreaElement>(null)
   const sectionUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -284,6 +286,17 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     }, 600)
   }, [rawContent, activeSection, updateNote]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Detect tab overflow to reposition + button ───────────────────────────
+  useEffect(() => {
+    const el = tabsScrollRef.current
+    if (!el) return
+    const check = () => setTabsOverflow(el.scrollWidth > el.clientWidth)
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [note?.sections])
+
   // ── Delete key on the note (only when editor is NOT focused) ──────────────
   useEffect(() => {
     if (!isPaneActive) return
@@ -298,10 +311,35 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         e.preventDefault()
         openDeleteNoteModal()
       }
+
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [note, openDeleteNoteModal, isPaneActive])
+
+  // ── Ctrl+Tab / Ctrl+Shift+Tab — cycle sections (capture phase to beat TipTap) ──
+  useEffect(() => {
+    if (!isPaneActive) return
+    const handler = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.key !== 'Tab') return
+      const n = noteRef.current
+      if (!n || n.sections.length <= 1) return
+      e.preventDefault()
+      e.stopPropagation()
+      const sections = n.sections
+      const currentIdx = sections.findIndex((s) => s.id === activeSectionIdRef.current)
+      const base = currentIdx === -1 ? 0 : currentIdx
+      const nextIdx = e.shiftKey
+        ? (base - 1 + sections.length) % sections.length
+        : (base + 1) % sections.length
+      const nextSection = sections[nextIdx]
+      setRawContent(nextSection.content ?? '')
+      setActiveSectionId(nextSection.id)
+      window.noteflow.setUiState({ activeSectionId: nextSection.id })
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
+  }, [isPaneActive])
 
   // ── Ctrl+T / Ctrl+W via custom events ────────────────────────────────────
   useEffect(() => {
@@ -747,8 +785,9 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           if (isAccel && e.key === '0') { e.preventDefault(); resetFontSize() }
         }}
       >
-        <div className="flex items-center gap-3 px-3 pt-3 pb-2 border-b border-border min-h-0 flex-shrink-0">
-          <div className="flex items-center gap-1.5 flex-1 overflow-x-auto min-w-0 pr-1 tabs-scroll">
+        <div className="flex items-center px-3 pt-3 pb-2 border-b border-border min-h-0 flex-shrink-0 gap-1.5">
+          <div className="relative flex-1 min-w-0">
+            <div ref={tabsScrollRef} className="flex items-center gap-1.5 overflow-x-auto tabs-scroll">
             {note.sections.map((section) => {
               const isActive = section.id === (activeSection?.id)
               const isRenaming = renamingId === section.id
@@ -836,6 +875,27 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
               )
             })}
 
+              {/* + button inside scroll area when no overflow */}
+              {!tabsOverflow && (
+                <button
+                  onClick={handleAddSection}
+                  title="Add section (Ctrl+T)"
+                  className="flex items-center justify-center w-6 h-6 rounded flex-shrink-0
+                             text-text-muted/60 hover:text-text-muted hover:bg-surface-3
+                             border border-transparent hover:border-border transition-colors"
+                >
+                  <Plus size={13} />
+                </button>
+              )}
+            </div>
+            {/* Fade gradient — only when overflowing */}
+            {tabsOverflow && (
+              <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-surface-1 to-transparent" />
+            )}
+          </div>
+
+          {/* + button pinned outside when tabs overflow */}
+          {tabsOverflow && (
             <button
               onClick={handleAddSection}
               title="Add section (Ctrl+T)"
@@ -845,7 +905,9 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             >
               <Plus size={13} />
             </button>
-          </div>
+          )}
+
+          <div className="w-px h-4 bg-border flex-shrink-0" />
 
           <div className="flex items-center gap-0.5 flex-shrink-0">
             <button

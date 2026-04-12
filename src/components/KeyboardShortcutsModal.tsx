@@ -26,6 +26,8 @@ const SECTIONS: ShortcutSection[] = [
     shortcuts: [
       { keys: ['Ctrl', 'T'], description: 'New section' },
       { keys: ['Ctrl', 'W'], description: 'Delete section' },
+      { keys: ['Ctrl', 'Tab'], description: 'Next section' },
+      { keys: ['Ctrl', 'Shift', 'Tab'], description: 'Previous section' },
       { keys: ['Delete'], description: 'Delete selected note (when not editing)' },
     ],
   },
