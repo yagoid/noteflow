@@ -272,6 +272,10 @@ function createWindow(hidden = false): BrowserWindow {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Prevent Chromium from throttling/killing the renderer while hidden in the
+      // tray. Without this, the renderer can crash after suspend or prolonged idle,
+      // leaving a blank window that requires a full process restart to recover.
+      backgroundThrottling: false,
     },
   })
 
@@ -308,6 +312,23 @@ function createWindow(hidden = false): BrowserWindow {
       e.preventDefault()
       win.hide()
     }
+  })
+
+  // Auto-recover when the renderer process crashes or is killed by the OS
+  // (common after system suspend/resume or prolonged idle under memory pressure).
+  win.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit') return
+    console.error('[Renderer] Process gone:', details.reason, details.exitCode)
+    if (isDev) {
+      win.loadURL('http://localhost:5173')
+    } else {
+      win.loadFile(path.join(__dirname, '../dist/index.html'))
+    }
+  })
+
+  win.on('unresponsive', () => {
+    console.warn('[Renderer] Unresponsive — reloading')
+    win.webContents.reload()
   })
 
   return win
@@ -469,10 +490,10 @@ function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
 }
 
 function createTray() {
-  // On Windows use the .ico (multi-resolution); on other platforms use the PNG
+  const dir = app.isPackaged ? '../dist' : '../public'
   const iconPath = process.platform === 'win32'
-    ? path.join(__dirname, '../public/icon.ico')
-    : path.join(__dirname, '../public/tray-icon.png')
+    ? path.join(__dirname, `${dir}/icon.ico`)
+    : path.join(__dirname, `${dir}/tray-icon.png`)
 
   let icon: Electron.NativeImage = nativeImage.createFromPath(iconPath)
 
@@ -1267,14 +1288,18 @@ app.whenReady().then(() => {
     isQuitting = true
   })
 
-  // After system resume from sleep, reload notes with a short delay to let
-  // the OS fully wake up (filesystem and network may not be immediately ready).
+  // After system resume from sleep, reload notes several times with increasing
+  // delays. A single 1500ms attempt is not enough: the renderer may take a few
+  // seconds to recover (or be reloaded by the crash handler above), and the
+  // filesystem may not be ready immediately on Windows.
   powerMonitor.on('resume', () => {
-    setTimeout(() => {
-      BrowserWindow.getAllWindows().forEach((win) => {
-        win.webContents.send('notes-updated')
-      })
-    }, 1500)
+    for (const delay of [1500, 4000, 8000]) {
+      setTimeout(() => {
+        BrowserWindow.getAllWindows().forEach((w) => {
+          if (!w.isDestroyed()) w.webContents.send('notes-updated')
+        })
+      }, delay)
+    }
   })
 })
 

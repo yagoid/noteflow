@@ -455,6 +455,10 @@ function parseMdListItems(lines: string[]): MdListItem[] {
     } else if (ulMatch) {
       item = { type: 'ul', checked: false, text: ulMatch[1], due: null, alarm: null, children: [] }
     } else {
+      // Continuation line (soft/hard break inside list item) — append to last item
+      if (stack.length > 0) {
+        stack[stack.length - 1].node.text += '\n' + line.trim()
+      }
       continue
     }
 
@@ -486,9 +490,9 @@ function renderMdListItems(items: MdListItem[]): string {
     if (item.type === 'task') {
       const dueAttr   = item.due   ? ` data-due="${item.due}"`     : ''
       const alarmAttr = item.alarm ? ` data-alarm="${item.alarm}"` : ''
-      return `<li data-checked="${item.checked}" data-type="taskItem"${dueAttr}${alarmAttr}><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${inlineToHtml(item.text)}</p>${childHtml}</li>`
+      return `<li data-checked="${item.checked}" data-type="taskItem"${dueAttr}${alarmAttr}><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${item.text.split('\n').map(inlineToHtml).join('<br>')}</p>${childHtml}</li>`
     }
-    return `<li><p>${inlineToHtml(item.text)}</p>${childHtml}</li>`
+    return `<li><p>${item.text.split('\n').map(inlineToHtml).join('<br>')}</p>${childHtml}</li>`
   }).join('')
 
   if (isTask) return `<ul data-type="taskList">${innerHtml}</ul>`

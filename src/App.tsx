@@ -83,8 +83,14 @@ export function App() {
         window.dispatchEvent(new CustomEvent('noteflow:close-tab'))
         return
       }
-      // Ctrl+F — focus search
-      if (!e.shiftKey && (key === 'f' || e.code === 'KeyF')) {
+      // Ctrl+M — toggle markdown / rich-text mode
+      if (!e.shiftKey && (key === 'm' || e.code === 'KeyM')) {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('noteflow:toggle-raw'))
+        return
+      }
+      // Ctrl+Shift+F — global search (all notes)
+      if (e.shiftKey && (key === 'f' || e.code === 'KeyF')) {
         e.preventDefault()
         window.dispatchEvent(new CustomEvent('noteflow:focus-search'))
         return

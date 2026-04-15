@@ -100,6 +100,10 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const [tabsOverflow, setTabsOverflow] = useState(false)
   const rawTextareaRef = useRef<HTMLTextAreaElement>(null)
   const sectionUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Must be declared before the early return below — calling hooks conditionally
+  // (after an early return) violates React's Rules of Hooks and crashes the app
+  // when the note temporarily disappears during a sync reload.
+  const lastColorPickerSectionRef = useRef<NoteSection | null>(null)
 
   // ── Derived state ──────────────────────────────────────────────────────────
   const activeSection: NoteSection | undefined = note?.sections.find(
@@ -203,6 +207,10 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   // Keep a ref to note so handlers always see the latest value
   const noteRef = useRef(note)
   useEffect(() => { noteRef.current = note })
+
+  // Keep a ref to rawContent so event handlers always see the latest value
+  const rawContentRef = useRef(rawContent)
+  useEffect(() => { rawContentRef.current = rawContent }, [rawContent])
 
   // Focus rename input when it appears
   useEffect(() => {
@@ -359,7 +367,33 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       if (!n || n.sections.length <= 1) return
       const sectionId = activeSectionIdRef.current
       if (!sectionId) return
-      deleteSectionWithUndo(sectionId)
+      const section = n.sections.find((s) => s.id === sectionId)
+      if (!section) return
+      setModal({
+        title: 'Delete section',
+        message: `"${section.name}" will be permanently deleted.`,
+        confirmLabel: 'Delete',
+        danger: true,
+        onConfirm: () => { setModal(null); deleteSectionWithUndo(sectionId) },
+      })
+    }
+    const handleToggleRaw = () => {
+      const n = noteRef.current
+      const sectionId = activeSectionIdRef.current
+      if (!n || !sectionId) return
+      const section = n.sections.find((s) => s.id === sectionId)
+      if (!section) return
+      if (!section.isRawMode) {
+        setRawContent(section.content)
+        updateNote(n.id, {
+          sections: n.sections.map((s) => s.id === sectionId ? { ...s, isRawMode: true } : s),
+        })
+      } else {
+        if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
+        updateNote(n.id, {
+          sections: n.sections.map((s) => s.id === sectionId ? { ...s, content: rawContentRef.current, isRawMode: false } : s),
+        })
+      }
     }
     const handleOpenStickySection = () => {
       if (!isPaneActive) return
@@ -375,11 +409,13 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     }
     window.addEventListener('noteflow:add-tab', handleAddTab)
     window.addEventListener('noteflow:close-tab', handleCloseTab)
+    window.addEventListener('noteflow:toggle-raw', handleToggleRaw)
     window.addEventListener('noteflow:open-sticky-section', handleOpenStickySection)
     window.addEventListener('noteflow:open-sticky-all', handleOpenStickyAll)
     return () => {
       window.removeEventListener('noteflow:add-tab', handleAddTab)
       window.removeEventListener('noteflow:close-tab', handleCloseTab)
+      window.removeEventListener('noteflow:toggle-raw', handleToggleRaw)
       window.removeEventListener('noteflow:open-sticky-section', handleOpenStickySection)
       window.removeEventListener('noteflow:open-sticky-all', handleOpenStickyAll)
     }
@@ -589,7 +625,15 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   }
 
   const handleDeleteSection = (sectionId: string) => {
-    deleteSectionWithUndo(sectionId)
+    const section = note?.sections.find((s) => s.id === sectionId)
+    if (!section) return
+    setModal({
+      title: 'Delete section',
+      message: `"${section.name}" will be permanently deleted.`,
+      confirmLabel: 'Delete',
+      danger: true,
+      onConfirm: () => { setModal(null); deleteSectionWithUndo(sectionId) },
+    })
   }
 
   const handleStartRename = (section: NoteSection) => {
@@ -629,7 +673,6 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     ? note.sections.find((s) => s.id === sectionColorPickerId) ?? null
     : null
 
-  const lastColorPickerSectionRef = useRef(colorPickerSection)
   if (colorPickerSection) lastColorPickerSectionRef.current = colorPickerSection
   const visibleColorPickerSection = colorPickerSection ?? lastColorPickerSectionRef.current
 
@@ -787,7 +830,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       >
         <div className="flex items-center px-3 pt-3 pb-2 border-b border-border min-h-0 flex-shrink-0 gap-1.5">
           <div className="relative flex-1 min-w-0">
-            <div ref={tabsScrollRef} className="flex items-center gap-1.5 overflow-x-auto tabs-scroll">
+            <div ref={tabsScrollRef} className="flex items-center gap-1.5 overflow-x-auto tabs-scroll pr-4">
             {note.sections.map((section) => {
               const isActive = section.id === (activeSection?.id)
               const isRenaming = renamingId === section.id

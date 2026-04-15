@@ -188,13 +188,11 @@ async function ensureRepo(token, owner, repo) {
     }
 }
 async function listRemoteNotes(token, owner, repo) {
-    try {
-        const files = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/`));
-        return Array.isArray(files) ? files.filter((f) => f.type === 'file' && f.name.endsWith('.md')) : [];
-    }
-    catch {
-        return [];
-    }
+    // Do NOT catch here — let network/API errors propagate to the caller (pullNotes).
+    // Returning [] on error would make the deletion logic treat all local files as
+    // "remotely deleted" and wipe them from disk when there is no internet connection.
+    const files = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/`));
+    return Array.isArray(files) ? files.filter((f) => f.type === 'file' && f.name.endsWith('.md')) : [];
 }
 async function getRemoteFile(token, owner, repo, filename) {
     try {

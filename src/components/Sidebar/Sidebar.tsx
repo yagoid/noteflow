@@ -127,6 +127,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
 
   // ── Group picker / create inline ───────────────────────────────────────────
   const [groupPickerNoteId, setGroupPickerNoteId] = useState<string | null>(null)
+  const [groupPickerFlip, setGroupPickerFlip] = useState<{ x: boolean; y: boolean }>({ x: false, y: false })
   const [groupNameInput, setGroupNameInput] = useState<{ noteId: string; value: string } | null>(null)
 
   // ── Group rename inline ────────────────────────────────────────────────────
@@ -526,7 +527,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           <input
             ref={searchRef}
             type="text"
-            placeholder="Search... (Ctrl+F)"
+            placeholder="Search..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleSearchKeyDown}
@@ -877,7 +878,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           : undefined
         return (
           <div
-            className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-48 overflow-hidden animate-in fade-in zoom-in duration-100"
+            className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-48 animate-in fade-in zoom-in duration-100"
             style={{ left: contextMenu.x, top: contextMenu.y }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1001,55 +1002,73 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               </button>
             ) : (
               <>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    if (groups.length === 0) {
-                      setGroupNameInput({ noteId: note.id, value: '' })
-                    } else {
-                      setGroupPickerNoteId(groupPickerNoteId === note.id ? null : note.id)
-                      setGroupNameInput(null)
-                    }
+                <div
+                  className="relative"
+                  onMouseEnter={(e) => {
+                    if (groups.length === 0) return
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const submenuW = 160
+                    const submenuH = (groups.length + 1) * 34
+                    setGroupPickerFlip({
+                      x: rect.right + submenuW > window.innerWidth,
+                      y: rect.top + submenuH > window.innerHeight,
+                    })
+                    setGroupPickerNoteId(note.id)
+                    setGroupNameInput(null)
                   }}
-                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                  onMouseLeave={() => setGroupPickerNoteId(null)}
                 >
-                  <FolderPlus size={12} />
-                  Add to group
-                  {groups.length > 0 && <ChevronRight size={10} className="ml-auto" />}
-                </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (groups.length === 0) setGroupNameInput({ noteId: note.id, value: '' })
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                  >
+                    <FolderPlus size={12} />
+                    Add to group
+                    {groups.length > 0 && <ChevronRight size={10} className="ml-auto" />}
+                  </button>
 
-                {/* Group picker — inline expansion */}
-                {groupPickerNoteId === note.id && (
-                  <>
-                    {groups.map((g) => (
+                  {/* Group picker — submenu, repositioned to stay within window */}
+                  {groupPickerNoteId === note.id && (
+                    <div
+                      className="absolute z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-40 animate-in fade-in zoom-in duration-100"
+                      style={{
+                        [groupPickerFlip.x ? 'right' : 'left']: '100%',
+                        [groupPickerFlip.y ? 'bottom' : 'top']: 0,
+                      }}
+                    >
+                      {groups.map((g) => (
+                        <button
+                          key={g.id}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            updateNote(note.id, { group: g.id })
+                            closeAllMenus()
+                          }}
+                          className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                        >
+                          <span
+                            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                            style={{ background: `rgb(var(${g.color}))` }}
+                          />
+                          {g.name}
+                        </button>
+                      ))}
                       <button
-                        key={g.id}
                         onClick={(e) => {
                           e.stopPropagation()
-                          updateNote(note.id, { group: g.id })
-                          closeAllMenus()
+                          setGroupPickerNoteId(null)
+                          setGroupNameInput({ noteId: note.id, value: '' })
                         }}
-                        className="w-full text-left pl-6 pr-3 py-1 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                        className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-accent/10 hover:text-accent transition-colors"
                       >
-                        <span
-                          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                          style={{ background: `rgb(var(${g.color}))` }}
-                        />
-                        {g.name}
+                        + New group…
                       </button>
-                    ))}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setGroupPickerNoteId(null)
-                        setGroupNameInput({ noteId: note.id, value: '' })
-                      }}
-                      className="w-full text-left pl-6 pr-3 py-1 text-xs font-mono text-text-muted hover:bg-accent/10 hover:text-accent transition-colors"
-                    >
-                      + New group…
-                    </button>
-                  </>
-                )}
+                    </div>
+                  )}
+                </div>
 
                 {/* Inline group name input */}
                 {groupNameInput?.noteId === note.id && (
