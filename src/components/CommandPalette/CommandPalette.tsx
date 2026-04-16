@@ -3,10 +3,7 @@ import { useNotesStore } from '../../stores/notesStore'
 import type { Note } from '../../types'
 import { Search, Plus, FolderOpen, Keyboard, X } from 'lucide-react'
 import { format } from 'date-fns'
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
+import { escapeRegExp } from '../../lib/searchUtils'
 
 function HighlightText({ text, query }: { text: string; query: string }) {
   const trimmed = query.trim()

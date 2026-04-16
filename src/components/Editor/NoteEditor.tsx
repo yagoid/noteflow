@@ -3,6 +3,8 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { Editor } from './Editor'
+import type { EditorHandle } from './Editor'
+import { InNoteSearchBar } from './InNoteSearchBar'
 import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
@@ -99,6 +101,8 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const tabsScrollRef = useRef<HTMLDivElement>(null)
   const [tabsOverflow, setTabsOverflow] = useState(false)
   const rawTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const editorRef = useRef<EditorHandle | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
   const sectionUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Must be declared before the early return below — calling hooks conditionally
   // (after an early return) violates React's Rules of Hooks and crashes the app
@@ -407,19 +411,35 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       if (!n) return
       n.sections.forEach((s) => window.noteflow.openSticky(n.id, s.id))
     }
+    const handleInNoteSearch = () => {
+      if (!isPaneActive) return
+      const n = noteRef.current
+      const sectionId = activeSectionIdRef.current
+      const section = n?.sections.find((s) => s.id === sectionId)
+      if (!n || !section || section.isRawMode) return
+      setSearchOpen(true)
+    }
     window.addEventListener('noteflow:add-tab', handleAddTab)
     window.addEventListener('noteflow:close-tab', handleCloseTab)
     window.addEventListener('noteflow:toggle-raw', handleToggleRaw)
     window.addEventListener('noteflow:open-sticky-section', handleOpenStickySection)
     window.addEventListener('noteflow:open-sticky-all', handleOpenStickyAll)
+    window.addEventListener('noteflow:in-note-search', handleInNoteSearch)
     return () => {
       window.removeEventListener('noteflow:add-tab', handleAddTab)
       window.removeEventListener('noteflow:close-tab', handleCloseTab)
       window.removeEventListener('noteflow:toggle-raw', handleToggleRaw)
       window.removeEventListener('noteflow:open-sticky-section', handleOpenStickySection)
       window.removeEventListener('noteflow:open-sticky-all', handleOpenStickyAll)
+      window.removeEventListener('noteflow:in-note-search', handleInNoteSearch)
     }
   }, [updateNote, isPaneActive])
+
+  // Close the in-note search bar when the active section or note changes.
+  // The Editor is recreated (key-based) so matches and decorations are gone.
+  useEffect(() => {
+    setSearchOpen(false)
+  }, [activeSectionId, note?.id, rawMode])
 
   // ── Early exit ─────────────────────────────────────────────────────────────
   if (!note) {
@@ -1082,7 +1102,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           </span>
         </div>
 
-        <div className="flex-1 overflow-hidden mr-1">
+        <div className="flex-1 overflow-hidden mr-1 relative">
           {rawMode ? (
             <textarea
               ref={rawTextareaRef}
@@ -1110,13 +1130,22 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
               spellCheck={false}
             />
           ) : (
-            <Editor
-              key={`${note.id}-${activeSection?.id ?? 'none'}`}
-              content={activeSection?.content ?? ''}
-              onChange={handleSectionContentChange}
-              placeholder={`${activeSection?.name ?? 'Section'} — start writing...`}
-              fontSize={fontSize}
-            />
+            <>
+              <Editor
+                ref={editorRef}
+                key={`${note.id}-${activeSection?.id ?? 'none'}`}
+                content={activeSection?.content ?? ''}
+                onChange={handleSectionContentChange}
+                placeholder={`${activeSection?.name ?? 'Section'} — start writing...`}
+                fontSize={fontSize}
+              />
+              {searchOpen && (
+                <InNoteSearchBar
+                  editorRef={editorRef}
+                  onClose={() => setSearchOpen(false)}
+                />
+              )}
+            </>
           )}
         </div>
       </div>

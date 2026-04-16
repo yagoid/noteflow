@@ -7,6 +7,7 @@ import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMont
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
 import { normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
+import { normalize, escapeRegExp } from '../../lib/searchUtils'
 import { NoteGroupHeader } from './NoteGroupHeader'
 import { useSidebarGroups } from './useSidebarGroups'
 import { SectionTabsRow } from './SectionTabsRow'
@@ -21,18 +22,6 @@ function formatNoteDate(iso: string): string {
   if (isToday(d)) return format(d, 'HH:mm')
   if (isYesterday(d)) return 'Yesterday'
   return format(d, 'MMM d')
-}
-
-/** Normalize a string: lowercase + strip diacritical marks (accents) */
-function normalize(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function renderHighlightedText(text: string, query: string) {

@@ -1,4 +1,5 @@
 import { useEditor, EditorContent } from '@tiptap/react'
+import type { Editor as TiptapEditor } from '@tiptap/react'
 import Document from '@tiptap/extension-document'
 import Paragraph from '@tiptap/extension-paragraph'
 import Text from '@tiptap/extension-text'
@@ -21,8 +22,9 @@ import HorizontalRule from '@tiptap/extension-horizontal-rule'
 import History from '@tiptap/extension-history'
 import Placeholder from '@tiptap/extension-placeholder'
 import { common, createLowlight } from 'lowlight'
-import { useCallback, useEffect, useRef } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
 import { EditorToolbar } from './EditorToolbar'
+import { SearchHighlight } from './SearchHighlightExtension'
 
 const lowlight = createLowlight(common)
 
@@ -44,14 +46,18 @@ interface EditorProps {
   fontSize?: number
 }
 
-export function Editor({
+export interface EditorHandle {
+  editor: TiptapEditor | null
+}
+
+export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   content,
   onChange,
   placeholder = 'Start typing...',
   readOnly = false,
   hideToolbar = false,
   fontSize,
-}: EditorProps) {
+}, ref) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const editor = useEditor({
@@ -82,6 +88,7 @@ export function Editor({
       HardBreak,
       History,
       Placeholder.configure({ placeholder }),
+      SearchHighlight,
     ],
     content: htmlFromMarkdown(content),
     editable: !readOnly,
@@ -93,6 +100,8 @@ export function Editor({
       }, 400)
     },
   })
+
+  useImperativeHandle(ref, () => ({ editor }), [editor])
 
   // Open links in external browser on click
   useEffect(() => {
@@ -194,7 +203,7 @@ export function Editor({
       </div>
     </div>
   )
-}
+})
 
 // ── Markdown ↔ HTML helpers ──────────────────────────────────────────────────
 //

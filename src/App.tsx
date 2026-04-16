@@ -95,6 +95,12 @@ export function App() {
         window.dispatchEvent(new CustomEvent('noteflow:focus-search'))
         return
       }
+      // Ctrl+F — search within the active note
+      if (!e.shiftKey && (key === 'f' || e.code === 'KeyF')) {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('noteflow:in-note-search'))
+        return
+      }
       // Ctrl+S — open current section as sticky note
       if (!e.shiftKey && (key === 's' || e.code === 'KeyS')) {
         e.preventDefault()

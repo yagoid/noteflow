@@ -478,3 +478,20 @@ button {
 /* ── Sidebar section tabs: hide native scrollbar (navigation via arrow btns) */
 .section-tabs-scroll { -ms-overflow-style: none; scrollbar-width: none; }
 .section-tabs-scroll::-webkit-scrollbar { display: none; }
+
+/* ── In-note search highlights (Ctrl+F) ──────────────────────────────────── */
+.nf-search-match {
+  background: rgb(var(--accent) / 0.25);
+  border-radius: 2px;
+}
+.nf-search-match-active {
+  background: rgb(var(--accent) / 0.55);
+  outline: 1px solid rgb(var(--accent));
+}
+.prose-editor .ProseMirror pre .nf-search-match {
+  background: rgb(var(--accent) / 0.4);
+  color: inherit;
+}
+.prose-editor .ProseMirror pre .nf-search-match-active {
+  background: rgb(var(--accent) / 0.7);
+}
