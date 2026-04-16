@@ -122,6 +122,7 @@ export function StickyApp() {
   const [rawContent, setRawContent] = useState('')
   const [isFolded, setIsFolded] = useState(false)
   const { loadNotes, isLoading, notes, updateNote } = useNotesStore()
+  const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
 
   // Encrypted note unlock state (local — no store interaction)
   const [unlockedSections, setUnlockedSections] = useState<NoteSection[] | null>(null)
@@ -222,7 +223,7 @@ export function StickyApp() {
   if (isLoading || !noteId || !sectionId) {
     return (
       <div className="flex flex-col h-screen bg-surface-0 rounded-lg overflow-hidden border border-border">
-        <StickyTitleBar title="Loading..." onFold={() => {}} />
+        <StickyTitleBar noteTitle="Loading..." colorVar="--accent" onFold={() => {}} />
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="text-xs font-mono text-text-muted animate-pulse">Loading sticky note...</div>
         </div>
@@ -234,7 +235,7 @@ export function StickyApp() {
   if (note?.encryption && !unlockedSections) {
     return (
       <div className="flex flex-col h-screen bg-surface-0 overflow-hidden border border-border rounded-lg">
-        <StickyTitleBar title={note.title || 'Untitled'} onFold={() => {}} />
+        <StickyTitleBar noteTitle={note.title || 'Untitled'} colorVar="--accent" onFold={() => {}} />
         <div className="flex-1 flex flex-col items-center justify-center gap-3 p-4">
           <Lock size={20} className="text-text-muted opacity-30" />
           <p className="text-xs font-mono text-text-muted text-center">This note is encrypted</p>
@@ -267,7 +268,7 @@ export function StickyApp() {
   if (!note || !section) {
     return (
       <div className="flex flex-col h-screen bg-surface-0 rounded-lg overflow-hidden border border-border">
-        <StickyTitleBar title="Not Found" onFold={() => {}} />
+        <StickyTitleBar noteTitle="Not Found" colorVar="--accent" onFold={() => {}} />
         <div className="flex-1 flex flex-col items-center justify-center p-4 text-center">
           <div className="text-sm font-mono text-red-400 mb-2">Note not found</div>
           <div className="text-xs font-mono text-text-muted">It may have been deleted.</div>
@@ -312,7 +313,6 @@ export function StickyApp() {
     })
   }
 
-  const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
   const showSectionName = section.name !== 'New' && section.name !== 'Main'
   const sectionColorVar = resolveColorVar(section.name, sectionTagColors)
 

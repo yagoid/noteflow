@@ -63,7 +63,8 @@ export function SectionTabsRow({
     <div className="relative mt-0.5">
       {/* Left scroll arrow */}
       {canScrollLeft && (
-        <button
+        <div
+          role="button"
           onClick={scrollLeft}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); scrollLeft(e as unknown as React.MouseEvent) } }}
           className="absolute left-0 inset-y-0 z-10 flex items-center justify-center w-5
@@ -74,7 +75,7 @@ export function SectionTabsRow({
           aria-label="Scroll sections left"
         >
           <ChevronLeft size={9} strokeWidth={2.5} />
-        </button>
+        </div>
       )}
 
       {/* Scrollable sections row (native scrollbar hidden via CSS) */}
@@ -108,7 +109,8 @@ export function SectionTabsRow({
 
       {/* Right scroll arrow */}
       {canScrollRight && (
-        <button
+        <div
+          role="button"
           onClick={scrollRight}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); scrollRight(e as unknown as React.MouseEvent) } }}
           className="absolute right-0 inset-y-0 z-10 flex items-center justify-center w-5
@@ -119,7 +121,7 @@ export function SectionTabsRow({
           aria-label="Scroll sections right"
         >
           <ChevronRight size={9} strokeWidth={2.5} />
-        </button>
+        </div>
       )}
     </div>
   )
