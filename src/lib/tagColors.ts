@@ -27,7 +27,7 @@ function colorVar(name: string): GroupColor {
   return TAG_COLOR_VARS[hashString(name) % TAG_COLOR_VARS.length]
 }
 
-function resolveColorVar(name: string, overrides?: TagColorMap): GroupColor {
+export function resolveColorVar(name: string, overrides?: TagColorMap): GroupColor {
   const key = normalizeTagColorKey(name)
   const override = key ? overrides?.[key] : undefined
   return override ?? colorVar(name)

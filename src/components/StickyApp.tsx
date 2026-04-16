@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNotesStore } from '../stores/notesStore'
+import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
+import { resolveColorVar } from '../lib/tagColors'
 import { Editor } from './Editor/Editor'
 import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
 import { decryptSections } from '../lib/cryptoUtils'
@@ -9,14 +11,28 @@ const FOLDED_W = 220
 const FOLDED_H = 32
 
 // Custom TitleBar for the sticky window
-function StickyTitleBar({ title, onFold }: { title: string; onFold: () => void }) {
+function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold }: {
+  noteTitle: string
+  sectionName?: string
+  colorVar: string
+  onFold: () => void
+}) {
   return (
     <div
       className="h-8 bg-surface-1 border-b border-border flex items-center justify-between px-2 cursor-default select-none"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      <div className="text-xs font-mono text-text-muted truncate flex-1 pr-2">
-        {title}
+      <div className="text-xs font-mono text-text-muted flex items-center gap-1.5 flex-1 pr-2 min-w-0">
+        <span className="truncate">{noteTitle}</span>
+        {sectionName && (
+          <>
+            <span
+              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              style={{ backgroundColor: `rgb(var(${colorVar}))` }}
+            />
+            <span className="text-text-muted/70 truncate">{sectionName}</span>
+          </>
+        )}
       </div>
       <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <button
@@ -46,14 +62,32 @@ function StickyTitleBar({ title, onFold }: { title: string; onFold: () => void }
 }
 
 // Compact folded pill shown when the sticky note is collapsed
-function FoldedPill({ title, onUnfold }: { title: string; onUnfold: () => void }) {
+function FoldedPill({ noteTitle, sectionName, colorVar, onUnfold }: {
+  noteTitle: string
+  sectionName?: string
+  colorVar: string
+  onUnfold: () => void
+}) {
   return (
     <div
-      className="h-8 flex items-center justify-between px-2 gap-1 cursor-default select-none bg-surface-1 border border-accent/70 rounded-full overflow-hidden shadow-[0_0_8px_0_rgb(var(--accent)/0.35)]"
-      style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      className="h-8 flex items-center justify-between px-2 gap-1 cursor-default select-none bg-surface-1 rounded-full overflow-hidden"
+      style={{
+        WebkitAppRegion: 'drag',
+        border: `1px solid rgb(var(${colorVar}) / 0.7)`,
+        boxShadow: `0 0 8px 0 rgb(var(${colorVar}) / 0.35)`,
+      } as React.CSSProperties}
     >
-      <div className="text-xs font-mono text-text-muted truncate flex-1 min-w-0">
-        {title}
+      <div className="text-xs font-mono text-text-muted flex items-center gap-1.5 flex-1 min-w-0">
+        <span className="truncate">{noteTitle}</span>
+        {sectionName && (
+          <>
+            <span
+              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              style={{ backgroundColor: `rgb(var(${colorVar}))` }}
+            />
+            <span className="text-text-muted/70 truncate">{sectionName}</span>
+          </>
+        )}
       </div>
       <div className="flex items-center gap-0.5 flex-shrink-0" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <button
@@ -278,15 +312,29 @@ export function StickyApp() {
     })
   }
 
-  const stickyTitle = section.name === 'New' || section.name === 'Main' ? note.title : `${note.title} - ${section.name}`
+  const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
+  const showSectionName = section.name !== 'New' && section.name !== 'Main'
+  const sectionColorVar = resolveColorVar(section.name, sectionTagColors)
 
   if (isFolded) {
-    return <FoldedPill title={stickyTitle} onUnfold={handleUnfold} />
+    return (
+      <FoldedPill
+        noteTitle={note.title}
+        sectionName={showSectionName ? section.name : undefined}
+        colorVar={sectionColorVar}
+        onUnfold={handleUnfold}
+      />
+    )
   }
 
   return (
     <div className="flex flex-col h-screen bg-surface-0 overflow-hidden border border-border rounded-lg">
-      <StickyTitleBar title={stickyTitle} onFold={handleFold} />
+      <StickyTitleBar
+        noteTitle={note.title}
+        sectionName={showSectionName ? section.name : undefined}
+        colorVar={sectionColorVar}
+        onFold={handleFold}
+      />
       {isReadOnly && (
         <div className="flex items-center gap-1 px-2 py-1 bg-amber-500/10 border-b border-amber-500/20">
           <Lock size={9} className="text-amber-400 flex-shrink-0" />
