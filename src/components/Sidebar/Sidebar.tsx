@@ -6,9 +6,10 @@ import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Cop
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, isYesterday, startOfMonth, startOfWeek } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
-import { getTagColor, normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
+import { normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
 import { NoteGroupHeader } from './NoteGroupHeader'
 import { useSidebarGroups } from './useSidebarGroups'
+import { SectionTabsRow } from './SectionTabsRow'
 import type { GroupColor } from '../../types'
 
 interface SidebarProps {
@@ -428,44 +429,34 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               {formatNoteDate(note.updated)}
             </span>
           </div>
-          <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
-            {note.sections.map((section) => (
-              <span
-                key={section.id}
-                role="button"
-                tabIndex={0}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  window.dispatchEvent(new CustomEvent('noteflow:request-section', {
-                    detail: { noteId: note.id, sectionId: section.id }
-                  }))
-                  if (e.ctrlKey || e.metaKey) {
-                    openNoteInSplit(note.id)
-                    return
-                  }
-                  setOpenNoteIds([note.id])
-                  setActiveNote(note.id)
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setContextMenu({
-                    x: e.clientX,
-                    y: Math.min(e.clientY, window.innerHeight - 260),
-                    noteId: note.id,
-                    sectionId: section.id,
-                  })
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
-                }}
-                className="text-[10px] font-mono px-1 rounded flex-shrink-0 leading-[1.6] hover:opacity-70 transition-opacity cursor-pointer"
-                style={getTagColor(section.name, sectionTagColors)}
-              >
-                {renderHighlightedText(section.name, searchQuery)}
-              </span>
-            ))}
-          </div>
+          <SectionTabsRow
+            sections={note.sections}
+            searchQuery={searchQuery}
+            sectionTagColors={sectionTagColors}
+            onSectionClick={(sectionId, e) => {
+              e.stopPropagation()
+              window.dispatchEvent(new CustomEvent('noteflow:request-section', {
+                detail: { noteId: note.id, sectionId }
+              }))
+              if (e.ctrlKey || e.metaKey) {
+                openNoteInSplit(note.id)
+                return
+              }
+              setOpenNoteIds([note.id])
+              setActiveNote(note.id)
+            }}
+            onSectionContextMenu={(e, sectionId) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setContextMenu({
+                x: e.clientX,
+                y: Math.min(e.clientY, window.innerHeight - 260),
+                noteId: note.id,
+                sectionId,
+              })
+            }}
+            renderHighlightedText={renderHighlightedText}
+          />
         </button>
       </li>
     )
