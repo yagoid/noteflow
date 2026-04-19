@@ -5,6 +5,7 @@ import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { Editor } from './Editor'
 import type { EditorHandle } from './Editor'
 import { InNoteSearchBar } from './InNoteSearchBar'
+import { RawNoteSearchBar } from './RawNoteSearchBar'
 import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
@@ -416,7 +417,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       const n = noteRef.current
       const sectionId = activeSectionIdRef.current
       const section = n?.sections.find((s) => s.id === sectionId)
-      if (!n || !section || section.isRawMode) return
+      if (!n || !section) return
       setSearchOpen(true)
     }
     window.addEventListener('noteflow:add-tab', handleAddTab)
@@ -1104,31 +1105,40 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
 
         <div className="flex-1 overflow-hidden mr-1 relative">
           {rawMode ? (
-            <textarea
-              ref={rawTextareaRef}
-              value={displayContent}
-              onChange={handleRawChange}
-              onBlur={handleRawBlur}
-              onKeyDown={handleRawKeyDown}
-              onPaste={(e) => {
-                const imageItems = Array.from(e.clipboardData.items).filter(i => i.type.startsWith('image/'))
-                if (imageItems.length === 0) return
-                e.preventDefault()
-                handleRawImageInsert(imageItems.map(i => i.getAsFile()).filter(Boolean) as File[])
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                const files = Array.from(e.dataTransfer.files)
-                if (!files.some(f => f.type.startsWith('image/'))) return
-                e.preventDefault()
-                handleRawImageInsert(files)
-              }}
-              placeholder={`${activeSection?.name ?? 'Section'} — start writing...`}
-              style={{ fontSize: `${fontSize}px` }}
-              className="w-full h-full p-4 bg-transparent font-mono text-text
-                         placeholder-text-muted/30 border-none outline-none resize-none caret-accent leading-relaxed"
-              spellCheck={false}
-            />
+            <>
+              <textarea
+                ref={rawTextareaRef}
+                value={displayContent}
+                onChange={handleRawChange}
+                onBlur={handleRawBlur}
+                onKeyDown={handleRawKeyDown}
+                onPaste={(e) => {
+                  const imageItems = Array.from(e.clipboardData.items).filter(i => i.type.startsWith('image/'))
+                  if (imageItems.length === 0) return
+                  e.preventDefault()
+                  handleRawImageInsert(imageItems.map(i => i.getAsFile()).filter(Boolean) as File[])
+                }}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  const files = Array.from(e.dataTransfer.files)
+                  if (!files.some(f => f.type.startsWith('image/'))) return
+                  e.preventDefault()
+                  handleRawImageInsert(files)
+                }}
+                placeholder={`${activeSection?.name ?? 'Section'} — start writing...`}
+                style={{ fontSize: `${fontSize}px` }}
+                className="w-full h-full p-4 bg-transparent font-mono text-text
+                           placeholder-text-muted/30 border-none outline-none resize-none caret-accent leading-relaxed"
+                spellCheck={false}
+              />
+              {searchOpen && (
+                <RawNoteSearchBar
+                  textareaRef={rawTextareaRef}
+                  content={displayContent}
+                  onClose={() => setSearchOpen(false)}
+                />
+              )}
+            </>
           ) : (
             <>
               <Editor

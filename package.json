@@ -1,7 +1,7 @@
 {
   "name": "noteflow",
   "private": true,
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "Fast notes for software engineers",
   "author": {
     "name": "yagoid",

@@ -175,16 +175,18 @@
   const heroSticky = document.getElementById('hero-sticky');
   if (heroSticky) {
     const STICKY_THEMES = [
-      'screenshots/sticky-note-carbon.png',
-      'screenshots/sticky-note-tokionight.png',
-      'screenshots/sticky-note-arcticday.png',
+      { src: 'screenshots/sticky-note-carbon.png',     width: 220 },
+      { src: 'screenshots/sticky-note-tokionight.png',  width: 220 },
+      { src: 'screenshots/sticky-note-arcticday.png',   width: 190 },
+      { src: 'screenshots/sticky-note-midnightblue.png', width: 300 },
     ];
     let stickyIdx = 0;
     const stickyBody = heroSticky.closest('.hero__window-body');
+    const stickyWin  = heroSticky.closest('.hero__window--sticky');
 
     setInterval(() => {
       stickyIdx = (stickyIdx + 1) % STICKY_THEMES.length;
-      const nextSrc = STICKY_THEMES[stickyIdx];
+      const theme = STICKY_THEMES[stickyIdx];
 
       // Preload next image to know target height before swapping
       const preload = new Image();
@@ -194,16 +196,19 @@
 
         heroSticky.classList.add('fading');
 
-        const renderedWidth = heroSticky.offsetWidth;
-        const newHeight = Math.round((preload.naturalHeight / preload.naturalWidth) * renderedWidth);
+        // Respect responsive breakpoints — mirrors the CSS media queries
+        const vw = window.innerWidth;
+        const effectiveWidth = vw <= 600 ? 140 : vw <= 860 ? 180 : theme.width;
+        const newHeight = Math.round((preload.naturalHeight / preload.naturalWidth) * effectiveWidth);
 
         setTimeout(() => {
-          heroSticky.src = nextSrc;
+          if (stickyWin) stickyWin.style.width = effectiveWidth + 'px';
+          heroSticky.src = theme.src;
           stickyBody.style.height = newHeight + 'px';
           heroSticky.classList.remove('fading');
         }, 400);
       };
-      preload.src = nextSrc;
+      preload.src = theme.src;
     }, 4200);
   }
 

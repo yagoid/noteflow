@@ -11,7 +11,7 @@ import { KeyboardShortcutsModal } from './KeyboardShortcutsModal'
 
 export function TitleBar() {
   const { activeThemeId, setTheme } = useThemeStore()
-  const { fontSize, changeFontSize, resetFontSize } = useEditorSettingsStore()
+  const { fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily } = useEditorSettingsStore()
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; downloadUrl: string } | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState(0)
@@ -241,6 +241,22 @@ export function TitleBar() {
                           title="Increase (Ctrl++)"
                         >+</button>
                       </div>
+                    </div>
+                  ),
+                },
+                {
+                  id: 'font-family',
+                  node: (
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-text-muted">Font</span>
+                      <button
+                        onClick={() => setFontFamily(fontFamily === 'mono' ? 'inter' : 'mono')}
+                        className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted hover:text-text transition-colors"
+                      >
+                        <span className={fontFamily === 'mono' ? 'text-text' : ''}>Mono</span>
+                        <span className="opacity-30 px-0.5">/</span>
+                        <span className={fontFamily === 'inter' ? 'text-text' : ''}>Inter</span>
+                      </button>
                     </div>
                   ),
                 },

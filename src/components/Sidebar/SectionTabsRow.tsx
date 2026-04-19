@@ -67,14 +67,14 @@ export function SectionTabsRow({
           role="button"
           onClick={scrollLeft}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); scrollLeft(e as unknown as React.MouseEvent) } }}
-          className="absolute left-0 inset-y-0 z-10 flex items-center justify-center w-5
+          className="absolute left-0 inset-y-0 z-10 flex items-center justify-center w-6
                      bg-gradient-to-r from-surface-1 to-transparent
-                     text-text-muted/50 hover:text-text-muted transition-colors cursor-pointer
+                     text-text-muted/80 hover:text-text-primary transition-colors cursor-pointer
                      animate-in fade-in duration-150"
           tabIndex={-1}
           aria-label="Scroll sections left"
         >
-          <ChevronLeft size={9} strokeWidth={2.5} />
+          <ChevronLeft size={13} strokeWidth={2.5} />
         </div>
       )}
 
@@ -83,8 +83,8 @@ export function SectionTabsRow({
         ref={scrollRef}
         className="flex items-center gap-1 overflow-x-auto section-tabs-scroll"
         style={{
-          paddingLeft: canScrollLeft ? 16 : 0,
-          paddingRight: canScrollRight ? 16 : 0,
+          paddingLeft: canScrollLeft ? 20 : 0,
+          paddingRight: canScrollRight ? 20 : 0,
           transition: 'padding 120ms ease',
         }}
       >
@@ -113,14 +113,14 @@ export function SectionTabsRow({
           role="button"
           onClick={scrollRight}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); scrollRight(e as unknown as React.MouseEvent) } }}
-          className="absolute right-0 inset-y-0 z-10 flex items-center justify-center w-5
+          className="absolute right-0 inset-y-0 z-10 flex items-center justify-center w-6
                      bg-gradient-to-l from-surface-1 to-transparent
-                     text-text-muted/50 hover:text-text-muted transition-colors cursor-pointer
+                     text-text-muted/80 hover:text-text-primary transition-colors cursor-pointer
                      animate-in fade-in duration-150"
           tabIndex={-1}
           aria-label="Scroll sections right"
         >
-          <ChevronRight size={9} strokeWidth={2.5} />
+          <ChevronRight size={13} strokeWidth={2.5} />
         </div>
       )}
     </div>

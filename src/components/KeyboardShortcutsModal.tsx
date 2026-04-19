@@ -48,7 +48,7 @@ const SECTIONS: ShortcutSection[] = [
       { keys: ['Ctrl', 'U'], description: 'Underline' },
       { keys: ['Ctrl', 'E'], description: 'Inline code' },
       { keys: ['Ctrl', 'Shift', 'B'], description: 'Code block' },
-      // { keys: ['Ctrl', 'F'], description: 'Find in note' },
+      { keys: ['Ctrl', 'F'], description: 'Find in note' },
       { keys: ['Ctrl', 'M'], description: 'Toggle Markdown / rich-text mode' },
     ],
   },

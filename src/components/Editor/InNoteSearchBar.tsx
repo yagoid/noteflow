@@ -27,6 +27,10 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       editor.commands.setSearchTerm(query, caseSensitive)
+      // onTransaction in SearchHighlight has already updated storage.matchCount
+      // synchronously inside dispatchTransaction, so these reads are reliable.
+      setMatchCount(editor.storage.searchHighlight.matchCount)
+      setActiveIndex(editor.storage.searchHighlight.activeIndex)
     }, 80)
 
     return () => {
@@ -34,18 +38,20 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
     }
   }, [query, caseSensitive, editorRef])
 
+  // Keep counts in sync for any transaction that changes matches while the
+  // search bar is open (e.g. user types in the editor, or navigates matches).
   useEffect(() => {
     const editor = editorRef.current?.editor
     if (!editor) return
 
-    const update = () => {
-      setMatchCount(editor.storage.searchHighlight.getMatchCount())
-      setActiveIndex(editor.storage.searchHighlight.getActiveIndex())
+    const syncCounts = () => {
+      setMatchCount(editor.storage.searchHighlight.matchCount)
+      setActiveIndex(editor.storage.searchHighlight.activeIndex)
     }
-    update()
-    editor.on('transaction', update)
+
+    editor.on('transaction', syncCounts)
     return () => {
-      editor.off('transaction', update)
+      editor.off('transaction', syncCounts)
     }
   }, [editorRef])
 
@@ -55,8 +61,31 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
     }
   }, [editorRef])
 
-  const next = () => editorRef.current?.editor?.commands.searchNext()
-  const prev = () => editorRef.current?.editor?.commands.searchPrev()
+  const scrollToActiveMatch = (editor: EditorHandle['editor']) => {
+    if (!editor) return
+    requestAnimationFrame(() => {
+      editor.view.dom
+        .querySelector('.nf-search-match-active')
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    })
+  }
+
+  const next = () => {
+    const editor = editorRef.current?.editor
+    if (!editor) return
+    editor.commands.searchNext()
+    setMatchCount(editor.storage.searchHighlight.matchCount)
+    setActiveIndex(editor.storage.searchHighlight.activeIndex)
+    scrollToActiveMatch(editor)
+  }
+  const prev = () => {
+    const editor = editorRef.current?.editor
+    if (!editor) return
+    editor.commands.searchPrev()
+    setMatchCount(editor.storage.searchHighlight.matchCount)
+    setActiveIndex(editor.storage.searchHighlight.activeIndex)
+    scrollToActiveMatch(editor)
+  }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {

@@ -25,6 +25,7 @@ import { common, createLowlight } from 'lowlight'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
 import { EditorToolbar } from './EditorToolbar'
 import { SearchHighlight } from './SearchHighlightExtension'
+import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 
 const lowlight = createLowlight(common)
 
@@ -59,6 +60,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   fontSize,
 }, ref) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { fontFamily } = useEditorSettingsStore()
 
   const editor = useEditor({
     editorProps: {
@@ -194,7 +196,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       {!readOnly && !hideToolbar && <EditorToolbar editor={editor} />}
       <div
         className="flex-1 overflow-y-auto"
-        style={fontSize ? { '--prose-font-size': `${fontSize}px` } as React.CSSProperties : undefined}
+        style={{
+          '--prose-font-size': fontSize ? `${fontSize}px` : undefined,
+          '--prose-font-family': fontFamily === 'inter'
+            ? "'Inter', sans-serif"
+            : "'JetBrains Mono', 'Fira Code', monospace",
+        } as React.CSSProperties}
       >
         <EditorContent
           editor={editor}

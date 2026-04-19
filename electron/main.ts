@@ -324,11 +324,24 @@ function createWindow(hidden = false): BrowserWindow {
     } else {
       win.loadFile(path.join(__dirname, '../dist/index.html'))
     }
+    // After the reload, send notes-updated once the renderer is ready.
+    // The powerMonitor.resume signals may have already been sent to the old
+    // (now dead) renderer, so the new one needs its own trigger.
+    win.webContents.once('did-finish-load', () => {
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.webContents.send('notes-updated')
+      }, 2000)
+    })
   })
 
   win.on('unresponsive', () => {
     console.warn('[Renderer] Unresponsive — reloading')
     win.webContents.reload()
+    win.webContents.once('did-finish-load', () => {
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.webContents.send('notes-updated')
+      }, 2000)
+    })
   })
 
   return win
@@ -663,8 +676,8 @@ ipcMain.handle('fs:read-all-notes', async () => {
   // isn't ready yet (e.g. OS waking from sleep, app starting at boot).
   // Retry up to 3 times so we don't mistake a transient empty result for no notes.
   let files: string[] = []
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) await new Promise<void>((r) => setTimeout(r, 600))
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (attempt > 0) await new Promise<void>((r) => setTimeout(r, 800))
     files = fs.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'))
     if (files.length > 0) break
   }
@@ -1292,8 +1305,11 @@ app.whenReady().then(() => {
   // delays. A single 1500ms attempt is not enough: the renderer may take a few
   // seconds to recover (or be reloaded by the crash handler above), and the
   // filesystem may not be ready immediately on Windows.
+  // The 15s and 30s signals act as extra safety nets for slow filesystem
+  // recovery (e.g. hibernation) or renderer restarts that happen after the
+  // earlier signals have already fired.
   powerMonitor.on('resume', () => {
-    for (const delay of [1500, 4000, 8000]) {
+    for (const delay of [1500, 4000, 8000, 15000, 30000]) {
       setTimeout(() => {
         BrowserWindow.getAllWindows().forEach((w) => {
           if (!w.isDestroyed()) w.webContents.send('notes-updated')

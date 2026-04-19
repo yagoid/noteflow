@@ -28,8 +28,16 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
   const [draftDue, setDraftDue] = useState<string>(due ?? '')
   const [draftAlarm, setDraftAlarm] = useState<string>(alarm ?? '')
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 })
+  const [isSticky, setIsSticky] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
+  const wrapperRef = useRef<HTMLElement>(null)
+
+  // Detect if we're inside a sticky-editor
+  useEffect(() => {
+    const el = wrapperRef.current
+    if (el) setIsSticky(!!el.closest('.sticky-editor'))
+  }, [])
 
   // Sync drafts when attrs change externally
   useEffect(() => {
@@ -96,6 +104,7 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
   return (
     <NodeViewWrapper
       as="li"
+      ref={wrapperRef}
       data-type="taskItem"
       data-checked={String(checked)}
     >
@@ -121,7 +130,7 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
           {due ? (
             <span className={`task-badge ${badgeColorClass(due)}`}>
               📅 {formatBadgeDate(due)}
-              {alarm && <> ⏰{alarm}</>}
+              {alarm && !isSticky && <> ⏰{alarm}</>}
             </span>
           ) : (
             <Calendar size={14} className="task-deadline-icon" />

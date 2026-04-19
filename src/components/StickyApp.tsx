@@ -19,18 +19,15 @@ function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold }: {
 }) {
   return (
     <div
-      className="h-8 bg-surface-1 border-b border-border flex items-center justify-between px-2 cursor-default select-none"
+      className="h-8 bg-surface-0 border-b border-border/40 flex items-center justify-between px-2 cursor-default select-none"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      <div className="text-xs font-mono text-text-muted flex items-center gap-1.5 flex-1 pr-2 min-w-0">
-        <span className="truncate">{noteTitle}</span>
+      <div className="text-xs font-mono flex items-center gap-3 flex-1 pr-2 min-w-0">
+        <span className="truncate text-text font-semibold">{noteTitle}</span>
         {sectionName && (
           <>
-            <span
-              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-              style={{ backgroundColor: `rgb(var(${colorVar}))` }}
-            />
-            <span className="text-text-muted/70 truncate">{sectionName}</span>
+            <span className="h-3 w-px bg-border/40 flex-shrink-0" />
+            <span className="truncate font-light" style={{ color: `rgb(var(${colorVar}))` }}>{sectionName}</span>
           </>
         )}
       </div>
@@ -54,7 +51,7 @@ function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold }: {
           onClick={() => window.noteflow.close()}
           title="Close Sticky Note"
         >
-          <X size={12} />
+          <X size={14} />
         </button>
       </div>
     </div>
@@ -70,22 +67,19 @@ function FoldedPill({ noteTitle, sectionName, colorVar, onUnfold }: {
 }) {
   return (
     <div
-      className="h-8 flex items-center justify-between px-2 gap-1 cursor-default select-none bg-surface-1 rounded-full overflow-hidden"
+      className="h-8 flex items-center justify-between px-2 gap-1 cursor-default select-none bg-surface-0 rounded-lg overflow-hidden border border-border/40"
       style={{
         WebkitAppRegion: 'drag',
-        border: `1px solid rgb(var(${colorVar}) / 0.7)`,
-        boxShadow: `0 0 8px 0 rgb(var(${colorVar}) / 0.35)`,
+        borderLeftColor: `rgb(var(${colorVar}))`,
+        borderLeftWidth: '3px',
       } as React.CSSProperties}
     >
-      <div className="text-xs font-mono text-text-muted flex items-center gap-1.5 flex-1 min-w-0">
-        <span className="truncate">{noteTitle}</span>
+      <div className="text-xs font-mono flex items-center gap-3 flex-1 min-w-0">
+        <span className="truncate text-text font-semibold">{noteTitle}</span>
         {sectionName && (
           <>
-            <span
-              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-              style={{ backgroundColor: `rgb(var(${colorVar}))` }}
-            />
-            <span className="text-text-muted/70 truncate">{sectionName}</span>
+            <span className="h-3 w-px bg-border/40 flex-shrink-0" />
+            <span className="truncate font-light" style={{ color: `rgb(var(${colorVar}))` }}>{sectionName}</span>
           </>
         )}
       </div>
@@ -109,7 +103,7 @@ function FoldedPill({ noteTitle, sectionName, colorVar, onUnfold }: {
           onClick={() => window.noteflow.close()}
           title="Close"
         >
-          <X size={12} />
+          <X size={14} />
         </button>
       </div>
     </div>
@@ -328,7 +322,10 @@ export function StickyApp() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-surface-0 overflow-hidden border border-border rounded-lg">
+    <div
+      className="flex flex-col h-screen bg-surface-1 overflow-hidden border border-border rounded-lg"
+      style={{ borderLeftColor: `rgb(var(${sectionColorVar}))`, borderLeftWidth: '3px' }}
+    >
       <StickyTitleBar
         noteTitle={note.title}
         sectionName={showSectionName ? section.name : undefined}

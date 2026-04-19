@@ -54,6 +54,11 @@ declare module '@tiptap/core' {
 }
 
 export interface SearchHighlightStorage {
+  // Plain properties updated on every transaction via onTransaction —
+  // safe to read directly without any PluginKey lookup.
+  matchCount: number
+  activeIndex: number
+  // Function-based accessors kept for backward-compat / convenience.
   getMatchCount: () => number
   getActiveIndex: () => number
   getQuery: () => string
@@ -65,6 +70,8 @@ export const SearchHighlight = Extension.create<unknown, SearchHighlightStorage>
 
   addStorage() {
     return {
+      matchCount: 0,
+      activeIndex: 0,
       getMatchCount: () => 0,
       getActiveIndex: () => 0,
       getQuery: () => '',
@@ -78,6 +85,16 @@ export const SearchHighlight = Extension.create<unknown, SearchHighlightStorage>
     this.storage.getActiveIndex = () => getState(editor.state)?.activeIndex ?? 0
     this.storage.getQuery = () => getState(editor.state)?.query ?? ''
     this.storage.getCaseSensitive = () => getState(editor.state)?.caseSensitive ?? false
+  },
+
+  // Keep matchCount / activeIndex in sync after every transaction.
+  // onTransaction runs inside dispatchTransaction with the correct editor
+  // reference, so getState(this.editor.state) always uses the right
+  // PluginKey instance regardless of Vite HMR module re-evaluations.
+  onTransaction() {
+    const s = getState(this.editor.state)
+    this.storage.matchCount = s?.matches.length ?? 0
+    this.storage.activeIndex = s?.activeIndex ?? 0
   },
 
   addProseMirrorPlugins() {
