@@ -300,7 +300,7 @@ export function TitleBar() {
             className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-red-500 hover:text-white transition-colors"
             title="Close (hides to tray)"
           >
-            <X size={11} />
+            <X size={13} />
           </button>
         </div>
       </div>

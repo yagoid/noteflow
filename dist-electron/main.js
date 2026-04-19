@@ -261,10 +261,7 @@ function isAllowedInitialUpdateUrl(url) {
     return pathname.endsWith('.exe') || pathname.endsWith('.deb');
 }
 function isAllowedRedirectUpdateUrl(url) {
-    if (!ALLOWED_UPDATE_REDIRECT_HOSTS.has(url.hostname))
-        return false;
-    const pathname = url.pathname.toLowerCase();
-    return pathname.endsWith('.exe') || pathname.endsWith('.deb');
+    return ALLOWED_UPDATE_REDIRECT_HOSTS.has(url.hostname);
 }
 function createWindow(hidden = false) {
     const win = new electron_1.BrowserWindow({
@@ -736,12 +733,14 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
         const response = await electron_1.net.fetch(initialUrl.toString());
         if (!response.ok)
             throw new Error(`HTTP ${response.status}`);
-        const finalUrl = parseHttpsUrl(response.url);
-        if (!finalUrl || !isAllowedRedirectUpdateUrl(finalUrl)) {
-            throw new Error('Blocked redirected update URL');
+        if (response.url) {
+            const finalUrl = parseHttpsUrl(response.url);
+            if (!finalUrl || !isAllowedRedirectUpdateUrl(finalUrl)) {
+                throw new Error(`Blocked redirected update URL: ${response.url}`);
+            }
         }
         const tmpDir = electron_1.app.getPath('temp');
-        const fileName = path_1.default.basename(finalUrl.pathname) || path_1.default.basename(initialUrl.pathname) || 'NoteFlow-update.exe';
+        const fileName = path_1.default.basename(initialUrl.pathname) || 'NoteFlow-update.exe';
         const dest = path_1.default.join(tmpDir, fileName);
         const total = parseInt(response.headers.get('content-length') || '0');
         let downloaded = 0;

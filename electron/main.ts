@@ -251,9 +251,7 @@ function isAllowedInitialUpdateUrl(url: URL): boolean {
 }
 
 function isAllowedRedirectUpdateUrl(url: URL): boolean {
-  if (!ALLOWED_UPDATE_REDIRECT_HOSTS.has(url.hostname)) return false
-  const pathname = url.pathname.toLowerCase()
-  return pathname.endsWith('.exe') || pathname.endsWith('.deb')
+  return ALLOWED_UPDATE_REDIRECT_HOSTS.has(url.hostname)
 }
 
 function createWindow(hidden = false): BrowserWindow {
@@ -751,13 +749,15 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
     const response = await net.fetch(initialUrl.toString())
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
-    const finalUrl = parseHttpsUrl(response.url)
-    if (!finalUrl || !isAllowedRedirectUpdateUrl(finalUrl)) {
-      throw new Error('Blocked redirected update URL')
+    if (response.url) {
+      const finalUrl = parseHttpsUrl(response.url)
+      if (!finalUrl || !isAllowedRedirectUpdateUrl(finalUrl)) {
+        throw new Error(`Blocked redirected update URL: ${response.url}`)
+      }
     }
 
     const tmpDir = app.getPath('temp')
-    const fileName = path.basename(finalUrl.pathname) || path.basename(initialUrl.pathname) || 'NoteFlow-update.exe'
+    const fileName = path.basename(initialUrl.pathname) || 'NoteFlow-update.exe'
     const dest = path.join(tmpDir, fileName)
 
     const total = parseInt(response.headers.get('content-length') || '0')
