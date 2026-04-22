@@ -109,25 +109,37 @@ ipcMain.on('alarms:schedule', (_event, incoming: AlarmEntry[]) => {
   checkAlarms()
 })
 
+function emitSyncStatusChanged(): void {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    win.webContents.send('sync:status-changed')
+  })
+}
+
+type PullResult = Awaited<ReturnType<typeof githubSync.pullNotes>>
+
+function broadcastPullResult(result: PullResult): void {
+  if (result.hadDeletions || result.hadMetadataChanges) {
+    BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
+  } else {
+    for (const filePath of result.updatedFiles) {
+      BrowserWindow.getAllWindows().forEach((win) => {
+        win.webContents.send('notes-updated', filePath, null)
+      })
+    }
+  }
+  emitSyncStatusChanged()
+}
+
 function startAutoSync(): void {
   if (autoSyncTimer) return
   autoSyncTimer = setInterval(async () => {
     if (!githubSync.getSyncStatus().connected) return
     try {
       const result = await githubSync.pullNotes(NOTES_DIR)
-      if (result.hadDeletions || result.hadMetadataChanges) {
-        // Metadata and deletions require a full reload so all stores stay in sync.
-        BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
-      } else {
-        // Broadcast only the files that actually changed — avoids full reload
-        for (const filePath of result.updatedFiles) {
-          BrowserWindow.getAllWindows().forEach((win) => {
-            win.webContents.send('notes-updated', filePath, null)
-          })
-        }
-      }
+      broadcastPullResult(result)
     } catch (err) {
       console.error('[AutoSync] pull failed:', String(err))
+      emitSyncStatusChanged()
     }
   }, AUTO_SYNC_INTERVAL_MS)
 }
@@ -294,14 +306,6 @@ function createWindow(hidden = false): BrowserWindow {
   win.once('ready-to-show', () => {
     if (hidden) return  // startup mode: stay hidden in tray
     win.show()
-    // Pull remote notes in background after window is visible
-    if (githubSync.getSyncStatus().connected) {
-      githubSync.pullNotes(NOTES_DIR).then(({ pulled, hadDeletions, hadMetadataChanges }) => {
-        if (pulled > 0 || hadDeletions || hadMetadataChanges) {
-          win.webContents.send('notes-updated')
-        }
-      })
-    }
   })
 
   // Hide instead of close — keeps the process alive for fast re-open
@@ -1215,15 +1219,50 @@ if (!gotTheLock) {
   app.quit()
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Remove default menu for all windows
   Menu.setApplicationMenu(null)
 
   githubSync.loadSyncSettings()
-  if (githubSync.getSyncStatus().connected) startAutoSync()
+  githubSync.onStatusChanged(() => emitSyncStatusChanged())
+  const connected = githubSync.getSyncStatus().connected
 
   const isStartupMode = process.argv.includes('--noteflow-startup')
   const startupStickies = (readSettings().startupStickies ?? []) as Array<{ noteId: string; sectionId: string }>
+
+  // Initial GitHub pull. In startup mode we block for up to 10s so sticky
+  // windows open with up-to-date content — otherwise an edit on stale data
+  // would overwrite newer remote changes (data loss). In normal mode we keep
+  // the fast-open UX and pull in the background; schedulePush is gated until
+  // the first pull succeeds, so no unsafe pushes happen in the meantime.
+  if (connected) {
+    const runInitialPull = () =>
+      githubSync
+        .pullNotes(NOTES_DIR)
+        .then(broadcastPullResult)
+        .catch((err) => {
+          console.error('[Startup] initial pull failed:', String(err))
+          githubSync.setInitialPullStatus('failed')
+        })
+
+    if (isStartupMode) {
+      await Promise.race([
+        runInitialPull(),
+        new Promise<void>((resolve) =>
+          setTimeout(() => {
+            if (githubSync.getSyncStatus().initialPullStatus === 'pending') {
+              console.warn('[Startup] initial pull timeout — proceeding with local data')
+              githubSync.setInitialPullStatus('failed')
+            }
+            resolve()
+          }, 10_000)
+        ),
+      ])
+    } else {
+      runInitialPull()
+    }
+    startAutoSync()
+  }
 
   // Refresh login item registration on every launch so it stays current after
   // app updates (binary path or args may have changed since the user first

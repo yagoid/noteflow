@@ -38,6 +38,8 @@ export interface GitHubSyncSettings {
   lastSync?: string
 }
 
+export type InitialPullStatus = 'pending' | 'ok' | 'failed'
+
 export interface SyncStatus {
   enabled: boolean
   connected: boolean
@@ -45,6 +47,7 @@ export interface SyncStatus {
   repo?: string
   lastSync?: string
   error?: string
+  initialPullStatus: InitialPullStatus
 }
 
 // ── Settings helpers ──────────────────────────────────────────────────────────
@@ -325,6 +328,10 @@ async function removeRemoteFile(
 
 let syncSettings: GitHubSyncSettings | null = null
 let syncError: string | undefined
+let initialPullStatus: InitialPullStatus = 'pending'
+
+// Fired every time initialPullStatus changes so main.ts can broadcast to renderers.
+let statusListener: (() => void) | null = null
 
 // Pending push timers per filename (debounce)
 const pushTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -358,7 +365,18 @@ export function getSyncStatus(): SyncStatus {
     repo: s.repo,
     lastSync: s.lastSync,
     error: syncError,
+    initialPullStatus,
   }
+}
+
+export function setInitialPullStatus(status: InitialPullStatus): void {
+  if (initialPullStatus === status) return
+  initialPullStatus = status
+  statusListener?.()
+}
+
+export function onStatusChanged(cb: () => void): void {
+  statusListener = cb
 }
 
 // Starts Device Flow. Returns the user_code to display + verification URL to open.
@@ -490,6 +508,7 @@ export function disconnectGitHub(): void {
 
   syncSettings = { enabled: false }
   syncError = undefined
+  setInitialPullStatus('pending')
 
   const settings = readSettings()
   delete settings.githubSync
@@ -516,6 +535,7 @@ export async function pullNotes(notesDir: string): Promise<{
     const msg = err instanceof Error ? err.message : String(err)
     const userFacingError = `Failed to decrypt GitHub token. Please reconnect GitHub sync. (${msg})`
     syncError = userFacingError
+    if (initialPullStatus === 'pending') setInitialPullStatus('failed')
     return {
       pulled: 0,
       deleted: 0,
@@ -530,6 +550,7 @@ export async function pullNotes(notesDir: string): Promise<{
   const errors: string[] = []
   const updatedFiles: string[] = []
   let hadMetadataChanges = false
+  const previousLastSync = s.lastSync
 
   try {
     const remoteFiles = await listRemoteNotes(token, s.owner, s.repo)
@@ -613,10 +634,16 @@ export async function pullNotes(notesDir: string): Promise<{
     settings.githubSync = syncSettings
     writeSettings(settings)
     syncError = undefined
+    const wasNotOk = initialPullStatus !== 'ok'
+    if (wasNotOk) {
+      setInitialPullStatus('ok')
+      flushPendingLocalChanges(notesDir, previousLastSync)
+    }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     syncError = msg
     errors.push(msg)
+    if (initialPullStatus === 'pending') setInitialPullStatus('failed')
   }
 
   return {
@@ -632,6 +659,12 @@ export async function pullNotes(notesDir: string): Promise<{
 export async function pushAllNotes(notesDir: string): Promise<{ pushed: number; errors: string[] }> {
   const s = syncSettings ?? loadSyncSettings()
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return { pushed: 0, errors: [] }
+
+  // Cancel any debounced pushes queued by flushPendingLocalChanges — pushAllNotes
+  // does the same work synchronously, so leaving timers active would double-push
+  // and produce duplicate commits.
+  pushTimers.forEach((t) => clearTimeout(t))
+  pushTimers.clear()
 
   let token: string
   try {
@@ -675,6 +708,26 @@ export function schedulePush(filePath: string, content: string, onStart?: () => 
     return
   }
 
+  // Gate: defer pushes until the initial pull has succeeded — otherwise a stale
+  // local file could overwrite a newer remote version (data loss). The on-disk
+  // write already happened in the caller, so no data is lost by deferring.
+  // Pending changes are flushed automatically when pullNotes transitions to 'ok'.
+  if (initialPullStatus !== 'ok') {
+    console.warn(`[GitHubSync] Push deferred for ${path.basename(filePath)}: initialPullStatus=${initialPullStatus}`)
+    onComplete?.(`sync-gated:${initialPullStatus}`)
+    return
+  }
+
+  schedulePushUnguarded(filePath, content, onStart, onComplete)
+}
+
+function schedulePushUnguarded(filePath: string, content: string, onStart?: () => void, onComplete?: (error?: string) => void): void {
+  const s = syncSettings ?? loadSyncSettings()
+  if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
+    onComplete?.()
+    return
+  }
+
   const filename = path.basename(filePath)
 
   // Debounce: reset timer if already queued for this file.
@@ -702,6 +755,32 @@ export function schedulePush(filePath: string, content: string, onStart?: () => 
   }, 5000) // 5s debounce — avoids spamming API while typing
 
   pushTimers.set(filename, timer)
+}
+
+// Called when pullNotes transitions from pending/failed → ok. Scans the notes
+// directory and re-queues pushes for any local file newer than the previous
+// lastSync (i.e. edits made while the push gate was closed). Survives restarts
+// because the detection is purely based on on-disk `updated:` timestamps.
+function flushPendingLocalChanges(notesDir: string, previousLastSync: string | undefined): void {
+  const lastSyncMs = previousLastSync ? Date.parse(previousLastSync) : null
+  let files: string[] = []
+  try {
+    files = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md'))
+  } catch {
+    return
+  }
+  for (const filename of files) {
+    const fullPath = path.join(notesDir, filename)
+    try {
+      const content = fs.readFileSync(fullPath, 'utf-8')
+      const updatedMs = parseUpdatedTimestamp(extractUpdatedTimestamp(content))
+      if (updatedMs === null) continue
+      if (lastSyncMs !== null && updatedMs <= lastSyncMs) continue
+      schedulePushUnguarded(fullPath, content)
+    } catch {
+      // Unreadable file — skip.
+    }
+  }
 }
 
 export async function scheduleDelete(filePath: string): Promise<void> {

@@ -114,6 +114,24 @@ electron_1.ipcMain.on('alarms:schedule', (_event, incoming) => {
     // Immediately fire any alarms that are already due (including missed ones)
     checkAlarms();
 });
+function emitSyncStatusChanged() {
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+        win.webContents.send('sync:status-changed');
+    });
+}
+function broadcastPullResult(result) {
+    if (result.hadDeletions || result.hadMetadataChanges) {
+        electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+    }
+    else {
+        for (const filePath of result.updatedFiles) {
+            electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+                win.webContents.send('notes-updated', filePath, null);
+            });
+        }
+    }
+    emitSyncStatusChanged();
+}
 function startAutoSync() {
     if (autoSyncTimer)
         return;
@@ -122,21 +140,11 @@ function startAutoSync() {
             return;
         try {
             const result = await githubSync.pullNotes(NOTES_DIR);
-            if (result.hadDeletions || result.hadMetadataChanges) {
-                // Metadata and deletions require a full reload so all stores stay in sync.
-                electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
-            }
-            else {
-                // Broadcast only the files that actually changed — avoids full reload
-                for (const filePath of result.updatedFiles) {
-                    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
-                        win.webContents.send('notes-updated', filePath, null);
-                    });
-                }
-            }
+            broadcastPullResult(result);
         }
         catch (err) {
             console.error('[AutoSync] pull failed:', String(err));
+            emitSyncStatusChanged();
         }
     }, AUTO_SYNC_INTERVAL_MS);
 }
@@ -302,14 +310,6 @@ function createWindow(hidden = false) {
         if (hidden)
             return; // startup mode: stay hidden in tray
         win.show();
-        // Pull remote notes in background after window is visible
-        if (githubSync.getSyncStatus().connected) {
-            githubSync.pullNotes(NOTES_DIR).then(({ pulled, hadDeletions, hadMetadataChanges }) => {
-                if (pulled > 0 || hadDeletions || hadMetadataChanges) {
-                    win.webContents.send('notes-updated');
-                }
-            });
-        }
     });
     // Hide instead of close — keeps the process alive for fast re-open
     win.on('close', (e) => {
@@ -1178,14 +1178,44 @@ const gotTheLock = electron_1.app.requestSingleInstanceLock();
 if (!gotTheLock) {
     electron_1.app.quit();
 }
-electron_1.app.whenReady().then(() => {
+electron_1.app.whenReady().then(async () => {
     // Remove default menu for all windows
     electron_1.Menu.setApplicationMenu(null);
     githubSync.loadSyncSettings();
-    if (githubSync.getSyncStatus().connected)
-        startAutoSync();
+    githubSync.onStatusChanged(() => emitSyncStatusChanged());
+    const connected = githubSync.getSyncStatus().connected;
     const isStartupMode = process.argv.includes('--noteflow-startup');
     const startupStickies = (readSettings().startupStickies ?? []);
+    // Initial GitHub pull. In startup mode we block for up to 10s so sticky
+    // windows open with up-to-date content — otherwise an edit on stale data
+    // would overwrite newer remote changes (data loss). In normal mode we keep
+    // the fast-open UX and pull in the background; schedulePush is gated until
+    // the first pull succeeds, so no unsafe pushes happen in the meantime.
+    if (connected) {
+        const runInitialPull = () => githubSync
+            .pullNotes(NOTES_DIR)
+            .then(broadcastPullResult)
+            .catch((err) => {
+            console.error('[Startup] initial pull failed:', String(err));
+            githubSync.setInitialPullStatus('failed');
+        });
+        if (isStartupMode) {
+            await Promise.race([
+                runInitialPull(),
+                new Promise((resolve) => setTimeout(() => {
+                    if (githubSync.getSyncStatus().initialPullStatus === 'pending') {
+                        console.warn('[Startup] initial pull timeout — proceeding with local data');
+                        githubSync.setInitialPullStatus('failed');
+                    }
+                    resolve();
+                }, 10000)),
+            ]);
+        }
+        else {
+            runInitialPull();
+        }
+        startAutoSync();
+    }
     // Refresh login item registration on every launch so it stays current after
     // app updates (binary path or args may have changed since the user first
     // enabled the feature).

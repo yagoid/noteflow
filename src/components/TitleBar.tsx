@@ -19,8 +19,8 @@ export function TitleBar() {
   const [upToDate, setUpToDate] = useState(false)
   const [exportImportModal, setExportImportModal] = useState<'export' | 'import' | null>(null)
   const [syncModal, setSyncModal] = useState(false)
-  type SyncStatus = { enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string }
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ enabled: false, connected: false })
+  type SyncStatus = { enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed' }
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ enabled: false, connected: false, initialPullStatus: 'pending' })
   const [syncing, setSyncing] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [startupModal, setStartupModal] = useState(false)
@@ -41,11 +41,13 @@ export function TitleBar() {
       setPushing(state === 'pushing')
       if (state === 'idle') refreshSyncStatus()
     })
+    const unsubStatus = window.noteflow.onSyncStatusChanged(() => refreshSyncStatus())
     const openShortcutsHandler = () => setShortcutsModal(true)
     window.addEventListener('noteflow:open-shortcuts', openShortcutsHandler)
     return () => {
       unsubNotes()
       unsubPush()
+      unsubStatus()
       window.removeEventListener('noteflow:open-shortcuts', openShortcutsHandler)
     }
   }, [])
@@ -135,6 +137,8 @@ export function TitleBar() {
                 ? 'Syncing...'
                 : pushing
                 ? 'Uploading changes...'
+                : syncStatus.initialPullStatus === 'failed'
+                ? `Sync bloqueado — los cambios no se subirán hasta reconectar.${syncStatus.error ? `\n${syncStatus.error}` : ''}\nClick para reintentar`
                 : syncStatus.error
                 ? `Sync error: ${syncStatus.error}`
                 : `${syncStatus.owner}/${syncStatus.repo} · Last sync: ${formatLastSync(syncStatus.lastSync)}\nClick to sync`
@@ -144,6 +148,8 @@ export function TitleBar() {
               <RefreshCw size={12} className="animate-spin text-accent" />
             ) : pushing ? (
               <Cloud size={12} className="animate-pulse text-green-400" />
+            ) : syncStatus.initialPullStatus === 'failed' ? (
+              <CloudOff size={12} className="text-amber-400" />
             ) : syncStatus.error ? (
               <Cloud size={12} className="text-amber-400" />
             ) : (

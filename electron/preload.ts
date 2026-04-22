@@ -85,6 +85,7 @@ const api = {
     repo?: string
     lastSync?: string
     error?: string
+    initialPullStatus: 'pending' | 'ok' | 'failed'
   }> => ipcRenderer.invoke('sync:get-status'),
   initiateGitHubAuth: (
     repo: string
@@ -111,6 +112,11 @@ const api = {
     const wrapper = (_event: any, state: 'pushing' | 'idle') => cb(state)
     ipcRenderer.on('sync:push-state', wrapper)
     return () => ipcRenderer.removeListener('sync:push-state', wrapper)
+  },
+  onSyncStatusChanged: (cb: () => void) => {
+    const wrapper = () => cb()
+    ipcRenderer.on('sync:status-changed', wrapper)
+    return () => ipcRenderer.removeListener('sync:status-changed', wrapper)
   },
 
   // Alarms
