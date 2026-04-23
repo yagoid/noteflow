@@ -176,7 +176,7 @@
   if (heroSticky) {
     const STICKY_THEMES = [
       { src: 'screenshots/sticky-note-carbon.png',     width: 220 },
-      { src: 'screenshots/sticky-note-tokionight.png',  width: 220 },
+      { src: 'screenshots/sticky-note-tokionight.png',  width: 170 },
       { src: 'screenshots/sticky-note-arcticday.png',   width: 190 },
       { src: 'screenshots/sticky-note-midnightblue.png', width: 300 },
     ];
