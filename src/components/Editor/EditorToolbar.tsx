@@ -16,6 +16,14 @@ import {
   Link,
   Undo2,
   Redo2,
+  Table as TableIcon,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  Plus,
+  Minus,
+  Trash2,
 } from 'lucide-react'
 
 interface ToolbarProps {
@@ -140,6 +148,19 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       isActive: editor.isActive('link'),
       title: 'Insert link',
     },
+    {
+      icon: <TableIcon size={14} />,
+      action: () => {
+        if (editor.isActive('table')) {
+          editor.chain().focus().deleteTable().run()
+        } else {
+          editor.chain().focus()
+            .insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+        }
+      },
+      isActive: editor.isActive('table'),
+      title: editor.isActive('table') ? 'Delete table' : 'Insert table',
+    },
     'sep',
     {
       icon: <Undo2 size={14} />,
@@ -206,6 +227,53 @@ export function EditorToolbar({ editor }: ToolbarProps) {
           </button>
         </div>
       )}
+
+      {editor.isActive('table') && (
+        <div className="flex items-center gap-1 px-3 py-1.5 border-t border-border flex-wrap">
+          <span className="text-[10px] uppercase tracking-wider text-text-muted/60 mr-1">Table</span>
+          <TableOpButton title="Insert row above the current one" onClick={() => editor.chain().focus().addRowBefore().run()}>
+            <Plus size={11} /> Row <ArrowUp size={11} />
+          </TableOpButton>
+          <TableOpButton title="Insert row below the current one" onClick={() => editor.chain().focus().addRowAfter().run()}>
+            <Plus size={11} /> Row <ArrowDown size={11} />
+          </TableOpButton>
+          <TableOpButton title="Delete current row" onClick={() => editor.chain().focus().deleteRow().run()}>
+            <Minus size={11} /> Row
+          </TableOpButton>
+          <div className="w-px h-4 bg-border mx-1" />
+          <TableOpButton title="Insert column to the left" onClick={() => editor.chain().focus().addColumnBefore().run()}>
+            <Plus size={11} /> Col <ArrowLeft size={11} />
+          </TableOpButton>
+          <TableOpButton title="Insert column to the right" onClick={() => editor.chain().focus().addColumnAfter().run()}>
+            <Plus size={11} /> Col <ArrowRight size={11} />
+          </TableOpButton>
+          <TableOpButton title="Delete current column" onClick={() => editor.chain().focus().deleteColumn().run()}>
+            <Minus size={11} /> Col
+          </TableOpButton>
+          <div className="w-px h-4 bg-border mx-1" />
+          <TableOpButton title="Delete the whole table" onClick={() => editor.chain().focus().deleteTable().run()}>
+            <Trash2 size={11} /> Table
+          </TableOpButton>
+        </div>
+      )}
     </div>
+  )
+}
+
+interface TableOpButtonProps {
+  title: string
+  onClick: () => void
+  children: React.ReactNode
+}
+
+function TableOpButton({ title, onClick, children }: TableOpButtonProps) {
+  return (
+    <button
+      onMouseDown={(e) => { e.preventDefault(); onClick() }}
+      title={title}
+      className="flex items-center gap-1 px-2 py-1 rounded text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
+    >
+      {children}
+    </button>
   )
 }

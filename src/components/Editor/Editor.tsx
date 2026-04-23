@@ -21,9 +21,14 @@ import HardBreak from '@tiptap/extension-hard-break'
 import HorizontalRule from '@tiptap/extension-horizontal-rule'
 import History from '@tiptap/extension-history'
 import Placeholder from '@tiptap/extension-placeholder'
+import Table from '@tiptap/extension-table'
+import TableRow from '@tiptap/extension-table-row'
+import TableHeader from '@tiptap/extension-table-header'
+import TableCell from '@tiptap/extension-table-cell'
 import { common, createLowlight } from 'lowlight'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
 import { EditorToolbar } from './EditorToolbar'
+import { TableContextMenu } from './TableContextMenu'
 import { SearchHighlight } from './SearchHighlightExtension'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 
@@ -87,6 +92,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       Link.configure({ openOnClick: false, autolink: false }),
       ResizableImage.configure({ inline: true, allowBase64: true }),
       HorizontalRule,
+      Table.configure({ resizable: true, HTMLAttributes: { class: 'md-table' } }),
+      TableRow,
+      TableHeader,
+      TableCell,
       HardBreak,
       History,
       Placeholder.configure({ placeholder }),
@@ -208,6 +217,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
           className="h-full prose-editor"
         />
       </div>
+      {!readOnly && <TableContextMenu editor={editor} />}
     </div>
   )
 })
@@ -267,6 +277,20 @@ function htmlFromMarkdown(md: string): string {
       continue
     }
 
+    // ── Pipe table ──────────────────────────────────────────────────────────
+    // Strict detection: line 1 must contain a |, line 2 must be a separator
+    // row with only |, :, -, spaces; every cell ≥3 dashes; ≥2 cells. This
+    // avoids reinterpreting paragraphs that contain literal | characters.
+    const isPipeTable =
+      lines.length >= 2 &&
+      /\|/.test(lines[0]) &&
+      /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[1])
+
+    if (isPipeTable) {
+      htmlBlocks.push(mdTableToHtml(lines))
+      continue
+    }
+
     // ── Paragraph (may span multiple lines — single \n becomes <br>) ────────
     const paraContent = lines
       .map((l) => {
@@ -316,6 +340,7 @@ function blockElToMd(el: Element): string {
     const code = codeEl?.textContent ?? ''
     return `\`\`\`${lang}\n${code.trimEnd()}\n\`\`\`\n\n`
   }
+  if (tag === 'table') return tableElToMd(el) + '\n'
   if (tag === 'ul' || tag === 'ol') return listElToMd(el, 0) + '\n'
   let out = ''
   for (const c of el.childNodes) {
@@ -518,4 +543,89 @@ function renderMdListItems(items: MdListItem[]): string {
 
 function mdListBlockToHtml(lines: string[]): string {
   return renderMdListItems(parseMdListItems(lines))
+}
+
+// ── Pipe table helpers ───────────────────────────────────────────────────────
+
+function splitPipeRow(line: string): string[] {
+  const trimmed = line.replace(/^\s*\|/, '').replace(/\|\s*$/, '')
+  const cells: string[] = []
+  let cur = ''
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i]
+    if (ch === '\\' && trimmed[i + 1] === '|') { cur += '|'; i++; continue }
+    if (ch === '|') { cells.push(cur); cur = ''; continue }
+    cur += ch
+  }
+  cells.push(cur)
+  return cells.map(c => c.trim())
+}
+
+function parseAlign(sep: string): 'left' | 'center' | 'right' | null {
+  const s = sep.trim()
+  const L = s.startsWith(':'), R = s.endsWith(':')
+  if (L && R) return 'center'
+  if (R) return 'right'
+  if (L) return 'left'
+  return null
+}
+
+function renderCell(c: string): string {
+  return c.split(/<br\s*\/?>/i).map(inlineToHtml).join('<br>')
+}
+
+function mdTableToHtml(lines: string[]): string {
+  const header = splitPipeRow(lines[0])
+  const aligns = splitPipeRow(lines[1]).map(parseAlign)
+  const bodyLines = lines.slice(2).filter(l => l.trim() && /\|/.test(l))
+  const styleFor = (i: number) =>
+    aligns[i] ? ` style="text-align:${aligns[i]}"` : ''
+
+  const thead = `<tr>${header.map((c, i) =>
+    `<th${styleFor(i)}>${renderCell(c)}</th>`).join('')}</tr>`
+
+  const tbody = bodyLines.map(l => {
+    const cells = splitPipeRow(l)
+    while (cells.length < header.length) cells.push('')
+    cells.length = header.length
+    return `<tr>${cells.map((c, i) =>
+      `<td${styleFor(i)}>${renderCell(c)}</td>`).join('')}</tr>`
+  }).join('')
+
+  return `<table>${thead}${tbody}</table>`
+}
+
+function escapeCell(md: string): string {
+  return md.replace(/\|/g, '\\|').replace(/\n/g, '<br>')
+}
+
+function tableElToMd(tbl: Element): string {
+  const rows = Array.from(tbl.querySelectorAll('tr'))
+  if (rows.length === 0) return ''
+
+  const headerRow = rows[0]
+  const firstHasTh = Array.from(headerRow.children).some(
+    c => c.tagName.toLowerCase() === 'th'
+  )
+  const cellMd = (c: Element) =>
+    escapeCell(inlineElToMd(c).trim()) || ' '
+
+  const aligns = Array.from(headerRow.children).map(c => {
+    const s = (c as HTMLElement).style?.textAlign ?? ''
+    if (s === 'center') return ':---:'
+    if (s === 'right')  return '---:'
+    if (s === 'left')   return ':---'
+    return '---'
+  })
+
+  const toLine = (r: Element) =>
+    '| ' + Array.from(r.children).map(cellMd).join(' | ') + ' |'
+
+  const head = firstHasTh
+    ? toLine(headerRow)
+    : '| ' + aligns.map(() => ' ').join(' | ') + ' |'
+  const sep  = '| ' + aligns.join(' | ') + ' |'
+  const body = rows.slice(firstHasTh ? 1 : 0).map(toLine).join('\n')
+
+  return [head, sep, body].filter(Boolean).join('\n') + '\n\n'
 }

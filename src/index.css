@@ -492,3 +492,49 @@ button {
 .prose-editor .ProseMirror pre .nf-search-match-active {
   background: rgb(var(--accent) / 0.7);
 }
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+.prose-editor .ProseMirror table {
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  table-layout: fixed;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+}
+.prose-editor .ProseMirror th,
+.prose-editor .ProseMirror td {
+  border: 1px solid rgb(var(--border));
+  padding: 0.35rem 0.6rem;
+  vertical-align: top;
+  position: relative;
+  min-width: 4rem;
+}
+.prose-editor .ProseMirror th {
+  background: rgb(var(--bg-2));
+  color: rgb(var(--cyan));
+  font-weight: 600;
+  text-align: left;
+}
+.prose-editor .ProseMirror tr:nth-child(even) td {
+  background: rgb(var(--bg-1) / 0.4);
+}
+.prose-editor .ProseMirror td p,
+.prose-editor .ProseMirror th p {
+  margin: 0;
+}
+.prose-editor .ProseMirror .selectedCell {
+  background: rgb(var(--accent) / 0.15);
+}
+.prose-editor .ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: rgb(var(--accent) / 0.6);
+  pointer-events: none;
+}
+.prose-editor .ProseMirror .tableWrapper {
+  overflow-x: auto;
+}
