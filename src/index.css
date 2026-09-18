@@ -569,6 +569,19 @@ button {
     /* Sit just outside the column; clamp so it never escapes the viewport on
        narrow windows (degrades by overlapping the right gutter instead). */
     margin-left: min(0.5rem, calc((100cqw - var(--readable-col)) / 2 - 0.5rem));
+    /* The margin clamp only bounds the block's LEFT edge. Its width is not
+       fixed: a bare hover icon fits in the ~3em gutter, but a deadline badge
+       (📅 date, optionally ⏰ time) is ~8-9em, so its RIGHT edge would spill
+       past the editor and, since the scroll container is overflow-y:auto,
+       force a horizontal scrollbar on the whole note. Bound the right edge
+       too: shift the block left by exactly the amount that doesn't fit
+       (100% = its own width), or 0 when it fits. The gutter measured from the
+       column's right edge is (100cqw - col) / 2 minus half the 6px scrollbar
+       (the column is centered inside the scroll container's content box);
+       1rem = the 0.5rem margin-left above + 0.5rem for that scrollbar share
+       and rounding. When it doesn't fit, the block overlaps the end of the
+       text column instead of scrolling — same degradation as the margin. */
+    transform: translateX(min(0px, calc((100cqw - var(--readable-col)) / 2 - 1rem - 100%)));
   }
 }
 

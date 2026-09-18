@@ -309,7 +309,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     >
       {!readOnly && !hideToolbar && <EditorToolbar editor={editor} />}
       <div
-        className="flex-1 overflow-y-auto"
+        // overflow-x-hidden: nothing at note level needs horizontal scroll
+        // (tables and code blocks scroll internally, images are capped at
+        // 100%, ProseMirror wraps long words). Without it, `overflow-y: auto`
+        // makes overflow-x resolve to `auto`, so anything poking past the
+        // right edge (e.g. the absolutely-positioned task actions in readable
+        // mode) would add a horizontal scrollbar to the whole note.
+        className="flex-1 overflow-y-auto overflow-x-hidden"
         style={{
           '--prose-font-size': fontSize ? `${fontSize}px` : undefined,
           '--prose-font-family': fontFamily === 'inter'

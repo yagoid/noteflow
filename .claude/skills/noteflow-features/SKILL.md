@@ -497,6 +497,11 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   a ancho completo. El ancho de columna se deriva del tamaño de fuente base del cuerpo (no del de
   cada elemento), así los headings comparten la misma columna. Aplica a ambos modos (WYSIWYG y
   raw); no afecta a los stickies.
+- En `Readable`, las acciones de cada tarea (importancia + deadline/badge) se sacan al margen
+  derecho, fuera de la columna, cuando el editor mide ≥ 58em (container query en `src/index.css`).
+  Si el bloque no cabe en el margen (badge con fecha + alarma), se desplaza hacia la izquierda
+  solapando el final de la columna en vez de provocar scroll horizontal; el contenedor de scroll
+  del editor es además `overflow-x: hidden` (tablas y código tienen su propio scroll interno).
 - Preferencia local persistida en `localStorage` (`noteflow-readable-width`), en
   `editorSettingsStore` junto a fuente/tamaño. No se sincroniza.
 
