@@ -346,6 +346,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       updated: now,
       archived: false,
       favorited: false,
+      // Same group/folder as the original, in the single write (see createNote)
+      ...(source.group ? { group: source.group } : {}),
+      ...(source.folder ? { folder: source.folder } : {}),
       sections: source.sections.map((s) => ({ ...s, id: nanoid(8) })),
     }
     const dir = get().notesDir

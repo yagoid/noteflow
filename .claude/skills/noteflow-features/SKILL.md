@@ -92,7 +92,7 @@ Iconos del TitleBar:
 - **Drag-to-reorder** → las notas se pueden arrastrar dentro de su contexto (favorites, grupo, carpeta o sin grupo) para fijar un orden manual. El orden persiste en `note-order.json` (sincronizado con GitHub). Una línea indicadora muestra dónde se insertará la nota al soltar.
 - **Drag-to-move (entre grupos/carpetas)** → arrastrar una nota y soltarla sobre **otro grupo** (cabecera o cuerpo) la reasigna a la raíz de ese grupo; soltarla sobre una **carpeta** la mueve a esa carpeta. El destino se resalta con un borde/tinte del color del grupo mientras se arrastra. Reordenar dentro del mismo contexto y mover a otro distinto conviven en el mismo gesto (la cabecera de un grupo colapsado también es zona de drop). Equivale a `updateNote({ group, folder })`; sin IPC nuevo.
 - **Archive** → se oculta de la lista principal (toggle "Show archived" en footer).
-- **Duplicate** → copia completa con todas sus secciones.
+- **Duplicate** → copia completa con todas sus secciones; conserva el grupo y la carpeta de la original.
 - **Open alongside** → abre la nota en paralelo (vista dividida) junto a la actual.
 - **Asignar a grupo / carpeta** → drag & drop o menú contextual.
 - **Delete** → con confirmación modal.
