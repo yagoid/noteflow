@@ -73,7 +73,7 @@ interface NotesState {
 
   // Actions
   loadNotes: () => Promise<void>
-  createNote: () => Promise<Note>
+  createNote: (opts?: { group?: string; folder?: string }) => Promise<Note>
   // Creates a note already populated with title/sections (and optional group/folder) in a
   // single disk write — no empty intermediate. Used by AI generation so the editor never
   // mounts a blank, date-titled note whose stale title draft could clobber the real one.
@@ -254,11 +254,20 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     }
   },
 
-  createNote: async () => {
+  // group/folder go in BEFORE the single disk write: assigning them afterwards with
+  // updateNote() left a window where a full loadNotes() (notes-updated after a sync pull)
+  // reloaded the note from disk without them and dropped the assignment.
+  createNote: async (opts) => {
     const draft = createEmptyNote()
     const dir = get().notesDir
     const filePath = `${dir}/${noteDirname(draft.id, draft.title)}`
-    const note: Note = { ...draft, filePath, raw: '' }
+    const note: Note = {
+      ...draft,
+      ...(opts?.group ? { group: opts.group } : {}),
+      ...(opts?.folder ? { folder: opts.folder } : {}),
+      filePath,
+      raw: '',
+    }
 
     await writeNoteToDisk(null, note)
     set((s) => ({

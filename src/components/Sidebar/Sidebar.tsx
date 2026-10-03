@@ -405,14 +405,12 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   }
 
   async function createNoteInGroup(groupId: string) {
-    const note = await createNote()
-    await updateNote(note.id, { group: groupId })
+    await createNote({ group: groupId })
     closeAllMenus()
   }
 
   async function createNoteInFolder(groupId: string, folderId: string) {
-    const note = await createNote()
-    await updateNote(note.id, { group: groupId, folder: folderId })
+    await createNote({ group: groupId, folder: folderId })
     closeAllMenus()
   }
 

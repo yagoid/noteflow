@@ -412,8 +412,7 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
   }
 
   const handleNewNote = async () => {
-    const note = await createNote()
-    await updateNote(note.id, { group: groupId })
+    const note = await createNote({ group: groupId })
     openNote(note.id)
   }
 
