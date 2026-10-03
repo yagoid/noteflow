@@ -203,12 +203,24 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   texto → se conserva la respuesta parcial como Markdown y el error se pinta en una fila roja debajo,
   `ChatView`). Antes el listener `onAiChatError` hacía `last.content || ⚠…` y descartaba el error si
   ya había texto: la respuesta se cortaba a medias sin ninguna señal.
+- **Indicador de progreso del chat (invariante "si no hay indicador, ha terminado"):** mientras
+  `streaming` es true **siempre** hay un cue al pie de la conversación hasta done/error/cancel.
+  Componente `ChatActivityIndicator` en `ChatView` (se suscribe él mismo con selectores primitivos y
+  tiene su propio timer → el chequeo de inactividad no re-renderiza la lista de mensajes); la regla es
+  pura en `src/lib/chatActivity.ts` (`chatActivityCue`, test en `tests/lib/chatActivity.test.ts`):
+  tool en curso o tarjeta de confirmación → nada (esa fila/tarjeta ya es el feedback);
+  `awaitingModelText` (inicio o tras un tool result) o **sin delta desde hace `STREAM_IDLE_MS`
+  (1,3 s)** → fila **"Thinking…"**; texto fluyendo → tres puntos pulsando (accent, texto sr-only).
+  El fallback por inactividad cubre el hueco típico del bucle agéntico: preámbulo ("Voy a buscar…")
+  y luego segundos generando los argumentos del tool call antes de que llegue `ai:chat-tool-call`.
+  El store guarda `lastDeltaAt` (ms del último delta del turno; `null` al enviar). Ambas variantes
+  comparten caja (`h-6`) para no mover el layout al alternar.
 - **Iluminación de fuentes:** las notas citadas se "encienden" en el cerebro — pulso/halo aditivo
   brillante en 3D (`litGroup` en `BrainScene`, parpadeo por `sin`) y glow + anillo en 2D
   (`BrainCanvas`). NO se fuerzan etiquetas (eso metía ruido). Prop `highlightedNoteIds`.
 - **Historial de chats:** sesiones en `userData/ai-chats.json` (local), gestionadas por `aiChatStore`
   (crear/abrir/borrar; se persiste al terminar cada respuesta). Selector de modelo en el chat
-  (cambia el modelo del preset activo). UI del panel **en inglés**.
+  (cambia el modelo del preset activo). Textos del panel vía i18n (`src/i18n/{en,es}/aiPanel.ts`).
 - **Enrutado del panel desde la paleta de comandos:** `aiChatStore` expone `panelTab`/`pendingPrompt`
   + `openAiPanel(tab, prompt?)` (tipo `PanelTab = 'chat'|'related'|'profile'|'settings'`). La
   `CommandPalette` abre la brain view (`setBrainView(true)`) y llama `openAiPanel` para que el

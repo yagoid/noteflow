@@ -65,6 +65,10 @@ interface AiChatState {
   // i.e. the initial think AND the gaps between agent steps (e.g. composing the final answer
   // after a tool ran). Drives the "Thinking…" row so a mid-turn pause never reads as "done".
   awaitingModelText: boolean
+  // Timestamp (ms) of the last text delta of the current turn, null until the first one. ChatView's
+  // activity cue uses it to notice a stalled stream (e.g. the model generating tool-call arguments
+  // after a preamble) and fall back to "Thinking…" — so the reply never looks finished while it isn't.
+  lastDeltaAt: number | null
   currentRequestId: string | null
   activeSources: ChatSource[]
   pendingConfirm: ChatPendingConfirm | null
@@ -152,6 +156,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
   messages: [],
   streaming: false,
   awaitingModelText: false,
+  lastDeltaAt: null,
   currentRequestId: null,
   activeSources: [],
   pendingConfirm: null,
@@ -169,6 +174,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       messages: [...history, userTurn, assistantTurn],
       streaming: true,
       awaitingModelText: true,
+      lastDeltaAt: null,
       currentRequestId: requestId,
       activeSources: [],
       suggestions: [],
@@ -252,7 +258,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
         const msgs = s.messages.slice()
         const last = msgs[msgs.length - 1]
         if (last && last.role === 'assistant') msgs[msgs.length - 1] = { ...last, content: last.content + delta }
-        return { messages: msgs }
+        return { messages: msgs, lastDeltaAt: Date.now() }
       })
     }
 
@@ -288,7 +294,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
 
     const offDelta = window.noteflow.onAiChatDelta((p) => {
       if (p.requestId !== get().currentRequestId) return
-      // Text is now flowing for this step — the bubble itself is the feedback, drop "Thinking…".
+      // Text is now flowing for this step — swap "Thinking…" for the subtle streaming cue.
       if (get().awaitingModelText) set({ awaitingModelText: false })
       appendToAssistant(p.delta)
     })
@@ -308,8 +314,9 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     const offToolResult = window.noteflow.onAiChatToolResult((p) => {
       if (p.requestId !== get().currentRequestId) return
       // Tool finished; the model is about to think again (e.g. compose the final answer). Re-arm
-      // "Thinking…" so the inter-step gap doesn't read as a finished reply. The `!toolRunning`
-      // guard in ChatView keeps it hidden if another tool in the same step is still going.
+      // "Thinking…" so the inter-step gap doesn't read as a finished reply. The `toolRunning`
+      // rule in chatActivityCue (lib/chatActivity.ts) keeps it hidden if another tool in the
+      // same step is still going.
       set({ awaitingModelText: true })
       updateActions((actions) =>
         actions.map((a) => a.toolCallId === p.toolCallId ? { ...a, status: p.status, summary: p.summary } : a))

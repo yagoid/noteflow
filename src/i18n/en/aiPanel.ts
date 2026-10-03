@@ -42,6 +42,8 @@ export const aiPanel = {
     },
     confirmBtn: 'Confirm',
     thinking: 'Thinking…',
+    // Screen-reader text for the pulsing dots shown while the reply streams in.
+    responding: 'Writing a reply…',
 
     // Composer attachment tooltip. `list` is a comma-joined subset of fileTypes.
     attachHint: 'Attach files — {list}',

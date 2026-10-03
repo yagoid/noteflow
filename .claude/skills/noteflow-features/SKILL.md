@@ -559,13 +559,17 @@ cualquier nota. Es **aditivo** — la lista de siempre sigue siendo el modo prin
 
 ## Panel de IA — chat + segundo cerebro (Fase 3 de "El Cerebro")
 
-La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañas:
+La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES). Pestañas:
 
 - **Chat:** conversación con un LLM que responde **usando tus notas como contexto** (RAG). Streaming
   token a token, botón de **parar**, y **citas** clicables debajo de la respuesta (abren la nota en su
   sección) que además **iluminan** esas notas en el cerebro. Arriba: **historial** de chats (crear,
   abrir, borrar — se guardan localmente), botón **nuevo chat**, y un **selector de modelo** para elegir
   con qué modelo se hace la siguiente pregunta. Si no hay proveedor configurado, muestra un CTA a Ajustes.
+  - **¿Ha terminado?** Mientras la IA trabaja siempre hay una señal al pie del chat: **"Thinking…"**
+    cuando piensa sin escribir (al empezar, entre acciones o si se queda >~1 s callada a mitad de
+    respuesta), **tres puntitos pulsando** mientras escribe, o la propia fila de la acción en curso /
+    la tarjeta de confirmación. Cuando no queda ninguna señal, la respuesta ha terminado.
   - **Adjuntar archivos (📎):** junto al campo de escribir hay un botón de clip para mandar **imágenes,
     PDFs y .txt/.md** con tu pregunta — lo que el **modelo activo** admita (Anthropic: PDF+imágenes+texto;
     OpenAI-compatibles: imágenes+texto; .txt/.md siempre). Ojo: en **NoteFlow AI** varios modelos curados

@@ -39,6 +39,7 @@ export const aiPanel: Messages['aiPanel'] = {
     },
     confirmBtn: 'Confirmar',
     thinking: 'Pensando…',
+    responding: 'Escribiendo respuesta…',
 
     attachHint: 'Adjuntar archivos — {list}',
     attachHintBasic: 'Adjuntar archivos de texto y código',

@@ -5,6 +5,7 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { buildStarterSuggestions, splitSuggestions } from '../../lib/chatSuggestions'
+import { chatActivityCue, msUntilStalled } from '../../lib/chatActivity'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import { Card } from './ui'
@@ -48,15 +49,52 @@ function ToolActivityRow({ a }: { a: ChatToolActivity }) {
   )
 }
 
-// Shown while the assistant is working but hasn't produced visible text yet (initial
-// thinking, or the gap after a tool finishes). Makes "still going" unmistakable so an
-// error mid-turn isn't mistaken for a finished reply.
-function ThinkingIndicator() {
+// In-progress cue at the bottom of the conversation. While a turn streams there is always some
+// feedback until it ends, so the cue disappearing reliably means "finished" (rules + rationale in
+// lib/chatActivity): "Thinking…" while the model works without emitting text (initial think, the
+// gap after a tool, generating tool-call arguments after a preamble, a mid-reply stall), pulsing
+// dots while text flows, nothing when a tool row or the confirm card already carries the feedback.
+// Self-subscribed with primitive selectors and its own idle timer, so the stall check never
+// re-renders the message list.
+function ChatActivityIndicator() {
   const t = useT()
+  const streaming = useAiChatStore((s) => s.streaming)
+  const awaitingModelText = useAiChatStore((s) => s.awaitingModelText)
+  const lastDeltaAt = useAiChatStore((s) => s.lastDeltaAt)
+  const pendingConfirm = useAiChatStore((s) => s.pendingConfirm !== null)
+  const lastRole = useAiChatStore((s) => s.messages[s.messages.length - 1]?.role)
+  const toolRunning = useAiChatStore((s) => s.messages[s.messages.length - 1]?.actions?.some((a) => a.status === 'running') ?? false)
+
+  // The `lastDeltaAt` the idle timer last fired for: the stream is stalled while it's still current
+  // (a new delta changes `lastDeltaAt`, which un-stalls it and re-arms the timer).
+  const [stalledAt, setStalledAt] = useState<number | null>(null)
+  useEffect(() => {
+    if (!streaming || lastDeltaAt === null) return
+    const id = setTimeout(() => setStalledAt(lastDeltaAt), msUntilStalled(lastDeltaAt, Date.now()))
+    return () => clearTimeout(id)
+  }, [streaming, lastDeltaAt])
+
+  const cue = chatActivityCue({
+    streaming, lastRole, awaitingModelText, toolRunning, pendingConfirm, lastDeltaAt,
+    stalled: lastDeltaAt !== null && stalledAt === lastDeltaAt,
+  })
+  if (cue === 'none') return null
+  // Both variants share the row box (h-6) so swapping between them doesn't shift the layout.
   return (
-    <div className="self-start flex items-center gap-1.5 px-2.5 py-1 text-[12px] font-mono text-text-muted">
-      <Loader2 size={12} className="animate-spin text-accent" />
-      <span className="animate-pulse">{t.aiPanel.chat.thinking}</span>
+    <div role="status" className="self-start flex items-center gap-1.5 h-6 px-2.5 text-[12px] font-mono text-text-muted">
+      {cue === 'thinking' ? (
+        <>
+          <Loader2 size={12} className="animate-spin text-accent" />
+          <span className="animate-pulse">{t.aiPanel.chat.thinking}</span>
+        </>
+      ) : (
+        <>
+          {[0, 200, 400].map((delay) => (
+            <span key={delay} aria-hidden className="w-1 h-1 rounded-full bg-accent animate-pulse" style={{ animationDelay: `${delay}ms` }} />
+          ))}
+          <span className="sr-only">{t.aiPanel.chat.responding}</span>
+        </>
+      )}
     </div>
   )
 }
@@ -92,7 +130,6 @@ export function ChatView({
   const setLlmConfig = useAiChatStore((s) => s.setLlmConfig)
   const messages = useAiChatStore((s) => s.messages)
   const streaming = useAiChatStore((s) => s.streaming)
-  const awaitingModelText = useAiChatStore((s) => s.awaitingModelText)
   const activeSources = useAiChatStore((s) => s.activeSources)
   const suggestions = useAiChatStore((s) => s.suggestions)
   const notes = useNotesStore((s) => s.notes)
@@ -168,15 +205,6 @@ export function ChatView({
     useAiChatStore.setState({ pendingPrompt: null })
     sendMessage(pendingPrompt)
   }, [pendingPrompt, configured, streaming, sendMessage])
-
-  // The assistant turn is always the last message. Show an explicit "Thinking…" row whenever the
-  // model is working but not currently emitting text and no tool is running — this covers both the
-  // initial think AND the gap between agent steps (e.g. composing the final answer after a tool
-  // ran). `awaitingModelText` is event-driven (see the store) so a mid-turn pause with earlier
-  // preamble text on screen no longer reads as a finished reply.
-  const lastMsg = messages[messages.length - 1]
-  const toolRunning = lastMsg?.actions?.some((a) => a.status === 'running') ?? false
-  const thinking = streaming && lastMsg?.role === 'assistant' && awaitingModelText && !toolRunning && !pendingConfirm
 
   // Personalized starter chips for the empty chat, randomized from the user's own note
   // and section names. Recomputed once notes are loaded (and on each view re-entry, since
@@ -357,7 +385,7 @@ export function ChatView({
           </div>
         )}
 
-        {thinking && <ThinkingIndicator />}
+        <ChatActivityIndicator />
 
         {activeSources.length > 0 && (
           <div className="self-start flex flex-wrap gap-1 mt-0.5">
