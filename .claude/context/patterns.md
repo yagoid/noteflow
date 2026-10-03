@@ -225,7 +225,9 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
      ```` ``` ````; su cierre = la **primera** línea posterior en columna 0 que es solo ```` ``` ````;
      las líneas entre medias son contenido (no aperturas). Una apertura sin cierre no se empareja y
      **no se toca** (el resto de su bloque es código, como siempre). Los fences indentados (dentro de
-     un ítem de lista) no se consideran.
+     un ítem de lista) no se consideran. **Racha de cierre:** las líneas ```` ``` ```` sueltas pegadas
+     justo tras un cierre, si la racha termina en línea vacía o fin de texto, son parte del cierre de
+     ese mismo bloque y **no abren** par (ver "Bloque que termina en un snippet anidado" abajo).
   2. Las líneas vacías dentro de un par pasan a ser el centinela `FENCE_BLANK` (se borra al pintar el
      `<pre>`), para que el split no parta el código.
   3. Asegura un **límite de bloque antes de la apertura** de cada par (añade una línea vacía solo si
@@ -244,20 +246,55 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   Resultado: un párrafo, un fence y una tarea sin líneas en blanco entre ellos (típico del LLM en el
   chat) dan párrafo + código + tarea en vez de meter la tarea dentro del código o el fence dentro del
   párrafo. El markdown **bien separado** (cada bloque termina en exactamente `\n\n` y un fence acaba en
-  su línea de cierre, que es lo normal en lo que emite `htmlToMarkdown`, fences anidados incluidos salvo
-  la limitación de abajo) se pinta **igual que antes** de esta pre-pasada, sin `<p></p>` espurios. Diferencias conocidas, todas
-  en casos que antes ya salían mal:
+  su línea de cierre, que es lo normal en lo que emite `htmlToMarkdown`, fences anidados incluidos) se
+  pinta **igual que antes** de esta pre-pasada, sin `<p></p>` espurios, salvo el arreglo del bloque que
+  termina en snippet anidado (abajo). Diferencias conocidas, todas en casos que antes ya salían mal:
   - **Dos o más líneas vacías seguidas** dentro de un fence ahora se conservan (antes partían el bloque).
   - Un párrafo que acaba en hard break justo antes de un fence (`a\n` + `\n\n` → racha impar de `\n`):
     antes el fence salía como texto; ahora sale `<p></p>` + código.
   - Líneas que son literalmente ```` ``` ```` en columna 0 dentro de un párrafo o ítem de lista (soft
     breaks) y que se emparejan entre sí: antes eran texto; ahora se aíslan como bloque de código.
 
-  **Limitación conocida (heredada, no resuelta):** si el contenido de un bloque de código **termina**
-  en una línea ```` ``` ```` suelta (snippet anidado) y más adelante en la sección hay otro fence, esa
-  línea se empareja con el fence posterior **aunque haya líneas en blanco entre medias**, y todo lo de
-  en medio acaba fusionado en un único bloque de código (que el editor guardaría así en la siguiente
-  edición). El parser antiguo hacía lo mismo; esta pre-pasada no lo introduce ni lo arregla.
+  **Bloque que termina en un snippet anidado (racha de cierre):** si el contenido de un bloque de
+  código **termina** en una línea ```` ``` ```` suelta, se escribe `…` / ```` ``` ```` / ```` ``` ````
+  + `\n\n`. Antes, esa última ```` ``` ```` (el cierre real) se tomaba como apertura y se emparejaba
+  con el siguiente fence de la sección **aunque hubiera líneas en blanco entre medias**, fusionando
+  todo lo de en medio en un único bloque de código que el editor guardaba así en la siguiente edición
+  (pérdida de estructura). Ahora, al emparejar, las ```` ``` ```` sueltas pegadas tras un cierre cuya
+  racha acaba en línea vacía/fin de texto **no abren par**: el bloque llega hasta la última de ellas
+  (coherente con "hasta el último cierre de su bloque `\n\n`"). Si la racha va seguida de contenido
+  sin línea en blanco, se empareja como siempre (el bloque continúa). Una ```` ``` ```` suelta que
+  **no** va pegada a un cierre sigue abriendo un par que puede cruzar líneas en blanco (es el fence
+  normal `para` / *blank* / ```` ``` ```` / `a` / *blank* / `b` / ```` ``` ````).
+
+  **Ambigüedades que quedan** (inherentes a escribir fences anidados con 3 backticks; no se cambia el
+  formato en disco por los 3 espejos desktop/CLI/móvil). Las conocidas, **no** es una lista exhaustiva:
+  - **Coste de la racha de cierre (nuevo):** se dispara cuando el contenido del código tiene **dos
+    líneas ```` ``` ```` sueltas seguidas, luego una línea en blanco y más contenido** antes del cierre
+    real. En la práctica: anidamiento de **3 niveles**, o un snippet suelto que empieza por línea en
+    blanco pegado justo tras otro snippet. Es indistinguible del caso arreglado. Consecuencias (en
+    HEAD esto hacía bien el round-trip):
+    - Sin más fences en la sección (```` ```md ```` / `a` / ```` ``` ```` / ```` ``` ```` / *blank* /
+      `b` / ```` ``` ````): código `a` + ```` ``` ```` y un párrafo `b` + ```` ``` ````.
+    - **Con otro fence más adelante** (… `b` / ```` ``` ```` / *blank* / `q` / *blank* /
+      ```` ```py ```` / `x` / ```` ``` ````): la ```` ``` ```` que queda bajo `b` abre un par con el
+      cierre del bloque posterior y **fusiona todo lo de en medio** en un bloque de código sin
+      lenguaje (código `a` + ```` ``` ````, `<p>b</p>`, y un código sin lenguaje con la línea vacía,
+      `q`, la línea vacía, ```` ```py ```` y `x`). Es el mismo tipo
+      de fusión que el bug arreglado, pero aquí sobre contenido que antes sí hacía bien el round-trip.
+    - Balance: mejora neta. Con anidamiento de **2 niveles** (el caso realista: un snippet de README
+      dentro de un bloque `md`), el fuzz del reviewer solo encontró arreglos y ninguna rotura.
+  - **Snippet anidado seguido de línea en blanco y más texto dentro del mismo bloque** (igual que
+    antes; probablemente la más común): ```` ```md ```` / ```` ```js ```` / `foo` / ```` ``` ```` /
+    *blank* / `text` / ```` ``` ```` da código `md` con ```` ```js ```` + `foo` (se pierde el cierre
+    anidado) y un párrafo `text` + ```` ``` ````.
+  - Un snippet anidado que **abre con ```` ``` ```` suelto** y tiene líneas en blanco dentro se parte
+    en código vacío + párrafos (igual que antes).
+  - Bloque que termina en snippet anidado con contenido **pegado** detrás (sin línea en blanco; no lo
+    escribe NoteFlow, solo markdown externo/LLM) y otro fence más adelante: sigue fusionando (igual
+    que antes).
+  - Fences de 4 backticks: la apertura cuenta como fence de 3 con lenguaje `` `md `` y la línea de 4
+    nunca cierra. `~~~` no es fence. (Igual que antes; solo afecta a markdown externo.)
 
   Tests en `tests/lib/markdownHtml.test.ts`.
 - **Invariante del separador de bloque en `blockElToMd`:** cada bloque serializado debe terminar en

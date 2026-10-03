@@ -169,6 +169,72 @@ describe('htmlFromMarkdown — nested fences written by NoteFlow', () => {
       .toBe('<pre><code class="language-">foo\n```\n```js\n\nbar</code></pre>')
   })
 
+  // A code block whose content ENDS with a ``` line is written as "…\n```\n```".
+  // The trailing bare ``` is the real closer: it must not open a new fence that
+  // pairs with a later one across blank lines and swallows everything between.
+  describe('code block ending in a nested snippet, followed by more content', () => {
+    const mdBlock = '<pre><code class="language-md">```js\nfoo\n```</code></pre>'
+    const nested = `${F}md\n${F}js\nfoo\n${F}\n${F}`
+
+    it('does not merge the paragraph and the next fence into the code block', () => {
+      const html = htmlFromMarkdown(`${nested}\n\npara\n\n${F}py\nx\n${F}`)
+      expect(html).toBe(mdBlock + '<p>para</p><pre><code class="language-py">x</code></pre>')
+    })
+
+    it('keeps an empty paragraph between them', () => {
+      expect(htmlFromMarkdown(`${nested}\n\n\n\npara\n\n${F}py\nx\n${F}`))
+        .toBe(mdBlock + '<p></p><p>para</p><pre><code class="language-py">x</code></pre>')
+    })
+
+    it('keeps a later nested code block separate', () => {
+      expect(htmlFromMarkdown(`${nested}\n\npara\n\n${F}md\n${F}py\nbar\n${F}\n${F}`)).toBe(
+        mdBlock + '<p>para</p><pre><code class="language-md">```py\nbar\n```</code></pre>'
+      )
+      expect(htmlFromMarkdown(`${nested}\n\n${F}md\n${F}py\nbar\n${F}\n${F}\n\nend`)).toBe(
+        mdBlock + '<pre><code class="language-md">```py\nbar\n```</code></pre><p>end</p>'
+      )
+    })
+
+    it('handles a later bare fence, an inner blank line and CRLF', () => {
+      expect(htmlFromMarkdown(`${nested}\n\npara\n\n${F}\nx\n${F}`))
+        .toBe(mdBlock + '<p>para</p><pre><code class="language-">x</code></pre>')
+      const html = htmlFromMarkdown(`${F}md\n${F}js\nfoo\n\nbar\n${F}\n${F}\n\npara\n\n${F}py\nx\n${F}`)
+      expect(html).toBe(
+        '<pre><code class="language-md">```js\nfoo\n\nbar\n```</code></pre>' +
+        '<p>para</p><pre><code class="language-py">x</code></pre>'
+      )
+      expect(html).not.toContain('\x00')
+      expect(htmlFromMarkdown(`${nested}\n\npara\n\n${F}py\nx\n${F}`.replace(/\n/g, '\r\n')))
+        .toBe(mdBlock + '<p>para</p><pre><code class="language-py">x</code></pre>')
+    })
+  })
+
+  // The closing-run rule only applies when the bare ``` run ends at a blank
+  // line. These pin both branches so any change to them is deliberate.
+  describe('closing-run rule boundaries', () => {
+    it('keeps pairing a bare ``` run that is followed by content (one code block)', () => {
+      expect(htmlFromMarkdown(`${F}js\na\n${F}\n${F}\nb\n\nc\n${F}`))
+        .toBe('<pre><code class="language-js">a\n```\n```\nb\n\nc</code></pre>')
+    })
+
+    // KNOWN LIMITATION (accepted trade-off): code content with two adjacent bare
+    // ``` lines followed by a blank line and more content (3-level nesting, in
+    // practice) is indistinguishable from a block ending in a nested snippet, so
+    // the code block is cut at the second ```. This round-tripped before the
+    // closing-run rule; the outputs below document the current behaviour.
+    it('known limitation: splits ``` ``` + blank + content when nothing follows', () => {
+      expect(htmlFromMarkdown(`${F}md\na\n${F}\n${F}\n\nb\n${F}`))
+        .toBe('<pre><code class="language-md">a\n```</code></pre><p>b<br>```</p>')
+    })
+
+    it('known limitation: the leftover ``` merges up to a later fence', () => {
+      expect(htmlFromMarkdown(`${F}md\na\n${F}\n${F}\n\nb\n${F}\n\nq\n\n${F}py\nx\n${F}`)).toBe(
+        '<pre><code class="language-md">a\n```</code></pre><p>b</p>' +
+        '<pre><code class="language-">\nq\n\n```py\nx</code></pre>'
+      )
+    })
+  })
+
   it('still splits off content glued after the last closing line', () => {
     expect(htmlFromMarkdown(`Intro\n${F}md\n${F}js\nfoo\n${F}\n${F}\n- [ ] tarea`)).toBe(
       '<p>Intro</p><pre><code class="language-md">```js\nfoo\n```</code></pre>' +

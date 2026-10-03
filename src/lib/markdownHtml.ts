@@ -138,8 +138,9 @@ const FENCE_CLOSE_RE = /^```[ \t]*$/
 /**
  * Pre-pass for htmlFromMarkdown's \n\n block splitter. Fences are paired left
  * to right, each opener with the first closer after it (lines inside a pair are
- * content, not openers; an opener with no closer pairs with nothing). Then, for
- * every pair:
+ * content, not openers; an opener with no closer pairs with nothing; bare ```
+ * lines right after a closer that end at a blank line are part of its closing
+ * run, not openers). Then, for every pair:
  *   - empty lines inside it become FENCE_BLANK, so the splitter can't tear the
  *     code block apart;
  *   - a block boundary is ensured before the opening line, so a fence glued to
@@ -172,7 +173,17 @@ function isolateCodeFences(src: string): string {
     if (close === -1) break
     closerOf.set(i, close)
     for (let k = i + 1; k < close; k++) inPair[k] = true
-    i = close
+
+    // Closing run: bare ``` lines right after the closer that end at a blank
+    // line (or the end of the text) close the same code block — that is how a
+    // block whose content ends in its own ``` line is written ("…\n```\n```").
+    // They must not open a new pair, or the last one would pair with the next
+    // fence anywhere later in the text, across blank lines, and merge
+    // everything in between into one code block. When the run is followed by
+    // content instead, the code block continues past it, so it pairs as usual.
+    let runEnd = close
+    while (runEnd + 1 < lines.length && FENCE_CLOSE_RE.test(lines[runEnd + 1])) runEnd++
+    i = runEnd + 1 === lines.length || lines[runEnd + 1] === '' ? runEnd : close
   }
 
   const out: string[] = []
