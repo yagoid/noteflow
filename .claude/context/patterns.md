@@ -218,6 +218,48 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   `index.css`.
 - **Orden de detección de bloque** en `htmlFromMarkdown`: code fence → heading → HR → lista →
   blockquote → tabla → párrafo (un prefijo `>` no choca con bullets/ordenadas/headings).
+- **Code fences pegados a otro contenido (`isolateCodeFences`):** el code fence solo se detecta como
+  **primera línea de un bloque**, y los bloques se cortan por `\n\n`. Por eso, antes del split, una
+  pre-pasada por líneas:
+  1. **Empareja** fences de izquierda a derecha: apertura = línea en columna 0 que empieza por
+     ```` ``` ````; su cierre = la **primera** línea posterior en columna 0 que es solo ```` ``` ````;
+     las líneas entre medias son contenido (no aperturas). Una apertura sin cierre no se empareja y
+     **no se toca** (el resto de su bloque es código, como siempre). Los fences indentados (dentro de
+     un ítem de lista) no se consideran.
+  2. Las líneas vacías dentro de un par pasan a ser el centinela `FENCE_BLANK` (se borra al pintar el
+     `<pre>`), para que el split no parta el código.
+  3. Asegura un **límite de bloque antes de la apertura** de cada par (añade una línea vacía solo si
+     falta, contando la paridad de `\n`: el split consume pares desde la izquierda).
+  4. El bloque de código llega, como siempre, hasta el **último** cierre de su bloque `\n\n` (no el
+     primero); solo si tras ese último cierre hay contenido pegado (sin línea en blanco) se añade un
+     límite ahí.
+
+  Por qué el **último** cierre: `blockElToMd` siempre escribe fence de 3 backticks, así que un bloque
+  de código cuyo contenido tiene sus propias líneas ```` ``` ```` (un snippet de README) se serializa
+  como **fences anidados** (```` ```md ```` / ```` ```js ```` / `foo` / ```` ``` ```` / ```` ``` ````).
+  Cerrar en el primer cierre perdería esas líneas y el editor guardaría la estructura rota en la
+  siguiente edición. Ambigüedad resultante (aceptada): dos fences pegados sin línea en blanco
+  entre ellos se leen como **un** bloque con el segundo fence dentro.
+
+  Resultado: un párrafo, un fence y una tarea sin líneas en blanco entre ellos (típico del LLM en el
+  chat) dan párrafo + código + tarea en vez de meter la tarea dentro del código o el fence dentro del
+  párrafo. El markdown **bien separado** (cada bloque termina en exactamente `\n\n` y un fence acaba en
+  su línea de cierre, que es lo normal en lo que emite `htmlToMarkdown`, fences anidados incluidos salvo
+  la limitación de abajo) se pinta **igual que antes** de esta pre-pasada, sin `<p></p>` espurios. Diferencias conocidas, todas
+  en casos que antes ya salían mal:
+  - **Dos o más líneas vacías seguidas** dentro de un fence ahora se conservan (antes partían el bloque).
+  - Un párrafo que acaba en hard break justo antes de un fence (`a\n` + `\n\n` → racha impar de `\n`):
+    antes el fence salía como texto; ahora sale `<p></p>` + código.
+  - Líneas que son literalmente ```` ``` ```` en columna 0 dentro de un párrafo o ítem de lista (soft
+    breaks) y que se emparejan entre sí: antes eran texto; ahora se aíslan como bloque de código.
+
+  **Limitación conocida (heredada, no resuelta):** si el contenido de un bloque de código **termina**
+  en una línea ```` ``` ```` suelta (snippet anidado) y más adelante en la sección hay otro fence, esa
+  línea se empareja con el fence posterior **aunque haya líneas en blanco entre medias**, y todo lo de
+  en medio acaba fusionado en un único bloque de código (que el editor guardaría así en la siguiente
+  edición). El parser antiguo hacía lo mismo; esta pre-pasada no lo introduce ni lo arregla.
+
+  Tests en `tests/lib/markdownHtml.test.ts`.
 - **Invariante del separador de bloque en `blockElToMd`:** cada bloque serializado debe terminar en
   **exactamente `\n\n`** (`htmlFromMarkdown` separa bloques con `split(/\n\n/)`). Ojo con quién pone
   el separador: `tableElToMd` **ya devuelve** su `\n\n` final (el caso `table` no debe añadir nada),

@@ -20,12 +20,9 @@ export function htmlFromMarkdown(md: string): string {
   // Normalise line endings
   const src = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
-  // Protect blank lines inside code fences before splitting on \n\n.
-  // Without this, a code block containing an empty line would be torn apart:
-  // only the first fragment starts with ```, so the rest becomes plain text.
-  const protectedSrc = src.replace(/^```[\s\S]*?^```[ \t]*$/gm, (m) =>
-    m.replace(/\n\n/g, '\n' + FENCE_BLANK + '\n')
-  )
+  // Isolate closed code fences as their own blocks and protect the blank lines
+  // inside them before splitting on \n\n (see isolateCodeFences).
+  const protectedSrc = isolateCodeFences(src)
 
   // Split into "blocks" on blank lines — use exactly \n\n so that multiple
   // consecutive blank lines produce empty blocks, preserving them as <p></p>.
@@ -130,6 +127,92 @@ export function htmlFromMarkdown(md: string): string {
   }
 
   return htmlBlocks.join('') || '<p></p>'
+}
+
+// A fence opens on any column-0 line starting with ``` and closes on the next
+// column-0 line that is only ``` (plus trailing spaces) — the same rule the
+// code-block branch of htmlFromMarkdown applies to a block's first line.
+const FENCE_OPEN_RE = /^```/
+const FENCE_CLOSE_RE = /^```[ \t]*$/
+
+/**
+ * Pre-pass for htmlFromMarkdown's \n\n block splitter. Fences are paired left
+ * to right, each opener with the first closer after it (lines inside a pair are
+ * content, not openers; an opener with no closer pairs with nothing). Then, for
+ * every pair:
+ *   - empty lines inside it become FENCE_BLANK, so the splitter can't tear the
+ *     code block apart;
+ *   - a block boundary is ensured before the opening line, so a fence glued to
+ *     a paragraph or list item is still its own block instead of text;
+ *   - the code block runs, as it always has, to the end of its \n\n block — but
+ *     if non-fence content is glued after the block's LAST closing line, a
+ *     boundary is added there so that content isn't swallowed into the code.
+ *
+ * Running to the last closer (not the first) keeps nested fences intact:
+ * blockElToMd always writes a 3-backtick fence, so a code block whose content
+ * has its own ``` lines serializes as "```\n```js\nfoo\n```\n```". Separators
+ * are only added where the right one is missing, so markdown whose fence blocks
+ * already start a block and end on their closing line (all htmlToMarkdown
+ * output) renders exactly as before, with no spurious empty paragraphs.
+ * Unpaired (unclosed) fences are left untouched.
+ */
+function isolateCodeFences(src: string): string {
+  const lines = src.split('\n')
+
+  // Pair openers with closers; `inPair` marks the lines strictly inside a pair.
+  const closerOf = new Map<number, number>()
+  const inPair: boolean[] = new Array(lines.length).fill(false)
+  for (let i = 0; i < lines.length; i++) {
+    if (!FENCE_OPEN_RE.test(lines[i])) continue
+    let close = -1
+    for (let j = i + 1; j < lines.length; j++) {
+      if (FENCE_CLOSE_RE.test(lines[j])) { close = j; break }
+    }
+    // No closer for this opener means no later line can close a fence either.
+    if (close === -1) break
+    closerOf.set(i, close)
+    for (let k = i + 1; k < close; k++) inPair[k] = true
+    i = close
+  }
+
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const close = closerOf.get(i)
+    if (close === undefined) {
+      out.push(lines[i])
+      continue
+    }
+
+    // The splitter consumes newlines in pairs from the left, so the opener
+    // starts a block only if the run of newlines right before it is even. Add
+    // one empty line when it's odd (incl. no blank line at all).
+    if (out.length > 0) {
+      let trailingEmpty = 0
+      while (trailingEmpty < out.length && out[out.length - 1 - trailingEmpty] === '') trailingEmpty++
+      const newlineRun = trailingEmpty === out.length ? trailingEmpty : trailingEmpty + 1
+      if (newlineRun % 2 === 1) out.push('')
+    }
+
+    // The block ends right before the first empty line outside any pair; the
+    // code ends on the last closing line within that block.
+    let end = close
+    while (end + 1 < lines.length && (lines[end + 1] !== '' || inPair[end + 1])) end++
+    let last = close
+    for (let k = close + 1; k <= end; k++) {
+      if (FENCE_CLOSE_RE.test(lines[k])) last = k
+    }
+
+    out.push(lines[i])
+    // Every empty line up to `last` is inside a pair (else the block would end there).
+    for (let k = i + 1; k < last; k++) out.push(lines[k] === '' ? FENCE_BLANK : lines[k])
+    out.push(lines[last])
+
+    // Content glued after the closing line starts a new block.
+    if (last < end) out.push('')
+    i = last
+  }
+
+  return out.join('\n')
 }
 
 // ── htmlToMarkdown: DOM-based walker to preserve nested list structure ────────
