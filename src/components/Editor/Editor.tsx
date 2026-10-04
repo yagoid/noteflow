@@ -74,6 +74,17 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
+/** Vertical breathing room (px) kept around the caret when typing/arrowing near
+ *  the edge of the scroll area. */
+export interface CaretScrollGap {
+  top: number
+  bottom: number
+}
+
+/** Main note editor: ~4 lines below the caret at the default 13px font, a bit
+ *  less above (the toolbar sits outside the scroll area). */
+const DEFAULT_CARET_SCROLL_GAP: CaretScrollGap = { top: 40, bottom: 96 }
+
 interface EditorProps {
   content: string
   onChange: (markdown: string) => void
@@ -86,6 +97,10 @@ interface EditorProps {
   autoFocus?: boolean
   /** Id of the section being edited — excluded from the "Link section" picker. */
   currentSectionId?: string | null
+  /** Gap kept between the caret and the top/bottom edge of the scroll area.
+   *  Read once at mount. Compact windows (sticky) pass a smaller one so the two
+   *  bands can't overlap in a short viewport. */
+  caretScrollGap?: CaretScrollGap
 }
 
 export interface EditorHandle {
@@ -101,6 +116,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   fontSize,
   autoFocus = true,
   currentSectionId,
+  caretScrollGap = DEFAULT_CARET_SCROLL_GAP,
 }, ref) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { fontFamily } = useEditorSettingsStore()
@@ -119,6 +135,16 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       attributes: {
         spellcheck: 'false',
       },
+      // Keep a gap below (and above) the caret while typing, pressing Enter or
+      // arrowing near the edge. ProseMirror's defaults (threshold 0, margin 5px)
+      // scroll just enough to show the caret line, so it hugs the bottom edge and
+      // the editor's bottom padding (index.css) only shows when scrolling by hand.
+      // threshold === margin → once the caret enters the band, it scrolls line by
+      // line keeping that gap (no jumps). Only transactions flagged with
+      // scrollIntoView() use this: mouse clicks never scroll. Horizontal values
+      // stay at ProseMirror's defaults.
+      scrollThreshold: { top: caretScrollGap.top, bottom: caretScrollGap.bottom, left: 0, right: 0 },
+      scrollMargin: { top: caretScrollGap.top, bottom: caretScrollGap.bottom, left: 5, right: 5 },
       // Pasting raw markdown source (from VS Code, a terminal, another markdown
       // editor…) renders it as real formatting — lists, tables, task lists,
       // headings — instead of literal text. ProseMirror's default would drop it

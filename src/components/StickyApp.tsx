@@ -12,6 +12,10 @@ import type { GroupColor, NoteSection } from '../types'
 
 const FOLDED_W = 220
 const FOLDED_H = 32
+// Caret breathing room for the small sticky window (default 300px tall, min
+// 200px): smaller than the main editor's so the top/bottom bands never overlap.
+// The bottom one must stay below `.sticky-editor .ProseMirror` padding-bottom.
+const STICKY_CARET_SCROLL_GAP = { top: 8, bottom: 32 }
 
 // Custom TitleBar for the sticky window
 function StickyTitleBar({ noteTitle, sectionName, color, onFold, isPinned, onTogglePin }: {
@@ -396,6 +400,7 @@ export function StickyApp() {
               onChange={handleContentChange}
               placeholder={t.sticky.startWriting}
               hideToolbar={true}
+              caretScrollGap={STICKY_CARET_SCROLL_GAP}
             />
           </div>
         )}

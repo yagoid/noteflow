@@ -181,6 +181,10 @@ button {
   text-decoration: line-through;
 }
 
+/* The 12rem bottom padding is real scroll room (ProseMirror's border box
+   overflows the h-full wrapper into Editor.tsx's scroller), and must stay larger
+   than the caret scroll gap (DEFAULT_CARET_SCROLL_GAP in Editor.tsx) so that gap
+   holds when typing at the very end of a section. */
 .prose-editor .ProseMirror {
   min-height: 100%;
   padding: 1.25rem 1.5rem 12rem;
@@ -780,9 +784,11 @@ button {
   border-radius: 1px;
 }
 
-/* Sticky note: compact padding override */
+/* Sticky note: compact padding override. The bottom padding must exceed the
+   sticky's caret scroll gap (STICKY_CARET_SCROLL_GAP in StickyApp.tsx, 32px) so
+   that gap is reachable when typing at the very end of the note. */
 .sticky-editor .ProseMirror {
-  padding: 0.5rem 0.75rem 1rem;
+  padding: 0.5rem 0.75rem 2.5rem;
 }
 
 /* Sticky note: compact badge — smaller font/padding so it fits inline without wrapping */

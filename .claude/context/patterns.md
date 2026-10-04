@@ -348,6 +348,22 @@ visible el tab activo. Decisiones a respetar si se toca:
   dentro del propio bucle: si el tab origen se desmonta a mitad de arrastre (p. ej. un pull de sync
   que cambia el set de secciones) su `dragend` se dispara en un nodo desconectado y no llega a nadie.
 
+### Editor: hueco bajo el caret al escribir cerca del borde
+El editor TipTap (`Editor.tsx`) fija `editorProps.scrollThreshold` y `scrollMargin` con el **mismo
+valor** vertical (`DEFAULT_CARET_SCROLL_GAP` = 40 px arriba / 96 px abajo). Por defecto ProseMirror
+usa threshold 0 / margin 5 px: al teclear o pulsar Enter en la última línea visible solo scrollea lo
+justo para ver el caret, que queda pegado al borde inferior (el `padding-bottom: 12rem` de
+`.prose-editor .ProseMirror` sí cuenta en el alto de scroll, pero solo se veía scrolleando a mano).
+- **threshold === margin** a propósito: en cuanto el caret entra en la franja, scrollea línea a línea
+  manteniendo el hueco. Un margin mayor que el threshold haría saltar el contenido de golpe.
+- Solo afecta a transacciones con `scrollIntoView()` (teclear, Enter, flechas, pegar, undo, saltos
+  de la búsqueda en nota); los clicks de ratón no scrollean.
+- El `padding-bottom` del `.ProseMirror` debe ser **mayor** que el gap inferior; si no, al final del
+  documento el scroll se clampa antes y el hueco no se alcanza.
+- La ventana **sticky** pasa un gap compacto vía prop `caretScrollGap` (`STICKY_CARET_SCROLL_GAP` =
+  8/32 px en `StickyApp.tsx`, con `.sticky-editor .ProseMirror` a `padding-bottom: 2.5rem`): en una
+  ventana de 200–300 px las franjas de 40+96 px casi se solaparían.
+
 ### Relaciones sección↔sección (slash command + cerebro)
 Enlaces explícitos que el usuario crea **inline mientras escribe**: en el editor rich teclea `/` →
 menú de comandos → "Link section" → buscador de secciones → inserta una **pill** que enlaza a otra
