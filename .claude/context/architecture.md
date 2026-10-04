@@ -84,6 +84,7 @@ noteflow/
 │   │   ├── Editor/
 │   │   │   ├── Editor.tsx               # Instancia TipTap (conversión md↔html en lib/markdownHtml.ts)
 │   │   │   ├── NoteEditor.tsx           # Wrapper con tabs de secciones, atajos de fuente
+│   │   │   ├── SectionNameField.tsx     # Nombre editable de la franja del click derecho en un tab
 │   │   │   ├── EditorToolbar.tsx        # Toolbar de formato
 │   │   │   ├── DeadlineTaskItem.ts      # Extensión TipTap: task item con deadline+alarma
 │   │   │   ├── DeadlineTaskItemView.tsx # NodeView React para DeadlineTaskItem
@@ -171,6 +172,7 @@ noteflow/
 │   │   │                         #   anti-borrado de escrituras de notas cifradas — testeado
 │   │   ├── sectionUtils.ts       # Operaciones puras sobre la lista de secciones (patch/move/duplicate/restore)
 │   │   ├── searchUtils.ts        # Helpers de búsqueda (normalización, matching)
+│   │   ├── keyScope.ts           # OWN_KEYS_PROPS/ownsKeys: campos que los atajos globales (capture) respetan
 │   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 vars del tema o hex libre);
 │   │   │                         #   normalizeGroupColor (validación) y colorChannels (TODO render de
 │   │   │                         #   color de grupo/sección debe pasar por él, no interpolar `var(...)`)

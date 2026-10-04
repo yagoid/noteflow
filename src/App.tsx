@@ -20,6 +20,7 @@ import { SectionWindowApp } from './components/SectionWindowApp'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { HoverPreviewProvider } from './components/SectionPreview/HoverPreviewProvider'
 import { modKey } from './lib/platform'
+import { ownsKeys } from './lib/keyScope'
 import { useT } from './i18n/useT'
 import { tf } from './i18n/format'
 
@@ -124,6 +125,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
     const handler = (e: KeyboardEvent) => {
       const isAccel = e.ctrlKey || e.metaKey
       if (!isAccel || e.altKey) return
+      if (ownsKeys(e.target)) return
       const key = e.key.toLowerCase()
 
       // Ctrl+N — new note (always, even when editing)

@@ -9,6 +9,7 @@ import { useEditorSettingsStore } from '../stores/editorSettingsStore'
 import { NoteEditor } from './Editor/NoteEditor'
 import { useT } from '../i18n/useT'
 import { decryptSections } from '../lib/cryptoUtils'
+import { ownsKeys } from '../lib/keyScope'
 import type { Note, NoteSection } from '../types'
 
 // The window's single pane. Fixed: there is exactly one editor per section window.
@@ -90,6 +91,7 @@ export function SectionWindowApp() {
     const handler = (e: KeyboardEvent) => {
       const isAccel = e.ctrlKey || e.metaKey
       if (!isAccel || e.altKey || e.shiftKey) return
+      if (ownsKeys(e.target)) return
       const events: Record<string, string> = {
         KeyT: 'noteflow:add-tab',
         KeyW: 'noteflow:close-tab',

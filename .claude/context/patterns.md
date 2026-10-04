@@ -348,6 +348,31 @@ visible el tab activo. Decisiones a respetar si se toca:
   dentro del propio bucle: si el tab origen se desmonta a mitad de arrastre (p. ej. un pull de sync
   que cambia el set de secciones) su `dragend` se dispara en un nodo desconectado y no llega a nadie.
 
+### Editor: nombre editable en la franja del click derecho
+La franja que abre el click derecho en un tab (`sectionColorPickerId` en `NoteEditor.tsx`) lleva el
+nombre como `<input>` (`SectionNameField.tsx`), no un botón de renombrar. Decisiones:
+- **Borrador local** montado con `key={noteId:sectionId}`: arranca del nombre de la sección y sigue
+  renombrados de fuera (sync, otro panel) **solo sin foco** (ajuste en render, no efecto). Se guarda
+  en Enter, en blur y al desmontar (un input desconectado no recibe blur); vacío o igual → restaura.
+  **Sin guarda anti-duplicado** a propósito: repetir el mismo nombre es inocuo (`updateSection` va
+  por `noteWriteQueue` y `patchSectionInList` devuelve `null` si no cambia nada), y una guarda por
+  "último nombre enviado" perdía renombrados (A→B, vuelta a A por fuera, otra vez B → no se escribía).
+  `onCommit` resuelve con el nombre real tras la escritura y el borrador se realinea con él (una
+  escritura fallida no deja el campo mostrando un nombre que el store no tiene).
+  La franja sigue montada mientras colapsa (`lastColorPickerSectionRef`), así que al cerrarse desde
+  fuera con el foco dentro el campo hace `blur()` (que es lo que guarda).
+- **Acciones justo después de renombrar:** el blur del input ocurre en el `mousedown` del botón, pero
+  el store solo refleja el nombre nuevo tras escribir a disco. Los colores van por nombre, la copia
+  de `Duplicate` se llama `"<nombre> (copy)"` y el modal de borrar muestra el nombre, así que los
+  botones de la franja usan `stripSectionName()`: el nombre recién guardado (`stripRenameRef`
+  `{ sectionId, from, name }`) **solo mientras el store siga mostrando `from`**; si la escritura
+  aterrizó, falló o llegó otro renombrado (sync/otro panel), manda el del store.
+- **Atajos globales:** los de `App.tsx`/`SectionWindowApp.tsx` y el `Ctrl+Tab` de `NoteEditor` son
+  listeners de `window` en **capture**, así que ven la tecla antes que el campo y su `stopPropagation`
+  no los frena. El campo se marca con `OWN_KEYS_PROPS` (`data-own-keys`, `src/lib/keyScope.ts`) y
+  esos handlers salen con `ownsKeys(e.target)`. Reutilizable para cualquier campo que deba
+  "quedarse" sus teclas. El resto (Escape incluido) se corta con `stopPropagation` en el propio campo.
+
 ### Editor: hueco bajo el caret al escribir cerca del borde
 El editor TipTap (`Editor.tsx`) fija `editorProps.scrollThreshold` y `scrollMargin` con el **mismo
 valor** vertical (`DEFAULT_CARET_SCROLL_GAP` = 40 px arriba / 96 px abajo). Por defecto ProseMirror

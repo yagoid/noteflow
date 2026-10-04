@@ -372,9 +372,19 @@ cifrar, borrar nota)
   cifrada y bloqueada.
 
 - **Agregar**: `Ctrl+T` o botón `+`.
-- **Renombrar**: doble-click en el tab → Enter para guardar, Esc para cancelar.
-- **Click derecho en un tab** → franja bajo la tira con los colores de sección, `Auto`, y los botones
-  **Rename** (lápiz), **Duplicate section** (`CopyPlus`) y **Delete** (papelera, solo si hay >1 sección).
+- **Renombrar**: doble-click en el tab → Enter para guardar, Esc para cancelar. O desde la franja del
+  click derecho (abajo), escribiendo directamente en el nombre.
+- **Click derecho en un tab** → franja bajo la tira con el **nombre de la sección editable**, los
+  colores de sección, `Auto`, y los botones **Duplicate section** (`CopyPlus`) y **Delete** (papelera,
+  solo si hay >1 sección) y `×` para cerrar.
+  - **Nombre editable** (`SectionNameField`): en reposo se ve como la etiqueta mono en mayúsculas; al
+    pasar el ratón aparece un subrayado y al hacer click se edita con las mayúsculas/minúsculas reales.
+    Se guarda (`updateSection`) con **Enter** (que además cierra la franja y devuelve el foco al editor)
+    y al **perder el foco** (click en un color, en `×`, fuera, en otro tab…). Vacío o sin cambios → no
+    guarda y restaura el nombre. **Esc** descarta el borrador y deja la franja abierta; un segundo Esc
+    (o Esc sin cambios) la cierra. Mientras se escribe, los atajos de la app (`Ctrl+T/W/M/F/S/G`,
+    `Ctrl+Tab`…) no se disparan. Con la nota cifrada y bloqueada el nombre es de solo lectura. Si se
+    renombra y luego se elige color en el mismo gesto, el color va al nombre nuevo.
 - **Duplicar**: `Duplicate section` (franja del click derecho o menú contextual de un tag de sección)
   crea una copia con id nuevo, mismo contenido, mismo modo raw/editor y mismo flag "oculta a la IA",
   llamada `"<nombre> (copy)"` / `"<nombre> (copia)"` según el idioma de la UI, **justo a la derecha** de

@@ -11,7 +11,7 @@ import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
-  Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer, TimerOff,
+  Plus, X, Check, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer, TimerOff,
   CopyPlus, Share,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
@@ -24,6 +24,8 @@ import { colorChannels, getTagColor, normalizeTagColorKey, resolveGroupColor, TA
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 import { getRootZoom } from '../../stores/themeStore'
 import { moveSectionInList, restoreSectionInList } from '../../lib/sectionUtils'
+import { ownsKeys } from '../../lib/keyScope'
+import { SectionNameField } from './SectionNameField'
 
 // ---------------------------------------------------------------------------
 // Confirm modal state type
@@ -207,6 +209,8 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   // (after an early return) violates React's Rules of Hooks and crashes the app
   // when the note temporarily disappears during a sync reload.
   const lastColorPickerSectionRef = useRef<NoteSection | null>(null)
+  // Name just committed from the strip's name field (see stripSectionName).
+  const stripRenameRef = useRef<{ sectionId: string; from: string; name: string } | null>(null)
 
   // ── Derived state ──────────────────────────────────────────────────────────
   const activeSection: NoteSection | undefined = note?.sections.find(
@@ -628,6 +632,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     if (!isPaneActive) return
     const handler = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.key !== 'Tab') return
+      if (ownsKeys(e.target)) return
       const n = noteRef.current
       if (!n || n.sections.length <= 1) return
       e.preventDefault()
@@ -893,8 +898,9 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
 
   // Copies a section next to the original and lands on the copy. A pending raw-mode
   // edit of the active section is flushed first: its debounced save would otherwise
-  // race the duplicate write (and the copy could miss the latest keystrokes).
-  const handleDuplicateSection = async (sectionId: string) => {
+  // race the duplicate write (and the copy could miss the latest keystrokes). `baseName`: the
+  // strip passes the name just typed in it, whose write may still be queued ahead of this one.
+  const handleDuplicateSection = async (sectionId: string, baseName?: string) => {
     const currentNote = noteRef.current
     const source = currentNote?.sections.find((s) => s.id === sectionId)
     if (!currentNote || !source) return
@@ -902,7 +908,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
       if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
       await updateSection(currentNote.id, activeSection.id, { content: rawContentRef.current })
     }
-    const copy = await duplicateSection(currentNote.id, sectionId, tf(t.common.sectionCopyName, { name: source.name }))
+    const copy = await duplicateSection(currentNote.id, sectionId, tf(t.common.sectionCopyName, { name: baseName ?? source.name }))
     if (!copy) return
     setRawContent(copy.content)
     setActiveSectionId(copy.id)
@@ -986,12 +992,12 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     setSectionUndo(null)
   }
 
-  const handleDeleteSection = (sectionId: string) => {
+  const handleDeleteSection = (sectionId: string, displayName?: string) => {
     const section = note?.sections.find((s) => s.id === sectionId)
     if (!section) return
     setModal({
       title: t.common.deleteSection,
-      message: tf(t.common.deleteSectionMessage, { name: section.name }),
+      message: tf(t.common.deleteSectionMessage, { name: displayName ?? section.name }),
       confirmLabel: t.common.delete,
       danger: true,
       onConfirm: () => { setModal(null); deleteSectionWithUndo(sectionId) },
@@ -1026,6 +1032,43 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   const handleClearSectionColor = async (sectionName: string) => {
     await clearSectionTagColor(sectionName)
     setSectionColorPickerId(null)
+  }
+
+  // The strip's name field commits on blur — i.e. on the mousedown of a swatch, before its
+  // click — and the store only shows the new name after the disk write. Colours are keyed by
+  // section name, so they go to the name just committed rather than the stale one.
+  // Only while the store still shows the name it replaced: once the write lands, or if a rename
+  // from elsewhere (sync, another pane) or a failed write moved it on, the store wins.
+  const stripSectionName = (section: NoteSection) => {
+    const pending = stripRenameRef.current
+    return pending && pending.sectionId === section.id && section.name === pending.from
+      ? pending.name
+      : section.name
+  }
+
+  // Resolves with the name the section has once the write settles (see SectionNameField).
+  const handleStripRename = async (sectionId: string, name: string) => {
+    const noteId = note.id
+    const sectionNameNow = () =>
+      useNotesStore.getState().notes.find((n) => n.id === noteId)?.sections.find((s) => s.id === sectionId)?.name
+    if (note.encryption && !sessionPasswords[noteId]) return sectionNameNow()
+    const from = sectionNameNow()
+    if (from !== undefined) stripRenameRef.current = { sectionId, from, name }
+    try {
+      await updateSection(noteId, sectionId, { name })
+    } catch (err) {
+      console.error('[editor] Section rename failed:', err)
+    }
+    return sectionNameNow()
+  }
+
+  const closeStripToEditor = () => {
+    setSectionColorPickerId(null)
+    requestAnimationFrame(() => {
+      const editor = editorRef.current?.editor
+      if (editor) editor.commands.focus()
+      else rawTextareaRef.current?.focus()
+    })
   }
 
   const colorPickerSection = sectionColorPickerId
@@ -1278,6 +1321,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
                   onDragLeave={() => setDragOverSectionId(null)}
                   onContextMenu={(e) => {
                     e.preventDefault()
+                    stripRenameRef.current = null
                     setSectionColorPickerId((prev) => (prev === section.id ? null : section.id))
                   }}
                   className={`relative group flex items-center justify-center min-w-[88px] flex-shrink-0 h-full transition-colors duration-150 cursor-grab active:cursor-grabbing
@@ -1552,25 +1596,31 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
         >
           {visibleColorPickerSection && (
             <div className="px-3 py-2 flex items-center justify-between gap-2">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-text-muted/70 min-w-0 truncate flex-shrink-0">
-                {visibleColorPickerSection.name}
-              </div>
+              <SectionNameField
+                key={`${note.id}:${visibleColorPickerSection.id}`}
+                name={visibleColorPickerSection.name}
+                open={!!colorPickerSection}
+                readOnly={!!note.encryption && !sessionPasswords[note.id]}
+                label={t.editor.renameSection}
+                onCommit={(name) => handleStripRename(visibleColorPickerSection.id, name)}
+                onClose={closeStripToEditor}
+              />
               <div className="flex items-center gap-1.5 flex-shrink-0">
                 {TAG_COLOR_VARS.map((color) => (
                   <button
                     key={`tab-color-${visibleColorPickerSection.id}-${color}`}
                     title={color.replace('--', '')}
-                    onClick={() => { void handleSetSectionColor(visibleColorPickerSection.name, color) }}
+                    onClick={() => { void handleSetSectionColor(stripSectionName(visibleColorPickerSection), color) }}
                     className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${colorPickerOverride === color ? 'ring-1 ring-white/60 ring-offset-1 ring-offset-surface-2' : ''}`}
                     style={{ background: `rgb(${colorChannels(color)})` }}
                   />
                 ))}
                 <CustomColorSwatch
                   value={colorPickerOverride ?? resolveGroupColor(visibleColorPickerSection.name)}
-                  onPick={(c) => { void setSectionTagColor(visibleColorPickerSection.name, c) }}
+                  onPick={(c) => { void setSectionTagColor(stripSectionName(visibleColorPickerSection), c) }}
                 />
                 <button
-                  onClick={() => { void handleClearSectionColor(visibleColorPickerSection.name) }}
+                  onClick={() => { void handleClearSectionColor(stripSectionName(visibleColorPickerSection)) }}
                   className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
                     colorPickerOverride
                       ? 'text-text-muted border-border hover:text-text hover:border-text/30'
@@ -1580,16 +1630,9 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
                   {t.editor.auto}
                 </button>
                 <div className="w-px h-4 bg-border/70 mx-0.5" />
-                <button
-                  onClick={() => { handleStartRename(visibleColorPickerSection); setSectionColorPickerId(null) }}
-                  title={t.editor.renameSection}
-                  className="p-0.5 rounded text-text-muted/80 hover:text-text transition-colors"
-                >
-                  <Pencil size={13} />
-                </button>
                 {!(note.encryption && !sessionPasswords[note.id]) && (
                   <button
-                    onClick={() => { void handleDuplicateSection(visibleColorPickerSection.id); setSectionColorPickerId(null) }}
+                    onClick={() => { void handleDuplicateSection(visibleColorPickerSection.id, stripSectionName(visibleColorPickerSection)); setSectionColorPickerId(null) }}
                     title={t.common.duplicateSection}
                     className="p-0.5 rounded text-text-muted/80 hover:text-text transition-colors"
                   >
@@ -1598,7 +1641,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
                 )}
                 {note.sections.length > 1 && (
                   <button
-                    onClick={() => { handleDeleteSection(visibleColorPickerSection.id); setSectionColorPickerId(null) }}
+                    onClick={() => { handleDeleteSection(visibleColorPickerSection.id, stripSectionName(visibleColorPickerSection)); setSectionColorPickerId(null) }}
                     title={t.common.deleteSection}
                     className="p-0.5 rounded text-text-muted/80 hover:text-red-400 transition-colors"
                   >
