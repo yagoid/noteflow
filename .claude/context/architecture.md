@@ -30,6 +30,8 @@ noteflow/
 │   ├── syncState.ts     # Lógica pura del journal de mutaciones + sha-cache (la usan GitHub y Cloud)
 │   ├── mirrorPlan.ts    # Lógica pura del espejo local→GitHub (plan + allowlist de borrado) — ver sync.md
 │   ├── syncProvider.ts  # Interfaz SyncProvider + getActiveSyncProvider() (GitHub ⟂ Cloud) — ver sync.md
+│   ├── tempNoteExpiry.ts # Lógica pura: cuándo puede correr el autoborrado de notas temporales
+│   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
 │   ├── account.ts       # Cuenta NoteFlow (Supabase Auth email+OTP vía REST, sesión en main,
 │   │                    #   refresh token cifrado, entitlements) — ver monetization.md
 │   ├── accountTransition.ts # Lógica pura del sign-out/sign-in: qué apagar (Cloud, DEK, IA gestionada)

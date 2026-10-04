@@ -111,11 +111,22 @@ Iconos del TitleBar:
 - Se crean con `Ctrl+Shift+N`, desde el click-derecho en `+ New note`, o con el **botón-icono de
   reloj** (`Timer`) que hay entre `+ New note` y el botón de nuevo grupo en el sidebar.
 - Llevan `expiresAt` en el frontmatter (24h desde su creación).
-- El proceso principal comprueba cada minuto y **borra automáticamente** las vencidas (también
-  del repositorio remoto si hay sync).
+- El proceso principal **borra automáticamente** las vencidas (también del remoto si hay sync).
+  Sin sync, comprueba al arrancar y cada minuto; **con sync, solo justo después de un pull que haya
+  ido bien** (para no borrar una nota que otro dispositivo hizo permanente), así que puede borrarse
+  unos minutos tarde y, sin conexión, no caduca hasta el siguiente pull correcto.
 - En el sidebar se distinguen por un icono de reloj (⏱) junto a la hora.
 - Dentro del editor, junto a la fecha de actualización se muestra `Deletes <fecha · hora>` (con
   icono de reloj, en tono de acento) indicando cuándo se autoeliminará.
+- **Hacerla permanente:** el menú ⋯ del editor muestra **"Make permanent"** (icono `TimerOff`) solo
+  en notas temporales. Quita `expiresAt` (bumpea `updated`) y la nota pasa a ser normal: desaparecen
+  el badge del editor y el reloj del sidebar, y vuelve a entrar en grafo, related, link picker y
+  sugerencias del chat. Sin confirmación (es inocuo). Funciona también con notas cifradas, incluso
+  bloqueadas (solo reescribe `note.md`). Solo está en el menú ⋯ (no en el menú contextual del
+  sidebar ni en la paleta). Con sync, los demás dispositivos reciben la versión permanente antes de
+  poder caducarla (ver `patterns.md` § "Motor de alarmas y notas temporales").
+- Las temporales **no entran** en el grafo del cerebro, la vista Related, el link picker de
+  secciones ni las sugerencias del chat (filtran por `expiresAt`).
 
 ---
 

@@ -225,14 +225,14 @@ describe('shouldRunDeletionRule', () => {
   const LAST_SYNC = Date.parse('2026-07-06T09:00:00.000Z')
 
   it('runs the rule in the normal case: lastSync known, remote on v2, Cloud off, no reconcile pending', () => {
-    expect(shouldRunDeletionRule(LAST_SYNC, false, false, true)).toBe(true)
+    expect(shouldRunDeletionRule(LAST_SYNC, false, false, true, false)).toBe(true)
   })
 
   it('never runs while NoteFlow Cloud is enabled (GitHub is a paused, write-only mirror)', () => {
     // The data-loss case: lastSync is old and the remote is a healthy v2 repo,
     // but it never received the notes that arrived through Cloud. Holds with the
     // one-shot flag already consumed — that is the second manual pull.
-    expect(shouldRunDeletionRule(LAST_SYNC, false, true, true)).toBe(false)
+    expect(shouldRunDeletionRule(LAST_SYNC, false, true, true, false)).toBe(false)
   })
 
   it('never runs right after Cloud is switched off: disableCloudSync re-arms the reconcile flag', () => {
@@ -242,21 +242,25 @@ describe('shouldRunDeletionRule', () => {
     // pull — Cloud already false, lastSync valid, remote a healthy v2 — must not
     // delete. (The marking itself lives in cloudSync.enableCloudSync/
     // disableCloudSync and needs Electron, so only the decision is unit-tested.)
-    expect(shouldRunDeletionRule(LAST_SYNC, true, false, true)).toBe(false)
-    expect(shouldRunDeletionRule(null, true, true, true)).toBe(false)
-    expect(shouldRunDeletionRule(LAST_SYNC, true, true, false)).toBe(false)
+    expect(shouldRunDeletionRule(LAST_SYNC, true, false, true, false)).toBe(false)
+    expect(shouldRunDeletionRule(null, true, true, true, false)).toBe(false)
+    expect(shouldRunDeletionRule(LAST_SYNC, true, true, false, false)).toBe(false)
   })
 
   it('never runs without a lastSync (nothing can be assumed deleted remotely)', () => {
-    expect(shouldRunDeletionRule(null, false, false, true)).toBe(false)
+    expect(shouldRunDeletionRule(null, false, false, true, false)).toBe(false)
   })
 
   it('never runs with an unparseable lastSync (NaN would delete everything missing)', () => {
-    expect(shouldRunDeletionRule(Number.NaN, false, false, true)).toBe(false)
+    expect(shouldRunDeletionRule(Number.NaN, false, false, true, false)).toBe(false)
   })
 
   it('never runs while the remote is not fully on format v2 (additive-only pull)', () => {
-    expect(shouldRunDeletionRule(LAST_SYNC, false, false, false)).toBe(false)
+    expect(shouldRunDeletionRule(LAST_SYNC, false, false, false, false)).toBe(false)
+  })
+
+  it('never runs when GitHub truncated the tree listing (absent from listing ≠ absent from remote)', () => {
+    expect(shouldRunDeletionRule(LAST_SYNC, false, false, true, true)).toBe(false)
   })
 })
 

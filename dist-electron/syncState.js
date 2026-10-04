@@ -195,9 +195,12 @@ function shouldDeletionRuleSkipDir(state, dir) {
  *   the first successful GitHub pull. It governs the FULL upload catch-up (and
  *   also blocks deletion, for the window where it outlives `cloudEnabled` — e.g.
  *   Cloud disabled again before that first pull, with `lastSync` still stale).
+ * - `treeTruncated`: GitHub cut the recursive tree listing short (very large
+ *   repo). "Absent from the listing" then doesn't mean "absent from the remote",
+ *   so the rule would delete local notes that still exist remotely.
  */
-function shouldRunDeletionRule(lastSyncTime, needsFullReconcile, cloudEnabled, remoteIsV2) {
-    if (needsFullReconcile || cloudEnabled)
+function shouldRunDeletionRule(lastSyncTime, needsFullReconcile, cloudEnabled, remoteIsV2, treeTruncated) {
+    if (needsFullReconcile || cloudEnabled || treeTruncated)
         return false;
     // An unparseable lastSync (NaN) must not authorize deletions either: every
     // `updated > lastSync` comparison would be false and the rule would delete

@@ -46,6 +46,13 @@ contra Supabase con E2EE, tombstones en vez de borrado por ausencia, sin cola de
 con pull incremental por `updated_at`): detalle completo en `monetization.md` § 4. Su journal
 reutiliza las transiciones puras de `syncState.ts` en un fichero PROPIO
 (`userData/cloud-sync-state.json`) — nunca el `sync-state.json` de GitHub.
+📌 **Problema conocido (preexistente, sin arreglar) — integridad del pull incremental de Cloud:**
+`pullNotes` avanza el cursor con `nextPullCursor(s.pullCursor, entries)` (`cloudSyncLogic.ts`), y
+`entries` solo contiene las filas que **descifraron** bien (incluidas las de carpetas cuyo aplicado
+falló después). Una fila que falla al descifrar y es más antigua que otra del mismo lote queda
+**por debajo del cursor para siempre** (`updated_at=gt.cursor`): no se reintenta nunca y se pierde
+esa edición en este dispositivo. Ese pull sí reporta el error; los siguientes salen "limpios" sin
+haberla aplicado (afecta también al gate de caducidad de notas temporales, ver `patterns.md`).
 
 **El CLI** (`cli/noteflow.js`) tiene su propio cliente Cloud headless (`noteflow cloud …`, con
 sesión y cursor propios en `settings.cliAccount`/`cliCloud`, y la misma prioridad Cloud > GitHub):
@@ -96,7 +103,9 @@ ver `monetization.md` § 4 "Cliente CLI (headless)".
   lleva paths de DIRECTORIOS. **Coste:** el pull NO hace un GET por nota — si el blob-sha del
   `note.md` en el tree coincide con el último reconciliado (sha cache, abajo) la carpeta se salta
   sin ninguna request; solo las carpetas con sha nuevo pagan el GET del ancla + comparación de
-  `updated`. El **journal** (abajo) además guarda al pull de los agujeros de datos: se salta dirs
+  `updated`. Si ese GET falla (`getRemoteFile` se traga el error y devuelve `null`) o el tree viene
+  truncado, el pull no añade nada a `errors` pero devuelve `incomplete: true` (no se muestra; solo
+  frena la caducidad de notas temporales, ver `patterns.md`). El **journal** (abajo) además guarda al pull de los agujeros de datos: se salta dirs
   remotos con `deleteDir` pendiente y ficheros con `delete` pendiente (no resucitar borrados que
   aún no aterrizaron), y la regla de borrado local se salta cualquier dir con `upsert` pendiente
   (su push no aterrizó; borrarlo sería pérdida de datos).
@@ -107,8 +116,11 @@ ver `monetization.md` § 4 "Cliente CLI (headless)".
   llegan por Cloud están ausentes del repo **y** con `updated <= lastSync` → la regla las borraba
   (bug de pérdida de datos real: un usuario perdió 42 notas al pulsar Sincronizar en Settings → Sync
   → GitHub). La decisión vive en `shouldRunDeletionRule(lastSyncTime, needsFullReconcile,
-  cloudEnabled, remoteIsV2)` (`syncState.ts`, puro y testeado): solo se borra con `lastSync` válido
-  (no nulo ni NaN), remoto v2, **Cloud deshabilitado** y sin reconcile pendiente. `pullNotes` lee
+  cloudEnabled, remoteIsV2, treeTruncated)` (`syncState.ts`, puro y testeado): solo se borra con
+  `lastSync` válido (no nulo ni NaN), remoto v2, **Cloud deshabilitado**, sin reconcile pendiente y
+  con el **listado del tree completo** — si GitHub lo trunca (`truncated: true`, repos enormes), una
+  carpeta ausente del listado puede seguir existiendo en remoto, así que ese pull no borra nada en
+  local (además marca el resultado `incomplete`, ver arriba). `pullNotes` lee
   `cloudEnabled` de `settings.json` **plano y fail-closed** (`isCloudSyncEnabledFailClosed()`: si el
   fichero no se puede leer o parsear responde "Cloud activo" ⇒ no borrar; solo la ausencia de sección
   `cloudSync` — el usuario solo-GitHub — responde false), y lo más tarde posible dentro del pull.
@@ -227,7 +239,9 @@ ver `monetization.md` § 4 "Cliente CLI (headless)".
 - **Autosync:** cada 5 min (`AUTO_SYNC_INTERVAL_MS`) mientras esté conectado: primero drena el
   journal (`retrySyncJournal`), luego pull (que se pospone si quedan mutaciones en vuelo).
 - **Delete:** `scheduleDelete(relPath)` (sección suelta) y `scheduleDeleteDir(dir)` (lista el
-  árbol y borra cada blob bajo `<dir>/`; usado por borrar nota y notas expiradas). Ambos se
+  árbol y borra cada blob bajo `<dir>/`; usado por borrar nota y notas expiradas — estas últimas
+  solo justo tras un pull limpio del backend activo, ver `patterns.md` § "Motor de alarmas y notas
+  temporales", porque el borrado es incondicional). Ambos se
   journalan antes de ejecutarse y en fallo setean `syncError` y QUEDAN en el journal para retry
   (sin tope de intentos: un borrado remoto perdido = nota que resucita en el siguiente pull).
 - **Journal + sha cache (`electron/syncState.ts` + `userData/sync-state.json`):** estado LOCAL de

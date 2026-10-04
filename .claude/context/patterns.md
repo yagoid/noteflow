@@ -502,11 +502,59 @@ transparencia era redundante y se desactiva. Ver el comentario en `createStickyW
 
 
 ### Motor de alarmas y notas temporales (en main)
-`setInterval` cada 60s ejecuta `checkAlarms()` + `checkExpiredNotes()`:
+`setInterval` cada 60s ejecuta `checkAlarms()` + `maybeCheckExpiredNotes({kind:'timer'})` (este
+último también una vez al arrancar):
 - **Alarmas:** el renderer recolecta deadlines/alarmas de los task items (`alarmUtils.ts`) y las
   envía con `alarms:schedule`; el main dispara `Notification` nativa cuando vence (incluye las ya
   vencidas/perdidas al registrar).
-- **Notas temporales:** archivos con `expiresAt` vencido se borran del disco y del remoto.
+- **Notas temporales:** `checkExpiredNotes()` lee cada `note.md` del **disco local** y, si casa
+  `/^expiresAt:/m` con fecha vencida, borra la carpeta y llama a `scheduleDeleteDir` del backend de
+  sync activo — borrado remoto **incondicional** (no compara `updated` y, a diferencia de los
+  pushes, no espera al primer pull).
+- **⚠️ Cuándo se ejecuta — gate por pull (`electron/tempNoteExpiry.ts`, puro y testeado):**
+  `maybeCheckExpiredNotes(trigger)` decide con `shouldRunExpiryCheck(trigger, {backend, connected})`
+  del `getActiveSyncProvider()`. `connected` = `isConnected()` del provider, **salvo Cloud, que cuenta
+  como conectado siempre que esté habilitado** (aunque aún no haya sesión: si no, el timer caducaría
+  y journalaría un borrado remoto en esa ventana):
+  - **Sin sync conectado:** como siempre — al arrancar y cada 60s (trigger `timer`).
+  - **Con sync conectado (GitHub o Cloud):** el timer **no** la ejecuta nunca (ni al arrancar ni tras
+    despertar). Solo corre **justo después de un pull completo del backend activo**: sin `errors` **y**
+    sin `incomplete` (campo opcional de `SyncPullResult`, hoy solo lo pone GitHub cuando el listado
+    del tree viene **truncado** o falla el GET de un `note.md` que sí está en el tree — `getRemoteFile`
+    se traga los errores y devuelve `null`; antes ese dir se saltaba en silencio y el pull salía
+    "limpio". Va aparte de `errors` porque estos se muestran tal cual en Settings → Sync y un GET
+    transitorio no es accionable) — trigger `pull`, emitido por `expireNotesAfterPull()` desde `broadcastPullResult(result,
+    backend)` (autosync GitHub, ciclo Cloud, pull inicial de arranque de ambos, pull tras managed
+    unlock, enable de Cloud) y desde `githubManualPull`/`cloudManualPull`. Corre **después** de que
+    `pullNotes` haya escrito las carpetas, así que si otro dispositivo la hizo permanente, el
+    `note.md` ya no tiene `expiresAt` y no se toca.
+  - **Por qué:** un dispositivo con la copia temporal obsoleta (p. ej. la hicieron permanente en otro
+    mientras este dormía, o hace 3 min y aún no ha tocado el pull de 5 min) la borraría en local **y**
+    en remoto, y el resto la perdería en su siguiente pull. Un pull completo ha reconciliado **cada**
+    carpeta de nota del remoto (las que se salta es porque su `note.md` no cambió desde la última
+    reconciliación — sha cache en GitHub, cursor en Cloud — o tienen un borrado pendiente), y con LWW
+    por carpeta la copia local queda al menos tan nueva como la remota: un `expiresAt` que siga en
+    disco es uno con el que el remoto coincide. Cubre arranque, resume y equipos encendidos sin
+    estado extra ni `powerMonitor`. **Excepción conocida (Cloud):** una fila que no descifra queda
+    por debajo del cursor para siempre, así que pulls posteriores salen completos sin haberla
+    aplicado — ver `sync.md` § Cloud Sync.
+  - **Contrapartidas (intencionadas):** con sync conectado una temporal se borra **hasta un intervalo
+    de pull tarde** (~5 min). Si los pulls **fallan o salen incompletos** (offline, claves de Cloud
+    bloqueadas en e2ee, Cloud habilitado sin sesión, un error persistente en cualquier carpeta, un
+    repo tan grande que GitHub trunca el tree) las temporales **no caducan** hasta un pull completo;
+    no hay fallback que borre igualmente. Un pull **manual de GitHub con Cloud activo** no cuenta (no
+    dice nada de lo que tiene Cloud). El pull interno del Device Flow (`githubSync.ts`) no dispara la
+    comprobación; la hace el siguiente tick del autosync.
+  - **Riesgo residual:** hacerla permanente en A segundos antes del vencimiento (antes de que el push
+    debounced de A llegue al remoto y B haga pull) aún puede perderla; y si B editó su copia temporal
+    después que A, gana B por LWW (con `expiresAt`). No se guarda el `scheduleDeleteDir` contra el
+    remoto: la interfaz `SyncProvider` no expone leer un `note.md` remoto y, con el gate, sería
+    redundante salvo en esa ventana de segundos.
+- **Hacer permanente** (`notesStore.makeNotePermanent`, menú ⋯ del editor): saca `expiresAt` del
+  objeto por desestructuración (no `= undefined`, para que ningún spread posterior lo resucite) y
+  reescribe solo `note.md` con `updated` nuevo (gana el conflicto por carpeta en el pull de los
+  demás). Al no haber línea `expiresAt:`, el main ya no la toca; grafo/related/link picker/chat la
+  incluyen al siguiente render (filtran en vivo, nada lo cachea).
 
 ### Auto-update in-app
 `app:check-update` consulta la última release (API GitHub, endpoint `/releases/latest` → **ignora

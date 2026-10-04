@@ -255,13 +255,19 @@ async function getDefaultBranch(token, owner, repo) {
  * "remotely deleted" and wipe them from disk when there is no internet connection.
  */
 async function listRemoteTree(token, owner, repo) {
+    return (await fetchRemoteTree(token, owner, repo)).blobs;
+}
+/** listRemoteTree plus whether GitHub truncated the listing (pullNotes needs to know). */
+async function fetchRemoteTree(token, owner, repo) {
     const branch = await getDefaultBranch(token, owner, repo);
     const res = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`));
-    if (res?.truncated)
+    const truncated = res?.truncated === true;
+    if (truncated)
         console.warn('[GitHubSync] tree listing truncated — repo unusually large');
-    return (res?.tree ?? [])
+    const blobs = (res?.tree ?? [])
         .filter((t) => t.type === 'blob')
         .map(({ path: p, sha }) => ({ path: p, sha }));
+    return { blobs, truncated };
 }
 /** Groups tree blobs into note directories: dir → set of .md filenames inside it. */
 function groupRemoteNoteDirs(blobs) {
@@ -656,6 +662,10 @@ async function pullNotes(notesDir) {
     const errors = [];
     const updatedFiles = [];
     let hadMetadataChanges = false;
+    // Set when this pass silently skipped something it should have reconciled (see
+    // SyncPullResult.incomplete). Deliberately NOT an `errors` entry: those are shown
+    // verbatim in Settings → Sync, and a transient GET failure isn't user-actionable.
+    let incomplete = false;
     const previousLastSync = s.lastSync;
     // Read the one-shot reconcile flag BEFORE the pull touches the settings: this
     // pull must not trust `lastSync` (GitHub was paused while Cloud was on).
@@ -663,7 +673,10 @@ async function pullNotes(notesDir) {
     const state = getState();
     let stateChanged = false;
     try {
-        const blobs = await listRemoteTree(token, s.owner, s.repo);
+        const { blobs, truncated } = await fetchRemoteTree(token, s.owner, s.repo);
+        // A truncated listing may be missing note folders entirely.
+        if (truncated)
+            incomplete = true;
         const treeShaByPath = new Map(blobs.map((b) => [b.path, b.sha]));
         const remoteNoteDirs = groupRemoteNoteDirs(blobs);
         const remoteHasMarker = blobs.some((b) => b.path === noteFormat_1.FORMAT_MARKER_FILE);
@@ -690,8 +703,12 @@ async function pullNotes(notesDir) {
                 if (anchorTreeSha && (0, syncState_1.getCachedSha)(state, anchorRel) === anchorTreeSha)
                     continue;
                 const remoteAnchor = await getRemoteFile(token, s.owner, s.repo, anchorRel);
-                if (!remoteAnchor)
+                if (!remoteAnchor) {
+                    // The anchor IS in the tree, so null means the GET failed (getRemoteFile
+                    // swallows network/403/5xx) — this folder was not reconciled.
+                    incomplete = true;
                     continue;
+                }
                 const localDirPath = path_1.default.join(notesDir, dir);
                 const localAnchorPath = path_1.default.join(localDirPath, noteFormat_1.NOTE_MD);
                 if (fs_1.default.existsSync(localAnchorPath)) {
@@ -747,13 +764,14 @@ async function pullNotes(notesDir) {
         // point and was since deleted. Dirs newer than lastSync were created
         // locally after the last sync and haven't been pushed yet — keep them.
         // The rule is skipped entirely while the remote is pre-v2, a full reconcile
-        // is pending, or NoteFlow Cloud is the active provider — see
+        // is pending, NoteFlow Cloud is the active provider, or the tree listing came
+        // back truncated (a dir missing from it may still exist remotely) — see
         // shouldRunDeletionRule in syncState.ts.
         // `cloudEnabled` is read fail-closed and as late as possible, so Cloud being
         // switched on mid-pull still disarms the rule.
         const cloudEnabled = isCloudSyncEnabledFailClosed();
         const lastSyncTime = s.lastSync ? new Date(s.lastSync).getTime() : null;
-        const runDeletionRule = (0, syncState_1.shouldRunDeletionRule)(lastSyncTime, needsFullReconcile, cloudEnabled, remoteIsV2);
+        const runDeletionRule = (0, syncState_1.shouldRunDeletionRule)(lastSyncTime, needsFullReconcile, cloudEnabled, remoteIsV2, truncated);
         if (runDeletionRule && lastSyncTime !== null) { // null already excluded above; repeated for narrowing
             for (const dir of (0, noteFormat_1.listNoteDirs)(notesDir)) {
                 if (remoteNoteDirs.has(dir))
@@ -858,6 +876,7 @@ async function pullNotes(notesDir) {
         updatedFiles,
         hadDeletions: deleted > 0,
         hadMetadataChanges,
+        ...(incomplete ? { incomplete: true } : {}),
     };
 }
 /**

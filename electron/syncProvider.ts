@@ -29,6 +29,13 @@ export interface SyncPullResult {
   updatedFiles: string[]
   hadDeletions: boolean
   hadMetadataChanges: boolean
+  /**
+   * True when the pull finished without errors but silently skipped something it
+   * should have reconciled (GitHub: truncated tree listing, or a note.md present in
+   * the tree whose GET failed). Not shown to the user; it keeps the temporary-note
+   * expiry from running on a possibly stale copy (see tempNoteExpiry.ts).
+   */
+  incomplete?: boolean
 }
 
 export interface SyncProvider {

@@ -58,6 +58,7 @@ const noteFormat = __importStar(require("./noteFormat"));
 const uiSettings_1 = require("./uiSettings");
 const importers = __importStar(require("./importers"));
 const migration_1 = require("./migration");
+const tempNoteExpiry_1 = require("./tempNoteExpiry");
 const i18n_1 = require("./i18n");
 function getIconPath() {
     if (process.platform === 'win32')
@@ -153,12 +154,30 @@ function checkExpiredNotes() {
         console.error('[TempNotes] checkExpiredNotes failed:', err);
     }
 }
+/**
+ * Gate in front of checkExpiredNotes(). Without sync it runs on the timer
+ * (startup + every 60s) as always; with a sync backend connected it runs ONLY
+ * right after a clean pull of that backend, so a device holding a stale
+ * temporary copy (e.g. made permanent elsewhere while this one slept) pulls
+ * the newer version before it can delete the note locally and remotely.
+ * Rationale and the "no pull ⇒ no expiry" trade-off: tempNoteExpiry.ts.
+ */
+function maybeCheckExpiredNotes(trigger) {
+    const sync = (0, syncProvider_1.getActiveSyncProvider)();
+    // Cloud is the active provider iff it is enabled. Count it as connected even
+    // while signed out / not yet restored: otherwise the timer would expire notes
+    // and journal remote deletes that land once the session comes back.
+    const connected = sync.id === 'cloud' || sync.isConnected();
+    if ((0, tempNoteExpiry_1.shouldRunExpiryCheck)(trigger, { backend: sync.id, connected })) {
+        checkExpiredNotes();
+    }
+}
 function startAlarmEngine() {
     if (alarmTimer)
         return;
     alarmTimer = setInterval(() => {
         checkAlarms();
-        checkExpiredNotes();
+        maybeCheckExpiredNotes({ kind: 'timer' });
     }, 60000);
 }
 electron_1.ipcMain.on('alarms:schedule', (_event, incoming) => {
@@ -340,7 +359,7 @@ function indexPulledNotes(result) {
     if (result.hadDeletions || result.hadMetadataChanges)
         aiIndex.markStaleUnknown();
 }
-function broadcastPullResult(result) {
+function broadcastPullResult(result, backend) {
     indexPulledNotes(result);
     if (result.hadDeletions || result.hadMetadataChanges) {
         electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
@@ -353,6 +372,17 @@ function broadcastPullResult(result) {
         }
     }
     emitSyncStatusChanged();
+    expireNotesAfterPull(result, backend);
+}
+// Every pull funnels here (broadcastPullResult + the two manual pulls): with sync
+// connected this is the only place temporary notes are expired — see maybeCheckExpiredNotes.
+function expireNotesAfterPull(result, backend) {
+    maybeCheckExpiredNotes({
+        kind: 'pull',
+        backend,
+        errorCount: result.errors.length,
+        incomplete: result.incomplete === true,
+    });
 }
 function startAutoSync() {
     if (autoSyncTimer)
@@ -384,7 +414,7 @@ function startAutoSync() {
         }
         try {
             const result = await githubSync.pullNotes(NOTES_DIR);
-            broadcastPullResult(result);
+            broadcastPullResult(result, 'github');
         }
         catch (err) {
             console.error('[AutoSync] pull failed:', String(err));
@@ -464,7 +494,7 @@ async function runCloudSyncCycleOnce() {
     }
     try {
         const result = await cloudSync.pullNotes(NOTES_DIR);
-        broadcastPullResult(result);
+        broadcastPullResult(result, 'cloud');
     }
     catch (err) {
         console.error('[CloudAutoSync] pull failed:', String(err));
@@ -1758,6 +1788,7 @@ async function githubManualPull() {
             electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated', filePath, null));
         }
     }
+    expireNotesAfterPull(result, 'github');
     return result;
 }
 electron_1.ipcMain.handle('sync:pull', async () => githubManualPull());
@@ -1891,7 +1922,7 @@ function enableCloudSyncWithInitialPull() {
         cloudSync
             .pullNotes(NOTES_DIR)
             .then((result) => {
-            broadcastPullResult(result);
+            broadcastPullResult(result, 'cloud');
             emitCloudStatusChanged();
         })
             .catch((err) => console.error('[Cloud] initial pull failed:', String(err)));
@@ -1924,6 +1955,7 @@ async function cloudManualPull() {
         }
     }
     emitCloudStatusChanged();
+    expireNotesAfterPull(result, 'cloud');
     return result;
 }
 // Manual pull (same broadcast contract as sync:pull).
@@ -3181,7 +3213,7 @@ electron_1.app.whenReady().then(async () => {
         const runInitialCloudPull = () => cloudSync
             .pullNotes(NOTES_DIR)
             .then((result) => {
-            broadcastPullResult(result);
+            broadcastPullResult(result, 'cloud');
             emitCloudStatusChanged();
             cloudSync.retrySyncJournal(NOTES_DIR).catch((err) => {
                 console.error('[Startup] cloud journal retry failed:', String(err));
@@ -3216,7 +3248,7 @@ electron_1.app.whenReady().then(async () => {
                 cloudSync
                     .pullNotes(NOTES_DIR)
                     .then((result) => {
-                    broadcastPullResult(result);
+                    broadcastPullResult(result, 'cloud');
                     emitCloudStatusChanged();
                 })
                     .catch((err) => console.error('[Startup] cloud pull after managed unlock failed:', String(err)));
@@ -3234,7 +3266,7 @@ electron_1.app.whenReady().then(async () => {
         const runInitialPull = () => githubSync
             .pullNotes(NOTES_DIR)
             .then((result) => {
-            broadcastPullResult(result);
+            broadcastPullResult(result, 'github');
             // Drain remote mutations journaled in previous sessions (failed or
             // interrupted pushes/deletes). Internally gated on the initial pull
             // having succeeded, so this is a no-op if the pull above failed.
@@ -3319,7 +3351,8 @@ electron_1.app.whenReady().then(async () => {
     createTray();
     registerGlobalShortcut();
     startAlarmEngine();
-    checkExpiredNotes();
+    // With sync connected this is a no-op: the initial pull above runs it on success.
+    maybeCheckExpiredNotes({ kind: 'timer' });
     // Semantic index (AI). init() wires config; primeSettings defers the worker warmup so
     // model loading / reindex doesn't compete with the app's first paint.
     aiIndex.init({ notesDir: NOTES_DIR, onProgress: emitAiProgress, onState: emitAiState, onStale: emitAiStale });
