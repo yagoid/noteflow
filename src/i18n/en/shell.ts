@@ -15,4 +15,7 @@ export const shell = {
   loadingNotes: 'Loading notes...',
   dropInEditor: 'Drop in editor to open side by side',
   dragToSeparateWindow: 'Drag here to open in a separate window',
+
+  // Section window ("Open in new window") showing an encrypted note: read-only.
+  encryptedReadOnlyHint: 'Encrypted notes are read-only in this window. Edit them in the main window.',
 }

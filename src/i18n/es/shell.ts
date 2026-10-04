@@ -12,4 +12,6 @@ export const shell = {
   loadingNotes: 'Cargando notas...',
   dropInEditor: 'Suelta en el editor para abrir en paralelo',
   dragToSeparateWindow: 'Arrastra aquí para abrir en una ventana aparte',
+
+  encryptedReadOnlyHint: 'Las notas cifradas son de solo lectura en esta ventana. Edítalas en la ventana principal.',
 }

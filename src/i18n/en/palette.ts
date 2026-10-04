@@ -21,6 +21,7 @@ export const palette = {
     startup: { label: 'Startup settings', description: 'Autostart and stickies on launch' },
     openFolder: { label: 'Open notes folder' },
     shortcuts: { label: 'Keyboard shortcuts', description: 'Open shortcut reference' },
+    openSectionWindow: { label: 'Open section in new window', description: 'Edit the active section in its own window' },
   },
 
   // Input placeholders + the "Commands ›" breadcrumb shown in sub-modes.

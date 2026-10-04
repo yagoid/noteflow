@@ -19,6 +19,7 @@ export const palette: Messages['palette'] = {
     startup: { label: 'Ajustes de arranque', description: 'Autoarranque y notas fijas al iniciar' },
     openFolder: { label: 'Abrir la carpeta de notas' },
     shortcuts: { label: 'Atajos de teclado', description: 'Abre la referencia de atajos' },
+    openSectionWindow: { label: 'Abrir sección en ventana nueva', description: 'Edita la sección activa en su propia ventana' },
   },
 
   searchPlaceholder: 'Busca notas o ejecuta un comando...',

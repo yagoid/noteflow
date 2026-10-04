@@ -143,7 +143,7 @@ export function StickyApp() {
   // Sticky windows are created with alwaysOnTop: true in the main process,
   // so the pin starts active.
   const [isPinned, setIsPinned] = useState(true)
-  const { loadNotes, isLoading, notes, updateNote } = useNotesStore()
+  const { loadNotes, isLoading, notes, updateSection } = useNotesStore()
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
 
   // Encrypted note unlock state (local — no store interaction)
@@ -327,13 +327,11 @@ export function StickyApp() {
     setTimeout(() => setIsFolded(false), 260)
   }
 
+  // updateSection merges onto the latest sections: a sync of another section that
+  // landed after this render must not be overwritten with our stale copy of it.
   const handleContentChange = (content: string) => {
     if (isReadOnly || section.content === content) return
-    updateNote(note.id, {
-      sections: note.sections.map((s) =>
-        s.id === section.id ? { ...s, content } : s,
-      ),
-    })
+    void updateSection(note.id, section.id, { content })
   }
 
   const handleRawChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -341,11 +339,7 @@ export function StickyApp() {
     const content = e.target.value
     setRawContent(content)
     if (section && section.content === content) return
-    updateNote(note!.id, {
-      sections: note!.sections.map((s) =>
-        s.id === section!.id ? { ...s, content } : s,
-      ),
-    })
+    void updateSection(note!.id, section!.id, { content })
   }
 
   const showSectionName = section.name !== 'New' && section.name !== 'Main'

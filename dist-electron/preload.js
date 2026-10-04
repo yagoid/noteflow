@@ -58,6 +58,10 @@ const api = {
     setTemplates: (templates) => electron_1.ipcRenderer.invoke('templates:set', templates),
     // Window controls
     openSticky: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-sticky', noteId, sectionId),
+    // Editor-only window for one section (focuses an existing window already on it).
+    openSectionWindow: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-section-window', noteId, sectionId),
+    // A section window reports the section it's on, so re-opening it focuses this window.
+    setSectionWindowTarget: (noteId, sectionId) => electron_1.ipcRenderer.send('window:section-window-target', noteId, sectionId),
     minimize: () => electron_1.ipcRenderer.send('window:minimize'),
     maximize: () => electron_1.ipcRenderer.send('window:maximize'),
     close: () => electron_1.ipcRenderer.send('window:close'),

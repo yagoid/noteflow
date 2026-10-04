@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo, startTransition } from 'react'
-import { useNotesStore } from './stores/notesStore'
+import { useNotesStore, setWindowRole, type OpenPane } from './stores/notesStore'
 import { useGroupsStore } from './stores/groupsStore'
 import { useTemplatesStore } from './stores/templatesStore'
 import { useSectionTagColorsStore } from './stores/sectionTagColorsStore'
@@ -16,6 +16,7 @@ import { AllContentOverview } from './components/AllContentOverview/AllContentOv
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
+import { SectionWindowApp } from './components/SectionWindowApp'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { HoverPreviewProvider } from './components/SectionPreview/HoverPreviewProvider'
 import { modKey } from './lib/platform'
@@ -29,14 +30,39 @@ const PANE_MIN_WIDTH = 360
 const PANE_MAX_WIDTH = 1200
 const PANE_DEFAULT_WIDTH = 520
 
+type WindowRoute = 'main' | 'sticky' | 'section'
+
+// The same bundle backs every window; the hash picks which app it renders. The store
+// learns its role here, before any child effect runs (loadNotes etc. depend on it).
+function detectWindowRoute(): WindowRoute {
+  const hash = window.location.hash
+  const route: WindowRoute = hash.startsWith('#section-window') ? 'section' : hash.startsWith('#sticky') ? 'sticky' : 'main'
+  setWindowRole(route)
+  return route
+}
+
 export function App() {
-  const [isSticky] = useState(() => window.location.hash.startsWith('#sticky'))
+  const [route] = useState(detectWindowRoute)
+  if (route === 'section') {
+    return (
+      <ErrorBoundary>
+        <HoverPreviewProvider>
+          <SectionWindowApp />
+        </HoverPreviewProvider>
+      </ErrorBoundary>
+    )
+  }
+  return <MainApp isSticky={route === 'sticky'} />
+}
+
+function MainApp({ isSticky }: { isSticky: boolean }) {
   const t = useT()
 
   const { loadNotes, isLoading, createNote, createTempNote, setCommandPaletteOpen } = useNotesStore()
   const notes = useNotesStore((s) => s.notes)
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
-  const openNoteIds = useNotesStore((s) => s.openNoteIds)
+  const openPanes = useNotesStore((s) => s.openPanes)
+  const activePaneId = useNotesStore((s) => s.activePaneId)
   const groupViewId = useNotesStore((s) => s.groupViewId)
   const noteViewId = useNotesStore((s) => s.noteViewId)
   const brainViewOpen = useNotesStore((s) => s.brainViewOpen)
@@ -44,9 +70,9 @@ export function App() {
   const allViewOpen = useNotesStore((s) => s.allViewOpen)
   const setAllView = useNotesStore((s) => s.setAllView)
   const closeFullView = useNotesStore((s) => s.closeFullView)
-  const closeOpenNote = useNotesStore((s) => s.closeOpenNote)
+  const closePane = useNotesStore((s) => s.closePane)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
-  const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
+  const reorderPane = useNotesStore((s) => s.reorderPane)
   const loadGroups = useGroupsStore((s) => s.loadGroups)
   const loadTemplates = useTemplatesStore((s) => s.loadTemplates)
   const loadSectionTagColors = useSectionTagColorsStore((s) => s.loadSectionTagColors)
@@ -250,24 +276,27 @@ export function App() {
     return () => window.removeEventListener('noteflow:note-drag', handler)
   }, [])
 
-  const visibleOpenNoteIds = useMemo(() => {
+  // Panes are keyed by paneId (not note id): the same note may be open in several
+  // panes, each on its own section — see lib/paneUtils.ts.
+  const visiblePanes = useMemo<OpenPane[]>(() => {
     const existingIds = new Set(notes.map((note) => note.id))
-    const validOpen = openNoteIds.filter((id) => existingIds.has(id))
+    const validOpen = openPanes.filter((p) => existingIds.has(p.noteId))
     if (validOpen.length > 0) return validOpen
-    if (activeNoteId && existingIds.has(activeNoteId)) return [activeNoteId]
+    if (activeNoteId && existingIds.has(activeNoteId)) return [{ paneId: activePaneId ?? 'main', noteId: activeNoteId }]
     return []
-  }, [notes, openNoteIds, activeNoteId])
+  }, [notes, openPanes, activeNoteId, activePaneId])
+  const visiblePaneIds = useMemo(() => visiblePanes.map((p) => p.paneId), [visiblePanes])
 
   // Panes default to auto-fill (flex) and only get a stored width once the user
   // resizes one by hand. So we never seed defaults here — we only prune entries
-  // for notes that are no longer visible.
+  // for panes that are no longer visible.
   useEffect(() => {
     setPaneWidths((prev) => {
       let changed = false
       const next: Record<string, number> = { ...prev }
 
       for (const id of Object.keys(next)) {
-        if (!visibleOpenNoteIds.includes(id)) {
+        if (!visiblePaneIds.includes(id)) {
           delete next[id]
           changed = true
         }
@@ -275,7 +304,7 @@ export function App() {
 
       return changed ? next : prev
     })
-  }, [visibleOpenNoteIds])
+  }, [visiblePaneIds])
 
   const refreshPaneOverflowState = useCallback(() => {
     const mainScroller = paneScrollRef.current
@@ -289,7 +318,7 @@ export function App() {
   useEffect(() => {
     const raf = window.requestAnimationFrame(refreshPaneOverflowState)
     return () => window.cancelAnimationFrame(raf)
-  }, [refreshPaneOverflowState, visibleOpenNoteIds, paneWidths, sidebarVisible, sidebarWidth, isLoading])
+  }, [refreshPaneOverflowState, visiblePaneIds, paneWidths, sidebarVisible, sidebarWidth, isLoading])
 
   useEffect(() => {
     const onResize = () => refreshPaneOverflowState()
@@ -357,12 +386,12 @@ export function App() {
   const extractDraggedPaneId = useCallback((e: React.DragEvent) => {
     const paneId = e.dataTransfer.getData('application/x-noteflow-pane-id') || draggingPaneId
     if (!paneId) return null
-    return visibleOpenNoteIds.includes(paneId) ? paneId : null
-  }, [visibleOpenNoteIds, draggingPaneId])
+    return visiblePaneIds.includes(paneId) ? paneId : null
+  }, [visiblePaneIds, draggingPaneId])
 
   const getPaneDropIndexFromPointer = useCallback((clientX: number) => {
     const container = paneContainerRef.current
-    if (!container) return visibleOpenNoteIds.length
+    if (!container) return visiblePaneIds.length
 
     const paneElements = Array.from(container.querySelectorAll<HTMLElement>('[data-pane-id]'))
     for (let i = 0; i < paneElements.length; i += 1) {
@@ -372,26 +401,12 @@ export function App() {
     }
 
     return paneElements.length
-  }, [visibleOpenNoteIds.length])
+  }, [visiblePaneIds.length])
 
-  const reorderOpenPanes = useCallback((draggedId: string, targetIndex: number) => {
-    const current = [...visibleOpenNoteIds]
-    const fromIndex = current.indexOf(draggedId)
-    if (fromIndex === -1) return
-
-    const clampedTarget = Math.max(0, Math.min(targetIndex, current.length))
-    if (clampedTarget === fromIndex || clampedTarget === fromIndex + 1) return
-
-    current.splice(fromIndex, 1)
-    const adjustedTarget = clampedTarget > fromIndex ? clampedTarget - 1 : clampedTarget
-    current.splice(adjustedTarget, 0, draggedId)
-    setOpenNoteIds(current)
-  }, [visibleOpenNoteIds, setOpenNoteIds])
-
-  const handlePaneDragStart = useCallback((e: React.DragEvent<HTMLElement>, noteId: string) => {
-    e.dataTransfer.setData('application/x-noteflow-pane-id', noteId)
+  const handlePaneDragStart = useCallback((e: React.DragEvent<HTMLElement>, paneId: string) => {
+    e.dataTransfer.setData('application/x-noteflow-pane-id', paneId)
     e.dataTransfer.effectAllowed = 'move'
-    setDraggingPaneId(noteId)
+    setDraggingPaneId(paneId)
     setPaneDropIndex(null)
   }, [])
 
@@ -416,10 +431,10 @@ export function App() {
     e.preventDefault()
     e.stopPropagation()
     const targetIndex = paneDropIndex ?? getPaneDropIndexFromPointer(e.clientX)
-    reorderOpenPanes(draggedId, targetIndex)
+    reorderPane(draggedId, targetIndex)
     setDraggingPaneId(null)
     setPaneDropIndex(null)
-  }, [extractDraggedPaneId, paneDropIndex, getPaneDropIndexFromPointer, reorderOpenPanes])
+  }, [extractDraggedPaneId, paneDropIndex, getPaneDropIndexFromPointer, reorderPane])
 
   const handlePaneContainerDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     const next = e.relatedTarget as Node | null
@@ -546,8 +561,8 @@ export function App() {
               <div className="text-xs font-mono text-text-muted">{t.shell.loadingNotes}</div>
             </div>
           ) : (
-            visibleOpenNoteIds.length <= 1 ? (
-              <NoteEditor noteId={visibleOpenNoteIds[0]} />
+            visiblePanes.length <= 1 ? (
+              <NoteEditor noteId={visiblePanes[0]?.noteId} paneId={visiblePanes[0]?.paneId} />
             ) : (
               <div className="h-full min-h-0 flex flex-col">
                 <div
@@ -561,26 +576,33 @@ export function App() {
                     onDragLeave={handlePaneContainerDragLeave}
                     className="h-full min-w-full flex relative"
                   >
-                    {visibleOpenNoteIds.map((noteId, index) => {
+                    {visiblePanes.map((pane, index) => {
+                      const { paneId, noteId } = pane
                       const paneNote = notes.find((n) => n.id === noteId)
-                      const paneTitle = paneNote?.title?.trim() || t.common.untitled
+                      const noteTitle = paneNote?.title?.trim() || t.common.untitled
+                      // Same note in several panes → "Note · Section" tells them apart.
+                      const sharesNote = visiblePanes.some((p) => p.paneId !== paneId && p.noteId === noteId)
+                      const paneSectionName = sharesNote
+                        ? paneNote?.sections.find((s) => s.id === pane.sectionId)?.name
+                        : undefined
+                      const paneTitle = paneSectionName ? `${noteTitle} · ${paneSectionName}` : noteTitle
                       // A pane is "pinned" once the user has resized it by hand
                       // (it then has a stored width). Otherwise it stays "auto" and
                       // shares the available width via flexbox, recomputed natively
                       // on every render / window resize.
-                      const pinnedWidth = paneWidths[noteId]
+                      const pinnedWidth = paneWidths[paneId]
                       const paneStyle: React.CSSProperties = typeof pinnedWidth === 'number'
                         ? { width: `${pinnedWidth}px`, minWidth: `${PANE_MIN_WIDTH}px`, flexGrow: 0, flexShrink: 0 }
                         : { flex: '1 1 0', minWidth: `${PANE_MIN_WIDTH}px` }
                       return (
                         <section
-                          key={noteId}
-                          data-pane-id={noteId}
+                          key={paneId}
+                          data-pane-id={paneId}
                           style={paneStyle}
                           className={`relative h-full flex flex-col border-r border-border/70 last:border-r-0 ${
-                            noteId === activeNoteId ? 'ring-1 ring-inset ring-text/20' : ''
+                            paneId === activePaneId ? 'ring-1 ring-inset ring-text/20' : ''
                           } ${
-                            draggingPaneId === noteId ? 'opacity-70' : ''
+                            draggingPaneId === paneId ? 'opacity-70' : ''
                           }`}
                         >
                           {draggingPaneId && paneDropIndex === index && (
@@ -593,7 +615,7 @@ export function App() {
                             <div className="flex items-center gap-1.5 flex-shrink-0">
                               <button
                                 draggable
-                                onDragStart={(e) => handlePaneDragStart(e, noteId)}
+                                onDragStart={(e) => handlePaneDragStart(e, paneId)}
                                 onDragEnd={handlePaneDragEnd}
                                 onClick={(e) => e.preventDefault()}
                                 className="px-2 py-1 rounded border border-text/20 bg-surface-2 text-text hover:bg-surface-3 hover:border-text/30 cursor-grab active:cursor-grabbing transition-colors inline-flex items-center gap-1"
@@ -603,7 +625,7 @@ export function App() {
                                 <span className="text-[10px] font-mono hidden xl:inline">{t.shell.drag}</span>
                               </button>
                               <button
-                                onClick={() => closeOpenNote(noteId)}
+                                onClick={() => closePane(paneId)}
                                 className="px-2 py-1 rounded border border-red-400/40 bg-red-400/15 text-red-300 hover:bg-red-400/25 hover:border-red-400/70 transition-colors"
                                 title={t.shell.closePane}
                               >
@@ -612,11 +634,11 @@ export function App() {
                             </div>
                           </div>
                           <div className="flex-1 min-h-0">
-                            <NoteEditor noteId={noteId} />
+                            <NoteEditor noteId={noteId} paneId={paneId} />
                           </div>
 
                           <div
-                            onMouseDown={(e) => beginPaneResize(e, noteId)}
+                            onMouseDown={(e) => beginPaneResize(e, paneId)}
                             className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-text/20 active:bg-text/35 transition-colors z-20"
                             title={t.shell.resizeColumn}
                           />
@@ -624,7 +646,7 @@ export function App() {
                       )
                     })}
 
-                    {draggingPaneId && paneDropIndex === visibleOpenNoteIds.length && (
+                    {draggingPaneId && paneDropIndex === visiblePanes.length && (
                       <div className="absolute inset-y-1 right-0 w-[6px] rounded bg-text/15 border border-text/40 pointer-events-none" />
                     )}
                   </div>

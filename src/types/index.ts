@@ -404,6 +404,8 @@ declare global {
       foldToCorner: (width: number, height: number) => void
       unfold: () => void
       openSticky: (noteId: string, sectionId: string) => void
+      openSectionWindow: (noteId: string, sectionId: string) => void
+      setSectionWindowTarget: (noteId: string, sectionId: string) => void
       onNewNote: (cb: () => void) => () => void
       onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => () => void
       windowId: () => number

@@ -93,6 +93,12 @@ const api = {
 
   // Window controls
   openSticky: (noteId: string, sectionId: string) => ipcRenderer.send('window:open-sticky', noteId, sectionId),
+  // Editor-only window for one section (focuses an existing window already on it).
+  openSectionWindow: (noteId: string, sectionId: string) =>
+    ipcRenderer.send('window:open-section-window', noteId, sectionId),
+  // A section window reports the section it's on, so re-opening it focuses this window.
+  setSectionWindowTarget: (noteId: string, sectionId: string) =>
+    ipcRenderer.send('window:section-window-target', noteId, sectionId),
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),

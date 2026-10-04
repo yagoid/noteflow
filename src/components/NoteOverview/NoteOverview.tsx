@@ -25,6 +25,9 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const updateNote = useNotesStore((s) => s.updateNote)
+  // Section writes merge onto the LATEST sections (an open editor pane or window may be
+  // editing this note) — see patterns.md "Sync entre ventanas".
+  const mutateSections = useNotesStore((s) => s.mutateSections)
   const deleteNote = useNotesStore((s) => s.deleteNote)
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
 
@@ -117,7 +120,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
   const addSection = async () => {
     if (!note || locked) return
     const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '' }
-    await updateNote(note.id, { sections: [...note.sections, newSection] })
+    await mutateSections(note.id, (sections) => [...sections, newSection])
     openSection(newSection.id)
   }
 
@@ -194,29 +197,32 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
 
   const deleteSelectedSections = () => {
     setConfirm(null)
-    void updateNote(note.id, { sections: note.sections.filter((s) => !selectedIds.has(s.id)) })
+    const ids = new Set(selectedIds)
+    // Never leave the note without sections (delete the note instead).
+    void mutateSections(note.id, (sections) => {
+      const kept = sections.filter((s) => !ids.has(s.id))
+      return kept.length > 0 && kept.length < sections.length ? kept : null
+    })
     clearSelection()
   }
 
   const toggleSelectedAiHidden = () => {
     // If every selected section is already hidden → reveal all; otherwise hide all.
     const hide = !allHidden
-    void updateNote(note.id, {
-      sections: note.sections.map((s) =>
-        selectedIds.has(s.id) ? { ...s, aiHidden: hide } : s,
-      ),
-    })
+    const ids = new Set(selectedIds)
+    void mutateSections(note.id, (sections) =>
+      sections.map((s) => (ids.has(s.id) ? { ...s, aiHidden: hide } : s)),
+    )
   }
 
   const toggleSelectedRawMode = () => {
     // If every selected section is already raw → back to the editor; otherwise raw for all.
     // Only the flag moves here: the content stays exactly as it is.
     const raw = !allRaw
-    void updateNote(note.id, {
-      sections: note.sections.map((s) =>
-        selectedIds.has(s.id) ? { ...s, isRawMode: raw } : s,
-      ),
-    })
+    const ids = new Set(selectedIds)
+    void mutateSections(note.id, (sections) =>
+      sections.map((s) => (ids.has(s.id) ? { ...s, isRawMode: raw } : s)),
+    )
   }
 
   const deleteThisNote = () => {

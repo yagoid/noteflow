@@ -6,7 +6,7 @@ import type { Note } from '../../types'
 import {
   Search, Plus, FolderOpen, Keyboard, X,
   Clock, FolderPlus, Upload, Download, RefreshCw, Cloud, Zap, Settings,
-  Brain, MessageSquare, Sparkles, Link2, SlidersHorizontal,
+  Brain, MessageSquare, Sparkles, Link2, SlidersHorizontal, AppWindow,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
 import { useT } from '../../i18n/useT'
@@ -65,6 +65,12 @@ export function CommandPalette() {
   const createGroup = useGroupsStore((s) => s.createGroup)
   const setBrainView = useNotesStore((s) => s.setBrainView)
   const openAiPanel = useAiChatStore((s) => s.openAiPanel)
+  // Section of the active pane — what "Open section in new window" acts on (primitive
+  // selectors: the target object itself is rebuilt on every call).
+  const targetNoteId = useNotesStore((s) => s.getActiveSectionTarget()?.noteId ?? null)
+  const targetSectionId = useNotesStore((s) => s.getActiveSectionTarget()?.sectionId ?? null)
+  // Encrypted notes can't be opened in a section window (see NoteContextMenu).
+  const targetEncrypted = useNotesStore((s) => !!s.notes.find((n) => n.id === targetNoteId)?.encryption)
   const t = useT()
 
   const [query, setQuery] = useState('')
@@ -257,6 +263,20 @@ export function CommandPalette() {
       action: () => { window.noteflow.openNotesFolder(); setCommandPaletteOpen(false) },
       category: 'action',
     },
+    ...(targetNoteId && targetSectionId && !targetEncrypted
+      ? [{
+          id: 'open-section-window',
+          label: cmd.openSectionWindow.label,
+          description: cmd.openSectionWindow.description,
+          keywords: 'open section new window separate detach',
+          icon: <AppWindow size={ICON_SIZE} className={ICON_CLS} />,
+          action: () => {
+            window.noteflow.openSectionWindow(targetNoteId, targetSectionId)
+            setCommandPaletteOpen(false)
+          },
+          category: 'action' as const,
+        }]
+      : []),
     {
       id: 'shortcuts',
       label: cmd.shortcuts.label,

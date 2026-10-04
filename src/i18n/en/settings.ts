@@ -344,7 +344,7 @@ export const settings = {
     newTempNote: 'New temporary note (24h)',
     searchAllNotes: 'Search all notes',
     toggleSidebar: 'Toggle sidebar',
-    openSideBySide: 'Open note side by side',
+    openSideBySide: 'Open note side by side (on a section tag: that section in a new pane)',
     newSectionShortcut: 'New section',
     deleteSectionShortcut: 'Delete section',
     nextSection: 'Next section',

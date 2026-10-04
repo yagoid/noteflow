@@ -3,6 +3,8 @@ export const noteMenu = {
   lockNote: 'Bloquear nota',
   removeEncryption: 'Quitar cifrado',
   openAlongside: 'Abrir en paralelo',
+  openSectionAlongside: 'Abrir sección en paralelo',
+  openInNewWindow: 'Abrir en ventana nueva',
   duplicateNote: 'Duplicar nota',
   noteOverview: 'Vista de la nota',
 

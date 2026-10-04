@@ -4,6 +4,10 @@ export const noteMenu = {
   lockNote: 'Lock note',
   removeEncryption: 'Remove encryption',
   openAlongside: 'Open alongside',
+  // Section menu: a pane of its own for this section (works with the note already open).
+  openSectionAlongside: 'Open section alongside',
+  // Section menu: editor-only window for this section (see SectionWindowApp).
+  openInNewWindow: 'Open in New Window',
   duplicateNote: 'Duplicate note',
   noteOverview: 'Note overview',
 

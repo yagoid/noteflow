@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
-import { useNotesStore } from '../../stores/notesStore'
+import { useNotesStore, saveUiState } from '../../stores/notesStore'
 import { useTemplatesStore } from '../../stores/templatesStore'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
@@ -23,6 +23,7 @@ import { EncryptionModal } from '../EncryptionModal'
 import { colorChannels, getTagColor, normalizeTagColorKey, resolveGroupColor, TAG_COLOR_VARS } from '../../lib/tagColors'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 import { getRootZoom } from '../../stores/themeStore'
+import { moveSectionInList, restoreSectionInList } from '../../lib/sectionUtils'
 
 // ---------------------------------------------------------------------------
 // Confirm modal state type
@@ -35,15 +36,26 @@ interface ModalState {
   onConfirm: () => void
 }
 
+// Undo of a section delete re-inserts THE section where it was into the current list
+// (restoreSectionInList) instead of restoring a snapshot of the whole list, which would
+// revert edits made meanwhile by another pane/window of the same note.
 interface SectionUndoState {
   noteId: string
-  sectionName: string
-  previousSections: NoteSection[]
+  section: NoteSection
+  index: number
   previousActiveSectionId: string | null
 }
 
 interface NoteEditorProps {
   noteId?: string
+  /**
+   * Split-view pane this editor renders (see paneUtils). Several panes may show the same
+   * note; the pane id is what tells them apart — which one is active, which one a
+   * section request targets, and which section each one is on.
+   */
+  paneId?: string
+  /** Rendered in a section window (no main-window shell): hides actions that need it. */
+  standalone?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -105,10 +117,14 @@ function revealSectionTab(
 // ---------------------------------------------------------------------------
 // NoteEditor
 // ---------------------------------------------------------------------------
-export function NoteEditor({ noteId }: NoteEditorProps) {
+export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorProps) {
   const globalActiveNoteId = useNotesStore((s) => s.activeNoteId)
+  const activePaneId = useNotesStore((s) => s.activePaneId)
   const resolvedNoteId = noteId ?? globalActiveNoteId
-  const isPaneActive = Boolean(resolvedNoteId && globalActiveNoteId === resolvedNoteId)
+  // By pane when we have one: two panes of the same note must not both be "active".
+  const isPaneActive = paneId
+    ? activePaneId === paneId
+    : Boolean(resolvedNoteId && globalActiveNoteId === resolvedNoteId)
   const note = useNotesStore((s) => {
     const targetId = noteId ?? s.activeNoteId
     return s.notes.find((n) => n.id === targetId) ?? null
@@ -116,6 +132,9 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setNoteView = useNotesStore((s) => s.setNoteView)
   const updateNote = useNotesStore((s) => s.updateNote)
+  const updateSection = useNotesStore((s) => s.updateSection)
+  const mutateSections = useNotesStore((s) => s.mutateSections)
+  const focusPane = useNotesStore((s) => s.focusPane)
   const duplicateSection = useNotesStore((s) => s.duplicateSection)
   const deleteNote = useNotesStore((s) => s.deleteNote)
   const archiveNote = useNotesStore((s) => s.archiveNote)
@@ -142,6 +161,10 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   // Local title draft — decoupled from store to prevent cursor jump
   const [titleDraft, setTitleDraft] = useState(note?.title ?? '')
   const titleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // True while the draft holds keystrokes not yet written. Only a dirty draft may be
+  // written on blur or shield itself from store updates: a title edited in ANOTHER pane
+  // or window must replace this draft even if our input still has focus.
+  const titleDirtyRef = useRef(false)
 
   // Raw mode debounce ref (for sorting: save to store while typing)
   const rawDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -195,28 +218,34 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   // ── Reset when the active note changes ─────────────────────────────────────
   useEffect(() => {
     if (!note) return
+    const store = useNotesStore.getState()
+    const has = (id: string | null | undefined): id is string => !!id && note.sections.some((s) => s.id === id)
     const pending = pendingSectionRef.current
-    const initialSection = useNotesStore.getState().pendingInitialSectionId
+    const initialSection = store.pendingInitialSectionId
+    // The section this pane was on (or was opened on: "open section alongside", a
+    // section window) — what keeps two panes of the same note on their own sections.
+    const paneSection = paneId ? store.openPanes.find((p) => p.paneId === paneId)?.sectionId : undefined
     // Section the user was last on for this note — restores it when the editor
     // remounts (e.g. after closing the brain / overview views).
-    const remembered = useNotesStore.getState().activeSectionByNote[note.id]
+    const remembered = store.activeSectionByNote[note.id]
     const targetId =
-      (pending && note.sections.find((s) => s.id === pending))
-        ? pending
-        : (initialSection && note.sections.find((s) => s.id === initialSection))
-        ? initialSection
-        : (remembered && note.sections.find((s) => s.id === remembered))
-        ? remembered
+      has(pending) ? pending
+        : has(initialSection) ? initialSection
+        : has(paneSection) ? paneSection
+        : has(remembered) ? remembered
         : note.sections[0]?.id ?? null
     pendingSectionRef.current = null
-    if (initialSection) useNotesStore.setState({ pendingInitialSectionId: null })
+    // One-shot: consumed by the editor that uses it (or by the active one). With several
+    // panes mounting at once, a pane of another note must not swallow it.
+    if (initialSection && (has(initialSection) || isPaneActive)) useNotesStore.setState({ pendingInitialSectionId: null })
     setActiveSectionId(targetId)
     setRawContent(note.sections.find((s) => s.id === targetId)?.content ?? '')
     setTitleDraft(note.title)
+    titleDirtyRef.current = false
     setRenamingId(null)
     setSectionColorPickerId(null)
-    if (targetId && isPaneActive) window.noteflow.setUiState({ activeSectionId: targetId })
-  }, [note?.id, isPaneActive]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (targetId && isPaneActive) saveUiState({ activeSectionId: targetId })
+  }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     return () => {
@@ -233,9 +262,26 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   }, [])
 
   // ── Handle section request from sidebar ────────────────────────────────────
+  // `paneId` in the detail targets one pane. Without it, a single pane reacts: the active
+  // pane of that note, else its first pane, else (note not open) the active pane, which is
+  // the one setActiveNote is about to reuse for it. Otherwise two panes of the same note
+  // would both jump to the requested section.
   useEffect(() => {
     const handler = (e: Event) => {
-      const { noteId: targetNoteId, sectionId } = (e as CustomEvent<{ noteId: string; sectionId: string }>).detail
+      const { noteId: targetNoteId, sectionId, paneId: targetPaneId } =
+        (e as CustomEvent<{ noteId: string; sectionId: string; paneId?: string }>).detail
+      if (paneId) {
+        if (targetPaneId) {
+          if (targetPaneId !== paneId) return
+        } else {
+          const { openPanes, activePaneId: currentActive } = useNotesStore.getState()
+          const owners = openPanes.filter((p) => p.noteId === targetNoteId)
+          const handlerPane = owners.length > 0
+            ? (owners.find((p) => p.paneId === currentActive) ?? owners[0]).paneId
+            : currentActive
+          if (handlerPane !== paneId) return
+        }
+      }
       if (noteRef.current?.id === targetNoteId) {
         // Same note: switch section directly
         const section = noteRef.current.sections.find((s) => s.id === sectionId)
@@ -252,7 +298,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     }
     window.addEventListener('noteflow:request-section', handler)
     return () => window.removeEventListener('noteflow:request-section', handler)
-  }, [noteId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [noteId, paneId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-focus title field when new note is created ───────────────────────
   useEffect(() => {
@@ -294,8 +340,11 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   // store for the SAME note (e.g. AI profile generation) wouldn't refresh the draft,
   // and a later blur could write the stale draft back over it. Mirror the raw-buffer
   // guard: only re-sync when the title input isn't focused.
+  // Only a DIRTY focused draft is protected: an idle focused input (e.g. left focused in
+  // a window while the title is edited in another pane or window) must follow the store,
+  // or its later blur would write the stale title back.
   useEffect(() => {
-    if (titleRef.current === document.activeElement) return
+    if (titleRef.current === document.activeElement && titleDirtyRef.current) return
     if (note && note.title !== titleDraft) setTitleDraft(note.title)
   }, [note?.title]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -328,11 +377,29 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
 
   // Remember the active section per note so it survives editor remounts (brain /
   // overview views unmount the editor; this restores the section on the way back).
+  // Also recorded on the pane, so each pane of a split keeps ITS section, and persisted
+  // as the main window's active section when this is the active pane.
+  // `activeSectionPresent` is a dep on purpose: a section created/restored from here (add,
+  // duplicate, undo delete) becomes active BEFORE its queued write lands in the store, so
+  // the first run skips it — it must run again once the section exists, or the pane would
+  // keep pointing at the previous section.
+  const activeSectionPresent = !!activeSectionId && (note?.sections.some((s) => s.id === activeSectionId) ?? false)
   useEffect(() => {
-    if (note?.id && activeSectionId) {
-      useNotesStore.getState().rememberActiveSection(note.id, activeSectionId)
-    }
-  }, [note?.id, activeSectionId])
+    // Also skips the transitional commit of a note switch (section of the previous note).
+    if (!note || !activeSectionId || !activeSectionPresent) return
+    const store = useNotesStore.getState()
+    store.rememberActiveSection(note.id, activeSectionId)
+    if (paneId) store.setPaneSection(paneId, activeSectionId)
+    if (isPaneActive) saveUiState({ activeSectionId })
+  }, [note?.id, activeSectionId, paneId, activeSectionPresent]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Becoming the active pane (click into it, focus from the store…) persists the section
+  // it's on — the note is persisted by the store action that activated it.
+  useEffect(() => {
+    if (!isPaneActive) return
+    const current = activeSectionIdRef.current
+    if (current && noteRef.current?.sections.some((s) => s.id === current)) saveUiState({ activeSectionId: current })
+  }, [isPaneActive])
 
   // Auto-show unlock modal when switching to a locked encrypted note
   useEffect(() => {
@@ -393,14 +460,10 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
     rawDebounceRef.current = setTimeout(() => {
       if (activeSection && noteRef.current) {
-        updateNote(noteRef.current.id, {
-          sections: noteRef.current.sections.map((s) =>
-            s.id === activeSection.id ? { ...s, content: newValue } : s,
-          ),
-        })
+        updateSection(noteRef.current.id, activeSection.id, { content: newValue })
       }
     }, 600)
-  }, [rawContent, activeSection, updateNote]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rawContent, activeSection, updateSection]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Detect tab overflow to reposition + button ───────────────────────────
   useEffect(() => {
@@ -451,6 +514,26 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     })
     return () => cancelAnimationFrame(raf)
   }, [activeTabId, activeTabSettled, note?.id, sectionMembershipKey])
+
+  // ── The active section vanished (deleted from another pane/window, sync, CLI) ──
+  // Fall back to the first section explicitly instead of only rendering sections[0]:
+  // otherwise the raw buffer (rawContent) would still hold the deleted section's text
+  // and the next keystroke would write it into the fallback section.
+  // Only reacts to a membership change of the SAME note: on a note switch the reset
+  // effect owns activeSectionId, and a pending cross-note request pre-sets an id that
+  // legitimately isn't in this note yet.
+  const membershipNoteRef = useRef<string | null>(null)
+  useEffect(() => {
+    const sameNote = membershipNoteRef.current === (note?.id ?? null)
+    membershipNoteRef.current = note?.id ?? null
+    if (!sameNote || !note || !activeSectionId || pendingSectionRef.current) return
+    if (note.sections.some((s) => s.id === activeSectionId)) return
+    const fallback = note.sections[0]
+    if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
+    setActiveSectionId(fallback?.id ?? null)
+    setRawContent(fallback?.content ?? '')
+    setRenamingId(null)
+  }, [note?.id, sectionMembershipKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Edge auto-scroll while dragging a tab ─────────────────────────────────
   // Without it a tab can't be reordered onto an off-screen one: the native drag
@@ -558,7 +641,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       const nextSection = sections[nextIdx]
       setRawContent(nextSection.content ?? '')
       setActiveSectionId(nextSection.id)
-      window.noteflow.setUiState({ activeSectionId: nextSection.id })
+      saveUiState({ activeSectionId: nextSection.id })
     }
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
@@ -570,8 +653,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     const handleAddTab = () => {
       if (!noteRef.current) return
       const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '' }
-      const sections = [...noteRef.current.sections, newSection]
-      updateNote(noteRef.current.id, { sections })
+      void mutateSections(noteRef.current.id, (sections) => [...sections, newSection])
       setRawContent('')
       setActiveSectionId(newSection.id)
       setRenamingId(newSection.id)
@@ -600,14 +682,10 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       if (!section) return
       if (!section.isRawMode) {
         setRawContent(section.content)
-        updateNote(n.id, {
-          sections: n.sections.map((s) => s.id === sectionId ? { ...s, isRawMode: true } : s),
-        })
+        void updateSection(n.id, sectionId, { isRawMode: true })
       } else {
         if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
-        updateNote(n.id, {
-          sections: n.sections.map((s) => s.id === sectionId ? { ...s, content: rawContentRef.current, isRawMode: false } : s),
-        })
+        void updateSection(n.id, sectionId, { content: rawContentRef.current, isRawMode: false })
       }
     }
     const handleOpenStickySection = () => {
@@ -644,13 +722,19 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       window.removeEventListener('noteflow:open-sticky-all', handleOpenStickyAll)
       window.removeEventListener('noteflow:in-note-search', handleInNoteSearch)
     }
-  }, [updateNote, isPaneActive, t])
+  }, [updateSection, mutateSections, isPaneActive, t])
 
   // Close the in-note search bar when the active section or note changes.
   // The Editor is recreated (key-based) so matches and decorations are gone.
   useEffect(() => {
     setSearchOpen(false)
   }, [activeSectionId, note?.id, rawMode])
+
+  // Clicking into an inactive pane makes it the active one.
+  const activateThisPane = () => {
+    if (paneId) focusPane(paneId)
+    else if (resolvedNoteId) setActiveNote(resolvedNoteId)
+  }
 
   // ── Early exit ─────────────────────────────────────────────────────────────
   if (!note) {
@@ -667,25 +751,30 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
     setTitleDraft(val)
+    titleDirtyRef.current = true
     if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current)
     titleDebounceRef.current = setTimeout(() => {
+      titleDirtyRef.current = false
       updateNote(note.id, { title: val })
     }, 300)
   }
 
   const handleTitleBlur = () => {
     if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current)
+    // A clean draft has nothing of ours to save — writing it could revert a title
+    // changed meanwhile in another pane/window.
+    if (!titleDirtyRef.current) return
+    titleDirtyRef.current = false
     updateNote(note.id, { title: titleDraft })
   }
 
+  // Each Editor instance is keyed by section, so `activeSection` here is the section
+  // this content belongs to. updateSection merges onto the LATEST sections: a write from
+  // this pane never carries a stale copy of a section another pane/window is editing.
   const handleSectionContentChange = (content: string) => {
     if (!activeSection) return
     if (activeSection.content === content) return
-    updateNote(note.id, {
-      sections: note.sections.map((s) =>
-        s.id === activeSection.id ? { ...s, content } : s,
-      ),
-    })
+    void updateSection(note.id, activeSection.id, { content })
   }
 
   const handleCopyAllText = () => {
@@ -726,15 +815,8 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       return
     }
 
-    const sections = [...note.sections]
-    const draggedIdx = sections.findIndex(s => s.id === draggedSectionId)
-    const targetIdx = sections.findIndex(s => s.id === targetId)
-
-    if (draggedIdx !== -1 && targetIdx !== -1) {
-      const [moved] = sections.splice(draggedIdx, 1)
-      sections.splice(targetIdx, 0, moved)
-      updateNote(note.id, { sections })
-    }
+    const draggedId = draggedSectionId
+    void mutateSections(note.id, (sections) => moveSectionInList(sections, draggedId, targetId))
 
     setDraggedSectionId(null)
     setDragOverSectionId(null)
@@ -770,59 +852,39 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
 
     if (newRawMode) {
       setRawContent(activeSection.content)
-      updateNote(note.id, {
-        sections: note.sections.map((s) =>
-          s.id === activeSection.id ? { ...s, isRawMode: true } : s,
-        ),
-      })
+      void updateSection(note.id, activeSection.id, { isRawMode: true })
     } else {
       if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
-      updateNote(note.id, {
-        sections: note.sections.map((s) =>
-          s.id === activeSection.id ? { ...s, content: rawContent, isRawMode: false } : s,
-        ),
-      })
+      void updateSection(note.id, activeSection.id, { content: rawContent, isRawMode: false })
     }
   }
 
   const handleToggleAiHidden = () => {
     if (!activeSection) return
-    const newHidden = !activeSection.aiHidden
-    updateNote(note.id, {
-      sections: note.sections.map((s) =>
-        s.id === activeSection.id ? { ...s, aiHidden: newHidden } : s,
-      ),
-    })
+    void updateSection(note.id, activeSection.id, { aiHidden: !activeSection.aiHidden })
   }
 
   const handleSwitchSection = (sectionId: string) => {
     if (sectionId === activeSectionId) return
 
-    if (resolvedNoteId && !isPaneActive) {
-      setActiveNote(resolvedNoteId)
-    }
+    if (!isPaneActive) activateThisPane()
 
     setSectionColorPickerId(null)
 
     if (rawMode && activeSection) {
       if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
-      updateNote(note.id, {
-        sections: note.sections.map((s) =>
-          s.id === activeSection.id ? { ...s, content: rawContent } : s,
-        ),
-      })
+      void updateSection(note.id, activeSection.id, { content: rawContent })
     }
 
     const newContent = note.sections.find((s) => s.id === sectionId)?.content ?? ''
     setRawContent(newContent)
     setActiveSectionId(sectionId)
-    if (isPaneActive) window.noteflow.setUiState({ activeSectionId: sectionId })
+    if (isPaneActive) saveUiState({ activeSectionId: sectionId })
   }
 
   const handleAddSection = () => {
     const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '' }
-    const sections = [...note.sections, newSection]
-    updateNote(note.id, { sections })
+    void mutateSections(note.id, (sections) => [...sections, newSection])
     setRawContent('')
     setActiveSectionId(newSection.id)
     setRenamingId(newSection.id)
@@ -838,18 +900,13 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     if (!currentNote || !source) return
     if (rawMode && activeSection) {
       if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
-      const pendingRaw = rawContentRef.current
-      await updateNote(currentNote.id, {
-        sections: currentNote.sections.map((s) =>
-          s.id === activeSection.id ? { ...s, content: pendingRaw } : s,
-        ),
-      })
+      await updateSection(currentNote.id, activeSection.id, { content: rawContentRef.current })
     }
     const copy = await duplicateSection(currentNote.id, sectionId, tf(t.common.sectionCopyName, { name: source.name }))
     if (!copy) return
     setRawContent(copy.content)
     setActiveSectionId(copy.id)
-    if (isPaneActive) window.noteflow.setUiState({ activeSectionId: copy.id })
+    if (isPaneActive) saveUiState({ activeSectionId: copy.id })
   }
 
   const deleteSectionWithUndo = (sectionId: string) => {
@@ -859,7 +916,6 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     const removeIndex = currentNote.sections.findIndex((s) => s.id === sectionId)
     if (removeIndex === -1) return
 
-    const previousSections = currentNote.sections.map((section) => ({ ...section }))
     const nextSections = currentNote.sections.filter((s) => s.id !== sectionId)
     const removedSection = currentNote.sections[removeIndex]
     const previousActiveSectionId = activeSectionIdRef.current
@@ -868,13 +924,17 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       ? nextSections[Math.min(removeIndex, nextSections.length - 1)] ?? nextSections[0]
       : nextSections.find((s) => s.id === previousActiveSectionId) ?? nextSections[0]
 
-    void updateNote(currentNote.id, { sections: nextSections })
+    // Filter the LATEST list (never write back our snapshot) and keep at least one section.
+    void mutateSections(currentNote.id, (sections) => {
+      if (sections.length <= 1 || !sections.some((s) => s.id === sectionId)) return null
+      return sections.filter((s) => s.id !== sectionId)
+    })
 
     if (previousActiveSectionId === sectionId) {
       const nextActiveId = fallbackSection?.id ?? null
       setActiveSectionId(nextActiveId)
       setRawContent(fallbackSection?.content ?? '')
-      if (nextActiveId && isPaneActive) window.noteflow.setUiState({ activeSectionId: nextActiveId })
+      if (nextActiveId && isPaneActive) saveUiState({ activeSectionId: nextActiveId })
     }
 
     if (sectionUndoTimerRef.current) {
@@ -883,8 +943,8 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
 
     setSectionUndo({
       noteId: currentNote.id,
-      sectionName: removedSection.name,
-      previousSections,
+      section: { ...removedSection },
+      index: removeIndex,
       previousActiveSectionId,
     })
 
@@ -907,16 +967,22 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       sectionUndoTimerRef.current = null
     }
 
-    const restoredSections = sectionUndo.previousSections.map((section) => ({ ...section }))
-    void updateNote(currentNote.id, { sections: restoredSections })
+    const { section, index, previousActiveSectionId } = sectionUndo
+    void mutateSections(currentNote.id, (sections) => restoreSectionInList(sections, section, index))
 
-    const restoreActiveId = sectionUndo.previousActiveSectionId && restoredSections.some((s) => s.id === sectionUndo.previousActiveSectionId)
-      ? sectionUndo.previousActiveSectionId
-      : restoredSections[0]?.id ?? null
+    // The restored section is the deleted one; any other previously active section is
+    // still in the current list (or, if it vanished meanwhile, fall back to the restored one).
+    const restoreActiveId =
+      previousActiveSectionId === section.id || currentNote.sections.some((s) => s.id === previousActiveSectionId)
+        ? previousActiveSectionId
+        : section.id
+    const restoreContent = restoreActiveId === section.id
+      ? section.content
+      : currentNote.sections.find((s) => s.id === restoreActiveId)?.content ?? ''
 
     setActiveSectionId(restoreActiveId)
-    setRawContent(restoredSections.find((s) => s.id === restoreActiveId)?.content ?? '')
-    if (restoreActiveId && isPaneActive) window.noteflow.setUiState({ activeSectionId: restoreActiveId })
+    setRawContent(restoreContent)
+    if (restoreActiveId && isPaneActive) saveUiState({ activeSectionId: restoreActiveId })
     setSectionUndo(null)
   }
 
@@ -940,13 +1006,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const handleCommitRename = () => {
     if (!renamingId) return
     const trimmed = renameValue.trim()
-    if (trimmed) {
-      updateNote(note.id, {
-        sections: note.sections.map((s) =>
-          s.id === renamingId ? { ...s, name: trimmed } : s,
-        ),
-      })
-    }
+    if (trimmed) void updateSection(note.id, renamingId, { name: trimmed })
     setRenamingId(null)
     // The editor isn't remounted on commit (its key is unchanged), so move focus
     // into it explicitly for a smooth "+ → name it → start writing" flow.
@@ -996,11 +1056,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
     rawDebounceRef.current = setTimeout(() => {
       if (activeSection && noteRef.current) {
-        updateNote(noteRef.current.id, {
-          sections: noteRef.current.sections.map((s) =>
-            s.id === activeSection.id ? { ...s, content: newContent } : s,
-          ),
-        })
+        void updateSection(noteRef.current.id, activeSection.id, { content: newContent })
       }
     }, 600)
   }
@@ -1045,22 +1101,21 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const handleRawBlur = () => {
     if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
     if (activeSection && activeSection.content !== rawContent) {
-      updateNote(note.id, {
-        sections: note.sections.map((s) =>
-          s.id === activeSection.id ? { ...s, content: rawContent } : s,
-        ),
-      })
+      void updateSection(note.id, activeSection.id, { content: rawContent })
     }
   }
 
   // ── Encrypted note — locked view ───────────────────────────────────────────
-  if (note.encryption && !sessionPasswords[note.id]) {
+  // Also when a session password exists but the sections aren't decrypted in memory
+  // (defence: never show an "unlocked but empty" encrypted note whose edits would wipe
+  // it — the store refuses those writes anyway). Unlocking again decrypts it.
+  if (note.encryption && (!sessionPasswords[note.id] || note.sections.length === 0)) {
     return (
       <>
         <div
           className="flex flex-col h-full"
           onMouseDownCapture={() => {
-            if (resolvedNoteId && !isPaneActive) setActiveNote(resolvedNoteId)
+            if (!isPaneActive) activateThisPane()
           }}
         >
           <div className="px-4 pt-3 pb-2 border-b border-border flex-shrink-0">
@@ -1176,7 +1231,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       <div
         className="flex flex-col h-full"
         onMouseDownCapture={() => {
-          if (resolvedNoteId && !isPaneActive) setActiveNote(resolvedNoteId)
+          if (!isPaneActive) activateThisPane()
         }}
         onKeyDown={(e) => {
           e.stopPropagation()
@@ -1325,13 +1380,15 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           <div className="self-center w-px h-4 bg-border flex-shrink-0 mx-1.5" />
 
           <div className="flex items-center gap-1 flex-shrink-0">
-            <button
-              onClick={() => setNoteView(note.id)}
-              title={t.editor.noteOverview}
-              className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
-            >
-              <LayoutGrid size={13} />
-            </button>
+            {!standalone && (
+              <button
+                onClick={() => setNoteView(note.id)}
+                title={t.editor.noteOverview}
+                className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
+              >
+                <LayoutGrid size={13} />
+              </button>
+            )}
             <button
               onClick={() => updateNote(note.id, { favorited: !note.favorited })}
               title={note.favorited ? t.common.removeFromFavorites : t.common.addToFavorites}
@@ -1384,7 +1441,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                       {t.editor.saveAsTemplate}
                     </button>
                   )}
-                  {!(note.encryption && !sessionPasswords[note.id]) && (
+                  {!standalone && !(note.encryption && !sessionPasswords[note.id]) && (
                     <button
                       onClick={() => {
                         setSectionMenuOpen(false)
@@ -1471,7 +1528,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         {sectionUndo && sectionUndo.noteId === note.id && (
           <div className="mx-3 mt-2 px-3 py-2 rounded border border-amber-300/35 bg-amber-300/10 flex items-center justify-between gap-2">
             <span className="text-[11px] font-mono text-text-muted min-w-0 truncate">
-              {tf(t.editor.sectionDeleted, { name: sectionUndo.sectionName })}
+              {tf(t.editor.sectionDeleted, { name: sectionUndo.section.name })}
             </span>
             <button
               onClick={undoSectionDelete}

@@ -65,10 +65,13 @@ noteflow/
 │   ├── linux-postinstall.sh    # deb: setuid chrome-sandbox + symlink CLI en /usr/local/bin
 │   └── linux-postremove.sh     # deb: limpia symlink CLI y statoverride del sandbox
 ├── src/
-│   ├── App.tsx           # Raíz React, carga notas, atajos globales, routing sticky
+│   ├── App.tsx           # Raíz React: router por hash (#sticky / #section-window / principal),
+│   │                    #   fija el rol de ventana del store; carga notas, atajos globales, paneles split
 │   ├── main.tsx          # Entry point renderer, init de tema
 │   ├── stores/
-│   │   ├── notesStore.ts             # Estado de notas (Zustand) — loadNotes (batch), CRUD
+│   │   ├── notesStore.ts             # Estado de notas (Zustand) — loadNotes (batch), CRUD, paneles del
+│   │   │                             #   split (openPanes/activePaneId), escrituras en cola por nota
+│   │   │                             #   (updateSection/mutateSections), rol de ventana (main/sticky/section)
 │   │   ├── groupsStore.ts            # Grupos — persistidos en groups.json (IPC)
 │   │   ├── templatesStore.ts         # Plantillas de nota — persistidas en templates.json (IPC)
 │   │   ├── themeStore.ts             # Tema/fuente/acento/colores editor — SINCRONIZADO en ui-settings.json (IPC sendSync); escala de UI en localStorage (por dispositivo)
@@ -155,12 +158,18 @@ noteflow/
 │   │   ├── ConfirmModal.tsx            # Modal de confirmación genérico
 │   │   ├── EncryptionModal.tsx         # Modal cifrar/descifrar notas
 │   │   ├── ExportImportModal.tsx       # Modal exportar/importar notas (flujo, lanzado desde DataPanel)
-│   │   └── StickyApp.tsx               # Ventana sticky flotante (fold/unfold)
+│   │   ├── StickyApp.tsx               # Ventana sticky flotante (fold/unfold)
+│   │   └── SectionWindowApp.tsx        # Ventana "Open in new window": solo-editor de una nota/sección
 │   ├── lib/
 │   │   ├── noteUtils.ts          # parseNoteFolder, serializeNoteFolder, buildNoteWritePayload,
 │   │   │                         #   noteFingerprint, noteDirname, extractTags, default title…
 │   │   ├── cryptoUtils.ts        # Cifrado AES-256-GCM + PBKDF2 (WebCrypto)
 │   │   ├── alarmUtils.ts         # Recolección de alarmas/deadlines para programarlas
+│   │   ├── paneUtils.ts          # Modelo puro de paneles del split (abrir/cerrar/reordenar/enfocar) — testeado
+│   │   ├── keyedQueue.ts         # Cola serial por clave (escrituras de una nota en orden) — testeada
+│   │   ├── encryptedSession.ts   # Re-descifrado con la contraseña de sesión tras recargar + guarda
+│   │   │                         #   anti-borrado de escrituras de notas cifradas — testeado
+│   │   ├── sectionUtils.ts       # Operaciones puras sobre la lista de secciones (patch/move/duplicate/restore)
 │   │   ├── searchUtils.ts        # Helpers de búsqueda (normalización, matching)
 │   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 vars del tema o hex libre);
 │   │   │                         #   normalizeGroupColor (validación) y colorChannels (TODO render de
@@ -235,9 +244,11 @@ Renderer (React)
 | `notes:parse-external-import` | handle | Importa de otras apps (`'md-folder'\|'notion'\|'keep'`): solo IO en main, devuelve `ExternalNote[]` normalizado; la conversión html→md y grupos son del renderer (detalle en `patterns.md` → Importación) |
 | `notes:write-imported` | handle | Escribe las notas importadas (filenames saneados) |
 | `alarms:schedule` | on | Registra el set de alarmas en el motor del main; dispara las vencidas |
-| `window:minimize` / `maximize` / `close` | on | Controles de ventana (frameless) |
+| `window:minimize` / `maximize` / `close` | on | Controles de ventana (frameless). Actúan sobre la ventana EMISORA; `close` oculta la principal (tray) y destruye cualquier otra (sticky, ventana de sección) |
 | `window:get-id` | on (sync) | webContents id de la ventana (para filtrar broadcasts) |
 | `window:open-sticky` | on | Abre ventana sticky flotante |
+| `window:open-section-window` | on | `(noteId, sectionId)` → abre una ventana solo-editor (`#section-window?…`, `SectionWindowApp`); si una ventana de sección ya muestra esa nota+sección, la enfoca |
+| `window:section-window-target` | on | La ventana de sección informa de la nota+sección que muestra (para el "enfocar si ya existe" del canal anterior y la recarga tras crash) |
 | `window:set-size` | on | Redimensiona la ventana (usado por sticky) |
 | `window:fold-to-corner` / `window:unfold` | on | Anima el plegado/desplegado de stickies |
 | `sync:get-status` | handle | Estado del sync **GitHub** (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`) |

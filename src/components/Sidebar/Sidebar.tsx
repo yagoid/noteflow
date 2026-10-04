@@ -816,6 +816,14 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       },
       sectionClick: (e, note, sectionId) => {
         e.stopPropagation()
+        // Ctrl/Cmd+click opens THIS section in a pane of its own, even when the note is
+        // already open in another pane (two sections of one note side by side); a pane
+        // already on exactly this section is just focused. No request-section event here:
+        // it would make the existing pane of the note jump to the section too.
+        if (e.ctrlKey || e.metaKey) {
+          openNoteInSplit(note.id, sectionId)
+          return
+        }
         // The synchronous request-section event serves the case where the target editor is
         // already mounted and stays mounted (e.g. clicking another section of the single
         // open note): it jumps there immediately. When the click remounts the editor the
@@ -824,19 +832,15 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         window.dispatchEvent(new CustomEvent('noteflow:request-section', {
           detail: { noteId: note.id, sectionId },
         }))
-        if (e.ctrlKey || e.metaKey) {
-          openNoteInSplit(note.id)
-          return
-        }
         // A normal click collapses the layout to this single note. The editor remounts when
         // the group / note overview or brain view is open (editor unmounted), OR when a split
-        // with more than one open note is collapsed to one — in both cases the synchronous
+        // with more than one open pane is collapsed to one — in both cases the synchronous
         // event above never reaches the freshly mounted editor. Stash the target section (the
         // editor reads it on mount, prioritised over the last-visited one) and re-emit once
         // it's listening (next macrotask) — same as GroupOverview / BrainView.
-        const { groupViewId, noteViewId: nv, brainViewOpen, openNoteIds } = useNotesStore.getState()
+        const { groupViewId, noteViewId: nv, brainViewOpen, openPanes } = useNotesStore.getState()
         const editorUnmounted = groupViewId !== null || nv !== null || brainViewOpen
-        const willRemount = editorUnmounted || openNoteIds.length > 1
+        const willRemount = editorUnmounted || openPanes.length > 1
         if (willRemount) {
           useNotesStore.setState({ pendingInitialSectionId: sectionId })
         }

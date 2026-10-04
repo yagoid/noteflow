@@ -469,6 +469,54 @@ hardcodeados, o se rompe en alguno de los 14 temas.
 Al escribir/borrar una nota, main hace broadcast (`notes-updated`) a todas las BrowserWindows.
 El renderer filtra eventos de su propia ventana por `senderId`/`windowId` para evitar races.
 
+**Varios editores de la misma nota (paneles del split, ventanas de sección, stickies) — no pisarse.**
+Cada editor guardaba antes `updateNote(id, { sections })` con la lista COMPLETA construida desde su
+snapshot de render: con dos editores de la misma nota, el último en escribir reescribía la sección
+del otro con su copia vieja. Invariantes actuales (`notesStore.ts`):
+- **Cola por nota** (`lib/keyedQueue.ts`): toda escritura de una nota (`updateNote`, `mutateSections`,
+  `updateSection`, `duplicateSection`, archivar, hacer permanente, cifrar) pasa por una cola serial
+  con clave = id de nota, y lee la nota del store **al ejecutarse**, no al llamarse. Sin cola, dos
+  escrituras cercanas partían del mismo snapshot (el `set` del store ocurre tras el `await` del disco).
+- **Guardar solo lo propio:** los editores (`NoteEditor`, `StickyApp`) usan
+  `updateSection(noteId, sectionId, patch)` (contenido, nombre, raw, aiHidden) y
+  `mutateSections(noteId, fn)` para cambios estructurales (añadir, borrar, reordenar, deshacer borrado),
+  que aplican el cambio sobre la lista MÁS RECIENTE. `updateSection` sobre una sección que ya no
+  existe es no-op (nunca la resucita); el "deshacer" de un borrado re-inserta esa sección en su índice
+  en vez de restaurar un snapshot de toda la lista. No volver a construir `sections` completas desde un
+  snapshot de render para guardar.
+- **Entre procesos** (ventana de sección/sticky ↔ principal) cada renderer tiene su store; lo que evita
+  pisarse es el formato v2 (un fichero por sección: el diff de `buildNoteWritePayload` solo reescribe
+  las secciones que cambian respecto al store) + lo anterior. Si un `syncNote` (escritura de OTRA
+  ventana) reemplaza la nota mientras nuestra escritura está en vuelo, al terminar se detecta
+  (`current !== note`) y se relee del disco (`syncNote`) para no ocultar en memoria el cambio ajeno.
+  Simétrico en `syncNote`: si la nota del store cambió durante sus `await` (lectura del disco o
+  re-descifrado) por una escritura local, NO la pisa con su copia vieja y relee **una** vez (la
+  escritura local llega al disco antes que al store); si vuelve a cambiar, se salta.
+- **Notas cifradas — invariante:** NO se editan entre ventanas. El desbloqueo es por proceso (la
+  contraseña de sesión vive en `sessionPasswords` del store de cada ventana) y cada escritura
+  re-cifra el blob ENTERO desde las secciones en memoria de quien escribe. Por eso: la ventana de
+  sección no se ofrece para notas cifradas (menú de sección y paleta la ocultan) y, si aun así le
+  llega una (hash viejo, o la nota se cifró con la ventana abierta), la muestra en **solo lectura**
+  (descifrado local, sin contraseña en el store), igual que la sticky. Los paneles del split sí
+  pueden editarla: comparten proceso, contraseña y cola.
+- **Recarga con contraseña en sesión:** `loadNotes` y `syncNote` parsean del disco la nota cifrada
+  con `sections: []`. Si hay contraseña de sesión se **re-descifra** con ella
+  (`lib/encryptedSession.ts` → `redecryptWithSession`); si falla, se quita la contraseña (vuelve a
+  bloqueada). Defensa adicional: `applyNoteUpdate`/`mutateSections` (y por tanto `updateSection`)
+  **rechazan** escribir secciones de una nota cifrada sin secciones descifradas en memoria o que la
+  dejaría sin secciones (`isUnsafeEncryptedSectionsWrite`, no-op + `console.warn`) — re-cifrar desde
+  `[]` + la sección editada borraría el resto; y `NoteEditor` muestra la vista bloqueada si la nota
+  cifrada tiene contraseña pero 0 secciones (nunca "desbloqueada pero vacía").
+- **Título:** el borrador del título solo se protege de actualizaciones del store si está *sucio*
+  (`titleDirtyRef`) y el blur solo escribe si está sucio — un input enfocado pero inactivo (p. ej. en
+  otra ventana) sigue el título editado en otro panel y no lo revierte al perder el foco.
+- **Riesgo residual asumido:** cambios estructurales simultáneos en dos procesos (p. ej. borrar una
+  sección en una ventana mientras la otra escribe `note.md` con la lista vieja en el mismo instante)
+  pueden dejar `note.md` con una sección cuyo fichero ya no existe; mismo riesgo que ya había con stickies.
+- **Alarmas:** solo la ventana principal (y las stickies, por histórico) llaman a `scheduleAlarms`;
+  la ventana de sección no. Para que un deadline creado en una ventana de sección se programe, el
+  `syncNote` de la ventana principal re-registra el set completo cuando cambian las alarmas de esa nota.
+
 ### fs.watch de cambios externos
 main observa el dir de notas con `fs.watch` (debounce 150ms) para detectar cambios del CLI o
 de la sincronización desde otro dispositivo. Los writes propios se marcan en
@@ -499,6 +547,61 @@ porque el DWM ignora `border-radius` al perder foco. Plegado/desplegado animado 
 componerse bien tras las actualizaciones de Windows 11 (24H2/25H2) y la ventana quedaba casi
 invisible; como en Windows el redondeo ya lo aporta `setShape()` (recorte de región DWM), la
 transparencia era redundante y se desactiva. Ver el comentario en `createStickyWindow()`.
+
+### Vista dividida por paneles (`lib/paneUtils.ts` + `notesStore`)
+El área del editor muestra uno o más **paneles** `{paneId, noteId, sectionId?}` (`openPanes` +
+`activePaneId`; `activeNoteId` = nota del panel activo y se deriva en cada cambio de layout con
+`layoutState()` — mucho código sigue leyendo `activeNoteId`). La misma nota puede estar en varios
+paneles, cada uno en su sección. La lógica de layout es pura y testeada (`tests/lib/paneUtils.test.ts`).
+- **Indexado por `paneId`**, no por nota: `key`, `data-pane-id`, anchos (`paneWidths`), reordenado
+  (`reorderPane`) y el panel activo (anillo + `isPaneActive` de `NoteEditor`, que decide quién atiende
+  `Ctrl+T/W/M/F/S/Tab`).
+- **`sectionId` del panel = sección que muestra AHORA** (`NoteEditor` llama a `setPaneSection` al
+  cambiar de sección, junto a `rememberActiveSection`). Al montar, el editor elige: request pendiente
+  → `pendingInitialSectionId` → sección del panel → recordada por nota → primera.
+- **Abrir:** `openNoteInSplit(noteId, sectionId?)`. Con sección (Ctrl+click en tag de sección, "Open
+  section alongside") → panel NUEVO aunque la nota ya esté abierta; si existe uno exactamente en esa
+  nota+sección, lo enfoca. Sin sección (Ctrl+click en nota, "Open alongside", soltar una nota en el
+  editor) → si la nota ya está en un panel lo enfoca (abrir la nota entera dos veces solo duplicaría
+  la vista). Cierra las vistas a pantalla completa para que el panel se vea.
+- **`setActiveNote(id)`** enfoca el panel de esa nota si existe (el split se mantiene) o colapsa a un
+  único panel **reutilizando el `paneId` activo** (el editor no se remonta al cambiar de nota, como el
+  editor único de antes). `setOpenNoteIds(ids)` (legacy, lo usan overviews/cerebro con `[id]`) reutiliza
+  paneles por nota. Hacer clic en un panel inactivo llama a `focusPane(paneId)`.
+- **`noteflow:request-section`** acepta `paneId` opcional en el detail. Sin él lo atiende UN solo
+  panel: el activo de esa nota, si no el primero de esa nota, y si la nota no está abierta el activo
+  (el que `setActiveNote` va a reutilizar). Antes lo atendían todos los editores montados.
+- **Borrado de nota / sección:** `removeNotesFromLayout` quita los paneles de la nota y conserva los
+  demás (antes un borrado metía una nota "fallback" en el split). Si otro panel/ventana borra la sección
+  activa de un panel, `NoteEditor` cae explícitamente a la primera sección y resetea el buffer raw —
+  si no, el siguiente tecleo escribiría el texto de la sección borrada en la de fallback.
+- `loadNotes` en una recarga completa (pull de sync, otra ventana) **conserva** los paneles abiertos
+  y solo poda los de notas desaparecidas (antes colapsaba el split en cada recarga). La restauración
+  al arrancar (`uiState.activeNoteId/activeSectionId`) crea el panel inicial con esa sección.
+- Guardado sin pisarse entre paneles: ver "Sync entre ventanas" (cola por nota + `updateSection`).
+
+### Ventanas de sección ("Open in new window")
+BrowserWindows extra (`createSectionWindow()` en main) que cargan la app con
+`#section-window?noteId=…&sectionId=…` → `SectionWindowApp`: barra de título propia (Nota · Sección,
+minimizar/maximizar/cerrar vía IPC — `window:maximize` actúa sobre la ventana emisora) + `NoteEditor`
+(`standalone`: oculta "note overview" y "export", que necesitan el shell principal) en un único panel
+fijo. Normal (no `alwaysOnTop`), redimensionable, frameless; `close` la destruye. Se abren desde el
+menú contextual de sección y la paleta (sección del panel activo, `getActiveSectionTarget()`); a
+propósito NO desde el menú ⋯ del editor, y nunca para notas cifradas (ver "Sync entre ventanas":
+si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
+- **Una por nota+sección:** main guarda `sectionWindows: Map<BrowserWindow, {noteId, sectionId}>`; el
+  renderer informa de la sección actual (`window:section-window-target`) y la refleja en el hash
+  (`history.replaceState`), así reabrir la misma sección enfoca la ventana y una recarga vuelve a ella.
+- **Rol de ventana:** `App` fija `setWindowRole('section')` antes del primer render. En ese rol el store
+  no lee/persiste `uiState` (`saveUiState` no-op), no programa alarmas, no poda notas vacías y, si la
+  nota desaparece, el panel se vacía (estado "note not found") en vez de saltar a otra nota. No monta
+  `TitleBar` (comprobación de updates, botón de sync) ni los listeners de IA. Sync GitHub/Cloud,
+  indexado IA, auto-update y motor de alarmas viven en main y no dependen de la ventana.
+- La ventana **sigue a su panel** (no al hash): un clic en una pill de relación hacia otra nota navega
+  dentro de la propia ventana (con un `noteId` fijo el editor quedaría en una sección de otra nota).
+- Recibe `notes-updated` como cualquier ventana (filtrado por `windowId`) y carga grupos, plantillas
+  (necesarias: "Save as template" reescribe `templates.json` entero) y colores de sección. Tiene su
+  propio handler de atajos (`Ctrl+T/W/M/F/S/G`); no hay paleta ni `Ctrl+N`.
 
 
 ### Motor de alarmas y notas temporales (en main)

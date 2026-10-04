@@ -133,8 +133,31 @@ Iconos del TitleBar:
 ## Vista en paralelo (split)
 
 - `Ctrl+Click` sobre una nota, o "Open alongside" en el menú contextual, abre una **segunda nota
-  lado a lado** en el área del editor.
+  lado a lado** en el área del editor. Si la nota ya está en un panel, lo enfoca (no la duplica).
+- **Dos secciones de la MISMA nota a la vez:** `Ctrl/Cmd+Click` sobre un **tag de sección** (sidebar)
+  o "Open section alongside" en el menú contextual de la sección abre un **panel nuevo en esa
+  sección**, aunque la nota ya esté abierta en otro panel. Si ya hay un panel exactamente en esa
+  nota+sección, lo enfoca. Cada panel tiene sus pestañas y recuerda su propia sección; se editan a
+  la vez sin pisarse (cada guardado solo toca la sección que edita ese panel).
+- Con varios paneles de la misma nota, la cabecera del panel muestra **"Nota · Sección"**.
+- Paneles reordenables (asa "Drag"), redimensionables por el borde y cerrables (✕). Borrar en un
+  panel la sección que otro tiene abierta hace que ese otro caiga a la primera sección.
 - Permite comparar o trabajar con dos notas a la vez sin abrir ventanas sticky.
+
+## Abrir sección en otra ventana
+
+- Menú contextual de una **sección** → "Open in New Window", o paleta de comandos → "Open section in
+  new window" (actúa sobre la sección del panel activo). No está en el menú ⋯ del editor.
+- **No disponible para notas cifradas** (se edita en la ventana principal). Si una ventana ya abierta
+  muestra una nota que se cifra después, pasa a solo lectura (pide la contraseña para verla).
+- Abre una ventana **solo-editor** (sin sidebar): barra de título propia con "Nota · Sección" y
+  minimizar/maximizar/cerrar; normal (NO siempre encima), redimensionable. Muestra el editor completo
+  de la nota (pestañas incluidas) abierto en esa sección; puedes cambiar de sección dentro.
+- Se pueden abrir varias. Reabrir la sección que una ventana ya muestra la enfoca en vez de duplicarla.
+- Cerrarla la destruye (no va al tray). Los cambios se sincronizan en vivo en ambos sentidos con la
+  ventana principal (y con otras ventanas/stickies).
+- Atajos dentro: `Ctrl+T/W` (sección nueva/borrar), `Ctrl+M` (raw), `Ctrl+F` (buscar), `Ctrl+S/G`
+  (sticky), `Ctrl+Tab`. No tiene paleta ni `Ctrl+N`.
 
 ---
 
@@ -385,8 +408,9 @@ navegar directamente a esa sección.
 > **Dos menús contextuales (mismo componente `NoteContextMenu`, distinto contenido según el
 > objetivo):** el click derecho **sobre la nota** (en zona sin sección) muestra las acciones de
 > nivel-nota (favorito, archivar, abrir en paralelo, duplicar, mover a grupo/carpeta, etc.); el click
-> derecho **sobre un tag de sección** muestra solo lo propio de la sección (color de sección, ocultar
-> a la IA, abrir como sticky) más unas pocas comunes (note overview, borrar nota). El componente
+> derecho **sobre un tag de sección** muestra solo lo propio de la sección (abrir la sección en
+> paralelo, color de sección, ocultar a la IA, abrir como sticky, abrir en ventana nueva) más unas
+> pocas comunes (note overview, borrar nota). El componente
 > distingue por el campo `sectionId` del request (`null` = nota).
 
 ---
@@ -796,11 +820,13 @@ las de sección:
   🔒 Unlock / Lock / Remove encryption   (solo si está cifrada)
   ⊞ Note overview
   ─────────────
+  ▥ Open section alongside                ← panel nuevo en esa sección (aunque la nota ya esté abierta)
   👁 Hide from AI / Show to AI            (no en notas cifradas)
   ⧉ Duplicate section                     ← copia a la derecha y navega a ella
   🎨 Section color
   ─────────────
   ⧉ Open as Sticky Note                   ← abre esa sección
+  ⧉ Open in New Window                    ← ventana solo-editor en esa sección (no en notas cifradas)
   ─────────────
   🗑 Delete section  (o Delete note si es la única sección)   ← rojo
 ```
@@ -1077,7 +1103,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+P` | Command palette |
 | `Ctrl+Shift+F` | Buscar en todas las notas (sidebar) |
 | `Ctrl+'` | Toggle sidebar |
-| `Ctrl+Click` | Abrir nota en paralelo |
+| `Ctrl+Click` | Abrir nota en paralelo (sobre un tag de sección: esa sección en un panel nuevo) |
 
 ### Secciones
 | Atajo | Acción |

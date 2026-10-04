@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Archive, Star, StarOff, Trash2, Lock, Unlock, Copy, CopyPlus, Columns2, Share,
-  ExternalLink, FolderPlus, FolderMinus, Folder, ChevronRight, LayoutGrid, Eye, EyeOff,
+  ExternalLink, FolderPlus, FolderMinus, Folder, ChevronRight, LayoutGrid, Eye, EyeOff, AppWindow,
 } from 'lucide-react'
 import { useNotesStore } from '../stores/notesStore'
 import { useGroupsStore } from '../stores/groupsStore'
@@ -43,7 +43,7 @@ export function NoteContextMenu({ request, onClose }: NoteContextMenuProps) {
   const t = useT()
   const rawNotes = useNotesStore((s) => s.notes)
   const deleteNote = useNotesStore((s) => s.deleteNote)
-  const updateNote = useNotesStore((s) => s.updateNote)
+  const mutateSections = useNotesStore((s) => s.mutateSections)
   const encryptNote = useNotesStore((s) => s.encryptNote)
   const unlockNote = useNotesStore((s) => s.unlockNote)
   const removeNoteEncryption = useNotesStore((s) => s.removeNoteEncryption)
@@ -92,7 +92,12 @@ export function NoteContextMenu({ request, onClose }: NoteContextMenuProps) {
       danger: true,
       onConfirm: () => {
         setModal(null)
-        void updateNote(note.id, { sections: note.sections.filter((s) => s.id !== sectionId) })
+        // Filter the latest list (an open editor may have edited other sections meanwhile).
+        void mutateSections(note.id, (sections) =>
+          sections.length > 1 && sections.some((s) => s.id === sectionId)
+            ? sections.filter((s) => s.id !== sectionId)
+            : null,
+        )
       },
     })
   }
@@ -169,6 +174,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
   const t = useT()
   const rawNotes = useNotesStore((s) => s.notes)
   const updateNote = useNotesStore((s) => s.updateNote)
+  const updateSection = useNotesStore((s) => s.updateSection)
   const archiveNote = useNotesStore((s) => s.archiveNote)
   const duplicateNote = useNotesStore((s) => s.duplicateNote)
   const duplicateSection = useNotesStore((s) => s.duplicateSection)
@@ -302,14 +308,19 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
       {currentSection && (
         <>
           <div className="h-px bg-border my-1" />
+          {/* Opens a pane of its own on this section — also when the note is already open
+              in another pane (two sections of one note side by side). */}
+          <button
+            onClick={() => { openNoteInSplit(note.id, currentSection.id); onClose() }}
+            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+          >
+            <Columns2 size={12} />
+            {t.noteMenu.openSectionAlongside}
+          </button>
           {!note.encryption && (
             <button
               onClick={() => {
-                updateNote(note.id, {
-                  sections: note.sections.map((s) =>
-                    s.id === currentSection.id ? { ...s, aiHidden: !currentSection.aiHidden } : s,
-                  ),
-                })
+                void updateSection(note.id, currentSection.id, { aiHidden: !currentSection.aiHidden })
                 onClose()
               }}
               title={currentSection.aiHidden ? t.noteMenu.aiShowTooltip : t.noteMenu.aiHideTooltip}
@@ -593,6 +604,20 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
             <ExternalLink size={12} />
             {t.noteMenu.openAsSticky}
           </button>
+          {/* Not for encrypted notes: their unlock is per window (session password), and a
+              second window editing one would re-encrypt from its own copy. */}
+          {currentSection && !note.encryption && (
+            <button
+              onClick={() => {
+                window.noteflow.openSectionWindow(note.id, currentSection.id)
+                onClose()
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <AppWindow size={12} />
+              {t.noteMenu.openInNewWindow}
+            </button>
+          )}
         </>
       )}
       <div className="h-px bg-border my-1" />

@@ -954,6 +954,94 @@ function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
   return win
 }
 
+// ── Section windows ──────────────────────────────────────────────────────────
+// Editor-only windows for one section of a note ("Open in new window"): a normal,
+// resizable, frameless window (NOT always-on-top) that loads the app with
+// `#section-window?noteId=…&sectionId=…` → SectionWindowApp. The renderer runs as a
+// secondary window (no alarms on load, no persisted UI state, no pruning) and keeps
+// in sync through the regular `notes-updated` broadcast. Closing destroys it.
+// Value = the section the window is showing right now (the renderer reports changes
+// via window:section-window-target), so re-opening that section focuses it.
+const sectionWindows = new Map<BrowserWindow, { noteId: string; sectionId: string }>()
+
+function loadSectionWindow(win: BrowserWindow, noteId: string, sectionId: string): void {
+  const hash = `#section-window?noteId=${encodeURIComponent(noteId)}&sectionId=${encodeURIComponent(sectionId)}`
+  if (isDev) {
+    win.loadURL(`http://localhost:5173/${hash}`)
+  } else {
+    win.loadFile(path.join(__dirname, '../dist/index.html'), { hash })
+  }
+}
+
+function createSectionWindow(noteId: string, sectionId: string): BrowserWindow {
+  for (const [existing, target] of sectionWindows) {
+    if (existing.isDestroyed()) continue
+    if (target.noteId === noteId && target.sectionId === sectionId) {
+      if (existing.isMinimized()) existing.restore()
+      existing.show()
+      existing.focus()
+      return existing
+    }
+  }
+
+  const WIDTH = 760
+  const HEIGHT = 680
+  // Cascade from the last open section window so new ones don't stack exactly.
+  const last = [...sectionWindows.keys()].filter((w) => !w.isDestroyed()).pop()
+  const position = last
+    ? (() => { const [x, y] = last.getPosition(); return { x: x + 30, y: y + 30 } })()
+    : {}
+
+  const win = new BrowserWindow({
+    width: WIDTH,
+    height: HEIGHT,
+    ...position,
+    minWidth: 420,
+    minHeight: 320,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#1a1b26',
+    titleBarStyle: 'hidden',
+    show: false,
+    icon: getIconPath(),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  sectionWindows.set(win, { noteId, sectionId })
+  loadSectionWindow(win, noteId, sectionId)
+
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.setZoomFactor(1)
+  })
+
+  win.once('ready-to-show', () => {
+    win.show()
+    win.focus()
+  })
+
+  win.on('closed', () => {
+    sectionWindows.delete(win)
+  })
+
+  // Same recovery as the main window: reload a crashed/hung renderer, back on the
+  // section it was showing.
+  win.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit' || win.isDestroyed()) return
+    console.error('[SectionWindow] Renderer gone:', details.reason, details.exitCode)
+    const target = sectionWindows.get(win) ?? { noteId, sectionId }
+    loadSectionWindow(win, target.noteId, target.sectionId)
+  })
+  win.on('unresponsive', () => {
+    console.warn('[SectionWindow] Unresponsive — reloading')
+    win.webContents.reload()
+  })
+
+  return win
+}
+
 function createTray() {
   const dir = (app.isPackaged || process.env.NOTEFLOW_NATIVE) ? '../dist' : '../public'
   const iconPath = process.platform === 'win32'
@@ -3154,9 +3242,12 @@ ipcMain.on('app:get-hardware', (event) => {
     totalMemGiB: os.totalmem() / (1024 ** 3),
   }
 })
-ipcMain.on('window:maximize', () => {
-  if (mainWindow?.isMaximized()) mainWindow.unmaximize()
-  else mainWindow?.maximize()
+// Acts on the sender's window (main or a section window).
+ipcMain.on('window:maximize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+  if (!win) return
+  if (win.isMaximized()) win.unmaximize()
+  else win.maximize()
 })
 ipcMain.on('window:close', (event) => {
   // Check if it's the main window or a sticky window
@@ -3170,6 +3261,19 @@ ipcMain.on('window:close', (event) => {
 
 ipcMain.on('window:open-sticky', (_event, noteId: string, sectionId: string) => {
   createStickyWindow(noteId, sectionId)
+})
+
+const isWindowTargetId = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 128
+
+ipcMain.on('window:open-section-window', (_event, noteId: unknown, sectionId: unknown) => {
+  if (!isWindowTargetId(noteId) || !isWindowTargetId(sectionId)) return
+  createSectionWindow(noteId, sectionId)
+})
+
+ipcMain.on('window:section-window-target', (event, noteId: unknown, sectionId: unknown) => {
+  if (!isWindowTargetId(noteId) || !isWindowTargetId(sectionId)) return
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win && sectionWindows.has(win)) sectionWindows.set(win, { noteId, sectionId })
 })
 
 ipcMain.on('window:set-size', (event, width: number, height: number, minW: number, minH: number) => {
