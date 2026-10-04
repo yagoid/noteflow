@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { AlertTriangle } from 'lucide-react'
+import { useT } from '../i18n/useT'
 
 interface ConfirmModalProps {
   title: string
@@ -14,12 +15,13 @@ interface ConfirmModalProps {
 export function ConfirmModal({
   title,
   message,
-  confirmLabel = 'Confirm',
-  cancelLabel  = 'Cancel',
+  confirmLabel,
+  cancelLabel,
   danger       = false,
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
+  const t = useT()
   const cancelRef = useRef<HTMLButtonElement>(null)
 
   // Focus cancel by default so Enter doesn't accidentally confirm
@@ -66,7 +68,7 @@ export function ConfirmModal({
                        border border-border hover:border-text/25 hover:text-text
                        transition-colors focus:outline-none focus:border-text/30"
           >
-            {cancelLabel}
+            {cancelLabel ?? t.common.cancel}
           </button>
           <button
             onClick={onConfirm}
@@ -76,7 +78,7 @@ export function ConfirmModal({
                 : 'bg-surface-2 text-text border border-text/20 hover:bg-surface-3 focus:border-text/30'
               }`}
           >
-            {confirmLabel}
+            {confirmLabel ?? t.common.confirm}
           </button>
         </div>
       </div>
