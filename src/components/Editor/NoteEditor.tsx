@@ -12,6 +12,7 @@ import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
   Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer, TimerOff,
+  CopyPlus, Share,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
 import { useT } from '../../i18n/useT'
@@ -115,6 +116,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setNoteView = useNotesStore((s) => s.setNoteView)
   const updateNote = useNotesStore((s) => s.updateNote)
+  const duplicateSection = useNotesStore((s) => s.duplicateSection)
   const deleteNote = useNotesStore((s) => s.deleteNote)
   const archiveNote = useNotesStore((s) => s.archiveNote)
   const makeNotePermanent = useNotesStore((s) => s.makeNotePermanent)
@@ -827,6 +829,29 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     setRenameValue('New')
   }
 
+  // Copies a section next to the original and lands on the copy. A pending raw-mode
+  // edit of the active section is flushed first: its debounced save would otherwise
+  // race the duplicate write (and the copy could miss the latest keystrokes).
+  const handleDuplicateSection = async (sectionId: string) => {
+    const currentNote = noteRef.current
+    const source = currentNote?.sections.find((s) => s.id === sectionId)
+    if (!currentNote || !source) return
+    if (rawMode && activeSection) {
+      if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
+      const pendingRaw = rawContentRef.current
+      await updateNote(currentNote.id, {
+        sections: currentNote.sections.map((s) =>
+          s.id === activeSection.id ? { ...s, content: pendingRaw } : s,
+        ),
+      })
+    }
+    const copy = await duplicateSection(currentNote.id, sectionId, tf(t.common.sectionCopyName, { name: source.name }))
+    if (!copy) return
+    setRawContent(copy.content)
+    setActiveSectionId(copy.id)
+    if (isPaneActive) window.noteflow.setUiState({ activeSectionId: copy.id })
+  }
+
   const deleteSectionWithUndo = (sectionId: string) => {
     const currentNote = noteRef.current
     if (!currentNote || currentNote.sections.length <= 1) return
@@ -1359,6 +1384,18 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                       {t.editor.saveAsTemplate}
                     </button>
                   )}
+                  {!(note.encryption && !sessionPasswords[note.id]) && (
+                    <button
+                      onClick={() => {
+                        setSectionMenuOpen(false)
+                        window.dispatchEvent(new CustomEvent('noteflow:open-export', { detail: { noteId: note.id } }))
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                    >
+                      <Share size={13} />
+                      {t.common.exportNote}
+                    </button>
+                  )}
                   <button
                     onClick={() => { handleToggleAiHidden(); setSectionMenuOpen(false) }}
                     title={activeSection?.aiHidden
@@ -1493,6 +1530,15 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                 >
                   <Pencil size={13} />
                 </button>
+                {!(note.encryption && !sessionPasswords[note.id]) && (
+                  <button
+                    onClick={() => { void handleDuplicateSection(visibleColorPickerSection.id); setSectionColorPickerId(null) }}
+                    title={t.common.duplicateSection}
+                    className="p-0.5 rounded text-text-muted/80 hover:text-text transition-colors"
+                  >
+                    <CopyPlus size={13} />
+                  </button>
+                )}
                 {note.sections.length > 1 && (
                   <button
                     onClick={() => { handleDeleteSection(visibleColorPickerSection.id); setSectionColorPickerId(null) }}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  Archive, Star, StarOff, Trash2, Lock, Unlock, Copy, Columns2,
+  Archive, Star, StarOff, Trash2, Lock, Unlock, Copy, CopyPlus, Columns2, Share,
   ExternalLink, FolderPlus, FolderMinus, Folder, ChevronRight, LayoutGrid, Eye, EyeOff,
 } from 'lucide-react'
 import { useNotesStore } from '../stores/notesStore'
@@ -171,6 +171,8 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
   const updateNote = useNotesStore((s) => s.updateNote)
   const archiveNote = useNotesStore((s) => s.archiveNote)
   const duplicateNote = useNotesStore((s) => s.duplicateNote)
+  const duplicateSection = useNotesStore((s) => s.duplicateSection)
+  const navigateToSection = useNotesStore((s) => s.navigateToSection)
   const lockNote = useNotesStore((s) => s.lockNote)
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
   const setNoteView = useNotesStore((s) => s.setNoteView)
@@ -201,6 +203,8 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
   // Only offer per-section delete when the menu targets a section and the note
   // has more than one — deleting the lone section would leave an empty note.
   const canDeleteSection = !!currentSection && note.sections.length > 1
+  // Locked encrypted notes have no readable content to export or copy.
+  const isLocked = !!note.encryption && !sessionPasswords[note.id]
   const currentSectionColor = currentSection
     ? sectionTagColors[normalizeTagColorKey(currentSection.name)]
     : undefined
@@ -273,6 +277,18 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
             <Copy size={12} />
             {t.noteMenu.duplicateNote}
           </button>
+          {!isLocked && (
+            <button
+              onClick={() => {
+                onClose()
+                window.dispatchEvent(new CustomEvent('noteflow:open-export', { detail: { noteId: note.id } }))
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <Share size={12} />
+              {t.common.exportNote}
+            </button>
+          )}
         </>
       )}
       <button
@@ -301,6 +317,21 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
             >
               {currentSection.aiHidden ? <Eye size={12} /> : <EyeOff size={12} />}
               {currentSection.aiHidden ? t.common.showToAI : t.common.hideFromAI}
+            </button>
+          )}
+          {!isLocked && (
+            <button
+              onClick={() => {
+                onClose()
+                const name = tf(t.common.sectionCopyName, { name: currentSection.name })
+                void duplicateSection(note.id, currentSection.id, name).then((copy) => {
+                  if (copy) navigateToSection(note.id, copy.id)
+                })
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <CopyPlus size={12} />
+              {t.common.duplicateSection}
             </button>
           )}
           <div className="px-3 pt-1 text-[10px] font-mono text-text-muted uppercase tracking-wider">

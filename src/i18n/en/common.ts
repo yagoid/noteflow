@@ -23,6 +23,10 @@ export const common = {
   unarchiveGroup: 'Unarchive group',
   deleteNote: 'Delete note',
   deleteSection: 'Delete section',
+  duplicateSection: 'Duplicate section',
+  // Name of the copy created by "Duplicate section".
+  sectionCopyName: '{name} (copy)',
+  exportNote: 'Export note…',
   addToFavorites: 'Add to favorites',
   removeFromFavorites: 'Remove from favorites',
   archive: 'Archive',

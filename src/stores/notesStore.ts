@@ -15,6 +15,7 @@ import {
 import { encryptSections, decryptSections, type EncryptionOptions } from '../lib/cryptoUtils'
 import { collectAlarms } from '../lib/alarmUtils'
 import { getNoteSearchIndex } from '../lib/searchUtils'
+import { duplicateSectionInList } from '../lib/sectionUtils'
 
 /**
  * Serializes `next`, computes the minimal multi-file diff against `prev`
@@ -81,6 +82,8 @@ interface NotesState {
   createTempNote: () => Promise<Note>
   duplicateNote: (id: string) => Promise<Note>
   updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'sections' | 'tags' | 'favorited' | 'group' | 'folder'>>) => Promise<void>
+  /** Copies a section (new id, given name) right after the original. Null if missing or the note is locked. */
+  duplicateSection: (noteId: string, sectionId: string, name: string) => Promise<NoteSection | null>
   deleteNote: (id: string) => Promise<void>
   archiveNote: (id: string) => Promise<void>
   makeNotePermanent: (id: string) => Promise<void>   // drops expiresAt from a temporary note
@@ -416,6 +419,19 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     await writeNoteToDisk(note, updated)
     set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
     window.noteflow.scheduleAlarms(collectAlarms(get().notes.map(n => n.id === id ? updated : n)))
+  },
+
+  // Persists through updateNote, so encryption, tags and the v2 per-section file
+  // diff (one new <id>.md + note.md for the order) are handled in one place.
+  duplicateSection: async (noteId, sectionId, name) => {
+    const note = get().notes.find((n) => n.id === noteId)
+    if (!note) return null
+    // A locked note has no decrypted sections to copy (updateNote would no-op anyway).
+    if (note.encryption && !get().sessionPasswords[noteId]) return null
+    const result = duplicateSectionInList(note.sections, sectionId, { id: nanoid(8), name })
+    if (!result) return null
+    await get().updateNote(noteId, { sections: result.sections })
+    return result.section
   },
 
   deleteNote: async (id) => {

@@ -17,6 +17,8 @@ export function TitleBar() {
   const [downloadProgress, setDownloadProgress] = useState(0)
   const [installing, setInstalling] = useState(false)
   const [exportImportModal, setExportImportModal] = useState<'export' | 'import' | null>(null)
+  // Note to preselect in the export panel (from "Export note…"); undefined = the active note.
+  const [exportNoteId, setExportNoteId] = useState<string | undefined>(undefined)
   // Backend-tagged status of whichever sync provider is live (GitHub or NoteFlow
   // Cloud — they are mutually exclusive). The button routes to the active one.
   const [syncStatus, setSyncStatus] = useState<ActiveSyncStatus>({ backend: 'none', active: false, initialPullStatus: 'pending' })
@@ -61,8 +63,13 @@ export function TitleBar() {
   }, [])
 
   useEffect(() => {
-    const openExport = () => setExportImportModal('export')
-    const openImport = () => setExportImportModal('import')
+    // Optional `detail.noteId` preselects that note instead of the active one.
+    const openExport = (e: Event) => {
+      const noteId = (e as CustomEvent<{ noteId?: string } | null>).detail?.noteId
+      setExportNoteId(noteId)
+      setExportImportModal('export')
+    }
+    const openImport = () => { setExportNoteId(undefined); setExportImportModal('import') }
     const openShortcuts = () => openSettings('shortcuts')
     const openGithubSync = () => openSettings('sync')
     const openStartup = () => openSettings('startup')
@@ -253,6 +260,7 @@ export function TitleBar() {
     {exportImportModal && (
       <ExportImportModal
         mode={exportImportModal}
+        initialNoteId={exportNoteId}
         onClose={() => setExportImportModal(null)}
       />
     )}
@@ -262,6 +270,7 @@ export function TitleBar() {
         onClose={() => setSettingsOpen(false)}
         onOpenExportImport={(mode) => {
           setSettingsOpen(false)
+          setExportNoteId(undefined)
           setExportImportModal(mode)
         }}
       />

@@ -339,10 +339,24 @@ Cada nota puede tener múltiples secciones independientes, como tabs:
 ```
 
 (`⊞` = note overview · `⭐` = favorito · `⋯` = menú de sección: raw/editor, copiar,
-**guardar como plantilla**, sticky, **ocultar a la IA**, archivar, cifrar, borrar nota)
+**guardar como plantilla**, **exportar nota**, sticky, **ocultar a la IA**, hacer permanente, archivar,
+cifrar, borrar nota)
+
+- **Exportar nota** (`Export note…`, icono `Share`): abre el popup de exportación (el mismo de
+  Ajustes / paleta, evento `noteflow:open-export`) con **esa nota ya preseleccionada** — con
+  `detail: { noteId }` el popup preselecciona esa nota en vez de la activa, y la lista aunque esté
+  archivada. También en el menú contextual de nota (right-click en el sidebar). Oculto si la nota está
+  cifrada y bloqueada.
 
 - **Agregar**: `Ctrl+T` o botón `+`.
 - **Renombrar**: doble-click en el tab → Enter para guardar, Esc para cancelar.
+- **Click derecho en un tab** → franja bajo la tira con los colores de sección, `Auto`, y los botones
+  **Rename** (lápiz), **Duplicate section** (`CopyPlus`) y **Delete** (papelera, solo si hay >1 sección).
+- **Duplicar**: `Duplicate section` (franja del click derecho o menú contextual de un tag de sección)
+  crea una copia con id nuevo, mismo contenido, mismo modo raw/editor y mismo flag "oculta a la IA",
+  llamada `"<nombre> (copy)"` / `"<nombre> (copia)"` según el idioma de la UI, **justo a la derecha** de
+  la original, y la deja activa (`notesStore.duplicateSection`). No se ofrece con la nota cifrada y
+  bloqueada.
 - **Reordenar**: drag & drop los tabs. Si arrastras cerca del borde izquierdo o derecho de la tira,
   esta scrollea sola en esa dirección para poder soltar sobre tabs que están fuera de la vista. Al
   soltar, la tira se queda donde estabas (no salta de vuelta a la sección activa).
@@ -742,8 +756,9 @@ a propósito (por dispositivo).
 
 ## Encriptación de notas
 
-Desde el menú contextual (right-click en nota):
-- **Encrypt note** → modal con contraseña.
+- **Encrypt note** → menú `⋯` del editor → modal con contraseña.
+
+Desde el menú contextual (right-click en nota), solo si la nota ya está cifrada:
 - **Unlock note** → pide contraseña para acceder (desbloqueo solo durante la sesión).
 - **Lock note** → vuelve a bloquear una nota desbloqueada.
 - **Remove encryption** → elimina el cifrado permanentemente.
@@ -756,20 +771,38 @@ El CLI ignora las notas cifradas.
 
 ## Menú contextual (right-click en nota del sidebar)
 
+Click sobre la **nota**:
 ```
   ⭐ Add to favorites / Remove from favorites
   📦 Archive / Unarchive
-  🔒 Encrypt note   (o: Unlock / Lock / Remove encryption)
+  🔒 Unlock / Lock / Remove encryption   (solo si está cifrada)
   ▥ Open alongside        ← abre en paralelo (split)
   📋 Duplicate note
+  ⇪ Export note…          ← popup de exportación con esta nota preseleccionada
   ⊞ Note overview         ← abre la vista de nota (todas sus secciones)
-  ─────────────
-  🎨 Section color         ← solo si el click fue sobre un tag de sección
   ─────────────
   📁 Move to folder ▸  /  Remove from group     (si está en un grupo)
   📁 Add to group ▸                              (si no tiene grupo)
   ─────────────
+  ⧉ Open as Sticky Note
+  ─────────────
   🗑 Delete note   ← rojo
+```
+
+Click sobre un **tag de sección** (sidebar, vista de grupo, tarjetas de la vista de nota): se ocultan
+las acciones de nota (favorito, archivar, split, duplicar/exportar nota, grupo/carpeta) y aparecen
+las de sección:
+```
+  🔒 Unlock / Lock / Remove encryption   (solo si está cifrada)
+  ⊞ Note overview
+  ─────────────
+  👁 Hide from AI / Show to AI            (no en notas cifradas)
+  ⧉ Duplicate section                     ← copia a la derecha y navega a ella
+  🎨 Section color
+  ─────────────
+  ⧉ Open as Sticky Note                   ← abre esa sección
+  ─────────────
+  🗑 Delete section  (o Delete note si es la única sección)   ← rojo
 ```
 
 ---
