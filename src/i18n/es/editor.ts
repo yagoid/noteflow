@@ -34,6 +34,8 @@ export const editor = {
     openAsSticky: 'Abrir como nota adhesiva',
     archiveNote: 'Archivar nota',
     unarchiveNote: 'Desarchivar nota',
+    makePermanent: 'Hacer permanente',
+    makePermanentHint: 'Conserva esta nota temporal: ya no se eliminará automáticamente',
     encryptNote: 'Cifrar nota',
     removeEncryption: 'Quitar cifrado',
   },

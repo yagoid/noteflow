@@ -11,7 +11,7 @@ import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
-  Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer,
+  Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer, TimerOff,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
 import { useT } from '../../i18n/useT'
@@ -117,6 +117,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const updateNote = useNotesStore((s) => s.updateNote)
   const deleteNote = useNotesStore((s) => s.deleteNote)
   const archiveNote = useNotesStore((s) => s.archiveNote)
+  const makeNotePermanent = useNotesStore((s) => s.makeNotePermanent)
   const unlockNote = useNotesStore((s) => s.unlockNote)
   const encryptNote = useNotesStore((s) => s.encryptNote)
   const removeNoteEncryption = useNotesStore((s) => s.removeNoteEncryption)
@@ -1380,6 +1381,16 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                     <ExternalLink size={13} />
                     {t.editor.menu.openAsSticky}
                   </button>
+                  {note.expiresAt && (
+                    <button
+                      onClick={() => { setSectionMenuOpen(false); void makeNotePermanent(note.id) }}
+                      title={t.editor.menu.makePermanentHint}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                    >
+                      <TimerOff size={13} />
+                      {t.editor.menu.makePermanent}
+                    </button>
+                  )}
                   <button
                     onClick={() => { setSectionMenuOpen(false); void archiveNote(note.id) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"

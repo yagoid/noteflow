@@ -172,6 +172,39 @@ describe('buildNoteWritePayload', () => {
     expect(payload.files['bbb.md']).toBe('do things')
     expect(payload.deleteFiles).toEqual([])
   })
+
+  // makeNotePermanent (notesStore) destructures expiresAt out of the note and writes it
+  // back. main's checkExpiredNotes() deletes any folder whose note.md matches
+  // /^expiresAt:/m, so the line must really disappear — and nothing else may be touched.
+  it('make-permanent transition: drops the expiresAt line and rewrites only note.md', () => {
+    const prev: Note = { ...sampleNote(), expiresAt: '2024-01-03T00:00:00.000Z' }
+    expect(serializeNoteFolder(prev).files[NOTE_MD]).toMatch(/^expiresAt:/m)
+
+    const { expiresAt: _expiresAt, ...next } = prev
+    const payload = buildNoteWritePayload(prev, next)
+    expect(payload.files[NOTE_MD]).not.toMatch(/^expiresAt:/m)
+    expect(Object.keys(payload.files)).toEqual([NOTE_MD])
+    expect(payload.deleteFiles).toEqual([])
+    expect(parseNoteFolder(payload.files[NOTE_MD], {}, prev.filePath).expiresAt).toBeUndefined()
+  })
+
+  it('make-permanent transition on a locked encrypted note keeps the ciphertext', () => {
+    const encryption = { alg: 'aes-256-gcm+pbkdf2' as const, salt: 's', iv: 'i', ciphertext: 'c' }
+    const prev: Note = {
+      ...sampleNote(),
+      sections: [], // locked: no plaintext in memory
+      encryption,
+      expiresAt: '2024-01-03T00:00:00.000Z',
+    }
+    expect(serializeNoteFolder(prev).files[NOTE_MD]).toMatch(/^expiresAt:/m)
+
+    const { expiresAt: _expiresAt, ...next } = prev
+    const payload = buildNoteWritePayload(prev, next)
+    expect(Object.keys(payload.files)).toEqual([NOTE_MD])
+    expect(payload.files[NOTE_MD]).not.toMatch(/^expiresAt:/m)
+    expect(payload.files[NOTE_MD]).toContain('ciphertext: c')
+    expect(payload.deleteFiles).toEqual([])
+  })
 })
 
 describe('extractTitle', () => {

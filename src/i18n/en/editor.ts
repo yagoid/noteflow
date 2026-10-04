@@ -46,6 +46,8 @@ export const editor = {
     openAsSticky: 'Open as sticky note',
     archiveNote: 'Archive note',
     unarchiveNote: 'Unarchive note',
+    makePermanent: 'Make permanent',
+    makePermanentHint: 'Keep this temporary note — it will no longer be deleted automatically',
     encryptNote: 'Encrypt note',
     removeEncryption: 'Remove encryption',
   },

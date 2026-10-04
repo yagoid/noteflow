@@ -83,6 +83,7 @@ interface NotesState {
   updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'sections' | 'tags' | 'favorited' | 'group' | 'folder'>>) => Promise<void>
   deleteNote: (id: string) => Promise<void>
   archiveNote: (id: string) => Promise<void>
+  makeNotePermanent: (id: string) => Promise<void>   // drops expiresAt from a temporary note
   setActiveNote: (id: string | null) => void
   /** Navigate to a specific section of a note (same note or another), closing any full-area view. */
   navigateToSection: (noteId: string, sectionId: string) => void
@@ -445,6 +446,21 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     if (!note) return
 
     const updated: Note = { ...note, archived: !note.archived, updated: new Date().toISOString() }
+    await writeNoteToDisk(note, updated)
+    set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
+  },
+
+  // Turns a temporary note into a regular one. The key is destructured OUT (not set to
+  // undefined) so no later `{ ...note }` spread can carry it back; the serializers omit a
+  // missing expiresAt, so note.md loses the line main's checkExpiredNotes() matches on.
+  // Metadata-only write: works for encrypted notes too, even while locked. Bumping
+  // `updated` makes this version win the per-folder conflict on the next sync pull.
+  makeNotePermanent: async (id) => {
+    const note = get().notes.find((n) => n.id === id)
+    if (!note?.expiresAt) return
+
+    const { expiresAt: _expiresAt, ...rest } = note
+    const updated: Note = { ...rest, updated: new Date().toISOString() }
     await writeNoteToDisk(note, updated)
     set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
   },
