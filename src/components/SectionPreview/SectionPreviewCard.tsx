@@ -19,8 +19,9 @@ interface SectionPreviewCardProps {
   note: Note
   section: NoteSection
   sectionTagColors: SectionTagColorMap
-  // `compact` shrinks the note title/date (used by the hover popover); the
-  // height/zoom of the body preview are overridable for the same reason.
+  // `compact` keeps the section header smaller (used by the hover popover and the
+  // Brain preview); the height/zoom of the body preview are overridable for the
+  // same reason.
   compact?: boolean
   previewHeight?: number
   previewZoom?: number
@@ -39,6 +40,7 @@ export function SectionPreviewCard({
 }: SectionPreviewCardProps) {
   const t = useT()
   const colorStyle = getTagColor(section.name, sectionTagColors)
+  const iconSize = compact ? 10 : 11
   const hasContent = section.content.trim().length > 0
   // Render the section body to the same HTML the editor produces, so the preview
   // matches the open note exactly. Memoised — markdown→HTML isn't free per card.
@@ -50,26 +52,26 @@ export function SectionPreviewCard({
   return (
     <>
       {/* Section label (the card's identity — which tab this represents) */}
-      <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-border/60 bg-surface-2/50 group-hover:bg-surface-2/80 transition-colors">
-        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: colorStyle.color }} />
-        <span className="text-[13px] font-mono font-semibold truncate" style={{ color: colorStyle.color }}>
+      <div className={`flex items-center gap-1.5 px-2.5 ${compact ? 'py-1.5' : 'py-2'} border-b border-border/60 bg-surface-2/50 group-hover:bg-surface-2/80 transition-colors`}>
+        <span className={`${compact ? 'w-2 h-2' : 'w-2.5 h-2.5'} rounded-full flex-shrink-0`} style={{ background: colorStyle.color }} />
+        <span className={`${compact ? 'text-[13px]' : 'text-[15px]'} font-mono font-semibold truncate`} style={{ color: colorStyle.color }}>
           {section.name}
         </span>
         <span
           className="ml-auto flex items-center text-text-muted/50 flex-shrink-0"
           title={section.isRawMode ? t.overview.rawSection : t.overview.richSection}
         >
-          {section.isRawMode ? <Edit3 size={10} /> : <Eye size={10} />}
+          {section.isRawMode ? <Edit3 size={iconSize} /> : <Eye size={iconSize} />}
         </span>
       </div>
 
       {/* Editor mock — title + date, a representational toolbar, then a few lines */}
       <div className="flex flex-col" style={{ background: 'rgb(var(--bg-editor))' }}>
         <div className="px-3 pt-1.5">
-          <div className={`${compact ? 'text-[9px]' : 'text-[10px]'} font-mono font-bold text-text truncate`}>
+          <div className={`${compact ? 'text-[9px]' : 'text-[8.5px]'} font-mono font-bold text-text truncate`}>
             {note.title || t.common.untitled}
           </div>
-          <div className={`${compact ? 'text-[7.5px]' : 'text-[8.5px]'} font-mono text-text-muted/50 mt-px`}>
+          <div className="text-[7.5px] font-mono text-text-muted/50 mt-px">
             {formatDate(new Date(note.created), 'MMM d, yyyy · HH:mm')}
           </div>
         </div>
