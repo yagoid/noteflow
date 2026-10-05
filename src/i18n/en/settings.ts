@@ -93,6 +93,10 @@ export const settings = {
     contentWidthHint: 'Constrain editor content to a readable column',
     full: 'Full',
     readable: 'Readable',
+    toc: 'Table of contents',
+    tocHint: 'Show an outline of the section headings at the right of the editor',
+    showToc: 'Show table of contents',
+    hideToc: 'Hide table of contents',
   },
 
   startup: {

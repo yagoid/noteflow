@@ -548,7 +548,7 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - También desde Settings → Editor (fuente y tamaño).
 
 ### Ancho del contenido (Full / Readable)
-- Settings → Editor → **Width**: alterna entre `Full` (por defecto, el contenido ocupa todo el
+- Settings → Editor → **Content width**: alterna entre `Full` (por defecto, el contenido ocupa todo el
   ancho del área del editor) y `Readable` (columna de lectura centrada de ~72 caracteres, estilo
   Obsidian/iA Writer).
 - En modo `Readable` se centran los bloques de texto (párrafos, headings, listas, citas,
@@ -561,8 +561,28 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   Si el bloque no cabe en el margen (badge con fecha + alarma), se desplaza hacia la izquierda
   solapando el final de la columna en vez de provocar scroll horizontal; el contenedor de scroll
   del editor es además `overflow-x: hidden` (tablas y código tienen su propio scroll interno).
-- Preferencia local persistida en `localStorage` (`noteflow-readable-width`), en
-  `editorSettingsStore` junto a fuente/tamaño. No se sincroniza.
+  Con el índice visible, el borde derecho de esas acciones se acota además contra las rayitas del
+  índice (se desplazan a la izquierda antes de llegar a ellas).
+- Preferencia en `editorSettingsStore` junto a fuente/tamaño, **sincronizada** en `ui-settings.json`
+  (`localStorage` `noteflow-readable-width` queda solo como dual-write legacy/seed).
+
+### Índice flotante (table of contents)
+- En el borde derecho del editor hay un **indicador discreto**: una rayita corta por encabezado
+  (H1 más larga, H3 más corta), con la del encabezado en el que estás más marcada. Solo aparece si la
+  sección tiene encabezados (H1–H3, los vacíos se ignoran).
+- **Al pasar el ratón** (o al llegar con Tab) se despliega el **panel del índice**, superpuesto al
+  texto, con los títulos sangrados por nivel y con jerarquía tipográfica (H1 > H2 > H3). El
+  encabezado activo va en **negrita**. Se recoge al sacar el ratón (Escape devuelve el foco al editor).
+- **Click en una entrada** → scroll suave hasta ese encabezado (sin mover el caret); el panel sigue
+  abierto mientras el ratón esté encima. Se actualiza en vivo al escribir; títulos largos con elipsis
+  (tooltip con el texto completo). Con muchísimos encabezados las rayitas se compactan (máx. 40,
+  priorizando H1/H2).
+- El editor solo reserva el hueco de las rayitas, así que en reposo nunca tapa el texto. En editores
+  muy estrechos (< 420 px, p. ej. paneles divididos muy estrechos) se oculta.
+- Sale en el editor principal, en cada panel del split y en la ventana de sección; **no** en stickies
+  ni en modo raw.
+- Settings → Editor → **Table of contents** (switch, activado por defecto); se sincroniza con el resto
+  de ajustes del editor.
 
 ---
 
@@ -772,7 +792,7 @@ citas**. Cada control sin tocar sigue al tema (y cambia con él); el panel muest
 vivo** de todo.
 
 **Sync entre dispositivos:** el tema y toda esta personalización (más los ajustes del editor:
-tamaño/familia de fuente y ancho legible) viajan en `ui-settings.json` dentro del dir de notas,
+tamaño/familia de fuente, ancho legible e índice flotante) viajan en `ui-settings.json` dentro del dir de notas,
 así que con cualquier sync activo (GitHub o Cloud) la apariencia sigue al usuario a cada máquina
 y se aplica en caliente al recibir un pull. La **escala de UI** y el **idioma** quedan fuera
 a propósito (por dispositivo).
@@ -1154,5 +1174,5 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 - Carpeta configurable desde Settings → Data → "Choose notes directory".
 - Ajustes locales (idioma, autostart, estado de UI, token de sync) en `settings.json` del userData.
   La apariencia (tema, fuente, acento, colores del editor) y los ajustes del editor (tamaño/familia
-  de fuente, ancho legible) se sincronizan vía `ui-settings.json`; la escala de UI y el idioma
+  de fuente, ancho legible, índice flotante) se sincronizan vía `ui-settings.json`; la escala de UI y el idioma
   siguen siendo por dispositivo.

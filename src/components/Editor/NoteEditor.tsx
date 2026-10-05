@@ -155,7 +155,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
 
   // Editor font size (from shared store)
-  const { fontSize, changeFontSize, resetFontSize, fontFamily, readableWidth } = useEditorSettingsStore()
+  const { fontSize, changeFontSize, resetFontSize, fontFamily, readableWidth, showToc } = useEditorSettingsStore()
 
   // Raw (markdown source) mode buffer
   const [rawContent, setRawContent] = useState('')
@@ -1738,6 +1738,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
                 fontSize={fontSize}
                 autoFocus={renamingId === null}
                 currentSectionId={activeSection?.id ?? null}
+                showToc={showToc}
               />
               {searchOpen && (
                 <InNoteSearchBar

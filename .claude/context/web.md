@@ -202,7 +202,7 @@ Anclas: `#organize` `#templates` `#sticky` `#links` `#shortcuts` `#views` `#temp
 | `#temp` | Notas temporales 24h | skill |
 | `#encryption` | AES-256-GCM + PBKDF2 310k, sin backdoor, CLI las ignora | skill / `noteUtils` |
 | `#ai-hidden` | Toggle Hide from AI (enlaza a `/ai#privacy`) | skill |
-| `#personalize` | **14 temas (11 dark + 3 light)** con swatches de valores reales, fuentes, ancho readable | `src/lib/themes.ts` (¡los swatches llevan colores literales!) |
+| `#personalize` | **14 temas (11 dark + 3 light)** con swatches de valores reales, fuentes, ancho readable, índice flotante del editor | `src/lib/themes.ts` (¡los swatches llevan colores literales!) |
 
 ### `/pricing` — fuente de verdad: **`.claude/context/monetization.md`** (§§ visión / 3 / 4)
 Anclas: `#free` `#plans` `#ai` `#cloud` `#compare` `#privacy`. Accent **pink**. Mensaje central:

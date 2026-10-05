@@ -59,6 +59,9 @@ import { SearchHighlight } from './SearchHighlightExtension'
 import { SectionRelation } from './SectionRelation'
 import { SlashCommands, getSlashCommands } from './SlashCommands'
 import { SectionLinkPicker } from './SectionLinkPicker'
+import { EditorToc } from './EditorToc'
+import { useTocItems } from './useEditorToc'
+import { TOC_MIN_EDITOR_WIDTH, TOC_RESERVE } from '../../lib/tocUtils'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../lib/markdownHtml'
 import { useT } from '../../i18n/useT'
@@ -101,6 +104,9 @@ interface EditorProps {
    *  Read once at mount. Compact windows (sticky) pass a smaller one so the two
    *  bands can't overlap in a short viewport. */
   caretScrollGap?: CaretScrollGap
+  /** Show the floating table of contents (H1–H3) at the right of the editor.
+   *  Off by default: only the main note editor opts in (not sticky windows). */
+  showToc?: boolean
 }
 
 export interface EditorHandle {
@@ -117,8 +123,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   autoFocus = true,
   currentSectionId,
   caretScrollGap = DEFAULT_CARET_SCROLL_GAP,
+  showToc = false,
 }, ref) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // Whether the editor viewport is wide enough to host the TOC next to the text
+  // (narrow windows / split panes hide it rather than squeeze the text).
+  const [wideEnoughForToc, setWideEnoughForToc] = useState(false)
   const { fontFamily } = useEditorSettingsStore()
   // When the "/ → Link section" command runs, open the section picker.
   const [linkPickerOpen, setLinkPickerOpen] = useState(false)
@@ -245,6 +256,20 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
 
   useImperativeHandle(ref, () => ({ editor }), [editor])
 
+  const tocItems = useTocItems(editor, showToc)
+  const tocVisible = showToc && wideEnoughForToc && tocItems.length > 0
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!showToc || !el) return
+    const observer = new ResizeObserver(([entry]) => {
+      setWideEnoughForToc(entry.contentRect.width >= TOC_MIN_EDITOR_WIDTH)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+    // `editor` is a dep because the scroller only mounts once the editor exists.
+  }, [showToc, editor])
+
   // Open links in external browser on click
   useEffect(() => {
     if (!editor) return
@@ -334,25 +359,33 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       }}
     >
       {!readOnly && !hideToolbar && <EditorToolbar editor={editor} />}
-      <div
-        // overflow-x-hidden: nothing at note level needs horizontal scroll
-        // (tables and code blocks scroll internally, images are capped at
-        // 100%, ProseMirror wraps long words). Without it, `overflow-y: auto`
-        // makes overflow-x resolve to `auto`, so anything poking past the
-        // right edge (e.g. the absolutely-positioned task actions in readable
-        // mode) would add a horizontal scrollbar to the whole note.
-        className="flex-1 overflow-y-auto overflow-x-hidden"
-        style={{
-          '--prose-font-size': fontSize ? `${fontSize}px` : undefined,
-          '--prose-font-family': fontFamily === 'inter'
-            ? "'Inter', sans-serif"
-            : "'JetBrains Mono', 'Fira Code', monospace",
-        } as React.CSSProperties}
-      >
-        <EditorContent
-          editor={editor}
-          className="h-full prose-editor"
-        />
+      {/* Positioning context for the TOC: it floats over the scroller's right
+          edge without scrolling with the content. */}
+      <div className="relative flex-1 min-h-0">
+        <div
+          ref={scrollRef}
+          // overflow-x-hidden: nothing at note level needs horizontal scroll
+          // (tables and code blocks scroll internally, images are capped at
+          // 100%, ProseMirror wraps long words). Without it, `overflow-y: auto`
+          // makes overflow-x resolve to `auto`, so anything poking past the
+          // right edge (e.g. the absolutely-positioned task actions in readable
+          // mode) would add a horizontal scrollbar to the whole note.
+          // editor-has-toc reserves the TOC's room on the right (index.css).
+          className={`h-full overflow-y-auto overflow-x-hidden${tocVisible ? ' editor-has-toc' : ''}`}
+          style={{
+            '--prose-font-size': fontSize ? `${fontSize}px` : undefined,
+            '--prose-font-family': fontFamily === 'inter'
+              ? "'Inter', sans-serif"
+              : "'JetBrains Mono', 'Fira Code', monospace",
+            '--toc-reserve': `${TOC_RESERVE}px`,
+          } as React.CSSProperties}
+        >
+          <EditorContent
+            editor={editor}
+            className="h-full prose-editor"
+          />
+        </div>
+        {tocVisible && <EditorToc editor={editor} items={tocItems} scrollRef={scrollRef} />}
       </div>
       {!readOnly && <TableContextMenu editor={editor} />}
       {linkPickerOpen && (

@@ -1,9 +1,14 @@
 "use strict";
 // Pure sanitize/merge logic for ui-settings.json — the root-level file of the
 // notes dir that syncs appearance (theme, app font, accent, editor colours) and
-// editor settings (font size/family, readable width) across devices. Lives in
+// editor settings (font size/family, readable width, floating TOC) across devices. Lives in
 // electron/ but imports nothing from Electron (same pure-module pattern as
 // syncState.ts / cloudSyncLogic.ts). Covered by tests/electron/uiSettings.test.ts.
+//
+// MIRRORED in noteflow-mobile (src/core/uiSettings.ts). Its sanitizer also drops
+// unknown keys and the mobile re-sanitizes the file before every write, so a
+// field added here and not ported there is erased whenever the phone saves its
+// appearance (e.g. an accent change). Port every new field to the mirror.
 //
 // Tri-state semantics for override keys (appFont, accent, editorColors.*):
 //   - key ABSENT   → never written on any device; readers fall back to their
@@ -97,6 +102,10 @@ function sanitizeUiSettings(raw) {
         }
         if (typeof ed.readableWidth === 'boolean') {
             cleaned.readableWidth = ed.readableWidth;
+            hasAny = true;
+        }
+        if (typeof ed.showToc === 'boolean') {
+            cleaned.showToc = ed.showToc;
             hasAny = true;
         }
         if (hasAny)

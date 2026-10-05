@@ -81,6 +81,10 @@ export const settings = {
     contentWidthHint: 'Limita el contenido del editor a una columna legible',
     full: 'Completo',
     readable: 'Legible',
+    toc: 'Índice',
+    tocHint: 'Muestra un índice con los encabezados de la sección a la derecha del editor',
+    showToc: 'Mostrar índice',
+    hideToc: 'Ocultar índice',
   },
 
   startup: {

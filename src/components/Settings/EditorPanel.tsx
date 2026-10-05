@@ -5,8 +5,10 @@ import { useT } from '../../i18n/useT'
 import { settingsButtonClass } from './ui'
 
 export function EditorPanel() {
-  const { fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily, readableWidth, setReadableWidth } =
-    useEditorSettingsStore()
+  const {
+    fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily, readableWidth, setReadableWidth,
+    showToc, setShowToc,
+  } = useEditorSettingsStore()
   const t = useT()
 
   return (
@@ -65,6 +67,30 @@ export function EditorPanel() {
           <span className={!readableWidth ? 'text-text' : ''}>{t.settings.editor.full}</span>
           <span className="opacity-30 px-0.5">/</span>
           <span className={readableWidth ? 'text-text' : ''}>{t.settings.editor.readable}</span>
+        </button>
+      </section>
+
+      {/* Floating table of contents */}
+      <section className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-mono font-medium text-text">{t.settings.editor.toc}</p>
+          <p className="text-[11px] font-mono text-text-muted mt-1">{t.settings.editor.tocHint}</p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={showToc}
+          aria-label={t.settings.editor.toc}
+          onClick={() => setShowToc(!showToc)}
+          title={showToc ? t.settings.editor.hideToc : t.settings.editor.showToc}
+          className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors ${
+            showToc ? 'bg-text/70' : 'bg-surface-3 border border-border'
+          }`}
+        >
+          <span
+            className={`absolute top-[2px] w-4 h-4 bg-white rounded-full shadow transition-all duration-200 ${
+              showToc ? 'left-[18px]' : 'left-[2px]'
+            }`}
+          />
         </button>
       </section>
     </div>

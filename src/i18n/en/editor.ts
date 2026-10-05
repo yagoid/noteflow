@@ -25,6 +25,11 @@ export const editor = {
   // Metadata line under the title.
   deletesAt: 'Deletes {date}',
 
+  // Floating table of contents at the right of the editor (EditorToc).
+  toc: {
+    label: 'Table of contents',
+  },
+
   // Section delete undo toast.
   sectionDeleted: 'Section "{name}" deleted',
   undo: 'Undo',

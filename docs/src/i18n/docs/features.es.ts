@@ -277,6 +277,6 @@ export const featuresEs: FeaturesContent = {
     moreP:
       'Más allá del tema, <strong>Settings → Appearance</strong> expone los mandos por separado: la <strong>fuente</strong> de toda la app, el <strong>color de acento</strong>, los <strong>colores del editor</strong> (encabezados, cursiva, código inline y la barra de acento de bloques de código y citas) y la <strong>escala</strong> general de la UI. El editor tiene sus propios ajustes de fuente y tamaño, independientes del chrome.',
     widthP:
-      'Y para escribir largo, <strong>Settings → Editor → Width</strong> alterna el editor entre <strong>Full</strong> (el contenido usa toda el área del editor) y <strong>Readable</strong> — una columna centrada de ~72 caracteres, estilo iA Writer, donde solo tablas e imágenes rompen a ancho completo.',
+      'Y para escribir largo, <strong>Settings → Editor → Content width</strong> alterna el editor entre <strong>Full</strong> (el contenido usa toda el área del editor) y <strong>Readable</strong> — una columna centrada de ~72 caracteres, estilo iA Writer, donde solo tablas e imágenes rompen a ancho completo. Además, las secciones con encabezados tienen un <strong>índice</strong>: una columna de rayitas en el borde derecho del editor que, al pasar el ratón, se despliega con los encabezados H1–H3 — pulsa uno para ir hasta él con un scroll suave (se activa o desactiva en <strong>Settings → Editor → Table of contents</strong>).',
   },
 };

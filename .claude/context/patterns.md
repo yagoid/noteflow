@@ -389,6 +389,57 @@ justo para ver el caret, que queda pegado al borde inferior (el `padding-bottom:
   8/32 px en `StickyApp.tsx`, con `.sticky-editor .ProseMirror` a `padding-bottom: 2.5rem`): en una
   ventana de 200–300 px las franjas de 40+96 px casi se solaparían.
 
+### Editor: índice flotante (table of contents)
+Índice estilo Notion de los **H1–H3** de la sección abierta, en el borde derecho del área de scroll
+del editor rich. Piezas: `lib/tocUtils.ts` (lógica pura con tests en `tests/lib/tocUtils.test.ts`:
+`buildTocItems`, `pickActiveHeading`, `pickIndicatorDashes`, `activeDashIndex`, constantes de tamaño),
+`Editor/useEditorToc.ts` (`readTocItems(doc)` + hook `useTocItems`) y `Editor/EditorToc.tsx` (UI).
+- **Dos estados.** En reposo solo se ve un **indicador**: una columna de rayitas (una por encabezado,
+  16/11/7 px según el nivel relativo; la del activo en `bg-text`, el resto `text-muted/50`). Hover
+  (retardo de apertura 90 ms para no saltar al ir hacia el scrollbar) o foco de teclado
+  (`focus-within`) despliega un **panel de 272 px que se superpone al texto** (`bg-surface-1`,
+  borde y sombra; transición de opacidad + desplazamiento); se recoge al salir con 160 ms de retardo
+  (sin parpadeo al pasar del indicador al panel, que lo tapa). Escape devuelve el foco al editor. El
+  indicador es un `button` con `aria-expanded`/`aria-controls`; el `nav` lleva `aria-label`.
+- **Panel:** entradas con jerarquía tipográfica por nivel absoluto (14/13/12 px, H1 `font-medium`) y
+  sangría por nivel relativo; el **activo va en negrita** (`text-text`), no con el color de acento;
+  truncado con elipsis + `title`. Scroll interno propio si es largo.
+- **Muchos encabezados:** como máximo `TOC_MAX_DASHES` (40) rayitas — se descartan primero H3, luego
+  H2, y si los de nivel superior aún no caben se muestrean uniformemente; la rayita activa es la del
+  encabezado activo o la anterior más cercana mostrada. El hueco entre rayitas se compacta (7→4 px)
+  a partir de 20.
+- **Opt-in por prop** `showToc` de `Editor` (default `false`): solo `NoteEditor` lo pasa (desde el
+  ajuste), así sale en el editor principal, en cada panel del split y en la ventana de sección
+  (`SectionWindowApp` monta `NoteEditor`), y **no** en stickies (`StickyApp` usa `Editor` sin la prop).
+  En modo raw no existe (`NoteEditor` renderiza el textarea en vez de `Editor`).
+- **Ajuste** Settings → Editor → "Table of contents" (switch), **activado por defecto**. Vive en
+  `editorSettingsStore.showToc` y se **sincroniza** en `ui-settings.json` (`editor.showToc`, saneado en
+  `electron/uiSettings.ts` **y en su espejo de noteflow-mobile**) como sus vecinos; sin clave legacy
+  en localStorage (nació con el fichero sincronizado): ausente = mostrado.
+- **Extracción:** `doc.descendants` sin bajar a textblocks (barato en notas grandes); vacíos y
+  niveles fuera de 1–3 se descartan; la sangría es relativa al nivel más alto presente (una sección
+  solo con H2/H3 empieza sin sangría). Se recalcula en cualquier transacción con `docChanged`
+  (debounce 200 ms) — no en el evento `update`, que `setContent(…, false)` del sync externo no emite —
+  y solo re-renderiza si cambia la firma (`tocSignature`).
+- **Reserva de espacio solo para el indicador:** el scroller recibe `.editor-has-toc` y
+  `--toc-reserve` (`TOC_RESERVE` = 44 px) e `index.css` lo convierte en `padding-right` del
+  `.ProseMirror` (en reposo nada pasa bajo las rayitas; el panel desplegado sí tapa, a propósito). En
+  **Readable** el `padding-left` crece hasta el mismo valor (`clamp(1.5rem, 100cqw - reserve - col,
+  reserve)`) para que la columna siga centrada; las acciones de tarea siguen saliendo al margen
+  derecho pero su borde derecho se acota contra `--toc-reserve` en vez del borde del editor. Bajo
+  **420 px** de ancho del scroller (`TOC_MIN_EDITOR_WIDTH`, `ResizeObserver`; paneles muy estrechos)
+  se oculta: el panel taparía casi todo. Sin encabezados tampoco se muestra.
+- **Posición:** `absolute` dentro de un wrapper `relative` que envuelve al scroller (hermano, no hijo:
+  no se mueve con el scroll), a 10 px del borde (libra el scrollbar). Solo tokens del tema.
+- **Activo y salto:** en cada scroll (rAF) se miden los `view.nodeDOM(pos)` de los encabezados y
+  `pickActiveHeading` elige el último cuyo top cruzó 64 px desde arriba (al fondo del scroll, el
+  último visible). Click → `scroller.scrollTo({ behavior: 'smooth' })` dejando el heading a 16 px del
+  borde; durante ese scroll programático la medición se congela hasta `scrollend` (sin parpadeo del
+  resaltado). El panel sigue abierto mientras el ratón esté encima. `mousedown` hace
+  `preventDefault` (entradas e indicador) para no robar el foco/caret al editor ni dejar el panel
+  abierto por `focus-within` tras un click. El auto-scroll del panel hacia la entrada activa se hace a
+  mano (`scrollIntoView` scrollearía también los ancestros `overflow-hidden` del editor).
+
 ### Relaciones sección↔sección (slash command + cerebro)
 Enlaces explícitos que el usuario crea **inline mientras escribe**: en el editor rich teclea `/` →
 menú de comandos → "Link section" → buscador de secciones → inserta una **pill** que enlaza a otra

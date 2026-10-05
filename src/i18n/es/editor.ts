@@ -17,6 +17,10 @@ export const editor = {
 
   deletesAt: 'Se elimina el {date}',
 
+  toc: {
+    label: 'Índice',
+  },
+
   sectionDeleted: 'Sección "{name}" eliminada',
   undo: 'Deshacer',
 

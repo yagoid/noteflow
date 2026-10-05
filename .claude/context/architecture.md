@@ -76,7 +76,7 @@ noteflow/
 │   │   ├── templatesStore.ts         # Plantillas de nota — persistidas en templates.json (IPC)
 │   │   ├── themeStore.ts             # Tema/fuente/acento/colores editor — SINCRONIZADO en ui-settings.json (IPC sendSync); escala de UI en localStorage (por dispositivo)
 │   │   ├── languageStore.ts          # Idioma UI (i18n) — settings.json vía IPC; dict de src/i18n; cambio en caliente vía broadcast
-│   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible del editor — SINCRONIZADO en ui-settings.json (IPC)
+│   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible/índice (TOC) del editor — SINCRONIZADO en ui-settings.json (IPC)
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
 │   │   ├── aiStore.ts                # Estado del índice IA (enabled, related, grafo, progreso) vía IPC ai:*
 │   │   └── aiChatStore.ts            # Estado del chat/LLM (config por proveedor, modelos, mensajes, sesiones) vía IPC ai:llm-*/ai:chat*/ai:chats-*
@@ -86,6 +86,7 @@ noteflow/
 │   │   │   ├── NoteEditor.tsx           # Wrapper con tabs de secciones, atajos de fuente
 │   │   │   ├── SectionNameField.tsx     # Nombre editable de la franja del click derecho en un tab
 │   │   │   ├── EditorToolbar.tsx        # Toolbar de formato
+│   │   │   ├── EditorToc.tsx            # Índice flotante H1–H3 (+ useEditorToc.ts: lectura del doc)
 │   │   │   ├── DeadlineTaskItem.ts      # Extensión TipTap: task item con deadline+alarma
 │   │   │   ├── DeadlineTaskItemView.tsx # NodeView React para DeadlineTaskItem
 │   │   │   ├── CodeBlockWithCopy.tsx    # NodeView: code block con botón copiar
@@ -167,6 +168,7 @@ noteflow/
 │   │   ├── cryptoUtils.ts        # Cifrado AES-256-GCM + PBKDF2 (WebCrypto)
 │   │   ├── alarmUtils.ts         # Recolección de alarmas/deadlines para programarlas
 │   │   ├── paneUtils.ts          # Modelo puro de paneles del split (abrir/cerrar/reordenar/enfocar) — testeado
+│   │   ├── tocUtils.ts           # Lógica pura del índice flotante del editor (entradas, activo) — testeado
 │   │   ├── keyedQueue.ts         # Cola serial por clave (escrituras de una nota en orden) — testeada
 │   │   ├── encryptedSession.ts   # Re-descifrado con la contraseña de sesión tras recargar + guarda
 │   │   │                         #   anti-borrado de escrituras de notas cifradas — testeado
@@ -333,8 +335,12 @@ Contenido del dir de notas:
 - `note-order.json` — orden manual de notas por contexto (`Record<contextKey, string[]>`); contextKey: `'ungrouped'`, `'group:<id>'`, `'folder:<id>'`, `'favorites'`. Gestionado desde `groupsStore` (`noteOrder`, `setContextNoteOrder`).
 - `templates.json` — array de plantillas de nota (`NoteTemplate[]`: `{id,name,title,sections,createdAt}`). Gestionado desde `templatesStore`. Crear nota desde plantilla regenera ids de sección y usa `createPopulatedNote`; "Save as template" en el menú ⋯ del editor captura título + secciones (oculto si la nota está cifrada y bloqueada). UI en Settings → Templates.
 - `ui-settings.json` — apariencia (tema, fuente de app, acento, colores del editor) + ajustes del
-  editor (tamaño/familia de fuente, ancho legible) sincronizados entre dispositivos. Formato y
+  editor (tamaño/familia de fuente, ancho legible, índice flotante `showToc`) sincronizados entre dispositivos. Formato y
   saneado/merge en `electron/uiSettings.ts` (módulo puro, tests en `tests/electron/uiSettings.test.ts`).
+  **Espejo en noteflow-mobile** (`src/core/uiSettings.ts`): su saneador también descarta claves
+  desconocidas y el móvil re-sanea el fichero antes de cada escritura (`appearanceStore`), así que un
+  campo nuevo que no se porte allí se borra en cuanto el móvil guarda su apariencia (p. ej. un cambio de
+  acento). Todo campo nuevo del esquema hay que añadirlo en los dos.
   Claves de override tri-estado: AUSENTE = nunca escrita (los stores caen a las fuentes legacy
   locales y hacen seed una vez), `null` = override borrado explícitamente ("sigue al tema"),
   string = valor. Los stores (`themeStore`, `editorSettingsStore`) siguen dual-escribiendo las

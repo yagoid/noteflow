@@ -17,7 +17,7 @@ describe('sanitizeUiSettings (tolerant validation)', () => {
       appFont: 'inter',
       accent: '129 140 248',
       editorColors: { h1: '255 0 0', h2: null },
-      editor: { fontSize: 15, fontFamily: 'mono', readableWidth: false },
+      editor: { fontSize: 15, fontFamily: 'mono', readableWidth: false, showToc: false },
     }
     expect(sanitizeUiSettings(input)).toEqual(input)
   })
@@ -61,6 +61,8 @@ describe('sanitizeUiSettings (tolerant validation)', () => {
       sanitizeUiSettings({ editor: { fontFamily: 'comic-sans', readableWidth: true } })
     ).toEqual({ editor: { readableWidth: true } })
     expect(sanitizeUiSettings({ editor: { readableWidth: 'yes' } })).toEqual({})
+    expect(sanitizeUiSettings({ editor: { showToc: 1 } })).toEqual({})
+    expect(sanitizeUiSettings({ editor: { showToc: 'no', fontSize: 14 } })).toEqual({ editor: { fontSize: 14 } })
   })
 
   it('discards unknown keys everywhere', () => {
@@ -101,6 +103,12 @@ describe('mergeUiSettings (partial patch over the file)', () => {
       fontSize: 20,
       fontFamily: 'inter',
       readableWidth: true,
+    })
+    expect(mergeUiSettings(current, { editor: { showToc: false } }).editor).toEqual({
+      fontSize: 13,
+      fontFamily: 'inter',
+      readableWidth: true,
+      showToc: false,
     })
   })
 
