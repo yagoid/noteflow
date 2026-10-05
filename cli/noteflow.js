@@ -82,6 +82,25 @@ function out(msg) { if (jsonMode) console.error(msg); else console.log(msg) }
 function err(msg) { console.error(`  Error: ${msg}`) }
 
 /**
+ * Ends the command with `code`. ⚠️ Never call process.exit() in this file: on
+ * Windows (seen on Node 24) a hard exit while a fetch/https keep-alive socket is
+ * still open intermittently aborts the process with the libuv assertion
+ * `!(handle->flags & UV_HANDLE_CLOSING)` (src\win\async.c) — and with exit code
+ * 127 instead of 1. Instead the code goes to process.exitCode and a CliExit
+ * unwinds to the handler at the bottom of main(); Node then exits NATURALLY once
+ * the event loop drains (idle keep-alive sockets are unref'd, so it doesn't wait
+ * for them). Like process.exit, it never returns: code after it does not run.
+ * An enclosing try/catch would intercept it — keep exit() out of try blocks.
+ */
+class CliExit extends Error {
+  constructor(code) { super(`exit ${code}`); this.exitCode = code }
+}
+function exit(code) {
+  process.exitCode = code
+  throw new CliExit(code)
+}
+
+/**
  * JSON.stringify with every non-ASCII char escaped as \uXXXX so the output
  * survives any console codepage (PowerShell 5.1 mangles raw UTF-8 otherwise).
  * Escaping per UTF-16 code unit keeps surrogate pairs valid JSON.
@@ -213,11 +232,11 @@ function resolveFolder(nameOrId, opts) {
   let groupId
   if (opts.group) {
     const g = findGroup(opts.group)
-    if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
+    if (!g) { err(`Group not found: "${opts.group}"`); exit(1) }
     groupId = g.id
   }
   const matches = findFolders(nameOrId, groupId)
-  if (!matches.length) { err(`No folder found: "${nameOrId}"`); process.exit(1) }
+  if (!matches.length) { err(`No folder found: "${nameOrId}"`); exit(1) }
   if (matches.length > 1) {
     const groups = readGroups()
     out('  Multiple folders match — narrow with --group:')
@@ -225,7 +244,7 @@ function resolveFolder(nameOrId, opts) {
       const g = groups.find(gr => gr.id === f.groupId)
       out(`    ${f.name}  (group: ${g ? g.name : '?'})`)
     })
-    process.exit(1)
+    exit(1)
   }
   return matches[0]
 }
@@ -430,11 +449,11 @@ function extractUpdatedTimestamp(content) {
 /** Resolves a single note by (partial) title, exiting with a helpful error on 0/many matches. */
 function resolveNote(titleQuery) {
   const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
+  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
   if (matches.length > 1) {
     out('  Multiple matches — be more specific:')
     matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`))
-    process.exit(1)
+    exit(1)
   }
   return matches[0]
 }
@@ -493,18 +512,18 @@ function matchSectionOrNull(note, name, { fuzzy = false } = {}) {
   if (ordinal != null) {
     if (exact[ordinal - 1]) return exact[ordinal - 1]
     err(`"${baseName}#${ordinal}" out of range in "${note.title}" — there ${exact.length === 1 ? 'is' : 'are'} ${exact.length} section(s) named "${baseName}"`)
-    process.exit(1)
+    exit(1)
   }
   if (exact.length === 1) return exact[0]
   if (exact.length > 1) {
     err(`Multiple sections named "${baseName}" in "${note.title}". Disambiguate with "${baseName}#1" … "${baseName}#${exact.length}".`)
-    process.exit(1)
+    exit(1)
   }
   const partial = (note.sections || []).filter(s => s.name.toLowerCase().includes(q))
   if (partial.length === 1) return partial[0]
   if (partial.length > 1) {
     err(`Ambiguous section "${baseName}" in "${note.title}" — matches: ${partial.map(s => s.name).join(', ')}. Use the exact name.`)
-    process.exit(1)
+    exit(1)
   }
   if (fuzzy) {
     const loose = fuzzySectionMatches(note.sections, baseName)
@@ -515,7 +534,7 @@ function matchSectionOrNull(note, name, { fuzzy = false } = {}) {
     }
     if (loose.length > 1) {
       err(`Ambiguous section "${baseName}" in "${note.title}" — matches: ${loose.map(s => s.name).join(', ')}. Use the exact name.`)
-      process.exit(1)
+      exit(1)
     }
   }
   return null
@@ -524,7 +543,7 @@ function matchSectionOrNull(note, name, { fuzzy = false } = {}) {
 /** Like matchSectionOrNull but exits when nothing matches (read/rename/delete must target an existing section). */
 function resolveSection(note, name, opts) {
   const sec = matchSectionOrNull(note, name, opts)
-  if (!sec) { err(`No section "${parseSectionRef(name).baseName}" in "${note.title}". Sections: ${sectionNamesOf(note)}`); process.exit(1) }
+  if (!sec) { err(`No section "${parseSectionRef(name).baseName}" in "${note.title}". Sections: ${sectionNamesOf(note)}`); exit(1) }
   return sec
 }
 
@@ -544,9 +563,9 @@ async function resolveSetContent(opts) {
   if (typeof opts.text === 'string') raw = opts.text
   else if (opts.file) {
     try { raw = fs.readFileSync(path.resolve(opts.file), 'utf-8') }
-    catch (e) { err(`Cannot read --file: ${e.message}`); process.exit(1) }
+    catch (e) { err(`Cannot read --file: ${e.message}`); exit(1) }
   } else if (opts.stdin || !process.stdin.isTTY) { fromStdin = true; raw = await readStdin() }
-  else { err('No content. Provide --text "..." , --file <path>, or pipe content with --stdin'); process.exit(1) }
+  else { err('No content. Provide --text "..." , --file <path>, or pipe content with --stdin'); exit(1) }
   // Strip a leading BOM (PowerShell pipes/here-strings add one) and normalize
   // CRLF/CR to LF so piped/echoed input round-trips cleanly.
   const content = raw.replace(/^﻿+/, '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
@@ -562,7 +581,7 @@ async function resolveSetContent(opts) {
       + '  Workarounds for the latter: write the content to a file and pass --file <path>, or invoke\n'
       + '  the cmd shim explicitly ("text" | noteflow.cmd set ... --stdin). Only reinstalling/updating\n'
       + '  the NoteFlow app refreshes the shims — \'noteflow self-update\' does not.')
-    process.exit(1)
+    exit(1)
   }
   return content
 }
@@ -1002,29 +1021,74 @@ async function cloudRestWithRetry(fn) {
 // on every run instead (one extra round-trip, zero secrets at rest).
 let cloudDek = null
 
-function promptLine(question) {
+// ── Prompts ───────────────────────────────────────────────────────────────────
+
+// Set once stdin is exhausted (EOF on a pipe, Ctrl+D) or a prompt is aborted
+// (Ctrl+C closes the readline): later prompts must not wait for a line that can
+// never arrive.
+let stdinClosed = false
+
+/**
+ * Reads one trimmed line. Resolves '' for an empty line (Enter) but `null` when
+ * stdin is closed — readline never calls the question() callback on EOF, so the
+ * promise would otherwise stay pending forever (and the CLI would end silently).
+ * `hidden` mutes the echo on a TTY (passphrases).
+ */
+function readPromptLine(question, { hidden = false, output = process.stdout } = {}) {
+  if (stdinClosed || process.stdin.readableEnded) {
+    stdinClosed = true
+    return Promise.resolve(null)
+  }
+  const mute = hidden && process.stdin.isTTY
   return new Promise(resolve => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-    rl.question(`  ${question}`, answer => { rl.close(); resolve(answer.trim()) })
+    const rl = readline.createInterface({ input: process.stdin, output })
+    let answered = false
+    let muted = false
+    if (mute) {
+      const write = rl._writeToOutput.bind(rl)
+      rl._writeToOutput = (s) => { if (!muted) write(s) }
+    }
+    rl.on('close', () => {
+      if (answered) return
+      stdinClosed = true
+      output.write('\n') // move off the dangling prompt before any error line
+      resolve(null)
+    })
+    rl.question(`  ${question}`, answer => {
+      answered = true
+      if (mute) { muted = false; output.write('\n') }
+      rl.close()
+      resolve(answer.trim())
+    })
+    if (mute) muted = true // question() wrote the prompt synchronously; keystrokes stay hidden
   })
+}
+
+/** One line from stdin; `null` = stdin closed (see readPromptLine). */
+function promptLine(question) {
+  return readPromptLine(question)
 }
 
 /** Interactive prompt with hidden echo (passphrases). Plain line read when stdin is not a TTY. */
 function promptHidden(question) {
-  if (!process.stdin.isTTY) return promptLine(question)
-  return new Promise(resolve => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-    let muted = false
-    const write = rl._writeToOutput.bind(rl)
-    rl._writeToOutput = (s) => { if (!muted) write(s) }
-    rl.question(`  ${question}`, answer => {
-      muted = false
-      rl.output.write('\n')
-      rl.close()
-      resolve(answer.trim())
-    })
-    muted = true // question() wrote the prompt synchronously; keystrokes stay hidden
-  })
+  return readPromptLine(question, { hidden: true })
+}
+
+/**
+ * Asks until `parse` accepts the answer (it returns the value, or null to
+ * reject). An empty line — Enter pressed too early — or malformed input prints
+ * `hint(answer)` and asks again instead of aborting. Returns null when stdin is
+ * closed (check `stdinClosed`) or after `attempts` rejected answers.
+ */
+async function promptUntil(question, parse, hint, attempts = 5) {
+  for (let i = 1; i <= attempts; i++) {
+    const answer = await promptLine(question)
+    if (answer === null) return null
+    const value = parse(answer)
+    if (value !== null) return value
+    if (i < attempts) out(`  ${hint(answer)}`)
+  }
+  return null
 }
 
 /**
@@ -1310,11 +1374,36 @@ async function cloudPullNow() {
 
 // ── NoteFlow Cloud: commands ──────────────────────────────────────────────────
 
+// The project's GoTrue emails 6-digit codes (⚠️ keep in sync with the "Sent a
+// 6-digit code" copy). Spaces/dashes are tolerated so a pasted "123 456" works.
+const OTP_CODE_RE = /^\d{6}$/
+// Codes /verify may reject before giving up. GoTrue answers a mistyped code and
+// an expired one identically (otp_expired / "Token has expired or is invalid"),
+// so a typo can be retried without emailing a new code (and hitting the 429).
+const OTP_VERIFY_ATTEMPTS = 3
+
+function normalizeOtpCode(answer) {
+  const code = answer.replace(/[\s-]/g, '')
+  return OTP_CODE_RE.test(code) ? code : null
+}
+
+/** Same detection as electron/account.ts verifyOtp → 'invalidCode'. */
+function isInvalidOtpResponse(json) {
+  if (!json || typeof json !== 'object') return false
+  if (json.error_code === 'otp_expired') return true
+  const msg = ['msg', 'message', 'error_description', 'error'].map(k => json[k]).find(v => typeof v === 'string' && v)
+  return !!msg && /expired|invalid/i.test(msg)
+}
+
 // noteflow cloud login [email]
 async function cmdCloudLogin(emailArg) {
   let email = (emailArg || '').trim()
-  if (!email) email = await promptLine('Email: ')
-  if (!email || !email.includes('@')) { err('A valid email is required'); process.exit(1) }
+  if (!email) {
+    email = await promptUntil('Email: ',
+      a => (a.includes('@') ? a : null),
+      a => (a ? `"${a}" is not an email address — try again` : 'Type the email of your NoteFlow account'))
+    if (!email) { err(stdinClosed ? 'No email entered' : 'A valid email is required'); exit(1) }
+  } else if (!email.includes('@')) { err('A valid email is required'); exit(1) }
 
   const otp = await supabaseFetch(`${SUPABASE_URL}/auth/v1/otp`, {
     method: 'POST',
@@ -1324,20 +1413,37 @@ async function cmdCloudLogin(emailArg) {
     err(otp.status === 429
       ? 'Too many attempts — wait a moment and try again'
       : `Could not send the sign-in code (HTTP ${otp.status})`)
-    process.exit(1)
+    exit(1)
   }
   out(`  Sent a 6-digit code to ${email}`)
-  const code = await promptLine('Code: ')
-  if (!code) { err('No code entered'); process.exit(1) }
 
-  const verify = await supabaseFetch(`${SUPABASE_URL}/auth/v1/verify`, {
-    method: 'POST',
-    body: { type: 'email', email, token: code },
-  })
-  const session = verify.json
-  if (verify.status >= 400 || !session || !session.access_token || !session.refresh_token || !session.user) {
-    err('That code is invalid or has expired. Run `noteflow cloud login` again.')
-    process.exit(1)
+  // An empty or malformed entry re-prompts locally (the emailed code stays
+  // valid); only a well-formed code spends a /verify attempt.
+  let session = null
+  for (let attempt = 1; !session; attempt++) {
+    const code = await promptUntil('Code: ', normalizeOtpCode,
+      a => (a ? `"${a}" is not a 6-digit code — paste the code from the email` : 'Paste the 6-digit code from the email'))
+    if (!code) { err(stdinClosed ? 'No code entered' : 'No valid code entered — run `noteflow cloud login` again'); exit(1) }
+
+    const verify = await supabaseFetch(`${SUPABASE_URL}/auth/v1/verify`, {
+      method: 'POST',
+      body: { type: 'email', email, token: code },
+    })
+    if (verify.status < 400) {
+      session = verify.json
+      if (!session || !session.access_token || !session.refresh_token || !session.user) {
+        err('Unexpected response from the account service'); exit(1)
+      }
+    } else if (verify.status === 429) {
+      err('Too many attempts — wait a moment and try again'); exit(1)
+    } else if (!isInvalidOtpResponse(verify.json)) {
+      err(`Could not verify the code (HTTP ${verify.status})`); exit(1)
+    } else if (attempt >= OTP_VERIFY_ATTEMPTS) {
+      err('That code is invalid or has expired. Run `noteflow cloud login` again to get a new one.'); exit(1)
+    } else {
+      const left = OTP_VERIFY_ATTEMPTS - attempt
+      out(`  That code is invalid or has expired — check it and try again (${left} ${left === 1 ? 'attempt' : 'attempts'} left)`)
+    }
   }
   saveCliAccount({
     email: session.user.email || email,
@@ -1426,7 +1532,7 @@ async function cmdCloudStatus(opts) {
 // noteflow cloud setup — MANAGED mode only: the e2ee setup (passphrase + the
 // one-time recovery code UX) lives in the desktop app.
 async function cmdCloudSetup() {
-  if (!getCliAccount()) { err('Not signed in. Run: noteflow cloud login'); process.exit(1) }
+  if (!getCliAccount()) { err('Not signed in. Run: noteflow cloud login'); exit(1) }
   const token = await getCloudAccessToken()
   const dek = generateDek()
   const res = await supabaseFetch(`${CLOUD_KEYS_URL}/setup`, {
@@ -1434,15 +1540,15 @@ async function cmdCloudSetup() {
     body: { dek: toB64Url(dek) },
     accessToken: token,
   })
-  if (res.status === 409) { err('Cloud keys already exist for this account'); process.exit(1) }
-  if (res.status >= 400) { err(`Could not set up the Cloud keys (HTTP ${res.status})`); process.exit(1) }
+  if (res.status === 409) { err('Cloud keys already exist for this account'); exit(1) }
+  if (res.status >= 400) { err(`Could not set up the Cloud keys (HTTP ${res.status})`); exit(1) }
   out('  Cloud keys created (standard/managed mode)')
   out('  For private end-to-end encryption, set up NoteFlow Cloud in the desktop app instead.')
 }
 
 // noteflow cloud push (also plain `noteflow push` while Cloud is active)
 async function cmdCloudPush() {
-  if (!cloudActive()) { err('Not connected to NoteFlow Cloud. Run: noteflow cloud login'); process.exit(1) }
+  if (!cloudActive()) { err('Not connected to NoteFlow Cloud. Run: noteflow cloud login'); exit(1) }
   if (!fs.existsSync(NOTES_DIR)) { out('  No notes to push'); return }
   await cloudEnsureReconciled()
   const dek = await getCliDek()
@@ -1466,7 +1572,7 @@ async function cmdCloudPush() {
       pushed++
       process.stdout.write(`\r  ${pushed}/${relPaths.length}`)
     } catch (e) {
-      if (e.subscription) { process.stdout.write('\n'); err(e.message); process.exit(1) }
+      if (e.subscription) { process.stdout.write('\n'); err(e.message); exit(1) }
       errors++
       console.error(`\n  Failed: ${relPath} — ${e.message}`)
     }
@@ -1477,7 +1583,7 @@ async function cmdCloudPush() {
 
 // noteflow cloud pull (also plain `noteflow pull` while Cloud is active)
 async function cmdCloudPull() {
-  if (!cloudActive()) { err('Not connected to NoteFlow Cloud. Run: noteflow cloud login'); process.exit(1) }
+  if (!cloudActive()) { err('Not connected to NoteFlow Cloud. Run: noteflow cloud login'); exit(1) }
   out('  Pulling from NoteFlow Cloud...')
   const { pulled, deleted, errors } = await cloudPullNow()
   out(`  Done: ${pulled} pulled, ${deleted} deleted, ${errors} errors`)
@@ -1485,12 +1591,12 @@ async function cmdCloudPull() {
 
 // ── Confirm prompt ────────────────────────────────────────────────────────────
 
-function confirm(question) {
-  return new Promise(resolve => {
-    // In --json mode the prompt goes to stderr so stdout stays pure JSON
-    const rl = readline.createInterface({ input: process.stdin, output: jsonMode ? process.stderr : process.stdout })
-    rl.question(`  ${question} (y/N) `, answer => { rl.close(); resolve(answer.trim().toLowerCase() === 'y') })
-  })
+async function confirm(question) {
+  // In --json mode the prompt goes to stderr so stdout stays pure JSON
+  const answer = await readPromptLine(`${question} (y/N) `, { output: jsonMode ? process.stderr : process.stdout })
+  // No stdin to answer from (pipe/agent/cron): the default "N" — say how to skip the prompt.
+  if (answer === null) console.error('  No answer (stdin is closed) — pass --yes to skip this confirmation')
+  return answer !== null && answer.toLowerCase() === 'y'
 }
 
 /** Best-effort check: is the NoteFlow desktop app running? (it may overwrite CLI metadata edits) */
@@ -1523,13 +1629,13 @@ async function cmdAdd(positionalText, opts) {
   const hasFlagSource = typeof opts.text === 'string' || opts.file || opts.stdin
   if (positionalText && hasFlagSource) {
     err('Provide the content either as an argument or via --text/--file/--stdin — not both')
-    process.exit(1)
+    exit(1)
   }
   let text
   if (positionalText) text = positionalText.replace(/^﻿+/, '').replace(/\r\n?/g, '\n')
   else if (hasFlagSource || !process.stdin.isTTY) text = await resolveSetContent(opts)
-  else { err('Usage: noteflow add <text> [options] — or provide content with --text "...", --file <path>, or --stdin'); process.exit(1) }
-  if (!text) { err('No content to add'); process.exit(1) }
+  else { err('Usage: noteflow add <text> [options] — or provide content with --text "...", --file <path>, or --stdin'); exit(1) }
+  if (!text) { err('No content to add'); exit(1) }
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
 
   const targetTitle = opts.title || getTodayTitle()
@@ -1547,7 +1653,7 @@ async function cmdAdd(positionalText, opts) {
     // --title fails loudly instead of silently spawning a stray note.
     if (!existing && !opts.create) {
       err(`Note "${opts.title}" not found. Pass --create to create it, or use 'noteflow new'.`)
-      process.exit(1)
+      exit(1)
     }
   } else {
     existing = findTodayNote() // the daily note keeps its auto-create behavior
@@ -1555,7 +1661,7 @@ async function cmdAdd(positionalText, opts) {
 
   if (existing) {
     const note = readNoteFolder(existing.dirname)
-    if (!note) { err(`Could not read note "${existing.title}"`); process.exit(1) }
+    if (!note) { err(`Could not read note "${existing.title}"`); exit(1) }
     if (!note.sections.length) note.sections = [{ id: nanoid(6), name: 'Note', content: '', isRawMode: true }]
 
     // Find or create target section. An EXPLICIT --section resolves like in `set`
@@ -1649,16 +1755,16 @@ async function cmdNew(title, opts) {
   let groupId, folderId
   if (opts.group) {
     const g = findGroup(opts.group)
-    if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
+    if (!g) { err(`Group not found: "${opts.group}"`); exit(1) }
     groupId = g.id
     if (opts.folder) {
       const matches = findFolders(opts.folder, g.id)
-      if (!matches.length) { err(`Folder "${opts.folder}" not found in group "${g.name}"`); process.exit(1) }
-      if (matches.length > 1) { err(`Multiple folders match "${opts.folder}" in "${g.name}"`); process.exit(1) }
+      if (!matches.length) { err(`Folder "${opts.folder}" not found in group "${g.name}"`); exit(1) }
+      if (matches.length > 1) { err(`Multiple folders match "${opts.folder}" in "${g.name}"`); exit(1) }
       folderId = matches[0].id
     }
   } else if (opts.folder) {
-    err('--folder requires --group'); process.exit(1)
+    err('--folder requires --group'); exit(1)
   }
   const note = {
     id, title, tags: [], created: now, updated: now,
@@ -1719,11 +1825,11 @@ function cmdList(opts) {
 // noteflow get <title> [--section <s>] [--json]
 function cmdGet(titleQuery, opts) {
   const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
+  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
   if (matches.length > 1 && !opts.json) {
     out(`  Multiple matches — be more specific:`)
     matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`))
-    process.exit(1)
+    exit(1)
   }
   const note = matches[0]
 
@@ -1755,11 +1861,11 @@ function cmdGet(titleQuery, opts) {
 // noteflow delete <title> [--yes] [--json]
 async function cmdDelete(titleQuery, opts) {
   const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
+  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
   if (matches.length > 1) {
     out('  Multiple matches — be more specific:')
     matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`))
-    process.exit(1)
+    exit(1)
   }
   const note = matches[0]
   if (!opts.yes) {
@@ -1808,10 +1914,10 @@ async function cmdDelete(titleQuery, opts) {
 // noteflow favorite <title>
 async function cmdFavorite(titleQuery) {
   const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
+  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
   if (matches.length > 1) {
     out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); process.exit(1)
+    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); exit(1)
   }
   const note = matches[0]
   note.favorited = !(note.favorited || note.pinned)
@@ -1824,10 +1930,10 @@ async function cmdFavorite(titleQuery) {
 // noteflow archive <title>
 async function cmdArchive(titleQuery) {
   const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
+  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
   if (matches.length > 1) {
     out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); process.exit(1)
+    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); exit(1)
   }
   const note = matches[0]
   note.archived = !note.archived
@@ -1839,10 +1945,10 @@ async function cmdArchive(titleQuery) {
 // noteflow rename <old-title> <new-title>
 async function cmdRename(oldTitle, newTitle) {
   const matches = findNoteByTitle(oldTitle)
-  if (!matches.length) { err(`No note found: "${oldTitle}"`); process.exit(1) }
+  if (!matches.length) { err(`No note found: "${oldTitle}"`); exit(1) }
   if (matches.length > 1) {
     out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); process.exit(1)
+    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); exit(1)
   }
   const note = matches[0]
   note.title = newTitle
@@ -1855,10 +1961,10 @@ async function cmdRename(oldTitle, newTitle) {
 // noteflow sections <title>
 function cmdSections(titleQuery) {
   const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
+  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
   if (matches.length > 1) {
     out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); process.exit(1)
+    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); exit(1)
   }
   const note = matches[0]
   out(`\n  Sections of "${note.title}":`)
@@ -1928,7 +2034,7 @@ async function cmdTouch(titleQuery) {
   // section file from note.sections[].content, so a stale copy would clobber
   // the very edit we are here to publish.
   const note = readNoteFolder(found.dirname)
-  if (!note) { err(`Could not read note "${found.title}"`); process.exit(1) }
+  if (!note) { err(`Could not read note "${found.title}"`); exit(1) }
   const written = writeNoteFolder(note.dirname, note)
   const stamp = extractUpdatedTimestamp(fs.readFileSync(path.join(NOTES_DIR, note.dirname, NOTE_MD), 'utf-8'))
   out(`  Updated "${note.title}"  (updated: ${stamp})`)
@@ -1990,7 +2096,7 @@ async function cmdSectionDelete(titleQuery, name, opts) {
   const sec = resolveSection(note, name)
   if ((note.sections || []).length <= 1) {
     err(`Cannot delete the last section of "${note.title}" — a note must keep at least one section`)
-    process.exit(1)
+    exit(1)
   }
   if (!opts.yes) {
     const ok = await confirm(`Delete section "${sec.name}" from "${note.title}"?`)
@@ -2032,7 +2138,7 @@ function cmdGroupCreate(name, opts) {
   warnIfDesktopRunning(opts)
   const groups = readGroups()
   if (groups.find(g => g.name.toLowerCase() === name.toLowerCase())) {
-    err(`Group "${name}" already exists`); process.exit(1)
+    err(`Group "${name}" already exists`); exit(1)
   }
   const color = opts.color
     ? (GROUP_COLORS.find(c => c.includes(opts.color)) || '--accent')
@@ -2049,7 +2155,7 @@ async function cmdGroupDelete(name, opts) {
   warnIfDesktopRunning(opts)
   const groups = readGroups()
   const g = groups.find(gr => gr.name.toLowerCase() === name.toLowerCase() || gr.id === name)
-  if (!g) { err(`Group not found: "${name}"`); process.exit(1) }
+  if (!g) { err(`Group not found: "${name}"`); exit(1) }
   if (!opts.yes) {
     const ok = await confirm(`Delete group "${g.name}"? (Notes will be ungrouped)`)
     if (!ok) { out('  Cancelled'); return }
@@ -2076,7 +2182,7 @@ function cmdFolders(opts) {
   const groups = readGroups()
   if (opts.group) {
     const g = findGroup(opts.group)
-    if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
+    if (!g) { err(`Group not found: "${opts.group}"`); exit(1) }
     folders = folders.filter(f => f.groupId === g.id)
   }
   if (opts.json) { jsonOut(folders); return }
@@ -2099,12 +2205,12 @@ function cmdFolders(opts) {
 // noteflow folder create <name> --group <group>
 function cmdFolderCreate(name, opts) {
   warnIfDesktopRunning(opts)
-  if (!opts.group) { err('A folder needs a group. Use: noteflow folder create <name> --group <group>'); process.exit(1) }
+  if (!opts.group) { err('A folder needs a group. Use: noteflow folder create <name> --group <group>'); exit(1) }
   const g = findGroup(opts.group)
-  if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
+  if (!g) { err(`Group not found: "${opts.group}"`); exit(1) }
   const folders = readFolders()
   if (folders.find(f => f.groupId === g.id && f.name.toLowerCase() === name.toLowerCase())) {
-    err(`Folder "${name}" already exists in group "${g.name}"`); process.exit(1)
+    err(`Folder "${name}" already exists in group "${g.name}"`); exit(1)
   }
   const siblings = folders.filter(f => f.groupId === g.id)
   const maxOrder = siblings.length ? Math.max(...siblings.map(f => f.order ?? 0)) : -1
@@ -2122,7 +2228,7 @@ function cmdFolderRename(name, newName, opts) {
   const folders = readFolders()
   const g = readGroups().find(gr => gr.id === folder.groupId)
   if (folders.find(f => f.groupId === folder.groupId && f.id !== folder.id && f.name.toLowerCase() === newName.toLowerCase())) {
-    err(`Folder "${newName}" already exists in group "${g ? g.name : folder.groupId}"`); process.exit(1)
+    err(`Folder "${newName}" already exists in group "${g ? g.name : folder.groupId}"`); exit(1)
   }
   writeFolders(folders.map(f => (f.id === folder.id ? { ...f, name: newName } : f)))
   out(`  Renamed folder "${folder.name}" → "${newName}"`)
@@ -2158,14 +2264,14 @@ async function cmdMove(titleQuery, opts) {
     await syncPushNoteFiles(note.dirname, [NOTE_MD])
     return
   }
-  if (!opts.group) { err('Usage: noteflow move <title> --group <g> [--folder <f>]   (or --ungroup)'); process.exit(1) }
+  if (!opts.group) { err('Usage: noteflow move <title> --group <g> [--folder <f>]   (or --ungroup)'); exit(1) }
   const g = findGroup(opts.group)
-  if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
+  if (!g) { err(`Group not found: "${opts.group}"`); exit(1) }
   note.group = g.id
   if (opts.folder) {
     const matches = findFolders(opts.folder, g.id)
-    if (!matches.length) { err(`Folder "${opts.folder}" not found in group "${g.name}"`); process.exit(1) }
-    if (matches.length > 1) { err(`Multiple folders match "${opts.folder}" in "${g.name}"`); process.exit(1) }
+    if (!matches.length) { err(`Folder "${opts.folder}" not found in group "${g.name}"`); exit(1) }
+    if (matches.length > 1) { err(`Multiple folders match "${opts.folder}" in "${g.name}"`); exit(1) }
     note.folder = matches[0].id
   } else {
     delete note.folder // moving to the group root
@@ -2180,7 +2286,7 @@ async function cmdLogin(repoName) {
   const repo = repoName || DEFAULT_REPO
   out('\n  Authenticating with GitHub...')
   const data = await githubAuthPost('/login/device/code', { client_id: GITHUB_CLIENT_ID, scope: 'repo' })
-  if (data.error) { err(data.error_description || data.error); process.exit(1) }
+  if (data.error) { err(data.error_description || data.error); exit(1) }
   out(`\n  Go to:  ${data.verification_uri}`)
   out(`  Enter:  ${data.user_code}\n`)
   try {
@@ -2218,10 +2324,10 @@ async function cmdLogin(repoName) {
     }
     if (result.error === 'slow_down') interval += 5000
     else if (result.error !== 'authorization_pending') {
-      process.stdout.write('\n'); err(result.error_description || result.error); process.exit(1)
+      process.stdout.write('\n'); err(result.error_description || result.error); exit(1)
     }
   }
-  process.stdout.write('\n'); err('Authorization expired. Try again.'); process.exit(1)
+  process.stdout.write('\n'); err('Authorization expired. Try again.'); exit(1)
 }
 
 function cmdLogout() {
@@ -2240,9 +2346,9 @@ function listLocalNoteDirs() {
 
 async function cmdPush() {
   const sync = getSyncSettings()
-  if (!sync.enabled || !sync.owner || !sync.repo) { err('Not connected. Run: noteflow login'); process.exit(1) }
+  if (!sync.enabled || !sync.owner || !sync.repo) { err('Not connected. Run: noteflow login'); exit(1) }
   const token = getToken()
-  if (!token) { err('Token unavailable (encrypted by desktop app). Run: noteflow login'); process.exit(1) }
+  if (!token) { err('Token unavailable (encrypted by desktop app). Run: noteflow login'); exit(1) }
   if (!fs.existsSync(NOTES_DIR)) { out('  No notes to push'); return }
 
   // Every file of every note folder + root metadata + the format marker
@@ -2274,9 +2380,9 @@ async function cmdPush() {
 
 async function cmdPull(opts = {}) {
   const sync = getSyncSettings()
-  if (!sync.enabled || !sync.owner || !sync.repo) { err('Not connected. Run: noteflow login'); process.exit(1) }
+  if (!sync.enabled || !sync.owner || !sync.repo) { err('Not connected. Run: noteflow login'); exit(1) }
   const token = getToken()
-  if (!token) { err('Token unavailable (encrypted by desktop app). Run: noteflow login'); process.exit(1) }
+  if (!token) { err('Token unavailable (encrypted by desktop app). Run: noteflow login'); exit(1) }
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
   const force = opts.force === true
   out(`  Pulling from ${sync.owner}/${sync.repo}...${force ? ' (--force)' : ''}`)
@@ -2288,7 +2394,7 @@ async function cmdPull(opts = {}) {
     // 404/409 means the repo is empty (just initialized); any other error is real
     if (e.message && !e.message.includes('404') && !e.message.includes('409') && !e.message.toLowerCase().includes('not found') && !e.message.toLowerCase().includes('empty')) {
       err(`Could not list remote files: ${e.message}`)
-      process.exit(1)
+      exit(1)
     }
   }
 
@@ -2859,11 +2965,11 @@ function parseFlags(args) {
       const [key, value] = BOOLEAN_FLAGS[a]
       flags[key] = value
     } else if (VALUE_FLAGS.includes(a)) {
-      if (i + 1 >= args.length) { err(`Flag ${a} requires a value`); process.exit(1) }
+      if (i + 1 >= args.length) { err(`Flag ${a} requires a value`); exit(1) }
       flags[a.slice(2)] = args[++i]
     } else if (a.startsWith('--')) {
       err(`Unknown flag: ${a}`)
-      process.exit(1)
+      exit(1)
     } else positional.push(a)
   }
   return { flags, positional }
@@ -2889,60 +2995,60 @@ async function main() {
     }
     case 'new': {
       const title = positional.join(' ')
-      if (!title) { err('Usage: noteflow new <title>'); process.exit(1) }
+      if (!title) { err('Usage: noteflow new <title>'); exit(1) }
       await cmdNew(title, flags)
       break
     }
     case 'list':    cmdList(flags); break
     case 'get': {
       const title = positional.join(' ')
-      if (!title) { err('Usage: noteflow get <title>'); process.exit(1) }
+      if (!title) { err('Usage: noteflow get <title>'); exit(1) }
       cmdGet(title, flags)
       break
     }
     case 'delete':
     case 'rm': {
       const title = positional.join(' ')
-      if (!title) { err('Usage: noteflow delete <title>'); process.exit(1) }
+      if (!title) { err('Usage: noteflow delete <title>'); exit(1) }
       await cmdDelete(title, flags)
       break
     }
     case 'rename': {
-      if (positional.length < 2) { err('Usage: noteflow rename <old-title> <new-title>'); process.exit(1) }
+      if (positional.length < 2) { err('Usage: noteflow rename <old-title> <new-title>'); exit(1) }
       const [old, ...rest] = positional
       await cmdRename(old, rest.join(' '))
       break
     }
     case 'sections': {
       const title = positional.join(' ')
-      if (!title) { err('Usage: noteflow sections <title>'); process.exit(1) }
+      if (!title) { err('Usage: noteflow sections <title>'); exit(1) }
       cmdSections(title)
       break
     }
     case 'read': {
       const title = positional[0]
-      if (!title) { err('Usage: noteflow read <title> [section]'); process.exit(1) }
+      if (!title) { err('Usage: noteflow read <title> [section]'); exit(1) }
       const section = flags.section || positional.slice(1).join(' ')
       cmdRead(title, section, flags)
       break
     }
     case 'path': {
       const title = positional[0]
-      if (!title) { err('Usage: noteflow path <title> [section]'); process.exit(1) }
+      if (!title) { err('Usage: noteflow path <title> [section]'); exit(1) }
       const section = flags.section || positional.slice(1).join(' ')
       cmdPath(title, section, flags)
       break
     }
     case 'touch': {
       const title = positional.join(' ')
-      if (!title) { err('Usage: noteflow touch <title>'); process.exit(1) }
+      if (!title) { err('Usage: noteflow touch <title>'); exit(1) }
       await cmdTouch(title)
       break
     }
     case 'set': {
       const title = positional[0]
       const section = flags.section || positional.slice(1).join(' ')
-      if (!title || !section) { err('Usage: noteflow set <title> <section> [--text "..." | --file <path> | --stdin]'); process.exit(1) }
+      if (!title || !section) { err('Usage: noteflow set <title> <section> [--text "..." | --file <path> | --stdin]'); exit(1) }
       await cmdSet(title, section, flags)
       break
     }
@@ -2950,39 +3056,39 @@ async function main() {
       const sub = positional[0]
       if (sub === 'list') {
         const title = positional.slice(1).join(' ')
-        if (!title) { err('Usage: noteflow section list <title>'); process.exit(1) }
+        if (!title) { err('Usage: noteflow section list <title>'); exit(1) }
         cmdSections(title)
       } else if (sub === 'add') {
         const title = positional[1]
         const name = positional.slice(2).join(' ')
-        if (!title || !name) { err('Usage: noteflow section add <title> <name> [--rich]'); process.exit(1) }
+        if (!title || !name) { err('Usage: noteflow section add <title> <name> [--rich]'); exit(1) }
         await cmdSectionAdd(title, name, flags)
       } else if (sub === 'rename') {
         const title = positional[1]
         const oldName = positional[2]
         const newName = positional.slice(3).join(' ')
-        if (!title || !oldName || !newName) { err('Usage: noteflow section rename <title> <old> <new>'); process.exit(1) }
+        if (!title || !oldName || !newName) { err('Usage: noteflow section rename <title> <old> <new>'); exit(1) }
         await cmdSectionRename(title, oldName, newName)
       } else if (sub === 'delete' || sub === 'rm') {
         const title = positional[1]
         const name = positional.slice(2).join(' ')
-        if (!title || !name) { err('Usage: noteflow section delete <title> <name> [--yes]'); process.exit(1) }
+        if (!title || !name) { err('Usage: noteflow section delete <title> <name> [--yes]'); exit(1) }
         await cmdSectionDelete(title, name, flags)
       } else {
-        err('Usage: noteflow section list|add|rename|delete <title> ...'); process.exit(1)
+        err('Usage: noteflow section list|add|rename|delete <title> ...'); exit(1)
       }
       break
     }
     case 'favorite':
     case 'pin': {
       const title = positional.join(' ')
-      if (!title) { err('Usage: noteflow favorite <title>'); process.exit(1) }
+      if (!title) { err('Usage: noteflow favorite <title>'); exit(1) }
       await cmdFavorite(title)
       break
     }
     case 'archive': {
       const title = positional.join(' ')
-      if (!title) { err('Usage: noteflow archive <title>'); process.exit(1) }
+      if (!title) { err('Usage: noteflow archive <title>'); exit(1) }
       await cmdArchive(title)
       break
     }
@@ -2990,9 +3096,9 @@ async function main() {
     case 'group': {
       const sub = positional[0]
       const name = positional.slice(1).join(' ')
-      if (sub === 'create') { if (!name) { err('Usage: noteflow group create <name>'); process.exit(1) }; cmdGroupCreate(name, flags) }
-      else if (sub === 'delete' || sub === 'rm') { if (!name) { err('Usage: noteflow group delete <name>'); process.exit(1) }; await cmdGroupDelete(name, flags) }
-      else { err('Usage: noteflow group create|delete <name>'); process.exit(1) }
+      if (sub === 'create') { if (!name) { err('Usage: noteflow group create <name>'); exit(1) }; cmdGroupCreate(name, flags) }
+      else if (sub === 'delete' || sub === 'rm') { if (!name) { err('Usage: noteflow group delete <name>'); exit(1) }; await cmdGroupDelete(name, flags) }
+      else { err('Usage: noteflow group create|delete <name>'); exit(1) }
       break
     }
     case 'folders': cmdFolders(flags); break
@@ -3001,23 +3107,23 @@ async function main() {
       if (sub === 'list') { cmdFolders(flags) }
       else if (sub === 'create') {
         const name = positional.slice(1).join(' ')
-        if (!name) { err('Usage: noteflow folder create <name> --group <group>'); process.exit(1) }
+        if (!name) { err('Usage: noteflow folder create <name> --group <group>'); exit(1) }
         cmdFolderCreate(name, flags)
       } else if (sub === 'rename') {
         const old = positional[1]
         const next = positional.slice(2).join(' ')
-        if (!old || !next) { err('Usage: noteflow folder rename <name> <new-name> [--group <g>]'); process.exit(1) }
+        if (!old || !next) { err('Usage: noteflow folder rename <name> <new-name> [--group <g>]'); exit(1) }
         cmdFolderRename(old, next, flags)
       } else if (sub === 'delete' || sub === 'rm') {
         const name = positional.slice(1).join(' ')
-        if (!name) { err('Usage: noteflow folder delete <name> [--group <g>] [--yes]'); process.exit(1) }
+        if (!name) { err('Usage: noteflow folder delete <name> [--group <g>] [--yes]'); exit(1) }
         await cmdFolderDelete(name, flags)
-      } else { err('Usage: noteflow folder list|create|rename|delete ...'); process.exit(1) }
+      } else { err('Usage: noteflow folder list|create|rename|delete ...'); exit(1) }
       break
     }
     case 'move': {
       const title = positional.join(' ')
-      if (!title) { err('Usage: noteflow move <title> --group <g> [--folder <f>]  (or --ungroup)'); process.exit(1) }
+      if (!title) { err('Usage: noteflow move <title> --group <g> [--folder <f>]  (or --ungroup)'); exit(1) }
       await cmdMove(title, flags)
       break
     }
@@ -3037,7 +3143,7 @@ async function main() {
       else if (sub === 'setup')  await cmdCloudSetup()
       else if (sub === 'push')   await cmdCloudPush()
       else if (sub === 'pull')   await cmdCloudPull()
-      else { err('Usage: noteflow cloud login|logout|status|setup|push|pull'); process.exit(1) }
+      else { err('Usage: noteflow cloud login|logout|status|setup|push|pull'); exit(1) }
       break
     }
     case 'migrate':       await cmdMigrate(); break
@@ -3046,12 +3152,33 @@ async function main() {
     default:
       err(`Unknown command: ${cmd}`)
       cmdHelp()
-      process.exit(1)
+      exit(1)
   }
 }
 
 if (require.main === module) {
-  main().catch(e => { err(e.message); process.exit(1) })
+  // No process.exit() here either (see exit()): errors set process.exitCode and
+  // the process ends on its own once the event loop drains.
+  let settled = false
+  main()
+    .catch(e => {
+      if (!(e instanceof CliExit)) err(e.message)
+      process.exitCode = e instanceof CliExit ? e.exitCode : 1
+      // Safety net, never a delay: unref'd, so it only fires if some stray
+      // handle keeps the loop alive — then a late hard exit beats hanging.
+      setTimeout(() => process.exit(), 3000).unref()
+    })
+    .finally(() => { settled = true })
+  // The loop drained while main() was still pending: something awaited a promise
+  // that can never settle (e.g. a prompt on a closed stdin). Node would exit 0
+  // as if the command had succeeded — report it as the failure it is.
+  let reported = false
+  process.on('beforeExit', () => {
+    if (settled || reported) return
+    reported = true
+    err('The command ended before finishing (no more input?)')
+    process.exitCode = 1
+  })
 } else {
   // Test-only surface: pure crypto + row-mapping functions (so the interop with
   // the desktop app — dist-electron/cloudCrypto.js and cloudSyncLogic.js — can be

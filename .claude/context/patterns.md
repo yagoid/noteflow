@@ -771,6 +771,29 @@ reescribe cada `<secId>.md` desde `note.sections[].content`, así que una copia 
 edición), bumpea `updated:` y hace `syncPushNoteFiles` de `note.md` + todas las secciones. Detalle
 completo en `cli/noteflow-cli/SKILL.md` (y skill `noteflow-cli`).
 
+**Salida del proceso: nunca `process.exit()`.** En Windows (visto con Node 24) un `process.exit()`
+con un socket keep-alive de `fetch`/`https` aún abierto aborta a veces con la aserción de libuv
+`!(handle->flags & UV_HANDLE_CLOSING)` (`src\win\async.c`) y exit **127** en vez de 1 (reproducido:
+casi siempre tras una respuesta HTTP completa con keep-alive). Todo error pasa por `exit(code)`:
+fija `process.exitCode` y lanza un `CliExit` que sube hasta el handler de `main()`, y Node sale **de
+forma natural** al vaciarse el event loop (los sockets keep-alive ociosos están `unref`, no hay
+espera). Como `process.exit`, `exit()` no retorna; ⚠️ un `try/catch` que lo envuelva se lo
+tragaría → mantener `exit()` fuera de bloques `try`. Dos redes en el handler de `main()`: un
+`setTimeout(process.exit, 3000).unref()` (solo se arma tras un error; actúa si un handle suelto mantiene vivo el loop, p. ej. en Windows un pipe de stdin que el padre deja abierto tras un prompt) y un
+`beforeExit` que, si el loop se vacía con `main()` aún pendiente (una promesa que nunca se resuelve),
+lo reporta como error con exit 1 en vez del exit 0 silencioso.
+
+**Prompts interactivos.** Todos (`promptLine`, `promptHidden`, `confirm`) pasan por
+`readPromptLine()`, que resuelve `''` con una línea vacía y **`null` si stdin está cerrado** (EOF de
+un pipe, Ctrl+D, o Ctrl+C que cierra el readline): `rl.question()` nunca llama a su callback en EOF,
+así que antes la promesa quedaba colgada y el CLI terminaba en silencio con exit 0. `promptUntil()`
+re-pregunta ante vacío/formato inválido (5 intentos) y lo usa `cloud login` para email y código OTP
+(6 dígitos, se ignoran espacios/guiones; solo un código bien formado gasta un `/verify`, con hasta 3
+intentos en total ante `otp_expired` sin reenviar el email). `confirm()` con stdin cerrado = "N" + aviso de
+`--yes`. Readline es **uno por prompt**: con stdin por pipe, las líneas que ya leyó un prompt se
+pierden al cerrarlo — el CLI no soporta responder a varios prompts por pipe (para scripts:
+`--yes`, `NOTEFLOW_CLOUD_PASSPHRASE`).
+
 **Shims de Windows (`cli/noteflow.cmd`, `cli/noteflow.ps1`).** PowerShell prefiere el `.ps1` sobre el
 `.cmd`, así que el `.ps1` carga con dos rarezas de PS 5.1: (1) en una **tubería** PowerShell se queda
 con stdin y node vería EOF → el shim lanza node vía `ProcessStartInfo` y le escribe `$input` como

@@ -698,7 +698,11 @@ comandos `push`, `pull`, `status` y el sync automático tras cada mutación usan
 noteflow cloud login [email]
 ```
 
-Envía un código de 6 dígitos por email y lo pide por prompt. La sesión del CLI es
+Envía un código de 6 dígitos por email y lo pide por prompt (sin `[email]`, también pide el
+email). Un Enter vacío o un formato que no es de 6 dígitos (se ignoran espacios y guiones)
+**vuelve a preguntar** sin gastar el código; si el servidor lo rechaza (erróneo o caducado)
+permite **hasta 3 intentos en total** sin reenviar el email. Es interactivo: sin stdin (pipe
+cerrado, agente, cron) falla con exit 1 en vez de quedarse esperando. La sesión del CLI es
 **independiente de la de la app de escritorio** (los tokens rotan en cada uso; compartirla
 los desconectaría mutuamente). Al iniciar sesión, el sync Cloud del CLI queda habilitado.
 
@@ -767,7 +771,7 @@ JSON: `{ notesDir, noteCount, github: { owner, repo, lastSync, tokenAccessible }
 | Flag | Aplica a | Descripción |
 |---|---|---|
 | `--json` | `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `groups`, `folders`, `status`, `cloud status` | Salida JSON machine-readable en stdout (líneas informativas → stderr) |
-| `--yes` | `delete`, `group delete`, `folder delete`, `section delete` | Salta confirmación interactiva |
+| `--yes` | `delete`, `group delete`, `folder delete`, `section delete` | Salta confirmación interactiva (sin `--yes` y sin stdin la respuesta es "N": `Cancelled`, exit 0, nada borrado) |
 | `--archived` | `list` | Incluye notas archivadas |
 | `--section <nombre>` | `read`, `path`, `get`, `add`, `set` | Apunta a una sección por nombre |
 | `--group <nombre>` | `add`, `new`, `move`, `list`, `folders`, `folder *` | Apunta a/filtra por un grupo |
