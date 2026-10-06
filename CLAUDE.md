@@ -73,6 +73,10 @@ Para cualquier tarea que **edite código** del proyecto, el hilo principal deleg
 **`implementer`**, que hace el cambio completo y se autoverifica (`npm run lint` + `npm run build` +
 `npm test` + el smoke script relevante si aplica).
 
+**Excepción — retoques mínimos:** los cambios muy pequeños y triviales (ajustar uno o dos valores de
+CSS, un padding, un color, un typo, el texto de una clave i18n) los hace el hilo principal **directamente**,
+sin lanzar el `implementer`. Si toca algo más que un valor puntual o hay lógica de por medio, se delega.
+
 El subagente **`reviewer`** (revisa el `git diff` contra las convenciones y emite veredicto) **no es
 obligatorio en todo cambio**: se lanza según el riesgo de la tarea.
 
