@@ -89,13 +89,21 @@ noteflow/
 │   │   │   ├── EditorToc.tsx            # Índice flotante H1–H3 (+ useEditorToc.ts: lectura del doc)
 │   │   │   ├── DeadlineTaskItem.ts      # Extensión TipTap: task item con deadline+alarma
 │   │   │   ├── DeadlineTaskItemView.tsx # NodeView React para DeadlineTaskItem
+│   │   │   ├── TaskPickers.tsx          # Pickers de deadline/alarma e importancia (tareas + tarjetas kanban)
+│   │   │   ├── taskBadge.ts             #   helpers compartidos: color/formato del badge, posición del picker
+│   │   │   ├── KanbanBoard.ts           # Nodo TipTap atom del tablero kanban (ver patterns.md)
+│   │   │   ├── KanbanBoardView.tsx      #   NodeView React: columnas, drag & drop, menús, búsqueda
+│   │   │   ├── KanbanParts.tsx          #   piezas: tarjeta, editor inline, menú de opciones
+│   │   │   ├── kanbanCommands.ts        #   insertar tablero, lista de tareas ↔ tablero
+│   │   │   ├── SectionRelation.ts       # Nodo inline atom de relación sección↔sección (+ SectionRelationView.tsx)
+│   │   │   ├── SlashCommands.ts         # Menú `/` (@tiptap/suggestion) + SlashCommandMenu.tsx
+│   │   │   ├── SectionLinkPicker.tsx    # Buscador de secciones del comando "Link section"
 │   │   │   ├── CodeBlockWithCopy.tsx    # NodeView: code block con botón copiar
 │   │   │   ├── ResizableImage.tsx       # NodeView: imagen redimensionable
 │   │   │   ├── TableContextMenu.tsx     # Menú contextual de tablas
 │   │   │   ├── SearchHighlightExtension.ts # Resaltado de matches de búsqueda in-note
 │   │   │   ├── InNoteSearchBar.tsx      # Barra búsqueda dentro de la nota (modo WYSIWYG)
-│   │   │   ├── RawNoteSearchBar.tsx     # Barra búsqueda dentro de la nota (modo raw)
-│   │   │   └── RelatedNotesPanel.tsx    # Panel "Related notes" (IA) al pie del editor
+│   │   │   └── RawNoteSearchBar.tsx     # Barra búsqueda dentro de la nota (modo raw)
 │   │   ├── Sidebar/
 │   │   │   ├── Sidebar.tsx              # Lista de notas, filtros, búsqueda, grupos/carpetas
 │   │   │   ├── NoteGroupHeader.tsx      # Cabecera de grupo (nombre→group overview; resto→colapsar)
@@ -166,7 +174,7 @@ noteflow/
 │   │   ├── noteUtils.ts          # parseNoteFolder, serializeNoteFolder, buildNoteWritePayload,
 │   │   │                         #   noteFingerprint, noteDirname, extractTags, default title…
 │   │   ├── cryptoUtils.ts        # Cifrado AES-256-GCM + PBKDF2 (WebCrypto)
-│   │   ├── alarmUtils.ts         # Recolección de alarmas/deadlines para programarlas
+│   │   ├── alarmUtils.ts         # Recolección de alarmas/deadlines (líneas de tarea, también indentadas) — testeado
 │   │   ├── paneUtils.ts          # Modelo puro de paneles del split (abrir/cerrar/reordenar/enfocar) — testeado
 │   │   ├── tocUtils.ts           # Lógica pura del índice flotante del editor (entradas, activo) — testeado
 │   │   ├── keyedQueue.ts         # Cola serial por clave (escrituras de una nota en orden) — testeada
@@ -179,7 +187,12 @@ noteflow/
 │   │   │                         #   normalizeGroupColor (validación) y colorChannels (TODO render de
 │   │   │                         #   color de grupo/sección debe pasar por él, no interpolar `var(...)`)
 │   │   ├── markdownHtml.ts       # Conversión markdown↔HTML (htmlFromMarkdown/htmlToMarkdown);
-│   │   │                         #   usado por el editor TipTap y SectionPreviewCard (previews)
+│   │   │                         #   usado por el editor TipTap, SectionPreviewCard (previews) y el chat IA — testeado
+│   │   ├── markdownInline.ts     # Hoja compartida: inlineToHtml, escapeHtml, anotaciones de tarea 📅⏰🔺
+│   │   ├── kanban.ts             # Tableros kanban en la nota: modelo + md↔datos↔HTML (ver patterns.md) — testeado
+│   │   ├── kanbanOps.ts          #   transformaciones puras del tablero (columnas, tarjetas, columna done,
+│   │   │                         #   conversión con listas de tareas) — testeado
+│   │   ├── kanbanSearch.ts       #   búsqueda en nota dentro de tableros (conteo + resaltado) — testeado
 │   │   └── themes.ts             # Definición de los 14 temas (CSS vars)
 │   ├── i18n/                     # Sistema i18n propio (EN/ES, sin deps): en/ = fuente de verdad
 │   │                            #   del tipo Messages, es/ forzado a paridad; format.ts (tf/plural),

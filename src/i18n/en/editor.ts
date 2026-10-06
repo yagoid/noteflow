@@ -119,6 +119,10 @@ export const editor = {
   slash: {
     linkSection: 'Link section',
     linkSectionDescription: 'Link to another section',
+    kanban: 'Kanban board',
+    kanbanDescription: 'Columns and cards you can drag around',
+    convertToKanban: 'Convert task list to board',
+    convertToKanbanDescription: 'Turn this task list into a kanban board',
     noCommands: 'No commands',
   },
 
@@ -150,5 +154,42 @@ export const editor = {
     alarm: 'Alarm',
     clear: 'Clear',
     done: 'Done',
+  },
+
+  // In-note kanban board (KanbanBoardView).
+  kanban: {
+    label: 'Kanban',
+    defaultTodo: 'To do',
+    defaultDoing: 'In progress',
+    defaultDone: 'Done',
+    columnsCount: { one: '{count} column', other: '{count} columns' },
+    cardsCount: { one: '{count} card', other: '{count} cards' },
+    selectBoard: 'Select board (Backspace deletes it)',
+    convertToTaskList: 'Convert to task list',
+    deleteBoard: 'Delete board',
+    confirmDeleteBoard: 'Click again to delete',
+    addCard: 'Add card',
+    cardPlaceholder: 'Card text… (Enter to save)',
+    addColumn: 'Add column',
+    columnPlaceholder: 'Column name…',
+    untitledColumn: 'Untitled',
+    columnOptions: 'Column options',
+    dragColumn: 'Drag to reorder',
+    rename: 'Rename',
+    markDone: 'Mark as done column',
+    unmarkDone: 'Unset done column',
+    doneColumn: 'Done column: cards moved here get checked',
+    deleteColumn: 'Delete column',
+    confirmDeleteColumn: {
+      one: 'Delete it and its card?',
+      other: 'Delete it and its {count} cards?',
+    },
+    cardOptions: 'Card options',
+    editCard: 'Edit text',
+    deleteCard: 'Delete card',
+    extraLines: {
+      one: '{count} nested line, kept as is (edit it in raw mode):',
+      other: '{count} nested lines, kept as is (edit them in raw mode):',
+    },
   },
 }

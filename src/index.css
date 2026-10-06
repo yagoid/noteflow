@@ -187,7 +187,13 @@ button {
    holds when typing at the very end of a section. */
 .prose-editor .ProseMirror {
   min-height: 100%;
-  padding: 1.25rem 1.5rem 12rem;
+  /* Horizontal padding as vars so full-bleed blocks (kanban boards) can cancel
+     it exactly: --pm-pad-l/-r = the padding, --pm-bleed-r = how far a block may
+     reach past the right padding (0 while the TOC owns that strip). */
+  --pm-pad-l: 1.5rem;
+  --pm-pad-r: 1.5rem;
+  --pm-bleed-r: var(--pm-pad-r);
+  padding: 1.25rem var(--pm-pad-r) 12rem var(--pm-pad-l);
   outline: none;
   font-family: var(--prose-font-family, 'JetBrains Mono', monospace);
   font-size: var(--prose-font-size, 13px);
@@ -251,10 +257,11 @@ button {
    isn't, shrink it so the column keeps its full width (column shifts left),
    never below the default 1.5rem. 100cqw = the .editor-readable container. */
 .editor-has-toc .prose-editor .ProseMirror {
-  padding-right: var(--toc-reserve);
+  --pm-pad-r: var(--toc-reserve);
+  --pm-bleed-r: 0px;
 }
 .editor-readable .editor-has-toc .prose-editor .ProseMirror {
-  padding-left: clamp(1.5rem, 100cqw - var(--toc-reserve) - var(--readable-col), var(--toc-reserve));
+  --pm-pad-l: clamp(1.5rem, 100cqw - var(--toc-reserve) - var(--readable-col), var(--toc-reserve));
 }
 
 .prose-editor .ProseMirror p.is-editor-empty:first-child::before {
@@ -810,7 +817,9 @@ button {
    sticky's caret scroll gap (STICKY_CARET_SCROLL_GAP in StickyApp.tsx, 32px) so
    that gap is reachable when typing at the very end of the note. */
 .sticky-editor .ProseMirror {
-  padding: 0.5rem 0.75rem 2.5rem;
+  --pm-pad-l: 0.75rem;
+  --pm-pad-r: 0.75rem;
+  padding: 0.5rem var(--pm-pad-r) 2.5rem var(--pm-pad-l);
 }
 
 /* Sticky note: compact badge — smaller font/padding so it fits inline without wrapping */
@@ -990,3 +999,498 @@ button {
 .slash-menu-item.is-selected { background: rgb(var(--text) / 0.08); }
 .slash-menu-item-title { font-size: 13px; color: rgb(var(--text)); }
 .slash-menu-item-desc { font-size: 11px; color: rgb(var(--text-muted)); }
+
+/* ── Kanban board (KanbanBoardView.tsx) ──────────────────────────────────────
+   Full bleed: the board ignores the readable column and cancels the editor's
+   horizontal padding (--pm-pad-l / --pm-bleed-r, see `.prose-editor
+   .ProseMirror`), so its own scroller spans the whole editor width; the inner
+   padding puts the first column back on the text's left edge. With the TOC
+   shown --pm-bleed-r is 0: the board stops short of the TOC's dash strip.
+   Columns are fixed-width (scaled with the prose font size) and scroll
+   horizontally inside the board — never the note. Theme vars only. */
+.prose-editor .ProseMirror > .node-kanbanBoard {
+  margin: 0.9rem calc(-1 * var(--pm-bleed-r, 1.5rem)) 0.9rem calc(-1 * var(--pm-pad-l, 1.5rem));
+}
+.kanban-node {
+  --kanban-col-w: calc(var(--prose-font-size, 13px) * 19);
+}
+.kanban-board {
+  position: relative;
+  outline: none;
+  font-size: calc(var(--prose-font-size, 13px) * 0.92);
+  line-height: 1.45;
+  user-select: none;
+  border-radius: 10px;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+.kanban-node.is-selected .kanban-board {
+  background: rgb(var(--accent) / 0.05);
+  box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.5);
+}
+
+.kanban-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.9rem;
+  padding: 0.2rem max(var(--pm-bleed-r), 0.5rem) 0.35rem var(--pm-pad-l);
+}
+.kanban-handle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: -6px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s, background 0.12s;
+}
+.kanban-handle svg { color: rgb(var(--accent)); flex-shrink: 0; }
+.kanban-handle:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.06); }
+.kanban-handle-label { font-weight: 600; }
+.kanban-handle-stats { text-transform: none; letter-spacing: 0; opacity: 0.65; }
+.kanban-toolbar {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.kanban-board:hover .kanban-toolbar,
+.kanban-board:focus-within .kanban-toolbar,
+.kanban-node.is-selected .kanban-toolbar { opacity: 1; }
+
+.kanban-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0 4px;
+  border-radius: 5px;
+  color: rgb(var(--text-muted));
+  transition: color 0.1s, background 0.1s, opacity 0.12s;
+}
+.kanban-icon-btn:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.08); }
+.kanban-icon-btn.is-danger:hover,
+.kanban-icon-btn.is-armed { color: rgb(var(--red)); background: rgb(var(--red) / 0.1); }
+.kanban-icon-btn span { font-size: 0.7rem; white-space: nowrap; }
+
+.kanban-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px max(var(--pm-bleed-r), 0.5rem) 0.75rem var(--pm-pad-l);
+}
+.kanban-columns {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: max-content;
+}
+
+.kanban-column {
+  flex: 0 0 var(--kanban-col-w);
+  width: var(--kanban-col-w);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 10px;
+  background: rgb(var(--text) / 0.03);
+  border: 1px solid rgb(var(--border) / 0.8);
+  transition: opacity 0.12s, border-color 0.12s;
+}
+.kanban-column.is-done {
+  border-color: rgb(var(--accent-2) / 0.3);
+  background: linear-gradient(rgb(var(--accent-2) / 0.05), rgb(var(--accent-2) / 0.015));
+}
+.kanban-column.is-drag-source { opacity: 0.35; border-style: dashed; }
+.kanban-column-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 1px 1px 1px 5px;
+  cursor: grab;
+}
+.kanban-column-marker {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 99px;
+  background: rgb(var(--accent));
+  box-shadow: 0 0 6px rgb(var(--accent) / 0.55);
+}
+svg.kanban-column-marker.is-done {
+  width: 12px;
+  height: 12px;
+  background: none;
+  box-shadow: none;
+  color: rgb(var(--accent-2));
+}
+.kanban-column-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgb(var(--text));
+  cursor: text;
+}
+.kanban-column-title.is-empty { color: rgb(var(--text-muted)); font-style: italic; }
+.kanban-count {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 99px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.68rem;
+  line-height: 1.6;
+  color: rgb(var(--text-muted));
+  background: rgb(var(--text) / 0.07);
+}
+.kanban-column.is-done .kanban-count { color: rgb(var(--accent-2)); background: rgb(var(--accent-2) / 0.12); }
+.kanban-column-menu-btn { opacity: 0; }
+.kanban-column:hover .kanban-column-menu-btn,
+.kanban-column-menu-btn:focus-visible { opacity: 1; }
+
+.kanban-cards {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 6px;
+}
+.kanban-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: rgb(var(--bg-2));
+  border: 1px solid rgb(var(--border));
+  cursor: grab;
+  transition: border-color 0.12s, box-shadow 0.12s, opacity 0.12s;
+}
+.kanban-card:hover {
+  border-color: rgb(var(--accent) / 0.45);
+  box-shadow: 0 0 0 1px rgb(var(--accent) / 0.12), 0 6px 18px rgb(0 0 0 / 0.22);
+}
+.kanban-card.is-editing {
+  cursor: default;
+  border-color: rgb(var(--accent) / 0.7);
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.1);
+}
+.kanban-card.is-drag-source { opacity: 0.3; border-style: dashed; box-shadow: none; }
+.kanban-check { display: inline-flex; flex-shrink: 0; margin-top: 2px; cursor: pointer; }
+.kanban-check input[type="checkbox"] {
+  appearance: none;
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1.5px solid rgb(var(--text-muted));
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+.kanban-check input[type="checkbox"]:checked {
+  background: rgb(var(--accent-2) / 0.15);
+  border-color: rgb(var(--accent-2));
+}
+.kanban-check input[type="checkbox"]:checked::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  line-height: 1;
+  font-weight: bold;
+  color: rgb(var(--accent-2));
+}
+.kanban-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.kanban-card-text {
+  min-height: 1.45em;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+/* No native (HTML5) drag of links/images inside cards: it would cancel the
+   pointer drag of the card and drop a URL into the note. */
+.kanban-board a,
+.kanban-board img { -webkit-user-drag: none; }
+.kanban-card-text img { max-width: 100%; height: auto; }
+.kanban-card.is-checked .kanban-card-text {
+  color: rgb(var(--text-muted) / 0.6);
+  text-decoration: line-through;
+}
+.kanban-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.kanban-card-meta .task-deadline-trigger,
+.kanban-card-meta .task-importance-trigger { opacity: 1; padding: 0; }
+.kanban-card-meta .task-importance-trigger { padding: 2px; }
+.kanban-extra {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  border-radius: 99px;
+  border: 1px solid rgb(var(--border));
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.68rem;
+  line-height: 1.6;
+  color: rgb(var(--text-muted));
+  cursor: help;
+}
+.kanban-card-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 1px;
+  padding: 1px;
+  border-radius: 6px;
+  background: rgb(var(--bg-2));
+  box-shadow: -10px 0 8px rgb(var(--bg-2));
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.kanban-card:hover .kanban-card-actions { opacity: 1; }
+.kanban-card-actions .kanban-icon-btn { height: 20px; min-width: 20px; padding: 0 3px; }
+
+.kanban-input {
+  display: block;
+  width: 100%;
+  padding: 0;
+  resize: none;
+  overflow: hidden;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: rgb(var(--text));
+  font: inherit;
+  line-height: inherit;
+  user-select: text;
+}
+.kanban-input::placeholder { color: rgb(var(--text-muted) / 0.7); }
+.kanban-composer {
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgb(var(--bg-2));
+  border: 1px solid rgb(var(--accent) / 0.6);
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.1);
+}
+.kanban-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgb(var(--bg-0));
+  border: 1px solid rgb(var(--accent) / 0.6);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.kanban-add-card {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: 7px;
+  font-size: 0.85em;
+  color: rgb(var(--text-muted));
+  opacity: 0.75;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.kanban-add-card:hover { opacity: 1; color: rgb(var(--accent)); background: rgb(var(--accent) / 0.08); }
+.kanban-add-column {
+  flex: 0 0 var(--kanban-col-w);
+  width: var(--kanban-col-w);
+}
+.kanban-add-column .kanban-title-input { padding: 9px 10px; border-radius: 10px; }
+.kanban-add-column-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px dashed rgb(var(--border));
+  font-size: 0.85em;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.kanban-add-column-btn:hover {
+  color: rgb(var(--accent));
+  border-color: rgb(var(--accent) / 0.6);
+  background: rgb(var(--accent) / 0.05);
+}
+
+/* Drop indicators: neon line where the card/column will land. */
+.kanban-drop-line,
+.kanban-column-drop-line {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 2px;
+  background: rgb(var(--accent));
+  box-shadow: 0 0 8px rgb(var(--accent) / 0.8);
+}
+.kanban-drop-line { left: 2px; right: 2px; height: 2px; margin-top: -1px; }
+.kanban-column-drop-line { top: 0; bottom: 0; width: 2px; margin-left: -1px; }
+.kanban-drop-line::before,
+.kanban-column-drop-line::before {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: rgb(var(--accent));
+}
+.kanban-drop-line::before { left: -3px; top: -2px; }
+.kanban-column-drop-line::before { top: -3px; left: -2px; }
+
+/* Drag ghost: portalled to <body>, follows the pointer (translate set inline). */
+.kanban-ghost.prose-editor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 10000;
+  height: auto;
+  pointer-events: none;
+}
+.kanban-ghost.prose-editor .ProseMirror {
+  min-height: 0;
+  padding: 0;
+  font-size: calc(var(--prose-font-size, 13px) * 0.92);
+  line-height: 1.45;
+}
+.kanban-ghost .kanban-card,
+.kanban-ghost .kanban-column {
+  rotate: 1.5deg;
+  border-color: rgb(var(--accent) / 0.7);
+  box-shadow: 0 0 0 1px rgb(var(--accent) / 0.25), 0 14px 34px rgb(0 0 0 / 0.45);
+}
+.kanban-ghost .kanban-column { width: 100%; background: rgb(var(--bg-1)); }
+.kanban-ghost .kanban-column .kanban-card { rotate: none; box-shadow: none; border-color: rgb(var(--border)); }
+body.kanban-dragging,
+body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
+
+/* Column / card options menu (portalled). Same look as the slash menu. */
+.kanban-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgb(var(--text) / 0.15);
+  background: rgb(var(--bg-1));
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+}
+.kanban-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: 7px;
+  text-align: left;
+  font-size: 12px;
+  color: rgb(var(--text));
+}
+.kanban-menu-item svg { flex-shrink: 0; color: rgb(var(--text-muted)); }
+.kanban-menu-item:hover { background: rgb(var(--text) / 0.08); }
+.kanban-menu-item.is-danger,
+.kanban-menu-item.is-danger svg { color: rgb(var(--red)); }
+.kanban-menu-item.is-armed { background: rgb(var(--red) / 0.12); }
+
+/* Static board (htmlFromMarkdown): section previews, overviews, AI chat — a
+   compact read-only mini board. Also the fallback before the NodeView mounts. */
+.prose-editor .ProseMirror div[data-type="kanban"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  overflow: hidden;
+}
+.prose-editor .ProseMirror div[data-kanban-column] {
+  flex: 0 0 11rem;
+  min-width: 0;
+  padding: 0.35rem;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--border) / 0.8);
+  background: rgb(var(--text) / 0.03);
+}
+.prose-editor .ProseMirror div[data-kanban-column][data-done="true"] { border-color: rgb(var(--accent-2) / 0.3); }
+.prose-editor .ProseMirror div[data-kanban-column-title] {
+  padding: 0 0.2rem 0.3rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.prose-editor .ProseMirror div[data-kanban-column-title]::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 0.45em;
+  border-radius: 99px;
+  vertical-align: middle;
+  background: rgb(var(--accent));
+}
+.prose-editor .ProseMirror div[data-kanban-column][data-done="true"] > div[data-kanban-column-title]::before {
+  background: rgb(var(--accent-2));
+}
+.prose-editor .ProseMirror div[data-kanban-column] > ul[data-type="taskList"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+}
+.prose-editor .ProseMirror div[data-kanban-column] > ul[data-type="taskList"] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.25rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid rgb(var(--border));
+  background: rgb(var(--bg-2));
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+.prose-editor .ProseMirror div[data-kanban-column] > ul[data-type="taskList"] > li > p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.chat-md.prose-editor .ProseMirror div[data-kanban-column] { flex-basis: 9.5rem; }

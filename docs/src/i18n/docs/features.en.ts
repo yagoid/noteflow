@@ -136,6 +136,7 @@ export const featuresEn = {
       '<strong>Click</strong> a pill to jump to the target section — in the same note or any other. <strong>Hover</strong> shows the same floating preview used across the app.',
       'The pill shows the target\'s name <strong>live</strong>: rename the section and every pill pointing at it updates. Delete the target and the pill switches to a <strong>broken</strong> state (dimmed, struck through, no navigation).',
       'The search excludes encrypted, archived and temporary notes; the <kbd>/</kbd> command exists in rich mode only.',
+      'The same <kbd>/</kbd> menu inserts a <strong>kanban board</strong> (<kbd>/kanban</kbd>): columns and cards you drag around, with the task chips (📅 deadline, ⏰ alarm, 🔺 importance), right inside the note — and saved as plain markdown, like everything else.',
     ],
     rawP:
       'Under the hood a pill is nothing exotic — it\'s a plain markdown link, <code>[Name](noteflow://noteId/sectionId)</code>, stored inside the section\'s text. That\'s exactly what you see in raw mode, and it\'s why links <strong>survive sync, export and import</strong> unchanged.',

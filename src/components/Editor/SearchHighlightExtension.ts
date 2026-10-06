@@ -2,12 +2,25 @@ import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
-import type { EditorState } from '@tiptap/pm/state'
+import type { EditorState, Transaction } from '@tiptap/pm/state'
 import { buildSearchRegex } from '../../lib/searchUtils'
+import { countKanbanMatches } from '../../lib/kanbanSearch'
+import { KANBAN_NODE_NAME, normalizeBoard } from '../../lib/kanbanOps'
 
 interface Match {
   from: number
   to: number
+  /** Set for a match inside an atom kanban board (from/to = the whole node):
+   *  its running number among that board's matches. The NodeView paints it. */
+  boardIndex?: number
+}
+
+/** Decoration spec the kanban NodeView reads to highlight its own matches. */
+export interface KanbanSearchSpec {
+  query: string
+  caseSensitive: boolean
+  /** Running number (within the board) of the active match, -1 if elsewhere. */
+  active: number
 }
 
 interface SearchState {
@@ -23,6 +36,13 @@ function findMatches(doc: ProseMirrorNode, regex: RegExp | null): Match[] {
   const matches: Match[] = []
   if (!regex) return matches
   doc.descendants((node, pos) => {
+    // Kanban boards are atoms (no text nodes): count their matches as a whole
+    // and let the NodeView paint them (see lib/kanbanSearch.ts).
+    if (node.type.name === KANBAN_NODE_NAME) {
+      const count = countKanbanMatches(normalizeBoard(node.attrs.board), regex)
+      for (let i = 0; i < count; i++) matches.push({ from: pos, to: pos + node.nodeSize, boardIndex: i })
+      return false
+    }
     if (!node.isText) return
     const text = node.text ?? ''
     regex.lastIndex = 0
@@ -36,6 +56,15 @@ function findMatches(doc: ProseMirrorNode, regex: RegExp | null): Match[] {
     }
   })
   return matches
+}
+
+// Select a text match (and scroll to it). A match inside a kanban board leaves
+// the selection alone: the board paints it and InNoteSearchBar scrolls the
+// active `.nf-search-match-active` element into view.
+function selectMatch(tr: Transaction, match: Match) {
+  if (match.boardIndex !== undefined) return
+  tr.setSelection(TextSelection.create(tr.doc, match.from, match.to))
+  tr.scrollIntoView()
 }
 
 function getState(state: EditorState): SearchState | null {
@@ -135,14 +164,28 @@ export const SearchHighlight = Extension.create<unknown, SearchHighlightStorage>
           decorations(state) {
             const s = getState(state)
             if (!s || s.matches.length === 0) return DecorationSet.empty
-            const decos = s.matches.map((m, i) =>
-              Decoration.inline(m.from, m.to, {
-                class:
-                  i === s.activeIndex
-                    ? 'nf-search-match nf-search-match-active'
-                    : 'nf-search-match',
-              }),
-            )
+            const decos: Decoration[] = []
+            // One node decoration per board carrying the query; the NodeView
+            // re-renders when it changes and highlights inside its cards.
+            const boards = new Map<number, KanbanSearchSpec & { to: number }>()
+            s.matches.forEach((m, i) => {
+              if (m.boardIndex === undefined) {
+                decos.push(Decoration.inline(m.from, m.to, {
+                  class:
+                    i === s.activeIndex
+                      ? 'nf-search-match nf-search-match-active'
+                      : 'nf-search-match',
+                }))
+                return
+              }
+              const board = boards.get(m.from) ??
+                { query: s.query, caseSensitive: s.caseSensitive, active: -1, to: m.to }
+              if (i === s.activeIndex) board.active = m.boardIndex
+              boards.set(m.from, board)
+            })
+            for (const [from, { to, ...kanbanSearch }] of boards) {
+              decos.push(Decoration.node(from, to, {}, { kanbanSearch }))
+            }
             return DecorationSet.create(state.doc, decos)
           },
         },
@@ -175,8 +218,7 @@ export const SearchHighlight = Extension.create<unknown, SearchHighlightStorage>
               caseSensitive: s.caseSensitive,
               activeIndex: nextIndex,
             })
-            tr.setSelection(TextSelection.create(tr.doc, match.from, match.to))
-            tr.scrollIntoView()
+            selectMatch(tr, match)
             dispatch(tr)
           }
           return true
@@ -195,8 +237,7 @@ export const SearchHighlight = Extension.create<unknown, SearchHighlightStorage>
               caseSensitive: s.caseSensitive,
               activeIndex: prevIndex,
             })
-            tr.setSelection(TextSelection.create(tr.doc, match.from, match.to))
-            tr.scrollIntoView()
+            selectMatch(tr, match)
             dispatch(tr)
           }
           return true
