@@ -88,7 +88,8 @@ exports.cloudProvider = {
 function getActiveSyncProvider() {
     return cloudSync.isCloudSyncEnabled() ? exports.cloudProvider : exports.githubProvider;
 }
-function getActiveSyncStatus() {
+/** `pendingUploads` is owned by main.ts (pendingPushFiles), so the caller passes it in. */
+function getActiveSyncStatus(pendingUploads) {
     if (cloudSync.isCloudSyncEnabled()) {
         const c = cloudSync.getCloudSyncStatus();
         return {
@@ -97,7 +98,9 @@ function getActiveSyncStatus() {
             lastSync: c.lastSync,
             error: c.error,
             initialPullStatus: c.initialPullStatus,
-            cloud: { keysState: c.keysState, keysMode: c.keysMode },
+            pendingUploads,
+            autoSyncIntervalMs: cloudSync.CLOUD_AUTO_SYNC_INTERVAL_MS,
+            cloud: { keysState: c.keysState, keysMode: c.keysMode, realtimeConnected: c.realtimeConnected },
         };
     }
     const g = githubSync.getSyncStatus();
@@ -108,8 +111,10 @@ function getActiveSyncStatus() {
             lastSync: g.lastSync,
             error: g.error,
             initialPullStatus: g.initialPullStatus,
+            pendingUploads,
+            autoSyncIntervalMs: githubSync.GITHUB_AUTO_SYNC_INTERVAL_MS,
             github: { owner: g.owner, repo: g.repo },
         };
     }
-    return { backend: 'none', active: false, initialPullStatus: 'pending' };
+    return { backend: 'none', active: false, initialPullStatus: 'pending', pendingUploads };
 }

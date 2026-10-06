@@ -151,6 +151,7 @@ noteflow/
 │   │   ├── NoteCard/                    # Tarjeta de nota en sidebar
 │   │   ├── TitleBar.tsx                 # Barra de título personalizada (frameless);
 │   │   │                                #   el ⚙ abre la ventana de Ajustes (SettingsModal)
+│   │   ├── SyncStatusButton.tsx         # Botón ☁ de la titlebar + tarjeta de estado al hover
 │   │   ├── Settings/                    # Ventana de Ajustes unificada (overlay split nav+contenido)
 │   │   │   ├── SettingsModal.tsx        #   Contenedor: nav izquierda + panel derecho según sección
 │   │   │   ├── AppearancePanel.tsx      #   Tema/fuente/acento/colores del editor/escala + preview
@@ -178,6 +179,7 @@ noteflow/
 │   │   ├── paneUtils.ts          # Modelo puro de paneles del split (abrir/cerrar/reordenar/enfocar) — testeado
 │   │   ├── tocUtils.ts           # Lógica pura del índice flotante del editor (entradas, activo) — testeado
 │   │   ├── keyedQueue.ts         # Cola serial por clave (escrituras de una nota en orden) — testeada
+│   │   ├── syncStatus.ts         # Estado mostrado por el botón de sync (prioridades) + edad relativa — testeado
 │   │   ├── encryptedSession.ts   # Re-descifrado con la contraseña de sesión tras recargar + guarda
 │   │   │                         #   anti-borrado de escrituras de notas cifradas — testeado
 │   │   ├── sectionUtils.ts       # Operaciones puras sobre la lista de secciones (patch/move/duplicate/restore)
@@ -269,7 +271,7 @@ Renderer (React)
 | `window:set-size` | on | Redimensiona la ventana (usado por sticky) |
 | `window:fold-to-corner` / `window:unfold` | on | Anima el plegado/desplegado de stickies |
 | `sync:get-status` | handle | Estado del sync **GitHub** (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`) |
-| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, github?: {owner, repo}, cloud?: {keysState, keysMode}}` (espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`) |
+| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`) |
 | `sync:initiate` | handle | Inicia Device Flow OAuth (recibe `repo`); al completar → `sync-auth-complete` + autosync |
 | `sync:cancel-auth` | handle | Cancela un Device Flow en curso |
 | `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings |

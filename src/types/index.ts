@@ -345,21 +345,26 @@ export interface CloudSyncStatus {
   lastSync?: string
   error?: string
   initialPullStatus: 'pending' | 'ok' | 'failed'
-  /** True while the main process holds a live Realtime subscription (informational — no UI yet). */
+  /** True while the main process holds a live Realtime subscription (shown in the titlebar sync card; no event on change). */
   realtimeConnected: boolean
 }
 
 // Backend-tagged snapshot of the LIVE sync provider (see electron/syncProvider.ts):
 // Cloud wins when enabled, else GitHub, else 'none'. Drives the titlebar sync
-// button so it routes to whichever backend is active. Never carries key material.
+// button (and its hover status card) so it routes to whichever backend is
+// active. Never carries key material.
 export interface ActiveSyncStatus {
   backend: 'github' | 'cloud' | 'none'
   active: boolean
   lastSync?: string
   error?: string
   initialPullStatus: 'pending' | 'ok' | 'failed'
+  /** Files whose push is in flight (main's pendingPushFiles; debounced edits not counted yet). */
+  pendingUploads: number
+  /** Cadence of the backend's periodic auto-sync loop (absent when 'none'). */
+  autoSyncIntervalMs?: number
   github?: { owner?: string; repo?: string }
-  cloud?: { keysState: CloudSyncStatus['keysState']; keysMode: CloudSyncStatus['keysMode'] }
+  cloud?: { keysState: CloudSyncStatus['keysState']; keysMode: CloudSyncStatus['keysMode']; realtimeConnected: boolean }
 }
 
 // Synced appearance + editor settings — ui-settings.json at the root of the

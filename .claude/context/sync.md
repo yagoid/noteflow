@@ -36,10 +36,21 @@ propios llaman a los módulos directamente.
 `getActiveSyncProvider()`) → status normalizado y etiquetado con `backend` (`'github'|'cloud'|'none'`),
 y su pull manual va por `sync:pull-active` (Cloud si `enabled`, GitHub si no). El botón se muestra
 cuando CUALQUIER backend está `active` (antes solo con GitHub conectado → un usuario solo-Cloud se
-quedaba sin sync manual), se suscribe a `sync:status-changed` **y** `cloud:status-changed`, y ramifica
-el tooltip por backend (owner/repo en GitHub; "NoteFlow Cloud · última sync"/claves bloqueadas en Cloud).
-El indicador "pushing" (`sync:push-state`) sigue siendo solo de GitHub; Cloud refresca vía su
-status-changed. `sync:pull` (GitHub puro) se mantiene intacto para Settings → Sync.
+quedaba sin sync manual) y se suscribe a `sync:status-changed`, `cloud:status-changed`,
+`notes-updated` y `sync:push-state` (refresca en **cada** cambio de push-state, no solo en `idle`,
+para que el contador de pendientes vaya al día). El botón y su **tarjeta de estado al hover** viven
+en `SyncStatusButton.tsx` (sin `title` nativo; `aria-label` con resumen); la prioridad del estado
+mostrado (syncing → uploading → locked → blocked → error → pending → synced) es lógica pura en
+`src/lib/syncStatus.ts` (testeada). Además de lo normalizado, el status lleva `pendingUploads`
+(tamaño de `pendingPushFiles` de `main.ts`, que se lo pasa a `getActiveSyncStatus(pendingUploads)`:
+ficheros con push **en vuelo** — las ediciones aún dentro del debounce de 5 s no cuentan),
+`autoSyncIntervalMs` (`GITHUB_AUTO_SYNC_INTERVAL_MS` en `githubSync.ts` /
+`CLOUD_AUTO_SYNC_INTERVAL_MS` en `cloudSync.ts`) y, en Cloud, `cloud.realtimeConnected` (sin
+evento propio: se lee al refrescar; la tarjeta re-lee el status al abrirse y cada 30 s).
+El indicador "pushing" (`sync:push-state`) vale para **ambos** backends: `applyNoteWrite` en
+`main.ts` engancha los callbacks `onStart/onComplete` de `schedulePush` del proveedor activo (y el
+push durable de las tools del chat) a `pendingPushFiles`. Los deletes no pasan por ese set.
+`sync:pull` (GitHub puro) se mantiene intacto para Settings → Sync.
 
 **Cloud Sync** (`electron/cloudSync.ts`, mismo modelo y regla de conflicto que GitHub pero
 contra Supabase con E2EE, tombstones en vez de borrado por ausencia, sin cola de mutaciones y

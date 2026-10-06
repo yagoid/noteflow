@@ -60,7 +60,19 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 Iconos del TitleBar:
 - **⬇ update**: aparece solo si hay una versión nueva; descarga e instala in-app (muestra el %
   de descarga y luego un spinner "Installing…").
-- **☁ sync**: estado de GitHub Sync (conectado verde / subiendo girando / error ámbar / off).
+- **☁ sync**: estado del backend de sync **activo** (NoteFlow Cloud o GitHub; oculto si no hay
+  ninguno). Icono: nube verde = sincronizado · verde pulsante = subiendo cambios · ↻ girando =
+  sincronizando · nube ámbar = error · nube tachada ámbar = bloqueado (claves de Cloud sin
+  desbloquear o primer pull fallido). **Click** = sync manual. **Hover** (~450 ms) abre una
+  mini-tarjeta flotante (`SyncStatusButton.tsx`, sin tooltip nativo) bajo el botón: backend +
+  `owner/repo` (GitHub) con píldora de estado (Synced / Uploading / Syncing / Error / Locked /
+  Blocked / Pending), filas *Last sync* (relativo + hora exacta), *Pending uploads*, en Cloud
+  *Encryption* (Standard / Private E2EE) y *Real-time* (conectado/desconectado), *Auto-sync*
+  ("every 5 min"), bloque ámbar con el error si lo hay, y pie con la acción del click
+  ("Click to sync now" / "Click to retry" / "Unlock in Settings → Sync") + enlace **Settings**
+  (abre Ajustes → Sync). Sigue abierta al hacer click (se ve el sync en vivo), se mantiene al pasar
+  el ratón a la tarjeta y se cierra al salir (~150 ms), al perder el foco la ventana o al redimensionar;
+  mientras está abierta re-lee el estado cada 30 s.
 - **⚙ settings**: abre la **ventana de Ajustes** (overlay tipo app de settings) con nav izquierda
   + panel derecho, **en General** (la primera de la nav). Secciones, **en el orden en que aparecen
   en la nav**: **General** (idioma de la

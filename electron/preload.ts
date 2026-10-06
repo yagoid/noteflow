@@ -157,15 +157,17 @@ const api = {
     initialPullStatus: 'pending' | 'ok' | 'failed'
   }> => ipcRenderer.invoke('sync:get-status'),
   // Backend-tagged status of the LIVE sync provider (Cloud when enabled, else
-  // GitHub, else 'none') — drives the titlebar sync button.
+  // GitHub, else 'none') — drives the titlebar sync button and its status card.
   getActiveSyncStatus: (): Promise<{
     backend: 'github' | 'cloud' | 'none'
     active: boolean
     lastSync?: string
     error?: string
     initialPullStatus: 'pending' | 'ok' | 'failed'
+    pendingUploads: number
+    autoSyncIntervalMs?: number
     github?: { owner?: string; repo?: string }
-    cloud?: { keysState: 'unlocked' | 'locked' | 'no-keys'; keysMode: 'managed' | 'e2ee' | null }
+    cloud?: { keysState: 'unlocked' | 'locked' | 'no-keys'; keysMode: 'managed' | 'e2ee' | null; realtimeConnected: boolean }
   }> => ipcRenderer.invoke('sync:get-active-status'),
   initiateGitHubAuth: (
     repo: string

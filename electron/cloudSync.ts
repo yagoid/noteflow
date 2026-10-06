@@ -114,7 +114,11 @@ export interface CloudSyncStatus {
   lastSync?: string
   error?: string
   initialPullStatus: InitialPullStatus
-  /** True while the Realtime channel is joined (informational — no UI consumes it yet). */
+  /**
+   * True while the Realtime channel is joined. Informational: shown in the
+   * titlebar sync status card. Joining/dropping the channel emits no event —
+   * the UI reads it whenever it refreshes the status.
+   */
   realtimeConnected: boolean
 }
 

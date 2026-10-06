@@ -93,7 +93,7 @@ const api = {
     // GitHub Sync
     getSyncStatus: () => electron_1.ipcRenderer.invoke('sync:get-status'),
     // Backend-tagged status of the LIVE sync provider (Cloud when enabled, else
-    // GitHub, else 'none') — drives the titlebar sync button.
+    // GitHub, else 'none') — drives the titlebar sync button and its status card.
     getActiveSyncStatus: () => electron_1.ipcRenderer.invoke('sync:get-active-status'),
     initiateGitHubAuth: (repo) => electron_1.ipcRenderer.invoke('sync:initiate', repo),
     cancelGitHubAuth: () => electron_1.ipcRenderer.invoke('sync:cancel-auth'),

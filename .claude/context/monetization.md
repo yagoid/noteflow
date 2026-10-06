@@ -463,7 +463,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
   cada transición (choke points: `emitCloudStatusChanged` y `handleAccountStatusChanged`; el
   sign-out lo para). El loop periódico queda como **red de seguridad** cada 5 min
   (`CLOUD_AUTO_SYNC_INTERVAL_MS`: cubre WS caído y drena el journal offline). El estado público
-  expone `realtimeConnected` (informativo, aún sin UI).
+  expone `realtimeConnected` (informativo: fila *Real-time* de la tarjeta de estado del botón de
+  sync de la titlebar; unirse/caerse del canal **no emite evento** — la UI lo lee al refrescar).
 
 ### Cerrar sesión (sign-out) — implementado
 

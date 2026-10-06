@@ -71,12 +71,12 @@ function markInternalWrite(relPath: string) {
   setTimeout(() => recentInternalWrites.delete(relPath), 1500)
 }
 
-const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
-
 // ── Push state tracking ───────────────────────────────────────────────────────
-// Tracks filenames whose debounced push is still pending or in-flight.
-// When the set transitions from empty→non-empty or non-empty→empty we notify
-// all renderer windows so the sync button can show an uploading indicator.
+// Tracks files whose push is in flight: added by schedulePush's onStart (when
+// the 5 s debounce fires, not when it's armed) and by the durable chat push.
+// Every add/delete notifies all renderer windows (not just empty↔non-empty
+// transitions): the sync button shows an uploading indicator and its hover
+// card re-reads the in-flight count on each event.
 const pendingPushFiles = new Set<string>()
 
 function notifyPushState(): void {
@@ -426,7 +426,7 @@ function startAutoSync(): void {
       console.error('[AutoSync] pull failed:', String(err))
       emitSyncStatusChanged()
     }
-  }, AUTO_SYNC_INTERVAL_MS)
+  }, githubSync.GITHUB_AUTO_SYNC_INTERVAL_MS)
 }
 
 function stopAutoSync(): void {
@@ -1849,9 +1849,10 @@ ipcMain.handle('sync:get-status', () => {
 })
 
 // Backend-tagged status of whichever sync provider is live (Cloud when enabled,
-// else GitHub, else 'none') — drives the titlebar sync button. See syncProvider.ts.
+// else GitHub, else 'none') — drives the titlebar sync button and its status
+// card. pendingPushFiles lives here (not in syncProvider), so it's passed in.
 ipcMain.handle('sync:get-active-status', () => {
-  return getActiveSyncStatus()
+  return getActiveSyncStatus(pendingPushFiles.size)
 })
 
 ipcMain.handle('sync:initiate', async (_event, repo: string) => {

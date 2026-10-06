@@ -100,10 +100,11 @@ export function getActiveSyncProvider(): SyncProvider {
 }
 
 /**
- * Renderer-safe, backend-tagged snapshot for the titlebar sync button: which
- * backend is live and its status, normalized so the UI routes to ONE indicator.
- * Mirrors getActiveSyncProvider() — Cloud (when enabled) wins over GitHub, and
- * 'none' means no backend is set up (button hidden). Never carries key material.
+ * Renderer-safe, backend-tagged snapshot for the titlebar sync button and its
+ * hover status card: which backend is live and its status, normalized so the UI
+ * routes to ONE indicator. Mirrors getActiveSyncProvider() — Cloud (when
+ * enabled) wins over GitHub, and 'none' means no backend is set up (button
+ * hidden). Never carries key material.
  */
 export interface ActiveSyncStatus {
   backend: 'github' | 'cloud' | 'none'
@@ -112,13 +113,26 @@ export interface ActiveSyncStatus {
   lastSync?: string
   error?: string
   initialPullStatus: 'pending' | 'ok' | 'failed'
+  /**
+   * Files whose push is in flight right now (main.ts `pendingPushFiles` — the
+   * same set behind `sync:push-state`). Edits still inside the 5 s push
+   * debounce are not counted yet.
+   */
+  pendingUploads: number
+  /** Cadence of the backend's periodic auto-sync loop (absent when 'none'). */
+  autoSyncIntervalMs?: number
   /** Present only when backend === 'github'. */
   github?: { owner?: string; repo?: string }
   /** Present only when backend === 'cloud'. */
-  cloud?: { keysState: cloudSync.CloudSyncStatus['keysState']; keysMode: cloudSync.CloudSyncStatus['keysMode'] }
+  cloud?: {
+    keysState: cloudSync.CloudSyncStatus['keysState']
+    keysMode: cloudSync.CloudSyncStatus['keysMode']
+    realtimeConnected: boolean
+  }
 }
 
-export function getActiveSyncStatus(): ActiveSyncStatus {
+/** `pendingUploads` is owned by main.ts (pendingPushFiles), so the caller passes it in. */
+export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
   if (cloudSync.isCloudSyncEnabled()) {
     const c = cloudSync.getCloudSyncStatus()
     return {
@@ -127,7 +141,9 @@ export function getActiveSyncStatus(): ActiveSyncStatus {
       lastSync: c.lastSync,
       error: c.error,
       initialPullStatus: c.initialPullStatus,
-      cloud: { keysState: c.keysState, keysMode: c.keysMode },
+      pendingUploads,
+      autoSyncIntervalMs: cloudSync.CLOUD_AUTO_SYNC_INTERVAL_MS,
+      cloud: { keysState: c.keysState, keysMode: c.keysMode, realtimeConnected: c.realtimeConnected },
     }
   }
   const g = githubSync.getSyncStatus()
@@ -138,8 +154,10 @@ export function getActiveSyncStatus(): ActiveSyncStatus {
       lastSync: g.lastSync,
       error: g.error,
       initialPullStatus: g.initialPullStatus,
+      pendingUploads,
+      autoSyncIntervalMs: githubSync.GITHUB_AUTO_SYNC_INTERVAL_MS,
       github: { owner: g.owner, repo: g.repo },
     }
   }
-  return { backend: 'none', active: false, initialPullStatus: 'pending' }
+  return { backend: 'none', active: false, initialPullStatus: 'pending', pendingUploads }
 }

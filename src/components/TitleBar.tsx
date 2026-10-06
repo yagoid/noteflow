@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
-import { Brain, Cloud, CloudOff, Download, Minus, RefreshCw, Settings, Square, X } from 'lucide-react'
+import { Brain, Download, Minus, RefreshCw, Settings, Square, X } from 'lucide-react'
 import { useNotesStore } from '../stores/notesStore'
 import { useT } from '../i18n/useT'
 import { tf } from '../i18n/format'
 import type { ActiveSyncStatus } from '../types'
 import { ExportImportModal } from './ExportImportModal'
 import { SettingsModal } from './Settings/SettingsModal'
+import { SyncStatusButton } from './SyncStatusButton'
 import type { SettingsSection } from './Settings/SettingsModal'
 
 export function TitleBar() {
@@ -21,7 +22,7 @@ export function TitleBar() {
   const [exportNoteId, setExportNoteId] = useState<string | undefined>(undefined)
   // Backend-tagged status of whichever sync provider is live (GitHub or NoteFlow
   // Cloud — they are mutually exclusive). The button routes to the active one.
-  const [syncStatus, setSyncStatus] = useState<ActiveSyncStatus>({ backend: 'none', active: false, initialPullStatus: 'pending' })
+  const [syncStatus, setSyncStatus] = useState<ActiveSyncStatus>({ backend: 'none', active: false, initialPullStatus: 'pending', pendingUploads: 0 })
   const [syncing, setSyncing] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -46,7 +47,9 @@ export function TitleBar() {
     const unsubNotes = window.noteflow.onNotesUpdated(() => refreshSyncStatus())
     const unsubPush = window.noteflow.onSyncPushState((state) => {
       setPushing(state === 'pushing')
-      if (state === 'idle') refreshSyncStatus()
+      // Refresh on every transition (not just 'idle') so the status card's
+      // pending-uploads count tracks files as they start and finish.
+      refreshSyncStatus()
     })
     const unsubStatus = window.noteflow.onSyncStatusChanged(() => refreshSyncStatus())
     // Cloud emits its own status-changed event (enable/disable, unlock, pull) —
@@ -103,15 +106,6 @@ export function TitleBar() {
     }
   }, [])
 
-  function formatLastSync(iso?: string) {
-    if (!iso) return t.titleBar.never
-    const d = new Date(iso)
-    const now = new Date()
-    const sameDay = d.toDateString() === now.toDateString()
-    const hhmm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    return sameDay ? hhmm : `${d.toLocaleDateString([], { day: '2-digit', month: '2-digit' })} ${hhmm}`
-  }
-
   const handleSync = async () => {
     if (syncing) return
     setSyncing(true)
@@ -131,25 +125,6 @@ export function TitleBar() {
     }
     setDownloading(false)
   }
-
-  // Cloud keys not in memory (locked / no-keys) — a manual pull can't run until
-  // the user unlocks in Settings; treated like a blocked initial pull.
-  const cloudLocked = syncStatus.backend === 'cloud' && syncStatus.cloud?.keysState !== 'unlocked'
-  const syncBlocked = syncStatus.initialPullStatus === 'failed' || cloudLocked
-
-  const syncTooltip = syncing
-    ? t.titleBar.syncing
-    : pushing
-    ? t.titleBar.uploading
-    : cloudLocked
-    ? t.titleBar.cloudLocked
-    : syncStatus.initialPullStatus === 'failed'
-    ? `${t.titleBar.syncBlocked}${syncStatus.error ? `\n${syncStatus.error}` : ''}\n${t.titleBar.clickToRetry}`
-    : syncStatus.error
-    ? tf(t.titleBar.syncError, { error: syncStatus.error })
-    : syncStatus.backend === 'cloud'
-    ? tf(t.titleBar.cloudIdle, { time: formatLastSync(syncStatus.lastSync) })
-    : tf(t.titleBar.syncIdle, { owner: syncStatus.github?.owner ?? '', repo: syncStatus.github?.repo ?? '', time: formatLastSync(syncStatus.lastSync) })
 
   return (
     <>
@@ -205,24 +180,14 @@ export function TitleBar() {
           </button>
         )}
         {syncStatus.active && (
-          <button
-            onClick={handleSync}
-            disabled={syncing || pushing}
-            className="flex items-center gap-1 px-2 h-full text-text-muted hover:text-text transition-colors disabled:opacity-60"
-            title={syncTooltip}
-          >
-            {syncing ? (
-              <RefreshCw size={12} className="animate-spin text-text" />
-            ) : pushing ? (
-              <Cloud size={12} className="animate-pulse text-green-400" />
-            ) : syncBlocked ? (
-              <CloudOff size={12} className="text-amber-400" />
-            ) : syncStatus.error ? (
-              <Cloud size={12} className="text-amber-400" />
-            ) : (
-              <Cloud size={12} className="text-green-400" />
-            )}
-          </button>
+          <SyncStatusButton
+            status={syncStatus}
+            syncing={syncing}
+            pushing={pushing}
+            onSync={handleSync}
+            onRefresh={refreshSyncStatus}
+            onOpenSettings={() => openSettings('sync')}
+          />
         )}
         <button
           onClick={() => openSettings('general')}

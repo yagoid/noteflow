@@ -56,6 +56,13 @@ You are reading this note inside NoteFlow. It lives in your GitHub repository as
 // fixed here as part of the v2 format work.
 const METADATA_FILENAMES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json', 'templates.json', 'ui-settings.json'] as const
 
+/**
+ * Cadence of the GitHub auto-sync loop (the timer itself lives in main.ts).
+ * Exported so the titlebar status card can show the real interval
+ * (see getActiveSyncStatus in syncProvider.ts).
+ */
+export const GITHUB_AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface GitHubSyncSettings {
