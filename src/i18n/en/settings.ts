@@ -191,6 +191,7 @@ export const settings = {
     passphrase: 'Passphrase',
     confirmPassphrase: 'Confirm passphrase',
     passphraseTooShort: 'Use at least {min} characters.',
+    passphraseEdgeWhitespace: 'The passphrase cannot start or end with a space.',
     passphraseMismatch: 'The passphrases do not match.',
     createPassphrase: 'Create passphrase',
     setupFailed: 'Could not set up the encryption keys.',

@@ -164,6 +164,7 @@ export const settings = {
     passphrase: 'Frase de contraseña',
     confirmPassphrase: 'Confirmar frase de contraseña',
     passphraseTooShort: 'Usa al menos {min} caracteres.',
+    passphraseEdgeWhitespace: 'La frase de contraseña no puede empezar ni terminar con un espacio.',
     passphraseMismatch: 'Las frases de contraseña no coinciden.',
     createPassphrase: 'Crear frase de contraseña',
     setupFailed: 'No se pudieron configurar las claves de cifrado.',

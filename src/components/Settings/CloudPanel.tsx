@@ -88,6 +88,14 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
       setError(tf(t.settings.cloud.passphraseTooShort, { min: MIN_PASSPHRASE_LENGTH }))
       return false
     }
+    // The unlock trims what the user types (handleUnlock) and setup/upgrade do
+    // not, so a passphrase with edge whitespace would wrap the DEK under a key
+    // no client can derive again. Reject it here, setup/upgrade only — never
+    // on unlock, which must keep opening passphrases created before this rule.
+    if (passphrase !== passphrase.trim()) {
+      setError(t.settings.cloud.passphraseEdgeWhitespace)
+      return false
+    }
     if (passphrase !== confirmPassphrase) {
       setError(t.settings.cloud.passphraseMismatch)
       return false
