@@ -57,6 +57,7 @@ import { EditorToolbar } from './EditorToolbar'
 import { TableContextMenu } from './TableContextMenu'
 import { SearchHighlight } from './SearchHighlightExtension'
 import { SectionRelation } from './SectionRelation'
+import { KanbanBoard } from './KanbanBoard'
 import { SlashCommands, getSlashCommands } from './SlashCommands'
 import { SectionLinkPicker } from './SectionLinkPicker'
 import { EditorToc } from './EditorToc'
@@ -64,9 +65,15 @@ import { useTocItems } from './useEditorToc'
 import { TOC_MIN_EDITOR_WIDTH, TOC_RESERVE } from '../../lib/tocUtils'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../lib/markdownHtml'
+import { editorOwnsFocus, isEditorWidgetTarget } from '../../lib/editorFocus'
 import { useT } from '../../i18n/useT'
 
 const lowlight = createLowlight(common)
+
+// Kanban boards (KanbanBoard.ts) are in their own `topBlock` group, accepted only
+// here: a board nested in a list, quote or table cell would be lost by the
+// markdown serializer, so the schema keeps boards at the top level.
+const TopLevelDocument = Document.extend({ content: '(block | topBlock)+' })
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -202,7 +209,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       },
     },
     extensions: [
-      Document,
+      TopLevelDocument,
       Paragraph,
       Text,
       Bold,
@@ -238,6 +245,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       Placeholder.configure({ placeholder }),
       SearchHighlight,
       SectionRelation,
+      KanbanBoard,
       SlashCommands.configure({
         onLinkSection: () => setLinkPickerOpen(true),
         getLabels: () => getSlashCommands(tRef.current),
@@ -287,10 +295,14 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   // Sync external content changes (e.g. sync from another window).
   // IMPORTANT: never reset content while the editor is focused — the debounced
   // save creates a window where the store lags behind the editor state, causing
-  // a false mismatch that would call setContent mid-typing and jump the cursor.
+  // a false mismatch that would call setContent mid-typing and jump the cursor
+  // (or drop the edits made since the save started). "Focused" includes focus
+  // anywhere inside the editor DOM while the window has focus: kanban boards
+  // keep focus on their own root or card fields, where ProseMirror reports
+  // itself as not focused (see editorOwnsFocus).
   useEffect(() => {
     if (!editor) return
-    if (editor.isFocused) return
+    if (editorOwnsFocus(editor.isFocused, document.hasFocus(), editor.view.dom, document.activeElement)) return
     const currentMd = htmlToMarkdown(editor.getHTML()).trim()
     const incomingMd = content.trim()
     if (currentMd !== incomingMd) {
@@ -310,6 +322,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (!editor) return
+      // Keys typed in a NodeView widget (kanban fields) aren't editor input.
+      if (isEditorWidgetTarget(e.target)) return
       // Ctrl/Cmd+Shift+B → code block
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'B') {
         e.preventDefault()
@@ -344,6 +358,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       className="flex flex-col h-full"
       onKeyDown={handleKeyDown}
       onPaste={(e: React.ClipboardEvent) => {
+        // Pastes into a NodeView widget (a kanban card field) are the field's:
+        // inserting the image at the ProseMirror selection could replace a
+        // node-selected board.
+        if (isEditorWidgetTarget(e.target)) return
         const imageItems = Array.from(e.clipboardData.items).filter(i => i.type.startsWith('image/'))
         if (imageItems.length === 0) return
         e.preventDefault()
@@ -352,6 +370,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e: React.DragEvent) => {
         const files = Array.from(e.dataTransfer.files)
+        // Files dropped on a NodeView widget (kanban board) aren't inserted at
+        // the ProseMirror selection; just keep the browser from opening them.
+        if (isEditorWidgetTarget(e.target)) {
+          if (files.length > 0) e.preventDefault()
+          return
+        }
         if (!files.some(f => f.type.startsWith('image/'))) return
         e.preventDefault()
         e.stopPropagation()

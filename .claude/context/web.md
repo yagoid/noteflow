@@ -196,7 +196,7 @@ Anclas: `#organize` `#templates` `#sticky` `#links` `#shortcuts` `#views` `#temp
 | `#organize` | Jerarquía grupos→carpetas→notas→secciones | skill (Grupos/Carpetas/Secciones) |
 | `#templates` | Save as template, Settings→Templates, `templates.json` | skill (Plantillas) |
 | `#sticky` | Mock CSS 300×300 plegable, Ctrl+S/Ctrl+G, startup de stickies | skill (Sticky notes) + `StickyMock.astro` |
-| `#links` | Slash command, pills vivas/rotas, forma raw `[Name](noteflow://…)` | skill + `src/lib/sectionRelations.ts` |
+| `#links` | Slash command, pills vivas/rotas, forma raw `[Name](noteflow://…)`; un bullet sobre el tablero kanban (`/kanban`) | skill + `src/lib/sectionRelations.ts` + `src/lib/kanban.ts` |
 | `#shortcuts` | Tabla completa de atajos (datos en `features.en.ts` como `combos`) | `src/components/Settings/ShortcutsPanel.tsx` |
 | `#views` | Note/group overview, All content, Brain view | skill (Vistas) |
 | `#temp` | Notas temporales 24h | skill |

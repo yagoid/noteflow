@@ -9,7 +9,7 @@ falta verificar en app real)** → **Fase 4 (nube/monetización — ver
 `.claude/context/monetization.md`)**. **Principio: un índice, tres
 consumidores** (related ✅, grafo ✅, chat ✅).
 
-- **3 procesos:** renderer (`aiStore` + `RelatedNotesPanel`) → main (`aiIndex`, lifecycle +
+- **3 procesos:** renderer (`aiStore` + `AiPanel/RelatedView`) → main (`aiIndex`, lifecycle +
   debounce + progreso) → **`utilityProcess`** (`aiWorker`, no bloquea el main).
 - **Worker (`aiWorker.ts`):** embeddings con **Transformers.js** (`@huggingface/transformers`,
   runtime `onnxruntime-node` nativo, cuantización q8→fp32 fallback) + índice **SQLite**

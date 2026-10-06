@@ -476,6 +476,7 @@ sin navegar.
 | Lista viñetas | `- item` | Toolbar |
 | Lista numerada | `1. item` | Toolbar |
 | Lista de tareas | `- [ ] tarea` | Toolbar |
+| Tablero kanban | `<!-- kanban -->` … `<!-- /kanban -->` | `/kanban` · Toolbar |
 | Cita / Blockquote | `> texto` | Toolbar |
 | Tabla | — | Toolbar (menú contextual para filas/columnas) |
 | Link | `[texto](url)` | Toolbar |
@@ -539,8 +540,45 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   sincroniza, sobrevive export/import y en **modo raw** se ve como `[Nombre](noteflow://…)`. El
   slash command solo está en modo rich; el buscador excluye notas cifradas/archivadas/temporales.
 
+### Tablero kanban dentro de la nota
+- En el editor **rich**, `/kanban` (o `/board`, en cualquier idioma) o el botón **kanban** de la
+  toolbar (justo tras el de tabla) insertan un tablero con tres
+  columnas: **To do / In progress / Done** (en español *Por hacer / En curso / Hecho*). Puede haber
+  varios por sección. En **modo raw** se ve tal cual es en disco: markdown plano entre
+  `<!-- kanban done="Done" -->` y `<!-- /kanban -->` (columnas = `- Nombre`, tarjetas = tareas
+  indentadas `  - [ ] …` con sus 📅⏰🔺), así sincroniza y lo leen el CLI/móvil/otros editores.
+- **Ocupa todo el ancho** del editor (no respeta la columna *Readable*); si las columnas no caben,
+  el tablero hace **scroll horizontal** propio (la barra solo se ve con el ratón encima del tablero o
+  durante un arrastre; su hueco queda reservado). Columnas de ancho fijo, con **contador** de tarjetas.
+- **Tarjetas:** checkbox, texto con formato (negrita, links, resaltado, pills de "Link section" —
+  clic navega), y los mismos chips que las tareas: **📅 deadline + ⏰ alarma** y **🔺 importancia**
+  (con sus pickers; al pasar el ratón aparecen los iconos de bandera/calendario y un menú `⋯` con
+  *Edit text* / *Delete card*). Clic en el texto → edición en línea (Enter guarda, Esc cancela); si
+  escribes `📅2026-10-12` o `🔺high` en el texto se convierten en chips. Las sub-viñetas que tuviera
+  la tarjeta en el markdown se conservan (chip "≡ n" con tooltip; se editan en modo raw).
+- **+ Add card** al pie de cada columna (Enter añade y deja el campo listo para la siguiente;
+  Esc cierra) y **+ Add column** al final del tablero.
+- **Columnas:** clic en el título para renombrar; menú `⋯` con *Rename*, *Mark as done column* /
+  *Unset done column* y *Delete column* (si tiene tarjetas pide un segundo clic de confirmación).
+- **Columna "done"** (la de Hecho, marcada con ✓ verde): arrastrar una tarjeta **a** ella la marca
+  como hecha y sacarla la desmarca; marcar el checkbox de una tarjeta la **mueve al final** de la
+  columna done; desmarcarla estando en done la devuelve al final de la primera columna. Sin columna
+  done, el checkbox solo marca/desmarca.
+- **Drag & drop** de tarjetas (dentro de una columna o entre columnas) y de columnas (arrastrando su
+  cabecera), con una línea de color que indica dónde caerá; cerca de los bordes el tablero y la nota
+  se desplazan solos. `Esc` cancela el arrastre.
+- Cabecera discreta "KANBAN · n columns · n cards": clic → selecciona el tablero (`Backspace`/`Delete`
+  lo borra). Al pasar el ratón: **Convert to task list** (todas las tarjetas a una lista de tareas) y
+  **Delete board**. Dentro de una lista de tareas, el menú `/` ofrece **Convert task list to board**
+  (las tareas pasan a la primera columna); ahí el botón kanban de la toolbar hace lo mismo en vez de
+  insertar un tablero nuevo (su tooltip pasa a *Convert task list to board*). Todo se deshace con `Ctrl+Z`.
+- La búsqueda en la nota (`Ctrl+F`) también encuentra y resalta texto dentro de las tarjetas y los
+  títulos de columna. Los previews de sección (hover, vistas de grupo/nota) y el chat de IA lo
+  muestran como un mini tablero de solo lectura.
+
 ### Búsqueda dentro de la nota
-- `Ctrl+F` (con el editor enfocado) → barra de "Find in note" que resalta coincidencias.
+- `Ctrl+F` (con el editor enfocado) → barra de "Find in note" que resalta coincidencias (también
+  dentro de los tableros kanban).
 - Funciona en ambos modos (WYSIWYG y raw).
 
 ### Tamaño de fuente
@@ -553,7 +591,7 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   Obsidian/iA Writer).
 - En modo `Readable` se centran los bloques de texto (párrafos, headings, listas, citas,
   separadores) **y los bloques de código**; solo **tablas e imágenes rompen la columna** y siguen
-  a ancho completo. El ancho de columna se deriva del tamaño de fuente base del cuerpo (no del de
+  a ancho completo (los **tableros kanban** van más allá: ocupan el editor de borde a borde). El ancho de columna se deriva del tamaño de fuente base del cuerpo (no del de
   cada elemento), así los headings comparten la misma columna. Aplica a ambos modos (WYSIWYG y
   raw); no afecta a los stickies.
 - En `Readable`, las acciones de cada tarea (importancia + deadline/badge) se sacan al margen

@@ -192,7 +192,8 @@ en memoria en `notesStore`):
 El editor TipTap (`src/components/Editor/Editor.tsx`) registra las extensiones **una a una** (sin
 StarterKit). Todo elemento soportado **round-trippea** por `src/lib/markdownHtml.ts`, fuente única de
 verdad de la conversión, que debe mantenerse **simétrica**: marcas inline en
-`inlineToHtml`/`inlineElToMd`, bloques en el bucle de `htmlFromMarkdown`/`blockElToMd`. Las mismas
+`inlineToHtml` (vive en `src/lib/markdownInline.ts`, hoja compartida con `kanban.ts` para no crear
+ciclos) / `inlineElToMd`, bloques en el bucle de `htmlFromMarkdown`/`blockElToMd`. Las mismas
 funciones las usa `SectionPreviewCard`, así que un elemento nuevo aparece también en los previews sin
 código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.css`).
 - **Bold neutro + highlight de acento (decisión):** la negrita (`**`) ya **no** usa el color de
@@ -216,8 +217,10 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   Posiciona con `getBoundingClientRect()/getRootZoom()` (mismo truco de zoom que `SlashCommands`);
   cierra con click-fuera y Escape. No toca `markdownHtml.ts` ni el formato. Estilos `.code-lang-*` en
   `index.css`.
-- **Orden de detección de bloque** en `htmlFromMarkdown`: code fence → heading → HR → lista →
-  blockquote → tabla → párrafo (un prefijo `>` no choca con bullets/ordenadas/headings).
+- **Orden de detección de bloque** en `htmlFromMarkdown`: code fence → heading → HR → kanban →
+  lista → blockquote → tabla → párrafo (un prefijo `>` no choca con bullets/ordenadas/headings; un
+  bloque que empieza por `<!-- kanban -->` pero no es un tablero válido sigue cayendo a párrafo).
+  Pre-pasadas antes del split por `\n\n`, en este orden: `isolateCodeFences` → `isolateKanbanBlocks`.
 - **Code fences pegados a otro contenido (`isolateCodeFences`):** el code fence solo se detecta como
   **primera línea de un bloque**, y los bloques se cortan por `\n\n`. Por eso, antes del split, una
   pre-pasada por líneas:
@@ -297,11 +300,178 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     nunca cierra. `~~~` no es fence. (Igual que antes; solo afecta a markdown externo.)
 
   Tests en `tests/lib/markdownHtml.test.ts`.
+- **Tablero kanban en la nota (`src/lib/kanban.ts`).** Formato en disco + round-trip md↔html (abajo)
+  y editor rich (nodo TipTap + NodeView React, ver "Tablero kanban: editor" justo después).
+  Formato (markdown plano dentro del `.md` de la sección; puede haber varios por sección):
+  ```md
+  <!-- kanban done="Done" -->
+  - Todo
+    - [ ] Design the NodeView 📅2026-10-12 🔺high
+      - sub-bullet (se conserva literal como `extra` de la tarjeta)
+  - Done
+    - [x] Pick the format
+  <!-- /kanban -->
+  ```
+  - Marcadores en columna 0. Atributos del de apertura = string crudo (`attrs`) que se reescribe
+    **literal**; v1 solo interpreta `done="<columna>"` (valores con `& " < >` como entidades). Columna
+    = `- nombre` en columna 0 (texto plano; `-` solo = nombre vacío). Tarjeta = tarea con **2
+    espacios** exactos (`  - [ ]`/`  - [x]`) con las anotaciones 📅⏰🔺 (mismo orden de escritura que
+    `listElToMd`, helper compartido `taskAnnotationsToMd`). Líneas más indentadas (≥3 espacios o tab)
+    = `extra` de la tarjeta anterior, literal. Líneas en blanco dentro: se toleran, no se emiten.
+  - **Nunca destroza contenido:** si algo entre los marcadores no encaja (párrafo, bullet que no es
+    tarea, indentación rara, lista ordenada, tarjeta antes de columna, extra bajo columna, otro
+    marcador…), `parseKanbanMarkdown` devuelve `null` y la región se pinta **exactamente como antes**
+    (los marcadores como texto literal). Apertura sin cierre: intacta. La normalización que sí hace un
+    tablero válido es solo de forma: espacios de marcadores/nombres, orden de anotaciones (al final),
+    líneas en blanco internas fuera, y límites `\n\n` antes/después del tablero.
+  - **`isolateKanbanBlocks`** (pre-pasada, **después** de `isolateCodeFences`: necesita saber qué
+    líneas son código, y eso solo queda fijado tras aislar fences). Calcula las líneas de bloques de
+    código (`codeBlockLines`: bloque `\n\n` cuya 1ª línea empieza por ```` ``` ````, misma regla de
+    paridad que `ensureBlockStart`) e ignora aperturas dentro de código. Empareja cada apertura con
+    el **primer** cierre posterior; solo si la región parsea como tablero asegura límite de bloque
+    antes/después (solo donde falta) y protege sus líneas vacías con el centinela `FENCE_BLANK`. Si no
+    parsea, salta esa apertura y sigue en la línea siguiente (una apertura posterior puede formar un
+    tablero válido con ese mismo cierre). Un ```` ``` ```` pegado justo tras el cierre (fence sin
+    pareja) haría código al separarlo → ese tablero se deja como texto.
+  - **Ambigüedad heredada (aceptada):** un tablero pegado **entre dos fences** sin líneas en blanco
+    queda dentro del bloque de código (regla "hasta el último cierre del bloque" de fences anidados).
+    Se conserva literal como código; no se pierde nada.
+  - **HTML estructurado** (lo consumen previews/chat ya, y el NodeView de la fase 2). La **fuente de
+    verdad** de la vuelta son los `data-*` (`data-name`, `data-md`, …), **no** el HTML interior:
+    ```html
+    <div data-type="kanban" data-attrs="done=&quot;Done&quot;">
+      <div data-kanban-column data-name="Done" data-done="true">   <!-- data-done solo en la columna done -->
+        <div data-kanban-column-title>Done</div>
+        <ul data-type="taskList">
+          <li data-type="taskItem" data-checked="true" data-due data-alarm data-importance data-md="…" data-extra="…">
+            <label><input type="checkbox" checked></label><p>…inlineToHtml(md)…</p></li>
+        </ul></div></div>
+    ```
+    `blockElToMd` trata `div[data-type="kanban"]` antes de la bajada genérica a hijos y añade el
+    `\n\n` final (`serializeKanbanMarkdown` acaba en el marcador de cierre).
+  - **API exportada** (`kanban.ts`): tipos `KanbanBoardData {attrs, done, columns}` /
+    `KanbanColumn {name, cards}` / `KanbanCard {md, checked, due, alarm, importance, extra}` (`md` =
+    texto sin anotaciones, una línea; `extra` = líneas hijas crudas, `''` = ninguna);
+    `parseKanbanMarkdown(block)` (→ `null` si no es tablero), `serializeKanbanMarkdown(data)` (siempre
+    re-parseable: aplana saltos de línea, indenta extras mal indentados; `done` manda y se sincroniza
+    en `attrs` con `setKanbanAttr`), `kanbanDataToHtml(data)`, `kanbanDataFromElement(el)`,
+    `getKanbanAttr`/`setKanbanAttr`, `KANBAN_OPEN_RE`/`KANBAN_CLOSE_RE`. `looksLikeMarkdown` detecta
+    la línea de apertura (pegar un tablero pasa por `htmlFromMarkdown`).
+  - `kanbanDataToHtml` escribe `data-attrs` con `done` ya sincronizado (`setKanbanAttr`), igual que el
+    serializador: `kanbanDataFromElement` lee `done` **de `data-attrs`**, así que un `attrs` desfasado
+    respecto a `done` (p. ej. tras renombrar la columna done) no puede perder la columna done al guardar.
+  - Las alarmas también salen de las tarjetas (`TASK_ALARM_RE` admite indentación). Tests en
+    `tests/lib/kanban.test.ts` (incl. fuzz de round-trip); usan un DOM mínimo
+    (`tests/helpers/miniDom.ts`, solo entiende la salida de `htmlFromMarkdown`) para correr
+    `htmlToMarkdown` en el entorno node de vitest.
+- **Tablero kanban: editor (`components/Editor/KanbanBoard.ts` + `KanbanBoardView.tsx`).**
+  - **Nodo** `kanbanBoard`: bloque **atom**, `selectable`, no arrastrable por ProseMirror, un único
+    atributo `board` (`KanbanBoardData`, JSON-safe). `parseHTML` = `div[data-type="kanban"]` con
+    `kanbanDataFromElement`; `renderHTML` devuelve el DOM de **`kanbanDataToHtml`** (no un
+    DOMOutputSpec espejo), así `editor.getHTML()` → `htmlToMarkdown` (la ruta de guardado de
+    `Editor.tsx`, debounce 400 ms) reescribe exactamente el mismo markdown; vale igual para pegar
+    (markdown → `htmlFromMarkdown` → `parseSlice`, o el HTML de copiar un tablero seleccionado) y para
+    undo/redo. `renderText` = el markdown (texto plano del portapapeles / `getText`). Test que simula la
+    ruta carga → atributo clonado por JSON → render → guardado en `tests/lib/kanbanOps.test.ts`.
+  - **Solo en el nivel superior:** grupo propio `topBlock` y el documento se extiende a
+    `content: '(block | topBlock)+'` (`TopLevelDocument` en `Editor.tsx`). Un tablero dentro de un
+    ítem de lista/cita/celda lo tiraría el serializador (`listElToMd` ignora el `div`); así pegar uno
+    dentro de una lista parte la lista y lo deja arriba.
+  - **NodeView:** todo cambio es una transformación pura de **`src/lib/kanbanOps.ts`** (tests en
+    `tests/lib/kanbanOps.test.ts`) aplicada al nodo **vivo** (`editor.state.doc.nodeAt(getPos())`, no al
+    closure del render) y escrita con `updateAttributes` → una transacción normal (historial,
+    autosave). Las ops devuelven el **mismo objeto** si no cambian nada (sin transacción vacía) y
+    mantienen `attrs` sincronizado con `done`. Todo `.kanban-board` lleva `data-kanban-interactive`:
+    el `stopEvent` del nodo entrega a React cualquier evento de dentro e `ignoreMutation` es siempre
+    true. Mousedown fuera de campos de texto hace `preventDefault` y enfoca la **raíz del tablero**
+    (`tabIndex=-1`): no mueve el caret de ProseMirror, cierra/commitea un editor inline por blur, y en
+    la raíz `Ctrl+Z`/`Ctrl+Shift+Z`/`Ctrl+Y` llaman a `editor.commands.undo/redo` (ProseMirror no ve
+    esas teclas por `stopEvent`); `Esc` selecciona el nodo. El handle de la cabecera ("KANBAN · n
+    columns · n cards") hace `setNodeSelection` + `view.focus()` → `Backspace`/`Delete` lo borran como
+    cualquier atom. En los textarea inline las teclas sin modificador hacen `stopPropagation` (Enter,
+    Backspace… no llegan a los handlers del editor/NoteEditor); las combinaciones con Ctrl/Meta siguen
+    burbujeando (atajos globales, tamaño de fuente). Tras aplicar algo desde un menú/picker el foco
+    vuelve a la raíz del tablero (Ctrl+Z inmediato); si se descartan, el foco queda donde se clicó.
+  - **Foco = "editando" aunque ProseMirror no lo crea (regla en `Editor.tsx`):** con el foco en la raíz
+    del tablero o en un campo de tarjeta, `editor.isFocused` es `false`. El efecto que sincroniza
+    `content` externo (`setContent`) se salta si **`editorOwnsFocus`** (`src/lib/editorFocus.ts`):
+    ProseMirror enfocado **o** (`document.hasFocus()` **y** `document.activeElement` dentro de
+    `editor.view.dom` — el NodeView vive dentro). La condición de `hasFocus()` es necesaria:
+    `activeElement` se queda en la raíz del tablero cuando la ventana pasa a segundo plano, y sin ella
+    se saltarían los cambios de una ventana sticky o de un pull de sync (el efecto solo re-corre al
+    cambiar `content`, así que el editor quedaría desfasado y la siguiente edición del tablero guardaría
+    lo viejo encima). Un campo de tarjeta abierto commitea por su `onBlur` al perder la ventana el foco. Sin esto había una carrera: edición A → el debounce guarda md_A (lento en notas cifradas,
+    PBKDF2) → edición B → llega `content = md_A` → `setContent(md_A)` y B se perdía (y se re-guardaba
+    md_A). Los popups portalados a `<body>` no cuentan, pero al aplicar devuelven el foco a la raíz.
+  - **Handlers del wrapper de `Editor.tsx`** (`onPaste`/`onDrop` de imágenes, `onKeyDown` con
+    Ctrl+Shift+B / Enter tras HR) **ignoran** eventos nacidos en widgets de NodeView o sus popups
+    (`isEditorWidgetTarget`: `[data-kanban-interactive]`, `.kanban-menu`, pickers de tarea): actúan
+    sobre la selección de ProseMirror, que puede ser una NodeSelection del propio tablero (pegar una
+    captura la reemplazaba). Un drop de ficheros sobre el tablero solo hace `preventDefault` (que el
+    navegador no abra el fichero); pegar texto en un campo de tarjeta es nativo.
+  - **Semántica de la columna done** (atributo `done`, en `kanbanOps`): mover una tarjeta **a** la
+    columna done la marca, sacarla la desmarca; marcar el checkbox la mueve al **final** de la done;
+    desmarcar una que está en la done la mueve al **final** de la primera columna no-done; sin columna
+    done el checkbox solo alterna. Renombrar la done mantiene `done`; borrarla lo limpia. Los nombres de
+    columna se hacen **únicos** (sufijo " 2"…) al añadir/renombrar: el nombre identifica la columna done.
+  - **Texto de tarjeta:** `md` nunca lleva anotaciones; el editor inline (Enter guarda, Esc cancela,
+    blur guarda; una tarjeta **nueva** vacía no se crea; el compositor sigue abierto tras Enter para
+    encadenar tarjetas) pasa el texto por `applyCardText`, que aplana a una línea y saca 📅⏰🔺 tecleados a
+    sus campos. Se pinta con `inlineToHtml` (vía `innerHTML`: por eso `inlineToHtml` escapa `"` en los
+    valores de atributo — `src`/`alt`/`href`/ids de relación — y una URL no puede inyectar atributos;
+    `getAttribute` lo decodifica al volver a markdown, round-trip intacto) (negrita, links, highlight, pills de relación: click en una
+    pill navega con `navigateToSection`; click en un link lo abre el handler de links de `Editor.tsx`).
+    Chips 📅/⏰/🔺 con las mismas clases (`task-badge`, `task-importance-dot`) y los **mismos pickers** que
+    las tareas (`TaskPickers.tsx` + helpers `taskBadge.ts`, extraídos de `DeadlineTaskItemView`). `extra`
+    se conserva sin editar: chip "≡ n" con tooltip (editable en modo raw).
+  - **Drag & drop** propio con pointer events (sin dependencia nueva; HTML5 DnD descartado: el drop lo
+    intercepta ProseMirror y el ghost nativo es feo). Umbral 4 px; ghost portalado a `<body>`
+    (`position: fixed`, se mueve con `transform` sin re-render), la tarjeta/columna origen queda
+    atenuada; línea neón de drop (`.kanban-drop-line` / `.kanban-column-drop-line`); el hit-test va en
+    un bucle rAF que además auto-scrollea el tablero (horizontal) y el editor (vertical) cerca de los
+    bordes. Soltar donde ya estaba = no-op sin indicador. `Esc` cancela; el click posterior al drop se
+    traga (capture, una vez). Columnas: se arrastran por la cabecera.
+    **Coordenadas bajo el zoom de UI:** el hit-test trabaja en espacio de `getBoundingClientRect()` y
+    convierte `clientX/Y` con un factor **medido** (`clientToRectScale`: ancho del rect de `<html>` /
+    `innerWidth`) en vez de asumirlo — ver la nota en "UI text size".
+  - **Ancho (decisión del usuario):** el tablero **no** respeta la columna Readable: el wrapper
+    (`.node-kanbanBoard`, hijo directo de `.ProseMirror`) anula el padding horizontal del editor con
+    márgenes negativos, que `index.css` expone como vars en `.prose-editor .ProseMirror`
+    (`--pm-pad-l`, `--pm-pad-r`, `--pm-bleed-r` = cuánto puede invadir el padding derecho: 0 con el
+    índice visible para no pasar bajo sus rayitas; el sticky define sus propios valores). El scroller
+    interno del tablero repone ese padding, así la primera columna se alinea con el borde izquierdo del
+    texto en Full. Columnas de ancho fijo `--prose-font-size × 19` (~247 px a 13 px); si no caben, scroll
+    horizontal **dentro** del tablero (el scroller de la nota sigue `overflow-x: hidden`).
+  - **Insertar:** slash `/kanban` (o `/board`; `keywords` sin traducir en `SlashCommandItem`) → tablero
+    con columnas i18n (To do / In progress / Done, done = la tercera) en el bloque de nivel superior
+    actual (reemplaza un párrafo vacío; si no, va detrás — p. ej. detrás de toda la lista) y añade un
+    párrafo vacío si quedaría al final del doc. Dentro de una task list de nivel superior aparece además
+    **"Convert task list to board"**: ítems de nivel superior → tarjetas de la primera columna
+    (estado/anotaciones; hijos → `extra`; ítems vacíos se descartan). La barra del tablero (hover) tiene
+    **"Convert to task list"** (todas las tarjetas aplanadas, con estado/anotaciones/`extra`) y **borrar
+    tablero** (doble click si tiene tarjetas). Borrar columna con tarjetas pide confirmación **inline en
+    el menú** (segundo click): `ConfirmModal` no sirve aquí porque sus atajos escuchan en `window`
+    (bubbling) y el `onKeyDown` de `NoteEditor` hace `stopPropagation` para todo lo que nace en su árbol
+    React (portales incluidos). Todo es deshacible.
+  - **Búsqueda en la nota:** el texto de un atom no tiene nodos de texto para las decoraciones. 
+    `SearchHighlightExtension` cuenta los matches de cada tablero con `countKanbanMatches`
+    (`src/lib/kanbanSearch.ts`: títulos de columna + texto renderizado de las tarjetas, por tramo de
+    texto entre tags, como la búsqueda normal) y pone **una decoración de nodo** por tablero con
+    `{query, caseSensitive, active}` en su spec; el NodeView la recibe en `decorations` y pinta los
+    `<span class="nf-search-match">` con `highlightHtml` (misma función → el conteo no puede divergir).
+    Next/prev sobre un match de tablero no mueve la selección; `InNoteSearchBar` ya hace
+    `scrollIntoView` del `.nf-search-match-active`. Tests en `tests/lib/kanbanSearch.test.ts`.
+  - **Previews:** `SectionPreviewCard`/overviews/chat pintan el HTML estático de `htmlFromMarkdown`; el
+    CSS de `.prose-editor .ProseMirror div[data-type="kanban"]` lo muestra como mini tablero de solo
+    lectura (columnas en fila, compactas, `overflow: hidden`; en `.chat-md` más estrechas). También es
+    el fallback si el NodeView aún no se montó.
+  - Modo raw: intacto (markdown literal). Pendiente/no hecho en v1: metadatos de columna
+    (color/WIP/colapsar), editar `extra` en la UI, mover tarjetas con teclado.
 - **Invariante del separador de bloque en `blockElToMd`:** cada bloque serializado debe terminar en
   **exactamente `\n\n`** (`htmlFromMarkdown` separa bloques con `split(/\n\n/)`). Ojo con quién pone
   el separador: `tableElToMd` **ya devuelve** su `\n\n` final (el caso `table` no debe añadir nada),
   mientras que `listElToMd` cierra el último ítem con un solo `\n` y por eso el caso `ul`/`ol` sí
-  suma `+ '\n'`. Un `\n` de más tras un bloque hace que el siguiente se reparsee con un hard break
+  suma `+ '\n'`; el caso kanban suma `+ '\n\n'` (su serializador acaba en el marcador de cierre). Un `\n` de más tras un bloque hace que el siguiente se reparsee con un hard break
   inicial (`<p><br>…`) y el hueco **crece en cada round-trip** guardar/reabrir (bug real con tablas).
 - Estos elementos son **markdown plano** en el cuerpo del `.md`: no tocan el frontmatter ni los tres
   espejos del formato (`noteUtils`/`noteFormat`/`cli`), así que sincronizan y se degradan limpio en
@@ -423,8 +593,9 @@ del editor rich. Piezas: `lib/tocUtils.ts` (lógica pura con tests en `tests/lib
   y solo re-renderiza si cambia la firma (`tocSignature`).
 - **Reserva de espacio solo para el indicador:** el scroller recibe `.editor-has-toc` y
   `--toc-reserve` (`TOC_RESERVE` = 44 px) e `index.css` lo convierte en `padding-right` del
-  `.ProseMirror` (en reposo nada pasa bajo las rayitas; el panel desplegado sí tapa, a propósito). En
-  **Readable** el `padding-left` crece hasta el mismo valor (`clamp(1.5rem, 100cqw - reserve - col,
+  `.ProseMirror` vía la var `--pm-pad-r` (y `--pm-bleed-r: 0`, para que los tableros kanban a sangre
+  tampoco pasen por debajo) — en reposo nada pasa bajo las rayitas; el panel desplegado sí tapa, a
+  propósito. En **Readable** el `padding-left` (`--pm-pad-l`) crece hasta el mismo valor (`clamp(1.5rem, 100cqw - reserve - col,
   reserve)`) para que la columna siga centrada; las acciones de tarea siguen saliendo al margen
   derecho pero su borde derecho se acota contra `--toc-reserve` en vez del borde del editor. Bajo
   **420 px** de ancho del scroller (`TOC_MIN_EDITOR_WIDTH`, `ResizeObserver`; paneles muy estrechos)
@@ -683,8 +854,10 @@ si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
 ### Motor de alarmas y notas temporales (en main)
 `setInterval` cada 60s ejecuta `checkAlarms()` + `maybeCheckExpiredNotes({kind:'timer'})` (este
 último también una vez al arrancar):
-- **Alarmas:** el renderer recolecta deadlines/alarmas de los task items (`alarmUtils.ts`) y las
-  envía con `alarms:schedule`; el main dispara `Notification` nativa cuando vence (incluye las ya
+- **Alarmas:** el renderer recolecta deadlines/alarmas de los task items (`alarmUtils.ts`:
+  `TASK_ALARM_RE` sobre el markdown de cada sección; línea de tarea con o sin indentación —
+  subtareas y tarjetas kanban incluidas —, `📅` seguido de `⏰` en la misma línea, también `[x]`;
+  ventana −24h…+7d) y las envía con `alarms:schedule`; el main dispara `Notification` nativa cuando vence (incluye las ya
   vencidas/perdidas al registrar).
 - **Notas temporales:** `checkExpiredNotes()` lee cada `note.md` del **disco local** y, si casa
   `/^expiresAt:/m` con fecha vencida, borra la carpeta y llama a `scheduleDeleteDir` del backend de
@@ -963,6 +1136,14 @@ ya están en espacio local, no se tocan. Ejemplos aplicados: menú slash (`Slash
 `openPopover`/`openImpPopover`). Los menús posicionados desde coords de ratón (`ContextMenu`, menús
 de sidebar) o submenús `absolute` dentro de un menú ya zoomeado (`NoteContextMenu`) NO necesitan el
 ajuste.
+
+**Ojo — el espacio de `clientX/Y` e `innerWidth` no es estable entre versiones de Chromium.** Medido
+en Chromium 141 (headless de Playwright, `zoom: 1.25` en `<html>`): `clientX/Y` e `innerWidth` salen en
+el **mismo** espacio que `getBoundingClientRect()` (sin dividir), no en el local que describe el
+párrafo anterior. No se ha medido en el Chromium de Electron 35. Código nuevo que mezcle coordenadas
+de ratón con rects debería medir el factor en vez de asumirlo (como `clientToRectScale` del tablero
+kanban: ancho del rect de `<html>` / `innerWidth`), y clampear popups contra el rect de `<html>` / zoom
+en vez de `window.inner*` (`KanbanMenu`).
 
 **Pendiente (scroll bajo zoom):** con `zoom` en el root y contenedores de scroll anidados
 (`flex-1 overflow-y-auto` del editor), a zoom alto el fondo del contenido puede quedar inalcanzable

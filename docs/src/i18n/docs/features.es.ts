@@ -137,6 +137,7 @@ export const featuresEs: FeaturesContent = {
       '<strong>Click</strong> en una pill navega a la sección destino — en la misma nota o en cualquier otra. <strong>Hover</strong> muestra la misma previsualización flotante que usa el resto de la app.',
       'La pill muestra el nombre del destino <strong>en vivo</strong>: renombra la sección y todas las pills que apuntan a ella se actualizan. Borra el destino y la pill pasa a estado <strong>roto</strong> (atenuada, tachada, sin navegación).',
       'El buscador excluye notas cifradas, archivadas y temporales; el comando <kbd>/</kbd> existe solo en modo rich.',
+      'El mismo menú <kbd>/</kbd> inserta un <strong>tablero kanban</strong> (<kbd>/kanban</kbd>): columnas y tarjetas que arrastras, con los chips de las tareas (📅 fecha límite, ⏰ alarma, 🔺 importancia), dentro de la propia nota — y guardado como markdown plano, como todo lo demás.',
     ],
     rawP:
       'Por debajo, una pill no tiene nada de exótico — es un enlace markdown normal, <code>[Nombre](noteflow://noteId/sectionId)</code>, guardado dentro del texto de la sección. Eso es exactamente lo que ves en modo raw, y por eso los enlaces <strong>sobreviven al sync, al export y al import</strong> sin cambios.',

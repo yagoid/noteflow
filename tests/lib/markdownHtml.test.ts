@@ -48,6 +48,13 @@ describe('htmlFromMarkdown — multi-line task annotations', () => {
     expect(html).not.toContain('data-importance="low"')
     expect(html).not.toContain('🔺')
   })
+
+  it('closes the gap left by an annotation written mid-text', () => {
+    const html = htmlFromMarkdown('- [ ] Fix 📅2026-07-23 the bug ⏰09:00 now')
+    expect(html).toContain('data-due="2026-07-23"')
+    expect(html).toContain('data-alarm="09:00"')
+    expect(html).toContain('<p>Fix the bug now</p>')
+  })
 })
 
 // A table is followed by exactly one blank line in the serialized markdown

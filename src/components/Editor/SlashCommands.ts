@@ -6,10 +6,19 @@ import { ReactRenderer } from '@tiptap/react'
 import { SlashCommandMenu, type SlashCommandMenuHandle } from './SlashCommandMenu'
 import { getRootZoom } from '../../stores/themeStore'
 import type { Messages } from '../../i18n'
+import {
+  convertTaskListToBoard,
+  insertDefaultBoard,
+  kanbanDefaultColumns,
+  topLevelTaskList,
+  type KanbanDefaultColumns,
+} from './kanbanCommands'
 
 export interface SlashCommandItem {
   title: string
   description?: string
+  /** Extra (untranslated) words that also match the typed query. */
+  keywords?: string[]
   // Runs after the typed `/query` range has been deleted.
   run: (editor: Editor) => void
 }
@@ -17,6 +26,12 @@ export interface SlashCommandItem {
 export interface SlashCommandLabels {
   linkSection: string
   linkSectionDescription: string
+  kanban: string
+  kanbanDescription: string
+  convertToKanban: string
+  convertToKanbanDescription: string
+  /** Column names of a new board (to do / in progress / done). */
+  kanbanColumns: KanbanDefaultColumns
 }
 
 /**
@@ -28,6 +43,11 @@ export function getSlashCommands(t: Messages): SlashCommandLabels {
   return {
     linkSection: t.editor.slash.linkSection,
     linkSectionDescription: t.editor.slash.linkSectionDescription,
+    kanban: t.editor.slash.kanban,
+    kanbanDescription: t.editor.slash.kanbanDescription,
+    convertToKanban: t.editor.slash.convertToKanban,
+    convertToKanbanDescription: t.editor.slash.convertToKanbanDescription,
+    kanbanColumns: kanbanDefaultColumns(t),
   }
 }
 
@@ -70,6 +90,11 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
       getLabels: () => ({
         linkSection: 'Link section',
         linkSectionDescription: 'Link to another section',
+        kanban: 'Kanban board',
+        kanbanDescription: 'Columns and cards you can drag around',
+        convertToKanban: 'Convert task list to board',
+        convertToKanbanDescription: 'Turn this task list into a kanban board',
+        kanbanColumns: ['To do', 'In progress', 'Done'],
       }),
     }
   },
@@ -87,7 +112,7 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
           const $from = state.doc.resolve(range.from)
           return $from.parent.type.name !== 'codeBlock'
         },
-        items: ({ query }) => {
+        items: ({ query, editor }) => {
           const labels = getLabels()
           const all: SlashCommandItem[] = [
             {
@@ -96,8 +121,26 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
               run: (editor) => onLinkSection(editor),
             },
           ]
+          // Inside a top-level task list: offer to turn it into a board.
+          if (topLevelTaskList(editor)) {
+            all.push({
+              title: labels.convertToKanban,
+              description: labels.convertToKanbanDescription,
+              keywords: ['kanban', 'board'],
+              run: (editor) => { convertTaskListToBoard(editor, labels.kanbanColumns) },
+            })
+          }
+          all.push({
+            title: labels.kanban,
+            description: labels.kanbanDescription,
+            // `/kanban` and `/board` find it in any UI language.
+            keywords: ['kanban', 'board'],
+            run: (editor) => insertDefaultBoard(editor, labels.kanbanColumns),
+          })
           const q = query.trim().toLowerCase()
-          return q ? all.filter((i) => i.title.toLowerCase().includes(q)) : all
+          return q
+            ? all.filter((i) => i.title.toLowerCase().includes(q) || i.keywords?.some((k) => k.startsWith(q)))
+            : all
         },
         command: ({ editor, range, props }) => {
           editor.chain().focus().deleteRange(range).run()

@@ -29,8 +29,10 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
+  SquareKanban,
 } from 'lucide-react'
 import { setColumnAlign, getColumnAlign } from './tableUtils'
+import { convertTaskListToBoard, insertDefaultBoard, kanbanDefaultColumns, topLevelTaskList } from './kanbanCommands'
 import { useT } from '../../i18n/useT'
 
 interface ToolbarProps {
@@ -70,6 +72,9 @@ export function EditorToolbar({ editor }: ToolbarProps) {
     setLinkUrl('')
     editor.chain().focus().run()
   }
+
+  // Inside a top-level task list the kanban button converts it (as the `/` menu does).
+  const inTaskList = topLevelTaskList(editor) !== null
 
   const buttons: (ToolbarButton | 'sep')[] = [
     {
@@ -180,6 +185,14 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       },
       isActive: editor.isActive('table'),
       title: editor.isActive('table') ? t.editor.toolbar.deleteTable : t.editor.toolbar.insertTable,
+    },
+    {
+      icon: <SquareKanban size={14} />,
+      action: () => {
+        if (inTaskList) convertTaskListToBoard(editor, kanbanDefaultColumns(t))
+        else insertDefaultBoard(editor, kanbanDefaultColumns(t))
+      },
+      title: inTaskList ? t.editor.slash.convertToKanban : t.editor.toolbar.insertKanban,
     },
     'sep',
     {

@@ -71,4 +71,29 @@ describe('collectAlarms', () => {
     const alarms = collectAlarms([a, b])
     expect(alarms.map((x) => x.taskText)).toEqual(['A', 'B done'])
   })
+
+  // Nested sub-tasks and kanban cards are indented task lines.
+  it('extracts indented tasks (sub-tasks and kanban cards)', () => {
+    const note = noteWith([
+      '- [ ] Parent',
+      '  - [ ] Sub 📅2024-06-16 ⏰08:00',
+      '<!-- kanban -->',
+      '- Todo',
+      '  - [ ] Card 📅2024-06-16 ⏰09:00 🔺high',
+      '      - [x] Deep \t📅2024-06-17 ⏰10:00',
+      '<!-- /kanban -->',
+      '\t- [ ] Tabbed 📅2024-06-18 ⏰11:00',
+    ].join('\n'))
+    expect(collectAlarms([note])).toEqual([
+      { noteTitle: 'My Note', taskText: 'Sub', alarmAt: '2024-06-16T08:00:00' },
+      { noteTitle: 'My Note', taskText: 'Card', alarmAt: '2024-06-16T09:00:00' },
+      { noteTitle: 'My Note', taskText: 'Deep', alarmAt: '2024-06-17T10:00:00' },
+      { noteTitle: 'My Note', taskText: 'Tabbed', alarmAt: '2024-06-18T11:00:00' },
+    ])
+  })
+
+  it('still ignores non-task lines with annotations', () => {
+    const note = noteWith('  - plain bullet 📅2024-06-16 ⏰08:00\n  text - [ ] x 📅2024-06-16 ⏰08:00')
+    expect(collectAlarms([note])).toEqual([])
+  })
 })

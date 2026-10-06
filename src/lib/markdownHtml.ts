@@ -10,8 +10,24 @@
 //   - Lists: consecutive same-type items are merged into one <ul>/<ol>
 //
 
-// Sentinel character used to protect blank lines inside code fences from
-// the \n\n block-splitter. Must not appear in real user content.
+import {
+  KANBAN_CLOSE_RE,
+  KANBAN_OPEN_RE,
+  kanbanDataFromElement,
+  kanbanDataToHtml,
+  parseKanbanMarkdown,
+  serializeKanbanMarkdown,
+} from './kanban'
+import {
+  escapeHtml,
+  extractDeadlineAnnotations,
+  inlineToHtml,
+  taskAnnotationsToMd,
+  type TaskImportance,
+} from './markdownInline'
+
+// Sentinel character used to protect blank lines inside code fences and kanban
+// boards from the \n\n block-splitter. Must not appear in real user content.
 const FENCE_BLANK = '\x00'
 
 export function htmlFromMarkdown(md: string): string {
@@ -21,8 +37,10 @@ export function htmlFromMarkdown(md: string): string {
   const src = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
   // Isolate closed code fences as their own blocks and protect the blank lines
-  // inside them before splitting on \n\n (see isolateCodeFences).
-  const protectedSrc = isolateCodeFences(src)
+  // inside them before splitting on \n\n (see isolateCodeFences). Kanban boards
+  // go second: their pass needs to know which lines are code (a marker inside a
+  // code block is code), and that is only settled once fences are isolated.
+  const protectedSrc = isolateKanbanBlocks(isolateCodeFences(src))
 
   // Split into "blocks" on blank lines — use exactly \n\n so that multiple
   // consecutive blank lines produce empty blocks, preserving them as <p></p>.
@@ -71,6 +89,17 @@ export function htmlFromMarkdown(md: string): string {
     if (lines.length === 1 && lines[0].trim() === '---') {
       htmlBlocks.push('<hr>')
       continue
+    }
+
+    // ── Kanban board (isolated by isolateKanbanBlocks; see kanban.ts) ─────────
+    // Only a block that parses as a board: anything else starting with the
+    // marker falls through and renders as text, as it always has.
+    if (KANBAN_OPEN_RE.test(lines[0])) {
+      const board = parseKanbanMarkdown(lines.map(l => (l === FENCE_BLANK ? '' : l)).join('\n'))
+      if (board) {
+        htmlBlocks.push(kanbanDataToHtml(board))
+        continue
+      }
     }
 
     // ── List block (supports nested/indented items) ───────────────────────────
@@ -194,15 +223,7 @@ function isolateCodeFences(src: string): string {
       continue
     }
 
-    // The splitter consumes newlines in pairs from the left, so the opener
-    // starts a block only if the run of newlines right before it is even. Add
-    // one empty line when it's odd (incl. no blank line at all).
-    if (out.length > 0) {
-      let trailingEmpty = 0
-      while (trailingEmpty < out.length && out[out.length - 1 - trailingEmpty] === '') trailingEmpty++
-      const newlineRun = trailingEmpty === out.length ? trailingEmpty : trailingEmpty + 1
-      if (newlineRun % 2 === 1) out.push('')
-    }
+    ensureBlockStart(out)
 
     // The block ends right before the first empty line outside any pair; the
     // code ends on the last closing line within that block.
@@ -223,6 +244,99 @@ function isolateCodeFences(src: string): string {
     i = last
   }
 
+  return out.join('\n')
+}
+
+/**
+ * Make the next line pushed onto `out` start a \n\n block. The splitter
+ * consumes newlines in pairs from the left, so a line starts a block only if
+ * the run of newlines right before it is even. Add one empty line when it's
+ * odd (incl. no blank line at all).
+ */
+function ensureBlockStart(out: string[]): void {
+  if (out.length === 0) return
+  let trailingEmpty = 0
+  while (trailingEmpty < out.length && out[out.length - 1 - trailingEmpty] === '') trailingEmpty++
+  const newlineRun = trailingEmpty === out.length ? trailingEmpty : trailingEmpty + 1
+  if (newlineRun % 2 === 1) out.push('')
+}
+
+/**
+ * Which lines of isolateCodeFences' output end up inside a code block: a block
+ * (see ensureBlockStart for the parity rule) whose first line starts with ```,
+ * running to the next empty line — exactly what htmlFromMarkdown renders as
+ * code. Blank lines inside paired fences are FENCE_BLANK by now, not empty.
+ */
+function codeBlockLines(lines: string[]): boolean[] {
+  const inCode: boolean[] = new Array(lines.length).fill(false)
+  let emptyRun = 0
+  let seenContent = false
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i] === '') { emptyRun++; continue }
+    const newlineRun = seenContent ? emptyRun + 1 : emptyRun
+    emptyRun = 0
+    seenContent = true
+    if (newlineRun % 2 === 0 && FENCE_OPEN_RE.test(lines[i])) {
+      while (i < lines.length && lines[i] !== '') inCode[i++] = true
+      i--
+    }
+  }
+  return inCode
+}
+
+/**
+ * Second pre-pass for htmlFromMarkdown's \n\n block splitter, run on the
+ * output of isolateCodeFences: turns each kanban board (kanban.ts) into exactly
+ * one block. Openers are paired left to right with the first closer after
+ * them; openers inside a code block are code and ignored. A pair becomes a
+ * board only if its text parses as one (parseKanbanMarkdown) — otherwise the
+ * opener is skipped and the scan goes on from the next line, so malformed or
+ * unclosed boards render exactly as before (the markers as literal text). For
+ * every board:
+ *   - a block boundary is ensured before the opening marker and after the
+ *     closing one, adding an empty line only where it's missing (htmlToMarkdown
+ *     output already has them, so it renders with no spurious empty paragraphs);
+ *   - empty lines inside become FENCE_BLANK, so the splitter can't tear the
+ *     board apart (the board branch turns them back into blank lines).
+ * A line starting with ``` glued right after the closer would become a code
+ * block once split off (such a fence is unpaired: paired ones were already
+ * isolated); that board is left as text rather than reinterpret the line.
+ */
+function isolateKanbanBlocks(src: string): string {
+  if (!/^<!--/m.test(src)) return src
+  const lines = src.split('\n')
+  const inCode = codeBlockLines(lines)
+
+  const closerOf = new Map<number, number>()
+  for (let i = 0; i < lines.length; i++) {
+    if (inCode[i] || !KANBAN_OPEN_RE.test(lines[i])) continue
+    let close = -1
+    for (let j = i + 1; j < lines.length; j++) {
+      if (KANBAN_CLOSE_RE.test(lines[j])) { close = j; break }
+    }
+    // No closer for this opener means no later opener has one either.
+    if (close === -1) break
+    if (close + 1 < lines.length && FENCE_OPEN_RE.test(lines[close + 1])) continue
+    // A code block in between makes the region invalid (its ``` line isn't board syntax).
+    if (!parseKanbanMarkdown(lines.slice(i, close + 1).join('\n'))) continue
+    closerOf.set(i, close)
+    i = close
+  }
+  if (closerOf.size === 0) return src
+
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const close = closerOf.get(i)
+    if (close === undefined) {
+      out.push(lines[i])
+      continue
+    }
+    ensureBlockStart(out)
+    for (let k = i; k <= close; k++) out.push(lines[k] === '' ? FENCE_BLANK : lines[k])
+    // Content glued after the closing marker starts a new block.
+    if (close + 1 < lines.length && lines[close + 1] !== '') out.push('')
+    i = close
+  }
   return out.join('\n')
 }
 
@@ -271,6 +385,12 @@ function blockElToMd(el: Element): string {
     return `${quoted}\n\n`
   }
   if (tag === 'ul' || tag === 'ol') return listElToMd(el, 0) + '\n'
+  // Kanban board: rebuilt from its data-* attributes (kanban.ts), never from the
+  // rendered children — so it must not reach the generic descent below.
+  // serializeKanbanMarkdown ends on the closing marker; add the block separator.
+  if (tag === 'div' && el.getAttribute('data-type') === 'kanban') {
+    return serializeKanbanMarkdown(kanbanDataFromElement(el)) + '\n\n'
+  }
   let out = ''
   for (const c of el.childNodes) {
     if (c.nodeType === Node.ELEMENT_NODE) out += blockElToMd(c as Element)
@@ -348,13 +468,8 @@ function listElToMd(listEl: Element, depth: number): string {
 
     if (isTaskItem || isTaskList) {
       const checked   = li.getAttribute('data-checked') === 'true'
-      const due       = li.getAttribute('data-due')
-      const alarm     = li.getAttribute('data-alarm')
-      const importance = li.getAttribute('data-importance')
-      const dueAnn    = due   ? ` 📅${due}`   : ''
-      const alarmAnn  = alarm ? ` ⏰${alarm}` : ''
-      const impAnn    = importance ? ` 🔺${importance}` : ''
-      const ann       = `${dueAnn}${alarmAnn}${impAnn}`
+      const ann       = taskAnnotationsToMd(
+        li.getAttribute('data-due'), li.getAttribute('data-alarm'), li.getAttribute('data-importance'))
       // Annotations belong to the task, not to a specific physical line. For
       // multi-line tasks (soft breaks) keep them on the first line so the parser
       // — which only reads annotations off the `- [ ]` line — round-trips them.
@@ -375,43 +490,7 @@ function listElToMd(listEl: Element, depth: number): string {
   return result
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-/** Convert inline markdown (bold, italic, code, links, etc.) to HTML */
-function inlineToHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    // Preserve runs of 2+ spaces: ProseMirror collapses regular spaces when
-    // parsing HTML, so we use &nbsp; to keep them intact.
-    .replace(/ {2,}/g, (m) => '&nbsp;'.repeat(m.length))
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)(?:\{width=(\d+)\})?/g, (_, alt, src, w) =>
-      w ? `<img alt="${alt}" src="${src}" width="${w}">` : `<img alt="${alt}" src="${src}">`)
-    // Section relation: `[Name](noteflow://noteId/sectionId)` → inline pill. Must
-    // run BEFORE the generic link regex below (it would otherwise capture it as a
-    // plain <a>). Rendered as a span the SectionRelation node parses back.
-    .replace(/\[([^\]]+)\]\(noteflow:\/\/([^/)]+)\/([^)]+)\)/g,
-      '<span data-type="section-relation" data-note-id="$2" data-section-id="$3">$1</span>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/__(.+?)__/g, '<strong>$1</strong>')
-    .replace(/~~(.+?)~~/g, '<s>$1</s>')
-    // Underline: `++text++` → <u>. Markdown has no native underline syntax, so
-    // NoteFlow uses `++` (mirrors the `==` highlight convention). Non-greedy +
-    // global; `++` doesn't collide with **/*/__/~~/== markers.
-    .replace(/\+\+(.+?)\+\+/g, '<u>$1</u>')
-    // Highlight: `==text==` → <mark>. Non-greedy + global so multiple highlights
-    // on one line round-trip. `==` doesn't collide with **/*/__/~~ markers.
-    .replace(/==(.+?)==/g, '<mark>$1</mark>')
-}
-
 // ── Nested markdown list parsing (htmlFromMarkdown helpers) ──────────────────
-
-type TaskImportance = 'low' | 'medium' | 'high'
 
 interface MdListItem {
   type: 'ul' | 'ol' | 'task'
@@ -421,22 +500,6 @@ interface MdListItem {
   alarm: string | null
   importance: TaskImportance | null
   children: MdListItem[]
-}
-
-function extractDeadlineAnnotations(
-  raw: string
-): { text: string; due: string | null; alarm: string | null; importance: TaskImportance | null } {
-  let text = raw
-  let due: string | null = null
-  let alarm: string | null = null
-  let importance: TaskImportance | null = null
-  const dueMatch = text.match(/📅(\d{4}-\d{2}-\d{2})/)
-  if (dueMatch) { due = dueMatch[1]; text = text.replace(dueMatch[0], '').trim() }
-  const alarmMatch = text.match(/⏰(\d{2}:\d{2})/)
-  if (alarmMatch) { alarm = alarmMatch[1]; text = text.replace(alarmMatch[0], '').trim() }
-  const impMatch = text.match(/🔺(low|medium|high)/)
-  if (impMatch) { importance = impMatch[1] as TaskImportance; text = text.replace(impMatch[0], '').trim() }
-  return { text, due, alarm, importance }
 }
 
 function parseMdListItems(lines: string[]): MdListItem[] {
@@ -594,6 +657,7 @@ export function looksLikeMarkdown(md: string): boolean {
     if (/^\s*\d+[.)]\s+\S/.test(line)) return true      // ordered list
     if (/^\s*>\s/.test(line)) return true               // blockquote
     if (/^\s*(```|~~~)/.test(line)) return true         // code fence
+    if (KANBAN_OPEN_RE.test(line)) return true           // kanban board
   }
   return containsMarkdownTable(src)
 }

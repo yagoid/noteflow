@@ -6,8 +6,11 @@ export interface AlarmEntry {
   alarmAt: string  // ISO timestamp 'YYYY-MM-DDTHH:MM:00'
 }
 
-// Matches tasks with both 📅 date and ⏰ time in any order on the same line
-const TASK_ALARM_RE = /^- \[[ x]\] ((?:(?!📅|⏰).)*?)📅(\d{4}-\d{2}-\d{2})(?:(?:.*?)⏰(\d{2}:\d{2}))?/gm
+// Matches task lines with a 📅 date followed, on the same line, by an optional ⏰
+// time (the order the serializers write; a ⏰ before the 📅 is not matched).
+// Leading whitespace is allowed: nested sub-tasks and kanban cards (kanban.ts)
+// are indented task lines and must schedule their alarms too.
+const TASK_ALARM_RE = /^[ \t]*- \[[ x]\] ((?:(?!📅|⏰).)*?)📅(\d{4}-\d{2}-\d{2})(?:(?:.*?)⏰(\d{2}:\d{2}))?/gm
 
 export function collectAlarms(notes: Note[]): AlarmEntry[] {
   const result: AlarmEntry[] = []

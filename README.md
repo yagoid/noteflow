@@ -21,7 +21,7 @@ Built specifically for software engineers and power users who need something fas
 
 ## Features
 
-- **Markdown-first editor** — headings (with a hover-to-expand table of contents to jump between them), bold, italic, inline code, code blocks, and interactive task lists with checkboxes.
+- **Markdown-first editor** — headings (with a hover-to-expand table of contents to jump between them), bold, italic, inline code, code blocks, interactive task lists with checkboxes, and in-note kanban boards (drag cards between columns; stored as plain markdown).
 - **Floating sticky notes** — launch any note as an independent floating window that stays on top while you work.
 - **Note groups & deadlines** — organize notes into color-coded groups and attach due dates to any task.
 - **Encrypted notes** — lock individual notes with a password; stored as ciphertext, no master key, no backdoor.
