@@ -76,6 +76,7 @@ export const editor = {
     insertLink: 'Insert link',
     insertTable: 'Insert table',
     deleteTable: 'Delete table',
+    insertKanban: 'Insert kanban board',
     undo: 'Undo (Ctrl+Z)',
     redo: 'Redo (Ctrl+Y)',
     set: 'Set',

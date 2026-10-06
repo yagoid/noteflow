@@ -476,7 +476,7 @@ sin navegar.
 | Lista viñetas | `- item` | Toolbar |
 | Lista numerada | `1. item` | Toolbar |
 | Lista de tareas | `- [ ] tarea` | Toolbar |
-| Tablero kanban | `<!-- kanban -->` … `<!-- /kanban -->` | `/kanban` |
+| Tablero kanban | `<!-- kanban -->` … `<!-- /kanban -->` | `/kanban` · Toolbar |
 | Cita / Blockquote | `> texto` | Toolbar |
 | Tabla | — | Toolbar (menú contextual para filas/columnas) |
 | Link | `[texto](url)` | Toolbar |
@@ -541,13 +541,15 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   slash command solo está en modo rich; el buscador excluye notas cifradas/archivadas/temporales.
 
 ### Tablero kanban dentro de la nota
-- En el editor **rich**, `/kanban` (o `/board`, en cualquier idioma) inserta un tablero con tres
+- En el editor **rich**, `/kanban` (o `/board`, en cualquier idioma) o el botón **kanban** de la
+  toolbar (justo tras el de tabla) insertan un tablero con tres
   columnas: **To do / In progress / Done** (en español *Por hacer / En curso / Hecho*). Puede haber
   varios por sección. En **modo raw** se ve tal cual es en disco: markdown plano entre
   `<!-- kanban done="Done" -->` y `<!-- /kanban -->` (columnas = `- Nombre`, tarjetas = tareas
   indentadas `  - [ ] …` con sus 📅⏰🔺), así sincroniza y lo leen el CLI/móvil/otros editores.
 - **Ocupa todo el ancho** del editor (no respeta la columna *Readable*); si las columnas no caben,
-  el tablero hace **scroll horizontal** propio. Columnas de ancho fijo, con **contador** de tarjetas.
+  el tablero hace **scroll horizontal** propio (la barra solo se ve con el ratón encima del tablero o
+  durante un arrastre; su hueco queda reservado). Columnas de ancho fijo, con **contador** de tarjetas.
 - **Tarjetas:** checkbox, texto con formato (negrita, links, resaltado, pills de "Link section" —
   clic navega), y los mismos chips que las tareas: **📅 deadline + ⏰ alarma** y **🔺 importancia**
   (con sus pickers; al pasar el ratón aparecen los iconos de bandera/calendario y un menú `⋯` con
@@ -568,7 +570,8 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - Cabecera discreta "KANBAN · n columns · n cards": clic → selecciona el tablero (`Backspace`/`Delete`
   lo borra). Al pasar el ratón: **Convert to task list** (todas las tarjetas a una lista de tareas) y
   **Delete board**. Dentro de una lista de tareas, el menú `/` ofrece **Convert task list to board**
-  (las tareas pasan a la primera columna). Todo se deshace con `Ctrl+Z`.
+  (las tareas pasan a la primera columna); ahí el botón kanban de la toolbar hace lo mismo en vez de
+  insertar un tablero nuevo (su tooltip pasa a *Convert task list to board*). Todo se deshace con `Ctrl+Z`.
 - La búsqueda en la nota (`Ctrl+F`) también encuentra y resalta texto dentro de las tarjetas y los
   títulos de columna. Los previews de sección (hover, vistas de grupo/nota) y el chat de IA lo
   muestran como un mini tablero de solo lectura.

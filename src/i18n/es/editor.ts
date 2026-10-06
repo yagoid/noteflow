@@ -62,6 +62,7 @@ export const editor = {
     insertLink: 'Insertar enlace',
     insertTable: 'Insertar tabla',
     deleteTable: 'Eliminar tabla',
+    insertKanban: 'Insertar tablero kanban',
     undo: 'Deshacer (Ctrl+Z)',
     redo: 'Rehacer (Ctrl+Y)',
     set: 'Aplicar',

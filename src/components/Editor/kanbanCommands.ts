@@ -13,9 +13,15 @@ import {
   taskListMarkdownToBoard,
 } from '../../lib/kanbanOps'
 import { htmlFromMarkdown, htmlToMarkdown } from '../../lib/markdownHtml'
+import type { Messages } from '../../i18n'
 
 /** Default column names of a new board (i18n); the last one is the done column. */
 export type KanbanDefaultColumns = [todo: string, doing: string, done: string]
+
+/** The default column names in the current UI language. */
+export function kanbanDefaultColumns(t: Messages): KanbanDefaultColumns {
+  return [t.editor.kanban.defaultTodo, t.editor.kanban.defaultDoing, t.editor.kanban.defaultDone]
+}
 
 export function defaultBoard(names: KanbanDefaultColumns): KanbanBoardData {
   return createBoard(names, 2)

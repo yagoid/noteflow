@@ -456,6 +456,15 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
     if (reason === 'select') focusBoard()
   }, [focusBoard])
 
+  // The "+ Add column" slot widens to a full column while naming it, and the
+  // inline editor focuses with preventScroll: reveal it (it's always the last
+  // item) by scrolling the board to its right end — horizontally only.
+  const newColumnSeq = editing?.kind === 'new-column' ? editing.seq : null
+  useLayoutEffect(() => {
+    const sc = scrollRef.current
+    if (newColumnSeq !== null && sc) sc.scrollLeft = sc.scrollWidth
+  }, [newColumnSeq])
+
   // Disarm the two-step "delete board" after a moment.
   useEffect(() => {
     if (!armDelete) return
@@ -661,7 +670,7 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
             })}
 
             {editable && (
-              <div className="kanban-add-column">
+              <div className={`kanban-add-column${editing?.kind === 'new-column' ? ' is-editing' : ''}`}>
                 {editing?.kind === 'new-column' ? (
                   <InlineEditor
                     key={editing.seq}

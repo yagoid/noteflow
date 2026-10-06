@@ -1086,6 +1086,16 @@ button {
   overflow-y: hidden;
   padding: 2px max(var(--pm-bleed-r), 0.5rem) 0.75rem var(--pm-pad-l);
 }
+/* Horizontal scrollbar: space reserved (global 6px), visible only while the
+   pointer is over the board — or while one of its cards/columns is being
+   dragged (the drag source lives inside this board; the ghost is portaled). */
+.kanban-scroll::-webkit-scrollbar-track { background: transparent; }
+.kanban-scroll::-webkit-scrollbar-thumb { background: transparent; }
+.kanban-board:hover .kanban-scroll::-webkit-scrollbar-track,
+.kanban-board:has(.is-drag-source) .kanban-scroll::-webkit-scrollbar-track { background: rgb(var(--text-muted) / 0.08); }
+.kanban-board:hover .kanban-scroll::-webkit-scrollbar-thumb,
+.kanban-board:has(.is-drag-source) .kanban-scroll::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); }
+.kanban-board:hover .kanban-scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--text-muted) / 0.7); }
 .kanban-columns {
   position: relative;
   display: flex;
@@ -1100,7 +1110,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 6px;
+  padding: 6px 6px 9px;
   border-radius: 10px;
   background: rgb(var(--text) / 0.03);
   border: 1px solid rgb(var(--border) / 0.8);
@@ -1326,7 +1336,11 @@ svg.kanban-column-marker.is-done {
   transition: opacity 0.12s, color 0.12s, background 0.12s;
 }
 .kanban-add-card:hover { opacity: 1; color: rgb(var(--accent)); background: rgb(var(--accent) / 0.08); }
-.kanban-add-column {
+/* "+ Add column" slot: as narrow as its label while idle (so it isn't cut at
+   the board's right edge); a full column width while typing the new name.
+   Not a [data-kanban-col], so column drag hit-testing ignores it. */
+.kanban-add-column { flex: 0 0 auto; }
+.kanban-add-column.is-editing {
   flex: 0 0 var(--kanban-col-w);
   width: var(--kanban-col-w);
 }
@@ -1335,9 +1349,10 @@ svg.kanban-column-marker.is-done {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  width: 100%;
+  gap: 5px;
   height: 40px;
+  padding: 0 10px;
+  white-space: nowrap;
   border-radius: 10px;
   border: 1px dashed rgb(var(--border));
   font-size: 0.85em;

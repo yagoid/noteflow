@@ -9,6 +9,7 @@ import type { Messages } from '../../i18n'
 import {
   convertTaskListToBoard,
   insertDefaultBoard,
+  kanbanDefaultColumns,
   topLevelTaskList,
   type KanbanDefaultColumns,
 } from './kanbanCommands'
@@ -46,7 +47,7 @@ export function getSlashCommands(t: Messages): SlashCommandLabels {
     kanbanDescription: t.editor.slash.kanbanDescription,
     convertToKanban: t.editor.slash.convertToKanban,
     convertToKanbanDescription: t.editor.slash.convertToKanbanDescription,
-    kanbanColumns: [t.editor.kanban.defaultTodo, t.editor.kanban.defaultDoing, t.editor.kanban.defaultDone],
+    kanbanColumns: kanbanDefaultColumns(t),
   }
 }
 
