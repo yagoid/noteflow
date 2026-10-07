@@ -21,7 +21,8 @@ export function NoteFolderHeader({
 }: NoteFolderHeaderProps) {
   return (
     <div
-      className="flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-md cursor-pointer select-none transition-colors hover:bg-surface-3"
+      className={`flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-md cursor-pointer select-none transition-colors hover:bg-surface-3
+        ${collapsed ? '' : 'bg-surface-3/75'}`}
       onClick={onToggle}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e) }}
     >
