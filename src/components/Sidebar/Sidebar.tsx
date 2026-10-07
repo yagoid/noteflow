@@ -167,6 +167,7 @@ const NoteRow = memo(function NoteRow({
           onSectionClick={(sectionId, e) => handlers.sectionClick(e, note, sectionId)}
           onSectionContextMenu={(e, sectionId) => handlers.sectionContextMenu(e, note, sectionId)}
           renderHighlightedText={renderHighlightedText}
+          dimmed={!isActive}
         />
       </button>
     </li>

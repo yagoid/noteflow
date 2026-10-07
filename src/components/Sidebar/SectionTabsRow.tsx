@@ -22,6 +22,8 @@ interface SectionTabsRowProps {
   onSectionClick: (sectionId: string, e: React.MouseEvent) => void
   onSectionContextMenu: (e: React.MouseEvent, sectionId: string) => void
   renderHighlightedText: (text: string, query: string) => React.ReactNode
+  /** Fade each tag (no background) until that tag itself is hovered. Sidebar only. */
+  dimmed?: boolean
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -35,6 +37,7 @@ export function SectionTabsRow({
   onSectionClick,
   onSectionContextMenu,
   renderHighlightedText,
+  dimmed = false,
 }: SectionTabsRowProps) {
   const t = useT()
   const { previewProps } = useSectionHoverPreview()
@@ -99,27 +102,34 @@ export function SectionTabsRow({
         className="flex items-center gap-1 px-2.5 overflow-x-auto section-tabs-scroll"
         style={{ WebkitMaskImage: EDGE_MASK, maskImage: EDGE_MASK }}
       >
-        {visibleSections.map((section) => (
-          <span
-            key={section.id}
-            role="button"
-            tabIndex={0}
-            {...previewProps(noteId, section.id, { placement: 'cursor-below' })}
-            onClick={(e) => onSectionClick(section.id, e)}
-            onContextMenu={(e) => onSectionContextMenu(e, section.id)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
-            }}
-            className="text-[11px] font-mono px-1 rounded flex-shrink-0 leading-[1.55]
-                       hover:opacity-70 transition-opacity cursor-pointer inline-flex items-center gap-0.5"
-            style={getTagColor(section.name, sectionTagColors)}
-          >
-            {section.aiHidden && (
-              <EyeOff size={9} className="opacity-70 flex-shrink-0" aria-label={t.common.hiddenFromAI} />
-            )}
-            {renderHighlightedText(section.name, searchQuery)}
-          </span>
-        ))}
+        {visibleSections.map((section) => {
+          const { background, ...tagColor } = getTagColor(section.name, sectionTagColors)
+          return (
+            <span
+              key={section.id}
+              role="button"
+              tabIndex={0}
+              {...previewProps(noteId, section.id, { placement: 'cursor-below' })}
+              onClick={(e) => onSectionClick(section.id, e)}
+              onContextMenu={(e) => onSectionContextMenu(e, section.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
+              }}
+              className={`text-[11px] font-mono px-1 rounded flex-shrink-0 leading-[1.55]
+                         transition-[opacity,background-color] duration-150 cursor-pointer inline-flex items-center gap-0.5
+                         ${dimmed
+                           ? 'opacity-80 hover:opacity-100 hover:[background-color:var(--chip-bg)]'
+                           : 'hover:opacity-70 [background-color:var(--chip-bg)]'}`}
+              // Background goes through a CSS var so a dimmed tag can drop it until it's hovered.
+              style={{ ...tagColor, '--chip-bg': background } as React.CSSProperties}
+            >
+              {section.aiHidden && (
+                <EyeOff size={9} className="opacity-70 flex-shrink-0" aria-label={t.common.hiddenFromAI} />
+              )}
+              {renderHighlightedText(section.name, searchQuery)}
+            </span>
+          )
+        })}
       </div>
 
       {/* Right scroll arrow — only when there's content scrolled off to the right */}
