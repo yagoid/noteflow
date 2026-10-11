@@ -302,10 +302,10 @@ export const cliGroups: CliGroup[] = [
     commands: g('accent-2', [
       {
         id: 'login',
-        usage: 'noteflow login [repo-name]',
+        usage: 'noteflow login [repo-name] [--no-pull]',
         desc: {
-          en: 'Connect to GitHub via Device Flow OAuth — it prints a code and a URL to authorize from any browser (perfect for headless boxes). Default repo: <code>noteflow-notes</code>. The CLI keeps its own token, separate from the desktop app’s.',
-          es: 'Conecta con GitHub vía Device Flow OAuth — muestra un código y una URL para autorizar desde cualquier navegador (ideal en headless). Repo por defecto: <code>noteflow-notes</code>. El CLI guarda su propio token, separado del de la app de escritorio.',
+          en: 'Connect to GitHub via Device Flow OAuth — it prints a code and a URL to authorize from any browser (perfect for headless boxes). Default repo: <code>noteflow-notes</code>. Once connected it <strong>pulls the repo’s notes automatically</strong> (local notes that are newer are kept), so a fresh machine is ready right away; <code>--no-pull</code> connects only. Skipped while NoteFlow Cloud is the active backend. The CLI keeps its own token, separate from the desktop app’s.',
+          es: 'Conecta con GitHub vía Device Flow OAuth — muestra un código y una URL para autorizar desde cualquier navegador (ideal en headless). Repo por defecto: <code>noteflow-notes</code>. Al conectar <strong>baja automáticamente las notas del repo</strong> (se conservan las locales más recientes), así una máquina nueva queda lista al momento; <code>--no-pull</code> solo conecta. Se omite mientras NoteFlow Cloud es el backend activo. El CLI guarda su propio token, separado del de la app de escritorio.',
         },
       },
       {
@@ -335,10 +335,10 @@ export const cliGroups: CliGroup[] = [
     commands: g('accent', [
       {
         id: 'cloud-login',
-        usage: 'noteflow cloud login [email]',
+        usage: 'noteflow cloud login [email] [--no-pull]',
         desc: {
-          en: 'Sign in to your NoteFlow account with an emailed 6-digit code. The CLI keeps its own session, separate from the desktop app’s. While signed in with Cloud enabled, <code>push</code>, <code>pull</code>, <code>status</code> and the automatic after-command sync use NoteFlow Cloud <strong>instead of</strong> GitHub.',
-          es: 'Inicia sesión en tu cuenta NoteFlow con un código de 6 dígitos por email. El CLI guarda su propia sesión, separada de la de la app de escritorio. Con sesión y Cloud habilitado, <code>push</code>, <code>pull</code>, <code>status</code> y el sync automático tras cada comando usan NoteFlow Cloud <strong>en vez de</strong> GitHub.',
+          en: 'Sign in to your NoteFlow account with an emailed 6-digit code. The CLI keeps its own session, separate from the desktop app’s. With standard (managed) keys it then pulls your notes automatically (<code>--no-pull</code> skips it); with private (e2ee) keys, run <code>noteflow pull</code> afterwards. While signed in with Cloud enabled, <code>push</code>, <code>pull</code>, <code>status</code> and the automatic after-command sync use NoteFlow Cloud <strong>instead of</strong> GitHub.',
+          es: 'Inicia sesión en tu cuenta NoteFlow con un código de 6 dígitos por email. El CLI guarda su propia sesión, separada de la de la app de escritorio. Con claves estándar (managed) baja después tus notas automáticamente (<code>--no-pull</code> lo omite); con claves privadas (e2ee), ejecuta <code>noteflow pull</code> a continuación. Con sesión y Cloud habilitado, <code>push</code>, <code>pull</code>, <code>status</code> y el sync automático tras cada comando usan NoteFlow Cloud <strong>en vez de</strong> GitHub.',
         },
         example: ['$ noteflow cloud login me@example.com'],
       },
@@ -346,8 +346,8 @@ export const cliGroups: CliGroup[] = [
         id: 'cloud-logout',
         usage: 'noteflow cloud logout',
         desc: {
-          en: 'Sign out. Keeps your local notes and the sync cursor — signing back in resumes incrementally.',
-          es: 'Cierra la sesión. Conserva las notas locales y el cursor de sync — volver a entrar retoma incremental.',
+          en: 'Sign out. Keeps your local notes and the sync cursor — signing back in with the same account resumes incrementally (another account starts with a full pull).',
+          es: 'Cierra la sesión. Conserva las notas locales y el cursor de sync — volver a entrar con la misma cuenta retoma incremental (otra cuenta empieza con un pull completo).',
         },
       },
       {

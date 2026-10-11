@@ -69,6 +69,33 @@ haberla aplicado (afecta también al gate de caducidad de notas temporales, ver 
 sesión y cursor propios en `settings.cliAccount`/`cliCloud`, y la misma prioridad Cloud > GitHub):
 ver `monetization.md` § 4 "Cliente CLI (headless)".
 
+**El CLI con GitHub** (`noteflow login/push/pull`) escribe en `settings.githubSync` — en
+Windows/Linux es el **mismo `settings.json`** que la app (en macOS el CLI usa `~/.config/noteflow`).
+Por eso su `lastSync` obedece al mismo invariante que la regla de borrado del pull de la app
+("ausente del remoto + `updated <= lastSync` ⇒ borrada"): `lastSync` solo avanza cuando el repo
+tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`). En concreto:
+- `login` **no** escribe `lastSync` (re-login al mismo repo conserva el estado previo; otro repo
+  empieza limpio) y hace un primer `pull` automático (salvo `--no-pull` o Cloud activo en el CLI).
+- **Todo** `pull` de GitHub (`pull`, su alias `update`, `--force` y el de tras el login) lo escribe
+  solo si no quedan notas solo-locales (`localOnlyNoteDirs`: sin `note.md` en el remoto, aunque
+  tenga secciones); si quedan, conserva el valor previo (o ninguno) y avisa con un texto neutro
+  (`… not on GitHub (new here, or deleted on another device) — run 'noteflow push' … if new`): el
+  pull del CLI no aplica borrados, así que una nota borrada en otro dispositivo también sale aquí.
+- `push` (y `migrate`, que lo llama) lo escribe solo si **ningún** fichero falló al subir — un
+  `note.md` fallido es una nota que el repo no tiene; con errores avisa `Last sync not updated`.
+- El valor escrito es la hora **de inicio** del comando (`startedAt`, tomada antes de leer el disco,
+  como `githubSync.ts`): una nota escrita mientras corre el push/pull queda con `updated > lastSync`.
+- El push automático por comando (`syncPushNoteFiles`) **no** toca `lastSync`.
+
+⚠️ **Pendiente — CLI con Cloud + app con GitHub sobre el mismo `settings.json`:** un pull de Cloud
+del CLI deja en disco notas con su `updated` original (antiguo) que no están en el repo de GitHub.
+La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEnabledFailClosed` en
+`electron/githubSync.ts`); no mira `cliCloud`, así que su siguiente pull de GitHub puede borrarlas
+("ausente del remoto + `updated <= lastSync`"). Arreglo sugerido (no implementado):
+`isCloudSyncEnabledFailClosed` devuelve true también con `cliCloud.enabled === true`, y el CLI marca
+`githubSync.needsFullReconcile` en `cloud login` y `cloud logout` (espejo de
+`enableCloudSync`/`disableCloudSync`).
+
 ### GitHub Sync (`electron/githubSync.ts`)
 - **Auth:** Device Flow OAuth — sin client secret; el usuario autoriza en
   `github.com/login/device`. Client ID `Ov23liut9QOJ2pJFF0KR` (público por diseño).

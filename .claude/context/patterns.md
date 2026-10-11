@@ -1002,7 +1002,10 @@ casi siempre tras una respuesta HTTP completa con keep-alive). Todo error pasa p
 fija `process.exitCode` y lanza un `CliExit` que sube hasta el handler de `main()`, y Node sale **de
 forma natural** al vaciarse el event loop (los sockets keep-alive ociosos están `unref`, no hay
 espera). Como `process.exit`, `exit()` no retorna; ⚠️ un `try/catch` que lo envuelva se lo
-tragaría → mantener `exit()` fuera de bloques `try`. Dos redes en el handler de `main()`: un
+tragaría → mantener `exit()` fuera de bloques `try`. Un comando que otro invoca como paso
+**best-effort** lanza `Error` en vez de llamar a `exit()` (el handler de `main()` lo convierte en
+`Error: …` + exit 1, idéntico a `err()+exit(1)`): así `cmdPull` puede usarse tras `login` y un fallo
+del pull no parece un login fallido (el llamador lo captura y re-lanza solo los `CliExit`). Dos redes en el handler de `main()`: un
 `setTimeout(process.exit, 3000).unref()` (solo se arma tras un error; actúa si un handle suelto mantiene vivo el loop, p. ej. en Windows un pipe de stdin que el padre deja abierto tras un prompt) y un
 `beforeExit` que, si el loop se vacía con `main()` aún pendiente (una promesa que nunca se resuelve),
 lo reporta como error con exit 1 en vez del exit 0 silencioso.

@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 1.12.0
+version: 1.13.0
 ---
 
 # NoteFlow CLI — Referencia completa
@@ -614,14 +614,22 @@ El CLI usa Device Flow OAuth — igual que la app de escritorio, pero guarda el 
 ### `login` — Conectar con GitHub
 
 ```bash
-noteflow login [nombre-repo]
+noteflow login [nombre-repo] [--no-pull]
 ```
 
 Default repo: `noteflow-notes`. Muestra un código y URL para autorizar en el navegador. En headless, el usuario abre la URL desde otro dispositivo.
 
+Al conectar hace **automáticamente un primer `pull`** (sin `--force`: respeta las notas locales más nuevas), así que en una máquina nueva no hace falta lanzar `noteflow pull` a mano. Si después quedan notas locales que no están en el repo, lo dice y sugiere `noteflow push`.
+
+- `--no-pull` — solo conecta; el pull queda para `noteflow pull`.
+- Si el CLI tiene **NoteFlow Cloud activo** (`cloud login` + sync habilitado), **no** hace el pull de GitHub: el backend vivo es Cloud (GitHub queda en pausa) y lo explica en la salida.
+- Si el pull falla (red, token revocado, error de la API…; un repo vacío no es fallo, da `Done: 0 pulled`), el **login no falla** (exit 0): la conexión ya está guardada; muestra el error y `Run 'noteflow pull' to retry`.
+- El login **no marca `lastSync`** (no se ha sincronizado nada aún): lo escribe el pull. Si el pull se omite o falla, o si quedan notas locales sin subir, se conserva el `lastSync` previo (re-login al mismo repo) o no hay — un `lastSync` falso armaría la regla de borrado del pull de la app de escritorio contra notas que el remoto nunca vio (ver `pull` abajo).
+
 ```bash
 noteflow login
 noteflow login mis-notas-privadas
+noteflow login --no-pull
 ```
 
 ### `logout` — Desconectar
@@ -636,6 +644,9 @@ noteflow logout
 noteflow push
 ```
 
+Marca `lastSync` solo si **todos** los ficheros subieron; si alguno falla lo dice
+(`Last sync not updated (some files failed) — run 'noteflow push' again`) y conserva el anterior.
+
 ### `pull` / `update` — Bajar notas del repo
 
 ```bash
@@ -644,6 +655,13 @@ noteflow update   # alias
 ```
 
 Solo sobreescribe si el `updated:` remoto es más reciente que el local.
+
+Si después quedan notas locales que no están en el repo, lo avisa
+(`N local notes are not on GitHub (new here, or deleted on another device) — run 'noteflow push'
+to upload them if new`) y **no marca `lastSync`** (conserva el anterior). El pull del CLI no aplica
+borrados, así que una nota borrada en otro dispositivo también aparece aquí: `push` la resucitaría. En Windows/Linux el `settings.json` del CLI es el de la app de
+escritorio, cuyo pull borra las notas locales ausentes del remoto con `updated <= lastSync`: marcarlo
+con notas sin subir haría que la app las borrara. Se marca en cuanto un `push` las sube.
 
 ### `migrate` — Migración única al formato v2
 
@@ -677,7 +695,7 @@ Si ya está en la última versión: `Already up to date`.
 
 ```bash
 noteflow version     # o: noteflow --version / -v
-# noteflow CLI v2.2.0
+# noteflow CLI v2.3.0
 ```
 
 ---
@@ -706,13 +724,22 @@ cerrado, agente, cron) falla con exit 1 en vez de quedarse esperando. La sesión
 **independiente de la de la app de escritorio** (los tokens rotan en cada uso; compartirla
 los desconectaría mutuamente). Al iniciar sesión, el sync Cloud del CLI queda habilitado.
 
+Si la cuenta tiene claves en modo **estándar (managed)**, tras el login hace **automáticamente
+un primer `cloud pull`** (la clave se desbloquea sin passphrase). Es best-effort: si falla, la
+sesión sigue guardada y basta con `noteflow pull`. `--no-pull` lo omite. En modo **privado
+(e2ee)** o sin claves no hace pull (pediría la passphrase en mitad del login): usar
+`noteflow pull` después.
+
 ### `cloud logout` — Cerrar sesión
 
 ```bash
 noteflow cloud logout
 ```
 
-Conserva las notas locales y el cursor de sync (volver a entrar retoma incremental).
+Conserva las notas locales y el cursor de sync: volver a entrar con la **misma** cuenta retoma
+incremental. Si entras con **otra** cuenta, el `cloud login` descarta ese cursor (`Reset the Cloud
+sync cursor…`) y el siguiente pull baja todo — un cursor ajeno se saltaría las notas antiguas de la
+cuenta nueva.
 
 ### `cloud setup` — Crear las claves de cifrado (modo estándar)
 

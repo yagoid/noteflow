@@ -582,9 +582,25 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
   deslogearía mutuamente. El token rotado se persiste **antes** de usar el access token; un 400/401
   del refresh borra `cliAccount` ("Session expired"). Un access token por invocación (proceso
   one-shot, sin single-flight).
-- **Estado propio:** `settings.cliCloud = {enabled, pullCursor, lastSync}` — cursor/lastSync del
-  CLI, independientes de `settings.cloudSync` (cada cliente reconcilia por su cuenta). `logout`
-  conserva cursor/lastSync (re-login retoma incremental).
+- **Estado propio:** `settings.cliCloud = {enabled, pullCursor, lastSync, userId}` — cursor/lastSync
+  del CLI, independientes de `settings.cloudSync` (cada cliente reconcilia por su cuenta). `userId`
+  es el **dueño** de ese cursor y sobrevive al `logout` (que borra `cliAccount` pero conserva
+  cursor/lastSync/userId): un re-login con la **misma** cuenta retoma incremental; con **otra**
+  cuenta `cliCloudForUser` descarta `pullCursor`/`lastSync` → el siguiente pull es completo (un
+  cursor ajeno saltaría, por `updated_at > cursor`, todas las notas más antiguas de la cuenta
+  nueva). Se aplica en `cloud login` (antes del pull automático) y al inicio de todo pull/reconcile
+  Cloud (`bindCliCloudToAccount`).
+  - **Dueño desconocido** (estado de antes de guardar `userId`): en `cloud login` se toma como dueño
+    el `userId` de la sesión anterior si seguía abierta (re-login sin logout) → reinicia solo si es
+    otra cuenta. Si no hay sesión anterior (o en un pull con sesión ya activa) se **adopta** la
+    cuenta actual **sin** reiniciar. Motivo: reiniciar no es gratis — sin cursor el pull filtra
+    `deleted=eq.false`, pierde los tombstones antiguos (las notas borradas en otro sitio se quedan en
+    disco) y el siguiente push las **resucita** en remoto (upsert `merge-duplicates` con
+    `deleted=false`). Adoptar solo falla para quien cambió de cuenta antes de esta regla, y el coste
+    es esconder notas antiguas (intactas en remoto), no destruir datos. Nada más queda ligado a la cuenta en disco: la DEK, las claves por
+  nota y el access token viven solo en memoria del proceso. ⚠️ La app de escritorio **no** hace
+  este reinicio: `disableCloudSync` conserva `cloudSync.pullCursor`/`lastSync` y el journal sin
+  dueño, así que entrar en la app con otra cuenta reutiliza el cursor anterior (pendiente).
 - **DEK por invocación, jamás cacheada en disco** (ni la passphrase): managed → `cloud-keys/unlock`
   en cada run; e2ee → passphrase de `NOTEFLOW_CLOUD_PASSPHRASE` o prompt interactivo con eco oculto
   (un input de 30 chars normalizados del alfabeto se trata como recovery code). En e2ee la máquina
@@ -604,6 +620,10 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
   ejecuta antes un pull automático ("First Cloud reconcile…") — un disco viejo no machaca un
   remoto más nuevo. Pull incremental idéntico al de la app (paginado `Range`, ancla decide,
   regla de borrado `updated <= lastSync`, cursor = max `updated_at` visto).
+- **Pull tras `cloud login`:** solo con claves **managed** (la DEK se desbloquea sin prompt) el login
+  encadena un `cmdCloudPull()` best-effort — un fallo se reporta (`Run 'noteflow pull' to retry`)
+  sin invalidar la sesión ya guardada; `--no-pull` lo omite. Con **e2ee** o sin claves no hay pull
+  (pediría la passphrase en mitad del login).
 
 ### Futuro (no-foco, solo dejar la puerta abierta)
 - **Historial de versiones:** tabla `file_versions` (insert del cliente en cada push; blobs

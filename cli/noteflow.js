@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.2.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.3.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.2.0'
+const CLI_VERSION = '2.3.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -168,8 +168,11 @@ function clearCliAccount() {
   writeSettings(settings)
 }
 
-// { enabled, pullCursor, lastSync } — the CLI's own cursor/lastSync, never the
-// desktop app's settings.cloudSync (each client reconciles independently).
+// { enabled, pullCursor, lastSync, userId } — the CLI's own cursor/lastSync,
+// never the desktop app's settings.cloudSync (each client reconciles
+// independently). `userId` = the account that cursor/lastSync belong to: it
+// outlives `cloud logout` (which drops cliAccount) so a re-login can tell
+// "same account → resume incrementally" from "another account → start over".
 function getCliCloud() {
   return readSettings().cliCloud || { enabled: false }
 }
@@ -178,6 +181,50 @@ function patchCliCloud(patch) {
   const settings = readSettings()
   settings.cliCloud = { ...(settings.cliCloud || { enabled: false }), ...patch }
   writeSettings(settings)
+}
+
+/**
+ * Pure: the cliCloud to keep for the signed-in `userId`. The cursor's owner is
+ * `c.userId`, or else `presumedOwner` (at login: the account that was still
+ * signed in before it, if any).
+ *  - Another account: pullCursor/lastSync are dropped and the owner rebound —
+ *    a foreign cursor would make the incremental pull skip every row of this
+ *    account older than it (`updated_at > cursor`).
+ *  - Unknown owner (state written before the owner was recorded, by a session
+ *    that is gone): the current account is ADOPTED, cursor kept. Resetting is
+ *    not free: without a cursor the pull skips tombstones (`deleted=eq.false`),
+ *    so notes deleted elsewhere stay on disk and the next push resurrects them
+ *    remotely. Adopting only goes wrong for someone who switched accounts
+ *    before this rule existed — and that costs hidden-but-intact older notes,
+ *    not destroyed data.
+ * Without a userId there is nothing to compare. Same object returned = no change.
+ */
+function cliCloudForUser(c, userId, presumedOwner) {
+  if (!userId) return c
+  const owner = c.userId || presumedOwner
+  if (!owner || owner === userId) return c.userId === userId ? c : { ...c, userId }
+  const next = { ...c, userId }
+  delete next.pullCursor
+  delete next.lastSync
+  return next
+}
+
+/**
+ * Applies cliCloudForUser to the persisted state for the signed-in account.
+ * Runs before every Cloud pull/reconcile and at login (there with the previous
+ * session's userId as `presumedOwner`). Returns true when a cursor/lastSync
+ * was actually discarded.
+ */
+function bindCliCloudToAccount(presumedOwner) {
+  const account = getCliAccount()
+  if (!account) return false
+  const settings = readSettings()
+  const c = settings.cliCloud || { enabled: false }
+  const next = cliCloudForUser(c, account.userId, presumedOwner)
+  if (next === c) return false
+  settings.cliCloud = next
+  writeSettings(settings)
+  return !!((c.pullCursor && !next.pullCursor) || (c.lastSync && !next.lastSync))
 }
 
 /** Cloud takes priority over GitHub whenever the CLI is signed in and Cloud is enabled. */
@@ -1244,6 +1291,7 @@ async function cloudTombstoneRelPaths(relPaths) {
 // old disk state over a newer remote corpus would clobber it (mirror of the
 // desktop app's initial-pull gate). Cursor or lastSync present = reconciled.
 async function cloudEnsureReconciled() {
+  bindCliCloudToAccount() // another account's cursor ≠ reconciled
   const c = getCliCloud()
   if (c.pullCursor || c.lastSync) return
   out('  First Cloud reconcile…')
@@ -1283,6 +1331,7 @@ async function cloudFetchRemoteAnchor(dek, dir) {
 
 /** Incremental pull — same grouping/conflict/tombstone rules as the app's cloudSync.pullNotes. */
 async function cloudPullNow() {
+  bindCliCloudToAccount()
   const c = getCliCloud()
   const dek = await getCliDek()
   const lastSyncMs = c.lastSync ? Date.parse(c.lastSync) : null
@@ -1396,8 +1445,8 @@ function isInvalidOtpResponse(json) {
   return !!msg && /expired|invalid/i.test(msg)
 }
 
-// noteflow cloud login [email]
-async function cmdCloudLogin(emailArg) {
+// noteflow cloud login [email] [--no-pull]
+async function cmdCloudLogin(emailArg, opts = {}) {
   let email = (emailArg || '').trim()
   if (!email) {
     email = await promptUntil('Email: ',
@@ -1446,29 +1495,57 @@ async function cmdCloudLogin(emailArg) {
       out(`  That code is invalid or has expired — check it and try again (${left} ${left === 1 ? 'attempt' : 'attempts'} left)`)
     }
   }
+  // A re-login without `cloud logout` still has the previous session here: its
+  // userId identifies the owner of a cursor written before owners were recorded.
+  const previousAccount = getCliAccount()
   saveCliAccount({
     email: session.user.email || email,
     userId: session.user.id,
     refreshToken: Buffer.from(session.refresh_token).toString('base64'),
   })
+  // Before any pull (the managed auto-pull below, or a later `noteflow pull`):
+  // a cursor kept by `cloud logout` only resumes for the SAME account.
+  if (bindCliCloudToAccount(previousAccount ? previousAccount.userId : undefined)) {
+    out('  Reset the Cloud sync cursor (it belonged to another account) — the next pull downloads everything')
+  }
   patchCliCloud({ enabled: true })
   cloudAccessToken = session.access_token
   out(`  Signed in as ${session.user.email || email} — NoteFlow Cloud sync enabled`)
 
   // Best-effort: tell the user whether the account already has Cloud keys.
+  let keysMode = null
   try {
     const res = await cloudRest('/rest/v1/user_keys?select=mode')
     if (res.status < 400 && Array.isArray(res.json)) {
       if (res.json.length) {
-        out(`  Cloud keys: ${res.json[0].mode === 'e2ee' ? 'private (e2ee) — passphrase needed to sync' : 'standard (managed)'}`)
+        keysMode = res.json[0].mode
+        out(`  Cloud keys: ${keysMode === 'e2ee' ? 'private (e2ee) — passphrase needed to sync' : 'standard (managed)'}`)
       } else {
         out('  No Cloud keys yet — run `noteflow cloud setup` (or set up Cloud in the desktop app)')
       }
     }
   } catch { /* informational only */ }
+
+  // Managed keys unlock silently (no passphrase prompt), so the first pull can
+  // run right away — best-effort: the session is already saved and a failure
+  // must not look like a failed login. e2ee would need the passphrase (an
+  // interactive prompt in the middle of login) → left to `noteflow pull`.
+  if (keysMode !== 'managed') return
+  if (opts.noPull) {
+    out("  Skipped the initial pull (--no-pull). Run 'noteflow pull' to download your notes")
+    return
+  }
+  try {
+    await cmdCloudPull()
+  } catch (e) {
+    if (e instanceof CliExit) throw e // never expected (Cloud is active right after login)
+    err(`Initial pull failed: ${e.message}`)
+    out("  You are still signed in. Run 'noteflow pull' to retry")
+  }
 }
 
 // noteflow cloud logout — best-effort server revocation, keeps cursor/lastSync
+// (and cliCloud.userId, their owner: a re-login with another account resets them)
 async function cmdCloudLogout() {
   const account = getCliAccount()
   if (!account) {
@@ -1481,7 +1558,7 @@ async function cmdCloudLogout() {
     await supabaseFetch(`${SUPABASE_URL}/auth/v1/logout`, { method: 'POST', accessToken: token })
   } catch { /* best-effort revocation */ }
   clearCliAccount()
-  patchCliCloud({ enabled: false }) // keeps pullCursor/lastSync — re-login resumes incrementally
+  patchCliCloud({ enabled: false }) // keeps pullCursor/lastSync/userId — a same-account re-login resumes incrementally
   out('  Signed out of NoteFlow Cloud')
 }
 
@@ -2282,8 +2359,8 @@ async function cmdMove(titleQuery, opts) {
   await syncPushNoteFiles(note.dirname, [NOTE_MD])
 }
 
-// noteflow login [repo]
-async function cmdLogin(repoName) {
+// noteflow login [repo] [--no-pull]
+async function cmdLogin(repoName, opts = {}) {
   const repo = repoName || DEFAULT_REPO
   out('\n  Authenticating with GitHub...')
   const data = await githubAuthPost('/login/device/code', { client_id: GITHUB_CLIENT_ID, scope: 'repo' })
@@ -2313,14 +2390,25 @@ async function cmdLogin(repoName) {
       out(`  Logged in as ${user.login}`)
       await ensureRepo(token, user.login, repo)
       const settings = readSettings()
+      // No fresh `lastSync` here: nothing has been synced yet, and on
+      // Windows/Linux this settings.json is the desktop app's too — its pull
+      // deletes local notes absent from the remote when `updated <= lastSync`.
+      // Re-connecting the SAME repo keeps the previous sync state (lastSync,
+      // needsFullReconcile…); a different repo starts clean. The pull below
+      // writes lastSync once it really ran — and only if the repo already has
+      // every local note (see nextGithubLastSync).
+      const prev = settings.githubSync
+      const sameRepo = prev && prev.owner === user.login && prev.repo === repo
       settings.githubSync = {
+        ...(sameRepo ? prev : {}),
         enabled: true,
         encryptedToken: Buffer.from(token).toString('base64'),
-        owner: user.login, repo, lastSync: new Date().toISOString(),
+        owner: user.login, repo,
       }
       writeSettings(settings)
       out(`  Connected to ${user.login}/${repo}`)
-      out("  Run 'noteflow push' to upload existing notes\n")
+      await pullAfterLogin(opts)
+      out('')
       return
     }
     if (result.error === 'slow_down') interval += 5000
@@ -2329,6 +2417,34 @@ async function cmdLogin(repoName) {
     }
   }
   process.stdout.write('\n'); err('Authorization expired. Try again.'); exit(1)
+}
+
+/**
+ * Best-effort first pull right after `login`, so a fresh machine gets its
+ * notes without a manual `noteflow pull`. The connection is already saved: a
+ * failed pull is reported, never turned into a failed login — cmdPull throws
+ * plain Errors (no exit()) precisely so they can be caught here.
+ */
+async function pullAfterLogin(opts) {
+  if (opts.noPull) {
+    out("  Skipped the initial pull (--no-pull). Run 'noteflow pull' to download your notes")
+    return
+  }
+  // Same priority as the push/pull routing: while the CLI is signed in to
+  // NoteFlow Cloud, GitHub is paused — pulling it now would sync the wrong backend.
+  if (cloudActive()) {
+    out('  NoteFlow Cloud is the active sync backend — skipped the GitHub pull (GitHub stays paused while it is on)')
+    out("  Run 'noteflow pull' to sync from NoteFlow Cloud, or 'noteflow cloud logout' to switch to GitHub")
+    return
+  }
+  out('')
+  try {
+    await cmdPull()
+  } catch (e) {
+    if (e instanceof CliExit) throw e // never expected (cmdPull doesn't exit) — keep exit() semantics intact
+    err(`Initial pull failed: ${e.message}`)
+    out("  You are still connected. Run 'noteflow pull' to retry")
+  }
 }
 
 function cmdLogout() {
@@ -2351,6 +2467,9 @@ async function cmdPush() {
   const token = getToken()
   if (!token) { err('Token unavailable (encrypted by desktop app). Run: noteflow login'); exit(1) }
   if (!fs.existsSync(NOTES_DIR)) { out('  No notes to push'); return }
+  // Taken BEFORE reading the disk (like the app's push): a note written while
+  // this runs must end up with `updated` > lastSync, never below it.
+  const startedAt = new Date().toISOString()
 
   // Every file of every note folder + root metadata + the format marker
   const relPaths = []
@@ -2373,19 +2492,70 @@ async function cmdPush() {
     } catch (e) { errors++; console.error(`\n  Failed: ${relPath} — ${e.message}`) }
   }
   try { await upsertRemoteFile(token, sync.owner, sync.repo, FORMAT_MARKER, `${FORMAT_VERSION}\n`) } catch { /* ignore */ }
-  const settings = readSettings()
-  settings.githubSync = { ...sync, lastSync: new Date().toISOString() }
-  writeSettings(settings)
   out(`\n  Done: ${pushed} pushed, ${errors} errors`)
+  // A failed file may be a note.md the repo still lacks — same rule as the pull.
+  if (writeGithubLastSync(sync, errors, startedAt) === null) {
+    out("  Last sync not updated (some files failed) — run 'noteflow push' again")
+  }
 }
 
+/**
+ * GitHub `lastSync` to keep after a pull/push (pure). It must mean "the repo
+ * holds everything on disk": on Windows/Linux this settings.json is the
+ * desktop app's too, and its pull deletes local notes absent from the repo
+ * with `updated <= lastSync` (shouldRunDeletionRule in electron/syncState.ts).
+ * So it only advances to `nowIso` when nothing is left unsynced (`pending` =
+ * local-only note dirs after a pull, failed files after a push); otherwise
+ * null = keep the previous value (or none).
+ */
+function nextGithubLastSync(pending, nowIso) {
+  return pending > 0 ? null : nowIso
+}
+
+/**
+ * Persists nextGithubLastSync (no write when it says keep). `startedAt` must be
+ * taken before the command read the disk. Returns the value written, or null.
+ */
+function writeGithubLastSync(sync, pending, startedAt) {
+  const lastSync = nextGithubLastSync(pending, startedAt)
+  if (lastSync === null) return null
+  const settings = readSettings()
+  settings.githubSync = { ...sync, lastSync }
+  writeSettings(settings)
+  return lastSync
+}
+
+/**
+ * Pure: local note dirs whose note.md the remote lacks. `remoteDirs` maps a dir
+ * to its remote .md files — a dir with sections but no note.md (an interrupted
+ * upload) still counts as local-only.
+ */
+function localOnlyNoteDirs(localDirs, remoteDirs) {
+  return localDirs.filter(dir => !(remoteDirs.get(dir) || []).includes(NOTE_MD))
+}
+
+/**
+ * Hint printed by every GitHub pull that leaves local-only notes. Neutral on
+ * purpose: this pull never applies deletions, so a note deleted on another
+ * device shows up here too — and pushing it would resurrect it.
+ */
+function localOnlyHint(n) {
+  const notes = n === 1 ? 'note is' : 'notes are'
+  return `${n} local ${notes} not on GitHub (new here, or deleted on another device) — run 'noteflow push' to upload ${n === 1 ? 'it' : 'them'} if new`
+}
+
+// Errors are THROWN, not exit()ed: `noteflow pull` gets the same "Error: …" +
+// exit 1 from the handler at the bottom of main(), while `login` can catch them
+// (a failed first pull must not look like a failed login).
+// Returns { pulled, skipped, localOnly } (localOnly = local note dirs the remote lacks).
 async function cmdPull(opts = {}) {
   const sync = getSyncSettings()
-  if (!sync.enabled || !sync.owner || !sync.repo) { err('Not connected. Run: noteflow login'); exit(1) }
+  if (!sync.enabled || !sync.owner || !sync.repo) throw new Error('Not connected. Run: noteflow login')
   const token = getToken()
-  if (!token) { err('Token unavailable (encrypted by desktop app). Run: noteflow login'); exit(1) }
+  if (!token) throw new Error('Token unavailable (encrypted by desktop app). Run: noteflow login')
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
   const force = opts.force === true
+  const startedAt = new Date().toISOString() // before reading the disk — see cmdPush
   out(`  Pulling from ${sync.owner}/${sync.repo}...${force ? ' (--force)' : ''}`)
 
   let blobs = []
@@ -2394,8 +2564,7 @@ async function cmdPull(opts = {}) {
   } catch (e) {
     // 404/409 means the repo is empty (just initialized); any other error is real
     if (e.message && !e.message.includes('404') && !e.message.includes('409') && !e.message.toLowerCase().includes('not found') && !e.message.toLowerCase().includes('empty')) {
-      err(`Could not list remote files: ${e.message}`)
-      exit(1)
+      throw new Error(`Could not list remote files: ${e.message}`)
     }
   }
 
@@ -2449,10 +2618,14 @@ async function cmdPull(opts = {}) {
     try { fs.writeFileSync(path.join(NOTES_DIR, m), await fetchRemote(m), 'utf-8') }
     catch { /* optional */ }
   }
-  const settings = readSettings()
-  settings.githubSync = { ...sync, lastSync: new Date().toISOString() }
-  writeSettings(settings)
+  const localOnly = localOnlyNoteDirs(listLocalNoteDirs(), remoteDirs)
+  // Local-only notes mean the repo does NOT know everything on disk yet: a
+  // fresh lastSync would arm the desktop app's deletion rule against them
+  // (see nextGithubLastSync). The push that uploads them writes it instead.
+  writeGithubLastSync(sync, localOnly.length, startedAt)
   out(`  Done: ${pulled} pulled${skipped ? `, ${skipped} skipped (local is newer — use --force to override)` : ''}`)
+  if (localOnly.length) out(`  ${localOnlyHint(localOnly.length)}`)
+  return { pulled, skipped, localOnly }
 }
 
 // noteflow migrate — one-time local v1→v2 conversion (flat .md → folders).
@@ -2833,8 +3006,10 @@ function cmdHelp(topic) {
     noteflow rename "Projct Alpha" "Project Alpha"
 `,
     cloud: `
-  noteflow cloud login [email]    Sign in with an emailed 6-digit code
-  noteflow cloud logout           Sign out (keeps notes and the sync cursor)
+  noteflow cloud login [email]    Sign in with an emailed 6-digit code (standard
+                                  keys: then pulls your notes; --no-pull skips it)
+  noteflow cloud logout           Sign out (keeps notes and the sync cursor: signing
+                                  back in with the same account resumes from it)
   noteflow cloud status [--json]  Account, keys mode and sync state
   noteflow cloud setup            Create Cloud keys (standard/managed mode)
   noteflow cloud push             Encrypt and upload all notes
@@ -2893,7 +3068,8 @@ function cmdHelp(topic) {
     folder delete <name>               Delete a folder (notes drop to group root)
 
   Sync commands:
-    login [repo]          Connect to GitHub
+    login [repo]          Connect to GitHub, then pull the repo's notes
+                          [--no-pull: connect only, skip the first pull]
     logout                Disconnect from GitHub
     push                  Push all notes (NoteFlow Cloud when signed in, else GitHub)
     pull / update         Pull notes (NoteFlow Cloud when signed in, else GitHub)
@@ -2952,6 +3128,7 @@ const BOOLEAN_FLAGS = {
   '--raw': ['raw', true], '--rich': ['raw', false], '--stdin': ['stdin', true],
   '--ungroup': ['ungroup', true], '--create': ['create', true],
   '--dry-run': ['dryRun', true], '--force': ['force', true],
+  '--no-pull': ['noPull', true],
 }
 const VALUE_FLAGS = ['--tag', '--title', '--section', '--group', '--folder', '--color', '--text', '--file']
 
@@ -3128,7 +3305,7 @@ async function main() {
       await cmdMove(title, flags)
       break
     }
-    case 'login':   await cmdLogin(positional[0]); break
+    case 'login':   await cmdLogin(positional[0], flags); break
     case 'logout':  cmdLogout(); break
     // Top-level push/pull/status route to NoteFlow Cloud while it is active
     // (signed in + enabled) and to GitHub otherwise — mirror of the app's
@@ -3138,7 +3315,7 @@ async function main() {
     case 'update':  if (cloudActive()) await cmdCloudPull(); else await cmdPull(flags); break
     case 'cloud': {
       const sub = positional[0]
-      if (sub === 'login')       await cmdCloudLogin(positional[1])
+      if (sub === 'login')       await cmdCloudLogin(positional[1], flags)
       else if (sub === 'logout') await cmdCloudLogout()
       else if (sub === 'status') await cmdCloudStatus(flags)
       else if (sub === 'setup')  await cmdCloudSetup()
@@ -3184,7 +3361,8 @@ if (require.main === module) {
   // Test-only surface: pure crypto + row-mapping functions (so the interop with
   // the desktop app — dist-electron/cloudCrypto.js and cloudSyncLogic.js — can be
   // verified), the note.md parser/serializer (format mirror of src/lib/noteUtils.ts),
-  // plus the pure name-matching helpers. The CLI always runs as a script.
+  // the pure sync-state decisions (GitHub lastSync, Cloud cursor owner) plus the
+  // pure name-matching helpers. The CLI always runs as a script.
   module.exports = {
     sectionTokens, fuzzySectionMatches,
     splitFrontmatter, parseNoteYaml, serializeNoteMd,
@@ -3195,5 +3373,6 @@ if (require.main === module) {
     resolveRowUpdatedAt, shouldApplyRemoteDir, shouldApplyRemoteDeletion,
     nextPullCursor, buildFileUpsertRow, decryptFileRow,
     CLOUD_METADATA_FILES,
+    nextGithubLastSync, localOnlyNoteDirs, localOnlyHint, cliCloudForUser,
   }
 }
