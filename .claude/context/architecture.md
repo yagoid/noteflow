@@ -371,6 +371,19 @@ dual-write legacy — la fuente sincronizada es `ui-settings.json` del dir de no
 - **macOS:** `~/Library/Application Support/NoteFlow/settings.json`
 - (vía `app.getPath('userData')`)
 
+> **Seguridad / modelo de amenaza.** La app cifra los secretos con `safeStorage` (base64 solo
+> como fallback si el SO no lo ofrece). El **CLI** comparte este fichero en Windows/Linux. Como un
+> proceso Node no tiene `safeStorage`, guarda su token de GitHub (`githubSync.encryptedToken`, scope
+> `repo`) y su refresh token de Cloud (`cliAccount.refreshToken`) **solo en base64**. Lo que los
+> protege es el permiso del fichero: en Linux/macOS el CLI deja `settings.json` en **`0600`**
+> (`restrictSettingsPerms()` al arrancar cualquier comando + `writeSettings`). Se protege frente a
+> otros usuarios locales, no frente a procesos del mismo usuario (el criterio de `gh` / `~/.ssh`).
+> Los writers de la app (`writeSettings` en `main.ts`, `githubSync.ts`, `account.ts`, `cloudSync.ts`,
+> `cloudKeys.ts`) escriben **in-place** con `writeFileSync`, que conserva el modo de un fichero
+> existente; si la app lo crea, queda con el umask (`0644`) hasta la siguiente ejecución del CLI.
+> **No** cambies esos writers a tmp + rename sin crear el tmp en `0600`, porque deshaces el
+> endurecimiento.
+
 Estructura de `settings.json`:
 ```json
 {

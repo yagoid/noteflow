@@ -121,10 +121,32 @@ function readSettings() {
   catch { return {} }
 }
 
+/**
+ * POSIX only: makes settings.json owner-only (0600) when group/others have ANY
+ * access. The file holds the GitHub token (scope `repo`) and the Cloud refresh
+ * token base64-encoded, NOT encrypted — a plain Node process has no safeStorage —
+ * so its mode is the only barrier against other local users (same model as `gh`
+ * or ~/.ssh). Best-effort and silent: a missing file, a filesystem without POSIX
+ * modes or a file owned by someone else must never fail the command.
+ */
+function restrictSettingsPerms() {
+  if (process.platform === 'win32') return
+  try {
+    if (fs.statSync(SETTINGS_PATH).mode & 0o077) fs.chmodSync(SETTINGS_PATH, 0o600)
+  } catch { /* ignore */ }
+}
+
 function writeSettings(data) {
   const dir = path.dirname(SETTINGS_PATH)
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), 'utf-8')
+  // 0700 only when WE create it (Chromium creates the app's userData the same
+  // way); an existing dir is left alone — the 0600 on the file is what matters.
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  // Written IN PLACE (no tmp + rename): the inode — and so the mode — survives,
+  // and the desktop app's writers do the same. Tighten BEFORE writing so a
+  // legacy 0644 file never holds the new token, even briefly; `mode` covers the
+  // create case (it is ignored when the file already exists).
+  restrictSettingsPerms()
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), { encoding: 'utf-8', mode: 0o600 })
 }
 
 function getSyncSettings() { return readSettings().githubSync || { enabled: false } }
@@ -155,11 +177,7 @@ function getCliAccount() {
 function saveCliAccount(account) {
   const settings = readSettings()
   settings.cliAccount = account
-  writeSettings(settings)
-  // Best-effort: the file now holds a session token — make it owner-only on POSIX.
-  if (process.platform !== 'win32') {
-    try { fs.chmodSync(SETTINGS_PATH, 0o600) } catch { /* ignore */ }
-  }
+  writeSettings(settings) // writeSettings keeps the file owner-only (0600) on POSIX
 }
 
 function clearCliAccount() {
@@ -3158,6 +3176,11 @@ function parseFlags(args) {
 async function main() {
   const args = process.argv.slice(2)
   const cmd = args[0]
+
+  // Heals a settings.json left world-readable by an older CLI or by the desktop
+  // app (which creates it with the umask) — also for read-only commands like
+  // `list`, which never go through writeSettings.
+  restrictSettingsPerms()
 
   if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') { cmdHelp(args[1]); return }
   if (cmd === 'version' || cmd === '--version' || cmd === '-v') { out(`noteflow CLI v${CLI_VERSION}`); return }
