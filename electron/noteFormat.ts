@@ -26,6 +26,7 @@ export interface DiskSection {
   content: string
   isRawMode?: boolean
   aiHidden?: boolean  // when true, the AI never sees this section (index, chat, tools)
+  created?: string    // ISO — optional per-section creation time (never backfilled)
 }
 
 export interface DiskNote {
@@ -182,6 +183,8 @@ export function parseNoteDir(dirPath: string): DiskNote | null {
       const section: DiskSection = { id, name: String(s.name ?? 'Section'), content }
       if (s.isRawMode) section.isRawMode = true
       if (s.aiHidden) section.aiHidden = true
+      const created = isoString(s.created)
+      if (created) section.created = created
       sections.push(section)
     }
   }
@@ -256,6 +259,7 @@ export function serializeNoteFolder(
       file: `${s.id}.md`,
       ...(s.isRawMode && { isRawMode: true }),
       ...(s.aiHidden && { aiHidden: true }),
+      ...(s.created && { created: s.created }),
     }))
   }
 

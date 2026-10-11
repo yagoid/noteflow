@@ -400,10 +400,10 @@ async function executeTool(name, rawInput, ctx) {
                 if (folderId && !ctx.readFolders().some((f) => f.id === folderId))
                     folderId = '';
                 const rawSections = Array.isArray(input.sections) ? input.sections : [];
-                const sections = rawSections.length
-                    ? rawSections.map((s) => ({ id: makeId(6), name: asStr(s.name).trim() || 'Note', content: asStr(s.content), isRawMode: asBool(s.raw) ?? false }))
-                    : [{ id: makeId(6), name: 'Note', content: '', isRawMode: false }];
                 const now = new Date().toISOString();
+                const sections = rawSections.length
+                    ? rawSections.map((s) => ({ id: makeId(6), name: asStr(s.name).trim() || 'Note', content: asStr(s.content), isRawMode: asBool(s.raw) ?? false, created: now }))
+                    : [{ id: makeId(6), name: 'Note', content: '', isRawMode: false, created: now }];
                 const id = makeId(8);
                 const note = {
                     id, title, tags: extractTags(sections.map((s) => s.content).join('\n')),
@@ -448,7 +448,7 @@ async function executeTool(name, rawInput, ctx) {
                 const sid = makeId(6);
                 const after = {
                     ...found.note,
-                    sections: [...found.note.sections, { id: sid, name: asStr(input.name).trim() || 'Section', content: asStr(input.content), isRawMode: asBool(input.raw) ?? false }],
+                    sections: [...found.note.sections, { id: sid, name: asStr(input.name).trim() || 'Section', content: asStr(input.content), isRawMode: asBool(input.raw) ?? false, created: new Date().toISOString() }],
                 };
                 await writeNoteRecord(ctx, found.dir, found.note, after);
                 return ok(`Added section "${asStr(input.name)}"`, `Added section "${asStr(input.name)}" (id ${sid}).`);

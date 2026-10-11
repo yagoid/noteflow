@@ -176,6 +176,9 @@ function parseNoteDir(dirPath) {
                 section.isRawMode = true;
             if (s.aiHidden)
                 section.aiHidden = true;
+            const created = isoString(s.created);
+            if (created)
+                section.created = created;
             sections.push(section);
         }
     }
@@ -242,6 +245,7 @@ function serializeNoteFolder(note, opts) {
             file: `${s.id}.md`,
             ...(s.isRawMode && { isRawMode: true }),
             ...(s.aiHidden && { aiHidden: true }),
+            ...(s.created && { created: s.created }),
         }));
     }
     if (note.archived)

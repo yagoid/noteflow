@@ -91,8 +91,8 @@ mutuamente excluyentes** (group / note / brain / all-content): todos los setters
 cierra las otras y seleccionar una nota devuelve el editor. `App.tsx` la renderiza (`NoteOverview`) con la
 prioridad de routing (all-content → brain → group → note → editor). **Entradas:** botón en la toolbar de
 `NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual del sidebar. Una
-**tarjeta por sección** que es un mini-mock del editor: etiqueta de sección, título+`created` de la
-nota, una barra-toolbar puramente representativa, y un **preview del contenido renderizado** con
+**tarjeta por sección** que es un mini-mock del editor: etiqueta de sección, título de la nota +
+`Created <fecha>` de **la sección** (`firstValidDate(section.created, note.created)`; sin fecha válida se oculta), una barra-toolbar puramente representativa, y un **preview del contenido renderizado** con
 `htmlFromMarkdown` (de `lib/markdownHtml.ts`) dentro de `.prose-editor .ProseMirror`, encogido con
 CSS `zoom` (Chromium/Electron) y recortado a unas líneas con fade. El mock visual vive en
 `SectionPreview/SectionPreviewCard.tsx` (componente puro, props `compact`/`previewHeight`/`previewZoom`);

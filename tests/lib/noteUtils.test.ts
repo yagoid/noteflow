@@ -5,6 +5,7 @@ import {
   buildNoteWritePayload,
   extractTitle,
   extractTags,
+  createEmptyNote,
   noteDirname,
   sectionFilename,
   pathBasename,
@@ -104,6 +105,57 @@ describe('serializeNoteFolder ↔ parseNoteFolder round-trip', () => {
     const parsed = parseNoteFolder(noteMd, {}, '/notes/x')
     expect(parsed.sections).toHaveLength(1)
     expect(parsed.sections[0].name).toBe('Note')
+  })
+})
+
+describe('per-section created (optional, never backfilled)', () => {
+  const noteWith = (sections: Note['sections']): Note => ({ ...sampleNote(), sections })
+
+  it('writes `created` in the section index only when present and reads it back', () => {
+    const note = noteWith([
+      { id: 'aaa', name: 'Note', content: 'old', isRawMode: true },
+      { id: 'bbb', name: 'New', content: 'fresh', created: '2026-05-06T07:08:09.000Z' },
+    ])
+    const { files } = serializeNoteFolder(note)
+    const noteMd = files[NOTE_MD]
+    expect(noteMd.match(/created:/g)).toHaveLength(2) // note-level + the one section that has it
+    expect(noteMd).toContain('    created: "2026-05-06T07:08:09.000Z"')
+
+    const parsed = parseNoteFolder(noteMd, { 'aaa.md': 'old', 'bbb.md': 'fresh' }, note.filePath)
+    expect(parsed.sections[0]).not.toHaveProperty('created')
+    expect(parsed.sections[1].created).toBe('2026-05-06T07:08:09.000Z')
+
+    // Stable across a second round-trip (ignoring the bumped `updated`)
+    const again = serializeNoteFolder(parsed).files[NOTE_MD]
+    expect(again.replace(/updated: .*\n/, '')).toBe(noteMd.replace(/updated: .*\n/, ''))
+  })
+
+  it('normalizes an unquoted (YAML Date) section created back to an ISO string', () => {
+    const noteMd = [
+      '---',
+      'id: x',
+      'title: T',
+      'sections:',
+      '  - id: s1',
+      '    name: Note',
+      '    file: s1.md',
+      '    created: 2024-03-04T05:06:07.000Z',
+      '---',
+      '',
+    ].join('\n')
+    const parsed = parseNoteFolder(noteMd, { 's1.md': '' }, '/notes/x')
+    expect(parsed.sections[0].created).toBe('2024-03-04T05:06:07.000Z')
+  })
+
+  it('does not invent a created for fallback/default sections when parsing', () => {
+    const noteMd = '---\nid: x\ntitle: T\n---\n'
+    expect(parseNoteFolder(noteMd, {}, '/notes/x').sections[0]).not.toHaveProperty('created')
+    expect(parseNoteFolder(noteMd, { 's.md': 'b' }, '/notes/x').sections[0]).not.toHaveProperty('created')
+  })
+
+  it('createEmptyNote stamps its initial section with the note created time', () => {
+    const note = createEmptyNote()
+    expect(note.sections[0].created).toBe(note.created)
   })
 })
 

@@ -1688,7 +1688,7 @@ electron_1.ipcMain.handle('notes:parse-import-file', async () => {
                 tags: [],
                 created: now,
                 updated: now,
-                sections: [{ id: secId, name: 'Note', content: textContent, isRawMode: true }],
+                sections: [{ id: secId, name: 'Note', content: textContent, isRawMode: true, created: now }],
             });
             return {
                 ok: true,

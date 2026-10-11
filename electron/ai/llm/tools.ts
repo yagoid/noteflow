@@ -388,10 +388,10 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         let folderId = asStr(input.folder_id).trim()
         if (folderId && !ctx.readFolders().some((f) => f.id === folderId)) folderId = ''
         const rawSections = Array.isArray(input.sections) ? (input.sections as Args[]) : []
-        const sections: DiskSection[] = rawSections.length
-          ? rawSections.map((s) => ({ id: makeId(6), name: asStr(s.name).trim() || 'Note', content: asStr(s.content), isRawMode: asBool(s.raw) ?? false }))
-          : [{ id: makeId(6), name: 'Note', content: '', isRawMode: false }]
         const now = new Date().toISOString()
+        const sections: DiskSection[] = rawSections.length
+          ? rawSections.map((s) => ({ id: makeId(6), name: asStr(s.name).trim() || 'Note', content: asStr(s.content), isRawMode: asBool(s.raw) ?? false, created: now }))
+          : [{ id: makeId(6), name: 'Note', content: '', isRawMode: false, created: now }]
         const id = makeId(8)
         const note: DiskNote = {
           id, title, tags: extractTags(sections.map((s) => s.content).join('\n')),
@@ -427,7 +427,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const sid = makeId(6)
         const after: DiskNote = {
           ...found.note,
-          sections: [...found.note.sections, { id: sid, name: asStr(input.name).trim() || 'Section', content: asStr(input.content), isRawMode: asBool(input.raw) ?? false }],
+          sections: [...found.note.sections, { id: sid, name: asStr(input.name).trim() || 'Section', content: asStr(input.content), isRawMode: asBool(input.raw) ?? false, created: new Date().toISOString() }],
         }
         await writeNoteRecord(ctx, found.dir, found.note, after)
         return ok(`Added section "${asStr(input.name)}"`, `Added section "${asStr(input.name)}" (id ${sid}).`)

@@ -24,6 +24,7 @@ import { colorChannels, getTagColor, normalizeTagColorKey, resolveGroupColor, TA
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 import { getRootZoom } from '../../stores/themeStore'
 import { moveSectionInList, restoreSectionInList } from '../../lib/sectionUtils'
+import { firstValidDate } from '../../lib/dateUtils'
 import { ownsKeys } from '../../lib/keyScope'
 import { SectionNameField } from './SectionNameField'
 
@@ -657,7 +658,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     if (!isPaneActive) return
     const handleAddTab = () => {
       if (!noteRef.current) return
-      const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '' }
+      const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', created: new Date().toISOString() }
       void mutateSections(noteRef.current.id, (sections) => [...sections, newSection])
       setRawContent('')
       setActiveSectionId(newSection.id)
@@ -794,7 +795,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     await useTemplatesStore.getState().createTemplate({
       name,
       title: note.title,
-      sections: note.sections.map((s) => ({ ...s })),
+      sections: note.sections.map((s) => ({ ...s })), // createTemplate drops each section's `created`
     })
     setTemplateNameDraft(null)
   }
@@ -888,7 +889,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   }
 
   const handleAddSection = () => {
-    const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '' }
+    const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', created: new Date().toISOString() }
     void mutateSections(note.id, (sections) => [...sections, newSection])
     setRawContent('')
     setActiveSectionId(newSection.id)
@@ -1191,6 +1192,10 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
       </>
     )
   }
+
+  // Active section's creation date for the line under the title; a hand-edited,
+  // unparseable `created` falls back to the note's, and if that is bad too the date is hidden.
+  const createdDate = firstValidDate(activeSection?.created, note.created)
 
   return (
     <>
@@ -1673,18 +1678,24 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
         </div>
 
 
-        <div className="px-4 pb-2 flex-shrink-0 flex items-center gap-2">
-          <span className="text-xs font-mono text-text-muted/50">
-            {formatDate(new Date(note.updated), 'MMM d, yyyy · HH:mm')}
-          </span>
-          {note.expiresAt && (
-            <span className="text-xs font-mono text-accent/70 flex items-center gap-1">
-              <span className="text-text-muted/40">·</span>
-              <Timer size={11} strokeWidth={2.5} />
-              {tf(t.editor.deletesAt, { date: formatDate(new Date(note.expiresAt), 'MMM d, yyyy · HH:mm') })}
-            </span>
-          )}
-        </div>
+        {(createdDate || note.expiresAt) && (
+          <div className="px-4 pb-2 flex-shrink-0 flex items-center gap-2">
+            {createdDate && (
+              <span className="text-xs font-mono text-text-muted/50">
+                {/* Creation date of THIS pane's active section (older sections without
+                    their own `created` fall back to the note's) */}
+                {tf(t.common.createdAt, { date: formatDate(createdDate, 'MMM d, yyyy · HH:mm') })}
+              </span>
+            )}
+            {note.expiresAt && (
+              <span className="text-xs font-mono text-accent/70 flex items-center gap-1">
+                {createdDate && <span className="text-text-muted/40">·</span>}
+                <Timer size={11} strokeWidth={2.5} />
+                {tf(t.editor.deletesAt, { date: formatDate(new Date(note.expiresAt), 'MMM d, yyyy · HH:mm') })}
+              </span>
+            )}
+          </div>
+        )}
 
         <div
           className={`flex-1 overflow-hidden mr-1 relative${readableWidth ? ' editor-readable' : ''}`}

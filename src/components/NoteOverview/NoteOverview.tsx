@@ -119,7 +119,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
   // writes there rather than landing back on an empty card in the overview.
   const addSection = async () => {
     if (!note || locked) return
-    const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '' }
+    const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', created: new Date().toISOString() }
     await mutateSections(note.id, (sections) => [...sections, newSection])
     openSection(newSection.id)
   }

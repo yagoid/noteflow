@@ -5,6 +5,7 @@ export interface NoteSection {
   content: string  // markdown body
   isRawMode?: boolean
   aiHidden?: boolean  // when true, the AI never sees this section (index, chat, tools)
+  created?: string    // ISO 8601 — set when the section is created; absent on older sections (UI falls back to note.created)
 }
 
 // Legacy fixed type kept only for default section creation

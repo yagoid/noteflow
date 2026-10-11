@@ -4,7 +4,7 @@ import type { NoteSection } from '../../src/types'
 
 const sections: NoteSection[] = [
   { id: 'a', name: 'Note', content: 'top secret' },
-  { id: 'b', name: 'Tasks', content: 'plan the heist', isRawMode: true },
+  { id: 'b', name: 'Tasks', content: 'plan the heist', isRawMode: true, created: '2026-01-02T03:04:05.000Z' },
 ]
 
 describe('encryptSections / decryptSections', () => {

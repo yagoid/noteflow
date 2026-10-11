@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { duplicateSectionInList, moveSectionInList, patchSectionInList, restoreSectionInList } from '../../src/lib/sectionUtils'
 import type { NoteSection } from '../../src/types'
 
+const NOW = '2026-10-11T12:00:00.000Z'
+
 const base = (): NoteSection[] => [
   { id: 'a', name: 'Alpha', content: 'one' },
   { id: 'b', name: 'Beta', content: '# two', isRawMode: true, aiHidden: true },
@@ -10,19 +12,19 @@ const base = (): NoteSection[] => [
 
 describe('duplicateSectionInList', () => {
   it('inserts the copy right after the original', () => {
-    const result = duplicateSectionInList(base(), 'a', { id: 'new', name: 'Alpha (copy)' })
+    const result = duplicateSectionInList(base(), 'a', { id: 'new', name: 'Alpha (copy)', created: NOW })
     expect(result?.sections.map((s) => s.id)).toEqual(['a', 'new', 'b', 'c'])
   })
 
   it('appends when duplicating the last section', () => {
-    const result = duplicateSectionInList(base(), 'c', { id: 'new', name: 'Gamma (copy)' })
+    const result = duplicateSectionInList(base(), 'c', { id: 'new', name: 'Gamma (copy)', created: NOW })
     expect(result?.sections.map((s) => s.id)).toEqual(['a', 'b', 'c', 'new'])
   })
 
-  it('keeps content, isRawMode and aiHidden; takes the new id and name', () => {
-    const result = duplicateSectionInList(base(), 'b', { id: 'new', name: 'Beta (copy)' })
+  it('keeps content, isRawMode and aiHidden; takes the new id, name and created', () => {
+    const result = duplicateSectionInList(base(), 'b', { id: 'new', name: 'Beta (copy)', created: NOW })
     expect(result?.section).toEqual({
-      id: 'new', name: 'Beta (copy)', content: '# two', isRawMode: true, aiHidden: true,
+      id: 'new', name: 'Beta (copy)', content: '# two', isRawMode: true, aiHidden: true, created: NOW,
     })
     expect(result?.sections[2]).toBe(result?.section)
   })
@@ -30,14 +32,21 @@ describe('duplicateSectionInList', () => {
   it('does not mutate the input', () => {
     const sections = base()
     const snapshot = JSON.parse(JSON.stringify(sections))
-    const result = duplicateSectionInList(sections, 'b', { id: 'new', name: 'Beta (copy)' })
+    const result = duplicateSectionInList(sections, 'b', { id: 'new', name: 'Beta (copy)', created: NOW })
     expect(sections).toEqual(snapshot)
     expect(result?.sections).not.toBe(sections)
     expect(result?.sections[1]).toBe(sections[1])
   })
 
   it('returns null for an unknown section', () => {
-    expect(duplicateSectionInList(base(), 'zzz', { id: 'new', name: 'x' })).toBeNull()
+    expect(duplicateSectionInList(base(), 'zzz', { id: 'new', name: 'x', created: NOW })).toBeNull()
+  })
+
+  it('stamps the copy with its own creation time, not the original one', () => {
+    const sections: NoteSection[] = [{ id: 'a', name: 'Alpha', content: 'one', created: '2020-01-01T00:00:00.000Z' }]
+    const result = duplicateSectionInList(sections, 'a', { id: 'new', name: 'Alpha (copy)', created: NOW })
+    expect(result?.section.created).toBe(NOW)
+    expect(result?.sections[0].created).toBe('2020-01-01T00:00:00.000Z')
   })
 })
 

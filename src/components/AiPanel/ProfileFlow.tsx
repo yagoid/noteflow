@@ -148,11 +148,13 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
         setBusy(false)
         return
       }
+      const sectionsCreated = new Date().toISOString()
       const noteSections: NoteSection[] = res.sections.map((s) => ({
         id: nanoid(8),
         name: s.name,
         content: s.content,
         isRawMode: false,
+        created: sectionsCreated,
       }))
 
       // Make sure the fixed "AI generated" group exists (match by name, case-insensitive) and

@@ -501,7 +501,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const note: Note = {
       ...draft,
       title,
-      sections,
+      // Every section of a brand-new note is new: stamp them with the note's own
+      // creation time (overrides any `created` carried over from a template).
+      sections: sections.map((s) => ({ ...s, created: draft.created })),
       tags: extractTags(allContent),
       ...(group ? { group } : {}),
       ...(folder ? { folder } : {}),
@@ -558,7 +560,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // Same group/folder as the original, in the single write (see createNote)
       ...(source.group ? { group: source.group } : {}),
       ...(source.folder ? { folder: source.folder } : {}),
-      sections: source.sections.map((s) => ({ ...s, id: nanoid(8) })),
+      // The copies are new sections of a new note → they share its creation time.
+      sections: source.sections.map((s) => ({ ...s, id: nanoid(8), created: now })),
     }
     const dir = get().notesDir
     const filePath = `${dir}/${noteDirname(draft.id, draft.title)}`
@@ -602,7 +605,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   duplicateSection: async (noteId, sectionId, name) => {
     let created: NoteSection | null = null
     await get().mutateSections(noteId, (sections) => {
-      const result = duplicateSectionInList(sections, sectionId, { id: nanoid(8), name })
+      const result = duplicateSectionInList(sections, sectionId, { id: nanoid(8), name, created: new Date().toISOString() })
       if (!result) return null
       created = result.section
       return result.sections

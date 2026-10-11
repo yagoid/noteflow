@@ -355,6 +355,7 @@ function serializeNoteMd(note, opts = {}) {
     y += `    file: ${q(s.id + '.md')}\n`
     if (s.isRawMode) y += '    isRawMode: true\n'
     if (s.aiHidden) y += '    aiHidden: true\n'
+    if (s.created) y += `    created: ${q(s.created)}\n`
   }
   if (note.archived)   y += 'archived: true\n'
   if (note.favorited)  y += 'favorited: true\n'
@@ -1662,7 +1663,7 @@ async function cmdAdd(positionalText, opts) {
   if (existing) {
     const note = readNoteFolder(existing.dirname)
     if (!note) { err(`Could not read note "${existing.title}"`); exit(1) }
-    if (!note.sections.length) note.sections = [{ id: nanoid(6), name: 'Note', content: '', isRawMode: true }]
+    if (!note.sections.length) note.sections = [{ id: nanoid(6), name: 'Note', content: '', isRawMode: true, created: new Date().toISOString() }]
 
     // Find or create target section. An EXPLICIT --section resolves like in `set`
     // (partial names hit the existing section instead of spawning a duplicate,
@@ -1683,7 +1684,7 @@ async function cmdAdd(positionalText, opts) {
       return
     }
     if (!sec) {
-      sec = { id: nanoid(6), name: newSectionName, content: '', isRawMode: isRaw }
+      sec = { id: nanoid(6), name: newSectionName, content: '', isRawMode: isRaw, created: new Date().toISOString() }
       note.sections.push(sec)
       out(`  Created section "${newSectionName}"`)
     }
@@ -1735,7 +1736,7 @@ async function cmdAdd(positionalText, opts) {
       id, title: targetTitle,
       tags: opts.tag ? [opts.tag] : [],
       created: now, updated: now,
-      sections: [{ id: nanoid(6), name: sectionName, content: text, isRawMode: isRaw }],
+      sections: [{ id: nanoid(6), name: sectionName, content: text, isRawMode: isRaw, created: now }],
       ...(groupId ? { group: groupId } : {}),
       ...(folderId ? { folder: folderId } : {}),
     }
@@ -1768,7 +1769,7 @@ async function cmdNew(title, opts) {
   }
   const note = {
     id, title, tags: [], created: now, updated: now,
-    sections: [{ id: nanoid(6), name: opts.section || 'Note', content: '', isRawMode: true }],
+    sections: [{ id: nanoid(6), name: opts.section || 'Note', content: '', isRawMode: true, created: now }],
     ...(groupId ? { group: groupId } : {}),
     ...(folderId ? { folder: folderId } : {}),
   }
@@ -2056,7 +2057,7 @@ async function cmdSet(titleQuery, sectionName, opts) {
     return
   }
   if (!sec) {
-    sec = { id: nanoid(6), name: parseSectionRef(sectionName).baseName, content: '', isRawMode: opts.raw !== false }
+    sec = { id: nanoid(6), name: parseSectionRef(sectionName).baseName, content: '', isRawMode: opts.raw !== false, created: new Date().toISOString() }
     note.sections = note.sections || []
     note.sections.push(sec)
   }
@@ -2071,7 +2072,7 @@ async function cmdSet(titleQuery, sectionName, opts) {
 // noteflow section add <title> <name> [--rich]  — append a new (possibly duplicate-named) section
 async function cmdSectionAdd(titleQuery, name, opts) {
   const note = resolveNote(titleQuery)
-  const sec = { id: nanoid(6), name, content: '', isRawMode: opts.raw !== false }
+  const sec = { id: nanoid(6), name, content: '', isRawMode: opts.raw !== false, created: new Date().toISOString() }
   note.sections = note.sections || []
   note.sections.push(sec)
   writeNoteFolder(note.dirname, note)
@@ -3182,9 +3183,11 @@ if (require.main === module) {
 } else {
   // Test-only surface: pure crypto + row-mapping functions (so the interop with
   // the desktop app — dist-electron/cloudCrypto.js and cloudSyncLogic.js — can be
-  // verified) plus the pure name-matching helpers. The CLI always runs as a script.
+  // verified), the note.md parser/serializer (format mirror of src/lib/noteUtils.ts),
+  // plus the pure name-matching helpers. The CLI always runs as a script.
   module.exports = {
     sectionTokens, fuzzySectionMatches,
+    splitFrontmatter, parseNoteYaml, serializeNoteMd,
     toB64Url, fromB64Url, deriveKek, normalizeRecoveryCode, looksLikeRecoveryCode,
     derivePathKeyHmac, wrapKey, unwrapKey, encryptContent, decryptContent,
     generateDek, generateNoteKey,

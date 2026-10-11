@@ -37,6 +37,7 @@ sections:
   - id: sec002
     name: Tasks
     file: sec002.md
+    created: "2026-01-05T10:00:00.000Z"   # opcional — creación de ESTA sección (ver abajo)
 archived: true    # solo presente si true
 favorited: true   # solo presente si true
 ---
@@ -58,6 +59,21 @@ encryption:
 - En memoria el `Note` sigue hidratado (`sections[].content`); `Note.filePath` = **directorio**;
   `Note.raw` = contenido de `note.md`. La UI (editor, sidebar, stickies) no cambió.
 - Título por defecto: `DD/MM/YYYY`. Sección por defecto: `Note` en raw.
+- **`created` por sección** (opcional, ISO 8601, misma clave en desktop, CLI y móvil): se escribe
+  solo si existe y se conserva en el round-trip (también dentro del payload cifrado, que es el JSON
+  del array `sections`). Se asigna `now` al **crear** una sección (nueva pestaña, duplicar — la
+  copia es nueva —, `section add`/`set`/`add` del CLI, tools `create_note`/`add_section` del
+  agente); las secciones iniciales de una nota nueva (nota vacía, plantilla, duplicar nota, perfil
+  IA, import) llevan el mismo timestamp que `note.created`. Excepción: al **regenerar** el perfil
+  de IA sobre una nota ya existente (`ProfileFlow.tsx`, "Start over" → `updateNote` in situ), las
+  secciones nuevas llevan la hora de la regeneración, no `note.created` de la nota reutilizada.
+  Las **plantillas** (`templates.json`) no guardan el `created` de las secciones
+  (`templatesStore.createTemplate` lo descarta). **Nunca se rellena** al parsear notas
+  antiguas ni en la migración v1→v2, y no se reescriben ficheros para backfill: la UI hace el
+  fallback al mostrar con `firstValidDate(section.created, note.created)` (`src/lib/dateUtils.ts`;
+  un valor no parseable —p. ej. editado a mano— también cae a `note.created`, y si ninguno es
+  válido no se muestra la fecha) — línea `Created …` bajo el título del editor y tarjetas
+  `SectionPreviewCard`.
 - Tags se extraen del contenido con `#nombre` (`extractTags`).
 - `NOTEFLOW_NOTES_DIR` (env) redirige el dir de notas en app y CLI (testing/scripting).
 - Los parsers toleran BOM UTF-8 (editores externos como Notepad lo añaden).

@@ -2,7 +2,9 @@ import { useMemo } from 'react'
 import { Eye, Edit3, Plus } from 'lucide-react'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { getTagColor } from '../../lib/tagColors'
+import { firstValidDate } from '../../lib/dateUtils'
 import { useT } from '../../i18n/useT'
+import { tf } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
 import type { SectionTagColorMap } from '../../stores/sectionTagColorsStore'
 import type { Note, NoteSection } from '../../types'
@@ -48,6 +50,9 @@ export function SectionPreviewCard({
     () => (hasContent ? htmlFromMarkdown(section.content) : ''),
     [section.content, hasContent],
   )
+  // The section's own creation date; older sections (or an unparseable, hand-edited
+  // value) fall back to the note's, and if that is bad too the date line is hidden.
+  const createdDate = firstValidDate(section.created, note.created)
 
   return (
     <>
@@ -71,9 +76,11 @@ export function SectionPreviewCard({
           <div className={`${compact ? 'text-[10px]' : 'text-[9.5px]'} font-mono font-bold text-text truncate`}>
             {note.title || t.common.untitled}
           </div>
-          <div className="text-[7.5px] font-mono text-text-muted/50 mt-px">
-            {formatDate(new Date(note.created), 'MMM d, yyyy · HH:mm')}
-          </div>
+          {createdDate && (
+            <div className="text-[7.5px] font-mono text-text-muted/50 mt-px">
+              {tf(t.common.createdAt, { date: formatDate(createdDate, 'MMM d, yyyy · HH:mm') })}
+            </div>
+          )}
         </div>
 
         {/* Toolbar — purely representational: a dark bar with a few faint marks */}

@@ -175,6 +175,32 @@ describe('serializeNoteFolder → parseNoteDir round-trip (real temp dir)', () =
     expect(parsed!.sections).toEqual([{ id: 'sec', name: 'Note', content: 'roundtrip body' }])
   })
 
+  it('preserves an optional per-section created (and omits it when absent)', () => {
+    const note: DiskNote = {
+      id: 'rt2',
+      title: 'Created',
+      tags: [],
+      created: '2024-01-01T00:00:00.000Z',
+      updated: '2024-01-02T00:00:00.000Z',
+      sections: [
+        { id: 'old', name: 'Note', content: 'a' },
+        { id: 'new', name: 'Later', content: 'b', created: '2024-06-07T08:09:10.000Z' },
+      ],
+    }
+    const dirPath = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-noteformat-'))
+    tmpDirs.push(dirPath)
+
+    const { files } = serializeNoteFolder(note, { preserveUpdated: true })
+    expect(files['note.md'].match(/created:/g)).toHaveLength(2)
+    for (const [file, content] of Object.entries(files)) {
+      fs.writeFileSync(path.join(dirPath, file), content, 'utf-8')
+    }
+
+    const parsed = parseNoteDir(dirPath)
+    expect(parsed!.sections).toEqual(note.sections)
+    expect(parsed!.sections[0]).not.toHaveProperty('created')
+  })
+
   it('returns null for a directory without note.md', () => {
     const dirPath = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-noteformat-'))
     tmpDirs.push(dirPath)

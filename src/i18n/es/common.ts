@@ -21,6 +21,7 @@ export const common = {
   deleteSection: 'Eliminar sección',
   duplicateSection: 'Duplicar sección',
   sectionCopyName: '{name} (copia)',
+  createdAt: 'Creado {date}',
   exportNote: 'Exportar nota…',
   addToFavorites: 'Añadir a favoritos',
   removeFromFavorites: 'Quitar de favoritos',

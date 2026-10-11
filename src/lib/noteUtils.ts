@@ -23,6 +23,7 @@
  *       name: Task
  *       file: def.md
  *       isRawMode: true
+ *       created: ISO        ← optional per-section creation time (absent on old sections)
  *   ---
  *
  * Encrypted notes keep the `encryption` block in note.md and have NO plaintext
@@ -75,12 +76,16 @@ export function parseNoteFolder(
     sections = (data.sections as Array<Record<string, unknown>>).map((s) => {
       const id = String(s.id ?? nanoid(6))
       const file = String(s.file ?? sectionFilename(id))
+      // Optional per-section creation time. Never backfilled: sections that
+      // predate the field stay without it (the UI falls back to note.created).
+      const created = isoString(s.created)
       return {
         id,
         name: String(s.name ?? 'Section'),
         content: normalizeNewlines(sectionFiles[file] ?? ''),
         isRawMode: Boolean(s.isRawMode ?? false),
         ...(s.aiHidden ? { aiHidden: true } : {}),
+        ...(created ? { created } : {}),
       }
     })
   } else {
@@ -148,6 +153,7 @@ export function serializeNoteFolder(
       file: sectionFilename(s.id),
       ...(s.isRawMode && { isRawMode: true }),
       ...(s.aiHidden && { aiHidden: true }),
+      ...(s.created && { created: s.created }),
     })),
   }
 
@@ -273,9 +279,14 @@ export function parseLegacyNote(raw: string, filePath: string): Note {
 // Create
 // ---------------------------------------------------------------------------
 
-export function defaultSections(): NoteSection[] {
+/**
+ * Initial sections of a brand-new note. Pass `created` (normally the note's own
+ * `created`) to stamp them; parse fallbacks call it without, so existing notes
+ * are never given an invented creation time.
+ */
+export function defaultSections(created?: string): NoteSection[] {
   return [
-    { id: nanoid(6), name: 'Note', content: '' },
+    { id: nanoid(6), name: 'Note', content: '', ...(created ? { created } : {}) },
   ]
 }
 
@@ -301,7 +312,7 @@ export function createEmptyNote(): Omit<Note, 'filePath' | 'raw'> {
     updated:  now,
     archived: false,
     favorited: false,
-    sections: defaultSections(),
+    sections: defaultSections(now),
   }
 }
 

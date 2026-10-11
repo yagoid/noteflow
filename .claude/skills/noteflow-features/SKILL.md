@@ -112,7 +112,10 @@ Iconos del TitleBar:
 ### Propiedades de una nota
 - Título editable (auto-save). Título por defecto: `DD/MM/YYYY`.
 - Tags: extraídos automáticamente del contenido con `#nombre`.
-- Timestamps: `created` y `updated` automáticos.
+- Timestamps: `created` y `updated` automáticos. Cada **sección** guarda además su propio `created`
+  (al crearla); las secciones antiguas sin él muestran la fecha de creación de la nota.
+- Bajo el título, el editor muestra `Created <fecha · hora>`: la creación de la **sección activa**
+  (cambia al cambiar de pestaña; en split, la de cada panel). No se muestra la fecha de edición.
 - Estado: favorited, archived, encrypted, temporary (`expiresAt`).
 - Ubicación: `group` (opcional) y `folder` (opcional, dentro del grupo).
 
@@ -128,7 +131,7 @@ Iconos del TitleBar:
   ido bien** (para no borrar una nota que otro dispositivo hizo permanente), así que puede borrarse
   unos minutos tarde y, sin conexión, no caduca hasta el siguiente pull correcto.
 - En el sidebar se distinguen por un icono de reloj (⏱) junto a la hora.
-- Dentro del editor, junto a la fecha de actualización se muestra `Deletes <fecha · hora>` (con
+- Dentro del editor, tras la fecha `Created …` se muestra `Deletes <fecha · hora>` (con
   icono de reloj, en tono de acento) indicando cuándo se autoeliminará.
 - **Hacerla permanente:** el menú ⋯ del editor muestra **"Make permanent"** (icono `TimerOff`) solo
   en notas temporales. Quita `expiresAt` (bumpea `updated`) y la nota pasa a ser normal: desaparecen
@@ -298,7 +301,8 @@ sección en el editor).
 **Tarjeta de sección** — replica lo que verías al pinchar esa sección (de las pestañas hacia abajo):
 - Etiqueta superior con el **nombre de la sección** y su color (identifica la tarjeta) + icono
   rich/raw.
-- **Título de la nota + fecha de creación**.
+- **Título de la nota + `Created <fecha>` de la sección** (la de la nota si la sección es antigua y
+  no tiene la suya).
 - Una **barra-toolbar representativa** (oscura, sin iconos — solo evoca la toolbar del editor).
 - **Unas pocas líneas** del contenido de la sección, renderizadas igual que en el editor pero
   diminutas (vía `zoom`) y recortadas con un fade inferior. Las secciones vacías muestran "Empty
