@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom'
 import { AlignLeft, Calendar, Ellipsis, Flag } from 'lucide-react'
 import type { KanbanCard } from '../../lib/kanban'
 import { extraLineCount, type CardRef } from '../../lib/kanbanOps'
-import { getRootZoom } from '../../stores/themeStore'
 import { useNotesStore } from '../../stores/notesStore'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
@@ -106,25 +105,21 @@ export function KanbanMenu({ anchor, items, onClose }: KanbanMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const [armed, setArmed] = useState<string | null>(null)
 
-  // Fixed popup positioned from a device-space rect: divide by the root zoom,
-  // then clamp to the viewport (same as CodeBlockWithCopy's dropdown).
+  // Fixed popup positioned from the anchor's rect, clamped to the viewport
+  // (same as CodeBlockWithCopy's dropdown). The UI zoom is native, so rects,
+  // window.inner* and style.left/top share one coordinate space.
   useLayoutEffect(() => {
     const el = menuRef.current
     if (!el) return
-    const z = getRootZoom()
     const rect = anchor.getBoundingClientRect()
-    // Viewport in the popup's local space, from the root's rect (also rect
-    // space) rather than window.inner*, whose space varies across Chromium
-    // versions under the root zoom (see clientToRectScale in KanbanBoardView).
-    const root = document.documentElement.getBoundingClientRect()
-    const vw = root.width / z
-    const vh = root.height / z
+    const vw = window.innerWidth
+    const vh = window.innerHeight
     const margin = 8
-    let left = rect.right / z - el.offsetWidth
-    let top = rect.bottom / z + 4
+    let left = rect.right - el.offsetWidth
+    let top = rect.bottom + 4
     if (left + el.offsetWidth + margin > vw) left = vw - el.offsetWidth - margin
     if (left < margin) left = margin
-    if (top + el.offsetHeight + margin > vh) top = rect.top / z - el.offsetHeight - 4
+    if (top + el.offsetHeight + margin > vh) top = rect.top - el.offsetHeight - 4
     el.style.left = `${left}px`
     el.style.top = `${Math.max(margin, top)}px`
   }, [anchor])

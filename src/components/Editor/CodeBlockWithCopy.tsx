@@ -3,7 +3,6 @@ import type { NodeViewProps } from '@tiptap/react'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { getRootZoom } from '../../stores/themeStore'
 import { useT } from '../../i18n/useT'
 
 // Pretty labels for common lowlight language ids. Anything not listed falls back
@@ -93,12 +92,7 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
 
   const openDropdown = () => {
     const rect = buttonRef.current?.getBoundingClientRect()
-    if (rect) {
-      // `rect` is device-space; the fixed-positioned dropdown lives in the zoomed
-      // local space, so divide by the root zoom (same trick as SlashCommands).
-      const z = getRootZoom()
-      setPos({ left: rect.left / z, top: rect.bottom / z + 6 })
-    }
+    if (rect) setPos({ left: rect.left, top: rect.bottom + 6 })
     setQuery('')
     setOpen(true)
   }

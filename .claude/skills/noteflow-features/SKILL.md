@@ -595,6 +595,8 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 ### Búsqueda dentro de la nota
 - `Ctrl+F` (con el editor enfocado) → barra de "Find in note" que resalta coincidencias (también
   dentro de los tableros kanban).
+- `Enter`/`Shift+Enter` (o las flechas de la barra) saltan al siguiente/anterior; el match activo
+  queda **centrado verticalmente** en el editor (también al escribir la consulta).
 - Funciona en ambos modos (WYSIWYG y raw).
 
 ### Tamaño de fuente

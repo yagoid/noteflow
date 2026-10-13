@@ -214,8 +214,8 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   ordenados por label legible (`LANGUAGE_LABELS`, fallback = capitalizar id). **Se guarda siempre el id
   real de lowlight** en `node.attrs.language` (no el label) para no romper resaltado ni round-trip. El
   botón se muestra siempre sutil si hay lenguaje (`opacity-60`) o solo en hover si es plain text.
-  Posiciona con `getBoundingClientRect()/getRootZoom()` (mismo truco de zoom que `SlashCommands`);
-  cierra con click-fuera y Escape. No toca `markdownHtml.ts` ni el formato. Estilos `.code-lang-*` en
+  Posiciona el dropdown `fixed` directamente desde `getBoundingClientRect()` del botón (clampeado al
+  viewport tras medirse); cierra con click-fuera y Escape. No toca `markdownHtml.ts` ni el formato. Estilos `.code-lang-*` en
   `index.css`.
 - **Orden de detección de bloque** en `htmlFromMarkdown`: code fence → heading → HR → kanban →
   lista → blockquote → tabla → párrafo (un prefijo `>` no choca con bullets/ordenadas/headings; un
@@ -431,9 +431,8 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     un bucle rAF que además auto-scrollea el tablero (horizontal) y el editor (vertical) cerca de los
     bordes. Soltar donde ya estaba = no-op sin indicador. `Esc` cancela; el click posterior al drop se
     traga (capture, una vez). Columnas: se arrastran por la cabecera.
-    **Coordenadas bajo el zoom de UI:** el hit-test trabaja en espacio de `getBoundingClientRect()` y
-    convierte `clientX/Y` con un factor **medido** (`clientToRectScale`: ancho del rect de `<html>` /
-    `innerWidth`) en vez de asumirlo — ver la nota en "UI text size".
+    **Coordenadas:** `clientX/Y`, `getBoundingClientRect()` y los px del ghost/indicadores comparten
+    espacio (el zoom de UI es nativo, ver "UI text size"), así que se comparan sin conversión.
   - **Ancho (decisión del usuario):** el tablero **no** respeta la columna Readable: el wrapper
     (`.node-kanbanBoard`, hijo directo de `.ProseMirror`) anula el padding horizontal del editor con
     márgenes negativos, que `index.css` expone como vars en `.prose-editor .ProseMirror`
@@ -459,8 +458,9 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     texto entre tags, como la búsqueda normal) y pone **una decoración de nodo** por tablero con
     `{query, caseSensitive, active}` en su spec; el NodeView la recibe en `decorations` y pinta los
     `<span class="nf-search-match">` con `highlightHtml` (misma función → el conteo no puede divergir).
-    Next/prev sobre un match de tablero no mueve la selección; `InNoteSearchBar` ya hace
-    `scrollIntoView` del `.nf-search-match-active`. Tests en `tests/lib/kanbanSearch.test.ts`.
+    Next/prev sobre un match de tablero no mueve la selección; `InNoteSearchBar` centra el
+    `.nf-search-match-active` (y desplaza el `.kanban-scroll` en horizontal si hace falta, ver
+    "Búsqueda en nota"). Tests en `tests/lib/kanbanSearch.test.ts`.
   - **Previews:** `SectionPreviewCard`/overviews/chat pintan el HTML estático de `htmlFromMarkdown`; el
     CSS de `.prose-editor .ProseMirror div[data-type="kanban"]` lo muestra como mini tablero de solo
     lectura (columnas en fila, compactas, `overflow: hidden`; en `.chat-md` más estrechas). También es
@@ -493,7 +493,7 @@ visible el tab activo. Decisiones a respetar si se toca:
   tab (localizado por `data-section-id`) y `scrollLeft`/`clientWidth` de la tira, deja ~12 px de
   margen, descuenta los ~24 px del degradado de fade derecho y **no hace nada si ya está visible**.
   Se usa `offsetLeft` y no `getBoundingClientRect()` a propósito: es el mismo espacio de coordenadas
-  que `scrollLeft`, así que el zoom de UI no lo afecta (ver "UI text size").
+  que `scrollLeft` (relativo al contenido, no a dónde esté la tira en pantalla).
 - `behavior: 'auto'` (salto) la primera vez que se revela una nota — el efecto reintenta en un
   `requestAnimationFrame` si la tira aún no está medida —, `'smooth'` para cambios dentro de la nota.
   ⚠️ Al cambiar de nota **hay un commit intermedio** en el que `activeSectionId` (estado) es todavía
@@ -509,11 +509,10 @@ visible el tab activo. Decisiones a respetar si se toca:
   ya asentada, la tira no persigue al fallback `sections[0]` hasta el siguiente cambio de sección.
 - **Auto-scroll por bordes al arrastrar** un tab: el `onDragOver` de la tira mira si el puntero está
   en los ~40 px de un borde y arranca un bucle `requestAnimationFrame` (~10 px/frame). El rect de la
-  tira y el zoom se **miden una vez en `dragStart`** (llamarlos por evento forzaría layout en cada
-  `dragover`); `clientX` es espacio local y el rect de dispositivo → se divide por `getRootZoom()`
-  antes de compararlos. El bucle se para en `onDrop`/`onDragEnd`/`onDragLeave` de la tira (este
-  último con guarda `contains(relatedTarget)`, porque `dragleave` burbujea al pasar de un tab a
-  otro), en listeners `dragend`/`drop` en `window` (capture) para arrastres que acaban en otro
+  tira se **mide una vez en `dragStart`** (medirlo por evento forzaría layout en cada `dragover`) y
+  se compara directamente con `clientX` (mismo espacio, ver "UI text size"). El bucle se para en
+  `onDrop`/`onDragEnd`/`onDragLeave` de la tira (este último con guarda `contains(relatedTarget)`,
+  porque `dragleave` burbujea al pasar de un tab a otro), en listeners `dragend`/`drop` en `window` (capture) para arrastres que acaban en otro
   destino, en el cleanup del efecto, y —último agujero— con un **watchdog** de 800 ms sin `dragover`
   dentro del propio bucle: si el tab origen se desmonta a mitad de arrastre (p. ej. un pull de sync
   que cambia el set de secciones) su `dragend` se dispara en un nodo desconectado y no llega a nadie.
@@ -551,13 +550,34 @@ justo para ver el caret, que queda pegado al borde inferior (el `padding-bottom:
 `.prose-editor .ProseMirror` sí cuenta en el alto de scroll, pero solo se veía scrolleando a mano).
 - **threshold === margin** a propósito: en cuanto el caret entra en la franja, scrollea línea a línea
   manteniendo el hueco. Un margin mayor que el threshold haría saltar el contenido de golpe.
-- Solo afecta a transacciones con `scrollIntoView()` (teclear, Enter, flechas, pegar, undo, saltos
-  de la búsqueda en nota); los clicks de ratón no scrollean.
+- Solo afecta a transacciones con `scrollIntoView()` (teclear, Enter, flechas, pegar, undo); los
+  clicks de ratón no scrollean. La búsqueda en nota **no** depende de esto (el foco está en su input;
+  centra el match a mano, ver "Búsqueda en nota").
 - El `padding-bottom` del `.ProseMirror` debe ser **mayor** que el gap inferior; si no, al final del
   documento el scroll se clampa antes y el hueco no se alcanza.
 - La ventana **sticky** pasa un gap compacto vía prop `caretScrollGap` (`STICKY_CARET_SCROLL_GAP` =
   8/32 px en `StickyApp.tsx`, con `.sticky-editor .ProseMirror` a `padding-bottom: 2.5rem`): en una
   ventana de 200–300 px las franjas de 40+96 px casi se solaparían.
+
+### Búsqueda en nota (Ctrl+F): el match activo se centra
+Al escribir la consulta / cambiar mayúsculas (si hay match) y en cada next/prev, el match activo queda
+**centrado verticalmente** en el área de scroll del editor (el navegador clampa al principio/final).
+- **Rich** (`InNoteSearchBar.tsx`): `centerInScroller` mide el `.nf-search-match-active` (decoración
+  de ProseMirror o `<span>` pintado por un tablero kanban) contra el scroller que expone
+  `EditorHandle.getScrollContainer()` y ajusta su `scrollTop`; los scrollers horizontales intermedios
+  (`.kanban-scroll`, `pre` de código) se desplazan lo justo para mostrarlo. Se hace a mano, en un rAF
+  (el tablero pinta el activo vía React), y **sin `scrollIntoView()`**, que también movería ancestros
+  `overflow: hidden`. El `tr.scrollIntoView()` de `selectMatch` no sirve: el foco está en el input y
+  solo llevaría el match al borde.
+- **Raw** (`RawNoteSearchBar.tsx`): el resaltado es un **div espejo** (`position: absolute`, texto
+  transparente, `<mark>`s en los offsets del match) bajo el `<textarea>` transparente. La posición del
+  match se **mide** en el espejo (`offsetTop`/`offsetHeight` del `<mark>` activo; el espejo es su
+  `offsetParent`, mismo espacio que `textarea.scrollTop`) en un `useLayoutEffect` tras regenerar su
+  HTML — nada de contar `\n` × alto de línea, que falla con líneas que hacen wrap. Para que el espejo
+  haga wrap igual que el textarea: copia sus estilos de texto/padding/borde, suma el **ancho del
+  scrollbar** del textarea a su `padding-right` (el espejo es `overflow: hidden` y no lo tiene) y
+  termina en un `\u200b` (un `\n` final crea línea en el textarea pero no en un div `pre-wrap`).
+  Re-casar tras editar el texto **no** salta al primer match: solo una consulta/case nuevos lo hacen.
 
 ### Editor: índice flotante (table of contents)
 Índice estilo Notion de los **H1–H3** de la sección abierta, en el borde derecho del área de scroll
@@ -1120,37 +1140,30 @@ cada commit escribe a disco + programa un push de sync.
 de la app y por NoteFlow Mobile (validan contra las 8 vars) → esas notas/grupos se ven con el color
 automático allí. Aceptado a propósito; el formato de los ficheros no cambia.
 
-### UI text size (zoom global) y posicionamiento de popups `fixed`
+### UI text size (zoom global nativo)
 
-El "UI text size" (Settings → Appearance) escala toda la UI aplicando un CSS `zoom` sobre
-`document.documentElement` (`applyUiScale` en `src/stores/themeStore.ts`; pasos en `UI_SCALES`).
-**Gotcha:** bajo el `zoom` del root, un elemento `position: fixed` vive en el espacio de
-coordenadas *zoomeado* (local, el mismo que `window.innerWidth/innerHeight` y que las coords de
-ratón `clientX/clientY`), mientras que `getBoundingClientRect()` devuelve coords en espacio de
-*dispositivo* (multiplicadas por el zoom). Por eso un popup fixed posicionado a partir de un rect
-cae más abajo/desplazado cuanto mayor es el zoom.
-
-**Regla:** cualquier popup `position: fixed` que se posicione desde `getBoundingClientRect()` debe
-dividir las coords del rect (`rect.left/top/bottom`) por el factor de zoom antes de clampear contra
-`window.inner*` y de escribir `style.left/top`. Usa el helper `getRootZoom()` (exportado desde
-`themeStore.ts`, única fuente de verdad) — con zoom 1 es no-op. `offsetWidth/offsetHeight` del popup
-ya están en espacio local, no se tocan. Ejemplos aplicados: menú slash (`SlashCommands.ts`,
-`positionPopup`) y los popovers de fecha/importancia de tareas (`DeadlineTaskItemView.tsx`,
-`openPopover`/`openImpPopover`). Los menús posicionados desde coords de ratón (`ContextMenu`, menús
-de sidebar) o submenús `absolute` dentro de un menú ya zoomeado (`NoteContextMenu`) NO necesitan el
-ajuste.
-
-**Ojo — el espacio de `clientX/Y` e `innerWidth` no es estable entre versiones de Chromium.** Medido
-en Chromium 141 (headless de Playwright, `zoom: 1.25` en `<html>`): `clientX/Y` e `innerWidth` salen en
-el **mismo** espacio que `getBoundingClientRect()` (sin dividir), no en el local que describe el
-párrafo anterior. No se ha medido en el Chromium de Electron 35. Código nuevo que mezcle coordenadas
-de ratón con rects debería medir el factor en vez de asumirlo (como `clientToRectScale` del tablero
-kanban: ancho del rect de `<html>` / `innerWidth`), y clampear popups contra el rect de `<html>` / zoom
-en vez de `window.inner*` (`KanbanMenu`).
-
-**Pendiente (scroll bajo zoom):** con `zoom` en el root y contenedores de scroll anidados
-(`flex-1 overflow-y-auto` del editor), a zoom alto el fondo del contenido puede quedar inalcanzable
-por el scroll. NO se arregla contra-escalando la altura del root (`calc(100% / scale)` deja una
-franja vacía por debajo — se probó y se revirtió). La solución de fondo es dejar de usar CSS `zoom`
-en el root y escalar la UI con la API nativa de Electron (`webFrame.setZoomFactor`), que maneja
-viewport y scroll correctamente.
+El "UI text size" (Settings → Appearance; pasos en `UI_SCALES`, persistido por dispositivo en
+`localStorage` `noteflow-ui-scale`) escala toda la UI con el **zoom nativo de Chromium**:
+`applyUiScale` (`src/stores/themeStore.ts`) llama a `window.noteflow.setUiZoom(factor)` →
+`webFrame.setZoomFactor` en `electron/preload.ts` (funciona con el preload en sandbox; no hay IPC).
+- Se aplica en **cada carga** desde `initTheme()` (`src/main.tsx`, común a todas las ventanas:
+  principal, sticky, sección) y **siempre**, también con 1.0, para que un zoom que Chromium haya
+  persistido en `userData` para el origen (versiones antiguas fijaban `zoomFactor: scaleFactor`) no
+  gane. Por eso `main.ts` **ya no** resetea el zoom en `did-finish-load`: ese evento llega *después*
+  de `initTheme()` y deshacía la escala del usuario.
+- `webFrame.setZoomFactor` es **por ventana** y no persiste (medido en Electron 35: otras ventanas del
+  mismo origen no lo heredan y una recarga vuelve a 1.0). Cambiar la escala en Ajustes solo afecta a la
+  ventana principal; las sticky/ventanas de sección abiertas la recogen al recargarse (igual que con el
+  antiguo CSS `zoom`).
+- **Un solo espacio de coordenadas:** con zoom nativo `getBoundingClientRect()`, `clientX/Y`,
+  `window.innerWidth/innerHeight` y `style.left/top` están en los mismos px CSS. Los popups `fixed`
+  (`SlashCommands`, `taskBadge.popoverPosition`, `KanbanMenu`, dropdown de `CodeBlockWithCopy`) y los
+  arrastres (kanban, tabs) usan los rects tal cual, sin dividir por ningún factor.
+- **Por qué no CSS `zoom` en `<html>`** (lo que se hacía antes): en el Chromium de Electron 35 la app
+  se maqueta a zoom × alto de ventana (a 1.1–1.25 el fondo del editor quedaba 80–200 px bajo el borde;
+  a 0.9 sobraba una franja vacía), y el `scrollRectIntoView` de ProseMirror / `scrollIntoView` nativo
+  acababan desplazando ancestros `overflow: hidden` (toda la UI subía, la barra de título
+  desaparecía, el caret quedaba pegado al borde y la búsqueda caía fuera de pantalla). Además rects y
+  coords de ratón vivían en espacios distintos según la versión de Chromium, lo que obligaba a
+  compensar con un factor en cada popup. No reintroducir `zoom` en el root; el `zoom` local de
+  `.note-preview`/previews de sección no tiene ese problema y se mantiene.
