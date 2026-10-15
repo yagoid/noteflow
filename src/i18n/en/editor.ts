@@ -25,6 +25,16 @@ export const editor = {
   // Metadata line under the title.
   deletesAt: 'Deletes {date}',
 
+  // Mini menu next to "Deletes …" on a temporary note (TempNoteExpiryMenu).
+  expiry: {
+    options: 'Change when this note is deleted',
+    deleteIn: 'Delete in',
+    hoursShort: '{count}h',
+    deleteInHours: { one: 'Delete in {count} hour from now', other: 'Delete in {count} hours from now' },
+    makePermanent: 'Make permanent',
+    makePermanentHint: 'Keep this temporary note — it will no longer be deleted automatically',
+  },
+
   // Floating table of contents at the right of the editor (EditorToc).
   toc: {
     label: 'Table of contents',
@@ -51,8 +61,6 @@ export const editor = {
     openAsSticky: 'Open as sticky note',
     archiveNote: 'Archive note',
     unarchiveNote: 'Unarchive note',
-    makePermanent: 'Make permanent',
-    makePermanentHint: 'Keep this temporary note — it will no longer be deleted automatically',
     encryptNote: 'Encrypt note',
     removeEncryption: 'Remove encryption',
   },

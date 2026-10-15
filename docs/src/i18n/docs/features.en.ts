@@ -236,7 +236,7 @@ export const featuresEn = {
       'Create one with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>, the <strong>clock button</strong> next to “New note”, or a right-click on “New note” → <em>Temporary note (24h)</em>.',
       'The expiry is an <code>expiresAt</code> timestamp in the note\'s frontmatter — visible, portable, editable.',
       'The main process checks <strong>every minute</strong> and deletes expired notes automatically — from the remote sync repo too, so they don\'t resurrect on another machine.',
-      'They\'re marked with a <strong>⏱ clock icon</strong> in the sidebar, and the editor header shows exactly when: <em>“Deletes &lt;date · time&gt;”</em>.',
+      'They\'re marked with a <strong>⏱ clock icon</strong> in the sidebar, and the editor header shows exactly when: <em>“Deletes &lt;date · time&gt;”</em>. A small chevron next to it lets you push the deletion to 1–48 hours from now, or <strong>make the note permanent</strong>.',
     ],
   },
 

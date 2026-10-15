@@ -721,7 +721,7 @@ Cada editor guardaba antes `updateNote(id, { sections })` con la lista COMPLETA 
 snapshot de render: con dos editores de la misma nota, el último en escribir reescribía la sección
 del otro con su copia vieja. Invariantes actuales (`notesStore.ts`):
 - **Cola por nota** (`lib/keyedQueue.ts`): toda escritura de una nota (`updateNote`, `mutateSections`,
-  `updateSection`, `duplicateSection`, archivar, hacer permanente, cifrar) pasa por una cola serial
+  `updateSection`, `duplicateSection`, archivar, hacer permanente, reprogramar caducidad, cifrar) pasa por una cola serial
   con clave = id de nota, y lee la nota del store **al ejecutarse**, no al llamarse. Sin cola, dos
   escrituras cercanas partían del mismo snapshot (el `set` del store ocurre tras el `await` del disco).
 - **Guardar solo lo propio:** los editores (`NoteEditor`, `StickyApp`) usan
@@ -902,11 +902,19 @@ si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
     después que A, gana B por LWW (con `expiresAt`). No se guarda el `scheduleDeleteDir` contra el
     remoto: la interfaz `SyncProvider` no expone leer un `note.md` remoto y, con el gate, sería
     redundante salvo en esa ventana de segundos.
-- **Hacer permanente** (`notesStore.makeNotePermanent`, menú ⋯ del editor): saca `expiresAt` del
+- **Hacer permanente** (`notesStore.makeNotePermanent`, mini menú junto a `Deletes …` del editor —
+  `src/components/Editor/TempNoteExpiryMenu.tsx`): saca `expiresAt` del
   objeto por desestructuración (no `= undefined`, para que ningún spread posterior lo resucite) y
   reescribe solo `note.md` con `updated` nuevo (gana el conflicto por carpeta en el pull de los
   demás). Al no haber línea `expiresAt:`, el main ya no la toca; grafo/related/link picker/chat la
   incluyen al siguiente render (filtran en vivo, nada lo cachea).
+- **Reprogramar** (`notesStore.setNoteExpiry(id, hours)`, mismo mini menú, opciones
+  `TEMP_NOTE_EXPIRY_HOURS` = 1/8/12/24/48 h de `src/lib/dateUtils.ts`): fija
+  `expiresAt = hoursFromNow(hours)` con el mismo patrón (cola de escritura, solo `note.md`, `updated`
+  nuevo). No-op si la nota no es temporal (nunca convierte una normal en temporal). La granularidad
+  real del borrado es la del chequeo del main: ≤60s sin sync, hasta un intervalo de pull (~5 min) con
+  sync. Mismo riesgo residual que hacerla permanente: alargarla en A justo antes de que
+  venza la copia de B, antes de que el push de A llegue, puede perderse frente al pull de B.
 
 ### Auto-update in-app
 `app:check-update` consulta la última release (API GitHub, endpoint `/releases/latest` → **ignora

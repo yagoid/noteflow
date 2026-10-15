@@ -17,6 +17,15 @@ export const editor = {
 
   deletesAt: 'Se elimina el {date}',
 
+  expiry: {
+    options: 'Cambiar cuándo se elimina esta nota',
+    deleteIn: 'Eliminar en',
+    hoursShort: '{count} h',
+    deleteInHours: { one: 'Eliminar dentro de {count} hora', other: 'Eliminar dentro de {count} horas' },
+    makePermanent: 'Hacer permanente',
+    makePermanentHint: 'Conserva esta nota temporal: ya no se eliminará automáticamente',
+  },
+
   toc: {
     label: 'Índice',
   },
@@ -38,8 +47,6 @@ export const editor = {
     openAsSticky: 'Abrir como nota adhesiva',
     archiveNote: 'Archivar nota',
     unarchiveNote: 'Desarchivar nota',
-    makePermanent: 'Hacer permanente',
-    makePermanentHint: 'Conserva esta nota temporal: ya no se eliminará automáticamente',
     encryptNote: 'Cifrar nota',
     removeEncryption: 'Quitar cifrado',
   },

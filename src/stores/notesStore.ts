@@ -17,6 +17,7 @@ import { collectAlarms } from '../lib/alarmUtils'
 import { getNoteSearchIndex } from '../lib/searchUtils'
 import { duplicateSectionInList, patchSectionInList } from '../lib/sectionUtils'
 import { createKeyedQueue } from '../lib/keyedQueue'
+import { hoursFromNow, TEMP_NOTE_DEFAULT_HOURS } from '../lib/dateUtils'
 import { isUnsafeEncryptedSectionsWrite, redecryptWithSession } from '../lib/encryptedSession'
 import {
   type OpenPane,
@@ -153,6 +154,8 @@ interface NotesState {
   deleteNote: (id: string) => Promise<void>
   archiveNote: (id: string) => Promise<void>
   makeNotePermanent: (id: string) => Promise<void>   // drops expiresAt from a temporary note
+  /** Reschedules a temporary note's auto-delete to `hours` from now. No-op on permanent notes. */
+  setNoteExpiry: (id: string, hours: number) => Promise<void>
   setActiveNote: (id: string | null) => void
   /** Navigate to a specific section of a note (same note or another), closing any full-area view. */
   navigateToSection: (noteId: string, sectionId: string) => void
@@ -524,7 +527,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   createTempNote: async () => {
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    const expiresAt = hoursFromNow(TEMP_NOTE_DEFAULT_HOURS)
     const draft = { ...createEmptyNote(), expiresAt }
     const dir = get().notesDir
     const filePath = `${dir}/${noteDirname(draft.id, draft.title)}`
@@ -655,6 +658,19 @@ export const useNotesStore = create<NotesState>((set, get) => ({
 
     const { expiresAt: _expiresAt, ...rest } = note
     const updated: Note = { ...rest, updated: new Date().toISOString() }
+    await writeNoteToDisk(note, updated)
+    set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
+  }),
+
+  // Moves a temporary note's deletion to `hours` from now — same metadata-only write as
+  // makeNotePermanent (works locked/encrypted; the bumped `updated` makes the new
+  // expiresAt win the per-folder conflict on the next sync pull). Never turns a regular
+  // note into a temporary one.
+  setNoteExpiry: (id, hours) => noteWriteQueue.run(id, async () => {
+    const note = get().notes.find((n) => n.id === id)
+    if (!note?.expiresAt || !(hours > 0)) return
+
+    const updated: Note = { ...note, expiresAt: hoursFromNow(hours), updated: new Date().toISOString() }
     await writeNoteToDisk(note, updated)
     set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
   }),

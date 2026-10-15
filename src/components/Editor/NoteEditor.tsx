@@ -11,7 +11,7 @@ import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
-  Plus, X, Check, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer, TimerOff,
+  Plus, X, Check, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer,
   CopyPlus, Share,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
@@ -27,6 +27,7 @@ import { moveSectionInList, restoreSectionInList } from '../../lib/sectionUtils'
 import { firstValidDate } from '../../lib/dateUtils'
 import { ownsKeys } from '../../lib/keyScope'
 import { SectionNameField } from './SectionNameField'
+import { TempNoteExpiryMenu } from './TempNoteExpiryMenu'
 
 // ---------------------------------------------------------------------------
 // Confirm modal state type
@@ -141,7 +142,6 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   const duplicateSection = useNotesStore((s) => s.duplicateSection)
   const deleteNote = useNotesStore((s) => s.deleteNote)
   const archiveNote = useNotesStore((s) => s.archiveNote)
-  const makeNotePermanent = useNotesStore((s) => s.makeNotePermanent)
   const unlockNote = useNotesStore((s) => s.unlockNote)
   const encryptNote = useNotesStore((s) => s.encryptNote)
   const removeNoteEncryption = useNotesStore((s) => s.removeNoteEncryption)
@@ -1524,16 +1524,6 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
                     <ExternalLink size={13} />
                     {t.editor.menu.openAsSticky}
                   </button>
-                  {note.expiresAt && (
-                    <button
-                      onClick={() => { setSectionMenuOpen(false); void makeNotePermanent(note.id) }}
-                      title={t.editor.menu.makePermanentHint}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
-                    >
-                      <TimerOff size={13} />
-                      {t.editor.menu.makePermanent}
-                    </button>
-                  )}
                   <button
                     onClick={() => { setSectionMenuOpen(false); void archiveNote(note.id) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
@@ -1692,6 +1682,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
                 {createdDate && <span className="text-text-muted/40">·</span>}
                 <Timer size={11} strokeWidth={2.5} />
                 {tf(t.editor.deletesAt, { date: formatDate(new Date(note.expiresAt), 'MMM d, yyyy · HH:mm') })}
+                <TempNoteExpiryMenu key={note.id} noteId={note.id} />
               </span>
             )}
           </div>

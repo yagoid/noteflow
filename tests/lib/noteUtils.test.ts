@@ -257,6 +257,31 @@ describe('buildNoteWritePayload', () => {
     expect(payload.files[NOTE_MD]).toContain('ciphertext: c')
     expect(payload.deleteFiles).toEqual([])
   })
+
+  // setNoteExpiry (notesStore) spreads the note with a new expiresAt + updated. The
+  // rewritten note.md must carry the NEW date on the line main's checkExpiredNotes()
+  // matches on, touch nothing else, and keep a locked note's ciphertext.
+  it('reschedule transition: rewrites the expiresAt line and only note.md', () => {
+    const prev: Note = { ...sampleNote(), expiresAt: '2024-01-03T00:00:00.000Z' }
+    const next: Note = { ...prev, expiresAt: '2024-01-02T01:00:00.000Z', updated: '2024-01-02T00:00:00.000Z' }
+    const payload = buildNoteWritePayload(prev, next)
+    expect(Object.keys(payload.files)).toEqual([NOTE_MD])
+    expect(payload.deleteFiles).toEqual([])
+    const line = payload.files[NOTE_MD].match(/^expiresAt:\s*(.+)$/m)
+    expect(line).not.toBeNull()
+    expect(new Date(line![1].trim().replace(/^["']|["']$/g, '')).toISOString()).toBe('2024-01-02T01:00:00.000Z')
+    expect(parseNoteFolder(payload.files[NOTE_MD], {}, prev.filePath).expiresAt).toBe('2024-01-02T01:00:00.000Z')
+  })
+
+  it('reschedule transition on a locked encrypted note keeps the ciphertext', () => {
+    const encryption = { alg: 'aes-256-gcm+pbkdf2' as const, salt: 's', iv: 'i', ciphertext: 'c' }
+    const prev: Note = { ...sampleNote(), sections: [], encryption, expiresAt: '2024-01-03T00:00:00.000Z' }
+    const next: Note = { ...prev, expiresAt: '2024-01-04T00:00:00.000Z' }
+    const payload = buildNoteWritePayload(prev, next)
+    expect(Object.keys(payload.files)).toEqual([NOTE_MD])
+    expect(payload.files[NOTE_MD]).toContain('ciphertext: c')
+    expect(parseNoteFolder(payload.files[NOTE_MD], {}, prev.filePath).expiresAt).toBe('2024-01-04T00:00:00.000Z')
+  })
 })
 
 describe('extractTitle', () => {

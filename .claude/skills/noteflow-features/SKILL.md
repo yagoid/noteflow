@@ -125,7 +125,7 @@ Iconos del TitleBar:
 
 - Se crean con `Ctrl+Shift+N`, desde el click-derecho en `+ New note`, o con el **botón-icono de
   reloj** (`Timer`) que hay entre `+ New note` y el botón de nuevo grupo en el sidebar.
-- Llevan `expiresAt` en el frontmatter (24h desde su creación).
+- Llevan `expiresAt` en el frontmatter (24h desde su creación; se puede reprogramar, ver abajo).
 - El proceso principal **borra automáticamente** las vencidas (también del remoto si hay sync).
   Sin sync, comprueba al arrancar y cada minuto; **con sync, solo justo después de un pull que haya
   ido bien** (para no borrar una nota que otro dispositivo hizo permanente), así que puede borrarse
@@ -133,13 +133,19 @@ Iconos del TitleBar:
 - En el sidebar se distinguen por un icono de reloj (⏱) junto a la hora.
 - Dentro del editor, tras la fecha `Created …` se muestra `Deletes <fecha · hora>` (con
   icono de reloj, en tono de acento) indicando cuándo se autoeliminará.
-- **Hacerla permanente:** el menú ⋯ del editor muestra **"Make permanent"** (icono `TimerOff`) solo
-  en notas temporales. Quita `expiresAt` (bumpea `updated`) y la nota pasa a ser normal: desaparecen
-  el badge del editor y el reloj del sidebar, y vuelve a entrar en grafo, related, link picker y
-  sugerencias del chat. Sin confirmación (es inocuo). Funciona también con notas cifradas, incluso
-  bloqueadas (solo reescribe `note.md`). Solo está en el menú ⋯ (no en el menú contextual del
-  sidebar ni en la paleta). Con sync, los demás dispositivos reciben la versión permanente antes de
-  poder caducarla (ver `patterns.md` § "Motor de alarmas y notas temporales").
+- **Mini menú de caducidad** (`TempNoteExpiryMenu`): justo después de `Deletes …` hay un chevron
+  (`ChevronDown` 11px, `text-accent/50`, sin borde ni fondo; se ilumina a `text-accent` en hover o
+  abierto). Abre un popover con el estilo de los menús de la app (cierra con click fuera, Escape o al
+  elegir):
+  - **"Delete in"** + fila de chips **1h · 8h · 12h · 24h · 48h**: fija `expiresAt = ahora + N h`
+    (`notesStore.setNoteExpiry`; puede acortar o alargar, siempre relativo al momento del click).
+  - Separador + **"Make permanent"** (icono `TimerOff`): quita `expiresAt` (`makeNotePermanent`) y la
+    nota pasa a ser normal: desaparecen el badge del editor y el reloj del sidebar, y vuelve a entrar
+    en grafo, related, link picker y sugerencias del chat.
+  - Ambas acciones: sin confirmación, bumpean `updated` y solo reescriben `note.md` (la escritura vale
+    con notas cifradas; en la UI el menú solo aparece con la nota desbloqueada). Solo están en este mini menú (no en el menú ⋯ del editor, ni
+    en el contextual del sidebar, ni en la paleta). Con sync, los demás dispositivos reciben la versión
+    nueva antes de poder caducarla (ver `patterns.md` § "Motor de alarmas y notas temporales").
 - Las temporales **no entran** en el grafo del cerebro, la vista Related, el link picker de
   secciones ni las sugerencias del chat (filtran por `expiresAt`).
 
@@ -378,8 +384,8 @@ Cada nota puede tener múltiples secciones independientes, como tabs:
 ```
 
 (`⊞` = note overview · `⭐` = favorito · `⋯` = menú de sección: raw/editor, copiar,
-**guardar como plantilla**, **exportar nota**, sticky, **ocultar a la IA**, hacer permanente, archivar,
-cifrar, borrar nota)
+**guardar como plantilla**, **exportar nota**, sticky, **ocultar a la IA**, archivar, cifrar, borrar nota.
+"Make permanent" ya no está aquí: vive en el mini menú junto a `Deletes …` de las temporales)
 
 - **Exportar nota** (`Export note…`, icono `Share`): abre el popup de exportación (el mismo de
   Ajustes / paleta, evento `noteflow:open-export`) con **esa nota ya preseleccionada** — con

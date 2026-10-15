@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { firstValidDate } from '../../src/lib/dateUtils'
+import { firstValidDate, hoursFromNow, TEMP_NOTE_EXPIRY_HOURS } from '../../src/lib/dateUtils'
 
 describe('firstValidDate', () => {
   it('returns the first candidate when it is a valid ISO string', () => {
@@ -32,5 +32,22 @@ describe('firstValidDate', () => {
     expect(firstValidDate(new Date('nope'), 0)?.getTime()).toBe(0)
     const valid = new Date('2021-03-04T05:06:07.000Z')
     expect(firstValidDate(valid)?.getTime()).toBe(valid.getTime())
+  })
+})
+
+describe('hoursFromNow', () => {
+  const now = Date.parse('2026-05-01T10:00:00.000Z')
+
+  it('returns the ISO timestamp `hours` after now', () => {
+    expect(hoursFromNow(1, now)).toBe('2026-05-01T11:00:00.000Z')
+    expect(hoursFromNow(24, now)).toBe('2026-05-02T10:00:00.000Z')
+    expect(hoursFromNow(48, now)).toBe('2026-05-03T10:00:00.000Z')
+  })
+
+  it('produces a value main\'s expiry check can parse for every offered delay', () => {
+    for (const hours of TEMP_NOTE_EXPIRY_HOURS) {
+      const iso = hoursFromNow(hours, now)
+      expect(new Date(iso).getTime() - now).toBe(hours * 60 * 60 * 1000)
+    }
   })
 })

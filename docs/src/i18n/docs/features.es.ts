@@ -237,7 +237,7 @@ export const featuresEs: FeaturesContent = {
       'Crea una con <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>, con el <strong>botón de reloj</strong> junto a “New note”, o con click derecho sobre “New note” → <em>Temporary note (24h)</em>.',
       'La caducidad es un timestamp <code>expiresAt</code> en el frontmatter de la nota — visible, portable, editable.',
       'El proceso principal comprueba <strong>cada minuto</strong> y borra las notas vencidas automáticamente — también del repo de sync remoto, para que no resuciten en otra máquina.',
-      'Se marcan con un <strong>icono de reloj ⏱</strong> en el sidebar, y la cabecera del editor muestra exactamente cuándo: <em>“Deletes &lt;fecha · hora&gt;”</em>.',
+      'Se marcan con un <strong>icono de reloj ⏱</strong> en el sidebar, y la cabecera del editor muestra exactamente cuándo: <em>“Deletes &lt;fecha · hora&gt;”</em>. Un pequeño chevron a su lado te deja mover el borrado a entre 1 y 48 horas desde ahora, o <strong>hacer la nota permanente</strong>.',
     ],
   },
 
