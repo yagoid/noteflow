@@ -350,6 +350,15 @@ export interface CloudSyncStatus {
   realtimeConnected: boolean
 }
 
+// One bar of the sync card's activity chart — mirror of SyncHistoryEntry in
+// electron/syncHistory.ts. Operations within the same minute are folded into
+// one entry (files summed, ok = none of them failed).
+export interface SyncHistoryEntry {
+  at: string
+  files: number
+  ok: boolean
+}
+
 // Backend-tagged snapshot of the LIVE sync provider (see electron/syncProvider.ts):
 // Cloud wins when enabled, else GitHub, else 'none'. Drives the titlebar sync
 // button (and its hover status card) so it routes to whichever backend is
@@ -364,6 +373,10 @@ export interface ActiveSyncStatus {
   pendingUploads: number
   /** Cadence of the backend's periodic auto-sync loop (absent when 'none'). */
   autoSyncIntervalMs?: number
+  /** This session's sync activity of the live backend, oldest first (in-memory in main; absent when 'none'). */
+  history?: SyncHistoryEntry[]
+  /** Files the live backend moved today (local day) this session — running total kept in main, not a sum of `history`. */
+  filesToday?: number
   github?: { owner?: string; repo?: string }
   cloud?: { keysState: CloudSyncStatus['keysState']; keysMode: CloudSyncStatus['keysMode']; realtimeConnected: boolean }
 }

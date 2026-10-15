@@ -29,6 +29,7 @@ noteflow/
 │   │                    #   Trees API, migración remota, cifrado token)
 │   ├── syncState.ts     # Lógica pura del journal de mutaciones + sha-cache (la usan GitHub y Cloud)
 │   ├── mirrorPlan.ts    # Lógica pura del espejo local→GitHub (plan + allowlist de borrado) — ver sync.md
+│   ├── syncHistory.ts   # Lógica pura del historial de actividad en memoria (gráfica de la tarjeta de sync) — ver sync.md
 │   ├── syncProvider.ts  # Interfaz SyncProvider + getActiveSyncProvider() (GitHub ⟂ Cloud) — ver sync.md
 │   ├── tempNoteExpiry.ts # Lógica pura: cuándo puede correr el autoborrado de notas temporales
 │   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
@@ -271,7 +272,7 @@ Renderer (React)
 | `window:set-size` | on | Redimensiona la ventana (usado por sticky) |
 | `window:fold-to-corner` / `window:unfold` | on | Anima el plegado/desplegado de stickies |
 | `sync:get-status` | handle | Estado del sync **GitHub** (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`) |
-| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`) |
+| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, history?: [{at, files, ok}], filesToday?, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`) |
 | `sync:initiate` | handle | Inicia Device Flow OAuth (recibe `repo`); al completar → `sync-auth-complete` + autosync |
 | `sync:cancel-auth` | handle | Cancela un Device Flow en curso |
 | `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings |

@@ -2,7 +2,7 @@
 // (TitleBar.tsx + SyncStatusButton.tsx). No React, no i18n — the components map
 // the results to icons and dictionary strings. Tested in tests/lib/syncStatus.test.ts.
 
-import type { ActiveSyncStatus } from '../types'
+import type { ActiveSyncStatus, SyncHistoryEntry } from '../types'
 
 /**
  * What the sync indicator shows, in priority order: a manual sync in progress,
@@ -55,4 +55,36 @@ export function relativeAge(iso: string, now: number): RelativeAge {
   if (diff < HOUR) return { unit: 'minutes', count: Math.floor(diff / MINUTE) }
   if (diff < DAY) return { unit: 'hours', count: Math.floor(diff / HOUR) }
   return { unit: 'days', count: Math.floor(diff / DAY) }
+}
+
+/** Bars the activity chart can hold — same as the ring size in electron/syncHistory.ts. */
+export const SYNC_CHART_MAX_BARS = 24
+
+export interface SyncChartBar {
+  entry: SyncHistoryEntry
+  /** Bar height in px, in [minHeight, maxHeight]. */
+  height: number
+}
+
+/**
+ * The activity chart's bars, oldest first (newest on the right), capped to the
+ * last `maxBars` entries. Heights are relative to the busiest entry shown; an
+ * entry that moved 0 files (a no-op pull, a failure) still gets `minHeight` so
+ * every sync leaves a visible "heartbeat".
+ */
+export function syncChartBars(
+  history: readonly SyncHistoryEntry[] | undefined,
+  maxHeight: number,
+  minHeight: number,
+  maxBars = SYNC_CHART_MAX_BARS,
+): SyncChartBar[] {
+  const recent = (history ?? []).slice(-maxBars)
+  const peak = recent.reduce((m, e) => Math.max(m, e.files), 0)
+  return recent.map((entry) => ({
+    entry,
+    height:
+      peak > 0 && entry.files > 0
+        ? Math.max(minHeight, Math.round((entry.files / peak) * maxHeight))
+        : minHeight,
+  }))
 }

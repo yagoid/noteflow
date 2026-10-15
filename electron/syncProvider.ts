@@ -20,6 +20,7 @@
 
 import * as githubSync from './githubSync'
 import * as cloudSync from './cloudSync'
+import type { SyncHistoryEntry } from './syncHistory'
 
 /** Result shape shared by both backends' pullNotes (paths in updatedFiles are note DIRS). */
 export interface SyncPullResult {
@@ -121,6 +122,16 @@ export interface ActiveSyncStatus {
   pendingUploads: number
   /** Cadence of the backend's periodic auto-sync loop (absent when 'none'). */
   autoSyncIntervalMs?: number
+  /**
+   * This session's activity of the live backend (oldest first, at most
+   * SYNC_HISTORY_MAX, in-memory only — see syncHistory.ts). Absent when 'none'.
+   */
+  history?: SyncHistoryEntry[]
+  /**
+   * Files the live backend moved today (local day) this session — a running
+   * total kept in main, NOT a sum of `history` (the ring only covers ~2 h).
+   */
+  filesToday?: number
   /** Present only when backend === 'github'. */
   github?: { owner?: string; repo?: string }
   /** Present only when backend === 'cloud'. */
@@ -143,6 +154,8 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       initialPullStatus: c.initialPullStatus,
       pendingUploads,
       autoSyncIntervalMs: cloudSync.CLOUD_AUTO_SYNC_INTERVAL_MS,
+      history: cloudSync.getSyncHistory(),
+      filesToday: cloudSync.getSyncFilesToday(),
       cloud: { keysState: c.keysState, keysMode: c.keysMode, realtimeConnected: c.realtimeConnected },
     }
   }
@@ -156,6 +169,8 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       initialPullStatus: g.initialPullStatus,
       pendingUploads,
       autoSyncIntervalMs: githubSync.GITHUB_AUTO_SYNC_INTERVAL_MS,
+      history: githubSync.getSyncHistory(),
+      filesToday: githubSync.getSyncFilesToday(),
       github: { owner: g.owner, repo: g.repo },
     }
   }

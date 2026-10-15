@@ -4,6 +4,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GITHUB_AUTO_SYNC_INTERVAL_MS = void 0;
+exports.getSyncHistory = getSyncHistory;
+exports.getSyncFilesToday = getSyncFilesToday;
 exports.hasPendingRemoteMutations = hasPendingRemoteMutations;
 exports.loadSyncSettings = loadSyncSettings;
 exports.getSyncStatus = getSyncStatus;
@@ -29,6 +31,7 @@ const https_1 = __importDefault(require("https"));
 const noteFormat_1 = require("./noteFormat");
 const syncState_1 = require("./syncState");
 const mirrorPlan_1 = require("./mirrorPlan");
+const syncHistory_1 = require("./syncHistory");
 // ── Constants ─────────────────────────────────────────────────────────────────
 const README_CONTENT = `# Your notes are synced with GitHub
 
@@ -316,11 +319,16 @@ async function getRemoteFile(token, owner, repo, relPath) {
 }
 // Serialized entry points — every push/delete goes through one of these two, so
 // wrapping them here serializes the whole module's remote writes (see enqueueMutation).
+// Being the single funnel, they are also where the activity history counts
+// uploads: 1 per PUT/DELETE that actually reached GitHub (identical-content skips
+// and already-gone deletes count 0), and a failed mutation records ok=false.
 function upsertRemoteFile(token, owner, repo, relPath, content) {
-    return enqueueMutation(() => upsertRemoteFileNow(token, owner, repo, relPath, content));
+    return enqueueMutation(() => upsertRemoteFileNow(token, owner, repo, relPath, content)).then((written) => { if (written)
+        syncHistory.record(1, true); }, (err) => { syncHistory.record(0, false); throw err; });
 }
 function removeRemoteFile(token, owner, repo, relPath) {
-    return enqueueMutation(() => removeRemoteFileNow(token, owner, repo, relPath));
+    return enqueueMutation(() => removeRemoteFileNow(token, owner, repo, relPath)).then((removed) => { if (removed)
+        syncHistory.record(1, true); }, (err) => { syncHistory.record(0, false); throw err; });
 }
 function isConflictError(msg) {
     return msg.includes('is at') || msg.includes('conflict') || msg.includes('422') || msg.includes('409');
@@ -329,6 +337,7 @@ function isNotFoundError(msg) {
     return msg.includes('Not Found') || msg.includes('404');
 }
 async function upsertRemoteFileNow(token, owner, repo, relPath, content, _retrying = false) {
+    // Resolves true when a PUT landed, false when the remote already held this content.
     let sha;
     try {
         const existing = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`));
@@ -349,7 +358,7 @@ async function upsertRemoteFileNow(token, owner, repo, relPath, content, _retryi
     // `pushed` and clear the journal stay correct: the remote already holds exactly
     // this content, so the intent IS satisfied.
     if (sha !== undefined && sha === (0, mirrorPlan_1.gitBlobSha)(content))
-        return;
+        return false;
     // note.md carries the title; section files fall back to '<dir>/<file>' label
     const titleMatch = content.match(/^title:\s*['"]?(.+?)['"]?\s*$/m);
     const label = titleMatch ? titleMatch[1].trim() : relPath.replace(/\.md$/, '');
@@ -365,13 +374,14 @@ async function upsertRemoteFileNow(token, owner, repo, relPath, content, _retryi
         // Re-fetch the current SHA and retry once.
         const msg = err instanceof Error ? err.message : String(err);
         if (!_retrying && isConflictError(msg)) {
-            await upsertRemoteFileNow(token, owner, repo, relPath, content, true);
-            return;
+            return upsertRemoteFileNow(token, owner, repo, relPath, content, true);
         }
         throw err;
     }
+    return true;
 }
 async function removeRemoteFileNow(token, owner, repo, relPath, _retrying = false) {
+    // Resolves true when a DELETE landed, false when the file was already gone.
     let sha;
     try {
         const existing = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`));
@@ -382,7 +392,7 @@ async function removeRemoteFileNow(token, owner, repo, relPath, _retrying = fals
         // transient error we must surface so the delete isn't silently dropped.
         const msg = err instanceof Error ? err.message : String(err);
         if (isNotFoundError(msg))
-            return;
+            return false;
         throw err;
     }
     try {
@@ -392,13 +402,13 @@ async function removeRemoteFileNow(token, owner, repo, relPath, _retrying = fals
         const msg = err instanceof Error ? err.message : String(err);
         // SHA moved under us (another commit landed first) — re-fetch and retry once.
         if (!_retrying && isConflictError(msg)) {
-            await removeRemoteFileNow(token, owner, repo, relPath, true);
-            return;
+            return removeRemoteFileNow(token, owner, repo, relPath, true);
         }
         if (isNotFoundError(msg))
-            return; // already deleted — fine
+            return false; // already deleted — fine
         throw err;
     }
+    return true;
 }
 // ── Module state ──────────────────────────────────────────────────────────────
 let syncSettings = null;
@@ -408,6 +418,16 @@ let initialPullStatus = 'pending';
 let statusListener = null;
 // Pending push timers per filename (debounce)
 const pushTimers = new Map();
+// Session-only activity history for the titlebar sync card (see syncHistory.ts).
+const syncHistory = (0, syncHistory_1.createSyncHistory)();
+/** This session's sync activity (oldest first) — exposed via getActiveSyncStatus. */
+function getSyncHistory() {
+    return syncHistory.list();
+}
+/** Files moved today (local day) this session — the sync card's "X files today". */
+function getSyncFilesToday() {
+    return syncHistory.filesToday();
+}
 // ── Durable sync state (journal + reconciled-SHA cache) ───────────────────────
 // Persisted in userData/sync-state.json — LOCAL device state, deliberately kept
 // out of the notes dir so it never syncs. The journal records every pending
@@ -655,6 +675,7 @@ async function pullNotes(notesDir) {
         syncError = userFacingError;
         if (initialPullStatus === 'pending')
             setInitialPullStatus('failed');
+        syncHistory.record(0, false);
         return {
             pulled: 0,
             deleted: 0,
@@ -666,6 +687,8 @@ async function pullNotes(notesDir) {
     }
     let pulled = 0;
     let deleted = 0;
+    // Files this pull changed on disk (written or removed) — for the activity history.
+    let filesDown = 0;
     const errors = [];
     const updatedFiles = [];
     let hadMetadataChanges = false;
@@ -732,6 +755,7 @@ async function pullNotes(notesDir) {
                 }
                 fs_1.default.mkdirSync(localDirPath, { recursive: true });
                 fs_1.default.writeFileSync(localAnchorPath, remoteAnchor.content, 'utf-8');
+                filesDown++;
                 for (const f of remoteFilesInDir) {
                     if (f === noteFormat_1.NOTE_MD)
                         continue;
@@ -739,8 +763,10 @@ async function pullNotes(notesDir) {
                     if ((0, syncState_1.shouldPullSkipFile)(state, `${dir}/${f}`))
                         continue;
                     const remoteSection = await getRemoteFile(token, s.owner, s.repo, `${dir}/${f}`);
-                    if (remoteSection)
+                    if (remoteSection) {
                         fs_1.default.writeFileSync(path_1.default.join(localDirPath, f), remoteSection.content, 'utf-8');
+                        filesDown++;
+                    }
                 }
                 // Sections removed remotely → remove their local files
                 try {
@@ -750,6 +776,7 @@ async function pullNotes(notesDir) {
                         if (!remoteFilesInDir.has(lf)) {
                             try {
                                 fs_1.default.unlinkSync(path_1.default.join(localDirPath, lf));
+                                filesDown++;
                             }
                             catch { /* ignore */ }
                         }
@@ -798,6 +825,7 @@ async function pullNotes(notesDir) {
                         continue; // created locally after last sync, not yet pushed
                     fs_1.default.rmSync(localDirPath, { recursive: true, force: true });
                     deleted++;
+                    filesDown++;
                 }
                 catch { /* ignore */ }
             }
@@ -822,6 +850,7 @@ async function pullNotes(notesDir) {
                 if (localContent !== remoteMetadata.content) {
                     fs_1.default.writeFileSync(metadataPath, remoteMetadata.content, 'utf-8');
                     hadMetadataChanges = true;
+                    filesDown++;
                 }
                 if ((0, syncState_1.setCachedSha)(state, metadataFilename, metadataTreeSha))
                     stateChanged = true;
@@ -876,6 +905,9 @@ async function pullNotes(notesDir) {
     }
     if (stateChanged)
         persistState();
+    // Uploads (incl. the catch-up queued above) are counted as they land, by the
+    // mutation wrappers; this entry is the download side of the pull.
+    syncHistory.record(filesDown, errors.length === 0);
     return {
         pulled,
         deleted,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { getSyncDisplayState, relativeAge } from '../../src/lib/syncStatus'
-import type { ActiveSyncStatus } from '../../src/types'
+import { getSyncDisplayState, relativeAge, syncChartBars } from '../../src/lib/syncStatus'
+import type { ActiveSyncStatus, SyncHistoryEntry } from '../../src/types'
 
 const github = (over: Partial<ActiveSyncStatus> = {}): ActiveSyncStatus => ({
   backend: 'github',
@@ -75,5 +75,41 @@ describe('relativeAge', () => {
     expect(relativeAge(ago(23 * 3_600_000 + 59 * 60_000), now)).toEqual({ unit: 'hours', count: 23 })
     expect(relativeAge(ago(24 * 3_600_000), now)).toEqual({ unit: 'days', count: 1 })
     expect(relativeAge(ago(10 * 24 * 3_600_000), now)).toEqual({ unit: 'days', count: 10 })
+  })
+})
+
+describe('syncChartBars', () => {
+  const entry = (files: number, ok = true, minute = 0): SyncHistoryEntry => ({
+    at: new Date(Date.UTC(2026, 9, 15, 10, minute)).toISOString(),
+    files,
+    ok,
+  })
+
+  it('is empty without history', () => {
+    expect(syncChartBars(undefined, 36, 3)).toEqual([])
+    expect(syncChartBars([], 36, 3)).toEqual([])
+  })
+
+  it('scales heights relative to the busiest entry', () => {
+    const bars = syncChartBars([entry(2, true, 0), entry(8, true, 1), entry(4, false, 2)], 36, 3)
+    expect(bars.map((b) => b.height)).toEqual([9, 36, 18])
+    expect(bars[2].entry.ok).toBe(false)
+  })
+
+  it('gives zero-file entries (and an all-zero history) the minimum stub', () => {
+    expect(syncChartBars([entry(0), entry(10, true, 1)], 36, 3).map((b) => b.height)).toEqual([3, 36])
+    expect(syncChartBars([entry(0), entry(0, false, 1)], 36, 3).map((b) => b.height)).toEqual([3, 3])
+  })
+
+  it('never draws a non-zero entry below the stub', () => {
+    expect(syncChartBars([entry(1), entry(1000, true, 1)], 36, 3)[0].height).toBe(3)
+  })
+
+  it('keeps only the newest maxBars entries, oldest first', () => {
+    const history = Array.from({ length: 30 }, (_, i) => entry(i + 1, true, i))
+    const bars = syncChartBars(history, 36, 3, 24)
+    expect(bars).toHaveLength(24)
+    expect(bars[0].entry.files).toBe(7)
+    expect(bars[23].entry.files).toBe(30)
   })
 })

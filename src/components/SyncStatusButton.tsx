@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Cloud, CloudOff, Github, RefreshCw, Settings } from 'lucide-react'
+import { Clock, Cloud, CloudOff, Github, Lock, RefreshCw, Settings, Zap } from 'lucide-react'
 import { useT } from '../i18n/useT'
 import { plural, tf } from '../i18n/format'
 import { formatDate } from '../i18n/formatDate'
 import type { Messages } from '../i18n'
 import type { ActiveSyncStatus } from '../types'
-import { getSyncDisplayState, relativeAge, type SyncDisplayState } from '../lib/syncStatus'
+import {
+  getSyncDisplayState,
+  relativeAge,
+  syncChartBars,
+  SYNC_CHART_MAX_BARS,
+  type SyncDisplayState,
+} from '../lib/syncStatus'
 
 // Hover delay before the status card opens — short, but enough that sweeping the
 // cursor along the titlebar towards the window controls doesn't flash it.
@@ -14,13 +20,22 @@ const OPEN_DELAY = 450
 // Grace period on leave, so the cursor can cross the gap between the button and
 // the card without it closing.
 const CLOSE_DELAY = 150
-const CARD_WIDTH = 236
+const CARD_WIDTH = 208
 // Gap (px) between the bottom of the titlebar button and the card.
 const GAP = 4
 // Keep the card this far from the viewport edges when clamping.
 const VIEWPORT_MARGIN = 8
 // While the card is open, re-render "x min ago" (and re-read the status) this often.
 const TICK_MS = 30_000
+// Activity chart geometry (px). The chart spans the card's inner width
+// (CARD_WIDTH minus the px-3 padding on both sides) with one slot per possible
+// bar, filled from the right so the newest sync always sits at the right edge.
+const CHART_WIDTH = CARD_WIDTH - 24
+const CHART_HEIGHT = 36
+const BAR_MIN_HEIGHT = 3
+const BAR_GAP = 2
+// Per-bar stagger of the grow-in animation when the card opens.
+const BAR_STAGGER_MS = 12
 
 type SyncMessages = Messages['titleBar']['sync']
 
@@ -60,18 +75,31 @@ interface SyncStatusButtonProps {
   onOpenSettings: () => void
 }
 
+/** What a click on the titlebar button does in each state (null while one is running). */
+function clickHint(state: SyncDisplayState, s: SyncMessages): string | null {
+  if (state === 'locked') return s.unlockHint
+  if (state === 'blocked') return s.clickToRetry
+  if (state === 'syncing' || state === 'uploading') return null
+  return s.clickToSync
+}
+
 /**
  * The titlebar sync button plus its hover status card. The button shows the
- * live state as an icon and runs a manual sync on click; hovering it opens a
- * small floating card (portal, fixed under the button, right-aligned) with the
- * backend, a status pill and a few data rows. The card stays open across a
- * click so the user watches the sync run and land ("Synced · just now").
+ * live state as an icon and runs a manual sync on click (what the click does
+ * goes in its aria-label); hovering it opens a small floating card (portal,
+ * fixed under the button, right-aligned) with the backend, a status pill, two
+ * data rows and a mini bar chart of this session's sync activity. The card
+ * stays open across a click so the user watches the sync run and land
+ * ("Synced · just now").
  */
 export function SyncStatusButton({ status, syncing, pushing, onSync, onRefresh, onOpenSettings }: SyncStatusButtonProps) {
   const t = useT()
   const s = t.titleBar.sync
   const state = getSyncDisplayState(status, syncing, pushing)
   const backendName = status.backend === 'cloud' ? s.backendCloud : s.backendGithub
+  const ariaVars = { backend: backendName, status: stateLabel(state, s) }
+  const hint = clickHint(state, s)
+  const ariaLabel = hint ? tf(s.ariaLabelWithHint, { ...ariaVars, hint }) : tf(s.ariaLabel, ariaVars)
 
   const wrapperRef = useRef<HTMLDivElement>(null)
   const openTimer = useRef<number | null>(null)
@@ -162,7 +190,7 @@ export function SyncStatusButton({ status, syncing, pushing, onSync, onRefresh, 
           onClick={onSync}
           disabled={syncing || pushing}
           className="flex items-center gap-1 px-2 h-full text-text-muted hover:text-text transition-colors disabled:opacity-60"
-          aria-label={tf(s.ariaLabel, { backend: backendName, status: stateLabel(state, s) })}
+          aria-label={ariaLabel}
         >
           {state === 'syncing' ? (
             <RefreshCw size={12} className="animate-spin text-text" />
@@ -218,7 +246,10 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings }: Syn
   const s = t.titleBar.sync
   const pill = PILL_STYLE[state]
   const isCloud = status.backend === 'cloud'
-  const repo = status.github?.owner && status.github?.repo ? `${status.github.owner}/${status.github.repo}` : null
+  // GitHub shows the repo name (owner/repo in the tooltip); Cloud its product name.
+  const repoName = isCloud ? undefined : status.github?.repo
+  const title = repoName || backendName
+  const titleTooltip = repoName && status.github?.owner ? `${status.github.owner}/${repoName}` : title
 
   const relative = (iso: string) => {
     const age = relativeAge(iso, now)
@@ -235,25 +266,32 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings }: Syn
     return formatDate(d, sameDay ? 'HH:mm' : 'MMM d, HH:mm')
   }
 
-  const hint =
-    state === 'locked' ? s.unlockHint
-    : state === 'blocked' ? s.clickToRetry
-    : state === 'syncing' || state === 'uploading' ? null
-    : s.clickToSync
+  // Footer icon tooltips (title + aria-label carry the same text).
+  const encryptionTip = tf(s.encryptionTooltip, {
+    mode:
+      status.cloud?.keysMode === 'managed' ? s.encryptionStandard
+      : status.cloud?.keysMode === 'e2ee' ? s.encryptionPrivate
+      : '—',
+  })
+  const realtimeOn = status.cloud?.realtimeConnected === true
+  const realtimeTip = tf(s.realtimeTooltip, { state: realtimeOn ? s.realtimeConnected : s.realtimeDisconnected })
+  const autoSyncTip =
+    status.autoSyncIntervalMs !== undefined
+      ? tf(s.autoSyncEvery, { minutes: Math.round(status.autoSyncIntervalMs / 60_000) })
+      : null
 
   return (
     <>
-      {/* Header — backend + live status pill */}
+      {/* Header — backend + live status pill, always a single row */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-solid border-border bg-surface-2/50">
         {isCloud ? (
           <Cloud size={13} className="text-text-muted flex-shrink-0" />
         ) : (
           <Github size={13} className="text-text-muted flex-shrink-0" />
         )}
-        <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold truncate">{backendName}</div>
-          {repo && <div className="text-text-muted truncate">{repo}</div>}
-        </div>
+        <span className="min-w-0 flex-1 text-[11px] font-semibold truncate" title={titleTooltip}>
+          {title}
+        </span>
         <span
           className={`flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 rounded-full border border-solid border-border bg-surface-0 ${pill.text}`}
         >
@@ -263,51 +301,19 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings }: Syn
       </div>
 
       {/* Data rows */}
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 px-3 py-2">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 px-3 pt-2">
         <dt className="text-text-muted whitespace-nowrap">{s.lastSync}</dt>
-        <dd className="text-right min-w-0">
-          {status.lastSync ? (
-            <>
-              <div>{relative(status.lastSync)}</div>
-              <div className="text-[9px] text-text-muted">{exactTime(status.lastSync)}</div>
-            </>
-          ) : (
-            s.never
-          )}
+        <dd className="text-right min-w-0 truncate" title={status.lastSync ? exactTime(status.lastSync) : undefined}>
+          {status.lastSync ? relative(status.lastSync) : s.never}
         </dd>
 
         <dt className="text-text-muted whitespace-nowrap">{s.pendingUploads}</dt>
-        <dd className="text-right min-w-0">
-          {status.pendingUploads > 0 ? plural(s.pendingFiles, status.pendingUploads) : s.pendingNone}
+        <dd className="text-right min-w-0 truncate">
+          {status.pendingUploads > 0 ? plural(s.files, status.pendingUploads) : s.pendingNone}
         </dd>
-
-        {isCloud && (
-          <>
-            <dt className="text-text-muted whitespace-nowrap">{s.encryption}</dt>
-            <dd className="text-right min-w-0">
-              {status.cloud?.keysMode === 'managed'
-                ? s.encryptionStandard
-                : status.cloud?.keysMode === 'e2ee'
-                ? s.encryptionPrivate
-                : '—'}
-            </dd>
-
-            <dt className="text-text-muted whitespace-nowrap">{s.realtime}</dt>
-            <dd className={`text-right min-w-0 ${status.cloud?.realtimeConnected ? 'text-green-400' : 'text-text-muted'}`}>
-              {status.cloud?.realtimeConnected ? s.realtimeConnected : s.realtimeDisconnected}
-            </dd>
-          </>
-        )}
-
-        {status.autoSyncIntervalMs !== undefined && (
-          <>
-            <dt className="text-text-muted whitespace-nowrap">{s.autoSync}</dt>
-            <dd className="text-right min-w-0">
-              {tf(s.autoSyncEvery, { minutes: Math.round(status.autoSyncIntervalMs / 60_000) })}
-            </dd>
-          </>
-        )}
       </dl>
+
+      <SyncActivityChart status={status} exactTime={exactTime} />
 
       {/* Error / blocked notice */}
       {(state === 'blocked' || status.error) && (
@@ -321,17 +327,113 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings }: Syn
         </div>
       )}
 
-      {/* Footer — what a click does + a shortcut to the settings */}
+      {/* Footer — backend facts as tooltip icons + a shortcut to the settings */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-t border-solid border-border bg-surface-2/30 text-text-muted">
-        <span className="min-w-0 flex-1 leading-snug">{hint}</span>
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          {isCloud && (
+            <>
+              <span role="img" title={encryptionTip} aria-label={encryptionTip}>
+                <Lock size={11} />
+              </span>
+              <span
+                role="img"
+                title={realtimeTip}
+                aria-label={realtimeTip}
+                className={realtimeOn ? 'text-green-400' : undefined}
+              >
+                <Zap size={11} />
+              </span>
+            </>
+          )}
+          {autoSyncTip && (
+            <span role="img" title={autoSyncTip} aria-label={autoSyncTip}>
+              <Clock size={11} />
+            </span>
+          )}
+        </div>
         <button
           onClick={onOpenSettings}
-          className="flex items-center gap-1 flex-shrink-0 hover:text-text transition-colors"
+          title={s.openSettings}
+          aria-label={s.openSettings}
+          className="flex items-center flex-shrink-0 hover:text-text transition-colors"
         >
-          <Settings size={10} />
-          {s.openSettings}
+          <Settings size={11} />
         </button>
       </div>
     </>
+  )
+}
+
+interface SyncActivityChartProps {
+  status: ActiveSyncStatus
+  exactTime: (iso: string) => string
+}
+
+// Mini bar chart of this session's syncs (main keeps them in memory only — see
+// electron/syncHistory.ts): one bar per entry, newest on the right, height
+// relative to the busiest one, green if it went well and amber if it failed.
+// "X files today" is main's running day total (status.filesToday), not a sum of
+// the bars: 24 entries with the 5-min heartbeat only span ~2 h.
+// The bars grow in on open (skipped under prefers-reduced-motion).
+function SyncActivityChart({ status, exactTime }: SyncActivityChartProps) {
+  const t = useT()
+  const s = t.titleBar.sync
+  const bars = syncChartBars(status.history, CHART_HEIGHT, BAR_MIN_HEIGHT)
+  const slot = CHART_WIDTH / SYNC_CHART_MAX_BARS
+  const firstSlot = SYNC_CHART_MAX_BARS - bars.length
+
+  return (
+    <div className="px-3 py-2">
+      <div className="relative">
+        <svg
+          width={CHART_WIDTH}
+          height={CHART_HEIGHT}
+          viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+          className="block"
+          role="img"
+          aria-label={s.chartLabel}
+        >
+          {bars.length === 0 ? (
+            <line
+              x1={0}
+              x2={CHART_WIDTH}
+              y1={CHART_HEIGHT - 0.5}
+              y2={CHART_HEIGHT - 0.5}
+              className="stroke-border"
+              strokeDasharray="3 3"
+            />
+          ) : (
+            bars.map(({ entry, height }, i) => (
+              <rect
+                key={entry.at}
+                x={(firstSlot + i) * slot + BAR_GAP / 2}
+                y={CHART_HEIGHT - height}
+                width={slot - BAR_GAP}
+                height={height}
+                rx={1}
+                className={`${entry.ok ? 'fill-green-400' : 'fill-amber-400'} origin-bottom motion-safe:animate-bar-grow`}
+                style={{ transformBox: 'fill-box', animationDelay: `${i * BAR_STAGGER_MS}ms` }}
+              >
+                <title>
+                  {tf(entry.ok ? s.barTitle : s.barTitleFailed, {
+                    time: exactTime(entry.at),
+                    files: plural(s.files, entry.files),
+                  })}
+                </title>
+              </rect>
+            ))
+          )}
+        </svg>
+        {bars.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center text-text-muted">{s.noActivity}</div>
+        )}
+      </div>
+      {bars.length > 0 && (
+        <div className="flex items-center justify-between gap-2 mt-1 text-text-muted">
+          <span className="truncate">{plural(s.lastSyncs, bars.length)}</span>
+          <span className="truncate">{plural(s.filesToday, status.filesToday ?? 0)}</span>
+        </div>
+      )}
+    </div>
   )
 }

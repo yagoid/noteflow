@@ -64,6 +64,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CLOUD_AUTO_SYNC_INTERVAL_MS = void 0;
+exports.getSyncHistory = getSyncHistory;
+exports.getSyncFilesToday = getSyncFilesToday;
 exports.loadCloudSyncSettings = loadCloudSyncSettings;
 exports.initCloudSync = initCloudSync;
 exports.isCloudSyncEnabled = isCloudSyncEnabled;
@@ -91,6 +93,7 @@ const noteFormat_1 = require("./noteFormat");
 const cloudCrypto_1 = require("./cloudCrypto");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
 const syncState_1 = require("./syncState");
+const syncHistory_1 = require("./syncHistory");
 // ── Constants ─────────────────────────────────────────────────────────────────
 /**
  * Safety-net cadence of the periodic sync loop. Remote changes normally arrive
@@ -142,6 +145,17 @@ let initialPullStatus = 'pending';
 let statusListener = null;
 // Pending debounced pushes, keyed by relPath (same semantics as githubSync).
 const pushTimers = new Map();
+// Session-only activity history for the titlebar sync card (see syncHistory.ts).
+// Uploads/tombstones are counted by trackActivity, downloads at the end of pullNotes.
+const syncHistory = (0, syncHistory_1.createSyncHistory)();
+/** This session's sync activity (oldest first) — exposed via getActiveSyncStatus. */
+function getSyncHistory() {
+    return syncHistory.list();
+}
+/** Files moved today (local day) this session — the sync card's "X files today". */
+function getSyncFilesToday() {
+    return syncHistory.filesToday();
+}
 // Per-note-key cache: '<dir>' (note folders) or '<name>.json' (root metadata)
 // → unwrapped note key. Seeded by pulls, populated on demand by pushes.
 const noteKeyCache = new Map();
@@ -326,8 +340,29 @@ async function getNoteKeyFor(scope, dek) {
     noteKeyCache.set(scope, noteKey);
     return noteKey;
 }
+/**
+ * Runs a remote mutation and logs it in the activity history: the file count
+ * it resolves with on success, a failed (ok=false) entry if it throws.
+ */
+async function trackActivity(op) {
+    let files;
+    try {
+        files = await op();
+    }
+    catch (err) {
+        syncHistory.record(0, false);
+        throw err;
+    }
+    syncHistory.record(files, true);
+}
 /** Uploads one file as an encrypted upsert row. Throws with an actionable message. */
-async function pushSingleFile(relPath, content) {
+function pushSingleFile(relPath, content) {
+    return trackActivity(async () => {
+        await uploadFileRow(relPath, content);
+        return 1;
+    });
+}
+async function uploadFileRow(relPath, content) {
     const dek = requireDek();
     const userId = account.getUserId();
     if (!userId)
@@ -372,9 +407,12 @@ async function pushSingleFile(relPath, content) {
 async function removeRemotePaths(relPaths) {
     if (relPaths.length === 0)
         return;
-    const dek = requireDek();
-    const pathKeys = await Promise.all(relPaths.map((p) => (0, cloudCrypto_1.derivePathKeyHmac)(dek, p)));
-    await removeRemoteByPathKeys(pathKeys);
+    await trackActivity(async () => {
+        const dek = requireDek();
+        const pathKeys = await Promise.all(relPaths.map((p) => (0, cloudCrypto_1.derivePathKeyHmac)(dek, p)));
+        await removeRemoteByPathKeys(pathKeys);
+        return pathKeys.length;
+    });
 }
 async function removeRemoteByPathKeys(pathKeys) {
     if (pathKeys.length === 0)
@@ -583,12 +621,15 @@ async function scheduleDeleteDir(dir) {
         pendingMutations--;
     }
 }
-async function deleteRemoteDirNow(dir) {
-    const dek = requireDek();
-    const remote = await listRemotePaths(dek);
-    const targets = remote.filter((r) => r.relPath.startsWith(`${dir}/`));
-    noteKeyCache.delete(dir);
-    await removeRemoteByPathKeys(targets.map((t) => t.pathKey));
+function deleteRemoteDirNow(dir) {
+    return trackActivity(async () => {
+        const dek = requireDek();
+        const remote = await listRemotePaths(dek);
+        const targets = remote.filter((r) => r.relPath.startsWith(`${dir}/`));
+        noteKeyCache.delete(dir);
+        await removeRemoteByPathKeys(targets.map((t) => t.pathKey));
+        return targets.length;
+    });
 }
 // ── Pull (incremental by updated_at) ──────────────────────────────────────────
 async function fetchChangedRows(cursor) {
@@ -650,10 +691,13 @@ async function pullNotes(notesDir) {
         syncError = LOCKED_ERROR;
         if (initialPullStatus === 'pending')
             setInitialPullStatus('failed');
+        syncHistory.record(0, false);
         return { ...empty, errors: [LOCKED_ERROR] };
     }
     let pulled = 0;
     let deleted = 0;
+    // Files this pull changed on disk (written or removed) — for the activity history.
+    let filesDown = 0;
     const errors = [];
     const updatedFiles = [];
     let hadMetadataChanges = false;
@@ -705,6 +749,7 @@ async function pullNotes(notesDir) {
                         (0, cloudSyncLogic_1.shouldApplyRemoteDeletion)(localUpdatedMs, lastSyncMs)) {
                         fs_1.default.rmSync(localDirPath, { recursive: true, force: true });
                         deleted++;
+                        filesDown++;
                     }
                     continue;
                 }
@@ -714,6 +759,7 @@ async function pullNotes(notesDir) {
                 }
                 fs_1.default.mkdirSync(localDirPath, { recursive: true });
                 fs_1.default.writeFileSync(localAnchorPath, anchor.content, 'utf-8');
+                filesDown++;
                 for (const entry of group) {
                     if ((0, cloudSyncLogic_1.isAnchorPath)(entry.relPath))
                         continue;
@@ -724,11 +770,13 @@ async function pullNotes(notesDir) {
                     if (entry.deleted) {
                         try {
                             fs_1.default.unlinkSync(localFile);
+                            filesDown++;
                         }
                         catch { /* already gone */ }
                     }
                     else {
                         fs_1.default.writeFileSync(localFile, entry.content, 'utf-8');
+                        filesDown++;
                     }
                 }
                 updatedFiles.push(localDirPath);
@@ -752,6 +800,7 @@ async function pullNotes(notesDir) {
                 if (localContent !== entry.content) {
                     fs_1.default.writeFileSync(metadataPath, entry.content, 'utf-8');
                     hadMetadataChanges = true;
+                    filesDown++;
                 }
             }
             catch (err) {
@@ -780,6 +829,9 @@ async function pullNotes(notesDir) {
         if (initialPullStatus === 'pending')
             setInitialPullStatus('failed');
     }
+    // Uploads (incl. the catch-up queued above) are counted as they land, by
+    // trackActivity; this entry is the download side of the pull.
+    syncHistory.record(filesDown, errors.length === 0);
     return {
         pulled,
         deleted,

@@ -166,6 +166,8 @@ const api = {
     initialPullStatus: 'pending' | 'ok' | 'failed'
     pendingUploads: number
     autoSyncIntervalMs?: number
+    history?: Array<{ at: string; files: number; ok: boolean }>
+    filesToday?: number
     github?: { owner?: string; repo?: string }
     cloud?: { keysState: 'unlocked' | 'locked' | 'no-keys'; keysMode: 'managed' | 'e2ee' | null; realtimeConnected: boolean }
   }> => ipcRenderer.invoke('sync:get-active-status'),

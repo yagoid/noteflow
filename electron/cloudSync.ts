@@ -66,6 +66,7 @@ import {
   shouldPullSkipDir,
   shouldPullSkipFile,
 } from './syncState'
+import { type SyncHistoryEntry, createSyncHistory } from './syncHistory'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -172,6 +173,20 @@ let statusListener: (() => void) | null = null
 
 // Pending debounced pushes, keyed by relPath (same semantics as githubSync).
 const pushTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+// Session-only activity history for the titlebar sync card (see syncHistory.ts).
+// Uploads/tombstones are counted by trackActivity, downloads at the end of pullNotes.
+const syncHistory = createSyncHistory()
+
+/** This session's sync activity (oldest first) — exposed via getActiveSyncStatus. */
+export function getSyncHistory(): SyncHistoryEntry[] {
+  return syncHistory.list()
+}
+
+/** Files moved today (local day) this session — the sync card's "X files today". */
+export function getSyncFilesToday(): number {
+  return syncHistory.filesToday()
+}
 
 // Per-note-key cache: '<dir>' (note folders) or '<name>.json' (root metadata)
 // → unwrapped note key. Seeded by pulls, populated on demand by pushes.
@@ -376,8 +391,30 @@ async function getNoteKeyFor(scope: string, dek: Uint8Array): Promise<Uint8Array
   return noteKey
 }
 
+/**
+ * Runs a remote mutation and logs it in the activity history: the file count
+ * it resolves with on success, a failed (ok=false) entry if it throws.
+ */
+async function trackActivity(op: () => Promise<number>): Promise<void> {
+  let files: number
+  try {
+    files = await op()
+  } catch (err) {
+    syncHistory.record(0, false)
+    throw err
+  }
+  syncHistory.record(files, true)
+}
+
 /** Uploads one file as an encrypted upsert row. Throws with an actionable message. */
-async function pushSingleFile(relPath: string, content: string): Promise<void> {
+function pushSingleFile(relPath: string, content: string): Promise<void> {
+  return trackActivity(async () => {
+    await uploadFileRow(relPath, content)
+    return 1
+  })
+}
+
+async function uploadFileRow(relPath: string, content: string): Promise<void> {
   const dek = requireDek()
   const userId = account.getUserId()
   if (!userId) throw new Error(NOT_SIGNED_IN_ERROR)
@@ -424,9 +461,12 @@ async function pushSingleFile(relPath: string, content: string): Promise<void> {
  */
 async function removeRemotePaths(relPaths: string[]): Promise<void> {
   if (relPaths.length === 0) return
-  const dek = requireDek()
-  const pathKeys = await Promise.all(relPaths.map((p) => derivePathKeyHmac(dek, p)))
-  await removeRemoteByPathKeys(pathKeys)
+  await trackActivity(async () => {
+    const dek = requireDek()
+    const pathKeys = await Promise.all(relPaths.map((p) => derivePathKeyHmac(dek, p)))
+    await removeRemoteByPathKeys(pathKeys)
+    return pathKeys.length
+  })
 }
 
 async function removeRemoteByPathKeys(pathKeys: string[]): Promise<void> {
@@ -645,12 +685,15 @@ export async function scheduleDeleteDir(dir: string): Promise<void> {
   }
 }
 
-async function deleteRemoteDirNow(dir: string): Promise<void> {
-  const dek = requireDek()
-  const remote = await listRemotePaths(dek)
-  const targets = remote.filter((r) => r.relPath.startsWith(`${dir}/`))
-  noteKeyCache.delete(dir)
-  await removeRemoteByPathKeys(targets.map((t) => t.pathKey))
+function deleteRemoteDirNow(dir: string): Promise<void> {
+  return trackActivity(async () => {
+    const dek = requireDek()
+    const remote = await listRemotePaths(dek)
+    const targets = remote.filter((r) => r.relPath.startsWith(`${dir}/`))
+    noteKeyCache.delete(dir)
+    await removeRemoteByPathKeys(targets.map((t) => t.pathKey))
+    return targets.length
+  })
 }
 
 // ── Pull (incremental by updated_at) ──────────────────────────────────────────
@@ -713,11 +756,14 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
   if (!dek) {
     syncError = LOCKED_ERROR
     if (initialPullStatus === 'pending') setInitialPullStatus('failed')
+    syncHistory.record(0, false)
     return { ...empty, errors: [LOCKED_ERROR] }
   }
 
   let pulled = 0
   let deleted = 0
+  // Files this pull changed on disk (written or removed) — for the activity history.
+  let filesDown = 0
   const errors: string[] = []
   const updatedFiles: string[] = []
   let hadMetadataChanges = false
@@ -776,6 +822,7 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
           ) {
             fs.rmSync(localDirPath, { recursive: true, force: true })
             deleted++
+            filesDown++
           }
           continue
         }
@@ -789,15 +836,17 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
 
         fs.mkdirSync(localDirPath, { recursive: true })
         fs.writeFileSync(localAnchorPath, anchor.content, 'utf-8')
+        filesDown++
         for (const entry of group) {
           if (isAnchorPath(entry.relPath)) continue
           // Journal guard: don't resurrect a section whose remote delete is pending.
           if (shouldPullSkipFile(state, entry.relPath)) continue
           const localFile = path.join(notesDir, entry.relPath)
           if (entry.deleted) {
-            try { fs.unlinkSync(localFile) } catch { /* already gone */ }
+            try { fs.unlinkSync(localFile); filesDown++ } catch { /* already gone */ }
           } else {
             fs.writeFileSync(localFile, entry.content, 'utf-8')
+            filesDown++
           }
         }
         updatedFiles.push(localDirPath)
@@ -819,6 +868,7 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
         if (localContent !== entry.content) {
           fs.writeFileSync(metadataPath, entry.content, 'utf-8')
           hadMetadataChanges = true
+          filesDown++
         }
       } catch (err) {
         errors.push(`${entry.relPath}: ${String(err)}`)
@@ -845,6 +895,10 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
     errors.push(msg)
     if (initialPullStatus === 'pending') setInitialPullStatus('failed')
   }
+
+  // Uploads (incl. the catch-up queued above) are counted as they land, by
+  // trackActivity; this entry is the download side of the pull.
+  syncHistory.record(filesDown, errors.length === 0)
 
   return {
     pulled,

@@ -64,13 +64,20 @@ Iconos del TitleBar:
   ninguno). Icono: nube verde = sincronizado · verde pulsante = subiendo cambios · ↻ girando =
   sincronizando · nube ámbar = error · nube tachada ámbar = bloqueado (claves de Cloud sin
   desbloquear o primer pull fallido). **Click** = sync manual. **Hover** (~450 ms) abre una
-  mini-tarjeta flotante (`SyncStatusButton.tsx`, sin tooltip nativo) bajo el botón: backend +
-  `owner/repo` (GitHub) con píldora de estado (Synced / Uploading / Syncing / Error / Locked /
-  Blocked / Pending), filas *Last sync* (relativo + hora exacta), *Pending uploads*, en Cloud
-  *Encryption* (Standard / Private E2EE) y *Real-time* (conectado/desconectado), *Auto-sync*
-  ("every 5 min"), bloque ámbar con el error si lo hay, y pie con la acción del click
-  ("Click to sync now" / "Click to retry" / "Unlock in Settings → Sync") + enlace **Settings**
-  (abre Ajustes → Sync). Sigue abierta al hacer click (se ve el sync en vivo), se mantiene al pasar
+  mini-tarjeta flotante (`SyncStatusButton.tsx`, sin tooltip nativo; ~208 px) bajo el botón:
+  cabecera de **una sola fila** con el nombre del repo (GitHub; `owner/repo` en el tooltip) o
+  "NoteFlow Cloud" + píldora de estado (Synced / Uploading / Syncing / Error / Locked / Blocked /
+  Pending); filas *Last sync* (relativo; hora exacta en el tooltip) y *Pending uploads*; una
+  **mini gráfica de barras** de la actividad de sync de esta sesión (una barra por minuto con
+  actividad, hasta 24, la más reciente a la derecha; altura ∝ ficheros movidos, stub mínimo si
+  fueron 0; verde = bien, ámbar = falló; tooltip "14:32 · 3 files"; crecen al abrir salvo con
+  *reduced motion*; vacía → línea discontinua + "No activity yet"; con el latido del auto-sync cada
+  5 min, las 24 barras abarcan ~las últimas 2 h) con leyenda "last N syncs" / "X files today" (total
+  acumulado del día local en esta sesión, llevado en main — no la suma de las barras); bloque ámbar con el error si lo hay; y pie compacto de **iconos con tooltip**:
+  candado (Cloud: cifrado Standard / Private E2EE), rayo (Cloud: verde si Real-time conectado),
+  reloj ("Auto-sync every 5 min") y a la derecha el engranaje que abre Ajustes → Sync. La acción
+  del click ("Click to sync now" / "Click to retry" / "Unlock in Settings → Sync") va en el
+  `aria-label` del botón. Sigue abierta al hacer click (se ve el sync en vivo), se mantiene al pasar
   el ratón a la tarjeta y se cierra al salir (~150 ms), al perder el foco la ventana o al redimensionar;
   mientras está abierta re-lee el estado cada 30 s.
 - **⚙ settings**: abre la **ventana de Ajustes** (overlay tipo app de settings) con nav izquierda

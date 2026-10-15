@@ -45,8 +45,35 @@ mostrado (syncing → uploading → locked → blocked → error → pending →
 (tamaño de `pendingPushFiles` de `main.ts`, que se lo pasa a `getActiveSyncStatus(pendingUploads)`:
 ficheros con push **en vuelo** — las ediciones aún dentro del debounce de 5 s no cuentan),
 `autoSyncIntervalMs` (`GITHUB_AUTO_SYNC_INTERVAL_MS` en `githubSync.ts` /
-`CLOUD_AUTO_SYNC_INTERVAL_MS` en `cloudSync.ts`) y, en Cloud, `cloud.realtimeConnected` (sin
-evento propio: se lee al refrescar; la tarjeta re-lee el status al abrirse y cada 30 s).
+`CLOUD_AUTO_SYNC_INTERVAL_MS` en `cloudSync.ts`), en Cloud `cloud.realtimeConnected` (sin
+evento propio: se lee al refrescar; la tarjeta re-lee el status al abrirse y cada 30 s) y
+`history` (abajo). La acción del clic (sync / reintentar / desbloquear) va en el `aria-label`
+del botón; la tarjeta ya no la muestra.
+**Historial de actividad (`history`, mini gráfica de barras de la tarjeta):** buffer circular
+**solo en memoria** (no se persiste; vacío en cada arranque) de hasta 24 `{at, files, ok}`, uno
+**por backend** (`getSyncHistory()` en `githubSync.ts`/`cloudSync.ts`; el status lleva el del
+backend activo, así que un pull manual de GitHub con Cloud activo no ensucia la gráfica de Cloud).
+Lógica pura en `electron/syncHistory.ts` (testeada); alturas de las barras en `src/lib/syncStatus.ts`.
+⚠️ **Cobertura:** con el latido del tick de 5 min (cada pull registra una entrada, aunque mueva 0
+ficheros), 24 entradas cubren solo **~las últimas 2 h**. Por eso **"X files today" no suma el
+ring**: el mismo registro lleva un **total acumulado del día** (`{day: 'YYYY-MM-DD' local, files}`,
+se reinicia al cambiar la fecha local; leído en otro día devuelve 0), expuesto como `filesToday`
+en el status (`getSyncFilesToday()`). Es "hoy en esta sesión": tampoco se persiste.
+- **Qué cuenta `files`:** subidas = mutaciones remotas que **llegaron de verdad** — GitHub: 1 por
+  PUT/DELETE en los wrappers serializados `upsertRemoteFile`/`removeRemoteFile` (un PUT saltado
+  por contenido idéntico o un DELETE de algo ya borrado cuentan 0; `upsertRemoteFileNow`/
+  `removeRemoteFileNow` devuelven si escribieron); Cloud: 1 por fila en `pushSingleFile`, N filas
+  tombstoneadas en `removeRemotePaths`/`deleteRemoteDirNow` (vía `trackActivity`). Bajadas = al
+  final de `pullNotes`, ficheros que el pull **cambió en disco** (escritos o borrados, metadatos
+  incluidos). Al estar en los primitivos cubre todos los caminos (push debounced, `pushPathsNow`,
+  journal retry, catch-up del pull, espejo, borrados).
+- **`ok`:** una mutación que lanza registra `ok: false` con 0 ficheros; un pull con `errors` (o
+  sin token/claves) también.
+- **Sin entradas espurias:** las operaciones que caen en el **mismo minuto de reloj** (bucket fijo
+  de `SYNC_HISTORY_BUCKET_MS`, no ventana deslizante) se **funden** en una entrada (ficheros
+  sumados, `ok` = AND, `at` = la última). Así un guardado (≥2 PUTs), las ráfagas del push con
+  debounce mientras se escribe o un pull + su catch-up dan **una barra por minuto**; un pull sin
+  cambios (tick de 5 min) deja un "stub" de 0 ficheros = el latido.
 El indicador "pushing" (`sync:push-state`) vale para **ambos** backends: `applyNoteWrite` en
 `main.ts` engancha los callbacks `onStart/onComplete` de `schedulePush` del proveedor activo (y el
 push durable de las tools del chat) a `pendingPushFiles`. Los deletes no pasan por ese set.

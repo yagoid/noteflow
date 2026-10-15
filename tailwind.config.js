@@ -26,9 +26,16 @@ module.exports = {
           '20%, 60%': { transform: 'translateX(-3px)' },
           '40%, 80%': { transform: 'translateX(3px)' },
         },
+        // Bars of the sync card's activity chart growing up from their base
+        // (pair with `origin-bottom` and, on SVG, transform-box: fill-box).
+        'bar-grow': {
+          from: { transform: 'scaleY(0)' },
+          to: { transform: 'scaleY(1)' },
+        },
       },
       animation: {
         shake: 'shake 0.28s ease-in-out',
+        'bar-grow': 'bar-grow 0.35s ease-out both',
       },
       fontFamily: {
         // `font-mono` is the app's general UI font: it follows the active theme's

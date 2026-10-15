@@ -23,6 +23,8 @@ export const titleBar = {
   // The button routes to whichever provider is active (GitHub or NoteFlow Cloud).
   sync: {
     ariaLabel: '{backend} sync — {status}',
+    // Same, plus what a click does (the card no longer shows it).
+    ariaLabelWithHint: '{backend} sync — {status}. {hint}',
     backendGithub: 'GitHub',
     backendCloud: 'NoteFlow Cloud',
     // Status pill.
@@ -42,22 +44,29 @@ export const titleBar = {
     daysAgo: { one: '{count} day ago', other: '{count} days ago' },
     pendingUploads: 'Pending uploads',
     pendingNone: 'None',
-    pendingFiles: { one: '{count} file', other: '{count} files' },
-    encryption: 'Encryption',
-    encryptionStandard: 'Standard',
-    encryptionPrivate: 'Private (E2EE)',
-    realtime: 'Real-time',
-    realtimeConnected: 'Connected',
-    realtimeDisconnected: 'Disconnected',
-    autoSync: 'Auto-sync',
-    autoSyncEvery: 'every {minutes} min',
+    files: { one: '{count} file', other: '{count} files' },
+    // Activity chart (this session's syncs, newest on the right).
+    chartLabel: 'Sync activity',
+    barTitle: '{time} · {files}',
+    barTitleFailed: '{time} · {files} · failed',
+    noActivity: 'No activity yet',
+    lastSyncs: { one: 'last sync', other: 'last {count} syncs' },
+    filesToday: { one: '{count} file today', other: '{count} files today' },
     // Blocked first pull (shown above the error message, if any).
     blockedNotice: 'Changes won’t upload until a sync succeeds.',
-    // Footer.
+    // Footer icons (tooltips).
+    encryptionTooltip: 'Encryption: {mode}',
+    encryptionStandard: 'Standard',
+    encryptionPrivate: 'Private (E2EE)',
+    realtimeTooltip: 'Real-time: {state}',
+    realtimeConnected: 'Connected',
+    realtimeDisconnected: 'Disconnected',
+    autoSyncEvery: 'Auto-sync every {minutes} min',
+    openSettings: 'Sync settings',
+    // What a click on the titlebar button does (in its aria-label).
     clickToSync: 'Click to sync now',
     clickToRetry: 'Click to retry',
     unlockHint: 'Unlock in Settings → Sync',
-    openSettings: 'Settings',
   },
 
   // Crash fallback (ErrorBoundary).
