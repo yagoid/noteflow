@@ -27,9 +27,9 @@ exports.CLOUD_KEYS_URL = `${exports.SUPABASE_URL}/functions/v1/cloud-keys`;
  * "Coming soon" instead of the "Subscribe" button.
  */
 exports.LEMONSQUEEZY_CHECKOUT_URLS = {
-    ai: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/67c8e588-e83e-4657-822a-0ecb6a71a980',
-    cloud: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/3f78ab13-dc92-4890-a4f5-73d6e4adc3ba',
-    bundle: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/e5131f61-0fbb-471a-b975-f882df1866de',
+    ai: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/d37cfca1-d828-42f7-93bb-20d747ac3ef1',
+    cloud: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/0010d7c7-46c5-4635-b214-0e2b378230b0',
+    bundle: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/4eb2e564-2c2b-4765-bfd0-a20bf3752cad',
 };
 /** True once the build carries a real Supabase project configuration. */
 function isCloudConfigured() {

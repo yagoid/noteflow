@@ -126,6 +126,13 @@ webhooks, verifica la firma HMAC y escribe en `public.subscriptions` vía la RPC
    deben entrar **todas** las variantes (mensual y anual). Un evento con una variante que no esté
    en el mapa se ignora (respuesta 200 + `console.warn` en los logs de la función).
 
+   > **En producción, solo variantes de live mode.** Los webhooks de test y de live comparten
+   > signing secret, así que el map es lo único que separa ambos modos: con IDs de test dentro,
+   > cualquiera podría pagar el checkout de test con la tarjeta de prueba de LS y obtener una
+   > entitlement real. Al pasar a live, quita los IDs de test y expira o borra las filas de test
+   > que sigan `active` en `public.subscriptions`, porque sus eventos ya no se procesarán y no
+   > expirarían nunca.
+
 4. **Desplegar la función** — el flag es imprescindible, porque el webhook de LS llega **sin JWT
    de Supabase** (su autenticación es la firma HMAC):
 

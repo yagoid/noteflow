@@ -4,8 +4,9 @@
 > real en Lemon Squeezy (variantes mensual/anual), Edge Functions desplegadas (`billing-webhook` +
 > `ai-proxy`), webhook dado de alta, migraciones 0001-0003 corridas, y el flujo probado
 > **end-to-end** (alta de cuenta, checkout, entitlement aplicada, chat vía el preset `noteflow`)
-> — en **modo test** de Lemon Squeezy. **Único pendiente del operador: el paso a live mode**
-> cuando LS apruebe la verificación de la store (detalle en § 3, "Pendiente del operador"). Cuenta NoteFlow en la app + entitlements + esquema SQL + panel Settings → Account
+> — primero en modo test. **Live mode activado (2026-10-19):** store verificada, los tres productos
+> copiados a live ("Copy to Live Mode"), webhook de live dado de alta y URLs de checkout de live en
+> `cloudConfig.ts` (detalle en § 3, "Billing en live mode"). Cuenta NoteFlow en la app + entitlements + esquema SQL + panel Settings → Account
 > (ver "Fase 4.0 — implementación" abajo) y la **IA gestionada**: `usage_events` + `get_month_usage`
 > + preset `noteflow` en el cliente + botón de suscripción en Settings → Account + auto-activación
 > del preset al suscribirse + sección dedicada en `LlmConfigView` (ver § 3, "implementación"). El
@@ -243,13 +244,38 @@ es **un preset más**, no una implementación nueva.
   los multiplicadores y el endpoint `/usage` entren en vigor. Sin redeploy, el proxy sigue
   sirviendo el catálogo viejo y `get_month_usage` (si 0007 no se corrió) sumaría una columna
   inexistente.
-- **Pendiente del operador (billing):** el **paso a live mode de Lemon Squeezy** (la store está en
-  verificación; el circuito actual corre sobre el producto de **test mode**). Al aprobarse:
-  recrear producto + variantes en live (los variant IDs **cambian**) → actualizar el secret
-  `LEMONSQUEEZY_VARIANT_MAP` → dar de alta el webhook en live (mismo endpoint y signing secret) →
-  cambiar la URL de checkout en `cloudConfig.ts` + `npm run build`. Todo lo demás está: 0003
-  corrida, secrets puestos, `ai-proxy` desplegado, flujo probado end-to-end en test (ver
-  `supabase/README.md` §§ 5-6 para repetir el proceso en otro proyecto).
+- **Billing en live mode (hecho 2026-10-19):** productos copiados de test a live con "Copy to Live
+  Mode" (los variant IDs **cambian** entre modos). IDs de variante:
+
+  | Producto | Live mensual / anual | Test mensual / anual |
+  |---|---|---|
+  | `ai` (LS: "NoteFlow IA") | 2268405 / 2268404 | 1892927 / 1892907 |
+  | `cloud` | 2268416 / 2268417 | 1901112 / 1901138 |
+  | `bundle` | 2268409 / 2268410 | 1901146 / 1901150 |
+
+  Cada producto tiene además una variante `Default` en estado `pending` que no se vende y no va en
+  el map. `LEMONSQUEEZY_VARIANT_MAP` lleva **solo los IDs de live**. Test y live comparten
+  signing secret, así que el map es el **único filtro** entre ambos modos. Si incluyera los de
+  test, cualquiera podría completar el checkout de test con la tarjeta de prueba de LS y obtener
+  una entitlement real gratis: las URLs de test están en el historial público de
+  `electron/cloudConfig.ts` en GitHub, aunque ninguna release publicada las llevó. Los eventos de
+  test que sigan llegando se ignoran (200 `{ignored: unknown variant}`, verificado reenviando una
+  entrega de test).
+  - **Filas de test huérfanas:** el acceso se concede por `status='active'` sin mirar `renews_at`
+    (`computeEntitlements`, el check de `ai-proxy`, la RLS de `files`). Como sus eventos ya se
+    ignoran, una fila de test `active` **nunca expira sola**. El webhook no guarda `test_mode`:
+    se identifican por `provider_ref` o porque se crearon antes del 2026-10-19. Al hacer el
+    cambio solo había dos filas, ambas del operador: `ai` 2332140 (ya `expired`) y bundle
+    `provider_ref=2370478`, que sigue **`active`** (expirarla o no lo decide el operador).
+  - **Volver a probar en test:** añadir sus IDs al map reabre el agujero. Hay que mantener esa
+    ventana lo más corta posible y, al retirar los IDs, expirar o borrar las filas que se hayan
+    creado durante ella (si no, quedan activas para siempre).
+
+  El webhook de live apunta al mismo endpoint, con los
+  mismos 7 eventos `subscription_*` y el **mismo signing secret** que el de test. Las URLs de
+  checkout (`cloudConfig.ts`) son `/checkout/buy/<slug>` de la **variante Monthly** de cada
+  producto, no el slug del producto. Ver `supabase/README.md` §§ 5-6 para repetir el proceso en
+  otro proyecto.
 - **Privacidad (documentar en UI/landing):** el índice RAG sigue siendo 100% local; lo que viaja
   al proxy es lo mismo que viajaría a cualquier proveedor con key propia (pregunta + chunks
   recuperados). Las secciones `aiHidden` y las notas cifradas ya quedan fuera del índice y por
@@ -638,7 +664,7 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
 | **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (código listo, pendiente de correr 0007 + redeploy):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×2/×6 — ver § 3), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`) |
-| **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). El producto Cloud (y el Bundle) ya existen en Lemon Squeezy y sus checkout URLs están pobladas en `cloudConfig.ts` → los planes ofrecen botón Subscribe; lo que sigue pendiente del operador es el **paso a live mode de la store** (ver § 3, "Pendiente del operador (billing)") |
+| **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). El producto Cloud (y el Bundle) ya existen en Lemon Squeezy y sus checkout URLs (de live desde 2026-10-19) están pobladas en `cloudConfig.ts` → los planes ofrecen botón Subscribe (ver § 3, "Billing en live mode") |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
 ## 6. Fase 4.0 — implementación (parte cliente/repo)
