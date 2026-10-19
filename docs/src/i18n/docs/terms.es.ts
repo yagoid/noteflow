@@ -6,18 +6,18 @@ export const termsEs: LegalContent = {
   meta: {
     title: 'Términos del servicio — NoteFlow',
     description:
-      'Los términos que rigen los servicios online opcionales de NoteFlow: la cuenta de NoteFlow y los planes de pago NoteFlow AI y NoteFlow Cloud. La app en sí es gratuita y se rige por su licencia source-available.',
+      'Los términos que rigen los servicios online opcionales de NoteFlow: la cuenta de NoteFlow y los planes de pago NoteFlow AI y NoteFlow Cloud. La app en sí es software libre y de código abierto, regido por su propia licencia (GPL-3.0-or-later).',
   },
 
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Términos<br />del servicio',
-    tagline: 'Última actualización: 12 de julio de 2026',
+    tagline: 'Última actualización: 19 de octubre de 2026',
   },
 
   summary: {
     title: 'Resumen',
-    html: 'La app de NoteFlow es source-available y gratuita — el software en sí se rige por su licencia (FSL-1.1), no por estos términos. Estos términos regulan los <strong>servicios online opcionales</strong>: la cuenta de NoteFlow y los planes de pago NoteFlow AI y NoteFlow Cloud. Los planes se venden a través de Lemon Squeezy, se renuevan automáticamente y pueden cancelarse en cualquier momento. Hay una cosa que merece énfasis: <strong>NoteFlow Cloud siempre cifra tus notas, y ofrece un modo privado opcional con cifrado de extremo a extremo — si lo activas y pierdes la passphrase y también el código de recuperación, nadie (nosotros incluidos) puede recuperar tus notas.</strong>',
+    html: 'La app de NoteFlow es software libre y de código abierto — el software en sí se rige por su licencia (GNU General Public License v3.0 o posterior), no por estos términos. Estos términos regulan los <strong>servicios online opcionales</strong>: la cuenta de NoteFlow y los planes de pago NoteFlow AI y NoteFlow Cloud. Los planes se venden a través de Lemon Squeezy, se renuevan automáticamente y pueden cancelarse en cualquier momento. Hay una cosa que merece énfasis: <strong>NoteFlow Cloud siempre cifra tus notas, y ofrece un modo privado opcional con cifrado de extremo a extremo — si lo activas y pierdes la passphrase y también el código de recuperación, nadie (nosotros incluidos) puede recuperar tus notas.</strong>',
   },
 
   toc: [
@@ -52,7 +52,7 @@ export const termsEs: LegalContent = {
         {
           t: 'ul',
           items: [
-            '<strong>El código de la aplicación de escritorio</strong>, que se licencia por separado bajo la <a href="https://github.com/yagoid/noteflow/blob/main/LICENSE" target="_blank" rel="noopener">Functional Source License 1.1</a>.',
+            '<strong>El código de la aplicación de escritorio</strong>, que es software libre y de código abierto licenciado por separado bajo la <a href="https://github.com/yagoid/noteflow/blob/main/LICENSE" target="_blank" rel="noopener">GNU General Public License v3.0 o posterior</a> (GPL-3.0-or-later).',
             'Las <strong>integraciones gratuitas con terceros</strong> (GitHub Sync, IA con tu propia clave de API o modelos locales), que son acuerdos entre tú y esos terceros (ver sección 7).',
           ],
         },
@@ -85,7 +85,7 @@ export const termsEs: LegalContent = {
           t: 'ul',
           items: [
             'Los planes de pago los vende <strong>Lemon Squeezy como Merchant of Record</strong>: Lemon Squeezy es el vendedor de la suscripción, y a la compra le aplican sus <a href="https://www.lemonsqueezy.com/terms" target="_blank" rel="noopener">términos</a> y su política de reembolsos, junto con tus derechos legales (incluido el derecho de desistimiento del consumidor en la UE).',
-            'El precio, el periodo de facturación (mensual o anual) y los impuestos aplicables se muestran en el checkout. De los impuestos/IVA se encarga Lemon Squeezy.',
+            'Los precios incluyen el IVA cuando corresponde. El precio y el periodo de facturación (mensual o anual) se muestran en el checkout; Lemon Squeezy, como Merchant of Record, recauda e ingresa el IVA.',
             'Las suscripciones <strong>se renuevan automáticamente</strong> hasta que se cancelan. Puedes cancelar en cualquier momento desde el portal de cliente; tu plan sigue activo hasta el final del periodo ya pagado y no se renueva.',
             'Si un pago falla, las funciones del plan afectado pueden quedar suspendidas hasta que el pago se resuelva.',
           ],

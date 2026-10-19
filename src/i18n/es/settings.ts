@@ -263,6 +263,7 @@ export const settings = {
     subscribe: 'Suscribirse',
     comingSoon: 'Próximamente',
     subscribeHint: 'Abre el pago en tu navegador. El plan se activa automáticamente tras el pago — pulsa Actualizar si no aparece.',
+    pricesIncludeVat: 'Precios con IVA incluido.',
     signInToSubscribe: 'Inicia sesión en tu cuenta de NoteFlow para suscribirte.',
     goToAccount: 'Ir a Cuenta',
     couldNotOpenCheckout: 'No se pudo abrir la página de pago.',

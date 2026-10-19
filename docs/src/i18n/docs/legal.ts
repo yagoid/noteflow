@@ -1,6 +1,6 @@
-// Shared shape of the legal pages (/privacy, /terms). Unlike the other docs pages
-// (where the EN dict defines the shape via `typeof`), both legal dicts are annotated
-// with this explicit interface: the two pages share one renderer (LegalPage.astro),
+// Shared shape of the legal pages (/privacy, /terms, /legal-notice). Unlike the other
+// docs pages (where the EN dict defines the shape via `typeof`), every legal dict is
+// annotated with this explicit interface: the pages share one renderer (LegalPage.astro),
 // so the shape must be identical across pages, not just across locales.
 // The `t` discriminator mirrors the NoteBlock pattern of the landing (types.ts).
 

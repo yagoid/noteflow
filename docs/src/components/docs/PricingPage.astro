@@ -33,12 +33,19 @@ const jsonLd = {
     '@type': 'SoftwareApplication',
     name: 'NoteFlow',
     applicationCategory: 'ProductivityApplication',
-    // Monthly price of each subscription plan (figures from the plans cards).
+    // Monthly price of each subscription plan (figures from the plans cards; VAT included —
+    // tax-inclusive pricing in Lemon Squeezy).
     offers: t.plans.cards.map((c) => ({
       '@type': 'Offer',
       name: c.name,
       priceCurrency: 'EUR',
       price: c.monthly.replace('€', ''),
+      priceSpecification: {
+        '@type': 'UnitPriceSpecification',
+        priceCurrency: 'EUR',
+        price: c.monthly.replace('€', ''),
+        valueAddedTaxIncluded: true,
+      },
     })),
   },
 };

@@ -1,0 +1,17 @@
+---
+// The /legal-notice page (both locales render through this component — see
+// src/pages/legal-notice/[...path].astro and its es/ mirror). Rendering lives in
+// LegalPage.astro (shared with /privacy and /terms); prose in
+// src/i18n/docs/legal-notice.{en,es}.ts and the owner data in legal-notice.owner.ts.
+import LegalPage from './LegalPage.astro';
+import { getLegalNoticeContent } from '../../i18n/docs/legal-notice';
+import type { Lang } from '../../i18n';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+---
+
+<LegalPage lang={lang} page="legal-notice" t={getLegalNoticeContent(lang)} />

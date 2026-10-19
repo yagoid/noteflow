@@ -97,7 +97,7 @@ export const pricingEn = {
         badge: 'Best value',
       },
     ],
-    note: 'The final price is always shown at checkout. Annual billing costs less than 12 months at the monthly price.',
+    note: 'Prices include VAT. The final price is always shown at checkout. Annual billing costs less than 12 months at the monthly price.',
   },
 
   ai: {
@@ -109,7 +109,7 @@ export const pricingEn = {
     bullets: [
       'No Ollama to install, no third-party account, no API key to buy, store or rotate.',
       'A monthly token quota is included — <strong>3M tokens per month</strong> by default.',
-      'Monthly or annual subscription — <strong>€5.99/month or €49.99/year</strong>. Subscribe from inside the app: <strong>Settings → Account → Subscribe</strong> — checkout opens in your browser, handled by Lemon Squeezy, our merchant of record.',
+      'Monthly or annual subscription — <strong>€5.99/month or €49.99/year</strong>, VAT included. Subscribe from inside the app: <strong>Settings → Account → Subscribe</strong> — checkout opens in your browser, handled by Lemon Squeezy, our merchant of record.',
       'Once the payment goes through, NoteFlow AI activates itself as your provider — nothing to configure.',
     ],
     modelsTitle: 'Standard models — base quota',
@@ -146,7 +146,7 @@ export const pricingEn = {
     bullets: [
       'Automatic sync across devices — no manual pushes, no waiting on a git flow.',
       'Two encryption modes: managed by default (zero secrets to keep), or opt into strict E2EE where the keys never leave your devices.',
-      'Monthly or annual subscription — <strong>€3.99/month or €39.99/year</strong>, subscribed from inside the app (Settings → Account).',
+      'Monthly or annual subscription — <strong>€3.99/month or €39.99/year</strong>, VAT included, subscribed from inside the app (Settings → Account).',
       'For people who don’t want to create and manage a GitHub repo just to sync notes.',
     ],
     alt: {

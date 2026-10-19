@@ -3,6 +3,7 @@ import Base from '../layouts/Base.astro';
 import { asset } from '../lib/url';
 import { getRelativeLocaleUrl } from 'astro:i18n';
 import { getContent, type Lang, type NoteBlock } from '../i18n';
+import { legalNoticeReady } from '../i18n/docs/legal-notice.owner';
 
 interface Props {
   lang: Lang;
@@ -21,6 +22,8 @@ const pricingHref = getRelativeLocaleUrl(lang, '/pricing');
 // Legal pages (footer-only links, no data-nav — the synapse script doesn't know them).
 const privacyHref = getRelativeLocaleUrl(lang, '/privacy');
 const termsHref = getRelativeLocaleUrl(lang, '/terms');
+// Only linked once its owner data is filled in (otherwise the page is not generated).
+const legalNoticeHref = getRelativeLocaleUrl(lang, '/legal-notice');
 // Discreet ghost CTA style shared by the three docs links (echoes the hero CTA).
 const docsCta =
   "display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:13px;letter-spacing:.02em;color:var(--ink);background:transparent;border:1px solid var(--line-2);padding:11px 18px;border-radius:5px;";
@@ -544,6 +547,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
               <div class="nf-footer-head">{t.download.footer.groups.legal}</div>
               <a href={privacyHref}>{t.download.footer.privacy}</a>
               <a href={termsHref}>{t.download.footer.terms}</a>
+              {legalNoticeReady && <a href={legalNoticeHref}>{t.download.footer.legalNotice}</a>}
               <a href={privacyHref} data-cookie-settings>{t.download.footer.cookies}</a>
             </div>
           </div>

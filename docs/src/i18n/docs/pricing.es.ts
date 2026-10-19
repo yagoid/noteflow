@@ -95,7 +95,7 @@ export const pricingEs: PricingContent = {
         badge: 'Mejor precio',
       },
     ],
-    note: 'El precio final se muestra siempre en el checkout. El pago anual sale más barato que 12 meses al precio mensual.',
+    note: 'Precios con IVA incluido. El precio final se muestra siempre en el checkout. El pago anual sale más barato que 12 meses al precio mensual.',
   },
 
   ai: {
@@ -107,7 +107,7 @@ export const pricingEs: PricingContent = {
     bullets: [
       'Sin instalar Ollama, sin cuentas de terceros, sin comprar, guardar ni rotar API keys.',
       'Incluye una cuota mensual de tokens — <strong>3M de tokens al mes</strong> por defecto.',
-      'Suscripción mensual o anual — <strong>€5.99/mes o €49.99/año</strong>. Se contrata desde la propia app: <strong>Settings → Account → Subscribe</strong> — el checkout se abre en tu navegador, a cargo de Lemon Squeezy, nuestro merchant of record.',
+      'Suscripción mensual o anual — <strong>€5.99/mes o €49.99/año</strong>, IVA incluido. Se contrata desde la propia app: <strong>Settings → Account → Subscribe</strong> — el checkout se abre en tu navegador, a cargo de Lemon Squeezy, nuestro merchant of record.',
       'En cuanto se completa el pago, NoteFlow AI se activa solo como tu proveedor — nada que configurar.',
     ],
     modelsTitle: 'Modelos estándar — cuota base',
@@ -144,7 +144,7 @@ export const pricingEs: PricingContent = {
     bullets: [
       'Sync automática entre dispositivos — sin pushes manuales, sin esperar a un flujo de git.',
       'Dos modos de cifrado: gestionado por defecto (cero secretos que guardar) u opt-in a E2EE estricto donde las claves nunca salen de tus dispositivos.',
-      'Suscripción mensual o anual — <strong>€3.99/mes o €39.99/año</strong>, contratada desde la propia app (Settings → Account).',
+      'Suscripción mensual o anual — <strong>€3.99/mes o €39.99/año</strong>, IVA incluido, contratada desde la propia app (Settings → Account).',
       'Para quien no quiere crear y mantener un repo de GitHub solo para sincronizar notas.',
     ],
     alt: {

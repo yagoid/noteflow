@@ -190,6 +190,7 @@ export const es: Content = {
       source: 'Código',
       privacy: 'Privacidad',
       terms: 'Términos',
+      legalNotice: 'Aviso legal',
       cookies: 'Cookies',
       copyright: '© 2026 · App de notas técnicas',
     },

@@ -12,11 +12,11 @@ información errónea/desactualizada) sin tener que re-explorar el sitio.
 ```bash
 cd docs
 npm run dev      # http://localhost:4321/noteflow/
-npm run build    # → docs/dist/ (14 páginas)
+npm run build    # → docs/dist/ (14 páginas; 16 cuando /legal-notice tiene los datos del titular)
 npm run check    # astro check (0 errores es lo esperado)
 ```
 
-## Mapa del sitio (14 páginas, EN + espejo ES bajo /es/)
+## Mapa del sitio (14-16 páginas, EN + espejo ES bajo /es/ con el MISMO slug)
 
 | Ruta | Qué es | Componente | Prosa i18n |
 |---|---|---|---|
@@ -26,16 +26,32 @@ npm run check    # astro check (0 errores es lo esperado)
 | `/features` | Detalles de producto (jerarquía, stickies, atajos, vistas, cifrado…) | `src/components/docs/FeaturesPage.astro` | `src/i18n/docs/features.{en,es}.ts` |
 | `/pricing` | Precios: todo lo esencial gratis + planes gestionados opcionales (NoteFlow AI / NoteFlow Cloud) | `src/components/docs/PricingPage.astro` | `src/i18n/docs/pricing.{en,es}.ts` |
 | `/privacy` | Política de privacidad (texto legal canónico, EN fuente) | `src/components/docs/PrivacyPage.astro` → `LegalPage.astro` | `src/i18n/docs/privacy.{en,es}.ts` |
-| `/terms` | Términos del servicio (cuenta + planes de pago; la app se rige por su licencia FSL) | `src/components/docs/TermsPage.astro` → `LegalPage.astro` | `src/i18n/docs/terms.{en,es}.ts` |
+| `/terms` | Términos del servicio (cuenta + planes de pago; la app se rige por su licencia GPL-3.0-or-later) | `src/components/docs/TermsPage.astro` → `LegalPage.astro` | `src/i18n/docs/terms.{en,es}.ts` |
+| `/legal-notice` (ES: `/es/legal-notice`) | Aviso legal LSSI-CE art. 10 (titular persona física autónoma, objeto, PI, responsabilidad, ley aplicable) — **gateada**, ver abajo | `src/components/docs/LegalNoticePage.astro` → `LegalPage.astro` | `src/i18n/docs/legal-notice.{en,es}.ts` + datos del titular en `legal-notice.owner.ts` |
 
-Las dos páginas legales van **fuera del rail** de neuronas: solo se enlazan desde los footers
-(landing y footer slim de DocsShell) y desde la línea de aceptación del sign-in de la app
-(`src/components/Settings/AccountPanel.tsx` → URLs absolutas `…/noteflow[/es]/{terms,privacy}`).
+Las páginas legales van **fuera del rail** de neuronas: solo se enlazan desde los footers
+(landing y footer slim de DocsShell) y /privacy y /terms también desde la línea de aceptación del
+sign-in de la app (`src/components/Settings/AccountPanel.tsx` → URLs absolutas
+`…/noteflow[/es]/{terms,privacy}`).
 Comparten renderer (`LegalPage.astro`: callout de resumen + secciones numeradas con bloques
-`p`/`ul`/`table`), forma común `LegalContent` en `src/i18n/docs/legal.ts` (aquí el ES se tipa
-contra la interfaz, no contra `typeof xEn`) y accent **cyan**. La privacy enlaza a
-`public/mobile-privacy-policy.html` vía placeholder `%MOBILE_PRIVACY_URL%` (esa página legacy
-sigue viva: la enlaza la Play Store).
+`p`/`ul`/`table`; las celdas de tabla son texto escapado, el resto `set:html`), forma común
+`LegalContent` en `src/i18n/docs/legal.ts` (aquí el ES se tipa contra la interfaz, no contra
+`typeof xEn`) y accent **cyan**. Placeholders que `LegalPage.astro` rellena con URLs base-aware
+del locale: `%MOBILE_PRIVACY_URL%` (→ `public/mobile-privacy-policy.html`, página legacy que sigue
+viva porque la enlaza la Play Store), `%PRIVACY_URL%`, `%TERMS_URL%` y `%LEGAL_NOTICE_URL%`.
+
+**`/legal-notice` está gateada por los datos del titular.** Nombre, NIF y domicilio viven UNA sola
+vez en `src/i18n/docs/legal-notice.owner.ts` (`OWNER`, compartido por EN y ES). Mientras alguno
+esté vacío (tras `trim`) o contenga `[[` o `]]` en cualquier posición (placeholder o resto de uno),
+`legalNoticeReady` es `false`: las rutas
+`src/pages/{,es/}legal-notice/[...path].astro` (rest route para poder devolver `[]` en
+`getStaticPaths` vía `legalNoticePaths()`) **no generan la página**, los footers (Home + DocsShell)
+**ocultan el enlace** y el build emite un `console.warn`. No se lanza un Error a propósito: `pages.yml`
+despliega en cada push a `main` que toque `docs/**` y un build roto bloquearía toda la web.
+La misma condición decide el párrafo del **responsable del tratamiento** en `/privacy` §1
+(`privacy.{en,es}.ts`): con datos, nombra al titular (`ownerNameHtml`, escapado para `set:html`) y
+enlaza al aviso legal vía `%LEGAL_NOTICE_URL%`; con placeholders, dice solo "el desarrollador
+independiente que opera NoteFlow" + email, sin enlace (nunca hay enlaces rotos).
 
 Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas),
 `public/mobile-privacy-policy.html`, `public/screenshots/`, `public/video/`, `public/brain/*.js`.
@@ -46,13 +62,13 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
   **`path`** para los hreflang), fuentes (Inter cuerpo + JetBrains Mono técnico), anti-flash de tema
   (`localStorage['noteflow:web-theme']` + `data-theme` en `<html>`), carga de los web components del
   cerebro, GA **gateado por consentimiento** + banner de cookies (ver gotcha 8).
-- **`src/layouts/DocsShell.astro`** — shell de las 4 páginas de docs y las 2 legales: `<nf-netbg>`
+- **`src/layouts/DocsShell.astro`** — shell de las 4 páginas de docs y las 3 legales: `<nf-netbg>`
   de fondo, rail vertical de neuronas (home arriba; CLI cyan / AI purple / Features orange /
-  Pricing pink, la activa "disparada"; en `/privacy`/`/terms` ninguna neurona está activa —
+  Pricing pink, la activa "disparada"; en `/privacy`/`/terms`/`/legal-notice` ninguna neurona está activa —
   páginas "off-rail";
   switch de idioma → espejo de la MISMA página + toggle de tema), header de página, grid contenido +
-  TOC lateral con scroll-spy (en <1100px pasa a chips horizontales), footer slim (incluye Privacy y
-  Terms), copy-to-clipboard.
+  TOC lateral con scroll-spy (en <1100px pasa a chips horizontales), footer slim (incluye Privacy,
+  Terms, Legal notice si `legalNoticeReady`, y Cookies), copy-to-clipboard.
   Props: `lang, page, title, description, kicker, h1, tagline, toc, accent`.
 - **Estilos**: `src/styles/brain-site.css` = tokens del design system "The Brain" (`--bg --card
   --ink* --line* --detail --accent --purple --orange --cyan --pink --red --brain-*`; dark en
@@ -71,15 +87,15 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
   Ej.: el grupo central "IA Generated" (perfil del segundo cerebro) se ancla al núcleo vía el flag
   `centered` en `graph.ts`/`sampleGraph.ts`/`assign.ts` y su espejo `nf-graph.js`.
 - **i18n**: `src/i18n/{en,es}.ts` (landing) y
-  `src/i18n/docs/{common,cli,ai,features,pricing,privacy,terms}.{en,es}.ts` (docs). Patrón: el
+  `src/i18n/docs/{common,cli,ai,features,pricing,privacy,terms,legal-notice}.{en,es}.ts` (docs). Patrón: el
   `.en.ts` define la forma (`type X = typeof xEn`) y el `.es.ts` la satisface → TypeScript fuerza
   el sync de claves (las legales usan la interfaz compartida `LegalContent` de `legal.ts` en su
-  lugar, porque /privacy y /terms comparten renderer). Getters en
-  `index.ts`/`common.ts`/`cli.ts`/`ai.ts`/`features.ts`/`pricing.ts`/`privacy.ts`/`terms.ts`.
+  lugar, porque las páginas legales comparten renderer). Getters en
+  `index.ts`/`common.ts`/`cli.ts`/`ai.ts`/`features.ts`/`pricing.ts`/`privacy.ts`/`terms.ts`/`legal-notice.ts`.
 - **Componentes de docs**: `src/components/docs/` — `Term.astro` (marco terminal con typing),
   `StickyMock.astro` (sticky note en HTML/CSS con plegado a píldora), y las 4 `XPage.astro`.
   Wrappers finos en `src/pages/{x,es/x}.astro`.
-- **LEGACY MUERTO (no usar, no imitar)**: `src/components/{Nav,Footer,ChatMock,BrainGlyph,Pillar,
+- **LEGACY MUERTO (no usar, no imitar)**: `src/components/{Nav,ChatMock,BrainGlyph,Pillar,
   Terminal,ScreenshotFrame}.astro`, `ThemeToggle.tsx`, `src/brain/*.tsx`, `src/styles/{tokens,global}.css`,
   y los HTML de la raíz `docs/` (`index.html`, `style.css`, `main.js` — no se sirven).
 
@@ -98,7 +114,7 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
    deliberada: los **prompts literales** de `/ai` van verbatim en inglés en ambos idiomas (viven una
    sola vez en `ai.en.ts`; `ai.es.ts` los importa) — son los prompts reales del código y no se traducen.
 6. El sitio se publica solo al pushear a `main`; no publicar a medias (el rail/footer de docs enlaza
-   entre sí las cuatro páginas de docs y las dos legales).
+   entre sí las cuatro páginas de docs y las legales).
 7. **Cerebros three.js y móvil**: `nf-brain.js` pausa su rAF fuera de viewport (IntersectionObserver
    sobre el host + `visibilitychange`) y en `(pointer: coarse)` corre en tier *lowPower* (pixelRatio
    ≤1.5, **sin** EffectComposer/UnrealBloom — `composer`/`bloom` pueden ser `null`). Los contenedores
@@ -214,19 +230,24 @@ capacidades se autogestionan gratis: IA con Ollama/key propia, nube con GitHub S
 | Sección | Documenta | Sincronizar si cambia |
 |---|---|---|
 | `#free` | Lo gratis (editor, Cerebro local, IA con key propia/Ollama, cifrado, GitHub Sync, CLI) + callout "los planes suman, no sustituyen" | monetization.md § visión |
-| `#plans` | Grid de 3 cards de precio: AI €5.99/mes · €49.99/año, Cloud €3.99/mes · €39.99/año, Bundle €7.99/mes · €79.99/año (badge "Best value") + alta desde la app + MoR Lemon Squeezy; las cifras van también al JSON-LD (`offers`) | monetization.md § visión "Precios" (y `src/lib/subscriptionPlans.ts`) |
+| `#plans` | Grid de 3 cards de precio: AI €5.99/mes · €49.99/año, Cloud €3.99/mes · €39.99/año, Bundle €7.99/mes · €79.99/año (badge "Best value") + alta desde la app + MoR Lemon Squeezy; **precios con IVA incluido** (tax-inclusive pricing activado en Lemon Squeezy; LSSI art. 10.1.f — lo dicen la nota bajo las cards, los bullets de `#ai`/`#cloud` y `/terms` §3); las cifras van también al JSON-LD (`offers`, con `valueAddedTaxIncluded: true`) | monetization.md § visión "Precios" (y `src/lib/subscriptionPlans.ts`) |
 | `#ai` | Plan NoteFlow AI: **modelos curados literales** en tres bloques por coste de cuota — estándar ×1 (los dos DeepSeek, mimo-v2.5-pro, gpt-5.6-luna, claude-haiku-4.5), intermedio ×2 (grok-4.5) y avanzados ×6 (kimi-k3) —, **cuota 3M tokens/mes**, mensual/anual con **€5.99/mes o €49.99/año** en el bullet, alta vía Settings → Account → Subscribe (checkout Lemon Squeezy) | monetization.md § 3 (`NOTEFLOW_AI_MODELS`, `MODEL_QUOTA_MULTIPLIERS`, `AI_MONTHLY_TOKENS`) + § visión "Precios" |
 | `#cloud` | Plan NoteFlow Cloud marcado **"Available now"**: sync automática, cifrado **dual** (managed por defecto + E2EE opt-in), bullet con **€3.99/mes o €39.99/año**; GitHub Sync sigue gratis | monetization.md § 4 (badge activo, no `--soon`; + § visión "Precios" |
 | `#compare` | Tabla gestionado vs autogestionado (IA, setup, sync, "todo lo demás gratis") | monetization.md §§ 3-4 |
 | `#privacy` | RAG local, al proxy viaja lo mismo que con key propia, `aiHidden`/cifradas nunca salen, IA gestionada ≠ nube de notas | monetization.md § 3 "Privacidad" + `/ai#privacy` |
 
-### `/privacy` y `/terms` — texto legal canónico (el EN es la fuente; el ES es traducción fiel)
-Los hechos que citan (Supabase/Lemon Squeezy/OpenRouter como proveedores, cuota 3M tokens,
-E2EE de Cloud sin reset de passphrase, edad mínima 14, FSL-1.1, contacto yago.igle@gmail.com,
-fecha "Last updated") deben seguir siendo ciertos: **si cambia un proveedor, la cuota, el flujo de
+### `/privacy`, `/terms` y `/legal-notice` — texto legal canónico (el EN es la fuente; el ES es traducción fiel)
+Los hechos que citan (Supabase/Lemon Squeezy/OpenRouter como proveedores, Lemon Squeezy como MoR,
+cuota 3M tokens, E2EE de Cloud sin reset de passphrase, edad mínima 14, licencia del código,
+contacto yago.igle@gmail.com, fecha "Last updated") deben seguir siendo ciertos: **si cambia un proveedor, la cuota, el flujo de
 pagos o la arquitectura E2EE, hay que revisar ambos textos y actualizar la fecha**. Cambios de
 redacción legal son deliberados — no "mejorar" el texto de pasada. La app enlaza a estas páginas
 desde el sign-in (AccountPanel), así que las URLs `/{es/}privacy` y `/{es/}terms` no deben moverse.
+
+**Licencia:** el `LICENSE` del repo es **GPL-3.0-or-later** desde el commit `71a0995` (antes
+FSL-1.1). README, `package.json`, `/legal-notice` y `/terms` (meta, summary y §1, corregidos el
+2026-10-19; antes decían "source-available"/FSL-1.1) citan la GPL. Si la licencia vuelve a cambiar,
+revisar esos textos y su fecha.
 
 ## Checklist al cerrar una feature de la app
 

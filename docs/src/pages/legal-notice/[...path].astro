@@ -1,0 +1,14 @@
+---
+// English legal notice (default locale, served at /noteflow/legal-notice/). A rest route
+// instead of a plain legal-notice.astro so the page can be skipped: getStaticPaths yields
+// the folder root only once the owner data in src/i18n/docs/legal-notice.owner.ts is
+// filled in (no placeholders are ever published). Mirror: src/pages/es/legal-notice/.
+import LegalNoticePage from '../../components/docs/LegalNoticePage.astro';
+import { legalNoticePaths } from '../../i18n/docs/legal-notice.owner';
+
+export function getStaticPaths() {
+  return legalNoticePaths();
+}
+---
+
+<LegalNoticePage lang="en" />

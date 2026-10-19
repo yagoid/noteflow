@@ -1,0 +1,13 @@
+---
+// Aviso legal en español (servido en /noteflow/es/legal-notice/). Ruta gateada igual que
+// su espejo EN (src/pages/legal-notice/[...path].astro): solo se genera cuando los datos
+// del titular de src/i18n/docs/legal-notice.owner.ts están rellenos.
+import LegalNoticePage from '../../../components/docs/LegalNoticePage.astro';
+import { legalNoticePaths } from '../../../i18n/docs/legal-notice.owner';
+
+export function getStaticPaths() {
+  return legalNoticePaths();
+}
+---
+
+<LegalNoticePage lang="es" />

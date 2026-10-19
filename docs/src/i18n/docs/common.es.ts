@@ -21,6 +21,7 @@ export const commonEs: DocsCommon = {
     pricing: 'Precios',
     privacy: 'Privacidad',
     terms: 'Términos',
+    legalNotice: 'Aviso legal',
     cookies: 'Cookies',
     source: 'GitHub',
     copyright: '© 2026 · App de notas técnicas',

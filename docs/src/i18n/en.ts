@@ -203,9 +203,10 @@ export const en = {
       featuresDocs: 'Features',
       pricingDocs: 'Pricing',
       source: 'Source',
-      // Legal pages (/privacy, /terms).
+      // Legal pages (/privacy, /terms, /legal-notice).
       privacy: 'Privacy',
       terms: 'Terms',
+      legalNotice: 'Legal notice',
       // Reopens the cookie consent banner (data-cookie-settings, handled in Base.astro).
       cookies: 'Cookies',
       copyright: '© 2026 · Technical notes app',

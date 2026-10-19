@@ -7,18 +7,18 @@ export const termsEn: LegalContent = {
   meta: {
     title: 'Terms of Service — NoteFlow',
     description:
-      'The terms governing the optional NoteFlow online services: the NoteFlow Account and the paid NoteFlow AI and NoteFlow Cloud plans. The app itself is free and governed by its source-available license.',
+      'The terms governing the optional NoteFlow online services: the NoteFlow Account and the paid NoteFlow AI and NoteFlow Cloud plans. The app itself is free and open-source software, governed by its own license (GPL-3.0-or-later).',
   },
 
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Terms of<br />Service',
-    tagline: 'Last updated: July 12, 2026',
+    tagline: 'Last updated: October 19, 2026',
   },
 
   summary: {
     title: 'Summary',
-    html: 'The NoteFlow app is source-available and free to use — the software itself is governed by its license (FSL-1.1), not by these terms. These terms govern the <strong>optional online services</strong>: the NoteFlow Account and the paid NoteFlow AI and NoteFlow Cloud plans. Plans are sold through Lemon Squeezy, renew automatically and can be cancelled at any time. One thing deserves emphasis: <strong>NoteFlow Cloud always encrypts your notes, and offers an optional private mode with end-to-end encryption — if you turn it on and lose both your passphrase and your recovery code, nobody (including us) can recover your notes.</strong>',
+    html: 'The NoteFlow app is free and open-source software — the software itself is governed by its license (GNU General Public License v3.0 or later), not by these terms. These terms govern the <strong>optional online services</strong>: the NoteFlow Account and the paid NoteFlow AI and NoteFlow Cloud plans. Plans are sold through Lemon Squeezy, renew automatically and can be cancelled at any time. One thing deserves emphasis: <strong>NoteFlow Cloud always encrypts your notes, and offers an optional private mode with end-to-end encryption — if you turn it on and lose both your passphrase and your recovery code, nobody (including us) can recover your notes.</strong>',
   },
 
   toc: [
@@ -53,7 +53,7 @@ export const termsEn: LegalContent = {
         {
           t: 'ul',
           items: [
-            '<strong>The desktop app’s code</strong>, which is licensed separately under the <a href="https://github.com/yagoid/noteflow/blob/main/LICENSE" target="_blank" rel="noopener">Functional Source License 1.1</a>.',
+            '<strong>The desktop app’s code</strong>, which is free and open-source software licensed separately under the <a href="https://github.com/yagoid/noteflow/blob/main/LICENSE" target="_blank" rel="noopener">GNU General Public License v3.0 or later</a> (GPL-3.0-or-later).',
             '<strong>Free third-party integrations</strong> (GitHub Sync, AI with your own API key or local models), which are agreements between you and those third parties (see section 7).',
           ],
         },
@@ -86,7 +86,7 @@ export const termsEn: LegalContent = {
           t: 'ul',
           items: [
             'Paid plans are sold by <strong>Lemon Squeezy as Merchant of Record</strong>: Lemon Squeezy is the seller of the subscription, and its <a href="https://www.lemonsqueezy.com/terms" target="_blank" rel="noopener">terms</a> and refund policy apply to the purchase, alongside your statutory rights (including EU consumer withdrawal rights).',
-            'The price, billing period (monthly or annual) and applicable taxes are shown at checkout. Taxes/VAT are handled by Lemon Squeezy.',
+            'Prices include VAT where applicable. The price and billing period (monthly or annual) are shown at checkout; Lemon Squeezy, as Merchant of Record, collects and remits the VAT.',
             'Subscriptions <strong>renew automatically</strong> until cancelled. You can cancel at any time from the customer portal; your plan then remains active until the end of the period already paid, and is not renewed.',
             'If a payment fails, features of the affected plan may be suspended until payment is resolved.',
           ],

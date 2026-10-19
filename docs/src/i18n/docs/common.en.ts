@@ -24,6 +24,7 @@ export const commonEn = {
     pricing: 'Pricing',
     privacy: 'Privacy',
     terms: 'Terms',
+    legalNotice: 'Legal notice',
     cookies: 'Cookies',
     source: 'GitHub',
     copyright: '© 2026 · Technical notes app',

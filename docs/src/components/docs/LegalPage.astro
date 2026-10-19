@@ -1,17 +1,18 @@
 ---
-// Shared renderer for the legal pages (/privacy and /terms) — both have the same
-// structure (summary callout + numbered prose sections), so PrivacyPage.astro and
-// TermsPage.astro are thin wrappers over this component. Legal pages live OUTSIDE
+// Shared renderer for the legal pages (/privacy, /terms, /legal-notice) — all share the
+// same structure (summary callout + numbered prose sections), so PrivacyPage.astro,
+// TermsPage.astro and LegalNoticePage.astro are thin wrappers over this component. Legal pages live OUTSIDE
 // the DocsShell neuron rail (they are only linked from footers), so no rail neuron
 // is active here; the accent is the discreet cyan.
 import DocsShell from '../../layouts/DocsShell.astro';
+import { getRelativeLocaleUrl } from 'astro:i18n';
 import { asset } from '../../lib/url';
 import type { LegalContent } from '../../i18n/docs/legal';
 import type { Lang } from '../../i18n';
 
 interface Props {
   lang: Lang;
-  page: 'privacy' | 'terms';
+  page: 'privacy' | 'terms' | 'legal-notice';
   t: LegalContent;
 }
 
@@ -20,7 +21,17 @@ const { lang, page, t } = Astro.props;
 // %MOBILE_PRIVACY_URL% → base-aware link to the mobile policy (Play Store target,
 // served from public/; locale-independent).
 const mobilePrivacyUrl = asset('/mobile-privacy-policy.html');
-const fill = (s: string) => s.replace(/%MOBILE_PRIVACY_URL%/g, mobilePrivacyUrl);
+// %PRIVACY_URL% / %TERMS_URL% / %LEGAL_NOTICE_URL% → base-aware links to the sibling legal
+// pages, in this locale (the legal-notice one is only emitted by dicts once that page exists).
+const privacyUrl = getRelativeLocaleUrl(lang, '/privacy');
+const termsUrl = getRelativeLocaleUrl(lang, '/terms');
+const legalNoticeUrl = getRelativeLocaleUrl(lang, '/legal-notice');
+const fill = (s: string) =>
+  s
+    .replace(/%MOBILE_PRIVACY_URL%/g, mobilePrivacyUrl)
+    .replace(/%PRIVACY_URL%/g, privacyUrl)
+    .replace(/%TERMS_URL%/g, termsUrl)
+    .replace(/%LEGAL_NOTICE_URL%/g, legalNoticeUrl);
 
 const jsonLd = {
   '@context': 'https://schema.org',
@@ -48,7 +59,7 @@ const jsonLd = {
     <!-- Summary callout -->
     <aside class="nf-legal-summary" data-reveal>
       <h3>{t.summary.title}</h3>
-      <p set:html={t.summary.html} />
+      <p set:html={fill(t.summary.html)} />
     </aside>
 
     <!-- Numbered sections -->
@@ -81,7 +92,7 @@ const jsonLd = {
 </DocsShell>
 
 <style is:global>
-  /* ── Legal pages (/privacy, /terms) — long numbered prose, so the shared docs
+  /* ── Legal pages (/privacy, /terms, /legal-notice) — long numbered prose, so the shared docs
      section furniture is toned down: tighter spacing, smaller h2s. ── */
   .nf-legal section[id] {
     padding: clamp(26px, 4vw, 38px) 0 clamp(6px, 1.5vw, 12px);

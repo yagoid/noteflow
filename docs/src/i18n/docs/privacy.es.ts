@@ -1,6 +1,13 @@
 // Copy en español de la página /privacy — traducción fiel del texto legal de
-// privacy.en.ts (misma estructura de secciones y bloques; mantener en sync).
+// privacy.en.ts (misma estructura de secciones y bloques; mantener en sync). El párrafo
+// del responsable (§1) nombra al titular y enlaza al aviso legal solo cuando
+// legal-notice.owner.ts está relleno.
 import type { LegalContent } from './legal';
+import { OWNER, legalNoticeReady, ownerNameHtml } from './legal-notice.owner';
+
+const controllerHtml = legalNoticeReady
+  ? `El responsable del tratamiento de tus datos personales es <strong>${ownerNameHtml}</strong>, titular de NoteFlow, cuyos datos identificativos completos figuran en el <a href="%LEGAL_NOTICE_URL%">Aviso legal</a>.`
+  : `El responsable del tratamiento de tus datos personales es el desarrollador independiente que opera NoteFlow, contactable en <strong>${OWNER.email}</strong>.`;
 
 export const privacyEs: LegalContent = {
   meta: {
@@ -12,7 +19,7 @@ export const privacyEs: LegalContent = {
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Política de<br />privacidad',
-    tagline: 'Última actualización: 12 de julio de 2026',
+    tagline: 'Última actualización: 19 de octubre de 2026',
   },
 
   summary: {
@@ -47,6 +54,7 @@ export const privacyEs: LegalContent = {
           t: 'p',
           html: 'NoteFlow es una aplicación de escritorio para tomar notas, un sitio web público y un conjunto de servicios online opcionales (la cuenta de NoteFlow, NoteFlow AI y NoteFlow Cloud) desarrollados y operados por un desarrollador independiente con base en España («NoteFlow», «nosotros»).',
         },
+        { t: 'p', html: controllerHtml },
         {
           t: 'p',
           html: 'Para cualquier cosa relacionada con esta política o con tus datos, escribe a: <strong>yago.igle@gmail.com</strong>.',

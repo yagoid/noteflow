@@ -2,8 +2,14 @@
 // text — edit deliberately (and keep privacy.es.ts in sync). Rendered by
 // LegalPage.astro via set:html; %MOBILE_PRIVACY_URL% is filled there with the
 // base-aware link to public/mobile-privacy-policy.html (which stays live — the
-// Play Store links to it).
+// Play Store links to it). The controller paragraph of §1 names the owner and links to
+// the legal notice (%LEGAL_NOTICE_URL%) only once legal-notice.owner.ts is filled in.
 import type { LegalContent } from './legal';
+import { OWNER, legalNoticeReady, ownerNameHtml } from './legal-notice.owner';
+
+const controllerHtml = legalNoticeReady
+  ? `The controller of your personal data is <strong>${ownerNameHtml}</strong>, the owner of NoteFlow, whose full identification details are listed in the <a href="%LEGAL_NOTICE_URL%">Legal Notice</a>.`
+  : `The controller of your personal data is the independent developer who operates NoteFlow, contactable at <strong>${OWNER.email}</strong>.`;
 
 export const privacyEn: LegalContent = {
   meta: {
@@ -15,7 +21,7 @@ export const privacyEn: LegalContent = {
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Privacy<br />Policy',
-    tagline: 'Last updated: July 12, 2026',
+    tagline: 'Last updated: October 19, 2026',
   },
 
   summary: {
@@ -50,6 +56,7 @@ export const privacyEn: LegalContent = {
           t: 'p',
           html: 'NoteFlow is a desktop note-taking application, a public website and a set of optional online services (NoteFlow Account, NoteFlow AI and NoteFlow Cloud) developed and operated by an independent developer based in Spain (“NoteFlow”, “we”).',
         },
+        { t: 'p', html: controllerHtml },
         {
           t: 'p',
           html: 'For anything related to this policy or your data, contact: <strong>yago.igle@gmail.com</strong>.',

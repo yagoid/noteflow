@@ -156,6 +156,10 @@ export function PlanOffers({
         })}
       </div>
 
+      <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed normal-case">
+        {t.settings.account.pricesIncludeVat}
+      </p>
+
       {account.signedIn ? (
         <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed normal-case">
           {t.settings.account.subscribeHint}

@@ -1,6 +1,6 @@
 ---
 // Shared shell for the long-form docs pages (/cli, /ai, /features, /pricing) and the
-// legal pages (/privacy, /terms): wraps Base with the neural background, a docs
+// legal pages (/privacy, /terms, /legal-notice): wraps Base with the neural background, a docs
 // variant of the vertical rail, the page header (kicker + h1 + tagline), the
 // content+TOC grid and a slim footer. Page-specific markup goes in the default
 // slot as <section id="…"> blocks matching `toc`.
@@ -10,9 +10,10 @@ import '../styles/docs.css';
 import Base from './Base.astro';
 import { getRelativeLocaleUrl } from 'astro:i18n';
 import { getDocsCommon } from '../i18n/docs/common';
+import { legalNoticeReady } from '../i18n/docs/legal-notice.owner';
 import type { Lang } from '../i18n';
 
-type DocsPage = 'cli' | 'ai' | 'features' | 'pricing' | 'privacy' | 'terms';
+type DocsPage = 'cli' | 'ai' | 'features' | 'pricing' | 'privacy' | 'terms' | 'legal-notice';
 
 interface TocItem {
   id: string;
@@ -50,10 +51,12 @@ const switchHref = getRelativeLocaleUrl(otherLang, `/${page}`);
 const cookieHref = getRelativeLocaleUrl(lang, '/privacy');
 const GITHUB = 'https://github.com/yagoid/noteflow';
 
-// The legal pages: footer-only links (no rail neuron).
+// The legal pages: footer-only links (no rail neuron). The legal notice is only linked
+// once its owner data is filled in (otherwise the page is not generated).
 const legalPages = [
   { key: 'privacy' as const, label: c.footer.privacy },
   { key: 'terms' as const, label: c.footer.terms },
+  ...(legalNoticeReady ? [{ key: 'legal-notice' as const, label: c.footer.legalNotice }] : []),
 ];
 const footerLinks = [
   { href: homeHref, label: c.footer.home },

@@ -308,6 +308,9 @@ export const settings = {
     subscribe: 'Subscribe',
     comingSoon: 'Coming soon',
     subscribeHint: 'Opens the checkout in your browser. The plan activates automatically after payment — hit Refresh if it does not show up.',
+    // Under the plan cards: Lemon Squeezy is set to tax-inclusive pricing, so the
+    // listed price is what the customer pays (stating it is required by LSSI art. 10.1.f).
+    pricesIncludeVat: 'Prices include VAT.',
     // Shown instead of subscribeHint when the plans block renders without a
     // session (AI / Cloud gates), next to the shortcut into Settings → Account.
     signInToSubscribe: 'Sign in to your NoteFlow account to subscribe.',

@@ -266,7 +266,11 @@ es **un preset más**, no una implementación nueva.
     ignoran, una fila de test `active` **nunca expira sola**. El webhook no guarda `test_mode`:
     se identifican por `provider_ref` o porque se crearon antes del 2026-10-19. Al hacer el
     cambio solo había dos filas, ambas del operador: `ai` 2332140 (ya `expired`) y bundle
-    `provider_ref=2370478`, que sigue **`active`** (expirarla o no lo decide el operador).
+    `provider_ref=2370478`, que se **expiró** el 2026-10-19.
+  - **Cuenta del operador (comp permanente):** fila `provider='manual'`,
+    `provider_ref='operator-comp'`, `product='bundle'`, `status='active'`, `renews_at=null`,
+    insertada a mano por SQL. Da AI + Cloud sin pagar y el webhook nunca la toca (otro
+    `provider`). Es el patrón para regalar acceso: una fila `manual` por usuario.
   - **Volver a probar en test:** añadir sus IDs al map reabre el agujero. Hay que mantener esa
     ventana lo más corta posible y, al retirar los IDs, expirar o borrar las filas que se hayan
     creado durante ella (si no, quedan activas para siempre).
@@ -274,7 +278,11 @@ es **un preset más**, no una implementación nueva.
   El webhook de live apunta al mismo endpoint, con los
   mismos 7 eventos `subscription_*` y el **mismo signing secret** que el de test. Las URLs de
   checkout (`cloudConfig.ts`) son `/checkout/buy/<slug>` de la **variante Monthly** de cada
-  producto, no el slug del producto. Ver `supabase/README.md` §§ 5-6 para repetir el proceso en
+  producto, no el slug del producto. **Precios con IVA incluido** (decidido 2026-10-19): la store
+  tiene activado "tax-inclusive pricing", así que el cliente paga exactamente la cifra publicada
+  y el neto baja según el IVA del país. La web (`/pricing`, `/terms`) lo indica (LSSI art.
+  10.1.f); la nota "IVA incluido" en la app (Settings → Account, `PlanOffers.tsx`) está
+  **pendiente**. Ver `supabase/README.md` §§ 5-6 para repetir el proceso en
   otro proyecto.
 - **Privacidad (documentar en UI/landing):** el índice RAG sigue siendo 100% local; lo que viaja
   al proxy es lo mismo que viajaría a cualquier proveedor con key propia (pregunta + chunks
