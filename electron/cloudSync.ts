@@ -36,6 +36,7 @@ import * as cloudRealtime from './cloudRealtime'
 import * as githubSync from './githubSync'
 import { supabaseRest } from './cloudKeys'
 import { isCloudConfigured } from './cloudConfig'
+import { writeSettingsFile } from './settingsFile'
 import { NOTE_MD, listNoteDirs } from './noteFormat'
 import { generateNoteKey, derivePathKeyHmac, unwrapKey, decryptContent } from './cloudCrypto'
 import {
@@ -162,7 +163,7 @@ function readSettings(): Record<string, unknown> {
 }
 
 function writeSettings(data: Record<string, unknown>): void {
-  fs.writeFileSync(getSettingsPath(), JSON.stringify(data), 'utf-8')
+  writeSettingsFile(getSettingsPath(), data) // owner-only (0600) on POSIX
 }
 
 // Merge-writes only the fields this module owns — cloudKeys.ts stores
@@ -488,8 +489,15 @@ async function removeRemoteByPathKeys(pathKeys: string[]): Promise<void> {
   if (pathKeys.length === 0) return
   const filter = `path_key=in.(${pathKeys.map((k) => `"${k}"`).join(',')})`
 
-  const hasEntitlement = account.getAccountStatus().entitlements.cloud
-  if (hasEntitlement) {
+  const status = account.getAccountStatus()
+  const hasEntitlement = status.entitlements.cloud
+  // Entitlements never fetched (offline boot, keychain locked…) are UNKNOWN, not
+  // "no subscription": try the tombstone, but NEVER fall back to a physical
+  // DELETE on that guess — a DELETE leaves the other devices un-notified, so the
+  // note would resurrect there. Throwing keeps the op journaled; it is retried
+  // once the entitlements are known (true → tombstone, false → DELETE below).
+  const entitlementsUnknown = !status.entitlementsKnown
+  if (hasEntitlement || entitlementsUnknown) {
     const res = await restWithRetry(() =>
       supabaseRest(`/rest/v1/files?${filter}`, {
         method: 'PATCH',
@@ -499,7 +507,8 @@ async function removeRemoteByPathKeys(pathKeys: string[]): Promise<void> {
     )
     if (res.status < 400) return
     if (!isWriteForbidden(res.status)) throw new Error(`Cloud delete failed (HTTP ${res.status})`)
-    // 403 despite local entitlement (stale) — fall through to physical delete.
+    if (entitlementsUnknown) throw new Error('Cloud delete deferred: subscription status not verified yet')
+    // 403 despite a KNOWN local entitlement (stale) — fall through to physical delete.
   }
   const res = await restWithRetry(() =>
     supabaseRest(`/rest/v1/files?${filter}`, {

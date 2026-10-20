@@ -16,9 +16,11 @@
 // secret — in a small `accountRestore` record so signing back in with the SAME
 // identity puts it all back, provided the entitlement is still alive.
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.NO_AI_BASELINE = void 0;
 exports.parseAccountRestore = parseAccountRestore;
 exports.clearRestoreSurface = clearRestoreSurface;
 exports.planAccountTransition = planAccountTransition;
+exports.stepAiEntitlementBaseline = stepAiEntitlementBaseline;
 const NO_OP = {
     disableCloud: false,
     resetKeys: false,
@@ -48,7 +50,7 @@ function parseAccountRestore(raw) {
  * A pending record is re-evaluated on every status change (entitlements arrive
  * async), which means it could otherwise sit there for boots on end and one day
  * overrule the user: if the entitlements fetch fails (verifyOtp's is
- * best-effort and entitlementsFetchedAt lives only in memory), a user who signs
+ * best-effort; until one succeeds they stay unknown), a user who signs
  * in and DELIBERATELY leaves Cloud off — or picks a BYO provider — would see it
  * flipped back on behind their back by a later refreshEntitlements.
  *
@@ -129,5 +131,32 @@ function planAccountTransition(previous, current, local) {
         enableCloud: record.cloudEnabled && current.entitlements.cloud && !local.cloudEnabled,
         setAiProvider: record.aiManaged && current.entitlements.ai && !local.aiManaged ? 'noteflow' : null,
         restore: null, // consumed
+    };
+}
+exports.NO_AI_BASELINE = { identity: null, baseline: null };
+/**
+ * Steps the baseline with a new observation and says whether to auto-activate
+ * the managed provider. Only a REAL false→true flip seen for the SAME identity
+ * triggers it (the user subscribes while the app runs and hits Refresh):
+ *  - an identity change (boot, sign-in, account switch, sign-out) only
+ *    establishes a fresh baseline — a naive false→true on the first read would
+ *    force-switch an already-subscribed user on every launch, even one who
+ *    deliberately kept a BYO-key provider;
+ *  - `fresh` must be false for anything not fetched in THIS run (unknown, or
+ *    the on-disk cache): it never sets nor moves the baseline, so unknown→true
+ *    and cached-false→true are NOT transitions.
+ */
+function stepAiEntitlementBaseline(prev, obs) {
+    if (obs.identity !== prev.identity) {
+        return {
+            next: { identity: obs.identity, baseline: obs.identity !== null && obs.fresh ? obs.ai : null },
+            autoSwitch: false,
+        };
+    }
+    if (obs.identity === null || !obs.fresh)
+        return { next: prev, autoSwitch: false };
+    return {
+        next: { identity: obs.identity, baseline: obs.ai },
+        autoSwitch: prev.baseline === false && obs.ai,
     };
 }

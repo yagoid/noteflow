@@ -39,6 +39,9 @@ export interface DialogMessages {
 
 export interface ChatErrorMessages {
   quotaExceeded: string
+  // NoteFlow AI proxy answered 401 (session token rejected) / 403 (no active plan).
+  managedSignInAgain: string
+  managedSubscriptionInactive: string
 }
 
 export interface Messages {
@@ -75,6 +78,8 @@ const en: Messages = {
   },
   chatErrors: {
     quotaExceeded: "You've reached your NoteFlow AI monthly quota. It resets on the 1st of next month.",
+    managedSignInAgain: 'Your NoteFlow session has expired. Sign in again from Settings → Account.',
+    managedSubscriptionInactive: "NoteFlow AI needs an active subscription and yours isn't active. Check your plan in Settings → Account.",
   },
 }
 
@@ -106,6 +111,8 @@ const es: Messages = {
   },
   chatErrors: {
     quotaExceeded: 'Has alcanzado tu cuota mensual de NoteFlow AI. Se renueva el día 1 del mes que viene.',
+    managedSignInAgain: 'Tu sesión de NoteFlow ha caducado. Vuelve a iniciar sesión en Ajustes → Cuenta.',
+    managedSubscriptionInactive: 'NoteFlow AI necesita una suscripción activa y la tuya no lo está. Revisa tu plan en Ajustes → Cuenta.',
   },
 }
 

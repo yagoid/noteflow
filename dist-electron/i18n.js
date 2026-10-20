@@ -38,6 +38,8 @@ const en = {
     },
     chatErrors: {
         quotaExceeded: "You've reached your NoteFlow AI monthly quota. It resets on the 1st of next month.",
+        managedSignInAgain: 'Your NoteFlow session has expired. Sign in again from Settings → Account.',
+        managedSubscriptionInactive: "NoteFlow AI needs an active subscription and yours isn't active. Check your plan in Settings → Account.",
     },
 };
 // `: Messages` forces key parity with English at compile time.
@@ -68,6 +70,8 @@ const es = {
     },
     chatErrors: {
         quotaExceeded: 'Has alcanzado tu cuota mensual de NoteFlow AI. Se renueva el día 1 del mes que viene.',
+        managedSignInAgain: 'Tu sesión de NoteFlow ha caducado. Vuelve a iniciar sesión en Ajustes → Cuenta.',
+        managedSubscriptionInactive: 'NoteFlow AI necesita una suscripción activa y la tuya no lo está. Revisa tu plan en Ajustes → Cuenta.',
     },
 };
 /**

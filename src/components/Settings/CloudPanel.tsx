@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Check, Cloud, CloudOff, Copy, KeyRound, Loader, Lock, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react'
 import type { AccountStatus, CloudSyncStatus } from '../../types'
-import type { SubscriptionProduct } from '../../lib/subscriptionPlans'
+import { hasKnownEntitlement, isPlanUnknown, type SubscriptionProduct } from '../../lib/subscriptionPlans'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import type { SettingsSection } from './SettingsModal'
-import { PlanOffers } from './PlanOffers'
+import { PlanOffers, PlanUnknownNotice } from './PlanOffers'
 import { settingsButtonClass } from './ui'
 
 // UI-only floor (the backend imposes no minimum); the passphrase only wraps
@@ -320,6 +320,13 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
 
   const isLoading = busy !== 'idle'
 
+  // KNOWN to have the cloud entitlement. Entitlements that were never fetched
+  // (offline boot, keychain locked…) are UNKNOWN: neither the paywall (a paying
+  // user must never be offered the plan again) nor the onboarding / Enable
+  // button — the gate shows a neutral "couldn't verify your plan — Retry".
+  const cloudEntitled = hasKnownEntitlement(account, 'cloud')
+  const planUnknown = isPlanUnknown(account)
+
   // Entitlement gate — shared by the two places where the panel stops short of
   // Cloud: the onboarding (no keys yet: creating keys for a cloud you cannot use
   // is pointless) and the enable button (unlocked but not enabled). Same copy and
@@ -328,7 +335,9 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
   // data up there must keep being able to read and take it out after lapsing.
   // Cloud, plus the Bundle while the AI plan is missing too. Display prices —
   // the authoritative figure is the checkout's.
-  const subscriptionGate = (
+  const subscriptionGate = planUnknown ? (
+    <PlanUnknownNotice />
+  ) : (
     <div className="space-y-2">
       <p className="text-[11px] font-mono text-text-muted leading-relaxed">
         {t.settings.cloud.requiresSubscription}
@@ -356,11 +365,11 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
       {/* ── No keys yet + no entitlement: the paywall replaces the onboarding.
              Creating key material here would only set up a cloud the user
              cannot enable; nothing is uploaded yet, so nothing to recover ── */}
-      {status.keysState === 'no-keys' && !account.entitlements.cloud && subscriptionGate}
+      {status.keysState === 'no-keys' && !cloudEntitled && subscriptionGate}
 
       {/* ── Onboarding (no keys yet): choose the encryption mode — two cards,
              Standard (managed) preselected and recommended ── */}
-      {status.keysState === 'no-keys' && account.entitlements.cloud && (
+      {status.keysState === 'no-keys' && cloudEntitled && (
         <div className="space-y-3">
           <p className="text-[11px] font-mono text-text-muted leading-relaxed">
             {t.settings.cloud.chooseModeDesc}
@@ -548,7 +557,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
 
           {/* Mutual-exclusion heads-up shown BEFORE enabling Cloud over GitHub —
               only when enabling is actually within reach (entitlement present) */}
-          {!status.enabled && githubConnected && account.entitlements.cloud && (
+          {!status.enabled && githubConnected && cloudEntitled && (
             <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
               {t.settings.cloud.willPauseGitHub}
             </div>
@@ -556,7 +565,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
 
           {/* Gate in front of Enable sync — it replaces the button (the other
               controls of this state stay open, see the constant above). */}
-          {!status.enabled && !account.entitlements.cloud && subscriptionGate}
+          {!status.enabled && !cloudEntitled && subscriptionGate}
 
           <div className="flex gap-2 flex-wrap">
             {status.enabled ? (
@@ -579,7 +588,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
                 </button>
               </>
             ) : (
-              account.entitlements.cloud && (
+              cloudEntitled && (
                 <button
                   onClick={handleEnable}
                   disabled={isLoading}

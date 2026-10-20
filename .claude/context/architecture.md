@@ -281,7 +281,7 @@ Renderer (React)
 | `sync:pull` | handle | Pull manual desde el remoto **GitHub** (lo usa Settings → Sync) |
 | `sync:pull-active` | handle | Pull manual enrutado al backend **activo** (Cloud si `enabled`, GitHub si no) — lo usa el botón de la titlebar |
 | `sync:mirror-to-github` | handle | **Espejo local → repo**: deja GitHub como copia exacta del disco (sube lo que difiere, borra lo que ya no existe). **Solo con Cloud habilitado** (gate en `main.ts`; si no → `{ok:false, error:'cloud-required'}`). No cambia nada local — ver `sync.md` |
-| `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsFetchedAt, aiCheckoutConfigured, cloudCheckoutConfigured}`) — **nunca** tokens |
+| `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsKnown, entitlementsFetchedAt, sessionLocked, aiCheckoutConfigured, cloudCheckoutConfigured, bundleCheckoutConfigured}`; `entitlementsKnown: false` = desconocidas, no "sin plan" (ver `monetization.md` § 2)) — **nunca** tokens |
 | `account:request-otp` | handle | Envía el código OTP de 6 dígitos por email (Supabase GoTrue, `create_user: true`) |
 | `account:verify-otp` | handle | Verifica `(email, code)` → guarda sesión (refresh token cifrado en `settings.account`) + primer fetch de entitlements |
 | `account:sign-out` | handle | Logout best-effort en el servidor + limpia la sección `account` y el estado. La app vuelve a su estado gratuito: Cloud `enabled=false`, **sesión de claves borrada** (DEK + cache + `keysMode`/`remoteKeysKnown`), IA gestionada → proveedor BYO/local, y se guarda `accountRestore` (ver `monetization.md` § 4 "Cerrar sesión") |
@@ -384,10 +384,11 @@ dual-write legacy — la fuente sincronizada es `ui-settings.json` del dir de no
 > (`restrictSettingsPerms()` al arrancar cualquier comando + `writeSettings`). Se protege frente a
 > otros usuarios locales, no frente a procesos del mismo usuario (el criterio de `gh` / `~/.ssh`).
 > Los writers de la app (`writeSettings` en `main.ts`, `githubSync.ts`, `account.ts`, `cloudSync.ts`,
-> `cloudKeys.ts`) escriben **in-place** con `writeFileSync`, que conserva el modo de un fichero
-> existente; si la app lo crea, queda con el umask (`0644`) hasta la siguiente ejecución del CLI.
-> **No** cambies esos writers a tmp + rename sin crear el tmp en `0600`, porque deshaces el
-> endurecimiento.
+> `cloudKeys.ts`) escriben todos vía `writeSettingsFile` (`electron/settingsFile.ts`): **in-place**
+> con `writeFileSync` y `mode: 0o600` (aplica al crear el fichero), más un `chmod 0600` previo si el
+> fichero existente está más abierto — en POSIX `settings.json` queda siempre owner-only, también
+> cuando lo crea la app. Un writer nuevo de este fichero debe usar ese helper. **No** cambies a
+> tmp + rename sin crear el tmp en `0600`, porque deshaces el endurecimiento.
 
 Estructura de `settings.json`:
 ```json
@@ -414,7 +415,8 @@ Estructura de `settings.json`:
   "account": {
     "email": "user@example.com",
     "userId": "<uuid de auth.users>",
-    "encryptedRefreshToken": "<cifrado con safeStorage o base64 fallback>"
+    "encryptedRefreshToken": "<cifrado con safeStorage o base64 fallback>",
+    "entitlementsCache": { "userId": "<uuid>", "ai": true, "cloud": false, "fetchedAt": "<ISO>" }
   },
   "cloudSync": {
     "enabled": true,

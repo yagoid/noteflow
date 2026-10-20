@@ -29,6 +29,9 @@ import {
   planAccountTransition,
   parseAccountRestore,
   clearRestoreSurface,
+  stepAiEntitlementBaseline,
+  NO_AI_BASELINE,
+  type AiEntitlementBaseline,
   type AccountRestoreRecord,
   type AccountTransitionPlan,
   type RestoreSurface,
@@ -37,6 +40,7 @@ import { LEMONSQUEEZY_CHECKOUT_URLS, AI_PROXY_URL } from './cloudConfig'
 import * as aiIndex from './ai/aiIndex'
 import * as llm from './ai/llm'
 import * as agentTools from './ai/llm/tools'
+import { managedProxyErrorKind } from './ai/llm/managedErrors'
 import * as noteFormat from './noteFormat'
 import { sanitizeUiSettings, mergeUiSettings, type UiSettings } from './uiSettings'
 import * as importers from './importers'
@@ -50,6 +54,7 @@ import {
   type ActivityLog,
 } from './activityLog'
 import { resolveLang, getTrayMessages, getMessages, type LanguageSetting } from './i18n'
+import { writeSettingsFile } from './settingsFile'
 
 
 function getIconPath(): string {
@@ -207,21 +212,25 @@ function emitAccountStatusChanged(): void {
   })
 }
 
-// Baseline for the 'ai' entitlement, established on the FIRST status observation of the
-// CURRENT signed-in identity (app boot with a persisted session, or right after sign-in) and
-// never used to trigger anything by itself — entitlements are re-fetched from scratch on every
-// boot (account.ts persists no entitlements), so a naive false→true edge on that first read
-// would force-switch the provider on every single launch for an already-subscribed user, even
-// one who deliberately kept a BYO-key provider active. Only a REAL transition seen LATER for
-// the SAME identity in the same run (e.g. the user subscribes, comes back and hits Refresh in
-// Settings → Account) should auto-activate the managed provider.
+// Baseline for the 'ai' entitlement, established on the FIRST FRESH status observation of the
+// CURRENT signed-in identity (the first successful fetch after app boot with a persisted
+// session, or right after sign-in) and never used to trigger anything by itself — a naive
+// false→true edge on that first read would force-switch the provider on every single launch for
+// an already-subscribed user, even one who deliberately kept a BYO-key provider active. Only a
+// REAL transition seen LATER for the SAME identity in the same run (e.g. the user subscribes,
+// comes back and hits Refresh in Settings → Account) should auto-activate the managed provider.
+// account.ts now PERSISTS the last known entitlements (account.entitlementsCache) so the UI is
+// known from t=0, but that cached value — like still-unknown entitlements — is NOT a fresh
+// observation: it neither sets nor moves the baseline (account.areEntitlementsFromCache), so
+// neither cached-false→true nor unknown→true count as a transition.
 // Keyed by identity (the signed-in email, or `null` while signed out) so that signing out and
 // signing back in — as the same account or a different one — always re-establishes a fresh
 // baseline instead of carrying over a stale `false` from a previous session: without this, an
 // account B that already had the entitlement before this process even started would look like
 // it just "transitioned" the moment it signs in after account A (which lacked it) signs out.
-let aiEntitlementBaseline: boolean | null = null
-let aiEntitlementIdentity: string | null = null
+// A keychain-locked session (status.sessionLocked) keeps signedIn + identity, so it is NOT a
+// sign-out for this nor for planAccountTransition. Logic: stepAiEntitlementBaseline.
+let aiEntitlementBaseline: AiEntitlementBaseline = NO_AI_BASELINE
 
 // Last observed account snapshot — the "previous" side of the sign-in/sign-out
 // edge that planAccountTransition() reasons about. Seeded at boot from the
@@ -305,23 +314,20 @@ function applyAccountTransition(plan: AccountTransitionPlan): void {
 function handleAccountStatusChanged(): void {
   const status = account.getAccountStatus()
   const identity = status.signedIn ? (status.email ?? '') : null
-  const aiActive = status.entitlements.ai
 
-  if (identity !== aiEntitlementIdentity) {
-    // Identity changed since the last observation (fresh sign-in, switch to a different
-    // account, or signing out) — start a fresh baseline for it without triggering anything.
-    aiEntitlementIdentity = identity
-    aiEntitlementBaseline = identity === null ? null : aiActive
-  } else if (aiEntitlementBaseline !== null && !aiEntitlementBaseline && aiActive) {
+  const step = stepAiEntitlementBaseline(aiEntitlementBaseline, {
+    identity,
+    ai: status.entitlements.ai,
+    fresh: status.entitlementsKnown && !account.areEntitlementsFromCache(),
+  })
+  aiEntitlementBaseline = step.next
+  if (step.autoSwitch) {
     // Same identity as before, real subscribe-while-running transition — auto-switch to the
     // managed provider unless it's already active (avoid an unnecessary settings write).
     // Written BEFORE the broadcast below so the renderer's config reload (LlmConfigView reacts
     // to onAccountStatusChanged) already sees the new active provider.
     const cfg = readLlmSettings()
     if (cfg.active !== 'noteflow') writeLlmSettings(llm.withActiveProvider(cfg, 'noteflow'))
-    aiEntitlementBaseline = aiActive
-  } else {
-    aiEntitlementBaseline = identity === null ? null : aiActive
   }
 
   // Sign-out teardown / sign-in restore of the paid subsystems. Read AFTER the
@@ -339,7 +345,7 @@ function handleAccountStatusChanged(): void {
         signedIn: status.signedIn,
         identity: accountIdentityOf(status),
         entitlements: status.entitlements,
-        entitlementsKnown: !!status.entitlementsFetchedAt,
+        entitlementsKnown: status.entitlementsKnown,
       },
       {
         cloudEnabled: cloudSync.isCloudSyncEnabled(),
@@ -2121,7 +2127,7 @@ function readSettings(): Record<string, unknown> {
 }
 
 function writeSettings(data: Record<string, unknown>): void {
-  fs.writeFileSync(path.join(app.getPath('userData'), 'settings.json'), JSON.stringify(data), 'utf-8')
+  writeSettingsFile(path.join(app.getPath('userData'), 'settings.json'), data) // owner-only (0600) on POSIX
 }
 
 // ── AI / Semantic index ───────────────────────────────────────────────────────
@@ -2211,7 +2217,13 @@ ipcMain.handle('ai:llm-set-config', (_event, patch: {
   // already offers those presets a read-only field, and persisting one would make the saved
   // config diverge from the model actually used (see llm.acceptsModel).
   if (patch.model !== undefined && llm.acceptsModel(id, patch.model)) ps.model = patch.model
-  if (patch.baseUrl !== undefined) ps.baseUrl = patch.baseUrl
+  // A base URL is only stored for presets that allow editing it. The pinned ones (above all the
+  // managed `noteflow`, whose credential is the Supabase access token) ignore it: a stored URL
+  // there could send the token to another host. effectiveBaseUrl enforces the same rule on read.
+  if (patch.baseUrl !== undefined) {
+    if (llm.acceptsBaseUrl(id)) ps.baseUrl = patch.baseUrl
+    else console.warn(`[LLM] ignored a baseUrl for preset "${id}" (its endpoint is fixed)`)
+  }
   if (patch.clearKey) ps.encryptedApiKey = undefined
   else if (typeof patch.apiKey === 'string' && patch.apiKey.length > 0) ps.encryptedApiKey = llm.encryptSecret(patch.apiKey)
   cfg.byPreset[id] = ps
@@ -2248,6 +2260,7 @@ ipcMain.handle('ai:llm-usage', async (): Promise<{ used: number; limit: number }
     if (!token) return null
     const res = await fetch(`${AI_PROXY_URL}/usage`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15000),
     })
     if (!res.ok) return null
     const body = (await res.json().catch(() => null)) as { used?: unknown; limit?: unknown } | null
@@ -2507,7 +2520,7 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
     send('ai:chat-done', { requestId })
   } catch (err) {
     if (controller.signal.aborted) send('ai:chat-done', { requestId, aborted: true })
-    else send('ai:chat-error', { requestId, error: friendlyChatError(err instanceof Error ? err.message : String(err), sentImages) })
+    else send('ai:chat-error', { requestId, error: friendlyChatError(err instanceof Error ? err.message : String(err), sentImages, stored.active === 'noteflow') })
   } finally {
     for (const id of myConfirmIds) chatConfirms.delete(id)
     chatAborts.delete(requestId)
@@ -2517,13 +2530,26 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
 // Turn a raw provider error into something actionable. The common BYO failure is attaching an image
 // to a text-only model (e.g. DeepSeek answers HTTP 400 with `unknown variant image_url`); detect that
 // and explain it instead of dumping the raw JSON. Everything else passes through unchanged.
-function friendlyChatError(raw: string, sentImages: boolean): string {
+function friendlyChatError(raw: string, sentImages: boolean, managed: boolean): string {
   // NoteFlow AI monthly quota: the proxy answers 429 with the stable machine code
   // `monthly_quota_exceeded` in its OpenAI-shaped body — match on that (not the HTTP
   // status or the English message) and surface a clean, localized message instead of
   // the raw `HTTP 429 — {json}` string.
   if (raw.includes('monthly_quota_exceeded')) {
     return mainMessages().chatErrors.quotaExceeded
+  }
+  // NoteFlow AI (managed preset only — for a BYO provider a 401/403 means a bad API key and
+  // keeps its raw wording): the proxy's 401 = the session token was rejected, 403 = no active
+  // 'ai' plan. See managedProxyErrorKind for how the status is read from the raw message.
+  if (managed) {
+    const kind = managedProxyErrorKind(raw)
+    if (kind === 'signInAgain') return mainMessages().chatErrors.managedSignInAgain
+    if (kind === 'subscriptionInactive') {
+      // Our local view of the plan may be stale (or still unknown) — re-check it so the
+      // Settings/AI surfaces catch up. Fire-and-forget: refreshEntitlements never throws.
+      void account.refreshEntitlements()
+      return mainMessages().chatErrors.managedSubscriptionInactive
+    }
   }
   if (sentImages) {
     const low = raw.toLowerCase()

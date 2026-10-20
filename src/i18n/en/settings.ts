@@ -294,6 +294,7 @@ export const settings = {
       verifyFailed: 'Could not verify the code. Please try again.',
       notSignedIn: 'Sign in to your NoteFlow account first.',
       refreshFailed: 'Could not load your subscription status. Please try again.',
+      sessionLocked: "Couldn't unlock your saved session — your system keychain may be locked. Unlock it and try again.",
       checkoutUnavailable: "This plan isn't available for purchase yet.",
       checkoutInvalidUrl: 'The checkout link is not valid in this build.',
     },
@@ -303,6 +304,16 @@ export const settings = {
     codeResent: 'New code sent — check your inbox.',
     active: 'Active',
     lastChecked: 'Last checked: {time}',
+    // Entitlements never fetched yet (offline boot, keychain locked…): the plan
+    // is UNKNOWN — shown instead of the Subscribe cards / "not subscribed" state
+    // so a paying user is never offered a plan they already have.
+    planUnknownBadge: "Couldn't check",
+    planUnknown: "Couldn't verify your plan yet.",
+    planChecking: 'Checking your plan…',
+    planRetry: 'Retry',
+    // The session's refresh token can't be decrypted right now (system keychain
+    // locked). Recoverable: retried automatically, or Retry / Sign out by hand.
+    sessionLocked: "Couldn't unlock your saved session — your system keychain may be locked. Unlock it and retry, or sign out.",
     // Plans block (signed in, entitlements missing). Price figures are NOT in
     // the dicts — they live in src/lib/subscriptionPlans.ts; only the pattern
     // is translated and filled with tf().

@@ -87,6 +87,7 @@ const path_1 = __importDefault(require("path"));
 const account = __importStar(require("./account"));
 const cloudConfig_1 = require("./cloudConfig");
 const secret_1 = require("./ai/llm/secret");
+const settingsFile_1 = require("./settingsFile");
 const cloudCrypto_1 = require("./cloudCrypto");
 // ── Settings helpers (same idiom as account.ts / githubSync.ts) ───────────────
 function getSettingsPath() {
@@ -101,7 +102,7 @@ function readSettings() {
     }
 }
 function writeSettings(data) {
-    fs_1.default.writeFileSync(getSettingsPath(), JSON.stringify(data), 'utf-8');
+    (0, settingsFile_1.writeSettingsFile)(getSettingsPath(), data); // owner-only (0600) on POSIX
 }
 // Merges a patch into the cloudSync section without clobbering fields owned by
 // cloudSync.ts (enabled/lastSync/pullSeq) — both modules read-modify-write

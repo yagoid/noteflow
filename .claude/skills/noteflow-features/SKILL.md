@@ -1155,6 +1155,18 @@ pobladas en la build (precios en `.claude/context/monetization.md` § visión, c
   proceso main manda un código de error, no texto en inglés).
 - **Con sesión:** muestra el email, badges de plan ("NoteFlow AI" / "NoteFlow Cloud" con estado
   Active/—), la sección de **planes**, botón "Refresh" (relee las suscripciones) y "Sign out".
+- **Plan aún sin comprobar:** si la app no ha podido consultar tu plan todavía (arranque sin red,
+  servidor caído) y no tiene uno guardado de la última vez, los badges dicen **"Couldn't check"** y
+  en los gates de IA y Cloud, en vez de las cards de Subscribe o del "requiere suscripción", aparece
+  **"Couldn't verify your plan yet — Retry"** (nunca te ofrece pagar algo que quizá ya pagas). La
+  app reintenta sola (cada vez más espaciado, al volver de suspensión y al recuperar la red);
+  mientras, NoteFlow AI se deja usar (el servidor decide). La última respuesta buena se recuerda,
+  así que tras reiniciar el plan se ve al momento.
+- **Llavero bloqueado:** si el sistema no deja descifrar la sesión guardada (Linux antes de
+  desbloquear el llavero, Keychain denegado en macOS), **no** se cierra sesión: aviso ámbar
+  "Couldn't unlock your saved session — your system keychain may be locked…" con Refresh para
+  reintentar o Sign out. Se recupera sola en cuanto el llavero se desbloquea.
+- **Sign out** cierra solo la sesión de este equipo (otros dispositivos y el CLI siguen dentro).
 - **Sección de planes:** cards en orden **Bundle → AI → Cloud**, cada una con nombre y precio
   ("€7.99/month · €79.99/year" para Bundle — con subtítulo "AI + Cloud" y badge **"Best value"** —,
   €5.99/€49.99 para AI, €3.99/€39.99 para Cloud; cifras de `src/lib/subscriptionPlans.ts`). Un plan

@@ -90,6 +90,7 @@ const cloudRealtime = __importStar(require("./cloudRealtime"));
 const githubSync = __importStar(require("./githubSync"));
 const cloudKeys_1 = require("./cloudKeys");
 const cloudConfig_1 = require("./cloudConfig");
+const settingsFile_1 = require("./settingsFile");
 const noteFormat_1 = require("./noteFormat");
 const cloudCrypto_1 = require("./cloudCrypto");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
@@ -121,7 +122,7 @@ function readSettings() {
     }
 }
 function writeSettings(data) {
-    fs_1.default.writeFileSync(getSettingsPath(), JSON.stringify(data), 'utf-8');
+    (0, settingsFile_1.writeSettingsFile)(getSettingsPath(), data); // owner-only (0600) on POSIX
 }
 // Merge-writes only the fields this module owns — cloudKeys.ts stores
 // encryptedDek in the same settings.cloudSync section.
@@ -417,8 +418,15 @@ async function removeRemoteByPathKeys(pathKeys) {
     if (pathKeys.length === 0)
         return;
     const filter = `path_key=in.(${pathKeys.map((k) => `"${k}"`).join(',')})`;
-    const hasEntitlement = account.getAccountStatus().entitlements.cloud;
-    if (hasEntitlement) {
+    const status = account.getAccountStatus();
+    const hasEntitlement = status.entitlements.cloud;
+    // Entitlements never fetched (offline boot, keychain locked…) are UNKNOWN, not
+    // "no subscription": try the tombstone, but NEVER fall back to a physical
+    // DELETE on that guess — a DELETE leaves the other devices un-notified, so the
+    // note would resurrect there. Throwing keeps the op journaled; it is retried
+    // once the entitlements are known (true → tombstone, false → DELETE below).
+    const entitlementsUnknown = !status.entitlementsKnown;
+    if (hasEntitlement || entitlementsUnknown) {
         const res = await restWithRetry(() => (0, cloudKeys_1.supabaseRest)(`/rest/v1/files?${filter}`, {
             method: 'PATCH',
             headers: { Prefer: 'return=minimal' },
@@ -428,7 +436,9 @@ async function removeRemoteByPathKeys(pathKeys) {
             return;
         if (!isWriteForbidden(res.status))
             throw new Error(`Cloud delete failed (HTTP ${res.status})`);
-        // 403 despite local entitlement (stale) — fall through to physical delete.
+        if (entitlementsUnknown)
+            throw new Error('Cloud delete deferred: subscription status not verified yet');
+        // 403 despite a KNOWN local entitlement (stale) — fall through to physical delete.
     }
     const res = await restWithRetry(() => (0, cloudKeys_1.supabaseRest)(`/rest/v1/files?${filter}`, {
         method: 'DELETE',

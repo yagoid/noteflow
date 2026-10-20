@@ -11,10 +11,10 @@ vi.mock('electron', () => ({
   },
 }))
 
-const { withActiveProvider, byoFallbackProvider, resolveConfig, acceptsModel, DEFAULT_LLM_CONFIG } = await import(
+const { withActiveProvider, byoFallbackProvider, resolveConfig, acceptsModel, acceptsBaseUrl, toPublic, DEFAULT_LLM_CONFIG } = await import(
   '../../electron/ai/llm'
 )
-const { NOTEFLOW_AI_MODELS } = await import('../../electron/ai/llm/presets')
+const { NOTEFLOW_AI_MODELS, PRESETS } = await import('../../electron/ai/llm/presets')
 type LlmConfigStored = import('../../electron/ai/llm').LlmConfigStored
 
 const base: LlmConfigStored = { active: 'ollama', byPreset: {} }
@@ -122,5 +122,34 @@ describe('acceptsModel', () => {
 
   it('accepts anything for an unknown preset id (presetOf falls back to anthropic — no catalog)', () => {
     expect(acceptsModel('gone-provider', 'whatever')).toBe(true)
+  })
+})
+
+// The managed preset's credential is the user's Supabase access token: its endpoint is pinned.
+// A baseUrl stored for it (older build, hand-edited settings.json, a renderer patch) must never
+// be used — otherwise the token would be sent to another host.
+describe('baseUrl lock for non-editable presets', () => {
+  const noteflowUrl = PRESETS.find((p) => p.id === 'noteflow')!.baseUrl
+
+  it('refuses to store a baseUrl for a pinned preset', () => {
+    expect(acceptsBaseUrl('noteflow')).toBe(false)
+    expect(acceptsBaseUrl('anthropic')).toBe(false)
+  })
+
+  it('accepts one for the editable presets', () => {
+    expect(acceptsBaseUrl('openai')).toBe(true)
+    expect(acceptsBaseUrl('ollama')).toBe(true)
+    expect(acceptsBaseUrl('custom')).toBe(true)
+  })
+
+  it('ignores a stored baseUrl for the managed preset on read', () => {
+    const cfg: LlmConfigStored = { active: 'noteflow', byPreset: { noteflow: { baseUrl: 'https://evil.example/v1' } } }
+    expect(resolveConfig(cfg).baseUrl).toBe(noteflowUrl)
+    expect(toPublic(cfg).baseUrl).toBe(noteflowUrl)
+  })
+
+  it('still honours it for an editable preset', () => {
+    const cfg: LlmConfigStored = { active: 'ollama', byPreset: { ollama: { baseUrl: ' http://lan-box:11434/v1 ' } } }
+    expect(resolveConfig(cfg).baseUrl).toBe('http://lan-box:11434/v1')
   })
 })
