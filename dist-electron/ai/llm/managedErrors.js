@@ -15,6 +15,7 @@
 // wrong API key and must keep its raw wording — the caller decides.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.managedProxyErrorKind = managedProxyErrorKind;
+exports.managedTokenFailureMessage = managedTokenFailureMessage;
 function managedProxyErrorKind(raw) {
     const status = /^HTTP (\d{3})\b/.exec(raw.trim())?.[1];
     if (status === '401' || /"(missing_token|invalid_token)"/.test(raw))
@@ -22,4 +23,19 @@ function managedProxyErrorKind(raw) {
     if (status === '403' || raw.includes('"subscription_required"'))
         return 'subscriptionInactive';
     return null;
+}
+/**
+ * User-facing reason why no access token could be minted for the managed preset
+ * (account.getAccessTokenResult's failure). Only `noSession` means "sign in" —
+ * offline, a locked keychain or a failing account service must not tell a
+ * signed-in user to sign in again.
+ */
+function managedTokenFailureMessage(reason, messages) {
+    if (reason === 'network')
+        return messages.managedOffline;
+    if (reason === 'locked')
+        return messages.managedKeychainLocked;
+    if (reason === 'server')
+        return messages.managedServiceUnavailable;
+    return messages.managedNoSession;
 }

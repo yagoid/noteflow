@@ -19,6 +19,8 @@ const openaiCompatible_1 = require("./openaiCompatible");
 // settingsFile), never this module.
 const account_1 = require("../../account");
 const entitlementsRetry_1 = require("../../entitlementsRetry");
+const i18n_1 = require("../../i18n");
+const managedErrors_1 = require("./managedErrors");
 var presets_2 = require("./presets");
 Object.defineProperty(exports, "PRESETS", { enumerable: true, get: function () { return presets_2.PRESETS; } });
 var secret_2 = require("./secret");
@@ -108,17 +110,19 @@ function resolveConfig(cfg) {
  * Like resolveConfig, but for the managed `noteflow` preset the credential is a
  * FRESH Supabase access token of the NoteFlow account session (GoTrue tokens
  * expire in ~1h, so it must be minted per request — never stored like an API
- * key). Throws a user-facing error when there is no signed-in session.
+ * key). Throws a user-facing error saying WHY there is no token: no session,
+ * no connection, the system keychain is locked, or the account service failed.
+ * `messages` = the main-process strings in the app language (main.ts passes
+ * mainMessages().chatErrors; English when omitted).
  */
-async function resolveConfigAsync(cfg) {
+async function resolveConfigAsync(cfg, messages = (0, i18n_1.getMessages)('en').chatErrors) {
     const resolved = resolveConfig(cfg);
     if ((0, presets_1.presetOf)(cfg.active).id !== 'noteflow')
         return resolved;
-    const token = await (0, account_1.getAccessToken)();
-    if (!token) {
-        throw new Error('NoteFlow AI needs your NoteFlow account. Sign in from Settings → Account and try again.');
-    }
-    return { ...resolved, apiKey: token };
+    const result = await (0, account_1.getAccessTokenResult)();
+    if (!result.ok)
+        throw new Error((0, managedErrors_1.managedTokenFailureMessage)(result.reason, messages));
+    return { ...resolved, apiKey: result.token };
 }
 /** Native attachment support per preset (the app never extracts text itself). */
 function providerCapabilities(preset, activeModel) {

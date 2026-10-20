@@ -8,8 +8,10 @@ import { AnthropicProvider } from './anthropic'
 import { OpenAiCompatibleProvider } from './openaiCompatible'
 // No import cycle: account.ts only pulls ./secret and leaf modules (cloudConfig, entitlements*,
 // settingsFile), never this module.
-import { getAccessToken, getAccountStatus } from '../../account'
+import { getAccessTokenResult, getAccountStatus } from '../../account'
 import { isManagedAiUsable } from '../../entitlementsRetry'
+import { getMessages, type ChatErrorMessages } from '../../i18n'
+import { managedTokenFailureMessage } from './managedErrors'
 
 export type {
   LlmConfigStored, LlmConfigPublic, ResolvedLlmConfig, LlmProvider, ChatMessage,
@@ -107,16 +109,20 @@ export function resolveConfig(cfg: LlmConfigStored): ResolvedLlmConfig {
  * Like resolveConfig, but for the managed `noteflow` preset the credential is a
  * FRESH Supabase access token of the NoteFlow account session (GoTrue tokens
  * expire in ~1h, so it must be minted per request — never stored like an API
- * key). Throws a user-facing error when there is no signed-in session.
+ * key). Throws a user-facing error saying WHY there is no token: no session,
+ * no connection, the system keychain is locked, or the account service failed.
+ * `messages` = the main-process strings in the app language (main.ts passes
+ * mainMessages().chatErrors; English when omitted).
  */
-export async function resolveConfigAsync(cfg: LlmConfigStored): Promise<ResolvedLlmConfig> {
+export async function resolveConfigAsync(
+  cfg: LlmConfigStored,
+  messages: ChatErrorMessages = getMessages('en').chatErrors
+): Promise<ResolvedLlmConfig> {
   const resolved = resolveConfig(cfg)
   if (presetOf(cfg.active).id !== 'noteflow') return resolved
-  const token = await getAccessToken()
-  if (!token) {
-    throw new Error('NoteFlow AI needs your NoteFlow account. Sign in from Settings → Account and try again.')
-  }
-  return { ...resolved, apiKey: token }
+  const result = await getAccessTokenResult()
+  if (!result.ok) throw new Error(managedTokenFailureMessage(result.reason, messages))
+  return { ...resolved, apiKey: result.token }
 }
 
 /** Native attachment support per preset (the app never extracts text itself). */

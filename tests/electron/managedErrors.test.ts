@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { managedProxyErrorKind } from '../../electron/ai/llm/managedErrors'
+import { managedProxyErrorKind, managedTokenFailureMessage } from '../../electron/ai/llm/managedErrors'
+import { getMessages } from '../../electron/i18n'
 
 // Shapes as thrown by OpenAiCompatibleProvider for a non-2xx response, with the
 // OpenAI-shaped bodies the ai-proxy Edge Function sends.
@@ -31,5 +32,28 @@ describe('managedProxyErrorKind', () => {
     expect(managedProxyErrorKind('HTTP 429 Too Many Requests — {"error":{"code":"monthly_quota_exceeded"}}')).toBeNull()
     expect(managedProxyErrorKind('HTTP 500 Internal Server Error')).toBeNull()
     expect(managedProxyErrorKind('fetch failed')).toBeNull()
+  })
+})
+
+describe('managedTokenFailureMessage — why the managed preset has no token', () => {
+  const en = getMessages('en').chatErrors
+  const es = getMessages('es').chatErrors
+
+  it('only a missing session says "sign in"', () => {
+    expect(managedTokenFailureMessage('noSession', en)).toBe(en.managedNoSession)
+    for (const reason of ['network', 'locked', 'server'] as const) {
+      expect(managedTokenFailureMessage(reason, en)).not.toBe(en.managedNoSession)
+    }
+  })
+
+  it('maps each transient cause to its own message', () => {
+    expect(managedTokenFailureMessage('network', en)).toBe(en.managedOffline)
+    expect(managedTokenFailureMessage('locked', en)).toBe(en.managedKeychainLocked)
+    expect(managedTokenFailureMessage('server', en)).toBe(en.managedServiceUnavailable)
+  })
+
+  it('follows the language it is given', () => {
+    expect(managedTokenFailureMessage('network', es)).toBe(es.managedOffline)
+    expect(es.managedOffline).not.toBe(en.managedOffline)
   })
 })

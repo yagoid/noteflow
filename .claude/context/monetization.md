@@ -89,8 +89,11 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     `CloudPanel` y `LlmConfigView` no pintan ni las cards de Subscribe ni el estado "sin plan" ni el
     botón Enable de Cloud, sino un aviso neutro **"Couldn't verify your plan yet — Retry"**
     (`PlanUnknownNotice`, Retry = `accountRefreshEntitlements`); `AccountPanel` muestra los badges
-    en estado "Couldn't check". `cloudSync.removeRemoteByPathKeys` con entitlements desconocidas
-    intenta el tombstone y **nunca** cae al `DELETE` físico (lanza → la op sigue en el journal).
+    en estado "Couldn't check". `cloudSync.removeRemoteByPathKeys` con entitlements **no verificadas**
+    — desconocidas **o restauradas de la cache** (`account.areEntitlementsFromCache()`) — intenta el
+    tombstone y **nunca** cae al `DELETE` físico (lanza → la op sigue en el journal); decisión pura
+    `planRemoteDelete` en `cloudSyncLogic.ts` (ver § 4 "Deletes = tombstones"). Para las ofertas, en
+    cambio, la cache **sí** cuenta como conocida (una cache `ai:false` muestra las cards: aceptado).
     Helpers puros del renderer en `src/lib/subscriptionPlans.ts` (`isPlanUnknown`,
     `isPlanOffered`, `hasKnownEntitlement`).
   - **Cache persistida:** cada fetch OK guarda `settings.json` → `account.entitlementsCache =
@@ -128,7 +131,14 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     access token nuevo y el refresh token rotado se quedan en memoria (`accountSettings` es la
     fuente de verdad), se reintenta la escritura (3 intentos inmediatos, luego `pendingPersist` +
     reintento cada 30 s y en cada operación de cuenta) y `loadAccountSettings` no relee el disco
-    obsoleto mientras haya escritura pendiente. Ya no se reporta como error de red.
+    obsoleto mientras haya escritura pendiente. Ya no se reporta como error de red. Igual con el
+    **sign-out**: si no se puede borrar la sección `account` del disco queda `pendingClear` (mismos
+    reintentos), para que una sesión cerrada no reaparezca tras reiniciar. `main.ts` llama a
+    `account.flushAccountPersistence()` en `before-quit` como último intento.
+  - **Access token rechazado:** un 401 de PostgREST (fetch de entitlements) o del proxy de NoteFlow
+    AI (`friendlyChatError`) llama a `account.invalidateAccessToken()`: el siguiente uso acuña uno
+    nuevo — o, si el refresh token también está revocado, el 400/401 del refresh cierra sesión
+    limpiamente — en vez de reutilizar uno muerto hasta su caducidad local.
   - **Logout local:** `signOut` llama a `POST /auth/v1/logout?scope=local` (también el CLI en
     `cloud logout`): sin `scope=local` GoTrue revoca **todas** las sesiones del usuario (otros
     dispositivos y el CLI).
@@ -239,10 +249,14 @@ es **un preset más**, no una implementación nueva.
   (`effectiveBaseUrl` devuelve siempre `preset.baseUrl`) y `ai:llm-set-config` no persiste un
   `baseUrl` para él (`acceptsBaseUrl`); si no, el token podría acabar en otro host.
   **Errores del proxy en el chat:** con el preset `noteflow` activo, `friendlyChatError` (main)
-  traduce un 401 del proxy a "vuelve a iniciar sesión" y un 403 a "suscripción inactiva" (y en el
-  403 lanza un `refreshEntitlements()` fire-and-forget); el 429 de cuota sigue igual. Clasificación
-  pura en `electron/ai/llm/managedErrors.ts`; textos en `electron/i18n.ts` (`chatErrors`). Con un
-  proveedor BYO un 401/403 conserva su texto crudo (es una API key mala).
+  traduce un 401 del proxy a "vuelve a iniciar sesión" (e invalida el access token en memoria) y un
+  403 a "suscripción inactiva" (y lanza un `refreshEntitlements()` fire-and-forget); el 429 de cuota
+  sigue igual. Si ni siquiera hay token, `resolveConfigAsync` (vía `getAccessTokenResult`) dice el
+  motivo real: sin sesión → "sign in", `network` → sin conexión, `locked` → llavero bloqueado,
+  `server` → servicio no disponible (`managedTokenFailureMessage`). Clasificación pura en
+  `electron/ai/llm/managedErrors.ts`; textos en `electron/i18n.ts` (`chatErrors`, EN/ES; main pasa
+  `mainMessages().chatErrors` a `resolveConfigAsync`). Con un proveedor BYO un 401/403 conserva su
+  texto crudo (es una API key mala).
   Capabilities: imágenes **según el modelo activo** (`modelMeta`; los text-only las desactivan);
   PDF no (anthropic-only).
 - **UI:** `LlmConfigView` presenta las dos fuentes del asistente como **opciones excluyentes** —
@@ -578,10 +592,14 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   de seguridad de siempre (`updated <= lastSync`) **más el guard del journal** (abajo). Sin
   entitlement, RLS bloquea el UPDATE → fallback a `DELETE` físico (la fila desaparece sin
   notificar a otros dispositivos — asumido: sin suscripción tampoco pueden pushear). Ese fallback
-  solo ocurre con la entitlement **conocida** a `false` (o conocida a `true` y un 403 por estar
-  obsoleta): con entitlements **desconocidas** (`!entitlementsKnown`, p. ej. boot offline) se intenta
-  el tombstone y, si RLS lo rechaza, se **lanza** en vez de borrar físicamente — la op sigue en el
-  journal y se reintenta cuando se conozcan. Ojo: el
+  solo ocurre con la entitlement **verificada** — obtenida por un fetch en ESTA ejecución — a
+  `false` (o verificada a `true` y un 403 por estar obsoleta): con entitlements **desconocidas**
+  (`!entitlementsKnown`, p. ej. boot offline) **o solo cacheadas** (`areEntitlementsFromCache()`, la
+  cache puede ser vieja) se intenta el tombstone y, si RLS lo rechaza, se **lanza** en vez de borrar
+  físicamente — la op sigue en el journal y se reintenta cuando se verifiquen. Decisión pura en
+  dos pasos `planRemoteDelete({entitled, verified, patchStatus?})` (`cloudSyncLogic.ts`,
+  `'tombstone' | 'delete' | 'defer' | 'done' | 'fail'`), testeada en
+  `tests/electron/cloudSync.test.ts` (invariante: nunca `'delete'` sin verificar). Ojo: el
   tombstone lleva `updated_at = ahora` (hora del borrado), no el `updated` de la nota.
   - **Borrar una nota entera** (`scheduleDeleteDir` → `deleteRemoteDirNow`) necesita las filas de
     la carpeta, pero `path_key` es opaco: `listRemotePaths` lista **todas** las filas vivas

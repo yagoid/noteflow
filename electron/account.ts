@@ -170,6 +170,9 @@ let sessionGeneration = 0
 // to settings.json yet. The in-memory accountSettings is then the ONLY copy of
 // the live refresh token — never replaced by a re-read of the stale disk copy.
 let pendingPersist = false
+// Same, for a sign-out whose removal of the `account` section failed: without a
+// retry an offline/locked-file sign-out would come back after a restart.
+let pendingClear = false
 let persistRetryTimer: ReturnType<typeof setInterval> | null = null
 const PERSIST_ATTEMPTS = 3
 const PERSIST_RETRY_MS = 30_000
@@ -256,8 +259,8 @@ function extractErrorCode(json: unknown): string {
 
 export function loadAccountSettings(): AccountSettings {
   // The disk copy is stale while a write is pending (it may hold an already
-  // consumed refresh token) — the in-memory one wins.
-  if (pendingPersist && accountSettings) return accountSettings
+  // consumed refresh token, or a session that was signed out) — memory wins.
+  if ((pendingPersist || pendingClear) && accountSettings) return accountSettings
   const settings = readSettings()
   accountSettings = (settings.account as AccountSettings) ?? {}
   applyEntitlementsCache()
@@ -275,20 +278,27 @@ function applyEntitlementsCache(): void {
   entitlementsFromCache = true
 }
 
-/** Writes the in-memory section to disk, retrying a few times. Never throws. */
-function writeAccountToDisk(): boolean {
+/**
+ * Writes the in-memory section to disk — or REMOVES it (`remove`, sign-out) —
+ * retrying a few times. Never throws.
+ */
+function writeAccountToDisk(remove = false): boolean {
   let lastError: unknown
   for (let i = 0; i < PERSIST_ATTEMPTS; i++) {
     try {
       const settings = readSettings()
-      settings.account = accountSettings ?? {}
+      if (remove) delete settings.account
+      else settings.account = accountSettings ?? {}
       writeSettings(settings)
       return true
     } catch (err: unknown) {
       lastError = err
     }
   }
-  console.error('[Account] could not write the session to settings.json (will retry):', String(lastError))
+  console.error(
+    `[Account] could not ${remove ? 'remove' : 'write'} the session in settings.json (will retry):`,
+    String(lastError)
+  )
   return false
 }
 
@@ -297,19 +307,40 @@ function stopPersistRetry(): void {
   persistRetryTimer = null
 }
 
+function ensurePersistRetry(): void {
+  if (!persistRetryTimer) persistRetryTimer = setInterval(flushPendingPersist, PERSIST_RETRY_MS)
+}
+
 function writeOrMarkPending(): void {
+  // Writing the current section also supersedes a pending removal: the disk
+  // then holds exactly the session in memory (a new sign-in after a failed
+  // sign-out write).
   if (writeAccountToDisk()) {
     pendingPersist = false
+    pendingClear = false
     stopPersistRetry()
     return
   }
   pendingPersist = true
-  if (!persistRetryTimer) persistRetryTimer = setInterval(flushPendingPersist, PERSIST_RETRY_MS)
+  pendingClear = false
+  ensurePersistRetry()
 }
 
-/** Retries a write that failed earlier (called on every account operation and on a timer). */
+/** Retries a write/removal that failed earlier (every account operation, a timer, app quit). */
 function flushPendingPersist(): void {
-  if (pendingPersist) writeOrMarkPending()
+  if (pendingClear) {
+    if (writeAccountToDisk(true)) {
+      pendingClear = false
+      stopPersistRetry()
+    }
+  } else if (pendingPersist) {
+    writeOrMarkPending()
+  }
+}
+
+/** Last-chance flush of a pending session write/removal — main.ts calls it on before-quit. */
+export function flushAccountPersistence(): void {
+  flushPendingPersist()
 }
 
 /**
@@ -336,7 +367,6 @@ function cancelEntitlementsRetry(): void {
 function clearSession(): void {
   sessionGeneration++
   cancelEntitlementsRetry()
-  stopPersistRetry()
   pendingPersist = false
   accountSettings = {}
   accessToken = null
@@ -346,14 +376,15 @@ function clearSession(): void {
   entitlementsKnown = false
   entitlementsFromCache = false
   sessionLocked = false
-  try {
-    const settings = readSettings()
-    delete settings.account
-    writeSettings(settings)
-  } catch (err: unknown) {
-    // The in-memory session is gone either way; a stale disk copy holds a
-    // revoked/abandoned token that the next boot drops on its first refresh.
-    console.error('[Account] could not remove the session from settings.json:', String(err))
+  // The in-memory session is gone either way. A failed removal is retried
+  // (timer, next account operation, before-quit) so the signed-out session
+  // can't come back on the next boot.
+  if (writeAccountToDisk(true)) {
+    pendingClear = false
+    stopPersistRetry()
+  } else {
+    pendingClear = true
+    ensurePersistRetry()
   }
 }
 
@@ -530,6 +561,20 @@ export async function getAccessTokenResult(): Promise<AccessTokenResult> {
   return refreshInFlight
 }
 
+/**
+ * Drops the in-memory access token after a server rejected it (a 401 from
+ * PostgREST or from the NoteFlow AI proxy), so the next getAccessToken mints a
+ * fresh one — or cleanly hits the 400/401 sign-out if the refresh token was
+ * revoked too — instead of replaying a dead token until it expires locally.
+ * With `token`, only that exact token is dropped (a newer one minted meanwhile
+ * is kept). The refresh token and the session are untouched.
+ */
+export function invalidateAccessToken(token?: string): void {
+  if (token !== undefined && accessToken !== token) return
+  accessToken = null
+  accessTokenExpiresAtMs = 0
+}
+
 /** Thin wrapper for callers that only care about the token (cloudSync, cloudKeys, llm, realtime). */
 export async function getAccessToken(): Promise<string | null> {
   const result = await getAccessTokenResult()
@@ -679,10 +724,7 @@ async function fetchEntitlements(): Promise<RefreshEntitlementsResult> {
   if (res.status >= 400 || !Array.isArray(res.json)) {
     // A 401 means the in-memory access token is no longer accepted: drop it so
     // the retry mints a fresh one instead of replaying it until it expires.
-    if (res.status === 401 && accessToken === tokenResult.token) {
-      accessToken = null
-      accessTokenExpiresAtMs = 0
-    }
+    if (res.status === 401) invalidateAccessToken(tokenResult.token)
     return entitlementsFailure({
       error: extractErrorMessage(res.json, 'Could not load subscription status.'),
       errorCode: 'refreshFailed',

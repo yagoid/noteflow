@@ -2150,7 +2150,7 @@ electron_1.ipcMain.handle('ai:llm-set-config', (_event, patch) => {
 });
 electron_1.ipcMain.handle('ai:llm-list-models', async () => {
     try {
-        const models = await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings())).listModels();
+        const models = await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings(), mainMessages().chatErrors)).listModels();
         return { ok: true, models };
     }
     catch (err) {
@@ -2161,7 +2161,7 @@ electron_1.ipcMain.handle('ai:llm-test', async () => {
     try {
         // resolveConfigAsync throws for the NoteFlow AI preset without a signed-in
         // session — surface that through the same {ok, error} contract as test().
-        return await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings())).test();
+        return await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings(), mainMessages().chatErrors)).test();
     }
     catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -2380,7 +2380,7 @@ electron_1.ipcMain.handle('ai:chat', async (event, req) => {
         const { system, sources } = await buildChatContext(lastUser);
         if (sources.length > 0)
             send('ai:chat-sources', { requestId, sources });
-        const provider = llm.getProvider(await llm.resolveConfigAsync(stored));
+        const provider = llm.getProvider(await llm.resolveConfigAsync(stored, mainMessages().chatErrors));
         const ctx = buildToolContext();
         // Seed the agentic conversation from the renderer's messages, resolving each user message's
         // attachment ids from the in-main cache: text/code files inline into the text, pdf/image go native.
@@ -2474,8 +2474,12 @@ function friendlyChatError(raw, sentImages, managed) {
     // 'ai' plan. See managedProxyErrorKind for how the status is read from the raw message.
     if (managed) {
         const kind = (0, managedErrors_1.managedProxyErrorKind)(raw);
-        if (kind === 'signInAgain')
+        if (kind === 'signInAgain') {
+            // The proxy rejected the session token: drop it so the next request mints a fresh one
+            // (or, if the refresh token was revoked too, the refresh's 400 signs out cleanly).
+            account.invalidateAccessToken();
             return mainMessages().chatErrors.managedSignInAgain;
+        }
         if (kind === 'subscriptionInactive') {
             // Our local view of the plan may be stale (or still unknown) — re-check it so the
             // Settings/AI surfaces catch up. Fire-and-forget: refreshEntitlements never throws.
@@ -2829,7 +2833,7 @@ electron_1.ipcMain.handle('ai:profile-generate', async (_event, req) => {
         return { ok: false, error: llm.notConfiguredMessage(stored) };
     let provider;
     try {
-        provider = llm.getProvider(await llm.resolveConfigAsync(stored));
+        provider = llm.getProvider(await llm.resolveConfigAsync(stored, mainMessages().chatErrors));
     }
     catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -3560,6 +3564,9 @@ electron_1.app.whenReady().then(async () => {
     });
     electron_1.app.on('before-quit', () => {
         isQuitting = true;
+        // A rotated refresh token / sign-out that couldn't be written yet must not
+        // be lost with the process (see account.ts pendingPersist/pendingClear).
+        account.flushAccountPersistence();
     });
     // After system resume from sleep, reload notes several times with increasing
     // delays. A single 1500ms attempt is not enough: the renderer may take a few

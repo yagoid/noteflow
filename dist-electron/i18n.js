@@ -40,6 +40,10 @@ const en = {
         quotaExceeded: "You've reached your NoteFlow AI monthly quota. It resets on the 1st of next month.",
         managedSignInAgain: 'Your NoteFlow session has expired. Sign in again from Settings → Account.',
         managedSubscriptionInactive: "NoteFlow AI needs an active subscription and yours isn't active. Check your plan in Settings → Account.",
+        managedNoSession: 'NoteFlow AI needs your NoteFlow account. Sign in from Settings → Account and try again.',
+        managedOffline: "Couldn't reach NoteFlow AI. Check your internet connection and try again.",
+        managedKeychainLocked: "Couldn't unlock your saved NoteFlow session — your system keychain may be locked. Unlock it and try again.",
+        managedServiceUnavailable: 'The NoteFlow account service is temporarily unavailable. Please try again in a moment.',
     },
 };
 // `: Messages` forces key parity with English at compile time.
@@ -72,6 +76,10 @@ const es = {
         quotaExceeded: 'Has alcanzado tu cuota mensual de NoteFlow AI. Se renueva el día 1 del mes que viene.',
         managedSignInAgain: 'Tu sesión de NoteFlow ha caducado. Vuelve a iniciar sesión en Ajustes → Cuenta.',
         managedSubscriptionInactive: 'NoteFlow AI necesita una suscripción activa y la tuya no lo está. Revisa tu plan en Ajustes → Cuenta.',
+        managedNoSession: 'NoteFlow AI necesita tu cuenta de NoteFlow. Inicia sesión en Ajustes → Cuenta e inténtalo de nuevo.',
+        managedOffline: 'No se pudo conectar con NoteFlow AI. Comprueba tu conexión a internet e inténtalo de nuevo.',
+        managedKeychainLocked: 'No se pudo desbloquear tu sesión de NoteFlow guardada — puede que el llavero del sistema esté bloqueado. Desbloquéalo e inténtalo de nuevo.',
+        managedServiceUnavailable: 'El servicio de cuentas de NoteFlow no está disponible en este momento. Inténtalo de nuevo en un momento.',
     },
 };
 /**

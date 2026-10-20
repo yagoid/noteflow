@@ -418,27 +418,30 @@ async function removeRemoteByPathKeys(pathKeys) {
     if (pathKeys.length === 0)
         return;
     const filter = `path_key=in.(${pathKeys.map((k) => `"${k}"`).join(',')})`;
+    // Entitlements never fetched (offline boot, keychain locked…) or only restored
+    // from the on-disk cache are UNVERIFIED: try the tombstone, but NEVER fall back
+    // to a physical DELETE on that guess — a DELETE leaves the other devices
+    // un-notified, so the note would resurrect there. 'defer' throws, keeping the
+    // op journaled until a fetch in this run verifies them (see planRemoteDelete).
     const status = account.getAccountStatus();
-    const hasEntitlement = status.entitlements.cloud;
-    // Entitlements never fetched (offline boot, keychain locked…) are UNKNOWN, not
-    // "no subscription": try the tombstone, but NEVER fall back to a physical
-    // DELETE on that guess — a DELETE leaves the other devices un-notified, so the
-    // note would resurrect there. Throwing keeps the op journaled; it is retried
-    // once the entitlements are known (true → tombstone, false → DELETE below).
-    const entitlementsUnknown = !status.entitlementsKnown;
-    if (hasEntitlement || entitlementsUnknown) {
+    const decision = {
+        entitled: status.entitlements.cloud,
+        verified: status.entitlementsKnown && !account.areEntitlementsFromCache(),
+    };
+    if ((0, cloudSyncLogic_1.planRemoteDelete)(decision) === 'tombstone') {
         const res = await restWithRetry(() => (0, cloudKeys_1.supabaseRest)(`/rest/v1/files?${filter}`, {
             method: 'PATCH',
             headers: { Prefer: 'return=minimal' },
             body: { deleted: true, content_ct: '', updated_at: new Date().toISOString() },
         }));
-        if (res.status < 400)
+        const next = (0, cloudSyncLogic_1.planRemoteDelete)({ ...decision, patchStatus: res.status });
+        if (next === 'done')
             return;
-        if (!isWriteForbidden(res.status))
+        if (next === 'fail')
             throw new Error(`Cloud delete failed (HTTP ${res.status})`);
-        if (entitlementsUnknown)
+        if (next === 'defer')
             throw new Error('Cloud delete deferred: subscription status not verified yet');
-        // 403 despite a KNOWN local entitlement (stale) — fall through to physical delete.
+        // 'delete': 403 despite a VERIFIED local entitlement (stale) — fall through to physical delete.
     }
     const res = await restWithRetry(() => (0, cloudKeys_1.supabaseRest)(`/rest/v1/files?${filter}`, {
         method: 'DELETE',
