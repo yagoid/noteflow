@@ -14,6 +14,8 @@ import {
   planPullQuery,
   parseRowSeq,
   nextPullSeq,
+  collectSeqPages,
+  CLOUD_PAGE_SIZE,
   CLOUD_PULL_COLUMNS,
   listAnchorSectionFiles,
   buildFileUpsertRow,
@@ -195,6 +197,57 @@ describe('parseRowSeq', () => {
     for (const v of [undefined, null, '', ' ', 'x', -1, 1.5, Number.NaN, 2 ** 60, {}]) {
       expect(parseRowSeq(v), String(v)).toBeNull()
     }
+  })
+})
+
+// A fake PostgREST `files` listing: keyset over seq, capped at max-rows.
+function fakeListing(total: number, maxRows = CLOUD_PAGE_SIZE) {
+  const rows = Array.from({ length: total }, (_, i) => ({ seq: i + 1, path_key: `k${i + 1}` }))
+  const calls: number[] = []
+  const fetchPage = async (after: number) => {
+    calls.push(after)
+    return rows.filter((r) => r.seq > after).slice(0, maxRows)
+  }
+  return { rows, calls, fetchPage }
+}
+
+describe('collectSeqPages (keyset pagination of every Cloud listing)', () => {
+  it('reads past the 1000-row cap: a note beyond it is listed (deletion bug A)', async () => {
+    const { calls, fetchPage } = fakeListing(2345)
+    const rows = await collectSeqPages(fetchPage, 0)
+    expect(rows).toHaveLength(2345)
+    expect(rows.some((r) => r.path_key === 'k2345')).toBe(true)
+    expect(calls).toEqual([0, 1000, 2000])
+  })
+
+  it('an exact multiple of the page size ends on the empty page', async () => {
+    const { calls, fetchPage } = fakeListing(2000)
+    expect(await collectSeqPages(fetchPage, 0)).toHaveLength(2000)
+    expect(calls).toEqual([0, 1000, 2000])
+  })
+
+  it('starts after the given seq (incremental pull)', async () => {
+    const { calls, fetchPage } = fakeListing(10)
+    expect((await collectSeqPages(fetchPage, 7)).map((r) => r.seq)).toEqual([8, 9, 10])
+    expect(calls).toEqual([7])
+  })
+
+  it('a full page that does not advance the keyset throws (never loops, never truncates)', async () => {
+    const stuck = async () => Array.from({ length: 3 }, () => ({ seq: 5 }))
+    await expect(collectSeqPages(stuck, 5, 3, 'Cloud listing failed')).rejects.toThrow(
+      'Cloud listing failed (invalid seq paging)'
+    )
+    const noSeq = async () => [{}, {}, {}]
+    await expect(collectSeqPages(noSeq, 0, 3, 'Cloud pull failed')).rejects.toThrow('Cloud pull failed (invalid seq paging)')
+  })
+
+  it('a failed page propagates: no partial listing is ever returned', async () => {
+    const { fetchPage } = fakeListing(1500)
+    const flaky = async (after: number) => {
+      if (after > 0) throw new Error('Cloud listing failed (HTTP 503)')
+      return fetchPage(after)
+    }
+    await expect(collectSeqPages(flaky, 0)).rejects.toThrow('HTTP 503')
   })
 })
 

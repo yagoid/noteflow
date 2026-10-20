@@ -26,7 +26,8 @@ export interface SyncState {
   ops: Record<string, SyncJournalOp>
   /**
    * Blob SHAs (from the Git Trees API) already reconciled by a pull, keyed by
-   * remote path: '<dir>/note.md' anchors and root metadata filenames.
+   * remote path: '<dir>/note.md' anchors, '<dir>/<sec>.md' sections (see
+   * planSectionRefresh) and root metadata filenames.
    */
   shas: Record<string, string>
 }
@@ -185,7 +186,10 @@ export function shouldPullSkipFile(state: SyncState, relPath: string): boolean {
  * Should the pull's local-deletion rule keep this LOCAL dir even though the
  * remote doesn't have it? True while any file under '<dir>/' has a pending
  * upsert — its push never landed, so the remote absence doesn't mean "deleted
- * remotely" and removing the dir locally would be data loss.
+ * remotely" and removing the dir locally would be data loss. The journal entry
+ * exists from the moment the debounce timer is ARMED, so this also covers the
+ * 5 s debounce window. The Cloud pull applies the same guard to an anchor
+ * tombstone (remote deletion of the whole note).
  */
 export function shouldDeletionRuleSkipDir(state: SyncState, dir: string): boolean {
   const prefix = `${dir}/`
@@ -193,6 +197,18 @@ export function shouldDeletionRuleSkipDir(state: SyncState, dir: string): boolea
     if (entry.op === 'upsert' && key.startsWith(prefix)) return true
   }
   return false
+}
+
+/**
+ * Is there a pending (not yet landed) upsert of exactly this file? A remote
+ * deletion of it must not be applied locally meanwhile: that would remove the
+ * unpushed edit from disk, and the journal drain would then DISCARD the upsert
+ * (resolveRetryAction: local file gone) — the edit lost for good. Used by the
+ * Cloud pull for loose-section tombstones (the dir-level counterpart is
+ * shouldDeletionRuleSkipDir) and by the GitHub pull's section refresh.
+ */
+export function hasPendingUpsert(state: SyncState, relPath: string): boolean {
+  return state.ops[relPath]?.op === 'upsert'
 }
 
 /**
@@ -240,6 +256,101 @@ export function setCachedSha(state: SyncState, relPath: string, sha: string): bo
   if (state.shas[relPath] === sha) return false
   state.shas[relPath] = sha
   return true
+}
+
+/** A blob of the remote tree (GitHub Git Trees API): notes-dir-relative path + git blob sha. */
+export interface TreeBlobRef {
+  path: string
+  sha: string
+}
+
+/**
+ * Blobs to delete for a remote note folder ('<dir>' → every blob under
+ * '<dir>/'). THROWS when the tree listing came back truncated (GitHub caps
+ * recursive listings of very large repos): files of the folder may be missing
+ * from it, and deleting only the listed ones would let the caller complete the
+ * journal entry while the rest of the note stays on the remote. Throwing
+ * BEFORE deleting anything keeps the 'deleteDir' journaled (retried) and the
+ * remote note whole — never half-deleted.
+ */
+export function planRemoteDirDelete(blobs: TreeBlobRef[], truncated: boolean, dir: string): TreeBlobRef[] {
+  if (truncated) {
+    throw new Error(`the remote file listing is truncated (repository too large) — cannot safely delete "${dir}"`)
+  }
+  return blobs.filter((b) => b.path.startsWith(`${dir}/`))
+}
+
+/** Section blobs of one remote note folder, split by what the pull must do with them. */
+export interface SectionRefreshPlan {
+  /** The local file already holds exactly this blob: just record its sha (no request). */
+  adopt: TreeBlobRef[]
+  /** Remote content differs from the reconciled sha AND from the local file. */
+  changed: TreeBlobRef[]
+}
+
+/**
+ * May the GitHub pull REFRESH sections of the same version (download a section
+ * blob over the local file)? Not while GitHub is a stale mirror by design:
+ *   - `cloudEnabled`: NoteFlow Cloud is the active provider and GitHub only
+ *     gets the pull's upload catch-up, which filters by the anchor's `updated`.
+ *     A note can reach GitHub as "anchor t2 + old section X" while Cloud
+ *     already brought X' to disk with the same t2 — refreshing would write X
+ *     over X', and the catch-up (compared against the tree just read) would
+ *     then drop the X' upload: X' lost.
+ *   - `needsFullReconcile`: the first pull after Cloud is switched off; the
+ *     repo is still that stale mirror until its full catch-up lands.
+ * Read `cloudEnabled` fail-closed (isCloudSyncEnabledFailClosed), like the
+ * deletion rule. When false the pull keeps the historical skip.
+ */
+export function shouldRefreshSections(needsFullReconcile: boolean, cloudEnabled: boolean): boolean {
+  return !needsFullReconcile && !cloudEnabled
+}
+
+export interface SectionRefreshOptions {
+  /** shouldRefreshSections(...): false → nothing is ever `changed` (no anchor GET, no write, no cache). */
+  refreshAllowed: boolean
+  /**
+   * Whether the LOCAL anchor (note.md) lists this section file. Unlisted blobs
+   * are never `changed`: e.g. two devices migrating the same v1 note to v2 get
+   * the same `updated` but different random section ids, and the other
+   * device's files would land here as orphans.
+   */
+  isListedLocally: (relPath: string) => boolean
+}
+
+/**
+ * GitHub pull, per note folder: which SECTION blobs of the tree are not
+ * reconciled yet. The anchor sha alone can't tell: the push uploads note.md and
+ * the sections in SEPARATE commits, so a pull landing in between applies the
+ * new anchor with the old sections and caches the anchor sha — from then on the
+ * folder would be skipped forever and the new sections never downloaded.
+ * Per section:
+ *   - pending remote delete (shouldPullSkipFile) or pending upsert of the local
+ *     file (unpushed edit) → ignored: its own journal op will change the remote;
+ *   - tree sha == cached (reconciled) sha → nothing to do;
+ *   - tree sha == sha of the LOCAL file → `adopt` (cache it, zero requests —
+ *     covers this device's own pushes and caches written by older builds);
+ *   - refresh not allowed (stale mirror, see shouldRefreshSections) or not
+ *     listed by the local anchor → ignored (historical skip, NOT cached);
+ *   - otherwise → `changed` (the caller decides with the anchors' `updated`).
+ * `localSha` returns the git blob sha of the local file, or null if missing /
+ * unreadable; it is only called for blobs that are not cached, so the steady
+ * state costs no disk reads.
+ */
+export function planSectionRefresh(
+  state: SyncState,
+  sections: TreeBlobRef[],
+  localSha: (relPath: string) => string | null,
+  opts: SectionRefreshOptions,
+): SectionRefreshPlan {
+  const plan: SectionRefreshPlan = { adopt: [], changed: [] }
+  for (const blob of sections) {
+    if (shouldPullSkipFile(state, blob.path) || hasPendingUpsert(state, blob.path)) continue
+    if (state.shas[blob.path] === blob.sha) continue
+    if (localSha(blob.path) === blob.sha) plan.adopt.push(blob)
+    else if (opts.refreshAllowed && opts.isListedLocally(blob.path)) plan.changed.push(blob)
+  }
+  return plan
 }
 
 /** Drops cached SHAs for paths no longer present in the remote tree (keeps the file bounded). */

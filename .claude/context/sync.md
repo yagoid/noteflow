@@ -86,6 +86,13 @@ por `updated_at`, que es la hora de edición y sigue siendo solo la base de los 
 completo en `monetization.md` § 4 (modos de reconciliación y regla de secciones sueltas). Su journal
 reutiliza las transiciones puras de `syncState.ts` en un fichero PROPIO
 (`userData/cloud-sync-state.json`) — nunca el `sync-state.json` de GitHub.
+📌 **Borrados de Cloud (arreglado):** el listado que usa borrar una nota entera pagina por keyset
+sobre `seq` (antes un GET capado a 1.000 filas dejaba la nota sin tombstone y el `deleteDir` se daba
+por hecho), y el pull **no aplica** el tombstone de una nota con un `upsert` pendiente bajo su
+carpeta (`shouldDeletionRuleSkipDir`, el mismo guard que aquí abajo usa la regla de borrado de
+GitHub) ni el de una sección con upsert pendiente de ese fichero (`hasPendingUpsert`): gana la
+edición local y la nota se re-sube entera (resurrección intencionada). Detalle en `monetization.md`
+§ 4 "Deletes = tombstones".
 📌 **Integridad del pull incremental de Cloud:** `pullNotes` avanza el watermark con
 `nextPullSeq(s.pullSeq, rows)` (`cloudSyncLogic.ts`) = máxima `seq` de **todas** las filas
 traídas. Las filas que no descifran (o con ruta insegura) quedan por debajo **a propósito**: nunca
@@ -167,15 +174,46 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   escribe la carpeta ENTERA (y borra secciones locales que ya no existan en remoto). Borrado de
   notas a nivel carpeta con la regla de seguridad de siempre (`updated <= lastSync`), y **solo
   si el remoto es v2** (marcador presente y sin planos) — guard de transición. `updatedFiles`
-  lleva paths de DIRECTORIOS. **Coste:** el pull NO hace un GET por nota — si el blob-sha del
-  `note.md` en el tree coincide con el último reconciliado (sha cache, abajo) la carpeta se salta
-  sin ninguna request; solo las carpetas con sha nuevo pagan el GET del ancla + comparación de
-  `updated`. Si ese GET falla (`getRemoteFile` se traga el error y devuelve `null`) o el tree viene
+  lleva paths de DIRECTORIOS. **No hay cursor:** cada pull lista el árbol completo
+  (`git/trees?recursive=1`), así que el problema del cursor por fecha de Cloud no existe aquí;
+  `lastSync` solo alimenta la regla de borrado y el catch-up. **Coste:** el pull NO hace un GET por
+  nota — si el blob-sha del `note.md` en el tree coincide con el último reconciliado (sha cache,
+  abajo) **y** también los de sus secciones, la carpeta se salta sin ninguna request; solo las
+  carpetas con sha nuevo pagan el GET del ancla + comparación de `updated`. Si ese GET falla (`getRemoteFile` se traga el error y devuelve `null`) o el tree viene
   truncado, el pull no añade nada a `errors` pero devuelve `incomplete: true` (no se muestra; solo
-  frena la caducidad de notas temporales, ver `patterns.md`). El **journal** (abajo) además guarda al pull de los agujeros de datos: se salta dirs
-  remotos con `deleteDir` pendiente y ficheros con `delete` pendiente (no resucitar borrados que
+  frena la caducidad de notas temporales, ver `patterns.md`).
+  **Secciones que llegan después de su ancla (arreglado):** el push sube `note.md` y las secciones
+  en commits **separados** (cola serializada, debounce por fichero). Un pull entre medias aplicaba el
+  ancla nueva con las secciones viejas y cacheaba el sha del ancla; como la caché solo miraba el ancla
+  (y, sin caché, `remoto <= local` también salta), la carpeta se saltaba para siempre y las secciones
+  nuevas no se bajaban nunca (reproducido con un GitHub simulado). Ahora la caché guarda también el
+  sha de cada **sección** y `planSectionRefresh` (`syncState.ts`, puro y testeado) separa las
+  secciones del tree no reconciliadas: si el fichero local ya es ese blob (`gitBlobSha`) se cachea
+  sin request (cubre los pushes propios y las cachés de builds anteriores — la primera pasada tras
+  actualizar solo lee disco); las demás pasan a "cambiadas". Con secciones cambiadas se hace el GET
+  del ancla: **misma versión** (`updated` igual) → se bajan solo esas secciones (regla de secciones
+  sueltas de Cloud); **local estrictamente más nuevo** → se respeta y **no** se cachea (cuando aterrice
+  el push propio vuelven a ser la misma versión y se bajan las secciones que este dispositivo no
+  tocó); timestamps ilegibles → salto histórico, cacheado. Se ignoran las secciones con `upsert` o
+  `delete` pendiente en el journal, y las que el **ancla local no lista** (`listAnchorSectionFiles`
+  de `cloudSyncLogic.ts`: p. ej. dos dispositivos que migraron la misma nota v1→v2 tienen el mismo
+  `updated` pero ids de sección aleatorios distintos — se bajarían como huérfanas).
+  ⚠️ **Nunca con GitHub como espejo obsoleto:** con **Cloud habilitado** (leído fail-closed con
+  `isCloudSyncEnabledFailClosed()`, como la regla de borrado) o con **`needsFullReconcile`**
+  pendiente, no hay refresco de secciones (ni GET del ancla por ellas, ni se cachean las
+  "cambiadas"; solo se adoptan las idénticas) — `shouldRefreshSections`, puro en `syncState.ts`. En
+  ese estado el repo puede tener "ancla t2 + sección X vieja" mientras Cloud ya trajo X' con el mismo
+  t2 (el catch-up subió el ancla pero no la sección); refrescar escribiría X encima de X' y el
+  catch-up, que compara con el tree ya leído, descartaría la subida de X': X' perdida. Se decide
+  antes del bucle y se re-comprueba justo antes de escribir. Una carpeta con ancla cacheada que ya **no existe en local** se
+  sigue saltando (nunca se resucita desde aquí). En el estado estable no hay GETs nuevos.
+  ⚠️ Caso límite no cubierto: si el ancla nueva lista una sección que aún no está en el tree, el
+  pull intermedio no la crea (sí llega luego por lo anterior); si en ese hueco el usuario edita la
+  nota, el editor puede recrearla vacía y subirla (Cloud lo evita bajando las secciones listadas).
+  El **journal** (abajo) además guarda al pull de los agujeros de datos: se salta dirs remotos con `deleteDir` pendiente y ficheros con `delete` pendiente (no resucitar borrados que
   aún no aterrizaron), y la regla de borrado local se salta cualquier dir con `upsert` pendiente
-  (su push no aterrizó; borrarlo sería pérdida de datos).
+  (su push no aterrizó; borrarlo sería pérdida de datos — el upsert se apunta al **armar** el timer,
+  así que también cubre la ventana de debounce de 5 s).
 - **⚠️ Con Cloud habilitado, GitHub NO borra nada en local (espejo de solo-escritura).** La regla de
   borrado del pull asume que `lastSync` significa "el remoto conocía TODO lo que había en disco en
   ese instante", y esa premisa se rompe en cuanto GitHub queda **pausado por NoteFlow Cloud**: no
@@ -306,7 +344,11 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
 - **Autosync:** cada 5 min (`AUTO_SYNC_INTERVAL_MS`) mientras esté conectado: primero drena el
   journal (`retrySyncJournal`), luego pull (que se pospone si quedan mutaciones en vuelo).
 - **Delete:** `scheduleDelete(relPath)` (sección suelta) y `scheduleDeleteDir(dir)` (lista el
-  árbol y borra cada blob bajo `<dir>/`; usado por borrar nota y notas expiradas — estas últimas
+  árbol y borra cada blob bajo `<dir>/` — si el listado viene **truncado** (`truncated: true`, repos
+  enormes) `deleteRemoteDirNow` **lanza antes de borrar nada** (`planRemoteDirDelete`, puro): con
+  ficheros de la carpeta fuera del listado se borraría a medias y se daría el journal por completado;
+  así el `deleteDir` sigue en el journal y la nota queda entera en remoto; usado por borrar nota y
+  notas expiradas — estas últimas
   solo justo tras un pull limpio del backend activo, ver `patterns.md` § "Motor de alarmas y notas
   temporales", porque el borrado es incondicional). Ambos se
   journalan antes de ejecutarse y en fallo setean `syncError` y QUEDAN en el journal para retry
@@ -324,9 +366,12 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     `main.ts` en cada tick del autosync ANTES de `pullNotes` y tras el pull inicial OK; gated por
     `initialPullStatus === 'ok'`. Semántica LWW conservada: si un dir con upsert pendiente viene
     MÁS NUEVO del remoto, el pull lo sobrescribe entero y el retry sube después lo que haya en disco.
-  - **`shas` (cache de blobs reconciliados):** relPath del ancla (`<dir>/note.md`) o del metadata →
-    blob-sha del tree ya reconciliado. Se escribe tras cada decisión del pull (tanto si pulleó como
-    si ganó lo local) y permite el skip sin GET; se poda a los paths presentes en el tree.
+  - **`shas` (cache de blobs reconciliados):** relPath del ancla (`<dir>/note.md`), de cada
+    sección (`<dir>/<sec>.md`) o del metadata → blob-sha del tree ya reconciliado. Se escribe tras
+    cada decisión del pull (tanto si pulleó como si ganó lo local — salvo secciones con el local
+    estrictamente más nuevo, ver "Pull") y permite el skip sin GET; se poda a los paths presentes en
+    el tree. El espejo (`mirrorToGitHub`) solo cachea anclas y metadatos; las secciones que sube se
+    adoptan en el siguiente pull comparando con el disco.
     Los `METADATA_FILENAMES` usan el mismo cache (solo GET cuando el sha del tree difiere).
     La lógica de transiciones/decisiones es pura en `syncState.ts` (sin imports de Electron, patrón
     `entitlements.ts`) y está cubierta por `tests/electron/syncState.test.ts`.
@@ -346,6 +391,12 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   overview) disparaba N mutaciones concurrentes → 409s silenciosos → notas restauradas; de ahí la
   cola. Mantener este patrón al añadir operaciones que toquen el remoto (notas, grupos, carpetas,
   metadatos).
+- **⚠️ Problema conocido (pendiente, igual que en Cloud): las subidas pisan sin condiciones.**
+  `upsertRemoteFileNow` hace GET del sha actual y PUT con él — el sha es solo el token de
+  concurrencia de la Contents API, no "la versión que este dispositivo vio" —, así que una subida
+  en cola o drenada tarde del journal pisa una versión más nueva subida por otro dispositivo
+  entretanto. Arreglo previsto con la **subida condicionada** en los dos backends (ver
+  `monetization.md` § 4).
 - **Repo:** se crea automáticamente con `private: true` + `auto_init: true` si no existe.
 - **initialPullStatus** (`pending|ok|failed`) gatea pushes hasta que el primer pull tenga éxito.
 - **Catch-up de subida (`flushPendingLocalChanges`) — dos niveles de filtro:**

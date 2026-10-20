@@ -55,7 +55,8 @@ import {
   shouldApplyRemoteDeletion,
   groupEntriesByDir,
   planPullQuery,
-  parseRowSeq,
+  collectSeqPages,
+  CLOUD_PAGE_SIZE,
   nextPullSeq,
   buildFileUpsertRow,
   decryptFileRow,
@@ -71,6 +72,8 @@ import {
   resolveRetryAction,
   shouldPullSkipDir,
   shouldPullSkipFile,
+  shouldDeletionRuleSkipDir,
+  hasPendingUpsert,
 } from './syncState'
 import { type SyncHistoryEntry, createSyncHistory } from './syncHistory'
 
@@ -86,9 +89,6 @@ export const CLOUD_AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000
 
 // Same debounce as the GitHub push: avoids spamming the API while typing.
 const PUSH_DEBOUNCE_MS = 5000
-
-// PostgREST caps responses (Supabase default max-rows 1000) — page the pull.
-const PULL_PAGE_SIZE = 1000
 
 const LOCKED_ERROR = 'Cloud keys are locked. Unlock NoteFlow Cloud to sync.'
 const SUBSCRIPTION_ERROR = 'An active NoteFlow Cloud subscription is required to upload changes.'
@@ -515,14 +515,25 @@ async function removeRemoteByPathKeys(pathKeys: string[]): Promise<void> {
  * scheduleDeleteDir, which must tombstone every row under '<dir>/' without a
  * plaintext prefix filter (path_key is opaque by design). content_ct is not
  * selected, so the payload stays small even for large corpora.
+ * Paged by keyset over `seq` (collectSeqPages): PostgREST caps a response at
+ * max-rows (1000 by default), and a single capped GET used to miss the rows of
+ * a note beyond the first 1000 — nothing was tombstoned, the deleteDir was
+ * completed anyway and the note resurrected on every other device. A failed
+ * page throws, so the deleteDir stays journaled (retried), never half-done.
  */
 async function listRemotePaths(dek: Uint8Array): Promise<Array<{ relPath: string; pathKey: string }>> {
-  const res = await supabaseRest(
-    '/rest/v1/files?select=path_key,path_ct,key_ct&deleted=eq.false'
+  const rows = await collectSeqPages<{ path_key: string; path_ct: string; key_ct: string; seq: unknown }>(
+    async (after) => {
+      const res = await supabaseRest(
+        `/rest/v1/files?select=path_key,path_ct,key_ct,seq&deleted=eq.false&order=seq.asc&seq=gt.${after}&limit=${CLOUD_PAGE_SIZE}`
+      )
+      if (res.status >= 400) throw new Error(`Cloud listing failed (HTTP ${res.status})`)
+      return Array.isArray(res.json) ? res.json : []
+    },
+    0,
   )
-  if (res.status >= 400) throw new Error(`Cloud listing failed (HTTP ${res.status})`)
   const out: Array<{ relPath: string; pathKey: string }> = []
-  for (const raw of (Array.isArray(res.json) ? res.json : []) as Array<Record<string, string>>) {
+  for (const raw of rows) {
     try {
       const noteKey = await unwrapKey(raw.key_ct, dek)
       const relPath = await decryptContent(noteKey, raw.path_ct)
@@ -723,25 +734,21 @@ function deleteRemoteDirNow(dir: string): Promise<void> {
  */
 async function fetchChangedRows(s: CloudSyncSettings): Promise<CloudFileRow[]> {
   const plan = planPullQuery(s)
-  const rows: CloudFileRow[] = []
-  let after = plan.afterSeq
-  for (;;) {
-    const res = await supabaseRest(
-      `/rest/v1/files?select=${CLOUD_PULL_COLUMNS}&order=seq.asc&seq=gt.${after}&limit=${PULL_PAGE_SIZE}` +
-        // First reconcile: tombstones are irrelevant (nothing local to delete
-        // safely — lastSync is null) and would only cost bandwidth.
-        (plan.includeDeleted ? '' : '&deleted=eq.false')
-    )
-    if (res.status >= 400) throw new Error(`Cloud pull failed (HTTP ${res.status})`)
-    const page = Array.isArray(res.json) ? (res.json as CloudFileRow[]) : []
-    rows.push(...page)
-    if (page.length < PULL_PAGE_SIZE) break
-    const last = parseRowSeq(page[page.length - 1].seq)
-    // A full page must move the keyset forward — anything else would loop forever.
-    if (last === null || last <= after) throw new Error('Cloud pull failed (invalid seq paging)')
-    after = last
-  }
-  return rows
+  return collectSeqPages<CloudFileRow>(
+    async (after) => {
+      const res = await supabaseRest(
+        `/rest/v1/files?select=${CLOUD_PULL_COLUMNS}&order=seq.asc&seq=gt.${after}&limit=${CLOUD_PAGE_SIZE}` +
+          // First reconcile: tombstones are irrelevant (nothing local to delete
+          // safely — lastSync is null) and would only cost bandwidth.
+          (plan.includeDeleted ? '' : '&deleted=eq.false')
+      )
+      if (res.status >= 400) throw new Error(`Cloud pull failed (HTTP ${res.status})`)
+      return Array.isArray(res.json) ? (res.json as CloudFileRow[]) : []
+    },
+    plan.afterSeq,
+    CLOUD_PAGE_SIZE,
+    'Cloud pull failed',
+  )
 }
 
 /** Fetches + decrypts the remote anchor row of a dir (or null). */
@@ -907,8 +914,23 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
         let anchor = group.find((e) => isAnchorPath(e.relPath)) ?? null
 
         if (anchor?.deleted) {
+          if (!localExists) continue
+          // Journal guard (same as the GitHub pull's deletion rule): a pending
+          // upsert under '<dir>/' is a local edit that hasn't reached the server
+          // (failed push, or still inside the 5 s debounce — it is journaled
+          // when the timer is armed). `updated <= lastSync` can't see it: a push
+          // of ANOTHER note moves lastSync past this note's `updated`. Deleting
+          // here would rm the edit and the drain would then discard its upsert.
+          // The local note wins and is RESURRECTED on purpose: the whole folder
+          // is re-uploaded, so every row loses its tombstone (re-pushing only the
+          // pending file would leave the other sections tombstoned → other
+          // devices would get an anchor without its sections).
+          if (shouldDeletionRuleSkipDir(state, dir)) {
+            requeueDirForUpload(notesDir, dir)
+            continue
+          }
           // Note deleted remotely — apply locally only under the safety rule.
-          if (localExists && shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs)) {
+          if (shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs)) {
             fs.rmSync(localDirPath, { recursive: true, force: true })
             deleted++
             filesDown++
@@ -977,6 +999,10 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
           for (const entry of group) {
             if (isAnchorPath(entry.relPath)) continue
             if (shouldPullSkipFile(state, entry.relPath)) continue
+            // A section tombstone must not remove an unpushed edit of that file
+            // (its updated_at is the deletion time, so the rule below would let
+            // it through): the pending upsert re-uploads it and wins, on purpose.
+            if (entry.deleted && hasPendingUpsert(state, entry.relPath)) continue
             if (!shouldApplyRemoteSection(entry.updatedAtMs, localUpdatedMs)) continue
             if (applyRemoteSectionFile(notesDir, entry)) changed++
           }
@@ -1080,6 +1106,29 @@ function flushPendingLocalChanges(notesDir: string, previousLastSync: string | u
         if (fs.existsSync(p)) schedulePushUnguarded(filename, fs.readFileSync(p, 'utf-8'))
       } catch { /* skip */ }
     }
+  }
+}
+
+/**
+ * Re-uploads EVERY '.md' of a local note folder (debounced + journaled, like
+ * flushPendingLocalChanges) — used when the pull keeps a note whose anchor
+ * arrived as a tombstone because a local edit of it is still pending. Files
+ * with a live debounce timer are left to it (same content source: disk).
+ */
+function requeueDirForUpload(notesDir: string, dir: string): void {
+  const dirPath = path.join(notesDir, dir)
+  let files: string[]
+  try {
+    files = fs.readdirSync(dirPath)
+  } catch {
+    return // unreadable dir — its pending upserts still stand in the journal
+  }
+  for (const f of files) {
+    const relPath = `${dir}/${f}`
+    if (!f.endsWith('.md') || pushTimers.has(relPath)) continue
+    try {
+      schedulePushUnguarded(relPath, fs.readFileSync(path.join(dirPath, f), 'utf-8'))
+    } catch { /* unreadable file — skip */ }
   }
 }
 

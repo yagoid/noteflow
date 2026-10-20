@@ -12,6 +12,10 @@ import {
   shouldPullSkipDir,
   shouldPullSkipFile,
   shouldDeletionRuleSkipDir,
+  hasPendingUpsert,
+  planRemoteDirDelete,
+  planSectionRefresh,
+  shouldRefreshSections,
   shouldRunDeletionRule,
   getCachedSha,
   setCachedSha,
@@ -218,6 +222,140 @@ describe('pull decisions', () => {
     expect(shouldDeletionRuleSkipDir(state, 'a')).toBe(true)
     expect(journalComplete(state, 'a/note.md', 'upsert')).toBe(true)
     expect(shouldDeletionRuleSkipDir(state, 'a')).toBe(false)
+  })
+})
+
+describe('hasPendingUpsert (remote deletion vs unpushed local edit)', () => {
+  it('true only for a pending upsert of exactly that file', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/sec1.md', 'upsert', NOW)
+    journalRecord(state, 'a/sec2.md', 'delete', NOW)
+    expect(hasPendingUpsert(state, 'a/sec1.md')).toBe(true)
+    expect(hasPendingUpsert(state, 'a/sec2.md')).toBe(false) // a delete is not an edit
+    expect(hasPendingUpsert(state, 'a/other.md')).toBe(false)
+    expect(hasPendingUpsert(state, 'a')).toBe(false) // file-level, not a prefix check
+  })
+
+  it('stops once the upsert lands, and a newer delete intent supersedes it', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/sec1.md', 'upsert', NOW)
+    journalComplete(state, 'a/sec1.md', 'upsert')
+    expect(hasPendingUpsert(state, 'a/sec1.md')).toBe(false)
+    journalRecord(state, 'a/sec1.md', 'upsert', NOW)
+    journalRecord(state, 'a', 'deleteDir', LATER) // deleting the note drops its file ops
+    expect(hasPendingUpsert(state, 'a/sec1.md')).toBe(false)
+  })
+})
+
+// Cloud anchor tombstone (B): a failed push of N stays journaled while a push
+// of ANOTHER note moves lastSync past N's `updated` — the time rule alone would
+// delete N. The dir guard is what keeps it (same guard as the GitHub pull).
+describe('Cloud tombstone guard: pending upsert under the dir (debounce window included)', () => {
+  it('a journaled upsert from timer-arming time protects the whole note', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'n/sec1.md', 'upsert', NOW) // armed, not fired yet
+    expect(shouldDeletionRuleSkipDir(state, 'n')).toBe(true)
+    journalComplete(state, 'n/sec1.md', 'upsert') // landed
+    expect(shouldDeletionRuleSkipDir(state, 'n')).toBe(false)
+  })
+})
+
+describe('shouldRefreshSections (GitHub same-version section refresh)', () => {
+  it('only when GitHub is not a stale mirror', () => {
+    expect(shouldRefreshSections(false, false)).toBe(true)
+    expect(shouldRefreshSections(false, true)).toBe(false) // Cloud enabled: write-only mirror
+    expect(shouldRefreshSections(true, false)).toBe(false) // first pull after Cloud was switched off
+    expect(shouldRefreshSections(true, true)).toBe(false)
+  })
+})
+
+describe('planRemoteDirDelete (GitHub deleteRemoteDirNow)', () => {
+  const blobs = [
+    { path: 'a/note.md', sha: '1' },
+    { path: 'a/s1.md', sha: '2' },
+    { path: 'ab/note.md', sha: '3' }, // prefix sibling
+    { path: 'groups.json', sha: '4' },
+  ]
+
+  it('targets every blob under <dir>/ only', () => {
+    expect(planRemoteDirDelete(blobs, false, 'a').map((b) => b.path)).toEqual(['a/note.md', 'a/s1.md'])
+    expect(planRemoteDirDelete(blobs, false, 'missing')).toEqual([])
+  })
+
+  it('throws on a truncated listing so the deleteDir stays journaled (nothing half-deleted)', () => {
+    expect(() => planRemoteDirDelete(blobs, true, 'a')).toThrow(/truncated/)
+  })
+})
+
+describe('planSectionRefresh (GitHub pull: sections pushed after their anchor)', () => {
+  const ALLOWED = { refreshAllowed: true, isListedLocally: () => true }
+  const sections = [
+    { path: 'n/s1.md', sha: 'remote-1' },
+    { path: 'n/s2.md', sha: 'remote-2' },
+  ]
+
+  it('steady state: every section sha reconciled → nothing to do, no disk read', () => {
+    const state = emptySyncState()
+    setCachedSha(state, 'n/s1.md', 'remote-1')
+    setCachedSha(state, 'n/s2.md', 'remote-2')
+    const reads: string[] = []
+    const plan = planSectionRefresh(state, sections, (rel) => { reads.push(rel); return null }, ALLOWED)
+    expect(plan).toEqual({ adopt: [], changed: [] })
+    expect(reads).toEqual([])
+  })
+
+  it('the bug: anchor cached, a section blob changed later → changed', () => {
+    const state = emptySyncState()
+    setCachedSha(state, 'n/s1.md', 'remote-1')
+    setCachedSha(state, 'n/s2.md', 'old-2') // reconciled before the second commit landed
+    const plan = planSectionRefresh(state, sections, () => 'old-2', ALLOWED)
+    expect(plan.changed).toEqual([{ path: 'n/s2.md', sha: 'remote-2' }])
+    expect(plan.adopt).toEqual([])
+  })
+
+  it('a section new to this device (missing locally, not cached) → changed', () => {
+    const plan = planSectionRefresh(emptySyncState(), [{ path: 'n/s3.md', sha: 'x' }], () => null, ALLOWED)
+    expect(plan.changed).toEqual([{ path: 'n/s3.md', sha: 'x' }])
+  })
+
+  it('local file already identical (own push / cache from an older build) → adopt, zero requests', () => {
+    const plan = planSectionRefresh(emptySyncState(), sections, (rel) => (rel === 'n/s1.md' ? 'remote-1' : 'local-2'), ALLOWED)
+    expect(plan.adopt).toEqual([{ path: 'n/s1.md', sha: 'remote-1' }])
+    expect(plan.changed).toEqual([{ path: 'n/s2.md', sha: 'remote-2' }])
+  })
+
+  it('stale mirror (Cloud on / full reconcile pending): nothing is changed, only identical files are adopted', () => {
+    // Cloud brought X' (same anchor version) while GitHub still holds old X:
+    // refreshing would write X over X' and the catch-up would drop X'.
+    const state = emptySyncState()
+    const plan = planSectionRefresh(state, sections, (rel) => (rel === 'n/s1.md' ? 'remote-1' : 'X-prime'), {
+      refreshAllowed: false,
+      isListedLocally: () => true,
+    })
+    expect(plan).toEqual({ adopt: [{ path: 'n/s1.md', sha: 'remote-1' }], changed: [] })
+    expect(state.shas['n/s2.md']).toBeUndefined() // the planner never caches; the caller won't either
+  })
+
+  it('sections the LOCAL anchor does not list are never changed (v1→v2 migration on two devices)', () => {
+    // Same legacy note migrated on A and B: same `updated`, different random
+    // section ids — B's files must not land on A as orphans.
+    const remote = [
+      { path: 'n/abc123.md', sha: 'b-1' }, // B's id
+      { path: 'n/s1.md', sha: 'remote-1' },
+    ]
+    const plan = planSectionRefresh(emptySyncState(), remote, () => null, {
+      refreshAllowed: true,
+      isListedLocally: (rel) => rel === 'n/s1.md',
+    })
+    expect(plan.changed).toEqual([{ path: 'n/s1.md', sha: 'remote-1' }])
+    expect(plan.adopt).toEqual([])
+  })
+
+  it('journal guards: a pending upsert (unpushed edit) or pending delete is left alone', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'n/s1.md', 'upsert', NOW)
+    journalRecord(state, 'n/s2.md', 'delete', NOW)
+    expect(planSectionRefresh(state, sections, () => null, ALLOWED)).toEqual({ adopt: [], changed: [] })
   })
 })
 

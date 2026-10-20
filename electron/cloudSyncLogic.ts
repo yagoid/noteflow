@@ -291,6 +291,40 @@ export function planPullQuery(s: {
   return { afterSeq: 0, includeDeleted: false }
 }
 
+/** Rows per page of every Cloud listing — PostgREST caps responses (Supabase default max-rows 1000). */
+export const CLOUD_PAGE_SIZE = 1000
+
+/**
+ * Reads a WHOLE `public.files` listing by KEYSET pagination over `seq`:
+ * `fetchPage(after)` must request `order=seq.asc&seq=gt.<after>&limit=<pageSize>`
+ * (plus its own filters) and resolve with that page — or throw. Stops at the
+ * first short page. Not offsets/Range: an upsert moves a row to a higher seq,
+ * so an offset window shifts mid-listing and can skip rows; a keyset can't.
+ * A full page whose last seq doesn't move the keyset forward throws (it would
+ * loop forever). Any failed page propagates: the callers never act on a
+ * partial listing — a capped listing is exactly how a note deletion used to
+ * tombstone nothing and still be marked done. Used by the pull
+ * (fetchChangedRows) and by the deletion listing (listRemotePaths).
+ * Mirror: collectSeqPages in cli/noteflow.js.
+ */
+export async function collectSeqPages<T extends { seq?: unknown }>(
+  fetchPage: (afterSeq: number) => Promise<T[]>,
+  afterSeq: number,
+  pageSize: number = CLOUD_PAGE_SIZE,
+  errorLabel = 'Cloud listing failed',
+): Promise<T[]> {
+  const rows: T[] = []
+  let after = afterSeq
+  for (;;) {
+    const page = await fetchPage(after)
+    rows.push(...page)
+    if (page.length < pageSize) return rows
+    const last = parseRowSeq(page[page.length - 1].seq)
+    if (last === null || last <= after) throw new Error(`${errorLabel} (invalid seq paging)`)
+    after = last
+  }
+}
+
 /** A row's seq as a safe non-negative integer, or null (bigint may arrive as a string). */
 export function parseRowSeq(value: unknown): number | null {
   const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value

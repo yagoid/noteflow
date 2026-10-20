@@ -186,7 +186,7 @@ function clearCliAccount() {
   writeSettings(settings)
 }
 
-// { enabled, pullSeq, lastSync, userId } — the CLI's own cursor/lastSync,
+// { enabled, pullSeq, lastSync, userId, pendingUpserts } — the CLI's own cursor/lastSync,
 // never the desktop app's settings.cloudSync (each client reconciles
 // independently). `pullSeq` = watermark of the server-assigned `seq` already
 // reconciled (migration 0008); a legacy `pullCursor` (updated_at cursor of
@@ -231,7 +231,42 @@ function cliCloudForUser(c, userId, presumedOwner) {
   delete next.pullSeq
   delete next.pullCursor
   delete next.lastSync
+  delete next.pendingUpserts // the other account's unsent edits don't guard this one's tombstones
   return next
+}
+
+// ── Cloud: pending uploads (minimal journal) ──────────────────────────────────
+// `cliCloud.pendingUpserts` = relPaths whose Cloud upload FAILED and has not
+// succeeded since (the CLI has no retry queue: `noteflow push` re-uploads).
+// Mirror of the app's journal guards: a remote tombstone must not delete an
+// edit that never reached the server — a later successful upload of ANOTHER
+// note moves lastSync past it, so `updated <= lastSync` alone can't see it.
+
+/** Pure: the pending list after an upload attempt — `failed` added, `uploaded` removed (deduped). */
+function nextPendingUpserts(pending, failed, uploaded) {
+  const out = (Array.isArray(pending) ? pending : []).filter(p => typeof p === 'string' && !uploaded.includes(p))
+  for (const f of failed) if (!out.includes(f)) out.push(f)
+  return out
+}
+
+/** Pure mirror of shouldDeletionRuleSkipDir (electron/syncState.ts): any pending upload under '<dir>/'. */
+function pendingUnderDir(pending, dir) {
+  return (Array.isArray(pending) ? pending : []).some(p => typeof p === 'string' && p.startsWith(`${dir}/`))
+}
+
+/** Pure mirror of hasPendingUpsert (electron/syncState.ts): a pending upload of exactly this file. */
+function isPendingUpsert(pending, relPath) {
+  return Array.isArray(pending) && pending.includes(relPath)
+}
+
+/** Pending entries whose local file still exists (a gone file has nothing left to protect). */
+function existingPendingUpserts(list) {
+  return (Array.isArray(list) ? list : []).filter(rel => typeof rel === 'string' && fs.existsSync(path.join(NOTES_DIR, rel)))
+}
+
+/** Empty list → field removed from settings. */
+function storedPendingUpserts(list) {
+  return list.length ? list : undefined
 }
 
 /**
@@ -788,18 +823,32 @@ async function syncPushNoteFiles(dirname, files) {
     // Cloud takes priority: never double-push to GitHub while Cloud is active
     // (mirror of the desktop app's syncProvider routing). Sync errors are
     // reported but never abort the local mutation, which already landed.
+    const relPaths = files.map(f => `${dirname}/${f}`)
+    const uploaded = []
     try {
       await cloudEnsureReconciled()
       const dek = await getCliDek()
       const noteKey = await cloudGetNoteKey(dek, dirname)
-      for (const f of files) await cloudPushFile(dek, noteKey, `${dirname}/${f}`)
+      for (const relPath of relPaths) {
+        await cloudPushFile(dek, noteKey, relPath)
+        uploaded.push(relPath)
+      }
       // Bump lastSync like the app's schedulePush: without it a later remote
       // tombstone would be skipped forever (`updated <= lastSync` rule) while
       // the cursor advances past it — and the next push would resurrect the note.
-      patchCliCloud({ lastSync: new Date().toISOString() })
+      patchCliCloud({
+        lastSync: new Date().toISOString(),
+        pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [], uploaded)),
+      })
       out('  Synced to NoteFlow Cloud')
     } catch (e) {
-      err(`Cloud sync failed: ${e.message}`)
+      // Remember what did NOT reach the server: that bump of lastSync by a later
+      // successful upload would otherwise expose this edit to a remote tombstone.
+      const failed = relPaths.filter(r => !uploaded.includes(r))
+      patchCliCloud({
+        pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, failed, uploaded)),
+      })
+      err(`Cloud sync failed: ${e.message} — run 'noteflow push' to retry`)
     }
     return
   }
@@ -1028,6 +1077,29 @@ function planPullQuery(c) {
 function parseRowSeq(value) {
   const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value
   return typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 ? n : null
+}
+
+// Rows per page of every Cloud listing — PostgREST caps responses (Supabase default max-rows 1000).
+const CLOUD_PAGE_SIZE = 1000
+
+/**
+ * Reads a WHOLE files listing by KEYSET pagination over `seq` (mirror of
+ * collectSeqPages in electron/cloudSyncLogic.ts): `fetchPage(after)` requests
+ * `order=seq.asc&seq=gt.<after>&limit=<pageSize>` and resolves with that page
+ * or throws. Stops at a short page; a full page that doesn't move the keyset
+ * forward throws; a failed page propagates — never act on a partial listing.
+ */
+async function collectSeqPages(fetchPage, afterSeq, pageSize = CLOUD_PAGE_SIZE, errorLabel = 'Cloud listing failed') {
+  const rows = []
+  let after = afterSeq
+  for (;;) {
+    const page = await fetchPage(after)
+    rows.push(...page)
+    if (page.length < pageSize) return rows
+    const last = parseRowSeq(page[page.length - 1].seq)
+    if (last === null || last <= after) throw new Error(`${errorLabel} (invalid seq paging)`)
+    after = last
+  }
 }
 
 /**
@@ -1324,12 +1396,22 @@ async function cloudPushFile(dek, noteKey, relPath) {
   if (res.status >= 400) throw new Error(`Cloud upload failed (HTTP ${res.status})`)
 }
 
-/** All non-deleted remote rows decrypted to (relPath, pathKey) — whole-note deletes. */
+/**
+ * All non-deleted remote rows decrypted to (relPath, pathKey) — whole-note
+ * deletes. Paged by keyset over `seq`: a single GET is capped at max-rows
+ * (1000), and a note beyond it got no tombstone at all while the delete was
+ * reported done. A failed page throws (the delete reports the error).
+ */
 async function cloudListRemotePaths(dek) {
-  const res = await cloudRest('/rest/v1/files?select=path_key,path_ct,key_ct&deleted=eq.false')
-  if (res.status >= 400) throw new Error(`Cloud listing failed (HTTP ${res.status})`)
+  const rows = await collectSeqPages(async (after) => {
+    const res = await cloudRest(
+      `/rest/v1/files?select=path_key,path_ct,key_ct,seq&deleted=eq.false&order=seq.asc&seq=gt.${after}&limit=${CLOUD_PAGE_SIZE}`
+    )
+    if (res.status >= 400) throw new Error(`Cloud listing failed (HTTP ${res.status})`)
+    return Array.isArray(res.json) ? res.json : []
+  }, 0)
   const remote = []
-  for (const raw of Array.isArray(res.json) ? res.json : []) {
+  for (const raw of rows) {
     try {
       const noteKey = await unwrapKey(raw.key_ct, dek)
       remote.push({ relPath: await decryptContent(noteKey, raw.path_ct), pathKey: raw.path_key })
@@ -1387,25 +1469,15 @@ async function cloudEnsureReconciled() {
  * stable while rows are written mid-pull. Mode from planPullQuery.
  */
 async function cloudFetchChangedRows(c) {
-  const PAGE = 1000 // PostgREST caps responses (Supabase default max-rows)
   const plan = planPullQuery(c)
-  const rows = []
-  let after = plan.afterSeq
-  for (;;) {
+  return collectSeqPages(async (after) => {
     const res = await cloudRest(
-      `/rest/v1/files?select=${CLOUD_PULL_COLUMNS}&order=seq.asc&seq=gt.${after}&limit=${PAGE}` +
+      `/rest/v1/files?select=${CLOUD_PULL_COLUMNS}&order=seq.asc&seq=gt.${after}&limit=${CLOUD_PAGE_SIZE}` +
         (plan.includeDeleted ? '' : '&deleted=eq.false') // first reconcile: nothing local to delete safely
     )
     if (res.status >= 400) throw new Error(`Cloud pull failed (HTTP ${res.status})`)
-    const page = Array.isArray(res.json) ? res.json : []
-    rows.push(...page)
-    if (page.length < PAGE) break
-    const last = parseRowSeq(page[page.length - 1].seq)
-    // A full page must move the keyset forward — anything else would loop forever.
-    if (last === null || last <= after) throw new Error('Cloud pull failed (invalid seq paging)')
-    after = last
-  }
-  return rows
+    return Array.isArray(res.json) ? res.json : []
+  }, plan.afterSeq, CLOUD_PAGE_SIZE, 'Cloud pull failed')
 }
 
 /** Fetches + decrypts the remote anchor row of a dir (or null). */
@@ -1471,6 +1543,10 @@ async function cloudPullNow() {
   const c = getCliCloud()
   const dek = await getCliDek()
   const lastSyncMs = c.lastSync ? Date.parse(c.lastSync) : null
+  // Pending uploads whose local file is gone protect nothing (the app's journal
+  // drain discards them the same way).
+  const pending = existingPendingUpserts(c.pendingUpserts)
+  const keptDirs = []
   const rows = await cloudFetchChangedRows(c)
 
   let errors = 0
@@ -1510,8 +1586,13 @@ async function cloudPullNow() {
       let anchor = group.find(e => isAnchorPath(e.relPath)) || null
 
       if (anchor && anchor.deleted) {
+        if (!localExists) continue
+        // A pending (failed) upload under '<dir>/' = a local edit the server
+        // never got: keep the note and re-upload it whole below (resurrected on
+        // purpose, like the app — the local edit wins).
+        if (pendingUnderDir(pending, dir)) { keptDirs.push(dir); continue }
         // Note deleted remotely — apply locally only under the safety rule.
-        if (localExists && shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs)) {
+        if (shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs)) {
           fs.rmSync(localDirPath, { recursive: true, force: true })
           deleted++
         }
@@ -1559,6 +1640,8 @@ async function cloudPullNow() {
         let changed = 0
         for (const entry of group) {
           if (isAnchorPath(entry.relPath)) continue
+          // A section tombstone must not remove a pending (failed) upload of that file.
+          if (entry.deleted && isPendingUpsert(pending, entry.relPath)) continue
           if (!shouldApplyRemoteSection(entry.updatedAtMs, localUpdatedMs)) continue
           if (cloudApplySectionFile(entry)) changed++
         }
@@ -1585,7 +1668,48 @@ async function cloudPullNow() {
 
   // Max seq of EVERY fetched row (undecryptable/unsafe ones too — they never
   // become applicable); the legacy updated_at cursor goes away.
-  patchCliCloud({ pullSeq: nextPullSeq(c.pullSeq, rows), pullCursor: undefined, lastSync: new Date().toISOString() })
+  // Every file of a kept folder is marked pending in the SAME write that moves
+  // the cursor past its tombstone: if the re-upload below is interrupted, the
+  // tombstone is never fetched again, and only this record keeps the folder
+  // protected (and re-uploaded whole by `noteflow push`) — mirror of the app's
+  // requeueDirForUpload, which journals before pullSeq is saved. Built on the
+  // FRESH stored list so a failure recorded meanwhile by another CLI process
+  // is not lost; entries whose file is gone are pruned.
+  const keptRelPaths = new Map()
+  for (const dir of keptDirs) {
+    const relPaths = []
+    try {
+      for (const f of fs.readdirSync(path.join(NOTES_DIR, dir))) if (f.endsWith('.md')) relPaths.push(`${dir}/${f}`)
+    } catch { /* unreadable — its pending entries still stand */ }
+    keptRelPaths.set(dir, relPaths)
+  }
+  patchCliCloud({
+    pullSeq: nextPullSeq(c.pullSeq, rows), pullCursor: undefined, lastSync: new Date().toISOString(),
+    pendingUpserts: storedPendingUpserts(existingPendingUpserts(
+      nextPendingUpserts(getCliCloud().pendingUpserts, [...keptRelPaths.values()].flat(), []))),
+  })
+
+  // Notes kept over a remote tombstone: re-upload EVERY file of the folder so
+  // all its rows lose the tombstone (re-sending only the pending file would
+  // leave the other sections deleted for every other device).
+  for (const [dir, relPaths] of keptRelPaths) {
+    const uploaded = []
+    try {
+      const noteKey = await cloudGetNoteKey(dek, dir)
+      for (const relPath of relPaths) {
+        await cloudPushFile(dek, noteKey, relPath)
+        uploaded.push(relPath)
+      }
+      out(`  Kept ${dir}/ (deleted elsewhere, but local changes were never uploaded) — uploaded again`)
+    } catch (e) {
+      errors++
+      err(`Kept ${dir}/ (deleted elsewhere, but local changes were never uploaded) — upload failed: ${e.message}. Run 'noteflow push' to retry`)
+    }
+    // Only what landed leaves the list (the rest is already recorded above).
+    if (uploaded.length) {
+      patchCliCloud({ pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [], uploaded)) })
+    }
+  }
   return { pulled, deleted, errors }
 }
 
@@ -1815,18 +1939,25 @@ async function cmdCloudPush() {
 
   out(`  Pushing ${relPaths.length} files to NoteFlow Cloud...`)
   let pushed = 0, errors = 0
+  const uploaded = [], failed = []
+  const savePending = () => patchCliCloud({
+    pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, failed, uploaded)),
+  })
   for (const relPath of relPaths) {
     try {
       const noteKey = await cloudGetNoteKey(dek, noteDirOf(relPath) || relPath)
       await cloudPushFile(dek, noteKey, relPath)
+      uploaded.push(relPath)
       pushed++
       process.stdout.write(`\r  ${pushed}/${relPaths.length}`)
     } catch (e) {
-      if (e.subscription) { process.stdout.write('\n'); err(e.message); exit(1) }
+      failed.push(relPath)
+      if (e.subscription) { savePending(); process.stdout.write('\n'); err(e.message); exit(1) }
       errors++
       console.error(`\n  Failed: ${relPath} — ${e.message}`)
     }
   }
+  savePending()
   patchCliCloud({ lastSync: new Date().toISOString() })
   out(`\n  Done: ${pushed} pushed, ${errors} errors`)
 }
@@ -3548,8 +3679,9 @@ if (require.main === module) {
     generateDek, generateNoteKey,
     noteDirOf, isAnchorPath, isSafeCloudRelPath, listAnchorSectionFiles, parseUpdatedTimestamp,
     resolveRowUpdatedAt, shouldApplyRemoteDir, shouldApplyRemoteSection, shouldApplyRemoteDeletion,
-    planPullQuery, parseRowSeq, nextPullSeq, buildFileUpsertRow, decryptFileRow,
-    CLOUD_METADATA_FILES, CLOUD_PULL_COLUMNS,
+    planPullQuery, parseRowSeq, nextPullSeq, collectSeqPages, buildFileUpsertRow, decryptFileRow,
+    CLOUD_METADATA_FILES, CLOUD_PULL_COLUMNS, CLOUD_PAGE_SIZE,
     nextGithubLastSync, localOnlyNoteDirs, localOnlyHint, cliCloudForUser,
+    nextPendingUpserts, pendingUnderDir, isPendingUpsert,
   }
 }

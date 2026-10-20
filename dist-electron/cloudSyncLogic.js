@@ -17,7 +17,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CLOUD_PULL_COLUMNS = exports.CLOUD_METADATA_FILENAMES = void 0;
+exports.CLOUD_PAGE_SIZE = exports.CLOUD_PULL_COLUMNS = exports.CLOUD_METADATA_FILENAMES = void 0;
 exports.noteDirOf = noteDirOf;
 exports.isAnchorPath = isAnchorPath;
 exports.isSafeCloudRelPath = isSafeCloudRelPath;
@@ -30,6 +30,7 @@ exports.shouldApplyRemoteSection = shouldApplyRemoteSection;
 exports.shouldApplyRemoteDeletion = shouldApplyRemoteDeletion;
 exports.groupEntriesByDir = groupEntriesByDir;
 exports.planPullQuery = planPullQuery;
+exports.collectSeqPages = collectSeqPages;
 exports.parseRowSeq = parseRowSeq;
 exports.nextPullSeq = nextPullSeq;
 exports.buildFileUpsertRow = buildFileUpsertRow;
@@ -239,6 +240,35 @@ function planPullQuery(s) {
     if (s.pullCursor || s.lastSync)
         return { afterSeq: 0, includeDeleted: true };
     return { afterSeq: 0, includeDeleted: false };
+}
+/** Rows per page of every Cloud listing — PostgREST caps responses (Supabase default max-rows 1000). */
+exports.CLOUD_PAGE_SIZE = 1000;
+/**
+ * Reads a WHOLE `public.files` listing by KEYSET pagination over `seq`:
+ * `fetchPage(after)` must request `order=seq.asc&seq=gt.<after>&limit=<pageSize>`
+ * (plus its own filters) and resolve with that page — or throw. Stops at the
+ * first short page. Not offsets/Range: an upsert moves a row to a higher seq,
+ * so an offset window shifts mid-listing and can skip rows; a keyset can't.
+ * A full page whose last seq doesn't move the keyset forward throws (it would
+ * loop forever). Any failed page propagates: the callers never act on a
+ * partial listing — a capped listing is exactly how a note deletion used to
+ * tombstone nothing and still be marked done. Used by the pull
+ * (fetchChangedRows) and by the deletion listing (listRemotePaths).
+ * Mirror: collectSeqPages in cli/noteflow.js.
+ */
+async function collectSeqPages(fetchPage, afterSeq, pageSize = exports.CLOUD_PAGE_SIZE, errorLabel = 'Cloud listing failed') {
+    const rows = [];
+    let after = afterSeq;
+    for (;;) {
+        const page = await fetchPage(after);
+        rows.push(...page);
+        if (page.length < pageSize)
+            return rows;
+        const last = parseRowSeq(page[page.length - 1].seq);
+        if (last === null || last <= after)
+            throw new Error(`${errorLabel} (invalid seq paging)`);
+        after = last;
+    }
 }
 /** A row's seq as a safe non-negative integer, or null (bigint may arrive as a string). */
 function parseRowSeq(value) {

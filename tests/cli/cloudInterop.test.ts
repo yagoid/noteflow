@@ -28,6 +28,8 @@ import {
   shouldApplyRemoteSection,
   planPullQuery,
   nextPullSeq,
+  collectSeqPages,
+  CLOUD_PAGE_SIZE,
   CLOUD_PULL_COLUMNS,
   listAnchorSectionFiles,
 } from '../../electron/cloudSyncLogic'
@@ -187,6 +189,34 @@ describe('CLI cloud mapping parity with cloudSyncLogic', () => {
     ]
     for (const md of anchors) expect(cli.listAnchorSectionFiles(md), md).toEqual(listAnchorSectionFiles(md))
     expect(cli.listAnchorSectionFiles(anchors[0])).toEqual(['sec001.md', 'sec002.md'])
+  })
+
+  it('pages every listing the same way (keyset by seq, same cap, same failures)', async () => {
+    expect(cli.CLOUD_PAGE_SIZE).toBe(CLOUD_PAGE_SIZE)
+    const listing = (total: number) => {
+      const rows = Array.from({ length: total }, (_, i) => ({ seq: String(i + 1) })) // bigint as string
+      const calls: number[] = []
+      return {
+        calls,
+        fetchPage: async (after: number) => {
+          calls.push(after)
+          return rows.filter((r) => Number(r.seq) > after).slice(0, CLOUD_PAGE_SIZE)
+        },
+      }
+    }
+    for (const [total, after] of [[0, 0], [999, 0], [1000, 0], [1001, 0], [2500, 0], [2500, 1200]]) {
+      const app = listing(total)
+      const cliSide = listing(total)
+      const a = await collectSeqPages(app.fetchPage, after)
+      const c = await cli.collectSeqPages(cliSide.fetchPage, after)
+      expect(c, `${total}/${after}`).toEqual(a)
+      expect(cliSide.calls, `${total}/${after}`).toEqual(app.calls)
+    }
+    const stuck = async () => [{ seq: 1 }, { seq: 1 }]
+    await expect(cli.collectSeqPages(stuck, 1, 2)).rejects.toThrow('Cloud listing failed (invalid seq paging)')
+    await expect(collectSeqPages(stuck, 1, 2)).rejects.toThrow('Cloud listing failed (invalid seq paging)')
+    const failing = async () => { throw new Error('HTTP 500') }
+    await expect(cli.collectSeqPages(failing, 0)).rejects.toThrow('HTTP 500')
   })
 
   it('selects the same pull columns (seq included)', () => {

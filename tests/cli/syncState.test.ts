@@ -124,3 +124,45 @@ describe('cliCloudForUser (Cloud cursor owner)', () => {
     expect(cliCloudForUser(synced, undefined)).toBe(synced)
   })
 })
+
+// Minimal Cloud journal of the CLI (`cliCloud.pendingUpserts`): failed uploads
+// guard the pull's tombstones exactly like the app's journal does
+// (shouldDeletionRuleSkipDir / hasPendingUpsert in electron/syncState.ts).
+describe('CLI pending Cloud uploads (pendingUpserts)', () => {
+  const nextPendingUpserts = cli.nextPendingUpserts as (p: unknown, failed: string[], uploaded: string[]) => string[]
+  const pendingUnderDir = cli.pendingUnderDir as (p: unknown, dir: string) => boolean
+  const isPendingUpsert = cli.isPendingUpsert as (p: unknown, rel: string) => boolean
+
+  it('failed uploads are added once, successful ones removed', () => {
+    let p = nextPendingUpserts(undefined, ['n/note.md', 'n/s1.md'], [])
+    expect(p).toEqual(['n/note.md', 'n/s1.md'])
+    p = nextPendingUpserts(p, ['n/s1.md'], ['m/note.md'])
+    expect(p).toEqual(['n/note.md', 'n/s1.md'])
+    p = nextPendingUpserts(p, [], ['n/note.md', 'n/s1.md'])
+    expect(p).toEqual([])
+    expect(nextPendingUpserts('garbage', ['a/x.md'], [])).toEqual(['a/x.md'])
+  })
+
+  it('same decisions as the app journal guards', async () => {
+    const { emptySyncState, journalRecord, shouldDeletionRuleSkipDir, hasPendingUpsert } = await import(
+      '../../electron/syncState'
+    )
+    const pending = ['n/s1.md', 'groups.json', 'ab/note.md']
+    const state = emptySyncState()
+    for (const rel of pending) journalRecord(state, rel, 'upsert', NOW)
+    for (const dir of ['n', 'a', 'ab', 'm', 'groups.json']) {
+      expect(pendingUnderDir(pending, dir), dir).toBe(shouldDeletionRuleSkipDir(state, dir))
+    }
+    for (const rel of ['n/s1.md', 'n/s2.md', 'n', 'groups.json']) {
+      expect(isPendingUpsert(pending, rel), rel).toBe(hasPendingUpsert(state, rel))
+    }
+    expect(pendingUnderDir(undefined, 'n')).toBe(false)
+    expect(isPendingUpsert(undefined, 'n/s1.md')).toBe(false)
+  })
+
+  it('another account drops them (like the cursor); the same account keeps them', () => {
+    const c = { enabled: true, pullSeq: 5, userId: 'user-a', pendingUpserts: ['n/s1.md'] } as CliCloud
+    expect(cliCloudForUser(c, 'user-b')).toEqual({ enabled: true, userId: 'user-b' })
+    expect(cliCloudForUser(c, 'user-a')).toBe(c)
+  })
+})

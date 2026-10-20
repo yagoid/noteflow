@@ -501,9 +501,35 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
 - **Deletes = tombstones (decisión):** `PATCH deleted=true, content_ct=''` (el `path_ct`/`key_ct`
   se conservan) para que otros dispositivos se enteren en su pull incremental — **no hay borrado
   por ausencia** (el pull incremental no ve filas "que faltan"). El borrado local aplica la regla
-  de seguridad de siempre (`updated <= lastSync`). Sin entitlement, RLS bloquea el UPDATE →
-  fallback a `DELETE` físico (la fila desaparece sin notificar a otros dispositivos — asumido:
-  sin suscripción tampoco pueden pushear).
+  de seguridad de siempre (`updated <= lastSync`) **más el guard del journal** (abajo). Sin
+  entitlement, RLS bloquea el UPDATE → fallback a `DELETE` físico (la fila desaparece sin
+  notificar a otros dispositivos — asumido: sin suscripción tampoco pueden pushear). Ojo: el
+  tombstone lleva `updated_at = ahora` (hora del borrado), no el `updated` de la nota.
+  - **Borrar una nota entera** (`scheduleDeleteDir` → `deleteRemoteDirNow`) necesita las filas de
+    la carpeta, pero `path_key` es opaco: `listRemotePaths` lista **todas** las filas vivas
+    (`select=path_key,path_ct,key_ct,seq&deleted=eq.false`), descifra rutas y filtra por `<dir>/`.
+    El listado va **paginado por keyset sobre `seq`** (`collectSeqPages`, puro en
+    `cloudSyncLogic.ts`, el mismo bucle que el pull; espejo en el CLI): antes era un único GET y
+    PostgREST lo corta a **1.000 filas** (max-rows de Supabase) → si las filas de la nota quedaban
+    fuera, no se tombstoneaba nada, el `deleteDir` se daba por completado y la nota **resucitaba**
+    en los demás dispositivos (reproducido en vivo). Cualquier página que falle lanza → el
+    `deleteDir` sigue en el journal y se reintenta; nunca se borra a medias dando el journal por
+    bueno.
+  - **Guard del journal (borrado remoto vs edición local sin subir):** si llega el tombstone del
+    **ancla** y hay algún `upsert` pendiente bajo `<dir>/` (`shouldDeletionRuleSkipDir`, el mismo
+    guard que la regla de borrado del pull de GitHub), **no** se borra la carpeta. Sin él se perdían
+    ediciones (reproducido en vivo): B edita N y su subida falla (queda en el journal); B sube otra
+    nota M y `lastSync` pasa por encima del `updated` de N; A borra N; el pull de B ve
+    `updated(N) <= lastSync` → `rmSync`, y el reintento del journal **descarta** el upsert porque el
+    fichero ya no existe. Lo mismo dentro del debounce de 5 s (el upsert se apunta en el journal al
+    **armar** el timer). Además se **resucita la nota a propósito**: `requeueDirForUpload` re-encola
+    **todos** los `.md` de la carpeta (debounce + journal, como el catch-up), no solo el pendiente —
+    si solo se re-subiera el fichero pendiente, el resto de secciones seguiría tombstoneado y los
+    demás dispositivos recibirían un ancla sin sus secciones (el editor las recrearía vacías). Gana
+    la edición local, que es lo que promete `shouldApplyRemoteDeletion` ("newer local edits win").
+    El tombstone de una **sección suelta** se salta igual si hay un upsert pendiente de **ese**
+    fichero (`hasPendingUpsert`, `syncState.ts`): su `updated_at` es la hora del borrado, así que
+    `shouldApplyRemoteSection` lo dejaría pasar siempre.
 - **Pull incremental por `seq` (0008):** `GET files?select=…,seq&order=seq.asc&seq=gt.<n>&limit=1000`
   con **paginación keyset** (siguiente página desde la última `seq` vista, hasta una página corta) —
   no por offset/`Range`, que se desplaza si se escriben filas a mitad del pull. **Dos marcas
@@ -521,8 +547,15 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   ajustes. Las rutas descifradas se sanean (`isSafeCloudRelPath`) antes de tocar disco. Las propias
   escrituras vuelven en el siguiente pull (tienen seq nueva): son no-ops porque el ancla no es más
   nueva y las secciones idénticas no se reescriben.
-  ⚠️ Fuera de este arreglo (pendiente): el cursor avanza aunque una carpeta falle al aplicarse
-  (error de disco) — esa fila no se reintenta en este dispositivo; `listRemotePaths` no pagina.
+  ⚠️ **Pendiente:** el cursor avanza aunque una carpeta falle al aplicarse (error de disco) — esa
+  fila no se reintenta en este dispositivo. (El listado de borrados ya pagina, ver "Deletes".)
+- ⚠️ **Problema conocido (pendiente, también en GitHub): las subidas pisan sin condiciones.** El
+  upsert (`merge-duplicates`) escribe aunque el servidor tenga una versión más nueva (o un tombstone)
+  que este dispositivo nunca vio: una subida del journal drenada tarde, o el **catch-up del primer
+  sync de un segundo dispositivo** (sube su corpus entero), puede pisar una edición o un borrado más
+  recientes de otro dispositivo — en la prueba en vivo, el corpus inicial de B resucitó 2 s después
+  una nota que A acababa de borrar. Arreglo previsto: **subida condicionada** (comparar con la versión
+  remota que se vio por última vez) en los dos backends.
 - **Regla de secciones sueltas (pull por carpeta, necesaria con el cursor por seq):** un ancla y sus
   secciones son subidas independientes y pueden caer en pulls distintos (en cualquier orden).
   - El grupo trae el ancla y `shouldApplyRemoteDir` (remota más nueva, o carpeta local inexistente)
@@ -549,13 +582,15 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     desfasada en un conflicto en el que el local era estrictamente más nuevo cuando llegó la fila
     remota de esa sección (no se aplicó) y luego llega un ancla remota aún más nueva que no la
     re-sube: se queda la local — rige "la más reciente gana" (LWW) por carpeta, como antes.
-  - El ancla del grupo es un **tombstone** → regla de borrado de siempre (`updated <= lastSync`).
+  - El ancla del grupo es un **tombstone** → regla de borrado de siempre (`updated <= lastSync`),
+    salvo upsert pendiente bajo la carpeta (guard del journal + resurrección, ver "Deletes").
   - El ancla no se aplica (ausente del grupo, o no más nueva) y la carpeta local **existe** → cada
     fila de sección del grupo se aplica **individualmente** si `shouldApplyRemoteSection(sección,
     local)` = `updatedAtMs >= localUpdatedMs` (la sección heredó el `updated` de su versión: `>=`
     cubre "misma versión, la sección llegó después"; con ediciones locales propias el `updated` local
-    es estrictamente mayor y se respeta). Un tombstone de sección con esa condición → unlink. Respeta
-    los guards del journal (`shouldPullSkipDir`/`shouldPullSkipFile`). Antes este caso descartaba el
+    es estrictamente mayor y se respeta). Un tombstone de sección con esa condición → unlink, salvo
+    que haya un upsert pendiente de ese fichero (`hasPendingUpsert`). Respeta los guards del journal
+    (`shouldPullSkipDir`/`shouldPullSkipFile`). Antes este caso descartaba el
     grupo entero y el contenido de sección se perdía en silencio.
   - Carpeta local inexistente y grupo sin ancla → `fetchRemoteAnchor`; si existe y no está borrada,
     se aplica como ancla nueva (rama de arriba, con la recogida de secciones listadas); si no, se
@@ -708,12 +743,12 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
   deslogearía mutuamente. El token rotado se persiste **antes** de usar el access token; un 400/401
   del refresh borra `cliAccount` ("Session expired"). Un access token por invocación (proceso
   one-shot, sin single-flight).
-- **Estado propio:** `settings.cliCloud = {enabled, pullSeq, lastSync, userId}` (más un
+- **Estado propio:** `settings.cliCloud = {enabled, pullSeq, lastSync, userId, pendingUpserts}` (más un
   `pullCursor` legado hasta el primer pull por seq) — cursor/lastSync del CLI, independientes de
   `settings.cloudSync` (cada cliente reconcilia por su cuenta). `userId` es el **dueño** de ese
   cursor y sobrevive al `logout` (que borra `cliAccount` pero conserva cursor/lastSync/userId): un
   re-login con la **misma** cuenta retoma incremental; con **otra** cuenta `cliCloudForUser`
-  descarta `pullSeq`/`pullCursor`/`lastSync` → el siguiente pull es completo (un watermark ajeno
+  descarta `pullSeq`/`pullCursor`/`lastSync`/`pendingUpserts` → el siguiente pull es completo (un watermark ajeno
   saltaría, por `seq > pullSeq`, todas las filas de la cuenta nueva por debajo de él). Se aplica en `cloud login` (antes del pull automático) y al inicio de todo pull/reconcile
   Cloud (`bindCliCloudToAccount`).
   - **Dueño desconocido** (estado de antes de guardar `userId`): en `cloud login` se toma como dueño
@@ -741,12 +776,36 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
 - **Prioridad Cloud sobre GitHub** (espejo de `syncProvider.ts`): con `cliCloud.enabled` + sesión,
   `noteflow push/pull/status` y el sync automático por comando (`syncPushNoteFiles`, borrados)
   van a Cloud y NO tocan GitHub. Borrados = tombstones `PATCH deleted=true` con fallback a `DELETE`
-  físico en 403; un 403 en un upsert corta el push completo con el mensaje de suscripción.
+  físico en 403; un 403 en un upsert corta el push completo con el mensaje de suscripción. El
+  listado de `noteflow delete` (`cloudListRemotePaths`) pagina por keyset igual que la app
+  (`collectSeqPages`, paridad en `tests/cli/cloudInterop.test.ts`).
+- **Journal mínimo (`cliCloud.pendingUpserts`):** el CLI no tiene cola de reintentos (cada subida
+  es síncrona dentro del comando), pero sí recuerda las subidas **fallidas**: `syncPushNoteFiles`,
+  `cloud push` y la re-subida del pull añaden los relPaths que no llegaron al servidor y los quitan
+  cuando suben bien (`nextPendingUpserts`, puro). Hace falta porque el hueco B existe igual: la
+  siguiente subida OK de **otra** nota mueve `lastSync` por encima de la edición fallida (y eso se
+  mantiene: no avanzar `lastSync` reabriría el bug de resurrección que ese bump evita). En el pull:
+  - tombstone del **ancla** con alguna subida pendiente bajo `<dir>/` (`pendingUnderDir`, espejo de
+    `shouldDeletionRuleSkipDir`) → la nota **no** se borra y, tras guardar el cursor, se re-sube la
+    carpeta entera (resurrección intencionada, como la app); si la re-subida falla, se informa
+    ("Run 'noteflow push' to retry") y sigue pendiente. **Toda la carpeta se marca pendiente en la
+    MISMA escritura que avanza `pullSeq`** (sobre la lista leída en ese momento, no la del inicio del
+    pull, para no perder fallos que registre otro proceso del CLI): si la re-subida se interrumpe
+    (Ctrl-C, cuelgue), el tombstone ya no vuelve a llegar y solo ese registro mantiene la carpeta
+    protegida y hace que `noteflow push` la re-suba entera — espejo de `requeueDirForUpload` de la
+    app, que la apunta en el journal antes de guardar `pullSeq`;
+  - tombstone de una **sección suelta** pendiente (`isPendingUpsert`, espejo de `hasPendingUpsert`) →
+    se salta;
+  - al empezar se descartan las entradas cuyo fichero local ya no existe (no protegen nada).
+  `noteflow push` es el reintento (sube todo y limpia lo que llega). Se borra al cambiar de cuenta
+  (`cliCloudForUser`, como `pullSeq`). Paridad con los guards de la app en
+  `tests/cli/syncState.test.ts`.
 - **Gate de pull inicial:** sin `pullSeq`, `pullCursor` ni `lastSync` (nunca reconciliado), el
   primer push ejecuta antes un pull automático ("First Cloud reconcile…") — un disco viejo no machaca
   un remoto más nuevo. Pull incremental idéntico al de la app (keyset por `seq` con los mismos tres
   modos de `planPullQuery`, ancla decide, regla de secciones sueltas, regla de borrado
-  `updated <= lastSync`, watermark = `nextPullSeq`); paridad fijada en `tests/cli/cloudInterop.test.ts`.
+  `updated <= lastSync` + los guards de `pendingUpserts`, ver "Journal mínimo" —,
+  watermark = `nextPullSeq`); paridad fijada en `tests/cli/cloudInterop.test.ts`.
   `noteflow cloud status --json` expone `pullSeq` (y `pullCursor`, legado, `null` tras el primer pull
   por seq).
 - **Pull tras `cloud login`:** solo con claves **managed** (la DEK se desbloquea sin prompt) el login

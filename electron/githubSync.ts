@@ -23,12 +23,17 @@ import {
   shouldPullSkipDir,
   shouldPullSkipFile,
   shouldDeletionRuleSkipDir,
+  planRemoteDirDelete,
+  planSectionRefresh,
+  shouldRefreshSections,
+  type TreeBlobRef,
   shouldRunDeletionRule,
   getCachedSha,
   setCachedSha,
   pruneShas,
 } from './syncState'
 import { type MirrorFile, gitBlobSha, planMirror, remoteHasContent } from './mirrorPlan'
+import { listAnchorSectionFiles } from './cloudSyncLogic'
 import { type SyncHistoryEntry, createSyncHistory } from './syncHistory'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -344,6 +349,15 @@ async function fetchRemoteTree(
     .filter((t) => t.type === 'blob')
     .map(({ path: p, sha }) => ({ path: p, sha }))
   return { blobs, truncated }
+}
+
+/** Git blob sha of a local file (notes-dir-relative), or null if it can't be read. */
+function localBlobSha(notesDir: string, relPath: string): string | null {
+  try {
+    return gitBlobSha(fs.readFileSync(path.join(notesDir, relPath), 'utf-8'))
+  } catch {
+    return null
+  }
 }
 
 /** Groups tree blobs into note directories: dir → set of .md filenames inside it. */
@@ -880,6 +894,11 @@ export async function pullNotes(notesDir: string): Promise<{
     // that the remote simply doesn't have yet.
     const remoteIsV2 = remoteHasMarker && !remoteHasFlatNotes
 
+    // Same-version section refresh (planSectionRefresh) only while GitHub is NOT
+    // a stale mirror (Cloud on / full reconcile pending) — shouldRefreshSections.
+    // Re-checked right before any refresh write, as late as possible.
+    const sectionRefreshAllowed = shouldRefreshSections(needsFullReconcile, isCloudSyncEnabledFailClosed())
+
     // Pull each remote note directory. The note dir is the unit of conflict
     // resolution: note.md's `updated:` decides, and a newer remote wins
     // WHOLESALE (all its section files mirrored, stale local sections removed).
@@ -891,10 +910,53 @@ export async function pullNotes(notesDir: string): Promise<{
         if (shouldPullSkipDir(state, dir)) continue
 
         const anchorRel = `${dir}/${NOTE_MD}`
-        // SHA cache: if the anchor blob is exactly the one we already
-        // reconciled, nothing changed remotely — skip the dir without any GET.
         const anchorTreeSha = treeShaByPath.get(anchorRel)
-        if (anchorTreeSha && getCachedSha(state, anchorRel) === anchorTreeSha) continue
+        const localDirPath = path.join(notesDir, dir)
+        const localAnchorPath = path.join(localDirPath, NOTE_MD)
+        const sectionBlobs: TreeBlobRef[] = []
+        for (const f of remoteFilesInDir) {
+          if (f === NOTE_MD) continue
+          const sha = treeShaByPath.get(`${dir}/${f}`)
+          if (sha) sectionBlobs.push({ path: `${dir}/${f}`, sha })
+        }
+        // Section files the LOCAL anchor lists (read lazily: only when a section
+        // blob is not cached yet) — unlisted remote sections are never refreshed.
+        let listedLocally: Set<string> | null = null
+        const isListedLocally = (rel: string): boolean => {
+          if (!listedLocally) {
+            try {
+              const files = listAnchorSectionFiles(fs.readFileSync(localAnchorPath, 'utf-8'))
+              listedLocally = new Set(files.map((f) => `${dir}/${f}`))
+            } catch {
+              listedLocally = new Set()
+            }
+          }
+          return listedLocally.has(rel)
+        }
+        // Section blobs not reconciled yet (planSectionRefresh). The ones the
+        // local file already matches are cached right away, without a request.
+        const planSections = (): TreeBlobRef[] => {
+          const plan = planSectionRefresh(state, sectionBlobs, (rel) => localBlobSha(notesDir, rel), {
+            refreshAllowed: sectionRefreshAllowed,
+            isListedLocally,
+          })
+          for (const blob of plan.adopt) if (setCachedSha(state, blob.path, blob.sha)) stateChanged = true
+          return plan.changed
+        }
+
+        // SHA cache: if the anchor blob is exactly the one we already
+        // reconciled, the note didn't change remotely — skip the dir without
+        // any GET... unless a SECTION blob changed: the push uploads note.md
+        // and its sections in separate commits, so a pull in between applied
+        // the new anchor with the old sections and cached the anchor sha.
+        // Checking the section shas too costs no request in the steady state.
+        let changedSections: TreeBlobRef[] | null = null
+        if (anchorTreeSha && getCachedSha(state, anchorRel) === anchorTreeSha) {
+          // Gone locally: keep the historical skip (never resurrect it from here).
+          if (!fs.existsSync(localAnchorPath)) continue
+          changedSections = planSections()
+          if (changedSections.length === 0) continue
+        }
 
         const remoteAnchor = await getRemoteFile(token, s.owner, s.repo, anchorRel)
         if (!remoteAnchor) {
@@ -904,19 +966,58 @@ export async function pullNotes(notesDir: string): Promise<{
           continue
         }
 
-        const localDirPath = path.join(notesDir, dir)
-        const localAnchorPath = path.join(localDirPath, NOTE_MD)
+        const localExists = fs.existsSync(localAnchorPath)
+        const localUpdatedTs = localExists
+          ? parseUpdatedTimestamp(extractUpdatedTimestamp(fs.readFileSync(localAnchorPath, 'utf-8')))
+          : null
+        const remoteUpdatedTs = parseUpdatedTimestamp(extractUpdatedTimestamp(remoteAnchor.content))
+        const remoteNotNewer =
+          localUpdatedTs !== null && remoteUpdatedTs !== null && remoteUpdatedTs <= localUpdatedTs
 
-        if (fs.existsSync(localAnchorPath)) {
-          const localUpdatedTs = parseUpdatedTimestamp(extractUpdatedTimestamp(fs.readFileSync(localAnchorPath, 'utf-8')))
-          const remoteUpdatedTs = parseUpdatedTimestamp(extractUpdatedTimestamp(remoteAnchor.content))
-          // Skip the whole dir if local is newer or equal — decision made, so
-          // remember this remote blob as reconciled (skip it without a GET
-          // until it changes remotely again).
-          if (localUpdatedTs !== null && remoteUpdatedTs !== null && remoteUpdatedTs <= localUpdatedTs) {
-            if (anchorTreeSha && setCachedSha(state, anchorRel, anchorTreeSha)) stateChanged = true
-            continue
+        // Anchor not applied: local is newer or equal (or the anchor was already
+        // reconciled). Decision made, so remember this remote blob as reconciled
+        // (skip it without a GET until it changes remotely again).
+        if (changedSections !== null || (localExists && remoteNotNewer)) {
+          if (anchorTreeSha && setCachedSha(state, anchorRel, anchorTreeSha)) stateChanged = true
+          changedSections ??= planSections()
+          if (changedSections.length === 0) continue
+          if (localUpdatedTs !== null && localUpdatedTs === remoteUpdatedTs) {
+            // Late re-check: Cloud switched on mid-pull makes GitHub a stale
+            // mirror again (shouldRefreshSections) — historical skip, no cache.
+            if (!shouldRefreshSections(needsFullReconcile, isCloudSyncEnabledFailClosed())) continue
+            // SAME version on both sides (same `updated`): download only the
+            // sections whose blob changed — the loose-section rule of the Cloud
+            // pull (shouldApplyRemoteSection: section of this version >= local).
+            // Pending local upserts/deletes were already left out by the plan.
+            let wrote = 0
+            for (const blob of changedSections) {
+              const remoteSection = await getRemoteFile(token, s.owner, s.repo, blob.path)
+              if (!remoteSection) {
+                incomplete = true // not cached → retried on the next pull
+                continue
+              }
+              fs.writeFileSync(path.join(notesDir, blob.path), remoteSection.content, 'utf-8')
+              filesDown++
+              wrote++
+              if (setCachedSha(state, blob.path, remoteSection.sha)) stateChanged = true
+            }
+            if (wrote > 0) {
+              updatedFiles.push(localDirPath)
+              pulled++
+            }
+          } else if (localUpdatedTs !== null && remoteUpdatedTs !== null && localUpdatedTs > remoteUpdatedTs) {
+            // Local strictly newer: respected (LWW per folder) — but NOT cached.
+            // Once this device's push lands both anchors are the same version
+            // again and the branch above brings in the sections it didn't touch
+            // (the push only uploads changed sections, so the remote keeps them).
+            // Costs one anchor GET per pull until then; never in a converged state.
+          } else {
+            // Unknown timestamps, or a reconciled remote anchor that is newer
+            // than the local one: can't reason about it — keep the historical
+            // skip and remember the decision.
+            for (const blob of changedSections) if (setCachedSha(state, blob.path, blob.sha)) stateChanged = true
           }
+          continue
         }
 
         fs.mkdirSync(localDirPath, { recursive: true })
@@ -930,6 +1031,8 @@ export async function pullNotes(notesDir: string): Promise<{
           if (remoteSection) {
             fs.writeFileSync(path.join(localDirPath, f), remoteSection.content, 'utf-8')
             filesDown++
+            // Reconciled section blob (see planSectionRefresh).
+            if (setCachedSha(state, `${dir}/${f}`, remoteSection.sha)) stateChanged = true
           }
         }
         // Sections removed remotely → remove their local files
@@ -1169,7 +1272,12 @@ export interface MirrorResult {
 
 let mirrorInFlight = false
 
-/** Paths tracked by the pull's reconciled-SHA cache: note.md anchors + root metadata. */
+/**
+ * Paths the MIRROR records in the reconciled-SHA cache after uploading/skipping
+ * them: note.md anchors + root metadata. The cache also holds section blobs,
+ * but those are only written by the pull — sections the mirror uploads are
+ * adopted on the next pull by comparing with the local file (planSectionRefresh).
+ */
 function isShaCachedPath(relPath: string): boolean {
   return relPath.endsWith(`/${NOTE_MD}`) || (METADATA_FILENAMES as readonly string[]).includes(relPath)
 }
@@ -1633,11 +1741,14 @@ export async function scheduleDelete(relPath: string): Promise<void> {
 /**
  * Deletes every remote blob under '<dir>/'. One blob failure must not abort the
  * rest (a half-deleted dir would be re-pulled on the next sync), but the call
- * THROWS if any blob failed so callers journal it for retry.
+ * THROWS if any blob failed so callers journal it for retry. It also throws,
+ * before deleting anything, when the tree listing came back truncated
+ * (planRemoteDirDelete): files of the folder may be missing from it, and the
+ * caller would complete the journal entry with part of the note still remote.
  */
 async function deleteRemoteDirNow(token: string, owner: string, repo: string, dir: string): Promise<void> {
-  const blobs = await listRemoteTree(token, owner, repo)
-  const targets = blobs.filter((b) => b.path.startsWith(`${dir}/`))
+  const { blobs, truncated } = await fetchRemoteTree(token, owner, repo)
+  const targets = planRemoteDirDelete(blobs, truncated, dir)
   let failures = 0
   let lastError = ''
   for (const b of targets) {
