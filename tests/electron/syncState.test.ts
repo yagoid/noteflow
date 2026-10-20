@@ -8,6 +8,9 @@ import {
   journalRecordIfAbsent,
   journalComplete,
   journalFail,
+  journalMarkStale,
+  journalMarkDirStale,
+  planAnchorTombstone,
   resolveRetryAction,
   shouldPullSkipDir,
   shouldPullSkipFile,
@@ -430,5 +433,143 @@ describe('reconciled-SHA cache', () => {
     pruneShas(state, new Set<string>())
     expect(state.ops['a']).toBeDefined()
     expect(state.shas).toEqual({})
+  })
+})
+
+describe('Cloud upsert flags: stale (conditional upload rejected) and force (resurrection)', () => {
+  it('parse/serialize preserve stale and force on upserts only, in their exact `true` form', () => {
+    const raw = JSON.stringify({
+      version: 1,
+      ops: {
+        'a/note.md': { op: 'upsert', queuedAt: NOW, attempts: 0, stale: true },
+        'b/note.md': { op: 'upsert', queuedAt: NOW, attempts: 2, force: true },
+        'c/note.md': { op: 'upsert', queuedAt: NOW, attempts: 0, stale: 'yes', force: 1 },
+        'd/sec.md': { op: 'delete', queuedAt: NOW, attempts: 0, stale: true, force: true },
+      },
+      shas: {},
+    })
+    const state = parseSyncState(raw)
+    expect(state.ops['a/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 0, stale: true })
+    expect(state.ops['b/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 2, force: true })
+    expect(state.ops['c/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 0 })
+    expect(state.ops['d/sec.md']).toEqual({ op: 'delete', queuedAt: NOW, attempts: 0 })
+    expect(parseSyncState(serializeSyncState(state))).toEqual(state)
+  })
+
+  it('journalMarkStale flags an existing upsert once and never re-creates a completed one', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/note.md', 'upsert', NOW)
+    expect(journalMarkStale(state, 'a/note.md')).toBe(true)
+    expect(journalMarkStale(state, 'a/note.md')).toBe(false)
+    expect(state.ops['a/note.md'].stale).toBe(true)
+    // The pull completed it while the upload was in flight → nothing to flag.
+    journalComplete(state, 'a/note.md', 'upsert')
+    expect(journalMarkStale(state, 'a/note.md')).toBe(false)
+    expect(state.ops['a/note.md']).toBeUndefined()
+    // Never on a different op.
+    journalRecord(state, 'a/sec.md', 'delete', NOW)
+    expect(journalMarkStale(state, 'a/sec.md')).toBe(false)
+  })
+
+  it('a stale upsert still counts as pending for the deletion guards', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/sec.md', 'upsert', NOW)
+    journalMarkStale(state, 'a/sec.md')
+    expect(hasPendingUpsert(state, 'a/sec.md')).toBe(true)
+    expect(shouldDeletionRuleSkipDir(state, 'a')).toBe(true)
+  })
+
+  it('re-recording an upsert clears stale (new local edit) and keeps attempts/queuedAt', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/note.md', 'upsert', NOW)
+    journalFail(state, 'a/note.md', 'upsert')
+    journalMarkStale(state, 'a/note.md')
+    expect(journalRecord(state, 'a/note.md', 'upsert', LATER)).toBe(true)
+    expect(state.ops['a/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 1 })
+  })
+
+  it('force is added on request and survives later non-forced records and failures', () => {
+    const state = emptySyncState()
+    expect(journalRecord(state, 'a/note.md', 'upsert', NOW, { force: true })).toBe(true)
+    expect(state.ops['a/note.md'].force).toBe(true)
+    expect(journalRecord(state, 'a/note.md', 'upsert', LATER)).toBe(false)
+    journalFail(state, 'a/note.md', 'upsert')
+    expect(state.ops['a/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 1, force: true })
+    // Forcing an existing plain upsert (live debounce timer) flags it in place.
+    journalRecord(state, 'b/note.md', 'upsert', NOW)
+    expect(journalRecord(state, 'b/note.md', 'upsert', LATER, { force: true })).toBe(true)
+    expect(state.ops['b/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 0, force: true })
+  })
+
+  it('force only applies to upserts; a delete replacing a forced upsert drops the flag', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/sec.md', 'delete', NOW, { force: true })
+    expect(state.ops['a/sec.md']).toEqual({ op: 'delete', queuedAt: NOW, attempts: 0 })
+    journalRecord(state, 'b/sec.md', 'upsert', NOW, { force: true })
+    journalRecord(state, 'b/sec.md', 'delete', LATER)
+    expect(state.ops['b/sec.md']).toEqual({ op: 'delete', queuedAt: LATER, attempts: 0 })
+  })
+
+  it('journalRecordIfAbsent passes force through when it creates the entry', () => {
+    const state = emptySyncState()
+    expect(journalRecordIfAbsent(state, 'a/note.md', 'upsert', NOW, { force: true })).toBe(true)
+    expect(state.ops['a/note.md'].force).toBe(true)
+  })
+})
+
+describe('journalMarkDirStale (wholesale apply of a newer remote folder)', () => {
+  it('flags every pending upsert under the dir (forced ones too), nothing else', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/note.md', 'upsert', NOW)
+    journalRecord(state, 'a/s1.md', 'upsert', NOW, { force: true })
+    journalRecord(state, 'a/s2.md', 'delete', NOW)
+    journalRecord(state, 'ab/note.md', 'upsert', NOW)
+    expect(journalMarkDirStale(state, 'a')).toBe(true)
+    expect(state.ops['a/note.md'].stale).toBe(true)
+    expect(state.ops['a/s1.md'].stale).toBe(true)
+    expect(state.ops['a/s2.md']).toEqual({ op: 'delete', queuedAt: NOW, attempts: 0 })
+    expect(state.ops['ab/note.md'].stale).toBeUndefined()
+    expect(journalMarkDirStale(state, 'a')).toBe(false) // already flagged
+  })
+})
+
+describe('planAnchorTombstone (remote deletion of a folder that exists locally)', () => {
+  const T_DELETED = Date.parse('2026-07-06T10:30:00.000Z')
+  const allStale = () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/note.md', 'upsert', NOW)
+    journalRecord(state, 'a/s1.md', 'upsert', NOW)
+    journalMarkDirStale(state, 'a')
+    return state
+  }
+
+  it('nothing pending → none (usual deletion rule)', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/s1.md', 'delete', NOW)
+    journalRecord(state, 'ab/note.md', 'upsert', NOW)
+    expect(planAnchorTombstone(state, 'a', T_DELETED - 1, T_DELETED)).toBe('none')
+  })
+
+  it('a non-stale pending upsert → keep (forced resurrection)', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/note.md', 'upsert', NOW)
+    journalRecord(state, 'a/s1.md', 'upsert', NOW)
+    journalMarkStale(state, 'a/s1.md')
+    expect(planAnchorTombstone(state, 'a', T_DELETED - 1, T_DELETED)).toBe('keep')
+  })
+
+  it('every pending upsert stale + local not newer than the deletion → lost', () => {
+    expect(planAnchorTombstone(allStale(), 'a', T_DELETED - 60_000, T_DELETED)).toBe('lost')
+    expect(planAnchorTombstone(allStale(), 'a', T_DELETED, T_DELETED)).toBe('lost') // equal
+  })
+
+  it('every pending upsert stale but the local note is newer than the deletion → keep (unjournaled edit)', () => {
+    // Edited while the push gate was closed (keys locked, before the first pull)
+    // or by the CLI: the journal never saw it, the local `updated` did.
+    expect(planAnchorTombstone(allStale(), 'a', T_DELETED + 1, T_DELETED)).toBe('keep')
+  })
+
+  it('every pending upsert stale but the local `updated` is unknown → keep (never delete blind)', () => {
+    expect(planAnchorTombstone(allStale(), 'a', null, T_DELETED)).toBe('keep')
   })
 })

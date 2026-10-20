@@ -272,7 +272,7 @@ function applyAccountTransition(plan) {
         // No initial pull from here: the DEK is null by construction on this path
         // (the sign-out dropped it and its cache), so pulling now would only set
         // syncError = "Cloud keys are locked". runCloudSyncCycle does it in the
-        // right order — managed auto-unlock → drain journal → pull.
+        // right order — managed auto-unlock → pull → drain journal.
         const res = cloudSync.enableCloudSync();
         if (res.ok) {
             startCloudAutoSync();
@@ -316,6 +316,7 @@ function handleAccountStatusChanged() {
     else {
         aiEntitlementBaseline = identity === null ? null : aiActive;
     }
+    cloudSync.bindCloudSyncToAccount(account.getUserId()); // another account's Cloud sync state is reset
     // Sign-out teardown / sign-in restore of the paid subsystems. Read AFTER the
     // auto-switch above so the plan sees the current provider; both paths write
     // BEFORE the broadcast below, so the renderer reloads with the final state.
@@ -449,9 +450,14 @@ function emitCloudStatusChanged() {
 let cloudSyncCycleRunning = false;
 let cloudSyncCycleDirty = false;
 /**
- * One cloud sync cycle: managed auto-unlock if needed → drain the journal →
- * stand down if writes are in flight → incremental pull → broadcast. Same
- * ordering rationale as the GitHub autosync tick above.
+ * One cloud sync cycle: managed auto-unlock if needed → stand down if writes
+ * are in flight → incremental pull (+ its notes broadcast) → drain the journal
+ * → status broadcast. The pull
+ * goes FIRST (unlike the GitHub tick): Cloud uploads of note rows are
+ * conditional (a version older than the server's is rejected as stale), and
+ * pulling first lets the newer remote versions land and settle the matching
+ * pending uploads before the drain re-sends anything. The pull's journal
+ * guards (pending deleteDir/delete/upsert) keep unsynced local intents safe.
  */
 async function runCloudSyncCycle() {
     if (cloudSyncCycleRunning) {
@@ -482,24 +488,28 @@ async function runCloudSyncCycleOnce() {
         if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked')
             return;
     }
-    // Same ordering as the GitHub tick: drain the journal first, then stand
-    // down if writes are still in flight, then pull.
+    // Stand down while writes are in flight (the next cycle runs once they
+    // land): pulling now could resurrect a note whose remote delete hasn't
+    // landed yet.
+    if (cloudSync.hasPendingRemoteMutations()) {
+        console.log('[CloudAutoSync] skipping cycle — remote mutations pending');
+        return;
+    }
+    try {
+        const result = await cloudSync.pullNotes(NOTES_DIR);
+        // Broadcast BEFORE the drain: an open editor must reload the pulled
+        // version right away — the drain can take a while, and every second the
+        // editor keeps the old content is a chance to save it over the pull.
+        broadcastPullResult(result, 'cloud');
+    }
+    catch (err) {
+        console.error('[CloudAutoSync] pull failed:', String(err));
+    }
     try {
         await cloudSync.retrySyncJournal(NOTES_DIR);
     }
     catch (err) {
         console.error('[CloudAutoSync] journal retry failed:', String(err));
-    }
-    if (cloudSync.hasPendingRemoteMutations()) {
-        console.log('[CloudAutoSync] skipping pull — remote mutations pending');
-        return;
-    }
-    try {
-        const result = await cloudSync.pullNotes(NOTES_DIR);
-        broadcastPullResult(result, 'cloud');
-    }
-    catch (err) {
-        console.error('[CloudAutoSync] pull failed:', String(err));
     }
     emitCloudStatusChanged();
 }
@@ -1876,7 +1886,24 @@ async function githubManualPull() {
     expireNotesAfterPull(result, 'github');
     return result;
 }
-electron_1.ipcMain.handle('sync:pull', async () => githubManualPull());
+// Settings → GitHub "Sync now". Refused while NoteFlow Cloud owns the sync loop:
+// the paused repo can still hold notes deleted under Cloud, and pulling it would
+// bring them back (the UI hides the button then; "Mirror to GitHub" is the way
+// to refresh the repo). The titlebar goes through sync:pull-active instead.
+electron_1.ipcMain.handle('sync:pull', async () => {
+    if (cloudSync.isCloudSyncEnabled()) {
+        return {
+            pulled: 0,
+            deleted: 0,
+            errors: [],
+            updatedFiles: [],
+            hadDeletions: false,
+            hadMetadataChanges: false,
+            error: 'cloud-enabled',
+        };
+    }
+    return githubManualPull();
+});
 // Mirror local → repo: leaves the GitHub repo as an exact copy of what is on
 // disk (uploads what differs, deletes what is gone). Offered ONLY while NoteFlow
 // Cloud owns the sync loop — that is when GitHub is a paused write-only mirror
@@ -1884,9 +1911,17 @@ electron_1.ipcMain.handle('sync:pull', async () => githubManualPull());
 // cannot import cloudSync.ts (that module imports it — it would be a cycle).
 // Local notes are untouched, so no 'notes-updated' broadcast; the sync status
 // (lastSync/error) does change, hence the usual status broadcast.
+// The mirror deletes from the repo everything missing on disk, so it also waits
+// for the Cloud initial pull: on a fresh device the disk is not the account's
+// state yet, and mirroring it would wipe every note not downloaded so far. Same
+// while remote rows that failed to apply here are pending a retry
+// (hasPendingPullRetries): the disk is missing them too.
 electron_1.ipcMain.handle('sync:mirror-to-github', async () => {
     if (!cloudSync.isCloudSyncEnabled()) {
         return { ok: false, pushed: 0, deleted: 0, skipped: 0, errors: [], warnings: [], error: 'cloud-required' };
+    }
+    if (cloudSync.getCloudSyncStatus().initialPullStatus !== 'ok' || cloudSync.hasPendingPullRetries()) {
+        return { ok: false, pushed: 0, deleted: 0, skipped: 0, errors: [], warnings: [], error: 'cloud-initial-pull-pending' };
     }
     const result = await githubSync.mirrorToGitHub(NOTES_DIR);
     emitSyncStatusChanged();
@@ -1982,6 +2017,15 @@ electron_1.ipcMain.handle('cloud:auto-unlock', async () => {
     if (changed)
         emitCloudStatusChanged();
     return { ok: true };
+});
+// Best-effort re-read of the account's encryption mode (the Cloud panel calls
+// it on open): an unlocked device never re-asks the server, so a switch made on
+// another device would otherwise go unnoticed here. Never throws.
+electron_1.ipcMain.handle('cloud:refresh-keys-mode', async () => {
+    const changed = await cloudKeys.refreshKeysMode();
+    if (changed)
+        emitCloudStatusChanged();
+    return { changed };
 });
 // passphrase or recovery code → unlocks the key session. Pending journaled
 // pushes drain on the next autosync tick.

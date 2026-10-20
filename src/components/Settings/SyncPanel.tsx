@@ -173,7 +173,8 @@ function GitHubSyncSection({
 }: {
   onConnectedChange: (connected: boolean) => void
   // Cloud owns the sync loop → GitHub is a paused write-only mirror, which is the
-  // only situation where the "Mirror to GitHub" action is offered (main gates it too).
+  // only situation where the "Mirror to GitHub" action is offered — and where
+  // "Sync now" (a GitHub pull) is hidden. Main gates both too.
   cloudEnabled: boolean
 }) {
   const t = useT()
@@ -252,8 +253,12 @@ function GitHubSyncSection({
     setError(null)
     setMirrorResult(null)
     const result = await window.noteflow.pullNotes()
-    setPullResult(result)
     setStep('idle')
+    if (result.error === 'cloud-enabled') {
+      setError(t.settings.sync.pullCloudEnabled)
+      return
+    }
+    setPullResult(result)
     if (result.pulled > 0) await loadNotes()
     const updated = await window.noteflow.getSyncStatus()
     setStatus(updated)
@@ -289,6 +294,7 @@ function GitHubSyncSection({
     }
     switch (result.error) {
       case 'cloud-required': return t.settings.sync.mirrorRequiresCloud
+      case 'cloud-initial-pull-pending': return t.settings.sync.mirrorCloudInitialPullPending
       case 'in-progress': return t.settings.sync.mirrorInProgress
       case 'token': return t.settings.sync.mirrorTokenError
       case 'not-connected': return t.settings.sync.notConnected
@@ -441,18 +447,22 @@ function GitHubSyncSection({
       {/* ── Connected: actions ── */}
       {status?.connected && !userCode && step !== 'completing' && (
         <div className="flex gap-2">
-          <button
-            onClick={handlePull}
-            disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
-          >
-            {step === 'pulling' ? (
-              <Loader size={11} className="animate-spin" />
-            ) : (
-              <RefreshCw size={11} />
-            )}
-            {t.settings.sync.syncNow}
-          </button>
+          {/* Hidden while Cloud owns the sync loop: pulling the paused repo could
+              bring back notes deleted under Cloud (main refuses it too). */}
+          {!cloudEnabled && (
+            <button
+              onClick={handlePull}
+              disabled={isLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
+            >
+              {step === 'pulling' ? (
+                <Loader size={11} className="animate-spin" />
+              ) : (
+                <RefreshCw size={11} />
+              )}
+              {t.settings.sync.syncNow}
+            </button>
+          )}
           {/* Only while Cloud owns the sync loop: that is when the paused repo
               goes stale (no deletions, no notes coming from other devices). */}
           {cloudEnabled && (

@@ -186,7 +186,7 @@ function clearCliAccount() {
   writeSettings(settings)
 }
 
-// { enabled, pullSeq, lastSync, userId, pendingUpserts } — the CLI's own cursor/lastSync,
+// { enabled, pullSeq, lastSync, userId, pendingUpserts, forceUpserts, pullRetry } — the CLI's own cursor/lastSync,
 // never the desktop app's settings.cloudSync (each client reconciles
 // independently). `pullSeq` = watermark of the server-assigned `seq` already
 // reconciled (migration 0008); a legacy `pullCursor` (updated_at cursor of
@@ -195,6 +195,14 @@ function clearCliAccount() {
 // account that cursor/lastSync belong to: it
 // outlives `cloud logout` (which drops cliAccount) so a re-login can tell
 // "same account → resume incrementally" from "another account → start over".
+// `pullRetry` = remote rows whose apply failed here (path_key → { relPath?,
+// attempts }), re-fetched by every pull until they apply — written in the same
+// write as pullSeq (mirror of the app's settings.cloudSync.pullRetry).
+// `forceUpserts` ⊆ pendingUpserts = files of a folder kept over a remote
+// tombstone whose FORCED re-upload hasn't landed yet: `noteflow push` and the
+// per-command push upload them unconditionally (a conditional upload would be
+// rejected against the newer tombstone forever) — mirror of the app's
+// SyncJournalOp.force.
 function getCliCloud() {
   return readSettings().cliCloud || { enabled: false }
 }
@@ -232,6 +240,8 @@ function cliCloudForUser(c, userId, presumedOwner) {
   delete next.pullCursor
   delete next.lastSync
   delete next.pendingUpserts // the other account's unsent edits don't guard this one's tombstones
+  delete next.pullRetry // the other account's failed rows don't exist in this one
+  delete next.forceUpserts
   return next
 }
 
@@ -267,6 +277,34 @@ function existingPendingUpserts(list) {
 /** Empty list → field removed from settings. */
 function storedPendingUpserts(list) {
   return list.length ? list : undefined
+}
+
+/**
+ * Pure: the pending list without what a pull reconciled to the server's
+ * content — every entry under a folder applied wholesale (`dirs`: the local
+ * folder lost, its pending edits are the losing version) and the exact
+ * `paths` written / found identical. Mirror of the app's settleDirUploads /
+ * settlePathUpload.
+ */
+function dropReconciledPending(pending, dirs, paths) {
+  return (Array.isArray(pending) ? pending : []).filter(p =>
+    typeof p === 'string' && !paths.includes(p) && !dirs.some(d => p.startsWith(`${d}/`)))
+}
+
+/**
+ * Pure: note folders with rows still in the pull retry set (a failed apply
+ * may have left them half-written: anchor new, a section old). `noteflow push`
+ * skips them — uploading the old section with the new anchor's `updated`
+ * would be accepted (a tie) and clobber the server's newer section. Mirror of
+ * the app flagging the folder's pending uploads stale before applying it.
+ */
+function dirsPendingRetry(pullRetry) {
+  const dirs = new Set()
+  for (const v of Object.values(pullRetry || {})) {
+    const dir = v && typeof v.relPath === 'string' ? noteDirOf(v.relPath) : null
+    if (dir) dirs.add(dir)
+  }
+  return dirs
 }
 
 /**
@@ -824,29 +862,36 @@ async function syncPushNoteFiles(dirname, files) {
     // (mirror of the desktop app's syncProvider routing). Sync errors are
     // reported but never abort the local mutation, which already landed.
     const relPaths = files.map(f => `${dirname}/${f}`)
-    const uploaded = []
+    const uploaded = [], stale = []
     try {
       await cloudEnsureReconciled()
       const dek = await getCliDek()
       const noteKey = await cloudGetNoteKey(dek, dirname)
+      const forced = getCliCloud().forceUpserts
       for (const relPath of relPaths) {
-        await cloudPushFile(dek, noteKey, relPath)
-        uploaded.push(relPath)
+        const force = isPendingUpsert(forced, relPath)
+        if ((await cloudPushFile(dek, noteKey, relPath, { force })) === 'stale') stale.push(relPath)
+        else uploaded.push(relPath)
       }
       // Bump lastSync like the app's schedulePush: without it a later remote
       // tombstone would be skipped forever (`updated <= lastSync` rule) while
       // the cursor advances past it — and the next push would resurrect the note.
+      // A stale (rejected) upload is NOT a sync: no bump, and it stays pending
+      // (a local edit the server lacks — the pull's tombstone guards must see it).
       patchCliCloud({
-        lastSync: new Date().toISOString(),
-        pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [], uploaded)),
+        ...(stale.length ? {} : { lastSync: new Date().toISOString() }),
+        pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, stale, uploaded)),
+        forceUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().forceUpserts, [], uploaded)),
       })
-      out('  Synced to NoteFlow Cloud')
+      if (stale.length) out(`  ${stale.length} file(s) ${STALE_UPLOAD_HINT}`)
+      else out('  Synced to NoteFlow Cloud')
     } catch (e) {
       // Remember what did NOT reach the server: that bump of lastSync by a later
       // successful upload would otherwise expose this edit to a remote tombstone.
       const failed = relPaths.filter(r => !uploaded.includes(r))
       patchCliCloud({
         pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, failed, uploaded)),
+        forceUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().forceUpserts, [], uploaded)),
       })
       err(`Cloud sync failed: ${e.message} — run 'noteflow push' to retry`)
     }
@@ -1115,6 +1160,138 @@ function nextPullSeq(current, rows) {
   return max
 }
 
+// ── Conditional uploads (migration 0011) + pull retry set ──────────────────────
+// Ports of electron/cloudSyncLogic.ts — parity pinned in tests/cli/cloudInterop.test.ts.
+
+const CLOUD_CONDITIONAL_UPSERT_RPC = 'cloud_upsert_file'
+
+/**
+ * Outcome of `POST /rest/v1/rpc/cloud_upsert_file`: 'uploaded' | 'stale' (the
+ * server holds a newer version of the folder — the function returned false) |
+ * 'missing' (404 / PGRST202: migration 0011 not deployed → plain upsert) |
+ * 'forbidden' (RLS 403) | 'error'.
+ */
+function classifyConditionalUpsert(status, json) {
+  const code = json && typeof json === 'object' ? json.code : undefined
+  if (status === 404 || code === 'PGRST202') return 'missing'
+  if (status === 403) return 'forbidden'
+  if (status >= 400) return 'error'
+  return json === false ? 'stale' : 'uploaded'
+}
+
+const PULL_RETRY_MAX_DECRYPT_ATTEMPTS = 5
+const PULL_RETRY_MAX_APPLY_ATTEMPTS = 50
+const PULL_RETRY_CHUNK = 100
+
+/** Tolerant read of cliCloud.pullRetry (path_key → { relPath?, attempts }). */
+function parsePullRetry(raw) {
+  const out = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [key, v] of Object.entries(raw)) {
+    if (!key || !v || typeof v !== 'object') continue
+    const attempts = typeof v.attempts === 'number' && Number.isFinite(v.attempts) && v.attempts >= 0 ? v.attempts : 0
+    out[key] = typeof v.relPath === 'string' ? { relPath: v.relPath, attempts } : { attempts }
+  }
+  return out
+}
+
+/** Main fetch + re-fetched retry rows, deduped by path_key (the main fetch wins). */
+function mergeRetryRows(mainRows, retryRows) {
+  const seen = new Set(mainRows.map(r => r.path_key))
+  const out = [...mainRows]
+  for (const row of retryRows) {
+    if (seen.has(row.path_key)) continue
+    seen.add(row.path_key)
+    out.push(row)
+  }
+  return out
+}
+
+/**
+ * Retry set after a pull, from this pull's failures only (`apply`: Map
+ * path_key → relPath; `decrypt`: path_keys). Each kind is dropped once it
+ * reaches its max attempts (a permanent error must not stay forever).
+ */
+function nextPullRetry(prev, failures, maxDecryptAttempts = PULL_RETRY_MAX_DECRYPT_ATTEMPTS,
+  maxApplyAttempts = PULL_RETRY_MAX_APPLY_ATTEMPTS) {
+  const next = {}
+  const decided = new Set()
+  for (const [key, relPath] of failures.apply) {
+    decided.add(key)
+    const attempts = ((prev[key] && prev[key].attempts) || 0) + 1
+    if (attempts < maxApplyAttempts) next[key] = { relPath, attempts }
+  }
+  for (const key of failures.decrypt) {
+    if (decided.has(key)) continue
+    decided.add(key)
+    const attempts = ((prev[key] && prev[key].attempts) || 0) + 1
+    if (attempts < maxDecryptAttempts) next[key] = { attempts }
+  }
+  return next
+}
+
+/** How many of this pull's failed rows nextPullRetry gave up on. */
+function countDroppedRetries(failures, next) {
+  const keys = new Set([...failures.apply.keys(), ...failures.decrypt])
+  let dropped = 0
+  for (const key of keys) if (!next[key]) dropped++
+  return dropped
+}
+
+// Root metadata merge — ports of mergeMetadataById / planMetadataPull.
+const CLOUD_MERGEABLE_METADATA = ['groups.json', 'folders.json', 'templates.json']
+
+function parseIdArray(json) {
+  if (json === null) return null
+  let data
+  try { data = JSON.parse(json) } catch { return null }
+  if (!Array.isArray(data)) return null
+  for (const item of data) {
+    if (!item || typeof item !== 'object' || Array.isArray(item) || typeof item.id !== 'string') return null
+  }
+  return data
+}
+
+/** Union by `id` (collisions → `prefer` side, its order first); null when not mergeable. */
+function mergeMetadataById(localJson, remoteJson, prefer) {
+  const local = parseIdArray(localJson)
+  const remote = parseIdArray(remoteJson)
+  if (!local || !remote) return null
+  const [first, second] = prefer === 'local' ? [local, remote] : [remote, local]
+  const ids = new Set()
+  const merged = []
+  for (const item of [...first, ...second]) {
+    if (ids.has(item.id)) continue
+    ids.add(item.id)
+    merged.push(item)
+  }
+  return JSON.stringify(merged, null, 2)
+}
+
+/**
+ * Pull decision for a root metadata file: identical → keep; pending local
+ * upload → union preferring local (mergeable) or keep local; first pull →
+ * backup + union preferring remote (mergeable) or remote; otherwise remote.
+ */
+function planMetadataPull(relPath, localContent, remoteContent, opts) {
+  if (localContent === remoteContent) return { action: 'keep' }
+  const backup = opts.firstPull && localContent !== null
+  const mergeable = CLOUD_MERGEABLE_METADATA.includes(relPath)
+  if (opts.pendingUpsert) {
+    if (localContent === null) return { action: 'write', content: remoteContent, backup: false, merged: false }
+    const merged = mergeable ? mergeMetadataById(localContent, remoteContent, 'local') : null
+    if (merged === null || merged === localContent) return { action: 'keep' }
+    return { action: 'write', content: merged, backup, merged: true }
+  }
+  if (opts.firstPull && localContent !== null && mergeable) {
+    const merged = mergeMetadataById(localContent, remoteContent, 'remote')
+    if (merged !== null) {
+      return merged === localContent ? { action: 'keep' } : { action: 'write', content: merged, backup, merged: true }
+    }
+  }
+  return { action: 'write', content: remoteContent, backup, merged: false }
+}
+
 async function buildFileUpsertRow(dek, noteKey, relPath, content, updatedAt, deleted = false) {
   return {
     path_key: await derivePathKeyHmac(dek, relPath),
@@ -1370,8 +1547,19 @@ async function cloudGetNoteKey(dek, scope) {
   return noteKey
 }
 
-/** Uploads one file as an encrypted upsert row. `e.subscription` marks the RLS 403 (stop the whole push). */
-async function cloudPushFile(dek, noteKey, relPath) {
+// Warned once per invocation when the server lacks the conditional RPC.
+let cloudConditionalFallbackWarned = false
+
+/**
+ * Uploads one file as an encrypted row → 'uploaded' | 'stale'. Note rows go
+ * through the CONDITIONAL upsert (RPC of migration 0011): rejected — 'stale',
+ * nothing written — when the server already holds a newer version of the
+ * folder (this row or its anchor, tombstones included). Root metadata json
+ * and `force` uploads (a folder kept over a remote tombstone) use the plain
+ * upsert; so does a server without the RPC. `e.subscription` marks the RLS
+ * 403 (stop the whole push). Mirror of the app's uploadFileRow.
+ */
+async function cloudPushFile(dek, noteKey, relPath, { force = false } = {}) {
   const account = getCliAccount()
   const content = fs.readFileSync(path.join(NOTES_DIR, relPath), 'utf-8')
   const dir = noteDirOf(relPath)
@@ -1381,6 +1569,31 @@ async function cloudPushFile(dek, noteKey, relPath) {
   }
   const updatedAt = resolveRowUpdatedAt(relPath, content, anchorContent, new Date().toISOString())
   const row = await buildFileUpsertRow(dek, noteKey, relPath, content, updatedAt)
+  const subscriptionError = () => {
+    const e = new Error('An active NoteFlow Cloud subscription is required to upload changes.')
+    e.subscription = true
+    return e
+  }
+  if (dir && !force) {
+    const anchorKey = isAnchorPath(relPath) ? null : await derivePathKeyHmac(dek, `${dir}/${NOTE_MD}`)
+    const rpc = await cloudRestWithRetry(() =>
+      cloudRest(`/rest/v1/rpc/${CLOUD_CONDITIONAL_UPSERT_RPC}`, {
+        method: 'POST',
+        body: {
+          p_path_key: row.path_key, p_path_ct: row.path_ct, p_content_ct: row.content_ct,
+          p_key_ct: row.key_ct, p_updated_at: row.updated_at, p_anchor_key: anchorKey,
+        },
+      })
+    )
+    const outcome = classifyConditionalUpsert(rpc.status, rpc.json)
+    if (outcome === 'uploaded' || outcome === 'stale') return outcome
+    if (outcome === 'forbidden') throw subscriptionError()
+    if (outcome === 'error') throw new Error(`Cloud upload failed (HTTP ${rpc.status})`)
+    if (!cloudConditionalFallbackWarned) { // 'missing': no regression vs the plain upsert
+      cloudConditionalFallbackWarned = true
+      console.error('  Note: NoteFlow Cloud does not support conditional uploads yet — uploading unconditionally')
+    }
+  }
   const res = await cloudRestWithRetry(() =>
     cloudRest('/rest/v1/files?on_conflict=user_id,path_key', {
       method: 'POST',
@@ -1388,13 +1601,12 @@ async function cloudPushFile(dek, noteKey, relPath) {
       body: { user_id: account.userId, ...row },
     })
   )
-  if (res.status === 403) {
-    const e = new Error('An active NoteFlow Cloud subscription is required to upload changes.')
-    e.subscription = true
-    throw e
-  }
+  if (res.status === 403) throw subscriptionError()
   if (res.status >= 400) throw new Error(`Cloud upload failed (HTTP ${res.status})`)
+  return 'uploaded'
 }
+
+const STALE_UPLOAD_HINT = "not uploaded: a newer version is on NoteFlow Cloud — run 'noteflow pull'"
 
 /**
  * All non-deleted remote rows decrypted to (relPath, pathKey) — whole-note
@@ -1487,7 +1699,23 @@ async function cloudFetchRemoteAnchor(dek, dir) {
     `/rest/v1/files?select=${CLOUD_PULL_COLUMNS}&path_key=eq.${encodeURIComponent(pathKey)}`
   )
   if (res.status >= 400 || !Array.isArray(res.json) || !res.json.length) return null
-  try { return await decryptFileRow(dek, res.json[0]) } catch { return null }
+  try { return { ...(await decryptFileRow(dek, res.json[0])), pathKey } } catch { return null }
+}
+
+/**
+ * Re-fetches the rows of the pull retry set by path_key (chunks of
+ * PULL_RETRY_CHUNK). A failed request aborts the pull (`abortPull`: nothing
+ * persisted, the retry set is kept).
+ */
+async function cloudFetchRowsByPathKeys(pathKeys) {
+  const rows = []
+  for (let i = 0; i < pathKeys.length; i += PULL_RETRY_CHUNK) {
+    const filter = `path_key=in.(${pathKeys.slice(i, i + PULL_RETRY_CHUNK).map(k => `"${k}"`).join(',')})`
+    const res = await cloudRest(`/rest/v1/files?select=${CLOUD_PULL_COLUMNS}&${filter}`)
+    if (res.status >= 400) throw Object.assign(new Error(`Cloud retry fetch failed (HTTP ${res.status})`), { abortPull: true })
+    if (Array.isArray(res.json)) rows.push(...res.json)
+  }
+  return rows
 }
 
 /**
@@ -1500,7 +1728,7 @@ async function cloudFetchRemoteAnchor(dek, dir) {
  * the next pull retries from the same watermark).
  */
 async function cloudFetchRemoteRows(dek, relPaths) {
-  if (!relPaths.length) return { entries: [], errors: 0 }
+  if (!relPaths.length) return { entries: [], errors: 0, undecryptable: [] }
   const byKey = new Map()
   for (const rel of relPaths) byKey.set(await derivePathKeyHmac(dek, rel), rel)
   const filter = `path_key=in.(${[...byKey.keys()].map(k => `"${k}"`).join(',')})`
@@ -1513,15 +1741,16 @@ async function cloudFetchRemoteRows(dek, relPaths) {
   }
   if (res.status >= 400) throw abort(`HTTP ${res.status}`)
   const entries = []
+  const undecryptable = [] // → pull retry set
   let errors = 0
   for (const row of Array.isArray(res.json) ? res.json : []) {
     try {
       const entry = await decryptFileRow(dek, row)
       if (entry.relPath !== byKey.get(row.path_key) || !isSafeCloudRelPath(entry.relPath)) { errors++; continue }
-      entries.push(entry)
-    } catch { errors++ }
+      entries.push({ ...entry, pathKey: row.path_key })
+    } catch { errors++; undecryptable.push(row.path_key) }
   }
-  return { entries, errors }
+  return { entries, errors, undecryptable }
 }
 
 /** Writes (or, for a tombstone, removes) one remote section file; true if the disk changed. */
@@ -1547,18 +1776,25 @@ async function cloudPullNow() {
   // drain discards them the same way).
   const pending = existingPendingUpserts(c.pendingUpserts)
   const keptDirs = []
-  const rows = await cloudFetchChangedRows(c)
+  // Reconciled to the server's content by this pull → leave pendingUpserts.
+  const reconciledDirs = [], reconciledPaths = []
+  // Retry set: rows that failed to apply in earlier pulls ride along with this
+  // batch (below the watermark now); this pull's failures replace it.
+  const prevRetry = parsePullRetry(c.pullRetry)
+  const applyFailures = new Map(), decryptFailures = new Set()
+  const mainRows = await cloudFetchChangedRows(c)
+  const rows = mergeRetryRows(mainRows, await cloudFetchRowsByPathKeys(Object.keys(prevRetry)))
 
   let errors = 0
   const entries = []
   for (const row of rows) {
     try {
       const entry = await decryptFileRow(dek, row)
-      if (!isSafeCloudRelPath(entry.relPath)) { errors++; continue }
-      entries.push(entry)
+      if (!isSafeCloudRelPath(entry.relPath)) { errors++; continue } // permanent — never retried
+      entries.push({ ...entry, pathKey: row.path_key })
       // Seed the per-folder key cache so pushes reuse the same note key.
       cloudNoteKeys.set(noteDirOf(entry.relPath) || entry.relPath, entry.noteKey)
-    } catch { errors++ }
+    } catch { errors++; decryptFailures.add(row.path_key) }
   }
 
   const dirs = new Map()
@@ -1574,6 +1810,7 @@ async function cloudPullNow() {
 
   let pulled = 0, deleted = 0
   for (const [dir, group] of dirs) {
+    const fetchedForDir = [] // rows fetched outside the batch — retried with the folder
     try {
       const localDirPath = path.join(NOTES_DIR, dir)
       const localAnchorPath = path.join(localDirPath, NOTE_MD)
@@ -1604,6 +1841,7 @@ async function cloudPullNow() {
         // Absent (never fully uploaded) or deleted → nothing to write.
         anchor = await cloudFetchRemoteAnchor(dek, dir)
         if (!anchor || anchor.deleted) continue
+        fetchedForDir.push(anchor)
       }
 
       if (anchor && (!localExists || shouldApplyRemoteDir(anchor.updatedAtMs, localUpdatedMs))) {
@@ -1613,14 +1851,18 @@ async function cloudPullNow() {
         // without its section files gets them recreated empty by the next
         // edit, and those blanks would be pushed over the real ones. Listed
         // sections already on disk are up to date or get their own newer row
-        // (loose-section rule); a stale one in a conflict the local folder
-        // won (strictly newer) is the accepted LWW edge, as before.
+        // (loose-section rule) — except those with a pending upload: the local
+        // folder lost (LWW), their disk content is the losing edit. A stale one
+        // without a pending upload in a conflict the local folder won
+        // (strictly newer) is the accepted LWW edge, as before.
         const inGroup = new Set(group.map(e => e.relPath))
-        const missing = listAnchorSectionFiles(anchor.content)
+        const toFetch = listAnchorSectionFiles(anchor.content)
           .map(f => `${dir}/${f}`)
-          .filter(rel => !inGroup.has(rel) && !fs.existsSync(path.join(NOTES_DIR, rel)))
-        const fetched = await cloudFetchRemoteRows(dek, missing)
+          .filter(rel => !inGroup.has(rel) && (isPendingUpsert(pending, rel) || !fs.existsSync(path.join(NOTES_DIR, rel))))
+        const fetched = await cloudFetchRemoteRows(dek, toFetch)
         errors += fetched.errors
+        fetchedForDir.push(...fetched.entries)
+        for (const key of fetched.undecryptable) decryptFailures.add(key)
 
         fs.mkdirSync(localDirPath, { recursive: true })
         fs.writeFileSync(localAnchorPath, anchor.content, 'utf-8')
@@ -1633,6 +1875,8 @@ async function cloudPullNow() {
         for (const entry of fetched.entries) {
           if (!entry.deleted) cloudApplySectionFile(entry)
         }
+        // The local folder lost: its pending uploads carry the losing version.
+        reconciledDirs.push(dir)
       } else {
         // Anchor not applied (absent from this batch, or not newer) and the
         // folder exists locally: sections apply ONE BY ONE — an anchor and its
@@ -1644,6 +1888,7 @@ async function cloudPullNow() {
           if (entry.deleted && isPendingUpsert(pending, entry.relPath)) continue
           if (!shouldApplyRemoteSection(entry.updatedAtMs, localUpdatedMs)) continue
           if (cloudApplySectionFile(entry)) changed++
+          if (!entry.deleted) reconciledPaths.push(entry.relPath) // disk = server's version
         }
         if (changed === 0) continue // local is newer, or already identical
       }
@@ -1653,21 +1898,47 @@ async function cloudPullNow() {
       if (e.abortPull) throw e // abort the pull: watermark/lastSync stay put
       errors++
       err(`${dir}: ${e.message}`)
+      // Retry the WHOLE folder next pull (its rows sit below the watermark now).
+      for (const e2 of [...group, ...fetchedForDir]) applyFailures.set(e2.pathKey, e2.relPath)
     }
   }
 
-  // Root metadata json — remote write wins (same LWW as the app / GitHub pull).
+  // Root metadata json — remote wins (same LWW as the app / GitHub pull),
+  // except a failed local upload (pending: union preferring local, or keep) and
+  // the first reconcile (local backed up — outside the notes dir — and the
+  // id-array files merged preferring remote). Same planMetadataPull as the app.
+  const firstPull = !c.lastSync
+  let backupDir = null, backedUp = 0, mergedMetadata = 0
   for (const entry of rootFiles) {
     try {
       if (entry.deleted) continue // metadata is never deleted by the app
       const metadataPath = path.join(NOTES_DIR, entry.relPath)
       const localContent = fs.existsSync(metadataPath) ? fs.readFileSync(metadataPath, 'utf-8') : null
-      if (localContent !== entry.content) fs.writeFileSync(metadataPath, entry.content, 'utf-8')
-    } catch { errors++ }
+      const pendingMeta = isPendingUpsert(pending, entry.relPath)
+      const decision = planMetadataPull(entry.relPath, localContent, entry.content, { pendingUpsert: pendingMeta, firstPull })
+      if (decision.action === 'keep') {
+        if (localContent === entry.content) reconciledPaths.push(entry.relPath)
+        continue
+      }
+      if (decision.backup && localContent !== null) {
+        backupDir = backupDir || path.join(getSettingsDir(), 'cloud-metadata-backups', new Date().toISOString().replace(/:/g, '-'))
+        fs.mkdirSync(backupDir, { recursive: true })
+        fs.writeFileSync(path.join(backupDir, entry.relPath), localContent, 'utf-8')
+        backedUp++
+      }
+      fs.writeFileSync(metadataPath, decision.content, 'utf-8')
+      if (decision.merged) mergedMetadata++
+      // A merged pending file stays pending (`noteflow push` uploads the union).
+      if (!(pendingMeta && decision.merged)) reconciledPaths.push(entry.relPath)
+    } catch { errors++; applyFailures.set(entry.pathKey, entry.relPath) }
+  }
+  if (backedUp || mergedMetadata) {
+    out(`  Metadata: ${backedUp} file(s) backed up to ${backupDir || getSettingsDir()}, ${mergedMetadata} merged`)
   }
 
-  // Max seq of EVERY fetched row (undecryptable/unsafe ones too — they never
-  // become applicable); the legacy updated_at cursor goes away.
+  // Max seq of the MAIN fetch; rows that failed to apply/decrypt stay alive in
+  // pullRetry (same write), unsafe-path rows are permanent. The legacy
+  // updated_at cursor goes away.
   // Every file of a kept folder is marked pending in the SAME write that moves
   // the cursor past its tombstone: if the re-upload below is interrupted, the
   // tombstone is never fetched again, and only this record keeps the folder
@@ -1683,21 +1954,37 @@ async function cloudPullNow() {
     } catch { /* unreadable — its pending entries still stand */ }
     keptRelPaths.set(dir, relPaths)
   }
+  const failures = { apply: applyFailures, decrypt: decryptFailures }
+  const pullRetry = nextPullRetry(prevRetry, failures)
+  const dropped = countDroppedRetries(failures, pullRetry)
+  if (dropped) out(`  Gave up retrying ${dropped} remote change(s) after repeated failures`)
+  const keptFlat = [...keptRelPaths.values()].flat()
+  const fresh = getCliCloud()
   patchCliCloud({
-    pullSeq: nextPullSeq(c.pullSeq, rows), pullCursor: undefined, lastSync: new Date().toISOString(),
-    pendingUpserts: storedPendingUpserts(existingPendingUpserts(
-      nextPendingUpserts(getCliCloud().pendingUpserts, [...keptRelPaths.values()].flat(), []))),
+    pullSeq: nextPullSeq(c.pullSeq, mainRows), pullCursor: undefined, lastSync: new Date().toISOString(),
+    pullRetry: Object.keys(pullRetry).length ? pullRetry : undefined,
+    pendingUpserts: storedPendingUpserts(existingPendingUpserts(nextPendingUpserts(
+      dropReconciledPending(fresh.pendingUpserts, reconciledDirs, reconciledPaths), keptFlat, []))),
+    // The kept folder's re-upload is FORCED until it lands — persisted here so
+    // an interrupted/failed one is retried forced by `noteflow push`.
+    forceUpserts: storedPendingUpserts(existingPendingUpserts(nextPendingUpserts(
+      dropReconciledPending(fresh.forceUpserts, reconciledDirs, reconciledPaths), keptFlat, []))),
   })
+  if (Object.keys(pullRetry).length) {
+    out(`  ${Object.keys(pullRetry).length} remote change(s) could not be applied — they will be retried on the next pull`)
+  }
 
   // Notes kept over a remote tombstone: re-upload EVERY file of the folder so
   // all its rows lose the tombstone (re-sending only the pending file would
-  // leave the other sections deleted for every other device).
+  // leave the other sections deleted for every other device). FORCED: the
+  // tombstone is newer than the local edit by design — a conditional upload
+  // would be rejected and the resurrection would silently fail.
   for (const [dir, relPaths] of keptRelPaths) {
     const uploaded = []
     try {
       const noteKey = await cloudGetNoteKey(dek, dir)
       for (const relPath of relPaths) {
-        await cloudPushFile(dek, noteKey, relPath)
+        await cloudPushFile(dek, noteKey, relPath, { force: true })
         uploaded.push(relPath)
       }
       out(`  Kept ${dir}/ (deleted elsewhere, but local changes were never uploaded) — uploaded again`)
@@ -1705,9 +1992,12 @@ async function cloudPullNow() {
       errors++
       err(`Kept ${dir}/ (deleted elsewhere, but local changes were never uploaded) — upload failed: ${e.message}. Run 'noteflow push' to retry`)
     }
-    // Only what landed leaves the list (the rest is already recorded above).
+    // Only what landed leaves the lists (the rest is already recorded above).
     if (uploaded.length) {
-      patchCliCloud({ pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [], uploaded)) })
+      patchCliCloud({
+        pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [], uploaded)),
+        forceUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().forceUpserts, [], uploaded)),
+      })
     }
   }
   return { pulled, deleted, errors }
@@ -1927,8 +2217,12 @@ async function cmdCloudPush() {
   await cloudEnsureReconciled()
   const dek = await getCliDek()
 
+  // Folders whose remote version failed to apply here may be half-written:
+  // pushing them would send old sections with the new anchor's timestamp.
+  const halfApplied = dirsPendingRetry(getCliCloud().pullRetry)
   const relPaths = []
   for (const dir of listLocalNoteDirs()) {
+    if (halfApplied.has(dir)) continue
     for (const f of fs.readdirSync(path.join(NOTES_DIR, dir))) {
       if (f.endsWith('.md')) relPaths.push(`${dir}/${f}`)
     }
@@ -1936,17 +2230,24 @@ async function cmdCloudPush() {
   for (const m of CLOUD_METADATA_FILES) {
     if (fs.existsSync(path.join(NOTES_DIR, m))) relPaths.push(m)
   }
+  if (halfApplied.size) {
+    out(`  Skipping ${halfApplied.size} note(s) whose remote changes are still pending here — run 'noteflow pull' first`)
+  }
 
   out(`  Pushing ${relPaths.length} files to NoteFlow Cloud...`)
   let pushed = 0, errors = 0
-  const uploaded = [], failed = []
+  const uploaded = [], failed = [], stale = []
+  const forced = getCliCloud().forceUpserts
+  // Stale (rejected: newer on the server) uploads stay pending like failures.
   const savePending = () => patchCliCloud({
-    pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, failed, uploaded)),
+    pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [...failed, ...stale], uploaded)),
+    forceUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().forceUpserts, [], uploaded)),
   })
   for (const relPath of relPaths) {
     try {
       const noteKey = await cloudGetNoteKey(dek, noteDirOf(relPath) || relPath)
-      await cloudPushFile(dek, noteKey, relPath)
+      const force = isPendingUpsert(forced, relPath)
+      if ((await cloudPushFile(dek, noteKey, relPath, { force })) === 'stale') { stale.push(relPath); continue }
       uploaded.push(relPath)
       pushed++
       process.stdout.write(`\r  ${pushed}/${relPaths.length}`)
@@ -1960,6 +2261,7 @@ async function cmdCloudPush() {
   savePending()
   patchCliCloud({ lastSync: new Date().toISOString() })
   out(`\n  Done: ${pushed} pushed, ${errors} errors`)
+  if (stale.length) out(`  ${stale.length} file(s) ${STALE_UPLOAD_HINT}`)
 }
 
 // noteflow cloud pull (also plain `noteflow pull` while Cloud is active)
@@ -3682,6 +3984,9 @@ if (require.main === module) {
     planPullQuery, parseRowSeq, nextPullSeq, collectSeqPages, buildFileUpsertRow, decryptFileRow,
     CLOUD_METADATA_FILES, CLOUD_PULL_COLUMNS, CLOUD_PAGE_SIZE,
     nextGithubLastSync, localOnlyNoteDirs, localOnlyHint, cliCloudForUser,
-    nextPendingUpserts, pendingUnderDir, isPendingUpsert,
+    nextPendingUpserts, pendingUnderDir, isPendingUpsert, dropReconciledPending,
+    classifyConditionalUpsert, parsePullRetry, mergeRetryRows, nextPullRetry, countDroppedRetries,
+    PULL_RETRY_MAX_DECRYPT_ATTEMPTS, PULL_RETRY_MAX_APPLY_ATTEMPTS, PULL_RETRY_CHUNK, CLOUD_CONDITIONAL_UPSERT_RPC,
+    mergeMetadataById, planMetadataPull, dirsPendingRetry,
   }
 }

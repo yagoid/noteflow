@@ -57,6 +57,10 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
 
   useEffect(() => {
     window.noteflow.getCloudStatus().then(setStatus)
+    // An unlocked device never re-asks the server for the encryption mode, so
+    // re-read it on open: another device may have switched it meanwhile. Main
+    // broadcasts cloud:status-changed (caught below) when it did change.
+    window.noteflow.cloudRefreshKeysMode()
     return window.noteflow.onCloudStatusChanged(setStatus)
   }, [])
 
@@ -140,6 +144,14 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
       setShowUpgrade(false)
       setPassphrase('')
       setConfirmPassphrase('')
+    } else if (result.errorCode === 'already-e2ee') {
+      // Switched to private on another device meanwhile: nothing was rewritten
+      // and no recovery code exists for this attempt. The status broadcast
+      // already moved the panel to the private-mode controls.
+      setShowUpgrade(false)
+      setPassphrase('')
+      setConfirmPassphrase('')
+      setError(t.settings.cloud.upgradeAlreadyPrivate)
     } else {
       setError(result.error ?? t.settings.cloud.upgradeFailed)
     }

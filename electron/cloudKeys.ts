@@ -74,6 +74,14 @@ export interface CloudKeysOpResult {
   error?: string
 }
 
+/**
+ * Machine-readable failure of upgradeCloudKeysToE2ee that the renderer
+ * localizes. 'already-e2ee' — the account was already switched to private mode
+ * (typically from another device while this one still believed it was managed);
+ * nothing was rewritten and no recovery code was issued.
+ */
+export type CloudUpgradeErrorCode = 'already-e2ee'
+
 // E2EE columns are nullable since migration 0005 (a managed row doesn't have
 // them); the mode CHECK guarantees they are all present when mode = 'e2ee'.
 interface UserKeysRow {
@@ -169,6 +177,7 @@ let keysMode: CloudKeysMode = null
 
 const NOT_SIGNED_IN_ERROR = 'Sign in to your NoteFlow account first.'
 const NETWORK_ERROR = 'Could not reach the NoteFlow Cloud service. Check your connection and try again.'
+const ALREADY_E2EE_ERROR = 'This account already uses private end-to-end encryption.'
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -375,6 +384,40 @@ async function doAutoUnlockManaged(): Promise<boolean> {
 }
 
 /**
+ * Best-effort re-read of the account's encryption mode (GET user_keys?select=mode).
+ * An unlocked device never asks the server again (autoUnlockManaged returns
+ * early with a DEK in memory), so it would otherwise keep showing — and acting
+ * on — a mode another device has since switched. Called when the Cloud panel
+ * opens. A missing row is recorded the same way as the cloud-keys 404 (no-keys,
+ * mode null). Resolves true when the public keys state/mode changed; never
+ * throws (offline / signed out / HTTP errors leave the state untouched).
+ */
+export async function refreshKeysMode(): Promise<boolean> {
+  if (!isCloudConfigured()) return false
+  if (!account.getAccountStatus().signedIn) return false
+  try {
+    const res = await supabaseRest('/rest/v1/user_keys?select=mode')
+    if (res.status >= 400) return false
+    const rows = Array.isArray(res.json) ? (res.json as Array<{ mode?: unknown }>) : []
+    const stateBefore = getKeysState()
+    const modeBefore = getKeysMode()
+    if (rows.length === 0) {
+      remoteKeysKnown = false
+      setKeysMode(null)
+    } else {
+      remoteKeysKnown = true
+      setKeysMode(rows[0].mode === 'managed' ? 'managed' : 'e2ee')
+    }
+    return getKeysState() !== stateBefore || getKeysMode() !== modeBefore
+  } catch (err: unknown) {
+    if (!String(err).includes('not-signed-in')) {
+      console.error('[CloudKeys] keys mode refresh failed:', String(err))
+    }
+    return false
+  }
+}
+
+/**
  * Upgrade managed → e2ee (private mode): wraps the CURRENT DEK with a new
  * passphrase KEK + a new recovery KEK and rewrites the user_keys row via
  * PostgREST (ownership RLS allows it), clearing dek_managed_ct. The DEK does
@@ -384,15 +427,25 @@ async function doAutoUnlockManaged(): Promise<boolean> {
  * HMAC path_key and is out of scope). Returns the recovery code ONCE.
  * The reverse switch exists too (downgradeCloudKeysToManaged) — both are
  * explicit, user-confirmed operations.
+ *
+ * The PATCH is conditional on the row still being managed (mode=eq.managed):
+ * a device with a stale keysMode must never rewrap over a row another device
+ * already upgraded — that would silently invalidate the passphrase and the
+ * recovery code the user saved there. Zero rows updated ⇒ errorCode
+ * 'already-e2ee' (no recovery code; the session stays unlocked because the DEK
+ * is the same in both modes).
  */
 export async function upgradeCloudKeysToE2ee(
   passphrase: string
-): Promise<CloudKeysOpResult & { recoveryCode?: string }> {
+): Promise<CloudKeysOpResult & { recoveryCode?: string; errorCode?: CloudUpgradeErrorCode }> {
   if (!isCloudConfigured()) return { ok: false, error: 'NoteFlow Cloud is not available in this build.' }
   if (passphrase.length < 8) return { ok: false, error: 'The passphrase must be at least 8 characters long.' }
   if (!dek) return { ok: false, error: 'Cloud keys are locked. Try again in a moment.' }
+  if (keysMode === 'e2ee') {
+    return { ok: false, error: ALREADY_E2EE_ERROR, errorCode: 'already-e2ee' }
+  }
   if (keysMode !== 'managed') {
-    return { ok: false, error: 'This account already uses private end-to-end encryption.' }
+    return { ok: false, error: 'The encryption mode of this account is not known yet. Try again in a moment.' }
   }
 
   try {
@@ -405,23 +458,38 @@ export async function upgradeCloudKeysToE2ee(
     const passKek = await deriveKek(passphrase, passSalt, DEFAULT_KDF_ITERATIONS)
     const recoveryKek = await deriveRecoveryKek(recoveryCode, recoverySalt, DEFAULT_KDF_ITERATIONS)
 
-    const res = await supabaseRest(`/rest/v1/user_keys?user_id=eq.${encodeURIComponent(userId)}`, {
-      method: 'PATCH',
-      headers: { Prefer: 'return=minimal' },
-      body: {
-        mode: 'e2ee',
-        dek_managed_ct: null,
-        dek_pass_ct: await wrapKey(dek, passKek),
-        pass_salt: toB64Url(passSalt),
-        pass_iterations: DEFAULT_KDF_ITERATIONS,
-        dek_recovery_ct: await wrapKey(dek, recoveryKek),
-        recovery_salt: toB64Url(recoverySalt),
-        recovery_iterations: DEFAULT_KDF_ITERATIONS,
-        updated_at: new Date().toISOString(),
-      },
-    })
+    // Conditional on mode=eq.managed (compare-and-swap): with
+    // return=representation PostgREST answers the rows it actually updated, so
+    // an empty array means the row was no longer managed. select=mode keeps the
+    // fresh wrapped keys out of the response body.
+    const res = await supabaseRest(
+      `/rest/v1/user_keys?user_id=eq.${encodeURIComponent(userId)}&mode=eq.managed&select=mode`,
+      {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: {
+          mode: 'e2ee',
+          dek_managed_ct: null,
+          dek_pass_ct: await wrapKey(dek, passKek),
+          pass_salt: toB64Url(passSalt),
+          pass_iterations: DEFAULT_KDF_ITERATIONS,
+          dek_recovery_ct: await wrapKey(dek, recoveryKek),
+          recovery_salt: toB64Url(recoverySalt),
+          recovery_iterations: DEFAULT_KDF_ITERATIONS,
+          updated_at: new Date().toISOString(),
+        },
+      }
+    )
     if (res.status >= 400) {
       return { ok: false, error: `Could not switch to private mode (HTTP ${res.status}).` }
+    }
+    if (!Array.isArray(res.json) || res.json.length === 0) {
+      // Another device already switched the account to private mode. Record it
+      // (the panel then shows the e2ee controls) and drop the recovery code we
+      // generated — it wraps nothing on the server and must never be shown.
+      remoteKeysKnown = true
+      setKeysMode('e2ee')
+      return { ok: false, error: ALREADY_E2EE_ERROR, errorCode: 'already-e2ee' }
     }
 
     setKeysMode('e2ee')

@@ -153,6 +153,9 @@ export const settings = {
     openBrowser: 'Open browser',
     connecting: 'Connecting...',
     syncNow: 'Sync now',
+    // Manual GitHub pull refused while NoteFlow Cloud is enabled (the button is
+    // hidden then; this covers a stale click).
+    pullCloudEnabled: 'GitHub Sync is paused while NoteFlow Cloud is enabled. Use "Mirror to GitHub" to update the repository.',
     // Mirror local → repo. Only shown while NoteFlow Cloud is enabled: GitHub is
     // then a paused write-only mirror and the repo slowly goes stale.
     mirror: 'Mirror to GitHub',
@@ -163,6 +166,9 @@ export const settings = {
     mirrorAlreadyMirrored: 'The repository already matches this device.',
     mirrorFailed: 'Could not mirror to GitHub.',
     mirrorRequiresCloud: 'Mirroring is only available while NoteFlow Cloud is enabled.',
+    // The mirror deletes from the repo whatever is missing locally, so it waits
+    // until this device has downloaded the account's notes from Cloud.
+    mirrorCloudInitialPullPending: 'NoteFlow Cloud has not finished downloading your notes on this device yet. Try mirroring again once it has.',
     mirrorInProgress: 'A mirror is already running.',
     mirrorTokenError: 'Could not read the GitHub token. Please reconnect GitHub.',
     // Deletions are skipped whenever a local file can't be read: an incomplete
@@ -233,6 +239,9 @@ export const settings = {
     upgradeNotice: 'Note: while in Standard mode, notes synced so far were technically accessible to NoteFlow. Switching does not rewrite them, but everything stays encrypted and only you hold the key from now on.',
     upgradeSubmit: 'Create passphrase & switch',
     upgradeFailed: 'Could not switch to private mode.',
+    // The account was switched to private mode on another device meanwhile —
+    // nothing was rewritten here and no new recovery code was created.
+    upgradeAlreadyPrivate: 'This account was already switched to private mode from another device. Nothing was changed here — use the passphrase and recovery code created on that device.',
     // Private → Standard downgrade (state: unlocked + e2ee). Explicit and
     // confirmed — never silent: it weakens the privacy guarantee.
     switchToStandard: 'Switch to standard mode',

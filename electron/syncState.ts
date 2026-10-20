@@ -15,6 +15,29 @@ export interface SyncJournalOp {
   queuedAt: string
   /** Failed attempts so far. Never used to drop an op — a lost remote delete = resurrected note. */
   attempts: number
+  /**
+   * NoteFlow Cloud only (GitHub never sets or reads it): the conditional upload
+   * of this upsert was REJECTED because the server already holds a newer
+   * version of the note folder. Still a local edit the server lacks — the
+   * deletion guards keep seeing it as pending — but the journal drain skips it:
+   * re-sending would be rejected again. The pull resolves it (the newer remote
+   * version is applied and the op completed), and a new local edit re-records
+   * the op, which clears the flag.
+   */
+  stale?: true
+  /**
+   * NoteFlow Cloud only: upload UNCONDITIONALLY (intentional resurrection of a
+   * folder kept over a remote tombstone — the tombstone is newer than the local
+   * edit by design, so a conditional upload would be rejected). Survives
+   * re-records and failed attempts so a failed forced push is retried forced.
+   */
+  force?: true
+}
+
+/** Options of journalRecord — only NoteFlow Cloud passes them. */
+export interface JournalRecordOptions {
+  /** Flag an upsert as forced (see SyncJournalOp.force). Never cleared by a later non-forced record. */
+  force?: boolean
 }
 
 export interface SyncState {
@@ -63,11 +86,15 @@ export function parseSyncState(raw: string | null | undefined): SyncState {
       if (typeof value !== 'object' || value === null) continue
       const entry = value as Record<string, unknown>
       if (!OP_TYPES.includes(entry.op as SyncOpType)) continue
-      state.ops[key] = {
+      const op: SyncJournalOp = {
         op: entry.op as SyncOpType,
         queuedAt: typeof entry.queuedAt === 'string' ? entry.queuedAt : new Date(0).toISOString(),
         attempts: typeof entry.attempts === 'number' && Number.isFinite(entry.attempts) ? entry.attempts : 0,
       }
+      // Cloud-only upsert flags: kept only in their exact `true` form.
+      if (op.op === 'upsert' && entry.stale === true) op.stale = true
+      if (op.op === 'upsert' && entry.force === true) op.force = true
+      state.ops[key] = op
     }
   }
 
@@ -88,15 +115,23 @@ export function serializeSyncState(state: SyncState): string {
 // All mutators return true when the state actually changed (caller persists only then).
 
 /**
- * Records a pending remote mutation. Re-recording the SAME op for a key is a
- * no-op (keeps queuedAt/attempts — e.g. a debounce timer being re-armed while
- * typing); a DIFFERENT op replaces the entry (e.g. a delete supersedes a
- * pending upsert of the same file). Recording a 'deleteDir' also drops every
- * file-level op under '<dir>/' — those files are going away with the dir, and
- * keeping their upserts would both block the pull deletion rule and make the
- * retry re-push files of a deleted note.
+ * Records a pending remote mutation. Re-recording the SAME op for a key keeps
+ * queuedAt/attempts (e.g. a debounce timer being re-armed while typing); for an
+ * upsert it also clears `stale` (a new local edit — its upload deserves a new
+ * conditional attempt) and adds `force` when asked, but never drops an
+ * existing `force`. A DIFFERENT op replaces the entry (e.g. a delete
+ * supersedes a pending upsert of the same file). Recording a 'deleteDir' also
+ * drops every file-level op under '<dir>/' — those files are going away with
+ * the dir, and keeping their upserts would both block the pull deletion rule
+ * and make the retry re-push files of a deleted note.
  */
-export function journalRecord(state: SyncState, key: string, op: SyncOpType, nowIso: string): boolean {
+export function journalRecord(
+  state: SyncState,
+  key: string,
+  op: SyncOpType,
+  nowIso: string,
+  opts?: JournalRecordOptions,
+): boolean {
   let changed = false
   if (op === 'deleteDir') {
     const prefix = `${key}/`
@@ -107,9 +142,20 @@ export function journalRecord(state: SyncState, key: string, op: SyncOpType, now
       }
     }
   }
+  const force = op === 'upsert' && opts?.force === true
   const existing = state.ops[key]
-  if (existing && existing.op === op) return changed
-  state.ops[key] = { op, queuedAt: nowIso, attempts: 0 }
+  if (existing && existing.op === op) {
+    if (existing.stale) {
+      delete existing.stale
+      changed = true
+    }
+    if (force && !existing.force) {
+      existing.force = true
+      changed = true
+    }
+    return changed
+  }
+  state.ops[key] = force ? { op, queuedAt: nowIso, attempts: 0, force: true } : { op, queuedAt: nowIso, attempts: 0 }
   return true
 }
 
@@ -127,9 +173,94 @@ export function journalRecord(state: SyncState, key: string, op: SyncOpType, now
  * journalFail; a newer delete intent wins — the failed upsert is irrelevant,
  * the file is going away).
  */
-export function journalRecordIfAbsent(state: SyncState, key: string, op: SyncOpType, nowIso: string): boolean {
+export function journalRecordIfAbsent(
+  state: SyncState,
+  key: string,
+  op: SyncOpType,
+  nowIso: string,
+  opts?: JournalRecordOptions,
+): boolean {
   if (state.ops[key]) return false
-  return journalRecord(state, key, op, nowIso)
+  return journalRecord(state, key, op, nowIso, opts)
+}
+
+/**
+ * NoteFlow Cloud: flags a pending upsert as `stale` (its conditional upload was
+ * rejected — the server holds a newer version). Only an EXISTING upsert entry
+ * is flagged, never re-created: if the pull already reconciled the path (and
+ * completed the op) while the upload was in flight, there is nothing left to
+ * keep — re-creating it would leave a phantom pending edit that guards the
+ * note against remote deletions forever.
+ */
+export function journalMarkStale(state: SyncState, key: string): boolean {
+  const entry = state.ops[key]
+  if (!entry || entry.op !== 'upsert' || entry.stale) return false
+  entry.stale = true
+  return true
+}
+
+/**
+ * NoteFlow Cloud: flags EVERY pending upsert under '<dir>/' as stale — the
+ * pull is about to apply a strictly newer remote version of the folder
+ * wholesale (the local version lost, LWW). Done BEFORE the first disk write:
+ * if the apply fails halfway, a still-live upsert of a section would be
+ * drained with the content of the losing version but the `updated` of the
+ * remote anchor just written (a tie the server accepts) and clobber the
+ * server's newer section. Stale ops are skipped by the drain and resolved by
+ * the retry of the failed apply. Forced ops are flagged too (their
+ * resurrection lost against a newer remote version).
+ */
+export function journalMarkDirStale(state: SyncState, dir: string): boolean {
+  const prefix = `${dir}/`
+  let changed = false
+  for (const [key, entry] of Object.entries(state.ops)) {
+    if (entry.op === 'upsert' && key.startsWith(prefix) && !entry.stale) {
+      entry.stale = true
+      changed = true
+    }
+  }
+  return changed
+}
+
+/**
+ * NoteFlow Cloud pull: what to do with a remote ANCHOR TOMBSTONE of a folder
+ * that exists locally, given its pending upserts:
+ *   - 'none'  → nothing pending: the usual deletion rule (updated <= lastSync);
+ *   - 'keep'  → at least one pending upsert is NOT stale — an unsynced local
+ *               edit the server never rejected: keep the note and re-upload it
+ *               forced (intentional resurrection);
+ *   - 'lost'  → every pending upsert is stale — the server already said the
+ *               local version lost against a newer one, and that newer version
+ *               is now deleted — AND the local note is not newer than the
+ *               deletion (`localUpdatedMs <= tombstoneUpdatedMs`; a tombstone's
+ *               updated_at is the deletion time): complete the stale ops and
+ *               delete locally (LWW; the local copy is a known-lost version).
+ *               The timestamp check is required because the journal does not
+ *               see every local edit: edits made while the push gate is closed
+ *               (before the first pull, keys locked, Cloud disabled) or by the
+ *               CLI are never journaled — a local `updated` newer than the
+ *               deletion is such an edit, so it is kept ('keep').
+ *               Unknown local `updated` (null) → 'keep' (never delete blind).
+ */
+export type AnchorTombstoneAction = 'none' | 'keep' | 'lost'
+
+export function planAnchorTombstone(
+  state: SyncState,
+  dir: string,
+  localUpdatedMs: number | null,
+  tombstoneUpdatedMs: number,
+): AnchorTombstoneAction {
+  const prefix = `${dir}/`
+  let pending = 0
+  let stale = 0
+  for (const [key, entry] of Object.entries(state.ops)) {
+    if (entry.op !== 'upsert' || !key.startsWith(prefix)) continue
+    pending++
+    if (entry.stale) stale++
+  }
+  if (pending === 0) return 'none'
+  if (stale < pending) return 'keep'
+  return localUpdatedMs !== null && localUpdatedMs <= tombstoneUpdatedMs ? 'lost' : 'keep'
 }
 
 /**

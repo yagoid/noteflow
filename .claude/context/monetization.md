@@ -322,6 +322,12 @@ diferencial de privacidad, no como peaje.
 > versión de la app/CLI que la usa** — un cliente nuevo contra un servidor sin la columna recibe 400
 > en el pull (error visible, sin pérdida de datos); la 0008 es aditiva y los clientes viejos siguen
 > funcionando con ella.
+> **Subidas condicionadas (migración `0011_cloud_conditional_upsert.sql`):** RPC
+> `cloud_upsert_file` para las filas de nota (ver "Subidas condicionadas" abajo) — **pendiente del
+> operador: aplicarla al proyecto real** (`supabase db push`; `--include-all` si la 0009/0010 de
+> otra rama se aplican después). Solo depende de la 0004 y la 0008. ⚠️ Aplicarla **antes** de
+> publicar el cliente que la usa; sin ella el cliente cae al upsert ciego de siempre (sin regresión,
+> pero sin la protección).
 > La suscripción manual de pruebas de Cloud que hubo aquí ya no existe (comprobado 2026-10-19).
 > ⚠️ La única fila `provider='manual'` es la **comp permanente del operador**
 > (`provider_ref='operator-comp'`, ver § 3 "Cuenta del operador"): **no borrar** filas
@@ -364,6 +370,17 @@ diferencial de privacidad, no como peaje.
   subidas pudieron ser técnicamente accesibles durante el modo managed — se avisa en la UI, no se
   resuelve (rotar la DEK cambiaría todos los `path_key` HMAC → re-upload completo, fuera de
   alcance).
+  El PATCH es **condicional** (`user_keys?user_id=eq.<uid>&mode=eq.managed&select=mode`,
+  `Prefer: return=representation`): si actualiza 0 filas es que otro dispositivo ya pasó la cuenta a
+  e2ee → se guarda `keysMode='e2ee'`, se descarta el recovery code generado (no envuelve nada) y se
+  devuelve `errorCode:'already-e2ee'` (la UI lo traduce, `settings.cloud.upgradeAlreadyPrivate`; la
+  sesión sigue unlocked porque la DEK no cambia). Evita que un dispositivo con modo obsoleto
+  re-envuelva encima e invalide en silencio la passphrase y el recovery code del primero.
+- **Refresco del modo** (`refreshKeysMode()`, IPC `cloud:refresh-keys-mode`): `GET
+  user_keys?select=mode` best-effort (nunca lanza; sin fila = mismo modelo que el 404 de cloud-keys:
+  no-keys + modo null); si cambia, `emitCloudStatusChanged()`. Lo llama el CloudPanel al montarse,
+  porque un dispositivo unlocked nunca vuelve a preguntar (`autoUnlockManaged` sale pronto con DEK en
+  memoria) y no se enteraría de un cambio de modo hecho en otro dispositivo.
 - **Downgrade e2ee → managed** (`downgradeCloudKeysToManaged`, IPC `cloud:downgrade-managed`,
   botón "Switch to standard mode" del panel; decisión de producto 2026-07 — antes no existía
   para no debilitar el cifrado en silencio, ahora existe pero **explícito y confirmado, nunca
@@ -383,8 +400,11 @@ diferencial de privacidad, no como peaje.
 
 ### Jerarquía de claves (implementada en `electron/cloudCrypto.ts`)
 - **Master key (DEK)** aleatoria de 256 bits, generada en cliente al activar la nube.
-- **KEK** derivada de una **passphrase** del usuario (PBKDF2-SHA256, 310.000 iteraciones por
-  defecto — mismos parámetros que `src/lib/cryptoUtils.ts`, el cifrado por nota; módulo propio
+- **KEK** derivada de una **passphrase** del usuario (PBKDF2-SHA256; los wraps NUEVOS usan
+  600.000 iteraciones — `DEFAULT_KDF_ITERATIONS` de `cloudCrypto.ts`, OWASP 2023 —, independiente
+  del cifrado por nota de `src/lib/cryptoUtils.ts`, que sigue en 310.000. Las iteraciones se guardan
+  por fila (`pass_iterations`/`recovery_iterations`) y todo unwrap — escritorio y CLI — deriva con
+  el valor ALMACENADO, así que las filas antiguas a 310.000 siguen abriendo; módulo propio
   en `electron/` porque `tsconfig.electron.json` no puede importar de `src/`) que **envuelve**
   la DEK.
 - **Recovery code** aleatorio mostrado UNA vez, que también envuelve la DEK (segunda vía de
@@ -487,9 +507,11 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   excluyentes**: si `cloudSync.enabled`, Cloud tiene prioridad y el loop de GitHub se salta
   (enforcement en Settings UI = tramo 4).
 - **Sin cola de mutaciones:** Postgres soporta upserts concurrentes — el invariante de
-  serialización del GitHub Sync es un workaround de la Contents API que aquí no aplica. Upserts
-  directos (`POST /rest/v1/files?on_conflict=user_id,path_key` +
-  `Prefer: resolution=merge-duplicates`) con **un** reintento ante error de red/5xx.
+  serialización del GitHub Sync es un workaround de la Contents API que aquí no aplica. Las filas de
+  nota se suben **condicionadas** (RPC `cloud_upsert_file`, migración 0011 — ver "Subidas
+  condicionadas"); los json de metadatos de raíz y las subidas **forzadas** van por el upsert directo
+  (`POST /rest/v1/files?on_conflict=user_id,path_key` + `Prefer: resolution=merge-duplicates`).
+  **Un** reintento ante error de red/5xx en ambos casos.
 - **`updated_at` por fila (decisión):** `note.md` → su propio `updated:` del frontmatter; los
   `.md` de sección → el `updated:` del **ancla de su carpeta** (leído de disco al pushear — así
   todas las filas de una versión de la nota llevan el mismo sello, que es lo que permite a la regla
@@ -524,13 +546,16 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     `updated(N) <= lastSync` → `rmSync`, y el reintento del journal **descarta** el upsert porque el
     fichero ya no existe. Lo mismo dentro del debounce de 5 s (el upsert se apunta en el journal al
     **armar** el timer). Además se **resucita la nota a propósito**: `requeueDirForUpload` re-encola
-    **todos** los `.md` de la carpeta (debounce + journal, como el catch-up), no solo el pendiente —
+    **todos** los `.md` de la carpeta (debounce + journal, como el catch-up) con subida **forzada**
+    (`force` en el op del journal — el tombstone es más nuevo que la edición local por diseño y una
+    subida condicionada se rechazaría), no solo el pendiente —
     si solo se re-subiera el fichero pendiente, el resto de secciones seguiría tombstoneado y los
     demás dispositivos recibirían un ancla sin sus secciones (el editor las recrearía vacías). Gana
     la edición local, que es lo que promete `shouldApplyRemoteDeletion` ("newer local edits win").
     El tombstone de una **sección suelta** se salta igual si hay un upsert pendiente de **ese**
     fichero (`hasPendingUpsert`, `syncState.ts`): su `updated_at` es la hora del borrado, así que
-    `shouldApplyRemoteSection` lo dejaría pasar siempre.
+    `shouldApplyRemoteSection` lo dejaría pasar siempre; si el tombstone es más nuevo que la versión
+    local, ese upsert se marca `force` (si no, la subida condicionada lo rechazaría).
 - **Pull incremental por `seq` (0008):** `GET files?select=…,seq&order=seq.asc&seq=gt.<n>&limit=1000`
   con **paginación keyset** (siguiente página desde la última `seq` vista, hasta una página corta) —
   no por offset/`Range`, que se desplaza si se escriben filas a mitad del pull. **Dos marcas
@@ -542,26 +567,130 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     el cursor viejo se saltó (las reglas de conflicto deciden qué se aplica).
   - sin nada (primer sync) → completa con `deleted=eq.false` (sin `lastSync` no hay nada local que un
     tombstone pueda borrar con seguridad).
-  El nuevo watermark es `nextPullSeq(pullSeq, rows)` = máxima `seq` de **todas** las filas traídas
-  (también las indescifrables o con ruta insegura: nunca van a volverse aplicables; esperar por ellas
-  las re-bajaría siempre), empezando en 0. Tras el primer pull por seq se borra `pullCursor` de los
-  ajustes. Las rutas descifradas se sanean (`isSafeCloudRelPath`) antes de tocar disco. Las propias
-  escrituras vuelven en el siguiente pull (tienen seq nueva): son no-ops porque el ancla no es más
-  nueva y las secciones idénticas no se reescriben.
-  ⚠️ **Pendiente:** el cursor avanza aunque una carpeta falle al aplicarse (error de disco) — esa
-  fila no se reintenta en este dispositivo. (El listado de borrados ya pagina, ver "Deletes".)
-- ⚠️ **Problema conocido (pendiente, también en GitHub): las subidas pisan sin condiciones.** El
-  upsert (`merge-duplicates`) escribe aunque el servidor tenga una versión más nueva (o un tombstone)
-  que este dispositivo nunca vio: una subida del journal drenada tarde, o el **catch-up del primer
-  sync de un segundo dispositivo** (sube su corpus entero), puede pisar una edición o un borrado más
-  recientes de otro dispositivo — en la prueba en vivo, el corpus inicial de B resucitó 2 s después
-  una nota que A acababa de borrar. Arreglo previsto: **subida condicionada** (comparar con la versión
-  remota que se vio por última vez) en los dos backends.
+  El nuevo watermark es `nextPullSeq(pullSeq, rows)` = máxima `seq` de **todas** las filas de la
+  consulta incremental (también las que fallan; esperar por ellas re-bajaría siempre la cola),
+  empezando en 0. Tras el primer pull por seq se borra `pullCursor` de los ajustes. Las rutas
+  descifradas se sanean (`isSafeCloudRelPath`) antes de tocar disco. Las propias escrituras vuelven
+  en el siguiente pull (tienen seq nueva): son no-ops porque el ancla no es más nueva y las secciones
+  idénticas no se reescriben.
+  - **Retry set de aplicados fallidos (`settings.cloudSync.pullRetry`):** antes el watermark pasaba
+    por encima de una carpeta que fallaba al escribirse (antivirus bloqueando un fichero: `note.md`
+    escrito con el `updated` nuevo, la sección con el contenido viejo, nunca reintentado — y la
+    siguiente edición local re-subía la sección vieja) y `syncError` se limpiaba. Ahora cada fallo se
+    apunta en `pullRetry` (path_key → `{relPath?, attempts}`) en el **mismo** `patchSettings` que
+    avanza `pullSeq` (atómico): fallo de carpeta → los path_keys de **todas** las filas del grupo +
+    las traídas para ella (ancla buscada, secciones listadas); fallo de un json de metadatos → esa
+    fila; fila que no descifra → su path_key sin `relPath`. Al empezar cada pull se re-piden por
+    `path_key=in.(…)` (trozos de ≤100, `CLOUD_PULL_COLUMNS`) y se mezclan en el lote
+    (`mergeRetryRows`: dedupe por path_key, gana la consulta incremental); si esa petición falla, el
+    pull aborta sin persistir nada (como `PullAbortError`). El set siguiente se construye solo con
+    los fallos de este pull (`nextPullRetry`, puro): lo que se aplicó o ya no existe en el servidor
+    sale; las indescifrables se abandonan tras **5** intentos (corrupción permanente no debe dejar el
+    error para siempre) y las que fallan al aplicarse tras **50** (`PULL_RETRY_MAX_APPLY_ATTEMPTS`,
+    horas de pulls: da tiempo a que se libere un bloqueo transitorio, pero un error local permanente
+    — `ENAMETOOLONG`, `EACCES` — no bloquea el espejo a GitHub ni deja el error para siempre); lo
+    abandonado se loguea solo como recuento (`countDroppedRetries`); las de ruta insegura nunca entran.
+    ⚠️ **Residual del tope de 50:** tras abandonar, una carpeta que quedó **a medio aplicar** (ancla
+    nueva escrita, secciones viejas, sus upserts marcados stale) ya no se reintenta ni muestra error:
+    solo queda el `console.warn` con el recuento. Una edición local posterior de esa nota re-registra
+    los ops (quita el stale) y sube la carpeta **mezclada** (secciones viejas con el `updated` nuevo,
+    aceptada por el servidor). Asumido: requiere un fallo de disco persistente durante horas sobre
+    esa carpeta concreta. Un pull con errores **deja `syncError`
+    puesto**, y `getCloudSyncStatus().error` = `syncError ?? (pullRetry no vacío ? "Some remote
+    changes could not be applied on this device; they will be retried.")`, así que un push posterior
+    que limpie `syncError` no lo esconde. `initialPullStatus` pasa igualmente a `'ok'` (si no, los
+    pushes quedarían bloqueados para siempre). `hasPendingPullRetries()` lo expone: el espejo a
+    GitHub (`sync:mirror-to-github`) se niega mientras haya reintentos pendientes (el disco no tiene
+    esas filas). El CLI lo replica en `cliCloud.pullRetry`. (El listado de borrados ya pagina, ver
+    "Deletes".)
+- **Subidas condicionadas (migración `0011_cloud_conditional_upsert.sql`).** Antes el upsert
+  (`merge-duplicates`) escribía aunque el servidor tuviera una versión más nueva (o un tombstone) que
+  este dispositivo nunca vio: una subida del journal drenada tarde, o el **catch-up del primer sync de
+  un segundo dispositivo** (sube su corpus entero), pisaba ediciones o borrados más recientes de otro
+  dispositivo — en la prueba en vivo, el corpus inicial de B resucitó 2 s después una nota que A
+  acababa de borrar.
+  - **Servidor:** RPC `public.cloud_upsert_file(p_path_key, p_path_ct, p_content_ct, p_key_ct,
+    p_updated_at, p_anchor_key default null) returns boolean`, `security invoker` (rige la RLS de
+    `files`: sin entitlement → 403 igual que antes), `search_path = ''`. Toma primero el **mismo**
+    advisory lock por usuario que la 0008 (comprobación + escritura atómicas frente a cualquier otra
+    escritura del usuario, sin deadlocks); `newest = max(updated_at)` de las filas del usuario con
+    `path_key` = la fila o `p_anchor_key` (**tombstones incluidos**: su `updated_at` es la hora del
+    borrado); si `newest > p_updated_at` → `false` sin escribir; si no, upsert con `deleted = false` →
+    `true`. **Los empates se aceptan** (re-subir la misma versión es idempotente).
+  - **Cliente (`uploadFileRow`):** las filas `<dir>/note.md` y `<dir>/<sec>.md` van por
+    `POST /rest/v1/rpc/cloud_upsert_file` (una sección pasa como `p_anchor_key` el HMAC de
+    `<dir>/note.md`); `classifyConditionalUpsert` (puro) traduce la respuesta: `true` → subida,
+    `false` → **stale**, 404/`PGRST202` → el servidor aún no tiene la 0011 → **fallback** al upsert
+    directo (se loguea una vez; sin regresión respecto a antes), 403 → error de suscripción +
+    `entitlementBlocked` como siempre. Los json de metadatos de raíz (sin versión) y las subidas
+    forzadas siguen con el upsert directo.
+  - **Stale (`SyncJournalOp.stale`, `syncState.ts`):** el servidor ya tiene una versión más nueva de
+    la carpeta. No es error (sin `syncError`, 0 ficheros en la actividad, `lastSync` no se mueve): el
+    op `upsert` **se queda** en el journal marcado `stale` (`journalMarkStale` — solo marca un op que
+    exista, nunca lo recrea), porque sigue siendo una edición local que el servidor no tiene y los
+    guards de borrado deben seguir viéndola. `retrySyncJournal` **se salta** los ops stale (re-enviar
+    se rechazaría otra vez); los **resuelve el pull** (abajo). Una nueva edición local re-registra el
+    op y le quita el `stale`.
+  - **Force (`SyncJournalOp.force`):** subida incondicional para la resurrección intencionada
+    (`requeueDirForUpload`, tombstone de sección más nuevo que una edición pendiente). Se guarda en
+    el op del journal y el timer lo lee **al disparar**, así que sobrevive a re-armados y a fallos
+    (el drain lo reintenta forzado); un re-registro normal no lo quita; desaparece al completarse.
+    GitHub ignora los dos flags.
+  - **El pull resuelve las subidas pendientes:** cuando el pull deja una ruta con el contenido del
+    servidor (la escribe, o el disco ya era idéntico) **cancela el timer armado** de esa ruta y
+    **completa** su `upsert` pendiente (`settlePathUpload` — arregla también "timer armado con un
+    contenido que un pull más nuevo ya había adelantado"). Cuando aplica un ancla remota **entera**
+    (remota estrictamente más nueva ⇒ LWW: perdió la carpeta local) pide además, en la misma
+    petición `fetchRemoteRows`, las secciones listadas que tengan un upsert pendiente (stale o no)
+    aunque existan en disco, las escribe y completa+cancela todos los upserts/timers bajo la carpeta
+    (`settleDirUploads`). **Antes de la primera escritura** marca `stale` todos los upserts pendientes
+    bajo la carpeta y cancela sus timers (`journalMarkDirStale`, persistido): si el aplicado falla a
+    medias (ancla nueva escrita, una sección no), un upsert vivo de esa sección se drenaría con el
+    contenido perdedor y el `updated` del ancla remota recién escrita — un empate que el servidor
+    acepta — y pisaría la sección nueva del servidor; marcados stale, el drain los salta y el
+    reintento de la carpeta (retry set) los resuelve.
+  - **Ancla tombstone con subidas pendientes** (`planAnchorTombstone`, puro): si **alguna** es no
+    stale → guard de siempre (se conserva la nota y se re-sube **forzada**); si **todas** son stale
+    **y** el `updated` local no es posterior al borrado (`localUpdatedMs <= updated_at` del
+    tombstone, que es la hora del borrado) → el servidor ya dijo que la versión local perdió contra
+    una más nueva, que ahora está borrada: se completan los ops y se **borra en local** (LWW, sin la
+    regla `updated <= lastSync` — la copia local es una versión que se sabe perdida; resucitarla
+    revertiría un borrado con contenido que el servidor rechazó). Si el `updated` local es
+    **posterior** al borrado, o desconocido → se conserva y se re-sube forzada como en el caso
+    anterior: el journal **no ve todas las ediciones** — las hechas con la puerta de push cerrada
+    (antes del primer pull de cada arranque, claves e2ee bloqueadas, Cloud desactivado) o desde el
+    CLI no se apuntan nunca, y sin esta comprobación un borrado más antiguo las eliminaría (D con op
+    stale, edición en T5 con las claves bloqueadas, otro dispositivo borra en T4 < T5 → al
+    desbloquear se perdería T5). Sin pendientes → regla de borrado de siempre.
+  - **Orden del ciclo (`runCloudSyncCycleOnce`, `main.ts`):** desbloqueo → si hay mutaciones en vuelo
+    se salta el ciclo → **pull → broadcast del resultado (`notes-updated`) → drain del journal** →
+    broadcast de estado (antes drenaba primero: una subida vieja del journal pisaba a ciegas). El
+    resultado del pull se emite **antes** del drain para que un editor abierto recargue la versión
+    traída cuanto antes (el drain puede tardar, y mientras el editor podría guardar encima el
+    contenido viejo). Los guards del journal del pull (`shouldPullSkipDir`/`File`,
+    guard de borrado) mantienen a salvo lo pendiente.
+  - **Metadatos con edición local pendiente** (necesario ahora que el pull va antes del drain;
+    `planMetadataPull`, puro): `groups.json`/`folders.json`/`templates.json` → se escribe la
+    **unión por `id` prefiriendo lo local** (`mergeMetadataById`) y se re-arma la subida con ella;
+    `note-order.json`, `section-colors.json`, `ui-settings.json` → se salta lo remoto (gana lo local,
+    el drain lo sube).
+  - **Casos residuales (asumidos):** un op stale cuya versión más nueva en el servidor es un tombstone
+    que el pull ya no aplicará (llegó en un pull anterior, o el primer sync no trae tombstones) se
+    queda en el journal: la nota sigue solo en local y una nueva edición la re-sube (con `updated`
+    más nuevo → aceptada, resucita). Pasa sobre todo con el corpus de un segundo dispositivo que aún
+    tenía notas borradas en otro sitio: ya **no** las resucita en remoto, pero tampoco las borra en
+    local. El CLI no aplica `force` al tombstone de una **sección** con subida pendiente (se salta y
+    `noteflow push` la re-sube condicionada, puede quedar stale) — solo a la re-subida de una carpeta
+    conservada (`cliCloud.forceUpserts`).
+- ⚠️ **Pendiente solo en GitHub:** el GitHub Sync sigue subiendo sin condiciones (el sha de la
+  Contents API no es "la versión que este dispositivo vio"), así que allí una subida tardía aún puede
+  pisar una versión más nueva. Cloud ya no (ver "Subidas condicionadas"); detalle en `sync.md`.
 - **Regla de secciones sueltas (pull por carpeta, necesaria con el cursor por seq):** un ancla y sus
   secciones son subidas independientes y pueden caer en pulls distintos (en cualquier orden).
   - El grupo trae el ancla y `shouldApplyRemoteDir` (remota más nueva, o carpeta local inexistente)
     → se escribe el ancla + todas las filas del grupo (como siempre) **+ las secciones que el ancla
-    lista, no vienen en el grupo y NO existen en el disco local**: `listAnchorSectionFiles` (puro, `cloudSyncLogic.ts`; espejo en
+    lista, no vienen en el grupo y NO existen en el disco local** (o tienen un upsert pendiente,
+    ver "Subidas condicionadas"): `listAnchorSectionFiles` (puro, `cloudSyncLogic.ts`; espejo en
     el CLI) saca `sections[].file` del frontmatter (fallback `<id>.md`, `[]` si la nota está
     cifrada, solo nombres `.md` planos), y `fetchRemoteRows` las pide en **una** petición
     `path_key=in.(…)` con `CLOUD_PULL_COLUMNS`, las descifra y valida (ruta descifrada = la pedida
@@ -575,8 +704,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     en la app, error marcado `abortPull` en el CLI; el catch por carpeta lo re-lanza) **sin
     persistir `pullSeq` ni `lastSync`**: el pull es idempotente y el siguiente reintenta desde el
     mismo watermark (avanzarlo perdería esa versión remota en este dispositivo). Las filas que sí
-    llegan pero no descifran o no casan con la ruta pedida son errores por carpeta (permanentes) y
-    no abortan. **Coste:** una petición extra solo cuando un ancla aplicada lista secciones que
+    llegan pero no descifran van al retry set (5 intentos); las que no casan con la ruta pedida son
+    errores por carpeta permanentes. Ninguna de las dos aborta. **Coste:** una petición extra solo cuando un ancla aplicada lista secciones que
     faltan en disco — no en cada edición: el renderer solo sube las secciones que cambian
     (`src/lib/noteUtils.ts`), y las que ya están en local o están al día o les llega su propia fila
     con seq mayor (regla de secciones sueltas). **Caso límite aceptado:** una sección local
@@ -600,14 +729,52 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   persiste en su PROPIO `userData/cloud-sync-state.json` (los dos backends no deben reproducirse
   ops mutuamente); el sha-cache no aplica (el pull incremental ya evita trabajo). Pushes con
   claves bloqueadas o offline quedan journaled y drenan tras unlock/reconexión
-  (`retrySyncJournal`, mismo contrato que GitHub). Un 403 de RLS (suscripción caducada) se mapea
+  (`retrySyncJournal`, mismo contrato que GitHub, salvo que se salta los ops `stale` y sube
+  forzados los `force`). Un 403 de RLS (suscripción caducada) se mapea
   a `syncError` accionable y **pausa** el drain de escrituras mientras la entitlement local
-  también diga "no cloud" (sin bucle de reintentos).
+  también diga "no cloud" (sin bucle de reintentos). Los logs de consola del motor **no llevan
+  relPaths ni dirs** (contienen el título de la nota; los errores de `fs` se loguean solo por su
+  `code`, `redactError`); los `syncError` de la UI sí pueden llevarlos (no se loguean).
 - Gate de push hasta el primer pull OK (`initialPullStatus`, como GitHub) +
   `flushPendingLocalChanges`: en la PRIMERA sincronización (sin `lastSync` previo) esto sube el
-  corpus local entero, metadatos incluidos.
-- `disableCloudSync()` conserva `lastSync`/`pullSeq`/journal (re-habilitar retoma incremental
-  y los deletes pendientes no se pierden); las claves no se tocan (lock es acción aparte).
+  corpus local entero, metadatos incluidos (las notas, condicionadas: lo que el servidor tenga más
+  nuevo no se pisa).
+- **Metadatos en el primer pull (sin `lastSync` previo — también tras un cambio de cuenta):** antes
+  `templates.json`, `folders.json`, `groups.json`, `note-order.json`, `ui-settings.json` y
+  `section-colors.json` se sobrescribían sin merge ni copia y el catch-up subía lo sobrescrito (se
+  perdían los grupos/carpetas/plantillas propios del dispositivo). Ahora (`planMetadataPull`): antes
+  de sobrescribir **cualquier** json cuyo contenido local difiera se copia a
+  `userData/cloud-metadata-backups/<ISO con ':'→'-'>/<fichero>` (nunca dentro del dir de notas, que
+  se sincroniza); los tres mergeables reciben la **unión por `id` prefiriendo lo remoto**
+  (`mergeMetadataById`: colisiones → lado preferido, su orden primero y luego los extras del otro;
+  si alguno no es un array de objetos con `id` string, no se mezcla) y el catch-up la sube; los
+  demás: gana lo remoto (con copia). En pulls posteriores gana lo remoto como siempre, salvo la regla
+  de edición pendiente de "Subidas condicionadas". Al no haber tombstones de estas entradas, una
+  borrada en un solo lado vuelve desde el otro (asumido). Se loguean solo recuentos.
+- **Dueño de la cuenta (`settings.cloudSync.userId`):** `disableCloudSync()` conserva
+  `lastSync`/`pullSeq`/`pullRetry`/journal (re-habilitar retoma incremental y los deletes pendientes
+  no se pierden) — **para la misma cuenta**. `bindCloudSyncToAccount(userId)` (lo llama `main.ts`
+  en cada `handleAccountStatusChanged`) y `ensureStateOwner()` (en cada punto de entrada que toca el
+  servidor o el journal: enable, `pullNotes`, `retrySyncJournal`, timers de `schedulePush` al
+  dispararse, `pushPathsNow`, `scheduleDelete`, `scheduleDeleteDir`) comparan con
+  `account.getUserId()`: si el dueño guardado es **otra** cuenta (`shouldResetCloudState`, puro,
+  misma semántica que `cliCloudForUser` del CLI) se tira todo lo suyo — `pullSeq`/`pullCursor`/
+  `lastSync`/`pullRetry`, journal **vacío** en `cloud-sync-state.json` (los ops de A jamás se
+  reproducen en B), cache de claves de nota, timers armados, `initialPullStatus = 'pending'`,
+  `entitlementBlocked`/`syncError` — y se guarda el nuevo dueño; el siguiente pull es un primer
+  sync (con la copia/merge de metadatos de arriba). **Dueño desconocido** (estado de builds
+  anteriores) → se **adopta** sin reiniciar (mismo razonamiento que el CLI, ver "Dueño
+  desconocido"); solo se escribe si hay estado que poseer (no se crea `cloudSync` en máquinas que
+  nunca usaron Cloud). Sin sesión → no-op. **Cambio de cuenta con trabajo en vuelo:** cada reset
+  incrementa una **generación** (`stateGeneration`); `pullNotes`, `retrySyncJournal`, cada timer de
+  push, `pushPathsNow`, los borrados y cada subida (`uploadFileRow`, que captura la DEK al empezar) la
+  capturan al entrar y la re-comprueban tras cada `await` y antes de enviar cada petición: un pull
+  iniciado con la cuenta anterior no persiste **nada** (ni `lastSync`/`pullSeq`/`pullRetry`, ni
+  journal, ni `initialPullStatus = 'ok'`, ni catch-up — `AccountSwitchedError`), el drain se corta
+  antes del siguiente op y una subida no llega a enviarse. Además la cache de claves de nota se vacía siempre que
+  cambia la DEK en uso (se compara una huella sha-256, nunca se guarda otra copia de la DEK): las
+  claves de nota de una DEK nunca se envuelven con otra. Las claves no se tocan (lock es acción
+  aparte).
 - **Tiempo real (tramo 3, implementado):** `electron/cloudRealtime.ts` abre un **WebSocket puro**
   (el `WebSocket` global de Node 22 — sin `@supabase/supabase-js` ni `ws`) contra Supabase
   Realtime (protocolo Phoenix, vsn=1.0.0) y se une a un canal con `postgres_changes` sobre
@@ -615,11 +782,13 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   a la publicación `supabase_realtime`; sin `replica identity full` — `user_id` está en la PK).
   **El payload del evento NO se aplica en caliente** (es ciphertext): es solo una **señal** que
   `main.ts` debouncea (1,5 s — un push ajeno llega como ráfaga de filas) y convierte en un ciclo
-  de sync normal (`runCloudSyncCycle`, single-flight con marca dirty: auto-unlock managed →
-  `retrySyncJournal` → skip si hay mutaciones en vuelo → `pullNotes`). Detalles: heartbeat cada
+  de sync normal (`runCloudSyncCycle`, single-flight con marca dirty: auto-unlock managed → skip
+  si hay mutaciones en vuelo → `pullNotes` → `retrySyncJournal` → broadcast). Detalles: heartbeat cada
   25 s (ack perdido = reconectar), token JWT fresco en cada reconexión + push `access_token`
   cada 45 min (expiran ~1 h), backoff exponencial con jitter (1 s → cap 60 s, reset al unirse),
-  silencioso offline. Lógica pura (frames/clasificación/backoff) en `cloudRealtimeLogic.ts`,
+  silencioso offline; **cada unión correcta al canal (la primera y cada re-join) dispara también el
+  callback de cambio** (`isFreshJoin` en `cloudRealtimeLogic.ts`, testeado) → ciclo de catch-up
+  inmediato para lo que cambió con el socket caído, sin esperar al tick de 5 min. Lógica pura (frames/clasificación/backoff) en `cloudRealtimeLogic.ts`,
   testeada en `tests/electron/cloudRealtime.test.ts`. **Ciclo de vida:** corre solo con Cloud
   enabled + sesión + claves unlocked — `syncCloudRealtimeState()` en `main.ts` reconcilia en
   cada transición (choke points: `emitCloudStatusChanged` y `handleAccountStatusChanged`; el
@@ -639,7 +808,8 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
 
 - **En la transición real `signedIn` true→false** (sign-out explícito **y** refresh token revocado,
   que ya hace `clearSession()` + `notifyStatusChanged()`):
-  - **Cloud:** `disableCloudSync()` (`enabled = false`, conserva `lastSync`/`pullSeq`/journal) →
+  - **Cloud:** `disableCloudSync()` (`enabled = false`, conserva `lastSync`/`pullSeq`/journal, ligados
+    a `cloudSync.userId`: si luego entra otra cuenta se reinician, ver "Dueño de la cuenta") →
     libera la exclusión mutua y GitHub Sync se reanuda solo si estaba conectado.
   - **Claves:** `resetCloudKeysSession()` (`cloudKeys.ts`) — **borra toda la sesión de claves**: la
     DEK de memoria + la cache `settings.cloudSync.encryptedDek` **y** el estado aprendido
@@ -668,7 +838,7 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   - **El pull inicial NO se lanza desde la restauración:** en ese instante la DEK es `null` por
     construcción (el sign-out la soltó), así que un `pullNotes()` inmediato solo dejaría
     `syncError = "Cloud keys are locked"`. Se habilita + `startCloudAutoSync()` y se dispara
-    `runCloudSyncCycle()`, que hace el orden correcto: auto-unlock managed → drenar journal → pull.
+    `runCloudSyncCycle()`, que hace el orden correcto: auto-unlock managed → pull → drenar journal.
   - **Corte anti-sorpresa (`clearRestoreSurface`):** una acción **explícita** del usuario logueado
     sobre una de las dos superficies gana sobre el registro y borra **esa mitad** (IPC `cloud:enable`
     / `cloud:disable` → mitad Cloud; `ai:llm-set-config` con `active` → mitad IA). Sin este corte, un
@@ -728,6 +898,9 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   a la inversa, con GitHub conectado, Cloud desbloqueado pero no habilitado **y entitlement
   `cloud`** (o sea, justo cuando activar Cloud está al alcance), aviso de que activar Cloud pausará
   GitHub. El routing real sigue siendo `syncProvider.ts` — la UI solo lo comunica.
+- Al abrir el panel de Cloud se llama `cloudRefreshKeysMode()` (detecta un cambio de modo hecho en
+  otro dispositivo). Con Cloud activo, el panel de GitHub **oculta "Sincronizar ahora"** (solo queda
+  "Espejar en GitHub" + "Desconectar").
 - **Reactividad:** `CloudPanel` se suscribe a `onCloudStatusChanged` + `onAccountStatusChanged`;
   `SyncPanel` a `onCloudStatusChanged` (badges + aviso de pausa). El estado *connected* de GitHub
   lo sube `GitHubSyncSection` al padre vía callback: `sync:status-changed` solo se emite para el
@@ -744,12 +917,12 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
   deslogearía mutuamente. El token rotado se persiste **antes** de usar el access token; un 400/401
   del refresh borra `cliAccount` ("Session expired"). Un access token por invocación (proceso
   one-shot, sin single-flight).
-- **Estado propio:** `settings.cliCloud = {enabled, pullSeq, lastSync, userId, pendingUpserts}` (más un
+- **Estado propio:** `settings.cliCloud = {enabled, pullSeq, lastSync, userId, pendingUpserts, pullRetry}` (más un
   `pullCursor` legado hasta el primer pull por seq) — cursor/lastSync del CLI, independientes de
   `settings.cloudSync` (cada cliente reconcilia por su cuenta). `userId` es el **dueño** de ese
   cursor y sobrevive al `logout` (que borra `cliAccount` pero conserva cursor/lastSync/userId): un
   re-login con la **misma** cuenta retoma incremental; con **otra** cuenta `cliCloudForUser`
-  descarta `pullSeq`/`pullCursor`/`lastSync`/`pendingUpserts` → el siguiente pull es completo (un watermark ajeno
+  descarta `pullSeq`/`pullCursor`/`lastSync`/`pendingUpserts`/`pullRetry` → el siguiente pull es completo (un watermark ajeno
   saltaría, por `seq > pullSeq`, todas las filas de la cuenta nueva por debajo de él). Se aplica en `cloud login` (antes del pull automático) y al inicio de todo pull/reconcile
   Cloud (`bindCliCloudToAccount`).
   - **Dueño desconocido** (estado de antes de guardar `userId`): en `cloud login` se toma como dueño
@@ -760,9 +933,8 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
     disco) y el siguiente push las **resucita** en remoto (upsert `merge-duplicates` con
     `deleted=false`). Adoptar solo falla para quien cambió de cuenta antes de esta regla, y el coste
     es esconder notas antiguas (intactas en remoto), no destruir datos. Nada más queda ligado a la cuenta en disco: la DEK, las claves por
-  nota y el access token viven solo en memoria del proceso. ⚠️ La app de escritorio **no** hace
-  este reinicio: `disableCloudSync` conserva `cloudSync.pullSeq`/`lastSync` y el journal sin
-  dueño, así que entrar en la app con otra cuenta reutiliza el cursor anterior (pendiente).
+  nota y el access token viven solo en memoria del proceso. La app de escritorio hace el mismo
+  reinicio con `settings.cloudSync.userId` (ver "Dueño de la cuenta" en "Sync engine").
 - **DEK por invocación, jamás cacheada en disco** (ni la passphrase): managed → `cloud-keys/unlock`
   en cada run; e2ee → passphrase de `NOTEFLOW_CLOUD_PASSPHRASE` o prompt interactivo con eco oculto
   (un input de 30 chars normalizados del alfabeto se trata como recovery code). En e2ee la máquina
@@ -797,10 +969,36 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
     app, que la apunta en el journal antes de guardar `pullSeq`;
   - tombstone de una **sección suelta** pendiente (`isPendingUpsert`, espejo de `hasPendingUpsert`) →
     se salta;
+  - **subidas condicionadas** (espejo de la app): las filas de nota van por la RPC
+    `cloud_upsert_file` con el mismo fallback (404/`PGRST202` → upsert directo, aviso una vez por
+    invocación); la re-subida de la carpeta conservada tras un tombstone va **forzada**; una subida
+    rechazada (stale) se informa como `not uploaded: a newer version is on NoteFlow Cloud — run
+    'noteflow pull'` (no como fallo), no bumpea `lastSync` y queda en `pendingUpserts`. Cuando el
+    pull aplica una carpeta **entera** (y pide también sus secciones listadas con subida pendiente)
+    o deja una sección igual al servidor, quita esas entradas de `pendingUpserts`
+    (`dropReconciledPending`, en la misma escritura que avanza `pullSeq`);
+  - **retry set** (`cliCloud.pullRetry`, mismas funciones puras que la app: `mergeRetryRows`,
+    `nextPullRetry` con los mismos topes, `countDroppedRetries`), escrito con `pullSeq`. `noteflow push`
+    **se salta** las notas con filas en el retry set (`dirsPendingRetry`: pueden estar a medio
+    aplicar, ancla nueva + sección vieja; subirlas mandaría la sección vieja con el `updated` nuevo) y
+    lo avisa — espejo de los upserts que la app marca stale antes de aplicar;
+  - **subida forzada persistida** (`cliCloud.forceUpserts` ⊆ `pendingUpserts`): los ficheros de una
+    carpeta conservada tras un tombstone se apuntan en la misma escritura que avanza `pullSeq`; la
+    re-subida del pull, `noteflow push` y la subida por comando los suben **forzados** hasta que
+    llegan (si no, una re-subida fallida se reintentaría condicionada y quedaría stale para siempre).
+    Sale al subir bien, al reconciliar la carpeta y al cambiar de cuenta;
+  - **metadatos (paridad de I7):** mismo `planMetadataPull`/`mergeMetadataById` que la app — en el
+    primer reconcile (sin `lastSync`) copia el json local a
+    `<dir de ajustes del CLI>/cloud-metadata-backups/<ISO>/` antes de sobrescribirlo y escribe la
+    unión por `id` (prefiriendo lo remoto) de `groups`/`folders`/`templates`; con una subida fallida
+    pendiente de ese json, unión prefiriendo lo local (o se conserva lo local) y sigue pendiente;
+  - **no replicado:** la regla "todas stale ⇒ borrar" del tombstone del ancla — `pendingUpserts` del
+    CLI no distingue subidas rechazadas (stale) de fallidas, así que conserva la carpeta como antes;
   - al empezar se descartan las entradas cuyo fichero local ya no existe (no protegen nada).
   `noteflow push` es el reintento (sube todo y limpia lo que llega). Se borra al cambiar de cuenta
   (`cliCloudForUser`, como `pullSeq`). Paridad con los guards de la app en
-  `tests/cli/syncState.test.ts`.
+  `tests/cli/syncState.test.ts`; la de subidas condicionadas, retry set y cambio de cuenta en
+  `tests/cli/cloudConditional.test.ts`.
 - **Gate de pull inicial:** sin `pullSeq`, `pullCursor` ni `lastSync` (nunca reconciliado), el
   primer push ejecuta antes un pull automático ("First Cloud reconcile…") — un disco viejo no machaca
   un remoto más nuevo. Pull incremental idéntico al de la app (keyset por `seq` con los mismos tres

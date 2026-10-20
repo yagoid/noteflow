@@ -113,6 +113,17 @@ export function classifyFrame(raw: string): FrameKind {
   return 'other'
 }
 
+/**
+ * True when a frame completes a channel (re)join: the first 'join-ok' since the
+ * socket (re)connected (`alreadyJoined` is reset on every teardown). Later
+ * 'join-ok' replies — e.g. to an access_token push — don't count. Every fresh
+ * join must trigger a catch-up sync: changes made while the socket was down
+ * produced no event this client will ever receive.
+ */
+export function isFreshJoin(kind: FrameKind, alreadyJoined: boolean): boolean {
+  return kind === 'join-ok' && !alreadyJoined
+}
+
 function replyStatus(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null
   const status = (payload as Record<string, unknown>).status

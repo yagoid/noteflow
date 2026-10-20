@@ -229,8 +229,9 @@ La migración 0005 añade el **modo de cifrado dual** (modelo Obsidian Sync): mo
 y modo **e2ee** (opt-in — passphrase + recovery code; el servidor solo ve ciphertext). El modo
 managed lo sirve la Edge Function `cloud-keys`. Pasos del operador:
 
-1. **Correr las migraciones 0004, 0005, 0006 y 0008** (`supabase/migrations/0004_cloud.sql`,
-   `0005_cloud_managed.sql`, `0006_cloud_realtime.sql` y `0008_cloud_seq.sql`), igual que las
+1. **Correr las migraciones 0004, 0005, 0006, 0008 y 0011** (`supabase/migrations/0004_cloud.sql`,
+   `0005_cloud_managed.sql`, `0006_cloud_realtime.sql`, `0008_cloud_seq.sql` y
+   `0011_cloud_conditional_upsert.sql`), igual que las
    anteriores (SQL Editor o `supabase db push`). La 0006 añade `files` a la publicación de
    Realtime (el cliente recibe los cambios por WebSocket). La 0008 añade `files.seq`, un número de
    cambio que asigna el servidor (trigger) y que los clientes usan como cursor del pull
@@ -238,6 +239,28 @@ managed lo sirve la Edge Function `cloud-keys`. Pasos del operador:
    ⚠️ **Orden de despliegue: aplicar la 0008 ANTES de publicar la versión de la app/CLI que la
    usa** — un cliente nuevo contra un servidor sin la columna recibe 400 en el pull (error
    visible, sin pérdida de datos).
+
+   **Migración 0011 (`0011_cloud_conditional_upsert.sql`) — subidas condicionadas.** Crea la
+   función RPC `public.cloud_upsert_file(...)` por la que los clientes suben las filas de nota:
+   rechaza (devuelve `false`, no escribe) una subida cuyo `updated_at` es más viejo que la versión
+   que el servidor ya tiene de esa carpeta (la fila o su ancla, tombstones incluidos), para que un
+   journal drenado tarde o el catch-up del primer sync de otro dispositivo no pisen ediciones ni
+   borrados más recientes. `security invoker` (rige la RLS de `files`: sin suscripción → 403 como
+   hasta ahora) y toma el mismo advisory lock por usuario que la 0008. Solo depende de la 0004 y la
+   0008. Es **aditiva**: los clientes anteriores siguen con su upsert directo, y un cliente nuevo
+   contra un servidor sin la función cae al upsert directo (sin regresión).
+   ⚠️ **Orden de despliegue: aplicar la 0011 ANTES de publicar la versión de la app/CLI que la
+   usa** (si no, esos clientes siguen subiendo sin condiciones hasta que se aplique):
+
+   ```bash
+   supabase db push            # aplica la 0011 (y cualquier otra pendiente)
+   supabase migration list     # comprobar que 0011 figura como aplicada en remoto
+   ```
+
+   Si el remoto ya tiene migraciones con número mayor o la 0009/0010 llegan después que la 0011,
+   `supabase db push` se niega a aplicar migraciones "fuera de orden": usar
+   `supabase db push --include-all`. Alternativa: pegar el fichero en el SQL Editor y registrar la
+   versión con `supabase migration repair --status applied 0011`.
 
 2. **Configurar la clave del operador** para el modo managed — 32 bytes aleatorios en base64.
    Es el ÚNICO secret de esta función; quien la tenga puede descifrar las DEK de los usuarios
