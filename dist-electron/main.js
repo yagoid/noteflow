@@ -59,6 +59,7 @@ const uiSettings_1 = require("./uiSettings");
 const importers = __importStar(require("./importers"));
 const migration_1 = require("./migration");
 const tempNoteExpiry_1 = require("./tempNoteExpiry");
+const activityLog_1 = require("./activityLog");
 const i18n_1 = require("./i18n");
 function getIconPath() {
     if (process.platform === 'win32')
@@ -2345,6 +2346,7 @@ function buildToolContext() {
         readFolders: () => readJsonArray(FOLDERS_FILE),
         writeFolders: (folders) => applyFoldersSet(folders, undefined, { durablePush: true }),
         search: aiIndex.isEnabled() ? (q, k) => aiIndex.search(q, k) : undefined,
+        onNoteEdited: (noteId) => recordNoteEdit(noteId),
     };
 }
 const MAX_AGENT_STEPS = 12;
@@ -2499,6 +2501,69 @@ electron_1.ipcMain.handle('ai:chats-save', (_event, sessions) => {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
 });
+// ── Activity log (userData/activity-log.json — local, not synced) ───────────────
+// Ids of the notes edited each local day on THIS device, for the activity chart in
+// Settings → General. Recorded only for user edits (the renderer's store write and
+// the chat agent's note edits) — never for sync pulls, imports, migration or
+// temp-note expiry. Logic (dedupe, pruning, parsing) is pure in activityLog.ts.
+// Writes are debounced and atomic (tmp + rename): the file holds no secrets, so the
+// in-place rule for settings.json does not apply here.
+const ACTIVITY_LOG_WRITE_DELAY_MS = 2000;
+let activityLog = null;
+let activityLogDirty = false;
+let activityLogTimer = null;
+function activityLogPath() {
+    return path_1.default.join(electron_1.app.getPath('userData'), 'activity-log.json');
+}
+/** Lazy so nothing touches userData before the app is ready. */
+function getActivityLog() {
+    if (!activityLog) {
+        let raw = null;
+        try {
+            raw = fs_1.default.readFileSync(activityLogPath(), 'utf-8');
+        }
+        catch {
+            raw = null; // missing file — start empty
+        }
+        activityLog = (0, activityLog_1.parseActivityLog)(raw); // corrupt content also degrades to empty
+    }
+    return activityLog;
+}
+function flushActivityLog() {
+    if (activityLogTimer) {
+        clearTimeout(activityLogTimer);
+        activityLogTimer = null;
+    }
+    if (!activityLogDirty)
+        return;
+    activityLogDirty = false;
+    const file = activityLogPath();
+    const tmp = `${file}.tmp`;
+    try {
+        fs_1.default.writeFileSync(tmp, (0, activityLog_1.serializeActivityLog)(getActivityLog()), 'utf-8');
+        fs_1.default.renameSync(tmp, file);
+    }
+    catch (err) {
+        // Never let bookkeeping break a note save — worst case this day's entry is lost.
+        console.error('[activity] failed to persist activity-log.json:', String(err));
+    }
+}
+/** Records that the user edited `noteId` today (no-op if already recorded today). */
+function recordNoteEdit(noteId) {
+    const current = getActivityLog();
+    const next = (0, activityLog_1.recordActivityEdit)(current, noteId, Date.now());
+    if (next === current)
+        return;
+    activityLog = next;
+    activityLogDirty = true;
+    if (!activityLogTimer)
+        activityLogTimer = setTimeout(flushActivityLog, ACTIVITY_LOG_WRITE_DELAY_MS);
+}
+electron_1.ipcMain.on('activity:record-edit', (_event, noteId) => {
+    if (typeof noteId === 'string')
+        recordNoteEdit(noteId);
+});
+electron_1.ipcMain.handle('activity:get-log', () => ({ days: (0, activityLog_1.pruneActivityLog)(getActivityLog(), Date.now()).days }));
 const profileFiles = new Map();
 // Chat attachments live in their own cache so they aren't consumed by profile generation.
 // Bytes stay in main (never cross to the renderer) and persist for the app session so follow-up
@@ -3497,6 +3562,7 @@ electron_1.app.on('window-all-closed', () => {
 });
 electron_1.app.on('will-quit', () => {
     electron_1.globalShortcut.unregisterAll();
+    flushActivityLog();
 });
 electron_1.app.on('second-instance', () => {
     showWindow();

@@ -42,6 +42,13 @@ import { sanitizeUiSettings, mergeUiSettings, type UiSettings } from './uiSettin
 import * as importers from './importers'
 import { migrateNotesDirToV2 } from './migration'
 import { shouldRunExpiryCheck, type ExpiryTrigger, type SyncBackendId } from './tempNoteExpiry'
+import {
+  parseActivityLog,
+  pruneActivityLog,
+  recordActivityEdit,
+  serializeActivityLog,
+  type ActivityLog,
+} from './activityLog'
 import { resolveLang, getTrayMessages, getMessages, type LanguageSetting } from './i18n'
 
 
@@ -2406,6 +2413,7 @@ function buildToolContext(): agentTools.ToolContext {
     readFolders: () => readJsonArray(FOLDERS_FILE) as ReturnType<agentTools.ToolContext['readFolders']>,
     writeFolders: (folders) => applyFoldersSet(folders, undefined, { durablePush: true }),
     search: aiIndex.isEnabled() ? (q, k) => aiIndex.search(q, k) : undefined,
+    onNoteEdited: (noteId) => recordNoteEdit(noteId),
   }
 }
 
@@ -2560,6 +2568,70 @@ ipcMain.handle('ai:chats-save', (_event, sessions: unknown) => {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 })
+
+// ── Activity log (userData/activity-log.json — local, not synced) ───────────────
+// Ids of the notes edited each local day on THIS device, for the activity chart in
+// Settings → General. Recorded only for user edits (the renderer's store write and
+// the chat agent's note edits) — never for sync pulls, imports, migration or
+// temp-note expiry. Logic (dedupe, pruning, parsing) is pure in activityLog.ts.
+// Writes are debounced and atomic (tmp + rename): the file holds no secrets, so the
+// in-place rule for settings.json does not apply here.
+const ACTIVITY_LOG_WRITE_DELAY_MS = 2000
+let activityLog: ActivityLog | null = null
+let activityLogDirty = false
+let activityLogTimer: ReturnType<typeof setTimeout> | null = null
+
+function activityLogPath(): string {
+  return path.join(app.getPath('userData'), 'activity-log.json')
+}
+
+/** Lazy so nothing touches userData before the app is ready. */
+function getActivityLog(): ActivityLog {
+  if (!activityLog) {
+    let raw: string | null = null
+    try {
+      raw = fs.readFileSync(activityLogPath(), 'utf-8')
+    } catch {
+      raw = null // missing file — start empty
+    }
+    activityLog = parseActivityLog(raw) // corrupt content also degrades to empty
+  }
+  return activityLog
+}
+
+function flushActivityLog(): void {
+  if (activityLogTimer) {
+    clearTimeout(activityLogTimer)
+    activityLogTimer = null
+  }
+  if (!activityLogDirty) return
+  activityLogDirty = false
+  const file = activityLogPath()
+  const tmp = `${file}.tmp`
+  try {
+    fs.writeFileSync(tmp, serializeActivityLog(getActivityLog()), 'utf-8')
+    fs.renameSync(tmp, file)
+  } catch (err) {
+    // Never let bookkeeping break a note save — worst case this day's entry is lost.
+    console.error('[activity] failed to persist activity-log.json:', String(err))
+  }
+}
+
+/** Records that the user edited `noteId` today (no-op if already recorded today). */
+function recordNoteEdit(noteId: string): void {
+  const current = getActivityLog()
+  const next = recordActivityEdit(current, noteId, Date.now())
+  if (next === current) return
+  activityLog = next
+  activityLogDirty = true
+  if (!activityLogTimer) activityLogTimer = setTimeout(flushActivityLog, ACTIVITY_LOG_WRITE_DELAY_MS)
+}
+
+ipcMain.on('activity:record-edit', (_event, noteId: unknown) => {
+  if (typeof noteId === 'string') recordNoteEdit(noteId)
+})
+
+ipcMain.handle('activity:get-log', () => ({ days: pruneActivityLog(getActivityLog(), Date.now()).days }))
 
 // ── Second-brain profile ───────────────────────────────────────────────────────
 
@@ -3569,6 +3641,7 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
+  flushActivityLog()
 })
 
 app.on('second-instance', () => {

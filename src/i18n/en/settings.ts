@@ -30,13 +30,21 @@ export const settings = {
     spanish: 'Español',
     // Secondary line under the "System" option showing the detected language.
     detected: 'Detected: {lang}',
-    // Decorative activity chart (ActivityPulse): header + axis legends. The chart
-    // itself has no text; these labels live in HTML around the SVG.
+    // Decorative activity mirror chart (ActivityPulse): header, legend and axis
+    // labels. The chart itself has no text; these labels live in HTML around the SVG.
     activity: {
       title: 'Activity',
-      hint: 'Notes created or edited over the last 16 weeks',
-      yAxis: 'Activity',
-      xStart: '16 weeks ago',
+      // Edits come from this device's activity log (plus each note's last edit);
+      // sections created come from the notes themselves, so they are not per device.
+      hint: 'Recent notes edited (tracked on this device) and sections created',
+      // Legend after each window total ("↑ 12 notes edited · ↓ 5 sections created");
+      // the number is rendered separately (coloured), so these forms carry no {count}.
+      notesEdited: { one: 'note edited', other: 'notes edited' },
+      sectionsCreated: { one: 'section created', other: 'sections created' },
+      // Left end of the X axis: the window adapts to the first active day (4–16 weeks),
+      // shown in whole weeks when it is a multiple of 7, in days otherwise.
+      xStartWeeks: { one: '{count} week ago', other: '{count} weeks ago' },
+      xStartDays: { one: '{count} day ago', other: '{count} days ago' },
       xEnd: 'Today',
     },
   },

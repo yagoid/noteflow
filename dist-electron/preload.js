@@ -197,6 +197,10 @@ const api = {
     aiLlmUsage: () => electron_1.ipcRenderer.invoke('ai:llm-usage'),
     aiChatsLoad: () => electron_1.ipcRenderer.invoke('ai:chats-load'),
     aiChatsSave: (sessions) => electron_1.ipcRenderer.invoke('ai:chats-save', sessions),
+    // Per-device activity log (userData/activity-log.json): ids of the notes the user
+    // edited each local day, for the activity chart in Settings → General
+    recordActivityEdit: (noteId) => electron_1.ipcRenderer.send('activity:record-edit', noteId),
+    getActivityLog: () => electron_1.ipcRenderer.invoke('activity:get-log'),
     aiChat: (requestId, messages) => electron_1.ipcRenderer.invoke('ai:chat', { requestId, messages }),
     aiChatPickFiles: () => electron_1.ipcRenderer.invoke('ai:chat-pick-files'),
     aiChatRemoveFile: (id) => electron_1.ipcRenderer.invoke('ai:chat-remove-file', id),

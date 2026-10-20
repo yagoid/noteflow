@@ -181,7 +181,11 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   **desacoplado de main por DI** (`ToolContext`): lee/parsea con `noteFormat` y escribe reusando los
   primitivos factorizados del main `applyNoteWrite` / `applyNoteDelete` / `applyGroupsSet` /
   `applyFoldersSet` (heredan broadcast `notes-updated` + `schedulePush` + `scheduleIndex`; **sin
-  senderId** → la propia ventana del chat también refresca). Tools v1: `list_notes`, `get_note`,
+  senderId** → la propia ventana del chat también refresca). Las ediciones de una nota **existente**
+  (`writeNoteRecord`) avisan además a `ctx.onNoteEdited(noteId)`, con el que main las apunta en el
+  log de actividad por dispositivo (`userData/activity-log.json`, ver `architecture.md`). Ojo: estas
+  escrituras **no** actualizan el `updated` de la nota, así que sin el log no aparecerían como
+  editadas en la gráfica de Ajustes → General. Tools v1: `list_notes`, `get_note`,
   `list_groups`, `search_notes`, `create_note`, `update_note`, `add_section`, `update_section`,
   `rename_section`, `create_group`, `create_folder`, `rename_group`, `rename_folder`, `delete_*`.
   Las **notas cifradas** se listan pero no se leen/editan. El **bucle** en `ai:chat` itera

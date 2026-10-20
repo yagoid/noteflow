@@ -30,6 +30,8 @@ noteflow/
 │   ├── syncState.ts     # Lógica pura del journal de mutaciones + sha-cache (la usan GitHub y Cloud)
 │   ├── mirrorPlan.ts    # Lógica pura del espejo local→GitHub (plan + allowlist de borrado) — ver sync.md
 │   ├── syncHistory.ts   # Lógica pura del historial de actividad en memoria (gráfica de la tarjeta de sync) — ver sync.md
+│   ├── activityLog.ts   # Lógica pura del log de ediciones por día y dispositivo (userData/activity-log.json):
+│   │                    #   parse/dedupe/poda — testeada; lo persiste main (canales activity:*)
 │   ├── syncProvider.ts  # Interfaz SyncProvider + getActiveSyncProvider() (GitHub ⟂ Cloud) — ver sync.md
 │   ├── tempNoteExpiry.ts # Lógica pura: cuándo puede correr el autoborrado de notas temporales
 │   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
@@ -309,6 +311,8 @@ Renderer (React)
 | `ai:chat-cancel` | on | Aborta un `ai:chat` en vuelo por `requestId` (AbortController); también resuelve confirmaciones pendientes |
 | `ai:chat-confirm` | on | Resuelve la confirmación de una tool destructiva por `toolCallId` (`{toolCallId, approved}`) |
 | `ai:chats-load` / `ai:chats-save` | handle | Historial de chats en `userData/ai-chats.json` (local, NO se sincroniza) |
+| `activity:record-edit` | on | `(noteId)` → apunta que el usuario editó esa nota hoy en el log de actividad por dispositivo (`userData/activity-log.json`). Lo envía `applyNoteUpdate` de `notesStore` (todas las ediciones de usuario: editor, sticky, ventana de sección, overviews, menús); main lo llama también para las ediciones de nota del agente del chat (`ToolContext.onNoteEdited`). Nunca desde sync pull, imports, migración ni autoborrado de notas temporales. Escritura con debounce (2 s) + atómica (tmp + rename), flush en `will-quit` |
+| `activity:get-log` | handle | `{days: Record<'YYYY-MM-DD', noteId[]>}` (podado) — lo lee la gráfica de actividad de Ajustes → General (`ActivityPulse.tsx`) |
 | `ai:profile-pick-files` / `ai:profile-remove-file` | handle | Segundo cerebro: file picker capado por capacidades del proveedor a una caché en main (solo metadatos al renderer) |
 | `ai:profile-generate` | handle | Segundo cerebro: `{fields[], fileIds[], urls[], locale?}` → prompt + adjuntos nativos → LLM → `{title, sections[]}` (detalle en `ai.md` → Segundo cerebro) |
 | `ai:profile-get-status` / `ai:profile-set-completed` | handle | `settings.aiProfile` = `{completedAt, noteId?}` (cuestionario mostrado una vez + id de la nota de perfil generada, para enlazar/regenerar sin duplicar). `set-completed(noteId?)`: sin `noteId` = "Not now" (saltado) |
@@ -443,6 +447,12 @@ Estructura de `settings.json`:
 > cifran por proveedor en `settings.aiLlm.byPreset[*].encryptedApiKey` (nunca cruzan al renderer).
 > Los **journals de sync** viven en `userData/sync-state.json` (GitHub) y
 > `userData/cloud-sync-state.json` (NoteFlow Cloud) — estado LOCAL del dispositivo, nunca en el dir
-> de notas. `accountRestore` recuerda, **sin secretos** (email + dos booleanos), qué features de
+> de notas. El **log de actividad** vive en `userData/activity-log.json` (local, NO se sincroniza,
+> fichero aparte para no engordar `settings.json`): `{version: 1, days: {'YYYY-MM-DD' (día local):
+> noteId[]}}` con los ids (sin duplicados; nunca títulos ni contenido) de las notas que el usuario
+> editó cada día en ESTE dispositivo; se podan los días de más de 120 en cada escritura. Lógica
+> pura en `electron/activityLog.ts`; como no guarda secretos se escribe con tmp + rename (la regla
+> in-place del apartado "Seguridad" de arriba es solo para `settings.json`).
+> `accountRestore` recuerda, **sin secretos** (email + dos booleanos), qué features de
 > pago tenía activas la sesión que cerró, para volver a activarlas si vuelve a entrar la MISMA
 > cuenta con la entitlement viva (ver `monetization.md` § 4 "Cerrar sesión").

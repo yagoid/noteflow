@@ -83,11 +83,32 @@ Iconos del TitleBar:
 - **⚙ settings**: abre la **ventana de Ajustes** (overlay tipo app de settings) con nav izquierda
   + panel derecho, **en General** (la primera de la nav). Secciones, **en el orden en que aparecen
   en la nav**: **General** (idioma de la
-  interfaz: System/English/Español; debajo, la sección **Activity**: gráfica monocroma de línea con
-  montículos suaves sobre una baseline con la actividad de notas de las últimas 16 semanas
-  (cuadrícula tenue con marca semanal, encabezado y leyendas de ejes en HTML —"16 weeks ago"/"Today"—
-  porque el SVG se estira; solo lee timestamps, nunca contenido; el gráfico en sí no tiene texto ni
-  números); `ActivityPulse.tsx` + `src/lib/activityPulse.ts`), **AI**, **Sync** (NoteFlow Cloud + GitHub), **Account** (cuenta
+  interfaz: System/English/Español; debajo, la sección **Activity**: **gráfico espejo** con
+  **ventana adaptativa**: empieza el primer día con actividad (del log o de las notas), con un
+  **mínimo de 4 semanas y un máximo de 16** (sin actividad → 4 semanas); si la ventana es de ≤56
+  días, **un punto por día**, si no, **uno cada 2 días**; cada punto es la **suma móvil de los 7
+  días** que acaban en él (con días previos completos para los primeros puntos; el último es hoy),
+  para que la línea no caiga a cero con actividad escasa,
+  con una baseline central fina y apagada sobre una cuadrícula muy tenue (una vertical por semana, contadas desde hoy) — **arriba, notas editadas** (verde
+  fijo `#1D9E75`, el del mockup) y **abajo, secciones creadas** (violeta fijo `#7F77DD`);
+  cada mitad es un área plana translúcida (~0.32) con contorno en zigzag de segmentos rectos
+  (~1.25px), normalizada cada mitad con raíz cuadrada contra **su propio máximo** (las dos llenan su altura; no son comparables entre sí, los totales van en la leyenda). "Editadas" de un día
+  = notas distintas del **log de actividad de este dispositivo** (`userData/activity-log.json`:
+  ids de las notas que el usuario editó ese día en la app —editor, sticky, ventana de sección,
+  menús/overviews y las ediciones del agente del chat—; nunca sync, imports, migración ni
+  autoborrado) **∪** las notas cuyo `updated` cae ese día; en ambos casos no cuenta el día de
+  creación de la nota (si sigue existiendo), y los ids de notas borradas sí cuentan. El log solo
+  existe desde que el dispositivo empezó a registrar; antes solo se conoce la **última** edición
+  de cada nota. "Sección creada" = día de `section.created` (o `note.created` en secciones
+  antiguas; una nota sin secciones legibles, p. ej. cifrada bloqueada, cuenta una vez por su
+  `created`) — sale de los datos de las notas, **no es por dispositivo**. Leyenda con los totales
+  de la ventana real a la derecha del título ("↑ N notes edited · ↓ M sections created"; N = notas
+  **distintas** editadas en la ventana), hint "Recent notes edited (tracked on this device) and
+  sections created" y eje X dinámico "N weeks ago" (ventana múltiplo de 7) o "N days ago" /
+  "Today", en HTML porque el SVG se estira; animación de entrada
+  izquierda→derecha (respeta `prefers-reduced-motion`) y montículo semilla simétrico si no hay
+  actividad; solo lee ids y timestamps, nunca contenido; `ActivityPulse.tsx` +
+  `src/lib/activityPulse.ts`), **AI**, **Sync** (NoteFlow Cloud + GitHub), **Account** (cuenta
   NoteFlow), **Appearance** (tema/fuente/acento/colores del editor/escala), **Editor**
   (fuente/tamaño/ancho), **Templates** (plantillas de nota), **Data** (export/import + carpeta de
   notas), **Startup** (autostart + stickies), **Keyboard shortcuts** y **About** (versión + updates +

@@ -552,6 +552,10 @@ declare global {
       aiLlmUsage: () => Promise<{ used: number; limit: number } | null>
       aiChatsLoad: () => Promise<ChatSession[]>
       aiChatsSave: (sessions: ChatSession[]) => Promise<{ ok: boolean; error?: string }>
+      // Per-device activity log (userData/activity-log.json, local, not synced): local day
+      // key (YYYY-MM-DD) → ids of the notes the user edited that day. Ids only, no content.
+      recordActivityEdit: (noteId: string) => void
+      getActivityLog: () => Promise<{ days: Record<string, string[]> }>
       aiChat: (requestId: string, messages: ChatMessage[]) => Promise<void>
       aiChatPickFiles: () => Promise<{ ok: boolean; canceled?: boolean; files?: ChatAttachment[]; errors?: string[] }>
       aiChatRemoveFile: (id: string) => Promise<{ ok: boolean }>

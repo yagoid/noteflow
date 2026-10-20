@@ -265,6 +265,10 @@ async function applyNoteUpdate(get: StoreGet, set: StoreSet, id: string, patch: 
     raced = current !== undefined && current !== note
     return { notes: s.notes.map((n) => (n.id === id ? updated : n)) }
   })
+  // Every user edit of an existing note (editor, sticky, section window, overviews, menus)
+  // funnels through here: log it in the per-device activity log behind Settings → General's
+  // chart. Sync pulls, imports, migration and temp-note expiry never come through this path.
+  window.noteflow.recordActivityEdit(id)
   if (alarmsMayChange && windowRole !== 'section') {
     window.noteflow.scheduleAlarms(collectAlarms(get().notes))
   }

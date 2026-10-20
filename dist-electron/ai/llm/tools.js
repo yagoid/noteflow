@@ -221,6 +221,7 @@ async function writeNoteRecord(ctx, dir, before, after) {
     for (const f of sectionFiles)
         beforeFiles.delete(f);
     await ctx.writeNote({ dir, files, deleteFiles: [...beforeFiles] });
+    ctx.onNoteEdited?.(after.id);
 }
 function ok(summary, content) {
     return { summary, content: content ?? summary };

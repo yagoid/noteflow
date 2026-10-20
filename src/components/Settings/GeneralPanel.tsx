@@ -46,7 +46,7 @@ export function GeneralPanel() {
           ))}
         </div>
       </section>
-      {/* Decorative chart of note activity over the last 16 weeks (header + axis legends included) */}
+      {/* Decorative chart of recent note activity (header + axis legends included) */}
       <ActivityPulse />
     </div>
   )

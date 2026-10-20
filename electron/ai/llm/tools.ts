@@ -73,6 +73,9 @@ export interface ToolContext {
   writeFolders(folders: FolderRec[]): void | Promise<void>
   /** Semantic search; present only when the local index is enabled. */
   search?: (query: string, k: number) => Promise<Array<{ noteId: string; sectionId: string; snippet: string }>>
+  /** Called after an edit of an EXISTING note lands (not on create/delete) — main records
+   *  it in the per-device activity log, since the agent edits on the user's request. */
+  onNoteEdited?: (noteId: string) => void
 }
 
 export interface ToolRunResult {
@@ -223,6 +226,7 @@ async function writeNoteRecord(ctx: ToolContext, dir: string, before: DiskNote, 
   const { files, sectionFiles } = noteFormat.serializeNoteFolder(after)
   for (const f of sectionFiles) beforeFiles.delete(f)
   await ctx.writeNote({ dir, files, deleteFiles: [...beforeFiles] })
+  ctx.onNoteEdited?.(after.id)
 }
 
 function ok(summary: string, content?: string): ToolRunResult {

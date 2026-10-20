@@ -366,6 +366,11 @@ const api = {
   aiLlmUsage: (): Promise<{ used: number; limit: number } | null> => ipcRenderer.invoke('ai:llm-usage'),
   aiChatsLoad: () => ipcRenderer.invoke('ai:chats-load'),
   aiChatsSave: (sessions: unknown) => ipcRenderer.invoke('ai:chats-save', sessions),
+
+  // Per-device activity log (userData/activity-log.json): ids of the notes the user
+  // edited each local day, for the activity chart in Settings → General
+  recordActivityEdit: (noteId: string) => ipcRenderer.send('activity:record-edit', noteId),
+  getActivityLog: (): Promise<{ days: Record<string, string[]> }> => ipcRenderer.invoke('activity:get-log'),
   aiChat: (requestId: string, messages: Array<{ role: string; content: string; attachmentIds?: string[] }>) =>
     ipcRenderer.invoke('ai:chat', { requestId, messages }),
   aiChatPickFiles: () => ipcRenderer.invoke('ai:chat-pick-files'),
