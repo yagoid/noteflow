@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Lock, Minus, Square, X } from 'lucide-react'
-import { useNotesStore } from '../stores/notesStore'
+import { closeWindowAfterSaving, useNotesStore } from '../stores/notesStore'
 import { useGroupsStore } from '../stores/groupsStore'
 import { useTemplatesStore } from '../stores/templatesStore'
 import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
@@ -162,7 +162,7 @@ export function SectionWindowApp() {
             <Square size={10} />
           </button>
           <button
-            onClick={() => window.noteflow.close()}
+            onClick={() => void closeWindowAfterSaving()}
             className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-red-500 hover:text-white transition-colors"
             title={t.common.close}
           >

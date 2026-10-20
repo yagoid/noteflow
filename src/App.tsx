@@ -21,6 +21,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { HoverPreviewProvider } from './components/SectionPreview/HoverPreviewProvider'
 import { modKey } from './lib/platform'
 import { ownsKeys } from './lib/keyScope'
+import { flushPendingEdits } from './lib/pendingEdits'
 import { useT } from './i18n/useT'
 import { tf } from './i18n/format'
 
@@ -44,6 +45,16 @@ function detectWindowRoute(): WindowRoute {
 
 export function App() {
   const [route] = useState(detectWindowRoute)
+  // Closing or reloading any window (OS close, app quit, a section/sticky window's own
+  // close goes through closeWindowAfterSaving first): run the editors' pending debounced
+  // saves now. Their writes reach main as IPC sent right after this handler returns,
+  // unless queued behind a write of the same note still in flight, or the note is
+  // encrypted (the write awaits encryptSections first and may never leave): best effort.
+  useEffect(() => {
+    const flush = () => flushPendingEdits()
+    window.addEventListener('beforeunload', flush)
+    return () => window.removeEventListener('beforeunload', flush)
+  }, [])
   if (route === 'section') {
     return (
       <ErrorBoundary>

@@ -17,6 +17,7 @@ import { collectAlarms } from '../lib/alarmUtils'
 import { getNoteSearchIndex } from '../lib/searchUtils'
 import { duplicateSectionInList, patchSectionInList } from '../lib/sectionUtils'
 import { createKeyedQueue } from '../lib/keyedQueue'
+import { flushPendingEdits, hasPendingEdits } from '../lib/pendingEdits'
 import { hoursFromNow, TEMP_NOTE_DEFAULT_HOURS } from '../lib/dateUtils'
 import { isUnsafeEncryptedSectionsWrite, redecryptWithSession } from '../lib/encryptedSession'
 import {
@@ -56,6 +57,28 @@ export function saveUiState(patch: { activeNoteId?: string; activeSectionId?: st
 
 // Every write of a note goes through this queue (keyed by note id) — see keyedQueue.ts.
 const noteWriteQueue = createKeyedQueue()
+
+/**
+ * Runs every pending debounced editor save (lib/pendingEdits) and waits until all
+ * queued note writes have reached main. For windows about to close.
+ */
+export async function settleNoteWrites(): Promise<void> {
+  flushPendingEdits()
+  await noteWriteQueue.idle()
+}
+
+/**
+ * Close button of a secondary (section / sticky) window: main destroys the window on
+ * `window:close`, so the last keystrokes still waiting on an editor debounce are saved
+ * first. Bounded wait, so a stuck write can't leave the window impossible to close.
+ */
+export async function closeWindowAfterSaving(): Promise<void> {
+  await Promise.race([
+    settleNoteWrites().catch(() => undefined),
+    new Promise((resolve) => setTimeout(resolve, 2000)),
+  ])
+  window.noteflow.close()
+}
 
 const newPaneId = () => nanoid(8)
 
@@ -284,8 +307,15 @@ function dropSessionPasswords(set: StoreSet, ids: string[]): void {
   }))
 }
 
-/** Leaving `noteId`: delete it if it's still a blank default note (main window only). */
+/**
+ * Leaving `noteId`: delete it if it's still a blank default note (main window only).
+ * Its editors' pending debounced saves are flushed first — they enqueue their writes,
+ * and pruneEmptyNote, queued behind them, re-checks the note once they've landed. Without
+ * this, a new note being typed into while the user clicked another pane looked empty to
+ * the store and was deleted; the late save then found no note and the text was lost.
+ */
 function maybePruneOnLeave(get: StoreGet, noteId: string): void {
+  flushPendingEdits(noteId)
   if (windowRole === 'section') return
   const note = get().notes.find((n) => n.id === noteId)
   if (note && isPrunable(note)) void get().pruneEmptyNote(noteId)
@@ -807,12 +837,18 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       : { activeSectionByNote: { ...s.activeSectionByNote, [noteId]: sectionId } }
   ),
 
-  pruneEmptyNote: async (id) => {
+  // Queued like every write of the note: it runs after the writes already queued (e.g.
+  // the saves maybePruneOnLeave just flushed) and judges the note as they left it.
+  pruneEmptyNote: (id) => noteWriteQueue.run(id, async () => {
     if (windowRole === 'section') return  // the main window owns pruning
     const note = get().notes.find((n) => n.id === id)
     if (!note) return
     if (note.encryption) return  // never auto-delete encrypted notes
     if (!isPrunable(note)) return
+    // Typed into again since the prune was queued: a save is on its way.
+    if (hasPendingEdits(id)) return
+    // Reopened while the prune waited in the queue: the user is back on it.
+    if (get().activeNoteId === id) return
     try { await window.noteflow.deleteNote(note.filePath) } catch { /* ignore */ }
     set((s) => {
       const remaining = s.notes.filter((n) => n.id !== id)
@@ -822,7 +858,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         ...layoutState(removeNotesFromLayout(layoutOf(s), new Set([id]), fallback, newPaneId())),
       }
     })
-  },
+  }),
 
   encryptNote: (id, password, options) => noteWriteQueue.run(id, async () => {
     const note = get().notes.find((n) => n.id === id)
