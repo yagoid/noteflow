@@ -29,8 +29,26 @@ export interface SubscriptionEventRow {
 }
 
 export type MapResult =
-  | { kind: 'apply'; row: SubscriptionEventRow }
+  /** warning: something the caller should log (e.g. a malformed custom_data.user_id). */
+  | { kind: 'apply'; row: SubscriptionEventRow; warning?: string }
+  /**
+   * Full refund of a subscription payment: expire the subscription for good
+   * (RPC expire_subscription_ref, migration 0010). providerRef = the LS
+   * subscription id the refunded invoice belongs to.
+   */
+  | { kind: 'expire'; providerRef: string }
   | { kind: 'ignore'; reason: string }
+
+export interface MapOptions {
+  /**
+   * Process Lemon Squeezy TEST-mode events (meta.test_mode === true). Off by
+   * default and NEVER on in production: test and live webhooks share the
+   * signing secret, so this flag (together with the live-only variant map) is
+   * what keeps a checkout paid with LS's test card from granting a real
+   * entitlement. Env LEMONSQUEEZY_ALLOW_TEST_MODE=true, for a test project.
+   */
+  allowTestMode?: boolean
+}
 
 const VALID_PRODUCTS: ReadonlySet<string> = new Set(['ai', 'cloud', 'bundle'])
 
@@ -119,21 +137,74 @@ function asNonEmptyString(value: unknown): string | null {
   return null
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Canonical 8-4-4-4-12 hex UUID (any case) — what Supabase auth.users ids look like. */
+export function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_RE.test(value)
+}
+
+/**
+ * Maps a refunded subscription invoice (event subscription_payment_refunded,
+ * data.type 'subscription-invoices'). Only a FULL refund (invoice status
+ * 'refunded') expires the subscription: LS does not cancel the subscription
+ * itself on refund, so without this the refunded buyer would keep the
+ * entitlement. A partial refund (status 'partial_refund') is a goodwill gesture
+ * on an otherwise paid period → ignored with a reason the caller logs; the
+ * operator decides by hand.
+ */
+function mapRefund(data: Record<string, unknown>): MapResult {
+  if (data.type !== 'subscription-invoices') {
+    return { kind: 'ignore', reason: `refund event with unexpected data.type: ${String(data.type)}` }
+  }
+  const attributes = data.attributes
+  if (!isRecord(attributes)) {
+    return { kind: 'ignore', reason: 'malformed refund payload: missing data.attributes' }
+  }
+  const providerRef = asNonEmptyString(attributes.subscription_id)
+  if (!providerRef) {
+    return { kind: 'ignore', reason: 'malformed refund payload: missing subscription_id' }
+  }
+  const status = typeof attributes.status === 'string' ? attributes.status : ''
+  if (status === 'partial_refund') {
+    return { kind: 'ignore', reason: `partial refund of subscription ${providerRef} (not expired; operator decides)` }
+  }
+  if (status !== 'refunded') {
+    return { kind: 'ignore', reason: `refund event with invoice status ${status || '(missing)'} for subscription ${providerRef}` }
+  }
+  return { kind: 'expire', providerRef }
+}
+
 /**
  * Maps a (signature-verified) Lemon Squeezy webhook payload to the row we feed
- * apply_subscription_event, or to an ignore with a human-readable reason.
- * Fully defensive: malformed/unexpected shapes NEVER throw — they map to
- * ignore, the endpoint answers 200 and LS does not enter a retry loop.
+ * apply_subscription_event, to a refund expiration, or to an ignore with a
+ * human-readable reason. Fully defensive: malformed/unexpected shapes NEVER
+ * throw — they map to ignore, the endpoint answers 200 and LS does not enter a
+ * retry loop.
  */
-export function mapLemonEvent(payload: unknown, variantMap: Map<string, Product>): MapResult {
+export function mapLemonEvent(
+  payload: unknown,
+  variantMap: Map<string, Product>,
+  opts: MapOptions = {}
+): MapResult {
   if (!isRecord(payload)) return { kind: 'ignore', reason: 'malformed payload: not an object' }
+
+  const meta = isRecord(payload.meta) ? payload.meta : undefined
+
+  // Test-mode events share the signing secret with live ones: drop them unless
+  // explicitly allowed (see MapOptions.allowTestMode).
+  if (meta?.test_mode === true && !opts.allowTestMode) {
+    return { kind: 'ignore', reason: 'test mode event' }
+  }
 
   const data = payload.data
   if (!isRecord(data)) return { kind: 'ignore', reason: 'malformed payload: missing data' }
 
-  // Only subscription objects mutate entitlements. subscription_payment_*
-  // events carry data.type 'subscription-invoices' and order_* events carry
-  // 'orders' — both are informational for us.
+  if (meta?.event_name === 'subscription_payment_refunded') return mapRefund(data)
+
+  // Only subscription objects mutate entitlements. The other
+  // subscription_payment_* events carry data.type 'subscription-invoices' and
+  // order_* events carry 'orders' — both are informational for us.
   if (data.type !== 'subscriptions') {
     return { kind: 'ignore', reason: `unsupported data.type: ${String(data.type)}` }
   }
@@ -167,13 +238,20 @@ export function mapLemonEvent(payload: unknown, variantMap: Map<string, Product>
   // The app opens the checkout with checkout[custom][user_id]=<uuid>, which LS
   // echoes back in meta.custom_data. Purchases made outside the app lack it →
   // userId null → apply_subscription_event only updates, never inserts.
-  const meta = payload.meta
-  const customData = isRecord(meta) ? meta.custom_data : undefined
+  // custom_data travels through the (public) checkout URL, so anyone can put
+  // anything there: a non-UUID value would make the RPC's uuid cast fail → 500
+  // → LS retry loop. It is treated as absent (update-only path) + a warning.
+  const customData = meta?.custom_data
   const rawUserId = isRecord(customData) ? customData.user_id : undefined
-  const userId = typeof rawUserId === 'string' && rawUserId.trim() !== '' ? rawUserId : null
+  const hasRawUserId = typeof rawUserId === 'string' ? rawUserId.trim() !== '' : rawUserId !== undefined && rawUserId !== null
+  const userId = isUuid(rawUserId) ? rawUserId : null
 
-  return {
+  const result: Extract<MapResult, { kind: 'apply' }> = {
     kind: 'apply',
     row: { userId, product, status, renewsAt, providerRef, eventAt },
   }
+  if (hasRawUserId && userId === null) {
+    result.warning = `custom_data.user_id is not a UUID (${String(rawUserId).slice(0, 64)}); treated as absent`
+  }
+  return result
 }
