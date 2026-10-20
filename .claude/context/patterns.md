@@ -887,9 +887,9 @@ si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
     reconciliación — sha cache en GitHub, cursor en Cloud — o tienen un borrado pendiente), y con LWW
     por carpeta la copia local queda al menos tan nueva como la remota: un `expiresAt` que siga en
     disco es uno con el que el remoto coincide. Cubre arranque, resume y equipos encendidos sin
-    estado extra ni `powerMonitor`. **Excepción conocida (Cloud):** una fila que no descifra queda
-    por debajo del cursor para siempre, así que pulls posteriores salen completos sin haberla
-    aplicado — ver `sync.md` § Cloud Sync.
+    estado extra ni `powerMonitor`. **Excepción conocida (Cloud):** una fila que no descifra, o
+    cuya carpeta falla al aplicarse, queda por debajo del watermark `pullSeq` para siempre, así que
+    pulls posteriores salen completos sin haberla aplicado — ver `sync.md` § Cloud Sync.
   - **Contrapartidas (intencionadas):** con sync conectado una temporal se borra **hasta un intervalo
     de pull tarde** (~5 min). Si los pulls **fallan o salen incompletos** (offline, claves de Cloud
     bloqueadas en e2ee, Cloud habilitado sin sesión, un error persistente en cualquier carpeta, un

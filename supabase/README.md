@@ -229,8 +229,15 @@ La migración 0005 añade el **modo de cifrado dual** (modelo Obsidian Sync): mo
 y modo **e2ee** (opt-in — passphrase + recovery code; el servidor solo ve ciphertext). El modo
 managed lo sirve la Edge Function `cloud-keys`. Pasos del operador:
 
-1. **Correr las migraciones 0004 y 0005** (`supabase/migrations/0004_cloud.sql` y
-   `0005_cloud_managed.sql`), igual que las anteriores (SQL Editor o `supabase db push`).
+1. **Correr las migraciones 0004, 0005, 0006 y 0008** (`supabase/migrations/0004_cloud.sql`,
+   `0005_cloud_managed.sql`, `0006_cloud_realtime.sql` y `0008_cloud_seq.sql`), igual que las
+   anteriores (SQL Editor o `supabase db push`). La 0006 añade `files` a la publicación de
+   Realtime (el cliente recibe los cambios por WebSocket). La 0008 añade `files.seq`, un número de
+   cambio que asigna el servidor (trigger) y que los clientes usan como cursor del pull
+   incremental en lugar de `updated_at`; es aditiva (los clientes anteriores siguen funcionando).
+   ⚠️ **Orden de despliegue: aplicar la 0008 ANTES de publicar la versión de la app/CLI que la
+   usa** — un cliente nuevo contra un servidor sin la columna recibe 400 en el pull (error
+   visible, sin pérdida de datos).
 
 2. **Configurar la clave del operador** para el modo managed — 32 bytes aleatorios en base64.
    Es el ÚNICO secret de esta función; quien la tenga puede descifrar las DEK de los usuarios

@@ -8,13 +8,19 @@ import {
   parseUpdatedTimestamp,
   resolveRowUpdatedAt,
   shouldApplyRemoteDir,
+  shouldApplyRemoteSection,
   shouldApplyRemoteDeletion,
   groupEntriesByDir,
-  nextPullCursor,
+  planPullQuery,
+  parseRowSeq,
+  nextPullSeq,
+  CLOUD_PULL_COLUMNS,
+  listAnchorSectionFiles,
   buildFileUpsertRow,
   decryptFileRow,
 } from '../../electron/cloudSyncLogic'
 import { generateDek, generateNoteKey, derivePathKeyHmac } from '../../electron/cloudCrypto'
+import { serializeNoteFolder, type DiskNote } from '../../electron/noteFormat'
 
 const NOW = '2026-07-10T12:00:00.000Z'
 
@@ -131,26 +137,159 @@ describe('groupEntriesByDir', () => {
   })
 })
 
-describe('nextPullCursor', () => {
-  it('advances to the max updated_at seen', () => {
-    const cursor = nextPullCursor('2026-07-01T00:00:00.000Z', [
-      { updatedAt: '2026-07-03T00:00:00.000Z' },
-      { updatedAt: '2026-07-02T00:00:00.000Z' },
-    ])
-    expect(cursor).toBe('2026-07-03T00:00:00.000Z')
+describe('shouldApplyRemoteSection (loose section rows)', () => {
+  it('applies a section of the SAME version (it landed after its anchor)', () => {
+    expect(shouldApplyRemoteSection(1000, 1000)).toBe(true)
   })
 
-  it('keeps the current cursor when entries are older or unparseable', () => {
-    expect(nextPullCursor('2026-07-05T00:00:00.000Z', [{ updatedAt: '2026-07-01T00:00:00.000Z' }]))
-      .toBe('2026-07-05T00:00:00.000Z')
-    expect(nextPullCursor('2026-07-05T00:00:00.000Z', [{ updatedAt: 'garbage' }]))
-      .toBe('2026-07-05T00:00:00.000Z')
-    expect(nextPullCursor(undefined, [])).toBeUndefined()
+  it('applies a section of a newer version whose anchor is not in this batch', () => {
+    expect(shouldApplyRemoteSection(2000, 1000)).toBe(true)
   })
 
-  it('starts from scratch without a cursor', () => {
-    expect(nextPullCursor(undefined, [{ updatedAt: '2026-07-01T00:00:00.000Z' }]))
-      .toBe('2026-07-01T00:00:00.000Z')
+  it('respects a local folder with its own newer edits', () => {
+    expect(shouldApplyRemoteSection(1000, 2000)).toBe(false)
+  })
+
+  it('unknown local timestamp → apply; unknown remote timestamp → never', () => {
+    expect(shouldApplyRemoteSection(1000, null)).toBe(true)
+    expect(shouldApplyRemoteSection(null, 1000)).toBe(false)
+    expect(shouldApplyRemoteSection(null, null)).toBe(false)
+  })
+})
+
+describe('planPullQuery (pull mode)', () => {
+  it('incremental from pullSeq, tombstones included', () => {
+    expect(planPullQuery({ pullSeq: 42, lastSync: NOW })).toEqual({ afterSeq: 42, includeDeleted: true })
+    expect(planPullQuery({ pullSeq: 0 })).toEqual({ afterSeq: 0, includeDeleted: true })
+  })
+
+  it('pullSeq wins over a leftover legacy cursor', () => {
+    expect(planPullQuery({ pullSeq: 7, pullCursor: NOW })).toEqual({ afterSeq: 7, includeDeleted: true })
+  })
+
+  it('device from the updated_at-cursor version → one full reconcile WITH tombstones', () => {
+    expect(planPullQuery({ pullCursor: NOW, lastSync: NOW })).toEqual({ afterSeq: 0, includeDeleted: true })
+    expect(planPullQuery({ pullCursor: NOW })).toEqual({ afterSeq: 0, includeDeleted: true })
+    expect(planPullQuery({ lastSync: NOW })).toEqual({ afterSeq: 0, includeDeleted: true })
+  })
+
+  it('first sync → full, live rows only', () => {
+    expect(planPullQuery({})).toEqual({ afterSeq: 0, includeDeleted: false })
+  })
+
+  it('ignores a corrupt pullSeq (falls back to the legacy/first-sync modes)', () => {
+    expect(planPullQuery({ pullSeq: -1, lastSync: NOW })).toEqual({ afterSeq: 0, includeDeleted: true })
+    expect(planPullQuery({ pullSeq: 1.5 })).toEqual({ afterSeq: 0, includeDeleted: false })
+    expect(planPullQuery({ pullSeq: '9' as unknown as number })).toEqual({ afterSeq: 0, includeDeleted: false })
+  })
+})
+
+describe('parseRowSeq', () => {
+  it('accepts safe non-negative integers, also as bigint strings', () => {
+    expect(parseRowSeq(12)).toBe(12)
+    expect(parseRowSeq('12')).toBe(12)
+    expect(parseRowSeq(0)).toBe(0)
+  })
+
+  it('rejects anything else', () => {
+    for (const v of [undefined, null, '', ' ', 'x', -1, 1.5, Number.NaN, 2 ** 60, {}]) {
+      expect(parseRowSeq(v), String(v)).toBeNull()
+    }
+  })
+})
+
+describe('nextPullSeq', () => {
+  it('advances to the max seq of ALL fetched rows, whatever their order', () => {
+    expect(nextPullSeq(10, [{ seq: 14 }, { seq: 12 }, { seq: 13 }])).toBe(14)
+  })
+
+  it('never goes backwards', () => {
+    expect(nextPullSeq(20, [{ seq: 3 }])).toBe(20)
+    expect(nextPullSeq(20, [])).toBe(20)
+  })
+
+  it('starts at 0 without a watermark (a pull that saw nothing still enters seq mode)', () => {
+    expect(nextPullSeq(undefined, [])).toBe(0)
+    expect(nextPullSeq(undefined, [{ seq: 5 }])).toBe(5)
+  })
+
+  it('skips rows with a missing/garbage seq and accepts bigint strings', () => {
+    expect(nextPullSeq(1, [{ seq: 'garbage' }, {}, { seq: '9' }])).toBe(9)
+  })
+
+  // The regression of the updated_at cursor: a row uploaded LATE carries an
+  // old edit time but a fresh seq, so it is not left behind the watermark.
+  it('is independent of updated_at (late uploads are not skipped)', () => {
+    const rows = [
+      { seq: 101, updated_at: '2026-07-10T00:00:00.000Z' },
+      { seq: 102, updated_at: '2026-01-01T00:00:00.000Z' }, // offline edit drained late
+    ]
+    expect(nextPullSeq(100, rows)).toBe(102)
+  })
+})
+
+describe('listAnchorSectionFiles (sections an applied anchor must bring along)', () => {
+  const note: DiskNote = {
+    id: 'abc123',
+    title: 'My: "note"',
+    tags: ['a'],
+    created: NOW,
+    updated: NOW,
+    sections: [
+      { id: 'sec001', name: 'One', content: 'first' },
+      { id: 'sec002', name: 'Two: tricky', content: 'second', isRawMode: true, created: NOW },
+    ],
+  }
+
+  it('lists sections[].file of a real serialized note.md, in order', () => {
+    const { files } = serializeNoteFolder(note)
+    expect(listAnchorSectionFiles(files['note.md'])).toEqual(['sec001.md', 'sec002.md'])
+  })
+
+  it('encrypted notes keep everything in note.md → no section files', () => {
+    const { files } = serializeNoteFolder({ ...note, encryption: { v: 1, iv: 'x', data: 'y' } })
+    expect(listAnchorSectionFiles(files['note.md'])).toEqual([])
+  })
+
+  it('falls back to <id>.md, dedupes and drops unsafe names', () => {
+    const md = [
+      '---',
+      'id: x',
+      'sections:',
+      '  - id: s1',
+      '    name: A',
+      '  - id: s2',
+      '    file: s2.md',
+      '  - id: s3',
+      '    file: s2.md',
+      '  - id: s4',
+      '    file: ../evil.md',
+      '  - id: s5',
+      '    file: note.md',
+      '  - id: s6',
+      '    file: sub/x.md',
+      '  - id: s7',
+      '    file: notes.txt',
+      '  - name: no id or file',
+      '---',
+      '',
+    ].join('\n')
+    expect(listAnchorSectionFiles(md)).toEqual(['s1.md', 's2.md'])
+  })
+
+  it('no frontmatter / malformed YAML / no sections → []', () => {
+    expect(listAnchorSectionFiles('just text')).toEqual([])
+    expect(listAnchorSectionFiles('---\nsections: [unclosed\n---\n')).toEqual([])
+    expect(listAnchorSectionFiles('---\nid: x\n---\n')).toEqual([])
+  })
+})
+
+describe('CLOUD_PULL_COLUMNS', () => {
+  it('selects seq (the cursor) besides every column decryptFileRow needs', () => {
+    const cols = CLOUD_PULL_COLUMNS.split(',')
+    for (const c of ['path_key', 'path_ct', 'content_ct', 'key_ct', 'updated_at', 'deleted', 'seq']) {
+      expect(cols).toContain(c)
+    }
   })
 })
 

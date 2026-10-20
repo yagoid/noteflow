@@ -378,8 +378,8 @@ export const cliGroups: CliGroup[] = [
         id: 'cloud-status',
         usage: 'noteflow cloud status [--json]',
         desc: {
-          en: 'Account email, keys mode (standard/private), sync state and cursor. JSON shape: <code>{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullCursor } | null, githubConfigured }</code>.',
-          es: 'Email de la cuenta, modo de claves (estándar/privado), estado del sync y cursor. JSON: <code>{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullCursor } | null, githubConfigured }</code>.',
+          en: 'Account email, keys mode (standard/private), sync state and cursor. JSON shape: <code>{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullSeq, pullCursor } | null, githubConfigured }</code>.',
+          es: 'Email de la cuenta, modo de claves (estándar/privado), estado del sync y cursor. JSON: <code>{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullSeq, pullCursor } | null, githubConfigured }</code>.',
         },
       },
     ]),

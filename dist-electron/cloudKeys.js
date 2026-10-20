@@ -104,7 +104,7 @@ function writeSettings(data) {
     fs_1.default.writeFileSync(getSettingsPath(), JSON.stringify(data), 'utf-8');
 }
 // Merges a patch into the cloudSync section without clobbering fields owned by
-// cloudSync.ts (enabled/lastSync/pullCursor) — both modules read-modify-write
+// cloudSync.ts (enabled/lastSync/pullSeq) — both modules read-modify-write
 // the same settings.json section.
 function patchCloudSection(patch) {
     const settings = readSettings();

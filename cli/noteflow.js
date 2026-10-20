@@ -186,9 +186,13 @@ function clearCliAccount() {
   writeSettings(settings)
 }
 
-// { enabled, pullCursor, lastSync, userId } — the CLI's own cursor/lastSync,
+// { enabled, pullSeq, lastSync, userId } — the CLI's own cursor/lastSync,
 // never the desktop app's settings.cloudSync (each client reconciles
-// independently). `userId` = the account that cursor/lastSync belong to: it
+// independently). `pullSeq` = watermark of the server-assigned `seq` already
+// reconciled (migration 0008); a legacy `pullCursor` (updated_at cursor of
+// earlier versions) no longer filters anything — without `pullSeq` it triggers
+// one full reconcile, and the first seq pull removes it. `userId` = the
+// account that cursor/lastSync belong to: it
 // outlives `cloud logout` (which drops cliAccount) so a re-login can tell
 // "same account → resume incrementally" from "another account → start over".
 function getCliCloud() {
@@ -197,7 +201,9 @@ function getCliCloud() {
 
 function patchCliCloud(patch) {
   const settings = readSettings()
-  settings.cliCloud = { ...(settings.cliCloud || { enabled: false }), ...patch }
+  const next = { ...(settings.cliCloud || { enabled: false }), ...patch }
+  for (const key of Object.keys(next)) if (next[key] === undefined) delete next[key]
+  settings.cliCloud = next
   writeSettings(settings)
 }
 
@@ -205,12 +211,12 @@ function patchCliCloud(patch) {
  * Pure: the cliCloud to keep for the signed-in `userId`. The cursor's owner is
  * `c.userId`, or else `presumedOwner` (at login: the account that was still
  * signed in before it, if any).
- *  - Another account: pullCursor/lastSync are dropped and the owner rebound —
- *    a foreign cursor would make the incremental pull skip every row of this
- *    account older than it (`updated_at > cursor`).
+ *  - Another account: pullSeq/pullCursor/lastSync are dropped and the owner
+ *    rebound — a foreign watermark would make the incremental pull skip every
+ *    row of this account below it (`seq > pullSeq`).
  *  - Unknown owner (state written before the owner was recorded, by a session
  *    that is gone): the current account is ADOPTED, cursor kept. Resetting is
- *    not free: without a cursor the pull skips tombstones (`deleted=eq.false`),
+ *    not free: with no state at all the pull skips tombstones (`deleted=eq.false`),
  *    so notes deleted elsewhere stay on disk and the next push resurrects them
  *    remotely. Adopting only goes wrong for someone who switched accounts
  *    before this rule existed — and that costs hidden-but-intact older notes,
@@ -222,6 +228,7 @@ function cliCloudForUser(c, userId, presumedOwner) {
   const owner = c.userId || presumedOwner
   if (!owner || owner === userId) return c.userId === userId ? c : { ...c, userId }
   const next = { ...c, userId }
+  delete next.pullSeq
   delete next.pullCursor
   delete next.lastSync
   return next
@@ -242,7 +249,11 @@ function bindCliCloudToAccount(presumedOwner) {
   if (next === c) return false
   settings.cliCloud = next
   writeSettings(settings)
-  return !!((c.pullCursor && !next.pullCursor) || (c.lastSync && !next.lastSync))
+  return !!(
+    (c.pullSeq !== undefined && next.pullSeq === undefined) ||
+    (c.pullCursor && !next.pullCursor) ||
+    (c.lastSync && !next.lastSync)
+  )
 }
 
 /** Cloud takes priority over GitHub whenever the CLI is signed in and Cloud is enabled. */
@@ -933,6 +944,26 @@ function isSafeCloudRelPath(relPath) {
   return parts.length === 2 && parts[1].endsWith('.md')
 }
 
+/**
+ * Section files an anchor (note.md) lists: `sections[].file` (fallback
+ * '<id>.md'), deduped; [] for encrypted notes. Only plain one-level '.md'
+ * names, never note.md. Mirror of listAnchorSectionFiles in cloudSyncLogic.ts.
+ */
+function listAnchorSectionFiles(anchorContent) {
+  const { frontmatter } = splitFrontmatter(anchorContent)
+  if (!frontmatter) return []
+  const note = parseNoteYaml(frontmatter)
+  if (note.encryption) return []
+  const files = []
+  for (const sec of note.sections) {
+    const name = sec.file != null ? String(sec.file) : sec.id != null ? `${sec.id}.md` : null
+    if (name === null || !name.endsWith('.md') || name === NOTE_MD || name.includes('/') ||
+        name.includes('\\') || name.startsWith('.') || files.includes(name)) continue
+    files.push(name)
+  }
+  return files
+}
+
 function parseUpdatedTimestamp(value) {
   if (!value) return null
   const parsed = Date.parse(value)
@@ -964,19 +995,52 @@ function shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs) {
   return localUpdatedMs <= lastSyncMs
 }
 
-/** Advances the incremental-pull cursor to the max remote updated_at reconciled. */
-function nextPullCursor(current, entries) {
-  let maxMs = current ? Date.parse(current) : null
-  let maxIso = current
-  for (const e of entries) {
-    const ms = Date.parse(e.updatedAt)
-    if (!Number.isFinite(ms)) continue
-    if (maxMs === null || ms > maxMs) {
-      maxMs = ms
-      maxIso = new Date(ms).toISOString()
-    }
+/**
+ * One remote SECTION row applied on its own (anchor absent from the batch or
+ * not newer, local folder exists): sections inherit the `updated:` of their
+ * anchor's version, so `>=` = "same version, the section landed later"; a
+ * local folder with its own edits has a strictly newer `updated` and wins.
+ */
+function shouldApplyRemoteSection(sectionUpdatedMs, localUpdatedMs) {
+  if (sectionUpdatedMs === null) return false
+  if (localUpdatedMs === null) return true
+  return sectionUpdatedMs >= localUpdatedMs
+}
+
+// Columns every pull/anchor read selects (keep `seq`: it feeds the cursor).
+const CLOUD_PULL_COLUMNS = 'path_key,path_ct,content_ct,key_ct,updated_at,deleted,seq'
+
+/**
+ * Pull mode: `pullSeq` known → incremental (tombstones included); legacy
+ * `pullCursor` or `lastSync` without `pullSeq` → ONE full reconcile from seq 0
+ * with tombstones (recovers what the old updated_at cursor skipped); nothing →
+ * first sync, live rows only (`deleted=eq.false`).
+ */
+function planPullQuery(c) {
+  if (typeof c.pullSeq === 'number' && Number.isSafeInteger(c.pullSeq) && c.pullSeq >= 0) {
+    return { afterSeq: c.pullSeq, includeDeleted: true }
   }
-  return maxIso
+  if (c.pullCursor || c.lastSync) return { afterSeq: 0, includeDeleted: true }
+  return { afterSeq: 0, includeDeleted: false }
+}
+
+/** A row's seq as a safe non-negative integer, or null (bigint may arrive as a string). */
+function parseRowSeq(value) {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value
+  return typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 ? n : null
+}
+
+/**
+ * New watermark = max `seq` of ALL fetched rows (undecryptable/unsafe ones
+ * too: they never become applicable). Starts at 0 without a watermark.
+ */
+function nextPullSeq(current, rows) {
+  let max = typeof current === 'number' && Number.isSafeInteger(current) && current >= 0 ? current : 0
+  for (const row of rows) {
+    const seq = parseRowSeq(row.seq)
+    if (seq !== null && seq > max) max = seq
+  }
+  return max
 }
 
 async function buildFileUpsertRow(dek, noteKey, relPath, content, updatedAt, deleted = false) {
@@ -1307,32 +1371,39 @@ async function cloudTombstoneRelPaths(relPaths) {
 
 // Push gate: never push before the first reconcile — a fresh machine pushing
 // old disk state over a newer remote corpus would clobber it (mirror of the
-// desktop app's initial-pull gate). Cursor or lastSync present = reconciled.
+// desktop app's initial-pull gate). Any cursor (pullSeq or a legacy
+// pullCursor) or lastSync present = reconciled.
 async function cloudEnsureReconciled() {
   bindCliCloudToAccount() // another account's cursor ≠ reconciled
   const c = getCliCloud()
-  if (c.pullCursor || c.lastSync) return
+  if (c.pullSeq !== undefined || c.pullCursor || c.lastSync) return
   out('  First Cloud reconcile…')
   await cloudPullNow()
 }
 
-async function cloudFetchChangedRows(cursor) {
+/**
+ * Rows changed since the watermark, in seq order — KEYSET pagination
+ * (`seq=gt.<last>&order=seq.asc&limit=N` until a short page): unlike offsets,
+ * stable while rows are written mid-pull. Mode from planPullQuery.
+ */
+async function cloudFetchChangedRows(c) {
   const PAGE = 1000 // PostgREST caps responses (Supabase default max-rows)
+  const plan = planPullQuery(c)
   const rows = []
-  const base =
-    '/rest/v1/files?select=path_key,path_ct,content_ct,key_ct,updated_at,deleted&order=updated_at.asc' +
-    (cursor
-      ? `&updated_at=gt.${encodeURIComponent(cursor)}`
-      : '&deleted=eq.false') // first reconcile: nothing local to delete safely
-  for (let offset = 0; ; offset += PAGE) {
-    const res = await cloudRest(base, {
-      headers: { Range: `${offset}-${offset + PAGE - 1}`, 'Range-Unit': 'items' },
-    })
-    if (res.status === 416) break // requested range past the end — done paging
+  let after = plan.afterSeq
+  for (;;) {
+    const res = await cloudRest(
+      `/rest/v1/files?select=${CLOUD_PULL_COLUMNS}&order=seq.asc&seq=gt.${after}&limit=${PAGE}` +
+        (plan.includeDeleted ? '' : '&deleted=eq.false') // first reconcile: nothing local to delete safely
+    )
     if (res.status >= 400) throw new Error(`Cloud pull failed (HTTP ${res.status})`)
     const page = Array.isArray(res.json) ? res.json : []
     rows.push(...page)
     if (page.length < PAGE) break
+    const last = parseRowSeq(page[page.length - 1].seq)
+    // A full page must move the keyset forward — anything else would loop forever.
+    if (last === null || last <= after) throw new Error('Cloud pull failed (invalid seq paging)')
+    after = last
   }
   return rows
 }
@@ -1341,19 +1412,66 @@ async function cloudFetchChangedRows(cursor) {
 async function cloudFetchRemoteAnchor(dek, dir) {
   const pathKey = await derivePathKeyHmac(dek, `${dir}/${NOTE_MD}`)
   const res = await cloudRest(
-    `/rest/v1/files?select=path_key,path_ct,content_ct,key_ct,updated_at,deleted&path_key=eq.${encodeURIComponent(pathKey)}`
+    `/rest/v1/files?select=${CLOUD_PULL_COLUMNS}&path_key=eq.${encodeURIComponent(pathKey)}`
   )
   if (res.status >= 400 || !Array.isArray(res.json) || !res.json.length) return null
   try { return await decryptFileRow(dek, res.json[0]) } catch { return null }
 }
 
-/** Incremental pull — same grouping/conflict/tombstone rules as the app's cloudSync.pullNotes. */
+/**
+ * Fetches + decrypts specific remote rows by relPath in ONE request
+ * (`path_key=in.(…)`) — the sections an applied anchor lists that did not
+ * travel in its batch. Absent rows (upload still pending) are simply missing;
+ * undecryptable / unexpected-path rows count as errors and are skipped. A
+ * failed REQUEST throws an error marked `abortPull`: cloudPullNow re-throws it
+ * so the whole pull fails WITHOUT persisting pullSeq/lastSync (idempotent —
+ * the next pull retries from the same watermark).
+ */
+async function cloudFetchRemoteRows(dek, relPaths) {
+  if (!relPaths.length) return { entries: [], errors: 0 }
+  const byKey = new Map()
+  for (const rel of relPaths) byKey.set(await derivePathKeyHmac(dek, rel), rel)
+  const filter = `path_key=in.(${[...byKey.keys()].map(k => `"${k}"`).join(',')})`
+  const abort = (msg) => Object.assign(new Error(`Cloud section fetch failed (${msg})`), { abortPull: true })
+  let res
+  try {
+    res = await cloudRest(`/rest/v1/files?select=${CLOUD_PULL_COLUMNS}&${filter}`)
+  } catch (e) {
+    throw abort(e.message)
+  }
+  if (res.status >= 400) throw abort(`HTTP ${res.status}`)
+  const entries = []
+  let errors = 0
+  for (const row of Array.isArray(res.json) ? res.json : []) {
+    try {
+      const entry = await decryptFileRow(dek, row)
+      if (entry.relPath !== byKey.get(row.path_key) || !isSafeCloudRelPath(entry.relPath)) { errors++; continue }
+      entries.push(entry)
+    } catch { errors++ }
+  }
+  return { entries, errors }
+}
+
+/** Writes (or, for a tombstone, removes) one remote section file; true if the disk changed. */
+function cloudApplySectionFile(entry) {
+  const localFile = path.join(NOTES_DIR, entry.relPath)
+  if (entry.deleted) {
+    try { fs.unlinkSync(localFile); return true } catch { return false } // already gone
+  }
+  try {
+    if (fs.readFileSync(localFile, 'utf-8') === entry.content) return false // own row coming back — no-op
+  } catch { /* missing locally — write it */ }
+  fs.writeFileSync(localFile, entry.content, 'utf-8')
+  return true
+}
+
+/** Incremental pull — same grouping/conflict/tombstone/loose-section rules as the app's cloudSync.pullNotes. */
 async function cloudPullNow() {
   bindCliCloudToAccount()
   const c = getCliCloud()
   const dek = await getCliDek()
   const lastSyncMs = c.lastSync ? Date.parse(c.lastSync) : null
-  const rows = await cloudFetchChangedRows(c.pullCursor)
+  const rows = await cloudFetchChangedRows(c)
 
   let errors = 0
   const entries = []
@@ -1381,46 +1499,75 @@ async function cloudPullNow() {
   let pulled = 0, deleted = 0
   for (const [dir, group] of dirs) {
     try {
-      // The anchor decides. If the window only carried section rows
-      // (interrupted push on the origin device), fetch it separately.
-      let anchor = group.find(e => isAnchorPath(e.relPath)) || null
-      if (!anchor) anchor = await cloudFetchRemoteAnchor(dek, dir)
-      if (!anchor) continue // never fully uploaded — skip
-
       const localDirPath = path.join(NOTES_DIR, dir)
       const localAnchorPath = path.join(localDirPath, NOTE_MD)
-      let localUpdatedMs = null
-      if (fs.existsSync(localAnchorPath)) {
-        localUpdatedMs = parseUpdatedTimestamp(extractUpdatedTimestamp(fs.readFileSync(localAnchorPath, 'utf-8')))
-      }
+      const localExists = fs.existsSync(localAnchorPath)
+      const localUpdatedMs = localExists
+        ? parseUpdatedTimestamp(extractUpdatedTimestamp(fs.readFileSync(localAnchorPath, 'utf-8')))
+        : null
 
-      if (anchor.deleted) {
+      // The anchor decides.
+      let anchor = group.find(e => isAnchorPath(e.relPath)) || null
+
+      if (anchor && anchor.deleted) {
         // Note deleted remotely — apply locally only under the safety rule.
-        if (fs.existsSync(localAnchorPath) && shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs)) {
+        if (localExists && shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs)) {
           fs.rmSync(localDirPath, { recursive: true, force: true })
           deleted++
         }
         continue
       }
 
-      if (fs.existsSync(localAnchorPath) && !shouldApplyRemoteDir(anchor.updatedAtMs, localUpdatedMs)) {
-        continue // local is newer or equal — cursor advances anyway
+      if (!anchor && !localExists) {
+        // Only section rows of a note not on this machine: fetch its anchor.
+        // Absent (never fully uploaded) or deleted → nothing to write.
+        anchor = await cloudFetchRemoteAnchor(dek, dir)
+        if (!anchor || anchor.deleted) continue
       }
 
-      fs.mkdirSync(localDirPath, { recursive: true })
-      fs.writeFileSync(localAnchorPath, anchor.content, 'utf-8')
-      for (const entry of group) {
-        if (isAnchorPath(entry.relPath)) continue
-        const localFile = path.join(NOTES_DIR, entry.relPath)
-        if (entry.deleted) {
-          try { fs.unlinkSync(localFile) } catch { /* already gone */ }
-        } else {
-          fs.writeFileSync(localFile, entry.content, 'utf-8')
+      if (anchor && (!localExists || shouldApplyRemoteDir(anchor.updatedAtMs, localUpdatedMs))) {
+        // Newer remote anchor (or a note new to this machine): wholesale.
+        // Listed sections NOT in this batch and NOT on disk were uploaded
+        // earlier (below the watermark) — fetch them BEFORE writing: an anchor
+        // without its section files gets them recreated empty by the next
+        // edit, and those blanks would be pushed over the real ones. Listed
+        // sections already on disk are up to date or get their own newer row
+        // (loose-section rule); a stale one in a conflict the local folder
+        // won (strictly newer) is the accepted LWW edge, as before.
+        const inGroup = new Set(group.map(e => e.relPath))
+        const missing = listAnchorSectionFiles(anchor.content)
+          .map(f => `${dir}/${f}`)
+          .filter(rel => !inGroup.has(rel) && !fs.existsSync(path.join(NOTES_DIR, rel)))
+        const fetched = await cloudFetchRemoteRows(dek, missing)
+        errors += fetched.errors
+
+        fs.mkdirSync(localDirPath, { recursive: true })
+        fs.writeFileSync(localAnchorPath, anchor.content, 'utf-8')
+        for (const entry of group) {
+          if (isAnchorPath(entry.relPath)) continue
+          cloudApplySectionFile(entry)
         }
+        // Not on the server yet (pending upload) → arrives later via the
+        // loose-section rule; listed-but-tombstoned → left alone.
+        for (const entry of fetched.entries) {
+          if (!entry.deleted) cloudApplySectionFile(entry)
+        }
+      } else {
+        // Anchor not applied (absent from this batch, or not newer) and the
+        // folder exists locally: sections apply ONE BY ONE — an anchor and its
+        // sections can land in different pulls (shouldApplyRemoteSection).
+        let changed = 0
+        for (const entry of group) {
+          if (isAnchorPath(entry.relPath)) continue
+          if (!shouldApplyRemoteSection(entry.updatedAtMs, localUpdatedMs)) continue
+          if (cloudApplySectionFile(entry)) changed++
+        }
+        if (changed === 0) continue // local is newer, or already identical
       }
       pulled++
       out(`  ${dir}/`)
     } catch (e) {
+      if (e.abortPull) throw e // abort the pull: watermark/lastSync stay put
       errors++
       err(`${dir}: ${e.message}`)
     }
@@ -1436,7 +1583,9 @@ async function cloudPullNow() {
     } catch { errors++ }
   }
 
-  patchCliCloud({ pullCursor: nextPullCursor(c.pullCursor, entries), lastSync: new Date().toISOString() })
+  // Max seq of EVERY fetched row (undecryptable/unsafe ones too — they never
+  // become applicable); the legacy updated_at cursor goes away.
+  patchCliCloud({ pullSeq: nextPullSeq(c.pullSeq, rows), pullCursor: undefined, lastSync: new Date().toISOString() })
   return { pulled, deleted, errors }
 }
 
@@ -1576,7 +1725,7 @@ async function cmdCloudLogout() {
     await supabaseFetch(`${SUPABASE_URL}/auth/v1/logout`, { method: 'POST', accessToken: token })
   } catch { /* best-effort revocation */ }
   clearCliAccount()
-  patchCliCloud({ enabled: false }) // keeps pullCursor/lastSync/userId — a same-account re-login resumes incrementally
+  patchCliCloud({ enabled: false }) // keeps pullSeq/lastSync/userId — a same-account re-login resumes incrementally
   out('  Signed out of NoteFlow Cloud')
 }
 
@@ -1598,7 +1747,11 @@ async function cmdCloudStatus(opts) {
       notesDir: NOTES_DIR,
       noteCount,
       cloud: account
-        ? { email: account.email, enabled: !!c.enabled, keysMode, lastSync: c.lastSync || null, pullCursor: c.pullCursor || null }
+        ? {
+            email: account.email, enabled: !!c.enabled, keysMode, lastSync: c.lastSync || null,
+            pullSeq: typeof c.pullSeq === 'number' ? c.pullSeq : null,
+            pullCursor: c.pullCursor || null, // legacy: only until the first seq pull
+          }
         : null,
       githubConfigured: !!(gh.enabled && gh.owner && gh.repo),
     })
@@ -1616,7 +1769,8 @@ async function cmdCloudStatus(opts) {
     out(`  Keys:      ${keysLabel}`)
     out(`  Sync:      ${c.enabled ? 'enabled' : 'disabled'}`)
     if (c.lastSync) out(`  Last sync: ${c.lastSync}`)
-    if (c.pullCursor) out(`  Cursor:    ${c.pullCursor}`)
+    if (typeof c.pullSeq === 'number') out(`  Cursor:    seq ${c.pullSeq}`)
+    else if (c.pullCursor) out(`  Cursor:    ${c.pullCursor} (legacy — next pull reconciles fully)`)
   }
   out(`  Notes:     ${noteCount} in ${NOTES_DIR}`)
   if (gh.enabled && gh.owner && gh.repo) {
@@ -3392,10 +3546,10 @@ if (require.main === module) {
     toB64Url, fromB64Url, deriveKek, normalizeRecoveryCode, looksLikeRecoveryCode,
     derivePathKeyHmac, wrapKey, unwrapKey, encryptContent, decryptContent,
     generateDek, generateNoteKey,
-    noteDirOf, isAnchorPath, isSafeCloudRelPath, parseUpdatedTimestamp,
-    resolveRowUpdatedAt, shouldApplyRemoteDir, shouldApplyRemoteDeletion,
-    nextPullCursor, buildFileUpsertRow, decryptFileRow,
-    CLOUD_METADATA_FILES,
+    noteDirOf, isAnchorPath, isSafeCloudRelPath, listAnchorSectionFiles, parseUpdatedTimestamp,
+    resolveRowUpdatedAt, shouldApplyRemoteDir, shouldApplyRemoteSection, shouldApplyRemoteDeletion,
+    planPullQuery, parseRowSeq, nextPullSeq, buildFileUpsertRow, decryptFileRow,
+    CLOUD_METADATA_FILES, CLOUD_PULL_COLUMNS,
     nextGithubLastSync, localOnlyNoteDirs, localOnlyHint, cliCloudForUser,
   }
 }

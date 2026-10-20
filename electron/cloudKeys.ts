@@ -105,7 +105,7 @@ function writeSettings(data: Record<string, unknown>): void {
 }
 
 // Merges a patch into the cloudSync section without clobbering fields owned by
-// cloudSync.ts (enabled/lastSync/pullCursor) — both modules read-modify-write
+// cloudSync.ts (enabled/lastSync/pullSeq) — both modules read-modify-write
 // the same settings.json section.
 function patchCloudSection(patch: Record<string, unknown>): void {
   const settings = readSettings()

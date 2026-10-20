@@ -13,8 +13,9 @@
 //     not via absence: the incremental pull can't see "missing" rows, and a
 //     tombstone is exactly the "this was deleted" signal absence used to imply.
 //     Local deletion still applies the safety rule (local updated <= lastSync).
-//   - NO sha cache: the incremental pull (updated_at > cursor, index of
-//     migration 0004) already skips unchanged rows without any per-file GET.
+//   - NO sha cache: the incremental pull (seq > pullSeq, the server-assigned
+//     change number of migration 0008) already skips unchanged rows without
+//     any per-file GET.
 //   - The journal of pending remote mutations IS kept (offline durability) —
 //     it reuses the pure transitions of syncState.ts, persisted in its own
 //     userData/cloud-sync-state.json (never shared with the GitHub journal:
@@ -257,7 +258,7 @@ function enableCloudSync() {
     return { ok: true };
 }
 /**
- * Turns Cloud sync off. Deliberately KEEPS lastSync/pullCursor (re-enabling
+ * Turns Cloud sync off. Deliberately KEEPS lastSync/pullSeq (re-enabling
  * resumes incrementally) and the journal (pending deletes must still land —
  * dropping them would resurrect notes on other devices). Key material is
  * untouched; locking is a separate action (cloudKeys.lockCloudKeys).
@@ -631,34 +632,42 @@ function deleteRemoteDirNow(dir) {
         return targets.length;
     });
 }
-// ── Pull (incremental by updated_at) ──────────────────────────────────────────
-async function fetchChangedRows(cursor) {
+// ── Pull (incremental by server-assigned seq) ─────────────────────────────────
+/**
+ * Rows changed since the watermark, in seq order. KEYSET pagination
+ * (`seq=gt.<last>&order=seq.asc&limit=N` until a short page), not offsets: an
+ * offset window shifts when rows are written mid-pull (an upsert moves a row
+ * to the end), which could skip rows; a keyset on a server-assigned seq can't.
+ * The mode (incremental / one-time full reconcile / first sync) comes from
+ * planPullQuery.
+ */
+async function fetchChangedRows(s) {
+    const plan = (0, cloudSyncLogic_1.planPullQuery)(s);
     const rows = [];
-    const base = '/rest/v1/files?select=path_key,path_ct,content_ct,key_ct,updated_at,deleted&order=updated_at.asc' +
-        (cursor
-            ? `&updated_at=gt.${encodeURIComponent(cursor)}`
-            : // First reconcile: tombstones are irrelevant (nothing local to delete
-                // safely — lastSync is null) and would only cost bandwidth.
-                '&deleted=eq.false');
-    for (let offset = 0;; offset += PULL_PAGE_SIZE) {
-        const res = await (0, cloudKeys_1.supabaseRest)(base, {
-            headers: { Range: `${offset}-${offset + PULL_PAGE_SIZE - 1}`, 'Range-Unit': 'items' },
-        });
-        if (res.status === 416)
-            break; // requested range past the end — done paging
+    let after = plan.afterSeq;
+    for (;;) {
+        const res = await (0, cloudKeys_1.supabaseRest)(`/rest/v1/files?select=${cloudSyncLogic_1.CLOUD_PULL_COLUMNS}&order=seq.asc&seq=gt.${after}&limit=${PULL_PAGE_SIZE}` +
+            // First reconcile: tombstones are irrelevant (nothing local to delete
+            // safely — lastSync is null) and would only cost bandwidth.
+            (plan.includeDeleted ? '' : '&deleted=eq.false'));
         if (res.status >= 400)
             throw new Error(`Cloud pull failed (HTTP ${res.status})`);
         const page = Array.isArray(res.json) ? res.json : [];
         rows.push(...page);
         if (page.length < PULL_PAGE_SIZE)
             break;
+        const last = (0, cloudSyncLogic_1.parseRowSeq)(page[page.length - 1].seq);
+        // A full page must move the keyset forward — anything else would loop forever.
+        if (last === null || last <= after)
+            throw new Error('Cloud pull failed (invalid seq paging)');
+        after = last;
     }
     return rows;
 }
 /** Fetches + decrypts the remote anchor row of a dir (or null). */
 async function fetchRemoteAnchor(dek, dir) {
     const pathKey = await (0, cloudCrypto_1.derivePathKeyHmac)(dek, `${dir}/${noteFormat_1.NOTE_MD}`);
-    const res = await (0, cloudKeys_1.supabaseRest)(`/rest/v1/files?select=path_key,path_ct,content_ct,key_ct,updated_at,deleted&path_key=eq.${encodeURIComponent(pathKey)}`);
+    const res = await (0, cloudKeys_1.supabaseRest)(`/rest/v1/files?select=${cloudSyncLogic_1.CLOUD_PULL_COLUMNS}&path_key=eq.${encodeURIComponent(pathKey)}`);
     if (res.status >= 400 || !Array.isArray(res.json) || res.json.length === 0)
         return null;
     try {
@@ -669,10 +678,87 @@ async function fetchRemoteAnchor(dek, dir) {
     }
 }
 /**
- * Incremental pull: fetches rows with updated_at > pullCursor, decrypts them,
- * groups by note folder and applies the SAME conflict rule as the GitHub pull
- * (newer remote anchor wins wholesale; tombstones delete locally only when
- * local updated <= lastSync). Returns the githubSync.pullNotes result shape.
+ * A failure that must abort the WHOLE pull (no pullSeq/lastSync persisted)
+ * instead of being recorded as a per-folder error: the per-folder catch
+ * re-throws it. The pull is idempotent, so the next one retries from the same
+ * watermark — advancing it would lose that remote version on this device.
+ */
+class PullAbortError extends Error {
+}
+/**
+ * Fetches + decrypts specific remote rows by relPath in ONE request
+ * (`path_key=in.(…)`). Used for the sections an applied anchor lists that did
+ * not travel in its batch (uploaded earlier → below the seq watermark). Rows
+ * the server doesn't have yet are simply absent (they'll arrive later with a
+ * higher seq). Undecryptable rows, or ones whose decrypted path isn't the one
+ * requested / isn't safe, are reported in `errors` and skipped (permanent);
+ * a failed REQUEST (HTTP/network) throws PullAbortError.
+ */
+async function fetchRemoteRows(dek, relPaths) {
+    if (relPaths.length === 0)
+        return { entries: [], errors: [] };
+    const byKey = new Map();
+    for (const rel of relPaths)
+        byKey.set(await (0, cloudCrypto_1.derivePathKeyHmac)(dek, rel), rel);
+    const filter = `path_key=in.(${[...byKey.keys()].map((k) => `"${k}"`).join(',')})`;
+    let res;
+    try {
+        res = await (0, cloudKeys_1.supabaseRest)(`/rest/v1/files?select=${cloudSyncLogic_1.CLOUD_PULL_COLUMNS}&${filter}`);
+    }
+    catch (err) {
+        throw new PullAbortError(`Cloud section fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (res.status >= 400)
+        throw new PullAbortError(`Cloud section fetch failed (HTTP ${res.status})`);
+    const entries = [];
+    const errors = [];
+    for (const row of (Array.isArray(res.json) ? res.json : [])) {
+        const expected = byKey.get(row.path_key);
+        try {
+            const entry = await (0, cloudSyncLogic_1.decryptFileRow)(dek, row);
+            if (entry.relPath !== expected || !(0, cloudSyncLogic_1.isSafeCloudRelPath)(entry.relPath)) {
+                errors.push(`unexpected remote section skipped: ${entry.relPath}`);
+                continue;
+            }
+            entries.push(entry);
+        }
+        catch (err) {
+            errors.push(`row ${row.path_key}: ${String(err)}`);
+        }
+    }
+    return { entries, errors };
+}
+/**
+ * Writes (or, for a tombstone, removes) one remote section file. Returns
+ * whether the disk changed — identical content is left alone, so this
+ * device's own rows coming back in its next pull are no-ops.
+ */
+function applyRemoteSectionFile(notesDir, entry) {
+    const localFile = path_1.default.join(notesDir, entry.relPath);
+    if (entry.deleted) {
+        try {
+            fs_1.default.unlinkSync(localFile);
+            return true;
+        }
+        catch {
+            return false; // already gone
+        }
+    }
+    try {
+        if (fs_1.default.readFileSync(localFile, 'utf-8') === entry.content)
+            return false;
+    }
+    catch { /* missing locally — write it */ }
+    fs_1.default.writeFileSync(localFile, entry.content, 'utf-8');
+    return true;
+}
+/**
+ * Incremental pull: fetches rows with seq > pullSeq (or a full reconcile, see
+ * planPullQuery), decrypts them, groups by note folder and applies the SAME
+ * conflict rule as the GitHub pull (newer remote anchor wins wholesale;
+ * tombstones delete locally only when local updated <= lastSync) plus the
+ * loose-section rule (shouldApplyRemoteSection). Returns the
+ * githubSync.pullNotes result shape.
  */
 async function pullNotes(notesDir) {
     const empty = {
@@ -705,7 +791,7 @@ async function pullNotes(notesDir) {
     const lastSyncMs = s.lastSync ? Date.parse(s.lastSync) : null;
     const state = getState();
     try {
-        const rows = await fetchChangedRows(s.pullCursor);
+        const rows = await fetchChangedRows(s);
         const entries = [];
         for (const row of rows) {
             try {
@@ -729,60 +815,103 @@ async function pullNotes(notesDir) {
                 // locally — applying remote rows would resurrect the note.
                 if ((0, syncState_1.shouldPullSkipDir)(state, dir))
                     continue;
-                // The anchor decides. It normally travels in the same incremental
-                // window as its sections (they inherit its timestamp); if only section
-                // rows made it (interrupted push on the origin device), fetch it.
-                let anchor = group.find((e) => (0, cloudSyncLogic_1.isAnchorPath)(e.relPath)) ?? null;
-                if (!anchor)
-                    anchor = await fetchRemoteAnchor(dek, dir);
-                if (!anchor)
-                    continue; // never fully uploaded — the origin's journal will finish it
                 const localDirPath = path_1.default.join(notesDir, dir);
                 const localAnchorPath = path_1.default.join(localDirPath, noteFormat_1.NOTE_MD);
-                let localUpdatedMs = null;
-                if (fs_1.default.existsSync(localAnchorPath)) {
-                    localUpdatedMs = (0, cloudSyncLogic_1.parseUpdatedTimestamp)((0, cloudSyncLogic_1.extractUpdatedTimestamp)(fs_1.default.readFileSync(localAnchorPath, 'utf-8')));
-                }
-                if (anchor.deleted) {
+                const localExists = fs_1.default.existsSync(localAnchorPath);
+                const localUpdatedMs = localExists
+                    ? (0, cloudSyncLogic_1.parseUpdatedTimestamp)((0, cloudSyncLogic_1.extractUpdatedTimestamp)(fs_1.default.readFileSync(localAnchorPath, 'utf-8')))
+                    : null;
+                // The anchor decides.
+                let anchor = group.find((e) => (0, cloudSyncLogic_1.isAnchorPath)(e.relPath)) ?? null;
+                if (anchor?.deleted) {
                     // Note deleted remotely — apply locally only under the safety rule.
-                    if (fs_1.default.existsSync(localAnchorPath) &&
-                        (0, cloudSyncLogic_1.shouldApplyRemoteDeletion)(localUpdatedMs, lastSyncMs)) {
+                    if (localExists && (0, cloudSyncLogic_1.shouldApplyRemoteDeletion)(localUpdatedMs, lastSyncMs)) {
                         fs_1.default.rmSync(localDirPath, { recursive: true, force: true });
                         deleted++;
                         filesDown++;
                     }
                     continue;
                 }
-                if (fs_1.default.existsSync(localAnchorPath) &&
-                    !(0, cloudSyncLogic_1.shouldApplyRemoteDir)(anchor.updatedAtMs, localUpdatedMs)) {
-                    continue; // local is newer or equal — decision made, cursor advances anyway
-                }
-                fs_1.default.mkdirSync(localDirPath, { recursive: true });
-                fs_1.default.writeFileSync(localAnchorPath, anchor.content, 'utf-8');
-                filesDown++;
-                for (const entry of group) {
-                    if ((0, cloudSyncLogic_1.isAnchorPath)(entry.relPath))
+                if (!anchor && !localExists) {
+                    // Only section rows of a note this device doesn't have: fetch its
+                    // anchor. Absent (never fully uploaded — the origin's journal will
+                    // finish it) or deleted → nothing to write.
+                    anchor = await fetchRemoteAnchor(dek, dir);
+                    if (!anchor || anchor.deleted)
                         continue;
-                    // Journal guard: don't resurrect a section whose remote delete is pending.
-                    if ((0, syncState_1.shouldPullSkipFile)(state, entry.relPath))
-                        continue;
-                    const localFile = path_1.default.join(notesDir, entry.relPath);
-                    if (entry.deleted) {
-                        try {
-                            fs_1.default.unlinkSync(localFile);
-                            filesDown++;
-                        }
-                        catch { /* already gone */ }
+                }
+                let changed = 0;
+                if (anchor && (!localExists || (0, cloudSyncLogic_1.shouldApplyRemoteDir)(anchor.updatedAtMs, localUpdatedMs))) {
+                    // Newer remote anchor (or a note new to this device): wholesale.
+                    // Sections the anchor lists that are NOT in this batch and NOT on
+                    // disk were uploaded earlier (below the watermark — e.g. they landed
+                    // in a previous pull before their anchor existed remotely and were
+                    // skipped). Fetch them BEFORE writing anything: an anchor on disk
+                    // without its section files would make the editor recreate them
+                    // empty and push those blanks over the real ones on the next save.
+                    // Listed sections already on disk are not fetched (the renderer only
+                    // uploads the sections that changed, so this would re-download
+                    // unchanged ones on almost every applied edit): they are up to date,
+                    // or their own newer row arrives with a higher seq (loose-section
+                    // rule). Accepted edge: a stale local section in a conflict where the
+                    // local folder was strictly newer — LWW, as before.
+                    const inGroup = new Set(group.map((e) => e.relPath));
+                    const missing = (0, cloudSyncLogic_1.listAnchorSectionFiles)(anchor.content)
+                        .map((f) => `${dir}/${f}`)
+                        .filter((rel) => !inGroup.has(rel) &&
+                        !(0, syncState_1.shouldPullSkipFile)(state, rel) &&
+                        !fs_1.default.existsSync(path_1.default.join(notesDir, rel)));
+                    const fetched = await fetchRemoteRows(dek, missing);
+                    errors.push(...fetched.errors.map((e) => `${dir}: ${e}`));
+                    fs_1.default.mkdirSync(localDirPath, { recursive: true });
+                    fs_1.default.writeFileSync(localAnchorPath, anchor.content, 'utf-8');
+                    changed++;
+                    for (const entry of group) {
+                        if ((0, cloudSyncLogic_1.isAnchorPath)(entry.relPath))
+                            continue;
+                        // Journal guard: don't resurrect a section whose remote delete is pending.
+                        if ((0, syncState_1.shouldPullSkipFile)(state, entry.relPath))
+                            continue;
+                        if (applyRemoteSectionFile(notesDir, entry))
+                            changed++;
                     }
-                    else {
-                        fs_1.default.writeFileSync(localFile, entry.content, 'utf-8');
-                        filesDown++;
+                    // Listed sections the server doesn't have yet stay as they are: their
+                    // upload is still pending on the origin and will arrive later (higher
+                    // seq) through the loose-section rule. A listed-but-tombstoned row is
+                    // inconsistent — left alone too.
+                    for (const entry of fetched.entries) {
+                        if (entry.deleted)
+                            continue;
+                        if (applyRemoteSectionFile(notesDir, entry))
+                            changed++;
                     }
                 }
+                else {
+                    // Anchor not applied (absent from this batch, or not newer) and the
+                    // folder exists locally: sections apply ONE BY ONE. With a seq
+                    // cursor, an anchor and its sections can land in different pulls
+                    // (separate uploads); dropping the group here would lose the
+                    // section content for good (shouldApplyRemoteSection).
+                    for (const entry of group) {
+                        if ((0, cloudSyncLogic_1.isAnchorPath)(entry.relPath))
+                            continue;
+                        if ((0, syncState_1.shouldPullSkipFile)(state, entry.relPath))
+                            continue;
+                        if (!(0, cloudSyncLogic_1.shouldApplyRemoteSection)(entry.updatedAtMs, localUpdatedMs))
+                            continue;
+                        if (applyRemoteSectionFile(notesDir, entry))
+                            changed++;
+                    }
+                    if (changed === 0)
+                        continue; // local is newer, or already identical
+                }
+                filesDown += changed;
                 updatedFiles.push(localDirPath);
                 pulled++;
             }
             catch (err) {
+                if (err instanceof PullAbortError)
+                    throw err; // abort the pull: watermark stays put
                 errors.push(`${dir}: ${String(err)}`);
             }
         }
@@ -809,7 +938,10 @@ async function pullNotes(notesDir) {
         }
         patchSettings({
             lastSync: new Date().toISOString(),
-            pullCursor: (0, cloudSyncLogic_1.nextPullCursor)(s.pullCursor, entries),
+            // Max seq of EVERY fetched row (undecryptable/unsafe ones too — they
+            // never become applicable). The legacy updated_at cursor goes away.
+            pullSeq: (0, cloudSyncLogic_1.nextPullSeq)(s.pullSeq, rows),
+            pullCursor: undefined,
         });
         syncError = undefined;
         const wasNotOk = initialPullStatus !== 'ok';

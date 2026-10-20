@@ -24,8 +24,14 @@ import {
   decryptFileRow,
   isSafeCloudRelPath,
   resolveRowUpdatedAt,
-  nextPullCursor,
+  shouldApplyRemoteDir,
+  shouldApplyRemoteSection,
+  planPullQuery,
+  nextPullSeq,
+  CLOUD_PULL_COLUMNS,
+  listAnchorSectionFiles,
 } from '../../electron/cloudSyncLogic'
+import { serializeNoteFolder } from '../../electron/noteFormat'
 
 const require = createRequire(import.meta.url)
 const cli = require('../../cli/noteflow.js')
@@ -120,7 +126,7 @@ describe('CLI cloud mapping parity with cloudSyncLogic', () => {
     for (const p of cases) expect(cli.isSafeCloudRelPath(p), p).toBe(isSafeCloudRelPath(p))
   })
 
-  it('agrees on row updated_at resolution and pull-cursor advancement', () => {
+  it('agrees on row updated_at resolution and pull-seq advancement', () => {
     const anchor = '---\nupdated: "2026-01-02T03:04:05.000Z"\n---\n'
     const now = '2026-07-16T00:00:00.000Z'
     for (const [rel, content, anchorContent] of [
@@ -133,10 +139,57 @@ describe('CLI cloud mapping parity with cloudSyncLogic', () => {
         resolveRowUpdatedAt(rel, content, anchorContent, now)
       )
     }
-    const entries = [{ updatedAt: '2026-01-01T00:00:00.000Z' }, { updatedAt: '2026-02-01T00:00:00.000Z' }]
-    expect(cli.nextPullCursor(undefined, entries)).toBe(nextPullCursor(undefined, entries))
-    expect(cli.nextPullCursor('2026-03-01T00:00:00.000Z', entries)).toBe(
-      nextPullCursor('2026-03-01T00:00:00.000Z', entries)
-    )
+    const rows = [{ seq: 7 }, { seq: '12' }, { seq: 'garbage' }, {}]
+    for (const current of [undefined, 0, 5, 20]) {
+      expect(cli.nextPullSeq(current, rows), String(current)).toBe(nextPullSeq(current, rows))
+      expect(cli.nextPullSeq(current, [])).toBe(nextPullSeq(current, []))
+    }
+  })
+
+  it('agrees on the pull mode (incremental / legacy full reconcile / first sync)', () => {
+    const cursor = '2026-10-01T00:00:00.000Z'
+    for (const state of [
+      { pullSeq: 42 },
+      { pullSeq: 0, pullCursor: cursor },
+      { pullCursor: cursor, lastSync: cursor },
+      { lastSync: cursor },
+      { pullSeq: -3, lastSync: cursor },
+      {},
+    ]) {
+      expect(cli.planPullQuery(state), JSON.stringify(state)).toEqual(planPullQuery(state))
+    }
+  })
+
+  it('agrees on the anchor and loose-section conflict decisions', () => {
+    const values = [null, 500, 1000, 2000]
+    for (const remote of values) {
+      for (const local of values) {
+        const label = `${remote} vs ${local}`
+        expect(cli.shouldApplyRemoteDir(remote, local), label).toBe(shouldApplyRemoteDir(remote, local))
+        expect(cli.shouldApplyRemoteSection(remote, local), label).toBe(shouldApplyRemoteSection(remote, local))
+      }
+    }
+  })
+
+  it('agrees on the section files an anchor lists', () => {
+    const base = {
+      id: 'abc123', title: 'T: "q"', tags: [], created: UPDATED_AT, updated: UPDATED_AT,
+      sections: [
+        { id: 'sec001', name: 'One', content: 'a' },
+        { id: 'sec002', name: 'Two: x', content: 'b', isRawMode: true, aiHidden: true, created: UPDATED_AT },
+      ],
+    }
+    const anchors = [
+      serializeNoteFolder(base).files['note.md'],
+      serializeNoteFolder({ ...base, encryption: { v: 1 } }).files['note.md'],
+      '---\nid: x\nsections:\n  - id: s1\n    name: A\n  - id: s2\n    file: s2.md\n  - id: s3\n    file: ../e.md\n---\n',
+      'no frontmatter',
+    ]
+    for (const md of anchors) expect(cli.listAnchorSectionFiles(md), md).toEqual(listAnchorSectionFiles(md))
+    expect(cli.listAnchorSectionFiles(anchors[0])).toEqual(['sec001.md', 'sec002.md'])
+  })
+
+  it('selects the same pull columns (seq included)', () => {
+    expect(cli.CLOUD_PULL_COLUMNS).toBe(CLOUD_PULL_COLUMNS)
   })
 })

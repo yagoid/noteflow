@@ -17,7 +17,7 @@ parcial (filtra por `updated` y nunca borra): para dejar el repo **exacto** est�
 **"Espejar en GitHub"** (`mirrorToGitHub`, abajo), que solo se ofrece con Cloud activo.
 
 **Cerrar sesión de la cuenta NoteFlow apaga Cloud** (`enabled = false` vía `disableCloudSync()`,
-que conserva `lastSync`/`pullCursor`/journal) → se **libera la exclusión mutua** y GitHub Sync
+que conserva `lastSync`/`pullSeq`/journal) → se **libera la exclusión mutua** y GitHub Sync
 vuelve a sincronizar solo en su siguiente tick si estaba conectado. Sin ese apagado la app se
 quedaba sin ningún backend activo (Cloud sin sesión no puede sincronizar y GitHub seguía "Paused").
 Lógica pura de la transición: `electron/accountTransition.ts` (ver `monetization.md` § 4 "Cerrar
@@ -81,16 +81,18 @@ push durable de las tools del chat) a `pendingPushFiles`. Los deletes no pasan p
 
 **Cloud Sync** (`electron/cloudSync.ts`, mismo modelo y regla de conflicto que GitHub pero
 contra Supabase con E2EE, tombstones en vez de borrado por ausencia, sin cola de mutaciones y
-con pull incremental por `updated_at`): detalle completo en `monetization.md` § 4. Su journal
+con pull incremental por `seq`, un número de cambio que asigna el servidor — migración 0008; ya no
+por `updated_at`, que es la hora de edición y sigue siendo solo la base de los conflictos): detalle
+completo en `monetization.md` § 4 (modos de reconciliación y regla de secciones sueltas). Su journal
 reutiliza las transiciones puras de `syncState.ts` en un fichero PROPIO
 (`userData/cloud-sync-state.json`) — nunca el `sync-state.json` de GitHub.
-📌 **Problema conocido (preexistente, sin arreglar) — integridad del pull incremental de Cloud:**
-`pullNotes` avanza el cursor con `nextPullCursor(s.pullCursor, entries)` (`cloudSyncLogic.ts`), y
-`entries` solo contiene las filas que **descifraron** bien (incluidas las de carpetas cuyo aplicado
-falló después). Una fila que falla al descifrar y es más antigua que otra del mismo lote queda
-**por debajo del cursor para siempre** (`updated_at=gt.cursor`): no se reintenta nunca y se pierde
-esa edición en este dispositivo. Ese pull sí reporta el error; los siguientes salen "limpios" sin
-haberla aplicado (afecta también al gate de caducidad de notas temporales, ver `patterns.md`).
+📌 **Integridad del pull incremental de Cloud:** `pullNotes` avanza el watermark con
+`nextPullSeq(s.pullSeq, rows)` (`cloudSyncLogic.ts`) = máxima `seq` de **todas** las filas
+traídas. Las filas que no descifran (o con ruta insegura) quedan por debajo **a propósito**: nunca
+van a volverse aplicables. ⚠️ **Pendiente (sin arreglar):** las filas de una carpeta cuyo
+**aplicado** falla después (error de disco) también quedan por debajo y no se reintentan en este
+dispositivo. En ambos casos ese pull reporta el error y los siguientes salen "limpios" sin haberla
+aplicado (afecta también al gate de caducidad de notas temporales, ver `patterns.md`).
 
 **El CLI** (`cli/noteflow.js`) tiene su propio cliente Cloud headless (`noteflow cloud …`, con
 sesión y cursor propios en `settings.cliAccount`/`cliCloud`, y la misma prioridad Cloud > GitHub):

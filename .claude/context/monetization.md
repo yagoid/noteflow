@@ -315,6 +315,13 @@ diferencial de privacidad, no como peaje.
 > local → push → evento `postgres_changes` → pull reactivo en segundos (vs. tick de 5 min).
 > De paso se saneó el tracking remoto de migraciones (`supabase migration repair` de 0001-0005,
 > que se habían aplicado por SQL Editor): a partir de ahora `supabase db push` funciona directo.
+> **Cursor por `seq` (migración `0008_cloud_seq.sql`):** el pull incremental ya no usa
+> `updated_at` como cursor sino un número de cambio asignado por el servidor (ver "Modelo de datos"
+> y "Pull incremental" abajo) — **pendiente del operador: aplicarla al proyecto real**
+> (`supabase db push`). ⚠️ **Orden de despliegue: aplicar la 0008 ANTES de publicar la
+> versión de la app/CLI que la usa** — un cliente nuevo contra un servidor sin la columna recibe 400
+> en el pull (error visible, sin pérdida de datos); la 0008 es aditiva y los clientes viejos siguen
+> funcionando con ella.
 > ⚠️ Para probar Cloud sin producto en LS existe una **suscripción manual de pruebas** en
 > `subscriptions` (`provider='manual'`, product `cloud`, cuenta del operador) — **borrarla
 > cuando exista el producto Cloud real** (`delete from public.subscriptions where provider = 'manual'`).
@@ -394,11 +401,12 @@ diferencial de privacidad, no como peaje.
 - **Formato de blob sellado** (todas las columnas `*_ct`): `base64url(iv de 12 bytes || AES-256-
   GCM ciphertext+tag)` — IV aleatorio por operación, viaja con el ciphertext.
 
-### Modelo de datos (migración `0004_cloud.sql`)
+### Modelo de datos (migraciones `0004_cloud.sql` + `0008_cloud_seq.sql`)
 ```
-files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
+files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
       PRIMARY KEY (user_id, path_key))
-+ índice (user_id, updated_at) para el pull incremental
++ índice (user_id, seq) para el pull incremental (0008)
++ índice (user_id, updated_at) de la 0004 (lo siguen usando los clientes anteriores)
 ```
 - `path_key = HMAC-SHA256(subclave de la DEK, relPath)` en base64url — identificador opaco y
   determinista; no filtra títulos/slugs (el relPath actual contiene el título de la nota). La
@@ -413,7 +421,40 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
   re-envolver por nota para compartir/rotar en el futuro.
 - `updated_at` **en claro** (solo filtra timing): lo pone el cliente desde el frontmatter y es la
   base de la resolución de conflictos con la **carpeta como unidad** (misma regla que el pull del
-  GitHub Sync).
+  GitHub Sync). **No sirve como cursor** del pull incremental: es la hora de EDICIÓN, no la de
+  subida — una fila que llega tarde al servidor (edición offline drenada del journal, reintento,
+  segundo dispositivo que sube su corpus viejo al activar Cloud, reloj desfasado) quedaba por debajo
+  del cursor de los demás dispositivos y no les llegaba nunca; y como las secciones heredan el
+  `updated_at` del ancla, un `note.md` subido después que sus secciones llegaba con un `updated_at`
+  IGUAL al cursor y `gt` lo excluía.
+- `seq` (0008) = **número de cambio asignado por el servidor**: un trigger `BEFORE INSERT OR UPDATE`
+  (`files_assign_seq`, `security definer` + `search_path = ''`, así `authenticated` no necesita
+  grants sobre la secuencia `files_change_seq`) le pone SIEMPRE `nextval` e ignora lo que mande el
+  cliente. En un upsert de PostgREST se disparan el BEFORE INSERT y el BEFORE UPDATE; la fila queda
+  con la seq del UPDATE (huecos: normales). **Orden de commit = orden de seq por usuario:** una
+  secuencia sola no lo garantiza (dos transacciones concurrentes pueden commitear al revés y un
+  lector que ve la 11 se saltaría la 10 aún no visible), así que antes del `nextval` se toma un
+  `pg_advisory_xact_lock` por usuario (`hashtextextended('noteflow.files.seq:' || user_id, 0)`):
+  las escrituras de un mismo usuario se serializan hasta el commit; las de usuarios distintos no se
+  bloquean. Basta con orden por usuario porque el cursor lo es (RLS). El lock se toma en **dos**
+  triggers con la **misma clave** (es reentrante en la transacción):
+  - **De sentencia** (`files_lock_user_writes`, `BEFORE INSERT OR UPDATE … FOR EACH STATEMENT`, con
+    `auth.uid()` si no es null): se coge **antes de bloquear ninguna fila**. Sin él había
+    **deadlock** entre dos escrituras del mismo usuario (reproducido en PG16): en el `PATCH` del
+    tombstone Postgres bloquea la fila *antes* de disparar el BEFORE UPDATE de fila, que luego espera
+    el advisory lock; mientras, un upsert del mismo usuario ya tiene el lock (desde su BEFORE INSERT
+    de fila) y espera esa fila.
+  - **De fila** (`files_assign_seq`, con `new.user_id`): cubre escrituras sin JWT (service role).
+  Las dos funciones son `security definer` + `search_path = ''` con `EXECUTE` revocado a
+  public/anon/authenticated, y la secuencia tiene `revoke all … from public, anon, authenticated`
+  (Supabase concede por defecto privilegios sobre las secuencias de `public`; nadie debe poder hacer
+  `nextval`/`setval` sobre el cursor). Backfill de la 0008: filas existentes numeradas por
+  `(updated_at, path_key)`. Verificado en un Postgres 16 local: upsert, `seq` del cliente ignorada,
+  RLS intacta, un segundo escritor del mismo usuario espera al commit del primero y saca una seq
+  mayor, y el caso PATCH-tombstone frente a upsert concurrente del mismo usuario ya no hace deadlock
+  (sin el trigger de sentencia se reproduce). La 0008 es **aditiva**: los clientes viejos piden
+  columnas explícitas y no mandan `seq`, siguen con su cursor por fecha y sus escrituras reciben seq
+  igual.
 - **RLS con gating por entitlement:** `select` y `delete` solo piden ownership (un usuario cuya
   suscripción caduca sigue pudiendo bajar y borrar sus datos), pero `insert` y `update` exigen
   además fila en `subscriptions` con product `cloud`/`bundle` y `status = 'active'`. Ojo: el
@@ -450,8 +491,10 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
   `Prefer: resolution=merge-duplicates`) con **un** reintento ante error de red/5xx.
 - **`updated_at` por fila (decisión):** `note.md` → su propio `updated:` del frontmatter; los
   `.md` de sección → el `updated:` del **ancla de su carpeta** (leído de disco al pushear — así
-  una edición viaja como grupo coherente en la ventana incremental de otros dispositivos); los
-  json de metadatos de raíz → momento de escritura. Fallback: momento de escritura.
+  todas las filas de una versión de la nota llevan el mismo sello, que es lo que permite a la regla
+  de secciones sueltas reconocer "misma versión"); los json de metadatos de raíz → momento de
+  escritura. Fallback: momento de escritura. Ojo: los tombstones (`PATCH deleted=true`) ponen
+  `updated_at = ahora`.
 - **Clave de nota por carpeta:** cache en memoria `dir → noteKey`, sembrada por los pulls y
   poblada bajo demanda (GET del `key_ct` del ancla remota y unwrap; si la nota es nueva, clave
   fresca). Los metadatos de raíz usan clave propia por fila.
@@ -461,13 +504,62 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
   de seguridad de siempre (`updated <= lastSync`). Sin entitlement, RLS bloquea el UPDATE →
   fallback a `DELETE` físico (la fila desaparece sin notificar a otros dispositivos — asumido:
   sin suscripción tampoco pueden pushear).
-- **Pull incremental:** `GET files?updated_at=gt.<pullCursor>` (índice de la 0004), paginado
-  (PostgREST capa a 1000 filas). **Dos marcas (decisión):** `pullCursor` = watermark del máximo
-  `updated_at` remoto reconciliado (filtro incremental — los timestamps los ponen los clientes
-  desde el frontmatter, usar "ahora" saltaría filas de otros dispositivos con reloj/timestamps
-  más viejos) y `lastSync` = hora de pared del último pull (regla de borrado + UI). El primer
-  pull (sin cursor) filtra `deleted=eq.false`. Las rutas descifradas se sanean
-  (`isSafeCloudRelPath`) antes de tocar disco.
+- **Pull incremental por `seq` (0008):** `GET files?select=…,seq&order=seq.asc&seq=gt.<n>&limit=1000`
+  con **paginación keyset** (siguiente página desde la última `seq` vista, hasta una página corta) —
+  no por offset/`Range`, que se desplaza si se escriben filas a mitad del pull. **Dos marcas
+  (decisión):** `pullSeq` = watermark de la máxima `seq` reconciliada y `lastSync` = hora de pared
+  del último pull (regla de borrado + UI). Tres modos (`planPullQuery`, puro):
+  - `pullSeq` definido → incremental `seq > pullSeq`, **con** tombstones.
+  - sin `pullSeq` pero con `pullCursor` (legado, cursor por `updated_at` de versiones anteriores) o
+    `lastSync` → **reconciliación completa una vez** desde seq 0 **con** tombstones: recupera lo que
+    el cursor viejo se saltó (las reglas de conflicto deciden qué se aplica).
+  - sin nada (primer sync) → completa con `deleted=eq.false` (sin `lastSync` no hay nada local que un
+    tombstone pueda borrar con seguridad).
+  El nuevo watermark es `nextPullSeq(pullSeq, rows)` = máxima `seq` de **todas** las filas traídas
+  (también las indescifrables o con ruta insegura: nunca van a volverse aplicables; esperar por ellas
+  las re-bajaría siempre), empezando en 0. Tras el primer pull por seq se borra `pullCursor` de los
+  ajustes. Las rutas descifradas se sanean (`isSafeCloudRelPath`) antes de tocar disco. Las propias
+  escrituras vuelven en el siguiente pull (tienen seq nueva): son no-ops porque el ancla no es más
+  nueva y las secciones idénticas no se reescriben.
+  ⚠️ Fuera de este arreglo (pendiente): el cursor avanza aunque una carpeta falle al aplicarse
+  (error de disco) — esa fila no se reintenta en este dispositivo; `listRemotePaths` no pagina.
+- **Regla de secciones sueltas (pull por carpeta, necesaria con el cursor por seq):** un ancla y sus
+  secciones son subidas independientes y pueden caer en pulls distintos (en cualquier orden).
+  - El grupo trae el ancla y `shouldApplyRemoteDir` (remota más nueva, o carpeta local inexistente)
+    → se escribe el ancla + todas las filas del grupo (como siempre) **+ las secciones que el ancla
+    lista, no vienen en el grupo y NO existen en el disco local**: `listAnchorSectionFiles` (puro, `cloudSyncLogic.ts`; espejo en
+    el CLI) saca `sections[].file` del frontmatter (fallback `<id>.md`, `[]` si la nota está
+    cifrada, solo nombres `.md` planos), y `fetchRemoteRows` las pide en **una** petición
+    `path_key=in.(…)` con `CLOUD_PULL_COLUMNS`, las descifra y valida (ruta descifrada = la pedida
+    + `isSafeCloudRelPath`; respeta `shouldPullSkipFile`). Se piden **antes** de escribir nada: un
+    ancla en disco sin sus ficheros de sección hace que el editor los recree vacíos en la siguiente
+    edición y los suba por encima de los buenos. Se escriben las que no son tombstone; una sección
+    listada que el servidor aún no tiene (subida pendiente en el origen) se deja como esté y llega
+    después por la regla de secciones sueltas (su seq será mayor). Cubre el caso "secciones de una
+    nota NUEVA en un pull anterior a su ancla" (ese pull las salta porque `fetchRemoteAnchor` aún no
+    encuentra ancla). **Fallo de esa petición (HTTP/red) → aborta el pull entero** (`PullAbortError`
+    en la app, error marcado `abortPull` en el CLI; el catch por carpeta lo re-lanza) **sin
+    persistir `pullSeq` ni `lastSync`**: el pull es idempotente y el siguiente reintenta desde el
+    mismo watermark (avanzarlo perdería esa versión remota en este dispositivo). Las filas que sí
+    llegan pero no descifran o no casan con la ruta pedida son errores por carpeta (permanentes) y
+    no abortan. **Coste:** una petición extra solo cuando un ancla aplicada lista secciones que
+    faltan en disco — no en cada edición: el renderer solo sube las secciones que cambian
+    (`src/lib/noteUtils.ts`), y las que ya están en local o están al día o les llega su propia fila
+    con seq mayor (regla de secciones sueltas). **Caso límite aceptado:** una sección local
+    desfasada en un conflicto en el que el local era estrictamente más nuevo cuando llegó la fila
+    remota de esa sección (no se aplicó) y luego llega un ancla remota aún más nueva que no la
+    re-sube: se queda la local — rige "la más reciente gana" (LWW) por carpeta, como antes.
+  - El ancla del grupo es un **tombstone** → regla de borrado de siempre (`updated <= lastSync`).
+  - El ancla no se aplica (ausente del grupo, o no más nueva) y la carpeta local **existe** → cada
+    fila de sección del grupo se aplica **individualmente** si `shouldApplyRemoteSection(sección,
+    local)` = `updatedAtMs >= localUpdatedMs` (la sección heredó el `updated` de su versión: `>=`
+    cubre "misma versión, la sección llegó después"; con ediciones locales propias el `updated` local
+    es estrictamente mayor y se respeta). Un tombstone de sección con esa condición → unlink. Respeta
+    los guards del journal (`shouldPullSkipDir`/`shouldPullSkipFile`). Antes este caso descartaba el
+    grupo entero y el contenido de sección se perdía en silencio.
+  - Carpeta local inexistente y grupo sin ancla → `fetchRemoteAnchor`; si existe y no está borrada,
+    se aplica como ancla nueva (rama de arriba, con la recogida de secciones listadas); si no, se
+    salta — las secciones se recuperarán cuando llegue el ancla.
 - **Journal (decisión):** reutiliza las transiciones puras de `electron/syncState.ts` pero
   persiste en su PROPIO `userData/cloud-sync-state.json` (los dos backends no deben reproducirse
   ops mutuamente); el sha-cache no aplica (el pull incremental ya evita trabajo). Pushes con
@@ -478,7 +570,7 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
 - Gate de push hasta el primer pull OK (`initialPullStatus`, como GitHub) +
   `flushPendingLocalChanges`: en la PRIMERA sincronización (sin `lastSync` previo) esto sube el
   corpus local entero, metadatos incluidos.
-- `disableCloudSync()` conserva `lastSync`/`pullCursor`/journal (re-habilitar retoma incremental
+- `disableCloudSync()` conserva `lastSync`/`pullSeq`/journal (re-habilitar retoma incremental
   y los deletes pendientes no se pierden); las claves no se tocan (lock es acción aparte).
 - **Tiempo real (tramo 3, implementado):** `electron/cloudRealtime.ts` abre un **WebSocket puro**
   (el `WebSocket` global de Node 22 — sin `@supabase/supabase-js` ni `ws`) contra Supabase
@@ -511,7 +603,7 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
 
 - **En la transición real `signedIn` true→false** (sign-out explícito **y** refresh token revocado,
   que ya hace `clearSession()` + `notifyStatusChanged()`):
-  - **Cloud:** `disableCloudSync()` (`enabled = false`, conserva `lastSync`/`pullCursor`/journal) →
+  - **Cloud:** `disableCloudSync()` (`enabled = false`, conserva `lastSync`/`pullSeq`/journal) →
     libera la exclusión mutua y GitHub Sync se reanuda solo si estaba conectado.
   - **Claves:** `resetCloudKeysSession()` (`cloudKeys.ts`) — **borra toda la sesión de claves**: la
     DEK de memoria + la cache `settings.cloudSync.encryptedDek` **y** el estado aprendido
@@ -616,24 +708,24 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
   deslogearía mutuamente. El token rotado se persiste **antes** de usar el access token; un 400/401
   del refresh borra `cliAccount` ("Session expired"). Un access token por invocación (proceso
   one-shot, sin single-flight).
-- **Estado propio:** `settings.cliCloud = {enabled, pullCursor, lastSync, userId}` — cursor/lastSync
-  del CLI, independientes de `settings.cloudSync` (cada cliente reconcilia por su cuenta). `userId`
-  es el **dueño** de ese cursor y sobrevive al `logout` (que borra `cliAccount` pero conserva
-  cursor/lastSync/userId): un re-login con la **misma** cuenta retoma incremental; con **otra**
-  cuenta `cliCloudForUser` descarta `pullCursor`/`lastSync` → el siguiente pull es completo (un
-  cursor ajeno saltaría, por `updated_at > cursor`, todas las notas más antiguas de la cuenta
-  nueva). Se aplica en `cloud login` (antes del pull automático) y al inicio de todo pull/reconcile
+- **Estado propio:** `settings.cliCloud = {enabled, pullSeq, lastSync, userId}` (más un
+  `pullCursor` legado hasta el primer pull por seq) — cursor/lastSync del CLI, independientes de
+  `settings.cloudSync` (cada cliente reconcilia por su cuenta). `userId` es el **dueño** de ese
+  cursor y sobrevive al `logout` (que borra `cliAccount` pero conserva cursor/lastSync/userId): un
+  re-login con la **misma** cuenta retoma incremental; con **otra** cuenta `cliCloudForUser`
+  descarta `pullSeq`/`pullCursor`/`lastSync` → el siguiente pull es completo (un watermark ajeno
+  saltaría, por `seq > pullSeq`, todas las filas de la cuenta nueva por debajo de él). Se aplica en `cloud login` (antes del pull automático) y al inicio de todo pull/reconcile
   Cloud (`bindCliCloudToAccount`).
   - **Dueño desconocido** (estado de antes de guardar `userId`): en `cloud login` se toma como dueño
     el `userId` de la sesión anterior si seguía abierta (re-login sin logout) → reinicia solo si es
     otra cuenta. Si no hay sesión anterior (o en un pull con sesión ya activa) se **adopta** la
-    cuenta actual **sin** reiniciar. Motivo: reiniciar no es gratis — sin cursor el pull filtra
+    cuenta actual **sin** reiniciar. Motivo: reiniciar no es gratis — sin ningún estado el pull filtra
     `deleted=eq.false`, pierde los tombstones antiguos (las notas borradas en otro sitio se quedan en
     disco) y el siguiente push las **resucita** en remoto (upsert `merge-duplicates` con
     `deleted=false`). Adoptar solo falla para quien cambió de cuenta antes de esta regla, y el coste
     es esconder notas antiguas (intactas en remoto), no destruir datos. Nada más queda ligado a la cuenta en disco: la DEK, las claves por
   nota y el access token viven solo en memoria del proceso. ⚠️ La app de escritorio **no** hace
-  este reinicio: `disableCloudSync` conserva `cloudSync.pullCursor`/`lastSync` y el journal sin
+  este reinicio: `disableCloudSync` conserva `cloudSync.pullSeq`/`lastSync` y el journal sin
   dueño, así que entrar en la app con otra cuenta reutiliza el cursor anterior (pendiente).
 - **DEK por invocación, jamás cacheada en disco** (ni la passphrase): managed → `cloud-keys/unlock`
   en cada run; e2ee → passphrase de `NOTEFLOW_CLOUD_PASSPHRASE` o prompt interactivo con eco oculto
@@ -650,10 +742,13 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
   `noteflow push/pull/status` y el sync automático por comando (`syncPushNoteFiles`, borrados)
   van a Cloud y NO tocan GitHub. Borrados = tombstones `PATCH deleted=true` con fallback a `DELETE`
   físico en 403; un 403 en un upsert corta el push completo con el mensaje de suscripción.
-- **Gate de pull inicial:** sin `pullCursor` ni `lastSync` (nunca reconciliado), el primer push
-  ejecuta antes un pull automático ("First Cloud reconcile…") — un disco viejo no machaca un
-  remoto más nuevo. Pull incremental idéntico al de la app (paginado `Range`, ancla decide,
-  regla de borrado `updated <= lastSync`, cursor = max `updated_at` visto).
+- **Gate de pull inicial:** sin `pullSeq`, `pullCursor` ni `lastSync` (nunca reconciliado), el
+  primer push ejecuta antes un pull automático ("First Cloud reconcile…") — un disco viejo no machaca
+  un remoto más nuevo. Pull incremental idéntico al de la app (keyset por `seq` con los mismos tres
+  modos de `planPullQuery`, ancla decide, regla de secciones sueltas, regla de borrado
+  `updated <= lastSync`, watermark = `nextPullSeq`); paridad fijada en `tests/cli/cloudInterop.test.ts`.
+  `noteflow cloud status --json` expone `pullSeq` (y `pullCursor`, legado, `null` tras el primer pull
+  por seq).
 - **Pull tras `cloud login`:** solo con claves **managed** (la DEK se desbloquea sin prompt) el login
   encadena un `cmdCloudPull()` best-effort — un fallo se reporta (`Run 'noteflow pull' to retry`)
   sin invalidar la sesión ya guardada; `--no-pull` lo omite. Con **e2ee** o sin claves no hay pull

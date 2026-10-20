@@ -772,8 +772,9 @@ noteflow cloud status [--json]
 ```
 
 Muestra email, modo de claves (`standard (managed)` / `private (e2ee)` / `none`),
-habilitado, último sync y cursor. JSON:
-`{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullCursor } | null, githubConfigured }`.
+habilitado, último sync y cursor (`seq N`, el número de cambio asignado por el servidor). JSON:
+`{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullSeq, pullCursor } | null, githubConfigured }`
+(`pullCursor` es el cursor por fecha de versiones anteriores: `null` tras el primer pull por `seq`).
 
 ---
 

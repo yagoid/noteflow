@@ -9,7 +9,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const cli = require('../../cli/noteflow.js')
 
-type CliCloud = { enabled: boolean; pullCursor?: string; lastSync?: string; userId?: string }
+type CliCloud = { enabled: boolean; pullSeq?: number; pullCursor?: string; lastSync?: string; userId?: string }
 
 const nextGithubLastSync = cli.nextGithubLastSync as (pending: number, nowIso: string) => string | null
 const localOnlyNoteDirs = cli.localOnlyNoteDirs as (localDirs: string[], remoteDirs: Map<string, string[]>) => string[]
@@ -94,6 +94,26 @@ describe('cliCloudForUser (Cloud cursor owner)', () => {
   it('a recorded owner wins over the presumed one', () => {
     expect(cliCloudForUser(synced, 'user-a', 'user-b')).toBe(synced)
     expect(cliCloudForUser(synced, 'user-b', 'user-b')).toEqual({ enabled: false, userId: 'user-b' })
+  })
+
+  // Seq-era state (migration 0008): the watermark is pullSeq. A foreign one
+  // would skip every row of the new account below it (`seq > pullSeq`).
+  const seqSynced: CliCloud = { enabled: true, pullSeq: 1234, lastSync: '2026-10-01T00:00:01.000Z', userId: 'user-a' }
+
+  it('keeps pullSeq for the same account', () => {
+    expect(cliCloudForUser(seqSynced, 'user-a')).toBe(seqSynced)
+  })
+
+  it('drops pullSeq (and any legacy pullCursor) when another account signs in', () => {
+    const next = cliCloudForUser({ ...seqSynced, pullCursor: '2026-10-01T00:00:00.000Z' }, 'user-b')
+    expect(next).toEqual({ enabled: true, userId: 'user-b' })
+    expect(next).not.toHaveProperty('pullSeq')
+    expect(next).not.toHaveProperty('pullCursor')
+  })
+
+  it('drops a pullSeq of 0 too (it is still a watermark)', () => {
+    expect(cliCloudForUser({ enabled: false, pullSeq: 0, userId: 'user-a' }, 'user-b'))
+      .toEqual({ enabled: false, userId: 'user-b' })
   })
 
   it('just records the owner when there was no cursor yet', () => {

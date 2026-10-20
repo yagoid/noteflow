@@ -16,7 +16,13 @@
    npm pkg set version=X.Y.Z
    ```
 
-3. **Verificar identidad git** si la máquina no tiene config global:
+3. **Migraciones de Supabase antes que el cliente:** si la versión usa una migración nueva de
+   `supabase/migrations/`, aplicarla al proyecto real (`supabase db push`) **antes** de publicar
+   el release. Caso concreto: la app/CLI que pide `files.seq` (cursor del pull de Cloud) necesita
+   la **0008** — contra un servidor sin ella el pull de Cloud responde 400 (error visible, sin
+   pérdida de datos). Ver `supabase/README.md` § 7.
+
+4. **Verificar identidad git** si la máquina no tiene config global:
    ```bash
    git config user.email "<tu-email>"
    git config user.name "<tu-usuario>"

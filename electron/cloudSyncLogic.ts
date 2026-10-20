@@ -9,9 +9,12 @@
 // keyed by an opaque deterministic path_key; every column *_ct is a sealed
 // AES-256-GCM blob (cloudCrypto.ts); updated_at is plaintext ON PURPOSE — it is
 // the basis of conflict resolution (note folder = unit of conflict, same rule
-// as the GitHub Sync pull) and of the incremental pull.
+// as the GitHub Sync pull). The incremental pull does NOT use it as a cursor
+// (it is the EDIT time, set by clients): it pages by `seq`, a change number the
+// server assigns on every write (migration 0008).
 
-import { NOTE_MD } from './noteFormat'
+import yaml from 'js-yaml'
+import { NOTE_MD, splitFrontmatter } from './noteFormat'
 import {
   derivePathKeyHmac,
   wrapKey,
@@ -33,8 +36,12 @@ export const CLOUD_METADATA_FILENAMES = [
 
 // ── Row shapes ────────────────────────────────────────────────────────────────
 
-/** Wire shape of a public.files row (user_id added by the engine on insert). */
-export interface CloudFileRow {
+/**
+ * Columns a client writes to public.files (user_id added by the engine on
+ * insert). Never includes `seq`: the server assigns it (trigger of migration
+ * 0008) and ignores whatever a client sends.
+ */
+export interface CloudFileUpsertRow {
   path_key: string
   path_ct: string
   content_ct: string
@@ -42,6 +49,15 @@ export interface CloudFileRow {
   updated_at: string
   deleted: boolean
 }
+
+/** Wire shape of a public.files row as the pull reads it. */
+export interface CloudFileRow extends CloudFileUpsertRow {
+  /** Server-assigned change number (migration 0008) — the incremental-pull cursor. */
+  seq: number
+}
+
+/** Columns every pull/anchor read selects (keep `seq`: it feeds the cursor). */
+export const CLOUD_PULL_COLUMNS = 'path_key,path_ct,content_ct,key_ct,updated_at,deleted,seq'
 
 /** A decrypted row, ready to be applied to disk. */
 export interface CloudPullEntry {
@@ -86,6 +102,47 @@ export function isSafeCloudRelPath(relPath: string): boolean {
   if (parts.some((p) => !p || p === '.' || p === '..')) return false
   if (parts.length === 1) return (CLOUD_METADATA_FILENAMES as readonly string[]).includes(relPath)
   return parts.length === 2 && parts[1].endsWith('.md')
+}
+
+/**
+ * Section files a note.md (anchor) references: `sections[].file` of its
+ * frontmatter (fallback '<id>.md', same as parseNoteDir), deduped. Encrypted
+ * notes keep everything inside note.md → []. Only plain one-level '.md'
+ * filenames survive (no separators, no dot segments, never note.md itself) —
+ * the pull uses this list to fetch the sections of an anchor it applies that
+ * did not travel in the same batch. Mirror: listAnchorSectionFiles in cli/noteflow.js.
+ */
+export function listAnchorSectionFiles(anchorContent: string): string[] {
+  const { frontmatter } = splitFrontmatter(anchorContent)
+  if (!frontmatter) return []
+  let data: unknown
+  try {
+    data = yaml.load(frontmatter)
+  } catch {
+    return []
+  }
+  if (!data || typeof data !== 'object') return []
+  const fm = data as Record<string, unknown>
+  if (fm.encryption || !Array.isArray(fm.sections)) return []
+  const files: string[] = []
+  for (const sec of fm.sections) {
+    if (!sec || typeof sec !== 'object') continue
+    const { id, file } = sec as Record<string, unknown>
+    const name = file != null ? String(file) : id != null ? `${String(id)}.md` : null
+    if (name === null || !isPlainSectionFilename(name) || files.includes(name)) continue
+    files.push(name)
+  }
+  return files
+}
+
+function isPlainSectionFilename(name: string): boolean {
+  return (
+    name.endsWith('.md') &&
+    name !== NOTE_MD &&
+    !name.includes('/') &&
+    !name.includes('\\') &&
+    !name.startsWith('.')
+  )
 }
 
 // ── Timestamps ────────────────────────────────────────────────────────────────
@@ -144,6 +201,28 @@ export function shouldApplyRemoteDir(
 }
 
 /**
+ * Should the pull apply ONE remote section row ('<dir>/<sec>.md', content or
+ * tombstone) on its own, when its folder's anchor is not being applied (absent
+ * from the batch, or not newer than the local one) and the folder exists
+ * locally? Sections inherit the `updated:` of their anchor's version
+ * (resolveRowUpdatedAt), so:
+ *   - `>=` covers "same version, the section reached the server after the
+ *     anchor" (the anchor was applied — or written here — before);
+ *   - a local folder with its own newer edits has a strictly greater
+ *     `updated`, and is respected.
+ * Unparseable/unknown local timestamp → apply (same stance as
+ * shouldApplyRemoteDir); unknown remote timestamp → never apply.
+ */
+export function shouldApplyRemoteSection(
+  sectionUpdatedMs: number | null,
+  localUpdatedMs: number | null
+): boolean {
+  if (sectionUpdatedMs === null) return false
+  if (localUpdatedMs === null) return true
+  return sectionUpdatedMs >= localUpdatedMs
+}
+
+/**
  * Should a remote tombstone delete the local copy? Safety rule shared with the
  * GitHub pull: only when the local `updated` is <= lastSync — i.e. the remote
  * knew this state and deleted it since. Newer local edits win (they'll be
@@ -158,7 +237,7 @@ export function shouldApplyRemoteDeletion(
   return localUpdatedMs <= lastSyncMs
 }
 
-// ── Pull grouping / cursor ────────────────────────────────────────────────────
+// ── Pull grouping / cursor (seq) ──────────────────────────────────────────────
 
 /** Splits decrypted pull entries into note-dir groups + root-level files. */
 export function groupEntriesByDir<T extends { relPath: string }>(
@@ -182,28 +261,59 @@ export function groupEntriesByDir<T extends { relPath: string }>(
   return { dirs, rootFiles }
 }
 
+/** Where the incremental pull starts and whether it reads tombstones. */
+export interface PullPlan {
+  /** Fetch rows with `seq > afterSeq` (0 = every row). */
+  afterSeq: number
+  /** False only for the very first reconcile (`deleted=eq.false`). */
+  includeDeleted: boolean
+}
+
 /**
- * Advances the incremental-pull cursor to the max updated_at reconciled. The
- * cursor is the WATERMARK of remote rows already seen (`updated_at=gt.cursor`),
- * deliberately separate from lastSync (wall clock, deletion-safety rule): rows
- * are timestamped by clients from note frontmatter, so "now" on this device
- * would skip rows another device pushed with slightly older timestamps.
+ * Picks the pull mode from the persisted sync state:
+ *   - `pullSeq` known → incremental from it, tombstones included;
+ *   - no `pullSeq` but a legacy `pullCursor` or a `lastSync` (device coming
+ *     from the updated_at-cursor version) → ONE full reconcile from seq 0,
+ *     tombstones included: it also recovers whatever the old cursor skipped
+ *     (the conflict rules decide what gets applied);
+ *   - nothing (first sync) → full, live rows only — with no lastSync there is
+ *     nothing local that a tombstone could safely delete.
  */
-export function nextPullCursor(
-  current: string | undefined,
-  entries: Array<{ updatedAt: string }>
-): string | undefined {
-  let maxMs = current ? Date.parse(current) : null
-  let maxIso = current
-  for (const e of entries) {
-    const ms = Date.parse(e.updatedAt)
-    if (!Number.isFinite(ms)) continue
-    if (maxMs === null || ms > maxMs) {
-      maxMs = ms
-      maxIso = new Date(ms).toISOString()
-    }
+export function planPullQuery(s: {
+  pullSeq?: number
+  pullCursor?: string
+  lastSync?: string
+}): PullPlan {
+  if (typeof s.pullSeq === 'number' && Number.isSafeInteger(s.pullSeq) && s.pullSeq >= 0) {
+    return { afterSeq: s.pullSeq, includeDeleted: true }
   }
-  return maxIso
+  if (s.pullCursor || s.lastSync) return { afterSeq: 0, includeDeleted: true }
+  return { afterSeq: 0, includeDeleted: false }
+}
+
+/** A row's seq as a safe non-negative integer, or null (bigint may arrive as a string). */
+export function parseRowSeq(value: unknown): number | null {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value
+  return typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 ? n : null
+}
+
+/**
+ * Advances the incremental-pull watermark to the max `seq` of ALL fetched rows
+ * — undecryptable and unsafe-path rows included: they will never become
+ * decryptable/safe, so waiting on them would re-fetch them forever. Starts at
+ * 0 when there was no watermark, so a pull that saw nothing still leaves the
+ * device in seq mode. `seq` is assigned by the server on every write
+ * (migration 0008) and, per user, becomes visible in order — unlike
+ * updated_at, which is the client's EDIT time and would let late uploads fall
+ * below the cursor.
+ */
+export function nextPullSeq(current: number | undefined, rows: Array<{ seq?: unknown }>): number {
+  let max = typeof current === 'number' && Number.isSafeInteger(current) && current >= 0 ? current : 0
+  for (const row of rows) {
+    const seq = parseRowSeq(row.seq)
+    if (seq !== null && seq > max) max = seq
+  }
+  return max
 }
 
 // ── Row crypto (cloudCrypto only — no IO) ─────────────────────────────────────
@@ -220,7 +330,7 @@ export async function buildFileUpsertRow(
   content: string,
   updatedAt: string,
   deleted = false
-): Promise<CloudFileRow> {
+): Promise<CloudFileUpsertRow> {
   return {
     path_key: await derivePathKeyHmac(dek, relPath),
     path_ct: await encryptContent(noteKey, relPath),
@@ -236,7 +346,10 @@ export async function buildFileUpsertRow(
  * tampered blobs (GCM auth). Tombstones (deleted, blank content_ct) decrypt to
  * an empty content — their path_ct/key_ct stay intact server-side.
  */
-export async function decryptFileRow(dek: Uint8Array, row: CloudFileRow): Promise<CloudPullEntry> {
+export async function decryptFileRow(
+  dek: Uint8Array,
+  row: CloudFileUpsertRow
+): Promise<CloudPullEntry> {
   const noteKey = await unwrapKey(row.key_ct, dek)
   const relPath = await decryptContent(noteKey, row.path_ct)
   const content = row.deleted || !row.content_ct ? '' : await decryptContent(noteKey, row.content_ct)

@@ -258,7 +258,7 @@ function applyAccountTransition(plan: AccountTransitionPlan): void {
   let cloudChanged = false
 
   if (plan.disableCloud) {
-    // Keeps lastSync/pullCursor/journal — re-enabling resumes incrementally.
+    // Keeps lastSync/pullSeq/journal — re-enabling resumes incrementally.
     // Releases the mutual exclusion too: GitHub Sync resumes on its next tick.
     cloudSync.disableCloudSync()
     stopCloudAutoSync()

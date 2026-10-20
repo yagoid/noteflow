@@ -415,7 +415,7 @@ Estructura de `settings.json`:
   "cloudSync": {
     "enabled": true,
     "lastSync": "2026-07-10T12:00:00.000Z",
-    "pullCursor": "2026-07-10T11:58:03.214Z",
+    "pullSeq": 18342,
     "encryptedDek": "safe:<solo si safeStorage está disponible — NUNCA base64 fallback>",
     "keysMode": "managed"
   },
