@@ -322,9 +322,10 @@ diferencial de privacidad, no como peaje.
 > versión de la app/CLI que la usa** — un cliente nuevo contra un servidor sin la columna recibe 400
 > en el pull (error visible, sin pérdida de datos); la 0008 es aditiva y los clientes viejos siguen
 > funcionando con ella.
-> ⚠️ Para probar Cloud sin producto en LS existe una **suscripción manual de pruebas** en
-> `subscriptions` (`provider='manual'`, product `cloud`, cuenta del operador) — **borrarla
-> cuando exista el producto Cloud real** (`delete from public.subscriptions where provider = 'manual'`).
+> La suscripción manual de pruebas de Cloud que hubo aquí ya no existe (comprobado 2026-10-19).
+> ⚠️ La única fila `provider='manual'` es la **comp permanente del operador**
+> (`provider_ref='operator-comp'`, ver § 3 "Cuenta del operador"): **no borrar** filas
+> `manual` en bloque.
 
 ### Modos de cifrado (managed | e2ee)
 
