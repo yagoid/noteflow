@@ -36,7 +36,7 @@ Get the latest release from the [Releases page](https://github.com/yagoid/notefl
 - **Windows**: `NoteFlow-X.Y.Z-Setup.exe`
 - **macOS (Apple Silicon)**: `NoteFlow-X.Y.Z-arm64.dmg`
 - **Debian/Ubuntu/Mint**: `noteflow_X.Y.Z_amd64.deb`
-- **Arch/CachyOS/Manjaro**: build from the [`PKGBUILD`](PKGBUILD), or use the AppImage below
+- **Arch/CachyOS/Manjaro**: use the AppImage below (the [`PKGBUILD`](PKGBUILD) is currently not working)
 - **Universal Linux**: `NoteFlow-X.Y.Z.AppImage` (works on any distro)
 
 ### macOS Installation
@@ -66,26 +66,14 @@ chmod +x /Applications/NoteFlow.app/Contents/Resources/cli/noteflow.js
 
 ### Arch/CachyOS Installation
 
-#### Build from the PKGBUILD:
-```bash
-git clone https://github.com/yagoid/noteflow.git
-cd noteflow
-makepkg -si    # uses the system electron
-```
-
-#### Using the AppImage (universal):
+Use the AppImage (it also updates itself in-app):
 ```bash
 wget https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-2.0.0.AppImage
 chmod +x NoteFlow-2.0.0.AppImage
 ./NoteFlow-2.0.0.AppImage
 ```
 
-#### From AUR (if available):
-```bash
-paru -y noteflow    # using paru
-# or
-yay -S noteflow     # using yay
-```
+> The [`PKGBUILD`](PKGBUILD) in this repo is currently **not working** (the installed app is missing its `node_modules` and the native modules are not built for the system `electron`). Use the AppImage until it is fixed.
 
 *[Landing page](https://yagoid.github.io/noteflow/) · [CLI reference](https://yagoid.github.io/noteflow/cli.html)*
 
