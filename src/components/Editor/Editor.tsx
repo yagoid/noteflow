@@ -59,6 +59,7 @@ import { SearchHighlight } from './SearchHighlightExtension'
 import { SectionRelation } from './SectionRelation'
 import { KanbanBoard } from './KanbanBoard'
 import { SlashCommands, getSlashCommands } from './SlashCommands'
+import { AutoCloseBrackets } from './AutoCloseBrackets'
 import { SectionLinkPicker } from './SectionLinkPicker'
 import { EditorToc } from './EditorToc'
 import { useTocItems } from './useEditorToc'
@@ -246,6 +247,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       SearchHighlight,
       SectionRelation,
       KanbanBoard,
+      // `(` → `()` with the caret inside, IDE-style (rules in lib/autoCloseBrackets.ts).
+      AutoCloseBrackets,
       SlashCommands.configure({
         onLinkSection: () => setLinkPickerOpen(true),
         getLabels: () => getSlashCommands(tRef.current),

@@ -512,6 +512,14 @@ sin navegar.
 | Imagen | `![alt](src)` | Drag & drop / Paste |
 | Separador | `---` | — |
 
+### Autocierre de paréntesis (modo rich)
+- Escribir `(` inserta `()` con el cursor en medio; con texto seleccionado (en un mismo párrafo)
+  lo envuelve: `(texto)`, manteniendo la selección.
+- No autocierra si justo a la derecha hay una letra o un dígito (escribir delante de una palabra).
+- Escribir `)` delante de un `)` autoinsertado lo salta en vez de duplicarlo; Backspace en un par
+  vacío autoinsertado `(|)` borra los dos. Los `)` escritos a mano no se saltan ni se borran.
+- Funciona también en bloques de código y código inline. Un solo `Ctrl+Z` deshace el par.
+
 ### Tareas con deadline, alarma e importancia
 Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - **Deadline**: fecha límite (se muestra junto al checkbox).

@@ -559,6 +559,37 @@ justo para ver el caret, que queda pegado al borde inferior (el `padding-bottom:
   8/32 px en `StickyApp.tsx`, con `.sticky-editor .ProseMirror` a `padding-bottom: 2.5rem`): en una
   ventana de 200–300 px las franjas de 40+96 px casi se solaparían.
 
+### Editor: autocierre de paréntesis
+Extensión `components/Editor/AutoCloseBrackets.ts` (registrada en `Editor.tsx`) que envuelve el plugin
+de `src/lib/autoCloseBrackets.ts`; toda la lógica vive en el lib, sin DOM, para testearla contra un
+`EditorState` pelado (`tests/lib/autoCloseBrackets.test.ts`). Solo `()`.
+- `(` vía `handleTextInput`: selección vacía → `()` con el caret dentro (no si el carácter siguiente
+  es letra/dígito, `shouldAutoClose`); selección de texto dentro de un mismo textblock → la envuelve y
+  la mantiene seleccionada. Cada caso es **una transacción** (un `Ctrl+Z`).
+- **Solo los `)` autoinsertados** se saltan al teclear `)` o se borran en pareja con Backspace en
+  `(|)`: el plugin guarda cada par como `{open, close}` (posiciones del `(` y del `)`, mapeadas por
+  cada transacción con assoc 1) y lo olvida en cuanto deja de estar "vivo": el caret sale del par por
+  cualquier lado (queda fuera de `[open+1, close]`), hay selección, el `(` y el `)` ya no están en el
+  mismo textblock, o cualquiera de los dos desaparece. Lo borrado se detecta **releyendo el carácter**
+  en la posición mapeada (`mapResult().deletedAfter` no sirve: también marca una inserción pura en esa
+  posición, p. ej. escribir justo tras el `(`). Así un `)` escrito a mano, pegado o restaurado por undo
+  nunca se salta ni se borra, ni tampoco uno cuyo `(` se haya borrado (`ab(|)` → `Supr` sobre el `(`
+  → `ab|)` → teclear `)` da `ab))`).
+- Backspace va por `addKeyboardShortcuts` con `priority: 200` (por encima del keymap core, prioridad
+  100); solo actúa dentro de un par vacío autoinsertado.
+- Aplica **en todas partes**, también bloques de código y código inline (donde más se usan los
+  paréntesis). No actúa durante composición IME (`view.composing`); con Ctrl/Meta no llega
+  `handleTextInput`. No choca con el `/` de `SlashCommands`.
+- **Input rules:** el plugin de input rules de TipTap va **siempre antes** que cualquier plugin de
+  extensión en `handleTextInput`. Ninguna regla termina en `(`, pero la de imagen (`![alt](src)`)
+  termina en `)`: al teclear ese `)` delante del autoinsertado, la regla se lo come antes de que
+  nuestro salto actúe y dejaría el `)` colgando tras la imagen. `dropClosedByInputRule`
+  (`appendTransaction`) lo borra: detecta la transacción de la regla por su meta (clave = el plugin
+  con `spec.isInputRules`, `text: ')'`). Al ser transacción anexada, el historial la agrupa con la
+  regla (un `Ctrl+Z`). Efecto lateral menor: como la transacción anexada cambia el doc, el estado del
+  plugin de input rules se resetea y **Backspace ya no revierte la imagen** a texto (`undoInputRule`)
+  en ese caso; `Ctrl+Z` sí.
+
 ### Editor: índice flotante (table of contents)
 Índice estilo Notion de los **H1–H3** de la sección abierta, en el borde derecho del área de scroll
 del editor rich. Piezas: `lib/tocUtils.ts` (lógica pura con tests en `tests/lib/tocUtils.test.ts`:
