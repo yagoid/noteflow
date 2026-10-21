@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isUnsafeEncryptedSectionsWrite, redecryptWithSession, type DecryptFn } from '../../src/lib/encryptedSession'
+import { isUnsafeEncryptedSectionsWrite, redecryptWithSession, relockNotes, type DecryptFn } from '../../src/lib/encryptedSession'
 import type { Note, NoteSection } from '../../src/types'
 
 const encryption = { v: 1 } as unknown as NonNullable<Note['encryption']>
@@ -61,5 +61,24 @@ describe('isUnsafeEncryptedSectionsWrite', () => {
   it('allows normal writes of decrypted encrypted notes and any plain note', () => {
     expect(isUnsafeEncryptedSectionsWrite(note('a', { encryption, sections }), sections)).toBe(false)
     expect(isUnsafeEncryptedSectionsWrite(note('p'), [])).toBe(false)
+  })
+})
+
+describe('relockNotes', () => {
+  const sections: NoteSection[] = [{ id: 's1', name: 'Main', content: 'secret' }]
+
+  it('drops the decrypted sections of the encrypted notes listed, and only those', () => {
+    const failed = note('a', { encryption, sections })
+    const stillUnlocked = note('b', { encryption, sections })
+    const plain = note('c', { sections })
+    const result = relockNotes([failed, stillUnlocked, plain], ['a', 'c'])
+    expect(result[0]).toEqual({ ...failed, sections: [] })
+    expect(result[1]).toBe(stillUnlocked)
+    expect(result[2]).toBe(plain) // not encrypted (anymore): nothing to lock
+  })
+
+  it('returns the same list when nothing failed', () => {
+    const list = [note('a', { encryption, sections })]
+    expect(relockNotes(list, [])).toBe(list)
   })
 })

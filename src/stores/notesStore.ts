@@ -19,7 +19,8 @@ import { duplicateSectionInList, patchSectionInList } from '../lib/sectionUtils'
 import { createKeyedQueue } from '../lib/keyedQueue'
 import { flushPendingEdits, hasPendingEdits } from '../lib/pendingEdits'
 import { hoursFromNow, TEMP_NOTE_DEFAULT_HOURS } from '../lib/dateUtils'
-import { isUnsafeEncryptedSectionsWrite, redecryptWithSession } from '../lib/encryptedSession'
+import { isUnsafeEncryptedSectionsWrite, redecryptWithSession, relockNotes } from '../lib/encryptedSession'
+import { keepNotesChangedDuringLoad } from '../lib/reloadGuard'
 import {
   type OpenPane,
   type PaneLayout,
@@ -347,6 +348,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   loadNotes: async () => {
     set({ isLoading: true })
     try {
+      // Store snapshot BEFORE the reads: a local write landing while we read/decrypt is
+      // newer than the disk copy we got — see keepNotesChangedDuringLoad (lib/reloadGuard).
+      const notesBeforeRead = get().notes
       const [dir, allDirs, uiState] = await Promise.all([
         window.noteflow.getNotesDir(),
         window.noteflow.readAllNotes(),
@@ -363,21 +367,33 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       )
       // Encrypted notes unlocked in this session come back from disk locked (sections: []):
       // decrypt them again, or relock the ones that no longer decrypt (see encryptedSession.ts).
-      const { notes, failed } = await redecryptWithSession(parsed, get().sessionPasswords, decryptSections)
+      const { notes: loaded, failed } = await redecryptWithSession(parsed, get().sessionPasswords, decryptSections)
       if (failed.length > 0) dropSessionPasswords(set, failed)
 
       // Safety guard: if we got 0 notes but already had notes in memory, this is
       // likely a transient FS issue (e.g. Windows returning an empty dir on OS
       // wake from sleep). Don't wipe in-memory notes — they're still on disk.
-      if (notes.length === 0 && get().notes.length > 0) {
+      if (loaded.length === 0 && get().notes.length > 0) {
         set({ isLoading: false })
         return
       }
+
+      // Notes written in memory during the load keep that copy (never go backwards);
+      // re-synced once set, so a newer disk version of them still lands. Computed right
+      // before the synchronous set()s below — no await in between.
+      const { notes: merged, resync } = keepNotesChangedDuringLoad(
+        notesBeforeRead, get().notes, loaded, (inMemory, read) => noteFingerprint(inMemory) === noteFingerprint(read),
+      )
+      // A kept copy of a note whose session password was just dropped (`failed`) still
+      // holds the plaintext: lock it like the loaded copy.
+      const notes = relockNotes(merged, failed)
+      const resyncChanged = () => { for (const filePath of resync) void get().syncNote(filePath) }
 
       // A section window owns its single pane (SectionWindowApp sets it); it never takes
       // the main window's persisted active note nor schedules alarms.
       if (windowRole === 'section') {
         set({ notes, isLoading: false })
+        resyncChanged()
         return
       }
 
@@ -408,6 +424,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
           pendingInitialSectionId: uiState.activeSectionId ?? null,
         })
       }
+
+      resyncChanged()
 
       // Register alarms with main process after notes are loaded
       window.noteflow.scheduleAlarms(collectAlarms(notes))

@@ -58,6 +58,37 @@ describe('pendingEdits', () => {
     expect(saves).toEqual([])
   })
 
+  it('tells the save whether its timer elapsed or it was flushed', () => {
+    const slot = createDebouncedSave()
+    const runs: string[] = []
+    slot.schedule('n1', 400, (run) => runs.push(run))
+    vi.advanceTimersByTime(400)
+    slot.schedule('n1', 400, (run) => runs.push(run))
+    slot.flush()
+    slot.schedule('n1', 400, (run) => runs.push(run))
+    flushPendingEdits('n1') // window closing / pruning
+    slot.schedule('a', 400, (run) => runs.push(run), 'a/s1')
+    slot.schedule('a', 400, () => {}, 'a/s2') // another target runs the pending one now
+    expect(runs).toEqual(['timer', 'flush', 'flush', 'flush'])
+  })
+
+  it('isPending reflects an armed debounce (false again once it ran, was flushed or cancelled)', () => {
+    const slot = createDebouncedSave()
+    let seenWhileRunning: boolean | null = null
+    expect(slot.isPending()).toBe(false)
+    slot.schedule('n1', 400, () => { seenWhileRunning = slot.isPending() })
+    expect(slot.isPending()).toBe(true)
+    vi.advanceTimersByTime(400)
+    expect(slot.isPending()).toBe(false)
+    expect(seenWhileRunning).toBe(false)
+    slot.schedule('n1', 400, () => {})
+    slot.flush()
+    expect(slot.isPending()).toBe(false)
+    slot.schedule('n1', 400, () => {})
+    slot.cancel()
+    expect(slot.isPending()).toBe(false)
+  })
+
   it('runs (does not drop) a pending save for another target when rescheduled', () => {
     const slot = createDebouncedSave()
     const saves: string[] = []

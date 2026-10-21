@@ -20,25 +20,30 @@ export function isEditorWidgetTarget(target: unknown): boolean {
   return typeof el?.closest === 'function' && el.closest(EDITOR_WIDGET_SELECTOR) != null
 }
 
+const FIELD_TAGS = new Set(['TEXTAREA', 'INPUT', 'SELECT'])
+
 /**
- * Whether the user is working inside this editor: ProseMirror itself has focus,
- * or focus sits on anything inside its DOM — e.g. a kanban board root or a card
- * textarea, which ProseMirror doesn't count as focused (`editor.isFocused` is
- * false there). The external-content sync must skip while this is true: the
- * debounced save makes the store lag behind the editor, and resetting the
- * content then would drop the edits made in between.
+ * Whether focus sits in a text field of a NodeView widget inside this editor —
+ * e.g. an open kanban card textarea, whose uncommitted draft lives outside
+ * ProseMirror (`editor.isFocused` is false there). The external-content sync
+ * defers replacing the document meanwhile and re-runs once focus leaves it
+ * (the field commits on that blur). Focus on the board root itself doesn't
+ * count: there's no draft to protect, and deferring would let the next board
+ * edit save the stale document.
  *
- * The DOM branch only counts while the document has focus (pass
- * `document.hasFocus()`): activeElement stays on the board root after the
- * window goes to the background, and skipping then would leave the editor stale
- * against updates from a sticky window or a sync pull (the next board edit would
- * save the stale content over them). An open card field commits on that blur.
+ * Only counts while the document has focus (pass `document.hasFocus()`):
+ * activeElement stays put after the window goes to the background, and an open
+ * card field commits on that blur anyway.
  */
-export function editorOwnsFocus(
-  proseMirrorFocused: boolean,
+export function widgetFieldHasFocus(
   documentHasFocus: boolean,
   viewDom: { contains(node: unknown): boolean },
   active: unknown,
 ): boolean {
-  return proseMirrorFocused || (documentHasFocus && active != null && viewDom.contains(active))
+  if (!documentHasFocus || active == null || !viewDom.contains(active)) return false
+  const { tagName, type } = active as { tagName?: unknown; type?: unknown }
+  if (typeof tagName !== 'string' || !FIELD_TAGS.has(tagName.toUpperCase())) return false
+  // A checkbox holds no draft (it applies on click).
+  if (type === 'checkbox' || type === 'radio') return false
+  return isEditorWidgetTarget(active)
 }

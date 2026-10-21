@@ -29,6 +29,13 @@ import { ownsKeys } from '../../lib/keyScope'
 import { SectionNameField } from './SectionNameField'
 import { TempNoteExpiryMenu } from './TempNoteExpiryMenu'
 import { createDebouncedSave } from '../../lib/pendingEdits'
+import {
+  createContentSync, mapOffsetThroughChange, needsSave, recordSave, resolveExternalContent, type ContentSync,
+} from '../../lib/externalContentSync'
+
+/** Raw textarea text: base64 image data shown as `[image]` (restored on change). */
+const rawDisplay = (content: string) =>
+  content.replace(/!\[([^\]]*)\]\(data:[^)]+\)/g, (_, alt) => `![${alt}]([image])`)
 
 // ---------------------------------------------------------------------------
 // Confirm modal state type
@@ -172,6 +179,17 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
 
   // Raw mode debounced save (for sorting: save to store while typing)
   const [rawSave] = useState(createDebouncedSave)
+  // Base + outbox of the raw buffer's saves, for the section it shows (`key` =
+  // noteId/sectionId): tells their echoes from external updates (lib/externalContentSync).
+  const rawSyncRef = useRef<{ key: string; sync: ContentSync } | null>(null)
+  // Textarea selection to restore after an external update replaced the buffer.
+  const rawSelectionRef = useRef<{ start: number; end: number } | null>(null)
+  // IME composition running in the textarea (dead keys, accents): an external update
+  // isn't applied meanwhile (replacing the value breaks it) but deferred to its end.
+  const rawComposingRef = useRef(false)
+  const rawDeferredRef = useRef(false)
+  const rawRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current) }, [])
 
   // Debounced saves are registered in lib/pendingEdits (pruning a note or closing the
   // window flushes them first) and flushed when this editor goes away.
@@ -336,14 +354,59 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   }, [note?.id])
 
   // ── Sync raw buffer with store updates (external changes) ──────────────────
-  // Skip if the textarea is focused — same guard as TipTap uses — to avoid
-  // resetting the cursor position while the user is actively typing.
-  useEffect(() => {
-    if (rawTextareaRef.current === document.activeElement) return
-    if (activeSection && activeSection.content !== rawContent) {
-      setRawContent(activeSection.content)
+  // Same rule as the rich editor (Editor.tsx): also while the textarea is focused —
+  // skipping then left the buffer stale and the next save (or just its blur) wrote
+  // the old text over the update. Echoes of our own saves are ignored, genuine
+  // external content is applied when no raw edit is in flight, or merged with it
+  // (and the merge saved). The caret is kept across the replacement. The section's raw
+  // undo/redo history is dropped instead of recording the pre-update text: Ctrl+Z must
+  // not silently revert the external change and save that (same rule as the rich editor).
+  const rawKey = note && activeSection ? `${note.id}/${activeSection.id}` : null
+  const syncRawFromStore = () => {
+    if (!rawKey || !activeSection) return
+    const incoming = activeSection.content
+    const tracked = rawSyncRef.current
+    if (tracked?.key !== rawKey) {
+      // Another section in the buffer, just loaded (no edit of it yet): follow the store.
+      rawSyncRef.current = { key: rawKey, sync: createContentSync(incoming) }
+      rawDeferredRef.current = false
+      if (rawContent !== incoming) setRawContent(incoming)
+      return
     }
-  }, [activeSection?.content]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (rawComposingRef.current) {
+      rawDeferredRef.current = true
+      return
+    }
+    rawDeferredRef.current = false
+    const result = resolveExternalContent(tracked.sync, { incoming, current: rawContent, pending: rawSave.isPending() })
+    if (result.kind !== 'apply' && result.kind !== 'merge') return
+    const next = result.kind === 'apply' ? incoming : result.merged
+    undoStackMap.current.delete(activeSection.id)
+    redoStackMap.current.delete(activeSection.id)
+    lastUndoPushRef.current.delete(activeSection.id)
+    const textarea = rawTextareaRef.current
+    if (textarea && textarea === document.activeElement) {
+      const before = rawDisplay(rawContent)
+      const after = rawDisplay(next)
+      rawSelectionRef.current = {
+        start: mapOffsetThroughChange(before, after, textarea.selectionStart),
+        end: mapOffsetThroughChange(before, after, textarea.selectionEnd),
+      }
+    }
+    setRawContent(next)
+    if (result.kind === 'merge') scheduleRawSave(next)
+  }
+  useEffect(() => syncRawFromStore(), [rawKey, activeSection?.content]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Latest closure, for the composition-end retry (handlers may hold an older render's).
+  const syncRawFromStoreRef = useRef(syncRawFromStore)
+  useEffect(() => { syncRawFromStoreRef.current = syncRawFromStore })
+
+  // A controlled textarea whose value is replaced puts the caret at the end.
+  useLayoutEffect(() => {
+    const selection = rawSelectionRef.current
+    rawSelectionRef.current = null
+    if (selection) rawTextareaRef.current?.setSelectionRange(selection.start, selection.end)
+  }, [rawContent])
 
   // ── Sync title draft with external store updates ──────────────────────────
   // The per-note init effect only runs on note.id change, so a title updated in the
@@ -361,10 +424,6 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   // Keep a ref to note so handlers always see the latest value
   const noteRef = useRef(note)
   useEffect(() => { noteRef.current = note })
-
-  // Keep a ref to rawContent so event handlers always see the latest value
-  const rawContentRef = useRef(rawContent)
-  useEffect(() => { rawContentRef.current = rawContent }, [rawContent])
 
   // Focus rename input when it appears. We also depend on the section actually
   // being present in the rendered list: for a brand-new section, updateNote is
@@ -439,6 +498,29 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     }
   }, [])
 
+  // Debounced save of the raw buffer to the section shown now — every local raw
+  // edit goes through here, so "a raw edit is pending" == rawSave.isPending().
+  // Target captured now: when the save fires the pane may show another note.
+  const scheduleRawSave = (content: string) => {
+    const target = noteRef.current
+    const sectionId = activeSection?.id
+    if (!target || !sectionId) return
+    const key = `${target.id}/${sectionId}`
+    rawSave.schedule(target.id, 600, () => {
+      // Only the section the buffer still shows tracks its echoes.
+      // There, compare with our last write still in flight, not the store: Backspace
+      // back to the store's text while that write is queued must still be written.
+      const tracked = rawSyncRef.current
+      if (tracked?.key === key) {
+        const stored = useNotesStore.getState().notes.find((n) => n.id === target.id)
+          ?.sections.find((s) => s.id === sectionId)?.content ?? ''
+        if (!needsSave(tracked.sync, content, stored)) return
+        recordSave(tracked.sync, content, stored)
+      }
+      void updateSection(target.id, sectionId, { content })
+    }, key)
+  }
+
   const openDeleteNoteModal = useCallback(() => {
     if (!note) return
     setModal({
@@ -467,11 +549,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     const pos = textarea?.selectionStart ?? rawContent.length
     const newValue = rawContent.substring(0, pos) + insertText + rawContent.substring(pos)
     setRawContent(newValue)
-    // Target captured now: when the save fires the pane may show another note.
-    const target = noteRef.current
-    if (!target) return
-    const sectionId = activeSection.id
-    rawSave.schedule(target.id, 600, () => { void updateSection(target.id, sectionId, { content: newValue }) }, `${target.id}/${sectionId}`)
+    scheduleRawSave(newValue)
   }, [rawContent, activeSection, updateSection]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Detect tab overflow to reposition + button ───────────────────────────
@@ -694,8 +772,11 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
         setRawContent(section.content)
         void updateSection(n.id, sectionId, { isRawMode: true })
       } else {
-        rawSave.cancel()
-        void updateSection(n.id, sectionId, { content: rawContentRef.current, isRawMode: false })
+        // A pending raw edit is written first (same write queue, in order). The buffer
+        // isn't written as such: with nothing pending it just mirrors the store, and
+        // writing it could revert an update that hasn't reached it yet.
+        rawSave.flush()
+        void updateSection(n.id, sectionId, { isRawMode: false })
       }
     }
     const handleOpenStickySection = () => {
@@ -781,9 +862,10 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   // Each Editor instance is keyed by section, so `activeSection` here is the section
   // this content belongs to. updateSection merges onto the LATEST sections: a write from
   // this pane never carries a stale copy of a section another pane/window is editing.
+  // No "same as the store" short-circuit here: Editor only calls this for a real change
+  // (it compares with its last save still in flight, which the store may not show yet).
   const handleSectionContentChange = (content: string) => {
     if (!activeSection) return
-    if (activeSection.content === content) return
     void updateSection(note.id, activeSection.id, { content })
   }
 
@@ -864,8 +946,9 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
       setRawContent(activeSection.content)
       void updateSection(note.id, activeSection.id, { isRawMode: true })
     } else {
-      rawSave.cancel()
-      void updateSection(note.id, activeSection.id, { content: rawContent, isRawMode: false })
+      // Pending raw edit first; never the buffer as such (see handleToggleRaw).
+      rawSave.flush()
+      void updateSection(note.id, activeSection.id, { isRawMode: false })
     }
   }
 
@@ -881,10 +964,9 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
 
     setSectionColorPickerId(null)
 
-    if (rawMode && activeSection) {
-      rawSave.cancel()
-      void updateSection(note.id, activeSection.id, { content: rawContent })
-    }
+    // Writes a pending raw edit of the section we leave (only a real local edit: the
+    // buffer may be a stale mirror of an update still on its way to it).
+    if (rawMode) rawSave.flush()
 
     const newContent = note.sections.find((s) => s.id === sectionId)?.content ?? ''
     setRawContent(newContent)
@@ -909,10 +991,8 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     const currentNote = noteRef.current
     const source = currentNote?.sections.find((s) => s.id === sectionId)
     if (!currentNote || !source) return
-    if (rawMode && activeSection) {
-      rawSave.cancel()
-      await updateSection(currentNote.id, activeSection.id, { content: rawContentRef.current })
-    }
+    // Its write is queued before the duplicate's (same per-note write queue).
+    if (rawMode) rawSave.flush()
     const copy = await duplicateSection(currentNote.id, sectionId, tf(t.common.sectionCopyName, { name: baseName ?? source.name }))
     if (!copy) return
     setRawContent(copy.content)
@@ -1101,18 +1181,10 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
 
     if (activeSection) pushToUndoStack(activeSection.id, rawContent)
     setRawContent(newContent)
-    // Target captured now: when the save fires the pane may show another note.
-    const target = noteRef.current
-    if (activeSection && target) {
-      const sectionId = activeSection.id
-      rawSave.schedule(target.id, 600, () => { void updateSection(target.id, sectionId, { content: newContent }) }, `${target.id}/${sectionId}`)
-    }
+    scheduleRawSave(newContent)
   }
 
-  const displayContent = rawContent.replace(
-    /!\[([^\]]*)\]\(data:[^)]+\)/g,
-    (_, alt) => `![${alt}]([image])`
-  )
+  const displayContent = rawDisplay(rawContent)
 
   const handleRawKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const sectionId = activeSection?.id
@@ -1127,6 +1199,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
         const redoStack = redoStackMap.current.get(sectionId) ?? []
         redoStackMap.current.set(sectionId, [...redoStack, rawContent])
         setRawContent(prev)
+        scheduleRawSave(prev)
       }
       return
     }
@@ -1140,18 +1213,16 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
         const undoStack = undoStackMap.current.get(sectionId) ?? []
         undoStackMap.current.set(sectionId, [...undoStack, rawContent])
         setRawContent(next)
+        scheduleRawSave(next)
       }
       return
     }
   }
 
 
-  const handleRawBlur = () => {
-    rawSave.cancel()
-    if (activeSection && activeSection.content !== rawContent) {
-      void updateSection(note.id, activeSection.id, { content: rawContent })
-    }
-  }
+  // Writes only a real local edit (a pending save): the buffer differing from the
+  // store isn't one — it may be a stale mirror of an update that hasn't reached it.
+  const handleRawBlur = () => rawSave.flush()
 
   // ── Encrypted note — locked view ───────────────────────────────────────────
   // Also when a session password exists but the sections aren't decrypted in memory
@@ -1704,6 +1775,17 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
                 onChange={handleRawChange}
                 onBlur={handleRawBlur}
                 onKeyDown={handleRawKeyDown}
+                onCompositionStart={() => { rawComposingRef.current = true }}
+                onCompositionEnd={() => {
+                  rawComposingRef.current = false
+                  // After the composed text's own change has rendered.
+                  if (!rawDeferredRef.current) return
+                  if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current)
+                  rawRetryTimerRef.current = setTimeout(() => {
+                    rawRetryTimerRef.current = null
+                    syncRawFromStoreRef.current()
+                  }, 0)
+                }}
                 onPaste={(e) => {
                   const imageItems = Array.from(e.clipboardData.items).filter(i => i.type.startsWith('image/'))
                   if (imageItems.length === 0) return

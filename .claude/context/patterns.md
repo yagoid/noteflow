@@ -426,17 +426,17 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     Backspace… no llegan a los handlers del editor/NoteEditor); las combinaciones con Ctrl/Meta siguen
     burbujeando (atajos globales, tamaño de fuente). Tras aplicar algo desde un menú/picker el foco
     vuelve a la raíz del tablero (Ctrl+Z inmediato); si se descartan, el foco queda donde se clicó.
-  - **Foco = "editando" aunque ProseMirror no lo crea (regla en `Editor.tsx`):** con el foco en la raíz
-    del tablero o en un campo de tarjeta, `editor.isFocused` es `false`. El efecto que sincroniza
-    `content` externo (`setContent`) se salta si **`editorOwnsFocus`** (`src/lib/editorFocus.ts`):
-    ProseMirror enfocado **o** (`document.hasFocus()` **y** `document.activeElement` dentro de
-    `editor.view.dom` — el NodeView vive dentro). La condición de `hasFocus()` es necesaria:
-    `activeElement` se queda en la raíz del tablero cuando la ventana pasa a segundo plano, y sin ella
-    se saltarían los cambios de una ventana sticky o de un pull de sync (el efecto solo re-corre al
-    cambiar `content`, así que el editor quedaría desfasado y la siguiente edición del tablero guardaría
-    lo viejo encima). Un campo de tarjeta abierto commitea por su `onBlur` al perder la ventana el foco. Sin esto había una carrera: edición A → el debounce guarda md_A (lento en notas cifradas,
-    PBKDF2) → edición B → llega `content = md_A` → `setContent(md_A)` y B se perdía (y se re-guardaba
-    md_A). Los popups portalados a `<body>` no cuentan, pero al aplicar devuelven el foco a la raíz.
+  - **Sync externo con el tablero enfocado:** el contenido externo se aplica también con el foco en el
+    editor (ver "Sync de contenido externo en los editores"; allí también la composición IME). Excepción: con el foco en un
+    **campo de texto** de un widget de NodeView (textarea/input de una tarjeta abierta:
+    **`widgetFieldHasFocus`** en `src/lib/editorFocus.ts`, solo si `document.hasFocus()`), el borrador
+    vive en React fuera de ProseMirror y no se reemplaza el documento: se marca como diferido y se
+    reintenta en `focusout` del DOM del editor (tras un `setTimeout(0)`, después del commit por
+    `onBlur` del campo) y en `blur` de la ventana. Si mientras tanto hay una edición local (Enter en el
+    compositor commitea y deja el campo abierto), `saveContent` funde primero lo diferido (merge) antes
+    de guardar — si no, se guardaría el documento viejo encima. Con el foco en la **raíz** del tablero
+    no se difiere (no hay borrador; diferir dejaría que la siguiente operación del tablero guardase lo
+    viejo). Los popups portalados a `<body>` no cuentan, pero al aplicar devuelven el foco a la raíz.
   - **Handlers del wrapper de `Editor.tsx`** (`onPaste`/`onDrop` de imágenes, `onKeyDown` con
     Ctrl+Shift+B / Enter tras HR) **ignoran** eventos nacidos en widgets de NodeView o sus popups
     (`isEditorWidgetTarget`: `[data-kanban-interactive]`, `.kanban-menu`, pickers de tarea): actúan
@@ -654,7 +654,7 @@ del editor rich. Piezas: `lib/tocUtils.ts` (lógica pura con tests en `tests/lib
 - **Extracción:** `doc.descendants` sin bajar a textblocks (barato en notas grandes); vacíos y
   niveles fuera de 1–3 se descartan; la sangría es relativa al nivel más alto presente (una sección
   solo con H2/H3 empieza sin sangría). Se recalcula en cualquier transacción con `docChanged`
-  (debounce 200 ms) — no en el evento `update`, que `setContent(…, false)` del sync externo no emite —
+  (debounce 200 ms) — no en el evento `update`, que la transacción del sync externo (`preventUpdate`) no emite —
   y solo re-renderiza si cambia la firma (`tocSignature`).
 - **Reserva de espacio solo para el indicador:** el scroller recibe `.editor-has-toc` y
   `--toc-reserve` (`TOC_RESERVE` = 44 px) e `index.css` lo convierte en `padding-right` del
@@ -804,6 +804,18 @@ del otro con su copia vieja. Invariantes actuales (`notesStore.ts`):
   Simétrico en `syncNote`: si la nota del store cambió durante sus `await` (lectura del disco o
   re-descifrado) por una escritura local, NO la pisa con su copia vieja y relee **una** vez (la
   escritura local llega al disco antes que al store); si vuelve a cambiar, se salta.
+  **Lo mismo en `loadNotes`** (recarga completa: pull, Cloud, otra ventana): guarda `get().notes` antes
+  de leer y, al hacer `set`, toda nota cuyo objeto del store cambió durante la carga (IPC + PBKDF2 del
+  re-descifrado) **conserva la copia en memoria** — o sigue borrada; una creada durante la carga
+  también se conserva — y después se le hace `syncNote` para recoger una versión del disco más nueva
+  (`keepNotesChangedDuringLoad` en `lib/reloadGuard.ts`, tests en `tests/lib/reloadGuard.test.ts`;
+  una copia cambiada con la misma huella, `noteFingerprint`, toma la cargada sin re-sync). Invariante:
+  **el store nunca retrocede** por una recarga: los editores ya consumieron esa escritura como eco
+  propio, y volver a la versión vieja la aplicaría (o la fusionaría duplicando una línea). Aplica en
+  todas las ramas de `set({ notes })` (también la de ventana de sección); la guarda de "0 notas" no
+  toca `notes`. Una copia conservada de una nota cuya contraseña de sesión se acaba de quitar
+  (`failed` del re-descifrado) se **re-bloquea** (`relockNotes`, `sections: []`): no queda texto plano
+  en memoria sin contraseña.
 - **Notas cifradas — invariante:** NO se editan entre ventanas. El desbloqueo es por proceso (la
   contraseña de sesión vive en `sessionPasswords` del store de cada ventana) y cada escritura
   re-cifra el blob ENTERO desde las secciones en memoria de quien escribe. Por eso: la ventana de
@@ -822,6 +834,8 @@ del otro con su copia vieja. Invariantes actuales (`notesStore.ts`):
 - **Título:** el borrador del título solo se protege de actualizaciones del store si está *sucio*
   (`titleDirtyRef`) y el blur solo escribe si está sucio — un input enfocado pero inactivo (p. ej. en
   otra ventana) sigue el título editado en otro panel y no lo revierte al perder el foco.
+- **Contenido de la sección abierta:** los editores (rich, raw, sticky) aplican o fusionan el contenido
+  externo también con el foco puesto — ver "Sync de contenido externo en los editores".
 - **Riesgo residual asumido:** cambios estructurales simultáneos en dos procesos (p. ej. borrar una
   sección en una ventana mientras la otra escribe `note.md` con la lista vieja en el mismo instante)
   pueden dejar `note.md` con una sección cuyo fichero ya no existe; mismo riesgo que ya había con stickies.
@@ -910,6 +924,76 @@ paneles, cada uno en su sección. La lógica de layout es pura y testeada (`test
   de la app): best effort, el IPC sale tras el handler salvo que haya otra escritura de esa nota en
   vuelo o la nota esté cifrada (la escritura espera a `encryptSections` y puede no salir). Si la nota
   vuelve a ser la activa mientras el prune espera en la cola, no se borra. Tests en `tests/lib/pendingEdits.test.ts`.
+- **Sync de contenido externo en los editores (`lib/externalContentSync.ts`):** cuando el store trae
+  otro `content` para la sección abierta (otro panel/ventana, pull de GitHub, NoteFlow Cloud realtime,
+  CLI), antes se **saltaba** si el editor tenía el foco (para no pisar lo tecleado tras un guardado
+  aún en cola) y el efecto no volvía a correr: la siguiente pulsación guardaba el texto viejo encima
+  del remoto, sin aviso (bug B1). Ahora cada editor distingue **ecos de sus propios guardados** de
+  actualizaciones genuinas:
+  - **Outbox:** cada guardado que entrega al store (`recordSave`) se apunta. Comparación **exacta**,
+    espacios incluidos (`sameContent`): los ficheros de sección se escriben tal cual, así que indentar la
+    primera línea o añadir/quitar una línea en blanco inicial es un cambio que hay que guardar; solo se
+    normaliza lo que normaliza una relectura del disco (BOM, CRLF → LF), para que un eco que vuelve vía
+    `loadNotes` siga casando. **"No hay nada que guardar"** = igual a lo **último entregado** (`lastHandedOff` /
+    `needsSave`: la última entrada del outbox, o el store si no hay nada en vuelo), **no** al store: con
+    "ab" aún en cola, Backspace vuelve al "a" del store y ese "a" hay que escribirlo (si no, aterriza "ab"
+    y el editor muestra "a"). Lo decide el propio editor (`saveContent` de `Editor.tsx`, `scheduleRawSave`
+    del raw y del sticky); por eso `handleSectionContentChange` (NoteEditor) y `handleContentChange`
+    (sticky) ya **no** comparan con el store. Lo que no cambia nada no se apunta (no habrá eco, y una
+    entrada rancia se tragaría luego una actualización que volviera a él). `OUTBOX_LIMIT` = 200, muy por
+    encima de lo alcanzable con guardados con debounce: una entrada desalojada cuyo eco sí llegara se
+    tomaría por externa y se fusionaría duplicando texto. Cubre la carrera que motivó
+    el salto: edición A → se guarda md_A (cola async; lenta en notas cifradas, PBKDF2) → edición B →
+    llega `content = md_A` → es **eco**, se ignora (antes un `setContent(md_A)` perdía B).
+  - **Decisión** (`decideExternalContent` / `resolveExternalContent`, tests en
+    `tests/lib/externalContentSync.test.ts`): **echo** si coincide con una entrada del outbox (la más
+    antigua; se descartan ella y las anteriores) → no se toca nada; **same** si el editor ya lo muestra
+    (en rich, también si el doc parseado `eq` el actual: otra serialización del mismo doc no mueve el
+    caret); **apply** si no hay edición local en vuelo → se aplica **aunque tenga el foco**; **merge**
+    si hay debounce pendiente (`DebouncedSave.isPending()`) **o** un guardado propio aún sin eco
+    (outbox no vacío: aplicar tal cual lo quitaría del editor y luego aterrizaría encima del remoto).
+    El `base` = lo último que el store confirmó (inicial, eco, apply o merge); cada decisión lo
+    rebasa al `incoming`. Un apply solo ocurre con el outbox vacío; un merge lo conserva (los ecos
+    tardíos de los guardados en vuelo se siguen reconociendo).
+  - **Composición IME** (teclas muertas, acentos): mientras dura no se reemplaza el contenido (rompería
+    la composición). Rich: `view.composing` → se difiere como el kanban y se reintenta en
+    `compositionend` (+50 ms: ProseMirror lee el texto compuesto poco después); un guardado con algo
+    diferido durante la composición se reprograma si lo disparó el **timer**; si es un **flush**
+    (desmontaje, cierre de ventana, poda: `SaveRun` = `'flush'`, que `createDebouncedSave` pasa al
+    callback) no puede esperar — se escaparía del flush y se perderían las últimas pulsaciones —: funde
+    lo diferido aunque haya composición y guarda. Raw y sticky: `compositionstart/end` en el textarea;
+    se reintenta al terminar.
+  - **`merge3(base, local, remote)`:** diff de líneas propio (Myers tras recortar prefijo/sufijo
+    comunes; más de 2000 líneas distintas → un único hunk) + diff3. Cambios en líneas distintas (también
+    adyacentes) se funden; el mismo cambio en ambos lados sale una vez; si se solapan **no se pierde
+    ninguno**: versión local seguida de la remota (`conflict: true`, sin UI por ahora). El resultado es
+    contenido local nuevo: se muestra y se (re)programa su guardado. En rich se fusiona en la
+    serialización del editor (`normalize` pasa base y remoto por parse → `htmlToMarkdown`).
+  - **Rich (`Editor.tsx`):** `replaceDocKeepingSelection` reemplaza solo el rango cambiado
+    (`findDiffStart`/`findDiffEnd`, como hace prosemirror-view; si el slice no reconstruye el doc
+    exacto, reemplazo completo), con `preventUpdate` (no dispara el guardado) y `addToHistory: false`
+    (Ctrl+Z no revierte en silencio el cambio remoto y lo guarda; el undo de ediciones fuera del rango
+    sigue funcionando). Selección: antes del cambio se queda, después se desplaza el delta, dentro va al
+    inicio del cambio; no roba el foco. Excepción del kanban: ver "Sync externo con el tablero enfocado".
+  - **Raw (`NoteEditor.tsx`):** misma regla para el buffer `rawContent` (sync por `noteId/sectionId`;
+    al cambiar de sección se reinicia siguiendo al store). **Toda** edición raw (tecleo, imagen,
+    undo/redo propios) pasa por `scheduleRawSave`, así "hay edición local" = `rawSave.isPending()`. El
+    `onBlur`, cambiar de sección, duplicar y salir de raw hacen **`rawSave.flush()`**: escriben solo una
+    edición real, nunca el buffer "porque difiere del store" (antes desenfocar un textarea desfasado
+    pisaba el remoto). El caret se conserva mapeando por prefijo/sufijo común
+    (`mapOffsetThroughChange`, en el texto mostrado con `[image]`), restaurado en un `useLayoutEffect`.
+    Al aplicar/fusionar contenido externo se **vacía** el historial undo/redo raw de esa sección (en vez
+    de apilar el texto previo): Ctrl+Z no debe revertir en silencio el cambio remoto y guardarlo (y la
+    coalescencia de 500 ms podía restaurar un estado anterior al cambio). Misma regla que el rich.
+  - **Sticky raw (`StickyApp.tsx`):** antes escribía cada pulsación sin debounce (el eco de una
+    anterior reseteaba el textarea y la siguiente guardaba sin los caracteres de en medio; además
+    desbordaba el outbox). Ahora usa su propio `createDebouncedSave` (600 ms, como el raw de
+    NoteEditor): `pending` real, y lo vacían el botón de cerrar (`closeWindowAfterSaving` →
+    `settleNoteWrites`), `beforeunload`, el `onBlur` del textarea y el desmontaje.
+  - **Recarga completa sin ir hacia atrás:** ver "Sync entre ventanas" (`keepNotesChangedDuringLoad`).
+  - **Título:** sin cambios — el borrador sigue al store salvo si está sucio y enfocado; todo paso de
+    sucio a limpio escribe el borrador (debounce o blur), así que una actualización saltada nunca se queda sin reaplicar
+    (un renombrado remoto concurrente con un borrador sucio es last-writer-wins).
 
 ### Ventanas de sección ("Open in new window")
 BrowserWindows extra (`createSectionWindow()` en main) que cargan la app con

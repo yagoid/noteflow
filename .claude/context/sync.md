@@ -434,3 +434,16 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   Con esto un guardado real sigue costando **2 commits** (`note.md` + la sección tocada): el push por
   la Git Data API (blobs→tree→commit, 1 commit por guardado) está **descartado por ahora**.
 - **Migración remota:** `migrateRemoteToV2IfNeeded(notesDir)` — ver "Migración v1 → v2".
+
+### Lado renderer: un pull con la nota abierta
+
+Un pull (GitHub o Cloud) escribe el disco y emite `notes-updated` → `loadNotes()`/`syncNote()` en
+cada ventana. Dos invariantes del renderer (detalle en `patterns.md`, "Sync entre ventanas" y "Sync
+de contenido externo en los editores"):
+
+- **El store nunca retrocede por una recarga:** `loadNotes` conserva la copia en memoria de toda nota
+  escrita localmente mientras leía/descifraba y luego le hace `syncNote`
+  (`keepNotesChangedDuringLoad`, `src/lib/reloadGuard.ts`) — igual que `syncNote` con su snapshot.
+- **Un editor enfocado aplica o fusiona el contenido remoto** (outbox de ecos + `merge3`,
+  `src/lib/externalContentSync.ts`): antes lo saltaba y la siguiente pulsación subía el texto viejo
+  encima del remoto a todos los dispositivos (bug B1).

@@ -12,6 +12,14 @@
 // `flush` is the owning slot's flush: it unregisters the entry and stops its timer.
 type Entry = { noteId: string; flush: () => void }
 
+/**
+ * How a scheduled save runs: its debounce elapsed (`'timer'`), or it was run early
+ * (`'flush'`: unmount, a window closing, pruning, another target). A save may only
+ * postpone itself (re-schedule) when run by the timer — a flush must write now, or
+ * the re-scheduled save would escape the flush and be lost when the window closes.
+ */
+export type SaveRun = 'timer' | 'flush'
+
 const pending = new Set<Entry>()
 
 export interface DebouncedSave {
@@ -22,18 +30,20 @@ export interface DebouncedSave {
    * the note): a pending save for ANOTHER target is run first, not replaced — the
    * field may have moved to another note/section before its debounce fired.
    */
-  schedule(noteId: string, delayMs: number, save: () => void, target?: string): void
+  schedule(noteId: string, delayMs: number, save: (run: SaveRun) => void, target?: string): void
   /** Runs the pending save immediately (no-op when nothing is pending). */
   flush(): void
   /** Drops the pending save without running it (the caller writes the same data itself). */
   cancel(): void
+  /** Whether a save is waiting on the debounce (a local edit not yet handed to the store). */
+  isPending(): boolean
 }
 
 /** One debounced save slot (one per editor field), registered while it's pending. */
 export function createDebouncedSave(): DebouncedSave {
   let timer: ReturnType<typeof setTimeout> | null = null
   let entry: Entry | null = null
-  let save: (() => void) | null = null
+  let save: ((run: SaveRun) => void) | null = null
   let pendingTarget: string | null = null
   const clear = () => {
     if (timer) clearTimeout(timer)
@@ -43,11 +53,12 @@ export function createDebouncedSave(): DebouncedSave {
     save = null
     pendingTarget = null
   }
-  const flush = () => {
+  const runNow = (how: SaveRun) => {
     const run = save
     clear()
-    run?.()
+    run?.(how)
   }
+  const flush = () => runNow('flush')
   return {
     schedule(noteId, delayMs, nextSave, target = noteId) {
       if (pendingTarget !== null && pendingTarget !== target) flush()
@@ -56,10 +67,11 @@ export function createDebouncedSave(): DebouncedSave {
       pendingTarget = target
       entry = { noteId, flush }
       pending.add(entry)
-      timer = setTimeout(flush, delayMs)
+      timer = setTimeout(() => runNow('timer'), delayMs)
     },
     flush,
     cancel: clear,
+    isPending: () => save !== null,
   }
 }
 

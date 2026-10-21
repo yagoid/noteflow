@@ -51,6 +51,9 @@ const AlignedTableHeader = TableHeader.extend({
   },
 })
 import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { AllSelection, NodeSelection, Selection, TextSelection } from '@tiptap/pm/state'
+import { createDocument, getHTMLFromFragment } from '@tiptap/core'
 import { common, createLowlight } from 'lowlight'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { EditorToolbar } from './EditorToolbar'
@@ -66,8 +69,9 @@ import { useTocItems } from './useEditorToc'
 import { TOC_MIN_EDITOR_WIDTH, TOC_RESERVE } from '../../lib/tocUtils'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../lib/markdownHtml'
-import { editorOwnsFocus, isEditorWidgetTarget } from '../../lib/editorFocus'
-import { createDebouncedSave } from '../../lib/pendingEdits'
+import { isEditorWidgetTarget, widgetFieldHasFocus } from '../../lib/editorFocus'
+import { createDebouncedSave, type SaveRun } from '../../lib/pendingEdits'
+import { createContentSync, needsSave, recordSave, resolveExternalContent } from '../../lib/externalContentSync'
 import { useT } from '../../i18n/useT'
 
 const lowlight = createLowlight(common)
@@ -76,6 +80,53 @@ const lowlight = createLowlight(common)
 // here: a board nested in a list, quote or table cell would be lost by the
 // markdown serializer, so the schema keeps boards at the top level.
 const TopLevelDocument = Document.extend({ content: '(block | topBlock)+' })
+
+/**
+ * Replaces the editor's document with `doc` (external content) without emitting
+ * an update (it isn't a local edit to save) nor adding it to the undo history
+ * (Ctrl+Z must not silently revert the external change and save that). Only the
+ * changed range is replaced, so node views outside it (a kanban board with an
+ * open card field) survive and undo keeps working for edits outside it. The
+ * selection is kept: positions before the change stay, after it shift by the
+ * size delta, inside it go to the change's start. Doesn't take focus.
+ */
+function replaceDocKeepingSelection(editor: TiptapEditor, doc: ProseMirrorNode) {
+  const { state } = editor
+  const start = state.doc.content.findDiffStart(doc.content)
+  if (start == null) return
+  const diffEnd = state.doc.content.findDiffEnd(doc.content)
+  let endA = diffEnd?.a ?? state.doc.content.size
+  let endB = diffEnd?.b ?? doc.content.size
+  // findDiffEnd can run past `start` when the change repeats nearby content.
+  const overlap = start - Math.min(endA, endB)
+  if (overlap > 0) { endA += overlap; endB += overlap }
+  let tr = state.tr
+  try {
+    tr.replace(start, endA, doc.slice(start, endB))
+  } catch {
+    tr = state.tr
+  }
+  // The slice must rebuild exactly `doc`; otherwise replace it whole.
+  if (!tr.doc.eq(doc)) tr = state.tr.replaceWith(0, state.doc.content.size, doc.content)
+  const size = tr.doc.content.size
+  const map = (pos: number) =>
+    Math.max(0, Math.min(size, pos <= start ? pos : pos >= endA ? pos + endB - endA : start))
+  const sel = state.selection
+  let next: Selection
+  if (sel instanceof AllSelection) {
+    next = new AllSelection(tr.doc)
+  } else if (sel instanceof NodeSelection) {
+    const pos = map(sel.from)
+    const node = tr.doc.nodeAt(pos)
+    next = node && node.type === sel.node.type && NodeSelection.isSelectable(node)
+      ? NodeSelection.create(tr.doc, pos)
+      : Selection.near(tr.doc.resolve(pos))
+  } else {
+    next = TextSelection.between(tr.doc.resolve(map(sel.anchor)), tr.doc.resolve(map(sel.head)))
+  }
+  tr.setSelection(next).setMeta('addToHistory', false).setMeta('preventUpdate', true)
+  editor.view.dispatch(tr)
+}
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -143,6 +194,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   // pane closed) instead of firing later from a dead editor.
   const [contentSave] = useState(createDebouncedSave)
   useEffect(() => () => contentSave.flush(), [contentSave])
+  // Base + outbox of our own saves: tells their echoes from genuine external
+  // updates (lib/externalContentSync). `contentRef` = the latest store content.
+  const [contentSync] = useState(() => createContentSync(content))
+  const contentRef = useRef(content)
+  // An external update left for later because a widget field (an open kanban
+  // card) had focus or an IME composition was running — see syncExternalContent.
+  const deferredSyncRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   // Whether the editor viewport is wide enough to host the TOC next to the text
   // (narrow windows / split panes hide it rather than squeeze the text).
@@ -267,9 +325,73 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     editable: !readOnly,
     autofocus: autoFocus,
     onUpdate({ editor }) {
-      contentSave.schedule(noteId, 400, () => onChange(htmlToMarkdown(editor.getHTML())))
+      contentSave.schedule(noteId, 400, (run) => saveContent(editor, run))
     },
   })
+
+  // Hands the editor's markdown to the store, remembering it so its echo isn't
+  // taken for an external update. This is THE "nothing changed" check (the
+  // parents don't compare with the store): it compares with what we last handed
+  // off, since returning to the store's text while an older save is in flight
+  // (an undo, Backspace) still has to be written. An update deferred while a
+  // card field had focus is folded in first: this local edit (e.g. a card
+  // committed with Enter, the field still open) must not be saved over it —
+  // mid-composition the doc shouldn't be touched, so a timer save waits for it;
+  // a flush (unmount, window closing) can't wait: it folds it in and saves now.
+  const saveContent = (ed: TiptapEditor, run: SaveRun) => {
+    if (deferredSyncRef.current && !ed.isDestroyed) {
+      if (ed.view.composing && run === 'timer') {
+        contentSave.schedule(noteId, 400, (next) => saveContent(ed, next))
+        return
+      }
+      syncExternalContent(ed, true)
+    }
+    const md = htmlToMarkdown(ed.getHTML())
+    if (!needsSave(contentSync, md, contentRef.current)) return
+    recordSave(contentSync, md, contentRef.current)
+    onChange(md)
+  }
+
+  // Brings the editor in line with the store's content (contentRef): echoes of
+  // our own saves are ignored, genuine external content is applied even while
+  // focused, or three-way merged with a local edit still in flight (the merge
+  // is new local content, so it's saved). `localEdit`: called from a save,
+  // whose edit is no longer on the debounce. Never applied while a widget field
+  // (open kanban card) has focus: replacing the board under it could lose its
+  // draft — deferred until focus leaves it (or a save, above). Nor during an IME
+  // composition (dead keys, accents): replacing the DOM under it breaks it —
+  // deferred until it ends.
+  const syncExternalContent = (ed: TiptapEditor, localEdit = false) => {
+    if (ed.isDestroyed) return
+    const blocked = ed.view.composing
+      || widgetFieldHasFocus(document.hasFocus(), ed.view.dom, document.activeElement)
+    if (!localEdit && blocked) {
+      deferredSyncRef.current = true
+      return
+    }
+    deferredSyncRef.current = false
+    const incoming = contentRef.current
+    const parse = (md: string) => createDocument(htmlFromMarkdown(md), ed.schema)
+    let incomingDoc: ProseMirrorNode | null = null
+    const parsedIncoming = () => (incomingDoc ??= parse(incoming))
+    const result = resolveExternalContent(contentSync, {
+      incoming,
+      current: htmlToMarkdown(ed.getHTML()),
+      pending: localEdit || contentSave.isPending(),
+      // A different serialization of the same document isn't a change.
+      isEquivalent: () => parsedIncoming().eq(ed.state.doc),
+      // Merge in the editor's own serialization (the stored markdown may differ).
+      normalize: (md) => htmlToMarkdown(getHTMLFromFragment(parse(md).content, ed.schema)),
+    })
+    if (result.kind === 'apply') {
+      replaceDocKeepingSelection(ed, parsedIncoming())
+    } else if (result.kind === 'merge') {
+      replaceDocKeepingSelection(ed, parse(result.merged))
+      if (!localEdit) contentSave.schedule(noteId, 400, (run) => saveContent(ed, run))
+    }
+  }
+  const syncExternalContentRef = useRef(syncExternalContent)
+  useEffect(() => { syncExternalContentRef.current = syncExternalContent })
 
   useImperativeHandle(ref, () => ({ editor }), [editor])
 
@@ -301,24 +423,46 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     return () => editor.view.dom.removeEventListener('click', handler)
   }, [editor])
 
-  // Sync external content changes (e.g. sync from another window).
-  // IMPORTANT: never reset content while the editor is focused — the debounced
-  // save creates a window where the store lags behind the editor state, causing
-  // a false mismatch that would call setContent mid-typing and jump the cursor
-  // (or drop the edits made since the save started). "Focused" includes focus
-  // anywhere inside the editor DOM while the window has focus: kanban boards
-  // keep focus on their own root or card fields, where ProseMirror reports
-  // itself as not focused (see editorOwnsFocus).
+  // Sync external content changes (another pane/window, a sync pull, the CLI…)
+  // — also while focused: skipping then left the editor stale and the next
+  // keystroke saved the old text over the update. The store lags behind the
+  // editor (debounced, queued saves), so its echoes of our own saves are told
+  // apart from genuine updates (syncExternalContent). `content` is a string: the
+  // effect only runs for a new value, and nothing relies on re-running for the
+  // same one (a deferred update re-runs from the listeners below).
   useEffect(() => {
-    if (!editor) return
-    if (editorOwnsFocus(editor.isFocused, document.hasFocus(), editor.view.dom, document.activeElement)) return
-    const currentMd = htmlToMarkdown(editor.getHTML()).trim()
-    const incomingMd = content.trim()
-    if (currentMd !== incomingMd) {
-      editor.commands.setContent(htmlFromMarkdown(content), false)
-    }
+    contentRef.current = content
+    if (editor) syncExternalContent(editor)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content])
+
+  // A deferred update is retried once focus leaves the widget field — after the
+  // field's own blur commit (hence the timeout) —, the window goes to the
+  // background, or a composition ends (ProseMirror reads the composed text a bit
+  // after compositionend, hence the longer wait; still composing → deferred again).
+  useEffect(() => {
+    if (!editor) return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const retryAfter = (ms: number) => () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        if (deferredSyncRef.current) syncExternalContentRef.current(editor)
+      }, ms)
+    }
+    const retry = retryAfter(0)
+    const retryAfterComposition = retryAfter(50)
+    const dom = editor.view.dom
+    dom.addEventListener('focusout', retry)
+    dom.addEventListener('compositionend', retryAfterComposition)
+    window.addEventListener('blur', retry)
+    return () => {
+      if (timer) clearTimeout(timer)
+      dom.removeEventListener('focusout', retry)
+      dom.removeEventListener('compositionend', retryAfterComposition)
+      window.removeEventListener('blur', retry)
+    }
+  }, [editor])
 
   const insertImageFiles = useCallback(async (files: File[]) => {
     if (!editor) return

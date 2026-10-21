@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { closeWindowAfterSaving, useNotesStore } from '../stores/notesStore'
 import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
 import { useThemeStore } from '../stores/themeStore'
@@ -7,6 +7,10 @@ import { colorChannels, resolveGroupColor } from '../lib/tagColors'
 import { Editor } from './Editor/Editor'
 import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp, Pin, PinOff } from 'lucide-react'
 import { decryptSections } from '../lib/cryptoUtils'
+import { createDebouncedSave } from '../lib/pendingEdits'
+import {
+  createContentSync, mapOffsetThroughChange, needsSave, recordSave, resolveExternalContent, type ContentSync,
+} from '../lib/externalContentSync'
 import { useT } from '../i18n/useT'
 import type { GroupColor, NoteSection } from '../types'
 
@@ -139,6 +143,22 @@ export function StickyApp() {
   const [noteId, setNoteId] = useState<string | null>(null)
   const [sectionId, setSectionId] = useState<string | null>(null)
   const [rawContent, setRawContent] = useState('')
+  // Raw textarea: base + outbox of its writes for the section shown (`key`), to tell
+  // their echoes from external updates (lib/externalContentSync), and the selection
+  // to restore after an external update replaced the text.
+  const rawSyncRef = useRef<{ key: string; sync: ContentSync } | null>(null)
+  const rawTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const rawSelectionRef = useRef<{ start: number; end: number } | null>(null)
+  // IME composition running in the textarea: external updates wait for its end.
+  const rawComposingRef = useRef(false)
+  const rawDeferredRef = useRef(false)
+  const rawRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current) }, [])
+  // Debounced raw save (like NoteEditor's raw mode): registered in lib/pendingEdits, so
+  // the close button (closeWindowAfterSaving) and beforeunload flush it; flushed on
+  // unmount too.
+  const [rawSave] = useState(createDebouncedSave)
+  useEffect(() => () => rawSave.flush(), [rawSave])
   const [isFolded, setIsFolded] = useState(false)
   // Sticky windows are created with alwaysOnTop: true in the main process,
   // so the pin starts active.
@@ -218,12 +238,71 @@ export function StickyApp() {
     ? unlockedSections.find(s => s.id === sectionId)
     : note?.sections.find(s => s.id === sectionId)
 
-  // Sync local buffer when section changes or store updates
-  useEffect(() => {
-    if (section && section.content !== rawContent) {
-      setRawContent(section.content)
+  // Sync local buffer when section changes or store updates. The store lags behind the
+  // textarea (debounced, queued writes): an echo of an older write must not reset the
+  // text (the next save would drop the chars typed since). Genuine external content is
+  // applied, or merged with a write still pending/in flight (lib/externalContentSync).
+  const syncRawFromStore = () => {
+    if (!section) return
+    const incoming = section.content
+    const tracked = rawSyncRef.current
+    if (tracked?.key !== section.id) {
+      rawSyncRef.current = { key: section.id, sync: createContentSync(incoming) }
+      rawDeferredRef.current = false
+      if (incoming !== rawContent) setRawContent(incoming)
+      return
     }
-  }, [section?.id, section?.content]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (rawComposingRef.current) {
+      rawDeferredRef.current = true
+      return
+    }
+    rawDeferredRef.current = false
+    const result = resolveExternalContent(tracked.sync, { incoming, current: rawContent, pending: rawSave.isPending() })
+    if (result.kind !== 'apply' && result.kind !== 'merge') return
+    const next = result.kind === 'apply' ? incoming : result.merged
+    const textarea = rawTextareaRef.current
+    if (textarea && textarea === document.activeElement) {
+      rawSelectionRef.current = {
+        start: mapOffsetThroughChange(rawContent, next, textarea.selectionStart),
+        end: mapOffsetThroughChange(rawContent, next, textarea.selectionEnd),
+      }
+    }
+    setRawContent(next)
+    if (result.kind === 'merge') scheduleRawSave(next)
+  }
+  useEffect(() => syncRawFromStore(), [section?.id, section?.content]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Latest closure, for the composition-end retry.
+  const syncRawFromStoreRef = useRef(syncRawFromStore)
+  useEffect(() => { syncRawFromStoreRef.current = syncRawFromStore })
+
+  // A controlled textarea whose value is replaced puts the caret at the end.
+  useLayoutEffect(() => {
+    const selection = rawSelectionRef.current
+    rawSelectionRef.current = null
+    if (selection) rawTextareaRef.current?.setSelectionRange(selection.start, selection.end)
+  }, [rawContent])
+
+  // Debounced write of the raw text, remembering it so its echo isn't taken for an
+  // external update. "Nothing to write" = equal to our last write still in flight, not
+  // to the store (Backspace back to the store's text while that write is queued must
+  // still be written). Read-only (unlocked encrypted) stickies never write.
+  const scheduleRawSave = (content: string) => {
+    if (unlockedSections || !noteId || !sectionId) return
+    const targetNoteId = noteId
+    const targetSectionId = sectionId
+    rawSave.schedule(targetNoteId, 600, () => {
+      const stored = useNotesStore.getState().notes.find((n) => n.id === targetNoteId)
+        ?.sections.find((s) => s.id === targetSectionId)?.content ?? ''
+      const tracked = rawSyncRef.current
+      if (tracked?.key === targetSectionId) {
+        if (!needsSave(tracked.sync, content, stored)) return
+        recordSave(tracked.sync, content, stored)
+      } else if (stored === content) {
+        return
+      }
+      void updateSection(targetNoteId, targetSectionId, { content })
+    })
+  }
 
   // Focus password input when encrypted note is detected
   useEffect(() => {
@@ -329,8 +408,10 @@ export function StickyApp() {
 
   // updateSection merges onto the latest sections: a sync of another section that
   // landed after this render must not be overwritten with our stale copy of it.
+  // No "same as the store" check: Editor only calls this for a real change (see
+  // its saveContent — the store may not show its last save in flight yet).
   const handleContentChange = (content: string) => {
-    if (isReadOnly || section.content === content) return
+    if (isReadOnly) return
     void updateSection(note.id, section.id, { content })
   }
 
@@ -338,8 +419,7 @@ export function StickyApp() {
     if (isReadOnly) return
     const content = e.target.value
     setRawContent(content)
-    if (section && section.content === content) return
-    void updateSection(note!.id, section!.id, { content })
+    scheduleRawSave(content)
   }
 
   const showSectionName = section.name !== 'New' && section.name !== 'Main'
@@ -378,8 +458,21 @@ export function StickyApp() {
       <div className="flex-1 overflow-hidden mr-1" onKeyDown={(e) => e.stopPropagation()}>
         {(section.isRawMode || isReadOnly) ? (
           <textarea
+            ref={rawTextareaRef}
             value={isReadOnly ? section.content : rawContent}
             onChange={handleRawChange}
+            onBlur={() => rawSave.flush()}
+            onCompositionStart={() => { rawComposingRef.current = true }}
+            onCompositionEnd={() => {
+              rawComposingRef.current = false
+              // After the composed text's own change has rendered.
+              if (!rawDeferredRef.current) return
+              if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current)
+              rawRetryTimerRef.current = setTimeout(() => {
+                rawRetryTimerRef.current = null
+                syncRawFromStoreRef.current()
+              }, 0)
+            }}
             readOnly={isReadOnly}
             className={`w-full h-full p-3 bg-transparent text-xs font-mono text-text
                        border-none outline-none resize-none caret-text leading-relaxed

@@ -48,3 +48,15 @@ export async function redecryptWithSession(
 export function isUnsafeEncryptedSectionsWrite(note: Note, nextSections: NoteSection[]): boolean {
   return !!note.encryption && (note.sections.length === 0 || nextSections.length === 0)
 }
+
+/**
+ * Locks again (drops the decrypted sections of) the encrypted notes in `ids` — those
+ * whose session password was just dropped. loadNotes needs it for the in-memory copies
+ * it keeps (notes written during the load, see lib/reloadGuard): they still hold the
+ * plaintext the dropped password had unlocked.
+ */
+export function relockNotes(notes: Note[], ids: readonly string[]): Note[] {
+  if (ids.length === 0) return notes
+  const relock = new Set(ids)
+  return notes.map((n) => (n.encryption && relock.has(n.id) && n.sections.length > 0 ? { ...n, sections: [] } : n))
+}
