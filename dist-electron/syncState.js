@@ -30,6 +30,7 @@ exports.planRemoteDirDelete = planRemoteDirDelete;
 exports.shouldRefreshSections = shouldRefreshSections;
 exports.planSectionRefresh = planSectionRefresh;
 exports.pruneShas = pruneShas;
+exports.isGitHubEmptyRepoError = isGitHubEmptyRepoError;
 const OP_TYPES = ['upsert', 'delete', 'deleteDir'];
 function emptySyncState() {
     return { version: 1, ops: {}, shas: {} };
@@ -387,4 +388,18 @@ function pruneShas(state, presentPaths) {
         }
     }
     return changed;
+}
+/**
+ * Is this GitHub API error answer the "repository has no commits yet" case?
+ * Connecting to an existing but EMPTY repo is legitimate: the Git Trees API
+ * (the pull's listing) replies HTTP 409 "Git Repository is empty." and the
+ * Contents API 404 "This repository is empty." — there is simply nothing to
+ * list, so the pull must treat it as an empty remote, not a failure (it used to
+ * leave initialPullStatus 'failed' and the error visible until a manual sync).
+ * Safe for the deletion rule: an empty listing has no v2 marker, so
+ * shouldRunDeletionRule never deletes anything from it. Both the status and
+ * GitHub's message must match — any other 409/404 stays an error.
+ */
+function isGitHubEmptyRepoError(status, message) {
+    return (status === 409 || status === 404) && /repository is empty/i.test(message);
 }

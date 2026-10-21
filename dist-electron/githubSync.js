@@ -138,6 +138,13 @@ function decryptToken(encrypted) {
 }
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR';
 // ── GitHub REST API (raw https, no external deps) ─────────────────────────────
+/** An error answer of the GitHub API: GitHub's own `message` plus the HTTP status. */
+class GitHubApiError extends Error {
+    constructor(message, status) {
+        super(message);
+        this.status = status;
+    }
+}
 async function githubRequest(token, method, endpoint, body) {
     return new Promise((resolve, reject) => {
         const payload = body ? JSON.stringify(body) : undefined;
@@ -166,7 +173,7 @@ async function githubRequest(token, method, endpoint, body) {
                 try {
                     const json = JSON.parse(raw);
                     if (res.statusCode && res.statusCode >= 400) {
-                        reject(new Error(json.message ?? `HTTP ${res.statusCode}`));
+                        reject(new GitHubApiError(json.message ?? `HTTP ${res.statusCode}`, res.statusCode));
                     }
                     else {
                         resolve(json);
@@ -265,6 +272,8 @@ async function getDefaultBranch(token, owner, repo) {
  * Do NOT catch here — let network/API errors propagate to the caller (pullNotes).
  * Returning [] on error would make the deletion logic treat all local notes as
  * "remotely deleted" and wipe them from disk when there is no internet connection.
+ * The ONLY exception is a repo with no commits yet (isGitHubEmptyRepoError): that
+ * is a genuinely empty remote, answered as an empty, complete listing.
  */
 async function listRemoteTree(token, owner, repo) {
     return (await fetchRemoteTree(token, owner, repo)).blobs;
@@ -272,7 +281,18 @@ async function listRemoteTree(token, owner, repo) {
 /** listRemoteTree plus whether GitHub truncated the listing (pullNotes needs to know). */
 async function fetchRemoteTree(token, owner, repo) {
     const branch = await getDefaultBranch(token, owner, repo);
-    const res = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`));
+    let res;
+    try {
+        res = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`));
+    }
+    catch (err) {
+        // Existing EMPTY repo (409 "Git Repository is empty."): nothing remote yet —
+        // the pull succeeds with no files and the catch-up uploads the local notes.
+        if (err instanceof GitHubApiError && (0, syncState_1.isGitHubEmptyRepoError)(err.status, err.message)) {
+            return { blobs: [], truncated: false };
+        }
+        throw err;
+    }
     const truncated = res?.truncated === true;
     if (truncated)
         console.warn('[GitHubSync] tree listing truncated — repo unusually large');
