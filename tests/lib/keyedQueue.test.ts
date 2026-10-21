@@ -54,3 +54,23 @@ describe('createKeyedQueue', () => {
     expect(q.size()).toBe(0)
   })
 })
+
+describe('createKeyedQueue().idle', () => {
+  it('waits for every key, including tasks queued while waiting', async () => {
+    const q = createKeyedQueue()
+    const log: string[] = []
+    q.run('a', async () => { await tick(); log.push('a') })
+    q.run('b', async () => {
+      await tick()
+      log.push('b')
+      q.run('b', async () => { await tick(); log.push('b2') })
+    })
+    await q.idle()
+    expect(log.sort()).toEqual(['a', 'b', 'b2'])
+    expect(q.size()).toBe(0)
+  })
+
+  it('resolves right away when nothing is queued', async () => {
+    await expect(createKeyedQueue().idle()).resolves.toBeUndefined()
+  })
+})

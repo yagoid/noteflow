@@ -517,7 +517,7 @@ sin navegar.
 |---|---|---|
 | Negrita | `**texto**` | Ctrl+B |
 | Cursiva | `*texto*` | Ctrl+I |
-| Subrayado | — | Ctrl+U |
+| Subrayado | `++texto++` (formato en disco; escribirlo no lo convierte al vuelo) | Ctrl+U |
 | Tachado | `~~texto~~` | — |
 | Resaltado | `==texto==` | Toolbar |
 | Código inline | `` `code` `` | Ctrl+E |

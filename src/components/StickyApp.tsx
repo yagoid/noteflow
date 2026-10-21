@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNotesStore } from '../stores/notesStore'
+import { closeWindowAfterSaving, useNotesStore } from '../stores/notesStore'
 import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
 import { useThemeStore } from '../stores/themeStore'
 import { useEditorSettingsStore } from '../stores/editorSettingsStore'
@@ -71,7 +71,7 @@ function StickyTitleBar({ noteTitle, sectionName, color, onFold, isPinned, onTog
         </button>
         <button
           className="p-1 rounded text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
-          onClick={() => window.noteflow.close()}
+          onClick={() => void closeWindowAfterSaving()}
           title={t.sticky.close}
         >
           <X size={14} />
@@ -124,7 +124,7 @@ function FoldedPill({ noteTitle, sectionName, color, onUnfold }: {
         </button>
         <button
           className="p-1 rounded-full text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
-          onClick={() => window.noteflow.close()}
+          onClick={() => void closeWindowAfterSaving()}
           title={t.sticky.closeShort}
         >
           <X size={14} />
@@ -392,6 +392,7 @@ export function StickyApp() {
               key={`${note.id}-${section.id}`}
               content={section.content ?? ''}
               onChange={handleContentChange}
+              noteId={note.id}
               placeholder={t.sticky.startWriting}
               hideToolbar={true}
               caretScrollGap={STICKY_CARET_SCROLL_GAP}

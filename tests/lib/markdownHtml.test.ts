@@ -40,13 +40,14 @@ describe('htmlFromMarkdown — multi-line task annotations', () => {
   })
 
   it('does not let a continuation-line annotation overwrite the first-line one', () => {
-    // First line wins: the stray 🔺low on the continuation line is stripped but
-    // must not clobber the high importance declared on the `- [ ]` line.
+    // First line wins: the 🔺low on the continuation line must not clobber the
+    // high importance declared on the `- [ ]` line — and, since the task already
+    // has an importance, it stays as the text the user wrote (not cut and lost).
     const md = '- [ ] Task 🔺high\nkeep going 🔺low'
     const html = htmlFromMarkdown(md)
     expect(html).toContain('data-importance="high"')
     expect(html).not.toContain('data-importance="low"')
-    expect(html).not.toContain('🔺')
+    expect(html).toContain('Task<br>keep going 🔺low')
   })
 
   it('closes the gap left by an annotation written mid-text', () => {
@@ -247,5 +248,20 @@ describe('htmlFromMarkdown — nested fences written by NoteFlow', () => {
       '<p>Intro</p><pre><code class="language-md">```js\nfoo\n```</code></pre>' +
       '<ul data-type="taskList"><li data-checked="false" data-type="taskItem"><label><input type="checkbox"></label><p>tarea</p></li></ul>'
     )
+  })
+})
+
+describe('htmlFromMarkdown — multi-line task annotations on a continuation line', () => {
+  it('keeps a continuation annotation the task already has as text', () => {
+    const html = htmlFromMarkdown('- [ ] Ship 📅2026-01-02\nwas 📅2025-12-20 before slip')
+    expect(html).toContain('data-due="2026-01-02"')
+    expect(html).toContain('Ship<br>was 📅2025-12-20 before slip')
+  })
+
+  it('still recovers a kind the first line lacks', () => {
+    const html = htmlFromMarkdown('- [ ] Ship 📅2026-01-02\nthen ⏰09:30 and 📅2025-12-20')
+    expect(html).toContain('data-due="2026-01-02"')
+    expect(html).toContain('data-alarm="09:30"')
+    expect(html).toContain('Ship<br>then and 📅2025-12-20')
   })
 })

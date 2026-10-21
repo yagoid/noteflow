@@ -67,6 +67,7 @@ import { TOC_MIN_EDITOR_WIDTH, TOC_RESERVE } from '../../lib/tocUtils'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../lib/markdownHtml'
 import { editorOwnsFocus, isEditorWidgetTarget } from '../../lib/editorFocus'
+import { createDebouncedSave } from '../../lib/pendingEdits'
 import { useT } from '../../i18n/useT'
 
 const lowlight = createLowlight(common)
@@ -99,6 +100,9 @@ const DEFAULT_CARET_SCROLL_GAP: CaretScrollGap = { top: 40, bottom: 96 }
 interface EditorProps {
   content: string
   onChange: (markdown: string) => void
+  /** Note this content belongs to: its pending (debounced) save is registered under it,
+   *  so pruning that note or closing the window can flush it first (lib/pendingEdits). */
+  noteId?: string
   placeholder?: string
   readOnly?: boolean
   hideToolbar?: boolean
@@ -124,6 +128,7 @@ export interface EditorHandle {
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   content,
   onChange,
+  noteId = '',
   placeholder = 'Start typing...',
   readOnly = false,
   hideToolbar = false,
@@ -133,7 +138,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   caretScrollGap = DEFAULT_CARET_SCROLL_GAP,
   showToc = false,
 }, ref) {
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Debounced save of the content (400 ms after the last change). Registered in
+  // lib/pendingEdits while pending, and flushed on unmount (section/note switch,
+  // pane closed) instead of firing later from a dead editor.
+  const [contentSave] = useState(createDebouncedSave)
+  useEffect(() => () => contentSave.flush(), [contentSave])
   const scrollRef = useRef<HTMLDivElement>(null)
   // Whether the editor viewport is wide enough to host the TOC next to the text
   // (narrow windows / split panes hide it rather than squeeze the text).
@@ -258,10 +267,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     editable: !readOnly,
     autofocus: autoFocus,
     onUpdate({ editor }) {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => {
-        onChange(htmlToMarkdown(editor.getHTML()))
-      }, 400)
+      contentSave.schedule(noteId, 400, () => onChange(htmlToMarkdown(editor.getHTML())))
     },
   })
 

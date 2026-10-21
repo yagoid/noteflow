@@ -200,6 +200,40 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   acento (`strong { color: inherit }`); el texto en color de acento es una marca aparte, **highlight**
   `==texto==` → `<mark>` (`@tiptap/extension-highlight`, `multicolor` off; `mark { color: var(--accent);
   background: transparent }`). Botón en la toolbar (icono `Highlighter`).
+- **Subrayado `++texto++` y resaltado `==texto==` — reglas de flanqueo (decisión):** markdown no tiene
+  subrayado; NoteFlow escribe `<u>` como `++…++` (`@tiptap/extension-underline` no tiene input rule:
+  teclear `++x++` no convierte al vuelo, sí al recargar). Como `+`/`=` aparecen mucho en texto plano,
+  un delimitador solo cuenta si **flanquea** el texto (`flankedMarkRe` en `markdownInline.ts`): el que
+  abre no va precedido de letra/dígito ni del propio carácter y lo primero tras su racha no es espacio;
+  el que cierra no va seguido de letra/dígito ni del propio carácter (toma los dos últimos de la racha:
+  `++Learn C++++`). Así siguen siendo texto `C++`, `C++11 vs C++14`, `C++/C++`, `a++b++`, `a ++ b ++ c`,
+  `a == b`, `x==y`, `a === b === c` (antes se subrayaban/resaltaban y el editor guardaba el texto
+  destrozado). Se **tolera espacio antes del cierre** porque builds anteriores escribían `++palabra ++`
+  (doble click en Windows selecciona el espacio final). Sin subrayado/resaltado **dentro de palabra**.
+  - **Spans protegidos en `inlineToHtml`:** antes de las regex de marcas, los code spans (que ahora se
+    procesan **primero**: `` `[a](b)` `` es código literal, no un link) y las etiquetas generadas
+    (`<img>`, `<a>`, pill de relación) se apartan tras placeholders de uso privado (`\uE000n\uE001`; los
+    que ya traiga el texto se apartan a su vez, así no colisionan) y se restauran al final. Arregla
+    `` `i++` y `j++` `` en una línea (antes se emparejaban a través de los `<code>` → HTML mal anidado
+    guardado como `` `i`++ y ++`j` ``), `` `a*b*c` ``, y `*`/`__`/`++` dentro de URLs.
+  - **Vuelta (`inlineElToMd` → `resolveFlankedMarks`):** los delimitadores `++`/`==` se emiten como
+    tokens y se resuelven con la línea completa: una marca que cruza un `<br>` se cierra y reabre; el
+    espacio de los bordes sale fuera (`<u>word </u>` → `++word++ `); y la línea se **relee** con la
+    misma regex (`flankedMarkPairs`, spans protegidos enmascarados): una marca que no volvería igual
+    (dentro de palabra, o `<u>a++ b</u>`, que se cerraría en el `++` literal) se escribe **sin
+    delimitadores** — se pierde el formato, nunca el texto. El `++`/`==` literal del texto se escribe
+    tal cual (no hay sintaxis de escape, igual que con `**`/`*`).
+  - **Ambigüedades que quedan:** texto que ya **es** sintaxis válida (`++i … i++` en prosa sin
+    backticks, `++x++` tecleado, `a ++b ++ c` → "b " subrayado y se guarda `a ++b++  c`) se lee como
+    marca al recargar; marcas de distinto tipo cruzadas
+    (`++a ==b++ c==`) dan HTML mal anidado (como ya pasaba con `**`/`*`). Tests en
+    `tests/lib/markdownInline.test.ts`. No hay espejo de este parser en `cli/`/`electron/`; la app
+    móvil (repo aparte) debe aplicar la misma regla si interpreta `++`/`==`.
+- **Tareas multilínea — anotaciones en líneas de continuación:** el serializador escribe 📅⏰🔺 en la
+  **primera** línea; el parser recupera de una línea de continuación (formato de builds antiguos) solo
+  los **tipos que la tarea aún no tiene**. Si ya tiene ese tipo, la anotación de la continuación es
+  texto del usuario y se queda tal cual (`- [ ] Ship 📅2026-01-02` / `was 📅2025-12-20 before slip`;
+  antes se cortaba y se perdía). Tests en `tests/lib/markdownHtml.test.ts`.
 - **Blockquote / cita (`> texto`, estilo VSCode):** `@tiptap/extension-blockquote`. Round-trip con
   `mdBlockquoteToHtml` (líneas consecutivas → `<p>` con `<br>`; línea `>` vacía → nuevo párrafo) y el
   caso `blockquote` en `blockElToMd` (prefija cada línea con `> `). Estilo: borde izquierdo del color
@@ -857,6 +891,25 @@ paneles, cada uno en su sección. La lógica de layout es pura y testeada (`test
   y solo poda los de notas desaparecidas (antes colapsaba el split en cada recarga). La restauración
   al arrancar (`uiState.activeNoteId/activeSectionId`) crea el panel inicial con esa sección.
 - Guardado sin pisarse entre paneles: ver "Sync entre ventanas" (cola por nota + `updateSection`).
+- **Poda de notas vacías y guardados pendientes (`lib/pendingEdits.ts`):** al salir de una nota
+  (`setActiveNote` desde la sidebar, `focusPane` al clicar otro panel) `maybePruneOnLeave` borra la
+  nota si sigue con título por defecto y secciones vacías (solo ventana principal). Los editores
+  guardan con debounce (rich 400 ms, raw 600 ms, título 300 ms) y mientras tanto el store aún tiene
+  el texto viejo: tecleando en una nota nueva y clicando otro panel, la nota parecía vacía, se
+  borraba y el guardado tardío no encontraba nota (texto perdido). Ahora cada debounce es un
+  `createDebouncedSave()` que se registra mientras está pendiente, con la nota/sección **capturadas al
+  programarlo** (no al disparar: el panel puede mostrar ya otra nota; reprogramar para otro destino
+  ejecuta el pendiente en vez de descartarlo). Invariante: `maybePruneOnLeave` hace
+  `flushPendingEdits(noteId)` **antes** de mirar la nota (encola las escrituras) y `pruneEmptyNote`
+  corre **en la cola de la nota** (`noteWriteQueue`), detrás de esas escrituras, re-comprueba
+  `isPrunable` con el store ya actualizado y no borra si hay un guardado pendiente. `Editor` y
+  `NoteEditor` además hacen flush al desmontarse. Cierre de ventanas: los botones de cerrar de la
+  ventana de sección y del sticky llaman a `closeWindowAfterSaving()` (flush + espera a que la cola
+  se vacíe, máx. 2 s, luego `window.noteflow.close()`; main destruye la ventana con `win.close()`);
+  `App` hace además `flushPendingEdits()` en `beforeunload` para el resto de cierres (Alt+F4, salir
+  de la app): best effort, el IPC sale tras el handler salvo que haya otra escritura de esa nota en
+  vuelo o la nota esté cifrada (la escritura espera a `encryptSections` y puede no salir). Si la nota
+  vuelve a ser la activa mientras el prune espera en la cola, no se borra. Tests en `tests/lib/pendingEdits.test.ts`.
 
 ### Ventanas de sección ("Open in new window")
 BrowserWindows extra (`createSectionWindow()` en main) que cargan la app con

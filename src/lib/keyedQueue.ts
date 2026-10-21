@@ -22,6 +22,10 @@ export function createKeyedQueue() {
       void tail.then(() => { if (tails.get(key) === tail) tails.delete(key) })
       return result
     },
+    /** Resolves once no key has queued/running work (including tasks queued meanwhile). */
+    async idle(): Promise<void> {
+      while (tails.size > 0) await Promise.all(tails.values())
+    },
     /** Number of keys with queued/running work (for tests). */
     size(): number {
       return tails.size
