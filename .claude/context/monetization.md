@@ -457,6 +457,10 @@ es **un preset más**, no una implementación nueva.
   sesión **la misma** cuenta, si la entitlement `ai` sigue viva se re-activa `noteflow`
   automáticamente (registro `accountRestore` — ver § 4 "Cerrar sesión", donde está el mecanismo
   completo; es un camino **aparte** del auto-switch por entitlement de arriba, e idempotente).
+  El mismo dato llega al renderer como `LlmConfigPublic.lastByoProvider` (solo si es un preset
+  conocido no gestionado): con NoteFlow AI activo, la tarjeta "Your provider / local AI" de
+  Ajustes → IA (`LlmConfigView.tsx`, `byoOf`) preselecciona ese proveedor (p. ej. DeepSeek con su
+  key guardada) y solo cae a `'anthropic'` si no hay ninguno.
 - **Cuota ponderada desplegada:** la migración 0007 está aplicada y `ai-proxy` redesplegado con el
   catálogo nuevo, los multiplicadores y el endpoint `/usage`.
 - **Endurecimiento desplegado (2026-10-21):** migraciones 0009 + 0010 + 0011 aplicadas,

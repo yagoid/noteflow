@@ -160,6 +160,9 @@ export function toPublic(cfg: LlmConfigStored): LlmConfigPublic {
     hasKey,
     configured,
     capabilities: providerCapabilities(preset, model),
+    ...(cfg.lastByoProvider && byoFallbackProvider(cfg) === cfg.lastByoProvider
+      ? { lastByoProvider: cfg.lastByoProvider }
+      : {}),
   }
 }
 

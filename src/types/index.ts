@@ -224,6 +224,9 @@ export interface LlmConfigPublic {
   hasKey: boolean
   configured: boolean
   capabilities: ProviderCapabilities
+  // Last BYO provider active before NoteFlow AI (known presets only) — what the
+  // "Your provider" card preselects while the managed plan is active.
+  lastByoProvider?: string
 }
 
 export interface ChatMessage {

@@ -13,8 +13,9 @@ import { PlanOffers, PlanUnknownNotice } from '../Settings/PlanOffers'
 // (see below) — the source of truth for what is actually in use is llmConfig.active.
 type Mode = 'noteflow' | 'byo'
 
-// Provider preselected in the BYO <select> when the managed plan is the active one
-// (main's presetOf() falls back to 'anthropic' for unknown ids too).
+// Provider preselected in the BYO <select> when the managed plan is the active one and no
+// earlier BYO provider is remembered (main's presetOf() falls back to 'anthropic' for unknown
+// ids too).
 const DEFAULT_BYO_PRESET = 'anthropic'
 
 // Initial view state, derived from the provider that is actually in use. Null while the config
@@ -22,8 +23,10 @@ const DEFAULT_BYO_PRESET = 'anthropic'
 // preselect the wrong card.
 const modeOf = (cfg: LlmConfigPublic | null): Mode | null =>
   cfg ? (cfg.active === 'noteflow' ? 'noteflow' : 'byo') : null
+// With NoteFlow AI active, the BYO card points at the provider the user had before it
+// (lastByoProvider, e.g. DeepSeek with its saved key), not the generic default.
 const byoOf = (cfg: LlmConfigPublic | null): string =>
-  cfg && cfg.active !== 'noteflow' ? cfg.active : DEFAULT_BYO_PRESET
+  cfg && cfg.active !== 'noteflow' ? cfg.active : cfg?.lastByoProvider || DEFAULT_BYO_PRESET
 
 // Compact token figure for the NoteFlow AI usage line: 1_234_567 → "1.2M",
 // 850_000 → "850k", 3_000_000 → "3M".
