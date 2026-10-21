@@ -24,14 +24,14 @@ supabase link --project-ref <project-ref>
 supabase db push   # aplica supabase/migrations/*.sql
 ```
 
-## 3. Configurar Auth (email + OTP de 6 dígitos)
+## 3. Configurar Auth (email + OTP de 8 dígitos)
 
 1. Dashboard → **Authentication → Sign In / Providers**: habilitar el provider **Email**.
    - "Confirm email" puede quedar en el default; el flujo OTP verifica el email por sí mismo.
 2. **SMTP propio — OBLIGATORIO, no solo para producción.** Con el SMTP integrado de Supabase
    **no se pueden editar las plantillas de email** (ni asunto ni cuerpo) y la plantilla por
-   defecto de "Magic Link" solo manda el enlace (`{{ .ConfirmationURL }}`), nunca el código de
-   6 dígitos. Como el login de NoteFlow es **sin deep links** (el usuario teclea el código, no
+   defecto de "Magic Link" solo manda el enlace (`{{ .ConfirmationURL }}`), nunca el código
+   numérico. Como el login de NoteFlow es **sin deep links** (el usuario teclea el código, no
    abre un enlace), sin SMTP propio el flujo de login **no funciona ni en desarrollo**.
 
    El proveedor es **[Resend](https://resend.com)**.
@@ -82,7 +82,8 @@ supabase db push   # aplica supabase/migrations/*.sql
    <p>This code expires in 1 hour. If you didn't request it, you can ignore this email.</p>
    ```
 
-   La clave es usar `{{ .Token }}` (el código de 6 dígitos) en lugar de `{{ .ConfirmationURL }}`.
+   La clave es usar `{{ .Token }}` (el código numérico — 8 dígitos en este proyecto; la longitud es configurable en GoTrue
+   y ni la app ni el CLI la fijan) en lugar de `{{ .ConfirmationURL }}`.
    La app llama a `POST /auth/v1/otp` con `create_user: true` y verifica con `type: 'email'`
    (acepta tanto el token de signup como el de login), así que el registro y el login comparten
    flujo y ambas plantillas deben mandar el código.

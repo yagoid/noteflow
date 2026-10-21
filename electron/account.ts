@@ -6,7 +6,7 @@
 // onStatusChanged callback that main.ts wires to a broadcast.
 //
 // Auth is Supabase GoTrue over plain REST (no @supabase/supabase-js dep):
-//   POST /auth/v1/otp                          → email a 6-digit code
+//   POST /auth/v1/otp                          → email a one-time code (8 digits)
 //   POST /auth/v1/verify                       → code → session (access+refresh)
 //   POST /auth/v1/token?grant_type=refresh_token → rotate session
 //   POST /auth/v1/logout?scope=local           → revoke THIS session only
@@ -444,7 +444,7 @@ export function getUserId(): string | null {
   return s.userId ?? null
 }
 
-/** Emails a 6-digit one-time code (creates the account on first sign-in). */
+/** Emails a one-time sign-in code (creates the account on first sign-in). */
 export async function requestOtp(email: string): Promise<AccountOpResult> {
   if (!isCloudConfigured()) return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured' }
   const trimmed = email.trim()

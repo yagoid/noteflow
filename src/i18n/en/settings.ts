@@ -294,7 +294,7 @@ export const settings = {
     errors: {
       notConfigured: "NoteFlow account services aren't available in this build yet.",
       invalidEmail: 'That email address does not look valid. Check it and try again.',
-      emptyCode: 'Enter the 6-digit code we emailed you.',
+      emptyCode: 'Enter the code we emailed you.',
       invalidCode: "That code doesn't match, or it has expired. Check your email or request a new one.",
       rateLimited: 'Too many attempts. Wait a moment before trying again.',
       network: 'Could not reach the NoteFlow account service. Check your connection and try again.',
@@ -350,9 +350,9 @@ export const settings = {
       "Sign in with your email to access your NoteFlow account. We'll send you a one-time code — no password needed.",
     email: 'Email',
     sendCode: 'Send code',
-    // "We sent a 6-digit code to <email>. Enter it below to sign in." — the email
+    // "We sent a sign-in code to <email>. Enter it below to sign in." — the email
     // address (styled inline) sits between these two fragments.
-    codeSentPrefix: 'We sent a 6-digit code to ',
+    codeSentPrefix: 'We sent a sign-in code to ',
     codeSentSuffix: '. Enter it below to sign in.',
     code: 'Code',
     verifyAndSignIn: 'Verify & sign in',

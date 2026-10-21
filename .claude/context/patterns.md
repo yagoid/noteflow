@@ -1129,7 +1129,7 @@ lo reporta como error con exit 1 en vez del exit 0 silencioso.
 un pipe, Ctrl+D, o Ctrl+C que cierra el readline): `rl.question()` nunca llama a su callback en EOF,
 así que antes la promesa quedaba colgada y el CLI terminaba en silencio con exit 0. `promptUntil()`
 re-pregunta ante vacío/formato inválido (5 intentos) y lo usa `cloud login` para email y código OTP
-(6 dígitos, se ignoran espacios/guiones; solo un código bien formado gasta un `/verify`, con hasta 3
+(de 6 a 10 dígitos —la longitud la fija GoTrue; el proyecto envía 8—, se ignoran espacios/guiones; solo un código bien formado gasta un `/verify`, con hasta 3
 intentos en total ante `otp_expired` sin reenviar el email). `confirm()` con stdin cerrado = "N" + aviso de
 `--yes`. Readline es **uno por prompt**: con stdin por pipe, las líneas que ya leyó un prompt se
 pierden al cerrarlo — el CLI no soporta responder a varios prompts por pipe (para scripts:

@@ -1148,7 +1148,7 @@ juntos — €7.99/mes · €79.99/año). Los tres son comprables: las tres URLs
 pobladas en la build (precios en `.claude/context/monetization.md` § visión, cifras de display en
 `src/lib/subscriptionPlans.ts`). Todo lo gratuito sigue funcionando sin cuenta.
 
-- **Sign-in sin contraseña:** email → "Send code" → código de 6 dígitos por email → "Verify &
+- **Sign-in sin contraseña:** email → "Send code" → código de acceso por email (8 dígitos) → "Verify &
   sign in" (misma UX de código que el Device Flow de GitHub). "Use a different email" vuelve atrás.
 - **Código incorrecto:** el error NO sale en la caja roja de arriba, sale **pegado al input**
   (icono ⚠ + "That code doesn't match, or it has expired…"), el input se pone con borde rojo y da

@@ -362,7 +362,7 @@ export function AccountPanel() {
                 if (codeNotice) setCodeNotice(null)
               }}
               onKeyDown={(e) => { if (e.key === 'Enter') handleVerify() }}
-              placeholder="123456"
+              placeholder="12345678"
               disabled={busy}
               aria-invalid={!!codeError}
               aria-describedby={codeError ? 'account-code-error' : undefined}

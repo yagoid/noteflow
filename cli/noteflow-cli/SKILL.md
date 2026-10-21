@@ -716,8 +716,8 @@ comandos `push`, `pull`, `status` y el sync automático tras cada mutación usan
 noteflow cloud login [email]
 ```
 
-Envía un código de 6 dígitos por email y lo pide por prompt (sin `[email]`, también pide el
-email). Un Enter vacío o un formato que no es de 6 dígitos (se ignoran espacios y guiones)
+Envía un código de acceso por email y lo pide por prompt (sin `[email]`, también pide el
+email). Un Enter vacío o algo que no es un código de 6 a 10 dígitos (se ignoran espacios y guiones)
 **vuelve a preguntar** sin gastar el código; si el servidor lo rechaza (erróneo o caducado)
 permite **hasta 3 intentos en total** sin reenviar el email. Es interactivo: sin stdin (pipe
 cerrado, agente, cron) falla con exit 1 en vez de quedarse esperando. La sesión del CLI es

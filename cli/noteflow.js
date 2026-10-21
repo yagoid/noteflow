@@ -2005,9 +2005,11 @@ async function cloudPullNow() {
 
 // ── NoteFlow Cloud: commands ──────────────────────────────────────────────────
 
-// The project's GoTrue emails 6-digit codes (⚠️ keep in sync with the "Sent a
-// 6-digit code" copy). Spaces/dashes are tolerated so a pasted "123 456" works.
-const OTP_CODE_RE = /^\d{6}$/
+// GoTrue's OTP length is a per-project setting (6–10 digits; ours emails 8),
+// so accept the whole range rather than pinning one length — the copy below
+// says "code", never "N-digit code". Spaces/dashes are tolerated so a pasted
+// "1234 5678" works.
+const OTP_CODE_RE = /^\d{6,10}$/
 // Codes /verify may reject before giving up. GoTrue answers a mistyped code and
 // an expired one identically (otp_expired / "Token has expired or is invalid"),
 // so a typo can be retried without emailing a new code (and hitting the 429).
@@ -2046,14 +2048,14 @@ async function cmdCloudLogin(emailArg, opts = {}) {
       : `Could not send the sign-in code (HTTP ${otp.status})`)
     exit(1)
   }
-  out(`  Sent a 6-digit code to ${email}`)
+  out(`  Sent a sign-in code to ${email}`)
 
   // An empty or malformed entry re-prompts locally (the emailed code stays
   // valid); only a well-formed code spends a /verify attempt.
   let session = null
   for (let attempt = 1; !session; attempt++) {
     const code = await promptUntil('Code: ', normalizeOtpCode,
-      a => (a ? `"${a}" is not a 6-digit code — paste the code from the email` : 'Paste the 6-digit code from the email'))
+      a => (a ? `"${a}" is not a valid code — paste the code from the email` : 'Paste the code from the email'))
     if (!code) { err(stdinClosed ? 'No code entered' : 'No valid code entered — run `noteflow cloud login` again'); exit(1) }
 
     const verify = await supabaseFetch(`${SUPABASE_URL}/auth/v1/verify`, {
@@ -3613,7 +3615,7 @@ function cmdHelp(topic) {
     noteflow rename "Projct Alpha" "Project Alpha"
 `,
     cloud: `
-  noteflow cloud login [email]    Sign in with an emailed 6-digit code (standard
+  noteflow cloud login [email]    Sign in with an emailed one-time code (standard
                                   keys: then pulls your notes; --no-pull skips it)
   noteflow cloud logout           Sign out (keeps notes and the sync cursor: signing
                                   back in with the same account resumes from it)
@@ -3990,5 +3992,6 @@ if (require.main === module) {
     classifyConditionalUpsert, parsePullRetry, mergeRetryRows, nextPullRetry, countDroppedRetries,
     PULL_RETRY_MAX_DECRYPT_ATTEMPTS, PULL_RETRY_MAX_APPLY_ATTEMPTS, PULL_RETRY_CHUNK, CLOUD_CONDITIONAL_UPSERT_RPC,
     mergeMetadataById, planMetadataPull, dirsPendingRetry,
+    normalizeOtpCode,
   }
 }

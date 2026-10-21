@@ -74,7 +74,8 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
 
 ## 2. Cuenta NoteFlow + entitlements + pagos (MoR)
 
-- **Auth:** Supabase Auth con **email + OTP de 6 dígitos** (sin deep links; misma UX de "código"
+- **Auth:** Supabase Auth con **email + OTP de 8 dígitos** (longitud configurable en GoTrue; la UI
+  y el CLI no la fijan: el copy dice "código" y el CLI acepta 6–10 dígitos) (sin deep links; misma UX de "código"
   que el Device Flow de GitHub ya establecido en la app). La sesión vive en el **proceso main**,
   espejo del patrón `githubSync`: refresh token cifrado con `safeStorage` en `settings.json`
   (sección `account`), **nunca cruza al renderer** — el renderer solo ve estado público
@@ -1365,7 +1366,7 @@ puro vía `fetch` desde el proceso main.
   or is invalid"), así que `invalidCode` cubre ambos y la UI ofrece reenviar.
 - **UI** — `src/components/Settings/AccountPanel.tsx` (sección "Account" en `SettingsModal`,
   textos vía i18n `t.settings.account.*`): no configurado → placeholder informativo; signed out →
-  email → código de 6 dígitos; signed in → email + badges de plan + el bloque compartido
+  email → código de acceso; signed in → email + badges de plan + el bloque compartido
   `PlanOffers` con los **planes y sus precios** (Bundle/AI/Cloud — ver § 3 "UI" y § visión
   "Precios") + Refresh + Sign out.
   **Dos superficies de error, nunca a la vez:** la caja roja de arriba (`error`) para el paso de
