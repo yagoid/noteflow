@@ -7,6 +7,7 @@ import {
   buildHeartbeatFrame,
   buildAccessTokenFrame,
   classifyFrame,
+  isFreshJoin,
   nextBackoffMs,
 } from '../../electron/cloudRealtimeLogic'
 
@@ -120,6 +121,26 @@ describe('classifyFrame', () => {
     expect(classifyFrame('not json at all')).toBe('other')
     expect(classifyFrame('null')).toBe('other')
     expect(classifyFrame('42')).toBe('other')
+  })
+})
+
+// ── Fresh join (catch-up trigger) ─────────────────────────────────────────────
+
+describe('isFreshJoin', () => {
+  const joinOk = JSON.stringify({ topic: REALTIME_TOPIC, event: 'phx_reply', payload: { status: 'ok' }, ref: '1' })
+
+  it('is true for the first join-ok of a connection (first join and every rejoin)', () => {
+    expect(isFreshJoin(classifyFrame(joinOk), false)).toBe(true)
+  })
+
+  it('is false for later join-ok replies on a joined channel (e.g. access_token acks)', () => {
+    expect(isFreshJoin(classifyFrame(joinOk), true)).toBe(false)
+  })
+
+  it('is false for every other frame kind', () => {
+    for (const kind of ['change', 'heartbeat-ok', 'join-error', 'close', 'other'] as const) {
+      expect(isFreshJoin(kind, false)).toBe(false)
+    }
   })
 })
 

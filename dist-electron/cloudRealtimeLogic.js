@@ -25,6 +25,7 @@ exports.buildJoinFrame = buildJoinFrame;
 exports.buildHeartbeatFrame = buildHeartbeatFrame;
 exports.buildAccessTokenFrame = buildAccessTokenFrame;
 exports.classifyFrame = classifyFrame;
+exports.isFreshJoin = isFreshJoin;
 exports.nextBackoffMs = nextBackoffMs;
 // ── Frames ────────────────────────────────────────────────────────────────────
 /** Channel topic for the files subscription (client-chosen, 'realtime:' prefix required). */
@@ -93,6 +94,16 @@ function classifyFrame(raw) {
     if (event === 'phx_close' || event === 'phx_error')
         return 'close';
     return 'other';
+}
+/**
+ * True when a frame completes a channel (re)join: the first 'join-ok' since the
+ * socket (re)connected (`alreadyJoined` is reset on every teardown). Later
+ * 'join-ok' replies — e.g. to an access_token push — don't count. Every fresh
+ * join must trigger a catch-up sync: changes made while the socket was down
+ * produced no event this client will ever receive.
+ */
+function isFreshJoin(kind, alreadyJoined) {
+    return kind === 'join-ok' && !alreadyJoined;
 }
 function replyStatus(payload) {
     if (!payload || typeof payload !== 'object')

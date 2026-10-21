@@ -13,6 +13,9 @@ exports.parseSyncState = parseSyncState;
 exports.serializeSyncState = serializeSyncState;
 exports.journalRecord = journalRecord;
 exports.journalRecordIfAbsent = journalRecordIfAbsent;
+exports.journalMarkStale = journalMarkStale;
+exports.journalMarkDirStale = journalMarkDirStale;
+exports.planAnchorTombstone = planAnchorTombstone;
 exports.journalComplete = journalComplete;
 exports.journalFail = journalFail;
 exports.resolveRetryAction = resolveRetryAction;
@@ -57,11 +60,17 @@ function parseSyncState(raw) {
             const entry = value;
             if (!OP_TYPES.includes(entry.op))
                 continue;
-            state.ops[key] = {
+            const op = {
                 op: entry.op,
                 queuedAt: typeof entry.queuedAt === 'string' ? entry.queuedAt : new Date(0).toISOString(),
                 attempts: typeof entry.attempts === 'number' && Number.isFinite(entry.attempts) ? entry.attempts : 0,
             };
+            // Cloud-only upsert flags: kept only in their exact `true` form.
+            if (op.op === 'upsert' && entry.stale === true)
+                op.stale = true;
+            if (op.op === 'upsert' && entry.force === true)
+                op.force = true;
+            state.ops[key] = op;
         }
     }
     if (typeof obj.shas === 'object' && obj.shas !== null) {
@@ -78,15 +87,17 @@ function serializeSyncState(state) {
 // ── Journal transitions ───────────────────────────────────────────────────────
 // All mutators return true when the state actually changed (caller persists only then).
 /**
- * Records a pending remote mutation. Re-recording the SAME op for a key is a
- * no-op (keeps queuedAt/attempts — e.g. a debounce timer being re-armed while
- * typing); a DIFFERENT op replaces the entry (e.g. a delete supersedes a
- * pending upsert of the same file). Recording a 'deleteDir' also drops every
- * file-level op under '<dir>/' — those files are going away with the dir, and
- * keeping their upserts would both block the pull deletion rule and make the
- * retry re-push files of a deleted note.
+ * Records a pending remote mutation. Re-recording the SAME op for a key keeps
+ * queuedAt/attempts (e.g. a debounce timer being re-armed while typing); for an
+ * upsert it also clears `stale` (a new local edit — its upload deserves a new
+ * conditional attempt) and adds `force` when asked, but never drops an
+ * existing `force`. A DIFFERENT op replaces the entry (e.g. a delete
+ * supersedes a pending upsert of the same file). Recording a 'deleteDir' also
+ * drops every file-level op under '<dir>/' — those files are going away with
+ * the dir, and keeping their upserts would both block the pull deletion rule
+ * and make the retry re-push files of a deleted note.
  */
-function journalRecord(state, key, op, nowIso) {
+function journalRecord(state, key, op, nowIso, opts) {
     let changed = false;
     if (op === 'deleteDir') {
         const prefix = `${key}/`;
@@ -97,10 +108,20 @@ function journalRecord(state, key, op, nowIso) {
             }
         }
     }
+    const force = op === 'upsert' && opts?.force === true;
     const existing = state.ops[key];
-    if (existing && existing.op === op)
+    if (existing && existing.op === op) {
+        if (existing.stale) {
+            delete existing.stale;
+            changed = true;
+        }
+        if (force && !existing.force) {
+            existing.force = true;
+            changed = true;
+        }
         return changed;
-    state.ops[key] = { op, queuedAt: nowIso, attempts: 0 };
+    }
+    state.ops[key] = force ? { op, queuedAt: nowIso, attempts: 0, force: true } : { op, queuedAt: nowIso, attempts: 0 };
     return true;
 }
 /**
@@ -117,10 +138,64 @@ function journalRecord(state, key, op, nowIso) {
  * journalFail; a newer delete intent wins — the failed upsert is irrelevant,
  * the file is going away).
  */
-function journalRecordIfAbsent(state, key, op, nowIso) {
+function journalRecordIfAbsent(state, key, op, nowIso, opts) {
     if (state.ops[key])
         return false;
-    return journalRecord(state, key, op, nowIso);
+    return journalRecord(state, key, op, nowIso, opts);
+}
+/**
+ * NoteFlow Cloud: flags a pending upsert as `stale` (its conditional upload was
+ * rejected — the server holds a newer version). Only an EXISTING upsert entry
+ * is flagged, never re-created: if the pull already reconciled the path (and
+ * completed the op) while the upload was in flight, there is nothing left to
+ * keep — re-creating it would leave a phantom pending edit that guards the
+ * note against remote deletions forever.
+ */
+function journalMarkStale(state, key) {
+    const entry = state.ops[key];
+    if (!entry || entry.op !== 'upsert' || entry.stale)
+        return false;
+    entry.stale = true;
+    return true;
+}
+/**
+ * NoteFlow Cloud: flags EVERY pending upsert under '<dir>/' as stale — the
+ * pull is about to apply a strictly newer remote version of the folder
+ * wholesale (the local version lost, LWW). Done BEFORE the first disk write:
+ * if the apply fails halfway, a still-live upsert of a section would be
+ * drained with the content of the losing version but the `updated` of the
+ * remote anchor just written (a tie the server accepts) and clobber the
+ * server's newer section. Stale ops are skipped by the drain and resolved by
+ * the retry of the failed apply. Forced ops are flagged too (their
+ * resurrection lost against a newer remote version).
+ */
+function journalMarkDirStale(state, dir) {
+    const prefix = `${dir}/`;
+    let changed = false;
+    for (const [key, entry] of Object.entries(state.ops)) {
+        if (entry.op === 'upsert' && key.startsWith(prefix) && !entry.stale) {
+            entry.stale = true;
+            changed = true;
+        }
+    }
+    return changed;
+}
+function planAnchorTombstone(state, dir, localUpdatedMs, tombstoneUpdatedMs) {
+    const prefix = `${dir}/`;
+    let pending = 0;
+    let stale = 0;
+    for (const [key, entry] of Object.entries(state.ops)) {
+        if (entry.op !== 'upsert' || !key.startsWith(prefix))
+            continue;
+        pending++;
+        if (entry.stale)
+            stale++;
+    }
+    if (pending === 0)
+        return 'none';
+    if (stale < pending)
+        return 'keep';
+    return localUpdatedMs !== null && localUpdatedMs <= tombstoneUpdatedMs ? 'lost' : 'keep';
 }
 /**
  * Removes a journal entry after the mutation landed remotely. Only removes when

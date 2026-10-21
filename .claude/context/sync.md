@@ -9,12 +9,13 @@ excluyentes**: esta función es la única fuente de verdad (el tick del autosync
 si Cloud está habilitado), y la página Settings → Sync lo comunica visualmente (selector de dos
 tarjetas con badges de estado + aviso "paused" en el panel de GitHub con Cloud activo — tramo 4,
 ver `monetization.md` § 4 "Settings UI").
-⚠️ Exclusión mutua = **enrutado**, no "GitHub no escribe nunca": el pull manual de GitHub
-(`sync:pull`, botón de Settings → Sync → GitHub) sigue disponible con Cloud activo y su catch-up
-(`flushPendingLocalChanges`) empuja ficheros al repo **sin pasar por el router** — es lo que evita
-que el espejo pausado se quede obsoleto (ver la regla de borrado más abajo). Ese catch-up es
-parcial (filtra por `updated` y nunca borra): para dejar el repo **exacto** está la acción
-**"Espejar en GitHub"** (`mirrorToGitHub`, abajo), que solo se ofrece con Cloud activo.
+⚠️ Exclusión mutua = **enrutado**, no "GitHub no escribe nunca": con Cloud activo **`sync:pull` se
+rechaza** en `main.ts` (`{…SyncPullResult vacío, error: 'cloud-enabled'}`) y el botón "Sincronizar
+ahora" de Settings → Sync → GitHub se oculta: un pull del repo pausado podía resucitar notas borradas
+bajo Cloud. Todos los demás pulls de GitHub ya se saltan con Cloud activo (tick del autosync,
+arranque, `sync:pull-active`) — **excepto** el pull inicial de `initiateDeviceFlow` al conectar
+GitHub (pendiente de decidir). La única forma de refrescar el repo con Cloud activo es **"Espejar en
+GitHub"** (`mirrorToGitHub`, abajo), que lo deja exacto.
 
 **Cerrar sesión de la cuenta NoteFlow apaga Cloud** (`enabled = false` vía `disableCloudSync()`,
 que conserva `lastSync`/`pullSeq`/journal) → se **libera la exclusión mutua** y GitHub Sync
@@ -91,15 +92,26 @@ sobre `seq` (antes un GET capado a 1.000 filas dejaba la nota sin tombstone y el
 por hecho), y el pull **no aplica** el tombstone de una nota con un `upsert` pendiente bajo su
 carpeta (`shouldDeletionRuleSkipDir`, el mismo guard que aquí abajo usa la regla de borrado de
 GitHub) ni el de una sección con upsert pendiente de ese fichero (`hasPendingUpsert`): gana la
-edición local y la nota se re-sube entera (resurrección intencionada). Detalle en `monetization.md`
+edición local y la nota se re-sube entera con subida **forzada** (resurrección intencionada: el
+tombstone es más nuevo por diseño y una subida condicionada se rechazaría) — salvo que **todas** sus
+subidas pendientes sean `stale` (el servidor ya rechazó esa versión local) y el `updated` local no
+sea posterior al borrado: entonces se borra en local (`planAnchorTombstone`). Detalle en `monetization.md`
 § 4 "Deletes = tombstones".
 📌 **Integridad del pull incremental de Cloud:** `pullNotes` avanza el watermark con
-`nextPullSeq(s.pullSeq, rows)` (`cloudSyncLogic.ts`) = máxima `seq` de **todas** las filas
-traídas. Las filas que no descifran (o con ruta insegura) quedan por debajo **a propósito**: nunca
-van a volverse aplicables. ⚠️ **Pendiente (sin arreglar):** las filas de una carpeta cuyo
-**aplicado** falla después (error de disco) también quedan por debajo y no se reintentan en este
-dispositivo. En ambos casos ese pull reporta el error y los siguientes salen "limpios" sin haberla
-aplicado (afecta también al gate de caducidad de notas temporales, ver `patterns.md`).
+`nextPullSeq(s.pullSeq, rows)` (`cloudSyncLogic.ts`) = máxima `seq` de **todas** las filas de la
+consulta incremental. Las filas que **fallan al aplicarse** (error de disco en su carpeta o en un json
+de metadatos) o **no descifran** no se pierden: entran en el **retry set**
+`settings.cloudSync.pullRetry` (path_key → `{relPath?, attempts}`), escrito en el **mismo**
+`patchSettings` que avanza `pullSeq`, y cada pull las vuelve a pedir por `path_key` y las mezcla en
+su lote (`mergeRetryRows`/`nextPullRetry`, puros). Las indescifrables se abandonan tras 5 intentos y
+las que fallan al aplicarse tras 50 (error local permanente); las de ruta insegura nunca se reintentan. Mientras el retry set no esté vacío el estado de Cloud
+muestra un error ("Some remote changes could not be applied…") aunque un push posterior limpie
+`syncError`, y el espejo a GitHub se bloquea (`hasPendingPullRetries`). Detalle en
+`monetization.md` § 4 "Pull incremental".
+📌 **Subidas condicionadas de Cloud (migración 0011):** las filas de nota se suben por la RPC
+`cloud_upsert_file`, que rechaza ("stale") una versión más vieja que la del servidor; el ciclo de
+Cloud hace **pull (y emite su resultado) antes de drenar el journal**. Detalle (stale/force, metadatos, cambio de cuenta)
+en `monetization.md` § 4 "Subidas condicionadas".
 
 **El CLI** (`cli/noteflow.js`) tiene su propio cliente Cloud headless (`noteflow cloud …`, con
 sesión y cursor propios en `settings.cliAccount`/`cliCloud`, y la misma prioridad Cloud > GitHub):
@@ -256,13 +268,17 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
 - **Espejo local → repo (`mirrorToGitHub(notesDir)`), acción manual solo-Cloud:** deja el repo como
   **copia exacta** del dir de notas — sube lo que falte o difiera, **borra del remoto** lo que ya no
   exista en local y reafirma el marcador v2. Botón "Mirror to GitHub"/"Espejar en GitHub" en
-  Settings → Sync → GitHub, **entre "Sincronizar ahora" y "Desconectar" y solo si Cloud está
+  Settings → Sync → GitHub, **junto a "Desconectar" y solo si Cloud está
   habilitado** (con diálogo de confirmación: el repo se sobrescribe y se borran ficheros de él).
   Existe porque con Cloud activo GitHub es un espejo de **solo escritura**: no recibe borrados y el
   flush del pull filtra por el `updated` del `note.md`, así que una nota que Cloud trajo de otro
-  dispositivo con `updated` viejo nunca sube. "Sincronizar ahora" (`sync:pull`) NO cambia.
+  dispositivo con `updated` viejo nunca sube. "Sincronizar ahora" (`sync:pull`) queda oculto y rechazado con Cloud activo.
   - **Gate de Cloud en `main.ts`** (`sync:mirror-to-github` → `{ok:false, error:'cloud-required'}`
-    si Cloud está apagado): `githubSync.ts` no puede importar `cloudSync.ts` (ciclo). El handler no
+    si Cloud está apagado, y `{ok:false, error:'cloud-initial-pull-pending'}` si el pull inicial de
+    Cloud de este dispositivo aún no está en `'ok'` **o** quedan filas en el set de reintento del
+    pull (`hasPendingPullRetries()`): en un dispositivo recién activado, o con carpetas que no se
+    pudieron aplicar, el disco todavía no es el estado de la cuenta y el espejo borraría del repo
+    todo lo no descargado): `githubSync.ts` no puede importar `cloudSync.ts` (ciclo). El handler no
     emite `notes-updated` (el disco no cambia), solo `sync:status-changed`.
   - **Decisión pura y testeada en `electron/mirrorPlan.ts`** (sin imports de Electron, patrón
     `syncState.ts`): `planMirror(localFiles, remoteBlobs, metadataFilenames)` → `{toUpload, toDelete,
@@ -391,12 +407,12 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   overview) disparaba N mutaciones concurrentes → 409s silenciosos → notas restauradas; de ahí la
   cola. Mantener este patrón al añadir operaciones que toquen el remoto (notas, grupos, carpetas,
   metadatos).
-- **⚠️ Problema conocido (pendiente, igual que en Cloud): las subidas pisan sin condiciones.**
-  `upsertRemoteFileNow` hace GET del sha actual y PUT con él — el sha es solo el token de
-  concurrencia de la Contents API, no "la versión que este dispositivo vio" —, así que una subida
+- **⚠️ Problema conocido (pendiente en GitHub; Cloud ya lo resolvió): las subidas pisan sin
+  condiciones.** `upsertRemoteFileNow` hace GET del sha actual y PUT con él — el sha es solo el token
+  de concurrencia de la Contents API, no "la versión que este dispositivo vio" —, así que una subida
   en cola o drenada tarde del journal pisa una versión más nueva subida por otro dispositivo
-  entretanto. Arreglo previsto con la **subida condicionada** en los dos backends (ver
-  `monetization.md` § 4).
+  entretanto. NoteFlow Cloud ya sube condicionado (RPC de la migración 0011, ver `monetization.md`
+  § 4 "Subidas condicionadas"); en GitHub sigue pendiente.
 - **Repo:** se crea automáticamente con `private: true` + `auto_init: true` si no existe.
 - **initialPullStatus** (`pending|ok|failed`) gatea pushes hasta que el primer pull tenga éxito.
 - **Catch-up de subida (`flushPendingLocalChanges`) — dos niveles de filtro:**

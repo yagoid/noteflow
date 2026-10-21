@@ -98,9 +98,12 @@ const api = {
     initiateGitHubAuth: (repo) => electron_1.ipcRenderer.invoke('sync:initiate', repo),
     cancelGitHubAuth: () => electron_1.ipcRenderer.invoke('sync:cancel-auth'),
     disconnectGitHub: () => electron_1.ipcRenderer.invoke('sync:disconnect'),
+    // Manual GitHub pull. Refused with error: 'cloud-enabled' while NoteFlow
+    // Cloud owns the sync loop (nothing is pulled then).
     pullNotes: () => electron_1.ipcRenderer.invoke('sync:pull'),
     // Mirror local → repo (only available while NoteFlow Cloud is enabled; main
-    // rejects it otherwise with error: 'cloud-required').
+    // rejects it otherwise with error: 'cloud-required', and with
+    // 'cloud-initial-pull-pending' until this device's Cloud initial pull is done).
     mirrorToGitHub: () => electron_1.ipcRenderer.invoke('sync:mirror-to-github'),
     // Manual pull routed to the LIVE backend (Cloud when enabled, else GitHub).
     pullActiveNotes: () => electron_1.ipcRenderer.invoke('sync:pull-active'),
@@ -152,6 +155,9 @@ const api = {
     cloudUnlock: (secret) => electron_1.ipcRenderer.invoke('cloud:unlock', secret),
     // Silent managed unlock retry (the panel polls it while "Unlocking…" shows).
     cloudAutoUnlock: () => electron_1.ipcRenderer.invoke('cloud:auto-unlock'),
+    // Best-effort re-read of the account's encryption mode (another device may
+    // have switched it); main broadcasts cloud:status-changed when it changed.
+    cloudRefreshKeysMode: () => electron_1.ipcRenderer.invoke('cloud:refresh-keys-mode'),
     cloudLock: () => electron_1.ipcRenderer.invoke('cloud:lock'),
     cloudEnable: () => electron_1.ipcRenderer.invoke('cloud:enable'),
     cloudDisable: () => electron_1.ipcRenderer.invoke('cloud:disable'),

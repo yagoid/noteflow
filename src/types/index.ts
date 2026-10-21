@@ -478,6 +478,7 @@ declare global {
       initiateGitHubAuth: (repo: string) => Promise<{ ok: boolean; userCode?: string; verificationUri?: string; error?: string }>
       cancelGitHubAuth: () => Promise<{ ok: boolean }>
       disconnectGitHub: () => Promise<{ ok: boolean }>
+      // Manual GitHub pull — refused with error 'cloud-enabled' while NoteFlow Cloud is enabled.
       pullNotes: () => Promise<{
         pulled: number
         deleted: number
@@ -485,6 +486,7 @@ declare global {
         updatedFiles: string[]
         hadDeletions: boolean
         hadMetadataChanges: boolean
+        error?: 'cloud-enabled'
       }>
       // Mirror local → repo: leaves the repo as an exact copy of the local state
       // (uploads what differs, deletes what is gone). Only while Cloud is enabled.
@@ -496,7 +498,7 @@ declare global {
         // errors: raw GitHub API failures (verbatim) · warnings: our own codes, localized here
         errors: string[]
         warnings: Array<'deletions-skipped-unreadable'>
-        error?: 'cloud-required' | 'not-connected' | 'in-progress' | 'token'
+        error?: 'cloud-required' | 'cloud-initial-pull-pending' | 'not-connected' | 'in-progress' | 'token'
       }>
       // Manual pull routed to the live backend (Cloud when enabled, else GitHub).
       pullActiveNotes: () => Promise<{
@@ -522,10 +524,13 @@ declare global {
       getCloudStatus: () => Promise<CloudSyncStatus>
       cloudSetup: (passphrase: string) => Promise<{ ok: boolean; recoveryCode?: string; error?: string }>
       cloudSetupManaged: () => Promise<{ ok: boolean; error?: string }>
-      cloudUpgradeE2ee: (passphrase: string) => Promise<{ ok: boolean; recoveryCode?: string; error?: string }>
+      // errorCode 'already-e2ee': another device already switched to private mode (no recovery code issued).
+      cloudUpgradeE2ee: (passphrase: string) => Promise<{ ok: boolean; recoveryCode?: string; error?: string; errorCode?: 'already-e2ee' }>
       cloudDowngradeManaged: () => Promise<{ ok: boolean; error?: string }>
       cloudUnlock: (secret: string) => Promise<{ ok: boolean; error?: string }>
       cloudAutoUnlock: () => Promise<{ ok: boolean }>
+      // Re-reads the account's encryption mode (switched from another device?) — called when the Cloud panel opens.
+      cloudRefreshKeysMode: () => Promise<{ changed: boolean }>
       cloudLock: () => Promise<{ ok: boolean }>
       cloudEnable: () => Promise<{ ok: boolean; error?: string }>
       cloudDisable: () => Promise<{ ok: boolean }>

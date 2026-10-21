@@ -17,7 +17,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CLOUD_PAGE_SIZE = exports.CLOUD_PULL_COLUMNS = exports.CLOUD_METADATA_FILENAMES = void 0;
+exports.CLOUD_MERGEABLE_METADATA = exports.PULL_RETRY_CHUNK = exports.PULL_RETRY_MAX_APPLY_ATTEMPTS = exports.PULL_RETRY_MAX_DECRYPT_ATTEMPTS = exports.CLOUD_CONDITIONAL_UPSERT_RPC = exports.CLOUD_PAGE_SIZE = exports.CLOUD_PULL_COLUMNS = exports.CLOUD_METADATA_FILENAMES = void 0;
 exports.noteDirOf = noteDirOf;
 exports.isAnchorPath = isAnchorPath;
 exports.isSafeCloudRelPath = isSafeCloudRelPath;
@@ -35,6 +35,15 @@ exports.parseRowSeq = parseRowSeq;
 exports.nextPullSeq = nextPullSeq;
 exports.buildFileUpsertRow = buildFileUpsertRow;
 exports.decryptFileRow = decryptFileRow;
+exports.classifyConditionalUpsert = classifyConditionalUpsert;
+exports.parsePullRetry = parsePullRetry;
+exports.mergeRetryRows = mergeRetryRows;
+exports.nextPullRetry = nextPullRetry;
+exports.countDroppedRetries = countDroppedRetries;
+exports.shouldResetCloudState = shouldResetCloudState;
+exports.isMergeableMetadata = isMergeableMetadata;
+exports.mergeMetadataById = mergeMetadataById;
+exports.planMetadataPull = planMetadataPull;
 exports.planRemoteDelete = planRemoteDelete;
 const js_yaml_1 = __importDefault(require("js-yaml"));
 const noteFormat_1 = require("./noteFormat");
@@ -278,8 +287,10 @@ function parseRowSeq(value) {
 }
 /**
  * Advances the incremental-pull watermark to the max `seq` of ALL fetched rows
- * — undecryptable and unsafe-path rows included: they will never become
- * decryptable/safe, so waiting on them would re-fetch them forever. Starts at
+ * — rows that failed to apply or decrypt included: holding the watermark on
+ * them would re-fetch the whole tail forever. Failed rows are kept alive by
+ * the pull retry set instead (settings.cloudSync.pullRetry, see
+ * nextPullRetry), persisted in the same write as the watermark. Starts at
  * 0 when there was no watermark, so a pull that saw nothing still leaves the
  * device in seq mode. `seq` is assigned by the server on every write
  * (migration 0008) and, per user, becomes visible in order — unlike
@@ -329,6 +340,206 @@ async function decryptFileRow(dek, row) {
         updatedAtMs: Number.isFinite(updatedAtMs) ? updatedAtMs : 0,
         deleted: row.deleted,
     };
+}
+// ── Conditional uploads (migration 0011) ──────────────────────────────────────
+/** RPC of migration 0011 that note rows go through ('<dir>/note.md' and its sections). */
+exports.CLOUD_CONDITIONAL_UPSERT_RPC = 'cloud_upsert_file';
+function classifyConditionalUpsert(status, json) {
+    const code = json && typeof json === 'object' ? json.code : undefined;
+    if (status === 404 || code === 'PGRST202')
+        return 'missing';
+    if (status === 403)
+        return 'forbidden';
+    if (status >= 400)
+        return 'error';
+    return json === false ? 'stale' : 'uploaded';
+}
+/** Undecryptable rows are given up after this many pulls (permanent corruption must not keep the error forever). */
+exports.PULL_RETRY_MAX_DECRYPT_ATTEMPTS = 5;
+/**
+ * Rows that fail to APPLY are given up after this many pulls (~hours of
+ * 5-minute safety-net pulls, more with Realtime): enough for a transient lock
+ * (antivirus, sync client) to clear, while a permanent local error
+ * (ENAMETOOLONG, EACCES) doesn't block "Mirror to GitHub" and show the error
+ * forever.
+ */
+exports.PULL_RETRY_MAX_APPLY_ATTEMPTS = 50;
+/** Path keys per `path_key=in.(…)` request of the retry re-fetch (keeps the URL short). */
+exports.PULL_RETRY_CHUNK = 100;
+/** Tolerant read of settings.cloudSync.pullRetry: malformed entries are dropped. */
+function parsePullRetry(raw) {
+    const out = {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+        return out;
+    for (const [key, value] of Object.entries(raw)) {
+        if (!key || !value || typeof value !== 'object')
+            continue;
+        const v = value;
+        const attempts = typeof v.attempts === 'number' && Number.isFinite(v.attempts) && v.attempts >= 0 ? v.attempts : 0;
+        out[key] = typeof v.relPath === 'string' ? { relPath: v.relPath, attempts } : { attempts };
+    }
+    return out;
+}
+/**
+ * The pull batch: the main incremental fetch plus the rows re-fetched for the
+ * retry set, deduped by path_key — the main fetch wins (same row, and it
+ * carries the seq that feeds the watermark).
+ */
+function mergeRetryRows(mainRows, retryRows) {
+    const seen = new Set(mainRows.map((r) => r.path_key));
+    const out = [...mainRows];
+    for (const row of retryRows) {
+        if (seen.has(row.path_key))
+            continue;
+        seen.add(row.path_key);
+        out.push(row);
+    }
+    return out;
+}
+/**
+ * Retry set to persist after a pull. Built from this pull's failures ONLY:
+ * every row of the previous set was re-fetched into the batch, so a key that
+ * did not fail again either applied (leaves) or is gone from the server
+ * (nothing to apply — leaves too). Apply failures are dropped once they
+ * reach PULL_RETRY_MAX_APPLY_ATTEMPTS (a permanent local error must not keep
+ * the error forever), decrypt failures once they reach
+ * PULL_RETRY_MAX_DECRYPT_ATTEMPTS. Unsafe-path rows never enter (permanent).
+ * Callers count what was dropped with countDroppedRetries (log a count only).
+ * Mirror: nextPullRetry in cli/noteflow.js.
+ */
+function nextPullRetry(prev, failures, maxDecryptAttempts = exports.PULL_RETRY_MAX_DECRYPT_ATTEMPTS, maxApplyAttempts = exports.PULL_RETRY_MAX_APPLY_ATTEMPTS) {
+    const next = {};
+    const decided = new Set();
+    for (const [key, relPath] of failures.apply) {
+        decided.add(key);
+        const attempts = (prev[key]?.attempts ?? 0) + 1;
+        if (attempts < maxApplyAttempts)
+            next[key] = { relPath, attempts };
+    }
+    for (const key of failures.decrypt) {
+        if (decided.has(key))
+            continue;
+        decided.add(key);
+        const attempts = (prev[key]?.attempts ?? 0) + 1;
+        if (attempts < maxDecryptAttempts)
+            next[key] = { attempts };
+    }
+    return next;
+}
+/** How many of this pull's failed rows nextPullRetry gave up on (reached their max attempts). */
+function countDroppedRetries(failures, next) {
+    const keys = new Set([...failures.apply.keys(), ...failures.decrypt]);
+    let dropped = 0;
+    for (const key of keys)
+        if (!next[key])
+            dropped++;
+    return dropped;
+}
+// ── Account owner of the sync state ───────────────────────────────────────────
+/**
+ * Must the persisted Cloud sync state (pullSeq/lastSync/pullRetry, the journal,
+ * the note-key cache) be discarded for the signed-in account? Only when its
+ * recorded owner is ANOTHER account: a foreign watermark would skip every row
+ * of this account below it, and a foreign journal would replay the other
+ * account's edits/deletions here. An unknown owner (state written before the
+ * owner was recorded) is ADOPTED by the caller, not reset — resetting is not
+ * free (the first full pull skips tombstones, so notes deleted elsewhere would
+ * stay on disk). Signed out (no current user) → nothing to compare. Same
+ * semantics as the CLI's cliCloudForUser.
+ */
+function shouldResetCloudState(storedOwner, currentUserId) {
+    if (!currentUserId || !storedOwner)
+        return false;
+    return storedOwner !== currentUserId;
+}
+// ── Root metadata merge (first sync / unsynced local edits) ───────────────────
+/** Root metadata files that are arrays of `{ id }` objects and can be merged by id. */
+exports.CLOUD_MERGEABLE_METADATA = ['groups.json', 'folders.json', 'templates.json'];
+function isMergeableMetadata(relPath) {
+    return exports.CLOUD_MERGEABLE_METADATA.includes(relPath);
+}
+function parseIdArray(json) {
+    if (json === null)
+        return null;
+    let data;
+    try {
+        data = JSON.parse(json);
+    }
+    catch {
+        return null;
+    }
+    if (!Array.isArray(data))
+        return null;
+    for (const item of data) {
+        if (!item || typeof item !== 'object' || Array.isArray(item))
+            return null;
+        if (typeof item.id !== 'string')
+            return null;
+    }
+    return data;
+}
+/**
+ * Union by `id` of two metadata JSON arrays (groups.json / folders.json /
+ * templates.json — arrays of objects with a string id). Colliding ids take the
+ * `prefer` side's object; the preferred side's order comes first, then the
+ * other side's extras in their order. Returns the merged JSON in the app's
+ * on-disk format (2-space indent), or null when either side isn't such an
+ * array (not mergeable — the caller picks a side). These entries have no
+ * tombstones, so one deleted on a single side comes back from the other:
+ * accepted — losing a device's groups/folders/templates is worse.
+ */
+function mergeMetadataById(localJson, remoteJson, prefer) {
+    const local = parseIdArray(localJson);
+    const remote = parseIdArray(remoteJson);
+    if (!local || !remote)
+        return null;
+    const [first, second] = prefer === 'local' ? [local, remote] : [remote, local];
+    const ids = new Set();
+    const merged = [];
+    for (const item of [...first, ...second]) {
+        if (ids.has(item.id))
+            continue;
+        ids.add(item.id);
+        merged.push(item);
+    }
+    return JSON.stringify(merged, null, 2);
+}
+/**
+ * Pull decision for a root metadata file (remote content vs the local file):
+ *   - identical → keep;
+ *   - pending local upsert (an unsynced local edit — the pull runs BEFORE the
+ *     journal drain): mergeable files get the union preferring LOCAL (the op
+ *     stays and uploads it); the others keep the local file (local wins, the
+ *     drain uploads it);
+ *   - first pull of this device/account (no previous lastSync): the local file
+ *     is backed up before being overwritten; mergeable files get the union
+ *     preferring REMOTE (the first-sync catch-up then uploads it), the others
+ *     take the remote;
+ *   - otherwise → remote wins (LWW, as the GitHub pull).
+ * An unmergeable pair (malformed JSON on either side) falls back to the
+ * non-merge rule of its case. `backup` is only ever set on the first pull.
+ */
+function planMetadataPull(relPath, localContent, remoteContent, opts) {
+    if (localContent === remoteContent)
+        return { action: 'keep' };
+    const backup = opts.firstPull && localContent !== null;
+    if (opts.pendingUpsert) {
+        if (localContent === null)
+            return { action: 'write', content: remoteContent, backup: false, merged: false };
+        const merged = isMergeableMetadata(relPath) ? mergeMetadataById(localContent, remoteContent, 'local') : null;
+        if (merged === null || merged === localContent)
+            return { action: 'keep' };
+        return { action: 'write', content: merged, backup, merged: true };
+    }
+    if (opts.firstPull && localContent !== null && isMergeableMetadata(relPath)) {
+        const merged = mergeMetadataById(localContent, remoteContent, 'remote');
+        if (merged !== null) {
+            return merged === localContent
+                ? { action: 'keep' }
+                : { action: 'write', content: merged, backup, merged: true };
+        }
+    }
+    return { action: 'write', content: remoteContent, backup, merged: false };
 }
 /**
  * Decides how a remote delete proceeds — a two-step decision: call it first

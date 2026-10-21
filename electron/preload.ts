@@ -177,6 +177,8 @@ const api = {
     ipcRenderer.invoke('sync:initiate', repo),
   cancelGitHubAuth: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:cancel-auth'),
   disconnectGitHub: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:disconnect'),
+  // Manual GitHub pull. Refused with error: 'cloud-enabled' while NoteFlow
+  // Cloud owns the sync loop (nothing is pulled then).
   pullNotes: (): Promise<{
     pulled: number
     deleted: number
@@ -184,9 +186,11 @@ const api = {
     updatedFiles: string[]
     hadDeletions: boolean
     hadMetadataChanges: boolean
+    error?: 'cloud-enabled'
   }> => ipcRenderer.invoke('sync:pull'),
   // Mirror local → repo (only available while NoteFlow Cloud is enabled; main
-  // rejects it otherwise with error: 'cloud-required').
+  // rejects it otherwise with error: 'cloud-required', and with
+  // 'cloud-initial-pull-pending' until this device's Cloud initial pull is done).
   mirrorToGitHub: (): Promise<{
     ok: boolean
     pushed: number
@@ -196,7 +200,7 @@ const api = {
     errors: string[]
     /** Codes for OUR user-facing notices — the renderer localizes them. */
     warnings: Array<'deletions-skipped-unreadable'>
-    error?: 'cloud-required' | 'not-connected' | 'in-progress' | 'token'
+    error?: 'cloud-required' | 'cloud-initial-pull-pending' | 'not-connected' | 'in-progress' | 'token'
   }> => ipcRenderer.invoke('sync:mirror-to-github'),
   // Manual pull routed to the LIVE backend (Cloud when enabled, else GitHub).
   pullActiveNotes: (): Promise<{
@@ -292,7 +296,9 @@ const api = {
   cloudSetupManaged: (): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('cloud:setup-managed'),
   // Managed → e2ee upgrade; returns the new recovery code ONCE.
-  cloudUpgradeE2ee: (passphrase: string): Promise<{ ok: boolean; recoveryCode?: string; error?: string }> =>
+  cloudUpgradeE2ee: (
+    passphrase: string
+  ): Promise<{ ok: boolean; recoveryCode?: string; error?: string; errorCode?: 'already-e2ee' }> =>
     ipcRenderer.invoke('cloud:upgrade-e2ee', passphrase),
   // e2ee → managed downgrade (explicit, UI-confirmed; passphrase + recovery
   // code stop working). Requires the keys to be unlocked.
@@ -302,6 +308,9 @@ const api = {
     ipcRenderer.invoke('cloud:unlock', secret),
   // Silent managed unlock retry (the panel polls it while "Unlocking…" shows).
   cloudAutoUnlock: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:auto-unlock'),
+  // Best-effort re-read of the account's encryption mode (another device may
+  // have switched it); main broadcasts cloud:status-changed when it changed.
+  cloudRefreshKeysMode: (): Promise<{ changed: boolean }> => ipcRenderer.invoke('cloud:refresh-keys-mode'),
   cloudLock: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:lock'),
   cloudEnable: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('cloud:enable'),
   cloudDisable: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:disable'),

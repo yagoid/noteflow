@@ -7,8 +7,11 @@
 //
 // Deliberate differences vs GitHub Sync (documented in monetization.md § 4):
 //   - NO mutation queue: the Contents API serialization invariant is a GitHub
-//     workaround — Postgres handles concurrent upserts natively. Writes are
-//     direct upserts (Prefer: resolution=merge-duplicates) with a single retry.
+//     workaround — Postgres handles concurrent upserts natively. Note rows go
+//     through a CONDITIONAL upsert (RPC cloud_upsert_file, migration 0011:
+//     rejected when the server holds a newer version of the folder); root
+//     metadata and forced uploads are plain upserts (merge-duplicates). One
+//     retry on network errors / 5xx either way.
 //   - Deletions propagate via TOMBSTONES (deleted=true, content_ct blanked),
 //     not via absence: the incremental pull can't see "missing" rows, and a
 //     tombstone is exactly the "this was deleted" signal absence used to imply.
@@ -73,6 +76,8 @@ exports.isCloudSyncEnabled = isCloudSyncEnabled;
 exports.getCloudSyncStatus = getCloudSyncStatus;
 exports.onStatusChanged = onStatusChanged;
 exports.hasPendingRemoteMutations = hasPendingRemoteMutations;
+exports.hasPendingPullRetries = hasPendingPullRetries;
+exports.bindCloudSyncToAccount = bindCloudSyncToAccount;
 exports.enableCloudSync = enableCloudSync;
 exports.disableCloudSync = disableCloudSync;
 exports.schedulePush = schedulePush;
@@ -82,6 +87,7 @@ exports.scheduleDeleteDir = scheduleDeleteDir;
 exports.pullNotes = pullNotes;
 exports.retrySyncJournal = retrySyncJournal;
 const electron_1 = require("electron");
+const crypto_1 = require("crypto");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const account = __importStar(require("./account"));
@@ -109,6 +115,9 @@ const PUSH_DEBOUNCE_MS = 5000;
 const LOCKED_ERROR = 'Cloud keys are locked. Unlock NoteFlow Cloud to sync.';
 const SUBSCRIPTION_ERROR = 'An active NoteFlow Cloud subscription is required to upload changes.';
 const NOT_SIGNED_IN_ERROR = 'Sign in to your NoteFlow account to use NoteFlow Cloud.';
+// Shown while the pull retry set is non-empty and no fresher error is set — a
+// later successful push must not hide that remote changes are still missing here.
+const PULL_RETRY_PENDING_ERROR = 'Some remote changes could not be applied on this device; they will be retried.';
 // ── Settings helpers ──────────────────────────────────────────────────────────
 function getSettingsPath() {
     return path_1.default.join(electron_1.app.getPath('userData'), 'settings.json');
@@ -159,6 +168,12 @@ function getSyncFilesToday() {
 // Per-note-key cache: '<dir>' (note folders) or '<name>.json' (root metadata)
 // → unwrapped note key. Seeded by pulls, populated on demand by pushes.
 const noteKeyCache = new Map();
+// Fingerprint (sha-256) of the DEK the cache above was built under — never the
+// DEK itself. A different DEK in use clears the cache: note keys of one DEK
+// must never be wrapped under another (see adoptDek).
+let noteKeyCacheDekId = null;
+// Logged once per session when the server lacks the conditional upsert RPC.
+let conditionalFallbackLogged = false;
 // In-flight remote mutations (upserts/tombstones) — the auto-sync pull defers
 // while > 0, same stand-down as GitHub's queue counter.
 let pendingMutations = 0;
@@ -216,7 +231,7 @@ function getCloudSyncStatus() {
         keysState: cloudKeys.getKeysState(),
         keysMode: cloudKeys.getKeysMode(),
         lastSync: s.lastSync,
-        error: syncError,
+        error: syncError ?? (hasPendingPullRetries() ? PULL_RETRY_PENDING_ERROR : undefined),
         initialPullStatus,
         realtimeConnected: cloudRealtime.isCloudRealtimeConnected(),
     };
@@ -235,6 +250,81 @@ function hasPendingRemoteMutations() {
     return pendingMutations > 0;
 }
 /**
+ * True while remote rows that failed to apply on this device are waiting in
+ * the pull retry set — this device is NOT a complete copy of the server yet.
+ */
+function hasPendingPullRetries() {
+    const s = cloudSettings ?? loadCloudSyncSettings();
+    return Object.keys((0, cloudSyncLogic_1.parsePullRetry)(s.pullRetry)).length > 0;
+}
+// ── Account owner of the sync state ───────────────────────────────────────────
+/**
+ * Binds the persisted sync state to the signed-in account. main.ts calls it on
+ * every account status change; every engine entry point that touches the
+ * server or the journal calls it too (ensureStateOwner), so a stale owner can
+ * never act. When the recorded owner is ANOTHER account
+ * (shouldResetCloudState) everything that belongs to it is dropped: watermark,
+ * lastSync, pull retry set, the journal (account A's pending ops must never be
+ * replayed into account B), the note-key cache and armed push timers; the push
+ * gate closes until the new account's first pull. An unknown owner (state of
+ * an earlier build) is adopted without a reset; signed out → no-op. Returns
+ * true when the state was reset.
+ */
+function bindCloudSyncToAccount(userId) {
+    if (!userId)
+        return false;
+    const s = cloudSettings ?? loadCloudSyncSettings();
+    if (s.userId === userId)
+        return false;
+    if ((0, cloudSyncLogic_1.shouldResetCloudState)(s.userId, userId)) {
+        resetCloudSyncState(userId);
+        return true;
+    }
+    // Unknown owner: adopt — but only when there is state to own (never write a
+    // cloudSync section for a machine that never used Cloud).
+    const hasState = s.enabled ||
+        s.lastSync !== undefined ||
+        s.pullSeq !== undefined ||
+        s.pullCursor !== undefined ||
+        Object.keys(getState().ops).length > 0;
+    if (hasState)
+        patchSettings({ userId });
+    return false;
+}
+function ensureStateOwner() {
+    return bindCloudSyncToAccount(account.getUserId());
+}
+// Bumped by every reset: work that started under one account (a pull, a drain,
+// an upload) captures it at entry and re-checks it after each await, so it
+// never persists anything — watermark, retry set, journal, initialPullStatus,
+// catch-up — nor sends a request once the account changed underneath it.
+let stateGeneration = 0;
+/** Raised when the account switched while an operation was in flight: it stops without side effects. */
+class AccountSwitchedError extends Error {
+    constructor() {
+        super('NoteFlow Cloud account changed — operation discarded');
+    }
+}
+function assertGeneration(gen) {
+    if (gen !== stateGeneration)
+        throw new AccountSwitchedError();
+}
+function resetCloudSyncState(userId) {
+    stateGeneration++;
+    pushTimers.forEach((t) => clearTimeout(t));
+    pushTimers.clear();
+    syncState = (0, syncState_1.emptySyncState)();
+    persistState();
+    noteKeyCache.clear();
+    noteKeyCacheDekId = null;
+    entitlementBlocked = false;
+    syncError = undefined;
+    patchSettings({ userId, pullSeq: undefined, pullCursor: undefined, lastSync: undefined, pullRetry: undefined });
+    console.log('[CloudSync] sync state belonged to another account — reset; the next pull reconciles from scratch');
+    setInitialPullStatus('pending');
+    statusListener?.();
+}
+/**
  * Turns Cloud sync on. Requires a signed-in account; the key session may still
  * be locked (pushes gate themselves and drain from the journal after unlock).
  * Mutual exclusion with GitHub Sync is routed in main.ts via syncProvider.ts.
@@ -244,7 +334,9 @@ function enableCloudSync() {
         return { ok: false, error: 'NoteFlow Cloud is not available in this build.' };
     if (!account.getAccountStatus().signedIn)
         return { ok: false, error: NOT_SIGNED_IN_ERROR };
-    patchSettings({ enabled: true });
+    ensureStateOwner();
+    const userId = account.getUserId();
+    patchSettings(userId ? { enabled: true, userId } : { enabled: true });
     // GitHub Sync is now paused (syncProvider gives Cloud priority) and its
     // `lastSync` freezes while notes keep arriving here, so its pull's
     // local-deletion rule ("absent from remote + older than lastSync ⇒ deleted
@@ -259,8 +351,10 @@ function enableCloudSync() {
 /**
  * Turns Cloud sync off. Deliberately KEEPS lastSync/pullSeq (re-enabling
  * resumes incrementally) and the journal (pending deletes must still land —
- * dropping them would resurrect notes on other devices). Key material is
- * untouched; locking is a separate action (cloudKeys.lockCloudKeys).
+ * dropping them would resurrect notes on other devices) — for the SAME
+ * account: they stay bound to settings.cloudSync.userId, and another account
+ * signing in resets them (bindCloudSyncToAccount). Key material is untouched;
+ * locking is a separate action (cloudKeys.lockCloudKeys).
  */
 function disableCloudSync() {
     pushTimers.forEach((t) => clearTimeout(t));
@@ -300,10 +394,35 @@ async function restWithRetry(fn) {
         return fn();
     }
 }
+/**
+ * Console-safe text of an error. Logs never carry relPaths (they contain note
+ * titles): Node fs errors embed the file path, so only their code is logged.
+ * UI-facing syncError strings may keep the path — they are never logged.
+ */
+function redactError(err) {
+    const e = err;
+    if (e && typeof e === 'object' && typeof e.code === 'string' && e.path !== undefined)
+        return e.code;
+    return err instanceof Error ? err.message : String(err);
+}
 function requireDek() {
     const dek = cloudKeys.getDek();
     if (!dek)
         throw new Error(LOCKED_ERROR);
+    return adoptDek(dek);
+}
+/**
+ * Registers the DEK about to be used: when it is not the one the note-key
+ * cache was built under (keys set up again, another account's DEK), the cache
+ * is cleared first — a cached note key would otherwise be wrapped under the
+ * new DEK and a folder's rows would mix note keys across DEKs.
+ */
+function adoptDek(dek) {
+    const id = (0, crypto_1.createHash)('sha256').update(dek).digest('hex');
+    if (id !== noteKeyCacheDekId) {
+        noteKeyCache.clear();
+        noteKeyCacheDekId = id;
+    }
     return dek;
 }
 function requireNotesDir() {
@@ -355,14 +474,40 @@ async function trackActivity(op) {
     }
     syncHistory.record(files, true);
 }
-/** Uploads one file as an encrypted upsert row. Throws with an actionable message. */
-function pushSingleFile(relPath, content) {
-    return trackActivity(async () => {
-        await uploadFileRow(relPath, content);
-        return 1;
+/**
+ * Uploads one file as an encrypted row. Throws with an actionable message;
+ * resolves 'stale' when the conditional upsert was rejected (counted as 0
+ * files in the activity history — nothing moved, nothing failed).
+ */
+async function pushSingleFile(relPath, content, force = false) {
+    let outcome = 'uploaded';
+    await trackActivity(async () => {
+        outcome = await uploadFileRow(relPath, content, force);
+        return outcome === 'uploaded' ? 1 : 0;
     });
+    return outcome;
 }
-async function uploadFileRow(relPath, content) {
+/** Is there a forced upload pending for this path (see SyncJournalOp.force)? */
+function isForcedUpload(relPath) {
+    const entry = getState().ops[relPath];
+    return entry?.op === 'upsert' && entry.force === true;
+}
+/**
+ * Writes one encrypted row. Note rows ('<dir>/note.md' and its sections) go
+ * through the CONDITIONAL upsert of migration 0011 (RPC cloud_upsert_file):
+ * the server rejects the write when it already holds a newer version of the
+ * folder — newest updated_at among this row and the folder's anchor,
+ * tombstones included — and this resolves 'stale' instead of overwriting it
+ * (a late journal drain or a second device's first-sync catch-up used to
+ * clobber newer edits/deletions blindly). Root metadata json rows (no version:
+ * their updated_at is "now") and FORCED uploads (intentional resurrection, see
+ * requeueDirForUpload) keep the plain merge-duplicates upsert. A server
+ * without the RPC (0011 not deployed yet) falls back to the plain upsert.
+ */
+async function uploadFileRow(relPath, content, force = false) {
+    // Captured with the DEK: if the account switches while the row is being
+    // built, nothing is sent (the row would be encrypted for the old account).
+    const gen = stateGeneration;
     const dek = requireDek();
     const userId = account.getUserId();
     if (!userId)
@@ -382,11 +527,52 @@ async function uploadFileRow(relPath, content) {
     }
     const updatedAt = (0, cloudSyncLogic_1.resolveRowUpdatedAt)(relPath, content, anchorContent, new Date().toISOString());
     const row = await (0, cloudSyncLogic_1.buildFileUpsertRow)(dek, noteKey, relPath, content, updatedAt);
-    const res = await restWithRetry(() => (0, cloudKeys_1.supabaseRest)('/rest/v1/files?on_conflict=user_id,path_key', {
-        method: 'POST',
-        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: { user_id: userId, ...row },
-    }));
+    if (dir && !force) {
+        // A section is checked against its anchor too: a newer version of the
+        // folder may have rewritten (or tombstoned) only note.md so far.
+        const anchorKey = (0, cloudSyncLogic_1.isAnchorPath)(relPath) ? null : await (0, cloudCrypto_1.derivePathKeyHmac)(dek, `${dir}/${noteFormat_1.NOTE_MD}`);
+        const rpc = await restWithRetry(() => {
+            assertGeneration(gen);
+            return (0, cloudKeys_1.supabaseRest)(`/rest/v1/rpc/${cloudSyncLogic_1.CLOUD_CONDITIONAL_UPSERT_RPC}`, {
+                method: 'POST',
+                body: {
+                    p_path_key: row.path_key,
+                    p_path_ct: row.path_ct,
+                    p_content_ct: row.content_ct,
+                    p_key_ct: row.key_ct,
+                    p_updated_at: row.updated_at,
+                    p_anchor_key: anchorKey,
+                },
+            });
+        });
+        const outcome = (0, cloudSyncLogic_1.classifyConditionalUpsert)(rpc.status, rpc.json);
+        if (outcome === 'forbidden') {
+            entitlementBlocked = true;
+            throw new Error(SUBSCRIPTION_ERROR);
+        }
+        if (outcome === 'error')
+            throw new Error(`Cloud upload failed (HTTP ${rpc.status})`);
+        if (outcome === 'uploaded') {
+            entitlementBlocked = false;
+            return 'uploaded';
+        }
+        // Rejected before any write: says nothing about the entitlement.
+        if (outcome === 'stale')
+            return 'stale';
+        // 'missing': deploy-order safety — no regression vs the unconditional upsert.
+        if (!conditionalFallbackLogged) {
+            conditionalFallbackLogged = true;
+            console.warn('[CloudSync] conditional upload RPC missing on the server (migration 0011) — using plain upserts');
+        }
+    }
+    const res = await restWithRetry(() => {
+        assertGeneration(gen);
+        return (0, cloudKeys_1.supabaseRest)('/rest/v1/files?on_conflict=user_id,path_key', {
+            method: 'POST',
+            headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+            body: { user_id: userId, ...row },
+        });
+    });
     if (isWriteForbidden(res.status)) {
         // RLS rejected the write — no active cloud entitlement. Actionable error,
         // and entitlementBlocked pauses journal drains (no retry loop).
@@ -396,6 +582,7 @@ async function uploadFileRow(relPath, content) {
     if (res.status >= 400)
         throw new Error(`Cloud upload failed (HTTP ${res.status})`);
     entitlementBlocked = false;
+    return 'uploaded';
 }
 /**
  * Propagates deletions for a set of relPaths: tombstones (deleted=true,
@@ -494,27 +681,57 @@ function schedulePush(relPath, content, onStart, onComplete) {
         onComplete?.();
         return;
     }
+    // Another account's state is reset first (the gate below then defers: the
+    // new account's first-sync catch-up uploads the folder).
+    ensureStateOwner();
     if (initialPullStatus !== 'ok') {
-        console.warn(`[CloudSync] Push deferred for ${relPath}: initialPullStatus=${initialPullStatus}`);
+        console.warn(`[CloudSync] Push deferred: initialPullStatus=${initialPullStatus}`);
         onComplete?.(`sync-gated:${initialPullStatus}`);
         return;
     }
     schedulePushUnguarded(relPath, content, onStart, onComplete);
 }
-function schedulePushUnguarded(relPath, content, onStart, onComplete) {
+/**
+ * Arms the debounced push. `force` (requeueDirForUpload) is stored on the
+ * journal op, and the timer reads it back from there when it fires: a forced
+ * push stays forced across re-arms (a new edit while it waits) and across
+ * failures (the journal drain retries it forced).
+ */
+function schedulePushUnguarded(relPath, content, onStart, onComplete, opts) {
     const existing = pushTimers.get(relPath);
     if (existing)
         clearTimeout(existing);
     // Journal at timer-arming time so the op survives the app closing during the
     // debounce window (retrySyncJournal re-reads the on-disk content later).
-    if ((0, syncState_1.journalRecord)(getState(), relPath, 'upsert', new Date().toISOString()))
+    if ((0, syncState_1.journalRecord)(getState(), relPath, 'upsert', new Date().toISOString(), { force: opts?.force }))
         persistState();
     const timer = setTimeout(async () => {
         pushTimers.delete(relPath);
+        // The account changed while armed: its op went away with the previous
+        // account's journal and the push gate is closed again — drop silently.
+        if (ensureStateOwner())
+            return;
+        const gen = stateGeneration;
         onStart?.();
         pendingMutations++;
         try {
-            await pushSingleFile(relPath, content);
+            const outcome = await pushSingleFile(relPath, content, isForcedUpload(relPath));
+            // Account switched in flight: the journal is the new account's now.
+            if (gen !== stateGeneration) {
+                onComplete?.();
+                return;
+            }
+            if (outcome === 'stale') {
+                // The server holds a newer version of the folder: keep the op (still
+                // a local edit the server lacks — the deletion guards must see it) but
+                // flagged, so the drain doesn't re-send it; the pull resolves it.
+                // Not an error, and lastSync does not move (nothing was uploaded). A
+                // timer re-armed meanwhile owns the entry — leave it alone.
+                if (!pushTimers.has(relPath) && (0, syncState_1.journalMarkStale)(getState(), relPath))
+                    persistState();
+                onComplete?.();
+                return;
+            }
             if ((0, syncState_1.journalComplete)(getState(), relPath, 'upsert'))
                 persistState();
             patchSettings({ lastSync: new Date().toISOString() });
@@ -522,13 +739,17 @@ function schedulePushUnguarded(relPath, content, onStart, onComplete) {
             onComplete?.();
         }
         catch (err) {
+            if (gen !== stateGeneration) {
+                onComplete?.();
+                return;
+            }
             // IfAbsent: never clobber a newer delete/deleteDir intent recorded while
             // this push was in flight (same rationale as githubSync).
             (0, syncState_1.journalRecordIfAbsent)(getState(), relPath, 'upsert', new Date().toISOString());
             (0, syncState_1.journalFail)(getState(), relPath, 'upsert');
             persistState();
             syncError = err instanceof Error ? err.message : String(err);
-            console.error('[CloudSync] push failed:', syncError);
+            console.error('[CloudSync] push failed:', redactError(err));
             onComplete?.(syncError);
         }
         finally {
@@ -546,37 +767,59 @@ async function pushPathsNow(notesDir, relPaths) {
     const s = cloudSettings ?? loadCloudSyncSettings();
     if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)())
         return { pushed: 0, errors: [] };
+    ensureStateOwner();
     if (initialPullStatus !== 'ok')
         return { pushed: 0, errors: [] };
     let pushed = 0;
     const errors = [];
     let stateChanged = false;
+    const gen = stateGeneration;
     for (const relPath of relPaths) {
+        if (gen !== stateGeneration)
+            break; // account switched: the rest belongs to nobody now
         const existing = pushTimers.get(relPath);
         if (existing) {
             clearTimeout(existing);
             pushTimers.delete(relPath);
         }
+        // Journaled BEFORE the request (like an armed timer): a stale rejection
+        // only flags an existing entry, so a pull that reconciles this path while
+        // the upload is in flight (completing the op) leaves nothing behind.
+        if ((0, syncState_1.journalRecord)(getState(), relPath, 'upsert', new Date().toISOString()))
+            stateChanged = true;
         pendingMutations++;
         try {
             const content = fs_1.default.readFileSync(path_1.default.join(notesDir, relPath), 'utf-8');
-            await pushSingleFile(relPath, content);
-            pushed++;
-            if ((0, syncState_1.journalComplete)(getState(), relPath, 'upsert'))
-                stateChanged = true;
+            const outcome = await pushSingleFile(relPath, content, isForcedUpload(relPath));
+            if (gen !== stateGeneration)
+                break;
+            if (outcome === 'stale') {
+                // Not an error: the server's newer version reaches disk with the next pull.
+                if ((0, syncState_1.journalMarkStale)(getState(), relPath))
+                    stateChanged = true;
+            }
+            else {
+                pushed++;
+                if ((0, syncState_1.journalComplete)(getState(), relPath, 'upsert'))
+                    stateChanged = true;
+            }
         }
         catch (err) {
+            if (gen !== stateGeneration)
+                break;
             errors.push(relPath);
             (0, syncState_1.journalRecordIfAbsent)(getState(), relPath, 'upsert', new Date().toISOString());
             (0, syncState_1.journalFail)(getState(), relPath, 'upsert');
             stateChanged = true;
             syncError = err instanceof Error ? err.message : String(err);
-            console.error(`[CloudSync] pushPathsNow failed for ${relPath}:`, String(err));
+            console.error('[CloudSync] pushPathsNow failed:', redactError(err));
         }
         finally {
             pendingMutations--;
         }
     }
+    if (gen !== stateGeneration)
+        return { pushed, errors };
     if (stateChanged)
         persistState();
     if (pushed > 0 && errors.length === 0)
@@ -589,6 +832,7 @@ async function scheduleDelete(relPath) {
     const s = cloudSettings ?? loadCloudSyncSettings();
     if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)())
         return;
+    ensureStateOwner();
     const existing = pushTimers.get(relPath);
     if (existing) {
         clearTimeout(existing);
@@ -596,17 +840,20 @@ async function scheduleDelete(relPath) {
     }
     if ((0, syncState_1.journalRecord)(getState(), relPath, 'delete', new Date().toISOString()))
         persistState();
+    const gen = stateGeneration;
     pendingMutations++;
     try {
         await removeRemotePaths([relPath]);
-        if ((0, syncState_1.journalComplete)(getState(), relPath, 'delete'))
+        if (gen === stateGeneration && (0, syncState_1.journalComplete)(getState(), relPath, 'delete'))
             persistState();
     }
     catch (err) {
+        if (gen !== stateGeneration)
+            return;
         (0, syncState_1.journalFail)(getState(), relPath, 'delete');
         persistState();
         syncError = `Failed to delete ${relPath} on NoteFlow Cloud: ${String(err)}`;
-        console.error('[CloudSync] delete failed:', String(err));
+        console.error('[CloudSync] delete failed:', redactError(err));
     }
     finally {
         pendingMutations--;
@@ -617,6 +864,7 @@ async function scheduleDeleteDir(dir) {
     const s = cloudSettings ?? loadCloudSyncSettings();
     if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)())
         return;
+    ensureStateOwner();
     for (const key of [...pushTimers.keys()]) {
         if (key.startsWith(`${dir}/`)) {
             clearTimeout(pushTimers.get(key));
@@ -625,17 +873,20 @@ async function scheduleDeleteDir(dir) {
     }
     if ((0, syncState_1.journalRecord)(getState(), dir, 'deleteDir', new Date().toISOString()))
         persistState();
+    const gen = stateGeneration;
     pendingMutations++;
     try {
         await deleteRemoteDirNow(dir);
-        if ((0, syncState_1.journalComplete)(getState(), dir, 'deleteDir'))
+        if (gen === stateGeneration && (0, syncState_1.journalComplete)(getState(), dir, 'deleteDir'))
             persistState();
     }
     catch (err) {
+        if (gen !== stateGeneration)
+            return;
         (0, syncState_1.journalFail)(getState(), dir, 'deleteDir');
         persistState();
         syncError = `Failed to delete note folder "${dir}" on NoteFlow Cloud: ${String(err)}`;
-        console.error('[CloudSync] delete dir failed:', String(err));
+        console.error('[CloudSync] delete dir failed:', redactError(err));
     }
     finally {
         pendingMutations--;
@@ -679,7 +930,7 @@ async function fetchRemoteAnchor(dek, dir) {
     if (res.status >= 400 || !Array.isArray(res.json) || res.json.length === 0)
         return null;
     try {
-        return await (0, cloudSyncLogic_1.decryptFileRow)(dek, res.json[0]);
+        return { ...(await (0, cloudSyncLogic_1.decryptFileRow)(dek, res.json[0])), pathKey };
     }
     catch {
         return null;
@@ -694,17 +945,38 @@ async function fetchRemoteAnchor(dek, dir) {
 class PullAbortError extends Error {
 }
 /**
+ * Re-fetches the rows of the pull retry set by path_key (`path_key=in.(…)`, in
+ * chunks of PULL_RETRY_CHUNK) with the same columns as the main fetch. Rows
+ * the server no longer has are simply absent (they leave the set). A failed
+ * request aborts the pull like PullAbortError: nothing is persisted, so the
+ * retry set is not lost.
+ */
+async function fetchRowsByPathKeys(pathKeys) {
+    const rows = [];
+    for (let i = 0; i < pathKeys.length; i += cloudSyncLogic_1.PULL_RETRY_CHUNK) {
+        const chunk = pathKeys.slice(i, i + cloudSyncLogic_1.PULL_RETRY_CHUNK);
+        const filter = `path_key=in.(${chunk.map((k) => `"${k}"`).join(',')})`;
+        const res = await (0, cloudKeys_1.supabaseRest)(`/rest/v1/files?select=${cloudSyncLogic_1.CLOUD_PULL_COLUMNS}&${filter}`);
+        if (res.status >= 400)
+            throw new PullAbortError(`Cloud retry fetch failed (HTTP ${res.status})`);
+        if (Array.isArray(res.json))
+            rows.push(...res.json);
+    }
+    return rows;
+}
+/**
  * Fetches + decrypts specific remote rows by relPath in ONE request
  * (`path_key=in.(…)`). Used for the sections an applied anchor lists that did
  * not travel in its batch (uploaded earlier → below the seq watermark). Rows
  * the server doesn't have yet are simply absent (they'll arrive later with a
- * higher seq). Undecryptable rows, or ones whose decrypted path isn't the one
- * requested / isn't safe, are reported in `errors` and skipped (permanent);
- * a failed REQUEST (HTTP/network) throws PullAbortError.
+ * higher seq). Undecryptable rows are reported in `errors` and their path_key
+ * in `undecryptable` (→ pull retry set); ones whose decrypted path isn't the
+ * one requested / isn't safe are reported and skipped (permanent). A failed
+ * REQUEST (HTTP/network) throws PullAbortError.
  */
 async function fetchRemoteRows(dek, relPaths) {
     if (relPaths.length === 0)
-        return { entries: [], errors: [] };
+        return { entries: [], errors: [], undecryptable: [] };
     const byKey = new Map();
     for (const rel of relPaths)
         byKey.set(await (0, cloudCrypto_1.derivePathKeyHmac)(dek, rel), rel);
@@ -720,6 +992,7 @@ async function fetchRemoteRows(dek, relPaths) {
         throw new PullAbortError(`Cloud section fetch failed (HTTP ${res.status})`);
     const entries = [];
     const errors = [];
+    const undecryptable = [];
     for (const row of (Array.isArray(res.json) ? res.json : [])) {
         const expected = byKey.get(row.path_key);
         try {
@@ -728,13 +1001,14 @@ async function fetchRemoteRows(dek, relPaths) {
                 errors.push(`unexpected remote section skipped: ${entry.relPath}`);
                 continue;
             }
-            entries.push(entry);
+            entries.push({ ...entry, pathKey: row.path_key });
         }
         catch (err) {
             errors.push(`row ${row.path_key}: ${String(err)}`);
+            undecryptable.push(row.path_key);
         }
     }
-    return { entries, errors };
+    return { entries, errors, undecryptable };
 }
 /**
  * Writes (or, for a tombstone, removes) one remote section file. Returns
@@ -761,12 +1035,44 @@ function applyRemoteSectionFile(notesDir, entry) {
     return true;
 }
 /**
+ * The pull reconciled `relPath` to the server's content (wrote it, or found
+ * the disk identical): a pending upload of it is moot — completed — and an
+ * armed debounce timer is cancelled (its captured content was just replaced
+ * or matched; letting it fire would upload the losing version). Returns
+ * whether the journal changed (the caller persists).
+ */
+function settlePathUpload(relPath) {
+    const timer = pushTimers.get(relPath);
+    if (timer) {
+        clearTimeout(timer);
+        pushTimers.delete(relPath);
+    }
+    return (0, syncState_1.journalComplete)(getState(), relPath, 'upsert');
+}
+/** settlePathUpload for every pending upload / armed timer under '<dir>/' (the folder was applied wholesale). */
+function settleDirUploads(dir) {
+    const prefix = `${dir}/`;
+    let changed = false;
+    for (const key of [...pushTimers.keys()]) {
+        if (key.startsWith(prefix))
+            changed = settlePathUpload(key) || changed;
+    }
+    for (const [key, entry] of Object.entries(getState().ops)) {
+        if (entry.op === 'upsert' && key.startsWith(prefix))
+            changed = settlePathUpload(key) || changed;
+    }
+    return changed;
+}
+/**
  * Incremental pull: fetches rows with seq > pullSeq (or a full reconcile, see
- * planPullQuery), decrypts them, groups by note folder and applies the SAME
+ * planPullQuery) plus the rows of the retry set (applies that failed in
+ * earlier pulls), decrypts them, groups by note folder and applies the SAME
  * conflict rule as the GitHub pull (newer remote anchor wins wholesale;
  * tombstones delete locally only when local updated <= lastSync) plus the
- * loose-section rule (shouldApplyRemoteSection). Returns the
- * githubSync.pullNotes result shape.
+ * loose-section rule (shouldApplyRemoteSection). Runs BEFORE the journal
+ * drain (main.ts): whatever it reconciles settles the matching pending
+ * uploads, and an unsynced local metadata edit is merged/kept, not clobbered.
+ * Returns the githubSync.pullNotes result shape.
  */
 async function pullNotes(notesDir) {
     const empty = {
@@ -777,17 +1083,23 @@ async function pullNotes(notesDir) {
         hadDeletions: false,
         hadMetadataChanges: false,
     };
-    const s = cloudSettings ?? loadCloudSyncSettings();
-    if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)())
+    if (!(cloudSettings ?? loadCloudSyncSettings()).enabled || !(0, cloudConfig_1.isCloudConfigured)())
         return empty;
-    const dek = cloudKeys.getDek();
-    if (!dek) {
+    // Another account's watermark/journal must never drive this pull.
+    ensureStateOwner();
+    const s = cloudSettings ?? loadCloudSyncSettings();
+    // Re-checked after every await: a pull that started under another account
+    // must persist nothing (watermark, retry set, journal, 'ok', catch-up).
+    const gen = stateGeneration;
+    const rawDek = cloudKeys.getDek();
+    if (!rawDek) {
         syncError = LOCKED_ERROR;
         if (initialPullStatus === 'pending')
             setInitialPullStatus('failed');
         syncHistory.record(0, false);
         return { ...empty, errors: [LOCKED_ERROR] };
     }
+    const dek = adoptDek(rawDek);
     let pulled = 0;
     let deleted = 0;
     // Files this pull changed on disk (written or removed) — for the activity history.
@@ -796,38 +1108,62 @@ async function pullNotes(notesDir) {
     const updatedFiles = [];
     let hadMetadataChanges = false;
     const previousLastSync = s.lastSync;
+    // First pull of this device (or of this account on it — an account switch
+    // drops lastSync): local root metadata is backed up / merged, not clobbered.
+    const firstPull = !previousLastSync;
     const lastSyncMs = s.lastSync ? Date.parse(s.lastSync) : null;
     const state = getState();
+    let stateChanged = false;
+    // Retry set (failed applies of earlier pulls) and this pull's failures.
+    const prevRetry = (0, cloudSyncLogic_1.parsePullRetry)(s.pullRetry);
+    const applyFailures = new Map();
+    const decryptFailures = new Set();
+    let backupDir = null;
+    let backedUp = 0;
+    let mergedMetadata = 0;
     try {
-        const rows = await fetchChangedRows(s);
+        const mainRows = await fetchChangedRows(s);
+        // Rows that failed to apply earlier sit below the watermark now: they ride
+        // along with this batch (the main fetch wins on duplicates).
+        const rows = (0, cloudSyncLogic_1.mergeRetryRows)(mainRows, await fetchRowsByPathKeys(Object.keys(prevRetry)));
+        assertGeneration(gen);
         const entries = [];
         for (const row of rows) {
             try {
                 const entry = await (0, cloudSyncLogic_1.decryptFileRow)(dek, row);
                 if (!(0, cloudSyncLogic_1.isSafeCloudRelPath)(entry.relPath)) {
+                    // Permanent — never retried.
                     errors.push(`unsafe remote path skipped: ${entry.relPath}`);
                     continue;
                 }
-                entries.push(entry);
+                entries.push({ ...entry, pathKey: row.path_key });
                 // Seed the per-folder key cache so pushes reuse the same note key.
                 noteKeyCache.set((0, cloudSyncLogic_1.noteDirOf)(entry.relPath) ?? entry.relPath, entry.noteKey);
             }
             catch (err) {
+                decryptFailures.add(row.path_key);
                 errors.push(`row ${row.path_key}: ${String(err)}`);
             }
         }
         const { dirs, rootFiles } = (0, cloudSyncLogic_1.groupEntriesByDir)(entries);
         for (const [dir, group] of dirs) {
+            // Rows fetched for this folder outside the batch (its anchor, listed
+            // sections) — retried together with the group if the folder fails.
+            const fetchedForDir = [];
             try {
+                assertGeneration(gen);
                 // Journal guard: a pending remote deleteDir means this dir was deleted
                 // locally — applying remote rows would resurrect the note.
                 if ((0, syncState_1.shouldPullSkipDir)(state, dir))
                     continue;
                 const localDirPath = path_1.default.join(notesDir, dir);
                 const localAnchorPath = path_1.default.join(localDirPath, noteFormat_1.NOTE_MD);
-                const localExists = fs_1.default.existsSync(localAnchorPath);
-                const localUpdatedMs = localExists
-                    ? (0, cloudSyncLogic_1.parseUpdatedTimestamp)((0, cloudSyncLogic_1.extractUpdatedTimestamp)(fs_1.default.readFileSync(localAnchorPath, 'utf-8')))
+                const localAnchorContent = fs_1.default.existsSync(localAnchorPath)
+                    ? fs_1.default.readFileSync(localAnchorPath, 'utf-8')
+                    : null;
+                const localExists = localAnchorContent !== null;
+                const localUpdatedMs = localAnchorContent !== null
+                    ? (0, cloudSyncLogic_1.parseUpdatedTimestamp)((0, cloudSyncLogic_1.extractUpdatedTimestamp)(localAnchorContent))
                     : null;
                 // The anchor decides.
                 let anchor = group.find((e) => (0, cloudSyncLogic_1.isAnchorPath)(e.relPath)) ?? null;
@@ -841,18 +1177,29 @@ async function pullNotes(notesDir) {
                     // of ANOTHER note moves lastSync past this note's `updated`. Deleting
                     // here would rm the edit and the drain would then discard its upsert.
                     // The local note wins and is RESURRECTED on purpose: the whole folder
-                    // is re-uploaded, so every row loses its tombstone (re-pushing only the
-                    // pending file would leave the other sections tombstoned → other
-                    // devices would get an anchor without its sections).
-                    if ((0, syncState_1.shouldDeletionRuleSkipDir)(state, dir)) {
+                    // is re-uploaded, FORCED (the tombstone is newer than the local edit
+                    // by design, so a conditional upload would be rejected), so every row
+                    // loses its tombstone (re-pushing only the pending file would leave
+                    // the other sections tombstoned → other devices would get an anchor
+                    // without its sections). Not when EVERY pending upsert is stale AND
+                    // the local note is not newer than the deletion (planAnchorTombstone
+                    // → 'lost'): the server already rejected that version against a newer
+                    // one, which is now deleted — LWW deletes it. A local `updated` newer
+                    // than the deletion is an unjournaled edit (gate closed, CLI): kept.
+                    // (A tombstone's updated_at is the deletion time.)
+                    const tombstoneAction = (0, syncState_1.planAnchorTombstone)(state, dir, localUpdatedMs, anchor.updatedAtMs);
+                    if (tombstoneAction === 'keep') {
                         requeueDirForUpload(notesDir, dir);
                         continue;
                     }
-                    // Note deleted remotely — apply locally only under the safety rule.
-                    if ((0, cloudSyncLogic_1.shouldApplyRemoteDeletion)(localUpdatedMs, lastSyncMs)) {
+                    // Note deleted remotely — apply locally under the safety rule, or
+                    // unconditionally when the local copy is a known-lost version.
+                    if (tombstoneAction === 'lost' || (0, cloudSyncLogic_1.shouldApplyRemoteDeletion)(localUpdatedMs, lastSyncMs)) {
                         fs_1.default.rmSync(localDirPath, { recursive: true, force: true });
                         deleted++;
                         filesDown++;
+                        if (tombstoneAction === 'lost' && settleDirUploads(dir))
+                            stateChanged = true;
                     }
                     continue;
                 }
@@ -861,8 +1208,10 @@ async function pullNotes(notesDir) {
                     // anchor. Absent (never fully uploaded — the origin's journal will
                     // finish it) or deleted → nothing to write.
                     anchor = await fetchRemoteAnchor(dek, dir);
+                    assertGeneration(gen);
                     if (!anchor || anchor.deleted)
                         continue;
+                    fetchedForDir.push(anchor);
                 }
                 let changed = 0;
                 if (anchor && (!localExists || (0, cloudSyncLogic_1.shouldApplyRemoteDir)(anchor.updatedAtMs, localUpdatedMs))) {
@@ -877,16 +1226,38 @@ async function pullNotes(notesDir) {
                     // uploads the sections that changed, so this would re-download
                     // unchanged ones on almost every applied edit): they are up to date,
                     // or their own newer row arrives with a higher seq (loose-section
-                    // rule). Accepted edge: a stale local section in a conflict where the
-                    // local folder was strictly newer — LWW, as before.
+                    // rule) — EXCEPT those with a pending upload (stale or not): the local
+                    // folder lost (LWW), so their on-disk content is the losing edit and
+                    // must be replaced by the server's. Accepted edge: a stale local
+                    // section without a pending upload in a conflict where the local
+                    // folder was strictly newer — LWW, as before.
                     const inGroup = new Set(group.map((e) => e.relPath));
-                    const missing = (0, cloudSyncLogic_1.listAnchorSectionFiles)(anchor.content)
+                    const toFetch = (0, cloudSyncLogic_1.listAnchorSectionFiles)(anchor.content)
                         .map((f) => `${dir}/${f}`)
                         .filter((rel) => !inGroup.has(rel) &&
                         !(0, syncState_1.shouldPullSkipFile)(state, rel) &&
-                        !fs_1.default.existsSync(path_1.default.join(notesDir, rel)));
-                    const fetched = await fetchRemoteRows(dek, missing);
+                        ((0, syncState_1.hasPendingUpsert)(state, rel) || !fs_1.default.existsSync(path_1.default.join(notesDir, rel))));
+                    const fetched = await fetchRemoteRows(dek, toFetch);
+                    assertGeneration(gen);
+                    fetchedForDir.push(...fetched.entries);
+                    for (const key of fetched.undecryptable)
+                        decryptFailures.add(key);
                     errors.push(...fetched.errors.map((e) => `${dir}: ${e}`));
+                    // BEFORE the first write: every pending upload under the folder is
+                    // the losing version — flag it stale and cancel its timer. If the
+                    // apply fails halfway, a live section upsert would otherwise be
+                    // drained with the losing content but the `updated` of the remote
+                    // anchor just written (a tie the server accepts) and clobber the
+                    // server's newer section; stale ops are skipped by the drain and
+                    // the retry of this folder (pull retry set) resolves them.
+                    for (const key of [...pushTimers.keys()]) {
+                        if (!key.startsWith(`${dir}/`))
+                            continue;
+                        clearTimeout(pushTimers.get(key));
+                        pushTimers.delete(key);
+                    }
+                    if ((0, syncState_1.journalMarkDirStale)(state, dir))
+                        persistState();
                     fs_1.default.mkdirSync(localDirPath, { recursive: true });
                     fs_1.default.writeFileSync(localAnchorPath, anchor.content, 'utf-8');
                     changed++;
@@ -909,6 +1280,9 @@ async function pullNotes(notesDir) {
                         if (applyRemoteSectionFile(notesDir, entry))
                             changed++;
                     }
+                    // Applied in full: the pending uploads flagged above are moot.
+                    if (settleDirUploads(dir))
+                        stateChanged = true;
                 }
                 else {
                     // Anchor not applied (absent from this batch, or not newer) and the
@@ -923,13 +1297,28 @@ async function pullNotes(notesDir) {
                             continue;
                         // A section tombstone must not remove an unpushed edit of that file
                         // (its updated_at is the deletion time, so the rule below would let
-                        // it through): the pending upsert re-uploads it and wins, on purpose.
-                        if (entry.deleted && (0, syncState_1.hasPendingUpsert)(state, entry.relPath))
+                        // it through): the pending upsert re-uploads it and wins, on purpose
+                        // — FORCED when the tombstone is newer than the local version (a
+                        // conditional upload would be rejected and the edit stranded).
+                        if (entry.deleted && (0, syncState_1.hasPendingUpsert)(state, entry.relPath)) {
+                            if ((0, cloudSyncLogic_1.shouldApplyRemoteSection)(entry.updatedAtMs, localUpdatedMs) &&
+                                (0, syncState_1.journalRecord)(state, entry.relPath, 'upsert', new Date().toISOString(), { force: true })) {
+                                stateChanged = true;
+                            }
                             continue;
+                        }
                         if (!(0, cloudSyncLogic_1.shouldApplyRemoteSection)(entry.updatedAtMs, localUpdatedMs))
                             continue;
                         if (applyRemoteSectionFile(notesDir, entry))
                             changed++;
+                        // The disk now holds the server's version of this section.
+                        if (!entry.deleted && settlePathUpload(entry.relPath))
+                            stateChanged = true;
+                    }
+                    // A remote anchor identical to the local one (typically this device's
+                    // own upload coming back): its pending upload, if any, is satisfied.
+                    if (anchor && localAnchorContent === anchor.content && settlePathUpload(anchor.relPath)) {
+                        stateChanged = true;
                     }
                     if (changed === 0)
                         continue; // local is newer, or already identical
@@ -939,12 +1328,21 @@ async function pullNotes(notesDir) {
                 pulled++;
             }
             catch (err) {
-                if (err instanceof PullAbortError)
-                    throw err; // abort the pull: watermark stays put
+                // Abort the pull: watermark stays put (an account switch persists nothing at all).
+                if (err instanceof PullAbortError || err instanceof AccountSwitchedError)
+                    throw err;
                 errors.push(`${dir}: ${String(err)}`);
+                // Retry the WHOLE folder next pull: every row of its group plus the
+                // rows fetched for it (they sit below the watermark).
+                for (const e of [...group, ...fetchedForDir])
+                    applyFailures.set(e.pathKey, e.relPath);
             }
         }
-        // Root metadata json — LWW like the GitHub pull (remote write wins).
+        // No await from here to the watermark write: one check covers the rest.
+        assertGeneration(gen);
+        // Root metadata json — remote wins (LWW, like the GitHub pull), except an
+        // unsynced local edit (pending upsert: merged or kept) and the first pull
+        // (backup + merge) — see planMetadataPull.
         for (const entry of rootFiles) {
             try {
                 if (entry.deleted)
@@ -955,24 +1353,73 @@ async function pullNotes(notesDir) {
                 const localContent = fs_1.default.existsSync(metadataPath)
                     ? fs_1.default.readFileSync(metadataPath, 'utf-8')
                     : null;
-                if (localContent !== entry.content) {
-                    fs_1.default.writeFileSync(metadataPath, entry.content, 'utf-8');
-                    hadMetadataChanges = true;
-                    filesDown++;
+                const pending = (0, syncState_1.hasPendingUpsert)(state, entry.relPath);
+                const decision = (0, cloudSyncLogic_1.planMetadataPull)(entry.relPath, localContent, entry.content, {
+                    pendingUpsert: pending,
+                    firstPull,
+                });
+                if (decision.action === 'keep') {
+                    // Identical to the server: a pending upload of it is satisfied. A
+                    // kept local edit stays pending — the drain uploads it.
+                    if (localContent === entry.content && settlePathUpload(entry.relPath))
+                        stateChanged = true;
+                    continue;
+                }
+                if (decision.backup && localContent !== null) {
+                    // Never inside the notes dir — it syncs.
+                    backupDir ?? (backupDir = path_1.default.join(electron_1.app.getPath('userData'), 'cloud-metadata-backups', new Date().toISOString().replace(/:/g, '-')));
+                    fs_1.default.mkdirSync(backupDir, { recursive: true });
+                    fs_1.default.writeFileSync(path_1.default.join(backupDir, entry.relPath), localContent, 'utf-8');
+                    backedUp++;
+                }
+                fs_1.default.writeFileSync(metadataPath, decision.content, 'utf-8');
+                hadMetadataChanges = true;
+                filesDown++;
+                if (decision.merged)
+                    mergedMetadata++;
+                if (pending && decision.merged) {
+                    // The union carries an unsynced local edit: upload THAT (re-armed —
+                    // an armed timer captured the pre-merge content).
+                    schedulePushUnguarded(entry.relPath, decision.content);
+                }
+                else if (settlePathUpload(entry.relPath)) {
+                    stateChanged = true;
                 }
             }
             catch (err) {
                 errors.push(`${entry.relPath}: ${String(err)}`);
+                applyFailures.set(entry.pathKey, entry.relPath);
             }
         }
+        if (backedUp > 0 || mergedMetadata > 0) {
+            console.log(`[CloudSync] metadata: ${backedUp} file(s) backed up, ${mergedMetadata} merged`);
+        }
+        // Settled uploads first: a crash before the watermark write only re-applies.
+        if (stateChanged)
+            persistState();
+        stateChanged = false;
+        const failures = { apply: applyFailures, decrypt: decryptFailures };
+        const pullRetry = (0, cloudSyncLogic_1.nextPullRetry)(prevRetry, failures);
+        const dropped = (0, cloudSyncLogic_1.countDroppedRetries)(failures, pullRetry);
+        if (dropped > 0)
+            console.warn(`[CloudSync] gave up retrying ${dropped} remote row(s) after repeated failures`);
         patchSettings({
             lastSync: new Date().toISOString(),
-            // Max seq of EVERY fetched row (undecryptable/unsafe ones too — they
-            // never become applicable). The legacy updated_at cursor goes away.
-            pullSeq: (0, cloudSyncLogic_1.nextPullSeq)(s.pullSeq, rows),
+            // Max seq of the MAIN fetch. Rows that failed to apply/decrypt are kept
+            // alive by the retry set below (same write), not by holding the
+            // watermark; unsafe-path rows are permanent and simply left behind. The
+            // legacy updated_at cursor goes away.
+            pullSeq: (0, cloudSyncLogic_1.nextPullSeq)(s.pullSeq, mainRows),
             pullCursor: undefined,
+            pullRetry: Object.keys(pullRetry).length > 0 ? pullRetry : undefined,
         });
-        syncError = undefined;
+        // Errors stay visible (a later successful push clears syncError, but the
+        // status still reports a non-empty retry set — see getCloudSyncStatus).
+        syncError = errors.length > 0
+            ? `Some remote changes could not be applied (${errors.length}): ${errors[0]}`
+            : undefined;
+        // 'ok' even with apply errors: otherwise pushes would stay gated forever
+        // (the retry set covers what failed).
         const wasNotOk = initialPullStatus !== 'ok';
         if (wasNotOk) {
             setInitialPullStatus('ok');
@@ -980,6 +1427,13 @@ async function pullNotes(notesDir) {
         }
     }
     catch (err) {
+        if (err instanceof AccountSwitchedError) {
+            // Started under the previous account: nothing is persisted and the new
+            // account's status (reset to 'pending') is left alone.
+            errors.push(err.message);
+            syncHistory.record(filesDown, false);
+            return { pulled, deleted, errors, updatedFiles, hadDeletions: deleted > 0, hadMetadataChanges };
+        }
         const msg = String(err).includes('not-signed-in')
             ? NOT_SIGNED_IN_ERROR
             : err instanceof Error
@@ -990,6 +1444,9 @@ async function pullNotes(notesDir) {
         if (initialPullStatus === 'pending')
             setInitialPullStatus('failed');
     }
+    // Uploads settled before an abort were reconciled on disk all the same.
+    if (stateChanged)
+        persistState();
     // Uploads (incl. the catch-up queued above) are counted as they land, by
     // trackActivity; this entry is the download side of the pull.
     syncHistory.record(filesDown, errors.length === 0);
@@ -1007,7 +1464,9 @@ async function pullNotes(notesDir) {
  * note whose anchor is newer than the previous lastSync (edits made while the
  * gate was closed / while Cloud was disabled) — same on-disk detection as
  * githubSync. On the very first sync (no previous lastSync) this uploads the
- * ENTIRE local corpus, including the root metadata files.
+ * ENTIRE local corpus, including the root metadata files. Note rows are
+ * conditional: a local copy older than the server's version (or than its
+ * tombstone) is rejected as stale instead of overwriting it.
  */
 function flushPendingLocalChanges(notesDir, previousLastSync) {
     const lastSyncMs = previousLastSync ? Date.parse(previousLastSync) : null;
@@ -1046,8 +1505,11 @@ function flushPendingLocalChanges(notesDir, previousLastSync) {
 /**
  * Re-uploads EVERY '.md' of a local note folder (debounced + journaled, like
  * flushPendingLocalChanges) — used when the pull keeps a note whose anchor
- * arrived as a tombstone because a local edit of it is still pending. Files
- * with a live debounce timer are left to it (same content source: disk).
+ * arrived as a tombstone because a local edit of it is still pending. The
+ * uploads are FORCED (plain upsert, no version check): the tombstone is newer
+ * than the local edit by design, and a conditional upload would be rejected —
+ * the resurrection would silently fail. Files with a live debounce timer are
+ * left to it (same content source: disk), but their op is flagged forced.
  */
 function requeueDirForUpload(notesDir, dir) {
     const dirPath = path_1.default.join(notesDir, dir);
@@ -1058,12 +1520,20 @@ function requeueDirForUpload(notesDir, dir) {
     catch {
         return; // unreadable dir — its pending upserts still stand in the journal
     }
+    const now = new Date().toISOString();
     for (const f of files) {
-        const relPath = `${dir}/${f}`;
-        if (!f.endsWith('.md') || pushTimers.has(relPath))
+        if (!f.endsWith('.md'))
             continue;
+        const relPath = `${dir}/${f}`;
+        if (pushTimers.has(relPath)) {
+            if ((0, syncState_1.journalRecord)(getState(), relPath, 'upsert', now, { force: true }))
+                persistState();
+            continue;
+        }
         try {
-            schedulePushUnguarded(relPath, fs_1.default.readFileSync(path_1.default.join(dirPath, f), 'utf-8'));
+            schedulePushUnguarded(relPath, fs_1.default.readFileSync(path_1.default.join(dirPath, f), 'utf-8'), undefined, undefined, {
+                force: true,
+            });
         }
         catch { /* unreadable file — skip */ }
     }
@@ -1074,13 +1544,18 @@ function requeueDirForUpload(notesDir, dir) {
  * tombstones, pushes deferred while the keys were locked). Same contract as
  * githubSync.retrySyncJournal: upserts re-read the CURRENT disk content,
  * deletes always re-run, nothing is dropped on failure, lastSync is NOT
- * bumped. Skips silently while the keys are locked or (for writes) while an
- * RLS 403 said the subscription lapsed and the local entitlement agrees.
+ * bumped. Upserts flagged `stale` are skipped (the server holds a newer
+ * version — re-sending would be rejected again; the pull resolves them) and
+ * `force` ones are uploaded unconditionally. Runs AFTER the pull in the sync
+ * cycle (main.ts). Skips silently while the keys are locked or (for writes)
+ * while an RLS 403 said the subscription lapsed and the local entitlement
+ * agrees.
  */
 async function retrySyncJournal(notesDir) {
     const s = cloudSettings ?? loadCloudSyncSettings();
     if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)())
         return;
+    ensureStateOwner();
     if (initialPullStatus !== 'ok')
         return;
     if (retryInFlight)
@@ -1098,9 +1573,14 @@ async function retrySyncJournal(notesDir) {
     // the ops are not lost.)
     if (entitlementBlocked && !account.getAccountStatus().entitlements.cloud)
         return;
+    // An account switch mid-drain stops it: the remaining ops belonged to the
+    // previous account and its journal is gone.
+    const gen = stateGeneration;
     retryInFlight = true;
     try {
         for (const [key, entry] of entries) {
+            if (gen !== stateGeneration)
+                break;
             if (entry.op === 'upsert' && pushTimers.has(key))
                 continue; // live timer will handle it
             const action = (0, syncState_1.resolveRetryAction)(entry.op, fs_1.default.existsSync(path_1.default.join(notesDir, key)));
@@ -1109,15 +1589,24 @@ async function retrySyncJournal(notesDir) {
                     persistState();
                 continue;
             }
+            if (entry.op === 'upsert' && entry.stale)
+                continue; // resolved by the pull
             pendingMutations++;
             try {
                 if (action === 'upsert') {
                     const content = fs_1.default.readFileSync(path_1.default.join(notesDir, key), 'utf-8');
-                    await pushSingleFile(key, content);
+                    const outcome = await pushSingleFile(key, content, entry.force === true);
+                    if (gen !== stateGeneration)
+                        break;
                     // Race guard (see githubSync): a fresh debounce timer armed while this
                     // retry was in flight owns the entry now — leave it alive.
                     if (pushTimers.has(key))
                         continue;
+                    if (outcome === 'stale') {
+                        if ((0, syncState_1.journalMarkStale)(state, key))
+                            persistState();
+                        continue;
+                    }
                 }
                 else if (action === 'delete') {
                     await removeRemotePaths([key]);
@@ -1125,15 +1614,20 @@ async function retrySyncJournal(notesDir) {
                 else {
                     await deleteRemoteDirNow(key);
                 }
+                if (gen !== stateGeneration)
+                    break;
                 if ((0, syncState_1.journalComplete)(state, key, entry.op))
                     persistState();
                 syncError = undefined;
             }
             catch (err) {
+                if (gen !== stateGeneration)
+                    break;
                 (0, syncState_1.journalFail)(state, key, entry.op);
                 persistState();
+                // UI-facing (never logged): the path helps the user find the note.
                 syncError = `Cloud sync retry (${entry.op} ${key}) failed: ${String(err)}`;
-                console.error(`[CloudSync] journal retry failed for ${entry.op} ${key}:`, String(err));
+                console.error(`[CloudSync] journal retry failed (${entry.op}):`, redactError(err));
             }
             finally {
                 pendingMutations--;

@@ -52,6 +52,22 @@ describe('key generation', () => {
 })
 
 describe('DEK <-> passphrase (PBKDF2 KEK)', () => {
+  it('wraps new cloud keys with 600k PBKDF2 iterations (OWASP 2023 floor)', () => {
+    expect(DEFAULT_KDF_ITERATIONS).toBe(600_000)
+  })
+
+  it('unwraps a DEK wrapped under the legacy 310k work factor when given the stored value', async () => {
+    // Rows wrapped before the bump keep pass_iterations = 310000; unlock derives
+    // with the STORED value, never with the current default.
+    const dek = generateDek()
+    const salt = generateKdfSalt()
+    const legacyKek = await deriveKek('legacy passphrase', salt, 310_000)
+    const wrapped = await wrapKey(dek, legacyKek)
+    expect(await unwrapKey(wrapped, await deriveKek('legacy passphrase', salt, 310_000))).toEqual(dek)
+    const currentKek = await deriveKek('legacy passphrase', salt, DEFAULT_KDF_ITERATIONS)
+    await expect(unwrapKey(wrapped, currentKek)).rejects.toThrow()
+  })
+
   it('round-trips the DEK through wrap/unwrap with default iterations', async () => {
     const dek = generateDek()
     const salt = generateKdfSalt()

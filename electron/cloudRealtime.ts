@@ -10,8 +10,9 @@
 // The event payload is CIPHERTEXT rows and is deliberately NEVER parsed or
 // applied here: all decryption/conflict logic lives in cloudSync.pullNotes().
 // This module only tells main.ts "something changed remotely" (onRemoteChange),
-// which debounces and runs the normal sync cycle (drain journal → pull). Key
-// material never enters this module.
+// which debounces and runs the normal sync cycle (pull → drain journal) — also
+// fired on every successful (re)join as a catch-up for the time the socket was
+// down. Key material never enters this module.
 //
 // Pure protocol logic (frames, classification, backoff) lives in
 // cloudRealtimeLogic.ts, tested in tests/electron/cloudRealtime.test.ts.
@@ -24,6 +25,7 @@ import {
   buildHeartbeatFrame,
   buildAccessTokenFrame,
   classifyFrame,
+  isFreshJoin,
   nextBackoffMs,
   type PhoenixFrame,
 } from './cloudRealtimeLogic'
@@ -58,7 +60,8 @@ let awaitingHeartbeatAck = false
 
 /**
  * Starts (idempotently) the Realtime subscription. `onRemoteChange` fires once
- * per incoming postgres_changes event — the caller debounces and pulls.
+ * per incoming postgres_changes event and once per successful channel
+ * (re)join (catch-up) — the caller debounces and pulls.
  * Reconnection (exponential backoff with jitter, capped at 60 s) is handled
  * internally and silently: offline periods produce no error cascades, just one
  * sober log per state transition.
@@ -137,7 +140,8 @@ async function connect(gen: number): Promise<void> {
 }
 
 function handleFrame(raw: string): void {
-  switch (classifyFrame(raw)) {
+  const kind = classifyFrame(raw)
+  switch (kind) {
     case 'change':
       onRemoteChangeCb?.()
       break
@@ -145,10 +149,14 @@ function handleFrame(raw: string): void {
       awaitingHeartbeatAck = false
       break
     case 'join-ok':
-      if (!joined) {
+      if (isFreshJoin(kind, joined)) {
         joined = true
         reconnectAttempt = 0 // stable connection — reset the backoff
         console.log('[CloudRealtime] channel joined')
+        // Catch-up: whatever changed while the socket was down (or before the
+        // first join) emitted no event we will ever see — ask main for a cycle
+        // now instead of waiting for the safety-net tick.
+        onRemoteChangeCb?.()
       }
       break
     case 'join-error':

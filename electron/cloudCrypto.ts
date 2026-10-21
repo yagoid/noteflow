@@ -8,9 +8,11 @@
 // tests/electron/cloudCrypto.test.ts.
 //
 // Primitives mirror src/lib/cryptoUtils.ts (per-note encryption): AES-256-GCM,
-// PBKDF2-SHA256 with 310,000 iterations by default, base64url encoding. It is a
-// separate module because tsconfig.electron.json (rootDir: 'electron') cannot
-// import from src/.
+// PBKDF2-SHA256, base64url encoding. It is a separate module because
+// tsconfig.electron.json (rootDir: 'electron') cannot import from src/. The
+// PBKDF2 work factor is NOT shared with per-note encryption: new cloud wraps use
+// 600,000 iterations (OWASP 2023 for PBKDF2-SHA256), per-note encryption keeps
+// its own default (310,000).
 //
 // Sealed blob format (used by wrapKey/encryptContent, i.e. every *_ct column):
 //   base64url( iv (12 bytes) || AES-256-GCM ciphertext+tag )
@@ -23,7 +25,12 @@ const { subtle } = webcrypto
 
 export const KEY_BYTES = 32 // AES-256 / DEK / note key / HMAC subkey
 export const KDF_SALT_BYTES = 16
-export const DEFAULT_KDF_ITERATIONS = 310_000 // keep in sync with src/lib/cryptoUtils.ts
+// Work factor for NEW cloud wraps (user_keys passphrase/recovery copies). The
+// value is stored per row (pass_iterations / recovery_iterations) and every
+// unwrap — desktop and CLI — derives with the STORED value, so raising it never
+// breaks rows wrapped earlier with 310,000. Deliberately independent from
+// src/lib/cryptoUtils.ts (per-note encryption has its own default).
+export const DEFAULT_KDF_ITERATIONS = 600_000
 const IV_BYTES = 12
 const HASH_ALG = 'SHA-256'
 
@@ -66,7 +73,7 @@ export function generateKdfSalt(): Uint8Array {
 
 // ── KEK derivation (passphrase / recovery code) ───────────────────────────────
 
-/** PBKDF2-SHA256 passphrase → 256-bit KEK. Same parameters as per-note encryption. */
+/** PBKDF2-SHA256 passphrase → 256-bit KEK (same KDF as per-note encryption; iterations per call). */
 export async function deriveKek(
   passphrase: string,
   salt: Uint8Array,
