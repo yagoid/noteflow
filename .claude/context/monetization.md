@@ -114,7 +114,7 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     single-flight por generación de sesión.
   - **Token con resultado discriminado:** internamente `getAccessTokenResult()` devuelve
     `{ok:true, token}` o `{ok:false, reason: 'noSession'|'network'|'server'|'locked'}`;
-    `getAccessToken()` (realtime, llm) es un wrapper fino que devuelve `string|null`.
+    `getAccessToken()` (realtime, `ai:llm-usage`) es un wrapper fino que devuelve `string|null`.
     `refreshEntitlements` lo mapea a `notSignedIn` / `network` / `refreshFailed` /
     `sessionLocked`, así que "Refresh" offline dice "no hay conexión", no "Sign in first". Los
     helpers REST de Cloud (`cloudKeys.supabaseRest` / `callCloudKeysFn`) usan también la versión

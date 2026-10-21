@@ -575,7 +575,7 @@ export function invalidateAccessToken(token?: string): void {
   accessTokenExpiresAtMs = 0
 }
 
-/** Thin wrapper for callers that only care about the token (cloudSync, cloudKeys, llm, realtime). */
+/** Thin wrapper for callers that only care about the token (realtime, ai:llm-usage). */
 export async function getAccessToken(): Promise<string | null> {
   const result = await getAccessTokenResult()
   return result.ok ? result.token : null

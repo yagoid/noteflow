@@ -470,7 +470,7 @@ function invalidateAccessToken(token) {
     accessToken = null;
     accessTokenExpiresAtMs = 0;
 }
-/** Thin wrapper for callers that only care about the token (cloudSync, cloudKeys, llm, realtime). */
+/** Thin wrapper for callers that only care about the token (realtime, ai:llm-usage). */
 async function getAccessToken() {
     const result = await getAccessTokenResult();
     return result.ok ? result.token : null;
