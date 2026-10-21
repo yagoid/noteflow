@@ -40,6 +40,13 @@ export interface LlmConfigPublic {
   hasKey: boolean
   configured: boolean
   capabilities: ProviderCapabilities
+  /**
+   * The stored lastByoProvider, only when it is a known non-managed preset
+   * (byoFallbackProvider's check). Lets Settings → AI preselect the provider the
+   * user had before NoteFlow AI in the "Your provider" card instead of the default.
+   * MIRROR: LlmConfigPublic in src/types/index.ts.
+   */
+  lastByoProvider?: string
 }
 
 /** Resolved config handed to a provider (key in clear; in-memory only). */

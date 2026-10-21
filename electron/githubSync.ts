@@ -29,6 +29,7 @@ import {
   shouldRefreshSections,
   type TreeBlobRef,
   shouldRunDeletionRule,
+  isGitHubEmptyRepoError,
   getCachedSha,
   setCachedSha,
   pruneShas,
@@ -182,6 +183,13 @@ const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 
 // ── GitHub REST API (raw https, no external deps) ─────────────────────────────
 
+/** An error answer of the GitHub API: GitHub's own `message` plus the HTTP status. */
+class GitHubApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+  }
+}
+
 async function githubRequest(
   token: string,
   method: string,
@@ -216,7 +224,7 @@ async function githubRequest(
           try {
             const json = JSON.parse(raw)
             if (res.statusCode && res.statusCode >= 400) {
-              reject(new Error(json.message ?? `HTTP ${res.statusCode}`))
+              reject(new GitHubApiError(json.message ?? `HTTP ${res.statusCode}`, res.statusCode))
             } else {
               resolve(json)
             }
@@ -327,6 +335,8 @@ async function getDefaultBranch(token: string, owner: string, repo: string): Pro
  * Do NOT catch here — let network/API errors propagate to the caller (pullNotes).
  * Returning [] on error would make the deletion logic treat all local notes as
  * "remotely deleted" and wipe them from disk when there is no internet connection.
+ * The ONLY exception is a repo with no commits yet (isGitHubEmptyRepoError): that
+ * is a genuinely empty remote, answered as an empty, complete listing.
  */
 async function listRemoteTree(token: string, owner: string, repo: string): Promise<TreeBlob[]> {
   return (await fetchRemoteTree(token, owner, repo)).blobs
@@ -339,11 +349,21 @@ async function fetchRemoteTree(
   repo: string
 ): Promise<{ blobs: TreeBlob[]; truncated: boolean }> {
   const branch = await getDefaultBranch(token, owner, repo)
-  const res = (await githubRequest(
-    token,
-    'GET',
-    `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`
-  )) as { tree?: Array<{ path: string; type: string; sha: string }>; truncated?: boolean }
+  let res: { tree?: Array<{ path: string; type: string; sha: string }>; truncated?: boolean }
+  try {
+    res = (await githubRequest(
+      token,
+      'GET',
+      `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`
+    )) as typeof res
+  } catch (err: unknown) {
+    // Existing EMPTY repo (409 "Git Repository is empty."): nothing remote yet —
+    // the pull succeeds with no files and the catch-up uploads the local notes.
+    if (err instanceof GitHubApiError && isGitHubEmptyRepoError(err.status, err.message)) {
+      return { blobs: [], truncated: false }
+    }
+    throw err
+  }
   const truncated = res?.truncated === true
   if (truncated) console.warn('[GitHubSync] tree listing truncated — repo unusually large')
   const blobs = (res?.tree ?? [])

@@ -106,3 +106,47 @@ export function isAllowedUpdateAssetPath(pathname: string): boolean {
   if (!pathname.toLowerCase().startsWith(REPO_PATH)) return false
   return updateAssetKind(pathname) !== null
 }
+
+/**
+ * Answer of the app:check-update IPC. `error: true` means the check itself
+ * failed (offline, timeout, GitHub rate limit, unparseable answer) — it says
+ * NOTHING about whether the app is up to date, so the UI must not claim it is.
+ * MIRROR: the checkUpdate() return type in electron/preload.ts and src/types/index.ts.
+ */
+export interface UpdateCheckResult {
+  hasUpdate: boolean
+  latestVersion?: string
+  downloadUrl?: string
+  error?: true
+}
+
+export const UPDATE_CHECK_FAILED: UpdateCheckResult = { hasUpdate: false, error: true }
+
+/**
+ * Builds the app:check-update answer from GitHub's /releases/latest response.
+ * `pickTarget` maps the latest version to the download URL (pickUpdateTarget
+ * with the probed environment). Any non-2xx status, unparseable body or missing
+ * tag_name is a failed check, never "up to date".
+ */
+export function buildUpdateCheckResult(
+  statusCode: number | undefined,
+  body: string,
+  currentVersion: string,
+  pickTarget: (latestVersion: string) => string
+): UpdateCheckResult {
+  if (!statusCode || statusCode < 200 || statusCode >= 300) return UPDATE_CHECK_FAILED
+  let json: unknown
+  try {
+    json = JSON.parse(body)
+  } catch {
+    return UPDATE_CHECK_FAILED
+  }
+  const tag = (json as { tag_name?: unknown } | null)?.tag_name
+  if (typeof tag !== 'string' || !tag.trim()) return UPDATE_CHECK_FAILED
+  const latestVersion = tag.trim().replace(/^v/, '')
+  return {
+    hasUpdate: latestVersion !== currentVersion,
+    latestVersion,
+    downloadUrl: pickTarget(latestVersion),
+  }
+}

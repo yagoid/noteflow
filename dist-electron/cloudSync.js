@@ -97,6 +97,7 @@ const cloudKeys = __importStar(require("./cloudKeys"));
 const cloudRealtime = __importStar(require("./cloudRealtime"));
 const githubSync = __importStar(require("./githubSync"));
 const cloudKeys_1 = require("./cloudKeys");
+const cloudAccessErrors_1 = require("./cloudAccessErrors");
 const cloudConfig_1 = require("./cloudConfig");
 const settingsFile_1 = require("./settingsFile");
 const noteFormat_1 = require("./noteFormat");
@@ -1612,11 +1613,13 @@ async function pullNotes(notesDir) {
             syncHistory.record(filesDown, false);
             return { pulled, deleted, errors, updatedFiles, hadDeletions: deleted > 0, hadMetadataChanges };
         }
-        const msg = String(err).includes('not-signed-in')
-            ? NOT_SIGNED_IN_ERROR
-            : err instanceof Error
-                ? err.message
-                : String(err);
+        // Signed out ≠ offline ≠ keychain locked: a session that merely can't
+        // reach the server must never read as "sign in".
+        const msg = (0, cloudAccessErrors_1.cloudAccessErrorMessage)(err, {
+            notSignedIn: NOT_SIGNED_IN_ERROR,
+            unreachable: cloudAccessErrors_1.CLOUD_UNREACHABLE_ERROR,
+            locked: cloudAccessErrors_1.CLOUD_SESSION_LOCKED_ERROR,
+        }) ?? (err instanceof Error ? err.message : String(err));
         syncError = msg;
         errors.push(msg);
         if (initialPullStatus === 'pending')

@@ -39,6 +39,7 @@ import * as cloudKeys from './cloudKeys'
 import * as cloudRealtime from './cloudRealtime'
 import * as githubSync from './githubSync'
 import { supabaseRest } from './cloudKeys'
+import { cloudAccessErrorMessage, CLOUD_UNREACHABLE_ERROR, CLOUD_SESSION_LOCKED_ERROR } from './cloudAccessErrors'
 import { isCloudConfigured } from './cloudConfig'
 import { writeSettingsFile } from './settingsFile'
 import { NOTE_MD, listNoteDirs, newNoteId } from './noteFormat'
@@ -1742,11 +1743,13 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
       syncHistory.record(filesDown, false)
       return { pulled, deleted, errors, updatedFiles, hadDeletions: deleted > 0, hadMetadataChanges }
     }
-    const msg = String(err).includes('not-signed-in')
-      ? NOT_SIGNED_IN_ERROR
-      : err instanceof Error
-        ? err.message
-        : String(err)
+    // Signed out ≠ offline ≠ keychain locked: a session that merely can't
+    // reach the server must never read as "sign in".
+    const msg = cloudAccessErrorMessage(err, {
+      notSignedIn: NOT_SIGNED_IN_ERROR,
+      unreachable: CLOUD_UNREACHABLE_ERROR,
+      locked: CLOUD_SESSION_LOCKED_ERROR,
+    }) ?? (err instanceof Error ? err.message : String(err))
     syncError = msg
     errors.push(msg)
     if (initialPullStatus === 'pending') setInitialPullStatus('failed')

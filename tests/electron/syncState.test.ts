@@ -22,6 +22,7 @@ import {
   planSectionRefresh,
   shouldRefreshSections,
   shouldRunDeletionRule,
+  isGitHubEmptyRepoError,
   getCachedSha,
   setCachedSha,
   pruneShas,
@@ -639,5 +640,24 @@ describe('conflictCopied (Cloud pull kept the local version as a conflict copy)'
     expect(planAnchorTombstone(state, 'a', T_DELETED - 1, T_DELETED)).toBe('keep')
     journalMarkDirStale(state, 'a')
     expect(planAnchorTombstone(state, 'a', T_DELETED - 1, T_DELETED)).toBe('lost')
+  })
+})
+
+describe('isGitHubEmptyRepoError', () => {
+  it('recognises GitHub answers for a repo with no commits yet', () => {
+    expect(isGitHubEmptyRepoError(409, 'Git Repository is empty.')).toBe(true) // Git Trees API
+    expect(isGitHubEmptyRepoError(404, 'This repository is empty.')).toBe(true) // Contents API
+  })
+
+  it('keeps every other error an error', () => {
+    expect(isGitHubEmptyRepoError(409, 'is at abc123 but expected def456')).toBe(false) // write conflict
+    expect(isGitHubEmptyRepoError(404, 'Not Found')).toBe(false)
+    expect(isGitHubEmptyRepoError(500, 'Git Repository is empty.')).toBe(false)
+    expect(isGitHubEmptyRepoError(undefined, 'Git Repository is empty.')).toBe(false)
+  })
+
+  it('an empty listing never triggers the deletion rule (no v2 marker)', () => {
+    // pullNotes derives remoteIsV2 from the marker blob, absent in an empty repo.
+    expect(shouldRunDeletionRule(Date.now(), false, false, false, false)).toBe(false)
   })
 })

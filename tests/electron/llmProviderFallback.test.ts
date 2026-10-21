@@ -153,3 +153,16 @@ describe('baseUrl lock for non-editable presets', () => {
     expect(resolveConfig(cfg).baseUrl).toBe('http://lan-box:11434/v1')
   })
 })
+
+describe('toPublic lastByoProvider (BYO card preselection)', () => {
+  it('exposes the remembered BYO provider while NoteFlow AI is active', () => {
+    const cfg: LlmConfigStored = { active: 'noteflow', byPreset: {}, lastByoProvider: 'deepseek' }
+    expect(toPublic(cfg).lastByoProvider).toBe('deepseek')
+  })
+
+  it('omits unknown or managed ids, and an absent memory', () => {
+    expect(toPublic({ active: 'noteflow', byPreset: {}, lastByoProvider: 'gone-preset' }).lastByoProvider).toBeUndefined()
+    expect(toPublic({ active: 'noteflow', byPreset: {}, lastByoProvider: 'noteflow' }).lastByoProvider).toBeUndefined()
+    expect(toPublic({ active: 'noteflow', byPreset: {} }).lastByoProvider).toBeUndefined()
+  })
+})

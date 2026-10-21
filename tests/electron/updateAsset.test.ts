@@ -5,6 +5,8 @@ import {
   updateAssetKind,
   isRunningFromOwnAppImage,
   RELEASES_PAGE_URL,
+  buildUpdateCheckResult,
+  UPDATE_CHECK_FAILED,
   type UpdateTargetInput,
 } from '../../electron/updateAsset'
 
@@ -143,5 +145,37 @@ describe('isRunningFromOwnAppImage', () => {
   it('rejects a relative or root APPDIR', () => {
     expect(isRunningFromOwnAppImage({ ...own, appDir: '/', execPath: '/opt/NoteFlow/noteflow' })).toBe(false)
     expect(isRunningFromOwnAppImage({ ...own, appDir: 'tmp/.mount_x', execPath: 'tmp/.mount_x/noteflow' })).toBe(false)
+  })
+})
+
+describe('buildUpdateCheckResult', () => {
+  const pick = (v: string) => `${DL}/NoteFlow-${v}-Setup.exe`
+  const release = (tag: unknown) => JSON.stringify({ tag_name: tag })
+
+  it('reports a newer release with its download URL', () => {
+    expect(buildUpdateCheckResult(200, release('v2.1.0'), '2.0.0', pick)).toEqual({
+      hasUpdate: true,
+      latestVersion: '2.1.0',
+      downloadUrl: `${DL}/NoteFlow-2.1.0-Setup.exe`,
+    })
+  })
+
+  it('reports up to date only when the check succeeded', () => {
+    const result = buildUpdateCheckResult(200, release('v2.0.0'), '2.0.0', pick)
+    expect(result.hasUpdate).toBe(false)
+    expect(result.error).toBeUndefined()
+  })
+
+  it('flags a failed check instead of claiming "up to date"', () => {
+    // GitHub rate limit / outage: an error JSON without tag_name.
+    expect(buildUpdateCheckResult(403, JSON.stringify({ message: 'API rate limit exceeded' }), '2.0.0', pick))
+      .toEqual(UPDATE_CHECK_FAILED)
+    expect(buildUpdateCheckResult(500, release('v2.1.0'), '2.0.0', pick)).toEqual(UPDATE_CHECK_FAILED)
+    expect(buildUpdateCheckResult(undefined, release('v2.1.0'), '2.0.0', pick)).toEqual(UPDATE_CHECK_FAILED)
+    expect(buildUpdateCheckResult(200, '<html>proxy error</html>', '2.0.0', pick)).toEqual(UPDATE_CHECK_FAILED)
+    expect(buildUpdateCheckResult(200, JSON.stringify({}), '2.0.0', pick)).toEqual(UPDATE_CHECK_FAILED)
+    expect(buildUpdateCheckResult(200, release(''), '2.0.0', pick)).toEqual(UPDATE_CHECK_FAILED)
+    expect(buildUpdateCheckResult(200, 'null', '2.0.0', pick)).toEqual(UPDATE_CHECK_FAILED)
+    expect(UPDATE_CHECK_FAILED).toEqual({ hasUpdate: false, error: true })
   })
 })

@@ -158,6 +158,9 @@ function toPublic(cfg) {
         hasKey,
         configured,
         capabilities: providerCapabilities(preset, model),
+        ...(cfg.lastByoProvider && byoFallbackProvider(cfg) === cfg.lastByoProvider
+            ? { lastByoProvider: cfg.lastByoProvider }
+            : {}),
     };
 }
 /** User-facing reason why toPublic().configured is false — tailored for the managed preset. */

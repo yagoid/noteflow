@@ -71,6 +71,7 @@ const api = {
     unfold: () => electron_1.ipcRenderer.send('window:unfold'),
     // Updates
     getAppVersion: () => electron_1.ipcRenderer.invoke('app:get-version'),
+    // error: the check itself failed (offline/timeout/bad answer) — not "up to date".
     checkUpdate: () => electron_1.ipcRenderer.invoke('app:check-update'),
     openUrl: (url) => electron_1.ipcRenderer.invoke('app:open-url', url),
     downloadAndInstall: (url) => electron_1.ipcRenderer.invoke('app:download-and-install', url),

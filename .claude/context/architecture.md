@@ -41,6 +41,8 @@ noteflow/
 │   │                    #   refresh token cifrado, entitlements) — ver monetization.md
 │   ├── accountTransition.ts # Lógica pura del sign-out/sign-in: qué apagar (Cloud, DEK, IA gestionada)
 │   │                    #   y qué restaurar (registro accountRestore) — testeada; ver monetization.md § 4
+│   ├── cloudAccessErrors.ts # Pura: errores etiquetados "sin token" (sin sesión / inalcanzable /
+│   │                    #   llavero bloqueado) y su mensaje — testeada; ver monetization.md § 2 (token discriminado)
 │   ├── cloudConfig.ts   # URL + anon key del proyecto Supabase real (la anon key es pública por diseño)
 │   ├── cloudCrypto.ts   # Capa criptográfica pura de NoteFlow Cloud (DEK/KEK/recovery, AES-GCM, path_key)
 │   ├── cloudKeys.ts     # Sesión de claves E2EE en main (setup/unlock/lock, DEK solo en memoria,
@@ -250,7 +252,7 @@ Renderer (React)
 | `app:choose-notes-dir` | handle | Diálogo para elegir carpeta |
 | `app:get-login-item` / `app:set-login-item` | handle | Autostart al login (gestiona `.desktop` propio en Linux) |
 | `app:get-version` | handle | Versión actual de la app (`app.getVersion()`) — la usa el panel About |
-| `app:check-update` | handle | Consulta la última release en la API de GitHub |
+| `app:check-update` | handle | Consulta la última release en la API de GitHub → `{hasUpdate, latestVersion?, downloadUrl?, error?}` (`error: true` = el chequeo falló, no "al día") |
 | `app:download-and-install` | handle | Descarga el instalador (allowlist de hosts) e instala; emite progreso |
 | `app:open-url` | handle | Abre URL externa (solo https, validada) |
 | `settings:get-theme` / `settings:set-theme` | on (sync/async) | Tema en settings.json (sendSync para leer) — hoy es dual-write legacy: la fuente sincronizada del tema es `ui-settings.json` |
@@ -284,7 +286,7 @@ Renderer (React)
 | `sync:pull-active` | handle | Pull manual enrutado al backend **activo** (Cloud si `enabled`, GitHub si no) — lo usa el botón de la titlebar |
 | `sync:mirror-to-github` | handle | **Espejo local → repo**: deja GitHub como copia exacta del disco (sube lo que difiere, borra lo que ya no existe). **Solo con Cloud habilitado** (gate en `main.ts`; si no → `{ok:false, error:'cloud-required'}`). No cambia nada local — ver `sync.md` |
 | `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsKnown, entitlementsFetchedAt, sessionLocked, aiCheckoutConfigured, cloudCheckoutConfigured, bundleCheckoutConfigured}`; `entitlementsKnown: false` = desconocidas, no "sin plan" (ver `monetization.md` § 2)) — **nunca** tokens |
-| `account:request-otp` | handle | Envía el código OTP de 6 dígitos por email (Supabase GoTrue, `create_user: true`) |
+| `account:request-otp` | handle | Envía el código OTP (8 dígitos) por email (Supabase GoTrue, `create_user: true`) |
 | `account:verify-otp` | handle | Verifica `(email, code)` → guarda sesión (refresh token cifrado en `settings.account`) + primer fetch de entitlements |
 | `account:sign-out` | handle | Logout best-effort en el servidor (`/auth/v1/logout?scope=local`: solo esta sesión) + limpia la sección `account` y el estado. La app vuelve a su estado gratuito: Cloud `enabled=false`, **sesión de claves borrada** (DEK + cache + `keysMode`/`remoteKeysKnown`), IA gestionada → proveedor BYO/local, y se guarda `accountRestore` (ver `monetization.md` § 4 "Cerrar sesión") |
 | `account:refresh-entitlements` | handle | Relee `subscriptions` vía PostgREST/RLS y re-deriva `{ai, cloud}` (y las cachea en `account.entitlementsCache`). **Single-flight** (comparte la petición en curso de la misma sesión); un fallo transitorio entra en el **backoff** de reintentos automáticos (también al volver de suspensión / recuperar la red). `errorCode`: `network` (sin conexión — también si falla el refresh del token por red), `sessionLocked` (llavero del sistema bloqueado), `refreshFailed` (error del servidor), `notSignedIn`, `notConfigured`. Ver `monetization.md` § 2 |

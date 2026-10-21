@@ -16,7 +16,8 @@
 //     (downgradeCloudKeysToManaged, which invalidates passphrase + recovery).
 // Crypto primitives live in cloudCrypto.ts (pure); REST follows the account.ts
 // pattern (plain fetch, a fresh access token per request via
-// account.getAccessToken()).
+// account.getAccessTokenResult(); a missing token throws a reason-tagged error
+// from cloudAccessErrors.ts).
 //
 // Security model:
 //   - The DEK lives ONLY in main-process memory. It never crosses to the
@@ -37,6 +38,7 @@ import path from 'path'
 import * as account from './account'
 import { SUPABASE_URL, SUPABASE_ANON_KEY, CLOUD_KEYS_URL, isCloudConfigured } from './cloudConfig'
 import { encryptSecret, decryptSecret } from './ai/llm/secret'
+import { accessTokenError, isAccessTokenError, cloudAccessErrorMessage, CLOUD_SESSION_LOCKED_ERROR } from './cloudAccessErrors'
 import { writeSettingsFile } from './settingsFile'
 import {
   KEY_BYTES,
@@ -137,14 +139,17 @@ export interface SupabaseRestResponse {
 /**
  * Authenticated PostgREST request with a FRESH access token per call (GoTrue
  * tokens expire in ~1h — never cache them as if they were API keys). Throws on
- * network/timeout errors or when there is no signed-in session.
+ * network/timeout errors, or a reason-tagged error (cloudAccessErrors.ts) when
+ * no token can be obtained: signed out, account service unreachable, or a
+ * keychain-locked session.
  */
 export async function supabaseRest(
   endpoint: string,
   opts: { method?: string; body?: unknown; headers?: Record<string, string> } = {}
 ): Promise<SupabaseRestResponse> {
-  const token = await account.getAccessToken()
-  if (!token) throw new Error('not-signed-in')
+  const tokenResult = await account.getAccessTokenResult()
+  if (!tokenResult.ok) throw accessTokenError(tokenResult.reason)
+  const token = tokenResult.token
   const res = await fetch(`${SUPABASE_URL}${endpoint}`, {
     method: opts.method ?? 'GET',
     headers: {
@@ -179,6 +184,15 @@ let keysMode: CloudKeysMode = null
 const NOT_SIGNED_IN_ERROR = 'Sign in to your NoteFlow account first.'
 const NETWORK_ERROR = 'Could not reach the NoteFlow Cloud service. Check your connection and try again.'
 const ALREADY_E2EE_ERROR = 'This account already uses private end-to-end encryption.'
+
+/** Message for an access-token failure (isAccessTokenError): signed out ≠ offline ≠ keychain locked. */
+function accessTokenErrorMessage(err: unknown): string {
+  return cloudAccessErrorMessage(err, {
+    notSignedIn: NOT_SIGNED_IN_ERROR,
+    unreachable: NETWORK_ERROR,
+    locked: CLOUD_SESSION_LOCKED_ERROR,
+  }) ?? NETWORK_ERROR
+}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -254,8 +268,9 @@ interface CloudKeysFnResponse {
 
 /** POST to the cloud-keys Edge Function with a fresh access token (ai-proxy caller pattern). */
 async function callCloudKeysFn(route: 'setup' | 'unlock' | 'downgrade', body?: unknown): Promise<CloudKeysFnResponse> {
-  const token = await account.getAccessToken()
-  if (!token) throw new Error('not-signed-in')
+  const tokenResult = await account.getAccessTokenResult()
+  if (!tokenResult.ok) throw accessTokenError(tokenResult.reason)
+  const token = tokenResult.token
   const res = await fetch(`${CLOUD_KEYS_URL}/${route}`, {
     method: 'POST',
     headers: {
@@ -311,7 +326,7 @@ export async function setupCloudKeysManaged(): Promise<CloudKeysOpResult> {
     cacheDek()
     return { ok: true }
   } catch (err: unknown) {
-    if (String(err).includes('not-signed-in')) return { ok: false, error: NOT_SIGNED_IN_ERROR }
+    if (isAccessTokenError(err)) return { ok: false, error: accessTokenErrorMessage(err) }
     console.error('[CloudKeys] managed setup failed:', String(err))
     return { ok: false, error: NETWORK_ERROR }
   }
@@ -377,7 +392,7 @@ async function doAutoUnlockManaged(): Promise<boolean> {
     return true
   } catch (err: unknown) {
     // Offline / expired session — stay locked; callers retry silently.
-    if (!String(err).includes('not-signed-in')) {
+    if (!isAccessTokenError(err)) {
       console.error('[CloudKeys] managed auto-unlock failed:', String(err))
     }
     return false
@@ -411,7 +426,7 @@ export async function refreshKeysMode(): Promise<boolean> {
     }
     return getKeysState() !== stateBefore || getKeysMode() !== modeBefore
   } catch (err: unknown) {
-    if (!String(err).includes('not-signed-in')) {
+    if (!isAccessTokenError(err)) {
       console.error('[CloudKeys] keys mode refresh failed:', String(err))
     }
     return false
@@ -496,7 +511,7 @@ export async function upgradeCloudKeysToE2ee(
     setKeysMode('e2ee')
     return { ok: true, recoveryCode }
   } catch (err: unknown) {
-    if (String(err).includes('not-signed-in')) return { ok: false, error: NOT_SIGNED_IN_ERROR }
+    if (isAccessTokenError(err)) return { ok: false, error: accessTokenErrorMessage(err) }
     console.error('[CloudKeys] upgrade to e2ee failed:', String(err))
     return { ok: false, error: NETWORK_ERROR }
   }
@@ -529,7 +544,7 @@ export async function downgradeCloudKeysToManaged(): Promise<CloudKeysOpResult> 
     cacheDek() // the DEK is unchanged; refresh the cache in case it was missing
     return { ok: true }
   } catch (err: unknown) {
-    if (String(err).includes('not-signed-in')) return { ok: false, error: NOT_SIGNED_IN_ERROR }
+    if (isAccessTokenError(err)) return { ok: false, error: accessTokenErrorMessage(err) }
     console.error('[CloudKeys] downgrade to managed failed:', String(err))
     return { ok: false, error: NETWORK_ERROR }
   }
@@ -593,7 +608,7 @@ export async function setupCloudKeys(
     cacheDek()
     return { ok: true, recoveryCode }
   } catch (err: unknown) {
-    if (String(err).includes('not-signed-in')) return { ok: false, error: NOT_SIGNED_IN_ERROR }
+    if (isAccessTokenError(err)) return { ok: false, error: accessTokenErrorMessage(err) }
     console.error('[CloudKeys] setup failed:', String(err))
     return { ok: false, error: NETWORK_ERROR }
   }
@@ -628,7 +643,7 @@ export async function unlockCloudKeys(secret: string): Promise<CloudKeysOpResult
     row = rows[0]
     setKeysMode(row.mode === 'managed' ? 'managed' : 'e2ee') // backfills pre-0005 devices
   } catch (err: unknown) {
-    if (String(err).includes('not-signed-in')) return { ok: false, error: NOT_SIGNED_IN_ERROR }
+    if (isAccessTokenError(err)) return { ok: false, error: accessTokenErrorMessage(err) }
     console.error('[CloudKeys] unlock fetch failed:', String(err))
     return { ok: false, error: NETWORK_ERROR }
   }

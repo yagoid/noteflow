@@ -202,6 +202,14 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   carpetas con sha nuevo pagan el GET del ancla + comparación de `updated`. Si ese GET falla (`getRemoteFile` se traga el error y devuelve `null`) o el tree viene
   truncado, el pull no añade nada a `errors` pero devuelve `incomplete: true` (no se muestra; solo
   frena la caducidad de notas temporales, ver `patterns.md`).
+  **Repo existente VACÍO (sin commits):** la Git Trees API responde **409 "Git Repository is
+  empty."**; `fetchRemoteTree` (único listado: pull, espejo, `deleteRemoteDirNow`, migración v2) lo
+  trata como listado **vacío y completo** — `isGitHubEmptyRepoError(status, message)` en
+  `syncState.ts` (puro y testeado; exige status 409/404 **y** el mensaje de repo vacío, cualquier otro
+  error sigue propagándose). El pull inicial termina OK (`initialPullStatus: 'ok'`, sin `syncError`) y
+  el catch-up sube las notas locales; antes quedaba `failed` con el error visible hasta un "Sync now"
+  manual. Sin riesgo para la regla de borrado: sin marcador v2 el remoto no es v2. `githubRequest`
+  rechaza con `GitHubApiError` (mensaje de GitHub + `status` HTTP) para poder distinguirlo.
   **Secciones que llegan después de su ancla (arreglado):** el push sube `note.md` y las secciones
   en commits **separados** (cola serializada, debounce por fichero). Un pull entre medias aplicaba el
   ancla nueva con las secciones viejas y cacheaba el sha del ancla; como la caché solo miraba el ancla

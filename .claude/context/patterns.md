@@ -1089,7 +1089,12 @@ si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
 ### Auto-update in-app
 `app:check-update` consulta la última release (API GitHub, endpoint `/releases/latest` → **ignora
 prereleases**; compara con `latest !== current`, así que cualquier versión local distinta dispara
-el update — útil para probar el flujo bajando a una versión inferior a la publicada). La elección
+el update — útil para probar el flujo bajando a una versión inferior a la publicada). **Un chequeo
+fallido no es "al día":** sin red, timeout, status no-2xx (p. ej. el 403 del rate limit), cuerpo
+ilegible o sin `tag_name` → `{hasUpdate: false, error: true}` (`buildUpdateCheckResult` /
+`UPDATE_CHECK_FAILED`, puros en `updateAsset.ts` y testeados); Ajustes → Acerca de muestra
+"Couldn't check for updates" + pista de conexión con el botón aún clicable para reintentar (antes
+mostraba "Up to date"), y la titlebar simplemente no ofrece update. La elección
 del artefacto es lógica pura en **`electron/updateAsset.ts`** (`pickUpdateTarget`, test en
 `tests/electron/updateAsset.test.ts`); `main.ts` solo sondea el entorno. Los nombres deben casar
 **exactamente** con los publicados (un nombre mal es un 404 y el bug viaja en la versión VIEJA, así que
@@ -1213,7 +1218,7 @@ lo reporta como error con exit 1 en vez del exit 0 silencioso.
 un pipe, Ctrl+D, o Ctrl+C que cierra el readline): `rl.question()` nunca llama a su callback en EOF,
 así que antes la promesa quedaba colgada y el CLI terminaba en silencio con exit 0. `promptUntil()`
 re-pregunta ante vacío/formato inválido (5 intentos) y lo usa `cloud login` para email y código OTP
-(6 dígitos, se ignoran espacios/guiones; solo un código bien formado gasta un `/verify`, con hasta 3
+(de 6 a 10 dígitos —la longitud la fija GoTrue; el proyecto envía 8—, se ignoran espacios/guiones; solo un código bien formado gasta un `/verify`, con hasta 3
 intentos en total ante `otp_expired` sin reenviar el email). `confirm()` con stdin cerrado = "N" + aviso de
 `--yes`. Readline es **uno por prompt**: con stdin por pipe, las líneas que ya leyó un prompt se
 pierden al cerrarlo — el CLI no soporta responder a varios prompts por pipe (para scripts:

@@ -2,7 +2,7 @@
 
 Emails transaccionales de NoteFlow con la estética de la marca ("The Brain"): fondo tinta, tarjeta con
 tira de sinapsis (teal → cian → púrpura → rosa → ámbar), wordmark con el punto ámbar y el **código de
-6 dígitos** como protagonista.
+acceso** como protagonista.
 
 ## Dónde se pegan
 

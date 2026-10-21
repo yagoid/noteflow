@@ -7,7 +7,7 @@
 // onStatusChanged callback that main.ts wires to a broadcast.
 //
 // Auth is Supabase GoTrue over plain REST (no @supabase/supabase-js dep):
-//   POST /auth/v1/otp                          → email a 6-digit code
+//   POST /auth/v1/otp                          → email a one-time code (8 digits)
 //   POST /auth/v1/verify                       → code → session (access+refresh)
 //   POST /auth/v1/token?grant_type=refresh_token → rotate session
 //   POST /auth/v1/logout?scope=local           → revoke THIS session only
@@ -346,7 +346,7 @@ function getUserId() {
     const s = accountSettings ?? loadAccountSettings();
     return s.userId ?? null;
 }
-/** Emails a 6-digit one-time code (creates the account on first sign-in). */
+/** Emails a one-time sign-in code (creates the account on first sign-in). */
 async function requestOtp(email) {
     if (!(0, cloudConfig_1.isCloudConfigured)())
         return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured' };
@@ -470,7 +470,7 @@ function invalidateAccessToken(token) {
     accessToken = null;
     accessTokenExpiresAtMs = 0;
 }
-/** Thin wrapper for callers that only care about the token (cloudSync, cloudKeys, llm, realtime). */
+/** Thin wrapper for callers that only care about the token (realtime, ai:llm-usage). */
 async function getAccessToken() {
     const result = await getAccessTokenResult();
     return result.ok ? result.token : null;

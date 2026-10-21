@@ -74,7 +74,8 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
 
 ## 2. Cuenta NoteFlow + entitlements + pagos (MoR)
 
-- **Auth:** Supabase Auth con **email + OTP de 6 dígitos** (sin deep links; misma UX de "código"
+- **Auth:** Supabase Auth con **email + OTP de 8 dígitos** (longitud configurable en GoTrue; la UI
+  y el CLI no la fijan: el copy dice "código" y el CLI acepta 6–10 dígitos) (sin deep links; misma UX de "código"
   que el Device Flow de GitHub ya establecido en la app). La sesión vive en el **proceso main**,
   espejo del patrón `githubSync`: refresh token cifrado con `safeStorage` en `settings.json`
   (sección `account`), **nunca cruza al renderer** — el renderer solo ve estado público
@@ -113,9 +114,15 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     single-flight por generación de sesión.
   - **Token con resultado discriminado:** internamente `getAccessTokenResult()` devuelve
     `{ok:true, token}` o `{ok:false, reason: 'noSession'|'network'|'server'|'locked'}`;
-    `getAccessToken()` (cloudSync, cloudKeys, realtime, llm) es un wrapper fino que devuelve
-    `string|null`. `refreshEntitlements` lo mapea a `notSignedIn` / `network` / `refreshFailed` /
-    `sessionLocked`, así que "Refresh" offline dice "no hay conexión", no "Sign in first".
+    `getAccessToken()` (realtime, `ai:llm-usage`) es un wrapper fino que devuelve `string|null`.
+    `refreshEntitlements` lo mapea a `notSignedIn` / `network` / `refreshFailed` /
+    `sessionLocked`, así que "Refresh" offline dice "no hay conexión", no "Sign in first". Los
+    helpers REST de Cloud (`cloudKeys.supabaseRest` / `callCloudKeysFn`) usan también la versión
+    discriminada y lanzan un error **etiquetado por motivo** (`electron/cloudAccessErrors.ts`, puro y
+    testeado: `not-signed-in` solo para `noSession`, `account-unreachable` para `network`/`server`,
+    `session-locked` para `locked`); el pull de `cloudSync` y los `catch` de `cloudKeys` lo traducen
+    con `cloudAccessErrorMessage` (también un `fetch failed`/timeout cuenta como "inalcanzable"), así
+    que con sesión y sin red Cloud dice "Can't reach NoteFlow Cloud…", no "Sign in…".
   - **Sesión bloqueada (`sessionLocked`):** si `safeStorage` no puede descifrar el refresh token
     (Linux antes de desbloquear el llavero, el usuario deniega el Keychain en macOS) **no** es un
     sign-out: el blob se queda en disco, `signedIn` sigue a `true`, `AccountStatus.sessionLocked`
@@ -450,6 +457,10 @@ es **un preset más**, no una implementación nueva.
   sesión **la misma** cuenta, si la entitlement `ai` sigue viva se re-activa `noteflow`
   automáticamente (registro `accountRestore` — ver § 4 "Cerrar sesión", donde está el mecanismo
   completo; es un camino **aparte** del auto-switch por entitlement de arriba, e idempotente).
+  El mismo dato llega al renderer como `LlmConfigPublic.lastByoProvider` (solo si es un preset
+  conocido no gestionado): con NoteFlow AI activo, la tarjeta "Your provider / local AI" de
+  Ajustes → IA (`LlmConfigView.tsx`, `byoOf`) preselecciona ese proveedor (p. ej. DeepSeek con su
+  key guardada) y solo cae a `'anthropic'` si no hay ninguno.
 - **Cuota ponderada desplegada:** la migración 0007 está aplicada y `ai-proxy` redesplegado con el
   catálogo nuevo, los multiplicadores y el endpoint `/usage`.
 - **Endurecimiento desplegado (2026-10-21):** migraciones 0009 + 0010 + 0011 aplicadas,
@@ -756,7 +767,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   jamás con el fallback base64 que se usa para tokens (una master key en base64 en disco anularía
   el E2EE). `lockCloudKeys()` borra también la cache.
 - Helper `supabaseRest()` exportado (PostgREST con token fresco por request vía
-  `account.getAccessToken()`) — lo reutiliza `cloudSync.ts`.
+  `account.getAccessTokenResult()`; sin token lanza un error etiquetado por motivo, ver
+  `cloudAccessErrors.ts` en § 2) — lo reutiliza `cloudSync.ts`.
 
 ### Sync engine (`electron/cloudSync.ts` + lógica pura en `cloudSyncLogic.ts`, tramo 2 — implementado)
 - Mismo modelo "archivo por ruta relativa" y **misma regla de conflicto** que el GitHub Sync
@@ -1453,7 +1465,7 @@ puro vía `fetch` desde el proceso main.
   or is invalid"), así que `invalidCode` cubre ambos y la UI ofrece reenviar.
 - **UI** — `src/components/Settings/AccountPanel.tsx` (sección "Account" en `SettingsModal`,
   textos vía i18n `t.settings.account.*`): no configurado → placeholder informativo; signed out →
-  email → código de 6 dígitos; signed in → email + badges de plan + el bloque compartido
+  email → código de acceso; signed in → email + badges de plan + el bloque compartido
   `PlanOffers` con los **planes y sus precios** (Bundle/AI/Cloud — ver § 3 "UI" y § visión
   "Precios") + Refresh + Sign out.
   **Dos superficies de error, nunca a la vez:** la caja roja de arriba (`error`) para el paso de
@@ -1463,4 +1475,5 @@ puro vía `fetch` desde el proceso main.
   `aria-invalid` + `aria-describedby`/`role="alert"`, contenido seleccionado al fallar (retecleo
   directo) y limpieza del error al escribir. Ese paso incluye **"Resend code"**
   (`sendCode('resend')`, misma llamada `accountRequestOtp` sin volver al paso de email) con
-  cooldown local de 30 s — el rate-limit real lo pone GoTrue y llega como `rateLimited`.
+  cooldown local de 60 s, igual al rate-limit por email de GoTrue (~60 s; con 30 s el primer
+  reenvío fallaba con `rateLimited`).
