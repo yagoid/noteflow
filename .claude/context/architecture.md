@@ -35,6 +35,8 @@ noteflow/
 │   ├── syncProvider.ts  # Interfaz SyncProvider + getActiveSyncProvider() (GitHub ⟂ Cloud) — ver sync.md
 │   ├── tempNoteExpiry.ts # Lógica pura: cuándo puede correr el autoborrado de notas temporales
 │   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
+│   ├── updateAsset.ts   # Lógica pura del auto-update: qué asset/URL ofrecer por plataforma y
+│   │                    #   allowlist de rutas descargables — testeada; ver patterns.md
 │   ├── account.ts       # Cuenta NoteFlow (Supabase Auth email+OTP vía REST, sesión en main,
 │   │                    #   refresh token cifrado, entitlements) — ver monetization.md
 │   ├── accountTransition.ts # Lógica pura del sign-out/sign-in: qué apagar (Cloud, DEK, IA gestionada)
@@ -218,7 +220,7 @@ noteflow/
 ├── docs/                  # Web de marketing (proyecto Astro independiente, npm propio) — ver release.md
 ├── public/                # Iconos, assets estáticos
 ├── release/               # Output de electron-builder (gitignored)
-├── PKGBUILD               # Build manual/AUR del paquete Arch (electron del sistema, NOTEFLOW_NATIVE)
+├── PKGBUILD               # Paquete Arch (electron del sistema, NOTEFLOW_NATIVE) — ROTO/no soportado, ver release.md
 └── .github/workflows/
     ├── release.yml        # CI/CD: build matrix (win+linux+mac) + release al pushear un tag
     └── pages.yml          # Build Astro de docs/ + deploy a GitHub Pages (push a main que toque docs/**)

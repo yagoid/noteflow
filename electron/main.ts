@@ -42,6 +42,7 @@ import { sanitizeUiSettings, mergeUiSettings, type UiSettings } from './uiSettin
 import * as importers from './importers'
 import { migrateNotesDirToV2 } from './migration'
 import { shouldRunExpiryCheck, type ExpiryTrigger, type SyncBackendId } from './tempNoteExpiry'
+import { pickUpdateTarget, isAllowedUpdateAssetPath, updateAssetKind, isRunningFromOwnAppImage } from './updateAsset'
 import {
   parseActivityLog,
   pruneActivityLog,
@@ -708,9 +709,7 @@ function parseHttpsUrl(rawUrl: string): URL | null {
 
 function isAllowedInitialUpdateUrl(url: URL): boolean {
   if (!ALLOWED_UPDATE_HOSTS.has(url.hostname)) return false
-  const pathname = url.pathname.toLowerCase()
-  if (!pathname.includes('/yagoid/noteflow/releases/')) return false
-  return pathname.endsWith('.exe') || pathname.endsWith('.deb') || pathname.endsWith('.AppImage') || pathname.endsWith('.pkg.tar.zst') || pathname.endsWith('.dmg')
+  return isAllowedUpdateAssetPath(url.pathname)
 }
 
 function isAllowedRedirectUpdateUrl(url: URL): boolean {
@@ -1436,29 +1435,20 @@ ipcMain.handle('app:check-update', () => {
             const latest = json.tag_name?.replace(/^v/, '')
             const current = app.getVersion()
             const hasUpdate = latest && latest !== current
-            let downloadUrl: string
-            if (process.platform === 'linux') {
-              // Match the package manager to the distro: pacman on Arch-based,
-              // deb on Debian-based, AppImage as the universal fallback.
-              const isArchBased = fs.existsSync('/etc/arch-release') ||
-                                 fs.existsSync('/etc/cachyos-release') ||
-                                 fs.existsSync('/usr/bin/pacman')
-              const isDebBased = fs.existsSync('/etc/debian_version') ||
-                                 fs.existsSync('/usr/bin/dpkg')
-              if (isArchBased) {
-                downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow-${latest}-x86_64.pkg.tar.zst`
-              } else if (isDebBased) {
-                downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow_${latest}_amd64.deb`
-              } else {
-                // Use AppImage as universal Linux format (works on all distros)
-                downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-x86_64.AppImage`
-              }
-            } else if (process.platform === 'darwin') {
-              // macOS ships a single Apple Silicon (arm64) DMG.
-              downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-arm64.dmg`
-            } else {
-              downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-Setup.exe`
-            }
+            // Asset choice lives in updateAsset.ts (pure, tested); here we only probe
+            // the environment. On Linux without an installable asset (Arch, Fedora…)
+            // this is the releases page, which the renderer opens in the browser.
+            const isLinux = process.platform === 'linux'
+            const downloadUrl = pickUpdateTarget({
+              platform: process.platform,
+              version: latest,
+              isAppImage: isLinux && isRunningFromOwnAppImage({
+                appImage: process.env.APPIMAGE,
+                appDir: process.env.APPDIR,
+                execPath: process.execPath,
+              }),
+              isDebian: isLinux && fs.existsSync('/etc/debian_version'),
+            })
             resolve({ hasUpdate, latestVersion: latest, downloadUrl })
           } catch {
             resolve({ hasUpdate: false })
@@ -1533,11 +1523,10 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
     )
 
     if (process.platform === 'linux') {
-      // Detect package type from filename
-      const isPacman = dest.endsWith('.pkg.tar.zst') || dest.endsWith('.pacman')
-      const isDeb = dest.endsWith('.deb')
+      // Only .deb and .AppImage are published for Linux (see updateAsset.ts).
+      const kind = updateAssetKind(dest)
 
-      if (isDeb) {
+      if (kind === 'deb') {
         await new Promise<void>((resolve) => {
           const proc = spawn('pkexec', ['dpkg', '-i', dest], { stdio: 'ignore' })
           proc.on('error', () => {
@@ -1553,29 +1542,20 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
             resolve()
           })
         })
-      } else if (isPacman) {
-        await new Promise<void>((resolve) => {
-          const proc = spawn('pkexec', ['pacman', '-U', '--noconfirm', dest], { stdio: 'ignore' })
-          proc.on('error', () => {
-            // pkexec not available, fall back to xdg-open
-            shell.openPath(dest)
-            resolve()
-          })
-          proc.on('close', (code) => {
-            if (code === 0) {
-              app.relaunch()
-              app.quit()
-            }
-            resolve()
-          })
-        })
-      } else {
+      } else if (kind === 'appimage') {
         // AppImage: replace the running AppImage in place and relaunch.
         // process.env.APPIMAGE holds the absolute path of the AppImage the user
         // launched (set by the AppImage runtime). No root needed: it lives in the
-        // user's space.
+        // user's space. APPIMAGE is inherited by children of ANY AppImage, so only
+        // trust it when this process really runs from it — otherwise we would
+        // rename NoteFlow over another app's file.
         const appImagePath = process.env.APPIMAGE
-        if (appImagePath) {
+        const ownAppImage = isRunningFromOwnAppImage({
+          appImage: appImagePath,
+          appDir: process.env.APPDIR,
+          execPath: process.execPath,
+        })
+        if (appImagePath && ownAppImage) {
           try {
             const dir = path.dirname(appImagePath)
             const tmpTarget = path.join(dir, `.${path.basename(appImagePath)}.new`)
@@ -1593,9 +1573,13 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
             await shell.openPath(dest)
           }
         } else {
-          // Not running from an AppImage (dev / unusual packaging) — just open it.
+          // Not running from our own AppImage (dev / .deb launched from another
+          // AppImage / unusual packaging) — just open it.
           await shell.openPath(dest)
         }
+      } else {
+        // Not a Linux package (the allow-check still admits .exe/.dmg) — just open it.
+        await shell.openPath(dest)
       }
     } else if (process.platform === 'darwin') {
       // macOS: the build is not notarized, so we can't use Squirrel.Mac for a

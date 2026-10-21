@@ -1025,15 +1025,19 @@ Settings → Startup:
   "Installing…") y se actualiza **sin popups del SO ni cerrar/reabrir a mano**:
   - Windows: muestra la **barra de progreso nativa del instalador**, se cierra sola y se reabre ya
     actualizada — **sin el popup "cierra la aplicación" ni UAC** (instalador NSIS lanzado con
-    `--updated`, que omite ese prompt; ver detalle técnico en `.claude/context/release.md`).
-  - Linux (deb/pacman): pide la contraseña de root (diálogo del sistema — inevitable al instalar a
-    nivel de sistema) y se relanza.
-  - Linux (AppImage): se reemplaza a sí misma en su ubicación y se relanza.
+    `--updated`, que omite ese prompt).
+  - Linux, ejecutándose desde su **AppImage**: se reemplaza a sí misma en su ubicación y se relanza.
+  - Linux **Debian-based** (instalada con el `.deb`): instala el `.deb` nuevo — pide la contraseña de
+    root (diálogo del sistema, inevitable al instalar a nivel de sistema) y se relanza.
+  - Linux **Arch y otras distros** (sin paquete publicado para ellas): el botón **abre la página de
+    releases en el navegador** para descargar el AppImage a mano (sin aviso de error).
 - En Windows, la instalación queda cubierta por la barra de progreso nativa de NSIS. En Linux el
-  feedback durante la instalación es el propio diálogo de root (deb/pacman) o es casi instantáneo
+  feedback durante la instalación es el propio diálogo de root (deb) o es casi instantáneo
   (AppImage). Dentro de la app, el botón del TitleBar muestra `%` de descarga → spinner
   "Installing…" hasta que la ventana se cierra.
 - Descargas restringidas a hosts oficiales de GitHub (allowlist de seguridad).
+- Detalle técnico (elección del asset, allowlist, instalación por plataforma): `.claude/context/patterns.md`
+  § "Auto-update in-app".
 
 ---
 

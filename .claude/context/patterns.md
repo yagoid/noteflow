@@ -950,14 +950,27 @@ si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
 ### Auto-update in-app
 `app:check-update` consulta la última release (API GitHub, endpoint `/releases/latest` → **ignora
 prereleases**; compara con `latest !== current`, así que cualquier versión local distinta dispara
-el update — útil para probar el flujo bajando a una versión inferior a la publicada). En Linux
-elige el artefacto según la distro detectada: **Arch-based** (`/etc/arch-release`,
-`/etc/cachyos-release` o `/usr/bin/pacman`) → `.pkg.tar.zst`; **Debian-based**
-(`/etc/debian_version` o `/usr/bin/dpkg`) → `.deb`; resto → `.AppImage` (universal).
-En **macOS** elige `NoteFlow-${latest}-arm64.dmg` (solo Apple Silicon).
+el update — útil para probar el flujo bajando a una versión inferior a la publicada). La elección
+del artefacto es lógica pura en **`electron/updateAsset.ts`** (`pickUpdateTarget`, test en
+`tests/electron/updateAsset.test.ts`); `main.ts` solo sondea el entorno. Los nombres deben casar
+**exactamente** con los publicados (un nombre mal es un 404 y el bug viaja en la versión VIEJA, así que
+solo se arregla un release después): Windows `NoteFlow-${latest}-Setup.exe`, macOS
+`NoteFlow-${latest}-arm64.dmg` (solo Apple Silicon), y en Linux, por orden:
+1. Corre desde **su propio** AppImage (`isRunningFromOwnAppImage`: `$APPIMAGE` y `$APPDIR` definidos
+   **y** `process.execPath` dentro de `$APPDIR`, comparado por segmentos de ruta) →
+   `NoteFlow-${latest}.AppImage` (**sin** `-x86_64`). Gana sobre Debian: un AppImage en Ubuntu se
+   actualiza a sí mismo. `$APPIMAGE` solo **no basta**: el runtime lo exporta a todos los hijos, así
+   que un NoteFlow `.deb` lanzado desde otro AppImage (terminal, launcher) lo hereda.
+2. **Debian-based** (`/etc/debian_version`) → `noteflow_${latest}_amd64.deb`. **No** se usa
+   `/usr/bin/dpkg` como señal: en Arch puede estar instalado desde AUR y un `dpkg -i` ahí se salta pacman.
+3. Resto (Arch, Fedora, build desde fuentes…) → **URL de la página de releases**
+   (`RELEASES_PAGE_URL`). No hay paquete pacman/rpm publicado. Esa URL **no pasa la allowlist** a
+   propósito: `downloadAndInstall` devuelve `{ success: false }` y el renderer (TitleBar/AboutPanel) cae
+   a `openUrl(downloadUrl)` → se abre en el navegador, sin toast de error.
 `app:download-and-install` descarga el artefacto con una **allowlist estricta de hosts**
-(github.com + objects/release-assets de githubusercontent.com) y de extensiones (`.exe`, `.deb`,
-`.AppImage`, `.pkg.tar.zst`, `.dmg`), emite `update:download-progress` durante la descarga y
+(github.com + objects/release-assets de githubusercontent.com) y de ruta+extensión
+(`isAllowedUpdateAssetPath`: la ruta debe **empezar** por `/yagoid/noteflow/releases/` y acabar en
+`.exe`, `.deb`, `.appimage` o `.dmg`, todo **case-insensitive**), emite `update:download-progress` durante la descarga y
 `update:installing` al terminarla (la UI muestra un spinner "Installing…" en el botón del
 TitleBar), y luego instala **sin depender de popups del SO**:
 - **Windows:** `spawn(setup, ['--updated','--force-run'], {detached:true}).unref()` + `app.quit()`
@@ -969,12 +982,15 @@ TitleBar), y luego instala **sin depender de popups del SO**:
   de ventana hace hide-to-tray (no sale) — sin él, el instalador tendría que force-killear la app
   tras un retry. Decisión de diseño: se eligió `--updated` (con barra de progreso) sobre `/S`
   (totalmente silencioso) para dar feedback visual de la instalación.
-- **Linux deb/pacman:** `pkexec dpkg -i` / `pkexec pacman -U --noconfirm` (el diálogo de PolicyKit
-  pidiendo root es esperado e inevitable: instalar a nivel de sistema requiere elevación), con
-  fallback a `shell.openPath` si `pkexec` no está; al instalar hace `app.relaunch()` + `app.quit()`.
+- **Linux deb:** `pkexec dpkg -i` (el diálogo de PolicyKit pidiendo root es esperado e inevitable:
+  instalar a nivel de sistema requiere elevación), con fallback a `shell.openPath` si `pkexec` no
+  está; al instalar hace `app.relaunch()` + `app.quit()`. (La rama pacman se eliminó: nunca se ha
+  publicado un `.pkg.tar.zst`.) Cualquier otra extensión en Linux → `shell.openPath`.
 - **AppImage:** reemplazo en sitio — copia al dir de `$APPIMAGE`, `chmod +x`, **rename atómico**
   sobre el original (no sobreescribe el inodo en uso → no corrompe el proceso vivo) +
-  `app.relaunch({execPath})` + `quit()`. Sin `$APPIMAGE` (dev/empaquetado raro) cae a `shell.openPath`.
+  `app.relaunch({execPath})` + `quit()`. Solo si `isRunningFromOwnAppImage` (misma guarda que el
+  check): si no — dev, `.deb` lanzado desde otro AppImage con `$APPIMAGE` heredado, empaquetado raro —
+  cae a `shell.openPath` en vez de renombrar NoteFlow encima del fichero de otra app.
 - **macOS:** la build **no está notarizada**, así que no se usa Squirrel.Mac. Se hace
   `shell.openPath(dest)` para **abrir el `.dmg` en Finder** + una `Notification` "Drag NoteFlow to
   Applications"; el usuario arrastra a Applications y relanza a mano (la app NO sale). Reemplazo
@@ -984,9 +1000,13 @@ TitleBar), y luego instala **sin depender de popups del SO**:
 > en Apple Silicon real**): probado de momento solo a nivel de compilación/typecheck. macOS, además,
 > no se ha podido probar en runtime (sin Mac) — ver el bloque de soporte macOS más abajo.
 
+> **v2.0.0 y anteriores** construían mal la URL en AppImage (`-x86_64`) y en Arch (`.pkg.tar.zst`
+> inexistente): esos usuarios tienen que actualizar a mano una vez; el updater corregido solo ayuda
+> a partir del siguiente salto. Ver "Puntos conocidos para las notas de release" en `release.md`.
+
 `NOTEFLOW_NATIVE=1` (lo setea el wrapper
 del PKGBUILD) hace que la app trate la instalación nativa de Arch como `isPackaged` para rutas de
-iconos y modo no-dev.
+iconos y modo no-dev. El `PKGBUILD` está **roto/no soportado** ahora mismo (ver `release.md`).
 
 ### Soporte macOS (Apple Silicon) — añadido sin Mac para probar
 Decisiones (tomadas por no disponer de Mac → mínima superficie de riesgo): **sin firmar/notarizar**

@@ -59,6 +59,7 @@ const uiSettings_1 = require("./uiSettings");
 const importers = __importStar(require("./importers"));
 const migration_1 = require("./migration");
 const tempNoteExpiry_1 = require("./tempNoteExpiry");
+const updateAsset_1 = require("./updateAsset");
 const activityLog_1 = require("./activityLog");
 const i18n_1 = require("./i18n");
 function getIconPath() {
@@ -694,10 +695,7 @@ function parseHttpsUrl(rawUrl) {
 function isAllowedInitialUpdateUrl(url) {
     if (!ALLOWED_UPDATE_HOSTS.has(url.hostname))
         return false;
-    const pathname = url.pathname.toLowerCase();
-    if (!pathname.includes('/yagoid/noteflow/releases/'))
-        return false;
-    return pathname.endsWith('.exe') || pathname.endsWith('.deb') || pathname.endsWith('.AppImage') || pathname.endsWith('.pkg.tar.zst') || pathname.endsWith('.dmg');
+    return (0, updateAsset_1.isAllowedUpdateAssetPath)(url.pathname);
 }
 function isAllowedRedirectUpdateUrl(url) {
     return ALLOWED_UPDATE_REDIRECT_HOSTS.has(url.hostname);
@@ -1396,33 +1394,20 @@ electron_1.ipcMain.handle('app:check-update', () => {
                     const latest = json.tag_name?.replace(/^v/, '');
                     const current = electron_1.app.getVersion();
                     const hasUpdate = latest && latest !== current;
-                    let downloadUrl;
-                    if (process.platform === 'linux') {
-                        // Match the package manager to the distro: pacman on Arch-based,
-                        // deb on Debian-based, AppImage as the universal fallback.
-                        const isArchBased = fs_1.default.existsSync('/etc/arch-release') ||
-                            fs_1.default.existsSync('/etc/cachyos-release') ||
-                            fs_1.default.existsSync('/usr/bin/pacman');
-                        const isDebBased = fs_1.default.existsSync('/etc/debian_version') ||
-                            fs_1.default.existsSync('/usr/bin/dpkg');
-                        if (isArchBased) {
-                            downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow-${latest}-x86_64.pkg.tar.zst`;
-                        }
-                        else if (isDebBased) {
-                            downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow_${latest}_amd64.deb`;
-                        }
-                        else {
-                            // Use AppImage as universal Linux format (works on all distros)
-                            downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-x86_64.AppImage`;
-                        }
-                    }
-                    else if (process.platform === 'darwin') {
-                        // macOS ships a single Apple Silicon (arm64) DMG.
-                        downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-arm64.dmg`;
-                    }
-                    else {
-                        downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-Setup.exe`;
-                    }
+                    // Asset choice lives in updateAsset.ts (pure, tested); here we only probe
+                    // the environment. On Linux without an installable asset (Arch, Fedora…)
+                    // this is the releases page, which the renderer opens in the browser.
+                    const isLinux = process.platform === 'linux';
+                    const downloadUrl = (0, updateAsset_1.pickUpdateTarget)({
+                        platform: process.platform,
+                        version: latest,
+                        isAppImage: isLinux && (0, updateAsset_1.isRunningFromOwnAppImage)({
+                            appImage: process.env.APPIMAGE,
+                            appDir: process.env.APPDIR,
+                            execPath: process.execPath,
+                        }),
+                        isDebian: isLinux && fs_1.default.existsSync('/etc/debian_version'),
+                    });
                     resolve({ hasUpdate, latestVersion: latest, downloadUrl });
                 }
                 catch {
@@ -1485,10 +1470,9 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
         // instantaneous on Windows, so we can't derive this from the 100% progress.)
         electron_1.BrowserWindow.getAllWindows().forEach(w => w.webContents.send('update:installing'));
         if (process.platform === 'linux') {
-            // Detect package type from filename
-            const isPacman = dest.endsWith('.pkg.tar.zst') || dest.endsWith('.pacman');
-            const isDeb = dest.endsWith('.deb');
-            if (isDeb) {
+            // Only .deb and .AppImage are published for Linux (see updateAsset.ts).
+            const kind = (0, updateAsset_1.updateAssetKind)(dest);
+            if (kind === 'deb') {
                 await new Promise((resolve) => {
                     const proc = (0, child_process_1.spawn)('pkexec', ['dpkg', '-i', dest], { stdio: 'ignore' });
                     proc.on('error', () => {
@@ -1505,30 +1489,20 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
                     });
                 });
             }
-            else if (isPacman) {
-                await new Promise((resolve) => {
-                    const proc = (0, child_process_1.spawn)('pkexec', ['pacman', '-U', '--noconfirm', dest], { stdio: 'ignore' });
-                    proc.on('error', () => {
-                        // pkexec not available, fall back to xdg-open
-                        electron_1.shell.openPath(dest);
-                        resolve();
-                    });
-                    proc.on('close', (code) => {
-                        if (code === 0) {
-                            electron_1.app.relaunch();
-                            electron_1.app.quit();
-                        }
-                        resolve();
-                    });
-                });
-            }
-            else {
+            else if (kind === 'appimage') {
                 // AppImage: replace the running AppImage in place and relaunch.
                 // process.env.APPIMAGE holds the absolute path of the AppImage the user
                 // launched (set by the AppImage runtime). No root needed: it lives in the
-                // user's space.
+                // user's space. APPIMAGE is inherited by children of ANY AppImage, so only
+                // trust it when this process really runs from it — otherwise we would
+                // rename NoteFlow over another app's file.
                 const appImagePath = process.env.APPIMAGE;
-                if (appImagePath) {
+                const ownAppImage = (0, updateAsset_1.isRunningFromOwnAppImage)({
+                    appImage: appImagePath,
+                    appDir: process.env.APPDIR,
+                    execPath: process.execPath,
+                });
+                if (appImagePath && ownAppImage) {
                     try {
                         const dir = path_1.default.dirname(appImagePath);
                         const tmpTarget = path_1.default.join(dir, `.${path_1.default.basename(appImagePath)}.new`);
@@ -1548,9 +1522,14 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
                     }
                 }
                 else {
-                    // Not running from an AppImage (dev / unusual packaging) — just open it.
+                    // Not running from our own AppImage (dev / .deb launched from another
+                    // AppImage / unusual packaging) — just open it.
                     await electron_1.shell.openPath(dest);
                 }
+            }
+            else {
+                // Not a Linux package (the allow-check still admits .exe/.dmg) — just open it.
+                await electron_1.shell.openPath(dest);
             }
         }
         else if (process.platform === 'darwin') {
