@@ -350,6 +350,8 @@ export const settings = {
     checking: 'Comprobando…',
     upToDate: 'Actualizado',
     checkForUpdates: 'Buscar actualizaciones',
+    checkFailed: 'No se pudo buscar actualizaciones',
+    checkFailedHint: 'Revisa tu conexión e inténtalo de nuevo.',
     installing: 'Instalando…',
     downloading: 'Descargando…',
     updateTo: 'Actualizar a v{version}',

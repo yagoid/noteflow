@@ -462,7 +462,8 @@ declare global {
       getTemplates: () => Promise<NoteTemplate[]>
       setTemplates: (templates: NoteTemplate[]) => Promise<void>
       getAppVersion: () => Promise<string>
-      checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }>
+      /** `error`: the check failed (offline/timeout/bad answer) — it does NOT mean "up to date". */
+      checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string; error?: true }>
       openUrl: (url: string) => Promise<void>
       downloadAndInstall: (url: string) => Promise<{ success: boolean; error?: string }>
       onUpdateProgress: (callback: (percent: number) => void) => () => void

@@ -1395,21 +1395,20 @@ electron_1.ipcMain.handle('app:open-notes-folder', () => electron_1.shell.openPa
 electron_1.ipcMain.handle('app:get-version', () => electron_1.app.getVersion());
 electron_1.ipcMain.handle('app:check-update', () => {
     // if (!app.isPackaged) return { hasUpdate: false }
+    // A failed check (offline, timeout, rate limit, bad answer) resolves
+    // UPDATE_CHECK_FAILED — never a bare {hasUpdate:false}, which the UI would
+    // show as "Up to date".
     return new Promise((resolve) => {
         const req = https_1.default.get('https://api.github.com/repos/yagoid/noteflow/releases/latest', { headers: { 'User-Agent': 'NoteFlow-App' } }, (res) => {
             let data = '';
             res.on('data', (chunk) => (data += chunk));
             res.on('end', () => {
                 try {
-                    const json = JSON.parse(data);
-                    const latest = json.tag_name?.replace(/^v/, '');
-                    const current = electron_1.app.getVersion();
-                    const hasUpdate = latest && latest !== current;
-                    // Asset choice lives in updateAsset.ts (pure, tested); here we only probe
-                    // the environment. On Linux without an installable asset (Arch, Fedora…)
-                    // this is the releases page, which the renderer opens in the browser.
+                    // Result shape + asset choice live in updateAsset.ts (pure, tested); here
+                    // we only probe the environment. On Linux without an installable asset
+                    // (Arch, Fedora…) the URL is the releases page, opened in the browser.
                     const isLinux = process.platform === 'linux';
-                    const downloadUrl = (0, updateAsset_1.pickUpdateTarget)({
+                    resolve((0, updateAsset_1.buildUpdateCheckResult)(res.statusCode, data, electron_1.app.getVersion(), (latest) => (0, updateAsset_1.pickUpdateTarget)({
                         platform: process.platform,
                         version: latest,
                         isAppImage: isLinux && (0, updateAsset_1.isRunningFromOwnAppImage)({
@@ -1418,16 +1417,15 @@ electron_1.ipcMain.handle('app:check-update', () => {
                             execPath: process.execPath,
                         }),
                         isDebian: isLinux && fs_1.default.existsSync('/etc/debian_version'),
-                    });
-                    resolve({ hasUpdate, latestVersion: latest, downloadUrl });
+                    })));
                 }
                 catch {
-                    resolve({ hasUpdate: false });
+                    resolve(updateAsset_1.UPDATE_CHECK_FAILED);
                 }
             });
         });
-        req.on('error', () => resolve({ hasUpdate: false }));
-        req.setTimeout(8000, () => { req.destroy(); resolve({ hasUpdate: false }); });
+        req.on('error', () => resolve(updateAsset_1.UPDATE_CHECK_FAILED));
+        req.setTimeout(8000, () => { req.destroy(); resolve(updateAsset_1.UPDATE_CHECK_FAILED); });
     });
 });
 electron_1.ipcMain.handle('app:open-url', (_event, rawUrl) => {

@@ -252,7 +252,7 @@ Renderer (React)
 | `app:choose-notes-dir` | handle | Diálogo para elegir carpeta |
 | `app:get-login-item` / `app:set-login-item` | handle | Autostart al login (gestiona `.desktop` propio en Linux) |
 | `app:get-version` | handle | Versión actual de la app (`app.getVersion()`) — la usa el panel About |
-| `app:check-update` | handle | Consulta la última release en la API de GitHub |
+| `app:check-update` | handle | Consulta la última release en la API de GitHub → `{hasUpdate, latestVersion?, downloadUrl?, error?}` (`error: true` = el chequeo falló, no "al día") |
 | `app:download-and-install` | handle | Descarga el instalador (allowlist de hosts) e instala; emite progreso |
 | `app:open-url` | handle | Abre URL externa (solo https, validada) |
 | `settings:get-theme` / `settings:set-theme` | on (sync/async) | Tema en settings.json (sendSync para leer) — hoy es dual-write legacy: la fuente sincronizada del tema es `ui-settings.json` |

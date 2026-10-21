@@ -46,7 +46,15 @@ import { sanitizeUiSettings, mergeUiSettings, type UiSettings } from './uiSettin
 import * as importers from './importers'
 import { migrateNotesDirToV2 } from './migration'
 import { shouldRunExpiryCheck, type ExpiryTrigger, type SyncBackendId } from './tempNoteExpiry'
-import { pickUpdateTarget, isAllowedUpdateAssetPath, updateAssetKind, isRunningFromOwnAppImage } from './updateAsset'
+import {
+  pickUpdateTarget,
+  isAllowedUpdateAssetPath,
+  updateAssetKind,
+  isRunningFromOwnAppImage,
+  buildUpdateCheckResult,
+  UPDATE_CHECK_FAILED,
+  type UpdateCheckResult,
+} from './updateAsset'
 import {
   parseActivityLog,
   pruneActivityLog,
@@ -1439,7 +1447,10 @@ ipcMain.handle('app:get-version', () => app.getVersion())
 
 ipcMain.handle('app:check-update', () => {
   // if (!app.isPackaged) return { hasUpdate: false }
-  return new Promise((resolve) => {
+  // A failed check (offline, timeout, rate limit, bad answer) resolves
+  // UPDATE_CHECK_FAILED — never a bare {hasUpdate:false}, which the UI would
+  // show as "Up to date".
+  return new Promise<UpdateCheckResult>((resolve) => {
     const req = https.get(
       'https://api.github.com/repos/yagoid/noteflow/releases/latest',
       { headers: { 'User-Agent': 'NoteFlow-App' } },
@@ -1448,33 +1459,30 @@ ipcMain.handle('app:check-update', () => {
         res.on('data', (chunk) => (data += chunk))
         res.on('end', () => {
           try {
-            const json = JSON.parse(data)
-            const latest = json.tag_name?.replace(/^v/, '')
-            const current = app.getVersion()
-            const hasUpdate = latest && latest !== current
-            // Asset choice lives in updateAsset.ts (pure, tested); here we only probe
-            // the environment. On Linux without an installable asset (Arch, Fedora…)
-            // this is the releases page, which the renderer opens in the browser.
+            // Result shape + asset choice live in updateAsset.ts (pure, tested); here
+            // we only probe the environment. On Linux without an installable asset
+            // (Arch, Fedora…) the URL is the releases page, opened in the browser.
             const isLinux = process.platform === 'linux'
-            const downloadUrl = pickUpdateTarget({
-              platform: process.platform,
-              version: latest,
-              isAppImage: isLinux && isRunningFromOwnAppImage({
-                appImage: process.env.APPIMAGE,
-                appDir: process.env.APPDIR,
-                execPath: process.execPath,
-              }),
-              isDebian: isLinux && fs.existsSync('/etc/debian_version'),
-            })
-            resolve({ hasUpdate, latestVersion: latest, downloadUrl })
+            resolve(buildUpdateCheckResult(res.statusCode, data, app.getVersion(), (latest) =>
+              pickUpdateTarget({
+                platform: process.platform,
+                version: latest,
+                isAppImage: isLinux && isRunningFromOwnAppImage({
+                  appImage: process.env.APPIMAGE,
+                  appDir: process.env.APPDIR,
+                  execPath: process.execPath,
+                }),
+                isDebian: isLinux && fs.existsSync('/etc/debian_version'),
+              })
+            ))
           } catch {
-            resolve({ hasUpdate: false })
+            resolve(UPDATE_CHECK_FAILED)
           }
         })
       }
     )
-    req.on('error', () => resolve({ hasUpdate: false }))
-    req.setTimeout(8000, () => { req.destroy(); resolve({ hasUpdate: false }) })
+    req.on('error', () => resolve(UPDATE_CHECK_FAILED))
+    req.setTimeout(8000, () => { req.destroy(); resolve(UPDATE_CHECK_FAILED) })
   })
 })
 

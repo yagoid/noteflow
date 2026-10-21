@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, Download, ExternalLink, Github, RefreshCw } from 'lucide-react'
+import { AlertCircle, Check, Download, ExternalLink, Github, RefreshCw } from 'lucide-react'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { SectionTitle, settingsButtonClass } from './ui'
@@ -9,6 +9,8 @@ export function AboutPanel() {
   const [version, setVersion] = useState<string>('')
   const [checking, setChecking] = useState(false)
   const [upToDate, setUpToDate] = useState(false)
+  // The last check failed (offline/timeout): NOT "up to date". Cleared by the next click.
+  const [checkFailed, setCheckFailed] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; downloadUrl: string } | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -28,8 +30,11 @@ export function AboutPanel() {
     if (checking) return
     setChecking(true)
     setUpToDate(false)
+    setCheckFailed(false)
     const result = await window.noteflow.checkUpdate()
-    if (result.hasUpdate && result.latestVersion && result.downloadUrl) {
+    if (result.error) {
+      setCheckFailed(true)
+    } else if (result.hasUpdate && result.latestVersion && result.downloadUrl) {
       setUpdateInfo({ latestVersion: result.latestVersion, downloadUrl: result.downloadUrl })
     } else {
       setUpToDate(true)
@@ -76,8 +81,16 @@ export function AboutPanel() {
               ? <RefreshCw size={13} className="animate-spin text-text-muted" />
               : upToDate
               ? <Check size={13} className="text-green-400" />
+              : checkFailed
+              ? <AlertCircle size={13} className="text-red" />
               : <RefreshCw size={13} className="text-text-muted" />}
-            {checking ? t.settings.about.checking : upToDate ? t.settings.about.upToDate : t.settings.about.checkForUpdates}
+            {checking
+              ? t.settings.about.checking
+              : upToDate
+              ? t.settings.about.upToDate
+              : checkFailed
+              ? t.settings.about.checkFailed
+              : t.settings.about.checkForUpdates}
           </button>
           {updateInfo && (
             <button
@@ -104,6 +117,11 @@ export function AboutPanel() {
             </button>
           )}
         </div>
+        {checkFailed && !checking && (
+          <p role="status" className="text-[11px] font-mono text-text-muted mt-2">
+            {t.settings.about.checkFailedHint}
+          </p>
+        )}
       </section>
 
       {/* Links */}

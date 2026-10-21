@@ -28,11 +28,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RELEASES_PAGE_URL = void 0;
+exports.UPDATE_CHECK_FAILED = exports.RELEASES_PAGE_URL = void 0;
 exports.isRunningFromOwnAppImage = isRunningFromOwnAppImage;
 exports.pickUpdateTarget = pickUpdateTarget;
 exports.updateAssetKind = updateAssetKind;
 exports.isAllowedUpdateAssetPath = isAllowedUpdateAssetPath;
+exports.buildUpdateCheckResult = buildUpdateCheckResult;
 const path_1 = __importDefault(require("path"));
 const REPO_PATH = '/yagoid/noteflow/releases/';
 const DOWNLOAD_BASE = 'https://github.com/yagoid/noteflow/releases/latest/download';
@@ -97,4 +98,31 @@ function isAllowedUpdateAssetPath(pathname) {
     if (!pathname.toLowerCase().startsWith(REPO_PATH))
         return false;
     return updateAssetKind(pathname) !== null;
+}
+exports.UPDATE_CHECK_FAILED = { hasUpdate: false, error: true };
+/**
+ * Builds the app:check-update answer from GitHub's /releases/latest response.
+ * `pickTarget` maps the latest version to the download URL (pickUpdateTarget
+ * with the probed environment). Any non-2xx status, unparseable body or missing
+ * tag_name is a failed check, never "up to date".
+ */
+function buildUpdateCheckResult(statusCode, body, currentVersion, pickTarget) {
+    if (!statusCode || statusCode < 200 || statusCode >= 300)
+        return exports.UPDATE_CHECK_FAILED;
+    let json;
+    try {
+        json = JSON.parse(body);
+    }
+    catch {
+        return exports.UPDATE_CHECK_FAILED;
+    }
+    const tag = json?.tag_name;
+    if (typeof tag !== 'string' || !tag.trim())
+        return exports.UPDATE_CHECK_FAILED;
+    const latestVersion = tag.trim().replace(/^v/, '');
+    return {
+        hasUpdate: latestVersion !== currentVersion,
+        latestVersion,
+        downloadUrl: pickTarget(latestVersion),
+    };
 }

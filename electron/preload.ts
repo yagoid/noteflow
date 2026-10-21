@@ -112,7 +112,8 @@ const api = {
 
   // Updates
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:get-version'),
-  checkUpdate: (): Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }> =>
+  // error: the check itself failed (offline/timeout/bad answer) — not "up to date".
+  checkUpdate: (): Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string; error?: true }> =>
     ipcRenderer.invoke('app:check-update'),
   openUrl: (url: string): Promise<void> =>
     ipcRenderer.invoke('app:open-url', url),

@@ -422,6 +422,9 @@ export const settings = {
     checking: 'Checking…',
     upToDate: 'Up to date',
     checkForUpdates: 'Check for updates',
+    // The check itself failed (offline, timeout…) — the button stays clickable to retry.
+    checkFailed: "Couldn't check for updates",
+    checkFailedHint: 'Check your connection and try again.',
     installing: 'Installing…',
     downloading: 'Downloading…',
     updateTo: 'Update to v{version}',
