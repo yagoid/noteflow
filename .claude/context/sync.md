@@ -112,6 +112,14 @@ muestra un error ("Some remote changes could not be applied…") aunque un push 
 `cloud_upsert_file`, que rechaza ("stale") una versión más vieja que la del servidor; el ciclo de
 Cloud hace **pull (y emite su resultado) antes de drenar el journal**. Detalle (stale/force, metadatos, cambio de cuenta)
 en `monetization.md` § 4 "Subidas condicionadas".
+📌 **Copias de conflicto (solo Cloud):** cuando el pull de Cloud va a sobrescribir (ancla remota más
+nueva, o una sección remota suelta) o borrar (tombstone `'lost'`) una carpeta con una edición local
+**apuntada en el journal** que difiere de la versión del servidor, antes guarda la versión local
+como **nota nueva** ("<título> (conflict copy fecha)") y avisa en la tarjeta del botón de sync. Por
+eso, con Cloud, las ediciones hechas con la **puerta de push cerrada** se apuntan en el journal (sin
+subirse) en lugar de descartarse; en GitHub la puerta sigue sin apuntar nada. El GitHub Sync **no**
+hace copias: sigue siendo LWW puro por carpeta. Residuales (Cloud desactivado, CLI, formato YAML,
+alarmas duplicadas…) y detalle en `monetization.md` § 4 "Subidas condicionadas" → "Copias de conflicto".
 
 **El CLI** (`cli/noteflow.js`) tiene su propio cliente Cloud headless (`noteflow cloud …`, con
 sesión y cursor propios en `settings.cliAccount`/`cliCloud`, y la misma prioridad Cloud > GitHub):

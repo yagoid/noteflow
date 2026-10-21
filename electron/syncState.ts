@@ -32,6 +32,15 @@ export interface SyncJournalOp {
    * re-records and failed attempts so a failed forced push is retried forced.
    */
   force?: true
+  /**
+   * NoteFlow Cloud only: the pull already preserved the local content of this
+   * pending upsert as a CONFLICT COPY (a new note folder) before applying a
+   * newer remote version of its folder over it (or deleting it). Set on every
+   * pending upsert under the folder (journalMarkDirConflictCopied) so a retry
+   * of a half-failed apply does not make a second identical copy; a new local
+   * edit re-records the op and clears it (that edit is new content).
+   */
+  conflictCopied?: true
 }
 
 /** Options of journalRecord — only NoteFlow Cloud passes them. */
@@ -94,6 +103,7 @@ export function parseSyncState(raw: string | null | undefined): SyncState {
       // Cloud-only upsert flags: kept only in their exact `true` form.
       if (op.op === 'upsert' && entry.stale === true) op.stale = true
       if (op.op === 'upsert' && entry.force === true) op.force = true
+      if (op.op === 'upsert' && entry.conflictCopied === true) op.conflictCopied = true
       state.ops[key] = op
     }
   }
@@ -118,7 +128,8 @@ export function serializeSyncState(state: SyncState): string {
  * Records a pending remote mutation. Re-recording the SAME op for a key keeps
  * queuedAt/attempts (e.g. a debounce timer being re-armed while typing); for an
  * upsert it also clears `stale` (a new local edit — its upload deserves a new
- * conditional attempt) and adds `force` when asked, but never drops an
+ * conditional attempt) and `conflictCopied` (the new content was never copied)
+ * and adds `force` when asked, but never drops an
  * existing `force`. A DIFFERENT op replaces the entry (e.g. a delete
  * supersedes a pending upsert of the same file). Recording a 'deleteDir' also
  * drops every file-level op under '<dir>/' — those files are going away with
@@ -147,6 +158,10 @@ export function journalRecord(
   if (existing && existing.op === op) {
     if (existing.stale) {
       delete existing.stale
+      changed = true
+    }
+    if (existing.conflictCopied) {
+      delete existing.conflictCopied
       changed = true
     }
     if (force && !existing.force) {
@@ -223,6 +238,38 @@ export function journalMarkDirStale(state: SyncState, dir: string): boolean {
 }
 
 /**
+ * NoteFlow Cloud: flags EVERY pending upsert under '<dir>/' as
+ * `conflictCopied` — the pull has just written a conflict copy holding their
+ * local content (see SyncJournalOp.conflictCopied). Persisted right after the
+ * copy is written and BEFORE the folder is overwritten/deleted.
+ */
+export function journalMarkDirConflictCopied(state: SyncState, dir: string): boolean {
+  const prefix = `${dir}/`
+  let changed = false
+  for (const [key, entry] of Object.entries(state.ops)) {
+    if (entry.op === 'upsert' && key.startsWith(prefix) && !entry.conflictCopied) {
+      entry.conflictCopied = true
+      changed = true
+    }
+  }
+  return changed
+}
+
+/**
+ * NoteFlow Cloud pull: the pending upserts under '<dir>/' (stale or not) whose
+ * local content has NOT been preserved as a conflict copy yet — the candidates
+ * planConflictCopy (cloudSyncLogic.ts) compares against the server's version.
+ */
+export function conflictCopyCandidates(state: SyncState, dir: string): string[] {
+  const prefix = `${dir}/`
+  const out: string[] = []
+  for (const [key, entry] of Object.entries(state.ops)) {
+    if (entry.op === 'upsert' && key.startsWith(prefix) && !entry.conflictCopied) out.push(key)
+  }
+  return out
+}
+
+/**
  * NoteFlow Cloud pull: what to do with a remote ANCHOR TOMBSTONE of a folder
  * that exists locally, given its pending upserts:
  *   - 'none'  → nothing pending: the usual deletion rule (updated <= lastSync);
@@ -236,10 +283,11 @@ export function journalMarkDirStale(state: SyncState, dir: string): boolean {
  *               updated_at is the deletion time): complete the stale ops and
  *               delete locally (LWW; the local copy is a known-lost version).
  *               The timestamp check is required because the journal does not
- *               see every local edit: edits made while the push gate is closed
- *               (before the first pull, keys locked, Cloud disabled) or by the
- *               CLI are never journaled — a local `updated` newer than the
- *               deletion is such an edit, so it is kept ('keep').
+ *               see every local edit: edits made while Cloud is disabled or by
+ *               the CLI are never journaled by the app (edits made while the
+ *               push gate is closed — before the first pull, keys locked — ARE
+ *               journaled, see planLocalPush) — a local `updated` newer than
+ *               the deletion is such an edit, so it is kept ('keep').
  *               Unknown local `updated` (null) → 'keep' (never delete blind).
  */
 export type AnchorTombstoneAction = 'none' | 'keep' | 'lost'

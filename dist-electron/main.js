@@ -1310,8 +1310,9 @@ function applyNoteWrite(payload, senderId, opts) {
     // `lastSync` on each completion, so a freshly AI-created note that hasn't been
     // pushed yet would be seen as `updated <= lastSync` by a racing auto-sync pull
     // and DELETED from disk — the same failure the bulk-import path guards against
-    // with pushPathsNow. (No-op while the push gate is closed; flushPendingLocalChanges
-    // re-pushes after the first successful pull.)
+    // with pushPathsNow. (While the push gate is closed nothing is sent —
+    // GitHub: flushPendingLocalChanges re-pushes after the first successful pull;
+    // Cloud also journals the paths so its first pull sees them as pending.)
     if (opts?.durablePush) {
         if (!connected)
             return Promise.resolve();
@@ -2016,6 +2017,13 @@ electron_1.ipcMain.handle('cloud:unlock', async (_event, secret) => {
 });
 electron_1.ipcMain.handle('cloud:lock', () => {
     cloudKeys.lockCloudKeys();
+    emitCloudStatusChanged();
+    return { ok: true };
+});
+// Dismisses the "kept as conflict copies" notice of the titlebar sync card
+// (session-only state in cloudSync — the copies themselves stay as notes).
+electron_1.ipcMain.handle('cloud:dismiss-conflict-copies', () => {
+    cloudSync.dismissConflictCopies();
     emitCloudStatusChanged();
     return { ok: true };
 });
@@ -3406,6 +3414,8 @@ electron_1.app.whenReady().then(async () => {
     cloudKeys.initCloudKeys();
     cloudSync.initCloudSync(NOTES_DIR);
     cloudSync.onStatusChanged(() => emitCloudStatusChanged());
+    // Title suffix of the conflict copies the pull makes, in the live UI language.
+    cloudSync.setConflictCopyLabel(() => mainMessages().sync.conflictCopy);
     const cloudEnabled = cloudSync.isCloudSyncEnabled();
     // NoteFlow account: load the persisted session and refresh entitlements in
     // the background (deferred inside initAccount — never blocks boot).

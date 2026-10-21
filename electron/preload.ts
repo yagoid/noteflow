@@ -169,7 +169,12 @@ const api = {
     history?: Array<{ at: string; files: number; ok: boolean }>
     filesToday?: number
     github?: { owner?: string; repo?: string }
-    cloud?: { keysState: 'unlocked' | 'locked' | 'no-keys'; keysMode: 'managed' | 'e2ee' | null; realtimeConnected: boolean }
+    cloud?: {
+      keysState: 'unlocked' | 'locked' | 'no-keys'
+      keysMode: 'managed' | 'e2ee' | null
+      realtimeConnected: boolean
+      conflictCopies?: { count: number; titles: string[]; at: string }
+    }
   }> => ipcRenderer.invoke('sync:get-active-status'),
   initiateGitHubAuth: (
     repo: string
@@ -312,6 +317,8 @@ const api = {
   // have switched it); main broadcasts cloud:status-changed when it changed.
   cloudRefreshKeysMode: (): Promise<{ changed: boolean }> => ipcRenderer.invoke('cloud:refresh-keys-mode'),
   cloudLock: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:lock'),
+  // Clears the session notice of conflict copies made by the pull (sync status card).
+  cloudDismissConflictCopies: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:dismiss-conflict-copies'),
   cloudEnable: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('cloud:enable'),
   cloudDisable: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:disable'),
   cloudPull: (): Promise<{

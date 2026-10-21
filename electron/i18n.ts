@@ -5,7 +5,8 @@
 // these are resolved at call-time from the persisted `language` setting (see
 // `mainMessages()` in main.ts) so they follow the same live-switch behaviour as
 // the renderer. Alarm notifications carry only user content (note title + task
-// text), so there is nothing to translate there.
+// text), so there is nothing to translate there. The sync engine also takes the
+// label of the conflict copies it creates from here (injected by main.ts).
 
 export type Lang = 'en' | 'es'
 export type LanguageSetting = Lang | 'system'
@@ -49,11 +50,18 @@ export interface ChatErrorMessages {
   managedServiceUnavailable: string
 }
 
+export interface SyncMessages {
+  // Suffix of the title of a conflict copy made by the NoteFlow Cloud pull:
+  // '<title> (<conflictCopy> YYYY-MM-DD HH:mm)'.
+  conflictCopy: string
+}
+
 export interface Messages {
   tray: TrayMessages
   notifications: NotificationMessages
   dialogs: DialogMessages
   chatErrors: ChatErrorMessages
+  sync: SyncMessages
 }
 
 const en: Messages = {
@@ -89,6 +97,9 @@ const en: Messages = {
     managedOffline: "Couldn't reach NoteFlow AI. Check your internet connection and try again.",
     managedKeychainLocked: "Couldn't unlock your saved NoteFlow session — your system keychain may be locked. Unlock it and try again.",
     managedServiceUnavailable: 'The NoteFlow account service is temporarily unavailable. Please try again in a moment.',
+  },
+  sync: {
+    conflictCopy: 'conflict copy',
   },
 }
 
@@ -126,6 +137,9 @@ const es: Messages = {
     managedOffline: 'No se pudo conectar con NoteFlow AI. Comprueba tu conexión a internet e inténtalo de nuevo.',
     managedKeychainLocked: 'No se pudo desbloquear tu sesión de NoteFlow guardada — puede que el llavero del sistema esté bloqueado. Desbloquéalo e inténtalo de nuevo.',
     managedServiceUnavailable: 'El servicio de cuentas de NoteFlow no está disponible en este momento. Inténtalo de nuevo en un momento.',
+  },
+  sync: {
+    conflictCopy: 'copia en conflicto',
   },
 }
 

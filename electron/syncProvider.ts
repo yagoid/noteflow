@@ -139,6 +139,8 @@ export interface ActiveSyncStatus {
     keysState: cloudSync.CloudSyncStatus['keysState']
     keysMode: cloudSync.CloudSyncStatus['keysMode']
     realtimeConnected: boolean
+    /** Session notice of the conflict copies made by the pull (until dismissed). */
+    conflictCopies?: cloudSync.ConflictCopiesNotice
   }
 }
 
@@ -156,7 +158,12 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       autoSyncIntervalMs: cloudSync.CLOUD_AUTO_SYNC_INTERVAL_MS,
       history: cloudSync.getSyncHistory(),
       filesToday: cloudSync.getSyncFilesToday(),
-      cloud: { keysState: c.keysState, keysMode: c.keysMode, realtimeConnected: c.realtimeConnected },
+      cloud: {
+        keysState: c.keysState,
+        keysMode: c.keysMode,
+        realtimeConnected: c.realtimeConnected,
+        conflictCopies: c.conflictCopies,
+      },
     }
   }
   const g = githubSync.getSyncStatus()

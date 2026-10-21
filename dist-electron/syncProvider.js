@@ -102,7 +102,12 @@ function getActiveSyncStatus(pendingUploads) {
             autoSyncIntervalMs: cloudSync.CLOUD_AUTO_SYNC_INTERVAL_MS,
             history: cloudSync.getSyncHistory(),
             filesToday: cloudSync.getSyncFilesToday(),
-            cloud: { keysState: c.keysState, keysMode: c.keysMode, realtimeConnected: c.realtimeConnected },
+            cloud: {
+                keysState: c.keysState,
+                keysMode: c.keysMode,
+                realtimeConnected: c.realtimeConnected,
+                conflictCopies: c.conflictCopies,
+            },
         };
     }
     const g = githubSync.getSyncStatus();

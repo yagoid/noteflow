@@ -43,8 +43,14 @@ exports.countDroppedRetries = countDroppedRetries;
 exports.shouldResetCloudState = shouldResetCloudState;
 exports.isMergeableMetadata = isMergeableMetadata;
 exports.mergeMetadataById = mergeMetadataById;
+exports.metadataPendingForPull = metadataPendingForPull;
 exports.planMetadataPull = planMetadataPull;
 exports.planRemoteDelete = planRemoteDelete;
+exports.planLocalPush = planLocalPush;
+exports.planConflictCopy = planConflictCopy;
+exports.anchorTitle = anchorTitle;
+exports.conflictCopyTitle = conflictCopyTitle;
+exports.buildConflictCopy = buildConflictCopy;
 const js_yaml_1 = __importDefault(require("js-yaml"));
 const noteFormat_1 = require("./noteFormat");
 const cloudCrypto_1 = require("./cloudCrypto");
@@ -505,6 +511,21 @@ function mergeMetadataById(localJson, remoteJson, prefer) {
     return JSON.stringify(merged, null, 2);
 }
 /**
+ * Whether the pull treats a root metadata file as an UNSYNCED LOCAL EDIT
+ * (planMetadataPull's `pendingUpsert`). Never on the first pull of a device or
+ * account (`firstPull`): a pending op there may be a gate-closed journal entry
+ * (fresh device with e2ee locked, a restart after a failed first sync, the
+ * boot-time ui-settings seed, an account switch) — honoring it would keep the
+ * local file and the first-sync catch-up would push it over the account's copy
+ * (account A's ui-settings/note-order into account B). The first pull keeps
+ * its documented rule instead: backup, then remote wins / union preferring
+ * remote; the op is settled and the catch-up uploads what ended on disk.
+ * Mirror: metadataPendingForPull in cli/noteflow.js.
+ */
+function metadataPendingForPull(pendingUpsert, firstPull) {
+    return pendingUpsert && !firstPull;
+}
+/**
  * Pull decision for a root metadata file (remote content vs the local file):
  *   - identical → keep;
  *   - pending local upsert (an unsynced local edit — the pull runs BEFORE the
@@ -569,4 +590,130 @@ function planRemoteDelete(s) {
     // 403 from RLS: no active entitlement server-side. Only a verified local view
     // may fall through to the physical DELETE (a stale verified `true` included).
     return s.verified ? 'delete' : 'defer';
+}
+function planLocalPush(s) {
+    if (!s.enabled || !s.configured)
+        return 'ignore';
+    return s.initialPullStatus === 'ok' ? 'push' : 'journal';
+}
+// ── Conflict copies (offline edit vs a newer remote version) ──────────────────
+// The pull is last-writer-wins per note folder. When it is about to overwrite
+// (newer remote anchor, applied wholesale) or delete (anchor tombstone over a
+// known-lost version) a folder that still holds a local edit the server never
+// accepted (a pending upsert in the journal), that edit would vanish silently
+// everywhere. Instead the LOCAL version is first kept as a conflict copy — a
+// new note folder with a new id — and the pull then proceeds as before.
+// Mirror: planConflictCopy / buildConflictCopy in cli/noteflow.js.
+/** note.md minus its top-level `updated:` line (every save rewrites it). */
+function anchorWithoutUpdated(content) {
+    return content.replace(/\r\n/g, '\n').replace(/^updated:[^\n]*(\n|$)/m, '');
+}
+/**
+ * Does the pull have to keep a conflict copy before overwriting/deleting a
+ * folder? `candidates` = the pending upserts under '<dir>/' not yet copied
+ * (conflictCopyCandidates, syncState.ts); `local` = their content on disk
+ * (null / absent = the file no longer exists → contributes nothing);
+ * `server` = the content each path will have after the apply (null / absent =
+ * deleted, unknown or not on the server). A copy is needed iff some pending
+ * path exists locally and differs from the server's: the anchor (note.md) is
+ * compared WITHOUT its `updated:` line (it always differs), sections
+ * byte-for-byte. For an anchor tombstone every server content is null → a copy
+ * whenever a pending file still exists locally.
+ *
+ * Encrypted notes (an `encryption:` block in note.md, no section files): only
+ * the anchor can be compared, and re-encrypting changes the iv/ciphertext even
+ * when the plaintext is identical — so a copy is usually made even for "the
+ * same" content. That is deliberate and safe: the main process cannot decrypt
+ * the note to tell, and a superfluous copy costs far less than a lost edit.
+ */
+function planConflictCopy(candidates, local, server) {
+    for (const relPath of candidates) {
+        const mine = local[relPath];
+        if (mine === null || mine === undefined)
+            continue;
+        const theirs = server[relPath];
+        if (theirs === null || theirs === undefined)
+            return true;
+        const differs = isAnchorPath(relPath)
+            ? anchorWithoutUpdated(mine) !== anchorWithoutUpdated(theirs)
+            : mine !== theirs;
+        if (differs)
+            return true;
+    }
+    return false;
+}
+// js-yaml parses unquoted ISO timestamps as Date objects: back to ISO strings
+// (what the app itself writes) before re-dumping the frontmatter.
+function datesToIso(value) {
+    if (value instanceof Date)
+        return value.toISOString();
+    if (Array.isArray(value))
+        return value.map(datesToIso);
+    if (value && typeof value === 'object') {
+        const out = {};
+        for (const [k, v] of Object.entries(value))
+            out[k] = datesToIso(v);
+        return out;
+    }
+    return value;
+}
+function loadAnchorFrontmatter(anchorContent) {
+    const { frontmatter, body } = (0, noteFormat_1.splitFrontmatter)(anchorContent);
+    if (!frontmatter)
+        return null;
+    let data;
+    try {
+        data = js_yaml_1.default.load(frontmatter);
+    }
+    catch {
+        return null;
+    }
+    if (!data || typeof data !== 'object' || Array.isArray(data))
+        return null;
+    return { data: datesToIso(data), body };
+}
+/** Title of a note.md (same default as the parsers: 'Untitled'). */
+function anchorTitle(anchorContent) {
+    const fm = loadAnchorFrontmatter(anchorContent);
+    const title = fm?.data.title;
+    return title === undefined || title === null || title === '' ? 'Untitled' : String(title);
+}
+/**
+ * Title of a conflict copy: '<original> (<label> YYYY-MM-DD HH:mm)', local
+ * time. `label` comes localized from the caller ("conflict copy").
+ */
+function conflictCopyTitle(original, label, now) {
+    const p = (n) => String(n).padStart(2, '0');
+    const stamp = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}`;
+    return `${original} (${label} ${stamp})`;
+}
+/**
+ * Builds the conflict copy of a local note folder (`localFiles`: filename →
+ * content, note.md required). The note.md frontmatter keeps EVERYTHING
+ * (group, folder, tags, created, archived, favorited, expiresAt, the sections
+ * list with the same `file` names, the encryption block…) except `id`,
+ * `title` and `updated` (= nowIso), re-dumped with the same yaml options as
+ * serializeNoteFolder; section files are copied byte-for-byte under the same
+ * filenames, so `sections[].file` stays valid. An encrypted note keeps its
+ * encryption block: the copy opens with the same password (the title is clear
+ * frontmatter, so it is renamed all the same). Dir = '<slug>-<newId>' with the
+ * app's slug rule (noteDirname). Throws when note.md is missing or its
+ * frontmatter is unreadable — the caller must then NOT overwrite the folder.
+ */
+function buildConflictCopy(localFiles, opts) {
+    const anchor = localFiles[noteFormat_1.NOTE_MD];
+    if (anchor === undefined)
+        throw new Error('conflict copy: the local folder has no note.md');
+    const fm = loadAnchorFrontmatter(anchor);
+    if (!fm)
+        throw new Error('conflict copy: unreadable note.md frontmatter');
+    // Assigning existing keys keeps their position in the dump.
+    const data = { ...fm.data, id: opts.newId, title: opts.title, updated: opts.nowIso };
+    const yamlStr = js_yaml_1.default.dump(data, { lineWidth: -1, quotingType: '"' });
+    const files = { [noteFormat_1.NOTE_MD]: `---\n${yamlStr}---\n${fm.body}` };
+    for (const [name, content] of Object.entries(localFiles)) {
+        if (name !== noteFormat_1.NOTE_MD)
+            files[name] = content;
+    }
+    return { dir: (0, noteFormat_1.noteDirname)(opts.newId, opts.title), files };
 }

@@ -15,6 +15,8 @@ exports.journalRecord = journalRecord;
 exports.journalRecordIfAbsent = journalRecordIfAbsent;
 exports.journalMarkStale = journalMarkStale;
 exports.journalMarkDirStale = journalMarkDirStale;
+exports.journalMarkDirConflictCopied = journalMarkDirConflictCopied;
+exports.conflictCopyCandidates = conflictCopyCandidates;
 exports.planAnchorTombstone = planAnchorTombstone;
 exports.journalComplete = journalComplete;
 exports.journalFail = journalFail;
@@ -70,6 +72,8 @@ function parseSyncState(raw) {
                 op.stale = true;
             if (op.op === 'upsert' && entry.force === true)
                 op.force = true;
+            if (op.op === 'upsert' && entry.conflictCopied === true)
+                op.conflictCopied = true;
             state.ops[key] = op;
         }
     }
@@ -90,7 +94,8 @@ function serializeSyncState(state) {
  * Records a pending remote mutation. Re-recording the SAME op for a key keeps
  * queuedAt/attempts (e.g. a debounce timer being re-armed while typing); for an
  * upsert it also clears `stale` (a new local edit — its upload deserves a new
- * conditional attempt) and adds `force` when asked, but never drops an
+ * conditional attempt) and `conflictCopied` (the new content was never copied)
+ * and adds `force` when asked, but never drops an
  * existing `force`. A DIFFERENT op replaces the entry (e.g. a delete
  * supersedes a pending upsert of the same file). Recording a 'deleteDir' also
  * drops every file-level op under '<dir>/' — those files are going away with
@@ -113,6 +118,10 @@ function journalRecord(state, key, op, nowIso, opts) {
     if (existing && existing.op === op) {
         if (existing.stale) {
             delete existing.stale;
+            changed = true;
+        }
+        if (existing.conflictCopied) {
+            delete existing.conflictCopied;
             changed = true;
         }
         if (force && !existing.force) {
@@ -179,6 +188,37 @@ function journalMarkDirStale(state, dir) {
         }
     }
     return changed;
+}
+/**
+ * NoteFlow Cloud: flags EVERY pending upsert under '<dir>/' as
+ * `conflictCopied` — the pull has just written a conflict copy holding their
+ * local content (see SyncJournalOp.conflictCopied). Persisted right after the
+ * copy is written and BEFORE the folder is overwritten/deleted.
+ */
+function journalMarkDirConflictCopied(state, dir) {
+    const prefix = `${dir}/`;
+    let changed = false;
+    for (const [key, entry] of Object.entries(state.ops)) {
+        if (entry.op === 'upsert' && key.startsWith(prefix) && !entry.conflictCopied) {
+            entry.conflictCopied = true;
+            changed = true;
+        }
+    }
+    return changed;
+}
+/**
+ * NoteFlow Cloud pull: the pending upserts under '<dir>/' (stale or not) whose
+ * local content has NOT been preserved as a conflict copy yet — the candidates
+ * planConflictCopy (cloudSyncLogic.ts) compares against the server's version.
+ */
+function conflictCopyCandidates(state, dir) {
+    const prefix = `${dir}/`;
+    const out = [];
+    for (const [key, entry] of Object.entries(state.ops)) {
+        if (entry.op === 'upsert' && key.startsWith(prefix) && !entry.conflictCopied)
+            out.push(key);
+    }
+    return out;
 }
 function planAnchorTombstone(state, dir, localUpdatedMs, tombstoneUpdatedMs) {
     const prefix = `${dir}/`;
