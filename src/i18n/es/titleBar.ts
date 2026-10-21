@@ -40,6 +40,13 @@ export const titleBar = {
     lastSyncs: { one: 'última sinc.', other: 'últimas {count} sinc.' },
     filesToday: { one: '{count} archivo hoy', other: '{count} archivos hoy' },
     blockedNotice: 'Los cambios no se subirán hasta que una sincronización salga bien.',
+    conflictCopiesNotice: {
+      one: 'Tus cambios sin conexión en {count} nota chocaron con cambios más recientes de otro dispositivo y se guardaron como copia en conflicto:',
+      other: 'Tus cambios sin conexión en {count} notas chocaron con cambios más recientes de otro dispositivo y se guardaron como copias en conflicto:',
+    },
+    conflictCopiesAria: { one: '{count} copia en conflicto creada', other: '{count} copias en conflicto creadas' },
+    conflictCopiesMore: 'y {count} más',
+    conflictCopiesDismiss: 'Descartar aviso',
     encryptionTooltip: 'Cifrado: {mode}',
     encryptionStandard: 'Estándar',
     encryptionPrivate: 'Privado (E2EE)',

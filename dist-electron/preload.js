@@ -159,6 +159,8 @@ const api = {
     // have switched it); main broadcasts cloud:status-changed when it changed.
     cloudRefreshKeysMode: () => electron_1.ipcRenderer.invoke('cloud:refresh-keys-mode'),
     cloudLock: () => electron_1.ipcRenderer.invoke('cloud:lock'),
+    // Clears the session notice of conflict copies made by the pull (sync status card).
+    cloudDismissConflictCopies: () => electron_1.ipcRenderer.invoke('cloud:dismiss-conflict-copies'),
     cloudEnable: () => electron_1.ipcRenderer.invoke('cloud:enable'),
     cloudDisable: () => electron_1.ipcRenderer.invoke('cloud:disable'),
     cloudPull: () => electron_1.ipcRenderer.invoke('cloud:pull'),

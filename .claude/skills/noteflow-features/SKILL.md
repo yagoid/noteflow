@@ -73,7 +73,11 @@ Iconos del TitleBar:
   fueron 0; verde = bien, ámbar = falló; tooltip "14:32 · 3 files"; crecen al abrir salvo con
   *reduced motion*; vacía → línea discontinua + "No activity yet"; con el latido del auto-sync cada
   5 min, las 24 barras abarcan ~las últimas 2 h) con leyenda "last N syncs" / "X files today" (total
-  acumulado del día local en esta sesión, llevado en main — no la suma de las barras); bloque ámbar con el error si lo hay; y pie compacto de **iconos con tooltip**:
+  acumulado del día local en esta sesión, llevado en main — no la suma de las barras); bloque ámbar con el error si lo hay;
+  bloque ámbar de **copias de conflicto** (solo NoteFlow Cloud: "Your offline edits to N note(s)
+  conflicted with newer changes from another device and were kept as conflict copies:" + hasta 3
+  títulos y "+N more", botón *Dismiss*; mientras no se descarta, el botón muestra un **punto ámbar**
+  y su `aria-label` lo menciona); y pie compacto de **iconos con tooltip**:
   candado (Cloud: cifrado Standard / Private E2EE), rayo (Cloud: verde si Real-time conectado),
   reloj ("Auto-sync every 5 min") y a la derecha el engranaje que abre Ajustes → Sync. La acción
   del click ("Click to sync now" / "Click to retry" / "Unlock in Settings → Sync") va en el
@@ -1052,6 +1056,19 @@ ninguno → Cloud); a partir de ahí manda la elección del usuario. Con Cloud a
 **en pausa** (badge amarillo + aviso ámbar en su panel; la config de GitHub se conserva).
 
 ## NoteFlow Cloud (Settings → Sync)
+
+> **Copias de conflicto:** si editas una nota **en la app con NoteFlow Cloud activado** y tu edición
+> aún no ha subido (sin conexión, o antes del primer sync del arranque) cuando otro dispositivo la
+> cambia (o la borra), al reconectar gana la versión más reciente del servidor, pero tu versión local
+> se guarda como nota nueva "<título> (conflict copy AAAA-MM-DD HH:mm)" (en español "copia en
+> conflicto"), en el mismo grupo/carpeta y con las mismas secciones (una nota cifrada sigue cifrada
+> con la misma contraseña); se sube como cualquier nota y se avisa en la tarjeta del botón de sync del
+> titlebar. **No cubre:** ediciones hechas con Cloud desactivado o desde el CLI con la app cerrada; un
+> `noteflow cloud pull` del CLI sobre una edición offline pendiente de la app; el GitHub Sync; ni el
+> caso en que tu edición local es más nueva que la remota (gana la tuya, sin copia). Puede salir una
+> copia de más (otro cliente que formatee distinto el YAML, notas cifradas) y la copia conserva
+> favorito/caducidad/alarmas (pueden sonar dos veces). El CLI con Cloud hace lo mismo con sus propias
+> subidas fallidas.
 
 Nube de notas **cifrada** de pago (suscripción) con **dos modos de cifrado a elegir** (modelo
 Obsidian Sync).

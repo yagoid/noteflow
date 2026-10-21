@@ -307,6 +307,147 @@ function dirsPendingRetry(pullRetry) {
   return dirs
 }
 
+// ── Cloud: conflict copies (mirror of electron/cloudSyncLogic.ts) ─────────────
+// The pull is last-writer-wins per note folder: a newer remote anchor replaces
+// the local folder wholesale. When that folder still holds a local edit the
+// server never accepted (a pending upload — failed or rejected as stale), the
+// LOCAL version is first kept as a conflict copy: a new note folder with a new
+// id, same group/folder/sections, title '<title> (conflict copy <date>)'.
+
+/** note.md minus its top-level `updated:` line (every save rewrites it). */
+function anchorWithoutUpdated(content) {
+  return content.replace(/\r\n/g, '\n').replace(/^updated:[^\n]*(\n|$)/m, '')
+}
+
+/**
+ * Pure mirror of planConflictCopy (electron/cloudSyncLogic.ts): a copy is
+ * needed iff some pending path exists locally (`local[rel]` not null) and
+ * differs from the content the server version leaves (`server[rel]`, null /
+ * absent = deleted or unknown). note.md is compared without `updated:`,
+ * sections byte-for-byte. Encrypted notes compare the anchor only — a
+ * re-encryption changes the ciphertext, so they usually get a copy (safe: the
+ * CLI can't decrypt to tell).
+ */
+function planConflictCopy(candidates, local, server) {
+  for (const rel of candidates) {
+    const mine = local[rel]
+    if (mine === null || mine === undefined) continue
+    const theirs = server[rel]
+    if (theirs === null || theirs === undefined) return true
+    if (isAnchorPath(rel) ? anchorWithoutUpdated(mine) !== anchorWithoutUpdated(theirs) : mine !== theirs) return true
+  }
+  return false
+}
+
+/** A one-line YAML scalar as written by js-yaml (plain, "double" or 'single' quoted). */
+function yamlScalarValue(raw) {
+  const v = raw.trim()
+  if (v.startsWith('"')) { try { return String(JSON.parse(v)) } catch { return unquote(v) } }
+  if (v.startsWith("'") && v.endsWith("'") && v.length >= 2) return v.slice(1, -1).replace(/''/g, "'")
+  return v
+}
+
+/** Title of a note.md (same default as the parsers: 'Untitled'). Mirror of anchorTitle. */
+function anchorTitle(content) {
+  const { frontmatter } = splitFrontmatter(content)
+  const m = frontmatter.match(/^title:[ \t]*(.*)$/m)
+  const title = m ? yamlScalarValue(m[1]) : ''
+  return title === '' ? 'Untitled' : title
+}
+
+/** '<original> (<label> YYYY-MM-DD HH:mm)', local time. Mirror of conflictCopyTitle. */
+function conflictCopyTitle(original, label, now) {
+  const p = n => String(n).padStart(2, '0')
+  const stamp = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}`
+  return `${original} (${label} ${stamp})`
+}
+
+/**
+ * Mirror of buildConflictCopy: the local folder's files (`localFiles`: name →
+ * content, note.md required) with a new `id`, `title` and `updated` in
+ * note.md — everything else (group, folder, tags, sections list, encryption
+ * block…) is kept as is: the CLI has no YAML library, so only those three
+ * top-level lines are rewritten (a multi-line value's continuation lines are
+ * dropped). Section files are copied byte-for-byte under the same names.
+ * Throws when note.md is missing or has no frontmatter.
+ */
+function buildConflictCopy(localFiles, { newId, title, nowIso }) {
+  const anchor = localFiles[NOTE_MD]
+  if (anchor === undefined) throw new Error('conflict copy: the local folder has no note.md')
+  const { frontmatter, body } = splitFrontmatter(anchor)
+  if (!frontmatter) throw new Error('conflict copy: unreadable note.md frontmatter')
+  const values = { id: q(newId), title: q(title), updated: q(nowIso) }
+  const lines = frontmatter.split('\n')
+  const kept = []
+  const seen = new Set()
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^(id|title|updated):/)
+    if (m && !seen.has(m[1])) {
+      seen.add(m[1])
+      kept.push(`${m[1]}: ${values[m[1]]}`)
+      while (i + 1 < lines.length && /^[ \t]/.test(lines[i + 1])) i++
+      continue
+    }
+    kept.push(lines[i])
+  }
+  for (const key of ['id', 'title', 'updated']) if (!seen.has(key)) kept.push(`${key}: ${values[key]}`)
+  const files = { [NOTE_MD]: `---\n${kept.join('\n')}\n---\n${body}` }
+  for (const [name, content] of Object.entries(localFiles)) if (name !== NOTE_MD) files[name] = content
+  return { dir: noteDirname(newId, title), files }
+}
+
+/** "conflict copy" in the app's language setting (settings.json `language`: en | es | system). */
+function conflictCopyLabel() {
+  const setting = readSettings().language
+  let lang = setting === 'en' || setting === 'es' ? setting : null
+  if (!lang) {
+    let locale = ''
+    try { locale = Intl.DateTimeFormat().resolvedOptions().locale || '' } catch { locale = '' }
+    lang = locale.toLowerCase().startsWith('es') ? 'es' : 'en'
+  }
+  return lang === 'es' ? 'copia en conflicto' : 'conflict copy'
+}
+
+/**
+ * Before the pull overwrites the local folder '<dir>' wholesale: keeps its
+ * LOCAL version as a conflict copy when a pending upload under it differs from
+ * what the server version leaves (`server`: relPath → content after the apply).
+ * Returns { dir, title, relPaths } of the copy written to disk, or null. Throws
+ * if the copy can't be written (the caller's per-folder catch → retry set; the
+ * folder is not overwritten).
+ */
+function cloudPreserveConflictCopy(dir, pending, server) {
+  const candidates = (Array.isArray(pending) ? pending : []).filter(p => typeof p === 'string' && p.startsWith(`${dir}/`))
+  if (!candidates.length) return null
+  const local = {}
+  for (const rel of candidates) {
+    try { local[rel] = fs.readFileSync(path.join(NOTES_DIR, rel), 'utf-8') } catch { local[rel] = null }
+  }
+  if (!planConflictCopy(candidates, local, server)) return null
+  const localDirPath = path.join(NOTES_DIR, dir)
+  const localFiles = {}
+  for (const f of fs.readdirSync(localDirPath)) {
+    if (f.endsWith('.md')) localFiles[f] = fs.readFileSync(path.join(localDirPath, f), 'utf-8')
+  }
+  const now = new Date()
+  const title = conflictCopyTitle(anchorTitle(localFiles[NOTE_MD] || ''), conflictCopyLabel(), now)
+  let copy
+  do {
+    copy = buildConflictCopy(localFiles, { newId: nanoid(8), title, nowIso: now.toISOString() })
+  } while (fs.existsSync(path.join(NOTES_DIR, copy.dir)))
+  const copyPath = path.join(NOTES_DIR, copy.dir)
+  let created = false
+  try {
+    fs.mkdirSync(copyPath) // not recursive: never writes into a folder that appeared meanwhile
+    created = true
+    for (const [name, content] of Object.entries(copy.files)) fs.writeFileSync(path.join(copyPath, name), content, 'utf-8')
+  } catch (e) {
+    if (created) { try { fs.rmSync(copyPath, { recursive: true, force: true }) } catch { /* best effort */ } }
+    throw e
+  }
+  return { dir: copy.dir, title, relPaths: Object.keys(copy.files).map(f => `${copy.dir}/${f}`) }
+}
+
 /**
  * Applies cliCloudForUser to the persisted state for the signed-in account.
  * Runs before every Cloud pull/reconcile and at login (there with the previous
@@ -1273,6 +1414,15 @@ function mergeMetadataById(localJson, remoteJson, prefer) {
  * upload → union preferring local (mergeable) or keep local; first pull →
  * backup + union preferring remote (mergeable) or remote; otherwise remote.
  */
+/**
+ * Mirror of metadataPendingForPull (electron/cloudSyncLogic.ts): a pending
+ * metadata upload is never an "unsynced local edit" on the first reconcile —
+ * backup + remote wins / union preferring remote, as documented.
+ */
+function metadataPendingForPull(pendingUpsert, firstPull) {
+  return pendingUpsert && !firstPull
+}
+
 function planMetadataPull(relPath, localContent, remoteContent, opts) {
   if (localContent === remoteContent) return { action: 'keep' }
   const backup = opts.firstPull && localContent !== null
@@ -1776,6 +1926,8 @@ async function cloudPullNow() {
   // drain discards them the same way).
   const pending = existingPendingUpserts(c.pendingUpserts)
   const keptDirs = []
+  // Conflict copies written by this pull ({ dir, title, relPaths }) — uploaded below.
+  const conflictCopies = []
   // Reconciled to the server's content by this pull → leave pendingUpserts.
   const reconciledDirs = [], reconciledPaths = []
   // Retry set: rows that failed to apply in earlier pulls ride along with this
@@ -1826,7 +1978,9 @@ async function cloudPullNow() {
         if (!localExists) continue
         // A pending (failed) upload under '<dir>/' = a local edit the server
         // never got: keep the note and re-upload it whole below (resurrected on
-        // purpose, like the app — the local edit wins).
+        // purpose, like the app — the local edit wins). The CLI ALWAYS keeps
+        // here (no 'lost' case like the app's planAnchorTombstone), so a
+        // tombstone never needs a conflict copy.
         if (pendingUnderDir(pending, dir)) { keptDirs.push(dir); continue }
         // Note deleted remotely — apply locally only under the safety rule.
         if (shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs)) {
@@ -1864,6 +2018,28 @@ async function cloudPullNow() {
         fetchedForDir.push(...fetched.entries)
         for (const key of fetched.undecryptable) decryptFailures.add(key)
 
+        // BEFORE anything is overwritten: a pending local edit that differs
+        // from the version about to be applied is kept as a conflict copy
+        // (mirror of the app). Server side = the remote anchor + the group's
+        // rows + the listed sections just fetched; tombstoned / absent →
+        // deleted. A failed copy throws → retry set, folder left untouched.
+        if (localExists) {
+          const server = { [anchor.relPath]: anchor.content }
+          for (const e of [...group, ...fetched.entries]) {
+            if (!isAnchorPath(e.relPath)) server[e.relPath] = e.deleted ? null : e.content
+          }
+          const copy = cloudPreserveConflictCopy(dir, pending, server)
+          if (copy) {
+            conflictCopies.push(copy)
+            // Dedupe: the folder's pending uploads are preserved in the copy
+            // now — they leave pendingUpserts even if the apply below fails
+            // halfway (its retry then can't copy them a second time). Residual:
+            // a CLI killed before the state write below copies again next run.
+            reconciledDirs.push(dir)
+            out(`  Conflict: local changes kept as "${copy.title}"`)
+          }
+        }
+
         fs.mkdirSync(localDirPath, { recursive: true })
         fs.writeFileSync(localAnchorPath, anchor.content, 'utf-8')
         for (const entry of group) {
@@ -1881,6 +2057,26 @@ async function cloudPullNow() {
         // Anchor not applied (absent from this batch, or not newer) and the
         // folder exists locally: sections apply ONE BY ONE — an anchor and its
         // sections can land in different pulls (shouldApplyRemoteSection).
+        // A remote section about to overwrite a pending (failed/stale) upload
+        // keeps the local folder as a conflict copy first, judged only on the
+        // overwritten files (identical = own echo → no copy) — mirror of the app.
+        const overwrites = group.filter(e =>
+          !isAnchorPath(e.relPath) && !e.deleted && isPendingUpsert(pending, e.relPath) &&
+          shouldApplyRemoteSection(e.updatedAtMs, localUpdatedMs))
+        if (localExists && overwrites.length) {
+          const server = {}
+          for (const e of overwrites) server[e.relPath] = e.content
+          const copy = cloudPreserveConflictCopy(dir, Object.keys(server), server)
+          if (copy) {
+            conflictCopies.push(copy)
+            // Dedupe: the whole folder is preserved in the copy — its pending
+            // uploads leave pendingUpserts (even if this apply fails halfway),
+            // so neither a retry nor the later anchor copies it again (the app
+            // flags the whole dir `conflictCopied` for the same reason).
+            reconciledDirs.push(dir)
+            out(`  Conflict: local changes kept as "${copy.title}"`)
+          }
+        }
         let changed = 0
         for (const entry of group) {
           if (isAnchorPath(entry.relPath)) continue
@@ -1914,7 +2110,7 @@ async function cloudPullNow() {
       if (entry.deleted) continue // metadata is never deleted by the app
       const metadataPath = path.join(NOTES_DIR, entry.relPath)
       const localContent = fs.existsSync(metadataPath) ? fs.readFileSync(metadataPath, 'utf-8') : null
-      const pendingMeta = isPendingUpsert(pending, entry.relPath)
+      const pendingMeta = metadataPendingForPull(isPendingUpsert(pending, entry.relPath), firstPull)
       const decision = planMetadataPull(entry.relPath, localContent, entry.content, { pendingUpsert: pendingMeta, firstPull })
       if (decision.action === 'keep') {
         if (localContent === entry.content) reconciledPaths.push(entry.relPath)
@@ -1958,13 +2154,16 @@ async function cloudPullNow() {
   const pullRetry = nextPullRetry(prevRetry, failures)
   const dropped = countDroppedRetries(failures, pullRetry)
   if (dropped) out(`  Gave up retrying ${dropped} remote change(s) after repeated failures`)
+  // Conflict copies are recorded as pending uploads in the same write (an
+  // interrupted upload below is retried by `noteflow push`).
   const keptFlat = [...keptRelPaths.values()].flat()
+  const copyFlat = conflictCopies.flatMap(c => c.relPaths)
   const fresh = getCliCloud()
   patchCliCloud({
     pullSeq: nextPullSeq(c.pullSeq, mainRows), pullCursor: undefined, lastSync: new Date().toISOString(),
     pullRetry: Object.keys(pullRetry).length ? pullRetry : undefined,
     pendingUpserts: storedPendingUpserts(existingPendingUpserts(nextPendingUpserts(
-      dropReconciledPending(fresh.pendingUpserts, reconciledDirs, reconciledPaths), keptFlat, []))),
+      dropReconciledPending(fresh.pendingUpserts, reconciledDirs, reconciledPaths), [...keptFlat, ...copyFlat], []))),
     // The kept folder's re-upload is FORCED until it lands — persisted here so
     // an interrupted/failed one is retried forced by `noteflow push`.
     forceUpserts: storedPendingUpserts(existingPendingUpserts(nextPendingUpserts(
@@ -1998,6 +2197,24 @@ async function cloudPullNow() {
         pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [], uploaded)),
         forceUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().forceUpserts, [], uploaded)),
       })
+    }
+  }
+
+  // Conflict copies: new folders → fresh note key, conditional uploads (nothing
+  // newer can exist for a new path). What doesn't land stays pending.
+  for (const copy of conflictCopies) {
+    const uploaded = []
+    try {
+      const noteKey = await cloudGetNoteKey(dek, copy.dir)
+      for (const relPath of copy.relPaths) {
+        if ((await cloudPushFile(dek, noteKey, relPath)) === 'uploaded') uploaded.push(relPath)
+      }
+    } catch (e) {
+      errors++
+      err(`Conflict copy "${copy.title}" — upload failed: ${e.message}. Run 'noteflow push' to retry`)
+    }
+    if (uploaded.length) {
+      patchCliCloud({ pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [], uploaded)) })
     }
   }
   return { pulled, deleted, errors }
@@ -3990,5 +4207,6 @@ if (require.main === module) {
     classifyConditionalUpsert, parsePullRetry, mergeRetryRows, nextPullRetry, countDroppedRetries,
     PULL_RETRY_MAX_DECRYPT_ATTEMPTS, PULL_RETRY_MAX_APPLY_ATTEMPTS, PULL_RETRY_CHUNK, CLOUD_CONDITIONAL_UPSERT_RPC,
     mergeMetadataById, planMetadataPull, dirsPendingRetry,
+    planConflictCopy, buildConflictCopy, anchorTitle, conflictCopyTitle, metadataPendingForPull,
   }
 }

@@ -356,6 +356,19 @@ export interface CloudSyncStatus {
   initialPullStatus: 'pending' | 'ok' | 'failed'
   /** True while the main process holds a live Realtime subscription (shown in the titlebar sync card; no event on change). */
   realtimeConnected: boolean
+  /** Conflict copies the Cloud pull made this session, until dismissed — mirror of ConflictCopiesNotice in electron/cloudSync.ts. */
+  conflictCopies?: ConflictCopiesNotice
+}
+
+/**
+ * Offline edits that lost against a newer remote version and were kept as new
+ * notes ("conflict copies") by the Cloud pull — session-only, in main.
+ * `titles` = the copies' titles (latest 10); `at` = time of the latest copy.
+ */
+export interface ConflictCopiesNotice {
+  count: number
+  titles: string[]
+  at: string
 }
 
 // One bar of the sync card's activity chart — mirror of SyncHistoryEntry in
@@ -386,7 +399,12 @@ export interface ActiveSyncStatus {
   /** Files the live backend moved today (local day) this session — running total kept in main, not a sum of `history`. */
   filesToday?: number
   github?: { owner?: string; repo?: string }
-  cloud?: { keysState: CloudSyncStatus['keysState']; keysMode: CloudSyncStatus['keysMode']; realtimeConnected: boolean }
+  cloud?: {
+    keysState: CloudSyncStatus['keysState']
+    keysMode: CloudSyncStatus['keysMode']
+    realtimeConnected: boolean
+    conflictCopies?: ConflictCopiesNotice
+  }
 }
 
 // Synced appearance + editor settings — ui-settings.json at the root of the
@@ -532,6 +550,8 @@ declare global {
       // Re-reads the account's encryption mode (switched from another device?) — called when the Cloud panel opens.
       cloudRefreshKeysMode: () => Promise<{ changed: boolean }>
       cloudLock: () => Promise<{ ok: boolean }>
+      // Clears the session notice of conflict copies made by the Cloud pull (titlebar sync card).
+      cloudDismissConflictCopies: () => Promise<{ ok: boolean }>
       cloudEnable: () => Promise<{ ok: boolean; error?: string }>
       cloudDisable: () => Promise<{ ok: boolean }>
       cloudPull: () => Promise<{

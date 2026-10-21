@@ -73,7 +73,12 @@ interface SyncStatusButtonProps {
   onRefresh: () => void
   /** Opens Settings → Sync (GitHub and the NoteFlow Cloud panel both live there). */
   onOpenSettings: () => void
+  /** Clears the "kept as conflict copies" notice (NoteFlow Cloud). */
+  onDismissConflictCopies: () => void
 }
+
+// How many conflict-copy titles the card lists before "+N more".
+const CONFLICT_TITLES_SHOWN = 3
 
 /** What a click on the titlebar button does in each state (null while one is running). */
 function clickHint(state: SyncDisplayState, s: SyncMessages): string | null {
@@ -92,14 +97,24 @@ function clickHint(state: SyncDisplayState, s: SyncMessages): string | null {
  * stays open across a click so the user watches the sync run and land
  * ("Synced · just now").
  */
-export function SyncStatusButton({ status, syncing, pushing, onSync, onRefresh, onOpenSettings }: SyncStatusButtonProps) {
+export function SyncStatusButton({
+  status,
+  syncing,
+  pushing,
+  onSync,
+  onRefresh,
+  onOpenSettings,
+  onDismissConflictCopies,
+}: SyncStatusButtonProps) {
   const t = useT()
   const s = t.titleBar.sync
   const state = getSyncDisplayState(status, syncing, pushing)
   const backendName = status.backend === 'cloud' ? s.backendCloud : s.backendGithub
   const ariaVars = { backend: backendName, status: stateLabel(state, s) }
   const hint = clickHint(state, s)
-  const ariaLabel = hint ? tf(s.ariaLabelWithHint, { ...ariaVars, hint }) : tf(s.ariaLabel, ariaVars)
+  const conflictCount = status.cloud?.conflictCopies?.count ?? 0
+  const baseAriaLabel = hint ? tf(s.ariaLabelWithHint, { ...ariaVars, hint }) : tf(s.ariaLabel, ariaVars)
+  const ariaLabel = conflictCount > 0 ? `${baseAriaLabel}. ${plural(s.conflictCopiesAria, conflictCount)}` : baseAriaLabel
 
   const wrapperRef = useRef<HTMLDivElement>(null)
   const openTimer = useRef<number | null>(null)
@@ -189,9 +204,13 @@ export function SyncStatusButton({ status, syncing, pushing, onSync, onRefresh, 
         <button
           onClick={onSync}
           disabled={syncing || pushing}
-          className="flex items-center gap-1 px-2 h-full text-text-muted hover:text-text transition-colors disabled:opacity-60"
+          className="relative flex items-center gap-1 px-2 h-full text-text-muted hover:text-text transition-colors disabled:opacity-60"
           aria-label={ariaLabel}
         >
+          {/* Attention dot: the card has a conflict-copies notice to read. */}
+          {conflictCount > 0 && (
+            <span aria-hidden className="absolute top-1.5 right-1 w-1.5 h-1.5 rounded-full bg-amber-400" />
+          )}
           {state === 'syncing' ? (
             <RefreshCw size={12} className="animate-spin text-text" />
           ) : state === 'uploading' ? (
@@ -224,6 +243,7 @@ export function SyncStatusButton({ status, syncing, pushing, onSync, onRefresh, 
                 close()
                 onOpenSettings()
               }}
+              onDismissConflictCopies={onDismissConflictCopies}
             />
           </div>,
           document.body,
@@ -238,10 +258,11 @@ interface SyncStatusCardProps {
   backendName: string
   now: number
   onOpenSettings: () => void
+  onDismissConflictCopies: () => void
 }
 
 // The card body — pure presentation of the status snapshot.
-function SyncStatusCard({ status, state, backendName, now, onOpenSettings }: SyncStatusCardProps) {
+function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDismissConflictCopies }: SyncStatusCardProps) {
   const t = useT()
   const s = t.titleBar.sync
   const pill = PILL_STYLE[state]
@@ -274,6 +295,7 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings }: Syn
       : '—',
   })
   const realtimeOn = status.cloud?.realtimeConnected === true
+  const conflicts = status.cloud?.conflictCopies
   const realtimeTip = tf(s.realtimeTooltip, { state: realtimeOn ? s.realtimeConnected : s.realtimeDisconnected })
   const autoSyncTip =
     status.autoSyncIntervalMs !== undefined
@@ -314,6 +336,34 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings }: Syn
       </dl>
 
       <SyncActivityChart status={status} exactTime={exactTime} />
+
+      {/* Conflict copies (NoteFlow Cloud): offline edits kept as new notes */}
+      {conflicts && conflicts.count > 0 && (
+        <div
+          className="mx-3 mb-2 px-2 py-1.5 rounded border border-solid border-amber-400/30 bg-amber-400/10
+                     text-amber-400 leading-snug break-words"
+        >
+          <div>{plural(s.conflictCopiesNotice, conflicts.count)}</div>
+          <ul className="mt-1 text-text select-text">
+            {conflicts.titles.slice(-CONFLICT_TITLES_SHOWN).map((title, i) => (
+              <li key={`${i}-${title}`} className="truncate" title={title}>
+                {title}
+              </li>
+            ))}
+          </ul>
+          {conflicts.count > CONFLICT_TITLES_SHOWN && (
+            <div className="opacity-90">{tf(s.conflictCopiesMore, { count: conflicts.count - CONFLICT_TITLES_SHOWN })}</div>
+          )}
+          <div className="flex justify-end mt-1">
+            <button
+              onClick={onDismissConflictCopies}
+              className="px-1.5 py-0.5 rounded border border-solid border-amber-400/40 hover:bg-amber-400/20 transition-colors"
+            >
+              {s.conflictCopiesDismiss}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Error / blocked notice */}
       {(state === 'blocked' || status.error) && (

@@ -906,7 +906,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     servidor (la escribe, o el disco ya era idéntico) **cancela el timer armado** de esa ruta y
     **completa** su `upsert` pendiente (`settlePathUpload` — arregla también "timer armado con un
     contenido que un pull más nuevo ya había adelantado"). Cuando aplica un ancla remota **entera**
-    (remota estrictamente más nueva ⇒ LWW: perdió la carpeta local) pide además, en la misma
+    (remota estrictamente más nueva ⇒ LWW: la carpeta local pierde, pero si tenía una edición
+    pendiente distinta se conserva antes como **copia de conflicto**, ver abajo) pide además, en la misma
     petición `fetchRemoteRows`, las secciones listadas que tengan un upsert pendiente (stale o no)
     aunque existan en disco, las escribe y completa+cancela todos los upserts/timers bajo la carpeta
     (`settleDirUploads`). **Antes de la primera escritura** marca `stale` todos los upserts pendientes
@@ -921,13 +922,91 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     tombstone, que es la hora del borrado) → el servidor ya dijo que la versión local perdió contra
     una más nueva, que ahora está borrada: se completan los ops y se **borra en local** (LWW, sin la
     regla `updated <= lastSync` — la copia local es una versión que se sabe perdida; resucitarla
-    revertiría un borrado con contenido que el servidor rechazó). Si el `updated` local es
+    revertiría un borrado con contenido que el servidor rechazó). **Antes del `rmSync`** su contenido
+    pendiente se conserva como **copia de conflicto** (nota nueva, ver abajo): la nota original se
+    borra igualmente, pero la edición local no desaparece. Si el `updated` local es
     **posterior** al borrado, o desconocido → se conserva y se re-sube forzada como en el caso
-    anterior: el journal **no ve todas las ediciones** — las hechas con la puerta de push cerrada
-    (antes del primer pull de cada arranque, claves e2ee bloqueadas, Cloud desactivado) o desde el
-    CLI no se apuntan nunca, y sin esta comprobación un borrado más antiguo las eliminaría (D con op
+    anterior: el journal **no ve todas las ediciones** — las hechas con Cloud desactivado o desde
+    el CLI no se apuntan nunca (las hechas con la **puerta de push cerrada** — antes del primer pull
+    de cada arranque, claves bloqueadas — **sí** se apuntan desde la corrección de las copias de
+    conflicto, ver "Gate de push"), y sin esta comprobación un borrado más antiguo las eliminaría (D con op
     stale, edición en T5 con las claves bloqueadas, otro dispositivo borra en T4 < T5 → al
     desbloquear se perdería T5). Sin pendientes → regla de borrado de siempre.
+  - **Copias de conflicto (QA "B2").** Sin ellas, una edición hecha **sin conexión** se perdía en
+    silencio en todas partes: A edita X offline (el upsert queda en el journal), B edita X y llega
+    al servidor; al reconectar, el pull de A ve el ancla remota estrictamente más nueva → rama
+    wholesale → sobrescribe la carpeta y `journalMarkDirStale` + `settleDirUploads` tiran los
+    upserts de A (igual el tombstone `'lost'` hacía `rmSync`). Ahora, **antes de sobrescribir**
+    (rama wholesale, solo si la carpeta local existe — después de traer `toFetch` y antes del
+    marcado stale; y en la rama **por secciones** — ancla no aplicada —, antes de escribir una
+    sección remota que pasa `shouldApplyRemoteSection` sobre un fichero con upsert pendiente: ahí
+    `planConflictCopy` se evalúa **solo** sobre los ficheros que se van a sobrescribir, con el mapa
+    del servidor limitado a esas filas, para que un `note.md` pendiente que no se toca no cuente
+    como "difiere"; contenido idéntico = el eco de la propia subida → sin copia; si hay copia se
+    marca la carpeta entera, así que cuando llegue el ancla la rama wholesale no hace otra)
+    **o de borrar** (tombstone `'lost'`, antes del `rmSync`), `preserveConflictCopy`
+    (`cloudSync.ts`) mira los upserts pendientes bajo `<dir>/` (stale o no) **sin** el flag
+    `conflictCopied` (`conflictCopyCandidates`, `syncState.ts`) y decide con `planConflictCopy`
+    (puro, `cloudSyncLogic.ts`): hace falta copia si alguna ruta pendiente existe en local y
+    difiere de lo que dejará el servidor (ancla remota + filas del grupo + secciones traídas;
+    tombstone/ausente = null; en el tombstone todo es null). El `note.md` se compara **sin la
+    línea `updated:`** (siempre difiere); las secciones byte a byte. Notas **cifradas**: solo hay
+    ancla y re-cifrar cambia iv/ciphertext, así que casi siempre se copia aunque el texto sea el
+    mismo — asumido y seguro (main no puede descifrar). La copia (`buildConflictCopy`, puro) es la
+    **carpeta local entera** con `id` nuevo (8 chars, `newNoteId`), `title` = `"<título>
+    (conflict copy YYYY-MM-DD HH:mm)"` (hora local; sufijo localizado en `electron/i18n.ts`
+    `sync.conflictCopy`, inyectado desde `main.ts` con `setConflictCopyLabel`) y `updated` = ahora;
+    todo lo demás del frontmatter se conserva (grupo, carpeta, tags, `sections[].file`, bloque
+    `encryption` — la copia de una nota cifrada sigue cifrada con la misma contraseña) y las
+    secciones se copian con el mismo nombre. Dir = `<slug>-<id>` con la regla de `noteDirname`
+    (espejo en `noteFormat.ts` de `src/lib/noteUtils.ts` y del CLI). Se escribe (`mkdirSync` no
+    recursivo; si falla a medias se borra lo creado y **se lanza** → catch por carpeta → retry set:
+    la carpeta original **no** se toca en ese pull), se marcan los ops con `conflictCopied`
+    (`journalMarkDirConflictCopied`, persistido) y se sube por el camino normal
+    (`schedulePushUnguarded`: condicionada, journaled, clave de nota fresca — unguarded porque el
+    primer pull del arranque corre con la puerta de push cerrada). Su dir va a `updatedFiles`
+    (renderer + índice de IA) y cuenta en `pulled`/`filesDown`; después el pull sigue exactamente
+    como antes. **Dedupe:** si el aplicado falla a medias, el reintento vuelve a la rama wholesale
+    con los mismos ops pendientes, pero ya marcados `conflictCopied` → sin segunda copia; un
+    re-registro (`journalRecord`, nueva edición local) quita el flag. GitHub ignora el flag.
+    **Aviso en la UI:** `CloudSyncStatus.conflictCopies` (`{count, titles, at}`, solo en memoria
+    de la sesión, acumulado entre pulls hasta descartarlo) → `ActiveSyncStatus.cloud.conflictCopies`
+    → punto ámbar en el botón de sync del titlebar + bloque en su tarjeta con los títulos y botón
+    *Dismiss* (IPC `cloud:dismiss-conflict-copies`); se limpia también al cambiar de cuenta
+    (`resetCloudSyncState`) y al desactivar Cloud. Logs: solo recuentos.
+    **Requisito: la edición tiene que estar en el journal.** Antes, con la puerta de push cerrada
+    (`initialPullStatus !== 'ok'`: arranque offline, claves managed que no desbloquean offline,
+    claves e2ee bloqueadas, cuenta recién cambiada) `schedulePush` volvía **sin apuntar nada** → el
+    primer pull sobrescribía esas ediciones sin copia (B2 otra vez). Ahora `planLocalPush` (puro)
+    decide `'ignore'` (Cloud desactivado/no configurado — sin cambios) · `'journal'` (puerta
+    cerrada: `journalRecord` del upsert **sin timer**, tras `ensureStateOwner`) · `'push'`;
+    `pushPathsNow` (imports, tools del chat) hace lo mismo. No se sube nada antes del primer pull
+    OK: `retrySyncJournal` ya retorna si `initialPullStatus !== 'ok'`; tras el pull,
+    `flushPendingLocalChanges` + el drain los suben. Descartada a propósito la heurística "`updated`
+    local > `lastSync` ⇒ candidata": daría copias espurias cuando otro dispositivo edita encima de
+    una edición propia ya subida. **CLI** (`cloudPullNow`):
+    mismo espejo en la rama wholesale con `pendingUpserts` (mismas reglas y helpers; idioma según
+    `settings.language`), sube la copia con `cloudPushFile` (lo que no llega queda en
+    `pendingUpserts` para `noteflow push`) e imprime `Conflict: local changes kept as "…"`; su
+    tombstone siempre conserva con subidas pendientes, así que no necesita copia. Dedupe del CLI: al
+    crear la copia la carpeta pasa a `reconciledDirs` (sus pendientes salen de `pendingUpserts` en la
+    escritura final aunque el aplicado falle); **residual:** un CLI matado antes de esa escritura
+    copia otra vez en la siguiente ejecución. Tests: `tests/electron/cloudConflictCopy.test.ts`,
+    `tests/electron/syncState.test.ts`, `tests/cli/conflictCopy.test.ts`.
+    **Residuales (asumidos / fuera de alcance):**
+    - Las ediciones hechas con **Cloud desactivado**, o por el **CLI con la app cerrada**, no las
+      apunta el journal de la app → no son candidatas.
+    - `noteflow cloud pull` ejecutado mientras la app tiene una edición offline en **su** journal
+      la sobrescribe sin copia (el CLI solo conoce sus propios `pendingUpserts`).
+    - La comparación del ancla es **textual** (sin `updated:`): otro cliente que formatee el YAML de
+      otra manera produce una copia espuria (segura).
+    - La copia conserva `favorited`/`expiresAt` y el contenido con alarmas → las alarmas pueden
+      sonar dos veces (original + copia).
+    - El **GitHub Sync** no hace copias de conflicto (sigue LWW puro).
+    - El caso simétrico — edición local pendiente **más nueva** que una versión remota que este
+      dispositivo nunca vio — sigue siendo LWW sin copia: el drain sube la local (condicionada,
+      aceptada por ser más nueva) y pisa esa versión remota.
+    - Sin `note.md` local no se copia (no es una nota legible).
   - **Orden del ciclo (`runCloudSyncCycleOnce`, `main.ts`):** desbloqueo → si hay mutaciones en vuelo
     se salta el ciclo → **pull → broadcast del resultado (`notes-updated`) → drain del journal** →
     broadcast de estado (antes drenaba primero: una subida vieja del journal pisaba a ciegas). El
@@ -939,7 +1018,9 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     `planMetadataPull`, puro): `groups.json`/`folders.json`/`templates.json` → se escribe la
     **unión por `id` prefiriendo lo local** (`mergeMetadataById`) y se re-arma la subida con ella;
     `note-order.json`, `section-colors.json`, `ui-settings.json` → se salta lo remoto (gana lo local,
-    el drain lo sube).
+    el drain lo sube). **Solo con un `lastSync` previo:** en el primer pull de un dispositivo o
+    cuenta el pendiente se ignora (`metadataPendingForPull`) y rige la regla del primer pull (ver
+    "Gate de push").
   - **Casos residuales (asumidos):** un op stale cuya versión más nueva en el servidor es un tombstone
     que el pull ya no aplicará (llegó en un pull anterior, o el primer sync no trae tombstones) se
     queda en el journal: la nota sigue solo en local y una nueva edición la re-sube (con `updated`
@@ -1004,7 +1085,21 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
 - Gate de push hasta el primer pull OK (`initialPullStatus`, como GitHub) +
   `flushPendingLocalChanges`: en la PRIMERA sincronización (sin `lastSync` previo) esto sube el
   corpus local entero, metadatos incluidos (las notas, condicionadas: lo que el servidor tenga más
-  nuevo no se pisa).
+  nuevo no se pisa). Con la puerta cerrada **no se sube nada** (tampoco el drain), pero
+  `schedulePush`/`pushPathsNow` **sí apuntan el upsert en el journal** (sin timer —
+  `planLocalPush` → `'journal'`): así el primer pull ve esas ediciones como pendientes (guards de
+  borrado, copias de conflicto) en vez de sobrescribirlas. Metadatos: una edición de
+  `groups.json`/`note-order.json`… apuntada con la puerta cerrada solo cuenta como edición local
+  pendiente (`planMetadataPull`: unión prefiriendo lo local, o se conserva lo local) si hay un
+  `lastSync` previo. En el **primer pull** de un dispositivo o cuenta (sin `lastSync`) se ignora el
+  pendiente (`metadataPendingForPull(pending, firstPull)` en el llamador, `planMetadataPull` no
+  cambia; espejo en el CLI): rige la regla documentada del primer pull — **copia de seguridad** de
+  lo local y luego gana lo remoto / unión prefiriendo lo remoto —, el op se completa
+  (`settlePathUpload`, sin re-armar la unión como edición pendiente) y el catch-up sube lo que quedó
+  en disco. Sin esto, un `ui-settings.json`/`note-order.json` de la cuenta A apuntado con la puerta
+  cerrada (dispositivo nuevo con e2ee bloqueado, reinicio tras un primer sync fallido, la siembra de
+  `ui-settings` al arrancar en `themeStore`/`editorSettingsStore`, cambio de cuenta) se habría
+  conservado y subido encima de la copia de la cuenta B.
 - **Metadatos en el primer pull (sin `lastSync` previo — también tras un cambio de cuenta):** antes
   `templates.json`, `folders.json`, `groups.json`, `note-order.json`, `ui-settings.json` y
   `section-colors.json` se sobrescribían sin merge ni copia y el catch-up subía lo sobrescrito (se

@@ -10,6 +10,8 @@ import {
   journalFail,
   journalMarkStale,
   journalMarkDirStale,
+  journalMarkDirConflictCopied,
+  conflictCopyCandidates,
   planAnchorTombstone,
   resolveRetryAction,
   shouldPullSkipDir,
@@ -571,5 +573,71 @@ describe('planAnchorTombstone (remote deletion of a folder that exists locally)'
 
   it('every pending upsert stale but the local `updated` is unknown → keep (never delete blind)', () => {
     expect(planAnchorTombstone(allStale(), 'a', null, T_DELETED)).toBe('keep')
+  })
+})
+
+describe('conflictCopied (Cloud pull kept the local version as a conflict copy)', () => {
+  it('journalMarkDirConflictCopied flags every pending upsert under the dir (stale or not), nothing else', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/note.md', 'upsert', NOW)
+    journalRecord(state, 'a/s1.md', 'upsert', NOW)
+    journalMarkStale(state, 'a/s1.md')
+    journalRecord(state, 'a/s2.md', 'delete', NOW)
+    journalRecord(state, 'ab/note.md', 'upsert', NOW)
+    expect(conflictCopyCandidates(state, 'a').sort()).toEqual(['a/note.md', 'a/s1.md'])
+    expect(journalMarkDirConflictCopied(state, 'a')).toBe(true)
+    expect(state.ops['a/note.md'].conflictCopied).toBe(true)
+    expect(state.ops['a/s1.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 0, stale: true, conflictCopied: true })
+    expect(state.ops['a/s2.md']).toEqual({ op: 'delete', queuedAt: NOW, attempts: 0 })
+    expect(state.ops['ab/note.md'].conflictCopied).toBeUndefined()
+    expect(journalMarkDirConflictCopied(state, 'a')).toBe(false) // already flagged
+    // Already copied → no candidates left: a retried apply makes no second copy.
+    expect(conflictCopyCandidates(state, 'a')).toEqual([])
+    expect(conflictCopyCandidates(state, 'ab')).toEqual(['ab/note.md'])
+  })
+
+  it('flagged ops still count as pending for the deletion guards', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/note.md', 'upsert', NOW)
+    journalMarkDirConflictCopied(state, 'a')
+    expect(hasPendingUpsert(state, 'a/note.md')).toBe(true)
+    expect(shouldDeletionRuleSkipDir(state, 'a')).toBe(true)
+  })
+
+  it('re-recording an upsert (new local edit) clears the flag', () => {
+    const state = emptySyncState()
+    journalRecord(state, 'a/note.md', 'upsert', NOW)
+    journalMarkDirStale(state, 'a')
+    journalMarkDirConflictCopied(state, 'a')
+    expect(journalRecord(state, 'a/note.md', 'upsert', LATER)).toBe(true)
+    expect(state.ops['a/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 0 })
+    expect(conflictCopyCandidates(state, 'a')).toEqual(['a/note.md'])
+  })
+
+  it('parse/serialize keep the flag on upserts only, in its exact `true` form', () => {
+    const raw = JSON.stringify({
+      version: 1,
+      ops: {
+        'a/note.md': { op: 'upsert', queuedAt: NOW, attempts: 0, stale: true, conflictCopied: true },
+        'b/note.md': { op: 'upsert', queuedAt: NOW, attempts: 0, conflictCopied: 'yes' },
+        'c/sec.md': { op: 'delete', queuedAt: NOW, attempts: 0, conflictCopied: true },
+      },
+      shas: {},
+    })
+    const state = parseSyncState(raw)
+    expect(state.ops['a/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 0, stale: true, conflictCopied: true })
+    expect(state.ops['b/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 0 })
+    expect(state.ops['c/sec.md']).toEqual({ op: 'delete', queuedAt: NOW, attempts: 0 })
+    expect(parseSyncState(serializeSyncState(state))).toEqual(state)
+  })
+
+  it('planAnchorTombstone is unaffected by the flag (keep / lost semantics unchanged)', () => {
+    const T_DELETED = Date.parse('2026-07-06T10:30:00.000Z')
+    const state = emptySyncState()
+    journalRecord(state, 'a/note.md', 'upsert', NOW)
+    journalMarkDirConflictCopied(state, 'a')
+    expect(planAnchorTombstone(state, 'a', T_DELETED - 1, T_DELETED)).toBe('keep')
+    journalMarkDirStale(state, 'a')
+    expect(planAnchorTombstone(state, 'a', T_DELETED - 1, T_DELETED)).toBe('lost')
   })
 })

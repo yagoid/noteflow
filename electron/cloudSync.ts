@@ -41,7 +41,7 @@ import * as githubSync from './githubSync'
 import { supabaseRest } from './cloudKeys'
 import { isCloudConfigured } from './cloudConfig'
 import { writeSettingsFile } from './settingsFile'
-import { NOTE_MD, listNoteDirs } from './noteFormat'
+import { NOTE_MD, listNoteDirs, newNoteId } from './noteFormat'
 import { generateNoteKey, derivePathKeyHmac, unwrapKey, decryptContent } from './cloudCrypto'
 import {
   CLOUD_METADATA_FILENAMES,
@@ -75,7 +75,13 @@ import {
   countDroppedRetries,
   shouldResetCloudState,
   planMetadataPull,
+  metadataPendingForPull,
   planRemoteDelete,
+  planLocalPush,
+  planConflictCopy,
+  buildConflictCopy,
+  anchorTitle,
+  conflictCopyTitle,
 } from './cloudSyncLogic'
 import {
   type SyncState,
@@ -88,6 +94,8 @@ import {
   journalFail,
   journalMarkStale,
   journalMarkDirStale,
+  journalMarkDirConflictCopied,
+  conflictCopyCandidates,
   planAnchorTombstone,
   resolveRetryAction,
   shouldPullSkipDir,
@@ -170,6 +178,24 @@ export interface CloudSyncStatus {
    * the UI reads it whenever it refreshes the status.
    */
   realtimeConnected: boolean
+  /**
+   * Conflict copies the pull made this session (in memory only), accumulated
+   * until the user dismisses the notice (dismissConflictCopies) — shown in the
+   * titlebar sync status card.
+   */
+  conflictCopies?: ConflictCopiesNotice
+}
+
+/**
+ * Session notice of the conflict copies made by pulls: offline edits that lost
+ * against a newer remote version were kept as new notes (see
+ * preserveConflictCopy). `titles` are the copies' titles (latest
+ * CONFLICT_COPY_TITLES_MAX); `at` = time of the latest copy.
+ */
+export interface ConflictCopiesNotice {
+  count: number
+  titles: string[]
+  at: string
 }
 
 /** A decrypted pull row plus its opaque path_key (feeds the retry set). */
@@ -225,6 +251,13 @@ let cloudSettings: CloudSyncSettings | null = null
 let syncError: string | undefined
 let initialPullStatus: InitialPullStatus = 'pending'
 let statusListener: (() => void) | null = null
+
+// Conflict copies made this session (see ConflictCopiesNotice) and the
+// localized label of their titles — injected by main.ts (the engine can't
+// import main), English until then.
+const CONFLICT_COPY_TITLES_MAX = 10
+let conflictCopies: ConflictCopiesNotice | undefined
+let conflictCopyLabel: () => string = () => 'conflict copy'
 
 // Pending debounced pushes, keyed by relPath (same semantics as githubSync).
 const pushTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -324,7 +357,18 @@ export function getCloudSyncStatus(): CloudSyncStatus {
     error: syncError ?? (hasPendingPullRetries() ? PULL_RETRY_PENDING_ERROR : undefined),
     initialPullStatus,
     realtimeConnected: cloudRealtime.isCloudRealtimeConnected(),
+    conflictCopies,
   }
+}
+
+/** main.ts injects the localized "conflict copy" label (electron/i18n.ts), resolved at copy time. */
+export function setConflictCopyLabel(label: () => string): void {
+  conflictCopyLabel = label
+}
+
+/** The user dismissed the conflict-copies notice of the sync status card. */
+export function dismissConflictCopies(): void {
+  conflictCopies = undefined
 }
 
 export function onStatusChanged(cb: () => void): void {
@@ -416,6 +460,7 @@ function resetCloudSyncState(userId: string): void {
   noteKeyCacheDekId = null
   entitlementBlocked = false
   syncError = undefined
+  conflictCopies = undefined // the previous account's notice
   patchSettings({ userId, pullSeq: undefined, pullCursor: undefined, lastSync: undefined, pullRetry: undefined })
   console.log('[CloudSync] sync state belonged to another account — reset; the next pull reconciles from scratch')
   setInitialPullStatus('pending')
@@ -456,6 +501,7 @@ export function enableCloudSync(): { ok: boolean; error?: string } {
 export function disableCloudSync(): { ok: boolean } {
   pushTimers.forEach((t) => clearTimeout(t))
   pushTimers.clear()
+  conflictCopies = undefined // the notice belongs to the Cloud session being turned off
   patchSettings({ enabled: false })
   // GitHub Sync is about to resume with a `lastSync` it can't trust: while Cloud
   // was on it received no pushes, and notes that arrived here from another device
@@ -784,8 +830,10 @@ async function listRemotePaths(dek: Uint8Array): Promise<Array<{ relPath: string
 /**
  * Debounced single-file push. `relPath` is the notes-dir-relative path and the
  * debounce key. Gated (like GitHub) until the initial pull succeeds so a stale
- * local file can't overwrite a newer remote row; deferred edits are re-queued
- * by flushPendingLocalChanges when the pull lands.
+ * local file can't overwrite a newer remote row: while gated the edit is only
+ * JOURNALED (planLocalPush → 'journal'; no timer — the pull sees it as pending)
+ * and is uploaded by flushPendingLocalChanges / the journal drain once the
+ * pull lands.
  */
 export function schedulePush(
   relPath: string,
@@ -794,15 +842,21 @@ export function schedulePush(
   onComplete?: (error?: string) => void
 ): void {
   const s = cloudSettings ?? loadCloudSyncSettings()
-  if (!s.enabled || !isCloudConfigured()) {
+  const action = () => planLocalPush({ enabled: s.enabled, configured: isCloudConfigured(), initialPullStatus })
+  if (action() === 'ignore') {
     onComplete?.()
     return
   }
   // Another account's state is reset first (the gate below then defers: the
-  // new account's first-sync catch-up uploads the folder).
+  // new account's first-sync catch-up uploads the folder) — so the op below
+  // lands in the journal of the account now signed in.
   ensureStateOwner()
-  if (initialPullStatus !== 'ok') {
-    console.warn(`[CloudSync] Push deferred: initialPullStatus=${initialPullStatus}`)
+  if (action() === 'journal') {
+    // Gate closed: journal the edit (no timer, no upload — the drain waits for
+    // the gate too) so the first pull treats it as a pending local edit
+    // (deletion guards, conflict copy) instead of overwriting it silently.
+    if (journalRecord(getState(), relPath, 'upsert', new Date().toISOString())) persistState()
+    console.warn(`[CloudSync] Push deferred (journaled): initialPullStatus=${initialPullStatus}`)
     onComplete?.(`sync-gated:${initialPullStatus}`)
     return
   }
@@ -882,7 +936,9 @@ function schedulePushUnguarded(
 /**
  * Pushes a set of files NOW (awaited, no debounce, content read from disk).
  * Same contract as githubSync.pushPathsNow: used by bulk imports / agentic
- * writes, does NOT bump lastSync, no-op while the push gate is closed.
+ * writes, does NOT bump lastSync. While the push gate is closed nothing is
+ * sent but the paths are JOURNALED (same reason as schedulePush: the first
+ * pull must see them as pending local edits); the drain uploads them later.
  */
 export async function pushPathsNow(
   notesDir: string,
@@ -891,7 +947,13 @@ export async function pushPathsNow(
   const s = cloudSettings ?? loadCloudSyncSettings()
   if (!s.enabled || !isCloudConfigured()) return { pushed: 0, errors: [] }
   ensureStateOwner()
-  if (initialPullStatus !== 'ok') return { pushed: 0, errors: [] }
+  if (planLocalPush({ enabled: s.enabled, configured: true, initialPullStatus }) === 'journal') {
+    let journaled = false
+    const nowIso = new Date().toISOString()
+    for (const relPath of relPaths) journaled = journalRecord(getState(), relPath, 'upsert', nowIso) || journaled
+    if (journaled) persistState()
+    return { pushed: 0, errors: [] }
+  }
 
   let pushed = 0
   const errors: string[] = []
@@ -1177,6 +1239,92 @@ function settleDirUploads(dir: string): boolean {
 }
 
 /**
+ * Before the pull overwrites (newer remote anchor, wholesale) or deletes
+ * (anchor tombstone over a known-lost version) the local note folder '<dir>':
+ * when a pending upsert under it (stale or not, not copied yet) holds local
+ * content that differs from what the server version will leave
+ * (planConflictCopy — `server`: relPath → content after the apply, null /
+ * absent = deleted or unknown), the WHOLE local folder is kept as a conflict
+ * copy — a new note folder with a new id, same group/folder/sections, title
+ * '<title> (conflict copy <date>)' — so the offline edit is never lost
+ * silently. The copy is uploaded through the normal path
+ * (schedulePushUnguarded: conditional, journaled, fresh note key — unguarded
+ * because the first pull of a boot runs with the push gate still closed, like
+ * flushPendingLocalChanges) and recorded in the session notice. The pending
+ * ops are then flagged `conflictCopied` (persisted) so a retry of a half-failed
+ * apply does not copy them again. THROWS when the copy can't be written (the
+ * caller's per-folder catch puts the folder in the retry set): the folder must
+ * NOT be overwritten/deleted in this pull. Returns the copy's absolute dir path
+ * (for updatedFiles) and its file count, or null when no copy was needed.
+ * `onlyPaths` restricts the candidates to the files about to be overwritten
+ * (per-section apply); the copy still carries the whole folder and the whole
+ * folder is flagged, so a later wholesale apply makes no second copy.
+ */
+function preserveConflictCopy(
+  notesDir: string,
+  dir: string,
+  server: Record<string, string | null>,
+  onlyPaths?: ReadonlySet<string>
+): { dirPath: string; files: number } | null {
+  const state = getState()
+  // `onlyPaths`: just the files the caller is about to overwrite (per-section
+  // apply) — other pending files of the folder are not being touched.
+  const candidates = conflictCopyCandidates(state, dir).filter((p) => !onlyPaths || onlyPaths.has(p))
+  if (candidates.length === 0) return null
+  const local: Record<string, string | null> = {}
+  for (const rel of candidates) {
+    try {
+      local[rel] = fs.readFileSync(path.join(notesDir, rel), 'utf-8')
+    } catch {
+      local[rel] = null // gone — nothing of it to keep
+    }
+  }
+  if (!planConflictCopy(candidates, local, server)) return null
+
+  // The copy carries the WHOLE local folder (every section), not only the
+  // pending files: it must open as the complete local version of the note.
+  const localDirPath = path.join(notesDir, dir)
+  const localFiles: Record<string, string> = {}
+  for (const f of fs.readdirSync(localDirPath)) {
+    if (f.endsWith('.md')) localFiles[f] = fs.readFileSync(path.join(localDirPath, f), 'utf-8')
+  }
+  const now = new Date()
+  const title = conflictCopyTitle(anchorTitle(localFiles[NOTE_MD] ?? ''), conflictCopyLabel(), now)
+  let copy = buildConflictCopy(localFiles, { newId: newNoteId(), title, nowIso: now.toISOString() })
+  while (fs.existsSync(path.join(notesDir, copy.dir))) {
+    copy = buildConflictCopy(localFiles, { newId: newNoteId(), title, nowIso: now.toISOString() })
+  }
+  const copyPath = path.join(notesDir, copy.dir)
+  let created = false
+  try {
+    fs.mkdirSync(copyPath) // not recursive: never writes into a folder that appeared meanwhile
+    created = true
+    for (const [name, content] of Object.entries(copy.files)) {
+      fs.writeFileSync(path.join(copyPath, name), content, 'utf-8')
+    }
+  } catch (err) {
+    // A half-written copy would show up as a broken note: remove it (only if
+    // this call created it). The original folder is left untouched.
+    if (created) {
+      try {
+        fs.rmSync(copyPath, { recursive: true, force: true })
+      } catch { /* best effort */ }
+    }
+    throw err
+  }
+  if (journalMarkDirConflictCopied(state, dir)) persistState()
+  for (const [name, content] of Object.entries(copy.files)) {
+    schedulePushUnguarded(`${copy.dir}/${name}`, content)
+  }
+  conflictCopies = {
+    count: (conflictCopies?.count ?? 0) + 1,
+    titles: [...(conflictCopies?.titles ?? []), title].slice(-CONFLICT_COPY_TITLES_MAX),
+    at: now.toISOString(),
+  }
+  return { dirPath: copyPath, files: Object.keys(copy.files).length }
+}
+
+/**
  * Incremental pull: fetches rows with seq > pullSeq (or a full reconcile, see
  * planPullQuery) plus the rows of the retry set (applies that failed in
  * earlier pulls), decrypts them, groups by note folder and applies the SAME
@@ -1234,6 +1382,14 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
   let backupDir: string | null = null
   let backedUp = 0
   let mergedMetadata = 0
+  let conflictCopiesMade = 0
+  const noteConflictCopy = (copy: { dirPath: string; files: number } | null): void => {
+    if (!copy) return
+    conflictCopiesMade++
+    updatedFiles.push(copy.dirPath) // renderer + AI index pick the new note up
+    filesDown += copy.files
+    pulled++
+  }
 
   try {
     const mainRows = await fetchChangedRows(s)
@@ -1302,7 +1458,7 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
           // the local note is not newer than the deletion (planAnchorTombstone
           // → 'lost'): the server already rejected that version against a newer
           // one, which is now deleted — LWW deletes it. A local `updated` newer
-          // than the deletion is an unjournaled edit (gate closed, CLI): kept.
+          // than the deletion is an unjournaled edit (Cloud disabled, CLI): kept.
           // (A tombstone's updated_at is the deletion time.)
           const tombstoneAction = planAnchorTombstone(state, dir, localUpdatedMs, anchor.updatedAtMs)
           if (tombstoneAction === 'keep') {
@@ -1312,6 +1468,13 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
           // Note deleted remotely — apply locally under the safety rule, or
           // unconditionally when the local copy is a known-lost version.
           if (tombstoneAction === 'lost' || shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs)) {
+            if (tombstoneAction === 'lost') {
+              // The known-lost version still holds an edit the server never
+              // took: keep it as a conflict copy before deleting (nothing of
+              // the folder survives on the server → every path compares as
+              // deleted). A failed copy throws → the folder is NOT deleted.
+              noteConflictCopy(preserveConflictCopy(notesDir, dir, {}))
+            }
             fs.rmSync(localDirPath, { recursive: true, force: true })
             deleted++
             filesDown++
@@ -1363,6 +1526,21 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
           for (const key of fetched.undecryptable) decryptFailures.add(key)
           errors.push(...fetched.errors.map((e) => `${dir}: ${e}`))
 
+          // BEFORE anything is overwritten: a pending local edit that differs
+          // from the version about to be applied is kept as a conflict copy
+          // (LWW would otherwise drop it silently, here and everywhere). The
+          // server side = the remote anchor + every row of the group + the
+          // listed sections just fetched (pending ones included — see
+          // toFetch); tombstoned or absent → deleted. A failed copy throws →
+          // retry set, the folder is not touched in this pull.
+          if (localExists) {
+            const server: Record<string, string | null> = { [anchor.relPath]: anchor.content }
+            for (const e of [...group, ...fetched.entries]) {
+              if (!isAnchorPath(e.relPath)) server[e.relPath] = e.deleted ? null : e.content
+            }
+            noteConflictCopy(preserveConflictCopy(notesDir, dir, server))
+          }
+
           // BEFORE the first write: every pending upload under the folder is
           // the losing version — flag it stale and cancel its timer. If the
           // apply fails halfway, a live section upsert would otherwise be
@@ -1402,6 +1580,26 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
           // cursor, an anchor and its sections can land in different pulls
           // (separate uploads); dropping the group here would lose the
           // section content for good (shouldApplyRemoteSection).
+          //
+          // A remote section written over a file that still has a pending
+          // local upsert (a newer remote version whose anchor hasn't arrived)
+          // would drop that edit — settlePathUpload completes it below. Keep
+          // the local folder as a conflict copy first, judged ONLY on the files
+          // about to be overwritten (identical content = this device's own
+          // upload coming back → no copy). Throws → retry set, nothing written.
+          const overwrites = group.filter(
+            (e) =>
+              !isAnchorPath(e.relPath) &&
+              !e.deleted &&
+              !shouldPullSkipFile(state, e.relPath) &&
+              hasPendingUpsert(state, e.relPath) &&
+              shouldApplyRemoteSection(e.updatedAtMs, localUpdatedMs)
+          )
+          if (localExists && overwrites.length > 0) {
+            const server: Record<string, string | null> = {}
+            for (const e of overwrites) server[e.relPath] = e.content
+            noteConflictCopy(preserveConflictCopy(notesDir, dir, server, new Set(Object.keys(server))))
+          }
           for (const entry of group) {
             if (isAnchorPath(entry.relPath)) continue
             if (shouldPullSkipFile(state, entry.relPath)) continue
@@ -1444,6 +1642,11 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
       }
     }
 
+    // Counts only — titles/dirs never reach the console.
+    if (conflictCopiesMade > 0) {
+      console.log(`[CloudSync] ${conflictCopiesMade} local version(s) kept as conflict copies`)
+    }
+
     // No await from here to the watermark write: one check covers the rest.
     assertGeneration(gen)
 
@@ -1458,7 +1661,9 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
         const localContent = fs.existsSync(metadataPath)
           ? fs.readFileSync(metadataPath, 'utf-8')
           : null
-        const pending = hasPendingUpsert(state, entry.relPath)
+        // Never an "unsynced local edit" on the first pull (metadataPendingForPull):
+        // the op is then settled below / uploaded by the first-sync catch-up.
+        const pending = metadataPendingForPull(hasPendingUpsert(state, entry.relPath), firstPull)
         const decision = planMetadataPull(entry.relPath, localContent, entry.content, {
           pendingUpsert: pending,
           firstPull,

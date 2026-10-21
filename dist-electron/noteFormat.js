@@ -10,6 +10,8 @@ exports.splitFrontmatter = splitFrontmatter;
 exports.parseNoteDir = parseNoteDir;
 exports.parseLegacyNoteRaw = parseLegacyNoteRaw;
 exports.serializeNoteFolder = serializeNoteFolder;
+exports.newNoteId = newNoteId;
+exports.noteDirname = noteDirname;
 exports.extractUpdatedTimestamp = extractUpdatedTimestamp;
 exports.hasFormatMarker = hasFormatMarker;
 exports.writeFormatMarker = writeFormatMarker;
@@ -271,6 +273,24 @@ function serializeNoteFolder(note, opts) {
     return { files, sectionFiles };
 }
 // ── Misc helpers ─────────────────────────────────────────────────────────────
+/** Fresh 8-char note id (same length the renderer's nanoid(8) / main's imports use). */
+function newNoteId() {
+    return newId(8);
+}
+/**
+ * Directory name for a note: '<slug>-<id>' (slug frozen at creation time).
+ * ⚠️ Mirror of noteDirname in src/lib/noteUtils.ts and cli/noteflow.js — keep
+ * the slug rule identical in all three.
+ */
+function noteDirname(id, title) {
+    const slug = title
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .trim()
+        .replace(/\s+/g, '-')
+        .slice(0, 40);
+    return `${slug ? `${slug}-` : ''}${id}`;
+}
 /** Reads the `updated:` timestamp out of a note.md (or legacy note) content. */
 function extractUpdatedTimestamp(content) {
     const match = content.match(/^updated:\s*['"]?([^'"\n]+)['"]?\s*$/m);

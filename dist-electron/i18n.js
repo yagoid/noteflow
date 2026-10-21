@@ -6,7 +6,8 @@
 // these are resolved at call-time from the persisted `language` setting (see
 // `mainMessages()` in main.ts) so they follow the same live-switch behaviour as
 // the renderer. Alarm notifications carry only user content (note title + task
-// text), so there is nothing to translate there.
+// text), so there is nothing to translate there. The sync engine also takes the
+// label of the conflict copies it creates from here (injected by main.ts).
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveLang = resolveLang;
 exports.getMessages = getMessages;
@@ -45,6 +46,9 @@ const en = {
         managedKeychainLocked: "Couldn't unlock your saved NoteFlow session — your system keychain may be locked. Unlock it and try again.",
         managedServiceUnavailable: 'The NoteFlow account service is temporarily unavailable. Please try again in a moment.',
     },
+    sync: {
+        conflictCopy: 'conflict copy',
+    },
 };
 // `: Messages` forces key parity with English at compile time.
 const es = {
@@ -80,6 +84,9 @@ const es = {
         managedOffline: 'No se pudo conectar con NoteFlow AI. Comprueba tu conexión a internet e inténtalo de nuevo.',
         managedKeychainLocked: 'No se pudo desbloquear tu sesión de NoteFlow guardada — puede que el llavero del sistema esté bloqueado. Desbloquéalo e inténtalo de nuevo.',
         managedServiceUnavailable: 'El servicio de cuentas de NoteFlow no está disponible en este momento. Inténtalo de nuevo en un momento.',
+    },
+    sync: {
+        conflictCopy: 'copia en conflicto',
     },
 };
 /**
