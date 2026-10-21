@@ -113,9 +113,15 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     single-flight por generación de sesión.
   - **Token con resultado discriminado:** internamente `getAccessTokenResult()` devuelve
     `{ok:true, token}` o `{ok:false, reason: 'noSession'|'network'|'server'|'locked'}`;
-    `getAccessToken()` (cloudSync, cloudKeys, realtime, llm) es un wrapper fino que devuelve
-    `string|null`. `refreshEntitlements` lo mapea a `notSignedIn` / `network` / `refreshFailed` /
-    `sessionLocked`, así que "Refresh" offline dice "no hay conexión", no "Sign in first".
+    `getAccessToken()` (realtime, llm) es un wrapper fino que devuelve `string|null`.
+    `refreshEntitlements` lo mapea a `notSignedIn` / `network` / `refreshFailed` /
+    `sessionLocked`, así que "Refresh" offline dice "no hay conexión", no "Sign in first". Los
+    helpers REST de Cloud (`cloudKeys.supabaseRest` / `callCloudKeysFn`) usan también la versión
+    discriminada y lanzan un error **etiquetado por motivo** (`electron/cloudAccessErrors.ts`, puro y
+    testeado: `not-signed-in` solo para `noSession`, `account-unreachable` para `network`/`server`,
+    `session-locked` para `locked`); el pull de `cloudSync` y los `catch` de `cloudKeys` lo traducen
+    con `cloudAccessErrorMessage` (también un `fetch failed`/timeout cuenta como "inalcanzable"), así
+    que con sesión y sin red Cloud dice "Can't reach NoteFlow Cloud…", no "Sign in…".
   - **Sesión bloqueada (`sessionLocked`):** si `safeStorage` no puede descifrar el refresh token
     (Linux antes de desbloquear el llavero, el usuario deniega el Keychain en macOS) **no** es un
     sign-out: el blob se queda en disco, `signedIn` sigue a `true`, `AccountStatus.sessionLocked`
@@ -756,7 +762,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   jamás con el fallback base64 que se usa para tokens (una master key en base64 en disco anularía
   el E2EE). `lockCloudKeys()` borra también la cache.
 - Helper `supabaseRest()` exportado (PostgREST con token fresco por request vía
-  `account.getAccessToken()`) — lo reutiliza `cloudSync.ts`.
+  `account.getAccessTokenResult()`; sin token lanza un error etiquetado por motivo, ver
+  `cloudAccessErrors.ts` en § 2) — lo reutiliza `cloudSync.ts`.
 
 ### Sync engine (`electron/cloudSync.ts` + lógica pura en `cloudSyncLogic.ts`, tramo 2 — implementado)
 - Mismo modelo "archivo por ruta relativa" y **misma regla de conflicto** que el GitHub Sync

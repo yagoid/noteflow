@@ -41,6 +41,8 @@ noteflow/
 │   │                    #   refresh token cifrado, entitlements) — ver monetization.md
 │   ├── accountTransition.ts # Lógica pura del sign-out/sign-in: qué apagar (Cloud, DEK, IA gestionada)
 │   │                    #   y qué restaurar (registro accountRestore) — testeada; ver monetization.md § 4
+│   ├── cloudAccessErrors.ts # Pura: errores etiquetados "sin token" (sin sesión / inalcanzable /
+│   │                    #   llavero bloqueado) y su mensaje — testeada; ver monetization.md § 2 (token discriminado)
 │   ├── cloudConfig.ts   # URL + anon key del proyecto Supabase real (la anon key es pública por diseño)
 │   ├── cloudCrypto.ts   # Capa criptográfica pura de NoteFlow Cloud (DEK/KEK/recovery, AES-GCM, path_key)
 │   ├── cloudKeys.ts     # Sesión de claves E2EE en main (setup/unlock/lock, DEK solo en memoria,
