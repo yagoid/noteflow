@@ -175,7 +175,7 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   y está testeada en `tests/supabase/billing-webhook.test.ts`. Deploy con `--no-verify-jwt` (LS no
   manda JWT).
 - **Endurecimiento del webhook (desplegado 2026-10-21: migración 0010 aplicada y `billing-webhook`
-  v6; falta suscribir los eventos nuevos en LS — ver `supabase/README.md` § 5):**
+  v6; eventos nuevos suscritos en el webhook de live — ver `supabase/README.md` § 5):**
   - **`test_mode`:** `mapLemonEvent(payload, variantMap, { allowTestMode })` ignora los eventos con
     `meta.test_mode === true` (`{ignored: "test mode event"}`) salvo que el secreto
     `LEMONSQUEEZY_ALLOW_TEST_MODE=true` (solo proyectos de prueba, **nunca** producción). Es un
@@ -454,9 +454,9 @@ es **un preset más**, no una implementación nueva.
   catálogo nuevo, los multiplicadores y el endpoint `/usage`.
 - **Endurecimiento desplegado (2026-10-21):** migraciones 0009 + 0010 + 0011 aplicadas,
   `ai-proxy` v9 y `billing-webhook` v6 desplegados (código idéntico al repo, verificado), permisos
-  de las RPC nuevas comprobados. **Pendiente del operador:** suscribir
-  `subscription_payment_refunded` y `subscription_plan_changed` en el webhook de **live** de LS
-  (sin eso los reembolsos no se procesan); adoptar la revisión manual de
+  de las RPC nuevas comprobados. El webhook de **live** de LS escucha además
+  `subscription_payment_refunded` y `subscription_plan_changed` (9 eventos, 2026-10-21).
+  **Pendiente del operador:** adoptar la revisión manual de
   `expire_stale_subscriptions` (README § 5, paso 6 — `pg_cron` solo si se aceptan sus falsos
   positivos).
   `AI_MAX_INFLIGHT` es opcional; `LEMONSQUEEZY_ALLOW_TEST_MODE` **no** se pone en producción.
@@ -492,8 +492,9 @@ es **un preset más**, no una implementación nueva.
     creado durante ella (si no, quedan activas para siempre).
 
   El webhook de live apunta al mismo endpoint, con los
-  mismos 7 eventos `subscription_*` y el **mismo signing secret** que el de test (pendiente: añadir
-  `subscription_payment_refunded` y `subscription_plan_changed`, ver arriba). Las URLs de
+  **mismo signing secret** que el de test y 9 eventos: los 7 `subscription_*` de estado más
+  `subscription_payment_refunded` y `subscription_plan_changed` (añadidos 2026-10-21; el de test
+  sigue con los 7). Las URLs de
   checkout (`cloudConfig.ts`) son `/checkout/buy/<slug>` de la **variante Monthly** de cada
   producto, no el slug del producto. **Precios con IVA incluido** (decidido 2026-10-19): la store
   tiene activado "tax-inclusive pricing", así que el cliente paga exactamente la cifra publicada
