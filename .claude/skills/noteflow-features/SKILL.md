@@ -1154,7 +1154,7 @@ pobladas en la build (precios en `.claude/context/monetization.md` § visión, c
   (icono ⚠ + "That code doesn't match, or it has expired…"), el input se pone con borde rojo y da
   un **shake** corto, y su contenido queda **seleccionado** para reteclear directo; el error se
   borra en cuanto escribes. Junto a "Verify & sign in" hay **"Resend code"** (con cuenta atrás de
-  30 s tras cada envío) para pedir otro código sin volver al paso del email — al llegar el nuevo,
+  60 s tras cada envío) para pedir otro código sin volver al paso del email — al llegar el nuevo,
   línea "New code sent — check your inbox.". Los mensajes de error vienen **traducidos** (el
   proceso main manda un código de error, no texto en inglés).
 - **Con sesión:** muestra el email, badges de plan ("NoteFlow AI" / "NoteFlow Cloud" con estado

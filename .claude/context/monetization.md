@@ -1376,4 +1376,5 @@ puro vía `fetch` desde el proceso main.
   `aria-invalid` + `aria-describedby`/`role="alert"`, contenido seleccionado al fallar (retecleo
   directo) y limpieza del error al escribir. Ese paso incluye **"Resend code"**
   (`sendCode('resend')`, misma llamada `accountRequestOtp` sin volver al paso de email) con
-  cooldown local de 30 s — el rate-limit real lo pone GoTrue y llega como `rateLimited`.
+  cooldown local de 60 s, igual al rate-limit por email de GoTrue (~60 s; con 30 s el primer
+  reenvío fallaba con `rateLimited`).

@@ -13,10 +13,10 @@ const LEGAL_BASE = 'https://yagoid.github.io/noteflow'
 
 type Step = 'email' | 'code'
 
-// Seconds the "Resend code" button stays disabled after a code is emailed —
-// enough to stop accidental double-sends without getting in the way (GoTrue
-// rate-limits on its side too, which would surface as `rateLimited`).
-const RESEND_COOLDOWN_S = 30
+// Seconds the "Resend code" button stays disabled after a code is emailed.
+// Matches GoTrue's per-email OTP rate limit (~60 s): a shorter cooldown let the
+// first resend fail with `rateLimited` ("Too many attempts").
+const RESEND_COOLDOWN_S = 60
 
 // Settings → Account: NoteFlow account (Supabase email + OTP) and plan badges.
 // All session/token handling lives in the main process — this panel only ever
@@ -397,7 +397,7 @@ export function AccountPanel() {
               {t.settings.account.verifyAndSignIn}
             </button>
             {/* Didn't arrive / expired: a new code without going back to the
-                email step. Short cooldown so it can't be spammed. */}
+                email step. Cooldown = the server's rate limit (RESEND_COOLDOWN_S). */}
             <button
               onClick={() => sendCode('resend')}
               disabled={busy || resendCooldown > 0}
