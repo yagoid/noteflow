@@ -28,6 +28,7 @@ import { firstValidDate } from '../../lib/dateUtils'
 import { ownsKeys } from '../../lib/keyScope'
 import { SectionNameField } from './SectionNameField'
 import { TempNoteExpiryMenu } from './TempNoteExpiryMenu'
+import { createDebouncedSave } from '../../lib/pendingEdits'
 
 // ---------------------------------------------------------------------------
 // Confirm modal state type
@@ -163,14 +164,18 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
 
   // Local title draft — decoupled from store to prevent cursor jump
   const [titleDraft, setTitleDraft] = useState(note?.title ?? '')
-  const titleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [titleSave] = useState(createDebouncedSave)
   // True while the draft holds keystrokes not yet written. Only a dirty draft may be
   // written on blur or shield itself from store updates: a title edited in ANOTHER pane
   // or window must replace this draft even if our input still has focus.
   const titleDirtyRef = useRef(false)
 
-  // Raw mode debounce ref (for sorting: save to store while typing)
-  const rawDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Raw mode debounced save (for sorting: save to store while typing)
+  const [rawSave] = useState(createDebouncedSave)
+
+  // Debounced saves are registered in lib/pendingEdits (pruning a note or closing the
+  // window flushes them first) and flushed when this editor goes away.
+  useEffect(() => () => { rawSave.flush(); titleSave.flush() }, [rawSave, titleSave])
 
   // Per-section undo/redo stacks for raw mode
   const undoStackMap = useRef<Map<string, string[]>>(new Map())
@@ -462,12 +467,11 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     const pos = textarea?.selectionStart ?? rawContent.length
     const newValue = rawContent.substring(0, pos) + insertText + rawContent.substring(pos)
     setRawContent(newValue)
-    if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
-    rawDebounceRef.current = setTimeout(() => {
-      if (activeSection && noteRef.current) {
-        updateSection(noteRef.current.id, activeSection.id, { content: newValue })
-      }
-    }, 600)
+    // Target captured now: when the save fires the pane may show another note.
+    const target = noteRef.current
+    if (!target) return
+    const sectionId = activeSection.id
+    rawSave.schedule(target.id, 600, () => { void updateSection(target.id, sectionId, { content: newValue }) }, `${target.id}/${sectionId}`)
   }, [rawContent, activeSection, updateSection]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Detect tab overflow to reposition + button ───────────────────────────
@@ -534,7 +538,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     if (!sameNote || !note || !activeSectionId || pendingSectionRef.current) return
     if (note.sections.some((s) => s.id === activeSectionId)) return
     const fallback = note.sections[0]
-    if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
+    rawSave.cancel()
     setActiveSectionId(fallback?.id ?? null)
     setRawContent(fallback?.content ?? '')
     setRenamingId(null)
@@ -690,7 +694,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
         setRawContent(section.content)
         void updateSection(n.id, sectionId, { isRawMode: true })
       } else {
-        if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
+        rawSave.cancel()
         void updateSection(n.id, sectionId, { content: rawContentRef.current, isRawMode: false })
       }
     }
@@ -728,7 +732,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
       window.removeEventListener('noteflow:open-sticky-all', handleOpenStickyAll)
       window.removeEventListener('noteflow:in-note-search', handleInNoteSearch)
     }
-  }, [updateSection, mutateSections, isPaneActive, t])
+  }, [updateSection, mutateSections, isPaneActive, t, rawSave])
 
   // Close the in-note search bar when the active section or note changes.
   // The Editor is recreated (key-based) so matches and decorations are gone.
@@ -758,15 +762,15 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     const val = e.target.value
     setTitleDraft(val)
     titleDirtyRef.current = true
-    if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current)
-    titleDebounceRef.current = setTimeout(() => {
+    const id = note.id
+    titleSave.schedule(id, 300, () => {
       titleDirtyRef.current = false
-      updateNote(note.id, { title: val })
-    }, 300)
+      void updateNote(id, { title: val })
+    })
   }
 
   const handleTitleBlur = () => {
-    if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current)
+    titleSave.cancel()
     // A clean draft has nothing of ours to save — writing it could revert a title
     // changed meanwhile in another pane/window.
     if (!titleDirtyRef.current) return
@@ -860,7 +864,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
       setRawContent(activeSection.content)
       void updateSection(note.id, activeSection.id, { isRawMode: true })
     } else {
-      if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
+      rawSave.cancel()
       void updateSection(note.id, activeSection.id, { content: rawContent, isRawMode: false })
     }
   }
@@ -878,7 +882,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     setSectionColorPickerId(null)
 
     if (rawMode && activeSection) {
-      if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
+      rawSave.cancel()
       void updateSection(note.id, activeSection.id, { content: rawContent })
     }
 
@@ -906,7 +910,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     const source = currentNote?.sections.find((s) => s.id === sectionId)
     if (!currentNote || !source) return
     if (rawMode && activeSection) {
-      if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
+      rawSave.cancel()
       await updateSection(currentNote.id, activeSection.id, { content: rawContentRef.current })
     }
     const copy = await duplicateSection(currentNote.id, sectionId, tf(t.common.sectionCopyName, { name: baseName ?? source.name }))
@@ -1097,12 +1101,12 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
 
     if (activeSection) pushToUndoStack(activeSection.id, rawContent)
     setRawContent(newContent)
-    if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
-    rawDebounceRef.current = setTimeout(() => {
-      if (activeSection && noteRef.current) {
-        void updateSection(noteRef.current.id, activeSection.id, { content: newContent })
-      }
-    }, 600)
+    // Target captured now: when the save fires the pane may show another note.
+    const target = noteRef.current
+    if (activeSection && target) {
+      const sectionId = activeSection.id
+      rawSave.schedule(target.id, 600, () => { void updateSection(target.id, sectionId, { content: newContent }) }, `${target.id}/${sectionId}`)
+    }
   }
 
   const displayContent = rawContent.replace(
@@ -1143,7 +1147,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
 
 
   const handleRawBlur = () => {
-    if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
+    rawSave.cancel()
     if (activeSection && activeSection.content !== rawContent) {
       void updateSection(note.id, activeSection.id, { content: rawContent })
     }
@@ -1736,6 +1740,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
                 key={`${note.id}-${activeSection?.id ?? 'none'}`}
                 content={activeSection?.content ?? ''}
                 onChange={handleSectionContentChange}
+                noteId={note.id}
                 placeholder={tf(t.editor.sectionStartWriting, { name: activeSection?.name ?? t.editor.sectionFallback })}
                 fontSize={fontSize}
                 autoFocus={renamingId === null}

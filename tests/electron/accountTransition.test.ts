@@ -3,6 +3,9 @@ import {
   planAccountTransition,
   parseAccountRestore,
   clearRestoreSurface,
+  stepAiEntitlementBaseline,
+  NO_AI_BASELINE,
+  type AiEntitlementBaseline,
   type AccountLocalState,
   type AccountObservation,
   type AccountRestoreRecord,
@@ -270,5 +273,76 @@ describe('parseAccountRestore', () => {
     expect(parseAccountRestore('nope')).toBeNull()
     expect(parseAccountRestore({ cloudEnabled: true })).toBeNull()
     expect(parseAccountRestore({ identity: '' })).toBeNull()
+  })
+})
+
+describe('stepAiEntitlementBaseline — auto-switch to NoteFlow AI on subscribe', () => {
+  const ME = 'user@example.com'
+  type Obs = Parameters<typeof stepAiEntitlementBaseline>[1]
+  /** Feeds a sequence of observations and returns the autoSwitch flags. */
+  function run(observations: Obs[], start: AiEntitlementBaseline = NO_AI_BASELINE): boolean[] {
+    let state = start
+    return observations.map((obs) => {
+      const step = stepAiEntitlementBaseline(state, obs)
+      state = step.next
+      return step.autoSwitch
+    })
+  }
+
+  it('fires on a fresh false → true for the same identity', () => {
+    expect(run([
+      { identity: ME, ai: false, fresh: true },
+      { identity: ME, ai: true, fresh: true },
+    ])).toEqual([false, true])
+  })
+
+  it('never fires on the first observation of an identity (boot of a subscribed user)', () => {
+    expect(run([{ identity: ME, ai: true, fresh: true }])).toEqual([false])
+  })
+
+  it('unknown → true is NOT a transition', () => {
+    expect(run([
+      { identity: ME, ai: false, fresh: false }, // placeholder: never fetched
+      { identity: ME, ai: true, fresh: true },
+    ])).toEqual([false, false])
+  })
+
+  it('a cached false (not fetched this run) is not a baseline either', () => {
+    expect(run([
+      { identity: ME, ai: false, fresh: false }, // restored from settings.json
+      { identity: ME, ai: true, fresh: true },   // subscribed while the app was closed
+    ])).toEqual([false, false])
+  })
+
+  it('an unknown observation in between does not erase a known false', () => {
+    expect(run([
+      { identity: ME, ai: false, fresh: true },
+      { identity: ME, ai: false, fresh: false },
+      { identity: ME, ai: true, fresh: true },
+    ])).toEqual([false, false, true])
+  })
+
+  it('fires only once', () => {
+    expect(run([
+      { identity: ME, ai: false, fresh: true },
+      { identity: ME, ai: true, fresh: true },
+      { identity: ME, ai: true, fresh: true },
+    ])).toEqual([false, true, false])
+  })
+
+  it('an identity change re-establishes the baseline instead of firing', () => {
+    expect(run([
+      { identity: 'a@example.com', ai: false, fresh: true },
+      { identity: null, ai: false, fresh: false },
+      { identity: 'b@example.com', ai: true, fresh: true },
+    ])).toEqual([false, false, false])
+  })
+
+  it('signing out and back in as the same user does not carry the old false over', () => {
+    expect(run([
+      { identity: ME, ai: false, fresh: true },
+      { identity: null, ai: false, fresh: false },
+      { identity: ME, ai: true, fresh: true },
+    ])).toEqual([false, false, false])
   })
 })

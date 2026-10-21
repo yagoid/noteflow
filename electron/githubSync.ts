@@ -2,6 +2,7 @@ import { app, safeStorage } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import https from 'https'
+import { writeSettingsFile } from './settingsFile'
 import {
   NOTE_MD,
   NOTE_FORMAT_VERSION,
@@ -114,7 +115,7 @@ function readSettings(): Record<string, unknown> {
 }
 
 function writeSettings(data: Record<string, unknown>): void {
-  fs.writeFileSync(getSettingsPath(), JSON.stringify(data), 'utf-8')
+  writeSettingsFile(getSettingsPath(), data) // owner-only (0600) on POSIX
 }
 
 /**

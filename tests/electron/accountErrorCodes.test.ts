@@ -20,9 +20,10 @@ function unionMembers(relPath: string): string[] {
   const source = fs.readFileSync(path.join(ROOT, relPath), 'utf-8')
   const start = source.indexOf('export type AccountErrorCode =')
   expect(start, `AccountErrorCode not declared in ${relPath}`).toBeGreaterThanOrEqual(0)
-  // The union ends at the first blank line after the declaration.
-  const end = source.indexOf('\n\n', start)
-  const block = source.slice(start, end === -1 ? undefined : end)
+  // The union ends at the first blank line after the declaration. EOL-agnostic:
+  // with core.autocrlf=true the checkout is CRLF, so a literal '\n\n' never matches.
+  const blankLine = /\r?\n[ \t]*\r?\n/.exec(source.slice(start))
+  const block = source.slice(start, blankLine ? start + blankLine.index : undefined)
   return Array.from(block.matchAll(/'([A-Za-z]+)'/g), (m) => m[1])
 }
 

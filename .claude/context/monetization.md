@@ -78,7 +78,74 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   que el Device Flow de GitHub ya establecido en la app). La sesión vive en el **proceso main**,
   espejo del patrón `githubSync`: refresh token cifrado con `safeStorage` en `settings.json`
   (sección `account`), **nunca cruza al renderer** — el renderer solo ve estado público
-  (`{email, signedIn, entitlements}`).
+  (`{email, signedIn, entitlements, entitlementsKnown, entitlementsFetchedAt, sessionLocked, …}`).
+- **Resiliencia de sesión y entitlements (cliente, `electron/account.ts` + puro en
+  `electron/entitlementsRetry.ts`):** con el checkout en live, un fallo puntual no puede dejar a un
+  usuario que paga viendo "Subscribe" (riesgo de doble cobro) ni con la IA bloqueada.
+  - **Desconocidas ≠ falsas.** `AccountStatus.entitlementsKnown` es `false` hasta el primer fetch
+    OK (o hasta restaurar la cache). Mientras tanto `entitlements` es un placeholder y **ningún
+    consumidor actúa sobre él**: el preset `noteflow` se deja usar (`isManagedAiUsable`: sesión y
+    (`ai` o desconocidas) — el proxy es el juez, responde 403 si no hay plan); `PlanOffers`,
+    `CloudPanel` y `LlmConfigView` no pintan ni las cards de Subscribe ni el estado "sin plan" ni el
+    botón Enable de Cloud, sino un aviso neutro **"Couldn't verify your plan yet — Retry"**
+    (`PlanUnknownNotice`, Retry = `accountRefreshEntitlements`); `AccountPanel` muestra los badges
+    en estado "Couldn't check". `cloudSync.removeRemoteByPathKeys` con entitlements **no verificadas**
+    — desconocidas **o restauradas de la cache** (`account.areEntitlementsFromCache()`) — intenta el
+    tombstone y **nunca** cae al `DELETE` físico (lanza → la op sigue en el journal); decisión pura
+    `planRemoteDelete` en `cloudSyncLogic.ts` (ver § 4 "Deletes = tombstones"). Para las ofertas, en
+    cambio, la cache **sí** cuenta como conocida (una cache `ai:false` muestra las cards: aceptado).
+    Helpers puros del renderer en `src/lib/subscriptionPlans.ts` (`isPlanUnknown`,
+    `isPlanOffered`, `hasKnownEntitlement`).
+  - **Cache persistida:** cada fetch OK guarda `settings.json` → `account.entitlementsCache =
+    {userId, ai, cloud, fetchedAt}` (no es secreto). Al cargar solo se usa si `userId` coincide con
+    el de la sesión guardada (`parseEntitlementsCache`): entonces `entitlementsKnown` es `true` desde
+    el arranque y "Last checked" muestra la hora cacheada; el fetch de fondo del boot la sobrescribe.
+    Se borra con la sesión (`clearSession`). `persistAccountSettings` reemplaza la sección entera,
+    así que rotación de token y cache se construyen siempre desde el `accountSettings` **actual**.
+  - **Reintentos:** todo fallo transitorio (`network`, `refreshFailed` = 5xx/PostgREST/refresh de
+    token fallido, `sessionLocked`) programa un reintento con backoff (`entitlementsRetryDelayMs`:
+    5 s, 15 s, 30 s, 1 min, 2 min, 5 min y tope 10 min, ±20 % de jitter). No se reintenta
+    `notConfigured` ni `notSignedIn`. Un éxito resetea el contador; sign-out o cambio de identidad
+    cancelan lo pendiente. Además se reintenta **ya** en `powerMonitor` `'resume'` y al volver la
+    red: el main de Electron no tiene evento `online`, así que mientras haya un reintento pendiente
+    se sondea `net.isOnline()` cada 10 s y un flanco offline→online lo dispara. El primer fetch de
+    `verifyOtp` (best-effort) entra en el mismo backoff si falla. `refreshEntitlements` es
+    single-flight por generación de sesión.
+  - **Token con resultado discriminado:** internamente `getAccessTokenResult()` devuelve
+    `{ok:true, token}` o `{ok:false, reason: 'noSession'|'network'|'server'|'locked'}`;
+    `getAccessToken()` (cloudSync, cloudKeys, realtime, llm) es un wrapper fino que devuelve
+    `string|null`. `refreshEntitlements` lo mapea a `notSignedIn` / `network` / `refreshFailed` /
+    `sessionLocked`, así que "Refresh" offline dice "no hay conexión", no "Sign in first".
+  - **Sesión bloqueada (`sessionLocked`):** si `safeStorage` no puede descifrar el refresh token
+    (Linux antes de desbloquear el llavero, el usuario deniega el Keychain en macOS) **no** es un
+    sign-out: el blob se queda en disco, `signedIn` sigue a `true`, `AccountStatus.sessionLocked`
+    se pone a `true` y el backoff/resume/Refresh reintentan el descifrado (un descifrado OK lo
+    limpia). `AccountPanel` muestra un aviso recuperable (Retry / Sign out). Mientras está
+    bloqueada no se rota ni persiste nada (no se puede refrescar). Solo un 400/401 de GoTrue al
+    refrescar (token revocado) cierra la sesión.
+  - **Generación de sesión:** `sessionGeneration` se incrementa en `clearSession` y en cada
+    sign-in (`verifyOtp`). `refreshAccessToken` y `refreshEntitlements` la capturan antes de la red y,
+    si cambió, **descartan** el resultado (ni persisten el token rotado — eso resucitaría la sesión
+    tras un sign-out en vuelo — ni asignan access token, ni aplican/cachean entitlements).
+  - **Persistencia que no pierde tokens:** si escribir `settings.json` falla tras una rotación, el
+    access token nuevo y el refresh token rotado se quedan en memoria (`accountSettings` es la
+    fuente de verdad), se reintenta la escritura (3 intentos inmediatos, luego `pendingPersist` +
+    reintento cada 30 s y en cada operación de cuenta) y `loadAccountSettings` no relee el disco
+    obsoleto mientras haya escritura pendiente. Ya no se reporta como error de red. Igual con el
+    **sign-out**: si no se puede borrar la sección `account` del disco queda `pendingClear` (mismos
+    reintentos), para que una sesión cerrada no reaparezca tras reiniciar. `main.ts` llama a
+    `account.flushAccountPersistence()` en `before-quit` como último intento.
+  - **Access token rechazado:** un 401 de PostgREST (fetch de entitlements) o del proxy de NoteFlow
+    AI (`friendlyChatError`) llama a `account.invalidateAccessToken()`: el siguiente uso acuña uno
+    nuevo — o, si el refresh token también está revocado, el 400/401 del refresh cierra sesión
+    limpiamente — en vez de reutilizar uno muerto hasta su caducidad local.
+  - **Logout local:** `signOut` llama a `POST /auth/v1/logout?scope=local` (también el CLI en
+    `cloud logout`): sin `scope=local` GoTrue revoca **todas** las sesiones del usuario (otros
+    dispositivos y el CLI).
+  - **`settings.json` en 0600:** todos los writers del `settings.json` de `userData` (`main.ts`,
+    `account.ts`, `githubSync.ts`, `cloudSync.ts`, `cloudKeys.ts`) escriben vía
+    `electron/settingsFile.ts` (`writeSettingsFile`): in-place, `mode: 0o600` al crear y `chmod`
+    previo si el fichero estaba más abierto (mismo idioma que el CLI). Windows no cambia.
 - **Entitlements agnósticos al proveedor de pago:**
   `subscriptions(user_id, product 'ai'|'cloud'|'bundle', status, renews_at, provider, provider_ref)`
   poblada exclusivamente por los **webhooks del MoR** (Edge Function `billing-webhook`, valida
@@ -98,12 +165,56 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   (`on_trial|active|cancelled → 'active'` — la suscripción cancelada sigue pagada hasta `ends_at`,
   coherente con el comentario de `electron/entitlements.ts`; `past_due|unpaid|paused →
   'past_due'`; `expired → 'expired'`) y aplica el evento con la RPC idempotente
-  `apply_subscription_event` (migración 0002: upsert por índice único `(provider, provider_ref)` +
-  guard `p_event_at >= updated_at` contra entregas fuera de orden; sin `user_id` en custom_data
-  solo actualiza, nunca inserta). Eventos no procesables (variante desconocida, `data.type` ≠
-  `subscriptions`, payload malformado) → 200 `{ignored}` para no entrar en el bucle de reintentos
-  de LS. La lógica pura vive en `logic.ts` (agnóstica de Deno) y está testeada en
-  `tests/supabase/billing-webhook.test.ts`. Deploy con `--no-verify-jwt` (LS no manda JWT).
+  `apply_subscription_event` (migración 0002, redefinida en la **0010**: con `user_id` es un único
+  `INSERT … ON CONFLICT (provider, provider_ref) DO UPDATE … WHERE excluded.updated_at >=
+  updated_at` — la versión de 0002, UPDATE y luego INSERT … DO NOTHING, perdía en silencio el
+  evento más nuevo si dos de una suscripción nueva llegaban a la vez; el `user_id` no se cambia en
+  conflicto; sin `user_id` en custom_data solo actualiza, nunca inserta). Eventos no procesables
+  (variante desconocida, `data.type` ≠ `subscriptions`, payload malformado) → 200 `{ignored}` para
+  no entrar en el bucle de reintentos de LS. La lógica pura vive en `logic.ts` (agnóstica de Deno)
+  y está testeada en `tests/supabase/billing-webhook.test.ts`. Deploy con `--no-verify-jwt` (LS no
+  manda JWT).
+- **Endurecimiento del webhook (código listo; migración 0010 + redeploy pendientes del operador —
+  ver `supabase/README.md` § 5):**
+  - **`test_mode`:** `mapLemonEvent(payload, variantMap, { allowTestMode })` ignora los eventos con
+    `meta.test_mode === true` (`{ignored: "test mode event"}`) salvo que el secreto
+    `LEMONSQUEEZY_ALLOW_TEST_MODE=true` (solo proyectos de prueba, **nunca** producción). Es un
+    segundo filtro, además del variant map con solo IDs de live (test y live comparten secreto).
+  - **`custom_data.user_id` validado como UUID** (`isUuid`): un valor basura (la URL del checkout
+    es pública) se trata como ausente → camino de solo-update + `console.warn`, en vez de un 500
+    por el cast a `uuid` que dejaría a LS reintentando para siempre.
+  - **Reembolsos:** `subscription_payment_refunded` (`data.type 'subscription-invoices'`, la
+    suscripción en `data.attributes.subscription_id`) → `MapResult` `{kind: 'expire',
+    providerRef}` **solo si el reembolso es total** (factura `status === 'refunded'`); un
+    `partial_refund` se ignora y se loguea (decide el operador). El index llama a la RPC
+    `expire_subscription_ref(provider, provider_ref)` (0010), que pone `status='expired'` y
+    **`updated_at='infinity'`**: LS no cancela la suscripción al reembolsar, así que siguen
+    llegando eventos más nuevos (`subscription_updated`; y `subscription_cancelled`, que mapeamos
+    a `active` hasta `ends_at`) que, con `now()`, la reactivarían vía el guard de orden; con
+    `infinity` ningún evento puede ganarle. Nada más lee `subscriptions.updated_at` (cliente:
+    `product,status,renews_at`; ai-proxy y RLS de `files`: `product,status`). Un reembolso antes de
+    que exista la fila es no-op (devuelve 0, se loguea). Hay que **suscribir
+    `subscription_payment_refunded` y `subscription_plan_changed`** en el webhook de LS.
+    - ⚠️ **Cancelar la suscripción en LS es OBLIGATORIO** tras todo reembolso total (automático o
+      manual): LS no la cancela, y con la fila bloqueada en `infinity` nuestro lado ya no reacciona,
+      así que el cliente seguiría pagando **sin acceso** → contracargos / riesgo de consumo. El log
+      del webhook lo recuerda (`… expired after a full refund — CANCEL subscription <id> in Lemon
+      Squeezy`).
+    - ⚠️ El webhook no distingue qué factura se reembolsa: el reembolso total de una factura
+      **antigua** expira también el periodo actual ya pagado. Reembolsar a sabiendas (runbook en
+      `supabase/README.md` § 5).
+  - **Reconciliación (revisión manual, NO automática):** `expire_stale_subscriptions()` (0010,
+    service role) expira las filas `provider='lemonsqueezy'` `active` con `renews_at < now() - 7
+    días` (red de seguridad ante un `subscription_expired` perdido); nunca toca `provider='manual'`
+    ni `renews_at` null y no cambia `updated_at`. **Tiene falsos positivos:** `renews_at` solo
+    avanza con el `subscription_updated` de cada renovación; si se pierde esa entrega, un cliente
+    que **sí paga** queda con el `renews_at` viejo y se expiraría — y el siguiente evento de LS
+    puede tardar un mes (un año en el anual) salvo reenvío manual. Por eso el flujo documentado
+    (README § 5, paso 6) es: listar candidatos con el mismo predicado → comprobar cada
+    `provider_ref` en LS → expirar solo los confirmados (o reenviar desde el log de webhooks de LS
+    el último `subscription_updated` si LS la da por activa). Recuperación de un error: reenviar
+    ese evento o `set status='active', renews_at='<real>'`. Agendarla con `pg_cron` es **opcional
+    y solo aceptando** ese riesgo; la migración no la programa.
 
 ## 3. NoteFlow AI — IA gestionada (IMPLEMENTADA, fase 4.1)
 
@@ -114,22 +225,102 @@ es **un preset más**, no una implementación nueva.
 - **Servidor — Edge Function `supabase/functions/ai-proxy`** (Deno, cero dependencias; lógica pura
   en `logic.ts`, testeada en `tests/supabase/ai-proxy.test.ts`) exponiendo `POST
   .../ai-proxy/chat/completions` + `GET .../ai-proxy/models` OpenAI-compatible. Pipeline por
-  request: resuelve el access token del caller a `user_id` vía `/auth/v1/user` (401 si inválido) →
-  entitlement `ai`/`bundle` activo consultando `subscriptions` con el service role (403 con error
-  OpenAI-shaped si no) → cuota mensual vía RPC `get_month_usage` (429 si superada; cabeceras
-  `X-NoteFlow-Tokens-Used`/`X-NoteFlow-Tokens-Limit` en las respuestas) → allowlist de modelos
-  (400 si fuera) → forward a **OpenRouter** con la key del servidor inyectando `usage:
-  {include: true}` (extensión que añade el bloque `usage` al último chunk SSE) y **eliminando del
-  body los campos de enrutado/coste de OpenRouter** (`models`, `route`, `provider`, `plugins` —
-  la allowlist solo valida `model` y esos campos permitirían ejecutar modelos caros fuera de la
-  lista o comprar features extra con la key del operador; ver `buildUpstreamBody`). El stream se
-  devuelve en **passthrough** mientras un `tee()` lo escanea (`createSseUsageScanner`) y al acabar
-  inserta la fila en `usage_events` (migración 0003: tabla + RPC `get_month_usage`, solo service
-  role escribe/invoca; **migración 0007** añade la columna `quota_tokens` — ver "Cuota ponderada")
-  — registro **best-effort**, un fallo no rompe la respuesta. Se despliega **con verify JWT**
-  (default; a diferencia del webhook). Env: `OPENROUTER_API_KEY` (secreto), `AI_MONTHLY_TOKENS`
-  (default 3M, ahora en **tokens ponderados**) y `AI_ALLOWED_MODELS` (default: lista curada en
-  `logic.ts`).
+  request (orden del código **desde la 0009**; la versión desplegada hoy comprueba la cuota antes
+  de leer el body y mide solo al final — ver "Coste acotado"): resuelve el access token del caller
+  a `user_id` vía `/auth/v1/user` (401 si inválido) → entitlement `ai`/`bundle` activo consultando
+  `subscriptions` con el service role (403 con error OpenAI-shaped si no) → **lee el body con
+  tope de tamaño** (413 `request_too_large`) → JSON válido, modelo en la allowlist (400
+  `model_not_allowed`) y `messages` array no vacío → `buildUpstreamBody` → **reserva** vía RPC
+  `reserve_ai_usage` (429 `monthly_quota_exceeded` / 429 `too_many_concurrent_requests`; 500 si la
+  RPC falla; cabeceras `X-NoteFlow-Tokens-Used`/`X-NoteFlow-Tokens-Limit` con el `used` de la RPC)
+  → forward a **OpenRouter** con la key del servidor → **liquidación** de la reserva. El body
+  reenviado es una **allowlist** (`UPSTREAM_ALLOWED_FIELDS`: `model`, `messages`, `stream`,
+  `max_tokens`, `tools`, `tool_choice`, `temperature`, `top_p`, `stop`, `seed`, `response_format`,
+  `parallel_tool_calls`; todo lo demás se descarta — en particular `models`/`route` (fallback a
+  modelos fuera de la lista), `provider`, `preset`, `plugins`, `web_search_options`, `reasoning`,
+  `n`, `transforms`, `stream_options`), con `max_tokens` **siempre** fijado a
+  `clampMaxTokens(cliente)` y `usage: {include: true}` forzado (extensión que añade el bloque
+  `usage` —con `cost`— al último chunk SSE). El stream se devuelve en **passthrough** mientras un
+  `tee()` lo escanea (`createSseUsageScanner`: solo hace `JSON.parse` de las líneas que contienen
+  `"usage"` y de las primeras hasta conocer el id de generación) y al acabar liquida la fila de
+  `usage_events` (tabla de la 0003; `quota_tokens` de la 0007 — ver "Cuota ponderada"; `pending`,
+  `cost_usd`, `generation_id` de la 0009). Los **errores del upstream nunca se reenvían tal
+  cual**: `mapUpstreamError` los loguea y devuelve uno de tres errores OpenAI-shaped — 4xx que
+  menciona imagen/`image_url`/vision/multimodal/"unknown variant" → 400 `image_input_unsupported`
+  (mensaje con el literal `image_url`, del que depende `friendlyChatError` en `electron/main.ts`);
+  4xx de longitud de contexto → 400 `context_length_exceeded`; el resto → 502 `upstream_error`
+  genérico. Un **402** de OpenRouter (el operador sin crédito) es el 502 genérico pero se loguea
+  como `ai-proxy: OPENROUTER OUT OF CREDIT (402)`. Se despliega **con verify JWT** (default; a
+  diferencia del webhook). Env: `OPENROUTER_API_KEY` (secreto), `AI_MONTHLY_TOKENS` (default 3M,
+  en **tokens ponderados**), `AI_ALLOWED_MODELS` (default: lista curada en `logic.ts`) y
+  `AI_MAX_INFLIGHT` (default 3).
+- **Coste acotado — reserva + concurrencia + topes (migración 0009; código listo, migración +
+  redeploy pendientes del operador, en ese orden — README § 6):** antes, la cuota se comprobaba
+  (`used >= limit`) y el consumo solo se insertaba al terminar el stream, así que (a) cientos de
+  peticiones en paralelo con `max_tokens` enorme pasaban todas el check, y (b) una petición que
+  supera el wall clock de la Edge Function (150-400 s) moría antes del chunk de `usage` y no se
+  medía nunca. Ahora:
+  - **Topes** (`logic.ts`): `MAX_OUTPUT_TOKENS = 8192` (`clampMaxTokens`: entero en [1, 8192];
+    ausente/inválido → 8192, nunca "sin fijar", que dejaría a OpenRouter usar el máximo del
+    modelo; el cliente manda 4096, 6144 el generador de perfil). `MAX_BODY_BYTES = 8 MiB`,
+    comprobado por `Content-Length` (rechazo temprano) **y** contando bytes al leer el stream
+    (`readBodyWithLimit`; el header puede mentir o faltar). 8 MiB y no ~4 MB porque el cliente
+    acepta imágenes de hasta 10 MB y reenvía las imágenes de toda la conversación en cada turno:
+    con 4 MB una sola foto de móvil (3-5 MB → 4-7 MB en base64) ya daría 413. El tope protege la
+    memoria del isolate; el coste lo acota la reserva.
+  - **Estimación** (`estimateReservationTokens`): entrada ≈ bytes UTF-8 del body serializado / 4,
+    salvo que cada parte `image_url` cuenta una tarifa plana **`IMAGE_PART_TOKENS = 1600`** (techo
+    de Anthropic ≈ 1,15 MP; por encima de los 765 de OpenAI a 1024²) en vez de su base64 — si no,
+    una captura de 2 MB reservaría ~500k tokens y, si el `usage` no llegara, se le cobrarían al
+    usuario — + el `max_tokens` ya recortado, × multiplicador del modelo, redondeado.
+  - **RPC `reserve_ai_usage`** (security definer, solo service role): `pg_advisory_xact_lock` por
+    usuario (las peticiones paralelas del mismo usuario se serializan en el check), `used` = misma
+    definición que `get_month_usage` (reservas pendientes incluidas) → `'quota'` si `used >=
+    limit`; en vuelo = filas `pending` con `at` más reciente que `p_stale_minutes`
+    (`RESERVATION_STALE_MINUTES = 10`, mayor que el wall clock) → `'concurrency'` si ya hay
+    `p_max_inflight`; si pasa, inserta la fila `pending` con la estimación en `quota_tokens` y
+    devuelve `{ok, reason, used, id}` (jsonb).
+  - **Liquidación:** PATCH `usage_events?id=eq.<id>&pending=eq.true` (una sola liquidación por
+    construcción: un segundo PATCH no casa ninguna fila) con tokens reales, `quota_tokens` real,
+    `cost_usd` (`usage.cost`), `generation_id` y `pending=false`. Si el stream acaba **sin**
+    `usage` pero se vio el id de generación, intento best-effort contra `GET
+    /api/v1/generation?id=` de OpenRouter (1,5 s + 1 reintento a los 3 s; `parseGenerationStats`,
+    contadores `native_*` primero). Si no hay nada, la reserva **se queda** (pending, estimación
+    cobrada) y se loguea — es justo lo que cubre el caso de isolate matado, donde ni el lookup
+    corre. Pasados 10 min deja de contar para la concurrencia, pero sigue contando para la cuota.
+  - **Liberación:** si OpenRouter responde no-OK, o el `fetch` al upstream lanza, **se asume** que
+    no ha facturado → la fila se liquida **a 0** (`pending=false`). Riesgo residual en el caso del
+    `fetch` que lanza: si la conexión se corta **después** de enviar la petición (p. ej. un reset
+    durante una llamada larga no-stream), OpenRouter puede haber generado y cobrado igualmente, y
+    ese consumo no queda medido. Se liquida en vez de borrarla para que el
+    intento fallido quede auditable (fallos de upstream por usuario/modelo) y por el mismo camino
+    de código que la liquidación normal.
+  - **Columna `pending` con default `false`** a propósito: en la ventana migrar → redeploy, la
+    función vieja sigue insertando filas finales y no deben contar como reservas en vuelo.
+  - **Exceso máximo sobre la cuota:** una petición solo se admite con `used < limit` (y `used` ya
+    incluye las reservas en vuelo), así que lo que se puede pasar un usuario de su cuota está
+    acotado por **`max_inflight × reserva máxima por petición`**: hoy 3 × (8 MiB / 4 ≈ 2,1M de
+    entrada + 8.192 de salida) × multiplicador en tokens de cuota. En **coste real** el tope
+    efectivo es menor, porque la entrada real la limita la ventana de contexto del modelo
+    (200k-1M tokens): el peor caso es `x-ai/grok-4.5` (500k de contexto a precio de contexto largo,
+    $4/M entrada + $12/M salida ≈ **$2,1 por petición**, ≈ **$6,3** con 3 en vuelo), una vez por
+    usuario y mes. La reserva puede quedarse **corta** si la estimación bytes/4 subestima la
+    entrada real (texto CJK, sobre todo) — es una estimación, no una tokenización.
+  - **Efectos para el usuario:** una petición que falla a mitad de stream sin `usage` ni
+    generación consultable le cuesta la estimación completa (entrada + `max_tokens`); 3 isolates
+    matados seguidos le bloquean hasta 10 min por concurrencia; y **parar y reenviar** 3 veces
+    seguidas puede dar 429 `too_many_concurrent_requests`: abortar en el cliente no cancela el
+    upstream (la rama de medición del `tee()` sigue leyendo), así que la reserva sigue `pending`
+    hasta que OpenRouter termina la respuesta (~1-2 min).
+  - ⚠️ **Hueco conocido — seguimiento en el cliente (fuera de este cambio):** el selector de
+    adjuntos acepta imágenes de hasta 10 MB (`PROFILE_FILE_MAX_BYTES` en `electron/main.ts`) y
+    el chat reenvía las imágenes de toda la conversación en cada turno, así que con el tope de
+    8 MiB del servidor una sola foto de ~6,3 MB (o dos fotos de móvil) dan un **413 permanente**
+    en esa conversación, que el usuario ve como `HTTP 413 — {json}` crudo. `friendlyChatError`
+    tampoco traduce `request_too_large`, `too_many_concurrent_requests`,
+    `context_length_exceeded`, `upstream_error` ni `image_too_large` (solo
+    `monthly_quota_exceeded` y la heurística de imágenes). Pendiente: limitar/reescalar las imágenes
+    en el cliente para el preset `noteflow` y mapear esos códigos a mensajes i18n.
 - **Cuota ponderada por modelo (migración 0007):** el catálogo mezcla modelos baratos y
   "avanzados" (más caros), así que la cuota mensual ya no cuenta tokens reales sino **tokens
   ponderados**. Cada modelo tiene un multiplicador (`MODEL_QUOTA_MULTIPLIERS` en
@@ -174,8 +365,22 @@ es **un preset más**, no una implementación nueva.
   La credencial es un **access token fresco** por request: `resolveConfigAsync()` en
   `llm/index.ts` (llama a `account.getAccessToken()`; lanza error accionable sin sesión) — main
   la usa en chat/list-models/test/profile-generate; `resolveConfig` síncrona queda para el resto.
-  `toPublic().configured` para este preset exige sesión + entitlement `ai`, y
-  `notConfiguredMessage()` da el motivo exacto ("sign in" vs "requires subscription").
+  `toPublic().configured` para este preset exige sesión + (entitlement `ai` **o entitlements aún
+  desconocidas** — `isManagedAiUsable`; el proxy decide con su 403), y `notConfiguredMessage()` da el
+  motivo exacto ("sign in" vs "requires subscription").
+  **Endpoint fijado:** la credencial de este preset es el access token de Supabase, así que un
+  preset con `editableBaseUrl: false` **ignora** cualquier `byPreset.<id>.baseUrl` guardado
+  (`effectiveBaseUrl` devuelve siempre `preset.baseUrl`) y `ai:llm-set-config` no persiste un
+  `baseUrl` para él (`acceptsBaseUrl`); si no, el token podría acabar en otro host.
+  **Errores del proxy en el chat:** con el preset `noteflow` activo, `friendlyChatError` (main)
+  traduce un 401 del proxy a "vuelve a iniciar sesión" (e invalida el access token en memoria) y un
+  403 a "suscripción inactiva" (y lanza un `refreshEntitlements()` fire-and-forget); el 429 de cuota
+  sigue igual. Si ni siquiera hay token, `resolveConfigAsync` (vía `getAccessTokenResult`) dice el
+  motivo real: sin sesión → "sign in", `network` → sin conexión, `locked` → llavero bloqueado,
+  `server` → servicio no disponible (`managedTokenFailureMessage`). Clasificación pura en
+  `electron/ai/llm/managedErrors.ts`; textos en `electron/i18n.ts` (`chatErrors`, EN/ES; main pasa
+  `mainMessages().chatErrors` a `resolveConfigAsync`). Con un proveedor BYO un 401/403 conserva su
+  texto crudo (es una API key mala).
   Capabilities: imágenes **según el modelo activo** (`modelMeta`; los text-only las desactivan);
   PDF no (anthropic-only).
 - **UI:** `LlmConfigView` presenta las dos fuentes del asistente como **opciones excluyentes** —
@@ -197,8 +402,11 @@ es **un preset más**, no una implementación nueva.
   4. **Ajustes → Sincronización → NoteFlow Cloud** (`CloudPanel`): `['cloud', 'bundle']`, tanto en el
      estado sin sesión como en el gate de entitlement (que cubre setup y enable — ver § 4, "Gating").
   Reglas: si `!account.configured` (build sin Supabase) no pinta nada — no se anuncian precios de algo
-  que no se puede comprar. Un plan solo aparece mientras falte su entitlement, y **Bundle exige que
-  falten AMBAS** (para no facilitar doble facturación); si no queda ninguno, no renderiza. Nombre y
+  que no se puede comprar. Con sesión y entitlements **desconocidas** no pinta ninguna card: muestra
+  `PlanUnknownNotice` ("Couldn't verify your plan yet — Retry"), salvo con `showUnknownNotice={false}`
+  (Ajustes → Cuenta, donde ya lo dicen los badges). Un plan solo aparece mientras se **sepa** que
+  falta su entitlement, y **Bundle exige que falten AMBAS** (para no facilitar doble facturación); si
+  no queda ninguno, no renderiza. Nombre y
   precio salen de `src/lib/subscriptionPlans.ts` (`SUBSCRIPTION_PRICES`, display-only) y el Bundle
   lleva badge "Best value". **La card entera es el call-to-action** (`<button>` cuando es clickable,
   para foco + teclado; el CTA de dentro es un `<span>` porque un button no puede anidar otro button).
@@ -215,12 +423,15 @@ es **un preset más**, no una implementación nueva.
   cuenta del proceso en curso** y cambia `settings.aiLlm.active` a `'noteflow'` automáticamente
   (si no lo era ya) antes de emitir `account:status-changed`, para que el renderer recargue ya
   con el proveedor correcto.
-  **Matiz importante:** `entitlements` no se persiste (arranca en `NO_ENTITLEMENTS` en cada boot;
-  ver "implementación" abajo) — para no forzar el cambio en cada arranque de un usuario ya
-  suscrito, se fija una **baseline por identidad** (`aiEntitlementBaseline` + `aiEntitlementIdentity`
-  = el email de la sesión, o `null` en signed-out) en la PRIMERA observación de cada identidad
-  (boot con sesión persistida, justo tras `verifyOtp`, o tras un `signOut`) sin disparar nada;
-  solo una transición posterior **para la misma identidad** en el mismo proceso (p. ej. "Subscribe"
+  **Matiz importante:** para no forzar el cambio en cada arranque de un usuario ya suscrito, se fija
+  una **baseline por identidad** (`aiEntitlementBaseline` = `{identity, baseline}`, identity = el
+  email de la sesión o `null` en signed-out; lógica pura `stepAiEntitlementBaseline` en
+  `accountTransition.ts`, testeada) en la PRIMERA observación **fresca** de cada identidad (primer
+  fetch OK tras el boot con sesión persistida, o tras `verifyOtp`) sin disparar nada. Las
+  entitlements desconocidas y las restauradas de la **cache en disco** (`account.entitlementsCache`,
+  ver § 2; `account.areEntitlementsFromCache()`) **no** son observaciones frescas: ni fijan ni mueven
+  la baseline, así que ni desconocida→`true` ni cacheada-`false`→`true` cuentan como transición.
+  Solo una transición posterior **para la misma identidad** en el mismo proceso (p. ej. "Subscribe"
   en el navegador → volver → "Refresh" en Settings → Account) dispara el auto-switch. **La
   identidad se re-arma en cada cambio de `signedIn`/email** — necesario porque la UI permite
   sign-out + sign-in sin reiniciar la app: sin este reset, una cuenta B que YA tenía la
@@ -239,11 +450,14 @@ es **un preset más**, no una implementación nueva.
   sesión **la misma** cuenta, si la entitlement `ai` sigue viva se re-activa `noteflow`
   automáticamente (registro `accountRestore` — ver § 4 "Cerrar sesión", donde está el mecanismo
   completo; es un camino **aparte** del auto-switch por entitlement de arriba, e idempotente).
-- **Pendiente del operador (cuota ponderada):** correr la **migración 0007** (`supabase db push`)
-  y **redesplegar `ai-proxy`** (`supabase functions deploy ai-proxy`) para que el nuevo catálogo,
-  los multiplicadores y el endpoint `/usage` entren en vigor. Sin redeploy, el proxy sigue
-  sirviendo el catálogo viejo y `get_month_usage` (si 0007 no se corrió) sumaría una columna
-  inexistente.
+- **Cuota ponderada desplegada:** la migración 0007 está aplicada y `ai-proxy` redesplegado con el
+  catálogo nuevo, los multiplicadores y el endpoint `/usage`.
+- **Pendiente del operador (endurecimiento, 2026-10):** `supabase db push` (0009 + 0010) →
+  `supabase functions deploy ai-proxy` → `supabase functions deploy billing-webhook
+  --no-verify-jwt`; suscribir `subscription_payment_refunded` y `subscription_plan_changed` en el
+  webhook de LS; adoptar la revisión manual de `expire_stale_subscriptions` (README § 5, paso 6
+  — `pg_cron` solo si se aceptan sus falsos positivos).
+  `AI_MAX_INFLIGHT` es opcional; `LEMONSQUEEZY_ALLOW_TEST_MODE` **no** se pone en producción.
 - **Billing en live mode (hecho 2026-10-19):** productos copiados de test a live con "Copy to Live
   Mode" (los variant IDs **cambian** entre modos). IDs de variante:
 
@@ -276,7 +490,8 @@ es **un preset más**, no una implementación nueva.
     creado durante ella (si no, quedan activas para siempre).
 
   El webhook de live apunta al mismo endpoint, con los
-  mismos 7 eventos `subscription_*` y el **mismo signing secret** que el de test. Las URLs de
+  mismos 7 eventos `subscription_*` y el **mismo signing secret** que el de test (pendiente: añadir
+  `subscription_payment_refunded` y `subscription_plan_changed`, ver arriba). Las URLs de
   checkout (`cloudConfig.ts`) son `/checkout/buy/<slug>` de la **variante Monthly** de cada
   producto, no el slug del producto. **Precios con IVA incluido** (decidido 2026-10-19): la store
   tiene activado "tax-inclusive pricing", así que el cliente paga exactamente la cifra publicada
@@ -288,6 +503,46 @@ es **un preset más**, no una implementación nueva.
   al proxy es lo mismo que viajaría a cualquier proveedor con key propia (pregunta + chunks
   recuperados). Las secciones `aiHidden` y las notas cifradas ya quedan fuera del índice y por
   tanto nunca salen. La IA gestionada NO pasa por la nube de notas (subsistemas independientes).
+
+### Coste en el peor caso (IA gestionada) — ⚠️ decisión pendiente del operador
+
+Precios de OpenRouter consultados el **2026-10-20** (`curl -s https://openrouter.ai/api/v1/models`,
+USD por millón de tokens, entrada / salida): `deepseek-v4-pro` 0,40 / 0,80 · `deepseek-v4-flash`
+0,09 / 0,18 · `mimo-v2.5-pro` 0,435 / 0,87 · `gpt-5.6-luna` 0,20 / 1,20 (0,40 / 1,80 con prompt
+> 272k) · `claude-haiku-4.5` 1 / 5 · `grok-4.5` 2 / 6 (4 / 12 con prompt > 200k) · `kimi-k3`
+0,239 / 11,936. Coste de un usuario que **agota la cuota de 3.000.000 tokens ponderados** en un solo
+modelo, con el **~5,5 % de comisión** de OpenRouter al comprar crédito incluida:
+
+| Modelo (mult.) | Tokens reales | Mezcla típica agéntica (90 % entrada / 10 % salida) | Peor caso (100 % salida: prompt mínimo + `max_tokens` 8192 en bucle) |
+|---|---|---|---|
+| `deepseek-v4-flash` (×1) | 3M | $0,32 | $0,58 |
+| `gpt-5.6-luna` (×1) | 3M | $0,95 ($1,71 con contexto > 272k) | $3,80 |
+| `deepseek-v4-pro` (×1) | 3M | $1,39 | $2,52 |
+| `mimo-v2.5-pro` (×1) | 3M | $1,51 | $2,75 |
+| `claude-haiku-4.5` (×1) | 3M | $4,43 | **$15,82** |
+| `grok-4.5` (×2) | 1,5M | $3,80 (**$7,60** con contexto > 200k) | **$9,49** |
+| `kimi-k3` (×6) | 0,5M | $0,74 | $6,30 |
+
+Ingreso neto por suscriptor (precios con IVA incluido; LS ~5 % sobre el total + $0,50 ≈ 0,43 € a
+1 € ≈ 1,15 $; sin contar posibles recargos de LS por pago internacional/PayPal):
+
+| Plan | Neto/mes con IVA 21 % (ES) | Neto/mes con IVA 27 % (máx. UE) |
+|---|---|---|
+| AI mensual (5,99 €) | 4,22 € ≈ $4,85 | 3,98 € ≈ $4,58 |
+| AI anual (49,99 €/12) | 3,20 € ≈ $3,68 | 3,04 € ≈ $3,49 |
+| Bundle mensual (7,99 €, incluye Cloud) | 5,77 € ≈ $6,63 | 5,46 € ≈ $6,28 |
+
+**Conclusión:** con la mezcla típica, los dos DeepSeek, MiMo, GPT-5.6 Luna y Kimi dejan margen
+holgado; `claude-haiku-4.5` ($4,43) y `grok-4.5` ($3,80) ya se comen casi todo el neto del plan AI
+mensual y **superan el del anual**, y `grok-4.5` con contexto largo ($7,60) supera cualquier plan.
+Un usuario que **agote la cuota a propósito** con `claude-haiku-4.5` (×1, salida a $5/M) **pierde
+dinero en cualquier plan** (~$15,8 frente a ≤ $6,6 de neto), y `grok-4.5` (×2) y `kimi-k3` (×6)
+también superan el neto del plan AI en el peor caso. El
+multiplicador ×1 de Haiku está muy por debajo de su coste relativo (su salida cuesta ~6× la de
+DeepSeek v4 pro). Opciones (decide el operador; **no se ha tocado** ninguna cuota ni
+multiplicador): subir los multiplicadores de Haiku/Grok/Kimi, bajar `AI_MONTHLY_TOKENS`, ponderar
+la salida más que la entrada, o pasar a una cuota en **coste** (`cost_usd` ya se guarda desde la
+0009). La tabla supone la cuota completa; el exceso por reserva (arriba) se suma una vez por mes.
 
 ## 4. NoteFlow Cloud — nube de notas cifrada (managed | e2ee)
 
@@ -394,9 +649,9 @@ diferencial de privacidad, no como peaje.
   técnicamente las notas (incluidas las ya subidas) y los secretos actuales quedan invalidados.
 - El estado público (`CloudSyncStatus`) lleva `keysMode: 'managed' | 'e2ee' | null` (null = sin
   fila o aún desconocido); persiste en `settings.cloudSync.keysMode` como cache de arranque.
-- **Pendiente del operador (downgrade):** **redesplegar la Edge Function `cloud-keys`**
-  (`supabase functions deploy cloud-keys`) para que la ruta `/downgrade` exista en producción;
-  sin redeploy el botón del panel devuelve 404 (`not_found`). No hace falta migración nueva.
+- **Downgrade desplegado:** la Edge Function `cloud-keys` está redesplegada con la ruta
+  `/downgrade` (no hizo falta migración nueva). Un despliegue sin ella respondería 404
+  (`not_found`) al botón del panel.
 
 ### Jerarquía de claves (implementada en `electron/cloudCrypto.ts`)
 - **Master key (DEK)** aleatoria de 256 bits, generada en cliente al activar la nube.
@@ -526,7 +781,15 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   por ausencia** (el pull incremental no ve filas "que faltan"). El borrado local aplica la regla
   de seguridad de siempre (`updated <= lastSync`) **más el guard del journal** (abajo). Sin
   entitlement, RLS bloquea el UPDATE → fallback a `DELETE` físico (la fila desaparece sin
-  notificar a otros dispositivos — asumido: sin suscripción tampoco pueden pushear). Ojo: el
+  notificar a otros dispositivos — asumido: sin suscripción tampoco pueden pushear). Ese fallback
+  solo ocurre con la entitlement **verificada** — obtenida por un fetch en ESTA ejecución — a
+  `false` (o verificada a `true` y un 403 por estar obsoleta): con entitlements **desconocidas**
+  (`!entitlementsKnown`, p. ej. boot offline) **o solo cacheadas** (`areEntitlementsFromCache()`, la
+  cache puede ser vieja) se intenta el tombstone y, si RLS lo rechaza, se **lanza** en vez de borrar
+  físicamente — la op sigue en el journal y se reintenta cuando se verifiquen. Decisión pura en
+  dos pasos `planRemoteDelete({entitled, verified, patchStatus?})` (`cloudSyncLogic.ts`,
+  `'tombstone' | 'delete' | 'defer' | 'done' | 'fail'`), testeada en
+  `tests/electron/cloudSync.test.ts` (invariante: nunca `'delete'` sin verificar). Ojo: el
   tombstone lleva `updated_at = ahora` (hora del borrado), no el `updated` de la nota.
   - **Borrar una nota entera** (`scheduleDeleteDir` → `deleteRemoteDirNow`) necesita las filas de
     la carpeta, pero `path_key` es opaco: `listRemotePaths` lista **todas** las filas vivas
@@ -832,7 +1095,7 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   se **consume**. Si la identidad NO coincide (otra cuenta) el registro se borra sin aplicar nada
   (arranque limpio). ⚠️ Las entitlements llegan **asíncronas** (`initAccount` difiere el refresh 5 s;
   `verifyOtp` las trae al vuelo), así que el registro **se evalúa en cada cambio de status** mientras
-  la identidad coincida y solo se consume cuando ya se conocen (`entitlementsFetchedAt`) — evaluar
+  la identidad coincida y solo se consume cuando ya se conocen (`AccountStatus.entitlementsKnown`) — evaluar
   contra el placeholder `NO_ENTITLEMENTS` lo tiraría a la basura. Si la entitlement caducó, no se
   restaura nada: la feature simplemente se vuelve a ofrecer.
   - **El pull inicial NO se lanza desde la restauración:** en ese instante la DEK es `null` por
@@ -842,11 +1105,14 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   - **Corte anti-sorpresa (`clearRestoreSurface`):** una acción **explícita** del usuario logueado
     sobre una de las dos superficies gana sobre el registro y borra **esa mitad** (IPC `cloud:enable`
     / `cloud:disable` → mitad Cloud; `ai:llm-set-config` con `active` → mitad IA). Sin este corte, un
-    usuario que entra con el fetch de entitlements caído (el de `verifyOtp` es best-effort y
-    `entitlementsFetchedAt` solo vive en memoria), decide dejar Cloud apagado, y ve cómo un
+    usuario que entra con el fetch de entitlements caído (el de `verifyOtp` es best-effort y,
+    hasta que uno funcione, siguen desconocidas), decide dejar Cloud apagado, y ve cómo un
     `refreshEntitlements` posterior (o el diferido de 5 s del siguiente arranque) se lo re-enciende
     por detrás. Por mitades y no todo-o-nada: tocar el asistente no debe tirar la restauración de
     Cloud que sigue esperando a que lleguen las entitlements.
+- **Sesión bloqueada ≠ sign-out:** `status.sessionLocked` (llavero del sistema bloqueado, ver § 2)
+  mantiene `signedIn` e identidad, así que ni `planAccountTransition` ni la baseline del auto-switch
+  lo ven como un cierre de sesión — no se apaga Cloud ni se suelta la DEK ni se vuelve a BYO.
 - **UI:** el badge de la tarjeta Cloud (`SyncPanel.tsx`) se deriva de `enabled && signedIn` — con lo
   anterior ese caso ya no debería darse, pero el badge no puede mentir. No hizo falta copy nuevo: los
   estados existentes (`t.settings.cloud.signInFirst`, aviso ámbar `noteflowSignIn` de `LlmConfigView`)
@@ -887,7 +1153,10 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   switches de modo managed↔e2ee tampoco. ⚠️ Matiz preexistente (no es del gate): **Sync now solo se
   renderiza con `status.enabled`**, así que un caducado que pulse Disable pierde el pull manual y no
   puede reactivar (el botón Enable sí está gateado) — el camino de salida de datos existe mientras
-  no desactive. Ojo: este gating es **solo de la UI del renderer** — los
+  no desactive. Con entitlements **desconocidas** (`!entitlementsKnown`) `subscriptionGate` es
+  `PlanUnknownNotice` y ni el onboarding ni **Enable** se ofrecen (estado neutro: ni paywall ni
+  activar a ciegas); la condición es `hasKnownEntitlement(account, 'cloud')`. Ojo: este gating es
+  **solo de la UI del renderer** — los
   IPC `cloud:setup*` y la Edge Function `cloud-keys` siguen sin gate por entitlement (espejo de la
   RLS de `user_keys`). El IPC `account:open-checkout` acepta `'ai' | 'cloud' | 'bundle'` y
   `AccountStatus` expone `aiCheckoutConfigured` / `cloudCheckoutConfigured` /
@@ -1024,7 +1293,7 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
 | Fase | Contenido |
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
-| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (código listo, pendiente de correr 0007 + redeploy):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×2/×6 — ver § 3), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`) |
+| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (0007 aplicada + redeploy hecho):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×2/×6 — ver § 3), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`). **Endurecimiento (código listo, pendiente 0009 + 0010 + redeploys):** reserva + límite de concurrencia + topes de body/`max_tokens`, allowlist del body, errores del upstream mapeados, `cost_usd`; y en el webhook reembolsos, `test_mode`, validación UUID y reconciliación — ver §§ 2-3 |
 | **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). El producto Cloud (y el Bundle) ya existen en Lemon Squeezy y sus checkout URLs (de live desde 2026-10-19) están pobladas en `cloudConfig.ts` → los planes ofrecen botón Subscribe (ver § 3, "Billing en live mode") |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
@@ -1047,7 +1316,8 @@ puro vía `fetch` desde el proceso main.
   proyecto real) + `isCloudConfigured()`. La anon key es pública por diseño (como el client ID de
   GitHub); la seguridad la da RLS.
 - **`electron/account.ts`** — capa de sesión, espejo estructural de `githubSync.ts`:
-  - Persistencia en `settings.json` sección `account` = `{email, userId, encryptedRefreshToken}`;
+  - Persistencia en `settings.json` sección `account` = `{email, userId, encryptedRefreshToken,
+    entitlementsCache?}` (la cache de entitlements, ver § 2 "Resiliencia");
     el refresh token se cifra reutilizando `encryptSecret/decryptSecret` de
     `electron/ai/llm/secret.ts` (safeStorage + fallback base64). El **access token vive solo en
     memoria** con su expiry.
@@ -1055,10 +1325,13 @@ puro vía `fetch` desde el proceso main.
     (`POST /auth/v1/verify`, `type:'email'`; guarda sesión + primer fetch de entitlements),
     `getAccessToken` (refresca si expira en <60 s vía `/auth/v1/token?grant_type=refresh_token`;
     **GoTrue rota el refresh token → se persiste siempre el nuevo**, con single-flight para evitar
-    carreras; 400/401 = revocado → limpia sesión y notifica), `signOut` (logout best-effort +
-    limpiar), `refreshEntitlements` (`GET /rest/v1/subscriptions` con RLS), `getAccountStatus`
-    (estado público, **nunca** tokens), `onStatusChanged`, `initAccount` (al arrancar, si hay
-    sesión: refresh de entitlements diferido 5 s, no bloquea el boot).
+    carreras; 400/401 = revocado → limpia sesión y notifica; fallo de descifrado → `sessionLocked`,
+    **no** sign-out; versión discriminada `getAccessTokenResult`), `signOut` (logout best-effort con
+    `?scope=local` + limpiar), `refreshEntitlements` (`GET /rest/v1/subscriptions` con RLS;
+    single-flight, backoff en fallos transitorios, cachea el resultado), `getAccountStatus` (estado
+    público, **nunca** tokens), `onStatusChanged`, `initAccount` (llamar tras `app.whenReady`: carga
+    sesión + cache, engancha `powerMonitor` `'resume'`, y si hay sesión lanza el refresh de
+    entitlements diferido 5 s, no bloquea el boot). Detalle de la resiliencia en § 2.
 - **`electron/entitlements.ts`** — `computeEntitlements(rows)` pura: producto activo si hay fila
   con ese product (o `bundle`) y `status === 'active'`. Vive en `electron/` (no `src/lib/`) porque
   `tsconfig.electron.json` (`rootDir: 'electron'`) no puede importar de `src/` y el renderer solo
@@ -1072,7 +1345,8 @@ puro vía `fetch` desde el proceso main.
 - **Errores tipados (`AccountErrorCode`)** — `AccountOpResult` lleva, además del `error` en inglés
   (fallback para logs), un **`errorCode`** de una unión cerrada (`notConfigured`, `invalidEmail`,
   `emptyCode`, `invalidCode`, `rateLimited`, `network`, `unexpectedResponse`, `sendFailed`,
-  `verifyFailed`, `notSignedIn`, `refreshFailed`, `checkoutUnavailable`, `checkoutInvalidUrl`) para
+  `verifyFailed`, `notSignedIn`, `refreshFailed`, `sessionLocked`, `checkoutUnavailable`,
+  `checkoutInvalidUrl`) para
   que el renderer pinte el mensaje **en el idioma de la app** en vez del string crudo de GoTrue.
   La unión está **triplicada** (main `electron/account.ts` → renderer `src/types/index.ts` → una
   clave por código en `settings.account.errors` de los dicts EN/ES) y el espejo lo fija el test

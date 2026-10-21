@@ -54,13 +54,16 @@ const cloudConfig_1 = require("./cloudConfig");
 const aiIndex = __importStar(require("./ai/aiIndex"));
 const llm = __importStar(require("./ai/llm"));
 const agentTools = __importStar(require("./ai/llm/tools"));
+const managedErrors_1 = require("./ai/llm/managedErrors");
 const noteFormat = __importStar(require("./noteFormat"));
 const uiSettings_1 = require("./uiSettings");
 const importers = __importStar(require("./importers"));
 const migration_1 = require("./migration");
 const tempNoteExpiry_1 = require("./tempNoteExpiry");
+const updateAsset_1 = require("./updateAsset");
 const activityLog_1 = require("./activityLog");
 const i18n_1 = require("./i18n");
+const settingsFile_1 = require("./settingsFile");
 function getIconPath() {
     if (process.platform === 'win32')
         return path_1.default.join(__dirname, '../public/icon.ico');
@@ -202,21 +205,25 @@ function emitAccountStatusChanged() {
         win.webContents.send('account:status-changed', status);
     });
 }
-// Baseline for the 'ai' entitlement, established on the FIRST status observation of the
-// CURRENT signed-in identity (app boot with a persisted session, or right after sign-in) and
-// never used to trigger anything by itself — entitlements are re-fetched from scratch on every
-// boot (account.ts persists no entitlements), so a naive false→true edge on that first read
-// would force-switch the provider on every single launch for an already-subscribed user, even
-// one who deliberately kept a BYO-key provider active. Only a REAL transition seen LATER for
-// the SAME identity in the same run (e.g. the user subscribes, comes back and hits Refresh in
-// Settings → Account) should auto-activate the managed provider.
+// Baseline for the 'ai' entitlement, established on the FIRST FRESH status observation of the
+// CURRENT signed-in identity (the first successful fetch after app boot with a persisted
+// session, or right after sign-in) and never used to trigger anything by itself — a naive
+// false→true edge on that first read would force-switch the provider on every single launch for
+// an already-subscribed user, even one who deliberately kept a BYO-key provider active. Only a
+// REAL transition seen LATER for the SAME identity in the same run (e.g. the user subscribes,
+// comes back and hits Refresh in Settings → Account) should auto-activate the managed provider.
+// account.ts now PERSISTS the last known entitlements (account.entitlementsCache) so the UI is
+// known from t=0, but that cached value — like still-unknown entitlements — is NOT a fresh
+// observation: it neither sets nor moves the baseline (account.areEntitlementsFromCache), so
+// neither cached-false→true nor unknown→true count as a transition.
 // Keyed by identity (the signed-in email, or `null` while signed out) so that signing out and
 // signing back in — as the same account or a different one — always re-establishes a fresh
 // baseline instead of carrying over a stale `false` from a previous session: without this, an
 // account B that already had the entitlement before this process even started would look like
 // it just "transitioned" the moment it signs in after account A (which lacked it) signs out.
-let aiEntitlementBaseline = null;
-let aiEntitlementIdentity = null;
+// A keychain-locked session (status.sessionLocked) keeps signedIn + identity, so it is NOT a
+// sign-out for this nor for planAccountTransition. Logic: stepAiEntitlementBaseline.
+let aiEntitlementBaseline = accountTransition_1.NO_AI_BASELINE;
 // Last observed account snapshot — the "previous" side of the sign-in/sign-out
 // edge that planAccountTransition() reasons about. Seeded at boot from the
 // persisted session (app.whenReady), so a session restored from disk is NOT
@@ -296,14 +303,13 @@ function applyAccountTransition(plan) {
 function handleAccountStatusChanged() {
     const status = account.getAccountStatus();
     const identity = status.signedIn ? (status.email ?? '') : null;
-    const aiActive = status.entitlements.ai;
-    if (identity !== aiEntitlementIdentity) {
-        // Identity changed since the last observation (fresh sign-in, switch to a different
-        // account, or signing out) — start a fresh baseline for it without triggering anything.
-        aiEntitlementIdentity = identity;
-        aiEntitlementBaseline = identity === null ? null : aiActive;
-    }
-    else if (aiEntitlementBaseline !== null && !aiEntitlementBaseline && aiActive) {
+    const step = (0, accountTransition_1.stepAiEntitlementBaseline)(aiEntitlementBaseline, {
+        identity,
+        ai: status.entitlements.ai,
+        fresh: status.entitlementsKnown && !account.areEntitlementsFromCache(),
+    });
+    aiEntitlementBaseline = step.next;
+    if (step.autoSwitch) {
         // Same identity as before, real subscribe-while-running transition — auto-switch to the
         // managed provider unless it's already active (avoid an unnecessary settings write).
         // Written BEFORE the broadcast below so the renderer's config reload (LlmConfigView reacts
@@ -311,10 +317,6 @@ function handleAccountStatusChanged() {
         const cfg = readLlmSettings();
         if (cfg.active !== 'noteflow')
             writeLlmSettings(llm.withActiveProvider(cfg, 'noteflow'));
-        aiEntitlementBaseline = aiActive;
-    }
-    else {
-        aiEntitlementBaseline = identity === null ? null : aiActive;
     }
     cloudSync.bindCloudSyncToAccount(account.getUserId()); // another account's Cloud sync state is reset
     // Sign-out teardown / sign-in restore of the paid subsystems. Read AFTER the
@@ -329,7 +331,7 @@ function handleAccountStatusChanged() {
         signedIn: status.signedIn,
         identity: accountIdentityOf(status),
         entitlements: status.entitlements,
-        entitlementsKnown: !!status.entitlementsFetchedAt,
+        entitlementsKnown: status.entitlementsKnown,
     }, {
         cloudEnabled: cloudSync.isCloudSyncEnabled(),
         aiManaged: llmCfg.active === 'noteflow',
@@ -704,10 +706,7 @@ function parseHttpsUrl(rawUrl) {
 function isAllowedInitialUpdateUrl(url) {
     if (!ALLOWED_UPDATE_HOSTS.has(url.hostname))
         return false;
-    const pathname = url.pathname.toLowerCase();
-    if (!pathname.includes('/yagoid/noteflow/releases/'))
-        return false;
-    return pathname.endsWith('.exe') || pathname.endsWith('.deb') || pathname.endsWith('.AppImage') || pathname.endsWith('.pkg.tar.zst') || pathname.endsWith('.dmg');
+    return (0, updateAsset_1.isAllowedUpdateAssetPath)(url.pathname);
 }
 function isAllowedRedirectUpdateUrl(url) {
     return ALLOWED_UPDATE_REDIRECT_HOSTS.has(url.hostname);
@@ -1406,33 +1405,20 @@ electron_1.ipcMain.handle('app:check-update', () => {
                     const latest = json.tag_name?.replace(/^v/, '');
                     const current = electron_1.app.getVersion();
                     const hasUpdate = latest && latest !== current;
-                    let downloadUrl;
-                    if (process.platform === 'linux') {
-                        // Match the package manager to the distro: pacman on Arch-based,
-                        // deb on Debian-based, AppImage as the universal fallback.
-                        const isArchBased = fs_1.default.existsSync('/etc/arch-release') ||
-                            fs_1.default.existsSync('/etc/cachyos-release') ||
-                            fs_1.default.existsSync('/usr/bin/pacman');
-                        const isDebBased = fs_1.default.existsSync('/etc/debian_version') ||
-                            fs_1.default.existsSync('/usr/bin/dpkg');
-                        if (isArchBased) {
-                            downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow-${latest}-x86_64.pkg.tar.zst`;
-                        }
-                        else if (isDebBased) {
-                            downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow_${latest}_amd64.deb`;
-                        }
-                        else {
-                            // Use AppImage as universal Linux format (works on all distros)
-                            downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-x86_64.AppImage`;
-                        }
-                    }
-                    else if (process.platform === 'darwin') {
-                        // macOS ships a single Apple Silicon (arm64) DMG.
-                        downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-arm64.dmg`;
-                    }
-                    else {
-                        downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-Setup.exe`;
-                    }
+                    // Asset choice lives in updateAsset.ts (pure, tested); here we only probe
+                    // the environment. On Linux without an installable asset (Arch, Fedora…)
+                    // this is the releases page, which the renderer opens in the browser.
+                    const isLinux = process.platform === 'linux';
+                    const downloadUrl = (0, updateAsset_1.pickUpdateTarget)({
+                        platform: process.platform,
+                        version: latest,
+                        isAppImage: isLinux && (0, updateAsset_1.isRunningFromOwnAppImage)({
+                            appImage: process.env.APPIMAGE,
+                            appDir: process.env.APPDIR,
+                            execPath: process.execPath,
+                        }),
+                        isDebian: isLinux && fs_1.default.existsSync('/etc/debian_version'),
+                    });
                     resolve({ hasUpdate, latestVersion: latest, downloadUrl });
                 }
                 catch {
@@ -1495,10 +1481,9 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
         // instantaneous on Windows, so we can't derive this from the 100% progress.)
         electron_1.BrowserWindow.getAllWindows().forEach(w => w.webContents.send('update:installing'));
         if (process.platform === 'linux') {
-            // Detect package type from filename
-            const isPacman = dest.endsWith('.pkg.tar.zst') || dest.endsWith('.pacman');
-            const isDeb = dest.endsWith('.deb');
-            if (isDeb) {
+            // Only .deb and .AppImage are published for Linux (see updateAsset.ts).
+            const kind = (0, updateAsset_1.updateAssetKind)(dest);
+            if (kind === 'deb') {
                 await new Promise((resolve) => {
                     const proc = (0, child_process_1.spawn)('pkexec', ['dpkg', '-i', dest], { stdio: 'ignore' });
                     proc.on('error', () => {
@@ -1515,30 +1500,20 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
                     });
                 });
             }
-            else if (isPacman) {
-                await new Promise((resolve) => {
-                    const proc = (0, child_process_1.spawn)('pkexec', ['pacman', '-U', '--noconfirm', dest], { stdio: 'ignore' });
-                    proc.on('error', () => {
-                        // pkexec not available, fall back to xdg-open
-                        electron_1.shell.openPath(dest);
-                        resolve();
-                    });
-                    proc.on('close', (code) => {
-                        if (code === 0) {
-                            electron_1.app.relaunch();
-                            electron_1.app.quit();
-                        }
-                        resolve();
-                    });
-                });
-            }
-            else {
+            else if (kind === 'appimage') {
                 // AppImage: replace the running AppImage in place and relaunch.
                 // process.env.APPIMAGE holds the absolute path of the AppImage the user
                 // launched (set by the AppImage runtime). No root needed: it lives in the
-                // user's space.
+                // user's space. APPIMAGE is inherited by children of ANY AppImage, so only
+                // trust it when this process really runs from it — otherwise we would
+                // rename NoteFlow over another app's file.
                 const appImagePath = process.env.APPIMAGE;
-                if (appImagePath) {
+                const ownAppImage = (0, updateAsset_1.isRunningFromOwnAppImage)({
+                    appImage: appImagePath,
+                    appDir: process.env.APPDIR,
+                    execPath: process.execPath,
+                });
+                if (appImagePath && ownAppImage) {
                     try {
                         const dir = path_1.default.dirname(appImagePath);
                         const tmpTarget = path_1.default.join(dir, `.${path_1.default.basename(appImagePath)}.new`);
@@ -1558,9 +1533,14 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
                     }
                 }
                 else {
-                    // Not running from an AppImage (dev / unusual packaging) — just open it.
+                    // Not running from our own AppImage (dev / .deb launched from another
+                    // AppImage / unusual packaging) — just open it.
                     await electron_1.shell.openPath(dest);
                 }
+            }
+            else {
+                // Not a Linux package (the allow-check still admits .exe/.dmg) — just open it.
+                await electron_1.shell.openPath(dest);
             }
         }
         else if (process.platform === 'darwin') {
@@ -2099,7 +2079,7 @@ function readSettings() {
     }
 }
 function writeSettings(data) {
-    fs_1.default.writeFileSync(path_1.default.join(electron_1.app.getPath('userData'), 'settings.json'), JSON.stringify(data), 'utf-8');
+    (0, settingsFile_1.writeSettingsFile)(path_1.default.join(electron_1.app.getPath('userData'), 'settings.json'), data); // owner-only (0600) on POSIX
 }
 // ── AI / Semantic index ───────────────────────────────────────────────────────
 function readAiSettings() {
@@ -2174,8 +2154,15 @@ electron_1.ipcMain.handle('ai:llm-set-config', (_event, patch) => {
     // config diverge from the model actually used (see llm.acceptsModel).
     if (patch.model !== undefined && llm.acceptsModel(id, patch.model))
         ps.model = patch.model;
-    if (patch.baseUrl !== undefined)
-        ps.baseUrl = patch.baseUrl;
+    // A base URL is only stored for presets that allow editing it. The pinned ones (above all the
+    // managed `noteflow`, whose credential is the Supabase access token) ignore it: a stored URL
+    // there could send the token to another host. effectiveBaseUrl enforces the same rule on read.
+    if (patch.baseUrl !== undefined) {
+        if (llm.acceptsBaseUrl(id))
+            ps.baseUrl = patch.baseUrl;
+        else
+            console.warn(`[LLM] ignored a baseUrl for preset "${id}" (its endpoint is fixed)`);
+    }
     if (patch.clearKey)
         ps.encryptedApiKey = undefined;
     else if (typeof patch.apiKey === 'string' && patch.apiKey.length > 0)
@@ -2186,7 +2173,7 @@ electron_1.ipcMain.handle('ai:llm-set-config', (_event, patch) => {
 });
 electron_1.ipcMain.handle('ai:llm-list-models', async () => {
     try {
-        const models = await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings())).listModels();
+        const models = await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings(), mainMessages().chatErrors)).listModels();
         return { ok: true, models };
     }
     catch (err) {
@@ -2197,7 +2184,7 @@ electron_1.ipcMain.handle('ai:llm-test', async () => {
     try {
         // resolveConfigAsync throws for the NoteFlow AI preset without a signed-in
         // session — surface that through the same {ok, error} contract as test().
-        return await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings())).test();
+        return await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings(), mainMessages().chatErrors)).test();
     }
     catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -2214,6 +2201,7 @@ electron_1.ipcMain.handle('ai:llm-usage', async () => {
             return null;
         const res = await fetch(`${cloudConfig_1.AI_PROXY_URL}/usage`, {
             headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(15000),
         });
         if (!res.ok)
             return null;
@@ -2415,7 +2403,7 @@ electron_1.ipcMain.handle('ai:chat', async (event, req) => {
         const { system, sources } = await buildChatContext(lastUser);
         if (sources.length > 0)
             send('ai:chat-sources', { requestId, sources });
-        const provider = llm.getProvider(await llm.resolveConfigAsync(stored));
+        const provider = llm.getProvider(await llm.resolveConfigAsync(stored, mainMessages().chatErrors));
         const ctx = buildToolContext();
         // Seed the agentic conversation from the renderer's messages, resolving each user message's
         // attachment ids from the in-main cache: text/code files inline into the text, pdf/image go native.
@@ -2485,7 +2473,7 @@ electron_1.ipcMain.handle('ai:chat', async (event, req) => {
         if (controller.signal.aborted)
             send('ai:chat-done', { requestId, aborted: true });
         else
-            send('ai:chat-error', { requestId, error: friendlyChatError(err instanceof Error ? err.message : String(err), sentImages) });
+            send('ai:chat-error', { requestId, error: friendlyChatError(err instanceof Error ? err.message : String(err), sentImages, stored.active === 'noteflow') });
     }
     finally {
         for (const id of myConfirmIds)
@@ -2496,13 +2484,31 @@ electron_1.ipcMain.handle('ai:chat', async (event, req) => {
 // Turn a raw provider error into something actionable. The common BYO failure is attaching an image
 // to a text-only model (e.g. DeepSeek answers HTTP 400 with `unknown variant image_url`); detect that
 // and explain it instead of dumping the raw JSON. Everything else passes through unchanged.
-function friendlyChatError(raw, sentImages) {
+function friendlyChatError(raw, sentImages, managed) {
     // NoteFlow AI monthly quota: the proxy answers 429 with the stable machine code
     // `monthly_quota_exceeded` in its OpenAI-shaped body — match on that (not the HTTP
     // status or the English message) and surface a clean, localized message instead of
     // the raw `HTTP 429 — {json}` string.
     if (raw.includes('monthly_quota_exceeded')) {
         return mainMessages().chatErrors.quotaExceeded;
+    }
+    // NoteFlow AI (managed preset only — for a BYO provider a 401/403 means a bad API key and
+    // keeps its raw wording): the proxy's 401 = the session token was rejected, 403 = no active
+    // 'ai' plan. See managedProxyErrorKind for how the status is read from the raw message.
+    if (managed) {
+        const kind = (0, managedErrors_1.managedProxyErrorKind)(raw);
+        if (kind === 'signInAgain') {
+            // The proxy rejected the session token: drop it so the next request mints a fresh one
+            // (or, if the refresh token was revoked too, the refresh's 400 signs out cleanly).
+            account.invalidateAccessToken();
+            return mainMessages().chatErrors.managedSignInAgain;
+        }
+        if (kind === 'subscriptionInactive') {
+            // Our local view of the plan may be stale (or still unknown) — re-check it so the
+            // Settings/AI surfaces catch up. Fire-and-forget: refreshEntitlements never throws.
+            void account.refreshEntitlements();
+            return mainMessages().chatErrors.managedSubscriptionInactive;
+        }
     }
     if (sentImages) {
         const low = raw.toLowerCase();
@@ -2850,7 +2856,7 @@ electron_1.ipcMain.handle('ai:profile-generate', async (_event, req) => {
         return { ok: false, error: llm.notConfiguredMessage(stored) };
     let provider;
     try {
-        provider = llm.getProvider(await llm.resolveConfigAsync(stored));
+        provider = llm.getProvider(await llm.resolveConfigAsync(stored, mainMessages().chatErrors));
     }
     catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -3581,6 +3587,9 @@ electron_1.app.whenReady().then(async () => {
     });
     electron_1.app.on('before-quit', () => {
         isQuitting = true;
+        // A rotated refresh token / sign-out that couldn't be written yet must not
+        // be lost with the process (see account.ts pendingPersist/pendingClear).
+        account.flushAccountPersistence();
     });
     // After system resume from sleep, reload notes several times with increasing
     // delays. A single 1500ms attempt is not enough: the renderer may take a few

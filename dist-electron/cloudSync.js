@@ -96,6 +96,7 @@ const cloudRealtime = __importStar(require("./cloudRealtime"));
 const githubSync = __importStar(require("./githubSync"));
 const cloudKeys_1 = require("./cloudKeys");
 const cloudConfig_1 = require("./cloudConfig");
+const settingsFile_1 = require("./settingsFile");
 const noteFormat_1 = require("./noteFormat");
 const cloudCrypto_1 = require("./cloudCrypto");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
@@ -130,7 +131,7 @@ function readSettings() {
     }
 }
 function writeSettings(data) {
-    fs_1.default.writeFileSync(getSettingsPath(), JSON.stringify(data), 'utf-8');
+    (0, settingsFile_1.writeSettingsFile)(getSettingsPath(), data); // owner-only (0600) on POSIX
 }
 // Merge-writes only the fields this module owns — cloudKeys.ts stores
 // encryptedDek in the same settings.cloudSync section.
@@ -604,18 +605,30 @@ async function removeRemoteByPathKeys(pathKeys) {
     if (pathKeys.length === 0)
         return;
     const filter = `path_key=in.(${pathKeys.map((k) => `"${k}"`).join(',')})`;
-    const hasEntitlement = account.getAccountStatus().entitlements.cloud;
-    if (hasEntitlement) {
+    // Entitlements never fetched (offline boot, keychain locked…) or only restored
+    // from the on-disk cache are UNVERIFIED: try the tombstone, but NEVER fall back
+    // to a physical DELETE on that guess — a DELETE leaves the other devices
+    // un-notified, so the note would resurrect there. 'defer' throws, keeping the
+    // op journaled until a fetch in this run verifies them (see planRemoteDelete).
+    const status = account.getAccountStatus();
+    const decision = {
+        entitled: status.entitlements.cloud,
+        verified: status.entitlementsKnown && !account.areEntitlementsFromCache(),
+    };
+    if ((0, cloudSyncLogic_1.planRemoteDelete)(decision) === 'tombstone') {
         const res = await restWithRetry(() => (0, cloudKeys_1.supabaseRest)(`/rest/v1/files?${filter}`, {
             method: 'PATCH',
             headers: { Prefer: 'return=minimal' },
             body: { deleted: true, content_ct: '', updated_at: new Date().toISOString() },
         }));
-        if (res.status < 400)
+        const next = (0, cloudSyncLogic_1.planRemoteDelete)({ ...decision, patchStatus: res.status });
+        if (next === 'done')
             return;
-        if (!isWriteForbidden(res.status))
+        if (next === 'fail')
             throw new Error(`Cloud delete failed (HTTP ${res.status})`);
-        // 403 despite local entitlement (stale) — fall through to physical delete.
+        if (next === 'defer')
+            throw new Error('Cloud delete deferred: subscription status not verified yet');
+        // 'delete': 403 despite a VERIFIED local entitlement (stale) — fall through to physical delete.
     }
     const res = await restWithRetry(() => (0, cloudKeys_1.supabaseRest)(`/rest/v1/files?${filter}`, {
         method: 'DELETE',

@@ -517,7 +517,7 @@ sin navegar.
 |---|---|---|
 | Negrita | `**texto**` | Ctrl+B |
 | Cursiva | `*texto*` | Ctrl+I |
-| Subrayado | — | Ctrl+U |
+| Subrayado | `++texto++` (formato en disco; escribirlo no lo convierte al vuelo) | Ctrl+U |
 | Tachado | `~~texto~~` | — |
 | Resaltado | `==texto==` | Toolbar |
 | Código inline | `` `code` `` | Ctrl+E |
@@ -1025,15 +1025,19 @@ Settings → Startup:
   "Installing…") y se actualiza **sin popups del SO ni cerrar/reabrir a mano**:
   - Windows: muestra la **barra de progreso nativa del instalador**, se cierra sola y se reabre ya
     actualizada — **sin el popup "cierra la aplicación" ni UAC** (instalador NSIS lanzado con
-    `--updated`, que omite ese prompt; ver detalle técnico en `.claude/context/release.md`).
-  - Linux (deb/pacman): pide la contraseña de root (diálogo del sistema — inevitable al instalar a
-    nivel de sistema) y se relanza.
-  - Linux (AppImage): se reemplaza a sí misma en su ubicación y se relanza.
+    `--updated`, que omite ese prompt).
+  - Linux, ejecutándose desde su **AppImage**: se reemplaza a sí misma en su ubicación y se relanza.
+  - Linux **Debian-based** (instalada con el `.deb`): instala el `.deb` nuevo — pide la contraseña de
+    root (diálogo del sistema, inevitable al instalar a nivel de sistema) y se relanza.
+  - Linux **Arch y otras distros** (sin paquete publicado para ellas): el botón **abre la página de
+    releases en el navegador** para descargar el AppImage a mano (sin aviso de error).
 - En Windows, la instalación queda cubierta por la barra de progreso nativa de NSIS. En Linux el
-  feedback durante la instalación es el propio diálogo de root (deb/pacman) o es casi instantáneo
+  feedback durante la instalación es el propio diálogo de root (deb) o es casi instantáneo
   (AppImage). Dentro de la app, el botón del TitleBar muestra `%` de descarga → spinner
   "Installing…" hasta que la ventana se cierra.
 - Descargas restringidas a hosts oficiales de GitHub (allowlist de seguridad).
+- Detalle técnico (elección del asset, allowlist, instalación por plataforma): `.claude/context/patterns.md`
+  § "Auto-update in-app".
 
 ---
 
@@ -1155,6 +1159,18 @@ pobladas en la build (precios en `.claude/context/monetization.md` § visión, c
   proceso main manda un código de error, no texto en inglés).
 - **Con sesión:** muestra el email, badges de plan ("NoteFlow AI" / "NoteFlow Cloud" con estado
   Active/—), la sección de **planes**, botón "Refresh" (relee las suscripciones) y "Sign out".
+- **Plan aún sin comprobar:** si la app no ha podido consultar tu plan todavía (arranque sin red,
+  servidor caído) y no tiene uno guardado de la última vez, los badges dicen **"Couldn't check"** y
+  en los gates de IA y Cloud, en vez de las cards de Subscribe o del "requiere suscripción", aparece
+  **"Couldn't verify your plan yet — Retry"** (nunca te ofrece pagar algo que quizá ya pagas). La
+  app reintenta sola (cada vez más espaciado, al volver de suspensión y al recuperar la red);
+  mientras, NoteFlow AI se deja usar (el servidor decide). La última respuesta buena se recuerda,
+  así que tras reiniciar el plan se ve al momento.
+- **Llavero bloqueado:** si el sistema no deja descifrar la sesión guardada (Linux antes de
+  desbloquear el llavero, Keychain denegado en macOS), **no** se cierra sesión: aviso ámbar
+  "Couldn't unlock your saved session — your system keychain may be locked…" con Refresh para
+  reintentar o Sign out. Se recupera sola en cuanto el llavero se desbloquea.
+- **Sign out** cierra solo la sesión de este equipo (otros dispositivos y el CLI siguen dentro).
 - **Sección de planes:** cards en orden **Bundle → AI → Cloud**, cada una con nombre y precio
   ("€7.99/month · €79.99/year" para Bundle — con subtítulo "AI + Cloud" y badge **"Best value"** —,
   €5.99/€49.99 para AI, €3.99/€39.99 para Cloud; cifras de `src/lib/subscriptionPlans.ts`). Un plan

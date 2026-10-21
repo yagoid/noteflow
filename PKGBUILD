@@ -1,5 +1,17 @@
 # Maintainer: yagoid <yago.igle@gmail.com>
 # Contributor: callysthenes
+#
+# !!! NOT WORKING / UNSUPPORTED — Arch users: use the AppImage from
+# !!! https://github.com/yagoid/noteflow/releases/latest instead.
+#
+# Known problems (kept here for reference until someone can test a fix on Arch):
+#   - package() copies only dist/, dist-electron/ and package.json, NOT node_modules,
+#     so the installed app crashes at startup on require('js-yaml') and friends.
+#   - It runs on the system `electron` package (whatever version Arch ships), while
+#     NoteFlow targets Electron 35.
+#   - NoteFlow uses native modules (better-sqlite3, onnxruntime-node, sqlite-vec) that
+#     must be built against the exact Electron ABI they run on; nothing here rebuilds
+#     them for the system electron.
 
 pkgname=noteflow
 pkgver=2.0.0

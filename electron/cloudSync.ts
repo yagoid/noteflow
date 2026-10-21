@@ -40,6 +40,7 @@ import * as cloudRealtime from './cloudRealtime'
 import * as githubSync from './githubSync'
 import { supabaseRest } from './cloudKeys'
 import { isCloudConfigured } from './cloudConfig'
+import { writeSettingsFile } from './settingsFile'
 import { NOTE_MD, listNoteDirs } from './noteFormat'
 import { generateNoteKey, derivePathKeyHmac, unwrapKey, decryptContent } from './cloudCrypto'
 import {
@@ -74,6 +75,7 @@ import {
   countDroppedRetries,
   shouldResetCloudState,
   planMetadataPull,
+  planRemoteDelete,
 } from './cloudSyncLogic'
 import {
   type SyncState,
@@ -200,7 +202,7 @@ function readSettings(): Record<string, unknown> {
 }
 
 function writeSettings(data: Record<string, unknown>): void {
-  fs.writeFileSync(getSettingsPath(), JSON.stringify(data), 'utf-8')
+  writeSettingsFile(getSettingsPath(), data) // owner-only (0600) on POSIX
 }
 
 // Merge-writes only the fields this module owns — cloudKeys.ts stores
@@ -709,8 +711,17 @@ async function removeRemoteByPathKeys(pathKeys: string[]): Promise<void> {
   if (pathKeys.length === 0) return
   const filter = `path_key=in.(${pathKeys.map((k) => `"${k}"`).join(',')})`
 
-  const hasEntitlement = account.getAccountStatus().entitlements.cloud
-  if (hasEntitlement) {
+  // Entitlements never fetched (offline boot, keychain locked…) or only restored
+  // from the on-disk cache are UNVERIFIED: try the tombstone, but NEVER fall back
+  // to a physical DELETE on that guess — a DELETE leaves the other devices
+  // un-notified, so the note would resurrect there. 'defer' throws, keeping the
+  // op journaled until a fetch in this run verifies them (see planRemoteDelete).
+  const status = account.getAccountStatus()
+  const decision = {
+    entitled: status.entitlements.cloud,
+    verified: status.entitlementsKnown && !account.areEntitlementsFromCache(),
+  }
+  if (planRemoteDelete(decision) === 'tombstone') {
     const res = await restWithRetry(() =>
       supabaseRest(`/rest/v1/files?${filter}`, {
         method: 'PATCH',
@@ -718,9 +729,11 @@ async function removeRemoteByPathKeys(pathKeys: string[]): Promise<void> {
         body: { deleted: true, content_ct: '', updated_at: new Date().toISOString() },
       })
     )
-    if (res.status < 400) return
-    if (!isWriteForbidden(res.status)) throw new Error(`Cloud delete failed (HTTP ${res.status})`)
-    // 403 despite local entitlement (stale) — fall through to physical delete.
+    const next = planRemoteDelete({ ...decision, patchStatus: res.status })
+    if (next === 'done') return
+    if (next === 'fail') throw new Error(`Cloud delete failed (HTTP ${res.status})`)
+    if (next === 'defer') throw new Error('Cloud delete deferred: subscription status not verified yet')
+    // 'delete': 403 despite a VERIFIED local entitlement (stale) — fall through to physical delete.
   }
   const res = await restWithRetry(() =>
     supabaseRest(`/rest/v1/files?${filter}`, {

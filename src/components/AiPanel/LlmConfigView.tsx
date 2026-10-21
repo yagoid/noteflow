@@ -4,10 +4,10 @@ import { useAiChatStore } from '../../stores/aiChatStore'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import type { AccountStatus, LlmConfigPublic } from '../../types'
-import type { SubscriptionProduct } from '../../lib/subscriptionPlans'
+import { hasKnownEntitlement, isPlanUnknown, type SubscriptionProduct } from '../../lib/subscriptionPlans'
 import type { SettingsSection } from '../Settings/SettingsModal'
 import { Card, FieldLabel, FIELD_INPUT } from './ui'
-import { PlanOffers } from '../Settings/PlanOffers'
+import { PlanOffers, PlanUnknownNotice } from '../Settings/PlanOffers'
 
 // The two mutually exclusive ways of powering the assistant. Kept as VIEW state
 // (see below) — the source of truth for what is actually in use is llmConfig.active.
@@ -183,7 +183,11 @@ export function LlmConfigView({
   // Presets carrying `modelMeta` (today only the managed plan) serve a CURATED catalog: the
   // model is picked from the chips, never typed. Main enforces the same rule (llm.acceptsModel).
   const curatedCatalog = !!preset.modelMeta
-  const entitled = !!account?.entitlements.ai
+  // KNOWN to have the 'ai' entitlement. Never-fetched entitlements are UNKNOWN (planUnknown):
+  // neither the paywall nor "not subscribed" — main still lets the managed preset run then
+  // (the proxy is the judge), and the gate shows a neutral "couldn't verify — Retry".
+  const entitled = !!account && hasKnownEntitlement(account, 'ai')
+  const planUnknown = !!account && isPlanUnknown(account)
   // The BYO provider on screen owns the config only while it is the active one: baseUrl / key /
   // model all write to whatever provider is active, so those fields stay HIDDEN until the picked
   // provider is activated — otherwise editing them here would silently overwrite the config of
@@ -312,7 +316,16 @@ export function LlmConfigView({
                 {/* Gate: without a session or the 'ai' entitlement there is nothing to activate —
                     show what the plans cost (AI, or the Bundle when Cloud is missing too) and,
                     below them, the way into Settings → Account. */}
-                {!account.signedIn || !entitled ? (
+                {planUnknown ? (
+                  <div className="flex flex-col gap-2 items-start">
+                    {managedActive && (
+                      <span className="flex items-center gap-1 text-[12px] font-bold text-accent">
+                        <Check size={12} /> {t.aiPanel.provider.badgeActive}
+                      </span>
+                    )}
+                    <PlanUnknownNotice />
+                  </div>
+                ) : !account.signedIn || !entitled ? (
                   <div className="flex flex-col gap-2 items-start">
                     <p className="text-[11px] text-text-muted normal-case leading-relaxed">
                       {!account.signedIn ? t.aiPanel.provider.noteflowSignIn : t.aiPanel.provider.noteflowNeedsSubscription}

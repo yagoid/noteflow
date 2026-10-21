@@ -21,6 +21,7 @@ import {
 import {
   escapeHtml,
   extractDeadlineAnnotations,
+  flankedMarkPairs,
   inlineToHtml,
   taskAnnotationsToMd,
   type TaskImportance,
@@ -398,38 +399,174 @@ function blockElToMd(el: Element): string {
   return out
 }
 
+// Underline (`++`) and highlight (`==`) delimiters are collected as tokens and
+// only written out once the whole line is known (resolveFlankedMarks): whether
+// inlineToHtml reads them back as a mark depends on what surrounds them. Spans
+// inlineToHtml holds aside from its mark regexes (code, images, link syntax)
+// are `held` tokens.
+interface FlankedMark { char: '+' | '='; keep: boolean }
+type InlineToken = string | { held: string } | { mark: FlankedMark; open: boolean }
+
 function inlineElToMd(el: Element): string {
-  let result = ''
+  return resolveFlankedMarks(inlineElTokens(el, []))
+}
+
+function inlineElTokens(el: Element, out: InlineToken[]): InlineToken[] {
+  const wrapped = (c: Element, delim: string) => {
+    out.push(delim)
+    inlineElTokens(c, out)
+    out.push(delim)
+  }
+  const flanked = (c: Element, char: FlankedMark['char']) => {
+    const mark: FlankedMark = { char, keep: true }
+    out.push({ mark, open: true })
+    inlineElTokens(c, out)
+    out.push({ mark, open: false })
+  }
   for (const child of el.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) {
       // &nbsp; in HTML becomes \u00A0 in textContent — restore to regular space
-      result += (child.textContent ?? '').replace(/\u00A0/g, ' ')
+      out.push((child.textContent ?? '').replace(/\u00A0/g, ' '))
     } else if (child.nodeType === Node.ELEMENT_NODE) {
       const c = child as Element
       const tag = c.tagName.toLowerCase()
-      if (tag === 'strong' || tag === 'b') result += `**${inlineElToMd(c)}**`
-      else if (tag === 'em' || tag === 'i') result += `*${inlineElToMd(c)}*`
-      else if (tag === 's') result += `~~${inlineElToMd(c)}~~`
-      else if (tag === 'u') result += `++${inlineElToMd(c)}++`
-      else if (tag === 'mark') result += `==${inlineElToMd(c)}==`
-      else if (tag === 'code') result += `\`${(c.textContent ?? '').replace(/\u00A0/g, ' ')}\``
-      else if (tag === 'br') result += '\n'
+      if (tag === 'strong' || tag === 'b') wrapped(c, '**')
+      else if (tag === 'em' || tag === 'i') wrapped(c, '*')
+      else if (tag === 's') wrapped(c, '~~')
+      else if (tag === 'u') flanked(c, '+')
+      else if (tag === 'mark') flanked(c, '=')
+      else if (tag === 'code') out.push({ held: `\`${(c.textContent ?? '').replace(/\u00A0/g, ' ')}\`` })
+      else if (tag === 'br') out.push('\n')
       else if (tag === 'img') {
         const w = c.getAttribute('width')
         const suffix = w ? `{width=${w}}` : ''
-        result += `![${c.getAttribute('alt') ?? ''}](${c.getAttribute('src') ?? ''})${suffix}`
+        out.push({ held: `![${c.getAttribute('alt') ?? ''}](${c.getAttribute('src') ?? ''})${suffix}` })
       }
       else if (tag === 'span' && c.getAttribute('data-type') === 'section-relation') {
         const relNoteId = c.getAttribute('data-note-id') ?? ''
         const relSectionId = c.getAttribute('data-section-id') ?? ''
         const relName = (c.textContent ?? '').replace(/\u00A0/g, ' ')
-        result += `[${relName}](noteflow://${relNoteId}/${relSectionId})`
+        out.push({ held: '[' }, relName, { held: `](noteflow://${relNoteId}/${relSectionId})` })
       }
-      else if (tag === 'a') result += `[${inlineElToMd(c)}](${c.getAttribute('href') ?? ''})`
-      else result += inlineElToMd(c)
+      else if (tag === 'a') {
+        out.push({ held: '[' })
+        inlineElTokens(c, out)
+        out.push({ held: `](${c.getAttribute('href') ?? ''})` })
+      }
+      else inlineElTokens(c, out)
     }
   }
-  return result
+  return out
+}
+
+/**
+ * Write the `++`/`==` delimiters so that inlineToHtml reads the same marks back:
+ *   - a mark spanning a line break is closed before it and reopened after it
+ *     (markdown is parsed line by line);
+ *   - whitespace at the inner edges moves outside the delimiters (`<u>word </u>`
+ *     → `++word++ `): an opener followed by a space never opens;
+ *   - a mark that still wouldn't read back exactly — inside a word
+ *     (`foo<u>bar</u>`, which has no markdown), or paired differently because of
+ *     a literal `++` next to it (`<u>a++ b</u>`) — is written without its
+ *     delimiters: the underline/highlight is lost, the text never changes.
+ * Literal `++`/`==` in text is written as is: the flanking rules already keep
+ * its usual uses ("C++", "C++/C++", "a == b") from reading back as marks.
+ */
+function resolveFlankedMarks(input: InlineToken[]): string {
+  const textOf = (t: InlineToken) => (typeof t === 'string' ? t : 'held' in t ? t.held : '')
+  if (input.every((t) => typeof t === 'string' || 'held' in t)) return input.map(textOf).join('')
+
+  // 1. Split marks at line breaks.
+  let tokens: InlineToken[] = []
+  const openMarks: FlankedMark[] = []
+  for (const t of input) {
+    if (typeof t !== 'string' && 'mark' in t) {
+      if (t.open) {
+        openMarks.push(t.mark)
+        tokens.push(t)
+      } else {
+        // Marks nest properly (they come from the DOM tree): this closes the innermost.
+        tokens.push({ mark: openMarks.pop() ?? t.mark, open: false })
+      }
+      continue
+    }
+    if (typeof t !== 'string' || openMarks.length === 0 || !t.includes('\n')) { tokens.push(t); continue }
+    t.split('\n').forEach((part, i) => {
+      if (i > 0) {
+        for (let k = openMarks.length - 1; k >= 0; k--) tokens.push({ mark: openMarks[k], open: false })
+        tokens.push('\n')
+        for (let k = 0; k < openMarks.length; k++) {
+          openMarks[k] = { char: openMarks[k].char, keep: true }
+          tokens.push({ mark: openMarks[k], open: true })
+        }
+      }
+      tokens.push(part)
+    })
+  }
+
+  // 2. Move edge whitespace out of every mark. Repeated until stable: nested
+  //    marks hand it outwards one level per pass.
+  const compact = (list: InlineToken[]): InlineToken[] => {
+    const res: InlineToken[] = []
+    for (const t of list) {
+      if (t === '') continue
+      const last = res[res.length - 1]
+      if (typeof t === 'string' && typeof last === 'string') res[res.length - 1] = last + t
+      else res.push(t)
+    }
+    return res
+  }
+  for (let moved = true; moved;) {
+    moved = false
+    tokens = compact(tokens)
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i]
+      if (typeof t === 'string' || !('mark' in t)) continue
+      const side = t.open ? i + 1 : i - 1
+      const text = tokens[side]
+      if (typeof text !== 'string') continue
+      const ws = (t.open ? text.match(/^\s+/) : text.match(/\s+$/))?.[0]
+      if (!ws) continue
+      tokens[side] = t.open ? text.slice(ws.length) : text.slice(0, -ws.length)
+      tokens.splice(t.open ? i : i + 1, 0, ws)
+      moved = true
+      i++
+    }
+  }
+
+  // 3. Read the line back the way inlineToHtml would (held spans masked with a
+  //    neutral character) and drop the first mark that doesn't come back as
+  //    written; dropping one changes what its neighbours touch, so repeat.
+  const marks = tokens.filter((t): t is { mark: FlankedMark; open: boolean } => typeof t !== 'string' && 'mark' in t)
+  for (let changed = true; changed;) {
+    changed = false
+    let md = ''
+    const at = new Map<FlankedMark, { open: number; close: number }>()
+    for (const t of tokens) {
+      if (typeof t === 'string') md += t
+      else if ('held' in t) md += '\uE000'.repeat(t.held.length)
+      else if (t.mark.keep) {
+        const pos = at.get(t.mark) ?? { open: -1, close: -1 }
+        pos[t.open ? 'open' : 'close'] = md.length
+        at.set(t.mark, pos)
+        md += t.mark.char + t.mark.char
+      }
+    }
+    const readBack = new Set(
+      (['+', '='] as const).flatMap((c) => flankedMarkPairs(md, c).map(([o, k]) => `${c}${o}:${k}`)))
+    for (const { mark, open } of marks) {
+      if (!open || !mark.keep) continue
+      const pos = at.get(mark)
+      if (pos && readBack.has(`${mark.char}${pos.open}:${pos.close}`)) continue
+      mark.keep = false
+      changed = true
+      break
+    }
+  }
+
+  return tokens
+    .map((t) => (typeof t === 'string' || 'held' in t ? textOf(t) : t.mark.keep ? t.mark.char + t.mark.char : ''))
+    .join('')
 }
 
 function listElToMd(listEl: Element, depth: number): string {
@@ -542,10 +679,15 @@ function parseMdListItems(lines: string[]): MdListItem[] {
           // Recover annotations that an older build appended to the last physical
           // line of a multi-line task instead of the first (they'd otherwise show
           // up as literal "🔺low"/"📅…"/"⏰…" text and the attribute would be lost).
-          const { text: contText, due, alarm, importance } = extractDeadlineAnnotations(line.trim())
-          if (due && !node.due) node.due = due
-          if (alarm && !node.alarm) node.alarm = alarm
-          if (importance && !node.importance) node.importance = importance
+          // Only the kinds the task doesn't have yet: once it has a date, a 📅
+          // further down is text the user wrote ("was 📅2025-12-20 before slip")
+          // and must stay where it is, not be cut out and lost.
+          const { text: contText, due, alarm, importance } = extractDeadlineAnnotations(line.trim(), {
+            due: !node.due, alarm: !node.alarm, importance: !node.importance,
+          })
+          if (due) node.due = due
+          if (alarm) node.alarm = alarm
+          if (importance) node.importance = importance
           node.text += '\n' + contText
         } else {
           node.text += '\n' + line.trim()

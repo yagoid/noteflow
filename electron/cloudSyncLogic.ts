@@ -658,3 +658,35 @@ export function planMetadataPull(
   }
   return { action: 'write', content: remoteContent, backup, merged: false }
 }
+
+// ── Remote deletes (tombstone vs physical DELETE) ────────────────────────────
+
+/** Next step of removeRemoteByPathKeys. */
+export type RemoteDeleteStep = 'tombstone' | 'delete' | 'defer' | 'done' | 'fail'
+
+/**
+ * Decides how a remote delete proceeds — a two-step decision: call it first
+ * WITHOUT `patchStatus` (what to try), then again with the tombstone PATCH's
+ * HTTP status (what to do with its answer).
+ *
+ * Deletes are tombstones (PATCH deleted=true) so other devices see them on
+ * their incremental pull. RLS gates that UPDATE on the cloud entitlement, so a
+ * user KNOWN to have no subscription falls back to a physical DELETE (allowed
+ * by ownership alone; other devices are not notified — they can't push either).
+ * That fallback is destructive for every other device, so it is only taken on
+ * a VERIFIED entitlement: one fetched in this run. Unknown entitlements (never
+ * fetched) and the on-disk cache (`verified: false`) only ever tombstone; a 403
+ * then means 'defer' — the caller throws, the op stays journaled and is retried
+ * once the entitlements are verified.
+ *  - entitled: the local view says the cloud entitlement is active.
+ *  - verified: that view comes from a fetch made in this run.
+ *  - patchStatus: HTTP status of the tombstone PATCH (omit on the first step).
+ */
+export function planRemoteDelete(s: { entitled: boolean; verified: boolean; patchStatus?: number }): RemoteDeleteStep {
+  if (s.patchStatus === undefined) return s.entitled || !s.verified ? 'tombstone' : 'delete'
+  if (s.patchStatus < 400) return 'done'
+  if (s.patchStatus !== 403) return 'fail'
+  // 403 from RLS: no active entitlement server-side. Only a verified local view
+  // may fall through to the physical DELETE (a stale verified `true` included).
+  return s.verified ? 'delete' : 'defer'
+}

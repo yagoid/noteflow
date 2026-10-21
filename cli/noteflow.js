@@ -2136,7 +2136,9 @@ async function cmdCloudLogout() {
   }
   try {
     const token = await getCloudAccessToken()
-    await supabaseFetch(`${SUPABASE_URL}/auth/v1/logout`, { method: 'POST', accessToken: token })
+    // scope=local: revoke only the CLI's own session — the default (global)
+    // would also sign out the desktop app and every other device.
+    await supabaseFetch(`${SUPABASE_URL}/auth/v1/logout?scope=local`, { method: 'POST', accessToken: token })
   } catch { /* best-effort revocation */ }
   clearCliAccount()
   patchCliCloud({ enabled: false }) // keeps pullSeq/lastSync/userId — a same-account re-login resumes incrementally

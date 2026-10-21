@@ -236,7 +236,9 @@ const api = {
     signedIn: boolean
     email?: string
     entitlements: { ai: boolean; cloud: boolean }
+    entitlementsKnown: boolean  // false = never fetched: UNKNOWN, not "not entitled"
     entitlementsFetchedAt?: string
+    sessionLocked: boolean  // session on disk but undecryptable right now (keychain locked)
     aiCheckoutConfigured: boolean
     cloudCheckoutConfigured: boolean
     bundleCheckoutConfigured: boolean
@@ -262,7 +264,9 @@ const api = {
       signedIn: boolean
       email?: string
       entitlements: { ai: boolean; cloud: boolean }
+      entitlementsKnown: boolean
       entitlementsFetchedAt?: string
+      sessionLocked: boolean
       aiCheckoutConfigured: boolean
       cloudCheckoutConfigured: boolean
       bundleCheckoutConfigured: boolean

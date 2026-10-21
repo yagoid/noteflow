@@ -4,6 +4,7 @@ exports.DEFAULT_LLM_CONFIG = exports.decryptSecret = exports.encryptSecret = exp
 exports.withActiveProvider = withActiveProvider;
 exports.byoFallbackProvider = byoFallbackProvider;
 exports.acceptsModel = acceptsModel;
+exports.acceptsBaseUrl = acceptsBaseUrl;
 exports.resolveConfig = resolveConfig;
 exports.resolveConfigAsync = resolveConfigAsync;
 exports.providerCapabilities = providerCapabilities;
@@ -14,8 +15,12 @@ const presets_1 = require("./presets");
 const secret_1 = require("./secret");
 const anthropic_1 = require("./anthropic");
 const openaiCompatible_1 = require("./openaiCompatible");
-// No import cycle: account.ts only pulls ./secret and ./cloudConfig, never this module.
+// No import cycle: account.ts only pulls ./secret and leaf modules (cloudConfig, entitlements*,
+// settingsFile), never this module.
 const account_1 = require("../../account");
+const entitlementsRetry_1 = require("../../entitlementsRetry");
+const i18n_1 = require("../../i18n");
+const managedErrors_1 = require("./managedErrors");
 var presets_2 = require("./presets");
 Object.defineProperty(exports, "PRESETS", { enumerable: true, get: function () { return presets_2.PRESETS; } });
 var secret_2 = require("./secret");
@@ -70,8 +75,21 @@ function acceptsModel(presetId, model) {
     const preset = (0, presets_1.presetOf)(presetId);
     return !preset.modelMeta || preset.suggestedModels.includes(model.trim());
 }
+/**
+ * Whether a custom base URL may be stored/used for `presetId`. Presets with
+ * `editableBaseUrl: false` are pinned to their built-in endpoint — above all the
+ * managed `noteflow` one, whose credential is the user's Supabase access token:
+ * honouring a stored URL there would hand that token to an arbitrary host.
+ */
+function acceptsBaseUrl(presetId) {
+    return (0, presets_1.presetOf)(presetId).editableBaseUrl;
+}
+/** The endpoint requests actually go to. A non-editable preset ALWAYS resolves to its own
+ *  baseUrl, whatever settings.json says (it may have been written by an older build or by hand). */
 function effectiveBaseUrl(cfg) {
     const preset = (0, presets_1.presetOf)(cfg.active);
+    if (!preset.editableBaseUrl)
+        return preset.baseUrl;
     const ps = cfg.byPreset[preset.id] ?? {};
     return ps.baseUrl?.trim() || preset.baseUrl;
 }
@@ -92,17 +110,19 @@ function resolveConfig(cfg) {
  * Like resolveConfig, but for the managed `noteflow` preset the credential is a
  * FRESH Supabase access token of the NoteFlow account session (GoTrue tokens
  * expire in ~1h, so it must be minted per request — never stored like an API
- * key). Throws a user-facing error when there is no signed-in session.
+ * key). Throws a user-facing error saying WHY there is no token: no session,
+ * no connection, the system keychain is locked, or the account service failed.
+ * `messages` = the main-process strings in the app language (main.ts passes
+ * mainMessages().chatErrors; English when omitted).
  */
-async function resolveConfigAsync(cfg) {
+async function resolveConfigAsync(cfg, messages = (0, i18n_1.getMessages)('en').chatErrors) {
     const resolved = resolveConfig(cfg);
     if ((0, presets_1.presetOf)(cfg.active).id !== 'noteflow')
         return resolved;
-    const token = await (0, account_1.getAccessToken)();
-    if (!token) {
-        throw new Error('NoteFlow AI needs your NoteFlow account. Sign in from Settings → Account and try again.');
-    }
-    return { ...resolved, apiKey: token };
+    const result = await (0, account_1.getAccessTokenResult)();
+    if (!result.ok)
+        throw new Error((0, managedErrors_1.managedTokenFailureMessage)(result.reason, messages));
+    return { ...resolved, apiKey: result.token };
 }
 /** Native attachment support per preset (the app never extracts text itself). */
 function providerCapabilities(preset, activeModel) {
@@ -125,10 +145,11 @@ function toPublic(cfg) {
     const hasKey = !!ps.encryptedApiKey;
     let configured = (!preset.needsKey || hasKey) && !!model;
     if (preset.id === 'noteflow') {
-        // The managed plan is only usable with a signed-in account AND an active
-        // 'ai' (or 'bundle') subscription — otherwise the proxy answers 401/403.
-        const status = (0, account_1.getAccountStatus)();
-        configured = configured && status.signedIn && status.entitlements.ai;
+        // The managed plan needs a signed-in account AND an active 'ai' (or
+        // 'bundle') subscription — otherwise the proxy answers 401/403. Entitlements
+        // that were never fetched (offline boot, keychain locked…) are UNKNOWN, not
+        // false: let the request through and let the proxy judge (403 if not entitled).
+        configured = configured && (0, entitlementsRetry_1.isManagedAiUsable)((0, account_1.getAccountStatus)());
     }
     return {
         active: preset.id,
@@ -145,7 +166,8 @@ function notConfiguredMessage(cfg) {
         const status = (0, account_1.getAccountStatus)();
         if (!status.signedIn)
             return 'NoteFlow AI needs your NoteFlow account — sign in from Settings → Account.';
-        if (!status.entitlements.ai)
+        // Unknown entitlements never land here (isManagedAiUsable lets them through).
+        if (!(0, entitlementsRetry_1.isManagedAiUsable)(status))
             return 'NoteFlow AI requires an active subscription — manage your plan in Settings → Account.';
     }
     return 'No LLM provider configured';

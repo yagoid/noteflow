@@ -37,6 +37,7 @@ import path from 'path'
 import * as account from './account'
 import { SUPABASE_URL, SUPABASE_ANON_KEY, CLOUD_KEYS_URL, isCloudConfigured } from './cloudConfig'
 import { encryptSecret, decryptSecret } from './ai/llm/secret'
+import { writeSettingsFile } from './settingsFile'
 import {
   KEY_BYTES,
   DEFAULT_KDF_ITERATIONS,
@@ -109,7 +110,7 @@ function readSettings(): Record<string, unknown> {
 }
 
 function writeSettings(data: Record<string, unknown>): void {
-  fs.writeFileSync(getSettingsPath(), JSON.stringify(data), 'utf-8')
+  writeSettingsFile(getSettingsPath(), data) // owner-only (0600) on POSIX
 }
 
 // Merges a patch into the cloudSync section without clobbering fields owned by

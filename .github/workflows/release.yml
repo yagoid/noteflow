@@ -104,19 +104,29 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          draft: false
+          # Created as a DRAFT on purpose. The in-app updater reads
+          # /releases/latest, which ignores drafts: a published release would be
+          # offered to existing clients while its assets may still be uploading
+          # (404 on download) and before the notes are written. Publish by hand
+          # once the assets are verified and the notes are in:
+          #   gh release edit vX.Y.Z --notes-file notes.md
+          #   gh release edit vX.Y.Z --draft=false
+          draft: true
           # Tags with a pre-release suffix (e.g. v1.7.0-mac.1) publish as a
           # prerelease, which the in-app updater (/releases/latest) ignores — handy
           # for testing the macOS build without pushing it to existing users.
           prerelease: ${{ contains(github.ref_name, '-') }}
+          # Kept, but in practice the generated body comes out empty: the real
+          # notes are always written by hand (see .claude/context/release.md).
           generate_release_notes: true
+          # Linux ships only .deb + AppImage (linux.target in package.json); no
+          # pacman package is built.
           files: |
             release-win/*.exe
             release-win/*.exe.blockmap
             release-win/latest.yml
             release-linux/*.deb
             release-linux/*.AppImage
-            release-linux/*.pkg.tar.zst
             release-linux/latest-linux.yml
             release-mac/*.dmg
             release-mac/*.dmg.blockmap
