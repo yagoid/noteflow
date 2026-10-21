@@ -74,8 +74,8 @@ Iconos del TitleBar:
   *reduced motion*; vacía → línea discontinua + "No activity yet"; con el latido del auto-sync cada
   5 min, las 24 barras abarcan ~las últimas 2 h) con leyenda "last N syncs" / "X files today" (total
   acumulado del día local en esta sesión, llevado en main — no la suma de las barras); bloque ámbar con el error si lo hay;
-  bloque ámbar de **copias de conflicto** (solo NoteFlow Cloud: "Your offline edits to N note(s)
-  conflicted with newer changes from another device and were kept as conflict copies:" + hasta 3
+  bloque ámbar de **copias de conflicto** (NoteFlow Cloud o GitHub, el backend activo: "Your edits to
+  N note(s) conflicted with changes made on another device and were kept as conflict copies:" + hasta 3
   títulos y "+N more", botón *Dismiss*; mientras no se descarta, el botón muestra un **punto ámbar**
   y su `aria-label` lo menciona); y pie compacto de **iconos con tooltip**:
   candado (Cloud: cifrado Standard / Private E2EE), rayo (Cloud: verde si Real-time conectado),
@@ -1064,8 +1064,9 @@ ninguno → Cloud); a partir de ahí manda la elección del usuario. Con Cloud a
 > conflicto"), en el mismo grupo/carpeta y con las mismas secciones (una nota cifrada sigue cifrada
 > con la misma contraseña); se sube como cualquier nota y se avisa en la tarjeta del botón de sync del
 > titlebar. **No cubre:** ediciones hechas con Cloud desactivado o desde el CLI con la app cerrada; un
-> `noteflow cloud pull` del CLI sobre una edición offline pendiente de la app; el GitHub Sync; ni el
-> caso en que tu edición local es más nueva que la remota (gana la tuya, sin copia). Puede salir una
+> `noteflow cloud pull` del CLI sobre una edición offline pendiente de la app; ni el caso en que tu
+> edición local es más nueva que la remota (gana la tuya, sin copia). El GitHub Sync tiene su propia
+> versión (ver "GitHub Sync" → "Si otro dispositivo cambió la nota"). Puede salir una
 > copia de más (otro cliente que formatee distinto el YAML, notas cifradas) y la copia conserva
 > favorito/caducidad/alarmas (pueden sonar dos veces). El CLI con Cloud hace lo mismo con sus propias
 > subidas fallidas.
@@ -1136,6 +1137,15 @@ Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
 - **Cada 5 min**: pull automático en segundo plano.
 - **Al guardar**: push automático con debounce (~5s). El icono ☁ indica cuándo está subiendo.
 - **Al borrar**: el archivo se elimina también del repo remoto.
+- **Si otro dispositivo cambió la nota** en GitHub desde la última vez que este la sincronizó (y
+  aquí también se editó), el push **no la pisa**: la app hace un sync enseguida, se queda con la
+  versión de GitHub y guarda tu versión local como nota nueva "<título> (conflict copy AAAA-MM-DD
+  HH:mm)" (mismo grupo/carpeta/secciones; se sube como cualquier nota), con el mismo aviso ámbar que
+  NoteFlow Cloud en la tarjeta del botón de sync. Lo mismo si borras una nota (o una sección) que
+  cambió en GitHub: no se borra allí y vuelve en el siguiente sync. Si solo cambió el otro lado, todo
+  sigue como siempre. Con NoteFlow Cloud activado GitHub es un espejo y no hace esto. El CLI
+  (`noteflow push` y el push de cada comando) hace lo mismo e imprime `Conflict: local changes kept
+  as "…"`.
 - Se sincronizan notas + `groups.json`, `folders.json`, `section-colors.json`, `note-order.json`,
   `templates.json`, `ui-settings.json` (apariencia y ajustes del editor).
 - El repositorio se crea como **privado** automáticamente si no existe.

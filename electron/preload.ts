@@ -156,7 +156,11 @@ const api = {
     lastSync?: string
     error?: string
     initialPullStatus: 'pending' | 'ok' | 'failed'
+    conflictCopies?: { count: number; titles: string[]; at: string }
   }> => ipcRenderer.invoke('sync:get-status'),
+  // Clears the session notice of conflict copies made by the pull of either
+  // backend (titlebar sync status card).
+  dismissConflictCopies: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:dismiss-conflict-copies'),
   // Backend-tagged status of the LIVE sync provider (Cloud when enabled, else
   // GitHub, else 'none') — drives the titlebar sync button and its status card.
   getActiveSyncStatus: (): Promise<{
@@ -169,12 +173,12 @@ const api = {
     autoSyncIntervalMs?: number
     history?: Array<{ at: string; files: number; ok: boolean }>
     filesToday?: number
+    conflictCopies?: { count: number; titles: string[]; at: string }
     github?: { owner?: string; repo?: string }
     cloud?: {
       keysState: 'unlocked' | 'locked' | 'no-keys'
       keysMode: 'managed' | 'e2ee' | null
       realtimeConnected: boolean
-      conflictCopies?: { count: number; titles: string[]; at: string }
     }
   }> => ipcRenderer.invoke('sync:get-active-status'),
   initiateGitHubAuth: (
@@ -295,6 +299,8 @@ const api = {
     lastSync?: string
     error?: string
     initialPullStatus: 'pending' | 'ok' | 'failed'
+    realtimeConnected: boolean
+    conflictCopies?: { count: number; titles: string[]; at: string }
   }> => ipcRenderer.invoke('cloud:get-status'),
   cloudSetup: (passphrase: string): Promise<{ ok: boolean; recoveryCode?: string; error?: string }> =>
     ipcRenderer.invoke('cloud:setup', passphrase),
@@ -318,8 +324,6 @@ const api = {
   // have switched it); main broadcasts cloud:status-changed when it changed.
   cloudRefreshKeysMode: (): Promise<{ changed: boolean }> => ipcRenderer.invoke('cloud:refresh-keys-mode'),
   cloudLock: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:lock'),
-  // Clears the session notice of conflict copies made by the pull (sync status card).
-  cloudDismissConflictCopies: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:dismiss-conflict-copies'),
   cloudEnable: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('cloud:enable'),
   cloudDisable: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:disable'),
   cloudPull: (): Promise<{

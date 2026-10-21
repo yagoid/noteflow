@@ -50,6 +50,12 @@ ficheros con push **en vuelo** — las ediciones aún dentro del debounce de 5 s
 evento propio: se lee al refrescar; la tarjeta re-lee el status al abrirse y cada 30 s) y
 `history` (abajo). La acción del clic (sync / reintentar / desbloquear) va en el `aria-label`
 del botón; la tarjeta ya no la muestra.
+**Aviso de copias de conflicto:** `ActiveSyncStatus.conflictCopies` (`{count, titles, at}`, de nivel
+superior — no dentro de `cloud`) lleva el aviso del backend **activo**, sea Cloud
+(`CloudSyncStatus.conflictCopies`) o GitHub (`SyncStatus.conflictCopies` de `githubSync.ts`): punto
+ámbar en el botón + bloque con los títulos y *Dismiss* en la tarjeta, igual para los dos. *Dismiss*
+llama a `sync:dismiss-conflict-copies`, que limpia el aviso de **ambos** backends. El tipo y el lado
+disco de la copia son compartidos (`electron/conflictCopy.ts`).
 **Historial de actividad (`history`, mini gráfica de barras de la tarjeta):** buffer circular
 **solo en memoria** (no se persiste; vacío en cada arranque) de hasta 24 `{at, files, ok}`, uno
 **por backend** (`getSyncHistory()` en `githubSync.ts`/`cloudSync.ts`; el status lleva el del
@@ -112,14 +118,19 @@ muestra un error ("Some remote changes could not be applied…") aunque un push 
 `cloud_upsert_file`, que rechaza ("stale") una versión más vieja que la del servidor; el ciclo de
 Cloud hace **pull (y emite su resultado) antes de drenar el journal**. Detalle (stale/force, metadatos, cambio de cuenta)
 en `monetization.md` § 4 "Subidas condicionadas".
-📌 **Copias de conflicto (solo Cloud):** cuando el pull de Cloud va a sobrescribir (ancla remota más
+📌 **Copias de conflicto (los dos backends):** cuando el pull de Cloud va a sobrescribir (ancla remota más
 nueva, o una sección remota suelta) o borrar (tombstone `'lost'`) una carpeta con una edición local
 **apuntada en el journal** que difiere de la versión del servidor, antes guarda la versión local
 como **nota nueva** ("<título> (conflict copy fecha)") y avisa en la tarjeta del botón de sync. Por
 eso, con Cloud, las ediciones hechas con la **puerta de push cerrada** se apuntan en el journal (sin
-subirse) en lugar de descartarse; en GitHub la puerta sigue sin apuntar nada. El GitHub Sync **no**
-hace copias: sigue siendo LWW puro por carpeta. Residuales (Cloud desactivado, CLI, formato YAML,
-alarmas duplicadas…) y detalle en `monetization.md` § 4 "Subidas condicionadas" → "Copias de conflicto".
+subirse) en lugar de descartarse; en GitHub la puerta sigue sin apuntar nada (allí la detección no
+depende del journal: es la comprobación de tres vías contra la caché de shas). Residuales de Cloud
+(Cloud desactivado, CLI, formato YAML, alarmas duplicadas…) y detalle en `monetization.md` § 4
+"Subidas condicionadas" → "Copias de conflicto". El **GitHub Sync** hace lo mismo desde QA B3 con su
+propia regla (subida condicionada de tres vías + "camino de conflicto" del pull): ver "Subida
+condicionada (QA B3)" abajo. Mismos helpers (`planConflictCopy`/`buildConflictCopy` de
+`cloudSyncLogic.ts`, `writeConflictCopy` de `conflictCopy.ts`), misma etiqueta i18n
+(`sync.conflictCopy`, inyectada con `githubSync.setConflictCopyLabel`) y mismo aviso.
 
 **El CLI** (`cli/noteflow.js`) tiene su propio cliente Cloud headless (`noteflow cloud …`, con
 sesión y cursor propios en `settings.cliAccount`/`cliCloud`, y la misma prioridad Cloud > GitHub):
@@ -142,6 +153,23 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
 - El valor escrito es la hora **de inicio** del comando (`startedAt`, tomada antes de leer el disco,
   como `githubSync.ts`): una nota escrita mientras corre el push/pull queda con `updated > lastSync`.
 - El push automático por comando (`syncPushNoteFiles`) **no** toca `lastSync`.
+- **Subida condicionada (QA B3, espejo de la app):** `noteflow push` y el push automático de cada
+  comando que edita (`syncPushNoteFiles`) hacen la misma comprobación de tres vías por fichero de
+  nota (`planConditionalUpsert`), con una caché de bases **propia** del CLI
+  (`cli-github-state.json` junto a su `settings.json`, `{owner, repo, shas}`; otra cuenta/repo ⇒
+  vacía; `logout` y `login` a otro repo la borran — nunca se comparte con el `sync-state.json` de
+  la app). Sin caché (primera ejecución, otro repo) ⇒ comportamiento histórico. Tampoco hace PUTs
+  idénticos (antes sí: commits vacíos). Un fichero cuya copia en GitHub cambió desde su base **no se
+  sube**: la carpeta se resuelve al final (`githubResolveConflictDir`) — baja la carpeta remota, guarda
+  la local como copia de conflicto si difiere (`preserveConflictCopy`, el helper de copias del pull de
+  Cloud), escribe la remota encima, sube la copia y avisa `Conflict: local changes kept as "…"`.
+  `noteflow pull` registra como base cada blob del tree **solo donde el fichero local ya es ese blob**
+  tras el pull (`nextPulledBases`: una carpeta saltada por "local más nuevo" conserva su base vieja,
+  para que el siguiente push vea el cambio remoto). Borrados: `noteflow delete` no borra nada en
+  GitHub si algún fichero de la nota cambió allí desde su base (`remoteDirChangesSinceBase`; el
+  siguiente `pull` la vuelve a bajar), y `noteflow section delete` no borra una sección cambiada en
+  GitHub (ni ninguna si el push del ancla acaba de resolver un conflicto). Con `cloudSync.enabled` en
+  el `settings.json` (la app usa Cloud) todo es incondicional, como en la app.
 
 ⚠️ **Pendiente — CLI con Cloud + app con GitHub sobre el mismo `settings.json`:** un pull de Cloud
 del CLI deja en disco notas con su `updated` original (antiguo) que no están en el repo de GitHub.
@@ -168,7 +196,10 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   `note-order:set`. Los callbacks alimentan `pendingPushFiles` → evento `sync:push-state`.
   Cada push se apunta en el **journal** (abajo) al armar el timer y se da de baja al completar;
   un push fallido setea `syncError` y queda journaled para que `retrySyncJournal` lo reintente
-  (antes se perdía hasta que el usuario reeditara).
+  (antes se perdía hasta que el usuario reeditara). Con GitHub como backend activo cada subida de un
+  fichero de nota es **condicionada** (tres vías contra la base cacheada, ver "Subida condicionada
+  (QA B3)"): si el fichero cambió en GitHub desde que este dispositivo lo vio, **no** se sube — no es
+  un error (sin `syncError`, sin bump de `lastSync`): el op queda `stale` y se pide un pull.
   **Push durable por lotes:** `pushPathsNow(notesDir, relPaths)` sube un set de archivos **ya**
   (awaited, sin debounce, leyendo de disco) y **NO bumpea `lastSync`**. Lo usa `notes:write-imported`:
   cada `schedulePush` que completa adelanta `lastSync` a "ahora", así que durante un import grande un
@@ -202,6 +233,9 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   carpetas con sha nuevo pagan el GET del ancla + comparación de `updated`. Si ese GET falla (`getRemoteFile` se traga el error y devuelve `null`) o el tree viene
   truncado, el pull no añade nada a `errors` pero devuelve `incomplete: true` (no se muestra; solo
   frena la caducidad de notas temporales, ver `patterns.md`).
+  **Camino de conflicto (QA B3, antes de la caché):** con GitHub como backend activo, una carpeta
+  con un op `stale` o con algún fichero en conflicto de tres vías no pasa por la regla de `updated`
+  sino por `resolveRemoteDirConflict` — ver "Subida condicionada (QA B3)".
   **Repo existente VACÍO (sin commits):** la Git Trees API responde **409 "Git Repository is
   empty."**; `fetchRemoteTree` (único listado: pull, espejo, `deleteRemoteDirNow`, migración v2) lo
   trata como listado **vacío y completo** — `isGitHubEmptyRepoError(status, message)` en
@@ -384,7 +418,10 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   solo justo tras un pull limpio del backend activo, ver `patterns.md` § "Motor de alarmas y notas
   temporales", porque el borrado es incondicional). Ambos se
   journalan antes de ejecutarse y en fallo setean `syncError` y QUEDAN en el journal para retry
-  (sin tope de intentos: un borrado remoto perdido = nota que resucita en el siguiente pull).
+  (sin tope de intentos: un borrado remoto perdido = nota que resucita en el siguiente pull). Con
+  GitHub activo ambos son **condicionados** (ver "Subida condicionada (QA B3)"): una sección que
+  cambió en GitHub no se borra (op `delete` `stale`), y un `deleteDir` sobre una nota cambiada allí no
+  borra **nada** — gana la edición remota y la nota vuelve en el siguiente pull.
 - **Journal + sha cache (`electron/syncState.ts` + `userData/sync-state.json`):** estado LOCAL de
   durabilidad (deliberadamente fuera del dir de notas — no debe sincronizarse; se limpia en
   `disconnectGitHub()`; corrupto/ausente degrada a estado vacío, nunca bloquea el sync). Dos mapas:
@@ -396,14 +433,27 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     fichero local ya no existe, se descarta la entrada — el borrado lo cubre su propia entrada),
     deletes se re-ejecutan; **no bumpea `lastSync`** (mismo motivo que `pushPathsNow`). Lo llama
     `main.ts` en cada tick del autosync ANTES de `pullNotes` y tras el pull inicial OK; gated por
-    `initialPullStatus === 'ok'`. Semántica LWW conservada: si un dir con upsert pendiente viene
-    MÁS NUEVO del remoto, el pull lo sobrescribe entero y el retry sube después lo que haya en disco.
+    `initialPullStatus === 'ok'`. Se **salta los ops `stale`** (subida/borrado ya retenidos por la
+    comprobación de tres vías — los resuelve el pull) y los que ya no son el op del snapshot
+    (completados o sustituidos mientras drenaba). Un dir con upsert pendiente que **también** cambió en
+    GitHub ya no se sobrescribe por LWW y luego se re-sube encima (eso perdía la edición remota, QA B3):
+    lo resuelve el camino de conflicto del pull (versión remota + copia de conflicto de la local). Si
+    solo cambió el remoto (lo local sigue en su base) el pull lo aplica por **avance rápido**
+    (fast-forward, mismo camino, sin copia) **diga lo que diga `updated:`** — antes, con el `updated`
+    remoto no más nuevo (reloj desfasado, edición en la web de GitHub que no lo toca), la regla de
+    timestamps conservaba lo local, cacheaba el sha remoto como reconciliado y la siguiente edición
+    local lo pisaba. La regla de `updated` (LWW por carpeta) sigue rigiendo cuando la base es
+    desconocida.
+    Flags del op en GitHub: `stale` (upserts **y** deletes de sección) y `conflictCopied` (dedupe de
+    copias); `force` es solo de Cloud.
   - **`shas` (cache de blobs reconciliados):** relPath del ancla (`<dir>/note.md`), de cada
-    sección (`<dir>/<sec>.md`) o del metadata → blob-sha del tree ya reconciliado. Se escribe tras
-    cada decisión del pull (tanto si pulleó como si ganó lo local — salvo secciones con el local
-    estrictamente más nuevo, ver "Pull") y permite el skip sin GET; se poda a los paths presentes en
-    el tree. El espejo (`mirrorToGitHub`) solo cachea anclas y metadatos; las secciones que sube se
-    adoptan en el siguiente pull comparando con el disco.
+    sección (`<dir>/<sec>.md`) o del metadata → blob-sha ya reconciliado por **este** dispositivo. Se
+    escribe tras cada decisión del pull (tanto si pulleó como si ganó lo local — salvo secciones con el
+    local estrictamente más nuevo, ver "Pull") **y tras cada subida propia** (PUT o salto por idéntico:
+    `recordPushedBase`; un DELETE la borra, `forgetRemoteBase`). Permite el skip sin GET y es la
+    **BASE** de la subida condicionada (abajo). Se poda a los paths presentes en el tree (más los que
+    este dispositivo subió después del listado). El espejo (`mirrorToGitHub`) cachea sin request las
+    anclas y metadatos que encuentra idénticos; lo que sube lo cachea la propia subida.
     Los `METADATA_FILENAMES` usan el mismo cache (solo GET cuando el sha del tree difiere).
     La lógica de transiciones/decisiones es pura en `syncState.ts` (sin imports de Electron, patrón
     `entitlements.ts`) y está cubierta por `tests/electron/syncState.test.ts`.
@@ -423,12 +473,105 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   overview) disparaba N mutaciones concurrentes → 409s silenciosos → notas restauradas; de ahí la
   cola. Mantener este patrón al añadir operaciones que toquen el remoto (notas, grupos, carpetas,
   metadatos).
-- **⚠️ Problema conocido (pendiente en GitHub; Cloud ya lo resolvió): las subidas pisan sin
-  condiciones.** `upsertRemoteFileNow` hace GET del sha actual y PUT con él — el sha es solo el token
-  de concurrencia de la Contents API, no "la versión que este dispositivo vio" —, así que una subida
-  en cola o drenada tarde del journal pisa una versión más nueva subida por otro dispositivo
-  entretanto. NoteFlow Cloud ya sube condicionado (RPC de la migración 0011, ver `monetization.md`
-  § 4 "Subidas condicionadas"); en GitHub sigue pendiente.
+- **Subida condicionada (QA B3 — resuelto; antes "las subidas pisan sin condiciones").** El bug:
+  `upsertRemoteFileNow` hacía GET del sha actual y PUT con él — ese sha es solo el **token de
+  concurrencia** de la Contents API, no "la versión que este dispositivo vio" —, así que A (con X
+  sincronizada) editaba X sin haber bajado una edición de X subida por otro dispositivo y su push
+  debounced la **pisaba en todas partes**, sin copia ni aviso. Variante: si un pull caía entre la
+  edición remota y el push, veía "local estrictamente más nuevo", cacheaba el sha remoto y el push
+  pisaba igual. Diseño (lógica pura en `syncState.ts`, testeada en `tests/electron/githubConflict.test.ts`;
+  flujo completo contra un GitHub simulado en `tests/electron/githubConditionalSync.test.ts`):
+  - **Tres vías por fichero de nota** (`<dir>/<file>.md`): **B** = base = `state.shas[p]` (lo último
+    que este dispositivo reconcilió: bajado, adoptado o **subido**; `undefined` = desconocida), **R** =
+    sha en GitHub ahora (GET de la Contents API en el push, tree en el pull; `null` = ausente), **L** =
+    sha del contenido local. Conflicto = `B definida && R≠B && L≠B && L≠R` (`isThreeWayConflict`).
+    **Base desconocida ⇒ comportamiento histórico** (sin copias espurias tras perder la caché, en el
+    primer connect o con ficheros de antes de la actualización).
+  - **Solo con GitHub como backend activo** (`isConditionalMutation`: no forzado, fichero de nota y
+    `!isCloudSyncEnabledFailClosed()`, evaluado al **ejecutar** la mutación). Metadatos, README y
+    marcador: incondicionales (como Cloud: los metadatos no tienen versión). Con Cloud activo GitHub es
+    el espejo de solo escritura: subidas incondicionales, `mirrorToGitHub` forzado (`force: true`) y el
+    pull sin camino de conflicto (`conflictsAllowed = shouldRefreshSections(...)`) — comportamiento
+    histórico, sin copias.
+  - **Push** (`upsertRemoteFileNow`, dentro de la cola serializada): (1) **comprobación de disco**: si
+    el fichero en disco ya no es el contenido capturado (o no existe) → `'superseded'`: sin PUT, sin
+    tocar el journal, sin error (una edición posterior arma su propio timer; un pull que resolvió la
+    carpeta escribió la versión remota). Verificado: todos los llamantes de `schedulePush`
+    (`applyNoteWrite`, metadatos de `main.ts`, catch-up, copias de conflicto) escriben el fichero
+    **antes** de programar. (2) `R === L` → `'identical'` (sin PUT, guarda de siempre). (3)
+    `planConditionalUpsert(B, R, L)`: `R` nulo → PUT (crear; también con base conocida: una edición
+    local gana a un borrado remoto); base desconocida o `R === B` → PUT; si no → **`RemoteChangedError`**
+    (sin PUT). (4) Tras cada PUT o salto idéntico se cachea la base (`recordPushedBase`). El reintento
+    por 409/422 re-entra y re-evalúa.
+  - **Al retenerse** (`holdBackForRemoteChange`): el op se marca `stale` (`journalMarkStale(…, op)`; se
+    re-crea si faltaba, con `journalRecordIfAbsent`), **sin** `syncError` ni bump de `lastSync`, y se
+    avisa a `main.ts` (`onRemoteConflict`) que lanza un **pull de GitHub en ~3 s** (debounced; solo con
+    GitHub activo y el pull inicial OK; se re-arma mientras haya mutaciones en vuelo — la misma espera
+    del tick). El tick de 5 min (drain → pull) también lo resuelve. Lo manejan el push debounced, el
+    drain, `pushPathsNow`, `pushAllNotes` (no cuenta como error) y `scheduleDelete`. El drain **se salta**
+    los ops `stale`. Una nueva edición local re-registra el op y le quita el `stale`.
+  - **Borrados**: sección (`removeRemoteFileNow`) con `planConditionalDelete` → `stale` en el op
+    `delete`; `deleteDir` (`deleteRemoteDirNow`) lanza **antes de borrar nada** si algún blob de la
+    carpeta tiene base y su sha del tree es otro (`remoteDirChangesSinceBase`) → `handleDeleteDirConflict`
+    completa el `deleteDir` y **borra las bases de la carpeta**, así que el siguiente pull (pedido al
+    momento) la vuelve a bajar entera: **la edición remota gana al borrado local** (solo log, sin aviso
+    en la UI). Los blobs se borran luego forzados (la comprobación ya se hizo por carpeta). Los borrados
+    del espejo siguen forzados.
+  - **Pull — camino de conflicto** (por carpeta remota, tras `shouldPullSkipDir` y **antes** del skip
+    por caché; solo si la carpeta existe en local): se evalúa solo cuando algún blob listado difiere de
+    su base (o una base cacheada desapareció del tree) o hay un op `stale` bajo la carpeta — cero
+    lecturas de disco en el estado estable. Se toman todos los ficheros (tree ∪ bases ∪ disco) con sus
+    tres shas (`dirThreeWayShas`); los que en local ya **son** el blob listado se **adoptan** como base
+    sin request (cubre pushes propios de builds anteriores); `planGithubDirConflict` decide:
+    **conflicto** = op `stale` **o** algún conflicto de tres vías (no necesita journal: cubre ediciones
+    del CLI con la app cerrada y el caso "local estrictamente más nuevo"); **fast-forward** (sin
+    conflicto) = algún fichero con base conocida cambió en remoto y **todo** fichero local sigue en su
+    base, ya es igual al remoto o no existe y no tiene base (sección añadida en remoto) — la carpeta
+    remota se aplica por el mismo camino, sin copia, **ignorando `updated:`**. Ninguno de los dos →
+    rama histórica, donde además, con GitHub activo, un blob remoto que **no** se aplicó nunca se cachea
+    sobre una base conocida si el local no es ese blob (`cacheKeptLocal`): la siguiente edición local
+    se retiene en vez de pisar el cambio remoto. `resolveRemoteDirConflict`: (0) si hay mutaciones propias
+    en vuelo → aplaza (`incomplete`); (1) GET del ancla y de cada sección remota (un fallo → aplaza, sin
+    tocar nada); (2) **todo síncrono desde aquí** (ningún guardado, timer ni mutación puede colarse):
+    re-comprueba (mutaciones, pushes propios desde el listado, Cloud activado a mitad → aplaza), relee
+    la carpeta local y **re-planifica** (si ya no es conflicto ni fast-forward → aplaza, sin escribir);
+    candidatos a copia = ficheros locales cambiados desde su base (o sin base), ninguno solo si **todos**
+    los upserts pendientes de la carpeta ya están `conflictCopied` (dedupe por op: un upsert pendiente
+    sin el flag — una edición hecha después de una copia cuyo aplicado falló a medias — vuelve a
+    provocar copia; una copia de más es aceptable, perder esa edición no); `planConflictCopy` contra el contenido
+    remoto (ancla sin `updated:`); si hace falta, `writeConflictCopy` (si falla, lanza → catch por
+    carpeta, la carpeta no se toca), `journalMarkDirConflictCopied`, la copia se sube por
+    `schedulePushUnguarded` y se acumula el aviso; (3) escribe la carpeta remota entera (ancla primero),
+    borra las secciones locales que el remoto no tiene y cachea los shas remotos (del GET, no del tree)
+    como base; (4) cancela los timers bajo la carpeta y completa **todos** sus ops
+    (`journalCompleteDir`). El caso "remoto más nuevo con lo local en su base" con base conocida va
+    ahora por el fast-forward; sin base sigue por la rama wholesale de siempre. Un op `stale` de una carpeta que ya **no existe** en el remoto (listado
+    completo) pierde el flag (`journalClearStale`): el drain la re-sube (la edición local gana al
+    borrado remoto) en vez de quedar atascado para siempre.
+  - **Pushes propios durante un pull:** el pull lista el tree una vez y trabaja un rato; un PUT propio
+    que aterriza entretanto cachea su base mientras el listado aún muestra el blob anterior. Si el pull
+    comparase con él (o lo cachease) el siguiente push vería "remoto ≠ base" → conflicto espurio. Cada
+    mutación propia sube un contador por ruta y por carpeta (`noteOwnRemoteMutation`); el pull (y
+    `deleteRemoteDirNow`) captura el contador antes del listado y **no evalúa conflictos ni cachea**
+    nada mutado después (`cachePulled`, `dirMutatedSince`). Cubierto por un test que falla sin la guarda.
+    Los mapas se podan al soltar cada listado (`beginListing`/`endListing`): las entradas con número
+    ≤ el del listado vivo más antiguo ya no pueden responder "mutado después".
+  - **Aviso**: el mismo que Cloud (ver "Botón de sync de la titlebar"); `SyncStatus.conflictCopies`,
+    solo en memoria, acumulado hasta *Dismiss*, se limpia en `disconnectGitHub()`.
+  - **Residuales (asumidos):** base desconocida (caché perdida, `disconnectGitHub`, ficheros nunca
+    reconciliados) ⇒ LWW histórico; las ediciones **no** apuntadas en el journal (CLI con la app
+    cerrada) **sí** quedan cubiertas por las tres vías del pull; una edición en la app justo después
+    de un push del CLI de la misma nota (antes de un pull de la app) da una copia espuria pero segura
+    (cachés de base separadas); ventana de actualización: un push de un build anterior no cacheado +
+    una edición pendiente nueva ⇒ posible copia espuria en el primer pull; una sección borrada en remoto
+    mientras se edita en local puede re-crearse como fichero huérfano (oculto); `settings.json`
+    ilegible ⇒ `isCloudSyncEnabledFailClosed` = true ⇒ subidas incondicionales; si el aplicado del
+    camino de conflicto falla a medias sin ops en el journal (edición del CLI), el reintento puede hacer
+    una segunda copia (el dedupe va por `conflictCopied` de los ops, y una edición posterior sin el flag
+    también provoca otra copia — solapada, pero sin perder nada); el ancla y las secciones se suben
+    en commits separados, así que si el ancla pasa la comprobación y una sección no, el remoto queda con
+    el ancla local + la sección remota (nada se pierde: la copia lleva la versión local completa); el
+    camino de conflicto no mira `updated:`: la versión remota gana la carpeta y la local va a la copia.
 - **Repo:** se crea automáticamente con `private: true` + `auto_init: true` si no existe.
 - **initialPullStatus** (`pending|ok|failed`) gatea pushes hasta que el primer pull tenga éxito.
 - **Catch-up de subida (`flushPendingLocalChanges`) — dos niveles de filtro:**

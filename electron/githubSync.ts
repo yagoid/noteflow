@@ -20,6 +20,10 @@ import {
   journalRecordIfAbsent,
   journalComplete,
   journalFail,
+  journalMarkStale,
+  journalMarkDirConflictCopied,
+  journalCompleteDir,
+  journalClearStale,
   resolveRetryAction,
   shouldPullSkipDir,
   shouldPullSkipFile,
@@ -33,9 +37,18 @@ import {
   getCachedSha,
   setCachedSha,
   pruneShas,
+  isNoteFilePath,
+  planConditionalUpsert,
+  planConditionalDelete,
+  remoteDirChangesSinceBase,
+  hasStaleOpUnder,
+  planGithubDirConflict,
+  dropCachedShasUnder,
+  type ThreeWayShas,
 } from './syncState'
 import { type MirrorFile, gitBlobSha, planMirror, remoteHasContent } from './mirrorPlan'
-import { listAnchorSectionFiles } from './cloudSyncLogic'
+import { listAnchorSectionFiles, planConflictCopy } from './cloudSyncLogic'
+import { type ConflictCopiesNotice, type WrittenConflictCopy, appendConflictCopyNotice, writeConflictCopy } from './conflictCopy'
 import { type SyncHistoryEntry, createSyncHistory } from './syncHistory'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -99,6 +112,12 @@ export interface SyncStatus {
   lastSync?: string
   error?: string
   initialPullStatus: InitialPullStatus
+  /**
+   * Conflict copies the pull made this session (in memory only), accumulated
+   * until the user dismisses the notice (dismissConflictCopies) — shown in the
+   * titlebar sync status card, same notice as NoteFlow Cloud.
+   */
+  conflictCopies?: ConflictCopiesNotice
 }
 
 // ── Settings helpers ──────────────────────────────────────────────────────────
@@ -187,6 +206,22 @@ const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 class GitHubApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message)
+  }
+}
+
+/**
+ * A conditional mutation was NOT sent: the remote file (or, for a deleteDir,
+ * a file of the folder) changed since this device last reconciled it
+ * (planConditionalUpsert / planConditionalDelete / remoteDirChangesSinceBase).
+ * Not a failure to report: the callers flag the op `stale` (no syncError) and
+ * ask for a pull, which applies the remote version and keeps the local one as
+ * a conflict copy when it differs. A caller that does not know this type
+ * treats it as a plain failure — the op stays journaled (fail-safe).
+ */
+export class RemoteChangedError extends Error {
+  constructor(readonly relPath: string) {
+    super(`"${relPath}" changed on GitHub since this device last synced it`)
+    this.name = 'RemoteChangedError'
   }
 }
 
@@ -427,19 +462,37 @@ async function getRemoteFile(
 // Serialized entry points — every push/delete goes through one of these two, so
 // wrapping them here serializes the whole module's remote writes (see enqueueMutation).
 // Being the single funnel, they are also where the activity history counts
-// uploads: 1 per PUT/DELETE that actually reached GitHub (identical-content skips
-// and already-gone deletes count 0), and a failed mutation records ok=false.
-function upsertRemoteFile(token: string, owner: string, repo: string, relPath: string, content: string): Promise<void> {
-  return enqueueMutation(() => upsertRemoteFileNow(token, owner, repo, relPath, content)).then(
-    (written) => { if (written) syncHistory.record(1, true) },
-    (err: unknown) => { syncHistory.record(0, false); throw err },
+// uploads: 1 per PUT/DELETE that actually reached GitHub (identical-content skips,
+// superseded uploads and already-gone deletes count 0), and a failed mutation
+// records ok=false. A conditional mutation held back because the remote moved
+// (RemoteChangedError) is not a failure: it records nothing.
+function upsertRemoteFile(
+  token: string,
+  owner: string,
+  repo: string,
+  relPath: string,
+  content: string,
+  opts: MutationOptions = {},
+): Promise<UpsertOutcome> {
+  return enqueueMutation(() => upsertRemoteFileNow(token, owner, repo, relPath, content, opts)).then(
+    (outcome) => {
+      if (outcome === 'written') syncHistory.record(1, true)
+      return outcome
+    },
+    (err: unknown) => {
+      if (!(err instanceof RemoteChangedError)) syncHistory.record(0, false)
+      throw err
+    },
   )
 }
 
-function removeRemoteFile(token: string, owner: string, repo: string, relPath: string): Promise<void> {
-  return enqueueMutation(() => removeRemoteFileNow(token, owner, repo, relPath)).then(
+function removeRemoteFile(token: string, owner: string, repo: string, relPath: string, opts: MutationOptions = {}): Promise<void> {
+  return enqueueMutation(() => removeRemoteFileNow(token, owner, repo, relPath, opts)).then(
     (removed) => { if (removed) syncHistory.record(1, true) },
-    (err: unknown) => { syncHistory.record(0, false); throw err },
+    (err: unknown) => {
+      if (!(err instanceof RemoteChangedError)) syncHistory.record(0, false)
+      throw err
+    },
   )
 }
 
@@ -451,15 +504,65 @@ function isNotFoundError(msg: string): boolean {
   return msg.includes('Not Found') || msg.includes('404')
 }
 
+/**
+ * Result of one upload: the PUT landed ('written'), the remote already held
+ * exactly this content ('identical', no PUT), or the content is no longer what
+ * is on disk ('superseded', no PUT — see the disk-still-current check).
+ */
+type UpsertOutcome = 'written' | 'identical' | 'superseded'
+
+interface MutationOptions {
+  /**
+   * Unconditional mutation (mirrorToGitHub, and the blobs of a deleteDir that
+   * already passed its folder-level check): GitHub is overwritten with the
+   * local state no matter what it holds.
+   */
+  force?: boolean
+  /**
+   * The notes dir — enables the disk-still-current check of a conditional
+   * upload. Without it (unknown notes dir) the check is skipped.
+   */
+  notesDir?: string
+}
+
+/**
+ * Does this mutation go through the three-way check? Note files only, never
+ * forced, and only while GitHub is the ACTIVE provider: with NoteFlow Cloud on
+ * (read fail-closed — unreadable settings answer "Cloud on") GitHub is a
+ * write-only mirror of Cloud's truth, and its uploads stay unconditional.
+ * Evaluated when the queued mutation RUNS, not when it was scheduled.
+ */
+function isConditionalMutation(relPath: string, opts: MutationOptions): boolean {
+  return opts.force !== true && isNoteFilePath(relPath) && !isCloudSyncEnabledFailClosed()
+}
+
 async function upsertRemoteFileNow(
   token: string,
   owner: string,
   repo: string,
   relPath: string,
   content: string,
+  opts: MutationOptions = {},
   _retrying = false
-): Promise<boolean> {
-  // Resolves true when a PUT landed, false when the remote already held this content.
+): Promise<UpsertOutcome> {
+  const conditional = isConditionalMutation(relPath, opts)
+
+  // Disk-still-current check: a debounced/queued upload carries the content
+  // captured when it was scheduled. If the file on disk is no longer exactly
+  // that (or is gone), something newer replaced it — a later local save arms
+  // its own push, a pull's resolution of the folder wrote the remote version —
+  // so sending this one would at best be a wasted commit and at worst revert
+  // the remote. No PUT, no journal change, no error.
+  if (conditional && opts.notesDir) {
+    let onDisk: string | null
+    try {
+      onDisk = fs.readFileSync(path.join(opts.notesDir, relPath), 'utf-8')
+    } catch {
+      onDisk = null
+    }
+    if (onDisk !== content) return 'superseded'
+  }
+
   let sha: string | undefined
   try {
     const existing = (await githubRequest(
@@ -471,7 +574,9 @@ async function upsertRemoteFileNow(
     // usable sha — fall through and let the PUT decide, never skip on ambiguity.
     if (typeof existing.sha === 'string') sha = existing.sha
   } catch {
-    // File doesn't exist yet — will be created
+    // File doesn't exist yet — will be created. (Any GET failure lands here: a
+    // PUT without `sha` can only CREATE — GitHub rejects it when the file
+    // exists, and the retry below re-reads it.)
   }
 
   // ⚠️ A PUT only happens when the content actually differs. The Contents API's
@@ -482,7 +587,20 @@ async function upsertRemoteFileNow(
   // empty commits — ~24% of the user's repo history. Callers that count this as
   // `pushed` and clear the journal stay correct: the remote already holds exactly
   // this content, so the intent IS satisfied.
-  if (sha !== undefined && sha === gitBlobSha(content)) return false
+  const localSha = gitBlobSha(content)
+  if (sha !== undefined && sha === localSha) {
+    recordPushedBase(relPath, localSha)
+    return 'identical'
+  }
+
+  // ⚠️ Three-way check (QA B3): the `sha` above is only the Contents API's
+  // concurrency token — a PUT carrying it always lands, even over a version
+  // another device uploaded after this device last saw the file. The base is
+  // the blob this device last reconciled (sha cache); if the remote moved away
+  // from it, the PUT is held back and the pull resolves the folder.
+  if (conditional && planConditionalUpsert(getCachedSha(getState(), relPath), sha ?? null, localSha) === 'conflict') {
+    throw new RemoteChangedError(relPath)
+  }
 
   // note.md carries the title; section files fall back to '<dir>/<file>' label
   const titleMatch = content.match(/^title:\s*['"]?(.+?)['"]?\s*$/m)
@@ -500,14 +618,15 @@ async function upsertRemoteFileNow(
     )
   } catch (err: unknown) {
     // SHA conflict: another push updated the file between our GET and PUT.
-    // Re-fetch the current SHA and retry once.
+    // Re-fetch the current SHA and retry once (re-evaluating the three-way check).
     const msg = err instanceof Error ? err.message : String(err)
     if (!_retrying && isConflictError(msg)) {
-      return upsertRemoteFileNow(token, owner, repo, relPath, content, true)
+      return upsertRemoteFileNow(token, owner, repo, relPath, content, opts, true)
     }
     throw err
   }
-  return true
+  recordPushedBase(relPath, localSha)
+  return 'written'
 }
 
 async function removeRemoteFileNow(
@@ -515,6 +634,7 @@ async function removeRemoteFileNow(
   owner: string,
   repo: string,
   relPath: string,
+  opts: MutationOptions = {},
   _retrying = false
 ): Promise<boolean> {
   // Resolves true when a DELETE landed, false when the file was already gone.
@@ -530,8 +650,19 @@ async function removeRemoteFileNow(
     // GET failed: a real 404 means it's already gone (success); anything else is a
     // transient error we must surface so the delete isn't silently dropped.
     const msg = err instanceof Error ? err.message : String(err)
-    if (isNotFoundError(msg)) return false
+    if (isNotFoundError(msg)) {
+      forgetRemoteBase(relPath)
+      return false
+    }
     throw err
+  }
+  // Three-way check (see upsertRemoteFileNow): deleting a file another device
+  // changed since this device last saw it would erase that change everywhere.
+  if (
+    isConditionalMutation(relPath, opts) &&
+    planConditionalDelete(getCachedSha(getState(), relPath), typeof sha === 'string' ? sha : null) === 'conflict'
+  ) {
+    throw new RemoteChangedError(relPath)
   }
   try {
     await githubRequest(
@@ -544,11 +675,15 @@ async function removeRemoteFileNow(
     const msg = err instanceof Error ? err.message : String(err)
     // SHA moved under us (another commit landed first) — re-fetch and retry once.
     if (!_retrying && isConflictError(msg)) {
-      return removeRemoteFileNow(token, owner, repo, relPath, true)
+      return removeRemoteFileNow(token, owner, repo, relPath, opts, true)
     }
-    if (isNotFoundError(msg)) return false // already deleted — fine
+    if (isNotFoundError(msg)) {
+      forgetRemoteBase(relPath)
+      return false // already deleted — fine
+    }
     throw err
   }
+  forgetRemoteBase(relPath)
   return true
 }
 
@@ -563,6 +698,106 @@ let statusListener: (() => void) | null = null
 
 // Pending push timers per filename (debounce)
 const pushTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+// The notes dir (main.ts sets it at boot via setNotesDir; every entry point that
+// receives it refreshes it). Needed by the debounced push's disk-still-current
+// check — schedulePush itself only gets a relative path.
+let notesDirPath: string | null = null
+
+// Conflict copies made by this session's pulls (see ConflictCopiesNotice) and
+// the localized label of their titles — injected by main.ts (the engine can't
+// import main), English until then. Same notice as NoteFlow Cloud's.
+let conflictCopies: ConflictCopiesNotice | undefined
+let conflictCopyLabel: () => string = () => 'conflict copy'
+
+// Fired when a conditional push/delete was held back because the remote moved
+// (RemoteChangedError): main.ts runs a GitHub pull soon, which resolves it.
+let remoteConflictListener: (() => void) | null = null
+
+// ── Own remote mutations vs the pull's tree listing ───────────────────────────
+// The pull lists the tree ONCE and then works for a while (GETs per folder).
+// A push of this device landing in between updates the cached base to the
+// content it uploaded, while the listing still shows the previous blob: if the
+// pull then cached the listed (older) sha, or compared against it, the next
+// push would see "remote != base" and report a spurious conflict. Every remote
+// mutation of this device bumps a sequence number per path and per note
+// folder; the pull (and deleteRemoteDirNow) captures the sequence before its
+// listing and ignores what was mutated after it.
+let mutationSeq = 0
+const lastMutationByPath = new Map<string, number>()
+const lastMutationByDir = new Map<string, number>()
+
+function noteOwnRemoteMutation(relPath: string): void {
+  mutationSeq++
+  lastMutationByPath.set(relPath, mutationSeq)
+  const slash = relPath.indexOf('/')
+  if (slash > 0) lastMutationByDir.set(relPath.slice(0, slash), mutationSeq)
+}
+
+// Sequence numbers captured by listings still in use (pulls, deleteDirs). Map
+// entries at or below the oldest of them (or below the current sequence when
+// none is live) can never answer "mutated since" again — pruned on release.
+const liveListings: number[] = []
+
+function beginListing(): number {
+  liveListings.push(mutationSeq)
+  return mutationSeq
+}
+
+function endListing(seq: number): void {
+  const i = liveListings.indexOf(seq)
+  if (i >= 0) liveListings.splice(i, 1)
+  const floor = liveListings.length > 0 ? Math.min(...liveListings) : mutationSeq
+  for (const [k, v] of lastMutationByPath) if (v <= floor) lastMutationByPath.delete(k)
+  for (const [k, v] of lastMutationByDir) if (v <= floor) lastMutationByDir.delete(k)
+}
+
+function mutatedSince(relPath: string, seq: number): boolean {
+  return (lastMutationByPath.get(relPath) ?? 0) > seq
+}
+
+function dirMutatedSince(dir: string, seq: number): boolean {
+  return (lastMutationByDir.get(dir) ?? 0) > seq
+}
+
+/**
+ * After a PUT landed (or found the remote already identical): the remote holds
+ * exactly `sha`, which becomes this device's base for the path — the next
+ * conditional push compares against it (see planConditionalUpsert). Cached for
+ * every path (metadata too: the pull then skips it without a GET).
+ */
+function recordPushedBase(relPath: string, sha: string): void {
+  noteOwnRemoteMutation(relPath)
+  if (setCachedSha(getState(), relPath, sha)) persistState()
+}
+
+/** After a DELETE landed (or found the file gone): there is no base any more. */
+function forgetRemoteBase(relPath: string): void {
+  noteOwnRemoteMutation(relPath)
+  const state = getState()
+  if (state.shas[relPath] !== undefined) {
+    delete state.shas[relPath]
+    persistState()
+  }
+}
+
+/**
+ * A conditional push/delete of `relPath` was held back (RemoteChangedError):
+ * the op stays journaled flagged `stale` — still a local change the remote
+ * lacks (the deletion guards keep seeing it), but the drain skips it — and a
+ * pull is requested, whose conflict path applies the remote folder and keeps
+ * the local version as a conflict copy. Not an error: no syncError.
+ */
+function holdBackForRemoteChange(relPath: string, op: 'upsert' | 'delete'): void {
+  const state = getState()
+  // IfAbsent: same reasoning as the push catch blocks — never replace a newer
+  // intent recorded for the key while the mutation was in flight.
+  journalRecordIfAbsent(state, relPath, op, new Date().toISOString())
+  journalMarkStale(state, relPath, op)
+  persistState()
+  console.warn(`[GitHubSync] ${op} held back: the file changed on GitHub since the last sync — a pull will resolve it`)
+  remoteConflictListener?.()
+}
 
 // Session-only activity history for the titlebar sync card (see syncHistory.ts).
 const syncHistory = createSyncHistory()
@@ -670,7 +905,32 @@ export function getSyncStatus(): SyncStatus {
     lastSync: s.lastSync,
     error: syncError,
     initialPullStatus,
+    conflictCopies,
   }
+}
+
+/** Boot hook (main.ts): the notes dir, for the debounced push's disk-still-current check. */
+export function setNotesDir(notesDir: string): void {
+  notesDirPath = notesDir
+}
+
+/** main.ts injects the localized "conflict copy" label (electron/i18n.ts), resolved at copy time. */
+export function setConflictCopyLabel(label: () => string): void {
+  conflictCopyLabel = label
+}
+
+/** The user dismissed the conflict-copies notice of the sync status card. */
+export function dismissConflictCopies(): void {
+  conflictCopies = undefined
+}
+
+/**
+ * Called whenever a conditional push/delete was held back because the remote
+ * file changed since this device last saw it — main.ts answers with a pull
+ * (whose conflict path resolves the folder).
+ */
+export function onRemoteConflict(cb: () => void): void {
+  remoteConflictListener = cb
 }
 
 /**
@@ -840,6 +1100,7 @@ export function disconnectGitHub(): void {
 
   syncSettings = { enabled: false }
   syncError = undefined
+  conflictCopies = undefined // the notice belongs to the repo we disconnect from
   cachedDefaultBranch = null
   // Drop the journal + SHA cache — they describe the repo we just disconnected from.
   syncState = emptySyncState()
@@ -849,6 +1110,189 @@ export function disconnectGitHub(): void {
   const settings = readSettings()
   delete settings.githubSync
   writeSettings(settings)
+}
+
+/** Groups notes-dir-relative paths by their note folder ('<dir>/<file>' → '<dir>'). */
+function groupPathsByDir(paths: Iterable<string>): Map<string, string[]> {
+  const byDir = new Map<string, string[]>()
+  for (const p of paths) {
+    const slash = p.indexOf('/')
+    if (slash <= 0) continue
+    const dir = p.slice(0, slash)
+    let list = byDir.get(dir)
+    if (!list) { list = []; byDir.set(dir, list) }
+    list.push(p)
+  }
+  return byDir
+}
+
+/**
+ * Every file of a note folder — `knownPaths` (listed remotely / cached as a
+ * base) plus the '.md' files on disk — with its three shas: cached base,
+ * remote (`remoteShaOf`) and local (null = absent / unreadable).
+ */
+function dirThreeWayShas(
+  notesDir: string,
+  dir: string,
+  remoteShaOf: (relPath: string) => string | null,
+  knownPaths: Iterable<string>,
+  state: SyncState,
+): Array<ThreeWayShas & { path: string }> {
+  const all = new Set<string>(knownPaths)
+  try {
+    for (const f of fs.readdirSync(path.join(notesDir, dir))) {
+      if (f.endsWith('.md')) all.add(`${dir}/${f}`)
+    }
+  } catch { /* folder gone locally */ }
+  return [...all].map((p) => ({
+    path: p,
+    base: getCachedSha(state, p),
+    remote: remoteShaOf(p),
+    local: localBlobSha(notesDir, p),
+  }))
+}
+
+interface DirConflictResolution {
+  /** 'deferred' = nothing was touched (mutations in flight, a GET failed, Cloud switched on): retried by the next pull. */
+  status: 'resolved' | 'deferred'
+  /** Local files written or removed to mirror the remote folder. */
+  filesWritten: number
+  /** The conflict copy written before overwriting, if one was needed. */
+  copy?: WrittenConflictCopy
+}
+
+/**
+ * Conflict path of the GitHub pull for the note folder '<dir>' (see
+ * planGithubDirConflict): the REMOTE version wins the folder, and the local
+ * version is kept as a conflict copy when it differs — the GitHub counterpart
+ * of the Cloud pull's copies (same helpers, same notice). Also the path of a
+ * FAST-FORWARD (only the remote moved — mirrored with no copy, whatever the
+ * `updated:` timestamps say):
+ *   0. Own remote mutations queued/in flight → deferred (they would land
+ *      between the GETs and the writes).
+ *   1. GET the remote anchor + every remote section — any failure → deferred.
+ *   2. From here on SYNCHRONOUS (no save, timer or queued mutation can
+ *      interleave): re-check (mutations, own pushes since the listing, Cloud
+ *      switched on mid-pull → deferred), re-read the local folder and re-plan
+ *      (neither conflict nor fast-forward any more → deferred); the copy
+ *      candidates are the local files changed since their base (or with an
+ *      unknown base), none only while EVERY pending upsert under the folder is
+ *      already `conflictCopied`; planConflictCopy against the remote contents (anchor
+ *      without `updated:`). If needed: write the copy (throws → the caller's
+ *      per-folder catch, the folder is left untouched), flag the ops
+ *      `conflictCopied`, upload the copy through the normal path
+ *      (schedulePushUnguarded — the first pull of a boot runs with the push
+ *      gate closed) and record the notice.
+ *   3. Write the remote folder wholesale (anchor first), delete the local
+ *      sections the remote lacks, cache every remote blob as the new base.
+ *   4. Settle: cancel the push timers under the folder and complete EVERY op
+ *      under it (upserts/deletes, stale or not).
+ */
+async function resolveRemoteDirConflict(
+  token: string,
+  owner: string,
+  repo: string,
+  notesDir: string,
+  dir: string,
+  remoteFiles: ReadonlySet<string>,
+  treeSeq: number,
+  needsFullReconcile: boolean,
+): Promise<DirConflictResolution> {
+  const deferred: DirConflictResolution = { status: 'deferred', filesWritten: 0 }
+  if (hasPendingRemoteMutations()) return deferred
+
+  const remote = new Map<string, { content: string; sha: string }>()
+  for (const f of remoteFiles) {
+    const rel = `${dir}/${f}`
+    // null = the GET failed (getRemoteFile swallows it) or the file vanished
+    // since the listing — either way this pass can't mirror the folder.
+    const file = await getRemoteFile(token, owner, repo, rel)
+    if (!file) return deferred
+    remote.set(rel, file)
+  }
+
+  // ── Synchronous from here on. ──
+  if (
+    hasPendingRemoteMutations() ||
+    dirMutatedSince(dir, treeSeq) ||
+    !shouldRefreshSections(needsFullReconcile, isCloudSyncEnabledFailClosed())
+  ) {
+    return deferred
+  }
+  const state = getState()
+  const prefix = `${dir}/`
+  const cachedUnder = Object.keys(state.shas).filter((p) => p.startsWith(prefix))
+  const paths = dirThreeWayShas(notesDir, dir, (rel) => remote.get(rel)?.sha ?? null, [...remote.keys(), ...cachedUnder], state)
+
+  // Re-plan on the fresh local read: if the folder is neither a conflict nor a
+  // fast-forward any more (e.g. local now equals remote), nothing to apply.
+  const plan = planGithubDirConflict(state, dir, paths)
+  if (!plan.conflict && !plan.fastForward) return deferred
+
+  let copy: WrittenConflictCopy | undefined
+  const candidates = plan.copyCandidates
+  if (candidates.length > 0) {
+    const local: Record<string, string | null> = {}
+    for (const rel of candidates) {
+      try {
+        local[rel] = fs.readFileSync(path.join(notesDir, rel), 'utf-8')
+      } catch {
+        local[rel] = null
+      }
+    }
+    const server: Record<string, string> = {}
+    for (const [rel, file] of remote) server[rel] = file.content
+    if (planConflictCopy(candidates, local, server)) {
+      const now = new Date()
+      copy = writeConflictCopy(notesDir, dir, conflictCopyLabel(), now)
+      if (journalMarkDirConflictCopied(state, dir)) persistState()
+      for (const [name, content] of Object.entries(copy.files)) {
+        schedulePushUnguarded(`${copy.dir}/${name}`, content)
+      }
+      conflictCopies = appendConflictCopyNotice(conflictCopies, copy.title, now.toISOString())
+    }
+  }
+
+  // Mirror the remote folder (note.md first, like every folder write).
+  const localDirPath = path.join(notesDir, dir)
+  fs.mkdirSync(localDirPath, { recursive: true })
+  const anchorRel = `${dir}/${NOTE_MD}`
+  const order = [...remote.keys()].sort((a, b) => (a === anchorRel ? -1 : b === anchorRel ? 1 : 0))
+  let filesWritten = 0
+  for (const rel of order) {
+    const file = remote.get(rel)!
+    const target = path.join(notesDir, rel)
+    let current: string | null = null
+    try {
+      current = fs.readFileSync(target, 'utf-8')
+    } catch { /* absent locally */ }
+    if (current !== file.content) {
+      fs.writeFileSync(target, file.content, 'utf-8')
+      filesWritten++
+    }
+  }
+  for (const lf of fs.readdirSync(localDirPath)) {
+    if (!lf.endsWith('.md') || lf === NOTE_MD || remote.has(`${dir}/${lf}`)) continue
+    try {
+      fs.unlinkSync(path.join(localDirPath, lf))
+      filesWritten++
+    } catch { /* ignore */ }
+  }
+
+  // The remote blobs are now this device's bases; sections the remote lacks have none.
+  for (const [rel, file] of remote) setCachedSha(state, rel, file.sha)
+  for (const rel of cachedUnder) if (!remote.has(rel)) delete state.shas[rel]
+
+  // Settle: nothing pending under the folder may land after this.
+  for (const key of [...pushTimers.keys()]) {
+    if (key.startsWith(prefix)) {
+      clearTimeout(pushTimers.get(key)!)
+      pushTimers.delete(key)
+    }
+  }
+  journalCompleteDir(state, dir)
+  persistState()
+  return { status: 'resolved', filesWritten, copy }
 }
 
 export async function pullNotes(notesDir: string): Promise<{
@@ -900,6 +1344,15 @@ export async function pullNotes(notesDir: string): Promise<{
   const needsFullReconcile = s.needsFullReconcile === true
   const state = getState()
   let stateChanged = false
+  notesDirPath = notesDir
+  // Own pushes that land after the tree listing below must not be compared with
+  // (nor cached as) the listed blobs, which are older — see noteOwnRemoteMutation.
+  const treeSeq = beginListing()
+  const cachePulled = (relPath: string, sha: string): void => {
+    if (mutatedSince(relPath, treeSeq)) return
+    if (setCachedSha(state, relPath, sha)) stateChanged = true
+  }
+  let conflictCopiesMade = 0
 
   try {
     const { blobs, truncated } = await fetchRemoteTree(token, s.owner, s.repo)
@@ -919,6 +1372,22 @@ export async function pullNotes(notesDir: string): Promise<{
     // a stale mirror (Cloud on / full reconcile pending) — shouldRefreshSections.
     // Re-checked right before any refresh write, as late as possible.
     const sectionRefreshAllowed = shouldRefreshSections(needsFullReconcile, isCloudSyncEnabledFailClosed())
+    // Conflict path (three-way check per file — planGithubDirConflict): only
+    // while GitHub is the ACTIVE provider, i.e. exactly when the section refresh
+    // is allowed. As a stale mirror of NoteFlow Cloud (or with a full reconcile
+    // pending) the pull keeps its historical behaviour — no conflict copies.
+    const conflictsAllowed = sectionRefreshAllowed
+    const cachedPathsByDir = conflictsAllowed ? groupPathsByDir(Object.keys(state.shas)) : new Map<string, string[]>()
+    // Caches a remote blob the historical rule did NOT apply (local kept).
+    // While GitHub is active, never over a known base when the local file is
+    // not that blob: it would mark an unapplied remote change as reconciled and
+    // the next local edit would PUT over it. Left uncached, that edit's push is
+    // held back and the pull resolves the folder.
+    const cacheKeptLocal = (relPath: string, sha: string): void => {
+      const base = getCachedSha(state, relPath)
+      if (conflictsAllowed && base !== undefined && base !== sha && localBlobSha(notesDir, relPath) !== sha) return
+      cachePulled(relPath, sha)
+    }
 
     // Pull each remote note directory. The note dir is the unit of conflict
     // resolution: note.md's `updated:` decides, and a newer remote wins
@@ -961,8 +1430,70 @@ export async function pullNotes(notesDir: string): Promise<{
             refreshAllowed: sectionRefreshAllowed,
             isListedLocally,
           })
-          for (const blob of plan.adopt) if (setCachedSha(state, blob.path, blob.sha)) stateChanged = true
+          for (const blob of plan.adopt) cachePulled(blob.path, blob.sha)
           return plan.changed
+        }
+
+        // ⚠️ Conflict path (QA B3): some file of this folder changed BOTH here
+        // and on GitHub since this device last reconciled it (three-way check
+        // against the cached base), or a push/delete of it was already held
+        // back (stale op). The historical rule below ("local strictly newer →
+        // keep local") would let the next push overwrite the remote edit.
+        // Evaluated only when a listed blob differs from its cached base (or a
+        // cached one vanished) or a stale op exists — no disk reads in the
+        // steady state — and only for a folder that still exists locally (no
+        // local version = nothing to keep, the historical flow handles it).
+        // Skipped for a folder this device mutated after the listing: its tree
+        // shas are older than its cached bases (the push side guards it).
+        if (conflictsAllowed && anchorTreeSha && !dirMutatedSince(dir, treeSeq)) {
+          const cachedPaths = cachedPathsByDir.get(dir) ?? []
+          const treeMoved =
+            getCachedSha(state, anchorRel) !== anchorTreeSha ||
+            sectionBlobs.some((b) => getCachedSha(state, b.path) !== b.sha) ||
+            cachedPaths.some((p) => !treeShaByPath.has(p))
+          if ((treeMoved || hasStaleOpUnder(state, dir)) && fs.existsSync(localAnchorPath)) {
+            const paths = dirThreeWayShas(
+              notesDir,
+              dir,
+              (rel) => treeShaByPath.get(rel) ?? null,
+              [anchorRel, ...sectionBlobs.map((b) => b.path), ...cachedPaths],
+              state,
+            )
+            // A file whose local content already IS the listed blob is
+            // reconciled whatever the cache said (e.g. an own push of an older
+            // build that never cached it): adopt it as the base, no request.
+            for (const p of paths) {
+              if (p.remote !== null && p.local === p.remote && p.base !== p.remote) cachePulled(p.path, p.remote)
+            }
+            // Conflict, or FAST-FORWARD (only the remote moved, every local file
+            // still at its base): both mirror the remote folder through the
+            // same path — the fast-forward without a copy and whatever the
+            // `updated:` timestamps say (clock skew, a web-UI edit that kept
+            // `updated` would otherwise keep local, cache the remote sha and let
+            // the next local edit PUT over the remote change).
+            const dirPlan = planGithubDirConflict(state, dir, paths)
+            if (dirPlan.conflict || dirPlan.fastForward) {
+              const res = await resolveRemoteDirConflict(
+                token, s.owner, s.repo, notesDir, dir, remoteFilesInDir, treeSeq, needsFullReconcile,
+              )
+              if (res.status === 'deferred') {
+                // In-flight mutations or a failed GET: nothing was touched;
+                // the next pull retries (the stale ops keep the drain off it).
+                incomplete = true
+                continue
+              }
+              filesDown += res.filesWritten
+              if (res.copy) {
+                conflictCopiesMade++
+                updatedFiles.push(res.copy.dirPath) // renderer + AI index pick the new note up
+                filesDown += Object.keys(res.copy.files).length
+                pulled++
+              }
+              updatedFiles.push(localDirPath)
+              pulled++
+              continue
+            }
+          }
         }
 
         // SHA cache: if the anchor blob is exactly the one we already
@@ -999,7 +1530,7 @@ export async function pullNotes(notesDir: string): Promise<{
         // reconciled). Decision made, so remember this remote blob as reconciled
         // (skip it without a GET until it changes remotely again).
         if (changedSections !== null || (localExists && remoteNotNewer)) {
-          if (anchorTreeSha && setCachedSha(state, anchorRel, anchorTreeSha)) stateChanged = true
+          if (anchorTreeSha) cacheKeptLocal(anchorRel, anchorTreeSha)
           changedSections ??= planSections()
           if (changedSections.length === 0) continue
           if (localUpdatedTs !== null && localUpdatedTs === remoteUpdatedTs) {
@@ -1020,7 +1551,7 @@ export async function pullNotes(notesDir: string): Promise<{
               fs.writeFileSync(path.join(notesDir, blob.path), remoteSection.content, 'utf-8')
               filesDown++
               wrote++
-              if (setCachedSha(state, blob.path, remoteSection.sha)) stateChanged = true
+              cachePulled(blob.path, remoteSection.sha)
             }
             if (wrote > 0) {
               updatedFiles.push(localDirPath)
@@ -1036,7 +1567,7 @@ export async function pullNotes(notesDir: string): Promise<{
             // Unknown timestamps, or a reconciled remote anchor that is newer
             // than the local one: can't reason about it — keep the historical
             // skip and remember the decision.
-            for (const blob of changedSections) if (setCachedSha(state, blob.path, blob.sha)) stateChanged = true
+            for (const blob of changedSections) cacheKeptLocal(blob.path, blob.sha)
           }
           continue
         }
@@ -1053,7 +1584,7 @@ export async function pullNotes(notesDir: string): Promise<{
             fs.writeFileSync(path.join(localDirPath, f), remoteSection.content, 'utf-8')
             filesDown++
             // Reconciled section blob (see planSectionRefresh).
-            if (setCachedSha(state, `${dir}/${f}`, remoteSection.sha)) stateChanged = true
+            cachePulled(`${dir}/${f}`, remoteSection.sha)
           }
         }
         // Sections removed remotely → remove their local files
@@ -1066,11 +1597,26 @@ export async function pullNotes(notesDir: string): Promise<{
           }
         } catch { /* ignore */ }
 
-        if (anchorTreeSha && setCachedSha(state, anchorRel, anchorTreeSha)) stateChanged = true
+        if (anchorTreeSha) cachePulled(anchorRel, anchorTreeSha)
         updatedFiles.push(localDirPath)
         pulled++
       } catch (err) {
         errors.push(`${dir}: ${String(err)}`)
+      }
+    }
+
+    // A stale op of a folder that no longer exists on GitHub at all (complete
+    // listing) has nothing left to conflict with: clear the flag so the drain
+    // runs it again — an upsert re-creates the note (a local edit beats a
+    // remote deletion), a delete finds the file gone. Otherwise it would sit in
+    // the journal forever: the drain skips stale ops and no pull resolves a
+    // folder the remote lacks.
+    if (conflictsAllowed && !truncated) {
+      for (const [key, entry] of Object.entries(state.ops)) {
+        if (!entry.stale) continue
+        const slash = key.indexOf('/')
+        if (slash > 0 && remoteNoteDirs.has(key.slice(0, slash))) continue
+        if (journalClearStale(state, key)) stateChanged = true
       }
     }
 
@@ -1130,14 +1676,21 @@ export async function pullNotes(notesDir: string): Promise<{
           hadMetadataChanges = true
           filesDown++
         }
-        if (setCachedSha(state, metadataFilename, metadataTreeSha)) stateChanged = true
+        cachePulled(metadataFilename, metadataTreeSha)
       } catch {
         // Optional metadata file is missing or unreadable remotely.
       }
     }
 
-    // Keep the SHA cache bounded: drop entries for blobs gone from the tree.
-    if (pruneShas(state, new Set(blobs.map((b) => b.path)))) stateChanged = true
+    // Keep the SHA cache bounded: drop entries for blobs gone from the tree —
+    // except the paths this device itself pushed after the listing (their
+    // cached base is newer than the listing, not gone).
+    const keepShas = new Set(blobs.map((b) => b.path))
+    for (const [p, seq] of lastMutationByPath) if (seq > treeSeq) keepShas.add(p)
+    if (pruneShas(state, keepShas)) stateChanged = true
+    if (conflictCopiesMade > 0) {
+      console.log(`[GitHubSync] ${conflictCopiesMade} local version(s) kept as conflict copies`)
+    }
 
     // Rebase on the CURRENT in-memory settings, not on the snapshot taken before
     // the network round-trips: anything written meanwhile (remoteFormatMigratedAt,
@@ -1181,6 +1734,7 @@ export async function pullNotes(notesDir: string): Promise<{
     if (initialPullStatus === 'pending') setInitialPullStatus('failed')
   }
 
+  endListing(treeSeq)
   if (stateChanged) persistState()
   // Uploads (incl. the catch-up queued above) are counted as they land, by the
   // mutation wrappers; this entry is the download side of the pull.
@@ -1244,14 +1798,22 @@ export async function pushAllNotes(notesDir: string): Promise<{ pushed: number; 
     return { pushed: 0, errors: [] }
   }
 
+  notesDirPath = notesDir
   let stateChanged = false
   for (const relPath of relPaths) {
     try {
       const content = fs.readFileSync(path.join(notesDir, relPath), 'utf-8')
-      await upsertRemoteFile(token, s.owner!, s.repo!, relPath, content)
+      const outcome = await upsertRemoteFile(token, s.owner!, s.repo!, relPath, content, { notesDir })
+      // Superseded: the disk moved on while queued — its own push (or the
+      // pull that wrote it) owns the path now; leave the journal alone.
+      if (outcome === 'superseded') continue
       pushed++
       if (journalComplete(getState(), relPath, 'upsert')) stateChanged = true
     } catch (err) {
+      if (err instanceof RemoteChangedError) {
+        holdBackForRemoteChange(relPath, 'upsert') // not an error: a pull resolves it
+        continue
+      }
       errors.push(relPath)
       // Journal the failed upsert so retrySyncJournal picks it up later.
       // IfAbsent: must not clobber a newer delete/deleteDir intent recorded for
@@ -1294,10 +1856,11 @@ export interface MirrorResult {
 let mirrorInFlight = false
 
 /**
- * Paths the MIRROR records in the reconciled-SHA cache after uploading/skipping
- * them: note.md anchors + root metadata. The cache also holds section blobs,
- * but those are only written by the pull — sections the mirror uploads are
- * adopted on the next pull by comparing with the local file (planSectionRefresh).
+ * Paths the MIRROR records in the reconciled-SHA cache for files it found
+ * IDENTICAL on the remote (no request at all): note.md anchors + root
+ * metadata. Identical sections are adopted on the next pull by comparing with
+ * the local file (planSectionRefresh). Every file it actually UPLOADS is cached
+ * by upsertRemoteFileNow itself (recordPushedBase), sections included.
  */
 function isShaCachedPath(relPath: string): boolean {
   return relPath.endsWith(`/${NOTE_MD}`) || (METADATA_FILENAMES as readonly string[]).includes(relPath)
@@ -1441,7 +2004,8 @@ export async function mirrorToGitHub(notesDir: string): Promise<MirrorResult> {
     for (const relPath of plan.toUpload) {
       try {
         const content = fs.readFileSync(path.join(notesDir, relPath), 'utf-8')
-        await upsertRemoteFile(token, owner, repo, relPath, content)
+        // Forced: GitHub is the write-only mirror of Cloud here, never conditional.
+        await upsertRemoteFile(token, owner, repo, relPath, content, { force: true })
         pushed++
         remainingRemote.add(relPath)
         if (journalComplete(state, relPath, 'upsert')) stateChanged = true
@@ -1480,7 +2044,7 @@ export async function mirrorToGitHub(notesDir: string): Promise<MirrorResult> {
         let failed = false
         for (const relPath of entry.paths) {
           try {
-            await removeRemoteFile(token, owner, repo, relPath)
+            await removeRemoteFile(token, owner, repo, relPath, { force: true })
             deleted++
             remainingRemote.delete(relPath)
           } catch (err) {
@@ -1573,16 +2137,23 @@ export async function pushPathsNow(notesDir: string, relPaths: string[]): Promis
   let pushed = 0
   const errors: string[] = []
   let stateChanged = false
+  notesDirPath = notesDir
   for (const relPath of relPaths) {
     // Supersede any debounced timer for this path — we're pushing it now.
     const existing = pushTimers.get(relPath)
     if (existing) { clearTimeout(existing); pushTimers.delete(relPath) }
     try {
       const content = fs.readFileSync(path.join(notesDir, relPath), 'utf-8')
-      await upsertRemoteFile(token, s.owner!, s.repo!, relPath, content)
+      const outcome = await upsertRemoteFile(token, s.owner!, s.repo!, relPath, content, { notesDir })
+      if (outcome === 'superseded') continue // the disk moved on — its own push owns it
       pushed++
       if (journalComplete(getState(), relPath, 'upsert')) stateChanged = true
     } catch (err) {
+      if (err instanceof RemoteChangedError) {
+        // Not a failure: the file changed on GitHub — a pull resolves it.
+        holdBackForRemoteChange(relPath, 'upsert')
+        continue
+      }
       errors.push(relPath)
       // Journal the failed upsert so retrySyncJournal picks it up later.
       // IfAbsent: must not clobber a newer delete/deleteDir intent recorded for
@@ -1645,7 +2216,16 @@ function schedulePushUnguarded(relPath: string, content: string, onStart?: () =>
     onStart?.() // timer fired → HTTP request is about to start
     try {
       const token = decryptToken(s.encryptedToken!)
-      await upsertRemoteFile(token, s.owner!, s.repo!, relPath, content)
+      const outcome = await upsertRemoteFile(token, s.owner!, s.repo!, relPath, content, {
+        notesDir: notesDirPath ?? undefined,
+      })
+      if (outcome === 'superseded') {
+        // The file on disk is no longer this content: a newer save re-armed
+        // its own timer, or a pull wrote the remote version. Nothing was sent;
+        // the journal entry (if any) belongs to whoever replaced it.
+        onComplete?.()
+        return
+      }
       if (journalComplete(getState(), relPath, 'upsert')) persistState()
       // Rebase on the CURRENT settings, never on the `s` captured when the timer
       // was armed: this closure can outlive it by minutes (5s debounce + the
@@ -1660,6 +2240,14 @@ function schedulePushUnguarded(relPath: string, content: string, onStart?: () =>
       syncError = undefined
       onComplete?.()
     } catch (err: unknown) {
+      if (err instanceof RemoteChangedError) {
+        // The file changed on GitHub since this device last saw it: nothing was
+        // sent (no syncError, no lastSync bump) — the op stays journaled as
+        // stale and the pull this requests resolves the folder.
+        holdBackForRemoteChange(relPath, 'upsert')
+        onComplete?.()
+        return
+      }
       // Re-record before failing: the entry may have been completed by a racing
       // retrySyncJournal while this push was in flight — journalFail alone would
       // be a no-op then and the failed push would be silently lost (same pattern
@@ -1752,6 +2340,13 @@ export async function scheduleDelete(relPath: string): Promise<void> {
     await removeRemoteFile(token, s.owner, s.repo, relPath)
     if (journalComplete(getState(), relPath, 'delete')) persistState()
   } catch (err: unknown) {
+    if (err instanceof RemoteChangedError) {
+      // The section changed on GitHub since this device last saw it: deleting
+      // it would erase that edit. Held back (stale) — the pull this requests
+      // restores the remote folder (local version kept as a conflict copy).
+      holdBackForRemoteChange(relPath, 'delete')
+      return
+    }
     journalFail(getState(), relPath, 'delete')
     persistState()
     syncError = `Failed to delete ${relPath} on GitHub: ${String(err)}`
@@ -1766,15 +2361,33 @@ export async function scheduleDelete(relPath: string): Promise<void> {
  * before deleting anything, when the tree listing came back truncated
  * (planRemoteDirDelete): files of the folder may be missing from it, and the
  * caller would complete the journal entry with part of the note still remote.
+ * And — while GitHub is the active provider — it throws RemoteChangedError,
+ * again before deleting anything, when a file of the folder changed on GitHub
+ * since this device last reconciled it (remoteDirChangesSinceBase): the remote
+ * edit beats the local deletion (see handleDeleteDirConflict).
  */
 async function deleteRemoteDirNow(token: string, owner: string, repo: string, dir: string): Promise<void> {
-  const { blobs, truncated } = await fetchRemoteTree(token, owner, repo)
-  const targets = planRemoteDirDelete(blobs, truncated, dir)
+  const listedAt = beginListing()
+  let targets: TreeBlobRef[]
+  try {
+    const { blobs, truncated } = await fetchRemoteTree(token, owner, repo)
+    targets = planRemoteDirDelete(blobs, truncated, dir)
+    if (!isCloudSyncEnabledFailClosed()) {
+      // Files this device itself pushed after the listing are older in it than
+      // their cached base — not a remote change.
+      const changed = remoteDirChangesSinceBase(getState(), targets, (p) => mutatedSince(p, listedAt))
+      if (changed.length > 0) throw new RemoteChangedError(dir)
+    }
+  } finally {
+    endListing(listedAt)
+  }
   let failures = 0
   let lastError = ''
   for (const b of targets) {
     try {
-      await removeRemoteFile(token, owner, repo, b.path)
+      // Forced: the folder-level check above already decided (a per-file
+      // check now could leave the folder half-deleted).
+      await removeRemoteFile(token, owner, repo, b.path, { force: true })
     } catch (err: unknown) {
       failures++
       lastError = String(err)
@@ -1782,6 +2395,23 @@ async function deleteRemoteDirNow(token: string, owner: string, repo: string, di
     }
   }
   if (failures > 0) throw new Error(`${failures} file(s) could not be deleted (${lastError})`)
+}
+
+/**
+ * A deleteDir found the note changed on GitHub since this device last saw it
+ * (RemoteChangedError from deleteRemoteDirNow, nothing was deleted): the remote
+ * edit beats the local deletion. The 'deleteDir' op is completed (it must not
+ * be retried) and the cached bases under the folder dropped, so the next pull
+ * — requested right away — downloads the remote note again as a folder this
+ * device doesn't have. Logged only, no UI notice: the note simply comes back.
+ */
+function handleDeleteDirConflict(dir: string): void {
+  const state = getState()
+  journalComplete(state, dir, 'deleteDir')
+  dropCachedShasUnder(state, dir)
+  persistState()
+  console.warn('[GitHubSync] note deletion not applied on GitHub: the note changed there since the last sync — it will be downloaded again')
+  remoteConflictListener?.()
 }
 
 /** Removes a whole remote note directory (every blob under '<dir>/'). */
@@ -1807,6 +2437,10 @@ export async function scheduleDeleteDir(dir: string): Promise<void> {
     await deleteRemoteDirNow(token, s.owner, s.repo, dir)
     if (journalComplete(getState(), dir, 'deleteDir')) persistState()
   } catch (err: unknown) {
+    if (err instanceof RemoteChangedError) {
+      handleDeleteDirConflict(dir)
+      return
+    }
     journalFail(getState(), dir, 'deleteDir')
     persistState()
     syncError = `Failed to delete note folder "${dir}" on GitHub: ${String(err)}`
@@ -1834,6 +2468,11 @@ let retryInFlight = false
  *
  * Gated on initialPullStatus === 'ok' like regular pushes: retrying before the
  * first successful pull could overwrite a newer remote version.
+ *
+ * `stale` ops are skipped: their conditional mutation was already held back
+ * because the file changed on GitHub — re-sending would be held back again;
+ * the pull resolves them. A conditional mutation held back NOW
+ * (RemoteChangedError) flags its op stale and asks for a pull — no syncError.
  */
 export async function retrySyncJournal(notesDir: string): Promise<void> {
   const s = syncSettings ?? loadSyncSettings()
@@ -1858,8 +2497,14 @@ export async function retrySyncJournal(notesDir: string): Promise<void> {
     }
     const owner = s.owner
     const repo = s.repo
+    notesDirPath = notesDir
 
     for (const [key, entry] of entries) {
+      // Completed or replaced meanwhile (e.g. a pull resolved the folder, or a
+      // newer intent was recorded) — the snapshot entry is no longer the op.
+      if (state.ops[key] !== entry) continue
+      // Held back by a conditional check — the pull resolves it.
+      if (entry.stale) continue
       // A live debounce timer for this path will push fresher content shortly —
       // let it handle the upsert instead of racing it here.
       if (entry.op === 'upsert' && pushTimers.has(key)) continue
@@ -1873,7 +2518,10 @@ export async function retrySyncJournal(notesDir: string): Promise<void> {
       try {
         if (action === 'upsert') {
           const content = fs.readFileSync(path.join(notesDir, key), 'utf-8')
-          await upsertRemoteFile(token, owner, repo, key, content)
+          const outcome = await upsertRemoteFile(token, owner, repo, key, content, { notesDir })
+          // The disk moved on while queued: whatever replaced it owns the path
+          // now (its own timer, or the pull) — leave the entry to them.
+          if (outcome === 'superseded') continue
           // Race guard: if the user edited this file WHILE the retry push was in
           // flight, schedulePushUnguarded armed a new debounce timer and its
           // journalRecord was a same-op no-op (the entry we're retrying was kept).
@@ -1889,6 +2537,11 @@ export async function retrySyncJournal(notesDir: string): Promise<void> {
         }
         if (journalComplete(state, key, entry.op)) persistState()
       } catch (err: unknown) {
+        if (err instanceof RemoteChangedError) {
+          if (entry.op === 'deleteDir') handleDeleteDirConflict(key)
+          else holdBackForRemoteChange(key, entry.op)
+          continue
+        }
         journalFail(state, key, entry.op)
         persistState()
         syncError = `Sync retry (${entry.op} ${key}) failed: ${String(err)}`

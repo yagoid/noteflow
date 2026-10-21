@@ -28,6 +28,9 @@ noteflow/
 │   ├── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull por carpeta,
 │   │                    #   Trees API, migración remota, cifrado token)
 │   ├── syncState.ts     # Lógica pura del journal de mutaciones + sha-cache (la usan GitHub y Cloud)
+│   │                    #   + decisiones de tres vías de la subida condicionada de GitHub — ver sync.md
+│   ├── conflictCopy.ts  # Lado disco de las copias de conflicto (escribir la copia + aviso de sesión),
+│   │                    #   compartido por cloudSync.ts y githubSync.ts — ver sync.md / monetization.md
 │   ├── mirrorPlan.ts    # Lógica pura del espejo local→GitHub (plan + allowlist de borrado) — ver sync.md
 │   ├── syncHistory.ts   # Lógica pura del historial de actividad en memoria (gráfica de la tarjeta de sync) — ver sync.md
 │   ├── activityLog.ts   # Lógica pura del log de ediciones por día y dispositivo (userData/activity-log.json):
@@ -277,8 +280,9 @@ Renderer (React)
 | `window:section-window-target` | on | La ventana de sección informa de la nota+sección que muestra (para el "enfocar si ya existe" del canal anterior y la recarga tras crash) |
 | `window:set-size` | on | Redimensiona la ventana (usado por sticky) |
 | `window:fold-to-corner` / `window:unfold` | on | Anima el plegado/desplegado de stickies |
-| `sync:get-status` | handle | Estado del sync **GitHub** (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`) |
-| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, history?: [{at, files, ok}], filesToday?, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`) |
+| `sync:get-status` | handle | Estado del sync **GitHub** (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`, `conflictCopies?`) |
+| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, history?: [{at, files, ok}], filesToday?, conflictCopies?: {count, titles, at}, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`; `conflictCopies` = aviso de copias de conflicto del backend activo, sea Cloud o GitHub) |
+| `sync:dismiss-conflict-copies` | handle | Descarta el aviso de **copias de conflicto** de la tarjeta del botón de sync (limpia el de **ambos** backends — `cloudSync`/`githubSync.dismissConflictCopies()` — y emite `cloud:status-changed` + `sync:status-changed`); las copias siguen siendo notas |
 | `sync:initiate` | handle | Inicia Device Flow OAuth (recibe `repo`); al completar → `sync-auth-complete` + autosync |
 | `sync:cancel-auth` | handle | Cancela un Device Flow en curso |
 | `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings |
@@ -291,7 +295,7 @@ Renderer (React)
 | `account:sign-out` | handle | Logout best-effort en el servidor (`/auth/v1/logout?scope=local`: solo esta sesión) + limpia la sección `account` y el estado. La app vuelve a su estado gratuito: Cloud `enabled=false`, **sesión de claves borrada** (DEK + cache + `keysMode`/`remoteKeysKnown`), IA gestionada → proveedor BYO/local, y se guarda `accountRestore` (ver `monetization.md` § 4 "Cerrar sesión") |
 | `account:refresh-entitlements` | handle | Relee `subscriptions` vía PostgREST/RLS y re-deriva `{ai, cloud}` (y las cachea en `account.entitlementsCache`). **Single-flight** (comparte la petición en curso de la misma sesión); un fallo transitorio entra en el **backoff** de reintentos automáticos (también al volver de suspensión / recuperar la red). `errorCode`: `network` (sin conexión — también si falla el refresh del token por red), `sessionLocked` (llavero del sistema bloqueado), `refreshFailed` (error del servidor), `notSignedIn`, `notConfigured`. Ver `monetization.md` § 2 |
 | `account:open-checkout` | handle | Abre el checkout de Lemon Squeezy en el navegador con `checkout[custom][user_id]` (URL construida en main — el userId no cruza al renderer) |
-| `cloud:get-status` | handle | Estado público de NoteFlow Cloud (`{configured, enabled, signedIn, keysState: 'unlocked'\|'locked'\|'no-keys', keysMode: 'managed'\|'e2ee'\|null, lastSync, error, initialPullStatus, realtimeConnected}`) — **nunca** material de claves |
+| `cloud:get-status` | handle | Estado público de NoteFlow Cloud (`{configured, enabled, signedIn, keysState: 'unlocked'\|'locked'\|'no-keys', keysMode: 'managed'\|'e2ee'\|null, lastSync, error, initialPullStatus, realtimeConnected, conflictCopies?}`) — **nunca** material de claves |
 | `cloud:setup` | handle | Passphrase → genera DEK + recovery code, sube `user_keys` y desbloquea; **devuelve el recovery code UNA vez** (no se persiste) — setup en modo e2ee (privado) |
 | `cloud:setup-managed` | handle | Setup en modo managed (estándar, el default): genera la DEK y la deposita en la Edge Function `cloud-keys`, que la envuelve con la KEK del operador — sin passphrase ni recovery |
 | `cloud:unlock` | handle | Desbloquea la sesión de claves e2ee con passphrase o recovery code (DEK solo en memoria del main + cache safeStorage) |

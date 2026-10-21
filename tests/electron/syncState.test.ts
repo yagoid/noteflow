@@ -440,7 +440,7 @@ describe('reconciled-SHA cache', () => {
 })
 
 describe('Cloud upsert flags: stale (conditional upload rejected) and force (resurrection)', () => {
-  it('parse/serialize preserve stale and force on upserts only, in their exact `true` form', () => {
+  it('parse/serialize preserve force on upserts only and stale on upserts + deletes (GitHub), in their exact `true` form', () => {
     const raw = JSON.stringify({
       version: 1,
       ops: {
@@ -448,6 +448,7 @@ describe('Cloud upsert flags: stale (conditional upload rejected) and force (res
         'b/note.md': { op: 'upsert', queuedAt: NOW, attempts: 2, force: true },
         'c/note.md': { op: 'upsert', queuedAt: NOW, attempts: 0, stale: 'yes', force: 1 },
         'd/sec.md': { op: 'delete', queuedAt: NOW, attempts: 0, stale: true, force: true },
+        e: { op: 'deleteDir', queuedAt: NOW, attempts: 0, stale: true },
       },
       shas: {},
     })
@@ -455,7 +456,9 @@ describe('Cloud upsert flags: stale (conditional upload rejected) and force (res
     expect(state.ops['a/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 0, stale: true })
     expect(state.ops['b/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 2, force: true })
     expect(state.ops['c/note.md']).toEqual({ op: 'upsert', queuedAt: NOW, attempts: 0 })
-    expect(state.ops['d/sec.md']).toEqual({ op: 'delete', queuedAt: NOW, attempts: 0 })
+    // A GitHub section delete held back by the three-way check keeps `stale`; never `force`.
+    expect(state.ops['d/sec.md']).toEqual({ op: 'delete', queuedAt: NOW, attempts: 0, stale: true })
+    expect(state.ops['e']).toEqual({ op: 'deleteDir', queuedAt: NOW, attempts: 0 })
     expect(parseSyncState(serializeSyncState(state))).toEqual(state)
   })
 

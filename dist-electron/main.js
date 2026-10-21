@@ -433,6 +433,42 @@ function stopAutoSync() {
         autoSyncTimer = null;
     }
 }
+// A conditional GitHub push/delete was held back because the file changed on
+// GitHub since this device last saw it (githubSync.onRemoteConflict): pull soon
+// — its conflict path applies the remote folder and keeps the local version as
+// a conflict copy — instead of waiting for the next 5-min tick (which would
+// resolve it too). Debounced (a burst of held-back files = one pull), only with
+// GitHub as the active provider and its first pull done, and deferred like the
+// tick while own remote mutations are still draining.
+const GITHUB_CONFLICT_PULL_DELAY_MS = 3000;
+let githubConflictPullTimer = null;
+function scheduleGithubConflictPull() {
+    if (githubConflictPullTimer)
+        clearTimeout(githubConflictPullTimer);
+    githubConflictPullTimer = setTimeout(() => {
+        githubConflictPullTimer = null;
+        void runGithubConflictPull();
+    }, GITHUB_CONFLICT_PULL_DELAY_MS);
+}
+async function runGithubConflictPull() {
+    if (cloudSync.isCloudSyncEnabled())
+        return;
+    const status = githubSync.getSyncStatus();
+    if (!status.connected || status.initialPullStatus !== 'ok')
+        return;
+    if (githubSync.hasPendingRemoteMutations()) {
+        scheduleGithubConflictPull(); // retry once the queue has drained
+        return;
+    }
+    try {
+        const result = await githubSync.pullNotes(NOTES_DIR);
+        broadcastPullResult(result, 'github');
+    }
+    catch (err) {
+        console.error('[Sync] conflict pull failed:', String(err));
+        emitSyncStatusChanged();
+    }
+}
 // ── NoteFlow Cloud autosync (Realtime signal + safety-net timer — stage 3) ────
 let cloudAutoSyncTimer = null;
 // Broadcasts the PUBLIC cloud status (never key material) to every window.
@@ -2018,11 +2054,14 @@ electron_1.ipcMain.handle('cloud:lock', () => {
     emitCloudStatusChanged();
     return { ok: true };
 });
-// Dismisses the "kept as conflict copies" notice of the titlebar sync card
-// (session-only state in cloudSync — the copies themselves stay as notes).
-electron_1.ipcMain.handle('cloud:dismiss-conflict-copies', () => {
+// Dismisses the "kept as conflict copies" notice of the titlebar sync card —
+// both backends' (session-only state in cloudSync / githubSync; the copies
+// themselves stay as notes). The card shows the active backend's notice.
+electron_1.ipcMain.handle('sync:dismiss-conflict-copies', () => {
     cloudSync.dismissConflictCopies();
+    githubSync.dismissConflictCopies();
     emitCloudStatusChanged();
+    emitSyncStatusChanged();
     return { ok: true };
 });
 // Enabling Cloud takes over from GitHub Sync (mutually exclusive — see
@@ -3404,7 +3443,12 @@ electron_1.app.whenReady().then(async () => {
     // MUST run before the initial pull and before the fs watcher starts.
     const migrationResult = (0, migration_1.migrateNotesDirToV2)(NOTES_DIR);
     githubSync.loadSyncSettings();
+    githubSync.setNotesDir(NOTES_DIR);
     githubSync.onStatusChanged(() => emitSyncStatusChanged());
+    // Held-back conditional push (the file changed on GitHub) → pull soon.
+    githubSync.onRemoteConflict(() => scheduleGithubConflictPull());
+    // Title suffix of the conflict copies the GitHub pull makes (same as Cloud's).
+    githubSync.setConflictCopyLabel(() => mainMessages().sync.conflictCopy);
     const connected = githubSync.getSyncStatus().connected;
     // NoteFlow Cloud: restore the cached DEK (safeStorage) and the engine
     // settings. Mutually exclusive with GitHub Sync — when enabled, Cloud owns

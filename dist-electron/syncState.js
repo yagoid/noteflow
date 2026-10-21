@@ -2,7 +2,8 @@
 // Pure state logic for GitHub sync durability: a persistent journal of pending
 // remote mutations (so pushes/deletes that fail are retried instead of lost) and
 // a cache of already-reconciled blob SHAs (so pullNotes can skip unchanged note
-// dirs / metadata files without a per-file GET). Lives in electron/ but imports
+// dirs / metadata files without a per-file GET, and the BASE of the conditional
+// push's three-way check — see "GitHub conditional push" below). Lives in electron/ but imports
 // nothing from Electron — githubSync.ts injects the file IO — following the same
 // pure-module pattern as electron/entitlements.ts. Persisted by githubSync.ts as
 // `sync-state.json` in userData (LOCAL device state — never in the notes dir, it
@@ -33,6 +34,16 @@ exports.shouldRefreshSections = shouldRefreshSections;
 exports.planSectionRefresh = planSectionRefresh;
 exports.pruneShas = pruneShas;
 exports.isGitHubEmptyRepoError = isGitHubEmptyRepoError;
+exports.isNoteFilePath = isNoteFilePath;
+exports.isThreeWayConflict = isThreeWayConflict;
+exports.planConditionalUpsert = planConditionalUpsert;
+exports.planConditionalDelete = planConditionalDelete;
+exports.remoteDirChangesSinceBase = remoteDirChangesSinceBase;
+exports.hasStaleOpUnder = hasStaleOpUnder;
+exports.planGithubDirConflict = planGithubDirConflict;
+exports.journalCompleteDir = journalCompleteDir;
+exports.journalClearStale = journalClearStale;
+exports.dropCachedShasUnder = dropCachedShasUnder;
 const OP_TYPES = ['upsert', 'delete', 'deleteDir'];
 function emptySyncState() {
     return { version: 1, ops: {}, shas: {} };
@@ -68,8 +79,9 @@ function parseSyncState(raw) {
                 queuedAt: typeof entry.queuedAt === 'string' ? entry.queuedAt : new Date(0).toISOString(),
                 attempts: typeof entry.attempts === 'number' && Number.isFinite(entry.attempts) ? entry.attempts : 0,
             };
-            // Cloud-only upsert flags: kept only in their exact `true` form.
-            if (op.op === 'upsert' && entry.stale === true)
+            // Op flags: kept only in their exact `true` form. `stale` exists on
+            // upserts (both backends) and on GitHub's section deletes.
+            if ((op.op === 'upsert' || op.op === 'delete') && entry.stale === true)
                 op.stale = true;
             if (op.op === 'upsert' && entry.force === true)
                 op.force = true;
@@ -154,16 +166,17 @@ function journalRecordIfAbsent(state, key, op, nowIso, opts) {
     return journalRecord(state, key, op, nowIso, opts);
 }
 /**
- * NoteFlow Cloud: flags a pending upsert as `stale` (its conditional upload was
- * rejected — the server holds a newer version). Only an EXISTING upsert entry
- * is flagged, never re-created: if the pull already reconciled the path (and
- * completed the op) while the upload was in flight, there is nothing left to
- * keep — re-creating it would leave a phantom pending edit that guards the
- * note against remote deletions forever.
+ * Flags a pending op as `stale` (its conditional mutation was rejected — the
+ * remote holds a version this device never saw). Only an EXISTING entry of
+ * exactly `op` is flagged, never re-created: if the pull already reconciled the
+ * path (and completed the op) while the mutation was in flight, there is
+ * nothing left to keep — re-creating it would leave a phantom pending edit that
+ * guards the note against remote deletions forever. NoteFlow Cloud only ever
+ * flags upserts (the default); GitHub also flags section deletes.
  */
-function journalMarkStale(state, key) {
+function journalMarkStale(state, key, op = 'upsert') {
     const entry = state.ops[key];
-    if (!entry || entry.op !== 'upsert' || entry.stale)
+    if (!entry || entry.op !== op || entry.stale)
         return false;
     entry.stale = true;
     return true;
@@ -191,7 +204,7 @@ function journalMarkDirStale(state, dir) {
     return changed;
 }
 /**
- * NoteFlow Cloud: flags EVERY pending upsert under '<dir>/' as
+ * Both backends: flags EVERY pending upsert under '<dir>/' as
  * `conflictCopied` — the pull has just written a conflict copy holding their
  * local content (see SyncJournalOp.conflictCopied). Persisted right after the
  * copy is written and BEFORE the folder is overwritten/deleted.
@@ -442,4 +455,167 @@ function pruneShas(state, presentPaths) {
  */
 function isGitHubEmptyRepoError(status, message) {
     return (status === 409 || status === 404) && /repository is empty/i.test(message);
+}
+// ── GitHub conditional push (three-way check per file) ────────────────────────
+// The Contents API's `sha` is only a concurrency token: a PUT/DELETE carrying
+// the CURRENT sha always lands, so a push queued (or drained from the journal)
+// after another device updated the same file used to overwrite that update
+// everywhere, with no copy and no notice (QA B3). The fix is a three-way
+// comparison per note file, with the reconciled-SHA cache as the BASE:
+//   B = `state.shas[p]` — the blob this device last reconciled (pulled,
+//       adopted, or pushed itself). undefined = unknown;
+//   R = the blob currently on GitHub (Contents API GET sha, or the tree sha
+//       in the pull). null = absent;
+//   L = git blob sha of the local content. null = absent.
+// "The remote moved since this device saw it" = B defined && R !== B.
+// An unknown base (B undefined: cache lost, pre-upgrade files, first connect)
+// keeps the historical last-writer-wins behaviour — never a spurious conflict.
+// Only note files ('<dir>/<file>.md') are conditional, and only while GitHub
+// is the active provider (NoteFlow Cloud off, read fail-closed): root metadata
+// JSONs, the README, the format marker and the Cloud-mode mirror stay
+// unconditional.
+/** Note files ('<dir>/<file>.md') are the only conditional remote paths. */
+function isNoteFilePath(relPath) {
+    return /^[^/]+\/[^/]+\.md$/.test(relPath);
+}
+/**
+ * Has BOTH sides changed this file since the base, to different contents?
+ * B defined && R !== B && L !== B && L !== R. Unknown base → never.
+ */
+function isThreeWayConflict(s) {
+    return s.base !== undefined && s.remote !== s.base && s.local !== s.base && s.local !== s.remote;
+}
+function planConditionalUpsert(base, remote, local) {
+    if (remote !== null && remote === local)
+        return 'identical';
+    if (remote === null)
+        return 'put';
+    if (base === undefined || remote === base)
+        return 'put';
+    return 'conflict';
+}
+function planConditionalDelete(base, remote) {
+    if (remote === null)
+        return 'gone';
+    if (base === undefined || remote === base)
+        return 'delete';
+    return 'conflict';
+}
+/**
+ * Removal of a whole note folder (deleteDir): the blobs of the folder that
+ * changed remotely since this device last reconciled them (base known and
+ * tree sha different). Non-empty → the caller must NOT delete anything — the
+ * remote edit beats the local deletion: the 'deleteDir' op is completed, the
+ * cached bases under the folder dropped, and the next pull downloads the
+ * remote note again. `ignore` = paths this device itself mutated after the
+ * tree listing was taken (their tree sha is older than the cached base).
+ */
+function remoteDirChangesSinceBase(state, blobs, ignore) {
+    const changed = [];
+    for (const b of blobs) {
+        if (ignore?.(b.path))
+            continue;
+        const base = state.shas[b.path];
+        if (base !== undefined && base !== b.sha)
+            changed.push(b.path);
+    }
+    return changed;
+}
+/** Is any op under '<dir>/' flagged stale (a rejected conditional mutation)? */
+function hasStaleOpUnder(state, dir) {
+    const prefix = `${dir}/`;
+    for (const [key, entry] of Object.entries(state.ops)) {
+        if (entry.stale && key.startsWith(prefix))
+            return true;
+    }
+    return false;
+}
+/**
+ * GitHub pull, per remote note folder (only while GitHub is the active
+ * provider): the folder takes the CONFLICT PATH when an op under it is stale
+ * (the push/delete already found the remote moved) OR any of its files — tree
+ * ∪ cached ∪ local — is a three-way conflict (isThreeWayConflict). The latter
+ * needs no journal: it also catches edits the app never journaled (the CLI
+ * with the app closed) and the "local strictly newer" case, where the
+ * historical rule kept the local folder and the next push overwrote the
+ * remote edit. Without a conflict it may still be a FAST-FORWARD (see
+ * GithubDirConflictPlan.fastForward), applied through the same path with no
+ * copy. `paths` carries every file of the folder with its three shas.
+ */
+function planGithubDirConflict(state, dir, paths) {
+    const conflict = hasStaleOpUnder(state, dir) || paths.some(isThreeWayConflict);
+    if (!conflict) {
+        // Fast-forward (QA B3 review): the remote moved for some file whose base is
+        // known, and nothing local diverges from its base. The historical rule
+        // would keep the local folder when the remote `updated:` is not newer,
+        // cache the remote sha as reconciled, and the next local edit would PUT
+        // over the remote change. A file that never existed locally and has no
+        // base (a section added remotely) does not block it.
+        const moved = paths.some((p) => p.base !== undefined && p.remote !== p.base && p.local !== p.remote);
+        const clean = paths.every((p) => p.local === p.remote || (p.base !== undefined && p.local === p.base) || (p.base === undefined && p.local === null));
+        return { conflict: false, fastForward: moved && clean, copyCandidates: [] };
+    }
+    const prefix = `${dir}/`;
+    // Dedupe of a retried, half-failed apply: skip the copy only while EVERY
+    // pending upsert under the folder was already copied. A pending upsert
+    // without the flag is an edit made after that copy — it must get one too
+    // (a second, overlapping copy is acceptable; a lost edit is not).
+    let flagged = 0;
+    let unflagged = 0;
+    for (const [key, entry] of Object.entries(state.ops)) {
+        if (entry.op !== 'upsert' || !key.startsWith(prefix))
+            continue;
+        if (entry.conflictCopied === true)
+            flagged++;
+        else
+            unflagged++;
+    }
+    if (flagged > 0 && unflagged === 0)
+        return { conflict: true, fastForward: false, copyCandidates: [] };
+    const copyCandidates = paths
+        .filter((p) => p.local !== null && p.local !== p.base)
+        .map((p) => p.path);
+    return { conflict: true, fastForward: false, copyCandidates };
+}
+/**
+ * Completes EVERY op under '<dir>/' (upserts and deletes, stale or not): the
+ * pull has just left the folder exactly as the remote holds it, so no pending
+ * local mutation of it may land afterwards. The folder's own 'deleteDir' key
+ * ('<dir>', no slash) is never touched.
+ */
+function journalCompleteDir(state, dir) {
+    const prefix = `${dir}/`;
+    let changed = false;
+    for (const key of Object.keys(state.ops)) {
+        if (key.startsWith(prefix)) {
+            delete state.ops[key];
+            changed = true;
+        }
+    }
+    return changed;
+}
+/**
+ * Clears `stale` from an op whose path no longer exists on the remote at all
+ * (complete tree listing): there is nothing left to conflict with, so the
+ * drain may run it again — an upsert re-creates the file (a local edit beats a
+ * remote deletion), a delete finds it already gone.
+ */
+function journalClearStale(state, key) {
+    const entry = state.ops[key];
+    if (!entry || !entry.stale)
+        return false;
+    delete entry.stale;
+    return true;
+}
+/** Drops the cached (base) shas of every file under '<dir>/'. */
+function dropCachedShasUnder(state, dir) {
+    const prefix = `${dir}/`;
+    let changed = false;
+    for (const key of Object.keys(state.shas)) {
+        if (key.startsWith(prefix)) {
+            delete state.shas[key];
+            changed = true;
+        }
+    }
+    return changed;
 }

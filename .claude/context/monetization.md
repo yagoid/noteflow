@@ -913,7 +913,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     (`requeueDirForUpload`, tombstone de sección más nuevo que una edición pendiente). Se guarda en
     el op del journal y el timer lo lee **al disparar**, así que sobrevive a re-armados y a fallos
     (el drain lo reintenta forzado); un re-registro normal no lo quita; desaparece al completarse.
-    GitHub ignora los dos flags.
+    GitHub ignora `force`; `stale` lo usa con su propia regla (subida condicionada de tres vías contra
+    su caché de shas, también en borrados de sección — ver `sync.md` "Subida condicionada (QA B3)").
   - **El pull resuelve las subidas pendientes:** cuando el pull deja una ruta con el contenido del
     servidor (la escribe, o el disco ya era idéntico) **cancela el timer armado** de esa ruta y
     **completa** su `upsert` pendiente (`settlePathUpload` — arregla también "timer armado con un
@@ -980,11 +981,16 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     (renderer + índice de IA) y cuenta en `pulled`/`filesDown`; después el pull sigue exactamente
     como antes. **Dedupe:** si el aplicado falla a medias, el reintento vuelve a la rama wholesale
     con los mismos ops pendientes, pero ya marcados `conflictCopied` → sin segunda copia; un
-    re-registro (`journalRecord`, nueva edición local) quita el flag. GitHub ignora el flag.
+    re-registro (`journalRecord`, nueva edición local) quita el flag. El GitHub Sync usa el mismo
+    flag para el dedupe de sus propias copias. La escritura de la copia en disco
+    (`writeConflictCopy`) y el tipo del aviso viven en `electron/conflictCopy.ts`, compartidos con
+    GitHub; `preserveConflictCopy` (decisión + journal + subida + aviso) sigue en `cloudSync.ts`.
     **Aviso en la UI:** `CloudSyncStatus.conflictCopies` (`{count, titles, at}`, solo en memoria
-    de la sesión, acumulado entre pulls hasta descartarlo) → `ActiveSyncStatus.cloud.conflictCopies`
+    de la sesión, acumulado entre pulls hasta descartarlo) → `ActiveSyncStatus.conflictCopies` (de
+    nivel superior: es el aviso del backend activo, el mismo campo para GitHub)
     → punto ámbar en el botón de sync del titlebar + bloque en su tarjeta con los títulos y botón
-    *Dismiss* (IPC `cloud:dismiss-conflict-copies`); se limpia también al cambiar de cuenta
+    *Dismiss* (IPC `sync:dismiss-conflict-copies`, que limpia el aviso de los dos backends; antes
+    `cloud:dismiss-conflict-copies`); se limpia también al cambiar de cuenta
     (`resetCloudSyncState`) y al desactivar Cloud. Logs: solo recuentos.
     **Requisito: la edición tiene que estar en el journal.** Antes, con la puerta de push cerrada
     (`initialPullStatus !== 'ok'`: arranque offline, claves managed que no desbloquean offline,
@@ -1014,7 +1020,9 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
       otra manera produce una copia espuria (segura).
     - La copia conserva `favorited`/`expiresAt` y el contenido con alarmas → las alarmas pueden
       sonar dos veces (original + copia).
-    - El **GitHub Sync** no hace copias de conflicto (sigue LWW puro).
+    - El **GitHub Sync** tiene su propia regla desde QA B3 (subida condicionada de tres vías +
+      camino de conflicto del pull, con las mismas copias y el mismo aviso): residuales en `sync.md`
+      "Subida condicionada (QA B3)".
     - El caso simétrico — edición local pendiente **más nueva** que una versión remota que este
       dispositivo nunca vio — sigue siendo LWW sin copia: el drain sube la local (condicionada,
       aceptada por ser más nueva) y pisa esa versión remota.
@@ -1041,9 +1049,14 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     local. El CLI no aplica `force` al tombstone de una **sección** con subida pendiente (se salta y
     `noteflow push` la re-sube condicionada, puede quedar stale) — solo a la re-subida de una carpeta
     conservada (`cliCloud.forceUpserts`).
-- ⚠️ **Pendiente solo en GitHub:** el GitHub Sync sigue subiendo sin condiciones (el sha de la
-  Contents API no es "la versión que este dispositivo vio"), así que allí una subida tardía aún puede
-  pisar una versión más nueva. Cloud ya no (ver "Subidas condicionadas"); detalle en `sync.md`.
+- 📌 **GitHub también sube condicionado (QA B3, resuelto):** el sha de la Contents API solo es un
+  token de concurrencia, así que el GitHub Sync usa como "versión que este dispositivo vio" su caché de
+  shas reconciliados (base) y compara en tres vías por fichero (base / GitHub / local): una subida o un
+  borrado sobre un fichero que cambió en GitHub desde su base se retiene (op `stale`, pull inmediato),
+  y el pull aplica la versión remota de la carpeta guardando la local como copia de conflicto si
+  difiere. Base desconocida ⇒ comportamiento histórico. Solo con GitHub como backend activo (con Cloud
+  activo GitHub es su espejo y sube incondicional). Detalle y residuales en `sync.md` "Subida
+  condicionada (QA B3)".
 - **Regla de secciones sueltas (pull por carpeta, necesaria con el cursor por seq):** un ancla y sus
   secciones son subidas independientes y pueden caer en pulls distintos (en cualquier orden).
   - El grupo trae el ancla y `shouldApplyRemoteDir` (remota más nueva, o carpeta local inexistente)

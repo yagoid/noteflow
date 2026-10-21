@@ -316,7 +316,10 @@ export const cliGroups: CliGroup[] = [
       {
         id: 'push',
         usage: 'noteflow push',
-        desc: { en: 'Upload every note to the repo.', es: 'Sube todas las notas al repositorio.' },
+        desc: {
+          en: 'Upload every note to the repo. A note that changed on GitHub since your last pull is never overwritten: the GitHub version is kept and yours is saved as a conflict copy.',
+          es: 'Sube todas las notas al repositorio. Una nota que cambió en GitHub desde tu último pull nunca se pisa: se queda la versión de GitHub y la tuya se guarda como copia en conflicto.',
+        },
       },
       {
         id: 'pull',

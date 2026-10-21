@@ -21,6 +21,7 @@
 import * as githubSync from './githubSync'
 import * as cloudSync from './cloudSync'
 import type { SyncHistoryEntry } from './syncHistory'
+import type { ConflictCopiesNotice } from './conflictCopy'
 
 /** Result shape shared by both backends' pullNotes (paths in updatedFiles are note DIRS). */
 export interface SyncPullResult {
@@ -132,6 +133,12 @@ export interface ActiveSyncStatus {
    * total kept in main, NOT a sum of `history` (the ring only covers ~2 h).
    */
   filesToday?: number
+  /**
+   * Session notice of the conflict copies the live backend's pulls made (until
+   * dismissed): local edits that lost against a remote version this device
+   * never saw, kept as new notes. Same shape for both backends.
+   */
+  conflictCopies?: ConflictCopiesNotice
   /** Present only when backend === 'github'. */
   github?: { owner?: string; repo?: string }
   /** Present only when backend === 'cloud'. */
@@ -139,8 +146,6 @@ export interface ActiveSyncStatus {
     keysState: cloudSync.CloudSyncStatus['keysState']
     keysMode: cloudSync.CloudSyncStatus['keysMode']
     realtimeConnected: boolean
-    /** Session notice of the conflict copies made by the pull (until dismissed). */
-    conflictCopies?: cloudSync.ConflictCopiesNotice
   }
 }
 
@@ -158,11 +163,11 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       autoSyncIntervalMs: cloudSync.CLOUD_AUTO_SYNC_INTERVAL_MS,
       history: cloudSync.getSyncHistory(),
       filesToday: cloudSync.getSyncFilesToday(),
+      conflictCopies: c.conflictCopies,
       cloud: {
         keysState: c.keysState,
         keysMode: c.keysMode,
         realtimeConnected: c.realtimeConnected,
-        conflictCopies: c.conflictCopies,
       },
     }
   }
@@ -178,6 +183,7 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       autoSyncIntervalMs: githubSync.GITHUB_AUTO_SYNC_INTERVAL_MS,
       history: githubSync.getSyncHistory(),
       filesToday: githubSync.getSyncFilesToday(),
+      conflictCopies: g.conflictCopies,
       github: { owner: g.owner, repo: g.repo },
     }
   }

@@ -54,12 +54,13 @@ export const titleBar = {
     filesToday: { one: '{count} file today', other: '{count} files today' },
     // Blocked first pull (shown above the error message, if any).
     blockedNotice: 'Changes won’t upload until a sync succeeds.',
-    // NoteFlow Cloud kept offline edits that lost against newer changes as new
-    // notes (conflict copies): card notice (+ the copies' titles), the button's
-    // aria-label addition, the "+N more" line and the dismiss action.
+    // The pull (NoteFlow Cloud or GitHub) kept local edits that conflicted with
+    // changes from another device as new notes (conflict copies): card notice
+    // (+ the copies' titles), the button's aria-label addition, the "+N more"
+    // line and the dismiss action.
     conflictCopiesNotice: {
-      one: 'Your offline edits to {count} note conflicted with newer changes from another device and were kept as a conflict copy:',
-      other: 'Your offline edits to {count} notes conflicted with newer changes from another device and were kept as conflict copies:',
+      one: 'Your edits to {count} note conflicted with changes made on another device and were kept as a conflict copy:',
+      other: 'Your edits to {count} notes conflicted with changes made on another device and were kept as conflict copies:',
     },
     conflictCopiesAria: { one: '{count} conflict copy created', other: '{count} conflict copies created' },
     conflictCopiesMore: '+{count} more',

@@ -42,7 +42,7 @@ import { supabaseRest } from './cloudKeys'
 import { cloudAccessErrorMessage, CLOUD_UNREACHABLE_ERROR, CLOUD_SESSION_LOCKED_ERROR } from './cloudAccessErrors'
 import { isCloudConfigured } from './cloudConfig'
 import { writeSettingsFile } from './settingsFile'
-import { NOTE_MD, listNoteDirs, newNoteId } from './noteFormat'
+import { NOTE_MD, listNoteDirs } from './noteFormat'
 import { generateNoteKey, derivePathKeyHmac, unwrapKey, decryptContent } from './cloudCrypto'
 import {
   CLOUD_METADATA_FILENAMES,
@@ -80,10 +80,8 @@ import {
   planRemoteDelete,
   planLocalPush,
   planConflictCopy,
-  buildConflictCopy,
-  anchorTitle,
-  conflictCopyTitle,
 } from './cloudSyncLogic'
+import { type ConflictCopiesNotice, appendConflictCopyNotice, writeConflictCopy } from './conflictCopy'
 import {
   type SyncState,
   emptySyncState,
@@ -187,17 +185,9 @@ export interface CloudSyncStatus {
   conflictCopies?: ConflictCopiesNotice
 }
 
-/**
- * Session notice of the conflict copies made by pulls: offline edits that lost
- * against a newer remote version were kept as new notes (see
- * preserveConflictCopy). `titles` are the copies' titles (latest
- * CONFLICT_COPY_TITLES_MAX); `at` = time of the latest copy.
- */
-export interface ConflictCopiesNotice {
-  count: number
-  titles: string[]
-  at: string
-}
+// Session notice of the conflict copies made by pulls (see preserveConflictCopy)
+// — the type is shared with the GitHub backend (conflictCopy.ts).
+export type { ConflictCopiesNotice }
 
 /** A decrypted pull row plus its opaque path_key (feeds the retry set). */
 type PulledEntry = CloudPullEntry & { pathKey: string }
@@ -256,7 +246,6 @@ let statusListener: (() => void) | null = null
 // Conflict copies made this session (see ConflictCopiesNotice) and the
 // localized label of their titles — injected by main.ts (the engine can't
 // import main), English until then.
-const CONFLICT_COPY_TITLES_MAX = 10
 let conflictCopies: ConflictCopiesNotice | undefined
 let conflictCopyLabel: () => string = () => 'conflict copy'
 
@@ -1284,45 +1273,16 @@ function preserveConflictCopy(
 
   // The copy carries the WHOLE local folder (every section), not only the
   // pending files: it must open as the complete local version of the note.
-  const localDirPath = path.join(notesDir, dir)
-  const localFiles: Record<string, string> = {}
-  for (const f of fs.readdirSync(localDirPath)) {
-    if (f.endsWith('.md')) localFiles[f] = fs.readFileSync(path.join(localDirPath, f), 'utf-8')
-  }
+  // Disk side shared with the GitHub pull (conflictCopy.ts); throws if the
+  // copy can't be written — the folder must then stay untouched.
   const now = new Date()
-  const title = conflictCopyTitle(anchorTitle(localFiles[NOTE_MD] ?? ''), conflictCopyLabel(), now)
-  let copy = buildConflictCopy(localFiles, { newId: newNoteId(), title, nowIso: now.toISOString() })
-  while (fs.existsSync(path.join(notesDir, copy.dir))) {
-    copy = buildConflictCopy(localFiles, { newId: newNoteId(), title, nowIso: now.toISOString() })
-  }
-  const copyPath = path.join(notesDir, copy.dir)
-  let created = false
-  try {
-    fs.mkdirSync(copyPath) // not recursive: never writes into a folder that appeared meanwhile
-    created = true
-    for (const [name, content] of Object.entries(copy.files)) {
-      fs.writeFileSync(path.join(copyPath, name), content, 'utf-8')
-    }
-  } catch (err) {
-    // A half-written copy would show up as a broken note: remove it (only if
-    // this call created it). The original folder is left untouched.
-    if (created) {
-      try {
-        fs.rmSync(copyPath, { recursive: true, force: true })
-      } catch { /* best effort */ }
-    }
-    throw err
-  }
+  const copy = writeConflictCopy(notesDir, dir, conflictCopyLabel(), now)
   if (journalMarkDirConflictCopied(state, dir)) persistState()
   for (const [name, content] of Object.entries(copy.files)) {
     schedulePushUnguarded(`${copy.dir}/${name}`, content)
   }
-  conflictCopies = {
-    count: (conflictCopies?.count ?? 0) + 1,
-    titles: [...(conflictCopies?.titles ?? []), title].slice(-CONFLICT_COPY_TITLES_MAX),
-    at: now.toISOString(),
-  }
-  return { dirPath: copyPath, files: Object.keys(copy.files).length }
+  conflictCopies = appendConflictCopyNotice(conflictCopies, copy.title, now.toISOString())
+  return { dirPath: copy.dirPath, files: Object.keys(copy.files).length }
 }
 
 /**

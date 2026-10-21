@@ -73,7 +73,7 @@ interface SyncStatusButtonProps {
   onRefresh: () => void
   /** Opens Settings → Sync (GitHub and the NoteFlow Cloud panel both live there). */
   onOpenSettings: () => void
-  /** Clears the "kept as conflict copies" notice (NoteFlow Cloud). */
+  /** Clears the "kept as conflict copies" notice (either backend). */
   onDismissConflictCopies: () => void
 }
 
@@ -112,7 +112,7 @@ export function SyncStatusButton({
   const backendName = status.backend === 'cloud' ? s.backendCloud : s.backendGithub
   const ariaVars = { backend: backendName, status: stateLabel(state, s) }
   const hint = clickHint(state, s)
-  const conflictCount = status.cloud?.conflictCopies?.count ?? 0
+  const conflictCount = status.conflictCopies?.count ?? 0
   const baseAriaLabel = hint ? tf(s.ariaLabelWithHint, { ...ariaVars, hint }) : tf(s.ariaLabel, ariaVars)
   const ariaLabel = conflictCount > 0 ? `${baseAriaLabel}. ${plural(s.conflictCopiesAria, conflictCount)}` : baseAriaLabel
 
@@ -295,7 +295,7 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
       : '—',
   })
   const realtimeOn = status.cloud?.realtimeConnected === true
-  const conflicts = status.cloud?.conflictCopies
+  const conflicts = status.conflictCopies
   const realtimeTip = tf(s.realtimeTooltip, { state: realtimeOn ? s.realtimeConnected : s.realtimeDisconnected })
   const autoSyncTip =
     status.autoSyncIntervalMs !== undefined
@@ -337,7 +337,7 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
 
       <SyncActivityChart status={status} exactTime={exactTime} />
 
-      {/* Conflict copies (NoteFlow Cloud): offline edits kept as new notes */}
+      {/* Conflict copies (either backend): local edits kept as new notes */}
       {conflicts && conflicts.count > 0 && (
         <div
           className="mx-3 mb-2 px-2 py-1.5 rounded border border-solid border-amber-400/30 bg-amber-400/10

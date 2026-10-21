@@ -103,6 +103,7 @@ const settingsFile_1 = require("./settingsFile");
 const noteFormat_1 = require("./noteFormat");
 const cloudCrypto_1 = require("./cloudCrypto");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
+const conflictCopy_1 = require("./conflictCopy");
 const syncState_1 = require("./syncState");
 const syncHistory_1 = require("./syncHistory");
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -158,7 +159,6 @@ let statusListener = null;
 // Conflict copies made this session (see ConflictCopiesNotice) and the
 // localized label of their titles — injected by main.ts (the engine can't
 // import main), English until then.
-const CONFLICT_COPY_TITLES_MAX = 10;
 let conflictCopies;
 let conflictCopyLabel = () => 'conflict copy';
 // Pending debounced pushes, keyed by relPath (same semantics as githubSync).
@@ -1143,49 +1143,17 @@ function preserveConflictCopy(notesDir, dir, server, onlyPaths) {
         return null;
     // The copy carries the WHOLE local folder (every section), not only the
     // pending files: it must open as the complete local version of the note.
-    const localDirPath = path_1.default.join(notesDir, dir);
-    const localFiles = {};
-    for (const f of fs_1.default.readdirSync(localDirPath)) {
-        if (f.endsWith('.md'))
-            localFiles[f] = fs_1.default.readFileSync(path_1.default.join(localDirPath, f), 'utf-8');
-    }
+    // Disk side shared with the GitHub pull (conflictCopy.ts); throws if the
+    // copy can't be written — the folder must then stay untouched.
     const now = new Date();
-    const title = (0, cloudSyncLogic_1.conflictCopyTitle)((0, cloudSyncLogic_1.anchorTitle)(localFiles[noteFormat_1.NOTE_MD] ?? ''), conflictCopyLabel(), now);
-    let copy = (0, cloudSyncLogic_1.buildConflictCopy)(localFiles, { newId: (0, noteFormat_1.newNoteId)(), title, nowIso: now.toISOString() });
-    while (fs_1.default.existsSync(path_1.default.join(notesDir, copy.dir))) {
-        copy = (0, cloudSyncLogic_1.buildConflictCopy)(localFiles, { newId: (0, noteFormat_1.newNoteId)(), title, nowIso: now.toISOString() });
-    }
-    const copyPath = path_1.default.join(notesDir, copy.dir);
-    let created = false;
-    try {
-        fs_1.default.mkdirSync(copyPath); // not recursive: never writes into a folder that appeared meanwhile
-        created = true;
-        for (const [name, content] of Object.entries(copy.files)) {
-            fs_1.default.writeFileSync(path_1.default.join(copyPath, name), content, 'utf-8');
-        }
-    }
-    catch (err) {
-        // A half-written copy would show up as a broken note: remove it (only if
-        // this call created it). The original folder is left untouched.
-        if (created) {
-            try {
-                fs_1.default.rmSync(copyPath, { recursive: true, force: true });
-            }
-            catch { /* best effort */ }
-        }
-        throw err;
-    }
+    const copy = (0, conflictCopy_1.writeConflictCopy)(notesDir, dir, conflictCopyLabel(), now);
     if ((0, syncState_1.journalMarkDirConflictCopied)(state, dir))
         persistState();
     for (const [name, content] of Object.entries(copy.files)) {
         schedulePushUnguarded(`${copy.dir}/${name}`, content);
     }
-    conflictCopies = {
-        count: (conflictCopies?.count ?? 0) + 1,
-        titles: [...(conflictCopies?.titles ?? []), title].slice(-CONFLICT_COPY_TITLES_MAX),
-        at: now.toISOString(),
-    };
-    return { dirPath: copyPath, files: Object.keys(copy.files).length };
+    conflictCopies = (0, conflictCopy_1.appendConflictCopyNotice)(conflictCopies, copy.title, now.toISOString());
+    return { dirPath: copy.dirPath, files: Object.keys(copy.files).length };
 }
 /**
  * Incremental pull: fetches rows with seq > pullSeq (or a full reconcile, see

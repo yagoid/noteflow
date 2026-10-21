@@ -41,8 +41,8 @@ export const titleBar = {
     filesToday: { one: '{count} archivo hoy', other: '{count} archivos hoy' },
     blockedNotice: 'Los cambios no se subirán hasta que una sincronización salga bien.',
     conflictCopiesNotice: {
-      one: 'Tus cambios sin conexión en {count} nota chocaron con cambios más recientes de otro dispositivo y se guardaron como copia en conflicto:',
-      other: 'Tus cambios sin conexión en {count} notas chocaron con cambios más recientes de otro dispositivo y se guardaron como copias en conflicto:',
+      one: 'Tus cambios en {count} nota chocaron con cambios hechos en otro dispositivo y se guardaron como copia en conflicto:',
+      other: 'Tus cambios en {count} notas chocaron con cambios hechos en otro dispositivo y se guardaron como copias en conflicto:',
     },
     conflictCopiesAria: { one: '{count} copia en conflicto creada', other: '{count} copias en conflicto creadas' },
     conflictCopiesMore: 'y {count} más',

@@ -359,13 +359,14 @@ export interface CloudSyncStatus {
   initialPullStatus: 'pending' | 'ok' | 'failed'
   /** True while the main process holds a live Realtime subscription (shown in the titlebar sync card; no event on change). */
   realtimeConnected: boolean
-  /** Conflict copies the Cloud pull made this session, until dismissed — mirror of ConflictCopiesNotice in electron/cloudSync.ts. */
+  /** Conflict copies the Cloud pull made this session, until dismissed — mirror of ConflictCopiesNotice in electron/conflictCopy.ts. */
   conflictCopies?: ConflictCopiesNotice
 }
 
 /**
- * Offline edits that lost against a newer remote version and were kept as new
- * notes ("conflict copies") by the Cloud pull — session-only, in main.
+ * Local edits that lost against a remote version this device never saw and
+ * were kept as new notes ("conflict copies") by the pull of either backend
+ * (NoteFlow Cloud or GitHub) — session-only, in main.
  * `titles` = the copies' titles (latest 10); `at` = time of the latest copy.
  */
 export interface ConflictCopiesNotice {
@@ -401,12 +402,13 @@ export interface ActiveSyncStatus {
   history?: SyncHistoryEntry[]
   /** Files the live backend moved today (local day) this session — running total kept in main, not a sum of `history`. */
   filesToday?: number
+  /** Conflict copies the live backend's pulls made this session, until dismissed. */
+  conflictCopies?: ConflictCopiesNotice
   github?: { owner?: string; repo?: string }
   cloud?: {
     keysState: CloudSyncStatus['keysState']
     keysMode: CloudSyncStatus['keysMode']
     realtimeConnected: boolean
-    conflictCopies?: ConflictCopiesNotice
   }
 }
 
@@ -494,9 +496,11 @@ declare global {
       parseExternalImport: (source: ImportSource) => Promise<{ ok: boolean; source?: ImportSource; notes?: ExternalNote[]; error?: string; canceled?: boolean }>
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
       // GitHub Sync
-      getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed' }>
+      getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed'; conflictCopies?: ConflictCopiesNotice }>
       // Backend-tagged status of the live sync provider — drives the titlebar sync button.
       getActiveSyncStatus: () => Promise<ActiveSyncStatus>
+      // Clears the session notice of conflict copies made by either backend's pull (titlebar sync card).
+      dismissConflictCopies: () => Promise<{ ok: boolean }>
       initiateGitHubAuth: (repo: string) => Promise<{ ok: boolean; userCode?: string; verificationUri?: string; error?: string }>
       cancelGitHubAuth: () => Promise<{ ok: boolean }>
       disconnectGitHub: () => Promise<{ ok: boolean }>
@@ -554,8 +558,6 @@ declare global {
       // Re-reads the account's encryption mode (switched from another device?) — called when the Cloud panel opens.
       cloudRefreshKeysMode: () => Promise<{ changed: boolean }>
       cloudLock: () => Promise<{ ok: boolean }>
-      // Clears the session notice of conflict copies made by the Cloud pull (titlebar sync card).
-      cloudDismissConflictCopies: () => Promise<{ ok: boolean }>
       cloudEnable: () => Promise<{ ok: boolean; error?: string }>
       cloudDisable: () => Promise<{ ok: boolean }>
       cloudPull: () => Promise<{

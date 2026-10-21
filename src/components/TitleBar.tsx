@@ -187,8 +187,8 @@ export function TitleBar() {
             onSync={handleSync}
             onRefresh={refreshSyncStatus}
             onDismissConflictCopies={() => {
-              // main emits cloud:status-changed → the status refreshes on its own.
-              void window.noteflow.cloudDismissConflictCopies()
+              // main emits sync:/cloud:status-changed → the status refreshes on its own.
+              void window.noteflow.dismissConflictCopies()
             }}
             onOpenSettings={() => openSettings('sync')}
           />
