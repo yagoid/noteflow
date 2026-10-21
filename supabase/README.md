@@ -111,9 +111,16 @@ webhooks, verifica la firma HMAC y escribe en `public.subscriptions` vía la RPC
    anual**. Anotar el **variant ID** de cada variante (visible en la URL o en la API de cada
    variante): harán falta para el variant map.
 
-2. **Correr la migración 0002** (`supabase/migrations/0002_billing.sql`), igual que la 0001
-   (SQL Editor o `supabase db push`). Crea el índice único `(provider, provider_ref)` y la función
-   `apply_subscription_event` (solo invocable por el service role).
+2. **Correr las migraciones 0002 y 0010** (`supabase/migrations/0002_billing.sql` y
+   `0010_billing_hardening.sql`), igual que la 0001 (SQL Editor o `supabase db push`). La 0002 crea
+   el índice único `(provider, provider_ref)` y la función `apply_subscription_event`. La 0010 la
+   redefine (misma firma: un único `INSERT … ON CONFLICT DO UPDATE` con guard de orden, que cierra
+   la carrera en la que un evento más nuevo de una suscripción recién creada se perdía) y añade
+   `expire_subscription_ref` (reembolsos, ver abajo) y `expire_stale_subscriptions`
+   (reconciliación, paso 6). Todas solo invocables por el service role.
+   ⚠️ **Orden:** `supabase db push` **antes** de `supabase functions deploy billing-webhook
+   --no-verify-jwt` — la función nueva llama a `expire_subscription_ref` ante un reembolso; sin la
+   0010 ese evento respondería 500 y LS lo reintentaría hasta aplicarla.
 
 3. **Configurar los secretos** de la Edge Function:
 
@@ -132,6 +139,16 @@ webhooks, verifica la firma HMAC y escribe en `public.subscriptions` vía la RPC
    > entitlement real. Al pasar a live, quita los IDs de test y expira o borra las filas de test
    > que sigan `active` en `public.subscriptions`, porque sus eventos ya no se procesarán y no
    > expirarían nunca.
+   >
+   > Segundo filtro (desde la 0010 / redeploy del webhook): la función **ignora todo evento con
+   > `meta.test_mode: true`** (200 `{ignored: "test mode event"}`). El secreto opcional
+   > `LEMONSQUEEZY_ALLOW_TEST_MODE=true` lo desactiva — **solo** para un proyecto Supabase de
+   > pruebas; **nunca** en producción.
+
+   `custom_data.user_id` se valida como UUID: un valor que no lo sea (la URL del checkout es
+   pública, cualquiera puede poner cualquier cosa) se trata como ausente (camino de solo-update) y
+   se loguea un `console.warn`, en vez de reventar el cast a `uuid` de la RPC con un 500 que dejaría
+   a LS en bucle de reintentos.
 
 4. **Desplegar la función** — el flag es imprescindible, porque el webhook de LS llega **sin JWT
    de Supabase** (su autenticación es la firma HMAC):
@@ -145,8 +162,112 @@ webhooks, verifica la firma HMAC y escribe en `public.subscriptions` vía la RPC
    - Signing secret: el mismo valor que `LEMONSQUEEZY_WEBHOOK_SECRET`
    - Eventos: suscribir los `subscription_*` (`subscription_created`, `subscription_updated`,
      `subscription_cancelled`, `subscription_resumed`, `subscription_expired`,
-     `subscription_paused`, `subscription_unpaused`). Los `subscription_payment_*` y `order_*`
-     pueden suscribirse o no: la función los ignora (responde 200).
+     `subscription_paused`, `subscription_unpaused`, **`subscription_plan_changed`**) y
+     **`subscription_payment_refunded`** (reembolsos, ver abajo). El resto de
+     `subscription_payment_*` y los `order_*` pueden suscribirse o no: la función los ignora
+     (responde 200).
+   - ⚠️ **Pendiente del operador (2026-10):** el webhook de live se dio de alta con los 7 eventos
+     originales; añadir a mano en el dashboard de LS (Settings → Webhooks → editar)
+     `subscription_payment_refunded` y `subscription_plan_changed`.
+
+6. **Reconciliación (red de seguridad) — revisión MANUAL, no automática.** Si se pierde un
+   `subscription_expired` (webhook caído, reintentos agotados), la fila se quedaría `active` para
+   siempre — el acceso se concede por `status`, sin mirar `renews_at`. Para detectarlo, la 0010
+   trae `expire_stale_subscriptions()`: expira las filas de Lemon Squeezy `active` cuyo
+   `renews_at` (que en las canceladas es el `ends_at`) pasó hace más de **7 días**, y devuelve
+   cuántas tocó. **Nunca** toca `provider='manual'` (la fila comp del operador) ni filas con
+   `renews_at` null, y no cambia `updated_at`.
+
+   ⚠️ **Falsos positivos — por qué NO se agenda a ciegas:** `renews_at` solo avanza cuando llega el
+   `subscription_updated` de cada renovación. Si se pierde **esa** entrega (LS reintenta poco
+   tiempo), un cliente que **sí está pagando** conserva el `renews_at` viejo y la función lo
+   expiraría 7 días después. No se arregla solo: el siguiente evento de LS de esa suscripción
+   puede tardar **un mes** (plan mensual — un año en el anual) salvo que se reenvíe a mano. O sea
+   que el predicado da **candidatos**, no certezas. Flujo recomendado (p. ej. una vez por semana):
+
+   1. **Listar candidatos** (SQL Editor):
+
+      ```sql
+      select user_id, product, provider_ref, renews_at
+        from public.subscriptions
+       where provider = 'lemonsqueezy' and status = 'active'
+         and renews_at < now() - interval '7 days';
+      ```
+
+   2. **Comprobar cada `provider_ref` en Lemon Squeezy** (dashboard → Subscriptions, o
+      `GET /v1/subscriptions/<id>` de su API). Si LS la da por `expired`/impagada → candidato
+      confirmado. Si LS la da por `active` → se perdió un evento: **no expirar**; reenviar el último
+      `subscription_updated` desde el log del webhook (dashboard de LS → Settings → Webhooks →
+      entregas → *Resend*) para que la fila se ponga al día.
+   3. **Expirar solo los confirmados**, uno a uno:
+
+      ```sql
+      update public.subscriptions
+         set status = 'expired'
+       where provider = 'lemonsqueezy' and provider_ref = '<id confirmado>';
+      ```
+
+      o `select public.expire_stale_subscriptions();` **solo si todos** los candidatos del paso 1
+      están confirmados.
+
+   **Si se expiró a alguien por error:** reenviar desde el log de webhooks de LS el último
+   `subscription_updated` de esa suscripción (su `updated_at` es ≥ el de la fila, que la función no
+   tocó, así que el guard de orden lo deja pasar y restaura `status`/`renews_at`), o a mano:
+   `update public.subscriptions set status = 'active', renews_at = '<renews_at real según LS>'
+   where provider = 'lemonsqueezy' and provider_ref = '<id>';`.
+
+   **pg_cron (opcional, solo aceptando el riesgo de falsos positivos de arriba):** si el operador
+   prefiere expirar automáticamente y asumir que, de vez en cuando, un cliente que paga pierda el
+   acceso hasta que alguien lo note y lo restaure, habilitar `pg_cron` (Dashboard → Database →
+   Extensions) y:
+
+   ```sql
+   -- ⚠️ Expira sin revisión: puede cortar a clientes al corriente de pago (ver arriba).
+   select cron.schedule('expire-stale-subscriptions', '0 4 * * *',
+     $$select public.expire_stale_subscriptions()$$);
+   ```
+
+   (Comprobar con `select * from cron.job;` y el historial en `cron.job_run_details`; quitarlo con
+   `select cron.unschedule('expire-stale-subscriptions');`.)
+
+> **Reembolsos.** Lemon Squeezy **no cancela** la suscripción al reembolsar: sin hacer nada, el
+> comprador reembolsado conservaría el acceso **y LS le seguiría cobrando** cada renovación. Con
+> `subscription_payment_refunded` suscrito, un **reembolso total** (factura en estado `refunded`)
+> llama a `expire_subscription_ref`, que pone `status='expired'` y `updated_at='infinity'`, y la
+> función loguea `billing-webhook: subscription <id> expired after a full refund — CANCEL
+> subscription <id> in Lemon Squeezy`. Un **reembolso parcial** (`partial_refund`) se ignora y se
+> loguea (`billing-webhook: ignoring refund event (…)`): decide el operador. Un reembolso que llega
+> antes de que exista la fila es un no-op (se loguea).
+>
+> ⚠️ **Paso OBLIGATORIO tras todo reembolso total (automático o manual): cancelar la suscripción en
+> Lemon Squeezy** (dashboard → Subscriptions → la suscripción → *Cancel subscription*, o
+> `DELETE /v1/subscriptions/<id>` de su API). Con la fila bloqueada en `updated_at='infinity'`
+> nuestro lado ya no reacciona a nada que mande LS, así que si no se cancela allí el cliente sigue
+> pagando **sin acceso** → contracargos y riesgo de consumo. Lo más limpio es cancelar en el mismo
+> momento en que se emite el reembolso.
+>
+> ⚠️ **Reembolsar una factura ANTIGUA también expira:** el webhook no distingue qué factura se
+> reembolsa; un reembolso total de cualquier factura de la suscripción la expira, aunque el periodo
+> **actual** esté pagado. Reembolsar a sabiendas (si solo se quiere devolver un mes viejo y mantener
+> el acceso, usar un reembolso parcial, o restaurar la fila a mano como se indica abajo).
+>
+> **Runbook manual** (p. ej. reembolso hecho antes de suscribir el evento, o uno parcial que se
+> quiere tratar como total): 1) **cancelar la suscripción en LS** (obligatorio, ver arriba);
+> 2) en el SQL Editor:
+>
+> ```sql
+> update public.subscriptions
+>    set status = 'expired', updated_at = 'infinity'
+>  where provider = 'lemonsqueezy' and provider_ref = '<id de suscripción de LS>';
+> ```
+>
+> **Por qué `'infinity'` y no `now()`:** LS sigue mandando eventos de la suscripción con un
+> `updated_at` posterior al reembolso — `subscription_updated` mientras no se cancele y, al
+> cancelarla, `subscription_cancelled` (que mapeamos a `active` hasta `ends_at`) — y el guard
+> `p_event_at >= updated_at` de `apply_subscription_event` la volvería a poner `active`. Con `'infinity'` ningún evento de LS puede ganarle. Nada más lee
+> `subscriptions.updated_at` (el cliente pide solo `product,status,renews_at`). Para **deshacerlo**
+> (reembolso por error, sin haber cancelado en LS): `set status = 'active', updated_at = now()` y
+> el siguiente evento de LS la deja como corresponda.
 
 > **Correlación compra ↔ usuario:** la app abre el checkout con
 > `checkout[custom][user_id]=<uuid del usuario de Supabase>` (handler `account:open-checkout`,
@@ -164,13 +285,21 @@ del usuario, comprueba el entitlement `ai`/`bundle` y la cuota mensual de tokens
 añade la **cuota ponderada** (columna `quota_tokens`): los modelos por encima de la baseline
 descuentan de la cuota a razón de su multiplicador (hoy dos niveles de pago, **×2** para el
 intermedio y **×6** para los avanzados; el resto ×1) en vez de 1:1. El mapa autoritativo es
-`MODEL_QUOTA_MULTIPLIERS` en `functions/ai-proxy/logic.ts`. Pasos del operador:
+`MODEL_QUOTA_MULTIPLIERS` en `functions/ai-proxy/logic.ts`. La **migración 0009** acota el coste:
+cada petición **reserva** antes de reenviar una estimación de su coste (RPC `reserve_ai_usage`, con
+lock por usuario, cuota y un máximo de peticiones simultáneas), que se **liquida** con el `usage`
+real al terminar (detalle en `.claude/context/monetization.md` § 3). Pasos del operador:
 
-1. **Correr las migraciones 0003 y 0007** (`supabase/migrations/0003_ai_usage.sql` y
-   `0007_ai_usage_weighted.sql`), igual que las anteriores (SQL Editor o `supabase db push`). La
-   0003 crea `usage_events` + la RPC `get_month_usage`; la 0007 añade la columna `quota_tokens`
-   (con backfill de las filas históricas) y redefine `get_month_usage` para sumar los tokens
-   ponderados. **Si ya tenías la 0003 aplicada, basta con correr la 0007.**
+1. **Correr las migraciones 0003, 0007 y 0009** (`supabase/migrations/0003_ai_usage.sql`,
+   `0007_ai_usage_weighted.sql` y `0009_ai_usage_reservations.sql`), igual que las anteriores (SQL
+   Editor o `supabase db push`). La 0003 crea `usage_events` + la RPC `get_month_usage`; la 0007
+   añade la columna `quota_tokens` (con backfill de las filas históricas) y redefine
+   `get_month_usage` para sumar los tokens ponderados; la 0009 añade a `usage_events` las columnas
+   `pending`, `cost_usd` y `generation_id` y la RPC `reserve_ai_usage`.
+   ⚠️ **Orden:** `supabase db push` **antes** de `supabase functions deploy ai-proxy` — la función
+   nueva llama a `reserve_ai_usage` y sin ella respondería 500 (`quota_check_failed`) a todo chat.
+   Al revés no hay problema: la función vieja es compatible con el esquema de la 0009 (`pending`
+   tiene default `false`, así que sus filas quedan como finales).
 
 2. **Crear una API key en [OpenRouter](https://openrouter.ai)** (con crédito o auto-topup) y
    configurar los secretos de la función:
@@ -181,7 +310,14 @@ intermedio y **×6** para los avanzados; el resto ×1) en vez de 1:1. El mapa au
    # de supabase/functions/ai-proxy/logic.ts):
    supabase secrets set AI_MONTHLY_TOKENS=3000000
    supabase secrets set AI_ALLOWED_MODELS=deepseek/deepseek-v4-pro,anthropic/claude-haiku-4.5
+   # Máximo de peticiones simultáneas por usuario (default 3; desde la 0009):
+   supabase secrets set AI_MAX_INFLIGHT=3
    ```
+
+   > **Crédito de OpenRouter:** con el auto top-up apagado, al quedarse sin crédito OpenRouter
+   > responde 402 y **todo** el plan gestionado falla (el usuario ve un 502 genérico). La función
+   > lo marca en los logs con una línea propia: buscar `OPENROUTER OUT OF CREDIT (402)` en
+   > Dashboard → Edge Functions → ai-proxy → Logs.
 
    > Si se cambia `AI_ALLOWED_MODELS`, mantener en sync `NOTEFLOW_AI_MODELS` (y
    > `NOTEFLOW_AI_MODEL_META`) en `electron/ai/llm/presets.ts` — la lista que ve el cliente.
@@ -210,9 +346,39 @@ intermedio y **×6** para los avanzados; el resto ×1) en vez de 1:1. El mapa au
    ```
 
    > El proxy expone además `GET .../ai-proxy/usage` (`{used, limit}` en tokens ponderados, sin
-   > gate de entitlement) que alimenta la barra de consumo de la card premium en la app. Un
-   > redeploy es obligatorio tras la 0007 para que el catálogo nuevo y los multiplicadores entren
-   > en vigor.
+   > gate de entitlement) que alimenta la barra de consumo de la card premium en la app. Cada
+   > migración que cambia el contrato de la función ha ido seguida de un redeploy (la 0007 —
+   > catálogo y multiplicadores — ya está aplicada y desplegada); con la 0009 es igual: primero
+   > la migración, luego el deploy.
+
+   **Monitorización de gasto (desde la 0009).** Cada fila liquidada guarda en `cost_usd` lo que
+   OpenRouter cobró por la petición (`usage.cost`, en créditos ≈ USD, sin el ~5,5 % de comisión de
+   compra de crédito). Las filas `pending = true` antiguas son reservas que nunca se liquidaron
+   (isolate matado, sin `usage`): su estimación sigue contando para la cuota del usuario, pero no
+   tienen coste real conocido. En el SQL Editor:
+
+   ```sql
+   -- Gasto por mes (y reservas sin liquidar)
+   select date_trunc('month', at) as mes,
+          round(sum(cost_usd), 2) as usd,
+          count(*) filter (where cost_usd is null and not pending) as sin_coste,
+          count(*) filter (where pending) as reservas_sin_liquidar
+     from public.usage_events
+    group by 1 order by 1 desc;
+
+   -- Top usuarios del mes en curso
+   select user_id, round(sum(cost_usd), 4) as usd, sum(quota_tokens) as cuota_ponderada,
+          sum(tokens_in) as tokens_in, sum(tokens_out) as tokens_out, count(*) as peticiones
+     from public.usage_events
+    where at >= date_trunc('month', now())
+    group by user_id order by usd desc nulls last limit 20;
+
+   -- Gasto por modelo del mes en curso
+   select model, round(sum(cost_usd), 4) as usd, count(*) as peticiones
+     from public.usage_events
+    where at >= date_trunc('month', now())
+    group by model order by usd desc nulls last;
+   ```
 
 4. **Checkout de Lemon Squeezy:** copiar la URL de compra de la variante del producto AI
    (dashboard de LS → producto → Share) y pegarla en `LEMONSQUEEZY_CHECKOUT_URLS.ai` de
