@@ -35,9 +35,11 @@ export interface AccountObservation {
   identity: string | null
   entitlements: Entitlements
   /**
-   * True once entitlements have been fetched from the server for this session.
-   * They arrive ASYNC (initAccount defers the refresh 5 s; verifyOtp brings them
-   * inline), so a restore must not be evaluated against the NO_ENTITLEMENTS
+   * True once entitlements have been fetched from the server for this session
+   * (or restored from account.ts's on-disk cache for the same user — the public
+   * AccountStatus.entitlementsKnown). Without a cache they arrive ASYNC
+   * (initAccount defers the refresh 5 s and retries with backoff; verifyOtp
+   * brings them inline), so a restore must not be evaluated against the NO_ENTITLEMENTS
    * placeholder — it waits, and the record is re-evaluated on every status
    * change while the identity keeps matching.
    */
@@ -102,7 +104,7 @@ export type RestoreSurface = 'cloud' | 'ai'
  * A pending record is re-evaluated on every status change (entitlements arrive
  * async), which means it could otherwise sit there for boots on end and one day
  * overrule the user: if the entitlements fetch fails (verifyOtp's is
- * best-effort and entitlementsFetchedAt lives only in memory), a user who signs
+ * best-effort; until one succeeds they stay unknown), a user who signs
  * in and DELIBERATELY leaves Cloud off — or picks a BYO provider — would see it
  * flipped back on behind their back by a later refreshEntitlements.
  *
@@ -191,5 +193,47 @@ export function planAccountTransition(
     enableCloud: record.cloudEnabled && current.entitlements.cloud && !local.cloudEnabled,
     setAiProvider: record.aiManaged && current.entitlements.ai && !local.aiManaged ? 'noteflow' : null,
     restore: null, // consumed
+  }
+}
+
+// ── AI auto-switch on subscribe ───────────────────────────────────────────────
+
+/**
+ * Per-identity memory of the 'ai' entitlement for the auto-switch to the managed
+ * provider. `baseline` null = no FRESH observation yet for this identity.
+ */
+export interface AiEntitlementBaseline {
+  identity: string | null
+  baseline: boolean | null
+}
+
+export const NO_AI_BASELINE: AiEntitlementBaseline = { identity: null, baseline: null }
+
+/**
+ * Steps the baseline with a new observation and says whether to auto-activate
+ * the managed provider. Only a REAL false→true flip seen for the SAME identity
+ * triggers it (the user subscribes while the app runs and hits Refresh):
+ *  - an identity change (boot, sign-in, account switch, sign-out) only
+ *    establishes a fresh baseline — a naive false→true on the first read would
+ *    force-switch an already-subscribed user on every launch, even one who
+ *    deliberately kept a BYO-key provider;
+ *  - `fresh` must be false for anything not fetched in THIS run (unknown, or
+ *    the on-disk cache): it never sets nor moves the baseline, so unknown→true
+ *    and cached-false→true are NOT transitions.
+ */
+export function stepAiEntitlementBaseline(
+  prev: AiEntitlementBaseline,
+  obs: { identity: string | null; ai: boolean; fresh: boolean }
+): { next: AiEntitlementBaseline; autoSwitch: boolean } {
+  if (obs.identity !== prev.identity) {
+    return {
+      next: { identity: obs.identity, baseline: obs.identity !== null && obs.fresh ? obs.ai : null },
+      autoSwitch: false,
+    }
+  }
+  if (obs.identity === null || !obs.fresh) return { next: prev, autoSwitch: false }
+  return {
+    next: { identity: obs.identity, baseline: obs.ai },
+    autoSwitch: prev.baseline === false && obs.ai,
   }
 }

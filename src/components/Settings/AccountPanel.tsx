@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, KeyRound, Loader, LogOut, Mail, MailCheck, RefreshCw, Send, UserCircle } from 'lucide-react'
+import { AlertCircle, KeyRound, Loader, Lock, LogOut, Mail, MailCheck, RefreshCw, Send, UserCircle } from 'lucide-react'
 import type { AccountErrorCode, AccountOpResult, AccountStatus } from '../../types'
 import type { SubscriptionProduct } from '../../lib/subscriptionPlans'
 import { tf } from '../../i18n/format'
@@ -152,7 +152,10 @@ export function AccountPanel() {
     setError(null)
     const result = await window.noteflow.accountRefreshEntitlements()
     setBusy(false)
-    if (!result.ok) setError(describeError(result, t.settings.account.couldNotRefresh))
+    // A locked keychain is already explained by its own notice above the badges.
+    if (!result.ok && result.errorCode !== 'sessionLocked') {
+      setError(describeError(result, t.settings.account.couldNotRefresh))
+    }
   }
 
   async function handleSubscribe(product: SubscriptionProduct) {
@@ -215,9 +218,29 @@ export function AccountPanel() {
             <span className="text-xs font-mono text-text">{status.email}</span>
           </div>
 
+          {/* Keychain locked: the session is still there (NOT signed out) but its
+              token can't be decrypted right now. Main retries on its own; Retry
+              forces it, Sign out (below) is the way out if it never unlocks. */}
+          {status.sessionLocked && (
+            <div
+              role="status"
+              className="flex items-start gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded text-xs font-mono text-yellow-400 leading-relaxed"
+            >
+              <Lock size={13} className="shrink-0 mt-[1px]" />
+              <span>{t.settings.account.sessionLocked}</span>
+            </div>
+          )}
+
+          {/* Unknown (never fetched) is its own state — not "inactive". */}
           <div className="space-y-2">
-            <PlanBadge name="NoteFlow AI" active={status.entitlements.ai} />
-            <PlanBadge name="NoteFlow Cloud" active={status.entitlements.cloud} />
+            <PlanBadge
+              name="NoteFlow AI"
+              state={!status.entitlementsKnown ? 'unknown' : status.entitlements.ai ? 'active' : 'inactive'}
+            />
+            <PlanBadge
+              name="NoteFlow Cloud"
+              state={!status.entitlementsKnown ? 'unknown' : status.entitlements.cloud ? 'active' : 'inactive'}
+            />
           </div>
 
           {status.entitlementsFetchedAt && (
@@ -227,12 +250,15 @@ export function AccountPanel() {
           )}
 
           {/* Subscription plans — each plan shows only while its entitlement is
-              missing (Bundle needs both missing, to avoid double billing). A
-              plan without a checkout URL in this build shows "Coming soon". */}
+              KNOWN to be missing (Bundle needs both missing, to avoid double
+              billing). A plan without a checkout URL in this build shows "Coming
+              soon". While the plan is unknown the badges above already say so and
+              Refresh below retries, so no extra notice here. */}
           <PlanOffers
             products={['bundle', 'ai', 'cloud']}
             account={status}
             busy={busy}
+            showUnknownNotice={false}
             onSubscribe={handleSubscribe}
           />
 
@@ -396,14 +422,18 @@ export function AccountPanel() {
   )
 }
 
-function PlanBadge({ name, active }: { name: string; active: boolean }) {
+function PlanBadge({ name, state }: { name: string; state: 'active' | 'inactive' | 'unknown' }) {
   const t = useT()
   return (
     <div className="flex items-center justify-between px-3 py-2 rounded bg-surface-0 border border-border">
       <span className="text-xs font-mono text-text">{name}</span>
-      {active ? (
+      {state === 'active' ? (
         <span className="text-[11px] font-mono text-green-400 bg-green-500/10 border border-green-500/30 rounded px-2 py-0.5">
           {t.settings.account.active}
+        </span>
+      ) : state === 'unknown' ? (
+        <span className="text-[11px] font-mono text-text-muted/70 border border-border rounded px-2 py-0.5">
+          {t.settings.account.planUnknownBadge}
         </span>
       ) : (
         <span className="text-[11px] font-mono text-text-muted/60">—</span>

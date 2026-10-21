@@ -1,6 +1,12 @@
-import { Sparkles } from 'lucide-react'
+import { useState } from 'react'
+import { HelpCircle, Loader, RefreshCw, Sparkles } from 'lucide-react'
 import type { AccountStatus } from '../../types'
-import { SUBSCRIPTION_PRICES, type SubscriptionProduct } from '../../lib/subscriptionPlans'
+import {
+  SUBSCRIPTION_PRICES,
+  isPlanOffered,
+  isPlanUnknown,
+  type SubscriptionProduct,
+} from '../../lib/subscriptionPlans'
 import { useT } from '../../i18n/useT'
 import { PlanCardBackdrop } from './PlanCardBackdrop'
 
@@ -23,12 +29,42 @@ function isCheckoutConfigured(account: AccountStatus, product: SubscriptionProdu
   return account.bundleCheckoutConfigured
 }
 
-// A plan is only offered while its entitlement is missing. The Bundle needs BOTH
-// missing: on top of a single plan it would mean paying twice for the same product.
-function isOffered(account: AccountStatus, product: SubscriptionProduct): boolean {
-  const { ai, cloud } = account.entitlements
-  if (product === 'bundle') return !ai && !cloud
-  return product === 'ai' ? !ai : !cloud
+/**
+ * Neutral state for a signed-in account whose plan was never fetched (offline
+ * boot, keychain locked…): instead of Subscribe cards or a "not subscribed"
+ * gate, say we couldn't check yet and offer a Retry. Main also retries on its
+ * own (backoff, resume, back online) and the status broadcast replaces this
+ * block as soon as the plan is known.
+ */
+export function PlanUnknownNotice() {
+  const t = useT()
+  const [checking, setChecking] = useState(false)
+
+  async function retry() {
+    setChecking(true)
+    try {
+      await window.noteflow.accountRefreshEntitlements()
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-text-muted normal-case leading-relaxed">
+      {checking ? <Loader size={12} className="animate-spin shrink-0" /> : <HelpCircle size={12} className="shrink-0" />}
+      <span>{checking ? t.settings.account.planChecking : t.settings.account.planUnknown}</span>
+      {!checking && (
+        <button
+          type="button"
+          onClick={retry}
+          className="inline-flex items-center gap-1 text-text-muted hover:text-text underline underline-offset-2 transition-colors"
+        >
+          <RefreshCw size={10} />
+          {t.settings.account.planRetry}
+        </button>
+      )}
+    </div>
+  )
 }
 
 export function PlanOffers({
@@ -36,6 +72,7 @@ export function PlanOffers({
   account,
   busy = false,
   showSignInHint = true,
+  showUnknownNotice = true,
   onSubscribe,
   onGoToAccount,
 }: {
@@ -50,6 +87,12 @@ export function PlanOffers({
    */
   showSignInHint?: boolean
   /**
+   * Signed in with the plan still UNKNOWN, the cards are never shown; by default
+   * the PlanUnknownNotice takes their place. Turn it off where the surface already
+   * reports the unknown state itself (Settings → Account's plan badges).
+   */
+  showUnknownNotice?: boolean
+  /**
    * Signed in, the whole card is the checkout button for its product. Omit where the
    * surface cannot open a checkout — a signed-in card then just shows "coming soon".
    */
@@ -63,7 +106,11 @@ export function PlanOffers({
   // prices would be a dead end.
   if (!account.configured) return null
 
-  const visible = products.filter((product) => isOffered(account, product))
+  // Plan never fetched: offering a plan the user may already pay for is a
+  // double-billing trap — show the neutral notice instead (or nothing).
+  if (isPlanUnknown(account)) return showUnknownNotice ? <PlanUnknownNotice /> : null
+
+  const visible = products.filter((product) => isPlanOffered(account, product))
   if (visible.length === 0) return null
 
   // `normal-case` everywhere: this block also renders inside the brain's AI panel,

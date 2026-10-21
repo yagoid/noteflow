@@ -6,8 +6,12 @@ import { presetOf, PRESETS as ALL_PRESETS, type LlmPreset } from './presets'
 import { decryptSecret } from './secret'
 import { AnthropicProvider } from './anthropic'
 import { OpenAiCompatibleProvider } from './openaiCompatible'
-// No import cycle: account.ts only pulls ./secret and ./cloudConfig, never this module.
-import { getAccessToken, getAccountStatus } from '../../account'
+// No import cycle: account.ts only pulls ./secret and leaf modules (cloudConfig, entitlements*,
+// settingsFile), never this module.
+import { getAccessTokenResult, getAccountStatus } from '../../account'
+import { isManagedAiUsable } from '../../entitlementsRetry'
+import { getMessages, type ChatErrorMessages } from '../../i18n'
+import { managedTokenFailureMessage } from './managedErrors'
 
 export type {
   LlmConfigStored, LlmConfigPublic, ResolvedLlmConfig, LlmProvider, ChatMessage,
@@ -68,8 +72,21 @@ export function acceptsModel(presetId: string, model: string): boolean {
   return !preset.modelMeta || preset.suggestedModels.includes(model.trim())
 }
 
+/**
+ * Whether a custom base URL may be stored/used for `presetId`. Presets with
+ * `editableBaseUrl: false` are pinned to their built-in endpoint — above all the
+ * managed `noteflow` one, whose credential is the user's Supabase access token:
+ * honouring a stored URL there would hand that token to an arbitrary host.
+ */
+export function acceptsBaseUrl(presetId: string): boolean {
+  return presetOf(presetId).editableBaseUrl
+}
+
+/** The endpoint requests actually go to. A non-editable preset ALWAYS resolves to its own
+ *  baseUrl, whatever settings.json says (it may have been written by an older build or by hand). */
 function effectiveBaseUrl(cfg: LlmConfigStored): string {
   const preset = presetOf(cfg.active)
+  if (!preset.editableBaseUrl) return preset.baseUrl
   const ps = cfg.byPreset[preset.id] ?? {}
   return ps.baseUrl?.trim() || preset.baseUrl
 }
@@ -92,16 +109,20 @@ export function resolveConfig(cfg: LlmConfigStored): ResolvedLlmConfig {
  * Like resolveConfig, but for the managed `noteflow` preset the credential is a
  * FRESH Supabase access token of the NoteFlow account session (GoTrue tokens
  * expire in ~1h, so it must be minted per request — never stored like an API
- * key). Throws a user-facing error when there is no signed-in session.
+ * key). Throws a user-facing error saying WHY there is no token: no session,
+ * no connection, the system keychain is locked, or the account service failed.
+ * `messages` = the main-process strings in the app language (main.ts passes
+ * mainMessages().chatErrors; English when omitted).
  */
-export async function resolveConfigAsync(cfg: LlmConfigStored): Promise<ResolvedLlmConfig> {
+export async function resolveConfigAsync(
+  cfg: LlmConfigStored,
+  messages: ChatErrorMessages = getMessages('en').chatErrors
+): Promise<ResolvedLlmConfig> {
   const resolved = resolveConfig(cfg)
   if (presetOf(cfg.active).id !== 'noteflow') return resolved
-  const token = await getAccessToken()
-  if (!token) {
-    throw new Error('NoteFlow AI needs your NoteFlow account. Sign in from Settings → Account and try again.')
-  }
-  return { ...resolved, apiKey: token }
+  const result = await getAccessTokenResult()
+  if (!result.ok) throw new Error(managedTokenFailureMessage(result.reason, messages))
+  return { ...resolved, apiKey: result.token }
 }
 
 /** Native attachment support per preset (the app never extracts text itself). */
@@ -126,10 +147,11 @@ export function toPublic(cfg: LlmConfigStored): LlmConfigPublic {
   const hasKey = !!ps.encryptedApiKey
   let configured = (!preset.needsKey || hasKey) && !!model
   if (preset.id === 'noteflow') {
-    // The managed plan is only usable with a signed-in account AND an active
-    // 'ai' (or 'bundle') subscription — otherwise the proxy answers 401/403.
-    const status = getAccountStatus()
-    configured = configured && status.signedIn && status.entitlements.ai
+    // The managed plan needs a signed-in account AND an active 'ai' (or
+    // 'bundle') subscription — otherwise the proxy answers 401/403. Entitlements
+    // that were never fetched (offline boot, keychain locked…) are UNKNOWN, not
+    // false: let the request through and let the proxy judge (403 if not entitled).
+    configured = configured && isManagedAiUsable(getAccountStatus())
   }
   return {
     active: preset.id,
@@ -146,7 +168,8 @@ export function notConfiguredMessage(cfg: LlmConfigStored): string {
   if (presetOf(cfg.active).id === 'noteflow') {
     const status = getAccountStatus()
     if (!status.signedIn) return 'NoteFlow AI needs your NoteFlow account — sign in from Settings → Account.'
-    if (!status.entitlements.ai) return 'NoteFlow AI requires an active subscription — manage your plan in Settings → Account.'
+    // Unknown entitlements never land here (isManagedAiUsable lets them through).
+    if (!isManagedAiUsable(status)) return 'NoteFlow AI requires an active subscription — manage your plan in Settings → Account.'
   }
   return 'No LLM provider configured'
 }

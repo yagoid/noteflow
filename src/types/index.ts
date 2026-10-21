@@ -306,6 +306,7 @@ export type AccountErrorCode =
   | 'verifyFailed'
   | 'notSignedIn'
   | 'refreshFailed'
+  | 'sessionLocked'
   | 'checkoutUnavailable'
   | 'checkoutInvalidUrl'
 
@@ -322,7 +323,14 @@ export interface AccountStatus {
   signedIn: boolean
   email?: string
   entitlements: AccountEntitlements
-  entitlementsFetchedAt?: string  // ISO — last successful entitlements fetch
+  // False until entitlements were fetched (or restored from main's on-disk cache)
+  // for this session. While false `entitlements` is a placeholder meaning UNKNOWN:
+  // never show Subscribe cards nor treat the user as not entitled on it.
+  entitlementsKnown: boolean
+  entitlementsFetchedAt?: string  // ISO — last successful entitlements fetch (or the cached one)
+  // Session on disk but its refresh token can't be decrypted right now (system
+  // keychain locked). Still signedIn; main retries on its own.
+  sessionLocked: boolean
   aiCheckoutConfigured: boolean   // true when the build ships a NoteFlow AI checkout URL
   cloudCheckoutConfigured: boolean  // same, for the NoteFlow Cloud product
   bundleCheckoutConfigured: boolean  // same, for the NoteFlow Bundle (AI + Cloud) product

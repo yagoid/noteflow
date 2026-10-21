@@ -20,6 +20,7 @@ import {
   listAnchorSectionFiles,
   buildFileUpsertRow,
   decryptFileRow,
+  planRemoteDelete,
 } from '../../electron/cloudSyncLogic'
 import { generateDek, generateNoteKey, derivePathKeyHmac } from '../../electron/cloudCrypto'
 import { serializeNoteFolder, type DiskNote } from '../../electron/noteFormat'
@@ -389,5 +390,50 @@ describe('buildFileUpsertRow / decryptFileRow', () => {
     expect(entry.deleted).toBe(true)
     expect(entry.content).toBe('')
     expect(entry.relPath).toBe('dir-a/sec001.md') // path stays recoverable
+  })
+})
+
+// A physical DELETE leaves every other device un-notified (the note resurrects
+// there), so it may only follow a VERIFIED "no subscription" — never an unknown
+// or cached view of the entitlements.
+describe('planRemoteDelete — tombstone vs physical DELETE', () => {
+  const combos = [
+    { entitled: true, verified: true },
+    { entitled: true, verified: false },
+    { entitled: false, verified: true },
+    { entitled: false, verified: false },
+  ]
+
+  it('first step: tombstone unless verified not-entitled', () => {
+    expect(planRemoteDelete({ entitled: true, verified: true })).toBe('tombstone')
+    expect(planRemoteDelete({ entitled: true, verified: false })).toBe('tombstone') // cached true
+    expect(planRemoteDelete({ entitled: false, verified: false })).toBe('tombstone') // unknown / cached false
+    expect(planRemoteDelete({ entitled: false, verified: true })).toBe('delete') // known false (fresh)
+  })
+
+  it('a successful tombstone is done', () => {
+    for (const c of combos) expect(planRemoteDelete({ ...c, patchStatus: 204 })).toBe('done')
+  })
+
+  it('a non-RLS failure is an error (stays journaled)', () => {
+    for (const c of combos) {
+      expect(planRemoteDelete({ ...c, patchStatus: 500 })).toBe('fail')
+      expect(planRemoteDelete({ ...c, patchStatus: 401 })).toBe('fail')
+    }
+  })
+
+  it('a 403 falls back to DELETE only when verified', () => {
+    expect(planRemoteDelete({ entitled: true, verified: true, patchStatus: 403 })).toBe('delete') // stale local true
+    expect(planRemoteDelete({ entitled: true, verified: false, patchStatus: 403 })).toBe('defer')
+    expect(planRemoteDelete({ entitled: false, verified: false, patchStatus: 403 })).toBe('defer')
+  })
+
+  it('never yields a physical DELETE while unverified, whatever the PATCH answers', () => {
+    for (const entitled of [true, false]) {
+      expect(planRemoteDelete({ entitled, verified: false })).not.toBe('delete')
+      for (const patchStatus of [200, 204, 400, 401, 403, 404, 409, 500, 503]) {
+        expect(planRemoteDelete({ entitled, verified: false, patchStatus })).not.toBe('delete')
+      }
+    }
   })
 })

@@ -78,7 +78,74 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   que el Device Flow de GitHub ya establecido en la app). La sesión vive en el **proceso main**,
   espejo del patrón `githubSync`: refresh token cifrado con `safeStorage` en `settings.json`
   (sección `account`), **nunca cruza al renderer** — el renderer solo ve estado público
-  (`{email, signedIn, entitlements}`).
+  (`{email, signedIn, entitlements, entitlementsKnown, entitlementsFetchedAt, sessionLocked, …}`).
+- **Resiliencia de sesión y entitlements (cliente, `electron/account.ts` + puro en
+  `electron/entitlementsRetry.ts`):** con el checkout en live, un fallo puntual no puede dejar a un
+  usuario que paga viendo "Subscribe" (riesgo de doble cobro) ni con la IA bloqueada.
+  - **Desconocidas ≠ falsas.** `AccountStatus.entitlementsKnown` es `false` hasta el primer fetch
+    OK (o hasta restaurar la cache). Mientras tanto `entitlements` es un placeholder y **ningún
+    consumidor actúa sobre él**: el preset `noteflow` se deja usar (`isManagedAiUsable`: sesión y
+    (`ai` o desconocidas) — el proxy es el juez, responde 403 si no hay plan); `PlanOffers`,
+    `CloudPanel` y `LlmConfigView` no pintan ni las cards de Subscribe ni el estado "sin plan" ni el
+    botón Enable de Cloud, sino un aviso neutro **"Couldn't verify your plan yet — Retry"**
+    (`PlanUnknownNotice`, Retry = `accountRefreshEntitlements`); `AccountPanel` muestra los badges
+    en estado "Couldn't check". `cloudSync.removeRemoteByPathKeys` con entitlements **no verificadas**
+    — desconocidas **o restauradas de la cache** (`account.areEntitlementsFromCache()`) — intenta el
+    tombstone y **nunca** cae al `DELETE` físico (lanza → la op sigue en el journal); decisión pura
+    `planRemoteDelete` en `cloudSyncLogic.ts` (ver § 4 "Deletes = tombstones"). Para las ofertas, en
+    cambio, la cache **sí** cuenta como conocida (una cache `ai:false` muestra las cards: aceptado).
+    Helpers puros del renderer en `src/lib/subscriptionPlans.ts` (`isPlanUnknown`,
+    `isPlanOffered`, `hasKnownEntitlement`).
+  - **Cache persistida:** cada fetch OK guarda `settings.json` → `account.entitlementsCache =
+    {userId, ai, cloud, fetchedAt}` (no es secreto). Al cargar solo se usa si `userId` coincide con
+    el de la sesión guardada (`parseEntitlementsCache`): entonces `entitlementsKnown` es `true` desde
+    el arranque y "Last checked" muestra la hora cacheada; el fetch de fondo del boot la sobrescribe.
+    Se borra con la sesión (`clearSession`). `persistAccountSettings` reemplaza la sección entera,
+    así que rotación de token y cache se construyen siempre desde el `accountSettings` **actual**.
+  - **Reintentos:** todo fallo transitorio (`network`, `refreshFailed` = 5xx/PostgREST/refresh de
+    token fallido, `sessionLocked`) programa un reintento con backoff (`entitlementsRetryDelayMs`:
+    5 s, 15 s, 30 s, 1 min, 2 min, 5 min y tope 10 min, ±20 % de jitter). No se reintenta
+    `notConfigured` ni `notSignedIn`. Un éxito resetea el contador; sign-out o cambio de identidad
+    cancelan lo pendiente. Además se reintenta **ya** en `powerMonitor` `'resume'` y al volver la
+    red: el main de Electron no tiene evento `online`, así que mientras haya un reintento pendiente
+    se sondea `net.isOnline()` cada 10 s y un flanco offline→online lo dispara. El primer fetch de
+    `verifyOtp` (best-effort) entra en el mismo backoff si falla. `refreshEntitlements` es
+    single-flight por generación de sesión.
+  - **Token con resultado discriminado:** internamente `getAccessTokenResult()` devuelve
+    `{ok:true, token}` o `{ok:false, reason: 'noSession'|'network'|'server'|'locked'}`;
+    `getAccessToken()` (cloudSync, cloudKeys, realtime, llm) es un wrapper fino que devuelve
+    `string|null`. `refreshEntitlements` lo mapea a `notSignedIn` / `network` / `refreshFailed` /
+    `sessionLocked`, así que "Refresh" offline dice "no hay conexión", no "Sign in first".
+  - **Sesión bloqueada (`sessionLocked`):** si `safeStorage` no puede descifrar el refresh token
+    (Linux antes de desbloquear el llavero, el usuario deniega el Keychain en macOS) **no** es un
+    sign-out: el blob se queda en disco, `signedIn` sigue a `true`, `AccountStatus.sessionLocked`
+    se pone a `true` y el backoff/resume/Refresh reintentan el descifrado (un descifrado OK lo
+    limpia). `AccountPanel` muestra un aviso recuperable (Retry / Sign out). Mientras está
+    bloqueada no se rota ni persiste nada (no se puede refrescar). Solo un 400/401 de GoTrue al
+    refrescar (token revocado) cierra la sesión.
+  - **Generación de sesión:** `sessionGeneration` se incrementa en `clearSession` y en cada
+    sign-in (`verifyOtp`). `refreshAccessToken` y `refreshEntitlements` la capturan antes de la red y,
+    si cambió, **descartan** el resultado (ni persisten el token rotado — eso resucitaría la sesión
+    tras un sign-out en vuelo — ni asignan access token, ni aplican/cachean entitlements).
+  - **Persistencia que no pierde tokens:** si escribir `settings.json` falla tras una rotación, el
+    access token nuevo y el refresh token rotado se quedan en memoria (`accountSettings` es la
+    fuente de verdad), se reintenta la escritura (3 intentos inmediatos, luego `pendingPersist` +
+    reintento cada 30 s y en cada operación de cuenta) y `loadAccountSettings` no relee el disco
+    obsoleto mientras haya escritura pendiente. Ya no se reporta como error de red. Igual con el
+    **sign-out**: si no se puede borrar la sección `account` del disco queda `pendingClear` (mismos
+    reintentos), para que una sesión cerrada no reaparezca tras reiniciar. `main.ts` llama a
+    `account.flushAccountPersistence()` en `before-quit` como último intento.
+  - **Access token rechazado:** un 401 de PostgREST (fetch de entitlements) o del proxy de NoteFlow
+    AI (`friendlyChatError`) llama a `account.invalidateAccessToken()`: el siguiente uso acuña uno
+    nuevo — o, si el refresh token también está revocado, el 400/401 del refresh cierra sesión
+    limpiamente — en vez de reutilizar uno muerto hasta su caducidad local.
+  - **Logout local:** `signOut` llama a `POST /auth/v1/logout?scope=local` (también el CLI en
+    `cloud logout`): sin `scope=local` GoTrue revoca **todas** las sesiones del usuario (otros
+    dispositivos y el CLI).
+  - **`settings.json` en 0600:** todos los writers del `settings.json` de `userData` (`main.ts`,
+    `account.ts`, `githubSync.ts`, `cloudSync.ts`, `cloudKeys.ts`) escriben vía
+    `electron/settingsFile.ts` (`writeSettingsFile`): in-place, `mode: 0o600` al crear y `chmod`
+    previo si el fichero estaba más abierto (mismo idioma que el CLI). Windows no cambia.
 - **Entitlements agnósticos al proveedor de pago:**
   `subscriptions(user_id, product 'ai'|'cloud'|'bundle', status, renews_at, provider, provider_ref)`
   poblada exclusivamente por los **webhooks del MoR** (Edge Function `billing-webhook`, valida
@@ -174,8 +241,22 @@ es **un preset más**, no una implementación nueva.
   La credencial es un **access token fresco** por request: `resolveConfigAsync()` en
   `llm/index.ts` (llama a `account.getAccessToken()`; lanza error accionable sin sesión) — main
   la usa en chat/list-models/test/profile-generate; `resolveConfig` síncrona queda para el resto.
-  `toPublic().configured` para este preset exige sesión + entitlement `ai`, y
-  `notConfiguredMessage()` da el motivo exacto ("sign in" vs "requires subscription").
+  `toPublic().configured` para este preset exige sesión + (entitlement `ai` **o entitlements aún
+  desconocidas** — `isManagedAiUsable`; el proxy decide con su 403), y `notConfiguredMessage()` da el
+  motivo exacto ("sign in" vs "requires subscription").
+  **Endpoint fijado:** la credencial de este preset es el access token de Supabase, así que un
+  preset con `editableBaseUrl: false` **ignora** cualquier `byPreset.<id>.baseUrl` guardado
+  (`effectiveBaseUrl` devuelve siempre `preset.baseUrl`) y `ai:llm-set-config` no persiste un
+  `baseUrl` para él (`acceptsBaseUrl`); si no, el token podría acabar en otro host.
+  **Errores del proxy en el chat:** con el preset `noteflow` activo, `friendlyChatError` (main)
+  traduce un 401 del proxy a "vuelve a iniciar sesión" (e invalida el access token en memoria) y un
+  403 a "suscripción inactiva" (y lanza un `refreshEntitlements()` fire-and-forget); el 429 de cuota
+  sigue igual. Si ni siquiera hay token, `resolveConfigAsync` (vía `getAccessTokenResult`) dice el
+  motivo real: sin sesión → "sign in", `network` → sin conexión, `locked` → llavero bloqueado,
+  `server` → servicio no disponible (`managedTokenFailureMessage`). Clasificación pura en
+  `electron/ai/llm/managedErrors.ts`; textos en `electron/i18n.ts` (`chatErrors`, EN/ES; main pasa
+  `mainMessages().chatErrors` a `resolveConfigAsync`). Con un proveedor BYO un 401/403 conserva su
+  texto crudo (es una API key mala).
   Capabilities: imágenes **según el modelo activo** (`modelMeta`; los text-only las desactivan);
   PDF no (anthropic-only).
 - **UI:** `LlmConfigView` presenta las dos fuentes del asistente como **opciones excluyentes** —
@@ -197,8 +278,11 @@ es **un preset más**, no una implementación nueva.
   4. **Ajustes → Sincronización → NoteFlow Cloud** (`CloudPanel`): `['cloud', 'bundle']`, tanto en el
      estado sin sesión como en el gate de entitlement (que cubre setup y enable — ver § 4, "Gating").
   Reglas: si `!account.configured` (build sin Supabase) no pinta nada — no se anuncian precios de algo
-  que no se puede comprar. Un plan solo aparece mientras falte su entitlement, y **Bundle exige que
-  falten AMBAS** (para no facilitar doble facturación); si no queda ninguno, no renderiza. Nombre y
+  que no se puede comprar. Con sesión y entitlements **desconocidas** no pinta ninguna card: muestra
+  `PlanUnknownNotice` ("Couldn't verify your plan yet — Retry"), salvo con `showUnknownNotice={false}`
+  (Ajustes → Cuenta, donde ya lo dicen los badges). Un plan solo aparece mientras se **sepa** que
+  falta su entitlement, y **Bundle exige que falten AMBAS** (para no facilitar doble facturación); si
+  no queda ninguno, no renderiza. Nombre y
   precio salen de `src/lib/subscriptionPlans.ts` (`SUBSCRIPTION_PRICES`, display-only) y el Bundle
   lleva badge "Best value". **La card entera es el call-to-action** (`<button>` cuando es clickable,
   para foco + teclado; el CTA de dentro es un `<span>` porque un button no puede anidar otro button).
@@ -215,12 +299,15 @@ es **un preset más**, no una implementación nueva.
   cuenta del proceso en curso** y cambia `settings.aiLlm.active` a `'noteflow'` automáticamente
   (si no lo era ya) antes de emitir `account:status-changed`, para que el renderer recargue ya
   con el proveedor correcto.
-  **Matiz importante:** `entitlements` no se persiste (arranca en `NO_ENTITLEMENTS` en cada boot;
-  ver "implementación" abajo) — para no forzar el cambio en cada arranque de un usuario ya
-  suscrito, se fija una **baseline por identidad** (`aiEntitlementBaseline` + `aiEntitlementIdentity`
-  = el email de la sesión, o `null` en signed-out) en la PRIMERA observación de cada identidad
-  (boot con sesión persistida, justo tras `verifyOtp`, o tras un `signOut`) sin disparar nada;
-  solo una transición posterior **para la misma identidad** en el mismo proceso (p. ej. "Subscribe"
+  **Matiz importante:** para no forzar el cambio en cada arranque de un usuario ya suscrito, se fija
+  una **baseline por identidad** (`aiEntitlementBaseline` = `{identity, baseline}`, identity = el
+  email de la sesión o `null` en signed-out; lógica pura `stepAiEntitlementBaseline` en
+  `accountTransition.ts`, testeada) en la PRIMERA observación **fresca** de cada identidad (primer
+  fetch OK tras el boot con sesión persistida, o tras `verifyOtp`) sin disparar nada. Las
+  entitlements desconocidas y las restauradas de la **cache en disco** (`account.entitlementsCache`,
+  ver § 2; `account.areEntitlementsFromCache()`) **no** son observaciones frescas: ni fijan ni mueven
+  la baseline, así que ni desconocida→`true` ni cacheada-`false`→`true` cuentan como transición.
+  Solo una transición posterior **para la misma identidad** en el mismo proceso (p. ej. "Subscribe"
   en el navegador → volver → "Refresh" en Settings → Account) dispara el auto-switch. **La
   identidad se re-arma en cada cambio de `signedIn`/email** — necesario porque la UI permite
   sign-out + sign-in sin reiniciar la app: sin este reset, una cuenta B que YA tenía la
@@ -504,7 +591,15 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   por ausencia** (el pull incremental no ve filas "que faltan"). El borrado local aplica la regla
   de seguridad de siempre (`updated <= lastSync`) **más el guard del journal** (abajo). Sin
   entitlement, RLS bloquea el UPDATE → fallback a `DELETE` físico (la fila desaparece sin
-  notificar a otros dispositivos — asumido: sin suscripción tampoco pueden pushear). Ojo: el
+  notificar a otros dispositivos — asumido: sin suscripción tampoco pueden pushear). Ese fallback
+  solo ocurre con la entitlement **verificada** — obtenida por un fetch en ESTA ejecución — a
+  `false` (o verificada a `true` y un 403 por estar obsoleta): con entitlements **desconocidas**
+  (`!entitlementsKnown`, p. ej. boot offline) **o solo cacheadas** (`areEntitlementsFromCache()`, la
+  cache puede ser vieja) se intenta el tombstone y, si RLS lo rechaza, se **lanza** en vez de borrar
+  físicamente — la op sigue en el journal y se reintenta cuando se verifiquen. Decisión pura en
+  dos pasos `planRemoteDelete({entitled, verified, patchStatus?})` (`cloudSyncLogic.ts`,
+  `'tombstone' | 'delete' | 'defer' | 'done' | 'fail'`), testeada en
+  `tests/electron/cloudSync.test.ts` (invariante: nunca `'delete'` sin verificar). Ojo: el
   tombstone lleva `updated_at = ahora` (hora del borrado), no el `updated` de la nota.
   - **Borrar una nota entera** (`scheduleDeleteDir` → `deleteRemoteDirNow`) necesita las filas de
     la carpeta, pero `path_key` es opaco: `listRemotePaths` lista **todas** las filas vivas
@@ -662,7 +757,7 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   se **consume**. Si la identidad NO coincide (otra cuenta) el registro se borra sin aplicar nada
   (arranque limpio). ⚠️ Las entitlements llegan **asíncronas** (`initAccount` difiere el refresh 5 s;
   `verifyOtp` las trae al vuelo), así que el registro **se evalúa en cada cambio de status** mientras
-  la identidad coincida y solo se consume cuando ya se conocen (`entitlementsFetchedAt`) — evaluar
+  la identidad coincida y solo se consume cuando ya se conocen (`AccountStatus.entitlementsKnown`) — evaluar
   contra el placeholder `NO_ENTITLEMENTS` lo tiraría a la basura. Si la entitlement caducó, no se
   restaura nada: la feature simplemente se vuelve a ofrecer.
   - **El pull inicial NO se lanza desde la restauración:** en ese instante la DEK es `null` por
@@ -672,11 +767,14 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   - **Corte anti-sorpresa (`clearRestoreSurface`):** una acción **explícita** del usuario logueado
     sobre una de las dos superficies gana sobre el registro y borra **esa mitad** (IPC `cloud:enable`
     / `cloud:disable` → mitad Cloud; `ai:llm-set-config` con `active` → mitad IA). Sin este corte, un
-    usuario que entra con el fetch de entitlements caído (el de `verifyOtp` es best-effort y
-    `entitlementsFetchedAt` solo vive en memoria), decide dejar Cloud apagado, y ve cómo un
+    usuario que entra con el fetch de entitlements caído (el de `verifyOtp` es best-effort y,
+    hasta que uno funcione, siguen desconocidas), decide dejar Cloud apagado, y ve cómo un
     `refreshEntitlements` posterior (o el diferido de 5 s del siguiente arranque) se lo re-enciende
     por detrás. Por mitades y no todo-o-nada: tocar el asistente no debe tirar la restauración de
     Cloud que sigue esperando a que lleguen las entitlements.
+- **Sesión bloqueada ≠ sign-out:** `status.sessionLocked` (llavero del sistema bloqueado, ver § 2)
+  mantiene `signedIn` e identidad, así que ni `planAccountTransition` ni la baseline del auto-switch
+  lo ven como un cierre de sesión — no se apaga Cloud ni se suelta la DEK ni se vuelve a BYO.
 - **UI:** el badge de la tarjeta Cloud (`SyncPanel.tsx`) se deriva de `enabled && signedIn` — con lo
   anterior ese caso ya no debería darse, pero el badge no puede mentir. No hizo falta copy nuevo: los
   estados existentes (`t.settings.cloud.signInFirst`, aviso ámbar `noteflowSignIn` de `LlmConfigView`)
@@ -717,7 +815,10 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   switches de modo managed↔e2ee tampoco. ⚠️ Matiz preexistente (no es del gate): **Sync now solo se
   renderiza con `status.enabled`**, así que un caducado que pulse Disable pierde el pull manual y no
   puede reactivar (el botón Enable sí está gateado) — el camino de salida de datos existe mientras
-  no desactive. Ojo: este gating es **solo de la UI del renderer** — los
+  no desactive. Con entitlements **desconocidas** (`!entitlementsKnown`) `subscriptionGate` es
+  `PlanUnknownNotice` y ni el onboarding ni **Enable** se ofrecen (estado neutro: ni paywall ni
+  activar a ciegas); la condición es `hasKnownEntitlement(account, 'cloud')`. Ojo: este gating es
+  **solo de la UI del renderer** — los
   IPC `cloud:setup*` y la Edge Function `cloud-keys` siguen sin gate por entitlement (espejo de la
   RLS de `user_keys`). El IPC `account:open-checkout` acepta `'ai' | 'cloud' | 'bundle'` y
   `AccountStatus` expone `aiCheckoutConfigured` / `cloudCheckoutConfigured` /
@@ -849,7 +950,8 @@ puro vía `fetch` desde el proceso main.
   proyecto real) + `isCloudConfigured()`. La anon key es pública por diseño (como el client ID de
   GitHub); la seguridad la da RLS.
 - **`electron/account.ts`** — capa de sesión, espejo estructural de `githubSync.ts`:
-  - Persistencia en `settings.json` sección `account` = `{email, userId, encryptedRefreshToken}`;
+  - Persistencia en `settings.json` sección `account` = `{email, userId, encryptedRefreshToken,
+    entitlementsCache?}` (la cache de entitlements, ver § 2 "Resiliencia");
     el refresh token se cifra reutilizando `encryptSecret/decryptSecret` de
     `electron/ai/llm/secret.ts` (safeStorage + fallback base64). El **access token vive solo en
     memoria** con su expiry.
@@ -857,10 +959,13 @@ puro vía `fetch` desde el proceso main.
     (`POST /auth/v1/verify`, `type:'email'`; guarda sesión + primer fetch de entitlements),
     `getAccessToken` (refresca si expira en <60 s vía `/auth/v1/token?grant_type=refresh_token`;
     **GoTrue rota el refresh token → se persiste siempre el nuevo**, con single-flight para evitar
-    carreras; 400/401 = revocado → limpia sesión y notifica), `signOut` (logout best-effort +
-    limpiar), `refreshEntitlements` (`GET /rest/v1/subscriptions` con RLS), `getAccountStatus`
-    (estado público, **nunca** tokens), `onStatusChanged`, `initAccount` (al arrancar, si hay
-    sesión: refresh de entitlements diferido 5 s, no bloquea el boot).
+    carreras; 400/401 = revocado → limpia sesión y notifica; fallo de descifrado → `sessionLocked`,
+    **no** sign-out; versión discriminada `getAccessTokenResult`), `signOut` (logout best-effort con
+    `?scope=local` + limpiar), `refreshEntitlements` (`GET /rest/v1/subscriptions` con RLS;
+    single-flight, backoff en fallos transitorios, cachea el resultado), `getAccountStatus` (estado
+    público, **nunca** tokens), `onStatusChanged`, `initAccount` (llamar tras `app.whenReady`: carga
+    sesión + cache, engancha `powerMonitor` `'resume'`, y si hay sesión lanza el refresh de
+    entitlements diferido 5 s, no bloquea el boot). Detalle de la resiliencia en § 2.
 - **`electron/entitlements.ts`** — `computeEntitlements(rows)` pura: producto activo si hay fila
   con ese product (o `bundle`) y `status === 'active'`. Vive en `electron/` (no `src/lib/`) porque
   `tsconfig.electron.json` (`rootDir: 'electron'`) no puede importar de `src/` y el renderer solo
@@ -874,7 +979,8 @@ puro vía `fetch` desde el proceso main.
 - **Errores tipados (`AccountErrorCode`)** — `AccountOpResult` lleva, además del `error` en inglés
   (fallback para logs), un **`errorCode`** de una unión cerrada (`notConfigured`, `invalidEmail`,
   `emptyCode`, `invalidCode`, `rateLimited`, `network`, `unexpectedResponse`, `sendFailed`,
-  `verifyFailed`, `notSignedIn`, `refreshFailed`, `checkoutUnavailable`, `checkoutInvalidUrl`) para
+  `verifyFailed`, `notSignedIn`, `refreshFailed`, `sessionLocked`, `checkoutUnavailable`,
+  `checkoutInvalidUrl`) para
   que el renderer pinte el mensaje **en el idioma de la app** en vez del string crudo de GoTrue.
   La unión está **triplicada** (main `electron/account.ts` → renderer `src/types/index.ts` → una
   clave por código en `settings.account.errors` de los dicts EN/ES) y el espejo lo fija el test

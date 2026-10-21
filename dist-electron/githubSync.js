@@ -28,6 +28,7 @@ const electron_1 = require("electron");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const https_1 = __importDefault(require("https"));
+const settingsFile_1 = require("./settingsFile");
 const noteFormat_1 = require("./noteFormat");
 const syncState_1 = require("./syncState");
 const mirrorPlan_1 = require("./mirrorPlan");
@@ -75,7 +76,7 @@ function readSettings() {
     }
 }
 function writeSettings(data) {
-    fs_1.default.writeFileSync(getSettingsPath(), JSON.stringify(data), 'utf-8');
+    (0, settingsFile_1.writeSettingsFile)(getSettingsPath(), data); // owner-only (0600) on POSIX
 }
 /**
  * Is NoteFlow Cloud the active sync provider? Read FLAT from settings.json —
