@@ -174,8 +174,8 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   no entrar en el bucle de reintentos de LS. La lógica pura vive en `logic.ts` (agnóstica de Deno)
   y está testeada en `tests/supabase/billing-webhook.test.ts`. Deploy con `--no-verify-jwt` (LS no
   manda JWT).
-- **Endurecimiento del webhook (código listo; migración 0010 + redeploy pendientes del operador —
-  ver `supabase/README.md` § 5):**
+- **Endurecimiento del webhook (desplegado 2026-10-21: migración 0010 aplicada y `billing-webhook`
+  v6; falta suscribir los eventos nuevos en LS — ver `supabase/README.md` § 5):**
   - **`test_mode`:** `mapLemonEvent(payload, variantMap, { allowTestMode })` ignora los eventos con
     `meta.test_mode === true` (`{ignored: "test mode event"}`) salvo que el secreto
     `LEMONSQUEEZY_ALLOW_TEST_MODE=true` (solo proyectos de prueba, **nunca** producción). Es un
@@ -452,11 +452,13 @@ es **un preset más**, no una implementación nueva.
   completo; es un camino **aparte** del auto-switch por entitlement de arriba, e idempotente).
 - **Cuota ponderada desplegada:** la migración 0007 está aplicada y `ai-proxy` redesplegado con el
   catálogo nuevo, los multiplicadores y el endpoint `/usage`.
-- **Pendiente del operador (endurecimiento, 2026-10):** `supabase db push` (0009 + 0010) →
-  `supabase functions deploy ai-proxy` → `supabase functions deploy billing-webhook
-  --no-verify-jwt`; suscribir `subscription_payment_refunded` y `subscription_plan_changed` en el
-  webhook de LS; adoptar la revisión manual de `expire_stale_subscriptions` (README § 5, paso 6
-  — `pg_cron` solo si se aceptan sus falsos positivos).
+- **Endurecimiento desplegado (2026-10-21):** migraciones 0009 + 0010 + 0011 aplicadas,
+  `ai-proxy` v9 y `billing-webhook` v6 desplegados (código idéntico al repo, verificado), permisos
+  de las RPC nuevas comprobados. **Pendiente del operador:** suscribir
+  `subscription_payment_refunded` y `subscription_plan_changed` en el webhook de **live** de LS
+  (sin eso los reembolsos no se procesan); adoptar la revisión manual de
+  `expire_stale_subscriptions` (README § 5, paso 6 — `pg_cron` solo si se aceptan sus falsos
+  positivos).
   `AI_MAX_INFLIGHT` es opcional; `LEMONSQUEEZY_ALLOW_TEST_MODE` **no** se pone en producción.
 - **Billing en live mode (hecho 2026-10-19):** productos copiados de test a live con "Copy to Live
   Mode" (los variant IDs **cambian** entre modos). IDs de variante:
@@ -1293,7 +1295,7 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
 | Fase | Contenido |
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
-| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (0007 aplicada + redeploy hecho):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×2/×6 — ver § 3), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`). **Endurecimiento (código listo, pendiente 0009 + 0010 + redeploys):** reserva + límite de concurrencia + topes de body/`max_tokens`, allowlist del body, errores del upstream mapeados, `cost_usd`; y en el webhook reembolsos, `test_mode`, validación UUID y reconciliación — ver §§ 2-3 |
+| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (0007 aplicada + redeploy hecho):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×2/×6 — ver § 3), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`). **Endurecimiento (desplegado 2026-10-21: 0009 + 0010 + redeploys):** reserva + límite de concurrencia + topes de body/`max_tokens`, allowlist del body, errores del upstream mapeados, `cost_usd`; y en el webhook reembolsos, `test_mode`, validación UUID y reconciliación — ver §§ 2-3 |
 | **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). El producto Cloud (y el Bundle) ya existen en Lemon Squeezy y sus checkout URLs (de live desde 2026-10-19) están pobladas en `cloudConfig.ts` → los planes ofrecen botón Subscribe (ver § 3, "Billing en live mode") |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
