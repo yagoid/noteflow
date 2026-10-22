@@ -190,8 +190,13 @@ en memoria en `notesStore`):
 
 ### Editor: marcas y bloques markdown (round-trip md↔html)
 El editor TipTap (`src/components/Editor/Editor.tsx`) registra las extensiones **una a una** (sin
-StarterKit). Todo elemento soportado **round-trippea** por `src/lib/markdownHtml.ts`, fuente única de
-verdad de la conversión, que debe mantenerse **simétrica**: marcas inline en
+StarterKit). Las que definen el **esquema** (nodos, marcas, atributos) viven en
+`src/components/Editor/editorExtensions.ts` (`schemaExtensions()`); `Editor.tsx` las expande y solo
+añade encima las de comportamiento (historial, placeholder, búsqueda, slash, autocierre). El harness
+de round-trip construye el esquema con esa misma lista, así no puede divergir de la app: **toda
+extensión que cambie el esquema va ahí**. Todo elemento soportado **round-trippea** por
+`src/lib/markdownHtml.ts`, fuente única de verdad de la conversión, que debe mantenerse **simétrica**
+(y lo vigila `tests/lib/editorRoundTrip.test.ts`, ver "Harness de round-trip" abajo): marcas inline en
 `inlineToHtml` (vive en `src/lib/markdownInline.ts`, hoja compartida con `kanban.ts` para no crear
 ciclos) / `inlineElToMd`, bloques en el bucle de `htmlFromMarkdown`/`blockElToMd`. Las mismas
 funciones las usa `SectionPreviewCard`, así que un elemento nuevo aparece también en los previews sin
@@ -234,9 +239,18 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   los **tipos que la tarea aún no tiene**. Si ya tiene ese tipo, la anotación de la continuación es
   texto del usuario y se queda tal cual (`- [ ] Ship 📅2026-01-02` / `was 📅2025-12-20 before slip`;
   antes se cortaba y se perdía). Tests en `tests/lib/markdownHtml.test.ts`.
-- **Blockquote / cita (`> texto`, estilo VSCode):** `@tiptap/extension-blockquote`. Round-trip con
-  `mdBlockquoteToHtml` (líneas consecutivas → `<p>` con `<br>`; línea `>` vacía → nuevo párrafo) y el
-  caso `blockquote` en `blockElToMd` (prefija cada línea con `> `). Estilo: borde izquierdo del color
+- **Blockquote / cita (`> texto`, estilo VSCode):** `@tiptap/extension-blockquote` (contenido
+  `block+`: dentro puede haber listas, código, headings, tablas, citas anidadas). Round-trip exacto:
+  `blockElToMd` serializa los bloques de la cita como markdown normal y prefija cada línea con `> `
+  (línea vacía → `>`), quitando **solo** el separador `\n\n` del último bloque (antes quitaba todos
+  los `\n` finales y se perdían hard breaks/párrafos vacíos al final de la cita); `mdBlockquoteToHtml`
+  quita el `> ` de cada línea y **parsea el resto como markdown propio** (recursión de
+  `markdownBlocksToHtml`; dentro de una cita **no** se detectan tableros kanban — `quoteDepth` — porque
+  el esquema los sacaría de la cita: sus marcadores siguen siendo texto citado). Antes solo entendía párrafos: una lista, código o heading dentro de una
+  cita (que el editor sí escribía) volvía como texto plano `- a`/```` ``` ````. Para citas de solo
+  párrafos el resultado es el de siempre (`> a\n> b` → un `<p>` con `<br>`, `>` vacío → nuevo
+  párrafo); con varias líneas `>` vacías seguidas ahora cuentan como en el nivel superior (párrafos
+  vacíos / hard break) en vez de colapsarse. Estilo: borde izquierdo del color
   compartido `--code-accent` (fallback `--accent`; el mismo que el borde del `pre`, personalizable —
   ver "Colores del editor") + texto atenuado. Botón en la toolbar (icono `Quote`).
 - **Bloque de código — selector de lenguaje (`CodeBlockWithCopy.tsx`):** el NodeView de
@@ -251,10 +265,20 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   Posiciona el dropdown `fixed` directamente desde `getBoundingClientRect()` del botón (clampeado al
   viewport tras medirse); cierra con click-fuera y Escape. No toca `markdownHtml.ts` ni el formato. Estilos `.code-lang-*` en
   `index.css`.
-- **Orden de detección de bloque** en `htmlFromMarkdown`: code fence → heading → HR → kanban →
-  lista → blockquote → tabla → párrafo (un prefijo `>` no choca con bullets/ordenadas/headings; un
-  bloque que empieza por `<!-- kanban -->` pero no es un tablero válido sigue cayendo a párrafo).
-  Pre-pasadas antes del split por `\n\n`, en este orden: `isolateCodeFences` → `isolateKanbanBlocks`.
+- **Orden de detección de bloque** (`blockKind`, única función que lo decide; la usan el render y
+  `groupBlocks`): code fence → heading → HR → kanban → lista → blockquote → tabla → párrafo (un
+  prefijo `>` no choca con bullets/ordenadas/headings; un bloque que empieza por `<!-- kanban -->`
+  pero no es un tablero válido sigue cayendo a párrafo). Pipeline: pre-pasadas `isolateCodeFences` →
+  `isolateKanbanBlocks`, split por `\n\n`, **`groupBlocks`** (reagrupa listas y recoloca el `\n`
+  impar, ver "Listas…" y "El `\n` impar…" abajo) y `blockToHtml` por bloque.
+- **Bloques pegados a un heading o a una tabla (markdown externo/LLM):** una línea heading dentro de
+  un bloque de párrafo (`## Título\n- a`) **corta el bloque**: lo de encima y lo de debajo se
+  clasifican como bloques propios (`blockToHtml`), que es justo como se releen tras guardar (el
+  serializador separa el heading). Antes lo de debajo quedaba como texto del párrafo y en el
+  siguiente guardado+reapertura se convertía en lista/tabla/HR (no idempotente). Igual en tablas:
+  las filas llegan hasta la **primera línea sin `|`**; lo pegado debajo es un bloque propio. Antes
+  `mdTableToHtml` **descartaba** las líneas sin `|` del bloque (pérdida de texto: el texto que un LLM
+  pega justo tras una tabla desaparecía al abrir y guardar).
 - **Code fences pegados a otro contenido (`isolateCodeFences`):** el code fence solo se detecta como
   **primera línea de un bloque**, y los bloques se cortan por `\n\n`. Por eso, antes del split, una
   pre-pasada por líneas:
@@ -267,8 +291,9 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
      ese mismo bloque y **no abren** par (ver "Bloque que termina en un snippet anidado" abajo).
   2. Las líneas vacías dentro de un par pasan a ser el centinela `FENCE_BLANK` (se borra al pintar el
      `<pre>`), para que el split no parta el código.
-  3. Asegura un **límite de bloque antes de la apertura** de cada par (añade una línea vacía solo si
-     falta, contando la paridad de `\n`: el split consume pares desde la izquierda).
+  3. Asegura un **límite de bloque antes de la apertura** de cada par (`ensureBlockStart`: añade una
+     línea vacía solo si el fence va **pegado** a la línea de encima; tras una racha impar de `\n` el
+     `\n` sobrante lo recoloca `groupBlocks` como hard break del bloque de encima).
   4. El bloque de código llega, como siempre, hasta el **último** cierre de su bloque `\n\n` (no el
      primero); solo si tras ese último cierre hay contenido pegado (sin línea en blanco) se añade un
      límite ahí.
@@ -288,7 +313,10 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   termina en snippet anidado (abajo). Diferencias conocidas, todas en casos que antes ya salían mal:
   - **Dos o más líneas vacías seguidas** dentro de un fence ahora se conservan (antes partían el bloque).
   - Un párrafo que acaba en hard break justo antes de un fence (`a\n` + `\n\n` → racha impar de `\n`):
-    antes el fence salía como texto; ahora sale `<p></p>` + código.
+    antes el fence salía como texto; luego salía `<p></p>` + código (se perdía el break y aparecía un
+    párrafo vacío); ahora vuelve exacto: `a<br>` + código (ver "El `\n` impar…").
+  - Las líneas vacías al **final** del código se descartan al leer (antes se quitaban al guardar: el
+    `FENCE_BLANK` se borraba después del `trimEnd()` y el código cambiaba entre aperturas).
   - Líneas que son literalmente ```` ``` ```` en columna 0 dentro de un párrafo o ítem de lista (soft
     breaks) y que se emparejan entre sí: antes eran texto; ahora se aíslan como bloque de código.
 
@@ -360,8 +388,9 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     líneas en blanco internas fuera, y límites `\n\n` antes/después del tablero.
   - **`isolateKanbanBlocks`** (pre-pasada, **después** de `isolateCodeFences`: necesita saber qué
     líneas son código, y eso solo queda fijado tras aislar fences). Calcula las líneas de bloques de
-    código (`codeBlockLines`: bloque `\n\n` cuya 1ª línea empieza por ```` ``` ````, misma regla de
-    paridad que `ensureBlockStart`) e ignora aperturas dentro de código. Empareja cada apertura con
+    código (`codeBlockLines`: línea ```` ``` ```` al inicio del texto o tras una línea vacía, hasta la
+    siguiente línea vacía — la misma regla que aplican `ensureBlockStart`/`groupBlocks`) e ignora
+    aperturas dentro de código. Empareja cada apertura con
     el **primer** cierre posterior; solo si la región parsea como tablero asegura límite de bloque
     antes/después (solo donde falta) y protege sus líneas vacías con el centinela `FENCE_BLANK`. Si no
     parsea, salta esa apertura y sigue en la línea siguiente (una apertura posterior puede formar un
@@ -408,7 +437,7 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     undo/redo. `renderText` = el markdown (texto plano del portapapeles / `getText`). Test que simula la
     ruta carga → atributo clonado por JSON → render → guardado en `tests/lib/kanbanOps.test.ts`.
   - **Solo en el nivel superior:** grupo propio `topBlock` y el documento se extiende a
-    `content: '(block | topBlock)+'` (`TopLevelDocument` en `Editor.tsx`). Un tablero dentro de un
+    `content: '(block | topBlock)+'` (`TopLevelDocument` en `editorExtensions.ts`). Un tablero dentro de un
     ítem de lista/cita/celda lo tiraría el serializador (`listElToMd` ignora el `div`); así pegar uno
     dentro de una lista parte la lista y lo deja arriba.
   - **NodeView:** todo cambio es una transformación pura de **`src/lib/kanbanOps.ts`** (tests en
@@ -507,9 +536,151 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   mientras que `listElToMd` cierra el último ítem con un solo `\n` y por eso el caso `ul`/`ol` sí
   suma `+ '\n'`; el caso kanban suma `+ '\n\n'` (su serializador acaba en el marcador de cierre). Un `\n` de más tras un bloque hace que el siguiente se reparsee con un hard break
   inicial (`<p><br>…`) y el hueco **crece en cada round-trip** guardar/reabrir (bug real con tablas).
+  Aritmética que el parser debe invertir: un textblock que acaba en *m* hard breaks escribe *m* `\n`
+  extra; toda lista de nivel superior acaba en un `\n` extra (separador); las listas anidadas van
+  justo tras su ítem, sin línea en blanco. Así, entre dos listas de nivel superior hay 1 línea en
+  blanco de separador + *m* (breaks finales del último ítem, el más profundo); entre ítems hermanos
+  de una misma lista, exactamente *m*.
+- **Listas: tareas, viñetas y numeradas nunca son hermanas (regla).** En el esquema un `taskList`
+  solo contiene `taskItem` y un `bulletList`/`orderedList` solo `listItem`: ítems de distinto tipo
+  son **listas consecutivas**. `groupBlocks` (`continueList`) ya no funde todos los bloques de lista
+  seguidos: un bloque continúa la lista de encima solo si empieza por un ítem **anidado** (indentado;
+  tras cualquier número de líneas en blanco, que son breaks del ítem de encima) o por un ítem de
+  nivel superior del **mismo tipo** tras una línea en blanco (el comportamiento de siempre). Un ítem
+  de nivel superior de **otro tipo** abre lista nueva y la línea en blanco anterior es el separador,
+  no un break. `renderMdListItems` agrupa los hermanos consecutivos por tipo en listas separadas (a
+  cualquier profundidad), así el HTML ya es el documento que construye ProseMirror. **Bug real
+  arreglado:** `- [ ] a` / *blank* / `- b` / *blank* / `- [ ] c` se fundía en un `taskList` con un
+  `<li>` normal dentro y cada ítem recibía un `<br>` final (línea fantasma); ProseMirror lo partía en
+  3 listas, el serializador escribía otra vez el mismo markdown y la línea volvía aunque el usuario
+  la borrase (y sin borrarla, cada guardado añadía otra: `\n\n\n`). Tampoco `- [ ] a\n- b` se
+  convierte ya en dos tareas. En anidadas no hay separador: todas las líneas en blanco antes de un
+  hermano de otro tipo son breaks del ítem de encima (como escribe `listElToMd`).
+  - `- [x](url)` (viñeta que empieza por un link con texto `x`) ya no se lee como tarea marcada: tras
+    `[ ]`/`[x]` se exige espacio o fin de línea (el resto de parsers de tareas — kanban, alarmas — ya
+    lo exigían). Consecuencia: `- [ ]foo` (sin espacio) es ahora una viñeta con texto `[ ]foo`.
+  - **Marcador vacío `- ` (`emptyMarkerIsItem`):** `listElToMd` escribe así una viñeta vacía y una
+    cuya primera línea es un hard break (`- ` + el texto en las líneas siguientes). Solo **justo
+    debajo de una viñeta hermana** se sigue leyendo como línea en blanco (legado YAML → break del ítem
+    de encima, ambiguo); en cualquier otro sitio — primer ítem del bloque, primer hijo del ítem de
+    encima, o tras una lista hermana de tareas/numerada — es una **viñeta vacía**. Antes, como primer
+    ítem no había ítem de encima y **el texto se perdía** (`- \ntexto\n- b` → `- b`; también tras un
+    heading pegado o dentro de una cita). Además el parser nunca descarta líneas: texto antes del
+    primer ítem (inalcanzable hoy) sale como párrafo encima de la lista, y tras el marcador se acepta
+    tabulador igual que en la detección de bloque (`-\tx` antes se perdía entero).
+- **El `\n` impar entre bloques (`groupBlocks`).** El split por `\n\n` deja el `\n` impar al
+  principio del bloque siguiente (`\nnext`). Si lo que sigue es un **párrafo**, se queda ahí como
+  break inicial (`<p><br>y`, como siempre: ver ambigüedades). Si es cualquier otro bloque (heading,
+  lista, fence, tabla, cita, HR, tablero), que no puede empezar por un break, es el **break final del
+  bloque de encima** (`attachTrailingBreak`): párrafo (también el vacío, que pasa a `<p><br></p>`) o
+  último ítem de lista; si encima hay un bloque que no admite breaks (heading, HR, código, tabla,
+  cita, tablero) o es el inicio del texto, se descarta. Así `x<br>` + `# T`, `x<br>` + lista/fence/
+  tablero vuelven exactos; antes `\n# T` daba `<p><br></p><h1>T</h1><p></p>` y el hueco crecía, `\n---`
+  quedaba como texto, y un fence/tablero tras un break dejaba un `<p></p>`. Para que funcione,
+  `ensureBlockStart` (pre-pasadas de fences y tableros) ya no fuerza paridad par: solo separa líneas
+  pegadas.
+- **Contenido de un ítem de lista: `paragraph+ list*` (decisión, `LIST_ITEM_CONTENT` en
+  `editorExtensions.ts`, para `listItem` y `taskItem`).** Es lo que una lista markdown sabe escribir:
+  su texto (uno o más párrafos; los extra se guardan como breaks del primero) y luego sublistas. Con
+  el `paragraph block*` de TipTap había **pérdida de datos real**: Backspace al inicio de un ítem lo
+  une al de encima como segundo párrafo, y escribir ahí `> `, ```` ``` ````, `# ` o `---` lo
+  convertía en cita/código/heading/HR **dentro del ítem**, que `listElToMd` descarta → el texto
+  desaparecía al guardar; igual al pegar HTML con un `<pre>` dentro de un `<li>`. Y Backspace al
+  inicio del ítem que sigue a uno **con subítems** dejaba su texto **detrás** de la sublista, que al
+  reabrir volvía **encima** (reordenado). Con la restricción: las input rules de bloque no saltan en
+  la 2ª línea del ítem (el texto queda literal), ProseMirror coloca fuera de la lista (partiéndola)
+  los bloques pegados o insertados, y ese Backspace anida el ítem bajo el anterior tras sus
+  subítems. Backspace en un ítem sin subítems sigue uniéndolo como segunda línea. No afecta a la
+  carga: el parser nunca produce otra cosa en un ítem. Tests de edición con un `Editor` real en
+  `editorRoundTrip.test.ts`.
+- **Headings: una sola línea.** Un heading markdown no admite saltos: `headingElToMd` escribe cada
+  hard break de un heading como **un espacio** (sin los de los bordes, colapsando rachas; solo si hay
+  breaks, el resto sale byte a byte). Antes Shift+Enter al inicio de `### ==Título==` guardaba
+  `### \n==Título==` y al reabrir el heading se destruía en un párrafo con `###` literal. Un heading
+  **vacío** (Enter al principio de uno) se guarda como párrafo vacío en vez de `### ` (que volvía como
+  el texto "###"). En el editor, `LineBreak` (`editorExtensions.ts`, `HardBreak` extendido) hace que
+  Shift+Enter / Mod+Enter dentro de un heading lo **parta** como Enter en vez de insertar el salto.
+- **Celdas de tabla con varios bloques:** la celda es `block+` (Enter en una celda crea otro
+  párrafo; se puede pegar una lista o código), pero una fila markdown es una línea. `tableElToMd`
+  escribe los bloques de la celda **uno por línea** (`<br>` en la celda: `cellLines`); antes los
+  pegaba sin separador (`a` + `b` → `ab`, corrupción de texto). Listas y código conservan el texto,
+  no la estructura; una celda con contenido inline directo (HTML de imports) se escribe como antes.
+- **Harness de round-trip (`tests/lib/editorRoundTrip.test.ts`, entorno happy-dom).** Prueba el ciclo
+  real de la app con el **esquema real** (`getSchema(schemaExtensions())`; `getSchema` no instancia
+  NodeViews, así que importar los módulos React no molesta): cargar =
+  `createDocument(htmlFromMarkdown(md), schema)` (lo que hace `Editor.tsx`), guardar =
+  `htmlToMarkdown(getHTMLFromFragment(doc.content, schema))` (`helpers/editorPipeline.ts`).
+  Invariantes: **(a) sin pérdida** — todo documento que el editor puede tener vuelve igual
+  (`load(save(D))` igual a `D` y el markdown es punto fijo): fuzz de documentos generados con PRNG
+  con semilla (`helpers/docFuzz.ts`: marcas, breaks al inicio/medio/final y rachas de 1-3, párrafos
+  vacíos, headings, HR, código, citas, tablas, tableros, las tres listas anidadas hasta 3 niveles y
+  mezcladas, atributos de tarea), más barridos exhaustivos de **todo par de tipos de bloque** en ambos
+  órdenes con 0-2 breaks y de **listas anidadas de todo par de tipos** con 0-3 breaks; **(b) estable**
+  — markdown arbitrario (líneas de toda sintaxis, también malformada, pegadas o separadas) llega a un
+  punto fijo como mucho en el segundo guardado (nada crece) **sin perder texto** (`lostText`: las
+  letras/dígitos del original, sin marcadores de lista, numeración, checkbox ni `>`, siguen todas;
+  un punto fijo vacío no basta), y si no es ambiguo, en el primero y sin cambiar el documento; **(c)** secciones canónicas (`helpers/roundTripFixtures.ts`, incl. un trozo
+  real de nota de trabajo) **byte a byte**. Más: tests de comandos de edición con un `Editor` de
+  `@tiptap/core` real. Cómo ampliarlo: un bloque/marca nuevo → añadirlo al generador (`genBlock`/
+  `inline`) y, si el formato no puede distinguirlo de otro documento, a `ambiguity()` **con comentario
+  de por qué y en qué vuelve** (nunca relajar una aserción); un bug de "línea que vuelve" de una nota
+  real → añadir la sección como fixture. `FUZZ_SEEDS=50000 npx vitest run
+  tests/lib/editorRoundTrip.test.ts` para fuzz profundo en local (por defecto 4000 + 2000). Ojo:
+  happy-dom mantiene vivos los documentos parseados hasta que corren sus tareas pendientes; los bucles
+  largos hacen `await breathe()` cada 25 casos o el worker se queda sin memoria. El resto de la
+  batería sigue en entorno node (`miniDom` para los tests que solo necesitan `htmlToMarkdown`).
+- **Ambigüedades del formato (inherentes; no se arreglan sin cambiar el formato en disco, que
+  comparten CLI y app móvil).** Documentos que se escriben igual que otro distinto; `ambiguity()` del
+  harness los nombra uno a uno (mantener esta lista en sync):
+  - **Dos listas del mismo tipo seguidas** (también anidadas) = una lista cuyo ítem acaba en break →
+    vuelven como una lista.
+  - **Línea en blanco dentro de un párrafo o ítem** (2+ breaks seguidos con texto detrás) = dos
+    párrafos (en un ítem: la lista + un párrafo).
+  - **Breaks finales antes de otro bloque:** 2+ = un párrafo vacío; 1 antes de un **párrafo** =
+    break inicial de ese párrafo (`x<br>` + `y` ≡ `x` + `<br>y`, vuelve lo segundo). 2+ breaks
+    iniciales en un párrafo que no es el primero = párrafo vacío. Igual al final de una cita.
+  - **Ítem de nivel superior que acaba en 3+ breaks antes de su hermano** = lista + párrafo vacío +
+    lista (en anidadas no hay límite: la indentación lo distingue).
+  - **Viñeta vacía o que empieza por break, justo debajo de otra viñeta de su lista:** `- ` ahí se lee
+    como línea en blanco (legado de la era YAML) → pasa a break del ítem de encima, y el texto que
+    seguía se une a ese ítem (el texto no se pierde). Como primer ítem de su lista round-trippea.
+  - **Hard break en un heading:** `# a\nb` es heading + párrafo para cualquier lector markdown (y en
+    la salida del LLM), así que se escribe como espacio → vuelve el heading con su texto, sin el salto.
+  - **Varios párrafos en un ítem o en una celda** → uno con breaks (el texto no cambia).
+  - **Bordes del documento:** `htmlToMarkdown` hace `.trim()`: párrafos vacíos/breaks/espacios al
+    inicio o al final se pierden; un ítem numerado o viñeta vacío como última línea pierde el espacio
+    (`1.`, `-`) y vuelve como texto.
+  - **Texto que parece sintaxis de bloque** en una línea de continuación (`# x`, `- x`, `1. x`,
+    `> x`, ```` ``` ````, fila separadora bajo una línea con `|`, `<!--`, `---`): no hay escapes; se
+    relee como ese bloque en cuanto deja de ir pegado a texto (p. ej. tras partirse un párrafo por una
+    ambigüedad de arriba). También un marcador `<!-- kanban -->` de un tablero inválido que quedó como
+    texto, aunque sea la primera línea: al guardar se normaliza lo de debajo (indentación de listas,
+    líneas en blanco) y puede pasar a ser un tablero válido. Es lo que hace que markdown ambiguo
+    necesite **dos** guardados para el punto fijo.
+  - Otras, ya documentadas arriba: fences anidados, `++`/`==` literales, líneas en blanco al final de
+    un bloque de código, espacios finales del código.
 - Estos elementos son **markdown plano** en el cuerpo del `.md`: no tocan el frontmatter ni los tres
   espejos del formato (`noteUtils`/`noteFormat`/`cli`), así que sincronizan y se degradan limpio en
-  editores externos/CLI/móvil.
+  editores externos/CLI.
+- **⚠ Pendiente portar a móvil.** `noteflow-mobile/src/editor-web/converters.ts` es una copia línea
+  a línea de `markdownHtml.ts` (su cabecera: los cambios se portan desde desktop como diff, y cualquier
+  diferencia **reescribe las notas en silencio al guardar** desde el móvil). Los arreglos del
+  round-trip de 2026-10 (lista-fantasma y siguientes) **no están portados**; hasta portarlos, el móvil
+  puede reintroducir las líneas fantasma / mover texto en notas que el desktop ya escribe bien. Qué
+  portar (sin tocar aquí el repo móvil):
+  - `groupBlocks`/`continueList`/`listTail` y el agrupado por tipo de `renderMdListItems`.
+  - `\n` impar: `attachTrailingBreak`, `ensureBlockStart` sin paridad y `codeBlockLines`.
+  - Citas recursivas (`mdBlockquoteToHtml` + `quoteDepth`: sin tableros dentro) y el serializador de
+    citas que quita solo el último separador.
+  - Tablas: líneas pegadas bajo la tabla como bloque propio (`mdTableToHtml`) y `cellLines`/
+    `isBlockCell` al serializar celdas.
+  - Headings pegados (`mdParagraphBlockToHtml`), `headingElToMd` (breaks → espacio; heading vacío →
+    párrafo vacío).
+  - Tareas: `- [x](url)` no es tarea, `- [ ]foo` es viñeta; marcador vacío `emptyMarkerIsItem` y
+    tabulador tras el marcador (`parseListLine`), `lead` de `parseMdListItems`.
+  - Bloques de código: líneas en blanco finales descartadas al leer.
+  - Esquema del editor web móvil: `listItem`/`taskItem` con contenido `paragraph+ list*` y
+    Shift+Enter en heading = partir (si su editor lo permite).
 
 ### Editor: la tira de tabs sigue a la sección activa
 En `NoteEditor.tsx`, la tira horizontal de pestañas (`tabsScrollRef`) se auto-scrollea para dejar

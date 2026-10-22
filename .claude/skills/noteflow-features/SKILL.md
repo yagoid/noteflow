@@ -537,6 +537,21 @@ sin navegar.
 | Imagen | `![alt](src)` | Drag & drop / Paste |
 | Separador | `---` | — |
 
+### Listas (comportamiento al editar y al guardar)
+- Tareas, viñetas y numeradas seguidas son **listas distintas** (no se mezclan en una); entre ellas
+  no aparece ninguna línea en blanco fantasma al reabrir.
+- Un ítem solo contiene **su texto y sublistas** (lo que markdown sabe guardar): un bloque de
+  código, heading, cita, tabla o separador insertado o pegado en un ítem se coloca fuera de la lista,
+  partiéndola; `> `, ```` ``` ```` o `# ` escritos en la 2ª línea de un ítem quedan como texto. Por lo
+  mismo, dentro de un ítem el botón **Cita** no hace nada, y **Heading** / **Bloque de código** de la
+  toolbar sacan la línea fuera de la lista.
+- En un **heading**, Shift+Enter lo parte como Enter (un heading markdown es una sola línea).
+- **Backspace** al inicio de un ítem lo une al anterior como segunda línea; si el anterior tiene
+  subítems, lo anida **detrás** de ellos (antes su texto acababa encima de los subítems al reabrir).
+- Limitación del formato: una **línea en blanco** dentro de un ítem o párrafo (dos Shift+Enter
+  seguidos con texto detrás) se guarda igual que dos bloques y al reabrir se parte en dos.
+  Detalle y lista completa de ambigüedades en `.claude/context/patterns.md`.
+
 ### Autocierre de paréntesis (modo rich)
 - Escribir `(` inserta `()` con el cursor en medio; con texto seleccionado (en un mismo párrafo)
   lo envuelve: `(texto)`, manteniendo la selección.
@@ -568,6 +583,8 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - **Sin redimensionado de columnas:** las tablas ocupan el ancho disponible con columnas
   equitativas. El ancho de columna NO se puede guardar en markdown portable, así que no se
   ofrece resize (evita el affordance que se reseteaba al recargar la nota).
+- **Enter en una celda** crea otra línea en la celda; se guarda como salto de línea (`<br>`) y al
+  reabrir es una línea más del mismo párrafo (antes las dos líneas se guardaban pegadas: `ab`).
 - **Pegar markdown con tabla:** en el editor visual (WYSIWYG), pegar texto que contenga una
   tabla markdown (`| a | b |` + fila separadora `|---|---|`) la convierte en tabla real
   (antes se pegaba como texto literal). El modo Raw Markdown muestra siempre el fuente tal

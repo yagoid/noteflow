@@ -265,3 +265,146 @@ describe('htmlFromMarkdown — multi-line task annotations on a continuation lin
     expect(html).toContain('Ship<br>then and 📅2025-12-20')
   })
 })
+
+// Task / bullet / ordered items can't be siblings in the editor (a taskList only
+// holds taskItems). The serializer ends every list with the block separator,
+// so the one blank line before an item of another kind is that separator, not
+// a hard break of the item above (the reported phantom line that came back
+// after deleting it). The real-editor round trip is in editorRoundTrip.test.ts.
+describe('htmlFromMarkdown — adjacent lists of different kinds', () => {
+  const task = (text: string) =>
+    `<li data-checked="false" data-type="taskItem"><label><input type="checkbox"></label><p>${text}</p></li>`
+
+  it('reads task, bullet, task separated by blank lines as three lists with no hard break', () => {
+    expect(htmlFromMarkdown('- [ ] **x**\n\n- **B42.** t\n\n- [ ] y')).toBe(
+      `<ul data-type="taskList">${task('<strong>x</strong>')}</ul>` +
+      '<ul><li><p><strong>B42.</strong> t</p></li></ul>' +
+      `<ul data-type="taskList">${task('y')}</ul>`
+    )
+  })
+
+  it('splits items of different kinds glued together into separate lists', () => {
+    expect(htmlFromMarkdown('- [ ] a\n- b\n1. c')).toBe(
+      `<ul data-type="taskList">${task('a')}</ul><ul><li><p>b</p></li></ul><ol><li><p>c</p></li></ol>`
+    )
+  })
+
+  it('reads a second blank line before another kind as a hard break of the item above', () => {
+    expect(htmlFromMarkdown('- [ ] a\n\n\n- b'))
+      .toBe(`<ul data-type="taskList">${task('a<br>')}</ul><ul><li><p>b</p></li></ul>`)
+    // …of its deepest last item: the one written last.
+    expect(htmlFromMarkdown('- a\n  - c\n\n\n1. d'))
+      .toBe('<ul><li><p>a</p><ul><li><p>c<br></p></li></ul></li></ul><ol><li><p>d</p></li></ol>')
+  })
+
+  it('keeps reading same-kind items after a blank line as one list (inherent ambiguity)', () => {
+    // `- a\n\n- b` is both "one list whose first item ends in a break" and "two
+    // bullet lists in a row": it has always been read as the former.
+    expect(htmlFromMarkdown('- a\n\n- b')).toBe('<ul><li><p>a<br></p></li><li><p>b</p></li></ul>')
+  })
+
+  it('splits nested siblings by kind, every blank line before them being a break', () => {
+    expect(htmlFromMarkdown('- p\n  - [ ] t\n\n  - b')).toBe(
+      `<ul><li><p>p</p><ul data-type="taskList">${task('t<br>')}</ul><ul><li><p>b</p></li></ul></li></ul>`
+    )
+  })
+
+  it('keeps nested items after any number of blank lines inside their parent', () => {
+    expect(htmlFromMarkdown('- a\n\n\n\n  - b'))
+      .toBe('<ul><li><p>a<br><br><br></p><ul><li><p>b</p></li></ul></li></ul>')
+  })
+
+  it('reads `- [x](url)` as a bullet starting with a link, not a checked task', () => {
+    expect(htmlFromMarkdown('- [x](https://e.com) more'))
+      .toBe('<ul><li><p><a href="https://e.com">x</a> more</p></li></ul>')
+    // An empty task at the end of the text keeps working without its trailing space.
+    expect(htmlFromMarkdown('- [ ]')).toBe(`<ul data-type="taskList">${task('')}</ul>`)
+  })
+})
+
+// listElToMd writes an empty bullet item as `- `, and one whose text starts
+// with a hard break as `- ` + the text on the next lines. Read as a blank line
+// (the legacy meaning of `- `), the first item of a list had no item above to
+// take it and its text was dropped.
+describe('htmlFromMarkdown — empty bullet markers never drop text', () => {
+  it('reads `- ` starting a list as an empty bullet item, keeping the lines after it', () => {
+    expect(htmlFromMarkdown('- \nimportant text\n- second'))
+      .toBe('<ul><li><p><br>important text</p></li><li><p>second</p></li></ul>')
+    expect(htmlFromMarkdown('- \n  - child')).toBe('<ul><li><p></p><ul><li><p>child</p></li></ul></li></ul>')
+    expect(htmlFromMarkdown('intro\n\n- \ntext')).toBe('<p>intro</p><ul><li><p><br>text</p></li></ul>')
+    expect(htmlFromMarkdown('# Title\n- \ntext')).toBe('<h1>Title</h1><ul><li><p><br>text</p></li></ul>')
+  })
+
+  it('reads `- ` after a task or ordered sibling as the start of a bullet list', () => {
+    expect(htmlFromMarkdown('- a\n  1. o\n  - \n  text')).toBe(
+      '<ul><li><p>a</p><ol><li><p>o</p></li></ol><ul><li><p><br>text</p></li></ul></li></ul>'
+    )
+  })
+
+  it('still reads `- ` right below a bullet sibling as a blank line (legacy, ambiguous)', () => {
+    expect(htmlFromMarkdown('- a\n- \n- b')).toBe('<ul><li><p>a<br></p></li><li><p>b</p></li></ul>')
+  })
+
+  it('accepts a tab after the marker, as the list detection does', () => {
+    expect(htmlFromMarkdown('-\tx\n1.\ty')).toBe('<ul><li><p>x</p></li></ul><ol><li><p>y</p></li></ol>')
+  })
+
+  it('keeps kanban markers inside a quote as quoted text', () => {
+    expect(htmlFromMarkdown('> <!-- kanban -->\n> - Todo\n> <!-- /kanban -->')).toBe(
+      '<blockquote><p>&lt;!-- kanban --&gt;<br>- Todo<br>&lt;!-- /kanban --&gt;</p></blockquote>'
+    )
+  })
+})
+
+describe('htmlFromMarkdown — the odd newline between blocks', () => {
+  // A textblock ending in a hard break writes one extra \n before the block
+  // separator; the \n\n splitter leaves it at the start of the next block.
+  it('gives it back to the paragraph above a heading, list, fence or kanban', () => {
+    expect(htmlFromMarkdown('x\n\n\n# T')).toBe('<p>x<br></p><h1>T</h1>')
+    expect(htmlFromMarkdown('x\n\n\n- a')).toBe('<p>x<br></p><ul><li><p>a</p></li></ul>')
+    expect(htmlFromMarkdown('x\n\n\n```js\nc\n```')).toBe('<p>x<br></p><pre><code class="language-js">c</code></pre>')
+    expect(htmlFromMarkdown('x\n\n\n<!-- kanban -->\n- Todo\n<!-- /kanban -->')).toMatch(/^<p>x<br><\/p><div data-type="kanban"/)
+  })
+
+  it('makes an empty paragraph above a heading a paragraph with a break', () => {
+    expect(htmlFromMarkdown('x\n\n\n\n\n# T')).toBe('<p>x</p><p><br></p><h1>T</h1>')
+  })
+
+  it('leaves it at the start of a following paragraph, as always (inherent ambiguity)', () => {
+    expect(htmlFromMarkdown('x\n\n\ny')).toBe('<p>x</p><p><br>y</p>')
+  })
+})
+
+describe('htmlFromMarkdown — blocks glued to a heading or a table', () => {
+  it('reads what follows a glued heading as a block of its own', () => {
+    expect(htmlFromMarkdown('## Title\n- a\n- b')).toBe('<h2>Title</h2><ul><li><p>a</p></li><li><p>b</p></li></ul>')
+    expect(htmlFromMarkdown('text\n# T\nmore')).toBe('<p>text</p><h1>T</h1><p>more</p>')
+    expect(htmlFromMarkdown('---\n# T')).toBe('<hr><h1>T</h1>')
+  })
+
+  it('keeps the text glued below a table instead of dropping it', () => {
+    expect(htmlFromMarkdown('| a | b |\n| --- | --- |\n| 1 | 2 |\nAfter the table'))
+      .toBe('<table><tr><th>a</th><th>b</th></tr><tr><td>1</td><td>2</td></tr></table><p>After the table</p>')
+  })
+})
+
+describe('htmlFromMarkdown — blockquote content', () => {
+  it('parses the quoted lines as markdown of their own (lists, code, headings, quotes)', () => {
+    expect(htmlFromMarkdown('> a\n>\n> - b\n> - [ ] c\n>\n> ```js\n> x\n> ```\n>\n> ## h\n>\n> > n')).toBe(
+      '<blockquote><p>a</p><ul><li><p>b</p></li></ul>' +
+      '<ul data-type="taskList"><li data-checked="false" data-type="taskItem"><label><input type="checkbox"></label><p>c</p></li></ul>' +
+      '<pre><code class="language-js">x</code></pre><h2>h</h2><blockquote><p>n</p></blockquote></blockquote>'
+    )
+  })
+
+  it('reads paragraphs and soft breaks as before', () => {
+    expect(htmlFromMarkdown('> a\n> b\n>\n> c')).toBe('<blockquote><p>a<br>b</p><p>c</p></blockquote>')
+    expect(htmlFromMarkdown('>')).toBe('<blockquote><p></p></blockquote>')
+  })
+})
+
+describe('htmlFromMarkdown — code block trailing blank lines', () => {
+  it('drops them, as the serializer does, so they can\'t come and go', () => {
+    expect(htmlFromMarkdown('```\na\n\n\n```')).toBe('<pre><code class="language-">a</code></pre>')
+  })
+})

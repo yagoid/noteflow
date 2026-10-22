@@ -93,6 +93,7 @@ noteflow/
 │   ├── components/
 │   │   ├── Editor/
 │   │   │   ├── Editor.tsx               # Instancia TipTap (conversión md↔html en lib/markdownHtml.ts)
+│   │   │   ├── editorExtensions.ts      #   extensiones que definen el esquema (nodos/marcas/atributos); las usan Editor.tsx y el harness de round-trip
 │   │   │   ├── NoteEditor.tsx           # Wrapper con tabs de secciones, atajos de fuente
 │   │   │   ├── SectionNameField.tsx     # Nombre editable de la franja del click derecho en un tab
 │   │   │   ├── EditorToolbar.tsx        # Toolbar de formato
