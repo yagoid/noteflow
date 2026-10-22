@@ -7,7 +7,14 @@
 // Rules:
 //   - Blank line (two newlines) = paragraph break  → </p><p>
 //   - Single newline within a paragraph             → <br>  (HardBreak)
-//   - Lists: consecutive same-type items are merged into one <ul>/<ol>
+//   - Lists: consecutive same-type items are merged into one <ul>/<ol>; items
+//     of different types (task / bullet / ordered) never share a list
+//
+// htmlFromMarkdown must stay the exact inverse of htmlToMarkdown for whatever
+// the editor can produce (load → save → load gives back the same document),
+// and stable for any other markdown. tests/lib/editorRoundTrip.test.ts checks
+// both against the real editor schema; the inherent ambiguities of the format
+// are listed there and in .claude/context/patterns.md.
 //
 
 import {
@@ -31,9 +38,17 @@ import {
 // boards from the \n\n block-splitter. Must not appear in real user content.
 const FENCE_BLANK = '\x00'
 
+const HEADING_RE = /^(#{1,3})\s+(.+)$/
+// A list block: its first non-blank line starts with a bullet or `1.` marker.
+const LIST_MARKER_RE = /^\s*(?:[-*+]|\d+\.)[ \t]/
+
 export function htmlFromMarkdown(md: string): string {
   if (!md.trim()) return '<p></p>'
+  return markdownBlocksToHtml(md)
+}
 
+/** htmlFromMarkdown, also for the content of a blockquote (mdBlockquoteToHtml). */
+function markdownBlocksToHtml(md: string): string {
   // Normalise line endings
   const src = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
@@ -41,122 +56,205 @@ export function htmlFromMarkdown(md: string): string {
   // inside them before splitting on \n\n (see isolateCodeFences). Kanban boards
   // go second: their pass needs to know which lines are code (a marker inside a
   // code block is code), and that is only settled once fences are isolated.
-  const protectedSrc = isolateKanbanBlocks(isolateCodeFences(src))
+  const fenced = isolateCodeFences(src)
+  const protectedSrc = quoteDepth > 0 ? fenced : isolateKanbanBlocks(fenced)
 
   // Split into "blocks" on blank lines — use exactly \n\n so that multiple
   // consecutive blank lines produce empty blocks, preserving them as <p></p>.
-  const rawBlocks = protectedSrc.split(/\n\n/)
-  const htmlBlocks: string[] = []
+  const blocks = groupBlocks(protectedSrc.split(/\n\n/))
 
-  // Merge consecutive list blocks so that blank lines between list items
-  // (stored as \n\n in markdown) are preserved as hard breaks inside the
-  // preceding item rather than splitting into separate disconnected lists.
-  const isBlockAList = (b: string) => {
-    const first = b.split('\n').find(l => l.trim())
-    return !!first && /^\s*(?:[-*+]|\d+\.)[ \t]/.test(first)
-  }
-  const blocks: string[] = []
-  for (const raw of rawBlocks) {
-    if (isBlockAList(raw) && blocks.length > 0 && isBlockAList(blocks[blocks.length - 1])) {
-      blocks[blocks.length - 1] += '\n\n' + raw
-    } else {
-      blocks.push(raw)
-    }
-  }
+  return blocks.map(blockToHtml).join('') || '<p></p>'
+}
 
-  for (const block of blocks) {
-    const lines = block.split('\n')
+// > 0 while parsing the content of a blockquote: no kanban boards there (the
+// schema keeps them at the top level, so a board in a quote would be moved out
+// of it); its markers stay quoted text, as they always were.
+let quoteDepth = 0
 
-    // ── Code fence ──────────────────────────────────────────────────────────
-    if (/^```/.test(lines[0])) {
+type BlockKind = 'code' | 'heading' | 'hr' | 'kanban' | 'list' | 'quote' | 'table' | 'paragraph'
+
+/**
+ * What a \n\n block renders as. Order matters: code fence → heading → HR →
+ * kanban → list → blockquote → table → paragraph (a `>` prefix can't be
+ * confused with list markers; a block that starts with the kanban marker but
+ * isn't a valid board falls through to the other kinds, as it always has).
+ */
+function blockKind(lines: string[]): BlockKind {
+  if (/^```/.test(lines[0])) return 'code'
+  if (lines.length === 1 && HEADING_RE.test(lines[0])) return 'heading'
+  if (lines.length === 1 && lines[0].trim() === '---') return 'hr'
+  if (quoteDepth === 0 && KANBAN_OPEN_RE.test(lines[0]) && parseKanbanMarkdown(unprotectKanban(lines))) return 'kanban'
+  const first = lines.find(l => l.trim())
+  if (first && LIST_MARKER_RE.test(first)) return 'list'
+  if (first && /^\s*>\s?/.test(first)) return 'quote'
+  // Strict detection: line 1 must contain a |, line 2 must be a separator
+  // row with only |, :, -, spaces; every cell ≥3 dashes; ≥2 cells. This
+  // avoids reinterpreting paragraphs that contain literal | characters.
+  if (lines.length >= 2 && /\|/.test(lines[0]) && TABLE_SEPARATOR_RE.test(lines[1])) return 'table'
+  return 'paragraph'
+}
+
+function unprotectKanban(lines: string[]): string {
+  return lines.map(l => (l === FENCE_BLANK ? '' : l)).join('\n')
+}
+
+function blockToHtml(block: string): string {
+  const lines = block.split('\n')
+  switch (blockKind(lines)) {
+    case 'code': {
       const lang = lines[0].slice(3).trim()
-      const code = lines.slice(1).join('\n').replace(/```\s*$/, '').trimEnd()
-        .replace(new RegExp(FENCE_BLANK, 'g'), '')
-      htmlBlocks.push(`<pre><code class="language-${lang}">${escapeHtml(code)}</code></pre>`)
-      continue
+      // Trailing blank lines go, as htmlToMarkdown drops them (code.trimEnd()):
+      // the protected ones too, so they can't come and go between saves.
+      const code = lines.slice(1).join('\n').replace(/```\s*$/, '')
+        .replace(new RegExp(FENCE_BLANK, 'g'), '').trimEnd()
+      return `<pre><code class="language-${lang}">${escapeHtml(code)}</code></pre>`
     }
-
-    // ── Headings ─────────────────────────────────────────────────────────────
-    if (lines.length === 1) {
-      const hm = lines[0].match(/^(#{1,3})\s+(.+)$/)
-      if (hm) {
-        const level = hm[1].length
-        htmlBlocks.push(`<h${level}>${inlineToHtml(hm[2])}</h${level}>`)
-        continue
-      }
-    }
-
-    // ── Horizontal Rule ──────────────────────────────────────────────────────
-    if (lines.length === 1 && lines[0].trim() === '---') {
-      htmlBlocks.push('<hr>')
-      continue
-    }
-
-    // ── Kanban board (isolated by isolateKanbanBlocks; see kanban.ts) ─────────
-    // Only a block that parses as a board: anything else starting with the
-    // marker falls through and renders as text, as it always has.
-    if (KANBAN_OPEN_RE.test(lines[0])) {
-      const board = parseKanbanMarkdown(lines.map(l => (l === FENCE_BLANK ? '' : l)).join('\n'))
-      if (board) {
-        htmlBlocks.push(kanbanDataToHtml(board))
-        continue
-      }
-    }
-
-    // ── List block (supports nested/indented items) ───────────────────────────
-    const firstMeaningfulLine = lines.find(l => l.trim())
-    const isListBlock = !!firstMeaningfulLine && /^\s*(?:[-*+]|\d+\.)[ \t]/.test(firstMeaningfulLine)
-
-    if (isListBlock) {
-      htmlBlocks.push(mdListBlockToHtml(lines))
-      continue
-    }
-
-    // ── Blockquote (`> …`) ────────────────────────────────────────────────────
-    // A block is a blockquote when its first meaningful line starts with `>`.
-    // Lists are checked above, so a `> ` prefix can't be confused with `-`/`*`/`+`
-    // bullets or `\d+.` ordered items (those never begin with `>`).
-    const isBlockquote = !!firstMeaningfulLine && /^\s*>\s?/.test(firstMeaningfulLine)
-
-    if (isBlockquote) {
-      htmlBlocks.push(mdBlockquoteToHtml(lines))
-      continue
-    }
-
-    // ── Pipe table ──────────────────────────────────────────────────────────
-    // Strict detection: line 1 must contain a |, line 2 must be a separator
-    // row with only |, :, -, spaces; every cell ≥3 dashes; ≥2 cells. This
-    // avoids reinterpreting paragraphs that contain literal | characters.
-    const isPipeTable =
-      lines.length >= 2 &&
-      /\|/.test(lines[0]) &&
-      TABLE_SEPARATOR_RE.test(lines[1])
-
-    if (isPipeTable) {
-      htmlBlocks.push(mdTableToHtml(lines))
-      continue
-    }
-
-    // ── Paragraph (may span multiple lines — single \n becomes <br>) ────────
-    const paraContent = lines
-      .map((l) => {
-        const hm = l.match(/^(#{1,3})\s+(.+)$/)
-        if (hm) {
-          const level = hm[1].length
-          return `</p><h${level}>${inlineToHtml(hm[2])}</h${level}><p>`
-        }
-        return inlineToHtml(l)
-      })
-      .join('<br>')
-      // clean up <p></p> artefacts from heading injection
-      .replace(/<p><\/p>/g, '')
-      .replace(/<\/p><br>/g, '</p>')
-      .replace(/<br><p>/g, '<p>')
-
-    htmlBlocks.push(`<p>${paraContent}</p>`)
+    case 'hr':
+      return '<hr>'
+    // Kanban board (isolated by isolateKanbanBlocks; see kanban.ts).
+    case 'kanban':
+      return kanbanDataToHtml(parseKanbanMarkdown(unprotectKanban(lines))!)
+    // List block (supports nested/indented items).
+    case 'list':
+      return mdListBlockToHtml(lines)
+    case 'quote':
+      return mdBlockquoteToHtml(lines)
+    case 'table':
+      return mdTableToHtml(lines)
+    // A one-line heading, or a paragraph (may span multiple lines — a single \n
+    // becomes <br>) that may contain heading lines.
+    default:
+      return mdParagraphBlockToHtml(lines)
   }
+}
 
-  return htmlBlocks.join('') || '<p></p>'
+/**
+ * Lines of a paragraph block (soft breaks as <br>). Markdown written by hand or
+ * by an LLM often glues a heading to the text above or below it ("## Title\n-
+ * item"): a heading line ends the paragraph, and the lines after it are a
+ * block of their own — a list, a table, more text… —, which is exactly how
+ * they are read back once saved (htmlToMarkdown separates the heading).
+ */
+function mdParagraphBlockToHtml(lines: string[]): string {
+  const h = lines.findIndex(l => HEADING_RE.test(l))
+  if (h === -1) return `<p>${lines.map(inlineToHtml).join('<br>')}</p>`
+  const [, hashes, title] = lines[h].match(HEADING_RE)!
+  // The lines above are a block of their own too (a lone `---` is an HR).
+  const before = h > 0 ? blockToHtml(lines.slice(0, h).join('\n')) : ''
+  const after = h + 1 < lines.length ? blockToHtml(lines.slice(h + 1).join('\n')) : ''
+  return `${before}<h${hashes.length}>${inlineToHtml(title)}</h${hashes.length}>${after}`
+}
+
+/** A block being regrouped by groupBlocks. */
+interface GroupedBlock {
+  text: string
+  kind: BlockKind
+  /** List blocks: depth and kind of their last top-level item (see listTail). */
+  tail?: ListTail | null
+}
+
+interface ListTail { depth: number; type: MdListItem['type'] }
+
+/**
+ * The last top-level item after `lines`, starting from `tail`. parseMdListItems
+ * pops its stack down to an item's depth, so an item is top-level exactly when
+ * its depth is ≤ the current top-level item's (the bottom of the stack).
+ */
+function listTail(tail: ListTail | null, lines: string[]): ListTail | null {
+  for (const line of lines) {
+    const item = parseListLine(line)
+    // An empty marker at the top level is a bullet item unless it's below a
+    // bullet sibling (emptyMarkerIsItem); deeper, it's nested, not top-level.
+    const type = item?.type ?? (item && (!tail || tail.type !== 'ul') ? 'ul' : null)
+    if (item && type && (!tail || item.depth <= tail.depth)) tail = { depth: item.depth, type }
+  }
+  return tail
+}
+
+/**
+ * Regroup the raw \n\n blocks into the blocks to render. htmlToMarkdown ends
+ * every block with exactly '\n\n', and a textblock that ends in hard breaks
+ * writes one extra '\n' per break before that separator; so between two
+ * blocks there are 2 + (trailing breaks) newlines, and the splitter leaves
+ * an odd one at the start of the next raw block ("\nnext").
+ *
+ *  - List blocks: blank lines inside a list are hard breaks at the end of the
+ *    item above them (listElToMd never writes a blank line between items
+ *    otherwise), so a list block absorbs the next raw block when that one
+ *    continues it: a nested item (deeper than the list's top-level items),
+ *    after any number of blank lines; or a top-level item of the SAME kind
+ *    right after a blank line (two same-kind lists in a row read as one list
+ *    whose item ends in a break — the format can't tell them apart). A
+ *    top-level item of a DIFFERENT kind (task / bullet / ordered) can't be a
+ *    sibling in the editor, so it starts a new list, and the one blank line
+ *    before it is the block separator.
+ *  - The odd '\n' at the start of a raw block is a hard break. Before a
+ *    paragraph it stays there (a leading <br>: "x<br>" + "y" and "x" + "<br>y"
+ *    are written the same, and this is how it has always been read). Before any
+ *    other block (heading, list, fence, table, quote, HR, board) — which can't
+ *    start with a break — it belongs to the end of the block above
+ *    (attachTrailingBreak), so "x<br>" + "# Title" comes back as written.
+ */
+function groupBlocks(rawBlocks: string[]): string[] {
+  const blocks: GroupedBlock[] = []
+  for (const raw of rawBlocks) {
+    let lines = raw.split('\n')
+    let kind = blockKind(lines)
+    if (kind === 'list' && continueList(blocks, raw, lines)) continue
+    if (lines.length > 1 && lines[0] === '') {
+      const rest = lines.slice(1)
+      const restKind = blockKind(rest)
+      if (restKind !== 'paragraph' || HEADING_RE.test(rest[0])) {
+        attachTrailingBreak(blocks)
+        lines = rest
+        kind = restKind
+      }
+    }
+    blocks.push({ text: lines.join('\n'), kind, tail: kind === 'list' ? listTail(null, lines) : undefined })
+  }
+  return blocks.map(b => b.text)
+}
+
+/**
+ * Append the list block `raw` to the list block before it (only empty blocks
+ * in between) if it continues that list — see groupBlocks. Restores the exact
+ * source text, so its blank lines become hard breaks in parseMdListItems.
+ */
+function continueList(blocks: GroupedBlock[], raw: string, lines: string[]): boolean {
+  let j = blocks.length - 1
+  while (j >= 0 && blocks[j].text === '') j--
+  const list = blocks[j]
+  if (!list || list.kind !== 'list') return false
+  const emptyBlocks = blocks.length - 1 - j
+  const first = parseListLine(lines.find(l => l.trim()) ?? '')
+  // An empty `- ` marker is a bullet here: continuing a bullet list it's a
+  // blank line below a sibling, else it starts a list (emptyMarkerIsItem).
+  const type = first ? first.type ?? 'ul' : null
+  let continues: boolean
+  if (!first || !type || !list.tail) {
+    continues = emptyBlocks === 0
+  } else if (first.depth > list.tail.depth) {
+    continues = true
+  } else {
+    continues = emptyBlocks === 0 && type === list.tail.type
+  }
+  if (!continues) return false
+  blocks.splice(j + 1)
+  list.text += '\n\n'.repeat(emptyBlocks + 1) + raw
+  list.tail = listTail(list.tail ?? null, lines)
+  return true
+}
+
+/**
+ * Give the block above a trailing hard break (see groupBlocks): a paragraph —
+ * empty or not — or the last item of a list. Blocks that can't end in a break
+ * (heading, HR, fence, table, quote, board) and the start of the text drop it.
+ */
+function attachTrailingBreak(blocks: GroupedBlock[]): void {
+  const last = blocks[blocks.length - 1]
+  if (!last) return
+  const lastLine = last.text.slice(last.text.lastIndexOf('\n') + 1)
+  if (last.kind === 'list' || (last.kind === 'paragraph' && !HEADING_RE.test(lastLine))) last.text += '\n'
 }
 
 // A fence opens on any column-0 line starting with ``` and closes on the next
@@ -249,24 +347,24 @@ function isolateCodeFences(src: string): string {
 }
 
 /**
- * Make the next line pushed onto `out` start a \n\n block. The splitter
- * consumes newlines in pairs from the left, so a line starts a block only if
- * the run of newlines right before it is even. Add one empty line when it's
- * odd (incl. no blank line at all).
+ * Make the next line pushed onto `out` start a \n\n block: add an empty line
+ * when it would be glued to the line above. After one or more blank lines it
+ * already does: the splitter consumes newlines in pairs from the left, so an
+ * odd run leaves one '\n' at the start of the raw block, which groupBlocks
+ * hands to the block above as a trailing hard break ("x<br>" + a fence is
+ * written `x\n\n\n```…`). Adding a line there instead would read back as an
+ * empty paragraph and lose the break.
  */
 function ensureBlockStart(out: string[]): void {
-  if (out.length === 0) return
-  let trailingEmpty = 0
-  while (trailingEmpty < out.length && out[out.length - 1 - trailingEmpty] === '') trailingEmpty++
-  const newlineRun = trailingEmpty === out.length ? trailingEmpty : trailingEmpty + 1
-  if (newlineRun % 2 === 1) out.push('')
+  if (out.length > 0 && out[out.length - 1] !== '') out.push('')
 }
 
 /**
- * Which lines of isolateCodeFences' output end up inside a code block: a block
- * (see ensureBlockStart for the parity rule) whose first line starts with ```,
- * running to the next empty line — exactly what htmlFromMarkdown renders as
- * code. Blank lines inside paired fences are FENCE_BLANK by now, not empty.
+ * Which lines of isolateCodeFences' output end up inside a code block: a line
+ * starting with ``` at the start of the text or after a blank line (see
+ * ensureBlockStart), running to the next empty line — exactly what
+ * htmlFromMarkdown renders as code. Blank lines inside paired fences are
+ * FENCE_BLANK by now, not empty.
  */
 function codeBlockLines(lines: string[]): boolean[] {
   const inCode: boolean[] = new Array(lines.length).fill(false)
@@ -274,10 +372,10 @@ function codeBlockLines(lines: string[]): boolean[] {
   let seenContent = false
   for (let i = 0; i < lines.length; i++) {
     if (lines[i] === '') { emptyRun++; continue }
-    const newlineRun = seenContent ? emptyRun + 1 : emptyRun
+    const startsBlock = !seenContent || emptyRun > 0
     emptyRun = 0
     seenContent = true
-    if (newlineRun % 2 === 0 && FENCE_OPEN_RE.test(lines[i])) {
+    if (startsBlock && FENCE_OPEN_RE.test(lines[i])) {
       while (i < lines.length && lines[i] !== '') inCode[i++] = true
       i--
     }
@@ -358,9 +456,12 @@ export function htmlToMarkdown(html: string): string {
 function blockElToMd(el: Element): string {
   const tag = el.tagName.toLowerCase()
   if (tag === 'p') return inlineElToMd(el) + '\n\n'
-  if (tag === 'h1') return `# ${inlineElToMd(el)}\n\n`
-  if (tag === 'h2') return `## ${inlineElToMd(el)}\n\n`
-  if (tag === 'h3') return `### ${inlineElToMd(el)}\n\n`
+  if (tag === 'h1' || tag === 'h2' || tag === 'h3') {
+    // An empty heading (Enter at its start) has no markdown: `### ` alone would
+    // come back as the literal text "###". It's written as an empty paragraph.
+    const text = headingElToMd(el)
+    return text ? `${'#'.repeat(Number(tag[1]))} ${text}\n\n` : '\n\n'
+  }
   if (tag === 'hr') return `---\n\n`
   if (tag === 'pre') {
     const codeEl = el.querySelector('code')
@@ -373,13 +474,14 @@ function blockElToMd(el: Element): string {
   if (tag === 'table') return tableElToMd(el)
   if (tag === 'blockquote') {
     // Convert each child block to markdown, then prefix every line with `> `
-    // (blank lines between paragraphs become a bare `>`).
+    // (blank lines between paragraphs become a bare `>`). Only the last block's
+    // separator is dropped: hard breaks / empty paragraphs at the end of the
+    // quote are part of it (mdBlockquoteToHtml parses the content back as is).
     let inner = ''
     for (const c of el.childNodes) {
       if (c.nodeType === Node.ELEMENT_NODE) inner += blockElToMd(c as Element)
     }
-    const quoted = inner
-      .replace(/\n+$/, '')
+    const quoted = (inner.endsWith('\n\n') ? inner.slice(0, -2) : inner)
       .split('\n')
       .map(line => (line ? `> ${line}` : '>'))
       .join('\n')
@@ -397,6 +499,17 @@ function blockElToMd(el: Element): string {
     if (c.nodeType === Node.ELEMENT_NODE) out += blockElToMd(c as Element)
   }
   return out
+}
+
+/**
+ * A markdown heading is one line: a hard break inside one (Shift+Enter in a
+ * heading, pasted HTML) is written as a space — leading/trailing ones dropped,
+ * runs collapsed. Written as is, `### \nTitle` came back as a paragraph with a
+ * literal `###` and the title on the next line.
+ */
+function headingElToMd(el: Element): string {
+  const md = inlineElToMd(el)
+  return md.includes('\n') ? md.replace(/\s*\n\s*/g, ' ').trim() : md
 }
 
 // Underline (`++`) and highlight (`==`) delimiters are collected as tokens and
@@ -639,16 +752,71 @@ interface MdListItem {
   children: MdListItem[]
 }
 
-function parseMdListItems(lines: string[]): MdListItem[] {
+interface MdListLine {
+  depth: number
+  /** null: an empty bullet marker (`- `), which is read as a blank line. */
+  type: MdListItem['type'] | null
+  checked: boolean
+  /** The item text after the marker (task annotations still in it). */
+  text: string
+}
+
+/** A list item line, or null for a blank line / continuation text. */
+function parseListLine(line: string): MdListLine | null {
+  if (!line.trim()) return null
+  const depth = Math.floor((line.match(/^(\s*)/)?.[1].length ?? 0) / 2)
+  // Empty bullet marker (`- `): an empty item or a blank line, see parseMdListItems.
+  if (/^\s*[-*+]\s*$/.test(line)) return { depth, type: null, checked: false, text: '' }
+  // The checkbox is followed by a space or the end of the line (an empty task
+  // at the end of the text, its space trimmed): `- [x](url)` is a bullet item
+  // starting with a link, not a checked task.
+  const taskMatch = line.match(/^\s*- \[([ x])\](?:[ \t](.*))?$/)
+  if (taskMatch) return { depth, type: 'task', checked: taskMatch[1] === 'x', text: taskMatch[2] ?? '' }
+  // A space or a tab after the marker, as LIST_MARKER_RE (which makes the block
+  // a list) accepts: a first line it accepts must be an item, or it'd be lost.
+  const olMatch = line.match(/^\s*(\d+)\.[ \t](.*)$/)
+  if (olMatch) return { depth, type: 'ol', checked: false, text: olMatch[2] }
+  const ulMatch = line.match(/^\s*[-*+][ \t](.*)$/)
+  if (ulMatch) return { depth, type: 'ul', checked: false, text: ulMatch[1] }
+  return null
+}
+
+/**
+ * Whether an empty bullet marker (`- `) at `depth` is an empty bullet item
+ * rather than a blank line: unless it sits right below a bullet sibling, it
+ * starts a bullet list (the first item of the block, the first child of the
+ * item above, or the list after a task/ordered sibling list) — that's how
+ * listElToMd writes an empty bullet, or one whose text starts with a hard
+ * break (`- ` + the rest on the next lines). The sibling is the shallowest
+ * stack entry at `depth` or deeper (they're popped for the new item).
+ */
+function emptyMarkerIsItem(stack: { depth: number; node: { type: MdListItem['type'] } }[], depth: number): boolean {
+  const sibling = stack.find(e => e.depth >= depth)
+  return !sibling || sibling.node.type !== 'ul'
+}
+
+/**
+ * The items of a list block. `lead`: text lines before the first item, which
+ * can't belong to any item (kept as a paragraph above the list, never dropped).
+ */
+function parseMdListItems(lines: string[]): { items: MdListItem[]; lead: string[] } {
   const result: MdListItem[] = []
+  const lead: string[] = []
   const stack: { depth: number; node: MdListItem }[] = []
 
   for (const line of lines) {
-    // Blank line or empty list item (e.g. "- " left by YAML) — append a line
-    // break to the preceding item so it renders as <br> (visual blank line)
-    // rather than a new bullet point.
-    const isEmptyListMarker = /^\s*[-*+]\s*$/.test(line)
-    if (!line.trim() || isEmptyListMarker) {
+    let parsed = parseListLine(line)
+
+    // An empty bullet marker that starts a bullet list is an empty bullet item
+    // (emptyMarkerIsItem). Read as a blank line, it went to the wrong item —
+    // or, first in the block, to none, and its text was lost.
+    if (parsed?.type === null && emptyMarkerIsItem(stack, parsed.depth)) parsed = { ...parsed, type: 'ul' }
+
+    // Blank line or any other empty marker (e.g. "- " left by YAML) — append a
+    // line break to the preceding item so it renders as <br> (visual blank
+    // line) rather than a new bullet point. Blank lines before the first item
+    // go: they're the block separator.
+    if (!line.trim() || parsed?.type === null) {
       const lastNode = stack.length > 0 ? stack[stack.length - 1].node
                      : result.length > 0 ? result[result.length - 1]
                      : null
@@ -656,21 +824,12 @@ function parseMdListItems(lines: string[]): MdListItem[] {
       continue
     }
 
-    const indentLen = line.match(/^(\s*)/)?.[1].length ?? 0
-    const depth = Math.floor(indentLen / 2)
-
-    const taskMatch = line.match(/^\s*- \[([ x])\] ?(.*)$/)
-    const olMatch = line.match(/^\s*(\d+)\. (.*)$/)
-    const ulMatch = line.match(/^\s*[-*+] (.*)$/)
-
     let item: MdListItem
-    if (taskMatch) {
-      const { text: cleanText, due, alarm, importance } = extractDeadlineAnnotations(taskMatch[2])
-      item = { type: 'task', checked: taskMatch[1] === 'x', text: cleanText, due, alarm, importance, children: [] }
-    } else if (olMatch) {
-      item = { type: 'ol', checked: false, text: olMatch[2], due: null, alarm: null, importance: null, children: [] }
-    } else if (ulMatch) {
-      item = { type: 'ul', checked: false, text: ulMatch[1], due: null, alarm: null, importance: null, children: [] }
+    if (parsed?.type === 'task') {
+      const { text: cleanText, due, alarm, importance } = extractDeadlineAnnotations(parsed.text)
+      item = { type: 'task', checked: parsed.checked, text: cleanText, due, alarm, importance, children: [] }
+    } else if (parsed?.type) {
+      item = { type: parsed.type, checked: false, text: parsed.text, due: null, alarm: null, importance: null, children: [] }
     } else {
       // Continuation line (soft/hard break inside list item) — append to last item.
       if (stack.length > 0) {
@@ -692,10 +851,13 @@ function parseMdListItems(lines: string[]): MdListItem[] {
         } else {
           node.text += '\n' + line.trim()
         }
+      } else {
+        lead.push(line.trim())
       }
       continue
     }
 
+    const depth = parsed.depth
     while (stack.length > 0 && stack[stack.length - 1].depth >= depth) {
       stack.pop()
     }
@@ -709,61 +871,66 @@ function parseMdListItems(lines: string[]): MdListItem[] {
     stack.push({ depth, node: item })
   }
 
-  return result
+  return { items: result, lead }
 }
 
+/**
+ * Sibling items → one list per run of consecutive items of the same kind. The
+ * editor schema can't mix them (a taskList only holds taskItems), so a mixed
+ * run would be split by ProseMirror anyway; rendering it already split keeps
+ * the HTML equal to the document it becomes.
+ */
 function renderMdListItems(items: MdListItem[]): string {
-  if (items.length === 0) return ''
+  let html = ''
+  for (let i = 0; i < items.length;) {
+    const type = items[i].type
+    let end = i
+    while (end < items.length && items[end].type === type) end++
+    const innerHtml = items.slice(i, end).map(renderMdListItem).join('')
+    if (type === 'task') html += `<ul data-type="taskList">${innerHtml}</ul>`
+    else if (type === 'ol') html += `<ol>${innerHtml}</ol>`
+    else html += `<ul>${innerHtml}</ul>`
+    i = end
+  }
+  return html
+}
 
-  const firstType = items[0].type
-  const isTask = firstType === 'task'
-  const isOl = firstType === 'ol'
-
-  const innerHtml = items.map(item => {
-    const childHtml = item.children.length > 0 ? renderMdListItems(item.children) : ''
-    if (item.type === 'task') {
-      const dueAttr   = item.due   ? ` data-due="${item.due}"`     : ''
-      const alarmAttr = item.alarm ? ` data-alarm="${item.alarm}"` : ''
-      const impAttr   = item.importance ? ` data-importance="${item.importance}"` : ''
-      return `<li data-checked="${item.checked}" data-type="taskItem"${dueAttr}${alarmAttr}${impAttr}><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${item.text.split('\n').map(inlineToHtml).join('<br>')}</p>${childHtml}</li>`
-    }
-    return `<li><p>${item.text.split('\n').map(inlineToHtml).join('<br>')}</p>${childHtml}</li>`
-  }).join('')
-
-  if (isTask) return `<ul data-type="taskList">${innerHtml}</ul>`
-  if (isOl) return `<ol>${innerHtml}</ol>`
-  return `<ul>${innerHtml}</ul>`
+function renderMdListItem(item: MdListItem): string {
+  const childHtml = renderMdListItems(item.children)
+  const textHtml = item.text.split('\n').map(inlineToHtml).join('<br>')
+  if (item.type === 'task') {
+    const dueAttr   = item.due   ? ` data-due="${item.due}"`     : ''
+    const alarmAttr = item.alarm ? ` data-alarm="${item.alarm}"` : ''
+    const impAttr   = item.importance ? ` data-importance="${item.importance}"` : ''
+    return `<li data-checked="${item.checked}" data-type="taskItem"${dueAttr}${alarmAttr}${impAttr}><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${textHtml}</p>${childHtml}</li>`
+  }
+  return `<li><p>${textHtml}</p>${childHtml}</li>`
 }
 
 function mdListBlockToHtml(lines: string[]): string {
-  return renderMdListItems(parseMdListItems(lines))
+  const { items, lead } = parseMdListItems(lines)
+  const leadHtml = lead.length ? `<p>${lead.map(inlineToHtml).join('<br>')}</p>` : ''
+  return leadHtml + renderMdListItems(items)
 }
 
 // ── Blockquote parsing (htmlFromMarkdown helper) ─────────────────────────────
 
 /**
- * Render a `> …` markdown block as `<blockquote><p>…</p>…</blockquote>`.
- * Each line's `>` prefix (with its optional single space) is stripped; runs of
- * consecutive non-empty lines become one `<p>` (soft breaks as `<br>`), and an
- * empty quote line (`>` alone) starts a new paragraph.
+ * Render a `> …` markdown block as `<blockquote>…</blockquote>`. Each line's
+ * `>` prefix (with its optional single space) is stripped and what's left is
+ * parsed as markdown of its own: the exact inverse of blockElToMd, which
+ * writes the quote's blocks (paragraphs, lists, code, headings, nested quotes…)
+ * and then prefixes every line. An empty quote line (`>` alone) is a blank
+ * line: one starts a new paragraph, as always.
  */
 function mdBlockquoteToHtml(lines: string[]): string {
-  const inner = lines.map(l => l.replace(/^\s*>\s?/, ''))
-  const paragraphs: string[][] = []
-  let current: string[] = []
-  for (const line of inner) {
-    if (line.trim() === '') {
-      if (current.length) { paragraphs.push(current); current = [] }
-    } else {
-      current.push(line)
-    }
+  const inner = lines.map(l => l.replace(/^\s*>\s?/, '')).map(l => (l.trim() ? l : ''))
+  quoteDepth++
+  try {
+    return `<blockquote>${markdownBlocksToHtml(inner.join('\n'))}</blockquote>`
+  } finally {
+    quoteDepth--
   }
-  if (current.length) paragraphs.push(current)
-  if (paragraphs.length === 0) return '<blockquote><p></p></blockquote>'
-  const html = paragraphs
-    .map(para => `<p>${para.map(inlineToHtml).join('<br>')}</p>`)
-    .join('')
-  return `<blockquote>${html}</blockquote>`
 }
 
 // ── Pipe table helpers ───────────────────────────────────────────────────────
@@ -834,7 +1001,12 @@ function renderCell(c: string): string {
 function mdTableToHtml(lines: string[]): string {
   const header = splitPipeRow(lines[0])
   const aligns = splitPipeRow(lines[1]).map(parseAlign)
-  const bodyLines = lines.slice(2).filter(l => l.trim() && /\|/.test(l))
+  // The rows run to the first line without a `|`; whatever is glued below the
+  // table (text an LLM wrote right after it…) is a block of its own, not lost.
+  let end = 2
+  while (end < lines.length && (!lines[end].trim() || /\|/.test(lines[end]))) end++
+  const bodyLines = lines.slice(2, end).filter(l => l.trim())
+  const rest = end < lines.length ? blockToHtml(lines.slice(end).join('\n')) : ''
   const styleFor = (i: number) =>
     aligns[i] ? ` style="text-align:${aligns[i]}"` : ''
 
@@ -849,11 +1021,38 @@ function mdTableToHtml(lines: string[]): string {
       `<td${styleFor(i)}>${renderCell(c)}</td>`).join('')}</tr>`
   }).join('')
 
-  return `<table>${thead}${tbody}</table>`
+  return `<table>${thead}${tbody}</table>${rest}`
 }
 
 function escapeCell(md: string): string {
   return md.replace(/\|/g, '\\|').replace(/\n/g, '<br>')
+}
+
+// A table cell in the editor holds blocks (Enter in a cell starts a new
+// paragraph; a list or code block can be pasted in), but a markdown table row
+// is one line. The cell's blocks go one per line — a `<br>` in the cell — so
+// their text is never glued together ("a" + "b" → "ab"); lists and code keep
+// their text, not their structure. A cell holding inline content directly
+// (HTML from an import) is written as before.
+const CELL_BLOCK_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'pre', 'blockquote', 'div'])
+
+function isBlockCell(cell: Element): boolean {
+  return Array.from(cell.childNodes).every(n =>
+    n.nodeType === Node.ELEMENT_NODE
+      ? CELL_BLOCK_TAGS.has((n as Element).tagName.toLowerCase())
+      : !(n.textContent ?? '').trim())
+}
+
+function cellLines(el: Element): string[] {
+  const lines: string[] = []
+  for (const c of el.children) {
+    const tag = c.tagName.toLowerCase()
+    if (tag === 'pre') lines.push(...(c.textContent ?? '').split('\n').map(l => (l.trim() ? `\`${l}\`` : '')))
+    else if (tag === 'p' || /^h\d$/.test(tag)) lines.push(inlineElToMd(c))
+    // A task item's checkbox (<label><input>) has no text: skipped.
+    else if (CELL_BLOCK_TAGS.has(tag)) lines.push(...cellLines(c))
+  }
+  return lines
 }
 
 function tableElToMd(tbl: Element): string {
@@ -865,7 +1064,7 @@ function tableElToMd(tbl: Element): string {
     c => c.tagName.toLowerCase() === 'th'
   )
   const cellMd = (c: Element) =>
-    escapeCell(inlineElToMd(c).trim()) || ' '
+    escapeCell((isBlockCell(c) ? cellLines(c).join('\n') : inlineElToMd(c)).trim()) || ' '
 
   const aligns = Array.from(headerRow.children).map(c => {
     const s = (c as HTMLElement).style?.textAlign ?? ''

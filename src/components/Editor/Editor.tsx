@@ -1,66 +1,16 @@
 import { useEditor, EditorContent } from '@tiptap/react'
 import type { Editor as TiptapEditor } from '@tiptap/react'
-import Document from '@tiptap/extension-document'
-import Paragraph from '@tiptap/extension-paragraph'
-import Text from '@tiptap/extension-text'
-import Bold from '@tiptap/extension-bold'
-import Italic from '@tiptap/extension-italic'
-import Underline from '@tiptap/extension-underline'
-import Strike from '@tiptap/extension-strike'
-import Highlight from '@tiptap/extension-highlight'
-import Code from '@tiptap/extension-code'
-import { CodeBlockWithCopy } from './CodeBlockWithCopy'
-import Heading from '@tiptap/extension-heading'
-import Blockquote from '@tiptap/extension-blockquote'
-import BulletList from '@tiptap/extension-bullet-list'
-import OrderedList from '@tiptap/extension-ordered-list'
-import ListItem from '@tiptap/extension-list-item'
-import TaskList from '@tiptap/extension-task-list'
-import { DeadlineTaskItem } from './DeadlineTaskItem'
-import Link from '@tiptap/extension-link'
-import { ResizableImage } from './ResizableImage'
-import HardBreak from '@tiptap/extension-hard-break'
-import HorizontalRule from '@tiptap/extension-horizontal-rule'
 import History from '@tiptap/extension-history'
 import Placeholder from '@tiptap/extension-placeholder'
-import Table from '@tiptap/extension-table'
-import TableRow from '@tiptap/extension-table-row'
-import TableHeader from '@tiptap/extension-table-header'
-import TableCell from '@tiptap/extension-table-cell'
-
-// Per-cell text alignment, serialized to/from `style="text-align:…"`. This is the
-// exact attribute htmlToMarkdown reads from header cells to emit markdown's
-// per-column `:---:` separators, so column alignment round-trips through .md.
-const textAlignAttribute = {
-  textAlign: {
-    default: null as 'left' | 'center' | 'right' | null,
-    parseHTML: (el: HTMLElement) =>
-      (el.style.textAlign as 'left' | 'center' | 'right') || null,
-    renderHTML: (attrs: { textAlign?: string | null }) =>
-      attrs.textAlign ? { style: `text-align:${attrs.textAlign}` } : {},
-  },
-}
-const AlignedTableCell = TableCell.extend({
-  addAttributes() {
-    return { ...this.parent?.(), ...textAlignAttribute }
-  },
-})
-const AlignedTableHeader = TableHeader.extend({
-  addAttributes() {
-    return { ...this.parent?.(), ...textAlignAttribute }
-  },
-})
 import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { AllSelection, NodeSelection, Selection, TextSelection } from '@tiptap/pm/state'
 import { createDocument, getHTMLFromFragment } from '@tiptap/core'
-import { common, createLowlight } from 'lowlight'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { schemaExtensions } from './editorExtensions'
 import { EditorToolbar } from './EditorToolbar'
 import { TableContextMenu } from './TableContextMenu'
 import { SearchHighlight } from './SearchHighlightExtension'
-import { SectionRelation } from './SectionRelation'
-import { KanbanBoard } from './KanbanBoard'
 import { SlashCommands, getSlashCommands } from './SlashCommands'
 import { AutoCloseBrackets } from './AutoCloseBrackets'
 import { SectionLinkPicker } from './SectionLinkPicker'
@@ -73,13 +23,6 @@ import { isEditorWidgetTarget, widgetFieldHasFocus } from '../../lib/editorFocus
 import { createDebouncedSave, type SaveRun } from '../../lib/pendingEdits'
 import { createContentSync, needsSave, recordSave, resolveExternalContent } from '../../lib/externalContentSync'
 import { useT } from '../../i18n/useT'
-
-const lowlight = createLowlight(common)
-
-// Kanban boards (KanbanBoard.ts) are in their own `topBlock` group, accepted only
-// here: a board nested in a list, quote or table cell would be lost by the
-// markdown serializer, so the schema keeps boards at the top level.
-const TopLevelDocument = Document.extend({ content: '(block | topBlock)+' })
 
 /**
  * Replaces the editor's document with `doc` (external content) without emitting
@@ -277,43 +220,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       },
     },
     extensions: [
-      TopLevelDocument,
-      Paragraph,
-      Text,
-      Bold,
-      Italic,
-      Underline,
-      Strike,
-      // `==text==` input rule → <mark>. multicolor off: a single accent-coloured
-      // highlight (styled via CSS, no background) — see index.css `.ProseMirror mark`.
-      Highlight,
-      Code,
-      CodeBlockWithCopy.configure({ lowlight }),
-      Heading.configure({ levels: [1, 2, 3] }),
-      // `> ` input rule → blockquote (VSCode/markdown-style citation). Round-trips
-      // to markdown via markdownHtml.ts; styled in index.css `.ProseMirror blockquote`.
-      Blockquote,
-      BulletList,
-      OrderedList,
-      ListItem,
-      TaskList,
-      DeadlineTaskItem.configure({ nested: true }),
-      Link.configure({ openOnClick: false, autolink: false }),
-      ResizableImage.configure({ inline: true, allowBase64: true }),
-      HorizontalRule,
-      // resizable:false — column widths can't be stored in portable markdown, so
-      // tables fill the available width with evenly distributed columns instead of
-      // offering a resize affordance that silently resets on reload.
-      Table.configure({ resizable: false, HTMLAttributes: { class: 'md-table' } }),
-      TableRow,
-      AlignedTableHeader,
-      AlignedTableCell,
-      HardBreak,
+      // Nodes, marks and attributes: the document schema, shared with the
+      // md<->editor round-trip tests (editorExtensions.ts).
+      ...schemaExtensions(),
       History,
       Placeholder.configure({ placeholder }),
       SearchHighlight,
-      SectionRelation,
-      KanbanBoard,
       // `(` → `()` with the caret inside, IDE-style (rules in lib/autoCloseBrackets.ts).
       AutoCloseBrackets,
       SlashCommands.configure({
