@@ -22,7 +22,6 @@ import { CustomColorSwatch } from '../CustomColorSwatch'
 import { EncryptionModal } from '../EncryptionModal'
 import { colorChannels, getTagColor, normalizeTagColorKey, resolveGroupColor, TAG_COLOR_VARS } from '../../lib/tagColors'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
-import { getRootZoom } from '../../stores/themeStore'
 import { moveSectionInList, restoreSectionInList } from '../../lib/sectionUtils'
 import { firstValidDate } from '../../lib/dateUtils'
 import { ownsKeys } from '../../lib/keyScope'
@@ -107,7 +106,7 @@ function revealSectionTab(
   if (!tab) return false
 
   // offsetLeft (not getBoundingClientRect) so we stay in the same coordinate
-  // space as scrollLeft: the UI zoom scales rects but not the scroll offset.
+  // space as scrollLeft (content-relative, independent of where the strip is).
   // The strip isn't positioned, so the tabs' offsetParent is its `relative`
   // wrapper — hence the subtraction (0 if the strip ever becomes positioned).
   const originLeft = tab.offsetParent === container ? 0 : container.offsetLeft
@@ -662,16 +661,13 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   }, [])
 
   // Measured on dragstart and reused for every dragover: the strip can't resize
-  // mid-drag, and getBoundingClientRect + getRootZoom (getComputedStyle) on each
-  // event would force a layout recalc per mouse move.
+  // mid-drag, and getBoundingClientRect on each event would force a layout
+  // recalc per mouse move.
   const measureTabsDragBounds = useCallback(() => {
     const container = tabsScrollRef.current
     if (!container) return null
     const rect = container.getBoundingClientRect()
-    // clientX lives in the zoomed (local) space while rects are in device space:
-    // divide by the root zoom before comparing them (see patterns.md).
-    const zoom = getRootZoom()
-    const bounds = { left: rect.left / zoom, width: rect.width / zoom }
+    const bounds = { left: rect.left, width: rect.width }
     tabsDragBoundsRef.current = bounds
     return bounds
   }, [])

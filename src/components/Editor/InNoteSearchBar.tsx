@@ -1,7 +1,29 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { ChevronUp, ChevronDown, X, CaseSensitive } from 'lucide-react'
 import type { EditorHandle } from './Editor'
 import { useT } from '../../i18n/useT'
+
+/**
+ * Scroll `el` to the vertical centre of `scroller` (the browser clamps at the
+ * ends) and, for any horizontal scroller in between (kanban board, code block),
+ * just enough to reveal it. Done by hand instead of `scrollIntoView` so only
+ * the note's own scrollers move — never `overflow: hidden` ancestors.
+ */
+function centerInScroller(el: HTMLElement, scroller: HTMLElement) {
+  for (let node = el.parentElement; node && node !== scroller; node = node.parentElement) {
+    const { overflowX } = getComputedStyle(node)
+    if ((overflowX !== 'auto' && overflowX !== 'scroll') || node.scrollWidth <= node.clientWidth) continue
+    const r = el.getBoundingClientRect()
+    const nr = node.getBoundingClientRect()
+    const margin = 24
+    if (r.left < nr.left) node.scrollLeft -= nr.left - r.left + margin
+    else if (r.right > nr.left + node.clientWidth) node.scrollLeft += r.right - (nr.left + node.clientWidth) + margin
+  }
+  const r = el.getBoundingClientRect()
+  const sr = scroller.getBoundingClientRect()
+  const offset = r.top - sr.top - scroller.clientTop
+  scroller.scrollTop += offset - (scroller.clientHeight - r.height) / 2
+}
 
 interface InNoteSearchBarProps {
   editorRef: RefObject<EditorHandle | null>
@@ -22,6 +44,19 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
     inputRef.current?.select()
   }, [])
 
+  // Centre the active match in the note's scroller. Deferred a frame so a
+  // kanban board (React node view) has painted its active card first.
+  // ProseMirror's own tr.scrollIntoView() in searchNext/Prev doesn't help here:
+  // focus stays in this input and it only scrolls to the nearest edge.
+  const scrollToActiveMatch = useCallback(() => {
+    requestAnimationFrame(() => {
+      const handle = editorRef.current
+      const el = handle?.editor?.view.dom.querySelector<HTMLElement>('.nf-search-match-active')
+      const scroller = handle?.getScrollContainer()
+      if (el && scroller) centerInScroller(el, scroller)
+    })
+  }, [editorRef])
+
   useEffect(() => {
     const editor = editorRef.current?.editor
     if (!editor) return
@@ -33,12 +68,13 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
       // synchronously inside dispatchTransaction, so these reads are reliable.
       setMatchCount(editor.storage.searchHighlight.matchCount)
       setActiveIndex(editor.storage.searchHighlight.activeIndex)
+      if (editor.storage.searchHighlight.matchCount > 0) scrollToActiveMatch()
     }, 80)
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [query, caseSensitive, editorRef])
+  }, [query, caseSensitive, editorRef, scrollToActiveMatch])
 
   // Keep counts in sync for any transaction that changes matches while the
   // search bar is open (e.g. user types in the editor, or navigates matches).
@@ -63,22 +99,13 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
     }
   }, [editorRef])
 
-  const scrollToActiveMatch = (editor: EditorHandle['editor']) => {
-    if (!editor) return
-    requestAnimationFrame(() => {
-      editor.view.dom
-        .querySelector('.nf-search-match-active')
-        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    })
-  }
-
   const next = () => {
     const editor = editorRef.current?.editor
     if (!editor) return
     editor.commands.searchNext()
     setMatchCount(editor.storage.searchHighlight.matchCount)
     setActiveIndex(editor.storage.searchHighlight.activeIndex)
-    scrollToActiveMatch(editor)
+    scrollToActiveMatch()
   }
   const prev = () => {
     const editor = editorRef.current?.editor
@@ -86,7 +113,7 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
     editor.commands.searchPrev()
     setMatchCount(editor.storage.searchHighlight.matchCount)
     setActiveIndex(editor.storage.searchHighlight.activeIndex)
-    scrollToActiveMatch(editor)
+    scrollToActiveMatch()
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

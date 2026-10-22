@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { ChevronUp, ChevronDown, X, CaseSensitive } from 'lucide-react'
 import { buildSearchRegex } from '../../lib/searchUtils'
 import { useT } from '../../i18n/useT'
@@ -48,13 +48,21 @@ function buildHighlightHtml(text: string, matches: Match[], activeIndex: number)
     lastIndex = to
   }
   html += escapeHtml(text.slice(lastIndex))
-  return html
+  // A textarea gives a trailing newline its own (empty) line; a pre-wrap div
+  // doesn't. The zero-width space materialises that line so both scroll ranges
+  // match (and it adds no height otherwise).
+  return html + '\u200b'
 }
 
 /** Copy the layout-relevant computed styles from the textarea onto the mirror
  *  so both elements have exactly the same text flow and line breaks. */
 function syncMirrorStyles(mirror: HTMLDivElement, textarea: HTMLTextAreaElement) {
   const cs = window.getComputedStyle(textarea)
+  // The textarea's vertical scrollbar eats into its content box, but the
+  // overflow:hidden mirror has none: pad the mirror by the scrollbar width so
+  // both wrap lines at the same column.
+  const borderX = (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0)
+  const scrollbarWidth = Math.max(0, textarea.offsetWidth - textarea.clientWidth - borderX)
   Object.assign(mirror.style, {
     position: 'absolute',
     inset: '0',
@@ -72,7 +80,7 @@ function syncMirrorStyles(mirror: HTMLDivElement, textarea: HTMLTextAreaElement)
     lineHeight: cs.lineHeight,
     letterSpacing: cs.letterSpacing,
     paddingTop: cs.paddingTop,
-    paddingRight: cs.paddingRight,
+    paddingRight: `${(parseFloat(cs.paddingRight) || 0) + scrollbarWidth}px`,
     paddingBottom: cs.paddingBottom,
     paddingLeft: cs.paddingLeft,
     // Transparent border to preserve the same inner width as the textarea
@@ -108,7 +116,9 @@ export function RawNoteSearchBar({ textareaRef, content, onClose }: RawNoteSearc
   }, [])
 
   // ── Create / destroy the mirror div ────────────────────────────────────────
-  useEffect(() => {
+  // Layout effect, declared before the update effect below, so the mirror exists
+  // (and gets styled) in the same commit the bar mounts.
+  useLayoutEffect(() => {
     const textarea = textareaRef.current
     const container = textarea?.parentElement
     if (!textarea || !container) return
@@ -133,39 +143,53 @@ export function RawNoteSearchBar({ textareaRef, content, onClose }: RawNoteSearc
   }, [textareaRef])
 
   // ── Update mirror HTML and styles on every relevant change ─────────────────
-  useEffect(() => {
+  // A scroll request (query change or next/prev) is served here, right after
+  // the mirror holds the new active <mark>, so the match position is MEASURED
+  // from the real layout (soft-wrapped lines included) instead of estimated.
+  const [scrollRequest, setScrollRequest] = useState(0)
+  const servedScrollRef = useRef(0)
+
+  useLayoutEffect(() => {
     const textarea = textareaRef.current
     const mirror = mirrorRef.current
     if (!textarea || !mirror) return
 
     syncMirrorStyles(mirror, textarea)
-    const prevScrollTop = textarea.scrollTop
     mirror.innerHTML = buildHighlightHtml(content, matches, activeIndex)
-    // Restore scroll after innerHTML update (setting innerHTML resets scrollTop)
-    mirror.scrollTop = prevScrollTop
-  }, [content, matches, activeIndex, textareaRef])
+    if (scrollRequest !== servedScrollRef.current) {
+      servedScrollRef.current = scrollRequest
+      // The mirror is position:absolute, so it is the mark's offsetParent and
+      // offsetTop is in the same content coordinates as textarea.scrollTop.
+      const mark = mirror.querySelector<HTMLElement>('.nf-search-match-active')
+      if (mark) {
+        textarea.scrollTop = mark.offsetTop + mark.offsetHeight / 2 - textarea.clientHeight / 2
+      }
+    }
+    // Setting innerHTML resets the mirror's scroll; re-align it with the textarea.
+    mirror.scrollTop = textarea.scrollTop
+  }, [content, matches, activeIndex, scrollRequest, textareaRef])
+
+  // Select the match (shown when the textarea is later focused) and centre it.
+  const revealMatch = (match: Match) => {
+    textareaRef.current?.setSelectionRange(match.from, match.to)
+    setScrollRequest((n) => n + 1)
+  }
 
   // ── Compute matches (debounced) ────────────────────────────────────────────
-  const scrollToMatch = (match: Match, text: string) => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    const linesBefore = (text.slice(0, match.from).match(/\n/g) ?? []).length
-    const cs = window.getComputedStyle(textarea)
-    const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.625
-    const paddingTop = parseFloat(cs.paddingTop) || 0
-    const targetScrollTop = paddingTop + linesBefore * lineHeight - textarea.clientHeight / 2 + lineHeight
-    textarea.scrollTop = Math.max(0, targetScrollTop)
-    // Store the selection so it becomes visible when the textarea is later focused
-    textarea.setSelectionRange(match.from, match.to)
-  }
+  // Only a new query / case toggle jumps to the first match: re-matching after
+  // an edit in the textarea must not yank the view away from the caret.
+  const lastSearchRef = useRef<{ query: string; caseSensitive: boolean } | null>(null)
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       const newMatches = findAllMatches(content, query, caseSensitive)
+      const last = lastSearchRef.current
+      const searchChanged = !last || last.query !== query || last.caseSensitive !== caseSensitive
+      lastSearchRef.current = { query, caseSensitive }
       setMatches(newMatches)
       setActiveIndex(0)
-      if (newMatches.length > 0) scrollToMatch(newMatches[0], content)
+      if (searchChanged && newMatches.length > 0) revealMatch(newMatches[0])
     }, 80)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [query, caseSensitive, content]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -173,7 +197,7 @@ export function RawNoteSearchBar({ textareaRef, content, onClose }: RawNoteSearc
   const navigate = (index: number) => {
     if (matches.length === 0) return
     setActiveIndex(index)
-    scrollToMatch(matches[index], content)
+    revealMatch(matches[index])
   }
 
   const next = () => navigate((activeIndex + 1) % matches.length)
@@ -181,7 +205,7 @@ export function RawNoteSearchBar({ textareaRef, content, onClose }: RawNoteSearc
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') { e.preventDefault(); onClose(); return }
-    if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? prev() : next(); return }
+    if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) prev(); else next(); return }
   }
 
   const matchCount = matches.length

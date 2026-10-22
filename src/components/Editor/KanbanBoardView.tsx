@@ -24,7 +24,6 @@ import {
 } from '../../lib/kanbanOps'
 import { cardTextHtml, columnTitleHtml, highlightHtml, kanbanSearchUnits } from '../../lib/kanbanSearch'
 import { buildSearchRegex } from '../../lib/searchUtils'
-import { getRootZoom } from '../../stores/themeStore'
 import { useT } from '../../i18n/useT'
 import { plural } from '../../i18n/format'
 import type { KanbanSearchSpec } from './SearchHighlightExtension'
@@ -99,18 +98,6 @@ function isTextField(target: EventTarget | null): boolean {
 
 function sameRef(a: CardRef | null, b: CardRef | null): boolean {
   return a === b || (!!a && !!b && a.col === b.col && a.idx === b.idx)
-}
-
-/**
- * getBoundingClientRect() px per MouseEvent client px. Under the root CSS
- * `zoom` (UI text size) Chromium versions disagree on whether client coords are
- * zoomed: patterns.md documents them in local space for the Electron build,
- * while Chromium 141 reports them in the same space as rects. Measure it (the
- * root's rect is rect space, innerWidth is client space) instead of assuming.
- */
-function clientToRectScale(): number {
-  const w = document.documentElement.getBoundingClientRect().width
-  return w > 0 && window.innerWidth > 0 ? w / window.innerWidth : 1
 }
 
 /** Nearest ancestor that scrolls vertically (the editor's scroller). */
@@ -191,17 +178,14 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
 
   // ── Drag & drop (pointer events; no HTML5 DnD — ProseMirror owns drop) ─────
   //
-  // Coordinates: hit-testing runs in getBoundingClientRect() space. Pointer
-  // client coords are converted into it with a factor MEASURED per drag
-  // (clientToRectScale), and local CSS px (ghost transform, indicator offsets)
-  // are rect values divided by the root zoom — see "UI text size" in
-  // patterns.md.
+  // Coordinates: the UI text size is a native page zoom, so pointer client
+  // coords, getBoundingClientRect() and the ghost's / indicators' CSS px all
+  // share one space — see "UI text size" in patterns.md.
 
   const pendingRef = useRef<PendingDrag | null>(null)
   const dragRef = useRef<DragState | null>(null)
-  /** Last pointer position, in rect space. */
+  /** Last pointer position (client coords). */
   const pointerRef = useRef({ x: 0, y: 0 })
-  const scaleRef = useRef(1)
   const frameRef = useRef<number | null>(null)
   const vScrollerRef = useRef<HTMLElement | null>(null)
   const listenersRef = useRef<(() => void) | null>(null)
@@ -211,11 +195,10 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
     setDrag(next)
   }, [])
 
-  /** Where a card dropped at (x, y) (rect space) would go; null = nowhere new. */
+  /** Where a card dropped at (x, y) (client coords) would go; null = nowhere new. */
   const hitCard = useCallback((x: number, y: number, from: CardRef): { over: CardRef | null; lineTop: number } => {
     const root = columnsRef.current
     if (!root) return { over: null, lineTop: 0 }
-    const z = getRootZoom()
     const cols = Array.from(root.querySelectorAll<HTMLElement>('[data-kanban-col]'))
     let best: HTMLElement | null = null
     let bestDist = Infinity
@@ -236,10 +219,10 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
       const idx = Number(el.dataset.kanbanCard)
       if (col === from.col && idx === from.idx) continue
       const r = el.getBoundingClientRect()
-      if (y < (r.top + r.bottom) / 2) { slot = idx; lineTop = (r.top - listTop) / z - CARD_GAP / 2; break }
+      if (y < (r.top + r.bottom) / 2) { slot = idx; lineTop = r.top - listTop - CARD_GAP / 2; break }
       lastBottom = r.bottom
     }
-    if (slot === cards.length) lineTop = lastBottom === null ? 0 : (lastBottom - listTop) / z + CARD_GAP / 2
+    if (slot === cards.length) lineTop = lastBottom === null ? 0 : lastBottom - listTop + CARD_GAP / 2
     // Dropping a card right where it already is: no indicator, no-op.
     if (col === from.col && (slot === from.idx || slot === from.idx + 1)) return { over: null, lineTop }
     return { over: { col, idx: slot }, lineTop }
@@ -248,7 +231,6 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
   const hitColumn = useCallback((x: number, from: number): { over: number | null; lineLeft: number } => {
     const root = columnsRef.current
     if (!root) return { over: null, lineLeft: 0 }
-    const z = getRootZoom()
     const rootLeft = root.getBoundingClientRect().left
     const cols = Array.from(root.querySelectorAll<HTMLElement>('[data-kanban-col]'))
     let slot = cols.length
@@ -258,10 +240,10 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
       const i = Number(el.dataset.kanbanCol)
       const r = el.getBoundingClientRect()
       if (i === from) { lastRight = r.right; continue }
-      if (x < r.left + r.width / 2) { slot = i; lineLeft = (r.left - rootLeft) / z - COLUMN_GAP / 2; break }
+      if (x < r.left + r.width / 2) { slot = i; lineLeft = r.left - rootLeft - COLUMN_GAP / 2; break }
       lastRight = r.right
     }
-    if (slot === cols.length) lineLeft = ((lastRight ?? rootLeft) - rootLeft) / z + COLUMN_GAP / 2
+    if (slot === cols.length) lineLeft = (lastRight ?? rootLeft) - rootLeft + COLUMN_GAP / 2
     if (slot === from || slot === from + 1) return { over: null, lineLeft }
     return { over: slot, lineLeft }
   }, [])
@@ -287,9 +269,8 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
     const cur = dragRef.current
     const el = ghostRef.current
     if (!cur || !el) return
-    // The ghost is `position: fixed` → local CSS px = rect px / root zoom.
-    const z = getRootZoom()
-    el.style.transform = `translate(${pointerRef.current.x / z - cur.ghost.dx}px, ${pointerRef.current.y / z - cur.ghost.dy}px)`
+    // The ghost is `position: fixed`: client coords map 1:1 to its CSS px.
+    el.style.transform = `translate(${pointerRef.current.x - cur.ghost.dx}px, ${pointerRef.current.y - cur.ghost.dy}px)`
   }, [])
 
   // Per-frame loop while dragging: auto-scroll near the edges (board
@@ -297,20 +278,18 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
   const startLoop = useCallback(() => {
     const loop = () => {
       if (!dragRef.current) { frameRef.current = null; return }
-      const z = getRootZoom()
-      const zone = EDGE_SCROLL_ZONE * z
       const { x, y } = pointerRef.current
       const sc = scrollRef.current
       if (sc) {
         const r = sc.getBoundingClientRect()
-        if (x < r.left + zone) sc.scrollLeft -= EDGE_SCROLL_SPEED
-        else if (x > r.right - zone) sc.scrollLeft += EDGE_SCROLL_SPEED
+        if (x < r.left + EDGE_SCROLL_ZONE) sc.scrollLeft -= EDGE_SCROLL_SPEED
+        else if (x > r.right - EDGE_SCROLL_ZONE) sc.scrollLeft += EDGE_SCROLL_SPEED
       }
       const vs = vScrollerRef.current
       if (vs) {
         const r = vs.getBoundingClientRect()
-        if (y < r.top + zone) vs.scrollTop -= EDGE_SCROLL_SPEED
-        else if (y > r.bottom - zone) vs.scrollTop += EDGE_SCROLL_SPEED
+        if (y < r.top + EDGE_SCROLL_ZONE) vs.scrollTop -= EDGE_SCROLL_SPEED
+        else if (y > r.bottom - EDGE_SCROLL_ZONE) vs.scrollTop += EDGE_SCROLL_SPEED
       }
       updateTarget()
       frameRef.current = requestAnimationFrame(loop)
@@ -343,13 +322,12 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
   }, [apply, setDragState])
 
   const beginDrag = useCallback((p: PendingDrag) => {
-    const z = getRootZoom()
     const r = p.el.getBoundingClientRect()
     const style = getComputedStyle(p.el)
     const ghost: Ghost = {
-      dx: (p.startX - r.left) / z,
-      dy: (p.startY - r.top) / z,
-      width: r.width / z,
+      dx: p.startX - r.left,
+      dy: p.startY - r.top,
+      width: r.width,
       fontSize: style.getPropertyValue('--prose-font-size') || style.fontSize,
       fontFamily: style.getPropertyValue('--prose-font-family') || style.fontFamily,
     }
@@ -370,17 +348,15 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
     const target = e.target as HTMLElement
     if (target.closest('button, input, textarea, a, label, span[data-type="section-relation"]')) return
     listenersRef.current?.()
-    scaleRef.current = clientToRectScale()
-    const k = scaleRef.current
-    pendingRef.current = { ...pending, startX: e.clientX * k, startY: e.clientY * k }
-    pointerRef.current = { x: e.clientX * k, y: e.clientY * k }
+    pendingRef.current = { ...pending, startX: e.clientX, startY: e.clientY }
+    pointerRef.current = { x: e.clientX, y: e.clientY }
 
     const onMove = (ev: PointerEvent) => {
-      pointerRef.current = { x: ev.clientX * k, y: ev.clientY * k }
+      pointerRef.current = { x: ev.clientX, y: ev.clientY }
       const p = pendingRef.current
       if (p && !dragRef.current) {
         const { x, y } = pointerRef.current
-        if (Math.hypot(x - p.startX, y - p.startY) < DRAG_THRESHOLD * k) return
+        if (Math.hypot(x - p.startX, y - p.startY) < DRAG_THRESHOLD) return
         beginDrag(p)
       }
       positionGhost()

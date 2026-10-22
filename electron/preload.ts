@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 // Type-only import (erased at compile time — the preload runs sandboxed, with
 // no Node/module loading beyond electron itself).
 import type { AccountErrorCode } from './account'
@@ -58,6 +58,14 @@ const api = {
   // Settings
   getTheme: (): string | null => ipcRenderer.sendSync('settings:get-theme'),
   setTheme: (id: string)      => ipcRenderer.send('settings:set-theme', id),
+
+  // "UI text size": native Chromium zoom for this window (see patterns.md "UI text
+  // size"). It is per window and not persisted, so the renderer re-applies it on
+  // every load (themeStore.initTheme), which also overrides any stale host-level
+  // zoom Chromium may have persisted.
+  setUiZoom: (factor: number) => {
+    if (Number.isFinite(factor) && factor > 0) webFrame.setZoomFactor(factor)
+  },
   // Synced UI settings (ui-settings.json). Sync read on purpose: initTheme()
   // needs it before the first paint to avoid a theme flash.
   getUiSettings: (): UiSettingsPayload => ipcRenderer.sendSync('ui-settings:get'),

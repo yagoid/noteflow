@@ -26,6 +26,14 @@ const api = {
     // Settings
     getTheme: () => electron_1.ipcRenderer.sendSync('settings:get-theme'),
     setTheme: (id) => electron_1.ipcRenderer.send('settings:set-theme', id),
+    // "UI text size": native Chromium zoom for this window (see patterns.md "UI text
+    // size"). It is per window and not persisted, so the renderer re-applies it on
+    // every load (themeStore.initTheme), which also overrides any stale host-level
+    // zoom Chromium may have persisted.
+    setUiZoom: (factor) => {
+        if (Number.isFinite(factor) && factor > 0)
+            electron_1.webFrame.setZoomFactor(factor);
+    },
     // Synced UI settings (ui-settings.json). Sync read on purpose: initTheme()
     // needs it before the first paint to avoid a theme flash.
     getUiSettings: () => electron_1.ipcRenderer.sendSync('ui-settings:get'),

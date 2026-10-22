@@ -2,7 +2,6 @@
 // used by task list items (DeadlineTaskItemView) and kanban cards
 // (KanbanBoardView). Kept apart from TaskPickers.tsx so that file only exports
 // components (react-refresh/only-export-components).
-import { getRootZoom } from '../../stores/themeStore'
 import type { TaskImportance } from '../../lib/markdownInline'
 
 export type Importance = TaskImportance
@@ -34,21 +33,16 @@ export const IMPORTANCE_POPOVER_SIZE = { height: 132, width: 170 }
 
 /**
  * Where to open a `position: fixed` picker for `trigger`: below it, or above
- * when there's no room, kept inside the viewport horizontally. The popover is
- * fixed (zoomed/local space) while the rect is device space, so the rect is
- * divided by the root zoom (see "UI text size" in patterns.md).
+ * when there's no room, kept inside the viewport horizontally. The UI zoom is
+ * native, so the rect and window.inner* share the popover's CSS px space.
  */
 export function popoverPosition(
   trigger: HTMLElement,
   size: { height: number; width: number },
 ): { top: number; left: number } {
   const rect = trigger.getBoundingClientRect()
-  const z = getRootZoom()
-  const rectTop = rect.top / z
-  const rectBottom = rect.bottom / z
-  const rectLeft = rect.left / z
-  const spaceBelow = window.innerHeight - rectBottom
-  const top = spaceBelow > size.height ? rectBottom + 4 : rectTop - size.height - 4
-  const left = Math.min(rectLeft, window.innerWidth - size.width)
+  const spaceBelow = window.innerHeight - rect.bottom
+  const top = spaceBelow > size.height ? rect.bottom + 4 : rect.top - size.height - 4
+  const left = Math.min(rect.left, window.innerWidth - size.width)
   return { top, left }
 }

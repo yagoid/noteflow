@@ -174,6 +174,8 @@ interface EditorProps {
 
 export interface EditorHandle {
   editor: TiptapEditor | null
+  /** The element that scrolls the note vertically (wraps the ProseMirror DOM). */
+  getScrollContainer: () => HTMLElement | null
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
@@ -393,7 +395,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   const syncExternalContentRef = useRef(syncExternalContent)
   useEffect(() => { syncExternalContentRef.current = syncExternalContent })
 
-  useImperativeHandle(ref, () => ({ editor }), [editor])
+  useImperativeHandle(ref, () => ({ editor, getScrollContainer: () => scrollRef.current }), [editor])
 
   const tocItems = useTocItems(editor, showToc)
   const tocVisible = showToc && wideEnoughForToc && tocItems.length > 0

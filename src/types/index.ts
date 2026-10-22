@@ -461,6 +461,8 @@ declare global {
       windowId: () => number
       getTheme: () => string | null
       setTheme: (id: string) => void
+      // Native page zoom for the "UI text size" setting (webFrame.setZoomFactor).
+      setUiZoom: (factor: number) => void
       getUiSettings: () => UiSettings
       setUiSettings: (patch: UiSettings) => Promise<void>
       getLanguage: () => 'en' | 'es' | 'system'

@@ -93,8 +93,8 @@ function applyEditorColors(overrides: EditorColorOverrides) {
 }
 
 // Preset UI scale steps. Small 5% increments so bumping the size never jumps
-// jarringly. Applied as a CSS zoom on the document root so the whole UI scales
-// proportionally (the codebase already uses `zoom` for note previews).
+// jarringly. Applied as the native page zoom (Electron webFrame) so the whole UI
+// scales proportionally while viewport, scrolling and coordinates stay consistent.
 export const UI_SCALES = [0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3]
 export const DEFAULT_UI_SCALE = 1.0
 
@@ -102,20 +102,14 @@ function nearestScale(value: number): number {
   return UI_SCALES.reduce((best, s) => (Math.abs(s - value) < Math.abs(best - value) ? s : best), UI_SCALES[0])
 }
 
+// Native zoom, NOT a CSS `zoom` on <html>: under a root CSS zoom Chromium lays the
+// app out at zoom × the window height and ProseMirror / scrollIntoView end up
+// scrolling outer `overflow: hidden` ancestors (whole UI shifts, editor bottom
+// unreachable). Always applied — including 1.0 — so a zoom level Chromium may
+// have persisted for this origin can't win. With native zoom every DOM API
+// (rects, clientX/Y, innerWidth, style.left/top) shares one CSS-px space.
 function applyUiScale(scale: number) {
-  // `zoom` is non-standard but supported in Chromium/Electron; 1 == no zoom.
-  const root = document.documentElement.style as CSSStyleDeclaration & { zoom: string }
-  root.zoom = String(scale)
-}
-
-// Current UI zoom factor applied on the document root by `applyUiScale`. Under a
-// root `zoom`, `position: fixed` elements live in the (zoomed) local coordinate
-// space, while `getBoundingClientRect()` reports device-space coords (multiplied
-// by the zoom). Popups positioned from a rect must divide by this factor to land
-// in the same space as `window.innerWidth/innerHeight`. Falls back to 1.
-export function getRootZoom(): number {
-  const z = parseFloat(getComputedStyle(document.documentElement).zoom)
-  return Number.isFinite(z) && z > 0 ? z : 1
+  window.noteflow?.setUiZoom?.(scale)
 }
 
 // A theme provides a base palette + its own app font + accent. On top of that the

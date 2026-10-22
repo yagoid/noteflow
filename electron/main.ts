@@ -806,12 +806,11 @@ function createWindow(hidden = false): BrowserWindow {
     win.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
-  // Reset any persisted zoom level — Chromium stores zoom preferences in the
-  // user data directory; old versions set zoomFactor: scaleFactor which got
-  // persisted, causing the app to appear zoomed even after that code was removed.
-  win.webContents.on('did-finish-load', () => {
-    win.webContents.setZoomFactor(1)
-  })
+  // Page zoom is owned by the renderer: themeStore.initTheme() applies the "UI
+  // text size" via webFrame.setZoomFactor on every load (all window kinds), which
+  // also overrides any zoom Chromium persisted in userData (old versions set
+  // zoomFactor: scaleFactor). Don't reset it here: did-finish-load fires after
+  // initTheme() and would undo the user's scale.
 
   win.once('ready-to-show', () => {
     if (hidden) return  // startup mode: stay hidden in tray
@@ -996,10 +995,6 @@ function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
     win.loadFile(path.join(__dirname, '../dist/index.html'), { hash })
   }
 
-  win.webContents.on('did-finish-load', () => {
-    win.webContents.setZoomFactor(1)
-  })
-
   // Apply the OS-level window shape so Windows DWM respects the rounded corners
   // even when the window loses focus (CSS border-radius is ignored by DWM).
   win.on('resize', () => applyStickyShape(win))
@@ -1078,10 +1073,6 @@ function createSectionWindow(noteId: string, sectionId: string): BrowserWindow {
   })
   sectionWindows.set(win, { noteId, sectionId })
   loadSectionWindow(win, noteId, sectionId)
-
-  win.webContents.on('did-finish-load', () => {
-    win.webContents.setZoomFactor(1)
-  })
 
   win.once('ready-to-show', () => {
     win.show()

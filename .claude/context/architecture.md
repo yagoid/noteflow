@@ -242,6 +242,9 @@ Renderer (React)
             └─ ipcMain.handle()/on()  ← definido en main.ts
 ```
 
+Excepción sin IPC: `window.noteflow.setUiZoom(factor)` llama a `webFrame.setZoomFactor` dentro del
+propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text size").
+
 ### Handlers IPC (fuente de verdad: `electron/main.ts` + `electron/preload.ts`)
 
 | Canal | Tipo | Descripción |

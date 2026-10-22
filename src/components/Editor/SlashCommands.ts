@@ -4,7 +4,6 @@ import Suggestion from '@tiptap/suggestion'
 import type { SuggestionProps } from '@tiptap/suggestion'
 import { ReactRenderer } from '@tiptap/react'
 import { SlashCommandMenu, type SlashCommandMenuHandle } from './SlashCommandMenu'
-import { getRootZoom } from '../../stores/themeStore'
 import type { Messages } from '../../i18n'
 import {
   convertTaskListToBoard,
@@ -61,21 +60,13 @@ export interface SlashCommandsOptions {
 function positionPopup(popup: HTMLElement, rect: DOMRect | null) {
   if (!rect) return
   const margin = 8
-  // The popup is `position: fixed` (zoomed/local space), but `rect` comes from
-  // getBoundingClientRect() (device space). Divide the rect coords by the root
-  // zoom so they match the local space of the popup and window.innerWidth/Height.
-  // popup.offsetWidth/offsetHeight are already in local space — don't touch them.
-  const z = getRootZoom()
-  const rectLeft = rect.left / z
-  const rectTop = rect.top / z
-  const rectBottom = rect.bottom / z
   const width = popup.offsetWidth || 240
-  let left = rectLeft
+  let left = rect.left
   if (left + width + margin > window.innerWidth) left = window.innerWidth - width - margin
   if (left < margin) left = margin
-  let top = rectBottom + 6
+  let top = rect.bottom + 6
   const height = popup.offsetHeight || 0
-  if (top + height + margin > window.innerHeight) top = rectTop - height - 6
+  if (top + height + margin > window.innerHeight) top = rect.top - height - 6
   popup.style.left = `${left}px`
   popup.style.top = `${Math.max(margin, top)}px`
 }
