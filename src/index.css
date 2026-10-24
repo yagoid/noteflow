@@ -1004,7 +1004,8 @@ button {
    Full bleed: the board ignores the readable column and cancels the editor's
    horizontal padding (--pm-pad-l / --pm-bleed-r, see `.prose-editor
    .ProseMirror`), so its own scroller spans the whole editor width; the inner
-   padding puts the first column back on the text's left edge. With the TOC
+   padding keeps the columns inside the text's edges, centered while they fit
+   (see `.kanban-columns`). With the TOC
    shown --pm-bleed-r is 0: the board stops short of the TOC's dash strip.
    Columns are fixed-width (scaled with the prose font size) and scroll
    horizontally inside the board — never the note. Theme vars only. */
@@ -1096,12 +1097,15 @@ button {
 .kanban-board:hover .kanban-scroll::-webkit-scrollbar-thumb,
 .kanban-board:has(.is-drag-source) .kanban-scroll::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); }
 .kanban-board:hover .kanban-scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--text-muted) / 0.7); }
+/* Centered in the note's width; once the columns overflow, the auto margins
+   resolve to 0 and the board scrolls from the left edge as usual. */
 .kanban-columns {
   position: relative;
   display: flex;
   align-items: flex-start;
   gap: 10px;
   width: max-content;
+  margin: 0 auto;
 }
 
 .kanban-column {
