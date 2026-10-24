@@ -3,53 +3,155 @@
 // unchanged in the Edge Function (Deno) and under vitest on Node. Covered by
 // tests/supabase/ai-proxy.test.ts. Same philosophy as billing-webhook/logic.ts.
 
+// ── Model catalog ─────────────────────────────────────────────────────────────
+// The catalog of the managed plan (which models it serves, what each costs
+// against the quota, which accept images) lives in the public.ai_models table
+// (migration 0012) — adding a model is inserting a row: no redeploy, no app
+// release. index.ts reads it with a short in-memory cache (catalogFromRows
+// turns the rows into a ModelCatalog) and falls back to FALLBACK_MODEL_CATALOG
+// when the table is unreachable or has no usable row. The catalog drives
+// everything model-related: the allowlist of POST /chat/completions, the
+// per-model quota multiplier, and GET /models, whose body (modelsListBody) is
+// what the desktop client caches as ITS catalog.
+
+/** One model of the managed plan's catalog. */
+export interface CatalogModel {
+  /** OpenRouter model id. */
+  id: string
+  /**
+   * What a real token costs against the monthly quota (×1 = baseline). Real
+   * tokens (tokens_in/tokens_out) are still recorded unweighted for the
+   * operator's cost accounting; the weighted value goes to the
+   * usage_events.quota_tokens column (migration 0007).
+   */
+  quotaMultiplier: number
+  /** Native vision support (the client gates image attachments on it). */
+  images: boolean
+}
+
+/** Ordered catalog — the first entry is the client's default model. */
+export type ModelCatalog = readonly CatalogModel[]
+
 /**
- * Curated OpenRouter model ids the managed plan serves by default (overridable
- * with the AI_ALLOWED_MODELS env). All of them MUST support tool calling — the
- * NoteFlow chat is agentic. NOT all of them support vision: the two DeepSeek
- * models and Xiaomi MiMo are text-only (every other curated model accepts image
- * input).
- *
- * KEEP IN SYNC with NOTEFLOW_AI_MODELS in electron/ai/llm/presets.ts (the
- * `noteflow` preset shows this same list as suggested models in the client,
- * and NOTEFLOW_AI_MODEL_META mirrors the multipliers/vision flags below).
+ * BACKUP catalog, used only when public.ai_models cannot be read or has no
+ * enabled usable row. Mirrors the seed of migration 0012 (same ids, order,
+ * multipliers and vision flags) and the client's own fallback
+ * (NOTEFLOW_AI_MODELS + NOTEFLOW_AI_MODEL_META in electron/ai/llm/presets.ts)
+ * — tests/supabase/ai-catalog-mirror.test.ts pins the three together. It is a
+ * safety net, NOT where the catalog is managed: new models go into the table.
+ * All curated models MUST support tool calling (the NoteFlow chat is agentic);
+ * NOT all support vision (the two DeepSeek models and Xiaomi MiMo are
+ * text-only).
  */
-export const DEFAULT_ALLOWED_MODELS: readonly string[] = [
+export const FALLBACK_MODEL_CATALOG: ModelCatalog = [
   // Standard models (×1 quota).
-  'deepseek/deepseek-v4-pro',
-  'deepseek/deepseek-v4-flash',
-  'xiaomi/mimo-v2.5-pro',
-  'openai/gpt-5.6-luna',
-  'anthropic/claude-haiku-4.5',
-  // Mid-tier (×2 quota — see MODEL_QUOTA_MULTIPLIERS).
-  'x-ai/grok-4.5',
-  // Advanced models (×6 quota — see MODEL_QUOTA_MULTIPLIERS).
-  'moonshotai/kimi-k3',
+  { id: 'deepseek/deepseek-v4-pro', quotaMultiplier: 1, images: false },
+  { id: 'deepseek/deepseek-v4-flash', quotaMultiplier: 1, images: false },
+  { id: 'xiaomi/mimo-v2.5-pro', quotaMultiplier: 1, images: false },
+  { id: 'openai/gpt-5.6-luna', quotaMultiplier: 1, images: true },
+  { id: 'anthropic/claude-haiku-4.5', quotaMultiplier: 1, images: true },
+  // Mid-tier (×2 quota).
+  { id: 'x-ai/grok-4.5', quotaMultiplier: 2, images: true },
+  // Advanced models (×6 quota).
+  { id: 'moonshotai/kimi-k3', quotaMultiplier: 6, images: true },
 ]
+
+/** Ids of the backup catalog, in order. */
+export const DEFAULT_ALLOWED_MODELS: readonly string[] = FALLBACK_MODEL_CATALOG.map((m) => m.id)
+
+/** Positive finite number from a JSON number or a numeric string (PostgREST
+ *  serializes `numeric` as a JSON number, but a string must not break us). */
+function positiveNumber(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+/**
+ * public.ai_models rows → catalog: only rows with `enabled = true`, ordered by
+ * sort_order (then id, for a deterministic order on ties). Defensive: a row
+ * with a missing/blank id, a non-positive or non-numeric multiplier or a
+ * non-boolean `images` is SKIPPED (the table's constraints make that
+ * near-impossible; one bad row must not take the whole catalog down), and a
+ * repeated id keeps its first occurrence. Null when nothing usable is left
+ * (not an array, empty table, everything disabled) — the caller then serves
+ * FALLBACK_MODEL_CATALOG.
+ */
+export function catalogFromRows(rows: unknown): ModelCatalog | null {
+  if (!Array.isArray(rows)) return null
+  const picked: Array<CatalogModel & { sortOrder: number }> = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) continue
+    const r = row as Record<string, unknown>
+    if (r.enabled !== true) continue
+    const id = typeof r.id === 'string' ? r.id.trim() : ''
+    const quotaMultiplier = positiveNumber(r.quota_multiplier)
+    if (!id || quotaMultiplier === null || typeof r.images !== 'boolean' || seen.has(id)) continue
+    seen.add(id)
+    const sortOrder = typeof r.sort_order === 'number' && Number.isFinite(r.sort_order) ? r.sort_order : 0
+    picked.push({ id, quotaMultiplier, images: r.images, sortOrder })
+  }
+  if (picked.length === 0) return null
+  picked.sort((a, b) => a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  return picked.map(({ id, quotaMultiplier, images }) => ({ id, quotaMultiplier, images }))
+}
+
+/**
+ * Parses the AI_ALLOWED_MODELS env value ("a/b,c/d" → list). Null when the env
+ * is missing/empty/whitespace-only, i.e. "no override".
+ */
+export function parseAllowedModelsOverride(raw: string | undefined | null): string[] | null {
+  const models = (raw ?? '')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean)
+  return models.length > 0 ? models : null
+}
+
+export interface ServedCatalog {
+  /** What the proxy serves: allowlist, multipliers and GET /models. */
+  catalog: ModelCatalog
+  /** The override was set but matched no catalog model, so it was ignored. */
+  overrideIgnored: boolean
+}
+
+/**
+ * Applies the AI_ALLOWED_MODELS emergency override to the catalog. The override
+ * can only RESTRICT: the served catalog is the catalog's models whose id is in
+ * the override, in CATALOG order and with CATALOG metadata. Ids absent from the
+ * catalog are ignored — an env var cannot add a model, because it would have no
+ * multiplier (a pricey model would be charged ×1) nor vision flag. If the
+ * override matches NO catalog model (typo, or ids that only exist in a table the
+ * proxy could not read) it is ignored altogether (overrideIgnored — the caller
+ * logs it): serving nothing would take the whole plan down. With the table in
+ * place the normal way to retire a model is `enabled = false`; the env remains
+ * as a lever that needs no database access.
+ */
+export function applyAllowedModelsOverride(catalog: ModelCatalog, raw: string | undefined | null): ServedCatalog {
+  const override = parseAllowedModelsOverride(raw)
+  if (!override) return { catalog, overrideIgnored: false }
+  const wanted = new Set(override)
+  const served = catalog.filter((m) => wanted.has(m.id))
+  return served.length > 0 ? { catalog: served, overrideIgnored: false } : { catalog, overrideIgnored: true }
+}
+
+/** Ids of a catalog, in order — the allowlist of POST /chat/completions. */
+export function catalogModelIds(catalog: ModelCatalog): string[] {
+  return catalog.map((m) => m.id)
+}
 
 /** Default monthly QUOTA token budget (weighted input + output) per user. */
 export const DEFAULT_MONTHLY_TOKENS = 3_000_000
 
 /**
- * Per-model quota multipliers: what a real token costs against the monthly
- * quota. Only models more expensive than the ×1 baseline are listed — anything
- * not in the map (every standard model, and unknown ids) is ×1. There are two
- * paid tiers today, mid-tier ×2 and advanced ×6, but nothing here assumes a
- * fixed set of values: quotaMultiplierFor accepts any positive finite number,
- * so adding a tier is just a new entry. Real tokens (tokens_in/tokens_out) are
- * still recorded unweighted for the operator's cost accounting; the weighted
- * value goes to the usage_events.quota_tokens column (migration 0007).
- *
- * KEEP IN SYNC with NOTEFLOW_AI_MODEL_META in electron/ai/llm/presets.ts.
+ * Quota multiplier for a model, from the catalog in use (the backup one when
+ * omitted). Models absent from the catalog — never allowed, so they should
+ * never get here — and malformed entries cost the ×1 baseline. Nothing assumes
+ * a fixed set of values: any positive finite number works, so a new tier is
+ * just a row with a new multiplier.
  */
-export const MODEL_QUOTA_MULTIPLIERS: Readonly<Record<string, number>> = {
-  'x-ai/grok-4.5': 2,
-  'moonshotai/kimi-k3': 6,
-}
-
-/** Quota multiplier for a model — unknown/unlisted models cost the ×1 baseline. */
-export function quotaMultiplierFor(model: string): number {
-  const mult = MODEL_QUOTA_MULTIPLIERS[model]
+export function quotaMultiplierFor(model: string, catalog: ModelCatalog = FALLBACK_MODEL_CATALOG): number {
+  const mult = catalog.find((m) => m.id === model)?.quotaMultiplier
   return typeof mult === 'number' && Number.isFinite(mult) && mult > 0 ? mult : 1
 }
 
@@ -57,22 +159,14 @@ export function quotaMultiplierFor(model: string): number {
  * Weighted quota tokens a usage event costs: round((in + out) * multiplier).
  * Defensive: a malformed usage side counts as 0 rather than poisoning the sum.
  */
-export function computeQuotaTokens(usage: Pick<TokenUsage, 'tokensIn' | 'tokensOut'>, model: string): number {
+export function computeQuotaTokens(
+  usage: Pick<TokenUsage, 'tokensIn' | 'tokensOut'>,
+  model: string,
+  catalog: ModelCatalog = FALLBACK_MODEL_CATALOG
+): number {
   const tokensIn = Number.isFinite(usage.tokensIn) && usage.tokensIn > 0 ? usage.tokensIn : 0
   const tokensOut = Number.isFinite(usage.tokensOut) && usage.tokensOut > 0 ? usage.tokensOut : 0
-  return Math.round((tokensIn + tokensOut) * quotaMultiplierFor(model))
-}
-
-/**
- * Parses the AI_ALLOWED_MODELS env value ("a/b,c/d" → list). Empty/missing/
- * whitespace-only input falls back to the curated default list.
- */
-export function parseAllowedModels(raw: string | undefined | null): string[] {
-  const models = (raw ?? '')
-    .split(',')
-    .map((m) => m.trim())
-    .filter(Boolean)
-  return models.length > 0 ? models : [...DEFAULT_ALLOWED_MODELS]
+  return Math.round((tokensIn + tokensOut) * quotaMultiplierFor(model, catalog))
 }
 
 /**
@@ -176,10 +270,15 @@ export const RESERVATION_STALE_MINUTES = 10
  *            `image_url` part of messages[].content counts IMAGE_PART_TOKENS
  *            instead of its base64 length;
  *   output = the clamped max_tokens (the worst case the request can bill);
- * times the model's quota multiplier, rounded. Deliberately an upper-ish bound:
- * it is what the user is charged if real usage never arrives.
+ * times the model's quota multiplier in `catalog` (the one being served — the
+ * backup catalog when omitted), rounded. Deliberately an upper-ish bound: it is
+ * what the user is charged if real usage never arrives.
  */
-export function estimateReservationTokens(upstreamBody: Record<string, unknown>, model: string): number {
+export function estimateReservationTokens(
+  upstreamBody: Record<string, unknown>,
+  model: string,
+  catalog: ModelCatalog = FALLBACK_MODEL_CATALOG
+): number {
   let images = 0
   const messages = Array.isArray(upstreamBody.messages)
     ? upstreamBody.messages.map((msg: unknown) => {
@@ -201,7 +300,7 @@ export function estimateReservationTokens(upstreamBody: Record<string, unknown>,
   const bytes = new TextEncoder().encode(JSON.stringify({ ...upstreamBody, messages })).length
   const input = Math.ceil(bytes / 4) + images * IMAGE_PART_TOKENS
   const output = clampMaxTokens(upstreamBody.max_tokens)
-  return Math.round((input + output) * quotaMultiplierFor(model))
+  return Math.round((input + output) * quotaMultiplierFor(model, catalog))
 }
 
 /** True when a Content-Length header already announces a body above the cap. */
@@ -314,12 +413,33 @@ export function openAiErrorBody(
   return { error: { message, type, code } }
 }
 
-/** GET /models response in OpenAI list format. */
-export function modelsListBody(models: string[]): {
-  object: 'list'
-  data: Array<{ id: string; object: 'model' }>
-} {
-  return { object: 'list', data: models.map((id) => ({ id, object: 'model' as const })) }
+/** One entry of GET /models: the OpenAI model object plus NoteFlow's metadata. */
+export interface ModelsListEntry {
+  id: string
+  object: 'model'
+  /** Quota multiplier (×1 = baseline) — the client shows "(N× quota)" above 1. */
+  quota_multiplier: number
+  /** Native vision support — the client gates image attachments on it. */
+  images: boolean
+}
+
+/**
+ * GET /models response: OpenAI list format (any OpenAI client still reads the
+ * ids), with each entry carrying the catalog metadata. The desktop client
+ * validates this body and caches it as the managed plan's catalog
+ * (electron/ai/llm/managedCatalog.ts sanitizeManagedCatalog) — keep the field
+ * names in sync with it.
+ */
+export function modelsListBody(catalog: ModelCatalog): { object: 'list'; data: ModelsListEntry[] } {
+  return {
+    object: 'list',
+    data: catalog.map((m) => ({
+      id: m.id,
+      object: 'model' as const,
+      quota_multiplier: m.quotaMultiplier,
+      images: m.images,
+    })),
+  }
 }
 
 /**

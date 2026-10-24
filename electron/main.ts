@@ -41,6 +41,7 @@ import * as aiIndex from './ai/aiIndex'
 import * as llm from './ai/llm'
 import * as agentTools from './ai/llm/tools'
 import { managedProxyErrorKind } from './ai/llm/managedErrors'
+import { isManagedAiUsable } from './entitlementsRetry'
 import * as noteFormat from './noteFormat'
 import { sanitizeUiSettings, mergeUiSettings, type UiSettings } from './uiSettings'
 import * as importers from './importers'
@@ -380,6 +381,10 @@ function handleAccountStatusChanged(): void {
   // session for its JWT): most notably sign-out must tear the socket down —
   // no cloud:status event fires in that path.
   syncCloudRealtimeState()
+
+  // A usable managed plan (fresh sign-in, boot with a restored session, entitlements
+  // arriving) → refresh NoteFlow AI's model catalog in the background (throttled).
+  if (status.signedIn && isManagedAiUsable(status)) void refreshManagedCatalog()
 
   emitAccountStatusChanged()
 }
@@ -2271,7 +2276,74 @@ function writeLlmSettings(next: llm.LlmConfigStored): void {
 
 ipcMain.handle('ai:llm-get-config', () => llm.toPublic(readLlmSettings()))
 
-ipcMain.handle('ai:llm-presets', () => llm.PRESETS)
+// The managed preset carries the EFFECTIVE model catalog (cached from the proxy, else
+// the backup constants) — see refreshManagedCatalog below. The renderer asks for the
+// presets whenever the assistant or Settings → AI loads, so that is also when a stale
+// catalog gets refreshed (throttled, in the background: a change arrives by event).
+ipcMain.handle('ai:llm-presets', () => {
+  if (isManagedAiUsable(account.getAccountStatus())) void refreshManagedCatalog()
+  return llm.listPresets()
+})
+
+// ── NoteFlow AI model catalog ──────────────────────────────────────────────────
+// The managed plan's catalog is served by the proxy (GET /models, from the Supabase
+// table ai_models) and cached in settings.aiManagedCatalog, so models added server-side
+// appear without an app release and the picker works offline / across restarts.
+// Refreshed in the background whenever the managed plan is usable — account status
+// changes (sign-in, boot, entitlements) and every ai:llm-presets read (assistant /
+// Settings → AI opening), throttled to MANAGED_CATALOG_MIN_INTERVAL_MS after a success —
+// and forced by the panel's "Load" button and by a chat 400 `model_not_allowed` (a model
+// retired server-side, see friendlyChatError). Contract (electron/ai/llm/managedCatalog.ts):
+// never touches the user's stored model, and a failed download or an unusable body never
+// replaces the good cache.
+const MANAGED_CATALOG_MIN_INTERVAL_MS = 10 * 60_000
+let managedCatalogRefresh: Promise<{ ok: boolean; error?: string }> | null = null
+let managedCatalogFetchedAt = 0
+
+/** Seeds the in-memory catalog from settings.json (boot). An unusable stored value is
+ *  ignored (the backup constants apply until the next successful download). */
+function loadManagedCatalogCache(): void {
+  llm.setCachedManagedCatalog(llm.parseStoredManagedCatalog(readSettings().aiManagedCatalog))
+}
+
+function refreshManagedCatalog(force = false): Promise<{ ok: boolean; error?: string }> {
+  if (managedCatalogRefresh) return managedCatalogRefresh
+  if (!force && Date.now() - managedCatalogFetchedAt < MANAGED_CATALOG_MIN_INTERVAL_MS) {
+    return Promise.resolve({ ok: true })
+  }
+  managedCatalogRefresh = runManagedCatalogRefresh().finally(() => {
+    managedCatalogRefresh = null
+  })
+  return managedCatalogRefresh
+}
+
+async function runManagedCatalogRefresh(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const fetched = await llm.fetchManagedCatalog(mainMessages().chatErrors)
+    managedCatalogFetchedAt = Date.now()
+    if (!fetched) {
+      // The proxy answered, but not with a usable catalog (corrupt, empty, or a proxy
+      // too old to send the metadata): keep whatever is in force.
+      console.warn('[LLM] NoteFlow AI sent no usable model catalog — keeping the current one')
+      return { ok: true }
+    }
+    const before = llm.effectiveManagedCatalog()
+    if (!llm.sameManagedCatalog(fetched, llm.getCachedManagedCatalog())) {
+      const settings = readSettings()
+      settings.aiManagedCatalog = llm.toStoredManagedCatalog(fetched)
+      writeSettings(settings)
+      llm.setCachedManagedCatalog(fetched)
+    }
+    // Only the presets change (settings.aiLlm is never touched): the renderer re-pulls
+    // presets + config, so the picker, the quota suffixes and the vision flag follow.
+    if (!llm.sameManagedCatalog(before, fetched)) {
+      BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('ai:llm-presets-changed'))
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
 
 ipcMain.handle('ai:llm-set-config', (_event, patch: {
   active?: string; model?: string; baseUrl?: string; apiKey?: string; clearKey?: boolean
@@ -2307,6 +2379,14 @@ ipcMain.handle('ai:llm-set-config', (_event, patch: {
 })
 
 ipcMain.handle('ai:llm-list-models', async () => {
+  // NoteFlow AI: "Load" re-downloads the catalog (forced) and answers with the effective
+  // one — on a failure the cached catalog stays in force and only the error is reported.
+  if (readLlmSettings().active === 'noteflow') {
+    const res = await refreshManagedCatalog(true)
+    return res.ok
+      ? { ok: true, models: [...llm.effectiveManagedCatalog().models] }
+      : { ok: false, models: [], error: res.error }
+  }
   try {
     const models = await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings(), mainMessages().chatErrors)).listModels()
     return { ok: true, models }
@@ -2630,6 +2710,10 @@ function friendlyChatError(raw: string, sentImages: boolean, managed: boolean): 
       void account.refreshEntitlements()
       return mainMessages().chatErrors.managedSubscriptionInactive
     }
+    // The model was retired server-side (ai_models.enabled = false) but our cached catalog
+    // still lists it: force a catalog refresh (single-flight, one per failed message — no
+    // loop) so effectiveModel falls back in memory and the NEXT message already works.
+    if (raw.includes('"model_not_allowed"')) void refreshManagedCatalog(true)
   }
   if (sentImages) {
     const low = raw.toLowerCase()
@@ -3542,6 +3626,9 @@ app.whenReady().then(async () => {
 
   // NoteFlow account: load the persisted session and refresh entitlements in
   // the background (deferred inside initAccount — never blocks boot).
+  // NoteFlow AI's model catalog as cached by a previous run — before anything can read
+  // the presets (windows, IPC) or a status change can trigger a refresh.
+  loadManagedCatalogCache()
   account.onStatusChanged(() => handleAccountStatusChanged())
   account.initAccount()
   // Seed the sign-in/sign-out edge detector with the session as restored from

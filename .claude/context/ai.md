@@ -138,8 +138,34 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   guardado o, si no hay, `suggestedModels[0]`; en los presets con **catálogo curado** (los que
   llevan `modelMeta` — hoy solo `noteflow`, cuya lista rota y cuyo proxy rechaza lo que no esté en
   ella) un modelo guardado que ya no esté en `suggestedModels` **también** cae en el primero, para
-  que un catálogo renovado no deje al usuario con un modelo inválido. En los presets BYO el modelo
-  es libre y se respeta tal cual.
+  que un catálogo renovado no deje al usuario con un modelo inválido. Ese fallback es **solo en
+  memoria**: `settings.aiLlm` conserva el id guardado, así que si un catálogo posterior lo vuelve a
+  traer, vuelve a ser el efectivo. En los presets BYO el modelo es libre y se respeta tal cual.
+- **Catálogo de modelos de NoteFlow AI (servido por el proxy, `electron/ai/llm/managedCatalog.ts`):**
+  la fuente de verdad es la tabla Supabase `public.ai_models` (migración 0012), que el proxy sirve en
+  `GET <ai-proxy>/models` en formato lista OpenAI **con metadatos por entrada** (`quota_multiplier`,
+  `images`). Main lo descarga (`llm.fetchManagedCatalog`, con el access token de la cuenta) en
+  segundo plano cada vez que la cuenta cambia de estado con el plan usable (`handleAccountStatusChanged`
+  con `isManagedAiUsable`: cubre el arranque —el refresh de entitlements diferido de `initAccount`
+  emite un cambio de estado—, el inicio de sesión y la llegada de entitlements) y en cada lectura de
+  `ai:llm-presets` (al abrir el asistente o Ajustes → IA), con **throttle de 10 min tras un éxito** y
+  single-flight; y **forzado** al pulsar "Load" con `noteflow` activo (`ai:llm-list-models`) y
+  cuando el chat recibe un 400 `model_not_allowed` del proxy (`friendlyChatError`: el modelo se
+  retiró en el servidor pero seguía en la caché — así solo falla ese mensaje). Un 401 al descargar
+  invalida el access token (`invalidateAccessToken`), como el resto de llamadas a la cuenta. Lo valida (`sanitizeManagedCatalog`: **todo o nada** — un id vacío, un
+  multiplicador no numérico/≤0, un `images` no booleano, una lista vacía o >200 entradas, o un proxy
+  antiguo que solo manda ids → se ignora la respuesta entera) y, si cambió, lo persiste en
+  `settings.aiManagedCatalog` (local, `userData`) y emite `ai:llm-presets-changed` (el renderer
+  recarga presets + config desde `App.tsx`). **Catálogo efectivo** = el cacheado si existe, si no las
+  constantes de respaldo `NOTEFLOW_AI_MODELS` + `NOTEFLOW_AI_MODEL_META` de `presets.ts`. Main lo
+  siembra desde `settings.json` al arrancar (`loadManagedCatalogCache`, antes de `initAccount`).
+  `llm/index.ts` lo inyecta en el preset (`livePreset` = `withManagedCatalog(presetOf(id))`), así que
+  `effectiveModel`, `acceptsModel`, `providerCapabilities` (vía `toPublic`) y `ai:llm-presets`
+  (`listPresets`) usan **el mismo** catálogo: un modelo nuevo aparece en el picker con su sufijo
+  "(N× quota)" sin release. Invariantes: refrescar **nunca** toca el modelo guardado (`aiLlm`), y un
+  fallo de red / respuesta inválida **nunca** vacía ni pisa la caché buena. Qué pasa si el modelo
+  guardado sale del catálogo: lo de arriba (fallback en memoria al primero) — un `replaced_by` para
+  migrar la selección está **pendiente** (fase posterior). Tests: `tests/electron/managedCatalog.test.ts`.
 - **UI del proveedor (`LlmConfigView`, embebida en Settings → IA y en la pestaña "settings" del panel
   del cerebro):** **selector de dos cards mutuamente excluyentes** (mismo patrón que Settings → Sync,
   con badge Activo/Inactivo) — **NoteFlow AI** (gestionado) vs **proveedor propio / IA local** (BYO key
@@ -274,8 +300,9 @@ Python…) quedan literales. **Borrador persistente:** las
   con un 400; true en los vision-capaces/flexibles: OpenAI/OpenRouter/Ollama/Custom). **Excepción:
   los presets con `modelMeta`** (hoy solo `noteflow`, cuyo catálogo mezcla modelos con y sin visión)
   refinan el flag **por modelo activo** — manda `modelMeta[activeModel].images` sobre el default del
-  preset (text-only en el catálogo gestionado: los dos DeepSeek y `xiaomi/mimo-v2.5-pro` — **tres de
-  los cinco modelos ×1**). ⚠️ **El modelo por defecto del plan gestionado (`suggestedModels[0]`, hoy
+  preset; para `noteflow` es el `images` del **catálogo efectivo** (columna `images` de
+  `ai_models`; ver "Catálogo de modelos de NoteFlow AI" arriba). Text-only en el catálogo de respaldo/
+  seed: los dos DeepSeek y `xiaomi/mimo-v2.5-pro` — **tres de los cinco modelos ×1**. ⚠️ **El modelo por defecto del plan gestionado (`suggestedModels[0]`, hoy
   `deepseek/deepseek-v4-pro`) es text-only**, así que quien active NoteFlow AI sin tocar el selector
   **no verá adjuntar imágenes** hasta que elija un modelo con visión: no dar por hecho que el plan
   gestionado trae visión "de serie". `.txt/.md` se

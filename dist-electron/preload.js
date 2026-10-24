@@ -207,6 +207,12 @@ const api = {
     // AI / LLM provider (chat + second brain)
     aiLlmGetConfig: () => electron_1.ipcRenderer.invoke('ai:llm-get-config'),
     aiLlmPresets: () => electron_1.ipcRenderer.invoke('ai:llm-presets'),
+    // NoteFlow AI's model catalog changed (downloaded from the proxy) → re-pull the presets.
+    onAiLlmPresetsChanged: (cb) => {
+        const wrapper = () => cb();
+        electron_1.ipcRenderer.on('ai:llm-presets-changed', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:llm-presets-changed', wrapper);
+    },
     aiLlmSetConfig: (patch) => electron_1.ipcRenderer.invoke('ai:llm-set-config', patch),
     aiLlmListModels: () => electron_1.ipcRenderer.invoke('ai:llm-list-models'),
     aiLlmTest: () => electron_1.ipcRenderer.invoke('ai:llm-test'),

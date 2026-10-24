@@ -180,8 +180,8 @@ export function ChatView({
 
   const preset = useMemo(() => presets.find((p) => p.id === llmConfig?.active) ?? null, [presets, llmConfig?.active])
   // Same rule as the provider panel: a preset with a curated catalog (modelMeta) only offers the
-  // catalog itself — main rejects any other id, so a wider /models answer would put an option in
-  // the <select> that silently bounces back when picked.
+  // catalog itself (the one main has in force, refreshed from the proxy) — main rejects any other
+  // id, so an option from another source would silently bounce back when picked.
   const modelOptions = useMemo(() => {
     if (preset?.modelMeta) return preset.suggestedModels
     const set = new Set<string>([...(preset?.suggestedModels ?? []), ...models])

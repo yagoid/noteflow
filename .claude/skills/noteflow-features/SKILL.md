@@ -820,7 +820,9 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   Activo/Inactivo en cada una, y debajo solo la sección de la que elijas):
   - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow),
     modelos curados (los más caros con sufijo "N× cuota" — hoy 2× y 6×; el campo "Model" es de **solo
-    lectura**, se elige haciendo clic en uno de los modelos) y **barra de consumo mensual**. Botón "Use NoteFlow
+    lectura**, se elige haciendo clic en uno de los modelos) y **barra de consumo mensual**. La lista de
+    modelos la sirve el servidor: los modelos nuevos **aparecen solos** (sin actualizar la app; "Load"
+    fuerza el refresco), se recuerda entre arranques y offline, y tu modelo elegido no cambia. Botón "Use NoteFlow
     AI" para activarlo (o check "Active" si ya lo es). Sin sesión o sin suscripción, la card sigue
     visible pero en vez del botón muestra el aviso del motivo ("sign in" / "requires subscription")
     **+ el bloque de planes con precios**: NoteFlow AI y, si tampoco tienes Cloud, el Bundle (con

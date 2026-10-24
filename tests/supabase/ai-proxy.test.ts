@@ -2,8 +2,12 @@ import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_ALLOWED_MODELS,
   DEFAULT_MONTHLY_TOKENS,
-  MODEL_QUOTA_MULTIPLIERS,
-  parseAllowedModels,
+  FALLBACK_MODEL_CATALOG,
+  catalogFromRows,
+  parseAllowedModelsOverride,
+  applyAllowedModelsOverride,
+  catalogModelIds,
+  type ModelCatalog,
   parseMonthlyTokens,
   isModelAllowed,
   hasAiEntitlement,
@@ -32,25 +36,137 @@ import {
   mapUpstreamError,
 } from '../../supabase/functions/ai-proxy/logic'
 
-describe('parseAllowedModels', () => {
-  it('falls back to the curated defaults when the env is missing or empty', () => {
-    expect(parseAllowedModels(undefined)).toEqual([...DEFAULT_ALLOWED_MODELS])
-    expect(parseAllowedModels(null)).toEqual([...DEFAULT_ALLOWED_MODELS])
-    expect(parseAllowedModels('')).toEqual([...DEFAULT_ALLOWED_MODELS])
-    expect(parseAllowedModels('  ,  ,')).toEqual([...DEFAULT_ALLOWED_MODELS])
+// A catalog that only exists in the table (not in the backup constants) — what
+// "a new model inserted in ai_models" looks like to the proxy.
+const TABLE_CATALOG: ModelCatalog = [
+  { id: 'deepseek/deepseek-v4-pro', quotaMultiplier: 1, images: false },
+  { id: 'new/model-x', quotaMultiplier: 3, images: true },
+  { id: 'cheap/model-y', quotaMultiplier: 0.5, images: false },
+]
+
+describe('catalogFromRows (public.ai_models → catalog)', () => {
+  const row = (id: unknown, extra: Record<string, unknown> = {}) => ({
+    id,
+    quota_multiplier: 1,
+    images: true,
+    enabled: true,
+    sort_order: 0,
+    ...extra,
   })
 
+  it('keeps only enabled rows, ordered by sort_order', () => {
+    expect(
+      catalogFromRows([
+        row('c/third', { sort_order: 30 }),
+        row('a/first', { sort_order: 10, quota_multiplier: 2, images: false }),
+        row('off/disabled', { sort_order: 0, enabled: false }),
+        row('b/second', { sort_order: 20 }),
+      ])
+    ).toEqual([
+      { id: 'a/first', quotaMultiplier: 2, images: false },
+      { id: 'b/second', quotaMultiplier: 1, images: true },
+      { id: 'c/third', quotaMultiplier: 1, images: true },
+    ])
+  })
+
+  it('breaks sort_order ties by id (deterministic order)', () => {
+    expect(catalogModelIds(catalogFromRows([row('z/z'), row('a/a'), row('m/m')])!)).toEqual(['a/a', 'm/m', 'z/z'])
+  })
+
+  it('accepts a numeric multiplier serialized as a string, and fractional tiers', () => {
+    expect(catalogFromRows([row('a/a', { quota_multiplier: '1.5' })])).toEqual([
+      { id: 'a/a', quotaMultiplier: 1.5, images: true },
+    ])
+  })
+
+  it('skips malformed rows without dropping the good ones', () => {
+    expect(
+      catalogFromRows([
+        row(''),
+        row('   '),
+        row(42),
+        row('bad/mult-0', { quota_multiplier: 0 }),
+        row('bad/mult-neg', { quota_multiplier: -2 }),
+        row('bad/mult-nan', { quota_multiplier: 'abc' }),
+        row('bad/mult-missing', { quota_multiplier: undefined }),
+        row('bad/images', { images: 'yes' }),
+        row('bad/enabled-string', { enabled: 'true' }),
+        null,
+        'nope',
+        [],
+        row(' ok/model ', { sort_order: 5 }),
+      ])
+    ).toEqual([{ id: 'ok/model', quotaMultiplier: 1, images: true }])
+  })
+
+  it('keeps the first occurrence of a repeated id', () => {
+    expect(catalogFromRows([row('a/a', { quota_multiplier: 2 }), row('a/a', { quota_multiplier: 9 })])).toEqual([
+      { id: 'a/a', quotaMultiplier: 2, images: true },
+    ])
+  })
+
+  it('a missing sort_order sorts as 0', () => {
+    expect(
+      catalogModelIds(catalogFromRows([row('b/b', { sort_order: 1 }), row('a/a', { sort_order: undefined })])!)
+    ).toEqual(['a/a', 'b/b'])
+  })
+
+  it('returns null when nothing usable is left — the caller serves the backup catalog', () => {
+    expect(catalogFromRows([])).toBeNull()
+    expect(catalogFromRows([row('a/a', { enabled: false })])).toBeNull()
+    expect(catalogFromRows([row('')])).toBeNull()
+    expect(catalogFromRows(null)).toBeNull()
+    expect(catalogFromRows({ data: [row('a/a')] })).toBeNull()
+  })
+})
+
+describe('FALLBACK_MODEL_CATALOG / DEFAULT_ALLOWED_MODELS', () => {
+  it('DEFAULT_ALLOWED_MODELS is the backup catalog ids, in order', () => {
+    expect([...DEFAULT_ALLOWED_MODELS]).toEqual(FALLBACK_MODEL_CATALOG.map((m) => m.id))
+  })
+
+  it('every backup entry is well-formed (what catalogFromRows would accept)', () => {
+    for (const m of FALLBACK_MODEL_CATALOG) {
+      expect(m.id.trim()).toBe(m.id)
+      expect(m.id).not.toBe('')
+      expect(Number.isFinite(m.quotaMultiplier) && m.quotaMultiplier > 0).toBe(true)
+      expect(typeof m.images).toBe('boolean')
+    }
+  })
+})
+
+describe('AI_ALLOWED_MODELS emergency override', () => {
   it('parses a comma-separated override with whitespace tolerance', () => {
-    expect(parseAllowedModels(' openai/gpt-5.6-luna , x-ai/grok-4.5 ,')).toEqual([
+    expect(parseAllowedModelsOverride(' openai/gpt-5.6-luna , x-ai/grok-4.5 ,')).toEqual([
       'openai/gpt-5.6-luna',
       'x-ai/grok-4.5',
     ])
   })
 
-  it('returns a copy, never the shared default array', () => {
-    const a = parseAllowedModels(undefined)
-    a.push('mutated')
-    expect(DEFAULT_ALLOWED_MODELS).not.toContain('mutated')
+  it('missing / empty / whitespace-only env = no override', () => {
+    expect(parseAllowedModelsOverride(undefined)).toBeNull()
+    expect(parseAllowedModelsOverride(null)).toBeNull()
+    expect(parseAllowedModelsOverride('')).toBeNull()
+    expect(parseAllowedModelsOverride('  ,  ,')).toBeNull()
+    expect(applyAllowedModelsOverride(TABLE_CATALOG, undefined)).toEqual({ catalog: TABLE_CATALOG, overrideIgnored: false })
+  })
+
+  it('only RESTRICTS the catalog, keeping catalog order and metadata', () => {
+    const { catalog, overrideIgnored } = applyAllowedModelsOverride(TABLE_CATALOG, 'cheap/model-y,new/model-x')
+    expect(overrideIgnored).toBe(false)
+    expect(catalog).toEqual([TABLE_CATALOG[1], TABLE_CATALOG[2]])
+  })
+
+  it('cannot ADD a model the catalog does not have (it would have no multiplier)', () => {
+    const { catalog } = applyAllowedModelsOverride(TABLE_CATALOG, 'new/model-x,someone/pricey-model')
+    expect(catalogModelIds(catalog)).toEqual(['new/model-x'])
+  })
+
+  it('is ignored (and flagged) when it matches no catalog model — never an empty allowlist', () => {
+    expect(applyAllowedModelsOverride(TABLE_CATALOG, 'typo/model')).toEqual({
+      catalog: TABLE_CATALOG,
+      overrideIgnored: true,
+    })
   })
 })
 
@@ -131,15 +247,27 @@ describe('computeQuota', () => {
 })
 
 describe('quotaMultiplierFor', () => {
-  it('returns the map value for advanced (×6) models', () => {
+  it('reads the multiplier from the catalog in use', () => {
+    expect(quotaMultiplierFor('new/model-x', TABLE_CATALOG)).toBe(3)
+    expect(quotaMultiplierFor('cheap/model-y', TABLE_CATALOG)).toBe(0.5)
+    // A model only in the backup catalog is unknown to this one → ×1 baseline.
+    expect(quotaMultiplierFor('moonshotai/kimi-k3', TABLE_CATALOG)).toBe(1)
+  })
+
+  it('falls back to ×1 for a malformed catalog entry', () => {
+    expect(quotaMultiplierFor('a/a', [{ id: 'a/a', quotaMultiplier: Number.NaN, images: true }])).toBe(1)
+    expect(quotaMultiplierFor('a/a', [{ id: 'a/a', quotaMultiplier: -3, images: true }])).toBe(1)
+  })
+
+  it('returns the backup value for advanced (×6) models', () => {
     expect(quotaMultiplierFor('moonshotai/kimi-k3')).toBe(6)
   })
 
-  it('returns the map value for mid-tier (×2) models', () => {
+  it('returns the backup value for mid-tier (×2) models', () => {
     expect(quotaMultiplierFor('x-ai/grok-4.5')).toBe(2)
   })
 
-  it('returns 1 for standard curated models (not in the map)', () => {
+  it('returns 1 for standard curated models', () => {
     expect(quotaMultiplierFor('openai/gpt-5.6-luna')).toBe(1)
     expect(quotaMultiplierFor('deepseek/deepseek-v4-flash')).toBe(1)
     expect(quotaMultiplierFor('xiaomi/mimo-v2.5-pro')).toBe(1)
@@ -148,12 +276,6 @@ describe('quotaMultiplierFor', () => {
   it('returns 1 for unknown models', () => {
     expect(quotaMultiplierFor('someone/some-model')).toBe(1)
     expect(quotaMultiplierFor('')).toBe(1)
-  })
-
-  it('every multiplied model is part of the curated catalog', () => {
-    for (const model of Object.keys(MODEL_QUOTA_MULTIPLIERS)) {
-      expect(DEFAULT_ALLOWED_MODELS).toContain(model)
-    }
   })
 })
 
@@ -175,6 +297,11 @@ describe('computeQuotaTokens', () => {
     expect(Number.isInteger(computeQuotaTokens({ tokensIn: 1, tokensOut: 2 }, 'anthropic/claude-haiku-4.5'))).toBe(true)
   })
 
+  it('uses the multiplier of the catalog it is given (the served one)', () => {
+    expect(computeQuotaTokens({ tokensIn: 100, tokensOut: 50 }, 'new/model-x', TABLE_CATALOG)).toBe(450)
+    expect(computeQuotaTokens({ tokensIn: 100, tokensOut: 50 }, 'cheap/model-y', TABLE_CATALOG)).toBe(75)
+  })
+
   it('treats zero and malformed usage sides as 0', () => {
     expect(computeQuotaTokens({ tokensIn: 0, tokensOut: 0 }, 'moonshotai/kimi-k3')).toBe(0)
     expect(computeQuotaTokens({ tokensIn: NaN, tokensOut: 10 }, 'moonshotai/kimi-k3')).toBe(60)
@@ -190,14 +317,20 @@ describe('openAiErrorBody / modelsListBody', () => {
     })
   })
 
-  it('shapes the OpenAI models list', () => {
-    expect(modelsListBody(['a/b', 'c/d'])).toEqual({
+  it('shapes the OpenAI models list, with the catalog metadata per entry, in order', () => {
+    expect(modelsListBody(TABLE_CATALOG)).toEqual({
       object: 'list',
       data: [
-        { id: 'a/b', object: 'model' },
-        { id: 'c/d', object: 'model' },
+        { id: 'deepseek/deepseek-v4-pro', object: 'model', quota_multiplier: 1, images: false },
+        { id: 'new/model-x', object: 'model', quota_multiplier: 3, images: true },
+        { id: 'cheap/model-y', object: 'model', quota_multiplier: 0.5, images: false },
       ],
     })
+  })
+
+  it('serves the override-restricted catalog when AI_ALLOWED_MODELS is set', () => {
+    const { catalog } = applyAllowedModelsOverride(TABLE_CATALOG, 'new/model-x')
+    expect(modelsListBody(catalog).data.map((m) => m.id)).toEqual(['new/model-x'])
   })
 })
 
@@ -384,6 +517,15 @@ describe('estimateReservationTokens', () => {
     expect(estimateReservationTokens(body, 'x-ai/grok-4.5')).toBe(base * 2)
     expect(estimateReservationTokens(body, 'moonshotai/kimi-k3')).toBe(base * 6)
     expect(Number.isInteger(estimateReservationTokens(body, 'moonshotai/kimi-k3'))).toBe(true)
+  })
+
+  it('takes the multiplier from the served catalog (a model that only exists in the table)', () => {
+    const body = buildUpstreamBody({ model: 'x', messages: [{ role: 'user', content: 'hi' }], max_tokens: 100 })
+    const base = estimateReservationTokens(body, 'deepseek/deepseek-v4-pro', TABLE_CATALOG)
+    expect(estimateReservationTokens(body, 'new/model-x', TABLE_CATALOG)).toBe(base * 3)
+    expect(estimateReservationTokens(body, 'cheap/model-y', TABLE_CATALOG)).toBe(Math.round(base * 0.5))
+    // The same model is ×1 against the backup catalog, which does not know it.
+    expect(estimateReservationTokens(body, 'new/model-x')).toBe(base)
   })
 
   it('uses the clamped output cap when max_tokens is missing or absurd', () => {

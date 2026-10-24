@@ -59,6 +59,7 @@ noteflow/
 │       ├── aiWorker.ts  #   utilityProcess: embeddings (Transformers.js) + SQLite index
 │       └── llm/         #   Proveedor LLM (Fase 3, corre en main; key NUNCA va al renderer)
 │           ├── presets.ts          #     Catálogo de proveedores (anthropic | openai-compatible)
+│           ├── managedCatalog.ts   #     Catálogo de modelos de NoteFlow AI (del proxy, cacheado; puro, testeado)
 │           ├── types.ts            #     LlmProvider, ChatMessage, config (por preset)
 │           ├── secret.ts           #     Cifrado de API key (safeStorage, espejo de githubSync)
 │           ├── anthropic.ts        #     Provider SDK @anthropic-ai/sdk (messages.stream)
@@ -316,8 +317,8 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `ai:reindex-all` | handle | Reindexa TODAS las secciones en background (lotes de 16) con progreso |
 | `ai:get-stale` | handle | `{stale, count}`: si el índice va por detrás de las notas (main lleva la cuenta, persistida). Se emite además por el evento `ai:index-stale` — detalle en `ai.md` |
 | `ai:llm-get-config` / `ai:llm-set-config` | handle | Lee/escribe `settings.aiLlm` (config del LLM por proveedor). `get` saneado (sin key); `set` aplica al **preset activo** (clave/modelo/baseUrl por proveedor) y cifra la key con `safeStorage`. El `baseUrl` se **ignora** (no se persiste) en presets con `editableBaseUrl: false` — sobre todo `noteflow`, cuya credencial es el token de Supabase; `effectiveBaseUrl` aplica la misma regla al leer |
-| `ai:llm-presets` | handle | Catálogo de presets de proveedor (`electron/ai/llm/presets.ts`) |
-| `ai:llm-list-models` / `ai:llm-test` | handle | Lista modelos del proveedor activo / valida conexión+credenciales |
+| `ai:llm-presets` | handle | Catálogo de presets de proveedor (`electron/ai/llm/presets.ts`, vía `llm.listPresets()`): el preset `noteflow` lleva el **catálogo efectivo** de modelos (el descargado del proxy y cacheado en `settings.aiManagedCatalog`, o las constantes de respaldo) — ver `ai.md` |
+| `ai:llm-list-models` / `ai:llm-test` | handle | Lista modelos del proveedor activo / valida conexión+credenciales. Con `noteflow` activo, `list-models` **re-descarga el catálogo** del proxy (forzado) y devuelve el efectivo; si falla, la caché sigue vigente y solo se informa del error |
 | `ai:chat` | handle | Chat **agéntico** con streaming: contexto RAG + bucle de tool-calling, emite por eventos, admite `attachmentIds[]` (detalle en `ai.md` → Chat agéntico) |
 | `ai:chat-pick-files` / `ai:chat-remove-file` | handle | Adjuntos del chat a la caché `chatFiles` del main (persisten para preguntas de seguimiento); devuelve solo metadatos — los bytes NUNCA cruzan al renderer |
 | `ai:chat-cancel` | on | Aborta un `ai:chat` en vuelo por `requestId` (AbortController); también resuelve confirmaciones pendientes |
@@ -337,6 +338,8 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 `cloud:status-changed` (broadcast del status público de NoteFlow Cloud — mismo shape que `cloud:get-status`),
 `ai:reindex-progress` (`{done,total}`), `ai:index-state` (estado del índice),
 `ai:index-stale` (`{stale,count}` — índice por detrás de las notas; OJO: no es lo mismo que `ai:index-state`),
+`ai:llm-presets-changed` (sin payload — cambió el catálogo de modelos de NoteFlow AI; `App.tsx` recarga
+presets + config si ya estaban cargados),
 `ai:chat-delta` (`{requestId,delta}`), `ai:chat-sources` (`{requestId,sources}`),
 `ai:chat-done` (`{requestId,aborted?}`), `ai:chat-error` (`{requestId,error}`),
 `ai:chat-tool-call` (`{requestId,toolCallId,name,input,label}` — `label` es la frase en presente
@@ -451,6 +454,10 @@ Estructura de `settings.json`:
       "ollama":    { "baseUrl": "http://localhost:11434/v1", "model": "..." }
     }
   },
+  "aiManagedCatalog": {
+    "models": [{ "id": "deepseek/deepseek-v4-pro", "quotaMultiplier": 1, "images": false }],
+    "updatedAt": "2026-10-24T10:00:00.000Z"
+  },
   "aiProfile": { "completedAt": "2026-06-14T10:00:00.000Z", "noteId": "abc12345" }
 }
 ```
@@ -459,6 +466,9 @@ Estructura de `settings.json`:
 > archivos JSON dentro del dir de notas para poder sincronizarse entre dispositivos. El **historial
 > de chats** vive en `userData/ai-chats.json` (local, no se sincroniza); las **API keys del LLM** se
 > cifran por proveedor en `settings.aiLlm.byPreset[*].encryptedApiKey` (nunca cruzan al renderer).
+> `aiManagedCatalog` es la **caché** del catálogo de modelos de NoteFlow AI que sirve el proxy
+> (`GET /models`); no es configuración del usuario (su modelo elegido sigue en `aiLlm`) y nunca se
+> pisa con una descarga fallida o inválida (ver `ai.md`).
 > Los **journals de sync** viven en `userData/sync-state.json` (GitHub) y
 > `userData/cloud-sync-state.json` (NoteFlow Cloud) — estado LOCAL del dispositivo, nunca en el dir
 > de notas. El **log de actividad** vive en `userData/activity-log.json` (local, NO se sincroniza,

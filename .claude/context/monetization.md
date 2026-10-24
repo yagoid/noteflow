@@ -259,8 +259,33 @@ es **un preset más**, no una implementación nueva.
   genérico. Un **402** de OpenRouter (el operador sin crédito) es el 502 genérico pero se loguea
   como `ai-proxy: OPENROUTER OUT OF CREDIT (402)`. Se despliega **con verify JWT** (default; a
   diferencia del webhook). Env: `OPENROUTER_API_KEY` (secreto), `AI_MONTHLY_TOKENS` (default 3M,
-  en **tokens ponderados**), `AI_ALLOWED_MODELS` (default: lista curada en `logic.ts`) y
-  `AI_MAX_INFLIGHT` (default 3).
+  en **tokens ponderados**), `AI_ALLOWED_MODELS` (opcional: **restricción de emergencia** del
+  catálogo — ver "Catálogo de modelos en BD") y `AI_MAX_INFLIGHT` (default 3).
+- **Catálogo de modelos en BD (migración 0012; código listo, migración + redeploy pendientes del
+  operador):** el catálogo del plan (qué modelos, multiplicador de cuota, visión) es la tabla
+  `public.ai_models` (`id` text PK, `quota_multiplier` numeric > 0 y `images` **sin default** —
+  cada insert declara coste y visión —, `enabled`,
+  `sort_order`, `created_at`; RLS **sin políticas** + grants revocados a anon/authenticated — solo
+  la lee el proxy con el service role, vía PostgREST como `subscriptions`). **Añadir un modelo =
+  insertar una fila**: el proxy lo sirve en ≤ 60 s y la app (desde esta versión; las anteriores
+  nunca lo ven hasta actualizar) lo muestra en el picker al siguiente refresco, sin redeploy ni
+  release (procedimiento en `supabase/README.md` § 6). Retirarlo = `enabled = false` — **con
+  ventana de 400** para quien lo tenía elegido (ver "Upstream OpenRouter" abajo). Proxy (`ai-proxy/index.ts` `getModelCatalog`): lectura con **caché en memoria
+  por isolate de 60 s** (`CATALOG_TTL_MS`, lectura en vuelo compartida); `catalogFromRows`
+  (`logic.ts`, pura) se queda con las filas `enabled`, ordenadas por `sort_order` (empate → id),
+  y descarta filas malformadas. Si la consulta **falla** → el último catálogo bueno que vio ese
+  isolate, o el de respaldo si no hay; si la tabla **no tiene filas usables** → el de respaldo
+  `FALLBACK_MODEL_CATALOG` (`logic.ts`, = seed de la 0012 = constantes del cliente; lo fija
+  `tests/supabase/ai-catalog-mirror.test.ts`). De ese catálogo salen la **allowlist**, el
+  **multiplicador** (el mismo catálogo `served` se usa para reservar y para liquidar una petición) y
+  el cuerpo de **`GET /models`** (lista OpenAI con `quota_multiplier` e `images` por entrada), que
+  es lo que el cliente cachea como su catálogo (`.claude/context/ai.md` → "Catálogo de modelos de
+  NoteFlow AI"). **`AI_ALLOWED_MODELS`** (`applyAllowedModelsOverride`) solo puede **restringir**:
+  se sirven los modelos del catálogo cuyo id esté en la lista, en el orden y con los metadatos del
+  catálogo; un id que no esté en el catálogo se ignora (no puede **añadir** modelos: no tendría
+  multiplicador y se cobraría ×1), y si **ninguno** coincide se ignora la variable entera (log
+  `AI_ALLOWED_MODELS matches no catalog model`) para no dejar el plan sin modelos. Con la tabla, la
+  forma normal de retirar un modelo es `enabled = false`; la variable queda como palanca sin BD.
 - **Coste acotado — reserva + concurrencia + topes (migración 0009; código listo, migración +
   redeploy pendientes del operador, en ese orden — README § 6):** antes, la cuota se comprobaba
   (`used >= limit`) y el consumo solo se insertaba al terminar el stream, así que (a) cientos de
@@ -330,16 +355,18 @@ es **un preset más**, no una implementación nueva.
     en el cliente para el preset `noteflow` y mapear esos códigos a mensajes i18n.
 - **Cuota ponderada por modelo (migración 0007):** el catálogo mezcla modelos baratos y
   "avanzados" (más caros), así que la cuota mensual ya no cuenta tokens reales sino **tokens
-  ponderados**. Cada modelo tiene un multiplicador (`MODEL_QUOTA_MULTIPLIERS` en
-  `ai-proxy/logic.ts`: solo los ≠×1; lo que no esté es ×1) y lo que descuenta de la cuota es
+  ponderados**. Cada modelo tiene un multiplicador (columna `quota_multiplier` de `ai_models` —
+  ver "Catálogo de modelos en BD"; un modelo ausente del catálogo, que en todo caso no está
+  permitido, sería ×1) y lo que descuenta de la cuota es
   `computeQuotaTokens = round((tokens_in+tokens_out) * multiplicador)`. Hoy hay tres niveles:
   **estándar ×1**, **intermedio ×2** y **avanzados ×6** (nada asume un conjunto fijo de valores —
-  `quotaMultiplierFor` acepta cualquier número finito positivo, así que añadir un nivel es una
-  entrada más en el mapa). `tokens_in`/`tokens_out` siguen guardándose sin ponderar (coste real del
+  `quotaMultiplierFor` acepta cualquier número finito positivo, también fraccionario, así que añadir
+  un nivel es una fila con otro multiplicador). `tokens_in`/`tokens_out` siguen guardándose sin ponderar (coste real del
   operador); lo ponderado va a la columna nueva `usage_events.quota_tokens`, que es lo que
   `get_month_usage` suma (0007 la redefine + backfill de filas históricas = tokens reales, todas
-  eran ×1). El multiplicador se refleja en el cliente (`NOTEFLOW_AI_MODEL_META` en `presets.ts`)
-  para etiquetar el coste en el selector de modelos — **mantener en sync** con el mapa del proxy.
+  eran ×1). El multiplicador llega al cliente en `GET /models` (`modelMeta` del preset) para
+  etiquetar el coste en el selector de modelos; `NOTEFLOW_AI_MODEL_META` (`presets.ts`) es solo el
+  respaldo hasta la primera descarga.
 - **Endpoint `GET .../ai-proxy/usage`:** devuelve `{used, limit}` (tokens ponderados del mes +
   cuota) tras resolver el token a `user_id`, **sin gate de entitlement** (ver el consumo es
   inocuo y sigue siendo útil tras caducar la suscripción). Lo consume el IPC `ai:llm-usage`
@@ -354,17 +381,30 @@ es **un preset más**, no una implementación nueva.
   el primero (`deepseek/deepseek-v4-pro`) es el modelo por defecto de facto (`suggestedModels[0]`)
   y, al ser **text-only**, el plan gestionado arranca **sin adjuntar imágenes** hasta que el
   usuario elija otro modelo (lo capa `providerCapabilities`, ver `.claude/context/ai.md`).
-  **Duplicada a propósito** en `DEFAULT_ALLOWED_MODELS` (`ai-proxy/logic.ts`) y
-  `NOTEFLOW_AI_MODELS` (`presets.ts`): mantener en sync — lo fija el test
-  `tests/supabase/ai-catalog-mirror.test.ts`. La visión por-modelo la refina
-  `providerCapabilities(preset, activeModel)` para el preset `noteflow` (DeepSeek y MiMo →
-  `images:false`). **Orden de despliegue de una rotación:** primero la Edge Function, después la
-  release de la app (detalle y por qué en `supabase/README.md` § 6).
+  Esa es la lista del **seed** de la 0012 y de los dos respaldos (`FALLBACK_MODEL_CATALOG` en
+  `ai-proxy/logic.ts`; `NOTEFLOW_AI_MODELS` + `NOTEFLOW_AI_MODEL_META` en `presets.ts`), que el test
+  `tests/supabase/ai-catalog-mirror.test.ts` mantiene idénticos; el catálogo **vivo** es la tabla
+  (ver "Catálogo de modelos en BD"), y los modelos que se añadan ahí no se copian a ningún sitio. La
+  visión por-modelo la refina `providerCapabilities(preset, activeModel)` para el preset `noteflow`
+  (con el `images` del catálogo efectivo; DeepSeek y MiMo → `images:false`). **Añadir** un modelo
+  ya no tiene orden de despliegue: insertar la fila basta (las versiones de la app **anteriores** a
+  esta, con el catálogo hardcodeado, no lo verán nunca hasta actualizar). **Retirar** uno
+  (`enabled = false`) sigue teniendo una ventana de 400 `model_not_allowed` para quien lo tenía
+  seleccionado: (a) en las versiones **antiguas**, hasta que actualicen la app — su fallback de
+  `effectiveModel` viaja en la app y el servidor no puede repararles la selección; (b) en **esta**
+  versión, hasta el siguiente refresco del catálogo — y como el primer 400 `model_not_allowed` en
+  el chat fuerza ese refresco (`friendlyChatError` → `refreshManagedCatalog(true)`), en la práctica
+  falla **un mensaje** y el siguiente ya sale con el primer modelo del catálogo (fallback en
+  memoria). Por eso: no retirar un modelo sin un equivalente en el catálogo, y mientras haya
+  instalaciones antiguas activas, asumir que sus usuarios con ese modelo fallarán hasta actualizar.
 - **El catálogo rota** (entran y salen modelos), así que el modelo guardado por el usuario puede
   quedar obsoleto y el proxy rechazaría **todas** sus peticiones. `effectiveModel()`
   (`electron/ai/llm/index.ts`) protege ese caso: en los presets con catálogo curado (los que
   tienen `modelMeta` — hoy solo `noteflow`), si el modelo guardado no está en `suggestedModels`
-  se usa `suggestedModels[0]`. En los presets BYO el modelo es libre y **no** se toca.
+  (= catálogo efectivo: el cacheado del proxy o el de respaldo) se usa `suggestedModels[0]`, solo en
+  memoria (el guardado no se reescribe). Pendiente (fase posterior): un `replaced_by` en
+  `ai_models` para migrar la selección a un sucesor. En los presets BYO el modelo es libre y **no**
+  se toca.
 - **Cliente:** preset `noteflow` **primero** en `presets.ts` (`impl: 'openai'`, `baseUrl` =
   `AI_PROXY_URL` de `cloudConfig.ts`, `needsKey: false`, `editableBaseUrl: false`).
   ⚠️ `presetOf()` con id desconocido cae **explícitamente en `anthropic`** (ya no en `PRESETS[0]`)
@@ -463,6 +503,9 @@ es **un preset más**, no una implementación nueva.
   key guardada) y solo cae a `'anthropic'` si no hay ninguno.
 - **Cuota ponderada desplegada:** la migración 0007 está aplicada y `ai-proxy` redesplegado con el
   catálogo nuevo, los multiplicadores y el endpoint `/usage`.
+- **Catálogo en BD (0012) — pendiente del operador:** aplicar `0012_ai_models.sql` y redesplegar
+  `ai-proxy` (orden indiferente: la función nueva sirve el respaldo mientras la tabla no exista, y la
+  app tolera el `/models` antiguo, solo ids, quedándose con su respaldo).
 - **Endurecimiento desplegado (2026-10-21):** migraciones 0009 + 0010 + 0011 aplicadas,
   `ai-proxy` v9 y `billing-webhook` v6 desplegados (código idéntico al repo, verificado), permisos
   de las RPC nuevas comprobados. El webhook de **live** de LS escucha además

@@ -207,6 +207,8 @@ export interface LlmPreset {
   // Its mere presence also marks the preset as serving a CURATED catalog: the model
   // is picked from suggestedModels (read-only field, no free text) and main refuses
   // to store anything else — see electron/ai/llm/presets.ts and acceptsModel().
+  // For `noteflow`, suggestedModels/modelMeta are the catalog main downloaded from the
+  // proxy (or its backup constants) — see electron/ai/llm/managedCatalog.ts.
   modelMeta?: Record<string, { quotaMultiplier: number; images: boolean }>
 }
 
@@ -586,6 +588,9 @@ declare global {
       // AI / LLM provider (chat + second brain)
       aiLlmGetConfig: () => Promise<LlmConfigPublic>
       aiLlmPresets: () => Promise<LlmPreset[]>
+      // Fired when NoteFlow AI's model catalog (the managed preset's suggestedModels/modelMeta)
+      // changes after main downloads it from the proxy — re-pull aiLlmPresets/aiLlmGetConfig
+      onAiLlmPresetsChanged: (cb: () => void) => () => void
       aiLlmSetConfig: (patch: { active?: string; model?: string; baseUrl?: string; apiKey?: string; clearKey?: boolean }) => Promise<LlmConfigPublic>
       aiLlmListModels: () => Promise<{ ok: boolean; models: string[]; error?: string }>
       aiLlmTest: () => Promise<{ ok: boolean; error?: string }>

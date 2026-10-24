@@ -11,14 +11,19 @@ exports.PRESET_BY_ID = exports.PRESETS = exports.NOTEFLOW_AI_MODEL_META = export
 exports.presetOf = presetOf;
 const cloudConfig_1 = require("../../cloudConfig");
 /**
- * Curated OpenRouter model ids served by the managed NoteFlow AI plan. All are
- * tool-calling capable (the chat is agentic); the two DeepSeek models and Xiaomi
- * MiMo are text-only, the rest accept images (see NOTEFLOW_AI_MODEL_META).
+ * BACKUP catalog of the managed NoteFlow AI plan (OpenRouter model ids). The live
+ * catalog is served by the proxy (GET /models, from the Supabase table
+ * public.ai_models) and cached in settings.json — see ./managedCatalog.ts. These
+ * constants are only used until a valid catalog has been downloaded once (fresh
+ * install, never signed in, or a proxy too old to send the metadata), so they
+ * must stay a sensible default: they mirror the seed of migration 0012 and the
+ * proxy's FALLBACK_MODEL_CATALOG (tests/supabase/ai-catalog-mirror.test.ts).
+ * Adding a model does NOT happen here — it is a row in the table.
+ * All are tool-calling capable (the chat is agentic); the two DeepSeek models and
+ * Xiaomi MiMo are text-only, the rest accept images (see NOTEFLOW_AI_MODEL_META).
  * The first entry is the de-facto default model for the preset (suggestedModels[0])
  * — today a text-only one, so a fresh managed setup starts WITHOUT image support
  * until the user picks another model (providerCapabilities gates the attach UI).
- * KEEP IN SYNC with DEFAULT_ALLOWED_MODELS in supabase/functions/ai-proxy/logic.ts
- * — the proxy rejects anything else.
  */
 exports.NOTEFLOW_AI_MODELS = [
     // Standard models (×1 quota).
@@ -33,16 +38,14 @@ exports.NOTEFLOW_AI_MODELS = [
     'moonshotai/kimi-k3',
 ];
 /**
- * Per-model metadata for the managed plan:
- *   - quotaMultiplier: what a real token costs against the monthly quota
- *     (KEEP IN SYNC with MODEL_QUOTA_MULTIPLIERS in
- *     supabase/functions/ai-proxy/logic.ts — there only the non-×1 entries are
- *     listed; here every curated model is spelled out for the UI).
+ * Per-model metadata of the BACKUP catalog above (same role: only used until the
+ * proxy's catalog has been cached — see ./managedCatalog.ts):
+ *   - quotaMultiplier: what a real token costs against the monthly quota.
  *   - images: native vision support (the two DeepSeek models and Xiaomi MiMo
  *     are text-only — three of the five ×1 models).
- * Exposed to the renderer through the preset's `modelMeta` field so the model
- * picker can flag quota cost, and used by providerCapabilities (llm/index.ts)
- * to gate image attachments per active model.
+ * The effective catalog (cached or this one) reaches the renderer through the
+ * preset's `modelMeta` field so the model picker can flag quota cost, and is used
+ * by providerCapabilities (llm/index.ts) to gate image attachments per model.
  */
 exports.NOTEFLOW_AI_MODEL_META = {
     'deepseek/deepseek-v4-pro': { quotaMultiplier: 1, images: false },

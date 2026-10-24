@@ -6,6 +6,7 @@ import { useSectionTagColorsStore } from './stores/sectionTagColorsStore'
 import { useThemeStore } from './stores/themeStore'
 import { useEditorSettingsStore } from './stores/editorSettingsStore'
 import { useAiStore } from './stores/aiStore'
+import { useAiChatStore } from './stores/aiChatStore'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { NoteEditor } from './components/Editor/NoteEditor'
@@ -129,6 +130,15 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
     useAiStore.getState().loadAiSettings()
     const cleanup = useAiStore.getState().initListeners()
     return cleanup
+  }, [isSticky])
+
+  // ── NoteFlow AI model catalog: main downloads it in the background; when it changes,
+  // re-pull presets + LLM config (only if already loaded — a later first load gets it fresh).
+  useEffect(() => {
+    if (isSticky) return
+    return window.noteflow.onAiLlmPresetsChanged(() => {
+      if (useAiChatStore.getState().configLoaded) void useAiChatStore.getState().loadConfig()
+    })
   }, [isSticky])
 
   // ── Global keyboard shortcuts (capture phase — works even inside editors) ─

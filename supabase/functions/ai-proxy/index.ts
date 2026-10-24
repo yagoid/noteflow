@@ -9,7 +9,8 @@
 //   POST <fn>/chat/completions   → auth + entitlement + body cap + validation
 //                                  + reservation (quota + concurrency) →
 //                                  OpenRouter → settle
-//   GET  <fn>/models             → auth + entitlement → curated model list
+//   GET  <fn>/models             → auth + entitlement → model catalog (ids +
+//                                  quota multiplier + vision flag per model)
 //   GET  <fn>/usage              → auth only → { used, limit } monthly quota
 //                                  (no entitlement gate: showing consumption is
 //                                  harmless and useful after expiration)
@@ -34,20 +35,33 @@
 // upstream that fails before generating (fetch throws / non-OK status) did not
 // bill, so the reservation is RELEASED (settled to 0). The row carries the REAL
 // tokens + cost (operator accounting) and the WEIGHTED quota_tokens (per-model
-// multiplier — what the monthly quota counts; see MODEL_QUOTA_MULTIPLIERS).
+// multiplier — what the monthly quota counts).
+//
+// Model catalog = table public.ai_models (migration 0012), read with the
+// service role and cached in memory for CATALOG_TTL_MS (getModelCatalog). It is
+// the allowlist, the source of the quota multipliers and the body of
+// GET /models — so a model inserted in the table reaches the desktop clients
+// within a minute, with no redeploy. If the table cannot be read, the last good
+// catalog this isolate saw is kept; with none (cold isolate) or with no usable
+// enabled row, FALLBACK_MODEL_CATALOG (logic.ts) is served.
 //
 // Env (set via `supabase secrets set`, except the SUPABASE_* ones which the
 // platform injects automatically):
 //   OPENROUTER_API_KEY   upstream key (the only one; secret)
 //   AI_MONTHLY_TOKENS    optional per-user monthly budget in weighted quota
 //                        tokens (default 3,000,000)
-//   AI_ALLOWED_MODELS    optional comma-separated model allowlist override
+//   AI_ALLOWED_MODELS    optional comma-separated EMERGENCY restriction of
+//                        the catalog (can only remove models, never add them —
+//                        see applyAllowedModelsOverride)
 //   AI_MAX_INFLIGHT      optional cap on simultaneous requests per user
 //                        (default 3)
 //   SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY  injected
 
 import {
-  parseAllowedModels,
+  catalogFromRows,
+  applyAllowedModelsOverride,
+  catalogModelIds,
+  FALLBACK_MODEL_CATALOG,
   parseMonthlyTokens,
   parseMaxInflight,
   isModelAllowed,
@@ -69,6 +83,7 @@ import {
   RESERVATION_STALE_MINUTES,
   type TokenUsage,
   type ReserveResult,
+  type ModelCatalog,
 } from './logic.ts'
 
 // Minimal surface of the globals we use (this file is deployed to Deno; it is
@@ -86,6 +101,9 @@ const OPENROUTER_GENERATION_URL = 'https://openrouter.ai/api/v1/generation'
 // A generation takes a moment to become queryable on /generation (404 until
 // then): first attempt after 1.5 s, one retry 3 s later.
 const GENERATION_LOOKUP_DELAYS_MS = [1_500, 3_000]
+// How long an isolate reuses the model catalog read from public.ai_models
+// before reading it again (a new row reaches clients within this window).
+const CATALOG_TTL_MS = 60_000
 
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -118,6 +136,7 @@ async function settleReservation(
   serviceRoleKey: string,
   reservationId: number,
   model: string,
+  catalog: ModelCatalog,
   usage: TokenUsage | null,
   generationId: string | null
 ): Promise<void> {
@@ -131,8 +150,9 @@ async function settleReservation(
       body: JSON.stringify({
         tokens_in: Math.max(0, Math.round(final.tokensIn)),
         tokens_out: Math.max(0, Math.round(final.tokensOut)),
-        // Weighted tokens the monthly quota counts (per-model multiplier).
-        quota_tokens: computeQuotaTokens(final, model),
+        // Weighted tokens the monthly quota counts (per-model multiplier of
+        // the catalog the request was reserved with).
+        quota_tokens: computeQuotaTokens(final, model, catalog),
         cost_usd: final.cost,
         generation_id: generationId,
         pending: false,
@@ -185,13 +205,14 @@ async function finishMetering(
   openrouterKey: string,
   reservationId: number,
   model: string,
+  catalog: ModelCatalog,
   usage: TokenUsage | null,
   generationId: string | null
 ): Promise<void> {
   let final = usage
   if (!final && generationId) final = await lookupGeneration(generationId, openrouterKey)
   if (final) {
-    await settleReservation(supabaseUrl, serviceRoleKey, reservationId, model, final, generationId)
+    await settleReservation(supabaseUrl, serviceRoleKey, reservationId, model, catalog, final, generationId)
     return
   }
   console.error(
@@ -261,6 +282,59 @@ async function reserveUsage(
     console.error('ai-proxy: reserve_ai_usage failed:', err)
     return null
   }
+}
+
+// Per-isolate catalog cache. `catalogState` is what requests use until it
+// expires; `lastGoodCatalog` is the last catalog actually read from the table,
+// kept so a transient database error does not swap the catalog for the backup
+// one. `catalogLoad` shares one in-flight read between concurrent requests (a
+// cold isolate must not answer the burst with the backup catalog).
+let catalogState: { catalog: ModelCatalog; at: number } | null = null
+let lastGoodCatalog: ModelCatalog | null = null
+let catalogLoad: Promise<ModelCatalog> | null = null
+
+async function readModelCatalog(supabaseUrl: string, serviceRoleKey: string): Promise<ModelCatalog> {
+  let catalog: ModelCatalog
+  try {
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/ai_models?select=id,quota_multiplier,images,enabled,sort_order&enabled=is.true&order=sort_order.asc,id.asc`,
+      { headers: serviceHeaders(serviceRoleKey) }
+    )
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      console.error(`ai-proxy: ai_models query failed (${res.status}): ${detail}`)
+      catalog = lastGoodCatalog ?? FALLBACK_MODEL_CATALOG
+    } else {
+      const fromTable = catalogFromRows(await res.json().catch(() => null))
+      if (fromTable) {
+        lastGoodCatalog = fromTable
+        catalog = fromTable
+      } else {
+        // Readable but empty / all disabled / all malformed: that is the
+        // table's real content, so the backup catalog (not a stale one).
+        console.error('ai-proxy: ai_models has no usable enabled row — serving the built-in fallback catalog')
+        catalog = FALLBACK_MODEL_CATALOG
+      }
+    }
+  } catch (err) {
+    console.error('ai-proxy: ai_models query failed:', err)
+    catalog = lastGoodCatalog ?? FALLBACK_MODEL_CATALOG
+  }
+  // Failures are cached for the same TTL: retrying a broken query on every
+  // request would only add latency (and the reservation RPC would fail too).
+  catalogState = { catalog, at: Date.now() }
+  return catalog
+}
+
+/** The model catalog, from the in-memory cache while it is fresh. Never throws. */
+function getModelCatalog(supabaseUrl: string, serviceRoleKey: string): Promise<ModelCatalog> {
+  if (catalogState && Date.now() - catalogState.at < CATALOG_TTL_MS) return Promise.resolve(catalogState.catalog)
+  if (!catalogLoad) {
+    catalogLoad = readModelCatalog(supabaseUrl, serviceRoleKey).finally(() => {
+      catalogLoad = null
+    })
+  }
+  return catalogLoad
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -336,8 +410,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
     )
   }
 
-  const allowedModels = parseAllowedModels(Deno.env.get('AI_ALLOWED_MODELS'))
-  if (isModels) return json(200, modelsListBody(allowedModels))
+  // ── Model catalog (table → cache → backup) and the emergency override.
+  //    `served` is used for EVERYTHING below — allowlist, GET /models and the
+  //    multiplier of both the reservation and its settlement — so one request
+  //    is priced consistently even if the cache refreshes mid-stream. ──────────
+  const override = applyAllowedModelsOverride(
+    await getModelCatalog(supabaseUrl, serviceRoleKey),
+    Deno.env.get('AI_ALLOWED_MODELS')
+  )
+  if (override.overrideIgnored) {
+    console.error('ai-proxy: AI_ALLOWED_MODELS matches no catalog model — ignored, serving the whole catalog')
+  }
+  const served = override.catalog
+  const allowedModels = catalogModelIds(served)
+  if (isModels) return json(200, modelsListBody(served))
 
   // ── Read the body with a hard size cap. Content-Length is checked first
   //    (cheap early reject) but not trusted: the stream itself is counted. ────
@@ -398,7 +484,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     serviceRoleKey,
     userId,
     model,
-    estimateReservationTokens(upstreamBody, model),
+    estimateReservationTokens(upstreamBody, model, served),
     limit,
     parseMaxInflight(Deno.env.get('AI_MAX_INFLIGHT'))
   )
@@ -450,7 +536,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   } catch (err) {
     // Never reached OpenRouter (or no answer) → nothing billed → release.
     console.error('ai-proxy: upstream fetch failed:', err)
-    await settleReservation(supabaseUrl, serviceRoleKey, reservationId, model, null, null)
+    await settleReservation(supabaseUrl, serviceRoleKey, reservationId, model, served, null, null)
     const mapped = mapUpstreamError(502, '')
     return json(mapped.status, mapped.body, quotaHeaders)
   }
@@ -462,7 +548,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const mapped = mapUpstreamError(upstream.status, detail)
     if (mapped.outOfCredit) console.error(`ai-proxy: OPENROUTER OUT OF CREDIT (402): ${detail}`)
     else console.error(`ai-proxy: upstream error (${upstream.status}): ${detail}`)
-    await settleReservation(supabaseUrl, serviceRoleKey, reservationId, model, null, null)
+    await settleReservation(supabaseUrl, serviceRoleKey, reservationId, model, served, null, null)
     return json(mapped.status, mapped.body, quotaHeaders)
   }
 
@@ -480,6 +566,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       openrouterKey,
       reservationId,
       model,
+      served,
       extractUsageFromJson(payload),
       extractGenerationId(payload)
     )
@@ -489,7 +576,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // ── Streaming: passthrough one branch of the tee, meter the other ───────────
   if (!upstream.body) {
     // OK status but no stream: treat as "nothing generated" → release.
-    await settleReservation(supabaseUrl, serviceRoleKey, reservationId, model, null, null)
+    await settleReservation(supabaseUrl, serviceRoleKey, reservationId, model, served, null, null)
     return json(502, openAiErrorBody('Upstream returned no stream.', 'server_error', 'upstream_error'), quotaHeaders)
   }
   const [clientBranch, meterBranch] = upstream.body.tee()
@@ -511,7 +598,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.error('ai-proxy: metering stream error:', err)
     }
     const { usage, generationId } = scanner.end()
-    await finishMetering(supabaseUrl, serviceRoleKey, openrouterKey, reservationId, model, usage, generationId)
+    await finishMetering(supabaseUrl, serviceRoleKey, openrouterKey, reservationId, model, served, usage, generationId)
   })()
   // Keep the isolate alive until the settle lands (best-effort otherwise).
   if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime) EdgeRuntime.waitUntil(metering)

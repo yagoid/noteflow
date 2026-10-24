@@ -285,18 +285,24 @@ del usuario, comprueba el entitlement `ai`/`bundle` y la cuota mensual de tokens
 0003) leyendo el bloque `usage` que OpenRouter añade al final del stream. La **migración 0007**
 añade la **cuota ponderada** (columna `quota_tokens`): los modelos por encima de la baseline
 descuentan de la cuota a razón de su multiplicador (hoy dos niveles de pago, **×2** para el
-intermedio y **×6** para los avanzados; el resto ×1) en vez de 1:1. El mapa autoritativo es
-`MODEL_QUOTA_MULTIPLIERS` en `functions/ai-proxy/logic.ts`. La **migración 0009** acota el coste:
+intermedio y **×6** para los avanzados; el resto ×1) en vez de 1:1. La **migración 0012** mueve el
+**catálogo de modelos** (ids, multiplicador de cuota, visión, orden) a la tabla `public.ai_models`:
+el proxy la lee (caché de 60 s) para la allowlist, los multiplicadores y `GET /models`, y la app
+descarga ese `/models` y lo cachea — **añadir un modelo es insertar una fila** (ver "Gestionar el
+catálogo de modelos" abajo). La **migración 0009** acota el coste:
 cada petición **reserva** antes de reenviar una estimación de su coste (RPC `reserve_ai_usage`, con
 lock por usuario, cuota y un máximo de peticiones simultáneas), que se **liquida** con el `usage`
 real al terminar (detalle en `.claude/context/monetization.md` § 3). Pasos del operador:
 
-1. **Correr las migraciones 0003, 0007 y 0009** (`supabase/migrations/0003_ai_usage.sql`,
-   `0007_ai_usage_weighted.sql` y `0009_ai_usage_reservations.sql`), igual que las anteriores (SQL
-   Editor o `supabase db push`). La 0003 crea `usage_events` + la RPC `get_month_usage`; la 0007
-   añade la columna `quota_tokens` (con backfill de las filas históricas) y redefine
-   `get_month_usage` para sumar los tokens ponderados; la 0009 añade a `usage_events` las columnas
-   `pending`, `cost_usd` y `generation_id` y la RPC `reserve_ai_usage`.
+1. **Correr las migraciones 0003, 0007, 0009 y 0012** (`supabase/migrations/0003_ai_usage.sql`,
+   `0007_ai_usage_weighted.sql`, `0009_ai_usage_reservations.sql` y `0012_ai_models.sql`), igual
+   que las anteriores (SQL Editor o `supabase db push`). La 0003 crea `usage_events` + la RPC
+   `get_month_usage`; la 0007 añade la columna `quota_tokens` (con backfill de las filas históricas)
+   y redefine `get_month_usage` para sumar los tokens ponderados; la 0009 añade a `usage_events` las
+   columnas `pending`, `cost_usd` y `generation_id` y la RPC `reserve_ai_usage`; la 0012 crea
+   `ai_models` (RLS sin políticas: solo la lee la función con el service role) con el catálogo
+   vigente como seed. La 0012 no tiene orden con el deploy: sin la tabla, la función nueva sirve su
+   catálogo de respaldo.
    ⚠️ **Orden:** `supabase db push` **antes** de `supabase functions deploy ai-proxy` — la función
    nueva llama a `reserve_ai_usage` y sin ella respondería 500 (`quota_check_failed`) a todo chat.
    Al revés no hay problema: la función vieja es compatible con el esquema de la 0009 (`pending`
@@ -307,9 +313,10 @@ real al terminar (detalle en `.claude/context/monetization.md` § 3). Pasos del 
 
    ```bash
    supabase secrets set OPENROUTER_API_KEY=<sk-or-...>
-   # Opcionales (defaults en el código: 3.000.000 tokens/mes y la lista curada
-   # de supabase/functions/ai-proxy/logic.ts):
+   # Opcionales (default: 3.000.000 tokens/mes; sin AI_ALLOWED_MODELS se sirve
+   # el catálogo completo de la tabla ai_models):
    supabase secrets set AI_MONTHLY_TOKENS=3000000
+   # SOLO emergencias: restringe el catálogo a estos ids (ver abajo)
    supabase secrets set AI_ALLOWED_MODELS=deepseek/deepseek-v4-pro,anthropic/claude-haiku-4.5
    # Máximo de peticiones simultáneas por usuario (default 3; desde la 0009):
    supabase secrets set AI_MAX_INFLIGHT=3
@@ -320,24 +327,15 @@ real al terminar (detalle en `.claude/context/monetization.md` § 3). Pasos del 
    > lo marca en los logs con una línea propia: buscar `OPENROUTER OUT OF CREDIT (402)` en
    > Dashboard → Edge Functions → ai-proxy → Logs.
 
-   > Si se cambia `AI_ALLOWED_MODELS`, mantener en sync `NOTEFLOW_AI_MODELS` (y
-   > `NOTEFLOW_AI_MODEL_META`) en `electron/ai/llm/presets.ts` — la lista que ve el cliente.
-   > **Ojo: ampliar el catálogo solo en el servidor no sirve de nada.** El cliente trata su
-   > lista como cerrada: no ofrece los modelos que no estén en ella, `acceptsModel()` se niega
-   > a guardarlos y `effectiveModel()` reescribe al primero de la lista un modelo guardado que
-   > ya no aparezca. O sea que **añadir o quitar modelos requiere también release de la app**;
-   > al revés (recortar la lista del servidor sin tocar el cliente) deja a los usuarios con
-   > modelos que el proxy rechaza con 400. `AI_ALLOWED_MODELS` es para **emergencias**
-   > (retirar deprisa un modelo que se ha vuelto caro o ha desaparecido de OpenRouter), no el
-   > sitio donde se gestiona el catálogo.
-
-   > **Orden al rotar el catálogo (importa):** 1) desplegar primero la Edge Function
-   > (`supabase functions deploy ai-proxy`, con el catálogo nuevo ya en `logic.ts`), 2) después
-   > publicar la release de la app. Al revés, el picker ofrece modelos que el backend todavía
-   > rechaza con **400**. Y si la rotación **retira** modelos hay una ventana inevitable: los
-   > usuarios que aún no han actualizado y tenían seleccionado uno de los retirados reciben 400
-   > hasta que actualicen — el fallback de `effectiveModel()` viaja en la app, no en el proxy,
-   > así que el servidor no puede repararles la selección.
+   > **`AI_ALLOWED_MODELS` es una restricción de emergencia, no el catálogo.** Si está puesta, el
+   > proxy sirve solo los modelos **del catálogo** (tabla `ai_models`) cuyo id aparezca en la
+   > lista, con el orden y los metadatos del catálogo — también en `GET /models`, así que la app
+   > deja de ofrecerlos. **No puede añadir** modelos: un id que no esté en el catálogo se ignora
+   > (no tendría multiplicador y se cobraría ×1). Si **ninguno** coincide (typo), la variable se
+   > ignora entera y se loguea `AI_ALLOWED_MODELS matches no catalog model`, para no dejar el plan
+   > sin modelos. Para retirar un modelo lo normal ahora es `enabled = false` en la tabla; la
+   > variable sirve cuando no se puede tocar la BD. Para quitarla: `supabase secrets unset
+   > AI_ALLOWED_MODELS`.
 
 3. **Desplegar la función** — esta SÍ con verificación de JWT (el default; a diferencia del
    webhook, aquí el caller es la app con el access token del usuario):
@@ -346,11 +344,59 @@ real al terminar (detalle en `.claude/context/monetization.md` § 3). Pasos del 
    supabase functions deploy ai-proxy
    ```
 
+   > Desde la 0012 `GET .../ai-proxy/models` devuelve, además del `id` de cada modelo (formato lista
+   > OpenAI), `quota_multiplier` e `images`; la app de escritorio valida ese cuerpo y lo cachea como
+   > su catálogo (si falta algún campo —función antigua— lo ignora y sigue con su respaldo).
+
    > El proxy expone además `GET .../ai-proxy/usage` (`{used, limit}` en tokens ponderados, sin
    > gate de entitlement) que alimenta la barra de consumo de la card premium en la app. Cada
    > migración que cambia el contrato de la función ha ido seguida de un redeploy (la 0007 —
    > catálogo y multiplicadores — ya está aplicada y desplegada); con la 0009 es igual: primero
    > la migración, luego el deploy.
+
+   **Gestionar el catálogo de modelos (desde la 0012).** El catálogo es la tabla `ai_models`
+   (SQL Editor; o Table Editor del Dashboard). Los cambios llegan al proxy en ≤ 60 s (caché por
+   isolate) y a la app en su siguiente refresco del catálogo (al arrancar, iniciar sesión o abrir el
+   asistente / Ajustes → IA — como mucho una vez cada 10 min — o al pulsar "Load" junto al modelo en
+   Ajustes → IA) — sin redeploy ni release. Ojo: las versiones de la app **anteriores** a la que
+   descarga el catálogo (tienen la lista hardcodeada) **nunca** ven los modelos nuevos hasta que
+   actualicen:
+
+   ```sql
+   -- Añadir un modelo (DEBE soportar tool calling; images=false si no tiene visión).
+   -- quota_multiplier e images son obligatorios (sin default, a propósito).
+   -- sort_order decide la posición en el selector (seed en pasos de 10).
+   insert into public.ai_models (id, quota_multiplier, images, sort_order)
+   values ('google/gemini-x-pro', 2, true, 65);
+
+   -- Retirarlo (mejor que borrar).
+   update public.ai_models set enabled = false where id = 'x-ai/grok-4.5';
+
+   -- Cambiar su coste de cuota.
+   update public.ai_models set quota_multiplier = 3 where id = 'x-ai/grok-4.5';
+   ```
+
+   - El **primer** modelo habilitado (menor `sort_order`) es el que usa por defecto quien activa
+     NoteFlow AI sin elegir.
+   - El modelo elegido por cada usuario **no cambia** al refrescar el catálogo.
+   - ⚠️ **Retirar un modelo (`enabled = false`) abre una ventana de 400 `model_not_allowed`** para
+     quien lo tenía seleccionado — añadir no tiene ese problema:
+     - **Versiones antiguas** de la app (catálogo hardcodeado): fallan **hasta que actualicen**. Su
+       fallback de modelo viaja en la app; el servidor no puede repararles la selección.
+     - **Esta versión**: el fallback (usar el primer modelo del catálogo, sin reescribir su ajuste)
+       solo se aplica tras el **siguiente refresco** del catálogo cacheado. El primer chat que
+       recibe `model_not_allowed` fuerza ese refresco, así que en la práctica falla **un mensaje** y
+       el siguiente ya funciona.
+
+     Por eso: no retirar un modelo sin tener otro equivalente en el catálogo, y mientras queden
+     instalaciones antiguas, contar con que sus usuarios con ese modelo fallen hasta actualizar
+     (si es una emergencia de coste, retirarlo igual: el 400 no cobra nada).
+   - **Constantes de respaldo:** `FALLBACK_MODEL_CATALOG` (`functions/ai-proxy/logic.ts`) es lo que
+     sirve el proxy si la tabla no se puede leer o no tiene filas habilitadas, y
+     `NOTEFLOW_AI_MODELS`/`NOTEFLOW_AI_MODEL_META` (`electron/ai/llm/presets.ts`) lo que usa la app
+     antes de haber descargado ningún catálogo. Son iguales al seed de la 0012 (lo comprueba
+     `tests/supabase/ai-catalog-mirror.test.ts`); **no hace falta tocarlos al añadir modelos** —
+     solo si se quiere cambiar el respaldo, y entonces los tres a la vez.
 
    **Monitorización de gasto (desde la 0009).** Cada fila liquidada guarda en `cost_usd` lo que
    OpenRouter cobró por la petición (`usage.cost`, en créditos ≈ USD, sin el ~5,5 % de comisión de

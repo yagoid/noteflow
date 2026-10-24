@@ -60,9 +60,10 @@ export function LlmConfigView({
   // The managed plan has its own card in the selector, so it is never a <select> option.
   const selectablePresets = useMemo(() => presets.filter((p) => p.id !== 'noteflow'), [presets])
   // Chips offered for the active preset. For a curated catalog (preset.modelMeta — the managed
-  // plan) the list is EXACTLY the catalog: main refuses to store anything else, so surfacing an
-  // extra id fetched from /models (the operator may widen AI_ALLOWED_MODELS server-side without
-  // an app release) would render a chip that does nothing when clicked.
+  // plan) the list is EXACTLY the catalog main has in force (downloaded from the proxy's /models
+  // and cached, else its backup constants): main refuses to store anything else, so a chip from
+  // any other source would do nothing when clicked. "Load" re-downloads that catalog, and the
+  // new presets arrive through onAiLlmPresetsChanged (App.tsx).
   const modelOptions = useMemo(() => {
     if (preset?.modelMeta) return preset.suggestedModels
     const set = new Set<string>([...(preset?.suggestedModels ?? []), ...models])
