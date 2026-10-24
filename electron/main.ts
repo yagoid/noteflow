@@ -2405,8 +2405,10 @@ ipcMain.handle('ai:llm-test', async () => {
   }
 })
 
-// Monthly consumption of the managed NoteFlow AI plan (weighted quota tokens),
-// read from the proxy's GET /usage endpoint with a fresh access token. Returns
+// Monthly consumption of the managed NoteFlow AI plan, read from the proxy's GET /usage
+// endpoint with a fresh access token. The proxy meters a USD budget but reports it in
+// abstract units (limit 3,000,000 — the old token-quota scale, kept for pre-b74fad0 builds), so only
+// used/limit (the share of the allowance spent) is meaningful. Returns
 // null on ANY failure (no session, offline, non-200) — the UI simply hides the
 // usage bar, it never surfaces an error for this.
 ipcMain.handle('ai:llm-usage', async (): Promise<{ used: number; limit: number } | null> => {
@@ -2635,13 +2637,18 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
     }
 
     for (let step = 0; step < MAX_AGENT_STEPS; step++) {
-      const { text, toolCalls } = await provider.streamTurn(
+      const { text, toolCalls, reasoningDetails } = await provider.streamTurn(
         { system, messages: convo, tools: agentTools.TOOLS, signal: controller.signal },
         (delta) => send('ai:chat-delta', { requestId, delta }),
       )
       if (toolCalls.length === 0) { send('ai:chat-done', { requestId }); return }
 
-      convo.push({ role: 'assistant', content: text, toolCalls })
+      // The reasoning behind these tool calls goes back with them (OpenRouter recommends it, and
+      // DeepSeek / Anthropic thinking reject a tool turn without it). Only when some was streamed:
+      // strict OpenAI-compatible APIs must never see the extra field.
+      convo.push(reasoningDetails?.length
+        ? { role: 'assistant', content: text, toolCalls, reasoningDetails }
+        : { role: 'assistant', content: text, toolCalls })
       const results: llm.ToolResult[] = []
       for (const call of toolCalls) {
         send('ai:chat-tool-call', { requestId, toolCallId: call.id, name: call.name, input: call.input, label: agentTools.describeAction(call.name, call.input, ctx) })

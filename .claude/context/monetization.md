@@ -236,58 +236,79 @@ es **un preset más**, no una implementación nueva.
   de leer el body y mide solo al final — ver "Coste acotado"): resuelve el access token del caller
   a `user_id` vía `/auth/v1/user` (401 si inválido) → entitlement `ai`/`bundle` activo consultando
   `subscriptions` con el service role (403 con error OpenAI-shaped si no) → **lee el body con
-  tope de tamaño** (413 `request_too_large`) → JSON válido, modelo en la allowlist (400
-  `model_not_allowed`) y `messages` array no vacío → `buildUpstreamBody` → **reserva** vía RPC
-  `reserve_ai_usage` (429 `monthly_quota_exceeded` / 429 `too_many_concurrent_requests`; 500 si la
-  RPC falla; cabeceras `X-NoteFlow-Tokens-Used`/`X-NoteFlow-Tokens-Limit` con el `used` de la RPC)
-  → forward a **OpenRouter** con la key del servidor → **liquidación** de la reserva. El body
+  tope de tamaño** (413 `request_too_large`) → JSON válido, **modelo servido o alias de uno retirado**
+  (`resolveRequestedModel`: un id retirado con sucesor se **reescribe** al sucesor — ver "Cuota por
+  coste real" —; si no, 400 `model_not_allowed`) y `messages` array no vacío → `buildUpstreamBody` →
+  **reserva** vía RPC `reserve_ai_cost` (0013; 429 `monthly_quota_exceeded` / 429
+  `too_many_concurrent_requests`; 500 si la RPC falla; cabeceras
+  `X-NoteFlow-Tokens-Used`/`X-NoteFlow-Tokens-Limit` con el `used` de la RPC **en unidades legacy**,
+  como `GET /usage`) → forward a **OpenRouter** con la key del servidor → **liquidación** de la
+  reserva. El body
   reenviado es una **allowlist** (`UPSTREAM_ALLOWED_FIELDS`: `model`, `messages`, `stream`,
   `max_tokens`, `tools`, `tool_choice`, `temperature`, `top_p`, `stop`, `seed`, `response_format`,
   `parallel_tool_calls`; todo lo demás se descarta — en particular `models`/`route` (fallback a
-  modelos fuera de la lista), `provider`, `preset`, `plugins`, `web_search_options`, `reasoning`,
-  `n`, `transforms`, `stream_options`), con `max_tokens` **siempre** fijado a
+  modelos fuera de la lista), `provider`, `preset`, `plugins`, `web_search_options`, el `reasoning`
+  **del cliente**, `n`, `transforms`, `stream_options`), con `model` = el id resuelto (alias ya
+  reescrito), `reasoning: {effort}` **inyectado por el proxy** cuando la fila del catálogo tiene
+  `reasoning_effort` (control solo del servidor), `max_tokens` **siempre** fijado a
   `clampMaxTokens(cliente)` y `usage: {include: true}` forzado (extensión que añade el bloque
   `usage` —con `cost`— al último chunk SSE). El stream se devuelve en **passthrough** mientras un
   `tee()` lo escanea (`createSseUsageScanner`: solo hace `JSON.parse` de las líneas que contienen
   `"usage"` y de las primeras hasta conocer el id de generación) y al acabar liquida la fila de
-  `usage_events` (tabla de la 0003; `quota_tokens` de la 0007 — ver "Cuota ponderada"; `pending`,
-  `cost_usd`, `generation_id` de la 0009). Los **errores del upstream nunca se reenvían tal
+  `usage_events` (tabla de la 0003; `pending`, `cost_usd`, `generation_id` de la 0009; `quota_usd`
+  de la 0013 — ver "Cuota por coste real"). Los `messages` viajan tal cual, así que los
+  `reasoning_details` que el cliente reenvía en los turnos de tool calls llegan a OpenRouter (ver
+  `.claude/context/ai.md` § chat agéntico). Los **errores del upstream nunca se reenvían tal
   cual**: `mapUpstreamError` los loguea y devuelve uno de tres errores OpenAI-shaped — 4xx que
   menciona imagen/`image_url`/vision/multimodal/"unknown variant" → 400 `image_input_unsupported`
   (mensaje con el literal `image_url`, del que depende `friendlyChatError` en `electron/main.ts`);
   4xx de longitud de contexto → 400 `context_length_exceeded`; el resto → 502 `upstream_error`
   genérico. Un **402** de OpenRouter (el operador sin crédito) es el 502 genérico pero se loguea
   como `ai-proxy: OPENROUTER OUT OF CREDIT (402)`. Se despliega **con verify JWT** (default; a
-  diferencia del webhook). Env: `OPENROUTER_API_KEY` (secreto), `AI_MONTHLY_TOKENS` (default 3M,
-  en **tokens ponderados**), `AI_ALLOWED_MODELS` (opcional: **restricción de emergencia** del
-  catálogo — ver "Catálogo de modelos en BD") y `AI_MAX_INFLIGHT` (default 3).
-- **Catálogo de modelos en BD (migración 0012; código listo, migración + redeploy pendientes del
-  operador):** el catálogo del plan (qué modelos, multiplicador de cuota, visión) es la tabla
-  `public.ai_models` (`id` text PK, `quota_multiplier` numeric > 0 y `images` **sin default** —
-  cada insert declara coste y visión —, `enabled`,
-  `sort_order`, `created_at`; RLS **sin políticas** + grants revocados a anon/authenticated — solo
-  la lee el proxy con el service role, vía PostgREST como `subscriptions`). **Añadir un modelo =
-  insertar una fila**: el proxy lo sirve en ≤ 60 s y la app (desde esta versión; las anteriores
-  nunca lo ven hasta actualizar) lo muestra en el picker al siguiente refresco, sin redeploy ni
-  release (procedimiento en `supabase/README.md` § 6). Retirarlo = `enabled = false` — **con
-  ventana de 400** para quien lo tenía elegido (ver "Upstream OpenRouter" abajo). Proxy (`ai-proxy/index.ts` `getModelCatalog`): lectura con **caché en memoria
-  por isolate de 60 s** (`CATALOG_TTL_MS`, lectura en vuelo compartida); `catalogFromRows`
-  (`logic.ts`, pura) se queda con las filas `enabled`, ordenadas por `sort_order` (empate → id),
-  y descarta filas malformadas. Si la consulta **falla** → el último catálogo bueno que vio ese
-  isolate, o el de respaldo si no hay; si la tabla **no tiene filas usables** → el de respaldo
-  `FALLBACK_MODEL_CATALOG` (`logic.ts`, = seed de la 0012 = constantes del cliente; lo fija
-  `tests/supabase/ai-catalog-mirror.test.ts`). De ese catálogo salen la **allowlist**, el
-  **multiplicador** (el mismo catálogo `served` se usa para reservar y para liquidar una petición) y
-  el cuerpo de **`GET /models`** (lista OpenAI con `quota_multiplier` e `images` por entrada), que
+  diferencia del webhook). Env: `OPENROUTER_API_KEY` (secreto), `AI_MONTHLY_BUDGET_USD`
+  (presupuesto mensual por usuario en **USD de coste real**, default 2, admite decimales; un valor
+  inválido → default; `AI_MONTHLY_TOKENS` ya no se lee), `AI_ALLOWED_MODELS` (opcional:
+  **restricción de emergencia** del catálogo — ver "Catálogo de modelos en BD") y `AI_MAX_INFLIGHT`
+  (default 3).
+- **Catálogo de modelos en BD (migraciones 0012 + 0013; código listo, migraciones + redeploy
+  pendientes del operador):** el catálogo del plan es la tabla `public.ai_models` (`id` text PK,
+  `images` **sin default**, `enabled`, `sort_order`, `created_at`; de la 0013: `price_in_usd` /
+  `price_out_usd` — precio de **lista** de OpenRouter en USD por 1M tokens, ≥ 0 —,
+  `reasoning_effort` — `none|minimal|low|medium|high` o null —, `recommended` y `replaced_by` — FK
+  a otra fila, el sucesor de un modelo retirado —; `quota_multiplier` (0012) queda **obsoleto**:
+  sigue NOT NULL y los inserts nuevos ponen 1, nadie lo lee). RLS **sin políticas** + grants
+  revocados a anon/authenticated — solo la lee el proxy con el service role, vía PostgREST como
+  `subscriptions`. **Añadir un modelo = insertar una fila** (con precios): el proxy lo sirve en
+  ≤ 60 s y la app (desde la versión que descarga el catálogo; las anteriores nunca lo ven hasta
+  actualizar) lo muestra en el picker al siguiente refresco, sin redeploy ni release (procedimiento
+  en `supabase/README.md` § 6). **Retirarlo = `enabled = false` + `replaced_by = <sucesor>`**: el
+  proxy reescribe al sucesor las peticiones al id retirado, así que nadie recibe 400 (ver "Upstream
+  OpenRouter" abajo). Proxy (`ai-proxy/index.ts` `getModelCatalog`): lee **todas** las filas
+  (también las deshabilitadas, por su `replaced_by`) con **caché en memoria por isolate de 60 s**
+  (`CATALOG_TTL_MS`, lectura en vuelo compartida); `catalogFromRows` (`logic.ts`, pura) se queda con
+  las filas `enabled`, ordenadas por `sort_order` (empate → id), y descarta filas malformadas —
+  **incluida una fila habilitada sin precio** (no se podría estimar su reserva) o con un
+  `reasoning_effort` desconocido —; `aliasEdgesFromRows` recoge las aristas `id → replaced_by`. Si
+  la consulta **falla** → el último catálogo bueno que vio ese isolate, o el de respaldo si no hay;
+  si la tabla **no tiene filas usables** → el de respaldo `FALLBACK_MODEL_CATALOG` +
+  `FALLBACK_MODEL_ALIASES` (`logic.ts`, = catálogo y retiradas de la 0013 = constantes del cliente;
+  lo fija `tests/supabase/ai-catalog-mirror.test.ts`). De ese catálogo salen la **allowlist** + los
+  **alias** (`resolveModelAliases`: cada id retirado sigue su cadena de `replaced_by` — máx.
+  `MAX_ALIAS_HOPS = 4` saltos, ciclos descartados — hasta un modelo **servido**; si no llega, no hay
+  alias y ese id da 400), los **precios** (el mismo catálogo `served` se usa para reservar y para
+  liquidar una petición), el **esfuerzo de razonamiento** inyectado y el cuerpo de **`GET /models`**
+  (lista OpenAI con `images`, `recommended` y `cost_index` por entrada — **nunca** los precios), que
   es lo que el cliente cachea como su catálogo (`.claude/context/ai.md` → "Catálogo de modelos de
   NoteFlow AI"). **`AI_ALLOWED_MODELS`** (`applyAllowedModelsOverride`) solo puede **restringir**:
   se sirven los modelos del catálogo cuyo id esté en la lista, en el orden y con los metadatos del
   catálogo; un id que no esté en el catálogo se ignora (no puede **añadir** modelos: no tendría
-  multiplicador y se cobraría ×1), y si **ninguno** coincide se ignora la variable entera (log
-  `AI_ALLOWED_MODELS matches no catalog model`) para no dejar el plan sin modelos. Con la tabla, la
-  forma normal de retirar un modelo es `enabled = false`; la variable queda como palanca sin BD.
-- **Coste acotado — reserva + concurrencia + topes (migración 0009; código listo, migración +
-  redeploy pendientes del operador, en ese orden — README § 6):** antes, la cuota se comprobaba
+  precio con el que estimar la reserva), y si **ninguno** coincide se ignora la variable entera (log
+  `AI_ALLOWED_MODELS matches no catalog model`) para no dejar el plan sin modelos. Un alias cuyo
+  sucesor quede fuera por la restricción **no** se resuelve. Con la tabla, la forma normal de
+  retirar un modelo es `enabled = false`; la variable queda como palanca sin BD.
+- **Coste acotado — reserva + concurrencia + topes (migración 0009, pasada a USD en la 0013;
+  desplegado con la 0009 el 2026-10-21 — la versión en USD está pendiente, ver "Cuota por coste
+  real"):** antes, la cuota se comprobaba
   (`used >= limit`) y el consumo solo se insertaba al terminar el stream, así que (a) cientos de
   peticiones en paralelo con `max_tokens` enorme pasaban todas el check, y (b) una petición que
   supera el wall clock de la Edge Function (150-400 s) moría antes del chunk de `usage` y no se
@@ -300,28 +321,36 @@ es **un preset más**, no una implementación nueva.
     acepta imágenes de hasta 10 MB y reenvía las imágenes de toda la conversación en cada turno:
     con 4 MB una sola foto de móvil (3-5 MB → 4-7 MB en base64) ya daría 413. El tope protege la
     memoria del isolate; el coste lo acota la reserva.
-  - **Estimación** (`estimateReservationTokens`): entrada ≈ bytes UTF-8 del body serializado / 4,
-    salvo que cada parte `image_url` cuenta una tarifa plana **`IMAGE_PART_TOKENS = 1600`** (techo
-    de Anthropic ≈ 1,15 MP; por encima de los 765 de OpenAI a 1024²) en vez de su base64 — si no,
-    una captura de 2 MB reservaría ~500k tokens y, si el `usage` no llegara, se le cobrarían al
-    usuario — + el `max_tokens` ya recortado, × multiplicador del modelo, redondeado.
-  - **RPC `reserve_ai_usage`** (security definer, solo service role): `pg_advisory_xact_lock` por
-    usuario (las peticiones paralelas del mismo usuario se serializan en el check), `used` = misma
-    definición que `get_month_usage` (reservas pendientes incluidas) → `'quota'` si `used >=
-    limit`; en vuelo = filas `pending` con `at` más reciente que `p_stale_minutes`
-    (`RESERVATION_STALE_MINUTES = 10`, mayor que el wall clock) → `'concurrency'` si ya hay
-    `p_max_inflight`; si pasa, inserta la fila `pending` con la estimación en `quota_tokens` y
-    devuelve `{ok, reason, used, id}` (jsonb).
+  - **Estimación** (`estimateReservationUsd`, en USD): entrada (`estimateInputTokens`) ≈ bytes
+    UTF-8 del body serializado / 4, salvo que cada parte `image_url` cuenta una tarifa plana
+    **`IMAGE_PART_TOKENS = 1600`** (techo de Anthropic ≈ 1,15 MP; por encima de los 765 de OpenAI a
+    1024²) en vez de su base64 — si no, una captura de 2 MB reservaría ~500k tokens y, si el `usage`
+    no llegara, se le cobrarían al usuario —; reserva = `(entrada × price_in + max_tokens recortado ×
+    price_out) / 1e6` con los precios de lista del modelo. Puede quedarse **corta** frente al cobro
+    real cuando el proveedor recarga sobre el precio de lista (tarifa punta de DeepSeek, tramos de
+    contexto largo) — la liquidación cobra entonces lo real.
+  - **RPC `reserve_ai_cost`** (0013; clon en USD de la `reserve_ai_usage` de la 0009, que sigue
+    existiendo; security definer, solo service role): `pg_advisory_xact_lock` por usuario con la
+    **misma clave** que la vieja (las peticiones paralelas del mismo usuario se serializan en el
+    check, también entre función vieja y nueva durante el despliegue), `used` = misma definición que
+    `get_month_cost` (reservas pendientes incluidas) → `'quota'` si `used >= p_limit_usd`; en vuelo
+    = filas `pending` con `at` más reciente que `p_stale_minutes` (`RESERVATION_STALE_MINUTES = 10`,
+    mayor que el wall clock) → `'concurrency'` si ya hay `p_max_inflight`; si pasa, inserta la fila
+    `pending` con la estimación en `quota_usd` (y `quota_tokens = 0`) y devuelve `{ok, reason, used,
+    id}` (jsonb, `used` en USD).
   - **Liquidación:** PATCH `usage_events?id=eq.<id>&pending=eq.true` (una sola liquidación por
-    construcción: un segundo PATCH no casa ninguna fila) con tokens reales, `quota_tokens` real,
-    `cost_usd` (`usage.cost`), `generation_id` y `pending=false`. Si el stream acaba **sin**
+    construcción: un segundo PATCH no casa ninguna fila) con tokens reales, `quota_usd`
+    (`computeCostUsd`: `usage.cost` si viene; si no, tokens reales × precios de lista del catálogo),
+    `cost_usd` (`usage.cost` tal cual, o null), `quota_tokens` (= tokens reales sin ponderar, in +
+    out: dato informativo — nada lo suma ya salvo la `get_month_usage` vieja, que así sigue teniendo
+    sentido si se revierte la función), `generation_id` y `pending=false`. Si el stream acaba **sin**
     `usage` pero se vio el id de generación, intento best-effort contra `GET
     /api/v1/generation?id=` de OpenRouter (1,5 s + 1 reintento a los 3 s; `parseGenerationStats`,
     contadores `native_*` primero). Si no hay nada, la reserva **se queda** (pending, estimación
     cobrada) y se loguea — es justo lo que cubre el caso de isolate matado, donde ni el lookup
     corre. Pasados 10 min deja de contar para la concurrencia, pero sigue contando para la cuota.
   - **Liberación:** si OpenRouter responde no-OK, o el `fetch` al upstream lanza, **se asume** que
-    no ha facturado → la fila se liquida **a 0** (`pending=false`). Riesgo residual en el caso del
+    no ha facturado → la fila se liquida **a 0** (`quota_usd = 0`, `pending=false`). Riesgo residual en el caso del
     `fetch` que lanza: si la conexión se corta **después** de enviar la petición (p. ej. un reset
     durante una llamada larga no-stream), OpenRouter puede haber generado y cobrado igualmente, y
     ese consumo no queda medido. Se liquida en vez de borrarla para que el
@@ -330,14 +359,15 @@ es **un preset más**, no una implementación nueva.
   - **Columna `pending` con default `false`** a propósito: en la ventana migrar → redeploy, la
     función vieja sigue insertando filas finales y no deben contar como reservas en vuelo.
   - **Exceso máximo sobre la cuota:** una petición solo se admite con `used < limit` (y `used` ya
-    incluye las reservas en vuelo), así que lo que se puede pasar un usuario de su cuota está
-    acotado por **`max_inflight × reserva máxima por petición`**: hoy 3 × (8 MiB / 4 ≈ 2,1M de
-    entrada + 8.192 de salida) × multiplicador en tokens de cuota. En **coste real** el tope
-    efectivo es menor, porque la entrada real la limita la ventana de contexto del modelo
-    (200k-1M tokens): el peor caso es `x-ai/grok-4.5` (500k de contexto a precio de contexto largo,
-    $4/M entrada + $12/M salida ≈ **$2,1 por petición**, ≈ **$6,3** con 3 en vuelo), una vez por
-    usuario y mes. La reserva puede quedarse **corta** si la estimación bytes/4 subestima la
-    entrada real (texto CJK, sobre todo) — es una estimación, no una tokenización.
+    incluye las reservas en vuelo), así que lo que se puede pasar un usuario de su presupuesto está
+    acotado. Desde la 0013, además, la estimación **entera** tiene que caber en lo que queda (`used
+    + estimación <= límite`, sin tolerancia — ver "Cuota por coste real"), así que el exceso solo
+    puede venir de que la estimación se quede **corta** frente al coste real: estimación bytes/4
+    que subestima la entrada real (texto CJK, sobre todo) o recargos sobre el precio de lista
+    (tarifa punta ×2 de DeepSeek, contexto largo). Cota: **peticiones en vuelo (≤ `max_inflight`) ×
+    error de estimación** de cada una, una vez por usuario y mes. Una reserva grande (8 MiB en
+    `openai/gpt-5.6-sol` ≈ $8,5) ya no se admite con un presupuesto de $2 — es una estimación, no una
+    tokenización; lo cobrado al liquidar es siempre el coste real.
   - **Efectos para el usuario:** una petición que falla a mitad de stream sin `usage` ni
     generación consultable le cuesta la estimación completa (entrada + `max_tokens`); 3 isolates
     matados seguidos le bloquean hasta 10 min por concurrencia; y **parar y reenviar** 3 veces
@@ -353,58 +383,112 @@ es **un preset más**, no una implementación nueva.
     `context_length_exceeded`, `upstream_error` ni `image_too_large` (solo
     `monthly_quota_exceeded` y la heurística de imágenes). Pendiente: limitar/reescalar las imágenes
     en el cliente para el preset `noteflow` y mapear esos códigos a mensajes i18n.
-- **Cuota ponderada por modelo (migración 0007):** el catálogo mezcla modelos baratos y
-  "avanzados" (más caros), así que la cuota mensual ya no cuenta tokens reales sino **tokens
-  ponderados**. Cada modelo tiene un multiplicador (columna `quota_multiplier` de `ai_models` —
-  ver "Catálogo de modelos en BD"; un modelo ausente del catálogo, que en todo caso no está
-  permitido, sería ×1) y lo que descuenta de la cuota es
-  `computeQuotaTokens = round((tokens_in+tokens_out) * multiplicador)`. Hoy hay tres niveles:
-  **estándar ×1**, **intermedio ×2** y **avanzados ×6** (nada asume un conjunto fijo de valores —
-  `quotaMultiplierFor` acepta cualquier número finito positivo, también fraccionario, así que añadir
-  un nivel es una fila con otro multiplicador). `tokens_in`/`tokens_out` siguen guardándose sin ponderar (coste real del
-  operador); lo ponderado va a la columna nueva `usage_events.quota_tokens`, que es lo que
-  `get_month_usage` suma (0007 la redefine + backfill de filas históricas = tokens reales, todas
-  eran ×1). El multiplicador llega al cliente en `GET /models` (`modelMeta` del preset) para
-  etiquetar el coste en el selector de modelos; `NOTEFLOW_AI_MODEL_META` (`presets.ts`) es solo el
-  respaldo hasta la primera descarga.
-- **Endpoint `GET .../ai-proxy/usage`:** devuelve `{used, limit}` (tokens ponderados del mes +
-  cuota) tras resolver el token a `user_id`, **sin gate de entitlement** (ver el consumo es
-  inocuo y sigue siendo útil tras caducar la suscripción). Lo consume el IPC `ai:llm-usage`
-  (main pide un access token fresco; devuelve `null` ante cualquier fallo — la UI solo oculta la
-  barra) que alimenta la barra de consumo de la **sección NoteFlow AI** de `LlmConfigView`.
+- **Cuota por coste real (migración 0013; código listo, migración + redeploy pendientes del
+  operador):** la cuota mensual es un **presupuesto de coste real en USD por usuario**
+  (`AI_MONTHLY_BUDGET_USD`, default **$2**; `parseMonthlyBudgetUsd`). Cada petición descuenta lo que
+  OpenRouter cobró por ella (`usage.cost`), que **ya incluye** los tokens de razonamiento, los
+  descuentos de caché y las tarifas punta — así el modo razonamiento queda contabilizado exacto. Un
+  modelo caro simplemente gasta el presupuesto antes: no hay multiplicadores que mantener alineados
+  con los precios.
+  - **Por qué (decidido 2026-10-24):** la cuota anterior (0007: 3M **tokens ponderados** —
+    `round((in+out) × multiplicador)` con ×1/×2/×6 por modelo) se desalineaba de los precios:
+    Haiku a ×1 hacía perder dinero al agotarla y Kimi a ×6 daba ~33 mensajes al mes sin motivo. Neto
+    por suscriptor tras IVA 21 % y Lemon Squeezy ≈ **€4,09/mes** (mensual) y ≈ **€3,11/mes**
+    (anual); $2 de coste real (+ ~5,5 % de comisión de OpenRouter al comprar crédito) deja margen en
+    los dos.
+  - **Unidad en BD:** columna `usage_events.quota_usd` (estimación mientras `pending`, coste real al
+    liquidar, 0 al liberar). Consumo del mes = `sum(coalesce(quota_usd, cost_usd, 0))` (RPC
+    `get_month_cost` y la suma de `reserve_ai_cost`): **sin backfill** — las filas anteriores a la
+    0013 cuentan por su `cost_usd` (que se guarda desde la 0009), así que el gasto de este mes ya
+    hecho cuenta; las reservas pendientes de la función vieja (sin `quota_usd` ni `cost_usd`)
+    cuentan 0. `get_month_usage`/`reserve_ai_usage` y las columnas viejas **no se borran**.
+  - **Alias de modelos retirados:** `replaced_by` en `ai_models` → el proxy reescribe la petición al
+    sucesor (para el upstream, la reserva y el registro: la fila de `usage_events` lleva el id del
+    sucesor). Cubre los **builds internos/QA de `main` anteriores al catálogo en BD (b74fad0)**,
+    que traen el catálogo hardcodeado (`deepseek/deepseek-v4-pro` por defecto), y cualquier caché de
+    catálogo antigua. Ojo: ninguna release pública lleva el plan gestionado anterior al catálogo en
+    BD (el tag v2.0.0 es anterior a NoteFlow AI); esos builds siguen diciendo "2.0.0" pero son de
+    `main`, así que esto es comodidad para QA, no un contrato con usuarios.
+  - **Razonamiento:** controlado solo por el servidor — `ai_models.reasoning_effort` se inyecta como
+    `reasoning: {effort}`; el del cliente se descarta. Hoy solo `openai/gpt-5.6-sol` (`low`).
+  - **`cost_index` (`GET /models`):** coste de un mensaje típico (mezcla `0,9 × price_in + 0,1 ×
+    price_out`, ~90 % entrada en el chat agéntico) relativo al modelo `recommended` (o al primero),
+    redondeado, mínimo 1 (`costIndexes`). Con el catálogo actual: deepseek 1, luna 2, haiku 1,
+    mimo 2, sol 29. El cliente etiqueta "(≈N× quota)" desde 2. Ni `GET /models` ni `GET /usage`
+    exponen USD, y la app nunca los muestra (aunque el usuario **puede** leer sus propias filas de
+    `usage_events` —`cost_usd`/`quota_usd` incluidos— por la policy de lectura de la 0003: no son
+    secretos; los precios de `ai_models` sí quedan solo en el servidor).
+  - **Forma de `/usage` (unidades legacy):** `GET /usage` y las cabeceras `X-NoteFlow-Tokens-*`
+    siguen devolviendo `{used, limit}` numéricos, pero en **unidades escaladas**
+    (`legacyUsageUnits`): `limit = LEGACY_USAGE_UNITS = 3.000.000` y `used = round(usedUsd / limitUsd
+    × 3.000.000)` — los builds internos/QA anteriores a b74fad0 pintan "X / 3M tokens" y su
+    porcentaje sigue siendo exacto; la app actual solo usa el cociente. El 429
+    `monthly_quota_exceeded` no cambia de código.
+  - **Sin tolerancia sobre el presupuesto:** `reserve_ai_cost` rechaza con `'quota'` si `used >=
+    límite` **o** si `used + estimación > límite` (espejo puro: `computeQuota(used, limit,
+    estimate)`). Una petición solo entra si su estimación **entera** cabe en lo que queda, así que
+    con poco saldo un modelo caro se bloquea antes que uno barato (una petición típica de
+    `gpt-5.6-sol` reserva ~8 % de los $2; una de deepseek, < 1 %): por eso el 429 —y su texto
+    localizado en `chatErrors.quotaExceeded`— dice "agotada **o lo que queda no basta para esta
+    petición** — prueba con un modelo más barato". El exceso sobre el presupuesto ya **solo** puede
+    venir de que la estimación se quede corta frente al coste real (tarifa punta ×2 de DeepSeek,
+    recargos de contexto largo, texto CJK que bytes/4 subestima…) y está acotado por **peticiones
+    en vuelo (≤ `AI_MAX_INFLIGHT`) × error de estimación** de cada una.
+  - **Despliegue (pendiente del operador), en este orden y seguido:** (1) aplicar
+    `0013_ai_cost_quota.sql`; (2) **justo después** `supabase functions deploy ai-proxy`; (3)
+    opcional `supabase secrets set AI_MONTHLY_BUDGET_USD=…` (sin ella, $2). La función **nueva** sin
+    la migración respondería 500 a todo chat (llama a `reserve_ai_cost` y lee columnas nuevas). La
+    **vieja** es compatible con el esquema nuevo, pero entre (1) y (2) sirve el catálogo nuevo **sin
+    alias**: un build interno/QA anterior a b74fad0 con un modelo retirado (todos los suyos salvo
+    luna) recibe 400 `model_not_allowed` desde que su caché de catálogo (60 s) recoge la tabla nueva
+    hasta el redeploy. En esa ventana (o tras un rollback de `ai-proxy`) la función vieja cobra con
+    `quota_multiplier`, que la 0013 siembra **realista** (= `cost_index`: deepseek 1, luna 2, haiku 1,
+    mimo 2, sol 30) para que sol no salga a ×1. Después, publicar la app con el catálogo nuevo de
+    respaldo.
+- **Endpoint `GET .../ai-proxy/usage`:** devuelve `{used, limit}` en **unidades legacy** (ver "Cuota
+  por coste real": solo el cociente significa algo) tras resolver el token a `user_id`, **sin gate
+  de entitlement** (ver el consumo es inocuo y sigue siendo útil tras caducar la suscripción). Lo
+  consume el IPC `ai:llm-usage` (main pide un access token fresco; devuelve `null` ante cualquier
+  fallo — la UI solo oculta la barra) que alimenta la barra de consumo de la **sección NoteFlow AI**
+  de `LlmConfigView`, que desde esta versión muestra un **porcentaje** ("N% of this month’s AI
+  allowance used").
 - **Upstream OpenRouter:** una key, cientos de modelos, cambiar el catálogo sin tocar infra
-  (sobrecoste ~5%, asumido). Lista curada actual (todos tool-calling; **text-only los dos DeepSeek
-  y `xiaomi/mimo-v2.5-pro`** — o sea **tres de los cinco ×1**; el resto acepta imágenes) —
-  **estándar ×1:** `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-flash`,
-  `xiaomi/mimo-v2.5-pro`, `openai/gpt-5.6-luna`, `anthropic/claude-haiku-4.5`;
-  **intermedio ×2:** `x-ai/grok-4.5`; **avanzados ×6:** `moonshotai/kimi-k3`. El **orden importa**:
-  el primero (`deepseek/deepseek-v4-pro`) es el modelo por defecto de facto (`suggestedModels[0]`)
-  y, al ser **text-only**, el plan gestionado arranca **sin adjuntar imágenes** hasta que el
-  usuario elija otro modelo (lo capa `providerCapabilities`, ver `.claude/context/ai.md`).
-  Esa es la lista del **seed** de la 0012 y de los dos respaldos (`FALLBACK_MODEL_CATALOG` en
+  (sobrecoste ~5%, asumido). Catálogo curado actual (0013; todos tool-calling **y con visión**;
+  precios de lista USD/1M entrada/salida del 2026-10-24), en orden:
+  `deepseek/deepseek-v4.1-flash-1017` (0,15/0,60, **recomendado** y por defecto; tarifa punta ×2
+  entre semana 01-04 y 06-10 UTC — se guarda el precio base, el cobro real lo da `usage.cost`),
+  `openai/gpt-5.6-luna` (0,20/1,20), `anthropic/claude-haiku-5.5` (0,10/0,50),
+  `xiaomi/mimo-v2.6-pro` (0,435/0,87) y `openai/gpt-5.6-sol` (4/20, `reasoning_effort: low` — el
+  más listo y el más caro). **Retirados con sucesor** (`enabled = false` + `replaced_by`):
+  `deepseek/deepseek-v4-pro` y `deepseek/deepseek-v4-flash` → `deepseek-v4.1-flash-1017`;
+  `xiaomi/mimo-v2.5-pro` → `mimo-v2.6-pro`; `anthropic/claude-haiku-4.5` → `claude-haiku-5.5`;
+  `x-ai/grok-4.5` (a $2/$6 daba ~50-75 mensajes al mes) y `moonshotai/kimi-k3` → `gpt-5.6-sol`. El
+  **orden importa**: el primero es el modelo por defecto de facto (`suggestedModels[0]`). Ese es el
+  catálogo de la 0013 y de los dos respaldos (`FALLBACK_MODEL_CATALOG` + `FALLBACK_MODEL_ALIASES` en
   `ai-proxy/logic.ts`; `NOTEFLOW_AI_MODELS` + `NOTEFLOW_AI_MODEL_META` en `presets.ts`), que el test
-  `tests/supabase/ai-catalog-mirror.test.ts` mantiene idénticos; el catálogo **vivo** es la tabla
-  (ver "Catálogo de modelos en BD"), y los modelos que se añadan ahí no se copian a ningún sitio. La
+  `tests/supabase/ai-catalog-mirror.test.ts` mantiene idénticos (el `costIndex` del cliente = el
+  `cost_index` que el proxy calcula para el mismo catálogo); el catálogo **vivo** es la tabla (ver
+  "Catálogo de modelos en BD"), y los modelos que se añadan ahí no se copian a ningún sitio. La
   visión por-modelo la refina `providerCapabilities(preset, activeModel)` para el preset `noteflow`
-  (con el `images` del catálogo efectivo; DeepSeek y MiMo → `images:false`). **Añadir** un modelo
-  ya no tiene orden de despliegue: insertar la fila basta (las versiones de la app **anteriores** a
-  esta, con el catálogo hardcodeado, no lo verán nunca hasta actualizar). **Retirar** uno
-  (`enabled = false`) sigue teniendo una ventana de 400 `model_not_allowed` para quien lo tenía
-  seleccionado: (a) en las versiones **antiguas**, hasta que actualicen la app — su fallback de
-  `effectiveModel` viaja en la app y el servidor no puede repararles la selección; (b) en **esta**
-  versión, hasta el siguiente refresco del catálogo — y como el primer 400 `model_not_allowed` en
-  el chat fuerza ese refresco (`friendlyChatError` → `refreshManagedCatalog(true)`), en la práctica
-  falla **un mensaje** y el siguiente ya sale con el primer modelo del catálogo (fallback en
-  memoria). Por eso: no retirar un modelo sin un equivalente en el catálogo, y mientras haya
-  instalaciones antiguas activas, asumir que sus usuarios con ese modelo fallarán hasta actualizar.
+  (con el `images` del catálogo efectivo). **Añadir** un modelo no tiene orden de despliegue:
+  insertar la fila basta (los builds internos/QA anteriores a b74fad0, con el catálogo
+  hardcodeado, no lo verán). **Retirar** uno con `replaced_by` **no** abre ventana de 400: el
+  proxy reescribe al sucesor tanto para esos builds como para esta versión antes de su siguiente
+  refresco del catálogo. Sin `replaced_by` (o con un sucesor que no se sirve) vuelve la ventana de
+  400 `model_not_allowed`: (a) en los builds anteriores a b74fad0, siempre; (b) en esta versión,
+  hasta el siguiente refresco del catálogo — el primer 400 en el chat lo fuerza (`friendlyChatError`
+  → `refreshManagedCatalog(true)`), así que falla **un mensaje** y el siguiente sale con el primer
+  modelo del catálogo (fallback en memoria). Por eso: retirar siempre **con sucesor**.
 - **El catálogo rota** (entran y salen modelos), así que el modelo guardado por el usuario puede
-  quedar obsoleto y el proxy rechazaría **todas** sus peticiones. `effectiveModel()`
-  (`electron/ai/llm/index.ts`) protege ese caso: en los presets con catálogo curado (los que
-  tienen `modelMeta` — hoy solo `noteflow`), si el modelo guardado no está en `suggestedModels`
-  (= catálogo efectivo: el cacheado del proxy o el de respaldo) se usa `suggestedModels[0]`, solo en
-  memoria (el guardado no se reescribe). Pendiente (fase posterior): un `replaced_by` en
-  `ai_models` para migrar la selección a un sucesor. En los presets BYO el modelo es libre y **no**
-  se toca.
+  quedar obsoleto. Dos defensas: en el **servidor**, el alias `replaced_by` (arriba); en el
+  **cliente**, `effectiveModel()` (`electron/ai/llm/index.ts`): en los presets con catálogo curado
+  (los que tienen `modelMeta` — hoy solo `noteflow`), si el modelo guardado no está en
+  `suggestedModels` (= catálogo efectivo: el cacheado del proxy o el de respaldo) se usa
+  `suggestedModels[0]` (el recomendado), solo en memoria (el guardado no se reescribe). El cliente
+  **no** recibe los alias (`GET /models` no los incluye), así que cae al recomendado aunque el
+  sucesor sea otro (p. ej. quien tenía `kimi-k3` pasa a `deepseek-v4.1-flash` en esta versión, y a
+  `gpt-5.6-sol` vía alias en un build anterior a b74fad0). En los presets BYO el modelo es libre y
+  **no** se toca.
 - **Cliente:** preset `noteflow` **primero** en `presets.ts` (`impl: 'openai'`, `baseUrl` =
   `AI_PROXY_URL` de `cloudConfig.ts`, `needsKey: false`, `editableBaseUrl: false`).
   ⚠️ `presetOf()` con id desconocido cae **explícitamente en `anthropic`** (ya no en `PRESETS[0]`)
@@ -501,11 +585,11 @@ es **un preset más**, no una implementación nueva.
   conocido no gestionado): con NoteFlow AI activo, la tarjeta "Your provider / local AI" de
   Ajustes → IA (`LlmConfigView.tsx`, `byoOf`) preselecciona ese proveedor (p. ej. DeepSeek con su
   key guardada) y solo cae a `'anthropic'` si no hay ninguno.
-- **Cuota ponderada desplegada:** la migración 0007 está aplicada y `ai-proxy` redesplegado con el
-  catálogo nuevo, los multiplicadores y el endpoint `/usage`.
-- **Catálogo en BD (0012) — pendiente del operador:** aplicar `0012_ai_models.sql` y redesplegar
-  `ai-proxy` (orden indiferente: la función nueva sirve el respaldo mientras la tabla no exista, y la
-  app tolera el `/models` antiguo, solo ids, quedándose con su respaldo).
+- **Cuota ponderada (0007) desplegada** en su día con el endpoint `/usage`; la **sustituye** la cuota
+  por coste de la 0013 (arriba).
+- **Catálogo en BD (0012) + cuota por coste (0013) — pendiente del operador:** aplicar
+  `0012_ai_models.sql` (si no se aplicó ya) y `0013_ai_cost_quota.sql`, y **justo después**
+  redesplegar `ai-proxy` (la 0013 sí tiene orden — ver "Cuota por coste real" → Despliegue).
 - **Endurecimiento desplegado (2026-10-21):** migraciones 0009 + 0010 + 0011 aplicadas,
   `ai-proxy` v9 y `billing-webhook` v6 desplegados (código idéntico al repo, verificado), permisos
   de las RPC nuevas comprobados. El webhook de **live** de LS escucha además
@@ -561,45 +645,24 @@ es **un preset más**, no una implementación nueva.
   recuperados). Las secciones `aiHidden` y las notas cifradas ya quedan fuera del índice y por
   tanto nunca salen. La IA gestionada NO pasa por la nube de notas (subsistemas independientes).
 
-### Coste en el peor caso (IA gestionada) — ⚠️ decisión pendiente del operador
+### Coste en el peor caso (IA gestionada) — decidido: cuota por coste real
 
-Precios de OpenRouter consultados el **2026-10-20** (`curl -s https://openrouter.ai/api/v1/models`,
-USD por millón de tokens, entrada / salida): `deepseek-v4-pro` 0,40 / 0,80 · `deepseek-v4-flash`
-0,09 / 0,18 · `mimo-v2.5-pro` 0,435 / 0,87 · `gpt-5.6-luna` 0,20 / 1,20 (0,40 / 1,80 con prompt
-> 272k) · `claude-haiku-4.5` 1 / 5 · `grok-4.5` 2 / 6 (4 / 12 con prompt > 200k) · `kimi-k3`
-0,239 / 11,936. Coste de un usuario que **agota la cuota de 3.000.000 tokens ponderados** en un solo
-modelo, con el **~5,5 % de comisión** de OpenRouter al comprar crédito incluida:
+Hasta la 0013 la cuota eran 3M **tokens ponderados** y el análisis (precios de OpenRouter del
+2026-10-20) mostró que el coste de agotarla dependía por completo del modelo: con la mezcla agéntica
+típica (90 % entrada / 10 % salida) iba de ~$0,3 (deepseek-v4-flash) a ~$4,4 (claude-haiku-4.5 a ×1)
+o ~$7,6 (grok-4.5 con contexto largo), y en el peor caso (100 % salida) Haiku llegaba a ~$15,8 —
+por encima del neto de cualquier plan.
 
-| Modelo (mult.) | Tokens reales | Mezcla típica agéntica (90 % entrada / 10 % salida) | Peor caso (100 % salida: prompt mínimo + `max_tokens` 8192 en bucle) |
-|---|---|---|---|
-| `deepseek-v4-flash` (×1) | 3M | $0,32 | $0,58 |
-| `gpt-5.6-luna` (×1) | 3M | $0,95 ($1,71 con contexto > 272k) | $3,80 |
-| `deepseek-v4-pro` (×1) | 3M | $1,39 | $2,52 |
-| `mimo-v2.5-pro` (×1) | 3M | $1,51 | $2,75 |
-| `claude-haiku-4.5` (×1) | 3M | $4,43 | **$15,82** |
-| `grok-4.5` (×2) | 1,5M | $3,80 (**$7,60** con contexto > 200k) | **$9,49** |
-| `kimi-k3` (×6) | 0,5M | $0,74 | $6,30 |
-
-Ingreso neto por suscriptor (precios con IVA incluido; LS ~5 % sobre el total + $0,50 ≈ 0,43 € a
-1 € ≈ 1,15 $; sin contar posibles recargos de LS por pago internacional/PayPal):
-
-| Plan | Neto/mes con IVA 21 % (ES) | Neto/mes con IVA 27 % (máx. UE) |
-|---|---|---|
-| AI mensual (5,99 €) | 4,22 € ≈ $4,85 | 3,98 € ≈ $4,58 |
-| AI anual (49,99 €/12) | 3,20 € ≈ $3,68 | 3,04 € ≈ $3,49 |
-| Bundle mensual (7,99 €, incluye Cloud) | 5,77 € ≈ $6,63 | 5,46 € ≈ $6,28 |
-
-**Conclusión:** con la mezcla típica, los dos DeepSeek, MiMo, GPT-5.6 Luna y Kimi dejan margen
-holgado; `claude-haiku-4.5` ($4,43) y `grok-4.5` ($3,80) ya se comen casi todo el neto del plan AI
-mensual y **superan el del anual**, y `grok-4.5` con contexto largo ($7,60) supera cualquier plan.
-Un usuario que **agote la cuota a propósito** con `claude-haiku-4.5` (×1, salida a $5/M) **pierde
-dinero en cualquier plan** (~$15,8 frente a ≤ $6,6 de neto), y `grok-4.5` (×2) y `kimi-k3` (×6)
-también superan el neto del plan AI en el peor caso. El
-multiplicador ×1 de Haiku está muy por debajo de su coste relativo (su salida cuesta ~6× la de
-DeepSeek v4 pro). Opciones (decide el operador; **no se ha tocado** ninguna cuota ni
-multiplicador): subir los multiplicadores de Haiku/Grok/Kimi, bajar `AI_MONTHLY_TOKENS`, ponderar
-la salida más que la entrada, o pasar a una cuota en **coste** (`cost_usd` ya se guarda desde la
-0009). La tabla supone la cuota completa; el exceso por reserva (arriba) se suma una vez por mes.
+**Decisión (2026-10-24):** la cuota pasa a ser un **presupuesto de coste real** de **$2/usuario/mes**
+(`AI_MONTHLY_BUDGET_USD`, ver § 3 "Cuota por coste real"), medido con el `usage.cost` de OpenRouter.
+El coste por usuario queda acotado por construcción, sea cual sea el modelo: **$2 + ~5,5 % de
+comisión de OpenRouter al comprar crédito ≈ $2,11**, más el error de estimación de las peticiones
+en vuelo (sin tolerancia: una petición solo entra si su estimación cabe — § 3 "Coste acotado"),
+una vez por usuario y mes. Frente al neto por suscriptor tras IVA 21 % y Lemon Squeezy
+(≈ **€4,09/mes** en el plan AI mensual y ≈ **€3,11/mes** en el anual — análisis del 2026-10-24; con
+IVA más alto el neto baja algo), deja margen en ambos. Si cambian precios o planes, el ajuste es
+la variable (no hay multiplicadores que recalcular); la web solo habla de "asignación mensual
+medida por el coste de cada petición" y no publica la cifra.
 
 ## 4. NoteFlow Cloud — nube de notas cifrada (managed | e2ee)
 
@@ -1459,7 +1522,7 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
 | Fase | Contenido |
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
-| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (0007 aplicada + redeploy hecho):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×2/×6 — ver § 3), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`). **Endurecimiento (desplegado 2026-10-21: 0009 + 0010 + redeploys):** reserva + límite de concurrencia + topes de body/`max_tokens`, allowlist del body, errores del upstream mapeados, `cost_usd`; y en el webhook reembolsos, `test_mode`, validación UUID y reconciliación — ver §§ 2-3 |
+| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (0007 aplicada + redeploy hecho):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×2/×6 — ver § 3), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`). **Endurecimiento (desplegado 2026-10-21: 0009 + 0010 + redeploys):** reserva + límite de concurrencia + topes de body/`max_tokens`, allowlist del body, errores del upstream mapeados, `cost_usd`; y en el webhook reembolsos, `test_mode`, validación UUID y reconciliación — ver §§ 2-3. **Cuota por coste real + catálogo renovado (0013, código listo; migración + redeploy pendientes):** presupuesto de $2/usuario/mes medido con `usage.cost`, alias `replaced_by` para modelos retirados, razonamiento inyectado por el servidor — ver § 3 |
 | **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). El producto Cloud (y el Bundle) ya existen en Lemon Squeezy y sus checkout URLs (de live desde 2026-10-19) están pobladas en `cloudConfig.ts` → los planes ofrecen botón Subscribe (ver § 3, "Billing en live mode") |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 

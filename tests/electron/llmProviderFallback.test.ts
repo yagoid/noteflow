@@ -80,6 +80,17 @@ describe('resolveConfig — model of the managed (curated) preset', () => {
     expect(resolveConfig(managed('openai/gpt-4o-mini')).model).toBe(NOTEFLOW_AI_MODELS[0])
   })
 
+  it('a model retired by the catalog renewal (ids of the pre-b74fad0 hardcoded catalog) falls back to the recommended default', () => {
+    for (const retired of ['deepseek/deepseek-v4-pro', 'x-ai/grok-4.5', 'moonshotai/kimi-k3', 'anthropic/claude-haiku-4.5']) {
+      expect(resolveConfig(managed(retired)).model).toBe('deepseek/deepseek-v4.1-flash-1017')
+    }
+  })
+
+  it('the default model of the backup catalog accepts images (attachments offered out of the box)', () => {
+    expect(toPublic(managed()).capabilities.images).toBe(true)
+    expect(toPublic(managed('openai/gpt-5.6-sol')).capabilities).toEqual({ images: true, pdf: false })
+  })
+
   it('uses the first curated model when nothing is stored yet', () => {
     expect(resolveConfig(managed()).model).toBe(NOTEFLOW_AI_MODELS[0])
     expect(resolveConfig(managed('  ')).model).toBe(NOTEFLOW_AI_MODELS[0])

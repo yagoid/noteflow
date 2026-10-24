@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.OpenAiCompatibleProvider = void 0;
+exports.accumulateReasoningDetails = accumulateReasoningDetails;
 function trimSlash(url) {
     return url.replace(/\/+$/, '');
 }
@@ -32,6 +33,8 @@ function toOpenAiMessages(system, messages) {
                     id: tc.id, type: 'function', function: { name: tc.name, arguments: JSON.stringify(tc.input) },
                 }));
             }
+            if (m.reasoningDetails?.length)
+                msg.reasoning_details = m.reasoningDetails;
             out.push(msg);
         }
         else {
@@ -41,6 +44,37 @@ function toOpenAiMessages(system, messages) {
         }
     }
     return out;
+}
+/** String fields of a reasoning detail that arrive fragmented across SSE chunks. */
+const REASONING_TEXT_FIELDS = ['text', 'summary', 'data'];
+/**
+ * Merges streamed `delta.reasoning_details` fragments into whole details, keyed by
+ * their `index` (a fragment without one continues detail 0): the text-like fields
+ * (`text`, `summary`, `data`) are concatenated, every other field (type, id, format,
+ * signature…) keeps its latest non-empty value. Non-object fragments are ignored.
+ */
+function accumulateReasoningDetails(acc, fragments) {
+    if (!Array.isArray(fragments))
+        return;
+    for (const frag of fragments) {
+        if (frag === null || typeof frag !== 'object' || Array.isArray(frag))
+            continue;
+        const f = frag;
+        const index = typeof f.index === 'number' && Number.isInteger(f.index) ? f.index : 0;
+        const cur = acc.get(index) ?? {};
+        for (const [key, value] of Object.entries(f)) {
+            if (value === undefined || value === null || value === '')
+                continue;
+            const prev = cur[key];
+            if (REASONING_TEXT_FIELDS.includes(key) && typeof value === 'string' && typeof prev === 'string') {
+                cur[key] = prev + value;
+            }
+            else {
+                cur[key] = value;
+            }
+        }
+        acc.set(index, cur);
+    }
 }
 function safeParseArgs(args) {
     if (!args.trim())
@@ -129,6 +163,8 @@ class OpenAiCompatibleProvider {
         let text = '';
         // tool_calls arrive fragmented across SSE chunks; accumulate by their array index.
         const accum = new Map();
+        // Same for OpenRouter's reasoning_details (only gateways with reasoning send them).
+        const reasoning = new Map();
         // Returns true on the terminating [DONE] frame; a failure reported mid-stream throws.
         const drain = (data) => {
             if (data === '[DONE]')
@@ -151,6 +187,8 @@ class OpenAiCompatibleProvider {
                 text += delta.content;
                 onDelta(delta.content);
             }
+            if (delta?.reasoning_details)
+                accumulateReasoningDetails(reasoning, delta.reasoning_details);
             for (const tc of delta?.tool_calls ?? []) {
                 const cur = accum.get(tc.index) ?? { id: '', name: '', args: '' };
                 if (tc.id)
@@ -191,7 +229,8 @@ class OpenAiCompatibleProvider {
             .sort((a, b) => a[0] - b[0])
             .filter(([, v]) => v.name)
             .map(([i, v]) => ({ id: v.id || `call_${i}`, name: v.name, input: safeParseArgs(v.args) }));
-        return { text, toolCalls };
+        const reasoningDetails = [...reasoning.entries()].sort((a, b) => a[0] - b[0]).map(([, d]) => d);
+        return reasoningDetails.length ? { text, toolCalls, reasoningDetails } : { text, toolCalls };
     }
     async listModels() {
         const res = await fetch(`${this.base}/models`, { headers: this.headers() });

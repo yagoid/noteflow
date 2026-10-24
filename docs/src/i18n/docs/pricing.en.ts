@@ -108,28 +108,23 @@ export const pricingEn = {
     ],
     bullets: [
       'No Ollama to install, no third-party account, no API key to buy, store or rotate.',
-      'A monthly token quota is included — <strong>3M tokens per month</strong> by default.',
+      'A <strong>monthly AI allowance</strong> is included, measured by the real compute cost of each request — so how far it goes depends on the model you pick and on how long your conversations get.',
       'Monthly or annual subscription — <strong>€5.99/month or €49.99/year</strong>, VAT included. Subscribe from inside the app: <strong>Settings → Account → Subscribe</strong> — checkout opens in your browser, handled by Lemon Squeezy, our merchant of record.',
       'Once the payment goes through, NoteFlow AI activates itself as your provider — nothing to configure.',
     ],
-    modelsTitle: 'Standard models — base quota',
+    modelsTitle: 'Everyday models',
     models: [
-      'deepseek/deepseek-v4-pro',
-      'deepseek/deepseek-v4-flash',
-      'xiaomi/mimo-v2.5-pro',
+      'deepseek/deepseek-v4.1-flash-1017',
       'openai/gpt-5.6-luna',
-      'anthropic/claude-haiku-4.5',
+      'anthropic/claude-haiku-5.5',
+      'xiaomi/mimo-v2.6-pro',
     ],
-    modelsMidTitle: 'Mid-tier models — 2× quota',
-    modelsMid: [
-      'x-ai/grok-4.5',
-    ],
-    modelsAdvancedTitle: 'Advanced models — 6× quota',
+    modelsAdvancedTitle: 'Advanced model — spends the allowance much faster',
     modelsAdvanced: [
-      'moonshotai/kimi-k3',
+      'openai/gpt-5.6-sol',
     ],
     modelsNote:
-      'All curated models support tool-calling (the agent), and all support vision (image attachments) except the two DeepSeek models and Xiaomi MiMo, which are text-only. The monthly quota is weighted by model: standard models spend it at the base rate, mid-tier ones at <strong>2× the rate</strong> and advanced ones at <strong>6×</strong> — so on an advanced model every token counts as six.',
+      'All curated models support tool-calling (the agent) and vision (image attachments); <strong>deepseek-v4.1-flash</strong> is the recommended default. Because the allowance follows the real cost of each request, pricier models use it up sooner: the everyday models cost about the same per message as the default, or up to roughly twice as much, while the advanced model — the most capable one — spends it <strong>around 30× faster</strong>. Keep it for the hardest questions.',
     alt: {
       title: 'The free way to the same capability',
       html: 'Run a local model with <strong>Ollama</strong> — nothing ever leaves your machine — or bring your own API key from any supported provider. Same chat, same agent, same features; you just manage the model yourself.',
@@ -168,7 +163,7 @@ export const pricingEn = {
     rows: [
       {
         capability: 'AI model',
-        managed: '<strong>NoteFlow AI</strong> — curated models, zero setup, token quota included',
+        managed: '<strong>NoteFlow AI</strong> — curated models, zero setup, monthly AI allowance included',
         self: '<strong>Ollama</strong> locally (no key, offline) or your own API key from any of the 9 supported providers',
       },
       {

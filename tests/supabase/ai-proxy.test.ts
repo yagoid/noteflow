@@ -1,19 +1,27 @@
 import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_ALLOWED_MODELS,
-  DEFAULT_MONTHLY_TOKENS,
+  DEFAULT_MONTHLY_BUDGET_USD,
   FALLBACK_MODEL_CATALOG,
+  FALLBACK_MODEL_ALIASES,
+  LEGACY_USAGE_UNITS,
+  MAX_ALIAS_HOPS,
   catalogFromRows,
+  aliasEdgesFromRows,
+  resolveModelAliases,
+  resolveRequestedModel,
   parseAllowedModelsOverride,
   applyAllowedModelsOverride,
   catalogModelIds,
+  type CatalogModel,
   type ModelCatalog,
-  parseMonthlyTokens,
+  parseMonthlyBudgetUsd,
+  legacyUsageUnits,
+  computeCostUsd,
+  costIndexes,
   isModelAllowed,
   hasAiEntitlement,
   computeQuota,
-  quotaMultiplierFor,
-  computeQuotaTokens,
   openAiErrorBody,
   modelsListBody,
   buildUpstreamBody,
@@ -27,7 +35,8 @@ import {
   UPSTREAM_ALLOWED_FIELDS,
   clampMaxTokens,
   parseMaxInflight,
-  estimateReservationTokens,
+  estimateInputTokens,
+  estimateReservationUsd,
   isDeclaredBodyTooLarge,
   readBodyWithLimit,
   parseReserveResult,
@@ -36,36 +45,53 @@ import {
   mapUpstreamError,
 } from '../../supabase/functions/ai-proxy/logic'
 
+const model = (id: string, extra: Partial<CatalogModel> = {}): CatalogModel => ({
+  id,
+  images: true,
+  priceInUsd: 1,
+  priceOutUsd: 2,
+  reasoningEffort: null,
+  recommended: false,
+  ...extra,
+})
+
 // A catalog that only exists in the table (not in the backup constants) — what
 // "a new model inserted in ai_models" looks like to the proxy.
 const TABLE_CATALOG: ModelCatalog = [
-  { id: 'deepseek/deepseek-v4-pro', quotaMultiplier: 1, images: false },
-  { id: 'new/model-x', quotaMultiplier: 3, images: true },
-  { id: 'cheap/model-y', quotaMultiplier: 0.5, images: false },
+  model('cheap/base', { images: false, priceInUsd: 0.1, priceOutUsd: 0.4, recommended: true }),
+  model('new/model-x', { priceInUsd: 3, priceOutUsd: 15, reasoningEffort: 'medium' }),
+  model('mid/model-y', { images: false, priceInUsd: 0.3, priceOutUsd: 1 }),
 ]
+
+/** Within floating-point noise (USD amounts are fractional). */
+const close = (a: number, b: number) => expect(Math.abs(a - b)).toBeLessThan(1e-12)
 
 describe('catalogFromRows (public.ai_models → catalog)', () => {
   const row = (id: unknown, extra: Record<string, unknown> = {}) => ({
     id,
-    quota_multiplier: 1,
     images: true,
     enabled: true,
     sort_order: 0,
+    price_in_usd: 1,
+    price_out_usd: 2,
+    reasoning_effort: null,
+    recommended: false,
+    replaced_by: null,
     ...extra,
   })
 
-  it('keeps only enabled rows, ordered by sort_order', () => {
+  it('keeps only enabled rows, ordered by sort_order, with prices / effort / recommended', () => {
     expect(
       catalogFromRows([
         row('c/third', { sort_order: 30 }),
-        row('a/first', { sort_order: 10, quota_multiplier: 2, images: false }),
-        row('off/disabled', { sort_order: 0, enabled: false }),
-        row('b/second', { sort_order: 20 }),
+        row('a/first', { sort_order: 10, images: false, price_in_usd: 0.15, price_out_usd: 0.6, recommended: true }),
+        row('off/disabled', { sort_order: 0, enabled: false, replaced_by: 'a/first' }),
+        row('b/second', { sort_order: 20, reasoning_effort: 'low' }),
       ])
     ).toEqual([
-      { id: 'a/first', quotaMultiplier: 2, images: false },
-      { id: 'b/second', quotaMultiplier: 1, images: true },
-      { id: 'c/third', quotaMultiplier: 1, images: true },
+      model('a/first', { images: false, priceInUsd: 0.15, priceOutUsd: 0.6, recommended: true }),
+      model('b/second', { reasoningEffort: 'low' }),
+      model('c/third'),
     ])
   })
 
@@ -73,35 +99,41 @@ describe('catalogFromRows (public.ai_models → catalog)', () => {
     expect(catalogModelIds(catalogFromRows([row('z/z'), row('a/a'), row('m/m')])!)).toEqual(['a/a', 'm/m', 'z/z'])
   })
 
-  it('accepts a numeric multiplier serialized as a string, and fractional tiers', () => {
-    expect(catalogFromRows([row('a/a', { quota_multiplier: '1.5' })])).toEqual([
-      { id: 'a/a', quotaMultiplier: 1.5, images: true },
+  it('accepts prices serialized as strings, and a zero price (free model)', () => {
+    expect(catalogFromRows([row('a/a', { price_in_usd: '0.435', price_out_usd: 0 })])).toEqual([
+      model('a/a', { priceInUsd: 0.435, priceOutUsd: 0 }),
     ])
   })
 
-  it('skips malformed rows without dropping the good ones', () => {
+  it('a missing recommended / reasoning_effort reads as false / null', () => {
+    expect(catalogFromRows([row('a/a', { recommended: undefined, reasoning_effort: undefined })])).toEqual([model('a/a')])
+    expect(catalogFromRows([row('a/a', { recommended: 'yes' })])).toEqual([model('a/a')])
+  })
+
+  it('skips malformed rows without dropping the good ones (an enabled row without a price is never served)', () => {
     expect(
       catalogFromRows([
         row(''),
         row('   '),
         row(42),
-        row('bad/mult-0', { quota_multiplier: 0 }),
-        row('bad/mult-neg', { quota_multiplier: -2 }),
-        row('bad/mult-nan', { quota_multiplier: 'abc' }),
-        row('bad/mult-missing', { quota_multiplier: undefined }),
+        row('bad/no-price-in', { price_in_usd: null }),
+        row('bad/no-price-out', { price_out_usd: undefined }),
+        row('bad/neg-price', { price_in_usd: -1 }),
+        row('bad/nan-price', { price_out_usd: 'abc' }),
         row('bad/images', { images: 'yes' }),
+        row('bad/effort', { reasoning_effort: 'extreme' }),
         row('bad/enabled-string', { enabled: 'true' }),
         null,
         'nope',
         [],
         row(' ok/model ', { sort_order: 5 }),
       ])
-    ).toEqual([{ id: 'ok/model', quotaMultiplier: 1, images: true }])
+    ).toEqual([model('ok/model')])
   })
 
   it('keeps the first occurrence of a repeated id', () => {
-    expect(catalogFromRows([row('a/a', { quota_multiplier: 2 }), row('a/a', { quota_multiplier: 9 })])).toEqual([
-      { id: 'a/a', quotaMultiplier: 2, images: true },
+    expect(catalogFromRows([row('a/a', { price_in_usd: 2 }), row('a/a', { price_in_usd: 9 })])).toEqual([
+      model('a/a', { priceInUsd: 2 }),
     ])
   })
 
@@ -118,6 +150,70 @@ describe('catalogFromRows (public.ai_models → catalog)', () => {
     expect(catalogFromRows(null)).toBeNull()
     expect(catalogFromRows({ data: [row('a/a')] })).toBeNull()
   })
+
+  it('a pre-0013 row (quota_multiplier, no prices) is not usable', () => {
+    expect(catalogFromRows([{ id: 'a/a', quota_multiplier: 1, images: true, enabled: true, sort_order: 0 }])).toBeNull()
+  })
+})
+
+describe('model aliases (retired id → successor)', () => {
+  it('aliasEdgesFromRows reads replaced_by from any row, enabled or not', () => {
+    expect(
+      aliasEdgesFromRows([
+        { id: 'old/a', enabled: false, replaced_by: 'new/a' },
+        { id: 'old/b', enabled: true, replaced_by: ' new/b ' },
+        { id: 'live/c', enabled: true, replaced_by: null },
+        { id: 'self/d', replaced_by: 'self/d' },
+        { id: '__proto__', replaced_by: 'x' },
+        { id: '', replaced_by: 'x' },
+        { id: 'old/a', replaced_by: 'other' }, // repeated id: first edge wins
+        null,
+        'nope',
+      ])
+    ).toEqual({ 'old/a': 'new/a', 'old/b': 'new/b' })
+    expect(aliasEdgesFromRows(null)).toEqual({})
+  })
+
+  it('resolves each retired id to a SERVED successor, following short chains', () => {
+    const edges = { 'v1/a': 'v2/a', 'v2/a': 'cheap/base', 'gone/x': 'new/model-x' }
+    expect(resolveModelAliases(edges, TABLE_CATALOG)).toEqual({ 'v1/a': 'cheap/base', 'v2/a': 'cheap/base', 'gone/x': 'new/model-x' })
+  })
+
+  it('drops cycles, chains that never reach a served model and over-long chains', () => {
+    expect(resolveModelAliases({ 'a/a': 'b/b', 'b/b': 'a/a' }, TABLE_CATALOG)).toEqual({})
+    expect(resolveModelAliases({ 'a/a': 'also/retired' }, TABLE_CATALOG)).toEqual({})
+    const long: Record<string, string> = {}
+    for (let i = 0; i < MAX_ALIAS_HOPS; i++) long[`m/${i}`] = `m/${i + 1}`
+    long[`m/${MAX_ALIAS_HOPS}`] = 'cheap/base'
+    expect(resolveModelAliases(long, TABLE_CATALOG)['m/0']).toBeUndefined()
+    expect(resolveModelAliases(long, TABLE_CATALOG)[`m/${MAX_ALIAS_HOPS}`]).toBe('cheap/base')
+  })
+
+  it('a served id is never aliased away, and a successor restricted by AI_ALLOWED_MODELS yields no alias', () => {
+    expect(resolveModelAliases({ 'cheap/base': 'new/model-x' }, TABLE_CATALOG)).toEqual({})
+    const { catalog } = applyAllowedModelsOverride(TABLE_CATALOG, 'cheap/base')
+    expect(resolveModelAliases({ 'old/x': 'new/model-x' }, catalog)).toEqual({})
+  })
+
+  it('resolveRequestedModel: served id as-is, alias → successor, anything else → null', () => {
+    const aliases = { 'old/x': 'new/model-x' }
+    expect(resolveRequestedModel('mid/model-y', TABLE_CATALOG, aliases)?.id).toBe('mid/model-y')
+    expect(resolveRequestedModel('old/x', TABLE_CATALOG, aliases)).toEqual(TABLE_CATALOG[1])
+    expect(resolveRequestedModel('unknown/model', TABLE_CATALOG, aliases)).toBeNull()
+    expect(resolveRequestedModel(undefined, TABLE_CATALOG, aliases)).toBeNull()
+    expect(resolveRequestedModel(42, TABLE_CATALOG, aliases)).toBeNull()
+    expect(resolveRequestedModel('__proto__', TABLE_CATALOG, aliases)).toBeNull()
+  })
+
+  it('the backup aliases map every model of the old hardcoded catalog (pre-b74fad0 internal builds) to a served successor', () => {
+    const resolved = resolveModelAliases(FALLBACK_MODEL_ALIASES, FALLBACK_MODEL_CATALOG)
+    expect(resolved).toEqual(FALLBACK_MODEL_ALIASES)
+    // The old default model keeps working — rewritten to the recommended one.
+    expect(resolveRequestedModel('deepseek/deepseek-v4-pro', FALLBACK_MODEL_CATALOG, resolved)?.id).toBe(
+      'deepseek/deepseek-v4.1-flash-1017'
+    )
+    expect(resolveRequestedModel('x-ai/grok-4.5', FALLBACK_MODEL_CATALOG, resolved)?.id).toBe('openai/gpt-5.6-sol')
+  })
 })
 
 describe('FALLBACK_MODEL_CATALOG / DEFAULT_ALLOWED_MODELS', () => {
@@ -129,17 +225,23 @@ describe('FALLBACK_MODEL_CATALOG / DEFAULT_ALLOWED_MODELS', () => {
     for (const m of FALLBACK_MODEL_CATALOG) {
       expect(m.id.trim()).toBe(m.id)
       expect(m.id).not.toBe('')
-      expect(Number.isFinite(m.quotaMultiplier) && m.quotaMultiplier > 0).toBe(true)
+      expect(Number.isFinite(m.priceInUsd) && m.priceInUsd >= 0).toBe(true)
+      expect(Number.isFinite(m.priceOutUsd) && m.priceOutUsd >= 0).toBe(true)
       expect(typeof m.images).toBe('boolean')
     }
+  })
+
+  it('the first model is the recommended one (the client default)', () => {
+    expect(FALLBACK_MODEL_CATALOG[0].recommended).toBe(true)
+    expect(FALLBACK_MODEL_CATALOG.filter((m) => m.recommended)).toHaveLength(1)
   })
 })
 
 describe('AI_ALLOWED_MODELS emergency override', () => {
   it('parses a comma-separated override with whitespace tolerance', () => {
-    expect(parseAllowedModelsOverride(' openai/gpt-5.6-luna , x-ai/grok-4.5 ,')).toEqual([
+    expect(parseAllowedModelsOverride(' openai/gpt-5.6-luna , openai/gpt-5.6-sol ,')).toEqual([
       'openai/gpt-5.6-luna',
-      'x-ai/grok-4.5',
+      'openai/gpt-5.6-sol',
     ])
   })
 
@@ -152,12 +254,12 @@ describe('AI_ALLOWED_MODELS emergency override', () => {
   })
 
   it('only RESTRICTS the catalog, keeping catalog order and metadata', () => {
-    const { catalog, overrideIgnored } = applyAllowedModelsOverride(TABLE_CATALOG, 'cheap/model-y,new/model-x')
+    const { catalog, overrideIgnored } = applyAllowedModelsOverride(TABLE_CATALOG, 'mid/model-y,new/model-x')
     expect(overrideIgnored).toBe(false)
     expect(catalog).toEqual([TABLE_CATALOG[1], TABLE_CATALOG[2]])
   })
 
-  it('cannot ADD a model the catalog does not have (it would have no multiplier)', () => {
+  it('cannot ADD a model the catalog does not have (it would have no price)', () => {
     const { catalog } = applyAllowedModelsOverride(TABLE_CATALOG, 'new/model-x,someone/pricey-model')
     expect(catalogModelIds(catalog)).toEqual(['new/model-x'])
   })
@@ -170,24 +272,46 @@ describe('AI_ALLOWED_MODELS emergency override', () => {
   })
 })
 
-describe('parseMonthlyTokens', () => {
-  it('parses a positive integer', () => {
-    expect(parseMonthlyTokens('5000000')).toBe(5_000_000)
+describe('parseMonthlyBudgetUsd', () => {
+  it('parses a positive amount, decimals included', () => {
+    expect(parseMonthlyBudgetUsd('5')).toBe(5)
+    expect(parseMonthlyBudgetUsd('2.5')).toBe(2.5)
+    expect(parseMonthlyBudgetUsd(' 3 ')).toBe(3)
   })
 
-  it('falls back to the default on missing/garbage/non-positive values', () => {
-    expect(parseMonthlyTokens(undefined)).toBe(DEFAULT_MONTHLY_TOKENS)
-    expect(parseMonthlyTokens(null)).toBe(DEFAULT_MONTHLY_TOKENS)
-    expect(parseMonthlyTokens('')).toBe(DEFAULT_MONTHLY_TOKENS)
-    expect(parseMonthlyTokens('lots')).toBe(DEFAULT_MONTHLY_TOKENS)
-    expect(parseMonthlyTokens('0')).toBe(DEFAULT_MONTHLY_TOKENS)
-    expect(parseMonthlyTokens('-5')).toBe(DEFAULT_MONTHLY_TOKENS)
-    expect(parseMonthlyTokens('1.5')).toBe(DEFAULT_MONTHLY_TOKENS)
+  it('falls back to the default ($2) on missing/garbage/non-positive values', () => {
+    expect(DEFAULT_MONTHLY_BUDGET_USD).toBe(2)
+    for (const raw of [undefined, null, '', '   ', 'lots', '0', '-5', 'Infinity', 'NaN', '$2']) {
+      expect(parseMonthlyBudgetUsd(raw)).toBe(DEFAULT_MONTHLY_BUDGET_USD)
+    }
+  })
+})
+
+describe('legacyUsageUnits (GET /usage + X-NoteFlow-Tokens-* contract)', () => {
+  it('keeps the 3M "token" scale pre-b74fad0 builds render, with used = share of the USD budget', () => {
+    expect(LEGACY_USAGE_UNITS).toBe(3_000_000)
+    expect(legacyUsageUnits(0, 2)).toEqual({ used: 0, limit: 3_000_000 })
+    expect(legacyUsageUnits(1, 2)).toEqual({ used: 1_500_000, limit: 3_000_000 })
+    expect(legacyUsageUnits(0.5, 2)).toEqual({ used: 750_000, limit: 3_000_000 })
+    expect(legacyUsageUnits(2, 2)).toEqual({ used: 3_000_000, limit: 3_000_000 })
+  })
+
+  it('returns integers, may exceed the limit (reservation overshoot) and never exposes USD', () => {
+    const units = legacyUsageUnits(0.123456789, 2)
+    expect(Number.isInteger(units.used)).toBe(true)
+    expect(units.used).toBe(Math.round((0.123456789 / 2) * 3_000_000))
+    expect(legacyUsageUnits(2.2, 2).used).toBe(3_300_000)
+  })
+
+  it('treats negative/NaN spend as 0 and survives a broken budget', () => {
+    expect(legacyUsageUnits(-1, 2).used).toBe(0)
+    expect(legacyUsageUnits(NaN, 2).used).toBe(0)
+    expect(legacyUsageUnits(1, 0)).toEqual({ used: 0, limit: 3_000_000 })
   })
 })
 
 describe('isModelAllowed', () => {
-  const allowed = ['openai/gpt-5.6-luna', 'x-ai/grok-4.5']
+  const allowed = ['openai/gpt-5.6-luna', 'openai/gpt-5.6-sol']
 
   it('accepts exact matches only', () => {
     expect(isModelAllowed('openai/gpt-5.6-luna', allowed)).toBe(true)
@@ -230,83 +354,60 @@ describe('hasAiEntitlement', () => {
 })
 
 describe('computeQuota', () => {
-  it('reports remaining tokens below the limit', () => {
-    expect(computeQuota(1_000, 3_000_000)).toEqual({ exceeded: false, remaining: 2_999_000 })
+  it('reports the remaining budget below the limit', () => {
+    expect(computeQuota(0.5, 2)).toEqual({ exceeded: false, remaining: 1.5 })
     expect(computeQuota(0, 100)).toEqual({ exceeded: false, remaining: 100 })
   })
 
   it('flags exceeded at and beyond the limit, clamping remaining at 0', () => {
-    expect(computeQuota(100, 100)).toEqual({ exceeded: true, remaining: 0 })
-    expect(computeQuota(150, 100)).toEqual({ exceeded: true, remaining: 0 })
+    expect(computeQuota(2, 2)).toEqual({ exceeded: true, remaining: 0 })
+    expect(computeQuota(2.4, 2)).toEqual({ exceeded: true, remaining: 0 })
   })
 
   it('treats negative/NaN usage as zero', () => {
     expect(computeQuota(-5, 100)).toEqual({ exceeded: false, remaining: 100 })
     expect(computeQuota(NaN, 100)).toEqual({ exceeded: false, remaining: 100 })
   })
-})
 
-describe('quotaMultiplierFor', () => {
-  it('reads the multiplier from the catalog in use', () => {
-    expect(quotaMultiplierFor('new/model-x', TABLE_CATALOG)).toBe(3)
-    expect(quotaMultiplierFor('cheap/model-y', TABLE_CATALOG)).toBe(0.5)
-    // A model only in the backup catalog is unknown to this one → ×1 baseline.
-    expect(quotaMultiplierFor('moonshotai/kimi-k3', TABLE_CATALOG)).toBe(1)
+  it('no tolerance: rejects a request whose estimate does not fit in what is left', () => {
+    // 3% of a $2 budget left ($0.06): a cheap request fits, a pricey one does not.
+    expect(computeQuota(1.94, 2, 0.005).exceeded).toBe(false)
+    expect(computeQuota(1.94, 2, 0.16).exceeded).toBe(true)
+    // Exactly filling the budget is allowed; one cent over is not.
+    expect(computeQuota(1.5, 2, 0.5).exceeded).toBe(false)
+    expect(computeQuota(1.5, 2, 0.51).exceeded).toBe(true)
+    // A broken estimate counts as 0 (the used >= limit rule still applies).
+    expect(computeQuota(1, 2, NaN).exceeded).toBe(false)
+    expect(computeQuota(2, 2, -1).exceeded).toBe(true)
   })
 
-  it('falls back to ×1 for a malformed catalog entry', () => {
-    expect(quotaMultiplierFor('a/a', [{ id: 'a/a', quotaMultiplier: Number.NaN, images: true }])).toBe(1)
-    expect(quotaMultiplierFor('a/a', [{ id: 'a/a', quotaMultiplier: -3, images: true }])).toBe(1)
-  })
-
-  it('returns the backup value for advanced (×6) models', () => {
-    expect(quotaMultiplierFor('moonshotai/kimi-k3')).toBe(6)
-  })
-
-  it('returns the backup value for mid-tier (×2) models', () => {
-    expect(quotaMultiplierFor('x-ai/grok-4.5')).toBe(2)
-  })
-
-  it('returns 1 for standard curated models', () => {
-    expect(quotaMultiplierFor('openai/gpt-5.6-luna')).toBe(1)
-    expect(quotaMultiplierFor('deepseek/deepseek-v4-flash')).toBe(1)
-    expect(quotaMultiplierFor('xiaomi/mimo-v2.5-pro')).toBe(1)
-  })
-
-  it('returns 1 for unknown models', () => {
-    expect(quotaMultiplierFor('someone/some-model')).toBe(1)
-    expect(quotaMultiplierFor('')).toBe(1)
+  it('a typical sol request reserves ~8% of the default budget (blocked below that), deepseek a fraction of 1%', () => {
+    const body = buildUpstreamBody({ model: 'x', messages: [{ role: 'user', content: 'x'.repeat(80_000) }], max_tokens: 4096 })
+    const sol = estimateReservationUsd(body, 'openai/gpt-5.6-sol')
+    const deepseek = estimateReservationUsd(body, 'deepseek/deepseek-v4.1-flash-1017')
+    expect(sol / DEFAULT_MONTHLY_BUDGET_USD).toBeGreaterThan(0.05)
+    expect(sol / DEFAULT_MONTHLY_BUDGET_USD).toBeLessThan(0.12)
+    expect(deepseek / DEFAULT_MONTHLY_BUDGET_USD).toBeLessThan(0.01)
   })
 })
 
-describe('computeQuotaTokens', () => {
-  it('sums in+out unweighted for standard models', () => {
-    expect(computeQuotaTokens({ tokensIn: 120, tokensOut: 45 }, 'openai/gpt-5.6-luna')).toBe(165)
+describe('computeCostUsd (what a settled request charges against the quota)', () => {
+  it("uses OpenRouter's reported cost when present (reasoning and caching included)", () => {
+    expect(computeCostUsd({ tokensIn: 1_000_000, tokensOut: 1_000_000, cost: 0.0042 }, 'new/model-x', TABLE_CATALOG)).toBe(0.0042)
+    expect(computeCostUsd({ tokensIn: 500, tokensOut: 50, cost: 0 }, 'new/model-x', TABLE_CATALOG)).toBe(0)
   })
 
-  it('applies the ×2 multiplier for mid-tier models', () => {
-    expect(computeQuotaTokens({ tokensIn: 100, tokensOut: 50 }, 'x-ai/grok-4.5')).toBe(300)
+  it('falls back to real tokens × the list prices of the catalog when the cost is missing', () => {
+    // new/model-x: $3 in / $15 out per 1M.
+    close(computeCostUsd({ tokensIn: 10_000, tokensOut: 1_000, cost: null }, 'new/model-x', TABLE_CATALOG), 0.03 + 0.015)
+    // Backup catalog by default: deepseek flash $0.15 / $0.60.
+    close(computeCostUsd({ tokensIn: 1_000_000, tokensOut: 1_000_000, cost: null }, 'deepseek/deepseek-v4.1-flash-1017'), 0.75)
   })
 
-  it('applies the ×6 multiplier for advanced models', () => {
-    expect(computeQuotaTokens({ tokensIn: 100, tokensOut: 50 }, 'moonshotai/kimi-k3')).toBe(900)
-  })
-
-  it('always yields an integer (round contract; current multipliers are integral)', () => {
-    expect(Number.isInteger(computeQuotaTokens({ tokensIn: 7, tokensOut: 3 }, 'moonshotai/kimi-k3'))).toBe(true)
-    expect(Number.isInteger(computeQuotaTokens({ tokensIn: 1, tokensOut: 2 }, 'anthropic/claude-haiku-4.5'))).toBe(true)
-  })
-
-  it('uses the multiplier of the catalog it is given (the served one)', () => {
-    expect(computeQuotaTokens({ tokensIn: 100, tokensOut: 50 }, 'new/model-x', TABLE_CATALOG)).toBe(450)
-    expect(computeQuotaTokens({ tokensIn: 100, tokensOut: 50 }, 'cheap/model-y', TABLE_CATALOG)).toBe(75)
-  })
-
-  it('treats zero and malformed usage sides as 0', () => {
-    expect(computeQuotaTokens({ tokensIn: 0, tokensOut: 0 }, 'moonshotai/kimi-k3')).toBe(0)
-    expect(computeQuotaTokens({ tokensIn: NaN, tokensOut: 10 }, 'moonshotai/kimi-k3')).toBe(60)
-    expect(computeQuotaTokens({ tokensIn: NaN, tokensOut: 10 }, 'x-ai/grok-4.5')).toBe(20)
-    expect(computeQuotaTokens({ tokensIn: -5, tokensOut: 10 }, 'openai/gpt-5.6-luna')).toBe(10)
+  it('treats malformed token sides as 0, and prices an unknown model at the priciest catalog rates', () => {
+    close(computeCostUsd({ tokensIn: NaN, tokensOut: 1_000_000, cost: null }, 'mid/model-y', TABLE_CATALOG), 1)
+    close(computeCostUsd({ tokensIn: -5, tokensOut: 0, cost: null }, 'mid/model-y', TABLE_CATALOG), 0)
+    close(computeCostUsd({ tokensIn: 1_000_000, tokensOut: 1_000_000, cost: null }, 'who/knows', TABLE_CATALOG), 3 + 15)
   })
 })
 
@@ -317,15 +418,41 @@ describe('openAiErrorBody / modelsListBody', () => {
     })
   })
 
-  it('shapes the OpenAI models list, with the catalog metadata per entry, in order', () => {
+  it('shapes the OpenAI models list, in order, with images / recommended / cost_index — never prices', () => {
     expect(modelsListBody(TABLE_CATALOG)).toEqual({
       object: 'list',
       data: [
-        { id: 'deepseek/deepseek-v4-pro', object: 'model', quota_multiplier: 1, images: false },
-        { id: 'new/model-x', object: 'model', quota_multiplier: 3, images: true },
-        { id: 'cheap/model-y', object: 'model', quota_multiplier: 0.5, images: false },
+        { id: 'cheap/base', object: 'model', images: false, recommended: true, cost_index: 1 },
+        // (0.9×3 + 0.1×15) / (0.9×0.1 + 0.1×0.4) = 4.2 / 0.13 ≈ 32.3
+        { id: 'new/model-x', object: 'model', images: true, recommended: false, cost_index: 32 },
+        // (0.27 + 0.1) / 0.13 ≈ 2.85 → 3
+        { id: 'mid/model-y', object: 'model', images: false, recommended: false, cost_index: 3 },
       ],
     })
+    for (const entry of modelsListBody(FALLBACK_MODEL_CATALOG).data) {
+      expect(entry).not.toHaveProperty('priceInUsd')
+      expect(entry).not.toHaveProperty('price_in_usd')
+    }
+  })
+
+  it('cost_index of the backup catalog: deepseek 1, luna 2, haiku 1, mimo 2, sol 29', () => {
+    expect(costIndexes(FALLBACK_MODEL_CATALOG)).toEqual({
+      'deepseek/deepseek-v4.1-flash-1017': 1,
+      'openai/gpt-5.6-luna': 2,
+      'anthropic/claude-haiku-5.5': 1,
+      'xiaomi/mimo-v2.6-pro': 2,
+      'openai/gpt-5.6-sol': 29,
+    })
+  })
+
+  it('cost_index: the first model is the reference without a recommended one; minimum 1; free reference → all 1', () => {
+    const noRec = TABLE_CATALOG.map((m) => ({ ...m, recommended: false }))
+    expect(costIndexes([noRec[2], noRec[0]])).toEqual({ 'mid/model-y': 1, 'cheap/base': 1 })
+    expect(costIndexes([model('free/a', { priceInUsd: 0, priceOutUsd: 0 }), model('paid/b')])).toEqual({
+      'free/a': 1,
+      'paid/b': 1,
+    })
+    expect(costIndexes([])).toEqual({})
   })
 
   it('serves the override-restricted catalog when AI_ALLOWED_MODELS is set', () => {
@@ -333,6 +460,119 @@ describe('openAiErrorBody / modelsListBody', () => {
     expect(modelsListBody(catalog).data.map((m) => m.id)).toEqual(['new/model-x'])
   })
 })
+
+describe('buildUpstreamBody — resolved model (alias rewrite + server-side reasoning)', () => {
+  const client = () => ({
+    model: 'deepseek/deepseek-v4-pro',
+    messages: [{ role: 'user', content: 'hi' }],
+    stream: true,
+    max_tokens: 4096,
+    reasoning: { effort: 'high', max_tokens: 50_000 },
+  })
+
+  it('rewrites the model to the resolved catalog id (a retired alias → its successor)', () => {
+    const successor = FALLBACK_MODEL_CATALOG[0]
+    const body = buildUpstreamBody(client(), successor)
+    expect(body.model).toBe('deepseek/deepseek-v4.1-flash-1017')
+    // No effort configured → no reasoning at all (the client's is dropped).
+    expect(body).not.toHaveProperty('reasoning')
+  })
+
+  it("injects the catalog's reasoning effort, never the client's", () => {
+    const sol = FALLBACK_MODEL_CATALOG.find((m) => m.id === 'openai/gpt-5.6-sol')!
+    expect(buildUpstreamBody({ ...client(), model: sol.id }, sol).reasoning).toEqual({ effort: 'low' })
+    expect(buildUpstreamBody(client(), model('x/y', { reasoningEffort: 'none' })).reasoning).toEqual({ effort: 'none' })
+  })
+
+  it('keeps reasoning_details on assistant messages verbatim (the agentic loop re-sends them)', () => {
+    const details = [{ type: 'reasoning.text', text: 'Let me look', signature: 'sig==', format: 'anthropic-claude-v1', index: 0 }]
+    const messages = [
+      { role: 'user', content: 'hi' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'list_notes', arguments: '{}' } }],
+        reasoning_details: details,
+      },
+      { role: 'tool', tool_call_id: 'c1', content: '[]' },
+    ]
+    const body = buildUpstreamBody({ ...client(), messages }, FALLBACK_MODEL_CATALOG[0])
+    expect(body.messages).toEqual(messages)
+  })
+})
+
+describe('estimateReservationUsd', () => {
+  const utf8 = (s: string) => new TextEncoder().encode(s).length
+
+  it('estimateInputTokens is ceil(serialized bytes / 4) for a text body', () => {
+    const body = buildUpstreamBody({ model: 'm', messages: [{ role: 'user', content: 'hello world' }], max_tokens: 4096 })
+    expect(estimateInputTokens(body)).toBe(Math.ceil(utf8(JSON.stringify(body)) / 4))
+  })
+
+  it('counts UTF-8 bytes, not UTF-16 code units', () => {
+    const ascii = buildUpstreamBody({ model: 'm', messages: [{ role: 'user', content: 'aaaa' }], max_tokens: 1 })
+    const accented = buildUpstreamBody({ model: 'm', messages: [{ role: 'user', content: 'ññññ' }], max_tokens: 1 })
+    expect(estimateInputTokens(accented)).toBeGreaterThan(estimateInputTokens(ascii))
+  })
+
+  it('charges a flat IMAGE_PART_TOKENS per image instead of its base64 length', () => {
+    const hugeBase64 = 'A'.repeat(2 * 1024 * 1024) // a 2 MB screenshot
+    const withImage = (url: string) =>
+      buildUpstreamBody({
+        model: 'openai/gpt-5.6-luna',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'describe' },
+              { type: 'image_url', image_url: { url } },
+              { type: 'image_url', image_url: { url } },
+            ],
+          },
+        ],
+        max_tokens: 1000,
+      })
+    const small = estimateInputTokens(withImage('data:image/png;base64,AAAA'))
+    const huge = estimateInputTokens(withImage(`data:image/png;base64,${hugeBase64}`))
+    // Payload size is irrelevant for images…
+    expect(huge).toBe(small)
+    // …which are charged at the flat rate (2 images) on top of the text.
+    const textOnly = buildUpstreamBody({
+      model: 'openai/gpt-5.6-luna',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'describe' }, { type: 'image_url' }, { type: 'image_url' }] }],
+      max_tokens: 1000,
+    })
+    expect(small).toBe(Math.ceil(utf8(JSON.stringify(textOnly)) / 4) + 2 * IMAGE_PART_TOKENS)
+    expect(huge).toBeLessThan(10_000)
+  })
+
+  it('is (input × price_in + clamped max_tokens × price_out) / 1e6 at the model list prices', () => {
+    const body = buildUpstreamBody({ model: 'x', messages: [{ role: 'user', content: 'hi' }], max_tokens: 4096 })
+    const input = estimateInputTokens(body)
+    close(estimateReservationUsd(body, 'new/model-x', TABLE_CATALOG), (input * 3 + 4096 * 15) / 1e6)
+    close(estimateReservationUsd(body, 'cheap/base', TABLE_CATALOG), (input * 0.1 + 4096 * 0.4) / 1e6)
+    // The backup catalog by default (gpt-5.6-sol: $4 / $20).
+    close(estimateReservationUsd(body, 'openai/gpt-5.6-sol'), (input * 4 + 4096 * 20) / 1e6)
+  })
+
+  it('uses the clamped output cap when max_tokens is missing or absurd', () => {
+    const body = { model: 'm', messages: [{ role: 'user', content: 'hi' }], max_tokens: 10_000_000 }
+    const input = estimateInputTokens(body)
+    close(estimateReservationUsd(body, 'mid/model-y', TABLE_CATALOG), (input * 0.3 + MAX_OUTPUT_TOKENS * 1) / 1e6)
+  })
+
+  it('a worst-case request stays bounded (8 MiB body on the priciest backup model)', () => {
+    const body = { model: 'm', messages: [{ role: 'user', content: 'x'.repeat(MAX_BODY_BYTES) }], max_tokens: MAX_OUTPUT_TOKENS }
+    // ~2.1M input tokens × $4 + 8192 × $20 ≈ $8.55 — the reservation, not the real bill.
+    expect(estimateReservationUsd(body, 'openai/gpt-5.6-sol')).toBeLessThan(9)
+  })
+
+  it('never throws on odd message shapes', () => {
+    const body = { model: 'm', messages: [null, 'x', { role: 'user', content: [null, 3] }], max_tokens: 5 }
+    expect(estimateReservationUsd(body, 'mid/model-y', TABLE_CATALOG)).toBeGreaterThan(0)
+  })
+})
+
 
 describe('buildUpstreamBody', () => {
   /** Exactly what electron/ai/llm/openaiCompatible.ts streamTurn sends (image part included). */
@@ -460,85 +700,6 @@ describe('parseMaxInflight / reservation constants', () => {
   })
 })
 
-describe('estimateReservationTokens', () => {
-  const utf8 = (s: string) => new TextEncoder().encode(s).length
-
-  it('is ceil(serialized bytes / 4) + clamped max_tokens for a text body', () => {
-    const body = buildUpstreamBody({
-      model: 'openai/gpt-5.6-luna',
-      messages: [{ role: 'user', content: 'hello world' }],
-      stream: true,
-      max_tokens: 4096,
-    })
-    const expected = Math.ceil(utf8(JSON.stringify(body)) / 4) + 4096
-    expect(estimateReservationTokens(body, 'openai/gpt-5.6-luna')).toBe(expected)
-  })
-
-  it('counts UTF-8 bytes, not UTF-16 code units', () => {
-    const ascii = buildUpstreamBody({ model: 'm', messages: [{ role: 'user', content: 'aaaa' }], max_tokens: 1 })
-    const accented = buildUpstreamBody({ model: 'm', messages: [{ role: 'user', content: 'ññññ' }], max_tokens: 1 })
-    expect(estimateReservationTokens(accented, 'm')).toBeGreaterThan(estimateReservationTokens(ascii, 'm'))
-  })
-
-  it('charges a flat IMAGE_PART_TOKENS per image instead of its base64 length', () => {
-    const hugeBase64 = 'A'.repeat(2 * 1024 * 1024) // a 2 MB screenshot
-    const withImage = (url: string) =>
-      buildUpstreamBody({
-        model: 'openai/gpt-5.6-luna',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: 'describe' },
-              { type: 'image_url', image_url: { url } },
-              { type: 'image_url', image_url: { url } },
-            ],
-          },
-        ],
-        max_tokens: 1000,
-      })
-    const small = estimateReservationTokens(withImage('data:image/png;base64,AAAA'), 'openai/gpt-5.6-luna')
-    const huge = estimateReservationTokens(withImage(`data:image/png;base64,${hugeBase64}`), 'openai/gpt-5.6-luna')
-    // Payload size is irrelevant for images…
-    expect(huge).toBe(small)
-    // …which are charged at the flat rate (2 images) on top of the text + output.
-    const textOnly = buildUpstreamBody({
-      model: 'openai/gpt-5.6-luna',
-      messages: [{ role: 'user', content: [{ type: 'text', text: 'describe' }, { type: 'image_url' }, { type: 'image_url' }] }],
-      max_tokens: 1000,
-    })
-    expect(small).toBe(Math.ceil(utf8(JSON.stringify(textOnly)) / 4) + 2 * IMAGE_PART_TOKENS + 1000)
-    expect(huge).toBeLessThan(10_000)
-  })
-
-  it('applies the model quota multiplier, rounded', () => {
-    const body = buildUpstreamBody({ model: 'x', messages: [{ role: 'user', content: 'hi' }], max_tokens: 100 })
-    const base = estimateReservationTokens(body, 'openai/gpt-5.6-luna')
-    expect(estimateReservationTokens(body, 'x-ai/grok-4.5')).toBe(base * 2)
-    expect(estimateReservationTokens(body, 'moonshotai/kimi-k3')).toBe(base * 6)
-    expect(Number.isInteger(estimateReservationTokens(body, 'moonshotai/kimi-k3'))).toBe(true)
-  })
-
-  it('takes the multiplier from the served catalog (a model that only exists in the table)', () => {
-    const body = buildUpstreamBody({ model: 'x', messages: [{ role: 'user', content: 'hi' }], max_tokens: 100 })
-    const base = estimateReservationTokens(body, 'deepseek/deepseek-v4-pro', TABLE_CATALOG)
-    expect(estimateReservationTokens(body, 'new/model-x', TABLE_CATALOG)).toBe(base * 3)
-    expect(estimateReservationTokens(body, 'cheap/model-y', TABLE_CATALOG)).toBe(Math.round(base * 0.5))
-    // The same model is ×1 against the backup catalog, which does not know it.
-    expect(estimateReservationTokens(body, 'new/model-x')).toBe(base)
-  })
-
-  it('uses the clamped output cap when max_tokens is missing or absurd', () => {
-    const body = { model: 'm', messages: [{ role: 'user', content: 'hi' }], max_tokens: 10_000_000 }
-    const input = Math.ceil(utf8(JSON.stringify(body)) / 4)
-    expect(estimateReservationTokens(body, 'm')).toBe(input + MAX_OUTPUT_TOKENS)
-  })
-
-  it('never throws on odd message shapes', () => {
-    const body = { model: 'm', messages: [null, 'x', { role: 'user', content: [null, 3] }], max_tokens: 5 }
-    expect(estimateReservationTokens(body, 'm')).toBeGreaterThan(5)
-  })
-})
 
 describe('body size cap', () => {
   const streamOf = (chunks: Uint8Array[]) =>

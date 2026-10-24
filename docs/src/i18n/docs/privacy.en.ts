@@ -21,7 +21,7 @@ export const privacyEn: LegalContent = {
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Privacy<br />Policy',
-    tagline: 'Last updated: October 19, 2026',
+    tagline: 'Last updated: October 24, 2026',
   },
 
   summary: {
@@ -156,7 +156,7 @@ export const privacyEn: LegalContent = {
           t: 'ul',
           items: [
             'Your chat message, plus the relevant excerpts of your notes retrieved <strong>locally on your device</strong>, are sent over TLS to our AI proxy, which forwards them to <strong>OpenRouter</strong>, which routes them to the AI model provider you selected. This is <strong>exactly the same data</strong> that would travel if you used that provider with your own API key.',
-            '<strong>We do not log or store the content of your prompts or the model’s responses on our servers.</strong> The only thing we record per request is metering data: your user ID, the model used, token counts and a timestamp — needed to enforce the monthly usage quota.',
+            '<strong>We do not log or store the content of your prompts or the model’s responses on our servers.</strong> The only thing we record per request is metering data: your user ID, the model used, token counts, the request’s cost as reported by OpenRouter, OpenRouter’s generation ID and a timestamp — needed to enforce the monthly usage allowance, which is measured by that cost.',
             'OpenRouter and the underlying model provider process the request under their own privacy policies (<a href="https://openrouter.ai/privacy" target="_blank" rel="noopener">OpenRouter privacy policy</a>). Our OpenRouter configuration does not opt in to prompt logging or training programs.',
             'As always, “Hide from AI” sections and encrypted notes never leave your device.',
             'NoteFlow AI is <strong>independent from NoteFlow Cloud</strong>: using the AI plan does not upload or store your notes on our servers.',

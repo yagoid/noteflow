@@ -106,28 +106,23 @@ export const pricingEs: PricingContent = {
     ],
     bullets: [
       'Sin instalar Ollama, sin cuentas de terceros, sin comprar, guardar ni rotar API keys.',
-      'Incluye una cuota mensual de tokens — <strong>3M de tokens al mes</strong> por defecto.',
+      'Incluye una <strong>asignación mensual de IA</strong>, medida por el coste de cómputo real de cada petición — así que cuánto da de sí depende del modelo que elijas y de lo largas que sean tus conversaciones.',
       'Suscripción mensual o anual — <strong>€5.99/mes o €49.99/año</strong>, IVA incluido. Se contrata desde la propia app: <strong>Settings → Account → Subscribe</strong> — el checkout se abre en tu navegador, a cargo de Lemon Squeezy, nuestro merchant of record.',
       'En cuanto se completa el pago, NoteFlow AI se activa solo como tu proveedor — nada que configurar.',
     ],
-    modelsTitle: 'Modelos estándar — cuota base',
+    modelsTitle: 'Modelos del día a día',
     models: [
-      'deepseek/deepseek-v4-pro',
-      'deepseek/deepseek-v4-flash',
-      'xiaomi/mimo-v2.5-pro',
+      'deepseek/deepseek-v4.1-flash-1017',
       'openai/gpt-5.6-luna',
-      'anthropic/claude-haiku-4.5',
+      'anthropic/claude-haiku-5.5',
+      'xiaomi/mimo-v2.6-pro',
     ],
-    modelsMidTitle: 'Modelos intermedios — 2× de cuota',
-    modelsMid: [
-      'x-ai/grok-4.5',
-    ],
-    modelsAdvancedTitle: 'Modelos avanzados — 6× de cuota',
+    modelsAdvancedTitle: 'Modelo avanzado — gasta la asignación mucho más rápido',
     modelsAdvanced: [
-      'moonshotai/kimi-k3',
+      'openai/gpt-5.6-sol',
     ],
     modelsNote:
-      'Todos los modelos curados soportan tool-calling (el agente), y todos soportan visión (adjuntar imágenes) excepto los dos modelos DeepSeek y Xiaomi MiMo, que son solo texto. La cuota mensual se pondera por modelo: los estándar la consumen a razón base, los intermedios a <strong>razón de 2×</strong> y los avanzados a <strong>6×</strong> — es decir, en un modelo avanzado cada token cuenta como seis.',
+      'Todos los modelos curados soportan tool-calling (el agente) y visión (adjuntar imágenes); <strong>deepseek-v4.1-flash</strong> es el recomendado por defecto. Como la asignación sigue el coste real de cada petición, los modelos más caros la agotan antes: los del día a día cuestan por mensaje lo mismo que el recomendado o, como mucho, en torno al doble, mientras que el modelo avanzado — el más capaz — la gasta <strong>unas 30 veces más rápido</strong>. Resérvalo para las preguntas más difíciles.',
     alt: {
       title: 'La vía gratuita a la misma capacidad',
       html: 'Ejecuta un modelo local con <strong>Ollama</strong> — nada sale nunca de tu máquina — o trae tu propia API key de cualquier proveedor soportado. Mismo chat, mismo agente, mismas funciones; solo que el modelo lo gestionas tú.',
@@ -166,7 +161,7 @@ export const pricingEs: PricingContent = {
     rows: [
       {
         capability: 'Modelo de IA',
-        managed: '<strong>NoteFlow AI</strong> — modelos curados, cero configuración, cuota de tokens incluida',
+        managed: '<strong>NoteFlow AI</strong> — modelos curados, cero configuración, asignación mensual de IA incluida',
         self: '<strong>Ollama</strong> en local (sin key, offline) o tu propia API key de cualquiera de los 9 proveedores soportados',
       },
       {

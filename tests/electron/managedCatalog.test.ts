@@ -32,18 +32,19 @@ const proxyBody = (entries: unknown[]) => ({ object: 'list', data: entries })
 const entry = (id: unknown, extra: Record<string, unknown> = {}) => ({
   id,
   object: 'model',
-  quota_multiplier: 1,
+  cost_index: 1,
   images: true,
+  recommended: false,
   ...extra,
 })
 
 /** A catalog with a model that only exists server-side (inserted in ai_models). */
 const SERVER_CATALOG: ManagedCatalog = {
-  models: ['anthropic/claude-haiku-4.5', 'new/vision-model', 'new/text-model'],
+  models: ['anthropic/claude-haiku-5.5', 'new/vision-model', 'new/text-model'],
   meta: {
-    'anthropic/claude-haiku-4.5': { quotaMultiplier: 1, images: true },
-    'new/vision-model': { quotaMultiplier: 4, images: true },
-    'new/text-model': { quotaMultiplier: 1, images: false },
+    'anthropic/claude-haiku-5.5': { costIndex: 1, images: true, recommended: true },
+    'new/vision-model': { costIndex: 4, images: true, recommended: false },
+    'new/text-model': { costIndex: 1, images: false, recommended: false },
   },
 }
 
@@ -54,20 +55,47 @@ describe('sanitizeManagedCatalog (GET /models body)', () => {
     expect(
       sanitizeManagedCatalog(
         proxyBody([
-          entry('b/second', { quota_multiplier: 2, images: false }),
-          entry(' a/first ', { quota_multiplier: 1.5 }),
+          entry('b/second', { cost_index: 29, images: false }),
+          entry(' a/first ', { cost_index: 1, recommended: true }),
         ])
       )
     ).toEqual({
       models: ['b/second', 'a/first'],
-      meta: { 'b/second': { quotaMultiplier: 2, images: false }, 'a/first': { quotaMultiplier: 1.5, images: true } },
+      meta: {
+        'b/second': { costIndex: 29, images: false, recommended: false },
+        'a/first': { costIndex: 1, images: true, recommended: true },
+      },
     })
   })
 
+  it('a missing `recommended` reads as false', () => {
+    const { recommended: _omit, ...noRec } = entry('a/a')
+    expect(sanitizeManagedCatalog(proxyBody([noRec]))?.meta['a/a']).toEqual({ costIndex: 1, images: true, recommended: false })
+  })
+
+  it('still adopts a pre-0013 proxy body (quota_multiplier as the cost hint) — the models it really allows', () => {
+    expect(
+      sanitizeManagedCatalog(
+        proxyBody([
+          { id: 'deepseek/deepseek-v4-pro', object: 'model', quota_multiplier: 1, images: false },
+          { id: 'moonshotai/kimi-k3', object: 'model', quota_multiplier: 6, images: true },
+        ])
+      )
+    ).toEqual({
+      models: ['deepseek/deepseek-v4-pro', 'moonshotai/kimi-k3'],
+      meta: {
+        'deepseek/deepseek-v4-pro': { costIndex: 1, images: false, recommended: false },
+        'moonshotai/kimi-k3': { costIndex: 6, images: true, recommended: false },
+      },
+    })
+    // cost_index wins when both are present.
+    expect(sanitizeManagedCatalog(proxyBody([entry('a/a', { cost_index: 3, quota_multiplier: 9 })]))?.meta['a/a'].costIndex).toBe(3)
+  })
+
   it('keeps the first occurrence of a repeated id', () => {
-    expect(sanitizeManagedCatalog(proxyBody([entry('a/a', { quota_multiplier: 2 }), entry('a/a', { quota_multiplier: 9 })]))).toEqual({
+    expect(sanitizeManagedCatalog(proxyBody([entry('a/a', { cost_index: 2 }), entry('a/a', { cost_index: 9 })]))).toEqual({
       models: ['a/a'],
-      meta: { 'a/a': { quotaMultiplier: 2, images: true } },
+      meta: { 'a/a': { costIndex: 2, images: true, recommended: false } },
     })
   })
 
@@ -77,12 +105,14 @@ describe('sanitizeManagedCatalog (GET /models body)', () => {
       entry('   '),
       entry(7),
       entry('__proto__'),
-      entry('m', { quota_multiplier: 0 }),
-      entry('m', { quota_multiplier: -1 }),
-      entry('m', { quota_multiplier: Number.NaN }),
-      entry('m', { quota_multiplier: '2' }),
+      entry('m', { cost_index: 0 }),
+      entry('m', { cost_index: -1 }),
+      entry('m', { cost_index: Number.NaN }),
+      entry('m', { cost_index: '2' }),
+      entry('m', { cost_index: undefined }),
       entry('m', { images: 'true' }),
       entry('m', { images: undefined }),
+      entry('m', { recommended: 'yes' }),
     ]
     for (const b of bad) expect(sanitizeManagedCatalog(proxyBody([entry('ok/model'), b]))).toBeNull()
     expect(sanitizeManagedCatalog(proxyBody([entry('ok/model'), null]))).toBeNull()
@@ -111,15 +141,29 @@ describe('stored catalog (settings.aiManagedCatalog)', () => {
   it('round-trips through the settings.json shape', () => {
     const stored = toStoredManagedCatalog(SERVER_CATALOG, new Date('2026-10-24T10:00:00.000Z'))
     expect(stored.updatedAt).toBe('2026-10-24T10:00:00.000Z')
-    expect(stored.models[1]).toEqual({ id: 'new/vision-model', quotaMultiplier: 4, images: true })
+    expect(stored.models[1]).toEqual({ id: 'new/vision-model', costIndex: 4, images: true, recommended: false })
     expect(parseStoredManagedCatalog(JSON.parse(JSON.stringify(stored)))).toEqual(SERVER_CATALOG)
   })
 
   it('a missing or corrupt stored value is ignored', () => {
     expect(parseStoredManagedCatalog(undefined)).toBeNull()
     expect(parseStoredManagedCatalog({ models: [] })).toBeNull()
-    expect(parseStoredManagedCatalog({ models: [{ id: 'a/a', quotaMultiplier: 'x', images: true }] })).toBeNull()
+    expect(parseStoredManagedCatalog({ models: [{ id: 'a/a', costIndex: 'x', images: true }] })).toBeNull()
     expect(parseStoredManagedCatalog([])).toBeNull()
+  })
+
+  it('a cache written by an older build (quotaMultiplier shape) is ignored, without throwing', () => {
+    const old = {
+      models: [
+        { id: 'deepseek/deepseek-v4-pro', quotaMultiplier: 1, images: false },
+        { id: 'moonshotai/kimi-k3', quotaMultiplier: 6, images: true },
+      ],
+      updatedAt: '2026-10-20T10:00:00.000Z',
+    }
+    expect(parseStoredManagedCatalog(old)).toBeNull()
+    // → nothing cached: the backup constants apply until the next refresh replaces it.
+    setCachedManagedCatalog(parseStoredManagedCatalog(old))
+    expect(effectiveManagedCatalog()).toBe(FALLBACK_MANAGED_CATALOG)
   })
 })
 
@@ -130,9 +174,14 @@ describe('sameManagedCatalog', () => {
     expect(sameManagedCatalog(SERVER_CATALOG, reordered)).toBe(false)
     const repriced: ManagedCatalog = {
       ...SERVER_CATALOG,
-      meta: { ...SERVER_CATALOG.meta, 'new/text-model': { quotaMultiplier: 2, images: false } },
+      meta: { ...SERVER_CATALOG.meta, 'new/text-model': { costIndex: 2, images: false, recommended: false } },
     }
     expect(sameManagedCatalog(SERVER_CATALOG, repriced)).toBe(false)
+    const rerecommended: ManagedCatalog = {
+      ...SERVER_CATALOG,
+      meta: { ...SERVER_CATALOG.meta, 'new/text-model': { costIndex: 1, images: false, recommended: true } },
+    }
+    expect(sameManagedCatalog(SERVER_CATALOG, rerecommended)).toBe(false)
     expect(sameManagedCatalog(SERVER_CATALOG, null)).toBe(false)
     expect(sameManagedCatalog(null, null)).toBe(true)
   })
@@ -156,9 +205,9 @@ describe('effective catalog', () => {
     expect(managed.suggestedModels).toEqual(SERVER_CATALOG.models)
     expect(managed.modelMeta).toEqual(SERVER_CATALOG.meta)
     managed.suggestedModels.push('mutated')
-    managed.modelMeta!['new/text-model'].quotaMultiplier = 99
+    managed.modelMeta!['new/text-model'].costIndex = 99
     expect(SERVER_CATALOG.models).not.toContain('mutated')
-    expect(SERVER_CATALOG.meta['new/text-model'].quotaMultiplier).toBe(1)
+    expect(SERVER_CATALOG.meta['new/text-model'].costIndex).toBe(1)
     // The static preset (the backup) is never modified.
     expect(PRESET_BY_ID['noteflow'].suggestedModels).toEqual(NOTEFLOW_AI_MODELS)
     // BYO presets come back untouched.
@@ -171,7 +220,7 @@ describe('effective catalog', () => {
     setCachedManagedCatalog(SERVER_CATALOG)
     const after = listPresets().find((p) => p.id === 'noteflow')!
     expect(after.suggestedModels).toEqual(SERVER_CATALOG.models)
-    expect(after.modelMeta?.['new/vision-model']).toEqual({ quotaMultiplier: 4, images: true })
+    expect(after.modelMeta?.['new/vision-model']).toEqual({ costIndex: 4, images: true, recommended: false })
   })
 })
 
@@ -190,22 +239,22 @@ describe('managed preset guards follow the effective catalog', () => {
   })
 
   it('the user keeps a model the refreshed catalog still has (no rewrite on refresh)', () => {
-    const cfg = managed('anthropic/claude-haiku-4.5')
-    expect(resolveConfig(cfg).model).toBe('anthropic/claude-haiku-4.5')
+    const cfg = managed('anthropic/claude-haiku-5.5')
+    expect(resolveConfig(cfg).model).toBe('anthropic/claude-haiku-5.5')
     setCachedManagedCatalog(SERVER_CATALOG)
-    expect(resolveConfig(cfg).model).toBe('anthropic/claude-haiku-4.5')
+    expect(resolveConfig(cfg).model).toBe('anthropic/claude-haiku-5.5')
     // The stored config object itself is never touched.
-    expect(cfg.byPreset.noteflow?.model).toBe('anthropic/claude-haiku-4.5')
+    expect(cfg.byPreset.noteflow?.model).toBe('anthropic/claude-haiku-5.5')
   })
 
   it('a model missing from the effective catalog keeps today\'s rule (first model, in memory only)', () => {
     setCachedManagedCatalog(SERVER_CATALOG)
-    const cfg = managed('moonshotai/kimi-k3')
+    const cfg = managed('openai/gpt-5.6-sol')
     expect(resolveConfig(cfg).model).toBe(SERVER_CATALOG.models[0])
-    expect(cfg.byPreset.noteflow?.model).toBe('moonshotai/kimi-k3')
+    expect(cfg.byPreset.noteflow?.model).toBe('openai/gpt-5.6-sol')
     // …and it becomes effective again as soon as a catalog brings it back.
     setCachedManagedCatalog(null)
-    expect(resolveConfig(cfg).model).toBe('moonshotai/kimi-k3')
+    expect(resolveConfig(cfg).model).toBe('openai/gpt-5.6-sol')
   })
 
   it('the default model is the first of the effective catalog', () => {

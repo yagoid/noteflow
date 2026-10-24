@@ -16,45 +16,37 @@ const cloudConfig_1 = require("../../cloudConfig");
  * public.ai_models) and cached in settings.json — see ./managedCatalog.ts. These
  * constants are only used until a valid catalog has been downloaded once (fresh
  * install, never signed in, or a proxy too old to send the metadata), so they
- * must stay a sensible default: they mirror the seed of migration 0012 and the
+ * must stay a sensible default: they mirror the seed of migration 0013 and the
  * proxy's FALLBACK_MODEL_CATALOG (tests/supabase/ai-catalog-mirror.test.ts).
  * Adding a model does NOT happen here — it is a row in the table.
- * All are tool-calling capable (the chat is agentic); the two DeepSeek models and
- * Xiaomi MiMo are text-only, the rest accept images (see NOTEFLOW_AI_MODEL_META).
- * The first entry is the de-facto default model for the preset (suggestedModels[0])
- * — today a text-only one, so a fresh managed setup starts WITHOUT image support
- * until the user picks another model (providerCapabilities gates the attach UI).
+ * All are tool-calling capable (the chat is agentic) and accept images (see
+ * NOTEFLOW_AI_MODEL_META). The first entry is the de-facto default model for the
+ * preset (suggestedModels[0]) — the recommended one.
  */
 exports.NOTEFLOW_AI_MODELS = [
-    // Standard models (×1 quota).
-    'deepseek/deepseek-v4-pro',
-    'deepseek/deepseek-v4-flash',
-    'xiaomi/mimo-v2.5-pro',
+    'deepseek/deepseek-v4.1-flash-1017',
     'openai/gpt-5.6-luna',
-    'anthropic/claude-haiku-4.5',
-    // Mid-tier (×2 quota).
-    'x-ai/grok-4.5',
-    // Advanced models (×6 quota).
-    'moonshotai/kimi-k3',
+    'anthropic/claude-haiku-5.5',
+    'xiaomi/mimo-v2.6-pro',
+    'openai/gpt-5.6-sol',
 ];
 /**
  * Per-model metadata of the BACKUP catalog above (same role: only used until the
  * proxy's catalog has been cached — see ./managedCatalog.ts):
- *   - quotaMultiplier: what a real token costs against the monthly quota.
- *   - images: native vision support (the two DeepSeek models and Xiaomi MiMo
- *     are text-only — three of the five ×1 models).
+ *   - costIndex: relative cost of a typical message (what the proxy's
+ *     modelsListBody computes for the same catalog — the mirror test checks it).
+ *   - images: native vision support.
+ *   - recommended: the picker's highlighted model.
  * The effective catalog (cached or this one) reaches the renderer through the
- * preset's `modelMeta` field so the model picker can flag quota cost, and is used
- * by providerCapabilities (llm/index.ts) to gate image attachments per model.
+ * preset's `modelMeta` field so the model picker can flag cost, and is used by
+ * providerCapabilities (llm/index.ts) to gate image attachments per model.
  */
 exports.NOTEFLOW_AI_MODEL_META = {
-    'deepseek/deepseek-v4-pro': { quotaMultiplier: 1, images: false },
-    'deepseek/deepseek-v4-flash': { quotaMultiplier: 1, images: false },
-    'xiaomi/mimo-v2.5-pro': { quotaMultiplier: 1, images: false },
-    'openai/gpt-5.6-luna': { quotaMultiplier: 1, images: true },
-    'anthropic/claude-haiku-4.5': { quotaMultiplier: 1, images: true },
-    'x-ai/grok-4.5': { quotaMultiplier: 2, images: true },
-    'moonshotai/kimi-k3': { quotaMultiplier: 6, images: true },
+    'deepseek/deepseek-v4.1-flash-1017': { costIndex: 1, images: true, recommended: true },
+    'openai/gpt-5.6-luna': { costIndex: 2, images: true, recommended: false },
+    'anthropic/claude-haiku-5.5': { costIndex: 1, images: true, recommended: false },
+    'xiaomi/mimo-v2.6-pro': { costIndex: 2, images: true, recommended: false },
+    'openai/gpt-5.6-sol': { costIndex: 29, images: true, recommended: false },
 };
 exports.PRESETS = [
     // NoteFlow AI: the managed plan (subscription). The "key" is a fresh Supabase access token of

@@ -455,7 +455,7 @@ Estructura de `settings.json`:
     }
   },
   "aiManagedCatalog": {
-    "models": [{ "id": "deepseek/deepseek-v4-pro", "quotaMultiplier": 1, "images": false }],
+    "models": [{ "id": "deepseek/deepseek-v4.1-flash-1017", "costIndex": 1, "images": true, "recommended": true }],
     "updatedAt": "2026-10-24T10:00:00.000Z"
   },
   "aiProfile": { "completedAt": "2026-06-14T10:00:00.000Z", "noteId": "abc12345" }

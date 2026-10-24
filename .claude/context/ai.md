@@ -142,9 +142,11 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   memoria**: `settings.aiLlm` conserva el id guardado, así que si un catálogo posterior lo vuelve a
   traer, vuelve a ser el efectivo. En los presets BYO el modelo es libre y se respeta tal cual.
 - **Catálogo de modelos de NoteFlow AI (servido por el proxy, `electron/ai/llm/managedCatalog.ts`):**
-  la fuente de verdad es la tabla Supabase `public.ai_models` (migración 0012), que el proxy sirve en
-  `GET <ai-proxy>/models` en formato lista OpenAI **con metadatos por entrada** (`quota_multiplier`,
-  `images`). Main lo descarga (`llm.fetchManagedCatalog`, con el access token de la cuenta) en
+  la fuente de verdad es la tabla Supabase `public.ai_models` (migraciones 0012 + 0013), que el proxy
+  sirve en `GET <ai-proxy>/models` en formato lista OpenAI **con metadatos por entrada** (`cost_index`,
+  `images`, `recommended` — `GET /models` nunca expone los precios). `cost_index` = cuántas veces
+  más rápido que el modelo recomendado gasta un mensaje típico la asignación mensual (entero ≥ 1; lo
+  calcula el proxy — ver `.claude/context/monetization.md` § 3 "Cuota por coste real"). Main lo descarga (`llm.fetchManagedCatalog`, con el access token de la cuenta) en
   segundo plano cada vez que la cuenta cambia de estado con el plan usable (`handleAccountStatusChanged`
   con `isManagedAiUsable`: cubre el arranque —el refresh de entitlements diferido de `initAccount`
   emite un cambio de estado—, el inicio de sesión y la llegada de entitlements) y en cada lectura de
@@ -153,19 +155,31 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   cuando el chat recibe un 400 `model_not_allowed` del proxy (`friendlyChatError`: el modelo se
   retiró en el servidor pero seguía en la caché — así solo falla ese mensaje). Un 401 al descargar
   invalida el access token (`invalidateAccessToken`), como el resto de llamadas a la cuenta. Lo valida (`sanitizeManagedCatalog`: **todo o nada** — un id vacío, un
-  multiplicador no numérico/≤0, un `images` no booleano, una lista vacía o >200 entradas, o un proxy
-  antiguo que solo manda ids → se ignora la respuesta entera) y, si cambió, lo persiste en
+  `cost_index` no numérico/≤0, un `images` no booleano, un `recommended` presente y no booleano, una
+  lista vacía o >200 entradas, o un proxy muy antiguo que solo manda ids → se ignora la respuesta
+  entera). Un proxy **pre-0013** (manda `quota_multiplier` en vez de `cost_index`) **sí** se adopta,
+  con el multiplicador como pista de coste: así un cliente nuevo frente a un proxy sin redesplegar usa
+  los modelos que ese proxy permite en vez de su respaldo (que tiene ids que el viejo rechazaría). Si
+  cambió, lo persiste en
   `settings.aiManagedCatalog` (local, `userData`) y emite `ai:llm-presets-changed` (el renderer
-  recarga presets + config desde `App.tsx`). **Catálogo efectivo** = el cacheado si existe, si no las
+  recarga presets + config desde `App.tsx`). Forma en `settings.json`: `{models: [{id, costIndex,
+  images, recommended}], updatedAt}`; una caché escrita por una versión anterior (forma
+  `quotaMultiplier`) **se ignora** sin romper (`parseStoredManagedCatalog` → null): rige el respaldo
+  hasta el primer refresco, que la reescribe. **Catálogo efectivo** = el cacheado si existe, si no las
   constantes de respaldo `NOTEFLOW_AI_MODELS` + `NOTEFLOW_AI_MODEL_META` de `presets.ts`. Main lo
   siembra desde `settings.json` al arrancar (`loadManagedCatalogCache`, antes de `initAccount`).
   `llm/index.ts` lo inyecta en el preset (`livePreset` = `withManagedCatalog(presetOf(id))`), así que
   `effectiveModel`, `acceptsModel`, `providerCapabilities` (vía `toPublic`) y `ai:llm-presets`
-  (`listPresets`) usan **el mismo** catálogo: un modelo nuevo aparece en el picker con su sufijo
-  "(N× quota)" sin release. Invariantes: refrescar **nunca** toca el modelo guardado (`aiLlm`), y un
-  fallo de red / respuesta inválida **nunca** vacía ni pisa la caché buena. Qué pasa si el modelo
-  guardado sale del catálogo: lo de arriba (fallback en memoria al primero) — un `replaced_by` para
-  migrar la selección está **pendiente** (fase posterior). Tests: `tests/electron/managedCatalog.test.ts`.
+  (`listPresets`) usan **el mismo** catálogo: un modelo nuevo aparece en el picker con su etiqueta
+  (`LlmConfigView.modelLabel`: nombre sin prefijo de proveedor + " · Recommended" si `recommended` +
+  "(≈N× quota)" si `costIndex >= 2`) sin release. Invariantes: refrescar **nunca** toca el modelo
+  guardado (`aiLlm`), y un fallo de red / respuesta inválida **nunca** vacía ni pisa la caché buena.
+  Qué pasa si el modelo guardado sale del catálogo: lo de arriba (fallback **en memoria** al primero
+  del catálogo, que es el recomendado). El `replaced_by` de `ai_models` (0013) **no** llega al cliente:
+  lo aplica el **proxy**, que reescribe al sucesor las peticiones a un id retirado (lo que mantiene
+  funcionando los builds internos/QA de `main` anteriores al catálogo en BD —b74fad0—, con el
+  catálogo hardcodeado; ninguna release pública los lleva); este cliente ni siquiera las envía,
+  porque su `effectiveModel` ya cae al primero. Tests: `tests/electron/managedCatalog.test.ts`.
 - **UI del proveedor (`LlmConfigView`, embebida en Settings → IA y en la pestaña "settings" del panel
   del cerebro):** **selector de dos cards mutuamente excluyentes** (mismo patrón que Settings → Sync,
   con badge Activo/Inactivo) — **NoteFlow AI** (gestionado) vs **proveedor propio / IA local** (BYO key
@@ -176,7 +190,10 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   (también sin entitlement); debajo, tras un `border-t`, se pinta **solo** la sección del modo elegido.
   NoteFlow AI **no aparece en el `<select>`** (que solo lista el resto de presets); su sección es la
   barra de consumo mensual + el gate (aviso ámbar → Ajustes → Cuenta) o el botón "Use NoteFlow AI"
-  (solo con entitlement `ai`).
+  (solo con entitlement `ai`). La barra muestra un **porcentaje** ("N% of this month’s AI allowance
+  used", `usagePercent`: `used/limit` con suelo, 100 % solo al agotarla): `GET /usage` devuelve
+  unidades abstractas (límite 3.000.000, la escala de la antigua cuota de tokens) y solo el cociente
+  significa algo.
   - **Campo "Model":** texto libre en los presets BYO, pero **solo lectura** (`disabled` + hint
     `modelCuratedHint`) en los de catálogo curado (`preset.modelMeta`) — ahí se elige con los chips.
     Si fuera editable, teclear un id que no está en el catálogo lo persistiría en `ps.model` mientras
@@ -216,7 +233,19 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   `rename_section`, `create_group`, `create_folder`, `rename_group`, `rename_folder`, `delete_*`.
   Las **notas cifradas** se listan pero no se leen/editan. El **bucle** en `ai:chat` itera
   `streamTurn`→ejecutar tools→realimentar `role:'tool'` hasta que no haya `toolCalls` (máx. 12 pasos,
-  `MAX_AGENT_STEPS`). **Tools siempre activas** (el modelo decide); **solo las destructivas piden
+  `MAX_AGENT_STEPS`). **`reasoning_details`:** con razonamiento + tools, OpenRouter recomienda (y
+  DeepSeek / Anthropic con thinking **exigen**) reenviar el razonamiento del turno del asistente que
+  pidió las tools. `openaiCompatible.streamTurn` acumula `delta.reasoning_details` del SSE
+  (`accumulateReasoningDetails`: por `index`, concatenando `text`/`summary`/`data`, el resto de campos
+  —`signature`, `id`, `format`…— último valor) y lo devuelve en `AgentTurnResult.reasoningDetails`
+  **solo si llegó alguno**; el bucle lo cuelga del mensaje `assistant` con `toolCalls` que realimenta
+  en ese mismo turno, y `toOpenAiMessages` lo serializa como `reasoning_details` **solo** ahí (una API
+  OpenAI-compatible estricta no debe ver el campo nunca). No se guarda en el historial: los turnos
+  previos del usuario van sin él. Aplica a **cualquier** proveedor OpenAI-compatible que lo mande: el
+  plan gestionado (el proxy inyecta el `reasoning_effort` del catálogo) y también un BYO como
+  OpenRouter con un modelo de razonamiento, que streamea `reasoning_details` por su cuenta y recibe
+  el mismo passthrough; Anthropic (SDK propio) no usa este campo. Test:
+  `tests/electron/openaiReasoningDetails.test.ts`. **Tools siempre activas** (el modelo decide); **solo las destructivas piden
   confirmación**: el main emite `ai:chat-confirm-request` y `await`ea `chatConfirms` (resuelto por
   `ai:chat-confirm`); si se cancela, devuelve un `ToolResult` "user declined" sin abortar el turno.
 - **Errores a mitad de respuesta (nunca se pierden):** como cada paso del bucle agéntico es una
@@ -301,11 +330,11 @@ Python…) quedan literales. **Borrador persistente:** las
   los presets con `modelMeta`** (hoy solo `noteflow`, cuyo catálogo mezcla modelos con y sin visión)
   refinan el flag **por modelo activo** — manda `modelMeta[activeModel].images` sobre el default del
   preset; para `noteflow` es el `images` del **catálogo efectivo** (columna `images` de
-  `ai_models`; ver "Catálogo de modelos de NoteFlow AI" arriba). Text-only en el catálogo de respaldo/
-  seed: los dos DeepSeek y `xiaomi/mimo-v2.5-pro` — **tres de los cinco modelos ×1**. ⚠️ **El modelo por defecto del plan gestionado (`suggestedModels[0]`, hoy
-  `deepseek/deepseek-v4-pro`) es text-only**, así que quien active NoteFlow AI sin tocar el selector
-  **no verá adjuntar imágenes** hasta que elija un modelo con visión: no dar por hecho que el plan
-  gestionado trae visión "de serie". `.txt/.md` se
+  `ai_models`; ver "Catálogo de modelos de NoteFlow AI" arriba). En el catálogo actual (0013 = respaldo)
+  **los cinco modelos aceptan imágenes**, incluido el por defecto (`suggestedModels[0]`,
+  `deepseek/deepseek-v4.1-flash-1017`); con el anterior (0012) el por defecto era text-only. No dar por
+  hecho que siempre será así: una fila con `images = false` vuelve a desactivar el adjunto de imágenes
+  para ese modelo. `.txt/.md` se
   incrustan como texto (universal). DOCX/OCR no se soportan (requerirían procesar). El picker capa las
   extensiones y `ai:chat` filtra los adjuntos por `caps` (defensa en profundidad: si cambias a un
   proveedor sin imágenes, los adjuntos de imagen no se envían). **Archivos de texto/código:** se admite

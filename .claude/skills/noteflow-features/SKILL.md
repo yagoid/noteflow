@@ -770,9 +770,9 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     la tarjeta de confirmación. Cuando no queda ninguna señal, la respuesta ha terminado.
   - **Adjuntar archivos (📎):** junto al campo de escribir hay un botón de clip para mandar **imágenes,
     PDFs y .txt/.md** con tu pregunta — lo que el **modelo activo** admita (Anthropic: PDF+imágenes+texto;
-    OpenAI-compatibles: imágenes+texto; .txt/.md siempre). Ojo: en **NoteFlow AI** varios modelos curados
-    son de solo texto —incluido el que viene elegido por defecto—, así que ahí el botón solo ofrece
-    imágenes si eliges un modelo con visión. Los archivos elegidos aparecen como **chips
+    OpenAI-compatibles: imágenes+texto; .txt/.md siempre). En **NoteFlow AI** la visión va por modelo
+    (la marca el catálogo del servidor); hoy todos los modelos curados aceptan imágenes, incluido el
+    recomendado que viene elegido por defecto. Los archivos elegidos aparecen como **chips
     removibles** sobre el campo y quedan pegados al mensaje al enviarlo; puedes mandar solo adjuntos sin
     texto. La IA **lee los documentos directamente** (la app no extrae texto): el .txt/.md se incrusta en
     el mensaje y el PDF/imagen va nativo al proveedor. Los adjuntos siguen disponibles para **preguntas de
@@ -819,8 +819,11 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   eligen con un **selector de dos cards** (mismo patrón que Ajustes → Sincronización; badge
   Activo/Inactivo en cada una, y debajo solo la sección de la que elijas):
   - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow),
-    modelos curados (los más caros con sufijo "N× cuota" — hoy 2× y 6×; el campo "Model" es de **solo
-    lectura**, se elige haciendo clic en uno de los modelos) y **barra de consumo mensual**. La lista de
+    modelos curados (el recomendado marcado "· Recommended"; los que gastan la asignación al menos el
+    doble de rápido, con sufijo "(≈N× quota)" — hoy ≈2× y ≈29×; el campo "Model" es de **solo
+    lectura**, se elige haciendo clic en uno de los modelos) y **barra de consumo mensual** en
+    porcentaje ("N% of this month’s AI allowance used": la asignación se mide por el coste real de
+    cada petición, así que los modelos caros la gastan antes). La lista de
     modelos la sirve el servidor: los modelos nuevos **aparecen solos** (sin actualizar la app; "Load"
     fuerza el refresco), se recuerda entre arranques y offline, y tu modelo elegido no cambia. Botón "Use NoteFlow
     AI" para activarlo (o check "Active" si ya lo es). Sin sesión o sin suscripción, la card sigue

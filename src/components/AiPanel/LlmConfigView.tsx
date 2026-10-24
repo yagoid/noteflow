@@ -28,15 +28,12 @@ const modeOf = (cfg: LlmConfigPublic | null): Mode | null =>
 const byoOf = (cfg: LlmConfigPublic | null): string =>
   cfg && cfg.active !== 'noteflow' ? cfg.active : cfg?.lastByoProvider || DEFAULT_BYO_PRESET
 
-// Compact token figure for the NoteFlow AI usage line: 1_234_567 → "1.2M",
-// 850_000 → "850k", 3_000_000 → "3M".
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) {
-    const m = n / 1_000_000
-    return `${Number.isInteger(m) || m >= 100 ? Math.round(m) : m.toFixed(1)}M`
-  }
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k`
-  return String(n)
+// Share of the NoteFlow AI monthly allowance spent, as a whole percentage. The proxy
+// reports abstract units (only used/limit is meaningful). Floored, so "100%" only shows
+// once the allowance is really exhausted (a reservation can overshoot it slightly).
+function usagePercent(used: number, limit: number): number {
+  if (used >= limit) return 100
+  return Math.max(0, Math.floor((used / limit) * 100))
 }
 
 export function LlmConfigView({
@@ -144,11 +141,15 @@ export function LlmConfigView({
   const changeProvider = (id: string) => { if (id !== llmConfig.active) void setLlmConfig({ active: id }) }
   // Picker label: show the model name only, dropping the "provider/" prefix
   // (x-ai/grok-4.5 → grok-4.5). The stored/sent id keeps the full form — this is
-  // cosmetic. NoteFlow AI models above the ×1 baseline keep an "(N× quota)" suffix.
+  // cosmetic. NoteFlow AI: the recommended model gets " · Recommended", and models that
+  // spend the allowance at least twice as fast as it an "(≈N× quota)" suffix.
   const modelLabel = (m: string) => {
     const name = m.includes('/') ? m.slice(m.indexOf('/') + 1) : m
-    const mult = preset.modelMeta?.[m]?.quotaMultiplier ?? 1
-    return mult > 1 ? `${name} ${tf(t.aiPanel.provider.modelQuotaSuffix, { mult })}` : name
+    const meta = preset.modelMeta?.[m]
+    const recommended = meta?.recommended ? ` · ${t.aiPanel.provider.modelRecommended}` : ''
+    const mult = meta?.costIndex ?? 1
+    const suffix = mult >= 2 ? ` ${tf(t.aiPanel.provider.modelQuotaSuffix, { mult })}` : ''
+    return `${name}${recommended}${suffix}`
   }
   const saveKey = async () => { if (keyInput.trim()) { await setLlmConfig({ apiKey: keyInput.trim() }); setKeyInput('') } }
   const clearKey = () => void setLlmConfig({ clearKey: true })
@@ -302,7 +303,7 @@ export function LlmConfigView({
                 Rendered once the account status lands (there is nothing to say before that). */}
             {account && (
               <Box className="gap-3">
-                {/* Monthly consumption (weighted quota tokens). Hidden while unknown or without entitlement. */}
+                {/* Monthly consumption (share of the allowance). Hidden while unknown or without entitlement. */}
                 {entitled && usage && usage.limit > 0 && (
                   <div className="flex flex-col gap-1">
                     <div className="h-1.5 rounded-full bg-border/50 overflow-hidden">
@@ -312,7 +313,7 @@ export function LlmConfigView({
                       />
                     </div>
                     <span className={`text-[11px] normal-case ${usage.used >= usage.limit ? 'text-amber-300' : 'text-text-muted/70'}`}>
-                      {tf(t.aiPanel.provider.noteflowCard.usage, { used: formatTokens(usage.used), limit: formatTokens(usage.limit) })}
+                      {tf(t.aiPanel.provider.noteflowCard.usage, { percent: usagePercent(usage.used, usage.limit) })}
                     </span>
                   </div>
                 )}

@@ -4,75 +4,115 @@
 // tests/supabase/ai-proxy.test.ts. Same philosophy as billing-webhook/logic.ts.
 
 // ── Model catalog ─────────────────────────────────────────────────────────────
-// The catalog of the managed plan (which models it serves, what each costs
-// against the quota, which accept images) lives in the public.ai_models table
-// (migration 0012) — adding a model is inserting a row: no redeploy, no app
-// release. index.ts reads it with a short in-memory cache (catalogFromRows
-// turns the rows into a ModelCatalog) and falls back to FALLBACK_MODEL_CATALOG
-// when the table is unreachable or has no usable row. The catalog drives
-// everything model-related: the allowlist of POST /chat/completions, the
-// per-model quota multiplier, and GET /models, whose body (modelsListBody) is
-// what the desktop client caches as ITS catalog.
+// The catalog of the managed plan (which models it serves, their list price,
+// their reasoning effort, which accept images, which one is recommended, and
+// which retired ids map to a successor) lives in the public.ai_models table
+// (migrations 0012 + 0013) — adding a model is inserting a row: no redeploy, no
+// app release. index.ts reads it with a short in-memory cache (catalogFromRows
+// turns the enabled rows into a ModelCatalog, aliasEdgesFromRows collects the
+// `replaced_by` edges) and falls back to FALLBACK_MODEL_CATALOG /
+// FALLBACK_MODEL_ALIASES when the table is unreachable or has no usable row.
+// The catalog drives everything model-related: the allowlist of
+// POST /chat/completions (plus the alias rewrite), the prices the reservation
+// is estimated with, the reasoning effort injected upstream, and GET /models,
+// whose body (modelsListBody) is what the desktop client caches as ITS catalog.
+
+/** Reasoning effort levels the proxy may inject (the ai_models CHECK constraint). */
+export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high'] as const
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
 
 /** One model of the managed plan's catalog. */
 export interface CatalogModel {
   /** OpenRouter model id. */
   id: string
-  /**
-   * What a real token costs against the monthly quota (×1 = baseline). Real
-   * tokens (tokens_in/tokens_out) are still recorded unweighted for the
-   * operator's cost accounting; the weighted value goes to the
-   * usage_events.quota_tokens column (migration 0007).
-   */
-  quotaMultiplier: number
   /** Native vision support (the client gates image attachments on it). */
   images: boolean
+  /**
+   * OpenRouter LIST price in USD per 1M input / output tokens. Only used to
+   * ESTIMATE a request (the reservation) and as the fallback cost when the
+   * upstream reports tokens but no `usage.cost`; the real charge is
+   * OpenRouter's `usage.cost` (which already includes reasoning tokens, cache
+   * discounts and peak-hour surcharges).
+   */
+  priceInUsd: number
+  priceOutUsd: number
+  /**
+   * Reasoning effort the proxy INJECTS upstream (`reasoning: { effort }`) —
+   * server-controlled only, the client's own `reasoning` is always dropped.
+   * Null = send nothing (the model's default).
+   */
+  reasoningEffort: ReasoningEffort | null
+  /** Highlighted in the client's picker; the reference model of cost_index. */
+  recommended: boolean
 }
 
 /** Ordered catalog — the first entry is the client's default model. */
 export type ModelCatalog = readonly CatalogModel[]
 
+/** Retired model id → successor id (`replaced_by` edges, or resolved aliases). */
+export type ModelAliases = Readonly<Record<string, string>>
+
 /**
  * BACKUP catalog, used only when public.ai_models cannot be read or has no
- * enabled usable row. Mirrors the seed of migration 0012 (same ids, order,
- * multipliers and vision flags) and the client's own fallback
+ * enabled usable row. Mirrors the seed of migration 0013 (same ids, order,
+ * prices, efforts, vision and recommended flags) and the client's own fallback
  * (NOTEFLOW_AI_MODELS + NOTEFLOW_AI_MODEL_META in electron/ai/llm/presets.ts)
  * — tests/supabase/ai-catalog-mirror.test.ts pins the three together. It is a
  * safety net, NOT where the catalog is managed: new models go into the table.
- * All curated models MUST support tool calling (the NoteFlow chat is agentic);
- * NOT all support vision (the two DeepSeek models and Xiaomi MiMo are
- * text-only).
+ * All curated models MUST support tool calling (the NoteFlow chat is agentic).
+ * Prices: OpenRouter list prices (USD / 1M tokens) on 2026-10-24.
  */
 export const FALLBACK_MODEL_CATALOG: ModelCatalog = [
-  // Standard models (×1 quota).
-  { id: 'deepseek/deepseek-v4-pro', quotaMultiplier: 1, images: false },
-  { id: 'deepseek/deepseek-v4-flash', quotaMultiplier: 1, images: false },
-  { id: 'xiaomi/mimo-v2.5-pro', quotaMultiplier: 1, images: false },
-  { id: 'openai/gpt-5.6-luna', quotaMultiplier: 1, images: true },
-  { id: 'anthropic/claude-haiku-4.5', quotaMultiplier: 1, images: true },
-  // Mid-tier (×2 quota).
-  { id: 'x-ai/grok-4.5', quotaMultiplier: 2, images: true },
-  // Advanced models (×6 quota).
-  { id: 'moonshotai/kimi-k3', quotaMultiplier: 6, images: true },
+  // Recommended default. Weekday peak hours bill ×2 — usage.cost reflects it.
+  { id: 'deepseek/deepseek-v4.1-flash-1017', images: true, priceInUsd: 0.15, priceOutUsd: 0.6, reasoningEffort: null, recommended: true },
+  { id: 'openai/gpt-5.6-luna', images: true, priceInUsd: 0.2, priceOutUsd: 1.2, reasoningEffort: null, recommended: false },
+  { id: 'anthropic/claude-haiku-5.5', images: true, priceInUsd: 0.1, priceOutUsd: 0.5, reasoningEffort: null, recommended: false },
+  { id: 'xiaomi/mimo-v2.6-pro', images: true, priceInUsd: 0.435, priceOutUsd: 0.87, reasoningEffort: null, recommended: false },
+  // The smartest — and by far the priciest — model: spends the allowance fastest.
+  { id: 'openai/gpt-5.6-sol', images: true, priceInUsd: 4, priceOutUsd: 20, reasoningEffort: 'low', recommended: false },
 ]
+
+/**
+ * BACKUP alias edges (retired id → successor), mirroring the `replaced_by`
+ * updates of migration 0013. They keep internal/QA builds of main from before
+ * the DB catalog (b74fad0) working — they ship a hardcoded catalog
+ * (deepseek-v4-pro as their default) and know nothing about the table — and
+ * cover cached client catalogs: requests for retired ids are rewritten to the
+ * successor instead of failing with 400 model_not_allowed. (No public release
+ * ever shipped the managed plan before the DB catalog.)
+ */
+export const FALLBACK_MODEL_ALIASES: ModelAliases = {
+  'deepseek/deepseek-v4-pro': 'deepseek/deepseek-v4.1-flash-1017',
+  'deepseek/deepseek-v4-flash': 'deepseek/deepseek-v4.1-flash-1017',
+  'xiaomi/mimo-v2.5-pro': 'xiaomi/mimo-v2.6-pro',
+  'anthropic/claude-haiku-4.5': 'anthropic/claude-haiku-5.5',
+  'x-ai/grok-4.5': 'openai/gpt-5.6-sol',
+  'moonshotai/kimi-k3': 'openai/gpt-5.6-sol',
+}
 
 /** Ids of the backup catalog, in order. */
 export const DEFAULT_ALLOWED_MODELS: readonly string[] = FALLBACK_MODEL_CATALOG.map((m) => m.id)
 
-/** Positive finite number from a JSON number or a numeric string (PostgREST
+/** Non-negative finite number from a JSON number or a numeric string (PostgREST
  *  serializes `numeric` as a JSON number, but a string must not break us). */
-function positiveNumber(value: unknown): number | null {
+function nonNegativeNumber(value: unknown): number | null {
   const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN
-  return Number.isFinite(n) && n > 0 ? n : null
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === 'string' && (REASONING_EFFORTS as readonly string[]).includes(value)
 }
 
 /**
  * public.ai_models rows → catalog: only rows with `enabled = true`, ordered by
  * sort_order (then id, for a deterministic order on ties). Defensive: a row
- * with a missing/blank id, a non-positive or non-numeric multiplier or a
- * non-boolean `images` is SKIPPED (the table's constraints make that
- * near-impossible; one bad row must not take the whole catalog down), and a
- * repeated id keeps its first occurrence. Null when nothing usable is left
+ * with a missing/blank id, a missing / negative / non-numeric price (an
+ * enabled model without a price cannot be estimated — SQL allows the null, the
+ * proxy does not serve it), a non-boolean `images` or an unknown
+ * `reasoning_effort` is SKIPPED (one bad row must not take the whole catalog
+ * down), and a repeated id keeps its first occurrence. `recommended` is true
+ * only when the column is exactly `true`. Null when nothing usable is left
  * (not an array, empty table, everything disabled) — the caller then serves
  * FALLBACK_MODEL_CATALOG.
  */
@@ -85,15 +125,93 @@ export function catalogFromRows(rows: unknown): ModelCatalog | null {
     const r = row as Record<string, unknown>
     if (r.enabled !== true) continue
     const id = typeof r.id === 'string' ? r.id.trim() : ''
-    const quotaMultiplier = positiveNumber(r.quota_multiplier)
-    if (!id || quotaMultiplier === null || typeof r.images !== 'boolean' || seen.has(id)) continue
+    const priceInUsd = nonNegativeNumber(r.price_in_usd)
+    const priceOutUsd = nonNegativeNumber(r.price_out_usd)
+    const effort = r.reasoning_effort ?? null
+    if (!id || seen.has(id) || priceInUsd === null || priceOutUsd === null) continue
+    if (typeof r.images !== 'boolean' || (effort !== null && !isReasoningEffort(effort))) continue
     seen.add(id)
     const sortOrder = typeof r.sort_order === 'number' && Number.isFinite(r.sort_order) ? r.sort_order : 0
-    picked.push({ id, quotaMultiplier, images: r.images, sortOrder })
+    picked.push({
+      id,
+      images: r.images,
+      priceInUsd,
+      priceOutUsd,
+      reasoningEffort: effort,
+      recommended: r.recommended === true,
+      sortOrder,
+    })
   }
   if (picked.length === 0) return null
   picked.sort((a, b) => a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-  return picked.map(({ id, quotaMultiplier, images }) => ({ id, quotaMultiplier, images }))
+  return picked.map(({ sortOrder: _sortOrder, ...model }) => model)
+}
+
+/**
+ * public.ai_models rows → raw alias edges (`id` → `replaced_by`), from ANY row
+ * (enabled or not) with a non-blank `replaced_by` different from its own id.
+ * Malformed rows are skipped; a repeated id keeps its first edge. The edges
+ * are resolved against the served catalog by resolveModelAliases.
+ */
+export function aliasEdgesFromRows(rows: unknown): Record<string, string> {
+  const edges: Record<string, string> = {}
+  if (!Array.isArray(rows)) return edges
+  for (const row of rows) {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) continue
+    const r = row as Record<string, unknown>
+    const id = typeof r.id === 'string' ? r.id.trim() : ''
+    const to = typeof r.replaced_by === 'string' ? r.replaced_by.trim() : ''
+    // '__proto__' would hit the prototype setter of the plain object.
+    if (!id || !to || id === to || id === '__proto__' || Object.prototype.hasOwnProperty.call(edges, id)) continue
+    edges[id] = to
+  }
+  return edges
+}
+
+/** Longest replaced_by chain followed (A → B → C …) before giving up. */
+export const MAX_ALIAS_HOPS = 4
+
+/**
+ * Resolves raw alias edges to models the proxy actually SERVES: each retired
+ * id follows its `replaced_by` chain (at most MAX_ALIAS_HOPS hops, cycles
+ * detected) until it lands on an id of `catalog`. An id that is itself served
+ * needs no alias and is skipped; a chain that never reaches a served model
+ * (successor disabled too, restricted by AI_ALLOWED_MODELS, a cycle, too long)
+ * yields no alias — that id then gets the usual 400 model_not_allowed.
+ */
+export function resolveModelAliases(edges: ModelAliases, catalog: ModelCatalog): Record<string, string> {
+  const served = new Set(catalog.map((m) => m.id))
+  const out: Record<string, string> = {}
+  for (const from of Object.keys(edges)) {
+    if (served.has(from)) continue
+    const visited = new Set<string>([from])
+    let current = from
+    for (let hop = 0; hop < MAX_ALIAS_HOPS; hop++) {
+      const next = Object.prototype.hasOwnProperty.call(edges, current) ? edges[current] : undefined
+      if (!next || visited.has(next)) break
+      if (served.has(next)) {
+        out[from] = next
+        break
+      }
+      visited.add(next)
+      current = next
+    }
+  }
+  return out
+}
+
+/**
+ * The model a chat request will really run: the requested id when the catalog
+ * serves it, else its resolved alias (a retired id with a served successor),
+ * else null (→ 400 model_not_allowed). The result is used for EVERYTHING
+ * downstream: the upstream body, the reservation and the usage row.
+ */
+export function resolveRequestedModel(model: unknown, catalog: ModelCatalog, aliases: ModelAliases): CatalogModel | null {
+  if (typeof model !== 'string') return null
+  const direct = catalog.find((m) => m.id === model)
+  if (direct) return direct
+  const successor = Object.prototype.hasOwnProperty.call(aliases, model) ? aliases[model] : undefined
+  return successor ? (catalog.find((m) => m.id === successor) ?? null) : null
 }
 
 /**
@@ -109,7 +227,7 @@ export function parseAllowedModelsOverride(raw: string | undefined | null): stri
 }
 
 export interface ServedCatalog {
-  /** What the proxy serves: allowlist, multipliers and GET /models. */
+  /** What the proxy serves: allowlist, prices / efforts and GET /models. */
   catalog: ModelCatalog
   /** The override was set but matched no catalog model, so it was ignored. */
   overrideIgnored: boolean
@@ -120,7 +238,7 @@ export interface ServedCatalog {
  * can only RESTRICT: the served catalog is the catalog's models whose id is in
  * the override, in CATALOG order and with CATALOG metadata. Ids absent from the
  * catalog are ignored — an env var cannot add a model, because it would have no
- * multiplier (a pricey model would be charged ×1) nor vision flag. If the
+ * price to estimate its reservation with nor vision flag. If the
  * override matches NO catalog model (typo, or ids that only exist in a table the
  * proxy could not read) it is ignored altogether (overrideIgnored — the caller
  * logs it): serving nothing would take the whole plan down. With the table in
@@ -140,42 +258,79 @@ export function catalogModelIds(catalog: ModelCatalog): string[] {
   return catalog.map((m) => m.id)
 }
 
-/** Default monthly QUOTA token budget (weighted input + output) per user. */
-export const DEFAULT_MONTHLY_TOKENS = 3_000_000
+// ── Monthly quota = real cost in USD (migration 0013) ─────────────────────────
+// The monthly quota is a budget of REAL upstream cost per user: every request
+// is charged what OpenRouter billed for it (`usage.cost`, which already
+// includes reasoning tokens and cache discounts), so a pricey model simply
+// spends the budget faster — no per-model multiplier to keep in sync with
+// prices. The budget never reaches the client in USD: GET /usage and the
+// X-NoteFlow-Tokens-* headers report it in LEGACY_USAGE_UNITS (see
+// legacyUsageUnits).
+
+/** Default monthly budget per user, in USD of real upstream cost. */
+export const DEFAULT_MONTHLY_BUDGET_USD = 2
 
 /**
- * Quota multiplier for a model, from the catalog in use (the backup one when
- * omitted). Models absent from the catalog — never allowed, so they should
- * never get here — and malformed entries cost the ×1 baseline. Nothing assumes
- * a fixed set of values: any positive finite number works, so a new tier is
- * just a row with a new multiplier.
+ * Parses the AI_MONTHLY_BUDGET_USD env value. Anything that is not a positive
+ * finite number (decimals allowed: "2.5") falls back to
+ * DEFAULT_MONTHLY_BUDGET_USD — an operator typo must not turn the quota off or
+ * into NaN-land.
  */
-export function quotaMultiplierFor(model: string, catalog: ModelCatalog = FALLBACK_MODEL_CATALOG): number {
-  const mult = catalog.find((m) => m.id === model)?.quotaMultiplier
-  return typeof mult === 'number' && Number.isFinite(mult) && mult > 0 ? mult : 1
+export function parseMonthlyBudgetUsd(raw: string | undefined | null): number {
+  if (raw === null || raw === undefined || raw.trim() === '') return DEFAULT_MONTHLY_BUDGET_USD
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MONTHLY_BUDGET_USD
 }
 
 /**
- * Weighted quota tokens a usage event costs: round((in + out) * multiplier).
- * Defensive: a malformed usage side counts as 0 rather than poisoning the sum.
+ * Scale of the usage numbers the proxy reports. Internal/QA builds of main
+ * from before the DB catalog (b74fad0) show GET /usage as "X / 3M tokens", so
+ * the proxy keeps that shape — {used, limit} numbers with limit = 3,000,000 —
+ * but `used` is the SHARE of the USD budget spent, scaled to those units: the
+ * percentage (and the progress bar) stays exact, and the proxy API never
+ * reports USD. (Users CAN read their own usage_events rows, cost_usd /
+ * quota_usd included, through the 0003 RLS policy — the USD are not secret,
+ * the app just never shows them.)
  */
-export function computeQuotaTokens(
-  usage: Pick<TokenUsage, 'tokensIn' | 'tokensOut'>,
-  model: string,
-  catalog: ModelCatalog = FALLBACK_MODEL_CATALOG
-): number {
+export const LEGACY_USAGE_UNITS = 3_000_000
+
+/** {used, limit} in LEGACY_USAGE_UNITS for a USD spend against a USD budget. */
+export function legacyUsageUnits(usedUsd: number, limitUsd: number): { used: number; limit: number } {
+  const used = Number.isFinite(usedUsd) && usedUsd > 0 ? usedUsd : 0
+  if (!(Number.isFinite(limitUsd) && limitUsd > 0)) return { used: 0, limit: LEGACY_USAGE_UNITS }
+  return { used: Math.round((used / limitUsd) * LEGACY_USAGE_UNITS), limit: LEGACY_USAGE_UNITS }
+}
+
+/**
+ * Catalog entry used to PRICE a request. Requests only get here for served
+ * models (resolveRequestedModel), so the lookup always hits; the defensive
+ * fallback for an unknown id is the priciest model of the catalog, never a
+ * free ride.
+ */
+function pricingFor(model: string, catalog: ModelCatalog): Pick<CatalogModel, 'priceInUsd' | 'priceOutUsd'> {
+  const found = catalog.find((m) => m.id === model)
+  if (found) return found
+  let priceInUsd = 0
+  let priceOutUsd = 0
+  for (const m of catalog) {
+    priceInUsd = Math.max(priceInUsd, m.priceInUsd)
+    priceOutUsd = Math.max(priceOutUsd, m.priceOutUsd)
+  }
+  return { priceInUsd, priceOutUsd }
+}
+
+/**
+ * USD a settled request is charged against the quota: OpenRouter's reported
+ * cost (`usage.cost` / generation total_cost) when present — it is the real
+ * bill, reasoning and caching included — else the real token counts at the
+ * catalog's list prices. Defensive: malformed token sides count as 0.
+ */
+export function computeCostUsd(usage: TokenUsage, model: string, catalog: ModelCatalog = FALLBACK_MODEL_CATALOG): number {
+  if (usage.cost !== null && Number.isFinite(usage.cost) && usage.cost >= 0) return usage.cost
   const tokensIn = Number.isFinite(usage.tokensIn) && usage.tokensIn > 0 ? usage.tokensIn : 0
   const tokensOut = Number.isFinite(usage.tokensOut) && usage.tokensOut > 0 ? usage.tokensOut : 0
-  return Math.round((tokensIn + tokensOut) * quotaMultiplierFor(model, catalog))
-}
-
-/**
- * Parses the AI_MONTHLY_TOKENS env value. Anything that is not a positive
- * integer falls back to DEFAULT_MONTHLY_TOKENS (operator typo must not turn
- * the quota off or into NaN-land).
- */
-export function parseMonthlyTokens(raw: string | undefined | null): number {
-  return parsePositiveInt(raw, DEFAULT_MONTHLY_TOKENS)
+  const { priceInUsd, priceOutUsd } = pricingFor(model, catalog)
+  return (tokensIn * priceInUsd + tokensOut * priceOutUsd) / 1_000_000
 }
 
 /** Positive integer from an env string, else the fallback (shared by the env parsers). */
@@ -191,10 +346,11 @@ function parsePositiveInt(raw: string | undefined | null, fallback: number): num
 // passed the check before any of them was metered, and (b) a request that
 // outlived the Edge wall clock was killed before its final `usage` chunk and
 // was never metered at all. Now every request first RESERVES an estimate of its
-// cost (RPC reserve_ai_usage, migration 0009 — per-user advisory lock, so
-// parallel requests serialize on the check), the reservation is settled to the
-// real usage when it arrives, and a reservation that never settles keeps its
-// estimate charged. Everything below bounds that estimate.
+// cost (RPC reserve_ai_cost, migration 0013 — the USD successor of 0009's
+// reserve_ai_usage, same per-user advisory lock, so parallel requests serialize
+// on the check), the reservation is settled to the real cost when it arrives,
+// and a reservation that never settles keeps its estimate charged. Everything
+// below bounds that estimate.
 
 /**
  * Hard cap on output tokens per request. Forced on EVERY upstream request
@@ -244,8 +400,8 @@ export const IMAGE_PART_TOKENS = 1_600
 export const DEFAULT_MAX_INFLIGHT = 3
 
 /**
- * Parses the optional AI_MAX_INFLIGHT env. Same rule as parseMonthlyTokens:
- * anything that is not a positive integer falls back to DEFAULT_MAX_INFLIGHT.
+ * Parses the optional AI_MAX_INFLIGHT env: anything that is not a positive
+ * integer falls back to DEFAULT_MAX_INFLIGHT.
  */
 export function parseMaxInflight(raw: string | undefined | null): number {
   return parsePositiveInt(raw, DEFAULT_MAX_INFLIGHT)
@@ -257,28 +413,19 @@ export function parseMaxInflight(raw: string | undefined | null): number {
  * quota forever — "the reservation stands"). Must be longer than the Edge wall
  * clock (150 s free / 400 s paid plans) so a live request is never treated as
  * stale; short enough that a few killed isolates do not lock the user out for
- * long. Passed to reserve_ai_usage as p_stale_minutes.
+ * long. Passed to reserve_ai_cost as p_stale_minutes.
  */
 export const RESERVATION_STALE_MINUTES = 10
 
 /**
- * Weighted quota tokens to RESERVE before forwarding a request (pass the body
- * produced by buildUpstreamBody, so max_tokens is already clamped):
- *   input  ≈ UTF-8 bytes of the serialized body / 4 (the usual ~4 bytes/token
- *            rule of thumb; tool schemas and the system prompt are part of
- *            the body and are billed as input too), except that every
- *            `image_url` part of messages[].content counts IMAGE_PART_TOKENS
- *            instead of its base64 length;
- *   output = the clamped max_tokens (the worst case the request can bill);
- * times the model's quota multiplier in `catalog` (the one being served — the
- * backup catalog when omitted), rounded. Deliberately an upper-ish bound: it is
- * what the user is charged if real usage never arrives.
+ * Estimated INPUT tokens of a request (pass the body produced by
+ * buildUpstreamBody): UTF-8 bytes of the serialized body / 4 (the usual
+ * ~4 bytes/token rule of thumb; tool schemas and the system prompt are part
+ * of the body and are billed as input too), except that every `image_url`
+ * part of messages[].content counts IMAGE_PART_TOKENS instead of its base64
+ * length.
  */
-export function estimateReservationTokens(
-  upstreamBody: Record<string, unknown>,
-  model: string,
-  catalog: ModelCatalog = FALLBACK_MODEL_CATALOG
-): number {
+export function estimateInputTokens(upstreamBody: Record<string, unknown>): number {
   let images = 0
   const messages = Array.isArray(upstreamBody.messages)
     ? upstreamBody.messages.map((msg: unknown) => {
@@ -298,9 +445,31 @@ export function estimateReservationTokens(
       })
     : upstreamBody.messages
   const bytes = new TextEncoder().encode(JSON.stringify({ ...upstreamBody, messages })).length
-  const input = Math.ceil(bytes / 4) + images * IMAGE_PART_TOKENS
+  return Math.ceil(bytes / 4) + images * IMAGE_PART_TOKENS
+}
+
+/**
+ * USD to RESERVE before forwarding a request (pass the body produced by
+ * buildUpstreamBody, so max_tokens is already clamped):
+ *   (estimateInputTokens × price_in + clamped max_tokens × price_out) / 1e6
+ * with the list prices of `model` in `catalog` (the one being served — the
+ * backup catalog when omitted). The output side is the worst case the request
+ * can bill (reasoning tokens count as output and are bounded by max_tokens
+ * too). Deliberately an upper-ish bound: it is what the user is charged if
+ * the real cost never arrives. It can still fall SHORT of the real bill when
+ * a provider surcharges above the list price (DeepSeek's weekday peak hours,
+ * long-context tiers) or bytes/4 underestimates the input — the settlement
+ * then charges the real cost.
+ */
+export function estimateReservationUsd(
+  upstreamBody: Record<string, unknown>,
+  model: string,
+  catalog: ModelCatalog = FALLBACK_MODEL_CATALOG
+): number {
+  const { priceInUsd, priceOutUsd } = pricingFor(model, catalog)
+  const input = estimateInputTokens(upstreamBody)
   const output = clampMaxTokens(upstreamBody.max_tokens)
-  return Math.round((input + output) * quotaMultiplierFor(model, catalog))
+  return (input * priceInUsd + output * priceOutUsd) / 1_000_000
 }
 
 /** True when a Content-Length header already announces a body above the cap. */
@@ -350,9 +519,10 @@ export type ReserveResult =
   | { ok: false; reason: 'quota' | 'concurrency'; used: number }
 
 /**
- * Validates the jsonb returned by the reserve_ai_usage RPC
- * ({ok, reason, used, id}). Null when malformed — the caller treats that as an
- * RPC failure (500), never as a granted reservation.
+ * Validates the jsonb returned by the reserve_ai_cost RPC
+ * ({ok, reason, used, id}; `used` = USD spent this month, pending reservations
+ * included — same shape as 0009's reserve_ai_usage). Null when malformed — the
+ * caller treats that as an RPC failure (500), never as a granted reservation.
  */
 export function parseReserveResult(payload: unknown): ReserveResult | null {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null
@@ -391,17 +561,26 @@ export function hasAiEntitlement(rows: unknown): boolean {
 
 export interface QuotaState {
   exceeded: boolean
-  /** Tokens still available this month (never negative). */
+  /** Budget still available this month (never negative). */
   remaining: number
 }
 
 /**
- * used = tokens already consumed this month (from get_month_usage). Same rule
- * (`used >= limit` → exceeded) that reserve_ai_usage applies server-side.
+ * used = budget already consumed this month (USD, from get_month_cost; pending
+ * reservations included); estimate = what the new request would reserve
+ * (estimateReservationUsd; 0 = "is anything left at all?"). Same rule that
+ * reserve_ai_cost (migration 0013) applies server-side, with NO tolerance:
+ * exceeded when `used >= limit` OR `used + estimate > limit` — a request is
+ * only admitted when its whole estimate fits in what is left, so the budget
+ * can only be overshot by an estimate that falls short of the real bill.
  */
-export function computeQuota(used: number, limit: number): QuotaState {
+export function computeQuota(used: number, limit: number, estimate = 0): QuotaState {
   const safeUsed = Number.isFinite(used) && used > 0 ? used : 0
-  return { exceeded: safeUsed >= limit, remaining: Math.max(0, limit - safeUsed) }
+  const safeEstimate = Number.isFinite(estimate) && estimate > 0 ? estimate : 0
+  return {
+    exceeded: safeUsed >= limit || safeUsed + safeEstimate > limit,
+    remaining: Math.max(0, limit - safeUsed),
+  }
 }
 
 /** OpenAI-compatible error body, so any OpenAI client surfaces it nicely. */
@@ -417,27 +596,63 @@ export function openAiErrorBody(
 export interface ModelsListEntry {
   id: string
   object: 'model'
-  /** Quota multiplier (×1 = baseline) — the client shows "(N× quota)" above 1. */
-  quota_multiplier: number
   /** Native vision support — the client gates image attachments on it. */
   images: boolean
+  /** Highlighted in the client's picker. */
+  recommended: boolean
+  /**
+   * How many times faster than the reference model (the recommended one) a
+   * typical message spends the monthly allowance — an integer ≥ 1 (see
+   * costIndexFor). The client shows "(≈N× quota)" from 2 up. Prices never
+   * leave the server.
+   */
+  cost_index: number
+}
+
+/**
+ * Cost of a "typical" agentic message at list prices, per 1M tokens: the
+ * chat re-sends the whole conversation + tool schemas every step and writes a
+ * comparatively short answer, so the mix is ~90% input / 10% output.
+ */
+function typicalMessageCost(m: Pick<CatalogModel, 'priceInUsd' | 'priceOutUsd'>): number {
+  return 0.9 * m.priceInUsd + 0.1 * m.priceOutUsd
+}
+
+/**
+ * cost_index of every model of `catalog`, by id: its typical message cost
+ * relative to the REFERENCE model — the first `recommended` one, else the
+ * first of the catalog — rounded to an integer, minimum 1 (so models cheaper
+ * than the reference read as 1, not 0). With a free reference (cost 0) every
+ * index is 1: there is nothing to compare against.
+ */
+export function costIndexes(catalog: ModelCatalog): Record<string, number> {
+  const out: Record<string, number> = {}
+  const reference = catalog.find((m) => m.recommended) ?? catalog[0]
+  const refCost = reference ? typicalMessageCost(reference) : 0
+  for (const m of catalog) {
+    out[m.id] = refCost > 0 ? Math.max(1, Math.round(typicalMessageCost(m) / refCost)) : 1
+  }
+  return out
 }
 
 /**
  * GET /models response: OpenAI list format (any OpenAI client still reads the
- * ids), with each entry carrying the catalog metadata. The desktop client
- * validates this body and caches it as the managed plan's catalog
+ * ids), with each entry carrying the catalog metadata the client needs
+ * (vision, recommended, relative cost — never the USD prices). The desktop
+ * client validates this body and caches it as the managed plan's catalog
  * (electron/ai/llm/managedCatalog.ts sanitizeManagedCatalog) — keep the field
  * names in sync with it.
  */
 export function modelsListBody(catalog: ModelCatalog): { object: 'list'; data: ModelsListEntry[] } {
+  const indexes = costIndexes(catalog)
   return {
     object: 'list',
     data: catalog.map((m) => ({
       id: m.id,
       object: 'model' as const,
-      quota_multiplier: m.quotaMultiplier,
       images: m.images,
+      recommended: m.recommended,
+      cost_index: indexes[m.id],
     })),
   }
 }
@@ -451,11 +666,12 @@ export function modelsListBody(catalog: ModelCatalog): { object: 'list'; data: M
  * knobs. Everything else is dropped, in particular:
  *   - models + route: alternate-model fallback routing — a permitted `model`
  *     plus `models: [<expensive ids>]` can force execution of models OUTSIDE
- *     the allowlist (and the quota is token-based, not cost-based).
+ *     the allowlist (whose prices the reservation knows nothing about).
  *   - provider / preset: provider routing preferences and saved presets.
  *   - plugins / web_search_options: extra-cost features (web search) billed on
  *     top of tokens to the operator's key.
- *   - reasoning: reasoning effort/budget — more (billed) completion tokens.
+ *   - reasoning: the client's reasoning effort/budget is dropped — the proxy
+ *     injects the catalog's own `reasoning_effort` instead (server-controlled).
  *   - n: several completions per request (n× the cost of one).
  *   - transforms, stream_options: OpenRouter/OpenAI knobs the proxy owns
  *     (usage accounting is forced below).
@@ -482,13 +698,25 @@ export const UPSTREAM_ALLOWED_FIELDS: readonly string[] = [
  * `usage: { include: true }` — an OpenRouter extension that appends the token
  * `usage` block (with the request's `cost`) to the last SSE chunk (and to
  * non-stream responses), so the proxy can meter without re-tokenizing
- * anything. The client object is never mutated.
+ * anything. With `model` (the catalog entry resolveRequestedModel picked) the
+ * body's `model` becomes that id — a retired alias is rewritten to its
+ * successor — and, when the entry has a reasoningEffort, `reasoning: { effort }`
+ * is injected (the only way reasoning reaches the upstream). The client object
+ * is never mutated. `messages` travel verbatim, so the `reasoning_details` the
+ * client re-sends on assistant tool-call turns reach OpenRouter intact.
  */
-export function buildUpstreamBody(clientBody: Record<string, unknown>): Record<string, unknown> {
+export function buildUpstreamBody(
+  clientBody: Record<string, unknown>,
+  model?: Pick<CatalogModel, 'id' | 'reasoningEffort'>
+): Record<string, unknown> {
   const body: Record<string, unknown> = {}
   for (const field of UPSTREAM_ALLOWED_FIELDS) {
     if (field === 'max_tokens') body.max_tokens = clampMaxTokens(clientBody.max_tokens)
     else if (Object.prototype.hasOwnProperty.call(clientBody, field)) body[field] = clientBody[field]
+  }
+  if (model) {
+    body.model = model.id
+    if (model.reasoningEffort) body.reasoning = { effort: model.reasoningEffort }
   }
   body.usage = { include: true }
   return body
@@ -499,8 +727,9 @@ export interface TokenUsage {
   tokensOut: number
   /**
    * What OpenRouter billed for the request (usage.cost / generation
-   * total_cost, in credits ≈ USD) — stored in usage_events.cost_usd for the
-   * operator's spend monitoring. Null when the upstream did not report it.
+   * total_cost, in credits ≈ USD) — stored in usage_events.cost_usd and, via
+   * computeCostUsd, charged against the monthly quota (quota_usd). Null when
+   * the upstream did not report it.
    */
   cost: number | null
 }

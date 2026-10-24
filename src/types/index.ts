@@ -202,14 +202,16 @@ export interface LlmPreset {
   editableBaseUrl: boolean
   suggestedModels: string[]
   images?: boolean // per-preset default for native image (vision) support; see providerCapabilities
-  // Per-model metadata, only on the managed `noteflow` preset: quota multiplier
-  // (pricier models burn the monthly quota faster) + native vision support.
+  // Per-model metadata, only on the managed `noteflow` preset: costIndex (how many
+  // times faster than the recommended model a typical message spends the monthly
+  // allowance — integer >= 1), native vision support and the recommended flag.
+  // MIRROR: ManagedModelMeta in electron/ai/llm/presets.ts.
   // Its mere presence also marks the preset as serving a CURATED catalog: the model
   // is picked from suggestedModels (read-only field, no free text) and main refuses
   // to store anything else — see electron/ai/llm/presets.ts and acceptsModel().
   // For `noteflow`, suggestedModels/modelMeta are the catalog main downloaded from the
   // proxy (or its backup constants) — see electron/ai/llm/managedCatalog.ts.
-  modelMeta?: Record<string, { quotaMultiplier: number; images: boolean }>
+  modelMeta?: Record<string, { costIndex: number; images: boolean; recommended?: boolean }>
 }
 
 // What attachments the active provider can ingest natively (no local processing)
@@ -594,7 +596,8 @@ declare global {
       aiLlmSetConfig: (patch: { active?: string; model?: string; baseUrl?: string; apiKey?: string; clearKey?: boolean }) => Promise<LlmConfigPublic>
       aiLlmListModels: () => Promise<{ ok: boolean; models: string[]; error?: string }>
       aiLlmTest: () => Promise<{ ok: boolean; error?: string }>
-      // NoteFlow AI managed plan: monthly consumption in weighted quota tokens (null on any failure)
+      // NoteFlow AI managed plan: monthly consumption (null on any failure). Abstract units —
+      // only used/limit (the share of the monthly allowance spent) is meaningful.
       aiLlmUsage: () => Promise<{ used: number; limit: number } | null>
       aiChatsLoad: () => Promise<ChatSession[]>
       aiChatsSave: (sessions: ChatSession[]) => Promise<{ ok: boolean; error?: string }>

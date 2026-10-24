@@ -16,54 +16,52 @@ export type LlmImpl = 'anthropic' | 'openai'
  * public.ai_models) and cached in settings.json — see ./managedCatalog.ts. These
  * constants are only used until a valid catalog has been downloaded once (fresh
  * install, never signed in, or a proxy too old to send the metadata), so they
- * must stay a sensible default: they mirror the seed of migration 0012 and the
+ * must stay a sensible default: they mirror the seed of migration 0013 and the
  * proxy's FALLBACK_MODEL_CATALOG (tests/supabase/ai-catalog-mirror.test.ts).
  * Adding a model does NOT happen here — it is a row in the table.
- * All are tool-calling capable (the chat is agentic); the two DeepSeek models and
- * Xiaomi MiMo are text-only, the rest accept images (see NOTEFLOW_AI_MODEL_META).
- * The first entry is the de-facto default model for the preset (suggestedModels[0])
- * — today a text-only one, so a fresh managed setup starts WITHOUT image support
- * until the user picks another model (providerCapabilities gates the attach UI).
+ * All are tool-calling capable (the chat is agentic) and accept images (see
+ * NOTEFLOW_AI_MODEL_META). The first entry is the de-facto default model for the
+ * preset (suggestedModels[0]) — the recommended one.
  */
 export const NOTEFLOW_AI_MODELS = [
-  // Standard models (×1 quota).
-  'deepseek/deepseek-v4-pro',
-  'deepseek/deepseek-v4-flash',
-  'xiaomi/mimo-v2.5-pro',
+  'deepseek/deepseek-v4.1-flash-1017',
   'openai/gpt-5.6-luna',
-  'anthropic/claude-haiku-4.5',
-  // Mid-tier (×2 quota).
-  'x-ai/grok-4.5',
-  // Advanced models (×6 quota).
-  'moonshotai/kimi-k3',
+  'anthropic/claude-haiku-5.5',
+  'xiaomi/mimo-v2.6-pro',
+  'openai/gpt-5.6-sol',
 ]
 
 /** Metadata of one model of the managed plan's catalog. */
 export interface ManagedModelMeta {
-  /** What a real token costs against the monthly quota (×1 = baseline). */
-  quotaMultiplier: number
+  /**
+   * How many times faster than the recommended model a typical message spends the
+   * monthly allowance (integer ≥ 1, computed by the proxy from its list prices —
+   * `cost_index` of GET /models). The picker shows "(≈N× quota)" from 2 up.
+   */
+  costIndex: number
   /** Native vision support. */
   images: boolean
+  /** Highlighted in the picker ("· Recommended"). */
+  recommended?: boolean
 }
 
 /**
  * Per-model metadata of the BACKUP catalog above (same role: only used until the
  * proxy's catalog has been cached — see ./managedCatalog.ts):
- *   - quotaMultiplier: what a real token costs against the monthly quota.
- *   - images: native vision support (the two DeepSeek models and Xiaomi MiMo
- *     are text-only — three of the five ×1 models).
+ *   - costIndex: relative cost of a typical message (what the proxy's
+ *     modelsListBody computes for the same catalog — the mirror test checks it).
+ *   - images: native vision support.
+ *   - recommended: the picker's highlighted model.
  * The effective catalog (cached or this one) reaches the renderer through the
- * preset's `modelMeta` field so the model picker can flag quota cost, and is used
- * by providerCapabilities (llm/index.ts) to gate image attachments per model.
+ * preset's `modelMeta` field so the model picker can flag cost, and is used by
+ * providerCapabilities (llm/index.ts) to gate image attachments per model.
  */
 export const NOTEFLOW_AI_MODEL_META: Record<string, ManagedModelMeta> = {
-  'deepseek/deepseek-v4-pro': { quotaMultiplier: 1, images: false },
-  'deepseek/deepseek-v4-flash': { quotaMultiplier: 1, images: false },
-  'xiaomi/mimo-v2.5-pro': { quotaMultiplier: 1, images: false },
-  'openai/gpt-5.6-luna': { quotaMultiplier: 1, images: true },
-  'anthropic/claude-haiku-4.5': { quotaMultiplier: 1, images: true },
-  'x-ai/grok-4.5': { quotaMultiplier: 2, images: true },
-  'moonshotai/kimi-k3': { quotaMultiplier: 6, images: true },
+  'deepseek/deepseek-v4.1-flash-1017': { costIndex: 1, images: true, recommended: true },
+  'openai/gpt-5.6-luna': { costIndex: 2, images: true, recommended: false },
+  'anthropic/claude-haiku-5.5': { costIndex: 1, images: true, recommended: false },
+  'xiaomi/mimo-v2.6-pro': { costIndex: 2, images: true, recommended: false },
+  'openai/gpt-5.6-sol': { costIndex: 29, images: true, recommended: false },
 }
 
 export interface LlmPreset {
@@ -81,8 +79,9 @@ export interface LlmPreset {
   // PDF stays anthropic-only (handled in providerCapabilities). For the managed `noteflow`
   // preset the vision capability is refined PER MODEL via modelMeta below.
   images?: boolean
-  // Per-model metadata (quota multiplier + vision), only set on the `noteflow` preset. The
-  // renderer uses it to flag "N× quota" models in the picker; providerCapabilities uses it
+  // Per-model metadata (relative cost + vision + recommended), only set on the `noteflow`
+  // preset. The renderer uses it to label the picker ("· Recommended", "(≈N× quota)");
+  // providerCapabilities uses it
   // to gate image attachments by the ACTIVE model. Its presence also marks the preset as
   // having a CURATED catalog (see effectiveModel in llm/index.ts). For `noteflow`, the
   // static value below is the backup catalog: llm/index.ts swaps in the catalog cached from

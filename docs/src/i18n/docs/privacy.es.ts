@@ -19,7 +19,7 @@ export const privacyEs: LegalContent = {
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Política de<br />privacidad',
-    tagline: 'Última actualización: 19 de octubre de 2026',
+    tagline: 'Última actualización: 24 de octubre de 2026',
   },
 
   summary: {
@@ -154,7 +154,7 @@ export const privacyEs: LegalContent = {
           t: 'ul',
           items: [
             'Tu mensaje de chat, junto con los extractos relevantes de tus notas recuperados <strong>localmente en tu dispositivo</strong>, se envían por TLS a nuestro proxy de IA, que los reenvía a <strong>OpenRouter</strong>, que los encamina al proveedor del modelo de IA que hayas elegido. Son <strong>exactamente los mismos datos</strong> que viajarían si usaras ese proveedor con tu propia clave de API.',
-            '<strong>No registramos ni almacenamos en nuestros servidores el contenido de tus prompts ni las respuestas del modelo.</strong> Lo único que anotamos por petición son datos de medición: tu ID de usuario, el modelo usado, el número de tokens y una marca de tiempo — necesarios para aplicar la cuota mensual de uso.',
+            '<strong>No registramos ni almacenamos en nuestros servidores el contenido de tus prompts ni las respuestas del modelo.</strong> Lo único que anotamos por petición son datos de medición: tu ID de usuario, el modelo usado, el número de tokens, el coste de la petición según OpenRouter, el ID de generación de OpenRouter y una marca de tiempo — necesarios para aplicar la asignación mensual de uso, que se mide por ese coste.',
             'OpenRouter y el proveedor del modelo subyacente tratan la petición bajo sus propias políticas de privacidad (<a href="https://openrouter.ai/privacy" target="_blank" rel="noopener">política de privacidad de OpenRouter</a>). Nuestra configuración de OpenRouter no se acoge a programas de registro de prompts ni de entrenamiento.',
             'Como siempre, las secciones «Hide from AI» y las notas cifradas nunca salen de tu dispositivo.',
             'NoteFlow AI es <strong>independiente de NoteFlow Cloud</strong>: usar el plan de IA no sube tus notas a nuestros servidores ni las almacena en ellos.',

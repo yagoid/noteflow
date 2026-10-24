@@ -2,7 +2,7 @@
 // (baseUrl http://localhost:11434/v1), LM Studio, OpenRouter, and any other server speaking
 // the /chat/completions + /models contract. Ollama exposes both endpoints under /v1.
 import type {
-  AgentMessage, AgentTurnOptions, AgentTurnResult, ChatOptions, LlmProvider, ResolvedLlmConfig, ToolCall,
+  AgentMessage, AgentTurnOptions, AgentTurnResult, ChatOptions, LlmProvider, ReasoningDetail, ResolvedLlmConfig, ToolCall,
 } from './types'
 
 function trimSlash(url: string): string {
@@ -19,6 +19,9 @@ interface OpenAiMessage {
   content: string | OpenAiContentPart[]
   tool_call_id?: string
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
+  // OpenRouter extension, only on assistant tool-call turns that streamed reasoning (see
+  // ReasoningDetail). Never set otherwise: strict OpenAI-compatible APIs reject unknown fields.
+  reasoning_details?: ReasoningDetail[]
 }
 
 function toOpenAiMessages(system: string | undefined, messages: AgentMessage[]): OpenAiMessage[] {
@@ -45,6 +48,7 @@ function toOpenAiMessages(system: string | undefined, messages: AgentMessage[]):
           id: tc.id, type: 'function', function: { name: tc.name, arguments: JSON.stringify(tc.input) },
         }))
       }
+      if (m.reasoningDetails?.length) msg.reasoning_details = m.reasoningDetails
       out.push(msg)
     } else {
       // each tool result becomes its own `tool` message keyed by the call id
@@ -52,6 +56,35 @@ function toOpenAiMessages(system: string | undefined, messages: AgentMessage[]):
     }
   }
   return out
+}
+
+/** String fields of a reasoning detail that arrive fragmented across SSE chunks. */
+const REASONING_TEXT_FIELDS = ['text', 'summary', 'data'] as const
+
+/**
+ * Merges streamed `delta.reasoning_details` fragments into whole details, keyed by
+ * their `index` (a fragment without one continues detail 0): the text-like fields
+ * (`text`, `summary`, `data`) are concatenated, every other field (type, id, format,
+ * signature…) keeps its latest non-empty value. Non-object fragments are ignored.
+ */
+export function accumulateReasoningDetails(acc: Map<number, ReasoningDetail>, fragments: unknown): void {
+  if (!Array.isArray(fragments)) return
+  for (const frag of fragments) {
+    if (frag === null || typeof frag !== 'object' || Array.isArray(frag)) continue
+    const f = frag as Record<string, unknown>
+    const index = typeof f.index === 'number' && Number.isInteger(f.index) ? f.index : 0
+    const cur: ReasoningDetail = acc.get(index) ?? {}
+    for (const [key, value] of Object.entries(f)) {
+      if (value === undefined || value === null || value === '') continue
+      const prev = cur[key]
+      if ((REASONING_TEXT_FIELDS as readonly string[]).includes(key) && typeof value === 'string' && typeof prev === 'string') {
+        cur[key] = prev + value
+      } else {
+        cur[key] = value
+      }
+    }
+    acc.set(index, cur)
+  }
 }
 
 function safeParseArgs(args: string): Record<string, unknown> {
@@ -138,6 +171,8 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     let text = ''
     // tool_calls arrive fragmented across SSE chunks; accumulate by their array index.
     const accum = new Map<number, { id: string; name: string; args: string }>()
+    // Same for OpenRouter's reasoning_details (only gateways with reasoning send them).
+    const reasoning = new Map<number, ReasoningDetail>()
 
     // Returns true on the terminating [DONE] frame; a failure reported mid-stream throws.
     const drain = (data: string): boolean => {
@@ -148,6 +183,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
           delta?: {
             content?: string
             tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>
+            reasoning_details?: unknown
           }
         }>
       }
@@ -163,6 +199,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       if (json.error) throw new Error(`Stream error — ${describeStreamError(json.error)}`)
       const delta = json.choices?.[0]?.delta
       if (delta?.content) { text += delta.content; onDelta(delta.content) }
+      if (delta?.reasoning_details) accumulateReasoningDetails(reasoning, delta.reasoning_details)
       for (const tc of delta?.tool_calls ?? []) {
         const cur = accum.get(tc.index) ?? { id: '', name: '', args: '' }
         if (tc.id) cur.id = tc.id
@@ -196,7 +233,8 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       .sort((a, b) => a[0] - b[0])
       .filter(([, v]) => v.name)
       .map(([i, v]) => ({ id: v.id || `call_${i}`, name: v.name, input: safeParseArgs(v.args) }))
-    return { text, toolCalls }
+    const reasoningDetails = [...reasoning.entries()].sort((a, b) => a[0] - b[0]).map(([, d]) => d)
+    return reasoningDetails.length ? { text, toolCalls, reasoningDetails } : { text, toolCalls }
   }
 
   async listModels(): Promise<string[]> {

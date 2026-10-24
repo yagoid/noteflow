@@ -101,14 +101,15 @@ export const aiPanel: Messages['aiPanel'] = {
     noteflowCard: {
       subtitle: 'Plan gestionado — chatea con tus notas sin ninguna clave API.',
       useButton: 'Usar NoteFlow AI',
-      usage: '{used} / {limit} tokens este mes',
+      usage: 'Has usado el {percent}% de la asignación de IA de este mes',
     },
     byoCard: {
       title: 'Tu proveedor / IA local',
       subtitle: 'OpenAI, Anthropic, OpenRouter… con tu propia clave API, o un modelo local (Ollama).',
       useButton: 'Usar este proveedor',
     },
-    modelQuotaSuffix: '({mult}× cuota)',
+    modelQuotaSuffix: '(≈{mult}× cuota)',
+    modelRecommended: 'Recomendado',
     baseUrl: 'URL base',
     apiKey: 'Clave API',
     keySaved: 'Clave guardada',

@@ -102,10 +102,28 @@ export interface ToolResult {
   isError?: boolean
 }
 
+/**
+ * Opaque reasoning blocks of an OpenAI-compatible gateway (OpenRouter's
+ * `reasoning_details`: reasoning.text / reasoning.summary / reasoning.encrypted, with
+ * provider signatures). Never inspected — only collected from the stream and sent back.
+ */
+export type ReasoningDetail = Record<string, unknown>
+
 /** Internal multi-turn message model that carries tool turns across providers. */
 export type AgentMessage =
   | { role: 'user'; content: string; attachments?: Attachment[] }
-  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | {
+      role: 'assistant'
+      content: string
+      toolCalls?: ToolCall[]
+      /**
+       * Reasoning the model produced in the turn that made these tool calls, re-sent
+       * verbatim when the turn is fed back (OpenAI-compatible provider only; set only
+       * when the stream carried some). With reasoning + tools, OpenRouter recommends —
+       * and some providers (DeepSeek / Anthropic thinking) require — getting it back.
+       */
+      reasoningDetails?: ReasoningDetail[]
+    }
   | { role: 'tool'; results: ToolResult[] }
 
 export interface AgentTurnOptions {
@@ -121,6 +139,8 @@ export interface AgentTurnResult {
   text: string
   /** Tools the model asked to run; empty array means the turn is final. */
   toolCalls: ToolCall[]
+  /** `reasoning_details` accumulated from the stream — present only when non-empty. */
+  reasoningDetails?: ReasoningDetail[]
 }
 
 export interface LlmProvider {

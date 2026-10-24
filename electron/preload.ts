@@ -400,7 +400,7 @@ const api = {
     ipcRenderer.invoke('ai:llm-set-config', patch),
   aiLlmListModels: () => ipcRenderer.invoke('ai:llm-list-models'),
   aiLlmTest: () => ipcRenderer.invoke('ai:llm-test'),
-  // NoteFlow AI managed plan: monthly consumption (weighted quota tokens).
+  // NoteFlow AI managed plan: monthly consumption (abstract units: only used/limit matters).
   // Null on any failure — the UI just hides the usage bar.
   aiLlmUsage: (): Promise<{ used: number; limit: number } | null> => ipcRenderer.invoke('ai:llm-usage'),
   aiChatsLoad: () => ipcRenderer.invoke('ai:chats-load'),

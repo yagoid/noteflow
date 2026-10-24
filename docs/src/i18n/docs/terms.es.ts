@@ -12,7 +12,7 @@ export const termsEs: LegalContent = {
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Términos<br />del servicio',
-    tagline: 'Última actualización: 19 de octubre de 2026',
+    tagline: 'Última actualización: 24 de octubre de 2026',
   },
 
   summary: {
@@ -99,7 +99,7 @@ export const termsEs: LegalContent = {
         {
           t: 'ul',
           items: [
-            'El plan incluye una <strong>cuota mensual de uso medida en tokens</strong> (actualmente 3 millones de tokens al mes). La cuota no usada no se acumula al mes siguiente. Podemos ajustar la cuota o la lista de modelos disponibles con el tiempo; las reducciones sustanciales se anunciarán con antelación.',
+            'El plan incluye una <strong>asignación mensual de uso medida por el coste de cómputo de cada petición</strong>, de modo que se agota antes con los modelos más avanzados y las conversaciones más largas. La asignación no usada no se acumula al mes siguiente. Podemos ajustar la asignación o la lista de modelos disponibles con el tiempo; las reducciones sustanciales se anunciarán con antelación.',
             'Las peticiones se encaminan a modelos de IA de terceros. <strong>Lo que genera la IA lo generan esos modelos y puede ser inexacto, incompleto o inapropiado — verifícalo antes de confiar en ello.</strong> Eres responsable del uso que hagas de esos resultados.',
             'Uso justo y aceptable: no puedes usar el servicio para contenido o actividades ilegales, para dañar a otros, para intentar eludir las cuotas, las restricciones de modelos o la autenticación, ni para acceder al proxy fuera de la app. También aplican las políticas de uso aceptable de los proveedores de modelos subyacentes.',
             'Conservas los derechos que tengas sobre tus prompts y, en la medida en que lo permitan los proveedores subyacentes, sobre los resultados.',

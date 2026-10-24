@@ -113,18 +113,21 @@ export const aiPanel = {
     noteflowCard: {
       subtitle: 'Managed plan — chat with your notes without any API key.',
       useButton: 'Use NoteFlow AI',
-      // Monthly consumption line under the progress bar; {used}/{limit} come
-      // pre-abbreviated (e.g. "1.2M", "3M").
-      usage: '{used} / {limit} tokens this month',
+      // Monthly consumption line under the progress bar. The allowance is measured by
+      // the real cost of each request, so only a percentage is shown ({percent}: 0-100).
+      usage: '{percent}% of this month’s AI allowance used',
     },
     byoCard: {
       title: 'Your provider / local AI',
       subtitle: 'OpenAI, Anthropic, OpenRouter… with your own API key, or a local model (Ollama).',
       useButton: 'Use this provider',
     },
-    // Suffix appended to model options that burn the monthly quota faster
-    // (e.g. "grok-4.5 (2× quota)", "kimi-k3 (6× quota)").
-    modelQuotaSuffix: '({mult}× quota)',
+    // Suffix appended to model options that spend the monthly allowance faster than the
+    // recommended model ({mult} = rounded relative cost of a typical message, shown from 2;
+    // e.g. "gpt-5.6-sol (≈29× quota)").
+    modelQuotaSuffix: '(≈{mult}× quota)',
+    // Appended to the recommended model's option ("deepseek-v4.1-flash-1017 · Recommended").
+    modelRecommended: 'Recommended',
     baseUrl: 'Base URL',
     apiKey: 'API key',
     keySaved: 'Key saved',
