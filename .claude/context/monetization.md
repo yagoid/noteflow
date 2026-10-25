@@ -270,8 +270,8 @@ es **un preset más**, no una implementación nueva.
   inválido → default; `AI_MONTHLY_TOKENS` ya no se lee), `AI_ALLOWED_MODELS` (opcional:
   **restricción de emergencia** del catálogo — ver "Catálogo de modelos en BD") y `AI_MAX_INFLIGHT`
   (default 3).
-- **Catálogo de modelos en BD (migraciones 0012 + 0013; código listo, migraciones + redeploy
-  pendientes del operador):** el catálogo del plan es la tabla `public.ai_models` (`id` text PK,
+- **Catálogo de modelos en BD (migraciones 0012 + 0013; desplegado el 2026-10-24 con `ai-proxy`
+  v11):** el catálogo del plan es la tabla `public.ai_models` (`id` text PK,
   `images` **sin default**, `enabled`, `sort_order`, `created_at`; de la 0013: `price_in_usd` /
   `price_out_usd` — precio de **lista** de OpenRouter en USD por 1M tokens, ≥ 0 —,
   `reasoning_effort` — `none|minimal|low|medium|high` o null —, `recommended` y `replaced_by` — FK
@@ -307,8 +307,8 @@ es **un preset más**, no una implementación nueva.
   sucesor quede fuera por la restricción **no** se resuelve. Con la tabla, la forma normal de
   retirar un modelo es `enabled = false`; la variable queda como palanca sin BD.
 - **Coste acotado — reserva + concurrencia + topes (migración 0009, pasada a USD en la 0013;
-  desplegado con la 0009 el 2026-10-21 — la versión en USD está pendiente, ver "Cuota por coste
-  real"):** antes, la cuota se comprobaba
+  desplegado con la 0009 el 2026-10-21; la versión en USD, con la 0013 el 2026-10-24, ver "Cuota
+  por coste real"):** antes, la cuota se comprobaba
   (`used >= limit`) y el consumo solo se insertaba al terminar el stream, así que (a) cientos de
   peticiones en paralelo con `max_tokens` enorme pasaban todas el check, y (b) una petición que
   supera el wall clock de la Edge Function (150-400 s) moría antes del chunk de `usage` y no se
@@ -383,8 +383,7 @@ es **un preset más**, no una implementación nueva.
     `context_length_exceeded`, `upstream_error` ni `image_too_large` (solo
     `monthly_quota_exceeded` y la heurística de imágenes). Pendiente: limitar/reescalar las imágenes
     en el cliente para el preset `noteflow` y mapear esos códigos a mensajes i18n.
-- **Cuota por coste real (migración 0013; código listo, migración + redeploy pendientes del
-  operador):** la cuota mensual es un **presupuesto de coste real en USD por usuario**
+- **Cuota por coste real (migración 0013; desplegada el 2026-10-24 con `ai-proxy` v11):** la cuota mensual es un **presupuesto de coste real en USD por usuario**
   (`AI_MONTHLY_BUDGET_USD`, default **$2**; `parseMonthlyBudgetUsd`). Cada petición descuenta lo que
   OpenRouter cobró por ella (`usage.cost`), que **ya incluye** los tokens de razonamiento, los
   descuentos de caché y las tarifas punta — así el modo razonamiento queda contabilizado exacto. Un
@@ -434,7 +433,8 @@ es **un preset más**, no una implementación nueva.
     venir de que la estimación se quede corta frente al coste real (tarifa punta ×2 de DeepSeek,
     recargos de contexto largo, texto CJK que bytes/4 subestima…) y está acotado por **peticiones
     en vuelo (≤ `AI_MAX_INFLIGHT`) × error de estimación** de cada una.
-  - **Despliegue (pendiente del operador), en este orden y seguido:** (1) aplicar
+  - **Despliegue (hecho el 2026-10-24; se documenta el orden por si hay que repetirlo), en este
+    orden y seguido:** (1) aplicar
     `0013_ai_cost_quota.sql`; (2) **justo después** `supabase functions deploy ai-proxy`; (3)
     opcional `supabase secrets set AI_MONTHLY_BUDGET_USD=…` (sin ella, $2). La función **nueva** sin
     la migración respondería 500 a todo chat (llama a `reserve_ai_cost` y lee columnas nuevas). La
@@ -587,9 +587,10 @@ es **un preset más**, no una implementación nueva.
   key guardada) y solo cae a `'anthropic'` si no hay ninguno.
 - **Cuota ponderada (0007) desplegada** en su día con el endpoint `/usage`; la **sustituye** la cuota
   por coste de la 0013 (arriba).
-- **Catálogo en BD (0012) + cuota por coste (0013) — pendiente del operador:** aplicar
-  `0012_ai_models.sql` (si no se aplicó ya) y `0013_ai_cost_quota.sql`, y **justo después**
-  redesplegar `ai-proxy` (la 0013 sí tiene orden — ver "Cuota por coste real" → Despliegue).
+- **Catálogo en BD (0012) + cuota por coste (0013) desplegados (2026-10-24):** migraciones 0012 +
+  0013 aplicadas y `ai-proxy` v11 desplegado (código idéntico al repo, verificado 2026-10-25 con
+  `supabase migration list` / `functions download`). Sin el secreto `AI_MONTHLY_BUDGET_USD`, así
+  que rige el default de **$2**/usuario/mes.
 - **Endurecimiento desplegado (2026-10-21):** migraciones 0009 + 0010 + 0011 aplicadas,
   `ai-proxy` v9 y `billing-webhook` v6 desplegados (código idéntico al repo, verificado), permisos
   de las RPC nuevas comprobados. El webhook de **live** de LS escucha además
@@ -692,16 +693,14 @@ diferencial de privacidad, no como peaje.
 > que se habían aplicado por SQL Editor): a partir de ahora `supabase db push` funciona directo.
 > **Cursor por `seq` (migración `0008_cloud_seq.sql`):** el pull incremental ya no usa
 > `updated_at` como cursor sino un número de cambio asignado por el servidor (ver "Modelo de datos"
-> y "Pull incremental" abajo) — **pendiente del operador: aplicarla al proyecto real**
-> (`supabase db push`). ⚠️ **Orden de despliegue: aplicar la 0008 ANTES de publicar la
-> versión de la app/CLI que la usa** — un cliente nuevo contra un servidor sin la columna recibe 400
+> y "Pull incremental" abajo) — **aplicada al proyecto real** (verificado 2026-10-25).
+> ⚠️ **Orden de despliegue: aplicar la 0008 ANTES de publicar la versión de la app/CLI que la usa** — un cliente nuevo contra un servidor sin la columna recibe 400
 > en el pull (error visible, sin pérdida de datos); la 0008 es aditiva y los clientes viejos siguen
 > funcionando con ella.
 > **Subidas condicionadas (migración `0011_cloud_conditional_upsert.sql`):** RPC
-> `cloud_upsert_file` para las filas de nota (ver "Subidas condicionadas" abajo) — **pendiente del
-> operador: aplicarla al proyecto real** (`supabase db push`; `--include-all` si la 0009/0010 de
-> otra rama se aplican después). Solo depende de la 0004 y la 0008. ⚠️ Aplicarla **antes** de
-> publicar el cliente que la usa; sin ella el cliente cae al upsert ciego de siempre (sin regresión,
+> `cloud_upsert_file` para las filas de nota (ver "Subidas condicionadas" abajo) — **aplicada al
+> proyecto real** (verificado 2026-10-25). Solo depende de la 0004 y la 0008.
+> ⚠️ Aplicarla **antes** de publicar el cliente que la usa; sin ella el cliente cae al upsert ciego de siempre (sin regresión,
 > pero sin la protección).
 > La suscripción manual de pruebas de Cloud que hubo aquí ya no existe (comprobado 2026-10-19).
 > ⚠️ La única fila `provider='manual'` es la **comp permanente del operador**
