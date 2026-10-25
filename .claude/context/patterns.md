@@ -1357,7 +1357,8 @@ TitleBar), y luego instala **sin depender de popups del SO**:
 > desde 2.0.0 = KNOWN BROKEN, como se esperaba. **En CI** (run 40220133234, AppImage montado con FUSE)
 > el escenario B del AppImage **falló**: el fichero se reemplazó bien (sha256 del target) pero NoteFlow
 > no se relanzaba (el `app.relaunch` de entonces; ver el bullet AppImage arriba). Corregido con el
-> helper `/bin/sh`; **pendiente de re-ejecutar** el workflow para confirmarlo en FUSE. (Ninguna
+> helper `/bin/sh`, **confirmado en CI** (run 40223589595, 2026-10-25: Windows, AppImage montado y
+> `.deb` en verde en ambos escenarios; AppImage desde 2.0.0 = KNOWN BROKEN). (Ninguna
 > versión publicada lleva el reemplazo en sitio con el relanzamiento roto: la última, v2.0.0, ya es
 > KNOWN BROKEN en AppImage por otro motivo.)
 > El `.deb` (`app.relaunch()` sin `execPath`, binario en `/opt`) **sí relanzó** en esa ejecución de CI. macOS (dmg en Apple Silicon

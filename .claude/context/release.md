@@ -217,7 +217,7 @@ exit 2 si la app no ve `APPIMAGE`/`APPDIR` (la semántica que exige `isRunningFr
 ejecutan los usuarios, y como corre en CI con `libfuse2`). El `app.relaunch({execPath})` original
 relanzaba bien extraído (WSL) pero **no** montado —el escenario B del AppImage falló así en el run de CI
 40220133234—; ahora relanza un `/bin/sh` desacoplado (ver `patterns.md` § "Auto-update in-app").
-Pendiente de re-ejecutar el workflow para confirmarlo. El `sh` de espera **no** cuenta como relanzamiento
+Confirmado en CI (run 40223589595, todo en verde). El `sh` de espera **no** cuenta como relanzamiento
 (`waitForLinuxRelaunch` descarta shells y exige que la app siga viva a los 5 s); como mucho cuenta el
 demonio FUSE del AppImage nuevo, que sale solo si Electron se cae al arrancar.
 
