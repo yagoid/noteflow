@@ -52,6 +52,9 @@ import {
   isAllowedUpdateAssetPath,
   updateAssetKind,
   isRunningFromOwnAppImage,
+  appImageRelaunchSpawnArgs,
+  sanitizeAppImageEnv,
+  appImageRelaunchCwd,
   buildUpdateCheckResult,
   UPDATE_CHECK_FAILED,
   type UpdateCheckResult,
@@ -1534,7 +1537,41 @@ ipcMain.handle('app:open-url', (_event, rawUrl: string) => {
   })
 })
 
-// E2E COUPLING: see app:check-update — scripts/update-e2e.cjs intercepts this net.fetch.
+/**
+ * Starts the (already replaced) AppImage once this process has exited. Not
+ * app.relaunch(): Electron's Linux relauncher is /proc/self/exe inside the OLD FUSE
+ * mount, which the AppImage runtime unmounts when we exit — the helper dies before it
+ * starts the new AppImage. A detached /bin/sh outside the mount waits for our pid and
+ * execs it instead (details and the pure argv/env builders in updateAsset.ts). If the
+ * shell can't be started, fall back to app.relaunch(), which still works when the
+ * AppImage runs extracted (APPIMAGE_EXTRACT_AND_RUN=1).
+ */
+function relaunchAppImageAfterExit(appImagePath: string): void {
+  const fallback = (err: unknown) => {
+    console.error('AppImage relaunch helper failed, falling back to app.relaunch:', err)
+    app.relaunch({ execPath: appImagePath })
+  }
+  try {
+    const appDir = process.env.APPDIR
+    const { command, args } = appImageRelaunchSpawnArgs(process.pid, appImagePath)
+    const helper = spawn(command, args, {
+      detached: true,
+      stdio: 'ignore',
+      env: sanitizeAppImageEnv(process.env, appDir),
+      cwd: appImageRelaunchCwd(process.cwd(), appDir, os.homedir()),
+    })
+    // Spawn failures (ENOENT /bin/sh, bad cwd) arrive async, before the quit completes.
+    helper.on('error', fallback)
+    helper.unref()
+  } catch (err) {
+    fallback(err)
+  }
+}
+
+// E2E COUPLING: see app:check-update — scripts/update-e2e.cjs intercepts this net.fetch,
+// and detects the AppImage relaunch by its temp work dir in a new process's argv or
+// environ: the relaunch helper must keep passing the AppImage path (under that dir) and
+// unrelated env vars such as NOTEFLOW_NOTES_DIR (sanitizeAppImageEnv keeps them).
 ipcMain.handle('app:download-and-install', async (_event, url: string) => {
   try {
     const initialUrl = parseHttpsUrl(url)
@@ -1629,7 +1666,7 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
             fs.copyFileSync(dest, tmpTarget)
             fs.chmodSync(tmpTarget, 0o755)
             fs.renameSync(tmpTarget, appImagePath)
-            app.relaunch({ execPath: appImagePath })
+            relaunchAppImageAfterExit(appImagePath)
             app.quit()
           } catch (err) {
             console.error('AppImage in-place update failed, opening file:', err)

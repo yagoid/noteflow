@@ -1478,7 +1478,41 @@ electron_1.ipcMain.handle('app:open-url', (_event, rawUrl) => {
         console.error('Failed to open external URL:', err);
     });
 });
-// E2E COUPLING: see app:check-update — scripts/update-e2e.cjs intercepts this net.fetch.
+/**
+ * Starts the (already replaced) AppImage once this process has exited. Not
+ * app.relaunch(): Electron's Linux relauncher is /proc/self/exe inside the OLD FUSE
+ * mount, which the AppImage runtime unmounts when we exit — the helper dies before it
+ * starts the new AppImage. A detached /bin/sh outside the mount waits for our pid and
+ * execs it instead (details and the pure argv/env builders in updateAsset.ts). If the
+ * shell can't be started, fall back to app.relaunch(), which still works when the
+ * AppImage runs extracted (APPIMAGE_EXTRACT_AND_RUN=1).
+ */
+function relaunchAppImageAfterExit(appImagePath) {
+    const fallback = (err) => {
+        console.error('AppImage relaunch helper failed, falling back to app.relaunch:', err);
+        electron_1.app.relaunch({ execPath: appImagePath });
+    };
+    try {
+        const appDir = process.env.APPDIR;
+        const { command, args } = (0, updateAsset_1.appImageRelaunchSpawnArgs)(process.pid, appImagePath);
+        const helper = (0, child_process_1.spawn)(command, args, {
+            detached: true,
+            stdio: 'ignore',
+            env: (0, updateAsset_1.sanitizeAppImageEnv)(process.env, appDir),
+            cwd: (0, updateAsset_1.appImageRelaunchCwd)(process.cwd(), appDir, os_1.default.homedir()),
+        });
+        // Spawn failures (ENOENT /bin/sh, bad cwd) arrive async, before the quit completes.
+        helper.on('error', fallback);
+        helper.unref();
+    }
+    catch (err) {
+        fallback(err);
+    }
+}
+// E2E COUPLING: see app:check-update — scripts/update-e2e.cjs intercepts this net.fetch,
+// and detects the AppImage relaunch by its temp work dir in a new process's argv or
+// environ: the relaunch helper must keep passing the AppImage path (under that dir) and
+// unrelated env vars such as NOTEFLOW_NOTES_DIR (sanitizeAppImageEnv keeps them).
 electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
     try {
         const initialUrl = parseHttpsUrl(url);
@@ -1563,7 +1597,7 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
                         fs_1.default.copyFileSync(dest, tmpTarget);
                         fs_1.default.chmodSync(tmpTarget, 0o755);
                         fs_1.default.renameSync(tmpTarget, appImagePath);
-                        electron_1.app.relaunch({ execPath: appImagePath });
+                        relaunchAppImageAfterExit(appImagePath);
                         electron_1.app.quit();
                     }
                     catch (err) {

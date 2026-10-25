@@ -1322,10 +1322,26 @@ TitleBar), y luego instala **sin depender de popups del SO**:
   está; al instalar hace `app.relaunch()` + `app.quit()`. (La rama pacman se eliminó: nunca se ha
   publicado un `.pkg.tar.zst`.) Cualquier otra extensión en Linux → `shell.openPath`.
 - **AppImage:** reemplazo en sitio — copia al dir de `$APPIMAGE`, `chmod +x`, **rename atómico**
-  sobre el original (no sobreescribe el inodo en uso → no corrompe el proceso vivo) +
-  `app.relaunch({execPath})` + `quit()`. Solo si `isRunningFromOwnAppImage` (misma guarda que el
-  check): si no — dev, `.deb` lanzado desde otro AppImage con `$APPIMAGE` heredado, empaquetado raro —
-  cae a `shell.openPath` en vez de renombrar NoteFlow encima del fichero de otra app.
+  sobre el original (no sobreescribe el inodo en uso → no corrompe el proceso vivo) + relanzamiento
+  con un **`/bin/sh` desacoplado** (`relaunchAppImageAfterExit` en `main.ts`) + `quit()`. Solo si
+  `isRunningFromOwnAppImage` (misma guarda que el check): si no — dev, `.deb` lanzado desde otro
+  AppImage con `$APPIMAGE` heredado, empaquetado raro — cae a `shell.openPath` en vez de renombrar
+  NoteFlow encima del fichero de otra app.
+  **Por qué no `app.relaunch({execPath})`:** en Linux Electron relanza mediante un helper que es
+  `/proc/self/exe`, es decir, el binario **dentro del montaje FUSE del AppImage viejo**
+  (`/tmp/.mount_XXX`); al salir la app el runtime del AppImage desmonta eso y el helper muere antes de
+  arrancar el nuevo (visto en CI, ubuntu-latest con FUSE: nunca relanzaba). Con
+  `APPIMAGE_EXTRACT_AND_RUN=1` el dir extraído sobrevive y sí funcionaba, por eso no se vio en WSL. El
+  `sh` vive fuera del montaje: espera (`kill -0` cada 0,2 s, tope ~30 s por si el pid se atasca o se
+  reutiliza) a que el pid del main haya muerto —para que la nueva instancia no pierda
+  `requestSingleInstanceLock()` contra la moribunda— y hace `exec` del AppImage nuevo, sin args. El pid y
+  la ruta van como `$1`/`$2` (nunca interpolados en el script). Entorno: se quitan
+  `APPIMAGE`/`APPDIR`/`ARGV0`/`OWD` y, en cualquier variable `:`-separada, las entradas bajo el `$APPDIR`
+  viejo (`PATH`, `LD_LIBRARY_PATH`, `XDG_DATA_DIRS`, `GSETTINGS_SCHEMA_DIR`…; si queda vacía se
+  elimina); el resto intacto (`NOTEFLOW_NOTES_DIR`…). El cwd del helper sale del montaje si estaba
+  dentro (→ home). Constructores puros y testeados en `updateAsset.ts` (`appImageRelaunchSpawnArgs`,
+  `sanitizeAppImageEnv`, `appImageRelaunchCwd`). Si el `spawn` falla (síncrono o evento `error`) se
+  recurre a `app.relaunch({execPath})` y se loguea.
 - **macOS:** la build **no está notarizada**, así que no se usa Squirrel.Mac. Se hace
   `shell.openPath(dest)` para **abrir el `.dmg` en Finder** + una `Notification` "Drag NoteFlow to
   Applications"; el usuario arrastra a Applications y relanza a mano (la app NO sale). Reemplazo
@@ -1337,8 +1353,14 @@ TitleBar), y luego instala **sin depender de popups del SO**:
 > Uso, escenarios y tabla KNOWN BROKEN: `release.md` § "Test E2E del updater". El contrato
 > nombres-de-asset ↔ config de electron-builder también está en `tests/electron/updateAsset.test.ts`.
 > **Verificado en runtime (2026-10-25, en local):** Windows 2.0.0→2.1.0 y 2.1.0→2.1.0-e2e.1, y
-> AppImage (WSL) 2.1.0→2.1.0-e2e.1, en verde; AppImage desde 2.0.0 = KNOWN BROKEN, como se esperaba.
-> El `.deb` queda **pendiente de una ejecución en CI** (necesita sudo). macOS (dmg en Apple Silicon
+> AppImage (WSL, **extraído** con `APPIMAGE_EXTRACT_AND_RUN=1`) 2.1.0→2.1.0-e2e.1, en verde; AppImage
+> desde 2.0.0 = KNOWN BROKEN, como se esperaba. **En CI** (run 40220133234, AppImage montado con FUSE)
+> el escenario B del AppImage **falló**: el fichero se reemplazó bien (sha256 del target) pero NoteFlow
+> no se relanzaba (el `app.relaunch` de entonces; ver el bullet AppImage arriba). Corregido con el
+> helper `/bin/sh`; **pendiente de re-ejecutar** el workflow para confirmarlo en FUSE. (Ninguna
+> versión publicada lleva el reemplazo en sitio con el relanzamiento roto: la última, v2.0.0, ya es
+> KNOWN BROKEN en AppImage por otro motivo.)
+> El `.deb` (`app.relaunch()` sin `execPath`, binario en `/opt`) **sí relanzó** en esa ejecución de CI. macOS (dmg en Apple Silicon
 > real) sigue **sin probar en runtime** (sin Mac) — ver el bloque de soporte macOS más abajo.
 
 > **v2.0.0 y anteriores** construían mal la URL en AppImage (`-x86_64`) y en Arch (`.pkg.tar.zst`

@@ -379,6 +379,28 @@ function linuxPids(marker) {
   return out
 }
 
+const SHELLS = new Set(['sh', 'dash', 'bash', 'busybox', 'sudo', 'pkexec'])
+
+/** New (post-click) pids of this run that are the app itself, not a waiting shell/helper. */
+function linuxRelaunchedApp(ctx) {
+  return linuxPids(ctx.marker).filter((p) => {
+    if (ctx.preClickPids.has(p)) return false
+    try { return !SHELLS.has(path.basename(fs.readlinkSync(`/proc/${p}/exe`))) } catch { return false }
+  })
+}
+
+/**
+ * The relaunch counts only if an app process (not the relaunch helper shell) shows up
+ * AND is still alive a few seconds later — a new AppImage that crashes on start fails.
+ */
+async function waitForLinuxRelaunch(ctx) {
+  const seen = await waitFor(() => linuxRelaunchedApp(ctx).length > 0, { timeoutMs: 60000, label: 'relaunch' })
+  if (!seen) return null
+  await sleep(5000)
+  const alive = linuxRelaunchedApp(ctx)
+  return alive.length ? alive : null
+}
+
 async function linuxKill(marker) {
   const found = linuxPids(marker)
   if (!found.length) return 0
@@ -564,7 +586,9 @@ async function runScenario(opts) {
   const result = { outcome: null, kind, from: opts.from, to: opts.to, oldVersion: null, targetVersion: null, feedLog: [], reason: null }
   // Linux: every process of this run carries the unique work dir in its argv or its
   // environment (NOTEFLOW_NOTES_DIR, APPIMAGE). The environment matters: the AppImage
-  // updater relaunches with app.relaunch({ execPath }), which drops argv but keeps env.
+  // updater relaunches via a detached /bin/sh that execs the AppImage path (under the
+  // work dir) with no other args, dropping APPIMAGE/APPDIR but keeping NOTEFLOW_NOTES_DIR
+  // (main.ts relaunchAppImageAfterExit; older builds used app.relaunch({ execPath })).
   const ctx = {
     apps: [], workDir, preexisting: null, installed: false, exe: null,
     marker: workDir, preClickPids: new Set(),
@@ -796,20 +820,18 @@ async function runScenario(opts) {
       }, { timeoutMs: 3 * 60 * 1000, intervalMs: 2000, label: 'AppImage replaced in place' })
       if (!ok) throw new TestFailure(`${ctx.exe} was not replaced by the target AppImage (sha256 differs)`)
       log(`${path.basename(ctx.exe)} now has the target's sha256 ${targetSha.slice(0, 16)}…`)
-      const relaunched = await waitFor(() => linuxPids(ctx.marker).some((p) => !ctx.preClickPids.has(p)), { timeoutMs: 60000, label: 'relaunch' })
-      if (!relaunched) throw new TestFailure('AppImage replaced but NoteFlow was not relaunched')
-      await sleep(3000)
-      log(`relaunched; killed ${await linuxKill(ctx.marker)} process(es)`)
+      const relaunched = await waitForLinuxRelaunch(ctx)
+      if (!relaunched) throw new TestFailure('AppImage replaced but NoteFlow was not relaunched (or did not stay up)')
+      log(`relaunched (pid ${relaunched.join(', ')}); killed ${await linuxKill(ctx.marker)} process(es)`)
     } else {
       const want = debVersion(target.version)
       const ok = await waitFor(() => run('dpkg-query', ['-W', '-f=${Version}', 'noteflow']).stdout === want,
         { timeoutMs: 3 * 60 * 1000, intervalMs: 2000, label: `dpkg noteflow ${want}` })
       if (!ok) throw new TestFailure(`dpkg says noteflow ${run('dpkg-query', ['-W', '-f=${Version}', 'noteflow']).stdout}, expected ${want}`)
       log(`dpkg: noteflow ${want} installed`)
-      const relaunched = await waitFor(() => linuxPids(ctx.marker).some((p) => !ctx.preClickPids.has(p)), { timeoutMs: 60000, label: 'relaunch' })
-      if (!relaunched) throw new TestFailure('package upgraded but NoteFlow was not relaunched (app.relaunch)')
-      await sleep(3000)
-      log(`relaunched; killed ${await linuxKill(ctx.marker)} process(es)`)
+      const relaunched = await waitForLinuxRelaunch(ctx)
+      if (!relaunched) throw new TestFailure('package upgraded but NoteFlow was not relaunched (app.relaunch) or did not stay up')
+      log(`relaunched (pid ${relaunched.join(', ')}); killed ${await linuxKill(ctx.marker)} process(es)`)
     }
 
     // ── Relaunch target ─────────────────────────────────────────────────────

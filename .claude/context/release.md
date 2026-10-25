@@ -168,7 +168,8 @@ si no 404), recarga, pulsa el botón (localizado por `title` acabado en ` v<targ
 del idioma) y deja que el **código de la versión vieja** descargue e instale. Verifica: Windows →
 versión de `resources/app.asar` instalado = target + relanzamiento por `--force-run`; AppImage →
 sha256 del fichero = el AppImage target + relanzado; `.deb` → `dpkg-query` = target (con `-`→`~`,
-como hace electron-builder) + relanzado. Después relanza la app instalada aislada y exige
+como hace electron-builder) + relanzado. En Linux "relanzado" = aparece un proceso nuevo de la app
+(no un `sh`/`sudo`/`pkexec`, mirado por `/proc/<pid>/exe`) y **sigue vivo 5 s después**. Después relanza la app instalada aislada y exige
 `app.getVersion() === target` y **ningún** botón de update. Capturas, log, `result.json` y la lista
 de URLs interceptadas van a `--out`. Exit: 0 PASS (o KNOWN BROKEN esperado), 1 FAIL, 2 ERROR del
 harness/entorno (no es veredicto).
@@ -212,6 +213,13 @@ redirige a `sudo -n` con un shim en el `PATH` del proceso lanzado. **AppImage** 
 copia temporal; su shim de `pkexec` **siempre falla** (si la versión vieja intenta `dpkg -i` en vez de
 reemplazarse, es FAIL). Sin FUSE usa `APPIMAGE_EXTRACT_AND_RUN=1` (`--appimage-mode`) y aborta con
 exit 2 si la app no ve `APPIMAGE`/`APPDIR` (la semántica que exige `isRunningFromOwnAppImage`).
+**Montado (FUSE) ≠ extraído:** el relanzamiento del AppImage solo se prueba de verdad montado (como lo
+ejecutan los usuarios, y como corre en CI con `libfuse2`). El `app.relaunch({execPath})` original
+relanzaba bien extraído (WSL) pero **no** montado —el escenario B del AppImage falló así en el run de CI
+40220133234—; ahora relanza un `/bin/sh` desacoplado (ver `patterns.md` § "Auto-update in-app").
+Pendiente de re-ejecutar el workflow para confirmarlo. El `sh` de espera **no** cuenta como relanzamiento
+(`waitForLinuxRelaunch` descarta shells y exige que la app siga viva a los 5 s); como mucho cuenta el
+demonio FUSE del AppImage nuevo, que sale solo si Electron se cae al arrancar.
 
 **KNOWN BROKEN** (tabla `KNOWN_BROKEN` del script, nada más se admite): `2.0.0 → linux-appimage`
 (ver "Puntos conocidos": v2.0.0 elige por distro). Si una entrada empieza a pasar, el script avisa

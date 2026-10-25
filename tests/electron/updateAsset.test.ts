@@ -1,11 +1,17 @@
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
+import { spawn } from 'child_process'
 import { describe, it, expect } from 'vitest'
 import {
   pickUpdateTarget,
   isAllowedUpdateAssetPath,
   updateAssetKind,
   isRunningFromOwnAppImage,
+  appImageRelaunchSpawnArgs,
+  sanitizeAppImageEnv,
+  appImageRelaunchCwd,
+  APPIMAGE_RELAUNCH_SCRIPT,
   RELEASES_PAGE_URL,
   buildUpdateCheckResult,
   UPDATE_CHECK_FAILED,
@@ -147,6 +153,130 @@ describe('isRunningFromOwnAppImage', () => {
   it('rejects a relative or root APPDIR', () => {
     expect(isRunningFromOwnAppImage({ ...own, appDir: '/', execPath: '/opt/NoteFlow/noteflow' })).toBe(false)
     expect(isRunningFromOwnAppImage({ ...own, appDir: 'tmp/.mount_x', execPath: 'tmp/.mount_x/noteflow' })).toBe(false)
+  })
+})
+
+describe('appImageRelaunchSpawnArgs', () => {
+  it('passes pid and path as positional parameters, never inside the script', () => {
+    const p = `/home/u/My Apps/Note"Flow $(rm -rf ~)'.AppImage`
+    const { command, args } = appImageRelaunchSpawnArgs(4242, p)
+    expect(command).toBe('/bin/sh')
+    expect(args).toEqual(['-c', APPIMAGE_RELAUNCH_SCRIPT, 'noteflow-relaunch', '4242', p])
+    expect(args[1]).not.toContain('4242')
+    expect(args[1]).not.toContain('AppImage')
+  })
+
+  it('the script waits on "$1" with a bounded loop and then execs "$2"', () => {
+    expect(APPIMAGE_RELAUNCH_SCRIPT).toContain('kill -0 "$1"')
+    expect(APPIMAGE_RELAUNCH_SCRIPT).toMatch(/\[ "\$i" -lt \d+ \]/)
+    expect(APPIMAGE_RELAUNCH_SCRIPT.trim().endsWith('exec "$2"')).toBe(true)
+  })
+
+  it('rejects a bad pid or a relative path (caller falls back to app.relaunch)', () => {
+    expect(() => appImageRelaunchSpawnArgs(0, '/a/NoteFlow.AppImage')).toThrow()
+    expect(() => appImageRelaunchSpawnArgs(-1, '/a/NoteFlow.AppImage')).toThrow()
+    expect(() => appImageRelaunchSpawnArgs(1.5, '/a/NoteFlow.AppImage')).toThrow()
+    expect(() => appImageRelaunchSpawnArgs(10, 'NoteFlow.AppImage')).toThrow()
+  })
+
+  // Runs the real script on POSIX (skipped on Windows): it must wait for the pid to be gone,
+  // then exec the target with a hostile path intact.
+  it.runIf(process.platform !== 'win32')('waits for the pid to exit, then execs the path verbatim', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nf relaunch $x "q" '))
+    try {
+      const marker = path.join(dir, 'ran')
+      const target = path.join(dir, `Note Flow $(touch pwned) 'x'.AppImage`)
+      fs.writeFileSync(target, '#!/bin/sh\necho "$0" > "$(dirname "$0")/ran"\n', { mode: 0o755 })
+      const waited = spawn('sleep', ['0.6'])
+      let waitedExited = false
+      waited.on('exit', () => { waitedExited = true })
+      const { command, args } = appImageRelaunchSpawnArgs(waited.pid!, target)
+      const ranBeforeExit = await new Promise<boolean>((resolve, reject) => {
+        const helper = spawn(command, args, { stdio: 'ignore', cwd: dir })
+        helper.on('error', reject)
+        helper.on('exit', () => resolve(!waitedExited))
+      })
+      expect(ranBeforeExit).toBe(false)
+      expect(fs.readFileSync(marker, 'utf8').trim()).toBe(target)
+      expect(fs.existsSync(path.join(dir, 'pwned'))).toBe(false)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('sanitizeAppImageEnv', () => {
+  const appDir = '/tmp/.mount_NoteFlAbC123'
+  const env = {
+    APPIMAGE: '/home/u/Apps/NoteFlow.AppImage',
+    APPDIR: appDir,
+    ARGV0: './NoteFlow.AppImage',
+    OWD: '/home/u',
+    PATH: `${appDir}/usr/bin:/usr/local/bin:/usr/bin`,
+    LD_LIBRARY_PATH: `${appDir}/usr/lib:${appDir}/usr/lib64:`,
+    XDG_DATA_DIRS: `${appDir}/usr/share:/usr/local/share:/usr/share`,
+    GSETTINGS_SCHEMA_DIR: `${appDir}/usr/share/glib-2.0/schemas`,
+    QT_PLUGIN_PATH: `${appDir}/usr/lib/qt5/plugins/`,
+    PERLLIB: appDir,
+    NOTEFLOW_NOTES_DIR: '/tmp/nf-update-e2e-x/notes',
+    DISPLAY: ':0',
+    HOME: '/home/u',
+    EMPTY: '',
+    UNSET: undefined,
+  }
+
+  it('drops the runtime variables of the old AppImage', () => {
+    const out = sanitizeAppImageEnv(env, appDir)
+    for (const k of ['APPIMAGE', 'APPDIR', 'ARGV0', 'OWD']) expect(out).not.toHaveProperty(k)
+  })
+
+  it('strips path-list entries inside the old mount and keeps the rest in order', () => {
+    const out = sanitizeAppImageEnv(env, appDir)
+    expect(out.PATH).toBe('/usr/local/bin:/usr/bin')
+    expect(out.XDG_DATA_DIRS).toBe('/usr/local/share:/usr/share')
+  })
+
+  it('drops a variable left without entries', () => {
+    const out = sanitizeAppImageEnv(env, appDir)
+    expect(out).not.toHaveProperty('LD_LIBRARY_PATH')
+    expect(out).not.toHaveProperty('GSETTINGS_SCHEMA_DIR')
+    expect(out).not.toHaveProperty('QT_PLUGIN_PATH')
+    expect(out).not.toHaveProperty('PERLLIB')
+  })
+
+  it('leaves unrelated variables untouched, byte for byte', () => {
+    const out = sanitizeAppImageEnv(env, appDir)
+    expect(out.NOTEFLOW_NOTES_DIR).toBe('/tmp/nf-update-e2e-x/notes')
+    expect(out.DISPLAY).toBe(':0')
+    expect(out.HOME).toBe('/home/u')
+    expect(out.EMPTY).toBe('')
+    expect(out).not.toHaveProperty('UNSET')
+    expect(sanitizeAppImageEnv({ PATH: '/usr/bin::/bin' }, appDir).PATH).toBe('/usr/bin::/bin')
+  })
+
+  it('compares by path segment: a sibling mount with a longer name survives', () => {
+    const out = sanitizeAppImageEnv({ PATH: `${appDir}X/usr/bin:${appDir}/usr/bin` }, `${appDir}/`)
+    expect(out.PATH).toBe(`${appDir}X/usr/bin`)
+  })
+
+  it('without a usable APPDIR only drops the runtime variables', () => {
+    for (const dir of [undefined, '', '/', 'tmp/.mount_x']) {
+      const out = sanitizeAppImageEnv(env, dir)
+      expect(out).not.toHaveProperty('APPIMAGE')
+      expect(out.PATH).toBe(env.PATH)
+      expect(out.LD_LIBRARY_PATH).toBe(env.LD_LIBRARY_PATH)
+    }
+  })
+})
+
+describe('appImageRelaunchCwd', () => {
+  const appDir = '/tmp/.mount_NoteFlAbC123'
+  it('keeps the current dir unless it is inside the old mount', () => {
+    expect(appImageRelaunchCwd('/home/u/Apps', appDir, '/home/u')).toBe('/home/u/Apps')
+    expect(appImageRelaunchCwd(appDir, appDir, '/home/u')).toBe('/home/u')
+    expect(appImageRelaunchCwd(`${appDir}/usr/bin`, appDir, '/home/u')).toBe('/home/u')
+    expect(appImageRelaunchCwd(`${appDir}X`, appDir, '/home/u')).toBe(`${appDir}X`)
+    expect(appImageRelaunchCwd(`${appDir}/usr`, undefined, '/home/u')).toBe(`${appDir}/usr`)
   })
 })
 
