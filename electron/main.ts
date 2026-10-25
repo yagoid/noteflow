@@ -1477,6 +1477,11 @@ ipcMain.handle('app:open-notes-folder', () =>
 
 ipcMain.handle('app:get-version', () => app.getVersion())
 
+// E2E COUPLING: scripts/update-e2e.cjs tests the updater on real installed builds by
+// monkeypatching `https.get` (this handler) and `net.fetch` (app:download-and-install)
+// from outside. Switching either HTTP client (or the URLs) requires updating that
+// harness's fake release feed (installFeed) to intercept BOTH: the previous published
+// build it updates FROM still makes the old calls.
 ipcMain.handle('app:check-update', () => {
   // if (!app.isPackaged) return { hasUpdate: false }
   // A failed check (offline, timeout, rate limit, bad answer) resolves
@@ -1529,6 +1534,7 @@ ipcMain.handle('app:open-url', (_event, rawUrl: string) => {
   })
 })
 
+// E2E COUPLING: see app:check-update — scripts/update-e2e.cjs intercepts this net.fetch.
 ipcMain.handle('app:download-and-install', async (_event, url: string) => {
   try {
     const initialUrl = parseHttpsUrl(url)

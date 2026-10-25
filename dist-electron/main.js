@@ -1428,6 +1428,11 @@ electron_1.ipcMain.handle('fs:read-all-notes', async () => {
 electron_1.ipcMain.handle('fs:notes-dir', () => NOTES_DIR);
 electron_1.ipcMain.handle('app:open-notes-folder', () => electron_1.shell.openPath(NOTES_DIR).catch(err => console.error('Failed to open notes folder:', err)));
 electron_1.ipcMain.handle('app:get-version', () => electron_1.app.getVersion());
+// E2E COUPLING: scripts/update-e2e.cjs tests the updater on real installed builds by
+// monkeypatching `https.get` (this handler) and `net.fetch` (app:download-and-install)
+// from outside. Switching either HTTP client (or the URLs) requires updating that
+// harness's fake release feed (installFeed) to intercept BOTH: the previous published
+// build it updates FROM still makes the old calls.
 electron_1.ipcMain.handle('app:check-update', () => {
     // if (!app.isPackaged) return { hasUpdate: false }
     // A failed check (offline, timeout, rate limit, bad answer) resolves
@@ -1473,6 +1478,7 @@ electron_1.ipcMain.handle('app:open-url', (_event, rawUrl) => {
         console.error('Failed to open external URL:', err);
     });
 });
+// E2E COUPLING: see app:check-update — scripts/update-e2e.cjs intercepts this net.fetch.
 electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
     try {
         const initialUrl = parseHttpsUrl(url);

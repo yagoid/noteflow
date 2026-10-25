@@ -161,3 +161,7 @@ eslint*.txt
 *_output.txt
 *_output_utf8.txt
 app-state.png
+
+# Updater E2E (scripts/update-e2e.cjs): re-packaged "next version" builds and run output
+release-e2e-next/
+update-e2e-out/

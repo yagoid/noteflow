@@ -55,18 +55,23 @@ release publicado antes de tiempo rompe la actualización de todos los usuarios 
    `NoteFlow-X.Y.Z-arm64.dmg` (+ `.blockmap`, `latest-mac.yml`), `noteflow_X.Y.Z_amd64.deb`,
    `NoteFlow-X.Y.Z.AppImage` (**sin** `-x86_64`) y `latest-linux.yml`. Son los nombres que espera
    `electron/updateAsset.ts`.
-10. **Escribir las notas a mano** — `generate_release_notes: true` deja el body **vacío** en la
+10. **Test E2E del updater con el draft aún sin publicar:** lanzar el workflow `Update E2E`
+    (`gh workflow run update-e2e.yml --ref vX.Y.Z -f version=X.Y.Z`; ver "Test E2E del updater" abajo) y/o
+    correr `scripts/update-e2e.cjs` en local. Debe salir verde (PASS o KNOWN BROKEN esperado)
+    en Windows, AppImage y .deb: escenario A (release publicada anterior → candidata) y B
+    (candidata → siguiente). No hace falta publicar nada: el feed de la release es falso.
+11. **Escribir las notas a mano** — `generate_release_notes: true` deja el body **vacío** en la
     práctica. Incluir lo que aplique de "Puntos conocidos para las notas de release" (abajo):
     ```bash
     gh release edit vX.Y.Z --notes-file notes.md
     ```
-11. **Publicar** (a partir de aquí `/releases/latest` lo devuelve y los clientes lo ofrecen):
+12. **Publicar** (a partir de aquí `/releases/latest` lo devuelve y los clientes lo ofrecen):
     ```bash
     gh release edit vX.Y.Z --draft=false
     ```
-12. **Smoke-test del updater desde la versión anterior:** instalar la versión previa (o arrancar una
-    build con versión local distinta: el updater compara `latest !== current`), y comprobar en al
-    menos Windows y un Linux (AppImage y/o .deb) que aparece el aviso, descarga, instala y relanza.
+13. **Comprobación rápida tras publicar:** en una instalación de la versión anterior, el aviso de
+    update aparece en la titlebar (lo único que el E2E no cubre es el GitHub real: `/releases/latest`
+    y los redirects de descarga a `release-assets.githubusercontent.com`).
 
 > **Identidad git:** si la máquina no tiene config global,
 > `git config user.email "<tu-email>"` y `git config user.name "<tu-usuario>"` antes del commit.
@@ -146,10 +151,80 @@ local antes de taggear. Dos jobs:
 > **Por qué draft:** con `draft: false` el release era visible en `/releases/latest` en cuanto se
 > creaba, y un cliente que comprobara updates en ese momento podía ver la versión nueva con assets
 > aún subiéndose (404) y sin notas. Los drafts son invisibles para `/releases/latest`; se publica a
-> mano tras verificar assets y escribir notas (pasos 9–11).
+> mano tras verificar assets, pasar el E2E del updater y escribir notas (pasos 9–12).
 
 > Los `.blockmap` / `latest*.yml` son metadatos de electron-builder (canal de updates); aunque
 > el auto-update in-app actual descarga el instalador a mano, conviene seguir publicándolos.
+
+### Test E2E del updater (`scripts/update-e2e.cjs`)
+
+Prueba el **botón de update de la titlebar** de punta a punta sobre builds empaquetadas reales
+(Windows NSIS, Linux AppImage y `.deb`; macOS fuera de alcance). Una ejecución = un escenario:
+instala/prepara una build VIEJA (`--from`), la lanza aislada con Playwright `_electron`
+(`--user-data-dir` + `NOTEFLOW_NOTES_DIR` en un temp), parchea su proceso main para sustituir GitHub
+por un **feed falso** (`https.get` de `/releases/latest` → `tag_name` del target; `net.fetch` de
+`…/releases/latest/download/<nombre>` → el fichero de `--to` **solo si el nombre casa exactamente**,
+si no 404), recarga, pulsa el botón (localizado por `title` acabado en ` v<target>`, independiente
+del idioma) y deja que el **código de la versión vieja** descargue e instale. Verifica: Windows →
+versión de `resources/app.asar` instalado = target + relanzamiento por `--force-run`; AppImage →
+sha256 del fichero = el AppImage target + relanzado; `.deb` → `dpkg-query` = target (con `-`→`~`,
+como hace electron-builder) + relanzado. Después relanza la app instalada aislada y exige
+`app.getVersion() === target` y **ningún** botón de update. Capturas, log, `result.json` y la lista
+de URLs interceptadas van a `--out`. Exit: 0 PASS (o KNOWN BROKEN esperado), 1 FAIL, 2 ERROR del
+harness/entorno (no es veredicto).
+
+Lo que **prueba**: que la versión vieja pide el nombre de asset que electron-builder genera (un
+nombre mal = 404 → FAIL, nunca enmascarado), que lo instala con su ruta real (NSIS `--updated
+--force-run`, rename atómico del AppImage, `pkexec dpkg -i`) y que relanza la nueva. **No** prueba el
+GitHub real (`/releases/latest`, redirects de descarga): eso queda para el paso 13. Los fallbacks
+`shell.openExternal`/`openPath` se neutralizan y cuentan como fallo (no abren nada en la máquina).
+
+- **Escenario A** (release anterior → candidata): `--from release:latest --to release`
+- **Escenario B** (candidata → siguiente; prueba que lo que publicamos sabrá actualizarse luego):
+  reempaquetar la build ya compilada con otra versión **sin recompilar** y usarla de target:
+  ```bash
+  node scripts/update-e2e.cjs --package X.Y.Z-next --no-rebuild   # → release-e2e-next/ (gitignored)
+  node scripts/update-e2e.cjs --kind win --from release --to release-e2e-next
+  ```
+  (`--package` = `electron-builder <targets> --x64 --publish never -c.extraMetadata.version=<v>
+  -c.directories.output=<dir>`; `--kind linux-appimage|linux-deb|linux` para Linux.)
+
+**En local** (`--help` para todas las opciones; `--dry-run` resuelve artefactos y versiones sin
+instalar nada):
+```bash
+npm run build    # luego la candidata, con una versión distinta de la publicada:
+npx electron-builder --win nsis --x64 --publish never -c.extraMetadata.version=X.Y.Z            # Windows
+npx electron-builder --linux deb AppImage --x64 --publish never -c.extraMetadata.version=X.Y.Z  # Linux
+node scripts/update-e2e.cjs --kind win --from release:latest --to release              # Windows
+xvfb-run -a node scripts/update-e2e.cjs --kind linux-appimage --from release:latest --to release
+xvfb-run -a node scripts/update-e2e.cjs --kind linux-deb --from release:latest --to release
+```
+Para probar **el binario exacto del draft**: `gh release download vX.Y.Z -D <dir>` y `--to <dir>`.
+
+**Efectos secundarios:** en **Windows** mata todos los `NoteFlow.exe`, instala **encima de la
+instalación per-user real** (`%LOCALAPPDATA%\Programs\noteflow`) y el relanzamiento de
+`--force-run` arranca NoteFlow con el **perfil real** (y probablemente también el dir de notas real: el
+`StartApp` de NSIS hereda el entorno de explorer) unos segundos, hasta que el harness lo mata; si
+NoteFlow no estaba instalado lo desinstala al final (`--keep-installed` para no hacerlo); si estaba, queda la
+versión target. **`.deb`** necesita Debian/Ubuntu y **sudo no interactivo** (`sudo -n true`; la app
+corre desacoplada del tty, así que un `sudo -v` cacheado no suele bastar): el `pkexec` de la app se
+redirige a `sudo -n` con un shim en el `PATH` del proceso lanzado. **AppImage** trabaja sobre una
+copia temporal; su shim de `pkexec` **siempre falla** (si la versión vieja intenta `dpkg -i` en vez de
+reemplazarse, es FAIL). Sin FUSE usa `APPIMAGE_EXTRACT_AND_RUN=1` (`--appimage-mode`) y aborta con
+exit 2 si la app no ve `APPIMAGE`/`APPDIR` (la semántica que exige `isRunningFromOwnAppImage`).
+
+**KNOWN BROKEN** (tabla `KNOWN_BROKEN` del script, nada más se admite): `2.0.0 → linux-appimage`
+(ver "Puntos conocidos": v2.0.0 elige por distro). Si una entrada empieza a pasar, el script avisa
+para quitarla.
+
+**En CI:** `.github/workflows/update-e2e.yml` (`workflow_dispatch` con inputs `from`, por defecto
+`release:latest`, y `version` de la candidata, por defecto `<package.json>-e2e.1`; también
+`workflow_call`). Matrix `win` / `linux-appimage` / `linux-deb`: `npm ci` → `npm run build` →
+candidata a `release/` → siguiente (`<version>-next`, o `.next` si ya lleva sufijo) a
+`release-e2e-next/` → escenarios A y B (Linux bajo `xvfb-run`, con `libfuse2`) → sube
+`update-e2e-out/` como artefacto. **No** está enganchado a `release.yml`: lanzarlo a mano antes de
+publicar el draft (`gh workflow run update-e2e.yml --ref vX.Y.Z -f version=X.Y.Z`). Construye la
+candidata desde el checkout (mismo `electron-builder` que la release), no reusa los assets del draft.
 
 ### Artefactos
 

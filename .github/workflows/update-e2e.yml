@@ -1,0 +1,140 @@
+# End-to-end test of the in-app updater on real packaged builds (scripts/update-e2e.cjs).
+# Manual / reusable only: NOT wired into release.yml. Run it before publishing a release
+# draft (see .claude/context/release.md § "Test E2E del updater").
+#
+# Per platform it builds the CANDIDATE (current checkout, version `version`) into
+# release/ and a re-packaged NEXT version into release-e2e-next/, then runs:
+#   A. --from <from> --to release           previous published → candidate
+#   B. --from release --to release-e2e-next  candidate → next (the candidate can update itself)
+name: Update E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'OLD build for scenario A (release:latest, release:vX.Y.Z)'
+        required: false
+        default: 'release:latest'
+      version:
+        description: 'Candidate version (empty = <package.json version>-e2e.1). Must differ from the published one.'
+        required: false
+        default: ''
+  workflow_call:
+    inputs:
+      from:
+        type: string
+        required: false
+        default: 'release:latest'
+      version:
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            kind: win
+            eb_targets: --win nsis
+          - os: ubuntu-latest
+            kind: linux-appimage
+            eb_targets: --linux AppImage
+          - os: ubuntu-latest
+            kind: linux-deb
+            eb_targets: --linux deb
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+      # Inputs go through env, never interpolated into scripts.
+      INPUT_FROM: ${{ inputs.from || 'release:latest' }}
+      INPUT_VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Linux system deps (Xvfb, FUSE for AppImage)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          # FUSE so the AppImage runs mounted like on a user's machine; without it the
+          # harness falls back to APPIMAGE_EXTRACT_AND_RUN=1.
+          sudo apt-get install -y libfuse2t64 || sudo apt-get install -y libfuse2 || true
+          # Ubuntu 24.04 blocks unprivileged user namespaces, and chrome-sandbox can't be
+          # setuid inside an AppImage: Electron would refuse to start. The .deb is fine
+          # (its postinstall makes chrome-sandbox 4755), but the AppImage needs this.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve candidate / next versions
+        shell: bash
+        run: |
+          base=$(node -p "require('./package.json').version")
+          cand="$INPUT_VERSION"
+          [ -z "$cand" ] && cand="${base}-e2e.1"
+          case "$cand" in *-*) next="${cand}.next" ;; *) next="${cand}-next" ;; esac
+          for v in "$cand" "$next"; do
+            if [[ ! "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "Version '$v' is not a valid semver-like value" && exit 1
+            fi
+          done
+          echo "CANDIDATE=$cand" >> "$GITHUB_ENV"
+          echo "NEXT=$next" >> "$GITHUB_ENV"
+          echo "candidate=$cand next=$next"
+
+      - name: Build (renderer + electron)
+        run: npm run build
+
+      - name: Package candidate → release/
+        shell: bash
+        run: npx electron-builder ${{ matrix.eb_targets }} --x64 --publish never -c.extraMetadata.version="$CANDIDATE"
+
+      - name: Package next version → release-e2e-next/
+        shell: bash
+        run: node scripts/update-e2e.cjs --package "$NEXT" --kind ${{ matrix.kind }} --package-dir release-e2e-next --no-rebuild
+
+      - name: 'Scenario A: previous published (input "from") → candidate'
+        id: scenario_a
+        shell: bash
+        env:
+          # Only for the GitHub API call that resolves release:latest (rate limit); the
+          # harness strips it from the environment of the app under test.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          cmd=(node scripts/update-e2e.cjs --kind ${{ matrix.kind }} --from "$INPUT_FROM" --to release --out update-e2e-out/A)
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a "${cmd[@]}"; else "${cmd[@]}"; fi
+
+      - name: 'Scenario B: candidate → next'
+        if: ${{ !cancelled() && steps.scenario_a.outcome != 'skipped' }}
+        shell: bash
+        run: |
+          cmd=(node scripts/update-e2e.cjs --kind ${{ matrix.kind }} --from release --to release-e2e-next --out update-e2e-out/B)
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a "${cmd[@]}"; else "${cmd[@]}"; fi
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-e2e-${{ matrix.kind }}
+          path: update-e2e-out/
+          if-no-files-found: warn

@@ -1,3 +1,5 @@
+import fs from 'fs'
+import path from 'path'
 import { describe, it, expect } from 'vitest'
 import {
   pickUpdateTarget,
@@ -178,4 +180,61 @@ describe('buildUpdateCheckResult', () => {
     expect(buildUpdateCheckResult(200, 'null', '2.0.0', pick)).toEqual(UPDATE_CHECK_FAILED)
     expect(UPDATE_CHECK_FAILED).toEqual({ hasUpdate: false, error: true })
   })
+})
+
+// Contract with the electron-builder config: the updater builds asset names by hand, so a
+// change to package.json → build (artifactName, productName, name) must not silently
+// diverge from what pickUpdateTarget() asks for (a 404 for every user, shipped inside the
+// OLD version). Mirrors electron-builder 26's naming rules (app-builder-lib):
+//   - pattern = target.artifactName || platform.artifactName || build.artifactName || default
+//   - NSIS default "${productName} Setup ${version}.${ext}"; deb default
+//     "${name}_${version}_${arch}.${ext}" with arch kept even on x64 ("amd64");
+//     AppImage default "${productName}-${version}-${arch}.${ext}" with "-${arch}" DROPPED
+//     on x64 unless the pattern was user-specified (then arch = "x86_64").
+// scripts/update-e2e.cjs proves the same end to end on real builds.
+describe('pickUpdateTarget ↔ electron-builder artifact names (package.json build)', () => {
+  type Opts = { artifactName?: string }
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8')) as {
+    name: string
+    build: Opts & { productName: string; win?: Opts; nsis?: Opts; mac?: Opts; dmg?: Opts; linux?: Opts; deb?: Opts; appImage?: Opts }
+  }
+  const b = pkg.build
+
+  function expand(pattern: string, version: string, ext: string, arch: string | null): string {
+    let p = pattern
+    if (arch === null) p = p.replace('-${arch}', '').replace(' ${arch}', '').replace('_${arch}', '')
+    const vars: Record<string, string> = { productName: b.productName, name: pkg.name, version, ext, arch: arch ?? '' }
+    return p.replace(/\$\{(\w+)\}/g, (_m, k: string) => {
+      if (!(k in vars)) throw new Error(`macro \${${k}} not modelled by this test — extend it`)
+      return vars[k]
+    })
+  }
+  const pattern = (...candidates: Array<string | undefined>) => candidates.find(Boolean)
+  const basename = (url: string) => decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '')
+
+  for (const version of ['2.1.0', '2.1.0-e2e.1']) {
+    it(`Windows NSIS (${version})`, () => {
+      const user = pattern(b.nsis?.artifactName, b.win?.artifactName, b.artifactName)
+      const name = expand(user ?? '${productName} Setup ${version}.${ext}', version, 'exe', user ? 'x64' : null)
+      expect(basename(pickUpdateTarget({ platform: 'win32', version, isAppImage: false, isDebian: false }))).toBe(name)
+    })
+
+    it(`Linux .deb (${version})`, () => {
+      const user = pattern(b.deb?.artifactName, b.linux?.artifactName, b.artifactName)
+      const name = expand(user ?? '${name}_${version}_${arch}.${ext}', version, 'deb', 'amd64')
+      expect(basename(pickUpdateTarget(linux({ version, isDebian: true })))).toBe(name)
+    })
+
+    it(`Linux AppImage (${version})`, () => {
+      const user = pattern(b.appImage?.artifactName, b.linux?.artifactName, b.artifactName)
+      const name = expand(user ?? '${productName}-${version}-${arch}.${ext}', version, 'AppImage', user ? 'x86_64' : null)
+      expect(basename(pickUpdateTarget(linux({ version, isAppImage: true })))).toBe(name)
+    })
+
+    it(`macOS dmg arm64 (${version})`, () => {
+      const user = pattern(b.dmg?.artifactName, b.mac?.artifactName, b.artifactName)
+      const name = expand(user ?? '${productName}-${version}-${arch}.${ext}', version, 'dmg', 'arm64')
+      expect(basename(pickUpdateTarget({ platform: 'darwin', version, isAppImage: false, isDebian: false }))).toBe(name)
+    })
+  }
 })

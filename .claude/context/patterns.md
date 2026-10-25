@@ -1331,9 +1331,15 @@ TitleBar), y luego instala **sin depender de popups del SO**:
   Applications"; el usuario arrastra a Applications y relanza a mano (la app NO sale). Reemplazo
   automático descartado por no poder probarse a ciegas.
 
-> **Pendiente de verificar** en build empaquetado real (Win silent + AppImage in-place + **macOS dmg
-> en Apple Silicon real**): probado de momento solo a nivel de compilación/typecheck. macOS, además,
-> no se ha podido probar en runtime (sin Mac) — ver el bloque de soporte macOS más abajo.
+> **Test E2E:** `scripts/update-e2e.cjs` (+ workflow `update-e2e.yml`) prueba el botón de update de
+> punta a punta en Windows/AppImage/.deb sobre builds empaquetadas reales, con un feed de release
+> falso que intercepta este `https.get` y este `net.fetch` (comentario de acoplamiento en `main.ts`).
+> Uso, escenarios y tabla KNOWN BROKEN: `release.md` § "Test E2E del updater". El contrato
+> nombres-de-asset ↔ config de electron-builder también está en `tests/electron/updateAsset.test.ts`.
+> **Verificado en runtime (2026-10-25, en local):** Windows 2.0.0→2.1.0 y 2.1.0→2.1.0-e2e.1, y
+> AppImage (WSL) 2.1.0→2.1.0-e2e.1, en verde; AppImage desde 2.0.0 = KNOWN BROKEN, como se esperaba.
+> El `.deb` queda **pendiente de una ejecución en CI** (necesita sudo). macOS (dmg en Apple Silicon
+> real) sigue **sin probar en runtime** (sin Mac) — ver el bloque de soporte macOS más abajo.
 
 > **v2.0.0 y anteriores** construían mal la URL en AppImage (`-x86_64`) y en Arch (`.pkg.tar.zst`
 > inexistente): esos usuarios tienen que actualizar a mano una vez; el updater corregido solo ayuda
