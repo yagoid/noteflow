@@ -14,7 +14,7 @@
 #     them for the system electron.
 
 pkgname=noteflow
-pkgver=2.0.0
+pkgver=2.1.0
 pkgrel=1
 pkgdesc="Fast notes for software engineers - Local files, optional private GitHub sync. No telemetry."
 arch=('x86_64')

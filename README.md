@@ -68,9 +68,9 @@ chmod +x /Applications/NoteFlow.app/Contents/Resources/cli/noteflow.js
 
 Use the AppImage (it also updates itself in-app):
 ```bash
-wget https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-2.0.0.AppImage
-chmod +x NoteFlow-2.0.0.AppImage
-./NoteFlow-2.0.0.AppImage
+wget https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-2.1.0.AppImage
+chmod +x NoteFlow-2.1.0.AppImage
+./NoteFlow-2.1.0.AppImage
 ```
 
 > The [`PKGBUILD`](PKGBUILD) in this repo is currently **not working** (the installed app is missing its `node_modules` and the native modules are not built for the system `electron`). Use the AppImage until it is fixed.
