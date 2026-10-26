@@ -760,7 +760,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               zIndex: 1,
             }} />
             <ul className="flex flex-col gap-0.5 mt-0.5">
-              {folderNotes.map((note) => renderNoteButton(note, group, 26))}
+              {/* Row starts 2px past the guide line (left 14px); 17px + 9px padding keeps the text at 26px */}
+              {folderNotes.map((note) => renderNoteButton(note, group, 9, false, 'pl-[17px]'))}
               {folderNotes.length === 0 && (
                 <li>
                   <button
@@ -1131,7 +1132,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                           </div>
                         )}
                         <ul className="flex flex-col gap-0.5 mt-0.5">
-                          {groupNotes.map((note) => renderNoteButton(note, group))}
+                          {/* Row starts 2px past the guide line (left 1px); 4px + 6px padding keeps the text at 10px */}
+                          {groupNotes.map((note) => renderNoteButton(note, group, 6, false, 'pl-[4px]'))}
                           {groupNotes.length === 0 && groupFolders.length === 0 && !newFolderInput && (
                             <li>
                               <button
