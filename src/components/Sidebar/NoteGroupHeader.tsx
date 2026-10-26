@@ -10,9 +10,13 @@ interface NoteGroupHeaderProps {
   onToggle: () => void
   onOpenGroupView: () => void
   onContextMenu: (e: React.MouseEvent) => void
+  /** Pointer entered / moves over the header (drives the collapsed-group peek). Stable. */
+  onPeekHover?: (groupId: string, el: HTMLElement) => void
+  /** Pointer left the header. Stable. */
+  onPeekLeave?: () => void
 }
 
-export function NoteGroupHeader({ group, noteCount, collapsed, onToggle, onOpenGroupView, onContextMenu }: NoteGroupHeaderProps) {
+export function NoteGroupHeader({ group, noteCount, collapsed, onToggle, onOpenGroupView, onContextMenu, onPeekHover, onPeekLeave }: NoteGroupHeaderProps) {
   const t = useT()
   return (
     <div
@@ -20,6 +24,9 @@ export function NoteGroupHeader({ group, noteCount, collapsed, onToggle, onOpenG
         ${collapsed ? '' : 'bg-surface-3/60'}`}
       onClick={onToggle}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e) }}
+      onMouseEnter={onPeekHover && ((e) => onPeekHover(group.id, e.currentTarget))}
+      onMouseMove={onPeekHover && ((e) => onPeekHover(group.id, e.currentTarget))}
+      onMouseLeave={onPeekLeave}
     >
       <span
         className="w-2 h-2 rounded-full flex-shrink-0"

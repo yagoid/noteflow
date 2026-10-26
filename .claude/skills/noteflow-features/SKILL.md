@@ -256,6 +256,19 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
 - **Crear**: botón-icono `FolderPlus` (arriba a la derecha del `+` de nueva nota) → input de nombre debajo (nombre + color).
 - **Renombrar / Eliminar / Color / View group / Archive**: menú contextual en la cabecera del grupo.
 - **Colapsar / Expandir**: click en la cabecera (estado persiste entre sesiones).
+- **Peek de grupo colapsado**: dejar el ratón ~400 ms sobre la cabecera de un grupo **colapsado** (con
+  notas) abre a la derecha del sidebar una ventanita con sus notas en pequeño (título + fecha y, debajo,
+  los tags de sección como chips mini); las notas de sus **carpetas** van en la misma lista, después de
+  las sueltas, con una etiqueta discreta (icono de carpeta + nombre). Altura ≈ 5 notas, con scroll.
+  Arriba, un **buscador** ("Search in {grupo}…", admite `#sección`) que **recibe el foco** al abrirse:
+  basta con empezar a escribir. ↑/↓ mueven la selección (la primera marcada por defecto), **Enter**
+  abre la nota, **Esc** cierra y devuelve el foco donde estaba (p. ej. el editor, con su caret). Click en
+  el título abre la nota y en un chip, esa sección (misma semántica que el sidebar, Ctrl/Cmd incluido);
+  la nota activa va resaltada. Se cierra al sacar el ratón de cabecera+ventanita (con margen para cruzar
+  el hueco), salvo si ya se tecleó en el buscador: entonces solo con click fuera, Esc o al abrir algo.
+  También al expandir el grupo, hacer scroll en el sidebar, cambiar de ventana o arrastrar. No aparece
+  mientras se escribe en el editor con el ratón quieto encima, durante un drag, un rename o con un menú
+  contextual abierto. Funciona igual con el sidebar fijado y flotante.
 - **Ver grupo (group overview)**: click en **el nombre** del grupo (hover sutil sobre el texto), o
   "View group" en el menú contextual. Click en el resto de la cabecera = colapsar/expandir.
 - **Archivar grupo**: menú contextual → "Archive group". Oculta el grupo **y todas sus notas** de

@@ -24,6 +24,8 @@ interface SectionTabsRowProps {
   renderHighlightedText: (text: string, query: string) => React.ReactNode
   /** Fade each tag (no background) until that tag itself is hovered. Sidebar only. */
   dimmed?: boolean
+  /** Smaller chips for denser lists (the collapsed-group peek); its rows use px-2. */
+  compact?: boolean
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -38,6 +40,7 @@ export function SectionTabsRow({
   onSectionContextMenu,
   renderHighlightedText,
   dimmed = false,
+  compact = false,
 }: SectionTabsRowProps) {
   const t = useT()
   const { previewProps } = useSectionHoverPreview()
@@ -76,11 +79,12 @@ export function SectionTabsRow({
 
   if (visibleSections.length === 0) return null
 
-  // Bleed out of the note's lateral padding (-mx-2.5 → re-add px-2.5) so the row spans
-  // edge to edge; a single non-wrapping scrollable line fits more tags, edges faded by
-  // the mask. Arrows appear on overflow to reach tags hidden past the edges.
+  // Bleed out of the note's lateral padding (-mx-2.5 → re-add px-2.5; -mx-2/px-2 when
+  // compact) so the row spans edge to edge; a single non-wrapping scrollable line fits
+  // more tags, edges faded by the mask. Arrows appear on overflow to reach tags hidden
+  // past the edges.
   return (
-    <div className="relative mt-1 -mx-2.5">
+    <div className={`relative ${compact ? 'mt-0.5 -mx-2' : 'mt-1 -mx-2.5'}`}>
       {/* Left scroll arrow — only when there's content scrolled off to the left */}
       {canScrollLeft && (
         <div
@@ -99,7 +103,7 @@ export function SectionTabsRow({
       {/* Scrollable sections row (native scrollbar hidden via CSS, edges faded via mask) */}
       <div
         ref={scrollRef}
-        className="flex items-center gap-1 px-2.5 overflow-x-auto section-tabs-scroll"
+        className={`flex items-center gap-1 overflow-x-auto section-tabs-scroll ${compact ? 'px-2' : 'px-2.5'}`}
         style={{ WebkitMaskImage: EDGE_MASK, maskImage: EDGE_MASK }}
       >
         {visibleSections.map((section) => {
@@ -115,7 +119,7 @@ export function SectionTabsRow({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
               }}
-              className={`text-[11px] font-mono px-1 rounded flex-shrink-0 leading-[1.55]
+              className={`${compact ? 'text-[10px] leading-[1.5]' : 'text-[11px] leading-[1.55]'} font-mono px-1 rounded flex-shrink-0
                          transition-[opacity,background-color] duration-150 cursor-pointer inline-flex items-center gap-0.5
                          ${dimmed
                            ? 'opacity-80 hover:opacity-100 hover:[background-color:var(--chip-bg)]'
@@ -124,7 +128,7 @@ export function SectionTabsRow({
               style={{ ...tagColor, '--chip-bg': background } as React.CSSProperties}
             >
               {section.aiHidden && (
-                <EyeOff size={9} className="opacity-70 flex-shrink-0" aria-label={t.common.hiddenFromAI} />
+                <EyeOff size={compact ? 8 : 9} className="opacity-70 flex-shrink-0" aria-label={t.common.hiddenFromAI} />
               )}
               {renderHighlightedText(section.name, searchQuery)}
             </span>

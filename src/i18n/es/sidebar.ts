@@ -40,4 +40,8 @@ export const sidebar = {
 
   scrollSectionsLeft: 'Desplazar secciones a la izquierda',
   scrollSectionsRight: 'Desplazar secciones a la derecha',
+
+  peekLabel: 'Notas de {group}',
+  peekSearchPlaceholder: 'Buscar en {group}…',
+  peekNoMatches: 'Sin coincidencias',
 }

@@ -54,4 +54,9 @@ export const sidebar = {
   // Section tabs row (scroll arrows).
   scrollSectionsLeft: 'Scroll sections left',
   scrollSectionsRight: 'Scroll sections right',
+
+  // Collapsed-group peek (hover a collapsed group's header). {group} = group name.
+  peekLabel: '{group} notes',
+  peekSearchPlaceholder: 'Search in {group}…',
+  peekNoMatches: 'No matches',
 }

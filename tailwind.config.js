@@ -32,10 +32,16 @@ module.exports = {
           from: { transform: 'scaleY(0)' },
           to: { transform: 'scaleY(1)' },
         },
+        // Collapsed-group peek (Sidebar/GroupPeek.tsx) sliding in from the sidebar.
+        'group-peek-in': {
+          from: { opacity: '0', transform: 'translateX(-4px)' },
+          to: { opacity: '1', transform: 'none' },
+        },
       },
       animation: {
         shake: 'shake 0.28s ease-in-out',
         'bar-grow': 'bar-grow 0.35s ease-out both',
+        'group-peek-in': 'group-peek-in 120ms ease-out',
       },
       fontFamily: {
         // `font-mono` is the app's general UI font: it follows the active theme's

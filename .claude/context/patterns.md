@@ -26,6 +26,8 @@ Dos invariantes para que el sidebar siga fluido con muchas notas — fáciles de
   `items`, solo mientras flota) y `SidebarShell` las guarda **solo si cambia su firma**
   (`miniRowsSignature`): teclear en el editor no cambia ids/orden/colores → la mini-vista no se
   re-renderiza. Solo se pinta la ventana visible (ver "Sidebar flotante").
+- **Peek de grupo colapsado:** su estado vive en `GroupPeek`, no en `Sidebar`; las cabeceras reciben
+  handlers estables y el hover no re-renderiza la lista (ver "Peek de grupo colapsado").
 
 ### Importación desde otras apps (`electron/importers/`, `src/lib/notionHtml.ts`)
 Importa notas de **Markdown folder**, **Notion** (export HTML `.zip`) y **Google Keep** (Takeout
@@ -180,7 +182,7 @@ en memoria en `notesStore`):
   portal a `document.body`. El hook `useSectionHoverPreview()` (en `hoverPreviewContext.ts`, archivo
   aparte por la regla `react-refresh/only-export-components`) expone `previewProps(noteId, sectionId, opts)`
   que devuelve handlers de ratón para escupir sobre cualquier disparador. Disparadores cableados:
-  `SectionTabsRow` (sidebar + group overview), pestañas del editor (omite la activa), `RelatedView`/`ChatView`.
+  `SectionTabsRow` (sidebar, peek de grupo colapsado y group overview), pestañas del editor (omite la activa), `RelatedView`/`ChatView`.
   `placement: 'cursor-below'` ancla la esquina sup-izq junto al cursor (sidebar/grupos/editor);
   `'element-right'` (default) al lado del elemento (IA). Retardo ~380 ms; el popover es `pointer-events-none`
   y se cierra con **cualquier click** (listener `pointerdown` global en el provider — esto evita que se quede
@@ -945,6 +947,51 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   `.prose-editor`) quedan fuera a propósito.
   Es el espejo izquierdo de `--toc-reserve`; se aplica a todos los panes (en el split solo el primero
   la necesita, la diferencia es de 4 px).
+
+### Peek de grupo colapsado (`Sidebar/GroupPeek.tsx`, `lib/groupPeek.ts`)
+Hover ~400 ms sobre la cabecera de un **grupo colapsado** con ≥1 nota visible → ventanita a la derecha
+del sidebar con sus notas (carpetas aplanadas) y un buscador que **toma el foco**. Lógica pura con tests
+en `tests/lib/groupPeek.test.ts`: `flattenGroupPeekEntries` (sueltas primero, luego cada carpeta, en el
+orden del sidebar; cada entrada lleva su carpeta o `null`), `filterGroupPeekEntries` (=`noteMatchesQuery`
++ `parseSearchQuery`: caché de índice, `#sección` incluido; query vacía → mismo array),
+`moveGroupPeekSelection` (↑/↓ con wrap) y `groupPeekPosition` (borde derecho del sidebar + 6 px, top =
+cabecera, clamp al viewport: sube si no cabe abajo).
+- **Datos:** usa el `item` de grupo que ya deriva `Sidebar` (`useSidebarGroups`), así respeta búsqueda/
+  tag/archivados sin recalcular. Las filas son un `PeekRow` memoizado (título 11.5 px + fecha, etiqueta
+  `Folder`+nombre de carpeta si viene de una, chips con `SectionTabsRow compact`). Clicks = los
+  `rowHandlers` estables del sidebar (`click`/`sectionClick`: Ctrl/Cmd → split, nota con >1 sección →
+  note overview…); `RowHandlers.click` acepta también `KeyboardEvent` porque Enter lo reutiliza.
+  `formatNoteDate`/`renderHighlightedText` viven en `Sidebar/rowText.tsx` (compartidos).
+- **Rendimiento:** el estado abierto/cerrado vive en `GroupPeek` (montado una vez en `Sidebar`); las
+  cabeceras solo reciben `onPeekHover`/`onPeekLeave` estables (`useCallback([])` → `peekRef`, un
+  `useImperativeHandle`). Mover el ratón no re-renderiza el sidebar; cerrado, `GroupPeek` devuelve
+  `null` sin calcular nada. El panel interno (`GroupPeekPanel`, `key` = grupo) tiene query/selección
+  locales y se mide **una vez** en `useLayoutEffect` (oculto hasta entonces; la altura sin filtrar es la
+  máxima, así no salta al teclear). Entrada con el keyframe `group-peek-in` (tailwind, 120 ms).
+- **Apertura:** temporizador desde el `mouseenter` (y `mousemove`, que re-arma); no abre si el grupo no
+  está colapsado/está vacío, si la ventana no tiene foco, ni con `blocked` (drag de grupo, cualquier
+  menú contextual o modal del sidebar, rename/nuevo grupo-carpeta). Cualquier **tecla** cancela el
+  temporizador pendiente: si el usuario escribe en el editor con el ratón parado sobre una cabecera, el
+  peek no le roba el foco a mitad de frase (moverlo de nuevo lo re-arma). Tras un click o un cierre con
+  el puntero aún en la cabecera, esa cabecera no reabre hasta que el ratón sale (`suppressRef`).
+- **Cierre:** salir de cabecera+peek → 250 ms de gracia (cruzar el hueco; volver a la cabecera lo
+  cancela; pasar a otra cabecera colapsada cambia de peek). Si el usuario **teclea o usa ↑/↓** en el
+  buscador queda **anclado**: solo cierra con click fuera, Esc o navegación. También cierra al abrir
+  nota/sección (desde él o desde cualquier sitio: `useNotesStore.subscribe` sobre activeNoteId/
+  noteViewId/groupViewId/brain/all), scroll dentro del sidebar, blur/resize de la ventana o `dragstart`.
+  Si el grupo se expande/vacía o el sidebar pasa a `blocked`, se descarta en render.
+- **Foco:** guarda `document.activeElement` al abrir y lo devuelve al cerrar por ratón-fuera/Esc/
+  dismiss (`focus({preventScroll})`; ProseMirror re-aplica su selección al recibir el foco, así que el
+  caret se conserva). Click fuera: se devuelve **después** del click y solo si no se llevó el foco a
+  otro sitio. Navegar no lo devuelve. Siempre se hace `blur()` del input **antes** de desmontar
+  (Chromium no emite `blur` al quitar el elemento enfocado; el sidebar flotante seguiría contando foco
+  dentro); el cleanup del panel hace lo mismo como red de seguridad. Esc hace `stopPropagation` (no cierra
+  el sidebar flotante ni la overview abierta).
+- **Portal + sidebar flotante:** portal a `document.body` con `position: fixed` (el panel flotante puede
+  estar transformado → sería containing block). Como los eventos React burbujean por el **árbol React**
+  (no el DOM), el hover (`onMouseEnter/Leave` del `aside`) y el foco (`onFocus`/`onBlur`) del peek cuentan
+  como "dentro" para `SidebarShell`: el panel flotante no se cierra mientras se usa el peek, sin atributos
+  extra. El hueco de 6 px dispara un leave del `aside`, pero el enter del peek cancela su cierre (200 ms).
 
 ### Relaciones sección↔sección (slash command + cerebro)
 Enlaces explícitos que el usuario crea **inline mientras escribe**: en el editor rich teclea `/` →
