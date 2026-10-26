@@ -84,9 +84,9 @@ const api = {
   setSkillSync: (enabled: boolean): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('app:set-skill-sync', enabled),
   getStartupStickies: (): Promise<Array<{ noteId: string; sectionId: string }>> => ipcRenderer.invoke('settings:get-startup-stickies'),
   setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>): Promise<void> => ipcRenderer.invoke('settings:set-startup-stickies', stickies),
-  getUiState: (): Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }> =>
+  getUiState: (): Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[]; sidebarMode?: 'pinned' | 'floating' }> =>
     ipcRenderer.invoke('settings:get-ui-state'),
-  setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }): Promise<void> =>
+  setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[]; sidebarMode?: 'pinned' | 'floating' }): Promise<void> =>
     ipcRenderer.invoke('settings:set-ui-state', patch),
   getGroups: (): Promise<unknown[]> => ipcRenderer.invoke('groups:get'),
   setGroups: (groups: unknown[]): Promise<void> => ipcRenderer.invoke('groups:set', groups),

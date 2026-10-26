@@ -9,6 +9,7 @@ import { useAiStore } from './stores/aiStore'
 import { useAiChatStore } from './stores/aiChatStore'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
+import { SidebarShell } from './components/Sidebar/SidebarShell'
 import { NoteEditor } from './components/Editor/NoteEditor'
 import { GroupOverview } from './components/GroupOverview/GroupOverview'
 import { NoteOverview } from './components/NoteOverview/NoteOverview'
@@ -20,11 +21,10 @@ import { StickyApp } from './components/StickyApp'
 import { SectionWindowApp } from './components/SectionWindowApp'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { HoverPreviewProvider } from './components/SectionPreview/HoverPreviewProvider'
-import { modKey } from './lib/platform'
+import { MINI_SIDEBAR_RESERVE } from './lib/miniSidebar'
 import { ownsKeys } from './lib/keyScope'
 import { flushPendingEdits } from './lib/pendingEdits'
 import { useT } from './i18n/useT'
-import { tf } from './i18n/format'
 
 const SIDEBAR_MIN = 180
 const SIDEBAR_MAX = 480
@@ -91,7 +91,12 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
   const loadSectionTagColors = useSectionTagColorsStore((s) => s.loadSectionTagColors)
 
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
-  const [sidebarVisible, setSidebarVisible] = useState(true)
+  // Docked ("pinned", in the layout) or floating (overlay panel opened from the
+  // mini-view at the content's left edge). Persisted in settings.json → uiState
+  // (local, not synced). Docked until the saved mode loads; the width animation
+  // stays off until then so a floating start doesn't play the collapse.
+  const [sidebarPinned, setSidebarPinned] = useState(true)
+  const [sidebarAnimate, setSidebarAnimate] = useState(false)
   // Notes sidebar inside the brain view — collapsed by default, toggled independently
   // from the editor sidebar so it doesn't change the editor's layout. It always starts
   // hidden when entering the brain view (reset by the effect below).
@@ -108,8 +113,30 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
   const paneResizeRef = useRef<{ paneId: string; startX: number; startWidth: number } | null>(null)
   const paneScrollRef = useRef<HTMLDivElement | null>(null)
   const paneContainerRef = useRef<HTMLDivElement | null>(null)
+  const contentRowRef = useRef<HTMLDivElement | null>(null)
   const dragStartX = useRef(0)
   const dragStartW = useRef(SIDEBAR_DEFAULT)
+
+  // ── Sidebar mode (docked / floating), local UI state ──────────────────────
+  useEffect(() => {
+    if (isSticky) return
+    let cancelled = false
+    const enableAnimation = () => requestAnimationFrame(() => { if (!cancelled) setSidebarAnimate(true) })
+    window.noteflow.getUiState()
+      .then((state) => {
+        if (cancelled) return
+        if (state.sidebarMode === 'floating') setSidebarPinned(false)
+        enableAnimation()
+      })
+      .catch(() => { if (!cancelled) enableAnimation() })
+    return () => { cancelled = true }
+  }, [isSticky])
+
+  const toggleSidebarPinned = useCallback(() => {
+    const next = !sidebarPinned
+    setSidebarPinned(next)
+    void window.noteflow.setUiState({ sidebarMode: next ? 'pinned' : 'floating' })
+  }, [sidebarPinned])
 
   // Entering the brain view always starts with the notes sidebar hidden.
   useEffect(() => {
@@ -161,11 +188,13 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
       if (!e.shiftKey && (key === 'p' || e.code === 'KeyP')) {
         e.preventDefault(); setCommandPaletteOpen(!useNotesStore.getState().commandPaletteOpen); return
       }
-      // Ctrl+' — toggle sidebar (Spanish keyboards often have ' on the key next to 0)
+      // Ctrl+' — pin / unpin the sidebar (docked ⇄ floating); in the brain view it
+      // shows/hides its own notes sidebar. Spanish keyboards often have ' on the
+      // key next to 0.
       if (!e.shiftKey && (e.key === "'" || e.key === '´' || e.code === 'Quote' || e.code === 'Minus')) {
         e.preventDefault()
         if (useNotesStore.getState().brainViewOpen) setBrainSidebarVisible((v) => !v)
-        else setSidebarVisible((v) => !v)
+        else toggleSidebarPinned()
         return
       }
       // Ctrl+T — new tab in active note
@@ -214,7 +243,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
     // Use capture phase so shortcuts work even inside editors that stopPropagation
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
-  }, [createNote, createTempNote, setCommandPaletteOpen, setSidebarVisible])
+  }, [createNote, createTempNote, setCommandPaletteOpen, toggleSidebarPinned])
 
   // ── Global shortcuts (via IPC) ─────────────────────────────────────────────
   useEffect(() => {
@@ -341,7 +370,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
   useEffect(() => {
     const raf = window.requestAnimationFrame(refreshPaneOverflowState)
     return () => window.cancelAnimationFrame(raf)
-  }, [refreshPaneOverflowState, visiblePaneIds, paneWidths, sidebarVisible, sidebarWidth, isLoading])
+  }, [refreshPaneOverflowState, visiblePaneIds, paneWidths, sidebarPinned, brainSidebarVisible, sidebarWidth, isLoading])
 
   useEffect(() => {
     const onResize = () => refreshPaneOverflowState()
@@ -500,6 +529,9 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
     clearDropUi()
   }, [extractDraggedNoteId, notes, clearDropUi])
 
+  const sidebarFloating = !brainViewOpen && !sidebarPinned
+  const sidebarDocked = brainViewOpen ? brainSidebarVisible : sidebarPinned
+
   if (isSticky) {
     return (
       <ErrorBoundary>
@@ -516,24 +548,29 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
     <div className="flex flex-col h-screen bg-surface-0 text-text overflow-hidden">
       <TitleBar />
 
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* ── Sidebar ───────────────────────────────────────────────── */}
-        <div
-          style={{
-            width: (brainViewOpen ? brainSidebarVisible : sidebarVisible) ? sidebarWidth : 0,
-            minWidth: 0,
-            flexShrink: 0,
-            overflow: 'hidden',
-            transition: isSidebarDragging ? 'none' : 'width 220ms ease',
-          }}
+      <div ref={contentRowRef} className="flex flex-1 overflow-hidden relative">
+        {/* ── Sidebar ───────────────────────────────────────────────────
+            Docked (pinned) or floating over the content (SidebarShell). The
+            brain view keeps its own show/hide sidebar and never floats. */}
+        <SidebarShell
+          containerRef={contentRowRef}
+          floating={sidebarFloating}
+          visible={brainViewOpen ? brainSidebarVisible : true}
+          width={sidebarWidth}
+          animate={sidebarAnimate && !isSidebarDragging}
         >
-          <div style={{ width: sidebarWidth, minWidth: sidebarWidth, height: '100%' }}>
-            <Sidebar onCollapse={() => (brainViewOpen ? setBrainSidebarVisible(false) : setSidebarVisible(false))} />
-          </div>
-        </div>
+          {(onMiniRows) => (
+            <Sidebar
+              pinned={!sidebarFloating}
+              onTogglePinned={brainViewOpen ? () => setBrainSidebarVisible(false) : toggleSidebarPinned}
+              hideOnly={brainViewOpen}
+              onMiniRows={sidebarFloating ? onMiniRows : undefined}
+            />
+          )}
+        </SidebarShell>
 
         {/* Drag handle */}
-        {(brainViewOpen ? brainSidebarVisible : sidebarVisible) && (
+        {sidebarDocked && (
           <div
             onMouseDown={handleDragStart}
             className="w-1 flex-shrink-0 cursor-col-resize hover:bg-text/30 active:bg-text/50
@@ -542,14 +579,14 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
           />
         )}
 
-        {/* ── Collapse / expand toggle ──────────────────────────────── */}
-        {!(brainViewOpen ? brainSidebarVisible : sidebarVisible) && (
+        {/* ── Brain view: show its hidden notes sidebar ──────────────── */}
+        {brainViewOpen && !brainSidebarVisible && (
           <button
-            onClick={() => (brainViewOpen ? setBrainSidebarVisible(true) : setSidebarVisible(true))}
-            title={brainViewOpen ? t.shell.showNotes : tf(t.shell.showSidebar, { key: modKey })}
-            className={`flex-shrink-0 flex items-center justify-center h-full
+            onClick={() => setBrainSidebarVisible(true)}
+            title={t.shell.showNotes}
+            className="flex-shrink-0 flex items-center justify-center h-full w-6
                        text-text-muted/40 hover:text-text-muted hover:bg-surface-2
-                       border-r border-border transition-colors ${brainViewOpen ? 'w-6' : 'w-7'}`}
+                       border-r border-border transition-colors"
           >
             <PanelLeftOpen size={14} />
           </button>
@@ -557,8 +594,14 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
 
         {/* ── Main editor ──────────────────────────────────────────── */}
         <main
-          className={`flex-1 overflow-hidden relative pr-1 ${editorDropActive ? 'ring-1 ring-inset ring-text/30' : ''}`}
-          style={{ background: 'rgb(var(--bg-editor))' }}
+          className={`flex-1 overflow-hidden relative pr-1 ${editorDropActive ? 'ring-1 ring-inset ring-text/30' : ''}${
+            sidebarFloating ? ' sidebar-floating' : ''
+          }`}
+          style={{
+            background: 'rgb(var(--bg-editor))',
+            // Room the text keeps on the left for the floating sidebar's mini-view (index.css).
+            '--mini-sidebar-reserve': `${MINI_SIDEBAR_RESERVE}px`,
+          } as React.CSSProperties}
           onDragOver={handleEditorDragOver}
           onDragLeave={handleEditorDragLeave}
           onDrop={handleEditorDrop}

@@ -2,13 +2,21 @@ import { Fragment, memo, useMemo, useRef, useEffect, useLayoutEffect, useState }
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, ArchiveRestore, Search, PanelLeftClose, Trash2, Lock, FolderPlus, Folder, FolderOpen, X, Plus, Timer, LayoutGrid } from 'lucide-react'
+import { Archive, ArchiveRestore, Search, PanelLeftClose, PanelLeftOpen, Trash2, Lock, FolderPlus, Folder, FolderOpen, X, Plus, Timer, LayoutGrid } from 'lucide-react'
 import { isToday, isYesterday } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { ContextMenu } from '../ContextMenu'
 import { CustomColorSwatch } from '../CustomColorSwatch'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
-import { colorChannels, TAG_COLOR_VARS } from '../../lib/tagColors'
+import { colorChannels, resolveGroupColor, TAG_COLOR_VARS } from '../../lib/tagColors'
+import {
+  buildMiniSidebarRows,
+  isSidebarFolderShown,
+  isSidebarGroupShown,
+  orderFavorites,
+  type MiniSidebarRow,
+} from '../../lib/miniSidebar'
+import { modKey } from '../../lib/platform'
 import { escapeRegExp, parseSearchQuery, noteMatchesQuery } from '../../lib/searchUtils'
 import { NoteGroupHeader } from './NoteGroupHeader'
 import { NoteFolderHeader } from './NoteFolderHeader'
@@ -22,7 +30,14 @@ import type { GroupColor, Note } from '../../types'
 import type { TagColorMap } from '../../lib/tagColors'
 
 interface SidebarProps {
-  onCollapse: () => void
+  /** Docked in the layout (true) or floating over the content (false). */
+  pinned: boolean
+  /** The pin switch next to the search box (docked ⇄ floating; with `hideOnly`, it hides the sidebar). */
+  onTogglePinned: () => void
+  /** Brain view: the button only hides the sidebar — a plain "collapse" button, not a pressed switch. */
+  hideOnly?: boolean
+  /** Receives the mini-view rows (lib/miniSidebar.ts) — passed by SidebarShell only while floating. */
+  onMiniRows?: (rows: MiniSidebarRow[]) => void
 }
 
 function formatNoteDate(iso: string, t: Messages): string {
@@ -174,7 +189,7 @@ const NoteRow = memo(function NoteRow({
   )
 })
 
-export function Sidebar({ onCollapse }: SidebarProps) {
+export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }: SidebarProps) {
   const t = useT()
   const rawNotes = useNotesStore((s) => s.notes)
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
@@ -357,12 +372,15 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   // Section headers ("groups" / "notes") mirror the favorites label. Compute the
   // first group that will actually render and the first ungrouped note, so each
   // header is emitted exactly once, right before its block.
-  const hasFavorites = notes.some((n) => n.favorited)
+  const favoriteNotes = useMemo(
+    () => orderFavorites(notes.filter((n) => n.favorited), noteOrder['favorites']),
+    [notes, noteOrder],
+  )
+  const hasFavorites = favoriteNotes.length > 0
   const firstRenderableGroupId = (() => {
     for (const it of items) {
       if (it.kind !== 'group') continue
-      if (hasActiveFilters && it.visibleCount === 0) continue
-      if (it.group.archived && !showArchived) continue
+      if (!isSidebarGroupShown(it, { hasActiveFilters, showArchived })) continue
       return it.group.id
     }
     return null
@@ -380,6 +398,19 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     hasSearchFilter && keyboardResultIndex >= 0 && keyboardResultIndex < visibleNoteIds.length
       ? visibleNoteIds[keyboardResultIndex]
       : null
+
+  // Mini-view of this list while the sidebar floats (SidebarShell draws it).
+  // Same rows, order and visibility rules as the list rendered below.
+  const miniRows = useMemo(() => {
+    if (!onMiniRows) return null
+    return buildMiniSidebarRows(
+      { favorites: favoriteNotes, items, collapsedGroupIds, collapsedFolderIds, hasActiveFilters, showArchived },
+      (name) => resolveGroupColor(name, sectionTagColors),
+    )
+  }, [onMiniRows, favoriteNotes, items, collapsedGroupIds, collapsedFolderIds, hasActiveFilters, showArchived, sectionTagColors])
+  useEffect(() => {
+    if (miniRows) onMiniRows?.(miniRows)
+  }, [miniRows, onMiniRows])
 
   useEffect(() => {
     if (!hasSearchFilter || visibleNoteIds.length === 0) {
@@ -692,7 +723,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   function renderFolder(group: { id: string; color: GroupColor }, sf: SidebarFolder) {
     const { folder, notes: folderNotes } = sf
     const collapsed = collapsedFolderIds.has(folder.id)
-    if (hasActiveFilters && folderNotes.length === 0) return null
+    if (!isSidebarFolderShown(folderNotes.length, hasActiveFilters)) return null
     const isMoveTarget = noteMoveTarget?.folderId === folder.id
     return (
       <div
@@ -860,7 +891,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   })
 
   return (
-    <div className="flex flex-col h-full border-r border-border bg-surface-1">
+    <div className={`flex flex-col h-full bg-surface-1${pinned ? ' border-r border-border' : ''}`}>
       {modal && (
         <ConfirmModal
           title={modal.title}
@@ -879,6 +910,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
           <input
             ref={searchRef}
+            data-sidebar-search
             type="text"
             placeholder={t.sidebar.searchPlaceholder}
             value={searchQuery}
@@ -907,13 +939,21 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         >
           <LayoutGrid size={14} strokeWidth={2.5} />
         </button>
+        {/* Pin switch: pressed = docked in the layout; off = floating panel that
+            opens from the mini-view at the content's left edge. In the brain view
+            it's a plain "collapse" button (hideOnly). */}
         <button
-          onClick={onCollapse}
-          title={t.sidebar.collapseSidebar}
-          className="flex-shrink-0 p-1.5 rounded text-text-muted/50 hover:text-text-muted
-                     hover:bg-surface-2 transition-colors"
+          onClick={onTogglePinned}
+          aria-pressed={hideOnly ? undefined : pinned}
+          aria-label={hideOnly ? tf(t.sidebar.collapseSidebar, { key: modKey }) : t.sidebar.pinSidebarLabel}
+          title={tf(pinned ? t.sidebar.collapseSidebar : t.sidebar.pinSidebar, { key: modKey })}
+          className={`flex-shrink-0 p-1.5 rounded transition-colors ${
+            pinned && !hideOnly
+              ? 'text-text-muted bg-text/[0.07] hover:bg-text/[0.12]'
+              : 'text-text-muted/50 hover:text-text-muted hover:bg-surface-2'
+          }`}
         >
-          <PanelLeftClose size={14} strokeWidth={2.5} />
+          {pinned ? <PanelLeftClose size={14} strokeWidth={2.5} /> : <PanelLeftOpen size={14} strokeWidth={2.5} />}
         </button>
       </div>
 
@@ -987,13 +1027,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           <ul className="flex flex-col gap-0.5 px-2.5 pt-2 pb-8">
             {/* ── Favorites section ───────────────────────────────────────── */}
             {(() => {
-              const allFavorites = notes.filter((n) => n.favorited)
-              if (allFavorites.length === 0) return null
-              const favOrder = noteOrder['favorites']
-              const favoriteNotes = favOrder
-                ? [...favOrder.map((id) => allFavorites.find((n) => n.id === id)).filter((n): n is typeof allFavorites[0] => n != null),
-                   ...allFavorites.filter((n) => !favOrder.includes(n.id))]
-                : allFavorites
+              if (favoriteNotes.length === 0) return null
               return (
                 <>
                   <li className="px-1 pt-0.5 pb-0.5">
@@ -1010,9 +1044,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               if (item.kind === 'group') {
                 const { group, notes: groupNotes, folders: groupFolders } = item
                 const collapsed = collapsedGroupIds.has(group.id)
-                if (hasActiveFilters && item.visibleCount === 0) return null
-                // Archived groups are hidden unless "Show archived" is on (then shown dimmed)
-                if (group.archived && !showArchived) return null
+                // Hidden when filters leave it empty; archived groups are hidden unless
+                // "Show archived" is on (then shown dimmed)
+                if (!isSidebarGroupShown(item, { hasActiveFilters, showArchived })) return null
                 const isFirstGroup = group.id === firstRenderableGroupId
                 return (
                   <Fragment key={`group-${group.id}`}>

@@ -26,6 +26,7 @@ import { moveSectionInList, restoreSectionInList } from '../../lib/sectionUtils'
 import { firstValidDate } from '../../lib/dateUtils'
 import { ownsKeys } from '../../lib/keyScope'
 import { SectionNameField } from './SectionNameField'
+import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { TempNoteExpiryMenu } from './TempNoteExpiryMenu'
 import { createDebouncedSave } from '../../lib/pendingEdits'
 import {
@@ -225,6 +226,12 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   const tabsScrollRef = useRef<HTMLDivElement>(null)
   const [tabsOverflow, setTabsOverflow] = useState(false)
   const rawTextareaRef = useRef<HTMLTextAreaElement>(null)
+  // The raw textarea is also the floating sidebar's content anchor (stable ref
+  // so it only signals on mount/unmount, not on every render).
+  const setRawTextarea = useCallback((el: HTMLTextAreaElement | null) => {
+    rawTextareaRef.current = el
+    sidebarAnchorRef(el)
+  }, [])
   const editorRef = useRef<EditorHandle | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const sectionUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1766,7 +1773,8 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
           {rawMode ? (
             <>
               <textarea
-                ref={rawTextareaRef}
+                ref={setRawTextarea}
+                data-sidebar-anchor
                 value={displayContent}
                 onChange={handleRawChange}
                 onBlur={handleRawBlur}
@@ -1800,7 +1808,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
                   fontSize: `${fontSize}px`,
                   fontFamily: fontFamily === 'inter' ? "'Inter', sans-serif" : "'JetBrains Mono', 'Fira Code', monospace",
                 }}
-                className={`h-full p-4 bg-transparent text-text placeholder-text-muted/30 border-none outline-none resize-none caret-text leading-relaxed w-full ${readableWidth ? 'raw-readable' : ''}`}
+                className={`raw-editor h-full p-4 bg-transparent text-text placeholder-text-muted/30 border-none outline-none resize-none caret-text leading-relaxed w-full ${readableWidth ? 'raw-readable' : ''}`}
                 spellCheck={false}
               />
               {searchOpen && (

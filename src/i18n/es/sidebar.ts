@@ -9,7 +9,11 @@ export const sidebar = {
 
   searchPlaceholder: 'Buscar... o #sección',
   clearSearch: 'Limpiar búsqueda',
-  collapseSidebar: "Contraer barra lateral (Ctrl+')",
+
+  pinSidebarLabel: 'Fijar barra lateral',
+  collapseSidebar: "Contraer barra lateral ({key}+')",
+  pinSidebar: "Fijar barra lateral ({key}+')",
+  panelLabel: 'Barra lateral',
 
   newNoteTooltip: 'Nueva nota (Ctrl+N) · Clic derecho para nota temporal',
   newTempNoteTooltip: 'Nueva nota temporal (24h)',

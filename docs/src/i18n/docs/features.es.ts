@@ -163,7 +163,7 @@ export const featuresEs: FeaturesContent = {
           { combos: [['Ctrl', 'Shift', 'N']], desc: 'Nueva nota temporal (se autoelimina en 24 h)' },
           { combos: [['Ctrl', 'P']], desc: 'Paleta de comandos' },
           { combos: [['Ctrl', 'Shift', 'F']], desc: 'Buscar en todas las notas (sidebar)' },
-          { combos: [['Ctrl', "'"]], desc: 'Mostrar / ocultar el sidebar' },
+          { combos: [['Ctrl', "'"]], desc: 'Fijar / desfijar el sidebar' },
           { combos: [['Ctrl', 'Click']], desc: 'Abrir una nota en paralelo a la actual (vista dividida)' },
         ],
       },
@@ -203,6 +203,7 @@ export const featuresEs: FeaturesContent = {
     title: 'Cuatro maneras de verlo todo',
     intro: [
       'Más allá del editor, NoteFlow tiene cuatro <strong>vistas a área completa</strong> que sustituyen la superficie de edición (el sidebar se queda como contexto). Son mutuamente excluyentes — abrir una cierra las demás, y seleccionar cualquier nota te devuelve al editor.',
+      '¿Quieres todo el ancho? <strong>Desfija el sidebar</strong> (el botón junto a su buscador, o <kbd>Ctrl</kbd>+<kbd>\'</kbd>): se pliega en un <strong>minimapa</strong> tenue y sin texto en el borde izquierdo del texto — una marca diminuta por nota, grupo y carpeta, con sus colores — y vuelve a flotar sobre el contenido al pasar el ratón.',
     ],
     cards: [
       {

@@ -12,6 +12,7 @@ import { colorChannels } from '../../lib/tagColors'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
+import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import type { GroupColor, Note, NoteGroup } from '../../types'
 
 interface AllContentOverviewProps {
@@ -428,8 +429,8 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
         </div>
       </div>
 
-      {/* ── Scroll area ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      {/* ── Scroll area (also the floating sidebar's content anchor) ── */}
+      <div className="flex-1 min-h-0 overflow-y-auto" data-sidebar-anchor ref={sidebarAnchorRef}>
         <div className="px-6 py-5 space-y-6">
           {isEmpty ? (
             <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">

@@ -3377,10 +3377,10 @@ ipcMain.handle('settings:set-startup-stickies', (_event, stickies: Array<{ noteI
 })
 
 ipcMain.handle('settings:get-ui-state', () => {
-  return (readSettings().uiState ?? {}) as { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }
+  return (readSettings().uiState ?? {}) as { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[]; sidebarMode?: 'pinned' | 'floating' }
 })
 
-ipcMain.handle('settings:set-ui-state', (_event, patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }) => {
+ipcMain.handle('settings:set-ui-state', (_event, patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[]; sidebarMode?: 'pinned' | 'floating' }) => {
   const settings = readSettings()
   settings.uiState = { ...(settings.uiState as object ?? {}), ...patch }
   writeSettings(settings)

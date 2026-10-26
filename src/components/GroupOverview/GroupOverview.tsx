@@ -15,6 +15,7 @@ import { CustomColorSwatch } from '../CustomColorSwatch'
 import { OverviewNoteCard } from '../OverviewNoteCard'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
+import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import type { GroupColor, Note, NoteGroup, NoteFolder } from '../../types'
 
 interface GroupOverviewProps {
@@ -565,8 +566,9 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
         </button>
       </div>
 
-      {/* ── Scroll area (only this scrolls — the scrollbar starts below the header) ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto relative">
+      {/* ── Scroll area (only this scrolls — the scrollbar starts below the header) ──
+          Also the floating sidebar's content anchor (it lines up below the header). */}
+      <div className="flex-1 min-h-0 overflow-y-auto relative" data-sidebar-anchor ref={sidebarAnchorRef}>
       <div className="px-6 py-5 space-y-6">
         {/* Inline new-folder input */}
         {showNewFolder && (

@@ -162,7 +162,7 @@ export const featuresEn = {
           { combos: [['Ctrl', 'Shift', 'N']], desc: 'New temporary note (self-deletes in 24 h)' },
           { combos: [['Ctrl', 'P']], desc: 'Command palette' },
           { combos: [['Ctrl', 'Shift', 'F']], desc: 'Search across all notes (sidebar)' },
-          { combos: [['Ctrl', "'"]], desc: 'Toggle the sidebar' },
+          { combos: [['Ctrl', "'"]], desc: 'Pin / unpin the sidebar' },
           { combos: [['Ctrl', 'Click']], desc: 'Open a note alongside the current one (split view)' },
         ],
       },
@@ -202,6 +202,7 @@ export const featuresEn = {
     title: 'Four ways to see everything',
     intro: [
       'Beyond the editor, NoteFlow has four <strong>full-area views</strong> that replace the editing surface (the sidebar stays as context). They\'re mutually exclusive — opening one closes the others, and selecting any note drops you back into the editor.',
+      'Want the full width? <strong>Unpin the sidebar</strong> (the button next to its search box, or <kbd>Ctrl</kbd>+<kbd>\'</kbd>): it folds into a faint, text-free <strong>mini-map</strong> at the left edge of the text — one tiny mark per note, group and folder, tinted with their colors — and floats back over the content when you hover it.',
     ],
     cards: [
       {

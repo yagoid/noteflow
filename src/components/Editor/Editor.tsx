@@ -16,6 +16,7 @@ import { AutoCloseBrackets } from './AutoCloseBrackets'
 import { SectionLinkPicker } from './SectionLinkPicker'
 import { EditorToc } from './EditorToc'
 import { useTocItems } from './useEditorToc'
+import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { TOC_MIN_EDITOR_WIDTH, TOC_RESERVE } from '../../lib/tocUtils'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../lib/markdownHtml'
@@ -451,8 +452,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     >
       {!readOnly && !hideToolbar && <EditorToolbar editor={editor} />}
       {/* Positioning context for the TOC: it floats over the scroller's right
-          edge without scrolling with the content. */}
-      <div className="relative flex-1 min-h-0">
+          edge without scrolling with the content. Also the floating sidebar's
+          content anchor: its panel/mini-view start where the text starts. */}
+      <div className="relative flex-1 min-h-0" data-sidebar-anchor ref={sidebarAnchorRef}>
         <div
           ref={scrollRef}
           // overflow-x-hidden: nothing at note level needs horizontal scroll
@@ -462,7 +464,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
           // right edge (e.g. the absolutely-positioned task actions in readable
           // mode) would add a horizontal scrollbar to the whole note.
           // editor-has-toc reserves the TOC's room on the right (index.css).
-          className={`h-full overflow-y-auto overflow-x-hidden${tocVisible ? ' editor-has-toc' : ''}`}
+          className={`editor-scroll h-full overflow-y-auto overflow-x-hidden${tocVisible ? ' editor-has-toc' : ''}`}
           style={{
             '--prose-font-size': fontSize ? `${fontSize}px` : undefined,
             '--prose-font-family': fontFamily === 'inter'

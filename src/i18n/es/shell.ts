@@ -1,7 +1,6 @@
 export const shell = {
   dragToResize: 'Arrastra para redimensionar',
   showNotes: 'Mostrar notas',
-  showSidebar: "Mostrar barra lateral ({key}+')",
 
   reorderColumns: 'Reordenar columnas',
   drag: 'Arrastrar',

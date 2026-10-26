@@ -35,7 +35,7 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 ┌─ TitleBar (32px) ──────────────────────────────────────────────────┐
 │  NOTEFLOW  [🧠 brain] [⬇ update] [☁ sync]        [⚙ settings] [─ □ ×] │
 ├─ Sidebar (180–480px, redimensionable) ──┬─ Editor area ─────────────┤
-│  [🔍 Search...      ] [▦] [⮜]          │  [Tabs sección] [⚙]        │
+│  [🔍 Search...      ] [▦] [📌⮜]        │  [Tabs sección] [⚙]        │
 │  [     +     ] [new group]              │  Título de nota            │
 │  [           ] [temp note]              │  19/03/2026 · 21:00        │
 │                                         │  ──────────────────────── │
@@ -55,6 +55,38 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 │  ⊞ Show archived       3 notes         │                            │
 └─────────────────────────────────────────┴────────────────────────────┘
 ```
+
+`[📌⮜]` = interruptor **fijar / contraer** el sidebar (ver "Sidebar fijado / flotante" abajo).
+
+### Sidebar fijado / flotante
+- **Dos modos.** *Fijado* (por defecto): el sidebar ocupa su ancho en el layout, como siempre.
+  *Flotante*: el contenido usa todo el ancho y el sidebar aparece como **panel superpuesto** al
+  acercar el ratón al borde izquierdo de la zona de contenido.
+- **Interruptor** = el botón junto al buscador (y `Ctrl+'`). Fijado se ve "pulsado"
+  (`PanelLeftClose`, tooltip "Collapse sidebar (Ctrl+')"); pulsarlo pasa a flotante. En flotante el
+  icono es `PanelLeftOpen` (tooltip "Pin sidebar (Ctrl+')"): se abre el panel con el ratón y se pulsa
+  para volver a fijar. **No** hay columna/botón aparte para desplegar. El modo se recuerda entre
+  reinicios (ajuste local del dispositivo, no se sincroniza).
+- **Mini-vista** (plegado): tira vertical finísima y muy translúcida en el borde izquierdo de la zona
+  de contenido, **sin texto**, una marca por fila del sidebar en el mismo orden y respetando
+  filtros/archivadas/colapsados: notas = rectangulito con micro-marcas de los colores de sus primeras
+  secciones (la activa más marcada), grupos = pastilla de su color (y sus notas debajo con una micro
+  línea guía), carpetas = cuadradito contorneado, cabeceras (favorites/groups/notes) = línea fina. Se
+  hace más visible al pasar el ratón. Con muchas notas muestra una ventana centrada en la nota activa,
+  como un minimapa. El texto del editor deja un pequeño margen izquierdo para no quedar debajo.
+- **Panel flotante**: es el sidebar completo (búsqueda, botones, lista, pie), mismo ancho, con borde y
+  sombra; entra deslizando desde la izquierda. Verticalmente cubre **solo la zona de contenido**:
+  empieza donde empieza el texto del panel más a la izquierda (bajo pestañas, título y toolbar, o bajo
+  la cabecera del pane en el split, o bajo la cabecera de las vistas de grupo / nota / all content) y
+  acaba en su borde inferior.
+- **Abre** al dejar el ratón sobre la mini-vista (~120 ms; no salta si se está seleccionando texto con
+  el botón pulsado) o con un click en ella; **cierra** ~200 ms después de salir. Se queda abierto
+  mientras haya foco de escritura dentro (búsqueda, renombrar, nuevo grupo/carpeta), un menú
+  contextual o modal lanzado desde él, o un arrastre en curso (arrastrar notas al editor → split, a la
+  ventana sticky o a otro grupo sigue funcionando). Seleccionar una nota no lo cierra. **Escape** lo
+  cierra y devuelve el foco al editor. `Ctrl+Shift+F` lo abre y enfoca la búsqueda.
+- La **vista cerebro** no cambia: su sidebar de notas se muestra/oculta aparte (columna de 24 px),
+  nunca flota.
 
 Iconos del TitleBar:
 - **⬇ update**: aparece solo si hay una versión nueva; descarga e instala in-app (muestra el %
@@ -377,7 +409,7 @@ contenido** del usuario de un vistazo, a modo de índice. Hermana de la vista de
 
 **Cómo entrar:** botón-icono **"View all content"** (`LayoutGrid`, solo icono, sin texto; tooltip y
 aria-label "View all content") en la fila del buscador del sidebar, entre la barra de búsqueda y el
-botón de plegar el sidebar (mismo estilo/tamaño que este).
+interruptor fijar/contraer el sidebar (mismo estilo/tamaño que este).
 
 **Disposición** (misma estética que la vista de grupo: cabecera fija + área scroll + tarjetas en grid):
 - **Favorites** — las notas marcadas como favoritas, como tarjetas de nota (mismas que la vista de grupo:
@@ -857,7 +889,7 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
 ## Búsqueda y filtros
 
 ### Búsqueda global (sidebar)
-- `Ctrl+Shift+F` → enfoca el input de búsqueda del sidebar.
+- `Ctrl+Shift+F` → enfoca el input de búsqueda del sidebar (con el sidebar flotante, abre el panel).
 - Busca en tiempo real en: títulos, contenido y tags.
 - Case-insensitive, sin acentos.
 
@@ -1298,7 +1330,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+Shift+N` | Nueva nota temporal (24h) |
 | `Ctrl+P` | Command palette |
 | `Ctrl+Shift+F` | Buscar en todas las notas (sidebar) |
-| `Ctrl+'` | Toggle sidebar |
+| `Ctrl+'` | Fijar / desfijar sidebar (fijado ⇄ flotante; en la vista cerebro, mostrar/ocultar sus notas) |
 | `Ctrl+Click` | Abrir nota en paralelo (sobre un tag de sección: esa sección en un panel nuevo) |
 
 ### Secciones

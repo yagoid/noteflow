@@ -22,6 +22,10 @@ Dos invariantes para que el sidebar siga fluido con muchas notas — fáciles de
 - **Pendiente:** virtualización real (windowing de filas fuera de pantalla) — aún se montan todas
   las filas en el DOM; el árbol anidado con grupos/carpetas colapsables + drag&drop lo hace no
   trivial.
+- **Mini-vista del sidebar flotante:** sus filas se derivan en `Sidebar` (un `useMemo` más sobre
+  `items`, solo mientras flota) y `SidebarShell` las guarda **solo si cambia su firma**
+  (`miniRowsSignature`): teclear en el editor no cambia ids/orden/colores → la mini-vista no se
+  re-renderiza. Solo se pinta la ventana visible (ver "Sidebar flotante").
 
 ### Importación desde otras apps (`electron/importers/`, `src/lib/notionHtml.ts`)
 Importa notas de **Markdown folder**, **Notion** (export HTML `.zip`) y **Google Keep** (Takeout
@@ -866,6 +870,78 @@ del editor rich. Piezas: `lib/tocUtils.ts` (lógica pura con tests en `tests/lib
   `preventDefault` (entradas e indicador) para no robar el foco/caret al editor ni dejar el panel
   abierto por `focus-within` tras un click. El auto-scroll del panel hacia la entrada activa se hace a
   mano (`scrollIntoView` scrollearía también los ancestros `overflow-hidden` del editor).
+
+### Sidebar flotante (mini-vista + panel superpuesto)
+Dos modos del sidebar en la vista normal: **fijado** (en el layout, como siempre) y **flotante**.
+Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.test.ts`),
+`Sidebar/SidebarShell.tsx` (alojamiento + hover/foco/drag + medición), `Sidebar/MiniSidebar.tsx`
+(dibujo) y `Sidebar/sidebarAnchor.ts` (anclas de contenido).
+- **Un solo `Sidebar`, sin remontar.** `SidebarShell` monta siempre la misma instancia en un `aside`
+  absoluto dentro de la fila de `App` (`contentRowRef`); el elemento del `Sidebar` (render-prop de
+  `App`) va memoizado, así los cambios de hover/foco/medición del shell no re-renderizan la lista. Fijado = un *spacer* en el flujo reserva el
+  ancho (transición de `width` 220 ms, igual que antes) y el `aside` va encima a altura completa;
+  flotante = el spacer pasa a 0 y el mismo `aside` se convierte en panel (`sidebarWidth` de ancho,
+  `left` 8 px, borde/sombra tipo TOC, `z-index` 40, entrada opacity + translate-x 150 ms). El panel
+  es **hermano** de `<main>`, no hijo: así los drops dentro del sidebar no burbujean al handler de
+  "soltar en el editor → split" de `main`.
+- **Interruptor.** El botón `PanelLeftClose`/`PanelLeftOpen` junto al buscador es un switch
+  (`aria-pressed` = fijado, `aria-label` fijo "Pin sidebar", tooltip según estado). `Ctrl+'` alterna
+  el modo. Ya no existe la columna de 28 px con `PanelLeftOpen`; para volver a fijar se abre el panel
+  y se pulsa el switch. **La vista cerebro no cambia:** su sidebar se muestra/oculta con
+  `brainSidebarVisible` (y su columna de 24 px), nunca flota; ahí el botón es un "Collapse" normal
+  (`hideOnly`: sin `aria-pressed`).
+- **Persistencia:** `settings.json → uiState.sidebarMode` (`'pinned' | 'floating'`, local, no
+  sincroniza). Arranca fijado hasta que llega `getUiState`; las transiciones del shell están
+  desactivadas hasta entonces (`sidebarAnimate`) para que un arranque flotante no reproduzca el plegado.
+- **Posición vertical medida.** Panel y mini-vista ocupan solo la **zona de contenido** del pane más a
+  la izquierda: su top/bottom salen del **ancla de contenido** visible más a la izquierda
+  (`pickSidebarAnchor` + `floatingSidebarBounds`, inset 12 px como el TOC, altura mínima 240 px).
+  Anclas (`data-sidebar-anchor` + callback ref estable `sidebarAnchorRef`): el wrapper del scroller de
+  `Editor` (debajo de la toolbar → recoge su alto variable), el textarea raw de `NoteEditor` y el
+  cuerpo con scroll de `GroupOverview`/`NoteOverview`/`AllContentOverview` (debajo de su cabecera).
+  Sin ancla (cargando, sin nota, nota cifrada bloqueada) → toda la fila. Se re-mide (rAF) con un
+  `ResizeObserver` sobre la fila y sobre el ancla elegida (toolbar que pasa a 2 filas, banners encima,
+  hint de overflow del split, animación del spacer…), al montar/desmontar un ancla (el callback ref
+  avisa: cambio de vista, raw, nota/sección) y con el scroll horizontal del split (scroll en captura,
+  ignorando el de dentro de anclas y del sidebar). **No** hay MutationObserver sobre el editor.
+- **Apertura/cierre.** Hover sobre la franja de 18 px (`MINI_STRIP_WIDTH`) del borde izquierdo:
+  abre a los 120 ms (más que el TOC, para no saltar al seleccionar texto pegado al borde; con un botón
+  pulsado — selección en curso — no abre); click en la franja abre ya. Sale del panel/franja → cierra a
+  los 200 ms. Sigue abierto mientras: el ratón está encima; hay foco de **texto o teclado** dentro
+  (inputs de búsqueda/rename/nuevo grupo-carpeta o `:focus-visible`; el foco que deja un click en un
+  botón no cuenta, si no el panel no cerraría tras pulsar una cabecera; Chromium no emite `blur` si el
+  input enfocado se desmonta — rename confirmado con Enter —, así que el `MutationObserver` de abajo
+  suelta el foco si `document.activeElement` ya no está dentro); hay un `.fixed` dentro
+  (menús contextuales, `ConfirmModal`, `EncryptionModal`… — `MutationObserver` sobre el `aside` que
+  solo re-comprueba si se inserta/quita un elemento que es o contiene un `.fixed`); o hay un **drag**
+  iniciado en él (el `dragend` puede no llegar si el drop re-parenta la fila, así que también cierran
+  el drag un `drop` en cualquier sitio y el primer `mousemove` posterior; al terminar, queda abierto
+  solo si el punto final está sobre el panel). Escape (salvo en un input de rename, o con un menú
+  abierto) cierra y devuelve el foco al editor del pane activo (`focusContentAnchor`) y hace
+  `stopPropagation` (si no, el Escape global — listener de `window` en burbuja — de `GroupOverview`/`NoteOverview`/`AllContentOverview` cerraría la vista); la franja no
+  reabre hasta que el ratón sale de ella. Seleccionar una nota no lo cierra.
+- **Abierto/cerrado sin `visibility`.** Cerrado = `opacity: 0` + `pointer-events: none` (sigue
+  enfocable): `Ctrl+Shift+F` (`noteflow:focus-search`) enfoca el buscador aunque esté cerrado y el
+  foco lo abre; Tab desde fuera también. Abierto usa `transform: none` (no `translateX(0)`): un
+  ancestro transformado sería el *containing block* de los menús/modales `fixed` del sidebar.
+- **Mini-vista.** Sin texto, una fila por fila real del sidebar, en el mismo orden
+  (`buildMiniSidebarRows`, que comparte con `Sidebar` `orderFavorites`/`isSidebarGroupShown`/
+  `isSidebarFolderShown` → mismos filtros, archivados y colapsados): nota = rectángulo `text` muy
+  tenue con micro-rectángulos de los colores de sus 3 primeras secciones (la activa más marcada; la
+  activa es `noteViewId ?? activeNoteId`, como en el sidebar); grupo = pastilla de su color (más corta
+  si está colapsado); carpeta = cuadradito contorneado (relleno si colapsada); cabeceras
+  (favorites/groups/notes) = línea fina; sus filas hijas llevan un segmento de línea guía del color del
+  grupo. Filas de 5 px + 3 px de hueco; si no caben, ventana centrada en la nota activa
+  (`miniSidebarWindow`, sin scroll). Franja `opacity-40` en reposo, `90` con hover, 0 con el panel
+  abierto; `aria-hidden` (lo accesible es el panel).
+- **Reserva a la izquierda.** Con el sidebar flotante `<main>` lleva `.sidebar-floating` y
+  `--mini-sidebar-reserve` (`MINI_SIDEBAR_RESERVE` = 28 px); `index.css` lo aplica como
+  `--pm-pad-l` del `.ProseMirror` del editor real (`.editor-scroll > .prose-editor`; en Readable + TOC,
+  como suelo del mismo `clamp`) y como `padding-left` del textarea raw (`.raw-editor`), así nada de
+  texto queda bajo la mini-vista. Las tarjetas `.note-preview` de la vista de nota (también
+  `.prose-editor`) quedan fuera a propósito.
+  Es el espejo izquierdo de `--toc-reserve`; se aplica a todos los panes (en el split solo el primero
+  la necesita, la diferencia es de 4 px).
 
 ### Relaciones sección↔sección (slash command + cerebro)
 Enlaces explícitos que el usuario crea **inline mientras escribe**: en el editor rich teclea `/` →

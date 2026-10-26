@@ -478,8 +478,8 @@ declare global {
       setSkillSync: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>
       getStartupStickies: () => Promise<Array<{ noteId: string; sectionId: string }>>
       setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>) => Promise<void>
-      getUiState: () => Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }>
-      setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }) => Promise<void>
+      getUiState: () => Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[]; sidebarMode?: 'pinned' | 'floating' }>
+      setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[]; sidebarMode?: 'pinned' | 'floating' }) => Promise<void>
       getGroups: () => Promise<NoteGroup[]>
       setGroups: (groups: NoteGroup[]) => Promise<void>
       getFolders: () => Promise<NoteFolder[]>

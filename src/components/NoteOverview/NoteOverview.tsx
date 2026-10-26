@@ -12,6 +12,7 @@ import { ConfirmModal } from '../ConfirmModal'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
+import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import type { Note, NoteSection } from '../../types'
 
 interface NoteOverviewProps {
@@ -335,8 +336,9 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
         </button>
       </div>
 
-      {/* ── Scroll area (only this scrolls — the scrollbar starts below the header) ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto relative">
+      {/* ── Scroll area (only this scrolls — the scrollbar starts below the header) ──
+          Also the floating sidebar's content anchor (it lines up below the header). */}
+      <div className="flex-1 min-h-0 overflow-y-auto relative" data-sidebar-anchor ref={sidebarAnchorRef}>
       <div className="px-6 py-5">
         {locked ? (
           <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">

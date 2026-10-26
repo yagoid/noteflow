@@ -214,7 +214,7 @@ Anclas: `#organize` `#templates` `#sticky` `#links` `#shortcuts` `#views` `#temp
 | `#sticky` | Mock CSS 300×300 plegable, Ctrl+S/Ctrl+G, startup de stickies | skill (Sticky notes) + `StickyMock.astro` |
 | `#links` | Slash command, pills vivas/rotas, forma raw `[Name](noteflow://…)`; un bullet sobre el tablero kanban (`/kanban`) | skill + `src/lib/sectionRelations.ts` + `src/lib/kanban.ts` |
 | `#shortcuts` | Tabla completa de atajos (datos en `features.en.ts` como `combos`) | `src/components/Settings/ShortcutsPanel.tsx` |
-| `#views` | Note/group overview, All content, Brain view | skill (Vistas) |
+| `#views` | Note/group overview, All content, Brain view; párrafo del sidebar flotante (desfijar → minimapa) | skill (Vistas, Sidebar fijado / flotante) |
 | `#temp` | Notas temporales 24h | skill |
 | `#encryption` | AES-256-GCM + PBKDF2 310k, sin backdoor, CLI las ignora | skill / `noteUtils` |
 | `#ai-hidden` | Toggle Hide from AI (enlaza a `/ai#privacy`) | skill |

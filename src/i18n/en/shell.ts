@@ -2,7 +2,6 @@
 export const shell = {
   dragToResize: 'Drag to resize',
   showNotes: 'Show notes',
-  showSidebar: "Show sidebar ({key}+')",
 
   // Split-pane column controls.
   reorderColumns: 'Reorder columns',

@@ -307,7 +307,7 @@ export const settings = {
     newNote: 'Nueva nota',
     newTempNote: 'Nueva nota temporal (24h)',
     searchAllNotes: 'Buscar en todas las notas',
-    toggleSidebar: 'Mostrar / ocultar barra lateral',
+    toggleSidebar: 'Fijar / desfijar barra lateral',
     openSideBySide: 'Abrir nota en paralelo (sobre un tag de sección: esa sección en un panel nuevo)',
     newSectionShortcut: 'Nueva sección',
     deleteSectionShortcut: 'Eliminar sección',

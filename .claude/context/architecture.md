@@ -121,6 +121,10 @@ noteflow/
 │   │   │   ├── NoteGroupHeader.tsx      # Cabecera de grupo (nombre→group overview; resto→colapsar)
 │   │   │   ├── NoteFolderHeader.tsx     # Cabecera colapsable de carpeta (dentro de grupo)
 │   │   │   ├── SectionTabsRow.tsx       # Fila de tags de secciones en la tarjeta de nota
+│   │   │   ├── SidebarShell.tsx         # Aloja el Sidebar fijado (en el layout) o flotante (panel
+│   │   │   │                            #   superpuesto + mini-vista); ver patterns.md "Sidebar flotante"
+│   │   │   ├── MiniSidebar.tsx          # Mini-vista sin texto del sidebar (modo flotante)
+│   │   │   ├── sidebarAnchor.ts         # Anclas de contenido (data-sidebar-anchor) que mide el panel flotante
 │   │   │   └── useSidebarGroups.ts      # Hook: agrupa/ordena notas por grupo→carpeta
 │   │   ├── OverviewNoteCard.tsx         # Tarjeta de nota compartida (group + all-content) + formatCardDate
 │   │   ├── GroupOverview/
@@ -190,6 +194,8 @@ noteflow/
 │   │   ├── alarmUtils.ts         # Recolección de alarmas/deadlines (líneas de tarea, también indentadas) — testeado
 │   │   ├── paneUtils.ts          # Modelo puro de paneles del split (abrir/cerrar/reordenar/enfocar) — testeado
 │   │   ├── tocUtils.ts           # Lógica pura del índice flotante del editor (entradas, activo) — testeado
+│   │   ├── miniSidebar.ts        # Lógica pura del sidebar flotante (filas de la mini-vista, ventana,
+│   │   │                         #   ancla/posición del panel, reglas de visibilidad compartidas) — testeado
 │   │   ├── keyedQueue.ts         # Cola serial por clave (escrituras de una nota en orden) — testeada
 │   │   ├── syncStatus.ts         # Estado mostrado por el botón de sync (prioridades) + edad relativa — testeado
 │   │   ├── encryptedSession.ts   # Re-descifrado con la contraseña de sesión tras recargar + guarda
@@ -415,7 +421,8 @@ Estructura de `settings.json`:
     "activeNoteId": "xyz",
     "activeSectionId": "sec001",
     "collapsedGroupIds": ["abc12345"],
-    "collapsedFolderIds": ["fld001"]
+    "collapsedFolderIds": ["fld001"],
+    "sidebarMode": "floating"
   },
   "startupStickies": [
     { "noteId": "xyz", "sectionId": "sec001" }
@@ -469,6 +476,10 @@ Estructura de `settings.json`:
 > `aiManagedCatalog` es la **caché** del catálogo de modelos de NoteFlow AI que sirve el proxy
 > (`GET /models`); no es configuración del usuario (su modelo elegido sigue en `aiLlm`) y nunca se
 > pisa con una descarga fallida o inválida (ver `ai.md`).
+> `uiState` es estado de UI **local** de este dispositivo (`getUiState`/`setUiState`; el handler
+> fusiona el patch tal cual, sin sanear: el renderer valida al leer): nota/sección activas, grupos y
+> carpetas colapsados y `sidebarMode` (`'pinned'` | `'floating'`, ausente = fijado; ver `patterns.md`
+> "Sidebar flotante").
 > Los **journals de sync** viven en `userData/sync-state.json` (GitHub) y
 > `userData/cloud-sync-state.json` (NoteFlow Cloud) — estado LOCAL del dispositivo, nunca en el dir
 > de notas. El **log de actividad** vive en `userData/activity-log.json` (local, NO se sincroniza,

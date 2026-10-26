@@ -14,7 +14,14 @@ export const sidebar = {
   // Search box.
   searchPlaceholder: 'Search... or #section',
   clearSearch: 'Clear search',
-  collapseSidebar: "Collapse sidebar (Ctrl+')",
+
+  // Pin switch next to the search box: pinned = docked in the layout; off =
+  // floating panel that opens from the mini-view at the content's left edge.
+  pinSidebarLabel: 'Pin sidebar',
+  collapseSidebar: "Collapse sidebar ({key}+')",
+  pinSidebar: "Pin sidebar ({key}+')",
+  // Landmark label of the sidebar (docked or floating panel).
+  panelLabel: 'Sidebar',
 
   // New-note / new-group toolbar.
   newNoteTooltip: 'New note (Ctrl+N) · Right-click for temporary note',

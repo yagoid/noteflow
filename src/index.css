@@ -264,6 +264,27 @@ button {
   --pm-pad-l: clamp(1.5rem, 100cqw - var(--toc-reserve) - var(--readable-col), var(--toc-reserve));
 }
 
+/* Floating sidebar (Sidebar/SidebarShell.tsx). Its mini-view strip sits over
+   the left edge of the content area, so while the sidebar floats <main> gets
+   .sidebar-floating and the text keeps --mini-sidebar-reserve (set inline from
+   MINI_SIDEBAR_RESERVE in lib/miniSidebar.ts) as left padding — the TOC owns
+   the right edge, this the left one. Scoped to the real editors (Editor.tsx's
+   .editor-scroll scroller, the raw textarea) so section previews (.note-preview
+   cards in the note overview) keep their own padding.
+   Readable + TOC: same clamp as above with the reserve as the floor. */
+.sidebar-floating .editor-scroll > .prose-editor .ProseMirror {
+  --pm-pad-l: var(--mini-sidebar-reserve);
+}
+.sidebar-floating .editor-readable .editor-has-toc .prose-editor .ProseMirror {
+  --pm-pad-l: clamp(var(--mini-sidebar-reserve), 100cqw - var(--toc-reserve) - var(--readable-col), var(--toc-reserve));
+}
+.sidebar-floating .raw-editor {
+  padding-left: max(1rem, var(--mini-sidebar-reserve));
+}
+.sidebar-floating .editor-readable .raw-editor.raw-readable {
+  padding-left: max(var(--mini-sidebar-reserve), calc((100% - var(--readable-col)) / 2));
+}
+
 .prose-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: rgb(var(--text-muted));
