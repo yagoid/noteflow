@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 1.13.0
+version: 1.14.0
 ---
 
 # NoteFlow CLI — Referencia completa
@@ -873,9 +873,44 @@ noteflow touch "título"              # bumpea updated: y sincroniza
 # 4. Gestionar la estructura de secciones si hace falta
 noteflow section rename "título" "Sección" "Nuevo nombre"
 
-# 5. Sincronizar
+# 5. Cerrar: traer lo remoto y comprobar que todo subió (ver "Sincroniza y verifica")
+noteflow pull
 noteflow push
 ```
+
+### Sincroniza y verifica tras cada cambio (obligatorio para agentes)
+
+Los comandos que escriben (`new`, `set`, `add`, `touch`, `section …`, `rename`, `move`,
+`archive`, `delete`, `favorite`, `pin`, `group …`, `folder …`) suben la nota solos al
+backend activo, pero **un fallo de sync no cambia el exit code**: el cambio local ya
+está escrito y el comando sale con 0. Por eso el agente **no puede fiarse del exit
+code** y debe leer la salida (stdout **y** stderr):
+
+1. **Al empezar** una tanda de cambios: `noteflow pull`, para partir de lo último y
+   no generar conflictos con lo editado en otro dispositivo.
+2. **Tras cada comando que escribe**, busca la línea de sync:
+   - `Synced to GitHub` / `Synced to NoteFlow Cloud` → bien.
+   - `Sync failed: …`, `Cloud sync failed: …`, `changed on GitHub since your last pull
+     — not uploaded`, `not uploaded: a newer version is on NoteFlow Cloud` o
+     `Conflict: local changes kept as "…"` → ejecuta `noteflow pull` y luego
+     `noteflow push`.
+   - Sin línea de sync → no hay sync configurado: confírmalo con
+     `noteflow status --json` y avisa al usuario de que el cambio solo está en local.
+3. **Al terminar**: `noteflow pull` y `noteflow push`, y comprueba que ambos acaban en
+   `Done: … 0 errors` sin avisos de `changed on GitHub` / `not uploaded`.
+4. **Si no se puede sincronizar** (siguen los errores, no hay red, token caducado o
+   sin acceso, conflicto…): **díselo al usuario** de forma explícita al final de tu
+   respuesta — qué notas quedaron solo en local, el mensaje de error literal y el
+   comando para reintentar (`noteflow pull` / `noteflow push`, o `noteflow login` /
+   `noteflow cloud login` si la sesión caducó). Si hubo conflicto, di el título de la
+   copia de conflicto que se creó. **Nunca** des el trabajo por sincronizado sin haber
+   visto la confirmación, no reintentes en bucle y no uses `--force` sin que el
+   usuario lo pida (pisa notas locales más nuevas).
+
+> Si un comando documentado aquí da `Unknown command` (p. ej. `touch`, `path` o
+> `cloud`), el CLI instalado es más antiguo que esta guía: avisa al usuario de que
+> actualice NoteFlow (el instalador refresca CLI y shims) o ejecute
+> `noteflow self-update`.
 
 > **`read` vs `get`:** `get` es para humanos (indenta y decora); `read` emite el
 > contenido verbatim — úsalo siempre que vayas a procesar el texto.
