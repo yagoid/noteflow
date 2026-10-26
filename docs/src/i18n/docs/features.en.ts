@@ -217,7 +217,7 @@ export const featuresEn = {
       {
         tag: '03 / all content',
         name: 'The whole vault, indexed',
-        desc: 'Favorites, groups (as accordion tiles that expand inline) and loose notes on one screen — with its own search box and a date filter (Today / Week / Month, plus a calendar with per-day activity markers).',
+        desc: 'Favorites, groups (as accordion tiles that expand inline) and loose notes on one screen — with its own search box and a date filter (Today / Week / Month, plus a calendar with per-day activity markers). Opened from the grid button (⊞) next to the sidebar search bar.',
       },
       {
         tag: '04 / brain view',
@@ -233,7 +233,7 @@ export const featuresEn = {
       'Some notes deserve to die: a phone number for today, a one-off shopping list, a paste buffer. <strong>Temporary notes</strong> live for 24 hours and then remove themselves — no graveyard of stale one-liners.',
     ],
     bullets: [
-      'Create one with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>, the <strong>clock button</strong> next to “New note”, or a right-click on “New note” → <em>Temporary note (24h)</em>.',
+      'Create one with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>, the <strong>clock button</strong> stacked under the new-group button (right of the big <strong>+</strong> new-note button), or a right-click on the <strong>+</strong> button → <em>Temporary note (24h)</em>.',
       'The expiry is an <code>expiresAt</code> timestamp in the note\'s frontmatter — visible, portable, editable.',
       'The main process checks <strong>every minute</strong> and deletes expired notes automatically — from the remote sync repo too, so they don\'t resurrect on another machine.',
       'They\'re marked with a <strong>⏱ clock icon</strong> in the sidebar, and the editor header shows exactly when: <em>“Deletes &lt;date · time&gt;”</em>. A small chevron next to it lets you push the deletion to 1–48 hours from now, or <strong>make the note permanent</strong>.',

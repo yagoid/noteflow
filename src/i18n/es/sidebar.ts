@@ -11,7 +11,6 @@ export const sidebar = {
   clearSearch: 'Limpiar búsqueda',
   collapseSidebar: "Contraer barra lateral (Ctrl+')",
 
-  newNoteButton: '+ Nueva nota',
   newNoteTooltip: 'Nueva nota (Ctrl+N) · Clic derecho para nota temporal',
   newTempNoteTooltip: 'Nueva nota temporal (24h)',
   newGroup: 'Nuevo grupo',

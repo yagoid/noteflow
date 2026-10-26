@@ -35,11 +35,10 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 ┌─ TitleBar (32px) ──────────────────────────────────────────────────┐
 │  NOTEFLOW  [🧠 brain] [⬇ update] [☁ sync]        [⚙ settings] [─ □ ×] │
 ├─ Sidebar (180–480px, redimensionable) ──┬─ Editor area ─────────────┤
-│  [🔍 Search...        ] [⮜]            │  [Tabs sección] [⚙]        │
-│  [▦ All content]                        │  Título de nota            │
-│  ─ Tags ─────────────────────           │  19/03/2026 · 21:00        │
-│  [tag1] [tag2] [tag3] ...               │  ──────────────────────── │
-│  [+ New note]  [+ New group]            │                            │
+│  [🔍 Search...      ] [▦] [⮜]          │  [Tabs sección] [⚙]        │
+│  [     +     ] [new group]              │  Título de nota            │
+│  [           ] [temp note]              │  19/03/2026 · 21:00        │
+│                                         │  ──────────────────────── │
 │  ─────────────────────────────          │  Contenido (editor)        │
 │  favorites                              │                            │
 │    NOTEFLOW               20:31 ⭐      │   (Ctrl+Click una nota →   │
@@ -128,7 +127,10 @@ Iconos del TitleBar:
 ### Crear
 - `Ctrl+N` → nota nueva instantánea.
 - `Ctrl+Shift+N` → **nota temporal** (se autoelimina en 24h).
-- Botón `+ New note` en el sidebar. **Click derecho** sobre él → "Temporary note (24h)".
+- Botón grande **`+`** (solo icono, sin texto; tooltip "New note (Ctrl+N)…") en el sidebar, bajo el
+  buscador. A su derecha, una columna con dos botones-icono apilados de la misma altura total:
+  arriba **nuevo grupo** (`FolderPlus`) y debajo **nota temporal** (`Timer`). **Click derecho** sobre
+  el `+` → "Temporary note (24h)".
 - Desde el tray (menú o `New Note`).
 
 ### Organizar
@@ -155,8 +157,8 @@ Iconos del TitleBar:
 
 ## Notas temporales
 
-- Se crean con `Ctrl+Shift+N`, desde el click-derecho en `+ New note`, o con el **botón-icono de
-  reloj** (`Timer`) que hay entre `+ New note` y el botón de nuevo grupo en el sidebar.
+- Se crean con `Ctrl+Shift+N`, desde el click-derecho en el botón grande `+` (nueva nota), o con el
+  **botón-icono de reloj** (`Timer`) de la columna a su derecha, debajo del botón de nuevo grupo.
 - Llevan `expiresAt` en el frontmatter (24h desde su creación; se puede reprogramar, ver abajo).
 - El proceso principal **borra automáticamente** las vencidas (también del remoto si hay sync).
   Sin sync, comprueba al arrancar y cada minuto; **con sync, solo justo después de un pull que haya
@@ -219,7 +221,7 @@ Iconos del TitleBar:
 Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta → nota**.
 
 ### Grupos
-- **Crear**: botón `+ New group` (nombre + color).
+- **Crear**: botón-icono `FolderPlus` (arriba a la derecha del `+` de nueva nota) → input de nombre debajo (nombre + color).
 - **Renombrar / Eliminar / Color / View group / Archive**: menú contextual en la cabecera del grupo.
 - **Colapsar / Expandir**: click en la cabecera (estado persiste entre sesiones).
 - **Ver grupo (group overview)**: click en **el nombre** del grupo (hover sutil sobre el texto), o
@@ -373,8 +375,9 @@ sección en el editor).
 Vista a pantalla completa (sustituye el editor; el sidebar sigue visible) que muestra **todo el
 contenido** del usuario de un vistazo, a modo de índice. Hermana de la vista de grupo y la de nota.
 
-**Cómo entrar:** botón **"View all content"** (icono de cuadrícula) en la cabecera del sidebar, justo
-debajo de "+ New note".
+**Cómo entrar:** botón-icono **"View all content"** (`LayoutGrid`, solo icono, sin texto; tooltip y
+aria-label "View all content") en la fila del buscador del sidebar, entre la barra de búsqueda y el
+botón de plegar el sidebar (mismo estilo/tamaño que este).
 
 **Disposición** (misma estética que la vista de grupo: cabecera fija + área scroll + tarjetas en grid):
 - **Favorites** — las notas marcadas como favoritas, como tarjetas de nota (mismas que la vista de grupo:

@@ -872,7 +872,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       )}
       <NoteContextMenu request={contextMenu} onClose={() => setContextMenu(null)} />
 
-      {/* ── Search + collapse ──────────────────────────────────────────────── */}
+      {/* ── Search + all content + collapse ────────────────────────────────── */}
       <div className="flex items-center gap-2 px-3 py-2.5">
         <div className="relative flex-1">
           <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
@@ -898,6 +898,15 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           )}
         </div>
         <button
+          onClick={() => setAllView(true)}
+          title={t.sidebar.viewAllContent}
+          aria-label={t.sidebar.viewAllContent}
+          className="flex-shrink-0 p-1.5 rounded text-text-muted/50 hover:text-text-muted
+                     hover:bg-surface-2 transition-colors"
+        >
+          <LayoutGrid size={14} strokeWidth={2.5} />
+        </button>
+        <button
           onClick={onCollapse}
           title={t.sidebar.collapseSidebar}
           className="flex-shrink-0 p-1.5 rounded text-text-muted/50 hover:text-text-muted
@@ -909,33 +918,39 @@ export function Sidebar({ onCollapse }: SidebarProps) {
 
       {/* ── New note / new group buttons ────────────────────────────────────── */}
       <div className="px-3 pt-0.5 pb-2 space-y-1.5">
-        <div className="flex items-center gap-1.5">
+        {/* Big "+" button stretches to the height of the stacked group / temp-note column. */}
+        <div className="flex items-stretch gap-1.5">
           <button
             onClick={() => createNote()}
             onContextMenu={(e) => { e.preventDefault(); setNewNoteCtx({ x: e.clientX, y: e.clientY }) }}
             title={t.sidebar.newNoteTooltip}
-            className="flex-1 py-1.5 rounded text-xs font-mono transition-all
-                       bg-text/[0.12] text-text border border-text/20
-                       hover:bg-text/[0.18] hover:border-text/30"
+            aria-label={t.sidebar.newNoteTooltip}
+            className="flex-1 flex items-center justify-center rounded-lg text-text transition-all
+                       bg-text/[0.06] border border-text/20
+                       hover:bg-text/[0.10] hover:border-text/30"
           >
-            {t.sidebar.newNoteButton}
+            <Plus size={16} strokeWidth={2.5} />
           </button>
-          <button
-            onClick={() => createTempNote()}
-            title={t.sidebar.newTempNoteTooltip}
-            className="flex-shrink-0 p-1.5 rounded text-text-muted/50 border border-border
-                       hover:text-text-muted hover:bg-surface-2 hover:border-border transition-colors"
-          >
-            <Timer size={14} strokeWidth={2.5} />
-          </button>
-          <button
-            onClick={() => { setNewGroupInput(true); setNewGroupName('') }}
-            title={t.sidebar.newGroup}
-            className="flex-shrink-0 p-1.5 rounded text-text-muted/50 border border-border
-                       hover:text-text-muted hover:bg-surface-2 hover:border-border transition-colors"
-          >
-            <FolderPlus size={14} strokeWidth={2.5} />
-          </button>
+          <div className="flex-shrink-0 flex flex-col gap-1.5">
+            <button
+              onClick={() => { setNewGroupInput(true); setNewGroupName('') }}
+              title={t.sidebar.newGroup}
+              aria-label={t.sidebar.newGroup}
+              className="flex justify-center px-[25px] py-[7px] rounded-md text-text-muted/50 bg-text/[0.03]
+                         hover:text-text-muted hover:bg-text/[0.06] transition-colors"
+            >
+              <FolderPlus size={14} strokeWidth={2.5} />
+            </button>
+            <button
+              onClick={() => createTempNote()}
+              title={t.sidebar.newTempNoteTooltip}
+              aria-label={t.sidebar.newTempNoteTooltip}
+              className="flex justify-center px-[25px] py-[7px] rounded-md text-text-muted/50 bg-text/[0.03]
+                         hover:text-text-muted hover:bg-text/[0.06] transition-colors"
+            >
+              <Timer size={14} strokeWidth={2.5} />
+            </button>
+          </div>
         </div>
         {newGroupInput && (
           <input
@@ -958,20 +973,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             className="w-full px-2 py-1 text-xs font-mono bg-surface-1 border border-text/25 rounded outline-none text-text placeholder-text-muted/40 caret-text"
           />
         )}
-      </div>
-
-      {/* ── All content view ───────────────────────────────────────────────── */}
-      <div className="px-3 pt-1.5 pb-0.5">
-        <button
-          onClick={() => setAllView(true)}
-          title={t.sidebar.viewAllContent}
-          className="w-full flex items-center justify-start gap-1.5 px-2 py-0.5 rounded text-xs font-mono
-                     transition-colors hover:bg-surface-2"
-          style={{ color: 'rgb(var(--text-muted))' }}
-        >
-          <LayoutGrid size={13} />
-          {t.common.allContent}
-        </button>
       </div>
 
       {/* ── Notes list ──────────────────────────────────────────────────────── */}

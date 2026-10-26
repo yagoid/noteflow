@@ -17,7 +17,6 @@ export const sidebar = {
   collapseSidebar: "Collapse sidebar (Ctrl+')",
 
   // New-note / new-group toolbar.
-  newNoteButton: '+ New note',
   newNoteTooltip: 'New note (Ctrl+N) · Right-click for temporary note',
   newTempNoteTooltip: 'New temporary note (24h)',
   newGroup: 'New group',

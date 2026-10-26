@@ -218,7 +218,7 @@ export const featuresEs: FeaturesContent = {
       {
         tag: '03 / all content',
         name: 'Todo el vault, indexado',
-        desc: 'Favoritos, grupos (como tiles en acordeón que se expanden inline) y notas sueltas en una sola pantalla — con su propio buscador y un filtro de fecha (Today / Week / Month, más un calendario con marcadores de actividad por día).',
+        desc: 'Favoritos, grupos (como tiles en acordeón que se expanden inline) y notas sueltas en una sola pantalla — con su propio buscador y un filtro de fecha (Today / Week / Month, más un calendario con marcadores de actividad por día). Se abre desde el botón de cuadrícula (⊞) junto al buscador del sidebar.',
       },
       {
         tag: '04 / vista cerebro',
@@ -234,7 +234,7 @@ export const featuresEs: FeaturesContent = {
       'Hay notas que merecen morir: un teléfono para hoy, una lista de la compra de un día, un buffer de pegado. Las <strong>notas temporales</strong> viven 24 horas y luego se eliminan solas — sin cementerio de notas de una línea.',
     ],
     bullets: [
-      'Crea una con <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>, con el <strong>botón de reloj</strong> junto a “New note”, o con click derecho sobre “New note” → <em>Temporary note (24h)</em>.',
+      'Crea una con <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>, con el <strong>botón de reloj</strong> apilado bajo el de nuevo grupo (a la derecha del botón grande <strong>+</strong> de nueva nota), o con click derecho sobre el botón <strong>+</strong> → <em>Temporary note (24h)</em>.',
       'La caducidad es un timestamp <code>expiresAt</code> en el frontmatter de la nota — visible, portable, editable.',
       'El proceso principal comprueba <strong>cada minuto</strong> y borra las notas vencidas automáticamente — también del repo de sync remoto, para que no resuciten en otra máquina.',
       'Se marcan con un <strong>icono de reloj ⏱</strong> en el sidebar, y la cabecera del editor muestra exactamente cuándo: <em>“Deletes &lt;fecha · hora&gt;”</em>. Un pequeño chevron a su lado te deja mover el borrado a entre 1 y 48 horas desde ahora, o <strong>hacer la nota permanente</strong>.',
