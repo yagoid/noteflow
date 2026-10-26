@@ -183,24 +183,24 @@ export function miniActiveRowIndex(rows: readonly MiniSidebarRow[], activeNoteId
 // ── Mini-view geometry ────────────────────────────────────────────────────────
 
 /** Height (px) of every mini-view row. */
-export const MINI_ROW_HEIGHT = 5
+export const MINI_ROW_HEIGHT = 7
 /** Gap (px) between mini-view rows. */
-export const MINI_ROW_GAP = 3
+export const MINI_ROW_GAP = 4
 /** Distance (px) from one row's top to the next. */
 export const MINI_ROW_PITCH = MINI_ROW_HEIGHT + MINI_ROW_GAP
 /** Left edge (px) of the mini-view items inside the strip. */
-export const MINI_ITEM_LEFT = 5
+export const MINI_ITEM_LEFT = 6
 /** Width (px) of a top-level note rectangle (deeper rows shrink by their indent). */
-export const MINI_ITEM_WIDTH = 10
+export const MINI_ITEM_WIDTH = 14
 /** Indent (px) per depth level. */
-export const MINI_INDENT = 2
+export const MINI_INDENT = 3
 /** Width (px) of the hover strip at the left edge of the content area that opens the panel. */
-export const MINI_STRIP_WIDTH = 18
+export const MINI_STRIP_WIDTH = 24
 /**
  * Left padding (px) the editor keeps while the mini-view is shown, so no text
  * runs under it. Exposed to CSS as `--mini-sidebar-reserve` (index.css `.sidebar-floating`).
  */
-export const MINI_SIDEBAR_RESERVE = 28
+export const MINI_SIDEBAR_RESERVE = 34
 
 /** Rows that fit in `height` px. */
 export function miniSidebarCapacity(height: number): number {

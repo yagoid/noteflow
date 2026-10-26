@@ -906,7 +906,7 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   hint de overflow del split, animación del spacer…), al montar/desmontar un ancla (el callback ref
   avisa: cambio de vista, raw, nota/sección) y con el scroll horizontal del split (scroll en captura,
   ignorando el de dentro de anclas y del sidebar). **No** hay MutationObserver sobre el editor.
-- **Apertura/cierre.** Hover sobre la franja de 18 px (`MINI_STRIP_WIDTH`) del borde izquierdo:
+- **Apertura/cierre.** Hover sobre la franja de 24 px (`MINI_STRIP_WIDTH`) del borde izquierdo:
   abre a los 120 ms (más que el TOC, para no saltar al seleccionar texto pegado al borde; con un botón
   pulsado — selección en curso — no abre); click en la franja abre ya. Sale del panel/franja → cierra a
   los 200 ms. Sigue abierto mientras: el ratón está encima; hay foco de **texto o teclado** dentro
@@ -936,17 +936,17 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   activa es `noteViewId ?? activeNoteId`, como en el sidebar); grupo = pastilla de su color (más corta
   si está colapsado); carpeta = cuadradito contorneado (relleno si colapsada); cabeceras
   (favorites/groups/notes) = línea fina; sus filas hijas llevan un segmento de línea guía del color del
-  grupo. Filas de 5 px + 3 px de hueco; si no caben, ventana centrada en la nota activa
+  grupo. Filas de 7 px + 4 px de hueco; si no caben, ventana centrada en la nota activa
   (`miniSidebarWindow`, sin scroll). Franja `opacity-40` en reposo, `90` con hover, 0 con el panel
   abierto; `aria-hidden` (lo accesible es el panel).
 - **Reserva a la izquierda.** Con el sidebar flotante `<main>` lleva `.sidebar-floating` y
-  `--mini-sidebar-reserve` (`MINI_SIDEBAR_RESERVE` = 28 px); `index.css` lo aplica como
+  `--mini-sidebar-reserve` (`MINI_SIDEBAR_RESERVE` = 34 px); `index.css` lo aplica como
   `--pm-pad-l` del `.ProseMirror` del editor real (`.editor-scroll > .prose-editor`; en Readable + TOC,
   como suelo del mismo `clamp`) y como `padding-left` del textarea raw (`.raw-editor`), así nada de
   texto queda bajo la mini-vista. Las tarjetas `.note-preview` de la vista de nota (también
   `.prose-editor`) quedan fuera a propósito.
   Es el espejo izquierdo de `--toc-reserve`; se aplica a todos los panes (en el split solo el primero
-  la necesita, la diferencia es de 4 px).
+  la necesita, la diferencia es de 10 px).
 
 ### Peek de grupo colapsado (`Sidebar/GroupPeek.tsx`, `lib/groupPeek.ts`)
 Hover ~400 ms sobre la cabecera de un **grupo colapsado** con ≥1 nota visible → ventanita a la derecha

@@ -70,7 +70,7 @@ const MiniRow = memo(function MiniRow({ row, top, active }: { row: MiniSidebarRo
         <span style={{ ...slot, width: MINI_ITEM_WIDTH, display: 'flex', alignItems: 'center', opacity: row.archived ? 0.5 : 1 }}>
           <span
             className="block rounded-full"
-            style={{ width: row.collapsed ? 6 : 8, height: 3, background: rgb(row.color) }}
+            style={{ width: row.collapsed ? 8 : 11, height: 4, background: rgb(row.color) }}
           />
         </span>
       )
@@ -82,8 +82,8 @@ const MiniRow = memo(function MiniRow({ row, top, active }: { row: MiniSidebarRo
           <span
             className="block rounded-[1px]"
             style={{
-              width: 4,
-              height: 4,
+              width: 6,
+              height: 6,
               border: `1px solid ${rgb(row.color, 0.9)}`,
               background: row.collapsed ? rgb(row.color, 0.35) : 'transparent',
             }}
@@ -101,13 +101,13 @@ const MiniRow = memo(function MiniRow({ row, top, active }: { row: MiniSidebarRo
             style={{
               width: MINI_ITEM_WIDTH - indent,
               gap: 1,
-              paddingLeft: 1,
+              paddingLeft: 2,
               background: active ? 'rgb(var(--text) / 0.55)' : 'rgb(var(--text) / 0.16)',
               boxShadow: active ? '0 0 0 1px rgb(var(--text) / 0.35)' : undefined,
             }}
           >
             {row.colors.map((color, i) => (
-              <span key={i} className="block flex-shrink-0" style={{ width: 2, height: 3, background: rgb(color) }} />
+              <span key={i} className="block flex-shrink-0" style={{ width: 3, height: 4, background: rgb(color) }} />
             ))}
           </span>
         </span>
