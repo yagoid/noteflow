@@ -924,6 +924,9 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   enfocable): `Ctrl+Shift+F` (`noteflow:focus-search`) enfoca el buscador aunque esté cerrado y el
   foco lo abre; Tab desde fuera también. Abierto usa `transform: none` (no `translateX(0)`): un
   ancestro transformado sería el *containing block* de los menús/modales `fixed` del sidebar.
+- **Scroll de una pieza.** En flotante (`pinned=false`) el scroller es la raíz del `Sidebar` (buscador,
+  botones, lista y footer se desplazan juntos); fijado, solo la lista (`notes-list-scroll`) hace scroll y
+  la cabecera queda fija. Al cambiar de modo el scroll vuelve arriba (cambia el elemento que scrollea).
 - **Mini-vista.** Sin texto, una fila por fila real del sidebar, en el mismo orden
   (`buildMiniSidebarRows`, que comparte con `Sidebar` `orderFavorites`/`isSidebarGroupShown`/
   `isSidebarFolderShown` → mismos filtros, archivados y colapsados): nota = rectángulo `text` muy

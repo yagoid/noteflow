@@ -891,7 +891,9 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   })
 
   return (
-    <div className={`flex flex-col h-full bg-surface-1${pinned ? ' border-r border-border' : ''}`}>
+    // Floating: the whole panel scrolls as one (search + buttons + list + footer);
+    // pinned: only the notes list scrolls and the header stays put.
+    <div className={`flex flex-col h-full bg-surface-1${pinned ? ' border-r border-border' : ' overflow-y-auto notes-list-scroll'}`}>
       {modal && (
         <ConfirmModal
           title={modal.title}
@@ -1017,7 +1019,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
       </div>
 
       {/* ── Notes list ──────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto notes-list-scroll">
+      <div className={`flex-1${pinned ? ' overflow-y-auto notes-list-scroll' : ''}`}>
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-text-muted gap-2">
             <span className="text-2xl opacity-20">∅</span>
