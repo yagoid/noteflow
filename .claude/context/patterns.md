@@ -1525,16 +1525,22 @@ Node.js standalone (sin deps de Electron) que opera directamente sobre los `.md`
 sync automático van a Cloud en vez de a GitHub), `migrate`, `self-update`.
 Todo se direcciona **por nombre** (título de nota + nombre de sección), nunca por id; los nombres de
 sección **no son únicos** → se desambiguan con un sufijo 1-based `#n` (p. ej. `Tasks#2`). La
-resolución de sección (`matchSectionOrNull`) es única para todos los comandos: exacto → subcadena →
-`#n`, y **falla ante ambigüedad en vez de adivinar** (`add` la usa igual que `set`, así un
-`--section` parcial escribe en la sección existente en lugar de duplicarla). ⚠️ En `cmdAdd` eso vale
-solo para el `--section` **explícito**: el default implícito `Note` se resuelve **exacto-o-crear**,
-porque por subcadena un `noteflow add "texto"` a la nota diaria acabaría en una sección ajena
-(`Meeting Notes`) o abortaría por ambigüedad sin escapatoria. Solo `read` y `path`
-—de lectura— activan un último fallback **tolerante** (`fuzzySectionMatches`: sin acentos ni
-mayúsculas, tokens y stopwords fuera, el candidato debe ser único), que avisa por **stderr** para no
-ensuciar el stdout verbatim; los que escriben o destruyen (`add`/`set`, `section rename`/`delete`)
-**no** lo usan. Pensado para
+resolución de sección (`matchSectionOrNull`) es única para todos los comandos: **nombre exacto**
+(case-insensitive) + `#n`, y varios homónimos sin `#n` **fallan en vez de adivinar**. La coincidencia
+**laxa** (`looseSectionMatches`: subcadena y, si no hay ninguna, `fuzzySectionMatches` — sin acentos
+ni mayúsculas, tokens y stopwords fuera) es opt-in con `{ loose: true }` y **solo** la activan `read`
+y `path` —de lectura—: gana si el candidato es único y se avisa por **stderr** para no ensuciar el
+stdout verbatim. Los que escriben o destruyen **no** la usan (bug real: `set <nota> EN` sobrescribió
+`Comentario` porque `"comentario".includes("en")`): `set` y `add --section` hacen **exacto-o-crear**
+y, si al crear hay candidatos laxos, lo dicen por stderr (`similarSectionsNote`: `Note: no section
+named "EN" — created it. Similar existing: …`; `would create` con `--dry-run`); `section
+rename`/`delete` fallan sin match exacto con la lista de secciones y un `Did you mean: …?`
+(`resolveSection`), nunca actúan sobre el candidato. ⚠️ En `cmdAdd` el default implícito `Note` (sin
+`--section`) va por una rama aparte: exacto-o-crear **sin** aviso de parecidas (sería ruido en cada
+append a la nota diaria con `Meeting Notes`) ni parseo de `#n`/salida por homónimos — no unificar las
+dos ramas. Cambios de comportamiento del CLI suben `CLI_VERSION` (y el marcador `// v` de la cabecera
+y el ejemplo de `version` del SKILL.md); `self-update` compara el fichero entero, no la versión.
+Pensado para
 agentes de IA: **`read`** imprime contenido raw apto para pipe (vs `get`, decorado para humanos) y
 **`set`** sobrescribe una sección (vs `add`, que solo añade al final). Como el CLI no tiene
 find-replace, para **ediciones parciales** existe la vía sin round-trip: **`path`** imprime la ruta

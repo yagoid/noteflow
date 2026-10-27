@@ -133,15 +133,19 @@ existir**: si no hay match el comando **falla con exit 1** salvo que pases
 
 **Comportamiento de append:** el texto se añade al final del contenido existente de la sección, separado por `\n`.
 
-**`--section` explícito resuelve igual que en `set`:** nombre exacto → subcadena →
-sufijo `#n` para duplicados; ante ambigüedad **falla** en vez de adivinar. Así
-`--section "Variables"` escribe en la sección existente `Variables Entorno` en
-lugar de crear una duplicada. Solo crea sección nueva si no hay ningún match.
+**`--section` explícito resuelve igual que en `set`: solo nombre exacto**
+(sin distinguir mayúsculas) + sufijo `#n` para duplicados; con varios homónimos
+sin `#n` **falla** en vez de adivinar. **Nunca** escribe en una sección por
+coincidencia parcial: si no hay match exacto, **crea** la sección con el nombre
+que escribiste, y si existen secciones parecidas (subcadena o mismas palabras) lo
+avisa por **stderr** sin bloquear — p. ej. `--section EN` en una nota con
+`Comentario` crea `EN` y avisa `Note: no section named "EN" — created it. Similar
+existing: Comentario`. Con `--dry-run` el aviso dice `would create`. Usa el nombre
+exacto que da `noteflow sections`.
 
-**Sin `--section`, el default `Note` se resuelve exacto-o-crear** (nunca por
-subcadena): un `noteflow add "texto"` a la nota diaria no puede acabar en una
-sección ajena que contenga la palabra (p. ej. `Meeting Notes`) ni fallar por
-ambigüedad. Si quieres el matching parcial, pídelo con `--section`.
+**Sin `--section`, el default `Note` también es exacto-o-crear**, pero sin el
+aviso de parecidas (un `noteflow add "texto"` a la nota diaria no avisa cada vez
+de que existe `Meeting Notes`) y sin `#n`: toma la primera sección llamada `Note`.
 
 **JSON de `add`/`set`:** `{ "note": "<título>", "dirname": "…", "section": "…",
 "createdNote": bool, "createdSection": bool, "bytesWritten": n }` (con `--dry-run`
@@ -248,14 +252,15 @@ Es la forma recomendada de **leer** una sección concreta.
 - El título puede ser parcial. Si hay varios matches, error pidiendo precisión.
 - **Nombres de sección duplicados:** apunta a uno con un sufijo 1-based, p. ej.
   `"Tasks#2"`. Si hay ambigüedad sin sufijo, el error te dice exactamente qué escribir.
-- **Matching tolerante (solo `read` y `path`):** tras probar nombre exacto y
-  subcadena, se compara por palabras ignorando mayúsculas, acentos y palabras
-  vacías (`de`, `la`, `the`…), así `"Variables de entorno"` encuentra
-  `Variables Entorno`. Solo vale si el candidato es **único**; si acierta por esta
-  vía lo avisa por **stderr** (`Note: matched section "…"`), nunca por stdout —
-  la salida sigue siendo verbatim y apta para pipe. `add`/`set` y
-  `section rename`/`delete` **no** lo usan (escribirían o destruirían la sección
-  equivocada).
+- **Matching tolerante (solo `read` y `path`):** si no hay nombre exacto, prueba
+  por subcadena (`"Variables"` → `Variables Entorno`) y, si tampoco, por palabras
+  ignorando mayúsculas, acentos y palabras vacías (`de`, `la`, `the`…), así
+  `"Variables de entorno"` encuentra `Variables Entorno`. Solo vale si el
+  candidato es **único** (varios → error de ambigüedad); si acierta por esta vía
+  lo avisa por **stderr** (`Note: matched section "…"`), nunca por stdout — la
+  salida sigue siendo verbatim y apta para pipe. `add`/`set` y
+  `section rename`/`delete` **no** lo usan: exigen el nombre exacto (escribirían
+  o destruirían la sección equivocada — `"EN"` está contenido en `"Comentario"`).
 
 ```bash
 noteflow read "Proyecto Alpha" Tasks
@@ -283,9 +288,14 @@ de `add`, que solo **añade al final**. Es la forma recomendada de **editar** un
 | `--dry-run` | Resuelve el destino y muestra qué haría **sin escribir ni sincronizar** |
 | `--json` | Resultado JSON en stdout (mismo shape que `add`; info → stderr) |
 
-- Si la sección no existe, se crea (mensaje `Created section "X"`).
-- Nombres duplicados: usa el sufijo `#n` (`"Tasks#2"`). Ante ambigüedad sin sufijo,
-  `set` **falla** en vez de adivinar.
+- **Solo nombre exacto** (sin distinguir mayúsculas): nunca sobrescribe una sección
+  por coincidencia parcial. Si no hay match exacto, la sección **se crea** (mensaje
+  `Created section "X"`) y, si existen secciones parecidas, avisa por **stderr**:
+  `Note: no section named "EN" — created it. Similar existing: Comentario` (con
+  `--dry-run`: `would create`). Si no querías crearla, bórrala con
+  `section delete` y repite con el nombre exacto de `noteflow sections`.
+- Nombres duplicados: usa el sufijo `#n` (`"Tasks#2"`). Con varios homónimos sin
+  sufijo, `set` **falla** en vez de adivinar.
 
 ```bash
 noteflow set "Proyecto Alpha" Tasks --text "- [ ] deploy"
@@ -423,6 +433,10 @@ Gestiona las secciones de una nota **por nombre**, sin necesidad de ids.
 
 - Los nombres de sección **no son únicos**: desambigua duplicados con un sufijo
   1-based, p. ej. `"Tasks#2"`. Entrecomilla los nombres con espacios.
+- `rename` y `delete` **solo aceptan el nombre exacto** (sin distinguir
+  mayúsculas). Sin match exacto fallan (exit 1, nada cambia) listando las
+  secciones y, si hay alguna parecida, `Did you mean: "…"?` — nunca actúan sobre
+  ella.
 
 ```bash
 noteflow section add "Proyecto Alpha" "Meeting Notes"
@@ -695,7 +709,7 @@ Si ya está en la última versión: `Already up to date`.
 
 ```bash
 noteflow version     # o: noteflow --version / -v
-# noteflow CLI v2.3.0
+# noteflow CLI v2.4.0
 ```
 
 ---

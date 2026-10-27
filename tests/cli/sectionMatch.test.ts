@@ -1,7 +1,8 @@
-// Loose section-name matching of the CLI (cli/noteflow.js). It is the LAST
-// resort of matchSectionOrNull (after exact and substring) and only read-only
-// commands ('read', 'path') opt into it, so the rules have to be tight: a
-// candidate wins only when it is unique and its words cover the query's.
+// Loose section-name matching of the CLI (cli/noteflow.js). It is the fallback
+// of matchSectionOrNull after the exact name, and only the read-only commands
+// ('read', 'path') may USE it ({ loose: true }); write commands merely SUGGEST
+// its candidates. So the rules have to be tight: substring first, then a
+// candidate whose words cover the query's — and the caller requires uniqueness.
 import { describe, it, expect } from 'vitest'
 import { createRequire } from 'node:module'
 
@@ -13,6 +14,7 @@ const fuzzySectionMatches = cli.fuzzySectionMatches as (
   sections: { name: string }[],
   query: string,
 ) => { name: string }[]
+const looseSectionMatches = cli.looseSectionMatches as typeof fuzzySectionMatches
 
 const sections = (...names: string[]) => names.map(name => ({ name }))
 const names = (matches: { name: string }[]) => matches.map(s => s.name)
@@ -64,5 +66,29 @@ describe('fuzzySectionMatches', () => {
 
   it('tolerates a missing section list', () => {
     expect(fuzzySectionMatches(undefined as never, 'tasks')).toEqual([])
+  })
+})
+
+describe('looseSectionMatches', () => {
+  it('finds a case-insensitive substring (the "EN" ⊂ "Comentario" trap write commands must not act on)', () => {
+    expect(names(looseSectionMatches(sections('Note', 'Comentario'), 'EN'))).toEqual(['Comentario'])
+  })
+
+  it('returns every substring hit so the caller can refuse to guess', () => {
+    expect(names(looseSectionMatches(sections('Tasks backend', 'Tasks frontend', 'Ideas'), 'tasks')))
+      .toEqual(['Tasks backend', 'Tasks frontend'])
+  })
+
+  it('falls back to word matching only when no substring matches', () => {
+    expect(names(looseSectionMatches(sections('Note', 'Variables Entorno'), 'Variables de entorno')))
+      .toEqual(['Variables Entorno'])
+    // a substring hit exists: the word-only match ('Entorno Variables') is not added
+    expect(names(looseSectionMatches(sections('Variables entorno local', 'Entorno Variables'), 'variables entorno')))
+      .toEqual(['Variables entorno local'])
+  })
+
+  it('returns nothing for an empty query or a missing section list', () => {
+    expect(looseSectionMatches(sections('Note'), '')).toEqual([])
+    expect(looseSectionMatches(undefined as never, 'note')).toEqual([])
   })
 })

@@ -1,14 +1,16 @@
 // How `noteflow add` picks its target section. Two deliberately different rules
 // live in cmdAdd and this is the regression net for both:
-//  - an EXPLICIT --section resolves like `set` (exact → substring → '#n'), so a
-//    partial name lands on the existing section instead of duplicating it;
-//  - the IMPLICIT default 'Note' (no --section given) is exact-or-create, because
-//    substring matching would silently divert the daily append to an unrelated
-//    section — or abort as ambiguous with no way for the user to opt out.
+//  - an EXPLICIT --section resolves like `set`: exact name (case-insensitive) or
+//    create, '#n' among duplicates, several same-named ones exit. A partial name
+//    NEVER lands on an existing section (`--section EN` would append to
+//    "Comentario") — loosely similar sections are only listed on stderr;
+//  - the IMPLICIT default 'Note' (no --section given) is exact-or-create too, but
+//    without the similar-names hint (it would fire on every daily append).
 // Driven through the real CLI in --dry-run (writes nothing, syncs nothing) with
-// NOTEFLOW_NOTES_DIR pointed at a throwaway dir.
+// NOTEFLOW_NOTES_DIR and the settings dir (APPDATA / XDG_CONFIG_HOME) pointed at
+// throwaway dirs.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -16,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 
 const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../cli/noteflow.js')
 
+let tmp: string
 let notesDir: string
 
 /** Title of today's daily note, same format cmdAdd derives (DD-MM-YYYY). */
@@ -43,40 +46,46 @@ function writeNote(title: string, sectionNames: string[]) {
 
 type Run = { status: number; stdout: string; stderr: string }
 
+/** Runs the CLI; stderr is captured on success too (the similar-names hint lives there). */
 function run(args: string[]): Run {
-  try {
-    const stdout = execFileSync(process.execPath, [CLI, ...args], {
-      encoding: 'utf-8',
-      env: { ...process.env, NOTEFLOW_NOTES_DIR: notesDir, NOTEFLOW_NO_APP_CHECK: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    return { status: 0, stdout, stderr: '' }
-  } catch (e) {
-    const x = e as { status: number; stdout: string; stderr: string }
-    return { status: x.status, stdout: x.stdout ?? '', stderr: x.stderr ?? '' }
-  }
+  const r = spawnSync(process.execPath, [CLI, ...args], {
+    encoding: 'utf-8',
+    env: {
+      ...process.env,
+      APPDATA: path.join(tmp, 'config'),
+      XDG_CONFIG_HOME: path.join(tmp, 'config'),
+      NOTEFLOW_NOTES_DIR: notesDir,
+      NOTEFLOW_NO_APP_CHECK: '1',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  return { status: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
 
 /** `add ... --dry-run --json`: nothing is written, the resolved target comes back as JSON. */
 function addDryRun(args: string[]) {
   const r = run(['add', 'hello', '--dry-run', '--json', ...args])
   expect(r.status, r.stderr).toBe(0)
-  return JSON.parse(r.stdout) as { section: string; createdSection: boolean }
+  return { ...(JSON.parse(r.stdout) as { section: string; createdSection: boolean }), stderr: r.stderr }
 }
 
 beforeEach(() => {
-  notesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'noteflow-cli-test-'))
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'noteflow-cli-test-'))
+  notesDir = path.join(tmp, 'notes')
+  fs.mkdirSync(notesDir)
   fs.writeFileSync(path.join(notesDir, '.noteflow-format'), '2', 'utf-8')
 })
 
 afterEach(() => {
-  fs.rmSync(notesDir, { recursive: true, force: true })
+  fs.rmSync(tmp, { recursive: true, force: true })
 })
 
 describe('add without --section (implicit "Note")', () => {
   it('creates "Note" instead of appending to a section that merely contains the word', () => {
     writeNote(todayTitle(), ['Meeting Notes', 'Ideas'])
-    expect(addDryRun([])).toMatchObject({ section: 'Note', createdSection: true })
+    const r = addDryRun([])
+    expect(r).toMatchObject({ section: 'Note', createdSection: true })
+    expect(r.stderr).not.toContain('Similar existing')
   })
 
   it('does not abort as ambiguous when several sections contain "Note"', () => {
@@ -91,16 +100,25 @@ describe('add without --section (implicit "Note")', () => {
 })
 
 describe('add with an explicit --section', () => {
-  it('lands on the existing section by substring instead of duplicating it', () => {
+  it('reuses an exact (case-insensitive) match', () => {
     writeNote('Project Alpha', ['Note', 'Variables Entorno'])
-    expect(addDryRun(['--title', 'Project Alpha', '--section', 'Variables']))
-      .toMatchObject({ section: 'Variables Entorno', createdSection: false })
+    const r = addDryRun(['--title', 'Project Alpha', '--section', 'variables entorno'])
+    expect(r).toMatchObject({ section: 'Variables Entorno', createdSection: false })
+    expect(r.stderr).not.toContain('Similar existing')
   })
 
-  it('creates the section when nothing matches', () => {
+  it('creates the section instead of appending to a substring match, and says so on stderr', () => {
+    writeNote('Project Alpha', ['Note', 'Comentario'])
+    const r = addDryRun(['--title', 'Project Alpha', '--section', 'EN'])
+    expect(r).toMatchObject({ section: 'EN', createdSection: true })
+    expect(r.stderr).toContain('no section named "EN" — would create it. Similar existing: Comentario')
+  })
+
+  it('creates the section silently when nothing is even similar', () => {
     writeNote('Project Alpha', ['Note'])
-    expect(addDryRun(['--title', 'Project Alpha', '--section', 'Deploy']))
-      .toMatchObject({ section: 'Deploy', createdSection: true })
+    const r = addDryRun(['--title', 'Project Alpha', '--section', 'Deploy'])
+    expect(r).toMatchObject({ section: 'Deploy', createdSection: true })
+    expect(r.stderr).not.toContain('Similar existing')
   })
 
   it('picks a same-named section with the 1-based #n suffix', () => {
@@ -109,16 +127,24 @@ describe('add with an explicit --section', () => {
       .toMatchObject({ section: 'Tasks', createdSection: false })
   })
 
-  it('fails on an ambiguous partial name rather than guessing', () => {
-    writeNote('Project Alpha', ['Tasks backend', 'Tasks frontend'])
+  it('fails on duplicate exact names without #n rather than guessing', () => {
+    writeNote('Project Alpha', ['Tasks', 'Tasks'])
     const r = run(['add', 'hello', '--dry-run', '--json', '--title', 'Project Alpha', '--section', 'Tasks'])
     expect(r.status).toBe(1)
-    expect(r.stderr).toContain('Ambiguous section "Tasks"')
+    expect(r.stderr).toContain('Disambiguate with "Tasks#1" … "Tasks#2"')
+  })
+
+  it('lists every loose candidate (substring or words) without picking one', () => {
+    writeNote('Project Alpha', ['Tasks backend', 'Tasks frontend'])
+    const r = addDryRun(['--title', 'Project Alpha', '--section', 'Tasks'])
+    expect(r).toMatchObject({ section: 'Tasks', createdSection: true })
+    expect(r.stderr).toContain('Similar existing: Tasks backend, Tasks frontend')
   })
 
   it('does not use the loose word matching reserved for read/path', () => {
     writeNote('Project Alpha', ['Note', 'Variables Entorno'])
-    expect(addDryRun(['--title', 'Project Alpha', '--section', 'Variables de entorno']))
-      .toMatchObject({ section: 'Variables de entorno', createdSection: true })
+    const r = addDryRun(['--title', 'Project Alpha', '--section', 'Variables de entorno'])
+    expect(r).toMatchObject({ section: 'Variables de entorno', createdSection: true })
+    expect(r.stderr).toContain('Similar existing: Variables Entorno')
   })
 })

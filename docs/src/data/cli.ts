@@ -49,7 +49,7 @@ export const cliGroups: CliGroup[] = [
         },
         flags: [
           { flag: '--title <title>', desc: { en: 'Write into the note with that title instead of today’s.', es: 'Escribe en la nota con ese título en vez de la del día.' } },
-          { flag: '--section <name>', desc: { en: 'Target section/tab. Created if missing. Default: <code>Note</code>.', es: 'Sección/pestaña destino. La crea si no existe. Default: <code>Note</code>.' } },
+          { flag: '--section <name>', desc: { en: 'Target section/tab, matched by its <strong>exact</strong> name (case-insensitive). Created if missing — never a partial match. Default: <code>Note</code>.', es: 'Sección/pestaña destino, por su nombre <strong>exacto</strong> (sin distinguir mayúsculas). La crea si no existe — nunca por coincidencia parcial. Default: <code>Note</code>.' } },
           { flag: '--tag <tag>', desc: { en: 'Add this tag to the note (if it doesn’t have it yet).', es: 'Añade este tag a la nota (si no lo tiene ya).' } },
           { flag: '--group <name>', desc: { en: 'Assign the note to a group.', es: 'Asigna la nota a un grupo.' } },
           { flag: '--folder <name>', desc: { en: 'Place the note in a folder of that group (requires <code>--group</code>).', es: 'Coloca la nota en una carpeta de ese grupo (requiere <code>--group</code>).' } },
@@ -117,8 +117,8 @@ export const cliGroups: CliGroup[] = [
         id: 'set',
         usage: 'noteflow set <title> <section> [source] [--rich]',
         desc: {
-          en: '<strong>Replace</strong> a section’s content (creating it if missing) — the complement of <code>add</code>, which only appends. The recommended way to edit a section. On ambiguous duplicate names without a <code>#n</code> suffix, it fails instead of guessing.',
-          es: '<strong>Reemplaza</strong> el contenido de una sección (la crea si no existe) — el complemento de <code>add</code>, que solo añade al final. La forma recomendada de editar una sección. Ante nombres duplicados ambiguos sin sufijo <code>#n</code>, falla en vez de adivinar.',
+          en: '<strong>Replace</strong> a section’s content (creating it if missing) — the complement of <code>add</code>, which only appends. The recommended way to edit a section. The section is matched by its <strong>exact</strong> name (case-insensitive) — never partially, so <code>EN</code> can’t overwrite <code>Comentario</code>; with no exact match it is created and similar names are flagged on stderr. On ambiguous duplicate names without a <code>#n</code> suffix, it fails instead of guessing.',
+          es: '<strong>Reemplaza</strong> el contenido de una sección (la crea si no existe) — el complemento de <code>add</code>, que solo añade al final. La forma recomendada de editar una sección. La sección se busca por su nombre <strong>exacto</strong> (sin distinguir mayúsculas) — nunca parcial, así <code>EN</code> no puede pisar <code>Comentario</code>; sin match exacto la crea y avisa por stderr de los nombres parecidos. Ante nombres duplicados ambiguos sin sufijo <code>#n</code>, falla en vez de adivinar.',
         },
         flags: [
           { flag: '--text "<content>"', desc: { en: 'Inline text (first source present wins).', es: 'Texto inline (gana la primera fuente presente).' } },
@@ -210,16 +210,16 @@ export const cliGroups: CliGroup[] = [
         id: 'section-rename',
         usage: 'noteflow section rename <title> <old> <new>',
         desc: {
-          en: 'Rename a section (the file on disk doesn’t change — it’s addressed by id).',
-          es: 'Renombra una sección (el archivo en disco no cambia — va por id).',
+          en: 'Rename a section (the file on disk doesn’t change — it’s addressed by id). Exact name only: with no exact match it fails and suggests similar ones.',
+          es: 'Renombra una sección (el archivo en disco no cambia — va por id). Solo nombre exacto: sin match exacto falla y sugiere los parecidos.',
         },
       },
       {
         id: 'section-delete',
         usage: 'noteflow section delete <title> <name> [--yes]',
         desc: {
-          en: 'Delete a section (confirmation unless <code>--yes</code>). <strong>Refuses to delete the last one.</strong> Disambiguate duplicates with <code>"Tasks#2"</code>.',
-          es: 'Borra una sección (confirmación salvo <code>--yes</code>). <strong>Rechaza borrar la última.</strong> Desambigua duplicados con <code>"Tasks#2"</code>.',
+          en: 'Delete a section (confirmation unless <code>--yes</code>). <strong>Refuses to delete the last one.</strong> Exact name only — never a partial match. Disambiguate duplicates with <code>"Tasks#2"</code>.',
+          es: 'Borra una sección (confirmación salvo <code>--yes</code>). <strong>Rechaza borrar la última.</strong> Solo nombre exacto — nunca por coincidencia parcial. Desambigua duplicados con <code>"Tasks#2"</code>.',
         },
       },
     ]),

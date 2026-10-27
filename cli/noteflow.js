@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.3.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.4.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.3.0'
+const CLI_VERSION = '2.4.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -773,7 +773,7 @@ function sectionTokens(name) {
 /**
  * Sections whose tokens are a superset of the query's — a forgiving last resort
  * for agents that half-remember a name ('Variables de entorno' → 'Variables Entorno').
- * Read-only by design: see the `fuzzy` option of matchSectionOrNull.
+ * Read-only by design: see the `loose` option of matchSectionOrNull.
  */
 function fuzzySectionMatches(sections, name) {
   const wanted = [...sectionTokens(name)]
@@ -785,19 +785,35 @@ function fuzzySectionMatches(sections, name) {
 }
 
 /**
+ * The loose candidates for a section name, in the order matchSectionOrNull tries
+ * them: case-insensitive substring hits first and, only when there are none, the
+ * token matches of fuzzySectionMatches. Pure: callers decide whether a candidate
+ * may be USED (read/path, unique only) or merely SUGGESTED (write commands).
+ */
+function looseSectionMatches(sections, name) {
+  const q = String(name || '').toLowerCase()
+  if (!q) return []
+  const partial = (sections || []).filter(s => s.name.toLowerCase().includes(q))
+  return partial.length ? partial : fuzzySectionMatches(sections, name)
+}
+
+/**
  * Finds a section by name. Section names are NOT unique in NoteFlow, so:
  *  - 'Name#2' targets the 2nd section named 'Name' (1-based).
- *  - an exact single match wins; multiple exact matches exit with a '#n' hint.
- *  - otherwise a single case-insensitive substring match wins.
- *  - with { fuzzy: true }, a last resort: a single token-subset match wins (see
- *    fuzzySectionMatches) and is announced on stderr.
+ *  - an exact (case-insensitive) single match wins; multiple exact matches exit
+ *    with a '#n' hint.
+ *  - with { loose: true }, a last resort: a single loose match wins (substring,
+ *    then token words — see looseSectionMatches) and is announced on stderr;
+ *    several loose candidates exit as ambiguous.
  * Returns the section or null (no match at all). Ambiguity/out-of-range exit the process.
  *
- * `fuzzy` is opt-in and enabled ONLY by the read-only commands (`read`, `path`):
- * guessing there costs nothing, while 'add'/'set' would write into the wrong
- * section and 'section rename'/'section delete' would destroy it.
+ * `loose` is opt-in and enabled ONLY by the read-only commands (`read`, `path`):
+ * guessing there costs nothing, while 'add'/'set' would overwrite the wrong
+ * section ('set Note EN' once clobbered "Comentario": "comentario" contains "en")
+ * and 'section rename'/'section delete' would destroy it. Write commands only
+ * SUGGEST loose candidates (see similarSectionsNote / resolveSection).
  */
-function matchSectionOrNull(note, name, { fuzzy = false } = {}) {
+function matchSectionOrNull(note, name, { loose = false } = {}) {
   const { baseName, ordinal } = parseSectionRef(name)
   const q = baseName.toLowerCase()
   const exact = (note.sections || []).filter(s => s.name.toLowerCase() === q)
@@ -811,32 +827,46 @@ function matchSectionOrNull(note, name, { fuzzy = false } = {}) {
     err(`Multiple sections named "${baseName}" in "${note.title}". Disambiguate with "${baseName}#1" … "${baseName}#${exact.length}".`)
     exit(1)
   }
-  const partial = (note.sections || []).filter(s => s.name.toLowerCase().includes(q))
-  if (partial.length === 1) return partial[0]
-  if (partial.length > 1) {
-    err(`Ambiguous section "${baseName}" in "${note.title}" — matches: ${partial.map(s => s.name).join(', ')}. Use the exact name.`)
-    exit(1)
-  }
-  if (fuzzy) {
-    const loose = fuzzySectionMatches(note.sections, baseName)
-    if (loose.length === 1) {
+  if (loose) {
+    const candidates = looseSectionMatches(note.sections, baseName)
+    if (candidates.length === 1) {
       // stderr on purpose: stdout of read/path stays verbatim and pipe-safe.
-      console.error(`  Note: matched section "${loose[0].name}"`)
-      return loose[0]
+      console.error(`  Note: matched section "${candidates[0].name}"`)
+      return candidates[0]
     }
-    if (loose.length > 1) {
-      err(`Ambiguous section "${baseName}" in "${note.title}" — matches: ${loose.map(s => s.name).join(', ')}. Use the exact name.`)
+    if (candidates.length > 1) {
+      err(`Ambiguous section "${baseName}" in "${note.title}" — matches: ${candidates.map(s => s.name).join(', ')}. Use the exact name.`)
       exit(1)
     }
   }
   return null
 }
 
-/** Like matchSectionOrNull but exits when nothing matches (read/rename/delete must target an existing section). */
-function resolveSection(note, name, opts) {
+/**
+ * Like matchSectionOrNull but exits when nothing matches (read/path/rename/delete
+ * must target an existing section). Without `loose`, the loose candidates are
+ * offered as a "Did you mean" hint — never acted upon.
+ */
+function resolveSection(note, name, opts = {}) {
   const sec = matchSectionOrNull(note, name, opts)
-  if (!sec) { err(`No section "${parseSectionRef(name).baseName}" in "${note.title}". Sections: ${sectionNamesOf(note)}`); exit(1) }
-  return sec
+  if (sec) return sec
+  const { baseName } = parseSectionRef(name)
+  const similar = opts.loose ? [] : looseSectionMatches(note.sections, baseName)
+  const hint = similar.length ? ` Did you mean: ${similar.map(s => `"${s.name}"`).join(', ')}?` : ''
+  err(`No section "${baseName}" in "${note.title}". Sections: ${sectionNamesOf(note)}.${hint}`)
+  exit(1)
+}
+
+/**
+ * stderr line for a write command ('set', 'add --section') that is about to create
+ * a section while loosely similar ones exist — likely a typo or a half-remembered
+ * name. Informational only: creating is the documented behavior. Must be computed
+ * BEFORE the new section is pushed (it would match itself). Returns '' if none.
+ */
+function similarSectionsNote(note, baseName, dryRun) {
+  const similar = looseSectionMatches(note.sections, baseName)
+  if (!similar.length) return ''
+  return `  Note: no section named "${baseName}" — ${dryRun ? 'would create' : 'created'} it. Similar existing: ${similar.map(s => s.name).join(', ')}`
 }
 
 function readStdin() {
@@ -2802,19 +2832,24 @@ async function cmdAdd(positionalText, opts) {
     if (!note) { err(`Could not read note "${existing.title}"`); exit(1) }
     if (!note.sections.length) note.sections = [{ id: nanoid(6), name: 'Note', content: '', isRawMode: true, created: new Date().toISOString() }]
 
-    // Find or create target section. An EXPLICIT --section resolves like in `set`
-    // (partial names hit the existing section instead of spawning a duplicate,
-    // '#n' picks among same-named ones, ambiguity exits rather than guessing).
+    // Find or create target section. An EXPLICIT --section resolves like in `set`:
+    // exact name (case-insensitive) or create, '#n' picks among same-named ones,
+    // duplicate exact names exit rather than guessing. A loosely similar section
+    // is only mentioned on stderr — never written into.
     // ⚠️ The implicit default ('Note', when no --section is given) must stay
-    // exact-or-create: the user named nothing, so a substring hit would silently
-    // append the daily note to an unrelated section ('Meeting Notes') — or abort
-    // as ambiguous with no way out. Do NOT "unify" these two branches.
+    // exact-or-create WITHOUT the similar-names hint: the user named nothing, so
+    // flagging 'Meeting Notes' on every daily append would be noise, and the '#n'
+    // parsing / duplicate-name exit must not apply either. Do NOT "unify" these
+    // two branches.
     let sec = explicitSection
       ? matchSectionOrNull(note, sectionName)
       : note.sections.find(s => s.name.toLowerCase() === sectionName.toLowerCase()) || null
     const createdSection = !sec
     const newSectionName = explicitSection ? parseSectionRef(sectionName).baseName : sectionName
+    // Computed before the new section is pushed; stderr keeps --json stdout and pipes clean.
+    const similarNote = createdSection && explicitSection ? similarSectionsNote(note, newSectionName, opts.dryRun) : ''
     if (opts.dryRun) {
+      if (similarNote) console.error(similarNote)
       const result = { note: note.title, dirname: note.dirname, section: sec ? sec.name : newSectionName, createdNote: false, createdSection, bytesWritten, dryRun: true }
       if (opts.json) { jsonOut(result); return }
       out(`  [dry-run] Would append ${text.length} chars to "${note.title}" → "${result.section}"${createdSection ? ' (new section)' : ''} — nothing written`)
@@ -2824,6 +2859,7 @@ async function cmdAdd(positionalText, opts) {
       sec = { id: nanoid(6), name: newSectionName, content: '', isRawMode: isRaw, created: new Date().toISOString() }
       note.sections.push(sec)
       out(`  Created section "${newSectionName}"`)
+      if (similarNote) console.error(similarNote)
     }
     const base = (sec.content || '').replace(/\n$/, '')
     sec.content = base ? base + '\n' + text : text
@@ -3125,7 +3161,7 @@ function cmdSections(titleQuery) {
 function cmdRead(titleQuery, sectionName, opts) {
   const note = resolveNote(titleQuery)
   if (sectionName) {
-    const sec = resolveSection(note, sectionName, { fuzzy: true }) // read-only: a loose name match is safe here
+    const sec = resolveSection(note, sectionName, { loose: true }) // read-only: a loose name match is safe here
     if (opts.json) {
       jsonOut({ id: note.id, title: note.title, section: sec.name, content: sec.content || '', isRawMode: sec.isRawMode })
       return
@@ -3154,7 +3190,7 @@ function cmdPath(titleQuery, sectionName, opts) {
   const note = resolveNote(titleQuery)
   const dir = path.resolve(note.filePath)
   if (sectionName) {
-    const sec = resolveSection(note, sectionName, { fuzzy: true }) // read-only: a loose name match is safe here
+    const sec = resolveSection(note, sectionName, { loose: true }) // read-only: a loose name match is safe here
     const file = sectionFilePath(note, sec)
     if (opts.json) {
       jsonOut({ id: note.id, title: note.title, dir, section: sec.name, file, isRawMode: sec.isRawMode })
@@ -3193,9 +3229,14 @@ async function cmdSet(titleQuery, sectionName, opts) {
   const note = resolveNote(titleQuery)
   const content = await resolveSetContent(opts)
   const bytesWritten = Buffer.byteLength(content, 'utf-8')
-  let sec = matchSectionOrNull(note, sectionName) // exits on ambiguity rather than guessing
+  // Exact name or create — never a loose match: overwriting the wrong section loses
+  // data. Duplicate exact names exit with a '#n' hint rather than guessing.
+  let sec = matchSectionOrNull(note, sectionName)
   const createdSection = !sec
+  // Computed before the new section is pushed; stderr keeps --json stdout and pipes clean.
+  const similarNote = createdSection ? similarSectionsNote(note, parseSectionRef(sectionName).baseName, opts.dryRun) : ''
   if (opts.dryRun) {
+    if (similarNote) console.error(similarNote)
     const result = { note: note.title, dirname: note.dirname, section: sec ? sec.name : parseSectionRef(sectionName).baseName, createdNote: false, createdSection, bytesWritten, dryRun: true }
     if (opts.json) { jsonOut(result); return }
     out(`  [dry-run] Would ${createdSection ? 'create' : 'overwrite'} section "${result.section}" in "${note.title}" (${content.length} chars) — nothing written`)
@@ -3209,6 +3250,7 @@ async function cmdSet(titleQuery, sectionName, opts) {
   sec.content = content
   writeNoteFolder(note.dirname, note)
   if (createdSection) out(`  Created section "${sec.name}"`)
+  if (similarNote) console.error(similarNote)
   if (opts.json) jsonOut({ note: note.title, dirname: note.dirname, section: sec.name, createdNote: false, createdSection, bytesWritten })
   else out(`  Set "${note.title}" → "${sec.name}"  (${content ? lineCount(content) + ' lines' : 'empty'})`)
   await syncPushNoteFiles(note.dirname, [NOTE_MD, `${sec.id}.md`])
@@ -3228,7 +3270,7 @@ async function cmdSectionAdd(titleQuery, name, opts) {
 // noteflow section rename <title> <old> <new>
 async function cmdSectionRename(titleQuery, oldName, newName) {
   const note = resolveNote(titleQuery)
-  const sec = resolveSection(note, oldName)
+  const sec = resolveSection(note, oldName) // exact only: loose candidates are just a "Did you mean"
   const prev = sec.name
   sec.name = newName
   writeNoteFolder(note.dirname, note) // section file is keyed by id — only note.md changes
@@ -3239,7 +3281,7 @@ async function cmdSectionRename(titleQuery, oldName, newName) {
 // noteflow section delete <title> <name> [--yes]
 async function cmdSectionDelete(titleQuery, name, opts) {
   const note = resolveNote(titleQuery)
-  const sec = resolveSection(note, name)
+  const sec = resolveSection(note, name) // exact only: loose candidates are just a "Did you mean"
   if ((note.sections || []).length <= 1) {
     err(`Cannot delete the last section of "${note.title}" — a note must keep at least one section`)
     exit(1)
@@ -3886,11 +3928,12 @@ function cmdHelp(topic) {
     --dry-run           Show what would be written (note/section/bytes) without writing
     --json              Machine-readable result on stdout; info lines go to stderr
 
-  Section resolution (same as 'set'): an explicit --section matches the exact name
-  first, then a single case-insensitive substring ("Variables" hits an existing
-  "Variables Entorno" instead of duplicating it), and "Name#2" picks among
-  same-named sections; ambiguity is an error, not a guess. Without --section the
-  default section "Note" is matched EXACTLY (or created) — never by substring.
+  Section resolution (same as 'set'): an explicit --section must match the EXACT
+  name (case-insensitive), "Name#2" picks among same-named sections and several
+  same-named ones without "#n" are an error, not a guess. With no exact match the
+  section is created with the name you typed — never a partial/loose match; if
+  similar sections exist they are listed on stderr. Without --section the default
+  section "Note" is likewise matched exactly (or created).
 
   Windows: the noteflow.cmd shim truncates multi-line arguments (cmd.exe drops
   everything after the first newline). PowerShell automatically picks the
@@ -3946,7 +3989,7 @@ function cmdHelp(topic) {
   Section names match exactly, then by substring, and finally by words ignoring
   accents/case/filler ("Variables de entorno" finds "Variables Entorno"); a loose
   hit is announced on stderr. Only 'read' and 'path' are that forgiving —
-  add/set/section rename/delete demand an exact-or-substring name.
+  add/set/section rename/delete demand the exact name (see 'noteflow sections').
 `,
     path: `
   noteflow path <title> [section]
@@ -4000,10 +4043,11 @@ function cmdHelp(topic) {
     --dry-run            Show what would be written (note/section/bytes) without writing
     --json               Machine-readable result on stdout; info lines go to stderr
 
-  Section resolution: exact name first, then a single case-insensitive substring
-  ("Variables" hits an existing "Variables Entorno"), and "Name#2" picks among
-  same-named sections; ambiguity is an error, not a guess. With no match at all
-  the section is created with the name you typed.
+  Section resolution: the EXACT name only (case-insensitive) — no partial/loose
+  match, so "EN" never overwrites "Comentario". "Name#2" picks among same-named
+  sections; several same-named ones without "#n" are an error, not a guess. With
+  no exact match the section is created with the name you typed (similar existing
+  sections, if any, are listed on stderr). Check names with 'noteflow sections'.
 
   Windows: the noteflow.cmd shim truncates multi-line arguments (cmd.exe drops
   everything after the first newline). PowerShell automatically picks the
@@ -4026,7 +4070,8 @@ function cmdHelp(topic) {
   Manage a note's sections by name (no ids needed). Section names are NOT unique;
   disambiguate duplicates with a 1-based suffix, e.g. "Tasks#2". 'delete' refuses
   to remove the last remaining section. Quote multi-word names. Being destructive,
-  'rename'/'delete' only accept exact or substring names — no loose matching.
+  'rename'/'delete' only accept the EXACT name (case-insensitive): with no exact
+  match they fail, listing the sections and any similar one ("Did you mean").
 
   Examples:
     noteflow section add "Project Alpha" "Meeting Notes"
@@ -4175,16 +4220,16 @@ function cmdHelp(topic) {
     folder rename <name> <new>         Rename a folder
     folder delete <name>               Delete a folder (notes drop to group root)
 
-  Sync commands:
-    login [repo]          Connect to GitHub, then pull the repo's notes
+  Sync commands — pick ONE backend, sign in once, then edits sync on their own:
+    login [repo]          GitHub: connect your notes repo and pull it
                           [--no-pull: connect only, skip the first pull]
-    logout                Disconnect from GitHub
-    push                  Push all notes (NoteFlow Cloud when signed in, else GitHub)
-    pull / update         Pull notes (NoteFlow Cloud when signed in, else GitHub)
+    cloud login           NoteFlow Cloud: sign in with your NoteFlow account
+                          (encrypted; takes priority over GitHub) — 'noteflow help cloud'
+    logout / cloud logout Disconnect GitHub / NoteFlow Cloud
+    push                  Upload all notes to the active backend
+    pull / update         Download remote changes from the active backend
                           [--force: GitHub only — overwrite even if local is newer]
-    status                Show notes and sync status
-    cloud <subcommand>    NoteFlow Cloud (encrypted, account-based sync):
-                          login/logout/status/setup/push/pull — 'noteflow help cloud'
+    status / cloud status Show GitHub / NoteFlow Cloud sync status
     migrate               One-time migration: flat .md notes → folder format v2
     self-update           Update this CLI script to the latest version
     version / --version   Print the CLI version
@@ -4477,7 +4522,7 @@ if (require.main === module) {
   // the pure sync-state decisions (GitHub lastSync, Cloud cursor owner) plus the
   // pure name-matching helpers. The CLI always runs as a script.
   module.exports = {
-    sectionTokens, fuzzySectionMatches,
+    sectionTokens, fuzzySectionMatches, looseSectionMatches,
     splitFrontmatter, parseNoteYaml, serializeNoteMd,
     toB64Url, fromB64Url, deriveKek, normalizeRecoveryCode, looksLikeRecoveryCode,
     derivePathKeyHmac, wrapKey, unwrapKey, encryptContent, decryptContent,
