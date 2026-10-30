@@ -6,10 +6,13 @@ export const noteMenu = {
   openAlongside: 'Open alongside',
   // Section menu: a pane of its own for this section (works with the note already open).
   openSectionAlongside: 'Open section alongside',
-  // Section menu: editor-only window for this section (see SectionWindowApp).
+  // Note and section menus: editor-only window for the note, opened on that section — or,
+  // from the note menu, on the section the note would open on (see SectionWindowApp).
   openInNewWindow: 'Open in New Window',
   duplicateNote: 'Duplicate note',
   noteOverview: 'Note overview',
+  // Section menu of an editor tab: renames it inline on the tab.
+  renameSection: 'Rename section',
 
   // AI visibility tooltips for a single section.
   aiShowTooltip: 'The AI will index and use this section again',

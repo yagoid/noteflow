@@ -8,7 +8,6 @@ export const editor = {
   sectionStartWriting: '{name} — empieza a escribir...',
   noteOverview: 'Vista de la nota — todas las secciones de un vistazo',
   sectionOptions: 'Opciones de sección',
-  renameSection: 'Renombrar sección',
 
   saveAsTemplate: 'Guardar como plantilla',
   saveAsTemplateHint: 'Guarda esta nota (título + secciones) como plantilla reutilizable',
@@ -32,8 +31,6 @@ export const editor = {
 
   sectionDeleted: 'Sección "{name}" eliminada',
   undo: 'Deshacer',
-
-  auto: 'Auto',
 
   noteEncrypted: 'Esta nota está cifrada',
   clickToUnlock: 'Haz clic para desbloquear',

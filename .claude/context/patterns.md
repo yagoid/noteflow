@@ -96,7 +96,8 @@ mutuamente excluyentes** (group / note / brain / all-content): todos los setters
 `setNoteView`, `setBrainView`, `setAllView`) y `setActiveNote` se limpian entre sí, así que abrir una
 cierra las otras y seleccionar una nota devuelve el editor. `App.tsx` la renderiza (`NoteOverview`) con la
 prioridad de routing (all-content → brain → group → note → editor). **Entradas:** botón en la toolbar de
-`NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual del sidebar. Una
+`NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual **de sección** (tag de
+sección en sidebar/vistas o tab del editor; el menú de la nota en sí no lo ofrece). Una
 **tarjeta por sección** que es un mini-mock del editor: etiqueta de sección, título de la nota +
 `Created <fecha>` de **la sección** (`firstValidDate(section.created, note.created)`; sin fecha válida se oculta), una barra-toolbar puramente representativa, y un **preview del contenido renderizado** con
 `htmlFromMarkdown` (de `lib/markdownHtml.ts`) dentro de `.prose-editor .ProseMirror`, encogido con
@@ -728,30 +729,45 @@ visible el tab activo. Decisiones a respetar si se toca:
   dentro del propio bucle: si el tab origen se desmonta a mitad de arrastre (p. ej. un pull de sync
   que cambia el set de secciones) su `dragend` se dispara en un nodo desconectado y no llega a nadie.
 
-### Editor: nombre editable en la franja del click derecho
-La franja que abre el click derecho en un tab (`sectionColorPickerId` en `NoteEditor.tsx`) lleva el
-nombre como `<input>` (`SectionNameField.tsx`), no un botón de renombrar. Decisiones:
-- **Borrador local** montado con `key={noteId:sectionId}`: arranca del nombre de la sección y sigue
-  renombrados de fuera (sync, otro panel) **solo sin foco** (ajuste en render, no efecto). Se guarda
-  en Enter, en blur y al desmontar (un input desconectado no recibe blur); vacío o igual → restaura.
-  **Sin guarda anti-duplicado** a propósito: repetir el mismo nombre es inocuo (`updateSection` va
-  por `noteWriteQueue` y `patchSectionInList` devuelve `null` si no cambia nada), y una guarda por
-  "último nombre enviado" perdía renombrados (A→B, vuelta a A por fuera, otra vez B → no se escribía).
-  `onCommit` resuelve con el nombre real tras la escritura y el borrador se realinea con él (una
-  escritura fallida no deja el campo mostrando un nombre que el store no tiene).
-  La franja sigue montada mientras colapsa (`lastColorPickerSectionRef`), así que al cerrarse desde
-  fuera con el foco dentro el campo hace `blur()` (que es lo que guarda).
-- **Acciones justo después de renombrar:** el blur del input ocurre en el `mousedown` del botón, pero
-  el store solo refleja el nombre nuevo tras escribir a disco. Los colores van por nombre, la copia
-  de `Duplicate` se llama `"<nombre> (copy)"` y el modal de borrar muestra el nombre, así que los
-  botones de la franja usan `stripSectionName()`: el nombre recién guardado (`stripRenameRef`
-  `{ sectionId, from, name }`) **solo mientras el store siga mostrando `from`**; si la escritura
-  aterrizó, falló o llegó otro renombrado (sync/otro panel), manda el del store.
-- **Atajos globales:** los de `App.tsx`/`SectionWindowApp.tsx` y el `Ctrl+Tab` de `NoteEditor` son
-  listeners de `window` en **capture**, así que ven la tecla antes que el campo y su `stopPropagation`
-  no los frena. El campo se marca con `OWN_KEYS_PROPS` (`data-own-keys`, `src/lib/keyScope.ts`) y
-  esos handlers salen con `ownsKeys(e.target)`. Reutilizable para cualquier campo que deba
-  "quedarse" sus teclas. El resto (Escape incluido) se corta con `stopPropagation` en el propio campo.
+### Editor: menú contextual de los tabs de sección
+El click derecho en un tab (`NoteEditor.tsx`, estado `tabMenu`) abre el **`NoteContextMenu`
+compartido** en modo sección (`sectionId` del tab, en `e.clientX/Y`) — el mismo del sidebar y las
+vistas —, no un menú propio. (Antes era una franja desplegable bajo la tira con el nombre editable;
+se eliminó junto con `SectionNameField`.) Decisiones:
+- **`sectionActions`** (prop opcional de `NoteContextMenu`): el editor resuelve él mismo las acciones
+  que dependen de su estado vivo — `rename` (activa el **renombrado inline del tab**, `renamingId`; solo
+  se ofrece `Rename section` cuando hay `sectionActions`), `duplicate` (`handleDuplicateSection`:
+  hace `flush` del buffer raw antes de duplicar y deja la copia activa **en ese panel**) y `delete`
+  (`handleDeleteSection`: confirmación + toast de **Undo**). Sin la prop, el menú usa sus defaults
+  (`duplicateSection` + `navigateToSection`, borrado sin undo). `standalone` (ventana de sección)
+  oculta `Note overview` y `Open (section) alongside`, que necesitan el shell principal.
+- **Escape:** el contenedor del panel hace `stopPropagation` en `onKeyDown`, así que el listener de
+  `window` del menú no ve el Escape con el foco aún dentro del panel (el tab clicado o el editor): el
+  `onKeyDown` del contenedor cierra `tabMenu` él mismo. Por lo mismo el menú se renderiza **fuera**
+  del contenedor (junto a los modales).
+- **Foco al cerrar** (`closeTabMenu`): en el siguiente frame, si el foco quedó "varado" (en `body` —
+  la opción clicada se desmonta — o en un tab de la tira) vuelve al editor (TipTap o textarea raw); si
+  algo se lo llevó (un modal, el título…) se respeta.
+- **`Rename section` y el foco:** mientras el **input de renombrado** está montado (`renameRef.current`),
+  `closeTabMenu` no devuelve el foco. El input se enfoca a sí mismo en un `setTimeout(0)`, así que en
+  el frame de `closeTabMenu` el foco aún está en `body` (parece "varado"); y el `commands.focus()` de
+  TipTap se difiere a su vez un frame, de modo que le robaría el foco al input ya enfocado → su
+  `onBlur` guardaría y cerraría el renombrado (y lo tecleado iría al cuerpo de la nota).
+- **Fin del renombrado inline:** Enter / ✓ / blur guardan y Esc cancela; todos devuelven el foco al
+  cuerpo (`focusEditorBody`: TipTap o textarea raw). `renameOpenRef` hace que solo el primero cuente:
+  el `onBlur` del input aún puede dispararse con el borrador al desmontarse o al irse el foco al editor,
+  y no debe guardar tras un Esc ni guardar dos veces. Toda entrada al renombrado (doble clic, menú,
+  `+`, `Ctrl+T`) pasa por `openRename` y toda salida (guardar, cancelar, cambio de nota, sección
+  activa borrada) por `closeRename`, que mantienen la ref en sintonía con `renamingId`: no usar
+  `setRenamingId` a pelo (una sección nueva no podría guardar su nombre). Cambio de nota o sección
+  activa borrada con el input abierto **descartan** el borrador (con ratón no pasa: el click fuera
+  hace blur y guarda antes del cambio).
+- No se abre sobre el **input de renombrado** de un tab: el nombre aún no está guardado y los colores
+  van por nombre de sección.
+- El input de renombrado inline lleva `OWN_KEYS_PROPS` (`data-own-keys`, `src/lib/keyScope.ts`): los
+  atajos globales de `App.tsx`/`SectionWindowApp.tsx` y el `Ctrl+Tab` de `NoteEditor` son listeners de
+  `window` en **capture** (ven la tecla antes que el campo) y salen con `ownsKeys(e.target)`.
+  Reutilizable para cualquier campo que deba "quedarse" sus teclas.
 
 ### Editor: hueco bajo el caret al escribir cerca del borde
 El editor TipTap (`Editor.tsx`) fija `editorProps.scrollThreshold` y `scrollMargin` con el **mismo
@@ -1318,7 +1334,10 @@ BrowserWindows extra (`createSectionWindow()` en main) que cargan la app con
 minimizar/maximizar/cerrar vía IPC — `window:maximize` actúa sobre la ventana emisora) + `NoteEditor`
 (`standalone`: oculta "note overview" y "export", que necesitan el shell principal) en un único panel
 fijo. Normal (no `alwaysOnTop`), redimensionable, frameless; `close` la destruye. Se abren desde el
-menú contextual de sección y la paleta (sección del panel activo, `getActiveSectionTarget()`); a
+menú contextual de sección (esa sección), el menú contextual **de nota** (no hay ventana "de nota": es
+la misma, que ya muestra la nota completa con sus tabs; se abre en la sección en que se abriría la nota
+—`activeSectionByNote[noteId]` si sigue existiendo, si no la primera—, mismo orden que `NoteEditor`) y
+la paleta (sección del panel activo, `getActiveSectionTarget()`); a
 propósito NO desde el menú ⋯ del editor, y nunca para notas cifradas (ver "Sync entre ventanas":
 si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
 - **Una por nota+sección:** main guarda `sectionWindows: Map<BrowserWindow, {noteId, sectionId}>`; el
@@ -1649,7 +1668,7 @@ habían personalizado sus encabezados no pierden nada. La clave se borra cuando 
 
 Un color de grupo/sección (`GroupColor` en `src/types/index.ts`) es **una de las 8 CSS vars del tema**
 (`ThemeColorVar` = `TAG_COLOR_VARS` en `src/lib/tagColors.ts`) **o un hex libre** `CustomColor`
-(`'#rrggbb'` en minúsculas). Los pickers (menú contextual de sección, barra de color del editor, menú
+(`'#rrggbb'` en minúsculas). Los pickers (menú contextual de sección —tag o tab del editor—, menú
 del grupo en el sidebar, punto de color de la Group Overview) muestran los 8 presets + el botón *auto*
 (solo secciones) + un **swatch de color libre** (`src/components/CustomColorSwatch.tsx`), mismo patrón
 que Ajustes → Apariencia: círculo con degradado cónico y un `<input type="color">` transparente encima

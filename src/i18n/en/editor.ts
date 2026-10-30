@@ -14,7 +14,6 @@ export const editor = {
   sectionStartWriting: '{name} — start writing...',
   noteOverview: 'Note overview — all sections at a glance',
   sectionOptions: 'Section options',
-  renameSection: 'Rename section',
 
   // Save-as-template modal.
   saveAsTemplate: 'Save as template',
@@ -43,9 +42,6 @@ export const editor = {
   // Section delete undo toast.
   sectionDeleted: 'Section "{name}" deleted',
   undo: 'Undo',
-
-  // Section colour picker.
-  auto: 'Auto',
 
   // Encrypted (locked) note view.
   noteEncrypted: 'This note is encrypted',

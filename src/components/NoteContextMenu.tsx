@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Archive, Star, StarOff, Trash2, Lock, Unlock, Copy, CopyPlus, Columns2, Share,
-  ExternalLink, FolderPlus, FolderMinus, Folder, ChevronRight, LayoutGrid, Eye, EyeOff, AppWindow,
+  ExternalLink, FolderPlus, FolderMinus, Folder, ChevronRight, LayoutGrid, Eye, EyeOff, AppWindow, Pencil,
 } from 'lucide-react'
 import { useNotesStore } from '../stores/notesStore'
 import { useGroupsStore } from '../stores/groupsStore'
@@ -24,9 +24,24 @@ export interface NoteContextMenuRequest {
   sectionId: string | null
 }
 
+/**
+ * Section actions a host performs itself instead of the menu's defaults — the editor's tab
+ * strip, which owns the section's live state: rename happens inline on the tab, a duplicate
+ * first flushes its pending raw edit and lands this pane on the copy, and a delete is undoable.
+ */
+export interface NoteSectionMenuActions {
+  rename: (sectionId: string) => void
+  duplicate: (sectionId: string) => void
+  delete: (sectionId: string) => void
+}
+
 interface NoteContextMenuProps {
   request: NoteContextMenuRequest | null
   onClose: () => void
+  /** Overrides for the section actions; `Rename section` is only offered with them. */
+  sectionActions?: NoteSectionMenuActions
+  /** Section window (no main-window shell): hides note overview and split panes. */
+  standalone?: boolean
 }
 
 /**
@@ -39,7 +54,7 @@ interface NoteContextMenuProps {
  * an in-flight delete/unlock dialog; the menu body is keyed by `request` so each
  * open starts with fresh submenu/input state.
  */
-export function NoteContextMenu({ request, onClose }: NoteContextMenuProps) {
+export function NoteContextMenu({ request, onClose, sectionActions, standalone = false }: NoteContextMenuProps) {
   const t = useT()
   const rawNotes = useNotesStore((s) => s.notes)
   const deleteNote = useNotesStore((s) => s.deleteNote)
@@ -109,6 +124,8 @@ export function NoteContextMenu({ request, onClose }: NoteContextMenuProps) {
           key={`${request.noteId}:${request.sectionId ?? ''}:${request.x}:${request.y}`}
           request={request}
           onClose={onClose}
+          sectionActions={sectionActions}
+          standalone={standalone}
           onConfirmDelete={confirmDelete}
           onConfirmDeleteSection={confirmDeleteSection}
           onUnlockThenDelete={(noteId) => { onClose(); setPendingDeleteId(noteId); setEncModal({ mode: 'unlock', noteId }) }}
@@ -162,6 +179,8 @@ export function NoteContextMenu({ request, onClose }: NoteContextMenuProps) {
 interface NoteMenuBodyProps {
   request: NoteContextMenuRequest
   onClose: () => void
+  sectionActions?: NoteSectionMenuActions
+  standalone: boolean
   onConfirmDelete: (note: Note) => void
   onConfirmDeleteSection: (note: Note, sectionId: string) => void
   onUnlockThenDelete: (noteId: string) => void
@@ -170,7 +189,7 @@ interface NoteMenuBodyProps {
 
 // The visible menu. Mounted fresh per open (keyed by request) so its submenu and
 // inline-input state always starts clean.
-function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSection, onUnlockThenDelete, onEncModal }: NoteMenuBodyProps) {
+function NoteMenuBody({ request, onClose, sectionActions, standalone, onConfirmDelete, onConfirmDeleteSection, onUnlockThenDelete, onEncModal }: NoteMenuBodyProps) {
   const t = useT()
   const rawNotes = useNotesStore((s) => s.notes)
   const updateNote = useNotesStore((s) => s.updateNote)
@@ -183,6 +202,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
   const setNoteView = useNotesStore((s) => s.setNoteView)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
+  const activeSectionByNote = useNotesStore((s) => s.activeSectionByNote)
 
   const groups = useGroupsStore((s) => s.groups)
   const folders = useGroupsStore((s) => s.folders)
@@ -211,6 +231,15 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
   const canDeleteSection = !!currentSection && note.sections.length > 1
   // Locked encrypted notes have no readable content to export or copy.
   const isLocked = !!note.encryption && !sessionPasswords[note.id]
+  // The sticky needs readable content; "Open alongside" (note menu, main window only)
+  // doesn't depend on the encryption state — the pane shows its own unlock prompt.
+  const canOpenSticky = !isLocked
+  const canOpenAlongside = !currentSection && !standalone
+  // Section the note opens on when clicked (same order as NoteEditor: last active, else first).
+  const remembered = activeSectionByNote[note.id]
+  const noteOpenSectionId = remembered && note.sections.some((s) => s.id === remembered)
+    ? remembered
+    : note.sections[0]?.id
   const currentSectionColor = currentSection
     ? sectionTagColors[normalizeTagColorKey(currentSection.name)]
     : undefined
@@ -223,22 +252,13 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
     >
       {/* Note-level actions — hidden when the menu targets a specific section */}
       {!currentSection && (
-        <>
-          <button
-            onClick={() => { updateNote(note.id, { favorited: !note.favorited }); onClose() }}
-            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-          >
-            {note.favorited ? <StarOff size={12} /> : <Star size={12} />}
-            {note.favorited ? t.common.removeFromFavorites : t.common.addToFavorites}
-          </button>
-          <button
-            onClick={() => { archiveNote(note.id); onClose() }}
-            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-          >
-            <Archive size={12} />
-            {note.archived ? t.common.unarchive : t.common.archive}
-          </button>
-        </>
+        <button
+          onClick={() => { updateNote(note.id, { favorited: !note.favorited }); onClose() }}
+          className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+        >
+          {note.favorited ? <StarOff size={12} /> : <Star size={12} />}
+          {note.favorited ? t.common.removeFromFavorites : t.common.addToFavorites}
+        </button>
       )}
       {note.encryption && !sessionPasswords[note.id] && (
         <button
@@ -270,13 +290,6 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
       {!currentSection && (
         <>
           <button
-            onClick={() => { openNoteInSplit(note.id); onClose() }}
-            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-          >
-            <Columns2 size={12} />
-            {t.noteMenu.openAlongside}
-          </button>
-          <button
             onClick={() => { duplicateNote(note.id); onClose() }}
             className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
           >
@@ -295,28 +308,50 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
               {t.common.exportNote}
             </button>
           )}
+          <button
+            onClick={() => { archiveNote(note.id); onClose() }}
+            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+          >
+            <Archive size={12} />
+            {note.archived ? t.common.unarchive : t.common.archive}
+          </button>
         </>
       )}
-      <button
-        onClick={() => { setNoteView(note.id); onClose() }}
-        className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-      >
-        <LayoutGrid size={12} />
-        {t.noteMenu.noteOverview}
-      </button>
+      {/* Section menu only — the note menu doesn't offer it. */}
+      {currentSection && !standalone && (
+        <button
+          onClick={() => { setNoteView(note.id); onClose() }}
+          className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+        >
+          <LayoutGrid size={12} />
+          {t.noteMenu.noteOverview}
+        </button>
+      )}
 
       {currentSection && (
         <>
-          <div className="h-px bg-border my-1" />
+          {/* In a section window only the encryption options can come before it */}
+          {(!standalone || !!note.encryption) && <div className="h-px bg-border my-1" />}
+          {sectionActions && !isLocked && (
+            <button
+              onClick={() => { onClose(); sectionActions.rename(currentSection.id) }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <Pencil size={12} />
+              {t.noteMenu.renameSection}
+            </button>
+          )}
           {/* Opens a pane of its own on this section — also when the note is already open
               in another pane (two sections of one note side by side). */}
-          <button
-            onClick={() => { openNoteInSplit(note.id, currentSection.id); onClose() }}
-            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-          >
-            <Columns2 size={12} />
-            {t.noteMenu.openSectionAlongside}
-          </button>
+          {!standalone && (
+            <button
+              onClick={() => { openNoteInSplit(note.id, currentSection.id); onClose() }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <Columns2 size={12} />
+              {t.noteMenu.openSectionAlongside}
+            </button>
+          )}
           {!note.encryption && (
             <button
               onClick={() => {
@@ -334,6 +369,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
             <button
               onClick={() => {
                 onClose()
+                if (sectionActions) { sectionActions.duplicate(currentSection.id); return }
                 const name = tf(t.common.sectionCopyName, { name: currentSection.name })
                 void duplicateSection(note.id, currentSection.id, name).then((copy) => {
                   if (copy) navigateToSection(note.id, copy.id)
@@ -590,26 +626,40 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
         </>
       )}
 
-      {(!note.encryption || !!sessionPasswords[note.id]) && (
+      {(canOpenSticky || canOpenAlongside) && (
         <>
           <div className="h-px bg-border my-1" />
-          <button
-            onClick={() => {
-              const targetSectionId = request.sectionId ?? note.sections[0]?.id
-              if (targetSectionId) window.noteflow.openSticky(note.id, targetSectionId)
-              onClose()
-            }}
-            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-          >
-            <ExternalLink size={12} />
-            {t.noteMenu.openAsSticky}
-          </button>
-          {/* Not for encrypted notes: their unlock is per window (session password), and a
-              second window editing one would re-encrypt from its own copy. */}
-          {currentSection && !note.encryption && (
+          {canOpenSticky && (
             <button
               onClick={() => {
-                window.noteflow.openSectionWindow(note.id, currentSection.id)
+                const targetSectionId = request.sectionId ?? note.sections[0]?.id
+                if (targetSectionId) window.noteflow.openSticky(note.id, targetSectionId)
+                onClose()
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <ExternalLink size={12} />
+              {t.noteMenu.openAsSticky}
+            </button>
+          )}
+          {canOpenAlongside && (
+            <button
+              onClick={() => { openNoteInSplit(note.id); onClose() }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <Columns2 size={12} />
+              {t.noteMenu.openAlongside}
+            </button>
+          )}
+          {/* Not for encrypted notes: their unlock is per window (session password), and a
+              second window editing one would re-encrypt from its own copy. */}
+          {!note.encryption && (
+            <button
+              onClick={() => {
+                // A note has no window of its own: the section window shows the whole note
+                // (tabs included), opened on the section the note would open on here.
+                const targetSectionId = currentSection?.id ?? noteOpenSectionId
+                if (targetSectionId) window.noteflow.openSectionWindow(note.id, targetSectionId)
                 onClose()
               }}
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
@@ -625,7 +675,8 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
         <button
           onClick={() => {
             onClose()
-            onConfirmDeleteSection(note, currentSection!.id)
+            if (sectionActions) sectionActions.delete(currentSection!.id)
+            else onConfirmDeleteSection(note, currentSection!.id)
           }}
           className="w-full text-left px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 flex items-center gap-2 transition-colors"
         >

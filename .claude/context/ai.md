@@ -24,7 +24,7 @@ consumidores** (related ✅, grafo ✅, chat ✅).
   exponen (`get_note`/`list_notes` en `llm/tools.ts` la omiten). Como el modelo no ve su `section_id`,
   tampoco puede editarla. UI: toggle "Hide from AI"/"Show to AI" en (1) el menú ⋯ del editor (sección
   activa) y (2) el `NoteContextMenu` compartido (click derecho sobre un tag de sección en el sidebar,
-  en la group overview y sobre las tarjetas de la note overview). Indicador `EyeOff` en la pestaña del
+  en la group overview, sobre las tarjetas de la note overview y sobre los tabs del editor). Indicador `EyeOff` en la pestaña del
   editor, en los tags del sidebar y como badge en las tarjetas de la note overview.
 - **DB:** `userData/ai-index/index.db` (en dev `userData` = `.electron-dev/`). **Fuera del dir de
   notas** → NO se sincroniza a GitHub. Tablas: `notes`, `chunks`, `vec_chunks` (vec0),

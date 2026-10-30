@@ -7,6 +7,7 @@ export const noteMenu = {
   openInNewWindow: 'Abrir en ventana nueva',
   duplicateNote: 'Duplicar nota',
   noteOverview: 'Vista de la nota',
+  renameSection: 'Renombrar sección',
 
   aiShowTooltip: 'La IA volverá a indexar y usar esta sección',
   aiHideTooltip: 'La IA nunca indexará, leerá ni citará esta sección',

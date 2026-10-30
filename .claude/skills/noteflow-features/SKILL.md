@@ -370,7 +370,8 @@ vuelve al editor.
 **Cómo entrar:**
 - Botón **⊞** (icono de cuadrícula) en la toolbar del editor, justo **al lado de la estrella de
   favoritos**.
-- **Click derecho** sobre la nota en el sidebar → **"Note overview"**.
+- **Click derecho** sobre un **tag de sección** (sidebar / vistas) o un **tab del editor** →
+  **"Note overview"** (el menú de la nota en sí ya no lo ofrece).
 
 **Cómo salir:** `Esc`, el botón `✕` de la cabecera, o click en una tarjeta de sección (abre esa
 sección en el editor).
@@ -474,20 +475,16 @@ Cada nota puede tener múltiples secciones independientes, como tabs:
   cifrada y bloqueada.
 
 - **Agregar**: `Ctrl+T` o botón `+`.
-- **Renombrar**: doble-click en el tab → Enter para guardar, Esc para cancelar. O desde la franja del
-  click derecho (abajo), escribiendo directamente en el nombre.
-- **Click derecho en un tab** → franja bajo la tira con el **nombre de la sección editable**, los
-  colores de sección, `Auto`, y los botones **Duplicate section** (`CopyPlus`) y **Delete** (papelera,
-  solo si hay >1 sección) y `×` para cerrar.
-  - **Nombre editable** (`SectionNameField`): en reposo se ve como la etiqueta mono en mayúsculas; al
-    pasar el ratón aparece un subrayado y al hacer click se edita con las mayúsculas/minúsculas reales.
-    Se guarda (`updateSection`) con **Enter** (que además cierra la franja y devuelve el foco al editor)
-    y al **perder el foco** (click en un color, en `×`, fuera, en otro tab…). Vacío o sin cambios → no
-    guarda y restaura el nombre. **Esc** descarta el borrador y deja la franja abierta; un segundo Esc
-    (o Esc sin cambios) la cierra. Mientras se escribe, los atajos de la app (`Ctrl+T/W/M/F/S/G`,
-    `Ctrl+Tab`…) no se disparan. Con la nota cifrada y bloqueada el nombre es de solo lectura. Si se
-    renombra y luego se elige color en el mismo gesto, el color va al nombre nuevo.
-- **Duplicar**: `Duplicate section` (franja del click derecho o menú contextual de un tag de sección)
+- **Renombrar**: doble-click en el tab, o `Rename section` en su click derecho → el tab se convierte
+  en un input inline: Enter (o perder el foco) guarda, Esc cancela; ambos devuelven el foco al editor.
+  Mientras se escribe, los atajos de la app (`Ctrl+T/W/M/F/S/G`, `Ctrl+Tab`…) no se disparan.
+- **Click derecho en un tab** → el **menú contextual de sección** junto al cursor (el mismo
+  `NoteContextMenu` que el click derecho sobre un tag de sección en el sidebar / vistas; ver
+  "Menú contextual" más abajo), con además **Rename section**. Duplicar y borrar actúan sobre el
+  editor: la copia queda activa en ese panel y el borrado ofrece **Undo**. Se cierra con click fuera o
+  Esc; al cerrarlo sin que nada se lleve el foco, el foco vuelve al editor. En una ventana de sección
+  se ocultan `Note overview` y `Open section alongside`.
+- **Duplicar**: `Duplicate section` (click derecho en el tab o en un tag de sección)
   crea una copia con id nuevo, mismo contenido, mismo modo raw/editor y mismo flag "oculta a la IA",
   llamada `"<nombre> (copy)"` / `"<nombre> (copia)"` según el idioma de la UI, **justo a la derecha** de
   la original, y la deja activa (`notesStore.duplicateSection`). No se ofrece con la nota cifrada y
@@ -502,7 +499,7 @@ Cada nota puede tener múltiples secciones independientes, como tabs:
   (click en el tab, `Ctrl+Tab`, click en un tag de sección del sidebar o de una vista, crear/borrar/
   deshacer una sección, o al volver a una nota en la sección que estabas).
 - **Sticky**: botón `⧉` abre la sección en ventana flotante.
-- **Color de sección**: desde el menú contextual de la nota (o la barra de color del editor) se puede
+- **Color de sección**: desde el menú contextual de sección (tab del editor o tag de sección) se puede
   asignar un color a una sección por su nombre: los 8 del tema o un **color libre** (swatch con
   degradado → selector nativo del SO); "Auto" vuelve al color por nombre. Se aplica a los tags de
   sección en el sidebar. Se guarda en `section-colors.json` (sincronizado).
@@ -519,10 +516,11 @@ navegar directamente a esa sección.
 
 > **Dos menús contextuales (mismo componente `NoteContextMenu`, distinto contenido según el
 > objetivo):** el click derecho **sobre la nota** (en zona sin sección) muestra las acciones de
-> nivel-nota (favorito, archivar, abrir en paralelo, duplicar, mover a grupo/carpeta, etc.); el click
-> derecho **sobre un tag de sección** muestra solo lo propio de la sección (abrir la sección en
-> paralelo, color de sección, ocultar a la IA, abrir como sticky, abrir en ventana nueva) más unas
-> pocas comunes (note overview, borrar nota). El componente
+> nivel-nota (favorito, duplicar, exportar, archivar, mover a grupo/carpeta, sticky, abrir en paralelo,
+> abrir en ventana nueva, borrar nota); el click derecho **sobre un tag de sección** (o sobre un **tab
+> del editor**) muestra solo lo propio de la sección (abrir la sección en paralelo, color de sección,
+> ocultar a la IA, abrir como sticky, abrir en ventana nueva) más unas pocas comunes (note overview,
+> borrar nota). El componente
 > distingue por el campo `sectionId` del request (`null` = nota).
 
 ---
@@ -1000,29 +998,35 @@ El CLI ignora las notas cifradas.
 Click sobre la **nota**:
 ```
   ⭐ Add to favorites / Remove from favorites
-  📦 Archive / Unarchive
   🔒 Unlock / Lock / Remove encryption   (solo si está cifrada)
-  ▥ Open alongside        ← abre en paralelo (split)
   📋 Duplicate note
-  ⇪ Export note…          ← popup de exportación con esta nota preseleccionada
-  ⊞ Note overview         ← abre la vista de nota (todas sus secciones)
+  ⇪ Export note…          ← popup de exportación con esta nota preseleccionada (no si está bloqueada)
+  📦 Archive / Unarchive
   ─────────────
   📁 Move to folder ▸  /  Remove from group     (si está en un grupo)
   📁 Add to group ▸                              (si no tiene grupo)
   ─────────────
-  ⧉ Open as Sticky Note
+  ⧉ Open as Sticky Note   ← primera sección (no si está bloqueada)
+  ▥ Open alongside        ← abre en paralelo (split); también con la nota bloqueada
+  ⧉ Open in New Window    ← ventana solo-editor de la nota (no en notas cifradas)
   ─────────────
   🗑 Delete note   ← rojo
 ```
 
-Click sobre un **tag de sección** (sidebar, vista de grupo, tarjetas de la vista de nota): se ocultan
-las acciones de nota (favorito, archivar, split, duplicar/exportar nota, grupo/carpeta) y aparecen
-las de sección:
+El menú de nota **no** ofrece "Note overview" (sí el de sección; la vista se abre con el botón ⊞ del
+editor). **Open in New Window** reutiliza la ventana de sección (`openSectionWindow`), que muestra la
+nota completa con sus tabs: se abre en la sección en la que se abriría la nota al pulsarla (la última
+activa en esta sesión, `activeSectionByNote`; si no, la primera).
+
+Click sobre un **tag de sección** (sidebar, vista de grupo, tarjetas de la vista de nota) o sobre un
+**tab del editor**: se ocultan las acciones de nota (favorito, archivar, split, duplicar/exportar nota,
+grupo/carpeta) y aparecen las de sección:
 ```
   🔒 Unlock / Lock / Remove encryption   (solo si está cifrada)
-  ⊞ Note overview
+  ⊞ Note overview                         (no en una ventana de sección)
   ─────────────
-  ▥ Open section alongside                ← panel nuevo en esa sección (aunque la nota ya esté abierta)
+  ✎ Rename section                        ← solo en el tab del editor: renombrado inline en el tab
+  ▥ Open section alongside                ← panel nuevo en esa sección (no en una ventana de sección)
   👁 Hide from AI / Show to AI            (no en notas cifradas)
   ⧉ Duplicate section                     ← copia a la derecha y navega a ella
   🎨 Section color

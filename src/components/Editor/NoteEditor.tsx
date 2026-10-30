@@ -7,25 +7,24 @@ import { Editor } from './Editor'
 import type { EditorHandle } from './Editor'
 import { InNoteSearchBar } from './InNoteSearchBar'
 import { RawNoteSearchBar } from './RawNoteSearchBar'
-import type { GroupColor, NoteSection } from '../../types'
+import type { NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
-  Plus, X, Check, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer,
-  CopyPlus, Share,
+  Plus, Check, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer,
+  Share,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import { ConfirmModal } from '../ConfirmModal'
-import { CustomColorSwatch } from '../CustomColorSwatch'
 import { EncryptionModal } from '../EncryptionModal'
-import { colorChannels, getTagColor, normalizeTagColorKey, resolveGroupColor, TAG_COLOR_VARS } from '../../lib/tagColors'
+import { NoteContextMenu, type NoteContextMenuRequest, type NoteSectionMenuActions } from '../NoteContextMenu'
+import { getTagColor } from '../../lib/tagColors'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 import { moveSectionInList, restoreSectionInList } from '../../lib/sectionUtils'
 import { firstValidDate } from '../../lib/dateUtils'
-import { ownsKeys } from '../../lib/keyScope'
-import { SectionNameField } from './SectionNameField'
+import { OWN_KEYS_PROPS, ownsKeys } from '../../lib/keyScope'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { TempNoteExpiryMenu } from './TempNoteExpiryMenu'
 import { createDebouncedSave } from '../../lib/pendingEdits'
@@ -155,8 +154,6 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   const removeNoteEncryption = useNotesStore((s) => s.removeNoteEncryption)
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
-  const setSectionTagColor = useSectionTagColorsStore((s) => s.setSectionTagColor)
-  const clearSectionTagColor = useSectionTagColorsStore((s) => s.clearSectionTagColor)
   const { previewProps } = useSectionHoverPreview()
   const t = useT()
 
@@ -204,6 +201,20 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const renameRef = useRef<HTMLInputElement>(null)
+  // Whether the inline rename is still open. Enter, the ✓, blur and Escape each end it once:
+  // the input's onBlur can still fire with the stale draft as it unmounts (or as focus goes
+  // back to the editor), and must neither save after an Escape nor save twice.
+  const renameOpenRef = useRef(false)
+  // Every way into or out of the inline rename goes through these, keeping the ref in step.
+  const openRename = (sectionId: string, name: string) => {
+    renameOpenRef.current = true
+    setRenamingId(sectionId)
+    setRenameValue(name)
+  }
+  const closeRename = () => {
+    renameOpenRef.current = false
+    setRenamingId(null)
+  }
 
   // Confirm modal
   const [modal, setModal] = useState<ModalState | null>(null)
@@ -214,7 +225,8 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   // Drag and drop state
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null)
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null)
-  const [sectionColorPickerId, setSectionColorPickerId] = useState<string | null>(null)
+  // Right-click menu of a section tab (the shared note/section context menu)
+  const [tabMenu, setTabMenu] = useState<NoteContextMenuRequest | null>(null)
   const [sectionUndo, setSectionUndo] = useState<SectionUndoState | null>(null)
   const [sectionMenuOpen, setSectionMenuOpen] = useState(false)
   const [encryptModalMode, setEncryptModalMode] = useState<'encrypt' | 'remove' | null>(null)
@@ -235,12 +247,6 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   const editorRef = useRef<EditorHandle | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const sectionUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Must be declared before the early return below — calling hooks conditionally
-  // (after an early return) violates React's Rules of Hooks and crashes the app
-  // when the note temporarily disappears during a sync reload.
-  const lastColorPickerSectionRef = useRef<NoteSection | null>(null)
-  // Name just committed from the strip's name field (see stripSectionName).
-  const stripRenameRef = useRef<{ sectionId: string; from: string; name: string } | null>(null)
 
   // ── Derived state ──────────────────────────────────────────────────────────
   const activeSection: NoteSection | undefined = note?.sections.find(
@@ -276,8 +282,8 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     setRawContent(note.sections.find((s) => s.id === targetId)?.content ?? '')
     setTitleDraft(note.title)
     titleDirtyRef.current = false
-    setRenamingId(null)
-    setSectionColorPickerId(null)
+    closeRename()
+    setTabMenu(null)
     if (targetId && isPaneActive) saveUiState({ activeSectionId: targetId })
   }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -290,7 +296,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
   }, [])
 
   useEffect(() => {
-    const close = () => { setSectionColorPickerId(null); setSectionMenuOpen(false) }
+    const close = () => setSectionMenuOpen(false)
     window.addEventListener('click', close)
     return () => window.removeEventListener('click', close)
   }, [])
@@ -625,7 +631,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     rawSave.cancel()
     setActiveSectionId(fallback?.id ?? null)
     setRawContent(fallback?.content ?? '')
-    setRenamingId(null)
+    closeRename()
   }, [note?.id, sectionMembershipKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Edge auto-scroll while dragging a tab ─────────────────────────────────
@@ -747,8 +753,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
       void mutateSections(noteRef.current.id, (sections) => [...sections, newSection])
       setRawContent('')
       setActiveSectionId(newSection.id)
-      setRenamingId(newSection.id)
-      setRenameValue('New')
+      openRename(newSection.id, 'New')
     }
     const handleCloseTab = () => {
       const n = noteRef.current
@@ -965,8 +970,6 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
 
     if (!isPaneActive) activateThisPane()
 
-    setSectionColorPickerId(null)
-
     // Writes a pending raw edit of the section we leave (only a real local edit: the
     // buffer may be a stale mirror of an update still on its way to it).
     if (rawMode) rawSave.flush()
@@ -982,21 +985,19 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     void mutateSections(note.id, (sections) => [...sections, newSection])
     setRawContent('')
     setActiveSectionId(newSection.id)
-    setRenamingId(newSection.id)
-    setRenameValue('New')
+    openRename(newSection.id, 'New')
   }
 
   // Copies a section next to the original and lands on the copy. A pending raw-mode
   // edit of the active section is flushed first: its debounced save would otherwise
-  // race the duplicate write (and the copy could miss the latest keystrokes). `baseName`: the
-  // strip passes the name just typed in it, whose write may still be queued ahead of this one.
-  const handleDuplicateSection = async (sectionId: string, baseName?: string) => {
+  // race the duplicate write (and the copy could miss the latest keystrokes).
+  const handleDuplicateSection = async (sectionId: string) => {
     const currentNote = noteRef.current
     const source = currentNote?.sections.find((s) => s.id === sectionId)
     if (!currentNote || !source) return
     // Its write is queued before the duplicate's (same per-note write queue).
     if (rawMode) rawSave.flush()
-    const copy = await duplicateSection(currentNote.id, sectionId, tf(t.common.sectionCopyName, { name: baseName ?? source.name }))
+    const copy = await duplicateSection(currentNote.id, sectionId, tf(t.common.sectionCopyName, { name: source.name }))
     if (!copy) return
     setRawContent(copy.content)
     setActiveSectionId(copy.id)
@@ -1080,95 +1081,77 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
     setSectionUndo(null)
   }
 
-  const handleDeleteSection = (sectionId: string, displayName?: string) => {
+  const handleDeleteSection = (sectionId: string) => {
     const section = note?.sections.find((s) => s.id === sectionId)
     if (!section) return
     setModal({
       title: t.common.deleteSection,
-      message: tf(t.common.deleteSectionMessage, { name: displayName ?? section.name }),
+      message: tf(t.common.deleteSectionMessage, { name: section.name }),
       confirmLabel: t.common.delete,
       danger: true,
       onConfirm: () => { setModal(null); deleteSectionWithUndo(sectionId) },
     })
   }
 
+  // Moves focus into the note body: TipTap, or the textarea in raw mode.
+  const focusEditorBody = () => {
+    const editor = editorRef.current?.editor
+    if (editor) editor.commands.focus()
+    else rawTextareaRef.current?.focus()
+  }
+
   const handleStartRename = (section: NoteSection) => {
-    setRenamingId(section.id)
-    setRenameValue(section.name)
+    openRename(section.id, section.name)
   }
 
   const handleCommitRename = () => {
-    if (!renamingId) return
+    if (!renamingId || !renameOpenRef.current) return
     const trimmed = renameValue.trim()
     if (trimmed) void updateSection(note.id, renamingId, { name: trimmed })
-    setRenamingId(null)
+    closeRename()
     // The editor isn't remounted on commit (its key is unchanged), so move focus
     // into it explicitly for a smooth "+ → name it → start writing" flow.
-    requestAnimationFrame(() => editorRef.current?.editor?.commands.focus())
+    requestAnimationFrame(focusEditorBody)
+  }
+
+  const handleCancelRename = () => {
+    closeRename()
+    requestAnimationFrame(focusEditorBody)
   }
 
   const handleRenameKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') { e.preventDefault(); handleCommitRename() }
-    if (e.key === 'Escape') { setRenamingId(null) }
+    if (e.key === 'Escape') { e.preventDefault(); handleCancelRename() }
   }
 
-  const handleSetSectionColor = async (sectionName: string, color: GroupColor) => {
-    await setSectionTagColor(sectionName, color)
-    setSectionColorPickerId(null)
+  // ── Tab right-click menu ───────────────────────────────────────────────────
+  // The shared note/section context menu, with the section actions that depend on this
+  // editor's live state done here: rename inline on the tab, duplicate after flushing the
+  // raw buffer (landing this pane on the copy), delete with the undo toast.
+  const tabMenuSectionActions: NoteSectionMenuActions = {
+    rename: (sectionId) => {
+      const section = noteRef.current?.sections.find((s) => s.id === sectionId)
+      if (section) handleStartRename(section)
+    },
+    duplicate: (sectionId) => { void handleDuplicateSection(sectionId) },
+    delete: handleDeleteSection,
   }
 
-  const handleClearSectionColor = async (sectionName: string) => {
-    await clearSectionTagColor(sectionName)
-    setSectionColorPickerId(null)
-  }
-
-  // The strip's name field commits on blur — i.e. on the mousedown of a swatch, before its
-  // click — and the store only shows the new name after the disk write. Colours are keyed by
-  // section name, so they go to the name just committed rather than the stale one.
-  // Only while the store still shows the name it replaced: once the write lands, or if a rename
-  // from elsewhere (sync, another pane) or a failed write moved it on, the store wins.
-  const stripSectionName = (section: NoteSection) => {
-    const pending = stripRenameRef.current
-    return pending && pending.sectionId === section.id && section.name === pending.from
-      ? pending.name
-      : section.name
-  }
-
-  // Resolves with the name the section has once the write settles (see SectionNameField).
-  const handleStripRename = async (sectionId: string, name: string) => {
-    const noteId = note.id
-    const sectionNameNow = () =>
-      useNotesStore.getState().notes.find((n) => n.id === noteId)?.sections.find((s) => s.id === sectionId)?.name
-    if (note.encryption && !sessionPasswords[noteId]) return sectionNameNow()
-    const from = sectionNameNow()
-    if (from !== undefined) stripRenameRef.current = { sectionId, from, name }
-    try {
-      await updateSection(noteId, sectionId, { name })
-    } catch (err) {
-      console.error('[editor] Section rename failed:', err)
-    }
-    return sectionNameNow()
-  }
-
-  const closeStripToEditor = () => {
-    setSectionColorPickerId(null)
+  // Closing the menu hands focus back to the editor when nothing else took it: the
+  // right-click leaves it on the tab (or on nothing once the clicked option unmounts).
+  // What moves it elsewhere — a modal, another field — keeps it. Never while the inline
+  // rename input (Rename section) is mounted: it focuses itself a tick later, so focus is
+  // still on <body> here, and TipTap's focus — itself deferred a frame — would steal it
+  // from the input, whose blur would end the rename.
+  const closeTabMenu = () => {
+    setTabMenu(null)
     requestAnimationFrame(() => {
-      const editor = editorRef.current?.editor
-      if (editor) editor.commands.focus()
-      else rawTextareaRef.current?.focus()
+      if (renameRef.current) return
+      const focused = document.activeElement
+      const stranded = !focused || focused === document.body || !!tabsScrollRef.current?.contains(focused)
+      if (stranded) focusEditorBody()
     })
   }
-
-  const colorPickerSection = sectionColorPickerId
-    ? note.sections.find((s) => s.id === sectionColorPickerId) ?? null
-    : null
-
-  if (colorPickerSection) lastColorPickerSectionRef.current = colorPickerSection
-  const visibleColorPickerSection = colorPickerSection ?? lastColorPickerSectionRef.current
-
-  const colorPickerOverride = visibleColorPickerSection
-    ? sectionTagColors[normalizeTagColorKey(visibleColorPickerSection.name)]
-    : undefined
 
   const handleRawChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newDisplay = e.target.value
@@ -1288,6 +1271,15 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
         />
       )}
 
+      {/* Outside the pane container below: its onKeyDown stops propagation, which would
+          hide the menu's own keys (Escape) from its window listener. */}
+      <NoteContextMenu
+        request={tabMenu}
+        onClose={closeTabMenu}
+        sectionActions={tabMenuSectionActions}
+        standalone={standalone}
+      />
+
       {encryptModalMode && (
         <EncryptionModal
           mode={encryptModalMode}
@@ -1361,6 +1353,13 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
         }}
         onKeyDown={(e) => {
           e.stopPropagation()
+          // The tab menu listens for Escape on window, which this stopPropagation hides it
+          // from while focus is still in the pane (on the right-clicked tab, or the editor).
+          if (e.key === 'Escape' && tabMenu) {
+            e.preventDefault()
+            closeTabMenu()
+            return
+          }
           const isAccel = e.ctrlKey || e.metaKey
           const key = e.key.toLowerCase()
 
@@ -1403,9 +1402,12 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
                   onDragEnd={handleDragEnd}
                   onDragLeave={() => setDragOverSectionId(null)}
                   onContextMenu={(e) => {
+                    // Not over the inline rename input: its name isn't saved yet, and the
+                    // colours are keyed by section name.
+                    if (isRenaming) return
                     e.preventDefault()
-                    stripRenameRef.current = null
-                    setSectionColorPickerId((prev) => (prev === section.id ? null : section.id))
+                    setSectionMenuOpen(false)
+                    setTabMenu({ x: e.clientX, y: e.clientY, noteId: note.id, sectionId: section.id })
                   }}
                   className={`relative group flex items-center justify-center min-w-[88px] flex-shrink-0 h-full transition-colors duration-150 cursor-grab active:cursor-grabbing
                     ${draggedSectionId === section.id ? 'opacity-30' : 'opacity-100'}
@@ -1434,6 +1436,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
                     <div className="flex items-center gap-0.5 px-1.5 py-1">
                       <input
                         ref={renameRef}
+                        {...OWN_KEYS_PROPS}
                         value={renameValue}
                         onChange={(e) => setRenameValue(e.target.value)}
                         onKeyDown={handleRenameKeyDown}
@@ -1526,7 +1529,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
             </button>
             <div className="relative">
               <button
-                onClick={(e) => { e.stopPropagation(); setSectionMenuOpen((prev) => !prev) }}
+                onClick={(e) => { e.stopPropagation(); setTabMenu(null); setSectionMenuOpen((prev) => !prev) }}
                 title={t.editor.sectionOptions}
                 className={`p-1.5 rounded text-xs transition-colors
                   ${sectionMenuOpen
@@ -1656,81 +1659,6 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
             </button>
           </div>
         )}
-
-        <div
-          className="overflow-hidden transition-all duration-200 ease-in-out border-border/60 bg-surface-1/40"
-          style={{
-            maxHeight: colorPickerSection ? '60px' : '0px',
-            opacity: colorPickerSection ? 1 : 0,
-            borderBottomWidth: colorPickerSection ? '1px' : '0px',
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {visibleColorPickerSection && (
-            <div className="px-3 py-2 flex items-center justify-between gap-2">
-              <SectionNameField
-                key={`${note.id}:${visibleColorPickerSection.id}`}
-                name={visibleColorPickerSection.name}
-                open={!!colorPickerSection}
-                readOnly={!!note.encryption && !sessionPasswords[note.id]}
-                label={t.editor.renameSection}
-                onCommit={(name) => handleStripRename(visibleColorPickerSection.id, name)}
-                onClose={closeStripToEditor}
-              />
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                {TAG_COLOR_VARS.map((color) => (
-                  <button
-                    key={`tab-color-${visibleColorPickerSection.id}-${color}`}
-                    title={color.replace('--', '')}
-                    onClick={() => { void handleSetSectionColor(stripSectionName(visibleColorPickerSection), color) }}
-                    className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${colorPickerOverride === color ? 'ring-1 ring-white/60 ring-offset-1 ring-offset-surface-2' : ''}`}
-                    style={{ background: `rgb(${colorChannels(color)})` }}
-                  />
-                ))}
-                <CustomColorSwatch
-                  value={colorPickerOverride ?? resolveGroupColor(visibleColorPickerSection.name)}
-                  onPick={(c) => { void setSectionTagColor(stripSectionName(visibleColorPickerSection), c) }}
-                />
-                <button
-                  onClick={() => { void handleClearSectionColor(stripSectionName(visibleColorPickerSection)) }}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
-                    colorPickerOverride
-                      ? 'text-text-muted border-border hover:text-text hover:border-text/30'
-                      : 'text-text border-text/25 bg-surface-2'
-                  }`}
-                >
-                  {t.editor.auto}
-                </button>
-                <div className="w-px h-4 bg-border/70 mx-0.5" />
-                {!(note.encryption && !sessionPasswords[note.id]) && (
-                  <button
-                    onClick={() => { void handleDuplicateSection(visibleColorPickerSection.id, stripSectionName(visibleColorPickerSection)); setSectionColorPickerId(null) }}
-                    title={t.common.duplicateSection}
-                    className="p-0.5 rounded text-text-muted/80 hover:text-text transition-colors"
-                  >
-                    <CopyPlus size={13} />
-                  </button>
-                )}
-                {note.sections.length > 1 && (
-                  <button
-                    onClick={() => { handleDeleteSection(visibleColorPickerSection.id, stripSectionName(visibleColorPickerSection)); setSectionColorPickerId(null) }}
-                    title={t.common.deleteSection}
-                    className="p-0.5 rounded text-text-muted/80 hover:text-red-400 transition-colors"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                )}
-                <button
-                  onClick={() => setSectionColorPickerId(null)}
-                  className="p-0.5 rounded text-text-muted/70 hover:text-text transition-colors"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
 
         <div className="px-4 pt-3 pb-1 flex-shrink-0">
           <input

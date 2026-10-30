@@ -95,8 +95,7 @@ noteflow/
 │   │   ├── Editor/
 │   │   │   ├── Editor.tsx               # Instancia TipTap (conversión md↔html en lib/markdownHtml.ts)
 │   │   │   ├── editorExtensions.ts      #   extensiones que definen el esquema (nodos/marcas/atributos); las usan Editor.tsx y el harness de round-trip
-│   │   │   ├── NoteEditor.tsx           # Wrapper con tabs de secciones, atajos de fuente
-│   │   │   ├── SectionNameField.tsx     # Nombre editable de la franja del click derecho en un tab
+│   │   │   ├── NoteEditor.tsx           # Wrapper con tabs de secciones (click derecho → NoteContextMenu), atajos de fuente
 │   │   │   ├── EditorToolbar.tsx        # Toolbar de formato
 │   │   │   ├── EditorToc.tsx            # Índice flotante H1–H3 (+ useEditorToc.ts: lectura del doc)
 │   │   │   ├── DeadlineTaskItem.ts      # Extensión TipTap: task item con deadline+alarma
