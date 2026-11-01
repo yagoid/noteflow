@@ -1347,7 +1347,8 @@ si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
   no lee/persiste `uiState` (`saveUiState` no-op), no programa alarmas, no poda notas vacías y, si la
   nota desaparece, el panel se vacía (estado "note not found") en vez de saltar a otra nota. No monta
   `TitleBar` (comprobación de updates, botón de sync) ni los listeners de IA. Sync GitHub/Cloud,
-  indexado IA, auto-update y motor de alarmas viven en main y no dependen de la ventana.
+  indexado IA, auto-update y motor de alarmas viven en main y no dependen de la ventana. La ventana
+  de chat despegada (`#ai-chat`, ver `ai.md` → Chat en el editor) reutiliza este mismo rol `'section'`.
 - La ventana **sigue a su panel** (no al hash): un clic en una pill de relación hacia otra nota navega
   dentro de la propia ventana (con un `noteId` fijo el editor quedaría en una sección de otra nota).
 - Recibe `notes-updated` como cualquier ventana (filtrado por `windowId`) y carga grupos, plantillas

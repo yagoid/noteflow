@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { AlertTriangle, ArrowUp, Check, FileText, History, Image as ImageIcon, Loader2, Paperclip, Plus, RefreshCw, Settings, Square, Trash2, Wrench, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { AlertTriangle, ArrowUp, Check, FileText, History, Image as ImageIcon, Loader2, Paperclip, Plus, RefreshCw, RotateCcw, Settings, Square, Trash2, Wrench, X } from 'lucide-react'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useNotesStore } from '../../stores/notesStore'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
@@ -33,6 +33,14 @@ function AttachmentChip({ a, onRemove }: { a: ChatAttachment; onRemove?: () => v
 
 function ToolActivityRow({ a }: { a: ChatToolActivity }) {
   const t = useT()
+  const undoToolCall = useAiChatStore((s) => s.undoToolCall)
+  const streaming = useAiChatStore((s) => s.streaming)
+  // 'confirm' = the note changed after the AI's edit: ask before restoring over those changes.
+  // 'error' = the undo failed or can't be done (undoError holds the message to show).
+  const [undoState, setUndoState] = useState<'idle' | 'busy' | 'confirm' | 'error'>('idle')
+  const [undoError, setUndoError] = useState('')
+  // Undoing a create_note deletes the whole note: say so.
+  const createdNote = a.name === 'create_note'
   // Present-continuous label shown while a tool runs (replaced by its summary once it finishes).
   const running = t.aiPanel.chat.running as Record<string, string>
   const label = a.summary || a.runningLabel || running[a.name] || a.name
@@ -41,10 +49,61 @@ function ToolActivityRow({ a }: { a: ChatToolActivity }) {
     : a.status === 'error' ? <AlertTriangle size={11} className="text-red-300" />
     : a.status === 'cancelled' ? <X size={11} className="text-text-muted" />
     : <Check size={11} className="text-emerald-400" />
+
+  const runUndo = async (force: boolean) => {
+    setUndoState('busy')
+    const res = await undoToolCall(a.toolCallId, force)
+    if (res.ok || res.reason === 'unavailable') setUndoState('idle')
+    else if (res.reason === 'modified') setUndoState('confirm')
+    else {
+      setUndoError(
+        res.reason === 'conflict' ? t.aiPanel.chat.undoConflict
+        : res.reason === 'encryption' ? t.aiPanel.chat.undoEncryption
+        : tf(t.aiPanel.chat.undoFailed, { error: res.error ?? '' }),
+      )
+      setUndoState('error')
+    }
+  }
+
+  const canUndo = a.status === 'done' && a.undo === 'available'
   return (
-    <div className="flex items-center gap-1.5 text-[11.5px] font-mono text-text-muted">
-      {icon}
-      <span className={`truncate ${a.status === 'cancelled' ? 'line-through opacity-60' : ''}`}>{label}</span>
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-1.5 text-[11.5px] font-mono text-text-muted">
+        {icon}
+        <span className={`truncate ${a.status === 'cancelled' || a.undo === 'done' ? 'line-through opacity-60' : ''}`}>{label}</span>
+        {canUndo && undoState !== 'confirm' && (
+          // While a reply streams the agent may still be editing that note: undo once it's done.
+          <button
+            onClick={() => void runUndo(false)}
+            disabled={streaming || undoState === 'busy'}
+            title={streaming ? t.aiPanel.chat.undoWhileStreaming : createdNote ? t.aiPanel.chat.undoHintCreated : t.aiPanel.chat.undoHint}
+            className="shrink-0 ml-0.5 inline-flex items-center gap-1 px-1.5 py-px rounded text-[11px] text-text-muted hover:text-text hover:bg-surface-2 border border-border transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            {undoState === 'busy' ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}
+            {t.aiPanel.chat.undo}
+          </button>
+        )}
+        {a.undo === 'done' && <span className="shrink-0 text-[11px] text-text-muted/70">· {t.aiPanel.chat.undone}</span>}
+      </div>
+      {undoState === 'confirm' && (
+        <div className="ml-[17px] flex flex-wrap items-center gap-1.5 text-[11.5px] font-mono text-amber-200">
+          <span>{createdNote ? t.aiPanel.chat.undoModifiedCreated : t.aiPanel.chat.undoModified}</span>
+          <button
+            onClick={() => void runUndo(true)}
+            className="px-1.5 py-px rounded bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 transition-colors"
+          >
+            {t.aiPanel.chat.undoAnyway}
+          </button>
+          <button onClick={() => setUndoState('idle')} className="px-1.5 py-px rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors">
+            {t.common.cancel}
+          </button>
+        </div>
+      )}
+      {undoState === 'error' && (
+        <div className="ml-[17px] text-[11.5px] font-mono text-red-300 break-words">
+          {undoError}
+        </div>
+      )}
     </div>
   )
 }
@@ -113,12 +172,36 @@ function MarkdownMessage({ content }: { content: string }) {
   )
 }
 
+/** What a custom header (`renderHeader`, compact variant) gets to build its controls. */
+export interface ChatHeaderControls {
+  historyOpen: boolean
+  toggleHistory: () => void
+  closeHistory: () => void
+  /** Compact model picker; null while no provider is configured. */
+  modelPicker: ReactNode | null
+}
+
 export function ChatView({
   onOpenNote,
   onConfigure,
+  compact = false,
+  renderHeader,
+  contextBar,
+  withContext = false,
+  autoSendPendingPrompt = true,
 }: {
   onOpenNote: (noteId: string, sectionId: string) => void
   onConfigure: () => void
+  /** Editor sidebar / detached window: tighter paddings, header from `renderHeader`. */
+  compact?: boolean
+  /** Replaces the default top bar (history + new chat + model picker). Shown even when not configured. */
+  renderHeader?: (controls: ChatHeaderControls) => ReactNode
+  /** Rendered right above the composer (the editor chat's context bar). */
+  contextBar?: ReactNode
+  /** Send the store's context with each message (see aiChatStore.sendMessage). */
+  withContext?: boolean
+  /** Auto-send a prompt queued from the command palette ("Ask AI" — the brain chat consumes it). */
+  autoSendPendingPrompt?: boolean
 }) {
   const t = useT()
   const { previewProps } = useSectionHoverPreview()
@@ -201,10 +284,10 @@ export function ChatView({
   // A question queued from the command palette ("Ask AI") auto-sends once a provider is ready.
   // If none is configured yet it lingers until one is, then fires.
   useEffect(() => {
-    if (!pendingPrompt || !configured || streaming) return
+    if (!autoSendPendingPrompt || !pendingPrompt || !configured || streaming) return
     useAiChatStore.setState({ pendingPrompt: null })
     sendMessage(pendingPrompt)
-  }, [pendingPrompt, configured, streaming, sendMessage])
+  }, [autoSendPendingPrompt, pendingPrompt, configured, streaming, sendMessage])
 
   // Personalized starter chips for the empty chat, randomized from the user's own note
   // and section names. Recomputed once notes are loaded (and on each view re-entry, since
@@ -219,35 +302,79 @@ export function ChatView({
   const shownSuggestions = streaming ? [] : messages.length === 0 ? starterSuggestions : suggestions
 
   const canSend = (draft.trim().length > 0 || pendingAttachments.length > 0) && !streaming
+  const send = (text: string) => sendMessage(text, { withContext })
   const submit = () => {
     if (!canSend) return
-    sendMessage(draft) // clears the draft + pending attachments in the store
+    send(draft) // clears the draft + pending attachments in the store
   }
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
   }
 
+  const notConfiguredCard = (
+    <div className="flex items-center justify-center h-full p-5">
+      <Card className="flex flex-col items-center gap-3 p-6 max-w-[260px] text-center">
+        <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-accent/15 text-accent">
+          <Settings size={18} />
+        </span>
+        <p className="text-[13px] font-mono text-text-muted leading-relaxed">
+          {compact ? t.aiPanel.sidebar.notConfigured : t.aiPanel.chat.notConfigured}
+        </p>
+        <button onClick={onConfigure} className="px-3 py-1.5 rounded-lg bg-text text-surface-0 text-[12px] font-mono font-bold hover:opacity-90">
+          {compact ? t.aiPanel.sidebar.openAiSettings : t.aiPanel.chat.configureProvider}
+        </button>
+      </Card>
+    </div>
+  )
+
+  const modelPicker = (
+    <div className="flex items-center gap-1 min-w-0">
+      <select
+        value={llmConfig?.model ?? ''}
+        onChange={(e) => setLlmConfig({ model: e.target.value })}
+        title={t.aiPanel.chat.modelSelectTitle}
+        className={`${compact ? 'max-w-[120px]' : 'max-w-[150px]'} min-w-0 bg-surface-0 border border-border rounded px-1.5 py-1 text-[11px] font-mono text-text outline-none focus:border-text/30`}
+      >
+        {modelOptions.length === 0 && <option value="">{t.aiPanel.chat.noModel}</option>}
+        {modelOptions.map((m) => (
+          // Show the model name only (drop the "provider/" prefix); the value keeps the full id.
+          <option key={m} value={m}>{m.includes('/') ? m.slice(m.indexOf('/') + 1) : m}</option>
+        ))}
+      </select>
+      {!compact && (
+        <button
+          onClick={() => refreshModels()}
+          disabled={modelsLoading}
+          title={t.aiPanel.chat.loadModelsTitle}
+          className="flex items-center justify-center w-6 h-6 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={11} className={modelsLoading ? 'animate-spin' : ''} />
+        </button>
+      )}
+    </div>
+  )
+
+  const header = renderHeader?.({
+    historyOpen,
+    toggleHistory: () => setHistoryOpen((o) => !o),
+    closeHistory: () => setHistoryOpen(false),
+    modelPicker: configured ? modelPicker : null,
+  })
+
   if (!configured) {
+    if (!header) return notConfiguredCard
     return (
-      <div className="flex items-center justify-center h-full p-5">
-        <Card className="flex flex-col items-center gap-3 p-6 max-w-[260px] text-center">
-          <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-accent/15 text-accent">
-            <Settings size={18} />
-          </span>
-          <p className="text-[13px] font-mono text-text-muted leading-relaxed">
-            {t.aiPanel.chat.notConfigured}
-          </p>
-          <button onClick={onConfigure} className="px-3 py-1.5 rounded-lg bg-text text-surface-0 text-[12px] font-mono font-bold hover:opacity-90">
-            {t.aiPanel.chat.configureProvider}
-          </button>
-        </Card>
+      <div className="flex flex-col h-full min-h-0">
+        {header}
+        <div className="flex-1 min-h-0">{notConfiguredCard}</div>
       </div>
     )
   }
 
   return (
     <div className="flex flex-col h-full min-h-0 relative">
-      {/* Top bar: history + new chat + model picker */}
+      {header ?? (
+      /* Top bar: history + new chat + model picker */
       <div className="flex-shrink-0 flex items-center gap-1.5 px-2 h-9 border-b border-text/10">
         <button
           onClick={() => setHistoryOpen((o) => !o)}
@@ -263,35 +390,15 @@ export function ChatView({
         >
           <Plus size={15} />
         </button>
-        <div className="ml-auto flex items-center gap-1 min-w-0">
-          <select
-            value={llmConfig?.model ?? ''}
-            onChange={(e) => setLlmConfig({ model: e.target.value })}
-            title={t.aiPanel.chat.modelSelectTitle}
-            className="max-w-[150px] bg-surface-0 border border-border rounded px-1.5 py-1 text-[11px] font-mono text-text outline-none focus:border-text/30"
-          >
-            {modelOptions.length === 0 && <option value="">{t.aiPanel.chat.noModel}</option>}
-            {modelOptions.map((m) => (
-              // Show the model name only (drop the "provider/" prefix); the value keeps the full id.
-              <option key={m} value={m}>{m.includes('/') ? m.slice(m.indexOf('/') + 1) : m}</option>
-            ))}
-          </select>
-          <button
-            onClick={() => refreshModels()}
-            disabled={modelsLoading}
-            title={t.aiPanel.chat.loadModelsTitle}
-            className="flex items-center justify-center w-6 h-6 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={11} className={modelsLoading ? 'animate-spin' : ''} />
-          </button>
-        </div>
+        <div className="ml-auto">{modelPicker}</div>
       </div>
+      )}
 
       {/* History overlay */}
       {historyOpen && (
         <>
           <div className="absolute inset-0 z-10" onClick={() => setHistoryOpen(false)} />
-          <div className="absolute top-9 left-2 z-20 w-64 max-h-80 overflow-y-auto rounded-lg border border-border bg-surface-1 shadow-2xl py-1">
+          <div className={`absolute z-20 w-64 max-w-[calc(100%-1rem)] max-h-80 overflow-y-auto rounded-lg border border-border bg-surface-1 shadow-2xl py-1 ${compact ? 'top-10 right-2' : 'top-9 left-2'}`}>
             {sessions.length === 0 && <p className="px-3 py-2 text-[12px] font-mono text-text-muted/60">{t.aiPanel.chat.noSavedChats}</p>}
             {sessions.map((s) => (
               <div
@@ -314,10 +421,10 @@ export function ChatView({
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-3 flex flex-col gap-3">
+      <div ref={scrollRef} className={`flex-1 min-h-0 overflow-y-auto py-3 flex flex-col gap-3 ${compact ? 'px-2.5' : 'px-3'}`}>
         {messages.length === 0 && (
           <p className="text-[12px] font-mono text-text-muted/60 text-center mt-6">
-            {t.aiPanel.chat.emptyHint}
+            {compact ? t.aiPanel.chat.emptyHintCompact : t.aiPanel.chat.emptyHint}
           </p>
         )}
         {messages.map((m) => (
@@ -404,13 +511,13 @@ export function ChatView({
       </div>
 
       {/* Composer — one rounded surface (attachments + input + actions), like the design's cards. */}
-      <div className="flex-shrink-0 px-4 pt-2 pb-6">
+      <div className={`flex-shrink-0 pt-2 ${compact ? 'px-2.5 pb-2.5' : 'px-4 pb-6'}`}>
         {shownSuggestions.length > 0 && (
           <div className="mb-1.5 flex flex-wrap gap-1">
             {shownSuggestions.map((s) => (
               <button
                 key={s}
-                onClick={() => sendMessage(s)}
+                onClick={() => send(s)}
                 title={s}
                 className="px-2 py-0.5 rounded-md text-[11px] font-mono border-solid border border-border bg-surface-0 text-text-muted hover:text-text hover:border-accent/50 transition-colors max-w-full truncate"
               >
@@ -419,6 +526,7 @@ export function ChatView({
             ))}
           </div>
         )}
+        {contextBar}
         <div className="rounded-xl border-solid border border-border bg-surface-0 p-1.5 transition-colors focus-within:border-accent/40">
           {pendingAttachments.length > 0 && (
             <div className="mb-1.5 flex flex-wrap gap-1">

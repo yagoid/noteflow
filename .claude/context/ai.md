@@ -226,9 +226,10 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   `applyFoldersSet` (heredan broadcast `notes-updated` + `schedulePush` + `scheduleIndex`; **sin
   senderId** → la propia ventana del chat también refresca). Las ediciones de una nota **existente**
   (`writeNoteRecord`) avisan además a `ctx.onNoteEdited(noteId)`, con el que main las apunta en el
-  log de actividad por dispositivo (`userData/activity-log.json`, ver `architecture.md`). Ojo: estas
-  escrituras **no** actualizan el `updated` de la nota, así que sin el log no aparecerían como
-  editadas en la gráfica de Ajustes → General. Tools v1: `list_notes`, `get_note`,
+  log de actividad por dispositivo (`userData/activity-log.json`, ver `architecture.md`). Estas
+  escrituras sí bumpean el `updated` de la nota (`serializeNoteFolder` sin `preserveUpdated`), pero
+  la gráfica de Ajustes → General (`lib/activityPulse.ts`) solo ve por `updated` el **último** día de
+  edición de cada nota; los días anteriores salen del log. Tools v1: `list_notes`, `get_note`,
   `list_groups`, `search_notes`, `create_note`, `update_note`, `add_section`, `update_section`,
   `rename_section`, `create_group`, `create_folder`, `rename_group`, `rename_folder`, `delete_*`.
   Las **notas cifradas** se listan pero no se leen/editan. El **bucle** en `ai:chat` itera
@@ -280,6 +281,9 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
 - **Historial de chats:** sesiones en `userData/ai-chats.json` (local), gestionadas por `aiChatStore`
   (crear/abrir/borrar; se persiste al terminar cada respuesta). Selector de modelo en el chat
   (cambia el modelo del preset activo). Textos del panel vía i18n (`src/i18n/{en,es}/aiPanel.ts`).
+  Los **listeners del stream** (`aiChatStore.initListeners`) los monta **`App` una vez por ventana**
+  (no `AiPanel`): la misma conversación corre en el cerebro y en el sidebar del editor, y una
+  respuesta sigue llegando aunque se cambie de vista. `AiPanel` solo recarga config + sesiones.
 - **Enrutado del panel desde la paleta de comandos:** `aiChatStore` expone `panelTab`/`pendingPrompt`
   + `openAiPanel(tab, prompt?)` (tipo `PanelTab = 'chat'|'related'|'profile'|'settings'`). La
   `CommandPalette` abre la brain view (`setBrainView(true)`) y llama `openAiPanel` para que el
@@ -360,3 +364,126 @@ Python…) quedan literales. **Borrador persistente:** las
   para limpiar el `setInterval` (con `req.on('close')` Node moderno lo mataba al consumir el body).
 - **Pendiente:** verificación manual en app real (necesita key/Ollama); monetización/nube (Fase 4,
   diseño en `.claude/context/monetization.md`).
+
+### Chat en el editor (sidebar flotante + ventana despegada)
+El mismo chat del cerebro, accesible desde el editor. Piezas: `AiPanel/AiChatButton.tsx` (botón),
+`AiPanel/AiChatSidebar.tsx` (panel), `AiPanel/ChatContextBar.tsx` + `lib/chatContext.ts` (contexto,
+tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventana), `AiPanel/ChatMoreMenu.tsx`
+(menú ⋯), `AiPanel/useChatEditorTarget.ts`; en main `electron/ai/chatContext.ts` y `electron/ai/chatUndo.ts`
+(puros, tests en `tests/electron/chatContext.test.ts` / `chatUndo.test.ts`).
+- **Botón:** `Brain` de 18 px con trazo fino (`strokeWidth` 1,25, para distinguirlo del `Brain` de
+  trazo normal del botón del cerebro de la `TitleBar`) en un botón de 32 px (activo = acento), a la
+  derecha del todo de la cabecera de `NoteEditor` (prop `aiChatButton`; `App` se lo pasa solo al panel
+  único o al **más a la derecha** del split). Va **centrado en vertical en la banda entre la fila de
+  pestañas y la toolbar de formato**: un wrapper `relative` envuelve la fila del título + la de fecha
+  (reserva `pr-10`) y el botón es `absolute right-3 top-1/2 -translate-y-1/2`. En la vista bloqueada de una nota
+  cifrada (sin fila de pestañas) va centrado en su cabecera con `-my-1`. Abre/pliega el sidebar — es la **única** forma de plegarlo — y, con el chat despegado,
+  enfoca la ventana (`ai:chat-window-focus`). Es también el **ancla** de posición (`aiChatAnchor.ts`,
+  mismo patrón que `sidebarAnchor.ts`).
+- **Sidebar:** `aside` absoluto en la fila de contenido de `App`, **hermano de `<main>`** (como el sidebar
+  flotante de notas: sus drops no llegan al "soltar nota → split"), `z-30`, estilo TOC (`bg-surface-1`,
+  borde, `rounded-xl`, sombra). Cuelga 6 px por debajo del botón y alinea su borde derecho con él (así
+  el botón nunca queda tapado); bottom 12 px. Re-mide con rAF en `ResizeObserver` de la fila, montaje/
+  desmontaje del ancla, `resize` y un intervalo de 500 ms mientras está visible (la fila del título se
+  mueve sin resize: banner de "sección borrada", scroll horizontal del split). Ancho 300–640 px
+  arrastrando el borde izquierdo, persistido en `localStorage` (`noteflow-ai-chat-width`). **Animación**
+  de plegar/desplegar: entra y sale deslizándose por el borde derecho (`transform: translateX`, 220 ms
+  `ease`, los mismos valores que el dock/undock del sidebar de notas en `SidebarShell`; transform y no
+  width para no re-maquetar la conversación en cada frame; `none` al estar dentro, por los `fixed`
+  descendientes). `closing` lo mantiene montado durante la salida y `entered` cambia un frame pintado
+  después de montar; ambos se resetean en render al cambiar `shown`, así que reabrir a mitad invierte el
+  deslizamiento sin desmontar. Durante la salida la posición queda congelada (el bucle de medida solo
+  corre con `shown` y mide el botón, que no se transforma). Como el sidebar de notas, no trata aparte
+  `prefers-reduced-motion`. **Plegado en
+  cada arranque** (`aiChatStore.sidebarOpen`, no se persiste). Solo se pinta en la vista de editor (no
+  cerebro/overviews) y si el ancla está en pantalla; la conversación vive en el store, así que ocultarlo
+  o cambiar de nota no la toca (mensajes, borrador, streaming).
+- **Conversación compartida con el cerebro:** mismo `aiChatStore` (historial, hilo activo) y mismo
+  `ChatView`, en variante `compact` con `renderHeader` (cabecera propia: título, selector de modelo,
+  "Nuevo chat", ⋯ con Historial / Despegar), `contextBar` y `withContext`. El cerebro sigue igual: sin
+  barra de contexto ni `context` en el payload, y es el único que consume `pendingPrompt` ("Ask AI" de la
+  paleta; `autoSendPendingPrompt`). Sin IA configurada: tarjeta con botón a **Ajustes → IA** (evento
+  `noteflow:open-ai-settings`, lo atiende `TitleBar`).
+- **Contexto (barra sobre el composer):** conjunto acumulable `context = {allNotes, items}` con items
+  `{kind:'section', noteId, sectionId} | {kind:'note', noteId}`. Botones "Sección: X" / "Nota: Y" (lo que
+  muestra el panel activo **ahora**, `editorTarget`) añaden/quitan su item (activos si ya está); "Todas
+  las notas" es un toggle. Lo añadido de otras notas queda como chip con ✕. Notas cifradas y secciones
+  `aiHidden` no se pueden añadir (botón deshabilitado con tooltip); una nota entera manda solo sus
+  secciones visibles. **Default de un chat nuevo = la sección abierta, y la SIGUE**: mientras el chat no
+  tenga mensajes y el usuario no haya tocado la barra (`contextPinned` false), cada cambio de
+  `editorTarget` re-siembra el default (`contextAfterTargetChange`) — así la nota restaurada al arrancar
+  no deja un chip viejo si luego se abre otra sección. Añadir/quitar/toggle o enviar el primer mensaje lo
+  **congela** (`contextPinned` true) y rige la lógica acumulable; `newChat`/`openSession`/borrar la
+  sesión activa vuelven al default sin congelar. El estado vacío del chat compacto usa su propio texto
+  (`chat.emptyHintCompact`; el del cerebro habla de iluminar notas). `editorTarget` lo calcula
+  la ventana principal (`useSyncChatEditorTarget`: suscripción al `notesStore`, panel activo +
+  `getActiveSectionTarget`) y lo reenvía a main en cada cambio (`ai:chat-window-editor-target`).
+- **Backend (`ai:chat` con `context`):** `buildChatContext(query, context)`. **Sin `context`** (cerebro) =
+  RAG de siempre. **Con `context`:** perfil siempre; los items se leen de disco (`readDiskNote` +
+  `chatContext.buildContextBlocks`: sin cifradas ni `aiHidden`, `stripBase64`, cap ~12k chars por item y
+  ~40k en total con marca de truncado, cada bloque con `note_id`/`section_id`); una línea con la
+  nota/sección abierta (`describeOpenNote`; nunca nombra una sección oculta ni lee una cifrada) para que
+  "esta nota" funcione aunque no esté en contexto; y **el RAG (`aiIndex.search` + vecinos) SOLO si
+  `allNotes`** (saltando lo ya compartido). El system prompt (`chatContextGuide`) explica el alcance, que
+  puede editar con las tools usando esos ids sin buscarlos, que `update_section` reemplaza la sección
+  entera y que no reescriba una sección truncada. Las **tools siguen libres**. `sanitizeContextRequest`
+  valida el payload (máx. 30 items).
+- **Flush antes de leer:** al empezar cada `ai:chat` (y cada undo) main pide a la ventana principal que
+  escriba sus guardados con debounce (`ai:flush-edits` → `settleNoteWrites()` → `ai:flush-edits-done`,
+  máx. 1,5 s), así el modelo lee la versión actual. Las ediciones de la IA llegan al editor por el
+  broadcast `notes-updated` sin senderId → `syncNote` → sync de contenido externo (aplica o fusiona sin
+  pisar lo tecleado; ver `patterns.md`).
+- **Imágenes en `update_section`:** el modelo solo ve `[image]`; `restoreStrippedImages` (en `tools.ts`)
+  devuelve los data URIs originales a los `![alt]([image])` del contenido nuevo **emparejando por
+  posición** (n-ésimo placeholder ← n-ésima imagen del original): si el modelo reordena o quita imágenes,
+  puede caer la imagen equivocada en un hueco. Los placeholders que sobran (más que imágenes había) se
+  **eliminan** en vez de guardarse como imagen rota. `get_note` marca ahora el truncado a 6000 chars por
+  sección.
+- **Deshacer por edición:** tools en `chatUndo.UNDOABLE_TOOLS` (`create_note`, `update_note`,
+  `add_section`, `update_section`, `rename_section`). **No** las de grupo/carpeta ni **`delete_note` /
+  `delete_section`**: ya piden confirmación, y restaurar lo borrado chocaría con el borrado remoto que
+  dejaron en el journal de sync (`scheduleDeleteDir` / `scheduleDelete`): un borrado pendiente
+  (`retrySyncJournal`) o en vuelo (`deleteRemoteDirNow`) podría volver a borrar en remoto —y luego en
+  local vía pull— lo restaurado. Main guarda **en memoria** (sesión de app, máx. 200, por `toolCallId`) la nota antes y después de
+  la tool (si algo cambió) y añade `undoable: true` al `ai:chat-tool-result`; la fila de actividad
+  (`ToolActivityRow`, también en el cerebro) muestra "Deshacer" (deshabilitado mientras hay streaming).
+  `ai:chat-undo(toolCallId, force?)`: primero `undoBlock` — **nunca** (ni con `force`) si tendría que
+  re-crear la carpeta de la nota o un fichero de sección que ya no está en disco (`conflict`: se borró
+  después y puede quedar un borrado remoto pendiente para esa clave, mismo motivo que arriba) ni si la
+  nota se cifró/descifró después de la edición (`encryption`: restaurar escribiría p. ej. una copia
+  descifrada sobre la nota cifrada); la UI lo explica y quita el botón. Después, si la nota ya no
+  coincide con el snapshot post-edición
+  (`isModifiedSinceEdit`, huella sin `updated`) devuelve `modified` y la UI pide confirmación antes de
+  reintentar con `force`; `planUndo` restaura el snapshot "antes" (note.md + solo las secciones que
+  difieren, borrando las que sobran) con `applyNoteWrite` durable, o borra la nota con `applyNoteDelete`
+  si la creó la tool (la confirmación avisa de que se borrará la nota entera). La fila pasa a "Deshecho" (`ChatToolActivity.undo: 'done'`, se persiste).
+  `ai:chats-load` quita el `undo: 'available'` de las filas cuyo snapshot ya no existe (tras reiniciar)
+  → sin botón. Restaurar es de la nota entera: deshacer una edición anterior revierte también las
+  posteriores de esa nota (por eso pide confirmación).
+- **Ventana despegada ("se muda"):** ⋯ → "Despegar en ventana" (deshabilitado con streaming o
+  confirmación pendiente) → `aiChatStore.detachChat()` serializa `ChatHandoff` (messages,
+  activeSessionId, draft, context, contextPinned, suggestions, pendingAttachments, `takenAt`) → `ai:chat-window-open`
+  → main crea `createChatWindow()` (frameless, opaca como la de sección, `#ai-chat` → rama `chat` de
+  `App.tsx`, rol de store `'section'`; bounds en `settings.json → aiChatWindow.bounds`, descartando la
+  posición si ya no cae en ninguna pantalla) → la ventana pide el estado (`ai:chat-window-get-state`, que
+  incluye el último `editorTarget`). Barra de título propia: zona de arrastre, ⋯ (Volver a la ventana
+  principal / Nuevo chat / Historial), chincheta (`setAlwaysOnTop`, desactivada al abrir) y cerrar.
+  Mientras está despegada (`aiChatStore.detached` en la principal): el sidebar se pliega, el botón del
+  editor enfoca la ventana y la pestaña chat del cerebro muestra un placeholder con "Mostrar ventana" /
+  "Traer aquí" (`ai:chat-window-recall`) — **un solo renderer escribe `ai-chats.json`**. **Vuelta:**
+  cualquier cierre (botón, Volver, Alt+F4, recall) pasa por `close` en main → `ai:chat-window-request-close`
+  → la ventana cancela el streaming si lo hay y manda su estado (`ai:chat-window-return`) → main lo
+  reenvía a la principal (`ai:chat-window-returned`) y destruye la ventana; si el renderer no contesta en
+  2,5 s se cierra igual con `null`. La principal recarga las sesiones del disco, abre el sidebar e
+  importa el estado. **Handoff nulo o viejo:** la copia que la principal congeló al despegar (o el handoff
+  de despegue que main vuelve a servir a una ventana recargada tras un crash) no tiene los turnos hechos
+  en la ventana, que ya están en `ai-chats.json`; si se importara tal cual, el siguiente `persist()` los
+  pisaría. `lib/chatHandoff.reconcileHandoff` (tests en `tests/lib/chatHandoff.test.ts`) hace que gane la
+  sesión guardada (`activeSessionId`) cuando su `updatedAt` es posterior a `takenAt`, o siempre si la
+  copia no tiene `takenAt` (la congelada de la principal con handoff nulo); borrador y contexto se
+  conservan. Abrir una nota o los ajustes de IA desde la ventana va por `ai:chat-window-command` → main
+  enfoca la principal y se lo reenvía. **"Ask AI"** de la paleta con el chat despegado no abre el
+  cerebro: `openAiPanel` lo manda por `ai:chat-window-ask` → main enfoca la ventana → `askInNewChat`
+  (chat nuevo con "Todas las notas" activado, el alcance del "Ask AI" del cerebro; sin proveedor, queda
+  como borrador). Si la principal se destruye, la de chat también; tras una recarga de la principal,
+  `ai:chat-window-is-open` restaura el `detached`.

@@ -65,6 +65,22 @@ export const aiPanel = {
     noSavedChats: 'No saved chats yet.',
     deleteChat: 'Delete chat',
     emptyHint: "Ask about your notes. I'll light up the ones I use in the brain.",
+    // Same empty state in the editor's chat sidebar / detached chat window (no brain there).
+    emptyHintCompact: 'Ask about this note or your notes, or ask me to edit it.',
+
+    // Undo of a note edit made by the agent (button on its activity row).
+    undo: 'Undo',
+    undoHint: 'Put the note back as it was before this edit',
+    undoWhileStreaming: 'Available when the reply finishes',
+    undone: 'Undone',
+    undoModified: 'The note changed after this edit. Undo anyway?',
+    undoAnyway: 'Undo anyway',
+    undoHintCreated: 'Delete the note the AI created',
+    undoModifiedCreated: 'The note changed after the AI created it. Undo anyway? The whole note will be deleted.',
+    undoConflict: "Can't undo: the note or one of its sections was deleted after this edit.",
+    undoEncryption: "Can't undo: the note was encrypted or decrypted after this edit.",
+    // {error}: raw error text from main.
+    undoFailed: "Couldn't undo: {error}",
 
     // Starter chips for the empty chat. `note`/`section` interpolate the quoted
     // name via {name}; when clicked, the chip text is sent to the chat as-is.
@@ -73,6 +89,55 @@ export const aiPanel = {
       note: ['Summarize {name}', 'Reorganize {name}', 'Improve {name}', 'Find notes like {name}', "What's in {name}?", 'Turn {name} into tasks'],
       section: ['Expand the {name} section', 'Clean up {name}'],
     },
+  },
+
+  // Chat sidebar floating over the editor (button on the note title row) and its detached window.
+  sidebar: {
+    title: 'AI chat',
+    open: 'Open AI chat',
+    close: 'Close AI chat',
+    // Editor button while the chat lives in its own window.
+    showWindow: 'Show the chat window',
+    resize: 'Drag to resize',
+    moreOptions: 'More options',
+    history: 'History',
+    detach: 'Open in a separate window',
+    detachBusy: 'Wait until the reply finishes',
+    notConfigured: 'Use NoteFlow AI or connect your own provider to chat about your notes.',
+    openAiSettings: 'Open AI settings',
+  },
+
+  // Context bar above the sidebar composer: what the chat sees besides your profile.
+  context: {
+    label: 'Context:',
+    none: 'none',
+    // Buttons for what the editor shows now; {name} = section name / note title.
+    section: 'Section: {name}',
+    note: 'Note: {name}',
+    allNotes: 'All notes',
+    addSection: 'Share the current section with the chat',
+    removeSection: 'Stop sharing the current section',
+    addNote: 'Share the whole current note with the chat',
+    removeNote: 'Stop sharing the current note',
+    allNotesOn: 'Also search all your notes (semantic search) for every question',
+    allNotesOff: 'Stop searching all your notes',
+    noNote: 'Open a note to share it',
+    noSection: 'This note has no sections',
+    encrypted: "Encrypted notes can't be shared with the AI",
+    aiHidden: 'This section is hidden from the AI',
+    removeItem: 'Remove from context',
+    // Chip of a section added earlier: "Note › Section".
+    sectionChip: '{note} › {section}',
+  },
+
+  // Detached chat window (title bar) + the placeholder left in the brain's chat tab.
+  window: {
+    returnToMain: 'Back to the main window',
+    pin: 'Keep on top',
+    unpin: 'Stop keeping on top',
+    detachedHint: 'The chat is open in a separate window.',
+    showWindow: 'Show window',
+    bringBack: 'Bring it here',
   },
 
   // File-type fragments shared by the chat composer + profile file picker.

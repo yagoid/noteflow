@@ -254,7 +254,62 @@ export interface ChatToolActivity {
   status: 'running' | 'done' | 'error' | 'cancelled'
   summary?: string
   runningLabel?: string // present-tense "what it's doing" label, shown while status === 'running'
+  // Undo of a note edit made by this tool: 'available' while main still holds its snapshot
+  // (this app session only — main strips it from sessions loaded after a restart), 'done' once undone.
+  undo?: 'available' | 'done'
 }
+
+// ── Chat context (editor sidebar / detached chat window) ──────────────────────
+// What the user shares with the chat on top of the profile: explicit notes/sections and/or
+// semantic search over all notes. Without a context payload `ai:chat` keeps the brain chat's
+// behaviour (RAG over every note).
+export type ChatContextItem =
+  | { kind: 'section'; noteId: string; sectionId: string }
+  | { kind: 'note'; noteId: string }
+
+export interface ChatContextState {
+  allNotes: boolean
+  items: ChatContextItem[]
+}
+
+export interface ChatContextPayload extends ChatContextState {
+  // The note/section open in the editor right now, so "this note" resolves even when it isn't in context.
+  openNote?: { noteId: string; sectionId?: string }
+}
+
+// The note/section open in the main window's active pane, as the context bar needs it.
+export interface ChatEditorTarget {
+  noteId: string
+  noteTitle: string
+  sectionId?: string
+  sectionName?: string
+  encrypted: boolean
+  sectionAiHidden: boolean
+}
+
+// The conversation moving between the main window and the detached chat window.
+export interface ChatHandoff {
+  messages: ChatSession['messages']
+  activeSessionId: string | null
+  draft: string
+  context: ChatContextState
+  contextPinned: boolean
+  suggestions: string[]
+  pendingAttachments: ChatAttachment[]
+  // When it was taken (ISO). Absent on a frozen local copy. See lib/chatHandoff.reconcileHandoff.
+  takenAt?: string
+}
+
+export type ChatUndoResult =
+  | { ok: true }
+  // conflict: the note or one of its sections was deleted after the edit; encryption: it was
+  // encrypted/decrypted after the edit. Neither can be forced.
+  | { ok: false; reason: 'modified' | 'unavailable' | 'conflict' | 'encryption' | 'error'; error?: string }
+
+// Requests from the detached chat window that the main window carries out.
+export type ChatWindowCommand =
+  | { type: 'open-note'; noteId: string; sectionId?: string }
+  | { type: 'open-ai-settings' }
 
 // A destructive tool call awaiting the user's confirmation
 export interface ChatPendingConfirm {
@@ -605,13 +660,40 @@ declare global {
       // key (YYYY-MM-DD) → ids of the notes the user edited that day. Ids only, no content.
       recordActivityEdit: (noteId: string) => void
       getActivityLog: () => Promise<{ days: Record<string, string[]> }>
-      aiChat: (requestId: string, messages: ChatMessage[]) => Promise<void>
+      // `context` (editor sidebar / chat window): explicit notes/sections + RAG only when allNotes.
+      // Omitted = the brain chat's behaviour (RAG over every note).
+      aiChat: (requestId: string, messages: ChatMessage[], context?: ChatContextPayload) => Promise<void>
+      // Undo a note edit made by a chat tool (snapshot kept in main for this app session).
+      // force: restore even if the note changed after the AI's edit (the UI asked the user first).
+      aiChatUndo: (toolCallId: string, force?: boolean) => Promise<ChatUndoResult>
+      // Main window → asks main for its pending editor saves to be written (before a chat turn reads the note).
+      onAiFlushEdits: (cb: (token: string) => void) => () => void
+      aiFlushEditsDone: (token: string) => void
+      // Detached chat window. Main window side: open (moves the conversation), focus, recall,
+      // report the open note/section, and get the conversation back.
+      aiChatWindowOpen: (handoff: ChatHandoff) => Promise<{ ok: boolean }>
+      aiChatWindowIsOpen: () => Promise<boolean>
+      aiChatWindowFocus: () => void
+      aiChatWindowRecall: () => void
+      aiChatWindowSetEditorTarget: (target: ChatEditorTarget | null) => void
+      onAiChatWindowReturned: (cb: (handoff: ChatHandoff | null) => void) => () => void
+      onAiChatWindowCommand: (cb: (cmd: ChatWindowCommand) => void) => () => void
+      // Chat window side: take the conversation, follow the main window's open note/section,
+      // send commands to the main window and hand the conversation back on close.
+      aiChatWindowGetState: () => Promise<{ handoff: ChatHandoff | null; editorTarget: ChatEditorTarget | null }>
+      onAiChatWindowEditorTarget: (cb: (target: ChatEditorTarget | null) => void) => () => void
+      onAiChatWindowRequestClose: (cb: () => void) => () => void
+      aiChatWindowCommand: (cmd: ChatWindowCommand) => void
+      aiChatWindowReturn: (handoff: ChatHandoff | null) => void
+      // Main window: "Ask AI" (command palette) while the chat is detached → new chat in that window.
+      aiChatWindowAsk: (prompt: string) => void
+      onAiChatWindowAsk: (cb: (prompt: string) => void) => () => void
       aiChatPickFiles: () => Promise<{ ok: boolean; canceled?: boolean; files?: ChatAttachment[]; errors?: string[] }>
       aiChatRemoveFile: (id: string) => Promise<{ ok: boolean }>
       aiChatCancel: (requestId: string) => void
       aiChatConfirm: (toolCallId: string, approved: boolean) => void
       onAiChatToolCall: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown; label: string }) => void) => () => void
-      onAiChatToolResult: (cb: (p: { requestId: string; toolCallId: string; status: ChatToolActivity['status']; summary: string }) => void) => () => void
+      onAiChatToolResult: (cb: (p: { requestId: string; toolCallId: string; status: ChatToolActivity['status']; summary: string; undoable?: boolean }) => void) => () => void
       onAiChatConfirmRequest: (cb: (p: ChatPendingConfirm) => void) => () => void
       onAiChatDelta: (cb: (p: { requestId: string; delta: string }) => void) => () => void
       onAiChatSources: (cb: (p: { requestId: string; sources: ChatSource[] }) => void) => () => void

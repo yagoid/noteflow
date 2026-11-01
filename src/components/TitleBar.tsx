@@ -79,6 +79,8 @@ export function TitleBar() {
     const openUpdates = () => openSettings('about')
     // Emitted by surfaces with no navigation of their own (the brain's AI panel gate).
     const openAccount = () => openSettings('account')
+    // The editor's AI chat sidebar / detached chat window with no provider configured.
+    const openAiSettings = () => openSettings('ai')
     const doSync = () => {
       setSyncing(true)
       window.noteflow.pullActiveNotes().then(() => {
@@ -93,6 +95,7 @@ export function TitleBar() {
     window.addEventListener('noteflow:open-startup', openStartup)
     window.addEventListener('noteflow:check-for-update', openUpdates)
     window.addEventListener('noteflow:open-account', openAccount)
+    window.addEventListener('noteflow:open-ai-settings', openAiSettings)
     window.addEventListener('noteflow:sync-notes', doSync)
     return () => {
       window.removeEventListener('noteflow:open-export', openExport)
@@ -102,6 +105,7 @@ export function TitleBar() {
       window.removeEventListener('noteflow:open-startup', openStartup)
       window.removeEventListener('noteflow:check-for-update', openUpdates)
       window.removeEventListener('noteflow:open-account', openAccount)
+      window.removeEventListener('noteflow:open-ai-settings', openAiSettings)
       window.removeEventListener('noteflow:sync-notes', doSync)
     }
   }, [])

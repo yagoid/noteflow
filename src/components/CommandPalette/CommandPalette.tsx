@@ -342,7 +342,8 @@ export function CommandPalette() {
     if (mode === 'ask-ai') {
       if (e.key === 'Enter' && query.trim()) {
         e.preventDefault()
-        setBrainView(true)
+        // With the chat detached the question goes to its window (openAiPanel routes it there).
+        if (!useAiChatStore.getState().detached) setBrainView(true)
         openAiPanel('chat', query.trim())
         setCommandPaletteOpen(false)
       }

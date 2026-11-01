@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link2, MessageSquare, PanelLeftClose, Settings, Sparkles } from 'lucide-react'
+import { ExternalLink, Link2, MessageSquare, PanelLeftClose, Settings, Sparkles } from 'lucide-react'
 import { useAiChatStore, type PanelTab } from '../../stores/aiChatStore'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
@@ -8,14 +8,15 @@ import { RelatedView } from './RelatedView'
 import { LlmConfigView } from './LlmConfigView'
 import { ProfileFlow, ProfileSummary, findAiProfileNote } from './ProfileFlow'
 import { useT } from '../../i18n/useT'
+import { Card } from './ui'
 
 type Tab = PanelTab
 
 export function AiPanel({ onOpenNote, onCollapse }: { onOpenNote: (noteId: string, sectionId: string) => void; onCollapse?: () => void }) {
   const loadConfig = useAiChatStore((s) => s.loadConfig)
   const loadSessions = useAiChatStore((s) => s.loadSessions)
-  const initListeners = useAiChatStore((s) => s.initListeners)
   const llmConfig = useAiChatStore((s) => s.llmConfig)
+  const chatDetached = useAiChatStore((s) => s.detached)
   const configLoaded = useAiChatStore((s) => s.configLoaded)
   const panelTab = useAiChatStore((s) => s.panelTab)
   const t = useT()
@@ -34,12 +35,12 @@ export function AiPanel({ onOpenNote, onCollapse }: { onOpenNote: (noteId: strin
   const [profileEditing, setProfileEditing] = useState(false) // "Start over" reopened the wizard
   const [autoRouted, setAutoRouted] = useState(false)
 
+  // The chat's stream listeners are set up once for the whole window (App), not here: the same
+  // conversation also runs in the editor's chat sidebar.
   useEffect(() => {
     void loadConfig()
     void loadSessions()
-    const off = initListeners()
-    return off
-  }, [loadConfig, loadSessions, initListeners])
+  }, [loadConfig, loadSessions])
 
   // Resolve profile status once notes have loaded, so opening the Profile tab doesn't flash the
   // wizard on a machine that already has a synced profile.
@@ -118,7 +119,33 @@ export function AiPanel({ onOpenNote, onCollapse }: { onOpenNote: (noteId: strin
 
       {/* Body */}
       <div className="flex-1 min-h-0">
-        {tab === 'chat' && <ChatView onOpenNote={onOpenNote} onConfigure={() => setTab('settings')} />}
+        {tab === 'chat' && (chatDetached ? (
+          // The conversation lives in the detached chat window: only one window may own it.
+          <div className="flex items-center justify-center h-full p-5">
+            <Card className="flex flex-col items-center gap-3 p-6 max-w-[260px] text-center">
+              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-accent/15 text-accent">
+                <ExternalLink size={18} />
+              </span>
+              <p className="text-[13px] font-mono text-text-muted leading-relaxed">{t.aiPanel.window.detachedHint}</p>
+              <div className="flex flex-wrap justify-center gap-1.5">
+                <button
+                  onClick={() => window.noteflow.aiChatWindowFocus()}
+                  className="px-3 py-1.5 rounded-lg bg-text text-surface-0 text-[12px] font-mono font-bold hover:opacity-90"
+                >
+                  {t.aiPanel.window.showWindow}
+                </button>
+                <button
+                  onClick={() => window.noteflow.aiChatWindowRecall()}
+                  className="px-3 py-1.5 rounded-lg bg-surface-2 text-text text-[12px] font-mono hover:bg-surface-3 transition-colors"
+                >
+                  {t.aiPanel.window.bringBack}
+                </button>
+              </div>
+            </Card>
+          </div>
+        ) : (
+          <ChatView onOpenNote={onOpenNote} onConfigure={() => setTab('settings')} />
+        ))}
         {tab === 'related' && <RelatedView onOpenNote={onOpenNote} />}
         {tab === 'profile' && (
           profileDone && profileNoteId && !profileEditing ? (

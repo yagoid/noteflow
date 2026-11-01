@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo, startTransition } from 'react'
-import { useNotesStore, setWindowRole, type OpenPane } from './stores/notesStore'
+import { useNotesStore, setWindowRole, settleNoteWrites, type OpenPane } from './stores/notesStore'
 import { useGroupsStore } from './stores/groupsStore'
 import { useTemplatesStore } from './stores/templatesStore'
 import { useSectionTagColorsStore } from './stores/sectionTagColorsStore'
@@ -19,6 +19,10 @@ import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
 import { SectionWindowApp } from './components/SectionWindowApp'
+import { AiChatWindowApp } from './components/AiPanel/AiChatWindowApp'
+import { AiChatSidebar } from './components/AiPanel/AiChatSidebar'
+import { useSyncChatEditorTarget } from './components/AiPanel/useChatEditorTarget'
+import { reconcileHandoff } from './lib/chatHandoff'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { HoverPreviewProvider } from './components/SectionPreview/HoverPreviewProvider'
 import { MINI_SIDEBAR_RESERVE } from './lib/miniSidebar'
@@ -33,14 +37,18 @@ const PANE_MIN_WIDTH = 360
 const PANE_MAX_WIDTH = 1200
 const PANE_DEFAULT_WIDTH = 520
 
-type WindowRoute = 'main' | 'sticky' | 'section'
+type WindowRoute = 'main' | 'sticky' | 'section' | 'chat'
 
 // The same bundle backs every window; the hash picks which app it renders. The store
 // learns its role here, before any child effect runs (loadNotes etc. depend on it).
+// The detached AI chat window is a secondary window like the section window.
 function detectWindowRoute(): WindowRoute {
   const hash = window.location.hash
-  const route: WindowRoute = hash.startsWith('#section-window') ? 'section' : hash.startsWith('#sticky') ? 'sticky' : 'main'
-  setWindowRole(route)
+  const route: WindowRoute = hash.startsWith('#section-window') ? 'section'
+    : hash.startsWith('#sticky') ? 'sticky'
+    : hash.startsWith('#ai-chat') ? 'chat'
+    : 'main'
+  setWindowRole(route === 'chat' ? 'section' : route)
   return route
 }
 
@@ -61,6 +69,15 @@ export function App() {
       <ErrorBoundary>
         <HoverPreviewProvider>
           <SectionWindowApp />
+        </HoverPreviewProvider>
+      </ErrorBoundary>
+    )
+  }
+  if (route === 'chat') {
+    return (
+      <ErrorBoundary>
+        <HoverPreviewProvider>
+          <AiChatWindowApp />
         </HoverPreviewProvider>
       </ErrorBoundary>
     )
@@ -158,6 +175,50 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
     const cleanup = useAiStore.getState().initListeners()
     return cleanup
   }, [isSticky])
+
+  // ── AI chat (editor sidebar + brain chat share this store): config, history and the stream
+  // listeners live for the whole window, so a reply keeps streaming whichever view is shown.
+  useEffect(() => {
+    if (isSticky) return
+    const chat = useAiChatStore.getState()
+    void chat.loadConfig()
+    void chat.loadSessions()
+    const offListeners = chat.initListeners()
+    // After a reload of this window the chat may still be in its own window.
+    window.noteflow.aiChatWindowIsOpen().then((open) => { if (open) useAiChatStore.setState({ detached: true, sidebarOpen: false }) }).catch(() => undefined)
+    // A chat turn (or an undo) is about to read notes from disk: write the editors' pending saves first.
+    const offFlush = window.noteflow.onAiFlushEdits((token) => {
+      void Promise.race([
+        settleNoteWrites().catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 1200)),
+      ]).then(() => window.noteflow.aiFlushEditsDone(token))
+    })
+    // The detached chat window closed: the conversation comes back here, in the sidebar. Without
+    // a handoff (the window didn't answer) our copy is the one frozen at detach time: the turns
+    // made in the window are on disk, so the saved session wins (lib/chatHandoff).
+    const offReturned = window.noteflow.onAiChatWindowReturned((handoff) => {
+      useAiChatStore.setState({ detached: false, sidebarOpen: true })
+      void (async () => {
+        const store = useAiChatStore.getState()
+        await store.loadSessions()
+        const sessions = useAiChatStore.getState().sessions
+        store.importHandoff(reconcileHandoff(handoff ?? { ...store.exportHandoff(), takenAt: undefined }, sessions))
+      })()
+    })
+    // Requests from the detached chat window that need this window.
+    const offCommand = window.noteflow.onAiChatWindowCommand((cmd) => {
+      if (cmd.type === 'open-ai-settings') {
+        window.dispatchEvent(new CustomEvent('noteflow:open-ai-settings'))
+      } else if (cmd.sectionId) {
+        useNotesStore.getState().navigateToSection(cmd.noteId, cmd.sectionId)
+      } else {
+        useNotesStore.getState().setActiveNote(cmd.noteId)
+      }
+    })
+    return () => { offListeners(); offFlush(); offReturned(); offCommand() }
+  }, [isSticky])
+
+  useSyncChatEditorTarget(!isSticky)
 
   // ── NoteFlow AI model catalog: main downloads it in the background; when it changes,
   // re-pull presets + LLM config (only if already loaded — a later first load gets it fresh).
@@ -531,6 +592,8 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
 
   const sidebarFloating = !brainViewOpen && !sidebarPinned
   const sidebarDocked = brainViewOpen ? brainSidebarVisible : sidebarPinned
+  // The AI chat sidebar only floats over the plain editor (not the brain / overviews).
+  const editorViewShown = !allViewOpen && !brainViewOpen && !groupViewId && !noteViewId
 
   if (isSticky) {
     return (
@@ -628,7 +691,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
             </div>
           ) : (
             visiblePanes.length <= 1 ? (
-              <NoteEditor noteId={visiblePanes[0]?.noteId} paneId={visiblePanes[0]?.paneId} />
+              <NoteEditor noteId={visiblePanes[0]?.noteId} paneId={visiblePanes[0]?.paneId} aiChatButton />
             ) : (
               <div className="h-full min-h-0 flex flex-col">
                 <div
@@ -700,7 +763,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
                             </div>
                           </div>
                           <div className="flex-1 min-h-0">
-                            <NoteEditor noteId={noteId} paneId={paneId} />
+                            <NoteEditor noteId={noteId} paneId={paneId} aiChatButton={index === visiblePanes.length - 1} />
                           </div>
 
                           <div
@@ -769,6 +832,10 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
             </>
           )}
         </main>
+
+        {/* AI chat floating over the right of the editor — sibling of <main>, like the floating
+            notes sidebar, so its drops never reach the "drop a note in the editor" handler. */}
+        <AiChatSidebar containerRef={contentRowRef} active={editorViewShown} />
       </div>
 
       <CommandPalette />

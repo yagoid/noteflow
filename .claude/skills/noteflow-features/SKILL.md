@@ -836,6 +836,12 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     mientras el modelo escribe o encadena acciones), **el texto ya escrito se conserva** y el error
     aparece justo debajo en una **fila roja** ⚠ con el motivo. Nunca se corta la respuesta en seco
     sin explicación.
+  - **Deshacer lo que hizo la IA:** cada edición de una nota (crear nota, editar/renombrar/añadir
+    sección, cambiar título o grupo…) muestra un botón **Deshacer** en su fila; al pulsarlo la nota
+    vuelve a como estaba (si la IA la creó, se borra). Si tú tocaste la nota después, pregunta antes.
+    No se puede deshacer si la nota o esa sección se borraron después, ni si la nota se cifró o
+    descifró después (lo avisa). Los borrados no tienen Deshacer: ya piden confirmación. Solo dura
+    mientras la app está abierta (tras reiniciar, el botón desaparece).
 - **Related:** las "Related notes" por sección (lo que antes estaba al pie del cerebro), eligiendo
   cualquier nota/sección como origen. Necesita la IA local (embeddings) activada.
 - **Profile:** cuestionario del **segundo cerebro** — **no aparece solo**: al entrar al cerebro
@@ -894,6 +900,33 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
 > **Dos interruptores independientes:** la **IA local** (embeddings, se activa en el cerebro) da
 > contexto RAG y conexiones de contenido; el **proveedor LLM** (Ajustes) da el chat. El chat funciona
 > sin la IA local, pero entonces responde **sin contexto de tus notas**.
+
+### Chat en el editor (sidebar flotante)
+
+El mismo chat, **sin salir del editor**: botón grande con un **cerebro de circuitos** a la derecha del
+todo de la cabecera de la nota, justo debajo de los iconos de la barra de pestañas (con el editor
+dividido, solo en el panel de la derecha). Abre un **panel flotante** que entra deslizándose desde el
+borde derecho (y sale igual al plegarlo) sobre la parte derecha del editor, sin empujar el texto, con
+ancho ajustable arrastrando su borde izquierdo.
+**Solo se pliega con ese mismo botón** y arranca plegado cada vez que abres la app. Es **la misma
+conversación e historial** que el chat del cerebro, y se mantiene tal cual al cambiar de nota.
+Cabecera: selector de modelo, **Nuevo chat** y menú **⋯** (Historial, Abrir en una ventana aparte).
+Sin IA configurada, ofrece ir a **Ajustes → IA**.
+
+- **Contexto (barra sobre el campo de escribir):** decides qué ve la IA además de tu perfil. Tres
+  botones: **Sección: …** (la sección abierta), **Nota: …** (la nota entera abierta) y **Todas las
+  notas** (búsqueda semántica en todas). Es **acumulable**: lo que añadas se queda como chip con ✕ al
+  cambiar de nota, y los botones pasan a ofrecer la nota/sección nueva; puedes dejarlo sin nada. Un
+  chat nuevo empieza con **la sección abierta**. Las notas cifradas y las secciones ocultas a la IA no
+  se pueden añadir. Aunque el contexto sea reducido, la IA sabe qué nota tienes abierta y puede
+  **editarla directamente** ("reescribe esta sección", "añade un resumen"): los cambios aparecen en vivo
+  en el editor y cada uno se puede **deshacer**.
+- **Ventana aparte:** ⋯ → *Abrir en una ventana aparte* mueve la conversación a una ventana propia
+  (con barra de título, ⋯ con *Volver a la ventana principal* / Nuevo chat / Historial, una
+  **chincheta** para mantenerla siempre encima y cerrar). Recuerda su tamaño y posición. Mientras está
+  fuera, el botón del editor la trae al frente y el chat del cerebro muestra "El chat está en una
+  ventana aparte" (*Mostrar ventana* / *Traer aquí*); "Ask AI" de la paleta pregunta en esa ventana.
+  Al cerrarla, la conversación vuelve al panel del editor.
 
 ---
 

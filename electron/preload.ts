@@ -410,8 +410,52 @@ const api = {
   // edited each local day, for the activity chart in Settings → General
   recordActivityEdit: (noteId: string) => ipcRenderer.send('activity:record-edit', noteId),
   getActivityLog: (): Promise<{ days: Record<string, string[]> }> => ipcRenderer.invoke('activity:get-log'),
-  aiChat: (requestId: string, messages: Array<{ role: string; content: string; attachmentIds?: string[] }>) =>
-    ipcRenderer.invoke('ai:chat', { requestId, messages }),
+  // `context` only from the editor sidebar / chat window (omitted = brain chat, RAG over every note)
+  aiChat: (requestId: string, messages: Array<{ role: string; content: string; attachmentIds?: string[] }>, context?: unknown) =>
+    ipcRenderer.invoke('ai:chat', context === undefined ? { requestId, messages } : { requestId, messages, context }),
+  aiChatUndo: (toolCallId: string, force?: boolean) => ipcRenderer.invoke('ai:chat-undo', toolCallId, force === true),
+  // Main asks the main window to write its pending editor saves before a chat turn reads notes
+  onAiFlushEdits: (cb: (token: string) => void) => {
+    const wrapper = (_event: Electron.IpcRendererEvent, token: string) => cb(token)
+    ipcRenderer.on('ai:flush-edits', wrapper)
+    return () => ipcRenderer.removeListener('ai:flush-edits', wrapper)
+  },
+  aiFlushEditsDone: (token: string) => ipcRenderer.send('ai:flush-edits-done', token),
+  // Detached chat window (the conversation moves between the main window and it)
+  aiChatWindowOpen: (handoff: unknown): Promise<{ ok: boolean }> => ipcRenderer.invoke('ai:chat-window-open', handoff),
+  aiChatWindowIsOpen: (): Promise<boolean> => ipcRenderer.invoke('ai:chat-window-is-open'),
+  aiChatWindowFocus: () => ipcRenderer.send('ai:chat-window-focus'),
+  aiChatWindowRecall: () => ipcRenderer.send('ai:chat-window-recall'),
+  aiChatWindowSetEditorTarget: (target: unknown) => ipcRenderer.send('ai:chat-window-editor-target', target),
+  onAiChatWindowReturned: (cb: (handoff: unknown) => void) => {
+    const wrapper = (_event: Electron.IpcRendererEvent, handoff: unknown) => cb(handoff)
+    ipcRenderer.on('ai:chat-window-returned', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-window-returned', wrapper)
+  },
+  onAiChatWindowCommand: (cb: (cmd: unknown) => void) => {
+    const wrapper = (_event: Electron.IpcRendererEvent, cmd: unknown) => cb(cmd)
+    ipcRenderer.on('ai:chat-window-command', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-window-command', wrapper)
+  },
+  aiChatWindowGetState: () => ipcRenderer.invoke('ai:chat-window-get-state'),
+  onAiChatWindowEditorTarget: (cb: (target: unknown) => void) => {
+    const wrapper = (_event: Electron.IpcRendererEvent, target: unknown) => cb(target)
+    ipcRenderer.on('ai:chat-window-editor-target', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-window-editor-target', wrapper)
+  },
+  onAiChatWindowRequestClose: (cb: () => void) => {
+    const wrapper = () => cb()
+    ipcRenderer.on('ai:chat-window-request-close', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-window-request-close', wrapper)
+  },
+  aiChatWindowCommand: (cmd: unknown) => ipcRenderer.send('ai:chat-window-command', cmd),
+  aiChatWindowReturn: (handoff: unknown) => ipcRenderer.send('ai:chat-window-return', handoff),
+  aiChatWindowAsk: (prompt: string) => ipcRenderer.send('ai:chat-window-ask', prompt),
+  onAiChatWindowAsk: (cb: (prompt: string) => void) => {
+    const wrapper = (_event: Electron.IpcRendererEvent, prompt: string) => cb(prompt)
+    ipcRenderer.on('ai:chat-window-ask', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-window-ask', wrapper)
+  },
   aiChatPickFiles: () => ipcRenderer.invoke('ai:chat-pick-files'),
   aiChatRemoveFile: (id: string) => ipcRenderer.invoke('ai:chat-remove-file', id),
   aiChatCancel: (requestId: string) => ipcRenderer.send('ai:chat-cancel', requestId),
@@ -422,8 +466,8 @@ const api = {
     ipcRenderer.on('ai:chat-tool-call', wrapper)
     return () => ipcRenderer.removeListener('ai:chat-tool-call', wrapper)
   },
-  onAiChatToolResult: (cb: (p: { requestId: string; toolCallId: string; status: string; summary: string }) => void) => {
-    const wrapper = (_event: any, p: { requestId: string; toolCallId: string; status: string; summary: string }) => cb(p)
+  onAiChatToolResult: (cb: (p: { requestId: string; toolCallId: string; status: string; summary: string; undoable?: boolean }) => void) => {
+    const wrapper = (_event: any, p: { requestId: string; toolCallId: string; status: string; summary: string; undoable?: boolean }) => cb(p)
     ipcRenderer.on('ai:chat-tool-result', wrapper)
     return () => ipcRenderer.removeListener('ai:chat-tool-result', wrapper)
   },

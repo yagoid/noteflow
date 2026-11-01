@@ -27,6 +27,7 @@ import { firstValidDate } from '../../lib/dateUtils'
 import { OWN_KEYS_PROPS, ownsKeys } from '../../lib/keyScope'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { TempNoteExpiryMenu } from './TempNoteExpiryMenu'
+import { AiChatButton } from '../AiPanel/AiChatButton'
 import { createDebouncedSave } from '../../lib/pendingEdits'
 import {
   createContentSync, mapOffsetThroughChange, needsSave, recordSave, resolveExternalContent, type ContentSync,
@@ -67,6 +68,8 @@ interface NoteEditorProps {
   paneId?: string
   /** Rendered in a section window (no main-window shell): hides actions that need it. */
   standalone?: boolean
+  /** Show the AI chat button on the title row (main window, rightmost pane only). */
+  aiChatButton?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +131,7 @@ function revealSectionTab(
 // ---------------------------------------------------------------------------
 // NoteEditor
 // ---------------------------------------------------------------------------
-export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorProps) {
+export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = false }: NoteEditorProps) {
   const globalActiveNoteId = useNotesStore((s) => s.activeNoteId)
   const activePaneId = useNotesStore((s) => s.activePaneId)
   const resolvedNoteId = noteId ?? globalActiveNoteId
@@ -1223,10 +1226,12 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
             if (!isPaneActive) activateThisPane()
           }}
         >
-          <div className="px-4 pt-3 pb-2 border-b border-border flex-shrink-0">
-            <span className="text-xl font-bold font-mono text-text">
+          <div className="px-4 pt-3 pb-2 border-b border-border flex-shrink-0 flex items-center gap-2">
+            <span className="flex-1 min-w-0 truncate text-xl font-bold font-mono text-text">
               {note.title || t.common.untitled}
             </span>
+            {/* -my-1: the 32 px button doesn't make this header taller than its text */}
+            {aiChatButton && <AiChatButton className="-my-1" />}
           </div>
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-muted">
             <Lock size={28} className="opacity-20" />
@@ -1660,7 +1665,10 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
           </div>
         )}
 
-        <div className="px-4 pt-3 pb-1 flex-shrink-0">
+        {/* Title + date block. The chat button sits at its right end, vertically centred in the
+            band between the tabs row and the formatting toolbar; both rows reserve room for it. */}
+        <div className={`relative flex-shrink-0${aiChatButton ? ' pr-10' : ''}`}>
+        <div className="px-4 pt-3 pb-1 flex-shrink-0 flex items-center gap-2">
           <input
             ref={titleRef}
             type="text"
@@ -1668,7 +1676,7 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
             onChange={handleTitleChange}
             onBlur={handleTitleBlur}
             placeholder={t.common.untitled}
-            className="w-full bg-transparent text-xl font-bold font-mono text-text
+            className="flex-1 min-w-0 bg-transparent text-xl font-bold font-mono text-text
                        placeholder-text-muted/30 border-none outline-none caret-text"
           />
         </div>
@@ -1693,6 +1701,8 @@ export function NoteEditor({ noteId, paneId, standalone = false }: NoteEditorPro
             )}
           </div>
         )}
+        {aiChatButton && <AiChatButton className="absolute right-3 top-1/2 -translate-y-1/2" />}
+        </div>
 
         <div
           className={`flex-1 overflow-hidden mr-1 relative${readableWidth ? ' editor-readable' : ''}`}

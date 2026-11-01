@@ -40,6 +40,8 @@ import { LEMONSQUEEZY_CHECKOUT_URLS, AI_PROXY_URL } from './cloudConfig'
 import * as aiIndex from './ai/aiIndex'
 import * as llm from './ai/llm'
 import * as agentTools from './ai/llm/tools'
+import * as chatUndo from './ai/chatUndo'
+import * as chatContext from './ai/chatContext'
 import { managedProxyErrorKind } from './ai/llm/managedErrors'
 import { isManagedAiUsable } from './entitlementsRetry'
 import * as noteFormat from './noteFormat'
@@ -1106,6 +1108,196 @@ function createSectionWindow(noteId: string, sectionId: string): BrowserWindow {
 
   return win
 }
+
+// ── Detached AI chat window ───────────────────────────────────────────────────
+// The editor's chat sidebar can move to its own frameless window (`#ai-chat` → AiChatWindowApp).
+// The conversation MOVES with it: the main window hands its chat state over (`ai:chat-window-open`),
+// the chat window takes it on load (`ai:chat-window-get-state`) and gives it back when it closes
+// (`ai:chat-window-return` → `ai:chat-window-returned` to the main window). Only one renderer owns
+// the conversation at a time, so two windows never write ai-chats.json concurrently. Main also
+// relays the main window's open note/section (for the context bar) and the chat window's
+// requests that need the main window (open a note, AI settings).
+let chatWindow: BrowserWindow | null = null
+let chatHandoff: unknown = null      // served to the chat window on (re)load until it hands it back
+let chatEditorTarget: unknown = null // latest note/section open in the main window
+let returnChatWindow: ((handoff: unknown) => void) | null = null
+
+type WindowBounds = { x: number; y: number; width: number; height: number }
+
+/** Saved size (and position, if it still lands on a screen) of the chat window. */
+function readChatWindowBounds(): { width: number; height: number; x?: number; y?: number } | null {
+  const b = ((readSettings().aiChatWindow ?? {}) as { bounds?: Partial<WindowBounds> }).bounds
+  if (!b || ![b.x, b.y, b.width, b.height].every((v) => typeof v === 'number' && Number.isFinite(v))) return null
+  const bounds = b as WindowBounds
+  // Forget a position that no longer lands on any screen (monitor unplugged).
+  const visible = screen.getAllDisplays().some(({ workArea: wa }) =>
+    bounds.x < wa.x + wa.width && bounds.x + bounds.width > wa.x && bounds.y < wa.y + wa.height && bounds.y + bounds.height > wa.y)
+  return visible ? bounds : { width: bounds.width, height: bounds.height }
+}
+
+function saveChatWindowBounds(win: BrowserWindow): void {
+  if (win.isDestroyed() || win.isMinimized()) return
+  const settings = readSettings()
+  writeSettings({ ...settings, aiChatWindow: { ...((settings.aiChatWindow ?? {}) as object), bounds: win.getNormalBounds() } })
+}
+
+function loadChatWindow(win: BrowserWindow): void {
+  if (isDev) win.loadURL('http://localhost:5173/#ai-chat')
+  else win.loadFile(path.join(__dirname, '../dist/index.html'), { hash: 'ai-chat' })
+}
+
+function focusChatWindow(): void {
+  const win = chatWindow
+  if (!win || win.isDestroyed()) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+}
+
+function createChatWindow(): BrowserWindow {
+  if (chatWindow && !chatWindow.isDestroyed()) { focusChatWindow(); return chatWindow }
+  const saved = readChatWindowBounds()
+  const placed = saved?.x !== undefined && saved.y !== undefined ? { x: saved.x, y: saved.y } : {}
+  const win = new BrowserWindow({
+    width: saved?.width ?? 440,
+    height: saved?.height ?? 680,
+    ...placed,
+    minWidth: 340,
+    minHeight: 360,
+    frame: false,
+    // Opaque on every platform: like the section window it has square corners, so it doesn't
+    // need the sticky's transparency (which Windows 11 24H2+ composites badly).
+    transparent: false,
+    backgroundColor: '#1a1b26',
+    titleBarStyle: 'hidden',
+    show: false,
+    // Pinning (always on top) is the renderer's toggle, off on every open.
+    alwaysOnTop: false,
+    icon: getIconPath(),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  chatWindow = win
+  let returned = false
+
+  // Hand the conversation back to the main window exactly once, then destroy the window.
+  const finish = (handoff: unknown) => {
+    if (returned) return
+    returned = true
+    chatHandoff = null
+    if (returnChatWindow === finish) returnChatWindow = null
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ai:chat-window-returned', handoff ?? null)
+    if (!win.isDestroyed()) {
+      saveChatWindowBounds(win) // destroy() skips the 'close' event
+      win.destroy()
+    }
+  }
+  returnChatWindow = finish
+
+  loadChatWindow(win)
+  win.once('ready-to-show', () => { win.show(); win.focus() })
+
+  // Any close (button, Alt+F4, taskbar) first asks the renderer for the conversation — it cancels
+  // a running reply and answers with `ai:chat-window-return`. Bounded, so it can always close.
+  win.on('close', (e) => {
+    saveChatWindowBounds(win)
+    if (returned || isQuitting) return
+    e.preventDefault()
+    win.webContents.send('ai:chat-window-request-close')
+    setTimeout(() => finish(null), 2500)
+  })
+  // The chat window follows the main window: if that one goes away, so does this one.
+  const owner = mainWindow
+  const onOwnerClosed = () => {
+    if (win.isDestroyed()) return
+    returned = true
+    win.destroy()
+  }
+  owner?.once('closed', onOwnerClosed)
+
+  win.on('closed', () => {
+    if (chatWindow === win) chatWindow = null
+    owner?.removeListener('closed', onOwnerClosed)
+    finish(null) // no-op when the conversation already came back
+  })
+
+  // A crashed/hung renderer reloads and takes the conversation again (the last one handed over).
+  win.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit' || win.isDestroyed()) return
+    console.error('[ChatWindow] Renderer gone:', details.reason, details.exitCode)
+    loadChatWindow(win)
+  })
+  win.on('unresponsive', () => {
+    console.warn('[ChatWindow] Unresponsive — reloading')
+    win.webContents.reload()
+  })
+
+  return win
+}
+
+const isChatWindowSender = (sender: Electron.WebContents) =>
+  !!chatWindow && !chatWindow.isDestroyed() && chatWindow.webContents === sender
+const isMainWindowSender = (sender: Electron.WebContents) =>
+  !!mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents === sender
+
+ipcMain.handle('ai:chat-window-open', (event, handoff: unknown) => {
+  if (!isMainWindowSender(event.sender)) return { ok: false }
+  if (chatWindow && !chatWindow.isDestroyed()) { focusChatWindow(); return { ok: true } }
+  chatHandoff = handoff && typeof handoff === 'object' ? handoff : null
+  createChatWindow()
+  return { ok: true }
+})
+
+ipcMain.handle('ai:chat-window-is-open', () => !!chatWindow && !chatWindow.isDestroyed())
+
+ipcMain.handle('ai:chat-window-get-state', (event) => {
+  if (!isChatWindowSender(event.sender)) return { handoff: null, editorTarget: null }
+  return { handoff: chatHandoff, editorTarget: chatEditorTarget }
+})
+
+ipcMain.on('ai:chat-window-focus', () => focusChatWindow())
+
+// "Bring back here" from the main window: same path as closing the chat window.
+ipcMain.on('ai:chat-window-recall', () => {
+  if (chatWindow && !chatWindow.isDestroyed()) chatWindow.close()
+})
+
+ipcMain.on('ai:chat-window-return', (event, handoff: unknown) => {
+  if (!isChatWindowSender(event.sender)) return
+  returnChatWindow?.(handoff && typeof handoff === 'object' ? handoff : null)
+})
+
+ipcMain.on('ai:chat-window-editor-target', (event, target: unknown) => {
+  if (!isMainWindowSender(event.sender)) return
+  chatEditorTarget = target && typeof target === 'object' ? target : null
+  if (chatWindow && !chatWindow.isDestroyed()) chatWindow.webContents.send('ai:chat-window-editor-target', chatEditorTarget)
+})
+
+// "Ask AI" from the main window's command palette while the chat is detached: the chat window
+// starts a new chat with the prompt.
+ipcMain.on('ai:chat-window-ask', (event, prompt: unknown) => {
+  if (!isMainWindowSender(event.sender) || typeof prompt !== 'string' || !prompt.trim() || prompt.length > 20_000) return
+  if (!chatWindow || chatWindow.isDestroyed()) return
+  focusChatWindow()
+  chatWindow.webContents.send('ai:chat-window-ask', prompt)
+})
+
+ipcMain.on('ai:chat-window-command', (event, cmd: unknown) => {
+  if (!isChatWindowSender(event.sender) || !cmd || typeof cmd !== 'object') return
+  const c = cmd as { type?: unknown; noteId?: unknown; sectionId?: unknown }
+  let safe: { type: 'open-note'; noteId: string; sectionId?: string } | { type: 'open-ai-settings' } | null = null
+  if (c.type === 'open-note' && isWindowTargetId(c.noteId)) {
+    safe = { type: 'open-note', noteId: c.noteId, ...(isWindowTargetId(c.sectionId) ? { sectionId: c.sectionId } : {}) }
+  } else if (c.type === 'open-ai-settings') {
+    safe = { type: 'open-ai-settings' }
+  }
+  if (!safe || !mainWindow || mainWindow.isDestroyed()) return
+  showWindow()
+  mainWindow.webContents.send('ai:chat-window-command', safe)
+})
 
 function createTray() {
   const dir = (app.isPackaged || process.env.NOTEFLOW_NATIVE) ? '../dist' : '../public'
@@ -2546,18 +2738,28 @@ function withProfile(system: string, profile: { block: string; noteId: string } 
   return `${system}\n\nUser profile (background — tone & preferences, do not cite):\n\n${profile.block}`
 }
 
-/** Build the RAG context for a question. Returns the augmented system prompt + the source notes
- *  (for citation + brain illumination). The user's profile note is always injected as background
- *  (even when Local AI is off or nothing matches); RAG context is added on top when available. */
-async function buildChatContext(query: string): Promise<{ system: string; sources: ChatSource[] }> {
-  const profileDirs = noteFormat.listNoteDirs(NOTES_DIR)
-  const profile = buildProfileBlock(profileDirs)
+/** A note read from disk by id, with its directory name (null when missing). Same dir match as
+ *  the agent tools (`<slug>-<id>` or a bare id). */
+function readDiskNote(noteId: string, dirs?: string[]): { dir: string; note: noteFormat.DiskNote } | null {
+  const dir = (dirs ?? noteFormat.listNoteDirs(NOTES_DIR)).find((d) => d.endsWith('-' + noteId) || d === noteId)
+  if (!dir) return null
+  const note = noteFormat.parseNoteDir(path.join(NOTES_DIR, dir))
+  return note ? { dir, note } : null
+}
 
-  if (!query.trim() || !aiIndex.isEnabled()) return { system: withProfile(CHAT_SYSTEM_BASE, profile), sources: [] }
+/** Semantic-search (RAG) blocks for a question: hybrid search hits + a few content-edge
+ *  neighbours, read from disk. `skip` leaves out sections already in the prompt. */
+async function buildRagBlocks(
+  query: string,
+  profile: { block: string; noteId: string } | null,
+  dirs: string[],
+  skip?: (noteId: string, sectionId: string) => boolean,
+): Promise<{ blocks: string[]; sources: ChatSource[] }> {
+  if (!query.trim() || !aiIndex.isEnabled()) return { blocks: [], sources: [] }
 
   let hits: Awaited<ReturnType<typeof aiIndex.search>> = []
   try { hits = await aiIndex.search(query, 6) } catch { hits = [] }
-  if (hits.length === 0) return { system: withProfile(CHAT_SYSTEM_BASE, profile), sources: [] }
+  if (hits.length === 0) return { blocks: [], sources: [] }
 
   // Expand with up to a few content-edge neighbours of the matched notes.
   const hitNoteIds = new Set(hits.map((h) => h.noteId))
@@ -2569,13 +2771,12 @@ async function buildChatContext(query: string): Promise<{ system: string; source
     }
   } catch { /* edges are best-effort */ }
 
-  const dirs = profileDirs
   const sources: ChatSource[] = []
   const blocks: string[] = []
   const seen = new Set<string>() // noteId:sectionId
 
   const pushSection = (noteId: string, preferredSectionId?: string) => {
-    // The profile note is injected whole as background above; skip it in RAG to avoid duplicate
+    // The profile note is injected whole as background; skip it in RAG to avoid duplicate
     // content and to keep it out of the cited `sources`.
     if (profile && noteId === profile.noteId) return
     const dirPath = findNoteDirPath(noteId, dirs)
@@ -2588,7 +2789,7 @@ async function buildChatContext(query: string): Promise<{ system: string; source
     if (visible.length === 0) return
     const section = visible.find((s) => s.id === preferredSectionId) ?? visible[0]
     const key = `${noteId}:${section.id}`
-    if (seen.has(key)) return
+    if (seen.has(key) || skip?.(noteId, section.id)) return
     seen.add(key)
     const text = stripBase64(section.content).trim().slice(0, 1500)
     if (!text) return
@@ -2598,10 +2799,62 @@ async function buildChatContext(query: string): Promise<{ system: string; source
 
   for (const h of hits) pushSection(h.noteId, h.sectionId)
   for (const id of [...neighbours].slice(0, 3)) pushSection(id)
+  return { blocks, sources }
+}
 
-  if (blocks.length === 0) return { system: withProfile(CHAT_SYSTEM_BASE, profile), sources: [] }
-  const ragSystem = `${CHAT_SYSTEM_BASE}\n\nContext from the user's notes:\n\n${blocks.join('\n\n---\n\n')}`
-  return { system: withProfile(ragSystem, profile), sources }
+/** How the explicit context of the editor sidebar / chat window works, for the system prompt. */
+function chatContextGuide(allNotes: boolean): string {
+  const scope = allNotes
+    ? aiIndex.isEnabled()
+      ? 'The user also enabled "all notes": passages found by semantic search over every note are included below when relevant.'
+      : 'The user enabled "all notes", but semantic search is unavailable (the local AI index is off): look other notes up with the tools (list_notes, get_note) when needed.'
+    : 'Only what is listed below is shared — no search over the rest of the notes was done. If you need other notes, look them up with the tools (list_notes, search_notes, get_note).'
+  return (
+    'CONTEXT IN THIS CHAT. The user chooses which notes and sections to share with you here; the ' +
+    `profile (if any) is always included as background. ${scope}\n` +
+    'Every shared note/section carries its note_id / section_id: use them directly with the tools to ' +
+    'edit (update_section, add_section, rename_section, update_note) — no need to list or fetch them first. ' +
+    'When the user asks you to change the open note or a shared section, just do it with the tools, without ' +
+    'asking for confirmation, then briefly say what you changed: the editor shows your edits live and the ' +
+    'user can undo each one from the chat. update_section REPLACES the whole section: send its complete new ' +
+    'content and keep everything the user did not ask to change (images appear as [image] placeholders — ' +
+    'keep them where they are; the app restores them). Never rewrite a section marked as truncated with ' +
+    'update_section (the part you cannot see would be lost): add a section or tell the user instead.'
+  )
+}
+
+/** Build the chat context for a question. Returns the augmented system prompt + the source notes
+ *  (for citation + brain illumination). The user's profile note is always injected as background.
+ *  - No `context` (the brain chat): RAG over every note, as always.
+ *  - With `context` (editor sidebar / chat window): the notes/sections the user shared, read from
+ *    disk, plus a line about the note open in the editor; RAG ONLY when `allNotes` is on. */
+async function buildChatContext(query: string, context: chatContext.ChatContextRequest | null): Promise<{ system: string; sources: ChatSource[] }> {
+  const dirs = noteFormat.listNoteDirs(NOTES_DIR)
+  const profile = buildProfileBlock(dirs)
+
+  if (!context) {
+    const { blocks, sources } = await buildRagBlocks(query, profile, dirs)
+    if (blocks.length === 0) return { system: withProfile(CHAT_SYSTEM_BASE, profile), sources: [] }
+    const ragSystem = `${CHAT_SYSTEM_BASE}\n\nContext from the user's notes:\n\n${blocks.join('\n\n---\n\n')}`
+    return { system: withProfile(ragSystem, profile), sources }
+  }
+
+  const read = (noteId: string) => readDiskNote(noteId, dirs)?.note ?? null
+  const explicit = chatContext.buildContextBlocks(context.items, read)
+  const wholeNotes = new Set(explicit.included.filter((i) => !i.sectionId).map((i) => i.noteId))
+  const sharedSections = new Set(explicit.included.filter((i) => i.sectionId).map((i) => `${i.noteId}:${i.sectionId}`))
+  const rag = context.allNotes
+    ? await buildRagBlocks(query, profile, dirs, (noteId, sectionId) => wholeNotes.has(noteId) || sharedSections.has(`${noteId}:${sectionId}`))
+    : { blocks: [], sources: [] }
+
+  let system = `${CHAT_SYSTEM_BASE}\n\n${chatContextGuide(context.allNotes)}`
+  const openLine = chatContext.describeOpenNote(context.openNote, read)
+  if (openLine) system += `\n\n${openLine}`
+  system += explicit.blocks.length
+    ? `\n\nNotes and sections the user shared with this chat:\n\n${explicit.blocks.join('\n\n---\n\n')}`
+    : '\n\nThe user shared no specific notes or sections with this chat.'
+  if (rag.blocks.length) system += `\n\nRelated passages from the user's notes (semantic search):\n\n${rag.blocks.join('\n\n---\n\n')}`
+  return { system: withProfile(system, profile), sources: rag.sources }
 }
 
 // Pending destructive-tool confirmations, keyed by toolCallId — resolved by `ai:chat-confirm`.
@@ -2634,7 +2887,34 @@ const MAX_AGENT_STEPS = 12
 
 type ChatWireMessage = { role: 'system' | 'user' | 'assistant'; content: string; attachmentIds?: string[] }
 
-ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: ChatWireMessage[] }) => {
+// ── Undo of the agent's note edits (pure logic in ai/chatUndo.ts) ───────────────
+// Snapshot of the note before/after each note-modifying tool call, keyed by toolCallId. In
+// memory only: an app restart drops them (and `ai:chats-load` strips the stale "Undo" flags).
+const chatUndoStore = chatUndo.createUndoStore()
+
+// ── Flush of the main window's pending editor saves ─────────────────────────────
+// The editors debounce their writes (lib/pendingEdits), so before a chat turn (or an undo)
+// reads a note from disk, the main window is asked to write what's pending and answer back.
+// Bounded: a renderer that doesn't answer (reloading, hung) only delays the turn.
+const flushEditWaiters = new Map<string, () => void>()
+
+function flushMainWindowEdits(timeoutMs = 1500): Promise<void> {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return Promise.resolve()
+  const token = randomBytes(8).toString('hex')
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(timer); flushEditWaiters.delete(token); resolve() }
+    const timer = setTimeout(done, timeoutMs)
+    flushEditWaiters.set(token, done)
+    win.webContents.send('ai:flush-edits', token)
+  })
+}
+
+ipcMain.on('ai:flush-edits-done', (_event, token: unknown) => {
+  if (typeof token === 'string') flushEditWaiters.get(token)?.()
+})
+
+ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: ChatWireMessage[]; context?: unknown }) => {
   const { requestId, messages } = req
   const sender = event.sender
   const send = (channel: string, payload: unknown) => { if (!sender.isDestroyed()) sender.send(channel, payload) }
@@ -2652,8 +2932,11 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
   const myConfirmIds = new Set<string>()
   let sentImages = false // tracked here so the catch can tailor the error message
   try {
+    // Notes are read from disk below (context + tools): land the editor's pending keystrokes first.
+    await flushMainWindowEdits()
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? ''
-    const { system, sources } = await buildChatContext(lastUser)
+    // `context` only comes from the editor sidebar / chat window; without it → brain chat (RAG).
+    const { system, sources } = await buildChatContext(lastUser, req.context === undefined ? null : chatContext.sanitizeContextRequest(req.context))
     if (sources.length > 0) send('ai:chat-sources', { requestId, sources })
 
     const provider = llm.getProvider(await llm.resolveConfigAsync(stored, mainMessages().chatErrors))
@@ -2713,9 +2996,24 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
           }
         }
 
+        // Undo: snapshot the note the tool is about to modify (create_note has none yet).
+        const undoable = chatUndo.UNDOABLE_TOOLS.has(call.name)
+        const beforeId = undoable ? chatUndo.undoNoteId(call.name, call.input) : null
+        const before = beforeId ? readDiskNote(beforeId) : null
         const result = await agentTools.executeTool(call.name, call.input, ctx)
+        let canUndo = false
+        if (undoable && !result.isError) {
+          const noteId = chatUndo.undoNoteId(call.name, call.input, result.noteId)
+          const after = noteId ? readDiskNote(noteId) : null
+          const dir = before?.dir ?? after?.dir
+          if (noteId && dir && chatUndo.noteFingerprint(before?.note ?? null) !== chatUndo.noteFingerprint(after?.note ?? null)) {
+            chatUndoStore.put({ toolCallId: call.id, noteId, dir, before: before?.note ?? null, after: after?.note ?? null })
+            canUndo = true
+          }
+        }
         send('ai:chat-tool-result', {
           requestId, toolCallId: call.id, status: result.isError ? 'error' : 'done', summary: result.summary,
+          ...(canUndo ? { undoable: true } : {}),
         })
         results.push({ toolCallId: call.id, content: result.content, isError: result.isError })
       }
@@ -2729,6 +3027,37 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
   } finally {
     for (const id of myConfirmIds) chatConfirms.delete(id)
     chatAborts.delete(requestId)
+  }
+})
+
+// Undo one note edit of the chat agent: put the note back as it was before that tool call,
+// through the regular write/delete primitives (broadcast to every window + push + reindex).
+// Without `force`, refuses with 'modified' when the note changed after the AI's edit — the UI
+// then asks the user and retries with force. Never runs (even forced) when it would re-create a
+// note folder / section file deleted since ('conflict': a remote delete may still be queued for
+// it) or when the note's encryption changed since ('encryption') — see chatUndo.undoBlock.
+ipcMain.handle('ai:chat-undo', async (_event, toolCallId: unknown, force: unknown) => {
+  if (typeof toolCallId !== 'string') return { ok: false, reason: 'unavailable' }
+  const snapshot = chatUndoStore.get(toolCallId)
+  if (!snapshot) return { ok: false, reason: 'unavailable' }
+  try {
+    await flushMainWindowEdits()
+    const current = readDiskNote(snapshot.noteId)?.note ?? null
+    // Checked before 'modified' (and not overridable by force): no confirmation can make these safe.
+    const block = chatUndo.undoBlock(snapshot, current)
+    if (block) return { ok: false, reason: block === 'gone' ? 'conflict' : 'encryption' }
+    if (force !== true && chatUndo.isModifiedSinceEdit(snapshot, current)) return { ok: false, reason: 'modified' }
+    const plan = chatUndo.planUndo(snapshot, current)
+    if (plan.kind === 'delete') {
+      applyNoteDelete(plan.dir)
+    } else if (plan.kind === 'write') {
+      await applyNoteWrite({ dir: plan.dir, files: plan.files, deleteFiles: plan.deleteFiles }, undefined, { durablePush: true })
+      if (current) recordNoteEdit(snapshot.noteId)
+    }
+    chatUndoStore.delete(toolCallId)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, reason: 'error', error: err instanceof Error ? err.message : String(err) }
   }
 })
 
@@ -2794,7 +3123,8 @@ function aiChatsPath(): string {
 ipcMain.handle('ai:chats-load', () => {
   try {
     const data = JSON.parse(fs.readFileSync(aiChatsPath(), 'utf-8'))
-    return Array.isArray(data) ? data : []
+    // "Undo" buttons only for the edits whose snapshot this app session still holds.
+    return Array.isArray(data) ? chatUndo.stripStaleUndo(data, (id) => chatUndoStore.has(id)) : []
   } catch {
     return []
   }

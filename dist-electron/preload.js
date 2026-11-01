@@ -225,7 +225,51 @@ const api = {
     // edited each local day, for the activity chart in Settings → General
     recordActivityEdit: (noteId) => electron_1.ipcRenderer.send('activity:record-edit', noteId),
     getActivityLog: () => electron_1.ipcRenderer.invoke('activity:get-log'),
-    aiChat: (requestId, messages) => electron_1.ipcRenderer.invoke('ai:chat', { requestId, messages }),
+    // `context` only from the editor sidebar / chat window (omitted = brain chat, RAG over every note)
+    aiChat: (requestId, messages, context) => electron_1.ipcRenderer.invoke('ai:chat', context === undefined ? { requestId, messages } : { requestId, messages, context }),
+    aiChatUndo: (toolCallId, force) => electron_1.ipcRenderer.invoke('ai:chat-undo', toolCallId, force === true),
+    // Main asks the main window to write its pending editor saves before a chat turn reads notes
+    onAiFlushEdits: (cb) => {
+        const wrapper = (_event, token) => cb(token);
+        electron_1.ipcRenderer.on('ai:flush-edits', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:flush-edits', wrapper);
+    },
+    aiFlushEditsDone: (token) => electron_1.ipcRenderer.send('ai:flush-edits-done', token),
+    // Detached chat window (the conversation moves between the main window and it)
+    aiChatWindowOpen: (handoff) => electron_1.ipcRenderer.invoke('ai:chat-window-open', handoff),
+    aiChatWindowIsOpen: () => electron_1.ipcRenderer.invoke('ai:chat-window-is-open'),
+    aiChatWindowFocus: () => electron_1.ipcRenderer.send('ai:chat-window-focus'),
+    aiChatWindowRecall: () => electron_1.ipcRenderer.send('ai:chat-window-recall'),
+    aiChatWindowSetEditorTarget: (target) => electron_1.ipcRenderer.send('ai:chat-window-editor-target', target),
+    onAiChatWindowReturned: (cb) => {
+        const wrapper = (_event, handoff) => cb(handoff);
+        electron_1.ipcRenderer.on('ai:chat-window-returned', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-window-returned', wrapper);
+    },
+    onAiChatWindowCommand: (cb) => {
+        const wrapper = (_event, cmd) => cb(cmd);
+        electron_1.ipcRenderer.on('ai:chat-window-command', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-window-command', wrapper);
+    },
+    aiChatWindowGetState: () => electron_1.ipcRenderer.invoke('ai:chat-window-get-state'),
+    onAiChatWindowEditorTarget: (cb) => {
+        const wrapper = (_event, target) => cb(target);
+        electron_1.ipcRenderer.on('ai:chat-window-editor-target', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-window-editor-target', wrapper);
+    },
+    onAiChatWindowRequestClose: (cb) => {
+        const wrapper = () => cb();
+        electron_1.ipcRenderer.on('ai:chat-window-request-close', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-window-request-close', wrapper);
+    },
+    aiChatWindowCommand: (cmd) => electron_1.ipcRenderer.send('ai:chat-window-command', cmd),
+    aiChatWindowReturn: (handoff) => electron_1.ipcRenderer.send('ai:chat-window-return', handoff),
+    aiChatWindowAsk: (prompt) => electron_1.ipcRenderer.send('ai:chat-window-ask', prompt),
+    onAiChatWindowAsk: (cb) => {
+        const wrapper = (_event, prompt) => cb(prompt);
+        electron_1.ipcRenderer.on('ai:chat-window-ask', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-window-ask', wrapper);
+    },
     aiChatPickFiles: () => electron_1.ipcRenderer.invoke('ai:chat-pick-files'),
     aiChatRemoveFile: (id) => electron_1.ipcRenderer.invoke('ai:chat-remove-file', id),
     aiChatCancel: (requestId) => electron_1.ipcRenderer.send('ai:chat-cancel', requestId),

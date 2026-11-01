@@ -1,7 +1,14 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
 import { splitSuggestions } from '../lib/chatSuggestions'
-import type { LlmConfigPublic, LlmPreset, ChatMessage, ChatSource, ChatSession, ChatToolActivity, ChatPendingConfirm, ChatAttachment } from '../types'
+import {
+  EMPTY_CONTEXT, contextAfterTargetChange, contextPayload, defaultContext, removeContextItem, sameEditorTarget, setAllNotes,
+  toggleContextItem,
+} from '../lib/chatContext'
+import type {
+  LlmConfigPublic, LlmPreset, ChatMessage, ChatSource, ChatSession, ChatToolActivity, ChatPendingConfirm, ChatAttachment,
+  ChatContextItem, ChatContextState, ChatEditorTarget, ChatHandoff, ChatUndoResult,
+} from '../types'
 
 export interface ChatTurn {
   id: string
@@ -73,9 +80,35 @@ interface AiChatState {
   activeSources: ChatSource[]
   pendingConfirm: ChatPendingConfirm | null
   suggestions: string[] // next-action prompts parsed from the last assistant reply
-  sendMessage: (text: string) => void
+  // withContext: the editor sidebar / chat window send their context bar (explicit notes/sections,
+  // RAG only with "all notes"); the brain chat sends none → RAG over every note, as always.
+  sendMessage: (text: string, opts?: { withContext?: boolean }) => void
   cancel: () => void
   confirmAction: (approved: boolean) => void
+  // Undo a note edit of the agent (snapshot in main). Marks the activity row 'done' on success.
+  undoToolCall: (toolCallId: string, force?: boolean) => Promise<ChatUndoResult>
+
+  // ── Context bar (editor sidebar / chat window — lib/chatContext) ──
+  context: ChatContextState
+  // False while the context is the untouched default of a chat with no messages: then it follows
+  // the open section (lib/chatContext.contextAfterTargetChange). Touching the bar or sending the
+  // first message pins it; new chat / opening a session unpins it again.
+  contextPinned: boolean
+  editorTarget: ChatEditorTarget | null // note/section open in the main window's active pane
+  setEditorTarget: (target: ChatEditorTarget | null) => void
+  toggleContextItem: (item: ChatContextItem) => void
+  removeContextItem: (item: ChatContextItem) => void
+  setAllNotes: (on: boolean) => void
+
+  // ── Editor sidebar / detached window (main window) ──
+  sidebarOpen: boolean // folded by default on every start (not persisted)
+  setSidebarOpen: (open: boolean) => void
+  detached: boolean    // the conversation lives in the detached chat window right now
+  setDetached: (detached: boolean) => void
+  exportHandoff: () => ChatHandoff
+  importHandoff: (handoff: ChatHandoff) => void
+  // Move the conversation to the detached chat window (not while a reply streams or waits for a confirmation).
+  detachChat: () => Promise<void>
 
   // ── Sessions (history) ──
   sessions: ChatSession[]
@@ -93,12 +126,39 @@ interface AiChatState {
   // ── AI panel routing (driven by the command palette) ──
   panelTab: PanelTab | null      // requested initial tab — consumed by AiPanel
   pendingPrompt: string | null   // a question to auto-send once chat is ready — consumed by ChatView
+  // With a prompt while the chat is detached, the prompt goes to the chat window instead.
   openAiPanel: (tab: PanelTab, prompt?: string) => void
+  // Detached chat window: "Ask AI" from the main window's palette → new chat asking `prompt`.
+  askInNewChat: (prompt: string) => void
 
   initListeners: () => () => void
 }
 
-export const useAiChatStore = create<AiChatState>((set, get) => ({
+export const useAiChatStore = create<AiChatState>((set, get) => {
+  // Persist the current conversation into the sessions list (create or update).
+  const persist = () => {
+    const msgs = get().messages
+    if (msgs.length === 0) return
+    const now = new Date().toISOString()
+    const title = (msgs.find((m) => m.role === 'user')?.content ?? 'Chat').replace(/\s+/g, ' ').trim().slice(0, 60) || 'Chat'
+    let id = get().activeSessionId
+    let sessions = get().sessions.slice()
+    if (!id) {
+      id = nanoid()
+      sessions = [{ id, title, createdAt: now, updatedAt: now, messages: msgs }, ...sessions]
+      set({ activeSessionId: id })
+    } else {
+      const sid = id
+      sessions = sessions.map((s) => (s.id === sid ? { ...s, updatedAt: now, messages: msgs } : s))
+    }
+    set({ sessions })
+    void window.noteflow.aiChatsSave(sessions)
+  }
+
+  // A fresh conversation's context: the section open now, following it until pinned.
+  const freshContext = () => ({ context: defaultContext(get().editorTarget), contextPinned: false })
+
+  return {
   llmConfig: null,
   presets: [],
   configLoaded: false,
@@ -162,7 +222,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
   pendingConfirm: null,
   suggestions: [],
 
-  sendMessage: (text) => {
+  sendMessage: (text, opts) => {
     const trimmed = text.trim()
     const atts = get().pendingAttachments
     if ((!trimmed && atts.length === 0) || get().streaming) return
@@ -172,6 +232,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     const history = get().messages
     set({
       messages: [...history, userTurn, assistantTurn],
+      contextPinned: true, // the first message freezes the context (no more following the open section)
       streaming: true,
       awaitingModelText: true,
       lastDeltaAt: null,
@@ -185,7 +246,8 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     const payload: ChatMessage[] = [...history, userTurn].map((m) => ({
       role: m.role, content: m.content, ...(m.attachments?.length ? { attachmentIds: m.attachments.map((a) => a.id) } : {}),
     }))
-    window.noteflow.aiChat(requestId, payload).catch((err) => console.error('aiChat failed:', err))
+    const context = opts?.withContext ? contextPayload(get().context, get().editorTarget) : undefined
+    window.noteflow.aiChat(requestId, payload, context).catch((err) => console.error('aiChat failed:', err))
   },
 
   cancel: () => {
@@ -199,6 +261,83 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     if (!pc) return
     window.noteflow.aiChatConfirm(pc.toolCallId, approved)
     set({ pendingConfirm: null })
+  },
+
+  undoToolCall: async (toolCallId, force) => {
+    let res: ChatUndoResult
+    try {
+      res = await window.noteflow.aiChatUndo(toolCallId, force)
+    } catch (err) {
+      res = { ok: false, reason: 'error', error: err instanceof Error ? err.message : String(err) }
+    }
+    // 'unavailable' = main no longer holds the snapshot; 'conflict' / 'encryption' = it can never
+    // run (see chatUndo.undoBlock in main): drop the button instead of failing again.
+    if (res.ok || res.reason === 'unavailable' || res.reason === 'conflict' || res.reason === 'encryption') {
+      const undo: ChatToolActivity['undo'] = res.ok ? 'done' : undefined
+      set((s) => ({
+        messages: s.messages.map((m) => !m.actions?.some((a) => a.toolCallId === toolCallId) ? m : {
+          ...m,
+          actions: m.actions.map((a) => {
+            if (a.toolCallId !== toolCallId) return a
+            const next = { ...a }
+            if (undo) next.undo = undo
+            else delete next.undo
+            return next
+          }),
+        }),
+      }))
+      persist()
+    }
+    return res
+  },
+
+  // ── Context bar ──
+  context: EMPTY_CONTEXT,
+  contextPinned: false,
+  editorTarget: null,
+
+  setEditorTarget: (target) => {
+    if (sameEditorTarget(get().editorTarget, target)) return
+    const s = get()
+    set({ editorTarget: target, context: contextAfterTargetChange(s.context, s.contextPinned, s.messages.length, target) })
+  },
+  toggleContextItem: (item) => set((s) => ({ context: toggleContextItem(s.context, item), contextPinned: true })),
+  removeContextItem: (item) => set((s) => ({ context: removeContextItem(s.context, item), contextPinned: true })),
+  setAllNotes: (on) => set((s) => ({ context: setAllNotes(s.context, on), contextPinned: true })),
+
+  // ── Editor sidebar / detached window ──
+  sidebarOpen: false,
+  setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  detached: false,
+  setDetached: (detached) => set({ detached }),
+
+  exportHandoff: () => {
+    const s = get()
+    return {
+      messages: s.messages, activeSessionId: s.activeSessionId, draft: s.draft, context: s.context,
+      contextPinned: s.contextPinned, suggestions: s.suggestions, pendingAttachments: s.pendingAttachments,
+      takenAt: new Date().toISOString(),
+    }
+  },
+
+  detachChat: async () => {
+    const s = get()
+    if (s.streaming || s.pendingConfirm || s.detached) return
+    const res = await window.noteflow.aiChatWindowOpen(s.exportHandoff())
+    if (res.ok) set({ detached: true, sidebarOpen: false })
+  },
+
+  importHandoff: (h) => {
+    set({
+      messages: Array.isArray(h.messages) ? h.messages.map((m) => ({ ...m })) : [],
+      activeSessionId: typeof h.activeSessionId === 'string' ? h.activeSessionId : null,
+      draft: typeof h.draft === 'string' ? h.draft : '',
+      context: h.context && Array.isArray(h.context.items) ? { allNotes: !!h.context.allNotes, items: h.context.items } : EMPTY_CONTEXT,
+      contextPinned: !!h.contextPinned,
+      suggestions: Array.isArray(h.suggestions) ? h.suggestions : [],
+      pendingAttachments: Array.isArray(h.pendingAttachments) ? h.pendingAttachments : [],
+      streaming: false, awaitingModelText: false, lastDeltaAt: null, currentRequestId: null, pendingConfirm: null, activeSources: [],
+    })
   },
 
   // ── Sessions ──
@@ -217,20 +356,28 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
   newChat: () => {
     if (get().streaming) get().cancel()
     for (const a of get().pendingAttachments) void window.noteflow.aiChatRemoveFile(a.id)
-    set({ messages: [], activeSources: [], activeSessionId: null, pendingConfirm: null, pendingAttachments: [], suggestions: [], awaitingModelText: false })
+    set({ messages: [], activeSources: [], activeSessionId: null, pendingConfirm: null, pendingAttachments: [], suggestions: [], awaitingModelText: false, ...freshContext() })
   },
 
   openSession: (id) => {
     if (get().streaming) get().cancel()
     const s = get().sessions.find((x) => x.id === id)
     if (!s) return
-    set({ messages: s.messages.map((m) => ({ ...m })), activeSessionId: id, activeSources: [], suggestions: [], awaitingModelText: false })
+    set({ messages: s.messages.map((m) => ({ ...m })), activeSessionId: id, activeSources: [], suggestions: [], awaitingModelText: false, ...freshContext() })
   },
 
   deleteSession: (id) => {
     const sessions = get().sessions.filter((s) => s.id !== id)
-    set({ sessions, ...(get().activeSessionId === id ? { messages: [], activeSessionId: null, activeSources: [] } : {}) })
+    set({ sessions, ...(get().activeSessionId === id ? { messages: [], activeSessionId: null, activeSources: [], ...freshContext() } : {}) })
     void window.noteflow.aiChatsSave(sessions)
+  },
+
+  askInNewChat: (prompt) => {
+    get().newChat()
+    // Same reach as the brain's "Ask AI" (semantic search over every note), visible in the bar.
+    set((s) => ({ context: setAllNotes(s.context, true), contextPinned: true }))
+    if (get().llmConfig?.configured) get().sendMessage(prompt, { withContext: true })
+    else set({ draft: prompt })
   },
 
   // ── AI panel routing ──
@@ -243,6 +390,11 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
 
   openAiPanel: (tab, prompt) => {
     const trimmed = prompt?.trim()
+    // The conversation lives in the detached chat window: ask there (it starts a new chat).
+    if (trimmed && get().detached) {
+      window.noteflow.aiChatWindowAsk(trimmed)
+      return
+    }
     if (trimmed) {
       // Land the question in a clean conversation so it isn't tacked onto an old thread.
       get().newChat()
@@ -260,26 +412,6 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
         if (last && last.role === 'assistant') msgs[msgs.length - 1] = { ...last, content: last.content + delta }
         return { messages: msgs, lastDeltaAt: Date.now() }
       })
-    }
-
-    // Persist the current conversation into the sessions list (create or update).
-    const persist = () => {
-      const msgs = get().messages
-      if (msgs.length === 0) return
-      const now = new Date().toISOString()
-      const title = (msgs.find((m) => m.role === 'user')?.content ?? 'Chat').replace(/\s+/g, ' ').trim().slice(0, 60) || 'Chat'
-      let id = get().activeSessionId
-      let sessions = get().sessions.slice()
-      if (!id) {
-        id = nanoid()
-        sessions = [{ id, title, createdAt: now, updatedAt: now, messages: msgs }, ...sessions]
-        set({ activeSessionId: id })
-      } else {
-        const sid = id
-        sessions = sessions.map((s) => (s.id === sid ? { ...s, updatedAt: now, messages: msgs } : s))
-      }
-      set({ sessions })
-      void window.noteflow.aiChatsSave(sessions)
     }
 
     // Mutate the actions array on the latest assistant turn.
@@ -319,7 +451,9 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       // same step is still going.
       set({ awaitingModelText: true })
       updateActions((actions) =>
-        actions.map((a) => a.toolCallId === p.toolCallId ? { ...a, status: p.status, summary: p.summary } : a))
+        actions.map((a) => a.toolCallId === p.toolCallId
+          ? { ...a, status: p.status, summary: p.summary, ...(p.undoable ? { undo: 'available' as const } : {}) }
+          : a))
     })
     const offConfirm = window.noteflow.onAiChatConfirmRequest((p) => {
       if (p.requestId !== get().currentRequestId) return
@@ -362,4 +496,5 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
 
     return () => { offDelta(); offSources(); offToolCall(); offToolResult(); offConfirm(); offDone(); offError() }
   },
-}))
+  }
+})

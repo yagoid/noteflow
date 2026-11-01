@@ -32,8 +32,23 @@ function extractTags(content: string): string[] {
   return [...new Set(matches.map((m) => m.slice(1).toLowerCase()))]
 }
 
+const DATA_URI_RE = /data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi
+
 function stripBase64(text: string): string {
-  return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]')
+  return text.replace(DATA_URI_RE, '[image]')
+}
+
+/**
+ * The model only ever sees images as `[image]` (stripBase64), so a section it rewrites with
+ * update_section comes back with `![alt]([image])` where the original had the data URI. Put the
+ * original images back, matched BY POSITION (n-th placeholder ← n-th image of the original): if
+ * the model reorders or drops images, the wrong one may land in a slot. Placeholders beyond the
+ * original's image count are removed (they would only be broken images).
+ */
+export function restoreStrippedImages(original: string, next: string): string {
+  const uris = original.match(DATA_URI_RE) ?? []
+  let i = 0
+  return next.replace(/!\[([^\]]*)\]\(\[image\]\)/g, (_m, alt: string) => (i < uris.length ? `![${alt}](${uris[i++]})` : ''))
 }
 
 const DEFAULT_GROUP_COLOR = '#64748b'
@@ -84,6 +99,8 @@ export interface ToolRunResult {
   /** Text fed back to the model as the tool result. */
   content: string
   isError?: boolean
+  /** create_note: id of the note it created (for the chat's undo). */
+  noteId?: string
 }
 
 // Tools that mutate irreversibly — gated behind an in-chat confirmation.
@@ -358,7 +375,13 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         if (note.encryption) return ok(`Read "${note.title}"`, `Note "${note.title}" is encrypted; its content is not readable.`)
         const body = note.sections
           .filter((s) => !s.aiHidden) // sections hidden from the AI are never exposed to the model
-          .map((s) => `## ${s.name} [section_id=${s.id}]\n${stripBase64(s.content).slice(0, 6000)}`)
+          .map((s) => {
+            const text = stripBase64(s.content)
+            // Say so when cut: update_section replaces the whole section, so rewriting from a
+            // silently truncated read would drop the tail.
+            const body = text.length > 6000 ? `${text.slice(0, 6000)}\n[…truncated — do not rewrite this whole section with update_section]` : text
+            return `## ${s.name} [section_id=${s.id}]\n${body}`
+          })
           .join('\n\n')
         return ok(`Read "${note.title}"`, `# ${note.title} [id=${note.id}]\n${body}`)
       }
@@ -406,7 +429,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const dir = noteDirname(id, title)
         const { files } = noteFormat.serializeNoteFolder(note)
         await ctx.writeNote({ dir, files })
-        return ok(`Created note "${title}"`, `Created note "${title}" with id ${id} and ${sections.length} section(s).`)
+        return { ...ok(`Created note "${title}"`, `Created note "${title}" with id ${id} and ${sections.length} section(s).`), noteId: id }
       }
 
       case 'update_note': {
@@ -448,7 +471,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
           ...found.note,
           sections: found.note.sections.map((s) => s.id !== sid ? s
             : name === 'rename_section' ? { ...s, name: asStr(input.name).trim() || s.name }
-            : { ...s, content: asStr(input.content) }),
+            : { ...s, content: restoreStrippedImages(s.content, asStr(input.content)) }),
         }
         await writeNoteRecord(ctx, found.dir, found.note, after)
         return ok(name === 'rename_section' ? `Renamed section` : `Updated section`)

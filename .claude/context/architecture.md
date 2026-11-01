@@ -57,6 +57,8 @@ noteflow/
 │       ├── protocol.ts  #   Tipos de mensajes worker↔main + constantes (modelo, schema)
 │       ├── aiIndex.ts   #   Lifecycle del worker en el main (fork/respawn, debounce, API)
 │       ├── aiWorker.ts  #   utilityProcess: embeddings (Transformers.js) + SQLite index
+│       ├── chatContext.ts #  Contexto explícito del chat del editor → bloques del prompt (puro, testeado)
+│       ├── chatUndo.ts  #   Deshacer ediciones del agente: snapshots/huella/plan (puro, testeado)
 │       └── llm/         #   Proveedor LLM (Fase 3, corre en main; key NUNCA va al renderer)
 │           ├── presets.ts          #     Catálogo de proveedores (anthropic | openai-compatible)
 │           ├── managedCatalog.ts   #     Catálogo de modelos de NoteFlow AI (del proxy, cacheado; puro, testeado)
@@ -140,9 +142,14 @@ noteflow/
 │   │   │   ├── HoverPreviewProvider.tsx #   Provider + popover flotante de hover (sidebar/grupos/editor/IA);
 │   │   │   │                            #     1 popover central, cierra con cualquier click (pointerdown global)
 │   │   │   └── hoverPreviewContext.ts   #   Contexto + hook useSectionHoverPreview (archivo aparte: fast-refresh)
-│   │   ├── AiPanel/                     # Panel de IA (Fase 3) — mitad izq. de la vista cerebro
+│   │   ├── AiPanel/                     # Panel de IA (Fase 3) — mitad izq. de la vista cerebro + chat del editor
 │   │   │   ├── AiPanel.tsx              #   Contenedor con pestañas Chat / Related / Profile / ⚙ Settings
-│   │   │   ├── ChatView.tsx             #   Chat streaming + selector de modelo + historial + citas
+│   │   │   ├── ChatView.tsx             #   Chat streaming + selector de modelo + historial + citas + deshacer
+│   │   │   │                            #     (variante compact/renderHeader/contextBar para el chat del editor)
+│   │   │   ├── AiChatButton.tsx         #   Botón del chat en la fila del título (y ancla del sidebar, aiChatAnchor.ts)
+│   │   │   ├── AiChatSidebar.tsx        #   Chat flotante a la derecha del editor (ai.md → Chat en el editor)
+│   │   │   ├── ChatContextBar.tsx       #   Barra "Contexto:" (sección / nota / todas las notas)
+│   │   │   ├── AiChatWindowApp.tsx      #   Ventana de chat despegada (#ai-chat)
 │   │   │   ├── RelatedView.tsx          #   "Related notes" por sección (movido aquí del cerebro)
 │   │   │   ├── LlmConfigView.tsx        #   Fuente del asistente: selector NoteFlow AI | proveedor propio/IA local (+ baseUrl, key, modelo, test)
 │   │   │   ├── ProfileFlow.tsx          #   Cuestionario por secciones (chips/tags/text/choice + archivos + enlaces) → genera nota de perfil
@@ -289,6 +296,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `window:open-section-window` | on | `(noteId, sectionId)` → abre una ventana solo-editor (`#section-window?…`, `SectionWindowApp`); si una ventana de sección ya muestra esa nota+sección, la enfoca |
 | `window:section-window-target` | on | La ventana de sección informa de la nota+sección que muestra (para el "enfocar si ya existe" del canal anterior y la recarga tras crash) |
 | `window:set-size` | on | Redimensiona la ventana (usado por sticky) |
+| `window:set-always-on-top` | on | Alterna `alwaysOnTop` de la ventana emisora (sticky; chincheta de la ventana de chat) |
 | `window:fold-to-corner` / `window:unfold` | on | Anima el plegado/desplegado de stickies |
 | `sync:get-status` | handle | Estado del sync **GitHub** (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`, `conflictCopies?`) |
 | `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, history?: [{at, files, ok}], filesToday?, conflictCopies?: {count, titles, at}, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`; `conflictCopies` = aviso de copias de conflicto del backend activo, sea Cloud o GitHub) |
@@ -324,7 +332,17 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `ai:llm-get-config` / `ai:llm-set-config` | handle | Lee/escribe `settings.aiLlm` (config del LLM por proveedor). `get` saneado (sin key); `set` aplica al **preset activo** (clave/modelo/baseUrl por proveedor) y cifra la key con `safeStorage`. El `baseUrl` se **ignora** (no se persiste) en presets con `editableBaseUrl: false` — sobre todo `noteflow`, cuya credencial es el token de Supabase; `effectiveBaseUrl` aplica la misma regla al leer |
 | `ai:llm-presets` | handle | Catálogo de presets de proveedor (`electron/ai/llm/presets.ts`, vía `llm.listPresets()`): el preset `noteflow` lleva el **catálogo efectivo** de modelos (el descargado del proxy y cacheado en `settings.aiManagedCatalog`, o las constantes de respaldo) — ver `ai.md` |
 | `ai:llm-list-models` / `ai:llm-test` | handle | Lista modelos del proveedor activo / valida conexión+credenciales. Con `noteflow` activo, `list-models` **re-descarga el catálogo** del proxy (forzado) y devuelve el efectivo; si falla, la caché sigue vigente y solo se informa del error |
-| `ai:chat` | handle | Chat **agéntico** con streaming: contexto RAG + bucle de tool-calling, emite por eventos, admite `attachmentIds[]` (detalle en `ai.md` → Chat agéntico) |
+| `ai:chat` | handle | Chat **agéntico** con streaming: contexto RAG + bucle de tool-calling, emite por eventos, admite `attachmentIds[]` (detalle en `ai.md` → Chat agéntico). `context?: {allNotes, items[], openNote?}` (solo sidebar del editor / ventana de chat): notas/secciones explícitas y RAG solo con `allNotes`; sin `context` = cerebro (ver `ai.md` → Chat en el editor) |
+| `ai:chat-undo` | handle | `(toolCallId, force?)` → deshace una edición de nota del agente desde el snapshot en memoria de main → `{ok:true} \| {ok:false, reason:'modified'\|'unavailable'\|'conflict'\|'encryption'\|'error'}` (`modified` = la nota cambió tras la edición; la UI confirma y reintenta con `force`. `conflict` = habría que re-crear la nota o una sección borrada después; `encryption` = se cifró/descifró después; ninguno se puede forzar) |
+| `ai:flush-edits-done` | on | `(token)` — la ventana principal confirma que escribió sus guardados pendientes (respuesta al evento `ai:flush-edits`) |
+| `ai:chat-window-open` | handle | (solo ventana principal) `(handoff)` → crea/enfoca la **ventana de chat despegada** y le guarda la conversación |
+| `ai:chat-window-is-open` | handle | `boolean` — si la ventana de chat existe (la principal lo consulta tras recargar) |
+| `ai:chat-window-get-state` | handle | (solo ventana de chat) `{handoff, editorTarget}` — la conversación entregada + la nota/sección abierta en la principal |
+| `ai:chat-window-focus` / `ai:chat-window-recall` | on | Enfoca la ventana de chat / le pide que devuelva la conversación y se cierre ("Traer aquí") |
+| `ai:chat-window-return` | on | (solo ventana de chat) `(handoff \| null)` → main lo reenvía a la principal y destruye la ventana |
+| `ai:chat-window-editor-target` | on | (solo ventana principal) nota/sección del panel activo `{noteId, noteTitle, sectionId?, sectionName?, encrypted, sectionAiHidden} \| null`; main lo cachea y lo reenvía a la ventana de chat |
+| `ai:chat-window-ask` | on | (solo ventana principal) `(prompt)` → "Ask AI" de la paleta con el chat despegado: main enfoca la ventana de chat y le reenvía el prompt (chat nuevo) |
+| `ai:chat-window-command` | on | (solo ventana de chat) `{type:'open-note', noteId, sectionId?} \| {type:'open-ai-settings'}` → main enfoca la principal y se lo reenvía |
 | `ai:chat-pick-files` / `ai:chat-remove-file` | handle | Adjuntos del chat a la caché `chatFiles` del main (persisten para preguntas de seguimiento); devuelve solo metadatos — los bytes NUNCA cruzan al renderer |
 | `ai:chat-cancel` | on | Aborta un `ai:chat` en vuelo por `requestId` (AbortController); también resuelve confirmaciones pendientes |
 | `ai:chat-confirm` | on | Resuelve la confirmación de una tool destructiva por `toolCallId` (`{toolCallId, approved}`) |
@@ -350,8 +368,14 @@ presets + config si ya estaban cargados),
 `ai:chat-tool-call` (`{requestId,toolCallId,name,input,label}` — `label` es la frase en presente
 "qué está haciendo" con el objetivo resuelto a título por `agentTools.describeAction`, mostrada en la
 fila de actividad mientras la tool corre), `ai:chat-tool-result`
-(`{requestId,toolCallId,status,summary}`), `ai:chat-confirm-request`
-(`{requestId,toolCallId,name,input}` — tool destructiva esperando confirmación).
+(`{requestId,toolCallId,status,summary,undoable?}` — `undoable` = main guardó un snapshot para
+deshacerla), `ai:chat-confirm-request`
+(`{requestId,toolCallId,name,input}` — tool destructiva esperando confirmación),
+`ai:flush-edits` (`token` — a la ventana principal: escribir los guardados con debounce antes de que un
+turno de chat o un undo lea notas; responde `ai:flush-edits-done`), `ai:chat-window-returned`
+(`handoff | null` — a la principal: vuelve la conversación de la ventana de chat), `ai:chat-window-command`
+(a la principal), `ai:chat-window-editor-target`, `ai:chat-window-request-close` y `ai:chat-window-ask`
+(a la ventana de chat).
 
 ### Modelo de almacenamiento
 
@@ -464,7 +488,8 @@ Estructura de `settings.json`:
     "models": [{ "id": "deepseek/deepseek-v4.1-flash-1017", "costIndex": 1, "images": true, "recommended": true }],
     "updatedAt": "2026-10-24T10:00:00.000Z"
   },
-  "aiProfile": { "completedAt": "2026-06-14T10:00:00.000Z", "noteId": "abc12345" }
+  "aiProfile": { "completedAt": "2026-06-14T10:00:00.000Z", "noteId": "abc12345" },
+  "aiChatWindow": { "bounds": { "x": 1200, "y": 120, "width": 440, "height": 680 } }
 }
 ```
 
@@ -487,6 +512,9 @@ Estructura de `settings.json`:
 > editó cada día en ESTE dispositivo; se podan los días de más de 120 en cada escritura. Lógica
 > pura en `electron/activityLog.ts`; como no guarda secretos se escribe con tmp + rename (la regla
 > in-place del apartado "Seguridad" de arriba es solo para `settings.json`).
+> `aiChatWindow.bounds` = tamaño/posición de la ventana de chat despegada (se guarda al cerrarla;
+> la posición se descarta si ya no cae en ninguna pantalla). El ancho del sidebar de chat del editor va
+> en `localStorage` (`noteflow-ai-chat-width`), no aquí.
 > `accountRestore` recuerda, **sin secretos** (email + dos booleanos), qué features de
 > pago tenía activas la sesión que cerró, para volver a activarlas si vuelve a entrar la MISMA
 > cuenta con la entitlement viva (ver `monetization.md` § 4 "Cerrar sesión").
