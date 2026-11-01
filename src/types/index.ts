@@ -533,6 +533,10 @@ declare global {
       setSkillSync: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>
       getStartupStickies: () => Promise<Array<{ noteId: string; sectionId: string }>>
       setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>) => Promise<void>
+      /** "What's new" tour: slide ids already shown on this device + startup popup kill switch (env). */
+      getWhatsNewSeen: () => Promise<{ seen: string[]; disabled: boolean }>
+      /** Union with the stored seen list (settings.json → whatsNewSeen); resolves to the updated list. */
+      markWhatsNewSeen: (ids: string[]) => Promise<string[]>
       getUiState: () => Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[]; sidebarMode?: 'pinned' | 'floating' }>
       setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[]; sidebarMode?: 'pinned' | 'floating' }) => Promise<void>
       getGroups: () => Promise<NoteGroup[]>

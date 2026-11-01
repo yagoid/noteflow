@@ -52,6 +52,11 @@ const api = {
     setSkillSync: (enabled) => electron_1.ipcRenderer.invoke('app:set-skill-sync', enabled),
     getStartupStickies: () => electron_1.ipcRenderer.invoke('settings:get-startup-stickies'),
     setStartupStickies: (stickies) => electron_1.ipcRenderer.invoke('settings:set-startup-stickies', stickies),
+    // "What's new" tour: slide ids already shown on this device (settings.json →
+    // whatsNewSeen) + whether the startup popup is disabled (NOTEFLOW_DISABLE_WHATS_NEW=1).
+    getWhatsNewSeen: () => electron_1.ipcRenderer.invoke('whats-new:get-seen'),
+    // Union with the stored list; resolves to the updated list.
+    markWhatsNewSeen: (ids) => electron_1.ipcRenderer.invoke('whats-new:mark-seen', ids),
     getUiState: () => electron_1.ipcRenderer.invoke('settings:get-ui-state'),
     setUiState: (patch) => electron_1.ipcRenderer.invoke('settings:set-ui-state', patch),
     getGroups: () => electron_1.ipcRenderer.invoke('groups:get'),

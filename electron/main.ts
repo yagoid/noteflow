@@ -70,6 +70,7 @@ import {
 } from './activityLog'
 import { resolveLang, getTrayMessages, getMessages, type LanguageSetting } from './i18n'
 import { writeSettingsFile } from './settingsFile'
+import { sanitizeSeenIds, mergeSeenIds } from './whatsNewSeen'
 
 
 function getIconPath(): string {
@@ -3704,6 +3705,27 @@ ipcMain.handle('settings:set-startup-stickies', (_event, stickies: Array<{ noteI
   const settings = readSettings()
   settings.startupStickies = stickies
   writeSettings(settings)
+})
+
+// "What's new" tour: ids of the slides already shown on THIS device (local, never
+// synced — each machine gets its own tour). `disabled` lets harnesses that drive a
+// fresh profile (scripts/update-e2e.cjs) keep the startup popup out of the way;
+// the tour can still be opened by hand from Settings → Tutorial.
+ipcMain.handle('whats-new:get-seen', () => ({
+  seen: sanitizeSeenIds(readSettings().whatsNewSeen),
+  disabled: process.env.NOTEFLOW_DISABLE_WHATS_NEW === '1',
+}))
+
+// Union with what is stored (never removes) → returns the updated list.
+ipcMain.handle('whats-new:mark-seen', (_event, ids: unknown) => {
+  const settings = readSettings()
+  const next = mergeSeenIds(settings.whatsNewSeen, ids)
+  // Each slide shown calls this: skip the disk write when nothing changed.
+  if (JSON.stringify(next) !== JSON.stringify(settings.whatsNewSeen)) {
+    settings.whatsNewSeen = next
+    writeSettings(settings)
+  }
+  return next
 })
 
 ipcMain.handle('settings:get-ui-state', () => {

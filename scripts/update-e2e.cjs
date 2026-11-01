@@ -637,7 +637,9 @@ async function runScenario(opts) {
 
     // ── Prepare old ─────────────────────────────────────────────────────────
     step(`prepare the old build (${kind})`)
-    const env = { ...process.env, NOTEFLOW_NOTES_DIR: notesDir }
+    // NOTEFLOW_DISABLE_WHATS_NEW: a fresh profile would otherwise get the startup "What's
+    // new" tour (builds >= 2.2.0), whose overlay covers the titlebar update button.
+    const env = { ...process.env, NOTEFLOW_NOTES_DIR: notesDir, NOTEFLOW_DISABLE_WHATS_NEW: '1' }
     // Not for the app: ELECTRON_RUN_AS_NODE would turn it into plain Node, and CI tokens
     // have no business in the app under test.
     for (const k of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'GITHUB_TOKEN', 'GH_TOKEN']) delete env[k]

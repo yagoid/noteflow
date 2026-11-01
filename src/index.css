@@ -1534,3 +1534,556 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
   overflow-wrap: anywhere;
 }
 .chat-md.prose-editor .ProseMirror div[data-kanban-column] { flex-basis: 9.5rem; }
+
+/* ── "What's new" tour (components/WhatsNew/) ────────────────────────────────
+   Everything is drawn from theme vars + `--wn-c`: the slide's colour channel (an
+   "r g b" triple, set inline from the slide's accent var). The colour changes
+   between slides animate because the elements transition their computed
+   background-color / box-shadow. `--dx` (−1 | 0.5 | 1) is the direction of the
+   last move and `--wn-base` the delay before the slide's reveal starts.
+   prefers-reduced-motion: only opacity fades remain (block at the end). */
+
+@property --wn-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.wn-root {
+  position: fixed;
+  inset: 0;
+  z-index: 70; /* over Settings (z-50): the tour can be opened from it */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.wn-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 0.58);
+  backdrop-filter: blur(10px) saturate(115%);
+  animation: wn-fade-in 380ms ease-out both;
+}
+.wn-root.is-closing .wn-backdrop { animation: wn-fade-out 240ms ease-in both; }
+
+.wn-modal {
+  position: relative;
+  width: min(880px, 100%);
+  height: min(580px, 100%);
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgb(var(--bg-1));
+  border: 1px solid rgb(var(--border));
+  box-shadow:
+    0 40px 90px -30px rgb(0 0 0 / 0.65),
+    inset 0 1px 0 rgb(var(--text) / 0.05),
+    0 0 140px -50px rgb(var(--wn-c) / 0.7);
+  transition: box-shadow 900ms ease;
+  animation: wn-modal-in 680ms cubic-bezier(0.2, 1.22, 0.32, 1) both;
+}
+.wn-root.is-closing .wn-modal { animation: wn-modal-out 240ms cubic-bezier(0.4, 0, 1, 1) both; }
+
+/* Aurora: three blurred blobs drifting slowly — slide colour + theme accent. */
+.wn-aurora {
+  position: absolute;
+  inset: -25%;
+  pointer-events: none;
+  filter: blur(72px);
+  opacity: 0.6;
+}
+.wn-blob {
+  position: absolute;
+  border-radius: 50%;
+  transition: background-color 900ms ease;
+}
+.wn-blob-a {
+  width: 52%; height: 58%; left: 2%; top: 14%;
+  background-color: rgb(var(--wn-c) / 0.42);
+  animation: wn-drift-a 21s ease-in-out infinite alternate;
+}
+.wn-blob-b {
+  width: 46%; height: 52%; right: 0%; top: 0%;
+  background-color: rgb(var(--accent) / 0.3);
+  animation: wn-drift-b 27s ease-in-out infinite alternate;
+}
+.wn-blob-c {
+  width: 40%; height: 46%; left: 38%; bottom: 0%;
+  background-color: rgb(var(--wn-c) / 0.22);
+  animation: wn-drift-c 33s ease-in-out infinite alternate;
+}
+/* Dot grid fading out from the centre: texture over the aurora. */
+.wn-dots {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgb(var(--text) / 0.08) 1px, transparent 1.2px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 40% 45%, #000 20%, transparent 80%);
+  mask-image: radial-gradient(ellipse 70% 60% at 40% 45%, #000 20%, transparent 80%);
+}
+
+.wn-header, .wn-stage, .wn-footer { position: relative; }
+
+.wn-header-icon {
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  color: rgb(var(--wn-c));
+  background: rgb(var(--wn-c) / 0.14);
+  border: 1px solid rgb(var(--wn-c) / 0.3);
+  transition: color 600ms ease, background-color 600ms ease, border-color 600ms ease;
+}
+
+/* ── Deck: slides stack in one grid cell so the leaving one can animate out ── */
+.wn-deck {
+  display: grid;
+  /* One definite cell: a slide can never grow past the stage (and over the footer). */
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+.wn-slide {
+  grid-area: 1 / 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 32px;
+  align-items: center;
+}
+.wn-slide[data-state="exit"] { pointer-events: none; }
+
+.wn-media {
+  container-type: size;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wn-slide[data-state="enter"] .wn-media { animation: wn-media-in 720ms cubic-bezier(0.18, 0.9, 0.24, 1) var(--wn-base, 0ms) both; }
+.wn-slide[data-state="exit"] .wn-media { animation: wn-media-out 380ms cubic-bezier(0.5, 0, 0.75, 0) both; }
+
+.wn-text {
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* Too tall for the stage (small window, big UI zoom, the "more" list): scroll, never overlap. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain; /* (no scrollbar-width: it would drop the app's ::-webkit-scrollbar style) */
+  padding: 4px 6px 4px 2px; /* room for the key chips' press ring inside the scroll box */
+}
+.wn-text > * { flex-shrink: 0; }
+.wn-reveal { animation: wn-text-in 620ms cubic-bezier(0.18, 0.9, 0.24, 1) both; animation-delay: calc(var(--wn-base, 0ms) + 110ms + var(--i, 0) * 85ms); }
+.wn-slide[data-state="exit"] .wn-reveal { animation: wn-text-out 300ms cubic-bezier(0.5, 0, 0.75, 0) both; }
+
+.wn-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgb(var(--wn-c));
+}
+.wn-title {
+  font-size: 26px;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: rgb(var(--text));
+  text-wrap: balance;
+}
+.wn-body {
+  font-size: 13px;
+  line-height: 1.65;
+  color: rgb(var(--text) / 0.72);
+  text-wrap: pretty;
+}
+
+/* Keyboard chips. `.wn-kbd-inline` = the same chip inside the body text. */
+.wn-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.9em;
+  height: 1.9em;
+  padding: 0 0.55em;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  color: rgb(var(--text));
+  background: linear-gradient(rgb(var(--bg-3) / 0.9), rgb(var(--bg-2)));
+  border: 1px solid rgb(var(--border));
+  border-bottom-width: 2px;
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.18), 0 0 0 0 rgb(var(--wn-c) / 0);
+}
+.wn-kbd-inline {
+  height: 1.7em;
+  min-width: 0;
+  padding: 0 0.45em;
+  font-size: 0.86em;
+  vertical-align: 0.05em;
+  color: rgb(var(--wn-c));
+  background: rgb(var(--wn-c) / 0.1);
+  border-color: rgb(var(--wn-c) / 0.3);
+  border-bottom-width: 1px;
+  box-shadow: none;
+}
+.wn-combo { display: inline-flex; align-items: center; gap: 4px; }
+.wn-combo-plus { font-size: 10px; color: rgb(var(--text-muted)); }
+.wn-slide[data-state="enter"] .wn-combo .wn-kbd { animation: wn-key-press 1.2s ease-in-out both; animation-delay: calc(var(--wn-base, 0ms) + 700ms + var(--k, 0) * 140ms); }
+
+/* ── Window frame around the clip ─────────────────────────────────────────── */
+.wn-frame {
+  position: relative;
+  width: min(100cqw, calc(100cqh * 1.5));
+  aspect-ratio: 3 / 2;
+  border-radius: 14px;
+  background: rgb(var(--bg-0));
+  border: 1px solid rgb(var(--text) / 0.1);
+  box-shadow:
+    0 24px 60px -24px rgb(var(--wn-c) / 0.6),
+    0 0 90px -34px rgb(var(--wn-c) / 0.75),
+    0 1px 0 rgb(var(--text) / 0.04) inset;
+  transition: box-shadow 900ms ease;
+  overflow: hidden;
+  isolation: isolate;
+}
+/* A light sweeping around the border (conic gradient masked to a 1px ring). */
+.wn-frame-glow {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: conic-gradient(from var(--wn-angle), transparent 0 62%, rgb(var(--wn-c) / 0.95) 80%, transparent 96%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: wn-angle 7s linear infinite;
+}
+.wn-frame-bar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 24px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: rgb(var(--bg-2) / 0.85);
+  border-bottom: 1px solid rgb(var(--border) / 0.8);
+}
+.wn-frame-bar > i {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: rgb(var(--text) / 0.16);
+}
+.wn-frame-bar > i:first-child { background: rgb(var(--wn-c) / 0.8); transition: background-color 600ms ease; }
+.wn-frame-bar > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  margin-left: auto;
+  margin-right: auto;
+  padding-right: 34px; /* optically centred despite the dots */
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgb(var(--text-muted));
+}
+.wn-frame-body { position: absolute; inset: 24px 0 0 0; overflow: hidden; }
+/* The clip (or its poster as a still image under reduced motion), in the frame or a thumbnail. */
+.wn-clip {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  background: rgb(var(--bg-0));
+}
+/* Thumbnail poster layered over its clip (see ThumbClip in SlideVisual.tsx). */
+/* Fades out when the clip starts; back instantly on stop (the rewound frame 0 is black). */
+.wn-clip-poster.is-hidden { opacity: 0; transition: opacity 180ms ease; }
+
+/* ── Animated fallback (no clip bundled): icon + rings + orbits + particles ── */
+.wn-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 54%, rgb(var(--wn-c) / 0.2), transparent 58%),
+    linear-gradient(180deg, rgb(var(--bg-1)), rgb(var(--bg-0)));
+}
+.wn-fallback > * { grid-area: 1 / 1; }
+.wn-fb-ring {
+  width: 34%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1.5px solid rgb(var(--wn-c) / 0.55);
+  animation: wn-ring 3.9s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+  animation-delay: calc(var(--i) * -1.3s);
+}
+.wn-fb-orbit {
+  width: var(--r);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1px dashed rgb(var(--text) / 0.09);
+  animation: wn-spin var(--t) linear infinite;
+  animation-direction: var(--dir, normal);
+  position: relative;
+}
+.wn-fb-orbit > i {
+  position: absolute;
+  top: -3.5px;
+  left: 50%;
+  width: 7px; height: 7px;
+  margin-left: -3.5px;
+  border-radius: 50%;
+  background: rgb(var(--wn-c));
+  box-shadow: 0 0 14px 3px rgb(var(--wn-c) / 0.65);
+}
+.wn-fb-orbit > i + i { top: auto; bottom: -2.5px; width: 5px; height: 5px; margin-left: -2.5px; opacity: 0.6; }
+.wn-fb-core {
+  position: relative;
+  width: 96px; height: 96px;
+  display: grid;
+  place-items: center;
+  border-radius: 28px;
+  color: rgb(var(--wn-c));
+  background: linear-gradient(145deg, rgb(var(--wn-c) / 0.26), rgb(var(--wn-c) / 0.06) 70%);
+  border: 1px solid rgb(var(--wn-c) / 0.45);
+  box-shadow: 0 0 70px -6px rgb(var(--wn-c) / 0.65), inset 0 1px 0 rgb(255 255 255 / 0.1);
+  backdrop-filter: blur(6px);
+  animation: wn-breathe 3.9s ease-in-out infinite;
+}
+.wn-fb-particles { position: absolute; inset: 0; pointer-events: none; }
+.wn-fb-particles > i {
+  position: absolute;
+  left: var(--x);
+  bottom: -10px;
+  width: var(--s); height: var(--s);
+  border-radius: 50%;
+  background: rgb(var(--wn-c) / 0.85);
+  box-shadow: 0 0 8px rgb(var(--wn-c) / 0.6);
+  opacity: 0;
+  animation: wn-rise var(--t) linear infinite;
+  animation-delay: var(--d);
+}
+/* Thumbnails (Settings → Tutorial): smaller core, paused until hovered. */
+.wn-fallback.is-thumb .wn-fb-core { width: 48px; height: 48px; border-radius: 15px; }
+.wn-thumb:not(:hover):not(:focus-visible) .wn-fallback * { animation-play-state: paused; }
+
+/* ── "And much more" chip grid ────────────────────────────────────────────── */
+.wn-extras {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: center;
+  gap: 10px;
+  padding: 18px;
+  background:
+    radial-gradient(circle at 50% 50%, rgb(var(--wn-c) / 0.12), transparent 65%),
+    linear-gradient(180deg, rgb(var(--bg-1)), rgb(var(--bg-0)));
+}
+.wn-extras.is-list { position: static; padding: 0; background: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.wn-extras.is-list .wn-extra { gap: 7px; padding: 6px 8px; border-radius: 8px; font-size: 11px; }
+.wn-extras.is-list .wn-extra-icon { width: 22px; height: 22px; border-radius: 6px; }
+.wn-extra {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 11px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: rgb(var(--text));
+  background: rgb(var(--bg-2) / 0.7);
+  border: 1px solid rgb(var(--border));
+  transition: transform 260ms cubic-bezier(0.2, 1.3, 0.3, 1), border-color 200ms ease, box-shadow 260ms ease;
+  animation: wn-pop 560ms cubic-bezier(0.2, 1.35, 0.3, 1) both;
+  animation-delay: calc(var(--wn-base, 0ms) + 240ms + var(--i, 0) * 75ms);
+}
+.wn-extra:last-child:nth-child(odd) { grid-column: 1 / -1; justify-content: center; }
+.wn-extras.is-list .wn-extra:last-child:nth-child(odd) { justify-content: flex-start; }
+.wn-extra:hover {
+  transform: translateY(-2px);
+  border-color: rgb(var(--wn-x) / 0.5);
+  box-shadow: 0 10px 24px -14px rgb(var(--wn-x) / 0.8);
+}
+.wn-extra-icon {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  color: rgb(var(--wn-x));
+  background: rgb(var(--wn-x) / 0.14);
+  border: 1px solid rgb(var(--wn-x) / 0.3);
+}
+.wn-extra > span { min-width: 0; line-height: 1.3; overflow-wrap: anywhere; }
+
+/* ── Footer: progress pills + buttons ─────────────────────────────────────── */
+.wn-pill-hit { padding: 7px 3px; border-radius: 99px; outline: none; }
+.wn-pill-hit:focus-visible .wn-pill { box-shadow: 0 0 0 2px rgb(var(--bg-1)), 0 0 0 3.5px rgb(var(--wn-c)); }
+.wn-pill {
+  display: block;
+  width: 7px; height: 7px;
+  border-radius: 99px;
+  background: rgb(var(--text) / 0.18);
+  transition: width 480ms cubic-bezier(0.2, 1.25, 0.3, 1), background-color 400ms ease, box-shadow 400ms ease;
+}
+.wn-pill-hit:hover .wn-pill { background: rgb(var(--text) / 0.4); }
+.wn-pill.is-visited { background: rgb(var(--text) / 0.34); }
+.wn-pill.is-active { width: 28px; background: rgb(var(--wn-c)); box-shadow: 0 0 12px rgb(var(--wn-c) / 0.6); }
+
+.wn-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 12px;
+  outline: none;
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease, transform 160ms ease, box-shadow 300ms ease, opacity 200ms ease;
+}
+.wn-btn:active { transform: scale(0.97); }
+.wn-btn:focus-visible { box-shadow: 0 0 0 2px rgb(var(--bg-1)), 0 0 0 3.5px rgb(var(--wn-c)); }
+.wn-btn-ghost { color: rgb(var(--text-muted)); }
+.wn-btn-ghost:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.06); }
+.wn-btn-secondary { color: rgb(var(--text)); background: rgb(var(--bg-2) / 0.8); border: 1px solid rgb(var(--border)); }
+.wn-btn-secondary:hover { background: rgb(var(--bg-3)); }
+.wn-btn-secondary[aria-disabled="true"] { opacity: 0; pointer-events: none; }
+/* Primary = text colour on background colour: max contrast in light and dark themes. */
+.wn-btn-primary {
+  position: relative;
+  overflow: hidden;
+  font-weight: 600;
+  color: rgb(var(--bg-1));
+  background: rgb(var(--text));
+  box-shadow: 0 8px 22px -10px rgb(var(--wn-c) / 0.9);
+}
+.wn-btn-primary:hover { box-shadow: 0 10px 28px -8px rgb(var(--wn-c)); }
+.wn-btn-primary .wn-btn-arrow { transition: transform 220ms cubic-bezier(0.2, 1.3, 0.3, 1); }
+.wn-btn-primary:hover .wn-btn-arrow { transform: translateX(3px); }
+/* Last slide CTA: shimmer sweep + glow pulse + arrow nudge. */
+.wn-btn-cta { animation: wn-cta-glow 2.4s ease-in-out infinite; }
+.wn-btn-cta::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 30%, rgb(var(--wn-c) / 0.55) 48%, rgb(255 255 255 / 0.35) 52%, transparent 70%);
+  transform: translateX(-120%);
+  animation: wn-shimmer 2.4s ease-in-out infinite;
+}
+.wn-btn-cta .wn-btn-arrow { animation: wn-nudge 2.4s ease-in-out infinite; }
+
+/* ── Compact layout (small windows / large UI zoom) ───────────────────────── */
+@media (max-width: 760px) {
+  /* Media keeps at least 110px; the text row takes what it needs and scrolls past that. */
+  .wn-slide { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(110px, 1fr) minmax(0, auto); gap: 16px; align-items: stretch; }
+  .wn-extras.is-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .wn-title { font-size: 20px; }
+  .wn-text { gap: 9px; }
+  .wn-body { font-size: 12px; line-height: 1.55; }
+  .wn-extras { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-height: 540px) {
+  .wn-title { font-size: 19px; }
+  .wn-text { gap: 8px; }
+  .wn-body { font-size: 12px; line-height: 1.5; }
+}
+
+/* ── Keyframes ────────────────────────────────────────────────────────────── */
+@keyframes wn-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes wn-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes wn-modal-in {
+  from { opacity: 0; transform: translateY(18px) scale(0.9); filter: blur(10px); }
+  60% { opacity: 1; filter: blur(0); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes wn-modal-out { to { opacity: 0; transform: translateY(8px) scale(0.96); filter: blur(6px); } }
+@keyframes wn-media-in {
+  from { opacity: 0; transform: translateX(calc(var(--dx, 1) * 80px)) scale(0.96); filter: blur(6px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes wn-media-out { to { opacity: 0; transform: translateX(calc(var(--dx, 1) * -60px)) scale(0.97); filter: blur(4px); } }
+@keyframes wn-text-in {
+  from { opacity: 0; transform: translate(calc(var(--dx, 1) * 34px), 6px); filter: blur(4px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes wn-text-out { to { opacity: 0; transform: translateX(calc(var(--dx, 1) * -22px)); } }
+@keyframes wn-key-press {
+  0%, 30%, 100% { transform: none; box-shadow: 0 1px 0 rgb(0 0 0 / 0.18), 0 0 0 0 rgb(var(--wn-c) / 0); }
+  12% { transform: translateY(1.5px); border-bottom-width: 1px; box-shadow: 0 0 0 0 rgb(0 0 0 / 0), 0 0 0 4px rgb(var(--wn-c) / 0.22); }
+}
+@keyframes wn-drift-a { to { transform: translate(18%, 12%) scale(1.15); } }
+@keyframes wn-drift-b { to { transform: translate(-22%, 18%) scale(0.9); } }
+@keyframes wn-drift-c { to { transform: translate(-28%, -16%) scale(1.2); } }
+@keyframes wn-angle { to { --wn-angle: 360deg; } }
+@keyframes wn-ring {
+  0% { transform: scale(0.55); opacity: 0; }
+  14% { opacity: 0.9; }
+  100% { transform: scale(2.3); opacity: 0; }
+}
+@keyframes wn-spin { to { transform: rotate(360deg); } }
+@keyframes wn-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-5px) scale(1.04); }
+}
+@keyframes wn-rise {
+  0% { transform: translate(0, 0); opacity: 0; }
+  12% { opacity: 0.9; }
+  100% { transform: translate(var(--sway, 10px), -360px); opacity: 0; }
+}
+@keyframes wn-pop {
+  from { opacity: 0; transform: translateY(14px) scale(0.86); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes wn-shimmer {
+  0%, 35% { transform: translateX(-120%); }
+  70%, 100% { transform: translateX(120%); }
+}
+@keyframes wn-cta-glow {
+  0%, 100% { box-shadow: 0 8px 22px -10px rgb(var(--wn-c) / 0.9), 0 0 0 0 rgb(var(--wn-c) / 0.45); }
+  50% { box-shadow: 0 10px 28px -8px rgb(var(--wn-c)), 0 0 0 6px rgb(var(--wn-c) / 0); }
+}
+@keyframes wn-nudge {
+  0%, 60%, 100% { transform: none; }
+  70% { transform: translateX(4px); }
+  80% { transform: translateX(0); }
+  90% { transform: translateX(2px); }
+}
+
+/* Reduced motion: no movement — the reveals become plain fades, loops stop. */
+@media (prefers-reduced-motion: reduce) {
+  .wn-modal,
+  .wn-slide[data-state="enter"] .wn-media,
+  .wn-reveal,
+  .wn-extra { animation-name: wn-fade-in; }
+  .wn-root.is-closing .wn-modal,
+  .wn-slide[data-state="exit"] .wn-media,
+  .wn-slide[data-state="exit"] .wn-reveal { animation-name: wn-fade-out; }
+  .wn-blob, .wn-frame-glow, .wn-fb-ring, .wn-fb-orbit, .wn-fb-core,
+  .wn-btn-cta, .wn-btn-cta::after, .wn-btn-cta .wn-btn-arrow,
+  .wn-slide[data-state="enter"] .wn-combo .wn-kbd { animation: none; }
+  .wn-fb-particles, .wn-btn-cta::after { display: none; }
+  .wn-fb-ring { transform: scale(1.4); opacity: 0.35; }
+  .wn-pill, .wn-extra, .wn-btn, .wn-btn-primary .wn-btn-arrow { transition-property: background-color, color, border-color, box-shadow, opacity; }
+  .wn-extra:hover { transform: none; }
+  .wn-btn:active { transform: none; }
+}

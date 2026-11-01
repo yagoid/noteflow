@@ -24,6 +24,10 @@ release publicado antes de tiempo rompe la actualización de todos los usuarios 
    no casa).
 4. **PKGBUILD:** bumpear `pkgver` **a mano** (no se sincroniza solo). Ojo: el PKGBUILD está
    **roto/no soportado** ahora mismo (ver "Artefactos"); se mantiene el bump para no desincronizarlo.
+   **Tour "What's new":** si la versión trae features visibles, añadir sus diapositivas nuevas al tour
+   (`src/components/WhatsNew/whatsNewSlides.ts`, antes de `more`, con `since` = X.Y.Z) + su copy EN/ES
+   + sus clips `src/assets/whats-new/<id>.<lang>.webm`; los usuarios que actualicen verán solo esas
+   (ver `patterns.md` → "Tour What's new").
 5. **Compilar y verificar:**
    ```bash
    npm run build      # type-check + recompila dist-electron/
@@ -161,7 +165,8 @@ local antes de taggear. Dos jobs:
 Prueba el **botón de update de la titlebar** de punta a punta sobre builds empaquetadas reales
 (Windows NSIS, Linux AppImage y `.deb`; macOS fuera de alcance). Una ejecución = un escenario:
 instala/prepara una build VIEJA (`--from`), la lanza aislada con Playwright `_electron`
-(`--user-data-dir` + `NOTEFLOW_NOTES_DIR` en un temp), parchea su proceso main para sustituir GitHub
+(`--user-data-dir` + `NOTEFLOW_NOTES_DIR` en un temp, y `NOTEFLOW_DISABLE_WHATS_NEW=1` para que el
+popup de arranque del tour "What's new" no tape el botón en builds ≥ 2.2.0), parchea su proceso main para sustituir GitHub
 por un **feed falso** (`https.get` de `/releases/latest` → `tag_name` del target; `net.fetch` de
 `…/releases/latest/download/<nombre>` → el fichero de `--to` **solo si el nombre casa exactamente**,
 si no 404), recarga, pulsa el botón (localizado por `title` acabado en ` v<target>`, independiente
@@ -233,6 +238,31 @@ candidata a `release/` → siguiente (`<version>-next`, o `.next` si ya lleva su
 `update-e2e-out/` como artefacto. **No** está enganchado a `release.yml`: lanzarlo a mano antes de
 publicar el draft (`gh workflow run update-e2e.yml --ref vX.Y.Z -f version=X.Y.Z`). Construye la
 candidata desde el checkout (mismo `electron-builder` que la release), no reusa los assets del draft.
+
+### Clips del tour What's new (`scripts/whats-new-capture.cjs`)
+
+Graba desde la app real (Playwright `_electron` + ffmpeg) los clips en bucle del tour →
+`src/assets/whats-new/<id>.<lang>.webm` + póster `<id>.<lang>.png` (ids fijos: `sections`, `kanban`,
+`links-palette`, `quick-capture`, `windows`, `brain`, `ai`, `sync`, `more`; idiomas `en`/`es`).
+Regenerarlos cuando cambie de forma visible la UI que aparece en ellos:
+
+```bash
+# --app = carpeta con dist/ + dist-electron/ compilados (mejor un worktree limpio de HEAD con
+# `npm run build`, para no grabar un árbol a medias). Por defecto: la raíz del repo.
+node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|all] [--out <dir>] [--frames <dir>]
+```
+
+- Requiere `playwright` (devDependency) y `ffmpeg` en el PATH. Abre ventanas reales en pantalla
+  (~30 s por clip): no usar ratón/teclado sobre ellas mientras graba.
+- Perfil (`--user-data-dir`) y dir de notas (`NOTEFLOW_NOTES_DIR`) **siempre temporales**, con
+  `NOTEFLOW_DISABLE_WHATS_NEW=1` y `whatsNewSeen` sembrado para que el tour no tape la toma. Las notas
+  demo se siembran **escribiendo carpetas v2 directamente — nunca con el CLI**: `NOTEFLOW_NOTES_DIR`
+  no aísla la sesión de NoteFlow Cloud del CLI y empujaría a la cuenta real. La IA habla con un mock
+  OpenAI-compatible local (127.0.0.1, key falsa); no se conecta GitHub ni Cloud.
+- Captura por CDP `Page.startScreencast` a DPR 1.5 (no `recordVideo`, que sale borroso) → 960×600
+  VP9; el cursor falso y las pastillas de teclas se inyectan solo en la página durante la toma.
+  Revisar los clips a ojo (`--frames <dir>` guarda los frames y 4 PNG de muestra por clip).
+- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~5,6 MB con los pósters).
 
 ### Artefactos
 

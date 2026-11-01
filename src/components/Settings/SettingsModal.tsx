@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Database,
   Globe,
+  GraduationCap,
   Info,
   Keyboard,
   LayoutTemplate,
@@ -26,6 +27,7 @@ import { ShortcutsPanel } from './ShortcutsPanel'
 import { AboutPanel } from './AboutPanel'
 import { AiPanel } from './AiPanel'
 import { TemplatesPanel } from './TemplatesPanel'
+import { TutorialPanel } from './TutorialPanel'
 
 export type SettingsSection =
   | 'general'
@@ -38,6 +40,7 @@ export type SettingsSection =
   | 'data'
   | 'startup'
   | 'shortcuts'
+  | 'tutorial'
   | 'about'
 
 interface NavEntry {
@@ -58,6 +61,7 @@ const NAV: NavEntry[] = [
   { id: 'data', icon: Database },
   { id: 'startup', icon: Monitor },
   { id: 'shortcuts', icon: Keyboard },
+  { id: 'tutorial', icon: GraduationCap },
   { id: 'about', icon: Info },
 ]
 
@@ -145,6 +149,7 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
               {section === 'data' && <DataPanel onOpenExportImport={onOpenExportImport} />}
               {section === 'startup' && <StartupPanel />}
               {section === 'shortcuts' && <ShortcutsPanel />}
+              {section === 'tutorial' && <TutorialPanel />}
               {section === 'about' && <AboutPanel />}
             </div>
           </div>

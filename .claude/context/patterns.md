@@ -1094,6 +1094,108 @@ tarjetas seleccionables (tema/fuente/backend) **no** usan estas clases: tienen s
 Todo en **tokens del tema** (`surface-*`, `border`, `text`, `text-muted`) — nunca colores
 hardcodeados, o se rompe en alguno de los 14 temas.
 
+### Tour "What's new" / tutorial (`src/components/WhatsNew/`)
+Popup grande de diapositivas (clip en bucle de la propia app dentro de un "marco de ventana" +
+título + texto + chips de atajos) que sale **solo en la ventana principal** tras arrancar si hay
+diapositivas que este dispositivo no ha visto. Piezas:
+- **Datos:** `whatsNewSlides.ts` — array `WHATS_NEW_SLIDES` (**su orden = orden de presentación**):
+  `id`, `since` (versión que la añadió), icono lucide, `accent` (una CSS var del tema:
+  `accent|accent-2|accent-3|cyan|purple|red` → se ve bien en los 14 temas), `i18nKey`, `keys`
+  (`{id, combo}`; `combo` son tokens crudos que `keyLabel` resuelve por plataforma → ⌘/⌃ en macOS)
+  y, solo en `more`, `extras` (la rejilla de chips). El texto vive en el namespace i18n
+  `whatsNew` (`slides.<id>.{title,body}`): los `{placeholders}` del cuerpo son los `keys[].id` de
+  esa diapositiva y se pintan como `<kbd>` inline (test en `tests/lib/whatsNew.test.ts` que lo
+  comprueba en EN y ES) — **nunca** escribir "Ctrl+…" literal en el copy.
+- **Lógica pura:** `src/lib/whatsNew.ts` (saneo/unión de ids vistos, qué presentar, navegación,
+  resolución del media) + `tests/lib/whatsNew.test.ts`. Main tiene su copia del saneo en
+  `electron/whatsNewSeen.ts` (rootDir separa `electron/` de `src/`; el test compara ambas).
+- **Persistencia:** `settings.json` → **`whatsNewSeen: string[]`** (local por dispositivo, no se
+  sincroniza: cada máquina ve su tour). IPC `whats-new:get-seen` → `{seen, disabled}` y
+  `whats-new:mark-seen(ids)` (unión saneada; solo escribe si cambia). Estado en
+  `src/stores/whatsNewStore.ts` (`seen`, `tour`, `openStartupTour`, `openFullTour(startId?)`,
+  `markSeen` optimista).
+- **Qué se presenta** (`planStartupTour`): nada visto → **todas** en modo `discover` (cabecera
+  "Discover NoteFlow"); algo visto → **solo las no vistas** en modo `new` ("New in NoteFlow
+  v{version}", versión de `app:get-version`). Ids guardados de diapositivas que ya no existen
+  cuentan como "ha visto algo". Sin pendientes → no sale.
+- **Marcado como visto:** cada diapositiva se marca **en cuanto se muestra** (un cierre/crash a
+  mitad conserva el progreso) y al cerrar/saltar un tour de arranque se marca **todo el lote**
+  (no vuelve a salir). Abierto a mano (modo `replay`: Ajustes → Tutorial o la paleta, "What's new
+  / Tutorial") solo marca lo que se ha visto de verdad.
+- **Disparo** (`WhatsNewHost.tsx`, montado en `MainApp` fuera de la rama sticky → nunca en
+  sticky/ventana de sección/chat): tras el **primer `loadNotes()`** (transición `isLoading`
+  true→false vía `subscribe`; el efecto del hijo corre antes del `loadNotes` del padre, así que no
+  se la pierde) + **700 ms**; si la ventana arrancó **oculta** (autostart al tray) espera a
+  `visibilitychange`; si hay **otro modal** abierto (cualquier overlay `fixed inset-0` con
+  `bg-black/…`, o la paleta) reintenta cada 1 s y se rinde en ese arranque a los 2 min. Un modal
+  nuevo de la app debe seguir ese patrón de backdrop para que el tour lo respete.
+- **Kill switch:** env **`NOTEFLOW_DISABLE_WHATS_NEW=1`** (leído en main y devuelto como
+  `disabled`) apaga solo el popup de arranque; lo usa `scripts/update-e2e.cjs`, cuyo perfil limpio
+  si no taparía el botón de update del titlebar.
+- **Capa y teclado:** `.wn-root` es `z-70` (encima de Ajustes, `z-50`, porque se abre desde ahí y
+  Ajustes sigue abierto debajo). Mientras está abierto, **ninguna tecla llega a lo de detrás**:
+  listener `keydown` en **captura de `window`** que hace `stopImmediatePropagation()` de **todas**
+  las teclas (←/→/Enter/Esc/Tab las gestiona; el resto solo se corta). Sin eso, p. ej. `Delete`
+  con el foco en un botón del tour llegaba al listener del editor (`NoteEditor`, borrar nota) y abría
+  su confirmación detrás del tour. Cortar la propagación no anula las acciones por defecto, así que
+  Enter/Espacio sobre un botón enfocado siguen pulsándolo. Los listeners de captura de `window`
+  registrados **antes** (aceleradores de `App.tsx`, Ctrl+Tab de `NoteEditor`) corren igualmente
+  primero: se apartan porque el root lleva **`data-own-keys`**, así que el foco **tiene que
+  quedarse dentro del diálogo**. Ojo: Chromium manda el foco a `<body>` **sin** `focusin` cuando el
+  elemento enfocado se vuelve `disabled` o se desmonta — y en `<body>` esos aceleradores sí actúan
+  (p. ej. Ctrl+W abría el "borrar sección" detrás). Por eso: el diálogo tiene `tabIndex={-1}` (un
+  click en una zona no interactiva lo enfoca); **Atrás** usa `aria-disabled` (+ guarda en
+  `onClick`, `tabIndex -1` y oculto) en la primera diapositiva, nunca `disabled`; antes de cambiar
+  de diapositiva, si el foco está en un control que va a desaparecer (Skip al llegar a la última,
+  Atrás al llegar a la primera) pasa al botón principal; un `useLayoutEffect` tras cada cambio de
+  diapositiva reenfoca el botón principal si el foco no está en un control vivo del diálogo; Tab
+  hace de trap (salta los `aria-disabled`); un `focusin` fuera del diálogo devuelve el foco; y el
+  backdrop hace `preventDefault` en `mousedown` para que el foco no salga durante el fade de
+  cierre. Si aun así una tecla llega con el foco fuera, se anula y se reenfoca (aunque los
+  aceleradores de `App.tsx` ya habrán corrido: el arreglo real es que el foco no salga). Cada apertura lleva un `seq` (key del modal y guarda de `closeTour(seq)`): el timer
+  del fade de cierre se limpia al desmontar y nunca cierra un tour abierto después.
+- **Media:** `src/assets/whats-new/<id>[.<lang>].webm` (VP9, en bucle, sin audio) y póster
+  opcional `<id>[.<lang>].png`. Resolución por tipo: **`<id>.<lang>`** (idioma efectivo de la UI,
+  `en`/`es`) → **`<id>`** neutro → **fallback animado** (icono grande con anillos, órbitas y
+  partículas en el color de la diapositiva, todo CSS). Se cargan con un `import.meta.glob` eager
+  `?url` (`whatsNewMedia.ts`): un fichero (o la carpeta entera) que falte **no rompe el build**,
+  simplemente no está en el mapa; un `<video>` que falla al cargar también cae al fallback. Vite
+  emite cada clip a `dist/assets/` y lo referencia con `new URL(…, import.meta.url)` (vale bajo
+  `file://`); la CSP de `index.html` tiene `media-src 'self' data:` (los <4 KB se inlinean como
+  `data:`). En `more`, sin clip se pinta la rejilla de chips dentro del marco; con clip, la rejilla
+  pasa en lista a la columna de texto.
+- **Animación** (`index.css` § "What's new" tour, clases `.wn-*`): entrada del modal con easing
+  spring + blur; fondo "aurora" (blobs difuminados con `--wn-c` = color de la diapositiva y el
+  acento del tema; el cambio de color entre diapositivas se anima porque los elementos transicionan
+  su `background-color`/`box-shadow` computados); transición direccional (`--dx`) con parallax
+  media/texto y reveal escalonado (título → cuerpo → chips, que hacen un "press" uno tras otro);
+  luz que recorre el borde del marco (`@property --wn-angle`). `prefers-reduced-motion`: todo se
+  queda en fades de opacidad y los bucles se paran; el clip **no** se reproduce (ni autoplay ni
+  loop): se muestra el póster como imagen fija o, sin póster, el fallback estático (`SlideClip`,
+  `matchMedia` leído al montar, como `ActivityPulse`/`PlanCardBackdrop`). Lo mismo en las
+  miniaturas de Ajustes → Tutorial (no se reproducen al hover). Layout compacto (una columna) por debajo de
+  760 px de ancho (ventana mínima 700×500 y zoom de UI). La diapositiva vive en **una celda de
+  grid de altura definida** (`.wn-deck`/`.wn-slide` con `grid-template-rows: minmax(0, 1fr)`) y la
+  columna de texto tiene `max-height: 100%` + `overflow-y: auto`: si no cabe (ventana pequeña, la
+  lista de chips de `more` junto a su clip) **hace scroll en vez de montarse sobre el footer**. En
+  una columna el media conserva ≥ 110 px y el texto se lleva el resto.
+- **Ajustes → Tutorial** (`Settings/TutorialPanel.tsx`): "Play full tour" + una tarjeta por
+  diapositiva (miniatura = el clip, que se reproduce al hover o con foco de teclado; fallback =
+  icono; badge "New" si no está vista; versión `since`). El póster de la miniatura es un `<img>`
+  **encima** del `<video>` (`ThumbClip` en `SlideVisual.tsx`), no el atributo `poster`: Chromium
+  solo pinta `poster` hasta que el vídeo se reproduce por primera vez, y tras un hover (pausa +
+  rebobinado) la tarjeta se quedaba en el fotograma 0 del clip, que es **negro** (los clips entran
+  con fundido desde negro). El `<img>` se oculta solo cuando el vídeo ya está reproduciendo y
+  vuelve al instante al parar. Click → tour completo empezando en esa diapositiva.
+
+**Añadir diapositivas en un release:** (1) entrada nueva en `WHATS_NEW_SLIDES` **antes de `more`**
+(que cierra el tour completo) con `since` = la versión del release; (2) su copy en
+`src/i18n/en/whatsNew.ts` y `es/whatsNew.ts` (`slides.<id>`), con `{placeholders}` = sus `keys`;
+(3) el clip `src/assets/whats-new/<id>.en.webm` / `<id>.es.webm` (o `<id>.webm` si no hay texto
+de UI visible). Los usuarios que ya vieron el resto recibirán solo las nuevas en el siguiente
+arranque. **Nunca** renombrar ni reutilizar un id (lo guarda `whatsNewSeen` y lo usa el script de
+captura de clips); para retirar una diapositiva, quitarla del array (su id guardado es inocuo).
+
 ### Single instance y activación de la ventana (Windows)
 `app.requestSingleInstanceLock()` — una segunda instancia trae la existente al frente
 (`second-instance` → `showWindow()`). Detalles no obvios, todos en `electron/main.ts`:

@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useAiChatStore } from '../../stores/aiChatStore'
+import { useWhatsNewStore } from '../../stores/whatsNewStore'
 import type { Note } from '../../types'
 import {
   Search, Plus, FolderOpen, Keyboard, X,
   Clock, FolderPlus, Upload, Download, RefreshCw, Cloud, Zap, Settings,
-  Brain, MessageSquare, Sparkles, Link2, SlidersHorizontal, AppWindow,
+  Brain, MessageSquare, Sparkles, Link2, SlidersHorizontal, AppWindow, GraduationCap,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
 import { useT } from '../../i18n/useT'
@@ -65,6 +66,7 @@ export function CommandPalette() {
   const createGroup = useGroupsStore((s) => s.createGroup)
   const setBrainView = useNotesStore((s) => s.setBrainView)
   const openAiPanel = useAiChatStore((s) => s.openAiPanel)
+  const openFullTour = useWhatsNewStore((s) => s.openFullTour)
   // Section of the active pane — what "Open section in new window" acts on (primitive
   // selectors: the target object itself is rebuilt on every call).
   const targetNoteId = useNotesStore((s) => s.getActiveSectionTarget()?.noteId ?? null)
@@ -277,6 +279,15 @@ export function CommandPalette() {
           category: 'action' as const,
         }]
       : []),
+    {
+      id: 'whats-new',
+      label: cmd.whatsNew.label,
+      description: cmd.whatsNew.description,
+      keywords: "what's new whats new tutorial tour onboarding features help",
+      icon: <GraduationCap size={ICON_SIZE} className={ICON_CLS} />,
+      action: () => { setCommandPaletteOpen(false); openFullTour() },
+      category: 'action',
+    },
     {
       id: 'shortcuts',
       label: cmd.shortcuts.label,

@@ -16,6 +16,7 @@ import { NoteOverview } from './components/NoteOverview/NoteOverview'
 import { BrainView } from './components/Brain/BrainView'
 import { AllContentOverview } from './components/AllContentOverview/AllContentOverview'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
+import { WhatsNewHost } from './components/WhatsNew/WhatsNewHost'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
 import { SectionWindowApp } from './components/SectionWindowApp'
@@ -839,6 +840,8 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
       </div>
 
       <CommandPalette />
+      {/* "What's new" tour: startup popup + the tour opened from Settings / the palette (main window only). */}
+      <WhatsNewHost />
     </div>
     </HoverPreviewProvider>
     </ErrorBoundary>

@@ -36,6 +36,8 @@ noteflow/
 │   ├── activityLog.ts   # Lógica pura del log de ediciones por día y dispositivo (userData/activity-log.json):
 │   │                    #   parse/dedupe/poda — testeada; lo persiste main (canales activity:*)
 │   ├── syncProvider.ts  # Interfaz SyncProvider + getActiveSyncProvider() (GitHub ⟂ Cloud) — ver sync.md
+│   ├── whatsNewSeen.ts  # Pura: saneo/unión de settings.whatsNewSeen (tour "What's new") — testeada;
+│   │                    #   espejo de src/lib/whatsNew.ts — ver patterns.md
 │   ├── tempNoteExpiry.ts # Lógica pura: cuándo puede correr el autoborrado de notas temporales
 │   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
 │   ├── updateAsset.ts   # Lógica pura del auto-update: qué asset/URL ofrecer por plataforma y
@@ -92,6 +94,7 @@ noteflow/
 │   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible/índice (TOC) del editor — SINCRONIZADO en ui-settings.json (IPC)
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
 │   │   ├── aiStore.ts                # Estado del índice IA (enabled, related, grafo, progreso) vía IPC ai:*
+│   │   ├── whatsNewStore.ts          # Tour "What's new": ids vistos (settings.json vía IPC whats-new:*) + tour abierto
 │   │   └── aiChatStore.ts            # Estado del chat/LLM (config por proveedor, modelos, mensajes, sesiones) vía IPC ai:llm-*/ai:chat*/ai:chats-*
 │   ├── components/
 │   │   ├── Editor/
@@ -186,8 +189,15 @@ noteflow/
 │   │   │   ├── AiPanel.tsx              #   Toggle "Local AI" + reindex + skill del CLI para agentes
 │   │   │   ├── DataPanel.tsx            #   Export/Import (lanza ExportImportModal) + dir de notas
 │   │   │   ├── ShortcutsPanel.tsx       #   Lista de atajos (fuente de verdad de los atajos)
+│   │   │   ├── TutorialPanel.tsx        #   Tutorial: "Play full tour" + tarjeta por diapositiva del tour
 │   │   │   └── AboutPanel.tsx           #   Versión (app:get-version) + check/instalar updates + repo
 │   │   ├── CommandPalette/             # Paleta de comandos
+│   │   ├── WhatsNew/                   # Tour "What's new" (popup de arranque + Ajustes → Tutorial) — ver patterns.md
+│   │   │   ├── whatsNewSlides.ts       #   Las diapositivas (datos: id, since, icono, acento, atajos) — ampliar aquí
+│   │   │   ├── whatsNewMedia.ts        #   Clips src/assets/whats-new/<id>[.<lang>].webm vía import.meta.glob
+│   │   │   ├── SlideVisual.tsx         #   Marco de ventana + <video> / fallback animado + chips de atajos
+│   │   │   ├── WhatsNewTour.tsx        #   El modal (navegación, animaciones, foco, marcado como visto)
+│   │   │   └── WhatsNewHost.tsx        #   Montado en MainApp: disparo de arranque + render del tour
 │   │   ├── ConfirmModal.tsx            # Modal de confirmación genérico
 │   │   ├── EncryptionModal.tsx         # Modal cifrar/descifrar notas
 │   │   ├── ExportImportModal.tsx       # Modal exportar/importar notas (flujo, lanzado desde DataPanel)
@@ -219,6 +229,7 @@ noteflow/
 │   │   ├── kanbanOps.ts          #   transformaciones puras del tablero (columnas, tarjetas, columna done,
 │   │   │                         #   conversión con listas de tareas) — testeado
 │   │   ├── kanbanSearch.ts       #   búsqueda en nota dentro de tableros (conteo + resaltado) — testeado
+│   │   ├── whatsNew.ts           # Lógica pura del tour "What's new" (qué mostrar, saneo, media) — testeado
 │   │   └── themes.ts             # Definición de los 14 temas (CSS vars)
 │   ├── i18n/                     # Sistema i18n propio (EN/ES, sin deps): en/ = fuente de verdad
 │   │                            #   del tipo Messages, es/ forzado a paridad; format.ts (tf/plural),
@@ -280,6 +291,8 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `settings:get-language` / `settings:set-language` | on (sync/async) | Idioma UI (`'system'\|'en'\|'es'`) en settings.json; el setter persiste, refresca el tray y hace broadcast `language-changed` a todas las ventanas (cambio en caliente) |
 | `settings:get-ui-state` / `settings:set-ui-state` | handle | Estado UI (nota/sección activa, grupos y carpetas colapsados) |
 | `settings:get-startup-stickies` / `settings:set-startup-stickies` | handle | Stickies que se abren al arrancar |
+| `whats-new:get-seen` | handle | Tour "What's new": `{seen: string[], disabled: boolean}` — ids de diapositiva ya mostradas en este dispositivo (`settings.whatsNewSeen`, saneado) y `disabled` = env `NOTEFLOW_DISABLE_WHATS_NEW=1` (sin popup de arranque) |
+| `whats-new:mark-seen` | handle | `(ids)` → unión saneada con `settings.whatsNewSeen` (nunca borra; solo escribe si cambia) → devuelve la lista resultante |
 | `groups:get` / `groups:set` | handle | Grupos → `groups.json` (en dir de notas, se sincroniza) |
 | `folders:get` / `folders:set` | handle | Carpetas → `folders.json` (en dir de notas, se sincroniza) |
 | `section-colors:get` / `section-colors:set` | handle | Color por sección → `section-colors.json` (saneado, se sincroniza) |
@@ -489,6 +502,7 @@ Estructura de `settings.json`:
     "updatedAt": "2026-10-24T10:00:00.000Z"
   },
   "aiProfile": { "completedAt": "2026-06-14T10:00:00.000Z", "noteId": "abc12345" },
+  "whatsNewSeen": ["sections", "kanban", "links-palette"],
   "aiChatWindow": { "bounds": { "x": 1200, "y": 120, "width": 440, "height": 680 } }
 }
 ```
@@ -515,6 +529,9 @@ Estructura de `settings.json`:
 > `aiChatWindow.bounds` = tamaño/posición de la ventana de chat despegada (se guarda al cerrarla;
 > la posición se descarta si ya no cae en ninguna pantalla). El ancho del sidebar de chat del editor va
 > en `localStorage` (`noteflow-ai-chat-width`), no aquí.
+> `whatsNewSeen` = ids de las diapositivas del tour "What's new" que ESTE dispositivo ya mostró
+> (unión, deduplicada y saneada en main por `electron/whatsNewSeen.ts`); decide qué sale en el popup
+> de arranque — ver `patterns.md` → "Tour What's new".
 > `accountRestore` recuerda, **sin secretos** (email + dos booleanos), qué features de
 > pago tenía activas la sesión que cerró, para volver a activarlas si vuelve a entrar la MISMA
 > cuenta con la entitlement viva (ver `monetization.md` § 4 "Cerrar sesión").

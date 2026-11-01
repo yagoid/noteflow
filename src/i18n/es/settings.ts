@@ -12,6 +12,7 @@ export const settings = {
     ai: 'IA',
     account: 'Cuenta',
     shortcuts: 'Atajos de teclado',
+    tutorial: 'Tutorial',
     about: 'Acerca de',
   },
 

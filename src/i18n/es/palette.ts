@@ -20,6 +20,7 @@ export const palette: Messages['palette'] = {
     openFolder: { label: 'Abrir la carpeta de notas' },
     shortcuts: { label: 'Atajos de teclado', description: 'Abre la referencia de atajos' },
     openSectionWindow: { label: 'Abrir sección en ventana nueva', description: 'Edita la sección activa en su propia ventana' },
+    whatsNew: { label: 'Novedades / Tutorial', description: 'Mira el tour visual de NoteFlow' },
   },
 
   searchPlaceholder: 'Busca notas o ejecuta un comando...',

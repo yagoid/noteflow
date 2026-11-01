@@ -22,6 +22,7 @@ export const palette = {
     openFolder: { label: 'Open notes folder' },
     shortcuts: { label: 'Keyboard shortcuts', description: 'Open shortcut reference' },
     openSectionWindow: { label: 'Open section in new window', description: 'Edit the active section in its own window' },
+    whatsNew: { label: "What's new / Tutorial", description: 'Play the visual tour of NoteFlow' },
   },
 
   // Input placeholders + the "Commands ›" breadcrumb shown in sub-modes.

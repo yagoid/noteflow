@@ -67,6 +67,7 @@ const updateAsset_1 = require("./updateAsset");
 const activityLog_1 = require("./activityLog");
 const i18n_1 = require("./i18n");
 const settingsFile_1 = require("./settingsFile");
+const whatsNewSeen_1 = require("./whatsNewSeen");
 function getIconPath() {
     if (process.platform === 'win32')
         return path_1.default.join(__dirname, '../public/icon.ico');
@@ -3619,6 +3620,25 @@ electron_1.ipcMain.handle('settings:set-startup-stickies', (_event, stickies) =>
     const settings = readSettings();
     settings.startupStickies = stickies;
     writeSettings(settings);
+});
+// "What's new" tour: ids of the slides already shown on THIS device (local, never
+// synced — each machine gets its own tour). `disabled` lets harnesses that drive a
+// fresh profile (scripts/update-e2e.cjs) keep the startup popup out of the way;
+// the tour can still be opened by hand from Settings → Tutorial.
+electron_1.ipcMain.handle('whats-new:get-seen', () => ({
+    seen: (0, whatsNewSeen_1.sanitizeSeenIds)(readSettings().whatsNewSeen),
+    disabled: process.env.NOTEFLOW_DISABLE_WHATS_NEW === '1',
+}));
+// Union with what is stored (never removes) → returns the updated list.
+electron_1.ipcMain.handle('whats-new:mark-seen', (_event, ids) => {
+    const settings = readSettings();
+    const next = (0, whatsNewSeen_1.mergeSeenIds)(settings.whatsNewSeen, ids);
+    // Each slide shown calls this: skip the disk write when nothing changed.
+    if (JSON.stringify(next) !== JSON.stringify(settings.whatsNewSeen)) {
+        settings.whatsNewSeen = next;
+        writeSettings(settings);
+    }
+    return next;
 });
 electron_1.ipcMain.handle('settings:get-ui-state', () => {
     return (readSettings().uiState ?? {});

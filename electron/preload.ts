@@ -84,6 +84,11 @@ const api = {
   setSkillSync: (enabled: boolean): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('app:set-skill-sync', enabled),
   getStartupStickies: (): Promise<Array<{ noteId: string; sectionId: string }>> => ipcRenderer.invoke('settings:get-startup-stickies'),
   setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>): Promise<void> => ipcRenderer.invoke('settings:set-startup-stickies', stickies),
+  // "What's new" tour: slide ids already shown on this device (settings.json →
+  // whatsNewSeen) + whether the startup popup is disabled (NOTEFLOW_DISABLE_WHATS_NEW=1).
+  getWhatsNewSeen: (): Promise<{ seen: string[]; disabled: boolean }> => ipcRenderer.invoke('whats-new:get-seen'),
+  // Union with the stored list; resolves to the updated list.
+  markWhatsNewSeen: (ids: string[]): Promise<string[]> => ipcRenderer.invoke('whats-new:mark-seen', ids),
   getUiState: (): Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[]; sidebarMode?: 'pinned' | 'floating' }> =>
     ipcRenderer.invoke('settings:get-ui-state'),
   setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[]; sidebarMode?: 'pinned' | 'floating' }): Promise<void> =>

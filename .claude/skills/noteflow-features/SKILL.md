@@ -146,8 +146,8 @@ Iconos del TitleBar:
   `src/lib/activityPulse.ts`), **AI**, **Sync** (NoteFlow Cloud + GitHub), **Account** (cuenta
   NoteFlow), **Appearance** (tema/fuente/acento/colores del editor/escala), **Editor**
   (fuente/tamaño/ancho), **Templates** (plantillas de nota), **Data** (export/import + carpeta de
-  notas), **Startup** (autostart + stickies), **Keyboard shortcuts** y **About** (versión + updates +
-  repo). Tamaño fijo proporcional a la ventana de la app. El orden vive en el array `NAV` de
+  notas), **Startup** (autostart + stickies), **Keyboard shortcuts**, **Tutorial** (el tour "What's
+  new", ver abajo) y **About** (versión + updates + repo). Tamaño fijo proporcional a la ventana de la app. El orden vive en el array `NAV` de
   `SettingsModal.tsx`; las labels vienen del diccionario i18n por id. La paleta de comandos y los
   atajos pueden abrirla directamente en otra sección (p. ej. shortcuts, startup, sync).
 - Controles de ventana: minimizar / maximizar / cerrar (cerrar = ocultar al tray).
@@ -950,6 +950,7 @@ Sin IA configurada, ofrece ir a **Ajustes → IA**.
 - **Ask AI a question…** es un sub-modo inline (como "Create group"): escribes la pregunta en la
   propia paleta y Enter abre el cerebro + chat y la envía directamente (en un chat nuevo). Si no
   hay proveedor LLM configurado, la pregunta queda en cola y se envía en cuanto configuras uno.
+- **What's new / Tutorial** abre el tour completo de novedades (ver "Tour What's new").
 
 ### Filtros por fecha (en la vista "All content")
 ```
@@ -1127,6 +1128,39 @@ Settings → Startup:
 - **Launch on system startup**: NoteFlow arranca al iniciar sesión (oculto en el tray).
 - **Open as sticky at startup**: selecciona qué secciones se abren como sticky al arrancar (solo
   si el autostart está activo; las notas cifradas no aparecen).
+
+---
+
+## Tour "What's new" / tutorial
+
+- **Cuándo sale:** al arrancar la **ventana principal** (nunca en stickies ni ventanas de sección),
+  ~0,7 s después de cargar las notas, si hay diapositivas que **este dispositivo** no ha visto. En
+  una instalación limpia (o el primer arranque con el tour) salen **todas** con la cabecera
+  **"Discover NoteFlow"**; tras una actualización, **solo las nuevas** con **"New in NoteFlow
+  vX.Y.Z"**. Si hay otro modal abierto espera a que se cierre; si la app arrancó oculta en el tray,
+  sale cuando se muestra la ventana. El registro de vistas es local (no se sincroniza).
+- **Qué es:** popup grande (~880×580, se adapta a ventanas pequeñas) con fondo difuminado. Cada
+  diapositiva = un clip corto en bucle de la propia app dentro de un marco de ventana (o, si no hay
+  clip, un icono animado con anillos y partículas en el color de la diapositiva) + título + texto
+  breve + chips de atajos (`Ctrl`/`⌘` según la plataforma). Diapositivas actuales, en orden: secciones
+  en pestañas, el Cerebro, enlazar secciones + paleta, captura rápida (`Ctrl+Shift+Space`, nota
+  temporal), sticky / ventanas separadas, kanban, la IA, sync (GitHub / NoteFlow Cloud) y "And much more"
+  (rejilla: notas cifradas, plantillas, temas y acentos, tareas con alarma, vista dividida
+  `Ctrl+Click`, CLI, importar de Notion y Keep). Los clips pueden estar grabados por idioma de la UI.
+- **Navegación:** Atrás / Siguiente, puntos de progreso clicables (el activo se estira), contador
+  "3 / 9", `←`/`→`, `Enter` (siguiente), `Esc` (cerrar) y **Skip** discreto. La última diapositiva
+  termina con **"Start writing"**. Transiciones direccionales con reveal escalonado; con
+  `prefers-reduced-motion` todo se queda en fundidos y los clips no se reproducen (se ve su imagen
+  fija o el icono sin animar). Mientras está abierto, el resto de la app no recibe teclas (ni
+  atajos como `Ctrl+N` ni `Delete`) y el foco se queda dentro del tour.
+- **Visto:** cada diapositiva cuenta como vista al mostrarse; cerrar o saltar el tour de arranque
+  marca vistas todas las de ese lote (no vuelve a salir).
+- **Volver a verlo:** **Ajustes → Tutorial** — botón **Play full tour** y una tarjeta por diapositiva
+  (miniatura con el clip, que se reproduce al pasar el ratón salvo con reduced motion; badge
+  **New** si aún no se vio;
+  versión en que se añadió). Click en una tarjeta → abre el tour en esa diapositiva (navegable a
+  todas). También desde la paleta de comandos: **What's new / Tutorial**. El tour se abre encima de
+  Ajustes, que sigue abierto debajo.
 
 ---
 
