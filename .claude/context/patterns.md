@@ -689,45 +689,83 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   - Esquema del editor web móvil: `listItem`/`taskItem` con contenido `paragraph+ list*` y
     Shift+Enter en heading = partir (si su editor lo permite).
 
-### Editor: la tira de tabs sigue a la sección activa
-En `NoteEditor.tsx`, la tira horizontal de pestañas (`tabsScrollRef`) se auto-scrollea para dejar
-visible el tab activo. Decisiones a respetar si se toca:
-- **Un solo efecto centralizado** (`useLayoutEffect`), no lógica repetida en cada handler: la sección
-  activa cambia desde muchos sitios (click, `Ctrl+Tab`, `noteflow:request-section` del sidebar,
-  alta/borrado/undo de sección, restaurar la sección recordada al cambiar de nota).
-- **Firma de pertenencia, no de orden** (`sections.map(id).sort().join('|')` como dep). Dos motivos:
-  ignora el tecleo (`updateNote` crea un array de secciones nuevo en cada edición) y **no dispara al
-  reordenar** — tras soltar un tab arrastrado desde el final, un scroll de vuelta al tab activo
-  escondería justo lo que se acaba de mover. Que la sección activa siga visible **mientras** se
-  arrastra lo cubre el auto-scroll por bordes, no este efecto.
-- **Nada de `scrollIntoView()`**: arrastraría a los ancestros scrollables y descolocaría el layout.
-  El helper `revealSectionTab()` calcula el `scrollLeft` objetivo con `offsetLeft`/`offsetWidth` del
-  tab (localizado por `data-section-id`) y `scrollLeft`/`clientWidth` de la tira, deja ~12 px de
-  margen, descuenta los ~24 px del degradado de fade derecho y **no hace nada si ya está visible**.
-  Se usa `offsetLeft` y no `getBoundingClientRect()` a propósito: es el mismo espacio de coordenadas
-  que `scrollLeft` (relativo al contenido, no a dónde esté la tira en pantalla).
-- `behavior: 'auto'` (salto) la primera vez que se revela una nota — el efecto reintenta en un
-  `requestAnimationFrame` si la tira aún no está medida —, `'smooth'` para cambios dentro de la nota.
-  ⚠️ Al cambiar de nota **hay un commit intermedio** en el que `activeSectionId` (estado) es todavía
-  el de la nota anterior y `activeSection` cae al fallback `sections[0]` — el efecto de reset que lo
-  corrige es passive y corre *después*. El efecto **se salta ese render** (guarda: el `activeSectionId`
-  de estado no pertenece a `note.sections`) y no consume el flag de "primera vez"; si no, la tira
-  saltaría al principio y luego barrería en `'smooth'` hasta la sección recordada.
-  Esa guarda es **incondicional a propósito** — no vale limitarla al primer render de la nota:
-  `noteflow:request-section` hacia *otra* nota hace `setActiveSectionId` un commit antes de que llegue
-  la nota (el sidebar despacha el evento síncrono antes de `setActiveNote`), y ahí el flag de "primera
-  vez" ya está gastado, así que la tira barrería en `'smooth'` hasta el tab #1 de la nota **vieja**
-  justo antes del swap. Trade-off asumido: si sync/CLI borra desde fuera la sección activa de una nota
-  ya asentada, la tira no persigue al fallback `sections[0]` hasta el siguiente cambio de sección.
-- **Auto-scroll por bordes al arrastrar** un tab: el `onDragOver` de la tira mira si el puntero está
-  en los ~40 px de un borde y arranca un bucle `requestAnimationFrame` (~10 px/frame). El rect de la
-  tira se **mide una vez en `dragStart`** (medirlo por evento forzaría layout en cada `dragover`) y
-  se compara directamente con `clientX` (mismo espacio, ver "UI text size"). El bucle se para en
-  `onDrop`/`onDragEnd`/`onDragLeave` de la tira (este último con guarda `contains(relatedTarget)`,
-  porque `dragleave` burbujea al pasar de un tab a otro), en listeners `dragend`/`drop` en `window` (capture) para arrastres que acaban en otro
-  destino, en el cleanup del efecto, y —último agujero— con un **watchdog** de 800 ms sin `dragover`
-  dentro del propio bucle: si el tab origen se desmonta a mitad de arrastre (p. ej. un pull de sync
-  que cambia el set de secciones) su `dragend` se dispara en un nodo desconectado y no llega a nadie.
+### Editor: mapa de secciones (pestañas que bajan de fila)
+Las pestañas de sección del editor no son una tira con scroll horizontal: son un **mapa de secciones**
+(`Editor/SectionMap.tsx`, lógica pura en `src/lib/sectionMap.ts` con test en `tests/lib/sectionMap.test.ts`,
+estilos `.section-map*` en `index.css`). Un único bloque `flex-wrap` (gap 4 px, `border-radius: 8px` +
+`overflow: hidden`, así que solo se redondean las esquinas exteriores) que baja de fila como los
+salientes de un archivador; las juntas dejan ver `--bg-editor` (la fila ya no tiene banda de fondo
+propia). Lo usan los paneles del editor y la ventana de sección (`SectionWindowApp` monta
+`NoteEditor`); **no** es `Sidebar/SectionTabsRow.tsx` (los chips de sección del sidebar, otro
+componente con su propia `.section-tabs-scroll`). Decisiones a respetar si se toca:
+- **Filas justificadas:** inactivas `flex: 1 1 auto`, activa `flex-grow: 2.6` → cada fila llena el
+  ancho y el mapa es un rectángulo. Al cambiar de sección `flex-grow` transiciona 450 ms (color/fondo
+  250 ms, `max-width` de la etiqueta 450 ms, el chevron entra con retraso); con
+  `prefers-reduced-motion` no hay transiciones. **Solo se anima el crecimiento** de lo que alimenta
+  el wrap (`max-width` del sizer y del chevron al *pasar a* activa); al dejar de serlo es instantáneo.
+  Si ambos sentidos se animaran, durante la transición la antigua activa seguiría ancha mientras crece
+  la nueva, la suma de bases superaría la final y el wrap podría sacar una fila de más (una 4.ª por
+  encima del tope) durante ~450 ms. Coste: una antigua activa con título >150 px estrecha su base de
+  golpe (el reparto de `flex-grow` sí sigue animado). El `+` es la última celda (`flex: 0 0 32px`, una sola
+  instancia); las acciones (vista general, favorito, `⋯`) van fuera del bloque alineadas con la
+  primera fila.
+- **Ancho de la etiqueta por un "sizer" invisible**, no por el texto: un `<span>` oculto con
+  `max-width` 150 px (340 px la activa) fija la base flex y el texto visible va `absolute` encima de
+  toda la caja con elipsis. Así el texto usa todo el sitio que le da la fila justificada y el **hover
+  no cambia la base** (si ensanchara la pestaña, la fila se re-partiría bajo el cursor y podría
+  oscilar). El hover solo aclara el fondo y agranda la "esquina doblada".
+- **Color:** `resolveGroupColor(nombre)` → `--sm-color` por pestaña (var del tema o hex). Inactivas:
+  fondo `--text / 0.06` y un triángulo de 7 px (11 px en hover) en la esquina sup-dcha con el color;
+  activa: fondo sólido del color. Su **tinta** (`--sm-ink`) la elige `resolveActiveInk()`: lee del
+  `getComputedStyle` de `<html>` el RGB del color (o parsea el hex) y de `--bg-0`/`--text`, y se queda
+  con el de más contraste WCAG (`pickReadableInk`, empate → `--bg-0`). En temas oscuros sale `--bg-0`
+  (tinta oscura) salvo colores muy oscuros; en claros depende del color (p. ej. ámbar de NoteFlow Light
+  → `--text`). Se recalcula al cambiar tema/acento (suscripción a `themeStore`). Secciones
+  ocultas a la IA: `EyeOff`, fondo más tenue y esquina gris (en la activa, color mezclado al 72 % con
+  `--bg-editor`, también en el cálculo de contraste).
+- **Tope de 3 filas** (`SECTION_MAP_MAX_ROWS`): el resto se pliega en una celda `+N more`; pulsarla
+  despliega el bloque entero, con `Show less` al final para replegar. Estado `expanded` por instancia
+  (el editor monta el mapa con `key={note.id}`, así que se repliega al cambiar de nota) y sin
+  persistir. **Medición sin bucles:** una **capa invisible** (`.section-map-measure`, `width:0` +
+  `overflow:hidden` con un hijo `width: max-content` sin wrap ni transiciones) pinta todas las pestañas a su ancho
+  natural en su estado final, más `+N more` (con N = total, el más ancho posible) y `+`. En un
+  `useLayoutEffect` (antes de pintar: sin parpadeo) se leen sus anchos y el del bloque y
+  `planSectionMap()` **simula** el salto de línea de `flex-wrap` (voraz, con 0.5 px de holgura para
+  errar hacia "no cabe": a lo sumo se pliega una pestaña de más, nunca sale una 4.ª fila). La capa no
+  depende del plan y el ancho del bloque viene del padre, así que medir no realimenta. Un
+  `ResizeObserver` sobre el bloque (ancho del panel) y la capa (fuentes que cargan tarde) re-mide; el
+  `useLayoutEffect` re-mide solo con cambios que afectan al ancho (firma id+nombre+`aiHidden`, sección
+  activa, renombrado, idioma), no al teclear.
+- **Secciones fijadas:** la activa y la que se está renombrando nunca quedan plegadas
+  (`visibleSectionIndices(total, pinned, count)`): si caen entre las ocultas ocupan los últimos huecos
+  visibles — **solo visualmente**, el orden de los datos no cambia. Sin esto, renombrar desde el menú
+  una pestaña cerca del tope (el input es más ancho) la plegaría y desmontaría el input.
+- **Equilibrado de la última fila: no implementado.** Forzar cortes de fila en un único `flex-wrap`
+  exige elementos de salto (`flex-basis:100%`), que con `row-gap` duplican la junta, o filas como
+  contenedores separados, que remontan la pestaña al cambiar de fila (se pierde la transición y un
+  doble clic puede caer en dos nodos distintos). La última fila puede quedar con 1–2 pestañas
+  estiradas.
+- **Arrastrar para reordenar** (estado local del mapa): el id va en una ref y el "hueco" visual
+  (`is-dragging`: fondo muy tenue, contenido invisible) se pone un frame después, para que la imagen
+  de arrastre se capture de la pestaña tal cual. El destino es una barra `--accent` de 4 px **en la
+  junta** del lado donde caerá (`moveSectionInList` deja la arrastrada *después* del destino si viene
+  de la izquierda y *antes* si viene de la derecha); si esa junta es el borde del bloque (que
+  `overflow:hidden` recortaría) la barra va dentro de la pestaña. El bloque entero acepta el `dragover`
+  (juntas, `+` y pills incluidas: el cursor no parpadea a "no soltar") y el `drop` confirma el último
+  destino. **Un mapa plegado se despliega al empezar el arrastre** (un frame después del `dragstart`,
+como el hueco): así el orden visual coincide con el de los datos (no hay activa adelantada cuya
+junta no corresponda a su posición real), toda sección es destino y soltar no puede mandar la
+pestaña a la zona plegada sin verse. Tras una soltada que reordena se queda desplegado (se ve dónde
+cayó); si el arrastre se cancela se vuelve a plegar. El test de borde usa `getBoundingClientRect`
+con 1.5 px de tolerancia (`offset*` redondean). Red de seguridad: `dragend` (capture) y
+  `drop` (**bubble**: en capture correría antes del `onDrop` del bloque y borraría el arrastre que va
+  a confirmar) en `window` limpian un arrastre que acabe fuera o cuyo tab origen se desmonte.
+- **Chevron de la activa** (`margin-left:auto`): abre el mismo `NoteContextMenu` del click derecho,
+  anclado bajo la pestaña; si ya está abierto para esa sección lo cierra (hace `stopPropagation`: el
+  listener de `click` en `window` del menú lo cerraría y el propio click lo reabriría).
+- **Renombrar inline** (doble clic): el input vive dentro de la pestaña, con fondo del color al 18 % y
+  anillo interior de 1.5 px (`color-mix` con `--sm-color`, vale para var o hex); la pestaña deja de ser
+  `draggable` mientras tanto (seleccionar texto con el ratón no debe arrastrarla).
 
 ### Editor: menú contextual de los tabs de sección
 El click derecho en un tab (`NoteEditor.tsx`, estado `tabMenu`) abre el **`NoteContextMenu`
@@ -746,7 +784,7 @@ se eliminó junto con `SectionNameField`.) Decisiones:
   `onKeyDown` del contenedor cierra `tabMenu` él mismo. Por lo mismo el menú se renderiza **fuera**
   del contenedor (junto a los modales).
 - **Foco al cerrar** (`closeTabMenu`): en el siguiente frame, si el foco quedó "varado" (en `body` —
-  la opción clicada se desmonta — o en un tab de la tira) vuelve al editor (TipTap o textarea raw); si
+  la opción clicada se desmonta — o en una pestaña del mapa, p. ej. su chevron) vuelve al editor (TipTap o textarea raw); si
   algo se lo llevó (un modal, el título…) se respeta.
 - **`Rename section` y el foco:** mientras el **input de renombrado** está montado (`renameRef.current`),
   `closeTabMenu` no devuelve el foco. El input se enfoca a sí mismo en un `setTimeout(0)`, así que en

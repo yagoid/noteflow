@@ -8,6 +8,10 @@ export const editor = {
   sectionStartWriting: '{name} — empieza a escribir...',
   noteOverview: 'Vista de la nota — todas las secciones de un vistazo',
   sectionOptions: 'Opciones de sección',
+  moreSections: { one: '+{count} más', other: '+{count} más' },
+  showAllSections: 'Mostrar todas las secciones',
+  showLessSections: 'Mostrar menos',
+  showLessSectionsHint: 'Volver a plegar las secciones en tres filas',
 
   saveAsTemplate: 'Guardar como plantilla',
   saveAsTemplateHint: 'Guarda esta nota (título + secciones) como plantilla reutilizable',

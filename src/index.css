@@ -63,12 +63,6 @@ button {
 ::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgb(var(--text-muted) / 0.7); }
 
-/* ── Tab active color (themed) ───────────────────────────────────────────── */
-.tab-active-text     { color: rgb(var(--tab-active)); }
-.tab-active-bg       { background: rgb(var(--tab-active) / 0.1); border-color: rgb(var(--tab-active) / 0.25); }
-.tab-active-border-l { border-left-color: rgb(var(--tab-active)); }
-.tab-active-caret    { caret-color: rgb(var(--tab-active)); }
-
 /* ── TipTap editor styles ────────────────────────────────────────────────── */
 .prose-editor {
   height: 100%;
@@ -880,12 +874,249 @@ button {
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 
-/* ── Tab scrollbar: space reserved, thumb visible only on hover ──────────── */
-.tabs-scroll { padding-bottom: 0; }
-.tabs-scroll::-webkit-scrollbar { height: 4px; }
-.tabs-scroll::-webkit-scrollbar-track { background: transparent; }
-.tabs-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; }
-.tabs-scroll:hover::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); }
+/* ── Editor section map (Editor/SectionMap.tsx) ──────────────────────────────
+   One block of cells that wraps onto rows: only its outer corners are rounded
+   (overflow hidden), the 4px joints show the editor background. Each tab sets
+   --sm-color (its section colour, `rgb(...)`) and the active one --sm-ink. */
+.section-map {
+  position: relative; /* offsetParent of the tabs (drop-indicator edge test) */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.section-map-tab {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  border-radius: 4px;
+  background: rgb(var(--text) / 0.06);
+  color: rgb(var(--text-muted));
+  font-size: 12px;
+  font-weight: 500;
+  cursor: grab;
+  transition:
+    flex-grow 450ms cubic-bezier(.22, .9, .24, 1),
+    background-color 250ms ease,
+    color 250ms ease,
+    box-shadow 250ms ease;
+}
+.section-map-tab:active { cursor: grabbing; }
+.section-map-tab:not(.is-active):hover { background: rgb(var(--text) / 0.10); color: rgb(var(--text)); }
+.section-map-tab.is-active {
+  flex-grow: 2.6;
+  background: var(--sm-color);
+  color: var(--sm-ink);
+  font-weight: 600;
+}
+/* Hidden from the AI: a fainter cell and a grey corner. */
+.section-map-tab.is-ai-hidden:not(.is-active) { background: rgb(var(--text) / 0.035); }
+.section-map-tab.is-ai-hidden:not(.is-active):hover { background: rgb(var(--text) / 0.07); }
+.section-map-tab.is-ai-hidden.is-active { background: color-mix(in srgb, var(--sm-color) 72%, rgb(var(--bg-editor))); }
+/* The dragged tab leaves its hole behind. */
+.section-map-tab.is-dragging,
+.section-map-tab.is-dragging:hover { background: rgb(var(--text) / 0.025); }
+.section-map-tab.is-dragging > * { opacity: 0; }
+/* Inline rename: tinted cell + inner ring in the section colour. */
+.section-map-tab.is-renaming,
+.section-map-tab.is-renaming:hover {
+  background: color-mix(in srgb, var(--sm-color) 18%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--sm-color);
+  color: rgb(var(--text));
+  cursor: auto;
+}
+
+.section-map-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 12px;
+  border-radius: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: inherit;
+  transition: padding 450ms cubic-bezier(.22, .9, .24, 1);
+}
+.is-active > .section-map-main { padding-right: 2px; }
+.section-map-main:focus-visible,
+.section-map-chevron:focus-visible,
+.section-map-pill:focus-visible,
+.section-map-add:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px rgb(var(--accent)); }
+
+/* The label's width comes from an invisible sizer capped at 150px (340px when active),
+   so the tab's flex basis never depends on hover; the visible text is laid over the
+   whole label box and uses whatever room the justified row gives it.
+   Widths that feed the wrapping (sizer max-width, chevron max-width) only animate while
+   GROWING into the active state; losing it is instant. Otherwise, mid-transition, the old
+   active would still be wide while the new one grows, and the bases could add up to more
+   than the final layout — a momentary extra row (beyond the 3-row cap). */
+.section-map-label { position: relative; flex: 1 1 auto; min-width: 0; align-self: stretch; }
+.section-map-label-sizer {
+  display: block;
+  visibility: hidden;
+  white-space: nowrap;
+  overflow: hidden;
+  line-height: 28px;
+  max-width: 150px;
+}
+.is-active .section-map-label-sizer {
+  max-width: 340px;
+  transition: max-width 450ms cubic-bezier(.22, .9, .24, 1);
+}
+.section-map-label-text {
+  position: absolute;
+  inset: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 28px;
+}
+
+/* Chevron of the active tab: opens the section menu (same as right-click). */
+.section-map-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  max-width: 0;
+  overflow: hidden;
+  margin-left: auto;
+  opacity: 0;
+  pointer-events: none;
+  color: inherit;
+  border-radius: inherit;
+  transition: opacity 150ms ease;
+}
+.is-active > .section-map-chevron {
+  max-width: 24px;
+  opacity: 0.8;
+  pointer-events: auto;
+  transition:
+    max-width 300ms cubic-bezier(.22, .9, .24, 1) 120ms,
+    opacity 200ms ease 160ms;
+}
+.is-active > .section-map-chevron:hover,
+.is-active > .section-map-chevron[aria-expanded="true"] { opacity: 1; }
+.section-map-chevron > svg {
+  box-sizing: content-box;
+  flex: none;
+  padding: 2px;
+  border-radius: 3px;
+  transition: background-color 150ms ease;
+}
+.section-map-chevron:hover > svg,
+.section-map-chevron[aria-expanded="true"] > svg { background: color-mix(in srgb, currentColor 16%, transparent); }
+
+/* Colour mark: a "folded corner" in the section colour on the inactive tabs. */
+.section-map-corner {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 7px;
+  height: 7px;
+  background: var(--sm-color);
+  border-top-right-radius: 4px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+  pointer-events: none;
+  transition: width 200ms ease, height 200ms ease, opacity 200ms ease;
+}
+.section-map-tab:not(.is-active):hover .section-map-corner { width: 11px; height: 11px; }
+.is-active .section-map-corner { width: 0; height: 0; opacity: 0; }
+.is-ai-hidden .section-map-corner { background: rgb(var(--text-muted) / 0.55); }
+
+.section-map-rename-input {
+  flex: 0 0 auto;
+  width: 124px;
+  min-width: 0;
+  padding: 0 0 0 12px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: rgb(var(--text));
+  caret-color: var(--sm-color);
+  font: inherit;
+  font-weight: 500;
+}
+.section-map-rename-ok {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  color: var(--sm-color);
+}
+
+/* "+N more" / "Show less" and the "+" (add section) cells. */
+.section-map-pill {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 4px;
+  background: rgb(var(--accent) / 0.12);
+  color: rgb(var(--accent));
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 250ms ease;
+}
+.section-map-pill:hover { background: rgb(var(--accent) / 0.2); }
+.section-map-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  height: 28px;
+  border-radius: 4px;
+  background: rgb(var(--text) / 0.035);
+  color: rgb(var(--text-muted) / 0.8);
+  transition: background-color 250ms ease, color 250ms ease;
+}
+.section-map-add:hover { background: rgb(var(--text) / 0.08); color: rgb(var(--text)); }
+
+/* Drop target while reordering: a 4px accent bar in the joint (inside the tab when the
+   joint is the block's edge, which overflow:hidden would clip). */
+.section-map-drop {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 2px;
+  background: rgb(var(--accent));
+  pointer-events: none;
+}
+.section-map-drop[data-side="before"] { left: -4px; }
+.section-map-drop[data-side="after"] { right: -4px; }
+.section-map-drop[data-side="before"][data-inside] { left: 0; }
+.section-map-drop[data-side="after"][data-inside] { right: 0; }
+
+/* Off-screen copy of the map at natural widths, measured to fold rows (see SectionMap). */
+.section-map-measure {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+.section-map-measure > div { display: flex; gap: 4px; width: max-content; }
+.section-map-measure .section-map-tab { flex: none; }
+.section-map-measure,
+.section-map-measure * { transition: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .section-map-tab,
+  .section-map-tab *,
+  .section-map-pill,
+  .section-map-add { transition: none !important; }
+}
 
 /* ── Sidebar notes list: thin scrollbar, visible only on hover ───────────── */
 .notes-list-scroll::-webkit-scrollbar { width: 4px; height: 4px; }

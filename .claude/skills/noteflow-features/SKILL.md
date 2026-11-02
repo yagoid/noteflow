@@ -458,11 +458,32 @@ vuelve al editor. Seleccionar cualquier nota (aquí o en el sidebar) también vu
 
 ## Secciones dentro de una nota
 
-Cada nota puede tener múltiples secciones independientes, como tabs:
+Cada nota puede tener múltiples secciones independientes. Sus pestañas forman un **mapa de
+secciones**: un único bloque de celdas que, cuando no caben en una fila, **baja de fila** como los
+salientes de un archivador (sin scroll horizontal):
 
 ```
-[Note ×] [Tasks ×] [Questions ×] [+]                    [⊞] [⭐] [⋯]
+╭─────────┬──────────────────┬───────────────────┬────────╮
+│ Note   ◥│ Tasks this week ◥│ ▓Questions▓▓▓▓▓ ⌄ │ Ideas ◥│   │ [⊞] [⭐] [⋯]
+├─────────┴──┬───────────────┼────────┬──────────┴──┬─────┤
+│ Meeting   ◥│ Backlog      ◥│ +3 more│      +      │
+╰────────────┴───────────────┴────────┴─────────────╯
 ```
+
+- **Cómo se ve:** celdas de 28 px separadas por juntas finas (se ve el fondo del editor), solo las
+  esquinas exteriores del bloque redondeadas. Cada fila se reparte para llenar el ancho. La pestaña
+  **activa** va en **sólido** con el color de su sección, en negrita, con el título (hasta ~340 px) y un
+  **chevron `⌄`** a la derecha que abre el menú de la sección (el mismo del click derecho). Las
+  inactivas son neutras con una **"esquina doblada"** (triangulito arriba a la derecha) del color de
+  su sección, que crece al pasar el ratón; su título se corta con `…` si no cabe. El color del texto
+  de la activa se elige solo para que se lea bien en cualquier tema (claro u oscuro). Al cambiar de
+  pestaña, la fila se reparte con una animación suave (sin animación si el sistema pide reducir el
+  movimiento).
+- **Tope de 3 filas:** con muchas secciones, las que no caben en tres filas se agrupan en una celda
+  **`+N more`**; al pulsarla se despliega el mapa entero y aparece **`Show less`** al final para
+  volver a plegarlo (se pliega solo al cambiar de nota). La sección activa **nunca queda oculta**: si
+  estaba entre las plegadas, se muestra en el último hueco visible (sin cambiar el orden real).
+- Las acciones de la nota quedan a la derecha del mapa, alineadas con su primera fila:
 
 (`⊞` = note overview · `⭐` = favorito · `⋯` = menú de sección: raw/editor, copiar,
 **guardar como plantilla**, **exportar nota**, sticky, **ocultar a la IA**, archivar, cifrar, borrar nota.
@@ -474,9 +495,9 @@ Cada nota puede tener múltiples secciones independientes, como tabs:
   archivada. También en el menú contextual de nota (right-click en el sidebar). Oculto si la nota está
   cifrada y bloqueada.
 
-- **Agregar**: `Ctrl+T` o botón `+`.
-- **Renombrar**: doble-click en el tab, o `Rename section` en su click derecho → el tab se convierte
-  en un input inline: Enter (o perder el foco) guarda, Esc cancela; ambos devuelven el foco al editor.
+- **Agregar**: `Ctrl+T` o la celda `+` (la última del mapa).
+- **Renombrar**: doble-click en el tab, o `Rename section` en su click derecho / chevron → el tab se
+  convierte en un input inline (teñido con el color de la sección): Enter (o perder el foco) guarda, Esc cancela; ambos devuelven el foco al editor.
   Mientras se escribe, los atajos de la app (`Ctrl+T/W/M/F/S/G`, `Ctrl+Tab`…) no se disparan.
 - **Click derecho en un tab** → el **menú contextual de sección** junto al cursor (el mismo
   `NoteContextMenu` que el click derecho sobre un tag de sección en el sidebar / vistas; ver
@@ -489,20 +510,18 @@ Cada nota puede tener múltiples secciones independientes, como tabs:
   llamada `"<nombre> (copy)"` / `"<nombre> (copia)"` según el idioma de la UI, **justo a la derecha** de
   la original, y la deja activa (`notesStore.duplicateSection`). No se ofrece con la nota cifrada y
   bloqueada.
-- **Reordenar**: drag & drop los tabs. Si arrastras cerca del borde izquierdo o derecho de la tira,
-  esta scrollea sola en esa dirección para poder soltar sobre tabs que están fuera de la vista. Al
-  soltar, la tira se queda donde estabas (no salta de vuelta a la sección activa).
-- **Eliminar**: `Ctrl+W` o botón `×` (no se puede si es la única sección).
+- **Reordenar**: drag & drop los tabs. La pestaña arrastrada deja su hueco y una barra del color de
+  acento marca en qué junta caerá. Si el mapa estaba plegado (`+N more`), se despliega al empezar a
+  arrastrar para poder soltar en cualquier sitio; tras soltar se queda desplegado (si cancelas el
+  arrastre, se vuelve a plegar).
+- **Eliminar**: `Ctrl+W` o `Delete section` en el menú de la sección (click derecho o chevron); no se
+  puede si es la única sección.
 - **Navegar**: `Ctrl+Tab` / `Ctrl+Shift+Tab` (siguiente / anterior).
-- **La tira sigue a la sección activa**: con muchas secciones, si la que pasa a estar activa queda
-  fuera de la vista, la tira se desplaza sola hasta mostrarla — venga el cambio de donde venga
-  (click en el tab, `Ctrl+Tab`, click en un tag de sección del sidebar o de una vista, crear/borrar/
-  deshacer una sección, o al volver a una nota en la sección que estabas).
-- **Sticky**: botón `⧉` abre la sección en ventana flotante.
+- **Sticky**: `Open as sticky note` (menú `⋯` o menú de la sección) abre la sección en ventana flotante.
 - **Color de sección**: desde el menú contextual de sección (tab del editor o tag de sección) se puede
   asignar un color a una sección por su nombre: los 8 del tema o un **color libre** (swatch con
   degradado → selector nativo del SO); "Auto" vuelve al color por nombre. Se aplica a los tags de
-  sección en el sidebar. Se guarda en `section-colors.json` (sincronizado).
+  sección en el sidebar y a las pestañas del editor. Se guarda en `section-colors.json` (sincronizado).
 - **Ocultar a la IA** (`Hide from AI`): marca una sección como invisible para la IA. Una sección
   oculta **nunca** se indexa ni aparece en el chat, en "Related notes", en el grafo del cerebro ni en
   las tools del agente — la IA actúa como si no existiera (el resto de la app la trata con normalidad).
@@ -520,7 +539,7 @@ navegar directamente a esa sección.
 > abrir en ventana nueva, borrar nota); el click derecho **sobre un tag de sección** (o sobre un **tab
 > del editor**) muestra solo lo propio de la sección (abrir la sección en paralelo, color de sección,
 > ocultar a la IA, abrir como sticky, abrir en ventana nueva) más unas pocas comunes (note overview,
-> borrar nota). El componente
+> y **borrar sección** — o borrar nota si es la única sección). El componente
 > distingue por el campo `sectionId` del request (`null` = nota).
 
 ---

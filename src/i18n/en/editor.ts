@@ -14,6 +14,11 @@ export const editor = {
   sectionStartWriting: '{name} — start writing...',
   noteOverview: 'Note overview — all sections at a glance',
   sectionOptions: 'Section options',
+  // Section map: past three rows the rest fold into a "+N more" tab.
+  moreSections: { one: '+{count} more', other: '+{count} more' },
+  showAllSections: 'Show all sections',
+  showLessSections: 'Show less',
+  showLessSectionsHint: 'Fold the sections back to three rows',
 
   // Save-as-template modal.
   saveAsTemplate: 'Save as template',

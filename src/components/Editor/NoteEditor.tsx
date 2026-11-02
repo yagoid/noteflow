@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react
 import { useNotesStore, saveUiState } from '../../stores/notesStore'
 import { useTemplatesStore } from '../../stores/templatesStore'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
-import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { Editor } from './Editor'
 import type { EditorHandle } from './Editor'
 import { InNoteSearchBar } from './InNoteSearchBar'
@@ -11,7 +10,7 @@ import type { NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
-  Plus, Check, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer,
+  ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer,
   Share,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
@@ -20,13 +19,12 @@ import { tf } from '../../i18n/format'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
 import { NoteContextMenu, type NoteContextMenuRequest, type NoteSectionMenuActions } from '../NoteContextMenu'
-import { getTagColor } from '../../lib/tagColors'
-import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 import { moveSectionInList, restoreSectionInList } from '../../lib/sectionUtils'
 import { firstValidDate } from '../../lib/dateUtils'
-import { OWN_KEYS_PROPS, ownsKeys } from '../../lib/keyScope'
+import { ownsKeys } from '../../lib/keyScope'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { TempNoteExpiryMenu } from './TempNoteExpiryMenu'
+import { SectionMap } from './SectionMap'
 import { AiChatButton } from '../AiPanel/AiChatButton'
 import { createDebouncedSave } from '../../lib/pendingEdits'
 import {
@@ -73,62 +71,6 @@ interface NoteEditorProps {
 }
 
 // ---------------------------------------------------------------------------
-// Tabs strip auto-scroll
-// ---------------------------------------------------------------------------
-// Gap left when aligning the active tab against either edge of the strip.
-const TAB_SCROLL_PAD = 12
-// The right fade gradient (w-6) covers the end of the strip, so it is discounted
-// from the usable width to keep the active tab out from under it.
-const TAB_FADE_WIDTH = 24
-// Edge band that triggers auto-scrolling while a tab is being dragged.
-const TAB_DRAG_EDGE = 40
-// Px per frame of the drag auto-scroll (~600 px/s at 60 fps).
-const TAB_DRAG_SPEED = 10
-// Watchdog for the drag auto-scroll loop: the DnD processing model re-fires
-// dragover every ~350 ms while a drag is alive, so going this long without one
-// means the drag is over even if we never saw its dragend (it fires on the
-// source node, which may have unmounted mid-drag). A stray stop is harmless —
-// the next dragover restarts the loop.
-const TAB_DRAG_STALE_MS = 800
-
-/**
- * Brings the tab of `sectionId` into view by scrolling ONLY the tabs strip.
- * `scrollIntoView()` is deliberately avoided: it would also scroll the ancestors
- * and shift the app layout. Returns false when nothing could be done yet —
- * either the container has no layout (first paint after switching note) or the
- * tab isn't in the DOM.
- */
-function revealSectionTab(
-  container: HTMLDivElement,
-  sectionId: string,
-  behavior: ScrollBehavior,
-): boolean {
-  const viewWidth = container.clientWidth
-  if (viewWidth === 0) return false
-  const tab = container.querySelector<HTMLElement>(`[data-section-id="${sectionId}"]`)
-  if (!tab) return false
-
-  // offsetLeft (not getBoundingClientRect) so we stay in the same coordinate
-  // space as scrollLeft (content-relative, independent of where the strip is).
-  // The strip isn't positioned, so the tabs' offsetParent is its `relative`
-  // wrapper — hence the subtraction (0 if the strip ever becomes positioned).
-  const originLeft = tab.offsetParent === container ? 0 : container.offsetLeft
-  const tabLeft = tab.offsetLeft - originLeft
-  const tabRight = tabLeft + tab.offsetWidth
-  const usableWidth = Math.max(viewWidth - TAB_FADE_WIDTH, 0)
-  const viewLeft = container.scrollLeft
-
-  let target: number
-  if (tabLeft < viewLeft) target = tabLeft - TAB_SCROLL_PAD
-  else if (tabRight > viewLeft + usableWidth) target = tabRight + TAB_SCROLL_PAD - usableWidth
-  else return true // fully visible already: don't scroll (avoids spurious jumps)
-
-  const left = Math.max(0, Math.min(target, container.scrollWidth - viewWidth))
-  if (Math.abs(left - viewLeft) > 1) container.scrollTo({ left, behavior })
-  return true
-}
-
-// ---------------------------------------------------------------------------
 // NoteEditor
 // ---------------------------------------------------------------------------
 export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = false }: NoteEditorProps) {
@@ -156,8 +98,6 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   const encryptNote = useNotesStore((s) => s.encryptNote)
   const removeNoteEncryption = useNotesStore((s) => s.removeNoteEncryption)
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
-  const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
-  const { previewProps } = useSectionHoverPreview()
   const t = useT()
 
   // Active section by id (not index — stable across reorders)
@@ -225,9 +165,6 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   // Unlock modal for encrypted notes
   const [showUnlockModal, setShowUnlockModal] = useState(false)
 
-  // Drag and drop state
-  const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null)
-  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null)
   // Right-click menu of a section tab (the shared note/section context menu)
   const [tabMenu, setTabMenu] = useState<NoteContextMenuRequest | null>(null)
   const [sectionUndo, setSectionUndo] = useState<SectionUndoState | null>(null)
@@ -238,8 +175,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
 
   const titleRef = useRef<HTMLInputElement>(null)
   const pendingSectionRef = useRef<string | null>(null)
-  const tabsScrollRef = useRef<HTMLDivElement>(null)
-  const [tabsOverflow, setTabsOverflow] = useState(false)
+  // The section map's wrapper (closeTabMenu: focus left on a tab is "stranded").
+  const tabsRef = useRef<HTMLDivElement>(null)
   const rawTextareaRef = useRef<HTMLTextAreaElement>(null)
   // The raw textarea is also the floating sidebar's content anchor (stable ref
   // so it only signals on mount/unmount, not on every render).
@@ -567,55 +504,9 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     scheduleRawSave(newValue)
   }, [rawContent, activeSection, updateSection]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Detect tab overflow to reposition + button ───────────────────────────
-  useEffect(() => {
-    const el = tabsScrollRef.current
-    if (!el) return
-    const check = () => setTabsOverflow(el.scrollWidth > el.clientWidth)
-    check()
-    const ro = new ResizeObserver(check)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [note?.sections])
-
-  // ── Keep the active tab visible in the tabs strip ─────────────────────────
-  // Centralized on purpose: the active section changes from many places (tab
-  // click, Ctrl+Tab, sidebar, add/delete/undo of a section, restoring the
-  // remembered section on note switch), and repeating the scroll in every
-  // handler would drift out of sync in no time.
-  const activeTabId = activeSection?.id ?? null
-  // Membership signature (ids sorted) rather than the rendered order: it still
-  // catches add/delete/undo, but it does NOT fire on reorder — after a drop we
-  // must not yank the strip back to the active tab, hiding the tab just moved
-  // (during the drag itself, the edge auto-scroll below keeps things in view).
-  // Either way it ignores plain typing, which rebuilds the sections array.
+  // Membership signature (ids sorted): catches add/delete/undo but neither reorder nor
+  // plain typing (which rebuilds the sections array).
   const sectionMembershipKey = note?.sections.map((s) => s.id).sort().join('|') ?? ''
-  // Around a note switch there is a transitional commit where the stored
-  // activeSectionId still belongs to the other note (the reset effect that fixes
-  // it is passive, so it runs after this one) and activeSection silently falls
-  // back to sections[0]. Revealing that tab would jump to the start of the strip
-  // and only then glide to the remembered section — exactly the glitch that the
-  // 'auto' behavior is meant to avoid — so those renders are skipped entirely,
-  // without consuming the "first reveal for this note" flag.
-  const activeTabSettled = note?.sections.some((s) => s.id === activeSectionId) ?? false
-  const scrolledNoteIdRef = useRef<string | null>(null)
-  useLayoutEffect(() => {
-    const container = tabsScrollRef.current
-    if (!container || !activeTabId || !activeTabSettled) return
-    const noteId = note?.id ?? null
-    const firstForNote = scrolledNoteIdRef.current !== noteId
-    // Opening/switching note jumps instantly; moving within the same note glides.
-    const behavior: ScrollBehavior = firstForNote ? 'auto' : 'smooth'
-    scrolledNoteIdRef.current = noteId
-    // Layout is already available inside a layout effect, but on the first paint
-    // of a note the tabs may not be measured yet → retry on the next frame.
-    if (revealSectionTab(container, activeTabId, behavior)) return
-    const raf = requestAnimationFrame(() => {
-      const el = tabsScrollRef.current
-      if (el) revealSectionTab(el, activeTabId, behavior)
-    })
-    return () => cancelAnimationFrame(raf)
-  }, [activeTabId, activeTabSettled, note?.id, sectionMembershipKey])
 
   // ── The active section vanished (deleted from another pane/window, sync, CLI) ──
   // Fall back to the first section explicitly instead of only rendering sections[0]:
@@ -636,71 +527,6 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     setRawContent(fallback?.content ?? '')
     closeRename()
   }, [note?.id, sectionMembershipKey]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Edge auto-scroll while dragging a tab ─────────────────────────────────
-  // Without it a tab can't be reordered onto an off-screen one: the native drag
-  // doesn't scroll the container by itself.
-  const dragScrollRef = useRef<{ raf: number | null; dir: -1 | 0 | 1; lastOverAt: number }>(
-    { raf: null, dir: 0, lastOverAt: 0 },
-  )
-  // Strip geometry, measured once per drag — see measureTabsDragBounds.
-  const tabsDragBoundsRef = useRef<{ left: number; width: number } | null>(null)
-
-  const stopDragScroll = useCallback(() => {
-    const state = dragScrollRef.current
-    if (state.raf !== null) cancelAnimationFrame(state.raf)
-    state.raf = null
-    state.dir = 0
-    tabsDragBoundsRef.current = null
-  }, [])
-
-  const setDragScroll = useCallback((dir: -1 | 0 | 1) => {
-    const state = dragScrollRef.current
-    if (dir === 0) {
-      // Only stop the loop: the bounds must survive until the drag really ends.
-      if (state.raf !== null) cancelAnimationFrame(state.raf)
-      state.raf = null
-      state.dir = 0
-      return
-    }
-    state.dir = dir
-    if (state.raf !== null) return // loop already alive: just steer it
-    const step = () => {
-      const container = tabsScrollRef.current
-      const current = dragScrollRef.current
-      const stale = Date.now() - current.lastOverAt > TAB_DRAG_STALE_MS
-      if (!container || current.dir === 0 || stale) { current.raf = null; return }
-      container.scrollLeft += current.dir * TAB_DRAG_SPEED
-      current.raf = requestAnimationFrame(step)
-    }
-    state.raf = requestAnimationFrame(step)
-  }, [])
-
-  // Measured on dragstart and reused for every dragover: the strip can't resize
-  // mid-drag, and getBoundingClientRect on each event would force a layout
-  // recalc per mouse move.
-  const measureTabsDragBounds = useCallback(() => {
-    const container = tabsScrollRef.current
-    if (!container) return null
-    const rect = container.getBoundingClientRect()
-    const bounds = { left: rect.left, width: rect.width }
-    tabsDragBoundsRef.current = bounds
-    return bounds
-  }, [])
-
-  // Safety net + unmount cleanup: no rAF loop may outlive the drag. The strip's
-  // own onDrop/onDragEnd cover the normal path; these catch drags that end on
-  // another target, and the watchdog above covers the last hole (a tab that
-  // unmounts mid-drag fires its dragend on a detached node that reaches nobody).
-  useEffect(() => {
-    window.addEventListener('dragend', stopDragScroll, true)
-    window.addEventListener('drop', stopDragScroll, true)
-    return () => {
-      window.removeEventListener('dragend', stopDragScroll, true)
-      window.removeEventListener('drop', stopDragScroll, true)
-      stopDragScroll()
-    }
-  }, [stopDragScroll])
 
   // ── Delete key on the note (only when editor is NOT focused) ──────────────
   useEffect(() => {
@@ -897,56 +723,10 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     setTemplateNameDraft(null)
   }
 
-  const handleDragStart = (e: React.DragEvent, id: string) => {
-    setDraggedSectionId(id)
-    e.dataTransfer.effectAllowed = 'move'
-    // Set a transparent ghost image or just let the browser handle it
-    measureTabsDragBounds() // for the edge auto-scroll, measured once per drag
-  }
-
-  const handleDragOver = (e: React.DragEvent, id: string) => {
-    e.preventDefault()
-    if (draggedSectionId === id) return
-    setDragOverSectionId(id)
-  }
-
-  const handleDrop = (e: React.DragEvent, targetId: string) => {
-    e.preventDefault()
-    if (!draggedSectionId || draggedSectionId === targetId) {
-      setDraggedSectionId(null)
-      setDragOverSectionId(null)
-      return
-    }
-
-    const draggedId = draggedSectionId
+  // Tab drag & drop (SectionMap): moves the dragged section to the target's position,
+  // on the LATEST list.
+  const handleReorderSections = (draggedId: string, targetId: string) => {
     void mutateSections(note.id, (sections) => moveSectionInList(sections, draggedId, targetId))
-
-    setDraggedSectionId(null)
-    setDragOverSectionId(null)
-  }
-
-  const handleDragEnd = () => {
-    setDraggedSectionId(null)
-    setDragOverSectionId(null)
-  }
-
-  // The strip's dragover (tab events bubble up to it) decides whether the
-  // pointer sits in one of the edge bands and starts/steers/stops the loop.
-  const handleTabsDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    if (!draggedSectionId) return
-    const bounds = tabsDragBoundsRef.current ?? measureTabsDragBounds()
-    if (!bounds) return
-    dragScrollRef.current.lastOverAt = Date.now() // feeds the loop watchdog
-    const x = e.clientX - bounds.left
-    setDragScroll(x < TAB_DRAG_EDGE ? -1 : x > bounds.width - TAB_DRAG_EDGE ? 1 : 0)
-  }
-
-  // dragleave also bubbles when moving from one tab to another: only stop when
-  // the pointer really leaves the strip.
-  const handleTabsDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    const next = e.relatedTarget as Node | null
-    if (next && e.currentTarget.contains(next)) return
-    stopDragScroll()
   }
 
   const handleRawToggle = () => {
@@ -1151,7 +931,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     requestAnimationFrame(() => {
       if (renameRef.current) return
       const focused = document.activeElement
-      const stranded = !focused || focused === document.body || !!tabsScrollRef.current?.contains(focused)
+      const stranded = !focused || focused === document.body || !!tabsRef.current?.contains(focused)
       if (stranded) focusEditorBody()
     })
   }
@@ -1378,143 +1158,37 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
           if (isAccel && e.key === '0') { e.preventDefault(); resetFontSize() }
         }}
       >
-        <div
-          className="flex items-stretch px-3 pt-2.5 flex-shrink-0 gap-1.5 h-[42px]"
-          style={{ background: 'color-mix(in srgb, rgb(var(--bg-0)) 50%, rgb(var(--bg-1)) 50%)' }}
-        >
-          <div className="relative flex-1 min-w-0 h-full flex items-stretch">
-            <div
-              ref={tabsScrollRef}
-              className="flex items-stretch gap-1 overflow-x-auto tabs-scroll pr-4 h-full"
-              onDragOver={handleTabsDragOver}
-              onDragLeave={handleTabsDragLeave}
-              onDrop={stopDragScroll}
-              onDragEnd={stopDragScroll}
-            >
-            {note.sections.map((section) => {
-              const isActive = section.id === (activeSection?.id)
-              const isRenaming = renamingId === section.id
-              const colorStyle = getTagColor(section.name, sectionTagColors)
-              return (
-                <div
-                  key={section.id}
-                  data-section-id={section.id}
-                  draggable
-                  title={t.editor.dragToReorder}
-                  onDragStart={(e) => handleDragStart(e, section.id)}
-                  onDragOver={(e) => handleDragOver(e, section.id)}
-                  onDrop={(e) => handleDrop(e, section.id)}
-                  onDragEnd={handleDragEnd}
-                  onDragLeave={() => setDragOverSectionId(null)}
-                  onContextMenu={(e) => {
-                    // Not over the inline rename input: its name isn't saved yet, and the
-                    // colours are keyed by section name.
-                    if (isRenaming) return
-                    e.preventDefault()
-                    setSectionMenuOpen(false)
-                    setTabMenu({ x: e.clientX, y: e.clientY, noteId: note.id, sectionId: section.id })
-                  }}
-                  className={`relative group flex items-center justify-center min-w-[88px] flex-shrink-0 h-full transition-colors duration-150 cursor-grab active:cursor-grabbing
-                    ${draggedSectionId === section.id ? 'opacity-30' : 'opacity-100'}
-                  `}
-                  style={isActive
-                    ? {
-                        borderTop: `1.5px solid ${colorStyle.color}`,
-                        borderTopLeftRadius: 8,
-                        borderTopRightRadius: 8,
-                        background: 'rgb(var(--bg-editor))',
-                        zIndex: 2,
-                        marginBottom: '-1px',
-                      }
-                    : !isActive && dragOverSectionId === section.id && draggedSectionId !== section.id
-                    ? {
-                        borderLeft: '2px solid rgb(var(--accent))',
-                        background: 'rgb(var(--accent) / 0.1)',
-                        borderTopLeftRadius: 4,
-                        borderBottomLeftRadius: 4,
-                      }
-                    : undefined
-                  }
-                >
-                  {isRenaming ? (
-                    // Inline rename input
-                    <div className="flex items-center gap-0.5 px-1.5 py-1">
-                      <input
-                        ref={renameRef}
-                        {...OWN_KEYS_PROPS}
-                        value={renameValue}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        onKeyDown={handleRenameKeyDown}
-                        onBlur={handleCommitRename}
-                        className="w-20 bg-surface-0 border border-yellow-400/40 rounded px-1
-                                   text-xs font-mono text-text outline-none tab-active-caret"
-                      />
-                      <button
-                        onMouseDown={(e) => { e.preventDefault(); handleCommitRename() }}
-                        className="tab-active-text p-0.5 rounded"
-                      >
-                        <Check size={12} />
-                      </button>
-                    </div>
-                  ) : (
-                    // Normal tab
-                    <button
-                      {...(isActive || !note ? {} : previewProps(note.id, section.id, { placement: 'cursor-below' }))}
-                      onClick={() => handleSwitchSection(section.id)}
-                      onDoubleClick={() => handleStartRename(section)}
-                      className={`px-3 py-1 text-xs font-mono transition-colors whitespace-nowrap inline-flex items-center gap-1
-                        ${isActive ? 'font-semibold' : 'text-text-muted hover:text-text'}`}
-                      style={isActive ? { color: colorStyle.color } : undefined}
-                    >
-                      {section.aiHidden && (
-                        <EyeOff size={11} className="opacity-60 flex-shrink-0" aria-label={t.common.hiddenFromAI} />
-                      )}
-                      {section.name}
-                    </button>
-                  )}
-
-                </div>
-              )
-            })}
-
-              {/* + button inside scroll area when no overflow */}
-              {!tabsOverflow && (
-                <button
-                  onClick={handleAddSection}
-                  title={t.editor.addSection}
-                  className="self-center ml-1 flex items-center justify-center w-6 h-6 rounded flex-shrink-0
-                             text-text-muted/60 hover:text-text-muted hover:bg-surface-3
-                             border border-transparent hover:border-border transition-colors"
-                >
-                  <Plus size={13} />
-                </button>
-              )}
-            </div>
-            {/* Fade gradient — only when overflowing */}
-            {tabsOverflow && (
-              <div
-                className="pointer-events-none absolute inset-y-0 right-0 w-6"
-                style={{ background: 'linear-gradient(to left, rgb(var(--bg-editor)), transparent)' }}
-              />
-            )}
+        {/* Section map + note actions. No band of its own: it sits on the editor background. */}
+        <div className="flex items-start px-3 pt-2.5 pb-0.5 flex-shrink-0 gap-1.5">
+          <div ref={tabsRef} className="flex-1 min-w-0">
+            <SectionMap
+              key={note.id}
+              noteId={note.id}
+              sections={note.sections}
+              activeSectionId={activeSection?.id ?? null}
+              renamingId={renamingId}
+              renameValue={renameValue}
+              renameRef={renameRef}
+              onRenameChange={setRenameValue}
+              onRenameKeyDown={handleRenameKeyDown}
+              onRenameCommit={handleCommitRename}
+              menuSectionId={tabMenu?.noteId === note.id ? tabMenu.sectionId : null}
+              onSwitch={handleSwitchSection}
+              onStartRename={handleStartRename}
+              onOpenMenu={(sectionId, x, y) => {
+                setSectionMenuOpen(false)
+                setTabMenu({ x, y, noteId: note.id, sectionId })
+              }}
+              onCloseMenu={closeTabMenu}
+              onAdd={handleAddSection}
+              onReorder={handleReorderSections}
+            />
           </div>
 
-          {/* + button pinned outside when tabs overflow */}
-          {tabsOverflow && (
-            <button
-              onClick={handleAddSection}
-              title={t.editor.addSection}
-              className="self-center flex items-center justify-center w-6 h-6 rounded flex-shrink-0
-                         text-text-muted/60 hover:text-text-muted hover:bg-surface-3
-                         border border-transparent hover:border-border transition-colors"
-            >
-              <Plus size={13} />
-            </button>
-          )}
+          {/* h-7: the actions line up with the map's first row */}
+          <div className="self-start mt-1.5 w-px h-4 bg-border flex-shrink-0 mx-1.5" />
 
-          <div className="self-center w-px h-4 bg-border flex-shrink-0 mx-1.5" />
-
-          <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="flex items-center gap-1 flex-shrink-0 h-7">
             {!standalone && (
               <button
                 onClick={() => setNoteView(note.id)}
