@@ -1208,7 +1208,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         <ContextMenu
           x={newNoteCtx.x}
           y={newNoteCtx.y}
-          className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-52 animate-in fade-in zoom-in duration-100"
+          className="fixed z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 w-52 animate-in fade-in zoom-in duration-100"
         >
           <button
             onClick={() => { createTempNote(); setNewNoteCtx(null) }}
@@ -1228,7 +1228,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
           <ContextMenu
             x={groupContextMenu.x}
             y={groupContextMenu.y}
-            className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-44 overflow-hidden animate-in fade-in zoom-in duration-100"
+            className="fixed z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 w-44 overflow-hidden animate-in fade-in zoom-in duration-100"
           >
             <button
               onClick={(e) => { e.stopPropagation(); setGroupView(group.id); closeAllMenus() }}
@@ -1339,7 +1339,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
           <ContextMenu
             x={folderContextMenu.x}
             y={folderContextMenu.y}
-            className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-44 overflow-hidden animate-in fade-in zoom-in duration-100"
+            className="fixed z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 w-44 overflow-hidden animate-in fade-in zoom-in duration-100"
           >
             <button
               onClick={(e) => { e.stopPropagation(); createNoteInFolder(folder.groupId, folder.id) }}
@@ -1383,7 +1383,8 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
       })()}
 
       {/* â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      <div className="px-3 py-2 border-t border-border flex items-center justify-between">
+      <div className="mx-8 h-px shrink-0 bg-border" />
+      <div className="px-3 py-2 flex items-center justify-between">
         <button
           onClick={() => setShowArchived(!showArchived)}
           className={`flex items-center gap-1 text-xs font-mono transition-colors

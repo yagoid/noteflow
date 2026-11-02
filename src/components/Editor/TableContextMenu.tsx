@@ -79,7 +79,7 @@ export function TableContextMenu({ editor }: Props) {
 
   return (
     <div
-      className="fixed z-50 bg-surface-2 border border-border rounded shadow-lg py-1 text-xs font-mono"
+      className="fixed z-50 bg-surface-2 border border-border rounded-lg shadow-lg py-1 text-xs font-mono"
       style={{ left, top, minWidth: MENU_W }}
       onMouseDown={(e) => e.stopPropagation()}
     >

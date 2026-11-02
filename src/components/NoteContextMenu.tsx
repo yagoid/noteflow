@@ -248,7 +248,7 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onConfirmD
     <ContextMenu
       x={request.x}
       y={request.y}
-      className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-48 animate-in fade-in zoom-in duration-100"
+      className="fixed z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 w-48 animate-in fade-in zoom-in duration-100"
     >
       {/* Note-level actions — hidden when the menu targets a specific section */}
       {!currentSection && (
@@ -456,7 +456,7 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onConfirmD
               const groupFolders = folders.filter((f) => f.groupId === currentGroup.id)
               return (
                 <div
-                  className="absolute z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-44 animate-in fade-in zoom-in duration-100"
+                  className="absolute z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 w-44 animate-in fade-in zoom-in duration-100"
                   style={{
                     [pickerFlip.x ? 'right' : 'left']: '100%',
                     [pickerFlip.y ? 'bottom' : 'top']: 0,
@@ -564,7 +564,7 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onConfirmD
             {/* Group picker — submenu, repositioned to stay within window */}
             {groupPickerOpen && (
               <div
-                className="absolute z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-40 animate-in fade-in zoom-in duration-100"
+                className="absolute z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 w-40 animate-in fade-in zoom-in duration-100"
                 style={{
                   [pickerFlip.x ? 'right' : 'left']: '100%',
                   [pickerFlip.y ? 'bottom' : 'top']: 0,
