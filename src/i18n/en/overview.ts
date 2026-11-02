@@ -32,8 +32,14 @@ export const overview = {
   clearSelection: 'Clear selection (Esc)',
 
   // ── Note overview ───────────────────────────────────────────────────────────
-  renameNote: 'Rename note',
-  addSection: 'Add section',
+  // Header: "N sections · edited <date>", the active grid button that closes the view,
+  // and the ⋯ note menu.
+  editedAt: 'edited {date}',
+  closeOverview: 'Close note overview (Esc)',
+  noteOptions: 'Note options',
+  noteOptionsTooltip: 'Note options (rename, delete…)',
+  // The "New section" cell that closes the grid (adds a section and opens it to write).
+  newSection: 'New section',
   addSectionTooltip: 'Add section and edit it',
   noteEncrypted: 'This note is encrypted',
   unlockToPreview: 'Unlock it in the editor to preview its sections',
@@ -67,10 +73,24 @@ export const overview = {
     other: '{count} sections will be permanently deleted.',
   },
 
-  // Section card.
+  // Section card (a cell of the grid). `{label}` = openSection / backToSection.
+  sectionsListLabel: 'Note sections',
   openSection: 'Open "{name}"',
+  backToSection: 'Back to "{name}" in the editor',
+  cardTooltip: '{label} · drag to reorder',
   selectSection: 'Select section',
-  aiBadge: 'AI',
+  // Tag on the header of the section the editor has open (shown uppercase).
+  openTag: 'Open',
+  emptySectionHint: 'Empty section · click to write',
+  // Card footer: task progress (3+ tasks), else the word count; "Markdown" = raw mode.
+  tasksProgress: '{done}/{total} tasks',
+  wordsPlural: {
+    one: '{count} word',
+    other: '{count} words',
+  },
+  emptyStat: 'Empty',
+  markdownBadge: 'Markdown',
+  selectionActions: 'Selection actions',
 
   // Section preview card (shared with the hover popover).
   rawSection: 'Raw markdown section',

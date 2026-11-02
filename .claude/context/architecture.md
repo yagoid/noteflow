@@ -135,13 +135,13 @@ noteflow/
 │   │   │   └── GroupOverview.tsx        # Vista de grupo (sustituye editor): bandas por carpeta
 │   │   │                                #   + "No folder" + "Archived"; reutiliza useSidebarGroups
 │   │   ├── NoteOverview/
-│   │   │   └── NoteOverview.tsx         # Vista de nota (sustituye editor): una tarjeta por sección,
-│   │   │                                #   mini-mock del editor (envuelve SectionPreviewCard)
+│   │   │   └── NoteOverview.tsx         # Vista de nota (sustituye editor): el mapa de secciones con la
+│   │   │                                #   vista previa dentro (bloque reticulado, lib/noteOverviewGrid.ts)
 │   │   ├── AllContentOverview/
 │   │   │   └── AllContentOverview.tsx   # Vista "All content" (sustituye editor): índice global —
 │   │   │                                #   Favorites + tiles de grupo + notas sueltas; back inteligente
 │   │   ├── SectionPreview/              # Previsualización de sección reutilizable
-│   │   │   ├── SectionPreviewCard.tsx   #   Tarjeta mini-mock pura (la usan NoteOverview, hover y cerebro)
+│   │   │   ├── SectionPreviewCard.tsx   #   Tarjeta mini-mock pura (la usan el hover y el cerebro)
 │   │   │   ├── HoverPreviewProvider.tsx #   Provider + popover flotante de hover (sidebar/grupos/editor/IA);
 │   │   │   │                            #     1 popover central, cierra con cualquier click (pointerdown global)
 │   │   │   └── hoverPreviewContext.ts   #   Contexto + hook useSectionHoverPreview (archivo aparte: fast-refresh)
@@ -217,6 +217,12 @@ noteflow/
 │   │   ├── encryptedSession.ts   # Re-descifrado con la contraseña de sesión tras recargar + guarda
 │   │   │                         #   anti-borrado de escrituras de notas cifradas — testeado
 │   │   ├── sectionUtils.ts       # Operaciones puras sobre la lista de secciones (patch/move/duplicate/restore)
+│   │   ├── sectionMap.ts         # Mapa de secciones del editor: simulación del wrap/plegado, lado de caída
+│   │   │                         #   al reordenar, contraste de la tinta — testeado
+│   │   ├── sectionInk.ts         # resolveSectionInk: tinta legible sobre un color de sección sólido (lee las
+│   │   │                         #   vars del tema; mapa del editor + vista de nota)
+│   │   ├── noteOverviewGrid.ts   # Vista de nota: columnas por ancho, filas justificadas, foco por flechas,
+│   │   │                         #   pie de tarjeta (tareas/palabras), recorte del preview — testeado
 │   │   ├── searchUtils.ts        # Helpers de búsqueda (normalización, matching)
 │   │   ├── keyScope.ts           # OWN_KEYS_PROPS/ownsKeys: campos que los atajos globales (capture) respetan
 │   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 vars del tema o hex libre);

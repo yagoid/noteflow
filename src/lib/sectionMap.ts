@@ -1,5 +1,7 @@
 // Pure layout + colour logic of the editor's section map (Editor/SectionMap.tsx): the block
-// of section tabs that wraps onto rows like the tabs of a filing cabinet.
+// of section tabs that wraps onto rows like the tabs of a filing cabinet. The reorder side
+// and the colour helpers are shared with the note overview grid (lib/noteOverviewGrid.ts,
+// lib/sectionInk.ts).
 //
 // The browser does the actual wrapping (one `flex-wrap` container). These helpers only
 // simulate that wrapping from the tabs' natural widths, to decide how many sections fit
@@ -99,6 +101,26 @@ export function planSectionMap(input: SectionMapPlanInput): SectionMapPlan {
     }
   }
   return { visibleCount: minimum, overflowing: true }
+}
+
+// ── Drag & drop reorder ────────────────────────────────────────────────────────────────
+
+/**
+ * Joint where a section dragged over `targetId` lands, as `moveSectionInList`
+ * (lib/sectionUtils.ts) places it: after the target when it comes from before it in the
+ * list, before the target when it comes from after it. Null when either id is missing or
+ * they are the same section. Shared by the section map and the note overview grid.
+ */
+export function reorderDropSide(
+  sections: readonly { id: string }[],
+  draggedId: string,
+  targetId: string,
+): 'before' | 'after' | null {
+  if (draggedId === targetId) return null
+  const from = sections.findIndex((s) => s.id === draggedId)
+  const to = sections.findIndex((s) => s.id === targetId)
+  if (from === -1 || to === -1) return null
+  return from < to ? 'after' : 'before'
 }
 
 // ── Colour: readable ink on the active tab's solid background ──────────────────────────

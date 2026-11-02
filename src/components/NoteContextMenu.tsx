@@ -42,6 +42,8 @@ interface NoteContextMenuProps {
   sectionActions?: NoteSectionMenuActions
   /** Section window (no main-window shell): hides note overview and split panes. */
   standalone?: boolean
+  /** Note menu only: offers `Rename note` (the note overview renames it in its header). */
+  onRenameNote?: () => void
 }
 
 /**
@@ -54,7 +56,7 @@ interface NoteContextMenuProps {
  * an in-flight delete/unlock dialog; the menu body is keyed by `request` so each
  * open starts with fresh submenu/input state.
  */
-export function NoteContextMenu({ request, onClose, sectionActions, standalone = false }: NoteContextMenuProps) {
+export function NoteContextMenu({ request, onClose, sectionActions, standalone = false, onRenameNote }: NoteContextMenuProps) {
   const t = useT()
   const rawNotes = useNotesStore((s) => s.notes)
   const deleteNote = useNotesStore((s) => s.deleteNote)
@@ -126,6 +128,7 @@ export function NoteContextMenu({ request, onClose, sectionActions, standalone =
           onClose={onClose}
           sectionActions={sectionActions}
           standalone={standalone}
+          onRenameNote={onRenameNote}
           onConfirmDelete={confirmDelete}
           onConfirmDeleteSection={confirmDeleteSection}
           onUnlockThenDelete={(noteId) => { onClose(); setPendingDeleteId(noteId); setEncModal({ mode: 'unlock', noteId }) }}
@@ -181,6 +184,7 @@ interface NoteMenuBodyProps {
   onClose: () => void
   sectionActions?: NoteSectionMenuActions
   standalone: boolean
+  onRenameNote?: () => void
   onConfirmDelete: (note: Note) => void
   onConfirmDeleteSection: (note: Note, sectionId: string) => void
   onUnlockThenDelete: (noteId: string) => void
@@ -189,7 +193,7 @@ interface NoteMenuBodyProps {
 
 // The visible menu. Mounted fresh per open (keyed by request) so its submenu and
 // inline-input state always starts clean.
-function NoteMenuBody({ request, onClose, sectionActions, standalone, onConfirmDelete, onConfirmDeleteSection, onUnlockThenDelete, onEncModal }: NoteMenuBodyProps) {
+function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNote, onConfirmDelete, onConfirmDeleteSection, onUnlockThenDelete, onEncModal }: NoteMenuBodyProps) {
   const t = useT()
   const rawNotes = useNotesStore((s) => s.notes)
   const updateNote = useNotesStore((s) => s.updateNote)
@@ -251,6 +255,15 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onConfirmD
       className="fixed z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 w-48 animate-in fade-in zoom-in duration-100"
     >
       {/* Note-level actions — hidden when the menu targets a specific section */}
+      {!currentSection && onRenameNote && !isLocked && (
+        <button
+          onClick={() => { onClose(); onRenameNote() }}
+          className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+        >
+          <Pencil size={12} />
+          {t.noteMenu.renameNote}
+        </button>
+      )}
       {!currentSection && (
         <button
           onClick={() => { updateNote(note.id, { favorited: !note.favorited }); onClose() }}

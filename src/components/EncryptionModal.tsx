@@ -80,7 +80,11 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}
     >
-      <div className="bg-surface-1 border border-border rounded-lg shadow-xl w-full max-w-sm mx-4 overflow-hidden">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="bg-surface-1 border border-border rounded-lg shadow-xl w-full max-w-sm mx-4 overflow-hidden"
+      >
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
           {mode === 'encrypt'

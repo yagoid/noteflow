@@ -45,6 +45,9 @@ export function ConfirmModal({
       onClick={onCancel}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className="w-80 bg-surface-1 border border-border rounded-lg shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >

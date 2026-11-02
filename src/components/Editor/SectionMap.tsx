@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react'
 import { Check, ChevronDown, EyeOff, Plus } from 'lucide-react'
-import type { GroupColor, NoteSection } from '../../types'
+import type { NoteSection } from '../../types'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { useThemeStore } from '../../stores/themeStore'
-import { colorChannels, isCustomColor, resolveGroupColor } from '../../lib/tagColors'
-import { hexToRgbChannels } from '../../lib/colorUtils'
+import { colorChannels, resolveGroupColor } from '../../lib/tagColors'
 import {
-  mixRgb, parseRgbTriple, pickReadableInk, planSectionMap, visibleSectionIndices,
-  type Rgb, type SectionMapPlan,
+  planSectionMap, reorderDropSide, visibleSectionIndices, type SectionMapPlan,
 } from '../../lib/sectionMap'
+import { resolveSectionInk } from '../../lib/sectionInk'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 import { useT } from '../../i18n/useT'
@@ -17,9 +16,6 @@ import { plural } from '../../i18n/format'
 
 // Joint between cells (matches `.section-map { gap }` in index.css).
 const GAP = 4
-// Share of the section colour in the active tab of a section hidden from the AI
-// (matches `.section-map-tab.is-ai-hidden.is-active` in index.css).
-const AI_HIDDEN_MIX = 0.72
 // Px within which a tab counts as touching the block's edge (drop bar drawn inside it).
 const EDGE_TOLERANCE = 1.5
 
@@ -51,28 +47,6 @@ export interface SectionMapProps {
   onCloseMenu: () => void
   onAdd: () => void
   onReorder: (draggedId: string, targetId: string) => void
-}
-
-/**
- * Text colour of the active tab, on its solid section-colour background: the theme's
- * `--bg-0` (dark ink in dark themes) or `--text`, whichever contrasts more. Theme colours
- * are read from the live CSS vars (themeStore applies them before updating its state, so
- * they're current when a theme change re-renders this).
- */
-function resolveActiveInk(color: GroupColor, aiHidden: boolean): string {
-  const fallback = 'rgb(var(--bg-0))'
-  if (typeof document === 'undefined') return fallback
-  const css = getComputedStyle(document.documentElement)
-  const themeRgb = (name: string) => parseRgbTriple(css.getPropertyValue(name))
-  let background: Rgb | null = isCustomColor(color) ? hexToRgbChannels(color) : themeRgb(color)
-  const bgInk = themeRgb('--bg-0')
-  const textInk = themeRgb('--text')
-  if (!background || !bgInk || !textInk) return fallback
-  if (aiHidden) {
-    const editor = themeRgb('--bg-editor')
-    if (editor) background = mixRgb(background, editor, AI_HIDDEN_MIX)
-  }
-  return pickReadableInk(background, [bgInk, textInk]) === 0 ? fallback : 'rgb(var(--text))'
 }
 
 /**
@@ -212,10 +186,8 @@ export function SectionMap({
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     if (draggedId === sectionId) { setDrop(null); return }
-    const from = sections.findIndex((s) => s.id === draggedId)
-    const to = sections.findIndex((s) => s.id === sectionId)
-    if (from === -1 || to === -1) return
-    const side = from < to ? 'after' : 'before'
+    const side = reorderDropSide(sections, draggedId, sectionId)
+    if (!side) return
     // Fractional rects (offset* round to integers): the joint is the block's edge when the
     // tab sits within EDGE_TOLERANCE of it.
     const tabRect = e.currentTarget.getBoundingClientRect()
@@ -259,7 +231,7 @@ export function SectionMap({
   const activeColor = activeSection ? colorOf(activeSection) : null
   const activeAiHidden = !!activeSection?.aiHidden
   const activeInk = useMemo(
-    () => (activeColor ? resolveActiveInk(activeColor, activeAiHidden) : undefined),
+    () => (activeColor ? resolveSectionInk(activeColor, activeAiHidden) : undefined),
     // themeId/accentOverride: the vars it reads change with them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeColor, activeAiHidden, themeId, accentOverride],

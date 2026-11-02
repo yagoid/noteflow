@@ -208,7 +208,7 @@ export const featuresEn = {
       {
         tag: '01 / note overview',
         name: 'One note, all its sections',
-        desc: 'Every section of a note as a miniature editor card — jump straight to one, rename the note inline, add sections, or multi-select cards for batch <em>Hide from AI</em> / <em>Delete</em>. Opened from the grid button (⊞) next to the favorite star, or right-click → “Note overview”.',
+        desc: 'Every section of a note in one grid, with its real content and the one open in the editor highlighted — drag to reorder, double-click a name to rename, add one from the “New section” cell, or multi-select for batch <em>Hide from AI</em> / <em>Delete</em>. Opened from the grid button (⊞) next to the favorite star, or right-click → “Note overview”.',
       },
       {
         tag: '02 / group overview',

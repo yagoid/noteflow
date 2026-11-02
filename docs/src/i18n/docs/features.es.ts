@@ -209,7 +209,7 @@ export const featuresEs: FeaturesContent = {
       {
         tag: '01 / vista de nota',
         name: 'Una nota, todas sus secciones',
-        desc: 'Cada sección de una nota como una tarjeta-editor en miniatura — salta directo a una, renombra la nota inline, añade secciones, o selecciona varias tarjetas para <em>Hide from AI</em> / <em>Delete</em> por lotes. Se abre desde el botón de cuadrícula (⊞) junto a la estrella de favorito, o con click derecho → “Note overview”.',
+        desc: 'Todas las secciones de una nota en una cuadrícula, con su contenido real y la abierta en el editor destacada — arrastra para reordenar, doble clic en un nombre para renombrar, añade una desde la celda “New section”, o selecciona varias para <em>Hide from AI</em> / <em>Delete</em> por lotes. Se abre desde el botón de cuadrícula (⊞) junto a la estrella de favorito, o con click derecho → “Note overview”.',
       },
       {
         tag: '02 / vista de grupo',

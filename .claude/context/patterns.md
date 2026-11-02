@@ -95,33 +95,91 @@ la selección; si no, cierra la vista (los inline-edit siguen gestionando su pro
 mutuamente excluyentes** (group / note / brain / all-content): todos los setters (`setGroupView`,
 `setNoteView`, `setBrainView`, `setAllView`) y `setActiveNote` se limpian entre sí, así que abrir una
 cierra las otras y seleccionar una nota devuelve el editor. `App.tsx` la renderiza (`NoteOverview`) con la
-prioridad de routing (all-content → brain → group → note → editor). **Entradas:** botón en la toolbar de
-`NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual **de sección** (tag de
-sección en sidebar/vistas o tab del editor; el menú de la nota en sí no lo ofrece). Una
-**tarjeta por sección** que es un mini-mock del editor: etiqueta de sección, título de la nota +
-`Created <fecha>` de **la sección** (`firstValidDate(section.created, note.created)`; sin fecha válida se oculta), una barra-toolbar puramente representativa, y un **preview del contenido renderizado** con
-`htmlFromMarkdown` (de `lib/markdownHtml.ts`) dentro de `.prose-editor .ProseMirror`, encogido con
-CSS `zoom` (Chromium/Electron) y recortado a unas líneas con fade. El mock visual vive en
-`SectionPreview/SectionPreviewCard.tsx` (componente puro, props `compact`/`previewHeight`/`previewZoom`);
-`NoteOverview` lo envuelve en su `<button>`. Click en una tarjeta navega a esa sección con el mismo baile
-`pendingInitialSectionId` + `noteflow:request-section` diferido. Ancho de tarjeta **fijo** (sin slider).
-Las notas cifradas bloqueadas muestran un estado "encrypted". Sin IPC nuevo.
-**Header:** el `<h1>` del título es **editable inline** (click o icono lápiz en hover → `<input>` con
-autofocus+select, commit debounced en blur/Enter, Esc revierte — mismo patrón que `NoteEditor`); no editable
-cuando `locked`. Botón **Delete note** (rojo, junto a cerrar) abre `ConfirmModal` `danger` y llama
-`deleteNote(note.id)` (el effect que cierra al desaparecer la nota gestiona el cierre).
-**Multi-selección de secciones:** estado local `selectedIds: Set<string>` (por id, nunca índice) en
-`NoteOverview`; `App.tsx` keya la vista por `noteViewId` así que cambiar de nota remonta y resetea la
-selección sin effects. Cada `SectionCard` recibe `selected`/`selectionActive` y un checkbox (esquina sup-izq,
-visible en hover o siempre con ≥1 marcada; estado marcado en `accent`). Modificadores en el click de la card:
-Ctrl/Cmd-click togglea, Shift-click selecciona el rango (orden `note.sections`) desde el ancla (`anchorIdRef`),
-click normal abre la sección. La barra de selección (fila bajo el header) muestra `"N selected"` + **Hide/Show
-to AI** (solo `!note.encryption`; "Show to AI" si todas las marcadas tienen `aiHidden`), **Delete** (deshabilitado
-con tooltip si la selección == todas las secciones — borrarlas todas dejaría la nota vacía; confirma con
-`ConfirmModal`) y **Clear**. El conteo/derivados se calculan filtrando `selectedIds` contra `note.sections`
-(no se filtra el Set en un effect). `Esc` limpia la selección antes de cerrar la vista.
-**Nota CSS:** el reset global `button { border: none }` deja `border-style: none`, así que las tarjetas usan `border-solid` explícito para
-que el borde se vea (la utilidad `border` de Tailwind solo fija el ancho).
+prioridad de routing (all-content → brain → group → note → editor) y `onClose = closeFullView()` (vuelve al
+editor, o a "All content" si se vino de ahí). **Entradas:** el botón `LayoutGrid` de las acciones del mapa de
+secciones de `NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual **de sección**
+(tag de sección en sidebar/vistas o tab del editor; el menú de la nota en sí no lo ofrece). Sin IPC nuevo.
+
+**Es el mapa de secciones con la vista previa dentro** (`NoteOverview/NoteOverview.tsx`, lógica pura en
+`src/lib/noteOverviewGrid.ts` con test en `tests/lib/noteOverviewGrid.test.ts`, estilos `.note-grid*` en
+`index.css`). Ya **no** usa `SectionPreviewCard` (el mini-mock con zoom sigue para el hover y el cerebro).
+Decisiones a respetar si se toca:
+- **Un bloque reticulado**, como el mapa: juntas de 4 px sobre `--bg-editor`, radio 8 px fuera
+  (`overflow: hidden` en `.note-grid`) y 4 px en las celdas, fondo `--text / 0.06` (hover 0.09, sin bordes
+  ni sombras). Las tarjetas van en el **orden de las pestañas**.
+- **Filas explícitas, no `flex-wrap`:** `planNoteGrid(ids, openId, columns)` reparte en filas de
+  `columns` unidades; cada slot es `flex: <unidades> 1 0px` (filas justificadas, alto fijo 196 px). La
+  sección **abierta en el editor** cuenta 2 unidades (solo si hay > 2 columnas). Una sección que no cabe
+  cierra la fila antes (sus celdas se estiran). El hueco final de la última fila es la celda **"New
+  section"** (añade una sección y la abre en el editor); si la última fila está llena (o no hay secciones)
+  va en una **franja de 40 px** propia. Las celdas pueden remontarse al cambiar de fila (reordenar,
+  redimensionar): aquí da igual porque la sección abierta no cambia mientras la vista está abierta (abrir
+  otra cierra la vista), al contrario que en el mapa del editor.
+- **Columnas adaptativas:** `gridColumnCount(ancho)` = tantas de ≥ 220 px como quepan (mín. 1), medido con
+  un `ResizeObserver` sobre el contenedor en un `useLayoutEffect` (sin parpadeo).
+- **"Abierta"** = la sección que el editor tiene en un pane de esta nota (`primaryPaneForNote` →
+  `pane.sectionId`, si no `activeSectionByNote`, si no la primera). Si ningún pane muestra la nota (vista
+  abierta desde un tag de otra nota) **no hay** celda abierta: no se marca una sección que el editor no
+  enseña. La abierta lleva cabecera sólida del color con tinta en contraste (`resolveSectionInk`, ver
+  abajo), etiqueta "OPEN" y no tiene esquina.
+- **Compartido con el mapa** (no duplicar): la esquina doblada es `.section-map-corner` (con su
+  transición; aquí 14 px → 20 px en hover), la junta de destino al arrastrar es `.section-map-drop`
+  (`data-side`/`data-inside`), el lado de caída es `reorderDropSide()` de `lib/sectionMap.ts` y el
+  reordenado `moveSectionInList` vía `mutateSections` (la misma acción que el mapa). La tinta del sólido es
+  `resolveSectionInk()` de `lib/sectionInk.ts` (antes privada del mapa; mezcla al 72 % con `--bg-editor` si
+  está oculta a la IA); con `--accent` da también `--ng-accent-ink`, la tinta de las casillas marcadas.
+  Las reglas `.is-ai-hidden .section-map-corner` (esquina gris) del mapa aplican igual a las celdas.
+- **Borde del bloque en el drop:** como las filas son explícitas, "junta = borde del bloque" se sabe por
+  la posición en la fila (primera/última celda), sin medir rects (el mapa sí mide).
+- **Soltar sobre "New section"** lleva la tarjeta **al final** (`moveSectionToEnd` de
+  `lib/sectionUtils.ts`; no-op si ya es la última). La barra va en la junta antes de esa celda, o —si es
+  una franja propia porque la última fila estaba llena— dentro del borde derecho de la última tarjeta.
+- **Vista previa** (`SectionCell`, `memo`): el HTML de `htmlFromMarkdown` (el mismo renderizado que el
+  editor y el antiguo mini-mock) dentro de `.note-grid-body.note-preview > .prose-editor > .ProseMirror`,
+  restilado **a tamaño real** (11 px, títulos 12 px seminegrita en color de texto, código 10 px mono), sin
+  título de nota, fecha ni toolbar falsa, con `mask-image` que lo desvanece abajo. Tamaños enteros a
+  propósito (los fraccionarios emborronan la mono en Chromium, como en `.chat-md`), por eso no los 11,5 px
+  del boceto. Secciones raw → texto crudo en mono. Solo se renderiza el principio de una sección larga
+  (`clipPreviewMarkdown`, 4000 chars, corta en límite de bloque y cierra un fence abierto) y el HTML/las
+  estadísticas se memoizan por contenido; los handlers llegan a las celdas por una fachada estable (ref),
+  así que teclear en una sección (otra ventana/pane) solo re-renderiza su tarjeta.
+- **Pie:** `sectionCardStats(md)` → "Empty" / `hechas/total tasks` con ≥ 3 tareas (`- [ ]`/`- [x]` como
+  `markdownHtml`, fuera de fences; las tarjetas de kanban cuentan) / nº de palabras (sin sintaxis, URLs de
+  links, anotaciones 📅⏰🔺 ni comentarios HTML). A la derecha, "Markdown" (raw) y "Hidden from AI".
+- **Clic, doble clic y nombre:** un `<button class="note-grid-open">` cubre la celda (clic, foco, Intro);
+  la cabecera es `pointer-events: none` salvo el `<span>` del nombre. **Doble clic en el nombre = renombrar
+  inline** (input con anillo del color de la sección, Enter/blur guarda, Esc cancela, `F2` desde el
+  teclado). Para que el clic simple no abra antes, un clic simple **en el nombre** abre con 250 ms de
+  retraso y el segundo clic (`detail === 2`) lo cancela y renombra; en el resto de la celda el clic abre al
+  instante. Un doble clic más lento que el retraso solo abre la sección (fallo inocuo). Cualquier otra
+  interacción en esos 250 ms (casilla, Ctrl/Cmd/Mayús+clic, clic derecho, Ctrl+A, arrastre, F2) cancela el
+  temporizador, y al vencer no abre si ya hay selección o renombrado en curso. Con selección activa el
+  nombre no recibe clics (todo togglea).
+- **Selección múltiple:** estado local `selectedIds: Set<string>` (por id, nunca índice); `App.tsx` keya la
+  vista por `noteViewId`, así que cambiar de nota remonta y resetea sin effects. Casilla `role="checkbox"`
+  junto a la esquina (visible en hover y siempre con selección); marcada → anillo de acento de 1,5 px (un
+  `::after` por encima de la cabecera sólida). Ctrl/Cmd-click togglea, Shift-click selecciona el rango
+  (orden `note.sections`) desde el ancla, y con selección activa basta un clic. La barra flotante (sticky
+  abajo) es otro bloque reticulado (`.note-grid-sbar`): contador en acento, **Hide/Show to AI** (solo
+  `!note.encryption`), **Raw/Editor mode**, **Delete** (deshabilitado con tooltip si están todas; confirma
+  con `ConfirmModal`) y limpiar. Los derivados se calculan filtrando `selectedIds` contra `note.sections`.
+- **Teclado:** flechas mueven el foco entre celdas (`gridNeighbor`: ←→ en orden de pestañas, ↑↓ a la
+  celda de la fila vecina bajo el centro, en fracciones de fila); Intro abre. `Esc` (listener de `window`
+  en burbuja): limpia la selección y si no hay, cierra la vista. No hace nada con un input propio, la
+  confirmación propia, un menú o **cualquier modal** (`[aria-modal="true"]`: `ConfirmModal`,
+  `EncryptionModal` — p. ej. la confirmación de borrar nota o el desbloqueo que abre el menú `⋯`) abiertos.
+  Menú/modal se miran en un listener de **captura** de `window` que guarda el estado al empezar la
+  pulsación: corre antes que todos los de burbuja, así que no importa si el listener del modal (que lo
+  cierra con ese mismo Escape) va antes o después del nuestro. `Ctrl/Cmd+A` = seleccionar todo (no en
+  campos de texto, ni con un menú o modal abiertos).
+- **Cabecera** en el mismo plano (sin banda ni borde): título editable inline (click/lápiz → input con
+  commit debounced en blur/Enter, Esc revierte; no editable con `locked`), "N sections · edited …",
+  Select all, y a la derecha el **botón de cuadrícula activo** (`aria-pressed`, cierra la vista), favorito
+  y **`⋯`** = `NoteContextMenu` de **nota** (`sectionId: null`) con `onRenameNote` (prop opcional que añade
+  "Rename note" arriba y enfoca el título); **Delete note** vive ahí (con su confirmación y el desbloqueo
+  previo si la nota está bloqueada). Notas cifradas bloqueadas: estado "encrypted" sin rejilla.
+- El reset global `button { border: none }` obliga a dar `border` con estilo explícito (la casilla usa
+  `border: 1.5px solid …`).
 
 ### Vista "All content" (índice global)
 `notesStore` tiene `allViewOpen: boolean` + `setAllView(open)`. Es la **cuarta vista full-area** (prioridad
@@ -206,7 +264,7 @@ extensión que cambie el esquema va ahí**. Todo elemento soportado **round-trip
 (y lo vigila `tests/lib/editorRoundTrip.test.ts`, ver "Harness de round-trip" abajo): marcas inline en
 `inlineToHtml` (vive en `src/lib/markdownInline.ts`, hoja compartida con `kanban.ts` para no crear
 ciclos) / `inlineElToMd`, bloques en el bucle de `htmlFromMarkdown`/`blockElToMd`. Las mismas
-funciones las usa `SectionPreviewCard`, así que un elemento nuevo aparece también en los previews sin
+funciones las usan `SectionPreviewCard` y la vista de nota, así que un elemento nuevo aparece también en los previews sin
 código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.css`).
 - **Bold neutro + highlight de acento (decisión):** la negrita (`**`) ya **no** usa el color de
   acento (`strong { color: inherit }`); el texto en color de acento es una marca aparte, **highlight**
@@ -697,7 +755,10 @@ estilos `.section-map*` en `index.css`). Un único bloque `flex-wrap` (gap 4 px,
 salientes de un archivador; las juntas dejan ver `--bg-editor` (la fila ya no tiene banda de fondo
 propia). Lo usan los paneles del editor y la ventana de sección (`SectionWindowApp` monta
 `NoteEditor`); **no** es `Sidebar/SectionTabsRow.tsx` (los chips de sección del sidebar, otro
-componente con su propia `.section-tabs-scroll`). Decisiones a respetar si se toca:
+componente con su propia `.section-tabs-scroll`). La **vista de nota** es el mismo bloque con la vista
+previa dentro y comparte piezas con él (`.section-map-corner`, `.section-map-drop`, `reorderDropSide`,
+`resolveSectionInk`): si cambias una, revisa también "Vista de nota (note overview)". Decisiones a
+respetar si se toca:
 - **Filas justificadas:** inactivas `flex: 1 1 auto`, activa `flex-grow: 2.6` → cada fila llena el
   ancho y el mapa es un rectángulo. Al cambiar de sección `flex-grow` transiciona 450 ms (color/fondo
   250 ms, `max-width` de la etiqueta 450 ms, el chevron entra con retraso); con
@@ -716,7 +777,8 @@ componente con su propia `.section-tabs-scroll`). Decisiones a respetar si se to
   oscilar). El hover solo aclara el fondo y agranda la "esquina doblada".
 - **Color:** `resolveGroupColor(nombre)` → `--sm-color` por pestaña (var del tema o hex). Inactivas:
   fondo `--text / 0.06` y un triángulo de 7 px (11 px en hover) en la esquina sup-dcha con el color;
-  activa: fondo sólido del color. Su **tinta** (`--sm-ink`) la elige `resolveActiveInk()`: lee del
+  activa: fondo sólido del color. Su **tinta** (`--sm-ink`) la elige `resolveSectionInk()`
+  (`lib/sectionInk.ts`, compartida con la vista de nota): lee del
   `getComputedStyle` de `<html>` el RGB del color (o parsea el hex) y de `--bg-0`/`--text`, y se queda
   con el de más contraste WCAG (`pickReadableInk`, empate → `--bg-0`). En temas oscuros sale `--bg-0`
   (tinta oscura) salvo colores muy oscuros; en claros depende del color (p. ej. ámbar de NoteFlow Light
@@ -997,7 +1059,7 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   `--mini-sidebar-reserve` (`MINI_SIDEBAR_RESERVE` = 34 px); `index.css` lo aplica como
   `--pm-pad-l` del `.ProseMirror` del editor real (`.editor-scroll > .prose-editor`; en Readable + TOC,
   como suelo del mismo `clamp`) y como `padding-left` del textarea raw (`.raw-editor`), así nada de
-  texto queda bajo la mini-vista. Las tarjetas `.note-preview` de la vista de nota (también
+  texto queda bajo la mini-vista. Las previews `.note-preview` (vista de nota, hover, cerebro; también
   `.prose-editor`) quedan fuera a propósito.
   Es el espejo izquierdo de `--toc-reserve`; se aplica a todos los panes (en el split solo el primero
   la necesita, la diferencia es de 10 px).

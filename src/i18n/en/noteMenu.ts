@@ -10,6 +10,8 @@ export const noteMenu = {
   // from the note menu, on the section the note would open on (see SectionWindowApp).
   openInNewWindow: 'Open in New Window',
   duplicateNote: 'Duplicate note',
+  // Note menu of the note overview's ⋯ button: renames the note in its header.
+  renameNote: 'Rename note',
   noteOverview: 'Note overview',
   // Section menu of an editor tab: renames it inline on the tab.
   renameSection: 'Rename section',

@@ -73,7 +73,7 @@ encryption:
   fallback al mostrar con `firstValidDate(section.created, note.created)` (`src/lib/dateUtils.ts`;
   un valor no parseable —p. ej. editado a mano— también cae a `note.created`, y si ninguno es
   válido no se muestra la fecha) — línea `Created …` bajo el título del editor y tarjetas
-  `SectionPreviewCard`.
+  `SectionPreviewCard` (hover / cerebro; la vista de nota ya no muestra fecha).
 - Tags se extraen del contenido con `#nombre` (`extractTags`).
 - `NOTEFLOW_NOTES_DIR` (env) redirige el dir de notas en app y CLI (testing/scripting).
 - Los parsers toleran BOM UTF-8 (editores externos como Notepad lo añaden).

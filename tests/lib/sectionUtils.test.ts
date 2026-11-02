@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { duplicateSectionInList, moveSectionInList, patchSectionInList, restoreSectionInList } from '../../src/lib/sectionUtils'
+import { duplicateSectionInList, moveSectionInList, moveSectionToEnd, patchSectionInList, restoreSectionInList } from '../../src/lib/sectionUtils'
 import type { NoteSection } from '../../src/types'
 
 const NOW = '2026-10-11T12:00:00.000Z'
@@ -84,6 +84,18 @@ describe('moveSectionInList', () => {
     expect(moveSectionInList(base(), 'a', 'a')).toBeNull()
     expect(moveSectionInList(base(), 'x', 'a')).toBeNull()
     expect(moveSectionInList(base(), 'a', 'x')).toBeNull()
+  })
+})
+
+describe('moveSectionToEnd', () => {
+  it('moves the dragged section to the end of the list', () => {
+    expect(moveSectionToEnd(base(), 'a')?.map((s) => s.id)).toEqual(['b', 'c', 'a'])
+    expect(moveSectionToEnd(base(), 'b')?.map((s) => s.id)).toEqual(['a', 'c', 'b'])
+  })
+
+  it('returns null when the section is missing or already last', () => {
+    expect(moveSectionToEnd(base(), 'c')).toBeNull()
+    expect(moveSectionToEnd(base(), 'x')).toBeNull()
   })
 })
 

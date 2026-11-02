@@ -9,8 +9,6 @@ import { formatDate } from '../../i18n/formatDate'
 import type { SectionTagColorMap } from '../../stores/sectionTagColorsStore'
 import type { Note, NoteSection } from '../../types'
 
-// Fixed card width (px) — a section card is a small mock of the open editor.
-export const CARD_WIDTH = 240
 // Height of the clamped content area (≈ a handful of lines once zoomed).
 const PREVIEW_HEIGHT = 132
 // `zoom` shrinks the rendered body (Chromium-only, fine in Electron) so the few
@@ -30,8 +28,8 @@ interface SectionPreviewCardProps {
 }
 
 // A small mock of the editor when that section is open. Pure presentation — the
-// caller decides how to wrap it (a clickable button in the Note overview, a
-// floating popover when hovering a navigation trigger).
+// caller decides how to wrap it (the floating popover when hovering a navigation
+// trigger, the Brain view's node preview).
 export function SectionPreviewCard({
   note,
   section,

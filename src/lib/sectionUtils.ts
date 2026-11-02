@@ -63,6 +63,19 @@ export function moveSectionInList(
 }
 
 /**
+ * Drop on the note overview's "New section" cell: moves `draggedId` to the end of the list.
+ * Null when it's missing or already last.
+ */
+export function moveSectionToEnd(sections: NoteSection[], draggedId: string): NoteSection[] | null {
+  const from = sections.findIndex((s) => s.id === draggedId)
+  if (from === -1 || from === sections.length - 1) return null
+  const next = [...sections]
+  const [moved] = next.splice(from, 1)
+  next.push(moved)
+  return next
+}
+
+/**
  * Undo of a section delete: re-inserts `section` at `index` (clamped) into the CURRENT
  * list, so edits made to other sections in the meantime survive. Null if it's back already.
  */

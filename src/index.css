@@ -68,10 +68,12 @@ button {
   height: 100%;
 }
 
-/* Miniature read-only note preview (Note overview cards). Renders the exact
-   prose markup the editor uses, but shrunk via `zoom` so the few visible lines
-   read like the open note in miniature. The card supplies its own insets, so the
-   ProseMirror padding is zeroed and the first block's top margin is removed. */
+/* Read-only section previews that render the exact prose markup the editor uses
+   (static HTML from htmlFromMarkdown): SectionPreviewCard (hover popover, Brain
+   preview) shrinks it via `zoom` into a miniature of the open note; the note
+   overview grid (.note-grid-body.note-preview) restyles it at reading size. The
+   container supplies its own insets, so the ProseMirror padding is zeroed and the
+   first block's top margin is removed. */
 .note-preview .prose-editor {
   height: auto;
 }
@@ -1116,6 +1118,347 @@ button {
   .section-map-tab *,
   .section-map-pill,
   .section-map-add { transition: none !important; }
+}
+
+/* ── Note overview grid (NoteOverview/NoteOverview.tsx) ──────────────────────
+   The section map's block with the content preview inside: one block of cells
+   in justified rows (lib/noteOverviewGrid.ts plans them; each slot is
+   `flex: <units> 1 0px`), 4px joints over --bg-editor, radius 8px outside and 4px
+   inside. Each cell sets --sm-color (its section colour) and the open one --sm-ink;
+   the root sets --ng-accent-ink (readable ink on the accent). It reuses the map's
+   folded corner (.section-map-corner) and drop bar (.section-map-drop). */
+.note-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.note-grid-row { display: flex; gap: 4px; height: 196px; }
+.note-grid-row.is-slim { height: 40px; }
+/* Slot = cell + its drop bar (outside the cell, which clips its content). */
+.note-grid-slot { position: relative; display: flex; min-width: 0; }
+
+.note-grid-cell {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 4px;
+  background: rgb(var(--text) / 0.06);
+  overflow: hidden;
+  transition: background-color 250ms ease;
+}
+.note-grid-cell:hover { background: rgb(var(--text) / 0.09); }
+.note-grid-cell.is-ai-hidden { background: rgb(var(--text) / 0.035); }
+.note-grid-cell.is-ai-hidden:hover { background: rgb(var(--text) / 0.065); }
+/* Selection / keyboard-focus ring, drawn over the (solid) header too. */
+.note-grid-cell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1.5px transparent;
+  transition: box-shadow 200ms ease;
+}
+.note-grid-cell.is-selected::after,
+.note-grid-cell:has(> .note-grid-open:focus-visible)::after { box-shadow: inset 0 0 0 1.5px rgb(var(--accent)); }
+/* The dragged card leaves its hole behind (like the map's tab). */
+.note-grid-cell.is-dragging,
+.note-grid-cell.is-dragging:hover { background: rgb(var(--text) / 0.025); }
+.note-grid-cell.is-dragging::after { box-shadow: inset 0 0 0 1px rgb(var(--text) / 0.07); }
+.note-grid-cell.is-dragging > * { opacity: 0; }
+
+/* The card's click / focus / Enter target, under the header and the checkbox. */
+.note-grid-open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.note-grid-open:focus-visible { outline: none; }
+.note-grid-cell[draggable="true"]:active .note-grid-open { cursor: grabbing; }
+
+/* Header (= the tab): clicks fall through to .note-grid-open except on the name. */
+.note-grid-head {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 34px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0 50px 0 12px;
+  color: rgb(var(--text));
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+  transition: background-color 250ms ease, color 250ms ease;
+}
+.note-grid-cell.is-ai-hidden .note-grid-head { color: rgb(var(--text-muted)); }
+.note-grid-cell.is-open .note-grid-head { background: var(--sm-color); color: var(--sm-ink); }
+.note-grid-cell.is-open.is-ai-hidden .note-grid-head {
+  background: color-mix(in srgb, var(--sm-color) 72%, rgb(var(--bg-editor)));
+}
+.note-grid-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+  cursor: pointer;
+}
+/* With a selection active a click anywhere toggles: the name doesn't take it. */
+.note-grid.is-selecting .note-grid-name { pointer-events: none; }
+.note-grid-tag {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+/* Inline rename: tinted field + inner ring in the section colour (as in the map). */
+.note-grid-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  margin-left: -6px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  outline: none;
+  background: color-mix(in srgb, var(--sm-color) 18%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--sm-color);
+  caret-color: var(--sm-color);
+  color: rgb(var(--text));
+  font: inherit;
+  pointer-events: auto;
+}
+.note-grid-cell.is-open .note-grid-rename {
+  background: color-mix(in srgb, var(--sm-ink) 12%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--sm-ink);
+  caret-color: var(--sm-ink);
+  color: var(--sm-ink);
+}
+
+/* The map's folded corner, bigger on a bigger cell. */
+.note-grid-cell .section-map-corner { z-index: 1; width: 14px; height: 14px; }
+.note-grid-cell:hover .section-map-corner { width: 20px; height: 20px; }
+
+/* Selection checkbox, left of the corner: on hover, always while selecting. */
+.note-grid-tick {
+  position: absolute;
+  top: 8px;
+  right: 26px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1.5px solid rgb(var(--text) / 0.4);
+  border-radius: 4px;
+  background: rgb(var(--bg-editor) / 0.6);
+  color: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms ease, background-color 150ms ease, border-color 150ms ease;
+}
+.note-grid-cell:hover .note-grid-tick,
+.note-grid.is-selecting .note-grid-tick,
+.note-grid-tick:focus-visible { opacity: 1; }
+.note-grid-tick:focus-visible { outline: none; box-shadow: 0 0 0 2px rgb(var(--accent)); }
+.note-grid-cell.is-open .note-grid-tick {
+  border-color: color-mix(in srgb, var(--sm-ink) 55%, transparent);
+  background: color-mix(in srgb, var(--sm-ink) 12%, transparent);
+}
+.note-grid-tick[aria-checked="true"],
+.note-grid-cell.is-open .note-grid-tick[aria-checked="true"] {
+  border-color: rgb(var(--accent));
+  background: rgb(var(--accent));
+  color: var(--ng-accent-ink);
+}
+
+/* Preview: the section's real content at reading size, fading out at the bottom. */
+.note-grid-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 2px 12px 0;
+  pointer-events: none;
+  user-select: none;
+  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent);
+  mask-image: linear-gradient(to bottom, #000 62%, transparent);
+}
+/* Whole-pixel sizes on purpose: fractional ones blur monospace fonts in Chromium. */
+.note-grid-body .prose-editor .ProseMirror {
+  font-size: 11px;
+  line-height: 1.55;
+  color: rgb(var(--text) / 0.82);
+}
+.note-grid-body .prose-editor .ProseMirror h1,
+.note-grid-body .prose-editor .ProseMirror h2,
+.note-grid-body .prose-editor .ProseMirror h3 {
+  margin: 4px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: normal;
+  color: rgb(var(--text));
+}
+.note-grid-body .prose-editor .ProseMirror p { margin: 0 0 4px; }
+.note-grid-body .prose-editor .ProseMirror ul,
+.note-grid-body .prose-editor .ProseMirror ol { padding-left: 14px; margin: 0 0 2px; }
+.note-grid-body .prose-editor .ProseMirror ul:not([data-type="taskList"]) > li,
+.note-grid-body .prose-editor .ProseMirror ol > li { margin-bottom: 2px; }
+.note-grid-body .prose-editor .ProseMirror li::marker { color: rgb(var(--text-muted)); }
+.note-grid-body .prose-editor .ProseMirror ul[data-type="taskList"] { padding-left: 0; }
+.note-grid-body .prose-editor .ProseMirror ul[data-type="taskList"] > li { gap: 7px; margin-bottom: 3px; }
+.note-grid-body .prose-editor .ProseMirror ul[data-type="taskList"] li input[type="checkbox"] {
+  width: 11px;
+  height: 11px;
+  border-color: rgb(var(--text-muted) / 0.7);
+}
+.note-grid-body .prose-editor .ProseMirror ul[data-type="taskList"] li input[type="checkbox"]:checked {
+  background: rgb(var(--accent));
+  border-color: rgb(var(--accent));
+}
+.note-grid-body .prose-editor .ProseMirror ul[data-type="taskList"] li input[type="checkbox"]:checked::after {
+  font-size: 8px;
+  color: var(--ng-accent-ink);
+}
+.note-grid-body .prose-editor .ProseMirror code { font-size: 10px; }
+.note-grid-body .prose-editor .ProseMirror pre {
+  margin: 3px 0;
+  padding: 4px 7px;
+  border: none;
+  border-radius: 4px;
+  background: rgb(var(--bg-0) / 0.55);
+}
+.note-grid-body .prose-editor .ProseMirror pre code { font-size: 10px; }
+.note-grid-body .prose-editor .ProseMirror blockquote { margin: 3px 0; padding-left: 8px; border-left-width: 2px; }
+.note-grid-body .prose-editor .ProseMirror hr { margin: 6px 0; }
+.note-grid-body .prose-editor .ProseMirror table { font-size: 10px; }
+/* Raw-markdown sections: the text as is, in mono. */
+.note-grid-raw {
+  margin: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1.55;
+  color: rgb(var(--text) / 0.72);
+  white-space: pre;
+  overflow: hidden;
+}
+.note-grid-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+  font-size: 11px;
+  color: rgb(var(--text-muted) / 0.85);
+}
+
+.note-grid-foot {
+  flex: 0 0 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 10px;
+  color: rgb(var(--text-muted));
+  pointer-events: none;
+}
+.note-grid-badge { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+/* "New section": the hole at the end of the last row (or a 40px strip). */
+.note-grid-add {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 4px;
+  background: rgb(var(--text) / 0.035);
+  color: rgb(var(--text-muted));
+  font-size: 12px;
+  font-weight: 500;
+  transition: background-color 250ms ease, color 250ms ease;
+}
+.note-grid-add:hover { background: rgb(var(--text) / 0.08); color: rgb(var(--text)); }
+.note-grid-add:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px rgb(var(--accent)); }
+
+/* The map's drop bar, above the cells' own layers. */
+.note-grid .section-map-drop { z-index: 4; }
+
+/* Header buttons (same plane as the content, no band). */
+.note-grid-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--text-muted));
+  font-size: 12px;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.note-grid-ghost:hover { background: rgb(var(--text) / 0.09); color: rgb(var(--text)); }
+.note-grid-ghost:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px rgb(var(--accent)); }
+.note-grid-ghost[aria-pressed="true"] { background: rgb(var(--accent) / 0.14); color: rgb(var(--accent)); }
+.note-grid-ghost[aria-pressed="true"]:hover { background: rgb(var(--accent) / 0.22); }
+.note-grid-ghost.is-favorite { color: rgb(var(--accent-3)); }
+
+/* Floating selection bar: a reticulated block too (same joints and radii). */
+.note-grid-sbar-wrap {
+  padding: 4px;
+  border-radius: 12px;
+  background: rgb(var(--bg-editor));
+  box-shadow: 0 0 0 1px rgb(var(--text) / 0.07), 0 18px 40px rgb(0 0 0 / 0.35);
+}
+.note-grid-sbar { display: flex; gap: 4px; border-radius: 8px; overflow: hidden; }
+.note-grid-sbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 4px;
+  background: rgb(var(--text) / 0.07);
+  color: rgb(var(--text) / 0.82);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 200ms ease, color 200ms ease;
+}
+.note-grid-sbar-btn:hover:not(:disabled) { background: rgb(var(--text) / 0.12); color: rgb(var(--text)); }
+.note-grid-sbar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.note-grid-sbar-btn:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px rgb(var(--accent)); }
+.note-grid-sbar-btn.is-count { background: rgb(var(--accent) / 0.14); color: rgb(var(--accent)); font-weight: 600; cursor: default; }
+.note-grid-sbar-btn.is-danger,
+.note-grid-sbar-btn.is-danger:hover:not(:disabled) { color: rgb(var(--red)); }
+.note-grid-sbar-btn.is-icon { width: 32px; padding: 0; justify-content: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .note-grid *,
+  .note-grid *::after,
+  .note-grid-ghost,
+  .note-grid-sbar-btn { transition: none !important; }
 }
 
 /* ── Sidebar notes list: thin scrollbar, visible only on hover ───────────── */

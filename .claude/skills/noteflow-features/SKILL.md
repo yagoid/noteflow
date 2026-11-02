@@ -361,58 +361,71 @@ Acento del color del grupo a la izquierda.
 ## Vista de nota (note overview)
 
 Vista amplia que **sustituye el área del editor** para ver de un vistazo **todas las secciones de
-una nota**, cada una como una **mini-representación del editor** al abrir esa sección. El sidebar
-permanece visible como contexto. Pensada para saltar rápido a una sección concreta o repasar la
-estructura de una nota con muchas secciones. Es una de las tres vistas full-area mutuamente
-excluyentes (grupo / nota / cerebro): abrir una cierra las otras, y seleccionar cualquier nota
+una nota**. Es el **mapa de secciones del editor con la vista previa dentro**: las secciones son
+celdas de un mismo bloque reticulado (juntas finas, esquinas exteriores redondeadas, sin bordes ni
+sombras), en el **orden de las pestañas**, cada una con su contenido real legible. El sidebar
+permanece visible como contexto. Pensada para saltar rápido a una sección, repasar la estructura de
+una nota con muchas secciones o reorganizarla. Es una de las vistas full-area mutuamente excluyentes
+(grupo / nota / cerebro / all content): abrir una cierra las otras, y seleccionar cualquier nota
 vuelve al editor.
 
 **Cómo entrar:**
-- Botón **⊞** (icono de cuadrícula) en la toolbar del editor, justo **al lado de la estrella de
-  favoritos**.
+- Botón **⊞** (icono de cuadrícula) de las acciones del mapa de secciones del editor, justo **al lado
+  de la estrella de favoritos**.
 - **Click derecho** sobre un **tag de sección** (sidebar / vistas) o un **tab del editor** →
-  **"Note overview"** (el menú de la nota en sí ya no lo ofrece).
+  **"Note overview"** (el menú de la nota en sí no lo ofrece).
 
-**Cómo salir:** `Esc`, el botón `✕` de la cabecera, o click en una tarjeta de sección (abre esa
-sección en el editor).
+**Cómo salir:** `Esc` (si no hay selección), el botón **⊞ activo** de la cabecera (resaltado en el
+color de acento: "estás en la vista de nota"; vuelve al editor, o a "All content" si veniste de ahí),
+o click en una tarjeta (abre esa sección en el editor).
 
-**Disposición** (misma estética mono-minimalista que la group overview):
-- Cabecera: candado si está cifrada + **título de la nota editable inline** (click o lápiz al hacer
-  hover → input; commit en blur/Enter, `Esc` revierte; no editable si está bloqueada) + estrella de
-  favorito (toggle) + contador (`N sections · fecha`) + botón **"Select all" / "Deselect all"** (solo
-  si hay secciones) + botón **"Add section"** + botón **borrar nota** (papelera roja, con
-  confirmación) + `✕`.
-- Cuadrícula de **tarjetas de ancho fijo**, una por sección.
+**Cabecera** (en el mismo plano que el contenido, sin banda): candado si está cifrada + **título de la
+nota editable inline** (click o lápiz al hacer hover → input; commit en blur/Enter, `Esc` revierte; no
+editable si está bloqueada) + `N sections · edited <fecha>` + **"Select all" / "Deselect all"** (solo si
+hay secciones) + separador + **⊞ activo** + **estrella** de favorito + **`⋯`** = el **menú de la nota**
+(el mismo del click derecho en el sidebar) con además **Rename note** arriba; **Delete note** vive ahí
+(con confirmación).
 
-**Tarjeta de sección** — replica lo que verías al pinchar esa sección (de las pestañas hacia abajo):
-- Etiqueta superior con el **nombre de la sección** y su color (identifica la tarjeta) + icono
-  rich/raw.
-- **Título de la nota + `Created <fecha>` de la sección** (la de la nota si la sección es antigua y
-  no tiene la suya).
-- Una **barra-toolbar representativa** (oscura, sin iconos — solo evoca la toolbar del editor).
-- **Unas pocas líneas** del contenido de la sección, renderizadas igual que en el editor pero
-  diminutas (vía `zoom`) y recortadas con un fade inferior. Las secciones vacías muestran "Empty
-  section".
+**Rejilla:**
+- **Columnas adaptativas**: tantas de ≥ 220 px como quepan (mínimo 1). Filas **justificadas** de alto
+  fijo: todas llegan al mismo borde; una tarjeta que no cabe cierra la fila y las de esa fila se estiran.
+- La sección **abierta en el editor** (si la nota está en algún panel) ocupa **dos columnas** (si hay
+  más de dos), con la cabecera en su **color sólido** y la etiqueta **OPEN**.
+- El hueco final de la última fila es la celda **"New section"** (crea una sección y te lleva al editor
+  en ella); si la última fila está llena, aparece como una franja fina debajo. Ya no hay botón "Add
+  section" en la cabecera.
 
-**Acciones:**
-- **Abrir sección** → click en la tarjeta (te lleva directo a esa sección en el editor).
-- **Add section** → crea una sección nueva y **navega al editor en ella** para escribir.
-- **Renombrar la nota** → click en el título de la cabecera (o el lápiz al hacer hover).
-- **Borrar la nota** → botón de papelera en la cabecera (con confirmación).
-- **Favorito** → toggle de la estrella en la cabecera.
-- **Selección múltiple de secciones** (igual que en la group overview): un **checkbox** aparece en la
-  esquina superior derecha de cada tarjeta al hacer hover; **click** en el checkbox lo marca,
-  **Ctrl/Cmd-click** sobre la tarjeta togglea, **Shift-click** selecciona el rango. El botón
-  **"Select all"** de la cabecera (y `Ctrl/Cmd+A`) marca todas las secciones; si ya lo están, pasa a
-  **"Deselect all"** y limpia la selección. Con ≥1 marcada aparece una **barra de acciones flotante**
-  anclada abajo: **Hide from AI / Show to AI** (oculta o vuelve a indexar las secciones para la IA;
-  solo en notas no cifradas), **Raw mode / Editor mode** (cambia de golpe el modo de todas las
-  seleccionadas — el mismo flag persistido que el menú `⋯` de la sección en el editor; si todas ya
-  están en raw, el botón las devuelve al editor; nunca toca el contenido), **Delete** (borra las
-  seleccionadas con confirmación — deshabilitado si están todas marcadas, para no dejar la nota
-  vacía) y **Clear**. `Esc` limpia la selección antes de cerrar la vista.
-- Notas **cifradas y bloqueadas** muestran un estado "encrypted" (sin previews) hasta desbloquear
-  en el editor.
+**Tarjeta de sección:**
+- **Cabecera** con el nombre (en color de texto, una línea) y la **esquina doblada** arriba a la derecha
+  en el color de la sección (crece al pasar el ratón), como las pestañas del mapa. Oculta a la IA →
+  icono de ojo tachado, celda más tenue, nombre atenuado y esquina gris.
+- **Vista previa** del contenido real a tamaño legible (títulos, listas, tareas con casilla — hechas
+  tachadas —, código en mono), que se desvanece abajo; las secciones en modo markdown muestran el texto
+  crudo en mono; las vacías, "Empty section · click to write".
+- **Pie**: progreso de tareas (`2/6 tasks`) si tiene 3 o más, si no el número de palabras ("Empty" si
+  no hay nada); a la derecha las marcas **Markdown** (modo raw) y **Hidden from AI**.
+
+**Interacciones:**
+- **Clic** → abre la sección en el editor (cierra la vista).
+- **Doble clic en el nombre** → **renombrar en línea** (campo con el aro del color de la sección; Enter
+  o perder el foco guarda, Esc cancela). Un clic simple sobre el nombre espera un instante antes de
+  abrir, para dejar sitio al doble clic.
+- **Arrastrar** una tarjeta → **reordena las secciones** (el mismo orden que las pestañas del editor):
+  deja su hueco y la junta de destino se ilumina con la barra de acento, igual que en el mapa. Soltarla
+  sobre la celda "New section" la lleva al final.
+- **Click derecho** → el menú de sección de siempre (color, IA, abrir en paralelo, duplicar, borrar…).
+- **Selección múltiple**: la **casilla** junto a la esquina aparece al pasar el ratón (y queda visible en
+  todas mientras haya selección); **Ctrl/Cmd+clic** togglea, **Mayús+clic** selecciona el rango, y con
+  algo seleccionado basta un clic. "Select all" (o `Ctrl/Cmd+A`) marca todas; si ya lo están, las
+  desmarca. Las seleccionadas llevan un aro de acento. Con ≥1 marcada aparece una **barra flotante**
+  abajo (también reticulada): contador, **Hide from AI / Show to AI** (oculta o vuelve a indexar para la
+  IA; solo en notas no cifradas), **Raw mode / Editor mode** (cambia de golpe el modo de todas las
+  seleccionadas; nunca toca el contenido), **Delete** (con confirmación; deshabilitado si están todas,
+  para no dejar la nota vacía) y **✕** para limpiar.
+- **Teclado**: `← → ↑ ↓` mueven el foco entre tarjetas, `Intro` abre, `F2` renombra, `Esc` limpia la
+  selección y, si no hay, vuelve al editor.
+- Notas **cifradas y bloqueadas** muestran un estado "encrypted" (sin rejilla) hasta desbloquear en el
+  editor.
 
 ---
 
@@ -527,7 +540,7 @@ salientes de un archivador (sin scroll horizontal):
   las tools del agente — la IA actúa como si no existiera (el resto de la app la trata con normalidad).
   Disponible en el **menú `⋯` del editor** (sección activa) y en el **click derecho sobre un tag de
   sección** (sidebar, vista de grupo y tarjetas de la vista de nota). Las secciones ocultas muestran
-  un icono `EyeOff` (pestaña del editor, tags del sidebar, badge en la vista de nota); `Show to AI` lo
+  un icono `EyeOff` (pestaña del editor, tags del sidebar, cabecera y pie de la tarjeta en la vista de nota); `Show to AI` lo
   revierte (re-indexa la sección). Útil para datos sensibles o ruido que no quieres que el modelo use.
 
 Las secciones aparecen como pequeños tags en la tarjeta de la nota y son clickeables para
@@ -547,9 +560,10 @@ navegar directamente a esa sección.
 ## Previsualización de sección al hover
 
 Cualquier elemento que **navega a una sección concreta** muestra, al pasar el ratón, una
-**tarjeta flotante con una previsualización** de esa sección — la misma mini-representación del
-editor que usa la [vista de nota](#vista-de-nota-note-overview) (etiqueta de sección + título +
-fecha + unas líneas del contenido renderizado, recortadas con fade). Permite ojear el contenido
+**tarjeta flotante con una previsualización** de esa sección — una mini-representación del
+editor (etiqueta de sección + título + fecha + unas líneas del contenido renderizado, recortadas
+con fade). La [vista de nota](#vista-de-nota-note-overview) ya no usa esta tarjeta: muestra el
+contenido a tamaño real dentro de su rejilla. Permite ojear el contenido
 sin navegar.
 
 **Dónde aparece:**
@@ -1067,7 +1081,8 @@ Click sobre la **nota**:
 ```
 
 El menú de nota **no** ofrece "Note overview" (sí el de sección; la vista se abre con el botón ⊞ del
-editor). **Open in New Window** reutiliza la ventana de sección (`openSectionWindow`), que muestra la
+editor). Abierto desde el `⋯` de la vista de nota, el mismo menú añade **Rename note** arriba (renombra
+en el título de la cabecera). **Open in New Window** reutiliza la ventana de sección (`openSectionWindow`), que muestra la
 nota completa con sus tabs: se abre en la sección en la que se abriría la nota al pulsarla (la última
 activa en esta sesión, `activeSectionByNote`; si no, la primera).
 
@@ -1458,6 +1473,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+Tab` | Siguiente sección |
 | `Ctrl+Shift+Tab` | Sección anterior |
 | `Ctrl+A` | Seleccionar todo (secciones en la vista de nota, notas en la vista de grupo) |
+| `← → ↑ ↓` / `Intro` / `F2` | Vista de nota: mover el foco entre tarjetas / abrir la sección / renombrarla |
 | `Delete` | Borrar nota seleccionada (cuando no se edita) |
 
 ### Sticky notes
