@@ -1219,15 +1219,23 @@ ninguno → Cloud); a partir de ahí manda la elección del usuario. Con Cloud a
 
 ## NoteFlow Cloud (Settings → Sync)
 
-> **Copias de conflicto:** si editas una nota **en la app con NoteFlow Cloud activado** y tu edición
-> aún no ha subido (sin conexión, o antes del primer sync del arranque) cuando otro dispositivo la
-> cambia (o la borra), al reconectar gana la versión más reciente del servidor, pero tu versión local
-> se guarda como nota nueva "<título> (conflict copy AAAA-MM-DD HH:mm)" (en español "copia en
-> conflicto"), en el mismo grupo/carpeta y con las mismas secciones (una nota cifrada sigue cifrada
-> con la misma contraseña); se sube como cualquier nota y se avisa en la tarjeta del botón de sync del
-> titlebar. **No cubre:** ediciones hechas con Cloud desactivado o desde el CLI con la app cerrada; un
-> `noteflow cloud pull` del CLI sobre una edición offline pendiente de la app; ni el caso en que tu
-> edición local es más nueva que la remota (gana la tuya, sin copia). El GitHub Sync tiene su propia
+> **Fusión por secciones y copias de conflicto:** si editas una nota **en la app con NoteFlow Cloud
+> activado** sin conexión (o antes del primer sync del arranque) y mientras tanto otro dispositivo
+> cambia **otras secciones** de esa nota, al reconectar se **combinan**: te quedas con tus secciones
+> y con las suyas, sin copia; también las secciones nuevas que añadió cada uno. Si los dos tocasteis
+> los datos de la nota (lo normal en cuanto cambian etiquetas, que salen del contenido), el título, el
+> grupo/carpeta y los nombres de sección los decide el otro dispositivo; las etiquetas se suman, y una
+> sección **oculta a la IA** o una nota **favorita** en cualquiera de los dos lados sigue oculta/favorita.
+> Si los dos cambiasteis **la misma sección**, la nota se queda con la versión del otro
+> dispositivo y la tuya se guarda como nota nueva "<título> (conflict copy AAAA-MM-DD HH:mm)" (en
+> español "copia en conflicto") **con solo esas secciones**, en el mismo grupo/carpeta. Una nota
+> **cifrada** no se puede combinar: gana la del servidor y tu versión entera va a la copia (sigue
+> cifrada con la misma contraseña). Si la borran (la nota o una sección) en otro dispositivo mientras
+> tú la editabas, tu versión se conserva y sigue visible en la nota (o va a una copia). La copia se sube como cualquier nota y se avisa en la
+> tarjeta del botón de sync del titlebar. El primer sync tras actualizar la app relee toda la nube una
+> vez para aplicar ya esta regla a todas las notas (también a ediciones offline hechas antes de ese
+> primer sync). **No cubre:** ediciones desde el CLI (sigue con la regla antigua); un
+> `noteflow cloud pull` del CLI sobre una edición offline pendiente de la app. El GitHub Sync tiene su propia
 > versión (ver "GitHub Sync" → "Si otro dispositivo cambió la nota"). Puede salir una
 > copia de más (otro cliente que formatee distinto el YAML, notas cifradas) y la copia conserva
 > favorito/caducidad/alarmas (pueden sonar dos veces). El CLI con Cloud hace lo mismo con sus propias

@@ -45,24 +45,33 @@ export interface WrittenConflictCopy {
 }
 
 /**
- * Writes the conflict copy of the LOCAL note folder '<dir>' — the WHOLE folder
- * (every section), so it opens as the complete local version of the note — as
+ * Writes the conflict copy of the LOCAL note folder '<dir>' — by default the
+ * WHOLE folder (every section), so it opens as the complete local version of the note — as
  * a new note folder with a fresh id and the title '<title> (<label> <date>)'
  * (buildConflictCopy). `label` is the localized "conflict copy". The copy's
  * folder is created non-recursively (never writes into a folder that appeared
  * meanwhile); a half-written copy is removed again and the error THROWN, so
- * the caller must then leave the original folder untouched.
+ * the caller must then leave the original folder untouched. `onlySections`
+ * (section filenames) narrows the copy to those sections — the Cloud
+ * three-way pull keeps only the sections in conflict (buildConflictCopy).
  */
-export function writeConflictCopy(notesDir: string, dir: string, label: string, now: Date): WrittenConflictCopy {
+export function writeConflictCopy(
+  notesDir: string,
+  dir: string,
+  label: string,
+  now: Date,
+  onlySections?: readonly string[],
+): WrittenConflictCopy {
   const localDirPath = path.join(notesDir, dir)
   const localFiles: Record<string, string> = {}
   for (const f of fs.readdirSync(localDirPath)) {
     if (f.endsWith('.md')) localFiles[f] = fs.readFileSync(path.join(localDirPath, f), 'utf-8')
   }
   const title = conflictCopyTitle(anchorTitle(localFiles[NOTE_MD] ?? ''), label, now)
-  let copy = buildConflictCopy(localFiles, { newId: newNoteId(), title, nowIso: now.toISOString() })
+  const build = () => buildConflictCopy(localFiles, { newId: newNoteId(), title, nowIso: now.toISOString(), onlySections })
+  let copy = build()
   while (fs.existsSync(path.join(notesDir, copy.dir))) {
-    copy = buildConflictCopy(localFiles, { newId: newNoteId(), title, nowIso: now.toISOString() })
+    copy = build()
   }
   const copyPath = path.join(notesDir, copy.dir)
   let created = false

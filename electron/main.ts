@@ -21,6 +21,7 @@ import { spawn } from 'child_process'
 import { randomBytes } from 'crypto'
 import * as githubSync from './githubSync'
 import * as cloudSync from './cloudSync'
+import { staleResolvePullDelay } from './cloudSyncLogic'
 import * as cloudKeys from './cloudKeys'
 import * as cloudRealtime from './cloudRealtime'
 import { getActiveSyncProvider, getActiveSyncStatus, type SyncPullResult } from './syncProvider'
@@ -586,6 +587,34 @@ async function runCloudSyncCycleOnce(): Promise<void> {
     console.error('[CloudAutoSync] journal retry failed:', String(err))
   }
   emitCloudStatusChanged()
+}
+
+// A conditional Cloud upload came back stale (cloudSync.onRemoteConflict: the
+// server holds a version of the file this device has not reconciled — the
+// drain skips stale ops, the pull resolves them by its three-way merge): run a
+// cycle soon instead of waiting for the next Realtime signal / 5-min tick.
+// Coalesced (one armed timer at a time), with a floor between two such pulls
+// (staleResolvePullDelay) so a file that keeps going stale can't loop pulls;
+// deferred while own writes are still in flight (the cycle would stand down).
+let cloudStalePullTimer: ReturnType<typeof setTimeout> | null = null
+let lastCloudStalePullAt = 0
+
+function scheduleCloudStalePull(): void {
+  if (cloudStalePullTimer) return
+  cloudStalePullTimer = setTimeout(() => {
+    cloudStalePullTimer = null
+    void runCloudStalePull()
+  }, staleResolvePullDelay(Date.now(), lastCloudStalePullAt))
+}
+
+async function runCloudStalePull(): Promise<void> {
+  if (!cloudSync.isCloudSyncEnabled() || cloudSync.getCloudSyncStatus().initialPullStatus !== 'ok') return
+  if (cloudSync.hasPendingRemoteMutations()) {
+    scheduleCloudStalePull() // retry once the uploads in flight have landed
+    return
+  }
+  lastCloudStalePullAt = Date.now()
+  await runCloudSyncCycle().catch((err) => console.error('[CloudAutoSync] stale-resolve cycle failed:', String(err)))
 }
 
 // A push from another device lands as a BURST of Realtime events (one per row
@@ -4022,6 +4051,7 @@ app.whenReady().then(async () => {
   cloudKeys.initCloudKeys()
   cloudSync.initCloudSync(NOTES_DIR)
   cloudSync.onStatusChanged(() => emitCloudStatusChanged())
+  cloudSync.onRemoteConflict(() => scheduleCloudStalePull())
   // Title suffix of the conflict copies the pull makes, in the live UI language.
   cloudSync.setConflictCopyLabel(() => mainMessages().sync.conflictCopy)
   const cloudEnabled = cloudSync.isCloudSyncEnabled()

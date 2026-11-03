@@ -1,23 +1,28 @@
 // NoteFlow Cloud E2EE sync engine (phase 4.2, stage 2) — the paid counterpart
 // of githubSync.ts, speaking to the public.files table (migration 0004) via
-// PostgREST. Same file-per-relative-path model and the SAME conflict rule (the
-// note folder is the unit, note.md's `updated:` decides), so main.ts can route
-// through either backend behind the SyncProvider interface (syncProvider.ts).
+// PostgREST. Same file-per-relative-path model, so main.ts can route through
+// either backend behind the SyncProvider interface (syncProvider.ts). Conflicts
+// are decided per FILE in three ways (base / local / remote) once a folder's
+// anchor has a known base (SyncState.bases, migration 0014 — see
+// planThreeWayDir); without one, the historical rule (the note folder is the
+// unit, note.md's `updated:` decides).
 //
 // Deliberate differences vs GitHub Sync (documented in monetization.md § 4):
 //   - NO mutation queue: the Contents API serialization invariant is a GitHub
 //     workaround — Postgres handles concurrent upserts natively. Note rows go
-//     through a CONDITIONAL upsert (RPC cloud_upsert_file, migration 0011:
-//     rejected when the server holds a newer version of the folder); root
-//     metadata and forced uploads are plain upserts (merge-duplicates). One
-//     retry on network errors / 5xx either way.
+//     through a CONDITIONAL upsert (RPC cloud_upsert_file_v2, migration 0014:
+//     rejected when the row moved past this device's base seq; fallback
+//     cloud_upsert_file, 0011: rejected when the server holds a newer version
+//     of the folder); root metadata and forced uploads are plain upserts
+//     (merge-duplicates). One retry on network errors / 5xx either way.
 //   - Deletions propagate via TOMBSTONES (deleted=true, content_ct blanked),
 //     not via absence: the incremental pull can't see "missing" rows, and a
 //     tombstone is exactly the "this was deleted" signal absence used to imply.
 //     Local deletion still applies the safety rule (local updated <= lastSync).
 //   - NO sha cache: the incremental pull (seq > pullSeq, the server-assigned
 //     change number of migration 0008) already skips unchanged rows without
-//     any per-file GET.
+//     any per-file GET. What GitHub's cache also provides — the BASE of the
+//     three-way check — is SyncState.bases here (server seq + content hash).
 //   - The journal of pending remote mutations IS kept (offline durability) —
 //     it reuses the pure transitions of syncState.ts, persisted in its own
 //     userData/cloud-sync-state.json (never shared with the GitHub journal:
@@ -68,6 +73,17 @@ import {
   decryptFileRow,
   CLOUD_CONDITIONAL_UPSERT_RPC,
   classifyConditionalUpsert,
+  CLOUD_BASE_UPSERT_RPC,
+  classifyBaseUpsert,
+  parseRowSeq,
+  hashForBase,
+  planThreeWayDir,
+  filesNeedingCatchUp,
+  needsBasesBootstrap,
+  synthesizeBootstrapBases,
+  type BasesBootstrapPending,
+  parseBootstrapPending,
+  nextBootstrapPending,
   type PullRetrySet,
   PULL_RETRY_CHUNK,
   parsePullRetry,
@@ -100,6 +116,10 @@ import {
   shouldPullSkipDir,
   shouldPullSkipFile,
   hasPendingUpsert,
+  getCloudBase,
+  setCloudBase,
+  dropCloudBasesUnder,
+  journalMarkConflictCopied,
 } from './syncState'
 import { type SyncHistoryEntry, createSyncHistory } from './syncHistory'
 
@@ -156,6 +176,19 @@ export interface CloudSyncSettings {
    * pull until they apply — see nextPullRetry. Written together with pullSeq.
    */
   pullRetry?: PullRetrySet
+  /**
+   * The one-time bases bootstrap pull (needsBasesBootstrap) is done — set by
+   * every successful pull, in the same write that advances pullSeq. Absent on
+   * a device that synced with a build without bases → its next pull is the
+   * bootstrap. Dropped with the rest on an account switch.
+   */
+  basesBootstrapped?: boolean
+  /**
+   * Folders whose bootstrap reconcile failed (→ pull retry set), with the
+   * bootstrap's context: they still get it when their rows come back (see
+   * nextBootstrapPending). Written with pullSeq; dropped on an account switch.
+   */
+  basesBootstrapPending?: BasesBootstrapPending
 }
 
 export type InitialPullStatus = 'pending' | 'ok' | 'failed'
@@ -189,8 +222,20 @@ export interface CloudSyncStatus {
 // — the type is shared with the GitHub backend (conflictCopy.ts).
 export type { ConflictCopiesNotice }
 
-/** A decrypted pull row plus its opaque path_key (feeds the retry set). */
-type PulledEntry = CloudPullEntry & { pathKey: string }
+/**
+ * A decrypted pull row plus its opaque path_key (feeds the retry set) and its
+ * server seq (the base the pull records for the file; null if unreadable).
+ */
+type PulledEntry = CloudPullEntry & { pathKey: string; seq: number | null }
+
+/** What the one-time bases bootstrap pull needs to synthesize bases (see synthesizeBootstrapBases). */
+interface BootstrapContext {
+  /** The watermark before this pull: rows at or below it were already seen here (null = none). */
+  seenSeq: number | null
+  /** path_keys of the pull retry set — fetched before, but never applied here. */
+  retryKeys: Set<string>
+  lastSyncMs: number | null
+}
 
 /** Result of one upload: written, or rejected by the conditional upsert (server has a newer version). */
 type UploadOutcome = 'uploaded' | 'stale'
@@ -276,6 +321,13 @@ let noteKeyCacheDekId: string | null = null
 
 // Logged once per session when the server lacks the conditional upsert RPC.
 let conditionalFallbackLogged = false
+// The server answered that it lacks cloud_upsert_file_v2 (migration 0014):
+// uploads go straight to cloud_upsert_file for the rest of the session
+// (logged once, when set).
+let baseUpsertMissing = false
+
+// relPath → hashForBase of the note uploads in flight (see uploadFileRow).
+const inFlightUploads = new Map<string, string>()
 
 // In-flight remote mutations (upserts/tombstones) — the auto-sync pull defers
 // while > 0, same stand-down as GitHub's queue counter.
@@ -365,6 +417,21 @@ export function onStatusChanged(cb: () => void): void {
   statusListener = cb
 }
 
+// A conditional upload came back stale (the server holds a version of the
+// file this device has not reconciled): main.ts schedules a pull soon
+// (debounced, with a floor between two — staleResolvePullDelay) instead of
+// waiting for the next Realtime signal or the 5-min tick. Same role as
+// githubSync.onRemoteConflict.
+let remoteConflictListener: (() => void) | null = null
+
+export function onRemoteConflict(cb: () => void): void {
+  remoteConflictListener = cb
+}
+
+function notifyStaleUpload(gen: number): void {
+  if (gen === stateGeneration) remoteConflictListener?.()
+}
+
 function setInitialPullStatus(status: InitialPullStatus): void {
   if (initialPullStatus === status) return
   initialPullStatus = status
@@ -451,7 +518,15 @@ function resetCloudSyncState(userId: string): void {
   entitlementBlocked = false
   syncError = undefined
   conflictCopies = undefined // the previous account's notice
-  patchSettings({ userId, pullSeq: undefined, pullCursor: undefined, lastSync: undefined, pullRetry: undefined })
+  patchSettings({
+    userId,
+    pullSeq: undefined,
+    pullCursor: undefined,
+    lastSync: undefined,
+    pullRetry: undefined,
+    basesBootstrapped: undefined,
+    basesBootstrapPending: undefined,
+  })
   console.log('[CloudSync] sync state belonged to another account — reset; the next pull reconciles from scratch')
   setInitialPullStatus('pending')
   statusListener?.()
@@ -645,8 +720,28 @@ function isForcedUpload(relPath: string): boolean {
  * their updated_at is "now") and FORCED uploads (intentional resurrection, see
  * requeueDirForUpload) keep the plain merge-duplicates upsert. A server
  * without the RPC (0011 not deployed yet) falls back to the plain upsert.
+ *
+ * Note rows try cloud_upsert_file_v2 (migration 0014) first: with a known
+ * BASE (SyncState.bases) the server writes only while this file's row is still
+ * at the base seq — a remote version this device never reconciled rejects the
+ * upload ('stale') whatever the timestamps say. It answers the new seq, which
+ * becomes the file's base. A server without 0014 → cloud_upsert_file (0011)
+ * for the rest of the session; uploads that return no seq forget the base.
  */
 async function uploadFileRow(relPath: string, content: string, force = false): Promise<UploadOutcome> {
+  if (noteDirOf(relPath) === null) return uploadFileRowNow(relPath, content, force)
+  // While in flight, a pull that already sees this row recognises it as this
+  // device's own version (planThreeWayDir's echo rule) instead of a conflict.
+  const hash = hashForBase(relPath, content)
+  inFlightUploads.set(relPath, hash)
+  try {
+    return await uploadFileRowNow(relPath, content, force)
+  } finally {
+    if (inFlightUploads.get(relPath) === hash) inFlightUploads.delete(relPath)
+  }
+}
+
+async function uploadFileRowNow(relPath: string, content: string, force: boolean): Promise<UploadOutcome> {
   // Captured with the DEK: if the account switches while the row is being
   // built, nothing is sent (the row would be encrypted for the old account).
   const gen = stateGeneration
@@ -674,6 +769,48 @@ async function uploadFileRow(relPath: string, content: string, force = false): P
     // A section is checked against its anchor too: a newer version of the
     // folder may have rewritten (or tombstoned) only note.md so far.
     const anchorKey = isAnchorPath(relPath) ? null : await derivePathKeyHmac(dek, `${dir}/${NOTE_MD}`)
+
+    // Base-seq check first (migration 0014): written only while the server row
+    // of this file is still the version this device last reconciled. No base
+    // known → the RPC applies the updated_at rule of 0011 itself.
+    if (!baseUpsertMissing) {
+      const baseSeq = getCloudBase(getState(), relPath)?.seq ?? null
+      const v2 = await restWithRetry(() => {
+        assertGeneration(gen)
+        return supabaseRest(`/rest/v1/rpc/${CLOUD_BASE_UPSERT_RPC}`, {
+          method: 'POST',
+          body: {
+            p_path_key: row.path_key,
+            p_path_ct: row.path_ct,
+            p_content_ct: row.content_ct,
+            p_key_ct: row.key_ct,
+            p_updated_at: row.updated_at,
+            p_base_seq: baseSeq,
+            p_anchor_key: anchorKey,
+          },
+        })
+      })
+      const res = classifyBaseUpsert(v2.status, v2.json)
+      if (res.outcome === 'forbidden') {
+        entitlementBlocked = true
+        throw new Error(SUBSCRIPTION_ERROR)
+      }
+      if (res.outcome === 'error') throw new Error(`Cloud upload failed (HTTP ${v2.status})`)
+      if (res.outcome === 'stale') {
+        notifyStaleUpload(gen)
+        return 'stale'
+      }
+      if (res.outcome === 'uploaded') {
+        entitlementBlocked = false
+        // The new base: the seq the server just gave this content (unknown → forgotten).
+        recordUploadedBase(gen, relPath, res.seq === null ? null : { seq: res.seq, hash: hashForBase(relPath, content) })
+        return 'uploaded'
+      }
+      // 'missing': 0014 not deployed yet — 0011 below, for the rest of the session.
+      baseUpsertMissing = true
+      console.warn('[CloudSync] base-seq upload RPC missing on the server (migration 0014) — using cloud_upsert_file')
+    }
+
     const rpc = await restWithRetry(() => {
       assertGeneration(gen)
       return supabaseRest(`/rest/v1/rpc/${CLOUD_CONDITIONAL_UPSERT_RPC}`, {
@@ -696,10 +833,14 @@ async function uploadFileRow(relPath: string, content: string, force = false): P
     if (outcome === 'error') throw new Error(`Cloud upload failed (HTTP ${rpc.status})`)
     if (outcome === 'uploaded') {
       entitlementBlocked = false
+      recordUploadedBase(gen, relPath, null) // 0011 answers no seq: the base is unknown now
       return 'uploaded'
     }
     // Rejected before any write: says nothing about the entitlement.
-    if (outcome === 'stale') return 'stale'
+    if (outcome === 'stale') {
+      notifyStaleUpload(gen)
+      return 'stale'
+    }
     // 'missing': deploy-order safety — no regression vs the unconditional upsert.
     if (!conditionalFallbackLogged) {
       conditionalFallbackLogged = true
@@ -723,7 +864,21 @@ async function uploadFileRow(relPath: string, content: string, force = false): P
   }
   if (res.status >= 400) throw new Error(`Cloud upload failed (HTTP ${res.status})`)
   entitlementBlocked = false
+  // Plain upsert (forced / fallback): no seq comes back — forget the base; the
+  // next pull sees this row again and re-establishes it.
+  if (dir) recordUploadedBase(gen, relPath, null)
   return 'uploaded'
+}
+
+/**
+ * Records the base of a file after its upload landed (see SyncState.bases):
+ * the seq the server assigned + the hash of what was uploaded, or — when the
+ * seq is unknown (0011 / plain upsert) — forgets it. Skipped when the account
+ * switched while the upload was in flight (the state is another account's).
+ */
+function recordUploadedBase(gen: number, relPath: string, base: { seq: number; hash: string } | null): void {
+  if (gen !== stateGeneration) return
+  if (setCloudBase(getState(), relPath, base)) persistState()
 }
 
 /**
@@ -1039,7 +1194,11 @@ export async function scheduleDeleteDir(dir: string): Promise<void> {
   pendingMutations++
   try {
     await deleteRemoteDirNow(dir)
-    if (gen === stateGeneration && journalComplete(getState(), dir, 'deleteDir')) persistState()
+    if (gen === stateGeneration) {
+      // The folder is gone everywhere: its bases are moot.
+      const done = journalComplete(getState(), dir, 'deleteDir')
+      if (dropCloudBasesUnder(getState(), dir) || done) persistState()
+    }
   } catch (err: unknown) {
     if (gen !== stateGeneration) return
     journalFail(getState(), dir, 'deleteDir')
@@ -1072,8 +1231,8 @@ function deleteRemoteDirNow(dir: string): Promise<void> {
  * The mode (incremental / one-time full reconcile / first sync) comes from
  * planPullQuery.
  */
-async function fetchChangedRows(s: CloudSyncSettings): Promise<CloudFileRow[]> {
-  const plan = planPullQuery(s)
+async function fetchChangedRows(s: CloudSyncSettings, bootstrapBases: boolean): Promise<CloudFileRow[]> {
+  const plan = planPullQuery(s, { bootstrapBases })
   return collectSeqPages<CloudFileRow>(
     async (after) => {
       const res = await supabaseRest(
@@ -1099,7 +1258,8 @@ async function fetchRemoteAnchor(dek: Uint8Array, dir: string): Promise<PulledEn
   )
   if (res.status >= 400 || !Array.isArray(res.json) || res.json.length === 0) return null
   try {
-    return { ...(await decryptFileRow(dek, res.json[0] as CloudFileRow)), pathKey }
+    const row = res.json[0] as CloudFileRow
+    return { ...(await decryptFileRow(dek, row)), pathKey, seq: parseRowSeq(row.seq) }
   } catch {
     return null
   }
@@ -1168,7 +1328,7 @@ async function fetchRemoteRows(
         errors.push(`unexpected remote section skipped: ${entry.relPath}`)
         continue
       }
-      entries.push({ ...entry, pathKey: row.path_key })
+      entries.push({ ...entry, pathKey: row.path_key, seq: parseRowSeq(row.seq) })
     } catch (err) {
       errors.push(`row ${row.path_key}: ${String(err)}`)
       undecryptable.push(row.path_key)
@@ -1273,16 +1433,198 @@ function preserveConflictCopy(
 
   // The copy carries the WHOLE local folder (every section), not only the
   // pending files: it must open as the complete local version of the note.
-  // Disk side shared with the GitHub pull (conflictCopy.ts); throws if the
-  // copy can't be written — the folder must then stay untouched.
+  return writeAndQueueConflictCopy(notesDir, dir)
+}
+
+/**
+ * Writes the conflict copy of the local folder '<dir>' — whole, or only the
+ * sections `onlySections` (filenames; three-way pull) — flags the pending ops
+ * it preserves as `conflictCopied` (the whole folder's, or just those
+ * sections'), queues its upload and records the session notice. Disk side
+ * shared with the GitHub pull (conflictCopy.ts); THROWS if the copy can't be
+ * written — the caller must then leave the folder untouched.
+ */
+function writeAndQueueConflictCopy(
+  notesDir: string,
+  dir: string,
+  onlySections?: readonly string[]
+): { dirPath: string; files: number } {
+  const state = getState()
   const now = new Date()
-  const copy = writeConflictCopy(notesDir, dir, conflictCopyLabel(), now)
-  if (journalMarkDirConflictCopied(state, dir)) persistState()
+  const copy = writeConflictCopy(notesDir, dir, conflictCopyLabel(), now, onlySections)
+  const flagged = onlySections
+    ? journalMarkConflictCopied(state, onlySections.map((f) => `${dir}/${f}`))
+    : journalMarkDirConflictCopied(state, dir)
+  if (flagged) persistState()
   for (const [name, content] of Object.entries(copy.files)) {
     schedulePushUnguarded(`${copy.dir}/${name}`, content)
   }
   conflictCopies = appendConflictCopyNotice(conflictCopies, copy.title, now.toISOString())
   return { dirPath: copy.dirPath, files: Object.keys(copy.files).length }
+}
+
+/**
+ * The disk now holds this remote row's content (written, or found identical):
+ * it becomes the file's base (SyncState.bases). An applied tombstone drops it.
+ * Returns whether the journal state changed (the caller persists).
+ */
+function recordPulledBase(entry: PulledEntry): boolean {
+  if (entry.deleted) return setCloudBase(getState(), entry.relPath, null)
+  if (entry.seq === null) return false
+  return setCloudBase(getState(), entry.relPath, { seq: entry.seq, hash: hashForBase(entry.relPath, entry.content) })
+}
+
+/** Every '.md' of a local note folder: '<dir>/<file>.md' → content. */
+function readLocalNoteFiles(dirPath: string, dir: string): Record<string, string> {
+  const files: Record<string, string> = {}
+  for (const f of fs.readdirSync(dirPath)) {
+    if (f.endsWith('.md')) files[`${dir}/${f}`] = fs.readFileSync(path.join(dirPath, f), 'utf-8')
+  }
+  return files
+}
+
+/**
+ * Three-way reconcile of a local note folder whose anchor has a known base
+ * (see planThreeWayDir): fetches the sections the remote anchor lists that
+ * are not in this batch and are missing on disk (or pending here without a
+ * base) — BEFORE writing anything, a failed request aborts the pull
+ * (PullAbortError) — and then executes the plan SYNCHRONOUSLY (no upload,
+ * timer or save can interleave): conflict copy first (it reads the local
+ * disk; throws → retry set, nothing written), pending uploads about to be
+ * settled flagged stale + timers cancelled (a half-failed apply never drains
+ * them), removes, writes (sections, then note.md), bases, settles and the
+ * re-uploads of whatever ends different from the server. Returns the files
+ * changed on disk, the copy made (if any) and whether the journal changed.
+ */
+async function reconcileDirThreeWay(
+  notesDir: string,
+  dir: string,
+  group: PulledEntry[],
+  anchor: PulledEntry | null,
+  dek: Uint8Array,
+  gen: number,
+  sink: { fetchedForDir: PulledEntry[]; decryptFailures: Set<string>; errors: string[] },
+  bootstrap: BootstrapContext | null
+): Promise<{ changed: number; copy: { dirPath: string; files: number } | null; stateChanged: boolean }> {
+  const state = getState()
+  const localDirPath = path.join(notesDir, dir)
+  const inGroup = new Set(group.map((e) => e.relPath))
+  const toFetch = anchor
+    ? listAnchorSectionFiles(anchor.content)
+        .map((f) => `${dir}/${f}`)
+        .filter(
+          (rel) =>
+            !inGroup.has(rel) &&
+            !shouldPullSkipFile(state, rel) &&
+            (!fs.existsSync(path.join(notesDir, rel)) || (hasPendingUpsert(state, rel) && !getCloudBase(state, rel)))
+        )
+    : []
+  const fetched = await fetchRemoteRows(dek, toFetch)
+  assertGeneration(gen)
+  sink.fetchedForDir.push(...fetched.entries)
+  for (const key of fetched.undecryptable) sink.decryptFailures.add(key)
+  sink.errors.push(...fetched.errors.map((e) => `${dir}: ${e}`))
+
+  // Synchronous from here to the end.
+  const prefix = `${dir}/`
+  const pendingUpserts = new Set<string>()
+  const staleUpserts = new Set<string>()
+  const copiedUpserts = new Set<string>()
+  const pendingDeletes = new Set<string>()
+  for (const [key, op] of Object.entries(state.ops)) {
+    if (!key.startsWith(prefix)) continue
+    if (op.op === 'upsert') {
+      pendingUpserts.add(key)
+      if (op.stale) staleUpserts.add(key)
+      if (op.conflictCopied) copiedUpserts.add(key)
+    } else if (op.op === 'delete') {
+      pendingDeletes.add(key)
+    }
+  }
+  const local = readLocalNoteFiles(localDirPath, dir)
+  const rows = [...group, ...fetched.entries]
+  const remote = rows.map((e) => ({
+    relPath: e.relPath,
+    seq: e.seq,
+    content: e.deleted ? null : e.content,
+    updatedAtMs: e.updatedAtMs,
+  }))
+  let stateChanged = false
+  let bases: Record<string, { seq: number; hash: string }> = state.bases
+  if (bootstrap) {
+    // Bootstrap pull: bases for the files that have none yet — real ones for
+    // rows this device had already seen (persisted), assumed ones for the
+    // remote changes it had not (planner only). See synthesizeBootstrapBases.
+    const synth = synthesizeBootstrapBases({
+      dir,
+      local,
+      remote,
+      bases: state.bases,
+      pendingUpserts,
+      seenSeq: bootstrap.seenSeq,
+      notSeen: new Set(rows.filter((e) => bootstrap.retryKeys.has(e.pathKey)).map((e) => e.relPath)),
+      lastSyncMs: bootstrap.lastSyncMs,
+    })
+    for (const [rel, base] of Object.entries(synth.seen)) {
+      if (setCloudBase(state, rel, base)) stateChanged = true
+    }
+    bases = { ...synth.assumed, ...state.bases }
+  }
+  const plan = planThreeWayDir({
+    dir,
+    local,
+    remote,
+    bases,
+    pendingUpserts,
+    staleUpserts,
+    copiedUpserts,
+    pendingDeletes,
+    inFlightHashes: inFlightUploads,
+    nowIso: new Date().toISOString(),
+  })
+
+  let copy: { dirPath: string; files: number } | null = null
+  if (plan.copyWhole) copy = writeAndQueueConflictCopy(notesDir, dir)
+  else if (plan.copySections.length > 0) copy = writeAndQueueConflictCopy(notesDir, dir, plan.copySections)
+
+  let journalChanged = false
+  for (const rel of plan.settle) {
+    const timer = pushTimers.get(rel)
+    if (timer) {
+      clearTimeout(timer)
+      pushTimers.delete(rel)
+    }
+    if (journalMarkStale(state, rel)) journalChanged = true
+  }
+  if (journalChanged) persistState()
+
+  let changed = 0
+  const finalContent: Record<string, string> = { ...local }
+  for (const rel of plan.removes) {
+    try {
+      fs.unlinkSync(path.join(notesDir, rel))
+      changed++
+    } catch { /* already gone */ }
+    delete finalContent[rel]
+  }
+  for (const w of plan.writes) {
+    fs.writeFileSync(path.join(notesDir, w.relPath), w.content, 'utf-8')
+    finalContent[w.relPath] = w.content
+    changed++
+  }
+
+  for (const [rel, base] of Object.entries(plan.bases)) {
+    if (setCloudBase(state, rel, base)) stateChanged = true
+  }
+  for (const rel of plan.settle) {
+    if (settlePathUpload(rel)) stateChanged = true
+  }
+  for (const rel of plan.upload) {
+    const content = finalContent[rel]
+    if (content === undefined) continue
+    schedulePushUnguarded(rel, content, undefined, undefined, plan.force.includes(rel) ? { force: true } : undefined)
+  }
+  return { changed, copy, stateChanged }
 }
 
 /**
@@ -1344,6 +1686,29 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
   let backedUp = 0
   let mergedMetadata = 0
   let conflictCopiesMade = 0
+  // One-time bases bootstrap (a device that synced with a build without
+  // bases): everything is re-read and every local folder reconciled
+  // three-way with synthesized bases — see needsBasesBootstrap.
+  const bootstrap = needsBasesBootstrap(s)
+  const bootstrapCtx: BootstrapContext | null = bootstrap
+    ? {
+        seenSeq: typeof s.pullSeq === 'number' && Number.isSafeInteger(s.pullSeq) && s.pullSeq >= 0 ? s.pullSeq : null,
+        retryKeys: new Set(Object.keys(prevRetry)),
+        lastSyncMs: lastSyncMs !== null && Number.isFinite(lastSyncMs) ? lastSyncMs : null,
+      }
+    : null
+  // Folders whose bootstrap reconcile failed in an earlier pull: they get the
+  // same context until they reconcile (their assumed bases were never saved).
+  const pendingBootstrap = parseBootstrapPending(s.basesBootstrapPending)
+  const pendingBootstrapCtx: BootstrapContext | null = pendingBootstrap
+    ? {
+        seenSeq: pendingBootstrap.seenSeq,
+        retryKeys: new Set(pendingBootstrap.retryKeys),
+        lastSyncMs: pendingBootstrap.lastSyncMs,
+      }
+    : null
+  const bootstrapFailed = new Set<string>()
+  const bootstrapDone = new Set<string>()
   const noteConflictCopy = (copy: { dirPath: string; files: number } | null): void => {
     if (!copy) return
     conflictCopiesMade++
@@ -1353,7 +1718,7 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
   }
 
   try {
-    const mainRows = await fetchChangedRows(s)
+    const mainRows = await fetchChangedRows(s, bootstrap)
     // Rows that failed to apply earlier sit below the watermark now: they ride
     // along with this batch (the main fetch wins on duplicates).
     const rows = mergeRetryRows(mainRows, await fetchRowsByPathKeys(Object.keys(prevRetry)))
@@ -1368,7 +1733,7 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
           errors.push(`unsafe remote path skipped: ${entry.relPath}`)
           continue
         }
-        entries.push({ ...entry, pathKey: row.path_key })
+        entries.push({ ...entry, pathKey: row.path_key, seq: parseRowSeq(row.seq) })
         // Seed the per-folder key cache so pushes reuse the same note key.
         noteKeyCache.set(noteDirOf(entry.relPath) ?? entry.relPath, entry.noteKey)
       } catch (err) {
@@ -1383,6 +1748,10 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
       // Rows fetched for this folder outside the batch (its anchor, listed
       // sections) — retried together with the group if the folder fails.
       const fetchedForDir: PulledEntry[] = []
+      // Bootstrap context of this folder: the bootstrap pull itself, or a
+      // folder whose bootstrap reconcile failed before.
+      const dirCtx = bootstrapCtx ?? (pendingBootstrap?.dirs.includes(dir) ? pendingBootstrapCtx : null)
+      let dirFailed = false
       try {
         assertGeneration(gen)
         // Journal guard: a pending remote deleteDir means this dir was deleted
@@ -1403,7 +1772,11 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
         let anchor: PulledEntry | null = group.find((e) => isAnchorPath(e.relPath)) ?? null
 
         if (anchor?.deleted) {
-          if (!localExists) continue
+          if (!localExists) {
+            // Gone here too: its bases are moot (keeps the state file bounded).
+            if (dropCloudBasesUnder(state, dir)) stateChanged = true
+            continue
+          }
           // Journal guard (same as the GitHub pull's deletion rule): a pending
           // upsert under '<dir>/' is a local edit that hasn't reached the server
           // (failed push, or still inside the 5 s debounce — it is journaled
@@ -1440,6 +1813,7 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
             deleted++
             filesDown++
             if (tombstoneAction === 'lost' && settleDirUploads(dir)) stateChanged = true
+            if (dropCloudBasesUnder(state, dir)) stateChanged = true
           }
           continue
         }
@@ -1455,7 +1829,30 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
         }
 
         let changed = 0
-        if (anchor && (!localExists || shouldApplyRemoteDir(anchor.updatedAtMs, localUpdatedMs))) {
+        if (localExists && (dirCtx !== null || getCloudBase(state, `${dir}/${NOTE_MD}`))) {
+          // THREE-WAY (the anchor has a known base — migration 0014): every
+          // remote row is decided against its file's base and the local file,
+          // not by the anchor's `updated:` (planThreeWayDir). Replaces both
+          // branches below for this folder: an offline edit of one section
+          // and a remote edit of others now MERGE (each side keeps what it
+          // changed) instead of the newer folder clobbering the other; a
+          // section both sides changed differently → the remote goes into the
+          // note and the local version into a copy holding only those sections.
+          const result = await reconcileDirThreeWay(
+            notesDir,
+            dir,
+            group,
+            anchor,
+            dek,
+            gen,
+            { fetchedForDir, decryptFailures, errors },
+            dirCtx
+          )
+          noteConflictCopy(result.copy)
+          if (result.stateChanged) stateChanged = true
+          changed = result.changed
+          if (changed === 0) continue
+        } else if (anchor && (!localExists || shouldApplyRemoteDir(anchor.updatedAtMs, localUpdatedMs))) {
           // Newer remote anchor (or a note new to this device): wholesale.
           // Sections the anchor lists that are NOT in this batch and NOT on
           // disk were uploaded earlier (below the watermark — e.g. they landed
@@ -1519,11 +1916,15 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
           fs.mkdirSync(localDirPath, { recursive: true })
           fs.writeFileSync(localAnchorPath, anchor.content, 'utf-8')
           changed++
+          // Every row written (or found identical) becomes its file's base:
+          // the next pull of this folder goes three-way.
+          if (recordPulledBase(anchor)) stateChanged = true
           for (const entry of group) {
             if (isAnchorPath(entry.relPath)) continue
             // Journal guard: don't resurrect a section whose remote delete is pending.
             if (shouldPullSkipFile(state, entry.relPath)) continue
             if (applyRemoteSectionFile(notesDir, entry)) changed++
+            if (recordPulledBase(entry)) stateChanged = true
           }
           // Listed sections the server doesn't have yet stay as they are: their
           // upload is still pending on the origin and will arrive later (higher
@@ -1532,6 +1933,7 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
           for (const entry of fetched.entries) {
             if (entry.deleted) continue
             if (applyRemoteSectionFile(notesDir, entry)) changed++
+            if (recordPulledBase(entry)) stateChanged = true
           }
           // Applied in full: the pending uploads flagged above are moot.
           if (settleDirUploads(dir)) stateChanged = true
@@ -1580,13 +1982,16 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
             }
             if (!shouldApplyRemoteSection(entry.updatedAtMs, localUpdatedMs)) continue
             if (applyRemoteSectionFile(notesDir, entry)) changed++
-            // The disk now holds the server's version of this section.
+            // The disk now holds the server's version of this section (its base).
+            if (recordPulledBase(entry)) stateChanged = true
             if (!entry.deleted && settlePathUpload(entry.relPath)) stateChanged = true
           }
           // A remote anchor identical to the local one (typically this device's
-          // own upload coming back): its pending upload, if any, is satisfied.
-          if (anchor && localAnchorContent === anchor.content && settlePathUpload(anchor.relPath)) {
-            stateChanged = true
+          // own upload coming back): its pending upload, if any, is satisfied,
+          // and it becomes the anchor's base (the folder goes three-way).
+          if (anchor && localAnchorContent === anchor.content) {
+            if (settlePathUpload(anchor.relPath)) stateChanged = true
+            if (recordPulledBase(anchor)) stateChanged = true
           }
           if (changed === 0) continue // local is newer, or already identical
         }
@@ -1594,12 +1999,15 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
         updatedFiles.push(localDirPath)
         pulled++
       } catch (err) {
+        dirFailed = true
         // Abort the pull: watermark stays put (an account switch persists nothing at all).
         if (err instanceof PullAbortError || err instanceof AccountSwitchedError) throw err
         errors.push(`${dir}: ${String(err)}`)
         // Retry the WHOLE folder next pull: every row of its group plus the
         // rows fetched for it (they sit below the watermark).
         for (const e of [...group, ...fetchedForDir]) applyFailures.set(e.pathKey, e.relPath)
+      } finally {
+        if (dirCtx) (dirFailed ? bootstrapFailed : bootstrapDone).add(dir)
       }
     }
 
@@ -1682,7 +2090,19 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
       pullSeq: nextPullSeq(s.pullSeq, mainRows),
       pullCursor: undefined,
       pullRetry: Object.keys(pullRetry).length > 0 ? pullRetry : undefined,
+      // Bootstrap done (or never needed: a first sync / a device with bases).
+      basesBootstrapped: true,
+      // A folder that failed its bootstrap reconcile keeps the context for its retry.
+      basesBootstrapPending:
+        nextBootstrapPending(pendingBootstrap, {
+          started: bootstrapCtx
+            ? { seenSeq: bootstrapCtx.seenSeq, lastSyncMs: bootstrapCtx.lastSyncMs, retryKeys: [...bootstrapCtx.retryKeys] }
+            : null,
+          failed: bootstrapFailed,
+          done: bootstrapDone,
+        }) ?? undefined,
     })
+    if (bootstrap) console.log('[CloudSync] bases bootstrap pull done')
     // Errors stay visible (a later successful push clears syncError, but the
     // status still reports a non-empty retry set — see getCloudSyncStatus).
     syncError = errors.length > 0
@@ -1738,22 +2158,33 @@ export async function pullNotes(notesDir: string): Promise<PullResult> {
  * githubSync. On the very first sync (no previous lastSync) this uploads the
  * ENTIRE local corpus, including the root metadata files. Note rows are
  * conditional: a local copy older than the server's version (or than its
- * tombstone) is rejected as stale instead of overwriting it.
+ * tombstone) is rejected as stale instead of overwriting it. A file with a
+ * known base (SyncState.bases) is queued only when its content differs from
+ * that base, whatever the folder's `updated` says (filesNeedingCatchUp).
  */
 function flushPendingLocalChanges(notesDir: string, previousLastSync: string | undefined): void {
   const lastSyncMs = previousLastSync ? Date.parse(previousLastSync) : null
+  const bases = getState().bases
   for (const dir of listNoteDirs(notesDir)) {
     const dirPath = path.join(notesDir, dir)
     try {
       const anchor = fs.readFileSync(path.join(dirPath, NOTE_MD), 'utf-8')
       const updatedMs = parseUpdatedTimestamp(extractUpdatedTimestamp(anchor))
-      if (updatedMs === null) continue
-      if (lastSyncMs !== null && updatedMs <= lastSyncMs) continue
+      // Historical folder gate, for files without a known base.
+      const dirGate = updatedMs !== null && (lastSyncMs === null || updatedMs > lastSyncMs)
+      const files: Array<{ relPath: string; content: string }> = []
       for (const f of fs.readdirSync(dirPath)) {
         if (!f.endsWith('.md')) continue
         try {
-          schedulePushUnguarded(`${dir}/${f}`, fs.readFileSync(path.join(dirPath, f), 'utf-8'))
+          files.push({ relPath: `${dir}/${f}`, content: fs.readFileSync(path.join(dirPath, f), 'utf-8') })
         } catch { /* unreadable file — skip */ }
+      }
+      // Files with a known base go up only when they differ from it: re-queuing
+      // the whole folder used to upload untouched sections over newer remote
+      // versions (filesNeedingCatchUp).
+      const queue = new Set(filesNeedingCatchUp(files, bases, dirGate))
+      for (const f of files) {
+        if (queue.has(f.relPath)) schedulePushUnguarded(f.relPath, f.content)
       }
     } catch { /* unreadable dir — skip */ }
   }
@@ -1867,6 +2298,7 @@ export async function retrySyncJournal(notesDir: string): Promise<void> {
           await removeRemotePaths([key])
         } else {
           await deleteRemoteDirNow(key)
+          if (gen === stateGeneration) dropCloudBasesUnder(state, key)
         }
         if (gen !== stateGeneration) break
         if (journalComplete(state, key, entry.op)) persistState()

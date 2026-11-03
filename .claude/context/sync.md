@@ -86,13 +86,16 @@ El indicador "pushing" (`sync:push-state`) vale para **ambos** backends: `applyN
 push durable de las tools del chat) a `pendingPushFiles`. Los deletes no pasan por ese set.
 `sync:pull` (GitHub puro) se mantiene intacto para Settings → Sync.
 
-**Cloud Sync** (`electron/cloudSync.ts`, mismo modelo y regla de conflicto que GitHub pero
-contra Supabase con E2EE, tombstones en vez de borrado por ausencia, sin cola de mutaciones y
-con pull incremental por `seq`, un número de cambio que asigna el servidor — migración 0008; ya no
-por `updated_at`, que es la hora de edición y sigue siendo solo la base de los conflictos): detalle
-completo en `monetization.md` § 4 (modos de reconciliación y regla de secciones sueltas). Su journal
-reutiliza las transiciones puras de `syncState.ts` en un fichero PROPIO
-(`userData/cloud-sync-state.json`) — nunca el `sync-state.json` de GitHub.
+**Cloud Sync** (`electron/cloudSync.ts`, mismo modelo que GitHub pero contra Supabase con E2EE,
+tombstones en vez de borrado por ausencia, sin cola de mutaciones y con pull incremental por `seq`, un
+número de cambio que asigna el servidor — migración 0008; ya no por `updated_at`, que es la hora de
+edición): detalle completo en `monetization.md` § 4 (modos de reconciliación y regla de secciones
+sueltas). **Conflictos:** desde la migración 0014, **fusión en tres vías por fichero** (base = `seq`
+del servidor + hash del contenido que este dispositivo reconcilió por última vez, `SyncState.bases`)
+en cuanto el ancla de la carpeta tiene base — el análogo de la caché de shas de GitHub en QA B3 —;
+sin base, la regla histórica compartida con GitHub (carpeta como unidad, decide el `updated:` del
+ancla). Su journal (y las bases) reutiliza las transiciones puras de `syncState.ts` en un fichero
+PROPIO (`userData/cloud-sync-state.json`) — nunca el `sync-state.json` de GitHub.
 📌 **Borrados de Cloud (arreglado):** el listado que usa borrar una nota entera pagina por keyset
 sobre `seq` (antes un GET capado a 1.000 filas dejaba la nota sin tombstone y el `deleteDir` se daba
 por hecho), y el pull **no aplica** el tombstone de una nota con un `upsert` pendiente bajo su
@@ -114,11 +117,17 @@ las que fallan al aplicarse tras 50 (error local permanente); las de ruta insegu
 muestra un error ("Some remote changes could not be applied…") aunque un push posterior limpie
 `syncError`, y el espejo a GitHub se bloquea (`hasPendingPullRetries`). Detalle en
 `monetization.md` § 4 "Pull incremental".
-📌 **Subidas condicionadas de Cloud (migración 0011):** las filas de nota se suben por la RPC
-`cloud_upsert_file`, que rechaza ("stale") una versión más vieja que la del servidor; el ciclo de
-Cloud hace **pull (y emite su resultado) antes de drenar el journal**. Detalle (stale/force, metadatos, cambio de cuenta)
-en `monetization.md` § 4 "Subidas condicionadas".
-📌 **Copias de conflicto (los dos backends):** cuando el pull de Cloud va a sobrescribir (ancla remota más
+📌 **Subidas condicionadas de Cloud (migraciones 0014 y 0011):** las filas de nota se suben por la
+RPC `cloud_upsert_file_v2`, que rechaza ("stale") la subida si la fila del servidor ya no está en la
+`seq` base del fichero (sin base: la regla de `updated_at` de la 0011; servidor sin la 0014 → fallback
+a `cloud_upsert_file`). El ciclo de Cloud hace **pull (y emite su resultado) antes de drenar el
+journal**, y el pull **fusiona por fichero**: una edición offline de una sección y una remota de otras
+se combinan; si ambos tocaron la misma sección, la remota va a la nota y la local a una copia con solo
+esas secciones. Detalle (stale/force, metadatos, cambio de cuenta, bases, residuales) en
+`monetization.md` § 4 "Subidas condicionadas" y "Fusión en tres vías".
+📌 **Copias de conflicto (los dos backends):** cuando el pull de Cloud (carpetas sin base de ancla; con
+base, ver "Fusión en tres vías" en `monetization.md`: copia solo de las secciones en conflicto) va a
+sobrescribir (ancla remota más
 nueva, o una sección remota suelta) o borrar (tombstone `'lost'`) una carpeta con una edición local
 **apuntada en el journal** que difiere de la versión del servidor, antes guarda la versión local
 como **nota nueva** ("<título> (conflict copy fecha)") y avisa en la tarjeta del botón de sync. Por

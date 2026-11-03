@@ -17,7 +17,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CLOUD_MERGEABLE_METADATA = exports.PULL_RETRY_CHUNK = exports.PULL_RETRY_MAX_APPLY_ATTEMPTS = exports.PULL_RETRY_MAX_DECRYPT_ATTEMPTS = exports.CLOUD_CONDITIONAL_UPSERT_RPC = exports.CLOUD_PAGE_SIZE = exports.CLOUD_PULL_COLUMNS = exports.CLOUD_METADATA_FILENAMES = void 0;
+exports.STALE_PULL_MIN_INTERVAL_MS = exports.STALE_PULL_DELAY_MS = exports.UNKNOWN_BASE_HASH = exports.TOMBSTONE_BASE_HASH = exports.CLOUD_MERGEABLE_METADATA = exports.PULL_RETRY_CHUNK = exports.PULL_RETRY_MAX_APPLY_ATTEMPTS = exports.PULL_RETRY_MAX_DECRYPT_ATTEMPTS = exports.CLOUD_BASE_UPSERT_RPC = exports.CLOUD_CONDITIONAL_UPSERT_RPC = exports.CLOUD_PAGE_SIZE = exports.CLOUD_PULL_COLUMNS = exports.CLOUD_METADATA_FILENAMES = void 0;
 exports.noteDirOf = noteDirOf;
 exports.isAnchorPath = isAnchorPath;
 exports.isSafeCloudRelPath = isSafeCloudRelPath;
@@ -30,12 +30,14 @@ exports.shouldApplyRemoteSection = shouldApplyRemoteSection;
 exports.shouldApplyRemoteDeletion = shouldApplyRemoteDeletion;
 exports.groupEntriesByDir = groupEntriesByDir;
 exports.planPullQuery = planPullQuery;
+exports.needsBasesBootstrap = needsBasesBootstrap;
 exports.collectSeqPages = collectSeqPages;
 exports.parseRowSeq = parseRowSeq;
 exports.nextPullSeq = nextPullSeq;
 exports.buildFileUpsertRow = buildFileUpsertRow;
 exports.decryptFileRow = decryptFileRow;
 exports.classifyConditionalUpsert = classifyConditionalUpsert;
+exports.classifyBaseUpsert = classifyBaseUpsert;
 exports.parsePullRetry = parsePullRetry;
 exports.mergeRetryRows = mergeRetryRows;
 exports.nextPullRetry = nextPullRetry;
@@ -51,7 +53,17 @@ exports.planConflictCopy = planConflictCopy;
 exports.anchorTitle = anchorTitle;
 exports.conflictCopyTitle = conflictCopyTitle;
 exports.buildConflictCopy = buildConflictCopy;
+exports.hashForBase = hashForBase;
+exports.planFileReconcile = planFileReconcile;
+exports.mergeAnchors = mergeAnchors;
+exports.planThreeWayDir = planThreeWayDir;
+exports.filesNeedingCatchUp = filesNeedingCatchUp;
+exports.synthesizeBootstrapBases = synthesizeBootstrapBases;
+exports.parseBootstrapPending = parseBootstrapPending;
+exports.nextBootstrapPending = nextBootstrapPending;
+exports.staleResolvePullDelay = staleResolvePullDelay;
 const js_yaml_1 = __importDefault(require("js-yaml"));
+const node_crypto_1 = require("node:crypto");
 const noteFormat_1 = require("./noteFormat");
 const cloudCrypto_1 = require("./cloudCrypto");
 // Root-level JSON files that sync alongside the note folders.
@@ -249,13 +261,36 @@ function groupEntriesByDir(entries) {
  *   - nothing (first sync) → full, live rows only — with no lastSync there is
  *     nothing local that a tombstone could safely delete.
  */
-function planPullQuery(s) {
-    if (typeof s.pullSeq === 'number' && Number.isSafeInteger(s.pullSeq) && s.pullSeq >= 0) {
+function planPullQuery(s, opts) {
+    const hasPullSeq = typeof s.pullSeq === 'number' && Number.isSafeInteger(s.pullSeq) && s.pullSeq >= 0;
+    // The one-time bases bootstrap (needsBasesBootstrap) re-reads everything,
+    // tombstones included — the same mode as the legacy-cursor reconcile.
+    if (opts?.bootstrapBases && (hasPullSeq || s.pullCursor || s.lastSync))
+        return { afterSeq: 0, includeDeleted: true };
+    if (hasPullSeq)
         return { afterSeq: s.pullSeq, includeDeleted: true };
-    }
     if (s.pullCursor || s.lastSync)
         return { afterSeq: 0, includeDeleted: true };
     return { afterSeq: 0, includeDeleted: false };
+}
+/**
+ * Must this pull be the ONE-TIME bases bootstrap? A device that already
+ * synced with a build without bases (pullSeq / legacy cursor / lastSync) and
+ * has not bootstrapped yet (settings.cloudSync.basesBootstrapped, persisted in
+ * the same write that advances pullSeq): its folders have no base, so the
+ * three-way reconcile would not apply and an offline edit made before the
+ * first pull of the new build would clobber remote edits exactly like the bug
+ * it fixes. The bootstrap pull re-reads every row (planPullQuery) and
+ * reconciles every local folder three-way with bases synthesized from the
+ * watermark and the journal (synthesizeBootstrapBases). Not gated on "no
+ * bases yet": an aborted bootstrap leaves some bases behind and must still be
+ * retried. A first sync (no previous state) never needs it.
+ */
+function needsBasesBootstrap(s) {
+    if (s.basesBootstrapped === true)
+        return false;
+    const hasPullSeq = typeof s.pullSeq === 'number' && Number.isSafeInteger(s.pullSeq) && s.pullSeq >= 0;
+    return hasPullSeq || Boolean(s.pullCursor) || Boolean(s.lastSync);
 }
 /** Rows per page of every Cloud listing — PostgREST caps responses (Supabase default max-rows 1000). */
 exports.CLOUD_PAGE_SIZE = 1000;
@@ -359,6 +394,35 @@ function classifyConditionalUpsert(status, json) {
     if (status >= 400)
         return 'error';
     return json === false ? 'stale' : 'uploaded';
+}
+// ── Base-seq conditional uploads (migration 0014) ─────────────────────────────
+/**
+ * RPC of migration 0014 that note rows go through first: the write lands only
+ * when the server row of this path (tombstone included) is still the version
+ * this device last reconciled (`p_base_seq` = its base seq, see
+ * SyncState.bases) or does not exist. `p_base_seq` null (unknown base) → the
+ * updated_at rule of 0011. Returns the row's new seq, or null when stale.
+ */
+exports.CLOUD_BASE_UPSERT_RPC = 'cloud_upsert_file_v2';
+/**
+ * Outcome of `POST /rest/v1/rpc/cloud_upsert_file_v2` — same meanings as
+ * classifyConditionalUpsert ('missing' = 0014 not deployed → the caller falls
+ * back to cloud_upsert_file), but the function answers a bigint: the new seq
+ * when written, JSON `null` when stale. A success with an unreadable seq is
+ * still 'uploaded' (the server wrote it) with `seq: null` — the caller then
+ * forgets the base instead of recording a wrong one.
+ */
+function classifyBaseUpsert(status, json) {
+    const code = json && typeof json === 'object' ? json.code : undefined;
+    if (status === 404 || code === 'PGRST202')
+        return { outcome: 'missing', seq: null };
+    if (status === 403)
+        return { outcome: 'forbidden', seq: null };
+    if (status >= 400)
+        return { outcome: 'error', seq: null };
+    if (json === null || json === undefined)
+        return { outcome: 'stale', seq: null };
+    return { outcome: 'uploaded', seq: parseRowSeq(json) };
 }
 /** Undecryptable rows are given up after this many pulls (permanent corruption must not keep the error forever). */
 exports.PULL_RETRY_MAX_DECRYPT_ATTEMPTS = 5;
@@ -697,8 +761,11 @@ function conflictCopyTitle(original, label, now) {
  * filenames, so `sections[].file` stays valid. An encrypted note keeps its
  * encryption block: the copy opens with the same password (the title is clear
  * frontmatter, so it is renamed all the same). Dir = '<slug>-<newId>' with the
- * app's slug rule (noteDirname). Throws when note.md is missing or its
- * frontmatter is unreadable — the caller must then NOT overwrite the folder.
+ * app's slug rule (noteDirname). `onlySections` (filenames) restricts the
+ * copy to those sections: its note.md lists only them and only their files
+ * are copied (the Cloud three-way pull keeps just the sections in conflict).
+ * Throws when note.md is missing or its frontmatter is unreadable — the
+ * caller must then NOT overwrite the folder.
  */
 function buildConflictCopy(localFiles, opts) {
     const anchor = localFiles[noteFormat_1.NOTE_MD];
@@ -709,11 +776,590 @@ function buildConflictCopy(localFiles, opts) {
         throw new Error('conflict copy: unreadable note.md frontmatter');
     // Assigning existing keys keeps their position in the dump.
     const data = { ...fm.data, id: opts.newId, title: opts.title, updated: opts.nowIso };
+    // Subset copy (Cloud three-way pull): only the conflicting sections — the
+    // copy's note.md lists just those, and only their files travel.
+    const only = opts.onlySections ? new Set(opts.onlySections) : null;
+    if (only && Array.isArray(data.sections)) {
+        data.sections = data.sections.filter((sec) => {
+            const name = sectionFileOf(sec);
+            return name !== null && only.has(name);
+        });
+    }
     const yamlStr = js_yaml_1.default.dump(data, { lineWidth: -1, quotingType: '"' });
     const files = { [noteFormat_1.NOTE_MD]: `---\n${yamlStr}---\n${fm.body}` };
     for (const [name, content] of Object.entries(localFiles)) {
-        if (name !== noteFormat_1.NOTE_MD)
+        if (name !== noteFormat_1.NOTE_MD && (!only || only.has(name)))
             files[name] = content;
     }
     return { dir: (0, noteFormat_1.noteDirname)(opts.newId, opts.title), files };
+}
+/** File name of one `sections[]` entry of a note.md frontmatter (fallback '<id>.md', as parseNoteDir). */
+function sectionFileOf(sec) {
+    if (!sec || typeof sec !== 'object')
+        return null;
+    const { id, file } = sec;
+    if (file != null)
+        return String(file);
+    return id != null ? `${String(id)}.md` : null;
+}
+// ── Three-way reconcile per file (bases, migration 0014) ──────────────────────
+// The pull used to decide a note folder by note.md's `updated:` alone (LWW),
+// with no notion of "the server version a local edit was made on". A device
+// that edited offline after missing a remote version saw its anchor as the
+// newer one, kept its folder, re-queued every file and the conditional upload
+// (updated_at rule of 0011) accepted it: the remote sections were clobbered
+// everywhere, without a copy (reproduced in production). Every device now
+// remembers, per file, its BASE (SyncState.bases: the server seq it last
+// reconciled + a hash of that content) and the pull compares base / local /
+// remote PER FILE — each section is its own file, note.md is the anchor whose
+// frontmatter is merged. Uploads carry the base seq (cloud_upsert_file_v2).
+// No base known (state of earlier builds) → the historical rules, unchanged.
+/** Base hash of a remote TOMBSTONE that a local edit is kept over (see CloudBase.hash). */
+exports.TOMBSTONE_BASE_HASH = '';
+/**
+ * Hash of a note file's content for its base (sha-256, hex). note.md is hashed
+ * WITHOUT its `updated:` line: every save rewrites it, so it says nothing
+ * about whether the note's metadata changed.
+ */
+function hashForBase(relPath, content) {
+    const text = isAnchorPath(relPath) ? anchorWithoutUpdated(content) : content;
+    return (0, node_crypto_1.createHash)('sha256').update(text, 'utf8').digest('hex');
+}
+function planFileReconcile(s) {
+    if (!s.base || s.remoteSeq === null)
+        return 'legacy';
+    if (s.remoteSeq < s.base.seq)
+        return 'outdated';
+    if (s.remoteSeq === s.base.seq)
+        return 'keep';
+    const localChanged = s.pending || s.localHash !== s.base.hash;
+    if (!localChanged)
+        return 'apply';
+    if (s.localHash === s.remoteHash)
+        return 'adopt';
+    if (s.remoteHash === null)
+        return 'keep-local';
+    if (s.localHash === null)
+        return 'apply'; // deleted here, edited remotely: the remote edit wins
+    return 'conflict';
+}
+function anchorHashOf(content) {
+    return (0, node_crypto_1.createHash)('sha256').update(anchorWithoutUpdated(content), 'utf8').digest('hex');
+}
+function updatedMsOf(content) {
+    return parseUpdatedTimestamp(extractUpdatedTimestamp(content));
+}
+/** `content` with the value of its first top-level `updated:` line replaced (rest of the text untouched). */
+function withUpdated(content, value) {
+    return content.replace(/^updated:[^\r\n]*/m, `updated: ${JSON.stringify(value)}`);
+}
+/**
+ * Can't merge two changed anchors field by field: either is encrypted (the
+ * frontmatter only holds the ciphertext of the whole note) or unreadable.
+ */
+function anchorsNeedWholeCopy(local, remote, baseHash) {
+    const lh = anchorHashOf(local);
+    const rh = anchorHashOf(remote);
+    if (lh === rh || lh === baseHash || rh === baseHash)
+        return false;
+    const l = loadAnchorFrontmatter(local);
+    const r = loadAnchorFrontmatter(remote);
+    return !l || !r || Boolean(l.data.encryption) || Boolean(r.data.encryption);
+}
+/**
+ * Frontmatter merge of note.md (compared WITHOUT `updated:` against the base hash):
+ *   - same content both sides → the remote, or the local when the folder keeps
+ *     newer local edits (its later `updated` must reach the server);
+ *   - only the remote changed → the remote (carrying the later local `updated`
+ *     when the folder keeps newer local edits — the server's anchor must say
+ *     when the note last changed);
+ *   - only the local changed → the local (its `updated` becomes now when the
+ *     remote's is not older — the server's `updated` never moves backwards);
+ *   - both changed → BASE = the remote anchor (title, group, folder, sections
+ *     metadata… from the remote) plus the local sections it lacks whose file
+ *     exists here (created on this device since the base); a section listed
+ *     only remotely is dropped when it is missing here and was known (deleted
+ *     on this device since the base); `aiHidden` of a section and `favorited`
+ *     are OR-ed, `tags` united; `updated` = now (a new local edit, uploaded
+ *     with the remote seq as its base).
+ * In EVERY case the sections whose local change is kept on disk
+ * (`keptLocalSectionFiles`) stay listed (withKeptLocalSections).
+ * Encrypted or unreadable anchors that both changed → 'whole'.
+ */
+function mergeAnchors(m) {
+    const chosen = chooseAnchor(m);
+    return chosen.source === 'whole' ? chosen : withKeptLocalSections(chosen, m);
+}
+function dumpAnchor(data, body) {
+    return `---\n${js_yaml_1.default.dump(data, { lineWidth: -1, quotingType: '"' })}---\n${body}`;
+}
+function stringArray(value) {
+    return Array.isArray(value) ? value.filter((v) => typeof v === 'string') : [];
+}
+function chooseAnchor(m) {
+    const lh = anchorHashOf(m.local);
+    const rh = anchorHashOf(m.remote);
+    const localMs = updatedMsOf(m.local);
+    const remoteMs = updatedMsOf(m.remote);
+    const bumpToLocal = m.folderKeepsLocalChanges && localMs !== null && (remoteMs === null || localMs > remoteMs);
+    if (lh === rh)
+        return bumpToLocal ? { content: m.local, source: 'local' } : { content: m.remote, source: 'remote' };
+    if (lh === m.baseHash) {
+        if (!bumpToLocal)
+            return { content: m.remote, source: 'remote' };
+        const content = withUpdated(m.remote, extractUpdatedTimestamp(m.local) ?? m.nowIso);
+        return content === m.remote ? { content, source: 'remote' } : { content, source: 'merged' };
+    }
+    if (rh === m.baseHash) {
+        // Only the local changed — but its `updated` may be OLDER than the remote's
+        // (a remote save that only bumped it): never move the server's `updated`
+        // backwards (clients still on the LWW rule — CLI, older builds — would
+        // ignore this version), so it becomes "now".
+        if (remoteMs !== null && (localMs === null || remoteMs >= localMs)) {
+            const content = withUpdated(m.local, m.nowIso);
+            return content === m.local ? { content, source: 'local' } : { content, source: 'merged' };
+        }
+        return { content: m.local, source: 'local' };
+    }
+    const l = loadAnchorFrontmatter(m.local);
+    const r = loadAnchorFrontmatter(m.remote);
+    if (!l || !r || l.data.encryption || r.data.encryption)
+        return { content: m.remote, source: 'whole' };
+    const remoteSections = Array.isArray(r.data.sections) ? r.data.sections : [];
+    const localSections = Array.isArray(l.data.sections) ? l.data.sections : [];
+    const localByFile = new Map();
+    for (const sec of localSections) {
+        const file = sectionFileOf(sec);
+        if (file !== null)
+            localByFile.set(file, sec);
+    }
+    const remoteListed = new Set(remoteSections.map(sectionFileOf).filter((f) => f !== null));
+    const kept = remoteSections
+        .filter((sec) => {
+        const file = sectionFileOf(sec);
+        if (file === null || localByFile.has(file) || m.sectionFilesOnDisk.has(file))
+            return true;
+        // Listed only remotely and missing here: deleted on this device since the
+        // base when it was known; otherwise added remotely (its row may still be on its way).
+        return !m.knownSectionFiles.has(file);
+    })
+        .map((sec) => {
+        // Hidden from the AI on EITHER side stays hidden (privacy beats a lost
+        // un-hide: there is no base content to tell which side changed it).
+        const file = sectionFileOf(sec);
+        const mine = file === null ? undefined : localByFile.get(file);
+        const theirs = sec;
+        return mine?.aiHidden === true && theirs.aiHidden !== true ? { ...theirs, aiHidden: true } : sec;
+    });
+    const added = localSections.filter((sec) => {
+        const file = sectionFileOf(sec);
+        return file !== null && !remoteListed.has(file) && m.sectionFilesOnDisk.has(file);
+    });
+    const data = { ...r.data, sections: [...kept, ...added], updated: m.nowIso };
+    // Cheap, safe field merges: tags are derived from the sections' content
+    // (both sides' content survives → union), and a favorite on either side stays.
+    const tags = [...new Set([...stringArray(r.data.tags), ...stringArray(l.data.tags)])];
+    if (Array.isArray(r.data.tags) || Array.isArray(l.data.tags))
+        data.tags = tags;
+    if (l.data.favorited === true || l.data.pinned === true)
+        data.favorited = true;
+    return { content: dumpAnchor(data, r.body), source: 'merged' };
+}
+/**
+ * Whatever side won, the sections whose LOCAL changes the plan keeps on disk
+ * (`keptLocalSectionFiles`: kept over an unchanged remote, or over a remote
+ * tombstone) must stay listed — otherwise the edit would live in a file no
+ * anchor references (an invisible orphan, re-uploaded as such). Appended with
+ * their local metadata; the result is a new version (`updated` = now).
+ */
+function withKeptLocalSections(chosen, m) {
+    const restored = m.restoredRemoteSectionFiles ?? new Set();
+    if (m.keptLocalSectionFiles.size === 0 && restored.size === 0)
+        return chosen;
+    const fm = loadAnchorFrontmatter(chosen.content);
+    if (!fm || fm.data.encryption)
+        return chosen;
+    const sections = Array.isArray(fm.data.sections) ? fm.data.sections : [];
+    const listed = new Set(sections.map(sectionFileOf).filter((f) => f !== null));
+    const extras = [];
+    // Local sections whose change is kept, and remote sections written back over
+    // a file missing here (a remote edit beats a local deletion — their file is
+    // on disk again, so they must be visible too).
+    for (const [side, files] of [[m.local, m.keptLocalSectionFiles], [m.remote, restored]]) {
+        if (files.size === 0)
+            continue;
+        const other = loadAnchorFrontmatter(side);
+        if (!other || !Array.isArray(other.data.sections))
+            continue;
+        for (const sec of other.data.sections) {
+            const file = sectionFileOf(sec);
+            if (file === null || listed.has(file) || !files.has(file))
+                continue;
+            listed.add(file);
+            extras.push(sec);
+        }
+    }
+    if (extras.length === 0)
+        return chosen;
+    return { content: dumpAnchor({ ...fm.data, sections: [...sections, ...extras], updated: m.nowIso }, fm.body), source: 'merged' };
+}
+/** Historical per-section rule (no base): the anchor's `updated` decides, pending edits are guarded. */
+function planLegacySection(row, local, pending, localUpdatedMs) {
+    if (row.content === null) {
+        if (local === null)
+            return 'adopt'; // already gone
+        if (pending)
+            return 'keep-local';
+        return shouldApplyRemoteSection(row.updatedAtMs, localUpdatedMs) ? 'apply' : 'keep';
+    }
+    // Missing here and no pending delete (the caller skips those): nothing local
+    // to lose — typically a section added on another device. Never skipped by
+    // the `updated` rule: the anchor may list it, and a missing file would be
+    // recreated empty by the editor and uploaded blank over the real one.
+    if (local === null)
+        return 'apply';
+    if (local === row.content)
+        return 'adopt';
+    if (!shouldApplyRemoteSection(row.updatedAtMs, localUpdatedMs))
+        return 'keep';
+    return local !== null && pending ? 'conflict' : 'apply';
+}
+/**
+ * Three-way reconcile of ONE note folder that exists locally and whose anchor
+ * has a known base (the pull's caller checks both). Pure: the caller reads the
+ * folder, executes the plan (conflict copy first — it reads the local disk —,
+ * then the writes, the bases, the settles and the uploads) and handles the
+ * anchor tombstone before (historical rule). Per remote section row:
+ * planFileReconcile (rows without a base → planLegacySection, the historical
+ * per-section rule). A conflicting section: the remote goes into the note and
+ * the local version into a copy holding ONLY the conflicting sections
+ * (`copySections`; an op already flagged conflictCopied is not copied twice).
+ * The anchor is decided by mergeAnchors once the sections are known (which
+ * files remain, whether local edits are kept); an unmergeable conflict
+ * (encrypted note) applies the remote folder and copies the WHOLE local one,
+ * as before. Whatever ends different from the server is re-uploaded.
+ */
+function planThreeWayDir(input) {
+    const { dir } = input;
+    const prefix = `${dir}/`;
+    const anchorRel = `${dir}/${noteFormat_1.NOTE_MD}`;
+    const plan = {
+        writes: [],
+        removes: [],
+        bases: {},
+        settle: [],
+        upload: [],
+        force: [],
+        copySections: [],
+        copyWhole: false,
+    };
+    const localAnchor = input.local[anchorRel];
+    if (localAnchor === undefined)
+        throw new Error('three-way reconcile: the local folder has no note.md');
+    const localUpdatedMs = updatedMsOf(localAnchor);
+    const fileName = (rel) => rel.slice(prefix.length);
+    const anchorRow = input.remote.find((r) => r.relPath === anchorRel && r.content !== null) ?? null;
+    // The echo of an upload of THIS device still waiting for its answer (the
+    // server committed it, the response that records its base has not arrived):
+    // its row IS this device's version — adopted as the base, never a conflict
+    // with a newer local save (that would push the latest edit into a copy).
+    const echoBase = (rel, row) => {
+        const base = input.bases[rel];
+        if (row.content === null || row.seq === null || (base && row.seq <= base.seq))
+            return base;
+        const hash = hashForBase(rel, row.content);
+        if (input.inFlightHashes?.get(rel) !== hash)
+            return base;
+        plan.bases[rel] = { seq: row.seq, hash };
+        return plan.bases[rel];
+    };
+    const anchorBase = anchorRow ? echoBase(anchorRel, anchorRow) : input.bases[anchorRel];
+    // 1. The anchor's verdict first: an unmergeable conflict turns the whole folder remote.
+    let anchorAction = 'keep';
+    let whole = false;
+    if (anchorRow) {
+        anchorAction = planFileReconcile({
+            base: anchorBase,
+            localHash: hashForBase(anchorRel, localAnchor),
+            pending: input.pendingUpserts.has(anchorRel),
+            remoteSeq: anchorRow.seq,
+            remoteHash: hashForBase(anchorRel, anchorRow.content),
+        });
+        whole = anchorAction === 'conflict' && anchorBase !== undefined &&
+            anchorsNeedWholeCopy(localAnchor, anchorRow.content, anchorBase.hash);
+    }
+    // 2. Sections, one file at a time. `keptLocal`: section files whose local
+    // change stays on disk (the anchor must keep listing them).
+    const keptLocal = new Set();
+    const restored = new Set(); // remote content written over a missing local file
+    const conflicts = [];
+    const after = new Map(); // relPath → content once applied (null = removed)
+    const recordBase = (rel, seq, content) => {
+        if (content === null)
+            plan.bases[rel] = null;
+        else if (seq !== null)
+            plan.bases[rel] = { seq, hash: hashForBase(rel, content) };
+    };
+    for (const row of input.remote) {
+        const rel = row.relPath;
+        if (rel === anchorRel || !rel.startsWith(prefix) || input.pendingDeletes.has(rel))
+            continue;
+        const local = input.local[rel] ?? null;
+        const pending = input.pendingUpserts.has(rel);
+        const base = echoBase(rel, row);
+        let action = planFileReconcile({
+            base,
+            localHash: local === null ? null : hashForBase(rel, local),
+            pending,
+            remoteSeq: row.seq,
+            remoteHash: row.content === null ? null : hashForBase(rel, row.content),
+        });
+        if (action === 'legacy')
+            action = planLegacySection(row, local, pending, localUpdatedMs);
+        // The whole local folder goes to the copy: every remote row is applied.
+        if (whole && action !== 'outdated')
+            action = local === row.content ? 'adopt' : 'apply';
+        switch (action) {
+            case 'outdated':
+                break;
+            case 'keep': {
+                if (local === null)
+                    break;
+                const changed = base ? pending || hashForBase(rel, local) !== base.hash : true;
+                if (!changed)
+                    break;
+                keptLocal.add(fileName(rel));
+                // A stale op is skipped by the drain, and an unjournaled change has no
+                // op at all: both must still go up (with the base just confirmed).
+                if (input.staleUpserts.has(rel) || (base !== undefined && !pending))
+                    plan.upload.push(rel);
+                break;
+            }
+            case 'apply':
+                if (row.content === null) {
+                    if (local !== null)
+                        plan.removes.push(rel);
+                }
+                else if (local !== row.content) {
+                    plan.writes.push({ relPath: rel, content: row.content });
+                    if (local === null)
+                        restored.add(fileName(rel));
+                }
+                after.set(rel, row.content);
+                recordBase(rel, row.seq, row.content);
+                plan.settle.push(rel);
+                break;
+            case 'adopt':
+                after.set(rel, row.content);
+                recordBase(rel, row.seq, row.content);
+                plan.settle.push(rel);
+                break;
+            case 'keep-local': {
+                // The local edit beats the remote deletion and goes up again. A
+                // tombstone newer than the local version would reject an updated_at
+                // (0011) upload — the legacy rule and the fallback of a server without
+                // 0014 — so that one is FORCED, as before; otherwise it goes up on top
+                // of the tombstone's seq (its new base, with the tombstone's empty hash).
+                const tombstoneNewer = shouldApplyRemoteSection(row.updatedAtMs, localUpdatedMs);
+                keptLocal.add(fileName(rel));
+                if (base !== undefined && row.seq !== null)
+                    plan.bases[rel] = { seq: row.seq, hash: exports.TOMBSTONE_BASE_HASH };
+                if (tombstoneNewer || base !== undefined || input.staleUpserts.has(rel))
+                    plan.upload.push(rel);
+                if (tombstoneNewer)
+                    plan.force.push(rel);
+                break;
+            }
+            case 'conflict':
+                conflicts.push(rel);
+                plan.writes.push({ relPath: rel, content: row.content });
+                after.set(rel, row.content);
+                recordBase(rel, row.seq, row.content);
+                plan.settle.push(rel);
+                break;
+        }
+    }
+    // Local section edits this batch did not touch (pending, or changed since
+    // their base) are kept too — the anchor must then carry the local `updated`.
+    for (const [rel, content] of Object.entries(input.local)) {
+        if (rel === anchorRel || !rel.startsWith(prefix) || after.has(rel))
+            continue;
+        const base = input.bases[rel];
+        if (input.pendingUpserts.has(rel) || (base !== undefined && hashForBase(rel, content) !== base.hash)) {
+            keptLocal.add(fileName(rel));
+        }
+    }
+    // 3. The anchor, once the sections are known.
+    if (anchorRow && anchorAction !== 'outdated' && anchorAction !== 'keep') {
+        const remote = anchorRow.content;
+        let final;
+        if (anchorAction === 'legacy' || anchorBase === undefined) {
+            final = shouldApplyRemoteDir(updatedMsOf(remote), localUpdatedMs) ? remote : localAnchor;
+        }
+        else if (whole) {
+            final = remote;
+        }
+        else {
+            const onDisk = new Set();
+            for (const rel of Object.keys(input.local))
+                if (rel !== anchorRel && rel.startsWith(prefix))
+                    onDisk.add(fileName(rel));
+            for (const [rel, content] of after) {
+                if (content === null)
+                    onDisk.delete(fileName(rel));
+                else
+                    onDisk.add(fileName(rel));
+            }
+            const known = new Set();
+            for (const rel of Object.keys(input.bases))
+                if (rel !== anchorRel && rel.startsWith(prefix))
+                    known.add(fileName(rel));
+            final = mergeAnchors({
+                local: localAnchor,
+                remote,
+                baseHash: anchorBase.hash,
+                sectionFilesOnDisk: onDisk,
+                knownSectionFiles: known,
+                folderKeepsLocalChanges: keptLocal.size > 0,
+                keptLocalSectionFiles: keptLocal,
+                restoredRemoteSectionFiles: restored,
+                nowIso: input.nowIso,
+            }).content;
+        }
+        const legacy = anchorAction === 'legacy' || anchorBase === undefined;
+        if (!legacy)
+            recordBase(anchorRel, anchorRow.seq, remote);
+        if (final !== localAnchor)
+            plan.writes.push({ relPath: anchorRel, content: final });
+        if (final === remote)
+            plan.settle.push(anchorRel);
+        else if (!legacy)
+            plan.upload.push(anchorRel); // a new local version on top of the remote seq
+    }
+    else if (anchorAction === 'keep' && anchorBase !== undefined) {
+        // Remote anchor unchanged since the base: a stale op (skipped by the drain)
+        // or an unjournaled change of the local one still has to go up.
+        const pending = input.pendingUpserts.has(anchorRel);
+        if (input.staleUpserts.has(anchorRel) || (!pending && hashForBase(anchorRel, localAnchor) !== anchorBase.hash)) {
+            plan.upload.push(anchorRel);
+        }
+    }
+    // 4. Conflict copy.
+    if (whole) {
+        // The remote folder wins wholesale: every pending upload under it is moot.
+        for (const rel of input.pendingUpserts)
+            if (rel.startsWith(prefix) && !plan.settle.includes(rel))
+                plan.settle.push(rel);
+        plan.upload = [];
+        plan.force = [];
+        const pendingUnder = [...input.pendingUpserts].filter((rel) => rel.startsWith(prefix));
+        plan.copyWhole = !(pendingUnder.length > 0 && pendingUnder.every((rel) => input.copiedUpserts.has(rel)));
+    }
+    else {
+        plan.copySections = conflicts.filter((rel) => !input.copiedUpserts.has(rel)).map(fileName);
+    }
+    return plan;
+}
+/**
+ * The first-sync / gate-reopened catch-up (flushPendingLocalChanges): which
+ * files of one note folder to upload. A file with a known base goes up only
+ * when its content differs from that base (re-queuing a whole folder used to
+ * clobber remote sections this device had not even touched); a file without
+ * a base keeps the historical folder gate (`dirGate`: the anchor's `updated`
+ * is newer than the previous lastSync, or there is none).
+ */
+function filesNeedingCatchUp(files, bases, dirGate) {
+    const out = [];
+    for (const f of files) {
+        const base = bases[f.relPath];
+        if (base ? hashForBase(f.relPath, f.content) !== base.hash : dirGate)
+            out.push(f.relPath);
+    }
+    return out;
+}
+/** Hash of a synthesized base whose content is unknown: never equals a real hash (always "local changed"). */
+exports.UNKNOWN_BASE_HASH = 'unknown';
+/**
+ * Bases of one local folder for the ONE-TIME bootstrap pull
+ * (needsBasesBootstrap), for the files that have no real base yet. The pull
+ * re-reads every row; per remote row of the folder:
+ *   - SEEN by this device before (seq <= the previous watermark `seenSeq`,
+ *     and not in the pull retry set — `notSeen`): its content is what this
+ *     device last reconciled → a REAL base `{seq, hash(row)}` (`seen`: the
+ *     caller persists it). Local identical → nothing to do; local different →
+ *     a local change, kept and uploaded on top of that seq. A seen TOMBSTONE
+ *     gets no base (the historical rule decides it);
+ *   - NOT seen (a remote change made since this device last pulled): the
+ *     version it replaced is gone from the server, so the base is ASSUMED
+ *     (`assumed`, for the planner only), with a seq just below the row's:
+ *       · the file has a pending upsert (an offline edit journaled before the
+ *         first pull of this build), or the folder has unjournaled local edits
+ *         (note.md not pending but its `updated` is after lastSync — Cloud
+ *         disabled, CLI) → UNKNOWN content: both sides changed → identical =
+ *         adopt, different = CONFLICT (remote in the note, local in a copy;
+ *         note.md is merged) — never a silent overwrite;
+ *       · otherwise the local file is taken as unchanged since the last sync
+ *         (its own hash; '' when missing) → the remote change applies.
+ * Mirrors what planFileReconcile needs: assumed bases always sit below the
+ * row's seq, so a row is never 'keep'/'outdated' on a guess.
+ */
+function synthesizeBootstrapBases(o) {
+    const prefix = `${o.dir}/`;
+    const anchorRel = `${o.dir}/${noteFormat_1.NOTE_MD}`;
+    const seen = {};
+    const assumed = {};
+    const localAnchor = o.local[anchorRel];
+    const localUpdatedMs = localAnchor === undefined ? null : updatedMsOf(localAnchor);
+    const unjournaled = !o.pendingUpserts.has(anchorRel) && o.lastSyncMs !== null && localUpdatedMs !== null && localUpdatedMs > o.lastSyncMs;
+    for (const row of o.remote) {
+        const rel = row.relPath;
+        if (!rel.startsWith(prefix) || o.bases[rel] || row.seq === null)
+            continue;
+        if (o.seenSeq !== null && row.seq <= o.seenSeq && !o.notSeen.has(rel)) {
+            if (row.content !== null)
+                seen[rel] = { seq: row.seq, hash: hashForBase(rel, row.content) };
+            continue;
+        }
+        const local = o.local[rel];
+        const hash = o.pendingUpserts.has(rel) || unjournaled
+            ? exports.UNKNOWN_BASE_HASH
+            : local === undefined
+                ? exports.TOMBSTONE_BASE_HASH
+                : hashForBase(rel, local);
+        assumed[rel] = { seq: row.seq - 1, hash };
+    }
+    return { seen, assumed };
+}
+/** Tolerant read of settings.cloudSync.basesBootstrapPending (null = none / malformed). */
+function parseBootstrapPending(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+        return null;
+    const v = raw;
+    const dirs = stringArray(v.dirs);
+    if (dirs.length === 0)
+        return null;
+    const num = (x) => (typeof x === 'number' && Number.isSafeInteger(x) && x >= 0 ? x : null);
+    return { seenSeq: num(v.seenSeq), lastSyncMs: num(v.lastSyncMs), retryKeys: stringArray(v.retryKeys), dirs };
+}
+/**
+ * The pending set after a pull. `started` = this pull WAS the bootstrap (its
+ * context): the pending set becomes exactly the folders that failed. Otherwise
+ * the folders reconciled with the pending context this time (`done`) leave;
+ * failed ones stay. Empty → null (the setting is removed).
+ */
+function nextBootstrapPending(prev, pull) {
+    if (pull.started)
+        return pull.failed.size > 0 ? { ...pull.started, dirs: [...pull.failed] } : null;
+    if (!prev)
+        return null;
+    const dirs = prev.dirs.filter((d) => !pull.done.has(d));
+    return dirs.length > 0 ? { ...prev, dirs } : null;
+}
+/** Debounce of the pull a stale upload asks for (a burst of rejections = one pull). */
+exports.STALE_PULL_DELAY_MS = 3000;
+/** Floor between two stale-triggered pulls: a file that keeps going stale can't loop pulls. */
+exports.STALE_PULL_MIN_INTERVAL_MS = 30000;
+/** Delay before the pull a stale upload asks for, given when the previous stale-triggered pull ran (0 = never). */
+function staleResolvePullDelay(nowMs, lastStalePullMs) {
+    return Math.max(exports.STALE_PULL_DELAY_MS, lastStalePullMs + exports.STALE_PULL_MIN_INTERVAL_MS - nowMs);
 }

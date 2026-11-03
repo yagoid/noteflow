@@ -702,6 +702,12 @@ diferencial de privacidad, no como peaje.
 > proyecto real** (verificado 2026-10-25). Solo depende de la 0004 y la 0008.
 > ⚠️ Aplicarla **antes** de publicar el cliente que la usa; sin ella el cliente cae al upsert ciego de siempre (sin regresión,
 > pero sin la protección).
+> **Subida por versión base (migración `0014_cloud_base_seq_upsert.sql`):** RPC
+> `cloud_upsert_file_v2` (condición por la `seq` base del fichero, ver "Fusión en tres vías" abajo) —
+> **aplicada al proyecto real** (2026-11-03, `supabase db push`). Aditiva: no toca la 0011 (la siguen
+> usando el CLI y los clientes anteriores). ⚠️ Aplicarla **antes** de publicar la app que la usa; sin
+> ella la app cae a `cloud_upsert_file` (0011) el resto de la sesión — el pull sigue fusionando en tres
+> vías, pero las subidas vuelven a decidirse por `updated_at`.
 > La suscripción manual de pruebas de Cloud que hubo aquí ya no existe (comprobado 2026-10-19).
 > ⚠️ La única fila `provider='manual'` es la **comp permanente del operador**
 > (`provider_ref='operator-comp'`, ver § 3 "Cuenta del operador"): **no borrar** filas
@@ -815,8 +821,9 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   envuelta — la tabla queda auto-contenida (una fila basta para descifrarse) y permite
   re-envolver por nota para compartir/rotar en el futuro.
 - `updated_at` **en claro** (solo filtra timing): lo pone el cliente desde el frontmatter y es la
-  base de la resolución de conflictos con la **carpeta como unidad** (misma regla que el pull del
-  GitHub Sync). **No sirve como cursor** del pull incremental: es la hora de EDICIÓN, no la de
+  base de la resolución de conflictos **histórica** con la **carpeta como unidad** (misma regla que el
+  pull del GitHub Sync) — desde la 0014 solo rige para ficheros **sin base conocida**; con base decide
+  la `seq` (ver "Fusión en tres vías"). **No sirve como cursor** del pull incremental: es la hora de EDICIÓN, no la de
   subida — una fila que llega tarde al servidor (edición offline drenada del journal, reintento,
   segundo dispositivo que sube su corpus viejo al activar Cloud, reloj desfasado) quedaba por debajo
   del cursor de los demás dispositivos y no les llegaba nunca; y como las secciones heredan el
@@ -876,15 +883,18 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   `cloudAccessErrors.ts` en § 2) — lo reutiliza `cloudSync.ts`.
 
 ### Sync engine (`electron/cloudSync.ts` + lógica pura en `cloudSyncLogic.ts`, tramo 2 — implementado)
-- Mismo modelo "archivo por ruta relativa" y **misma regla de conflicto** que el GitHub Sync
-  (la carpeta de nota es la unidad; decide el `updated:` del `note.md`). `main.ts` enruta por la
+- Mismo modelo "archivo por ruta relativa" que el GitHub Sync. **Regla de conflicto:** desde la 0014,
+  **fusión en tres vías por fichero** (base / local / remoto) en cuanto el ancla de la carpeta tiene
+  base conocida (ver "Fusión en tres vías"); sin base, la regla histórica compartida con GitHub (la
+  carpeta de nota es la unidad; decide el `updated:` del `note.md`). `main.ts` enruta por la
   interfaz **`SyncProvider`** (`electron/syncProvider.ts`, ver `sync.md`); **mutuamente
   excluyentes**: si `cloudSync.enabled`, Cloud tiene prioridad y el loop de GitHub se salta
   (enforcement en Settings UI = tramo 4).
 - **Sin cola de mutaciones:** Postgres soporta upserts concurrentes — el invariante de
   serialización del GitHub Sync es un workaround de la Contents API que aquí no aplica. Las filas de
-  nota se suben **condicionadas** (RPC `cloud_upsert_file`, migración 0011 — ver "Subidas
-  condicionadas"); los json de metadatos de raíz y las subidas **forzadas** van por el upsert directo
+  nota se suben **condicionadas** (RPC `cloud_upsert_file_v2`, migración 0014, con fallback a
+  `cloud_upsert_file`, 0011 — ver "Subidas condicionadas" y "Fusión en tres vías"); los json de
+  metadatos de raíz y las subidas **forzadas** van por el upsert directo
   (`POST /rest/v1/files?on_conflict=user_id,path_key` + `Prefer: resolution=merge-duplicates`).
   **Un** reintento ante error de red/5xx en ambos casos.
 - **`updated_at` por fila (decisión):** `note.md` → su propio `updated:` del frontmatter; los
@@ -1000,6 +1010,9 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     `path_key` = la fila o `p_anchor_key` (**tombstones incluidos**: su `updated_at` es la hora del
     borrado); si `newest > p_updated_at` → `false` sin escribir; si no, upsert con `deleted = false` →
     `true`. **Los empates se aceptan** (re-subir la misma versión es idempotente).
+  - **Desde la 0014 es el fallback:** `uploadFileRow` prueba primero `cloud_upsert_file_v2` (condición
+    por la `seq` base, ver "Fusión en tres vías"); solo si el servidor no la tiene (404/`PGRST202`) usa
+    esta RPC el resto de la sesión. Lo que sigue describe ese camino (y el del CLI, que sigue aquí).
   - **Cliente (`uploadFileRow`):** las filas `<dir>/note.md` y `<dir>/<sec>.md` van por
     `POST /rest/v1/rpc/cloud_upsert_file` (una sección pasa como `p_anchor_key` el HMAC de
     `<dir>/note.md`); `classifyConditionalUpsert` (puro) traduce la respuesta: `true` → subida,
@@ -1050,7 +1063,10 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     conflicto, ver "Gate de push"), y sin esta comprobación un borrado más antiguo las eliminaría (D con op
     stale, edición en T5 con las claves bloqueadas, otro dispositivo borra en T4 < T5 → al
     desbloquear se perdería T5). Sin pendientes → regla de borrado de siempre.
-  - **Copias de conflicto (QA "B2").** Sin ellas, una edición hecha **sin conexión** se perdía en
+  - **Copias de conflicto (QA "B2").** (Lo que sigue es el camino de las carpetas **sin base de ancla**
+    — ramas wholesale / por secciones. Con base, el pull decide por fichero y la copia lleva **solo las
+    secciones en conflicto**: ver "Fusión en tres vías"; reutiliza `writeConflictCopy`, el aviso y el
+    dedupe por `conflictCopied`.) Sin ellas, una edición hecha **sin conexión** se perdía en
     silencio en todas partes: A edita X offline (el upsert queda en el journal), B edita X y llega
     al servidor; al reconectar, el pull de A ve el ancla remota estrictamente más nueva → rama
     wholesale → sobrescribe la carpeta y `journalMarkDirStale` + `settleDirUploads` tiran los
@@ -1128,9 +1144,11 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     - El **GitHub Sync** tiene su propia regla desde QA B3 (subida condicionada de tres vías +
       camino de conflicto del pull, con las mismas copias y el mismo aviso): residuales en `sync.md`
       "Subida condicionada (QA B3)".
-    - El caso simétrico — edición local pendiente **más nueva** que una versión remota que este
-      dispositivo nunca vio — sigue siendo LWW sin copia: el drain sube la local (condicionada,
-      aceptada por ser más nueva) y pisa esa versión remota.
+    - ~~El caso simétrico (edición local pendiente más nueva que una versión remota nunca vista → LWW
+      sin copia)~~ — **resuelto con la fusión en tres vías** (reproducido en producción el 2026-11-03:
+      portátil offline editó una sección, el PC había editado otras dos el finde, y el catch-up subió la
+      carpeta entera pisándolas). Solo persiste para carpetas **sin base de ancla** (transición, ver los
+      residuales de "Fusión en tres vías").
     - Sin `note.md` local no se copia (no es una nota legible).
   - **Orden del ciclo (`runCloudSyncCycleOnce`, `main.ts`):** desbloqueo → si hay mutaciones en vuelo
     se salta el ciclo → **pull → broadcast del resultado (`notes-updated`) → drain del journal** →
@@ -1154,6 +1172,181 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     local. El CLI no aplica `force` al tombstone de una **sección** con subida pendiente (se salta y
     `noteflow push` la re-sube condicionada, puede quedar stale) — solo a la re-subida de una carpeta
     conservada (`cliCloud.forceUpserts`).
+- **Fusión en tres vías por fichero (bases + migración `0014_cloud_base_seq_upsert.sql`).** El bug
+  (reproducido en producción el 2026-11-03, se perdieron ediciones): la resolución era LWW por carpeta
+  comparando solo el `updated:` del `note.md`, sin noción de "versión sobre la que se hizo la edición
+  local". Portátil sincronizado el viernes; el finde el PC edita dos secciones; el lunes el portátil
+  arranca **sin conexión** y edita otra sección (`updated` = lunes, upsert en el journal). Al volver la
+  red el pull veía el ancla remota (domingo) no más nueva → no aplicaba nada (ni las secciones:
+  `shouldApplyRemoteSection` = remota ≥ local, falso); el catch-up re-encolaba **todos** los `.md` de
+  la carpeta y la subida condicionada de la 0011 los aceptaba por más nuevos → las secciones del PC
+  quedaban pisadas en Cloud y el PC se bajaba la versión vieja, sin copia. Diseño (lógica pura en
+  `cloudSyncLogic.ts`, testeada en `tests/electron/cloudThreeWay.test.ts`, incluido un **escenario
+  simulado** contra un servidor en memoria con la semántica de la 0014):
+  - **Base por fichero** (`SyncState.bases[relPath] = {seq, hash}`, `syncState.ts`; persistida en
+    `userData/cloud-sync-state.json` junto al journal — se omite del JSON mientras está vacía, así el
+    `sync-state.json` de GitHub no cambia de forma; un cambio de cuenta la tira con el resto del estado,
+    `resetCloudSyncState` → `emptySyncState()`): la **`seq` del servidor** de la fila que este
+    dispositivo reconcilió por última vez + `hashForBase` (sha-256; el `note.md` **sin la línea
+    `updated:`**, las secciones byte a byte). Se actualiza cuando el pull **escribe** una fila remota o
+    comprueba que el disco **ya es idéntico** (`recordPulledBase`, también en las ramas históricas
+    wholesale/por secciones y con el ancla idéntica — así se van creando las bases), cuando una subida es
+    **aceptada** por la v2 (seq devuelta + hash de lo subido; `recordUploadedBase`), y se **borra** al
+    aplicar un tombstone, al borrar la carpeta (`dropCloudBasesUnder`: tombstone del ancla aplicado o de
+    una carpeta que ya no existe en local, `deleteDir` completado) o tras una subida que no devuelve seq
+    (0011 de fallback, upsert directo/forzado — el siguiente pull la re-establece con el eco). Hash `''`
+    (`TOMBSTONE_BASE_HASH`) = tombstone remoto sobre el que se conserva una edición local.
+  - **Servidor (0014):** `public.cloud_upsert_file_v2(p_path_key, p_path_ct, p_content_ct, p_key_ct,
+    p_updated_at, p_base_seq bigint default null, p_anchor_key default null) returns bigint`, `security
+    invoker` (RLS de `files`: sin entitlement → 403), `search_path = ''`, el **mismo** advisory lock por
+    usuario que 0008/0011, `EXECUTE` revocado a public/anon y concedido a authenticated. Con
+    `p_base_seq` → escribe solo si la fila actual de `p_path_key` (**tombstone incluido**) no existe o
+    su `seq = p_base_seq`; con `null` → la regla de la 0011 (`updated_at` de la fila y del ancla). Devuelve
+    la `seq` asignada por el trigger (`returning seq`) o **`null` si es stale**. Aditiva: la 0011 no se
+    toca. **Aplicada al proyecto real el 2026-11-03.**
+  - **Cliente — subida (`uploadFileRow`):** filas de nota no forzadas → v2 con `p_base_seq =
+    bases[relPath]?.seq ?? null` (`classifyBaseUpsert`: número → subida + nueva base; `null` → `stale`,
+    como siempre: op `stale` en el journal, lo resuelve el pull; 403/error igual que antes; 404/`PGRST202`
+    → fallback a la 0011 **el resto de la sesión**, aviso una vez). Forzadas y json de metadatos: sin
+    cambios (upsert directo).
+  - **Cliente — catch-up (`flushPendingLocalChanges` → `filesNeedingCatchUp`):** un fichero con base
+    se encola **solo si su hash difiere de la base** (ignorando la puerta por `updated` de la carpeta);
+    sin base, la puerta histórica (`updated` > `lastSync` previo, o primer sync).
+  - **Cliente — pull (`reconcileDirThreeWay` → `planThreeWayDir`, puro):** rama nueva por carpeta, que
+    **sustituye** a las ramas wholesale y por secciones cuando la carpeta existe en local y su
+    `<dir>/note.md` tiene base. Va **después** del tombstone del ancla (sigue con la lógica histórica:
+    guard del journal, `planAnchorTombstone`, copia/resurrección) y del caso "carpeta local
+    inexistente" (nota nueva → rama wholesale histórica, que ya registra las bases). Pasos:
+    1. **Antes de escribir nada** pide (`fetchRemoteRows`, una petición; fallo → `PullAbortError`) las
+       secciones que lista el ancla remota del lote que no vienen en él y faltan en disco (o están
+       pendientes aquí sin base); sus filas van a `fetchedForDir` (retry set) como en la wholesale.
+    2. **Síncrono desde aquí** (ninguna subida, timer ni guardado se intercala): lee la carpeta local
+       entera y planifica. Por cada fila remota de sección (`planFileReconcile`): sin base → la regla
+       histórica por sección (`planLegacySection`: decide el `updated` del ancla, pendiente → copia),
+       **salvo** si el fichero no existe aquí (y no hay borrado pendiente) → **apply** siempre: no hay
+       nada local que perder (típicamente una sección añadida en el otro dispositivo; saltarla por
+       `updated` dejaba el ancla listándola sin fichero → el editor la recreaba vacía y la subía en blanco);
+       eco de una subida propia **aún sin respuesta** (`inFlightHashes`: hash de lo que se está subiendo,
+       `uploadFileRow`) → se adopta como base, nunca conflicto con un guardado local posterior;
+       `seq < base.seq` → **outdated** (una subida propia ya fue más allá mientras corría el pull: se
+       ignora); `seq = base.seq` → **keep** (el remoto no cambió; si lo local cambió se sube con esa base
+       — se re-encola si su op es `stale`, que el drain se salta, o si no tiene op); `localChanged` =
+       hash local ≠ base **o** upsert pendiente; sin cambio local → **apply** (escribir/borrar, base,
+       `settlePathUpload`); mismo contenido → **adopt** (base + settle); tombstone sobre cambio local →
+       **keep-local** (base = seq del tombstone con hash `''`, re-subida; **forzada** si el tombstone es
+       más nuevo que la versión local, como antes — así también funciona contra un servidor sin 0014);
+       distinto → **conflicto**: la remota va a la nota, la local a una **copia de conflicto con solo
+       las secciones en conflicto** (`buildConflictCopy`/`writeConflictCopy` con `onlySections`: su
+       `note.md` lista solo esas; dedupe por `conflictCopied` de esos ops, `journalMarkConflictCopied`).
+       Las secciones con `delete` pendiente no se tocan.
+    3. **Ancla** (si viene en el lote, `mergeAnchors`, comparando sin `updated:` contra la base): solo
+       cambió un lado → ese lado (si gana el local y el `updated` remoto no es anterior, el resultado
+       lleva `updated` = ahora: el `updated` del servidor nunca retrocede, lo leen los clientes LWW);
+       mismo contenido → el remoto; ambos → **base = ancla remota** (título, grupo, carpeta, nombres y
+       resto de metadatos de secciones del remoto) + las secciones locales que el remoto no
+       lista y cuyo fichero existe aquí (creadas en este dispositivo), quitando las que solo lista el
+       remoto, faltan aquí y tenían base (borradas aquí desde la base); `aiHidden` de cada sección y
+       `favorited` en **OR** (oculta a la IA en cualquiera de los dos lados sigue oculta), `tags` **unidas**
+       (salen del contenido de las secciones, que sobrevive de los dos lados); `updated` = ahora. **En
+       todas las ramas** se vuelven a listar las secciones cuyo cambio local se conserva en disco
+       (keep / keep-local / pendientes) y las que se reescriben desde el remoto sobre un fichero que
+       faltaba aquí (`withKeptLocalSections`) — si no, la edición quedaría en un fichero huérfano que no
+       lista nadie (sección borrada en el otro dispositivo y editada aquí, o al revés). Si la
+       carpeta **conserva cambios locales** (secciones keep/keep-local o pendientes fuera del lote) y el
+       `updated` local es posterior, el resultado lleva el `updated` local (el ancla del servidor debe
+       decir cuándo cambió la nota por última vez). Ancla **cifrada** o ilegible en conflicto → no se
+       fusiona: la remota gana la carpeta entera y la **carpeta local entera** va a la copia (como antes;
+       todas las filas remotas se aplican y se completan todos los upserts pendientes de la carpeta).
+       Base del ancla = seq remota.
+    4. Ejecución: copia primero (lee el disco; si falla lanza → retry set, nada escrito); los upserts
+       que se van a completar se marcan `stale` + se cancelan sus timers (persistido — si el aplicado
+       falla a medias el drain no los sube); borrados, escrituras (**secciones primero, `note.md` el
+       último**), bases, settles y **re-subida** (`schedulePushUnguarded`, que quita `stale`) de todo lo
+       que acaba distinto del servidor — el ancla fusionada se sube con base = seq remota.
+    El escenario del bug queda: secciones del PC aplicadas (el portátil no las tocó), la del portátil
+    conservada, ancla con el `updated` del portátil re-subida con base = seq del PC, sin copia; el
+    catch-up solo sube la sección del portátil. Si ambos tocaron la misma sección → la del PC en la nota
+    + copia con solo la del portátil.
+  - **Bootstrap de bases (una sola vez, al actualizar):** sin él, un portátil recién actualizado que
+    edita offline una nota antes de que tenga base repetiría el bug tal cual. `needsBasesBootstrap`
+    (puro): dispositivo con estado previo (`pullSeq`, `pullCursor` heredado o `lastSync`) y sin
+    `settings.cloudSync.basesBootstrapped` → ese pull es una **reconciliación completa desde seq 0 con
+    tombstones** (`planPullQuery(s, {bootstrapBases: true})`, el mismo modo que el `pullCursor`
+    heredado) y **toda** carpeta local va por la rama de tres vías con bases sintetizadas
+    (`synthesizeBootstrapBases`, puro) para los ficheros sin base real:
+    - fila **ya vista** (`seq` ≤ el watermark previo y fuera del retry set): es lo que este dispositivo
+      reconcilió → **base real** `{seq, hash(fila)}`, persistida. Local idéntico → nada; local distinto
+      → cambio local, se conserva y se sube sobre esa seq. Un tombstone ya visto no recibe base (regla
+      histórica);
+    - fila **no vista** (cambio remoto desde el último pull de este dispositivo; la versión que
+      sustituyó ya no existe en el servidor) → base **supuesta**, solo para el plan, con `seq` justo por
+      debajo de la de la fila: si el fichero tiene **upsert pendiente** (edición offline antes del primer
+      pull de esta versión), o la carpeta tiene **ediciones no apuntadas** (`note.md` sin op pero con
+      `updated` > `lastSync`: Cloud desactivado, CLI) → contenido desconocido (`UNKNOWN_BASE_HASH`) →
+      idéntico = adopt, distinto = **conflicto** (la remota a la nota y la local a una copia; el
+      `note.md` se fusiona) — **nunca se pisa en silencio**; si no, el fichero local se toma como no
+      cambiado desde el último sync (su propio hash; `''` si falta) → se aplica el cambio remoto.
+    `basesBootstrapped = true` se escribe en el **mismo** `patchSettings` que avanza `pullSeq` (en todo
+    pull correcto: también un primer sync o un dispositivo que ya tiene bases, que no lo necesitan); un
+    cambio de cuenta lo borra con el resto. **No** se condiciona a "`bases` vacío" (lo que se pidió): un
+    bootstrap abortado (`PullAbortError`, caída) ya habría dejado bases parciales persistidas y no se
+    reintentaría nunca; las bases reales existentes tienen prioridad sobre las sintetizadas.
+    **Desviación deliberada de "difiere + pendiente → copia":** se aplica solo a las filas **no
+    vistas**. Para una fila ya vista (el remoto no cambió desde el último pull) la edición offline se
+    conserva y se sube sin copia: copiar ahí sacaría la edición a una copia y revertiría la nota en el
+    caso más común (editar offline sin que nadie más toque la nota). Coste: baja el corpus entero una vez
+    y lee cada carpeta local; los metadatos de raíz siguen la regla de siempre (como en la reconciliación
+    del cursor heredado). **Carpetas que fallan en la siembra** (error de disco → retry set): no pierden
+    la protección. Sus bases supuestas nunca se guardaron, así que el reintento (sin contexto) volvería a
+    la regla LWW — el bug original. Se persisten en `settings.cloudSync.basesBootstrapPending`
+    (`{seenSeq, lastSyncMs, retryKeys, dirs}`: el contexto de la siembra + las carpetas fallidas,
+    `nextBootstrapPending`/`parseBootstrapPending`, puros) en el mismo patch que avanza `pullSeq`; cada
+    pull aplica ese contexto a esas carpetas cuando vuelven en el lote y las quita al reconciliarlas sin
+    error. Elegido frente a "no poner el flag mientras falle alguna": un error de disco permanente
+    haría una reconciliación completa en cada pull para siempre. Un cambio de cuenta lo borra. Tests:
+    `synthesizeBootstrapBases`, `needsBasesBootstrap`, `nextBootstrapPending` y escenarios
+    "laptop just updated" en `tests/electron/cloudThreeWay.test.ts`.
+  - **Pull pronto tras un stale:** cuando una subida condicionada vuelve `stale` (v2 o 0011),
+    `cloudSync.onRemoteConflict` avisa a `main.ts` (`scheduleCloudStalePull`), que lanza un ciclo de
+    Cloud (`runCloudSyncCycle`) a los `staleResolvePullDelay` ms: debounce de 3 s (un solo timer armado a
+    la vez) y **mínimo 30 s entre dos** de estos pulls (un fichero que vuelve a quedar stale no puede
+    encadenar pulls); solo con Cloud activo y el pull inicial OK, y se re-arma si hay subidas propias en
+    vuelo (el ciclo se apartaría). Mismo papel que `githubSync.onRemoteConflict`.
+  - **Residuales (asumidos):**
+    - **Transición residual:** tras el bootstrap toda carpeta sincronizada tiene base. Las ediciones
+      no apuntadas en el journal sobre ficheros cuya fila ya se había visto se suben sin más (no hay
+      forma de saber si el remoto también cambió antes: no cambió, porque la fila es la vista); el caso
+      límite histórico "sección local desfasada que se saltó por LWW" se sube igual que antes.
+    - El **CLI** (`cli/noteflow.js`) sigue con la 0011 y la regla LWW por carpeta (sin bases): una
+      edición offline del CLI todavía puede pisar secciones remotas. Interop: las subidas del CLI cambian
+      la `seq` → la app las ve como cambio remoto en tres vías; las de la app con base pueden quedar
+      `stale` si el CLI escribió entre medias (lo resuelve el pull).
+    - Fusión del ancla a nivel de **campo** limitada (no hay contenido base, solo su hash): con ambos
+      lados cambiados — fácil, porque las `tags` salen del contenido y casi cualquier edición de
+      secciones con etiquetas cambia el frontmatter — gana el frontmatter remoto en título, grupo,
+      carpeta, `archived`, `expiresAt`, nombres/`isRawMode` de las secciones: un cambio local de esos
+      campos se pierde (el contenido de las secciones no). Se salvan `aiHidden` (OR por sección),
+      `favorited` (OR) y las `tags` (unión); consecuencia del OR: quitar `aiHidden`/favorito en un lado
+      mientras el otro edita la nota no se respeta (se vuelve a ocultar/marcar — preferible a exponer a
+      la IA y al proxy una sección oculta).
+    - Una sección que solo lista el ancla remota, que falta aquí, **no** tenía base y no viene en el lote
+      (p. ej. borrada aquí y su tombstone ya reconciliado) se mantiene en el ancla fusionada → el editor
+      la mostraría vacía.
+    - Los **borrados locales** (`scheduleDelete`/`deleteDir`) siguen sin condición de base: borrar una
+      sección/nota que otro dispositivo acaba de editar la tombstonea igual. (Al revés — borrada aquí,
+      editada allí — la edición remota vuelve y queda listada, ver paso 3.)
+    - El eco de una subida propia se reconoce por el hash de lo que está **en vuelo** en este proceso;
+      si la app se cierra con la subida comprometida en el servidor pero sin respuesta, y el usuario ya
+      había guardado otra versión, el siguiente pull ve un conflicto y hace una **copia espuria** (con la
+      versión más nueva; no se pierde nada).
+    - Un conflicto **sin op en el journal** (edición no apuntada: Cloud desactivado, CLI) no tiene flag de
+      dedupe: si el aplicado falla a medias, el reintento puede hacer una segunda copia.
+    - Con el servidor **sin la 0014**, el pull fusiona en tres vías pero las subidas vuelven a la regla
+      de `updated_at` (y no devuelven seq: las bases se pierden tras cada subida y se re-establecen con
+      el eco del pull).
+    - Una subida rechazada (`stale`) por una escritura concurrente de otro dispositivo pasa ahora con
+      cualquier guardado simultáneo del mismo fichero (no solo con versiones más nuevas); se resuelve con
+      el pull pronto de arriba (≥ 3 s, ≥ 30 s entre dos), no al instante.
 - 📌 **GitHub también sube condicionado (QA B3, resuelto):** el sha de la Contents API solo es un
   token de concurrencia, así que el GitHub Sync usa como "versión que este dispositivo vio" su caché de
   shas reconciliados (base) y compara en tres vías por fichero (base / GitHub / local): una subida o un
@@ -1164,6 +1357,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   condicionada (QA B3)".
 - **Regla de secciones sueltas (pull por carpeta, necesaria con el cursor por seq):** un ancla y sus
   secciones son subidas independientes y pueden caer en pulls distintos (en cualquier orden).
+  (Rige para las carpetas **sin base de ancla**; con base, la rama de tres vías decide cada fila por su
+  `seq` frente a la base y el caso queda cubierto sin mirar `updated` — ver "Fusión en tres vías".)
   - El grupo trae el ancla y `shouldApplyRemoteDir` (remota más nueva, o carpeta local inexistente)
     → se escribe el ancla + todas las filas del grupo (como siempre) **+ las secciones que el ancla
     lista, no vienen en el grupo y NO existen en el disco local** (o tienen un upsert pendiente,
@@ -1204,7 +1399,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     salta — las secciones se recuperarán cuando llegue el ancla.
 - **Journal (decisión):** reutiliza las transiciones puras de `electron/syncState.ts` pero
   persiste en su PROPIO `userData/cloud-sync-state.json` (los dos backends no deben reproducirse
-  ops mutuamente); el sha-cache no aplica (el pull incremental ya evita trabajo). Pushes con
+  ops mutuamente); el sha-cache no aplica (el pull incremental ya evita trabajo), pero el mismo fichero
+  guarda las **bases** de la fusión en tres vías (`bases`, ver "Fusión en tres vías"). Pushes con
   claves bloqueadas o offline quedan journaled y drenan tras unlock/reconexión
   (`retrySyncJournal`, mismo contrato que GitHub, salvo que se salta los ops `stale` y sube
   forzados los `force`). Un 403 de RLS (suscripción caducada) se mapea
@@ -1215,7 +1411,9 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
 - Gate de push hasta el primer pull OK (`initialPullStatus`, como GitHub) +
   `flushPendingLocalChanges`: en la PRIMERA sincronización (sin `lastSync` previo) esto sube el
   corpus local entero, metadatos incluidos (las notas, condicionadas: lo que el servidor tenga más
-  nuevo no se pisa). Con la puerta cerrada **no se sube nada** (tampoco el drain), pero
+  nuevo no se pisa). En los arranques siguientes encola los ficheros cuya **base** conocida difiere
+  del disco y, sin base, los de las carpetas con `updated` > `lastSync` previo (`filesNeedingCatchUp`).
+  Con la puerta cerrada **no se sube nada** (tampoco el drain), pero
   `schedulePush`/`pushPathsNow` **sí apuntan el upsert en el journal** (sin timer —
   `planLocalPush` → `'journal'`): así el primer pull ve esas ediciones como pendientes (guards de
   borrado, copias de conflicto) en vez de sobrescribirlas. Metadatos: una edición de
@@ -1466,7 +1664,8 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
     app, que la apunta en el journal antes de guardar `pullSeq`;
   - tombstone de una **sección suelta** pendiente (`isPendingUpsert`, espejo de `hasPendingUpsert`) →
     se salta;
-  - **subidas condicionadas** (espejo de la app): las filas de nota van por la RPC
+  - **subidas condicionadas** (espejo de la app **anterior a la 0014** — el CLI aún no tiene bases ni
+    fusión en tres vías, ver los residuales de "Fusión en tres vías"): las filas de nota van por la RPC
     `cloud_upsert_file` con el mismo fallback (404/`PGRST202` → upsert directo, aviso una vez por
     invocación); la re-subida de la carpeta conservada tras un tombstone va **forzada**; una subida
     rechazada (stale) se informa como `not uploaded: a newer version is on NoteFlow Cloud — run

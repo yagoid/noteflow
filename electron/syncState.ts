@@ -71,6 +71,27 @@ export interface SyncState {
    * (planConditionalUpsert & co.).
    */
   shas: Record<string, string>
+  /**
+   * NoteFlow Cloud only (GitHub never touches it): the BASE of each note file
+   * ('<dir>/note.md', '<dir>/<sec>.md') — the server version this device last
+   * reconciled it to (pulled, found identical on disk, or uploaded and
+   * accepted). Drives the three-way reconcile of the pull and the
+   * `p_base_seq` of the conditional upload (migration 0014). Absent = unknown
+   * (state of an earlier build, never reconciled) → historical behaviour.
+   */
+  bases: Record<string, CloudBase>
+}
+
+/**
+ * NoteFlow Cloud base of one note file: the server-assigned `seq` of the row
+ * this device last reconciled, and the hash of that content
+ * (hashForBase in cloudSyncLogic.ts — sha-256; note.md without its `updated:`
+ * line). `hash` is '' for a remote TOMBSTONE that a local edit is being kept
+ * over (the next upload carries that tombstone's seq as its base).
+ */
+export interface CloudBase {
+  seq: number
+  hash: string
 }
 
 /** What retrySyncJournal should do for a journal entry, given local file existence. */
@@ -79,7 +100,7 @@ export type RetryAction = 'discard' | SyncOpType
 const OP_TYPES: readonly SyncOpType[] = ['upsert', 'delete', 'deleteDir']
 
 export function emptySyncState(): SyncState {
-  return { version: 1, ops: {}, shas: {} }
+  return { version: 1, ops: {}, shas: {}, bases: {} }
 }
 
 /**
@@ -124,11 +145,27 @@ export function parseSyncState(raw: string | null | undefined): SyncState {
     }
   }
 
+  if (typeof obj.bases === 'object' && obj.bases !== null && !Array.isArray(obj.bases)) {
+    for (const [key, value] of Object.entries(obj.bases as Record<string, unknown>)) {
+      if (typeof value !== 'object' || value === null) continue
+      const { seq, hash } = value as Record<string, unknown>
+      if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq < 0 || typeof hash !== 'string') continue
+      state.bases[key] = { seq, hash }
+    }
+  }
+
   return state
 }
 
 export function serializeSyncState(state: SyncState): string {
-  return JSON.stringify({ version: 1, ops: state.ops, shas: state.shas })
+  // `bases` is Cloud-only: omitted while empty, so GitHub's sync-state.json keeps its shape.
+  const bases = state.bases ?? {}
+  return JSON.stringify({
+    version: 1,
+    ops: state.ops,
+    shas: state.shas,
+    ...(Object.keys(bases).length > 0 ? { bases } : {}),
+  })
 }
 
 // ── Journal transitions ───────────────────────────────────────────────────────
@@ -434,6 +471,58 @@ export function shouldRunDeletionRule(
   // every dir missing from the remote.
   if (lastSyncTime === null || !Number.isFinite(lastSyncTime)) return false
   return remoteIsV2
+}
+
+// ── NoteFlow Cloud bases (three-way reconcile, migration 0014) ────────────────
+
+/** Base of a note file (see SyncState.bases), or undefined when unknown. */
+export function getCloudBase(state: SyncState, relPath: string): CloudBase | undefined {
+  return state.bases?.[relPath]
+}
+
+/** Sets (or, with null, drops) the base of a note file. Returns whether the state changed. */
+export function setCloudBase(state: SyncState, relPath: string, base: CloudBase | null): boolean {
+  state.bases ??= {}
+  const prev = state.bases[relPath]
+  if (base === null) {
+    if (!prev) return false
+    delete state.bases[relPath]
+    return true
+  }
+  if (prev && prev.seq === base.seq && prev.hash === base.hash) return false
+  state.bases[relPath] = { seq: base.seq, hash: base.hash }
+  return true
+}
+
+/** Drops the bases of every file under '<dir>/' (the folder is gone locally). */
+export function dropCloudBasesUnder(state: SyncState, dir: string): boolean {
+  const prefix = `${dir}/`
+  let changed = false
+  for (const key of Object.keys(state.bases ?? {})) {
+    if (key.startsWith(prefix)) {
+      delete state.bases[key]
+      changed = true
+    }
+  }
+  return changed
+}
+
+/**
+ * Flags the pending upserts of exactly these paths as `conflictCopied` — the
+ * Cloud three-way pull copied only the CONFLICTING sections of a folder (see
+ * planThreeWayDir), so only their ops are deduped; journalMarkDirConflictCopied
+ * flags the whole folder (whole-folder copies).
+ */
+export function journalMarkConflictCopied(state: SyncState, relPaths: Iterable<string>): boolean {
+  let changed = false
+  for (const key of relPaths) {
+    const entry = state.ops[key]
+    if (entry?.op === 'upsert' && !entry.conflictCopied) {
+      entry.conflictCopied = true
+      changed = true
+    }
+  }
+  return changed
 }
 
 // ── Reconciled-SHA cache ──────────────────────────────────────────────────────

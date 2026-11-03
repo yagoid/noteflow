@@ -27,6 +27,10 @@ exports.shouldPullSkipFile = shouldPullSkipFile;
 exports.shouldDeletionRuleSkipDir = shouldDeletionRuleSkipDir;
 exports.hasPendingUpsert = hasPendingUpsert;
 exports.shouldRunDeletionRule = shouldRunDeletionRule;
+exports.getCloudBase = getCloudBase;
+exports.setCloudBase = setCloudBase;
+exports.dropCloudBasesUnder = dropCloudBasesUnder;
+exports.journalMarkConflictCopied = journalMarkConflictCopied;
 exports.getCachedSha = getCachedSha;
 exports.setCachedSha = setCachedSha;
 exports.planRemoteDirDelete = planRemoteDirDelete;
@@ -46,7 +50,7 @@ exports.journalClearStale = journalClearStale;
 exports.dropCachedShasUnder = dropCachedShasUnder;
 const OP_TYPES = ['upsert', 'delete', 'deleteDir'];
 function emptySyncState() {
-    return { version: 1, ops: {}, shas: {} };
+    return { version: 1, ops: {}, shas: {}, bases: {} };
 }
 /**
  * Tolerant deserialization: a missing, corrupt or wrong-shaped file degrades to
@@ -96,10 +100,27 @@ function parseSyncState(raw) {
                 state.shas[key] = value;
         }
     }
+    if (typeof obj.bases === 'object' && obj.bases !== null && !Array.isArray(obj.bases)) {
+        for (const [key, value] of Object.entries(obj.bases)) {
+            if (typeof value !== 'object' || value === null)
+                continue;
+            const { seq, hash } = value;
+            if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq < 0 || typeof hash !== 'string')
+                continue;
+            state.bases[key] = { seq, hash };
+        }
+    }
     return state;
 }
 function serializeSyncState(state) {
-    return JSON.stringify({ version: 1, ops: state.ops, shas: state.shas });
+    // `bases` is Cloud-only: omitted while empty, so GitHub's sync-state.json keeps its shape.
+    const bases = state.bases ?? {};
+    return JSON.stringify({
+        version: 1,
+        ops: state.ops,
+        shas: state.shas,
+        ...(Object.keys(bases).length > 0 ? { bases } : {}),
+    });
 }
 // ── Journal transitions ───────────────────────────────────────────────────────
 // All mutators return true when the state actually changed (caller persists only then).
@@ -355,6 +376,55 @@ function shouldRunDeletionRule(lastSyncTime, needsFullReconcile, cloudEnabled, r
     if (lastSyncTime === null || !Number.isFinite(lastSyncTime))
         return false;
     return remoteIsV2;
+}
+// ── NoteFlow Cloud bases (three-way reconcile, migration 0014) ────────────────
+/** Base of a note file (see SyncState.bases), or undefined when unknown. */
+function getCloudBase(state, relPath) {
+    return state.bases?.[relPath];
+}
+/** Sets (or, with null, drops) the base of a note file. Returns whether the state changed. */
+function setCloudBase(state, relPath, base) {
+    state.bases ?? (state.bases = {});
+    const prev = state.bases[relPath];
+    if (base === null) {
+        if (!prev)
+            return false;
+        delete state.bases[relPath];
+        return true;
+    }
+    if (prev && prev.seq === base.seq && prev.hash === base.hash)
+        return false;
+    state.bases[relPath] = { seq: base.seq, hash: base.hash };
+    return true;
+}
+/** Drops the bases of every file under '<dir>/' (the folder is gone locally). */
+function dropCloudBasesUnder(state, dir) {
+    const prefix = `${dir}/`;
+    let changed = false;
+    for (const key of Object.keys(state.bases ?? {})) {
+        if (key.startsWith(prefix)) {
+            delete state.bases[key];
+            changed = true;
+        }
+    }
+    return changed;
+}
+/**
+ * Flags the pending upserts of exactly these paths as `conflictCopied` — the
+ * Cloud three-way pull copied only the CONFLICTING sections of a folder (see
+ * planThreeWayDir), so only their ops are deduped; journalMarkDirConflictCopied
+ * flags the whole folder (whole-folder copies).
+ */
+function journalMarkConflictCopied(state, relPaths) {
+    let changed = false;
+    for (const key of relPaths) {
+        const entry = state.ops[key];
+        if (entry?.op === 'upsert' && !entry.conflictCopied) {
+            entry.conflictCopied = true;
+            changed = true;
+        }
+    }
+    return changed;
 }
 // ── Reconciled-SHA cache ──────────────────────────────────────────────────────
 function getCachedSha(state, relPath) {

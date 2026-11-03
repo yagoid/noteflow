@@ -25,15 +25,17 @@ function appendConflictCopyNotice(prev, title, at) {
     };
 }
 /**
- * Writes the conflict copy of the LOCAL note folder '<dir>' — the WHOLE folder
- * (every section), so it opens as the complete local version of the note — as
+ * Writes the conflict copy of the LOCAL note folder '<dir>' — by default the
+ * WHOLE folder (every section), so it opens as the complete local version of the note — as
  * a new note folder with a fresh id and the title '<title> (<label> <date>)'
  * (buildConflictCopy). `label` is the localized "conflict copy". The copy's
  * folder is created non-recursively (never writes into a folder that appeared
  * meanwhile); a half-written copy is removed again and the error THROWN, so
- * the caller must then leave the original folder untouched.
+ * the caller must then leave the original folder untouched. `onlySections`
+ * (section filenames) narrows the copy to those sections — the Cloud
+ * three-way pull keeps only the sections in conflict (buildConflictCopy).
  */
-function writeConflictCopy(notesDir, dir, label, now) {
+function writeConflictCopy(notesDir, dir, label, now, onlySections) {
     const localDirPath = path_1.default.join(notesDir, dir);
     const localFiles = {};
     for (const f of fs_1.default.readdirSync(localDirPath)) {
@@ -41,9 +43,10 @@ function writeConflictCopy(notesDir, dir, label, now) {
             localFiles[f] = fs_1.default.readFileSync(path_1.default.join(localDirPath, f), 'utf-8');
     }
     const title = (0, cloudSyncLogic_1.conflictCopyTitle)((0, cloudSyncLogic_1.anchorTitle)(localFiles[noteFormat_1.NOTE_MD] ?? ''), label, now);
-    let copy = (0, cloudSyncLogic_1.buildConflictCopy)(localFiles, { newId: (0, noteFormat_1.newNoteId)(), title, nowIso: now.toISOString() });
+    const build = () => (0, cloudSyncLogic_1.buildConflictCopy)(localFiles, { newId: (0, noteFormat_1.newNoteId)(), title, nowIso: now.toISOString(), onlySections });
+    let copy = build();
     while (fs_1.default.existsSync(path_1.default.join(notesDir, copy.dir))) {
-        copy = (0, cloudSyncLogic_1.buildConflictCopy)(localFiles, { newId: (0, noteFormat_1.newNoteId)(), title, nowIso: now.toISOString() });
+        copy = build();
     }
     const copyPath = path_1.default.join(notesDir, copy.dir);
     let created = false;

@@ -519,7 +519,8 @@ Estructura de `settings.json`:
 > carpetas colapsados y `sidebarMode` (`'pinned'` | `'floating'`, ausente = fijado; ver `patterns.md`
 > "Sidebar flotante").
 > Los **journals de sync** viven en `userData/sync-state.json` (GitHub) y
-> `userData/cloud-sync-state.json` (NoteFlow Cloud) — estado LOCAL del dispositivo, nunca en el dir
+> `userData/cloud-sync-state.json` (NoteFlow Cloud; guarda también las **bases** de la fusión en tres
+> vías por fichero, ver `monetization.md` § 4) — estado LOCAL del dispositivo, nunca en el dir
 > de notas. El **log de actividad** vive en `userData/activity-log.json` (local, NO se sincroniza,
 > fichero aparte para no engordar `settings.json`): `{version: 1, days: {'YYYY-MM-DD' (día local):
 > noteId[]}}` con los ids (sin duplicados; nunca títulos ni contenido) de las notas que el usuario
