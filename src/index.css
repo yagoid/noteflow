@@ -1126,8 +1126,8 @@ button {
    `flex: <units> 1 0px`), 4px joints over --bg-editor, radius 8px outside and 4px
    inside. Each cell sets --sm-color (its section colour) and the open one --sm-ink;
    the root sets --ng-accent-ink (readable ink on the accent) and the grid
-   --prose-font-family (the editor's font setting). It reuses the map's drop bar
-   (.section-map-drop) but not its folded corner: the tinted header carries the colour. */
+   --prose-font-family (the editor's font setting). It reuses the map's folded
+   corner (.section-map-corner) and drop bar (.section-map-drop). */
 .note-grid {
   display: flex;
   flex-direction: column;
@@ -1185,9 +1185,9 @@ button {
 .note-grid-open:focus-visible { outline: none; }
 .note-grid-cell[draggable="true"]:active .note-grid-open { cursor: grabbing; }
 
-/* Header (= the tab), tinted with the section colour so the name reads as the card's
-   title; solid on the open section. Clicks fall through to .note-grid-open except on
-   the name. */
+/* Header (= the tab): a slightly lighter neutral band so the name reads as the
+   card's title (the colour stays in the corner); solid on the open section. Clicks
+   fall through to .note-grid-open except on the name. */
 .note-grid-head {
   position: relative;
   z-index: 2;
@@ -1196,8 +1196,8 @@ button {
   align-items: center;
   gap: 7px;
   min-width: 0;
-  padding: 0 34px 0 12px;
-  background: color-mix(in srgb, var(--sm-color) 14%, transparent);
+  padding: 0 50px 0 12px;
+  background: rgb(var(--text) / 0.05);
   color: rgb(var(--text));
   font-size: 13px;
   font-weight: 600;
@@ -1206,7 +1206,7 @@ button {
   transition: background-color 250ms ease, color 250ms ease;
 }
 .note-grid-cell.is-ai-hidden .note-grid-head {
-  background: color-mix(in srgb, var(--sm-color) 7%, transparent);
+  background: rgb(var(--text) / 0.03);
   color: rgb(var(--text-muted));
 }
 .note-grid-cell.is-open .note-grid-head { background: var(--sm-color); color: var(--sm-ink); }
@@ -1256,11 +1256,15 @@ button {
   color: var(--sm-ink);
 }
 
-/* Selection checkbox, at the header's right end: on hover, always while selecting. */
+/* The map's folded corner, bigger on a bigger cell. */
+.note-grid-cell .section-map-corner { z-index: 1; width: 14px; height: 14px; }
+.note-grid-cell:hover .section-map-corner { width: 20px; height: 20px; }
+
+/* Selection checkbox, left of the corner: on hover, always while selecting. */
 .note-grid-tick {
   position: absolute;
   top: 8px;
-  right: 8px;
+  right: 26px;
   z-index: 2;
   display: flex;
   align-items: center;
@@ -1297,7 +1301,7 @@ button {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  padding: 2px 12px 0;
+  padding: 8px 12px 0;
   pointer-events: none;
   user-select: none;
   -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent);

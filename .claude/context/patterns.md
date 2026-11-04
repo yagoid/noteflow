@@ -122,12 +122,14 @@ Decisiones a respetar si se toca:
   abierta desde un tag de otra nota) **no hay** celda abierta: no se marca una sección que el editor no
   enseña. La abierta lleva cabecera sólida del color con tinta en contraste (`resolveSectionInk`, ver
   abajo) y etiqueta "OPEN".
-- **Cabecera tintada, sin esquina doblada:** la cabecera de cada celda (`.note-grid-head`) lleva de fondo
-  el color de la sección al 14 % (`color-mix(in srgb, var(--sm-color) 14%, transparent)`; al 7 % si está
-  oculta a la IA) para que el nombre se lea como título de la tarjeta; la abierta la tiene sólida (ver
-  arriba). Al llevar el color la cabecera, la vista **no** usa la esquina doblada del mapa
-  (`.section-map-corner`, que el mapa del editor sí conserva). La casilla de selección va a 8 px del borde
-  derecho de la cabecera (que reserva 34 px a la derecha para ella).
+- **Cabecera neutra + esquina doblada:** la cabecera de cada celda (`.note-grid-head`) es una franja
+  neutra algo más clara (`rgb(var(--text) / 0.05)`; 0.03 si está oculta a la IA) para que el nombre se lea
+  como título de la tarjeta; la abierta la tiene sólida (ver arriba). El color de la sección va **solo**
+  en la esquina doblada del mapa (`.section-map-corner`), aquí más grande: 14 px en reposo y 20 px en
+  hover, con su misma transición; gris apagada si está oculta a la IA y ausente en la abierta. Se probó
+  la cabecera tintada al 14 % con el color y se descartó (no convencía). La casilla de selección va a
+  26 px del borde derecho, a la izquierda de la esquina (la cabecera reserva 50 px). El contenido arranca
+  8 px por debajo de la cabecera (`.note-grid-body` padding-top).
 - **Compartido con el mapa** (no duplicar): la junta de destino al arrastrar es `.section-map-drop`
   (`data-side`/`data-inside`), el lado de caída es `reorderDropSide()` de `lib/sectionMap.ts` y el
   reordenado `moveSectionInList` vía `mutateSections` (la misma acción que el mapa). La tinta del sólido es
@@ -167,7 +169,7 @@ Decisiones a respetar si se toca:
   nombre no recibe clics (todo togglea).
 - **Selección múltiple:** estado local `selectedIds: Set<string>` (por id, nunca índice); `App.tsx` keya la
   vista por `noteViewId`, así que cambiar de nota remonta y resetea sin effects. Casilla `role="checkbox"`
-  al extremo derecho de la cabecera (visible en hover y siempre con selección); marcada → anillo de acento de 1,5 px (un
+  a la izquierda de la esquina doblada (visible en hover y siempre con selección); marcada → anillo de acento de 1,5 px (un
   `::after` por encima de la cabecera sólida). Ctrl/Cmd-click togglea, Shift-click selecciona el rango
   (orden `note.sections`) desde el ancla, y con selección activa basta un clic. La barra flotante (sticky
   abajo) es otro bloque reticulado (`.note-grid-sbar`): contador en acento, **Hide/Show to AI** (solo
@@ -766,8 +768,8 @@ salientes de un archivador; las juntas dejan ver `--bg-editor` (la fila ya no ti
 propia). Lo usan los paneles del editor y la ventana de sección (`SectionWindowApp` monta
 `NoteEditor`); **no** es `Sidebar/SectionTabsRow.tsx` (los chips de sección del sidebar, otro
 componente con su propia `.section-tabs-scroll`). La **vista de nota** es el mismo bloque con la vista
-previa dentro y comparte piezas con él (`.section-map-drop`, `reorderDropSide`, `resolveSectionInk`; la
-esquina doblada `.section-map-corner` es solo del mapa): si cambias una, revisa también "Vista de nota (note overview)". Decisiones a
+previa dentro y comparte piezas con él (`.section-map-corner`, más grande allí, `.section-map-drop`,
+`reorderDropSide`, `resolveSectionInk`): si cambias una, revisa también "Vista de nota (note overview)". Decisiones a
 respetar si se toca:
 - **Filas justificadas:** inactivas `flex: 1 1 auto`, activa `flex-grow: 2.6` → cada fila llena el
   ancho y el mapa es un rectángulo. Al cambiar de sección `flex-grow` transiciona 450 ms (color/fondo

@@ -1004,6 +1004,7 @@ const SectionCell = memo(function SectionCell({
         onClick={(e) => actions.cardClick(e, section.id)}
         onKeyDown={(e) => actions.keyDown(e, section.id)}
       />
+      {!isOpen && <span className="section-map-corner" aria-hidden />}
       <button
         className="note-grid-tick"
         role="checkbox"

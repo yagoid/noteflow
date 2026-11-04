@@ -396,10 +396,11 @@ hay secciones) + separador + **⊞ activo** + **estrella** de favorito + **`⋯`
   section" en la cabecera.
 
 **Tarjeta de sección:**
-- **Cabecera** con el nombre (en color de texto, una línea) **tintada con el color de la sección**
-  (un velo suave), para que el nombre se lea como el título de la tarjeta; la sección abierta la tiene
-  en color sólido. Sin esquina doblada (esa marca es solo de las pestañas del mapa del editor). Oculta a
-  la IA → icono de ojo tachado, celda y tinte más tenues y nombre atenuado.
+- **Cabecera** con el nombre (en color de texto, una línea) sobre una **franja neutra algo más clara**
+  que la tarjeta, para que el nombre se lea como el título; la sección abierta la tiene en color
+  sólido. El color de la sección lo pone la **esquina doblada** (como en el mapa, pero más grande; crece
+  en hover). Oculta a la IA → icono de ojo tachado, celda y franja más tenues, esquina gris y nombre
+  atenuado. El contenido deja un pequeño margen bajo la cabecera.
 - **Vista previa** del contenido real a tamaño legible (títulos, listas, tareas con casilla — hechas
   tachadas —, código en mono), que se desvanece abajo, **con la fuente del editor** (Settings → Editor:
   Inter o mono); las secciones en modo raw muestran el texto crudo, también con esa fuente (como el
@@ -416,7 +417,7 @@ hay secciones) + separador + **⊞ activo** + **estrella** de favorito + **`⋯`
   deja su hueco y la junta de destino se ilumina con la barra de acento, igual que en el mapa. Soltarla
   sobre la celda "New section" la lleva al final.
 - **Click derecho** → el menú de sección de siempre (color, IA, abrir en paralelo, duplicar, borrar…).
-- **Selección múltiple**: la **casilla** del extremo derecho de la cabecera aparece al pasar el ratón (y queda visible en
+- **Selección múltiple**: la **casilla** de la cabecera (junto a la esquina) aparece al pasar el ratón (y queda visible en
   todas mientras haya selección); **Ctrl/Cmd+clic** togglea, **Mayús+clic** selecciona el rango, y con
   algo seleccionado basta un clic. "Select all" (o `Ctrl/Cmd+A`) marca todas; si ya lo están, las
   desmarca. Las seleccionadas llevan un aro de acento. Con ≥1 marcada aparece una **barra flotante**
