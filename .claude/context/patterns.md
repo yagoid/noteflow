@@ -1866,8 +1866,8 @@ dev → `__dirname/../cli/noteflow-cli/SKILL.md` (`__dirname` = `dist-electron/`
 arranque (fire-and-forget, best-effort con try/catch): copia solo si el contenido difiere (auto-cura y
 recoge updates sin reescribir en vano). Controlado por el setting local `exposeSkillToAgents` (default
 `true`) en `settings.json`; al desactivarlo borra el fichero y la carpeta `noteflow-cli` si queda vacía
-(nunca toca nada más de `~/.claude`). Toggle **"Expose CLI skill to AI agents"** en Settings → AI
-(sección "AI agents"), IPC `app:get-skill-sync` / `app:set-skill-sync`.
+(nunca toca nada más de `~/.claude`). Toggle **"Expose CLI skill to AI agents"** en Settings → General
+(`GeneralPanel.tsx`), IPC `app:get-skill-sync` / `app:set-skill-sync`.
 
 ## Temas
 

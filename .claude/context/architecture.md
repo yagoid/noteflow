@@ -179,6 +179,7 @@ noteflow/
 │   │   ├── SyncStatusButton.tsx         # Botón ☁ de la titlebar + tarjeta de estado al hover
 │   │   ├── Settings/                    # Ventana de Ajustes unificada (overlay split nav+contenido)
 │   │   │   ├── SettingsModal.tsx        #   Contenedor: nav izquierda + panel derecho según sección
+│   │   │   ├── GeneralPanel.tsx         #   Idioma + gráfica de actividad + IA local (toggle/reindex) + perfil + skill del CLI
 │   │   │   ├── AppearancePanel.tsx      #   Tema/fuente/acento/colores del editor/escala + preview
 │   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho
 │   │   │   ├── TemplatesPanel.tsx       #   Plantillas de nota (listar/usar/renombrar/borrar)
@@ -186,7 +187,7 @@ noteflow/
 │   │   │   ├── SyncPanel.tsx            #   Selector de backend (Cloud/GitHub, excluyentes) + sección GitHub
 │   │   │   ├── CloudPanel.tsx           #   NoteFlow Cloud (cifrado, suscripción) — ver monetization.md
 │   │   │   ├── AccountPanel.tsx         #   Cuenta NoteFlow (OTP, entitlements) — ver monetization.md
-│   │   │   ├── AiPanel.tsx              #   Toggle "Local AI" + reindex + skill del CLI para agentes
+│   │   │   ├── AiPanel.tsx              #   Solo el proveedor del LLM (LlmConfigView embebido)
 │   │   │   ├── DataPanel.tsx            #   Export/Import (lanza ExportImportModal) + dir de notas
 │   │   │   ├── ShortcutsPanel.tsx       #   Lista de atajos (fuente de verdad de los atajos)
 │   │   │   ├── TutorialPanel.tsx        #   Tutorial: "Play full tour" + tarjeta por diapositiva del tour

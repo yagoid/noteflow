@@ -286,9 +286,10 @@ export function AccountPanel() {
       {/* ── Signed out: step 1 — email ── */}
       {!status.signedIn && step === 'email' && (
         <div className="space-y-3 pt-1">
-          <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            {t.settings.account.signInDesc}
-          </p>
+          <div className="text-[11px] font-mono text-text-muted leading-relaxed">
+            <p>{t.settings.account.signInDesc}</p>
+            <p>{t.settings.account.signInCodeHint}</p>
+          </div>
           <div>
             <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
               {t.settings.account.email}

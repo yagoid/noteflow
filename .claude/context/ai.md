@@ -100,7 +100,7 @@ consumidores** (related ✅, grafo ✅, chat ✅).
 - **Activación:** flag `settings.ai.enabled` (default `false`). **UI principal de activación: el
   overlay/CTA dentro de la vista cerebro** (con IA off el cerebro muestra solo estructura; activar
   desde ahí descarga el modelo + reindexa con barra de progreso). También hay toggle + "Reindex all"
-  en **Settings → AI** (`Settings/AiPanel.tsx`). Arranque del worker diferido ~4s tras el boot
+  en **Settings → General** (`Settings/GeneralPanel.tsx`; Settings → AI solo lleva el proveedor LLM). Arranque del worker diferido ~4s tras el boot
   (`primeSettings`).
 - **Deps nativas (IMPRESCINDIBLE):** `better-sqlite3` + `onnxruntime-node` + `sqlite-vec` son
   binarios nativos. `package.json` lleva **`"postinstall": "electron-builder install-app-deps"`**
@@ -291,12 +291,12 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   auto-routing de primera vez). **Auto-routing de primera vez (`AiPanel`):** solo enruta a
   `settings` cuando **no hay proveedor configurado** (onboarding); con proveedor el panel aterriza
   **siempre en `chat`**. La pestaña `profile` **nunca se abre sola** — se llega pulsándola, desde la
-  paleta o desde Settings → AI. El comando inline **"Ask AI"** pasa un `prompt`: `openAiPanel`
+  paleta o desde Settings → General ("Open profile setup"). El comando inline **"Ask AI"** pasa un `prompt`: `openAiPanel`
   arranca un chat nuevo y deja `pendingPrompt`, que `ChatView` auto-envía en cuanto hay proveedor
   configurado (si no, queda en cola). Sin IPC nuevo — es routing in-renderer vía store.
 - **Segundo cerebro (cuestionario de baja fricción):** el `ProfileFlow` vive en la pestaña
   **Profile** del panel de IA y **solo se abre a petición del usuario** (pestaña, paleta de comandos
-  o Settings → AI); no hay auto-apertura al entrar al cerebro. La UI es **data-driven** desde
+  o Settings → General); no hay auto-apertura al entrar al cerebro. La UI es **data-driven** desde
   `profileQuestions.ts` (`PROFILE_SECTIONS` → secciones **Professional / Personal / Your style /
   Working with the AI**; campos tipo `chips`/`tags`/`text`/**`choice`** — `PROFILE_FIELDS` los aplana).
   **Diseño indirecto > directo:** la mayor señal viene de **preguntas-proxy de baja fricción**

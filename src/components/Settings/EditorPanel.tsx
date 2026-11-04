@@ -12,7 +12,7 @@ export function EditorPanel() {
   const t = useT()
 
   return (
-    <div className="space-y-6">
+    <div className="settings-rows space-y-6">
       {/* Font size */}
       <section className="flex items-center justify-between gap-4">
         <div>

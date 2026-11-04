@@ -143,9 +143,12 @@ Iconos del TitleBar:
   "Today", en HTML porque el SVG se estira; animación de entrada
   izquierda→derecha (respeta `prefers-reduced-motion`) y montículo semilla simétrico si no hay
   actividad; solo lee ids y timestamps, nunca contenido; `ActivityPulse.tsx` +
-  `src/lib/activityPulse.ts`), **Appearance** (tema/fuente/acento/colores del editor/escala),
+  `src/lib/activityPulse.ts`; bajo el gráfico, en filas título + descripción + control: **Local AI**
+  (toggle de embeddings; activada, botón "Reindex all notes" con progreso), **Profile** (botón "Open
+  profile setup" → abre el cerebro en la pestaña Profile y cierra Ajustes) y **Expose CLI skill to AI
+  agents** (toggle)), **Appearance** (tema/fuente/acento/colores del editor/escala),
   **Editor** (fuente/tamaño/ancho) — grupo **Preferences** —; **Sync** (NoteFlow Cloud + GitHub),
-  **AI**, **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
+  **AI** (solo el proveedor del LLM), **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
   de notas), **Startup** (autostart + stickies), **Templates** (plantillas de nota) — grupo **Your
   notes** —; y **Tutorial** (el tour "What's new", ver abajo), **Keyboard shortcuts** y **About**
   (versión + updates + repo) — grupo **Help**. Cada grupo lleva un título pequeño en mayúsculas y
@@ -807,10 +810,10 @@ derivado reconstruible desde los `.md`.
 - **Activación:** flag `settings.ai.enabled` (default **off**). La **UI definitiva de activación
   está en la vista cerebro** (ver abajo): con la IA off el cerebro muestra solo la estructura y un
   CTA "Activar IA local"; al activar descarga un modelo pequeño (~una vez) e indexa con barra de
-  progreso. También hay un toggle **"Local AI"** en Settings → AI.
+  progreso. También hay un toggle **"Local AI"** en Settings → General.
 - **Panel Related:** al cambiar de sección/nota, el panel actualiza las relacionadas; click en un
   resultado navega a esa sección. Las notas **cifradas se omiten** (no entran al índice).
-- **Reindexar:** botón "Reindex all notes" en Settings → AI (muestra progreso); el índice también
+- **Reindexar:** botón "Reindex all notes" en Settings → General (debajo del toggle "Local AI", muestra progreso); el índice también
   se mantiene al día solo al guardar (incremental, debounce).
 - Roadmap: este índice alimenta la **vista cerebro** (Fase 2 ✅) y el **chat RAG** (Fase 3 ✅, ver
   "Panel de IA" más abajo). Un índice, tres consumidores. Detalle técnico en `.claude/context/ai.md`.
@@ -891,7 +894,7 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   cualquier nota/sección como origen. Necesita la IA local (embeddings) activada.
 - **Profile:** cuestionario del **segundo cerebro** — **no aparece solo**: al entrar al cerebro
   siempre aterrizas en el chat (o en el proveedor, si aún no configuraste ninguno) y el cuestionario
-  se abre cuando pulsas la pestaña **Profile** (o desde la paleta / Ajustes → IA). Pensado para
+  se abre cuando pulsas la pestaña **Profile** (o desde la paleta / Ajustes → General, botón "Open profile setup"). Pensado para
   **cualquier persona** (no solo
   perfiles técnicos) y para **mínimo esfuerzo**, organizado en **secciones**: *Professional* (a qué
   te dedicas, herramientas, en qué te enfocas), *Personal*, *Your style* y *Working with the AI*
@@ -930,8 +933,12 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     badge "Best value"). **La card entera es clickable**: con sesión y checkout configurado abre la
     pasarela de pago de ESE plan (antes había un botón "Subscribe" dentro; ahora la card muestra un CTA
     "Subscribe"); sin sesión, clicar la card lleva a Ajustes → Suscripción (CTA "Go to Subscription" con flecha);
-    con sesión pero sin checkout en el build muestra "coming soon" y queda inerte. Esto vale tanto en
-    Ajustes → IA como en el **panel de IA del Cerebro** (antes solo en Ajustes). Lo mismo si la
+    con sesión pero sin checkout en el build muestra "coming soon" y queda inerte. Bajo los planes,
+    una lista **"What you get"** con las ventajas de NoteFlow AI frente a la vía gratis (sin Ollama ni
+    API keys, más barato con los modelos más eficientes, con tools e imágenes, asignación mensual con consumo visible, catálogo
+    siempre al día). Esto vale tanto en
+    Ajustes → IA (que ya no lleva título "Assistant (LLM)": empieza directamente con la línea "Pick one
+    source…" y las dos cards) como en el **panel de IA del Cerebro** (antes solo en Ajustes). Lo mismo si la
     suscripción caduca teniéndolo activo, para que entiendas el fallo y puedas cambiar de fuente.
     **Al suscribirte** (Subscribe → pagar → Refresh en Settings → Subscription), NoteFlow AI **se activa
     como proveedor automáticamente**.
@@ -1327,7 +1334,10 @@ Flujo del panel según estado:
   modo del estado `no-keys` — configurar una nube que no podrías activar no lleva a ninguna parte)
   y el botón **Enable sync**. En ambos casos, en su lugar: mensaje "requires subscription" + el
   **mismo bloque de planes** que Ajustes → Suscripción — NoteFlow Cloud y, si tampoco tienes AI, el
-  Bundle con badge "Best value" —, cada card clickable para abrir su checkout. **Unlock, Sync now,
+  Bundle con badge "Best value" —, cada card clickable para abrir su checkout, y debajo la lista
+  **"What you get"** de Cloud (cifrado en tránsito y en reposo, sync automático, elegir Estándar o
+  Privado E2EE, sin repo de GitHub). El panel Cloud ya no tiene párrafo de introducción propio (lo
+  describe la card del selector). **Unlock, Sync now,
   Disable y Lock funcionan sin suscripción**: quien ya tiene claves y datos subidos puede seguir
   desbloqueando y bajándose sus notas aunque caduque.
 - **Sin sesión**, el panel ya no se limita a pedirte que inicies sesión: muestra también esos

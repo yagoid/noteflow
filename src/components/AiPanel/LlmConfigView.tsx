@@ -358,6 +358,7 @@ export function LlmConfigView({
                       products={['ai', 'bundle']}
                       account={account}
                       showSignInHint={false}
+                      benefits="ai"
                       onSubscribe={openCheckout}
                       onGoToAccount={goToAccount}
                     />

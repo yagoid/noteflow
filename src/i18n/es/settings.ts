@@ -162,7 +162,6 @@ export const settings = {
 
   cloud: {
     title: 'NoteFlow Cloud',
-    desc: 'Sincronización cifrada a través de los servidores de NoteFlow. Las notas se cifran en este dispositivo antes de subirse — el servidor solo almacena texto cifrado.',
     notAvailable: 'NoteFlow Cloud aún no está disponible en esta versión.',
     requiresSubscription: 'Activar la sincronización de NoteFlow Cloud requiere una suscripción activa.',
     chooseModeDesc: 'Elige cómo se gestionan tus claves de cifrado. Puedes cambiar de modo más adelante desde este panel.',
@@ -230,13 +229,9 @@ export const settings = {
     disableLocalAi: 'Desactivar IA local',
     reindexAll: 'Reindexar todas las notas',
     downloadingModel: 'Descargando modelo…',
-    assistant: 'Asistente (LLM)',
-    assistantHint:
-      'Haz funcionar el chat con el plan gestionado NoteFlow AI o con un proveedor propio (clave API o modelo local) — uno u otro. Cada proveedor guarda sus propias credenciales; cambiar de proveedor no mezcla las claves.',
     profile: 'Perfil',
     openProfileSetup: 'Abrir configuración del perfil',
     profileHint: 'Vuelve a hacer el cuestionario para actualizar la nota de perfil que el asistente usa como contexto.',
-    aiAgents: 'Agentes de IA',
     exposeSkill: 'Exponer la skill del CLI a los agentes de IA',
     exposeSkillHint:
       'Instala la skill de NoteFlow en ~/.claude/skills para que agentes como Claude Code puedan gestionar tus notas a través del CLI sin configuración adicional.',
@@ -292,7 +287,8 @@ export const settings = {
     refresh: 'Actualizar',
     signOut: 'Cerrar sesión',
     signInDesc:
-      'Para usuarios de pago: inicia sesión con tu correo para acceder a tu suscripción de NoteFlow. Te enviaremos un código de un solo uso — sin contraseña.',
+      'Para usuarios de pago: inicia sesión con tu correo para acceder a tu suscripción de NoteFlow.',
+    signInCodeHint: 'Te enviaremos un código de un solo uso.',
     email: 'Correo',
     sendCode: 'Enviar código',
     codeSentPrefix: 'Enviamos un código de acceso a ',
@@ -305,6 +301,22 @@ export const settings = {
     legalMiddle: ' y confirmas haber leído la ',
     legalPrivacy: 'Política de privacidad',
     legalSuffix: '.',
+  },
+
+  planBenefits: {
+    title: 'Qué incluye',
+    ai: [
+      'Funciona nada más suscribirte: sin instalar Ollama, sin cuentas de terceros, sin API keys que comprar ni rotar.',
+      'Sale más barato: usamos los modelos más eficientes (GPT Luna, Claude Haiku, DeepSeek…), todos con herramientas del agente y soporte de imágenes.',
+      'Asignación mensual de IA incluida, con tu consumo visible aquí mismo.',
+      'Catálogo de modelos siempre al día: los nuevos llegan sin reconfigurar nada.',
+    ],
+    cloud: [
+      'Sincronización cifrada a través de los servidores de NoteFlow: cifrada en tránsito y en reposo.',
+      'Sincronización automática entre tus dispositivos, sin push ni pull manuales.',
+      'Tú eliges el cifrado: Estándar (nada que recordar) o Privado de extremo a extremo, donde solo tú puedes leer tus notas.',
+      'Sin configuración: ningún repositorio de GitHub que crear ni mantener.',
+    ],
   },
 
   shortcuts: {

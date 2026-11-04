@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { HelpCircle, Loader, RefreshCw, Sparkles } from 'lucide-react'
+import { Check, HelpCircle, Loader, RefreshCw, Sparkles } from 'lucide-react'
 import type { AccountStatus } from '../../types'
 import {
   SUBSCRIPTION_PRICES,
@@ -73,6 +73,7 @@ export function PlanOffers({
   busy = false,
   showSignInHint = true,
   showUnknownNotice = true,
+  benefits,
   onSubscribe,
   onGoToAccount,
 }: {
@@ -92,6 +93,13 @@ export function PlanOffers({
    * reports the unknown state itself (Settings → Account's plan badges).
    */
   showUnknownNotice?: boolean
+  /**
+   * "What you get" list under the cards: what the managed plan adds over the free
+   * self-managed route (own provider / GitHub Sync). Set it on the AI and Cloud
+   * gates; omit it in Settings → Subscription, which compares plans, not routes.
+   * Living inside this block, it shows exactly when the cards do.
+   */
+  benefits?: 'ai' | 'cloud'
   /**
    * Signed in, the whole card is the checkout button for its product. Omit where the
    * surface cannot open a checkout — a signed-in card then just shows "coming soon".
@@ -202,6 +210,22 @@ export function PlanOffers({
           )
         })}
       </div>
+
+      {benefits && (
+        <div className="max-w-md space-y-1.5 normal-case">
+          <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-text-muted/70">
+            {t.settings.planBenefits.title}
+          </p>
+          <ul className="space-y-1">
+            {t.settings.planBenefits[benefits].map((benefit) => (
+              <li key={benefit} className="flex items-start gap-2 text-[11px] font-mono text-text-muted leading-relaxed">
+                <Check size={11} className="mt-[3px] shrink-0 text-accent" />
+                <span>{benefit}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed normal-case">
         {t.settings.account.pricesIncludeVat}

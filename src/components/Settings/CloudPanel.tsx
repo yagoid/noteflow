@@ -228,19 +228,14 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
     })
   }
 
-  // No title here: the backend selector card in SyncPanel already names the
-  // panel (t.settings.cloud.title), so this is just the one-paragraph intro.
-  const header = (
-    <p className="text-[11px] font-mono text-text-muted max-w-md leading-relaxed">
-      {t.settings.cloud.desc}
-    </p>
-  )
+  // No title or intro here: the backend selector card in SyncPanel already names
+  // and describes the panel (t.settings.cloud.title + sync.cloudCardDesc), and the
+  // pitch (encryption included) lives in the plans block's "What you get" list.
 
   // ── Initial status fetch ──
   if (!status || !account) {
     return (
       <div className="space-y-4">
-        {header}
         <div className="flex items-center gap-2 text-text-muted">
           <Loader size={12} className="animate-spin" />
           <span className="text-xs font-mono">{t.common.loading}</span>
@@ -253,7 +248,6 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
   if (!status.configured) {
     return (
       <div className="space-y-4">
-        {header}
         <p className="text-[11px] font-mono text-text-muted leading-relaxed">
           {t.settings.cloud.notAvailable}
         </p>
@@ -265,7 +259,6 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
   if (recoveryCode) {
     return (
       <div className="space-y-4">
-        {header}
         <div className="px-4 py-3 bg-yellow-500/10 border border-yellow-500/40 rounded-xl space-y-3">
           <div className="flex items-center gap-2">
             <ShieldAlert size={13} className="text-yellow-400 flex-shrink-0" />
@@ -308,7 +301,6 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
   if (!status.signedIn) {
     return (
       <div className="space-y-4">
-        {header}
         <div className="space-y-2">
           {/* The NoteFlow account is only for paid users: address existing
               subscribers, so signing in isn't mistaken for "turn on sync". */}
@@ -330,6 +322,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
             products={['cloud', 'bundle']}
             account={account}
             showSignInHint={false}
+            benefits="cloud"
             onGoToAccount={onNavigate ? () => onNavigate('account') : undefined}
           />
         </div>
@@ -365,6 +358,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
         products={['cloud', 'bundle']}
         account={account}
         busy={isLoading}
+        benefits="cloud"
         onSubscribe={handleSubscribe}
       />
     </div>
@@ -372,8 +366,6 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
 
   return (
     <div className="space-y-4">
-      {header}
-
       {/* Error (local or engine syncError — e.g. an expired subscription) */}
       {(error || status.error) && (
         <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs font-mono text-red-400">

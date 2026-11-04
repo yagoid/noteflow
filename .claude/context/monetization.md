@@ -539,6 +539,10 @@ es **un preset más**, no una implementación nueva.
      `['ai', 'bundle']` dentro del gate.
   4. **Ajustes → Sincronización → NoteFlow Cloud** (`CloudPanel`): `['cloud', 'bundle']`, tanto en el
      estado sin sesión como en el gate de entitlement (que cubre setup y enable — ver § 4, "Gating").
+  Prop opcional `benefits: 'ai' | 'cloud'`: lista "What you get" (`t.settings.planBenefits`) entre
+  las cards y la letra pequeña, con las ventajas del plan gestionado frente a la vía gratis
+  autogestionada; la pasan los gates de IA (`LlmConfigView`) y Cloud (`CloudPanel`), **no**
+  Ajustes → Suscripción. Al vivir dentro del bloque hereda sus reglas de visibilidad.
   Reglas: si `!account.configured` (build sin Supabase) no pinta nada — no se anuncian precios de algo
   que no se puede comprar. Con sesión y entitlements **desconocidas** no pinta ninguna card: muestra
   `PlanUnknownNotice` ("Couldn't verify your plan yet — Retry"), salvo con `showUnknownNotice={false}`

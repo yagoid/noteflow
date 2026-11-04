@@ -88,7 +88,7 @@ export function SyncPanel({ onNavigate }: { onNavigate?: (section: SettingsSecti
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <p className="text-[11px] font-mono text-text-muted max-w-md leading-relaxed">
+        <p className="text-[11px] font-mono text-text-muted leading-relaxed">
           {t.settings.sync.chooseBackendDesc}
         </p>
         <div className="grid gap-2 sm:grid-cols-2">

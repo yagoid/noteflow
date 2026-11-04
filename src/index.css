@@ -90,6 +90,32 @@ button {
   height: auto;
 }
 
+/* Settings content area: the smallest body copy (hints, descriptions, plan
+   benefits…) reads one step larger than in the rest of the app. Scoped here, not
+   in each component, because some of them (PlanOffers, LlmConfigView) also render
+   in the narrower brain panel, which keeps 11px. */
+.settings-content .text-\[11px\] {
+  font-size: 12px;
+}
+
+/* Subtle, inset divider between consecutive setting rows (General, Editor). Drawn
+   as an absolute pseudo-element so it never becomes a flex item of the row, and
+   centred in the parent's space-y-6 gap (24px → top: -12px). Only between two
+   adjacent <section>s: wrap a block in a <div> instead to keep it rule-free. */
+.settings-rows > section {
+  position: relative;
+}
+.settings-rows > section + section::before {
+  content: '';
+  position: absolute;
+  top: -12px;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: rgb(var(--border) / 0.5);
+  pointer-events: none;
+}
+
 /* AI chat markdown. Reuses the editor's prose markup (via htmlFromMarkdown) but
    scaled down to the chat panel: 12px base, compact headings/spacing, and no
    editor padding (the message bubble supplies its own insets). */

@@ -196,7 +196,6 @@ export const settings = {
   // NoteFlow Cloud (encrypted sync) — lives on the Sync page above GitHub Sync.
   cloud: {
     title: 'NoteFlow Cloud',
-    desc: 'Encrypted sync through NoteFlow servers. Notes are encrypted on this device before upload — the server only ever stores ciphertext.',
     notAvailable: "NoteFlow Cloud isn't available in this build yet.",
     // Entitlement gate (enable only — unlock/pull/disable stay available). The
     // plans and their prices come from the shared PlanOffers block (settings.account.*).
@@ -279,13 +278,9 @@ export const settings = {
     disableLocalAi: 'Disable local AI',
     reindexAll: 'Reindex all notes',
     downloadingModel: 'Downloading model…',
-    assistant: 'Assistant (LLM)',
-    assistantHint:
-      "Power the chat with the managed NoteFlow AI plan or with a provider of your own (API key or a local model) — one or the other. Each provider keeps its own credentials; switching providers won't mix keys.",
     profile: 'Profile',
     openProfileSetup: 'Open profile setup',
     profileHint: 'Re-run the questionnaire to refresh the profile note the assistant uses for context.',
-    aiAgents: 'AI agents',
     exposeSkill: 'Expose CLI skill to AI agents',
     exposeSkillHint:
       'Installs the NoteFlow skill into ~/.claude/skills so agents like Claude Code can drive your notes via the CLI without extra setup.',
@@ -361,7 +356,8 @@ export const settings = {
     refresh: 'Refresh',
     signOut: 'Sign out',
     signInDesc:
-      "For paid users: sign in with your email to access your NoteFlow subscription. We'll send you a one-time code — no password needed.",
+      'For paid users: sign in with your email to access your NoteFlow subscription.',
+    signInCodeHint: "We'll send you a one-time code.",
     email: 'Email',
     sendCode: 'Send code',
     // "We sent a sign-in code to <email>. Enter it below to sign in." — the email
@@ -378,6 +374,25 @@ export const settings = {
     legalMiddle: ' and acknowledge the ',
     legalPrivacy: 'Privacy Policy',
     legalSuffix: '.',
+  },
+
+  // "What you get" list under the plan cards of the AI and Cloud gates (PlanOffers
+  // `benefits` prop) — what the managed plan adds over the free self-managed route
+  // (own provider / GitHub Sync). Not shown in Settings → Subscription.
+  planBenefits: {
+    title: 'What you get',
+    ai: [
+      'Works the moment you subscribe — no Ollama to install, no third-party accounts, no API keys to buy or rotate.',
+      'More affordable — we use the most efficient models (GPT Luna, Claude Haiku, DeepSeek…), all with agent tools and image support.',
+      'A monthly AI allowance included, with your usage shown right here.',
+      'The model catalog stays up to date — new models arrive without reconfiguring anything.',
+    ],
+    cloud: [
+      'Encrypted sync through NoteFlow servers — encrypted in transit and at rest.',
+      'Automatic, hands-free sync across your devices — no manual pushes or pulls.',
+      'Choose your encryption: Standard (nothing to remember) or Private end-to-end, where only you can read your notes.',
+      'Nothing to set up — no GitHub repository to create or maintain.',
+    ],
   },
 
   shortcuts: {
