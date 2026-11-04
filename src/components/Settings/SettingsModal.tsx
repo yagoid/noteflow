@@ -122,7 +122,7 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-surface-1 border border-border rounded-lg shadow-2xl w-[min(940px,92vw)] h-[min(680px,90vh)] flex flex-col overflow-hidden">
+      <div className="bg-surface-1 border border-border rounded-lg shadow-2xl w-[min(1040px,94vw)] h-[min(760px,92vh)] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
@@ -171,7 +171,7 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
           <div className="flex-1 min-w-0 flex flex-col">
             {/* Title of the section being viewed: the top of the hierarchy inside the
                 window (subsection headers below use the smaller uppercase SectionTitle). */}
-            <div className="px-5 pt-4 pb-3 border-b border-border">
+            <div className="px-5 pt-4 pb-3">
               <h2 className="text-sm font-mono font-semibold text-text">{activeLabel}</h2>
             </div>
             <div className="settings-content flex-1 overflow-y-auto px-5 py-5">
