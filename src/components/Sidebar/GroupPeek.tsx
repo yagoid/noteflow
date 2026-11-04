@@ -86,7 +86,8 @@ function findGroupItem(items: SidebarItem[], groupId: string): GroupItem | null 
  * moves never re-render the list. Portaled to <body>: the floating sidebar's panel
  * can be transformed (it would become the containing block of a `fixed` child);
  * React events still bubble through the React tree, so the floating panel counts
- * hover/focus in the peek as its own and stays open meanwhile.
+ * hover/focus in the peek as its own and stays open meanwhile (`data-sidebar-portal`
+ * lets the panel's hover watchdog, which reads the DOM, do the same).
  */
 export function GroupPeek({
   controllerRef,
@@ -436,6 +437,7 @@ function GroupPeekPanel({
   return createPortal(
     <div
       ref={panelRef}
+      data-sidebar-portal
       role="dialog"
       aria-label={tf(t.sidebar.peekLabel, { group: group.name })}
       className="fixed z-50 flex flex-col overflow-hidden rounded-lg border border-border bg-surface-1 shadow-xl animate-group-peek-in"

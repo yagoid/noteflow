@@ -1050,6 +1050,13 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   abierto) cierra y devuelve el foco al editor del pane activo (`focusContentAnchor`) y hace
   `stopPropagation` (si no, el Escape global — listener de `window` en burbuja — de `GroupOverview`/`NoteOverview`/`AllContentOverview` cerraría la vista); la franja no
   reabre hasta que el ratón sale de ella. Seleccionar una nota no lo cierra.
+- **Watchdog de hover.** El `hovered` sale de `onMouseEnter/Leave` del `aside`, que React deriva de
+  pares `mouseout`/`mouseover`; si se elimina el nodo bajo el puntero (nota pulsada en el peek de grupo,
+  portaleado a `<body>`) no hay `mouseout` y el leave no llega nunca. Mientras `floating && hovered`, un
+  listener de `mouseover`/`mousemove` en `window` (captura, pasivo) programa el cierre de 200 ms si el
+  target no está en el `aside`, la franja ni un `[data-sidebar-portal]`; volver dentro cancela solo el
+  temporizador que programó él (no interfiere con el cruce franja↔panel ni con el leave normal).
+  Drag/overlay/foco siguen manteniéndolo abierto por su cuenta (`open` es un OR).
 - **Abierto/cerrado sin `visibility`.** Cerrado = `opacity: 0` + `pointer-events: none` (sigue
   enfocable): `Ctrl+Shift+F` (`noteflow:focus-search`) enfoca el buscador aunque esté cerrado y el
   foco lo abre; Tab desde fuera también. Abierto usa `transform: none` (no `translateX(0)`): un
@@ -1120,8 +1127,11 @@ cabecera, clamp al viewport: sube si no cabe abajo).
 - **Portal + sidebar flotante:** portal a `document.body` con `position: fixed` (el panel flotante puede
   estar transformado → sería containing block). Como los eventos React burbujean por el **árbol React**
   (no el DOM), el hover (`onMouseEnter/Leave` del `aside`) y el foco (`onFocus`/`onBlur`) del peek cuentan
-  como "dentro" para `SidebarShell`: el panel flotante no se cierra mientras se usa el peek, sin atributos
-  extra. El hueco de 6 px dispara un leave del `aside`, pero el enter del peek cancela su cierre (200 ms).
+  como "dentro" para `SidebarShell`: el panel flotante no se cierra mientras se usa el peek. El hueco de
+  6 px dispara un leave del `aside`, pero el enter del peek cancela su cierre (200 ms). El panel del peek
+  lleva `data-sidebar-portal` (`SIDEBAR_PORTAL_ATTR` en `sidebarAnchor.ts`) para el *watchdog* de hover
+  del shell (ver "Sidebar flotante"): al pulsar una nota del peek este se desmonta bajo el puntero, el
+  navegador no emite `mouseout` de un nodo eliminado y React nunca entrega el `mouseleave` del `aside`.
 
 ### Relaciones sección↔sección (slash command + cerebro)
 Enlaces explícitos que el usuario crea **inline mientras escribe**: en el editor rich teclea `/` →

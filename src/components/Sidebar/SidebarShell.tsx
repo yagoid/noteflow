@@ -8,7 +8,7 @@ import {
   MINI_STRIP_WIDTH,
   type MiniSidebarRow,
 } from '../../lib/miniSidebar'
-import { focusContentAnchor, onSidebarAnchorChange, SIDEBAR_ANCHOR_ATTR } from './sidebarAnchor'
+import { focusContentAnchor, onSidebarAnchorChange, SIDEBAR_ANCHOR_ATTR, SIDEBAR_PORTAL_ATTR } from './sidebarAnchor'
 import { MiniSidebar } from './MiniSidebar'
 import { useT } from '../../i18n/useT'
 
@@ -23,6 +23,7 @@ const PANEL_LEFT = 8
 const DOCK_TRANSITION_MS = 220
 
 const ANCHOR_SELECTOR = `[${SIDEBAR_ANCHOR_ATTR}]`
+const PORTAL_SELECTOR = `[${SIDEBAR_PORTAL_ATTR}]`
 
 interface Bounds {
   top: number
@@ -256,6 +257,41 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
       window.removeEventListener('mousemove', onMove, true)
     }
   }, [dragging, endDrag])
+
+  // ── Hover watchdog: a leave React never reports ────────────────────────────
+  // Removing the element under the pointer (a note clicked in the group peek,
+  // portaled to <body>) fires no mouseout, so the next mouseover comes with no
+  // related target and the aside never gets its mouseleave. While hovered, a
+  // pointer seen outside host / strip / sidebar portals closes as a leave would;
+  // coming back cancels only the close this watchdog scheduled.
+  useEffect(() => {
+    if (!floating || !hovered) return
+    let ownTimer: ReturnType<typeof setTimeout> | null = null
+    const onPointer = (e: MouseEvent) => {
+      const target = e.target
+      const inside = target instanceof Element && (
+        hostRef.current?.contains(target) ||
+        stripRef.current?.contains(target) ||
+        target.closest(PORTAL_SELECTOR) != null
+      )
+      if (inside) {
+        if (ownTimer && hoverTimerRef.current === ownTimer) clearHoverTimer()
+        ownTimer = null
+        return
+      }
+      // A close is already pending (the regular leave, or ours).
+      if (hoverTimerRef.current) return
+      lastPointerRef.current = null
+      setHoverSoon(false)
+      ownTimer = hoverTimerRef.current
+    }
+    window.addEventListener('mouseover', onPointer, { capture: true, passive: true })
+    window.addEventListener('mousemove', onPointer, { capture: true, passive: true })
+    return () => {
+      window.removeEventListener('mouseover', onPointer, { capture: true })
+      window.removeEventListener('mousemove', onPointer, { capture: true })
+    }
+  }, [floating, hovered, clearHoverTimer, setHoverSoon])
 
   // ── Hover ───────────────────────────────────────────────────────────────────
   const trackPointer = (e: React.MouseEvent) => { lastPointerRef.current = { x: e.clientX, y: e.clientY } }

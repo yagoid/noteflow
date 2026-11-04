@@ -8,6 +8,10 @@
 
 export const SIDEBAR_ANCHOR_ATTR = 'data-sidebar-anchor'
 
+/** Marks a sidebar element portaled out of the `aside` (the group peek): the
+ *  floating panel's hover watchdog counts the pointer on it as inside. */
+export const SIDEBAR_PORTAL_ATTR = 'data-sidebar-portal'
+
 const listeners = new Set<() => void>()
 
 /** Subscribe to anchors mounting/unmounting. Returns the unsubscribe. */
