@@ -171,6 +171,21 @@ export function TitleBar() {
             )}
           </button>
         )}
+        {/* Brain · sync (when connected) · settings, evenly spaced: the brain pill's
+            mr-2 plus the icon buttons' px-2 give the same 16px between each. The
+            window controls keep a slightly wider gap after them. */}
+        <button
+          onClick={() => setBrainView(!brainViewOpen)}
+          className={`flex items-center gap-1.5 px-2.5 h-6 my-auto ml-3 mr-2 rounded text-[11px] font-mono tracking-wide transition-[color,background-color,transform] duration-150 motion-safe:hover:scale-105 ${
+            brainViewOpen
+              ? 'bg-accent/15 text-accent'
+              : 'text-text-muted hover:text-text hover:bg-surface-2'
+          }`}
+          title={brainViewOpen ? t.titleBar.closeBrain : t.titleBar.openBrain}
+        >
+          <Brain size={14} />
+          <span>brain</span>
+        </button>
         {syncStatus.active && (
           <SyncStatusButton
             status={syncStatus}
@@ -185,23 +200,9 @@ export function TitleBar() {
             onOpenSettings={() => openSettings('sync')}
           />
         )}
-        {/* Brain + settings sit together as one pair; the window controls keep a
-            slightly wider gap after them. */}
-        <button
-          onClick={() => setBrainView(!brainViewOpen)}
-          className={`flex items-center gap-1.5 px-2.5 h-6 my-auto ml-3 mr-0.5 rounded text-[11px] font-mono tracking-wide transition-[color,background-color,transform] duration-150 motion-safe:hover:scale-105 ${
-            brainViewOpen
-              ? 'bg-accent/15 text-accent'
-              : 'text-text-muted hover:text-text hover:bg-surface-2'
-          }`}
-          title={brainViewOpen ? t.titleBar.closeBrain : t.titleBar.openBrain}
-        >
-          <Brain size={14} />
-          <span>brain</span>
-        </button>
         <button
           onClick={() => openSettings('general')}
-          className="w-8 h-full flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
+          className="px-2 h-full flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
           title={t.titleBar.settings}
         >
           <Settings size={12} />
