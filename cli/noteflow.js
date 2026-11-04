@@ -186,7 +186,8 @@ function clearCliAccount() {
   writeSettings(settings)
 }
 
-// { enabled, pullSeq, lastSync, userId, pendingUpserts, forceUpserts, pullRetry } — the CLI's own cursor/lastSync,
+// { enabled, pullSeq, lastSync, userId, pendingUpserts, forceUpserts, pullRetry,
+// basesBootstrapped, basesBootstrapPending } — the CLI's own cursor/lastSync,
 // never the desktop app's settings.cloudSync (each client reconciles
 // independently). `pullSeq` = watermark of the server-assigned `seq` already
 // reconciled (migration 0008); a legacy `pullCursor` (updated_at cursor of
@@ -203,6 +204,10 @@ function clearCliAccount() {
 // per-command push upload them unconditionally (a conditional upload would be
 // rejected against the newer tombstone forever) — mirror of the app's
 // SyncJournalOp.force.
+// `basesBootstrapped` = the one-time bases bootstrap pull is done (written with
+// pullSeq, see needsBasesBootstrap); `basesBootstrapPending` = folders whose
+// bootstrap reconcile failed, with its context (see nextBootstrapPending). The
+// per-file bases themselves live in cli-cloud-state.json (see cliCloudBase).
 function getCliCloud() {
   return readSettings().cliCloud || { enabled: false }
 }
@@ -242,6 +247,10 @@ function cliCloudForUser(c, userId, presumedOwner) {
   delete next.pendingUpserts // the other account's unsent edits don't guard this one's tombstones
   delete next.pullRetry // the other account's failed rows don't exist in this one
   delete next.forceUpserts
+  // The bases (cli-cloud-state.json) are dropped by bindCliCloudToAccount; the
+  // bootstrap flags describe them — a fresh account starts with a first sync.
+  delete next.basesBootstrapped
+  delete next.basesBootstrapPending
   return next
 }
 
@@ -308,8 +317,10 @@ function dirsPendingRetry(pullRetry) {
 }
 
 // ── Cloud: conflict copies (mirror of electron/cloudSyncLogic.ts) ─────────────
-// The pull is last-writer-wins per note folder: a newer remote anchor replaces
-// the local folder wholesale. When that folder still holds a local edit the
+// For a folder WITHOUT a base the pull is still last-writer-wins per note
+// folder (with a base it merges per file — see planThreeWayDir — and copies
+// only the conflicting sections): a newer remote anchor replaces the local
+// folder wholesale. When that folder still holds a local edit the
 // server never accepted (a pending upload — failed or rejected as stale), the
 // LOCAL version is first kept as a conflict copy: a new note folder with a new
 // id, same group/folder/sections, title '<title> (conflict copy <date>)'.
@@ -369,11 +380,31 @@ function conflictCopyTitle(original, label, now) {
  * block…) is kept as is: the CLI has no YAML library, so only those three
  * top-level lines are rewritten (a multi-line value's continuation lines are
  * dropped). Section files are copied byte-for-byte under the same names.
- * Throws when note.md is missing or has no frontmatter.
+ * `onlySections` (filenames) restricts the copy to those sections: its note.md
+ * lists only them and only their files are copied (the Cloud three-way pull
+ * keeps just the sections in conflict). If the sections list can't be read as
+ * text blocks (parseAnchorFm), the WHOLE folder is copied instead — more than
+ * needed, never less. Throws when note.md is missing or has no frontmatter.
  */
-function buildConflictCopy(localFiles, { newId, title, nowIso }) {
-  const anchor = localFiles[NOTE_MD]
+function buildConflictCopy(localFiles, { newId, title, nowIso, onlySections }) {
+  let anchor = localFiles[NOTE_MD]
   if (anchor === undefined) throw new Error('conflict copy: the local folder has no note.md')
+  let only = onlySections ? new Set(onlySections) : null
+  if (only) {
+    const fm = parseAnchorFm(anchor)
+    if (!fm) {
+      only = null
+    } else {
+      const items = fmSectionItems(fm)
+      if (items !== null) {
+        setFmBlock(fm.blocks, 'sections', renderSectionItems(items.filter(it => {
+          const file = sectionItemFile(it)
+          return file !== null && only.has(file)
+        })))
+        anchor = renderAnchorFm(fm.blocks, fm.body)
+      }
+    }
+  }
   const { frontmatter, body } = splitFrontmatter(anchor)
   if (!frontmatter) throw new Error('conflict copy: unreadable note.md frontmatter')
   const values = { id: q(newId), title: q(title), updated: q(nowIso) }
@@ -392,7 +423,9 @@ function buildConflictCopy(localFiles, { newId, title, nowIso }) {
   }
   for (const key of ['id', 'title', 'updated']) if (!seen.has(key)) kept.push(`${key}: ${values[key]}`)
   const files = { [NOTE_MD]: `---\n${kept.join('\n')}\n---\n${body}` }
-  for (const [name, content] of Object.entries(localFiles)) if (name !== NOTE_MD) files[name] = content
+  for (const [name, content] of Object.entries(localFiles)) {
+    if (name !== NOTE_MD && (!only || only.has(name))) files[name] = content
+  }
   return { dir: noteDirname(newId, title), files }
 }
 
@@ -425,6 +458,16 @@ function preserveConflictCopy(dir, pending, server) {
     try { local[rel] = fs.readFileSync(path.join(NOTES_DIR, rel), 'utf-8') } catch { local[rel] = null }
   }
   if (!planConflictCopy(candidates, local, server)) return null
+  return writeConflictCopyDir(dir)
+}
+
+/**
+ * Writes the conflict copy of the local folder '<dir>' — whole, or only the
+ * sections `onlySections` (filenames; Cloud three-way pull) — as a new note
+ * folder. Returns { dir, title, relPaths }; throws if it can't be written
+ * (nothing is left half-written; the caller must not touch the folder).
+ */
+function writeConflictCopyDir(dir, onlySections) {
   const localDirPath = path.join(NOTES_DIR, dir)
   const localFiles = {}
   for (const f of fs.readdirSync(localDirPath)) {
@@ -434,7 +477,7 @@ function preserveConflictCopy(dir, pending, server) {
   const title = conflictCopyTitle(anchorTitle(localFiles[NOTE_MD] || ''), conflictCopyLabel(), now)
   let copy
   do {
-    copy = buildConflictCopy(localFiles, { newId: nanoid(8), title, nowIso: now.toISOString() })
+    copy = buildConflictCopy(localFiles, { newId: nanoid(8), title, nowIso: now.toISOString(), onlySections })
   } while (fs.existsSync(path.join(NOTES_DIR, copy.dir)))
   const copyPath = path.join(NOTES_DIR, copy.dir)
   let created = false
@@ -447,6 +490,759 @@ function preserveConflictCopy(dir, pending, server) {
     throw e
   }
   return { dir: copy.dir, title, relPaths: Object.keys(copy.files).map(f => `${copy.dir}/${f}`) }
+}
+
+// ── Cloud: note.md frontmatter as text blocks ─────────────────────────────────
+// The CLI has no YAML library, but the three-way pull must edit a note.md
+// frontmatter structurally (re-list sections, OR aiHidden/favorited, unite
+// tags). It is handled as TOP-LEVEL BLOCKS of text — a `key:` line plus its
+// indented continuation lines — which is how js-yaml (the app) and
+// serializeNoteMd (the CLI) write it. Untouched blocks keep their exact text;
+// rewritten ones are emitted as YAML that js-yaml reads back to the same data
+// the app's mergeAnchors produces (parity pinned in tests/cli/cloudThreeWay.test.ts).
+// Whatever this reader does not understand (duplicate keys, a non-key line at
+// column 0, a flow-style sections list) is UNREADABLE — like a YAML parse
+// error in the app (an unreadable anchor in conflict → whole-folder copy).
+
+/** Mirror of splitFrontmatter in electron/noteFormat.ts (incl. a closing '---' at EOF); null = no frontmatter. */
+function splitAnchorFrontmatter(content) {
+  const s = content.replace(/^﻿/, '').replace(/\r\n/g, '\n')
+  if (!s.startsWith('---\n')) return null
+  const end = s.indexOf('\n---\n', 4)
+  if (end === -1) return s.endsWith('\n---') ? { frontmatter: s.slice(4, -4), body: '' } : null
+  return { frontmatter: s.slice(4, end), body: s.slice(end + 5) }
+}
+
+const FM_KEY_RE = /^([A-Za-z_][\w-]*):(.*)$/
+const YAML_TRUE_RE = /^(true|True|TRUE)$/
+const YAML_NULL_RE = /^(|~|null|Null|NULL)$/
+
+/** note.md → { blocks: [{ key, inline, lines }], body } or null (no / unreadable frontmatter). */
+function parseAnchorFm(content) {
+  const split = splitAnchorFrontmatter(content)
+  if (!split || !split.frontmatter) return null
+  const blocks = []
+  const keys = new Set()
+  for (const line of split.frontmatter.split('\n')) {
+    const m = line.match(FM_KEY_RE)
+    if (m && (m[2] === '' || /^\s/.test(m[2]))) {
+      if (keys.has(m[1])) return null // duplicate key: js-yaml rejects the document
+      keys.add(m[1])
+      blocks.push({ key: m[1], inline: m[2].trim(), lines: [line] })
+      continue
+    }
+    const blank = line.trim() === '' || line.startsWith('#')
+    if (blank || /^\s/.test(line) || line === '-' || line.startsWith('- ')) {
+      if (blocks.length === 0) { if (blank) continue; return null }
+      blocks[blocks.length - 1].lines.push(line)
+      continue
+    }
+    return null
+  }
+  // The values this reader interprets must read unambiguously — a comment, an
+  // unclosed quote or flow content it can't split counts as unreadable (never
+  // a silent misread: a wrong `file` would drop a section from a merge).
+  for (const b of blocks) {
+    if (['favorited', 'pinned', 'encryption'].includes(b.key) && !yamlInlineReadable(b.inline)) return null
+    if (b.key === 'tags' && fmStringList(b) === undefined) return null
+  }
+  const sections = blocks.find(b => b.key === 'sections')
+  if (sections && parseSectionItems(sections) === undefined) return null
+  return { blocks, body: split.body }
+}
+
+/**
+ * Is this inline YAML value one scalar with nothing after it? False for a
+ * ` #` comment outside quotes, an unclosed quoted scalar (it continues on the
+ * next lines) or text after the closing quote.
+ */
+function yamlInlineReadable(raw) {
+  const v = raw.trim()
+  if (v === '') return true
+  if (v[0] === '"' || v[0] === "'") {
+    const quote = v[0]
+    let i = 1
+    for (; i < v.length; i++) {
+      if (quote === '"' && v[i] === '\\') { i++; continue }
+      if (v[i] === quote) {
+        if (quote === "'" && v[i + 1] === "'") { i++; continue }
+        break
+      }
+    }
+    return i < v.length && v.slice(i + 1).trim() === ''
+  }
+  return !/(^|\s)#/.test(v)
+}
+
+function fmBlock(fm, key) {
+  return fm.blocks.find(b => b.key === key) || null
+}
+
+/** Replaces the block `key` in place (keeps its position) or appends it. */
+function setFmBlock(blocks, key, lines) {
+  const block = { key, inline: lines[0].slice(key.length + 1).trim(), lines }
+  const i = blocks.findIndex(b => b.key === key)
+  if (i === -1) blocks.push(block)
+  else blocks[i] = block
+}
+
+function renderAnchorFm(blocks, body) {
+  return `---\n${blocks.flatMap(b => b.lines).join('\n')}\n---\n${body}`
+}
+
+function fmHasNested(block) {
+  return block.lines.slice(1).some(l => l.trim() !== '' && !l.trim().startsWith('#'))
+}
+
+/** `key: true` (a YAML boolean true). */
+function fmIsTrue(block) {
+  return !!block && YAML_TRUE_RE.test(block.inline) && !fmHasNested(block)
+}
+
+/** JS truthiness of the block's YAML value (`Boolean(data.encryption)` in the app). */
+function fmTruthy(block) {
+  if (!block) return false
+  if (block.inline === '') return fmHasNested(block)
+  return !/^(~|null|Null|NULL|false|False|FALSE|0|""|'')$/.test(block.inline)
+}
+
+function fmEncrypted(fm) {
+  return fmTruthy(fmBlock(fm, 'encryption'))
+}
+
+/** Plain YAML scalars that do NOT load as strings (numbers, booleans, null). */
+function yamlPlainNonString(raw) {
+  return /^(~|null|Null|NULL|true|True|TRUE|false|False|FALSE|[-+]?\.(inf|Inf|INF)|\.(nan|NaN|NAN))$/.test(raw) ||
+    /^[-+]?(\d[\d_]*(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/.test(raw) || /^0x[0-9a-fA-F_]+$/.test(raw) || /^0o[0-7_]+$/.test(raw)
+}
+
+/** One flow/block list item as a string, or null when it doesn't load as a string. */
+function yamlStringItem(raw) {
+  const v = raw.trim()
+  if (v === '') return null
+  if (v.startsWith('"') || v.startsWith("'")) return yamlScalarValue(v)
+  return yamlPlainNonString(v) ? null : v
+}
+
+/** Splits the inside of a flow sequence on the commas outside quotes. */
+function splitFlowItems(text) {
+  const items = []
+  let cur = '', quote = null
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (quote) {
+      cur += ch
+      if (quote === '"' && ch === '\\' && i + 1 < text.length) { cur += text[++i]; continue }
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '"' || ch === "'") { quote = ch; cur += ch; continue }
+    if (ch === ',') { items.push(cur); cur = ''; continue }
+    cur += ch
+  }
+  items.push(cur)
+  return items
+}
+
+/**
+ * The string items of a list block (`stringArray` in the app); null when the
+ * value is not a list; undefined when unreadable (a flow list that doesn't
+ * close on its line, nested flow items, comments, nested block content).
+ */
+function fmStringList(block) {
+  if (!block) return null
+  const inline = block.inline
+  if (inline.startsWith('[')) {
+    if (!inline.endsWith(']') || fmHasNested(block)) return undefined
+    const items = splitFlowItems(inline.slice(1, -1))
+    if (items.some(it => /^[[{]/.test(it.trim()) || !yamlInlineReadable(it))) return undefined
+    return items.map(yamlStringItem).filter(v => v !== null)
+  }
+  if (!yamlInlineReadable(inline)) return undefined
+  if (inline !== '') return null
+  const rest = block.lines.slice(1).filter(l => l.trim() !== '' && !l.trim().startsWith('#'))
+  if (rest.length === 0) return null
+  const dash = rest[0].length - rest[0].trimStart().length
+  const out = []
+  for (const line of rest) {
+    const indent = line.length - line.trimStart().length
+    if (indent !== dash || line[indent] !== '-') return undefined
+    const raw = line.slice(indent + 1)
+    if (/^\s*[[{&*!|>]/.test(raw) || !yamlInlineReadable(raw)) return undefined
+    const v = yamlStringItem(raw)
+    if (v !== null) out.push(v)
+  }
+  return out
+}
+
+/**
+ * Items of a `sections:` block: an array of { lines, d, fieldIndent, fields }
+ * (fields = raw scalar text of each `key: value` of the item), `null` when the
+ * value is not a list (absent / null), `undefined` when unreadable.
+ */
+function parseSectionItems(block) {
+  if (block.cachedItems !== undefined) return block.cachedItems
+  const result = (() => {
+    const inline = block.inline
+    if (inline === '[]') return fmHasNested(block) ? undefined : []
+    if (!YAML_NULL_RE.test(inline)) return undefined // flow style / scalar: not written by any NoteFlow client
+    const items = []
+    let d = -1, cur = null
+    for (const line of block.lines.slice(1)) {
+      const trimmed = line.trim()
+      if (trimmed === '' || (cur === null && trimmed.startsWith('#'))) { if (cur) cur.lines.push(line); continue }
+      const indent = line.length - line.trimStart().length
+      const isDash = line[indent] === '-' && (line.length === indent + 1 || line[indent + 1] === ' ')
+      if (d === -1) {
+        if (!isDash) return undefined
+        d = indent
+      }
+      if (isDash && indent === d) { cur = { lines: [line], d }; items.push(cur); continue }
+      if (indent <= d) return undefined
+      cur.lines.push(line)
+    }
+    if (items.length === 0) return null
+    if (inline !== '') return undefined // `sections: null` followed by items is not YAML
+    const finished = items.map(finishSectionItem)
+    return finished.some(it => it === undefined) ? undefined : finished
+  })()
+  block.cachedItems = result
+  return result
+}
+
+// Fields of a section item the merge interprets: their value must be a plain one-line scalar.
+const SECTION_READ_FIELDS = ['id', 'file', 'aiHidden']
+
+/**
+ * One `- key: value` item of `sections:` → { …item, fieldIndent, fields }, or
+ * undefined when it is not a block mapping this reader can read for sure: a
+ * flow / anchored / quoted-key item, a line at field level that is not
+ * `key: value`, a repeated field (js-yaml rejects it), or an `id` / `file` /
+ * `aiHidden` whose value is not a plain one-line scalar (comment, unclosed
+ * quote, block scalar, nested content).
+ */
+function finishSectionItem(item) {
+  const first = item.lines[0]
+  const afterDash = first.slice(item.d + 1)
+  const pad = afterDash.length - afterDash.trimStart().length
+  const next = item.lines.slice(1).find(l => l.trim() !== '' && !l.trim().startsWith('#'))
+  const fieldIndent = afterDash.trim() !== '' ? item.d + 1 + pad : next ? next.length - next.trimStart().length : item.d + 2
+  const fields = {}
+  let lastKey = null
+  const take = (text) => {
+    const m = text.match(/^([A-Za-z_][\w-]*):(?:[ \t]+(.*))?$/)
+    if (!m || m[1] in fields) return false
+    const value = (m[2] || '').trim()
+    if (SECTION_READ_FIELDS.includes(m[1]) && (/^[[{&*!|>]/.test(value) || !yamlInlineReadable(value))) return false
+    fields[m[1]] = value
+    lastKey = m[1]
+    return true
+  }
+  if (afterDash.trim() !== '' && !take(afterDash.trim())) return undefined
+  for (const line of item.lines.slice(1)) {
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    const indent = line.length - line.trimStart().length
+    if (indent === fieldIndent) {
+      if (!take(trimmed)) return undefined
+    } else if (indent < fieldIndent || SECTION_READ_FIELDS.includes(lastKey)) {
+      return undefined // misaligned, or nested content under a field the merge reads
+    }
+  }
+  return { ...item, fieldIndent, fields }
+}
+
+/** The file a sections[] item points at (fallback '<id>.md'), or null. Mirror of sectionFileOf. */
+function sectionItemFile(item) {
+  const { file, id } = item.fields
+  if (file !== undefined && !YAML_NULL_RE.test(file)) return yamlScalarValue(file)
+  if (id !== undefined && !YAML_NULL_RE.test(id)) return `${yamlScalarValue(id)}.md`
+  return null
+}
+
+function sectionItemHidden(item) {
+  return item.fields.aiHidden !== undefined && YAML_TRUE_RE.test(item.fields.aiHidden)
+}
+
+/** The item with `aiHidden: true` (replacing an existing `aiHidden:` field, or appended). */
+function withSectionHidden(item) {
+  const lines = [...item.lines]
+  const fieldLine = `${' '.repeat(item.fieldIndent)}aiHidden: true`
+  const i = lines.findIndex((l, n) => n > 0 && l.length - l.trimStart().length === item.fieldIndent && /^aiHidden:/.test(l.trim()))
+  if (i !== -1) {
+    lines[i] = fieldLine
+  } else {
+    let at = lines.length
+    while (at > 1 && lines[at - 1].trim() === '') at--
+    lines.splice(at, 0, fieldLine)
+  }
+  return { ...item, lines, fields: { ...item.fields, aiHidden: 'true' } }
+}
+
+/** `sections:` block lines for these items, re-indented to the js-yaml layout ('  - '). */
+function renderSectionItems(items) {
+  if (items.length === 0) return ['sections: []']
+  const out = ['sections:']
+  for (const item of items) {
+    for (const line of item.lines) out.push(line.trim() === '' ? '' : `  ${line.slice(item.d)}`)
+  }
+  return out
+}
+
+/** Sections list of a parsed note.md (null = not a list). */
+function fmSectionItems(fm) {
+  const block = fmBlock(fm, 'sections')
+  return block ? parseSectionItems(block) : null
+}
+
+// ── Cloud: three-way reconcile per file (mirror of electron/cloudSyncLogic.ts) ─
+// The pull used to decide a note folder by note.md's `updated:` alone (LWW): a
+// device that edited one section offline after missing a remote edit of
+// another kept its whole folder ("newer") and the conditional upload clobbered
+// the remote section everywhere (reproduced in production, 2026-11-03). Every
+// client now remembers, per file, its BASE — the server seq it last reconciled
+// + a hash of that content (the CLI keeps them in cli-cloud-state.json, see
+// cliCloudBase) — and the pull compares base / local / remote PER FILE. Uploads
+// carry the base seq (cloud_upsert_file_v2, migration 0014). No base known →
+// the historical rules, unchanged. Pure mirrors — parity pinned in
+// tests/cli/cloudThreeWay.test.ts against the app's TypeScript.
+
+/** RPC of migration 0014 (compare-and-swap on the file's base seq). Mirror of CLOUD_BASE_UPSERT_RPC. */
+const CLOUD_BASE_UPSERT_RPC = 'cloud_upsert_file_v2'
+/** Base hash of a remote TOMBSTONE a local edit is kept over. Mirror of TOMBSTONE_BASE_HASH. */
+const TOMBSTONE_BASE_HASH = ''
+/** Hash of a synthesized base whose content is unknown (never equals a real hash). Mirror of UNKNOWN_BASE_HASH. */
+const UNKNOWN_BASE_HASH = 'unknown'
+
+/** sha-256 (hex) of a note file for its base; note.md WITHOUT its `updated:` line. Mirror of hashForBase. */
+function hashForBase(relPath, content) {
+  const text = isAnchorPath(relPath) ? anchorWithoutUpdated(content) : content
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+/**
+ * Pure mirror of classifyBaseUpsert: outcome of `POST rpc/cloud_upsert_file_v2`
+ * → { outcome: 'uploaded' | 'stale' | 'missing' | 'forbidden' | 'error', seq }.
+ * The function answers the new seq, or JSON null when stale.
+ */
+function classifyBaseUpsert(status, json) {
+  const code = json && typeof json === 'object' ? json.code : undefined
+  if (status === 404 || code === 'PGRST202') return { outcome: 'missing', seq: null }
+  if (status === 403) return { outcome: 'forbidden', seq: null }
+  if (status >= 400) return { outcome: 'error', seq: null }
+  if (json === null || json === undefined) return { outcome: 'stale', seq: null }
+  return { outcome: 'uploaded', seq: parseRowSeq(json) }
+}
+
+/** Pure mirror of planFileReconcile: what the pull does with ONE remote row of a file, given its base. */
+function planFileReconcile(s) {
+  if (!s.base || s.remoteSeq === null) return 'legacy'
+  if (s.remoteSeq < s.base.seq) return 'outdated'
+  if (s.remoteSeq === s.base.seq) return 'keep'
+  const localChanged = s.pending || s.localHash !== s.base.hash
+  if (!localChanged) return 'apply'
+  if (s.localHash === s.remoteHash) return 'adopt'
+  if (s.remoteHash === null) return 'keep-local'
+  if (s.localHash === null) return 'apply' // deleted here, edited remotely: the remote edit wins
+  return 'conflict'
+}
+
+function anchorHashOf(content) {
+  return createHash('sha256').update(anchorWithoutUpdated(content), 'utf8').digest('hex')
+}
+
+function updatedMsOf(content) {
+  return parseUpdatedTimestamp(extractUpdatedTimestamp(content))
+}
+
+/** `content` with the value of its first top-level `updated:` line replaced. Mirror of withUpdated. */
+function withUpdated(content, value) {
+  return content.replace(/^updated:[^\r\n]*/m, `updated: ${JSON.stringify(value)}`)
+}
+
+/** Mirror of anchorsNeedWholeCopy: two changed anchors that can't be merged (encrypted / unreadable). */
+function anchorsNeedWholeCopy(local, remote, baseHash) {
+  const lh = anchorHashOf(local)
+  const rh = anchorHashOf(remote)
+  if (lh === rh || lh === baseHash || rh === baseHash) return false
+  const l = parseAnchorFm(local)
+  const r = parseAnchorFm(remote)
+  return !l || !r || fmEncrypted(l) || fmEncrypted(r)
+}
+
+/**
+ * Pure mirror of mergeAnchors (electron/cloudSyncLogic.ts): frontmatter merge
+ * of note.md compared WITHOUT `updated:` against the base hash — same rules
+ * (one side changed → that side; both → the remote frontmatter + the local-only
+ * sections whose file exists here, minus the remote-only ones deleted here
+ * since the base; `aiHidden` per section and `favorited` OR-ed, `tags` united,
+ * `updated` = now; encrypted/unreadable → 'whole'), and in every case the
+ * sections whose local change is kept stay listed. Textual instead of a YAML
+ * re-dump: the result loads (js-yaml) to the same data as the app's.
+ * `m` = { local, remote, baseHash, sectionFilesOnDisk, knownSectionFiles,
+ * folderKeepsLocalChanges, keptLocalSectionFiles, restoredRemoteSectionFiles?, nowIso }.
+ */
+function mergeAnchors(m) {
+  const chosen = chooseAnchor(m)
+  return chosen.source === 'whole' ? chosen : withKeptLocalSections(chosen, m)
+}
+
+function chooseAnchor(m) {
+  const lh = anchorHashOf(m.local)
+  const rh = anchorHashOf(m.remote)
+  const localMs = updatedMsOf(m.local)
+  const remoteMs = updatedMsOf(m.remote)
+  const bumpToLocal = m.folderKeepsLocalChanges && localMs !== null && (remoteMs === null || localMs > remoteMs)
+
+  if (lh === rh) return bumpToLocal ? { content: m.local, source: 'local' } : { content: m.remote, source: 'remote' }
+  if (lh === m.baseHash) {
+    if (!bumpToLocal) return { content: m.remote, source: 'remote' }
+    const content = withUpdated(m.remote, extractUpdatedTimestamp(m.local) || m.nowIso)
+    return content === m.remote ? { content, source: 'remote' } : { content, source: 'merged' }
+  }
+  if (rh === m.baseHash) {
+    // Only the local changed — never move the server's `updated` backwards.
+    if (remoteMs !== null && (localMs === null || remoteMs >= localMs)) {
+      const content = withUpdated(m.local, m.nowIso)
+      return content === m.local ? { content, source: 'local' } : { content, source: 'merged' }
+    }
+    return { content: m.local, source: 'local' }
+  }
+
+  const l = parseAnchorFm(m.local)
+  const r = parseAnchorFm(m.remote)
+  if (!l || !r || fmEncrypted(l) || fmEncrypted(r)) return { content: m.remote, source: 'whole' }
+  const remoteItems = fmSectionItems(r) || []
+  const localItems = fmSectionItems(l) || []
+  const localByFile = new Map()
+  for (const item of localItems) {
+    const file = sectionItemFile(item)
+    if (file !== null) localByFile.set(file, item)
+  }
+  const remoteListed = new Set(remoteItems.map(sectionItemFile).filter(f => f !== null))
+  const kept = remoteItems
+    .filter(item => {
+      const file = sectionItemFile(item)
+      if (file === null || localByFile.has(file) || m.sectionFilesOnDisk.has(file)) return true
+      // Listed only remotely and missing here: deleted on this device since the
+      // base when it was known; otherwise added remotely.
+      return !m.knownSectionFiles.has(file)
+    })
+    .map(item => {
+      // Hidden from the AI on EITHER side stays hidden.
+      const file = sectionItemFile(item)
+      const mine = file === null ? undefined : localByFile.get(file)
+      return mine && sectionItemHidden(mine) && !sectionItemHidden(item) ? withSectionHidden(item) : item
+    })
+  const added = localItems.filter(item => {
+    const file = sectionItemFile(item)
+    return file !== null && !remoteListed.has(file) && m.sectionFilesOnDisk.has(file)
+  })
+  const blocks = [...r.blocks]
+  setFmBlock(blocks, 'sections', renderSectionItems([...kept, ...added]))
+  setFmBlock(blocks, 'updated', [`updated: ${JSON.stringify(m.nowIso)}`])
+  const rTags = fmStringList(fmBlock(r, 'tags'))
+  const lTags = fmStringList(fmBlock(l, 'tags'))
+  if (rTags !== null || lTags !== null) {
+    const tags = [...new Set([...(rTags || []), ...(lTags || [])])]
+    setFmBlock(blocks, 'tags', [`tags: [${tags.map(t => JSON.stringify(t)).join(', ')}]`])
+  }
+  if (fmIsTrue(fmBlock(l, 'favorited')) || fmIsTrue(fmBlock(l, 'pinned'))) setFmBlock(blocks, 'favorited', ['favorited: true'])
+  return { content: renderAnchorFm(blocks, r.body), source: 'merged' }
+}
+
+/** Mirror of withKeptLocalSections: kept local / restored remote sections stay listed in whatever anchor won. */
+function withKeptLocalSections(chosen, m) {
+  const restored = m.restoredRemoteSectionFiles || new Set()
+  if (m.keptLocalSectionFiles.size === 0 && restored.size === 0) return chosen
+  const fm = parseAnchorFm(chosen.content)
+  if (!fm || fmEncrypted(fm)) return chosen
+  const items = fmSectionItems(fm) || []
+  const listed = new Set(items.map(sectionItemFile).filter(f => f !== null))
+  const extras = []
+  for (const [side, files] of [[m.local, m.keptLocalSectionFiles], [m.remote, restored]]) {
+    if (files.size === 0) continue
+    const other = parseAnchorFm(side)
+    const otherItems = other ? fmSectionItems(other) : null
+    if (!otherItems) continue
+    for (const item of otherItems) {
+      const file = sectionItemFile(item)
+      if (file === null || listed.has(file) || !files.has(file)) continue
+      listed.add(file)
+      extras.push(item)
+    }
+  }
+  if (extras.length === 0) return chosen
+  const blocks = [...fm.blocks]
+  setFmBlock(blocks, 'sections', renderSectionItems([...items, ...extras]))
+  setFmBlock(blocks, 'updated', [`updated: ${JSON.stringify(m.nowIso)}`])
+  return { content: renderAnchorFm(blocks, fm.body), source: 'merged' }
+}
+
+/** Mirror of planLegacySection: the historical per-section rule (no base). */
+function planLegacySection(row, local, pending, localUpdatedMs) {
+  if (row.content === null) {
+    if (local === null) return 'adopt' // already gone
+    if (pending) return 'keep-local'
+    return shouldApplyRemoteSection(row.updatedAtMs, localUpdatedMs) ? 'apply' : 'keep'
+  }
+  if (local === null) return 'apply' // missing here: nothing local to lose
+  if (local === row.content) return 'adopt'
+  if (!shouldApplyRemoteSection(row.updatedAtMs, localUpdatedMs)) return 'keep'
+  return pending ? 'conflict' : 'apply'
+}
+
+/**
+ * Pure mirror of planThreeWayDir (electron/cloudSyncLogic.ts): three-way
+ * reconcile of ONE local note folder whose anchor has a known base. `input` =
+ * { dir, local (relPath → content, must hold note.md), remote ([{ relPath,
+ * seq, content (null = tombstone), updatedAtMs }]), bases, pendingUpserts,
+ * staleUpserts, copiedUpserts, pendingDeletes (Sets), inFlightHashes?, nowIso }.
+ * Returns { writes (sections first, note.md last), removes, bases (null =
+ * drop), settle, upload, force, copySections, copyWhole }.
+ */
+function planThreeWayDir(input) {
+  const { dir } = input
+  const prefix = `${dir}/`
+  const anchorRel = `${dir}/${NOTE_MD}`
+  const plan = { writes: [], removes: [], bases: {}, settle: [], upload: [], force: [], copySections: [], copyWhole: false }
+  const localAnchor = input.local[anchorRel]
+  if (localAnchor === undefined) throw new Error('three-way reconcile: the local folder has no note.md')
+  const localUpdatedMs = updatedMsOf(localAnchor)
+  const fileName = rel => rel.slice(prefix.length)
+  const anchorRow = input.remote.find(r => r.relPath === anchorRel && r.content !== null) || null
+  // The echo of an upload of this device still waiting for its answer → adopted as the base.
+  const echoBase = (rel, row) => {
+    const base = input.bases[rel]
+    if (row.content === null || row.seq === null || (base && row.seq <= base.seq)) return base
+    const hash = hashForBase(rel, row.content)
+    if (!input.inFlightHashes || input.inFlightHashes.get(rel) !== hash) return base
+    plan.bases[rel] = { seq: row.seq, hash }
+    return plan.bases[rel]
+  }
+  const anchorBase = anchorRow ? echoBase(anchorRel, anchorRow) : input.bases[anchorRel]
+
+  // 1. The anchor's verdict first: an unmergeable conflict turns the whole folder remote.
+  let anchorAction = 'keep'
+  let whole = false
+  if (anchorRow) {
+    anchorAction = planFileReconcile({
+      base: anchorBase,
+      localHash: hashForBase(anchorRel, localAnchor),
+      pending: input.pendingUpserts.has(anchorRel),
+      remoteSeq: anchorRow.seq,
+      remoteHash: hashForBase(anchorRel, anchorRow.content),
+    })
+    whole = anchorAction === 'conflict' && anchorBase !== undefined &&
+      anchorsNeedWholeCopy(localAnchor, anchorRow.content, anchorBase.hash)
+  }
+
+  // 2. Sections, one file at a time.
+  const keptLocal = new Set()
+  const restored = new Set()
+  const conflicts = []
+  const after = new Map() // relPath → content once applied (null = removed)
+  const recordBase = (rel, seq, content) => {
+    if (content === null) plan.bases[rel] = null
+    else if (seq !== null) plan.bases[rel] = { seq, hash: hashForBase(rel, content) }
+  }
+  for (const row of input.remote) {
+    const rel = row.relPath
+    if (rel === anchorRel || !rel.startsWith(prefix) || input.pendingDeletes.has(rel)) continue
+    const local = input.local[rel] ?? null
+    const pending = input.pendingUpserts.has(rel)
+    const base = echoBase(rel, row)
+    let action = planFileReconcile({
+      base,
+      localHash: local === null ? null : hashForBase(rel, local),
+      pending,
+      remoteSeq: row.seq,
+      remoteHash: row.content === null ? null : hashForBase(rel, row.content),
+    })
+    if (action === 'legacy') action = planLegacySection(row, local, pending, localUpdatedMs)
+    if (whole && action !== 'outdated') action = local === row.content ? 'adopt' : 'apply'
+    switch (action) {
+      case 'outdated':
+        break
+      case 'keep': {
+        if (local === null) break
+        const changed = base ? pending || hashForBase(rel, local) !== base.hash : true
+        if (!changed) break
+        keptLocal.add(fileName(rel))
+        if (input.staleUpserts.has(rel) || (base !== undefined && !pending)) plan.upload.push(rel)
+        break
+      }
+      case 'apply':
+        if (row.content === null) {
+          if (local !== null) plan.removes.push(rel)
+        } else if (local !== row.content) {
+          plan.writes.push({ relPath: rel, content: row.content })
+          if (local === null) restored.add(fileName(rel))
+        }
+        after.set(rel, row.content)
+        recordBase(rel, row.seq, row.content)
+        plan.settle.push(rel)
+        break
+      case 'adopt':
+        after.set(rel, row.content)
+        recordBase(rel, row.seq, row.content)
+        plan.settle.push(rel)
+        break
+      case 'keep-local': {
+        const tombstoneNewer = shouldApplyRemoteSection(row.updatedAtMs, localUpdatedMs)
+        keptLocal.add(fileName(rel))
+        if (base !== undefined && row.seq !== null) plan.bases[rel] = { seq: row.seq, hash: TOMBSTONE_BASE_HASH }
+        if (tombstoneNewer || base !== undefined || input.staleUpserts.has(rel)) plan.upload.push(rel)
+        if (tombstoneNewer) plan.force.push(rel)
+        break
+      }
+      case 'conflict':
+        conflicts.push(rel)
+        plan.writes.push({ relPath: rel, content: row.content })
+        after.set(rel, row.content)
+        recordBase(rel, row.seq, row.content)
+        plan.settle.push(rel)
+        break
+    }
+  }
+
+  // Local section edits this batch did not touch are kept too.
+  for (const [rel, content] of Object.entries(input.local)) {
+    if (rel === anchorRel || !rel.startsWith(prefix) || after.has(rel)) continue
+    const base = input.bases[rel]
+    if (input.pendingUpserts.has(rel) || (base !== undefined && hashForBase(rel, content) !== base.hash)) {
+      keptLocal.add(fileName(rel))
+    }
+  }
+
+  // 3. The anchor, once the sections are known.
+  if (anchorRow && anchorAction !== 'outdated' && anchorAction !== 'keep') {
+    const remote = anchorRow.content
+    let final
+    if (anchorAction === 'legacy' || anchorBase === undefined) {
+      final = shouldApplyRemoteDir(updatedMsOf(remote), localUpdatedMs) ? remote : localAnchor
+    } else if (whole) {
+      final = remote
+    } else {
+      const onDisk = new Set()
+      for (const rel of Object.keys(input.local)) if (rel !== anchorRel && rel.startsWith(prefix)) onDisk.add(fileName(rel))
+      for (const [rel, content] of after) {
+        if (content === null) onDisk.delete(fileName(rel))
+        else onDisk.add(fileName(rel))
+      }
+      const known = new Set()
+      for (const rel of Object.keys(input.bases)) if (rel !== anchorRel && rel.startsWith(prefix)) known.add(fileName(rel))
+      final = mergeAnchors({
+        local: localAnchor,
+        remote,
+        baseHash: anchorBase.hash,
+        sectionFilesOnDisk: onDisk,
+        knownSectionFiles: known,
+        folderKeepsLocalChanges: keptLocal.size > 0,
+        keptLocalSectionFiles: keptLocal,
+        restoredRemoteSectionFiles: restored,
+        nowIso: input.nowIso,
+      }).content
+    }
+    const legacy = anchorAction === 'legacy' || anchorBase === undefined
+    if (!legacy) recordBase(anchorRel, anchorRow.seq, remote)
+    if (final !== localAnchor) plan.writes.push({ relPath: anchorRel, content: final })
+    if (final === remote) plan.settle.push(anchorRel)
+    else if (!legacy) plan.upload.push(anchorRel)
+  } else if (anchorAction === 'keep' && anchorBase !== undefined) {
+    const pending = input.pendingUpserts.has(anchorRel)
+    if (input.staleUpserts.has(anchorRel) || (!pending && hashForBase(anchorRel, localAnchor) !== anchorBase.hash)) {
+      plan.upload.push(anchorRel)
+    }
+  }
+
+  // 4. Conflict copy.
+  if (whole) {
+    for (const rel of input.pendingUpserts) if (rel.startsWith(prefix) && !plan.settle.includes(rel)) plan.settle.push(rel)
+    plan.upload = []
+    plan.force = []
+    const pendingUnder = [...input.pendingUpserts].filter(rel => rel.startsWith(prefix))
+    plan.copyWhole = !(pendingUnder.length > 0 && pendingUnder.every(rel => input.copiedUpserts.has(rel)))
+  } else {
+    plan.copySections = conflicts.filter(rel => !input.copiedUpserts.has(rel)).map(fileName)
+  }
+  return plan
+}
+
+/** Pure mirror of filesNeedingCatchUp: with a base, only files that differ from it; without, `dirGate`. */
+function filesNeedingCatchUp(files, bases, dirGate) {
+  const out = []
+  for (const f of files) {
+    const base = bases[f.relPath]
+    if (base ? hashForBase(f.relPath, f.content) !== base.hash : dirGate) out.push(f.relPath)
+  }
+  return out
+}
+
+/**
+ * Pure mirror of needsBasesBootstrap: an install that synced before bases
+ * existed (pullSeq / legacy cursor / lastSync) and has not bootstrapped yet
+ * (`basesBootstrapped`, written with pullSeq) → this pull is the one-time
+ * bases bootstrap (full reconcile, every local folder three-way).
+ */
+function needsBasesBootstrap(c) {
+  if (c.basesBootstrapped === true) return false
+  const hasPullSeq = typeof c.pullSeq === 'number' && Number.isSafeInteger(c.pullSeq) && c.pullSeq >= 0
+  return hasPullSeq || Boolean(c.pullCursor) || Boolean(c.lastSync)
+}
+
+/**
+ * Pure mirror of synthesizeBootstrapBases: bases of one local folder for the
+ * bootstrap pull, for the files without a real base — a row already SEEN
+ * (seq <= seenSeq, not in the retry set) → a real base (`seen`, persisted); an
+ * unseen row → an ASSUMED base (planner only) just below its seq: unknown
+ * content when the file is pending or the folder has unjournaled local edits
+ * (note.md not pending but `updated` after lastSync), else the local file's own hash.
+ */
+function synthesizeBootstrapBases(o) {
+  const prefix = `${o.dir}/`
+  const anchorRel = `${o.dir}/${NOTE_MD}`
+  const seen = {}
+  const assumed = {}
+  const localAnchor = o.local[anchorRel]
+  const localUpdatedMs = localAnchor === undefined ? null : updatedMsOf(localAnchor)
+  const unjournaled =
+    !o.pendingUpserts.has(anchorRel) && o.lastSyncMs !== null && localUpdatedMs !== null && localUpdatedMs > o.lastSyncMs
+  for (const row of o.remote) {
+    const rel = row.relPath
+    if (!rel.startsWith(prefix) || o.bases[rel] || row.seq === null) continue
+    if (o.seenSeq !== null && row.seq <= o.seenSeq && !o.notSeen.has(rel)) {
+      if (row.content !== null) seen[rel] = { seq: row.seq, hash: hashForBase(rel, row.content) }
+      continue
+    }
+    const local = o.local[rel]
+    const hash = o.pendingUpserts.has(rel) || unjournaled
+      ? UNKNOWN_BASE_HASH
+      : local === undefined ? TOMBSTONE_BASE_HASH : hashForBase(rel, local)
+    assumed[rel] = { seq: row.seq - 1, hash }
+  }
+  return { seen, assumed }
+}
+
+function stringList(value) {
+  return Array.isArray(value) ? value.filter(v => typeof v === 'string') : []
+}
+
+/** Pure mirror of parseBootstrapPending (cliCloud.basesBootstrapPending; null = none / malformed). */
+function parseBootstrapPending(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const dirs = stringList(raw.dirs)
+  if (dirs.length === 0) return null
+  const num = x => (typeof x === 'number' && Number.isSafeInteger(x) && x >= 0 ? x : null)
+  return { seenSeq: num(raw.seenSeq), lastSyncMs: num(raw.lastSyncMs), retryKeys: stringList(raw.retryKeys), dirs }
+}
+
+/** Pure mirror of nextBootstrapPending: the folders whose bootstrap reconcile still has to succeed. */
+function nextBootstrapPending(prev, pull) {
+  if (pull.started) return pull.failed.size > 0 ? { ...pull.started, dirs: [...pull.failed] } : null
+  if (!prev) return null
+  const dirs = prev.dirs.filter(d => !pull.done.has(d))
+  return dirs.length > 0 ? { ...prev, dirs } : null
 }
 
 /**
@@ -462,13 +1258,135 @@ function bindCliCloudToAccount(presumedOwner) {
   const c = settings.cliCloud || { enabled: false }
   const next = cliCloudForUser(c, account.userId, presumedOwner)
   if (next === c) return false
+  const owner = c.userId || presumedOwner
   settings.cliCloud = next
   writeSettings(settings)
+  // Another account's bases would make every upload of this one stale (or worse, match a foreign seq).
+  if (owner && owner !== account.userId) clearCliCloudBases()
+  else cloudBasesCache = null // owner adopted: re-read under it
   return !!(
     (c.pullSeq !== undefined && next.pullSeq === undefined) ||
     (c.pullCursor && !next.pullCursor) ||
     (c.lastSync && !next.lastSync)
   )
+}
+
+// ── Cloud: per-file bases (cli-cloud-state.json) ──────────────────────────────
+// relPath → { seq, hash } (see hashForBase): the server seq of the version of
+// each note file this CLI last reconciled. Kept OUT of settings.json — it grows
+// with the corpus and settings.json is shared with the desktop app on
+// Windows/Linux (same choice as cli-github-state.json, and as the app, whose
+// bases live in cloud-sync-state.json, apart from its settings). Owned by
+// cliCloud.userId: a file written for another account reads as empty.
+// Changes are buffered in memory (one invocation may record thousands) and
+// written by flushCliCloudBases, which re-reads the file first (another CLI
+// process may have written it meanwhile) and applies only this run's changes.
+
+const CLOUD_BASES_PATH = path.join(getSettingsDir(), 'cli-cloud-state.json')
+let cloudBasesCache = null // relPath → base, as last read/written
+const cloudBaseDelta = new Map() // relPath → base | null (drop), not written yet
+
+function readCloudBasesFile(owner) {
+  const out = {}
+  try {
+    const data = JSON.parse(fs.readFileSync(CLOUD_BASES_PATH, 'utf-8'))
+    if (!owner || !data || data.userId !== owner || !data.bases || typeof data.bases !== 'object' || Array.isArray(data.bases)) return out
+    for (const [rel, v] of Object.entries(data.bases)) {
+      if (v && typeof v === 'object' && typeof v.seq === 'number' && Number.isSafeInteger(v.seq) && v.seq >= 0 &&
+          typeof v.hash === 'string') out[rel] = { seq: v.seq, hash: v.hash }
+    }
+  } catch { /* missing or corrupt — no bases (historical rules) */ }
+  return out
+}
+
+function loadedCloudBases() {
+  if (!cloudBasesCache) cloudBasesCache = readCloudBasesFile(getCliCloud().userId)
+  return cloudBasesCache
+}
+
+/** Base of a note file, or undefined when unknown. */
+function cliCloudBase(relPath) {
+  if (cloudBaseDelta.has(relPath)) return cloudBaseDelta.get(relPath) || undefined
+  return loadedCloudBases()[relPath]
+}
+
+/** Every known base (file + this run's unwritten changes). */
+function cliCloudBasesSnapshot() {
+  const out = { ...loadedCloudBases() }
+  for (const [rel, base] of cloudBaseDelta) {
+    if (base) out[rel] = base
+    else delete out[rel]
+  }
+  return out
+}
+
+/** Sets (or, with null, drops) a base — buffered until flushCliCloudBases. */
+function setCliCloudBase(relPath, base) {
+  cloudBaseDelta.set(relPath, base ? { seq: base.seq, hash: base.hash } : null)
+}
+
+/** Drops the bases of every file under '<dir>/' (the folder is gone). */
+function dropCliCloudBasesUnder(dir) {
+  const prefix = `${dir}/`
+  for (const rel of Object.keys(cliCloudBasesSnapshot())) if (rel.startsWith(prefix)) cloudBaseDelta.set(rel, null)
+}
+
+/** The disk now holds this remote row (written or found identical): its base. A tombstone drops it. */
+function recordPulledBase(entry) {
+  if (entry.deleted) setCliCloudBase(entry.relPath, null)
+  else if (entry.seq !== null && entry.seq !== undefined) setCliCloudBase(entry.relPath, { seq: entry.seq, hash: hashForBase(entry.relPath, entry.content) })
+}
+
+/** Writes this run's base changes on top of the file's CURRENT content (tmp + rename). Throws on IO errors. */
+function flushCliCloudBases() {
+  if (cloudBaseDelta.size === 0) return
+  const owner = getCliCloud().userId
+  const bases = readCloudBasesFile(owner)
+  for (const [rel, base] of cloudBaseDelta) {
+    if (base) bases[rel] = base
+    else delete bases[rel]
+  }
+  const dir = path.dirname(CLOUD_BASES_PATH)
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const tmp = `${CLOUD_BASES_PATH}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify({ userId: owner || null, bases }), { encoding: 'utf-8', mode: 0o600 })
+  fs.renameSync(tmp, CLOUD_BASES_PATH)
+  cloudBasesCache = bases
+  cloudBaseDelta.clear()
+}
+
+/** flushCliCloudBases where a failure must not fail the command (the upload already landed). */
+function flushCliCloudBasesBestEffort() {
+  try { flushCliCloudBases() }
+  catch (e) { console.error(`  Warning: could not save the Cloud sync state (${e.message}) — the next pull re-establishes it`) }
+}
+
+/** Account switch: every base belonged to the previous account. */
+function clearCliCloudBases() {
+  cloudBaseDelta.clear()
+  cloudBasesCache = {}
+  try { fs.unlinkSync(CLOUD_BASES_PATH) } catch { /* not there */ }
+}
+
+/**
+ * Note files to upload (of `relPaths`): a pending one (failed / stale / forced)
+ * always; one with a base only when its content differs from it (an untouched
+ * section must never go up over a newer remote one — filesNeedingCatchUp);
+ * one without a base, as before (always). `alwaysAnchor`: note.md goes up
+ * regardless (a command's own edit: it carries the new `updated`, like every
+ * save of the app). Files gone from disk are skipped.
+ */
+function cloudFilesToUpload(relPaths, { alwaysAnchor = false } = {}) {
+  const pending = getCliCloud().pendingUpserts
+  return relPaths.filter(rel => {
+    if (!fs.existsSync(path.join(NOTES_DIR, rel))) return false
+    if ((alwaysAnchor && isAnchorPath(rel)) || isPendingUpsert(pending, rel)) return true
+    const base = cliCloudBase(rel)
+    if (!base) return true
+    let content
+    try { content = fs.readFileSync(path.join(NOTES_DIR, rel), 'utf-8') } catch { return false }
+    return filesNeedingCatchUp([{ relPath: rel, content }], { [rel]: base }, true).length > 0
+  })
 }
 
 /** Cloud takes priority over GitHub whenever the CLI is signed in and Cloud is enabled. */
@@ -1256,16 +2174,31 @@ async function syncPushNoteFiles(dirname, files) {
     // reported but never abort the local mutation, which already landed.
     const relPaths = files.map(f => `${dirname}/${f}`)
     const uploaded = [], stale = []
+    // What this command changed: note.md always (it carries the new `updated`,
+    // like every save of the app), a section only when it differs from its
+    // base — writeNoteFolder rewrites EVERY section file, and re-sending an
+    // untouched one would clobber a newer remote edit of it.
+    let toUpload = []
     try {
+      bindCliCloudToAccount() // bases of another account must not decide anything
+      toUpload = cloudFilesToUpload(relPaths, { alwaysAnchor: true })
+      // Journaled BEFORE any network call: a first reconcile / bases bootstrap
+      // pull below then sees this edit as a pending local change (kept, or a
+      // conflict copy — never overwritten), and an interrupted upload is
+      // retried by `noteflow push`.
+      patchCliCloud({ pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, toUpload, [])) })
       await cloudEnsureReconciled()
+      // That pull may have reconciled (or already re-uploaded) some of them.
+      toUpload = cloudFilesToUpload(relPaths, { alwaysAnchor: true })
       const dek = await getCliDek()
       const noteKey = await cloudGetNoteKey(dek, dirname)
       const forced = getCliCloud().forceUpserts
-      for (const relPath of relPaths) {
+      for (const relPath of toUpload) {
         const force = isPendingUpsert(forced, relPath)
         if ((await cloudPushFile(dek, noteKey, relPath, { force })) === 'stale') stale.push(relPath)
         else uploaded.push(relPath)
       }
+      flushCliCloudBasesBestEffort()
       // Bump lastSync like the app's schedulePush: without it a later remote
       // tombstone would be skipped forever (`updated <= lastSync` rule) while
       // the cursor advances past it — and the next push would resurrect the note.
@@ -1279,9 +2212,10 @@ async function syncPushNoteFiles(dirname, files) {
       if (stale.length) out(`  ${stale.length} file(s) ${STALE_UPLOAD_HINT}`)
       else out('  Synced to NoteFlow Cloud')
     } catch (e) {
+      flushCliCloudBasesBestEffort() // bases of the uploads that did land
       // Remember what did NOT reach the server: that bump of lastSync by a later
       // successful upload would otherwise expose this edit to a remote tombstone.
-      const failed = relPaths.filter(r => !uploaded.includes(r))
+      const failed = toUpload.filter(r => !uploaded.includes(r))
       patchCliCloud({
         pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, failed, uploaded)),
         forceUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().forceUpserts, [], uploaded)),
@@ -1513,10 +2447,13 @@ const CLOUD_PULL_COLUMNS = 'path_key,path_ct,content_ct,key_ct,updated_at,delete
  * Pull mode: `pullSeq` known → incremental (tombstones included); legacy
  * `pullCursor` or `lastSync` without `pullSeq` → ONE full reconcile from seq 0
  * with tombstones (recovers what the old updated_at cursor skipped); nothing →
- * first sync, live rows only (`deleted=eq.false`).
+ * first sync, live rows only (`deleted=eq.false`). `opts.bootstrapBases` (the
+ * one-time bases bootstrap, needsBasesBootstrap) → the full reconcile mode too.
  */
-function planPullQuery(c) {
-  if (typeof c.pullSeq === 'number' && Number.isSafeInteger(c.pullSeq) && c.pullSeq >= 0) {
+function planPullQuery(c, opts) {
+  const hasPullSeq = typeof c.pullSeq === 'number' && Number.isSafeInteger(c.pullSeq) && c.pullSeq >= 0
+  if (opts && opts.bootstrapBases && (hasPullSeq || c.pullCursor || c.lastSync)) return { afterSeq: 0, includeDeleted: true }
+  if (hasPullSeq) {
     return { afterSeq: c.pullSeq, includeDeleted: true }
   }
   if (c.pullCursor || c.lastSync) return { afterSeq: 0, includeDeleted: true }
@@ -1963,15 +2900,22 @@ async function cloudGetNoteKey(dek, scope) {
 
 // Warned once per invocation when the server lacks the conditional RPC.
 let cloudConditionalFallbackWarned = false
+// Set once per invocation when the server lacks cloud_upsert_file_v2 (0014): 0011 from then on.
+let cloudBaseUpsertMissing = false
 
 /**
  * Uploads one file as an encrypted row → 'uploaded' | 'stale'. Note rows go
- * through the CONDITIONAL upsert (RPC of migration 0011): rejected — 'stale',
- * nothing written — when the server already holds a newer version of the
- * folder (this row or its anchor, tombstones included). Root metadata json
- * and `force` uploads (a folder kept over a remote tombstone) use the plain
- * upsert; so does a server without the RPC. `e.subscription` marks the RLS
- * 403 (stop the whole push). Mirror of the app's uploadFileRow.
+ * first through cloud_upsert_file_v2 (migration 0014) with the file's BASE seq
+ * (cliCloudBase): written only while the server row is still the version this
+ * CLI last reconciled — 'stale' (nothing written) otherwise, whatever the
+ * timestamps say; the seq it answers becomes the new base. No base → the RPC
+ * applies the updated_at rule of 0011 itself. A server without 0014 → the RPC
+ * of 0011 (cloud_upsert_file, rejected when the server holds a newer version of
+ * the folder) for the rest of the invocation; without that one either, the
+ * plain upsert. Root metadata json and `force` uploads (a folder kept over a
+ * remote tombstone) use the plain upsert. Uploads that answer no seq forget the
+ * base (the next pull re-establishes it). `e.subscription` marks the RLS 403
+ * (stop the whole push). Mirror of the app's uploadFileRow.
  */
 async function cloudPushFile(dek, noteKey, relPath, { force = false } = {}) {
   const account = getCliAccount()
@@ -1990,6 +2934,30 @@ async function cloudPushFile(dek, noteKey, relPath, { force = false } = {}) {
   }
   if (dir && !force) {
     const anchorKey = isAnchorPath(relPath) ? null : await derivePathKeyHmac(dek, `${dir}/${NOTE_MD}`)
+    if (!cloudBaseUpsertMissing) {
+      const base = cliCloudBase(relPath)
+      const v2 = await cloudRestWithRetry(() =>
+        cloudRest(`/rest/v1/rpc/${CLOUD_BASE_UPSERT_RPC}`, {
+          method: 'POST',
+          body: {
+            p_path_key: row.path_key, p_path_ct: row.path_ct, p_content_ct: row.content_ct,
+            p_key_ct: row.key_ct, p_updated_at: row.updated_at, p_base_seq: base ? base.seq : null,
+            p_anchor_key: anchorKey,
+          },
+        })
+      )
+      const res = classifyBaseUpsert(v2.status, v2.json)
+      if (res.outcome === 'stale') return 'stale'
+      if (res.outcome === 'uploaded') {
+        // The new base: the seq the server just gave this content (unknown → forgotten).
+        setCliCloudBase(relPath, res.seq === null ? null : { seq: res.seq, hash: hashForBase(relPath, content) })
+        return 'uploaded'
+      }
+      if (res.outcome === 'forbidden') throw subscriptionError()
+      if (res.outcome === 'error') throw new Error(`Cloud upload failed (HTTP ${v2.status})`)
+      cloudBaseUpsertMissing = true // 'missing': 0014 not deployed — 0011 below from now on
+      console.error('  Note: NoteFlow Cloud does not support base-checked uploads yet — using timestamp-checked uploads')
+    }
     const rpc = await cloudRestWithRetry(() =>
       cloudRest(`/rest/v1/rpc/${CLOUD_CONDITIONAL_UPSERT_RPC}`, {
         method: 'POST',
@@ -2000,7 +2968,11 @@ async function cloudPushFile(dek, noteKey, relPath, { force = false } = {}) {
       })
     )
     const outcome = classifyConditionalUpsert(rpc.status, rpc.json)
-    if (outcome === 'uploaded' || outcome === 'stale') return outcome
+    if (outcome === 'uploaded') {
+      setCliCloudBase(relPath, null) // 0011 answers no seq: the base is unknown now
+      return outcome
+    }
+    if (outcome === 'stale') return outcome
     if (outcome === 'forbidden') throw subscriptionError()
     if (outcome === 'error') throw new Error(`Cloud upload failed (HTTP ${rpc.status})`)
     if (!cloudConditionalFallbackWarned) { // 'missing': no regression vs the plain upsert
@@ -2017,6 +2989,8 @@ async function cloudPushFile(dek, noteKey, relPath, { force = false } = {}) {
   )
   if (res.status === 403) throw subscriptionError()
   if (res.status >= 400) throw new Error(`Cloud upload failed (HTTP ${res.status})`)
+  // Plain upsert (forced / fallback): no seq comes back — forget the base.
+  if (dir) setCliCloudBase(relPath, null)
   return 'uploaded'
 }
 
@@ -2081,11 +3055,15 @@ async function cloudTombstoneRelPaths(relPaths) {
 // old disk state over a newer remote corpus would clobber it (mirror of the
 // desktop app's initial-pull gate). Any cursor (pullSeq or a legacy
 // pullCursor) or lastSync present = reconciled.
+// The one-time bases bootstrap (needsBasesBootstrap) is the same kind of gate:
+// until it ran, no file has a base and an upload would fall back to the
+// timestamp rule — the very LWW clobber the per-file merge fixes.
 async function cloudEnsureReconciled() {
   bindCliCloudToAccount() // another account's cursor ≠ reconciled
   const c = getCliCloud()
-  if (c.pullSeq !== undefined || c.pullCursor || c.lastSync) return
-  out('  First Cloud reconcile…')
+  const reconciled = c.pullSeq !== undefined || c.pullCursor || c.lastSync
+  if (reconciled && !needsBasesBootstrap(c)) return
+  if (!reconciled) out('  First Cloud reconcile…')
   await cloudPullNow()
 }
 
@@ -2094,8 +3072,8 @@ async function cloudEnsureReconciled() {
  * (`seq=gt.<last>&order=seq.asc&limit=N` until a short page): unlike offsets,
  * stable while rows are written mid-pull. Mode from planPullQuery.
  */
-async function cloudFetchChangedRows(c) {
-  const plan = planPullQuery(c)
+async function cloudFetchChangedRows(c, bootstrapBases = false) {
+  const plan = planPullQuery(c, { bootstrapBases })
   return collectSeqPages(async (after) => {
     const res = await cloudRest(
       `/rest/v1/files?select=${CLOUD_PULL_COLUMNS}&order=seq.asc&seq=gt.${after}&limit=${CLOUD_PAGE_SIZE}` +
@@ -2113,7 +3091,7 @@ async function cloudFetchRemoteAnchor(dek, dir) {
     `/rest/v1/files?select=${CLOUD_PULL_COLUMNS}&path_key=eq.${encodeURIComponent(pathKey)}`
   )
   if (res.status >= 400 || !Array.isArray(res.json) || !res.json.length) return null
-  try { return { ...(await decryptFileRow(dek, res.json[0])), pathKey } } catch { return null }
+  try { return { ...(await decryptFileRow(dek, res.json[0])), pathKey, seq: parseRowSeq(res.json[0].seq) } } catch { return null }
 }
 
 /**
@@ -2161,7 +3139,7 @@ async function cloudFetchRemoteRows(dek, relPaths) {
     try {
       const entry = await decryptFileRow(dek, row)
       if (entry.relPath !== byKey.get(row.path_key) || !isSafeCloudRelPath(entry.relPath)) { errors++; continue }
-      entries.push({ ...entry, pathKey: row.path_key })
+      entries.push({ ...entry, pathKey: row.path_key, seq: parseRowSeq(row.seq) })
     } catch { errors++; undecryptable.push(row.path_key) }
   }
   return { entries, errors, undecryptable }
@@ -2180,6 +3158,132 @@ function cloudApplySectionFile(entry) {
   return true
 }
 
+/** Every '.md' of a local note folder: '<dir>/<file>.md' → content. */
+function readLocalNoteFiles(dir) {
+  const files = {}
+  const dirPath = path.join(NOTES_DIR, dir)
+  for (const f of fs.readdirSync(dirPath)) {
+    if (f.endsWith('.md')) files[`${dir}/${f}`] = fs.readFileSync(path.join(dirPath, f), 'utf-8')
+  }
+  return files
+}
+
+/**
+ * Three-way reconcile of a local note folder whose anchor has a known base (or
+ * that the bases bootstrap covers) — mirror of the app's reconcileDirThreeWay
+ * around the pure planThreeWayDir. Fetches the sections the remote anchor lists
+ * that are not in this batch and are missing on disk (or pending here without a
+ * base) BEFORE writing anything (a failed request aborts the pull), then:
+ * conflict copy first (only the conflicting sections; the whole folder when the
+ * anchors can't be merged — throws → retry set, nothing written), removes,
+ * writes (sections, then note.md), bases. The CLI's journal is
+ * `pendingUpserts`: every entry counts as a pending AND "stale" upload (the CLI
+ * has no drain — what must still go up is re-uploaded by the pull itself,
+ * including the folder's pending files this batch did not touch); no upload is
+ * ever in flight during a pull, and there are no pending deletes or
+ * conflict-copied flags. Returns { changed, copy, errors, settle, upload:
+ * [{ relPath, force }] } — the caller drops `settle` from pendingUpserts and
+ * re-uploads `upload` (with base = the seq just reconciled).
+ */
+async function cloudReconcileDirThreeWay(dir, group, anchor, dek, pending, dirBases, ctx, sink) {
+  const inGroup = new Set(group.map(e => e.relPath))
+  const toFetch = anchor
+    ? listAnchorSectionFiles(anchor.content)
+        .map(f => `${dir}/${f}`)
+        .filter(rel => !inGroup.has(rel) &&
+          (!fs.existsSync(path.join(NOTES_DIR, rel)) || (isPendingUpsert(pending, rel) && !dirBases[rel])))
+    : []
+  const fetched = await cloudFetchRemoteRows(dek, toFetch)
+  sink.fetchedForDir.push(...fetched.entries)
+  for (const key of fetched.undecryptable) sink.decryptFailures.add(key)
+
+  // Synchronous from here to the end.
+  const prefix = `${dir}/`
+  const pendingSet = new Set(pending.filter(p => p.startsWith(prefix)))
+  const local = readLocalNoteFiles(dir)
+  const rows = [...group, ...fetched.entries]
+  const remote = rows.map(e => ({
+    relPath: e.relPath,
+    seq: e.seq === undefined ? null : e.seq,
+    content: e.deleted ? null : e.content,
+    updatedAtMs: e.updatedAtMs,
+  }))
+  let bases = dirBases
+  if (ctx) {
+    // Bootstrap: real bases for rows this CLI had already seen (persisted),
+    // assumed ones for the remote changes it had not (planner only).
+    const synth = synthesizeBootstrapBases({
+      dir,
+      local,
+      remote,
+      bases: dirBases,
+      pendingUpserts: pendingSet,
+      seenSeq: ctx.seenSeq,
+      notSeen: new Set(rows.filter(e => ctx.retryKeys.has(e.pathKey)).map(e => e.relPath)),
+      lastSyncMs: ctx.lastSyncMs,
+    })
+    for (const [rel, base] of Object.entries(synth.seen)) setCliCloudBase(rel, base)
+    bases = { ...synth.assumed, ...dirBases, ...synth.seen }
+  }
+  const plan = planThreeWayDir({
+    dir,
+    local,
+    remote,
+    bases,
+    pendingUpserts: pendingSet,
+    staleUpserts: pendingSet,
+    copiedUpserts: new Set(),
+    pendingDeletes: new Set(),
+    nowIso: new Date().toISOString(),
+  })
+
+  let copy = null
+  if (plan.copyWhole) copy = writeConflictCopyDir(dir)
+  else if (plan.copySections.length > 0) copy = writeConflictCopyDir(dir, plan.copySections)
+
+  let changed = 0
+  for (const rel of plan.removes) {
+    try { fs.unlinkSync(path.join(NOTES_DIR, rel)); changed++ } catch { /* already gone */ }
+  }
+  for (const w of plan.writes) {
+    fs.writeFileSync(path.join(NOTES_DIR, w.relPath), w.content, 'utf-8')
+    changed++
+  }
+  for (const [rel, base] of Object.entries(plan.bases)) setCliCloudBase(rel, base)
+  // The app's journal drain runs right after its pull and uploads the pending
+  // edits the batch did not touch (a section edited offline whose row did not
+  // move). The CLI has no drain: those go up here too — sections before
+  // note.md, so the merged anchor never lists content the server lacks.
+  // Forced entries (cliCloud.forceUpserts: a folder kept over a tombstone) stay forced.
+  const planned = new Set([...plan.settle, ...plan.upload, ...plan.removes])
+  const drained = [...pendingSet].filter(rel => !planned.has(rel) && rel in local)
+  const upload = [...drained.filter(rel => !isAnchorPath(rel)), ...plan.upload, ...drained.filter(isAnchorPath)]
+  // A file already in forceUpserts stays forced whichever way it comes (the
+  // app's journal keeps `force` on re-record): a folder kept over an anchor
+  // tombstone whose forced re-upload failed would otherwise go up conditional,
+  // stale against the newer tombstone, forever.
+  const forced = new Set([...plan.force, ...upload.filter(rel => isPendingUpsert(sink.forceUpserts, rel))])
+  return {
+    changed,
+    copy,
+    errors: fetched.errors,
+    settle: plan.settle,
+    upload: upload.map(rel => ({ relPath: rel, force: forced.has(rel) })),
+  }
+}
+
+/** Bases grouped by note folder: dir → { relPath → base }. */
+function indexBasesByDir(bases) {
+  const byDir = new Map()
+  for (const [rel, base] of Object.entries(bases)) {
+    const dir = noteDirOf(rel)
+    if (dir === null) continue
+    if (!byDir.has(dir)) byDir.set(dir, {})
+    byDir.get(dir)[rel] = base
+  }
+  return byDir
+}
+
 /** Incremental pull — same grouping/conflict/tombstone/loose-section rules as the app's cloudSync.pullNotes. */
 async function cloudPullNow() {
   bindCliCloudToAccount()
@@ -2194,11 +3298,36 @@ async function cloudPullNow() {
   const conflictCopies = []
   // Reconciled to the server's content by this pull → leave pendingUpserts.
   const reconciledDirs = [], reconciledPaths = []
+  // Three-way re-uploads ({ relPath, force }): whatever a merged folder ends
+  // with that differs from the server, on top of the seq just reconciled.
+  const reUploads = []
   // Retry set: rows that failed to apply in earlier pulls ride along with this
   // batch (below the watermark now); this pull's failures replace it.
   const prevRetry = parsePullRetry(c.pullRetry)
   const applyFailures = new Map(), decryptFailures = new Set()
-  const mainRows = await cloudFetchChangedRows(c)
+  // One-time bases bootstrap (an install that synced before per-file bases):
+  // everything is re-read and every local folder reconciled three-way with
+  // synthesized bases — see needsBasesBootstrap / synthesizeBootstrapBases.
+  // "Unjournaled" local edits = a note.md not in pendingUpserts whose
+  // `updated` is after this CLI's lastSync (the desktop app or an editor wrote
+  // it while the CLI was not syncing): treated as unknown → never overwritten.
+  const bootstrap = needsBasesBootstrap(c)
+  const validLastSyncMs = lastSyncMs !== null && Number.isFinite(lastSyncMs) ? lastSyncMs : null
+  const bootstrapCtx = bootstrap
+    ? {
+        seenSeq: typeof c.pullSeq === 'number' && Number.isSafeInteger(c.pullSeq) && c.pullSeq >= 0 ? c.pullSeq : null,
+        retryKeys: new Set(Object.keys(prevRetry)),
+        lastSyncMs: validLastSyncMs,
+      }
+    : null
+  // Folders whose bootstrap reconcile failed in an earlier pull keep its context.
+  const pendingBootstrap = parseBootstrapPending(c.basesBootstrapPending)
+  const pendingBootstrapCtx = pendingBootstrap
+    ? { seenSeq: pendingBootstrap.seenSeq, retryKeys: new Set(pendingBootstrap.retryKeys), lastSyncMs: pendingBootstrap.lastSyncMs }
+    : null
+  const bootstrapFailed = new Set(), bootstrapDone = new Set()
+  if (bootstrap) out('  One-time Cloud sync upgrade: reconciling every note file by file…')
+  const mainRows = await cloudFetchChangedRows(c, bootstrap)
   const rows = mergeRetryRows(mainRows, await cloudFetchRowsByPathKeys(Object.keys(prevRetry)))
 
   let errors = 0
@@ -2207,7 +3336,7 @@ async function cloudPullNow() {
     try {
       const entry = await decryptFileRow(dek, row)
       if (!isSafeCloudRelPath(entry.relPath)) { errors++; continue } // permanent — never retried
-      entries.push({ ...entry, pathKey: row.path_key })
+      entries.push({ ...entry, pathKey: row.path_key, seq: parseRowSeq(row.seq) })
       // Seed the per-folder key cache so pushes reuse the same note key.
       cloudNoteKeys.set(noteDirOf(entry.relPath) || entry.relPath, entry.noteKey)
     } catch { errors++; decryptFailures.add(row.path_key) }
@@ -2224,22 +3353,29 @@ async function cloudPullNow() {
 
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
 
+  // Bases known before this pull, by note folder (each folder is reconciled once).
+  const basesByDir = indexBasesByDir(cliCloudBasesSnapshot())
+
   let pulled = 0, deleted = 0
   for (const [dir, group] of dirs) {
     const fetchedForDir = [] // rows fetched outside the batch — retried with the folder
+    // Bootstrap context of this folder: the bootstrap pull itself, or a folder
+    // whose bootstrap reconcile failed before.
+    const dirCtx = bootstrapCtx || (pendingBootstrap && pendingBootstrap.dirs.includes(dir) ? pendingBootstrapCtx : null)
+    let dirFailed = false
     try {
       const localDirPath = path.join(NOTES_DIR, dir)
       const localAnchorPath = path.join(localDirPath, NOTE_MD)
-      const localExists = fs.existsSync(localAnchorPath)
-      const localUpdatedMs = localExists
-        ? parseUpdatedTimestamp(extractUpdatedTimestamp(fs.readFileSync(localAnchorPath, 'utf-8')))
-        : null
+      const localAnchorContent = fs.existsSync(localAnchorPath) ? fs.readFileSync(localAnchorPath, 'utf-8') : null
+      const localExists = localAnchorContent !== null
+      const localUpdatedMs = localExists ? parseUpdatedTimestamp(extractUpdatedTimestamp(localAnchorContent)) : null
 
       // The anchor decides.
       let anchor = group.find(e => isAnchorPath(e.relPath)) || null
 
       if (anchor && anchor.deleted) {
-        if (!localExists) continue
+        // Gone here too: its bases are moot.
+        if (!localExists) { dropCliCloudBasesUnder(dir); continue }
         // A pending (failed) upload under '<dir>/' = a local edit the server
         // never got: keep the note and re-upload it whole below (resurrected on
         // purpose, like the app — the local edit wins). The CLI ALWAYS keeps
@@ -2250,6 +3386,7 @@ async function cloudPullNow() {
         if (shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs)) {
           fs.rmSync(localDirPath, { recursive: true, force: true })
           deleted++
+          dropCliCloudBasesUnder(dir)
         }
         continue
       }
@@ -2262,7 +3399,26 @@ async function cloudPullNow() {
         fetchedForDir.push(anchor)
       }
 
-      if (anchor && (!localExists || shouldApplyRemoteDir(anchor.updatedAtMs, localUpdatedMs))) {
+      const dirBases = basesByDir.get(dir) || {}
+      if (localExists && (dirCtx !== null || dirBases[`${dir}/${NOTE_MD}`])) {
+        // THREE-WAY (the anchor has a known base): every remote row is decided
+        // against its file's base and the local file, not by note.md's
+        // `updated:` — an offline edit of one section and a remote edit of
+        // another MERGE; a section both sides changed differently → the remote
+        // goes into the note and the local version into a copy holding only
+        // those sections. Replaces both branches below for this folder.
+        const result = await cloudReconcileDirThreeWay(dir, group, anchor, dek, pending, dirBases, dirCtx,
+          { fetchedForDir, decryptFailures, forceUpserts: c.forceUpserts })
+        errors += result.errors
+        if (result.copy) {
+          conflictCopies.push(result.copy)
+          out(`  Conflict: local changes kept as "${result.copy.title}"`)
+        }
+        // Reconciled to the server's content (written or identical) → leave pendingUpserts.
+        reconciledPaths.push(...result.settle)
+        reUploads.push(...result.upload)
+        if (result.changed === 0) continue
+      } else if (anchor && (!localExists || shouldApplyRemoteDir(anchor.updatedAtMs, localUpdatedMs))) {
         // Newer remote anchor (or a note new to this machine): wholesale.
         // Listed sections NOT in this batch and NOT on disk were uploaded
         // earlier (below the watermark) — fetch them BEFORE writing: an anchor
@@ -2306,14 +3462,20 @@ async function cloudPullNow() {
 
         fs.mkdirSync(localDirPath, { recursive: true })
         fs.writeFileSync(localAnchorPath, anchor.content, 'utf-8')
+        // Every row written (or found identical) becomes its file's base: the
+        // next pull of this folder goes three-way.
+        recordPulledBase(anchor)
         for (const entry of group) {
           if (isAnchorPath(entry.relPath)) continue
           cloudApplySectionFile(entry)
+          recordPulledBase(entry)
         }
         // Not on the server yet (pending upload) → arrives later via the
         // loose-section rule; listed-but-tombstoned → left alone.
         for (const entry of fetched.entries) {
-          if (!entry.deleted) cloudApplySectionFile(entry)
+          if (entry.deleted) continue
+          cloudApplySectionFile(entry)
+          recordPulledBase(entry)
         }
         // The local folder lost: its pending uploads carry the losing version.
         reconciledDirs.push(dir)
@@ -2348,18 +3510,29 @@ async function cloudPullNow() {
           if (entry.deleted && isPendingUpsert(pending, entry.relPath)) continue
           if (!shouldApplyRemoteSection(entry.updatedAtMs, localUpdatedMs)) continue
           if (cloudApplySectionFile(entry)) changed++
+          recordPulledBase(entry) // the disk now holds the server's version (its base)
           if (!entry.deleted) reconciledPaths.push(entry.relPath) // disk = server's version
+        }
+        // A remote anchor identical to the local one (typically this CLI's own
+        // upload coming back): its pending upload is satisfied, and it becomes
+        // the anchor's base (the folder goes three-way from now on).
+        if (anchor && localAnchorContent === anchor.content) {
+          reconciledPaths.push(anchor.relPath)
+          recordPulledBase(anchor)
         }
         if (changed === 0) continue // local is newer, or already identical
       }
       pulled++
       out(`  ${dir}/`)
     } catch (e) {
+      dirFailed = true
       if (e.abortPull) throw e // abort the pull: watermark/lastSync stay put
       errors++
       err(`${dir}: ${e.message}`)
       // Retry the WHOLE folder next pull (its rows sit below the watermark now).
       for (const e2 of [...group, ...fetchedForDir]) applyFailures.set(e2.pathKey, e2.relPath)
+    } finally {
+      if (dirCtx) (dirFailed ? bootstrapFailed : bootstrapDone).add(dir)
     }
   }
 
@@ -2422,16 +3595,33 @@ async function cloudPullNow() {
   // interrupted upload below is retried by `noteflow push`).
   const keptFlat = [...keptRelPaths.values()].flat()
   const copyFlat = conflictCopies.flatMap(c => c.relPaths)
+  // Three-way re-uploads are journaled the same way (and the forced ones as forced).
+  const reUploadFlat = reUploads.map(u => u.relPath)
+  const reUploadForced = reUploads.filter(u => u.force).map(u => u.relPath)
+  // Bases BEFORE the cursor moves: a crash in between only re-reconciles rows
+  // whose bases are already right (seq = base → nothing to do). Throws → the
+  // pull fails without advancing anything.
+  flushCliCloudBases()
   const fresh = getCliCloud()
   patchCliCloud({
     pullSeq: nextPullSeq(c.pullSeq, mainRows), pullCursor: undefined, lastSync: new Date().toISOString(),
     pullRetry: Object.keys(pullRetry).length ? pullRetry : undefined,
     pendingUpserts: storedPendingUpserts(existingPendingUpserts(nextPendingUpserts(
-      dropReconciledPending(fresh.pendingUpserts, reconciledDirs, reconciledPaths), [...keptFlat, ...copyFlat], []))),
+      dropReconciledPending(fresh.pendingUpserts, reconciledDirs, reconciledPaths), [...keptFlat, ...copyFlat, ...reUploadFlat], []))),
     // The kept folder's re-upload is FORCED until it lands — persisted here so
     // an interrupted/failed one is retried forced by `noteflow push`.
     forceUpserts: storedPendingUpserts(existingPendingUpserts(nextPendingUpserts(
-      dropReconciledPending(fresh.forceUpserts, reconciledDirs, reconciledPaths), keptFlat, []))),
+      dropReconciledPending(fresh.forceUpserts, reconciledDirs, reconciledPaths), [...keptFlat, ...reUploadForced], []))),
+    // Bootstrap done (or never needed: a first sync / an install with bases).
+    basesBootstrapped: true,
+    // A folder that failed its bootstrap reconcile keeps the context for its retry.
+    basesBootstrapPending: nextBootstrapPending(pendingBootstrap, {
+      started: bootstrapCtx
+        ? { seenSeq: bootstrapCtx.seenSeq, lastSyncMs: bootstrapCtx.lastSyncMs, retryKeys: [...bootstrapCtx.retryKeys] }
+        : null,
+      failed: bootstrapFailed,
+      done: bootstrapDone,
+    }) || undefined,
   })
   if (Object.keys(pullRetry).length) {
     out(`  ${Object.keys(pullRetry).length} remote change(s) could not be applied — they will be retried on the next pull`)
@@ -2481,6 +3671,40 @@ async function cloudPullNow() {
       patchCliCloud({ pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [], uploaded)) })
     }
   }
+
+  // Three-way merges: re-upload what the folder ends with that differs from
+  // the server (a section kept local, the merged note.md…) with base = the seq
+  // just reconciled — sections first, note.md last (planThreeWayDir's order).
+  // Rejected (stale: another device wrote meanwhile) or failed → stays pending.
+  const reUploadDirs = new Map()
+  for (const u of reUploads) {
+    const dir = noteDirOf(u.relPath)
+    if (!reUploadDirs.has(dir)) reUploadDirs.set(dir, [])
+    reUploadDirs.get(dir).push(u)
+  }
+  for (const [dir, list] of reUploadDirs) {
+    const uploaded = [], stale = []
+    try {
+      const noteKey = await cloudGetNoteKey(dek, dir)
+      for (const u of list) {
+        if (!fs.existsSync(path.join(NOTES_DIR, u.relPath))) continue
+        if ((await cloudPushFile(dek, noteKey, u.relPath, { force: u.force })) === 'stale') stale.push(u.relPath)
+        else uploaded.push(u.relPath)
+      }
+    } catch (e) {
+      errors++
+      err(`${dir}/: upload of the merged note failed: ${e.message}. Run 'noteflow push' to retry`)
+    }
+    if (stale.length) out(`  ${dir}/: ${stale.length} file(s) ${STALE_UPLOAD_HINT}`)
+    flushCliCloudBasesBestEffort()
+    if (uploaded.length) {
+      patchCliCloud({
+        pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [], uploaded)),
+        forceUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().forceUpserts, [], uploaded)),
+      })
+    }
+  }
+  flushCliCloudBasesBestEffort() // bases of the kept-folder / conflict-copy uploads above
   return { pulled, deleted, errors }
 }
 
@@ -2705,13 +3929,17 @@ async function cmdCloudPush() {
   // Folders whose remote version failed to apply here may be half-written:
   // pushing them would send old sections with the new anchor's timestamp.
   const halfApplied = dirsPendingRetry(getCliCloud().pullRetry)
-  const relPaths = []
+  const noteFiles = []
   for (const dir of listLocalNoteDirs()) {
     if (halfApplied.has(dir)) continue
     for (const f of fs.readdirSync(path.join(NOTES_DIR, dir))) {
-      if (f.endsWith('.md')) relPaths.push(`${dir}/${f}`)
+      if (f.endsWith('.md')) noteFiles.push(`${dir}/${f}`)
     }
   }
+  // Catch-up of what changed only: a note file with a base goes up when it
+  // differs from it (or is pending); without a base, as before (always).
+  const relPaths = cloudFilesToUpload(noteFiles)
+  const unchanged = noteFiles.length - relPaths.length
   for (const m of CLOUD_METADATA_FILES) {
     if (fs.existsSync(path.join(NOTES_DIR, m))) relPaths.push(m)
   }
@@ -2719,15 +3947,18 @@ async function cmdCloudPush() {
     out(`  Skipping ${halfApplied.size} note(s) whose remote changes are still pending here — run 'noteflow pull' first`)
   }
 
-  out(`  Pushing ${relPaths.length} files to NoteFlow Cloud...`)
+  out(`  Pushing ${relPaths.length} files to NoteFlow Cloud...${unchanged ? ` (${unchanged} unchanged since the last sync)` : ''}`)
   let pushed = 0, errors = 0
   const uploaded = [], failed = [], stale = []
   const forced = getCliCloud().forceUpserts
   // Stale (rejected: newer on the server) uploads stay pending like failures.
-  const savePending = () => patchCliCloud({
-    pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [...failed, ...stale], uploaded)),
-    forceUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().forceUpserts, [], uploaded)),
-  })
+  const savePending = () => {
+    flushCliCloudBasesBestEffort()
+    patchCliCloud({
+      pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [...failed, ...stale], uploaded)),
+      forceUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().forceUpserts, [], uploaded)),
+    })
+  }
   for (const relPath of relPaths) {
     try {
       const noteKey = await cloudGetNoteKey(dek, noteDirOf(relPath) || relPath)
@@ -3062,6 +4293,9 @@ async function cmdDelete(titleQuery, opts) {
       const remote = await cloudListRemotePaths(dek)
       const targets = remote.filter(r => r.relPath.startsWith(`${note.dirname}/`))
       await cloudTombstonePathKeys(targets.map(t => t.pathKey))
+      // The folder is gone everywhere: its bases are moot.
+      dropCliCloudBasesUnder(note.dirname)
+      flushCliCloudBasesBestEffort()
       out('  Deleted from NoteFlow Cloud')
     } catch (e) { err(`Cloud delete failed: ${e.message}`) }
     return
@@ -4540,5 +5774,11 @@ if (require.main === module) {
     normalizeOtpCode,
     gitBlobSha, isNoteFilePath, planConditionalUpsert, planConditionalDelete, remoteDirChangesSinceBase,
     nextPulledBases, githubConflictCandidates,
+    // Cloud three-way reconcile (mirrors of electron/cloudSyncLogic.ts) + the
+    // Cloud engine entry points, driven by tests against an in-memory server.
+    CLOUD_BASE_UPSERT_RPC, TOMBSTONE_BASE_HASH, UNKNOWN_BASE_HASH,
+    hashForBase, classifyBaseUpsert, planFileReconcile, mergeAnchors, planThreeWayDir, filesNeedingCatchUp,
+    needsBasesBootstrap, synthesizeBootstrapBases, parseBootstrapPending, nextBootstrapPending, parseAnchorFm,
+    cloudPullNow, syncPushNoteFiles, cmdCloudPush, bindCliCloudToAccount, cliCloudBasesSnapshot, CLOUD_BASES_PATH,
   }
 }

@@ -1124,7 +1124,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     `flushPendingLocalChanges` + el drain los suben. Descartada a propósito la heurística "`updated`
     local > `lastSync` ⇒ candidata": daría copias espurias cuando otro dispositivo edita encima de
     una edición propia ya subida. **CLI** (`cloudPullNow`):
-    mismo espejo en la rama wholesale con `pendingUpserts` (mismas reglas y helpers; idioma según
+    mismo espejo en la rama wholesale (carpetas sin base de ancla; con base, la rama de tres vías del
+    CLI) con `pendingUpserts` (mismas reglas y helpers; idioma según
     `settings.language`), sube la copia con `cloudPushFile` (lo que no llega queda en
     `pendingUpserts` para `noteflow push`) e imprime `Conflict: local changes kept as "…"`; su
     tombstone siempre conserva con subidas pendientes, así que no necesita copia. Dedupe del CLI: al
@@ -1136,7 +1137,10 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     - Las ediciones hechas con **Cloud desactivado**, o por el **CLI con la app cerrada**, no las
       apunta el journal de la app → no son candidatas.
     - `noteflow cloud pull` ejecutado mientras la app tiene una edición offline en **su** journal
-      la sobrescribe sin copia (el CLI solo conoce sus propios `pendingUpserts`).
+      (mismo dir de notas): el CLI solo conoce sus propios `pendingUpserts`. En carpetas con base del
+      CLI se protege igual (el fichero difiere de la base del CLI → cambio local: se conserva y se
+      sube, o copia si el remoto también cambió); sin base del CLI, la regla LWW de antes la puede
+      sobrescribir sin copia.
     - La comparación del ancla es **textual** (sin `updated:`): otro cliente que formatee el YAML de
       otra manera produce una copia espuria (segura).
     - La copia conserva `favorited`/`expiresAt` y el contenido con alarmas → las alarmas pueden
@@ -1317,10 +1321,11 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
       no apuntadas en el journal sobre ficheros cuya fila ya se había visto se suben sin más (no hay
       forma de saber si el remoto también cambió antes: no cambió, porque la fila es la vista); el caso
       límite histórico "sección local desfasada que se saltó por LWW" se sube igual que antes.
-    - El **CLI** (`cli/noteflow.js`) sigue con la 0011 y la regla LWW por carpeta (sin bases): una
-      edición offline del CLI todavía puede pisar secciones remotas. Interop: las subidas del CLI cambian
-      la `seq` → la app las ve como cambio remoto en tres vías; las de la app con base pueden quedar
-      `stale` si el CLI escribió entre medias (lo resuelve el pull).
+    - El **CLI** (`cli/noteflow.js`) tiene la misma fusión en tres vías desde el 2026-11-04 (bases
+      propias, v2, bootstrap; ver "Cliente CLI (headless)" → "Fusión en tres vías"). Interop: cada
+      cliente tiene sus bases; una subida de uno cambia la `seq` → el otro la ve como cambio remoto en
+      tres vías, y una subida con base puede quedar `stale` si el otro escribió entre medias (lo
+      resuelve el pull).
     - Fusión del ancla a nivel de **campo** limitada (no hay contenido base, solo su hash): con ambos
       lados cambiados — fácil, porque las `tags` salen del contenido y casi cualquier edición de
       secciones con etiquetas cambia el frontmatter — gana el frontmatter remoto en título, grupo,
@@ -1612,12 +1617,13 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
   deslogearía mutuamente. El token rotado se persiste **antes** de usar el access token; un 400/401
   del refresh borra `cliAccount` ("Session expired"). Un access token por invocación (proceso
   one-shot, sin single-flight).
-- **Estado propio:** `settings.cliCloud = {enabled, pullSeq, lastSync, userId, pendingUpserts, pullRetry}` (más un
-  `pullCursor` legado hasta el primer pull por seq) — cursor/lastSync del CLI, independientes de
+- **Estado propio:** `settings.cliCloud = {enabled, pullSeq, lastSync, userId, pendingUpserts, forceUpserts, pullRetry,
+  basesBootstrapped, basesBootstrapPending}` (más un `pullCursor` legado hasta el primer pull por seq; las
+  bases por fichero van aparte, en `cli-cloud-state.json`, ver "Fusión en tres vías" abajo) — cursor/lastSync del CLI, independientes de
   `settings.cloudSync` (cada cliente reconcilia por su cuenta). `userId` es el **dueño** de ese
   cursor y sobrevive al `logout` (que borra `cliAccount` pero conserva cursor/lastSync/userId): un
   re-login con la **misma** cuenta retoma incremental; con **otra** cuenta `cliCloudForUser`
-  descarta `pullSeq`/`pullCursor`/`lastSync`/`pendingUpserts`/`pullRetry` → el siguiente pull es completo (un watermark ajeno
+  descarta `pullSeq`/`pullCursor`/`lastSync`/`pendingUpserts`/`forceUpserts`/`pullRetry` y los flags de bootstrap (y `bindCliCloudToAccount` borra `cli-cloud-state.json`) → el siguiente pull es completo (un watermark ajeno
   saltaría, por `seq > pullSeq`, todas las filas de la cuenta nueva por debajo de él). Se aplica en `cloud login` (antes del pull automático) y al inicio de todo pull/reconcile
   Cloud (`bindCliCloudToAccount`).
   - **Dueño desconocido** (estado de antes de guardar `userId`): en `cloud login` se toma como dueño
@@ -1664,10 +1670,11 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
     app, que la apunta en el journal antes de guardar `pullSeq`;
   - tombstone de una **sección suelta** pendiente (`isPendingUpsert`, espejo de `hasPendingUpsert`) →
     se salta;
-  - **subidas condicionadas** (espejo de la app **anterior a la 0014** — el CLI aún no tiene bases ni
-    fusión en tres vías, ver los residuales de "Fusión en tres vías"): las filas de nota van por la RPC
-    `cloud_upsert_file` con el mismo fallback (404/`PGRST202` → upsert directo, aviso una vez por
-    invocación); la re-subida de la carpeta conservada tras un tombstone va **forzada**; una subida
+  - **subidas condicionadas** (ver también "Fusión en tres vías" abajo): las filas de nota van primero
+    por la v2 (`cloud_upsert_file_v2`, con la base del fichero), 404/`PGRST202` → la 0011
+    (`cloud_upsert_file`) el resto de la invocación y, si tampoco existe, upsert directo (cada
+    fallback avisa una vez por invocación); la re-subida de la carpeta conservada tras un tombstone va
+    **forzada**; una subida
     rechazada (stale) se informa como `not uploaded: a newer version is on NoteFlow Cloud — run
     'noteflow pull'` (no como fallo), no bumpea `lastSync` y queda en `pendingUpserts`. Cuando el
     pull aplica una carpeta **entera** (y pide también sus secciones listadas con subida pendiente)
@@ -1691,10 +1698,103 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
   - **no replicado:** la regla "todas stale ⇒ borrar" del tombstone del ancla — `pendingUpserts` del
     CLI no distingue subidas rechazadas (stale) de fallidas, así que conserva la carpeta como antes;
   - al empezar se descartan las entradas cuyo fichero local ya no existe (no protegen nada).
-  `noteflow push` es el reintento (sube todo y limpia lo que llega). Se borra al cambiar de cuenta
+  `noteflow push` es el reintento (sube lo pendiente + lo que difiere de su base, ver abajo, y limpia
+  lo que llega). Se borra al cambiar de cuenta
   (`cliCloudForUser`, como `pullSeq`). Paridad con los guards de la app en
   `tests/cli/syncState.test.ts`; la de subidas condicionadas, retry set y cambio de cuenta en
   `tests/cli/cloudConditional.test.ts`.
+- **Fusión en tres vías por fichero (paridad con la app, 2026-11-04).** Mismo diseño que "Fusión en
+  tres vías por fichero" del Sync engine, con estas piezas propias del CLI:
+  - **Bases** `{seq, hash}` por relPath en **`<dir de ajustes del CLI>/cli-cloud-state.json`**
+    (`{userId, bases}`), **no** en `settings.json` (crece con el corpus y en Windows/Linux ese fichero
+    lo comparte la app; mismo criterio que `cli-github-state.json` y que la app, que las guarda en
+    `cloud-sync-state.json`). Un fichero con otro `userId` (o ilegible) se lee vacío. Los cambios se
+    acumulan en memoria (`setCliCloudBase`) y `flushCliCloudBases` **re-lee el fichero y aplica solo
+    los de esta invocación** (otro proceso del CLI puede haber escrito), tmp + rename. En el pull el
+    flush va **antes** del `patchCliCloud` que avanza `pullSeq` (si falla, el pull no avanza nada); en
+    las subidas es best-effort con aviso (la subida ya llegó; una base perdida solo da un `stale`
+    espurio que el pull resuelve con *adopt*). Mismos sitios que la app para registrar/borrar:
+    escritura o disco idéntico en el pull (también ramas históricas wholesale/por secciones y ancla
+    idéntica), subida aceptada por la v2, borrado al aplicar un tombstone/borrar la carpeta
+    (`noteflow delete` incluido) o tras una subida sin seq. Cambio de cuenta: `bindCliCloudToAccount`
+    borra el fichero y `cliCloudForUser` quita `basesBootstrapped`/`basesBootstrapPending`.
+  - **Espejos puros** (JS, comentario "Pure mirror of …", exportados para tests): `hashForBase`,
+    `classifyBaseUpsert`, `planFileReconcile`, `mergeAnchors` (+ `chooseAnchor`,
+    `withKeptLocalSections`, `anchorsNeedWholeCopy`), `planThreeWayDir` (+ `planLegacySection`),
+    `filesNeedingCatchUp`, `needsBasesBootstrap`, `planPullQuery(c, {bootstrapBases})`,
+    `synthesizeBootstrapBases`, `parseBootstrapPending`/`nextBootstrapPending`, `buildConflictCopy`
+    con `onlySections`. **El CLI no tiene librería YAML**: el `note.md` se edita como **bloques de
+    texto de primer nivel** (`parseAnchorFm`: línea `clave:` + continuaciones indentadas; items de
+    `sections:` con sus campos `id`/`file`/`aiHidden`). Los bloques no tocados conservan su texto; los
+    reescritos (`sections`, `updated`, `tags` como lista flow con comillas JSON, `favorited: true`)
+    cargan con js-yaml a los mismos datos que el re-dump de la app. Lo que no entiende (clave
+    duplicada, línea no-clave en columna 0, `sections` en estilo flow) cuenta como **ilegible** =
+    error de YAML en la app (ancla en conflicto → copia de la carpeta entera). Paridad en
+    `tests/cli/cloudThreeWay.test.ts`: rejilla de 10×10 variantes local×remota (editar/borrar/añadir
+    secciones, `aiHidden`, favorito, tags, título; anclas escritas por la app **y** por el CLI;
+    con/sin pendientes; los dos órdenes de `updated`) comparando `planThreeWayDir` del CLI con el de
+    la app (el `note.md` por lo que carga js-yaml).
+  - **Journal = `pendingUpserts`.** En `planThreeWayDir`: `pendingUpserts` = sus entradas bajo la
+    carpeta **y** `staleUpserts` = las mismas (el CLI no tiene drain: lo que deba subir lo sube el
+    propio pull), `copiedUpserts`/`pendingDeletes`/`inFlightHashes` vacíos (no hay flag de dedupe,
+    borrados en cola ni subidas en vuelo: el CLI es síncrono). `settle` → `reconciledPaths`
+    (`dropReconciledPending`, tras aplicar la carpeta sin error); `upload` → se apuntan en
+    `pendingUpserts` (y las forzadas en `forceUpserts`) en la **misma** escritura que avanza `pullSeq`
+    y se suben después con `cloudPushFile` (base = la seq recién reconciliada; un fichero que ya estaba en
+    `forceUpserts` sube **forzado** venga por donde venga, como el `force` que conserva el journal de la
+    app); lo que llega sale de
+    las listas, lo `stale` queda con el mensaje de siempre. **Drain del pull:** las entradas pendientes
+    de la carpeta que el lote no tocó (sección editada offline cuya fila no se movió) también se
+    suben ahí (secciones antes que el `note.md`), equivalente al drain que la app ejecuta justo
+    después del pull.
+  - **Pull (`cloudPullNow` → `cloudReconcileDirThreeWay`):** rama de tres vías cuando la carpeta
+    existe en local y su `note.md` tiene base (o hay contexto de bootstrap), **después** del tombstone
+    del ancla (que sigue con su lógica: `pendingUnderDir` → conservar y re-subir forzado) y de "carpeta
+    local inexistente" (wholesale, que ya registra bases). Pide antes de escribir las secciones listadas
+    por el ancla remota que faltan en disco (o pendientes sin base) — fallo → `abortPull` —; copia
+    primero (solo las secciones en conflicto con `writeConflictCopyDir(dir, copySections)`, o la
+    carpeta entera si las anclas no se pueden fusionar; imprime `Conflict: local changes kept as "…"`
+    y la sube como las demás copias), borrados, escrituras (secciones primero, `note.md` el último),
+    bases.
+  - **Subidas:** `cloudPushFile` usa la v2 con `p_base_seq = cliCloudBase(rel)?.seq ?? null`
+    (número → nueva base con el hash de lo subido; `null` → `stale`; fallback 0011 → base borrada;
+    forzadas y json sin cambios). **Qué se sube** (`cloudFilesToUpload`): un fichero pendiente
+    siempre; con base, solo si su hash difiere de la base (`filesNeedingCatchUp`); sin base, siempre
+    (regla anterior). La **subida por comando** (`syncPushNoteFiles`) sube además el `note.md` siempre
+    (lleva el `updated` nuevo, como cada guardado de la app; `touch` depende de ello) — necesario
+    porque `writeNoteFolder` reescribe **todas** las secciones y antes subía las no tocadas encima de
+    versiones remotas más nuevas. Además **apunta en `pendingUpserts` lo que va a subir antes de
+    cualquier petición** (journal primero): un primer reconcile / bootstrap que corra entre medias ve
+    la edición como cambio local pendiente (conserva o copia, nunca pisa) y una subida interrumpida la
+    reintenta `noteflow push`. `noteflow push` = catch-up (solo lo pendiente o distinto de la base;
+    imprime `(N unchanged since the last sync)`) + json de metadatos como antes.
+  - **Bootstrap** (`needsBasesBootstrap(cliCloud)`, flag `cliCloud.basesBootstrapped` en la misma
+    escritura que `pullSeq`; carpetas fallidas en `cliCloud.basesBootstrapPending`, mismos helpers
+    puros): `cloudEnsureReconciled` lo trata como la **puerta de pull inicial** — antes de la primera
+    subida (comando o `noteflow push`) tras actualizar, corre ese pull completo (`One-time Cloud sync
+    upgrade: reconciling every note file by file…`). Contexto: `seenSeq` = `pullSeq` previo,
+    `retryKeys` = el retry set, `lastSyncMs` = `lastSync` del CLI. **Ediciones no apuntadas** en el CLI
+    = `note.md` fuera de `pendingUpserts` con `updated` > `lastSync` del CLI (lo escribió la app
+    —mismo dir de notas en Windows/Linux—, un editor externo o un `touch` previo sin red): contenido
+    desconocido → idéntico = adopt, distinto = copia, nunca se pisa.
+  - **Desviaciones / residuales del CLI:** sin flag `conflictCopied`, un aplicado que falla a medias
+    tras crear la copia puede **copiar otra vez** en el reintento (como las ediciones no apuntadas en la
+    app). Antes del bootstrap no hay bases: un `touch` (pasa todas las secciones) apunta todas como
+    pendientes → una sección que el otro dispositivo cambió y este no tocó sale como copia de
+    conflicto (conservador; `set`/`add` solo apuntan la sección escrita y fusionan limpio). Cuando el
+    CLI reescribe un `note.md` en **su** formato (`serializeNoteMd`: comillas, `tags` en flow, sin
+    `expiresAt`), el hash del ancla cambia aunque no haya edición real: frente a la app, la rama
+    "ambos cambiaron" (base = ancla remota + OR de `aiHidden`/`favorited` + unión de `tags`) corre
+    más a menudo — conservador (no pierde contenido de secciones; ver la fusión de campo limitada en
+    los residuales de "Fusión en tres vías"). Un `note.md` con YAML que el lector de bloques no
+    entiende con seguridad (item de `sections` en flow, comentario tras un valor que lee, campo
+    repetido, `tags` en flow multilínea o sin cerrar, contenido anidado bajo `id`/`file`/`aiHidden`)
+    es ilegible → en conflicto, copia de la carpeta entera (la app fusionaría algunos de esos
+    casos); nunca una fusión que pierda una sección o un `aiHidden`. Las
+    subidas por comando sin bootstrap y **sin red** se quedan apuntadas y el bootstrap corre en el
+    siguiente comando con red. Escenarios extremo a extremo (servidor en memoria con la semántica de
+    0011/0014 tras un mock de `fetch`, cripto y ficheros reales) en
+    `tests/cli/cloudThreeWayPull.test.ts`.
 - **Gate de pull inicial:** sin `pullSeq`, `pullCursor` ni `lastSync` (nunca reconciliado), el
   primer push ejecuta antes un pull automático ("First Cloud reconcile…") — un disco viejo no machaca
   un remoto más nuevo. Pull incremental idéntico al de la app (keyset por `seq` con los mismos tres

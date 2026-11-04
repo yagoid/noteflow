@@ -770,14 +770,27 @@ La clave **nunca se guarda en disco** en esta máquina.
 ### `cloud push` / `cloud pull` — Sync completo manual
 
 ```bash
-noteflow cloud push   # cifra y sube todas las notas + metadatos
+noteflow cloud push   # cifra y sube lo que cambió desde el último sync + metadatos
 noteflow cloud pull   # baja y descifra los cambios remotos (incremental)
 ```
 
 El primer push ejecuta automáticamente un pull inicial de reconciliación
-(`First Cloud reconcile…`) para no pisar remoto más nuevo. En el pull manda el
-`updated:` del ancla de cada nota: el remoto más nuevo gana la carpeta entera; los
-borrados remotos solo se aplican si la copia local no cambió desde el último sync.
+(`First Cloud reconcile…`) para no pisar remoto más nuevo. Tras actualizar el CLI, la
+primera subida o pull hace **una vez** una reconciliación completa
+(`One-time Cloud sync upgrade: reconciling every note file by file…`).
+
+El sync es **por fichero** (cada sección es un fichero), igual que la app de escritorio:
+- Si aquí editaste una sección y en otro dispositivo otra, el pull **fusiona** las dos (sin
+  copia) y vuelve a subir la nota.
+- Si los dos editaron **la misma** sección de forma distinta, la nota se queda con la versión
+  remota y la tuya va a una **copia de conflicto que contiene solo esas secciones**
+  (`Conflict: local changes kept as "<título> (conflict copy …)"`).
+- Cada subida lleva la versión del servidor sobre la que se hizo: si otro dispositivo cambió
+  ese fichero entretanto, se rechaza (`not uploaded: a newer version is on NoteFlow Cloud —
+  run 'noteflow pull'`) y el pull la fusiona. `push` solo sube lo que difiere de lo último
+  sincronizado (`(N unchanged since the last sync)`), y tras cada comando solo sube `note.md`
+  y las secciones que cambiaron.
+- Los borrados remotos solo se aplican si la copia local no cambió desde el último sync.
 
 ### `cloud status` — Estado de la cuenta y el sync
 

@@ -1234,12 +1234,18 @@ ninguno → Cloud); a partir de ahí manda la elección del usuario. Con Cloud a
 > tú la editabas, tu versión se conserva y sigue visible en la nota (o va a una copia). La copia se sube como cualquier nota y se avisa en la
 > tarjeta del botón de sync del titlebar. El primer sync tras actualizar la app relee toda la nube una
 > vez para aplicar ya esta regla a todas las notas (también a ediciones offline hechas antes de ese
-> primer sync). **No cubre:** ediciones desde el CLI (sigue con la regla antigua); un
-> `noteflow cloud pull` del CLI sobre una edición offline pendiente de la app. El GitHub Sync tiene su propia
+> primer sync). **El CLI con Cloud hace lo mismo** (`noteflow pull`/`push` y la subida tras cada
+> comando): fusiona por secciones, sus subidas llevan la versión sobre la que se editó, la primera
+> ejecución tras actualizarlo relee la nube una vez, y sus copias de conflicto también llevan solo
+> las secciones en conflicto (`Conflict: local changes kept as "…"`). **No cubre:** notas que ese
+> cliente aún no tiene sincronizadas con la regla nueva (sin base: rigen las reglas de antes); un
+> `noteflow touch` del CLI hecho antes de esa primera relectura (no sabe qué secciones cambiaste, así
+> que una sección que el otro dispositivo tocó sale como copia de más); y un `noteflow cloud pull`
+> sobre una edición offline de la app en una nota que el CLI aún no tiene sincronizada con la regla
+> nueva. El GitHub Sync tiene su propia
 > versión (ver "GitHub Sync" → "Si otro dispositivo cambió la nota"). Puede salir una
-> copia de más (otro cliente que formatee distinto el YAML, notas cifradas) y la copia conserva
-> favorito/caducidad/alarmas (pueden sonar dos veces). El CLI con Cloud hace lo mismo con sus propias
-> subidas fallidas.
+> copia de más (otro cliente que formatee distinto el YAML, notas cifradas, un `note.md` con YAML que
+> el CLI no sabe leer) y la copia conserva favorito/caducidad/alarmas (pueden sonar dos veces).
 
 Nube de notas **cifrada** de pago (suscripción) con **dos modos de cifrado a elegir** (modelo
 Obsidian Sync).
