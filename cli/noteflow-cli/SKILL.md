@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 1.14.0
+version: 1.15.0
 ---
 
 # NoteFlow CLI — Referencia completa
@@ -961,6 +961,23 @@ noteflow touch "título"
   nada por sí solo).
 - Usa `read`/`set` cuando reescribas la sección entera, o cuando no tengas acceso al
   sistema de ficheros (p. ej. la nota vive en otra máquina).
+
+### Estilo del contenido: no abuses del código inline
+
+Las notas las lee una persona en la app, no un parser. El código inline (`` `así` ``)
+se renderiza como una píldora monoespaciada con fondo propio: si se reparte por todo
+el texto, la nota se vuelve ruidosa y lo que sí era código deja de destacar.
+
+- **Úsalo solo para lo que se escribiría tal cual en una terminal o en código:**
+  comandos (`npm run build`), rutas y nombres de fichero (`~/.config/noteflow`),
+  identificadores reales (funciones, variables, claves de config, flags como
+  `--json`), valores literales y fragmentos que el usuario copiaría.
+- **No lo uses para resaltar palabras normales**, conceptos, nombres de producto,
+  tecnologías mencionadas de pasada ("usa React", no "usa `React`"), estados,
+  cifras o términos que solo quieres enfatizar. Para énfasis, **negrita** (con
+  moderación) o nada.
+- Ante la duda, texto plano. Varias líneas de código → bloque con triple backtick,
+  no una cadena de inlines.
 
 ---
 
