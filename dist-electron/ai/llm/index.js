@@ -220,10 +220,10 @@ function notConfiguredMessage(cfg) {
     if ((0, presets_1.presetOf)(cfg.active).id === 'noteflow') {
         const status = (0, account_1.getAccountStatus)();
         if (!status.signedIn)
-            return 'NoteFlow AI needs your NoteFlow account — sign in from Settings → Account.';
+            return 'NoteFlow AI needs your NoteFlow account — sign in from Settings → Subscription.';
         // Unknown entitlements never land here (isManagedAiUsable lets them through).
         if (!(0, entitlementsRetry_1.isManagedAiUsable)(status))
-            return 'NoteFlow AI requires an active subscription — manage your plan in Settings → Account.';
+            return 'NoteFlow AI requires an active subscription — manage your plan in Settings → Subscription.';
     }
     return 'No LLM provider configured';
 }

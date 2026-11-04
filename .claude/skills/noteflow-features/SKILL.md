@@ -924,15 +924,16 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     modelos la sirve el servidor: los modelos nuevos **aparecen solos** (sin actualizar la app; "Load"
     fuerza el refresco), se recuerda entre arranques y offline, y tu modelo elegido no cambia. Botón "Use NoteFlow
     AI" para activarlo (o check "Active" si ya lo es). Sin sesión o sin suscripción, la card sigue
-    visible pero en vez del botón muestra el aviso del motivo ("sign in" / "requires subscription")
+    visible pero en vez del botón muestra, sin sesión, "Already subscribed?" + botón **"Sign in"** (lleva a
+    Ajustes → Suscripción) y, con sesión sin suscripción, el aviso "requires subscription" (badge "Paid")
     **+ el bloque de planes con precios**: NoteFlow AI y, si tampoco tienes Cloud, el Bundle (con
     badge "Best value"). **La card entera es clickable**: con sesión y checkout configurado abre la
     pasarela de pago de ESE plan (antes había un botón "Subscribe" dentro; ahora la card muestra un CTA
-    "Subscribe"); sin sesión, clicar la card lleva a Ajustes → Cuenta (CTA "Go to Account" con flecha);
+    "Subscribe"); sin sesión, clicar la card lleva a Ajustes → Suscripción (CTA "Go to Subscription" con flecha);
     con sesión pero sin checkout en el build muestra "coming soon" y queda inerte. Esto vale tanto en
     Ajustes → IA como en el **panel de IA del Cerebro** (antes solo en Ajustes). Lo mismo si la
     suscripción caduca teniéndolo activo, para que entiendas el fallo y puedas cambiar de fuente.
-    **Al suscribirte** (Subscribe → pagar → Refresh en Settings → Account), NoteFlow AI **se activa
+    **Al suscribirte** (Subscribe → pagar → Refresh en Settings → Subscription), NoteFlow AI **se activa
     como proveedor automáticamente**.
   - **Tu proveedor / IA local (BYO; gratis y privado):** elige proveedor (Anthropic/Claude, OpenAI,
     DeepSeek, MiniMax, Moonshot, OpenRouter, Ollama local, o Custom OpenAI-compatible), pega tu **API
@@ -1299,7 +1300,8 @@ Los dos modos (se eligen al configurar, con dos cards):
   notas. Perderlos ambos = notas irrecuperables (aviso explícito).
 
 Flujo del panel según estado:
-- **Sin sesión:** mensaje "inicia sesión en Settings → Account".
+- **Sin sesión:** "Already subscribed?" + botón **"Sign in"** (lleva a Ajustes → Suscripción) — la cuenta
+  es solo para usuarios de pago, así que no se presenta como "inicia sesión para sincronizar".
 - **Sin claves (`no-keys`):** con la entitlement `cloud`, elección de modo con dos cards (Standard
   preseleccionada); sin ella, en su lugar sale el bloque de planes (ver "Gating por suscripción").
   Standard = un click ("Enable") y directo a desbloqueado. Private = crear **passphrase**
@@ -1324,12 +1326,12 @@ Flujo del panel según estado:
 - **Gating por suscripción:** exigen la entitlement `cloud` **crear las claves** (la elección de
   modo del estado `no-keys` — configurar una nube que no podrías activar no lleva a ninguna parte)
   y el botón **Enable sync**. En ambos casos, en su lugar: mensaje "requires subscription" + el
-  **mismo bloque de planes** que Ajustes → Cuenta — NoteFlow Cloud y, si tampoco tienes AI, el
+  **mismo bloque de planes** que Ajustes → Suscripción — NoteFlow Cloud y, si tampoco tienes AI, el
   Bundle con badge "Best value" —, cada card clickable para abrir su checkout. **Unlock, Sync now,
   Disable y Lock funcionan sin suscripción**: quien ya tiene claves y datos subidos puede seguir
   desbloqueando y bajándose sus notas aunque caduque.
 - **Sin sesión**, el panel ya no se limita a pedirte que inicies sesión: muestra también esos
-  precios, y clicar cualquier card lleva a Ajustes → Cuenta para crear la cuenta sin salir de Ajustes.
+  precios, y clicar cualquier card lleva a Ajustes → Suscripción para crear la cuenta sin salir de Ajustes.
 - Antes de activar con GitHub Sync conectado, aviso ámbar: "GitHub Sync quedará en pausa" (solo
   cuando activar Cloud está realmente al alcance, es decir con la entitlement `cloud`).
 
@@ -1383,9 +1385,11 @@ Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
 
 ---
 
-## Cuenta NoteFlow (Settings → Account)
+## Cuenta NoteFlow (Settings → Subscription)
 
-Cuenta opcional para las suscripciones (**NoteFlow AI** — €5.99/mes · €49.99/año; **NoteFlow
+El apartado de Ajustes se llama **"Subscription"/"Suscripción"** (id interno `'account'`) para que
+nadie confunda iniciar sesión con activar la sincronización: el texto sin sesión empieza por "For paid
+users:". Cuenta opcional para las suscripciones (**NoteFlow AI** — €5.99/mes · €49.99/año; **NoteFlow
 Cloud**, con panel en Settings → Sync — €3.99/mes · €39.99/año; **NoteFlow Bundle**, AI + Cloud
 juntos — €7.99/mes · €79.99/año). Los tres son comprables: las tres URLs de checkout están
 pobladas en la build (precios en `.claude/context/monetization.md` § visión, cifras de display en

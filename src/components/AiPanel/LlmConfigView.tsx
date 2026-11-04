@@ -8,6 +8,7 @@ import { hasKnownEntitlement, isPlanUnknown, type SubscriptionProduct } from '..
 import type { SettingsSection } from '../Settings/SettingsModal'
 import { Card, FieldLabel, FIELD_INPUT } from './ui'
 import { PlanOffers, PlanUnknownNotice } from '../Settings/PlanOffers'
+import { settingsButtonClass } from '../Settings/ui'
 
 // The two mutually exclusive ways of powering the assistant. Kept as VIEW state
 // (see below) — the source of truth for what is actually in use is llmConfig.active.
@@ -332,13 +333,27 @@ export function LlmConfigView({
                   </div>
                 ) : !account.signedIn || !entitled ? (
                   <div className="flex flex-col gap-2 items-start">
-                    <p className="text-[11px] text-text-muted normal-case leading-relaxed">
-                      {!account.signedIn ? t.aiPanel.provider.noteflowSignIn : t.aiPanel.provider.noteflowNeedsSubscription}
-                      <span className="ml-1.5 align-middle text-[10px] px-1.5 py-0.5 rounded-md border border-solid border-border text-text-muted">
-                        {t.aiPanel.provider.paidLabel}
-                      </span>
-                    </p>
-                    {/* Sign-in hint off: noteflowSignIn above already says it. */}
+                    {!account.signedIn ? (
+                      // The account is only for paid users: address existing subscribers
+                      // (same prompt as the Cloud panel) instead of a generic "sign in".
+                      <div className="flex flex-wrap items-center gap-2 normal-case">
+                        <span className="text-[13px] text-text-muted normal-case">{t.settings.account.alreadySubscribed}</span>
+                        <button
+                          onClick={goToAccount}
+                          className={`px-3 py-1.5 rounded-lg border-solid text-[12px] font-bold normal-case ${settingsButtonClass}`}
+                        >
+                          {t.settings.account.signIn}
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-text-muted normal-case leading-relaxed">
+                        {t.aiPanel.provider.noteflowNeedsSubscription}
+                        <span className="ml-1.5 align-middle text-[10px] px-1.5 py-0.5 rounded-md border border-solid border-border text-text-muted">
+                          {t.aiPanel.provider.paidLabel}
+                        </span>
+                      </p>
+                    )}
+                    {/* Sign-in hint off: the prompt above already covers it. */}
                     <PlanOffers
                       products={['ai', 'bundle']}
                       account={account}

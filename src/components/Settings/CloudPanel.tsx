@@ -310,15 +310,22 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
       <div className="space-y-4">
         {header}
         <div className="space-y-2">
-          <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            {t.settings.cloud.signInFirst}
-            <span className="ml-1.5 align-middle inline-block text-[10px] font-mono px-1.5 py-0.5 rounded-md border border-border text-text-muted">
-              {t.settings.cloud.paidLabel}
-            </span>
-          </p>
+          {/* The NoteFlow account is only for paid users: address existing
+              subscribers, so signing in isn't mistaken for "turn on sync". */}
+          {onNavigate && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[13px] font-mono text-text-muted">{t.settings.account.alreadySubscribed}</span>
+              <button
+                onClick={() => onNavigate('account')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
+              >
+                {t.settings.account.signIn}
+              </button>
+            </div>
+          )}
           {/* What Cloud costs, before asking for a sign-in (the Bundle joins in
-              while the AI plan is missing too). Carries its own way into Account;
-              the sign-in hint is off because signInFirst above already says it. */}
+              while the AI plan is missing too). Carries its own way into Subscription;
+              the sign-in hint is off because the prompt above already covers it. */}
           <PlanOffers
             products={['cloud', 'bundle']}
             account={account}

@@ -189,7 +189,7 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   Ajustes, y **Settings → Sync/Cloud se alinearon a él** (2026-07). Las **dos cards se ven siempre**
   (también sin entitlement); debajo, tras un `border-t`, se pinta **solo** la sección del modo elegido.
   NoteFlow AI **no aparece en el `<select>`** (que solo lista el resto de presets); su sección es la
-  barra de consumo mensual + el gate (aviso ámbar → Ajustes → Cuenta) o el botón "Use NoteFlow AI"
+  barra de consumo mensual + el gate (aviso ámbar → Ajustes → Suscripción) o el botón "Use NoteFlow AI"
   (solo con entitlement `ai`). La barra muestra un **porcentaje** ("N% of this month’s AI allowance
   used", `usagePercent`: `used/limit` con suelo, 100 % solo al agotarla): `GET /usage` devuelve
   unidades abstractas (límite 3.000.000, la escala de la antigua cuota de tokens) y solo el cociente

@@ -68,7 +68,7 @@ export const pricingEs: PricingContent = {
   plans: {
     title: 'Planes y precios',
     intro: [
-      'Los planes compran comodidad, no capacidad — y se contratan <strong>desde la propia app</strong>: Settings → Account, con pago mensual o anual. El checkout se abre en tu navegador y el pago lo procesa <strong>Lemon Squeezy</strong>, nuestro merchant of record.',
+      'Los planes compran comodidad, no capacidad — y se contratan <strong>desde la propia app</strong>: Settings → Subscription, con pago mensual o anual. El checkout se abre en tu navegador y el pago lo procesa <strong>Lemon Squeezy</strong>, nuestro merchant of record.',
     ],
     perMonth: '/mes',
     perYear: '/año',
@@ -107,7 +107,7 @@ export const pricingEs: PricingContent = {
     bullets: [
       'Sin instalar Ollama, sin cuentas de terceros, sin comprar, guardar ni rotar API keys.',
       'Incluye una <strong>asignación mensual de IA</strong>, medida por el coste de cómputo real de cada petición — así que cuánto da de sí depende del modelo que elijas y de lo largas que sean tus conversaciones.',
-      'Suscripción mensual o anual — <strong>€5.99/mes o €49.99/año</strong>, IVA incluido. Se contrata desde la propia app: <strong>Settings → Account → Subscribe</strong> — el checkout se abre en tu navegador, a cargo de Lemon Squeezy, nuestro merchant of record.',
+      'Suscripción mensual o anual — <strong>€5.99/mes o €49.99/año</strong>, IVA incluido. Se contrata desde la propia app: <strong>Settings → Subscription → Subscribe</strong> — el checkout se abre en tu navegador, a cargo de Lemon Squeezy, nuestro merchant of record.',
       'En cuanto se completa el pago, NoteFlow AI se activa solo como tu proveedor — nada que configurar.',
     ],
     modelsTitle: 'Modelos del día a día',
@@ -139,7 +139,7 @@ export const pricingEs: PricingContent = {
     bullets: [
       'Sync automática entre dispositivos — sin pushes manuales, sin esperar a un flujo de git.',
       'Dos modos de cifrado: gestionado por defecto (cero secretos que guardar) u opt-in a E2EE estricto donde las claves nunca salen de tus dispositivos.',
-      'Suscripción mensual o anual — <strong>€3.99/mes o €39.99/año</strong>, IVA incluido, contratada desde la propia app (Settings → Account).',
+      'Suscripción mensual o anual — <strong>€3.99/mes o €39.99/año</strong>, IVA incluido, contratada desde la propia app (Settings → Subscription).',
       'Para quien no quiere crear y mantener un repo de GitHub solo para sincronizar notas.',
     ],
     alt: {

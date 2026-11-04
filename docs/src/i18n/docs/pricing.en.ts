@@ -70,7 +70,7 @@ export const pricingEn = {
   plans: {
     title: 'Plans & pricing',
     intro: [
-      'The plans buy convenience, not capability — and you subscribe <strong>from inside the app</strong>: Settings → Account, monthly or annual. The checkout opens in your browser and payment is processed by <strong>Lemon Squeezy</strong>, our merchant of record.',
+      'The plans buy convenience, not capability — and you subscribe <strong>from inside the app</strong>: Settings → Subscription, monthly or annual. The checkout opens in your browser and payment is processed by <strong>Lemon Squeezy</strong>, our merchant of record.',
     ],
     perMonth: '/month',
     perYear: '/year',
@@ -109,7 +109,7 @@ export const pricingEn = {
     bullets: [
       'No Ollama to install, no third-party account, no API key to buy, store or rotate.',
       'A <strong>monthly AI allowance</strong> is included, measured by the real compute cost of each request — so how far it goes depends on the model you pick and on how long your conversations get.',
-      'Monthly or annual subscription — <strong>€5.99/month or €49.99/year</strong>, VAT included. Subscribe from inside the app: <strong>Settings → Account → Subscribe</strong> — checkout opens in your browser, handled by Lemon Squeezy, our merchant of record.',
+      'Monthly or annual subscription — <strong>€5.99/month or €49.99/year</strong>, VAT included. Subscribe from inside the app: <strong>Settings → Subscription → Subscribe</strong> — checkout opens in your browser, handled by Lemon Squeezy, our merchant of record.',
       'Once the payment goes through, NoteFlow AI activates itself as your provider — nothing to configure.',
     ],
     modelsTitle: 'Everyday models',
@@ -141,7 +141,7 @@ export const pricingEn = {
     bullets: [
       'Automatic sync across devices — no manual pushes, no waiting on a git flow.',
       'Two encryption modes: managed by default (zero secrets to keep), or opt into strict E2EE where the keys never leave your devices.',
-      'Monthly or annual subscription — <strong>€3.99/month or €39.99/year</strong>, VAT included, subscribed from inside the app (Settings → Account).',
+      'Monthly or annual subscription — <strong>€3.99/month or €39.99/year</strong>, VAT included, subscribed from inside the app (Settings → Subscription).',
       'For people who don’t want to create and manage a GitHub repo just to sync notes.',
     ],
     alt: {

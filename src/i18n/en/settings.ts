@@ -15,7 +15,7 @@ export const settings = {
     sync: 'Sync',
     data: 'Data',
     ai: 'AI',
-    account: 'Account',
+    account: 'Subscription',
     shortcuts: 'Keyboard shortcuts',
     tutorial: 'Tutorial',
     about: 'About',
@@ -198,8 +198,6 @@ export const settings = {
     title: 'NoteFlow Cloud',
     desc: 'Encrypted sync through NoteFlow servers. Notes are encrypted on this device before upload — the server only ever stores ciphertext.',
     notAvailable: "NoteFlow Cloud isn't available in this build yet.",
-    paidLabel: 'Paid',
-    signInFirst: 'Sign in to your NoteFlow account to use it.',
     // Entitlement gate (enable only — unlock/pull/disable stay available). The
     // plans and their prices come from the shared PlanOffers block (settings.account.*).
     requiresSubscription: 'Enabling NoteFlow Cloud sync requires an active subscription.',
@@ -352,14 +350,18 @@ export const settings = {
     // listed price is what the customer pays (stating it is required by LSSI art. 10.1.f).
     pricesIncludeVat: 'Prices include VAT.',
     // Shown instead of subscribeHint when the plans block renders without a
-    // session (AI / Cloud gates), next to the shortcut into Settings → Account.
+    // session (AI / Cloud gates), next to the shortcut into Settings → Subscription.
     signInToSubscribe: 'Sign in to your NoteFlow account to subscribe.',
-    goToAccount: 'Go to Account',
+    goToAccount: 'Go to Subscription',
+    // Signed-out AI / Cloud gates: the account is only for paid users, so the
+    // prompt is addressed to existing subscribers, with a button into Settings → Subscription.
+    alreadySubscribed: 'Already subscribed?',
+    signIn: 'Sign in',
     couldNotOpenCheckout: 'Could not open the checkout.',
     refresh: 'Refresh',
     signOut: 'Sign out',
     signInDesc:
-      "Sign in with your email to access your NoteFlow account. We'll send you a one-time code — no password needed.",
+      "For paid users: sign in with your email to access your NoteFlow subscription. We'll send you a one-time code — no password needed.",
     email: 'Email',
     sendCode: 'Send code',
     // "We sent a sign-in code to <email>. Enter it below to sign in." — the email

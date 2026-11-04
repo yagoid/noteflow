@@ -220,9 +220,9 @@ export function toPublic(cfg: LlmConfigStored): LlmConfigPublic {
 export function notConfiguredMessage(cfg: LlmConfigStored): string {
   if (presetOf(cfg.active).id === 'noteflow') {
     const status = getAccountStatus()
-    if (!status.signedIn) return 'NoteFlow AI needs your NoteFlow account — sign in from Settings → Account.'
+    if (!status.signedIn) return 'NoteFlow AI needs your NoteFlow account — sign in from Settings → Subscription.'
     // Unknown entitlements never land here (isManagedAiUsable lets them through).
-    if (!isManagedAiUsable(status)) return 'NoteFlow AI requires an active subscription — manage your plan in Settings → Account.'
+    if (!isManagedAiUsable(status)) return 'NoteFlow AI requires an active subscription — manage your plan in Settings → Subscription.'
   }
   return 'No LLM provider configured'
 }

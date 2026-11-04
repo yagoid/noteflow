@@ -6,9 +6,9 @@
 > **end-to-end** (alta de cuenta, checkout, entitlement aplicada, chat vía el preset `noteflow`)
 > — primero en modo test. **Live mode activado (2026-10-19):** store verificada, los tres productos
 > copiados a live ("Copy to Live Mode"), webhook de live dado de alta y URLs de checkout de live en
-> `cloudConfig.ts` (detalle en § 3, "Billing en live mode"). Cuenta NoteFlow en la app + entitlements + esquema SQL + panel Settings → Account
+> `cloudConfig.ts` (detalle en § 3, "Billing en live mode"). Cuenta NoteFlow en la app + entitlements + esquema SQL + panel Settings → Subscription
 > (ver "Fase 4.0 — implementación" abajo) y la **IA gestionada**: `usage_events` + `get_month_usage`
-> + preset `noteflow` en el cliente + botón de suscripción en Settings → Account + auto-activación
+> + preset `noteflow` en el cliente + botón de suscripción en Settings → Subscription + auto-activación
 > del preset al suscribirse + sección dedicada en `LlmConfigView` (ver § 3, "implementación"). El
 > **proyecto Supabase real está conectado** (`electron/cloudConfig.ts`).
 > Decisiones tomadas con el usuario (2026-07): backend **Supabase**, pagos por **Merchant of
@@ -27,7 +27,7 @@ Dos áreas de suscripción (mensual/anual), pensadas para el usuario que "no qui
    (push por websocket, no pull cada 5 min), sin fricción de push/pull, más rápido y fiable.
    Futuro no-foco: historial de versiones y compartir notas entre usuarios en tiempo real.
 
-**Precios (decididos 2026-07, EUR** — publicados en la app (Settings → Account) y en `/pricing` de la web):
+**Precios (decididos 2026-07, EUR** — publicados en la app (Settings → Subscription) y en `/pricing` de la web):
 
 | Plan | Mensual | Anual |
 |---|---|---|
@@ -520,7 +520,7 @@ es **un preset más**, no una implementación nueva.
   aparece en el `<select>` de proveedores** (se filtra por id). Su sección: barra de consumo mensual +
   botón "Use NoteFlow AI" (`changeProvider('noteflow')`) **solo con entitlement `ai`**; sin sesión o
   sin entitlement, en su lugar el aviso ámbar (`noteflowSignIn`/`noteflowNeedsSubscription`) que
-  remite a Ajustes → Cuenta — también cuando la suscripción caduca teniéndolo activo (sigue viendo el
+  remite a Ajustes → Suscripción — también cuando la suscripción caduca teniéndolo activo (sigue viendo el
   motivo y puede pasarse a BYO con la otra card). Detalle del selector, del estado de vista `mode` y
   de por qué los campos BYO se ocultan hasta activar el proveedor: `.claude/context/ai.md` § LLM.
   **Reactividad de la config LLM en el renderer:** el store `aiChatStore` (`llmConfig`/`presets`/
@@ -534,7 +534,7 @@ es **un preset más**, no una implementación nueva.
 - **Bloque de planes (`src/components/Settings/PlanOffers.tsx`):** componente **compartido** por los
   cuatro sitios donde un gate puede acabar en compra, para que precio, reglas de visibilidad y copy
   no se separen entre superficies:
-  1. **Ajustes → Cuenta** (`AccountPanel`, con sesión): `['bundle', 'ai', 'cloud']`.
+  1. **Ajustes → Suscripción** (`AccountPanel`, con sesión): `['bundle', 'ai', 'cloud']`.
   2. **Ajustes → IA** y 3. **panel de IA del Cerebro** (`LlmConfigView`, mismo componente en ambas):
      `['ai', 'bundle']` dentro del gate.
   4. **Ajustes → Sincronización → NoteFlow Cloud** (`CloudPanel`): `['cloud', 'bundle']`, tanto en el
@@ -542,7 +542,7 @@ es **un preset más**, no una implementación nueva.
   Reglas: si `!account.configured` (build sin Supabase) no pinta nada — no se anuncian precios de algo
   que no se puede comprar. Con sesión y entitlements **desconocidas** no pinta ninguna card: muestra
   `PlanUnknownNotice` ("Couldn't verify your plan yet — Retry"), salvo con `showUnknownNotice={false}`
-  (Ajustes → Cuenta, donde ya lo dicen los badges). Un plan solo aparece mientras se **sepa** que
+  (Ajustes → Suscripción, donde ya lo dicen los badges). Un plan solo aparece mientras se **sepa** que
   falta su entitlement, y **Bundle exige que falten AMBAS** (para no facilitar doble facturación); si
   no queda ninguno, no renderiza. Nombre y
   precio salen de `src/lib/subscriptionPlans.ts` (`SUBSCRIPTION_PRICES`, display-only) y el Bundle
@@ -552,7 +552,7 @@ es **un preset más**, no una implementación nueva.
   `account:open-checkout` (`'ai' | 'cloud' | 'bundle'`; main construye la URL con
   `checkout%5Bcustom%5D%5Buser_id%5D=<uuid>` y la abre con `shell.openExternal`; el userId
   **no cruza al renderer**). URL vacía = card inerte con nota "Coming soon". Sin sesión, clicar la card
-  dispara `onGoToAccount` (lleva a Ajustes → Cuenta), y debajo se muestra la línea "sign in to
+  dispara `onGoToAccount` (lleva a Ajustes → Suscripción), y debajo se muestra la línea "sign in to
   subscribe". Ese acceso a Cuenta lo resuelve `onNavigate('account')` donde existe (paneles de Ajustes)
   y, desde el panel del Cerebro —que no tiene navegación propia—, el evento `window`
   **`noteflow:open-account`**, escuchado en `TitleBar` junto al resto de `noteflow:open-*`.
@@ -570,7 +570,7 @@ es **un preset más**, no una implementación nueva.
   ver § 2; `account.areEntitlementsFromCache()`) **no** son observaciones frescas: ni fijan ni mueven
   la baseline, así que ni desconocida→`true` ni cacheada-`false`→`true` cuentan como transición.
   Solo una transición posterior **para la misma identidad** en el mismo proceso (p. ej. "Subscribe"
-  en el navegador → volver → "Refresh" en Settings → Account) dispara el auto-switch. **La
+  en el navegador → volver → "Refresh" en Settings → Subscription) dispara el auto-switch. **La
   identidad se re-arma en cada cambio de `signedIn`/email** — necesario porque la UI permite
   sign-out + sign-in sin reiniciar la app: sin este reset, una cuenta B que YA tenía la
   entitlement antes de este proceso (y se loguea después de que la cuenta A, sin entitlement,
@@ -645,7 +645,7 @@ es **un preset más**, no una implementación nueva.
   producto, no el slug del producto. **Precios con IVA incluido** (decidido 2026-10-19): la store
   tiene activado "tax-inclusive pricing", así que el cliente paga exactamente la cifra publicada
   y el neto baja según el IVA del país. La web (`/pricing`, `/terms`) lo indica (LSSI art.
-  10.1.f); la nota "IVA incluido" en la app (Settings → Account, `PlanOffers.tsx`) está
+  10.1.f); la nota "IVA incluido" en la app (Settings → Subscription, `PlanOffers.tsx`) está
   **pendiente**. Ver `supabase/README.md` §§ 5-6 para repetir el proceso en
   otro proyecto.
 - **Privacidad (documentar en UI/landing):** el índice RAG sigue siendo 100% local; lo que viaja
@@ -1568,7 +1568,7 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   la tarjeta): solo su párrafo `desc`. Textos vía i18n `t.settings.cloud.*` +
   `t.settings.sync.*` (`chooseBackendDesc`, `cloudCardDesc`, `githubTitle`, `githubCardDesc`,
   `badgeActive`/`badgePaused`/`badgeInactive`, `pausedByCloud`).
-- **El panel renderiza según `keysState` + cuenta:** sin sesión → "sign in en Settings → Account";
+- **El panel renderiza según `keysState` + cuenta:** sin sesión → "sign in en Settings → Subscription";
   `no-keys` **sin entitlement `cloud`** → el bloque de planes (ver "Gating" abajo), sin onboarding;
   `no-keys` **con entitlement** → onboarding de elección de modo (dos cards, Estándar/managed
   preseleccionada) → botón directo `cloudSetupManaged`, o formulario de passphrase (input +
