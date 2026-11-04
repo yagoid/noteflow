@@ -22,9 +22,9 @@ La **documentación del proyecto** vive en `.claude/context/*.md` (abajo el mapa
 - Al cerrar una feature importante, **actualizar la documentación** (el `.claude/context/*.md` que
   toque y la skill `noteflow-features` si es UX) y, si es visible, `docs/` y `README.md`.
 - **Al cerrar un desarrollo, valora si también tiene sentido en móvil** (`yagoid/noteflow-mobile`). Si
-  sí, déjalo pendiente con el CLI en la nota `Noteflow NOTEFLOW-MOBILE`: elige la sección del área con
-  `noteflow sections "Noteflow NOTEFLOW-MOBILE"` y añade un ítem sin marcar a su checklist con
-  `noteflow add "- [ ] <tarea>" --title "Noteflow NOTEFLOW-MOBILE" --section "<nombre exacto>"`. Solo
+  sí, déjalo pendiente con el CLI en la nota `NOTEFLOW-MOBILE`: elige la sección del área con
+  `noteflow sections "NOTEFLOW-MOBILE"` y añade un ítem sin marcar a su checklist con
+  `noteflow add "- [ ] <tarea>" --title "NOTEFLOW-MOBILE" --section "<nombre exacto>"`. Solo
   añadir: no crear secciones, ni reordenar ni tachar (si la checklist no cierra la sección, insértalo en
   su sitio con `noteflow path` + editar + `noteflow touch`). Sin CLI a mano, indica el ítem en tu respuesta.
 - Los **mensajes de commit van en inglés**.
