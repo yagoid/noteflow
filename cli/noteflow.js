@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.4.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.5.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.4.0'
+const CLI_VERSION = '2.5.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -1775,16 +1775,71 @@ function resolveSection(note, name, opts = {}) {
   exit(1)
 }
 
+/** Optimal-string-alignment edit distance: insert/delete/substitute/swap neighbours = 1 edit. */
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array(b.length).fill(0)])
+  for (let j = 1; j <= b.length; j++) d[0][j] = j
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1)
+    }
+  }
+  return d[a.length][b.length]
+}
+
+/**
+ * Section names to offer as "Did you mean" when a write command is given a name
+ * with no exact match: the loose candidates first (substring / same words — see
+ * looseSectionMatches), then near-misses by spelling ('Improvment' → 'Improvements',
+ * 'Urgnet' → 'Urgent'; diacritics and case ignored). Suggestions ONLY — no command
+ * acts on them. Unique names, in note order within each tier.
+ */
+function sectionSuggestions(sections, name) {
+  const plain = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+  const q = plain(name)
+  const loose = looseSectionMatches(sections, name).map(s => s.name)
+  // Very short queries ('EN') would "match" half the alphabet by spelling.
+  const maxEdits = q.length < 3 ? 0 : q.length <= 4 ? 1 : 2
+  const typos = maxEdits
+    ? (sections || []).map(s => s.name).filter(n => editDistance(q, plain(n)) <= maxEdits)
+    : []
+  return [...new Set([...loose, ...typos])]
+}
+
+/**
+ * Exits a write command ('add --section', 'set') whose section has no exact
+ * match and no --create: creating on a typo used to leave stray sections behind.
+ * Lists the near names first and the existing ones after, so a human or an agent
+ * can retry with the right name. With --json the same facts also go to stdout as
+ * { error, code, note, section, sections, suggestions } (the CLI's other errors
+ * are stderr-only; this one is the agent's self-correction path).
+ */
+function failUnknownSection(note, baseName, opts) {
+  const sections = (note.sections || []).map(s => s.name)
+  const suggestions = sectionSuggestions(note.sections, baseName)
+  const didYouMean = !suggestions.length ? ''
+    : suggestions.length === 1 ? ` Did you mean "${suggestions[0]}"?`
+      : ` Did you mean one of: ${suggestions.map(n => `"${n}"`).join(', ')}?`
+  const message = `No section named "${baseName}" in "${note.title}".${didYouMean}`
+  err(message)
+  console.error(`  Existing: ${sectionNamesOf(note)}`)
+  console.error('  Use the exact name, or pass --create to create it.')
+  if (opts.json) jsonOut({ error: message, code: 'section_not_found', note: note.title, section: baseName, sections, suggestions })
+  exit(1)
+}
+
 /**
  * stderr line for a write command ('set', 'add --section') that is about to create
- * a section while loosely similar ones exist — likely a typo or a half-remembered
- * name. Informational only: creating is the documented behavior. Must be computed
- * BEFORE the new section is pushed (it would match itself). Returns '' if none.
+ * a section (with --create) while loosely similar ones exist — likely a typo or a
+ * half-remembered name. Informational only. Must be computed BEFORE the new
+ * section is pushed (it would match itself). Returns '' if none.
  */
 function similarSectionsNote(note, baseName, dryRun) {
-  const similar = looseSectionMatches(note.sections, baseName)
+  const similar = sectionSuggestions(note.sections, baseName)
   if (!similar.length) return ''
-  return `  Note: no section named "${baseName}" — ${dryRun ? 'would create' : 'created'} it. Similar existing: ${similar.map(s => s.name).join(', ')}`
+  return `  Note: no section named "${baseName}" — ${dryRun ? 'would create' : 'created'} it. Similar existing: ${similar.join(', ')}`
 }
 
 function readStdin() {
@@ -4020,7 +4075,7 @@ function warnIfDesktopRunning(opts) {
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 // noteflow add [<text>] [--text <t> | --file <p> | --stdin] [--title <t>] [--section <s>]
-//              [--tag <t>] [--group <g>] [--raw|--rich] [--create] [--dry-run] [--json]
+//              [--tag <t>] [--group <g>] [--raw|--markdown] [--create] [--dry-run] [--json]
 async function cmdAdd(positionalText, opts) {
   // Content: positional arg XOR a flag source (--text/--file/--stdin, same helper as `set`).
   // Windows note: the .cmd shim truncates multi-line argv, so flag/stdin sources
@@ -4040,7 +4095,9 @@ async function cmdAdd(positionalText, opts) {
   const targetTitle = opts.title || getTodayTitle()
   const explicitSection = typeof opts.section === 'string' && opts.section !== ''
   const sectionName = explicitSection ? opts.section : 'Note'
-  const isRaw = opts.raw !== false // default true (text mode: the app shows the content as-is)
+  // New sections default to markdown mode (the app renders them); --raw opts into
+  // text mode (shown as-is). Existing sections never change mode.
+  const isRaw = opts.raw === true
   const bytesWritten = Buffer.byteLength(text, 'utf-8')
 
   // Find existing note by title
@@ -4061,22 +4118,25 @@ async function cmdAdd(positionalText, opts) {
   if (existing) {
     const note = readNoteFolder(existing.dirname)
     if (!note) { err(`Could not read note "${existing.title}"`); exit(1) }
-    if (!note.sections.length) note.sections = [{ id: nanoid(6), name: 'Note', content: '', isRawMode: true, created: new Date().toISOString() }]
+    note.sections = note.sections || []
 
-    // Find or create target section. An EXPLICIT --section resolves like in `set`:
-    // exact name (case-insensitive) or create, '#n' picks among same-named ones,
-    // duplicate exact names exit rather than guessing. A loosely similar section
-    // is only mentioned on stderr — never written into.
+    // Find the target section. An EXPLICIT --section resolves like in `set`: exact
+    // name (case-insensitive), '#n' picks among same-named ones, duplicate exact
+    // names exit rather than guessing, and NO exact match is an error listing the
+    // near/existing names — unless --create, which creates it (loosely similar
+    // sections are then mentioned on stderr). Never written into by a loose match.
     // ⚠️ The implicit default ('Note', when no --section is given) must stay
     // exact-or-create WITHOUT the similar-names hint: the user named nothing, so
-    // flagging 'Meeting Notes' on every daily append would be noise, and the '#n'
-    // parsing / duplicate-name exit must not apply either. Do NOT "unify" these
-    // two branches.
+    // failing or flagging 'Meeting Notes' on every daily append would be noise, and
+    // the '#n' parsing / duplicate-name exit must not apply either. Do NOT "unify"
+    // these two branches.
     let sec = explicitSection
       ? matchSectionOrNull(note, sectionName)
       : note.sections.find(s => s.name.toLowerCase() === sectionName.toLowerCase()) || null
     const createdSection = !sec
     const newSectionName = explicitSection ? parseSectionRef(sectionName).baseName : sectionName
+    // Before --dry-run on purpose: a dry run reproduces the error (validate without writing).
+    if (createdSection && explicitSection && !opts.create) failUnknownSection(note, newSectionName, opts)
     // Computed before the new section is pushed; stderr keeps --json stdout and pipes clean.
     const similarNote = createdSection && explicitSection ? similarSectionsNote(note, newSectionName, opts.dryRun) : ''
     if (opts.dryRun) {
@@ -4152,7 +4212,7 @@ async function cmdAdd(positionalText, opts) {
   }
 }
 
-// noteflow new <title> [--section <s>] [--group <g>]
+// noteflow new <title> [--section <s>] [--group <g>] [--folder <f>] [--raw] [--json]
 async function cmdNew(title, opts) {
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
   const id = nanoid(8)
@@ -4173,7 +4233,7 @@ async function cmdNew(title, opts) {
   }
   const note = {
     id, title, tags: [], created: now, updated: now,
-    sections: [{ id: nanoid(6), name: opts.section || 'Note', content: '', isRawMode: true, created: now }],
+    sections: [{ id: nanoid(6), name: opts.section || 'Note', content: '', isRawMode: opts.raw === true, created: now }],
     ...(groupId ? { group: groupId } : {}),
     ...(folderId ? { folder: folderId } : {}),
   }
@@ -4457,16 +4517,19 @@ async function cmdTouch(titleQuery) {
   await syncPushNoteFiles(note.dirname, written)
 }
 
-// noteflow set <title> <section> [--text <t> | --file <p> | --stdin] [--rich] [--dry-run] [--json]
-// Overwrites the section's content (creates it if missing). Complements `add` (append).
+// noteflow set <title> <section> [--text <t> | --file <p> | --stdin] [--create] [--raw] [--dry-run] [--json]
+// Overwrites the section's content (--create: creates it if missing). Complements `add` (append).
 async function cmdSet(titleQuery, sectionName, opts) {
   const note = resolveNote(titleQuery)
-  const content = await resolveSetContent(opts)
-  const bytesWritten = Buffer.byteLength(content, 'utf-8')
-  // Exact name or create — never a loose match: overwriting the wrong section loses
-  // data. Duplicate exact names exit with a '#n' hint rather than guessing.
+  // Exact name only — never a loose match: overwriting the wrong section loses
+  // data. Duplicate exact names exit with a '#n' hint rather than guessing, and no
+  // exact match is an error (with near names) unless --create. Resolved BEFORE
+  // reading the content so a wrong name fails fast, before stdin is consumed.
   let sec = matchSectionOrNull(note, sectionName)
   const createdSection = !sec
+  if (createdSection && !opts.create) failUnknownSection(note, parseSectionRef(sectionName).baseName, opts)
+  const content = await resolveSetContent(opts)
+  const bytesWritten = Buffer.byteLength(content, 'utf-8')
   // Computed before the new section is pushed; stderr keeps --json stdout and pipes clean.
   const similarNote = createdSection ? similarSectionsNote(note, parseSectionRef(sectionName).baseName, opts.dryRun) : ''
   if (opts.dryRun) {
@@ -4477,7 +4540,7 @@ async function cmdSet(titleQuery, sectionName, opts) {
     return
   }
   if (!sec) {
-    sec = { id: nanoid(6), name: parseSectionRef(sectionName).baseName, content: '', isRawMode: opts.raw !== false, created: new Date().toISOString() }
+    sec = { id: nanoid(6), name: parseSectionRef(sectionName).baseName, content: '', isRawMode: opts.raw === true, created: new Date().toISOString() }
     note.sections = note.sections || []
     note.sections.push(sec)
   }
@@ -4490,10 +4553,11 @@ async function cmdSet(titleQuery, sectionName, opts) {
   await syncPushNoteFiles(note.dirname, [NOTE_MD, `${sec.id}.md`])
 }
 
-// noteflow section add <title> <name> [--rich]  — append a new (possibly duplicate-named) section
+// noteflow section add <title> <name> [--raw]  — append a new (possibly duplicate-named) section
+// (markdown mode by default, --raw for text mode)
 async function cmdSectionAdd(titleQuery, name, opts) {
   const note = resolveNote(titleQuery)
-  const sec = { id: nanoid(6), name, content: '', isRawMode: opts.raw !== false, created: new Date().toISOString() }
+  const sec = { id: nanoid(6), name, content: '', isRawMode: opts.raw === true, created: new Date().toISOString() }
   note.sections = note.sections || []
   note.sections.push(sec)
   writeNoteFolder(note.dirname, note)
@@ -5037,7 +5101,9 @@ async function cmdMigrate() {
         continue
       }
       if (!note.sections.length) {
-        note.sections = [{ id: nanoid(6), name: 'Note', content: body, isRawMode: true }]
+        // Markdown mode (no isRawMode), like the desktop migrator: parseLegacyNoteRaw
+        // in electron/noteFormat.ts turns a body-only v1 note into a plain 'Note'.
+        note.sections = [{ id: nanoid(6), name: 'Note', content: body }]
       }
       if (!note.id) note.id = nanoid(8)
       const dir = filename.replace(/\.md$/i, '')
@@ -5152,22 +5218,30 @@ function cmdHelp(topic) {
 
   Options:
     --title <title>     Target a note with this title instead of today's date
-    --create            With --title: create the note when it doesn't exist
-    --section <name>    Write to a section/tab (resolved below; creates it if missing)
+    --section <name>    Write to an EXISTING section/tab (exact name, see below)
+    --create            Create whatever is missing: the --title note and/or the
+                        --section (without it, a missing one is an error)
     --tag <tag>         Add a metadata tag to the note
     --group <name>      Assign the note to a group (only when creating)
     --folder <name>     Put the note in a folder of that group (requires --group)
-    --raw               New section in text mode: the app shows it as-is, unrendered (default)
-    --rich              New section in markdown mode: the app renders its markdown
-    --dry-run           Show what would be written (note/section/bytes) without writing
+    --raw               New section in text mode: the app shows it as-is, unrendered
+    --markdown          New section in markdown mode: the app renders it (default;
+                        --rich is an alias)
+    --dry-run           Show what would be written (note/section/bytes) without
+                        writing — fails exactly like the real run would
     --json              Machine-readable result on stdout; info lines go to stderr
 
   Section resolution (same as 'set'): an explicit --section must match the EXACT
   name (case-insensitive), "Name#2" picks among same-named sections and several
-  same-named ones without "#n" are an error, not a guess. With no exact match the
-  section is created with the name you typed — never a partial/loose match; if
-  similar sections exist they are listed on stderr. Without --section the default
-  section "Note" is likewise matched exactly (or created).
+  same-named ones without "#n" are an error, not a guess. With no exact match it
+  FAILS (exit 1) listing similar names ("Did you mean") and the existing ones —
+  never a partial/loose match, never a stray section from a typo. Pass --create
+  to create it, or 'noteflow section add'. With --json the error is also printed
+  on stdout: { error, code: "section_not_found", note, section, sections,
+  suggestions }. Without --section the default section "Note" is matched exactly
+  and created if missing (quick daily-note appends). A note created by this very
+  command (today's daily note, or --title + --create) gets its section created.
+  The mode flags only apply to a section created now; existing ones keep theirs.
 
   Windows: the noteflow.cmd shim truncates multi-line arguments (cmd.exe drops
   everything after the first newline). PowerShell automatically picks the
@@ -5180,7 +5254,7 @@ function cmdHelp(topic) {
     noteflow add "Fix: CORS issue"
     noteflow add "meeting notes" --title "Project Alpha" --section "Meetings"
     noteflow add --file notes.md --title "New Note" --create
-    git log --oneline -5 | noteflow add --stdin --section "Log"
+    git log --oneline -5 | noteflow add --stdin --section "Log" --create --raw
 `,
     list: `
   noteflow list [options]
@@ -5262,26 +5336,32 @@ function cmdHelp(topic) {
     noteflow touch "Project Alpha"
 `,
     set: `
-  noteflow set <title> <section> [content source] [--rich] [--dry-run] [--json]
+  noteflow set <title> <section> [content source] [--create] [--raw] [--dry-run] [--json]
 
-  Overwrites a section's content (creates the section if it doesn't exist).
-  This is the counterpart of 'add', which only appends.
+  Overwrites the content of an existing section (--create: creates the section
+  if it doesn't exist). This is the counterpart of 'add', which only appends.
+  The note must exist (create notes with 'new' or 'add --title … --create').
 
   Content source (first one wins):
     --text "<content>"   Inline text
     --file <path>        Read content from a file
     --stdin              Read content from stdin (also auto-used when piped)
-    --rich               Create a new section in markdown mode, rendered (default: text mode, shown as-is)
 
   Other options:
-    --dry-run            Show what would be written (note/section/bytes) without writing
+    --create             Create the section if it doesn't exist
+    --raw                A section created now is in text mode (shown as-is);
+                         default: markdown mode (rendered; --markdown/--rich alias it)
+    --dry-run            Show what would be written (note/section/bytes) without
+                         writing — fails exactly like the real run would
     --json               Machine-readable result on stdout; info lines go to stderr
 
   Section resolution: the EXACT name only (case-insensitive) — no partial/loose
   match, so "EN" never overwrites "Comentario". "Name#2" picks among same-named
   sections; several same-named ones without "#n" are an error, not a guess. With
-  no exact match the section is created with the name you typed (similar existing
-  sections, if any, are listed on stderr). Check names with 'noteflow sections'.
+  no exact match it FAILS (exit 1) listing similar names ("Did you mean") and the
+  existing ones — pass --create to create it with the name you typed. With --json
+  the error is also printed on stdout: { error, code: "section_not_found", note,
+  section, sections, suggestions }. Check names with 'noteflow sections'.
 
   Windows: the noteflow.cmd shim truncates multi-line arguments (cmd.exe drops
   everything after the first newline). PowerShell automatically picks the
@@ -5292,12 +5372,12 @@ function cmdHelp(topic) {
 
   Examples:
     noteflow set "Project Alpha" Tasks --text "- [ ] deploy"
-    cat notes.md | noteflow set "Project Alpha" Notes --stdin
+    cat notes.md | noteflow set "Project Alpha" Notes --stdin --create
     noteflow set "Project Alpha" "Tasks#2" --file todo.txt   # 2nd 'Tasks' section
 `,
     section: `
   noteflow section list   <title>
-  noteflow section add    <title> <name> [--rich]
+  noteflow section add    <title> <name> [--raw]
   noteflow section rename <title> <old> <new>
   noteflow section delete <title> <name> [--yes]
 
@@ -5306,8 +5386,9 @@ function cmdHelp(topic) {
   to remove the last remaining section. Quote multi-word names. Being destructive,
   'rename'/'delete' only accept the EXACT name (case-insensitive): with no exact
   match they fail, listing the sections and any similar one ("Did you mean").
-  'add' creates the section in text mode (the app shows it as-is, unrendered);
-  with --rich it is created in markdown mode (the app renders the markdown).
+  'add' always creates a new section (even if one with that name exists), in
+  markdown mode (the app renders the markdown); with --raw it is created in text
+  mode (the app shows it as-is, unrendered).
 
   Examples:
     noteflow section add "Project Alpha" "Meeting Notes"
@@ -5349,10 +5430,11 @@ function cmdHelp(topic) {
   (create it first with 'noteflow folder create'). --ungroup clears both.
 `,
     new: `
-  noteflow new <title> [--section <s>] [--group <g>] [--folder <f>] [--json]
+  noteflow new <title> [--section <s>] [--group <g>] [--folder <f>] [--raw] [--json]
 
   Creates a new empty note with the given title. Optionally place it in a group
-  (and a folder of that group) and name its first section. --json prints the note.
+  (and a folder of that group) and name its first section. The section is in
+  markdown mode (rendered); --raw makes it text mode. --json prints the note.
 
   Examples:
     noteflow new "Sprint 14"
@@ -5432,7 +5514,7 @@ function cmdHelp(topic) {
     list                  List notes
     get <title>           Show note content (pretty, human-readable)
     read <title> [sec]    Print note/section content RAW (pipe/agent-friendly)
-    set <title> <sec>     Overwrite a section's content (creates it if missing)
+    set <title> <sec>     Overwrite a section's content (--create if it's new)
     path <title> [sec]    Print the absolute path of a section's .md (or the note dir)
     touch <title>         Bump 'updated:' and push (after editing a .md by hand)
     delete <title>        Delete a note
@@ -5474,6 +5556,10 @@ function cmdHelp(topic) {
     --json                Machine-readable JSON output (info lines go to stderr)
     --yes                 Skip confirmation prompts
     --dry-run             add/set: resolve the target without writing anything
+    --create              add/set: create a missing section (add: or note) —
+                          without it an unknown section name is an error
+    --raw                 add/set/new/section add: new section in text mode (as-is);
+                          default is markdown mode (rendered)
 
   Agent quickstart (read + write by name, no ids):
     noteflow list --json                      Discover note titles + section names
@@ -5482,6 +5568,8 @@ function cmdHelp(topic) {
     noteflow add  "..." --title "<title>" --section "<section>"   Append instead
     noteflow path "<title>" "<section>"       Get the .md path, edit it, then:
     noteflow touch "<title>"                  …bump 'updated:' and sync
+    Section names must be exact: an unknown one fails with "Did you mean" and the
+    existing names (also as JSON with --json) — add --create only for a NEW one.
 
   AI agent integration:
     NoteFlow ships with an AI agent skill that teaches LLMs how to use this CLI.
@@ -5494,7 +5582,7 @@ function cmdHelp(topic) {
 
   Examples:
     noteflow add "Fix: CORS issue"
-    noteflow add "deploy steps" --section "Tasks" --tag urgent
+    noteflow add "deploy steps" --section "Tasks" --create --tag urgent
     noteflow new "Project Alpha" --group backend
     noteflow list --group backend
     noteflow read "Project Alpha" "Tasks"
@@ -5514,7 +5602,9 @@ function cmdHelp(topic) {
 // missing their value are hard errors, never silently dropped.
 const BOOLEAN_FLAGS = {
   '--json': ['json', true], '--yes': ['yes', true], '--archived': ['archived', true],
-  '--raw': ['raw', true], '--rich': ['raw', false], '--stdin': ['stdin', true],
+  // New sections are markdown mode by default; --markdown/--rich are explicit
+  // spellings of that default (--rich kept so older scripts don't break).
+  '--raw': ['raw', true], '--markdown': ['raw', false], '--rich': ['raw', false], '--stdin': ['stdin', true],
   '--ungroup': ['ungroup', true], '--create': ['create', true],
   '--dry-run': ['dryRun', true], '--force': ['force', true],
   '--no-pull': ['noPull', true],
@@ -5633,7 +5723,7 @@ async function main() {
       } else if (sub === 'add') {
         const title = positional[1]
         const name = positional.slice(2).join(' ')
-        if (!title || !name) { err('Usage: noteflow section add <title> <name> [--rich]'); exit(1) }
+        if (!title || !name) { err('Usage: noteflow section add <title> <name> [--raw]'); exit(1) }
         await cmdSectionAdd(title, name, flags)
       } else if (sub === 'rename') {
         const title = positional[1]
@@ -5758,7 +5848,7 @@ if (require.main === module) {
   // the pure sync-state decisions (GitHub lastSync, Cloud cursor owner) plus the
   // pure name-matching helpers. The CLI always runs as a script.
   module.exports = {
-    sectionTokens, fuzzySectionMatches, looseSectionMatches,
+    sectionTokens, fuzzySectionMatches, looseSectionMatches, editDistance, sectionSuggestions,
     splitFrontmatter, parseNoteYaml, serializeNoteMd,
     toB64Url, fromB64Url, deriveKek, normalizeRecoveryCode, looksLikeRecoveryCode,
     derivePathKeyHmac, wrapKey, unwrapKey, encryptContent, decryptContent,

@@ -1776,15 +1776,38 @@ resolución de sección (`matchSectionOrNull`) es única para todos los comandos
 ni mayúsculas, tokens y stopwords fuera) es opt-in con `{ loose: true }` y **solo** la activan `read`
 y `path` —de lectura—: gana si el candidato es único y se avisa por **stderr** para no ensuciar el
 stdout verbatim. Los que escriben o destruyen **no** la usan (bug real: `set <nota> EN` sobrescribió
-`Comentario` porque `"comentario".includes("en")`): `set` y `add --section` hacen **exacto-o-crear**
-y, si al crear hay candidatos laxos, lo dicen por stderr (`similarSectionsNote`: `Note: no section
-named "EN" — created it. Similar existing: …`; `would create` con `--dry-run`); `section
-rename`/`delete` fallan sin match exacto con la lista de secciones y un `Did you mean: …?`
-(`resolveSection`), nunca actúan sobre el candidato. ⚠️ En `cmdAdd` el default implícito `Note` (sin
-`--section`) va por una rama aparte: exacto-o-crear **sin** aviso de parecidas (sería ruido en cada
+`Comentario` porque `"comentario".includes("en")`). **Desde v2.5.0, `set` y `add --section` son
+estrictos:** sin match exacto **fallan** (exit 1, nada escrito; `failUnknownSection`) con
+`Did you mean "…"?` + `Existing: …` — antes creaban la sección y un typo (`Improvement` por
+`Improvements`) dejaba secciones basura. Las sugerencias (`sectionSuggestions`) son los candidatos
+laxos y después los parecidos por ortografía (`editDistance`, distancia OSA ≤1 para ≤4 letras, ≤2
+para más; nada por ortografía con <3 letras) — **solo se sugieren**, nunca se usan. Con `--json` el
+error sale **además en stdout** como `{ error, code: "section_not_found", note, section, sections,
+suggestions }` (es el único error del CLI en JSON: la vía de autocorrección de un agente); `--dry-run`
+lo reproduce. **`--create`** = "crea lo que falte" (en `add`, nota de `--title` y/o sección; en
+`set`, solo la sección — la nota tiene que existir); al crear con parecidas lo avisa por stderr
+(`similarSectionsNote`: `Note: no section named "EN" — created it. Similar existing: …`; `would
+create` con `--dry-run`). `section add` siempre crea (admite homónimos). `section rename`/`delete`
+fallan sin match exacto con la lista de secciones y un `Did you mean: …?` (`resolveSection`), nunca
+actúan sobre el candidato. ⚠️ En `cmdAdd` el default implícito `Note` (sin `--section`) va por una
+rama aparte: exacto-o-crear **sin** `--create`, **sin** aviso de parecidas (sería ruido en cada
 append a la nota diaria con `Meeting Notes`) ni parseo de `#n`/salida por homónimos — no unificar las
-dos ramas. Cambios de comportamiento del CLI suben `CLI_VERSION` (y el marcador `// v` de la cabecera
-y el ejemplo de `version` del SKILL.md); `self-update` compara el fichero entero, no la versión.
+dos ramas. Una nota que se crea en ese mismo comando (diaria auto-creada o `--title` + `--create`)
+crea su sección sin más.
+**Modo de las secciones nuevas (v2.5.0): modo markdown** (`isRawMode` no se escribe en `note.md`;
+mismo default que `defaultSections()` de la app y las tools `create_note`/`add_section` del agente) en `add`/`set`/`new`/`section add`; `--raw`
+fuerza modo texto; `--markdown` y `--rich` (alias histórico, se mantiene) son el default explícito.
+Las secciones existentes nunca cambian de modo. `migrate` (v1→v2) crea la `Note` de una nota v1 solo
+con cuerpo en modo markdown, igual que `parseLegacyNoteRaw` del escritorio (antes el CLI la ponía en
+modo texto).
+
+**Versionado del CLI y su skill — siempre la misma versión.** `CLI_VERSION` (`cli/noteflow.js`), el
+marcador `// v` de su cabecera, el `version:` del frontmatter de `cli/noteflow-cli/SKILL.md` y el ejemplo
+de salida de `noteflow version` en esa skill llevan **el mismo número**, y se suben juntos: cambio de
+comportamiento del CLI → semver del CLI (minor/major) en los cuatro sitios; cambio solo de redacción de la
+skill → patch en los cuatro. **Independiente de la versión del escritorio** (`package.json`): el CLI tiene
+canal propio (`self-update` baja `noteflow.js` de `main` sin release de la app), así que no van a la par.
+`self-update` compara el fichero entero, no la versión.
 Pensado para
 agentes de IA: **`read`** imprime contenido raw apto para pipe (vs `get`, decorado para humanos) y
 **`set`** sobrescribe una sección (vs `add`, que solo añade al final). Como el CLI no tiene

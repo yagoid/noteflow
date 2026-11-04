@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 1.15.0
+version: 2.5.0
 ---
 
 # NoteFlow CLI — Referencia completa
@@ -81,13 +81,12 @@ sections:
   - id: "sec002"
     name: "Tasks"
     file: "sec002.md"
-    isRawMode: true
 ---
 ```
 
 - El contenido de cada sección vive en su archivo `<sectionId>.md` (sin frontmatter).
 - `updated:` de `note.md` es el timestamp canónico de sincronización de toda la nota.
-- `isRawMode` indica el **modo de sección** (ver abajo). En ambos modos el `<sectionId>.md`
+- `isRawMode` indica el **modo de sección** (ver abajo; sin la clave = modo markdown). En ambos modos el `<sectionId>.md`
   contiene markdown / texto plano — nunca HTML.
 - Notas con `encryption:` en `note.md` están cifradas (la carpeta solo contiene
   `note.md`) — el CLI las ignora.
@@ -102,14 +101,15 @@ markdown / texto plano en los dos casos (la app serializa el editor a markdown).
 
 | Modo | `isRawMode` | Flag del CLI | Qué ve el usuario en la app |
 |---|---|---|---|
-| **Modo texto** | `true` | `--raw` (**default del CLI**) | El contenido **tal cual, sin renderizar**: un `# Título` se ve literalmente con la almohadilla, `- [ ] x` como texto |
-| **Modo markdown** | `false` | `--rich` | El markdown **renderizado**: títulos, listas, checkboxes, negritas, tablas, código… |
+| **Modo markdown** | `false` (o sin la clave) | `--markdown` / `--rich` (**default del CLI**) | El markdown **renderizado**: títulos, listas, checkboxes, negritas, tablas, código… |
+| **Modo texto** | `true` | `--raw` | El contenido **tal cual, sin renderizar**: un `# Título` se ve literalmente con la almohadilla, `- [ ] x` como texto |
 
 Cuándo usar cada uno:
 - Escribes **markdown que el usuario quiere ver formateado** (títulos, listas de
-  tareas, tablas, resúmenes estructurados) → `--rich` (modo markdown).
+  tareas, tablas, resúmenes estructurados) → default (modo markdown); no hace
+  falta flag (`--markdown`/`--rich` lo dicen explícitamente).
 - Texto plano, logs, comandos, salida de herramientas, o el usuario quiere ver el
-  texto exactamente como está → default / `--raw` (modo texto).
+  texto exactamente como está → `--raw` (modo texto).
 - Los flags solo fijan el modo al **crear** la sección (o la nota); sobre una sección
   existente no cambian su modo (el usuario lo cambia en la app: menú de la sección
   o `Ctrl+M`).
@@ -141,14 +141,14 @@ existir**: si no hay match el comando **falla con exit 1** salvo que pases
 | Opción | Descripción |
 |---|---|
 | `--title <título>` | Escribir en una nota con ese título en lugar de la del día |
-| `--create` | Con `--title`: crea la nota si no existe (sin él → error) |
-| `--section <nombre>` | Sección/pestaña destino. La crea si no existe. Default: `Note` |
+| `--section <nombre>` | Sección/pestaña destino, **existente** (nombre exacto; si no existe → error salvo `--create`). Default: `Note` |
+| `--create` | Crea **lo que falte**: la nota de `--title` y/o la sección de `--section` (sin él, cualquiera de las dos que falte → error) |
 | `--tag <tag>` | Añade este tag a la nota (si no lo tiene ya) |
 | `--group <nombre>` | Asigna la nota a un grupo |
 | `--folder <nombre>` | Coloca la nota en una carpeta de ese grupo (requiere `--group`) |
-| `--raw` | Sección nueva en **modo texto** (se ve tal cual, sin renderizar) — default |
-| `--rich` | Sección nueva en **modo markdown** (la app renderiza el markdown) |
-| `--dry-run` | Resuelve el destino y muestra qué haría **sin escribir ni sincronizar** |
+| `--raw` | Sección nueva en **modo texto** (se ve tal cual, sin renderizar) |
+| `--markdown` / `--rich` | Sección nueva en **modo markdown** (la app renderiza el markdown) — default |
+| `--dry-run` | Resuelve el destino y muestra qué haría **sin escribir ni sincronizar** (falla igual que la ejecución real: sirve para validar) |
 | `--json` | Resultado JSON en stdout (líneas informativas → stderr) |
 
 **Comportamiento de append:** el texto se añade al final del contenido existente de la sección, separado por `\n`.
@@ -156,16 +156,30 @@ existir**: si no hay match el comando **falla con exit 1** salvo que pases
 **`--section` explícito resuelve igual que en `set`: solo nombre exacto**
 (sin distinguir mayúsculas) + sufijo `#n` para duplicados; con varios homónimos
 sin `#n` **falla** en vez de adivinar. **Nunca** escribe en una sección por
-coincidencia parcial: si no hay match exacto, **crea** la sección con el nombre
-que escribiste, y si existen secciones parecidas (subcadena o mismas palabras) lo
-avisa por **stderr** sin bloquear — p. ej. `--section EN` en una nota con
-`Comentario` crea `EN` y avisa `Note: no section named "EN" — created it. Similar
-existing: Comentario`. Con `--dry-run` el aviso dice `would create`. Usa el nombre
-exacto que da `noteflow sections`.
+coincidencia parcial, y **sin match exacto falla con exit 1** (no escribe nada) —
+así un typo no deja secciones basura. El error sugiere primero las parecidas
+(subcadena, mismas palabras o un typo de una/dos letras) y luego lista las existentes:
 
-**Sin `--section`, el default `Note` también es exacto-o-crear**, pero sin el
-aviso de parecidas (un `noteflow add "texto"` a la nota diaria no avisa cada vez
-de que existe `Meeting Notes`) y sin `#n`: toma la primera sección llamada `Note`.
+```
+  Error: No section named "Improvement" in "NOTEFLOW-MOBILE". Did you mean "Improvements"?
+  Existing: Urgent, Features, Improvements, Errors
+  Use the exact name, or pass --create to create it.
+```
+
+Con `--json` el mismo error sale **además en stdout** como JSON, para que un agente
+se autocorrija: `{ "error": "<mensaje>", "code": "section_not_found", "note": "…",
+"section": "Improvement", "sections": [...todas...], "suggestions": ["Improvements"] }`.
+`--dry-run` reproduce el error (sirve para validar sin escribir). Para **crear** la
+sección a propósito: `--create` (si hay parecidas, lo avisa por **stderr**: `Note: no
+section named "EN" — created it. Similar existing: Comentario`; con `--dry-run`,
+`would create` y `createdSection: true`), o `noteflow section add`.
+
+**Sin `--section`, el default `Note` es exacto-o-crear** (sin `--create`): `noteflow
+add "texto"` a la nota diaria sigue funcionando aunque no tenga `Note`, sin el aviso
+de parecidas (no avisa cada vez de que existe `Meeting Notes`) y sin `#n`: toma la
+primera sección llamada `Note`. Si la nota se crea en ese momento (nota diaria
+auto-creada o `--title` + `--create`), su sección —`Note` o la de `--section`— se
+crea con ella.
 
 **JSON de `add`/`set`:** `{ "note": "<título>", "dirname": "…", "section": "…",
 "createdNote": bool, "createdSection": bool, "bytesWritten": n }` (con `--dry-run`
@@ -173,10 +187,10 @@ añade `"dryRun": true` y `dirname` es `null` si la nota se crearía).
 
 ```bash
 noteflow add "Fix: CORS en /api/notes"
-noteflow add "Revisar logs del servidor" --section "Tasks" --tag urgent
-noteflow add "Reunión con cliente" --title "Proyecto Alpha" --section "Meetings"
+noteflow add "Revisar logs del servidor" --section "Tasks" --create --tag urgent
+noteflow add "Reunión con cliente" --title "Proyecto Alpha" --section "Meetings"   # "Meetings" debe existir
 noteflow add --file notas.md --title "Nota nueva" --create
-git log --oneline -5 | noteflow add --stdin --section "Log"
+git log --oneline -5 | noteflow add --stdin --section "Log" --create --raw
 ```
 
 ---
@@ -192,6 +206,7 @@ noteflow new <título> [opciones]
 | `--section <nombre>` | Nombre de la primera sección. Default: `Note` |
 | `--group <nombre>` | Asignar a un grupo |
 | `--folder <nombre>` | Colocar en una carpeta de ese grupo (requiere `--group`) |
+| `--raw` | La sección en **modo texto** (default: modo markdown) |
 | `--json` | Devuelve `{ id, title, dirname }` en JSON |
 
 ```bash
@@ -293,34 +308,39 @@ noteflow read "Proyecto Alpha" --json | jq '.sections[].name'
 ### `set` — Sobrescribir (o crear) una sección
 
 ```bash
-noteflow set <título> <sección> [fuente de contenido] [--rich] [--dry-run] [--json]
+noteflow set <título> <sección> [fuente de contenido] [--create] [--raw] [--dry-run] [--json]
 ```
 
-**Reemplaza** el contenido de una sección (la crea si no existe). Es el complemento
-de `add`, que solo **añade al final**. Es la forma recomendada de **editar** una sección.
+**Reemplaza** el contenido de una sección **existente** (con `--create`, la crea si no
+existe). Es el complemento de `add`, que solo **añade al final**. Es la forma
+recomendada de **editar** una sección. La nota tiene que existir (`--create` en `set`
+solo crea la sección; las notas se crean con `new` o `add --title … --create`).
 
 | Fuente (gana la primera presente) | Descripción |
 |---|---|
 | `--text "<contenido>"` | Texto inline |
 | `--file <ruta>` | Lee el contenido de un archivo |
 | `--stdin` | Lee de stdin (también se usa automáticamente al recibir un pipe) |
-| `--rich` | Si crea la sección, la crea en modo markdown (default: modo texto) |
-| `--dry-run` | Resuelve el destino y muestra qué haría **sin escribir ni sincronizar** |
+| `--create` | Crea la sección si no existe (sin él → error) |
+| `--raw` | Si crea la sección, la crea en modo texto (default: modo markdown; `--markdown`/`--rich` lo explicitan) |
+| `--dry-run` | Resuelve el destino y muestra qué haría **sin escribir ni sincronizar** (falla igual que la ejecución real) |
 | `--json` | Resultado JSON en stdout (mismo shape que `add`; info → stderr) |
 
 - **Solo nombre exacto** (sin distinguir mayúsculas): nunca sobrescribe una sección
-  por coincidencia parcial. Si no hay match exacto, la sección **se crea** (mensaje
-  `Created section "X"`) y, si existen secciones parecidas, avisa por **stderr**:
-  `Note: no section named "EN" — created it. Similar existing: Comentario` (con
-  `--dry-run`: `would create`). Si no querías crearla, bórrala con
-  `section delete` y repite con el nombre exacto de `noteflow sections`.
+  por coincidencia parcial. Sin match exacto **falla con exit 1** igual que `add
+  --section` (`Did you mean "…"?` + `Existing: …`; con `--json`, también el objeto
+  `{ error, code: "section_not_found", note, section, sections, suggestions }` en
+  stdout). Corrige el nombre con lo que sugiere, o pasa `--create` si de verdad es
+  una sección nueva: se crea (`Created section "X"`) y, si existen parecidas, avisa
+  por **stderr** (`Note: no section named "EN" — created it. Similar existing:
+  Comentario`; con `--dry-run`: `would create`).
 - Nombres duplicados: usa el sufijo `#n` (`"Tasks#2"`). Con varios homónimos sin
   sufijo, `set` **falla** en vez de adivinar.
 
 ```bash
 noteflow set "Proyecto Alpha" Tasks --text "- [ ] deploy"
 cat todo.md | noteflow set "Proyecto Alpha" Tasks --stdin
-noteflow set "Proyecto Alpha" Notas --file ./notas.txt
+noteflow set "Proyecto Alpha" Notas --file ./notas.txt --create   # "Notas" es nueva
 ```
 
 > **⚠ Windows — contenido multilínea o complejo:** el shim `noteflow.cmd`
@@ -437,7 +457,7 @@ noteflow sections "Proyecto Alpha"
 
 ```bash
 noteflow section list   <título>
-noteflow section add    <título> <nombre> [--rich]
+noteflow section add    <título> <nombre> [--raw]
 noteflow section rename <título> <viejo> <nuevo>
 noteflow section delete <título> <nombre> [--yes]
 ```
@@ -447,7 +467,7 @@ Gestiona las secciones de una nota **por nombre**, sin necesidad de ids.
 | Subcomando | Descripción |
 |---|---|
 | `list` | Alias de `noteflow sections <título>` |
-| `add` | Crea una sección vacía (modo texto por defecto; `--rich` para modo markdown) |
+| `add` | Crea una sección vacía, siempre nueva (aunque ya exista una con ese nombre); modo markdown por defecto, `--raw` para modo texto |
 | `rename` | Renombra una sección (la carpeta/archivo no cambia — va por id) |
 | `delete` | Borra una sección (confirm salvo `--yes`). **Rechaza borrar la última** |
 
@@ -729,7 +749,7 @@ Si ya está en la última versión: `Already up to date`.
 
 ```bash
 noteflow version     # o: noteflow --version / -v
-# noteflow CLI v2.4.0
+# noteflow CLI v2.5.0
 ```
 
 ---
@@ -853,9 +873,10 @@ JSON: `{ notesDir, noteCount, github: { owner, repo, lastSync, tokenAccessible }
 | `--folder <nombre>` | `add`, `new`, `move`, `list` | Apunta a/filtra por una carpeta (requiere grupo) |
 | `--ungroup` | `move` | Saca la nota del grupo y la carpeta |
 | `--text` / `--file` / `--stdin` | `add`, `set` | Fuente del contenido a escribir |
-| `--create` | `add` | Con `--title`: crea la nota si no existe (sin él, `add` falla) |
+| `--create` | `add`, `set` | Crea lo que falte: en `add`, la nota de `--title` y/o la sección de `--section`; en `set`, la sección. Sin él, un nombre que no existe es error |
 | `--dry-run` | `add`, `set` | Resuelve el destino sin escribir ni sincronizar |
-| `--rich` | `add`, `set`, `section add` | Sección nueva en modo markdown (default: modo texto) |
+| `--raw` | `add`, `set`, `new`, `section add` | Sección nueva en modo texto (default: modo markdown) |
+| `--markdown` / `--rich` | `add`, `set`, `new`, `section add` | Sección nueva en modo markdown — ya es el default; `--rich` se mantiene por compatibilidad |
 | `--force` | `pull` | Solo GitHub: sobrescribe aunque lo local sea más nuevo |
 
 **Parser estricto:** un flag desconocido (`Unknown flag: --foo`) o un flag de
@@ -902,7 +923,8 @@ noteflow list --json
 # 2. Leer una sección concreta tal cual (apto para pipe — usa 'read', no 'get')
 noteflow read "título" "Sección"
 
-# 3a. Sobrescribir una sección (la crea si no existe)
+# 3a. Sobrescribir una sección existente (nombre EXACTO de 'list'/'sections';
+#     si no existe falla con "Did you mean" — usa --create solo si es nueva)
 noteflow set "título" "Sección" --text "contenido nuevo"
 #    …o desde stdin:
 echo "contenido" | noteflow set "título" "Sección" --stdin

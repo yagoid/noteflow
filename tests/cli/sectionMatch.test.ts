@@ -15,6 +15,8 @@ const fuzzySectionMatches = cli.fuzzySectionMatches as (
   query: string,
 ) => { name: string }[]
 const looseSectionMatches = cli.looseSectionMatches as typeof fuzzySectionMatches
+const editDistance = cli.editDistance as (a: string, b: string) => number
+const sectionSuggestions = cli.sectionSuggestions as (sections: { name: string }[], query: string) => string[]
 
 const sections = (...names: string[]) => names.map(name => ({ name }))
 const names = (matches: { name: string }[]) => matches.map(s => s.name)
@@ -90,5 +92,48 @@ describe('looseSectionMatches', () => {
   it('returns nothing for an empty query or a missing section list', () => {
     expect(looseSectionMatches(sections('Note'), '')).toEqual([])
     expect(looseSectionMatches(undefined as never, 'note')).toEqual([])
+  })
+})
+
+describe('editDistance', () => {
+  it('counts insertions, deletions and substitutions', () => {
+    expect(editDistance('improvment', 'improvements')).toBe(2)
+    expect(editDistance('tasks', 'task')).toBe(1)
+    expect(editDistance('note', 'note')).toBe(0)
+  })
+
+  it('counts a swap of neighbours as a single edit', () => {
+    expect(editDistance('urgnet', 'urgent')).toBe(1)
+  })
+})
+
+// The "Did you mean" list of add/set when a section name has no exact match.
+// Suggestions only: no command ever writes into one of them.
+describe('sectionSuggestions', () => {
+  const mobile = sections('Urgent', 'Features', 'Improvements', 'Errors')
+
+  it('suggests a substring hit (missing plural)', () => {
+    expect(sectionSuggestions(mobile, 'Improvement')).toEqual(['Improvements'])
+  })
+
+  it('suggests near-misses by spelling, ignoring case and accents', () => {
+    expect(sectionSuggestions(mobile, 'Improvment')).toEqual(['Improvements'])
+    expect(sectionSuggestions(mobile, 'urgnet')).toEqual(['Urgent'])
+    expect(sectionSuggestions(sections('Configuración'), 'configuracion')).toEqual(['Configuración'])
+  })
+
+  it('lists loose candidates before spelling ones, without duplicates', () => {
+    expect(sectionSuggestions(sections('Task', 'Tasks backend', 'Tasks'), 'Taks'))
+      .toEqual(['Task', 'Tasks'])
+    expect(sectionSuggestions(sections('Tests', 'Tasks backend'), 'Tasks'))
+      .toEqual(['Tasks backend', 'Tests'])
+  })
+
+  it('suggests nothing when no name is close', () => {
+    expect(sectionSuggestions(mobile, 'Deploy')).toEqual([])
+  })
+
+  it('does not spell-match very short queries (substring hits still count)', () => {
+    expect(sectionSuggestions(sections('ES', 'Comentario'), 'EN')).toEqual(['Comentario'])
   })
 })

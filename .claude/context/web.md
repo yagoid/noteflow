@@ -177,7 +177,8 @@ cambios en `docs/**`, así que cualquier versión/URL horneada mentiría en cuan
   código, esta nota **se borra**.
 
 ### `/cli` — fuente de verdad: **`cli/noteflow-cli/SKILL.md`** (skill `noteflow-cli`)
-Documenta el CLI **v1.10.0**. Anclas: `#install` `#notes-dir` `#format` `#commands` `#flags`
+El hero/cabecera dicen CLI **v1.10.0** (no re-sincronizados: el CLI va por v2.5.0; las filas de
+`add`/`set`/`new`/`section add` y los flags `--create`/`--raw` sí reflejan v2.5.0). Anclas: `#install` `#notes-dir` `#format` `#commands` `#flags`
 `#agents` `#caveats` `#troubleshooting`.
 - Tabla de comandos/flags/ejemplos (38 comandos en 6 grupos, incluido el grupo **NoteFlow Cloud**
   `cloud login/logout/setup/push/pull/status`): **`src/data/cli.ts`** (estructural,
@@ -253,7 +254,7 @@ revisar esos textos y su fecha.
 
 1. ¿Es visible para el usuario? → skill `noteflow-features` (ya obligatorio) **y** revisar si toca
    alguna sección de `/features` o el mock de la landing.
-2. ¿Toca el CLI? → SKILL.md del CLI **y** `/cli` (`data/cli.ts` + prosa + versión del hero).
+2. ¿Toca el CLI? → SKILL.md del CLI (con la **misma versión** que `CLI_VERSION`, ver `patterns.md`) **y** `/cli` (`data/cli.ts` + prosa + versión del hero).
 3. ¿Toca IA (presets, tools, umbrales, prompts, cuestionario)? → `/ai` (tabla de arriba).
 4. ¿Atajos o temas nuevos? → `/features#shortcuts` / `#personalize`.
 5. Verificar: `cd docs && npm run build` + revisar la página en dark y light y en EN y ES.

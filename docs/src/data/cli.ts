@@ -44,18 +44,19 @@ export const cliGroups: CliGroup[] = [
         id: 'add',
         usage: 'noteflow add <text> [options]',
         desc: {
-          en: 'Append text to today’s daily note (title <code>DD-MM-YYYY</code>) — or to any note via <code>--title</code>. Creates the note if it doesn’t exist; the text is appended to the end of the section, separated by a newline.',
-          es: 'Añade texto a la nota diaria de hoy (título <code>DD-MM-YYYY</code>) — o a cualquier nota con <code>--title</code>. Crea la nota si no existe; el texto se añade al final de la sección, separado por un salto de línea.',
+          en: 'Append text to today’s daily note (title <code>DD-MM-YYYY</code>, created if it doesn’t exist) — or to any note via <code>--title</code>, which must exist unless you pass <code>--create</code>. The text is appended to the end of the section, separated by a newline.',
+          es: 'Añade texto a la nota diaria de hoy (título <code>DD-MM-YYYY</code>, se crea si no existe) — o a cualquier nota con <code>--title</code>, que debe existir salvo que pases <code>--create</code>. El texto se añade al final de la sección, separado por un salto de línea.',
         },
         flags: [
           { flag: '--title <title>', desc: { en: 'Write into the note with that title instead of today’s.', es: 'Escribe en la nota con ese título en vez de la del día.' } },
-          { flag: '--section <name>', desc: { en: 'Target section/tab, matched by its <strong>exact</strong> name (case-insensitive). Created if missing — never a partial match. Default: <code>Note</code>.', es: 'Sección/pestaña destino, por su nombre <strong>exacto</strong> (sin distinguir mayúsculas). La crea si no existe — nunca por coincidencia parcial. Default: <code>Note</code>.' } },
+          { flag: '--section <name>', desc: { en: 'Target section/tab, matched by its <strong>exact</strong> name (case-insensitive) — never a partial match. An unknown name is an error that suggests similar sections and lists the existing ones (also as JSON with <code>--json</code>), so a typo never creates a stray section. Default: <code>Note</code>, created if missing.', es: 'Sección/pestaña destino, por su nombre <strong>exacto</strong> (sin distinguir mayúsculas) — nunca por coincidencia parcial. Un nombre que no existe es un error que sugiere las secciones parecidas y lista las existentes (también en JSON con <code>--json</code>), así un typo nunca crea una sección basura. Default: <code>Note</code>, que se crea si falta.' } },
+          { flag: '--create', desc: { en: 'Create whatever is missing: the <code>--title</code> note and/or the <code>--section</code>.', es: 'Crea lo que falte: la nota de <code>--title</code> y/o la sección de <code>--section</code>.' } },
           { flag: '--tag <tag>', desc: { en: 'Add this tag to the note (if it doesn’t have it yet).', es: 'Añade este tag a la nota (si no lo tiene ya).' } },
           { flag: '--group <name>', desc: { en: 'Assign the note to a group.', es: 'Asigna la nota a un grupo.' } },
           { flag: '--folder <name>', desc: { en: 'Place the note in a folder of that group (requires <code>--group</code>).', es: 'Coloca la nota en una carpeta de ese grupo (requiere <code>--group</code>).' } },
-          { flag: '--raw / --rich', desc: { en: 'New section in text mode, shown as-is (default), or markdown mode, rendered.', es: 'Sección nueva en modo texto, tal cual (default), o modo markdown, renderizado.' } },
+          { flag: '--raw', desc: { en: 'Create a new section in text mode, shown as-is (default: markdown mode, rendered; <code>--markdown</code>/<code>--rich</code> say so explicitly).', es: 'Crea la sección nueva en modo texto, tal cual (default: modo markdown, renderizado; <code>--markdown</code>/<code>--rich</code> lo explicitan).' } },
         ],
-        example: ['$ noteflow add "Fix: CORS on /api/notes"', '$ noteflow add "Check server logs" --section Tasks --tag urgent'],
+        example: ['$ noteflow add "Fix: CORS on /api/notes"', '$ noteflow add "Check server logs" --section Tasks --create --tag urgent'],
       },
       {
         id: 'new',
@@ -68,6 +69,7 @@ export const cliGroups: CliGroup[] = [
           { flag: '--section <name>', desc: { en: 'Name of the first section. Default: <code>Note</code>.', es: 'Nombre de la primera sección. Default: <code>Note</code>.' } },
           { flag: '--group <name>', desc: { en: 'Assign to a group.', es: 'Asignar a un grupo.' } },
           { flag: '--folder <name>', desc: { en: 'Place in a folder of that group (requires <code>--group</code>).', es: 'Colocar en una carpeta de ese grupo (requiere <code>--group</code>).' } },
+          { flag: '--raw', desc: { en: 'First section in text mode (default: markdown mode).', es: 'Primera sección en modo texto (default: modo markdown).' } },
           { flag: '--json', desc: { en: 'Print <code>{ id, title, dirname }</code> as JSON.', es: 'Devuelve <code>{ id, title, dirname }</code> en JSON.' } },
         ],
         example: ['$ noteflow new "Sprint 14" --group backend --section Planning'],
@@ -115,16 +117,17 @@ export const cliGroups: CliGroup[] = [
       },
       {
         id: 'set',
-        usage: 'noteflow set <title> <section> [source] [--rich]',
+        usage: 'noteflow set <title> <section> [source] [--create] [--raw]',
         desc: {
-          en: '<strong>Replace</strong> a section’s content (creating it if missing) — the complement of <code>add</code>, which only appends. The recommended way to edit a section. The section is matched by its <strong>exact</strong> name (case-insensitive) — never partially, so <code>EN</code> can’t overwrite <code>Comentario</code>; with no exact match it is created and similar names are flagged on stderr. On ambiguous duplicate names without a <code>#n</code> suffix, it fails instead of guessing.',
-          es: '<strong>Reemplaza</strong> el contenido de una sección (la crea si no existe) — el complemento de <code>add</code>, que solo añade al final. La forma recomendada de editar una sección. La sección se busca por su nombre <strong>exacto</strong> (sin distinguir mayúsculas) — nunca parcial, así <code>EN</code> no puede pisar <code>Comentario</code>; sin match exacto la crea y avisa por stderr de los nombres parecidos. Ante nombres duplicados ambiguos sin sufijo <code>#n</code>, falla en vez de adivinar.',
+          en: '<strong>Replace</strong> a section’s content — the complement of <code>add</code>, which only appends. The recommended way to edit a section. The section is matched by its <strong>exact</strong> name (case-insensitive) — never partially, so <code>EN</code> can’t overwrite <code>Comentario</code>; with no exact match it fails, suggesting similar names and listing the existing ones (<code>--create</code> creates it instead). On ambiguous duplicate names without a <code>#n</code> suffix, it fails instead of guessing.',
+          es: '<strong>Reemplaza</strong> el contenido de una sección — el complemento de <code>add</code>, que solo añade al final. La forma recomendada de editar una sección. La sección se busca por su nombre <strong>exacto</strong> (sin distinguir mayúsculas) — nunca parcial, así <code>EN</code> no puede pisar <code>Comentario</code>; sin match exacto falla, sugiriendo los nombres parecidos y listando los existentes (<code>--create</code> la crea en su lugar). Ante nombres duplicados ambiguos sin sufijo <code>#n</code>, falla en vez de adivinar.',
         },
         flags: [
           { flag: '--text "<content>"', desc: { en: 'Inline text (first source present wins).', es: 'Texto inline (gana la primera fuente presente).' } },
           { flag: '--file <path>', desc: { en: 'Read the content from a file — the most reliable route on Windows/PowerShell.', es: 'Lee el contenido de un archivo — la vía más fiable en Windows/PowerShell.' } },
           { flag: '--stdin', desc: { en: 'Read from stdin (also used automatically when piped).', es: 'Lee de stdin (también se usa automáticamente al recibir un pipe).' } },
-          { flag: '--rich', desc: { en: 'If the section is created, create it in markdown mode (default: text mode).', es: 'Si crea la sección, la crea en modo markdown (default: modo texto).' } },
+          { flag: '--create', desc: { en: 'Create the section if it doesn’t exist.', es: 'Crea la sección si no existe.' } },
+          { flag: '--raw', desc: { en: 'If the section is created, create it in text mode (default: markdown mode).', es: 'Si crea la sección, la crea en modo texto (default: modo markdown).' } },
         ],
         example: ['$ noteflow set "Project Alpha" Tasks --text "- [ ] deploy"', '$ cat todo.md | noteflow set "Project Alpha" Tasks --stdin'],
       },
@@ -199,10 +202,10 @@ export const cliGroups: CliGroup[] = [
       },
       {
         id: 'section-add',
-        usage: 'noteflow section add <title> <name> [--rich]',
+        usage: 'noteflow section add <title> <name> [--raw]',
         desc: {
-          en: 'Create an empty section (text mode by default; <code>--rich</code> for markdown mode). Sections are managed by name — no ids needed.',
-          es: 'Crea una sección vacía (modo texto por defecto; <code>--rich</code> para modo markdown). Las secciones se gestionan por nombre — sin ids.',
+          en: 'Create an empty section (markdown mode by default; <code>--raw</code> for text mode). Sections are managed by name — no ids needed.',
+          es: 'Crea una sección vacía (modo markdown por defecto; <code>--raw</code> para modo texto). Las secciones se gestionan por nombre — sin ids.',
         },
         example: ['$ noteflow section add "Project Alpha" "Meeting Notes"'],
       },
@@ -477,9 +480,14 @@ export const globalFlags: GlobalFlag[] = [
     desc: { en: 'Source of the content to write (first one present wins).', es: 'Fuente del contenido a escribir (gana la primera presente).' },
   },
   {
-    flag: '--rich',
-    applies: 'add · set · section add',
-    desc: { en: 'Create the new section in markdown mode (default: text mode).', es: 'Sección nueva en modo markdown (default: modo texto).' },
+    flag: '--create',
+    applies: 'add · set',
+    desc: { en: 'Create a missing section (and, in <code>add</code>, a missing <code>--title</code> note) instead of failing.', es: 'Crea la sección que falte (y, en <code>add</code>, la nota de <code>--title</code>) en vez de fallar.' },
+  },
+  {
+    flag: '--raw',
+    applies: 'add · set · new · section add',
+    desc: { en: 'Create the new section in text mode (default: markdown mode; <code>--markdown</code>/<code>--rich</code> are accepted aliases of the default).', es: 'Sección nueva en modo texto (default: modo markdown; <code>--markdown</code>/<code>--rich</code> se aceptan como alias del default).' },
   },
 ];
 

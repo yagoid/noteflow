@@ -1,6 +1,7 @@
 // Section resolution of the CLI's write/destructive commands (cli/noteflow.js):
 // `set`, `section rename` and `section delete` match the EXACT section name only
-// (case-insensitive, '#n' among duplicates). Regression net for a real data loss:
+// (case-insensitive, '#n' among duplicates); `set` fails on an unknown name
+// unless --create. Regression net for a real data loss:
 // `noteflow set <note> EN --text …` overwrote "Comentario", because the old
 // matcher fell back to substrings ("comentario".includes("en")) — and
 // `section delete <note> EN` would have deleted it. Loose matching stays opt-in
@@ -77,9 +78,31 @@ afterEach(() => {
 })
 
 describe('set', () => {
-  it('creates "EN" and leaves "Comentario" intact (substring is not a match)', () => {
+  it('refuses "EN" without --create: suggests "Comentario", lists the sections, writes nothing', () => {
     writeNote(['Note', 'Comentario'])
+    const before = fs.readFileSync(path.join(noteDir, 'note.md'), 'utf-8')
     const r = run(['set', TITLE, 'EN', '--text', 'english text'])
+    expect(r.status).toBe(1)
+    expect(r.stderr).toContain('No section named "EN" in "Project Alpha". Did you mean "Comentario"?')
+    expect(r.stderr).toContain('Existing: Note, Comentario')
+    expect(fs.readFileSync(path.join(noteDir, 'note.md'), 'utf-8')).toBe(before)
+  })
+
+  it('prints the error as JSON on stdout with --json (also in --dry-run)', () => {
+    writeNote(['Note', 'Comentario'])
+    for (const extra of [[], ['--dry-run']]) {
+      const r = run(['set', TITLE, 'Notes', '--text', 'x', '--json', ...extra])
+      expect(r.status).toBe(1)
+      expect(JSON.parse(r.stdout)).toMatchObject({
+        code: 'section_not_found', note: TITLE, section: 'Notes',
+        sections: ['Note', 'Comentario'], suggestions: ['Note'],
+      })
+    }
+  })
+
+  it('--create creates "EN", leaves "Comentario" intact and hints on stderr only', () => {
+    writeNote(['Note', 'Comentario'])
+    const r = run(['set', TITLE, 'EN', '--text', 'english text', '--create'])
     expect(r.status, r.stderr).toBe(0)
     expect(r.stdout).toContain('Created section "EN"')
     expect(r.stderr).toContain('Note: no section named "EN" — created it. Similar existing: Comentario')
@@ -93,20 +116,34 @@ describe('set', () => {
 
   it('keeps --json stdout pure while hinting on stderr', () => {
     writeNote(['Note', 'Comentario'])
-    const r = run(['set', TITLE, 'EN', '--text', 'x', '--json'])
+    const r = run(['set', TITLE, 'EN', '--text', 'x', '--json', '--create'])
     expect(r.status, r.stderr).toBe(0)
     expect(JSON.parse(r.stdout)).toMatchObject({ section: 'EN', createdSection: true })
     expect(r.stderr).toContain('Similar existing: Comentario')
   })
 
-  it('--dry-run reports the creation and writes nothing', () => {
+  it('--dry-run --create reports the creation and writes nothing', () => {
     writeNote(['Note', 'Comentario'])
     const before = fs.readFileSync(path.join(noteDir, 'note.md'), 'utf-8')
-    const r = run(['set', TITLE, 'EN', '--text', 'x', '--dry-run', '--json'])
+    const r = run(['set', TITLE, 'EN', '--text', 'x', '--dry-run', '--json', '--create'])
     expect(r.status, r.stderr).toBe(0)
     expect(JSON.parse(r.stdout)).toMatchObject({ section: 'EN', createdSection: true, dryRun: true })
     expect(r.stderr).toContain('no section named "EN" — would create it. Similar existing: Comentario')
     expect(fs.readFileSync(path.join(noteDir, 'note.md'), 'utf-8')).toBe(before)
+  })
+
+  it('creates new sections in markdown mode by default, text mode with --raw', () => {
+    writeNote(['Note'])
+    expect(run(['set', TITLE, 'Md', '--text', 'a', '--create']).status).toBe(0)
+    expect(run(['set', TITLE, 'Txt', '--text', 'b', '--create', '--raw']).status).toBe(0)
+    expect(run(['section', 'add', TITLE, 'Empty']).status).toBe(0)
+    expect(run(['section', 'add', TITLE, 'EmptyTxt', '--raw']).status).toBe(0)
+    // ...and never changes the mode of an existing section
+    expect(run(['set', TITLE, 'Note', '--text', 'c', '--rich']).status).toBe(0)
+    const r = run(['read', TITLE, '--json'])
+    const got = (JSON.parse(r.stdout) as { sections: { name: string; isRawMode?: boolean }[] }).sections
+      .map(s => [s.name, !!s.isRawMode])
+    expect(got).toEqual([['Note', true], ['Md', false], ['Txt', true], ['Empty', false], ['EmptyTxt', true]])
   })
 
   it('overwrites an exact (case-insensitive) match without any hint', () => {

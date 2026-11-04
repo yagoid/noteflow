@@ -56,6 +56,9 @@ trabajando en paralelo** en features/fixes distintos, o de trabajo previo. Por t
   IPC. Si se añadió un canal IPC, están los 3 puntos (`main.ts`, `preload.ts`, `types/index.ts`).
 - **Espejos del formato:** si tocó el formato de nota, ¿están en sync `src/lib/noteUtils.ts`,
   `electron/noteFormat.ts` y `cli/noteflow.js`?
+- **Versión CLI = versión skill:** si el diff toca `cli/noteflow.js` o `cli/noteflow-cli/SKILL.md`,
+  ¿se subieron juntos y con el **mismo número** `CLI_VERSION`, la cabecera `// v`, el `version:` del
+  frontmatter de la skill y su ejemplo de `noteflow version`? (ver `.claude/context/patterns.md` § CLI)
 - **Documentación de contexto (obligatorio):** primero **decide si el cambio es documentable** —
   cambia arquitectura/IPC, formato de nota, sync, IA, release, una **feature** de usuario, una
   **decisión de diseño** o un **patrón** reseñable. Si lo es, ¿se actualizó el `.claude/context/*.md`

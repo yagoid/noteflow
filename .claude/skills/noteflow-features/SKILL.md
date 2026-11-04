@@ -597,7 +597,7 @@ Terminología de UI (EN/ES): **Markdown mode / Modo markdown** y **Text mode / M
 
 **Modo markdown** (`isRawMode: false`, por defecto en la app) — el editor (TipTap) **renderiza** el
 markdown: títulos, listas, checkboxes, tablas… con toolbar.
-**Modo texto** (`isRawMode: true`, default del CLI) — textarea plana: el contenido se ve **tal cual**,
+**Modo texto** (`isRawMode: true`; en el CLI, con `--raw` — desde v2.5.0 el CLI crea en Modo markdown por defecto) — textarea plana: el contenido se ve **tal cual**,
 sin renderizar (un `# Título` se ve con la almohadilla).
 
 En ambos modos el `.md` de la sección guarda markdown (el editor serializa con `htmlToMarkdown`).

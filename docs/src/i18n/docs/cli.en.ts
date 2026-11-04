@@ -26,8 +26,8 @@ export const cliEn = {
       '  sections · section · move · groups · folders',
       '  login · cloud · push · pull · migrate · self-update · status',
       '',
-      '~ $ noteflow add "It works." --section Ideas',
-      '✓ Added to "07-07-2026" · Ideas',
+      '~ $ noteflow add "It works."',
+      '✓ Added to "07-07-2026" · Note',
     ],
   },
 
@@ -137,7 +137,7 @@ export const cliEn = {
     title: 'A tool built for AI agents',
     intro: [
       'The CLI is deliberately agent-friendly: every read command takes <code>--json</code> for machine-readable output, results go to <strong>stdout</strong> and errors to <strong>stderr</strong>, and the exit code is <code>0</code> on success, <code>1</code> on error. Since everything is addressed by note title and section name, an agent never needs to track ids.',
-      'Two conventions matter: <code>read</code> vs <code>get</code> — <code>get</code> is for humans (indented, decorated) while <code>read</code> emits content verbatim, so agents should always use <code>read</code>. And <code>set</code> vs <code>add</code> — <code>set</code> <strong>replaces</strong> a section, <code>add</code> <strong>appends</strong> to it.',
+      'Two conventions matter: <code>read</code> vs <code>get</code> — <code>get</code> is for humans (indented, decorated) while <code>read</code> emits content verbatim, so agents should always use <code>read</code>. And <code>set</code> vs <code>add</code> — <code>set</code> <strong>replaces</strong> a section, <code>add</code> <strong>appends</strong> to it. An explicit section name must match an existing one <strong>exactly</strong>: an unknown one fails with a “Did you mean” and the list of sections — as JSON too under <code>--json</code> — so the agent can retry with the right name; <code>--create</code> is for genuinely new sections.',
       'For <strong>partial edits of a large section</strong> there is a shortcut: the CLI has no find-replace, so <code>read</code> + <code>set</code> means hauling the whole section out and back. If your agent already has file-editing tools, ask <code>path</code> for the section’s <code>.md</code>, edit it in place, and close with <code>touch</code> — which bumps <code>updated:</code> and pushes.',
     ],
     flowH3: 'Typical agent flow',

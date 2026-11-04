@@ -1,14 +1,17 @@
 // How `noteflow add` picks its target section. Two deliberately different rules
 // live in cmdAdd and this is the regression net for both:
-//  - an EXPLICIT --section resolves like `set`: exact name (case-insensitive) or
-//    create, '#n' among duplicates, several same-named ones exit. A partial name
-//    NEVER lands on an existing section (`--section EN` would append to
-//    "Comentario") — loosely similar sections are only listed on stderr;
-//  - the IMPLICIT default 'Note' (no --section given) is exact-or-create too, but
-//    without the similar-names hint (it would fire on every daily append).
-// Driven through the real CLI in --dry-run (writes nothing, syncs nothing) with
-// NOTEFLOW_NOTES_DIR and the settings dir (APPDATA / XDG_CONFIG_HOME) pointed at
-// throwaway dirs.
+//  - an EXPLICIT --section resolves like `set`: exact name (case-insensitive),
+//    '#n' among duplicates, several same-named ones exit. No exact match is an
+//    ERROR (exit 1, near names as "Did you mean" + the existing ones; JSON too
+//    with --json) unless --create — a typo used to leave a stray section behind.
+//    A partial name NEVER lands on an existing section (`--section EN` would
+//    append to "Comentario");
+//  - the IMPLICIT default 'Note' (no --section given) is exact-or-create, without
+//    the similar-names hint (it would fire on every daily append).
+// Plus the mode of the sections it creates: markdown by default, --raw = text.
+// Driven through the real CLI with NOTEFLOW_NOTES_DIR and the settings dir
+// (APPDATA / XDG_CONFIG_HOME) pointed at throwaway dirs — no sync session exists,
+// so nothing is pushed anywhere.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -69,6 +72,14 @@ function addDryRun(args: string[]) {
   return { ...(JSON.parse(r.stdout) as { section: string; createdSection: boolean }), stderr: r.stderr }
 }
 
+/** Sections (name + mode) of a note as the CLI reads them back from disk. */
+function modes(title: string): { name: string; isRawMode: boolean }[] {
+  const r = run(['read', title, '--json'])
+  expect(r.status, r.stderr).toBe(0)
+  return (JSON.parse(r.stdout) as { sections: { name: string; isRawMode?: boolean }[] }).sections
+    .map(s => ({ name: s.name, isRawMode: !!s.isRawMode }))
+}
+
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'noteflow-cli-test-'))
   notesDir = path.join(tmp, 'notes')
@@ -97,6 +108,16 @@ describe('add without --section (implicit "Note")', () => {
     writeNote(todayTitle(), ['note', 'Ideas'])
     expect(addDryRun([])).toMatchObject({ section: 'note', createdSection: false })
   })
+
+  it('really creates "Note" on an existing daily note, without needing --create', () => {
+    writeNote(todayTitle(), ['Ideas'])
+    const r = run(['add', 'hello'])
+    expect(r.status, r.stderr).toBe(0)
+    expect(modes(todayTitle())).toEqual([
+      { name: 'Ideas', isRawMode: true },
+      { name: 'Note', isRawMode: false },
+    ])
+  })
 })
 
 describe('add with an explicit --section', () => {
@@ -107,18 +128,63 @@ describe('add with an explicit --section', () => {
     expect(r.stderr).not.toContain('Similar existing')
   })
 
-  it('creates the section instead of appending to a substring match, and says so on stderr', () => {
+  it('fails on an unknown name, suggesting the near one and listing the rest', () => {
+    writeNote('NOTEFLOW-MOBILE', ['Urgent', 'Features', 'Improvements', 'Errors'])
+    const r = run(['add', 'hello', '--title', 'NOTEFLOW-MOBILE', '--section', 'Improvement'])
+    expect(r.status).toBe(1)
+    expect(r.stderr).toContain('No section named "Improvement" in "NOTEFLOW-MOBILE". Did you mean "Improvements"?')
+    expect(r.stderr).toContain('Existing: Urgent, Features, Improvements, Errors')
+    expect(r.stderr).toContain('--create')
+    expect(modes('NOTEFLOW-MOBILE').map(s => s.name)).toEqual(['Urgent', 'Features', 'Improvements', 'Errors'])
+  })
+
+  it('never appends to a substring match: "EN" fails and suggests "Comentario"', () => {
     writeNote('Project Alpha', ['Note', 'Comentario'])
-    const r = addDryRun(['--title', 'Project Alpha', '--section', 'EN'])
+    const r = run(['add', 'hello', '--title', 'Project Alpha', '--section', 'EN'])
+    expect(r.status).toBe(1)
+    expect(r.stderr).toContain('Did you mean "Comentario"?')
+  })
+
+  it('reproduces the error in --dry-run, and prints it as JSON with --json', () => {
+    writeNote('Project Alpha', ['Tasks backend', 'Tasks frontend', 'Ideas'])
+    const r = run(['add', 'hello', '--dry-run', '--json', '--title', 'Project Alpha', '--section', 'Tasks'])
+    expect(r.status).toBe(1)
+    expect(JSON.parse(r.stdout)).toEqual({
+      error: 'No section named "Tasks" in "Project Alpha". Did you mean one of: "Tasks backend", "Tasks frontend"?',
+      code: 'section_not_found',
+      note: 'Project Alpha',
+      section: 'Tasks',
+      sections: ['Tasks backend', 'Tasks frontend', 'Ideas'],
+      suggestions: ['Tasks backend', 'Tasks frontend'],
+    })
+  })
+
+  it('omits "Did you mean" when nothing is similar', () => {
+    writeNote('Project Alpha', ['Note'])
+    const r = run(['add', 'hello', '--title', 'Project Alpha', '--section', 'Deploy'])
+    expect(r.status).toBe(1)
+    expect(r.stderr).toContain('No section named "Deploy" in "Project Alpha".')
+    expect(r.stderr).not.toContain('Did you mean')
+  })
+
+  it('also fails on the daily note (only the implicit "Note" is auto-created)', () => {
+    writeNote(todayTitle(), ['Note'])
+    const r = run(['add', 'hello', '--section', 'Log'])
+    expect(r.status).toBe(1)
+    expect(r.stderr).toContain('No section named "Log"')
+  })
+
+  it('--create creates it, flagging similar sections on stderr', () => {
+    writeNote('Project Alpha', ['Note', 'Comentario'])
+    const r = addDryRun(['--title', 'Project Alpha', '--section', 'EN', '--create'])
     expect(r).toMatchObject({ section: 'EN', createdSection: true })
     expect(r.stderr).toContain('no section named "EN" — would create it. Similar existing: Comentario')
   })
 
-  it('creates the section silently when nothing is even similar', () => {
-    writeNote('Project Alpha', ['Note'])
-    const r = addDryRun(['--title', 'Project Alpha', '--section', 'Deploy'])
-    expect(r).toMatchObject({ section: 'Deploy', createdSection: true })
-    expect(r.stderr).not.toContain('Similar existing')
+  it('--create creates the note AND its section when both are missing', () => {
+    const r = run(['add', 'hello', '--title', 'Brand New', '--section', 'Tasks', '--create', '--json'])
+    expect(r.status, r.stderr).toBe(0)
+    expect(JSON.parse(r.stdout)).toMatchObject({ note: 'Brand New', section: 'Tasks', createdNote: true, createdSection: true })
   })
 
   it('picks a same-named section with the 1-based #n suffix', () => {
@@ -134,17 +200,38 @@ describe('add with an explicit --section', () => {
     expect(r.stderr).toContain('Disambiguate with "Tasks#1" … "Tasks#2"')
   })
 
-  it('lists every loose candidate (substring or words) without picking one', () => {
-    writeNote('Project Alpha', ['Tasks backend', 'Tasks frontend'])
-    const r = addDryRun(['--title', 'Project Alpha', '--section', 'Tasks'])
-    expect(r).toMatchObject({ section: 'Tasks', createdSection: true })
-    expect(r.stderr).toContain('Similar existing: Tasks backend, Tasks frontend')
-  })
-
   it('does not use the loose word matching reserved for read/path', () => {
     writeNote('Project Alpha', ['Note', 'Variables Entorno'])
-    const r = addDryRun(['--title', 'Project Alpha', '--section', 'Variables de entorno'])
+    const r = addDryRun(['--title', 'Project Alpha', '--section', 'Variables de entorno', '--create'])
     expect(r).toMatchObject({ section: 'Variables de entorno', createdSection: true })
     expect(r.stderr).toContain('Similar existing: Variables Entorno')
+  })
+})
+
+describe('mode of the sections add creates', () => {
+  it('is markdown mode by default, text mode with --raw', () => {
+    writeNote('Project Alpha', ['Note'])
+    expect(run(['add', 'a', '--title', 'Project Alpha', '--section', 'Md', '--create']).status).toBe(0)
+    expect(run(['add', 'b', '--title', 'Project Alpha', '--section', 'Txt', '--create', '--raw']).status).toBe(0)
+    expect(run(['add', 'c', '--title', 'Project Alpha', '--section', 'Rich', '--create', '--rich']).status).toBe(0)
+    expect(modes('Project Alpha')).toEqual([
+      { name: 'Note', isRawMode: true },
+      { name: 'Md', isRawMode: false },
+      { name: 'Txt', isRawMode: true },
+      { name: 'Rich', isRawMode: false },
+    ])
+  })
+
+  it('never changes the mode of an existing section', () => {
+    writeNote('Project Alpha', ['Note'])
+    expect(run(['add', 'a', '--title', 'Project Alpha', '--section', 'Note', '--markdown']).status).toBe(0)
+    expect(modes('Project Alpha')).toEqual([{ name: 'Note', isRawMode: true }])
+  })
+
+  it('creates a brand-new note in markdown mode (or text with --raw)', () => {
+    expect(run(['add', 'a', '--title', 'Alpha', '--create']).status).toBe(0)
+    expect(run(['add', 'b', '--title', 'Beta', '--create', '--raw']).status).toBe(0)
+    expect(modes('Alpha')).toEqual([{ name: 'Note', isRawMode: false }])
+    expect(modes('Beta')).toEqual([{ name: 'Note', isRawMode: true }])
   })
 })

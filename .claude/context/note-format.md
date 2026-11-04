@@ -58,7 +58,7 @@ encryption:
 - Marcador de versión: `<notesDir>/.noteflow-format` (contenido `2`).
 - En memoria el `Note` sigue hidratado (`sections[].content`); `Note.filePath` = **directorio**;
   `Note.raw` = contenido de `note.md`. La UI (editor, sidebar, stickies) no cambió.
-- Título por defecto: `DD/MM/YYYY`. Sección por defecto: `Note` en modo markdown (`defaultSections()`, sin `isRawMode`); el CLI crea las suyas en modo texto (`isRawMode: true`) salvo `--rich`.
+- Título por defecto: `DD/MM/YYYY`. Sección por defecto: `Note` en modo markdown (`defaultSections()`, sin `isRawMode`); el CLI también crea las suyas en modo markdown desde v2.5.0 (antes, modo texto) y `--raw` las pone en modo texto (`isRawMode: true`); la `Note` de una nota v1 solo-cuerpo sale en modo markdown tanto en el migrador del escritorio (`parseLegacyNoteRaw`) como en `noteflow migrate`.
 - **`created` por sección** (opcional, ISO 8601, misma clave en desktop, CLI y móvil): se escribe
   solo si existe y se conserva en el round-trip (también dentro del payload cifrado, que es el JSON
   del array `sections`). Se asigna `now` al **crear** una sección (nueva pestaña, duplicar — la
