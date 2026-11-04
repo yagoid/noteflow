@@ -337,7 +337,7 @@ export function ChatView({
         value={llmConfig?.model ?? ''}
         onChange={(e) => setLlmConfig({ model: e.target.value })}
         title={t.aiPanel.chat.modelSelectTitle}
-        className={`${compact ? 'max-w-[120px]' : 'max-w-[150px]'} min-w-0 bg-surface-0 border border-border rounded px-1.5 py-1 text-[11px] font-mono text-text outline-none focus:border-text/30`}
+        className={`${compact ? 'max-w-[200px]' : 'max-w-[150px]'} min-w-0 bg-surface-0 border border-border rounded px-1.5 py-1 text-[11px] font-mono text-text outline-none focus:border-text/30`}
       >
         {modelOptions.length === 0 && <option value="">{t.aiPanel.chat.noModel}</option>}
         {modelOptions.map((m) => (
