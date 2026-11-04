@@ -32,7 +32,7 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 ## Estructura visual de la app
 
 ```
-┌─ TitleBar (32px) ──────────────────────────────────────────────────┐
+┌─ TitleBar (34px) ──────────────────────────────────────────────────┐
 │  NOTEFLOW  [🧠 brain] [⬇ update] [☁ sync]        [⚙ settings] [─ □ ×] │
 ├─ Sidebar (180–480px, redimensionable) ──┬─ Editor area ─────────────┤
 │  [🔍 Search...      ] [▦] [📌⮜]        │  [Tabs sección] [⚙]        │

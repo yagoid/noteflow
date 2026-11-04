@@ -2670,3 +2670,35 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
   .wn-extra:hover { transform: none; }
   .wn-btn:active { transform: none; }
 }
+
+/* ── Status tones on light themes ────────────────────────────────────────────
+   Fixed Tailwind palette tones (yellow/amber/green/emerald 100–500) are tuned
+   for dark surfaces and wash out on light themes. themeStore sets
+   `data-color-scheme` on <html>; under a light scheme these classes are remapped
+   to the 700/800 tones (alpha kept). `:root[attr]` outranks the bare utility, so
+   no component has to branch on the theme. Lighter source tones map to the
+   darker target so the dark-mode emphasis order (100/200 > 300/400) survives. */
+:root[data-color-scheme='light'] .text-yellow-400,
+:root[data-color-scheme='light'] .text-yellow-500  { color: rgb(161 98 7 / var(--tw-text-opacity, 1)); }   /* yellow-700 */
+:root[data-color-scheme='light'] .text-yellow-500\/80 { color: rgb(161 98 7 / 0.8); }
+:root[data-color-scheme='light'] .text-amber-300,
+:root[data-color-scheme='light'] .text-amber-400   { color: rgb(180 83 9 / var(--tw-text-opacity, 1)); }   /* amber-700 */
+:root[data-color-scheme='light'] .text-amber-400\/80 { color: rgb(180 83 9 / 0.8); }
+:root[data-color-scheme='light'] .text-amber-100,
+:root[data-color-scheme='light'] .text-amber-200   { color: rgb(146 64 14 / var(--tw-text-opacity, 1)); }  /* amber-800 */
+:root[data-color-scheme='light'] .text-amber-100\/90 { color: rgb(146 64 14 / 0.9); }
+:root[data-color-scheme='light'] .text-green-400   { color: rgb(21 128 61 / var(--tw-text-opacity, 1)); }  /* green-700 */
+:root[data-color-scheme='light'] .text-emerald-400 { color: rgb(4 120 87 / var(--tw-text-opacity, 1)); }   /* emerald-700 */
+:root[data-color-scheme='light'] .fill-green-400   { fill: rgb(21 128 61); }
+:root[data-color-scheme='light'] .fill-amber-400   { fill: rgb(180 83 9); }
+
+/* Tinted status boxes/badges: a touch more body so they don't vanish on white. */
+:root[data-color-scheme='light'] .bg-yellow-500\/10 { background-color: rgb(234 179 8 / 0.14); }
+:root[data-color-scheme='light'] .bg-yellow-500\/15 { background-color: rgb(234 179 8 / 0.2); }
+:root[data-color-scheme='light'] .bg-green-500\/10  { background-color: rgb(34 197 94 / 0.14); }
+:root[data-color-scheme='light'] .bg-green-500\/15  { background-color: rgb(34 197 94 / 0.2); }
+:root[data-color-scheme='light'] .bg-amber-300\/10  { background-color: rgb(245 158 11 / 0.12); }
+:root[data-color-scheme='light'] .border-yellow-500\/30 { border-color: rgb(202 138 4 / 0.45); }
+:root[data-color-scheme='light'] .border-green-500\/30  { border-color: rgb(22 163 74 / 0.45); }
+:root[data-color-scheme='light'] .border-amber-300\/35,
+:root[data-color-scheme='light'] .border-amber-300\/45  { border-color: rgb(217 119 6 / 0.45); }

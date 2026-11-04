@@ -119,6 +119,9 @@ function applyTheme(theme: Theme, fontOverride: string | null, accentOverride: s
   const root = document.documentElement
   root.setAttribute('data-theme', theme.id)
   root.style.colorScheme = theme.colorScheme
+  // Hook for scheme-wide CSS overrides (index.css remaps the fixed status tones
+  // — yellow/amber/green — that are too pale on light surfaces).
+  root.setAttribute('data-color-scheme', theme.colorScheme)
   for (const [prop, value] of Object.entries(theme.vars)) {
     root.style.setProperty(prop, value)
   }

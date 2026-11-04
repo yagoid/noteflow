@@ -133,7 +133,7 @@ export function TitleBar() {
   return (
     <>
     <div
-      className="flex items-center h-8 bg-surface-0 border-b border-border select-none flex-shrink-0"
+      className="flex items-center h-[34px] bg-surface-0 border-b border-border select-none flex-shrink-0"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       {/* App name */}
@@ -149,18 +149,6 @@ export function TitleBar() {
         className="flex items-center h-full"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        <button
-          onClick={() => setBrainView(!brainViewOpen)}
-          className={`flex items-center gap-1.5 px-2.5 h-5 my-auto mr-5 rounded border border-solid text-[10px] font-mono tracking-wide transition-colors ${
-            brainViewOpen
-              ? 'border-accent/60 bg-accent/15 text-accent'
-              : 'border-text-muted/60 text-text-muted hover:text-text hover:border-text-muted hover:bg-surface-2'
-          }`}
-          title={brainViewOpen ? t.titleBar.closeBrain : t.titleBar.openBrain}
-        >
-          <Brain size={12} />
-          <span>brain</span>
-        </button>
         {updateInfo && (
           <button
             onClick={handleUpdate}
@@ -197,31 +185,45 @@ export function TitleBar() {
             onOpenSettings={() => openSettings('sync')}
           />
         )}
+        {/* Brain + settings sit together as one pair; the window controls keep a
+            slightly wider gap after them. */}
+        <button
+          onClick={() => setBrainView(!brainViewOpen)}
+          className={`flex items-center gap-1.5 px-2.5 h-6 my-auto ml-3 mr-0.5 rounded text-[11px] font-mono tracking-wide transition-[color,background-color,transform] duration-150 motion-safe:hover:scale-105 ${
+            brainViewOpen
+              ? 'bg-accent/15 text-accent'
+              : 'text-text-muted hover:text-text hover:bg-surface-2'
+          }`}
+          title={brainViewOpen ? t.titleBar.closeBrain : t.titleBar.openBrain}
+        >
+          <Brain size={14} />
+          <span>brain</span>
+        </button>
         <button
           onClick={() => openSettings('general')}
-          className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
+          className="w-8 h-full flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
           title={t.titleBar.settings}
         >
           <Settings size={12} />
         </button>
-        <div className="flex">
+        <div className="flex h-full ml-2">
           <button
             onClick={() => window.noteflow.minimize()}
-            className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
+            className="w-10 h-full flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
             title={t.titleBar.minimize}
           >
             <Minus size={11} />
           </button>
           <button
             onClick={() => window.noteflow.maximize()}
-            className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
+            className="w-10 h-full flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
             title={t.titleBar.maximize}
           >
             <Square size={10} />
           </button>
           <button
             onClick={() => window.noteflow.close()}
-            className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-red-500 hover:text-white transition-colors"
+            className="w-10 h-full flex items-center justify-center text-text-muted hover:bg-[#e81123] transition-colors"
             title={t.titleBar.close}
           >
             <X size={13} />

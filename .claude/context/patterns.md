@@ -1868,6 +1868,16 @@ correcto es `text-red` / `bg-red/10` / `border-red/50` (opacidad con `/`), que a
 activo. Las paletas que el config **no** toca (`green-400`, `amber-500`…) sí funcionan. Hay usos
 antiguos de `red-400`/`red-500` por el código que son no-ops — al tocar un componente, migrarlos.
 
+**Tonos de estado en temas claros (`data-color-scheme`):** `applyTheme` (themeStore) pone
+`data-color-scheme="dark|light"` en `<html>` (del `colorScheme` del tema). Al final de
+`src/index.css` hay un bloque `:root[data-color-scheme='light'] …` que remapea las clases de paleta
+fija pensadas para fondo oscuro (`text-yellow-400/500`, `text-amber-100…400`, `text-green-400`,
+`text-emerald-400`, `fill-green/amber-400`, conservando el alfa `/80`, `/90`) a los tonos 700/800, y da
+algo más de cuerpo a los fondos/bordes tintados de estado (`bg-yellow-500/10`, `border-green-500/30`…).
+Así los badges "Activo"/"En pausa", avisos y candados se leen en Arctic Day/Parchment/NoteFlow Light
+sin ramificar en cada componente. **Si usas una clase nueva de esas paletas en texto, añádela al
+bloque** (o usa un token del tema: `accent-2`/`accent-3`).
+
 Animaciones propias del config: `animate-shake` (nudge horizontal de 0,28 s para un input que acaba
 de rechazar un valor, p. ej. el código de sign-in en Ajustes → Cuenta; úsalo con `motion-safe:`).
 
