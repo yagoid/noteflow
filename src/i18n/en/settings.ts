@@ -64,6 +64,8 @@ export const settings = {
     moreThemes: 'More themes ({count})',
     fontSelected: 'Selected',
     customColour: 'Custom colour',
+    // Swatch that follows the active theme's text colour (light on dark themes, dark on light ones).
+    textColour: 'Text colour (follows the theme)',
     resetToThemeDefault: 'Reset to theme default',
     // Editor colour rows (H1/H2/H3 need no label — they show as "H1"…).
     colorItalic: 'Italic',
@@ -88,6 +90,7 @@ export const settings = {
     // Selection summary suffixes.
     summaryTheme: 'theme',
     summaryCustom: 'custom',
+    summaryText: 'text',
   },
 
   editor: {
@@ -398,7 +401,7 @@ export const settings = {
     inlineCode: 'Inline code',
     codeBlock: 'Code block',
     findInNote: 'Find in note',
-    toggleMarkdown: 'Toggle Markdown / rich-text mode',
+    toggleMarkdown: 'Toggle text / markdown mode',
     increaseFontSize: 'Increase font size',
     decreaseFontSize: 'Decrease font size',
     resetFontSize: 'Reset font size',

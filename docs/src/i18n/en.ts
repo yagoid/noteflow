@@ -42,8 +42,8 @@ export const en = {
     kicker: 'What is NoteFlow',
     h2: 'Quick notes. Zero friction.',
     p: `A dark-first desktop notebook for technical people. It lives in your system tray, writes plain Markdown to your own disk, and stays out of the way until you need it. The brain is optional — the speed isn't.`,
-    modeRaw: 'Raw markdown section',
-    modeRich: 'Rich text section',
+    modeRaw: 'Text section',
+    modeRich: 'Markdown section',
     listAria: 'NoteFlow features',
     // Contextual CTA under the notes widget → the /cli docs page.
     cliCta: 'CLI reference →',

@@ -54,8 +54,9 @@ export const editor = {
 
   // Section options dropdown.
   menu: {
-    editorMode: 'Editor mode',
-    rawMode: 'Raw markdown mode',
+    // Section modes: markdown = rendered (isRawMode false); text = shown as-is (isRawMode true).
+    editorMode: 'Markdown mode',
+    rawMode: 'Text mode',
     copySectionText: 'Copy section text',
     showToAiHint: 'The AI will index and use this section again',
     hideFromAiHint: 'The AI will never index, read or reference this section',
@@ -116,7 +117,7 @@ export const editor = {
     deleteTableMenu: 'Delete table',
   },
 
-  // In-note find bar (rich + raw).
+  // In-note find bar (markdown + text mode).
   search: {
     findInNote: 'Find in note',
     matchCase: 'Match case',
@@ -198,8 +199,8 @@ export const editor = {
     editCard: 'Edit text',
     deleteCard: 'Delete card',
     extraLines: {
-      one: '{count} nested line, kept as is (edit it in raw mode):',
-      other: '{count} nested lines, kept as is (edit them in raw mode):',
+      one: '{count} nested line, kept as is (edit it in text mode):',
+      other: '{count} nested lines, kept as is (edit them in text mode):',
     },
   },
 }

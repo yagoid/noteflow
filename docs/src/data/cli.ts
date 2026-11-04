@@ -53,7 +53,7 @@ export const cliGroups: CliGroup[] = [
           { flag: '--tag <tag>', desc: { en: 'Add this tag to the note (if it doesn’t have it yet).', es: 'Añade este tag a la nota (si no lo tiene ya).' } },
           { flag: '--group <name>', desc: { en: 'Assign the note to a group.', es: 'Asigna la nota a un grupo.' } },
           { flag: '--folder <name>', desc: { en: 'Place the note in a folder of that group (requires <code>--group</code>).', es: 'Coloca la nota en una carpeta de ese grupo (requiere <code>--group</code>).' } },
-          { flag: '--raw / --rich', desc: { en: 'New section in raw/markdown mode (default) or rich text.', es: 'Sección nueva en modo raw/markdown (default) o rich text.' } },
+          { flag: '--raw / --rich', desc: { en: 'New section in text mode, shown as-is (default), or markdown mode, rendered.', es: 'Sección nueva en modo texto, tal cual (default), o modo markdown, renderizado.' } },
         ],
         example: ['$ noteflow add "Fix: CORS on /api/notes"', '$ noteflow add "Check server logs" --section Tasks --tag urgent'],
       },
@@ -124,7 +124,7 @@ export const cliGroups: CliGroup[] = [
           { flag: '--text "<content>"', desc: { en: 'Inline text (first source present wins).', es: 'Texto inline (gana la primera fuente presente).' } },
           { flag: '--file <path>', desc: { en: 'Read the content from a file — the most reliable route on Windows/PowerShell.', es: 'Lee el contenido de un archivo — la vía más fiable en Windows/PowerShell.' } },
           { flag: '--stdin', desc: { en: 'Read from stdin (also used automatically when piped).', es: 'Lee de stdin (también se usa automáticamente al recibir un pipe).' } },
-          { flag: '--rich', desc: { en: 'If the section is created, create it in rich-text mode (default: raw).', es: 'Si crea la sección, la crea en modo rich text (default: raw).' } },
+          { flag: '--rich', desc: { en: 'If the section is created, create it in markdown mode (default: text mode).', es: 'Si crea la sección, la crea en modo markdown (default: modo texto).' } },
         ],
         example: ['$ noteflow set "Project Alpha" Tasks --text "- [ ] deploy"', '$ cat todo.md | noteflow set "Project Alpha" Tasks --stdin'],
       },
@@ -193,16 +193,16 @@ export const cliGroups: CliGroup[] = [
         id: 'sections',
         usage: 'noteflow sections <title>',
         desc: {
-          en: 'List a note’s sections with name, line count and mode (raw/rich). <code>section list</code> is an alias.',
-          es: 'Lista las secciones de una nota con nombre, número de líneas y modo (raw/rich). <code>section list</code> es un alias.',
+          en: 'List a note’s sections with name, line count and mode (text/markdown). <code>section list</code> is an alias.',
+          es: 'Lista las secciones de una nota con nombre, número de líneas y modo (texto/markdown). <code>section list</code> es un alias.',
         },
       },
       {
         id: 'section-add',
         usage: 'noteflow section add <title> <name> [--rich]',
         desc: {
-          en: 'Create an empty section (raw by default; <code>--rich</code> for rich text). Sections are managed by name — no ids needed.',
-          es: 'Crea una sección vacía (raw por defecto; <code>--rich</code> para rich text). Las secciones se gestionan por nombre — sin ids.',
+          en: 'Create an empty section (text mode by default; <code>--rich</code> for markdown mode). Sections are managed by name — no ids needed.',
+          es: 'Crea una sección vacía (modo texto por defecto; <code>--rich</code> para modo markdown). Las secciones se gestionan por nombre — sin ids.',
         },
         example: ['$ noteflow section add "Project Alpha" "Meeting Notes"'],
       },
@@ -479,7 +479,7 @@ export const globalFlags: GlobalFlag[] = [
   {
     flag: '--rich',
     applies: 'add · set · section add',
-    desc: { en: 'Create the new section in rich-text mode (default: raw).', es: 'Sección nueva en modo rich text (default: raw).' },
+    desc: { en: 'Create the new section in markdown mode (default: text mode).', es: 'Sección nueva en modo markdown (default: modo texto).' },
   },
 ];
 

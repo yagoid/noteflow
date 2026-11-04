@@ -40,8 +40,8 @@ export const editor = {
   clickToUnlock: 'Haz clic para desbloquear',
 
   menu: {
-    editorMode: 'Modo editor',
-    rawMode: 'Modo markdown en crudo',
+    editorMode: 'Modo markdown',
+    rawMode: 'Modo texto',
     copySectionText: 'Copiar texto de la sección',
     showToAiHint: 'La IA volverá a indexar y usar esta sección',
     hideFromAiHint: 'La IA nunca indexará, leerá ni referenciará esta sección',
@@ -175,8 +175,8 @@ export const editor = {
     editCard: 'Editar texto',
     deleteCard: 'Borrar tarjeta',
     extraLines: {
-      one: '{count} línea anidada, se conserva tal cual (edítala en modo raw):',
-      other: '{count} líneas anidadas, se conservan tal cual (edítalas en modo raw):',
+      one: '{count} línea anidada, se conserva tal cual (edítala en modo texto):',
+      other: '{count} líneas anidadas, se conservan tal cual (edítalas en modo texto):',
     },
   },
 }

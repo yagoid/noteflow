@@ -84,7 +84,7 @@ export const cliEs: CliContent = {
     bullets: [
       'El contenido de cada sección vive en su propio <code>&lt;sectionId&gt;.md</code> — sin frontmatter, solo markdown.',
       'El campo <code>updated:</code> de <code>note.md</code> es el timestamp canónico de sincronización de toda la nota.',
-      '<code>isRawMode: true</code> significa modo raw/markdown; <code>false</code>, rich text (HTML de TipTap).',
+      '<code>isRawMode: true</code> significa modo texto (la app muestra el contenido tal cual, sin renderizar); <code>false</code>, modo markdown (la app lo renderiza). En ambos casos el fichero de la sección guarda markdown plano.',
       'Las notas con bloque <code>encryption:</code> en <code>note.md</code> están cifradas (la carpeta solo contiene <code>note.md</code>) — el CLI las ignora.',
       'Un marcador <code>.noteflow-format</code> (con contenido <code>2</code>) en la raíz del directorio señala el formato v2.',
     ],

@@ -143,7 +143,7 @@ exports.TOOLS = [
             sections: {
                 type: 'array',
                 description: 'Sections to create. If omitted, a single empty "Note" section is created.',
-                items: obj({ name: str('Section name.'), content: str('Markdown content.'), raw: bool('Raw markdown mode — shows the unrendered source. Default false (content is rendered as rich text). Only set true if the user wants to see/edit the raw markdown.') }, ['name']),
+                items: obj({ name: str('Section name.'), content: str('Markdown content.'), raw: bool('Text mode: the section shows its content as plain text, exactly as written, without rendering markdown. Default false = markdown mode (content is rendered). Only set true if the user explicitly wants plain/unrendered text.') }, ['name']),
             },
         }),
     },
@@ -162,7 +162,7 @@ exports.TOOLS = [
     {
         name: 'add_section',
         description: 'Append a new section to an existing note.',
-        inputSchema: obj({ note_id: str('The note id.'), name: str('Section name.'), content: str('Markdown content.'), raw: bool('Raw markdown mode — shows the unrendered source. Default false (content is rendered as rich text). Only set true if the user wants to see/edit the raw markdown.') }, ['note_id', 'name']),
+        inputSchema: obj({ note_id: str('The note id.'), name: str('Section name.'), content: str('Markdown content.'), raw: bool('Text mode: the section shows its content as plain text, exactly as written, without rendering markdown. Default false = markdown mode (content is rendered). Only set true if the user explicitly wants plain/unrendered text.') }, ['note_id', 'name']),
     },
     {
         name: 'update_section',

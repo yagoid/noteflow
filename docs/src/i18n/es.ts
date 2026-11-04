@@ -38,8 +38,8 @@ export const es: Content = {
     kicker: 'Qué es NoteFlow',
     h2: 'Notas rápidas. Cero fricción.',
     p: 'Un cuaderno de escritorio dark-first para personas técnicas. Vive en la bandeja del sistema, escribe Markdown plano en tu propio disco y se mantiene fuera del camino hasta que lo necesitas. El cerebro es opcional — la velocidad no.',
-    modeRaw: 'Sección de markdown en crudo',
-    modeRich: 'Sección de texto enriquecido',
+    modeRaw: 'Sección de texto',
+    modeRich: 'Sección markdown',
     listAria: 'Funcionalidades de NoteFlow',
     cliCta: 'Referencia del CLI →',
     notes: {

@@ -15,7 +15,12 @@
 //   - key === null → the user explicitly cleared the override ("follow the
 //     theme"); readers must NOT fall back to legacy values. Nulls are therefore
 //     kept in the stored JSON on purpose.
-//   - key === "r g b" / string → the override value.
+//   - key === "r g b" / string → the override value. For `accent` and
+//     `editorColors.*` that is an "r g b" triplet or THEME_TEXT_COLOR ("text"):
+//     "follow the active theme's --text" — the renderer (themeStore) resolves it
+//     to the theme's triple on every theme change. PENDING in the mobile mirror:
+//     its sanitizer still only accepts triplets, so the phone ignores "text"
+//     (follows the theme) and drops it from the file on its next write.
 // `theme` and the `editor` fields always hold concrete values, so null is not
 // accepted for them (invalid values are silently dropped, like
 // sanitizeSectionColors does).
@@ -41,9 +46,9 @@ export interface UiSettings {
   theme?: string
   /** APP_FONTS key override, or null to follow the theme's own font. */
   appFont?: string | null
-  /** Accent as an "r g b" triplet, or null to follow the theme. */
+  /** Accent as an "r g b" triplet or THEME_TEXT_COLOR, or null to follow the theme. */
   accent?: string | null
-  /** Per-element editor colour overrides ("r g b" triplets, null = follow theme). */
+  /** Per-element editor colour overrides ("r g b" triplets or THEME_TEXT_COLOR, null = follow theme). */
   editorColors?: Partial<Record<UiEditorColorKey, string | null>>
   editor?: {
     /** Editor font size in px, integer clamped to 10–24. */
@@ -57,6 +62,12 @@ export interface UiSettings {
 
 const RGB_TRIPLET = /^\d{1,3} \d{1,3} \d{1,3}$/
 
+/**
+ * Colour sentinel: "follow the active theme's text colour" (mirror of THEME_TEXT_COLOR in
+ * src/lib/colorUtils.ts — main can't import from src/).
+ */
+export const THEME_TEXT_COLOR = 'text'
+
 export const UI_FONT_SIZE_MIN = 10
 export const UI_FONT_SIZE_MAX = 24
 
@@ -66,6 +77,11 @@ function isShortString(value: unknown): value is string {
 
 function isTriplet(value: unknown): value is string {
   return typeof value === 'string' && RGB_TRIPLET.test(value)
+}
+
+/** A storable colour override (accent / editorColors.*): a triplet or the theme-text sentinel. */
+function isColor(value: unknown): value is string {
+  return value === THEME_TEXT_COLOR || isTriplet(value)
 }
 
 function clampFontSize(value: number): number {
@@ -88,7 +104,7 @@ export function sanitizeUiSettings(raw: unknown): UiSettings {
   else if (isShortString(input.appFont)) out.appFont = input.appFont
 
   if (input.accent === null) out.accent = null
-  else if (isTriplet(input.accent)) out.accent = input.accent
+  else if (isColor(input.accent)) out.accent = input.accent
 
   const colors = input.editorColors
   if (colors && typeof colors === 'object' && !Array.isArray(colors)) {
@@ -99,7 +115,7 @@ export function sanitizeUiSettings(raw: unknown): UiSettings {
       if (value === null) {
         cleaned[key] = null
         hasAny = true
-      } else if (isTriplet(value)) {
+      } else if (isColor(value)) {
         cleaned[key] = value
         hasAny = true
       }

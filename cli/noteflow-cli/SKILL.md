@@ -87,12 +87,32 @@ sections:
 
 - El contenido de cada sección vive en su archivo `<sectionId>.md` (sin frontmatter).
 - `updated:` de `note.md` es el timestamp canónico de sincronización de toda la nota.
-- `isRawMode: true` = modo markdown/raw. `false` = modo rich text (TipTap HTML).
+- `isRawMode` indica el **modo de sección** (ver abajo). En ambos modos el `<sectionId>.md`
+  contiene markdown / texto plano — nunca HTML.
 - Notas con `encryption:` en `note.md` están cifradas (la carpeta solo contiene
   `note.md`) — el CLI las ignora.
 - El marcador `.noteflow-format` (contenido `2`) en la raíz indica el formato v2.
 - La variable de entorno `NOTEFLOW_NOTES_DIR` permite apuntar a otro directorio
   (scripting / testing).
+
+### Modos de sección (solo hay dos)
+
+El modo solo cambia **cómo muestra la app** la sección; el fichero `.md` guarda
+markdown / texto plano en los dos casos (la app serializa el editor a markdown).
+
+| Modo | `isRawMode` | Flag del CLI | Qué ve el usuario en la app |
+|---|---|---|---|
+| **Modo texto** | `true` | `--raw` (**default del CLI**) | El contenido **tal cual, sin renderizar**: un `# Título` se ve literalmente con la almohadilla, `- [ ] x` como texto |
+| **Modo markdown** | `false` | `--rich` | El markdown **renderizado**: títulos, listas, checkboxes, negritas, tablas, código… |
+
+Cuándo usar cada uno:
+- Escribes **markdown que el usuario quiere ver formateado** (títulos, listas de
+  tareas, tablas, resúmenes estructurados) → `--rich` (modo markdown).
+- Texto plano, logs, comandos, salida de herramientas, o el usuario quiere ver el
+  texto exactamente como está → default / `--raw` (modo texto).
+- Los flags solo fijan el modo al **crear** la sección (o la nota); sobre una sección
+  existente no cambian su modo (el usuario lo cambia en la app: menú de la sección
+  o `Ctrl+M`).
 
 ---
 
@@ -126,8 +146,8 @@ existir**: si no hay match el comando **falla con exit 1** salvo que pases
 | `--tag <tag>` | Añade este tag a la nota (si no lo tiene ya) |
 | `--group <nombre>` | Asigna la nota a un grupo |
 | `--folder <nombre>` | Coloca la nota en una carpeta de ese grupo (requiere `--group`) |
-| `--raw` | Fuerza modo raw/markdown en la sección (default) |
-| `--rich` | La sección nueva se crea en modo rich text |
+| `--raw` | Sección nueva en **modo texto** (se ve tal cual, sin renderizar) — default |
+| `--rich` | Sección nueva en **modo markdown** (la app renderiza el markdown) |
 | `--dry-run` | Resuelve el destino y muestra qué haría **sin escribir ni sincronizar** |
 | `--json` | Resultado JSON en stdout (líneas informativas → stderr) |
 
@@ -232,7 +252,7 @@ noteflow get "31-03" --json
 
 ---
 
-### `read` — Leer contenido RAW (para pipes / agentes)
+### `read` — Leer el contenido tal cual (para pipes / agentes)
 
 ```bash
 noteflow read <título> [sección]
@@ -284,7 +304,7 @@ de `add`, que solo **añade al final**. Es la forma recomendada de **editar** un
 | `--text "<contenido>"` | Texto inline |
 | `--file <ruta>` | Lee el contenido de un archivo |
 | `--stdin` | Lee de stdin (también se usa automáticamente al recibir un pipe) |
-| `--rich` | Si crea la sección, la crea en modo rich text (default: raw) |
+| `--rich` | Si crea la sección, la crea en modo markdown (default: modo texto) |
 | `--dry-run` | Resuelve el destino y muestra qué haría **sin escribir ni sincronizar** |
 | `--json` | Resultado JSON en stdout (mismo shape que `add`; info → stderr) |
 
@@ -402,13 +422,13 @@ noteflow touch "Proyecto Alpha"
 noteflow sections <título>
 ```
 
-Lista las secciones con nombre, número de líneas y modo (raw/rich).
+Lista las secciones con nombre, número de líneas y modo (`text` = modo texto, `markdown` = modo markdown).
 
 ```bash
 noteflow sections "Proyecto Alpha"
 # Secciones de "Proyecto Alpha":
-#   Note  (3 lines, raw/markdown)
-#   Tasks  (5 lines, raw/markdown)
+#   Note  (3 lines, text)
+#   Tasks  (5 lines, markdown)
 ```
 
 ---
@@ -427,7 +447,7 @@ Gestiona las secciones de una nota **por nombre**, sin necesidad de ids.
 | Subcomando | Descripción |
 |---|---|
 | `list` | Alias de `noteflow sections <título>` |
-| `add` | Crea una sección vacía (raw por defecto; `--rich` para rich text) |
+| `add` | Crea una sección vacía (modo texto por defecto; `--rich` para modo markdown) |
 | `rename` | Renombra una sección (la carpeta/archivo no cambia — va por id) |
 | `delete` | Borra una sección (confirm salvo `--yes`). **Rechaza borrar la última** |
 
@@ -835,7 +855,7 @@ JSON: `{ notesDir, noteCount, github: { owner, repo, lastSync, tokenAccessible }
 | `--text` / `--file` / `--stdin` | `add`, `set` | Fuente del contenido a escribir |
 | `--create` | `add` | Con `--title`: crea la nota si no existe (sin él, `add` falla) |
 | `--dry-run` | `add`, `set` | Resuelve el destino sin escribir ni sincronizar |
-| `--rich` | `add`, `set`, `section add` | Sección nueva en modo rich text (default: raw) |
+| `--rich` | `add`, `set`, `section add` | Sección nueva en modo markdown (default: modo texto) |
 | `--force` | `pull` | Solo GitHub: sobrescribe aunque lo local sea más nuevo |
 
 **Parser estricto:** un flag desconocido (`Unknown flag: --foo`) o un flag de
@@ -879,7 +899,7 @@ tocar ids nunca.
 # 1. Descubrir notas y nombres de sección
 noteflow list --json
 
-# 2. Leer una sección concreta RAW (apto para pipe — usa 'read', no 'get')
+# 2. Leer una sección concreta tal cual (apto para pipe — usa 'read', no 'get')
 noteflow read "título" "Sección"
 
 # 3a. Sobrescribir una sección (la crea si no existe)

@@ -109,7 +109,7 @@ export const featuresEn = {
     bullets: [
       '<kbd>Ctrl</kbd>+<kbd>S</kbd> opens the <strong>current section</strong> as a sticky; <kbd>Ctrl</kbd>+<kbd>G</kbd> opens <strong>every section</strong> of the note at once. There\'s also a <code>⧉</code> button in the editor toolbar.',
       'Stickies start at <strong>300 × 300 px</strong> and are freely resizable (minimum 200 × 200).',
-      'Each sticky is a full editor: <strong>WYSIWYG or raw markdown</strong>, same as the main window.',
+      'Each sticky is a full editor: <strong>markdown mode (rendered) or text mode (shown as-is)</strong>, same as the main window.',
       'Edits sync with the main window <strong>in real time</strong> — it\'s the same section, not a copy.',
       'Open <strong>as many as you want</strong>; folded stickies stack as pills in the corner of your screen.',
     ],
@@ -129,17 +129,17 @@ export const featuresEn = {
       after: ' before Friday.',
       brokenLabel: 'If the target section is deleted, the pill turns broken:',
       brokenPill: 'Old roadmap',
-      rawLabel: 'the same link in raw markdown',
+      rawLabel: 'the same link in text mode',
       raw: '[Launch checklist](noteflow://k3v9pQ/aB3dE9)',
     },
     bullets: [
       '<strong>Click</strong> a pill to jump to the target section — in the same note or any other. <strong>Hover</strong> shows the same floating preview used across the app.',
       'The pill shows the target\'s name <strong>live</strong>: rename the section and every pill pointing at it updates. Delete the target and the pill switches to a <strong>broken</strong> state (dimmed, struck through, no navigation).',
-      'The search excludes encrypted, archived and temporary notes; the <kbd>/</kbd> command exists in rich mode only.',
+      'The search excludes encrypted, archived and temporary notes; the <kbd>/</kbd> command exists in markdown mode only.',
       'The same <kbd>/</kbd> menu inserts a <strong>kanban board</strong> (<kbd>/kanban</kbd>): columns and cards you drag around, with the task chips (📅 deadline, ⏰ alarm, 🔺 importance), right inside the note — and saved as plain markdown, like everything else.',
     ],
     rawP:
-      'Under the hood a pill is nothing exotic — it\'s a plain markdown link, <code>[Name](noteflow://noteId/sectionId)</code>, stored inside the section\'s text. That\'s exactly what you see in raw mode, and it\'s why links <strong>survive sync, export and import</strong> unchanged.',
+      'Under the hood a pill is nothing exotic — it\'s a plain markdown link, <code>[Name](noteflow://noteId/sectionId)</code>, stored inside the section\'s text. That\'s exactly what you see in text mode, and it\'s why links <strong>survive sync, export and import</strong> unchanged.',
     brainP:
       'These links also appear as <strong>edges in the brain view</strong>, connecting the two sections — and since they\'re your own explicit structure, they work even with the AI and embeddings <strong>completely disabled</strong>.',
   },
@@ -191,7 +191,7 @@ export const featuresEn = {
           { combos: [['Ctrl', 'E']], desc: 'Inline code' },
           { combos: [['Ctrl', 'Shift', 'B']], desc: 'Code block' },
           { combos: [['Ctrl', 'F']], desc: 'Find in note' },
-          { combos: [['Ctrl', 'M']], desc: 'Toggle raw markdown / rich text' },
+          { combos: [['Ctrl', 'M']], desc: 'Toggle text / markdown mode' },
           { combos: [['Ctrl', '+'], ['Ctrl', '−'], ['Ctrl', '0']], desc: 'Font size: bigger / smaller / reset' },
         ],
       },

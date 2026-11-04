@@ -243,7 +243,7 @@ Iconos del TitleBar:
 - Se pueden abrir varias. Reabrir la sección que una ventana ya muestra la enfoca en vez de duplicarla.
 - Cerrarla la destruye (no va al tray). Los cambios se sincronizan en vivo en ambos sentidos con la
   ventana principal (y con otras ventanas/stickies).
-- Atajos dentro: `Ctrl+T/W` (sección nueva/borrar), `Ctrl+M` (raw), `Ctrl+F` (buscar), `Ctrl+S/G`
+- Atajos dentro: `Ctrl+T/W` (sección nueva/borrar), `Ctrl+M` (modo texto/markdown), `Ctrl+F` (buscar), `Ctrl+S/G`
   (sticky), `Ctrl+Tab`. No tiene paleta ni `Ctrl+N`.
 
 ---
@@ -403,10 +403,10 @@ hay secciones) + separador + **⊞ activo** + **estrella** de favorito + **`⋯`
   atenuado. El contenido deja un pequeño margen bajo la cabecera.
 - **Vista previa** del contenido real a tamaño legible (títulos, listas, tareas con casilla — hechas
   tachadas —, código en mono), que se desvanece abajo, **con la fuente del editor** (Settings → Editor:
-  Inter o mono); las secciones en modo raw muestran el texto crudo, también con esa fuente (como el
-  editor raw); las vacías, "Empty section · click to write".
+  Inter o mono); las secciones en modo texto muestran el texto tal cual, también con esa fuente (como el
+  textarea del modo texto); las vacías, "Empty section · click to write".
 - **Pie**: progreso de tareas (`2/6 tasks`) si tiene 3 o más, si no el número de palabras ("Empty" si
-  no hay nada); a la derecha las marcas **Raw** (modo raw) y **Hidden from AI**.
+  no hay nada); a la derecha las marcas **Text** (modo texto) y **Hidden from AI**.
 
 **Interacciones:**
 - **Clic** → abre la sección en el editor (cierra la vista).
@@ -422,7 +422,7 @@ hay secciones) + separador + **⊞ activo** + **estrella** de favorito + **`⋯`
   algo seleccionado basta un clic. "Select all" (o `Ctrl/Cmd+A`) marca todas; si ya lo están, las
   desmarca. Las seleccionadas llevan un aro de acento. Con ≥1 marcada aparece una **barra flotante**
   abajo (también reticulada): contador, **Hide from AI / Show to AI** (oculta o vuelve a indexar para la
-  IA; solo en notas no cifradas), **Raw mode / Editor mode** (cambia de golpe el modo de todas las
+  IA; solo en notas no cifradas), **Text mode / Markdown mode** (cambia de golpe el modo de todas las
   seleccionadas; nunca toca el contenido), **Delete** (con confirmación; deshabilitado si están todas,
   para no dejar la nota vacía) y **✕** para limpiar.
 - **Teclado**: `← → ↑ ↓` mueven el foco entre tarjetas, `Intro` abre, `F2` renombra, `Esc` limpia la
@@ -501,7 +501,7 @@ salientes de un archivador (sin scroll horizontal):
   estaba entre las plegadas, se muestra en el último hueco visible (sin cambiar el orden real).
 - Las acciones de la nota quedan a la derecha del mapa, alineadas con su primera fila:
 
-(`⊞` = note overview · `⭐` = favorito · `⋯` = menú de sección: raw/editor, copiar,
+(`⊞` = note overview · `⭐` = favorito · `⋯` = menú de sección: modo texto/markdown, copiar,
 **guardar como plantilla**, **exportar nota**, sticky, **ocultar a la IA**, archivar, cifrar, borrar nota.
 "Make permanent" ya no está aquí: vive en el mini menú junto a `Deletes …` de las temporales)
 
@@ -522,7 +522,7 @@ salientes de un archivador (sin scroll horizontal):
   Esc; al cerrarlo sin que nada se lleve el foco, el foco vuelve al editor. En una ventana de sección
   se ocultan `Note overview` y `Open section alongside`.
 - **Duplicar**: `Duplicate section` (click derecho en el tab o en un tag de sección)
-  crea una copia con id nuevo, mismo contenido, mismo modo raw/editor y mismo flag "oculta a la IA",
+  crea una copia con id nuevo, mismo contenido, mismo modo (texto/markdown) y mismo flag "oculta a la IA",
   llamada `"<nombre> (copy)"` / `"<nombre> (copia)"` según el idioma de la UI, **justo a la derecha** de
   la original, y la deja activa (`notesStore.duplicateSection`). No se ofrece con la nota cifrada y
   bloqueada.
@@ -590,10 +590,17 @@ sin navegar.
 
 ## Editor de contenido
 
-### Dos modos de edición (por sección)
+### Dos modos de sección (solo hay dos)
 
-**WYSIWYG** (visual, por defecto) — edición tipo Word/Notion con toolbar.
-**Raw Markdown** (texto puro) — textarea plana con markdown.
+Terminología de UI (EN/ES): **Markdown mode / Modo markdown** y **Text mode / Modo texto**. No usar
+"raw", "crudo", "rich text", "enriquecido" ni "WYSIWYG" en textos de usuario.
+
+**Modo markdown** (`isRawMode: false`, por defecto en la app) — el editor (TipTap) **renderiza** el
+markdown: títulos, listas, checkboxes, tablas… con toolbar.
+**Modo texto** (`isRawMode: true`, default del CLI) — textarea plana: el contenido se ve **tal cual**,
+sin renderizar (un `# Título` se ve con la almohadilla).
+
+En ambos modos el `.md` de la sección guarda markdown (el editor serializa con `htmlToMarkdown`).
 
 - Alternar con `Ctrl+M` (o el icono Eye/Edit en la toolbar).
 - Undo/Redo con `Ctrl+Z` / `Ctrl+Y`.
@@ -634,7 +641,7 @@ sin navegar.
   seguidos con texto detrás) se guarda igual que dos bloques y al reabrir se parte en dos.
   Detalle y lista completa de ambigüedades en `.claude/context/patterns.md`.
 
-### Autocierre de paréntesis (modo rich)
+### Autocierre de paréntesis (modo markdown)
 - Escribir `(` inserta `()` con el cursor en medio; con texto seleccionado (en un mismo párrafo)
   lo envuelve: `(texto)`, manteniendo la selección.
 - No autocierra si justo a la derecha hay una letra o un dígito (escribir delante de una palabra).
@@ -667,10 +674,10 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   ofrece resize (evita el affordance que se reseteaba al recargar la nota).
 - **Enter en una celda** crea otra línea en la celda; se guarda como salto de línea (`<br>`) y al
   reabrir es una línea más del mismo párrafo (antes las dos líneas se guardaban pegadas: `ab`).
-- **Pegar markdown con tabla:** en el editor visual (WYSIWYG), pegar texto que contenga una
+- **Pegar markdown con tabla:** en modo markdown, pegar texto que contenga una
   tabla markdown (`| a | b |` + fila separadora `|---|---|`) la convierte en tabla real
-  (antes se pegaba como texto literal). El modo Raw Markdown muestra siempre el fuente tal
-  cual — para verla renderizada hay que cambiar al modo visual.
+  (antes se pegaba como texto literal). El modo texto muestra siempre el fuente tal
+  cual — para verla renderizada hay que cambiar a modo markdown.
 
 ### Imágenes
 - Drag & drop o paste desde el portapapeles.
@@ -687,7 +694,7 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - Syntax highlighting con Lowlight.
 
 ### Relacionar secciones (slash command `/`)
-- Mientras escribes en el editor **rich**, teclea `/` → aparece un **menú de comandos** con
+- Mientras escribes en el editor en **modo markdown**, teclea `/` → aparece un **menú de comandos** con
   **"Link section"**. Al elegirlo se abre un **buscador** de todas las secciones (de cualquier nota
   o grupo); filtra por nombre de sección o título de nota. Al elegir una, se inserta una **pill**
   (chip con icono de enlace + nombre de la sección) en el punto donde estabas escribiendo.
@@ -698,14 +705,14 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - Estas relaciones también aparecen como **aristas en la Vista Cerebro**, conectando las dos
   secciones — y **funcionan aunque la IA/embeddings esté desactivada** (no dependen del modelo).
 - La relación se guarda **dentro del texto** de la sección (es un enlace markdown), así que
-  sincroniza, sobrevive export/import y en **modo raw** se ve como `[Nombre](noteflow://…)`. El
-  slash command solo está en modo rich; el buscador excluye notas cifradas/archivadas/temporales.
+  sincroniza, sobrevive export/import y en **modo texto** se ve como `[Nombre](noteflow://…)`. El
+  slash command solo está en modo markdown; el buscador excluye notas cifradas/archivadas/temporales.
 
 ### Tablero kanban dentro de la nota
-- En el editor **rich**, `/kanban` (o `/board`, en cualquier idioma) o el botón **kanban** de la
+- En el editor en **modo markdown**, `/kanban` (o `/board`, en cualquier idioma) o el botón **kanban** de la
   toolbar (justo tras el de tabla) insertan un tablero con tres
   columnas: **To do / In progress / Done** (en español *Por hacer / En curso / Hecho*). Puede haber
-  varios por sección. En **modo raw** se ve tal cual es en disco: markdown plano entre
+  varios por sección. En **modo texto** se ve tal cual es en disco: markdown plano entre
   `<!-- kanban done="Done" -->` y `<!-- /kanban -->` (columnas = `- Nombre`, tarjetas = tareas
   indentadas `  - [ ] …` con sus 📅⏰🔺), así sincroniza y lo leen el CLI/móvil/otros editores.
 - **Ocupa todo el ancho** del editor (no respeta la columna *Readable*); si las columnas no caben,
@@ -716,7 +723,7 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   (con sus pickers; al pasar el ratón aparecen los iconos de bandera/calendario y un menú `⋯` con
   *Edit text* / *Delete card*). Clic en el texto → edición en línea (Enter guarda, Esc cancela); si
   escribes `📅2026-10-12` o `🔺high` en el texto se convierten en chips. Las sub-viñetas que tuviera
-  la tarjeta en el markdown se conservan (chip "≡ n" con tooltip; se editan en modo raw).
+  la tarjeta en el markdown se conservan (chip "≡ n" con tooltip; se editan en modo texto).
 - **+ Add card** al pie de cada columna (Enter añade y deja el campo listo para la siguiente;
   Esc cierra) y **+ Add column** al final del tablero.
 - **Columnas:** clic en el título para renombrar; menú `⋯` con *Rename*, *Mark as done column* /
@@ -742,7 +749,7 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   dentro de los tableros kanban).
 - `Enter`/`Shift+Enter` (o las flechas de la barra) saltan al siguiente/anterior; el match activo
   queda **centrado verticalmente** en el editor (también al escribir la consulta).
-- Funciona en ambos modos (WYSIWYG y raw).
+- Funciona en ambos modos (markdown y texto).
 
 ### Tamaño de fuente
 - `Ctrl++` aumentar · `Ctrl+-` disminuir · `Ctrl+0` reset.
@@ -755,8 +762,8 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - En modo `Readable` se centran los bloques de texto (párrafos, headings, listas, citas,
   separadores) **y los bloques de código**; solo **tablas e imágenes rompen la columna** y siguen
   a ancho completo (los **tableros kanban** van más allá: ocupan el editor de borde a borde). El ancho de columna se deriva del tamaño de fuente base del cuerpo (no del de
-  cada elemento), así los headings comparten la misma columna. Aplica a ambos modos (WYSIWYG y
-  raw); no afecta a los stickies.
+  cada elemento), así los headings comparten la misma columna. Aplica a ambos modos (markdown y
+  texto); no afecta a los stickies.
 - En `Readable`, las acciones de cada tarea (importancia + deadline/badge) se sacan al margen
   derecho, fuera de la columna, cuando el editor mide ≥ 58em (container query en `src/index.css`).
   Si el bloque no cabe en el margen (badge con fecha + alarma), se desplaza hacia la izquierda
@@ -781,7 +788,7 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - El editor solo reserva el hueco de las rayitas, así que en reposo nunca tapa el texto. En editores
   muy estrechos (< 420 px, p. ej. paneles divididos muy estrechos) se oculta.
 - Sale en el editor principal, en cada panel del split y en la ventana de sección; **no** en stickies
-  ni en modo raw.
+  ni en modo texto.
 - Settings → Editor → **Table of contents** (switch, activado por defecto); se sincroniza con el resto
   de ajustes del editor.
 
@@ -1035,6 +1042,15 @@ reset por control): **fuente** de la app, **color de acento** y **colores del ed
 citas**. Cada control sin tocar sigue al tema (y cambia con él); el panel muestra un **preview en
 vivo** de todo.
 
+- **Swatches** (iguales en la fila de acento y en las 6 del editor): primero **"Text colour (follows
+  the theme)" / "Color del texto (sigue al tema)"** — el color del texto del tema activo (blanco/claro
+  en temas oscuros, negro/oscuro en claros) que **cambia solo al cambiar de tema**, para que un color
+  oscuro elegido en un tema claro no se pierda en uno oscuro; luego 9 presets de saturación media
+  que se leen en temas claros y oscuros (azul, teal, salvia, ocre, terracota, rosa, malva, violeta y
+  gris pizarra); al final el **selector de color libre** (círculo con degradado cónico). Botones
+  "Theme default" / reset por fila para volver al tema. El resumen bajo el preview muestra el acento
+  como *theme*, *text* o *custom*.
+
 **Sync entre dispositivos:** el tema y toda esta personalización (más los ajustes del editor:
 tamaño/familia de fuente, ancho legible e índice flotante) viajan en `ui-settings.json` dentro del dir de notas,
 así que con cualquier sync activo (GitHub o Cloud) la apariencia sigue al usuario a cada máquina
@@ -1119,7 +1135,7 @@ grupo/carpeta) y aparecen las de sección:
 Botón `⧉` en la toolbar del editor (o `Ctrl+S` para la sección actual, `Ctrl+G` para todas):
 - Siempre encima (`alwaysOnTop`). Tamaño 300×300px, redimensionable (mín. 200×200).
 - Frameless con barra de título propia y esquinas redondeadas.
-- Modo WYSIWYG o Raw, igual que el editor principal.
+- Modo markdown o modo texto, igual que el editor principal.
 - Cambios sincronizados con la ventana principal en tiempo real.
 - Se pueden abrir varias a la vez.
 - **Plegar/desplegar** (fold/unfold) desde su barra de título: se contrae a una píldora animada
@@ -1437,7 +1453,7 @@ ids/dirs frescos → sin conflicto, y muestran el grupo/folder destino):
 - **Overwrite** → reemplaza con la importada.
 - **Keep both** → renombra y guarda ambas.
 
-Detalles de los imports externos: el contenido entra en **rich-text** (no raw); las notas **sin
+Detalles de los imports externos: el contenido entra en **modo markdown** (no en modo texto); las notas **sin
 contenido se omiten** (las filas de BD / páginas título-solo de Notion no ensucian); subcarpetas →
 grupos (1er nivel) + folders (anidados, aplanados a 2 niveles); imágenes y `.csv` de Notion no se
 importan (v1). Implementación en `.claude/context/patterns.md` (importadores + IPC).
@@ -1497,7 +1513,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+E` | Código inline |
 | `Ctrl+Shift+B` | Bloque de código |
 | `Ctrl+F` | Buscar dentro de la nota |
-| `Ctrl+M` | Alternar modo Markdown / rich-text |
+| `Ctrl+M` | Alternar modo texto / modo markdown (también `Ctrl+Shift+E` con el foco en el editor) |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Fuente: aumentar / disminuir / reset |
 
 ---

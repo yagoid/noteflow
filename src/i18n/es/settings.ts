@@ -49,6 +49,7 @@ export const settings = {
     moreThemes: 'Más temas ({count})',
     fontSelected: 'Seleccionada',
     customColour: 'Color personalizado',
+    textColour: 'Color del texto (sigue al tema)',
     resetToThemeDefault: 'Restablecer al valor del tema',
     colorItalic: 'Cursiva',
     colorInlineCode: 'Código',
@@ -70,6 +71,7 @@ export const settings = {
     previewInlineCode: 'código en línea',
     summaryTheme: 'tema',
     summaryCustom: 'personalizado',
+    summaryText: 'texto',
   },
 
   editor: {
@@ -326,7 +328,7 @@ export const settings = {
     inlineCode: 'Código en línea',
     codeBlock: 'Bloque de código',
     findInNote: 'Buscar en la nota',
-    toggleMarkdown: 'Alternar modo Markdown / texto enriquecido',
+    toggleMarkdown: 'Alternar modo texto / markdown',
     increaseFontSize: 'Aumentar el tamaño de fuente',
     decreaseFontSize: 'Reducir el tamaño de fuente',
     resetFontSize: 'Restablecer el tamaño de fuente',

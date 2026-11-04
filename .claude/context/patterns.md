@@ -50,7 +50,7 @@ Dep nueva: `adm-zip` (JS puro, sin binario nativo → no toca `asarUnpack`/posti
   (`isKeepNote`: tiene `textContent`/`listContent`/`isTrashed`/`userEditedTimestampUsec`…). Mapea
   `textContent`+`listContent`(→checkboxes), `labels`→tags, `isArchived`/`isPinned`, timestamps µs;
   omite `isTrashed`. Sin `relPath` (Keep no tiene carpetas).
-- **Decisiones de UX:** contenido importado en **rich-text** (`isRawMode:false`); **notas sin
+- **Decisiones de UX:** contenido importado en **modo markdown** (`isRawMode:false`, renderizado); **notas sin
   contenido se omiten** (filtradas en preview por `externalContent()`); los **grupos/folders se crean
   solo al confirmar** (previsualizar y cancelar no deja rastro). Nesting >2 niveles se aplana a
   grupo + folder (`'A / B'`). Tutorial in-app por fuente en el selector de origen.
@@ -156,8 +156,7 @@ Decisiones a respetar si se toca:
   así que teclear en una sección (otra ventana/pane) solo re-renderiza su tarjeta.
 - **Pie:** `sectionCardStats(md)` → "Empty" / `hechas/total tasks` con ≥ 3 tareas (`- [ ]`/`- [x]` como
   `markdownHtml`, fuera de fences; las tarjetas de kanban cuentan) / nº de palabras (sin sintaxis, URLs de
-  links, anotaciones 📅⏰🔺 ni comentarios HTML). A la derecha, "Raw" (modo raw; no "Markdown": para el
-  usuario markdown es el editor normal, que lo renderiza) y "Hidden from AI".
+  links, anotaciones 📅⏰🔺 ni comentarios HTML). A la derecha, "Text" (modo texto, `isRawMode`) y "Hidden from AI".
 - **Clic, doble clic y nombre:** un `<button class="note-grid-open">` cubre la celda (clic, foco, Intro);
   la cabecera es `pointer-events: none` salvo el `<span>` del nombre. **Doble clic en el nombre = renombrar
   inline** (input con anillo del color de la sección, Enter/blur guarda, Esc cancela, `F2` desde el
@@ -173,7 +172,7 @@ Decisiones a respetar si se toca:
   `::after` por encima de la cabecera sólida). Ctrl/Cmd-click togglea, Shift-click selecciona el rango
   (orden `note.sections`) desde el ancla, y con selección activa basta un clic. La barra flotante (sticky
   abajo) es otro bloque reticulado (`.note-grid-sbar`): contador en acento, **Hide/Show to AI** (solo
-  `!note.encryption`), **Raw/Editor mode**, **Delete** (deshabilitado con tooltip si están todas; confirma
+  `!note.encryption`), **Text mode / Markdown mode**, **Delete** (deshabilitado con tooltip si están todas; confirma
   con `ConfirmModal`) y limpiar. Los derivados se calculan filtrando `selectedIds` contra `note.sections`.
 - **Teclado:** flechas mueven el foco entre celdas (`gridNeighbor`: ←→ en orden de pestañas, ↑↓ a la
   celda de la fila vecina bajo el centro, en fracciones de fila); Intro abre. `Esc` (listener de `window`
@@ -563,7 +562,7 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     pill navega con `navigateToSection`; click en un link lo abre el handler de links de `Editor.tsx`).
     Chips 📅/⏰/🔺 con las mismas clases (`task-badge`, `task-importance-dot`) y los **mismos pickers** que
     las tareas (`TaskPickers.tsx` + helpers `taskBadge.ts`, extraídos de `DeadlineTaskItemView`). `extra`
-    se conserva sin editar: chip "≡ n" con tooltip (editable en modo raw).
+    se conserva sin editar: chip "≡ n" con tooltip (editable en modo texto).
   - **Drag & drop** propio con pointer events (sin dependencia nueva; HTML5 DnD descartado: el drop lo
     intercepta ProseMirror y el ghost nativo es feo). Umbral 4 px; ghost portalado a `<body>`
     (`position: fixed`, se mueve con `transform` sin re-render), la tarjeta/columna origen queda
@@ -605,7 +604,7 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     CSS de `.prose-editor .ProseMirror div[data-type="kanban"]` lo muestra como mini tablero de solo
     lectura (columnas en fila, compactas, `overflow: hidden`; en `.chat-md` más estrechas). También es
     el fallback si el NodeView aún no se montó.
-  - Modo raw: intacto (markdown literal). Pendiente/no hecho en v1: metadatos de columna
+  - Modo texto (`isRawMode`): intacto (markdown literal). Pendiente/no hecho en v1: metadatos de columna
     (color/WIP/colapsar), editar `extra` en la UI, mover tarjetas con teclado.
 - **Invariante del separador de bloque en `blockElToMd`:** cada bloque serializado debe terminar en
   **exactamente `\n\n`** (`htmlFromMarkdown` separa bloques con `split(/\n\n/)`). Ojo con quién pone
@@ -971,7 +970,7 @@ del editor rich. Piezas: `lib/tocUtils.ts` (lógica pura con tests en `tests/lib
 - **Opt-in por prop** `showToc` de `Editor` (default `false`): solo `NoteEditor` lo pasa (desde el
   ajuste), así sale en el editor principal, en cada panel del split y en la ventana de sección
   (`SectionWindowApp` monta `NoteEditor`), y **no** en stickies (`StickyApp` usa `Editor` sin la prop).
-  En modo raw no existe (`NoteEditor` renderiza el textarea en vez de `Editor`).
+  En modo texto (`isRawMode`) no existe (`NoteEditor` renderiza el textarea en vez de `Editor`).
 - **Ajuste** Settings → Editor → "Table of contents" (switch), **activado por defecto**. Vive en
   `editorSettingsStore.showToc` y se **sincroniza** en `ui-settings.json` (`editor.showToc`, saneado en
   `electron/uiSettings.ts` **y en su espejo de noteflow-mobile**) como sus vecinos; sin clave legacy
@@ -1153,7 +1152,7 @@ arista en el cerebro **aunque la IA esté apagada**.
   `notesStore.navigateToSection`). El slash usa **`@tiptap/suggestion`** (dep nueva, JS puro):
   `SlashCommands.ts` (Suggestion `char:'/'`, off en code blocks) + `SlashCommandMenu.tsx` (popup
   comandos) + `SectionLinkPicker.tsx` (overlay buscador). `Editor.tsx` registra ambas extensiones y
-  abre el picker con estado local. Solo en modo rich; en raw se ve el markdown literal.
+  abre el picker con estado local. Solo en modo markdown; en modo texto se ve el markdown literal.
 - **Navegación:** `notesStore.navigateToSection(noteId, sectionId)` encapsula el patrón
   pending+`request-section` (reutilizable; mismo que overviews/cerebro).
 - **Cerebro (capa de relaciones):** `useBrainGraph` añade `relationEdges` derivado de escanear el
@@ -1893,13 +1892,53 @@ editor** por encima del tema activo (`editorColors` en `src/stores/themeStore.ts
 | `inlineCode` | `--code-inline` | `--red` | Código inline (`code`, no el `pre code`) |
 | `codeAccent` | `--code-accent` | `--accent` | Borde izquierdo **compartido** de `pre` y `blockquote` |
 
-Mecánica (la misma para los 6): el override se guarda como triplete `"r g b"` o `null` = seguir el
-tema; se aplica con `setProperty`/`removeProperty` sobre `document.documentElement` y el CSS usa el
-fallback nativo (`color: rgb(var(--code-inline, var(--red)))` en `src/index.css`), así que sin
-override el color sigue vivo al cambiar de tema. Persistencia en `localStorage` bajo la clave
-**`noteflow-heading-overrides`** — nombre heredado de cuando solo había H1/H2/H3: se mantiene (en vez
-de migrar a otra clave) porque el parser tolera claves ausentes → `null`, y así los usuarios que ya
-habían personalizado sus encabezados no pierden nada. La clave se borra cuando los 6 vuelven a `null`.
+Mecánica (la misma para los 6): el override se guarda como triplete `"r g b"`, como el centinela
+`'text'` (ver abajo) o `null` = seguir el tema; se aplica con `setProperty`/`removeProperty` sobre
+`document.documentElement` y el CSS usa el fallback nativo (`color: rgb(var(--code-inline, var(--red)))`
+en `src/index.css`), así que sin override el color sigue vivo al cambiar de tema. Persistencia: se
+sincroniza en **`ui-settings.json`** (`editorColors`, ver `electron/uiSettings.ts`) y además se
+*dual-escribe* en `localStorage` bajo la clave **`noteflow-heading-overrides`** (fuente legacy y semilla
+de migración) — nombre heredado de cuando solo había H1/H2/H3: se mantiene (en vez de migrar a otra
+clave) porque el parser tolera claves ausentes → `null`. La clave se borra cuando los 6 vuelven a `null`.
+
+**Color "texto" adaptativo (centinela `'text'`).** El primer swatch de la fila de acento y de cada fila
+de colores del editor es el **color del texto del tema** (`--text`: claro en temas oscuros, oscuro en
+claros), para que un color elegido en un tema claro no desaparezca al pasar a uno oscuro. Se guarda
+como la cadena **`THEME_TEXT_COLOR = 'text'`** (`src/lib/colorUtils.ts`; espejo en
+`electron/uiSettings.ts`, cuyo `sanitizeUiSettings` la acepta en `accent` y `editorColors.*` junto a los
+tripletes) y `themeStore` la **resuelve al triplete `--text` del tema activo** al aplicar
+(`resolveThemeColor`): `applyTheme` para `--accent` y `applyEditorColors(overrides, theme)` para los 6,
+que `setTheme` vuelve a llamar en cada cambio de tema. Decisión: resolver a triplete (y no poner
+`var(--text)` en la var) para que `--accent`/`--heading-*` sigan siendo SIEMPRE un `"r g b"` real — hay
+consumidores que los leen por `getComputedStyle` y parsean canales (vista cerebro `brainColors`,
+`resolveSectionInk` de mapa/overview, el `<input type="color">` vía `rgbTripleToHex`). El panel
+(`AppearancePanel`) resuelve igual para swatches, preview y selector libre; el swatch se pinta con
+`rgb(var(--text))` y su check con `rgb(var(--bg-1))` (contrasta en ambos casos). Con acento = texto
+(blanco en temas oscuros) los rellenos sólidos de acento siguen legibles porque su tinta no es fija:
+`--ng-accent-ink` (casillas del overview) se calcula con `resolveSectionInk('--accent')` y el resto usa
+`text-surface-0` o son indicadores sin texto encima.
+
+**Compatibilidad de `'text'` (excepción consciente a "todo campo nuevo en ambos espejos", ver
+`ui-settings.json` en `architecture.md`):**
+- **Móvil (pendiente):** el espejo `noteflow-mobile/src/core/uiSettings.ts` solo acepta tripletes →
+  ignora `'text'` (sigue al tema) y lo borra del fichero en su siguiente escritura de apariencia.
+- **Escritorio anterior a este cambio:** también lo descarta, y es peor que el móvil: su handler
+  `ui-settings:set` hace `mergeUiSettings(readUiSettingsFile(), patch)` sobre el fichero **ya saneado**,
+  así que **cualquier** escritura (cambiar tema, tamaño de fuente del editor…) reescribe el fichero sin
+  `'text'`.
+- **Seed legacy que lo pisa:** cuando la clave `accent` (o `editorColors.*`) queda AUSENTE por lo
+  anterior, un equipo que aún tenga un acento antiguo en `localStorage` (`noteflow-accent-override`)
+  hará el seed de migración de `initTheme` con ese triplete y **sobrescribirá `'text'` en todos los
+  dispositivos** vía sync.
+- **Downgrade:** el dual-write deja `'text'` en `localStorage`; una versión anterior que vea la clave
+  ausente en el fichero cae a ese valor legacy y aplica `--accent: text` (o `--heading-*: text`), que
+  no es un color válido → `rgb(var(--accent))` deja de pintar. (No lo re-siembra: su seed exige
+  triplete.)
+
+**Paleta de presets** (`ACCENT_PRESETS`, compartida por acento y colores del editor): 9 tonos de
+saturación/luminosidad media — azul, teal, salvia, ocre, terracota, rosa, malva, violeta y gris
+pizarra al final — elegidos para dar **≥ 3:1 de contraste contra `--bg-1` y `--bg-editor` de los 14
+temas** (claros y oscuros), porque el mismo color se usa en ambos.
 
 ### Color de grupos y secciones (paleta del tema + color libre)
 

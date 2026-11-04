@@ -60,11 +60,11 @@ export const overview = {
   aiHideTooltip: 'The AI will never index, read or reference these sections',
   cantDeleteAllSections: "Can't delete every section — delete the note instead",
 
-  // Editor ↔ raw markdown mode for a multi-section selection.
-  modeEditor: 'Editor mode',
-  modeRaw: 'Raw mode',
-  modeEditorTooltip: 'Open these sections in the rich text editor',
-  modeRawTooltip: 'Open these sections as raw markdown',
+  // Markdown mode (rendered) ↔ text mode (shown as-is) for a multi-section selection.
+  modeEditor: 'Markdown mode',
+  modeRaw: 'Text mode',
+  modeEditorTooltip: 'Render these sections as markdown',
+  modeRawTooltip: 'Show these sections as plain text, without rendering',
 
   // Note-overview delete-sections confirmation.
   deleteSections: 'Delete sections',
@@ -82,18 +82,18 @@ export const overview = {
   // Tag on the header of the section the editor has open (shown uppercase).
   openTag: 'Open',
   emptySectionHint: 'Empty section · click to write',
-  // Card footer: task progress (3+ tasks), else the word count; "Raw" = raw mode.
+  // Card footer: task progress (3+ tasks), else the word count; "Text" = text mode.
   tasksProgress: '{done}/{total} tasks',
   wordsPlural: {
     one: '{count} word',
     other: '{count} words',
   },
   emptyStat: 'Empty',
-  rawBadge: 'Raw',
+  rawBadge: 'Text',
   selectionActions: 'Selection actions',
 
   // Section preview card (shared with the hover popover).
-  rawSection: 'Raw markdown section',
-  richSection: 'Rich text section',
+  rawSection: 'Text section',
+  richSection: 'Markdown section',
   emptySection: 'Empty section',
 }

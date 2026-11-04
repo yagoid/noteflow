@@ -32,7 +32,7 @@ sections:
   - id: sec001
     name: Note
     file: sec001.md
-    isRawMode: true   # true = markdown/raw, false/ausente = rich text (TipTap HTML)
+    isRawMode: true   # true = modo texto (la app lo muestra tal cual, sin renderizar); false/ausente = modo markdown (renderizado). El .md guarda markdown en ambos
     aiHidden: true    # opcional — la IA NUNCA ve esta sección (índice, chat RAG, tools)
   - id: sec002
     name: Tasks
@@ -58,7 +58,7 @@ encryption:
 - Marcador de versión: `<notesDir>/.noteflow-format` (contenido `2`).
 - En memoria el `Note` sigue hidratado (`sections[].content`); `Note.filePath` = **directorio**;
   `Note.raw` = contenido de `note.md`. La UI (editor, sidebar, stickies) no cambió.
-- Título por defecto: `DD/MM/YYYY`. Sección por defecto: `Note` en raw.
+- Título por defecto: `DD/MM/YYYY`. Sección por defecto: `Note` en modo markdown (`defaultSections()`, sin `isRawMode`); el CLI crea las suyas en modo texto (`isRawMode: true`) salvo `--rich`.
 - **`created` por sección** (opcional, ISO 8601, misma clave en desktop, CLI y móvil): se escribe
   solo si existe y se conserva en el round-trip (también dentro del payload cifrado, que es el JSON
   del array `sections`). Se asigna `now` al **crear** una sección (nueva pestaña, duplicar — la

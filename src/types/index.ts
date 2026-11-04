@@ -476,7 +476,9 @@ export interface ActiveSyncStatus {
 // Mirror of UiSettings in electron/uiSettings.ts. Tri-state override keys
 // (appFont / accent / editorColors.*): ABSENT = never written (readers fall
 // back to legacy local sources), null = explicitly cleared ("follow theme"),
-// string = the override. `ui-settings:set` takes a PARTIAL patch merged in main.
+// string = the override (accent / editorColors.*: an "r g b" triplet or the
+// THEME_TEXT_COLOR sentinel "text" of src/lib/colorUtils.ts, which follows the
+// theme's --text). `ui-settings:set` takes a PARTIAL patch merged in main.
 export interface UiSettings {
   theme?: string
   appFont?: string | null

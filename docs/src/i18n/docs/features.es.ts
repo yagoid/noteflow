@@ -110,7 +110,7 @@ export const featuresEs: FeaturesContent = {
     bullets: [
       '<kbd>Ctrl</kbd>+<kbd>S</kbd> abre la <strong>sección actual</strong> como sticky; <kbd>Ctrl</kbd>+<kbd>G</kbd> abre <strong>todas las secciones</strong> de la nota a la vez. También hay un botón <code>⧉</code> en la toolbar del editor.',
       'Las stickies nacen a <strong>300 × 300 px</strong> y se redimensionan libremente (mínimo 200 × 200).',
-      'Cada sticky es un editor completo: <strong>WYSIWYG o markdown en crudo</strong>, igual que la ventana principal.',
+      'Cada sticky es un editor completo: <strong>modo markdown (renderizado) o modo texto (tal cual)</strong>, igual que la ventana principal.',
       'Los cambios se sincronizan con la ventana principal <strong>en tiempo real</strong> — es la misma sección, no una copia.',
       'Abre <strong>tantas como quieras</strong>; las stickies plegadas se apilan como píldoras en la esquina de tu pantalla.',
     ],
@@ -130,17 +130,17 @@ export const featuresEs: FeaturesContent = {
       after: ' antes del viernes.',
       brokenLabel: 'Si la sección destino se borra, la pill queda rota:',
       brokenPill: 'Roadmap antiguo',
-      rawLabel: 'el mismo enlace en markdown crudo',
+      rawLabel: 'el mismo enlace en modo texto',
       raw: '[Checklist de lanzamiento](noteflow://k3v9pQ/aB3dE9)',
     },
     bullets: [
       '<strong>Click</strong> en una pill navega a la sección destino — en la misma nota o en cualquier otra. <strong>Hover</strong> muestra la misma previsualización flotante que usa el resto de la app.',
       'La pill muestra el nombre del destino <strong>en vivo</strong>: renombra la sección y todas las pills que apuntan a ella se actualizan. Borra el destino y la pill pasa a estado <strong>roto</strong> (atenuada, tachada, sin navegación).',
-      'El buscador excluye notas cifradas, archivadas y temporales; el comando <kbd>/</kbd> existe solo en modo rich.',
+      'El buscador excluye notas cifradas, archivadas y temporales; el comando <kbd>/</kbd> existe solo en modo markdown.',
       'El mismo menú <kbd>/</kbd> inserta un <strong>tablero kanban</strong> (<kbd>/kanban</kbd>): columnas y tarjetas que arrastras, con los chips de las tareas (📅 fecha límite, ⏰ alarma, 🔺 importancia), dentro de la propia nota — y guardado como markdown plano, como todo lo demás.',
     ],
     rawP:
-      'Por debajo, una pill no tiene nada de exótico — es un enlace markdown normal, <code>[Nombre](noteflow://noteId/sectionId)</code>, guardado dentro del texto de la sección. Eso es exactamente lo que ves en modo raw, y por eso los enlaces <strong>sobreviven al sync, al export y al import</strong> sin cambios.',
+      'Por debajo, una pill no tiene nada de exótico — es un enlace markdown normal, <code>[Nombre](noteflow://noteId/sectionId)</code>, guardado dentro del texto de la sección. Eso es exactamente lo que ves en modo texto, y por eso los enlaces <strong>sobreviven al sync, al export y al import</strong> sin cambios.',
     brainP:
       'Estos enlaces también aparecen como <strong>aristas en la vista cerebro</strong>, conectando las dos secciones — y como son estructura explícita tuya, funcionan incluso con la IA y los embeddings <strong>completamente desactivados</strong>.',
   },
@@ -192,7 +192,7 @@ export const featuresEs: FeaturesContent = {
           { combos: [['Ctrl', 'E']], desc: 'Código inline' },
           { combos: [['Ctrl', 'Shift', 'B']], desc: 'Bloque de código' },
           { combos: [['Ctrl', 'F']], desc: 'Buscar dentro de la nota' },
-          { combos: [['Ctrl', 'M']], desc: 'Alternar markdown crudo / texto enriquecido' },
+          { combos: [['Ctrl', 'M']], desc: 'Alternar modo texto / markdown' },
           { combos: [['Ctrl', '+'], ['Ctrl', '−'], ['Ctrl', '0']], desc: 'Tamaño de fuente: aumentar / disminuir / reset' },
         ],
       },

@@ -47,7 +47,7 @@ export const palette = {
   scPalette: 'palette',
   scNote: 'note',
   scSearch: 'search',
-  scRawEditor: 'raw/editor',
+  scRawEditor: 'text/markdown',
 
   // Results.
   results: { one: '{count} result', other: '{count} results' },

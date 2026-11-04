@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { THEMES, DEFAULT_THEME_ID, APP_FONTS, DEFAULT_APP_FONT } from '../lib/themes'
 import type { Theme } from '../lib/themes'
+import { THEME_TEXT_COLOR, resolveThemeColor } from '../lib/colorUtils'
 import type { UiSettings } from '../types'
 
 // Appearance is SYNCED across devices via ui-settings.json in the notes dir
@@ -22,8 +23,16 @@ const UI_SCALE_KEY = 'noteflow-ui-scale'
 // to pre-validate the migration seed so it always survives main's sanitizer).
 const RGB_TRIPLET = /^\d{1,3} \d{1,3} \d{1,3}$/
 
+/** A stored colour main's sanitizer keeps: an "r g b" triplet or the theme-text sentinel. */
+function isStoredColor(value: string): boolean {
+  return value === THEME_TEXT_COLOR || RGB_TRIPLET.test(value)
+}
+
 export type EditorColorKey = 'h1' | 'h2' | 'h3' | 'italic' | 'inlineCode' | 'codeAccent'
-/** Per-element editor colour overrides as "r g b" triplets, or null to follow the theme. */
+/**
+ * Per-element editor colour overrides as "r g b" triplets (or THEME_TEXT_COLOR = follow the
+ * theme's `--text`), or null to follow the element's own theme var.
+ */
 export type EditorColorOverrides = Record<EditorColorKey, string | null>
 
 const EMPTY_EDITOR_COLORS: EditorColorOverrides = {
@@ -83,11 +92,13 @@ function editorColorsFromUi(colors: NonNullable<UiSettings['editorColors']>): Ed
   return overrides
 }
 
-function applyEditorColors(overrides: EditorColorOverrides) {
+// Takes the theme because THEME_TEXT_COLOR resolves to ITS `--text` triple: re-run on every
+// theme change so a "text" colour flips with it (light ink on dark themes and vice versa).
+function applyEditorColors(overrides: EditorColorOverrides, theme: Theme) {
   const root = document.documentElement
   for (const key of EDITOR_COLOR_KEYS) {
     const value = overrides[key]
-    if (value) root.style.setProperty(EDITOR_COLOR_VARS[key], value)
+    if (value) root.style.setProperty(EDITOR_COLOR_VARS[key], resolveThemeColor(value, theme.vars['--text']))
     else root.style.removeProperty(EDITOR_COLOR_VARS[key])
   }
 }
@@ -134,17 +145,24 @@ function applyTheme(theme: Theme, fontOverride: string | null, accentOverride: s
     ? APP_FONTS[fontId]
     : APP_FONTS[DEFAULT_APP_FONT]
   root.style.setProperty('--app-font-family', font.stack)
-  // Accent — user override (stored as an "r g b" triplet), else the theme's accent.
-  root.style.setProperty('--accent', accentOverride ?? theme.vars['--accent'])
+  // Accent — user override (an "r g b" triplet, or THEME_TEXT_COLOR resolved to this
+  // theme's `--text` triple so `--accent` always holds a real triple), else the theme's accent.
+  root.style.setProperty(
+    '--accent',
+    accentOverride ? resolveThemeColor(accentOverride, theme.vars['--text']) : theme.vars['--accent'],
+  )
 }
 
 interface ThemeState {
   activeThemeId: string
   /** APP_FONTS key chosen by the user, or null to follow the theme's own font. */
   fontOverride: string | null
-  /** Accent as an "r g b" triplet chosen by the user, or null to follow the theme. */
+  /**
+   * Accent chosen by the user: an "r g b" triplet or THEME_TEXT_COLOR (follows the active
+   * theme's `--text`, resolved in applyTheme), or null to follow the theme's accent.
+   */
   accentOverride: string | null
-  /** Per-element editor colour overrides ("r g b" triplets) layered over the theme. */
+  /** Per-element editor colour overrides ("r g b" triplets or THEME_TEXT_COLOR) layered over the theme. */
   editorColors: EditorColorOverrides
   /** UI zoom factor (one of UI_SCALES). */
   uiScale: number
@@ -195,7 +213,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     const storedScale = parseFloat(localStorage.getItem(UI_SCALE_KEY) ?? '')
     const uiScale = Number.isFinite(storedScale) ? nearestScale(storedScale) : DEFAULT_UI_SCALE
     applyTheme(theme, fontOverride, accentOverride)
-    applyEditorColors(editorColors)
+    applyEditorColors(editorColors, theme)
     applyUiScale(uiScale)
     set({ activeThemeId: theme.id, fontOverride, accentOverride, editorColors, uiScale })
 
@@ -213,7 +231,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     if (!('appFont' in ui) && legacyFont && Object.prototype.hasOwnProperty.call(APP_FONTS, legacyFont)) {
       seed.appFont = legacyFont
     }
-    if (!('accent' in ui) && legacyAccent && RGB_TRIPLET.test(legacyAccent)) {
+    if (!('accent' in ui) && legacyAccent && isStoredColor(legacyAccent)) {
       seed.accent = legacyAccent
     }
     if (!ui.editorColors && legacyColorsRaw) {
@@ -221,7 +239,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
       const valid: Partial<Record<EditorColorKey, string>> = {}
       for (const k of EDITOR_COLOR_KEYS) {
         const v = legacyColors[k]
-        if (v !== null && RGB_TRIPLET.test(v)) valid[k] = v
+        if (v !== null && isStoredColor(v)) valid[k] = v
       }
       if (Object.keys(valid).length > 0) seed.editorColors = valid
     }
@@ -238,15 +256,17 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     const accentOverride = 'accent' in ui ? ui.accent ?? null : state.accentOverride
     const editorColors = ui.editorColors ? editorColorsFromUi(ui.editorColors) : state.editorColors
     applyTheme(theme, fontOverride, accentOverride)
-    applyEditorColors(editorColors)
+    applyEditorColors(editorColors, theme)
     set({ activeThemeId: theme.id, fontOverride, accentOverride, editorColors })
   },
 
   setTheme: (id) => {
     const theme = THEMES.find((t) => t.id === id)
     if (!theme) return
-    const { fontOverride, accentOverride } = get()
+    const { fontOverride, accentOverride, editorColors } = get()
     applyTheme(theme, fontOverride, accentOverride)
+    // Re-resolve the editor colours too: a THEME_TEXT_COLOR one follows the new `--text`.
+    applyEditorColors(editorColors, theme)
     window.noteflow.setTheme(id) // legacy dual-write (settings.json)
     void window.noteflow.setUiSettings?.({ theme: id })
     set({ activeThemeId: id })
@@ -274,7 +294,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     if (EDITOR_COLOR_KEYS.every((k) => next[k] === null)) localStorage.removeItem(EDITOR_COLORS_KEY)
     else localStorage.setItem(EDITOR_COLORS_KEY, JSON.stringify(next))
     void window.noteflow.setUiSettings?.({ editorColors: { [key]: rgb } })
-    applyEditorColors(next)
+    applyEditorColors(next, currentTheme(get().activeThemeId))
     set({ editorColors: next })
   },
 
@@ -282,7 +302,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     const next = { ...EMPTY_EDITOR_COLORS }
     localStorage.removeItem(EDITOR_COLORS_KEY)
     void window.noteflow.setUiSettings?.({ editorColors: { ...EMPTY_EDITOR_COLORS } })
-    applyEditorColors(next)
+    applyEditorColors(next, currentTheme(get().activeThemeId))
     set({ editorColors: next })
   },
 

@@ -41,7 +41,7 @@ export const palette: Messages['palette'] = {
   scPalette: 'paleta',
   scNote: 'nota',
   scSearch: 'buscar',
-  scRawEditor: 'crudo/editor',
+  scRawEditor: 'texto/markdown',
 
   results: { one: '{count} resultado', other: '{count} resultados' },
   noResults: 'Sin resultados para "{query}"',

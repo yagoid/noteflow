@@ -49,10 +49,10 @@ export const overview = {
   aiHideTooltip: 'La IA nunca indexará, leerá ni citará estas secciones',
   cantDeleteAllSections: 'No puedes eliminar todas las secciones — elimina la nota',
 
-  modeEditor: 'Modo editor',
-  modeRaw: 'Modo markdown en crudo',
-  modeEditorTooltip: 'Abrir estas secciones en el editor de texto enriquecido',
-  modeRawTooltip: 'Abrir estas secciones como markdown en crudo',
+  modeEditor: 'Modo markdown',
+  modeRaw: 'Modo texto',
+  modeEditorTooltip: 'Renderizar estas secciones como markdown',
+  modeRawTooltip: 'Mostrar estas secciones como texto plano, sin renderizar',
 
   deleteSections: 'Eliminar secciones',
   deleteSectionsMessage: {
@@ -73,10 +73,10 @@ export const overview = {
     other: '{count} palabras',
   },
   emptyStat: 'Vacía',
-  rawBadge: 'Raw',
+  rawBadge: 'Texto',
   selectionActions: 'Acciones de la selección',
 
-  rawSection: 'Sección Markdown sin formato',
-  richSection: 'Sección de texto enriquecido',
+  rawSection: 'Sección de texto',
+  richSection: 'Sección markdown',
   emptySection: 'Sección vacía',
 }

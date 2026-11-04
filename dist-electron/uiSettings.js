@@ -16,7 +16,12 @@
 //   - key === null → the user explicitly cleared the override ("follow the
 //     theme"); readers must NOT fall back to legacy values. Nulls are therefore
 //     kept in the stored JSON on purpose.
-//   - key === "r g b" / string → the override value.
+//   - key === "r g b" / string → the override value. For `accent` and
+//     `editorColors.*` that is an "r g b" triplet or THEME_TEXT_COLOR ("text"):
+//     "follow the active theme's --text" — the renderer (themeStore) resolves it
+//     to the theme's triple on every theme change. PENDING in the mobile mirror:
+//     its sanitizer still only accepts triplets, so the phone ignores "text"
+//     (follows the theme) and drops it from the file on its next write.
 // `theme` and the `editor` fields always hold concrete values, so null is not
 // accepted for them (invalid values are silently dropped, like
 // sanitizeSectionColors does).
@@ -26,7 +31,7 @@
 // renderer stores that own different slices (themeStore → appearance,
 // editorSettingsStore → editor) never clobber each other.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.UI_FONT_SIZE_MAX = exports.UI_FONT_SIZE_MIN = exports.UI_EDITOR_COLOR_KEYS = void 0;
+exports.UI_FONT_SIZE_MAX = exports.UI_FONT_SIZE_MIN = exports.THEME_TEXT_COLOR = exports.UI_EDITOR_COLOR_KEYS = void 0;
 exports.sanitizeUiSettings = sanitizeUiSettings;
 exports.mergeUiSettings = mergeUiSettings;
 exports.UI_EDITOR_COLOR_KEYS = [
@@ -38,6 +43,11 @@ exports.UI_EDITOR_COLOR_KEYS = [
     'codeAccent',
 ];
 const RGB_TRIPLET = /^\d{1,3} \d{1,3} \d{1,3}$/;
+/**
+ * Colour sentinel: "follow the active theme's text colour" (mirror of THEME_TEXT_COLOR in
+ * src/lib/colorUtils.ts — main can't import from src/).
+ */
+exports.THEME_TEXT_COLOR = 'text';
 exports.UI_FONT_SIZE_MIN = 10;
 exports.UI_FONT_SIZE_MAX = 24;
 function isShortString(value) {
@@ -45,6 +55,10 @@ function isShortString(value) {
 }
 function isTriplet(value) {
     return typeof value === 'string' && RGB_TRIPLET.test(value);
+}
+/** A storable colour override (accent / editorColors.*): a triplet or the theme-text sentinel. */
+function isColor(value) {
+    return value === exports.THEME_TEXT_COLOR || isTriplet(value);
 }
 function clampFontSize(value) {
     return Math.min(exports.UI_FONT_SIZE_MAX, Math.max(exports.UI_FONT_SIZE_MIN, Math.round(value)));
@@ -67,7 +81,7 @@ function sanitizeUiSettings(raw) {
         out.appFont = input.appFont;
     if (input.accent === null)
         out.accent = null;
-    else if (isTriplet(input.accent))
+    else if (isColor(input.accent))
         out.accent = input.accent;
     const colors = input.editorColors;
     if (colors && typeof colors === 'object' && !Array.isArray(colors)) {
@@ -79,7 +93,7 @@ function sanitizeUiSettings(raw) {
                 cleaned[key] = null;
                 hasAny = true;
             }
-            else if (isTriplet(value)) {
+            else if (isColor(value)) {
                 cleaned[key] = value;
                 hasAny = true;
             }

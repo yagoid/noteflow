@@ -271,7 +271,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
         window.dispatchEvent(new CustomEvent('noteflow:close-tab'))
         return
       }
-      // Ctrl+M — toggle markdown / rich-text mode
+      // Ctrl+M — toggle text / markdown mode
       if (!e.shiftKey && (key === 'm' || e.code === 'KeyM')) {
         e.preventDefault()
         window.dispatchEvent(new CustomEvent('noteflow:toggle-raw'))

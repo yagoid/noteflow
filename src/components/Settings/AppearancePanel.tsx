@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Check, ChevronDown, Minus, Plus, RotateCcw } from 'lucide-react'
 import { THEMES, APP_FONTS } from '../../lib/themes'
-import { hexToRgbTriple, rgbTripleToHex } from '../../lib/colorUtils'
+import { THEME_TEXT_COLOR, hexToRgbTriple, resolveThemeColor, rgbTripleToHex } from '../../lib/colorUtils'
 import { useThemeStore } from '../../stores/themeStore'
 import { useBrainSettingsStore } from '../../stores/brainSettingsStore'
 import { UI_SCALES } from '../../stores/themeStore'
@@ -34,19 +34,21 @@ const EDITOR_COLOR_ROWS: EditorColorRow[] = [
   { key: 'codeAccent', sample: 'border' },
 ]
 
-// Curated accent presets (as "r g b" triplets) spanning the hue wheel, on top of
-// which the user can still pick any custom colour via the native colour input.
+// Curated presets (as "r g b" triplets) around the hue wheel, slate grey last, on top of
+// which the user can still pick any custom colour via the native colour input. Mid
+// saturation and lightness on purpose: the same colour must read on light AND dark themes
+// (each one is ≥ 3:1 against the --bg-1 / --bg-editor of every theme in lib/themes.ts).
+// The "text" swatch (THEME_TEXT_COLOR) is rendered separately, before these.
 const ACCENT_PRESETS: string[] = [
-  '122 162 247', // blue
-  '78 158 255',  // bright blue
-  '78 201 176',  // teal
-  '158 206 106', // green
-  '224 175 104', // amber
-  '255 158 100', // orange
-  '247 118 142', // red
-  '255 121 198', // pink
-  '187 154 247', // purple
-  '125 207 255', // cyan
+  '88 128 214',  // blue
+  '50 142 152',  // teal
+  '88 142 94',   // sage green
+  '172 122 48',  // ochre
+  '200 102 72',  // terracotta
+  '208 88 110',  // rose
+  '186 100 152', // mauve
+  '138 108 212', // violet
+  '120 128 144', // slate grey
 ]
 
 export function AppearancePanel() {
@@ -69,14 +71,29 @@ export function AppearancePanel() {
 
   const theme = THEMES.find((th) => th.id === activeThemeId) ?? THEMES[0]
   const effectiveFontId = fontOverride ?? theme.font
-  const effectiveAccent = accentOverride ?? theme.vars['--accent']
+  // Stored colours may be THEME_TEXT_COLOR: resolve it to this theme's `--text` triple, as
+  // themeStore does when applying it, so every swatch/preview/colour input gets a real triple.
+  const resolveColor = (value: string) => resolveThemeColor(value, theme.vars['--text'])
+  const effectiveAccent = accentOverride ? resolveColor(accentOverride) : theme.vars['--accent']
   const fonts = Object.values(APP_FONTS)
 
   // Effective colour of an editor element — the override, else its theme var. `--accent`
   // reads through the accent override, since that's what the root ends up carrying.
   const editorColor = (key: EditorColorKey) => {
+    const override = editorColors[key]
+    if (override) return resolveColor(override)
     const themeVar = EDITOR_COLOR_THEME_VARS[key]
-    return editorColors[key] ?? (themeVar === '--accent' ? effectiveAccent : theme.vars[themeVar])
+    return themeVar === '--accent' ? effectiveAccent : theme.vars[themeVar]
+  }
+  // The "text" swatch is selected when chosen explicitly, or when the element follows the theme
+  // and its default resolves to `--text`: its theme var is `--text` (h3), or it is `--accent`
+  // (h1, codeAccent) while the accent itself is the text colour — the same "effective colour"
+  // rule as the presets.
+  const editorColorFollowsText = (key: EditorColorKey) => {
+    const override = editorColors[key]
+    if (override !== null) return override === THEME_TEXT_COLOR
+    const themeVar = EDITOR_COLOR_THEME_VARS[key]
+    return themeVar === '--text' || (themeVar === '--accent' && accentOverride === THEME_TEXT_COLOR)
   }
   const editorColorsOverridden = EDITOR_COLOR_ROWS.some((row) => editorColors[row.key] !== null)
 
@@ -116,6 +133,28 @@ export function AppearancePanel() {
           </span>
         )
     }
+  }
+
+  // First swatch of every colour row: the theme's text colour (light on dark themes, dark on
+  // light ones), painted with the live `--text` var so it flips with the theme. The check uses
+  // --bg-1 so it contrasts with the swatch either way (a white check would vanish on white).
+  function renderTextSwatch(size: 'lg' | 'sm', selected: boolean, onSelect: () => void) {
+    const lg = size === 'lg'
+    return (
+      <button
+        key={THEME_TEXT_COLOR}
+        onClick={onSelect}
+        className={`${lg ? 'w-7 h-7' : 'w-4 h-4'} rounded-full border border-border flex items-center justify-center transition-transform hover:scale-110`}
+        style={{
+          background: 'rgb(var(--text))',
+          boxShadow: selected ? `0 0 0 2px rgb(var(--bg-1)), 0 0 0 ${lg ? 4 : 3}px rgb(var(--text) / 0.6)` : undefined,
+        }}
+        title={t.settings.appearance.textColour}
+        aria-label={t.settings.appearance.textColour}
+      >
+        {selected && <Check size={lg ? 13 : 9} strokeWidth={3} style={{ color: 'rgb(var(--bg-1))' }} />}
+      </button>
+    )
   }
 
   // Only the first four themes show by default; the rest live behind a toggle.
@@ -243,8 +282,9 @@ export function AppearancePanel() {
             {t.settings.appearance.accent}
           </SectionTitle>
           <div className="flex flex-wrap items-center gap-2">
+            {renderTextSwatch('lg', accentOverride === THEME_TEXT_COLOR, () => setAccentOverride(THEME_TEXT_COLOR))}
             {ACCENT_PRESETS.map((rgb) => {
-              const selected = effectiveAccent.trim() === rgb
+              const selected = accentOverride !== THEME_TEXT_COLOR && effectiveAccent.trim() === rgb
               return (
                 <button
                   key={rgb}
@@ -306,8 +346,9 @@ export function AppearancePanel() {
                     {renderColorSample(row, color)}
                   </span>
                   <div className="flex flex-wrap items-center gap-1">
+                    {renderTextSwatch('sm', editorColorFollowsText(row.key), () => setEditorColor(row.key, THEME_TEXT_COLOR))}
                     {ACCENT_PRESETS.map((rgb) => {
-                      const selected = color.trim() === rgb
+                      const selected = !editorColorFollowsText(row.key) && color.trim() === rgb
                       return (
                         <button
                           key={rgb}
@@ -475,7 +516,9 @@ export function AppearancePanel() {
             <span className="text-text-muted/60">{t.settings.appearance.accent}</span>
             <span className="flex items-center gap-1.5 text-text">
               <span className="w-3 h-3 rounded-full border border-border" style={{ background: `rgb(${effectiveAccent})` }} />
-              {accentOverride === null ? <span className="text-text-muted/50">{t.settings.appearance.summaryTheme}</span> : t.settings.appearance.summaryCustom}
+              {accentOverride === null
+                ? <span className="text-text-muted/50">{t.settings.appearance.summaryTheme}</span>
+                : accentOverride === THEME_TEXT_COLOR ? t.settings.appearance.summaryText : t.settings.appearance.summaryCustom}
             </span>
           </div>
         </div>

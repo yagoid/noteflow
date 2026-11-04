@@ -23,3 +23,16 @@ export function rgbTripleToHex(rgb: string): string {
   const h = (n: number) => Math.max(0, Math.min(255, n || 0)).toString(16).padStart(2, '0')
   return `#${h(r)}${h(g)}${h(b)}`
 }
+
+/**
+ * Stored-colour sentinel for "follow the theme's text colour" (Settings → Appearance: accent and
+ * editor colours). Persisted as-is in ui-settings.json (electron/uiSettings.ts accepts it) and
+ * resolved to the active theme's `--text` triple every time the theme is applied, so the CSS vars
+ * always carry a real "r g b" triple (consumers parse them via getComputedStyle).
+ */
+export const THEME_TEXT_COLOR = 'text'
+
+/** A stored colour override → the "r g b" triple to apply (`THEME_TEXT_COLOR` → `textTriple`). */
+export function resolveThemeColor(value: string, textTriple: string): string {
+  return value === THEME_TEXT_COLOR ? textTriple : value
+}

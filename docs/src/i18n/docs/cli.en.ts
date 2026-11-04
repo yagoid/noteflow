@@ -86,7 +86,7 @@ export const cliEn = {
     bullets: [
       'Each section’s content lives in its own <code>&lt;sectionId&gt;.md</code> — no frontmatter, just markdown.',
       'The <code>updated:</code> field in <code>note.md</code> is the canonical sync timestamp for the whole note.',
-      '<code>isRawMode: true</code> means raw/markdown mode; <code>false</code> means rich text (TipTap HTML).',
+      '<code>isRawMode: true</code> means text mode (the app shows the content as-is, unrendered); <code>false</code> means markdown mode (the app renders it). Either way the section file holds plain markdown.',
       'Notes with an <code>encryption:</code> block in <code>note.md</code> are encrypted (the folder only contains <code>note.md</code>) — the CLI ignores them.',
       'A <code>.noteflow-format</code> marker file (containing <code>2</code>) at the root of the notes directory flags the v2 format.',
     ],

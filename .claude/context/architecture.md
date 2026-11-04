@@ -118,8 +118,8 @@ noteflow/
 │   │   │   ├── ResizableImage.tsx       # NodeView: imagen redimensionable
 │   │   │   ├── TableContextMenu.tsx     # Menú contextual de tablas
 │   │   │   ├── SearchHighlightExtension.ts # Resaltado de matches de búsqueda in-note
-│   │   │   ├── InNoteSearchBar.tsx      # Barra búsqueda dentro de la nota (modo WYSIWYG)
-│   │   │   └── RawNoteSearchBar.tsx     # Barra búsqueda dentro de la nota (modo raw)
+│   │   │   ├── InNoteSearchBar.tsx      # Barra búsqueda dentro de la nota (modo markdown)
+│   │   │   └── RawNoteSearchBar.tsx     # Barra búsqueda dentro de la nota (modo texto, `isRawMode`)
 │   │   ├── Sidebar/
 │   │   │   ├── Sidebar.tsx              # Lista de notas, filtros, búsqueda, grupos/carpetas
 │   │   │   ├── NoteGroupHeader.tsx      # Cabecera de grupo (nombre→group overview; resto→colapsar)
@@ -423,7 +423,10 @@ Contenido del dir de notas:
   **Espejo en noteflow-mobile** (`src/core/uiSettings.ts`): su saneador también descarta claves
   desconocidas y el móvil re-sanea el fichero antes de cada escritura (`appearanceStore`), así que un
   campo nuevo que no se porte allí se borra en cuanto el móvil guarda su apariencia (p. ej. un cambio de
-  acento). Todo campo nuevo del esquema hay que añadirlo en los dos.
+  acento). Todo campo nuevo del esquema hay que añadirlo en los dos. **Excepción consciente:** el
+  valor centinela `'text'` de `accent`/`editorColors.*` (color "texto" adaptativo) aún no está en el espejo
+  móvil — riesgos y compatibilidad con versiones anteriores en **Color "texto" adaptativo** de `patterns.md`
+  (sección "Colores del editor").
   Claves de override tri-estado: AUSENTE = nunca escrita (los stores caen a las fuentes legacy
   locales y hacen seed una vez), `null` = override borrado explícitamente ("sigue al tema"),
   string = valor. Los stores (`themeStore`, `editorSettingsStore`) siguen dual-escribiendo las

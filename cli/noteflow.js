@@ -4040,7 +4040,7 @@ async function cmdAdd(positionalText, opts) {
   const targetTitle = opts.title || getTodayTitle()
   const explicitSection = typeof opts.section === 'string' && opts.section !== ''
   const sectionName = explicitSection ? opts.section : 'Note'
-  const isRaw = opts.raw !== false // default true (raw/markdown mode)
+  const isRaw = opts.raw !== false // default true (text mode: the app shows the content as-is)
   const bytesWritten = Buffer.byteLength(text, 'utf-8')
 
   // Find existing note by title
@@ -4386,7 +4386,7 @@ function cmdSections(titleQuery) {
   out(`\n  Sections of "${note.title}":`)
   for (const s of note.sections || []) {
     const lines = lineCount(s.content)
-    out(`    ${s.name}  (${lines} lines${s.isRawMode ? ', raw/markdown' : ', rich'}${s.aiHidden ? ', hidden from AI' : ''})`)
+    out(`    ${s.name}  (${lines} lines${s.isRawMode ? ', text' : ', markdown'}${s.aiHidden ? ', hidden from AI' : ''})`)
   }
   out('')
 }
@@ -5157,8 +5157,8 @@ function cmdHelp(topic) {
     --tag <tag>         Add a metadata tag to the note
     --group <name>      Assign the note to a group (only when creating)
     --folder <name>     Put the note in a folder of that group (requires --group)
-    --raw               Force raw/markdown mode for the section (default: true)
-    --rich              Use rich text mode for the section
+    --raw               New section in text mode: the app shows it as-is, unrendered (default)
+    --rich              New section in markdown mode: the app renders its markdown
     --dry-run           Show what would be written (note/section/bytes) without writing
     --json              Machine-readable result on stdout; info lines go to stderr
 
@@ -5271,7 +5271,7 @@ function cmdHelp(topic) {
     --text "<content>"   Inline text
     --file <path>        Read content from a file
     --stdin              Read content from stdin (also auto-used when piped)
-    --rich               Create a new section in rich-text mode (default: raw)
+    --rich               Create a new section in markdown mode, rendered (default: text mode, shown as-is)
 
   Other options:
     --dry-run            Show what would be written (note/section/bytes) without writing
@@ -5306,6 +5306,8 @@ function cmdHelp(topic) {
   to remove the last remaining section. Quote multi-word names. Being destructive,
   'rename'/'delete' only accept the EXACT name (case-insensitive): with no exact
   match they fail, listing the sections and any similar one ("Did you mean").
+  'add' creates the section in text mode (the app shows it as-is, unrendered);
+  with --rich it is created in markdown mode (the app renders the markdown).
 
   Examples:
     noteflow section add "Project Alpha" "Meeting Notes"

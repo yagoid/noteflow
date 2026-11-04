@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { sanitizeUiSettings, mergeUiSettings, type UiSettings } from '../../electron/uiSettings'
+import { sanitizeUiSettings, mergeUiSettings, THEME_TEXT_COLOR as MAIN_THEME_TEXT_COLOR, type UiSettings } from '../../electron/uiSettings'
+import { THEME_TEXT_COLOR } from '../../src/lib/colorUtils'
 
 describe('sanitizeUiSettings (tolerant validation)', () => {
   it('degrades to {} for garbage input, never throws', () => {
@@ -46,6 +47,28 @@ describe('sanitizeUiSettings (tolerant validation)', () => {
     expect(sanitizeUiSettings({ accent: '1234 2 3' })).toEqual({})
     expect(sanitizeUiSettings({ accent: ' 1 2 3' })).toEqual({})
     expect(sanitizeUiSettings({ editorColors: { h1: '#ff0000' } })).toEqual({})
+  })
+
+  it('accepts the "text" sentinel (follow the theme text colour) on accent and editor colours', () => {
+    // main's copy of the sentinel must match the renderer's (main can't import from src/).
+    expect(MAIN_THEME_TEXT_COLOR).toBe(THEME_TEXT_COLOR)
+    expect(sanitizeUiSettings({ accent: 'text' })).toEqual({ accent: 'text' })
+    expect(sanitizeUiSettings({ editorColors: { h1: 'text', h2: '1 2 3' } })).toEqual({
+      editorColors: { h1: 'text', h2: '1 2 3' },
+    })
+    // Only the exact sentinel: other words / casing / padding are still dropped.
+    expect(sanitizeUiSettings({ accent: 'Text' })).toEqual({})
+    expect(sanitizeUiSettings({ accent: ' text' })).toEqual({})
+    expect(sanitizeUiSettings({ accent: '--text' })).toEqual({})
+    expect(sanitizeUiSettings({ editorColors: { h1: 'accent' } })).toEqual({})
+    // Not a value for the editor fields.
+    expect(sanitizeUiSettings({ editor: { fontFamily: 'text' } })).toEqual({})
+  })
+
+  it('merges the "text" sentinel like any other override', () => {
+    const current: UiSettings = { accent: '1 2 3', editorColors: { h1: '9 9 9' } }
+    expect(mergeUiSettings(current, { accent: 'text' }).accent).toBe('text')
+    expect(mergeUiSettings(current, { editorColors: { h2: 'text' } }).editorColors).toEqual({ h1: '9 9 9', h2: 'text' })
   })
 
   it('clamps and rounds fontSize to an integer in 10–24', () => {
