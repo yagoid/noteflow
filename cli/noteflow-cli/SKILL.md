@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 1.14.0
+version: 1.15.0
 ---
 
 # NoteFlow CLI — Referencia completa
@@ -961,6 +961,12 @@ noteflow touch "título"
   nada por sí solo).
 - Usa `read`/`set` cuando reescribas la sección entera, o cuando no tengas acceso al
   sistema de ficheros (p. ej. la nota vive en otra máquina).
+
+### Estilo del contenido: no abuses del código inline
+
+Al escribir notas, **no abuses del código inline** (`` `así` ``). Resérvalo para
+las pocas referencias que lo piden de verdad y escribe el resto como texto normal:
+una nota llena de píldoras monoespaciadas se lee peor y lo importante deja de destacar.
 
 ---
 
