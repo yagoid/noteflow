@@ -189,6 +189,7 @@ export function ChatView({
   contextBar,
   withContext = false,
   autoSendPendingPrompt = true,
+  showSuggestions = true,
 }: {
   onOpenNote: (noteId: string, sectionId: string) => void
   onConfigure: () => void
@@ -202,6 +203,9 @@ export function ChatView({
   withContext?: boolean
   /** Auto-send a prompt queued from the command palette ("Ask AI" — the brain chat consumes it). */
   autoSendPendingPrompt?: boolean
+  /** Show the prompt chips above the composer (starters + the model's follow-ups). The editor
+   *  sidebar turns them off; the marker is stripped from the shown text either way. */
+  showSuggestions?: boolean
 }) {
   const t = useT()
   const { previewProps } = useSectionHoverPreview()
@@ -299,7 +303,7 @@ export function ChatView({
 
   // Prompt suggestions above the composer: personalized starters on an empty chat, or the
   // model's parsed next-actions once there's a conversation. Hidden while streaming.
-  const shownSuggestions = streaming ? [] : messages.length === 0 ? starterSuggestions : suggestions
+  const shownSuggestions = !showSuggestions || streaming ? [] : messages.length === 0 ? starterSuggestions : suggestions
 
   const canSend = (draft.trim().length > 0 || pendingAttachments.length > 0) && !streaming
   const send = (text: string) => sendMessage(text, { withContext })

@@ -369,21 +369,27 @@ Python…) quedan literales. **Borrador persistente:** las
 El mismo chat del cerebro, accesible desde el editor. Piezas: `AiPanel/AiChatButton.tsx` (botón),
 `AiPanel/AiChatSidebar.tsx` (panel), `AiPanel/ChatContextBar.tsx` + `lib/chatContext.ts` (contexto,
 tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventana), `AiPanel/ChatMoreMenu.tsx`
-(menú ⋯), `AiPanel/useChatEditorTarget.ts`; en main `electron/ai/chatContext.ts` y `electron/ai/chatUndo.ts`
-(puros, tests en `tests/electron/chatContext.test.ts` / `chatUndo.test.ts`).
-- **Botón:** `Brain` de 18 px con trazo fino (`strokeWidth` 1,25, para distinguirlo del `Brain` de
-  trazo normal del botón del cerebro de la `TitleBar`) en un botón de 32 px (activo = acento), a la
-  derecha del todo de la cabecera de `NoteEditor` (prop `aiChatButton`; `App` se lo pasa solo al panel
-  único o al **más a la derecha** del split). Va **centrado en vertical en la banda entre la fila de
-  pestañas y la toolbar de formato**: un wrapper `relative` envuelve la fila del título + la de fecha
-  (reserva `pr-10`) y el botón es `absolute right-3 top-1/2 -translate-y-1/2`. En la vista bloqueada de una nota
-  cifrada (sin fila de pestañas) va centrado en su cabecera con `-my-1`. Abre/pliega el sidebar — es la **única** forma de plegarlo — y, con el chat despegado,
+(menú ⋯ de la ventana despegada; el sidebar ya no lo usa), `AiPanel/useChatEditorTarget.ts`; en main
+`electron/ai/chatContext.ts` y `electron/ai/chatUndo.ts` (puros, tests en
+`tests/electron/chatContext.test.ts` / `chatUndo.test.ts`).
+- **Botón:** icono `BotMessageSquare` de 18 px con trazo fino (`strokeWidth` 1,25) en una **franja de
+  44 px de ancho (`w-11`) y alto completo de la cabecera**, sin redondeo y pegada al borde derecho de
+  `NoteEditor` (prop `aiChatButton`; `App` se lo pasa solo al panel único o al **más a la derecha** del
+  split). Pulsado = gris discreto (`text-text bg-surface-3`, tokens de tema; no el acento). Ocupa **toda la
+  banda entre la fila de pestañas y la toolbar de formato**: un wrapper `relative` envuelve la fila del
+  título + la de fecha (reserva `pr-10`, que con el `px-4` de las filas deja 12 px libres a la izquierda
+  del botón) y el botón es `absolute right-0 top-0 bottom-0`. En la vista bloqueada de una nota cifrada
+  (sin fila de pestañas) la cabecera es `relative` con `pr-14` y el botón se posiciona igual (alto completo
+  hasta el `border-b`). El componente fija solo el ancho; posición y alto los pone el call site
+  (`className`). Abre/pliega el sidebar — es la **única** forma de plegarlo — y, con el chat despegado,
   enfoca la ventana (`ai:chat-window-focus`). Es también el **ancla** de posición (`aiChatAnchor.ts`,
   mismo patrón que `sidebarAnchor.ts`).
 - **Sidebar:** `aside` absoluto en la fila de contenido de `App`, **hermano de `<main>`** (como el sidebar
   flotante de notas: sus drops no llegan al "soltar nota → split"), `z-30`, estilo TOC (`bg-surface-1`,
-  borde, `rounded-xl`, sombra). Cuelga 6 px por debajo del botón y alinea su borde derecho con él (así
-  el botón nunca queda tapado); bottom 12 px. Re-mide con rAF en `ResizeObserver` de la fila, montaje/
+  borde, `rounded-xl`, sombra). Cuelga 6 px por debajo del botón (= del borde inferior de la cabecera,
+  porque el botón la ocupa entera, así que nunca queda tapado) con el borde derecho a
+  `max(EDGE, distancia al borde derecho del botón)` — con el botón pegado al borde, `EDGE` = 12 px;
+  bottom 12 px. Re-mide con rAF en `ResizeObserver` de la fila, montaje/
   desmontaje del ancla, `resize` y un intervalo de 500 ms mientras está visible (la fila del título se
   mueve sin resize: banner de "sección borrada", scroll horizontal del split). Ancho 300–640 px
   arrastrando el borde izquierdo, persistido en `localStorage` (`noteflow-ai-chat-width`). **Animación**
@@ -399,8 +405,13 @@ tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventan
   cerebro/overviews) y si el ancla está en pantalla; la conversación vive en el store, así que ocultarlo
   o cambiar de nota no la toca (mensajes, borrador, streaming).
 - **Conversación compartida con el cerebro:** mismo `aiChatStore` (historial, hilo activo) y mismo
-  `ChatView`, en variante `compact` con `renderHeader` (cabecera propia: título, selector de modelo,
-  "Nuevo chat", ⋯ con Historial / Despegar), `contextBar` y `withContext`. El cerebro sigue igual: sin
+  `ChatView`, en variante `compact` con `renderHeader` (cabecera propia: sin texto de título — `sidebar.title` queda solo como aria-label y título de la ventana aparte —,
+  selector de modelo y tres botones de icono a la vista — Historial (activo mientras el overlay está
+  abierto, `historyOpen`), Nuevo chat y Abrir en ventana aparte), `contextBar`, `withContext` y
+  `showSuggestions={false}`: el sidebar **no muestra los chips de sugerencias** (ni los starters del chat
+  vacío ni los de seguimiento; el marcador del LLM se sigue quitando del texto con `splitSuggestions`).
+  Es una prop propia y no cuelga de `compact` porque la ventana despegada también es `compact` y sí los
+  muestra, como el cerebro. El cerebro sigue igual: sin
   barra de contexto ni `context` en el payload, y es el único que consume `pendingPrompt` ("Ask AI" de la
   paleta; `autoSendPendingPrompt`). Sin IA configurada: tarjeta con botón a **Ajustes → IA** (evento
   `noteflow:open-ai-settings`, lo atiende `TitleBar`).
@@ -460,8 +471,8 @@ tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventan
   `ai:chats-load` quita el `undo: 'available'` de las filas cuyo snapshot ya no existe (tras reiniciar)
   → sin botón. Restaurar es de la nota entera: deshacer una edición anterior revierte también las
   posteriores de esa nota (por eso pide confirmación).
-- **Ventana despegada ("se muda"):** ⋯ → "Despegar en ventana" (deshabilitado con streaming o
-  confirmación pendiente) → `aiChatStore.detachChat()` serializa `ChatHandoff` (messages,
+- **Ventana despegada ("se muda"):** botón "Open in a separate window" de la cabecera del sidebar
+  (deshabilitado con streaming o confirmación pendiente, con tooltip `sidebar.detachBusy`) → `aiChatStore.detachChat()` serializa `ChatHandoff` (messages,
   activeSessionId, draft, context, contextPinned, suggestions, pendingAttachments, `takenAt`) → `ai:chat-window-open`
   → main crea `createChatWindow()` (frameless, opaca como la de sección, `#ai-chat` → rama `chat` de
   `App.tsx`, rol de store `'section'`; bounds en `settings.json → aiChatWindow.bounds`, descartando la

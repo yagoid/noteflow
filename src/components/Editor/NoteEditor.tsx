@@ -1006,12 +1006,13 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
             if (!isPaneActive) activateThisPane()
           }}
         >
-          <div className="px-4 pt-3 pb-2 border-b border-border flex-shrink-0 flex items-center gap-2">
+          {/* The chat button spans this header's full height at its right end; pr-14 keeps the
+              title clear of it. */}
+          <div className={`relative pl-4 ${aiChatButton ? 'pr-14' : 'pr-4'} pt-3 pb-2 border-b border-border flex-shrink-0 flex items-center gap-2`}>
             <span className="flex-1 min-w-0 truncate text-xl font-bold font-mono text-text">
               {note.title || t.common.untitled}
             </span>
-            {/* -my-1: the 32 px button doesn't make this header taller than its text */}
-            {aiChatButton && <AiChatButton className="-my-1" />}
+            {aiChatButton && <AiChatButton className="absolute right-0 top-0 bottom-0" />}
           </div>
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-muted">
             <Lock size={28} className="opacity-20" />
@@ -1339,8 +1340,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
           </div>
         )}
 
-        {/* Title + date block. The chat button sits at its right end, vertically centred in the
-            band between the tabs row and the formatting toolbar; both rows reserve room for it. */}
+        {/* Title + date block. The chat button is a full-height strip at its right end (the whole
+            band between the tabs row and the formatting toolbar); pr-10 keeps both rows clear of it. */}
         <div className={`relative flex-shrink-0${aiChatButton ? ' pr-10' : ''}`}>
         <div className="px-4 pt-3 pb-1 flex-shrink-0 flex items-center gap-2">
           <input
@@ -1375,7 +1376,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
             )}
           </div>
         )}
-        {aiChatButton && <AiChatButton className="absolute right-3 top-1/2 -translate-y-1/2" />}
+        {aiChatButton && <AiChatButton className="absolute right-0 top-0 bottom-0" />}
         </div>
 
         <div

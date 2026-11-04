@@ -5,7 +5,6 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useT } from '../../i18n/useT'
 import { ChatView } from './ChatView'
 import { ChatContextBar } from './ChatContextBar'
-import { ChatMoreMenu } from './ChatMoreMenu'
 import { AI_CHAT_ANCHOR_ATTR, onAiChatAnchorChange } from './aiChatAnchor'
 
 const WIDTH_KEY = 'noteflow-ai-chat-width'
@@ -21,6 +20,8 @@ const EDGE = 12
 const SLIDE_MS = 220
 // Extra distance so the shadow is out of view too when folded.
 const SLIDE_OUT_EXTRA = 32
+// Header icon buttons (history · new chat · detach); colors are added per button.
+const ICON_BTN = 'shrink-0 flex items-center justify-center w-7 h-7 rounded-lg transition-colors'
 
 function readStoredWidth(): number {
   try {
@@ -68,7 +69,8 @@ export function AiChatSidebar({ containerRef, active }: { containerRef: RefObjec
   const widthRef = useRef(width)
   useEffect(() => { widthRef.current = width }, [width])
 
-  // Hang below the chat button of the rightmost pane, aligned with its right edge.
+  // Hang below the chat button of the rightmost pane (a full-height strip flush with the pane's right
+  // edge, so its bottom is the header's), aligned with its right edge but never closer than EDGE.
   const measure = useCallback(() => {
     const container = containerRef.current
     if (!container) return
@@ -187,35 +189,41 @@ export function AiChatSidebar({ containerRef, active }: { containerRef: RefObjec
         compact
         withContext
         autoSendPendingPrompt={false}
+        showSuggestions={false}
         onOpenNote={openNote}
         onConfigure={openAiSettings}
         contextBar={<ChatContextBar />}
         renderHeader={(c) => (
           <div className="flex-shrink-0 flex items-center gap-1 pl-3 pr-1.5 h-10 border-b border-border">
             <Sparkles size={13} className="shrink-0 text-accent" />
-            <span className="text-[12px] font-mono font-semibold text-text truncate">{t.aiPanel.sidebar.title}</span>
             <div className="ml-auto flex items-center gap-0.5 min-w-0">
               {c.modelPicker}
+              <button
+                onClick={c.toggleHistory}
+                title={t.aiPanel.sidebar.history}
+                aria-label={t.aiPanel.sidebar.history}
+                aria-pressed={c.historyOpen}
+                className={`${ICON_BTN} ${c.historyOpen ? 'bg-surface-2 text-text' : 'text-text-muted hover:text-text hover:bg-surface-2'}`}
+              >
+                <History size={15} />
+              </button>
               <button
                 onClick={() => { newChat(); c.closeHistory() }}
                 title={t.aiPanel.chat.newChat}
                 aria-label={t.aiPanel.chat.newChat}
-                className="shrink-0 flex items-center justify-center w-7 h-7 rounded-lg text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+                className={`${ICON_BTN} text-text-muted hover:text-text hover:bg-surface-2`}
               >
                 <Plus size={15} />
               </button>
-              <ChatMoreMenu
-                items={[
-                  { label: t.aiPanel.sidebar.history, icon: <History size={13} />, onClick: c.toggleHistory },
-                  {
-                    label: t.aiPanel.sidebar.detach,
-                    icon: <ExternalLink size={13} />,
-                    onClick: () => void detachChat(),
-                    disabled: busy,
-                    title: busy ? t.aiPanel.sidebar.detachBusy : undefined,
-                  },
-                ]}
-              />
+              <button
+                onClick={() => void detachChat()}
+                disabled={busy}
+                title={busy ? t.aiPanel.sidebar.detachBusy : t.aiPanel.sidebar.detach}
+                aria-label={t.aiPanel.sidebar.detach}
+                className={`${ICON_BTN} text-text-muted hover:text-text hover:bg-surface-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-text-muted disabled:hover:bg-transparent`}
+              >
+                <ExternalLink size={15} />
+              </button>
             </div>
           </div>
         )}

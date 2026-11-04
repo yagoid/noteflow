@@ -81,7 +81,7 @@ export const aiPanel: Messages['aiPanel'] = {
   },
 
   sidebar: {
-    title: 'Chat con IA',
+    title: 'Pregunta a tus notas',
     open: 'Abrir el chat con IA',
     close: 'Cerrar el chat con IA',
     showWindow: 'Mostrar la ventana del chat',

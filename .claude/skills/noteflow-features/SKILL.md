@@ -939,15 +939,18 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
 
 ### Chat en el editor (sidebar flotante)
 
-El mismo chat, **sin salir del editor**: botón grande con un **cerebro de circuitos** a la derecha del
-todo de la cabecera de la nota, justo debajo de los iconos de la barra de pestañas (con el editor
-dividido, solo en el panel de la derecha). Abre un **panel flotante** que entra deslizándose desde el
+El mismo chat, **sin salir del editor**: botón con un **bocadillo con robot** (`BotMessageSquare`) a la
+derecha del todo de la cabecera de la nota, justo debajo de los iconos de la barra de pestañas (con el
+editor dividido, solo en el panel de la derecha). Su zona clicable es una franja que ocupa **todo el alto
+de la cabecera** (título + fecha) pegada al borde derecho; desplegado se ve en gris discreto. Abre un **panel flotante** que entra deslizándose desde el
 borde derecho (y sale igual al plegarlo) sobre la parte derecha del editor, sin empujar el texto, con
 ancho ajustable arrastrando su borde izquierdo.
 **Solo se pliega con ese mismo botón** y arranca plegado cada vez que abres la app. Es **la misma
 conversación e historial** que el chat del cerebro, y se mantiene tal cual al cambiar de nota.
-Cabecera: selector de modelo, **Nuevo chat** y menú **⋯** (Historial, Abrir en una ventana aparte).
-Sin IA configurada, ofrece ir a **Ajustes → IA**.
+Cabecera sin título visible (solo el icono ✦), selector de modelo y tres botones de
+icono a la vista: **Historial**, **Nuevo chat** y **Abrir en una ventana aparte**. A diferencia del
+cerebro y de la ventana aparte, este panel **no muestra preguntas sugeridas** (ni al empezar ni tras
+cada respuesta). Sin IA configurada, ofrece ir a **Ajustes → IA**.
 
 - **Contexto (barra sobre el campo de escribir):** decides qué ve la IA además de tu perfil. Tres
   botones: **Sección: …** (la sección abierta), **Nota: …** (la nota entera abierta) y **Todas las
@@ -957,7 +960,8 @@ Sin IA configurada, ofrece ir a **Ajustes → IA**.
   se pueden añadir. Aunque el contexto sea reducido, la IA sabe qué nota tienes abierta y puede
   **editarla directamente** ("reescribe esta sección", "añade un resumen"): los cambios aparecen en vivo
   en el editor y cada uno se puede **deshacer**.
-- **Ventana aparte:** ⋯ → *Abrir en una ventana aparte* mueve la conversación a una ventana propia
+- **Ventana aparte:** el botón *Abrir en una ventana aparte* de la cabecera (deshabilitado mientras
+  responde) mueve la conversación a una ventana propia
   (con barra de título, ⋯ con *Volver a la ventana principal* / Nuevo chat / Historial, una
   **chincheta** para mantenerla siempre encima y cerrar). Recuerda su tamaño y posición. Mientras está
   fuera, el botón del editor la trae al frente y el chat del cerebro muestra "El chat está en una

@@ -93,7 +93,7 @@ export const aiPanel = {
 
   // Chat sidebar floating over the editor (button on the note title row) and its detached window.
   sidebar: {
-    title: 'AI chat',
+    title: 'Ask your notes',
     open: 'Open AI chat',
     close: 'Close AI chat',
     // Editor button while the chat lives in its own window.

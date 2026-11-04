@@ -1,4 +1,4 @@
-import { Brain } from 'lucide-react'
+import { BotMessageSquare } from 'lucide-react'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useT } from '../../i18n/useT'
 import { AI_CHAT_ANCHOR_ATTR, aiChatAnchorRef } from './aiChatAnchor'
@@ -7,7 +7,8 @@ import { AI_CHAT_ANCHOR_ATTR, aiChatAnchorRef } from './aiChatAnchor'
  * Chat button at the right end of the note's header (rightmost pane only). Opens/folds the
  * floating chat sidebar — the only way to fold it — or, while the chat lives in its own window,
  * brings that window to the front. It is also the sidebar's position anchor (the sidebar hangs
- * right below it). `className` places it in its row (see NoteEditor).
+ * right below it). A 44 px wide, square-cornered strip: `className` places it in its header and
+ * gives it that header's full height (see NoteEditor).
  */
 export function AiChatButton({ className = '' }: { className?: string }) {
   const t = useT()
@@ -26,11 +27,11 @@ export function AiChatButton({ className = '' }: { className?: string }) {
       title={label}
       aria-label={label}
       aria-pressed={pressed}
-      className={`flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
-        pressed ? 'text-accent bg-accent/10' : 'text-text-muted hover:text-text hover:bg-surface-3'
+      className={`flex-shrink-0 flex items-center justify-center w-11 transition-colors ${
+        pressed ? 'text-text bg-surface-3' : 'text-text-muted hover:text-text hover:bg-surface-3'
       } ${className}`}
     >
-      <Brain size={18} strokeWidth={1.25} />
+      <BotMessageSquare size={18} strokeWidth={1.25} />
     </button>
   )
 }
