@@ -18,7 +18,7 @@ import { EditorToc } from './EditorToc'
 import { useTocItems } from './useEditorToc'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { TOC_MIN_EDITOR_WIDTH, TOC_RESERVE } from '../../lib/tocUtils'
-import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
+import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../lib/markdownHtml'
 import { isEditorWidgetTarget, widgetFieldHasFocus } from '../../lib/editorFocus'
 import { createDebouncedSave, type SaveRun } from '../../lib/pendingEdits'
@@ -467,9 +467,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
           className={`editor-scroll h-full overflow-y-auto overflow-x-hidden${tocVisible ? ' editor-has-toc' : ''}`}
           style={{
             '--prose-font-size': fontSize ? `${fontSize}px` : undefined,
-            '--prose-font-family': fontFamily === 'inter'
-              ? "'Inter', sans-serif"
-              : "'JetBrains Mono', 'Fira Code', monospace",
+            '--prose-font-family': proseFontStack(fontFamily),
             '--toc-reserve': `${TOC_RESERVE}px`,
           } as React.CSSProperties}
         >

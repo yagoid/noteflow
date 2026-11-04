@@ -1125,8 +1125,9 @@ button {
    in justified rows (lib/noteOverviewGrid.ts plans them; each slot is
    `flex: <units> 1 0px`), 4px joints over --bg-editor, radius 8px outside and 4px
    inside. Each cell sets --sm-color (its section colour) and the open one --sm-ink;
-   the root sets --ng-accent-ink (readable ink on the accent). It reuses the map's
-   folded corner (.section-map-corner) and drop bar (.section-map-drop). */
+   the root sets --ng-accent-ink (readable ink on the accent) and the grid
+   --prose-font-family (the editor's font setting). It reuses the map's drop bar
+   (.section-map-drop) but not its folded corner: the tinted header carries the colour. */
 .note-grid {
   display: flex;
   flex-direction: column;
@@ -1184,7 +1185,9 @@ button {
 .note-grid-open:focus-visible { outline: none; }
 .note-grid-cell[draggable="true"]:active .note-grid-open { cursor: grabbing; }
 
-/* Header (= the tab): clicks fall through to .note-grid-open except on the name. */
+/* Header (= the tab), tinted with the section colour so the name reads as the card's
+   title; solid on the open section. Clicks fall through to .note-grid-open except on
+   the name. */
 .note-grid-head {
   position: relative;
   z-index: 2;
@@ -1193,7 +1196,8 @@ button {
   align-items: center;
   gap: 7px;
   min-width: 0;
-  padding: 0 50px 0 12px;
+  padding: 0 34px 0 12px;
+  background: color-mix(in srgb, var(--sm-color) 14%, transparent);
   color: rgb(var(--text));
   font-size: 13px;
   font-weight: 600;
@@ -1201,7 +1205,10 @@ button {
   user-select: none;
   transition: background-color 250ms ease, color 250ms ease;
 }
-.note-grid-cell.is-ai-hidden .note-grid-head { color: rgb(var(--text-muted)); }
+.note-grid-cell.is-ai-hidden .note-grid-head {
+  background: color-mix(in srgb, var(--sm-color) 7%, transparent);
+  color: rgb(var(--text-muted));
+}
 .note-grid-cell.is-open .note-grid-head { background: var(--sm-color); color: var(--sm-ink); }
 .note-grid-cell.is-open.is-ai-hidden .note-grid-head {
   background: color-mix(in srgb, var(--sm-color) 72%, rgb(var(--bg-editor)));
@@ -1249,15 +1256,11 @@ button {
   color: var(--sm-ink);
 }
 
-/* The map's folded corner, bigger on a bigger cell. */
-.note-grid-cell .section-map-corner { z-index: 1; width: 14px; height: 14px; }
-.note-grid-cell:hover .section-map-corner { width: 20px; height: 20px; }
-
-/* Selection checkbox, left of the corner: on hover, always while selecting. */
+/* Selection checkbox, at the header's right end: on hover, always while selecting. */
 .note-grid-tick {
   position: absolute;
   top: 8px;
-  right: 26px;
+  right: 8px;
   z-index: 2;
   display: flex;
   align-items: center;
@@ -1300,7 +1303,9 @@ button {
   -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent);
   mask-image: linear-gradient(to bottom, #000 62%, transparent);
 }
-/* Whole-pixel sizes on purpose: fractional ones blur monospace fonts in Chromium. */
+/* Whole-pixel sizes on purpose: fractional ones blur monospace fonts in Chromium, and
+   the family follows the editor font setting (--prose-font-family, set on .note-grid),
+   which may be the mono one. */
 .note-grid-body .prose-editor .ProseMirror {
   font-size: 11px;
   line-height: 1.55;
@@ -1349,10 +1354,10 @@ button {
 .note-grid-body .prose-editor .ProseMirror blockquote { margin: 3px 0; padding-left: 8px; border-left-width: 2px; }
 .note-grid-body .prose-editor .ProseMirror hr { margin: 6px 0; }
 .note-grid-body .prose-editor .ProseMirror table { font-size: 10px; }
-/* Raw-markdown sections: the text as is, in mono. */
+/* Raw sections: the text as is, in the editor's font (like the raw textarea). */
 .note-grid-raw {
   margin: 0;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--prose-font-family, 'JetBrains Mono', monospace);
   font-size: 10px;
   line-height: 1.55;
   color: rgb(var(--text) / 0.72);

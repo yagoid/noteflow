@@ -82,14 +82,14 @@ export const overview = {
   // Tag on the header of the section the editor has open (shown uppercase).
   openTag: 'Open',
   emptySectionHint: 'Empty section · click to write',
-  // Card footer: task progress (3+ tasks), else the word count; "Markdown" = raw mode.
+  // Card footer: task progress (3+ tasks), else the word count; "Raw" = raw mode.
   tasksProgress: '{done}/{total} tasks',
   wordsPlural: {
     one: '{count} word',
     other: '{count} words',
   },
   emptyStat: 'Empty',
-  markdownBadge: 'Markdown',
+  rawBadge: 'Raw',
   selectionActions: 'Selection actions',
 
   // Section preview card (shared with the hover popover).

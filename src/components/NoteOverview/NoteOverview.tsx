@@ -8,6 +8,7 @@ import {
 import { useNotesStore } from '../../stores/notesStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { useThemeStore } from '../../stores/themeStore'
+import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { ConfirmModal } from '../ConfirmModal'
 import { useT } from '../../i18n/useT'
@@ -86,6 +87,8 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
   // Only to recompute the inks when the theme (or its accent) changes.
   const themeId = useThemeStore((s) => s.activeThemeId)
   const accentOverride = useThemeStore((s) => s.accentOverride)
+  // The previews (rich and raw) use the editor's font, as the open section would.
+  const proseFont = proseFontStack(useEditorSettingsStore((s) => s.fontFamily))
 
   // One menu slot: a section's right-click menu, or the note menu of the ⋯ button.
   const [contextMenu, setContextMenu] = useState<NoteContextMenuRequest | null>(null)
@@ -704,6 +707,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
               role="list"
               aria-label={t.overview.sectionsListLabel}
               className={`note-grid${selectionActive ? ' is-selecting' : ''}`}
+              style={{ '--prose-font-family': proseFont } as CSSProperties}
               onDragOver={handleBlockDragOver}
               onDrop={handleBlockDrop}
               onDragLeave={handleBlockDragLeave}
@@ -986,7 +990,7 @@ const SectionCell = memo(function SectionCell({
         {raw && (
           <span className="note-grid-badge">
             <Code size={11} />
-            {t.overview.markdownBadge}
+            {t.overview.rawBadge}
           </span>
         )}
         {section.aiHidden && <span className="note-grid-badge">{t.common.hiddenFromAI}</span>}
@@ -1000,7 +1004,6 @@ const SectionCell = memo(function SectionCell({
         onClick={(e) => actions.cardClick(e, section.id)}
         onKeyDown={(e) => actions.keyDown(e, section.id)}
       />
-      {!isOpen && <span className="section-map-corner" aria-hidden />}
       <button
         className="note-grid-tick"
         role="checkbox"

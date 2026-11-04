@@ -73,7 +73,7 @@ export const overview = {
     other: '{count} palabras',
   },
   emptyStat: 'Vacía',
-  markdownBadge: 'Markdown',
+  rawBadge: 'Raw',
   selectionActions: 'Acciones de la selección',
 
   rawSection: 'Sección Markdown sin formato',

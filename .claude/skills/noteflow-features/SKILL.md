@@ -396,14 +396,16 @@ hay secciones) + separador + **⊞ activo** + **estrella** de favorito + **`⋯`
   section" en la cabecera.
 
 **Tarjeta de sección:**
-- **Cabecera** con el nombre (en color de texto, una línea) y la **esquina doblada** arriba a la derecha
-  en el color de la sección (crece al pasar el ratón), como las pestañas del mapa. Oculta a la IA →
-  icono de ojo tachado, celda más tenue, nombre atenuado y esquina gris.
+- **Cabecera** con el nombre (en color de texto, una línea) **tintada con el color de la sección**
+  (un velo suave), para que el nombre se lea como el título de la tarjeta; la sección abierta la tiene
+  en color sólido. Sin esquina doblada (esa marca es solo de las pestañas del mapa del editor). Oculta a
+  la IA → icono de ojo tachado, celda y tinte más tenues y nombre atenuado.
 - **Vista previa** del contenido real a tamaño legible (títulos, listas, tareas con casilla — hechas
-  tachadas —, código en mono), que se desvanece abajo; las secciones en modo markdown muestran el texto
-  crudo en mono; las vacías, "Empty section · click to write".
+  tachadas —, código en mono), que se desvanece abajo, **con la fuente del editor** (Settings → Editor:
+  Inter o mono); las secciones en modo raw muestran el texto crudo, también con esa fuente (como el
+  editor raw); las vacías, "Empty section · click to write".
 - **Pie**: progreso de tareas (`2/6 tasks`) si tiene 3 o más, si no el número de palabras ("Empty" si
-  no hay nada); a la derecha las marcas **Markdown** (modo raw) y **Hidden from AI**.
+  no hay nada); a la derecha las marcas **Raw** (modo raw) y **Hidden from AI**.
 
 **Interacciones:**
 - **Clic** → abre la sección en el editor (cierra la vista).
@@ -414,7 +416,7 @@ hay secciones) + separador + **⊞ activo** + **estrella** de favorito + **`⋯`
   deja su hueco y la junta de destino se ilumina con la barra de acento, igual que en el mapa. Soltarla
   sobre la celda "New section" la lleva al final.
 - **Click derecho** → el menú de sección de siempre (color, IA, abrir en paralelo, duplicar, borrar…).
-- **Selección múltiple**: la **casilla** junto a la esquina aparece al pasar el ratón (y queda visible en
+- **Selección múltiple**: la **casilla** del extremo derecho de la cabecera aparece al pasar el ratón (y queda visible en
   todas mientras haya selección); **Ctrl/Cmd+clic** togglea, **Mayús+clic** selecciona el rango, y con
   algo seleccionado basta un clic. "Select all" (o `Ctrl/Cmd+A`) marca todas; si ya lo están, las
   desmarca. Las seleccionadas llevan un aro de acento. Con ≥1 marcada aparece una **barra flotante**
@@ -561,8 +563,8 @@ navegar directamente a esa sección.
 
 Cualquier elemento que **navega a una sección concreta** muestra, al pasar el ratón, una
 **tarjeta flotante con una previsualización** de esa sección — una mini-representación del
-editor (etiqueta de sección + título + fecha + unas líneas del contenido renderizado, recortadas
-con fade). La [vista de nota](#vista-de-nota-note-overview) ya no usa esta tarjeta: muestra el
+editor (etiqueta de sección + título + fecha + unas líneas del contenido renderizado con la fuente
+del editor, recortadas con fade). La [vista de nota](#vista-de-nota-note-overview) ya no usa esta tarjeta: muestra el
 contenido a tamaño real dentro de su rejilla. Permite ojear el contenido
 sin navegar.
 

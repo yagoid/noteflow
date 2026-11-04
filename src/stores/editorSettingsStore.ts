@@ -11,7 +11,17 @@ const DEFAULT_SIZE = 13
 
 const FONT_FAMILY_KEY = 'noteflow-font-family'
 const DEFAULT_FONT = 'inter' as const
-type FontFamily = 'mono' | 'inter'
+export type FontFamily = 'mono' | 'inter'
+
+/**
+ * CSS font stack for the editor's font setting. The single source for every surface
+ * that shows note content in the editor font: the TipTap editor and the raw textarea
+ * (NoteEditor), plus the read-only previews (note overview grid, SectionPreviewCard),
+ * which set it as `--prose-font-family` since they render outside the editor.
+ */
+export function proseFontStack(fontFamily: FontFamily): string {
+  return fontFamily === 'inter' ? "'Inter', sans-serif" : "'JetBrains Mono', 'Fira Code', monospace"
+}
 
 const READABLE_WIDTH_KEY = 'noteflow-readable-width'
 

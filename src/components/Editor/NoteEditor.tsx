@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
 import { useNotesStore, saveUiState } from '../../stores/notesStore'
 import { useTemplatesStore } from '../../stores/templatesStore'
-import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
+import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { Editor } from './Editor'
 import type { EditorHandle } from './Editor'
 import { InNoteSearchBar } from './InNoteSearchBar'
@@ -1418,7 +1418,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                 placeholder={tf(t.editor.sectionStartWriting, { name: activeSection?.name ?? t.editor.sectionFallback })}
                 style={{
                   fontSize: `${fontSize}px`,
-                  fontFamily: fontFamily === 'inter' ? "'Inter', sans-serif" : "'JetBrains Mono', 'Fira Code', monospace",
+                  fontFamily: proseFontStack(fontFamily),
                 }}
                 className={`raw-editor h-full p-4 bg-transparent text-text placeholder-text-muted/30 border-none outline-none resize-none caret-text leading-relaxed w-full ${readableWidth ? 'raw-readable' : ''}`}
                 spellCheck={false}

@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import type { CSSProperties } from 'react'
 import { Eye, Edit3, Plus } from 'lucide-react'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { getTagColor } from '../../lib/tagColors'
@@ -7,6 +8,7 @@ import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
 import type { SectionTagColorMap } from '../../stores/sectionTagColorsStore'
+import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import type { Note, NoteSection } from '../../types'
 
 // Height of the clamped content area (≈ a handful of lines once zoomed).
@@ -39,6 +41,9 @@ export function SectionPreviewCard({
   previewZoom = PREVIEW_ZOOM,
 }: SectionPreviewCardProps) {
   const t = useT()
+  // Rendered in a portal, outside the editor that defines --prose-font-family: set it
+  // here so the lines use the editor's font, like the open note.
+  const proseFont = proseFontStack(useEditorSettingsStore((s) => s.fontFamily))
   const colorStyle = getTagColor(section.name, sectionTagColors)
   const iconSize = compact ? 10 : 11
   const hasContent = section.content.trim().length > 0
@@ -96,7 +101,7 @@ export function SectionPreviewCard({
         {/* A few lines of the section, as if the note were open — just tiny */}
         <div
           className="note-preview relative overflow-hidden px-3 pt-1"
-          style={{ height: previewHeight }}
+          style={{ height: previewHeight, '--prose-font-family': proseFont } as CSSProperties}
         >
           {hasContent ? (
             <div

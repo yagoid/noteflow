@@ -121,14 +121,18 @@ Decisiones a respetar si se toca:
   `pane.sectionId`, si no `activeSectionByNote`, si no la primera). Si ningún pane muestra la nota (vista
   abierta desde un tag de otra nota) **no hay** celda abierta: no se marca una sección que el editor no
   enseña. La abierta lleva cabecera sólida del color con tinta en contraste (`resolveSectionInk`, ver
-  abajo), etiqueta "OPEN" y no tiene esquina.
-- **Compartido con el mapa** (no duplicar): la esquina doblada es `.section-map-corner` (con su
-  transición; aquí 14 px → 20 px en hover), la junta de destino al arrastrar es `.section-map-drop`
+  abajo) y etiqueta "OPEN".
+- **Cabecera tintada, sin esquina doblada:** la cabecera de cada celda (`.note-grid-head`) lleva de fondo
+  el color de la sección al 14 % (`color-mix(in srgb, var(--sm-color) 14%, transparent)`; al 7 % si está
+  oculta a la IA) para que el nombre se lea como título de la tarjeta; la abierta la tiene sólida (ver
+  arriba). Al llevar el color la cabecera, la vista **no** usa la esquina doblada del mapa
+  (`.section-map-corner`, que el mapa del editor sí conserva). La casilla de selección va a 8 px del borde
+  derecho de la cabecera (que reserva 34 px a la derecha para ella).
+- **Compartido con el mapa** (no duplicar): la junta de destino al arrastrar es `.section-map-drop`
   (`data-side`/`data-inside`), el lado de caída es `reorderDropSide()` de `lib/sectionMap.ts` y el
   reordenado `moveSectionInList` vía `mutateSections` (la misma acción que el mapa). La tinta del sólido es
   `resolveSectionInk()` de `lib/sectionInk.ts` (antes privada del mapa; mezcla al 72 % con `--bg-editor` si
   está oculta a la IA); con `--accent` da también `--ng-accent-ink`, la tinta de las casillas marcadas.
-  Las reglas `.is-ai-hidden .section-map-corner` (esquina gris) del mapa aplican igual a las celdas.
 - **Borde del bloque en el drop:** como las filas son explícitas, "junta = borde del bloque" se sabe por
   la posición en la fila (primera/última celda), sin medir rects (el mapa sí mide).
 - **Soltar sobre "New section"** lleva la tarjeta **al final** (`moveSectionToEnd` de
@@ -137,15 +141,21 @@ Decisiones a respetar si se toca:
 - **Vista previa** (`SectionCell`, `memo`): el HTML de `htmlFromMarkdown` (el mismo renderizado que el
   editor y el antiguo mini-mock) dentro de `.note-grid-body.note-preview > .prose-editor > .ProseMirror`,
   restilado **a tamaño real** (11 px, títulos 12 px seminegrita en color de texto, código 10 px mono), sin
-  título de nota, fecha ni toolbar falsa, con `mask-image` que lo desvanece abajo. Tamaños enteros a
-  propósito (los fraccionarios emborronan la mono en Chromium, como en `.chat-md`), por eso no los 11,5 px
-  del boceto. Secciones raw → texto crudo en mono. Solo se renderiza el principio de una sección larga
+  título de nota, fecha ni toolbar falsa, con `mask-image` que lo desvanece abajo. **Fuente = la del
+  editor:** `.note-grid` define `--prose-font-family` con `proseFontStack(fontFamily)` (de
+  `stores/editorSettingsStore.ts`, la misma función que usan `Editor.tsx` y el textarea raw de
+  `NoteEditor`), porque la vista se pinta fuera del contenedor del editor que la define y si no caería al
+  fallback mono de `.prose-editor .ProseMirror`. Tamaños enteros a propósito (los fraccionarios
+  emborronan la mono en Chromium, como en `.chat-md`, y la fuente del editor puede ser la mono), por eso
+  no los 11,5 px del boceto. Secciones raw → texto crudo (`.note-grid-raw`, con la misma
+  `--prose-font-family` que el textarea raw). Solo se renderiza el principio de una sección larga
   (`clipPreviewMarkdown`, 4000 chars, corta en límite de bloque y cierra un fence abierto) y el HTML/las
   estadísticas se memoizan por contenido; los handlers llegan a las celdas por una fachada estable (ref),
   así que teclear en una sección (otra ventana/pane) solo re-renderiza su tarjeta.
 - **Pie:** `sectionCardStats(md)` → "Empty" / `hechas/total tasks` con ≥ 3 tareas (`- [ ]`/`- [x]` como
   `markdownHtml`, fuera de fences; las tarjetas de kanban cuentan) / nº de palabras (sin sintaxis, URLs de
-  links, anotaciones 📅⏰🔺 ni comentarios HTML). A la derecha, "Markdown" (raw) y "Hidden from AI".
+  links, anotaciones 📅⏰🔺 ni comentarios HTML). A la derecha, "Raw" (modo raw; no "Markdown": para el
+  usuario markdown es el editor normal, que lo renderiza) y "Hidden from AI".
 - **Clic, doble clic y nombre:** un `<button class="note-grid-open">` cubre la celda (clic, foco, Intro);
   la cabecera es `pointer-events: none` salvo el `<span>` del nombre. **Doble clic en el nombre = renombrar
   inline** (input con anillo del color de la sección, Enter/blur guarda, Esc cancela, `F2` desde el
@@ -157,7 +167,7 @@ Decisiones a respetar si se toca:
   nombre no recibe clics (todo togglea).
 - **Selección múltiple:** estado local `selectedIds: Set<string>` (por id, nunca índice); `App.tsx` keya la
   vista por `noteViewId`, así que cambiar de nota remonta y resetea sin effects. Casilla `role="checkbox"`
-  junto a la esquina (visible en hover y siempre con selección); marcada → anillo de acento de 1,5 px (un
+  al extremo derecho de la cabecera (visible en hover y siempre con selección); marcada → anillo de acento de 1,5 px (un
   `::after` por encima de la cabecera sólida). Ctrl/Cmd-click togglea, Shift-click selecciona el rango
   (orden `note.sections`) desde el ancla, y con selección activa basta un clic. La barra flotante (sticky
   abajo) es otro bloque reticulado (`.note-grid-sbar`): contador en acento, **Hide/Show to AI** (solo
@@ -756,8 +766,8 @@ salientes de un archivador; las juntas dejan ver `--bg-editor` (la fila ya no ti
 propia). Lo usan los paneles del editor y la ventana de sección (`SectionWindowApp` monta
 `NoteEditor`); **no** es `Sidebar/SectionTabsRow.tsx` (los chips de sección del sidebar, otro
 componente con su propia `.section-tabs-scroll`). La **vista de nota** es el mismo bloque con la vista
-previa dentro y comparte piezas con él (`.section-map-corner`, `.section-map-drop`, `reorderDropSide`,
-`resolveSectionInk`): si cambias una, revisa también "Vista de nota (note overview)". Decisiones a
+previa dentro y comparte piezas con él (`.section-map-drop`, `reorderDropSide`, `resolveSectionInk`; la
+esquina doblada `.section-map-corner` es solo del mapa): si cambias una, revisa también "Vista de nota (note overview)". Decisiones a
 respetar si se toca:
 - **Filas justificadas:** inactivas `flex: 1 1 auto`, activa `flex-grow: 2.6` → cada fila llena el
   ancho y el mapa es un rectángulo. Al cambiar de sección `flex-grow` transiciona 450 ms (color/fondo
@@ -1060,7 +1070,9 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   `--pm-pad-l` del `.ProseMirror` del editor real (`.editor-scroll > .prose-editor`; en Readable + TOC,
   como suelo del mismo `clamp`) y como `padding-left` del textarea raw (`.raw-editor`), así nada de
   texto queda bajo la mini-vista. Las previews `.note-preview` (vista de nota, hover, cerebro; también
-  `.prose-editor`) quedan fuera a propósito.
+  `.prose-editor`) quedan fuera a propósito. Esas previews se pintan fuera del contenedor del editor, así
+  que definen ellas mismas `--prose-font-family` con `proseFontStack()` (la vista de nota en `.note-grid`,
+  `SectionPreviewCard` en su `.note-preview`) para seguir el ajuste de fuente del editor.
   Es el espejo izquierdo de `--toc-reserve`; se aplica a todos los panes (en el split solo el primero
   la necesita, la diferencia es de 10 px).
 
