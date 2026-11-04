@@ -48,21 +48,50 @@ interface NavEntry {
   icon: React.ComponentType<{ size?: number; className?: string }>
 }
 
-// Icon + order only; labels come from the dictionary (keyed by id) so the nav
-// switches language live.
-const NAV: NavEntry[] = [
-  { id: 'general', icon: Globe },
-  { id: 'ai', icon: Sparkles },
-  { id: 'sync', icon: RefreshCw },
-  { id: 'account', icon: UserCircle },
-  { id: 'appearance', icon: Palette },
-  { id: 'editor', icon: Pencil },
-  { id: 'templates', icon: LayoutTemplate },
-  { id: 'data', icon: Database },
-  { id: 'startup', icon: Monitor },
-  { id: 'shortcuts', icon: Keyboard },
-  { id: 'tutorial', icon: GraduationCap },
-  { id: 'about', icon: Info },
+type NavGroupId = 'preferences' | 'services' | 'notes' | 'help'
+
+interface NavGroup {
+  id: NavGroupId
+  entries: NavEntry[]
+}
+
+// Icon + order only; labels (section and group titles) come from the dictionary
+// (keyed by id) so the nav switches language live. Groups render as a small
+// uppercase title plus a gap; the first entry of the first group is the default
+// section (see `initialSection`).
+const NAV: NavGroup[] = [
+  {
+    id: 'preferences',
+    entries: [
+      { id: 'general', icon: Globe },
+      { id: 'appearance', icon: Palette },
+      { id: 'editor', icon: Pencil },
+    ],
+  },
+  {
+    id: 'services',
+    entries: [
+      { id: 'sync', icon: RefreshCw },
+      { id: 'ai', icon: Sparkles },
+      { id: 'account', icon: UserCircle },
+    ],
+  },
+  {
+    id: 'notes',
+    entries: [
+      { id: 'data', icon: Database },
+      { id: 'startup', icon: Monitor },
+      { id: 'templates', icon: LayoutTemplate },
+    ],
+  },
+  {
+    id: 'help',
+    entries: [
+      { id: 'tutorial', icon: GraduationCap },
+      { id: 'shortcuts', icon: Keyboard },
+      { id: 'about', icon: Info },
+    ],
+  },
 ]
 
 interface SettingsModalProps {
@@ -111,24 +140,31 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
         <div className="flex flex-1 min-h-0">
           {/* ── Nav ──────────────────────────────────────────────────────── */}
           <nav className="w-[200px] flex-shrink-0 border-r border-border p-2 overflow-y-auto">
-            {NAV.map((entry) => {
-              const Icon = entry.icon
-              const active = entry.id === section
-              return (
-                <button
-                  key={entry.id}
-                  onClick={() => setSection(entry.id)}
-                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs font-mono text-left transition-colors ${
-                    active
-                      ? 'bg-surface-2 text-text'
-                      : 'text-text-muted hover:text-text hover:bg-surface-2/60'
-                  }`}
-                >
-                  <Icon size={13} className="flex-shrink-0" />
-                  <span className="truncate">{t.settings.nav[entry.id]}</span>
-                </button>
-              )
-            })}
+            {NAV.map((group, gi) => (
+              <div key={group.id} className={gi > 0 ? 'mt-4' : undefined}>
+                <h3 className="px-2.5 pb-1 text-[10px] font-mono font-semibold text-text-muted uppercase tracking-widest truncate">
+                  {t.settings.navGroups[group.id]}
+                </h3>
+                {group.entries.map((entry) => {
+                  const Icon = entry.icon
+                  const active = entry.id === section
+                  return (
+                    <button
+                      key={entry.id}
+                      onClick={() => setSection(entry.id)}
+                      className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs font-mono text-left transition-colors ${
+                        active
+                          ? 'bg-surface-2 text-text'
+                          : 'text-text-muted hover:text-text hover:bg-surface-2/60'
+                      }`}
+                    >
+                      <Icon size={13} className="flex-shrink-0" />
+                      <span className="truncate">{t.settings.nav[entry.id]}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
           </nav>
 
           {/* ── Content ──────────────────────────────────────────────────── */}

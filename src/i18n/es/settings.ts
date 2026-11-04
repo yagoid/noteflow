@@ -16,6 +16,14 @@ export const settings = {
     about: 'Acerca de',
   },
 
+  // Títulos de los grupos de la nav (cabeceras pequeñas sobre cada bloque).
+  navGroups: {
+    preferences: 'Preferencias',
+    services: 'Servicios',
+    notes: 'Tus notas',
+    help: 'Ayuda',
+  },
+
   general: {
     language: 'Idioma',
     languageHint: 'Idioma usado en toda la interfaz de NoteFlow',

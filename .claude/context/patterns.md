@@ -1180,8 +1180,9 @@ oculta en lugar de cerrarse (`win.hide()`); la app vive en el system tray. Atajo
 ### Ventana de Ajustes unificada (`src/components/Settings/`)
 El ⚙ del TitleBar abre `SettingsModal` (overlay in-app, NO un BrowserWindow): split **nav
 izquierda + panel derecho**, una sección por panel (un `.tsx` por panel en
-`src/components/Settings/`). El orden canónico de la nav es el array `NAV` de `SettingsModal.tsx`
-(icono + id; las labels salen del diccionario i18n por id) — no se duplica aquí. La **sección por
+`src/components/Settings/`). El orden canónico de la nav es el array `NAV` de `SettingsModal.tsx`:
+**grupos** (`preferences`/`services`/`notes`/`help`, título en `settings.navGroups`) con sus
+entradas (icono + id; las labels salen del diccionario i18n por id) — no se duplica aquí. La **sección por
 defecto es `general`** (la primera de la nav): el default vive en dos sitios y deben ir a la par —
 la prop `initialSection` de `SettingsModal` y el `useState<SettingsSection>` del `TitleBar` (que es
 quien la abre; la paleta de comandos solo cambia esa sección vía eventos).
