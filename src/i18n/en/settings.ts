@@ -21,6 +21,14 @@ export const settings = {
     about: 'About',
   },
 
+  // Titles of the nav groups (small uppercase headers above each block).
+  navGroups: {
+    preferences: 'Preferences',
+    services: 'Services',
+    notes: 'Your notes',
+    help: 'Help',
+  },
+
   general: {
     language: 'Language',
     languageHint: 'Language used across the NoteFlow interface',

@@ -143,11 +143,13 @@ Iconos del TitleBar:
   "Today", en HTML porque el SVG se estira; animación de entrada
   izquierda→derecha (respeta `prefers-reduced-motion`) y montículo semilla simétrico si no hay
   actividad; solo lee ids y timestamps, nunca contenido; `ActivityPulse.tsx` +
-  `src/lib/activityPulse.ts`), **AI**, **Sync** (NoteFlow Cloud + GitHub), **Account** (cuenta
-  NoteFlow), **Appearance** (tema/fuente/acento/colores del editor/escala), **Editor**
-  (fuente/tamaño/ancho), **Templates** (plantillas de nota), **Data** (export/import + carpeta de
-  notas), **Startup** (autostart + stickies), **Keyboard shortcuts**, **Tutorial** (el tour "What's
-  new", ver abajo) y **About** (versión + updates + repo). Tamaño fijo proporcional a la ventana de la app. El orden vive en el array `NAV` de
+  `src/lib/activityPulse.ts`), **Appearance** (tema/fuente/acento/colores del editor/escala),
+  **Editor** (fuente/tamaño/ancho) — grupo **Preferences** —; **Sync** (NoteFlow Cloud + GitHub),
+  **AI**, **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
+  de notas), **Startup** (autostart + stickies), **Templates** (plantillas de nota) — grupo **Your
+  notes** —; y **Tutorial** (el tour "What's new", ver abajo), **Keyboard shortcuts** y **About**
+  (versión + updates + repo) — grupo **Help**. Cada grupo lleva un título pequeño en mayúsculas y
+  un espacio de separación en la nav. Tamaño fijo proporcional a la ventana de la app. El orden y los grupos viven en el array `NAV` de
   `SettingsModal.tsx`; las labels vienen del diccionario i18n por id. La paleta de comandos y los
   atajos pueden abrirla directamente en otra sección (p. ej. shortcuts, startup, sync).
 - Controles de ventana: minimizar / maximizar / cerrar (cerrar = ocultar al tray).
