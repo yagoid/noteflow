@@ -523,7 +523,14 @@ es **un preset más**, no una implementación nueva.
   remite a Ajustes → Cuenta — también cuando la suscripción caduca teniéndolo activo (sigue viendo el
   motivo y puede pasarse a BYO con la otra card). Detalle del selector, del estado de vista `mode` y
   de por qué los campos BYO se ocultan hasta activar el proveedor: `.claude/context/ai.md` § LLM.
-  `LlmConfigView` refresca la config al cambiar el estado de cuenta (`onAccountStatusChanged`).
+  **Reactividad de la config LLM en el renderer:** el store `aiChatStore` (`llmConfig`/`presets`/
+  `models`) se recarga con `loadConfig()` ante `onAccountStatusChanged` (y `onAiLlmPresetsChanged`)
+  a nivel de **ventana**, no de panel: `App.tsx` (ventana principal, salvo sticky) y
+  `AiChatWindowApp.tsx` (ventana de chat separada). Así el chat del sidebar del editor / Cerebro y el
+  de la ventana separada reflejan al momento el cambio de `active` que main hace al cerrar sesión,
+  suscribirse o restaurar (antes solo lo veía `LlmConfigView`, que además conserva su propio
+  `onAccountStatusChanged` para el estado de cuenta). Si el `active` recargado difiere del anterior,
+  `loadConfig` vacía `models` (eran del proveedor anterior), igual que `setLlmConfig`.
 - **Bloque de planes (`src/components/Settings/PlanOffers.tsx`):** componente **compartido** por los
   cuatro sitios donde un gate puede acabar en compra, para que precio, reglas de visibilidad y copy
   no se separen entre superficies:

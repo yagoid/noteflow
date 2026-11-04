@@ -376,11 +376,13 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 `new-note`, `notes-updated` (filePath?, senderId?), `update:download-progress` (percent),
 `update:installing` (fase de instalación, post-descarga),
 `sync-auth-complete`, `sync:push-state` (`'pushing'|'idle'`), `sync:status-changed`,
-`account:status-changed` (broadcast del status público de la cuenta a todas las ventanas),
+`account:status-changed` (broadcast del status público de la cuenta a todas las ventanas; main lo emite
+DESPUÉS de reescribir `settings.aiLlm.active` si toca, y `App.tsx` / `AiChatWindowApp.tsx` recargan la
+config LLM del chat con él),
 `cloud:status-changed` (broadcast del status público de NoteFlow Cloud — mismo shape que `cloud:get-status`),
 `ai:reindex-progress` (`{done,total}`), `ai:index-state` (estado del índice),
 `ai:index-stale` (`{stale,count}` — índice por detrás de las notas; OJO: no es lo mismo que `ai:index-state`),
-`ai:llm-presets-changed` (sin payload — cambió el catálogo de modelos de NoteFlow AI; `App.tsx` recarga
+`ai:llm-presets-changed` (sin payload — cambió el catálogo de modelos de NoteFlow AI; `App.tsx` y `AiChatWindowApp.tsx` recargan
 presets + config si ya estaban cargados),
 `ai:chat-delta` (`{requestId,delta}`), `ai:chat-sources` (`{requestId,sources}`),
 `ai:chat-done` (`{requestId,aborted?}`), `ai:chat-error` (`{requestId,error}`),

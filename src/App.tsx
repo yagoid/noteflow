@@ -223,11 +223,16 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
 
   // ── NoteFlow AI model catalog: main downloads it in the background; when it changes,
   // re-pull presets + LLM config (only if already loaded — a later first load gets it fresh).
+  // Same on an account change: main switches the active provider itself (sign-out falls back
+  // to the BYO one, subscribing activates NoteFlow AI) and `configured` is account-derived.
   useEffect(() => {
     if (isSticky) return
-    return window.noteflow.onAiLlmPresetsChanged(() => {
+    const reload = () => {
       if (useAiChatStore.getState().configLoaded) void useAiChatStore.getState().loadConfig()
-    })
+    }
+    const offPresets = window.noteflow.onAiLlmPresetsChanged(reload)
+    const offAccount = window.noteflow.onAccountStatusChanged(reload)
+    return () => { offPresets(); offAccount() }
   }, [isSticky])
 
   // ── Global keyboard shortcuts (capture phase — works even inside editors) ─

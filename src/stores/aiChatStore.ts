@@ -168,7 +168,11 @@ export const useAiChatStore = create<AiChatState>((set, get) => {
   loadConfig: async () => {
     try {
       const [cfg, presets] = await Promise.all([window.noteflow.aiLlmGetConfig(), window.noteflow.aiLlmPresets()])
-      set({ llmConfig: cfg, presets, configLoaded: true })
+      // Main may have switched the active provider on its own (sign-out falls back to the BYO
+      // one, subscribing activates NoteFlow AI): the loaded model list belonged to the old one.
+      const prev = get().llmConfig
+      const switched = !!prev && prev.active !== cfg.active
+      set({ llmConfig: cfg, presets, configLoaded: true, ...(switched ? { models: [] } : {}) })
     } catch (err) {
       console.error('Failed to load LLM config:', err)
       set({ configLoaded: true })

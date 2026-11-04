@@ -83,10 +83,14 @@ export function AiChatWindowApp() {
     const offClose = window.noteflow.onAiChatWindowRequestClose(giveBack)
     // "Ask AI" from the main window's command palette.
     const offAsk = window.noteflow.onAiChatWindowAsk((prompt) => useAiChatStore.getState().askInNewChat(prompt))
-    const offPresets = window.noteflow.onAiLlmPresetsChanged(() => {
+    // New NoteFlow AI catalog, or an account change (main switches the active provider on
+    // sign-out / subscribe): re-pull the LLM config so the chat shows what will really run.
+    const reloadConfig = () => {
       if (useAiChatStore.getState().configLoaded) void useAiChatStore.getState().loadConfig()
-    })
-    return () => { cancelled = true; offListeners(); offTarget(); offClose(); offAsk(); offPresets() }
+    }
+    const offPresets = window.noteflow.onAiLlmPresetsChanged(reloadConfig)
+    const offAccount = window.noteflow.onAccountStatusChanged(reloadConfig)
+    return () => { cancelled = true; offListeners(); offTarget(); offClose(); offAsk(); offPresets(); offAccount() }
   }, [giveBack])
 
   const openNote = useCallback((noteId: string, sectionId: string) => {
