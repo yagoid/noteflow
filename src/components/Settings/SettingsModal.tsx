@@ -57,7 +57,7 @@ interface NavGroup {
 
 // Icon + order only; labels (section and group titles) come from the dictionary
 // (keyed by id) so the nav switches language live. Groups render as a small
-// uppercase title plus a gap; the first entry of the first group is the default
+// title plus a gap; the first entry of the first group is the default
 // section (see `initialSection`).
 const NAV: NavGroup[] = [
   {
@@ -142,7 +142,7 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
           <nav className="w-[200px] flex-shrink-0 border-r border-border p-2 overflow-y-auto">
             {NAV.map((group, gi) => (
               <div key={group.id} className={gi > 0 ? 'mt-4' : undefined}>
-                <h3 className="px-2.5 pb-1 text-[10px] font-mono font-semibold text-text-muted uppercase tracking-widest truncate">
+                <h3 className="pl-1.5 pr-2.5 pb-1 text-[11px] font-mono text-text-muted/75 truncate">
                   {t.settings.navGroups[group.id]}
                 </h3>
                 {group.entries.map((entry) => {
@@ -154,8 +154,8 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
                       onClick={() => setSection(entry.id)}
                       className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs font-mono text-left transition-colors ${
                         active
-                          ? 'bg-surface-2 text-text'
-                          : 'text-text-muted hover:text-text hover:bg-surface-2/60'
+                          ? 'bg-surface-3 text-text'
+                          : 'text-text/85 hover:text-text hover:bg-surface-2'
                       }`}
                     >
                       <Icon size={13} className="flex-shrink-0" />
