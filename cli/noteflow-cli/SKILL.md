@@ -964,20 +964,9 @@ noteflow touch "título"
 
 ### Estilo del contenido: no abuses del código inline
 
-Las notas las lee una persona en la app, no un parser. El código inline (`` `así` ``)
-se renderiza como una píldora monoespaciada con fondo propio: si se reparte por todo
-el texto, la nota se vuelve ruidosa y lo que sí era código deja de destacar.
-
-- **Úsalo solo para lo que se escribiría tal cual en una terminal o en código:**
-  comandos (`npm run build`), rutas y nombres de fichero (`~/.config/noteflow`),
-  identificadores reales (funciones, variables, claves de config, flags como
-  `--json`), valores literales y fragmentos que el usuario copiaría.
-- **No lo uses para resaltar palabras normales**, conceptos, nombres de producto,
-  tecnologías mencionadas de pasada ("usa React", no "usa `React`"), estados,
-  cifras o términos que solo quieres enfatizar. Para énfasis, **negrita** (con
-  moderación) o nada.
-- Ante la duda, texto plano. Varias líneas de código → bloque con triple backtick,
-  no una cadena de inlines.
+Al escribir notas, **no abuses del código inline** (`` `así` ``). Resérvalo para
+las pocas referencias que lo piden de verdad y escribe el resto como texto normal:
+una nota llena de píldoras monoespaciadas se lee peor y lo importante deja de destacar.
 
 ---
 
