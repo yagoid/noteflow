@@ -171,7 +171,7 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   `llm/index.ts` lo inyecta en el preset (`livePreset` = `withManagedCatalog(presetOf(id))`), así que
   `effectiveModel`, `acceptsModel`, `providerCapabilities` (vía `toPublic`) y `ai:llm-presets`
   (`listPresets`) usan **el mismo** catálogo: un modelo nuevo aparece en el picker con su etiqueta
-  (`LlmConfigView.modelLabel`: nombre sin prefijo de proveedor + " · Recommended" si `recommended` +
+  (`LlmConfigView.modelLabel`: nombre sin prefijo de proveedor + " (Recommended)" si `recommended` +
   "(≈N× quota)" si `costIndex >= 2`) sin release. Invariantes: refrescar **nunca** toca el modelo
   guardado (`aiLlm`), y un fallo de red / respuesta inválida **nunca** vacía ni pisa la caché buena.
   Qué pasa si el modelo guardado sale del catálogo: lo de arriba (fallback **en memoria** al primero
@@ -280,7 +280,8 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   (`BrainCanvas`). NO se fuerzan etiquetas (eso metía ruido). Prop `highlightedNoteIds`.
 - **Historial de chats:** sesiones en `userData/ai-chats.json` (local), gestionadas por `aiChatStore`
   (crear/abrir/borrar; se persiste al terminar cada respuesta). Selector de modelo en el chat
-  (cambia el modelo del preset activo). Textos del panel vía i18n (`src/i18n/{en,es}/aiPanel.ts`).
+  (cambia el modelo del preset activo; con NoteFlow AI, si el elegido tiene `costIndex >= 2`, un badge
+  rojo "xN" a su izquierda con tooltip — `ChatView`, mismo umbral que `modelLabel`). Textos del panel vía i18n (`src/i18n/{en,es}/aiPanel.ts`).
   Los **listeners del stream** (`aiChatStore.initListeners`) los monta **`App` una vez por ventana**
   (no `AiPanel`): la misma conversación corre en el cerebro y en el sidebar del editor, y una
   respuesta sigue llegando aunque se cambie de vista. `AiPanel` solo recarga config + sesiones.

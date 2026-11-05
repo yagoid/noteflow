@@ -335,8 +335,24 @@ export function ChatView({
     </div>
   )
 
+  // NoteFlow AI (curated catalog): flag a selected model that spends the allowance at least
+  // twice as fast as the recommended one — same threshold as the "(≈N× quota)" suffix in
+  // Settings → AI (LlmConfigView's modelLabel). BYO providers have no modelMeta: no badge.
+  const costMult = llmConfig?.model ? preset?.modelMeta?.[llmConfig.model]?.costIndex ?? 1 : 1
+  const costBadgeTitle = tf(t.aiPanel.chat.modelCostBadgeTitle, { mult: costMult })
+
   const modelPicker = (
     <div className="flex items-center gap-1 min-w-0">
+      {costMult >= 2 && (
+        <span
+          role="img"
+          title={costBadgeTitle}
+          aria-label={costBadgeTitle}
+          className="shrink-0 px-1 rounded bg-red/10 text-red text-[10px] leading-4 font-mono font-bold cursor-default"
+        >
+          x{costMult}
+        </span>
+      )}
       <select
         value={llmConfig?.model ?? ''}
         onChange={(e) => setLlmConfig({ model: e.target.value })}

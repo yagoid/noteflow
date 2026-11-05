@@ -60,6 +60,10 @@ export const aiPanel = {
     historyTooltip: 'Chat history',
     newChat: 'New chat',
     modelSelectTitle: 'Model used for the next question',
+    // Tooltip/aria-label of the red "x{mult}" badge next to the model picker (NoteFlow AI only),
+    // shown when the selected model spends the allowance at least twice as fast as the
+    // recommended one ({mult} = rounded relative cost of a typical message, e.g. 29).
+    modelCostBadgeTitle: 'This model uses {mult}× more of your quota than the recommended one',
     noModel: '(no model)',
     loadModelsTitle: 'Load models from provider',
     noSavedChats: 'No saved chats yet.',
@@ -190,7 +194,7 @@ export const aiPanel = {
     // recommended model ({mult} = rounded relative cost of a typical message, shown from 2;
     // e.g. "gpt-5.6-sol (≈29× quota)").
     modelQuotaSuffix: '(≈{mult}× quota)',
-    // Appended to the recommended model's option ("deepseek-v4.1-flash-1017 · Recommended").
+    // Appended in parentheses to the recommended model's option ("deepseek-v4.1-flash-1017 (Recommended)").
     modelRecommended: 'Recommended',
     baseUrl: 'Base URL',
     apiKey: 'API key',

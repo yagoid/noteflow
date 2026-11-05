@@ -53,6 +53,7 @@ export const aiPanel: Messages['aiPanel'] = {
     historyTooltip: 'Historial de chats',
     newChat: 'Chat nuevo',
     modelSelectTitle: 'Modelo usado para la próxima pregunta',
+    modelCostBadgeTitle: 'Este modelo consume {mult} veces más que el recomendado',
     noModel: '(sin modelo)',
     loadModelsTitle: 'Cargar modelos del proveedor',
     noSavedChats: 'Aún no hay chats guardados.',

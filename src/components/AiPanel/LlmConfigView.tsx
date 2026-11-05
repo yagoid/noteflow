@@ -142,12 +142,12 @@ export function LlmConfigView({
   const changeProvider = (id: string) => { if (id !== llmConfig.active) void setLlmConfig({ active: id }) }
   // Picker label: show the model name only, dropping the "provider/" prefix
   // (x-ai/grok-4.5 → grok-4.5). The stored/sent id keeps the full form — this is
-  // cosmetic. NoteFlow AI: the recommended model gets " · Recommended", and models that
+  // cosmetic. NoteFlow AI: the recommended model gets " (Recommended)", and models that
   // spend the allowance at least twice as fast as it an "(≈N× quota)" suffix.
   const modelLabel = (m: string) => {
     const name = m.includes('/') ? m.slice(m.indexOf('/') + 1) : m
     const meta = preset.modelMeta?.[m]
-    const recommended = meta?.recommended ? ` · ${t.aiPanel.provider.modelRecommended}` : ''
+    const recommended = meta?.recommended ? ` (${t.aiPanel.provider.modelRecommended})` : ''
     const mult = meta?.costIndex ?? 1
     const suffix = mult >= 2 ? ` ${tf(t.aiPanel.provider.modelQuotaSuffix, { mult })}` : ''
     return `${name}${recommended}${suffix}`

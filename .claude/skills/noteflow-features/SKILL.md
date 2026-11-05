@@ -858,7 +858,10 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   token a token, botón de **parar**, y **citas** clicables debajo de la respuesta (abren la nota en su
   sección) que además **iluminan** esas notas en el cerebro. Arriba: **historial** de chats (crear,
   abrir, borrar — se guardan localmente), botón **nuevo chat**, y un **selector de modelo** para elegir
-  con qué modelo se hace la siguiente pregunta. Si no hay proveedor configurado, muestra un CTA a Ajustes.
+  con qué modelo se hace la siguiente pregunta (con NoteFlow AI, si el modelo elegido gasta la cuota al
+  menos el doble de rápido que el recomendado, un pequeño badge rojo **"x29"** a su izquierda lo avisa;
+  tooltip "This model uses 29× more of your quota than the recommended one"; también en el panel lateral).
+  Si no hay proveedor configurado, muestra un CTA a Ajustes.
   - **¿Ha terminado?** Mientras la IA trabaja siempre hay una señal al pie del chat: **"Thinking…"**
     cuando piensa sin escribir (al empezar, entre acciones o si se queda >~1 s callada a mitad de
     respuesta), **tres puntitos pulsando** mientras escribe, o la propia fila de la acción en curso /
@@ -922,7 +925,7 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   eligen con un **selector de dos cards** (mismo patrón que Ajustes → Sincronización; badge
   Activo/Inactivo en cada una, y debajo solo la sección de la que elijas):
   - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow),
-    modelos curados (el recomendado marcado "· Recommended"; los que gastan la asignación al menos el
+    modelos curados (el recomendado marcado "(Recommended)"; los que gastan la asignación al menos el
     doble de rápido, con sufijo "(≈N× quota)" — hoy ≈2× y ≈29×; el campo "Model" es de **solo
     lectura**, se elige haciendo clic en uno de los modelos) y **barra de consumo mensual** en
     porcentaje ("N% of this month’s AI allowance used": la asignación se mide por el coste real de
