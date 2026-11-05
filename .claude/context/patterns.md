@@ -1765,7 +1765,8 @@ abrir el dmg en Finder** (no reemplazo automático). Qué cambió y qué NO:
 Node.js standalone (sin deps de Electron) que opera directamente sobre los `.md`. Comandos:
 `add`, `new`, `list`, `get`, `read`, `set`, `path`, `touch`, `delete`, `rename`, `move`, `sections`,
 `section add/rename/delete`, `favorite` (alias `pin`), `archive`, `groups`, `group create/delete`,
-`folders`, `folder create/rename/delete`, `login`, `logout`, `push`, `pull`/`update`, `status`,
+`folders`, `folder create/rename/delete`, `login` (también en dos pasos: `--no-wait`/`--finish`),
+`logout`, `push`, `pull`/`update`, `status`,
 `cloud login/logout/status/setup/push/pull` (cliente NoteFlow Cloud headless — ver
 `monetization.md` § 4 "Cliente CLI (headless)"; con sesión Cloud activa, `push`/`pull`/`status` y el
 sync automático van a Cloud en vez de a GitHub), `migrate`, `self-update`.
@@ -1816,8 +1817,19 @@ find-replace, para **ediciones parciales** existe la vía sin round-trip: **`pat
 absoluta del `.md` de una sección (o del dir de la nota) para que el agente lo edite con sus propias
 herramientas, y **`touch`** cierra el ciclo — relee la nota de disco (obligatorio: `writeNoteFolder()`
 reescribe cada `<secId>.md` desde `note.sections[].content`, así que una copia vieja pisaría la
-edición), bumpea `updated:` y hace `syncPushNoteFiles` de `note.md` + todas las secciones. Detalle
-completo en `cli/noteflow-cli/SKILL.md` (y skill `noteflow-cli`).
+edición), bumpea `updated:` y hace `syncPushNoteFiles` de `note.md` + todas las secciones. El
+detalle de cada comando vive en **`noteflow help <comando>`** (`cmdHelp`).
+
+**Criterio de la skill `cli/noteflow-cli/SKILL.md` (~270 líneas, desde 2026-11).** La lee un agente
+cualquiera en el equipo de un usuario final, sin el repo ni `.claude/context/` (la app la copia sola
+a `~/.claude/skills/`). Recoge **solo lo que el CLI no avisa por sí solo** —fallos silenciosos (sync
+con exit 0, `set` reemplaza, truncado de `noteflow.cmd`, `touch` obligatorio y que borra `.md`
+sueltos, app abierta pisando grupos/carpetas, `--force`, `add --title` parcial…), modelo mental,
+chuleta de una línea por comando, checklist y protocolos de sync—; lo que el CLI ya bloquea con un
+error autocorregible (`Did you mean`, flag desconocido, uso incorrecto) se resume en "lee el error".
+Detalle útil que no sea un riesgo → a `cmdHelp`, no a la skill (las pruebas con modelos pequeños
+mostraron que fallan por olvidar reglas enterradas en un fichero largo). Antes de quitar un aviso,
+rastrea con `git log -S` por qué se añadió.
 
 **Salida del proceso: nunca `process.exit()`.** En Windows (visto con Node 24) un `process.exit()`
 con un socket keep-alive de `fetch`/`https` aún abierto aborta a veces con la aserción de libuv
@@ -1844,6 +1856,45 @@ intentos en total ante `otp_expired` sin reenviar el email). `confirm()` con std
 `--yes`. Readline es **uno por prompt**: con stdin por pipe, las líneas que ya leyó un prompt se
 pierden al cerrarlo — el CLI no soporta responder a varios prompts por pipe (para scripts:
 `--yes`, `NOTEFLOW_CLOUD_PASSPHRASE`).
+
+**Logins en dos pasos para agentes (v2.6.0).** Un agente de IA no tiene stdin (el `cloud login`
+interactivo sale con exit 1 sin él) ni puede dejar un comando bloqueado ~15 min (el polling del
+Device Flow de `login`). Por eso ambos logins tienen una variante no interactiva y no bloqueante,
+y al humano solo le queda autorizar en GitHub o dar el código del email:
+- **Cloud:** `cloud login <email> --send-code` envía el OTP y sale con 0; `cloud login <email>
+  --code <código>` **no** reenvía email, normaliza con `normalizeOtpCode` y gasta **un** `/verify`
+  (inválido/caducado → exit 1, reintentable con el mismo código o con un `--send-code` nuevo). La
+  validación de flags (`planCloudLogin`: email obligatorio como argumento, `--send-code` ⊕ `--code`)
+  es pura; `sendCloudOtp`/`verifyCloudOtp` son comunes, y lo que pasa tras obtener la sesión
+  (`finishCloudLogin`: `saveCliAccount`, `bindCliCloudToAccount`, `patchCliCloud`, línea `Cloud
+  keys:`, pull en managed, `--no-pull`) es **la misma función** para el flujo interactivo y `--code`.
+- **GitHub:** `login [repo] --no-wait` pide el device code, lo imprime (abre el navegador
+  best-effort; con `--json`, `{ verificationUri, userCode, expiresAt, repo }`) y guarda la concesión
+  pendiente en `settings.cliGithubLogin` (`{ deviceCode, userCode, verificationUri, interval,
+  expiresAt, repo, noPull? }`, clave propia del CLI, `writeSettings` → 0600). `login --finish` la
+  valida (`checkPendingGithubLogin`: ausente/mal formada o caducada → exit 1 pidiendo `--no-wait`
+  otra vez), hace el polling con el **primer intento inmediato** (respeta `interval`/`slow_down`) y
+  sigue por `completeGithubLogin`, el mismo final que el login interactivo (`ensureRepo`, reglas
+  `sameRepo`/`clearGithubBases`, `pullAfterLogin`). El pendiente se borra en cuanto el polling
+  termina (token concedido, caducado o error definitivo como `access_denied`). Un fallo de red
+  **durante el polling** (o que el timeout de la herramienta del agente corte el comando) lo
+  conserva y basta repetir `--finish`. Uno **después** de recibir el token (`GET /user`,
+  `ensureRepo`) ya no: GitHub da un token por device code, así que el pendiente se borra antes de
+  conectar y un `--finish` repetido dice `No pending GitHub login` → empezar con `--no-wait`. **Repo con `--finish`:** manda el del pendiente; uno distinto es error sin tocar nada
+  (`resolveFinishRepo`) — nunca se cambia de repo en silencio.
+- **Pista `desktopApp` en `status --json`/`cloud status --json`** (aditiva): `{ cloudSignedIn,
+  cloudSyncEnabled, cloudEmail?, github: { owner, repo } | null }` leído del `settings.json` de la app (`desktopSettingsCandidates`:
+  `<appData>/NoteFlow/settings.json` — el userData de Electron usa el `productName`; en Windows es
+  el mismo fichero que el del CLI, en macOS/Linux otro), `null` si no se encuentra. En Linux **no**
+  se mira `~/.config/noteflow` como respaldo: es el fichero del propio CLI y existe sin la app (daría
+  un falso "no" en vez de `null`). Única excepción
+  a "nunca leer `settings.account`": solo la **presencia** de la sesión (misma regla que
+  `getAccountStatus`: refresh token + userId) y el email, que la app guarda en claro; el token no
+  sale. `github` = owner/repo del `githubSync` de la app (sin token): en Windows el caso GitHub ya
+  se ve con `github.tokenAccessible: false`, pero en macOS/Linux el `githubSync` del CLI vive en
+  otro fichero y esta es la única forma de saberlo. Así el agente propone al usuario el mismo
+  backend que usa en la app. Protocolo del agente en la skill (`cli/noteflow-cli/SKILL.md`
+  § "Ofrécete a activar el sync"). Tests en `tests/cli/agentLogin.test.ts`.
 
 **Shims de Windows (`cli/noteflow.cmd`, `cli/noteflow.ps1`).** PowerShell prefiere el `.ps1` sobre el
 `.cmd`, así que el `.ps1` carga con dos rarezas de PS 5.1: (1) en una **tubería** PowerShell se queda

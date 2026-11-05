@@ -1,6 +1,6 @@
 // Pure sync-state decisions of the CLI (cli/noteflow.js), pinned without any
 // network: when a GitHub pull/push may advance `githubSync.lastSync` (shared
-// with the desktop app's deletion rule on Windows/Linux), and when the Cloud
+// with the desktop app's deletion rule on Windows), and when the Cloud
 // pull cursor kept across `cloud logout` must be dropped because the account
 // that signs in is not the one that produced it.
 import { describe, it, expect } from 'vitest'

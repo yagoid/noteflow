@@ -11,7 +11,7 @@
   está en el `CLAUDE.md` de la raíz, que se carga en cada sesión.
 - **Proyectos/skills hermanas:**
   - `noteflow-features` (skill) → funcionalidades, UI, UX, atajos (perspectiva de producto/usuario).
-  - `noteflow-cli` (skill) → referencia completa del CLI companion.
+  - `noteflow-cli` (skill) → guía del CLI companion para agentes (lo que el CLI no avisa); la referencia completa es `noteflow help <comando>`.
   - `noteflow-mobile` (skill) → app móvil hermana (React Native + Expo), comparte el formato de nota.
 
 ## Estructura de directorios
@@ -441,12 +441,20 @@ Contenido del dir de notas:
 **Ajustes locales (NO se sincronizan)** en `settings.json` (nota: `theme` sigue aquí como
 dual-write legacy — la fuente sincronizada es `ui-settings.json` del dir de notas):
 - **Windows:** `%APPDATA%\noteflow\settings.json`
-- **Linux:** `~/.config/noteflow/settings.json`
+- **Linux:** `~/.config/NoteFlow/settings.json` (`$XDG_CONFIG_HOME` si está definido)
 - **macOS:** `~/Library/Application Support/NoteFlow/settings.json`
-- (vía `app.getPath('userData')`)
+- (vía `app.getPath('userData')` = `<appData>/<app.name>`, y Electron toma `app.name` del
+  **`productName`** de `package.json` — `NoteFlow` —, no de `name`; comprobado: `app.getName()`
+  devuelve `NoteFlow`). En Windows la carpeta aparece como `noteflow` si la creó antes el CLI: es
+  la misma (NTFS no distingue mayúsculas).
 
 > **Seguridad / modelo de amenaza.** La app cifra los secretos con `safeStorage` (base64 solo
-> como fallback si el SO no lo ofrece). El **CLI** comparte este fichero en Windows/Linux. Como un
+> como fallback si el SO no lo ofrece). El **CLI** comparte este fichero **solo en Windows**: usa
+> `%APPDATA%\noteflow` (= `NoteFlow`, sin distinguir mayúsculas) y en Linux/macOS
+> `${XDG_CONFIG_HOME:-~/.config}/noteflow`, que en Linux es **otra** carpeta que `~/.config/NoteFlow`
+> (sistema de ficheros sensible a mayúsculas) — así que allí la app y el CLI no comparten
+> `githubSync`, y `status --json` lee el de la app aparte para la pista `desktopApp` (ver
+> `patterns.md` § CLI). Como un
 > proceso Node no tiene `safeStorage`, guarda su token de GitHub (`githubSync.encryptedToken`, scope
 > `repo`) y su refresh token de Cloud (`cliAccount.refreshToken`) **solo en base64**. Lo que los
 > protege es el permiso del fichero: en Linux/macOS el CLI deja `settings.json` en **`0600`**

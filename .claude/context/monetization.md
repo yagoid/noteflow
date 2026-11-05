@@ -1627,7 +1627,10 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
   `settings.account`** con la app: GoTrue rota el refresh token en cada uso y compartir sesión los
   deslogearía mutuamente. El token rotado se persiste **antes** de usar el access token; un 400/401
   del refresh borra `cliAccount` ("Session expired"). Un access token por invocación (proceso
-  one-shot, sin single-flight).
+  one-shot, sin single-flight). Además del login interactivo hay uno **en dos pasos sin stdin**
+  para agentes (`cloud login <email> --send-code` y luego `--code <código>`, v2.6.0; detalle en
+  `patterns.md` § CLI). La única lectura de `settings.account` es la pista `desktopApp` de
+  `status --json` (solo presencia de la sesión + email en claro, nunca el token).
 - **Estado propio:** `settings.cliCloud = {enabled, pullSeq, lastSync, userId, pendingUpserts, forceUpserts, pullRetry,
   basesBootstrapped, basesBootstrapPending}` (más un `pullCursor` legado hasta el primer pull por seq; las
   bases por fichero van aparte, en `cli-cloud-state.json`, ver "Fusión en tres vías" abajo) — cursor/lastSync del CLI, independientes de
@@ -1717,7 +1720,7 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
 - **Fusión en tres vías por fichero (paridad con la app, 2026-11-04).** Mismo diseño que "Fusión en
   tres vías por fichero" del Sync engine, con estas piezas propias del CLI:
   - **Bases** `{seq, hash}` por relPath en **`<dir de ajustes del CLI>/cli-cloud-state.json`**
-    (`{userId, bases}`), **no** en `settings.json` (crece con el corpus y en Windows/Linux ese fichero
+    (`{userId, bases}`), **no** en `settings.json` (crece con el corpus y en Windows ese fichero
     lo comparte la app; mismo criterio que `cli-github-state.json` y que la app, que las guarda en
     `cloud-sync-state.json`). Un fichero con otro `userId` (o ilegible) se lee vacío. Los cambios se
     acumulan en memoria (`setCliCloudBase`) y `flushCliCloudBases` **re-lee el fichero y aplica solo
