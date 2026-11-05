@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   UNDOABLE_TOOLS,
   createUndoStore,
-  isModifiedSinceEdit,
+  hasUndoConflict,
+  mergeUndo,
   noteFingerprint,
   planUndo,
   stripStaleUndo,
@@ -25,7 +26,7 @@ const note = (over: Partial<DiskNote> = {}): DiskNote => ({
   ...over,
 })
 
-const snap = (before: DiskNote | null, after: DiskNote | null): UndoSnapshot => ({
+const snap = (before: DiskNote | null, after: DiskNote): UndoSnapshot => ({
   toolCallId: 'call-1', noteId: 'n1', dir: 'roadmap-n1', before, after,
 })
 
@@ -52,7 +53,7 @@ describe('undoNoteId', () => {
   })
 })
 
-describe('noteFingerprint / isModifiedSinceEdit', () => {
+describe('noteFingerprint', () => {
   it('ignores the updated timestamp', () => {
     expect(noteFingerprint(note())).toBe(noteFingerprint(note({ updated: '2026-11-01T00:00:00.000Z' })))
   })
@@ -67,15 +68,46 @@ describe('noteFingerprint / isModifiedSinceEdit', () => {
     expect(noteFingerprint(null)).not.toBe(base)
   })
 
-  it('reports a change only when disk no longer matches what the AI left', () => {
-    const after = note({ sections: [{ id: 's1', name: 'Ideas', content: 'AI text' }, { id: 's2', name: 'Tasks', content: 'two' }] })
-    const s = snap(note(), after)
-    expect(isModifiedSinceEdit(s, { ...after, updated: 'later' })).toBe(false)
-    expect(isModifiedSinceEdit(s, { ...after, title: 'Renamed by the user' })).toBe(true)
-    expect(isModifiedSinceEdit(s, null)).toBe(true)
-    // A created note that is still untouched / was deleted meanwhile
-    expect(isModifiedSinceEdit(snap(null, after), after)).toBe(false)
-    expect(isModifiedSinceEdit(snap(note(), null), null)).toBe(false)
+})
+
+// The AI's update_section of s1: before → after.
+const S1_AI = { id: 's1', name: 'Ideas', content: 'AI text' }
+const S2 = { id: 's2', name: 'Tasks', content: 'two' }
+const aiEditedS1 = () => note({ sections: [S1_AI, S2] })
+
+describe('hasUndoConflict', () => {
+  it('is false while disk still matches what the AI left', () => {
+    const after = aiEditedS1()
+    expect(hasUndoConflict(snap(note(), after), { ...after, updated: 'later' })).toBe(false)
+  })
+
+  it('ignores user edits to parts the AI did not touch', () => {
+    const s = snap(note(), aiEditedS1())
+    expect(hasUndoConflict(s, { ...aiEditedS1(), title: 'Renamed by the user' })).toBe(false)
+    expect(hasUndoConflict(s, note({ sections: [S1_AI, { ...S2, content: 'user text' }] }))).toBe(false)
+    expect(hasUndoConflict(s, note({ sections: [S1_AI, S2, { id: 's9', name: 'Mine', content: 'u' }] }))).toBe(false)
+    expect(hasUndoConflict(s, note({ sections: [S1_AI] }))).toBe(false)
+  })
+
+  it('is true when the part the AI changed changed again', () => {
+    const s = snap(note(), aiEditedS1())
+    expect(hasUndoConflict(s, note({ sections: [{ ...S1_AI, content: 'AI text + user' }, S2] }))).toBe(true)
+    expect(hasUndoConflict(s, null)).toBe(true)
+    // A note-level field the AI changed and the user changed again
+    const renamed = note({ title: 'AI title' })
+    expect(hasUndoConflict(snap(note(), renamed), { ...renamed, title: 'User title' })).toBe(true)
+    expect(hasUndoConflict(snap(note(), renamed), { ...renamed, favorited: true })).toBe(false)
+    // A section the AI added and the user then edited (a deleted one leaves nothing to lose)
+    const added = note({ sections: [...note().sections, { id: 's3', name: 'New', content: 'x' }] })
+    expect(hasUndoConflict(snap(note(), added), note({ sections: [...note().sections, { id: 's3', name: 'New', content: 'x+' }] }))).toBe(true)
+    expect(hasUndoConflict(snap(note(), added), note())).toBe(false)
+  })
+
+  it('treats any change to a created note as a conflict (undo deletes it whole)', () => {
+    const after = aiEditedS1()
+    expect(hasUndoConflict(snap(null, after), after)).toBe(false)
+    expect(hasUndoConflict(snap(null, after), { ...after, title: 'Renamed' })).toBe(true)
+    expect(hasUndoConflict(snap(null, after), null)).toBe(true)
   })
 })
 
@@ -91,13 +123,27 @@ describe('undoBlock', () => {
     expect(undoBlock(snap(note(), note({ title: 'AI title' })), null)).toBe('gone')
   })
 
-  it('refuses to re-create a section file deleted after the edit', () => {
-    const after = note({ sections: [{ id: 's1', name: 'Ideas', content: 'AI text' }, { id: 's2', name: 'Tasks', content: 'two' }] })
-    const userDeletedS2 = note({ sections: [{ id: 's1', name: 'Ideas', content: 'AI text' }] })
-    expect(undoBlock(snap(note(), after), userDeletedS2)).toBe('gone')
+  it('refuses to re-create the section the AI changed once deleted after the edit', () => {
+    const userDeletedS1 = note({ sections: [S2] })
+    expect(undoBlock(snap(note(), aiEditedS1()), userDeletedS1)).toBe('gone')
+  })
+
+  it('does not block when the user deleted a section the AI did not touch', () => {
+    const userDeletedS2 = note({ sections: [S1_AI] })
+    expect(undoBlock(snap(note(), aiEditedS1()), userDeletedS2)).toBeNull()
     // Removing a section the AI added is fine (it deletes, never re-creates)
     const added = note({ sections: [...note().sections, { id: 's3', name: 'New', content: 'x' }] })
     expect(undoBlock(snap(note(), added), added)).toBeNull()
+    expect(undoBlock(snap(note(), added), note())).toBeNull()
+  })
+
+  it('keeps blocking a section the tool itself removed (its remote delete is queued)', () => {
+    const removedS2 = note({ sections: [{ id: 's1', name: 'Ideas', content: 'one' }] })
+    expect(undoBlock(snap(note(), removedS2), removedS2)).toBe('gone')
+    // The merge itself would put it back after its neighbour (only reachable bypassing undoBlock).
+    const mine = { id: 's9', name: 'Mine', content: 'u' }
+    expect(mergeUndo(snap(note(), removedS2), note({ sections: [mine, removedS2.sections[0]] })).sections.map((s) => s.id))
+      .toEqual(['s9', 's1', 's2'])
   })
 
   it('refuses when the note was encrypted or decrypted after the edit', () => {
@@ -137,6 +183,99 @@ describe('planUndo', () => {
     expect(plan.kind === 'write' && Object.keys(plan.files)).toEqual(['note.md'])
   })
 
+  it('keeps a user edit to another section made after the AI edit', () => {
+    const s = snap(note(), aiEditedS1())
+    const current = note({ sections: [S1_AI, { ...S2, content: 'user text' }] })
+    expect(hasUndoConflict(s, current)).toBe(false)
+    expect(undoBlock(s, current)).toBeNull()
+    const plan = planUndo(s, current)
+    expect(plan.kind === 'write' && Object.keys(plan.files).sort()).toEqual(['note.md', 's1.md'])
+    expect(plan.kind === 'write' && plan.files['s1.md']).toBe('one')
+    expect(plan.kind === 'write' && plan.deleteFiles).toEqual([])
+    expect(mergeUndo(s, current).sections).toEqual([{ id: 's1', name: 'Ideas', content: 'one' }, { ...S2, content: 'user text' }])
+  })
+
+  it('keeps sections the user added afterwards, and deletions of untouched ones', () => {
+    const s = snap(note(), aiEditedS1())
+    const mine = { id: 's9', name: 'Mine', content: 'u' }
+    const merged = mergeUndo(s, note({ sections: [mine, S1_AI] }))
+    expect(merged.sections).toEqual([mine, { id: 's1', name: 'Ideas', content: 'one' }])
+    const plan = planUndo(s, note({ sections: [mine, S1_AI] }))
+    expect(plan.kind === 'write' && plan.deleteFiles).toEqual([])
+    expect(plan.kind === 'write' && Object.keys(plan.files).sort()).toEqual(['note.md', 's1.md'])
+  })
+
+  it('forced over a conflict restores only the conflicting section', () => {
+    const s = snap(note(), aiEditedS1())
+    const current = note({ title: 'User title', sections: [{ ...S1_AI, content: 'AI text + user' }, { ...S2, content: 'user text' }] })
+    expect(hasUndoConflict(s, current)).toBe(true)
+    const merged = mergeUndo(s, current)
+    expect(merged.title).toBe('User title')
+    expect(merged.sections).toEqual([{ id: 's1', name: 'Ideas', content: 'one' }, { ...S2, content: 'user text' }])
+  })
+
+  it('undoes add_section by removing only that section', () => {
+    const s3 = { id: 's3', name: 'New', content: 'x' }
+    const s = snap(note(), note({ sections: [...note().sections, s3] }))
+    const current = note({ sections: [{ id: 's1', name: 'Ideas', content: 'user' }, S2, s3] })
+    const plan = planUndo(s, current)
+    expect(plan.kind === 'write' && plan.deleteFiles).toEqual(['s3.md'])
+    expect(plan.kind === 'write' && Object.keys(plan.files)).toEqual(['note.md'])
+    expect(mergeUndo(s, current).sections.map((x) => x.content)).toEqual(['user', 'two'])
+  })
+
+  it('undoes rename_section keeping the content the user typed since', () => {
+    const renamed = note({ sections: [{ id: 's1', name: 'Brainstorm', content: 'one' }, S2] })
+    const s = snap(note(), renamed)
+    // s2 edited since: unrelated to the rename, it survives.
+    const current = note({ sections: [{ id: 's1', name: 'Brainstorm', content: 'one' }, { ...S2, content: 'later' }] })
+    expect(hasUndoConflict(s, current)).toBe(false)
+    expect(mergeUndo(s, current).sections).toEqual([{ id: 's1', name: 'Ideas', content: 'one' }, { ...S2, content: 'later' }])
+    const plan = planUndo(s, current)
+    // Section names live in note.md: the section file itself is unchanged.
+    expect(plan.kind === 'write' && Object.keys(plan.files)).toEqual(['note.md'])
+    expect(plan.kind === 'write' && plan.files['note.md']).toContain('name: Ideas')
+  })
+
+  it('undoes update_note per field (title, placement), keeping other user changes', () => {
+    const before = note({ group: 'g1', folder: 'f1' })
+    const after = { ...before, title: 'AI title' }
+    const current = { ...after, tags: ['mine'], favorited: true, group: 'g2', folder: undefined, sections: [{ id: 's1', name: 'Ideas', content: 'user #mine' }, S2] }
+    const s = snap(before, after)
+    expect(hasUndoConflict(s, current)).toBe(false)
+    const merged = mergeUndo(s, current)
+    expect(merged.title).toBe('Roadmap')
+    expect(merged.tags).toEqual(['mine'])
+    expect(merged.favorited).toBe(true)
+    expect([merged.group, merged.folder]).toEqual(['g2', undefined])
+    expect(merged.sections[0].content).toBe('user #mine')
+    // Group and folder go together: the AI moving the note restores both.
+    const moved = { ...before, group: 'g3', folder: undefined }
+    const m2 = mergeUndo(snap(before, moved), { ...moved, title: 'User title' })
+    expect([m2.group, m2.folder, m2.title]).toEqual(['g1', 'f1', 'User title'])
+  })
+
+  it('recomputes tags from the merged content (they are derived, the tools never set them)', () => {
+    // The AI adds #urgent to s1; the renderer then derives tags when the user edits s2.
+    const after = note({ sections: [{ id: 's1', name: 'Ideas', content: 'one #urgent' }, S2] })
+    const current = note({ tags: ['urgent', 'later'], sections: [{ id: 's1', name: 'Ideas', content: 'one #urgent' }, { ...S2, content: 'two #later' }] })
+    const s = snap(note(), after)
+    expect(hasUndoConflict(s, current)).toBe(false)
+    expect(mergeUndo(s, current).tags).toEqual(['later'])
+    const plan = planUndo(s, current)
+    expect(plan.kind === 'write' && plan.files['note.md']).toMatch(/tags:\n\s+- later\n/)
+    // Same through add_section: removing the AI's section drops its tag.
+    const added = note({ sections: [...note().sections, { id: 's3', name: 'New', content: '#urgent' }] })
+    expect(mergeUndo(snap(note(), added), { ...added, tags: ['urgent'] }).tags).toEqual([])
+  })
+
+  it('is a noop when there is nothing left to revert, or the note is gone', () => {
+    const s3 = { id: 's3', name: 'New', content: 'x' }
+    expect(planUndo(snap(note(), note({ sections: [...note().sections, s3] })), note())).toEqual({ kind: 'noop' })
+    // Never re-creates a deleted note (undoBlock reports it as 'gone' first).
+    expect(planUndo(snap(note(), aiEditedS1()), null)).toEqual({ kind: 'noop' })
+  })
+
   it('restores an encrypted note from its note.md alone', () => {
     const enc = note({ encryption: { alg: 'aes-256-gcm+pbkdf2', salt: 'a', iv: 'b', ciphertext: 'c' }, sections: [] })
     const moved = { ...enc, group: 'g1' }
@@ -145,14 +284,26 @@ describe('planUndo', () => {
     expect(plan.kind === 'write' && plan.files['note.md']).toContain('ciphertext')
     expect(plan.kind === 'write' && plan.deleteFiles).toEqual([])
   })
+
+  it('keeps the current ciphertext of an encrypted note re-encrypted since', () => {
+    const enc = note({ encryption: { alg: 'aes-256-gcm+pbkdf2', salt: 'a', iv: 'b', ciphertext: 'old' }, sections: [] })
+    const moved = { ...enc, group: 'g1' }
+    const current = { ...moved, encryption: { ...enc.encryption, ciphertext: 'new' } }
+    const s = snap(enc, moved)
+    expect(undoBlock(s, current)).toBeNull()
+    expect(hasUndoConflict(s, current)).toBe(false)
+    const plan = planUndo(s, current)
+    expect(plan.kind === 'write' && plan.files['note.md']).toContain('ciphertext: new')
+    expect(plan.kind === 'write' && plan.files['note.md']).not.toContain('group:')
+  })
 })
 
 describe('createUndoStore', () => {
   it('stores by toolCallId and drops the oldest past the limit', () => {
     const store = createUndoStore(2)
-    store.put({ ...snap(null, null), toolCallId: 'a' })
-    store.put({ ...snap(null, null), toolCallId: 'b' })
-    store.put({ ...snap(null, null), toolCallId: 'c' })
+    store.put({ ...snap(null, note()), toolCallId: 'a' })
+    store.put({ ...snap(null, note()), toolCallId: 'b' })
+    store.put({ ...snap(null, note()), toolCallId: 'c' })
     expect(store.has('a')).toBe(false)
     expect(store.has('b') && store.has('c')).toBe(true)
     store.delete('b')

@@ -3035,9 +3035,10 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
         if (undoable && !result.isError) {
           const noteId = chatUndo.undoNoteId(call.name, call.input, result.noteId)
           const after = noteId ? readDiskNote(noteId) : null
+          // No `after` (note unreadable right after the tool) → no undo: the 3-way merge needs it.
           const dir = before?.dir ?? after?.dir
-          if (noteId && dir && chatUndo.noteFingerprint(before?.note ?? null) !== chatUndo.noteFingerprint(after?.note ?? null)) {
-            chatUndoStore.put({ toolCallId: call.id, noteId, dir, before: before?.note ?? null, after: after?.note ?? null })
+          if (noteId && after && dir && chatUndo.noteFingerprint(before?.note ?? null) !== chatUndo.noteFingerprint(after.note)) {
+            chatUndoStore.put({ toolCallId: call.id, noteId, dir, before: before?.note ?? null, after: after.note })
             canUndo = true
           }
         }
@@ -3060,12 +3061,13 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
   }
 })
 
-// Undo one note edit of the chat agent: put the note back as it was before that tool call,
-// through the regular write/delete primitives (broadcast to every window + push + reindex).
-// Without `force`, refuses with 'modified' when the note changed after the AI's edit — the UI
-// then asks the user and retries with force. Never runs (even forced) when it would re-create a
-// note folder / section file deleted since ('conflict': a remote delete may still be queued for
-// it) or when the note's encryption changed since ('encryption') — see chatUndo.undoBlock.
+// Undo one note edit of the chat agent: revert only what that tool call changed (3-way merge,
+// later edits elsewhere in the note survive), through the regular write/delete primitives
+// (broadcast to every window + push + reindex). Without `force`, refuses with 'modified' when a
+// part the AI changed was changed again afterwards — the UI then asks the user and retries with
+// force. Never runs (even forced) when it would re-create the note folder / a section file the
+// tool changed that was deleted since ('conflict': a remote delete may still be queued for it) or
+// when the note's encryption changed since ('encryption') — see chatUndo.undoBlock.
 ipcMain.handle('ai:chat-undo', async (_event, toolCallId: unknown, force: unknown) => {
   if (typeof toolCallId !== 'string') return { ok: false, reason: 'unavailable' }
   const snapshot = chatUndoStore.get(toolCallId)
@@ -3076,7 +3078,7 @@ ipcMain.handle('ai:chat-undo', async (_event, toolCallId: unknown, force: unknow
     // Checked before 'modified' (and not overridable by force): no confirmation can make these safe.
     const block = chatUndo.undoBlock(snapshot, current)
     if (block) return { ok: false, reason: block === 'gone' ? 'conflict' : 'encryption' }
-    if (force !== true && chatUndo.isModifiedSinceEdit(snapshot, current)) return { ok: false, reason: 'modified' }
+    if (force !== true && chatUndo.hasUndoConflict(snapshot, current)) return { ok: false, reason: 'modified' }
     const plan = chatUndo.planUndo(snapshot, current)
     if (plan.kind === 'delete') {
       applyNoteDelete(plan.dir)

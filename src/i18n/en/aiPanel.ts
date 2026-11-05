@@ -70,14 +70,14 @@ export const aiPanel = {
 
     // Undo of a note edit made by the agent (button on its activity row).
     undo: 'Undo',
-    undoHint: 'Put the note back as it was before this edit',
+    undoHint: 'Revert only what this edit changed',
     undoWhileStreaming: 'Available when the reply finishes',
     undone: 'Undone',
-    undoModified: 'The note changed after this edit. Undo anyway?',
+    undoModified: 'The part the AI edited changed afterwards. Undo anyway?',
     undoAnyway: 'Undo anyway',
     undoHintCreated: 'Delete the note the AI created',
     undoModifiedCreated: 'The note changed after the AI created it. Undo anyway? The whole note will be deleted.',
-    undoConflict: "Can't undo: the note or one of its sections was deleted after this edit.",
+    undoConflict: "Can't undo: the note, or the section this edit changed, was deleted afterwards.",
     undoEncryption: "Can't undo: the note was encrypted or decrypted after this edit.",
     // {error}: raw error text from main.
     undoFailed: "Couldn't undo: {error}",

@@ -886,9 +886,11 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     aparece justo debajo en una **fila roja** ⚠ con el motivo. Nunca se corta la respuesta en seco
     sin explicación.
   - **Deshacer lo que hizo la IA:** cada edición de una nota (crear nota, editar/renombrar/añadir
-    sección, cambiar título o grupo…) muestra un botón **Deshacer** en su fila; al pulsarlo la nota
-    vuelve a como estaba (si la IA la creó, se borra). Si tú tocaste la nota después, pregunta antes.
-    No se puede deshacer si la nota o esa sección se borraron después, ni si la nota se cifró o
+    sección, cambiar título o grupo…) muestra un botón **Deshacer** en su fila; al pulsarlo se
+    revierte **solo lo que cambió esa edición** (si la IA creó la nota, se borra): lo que tú editaste
+    después en otras secciones o en la nota se conserva. Solo pregunta antes si tú (u otra edición
+    posterior) volviste a tocar justo lo que cambió la IA ("Lo que editó la IA cambió después").
+    No se puede deshacer si la nota o la sección que cambió la IA se borraron después, ni si la nota se cifró o
     descifró después (lo avisa). Los borrados no tienen Deshacer: ya piden confirmación. Solo dura
     mientras la app está abierta (tras reiniciar, el botón desaparece).
 - **Related:** las "Related notes" por sección (lo que antes estaba al pie del cerebro), eligiendo

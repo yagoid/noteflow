@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TOOLS = exports.DESTRUCTIVE_TOOLS = void 0;
+exports.extractTags = extractTags;
 exports.restoreStrippedImages = restoreStrippedImages;
 exports.describeTarget = describeTarget;
 exports.describeAction = describeAction;
@@ -61,6 +62,7 @@ function defaultNoteTitle() {
     const pad = (n) => String(n).padStart(2, '0');
     return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
+/** Hashtags in `content` — mirror of extractTags in src/lib/noteUtils.ts (tags are derived data). */
 function extractTags(content) {
     const matches = content.match(/#([a-zA-Z][a-zA-Z0-9_-]*)/g);
     if (!matches)

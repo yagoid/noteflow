@@ -62,14 +62,14 @@ export const aiPanel: Messages['aiPanel'] = {
 
     // Deshacer una edición de nota hecha por el agente (botón en su fila de actividad).
     undo: 'Deshacer',
-    undoHint: 'Devolver la nota a como estaba antes de esta edición',
+    undoHint: 'Revertir solo lo que cambió esta edición',
     undoWhileStreaming: 'Disponible cuando termine la respuesta',
     undone: 'Deshecho',
-    undoModified: 'La nota cambió después de esta edición. ¿Deshacer igualmente?',
+    undoModified: 'Lo que editó la IA cambió después. ¿Deshacer igualmente?',
     undoAnyway: 'Deshacer igualmente',
     undoHintCreated: 'Borrar la nota que creó la IA',
     undoModifiedCreated: 'La nota cambió después de que la creara la IA. ¿Deshacer igualmente? Se borrará la nota entera.',
-    undoConflict: 'No se puede deshacer: la nota o una de sus secciones se borró después de esta edición.',
+    undoConflict: 'No se puede deshacer: la nota, o la sección que cambió esta edición, se borró después.',
     undoEncryption: 'No se puede deshacer: la nota se cifró o descifró después de esta edición.',
     undoFailed: 'No se pudo deshacer: {error}',
 
