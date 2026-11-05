@@ -234,7 +234,7 @@ export const settings = {
     profileHint: 'Vuelve a hacer el cuestionario para actualizar la nota de perfil que el asistente usa como contexto.',
     exposeSkill: 'Exponer la skill del CLI a los agentes de IA',
     exposeSkillHint:
-      'Instala la skill de NoteFlow en ~/.claude/skills para que agentes como Claude Code puedan gestionar tus notas a través del CLI sin configuración adicional.',
+      'Instala la skill de NoteFlow en ~/.claude/skills y ~/.agents/skills para que Claude Code, Codex, Gemini CLI, Copilot, Cursor y otros agentes compatibles con el estándar Agent Skills gestionen tus notas a través del CLI.',
     exposeSkillTooltip: 'Exponer la skill del CLI',
     stopExposingSkill: 'Dejar de exponer la skill del CLI',
   },

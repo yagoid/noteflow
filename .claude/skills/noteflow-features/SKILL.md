@@ -146,7 +146,8 @@ Iconos del TitleBar:
   `src/lib/activityPulse.ts`; bajo el gráfico, en filas título + descripción + control: **Local AI**
   (toggle de embeddings; activada, botón "Reindex all notes" con progreso), **Profile** (botón "Open
   profile setup" → abre el cerebro en la pestaña Profile y cierra Ajustes) y **Expose CLI skill to AI
-  agents** (toggle)), **Appearance** (tema/fuente/acento/colores del editor/escala),
+  agents** (toggle: copia la skill del CLI a `~/.claude/skills` y `~/.agents/skills`, y a Windsurf si
+  está instalado)), **Appearance** (tema/fuente/acento/colores del editor/escala),
   **Editor** (fuente/tamaño/ancho) — grupo **Preferences** —; **Sync** (NoteFlow Cloud + GitHub),
   **AI** (solo el proveedor del LLM), **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
   de notas), **Startup** (autostart + stickies), **Templates** (plantillas de nota) — grupo **Your

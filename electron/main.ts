@@ -3663,26 +3663,48 @@ ipcMain.handle('app:set-login-item', (_event, enabled: boolean) => {
   }
 })
 
-// ── CLI skill exposure (~/.claude/skills/noteflow-cli) ────────────────────────
-// Installs the bundled noteflow-cli SKILL.md into the user's Claude skills dir so
-// AI agents (e.g. Claude Code) discover how to drive NoteFlow via the CLI without
-// any extra download. Controlled by the `exposeSkillToAgents` setting (default on)
-// and re-synced on every launch so skill updates propagate. Best-effort: never
-// throws into the startup path.
-function syncSkillToClaudeDir(): void {
+// ── CLI skill exposure (agent skill dirs) ─────────────────────────────────────
+// Installs the bundled noteflow-cli SKILL.md into the user-level skill dirs of
+// AI coding agents so they discover how to drive NoteFlow via the CLI without
+// any extra download:
+//   - ~/.claude/skills/noteflow-cli          → Claude Code (only reads this path)
+//   - ~/.agents/skills/noteflow-cli          → Agent Skills standard user path
+//     (agentskills.io): Codex, Gemini CLI, GitHub Copilot, Cursor, OpenCode…
+//   - ~/.codeium/windsurf/skills/noteflow-cli → Windsurf, only if ~/.codeium/windsurf
+//     already exists (we never create ~/.codeium on machines without Windsurf)
+// Controlled by the `exposeSkillToAgents` setting (default on) and re-synced on
+// every launch so skill updates propagate. Each destination is handled
+// independently and best-effort: a failure in one never blocks the others, and
+// nothing ever throws into the startup path.
+function skillAgentDestDirs(): string[] {
+  const home = os.homedir()
+  const dirs = [
+    path.join(home, '.claude', 'skills', 'noteflow-cli'),
+    path.join(home, '.agents', 'skills', 'noteflow-cli'),
+  ]
+  const windsurfRoot = path.join(home, '.codeium', 'windsurf')
+  try {
+    if (fs.existsSync(windsurfRoot)) dirs.push(path.join(windsurfRoot, 'skills', 'noteflow-cli'))
+  } catch { /* treat as not installed */ }
+  return dirs
+}
+
+function syncSkillToAgentDirs(): void {
   try {
     const enabled = (readSettings().exposeSkillToAgents ?? true) as boolean
-    const destDir = path.join(os.homedir(), '.claude', 'skills', 'noteflow-cli')
-    const destFile = path.join(destDir, 'SKILL.md')
+    const destDirs = skillAgentDestDirs()
 
     if (!enabled) {
-      // Opt-out: remove our file (and the folder if we left it empty). Never
-      // touch anything else under ~/.claude.
-      try {
-        if (fs.existsSync(destFile)) fs.unlinkSync(destFile)
-        if (fs.existsSync(destDir) && fs.readdirSync(destDir).length === 0) fs.rmdirSync(destDir)
-      } catch (err) {
-        console.error('Failed to remove NoteFlow skill:', err)
+      // Opt-out: remove our file (and the noteflow-cli folder if we left it
+      // empty) in every destination. Never touch anything else.
+      for (const destDir of destDirs) {
+        try {
+          const destFile = path.join(destDir, 'SKILL.md')
+          if (fs.existsSync(destFile)) fs.unlinkSync(destFile)
+          if (fs.existsSync(destDir) && fs.readdirSync(destDir).length === 0) fs.rmdirSync(destDir)
+        } catch (err) {
+          console.error('Failed to remove NoteFlow skill from', destDir, err)
+        }
       }
       return
     }
@@ -3697,12 +3719,19 @@ function syncSkillToClaudeDir(): void {
     }
 
     const srcContent = fs.readFileSync(srcFile, 'utf-8')
-    // Copy only when missing or stale, so we self-heal and pick up skill
-    // changes on update without rewriting on every launch.
-    const current = fs.existsSync(destFile) ? fs.readFileSync(destFile, 'utf-8') : null
-    if (current !== srcContent) {
-      fs.mkdirSync(destDir, { recursive: true })
-      fs.writeFileSync(destFile, srcContent, 'utf-8')
+    for (const destDir of destDirs) {
+      try {
+        const destFile = path.join(destDir, 'SKILL.md')
+        // Copy only when missing or stale, so we self-heal and pick up skill
+        // changes on update without rewriting on every launch.
+        const current = fs.existsSync(destFile) ? fs.readFileSync(destFile, 'utf-8') : null
+        if (current !== srcContent) {
+          fs.mkdirSync(destDir, { recursive: true })
+          fs.writeFileSync(destFile, srcContent, 'utf-8')
+        }
+      } catch (err) {
+        console.error('Failed to sync NoteFlow skill to', destDir, err)
+      }
     }
   } catch (err) {
     console.error('Failed to sync NoteFlow skill:', err)
@@ -3718,7 +3747,7 @@ ipcMain.handle('app:set-skill-sync', (_event, enabled: boolean) => {
   settings.exposeSkillToAgents = enabled
   writeSettings(settings)
   try {
-    syncSkillToClaudeDir()
+    syncSkillToAgentDirs()
     return { ok: true }
   } catch (err) {
     console.error('Failed to set skill sync:', err)
@@ -4190,9 +4219,10 @@ app.whenReady().then(async () => {
     }
   }
 
-  // Keep the CLI skill in ~/.claude/skills in sync (install/update/remove) so AI
-  // agents discover it. Best-effort — must never block startup.
-  try { syncSkillToClaudeDir() } catch (err) {
+  // Keep the CLI skill in the agent skill dirs (~/.claude/skills, ~/.agents/skills,
+  // Windsurf if installed) in sync (install/update/remove) so AI agents discover
+  // it. Best-effort — must never block startup.
+  try { syncSkillToAgentDirs() } catch (err) {
     console.error('Failed to sync NoteFlow skill on startup:', err)
   }
 

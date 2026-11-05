@@ -1822,7 +1822,7 @@ detalle de cada comando vive en **`noteflow help <comando>`** (`cmdHelp`).
 
 **Criterio de la skill `cli/noteflow-cli/SKILL.md` (~270 líneas, desde 2026-11).** La lee un agente
 cualquiera en el equipo de un usuario final, sin el repo ni `.claude/context/` (la app la copia sola
-a `~/.claude/skills/`). Recoge **solo lo que el CLI no avisa por sí solo** —fallos silenciosos (sync
+a los dirs de skills de los agentes, ver "Auto-instalación de la skill" abajo). Recoge **solo lo que el CLI no avisa por sí solo** —fallos silenciosos (sync
 con exit 0, `set` reemplaza, truncado de `noteflow.cmd`, `touch` obligatorio y que borra `.md`
 sueltos, app abierta pisando grupos/carpetas, `--force`, `add --title` parcial…), modelo mental,
 chuleta de una línea por comando, checklist y protocolos de sync—; lo que el CLI ya bloquea con un
@@ -1909,15 +1909,23 @@ era inmune (escapa a `\uXXXX`); esto arregla el texto plano de `read`/`get`/`pat
 actualizar la app → `resolveSetContent()` detecta el caso "stdin vacío en win32" y explica la salida
 (`--file`, `noteflow.cmd`, o actualizar).
 
-**Auto-instalación de la skill.** Para que un agente (Claude Code) descubra la CLI sin descargar nada,
-la app copia `cli/noteflow-cli/SKILL.md` a `~/.claude/skills/noteflow-cli/SKILL.md`. La carpeta
-`cli/noteflow-cli` se bundlea vía `extraResources` (`package.json`) y en runtime `syncSkillToClaudeDir()`
-(`electron/main.ts`) resuelve el origen: empaquetado → `process.resourcesPath/cli/noteflow-cli/SKILL.md`,
+**Auto-instalación de la skill.** Para que los agentes de IA descubran la CLI sin descargar nada, la
+app copia `cli/noteflow-cli/SKILL.md` a `<destino>/noteflow-cli/SKILL.md` en varios dirs de skills de
+usuario (`skillAgentDestDirs()` en `electron/main.ts`):
+- `~/.claude/skills/` — Claude Code (solo lee esta ruta).
+- `~/.agents/skills/` — ruta de usuario del estándar Agent Skills (agentskills.io): la leen Codex (su
+  única ruta de usuario), Gemini CLI, GitHub Copilot, Cursor, OpenCode, Devin, Kilo, Augment…
+- `~/.codeium/windsurf/skills/` — Windsurf, **solo si ya existe `~/.codeium/windsurf`** (no se crea
+  `~/.codeium` en equipos sin Windsurf).
+
+La carpeta `cli/noteflow-cli` se bundlea vía `extraResources` (`package.json`) y en runtime
+`syncSkillToAgentDirs()` resuelve el origen: empaquetado → `process.resourcesPath/cli/noteflow-cli/SKILL.md`,
 dev → `__dirname/../cli/noteflow-cli/SKILL.md` (`__dirname` = `dist-electron/`). Se ejecuta en cada
-arranque (fire-and-forget, best-effort con try/catch): copia solo si el contenido difiere (auto-cura y
-recoge updates sin reescribir en vano). Controlado por el setting local `exposeSkillToAgents` (default
-`true`) en `settings.json`; al desactivarlo borra el fichero y la carpeta `noteflow-cli` si queda vacía
-(nunca toca nada más de `~/.claude`). Toggle **"Expose CLI skill to AI agents"** en Settings → General
+arranque (fire-and-forget, best-effort): cada destino va en su propio try/catch (un fallo en uno no
+impide los demás) y copia solo si el contenido difiere (auto-cura y recoge updates sin reescribir en
+vano). Controlado por el setting local `exposeSkillToAgents` (default `true`) en `settings.json`; al
+desactivarlo borra nuestro `SKILL.md` en todos los destinos y la carpeta `noteflow-cli` si queda vacía
+(nunca toca nada más). Toggle **"Expose CLI skill to AI agents"** en Settings → General
 (`GeneralPanel.tsx`), IPC `app:get-skill-sync` / `app:set-skill-sync`.
 
 ## Temas
