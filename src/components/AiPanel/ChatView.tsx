@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { AlertTriangle, ArrowUp, Check, FileText, History, Image as ImageIcon, Loader2, Paperclip, Plus, RefreshCw, RotateCcw, Settings, Square, Trash2, Wrench, X } from 'lucide-react'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useNotesStore } from '../../stores/notesStore'
+import { proseFontStack, useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { buildStarterSuggestions, splitSuggestions } from '../../lib/chatSuggestions'
@@ -165,8 +166,11 @@ function MarkdownMessage({ content }: { content: string }) {
   // Hide the trailing suggestion marker/block live while streaming (the store keeps the
   // raw content until the turn finishes; suggestions become chips below the chat).
   const html = useMemo(() => htmlFromMarkdown(splitSuggestions(content).visible), [content])
+  // Rendered outside the editor that defines --prose-font-family: set it here so the
+  // reply follows the editor font setting instead of the CSS fallback (JetBrains Mono).
+  const proseFont = proseFontStack(useEditorSettingsStore((s) => s.fontFamily))
   return (
-    <div className="chat-md prose-editor">
+    <div className="chat-md prose-editor" style={{ '--prose-font-family': proseFont } as CSSProperties}>
       <div className="ProseMirror" dangerouslySetInnerHTML={{ __html: html }} />
     </div>
   )
