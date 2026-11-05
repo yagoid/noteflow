@@ -845,13 +845,13 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
           detail: { noteId: note.id, sectionId },
         }))
         // A normal click collapses the layout to this single note. The editor remounts when
-        // the group / note overview or brain view is open (editor unmounted), OR when a split
+        // the group / note / all-content overview or brain view is open (editor unmounted), OR when a split
         // with more than one open pane is collapsed to one â€” in both cases the synchronous
         // event above never reaches the freshly mounted editor. Stash the target section (the
         // editor reads it on mount, prioritised over the last-visited one) and re-emit once
         // it's listening (next macrotask) â€” same as GroupOverview / BrainView.
-        const { groupViewId, noteViewId: nv, brainViewOpen, openPanes } = useNotesStore.getState()
-        const editorUnmounted = groupViewId !== null || nv !== null || brainViewOpen
+        const { groupViewId, noteViewId: nv, brainViewOpen, allViewOpen, openPanes } = useNotesStore.getState()
+        const editorUnmounted = groupViewId !== null || nv !== null || brainViewOpen || allViewOpen
         const willRemount = editorUnmounted || openPanes.length > 1
         if (willRemount) {
           useNotesStore.setState({ pendingInitialSectionId: sectionId })
