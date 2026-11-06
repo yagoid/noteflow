@@ -11,6 +11,7 @@ exports.loadSyncSettings = loadSyncSettings;
 exports.getSyncStatus = getSyncStatus;
 exports.setNotesDir = setNotesDir;
 exports.setConflictCopyLabel = setConflictCopyLabel;
+exports.setConflictMarkerLabels = setConflictMarkerLabels;
 exports.dismissConflictCopies = dismissConflictCopies;
 exports.onRemoteConflict = onRemoteConflict;
 exports.markNeedsFullReconcile = markNeedsFullReconcile;
@@ -37,6 +38,7 @@ const noteFormat_1 = require("./noteFormat");
 const syncState_1 = require("./syncState");
 const mirrorPlan_1 = require("./mirrorPlan");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
+const githubMerge_1 = require("./githubMerge");
 const conflictCopy_1 = require("./conflictCopy");
 const syncHistory_1 = require("./syncHistory");
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -360,6 +362,26 @@ function groupRemoteNoteDirs(blobs) {
 function rootFlatNoteBlobs(blobs) {
     return blobs.filter((b) => !b.path.includes('/') && b.path.endsWith('.md') && b.path !== 'README.md');
 }
+/**
+ * Content of a git blob by its sha (`GET /repos/{o}/{r}/git/blobs/{sha}`):
+ * immutable and always available, so the base of a file (the blob this device
+ * last reconciled) needs no local store. null on any failure or a content
+ * that does not hash to `sha` (the merge then falls back to a two-way union).
+ */
+async function getRemoteBlobContent(token, owner, repo, sha) {
+    if (!/^[0-9a-f]{40}$/.test(sha))
+        return null;
+    try {
+        const blob = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/git/blobs/${sha}`));
+        if (!blob || blob.encoding !== 'base64' || typeof blob.content !== 'string')
+            return null;
+        const content = Buffer.from(blob.content.replace(/\n/g, ''), 'base64').toString('utf-8');
+        return (0, mirrorPlan_1.gitBlobSha)(content) === sha ? content : null;
+    }
+    catch {
+        return null;
+    }
+}
 async function getRemoteFile(token, owner, repo, relPath) {
     try {
         const file = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`));
@@ -545,6 +567,10 @@ let notesDirPath = null;
 // import main), English until then. Same notice as NoteFlow Cloud's.
 let conflictCopies;
 let conflictCopyLabel = () => 'conflict copy';
+// Notes merged with conflict blocks this session, and the localized marker
+// lines of those blocks (injected by main.ts, same as Cloud's).
+let conflictMerges;
+let conflictMarkerLabels = () => cloudSyncLogic_1.DEFAULT_SECTION_CONFLICT_LABELS;
 // Fired when a conditional push/delete was held back because the remote moved
 // (RemoteChangedError): main.ts runs a GitHub pull soon, which resolves it.
 let remoteConflictListener = null;
@@ -712,6 +738,7 @@ function getSyncStatus() {
         error: syncError,
         initialPullStatus,
         conflictCopies,
+        conflictMerges,
     };
 }
 /** Boot hook (main.ts): the notes dir, for the debounced push's disk-still-current check. */
@@ -722,9 +749,14 @@ function setNotesDir(notesDir) {
 function setConflictCopyLabel(label) {
     conflictCopyLabel = label;
 }
-/** The user dismissed the conflict-copies notice of the sync status card. */
+/** main.ts injects the localized marker lines of the conflict blocks a merge writes (electron/i18n.ts). */
+function setConflictMarkerLabels(labels) {
+    conflictMarkerLabels = labels;
+}
+/** The user dismissed the conflict notice of the sync status card (copies and merges with markers). */
 function dismissConflictCopies() {
     conflictCopies = undefined;
+    conflictMerges = undefined;
 }
 /**
  * Called whenever a conditional push/delete was held back because the remote
@@ -885,6 +917,7 @@ function disconnectGitHub() {
     syncSettings = { enabled: false };
     syncError = undefined;
     conflictCopies = undefined; // the notice belongs to the repo we disconnect from
+    conflictMerges = undefined;
     cachedDefaultBranch = null;
     // Drop the journal + SHA cache — they describe the repo we just disconnected from.
     syncState = (0, syncState_1.emptySyncState)();
@@ -934,9 +967,17 @@ function dirThreeWayShas(notesDir, dir, remoteShaOf, knownPaths, state) {
 }
 /**
  * Conflict path of the GitHub pull for the note folder '<dir>' (see
- * planGithubDirConflict): the REMOTE version wins the folder, and the local
- * version is kept as a conflict copy when it differs — the GitHub counterpart
- * of the Cloud pull's copies (same helpers, same notice). Also the path of a
+ * planGithubDirConflict). A CONFLICT is merged file by file
+ * (mergeGithubConflictDir → planGithubDirMerge, the same planner and line
+ * merge as the Cloud pull): sections both sides changed are merged line by
+ * line in the note (both versions between ⚠️ markers where the same lines
+ * changed), note.md's frontmatter with mergeAnchors, and whatever ends
+ * different from GitHub goes up through the normal conditional push. Only
+ * when it can't be merged (encrypted / unreadable anchor, missing anchor,
+ * merge failure) the historical path below runs: the REMOTE version wins the
+ * folder, and the local version is kept as a conflict copy when it differs —
+ * the GitHub counterpart of the Cloud pull's copies (same helpers, same
+ * notice). Also the path of a
  * FAST-FORWARD (only the remote moved — mirrored with no copy, whatever the
  * `updated:` timestamps say):
  *   0. Own remote mutations queued/in flight → deferred (they would land
@@ -973,6 +1014,21 @@ async function resolveRemoteDirConflict(token, owner, repo, notesDir, dir, remot
             return deferred;
         remote.set(rel, file);
     }
+    // Contents of the bases of the files both sides changed (diff3 of the merge).
+    // A failed GET only means "unknown" (two-way union), never a deferral.
+    const baseContents = new Map();
+    {
+        const state = getState();
+        const cachedUnder = Object.keys(state.shas).filter((p) => p.startsWith(`${dir}/`));
+        const pre = dirThreeWayShas(notesDir, dir, (rel) => remote.get(rel)?.sha ?? null, [...remote.keys(), ...cachedUnder], state);
+        for (const p of pre) {
+            if (!(0, syncState_1.isThreeWayConflict)(p) || p.base === undefined || p.local === null || p.remote === null)
+                continue;
+            const content = await getRemoteBlobContent(token, owner, repo, p.base);
+            if (content !== null)
+                baseContents.set(p.path, content);
+        }
+    }
     // ── Synchronous from here on. ──
     if (hasPendingRemoteMutations() ||
         dirMutatedSince(dir, treeSeq) ||
@@ -988,6 +1044,12 @@ async function resolveRemoteDirConflict(token, owner, repo, notesDir, dir, remot
     const plan = (0, syncState_1.planGithubDirConflict)(state, dir, paths);
     if (!plan.conflict && !plan.fastForward)
         return deferred;
+    if (plan.conflict) {
+        const merged = mergeGithubConflictDir(notesDir, dir, paths, remote, baseContents);
+        if (merged)
+            return merged;
+        // Not mergeable → the historical path: remote folder + conflict copy.
+    }
     let copy;
     const candidates = plan.copyCandidates;
     if (candidates.length > 0) {
@@ -1059,6 +1121,102 @@ async function resolveRemoteDirConflict(token, owner, repo, notesDir, dir, remot
     persistState();
     return { status: 'resolved', filesWritten, copy };
 }
+/**
+ * The merge of a conflicting folder (synchronous part of
+ * resolveRemoteDirConflict, see planGithubDirMerge), or null when it can't be
+ * merged — nothing was touched then. Executes: conflict copy of the sections
+ * deleted on GitHub but edited here (only those; throws → the caller's
+ * per-folder catch, nothing written), local writes (sections, then note.md)
+ * and removes, the remote blobs as the new bases, every op under the folder
+ * completed and timers cancelled, then the re-uploads of whatever ends
+ * different from GitHub (normal conditional push on top of the remote sha)
+ * and a journaled delete for a remote file the merge dropped here.
+ */
+function mergeGithubConflictDir(notesDir, dir, paths, remote, baseContents) {
+    const state = getState();
+    const prefix = `${dir}/`;
+    const files = paths.map((p) => {
+        let local = null;
+        try {
+            local = fs_1.default.readFileSync(path_1.default.join(notesDir, p.path), 'utf-8');
+        }
+        catch { /* absent locally */ }
+        return {
+            path: p.path,
+            base: p.base,
+            remote: remote.get(p.path) ?? null,
+            local,
+            localSha: local === null ? null : (0, mirrorPlan_1.gitBlobSha)(local),
+            baseContent: baseContents.get(p.path) ?? null,
+        };
+    });
+    let merge;
+    try {
+        merge = (0, githubMerge_1.planGithubDirMerge)({ dir, files, labels: conflictMarkerLabels(), nowIso: new Date().toISOString() });
+    }
+    catch (err) {
+        console.warn('[GitHubSync] merge of a conflicting note failed — keeping a conflict copy instead:', String(err));
+        return null;
+    }
+    if (!merge)
+        return null;
+    let copy;
+    if (merge.copySections.length > 0) {
+        const now = new Date();
+        copy = (0, conflictCopy_1.writeConflictCopy)(notesDir, dir, conflictCopyLabel(), now, merge.copySections);
+        if ((0, syncState_1.journalMarkConflictCopied)(state, merge.copySections.map((f) => `${prefix}${f}`)))
+            persistState();
+        for (const [name, content] of Object.entries(copy.files))
+            schedulePushUnguarded(`${copy.dir}/${name}`, content);
+        conflictCopies = (0, conflictCopy_1.appendConflictCopyNotice)(conflictCopies, copy.title, now.toISOString());
+    }
+    let filesWritten = 0;
+    for (const rel of merge.removes) {
+        try {
+            fs_1.default.unlinkSync(path_1.default.join(notesDir, rel));
+            filesWritten++;
+        }
+        catch { /* already gone */ }
+    }
+    for (const w of merge.writes) {
+        fs_1.default.writeFileSync(path_1.default.join(notesDir, w.relPath), w.content, 'utf-8');
+        filesWritten++;
+    }
+    // The remote blobs are the bases now (the merged files go up on top of them).
+    const cachedUnder = Object.keys(state.shas).filter((p) => p.startsWith(prefix));
+    for (const [rel, file] of remote)
+        (0, syncState_1.setCachedSha)(state, rel, file.sha);
+    for (const rel of cachedUnder)
+        if (!remote.has(rel))
+            delete state.shas[rel];
+    for (const key of [...pushTimers.keys()]) {
+        if (key.startsWith(prefix)) {
+            clearTimeout(pushTimers.get(key));
+            pushTimers.delete(key);
+        }
+    }
+    (0, syncState_1.journalCompleteDir)(state, dir);
+    // A remote file the merge left deleted here (a local deletion over an
+    // unchanged remote file): the drain deletes it (conditional on the new base).
+    const nowIso = new Date().toISOString();
+    for (const rel of remote.keys()) {
+        if (!(rel in merge.final))
+            (0, syncState_1.journalRecord)(state, rel, 'delete', nowIso);
+    }
+    persistState();
+    // Sections first, note.md last: the anchor never lists a file GitHub lacks.
+    const anchorRel = `${prefix}${noteFormat_1.NOTE_MD}`;
+    const ups = Object.entries(merge.final).filter(([rel, content]) => remote.get(rel)?.content !== content);
+    ups.sort(([a], [b]) => (a === anchorRel ? 1 : b === anchorRel ? -1 : 0));
+    for (const [rel, content] of ups)
+        schedulePushUnguarded(rel, content);
+    const anchorContent = merge.final[anchorRel];
+    const conflictMergeTitle = merge.conflictMarkerSections.length > 0 && anchorContent !== undefined ? (0, cloudSyncLogic_1.anchorTitle)(anchorContent) : undefined;
+    if (conflictMergeTitle !== undefined) {
+        conflictMerges = (0, conflictCopy_1.appendConflictCopyNotice)(conflictMerges, conflictMergeTitle, new Date().toISOString());
+    }
+    return { status: 'resolved', filesWritten, copy, conflictMergeTitle };
+}
 async function pullNotes(notesDir) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
@@ -1112,6 +1270,7 @@ async function pullNotes(notesDir) {
             stateChanged = true;
     };
     let conflictCopiesMade = 0;
+    let conflictMergesMade = 0;
     try {
         const { blobs, truncated } = await fetchRemoteTree(token, s.owner, s.repo);
         // A truncated listing may be missing note folders entirely.
@@ -1236,6 +1395,8 @@ async function pullNotes(notesDir) {
                                 continue;
                             }
                             filesDown += res.filesWritten;
+                            if (res.conflictMergeTitle !== undefined)
+                                conflictMergesMade++;
                             if (res.copy) {
                                 conflictCopiesMade++;
                                 updatedFiles.push(res.copy.dirPath); // renderer + AI index pick the new note up
@@ -1462,6 +1623,9 @@ async function pullNotes(notesDir) {
             stateChanged = true;
         if (conflictCopiesMade > 0) {
             console.log(`[GitHubSync] ${conflictCopiesMade} local version(s) kept as conflict copies`);
+        }
+        if (conflictMergesMade > 0) {
+            console.log(`[GitHubSync] ${conflictMergesMade} note(s) merged with conflict markers`);
         }
         // Rebase on the CURRENT in-memory settings, not on the snapshot taken before
         // the network round-trips: anything written meanwhile (remoteFormatMigratedAt,

@@ -141,8 +141,8 @@ export interface ActiveSyncStatus {
   conflictCopies?: ConflictCopiesNotice
   /**
    * Notes the live backend's pulls merged WITH conflict blocks this session
-   * (both versions kept in the note, between ⚠️ markers) — Cloud only; dismissed
-   * with `conflictCopies`.
+   * (both versions kept in the note, between ⚠️ markers) — either backend;
+   * dismissed with `conflictCopies`.
    */
   conflictMerges?: ConflictCopiesNotice
   /** Present only when backend === 'github'. */
@@ -191,6 +191,7 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       history: githubSync.getSyncHistory(),
       filesToday: githubSync.getSyncFilesToday(),
       conflictCopies: g.conflictCopies,
+      conflictMerges: g.conflictMerges,
       github: { owner: g.owner, repo: g.repo },
     }
   }

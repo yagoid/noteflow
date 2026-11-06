@@ -1348,7 +1348,13 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
       copia de la carpeta entera), tombstone `'lost'`, ramas sin base de ancla (wholesale / por
       secciones), notas cifradas. Los finales de línea mixtos de un fichero se normalizan al de la
       remota. Una sección con marcas que el usuario no resuelve se sincroniza tal cual (las marcas son
-      texto). El GitHub Sync tiene su propio camino (ver `sync.md` "Subida condicionada (QA B3)").
+      texto). El **GitHub Sync** de la app usa la misma fusión desde su camino de conflicto (base
+      pedida por sha a la API de git blobs, `electron/githubMerge.ts`; ver `sync.md` "Subida
+      condicionada (QA B3)"); el CLI con GitHub aún copia.
+    - **Inserciones en el mismo sitio:** con base, si los dos lados solo **añadieron** líneas donde la
+      base no tenía nada (p. ej. cada dispositivo añadió una tarea al final de la misma checklist), se
+      conservan las dos (primero la remota) **sin marcas**: no se pisa nada. Sin base no se puede
+      distinguir de una edición → marcas.
   - **Bootstrap de bases (una sola vez, al actualizar):** sin él, un portátil recién actualizado que
     edita offline una nota antes de que tenga base repetiría el bug tal cual. `needsBasesBootstrap`
     (puro): dispositivo con estado previo (`pullSeq`, `pullCursor` heredado o `lastSync`) y sin

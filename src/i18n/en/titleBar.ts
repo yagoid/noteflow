@@ -65,7 +65,7 @@ export const titleBar = {
     conflictCopiesAria: { one: '{count} conflict copy created', other: '{count} conflict copies created' },
     conflictCopiesMore: '+{count} more',
     conflictCopiesDismiss: 'Dismiss',
-    // The NoteFlow Cloud pull merged a note both devices changed on the same
+    // The pull (NoteFlow Cloud or GitHub) merged a note both devices changed on the same
     // lines: both versions stay in the note between ⚠️ markers (no copy). Card
     // notice (+ the notes' titles) and the button's aria-label addition; it
     // shares "+N more" and the dismiss action with the conflict copies.

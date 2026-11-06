@@ -3950,6 +3950,7 @@ electron_1.app.whenReady().then(async () => {
     githubSync.onRemoteConflict(() => scheduleGithubConflictPull());
     // Title suffix of the conflict copies the GitHub pull makes (same as Cloud's).
     githubSync.setConflictCopyLabel(() => mainMessages().sync.conflictCopy);
+    githubSync.setConflictMarkerLabels(() => mainMessages().sync.conflictMarkers);
     const connected = githubSync.getSyncStatus().connected;
     // NoteFlow Cloud: restore the cached DEK (safeStorage) and the engine
     // settings. Mutually exclusive with GitHub Sync — when enabled, Cloud owns

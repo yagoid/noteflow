@@ -31,6 +31,8 @@ noteflow/
 │   │                    #   + decisiones de tres vías de la subida condicionada de GitHub — ver sync.md
 │   ├── conflictCopy.ts  # Lado disco de las copias de conflicto (escribir la copia + aviso de sesión),
 │   │                    #   compartido por cloudSync.ts y githubSync.ts — ver sync.md / monetization.md
+│   ├── githubMerge.ts   # Pura: fusión por fichero del camino de conflicto del pull de GitHub (adapta los shas
+│   │                    #   a planThreeWayDir + mergeSectionText de Cloud) — ver sync.md "Subida condicionada (QA B3)"
 │   ├── cloudBaseStore.ts # Almacén direccionado por contenido del texto de las bases de sección de Cloud
 │   │                    #   (userData/cloud-base-content/<sha256>) para el diff3 de mergeSectionText — ver monetization.md
 │   ├── mirrorPlan.ts    # Lógica pura del espejo local→GitHub (plan + allowlist de borrado) — ver sync.md

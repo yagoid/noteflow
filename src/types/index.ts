@@ -465,7 +465,7 @@ export interface ActiveSyncStatus {
   filesToday?: number
   /** Conflict copies the live backend's pulls made this session, until dismissed. */
   conflictCopies?: ConflictCopiesNotice
-  /** Notes the live backend's pulls merged WITH conflict blocks (Cloud only), until dismissed with `conflictCopies`. */
+  /** Notes the live backend's pulls merged WITH conflict blocks (either backend), until dismissed with `conflictCopies`. */
   conflictMerges?: ConflictCopiesNotice
   github?: { owner?: string; repo?: string }
   cloud?: {
@@ -567,7 +567,7 @@ declare global {
       parseExternalImport: (source: ImportSource) => Promise<{ ok: boolean; source?: ImportSource; notes?: ExternalNote[]; error?: string; canceled?: boolean }>
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
       // GitHub Sync
-      getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed'; conflictCopies?: ConflictCopiesNotice }>
+      getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed'; conflictCopies?: ConflictCopiesNotice; conflictMerges?: ConflictCopiesNotice }>
       // Backend-tagged status of the live sync provider — drives the titlebar sync button.
       getActiveSyncStatus: () => Promise<ActiveSyncStatus>
       // Clears the session notice of conflict copies made by either backend's pull (titlebar sync card).

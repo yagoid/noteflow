@@ -54,6 +54,15 @@ describe('mergeSectionText — diff3 with the base', () => {
     expect(mergeSectionText(base, 'a\nb\nC\nd\ne', 'a\nb\nC\nd\ne\nR')).toEqual({ content: 'a\nb\nC\nd\ne\nR', conflicts: 0 })
   })
 
+  it('both sides appended different lines at the same spot: both kept (remote first), no conflict', () => {
+    expect(mergeSectionText('- [ ] a', '- [ ] a\n- [ ] mine', '- [ ] a\n- [ ] theirs')).toEqual({
+      content: '- [ ] a\n- [ ] theirs\n- [ ] mine',
+      conflicts: 0,
+    })
+    // …while without the base the same texts can't be told from an edit: markers.
+    expect(mergeSectionText(null, '- [ ] a\n- [ ] mine', '- [ ] a\n- [ ] theirs').conflicts).toBe(1)
+  })
+
   it('a deletion on one side is applied', () => {
     expect(mergeSectionText(base, 'a\nb\nd\ne', 'a\nb\nc\nd\ne\nR')).toEqual({ content: 'a\nb\nd\ne\nR', conflicts: 0 })
   })

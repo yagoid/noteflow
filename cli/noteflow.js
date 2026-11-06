@@ -1080,13 +1080,17 @@ function sameLines(a, b) {
   return a.length === b.length && a.every((l, i) => l === b[i])
 }
 
-function unionPieces(a, b, out) {
+// insertsOnly: both sides only added lines there (per the base) → both kept, remote first, no conflict.
+function unionPieces(a, b, out, insertsOnly = false) {
   let i = 0, j = 0
   const hunk = (ei, ej) => {
     const la = a.slice(i, ei), lb = b.slice(j, ej)
-    if (la.length > 0 && lb.length > 0) out.push({ local: la, remote: lb })
-    else for (const line of la) out.push({ line, side: 'local' })
-    if (la.length === 0) for (const line of lb) out.push({ line, side: 'remote' })
+    if (la.length > 0 && lb.length > 0 && !insertsOnly) {
+      out.push({ local: la, remote: lb })
+      return
+    }
+    for (const line of lb) out.push({ line, side: 'remote' })
+    for (const line of la) out.push({ line, side: 'local' })
   }
   for (const [x, y] of lineMatches(a, b)) {
     hunk(x, y)
@@ -1106,7 +1110,7 @@ function diff3Pieces(o, a, b, out) {
     if (sameLines(ca, co)) for (const line of cb) out.push({ line, side: sameLines(cb, co) ? 'both' : 'remote' })
     else if (sameLines(cb, co)) for (const line of ca) out.push({ line, side: 'local' })
     else if (sameLines(ca, cb)) for (const line of ca) out.push({ line, side: 'both' })
-    else unionPieces(ca, cb, out)
+    else unionPieces(ca, cb, out, co.length === 0)
   }
   for (let k = 0; k < o.length; k++) {
     const x = ma.get(k), y = mb.get(k)

@@ -170,6 +170,7 @@ const api = {
     error?: string
     initialPullStatus: 'pending' | 'ok' | 'failed'
     conflictCopies?: { count: number; titles: string[]; at: string }
+    conflictMerges?: { count: number; titles: string[]; at: string }
   }> => ipcRenderer.invoke('sync:get-status'),
   // Clears the session notice of conflict copies made by the pull of either
   // backend, and of Cloud's merges with conflict markers (titlebar sync status card).

@@ -22,6 +22,9 @@ import {
   planGithubDirConflict,
   shouldRefreshSections,
 } from '../../electron/syncState'
+import { planGithubDirMerge, type GithubMergeFile } from '../../electron/githubMerge'
+import { gitBlobSha } from '../../electron/mirrorPlan'
+import { serializeNoteFolder, type DiskNote } from '../../electron/noteFormat'
 
 const NOW = '2026-10-21T10:00:00.000Z'
 const DIR = 'groceries-abc12345'
@@ -271,5 +274,102 @@ describe('journal helpers of the GitHub conflict path', () => {
     expect(isNoteFilePath('README.md')).toBe(false)
     expect(isNoteFilePath('.noteflow-format')).toBe(false)
     expect(isNoteFilePath('a/b/c.md')).toBe(false)
+  })
+})
+
+
+// ── Merge of a conflicting folder (planGithubDirMerge — the pull's conflict path) ──
+
+describe('planGithubDirMerge', () => {
+  const folder = (updated: string, sections: Record<string, string>, extra?: Partial<DiskNote>) => {
+    const n: DiskNote = {
+      id: 'abc12345', title: 'Groceries', tags: [], created: NOW, updated,
+      sections: Object.entries(sections).map(([id, content]) => ({ id, name: id, content })),
+      ...extra,
+    }
+    const out: Record<string, string> = {}
+    for (const [f, c] of Object.entries(serializeNoteFolder(n, { preserveUpdated: true }).files)) out[`${DIR}/${f}`] = c
+    return out
+  }
+  const T1 = '2026-10-01T00:00:00.000Z'
+  const T2 = '2026-10-02T00:00:00.000Z'
+  const T3 = '2026-10-03T00:00:00.000Z'
+  /** Files seen from base / remote / local (absent = null); `withBase` = the base blob contents were fetched. */
+  const filesOf = (
+    base: Record<string, string>,
+    remote: Record<string, string>,
+    local: Record<string, string>,
+    withBase = true,
+  ): GithubMergeFile[] =>
+    [...new Set([...Object.keys(base), ...Object.keys(remote), ...Object.keys(local)])].map((p) => ({
+      path: p,
+      base: base[p] === undefined ? undefined : gitBlobSha(base[p]),
+      remote: remote[p] === undefined ? null : { sha: gitBlobSha(remote[p]), content: remote[p] },
+      local: local[p] ?? null,
+      localSha: local[p] === undefined ? null : gitBlobSha(local[p]),
+      baseContent: withBase ? (base[p] ?? null) : null,
+    }))
+
+  it('a line added here + a remote change of another line → one merged note, no markers', () => {
+    const base = folder(T1, { s1: 'milk\nflour' })
+    const m = planGithubDirMerge({
+      dir: DIR,
+      files: filesOf(base, folder(T2, { s1: 'MILK\nflour' }), folder(T3, { s1: 'milk\nflour\nbread' })),
+      nowIso: NOW,
+    })!
+    expect(m.final[`${DIR}/s1.md`]).toBe(folder(T3, { s1: 'MILK\nflour\nbread' })[`${DIR}/s1.md`])
+    expect(m.conflictMarkerSections).toEqual([])
+    expect(m.copySections).toEqual([])
+  })
+
+  it('the same line changed on both sides → both versions between markers', () => {
+    const base = folder(T1, { s1: 'milk' })
+    const m = planGithubDirMerge({ dir: DIR, files: filesOf(base, folder(T2, { s1: 'eggs' }), folder(T3, { s1: 'bread' })), nowIso: NOW })!
+    expect(m.conflictMarkerSections).toEqual(['s1.md'])
+    expect(m.final[`${DIR}/s1.md`]).toContain('> ⚠️ Sync conflict — this device’s version:')
+  })
+
+  it('different sections changed on each side are both kept; the anchor keeps the later local `updated`', () => {
+    const base = folder(T1, { s1: 'a', s2: 'b' })
+    const m = planGithubDirMerge({
+      dir: DIR,
+      files: filesOf(base, folder(T2, { s1: 'a', s2: 'b remote' }), folder(T3, { s1: 'a local', s2: 'b' })),
+      nowIso: NOW,
+    })!
+    expect(m.final[`${DIR}/s1.md`]).toBe(folder(T3, { s1: 'a local' })[`${DIR}/s1.md`])
+    expect(m.final[`${DIR}/s2.md`]).toBe(folder(T2, { s2: 'b remote' })[`${DIR}/s2.md`])
+    expect(m.final[`${DIR}/note.md`]).toContain(T3)
+  })
+
+  it('without the base contents (blob GET failed): two-way union, never a copy', () => {
+    const base = folder(T1, { s1: 'milk' })
+    const m = planGithubDirMerge({
+      dir: DIR,
+      files: filesOf(base, folder(T2, { s1: 'milk\neggs' }), folder(T3, { s1: 'milk\neggs\nbread' }), false),
+      nowIso: NOW,
+    })!
+    expect(m.final[`${DIR}/s1.md`]).toBe(folder(T3, { s1: 'milk\neggs\nbread' })[`${DIR}/s1.md`])
+    expect(m.copySections).toEqual([])
+  })
+
+  it('a section deleted on GitHub and edited here → removed here, copied (only that section)', () => {
+    const base = folder(T1, { s1: 'a', s2: 'b' })
+    const m = planGithubDirMerge({
+      dir: DIR,
+      files: filesOf(base, folder(T2, { s1: 'a' }), folder(T3, { s1: 'a', s2: 'b here' })),
+      nowIso: NOW,
+    })!
+    expect(m.removes).toContain(`${DIR}/s2.md`)
+    expect(m.copySections).toEqual(['s2.md'])
+    expect(m.final[`${DIR}/s2.md`]).toBeUndefined()
+    expect(m.final[`${DIR}/note.md`]).not.toContain('s2.md')
+  })
+
+  it('not mergeable → null (the caller keeps the copy path): encrypted anchors both changed, anchor missing', () => {
+    const enc = (u: string, ct: string) => folder(u, {}, { encryption: { v: 1, ct } } as Partial<DiskNote>)
+    expect(planGithubDirMerge({ dir: DIR, files: filesOf(enc(T1, 'c0'), enc(T2, 'c1'), enc(T3, 'c2')), nowIso: NOW })).toBeNull()
+    const base = folder(T1, { s1: 'a' })
+    const noRemoteAnchor = { [`${DIR}/s1.md`]: 'x' }
+    expect(planGithubDirMerge({ dir: DIR, files: filesOf(base, noRemoteAnchor, folder(T3, { s1: 'y' })), nowIso: NOW })).toBeNull()
   })
 })

@@ -1375,14 +1375,17 @@ Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
 - **Al guardar**: push automático con debounce (~5s). El icono ☁ indica cuándo está subiendo.
 - **Al borrar**: el archivo se elimina también del repo remoto.
 - **Si otro dispositivo cambió la nota** en GitHub desde la última vez que este la sincronizó (y
-  aquí también se editó), el push **no la pisa**: la app hace un sync enseguida, se queda con la
-  versión de GitHub y guarda tu versión local como nota nueva "<título> (conflict copy AAAA-MM-DD
-  HH:mm)" (mismo grupo/carpeta/secciones; se sube como cualquier nota), con el mismo aviso ámbar que
-  NoteFlow Cloud en la tarjeta del botón de sync. Lo mismo si borras una nota (o una sección) que
+  aquí también se editó), el push **no la pisa**: la app hace un sync enseguida y **fusiona** las dos
+  versiones como NoteFlow Cloud — por secciones y, dentro de una sección que cambiasteis los dos, por
+  líneas (las dos versiones entre marcas ⚠️ solo si tocasteis las mismas líneas, con el aviso ámbar
+  de la tarjeta del botón de sync) — y sube el resultado. Solo si no se puede fusionar (nota cifrada,
+  `note.md` ilegible) se queda con la versión de GitHub y guarda la tuya como nota nueva "<título>
+  (conflict copy AAAA-MM-DD HH:mm)"; una sección que se borró en GitHub mientras la editabas aquí se
+  borra y tu texto va a una copia con solo esa sección. Lo mismo si borras una nota (o una sección) que
   cambió en GitHub: no se borra allí y vuelve en el siguiente sync. Si solo cambió el otro lado, todo
   sigue como siempre. Con NoteFlow Cloud activado GitHub es un espejo y no hace esto. El CLI
-  (`noteflow push` y el push de cada comando) hace lo mismo e imprime `Conflict: local changes kept
-  as "…"`.
+  (`noteflow push` y el push de cada comando) tampoco pisa, pero aún **no fusiona**: guarda tu versión
+  como copia de conflicto e imprime `Conflict: local changes kept as "…"`.
 - Se sincronizan notas + `groups.json`, `folders.json`, `section-colors.json`, `note-order.json`,
   `templates.json`, `ui-settings.json` (apariencia y ajustes del editor).
 - El repositorio se crea como **privado** automáticamente si no existe.

@@ -1098,22 +1098,24 @@ function sameLines(a, b) {
 /**
  * Two-way union of local × remote: common lines once; a hunk with lines of
  * only one side is kept (an addition — never lose a line; a deletion on one
- * side comes back); a hunk with lines of both sides is a conflict.
+ * side comes back); a hunk with lines of both sides is a conflict — unless
+ * `insertsOnly` (both sides only ADDED lines there, per the base): then both
+ * are kept, the remote's first, no conflict (nothing was overwritten).
  */
-function unionPieces(a, b, out) {
+function unionPieces(a, b, out, insertsOnly = false) {
     let i = 0;
     let j = 0;
     const hunk = (ei, ej) => {
         const la = a.slice(i, ei);
         const lb = b.slice(j, ej);
-        if (la.length > 0 && lb.length > 0)
+        if (la.length > 0 && lb.length > 0 && !insertsOnly) {
             out.push({ local: la, remote: lb });
-        else
-            for (const line of la)
-                out.push({ line, side: 'local' });
-        if (la.length === 0)
-            for (const line of lb)
-                out.push({ line, side: 'remote' });
+            return;
+        }
+        for (const line of lb)
+            out.push({ line, side: 'remote' });
+        for (const line of la)
+            out.push({ line, side: 'local' });
     };
     for (const [x, y] of lineMatches(a, b)) {
         hunk(x, y);
@@ -1128,7 +1130,8 @@ function unionPieces(a, b, out) {
  * between them, a chunk only one side changed takes that side, the same change
  * on both sides is taken once, and a chunk both changed differently is refined
  * with the two-way union (lines common to both versions are not a conflict —
- * e.g. this device appended a line on top of a remote addition it already had).
+ * e.g. this device appended a line on top of a remote addition it already had;
+ * where the base had nothing, both sides only inserted: both kept, remote first).
  */
 function diff3Pieces(o, a, b, out) {
     const ma = new Map(lineMatches(o, a));
@@ -1150,7 +1153,7 @@ function diff3Pieces(o, a, b, out) {
             for (const line of ca)
                 out.push({ line, side: 'both' });
         else
-            unionPieces(ca, cb, out);
+            unionPieces(ca, cb, out, co.length === 0);
     };
     for (let k = 0; k < o.length; k++) {
         const x = ma.get(k);

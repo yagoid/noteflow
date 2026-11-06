@@ -126,7 +126,14 @@ se combinan; si ambos tocaron la misma sección, se **fusiona por líneas** dent
 el contenido de la base guardado en local, o unión de dos vías; si tocaron las mismas líneas, las dos
 versiones entre marcas `> ⚠️ Sync conflict …`, sin nota aparte). Detalle (stale/force, metadatos, cambio de cuenta, bases, residuales) en
 `monetization.md` § 4 "Subidas condicionadas" y "Fusión en tres vías".
-📌 **Copias de conflicto (los dos backends):** cuando el pull de Cloud (carpetas sin base de ancla; con
+📌 **Copias de conflicto y fusión (los dos backends):** desde el 2026-11-06 ni Cloud ni el GitHub
+Sync de la app crean nota aparte cuando una sección cambió en los dos lados: la **fusionan por líneas**
+(`mergeSectionText`, mismo planificador `planThreeWayDir`; GitHub vía `electron/githubMerge.ts`, con el
+contenido de la base pedido por sha a la API de git blobs) y dejan las dos versiones entre marcas ⚠️
+solo si chocan las mismas líneas (aviso `conflictMerges`). Las copias quedan para lo que no se fusiona
+(notas cifradas, ancla ilegible, borrado remoto de una sección editada aquí en GitHub, el tombstone
+`'lost'` y las carpetas sin base de ancla en Cloud, la red de seguridad) y para el CLI con GitHub. Lo
+que sigue describe esas copias. Cuando el pull de Cloud (carpetas sin base de ancla; con
 base, ver "Fusión en tres vías" en `monetization.md`: una sección que cambiaron los dos se **fusiona por
 líneas** en la nota — marcas ⚠️ si chocan las mismas líneas, aviso `conflictMerges` —, y solo una nota
 cifrada o una fusión fallida acaba en copia de esas secciones) va a
@@ -140,7 +147,7 @@ depende del journal: es la comprobación de tres vías contra la caché de shas)
 (Cloud desactivado, CLI, formato YAML, alarmas duplicadas…) y detalle en `monetization.md` § 4
 "Subidas condicionadas" → "Copias de conflicto". El **GitHub Sync** hace lo mismo desde QA B3 con su
 propia regla (subida condicionada de tres vías + "camino de conflicto" del pull): ver "Subida
-condicionada (QA B3)" abajo. Mismos helpers (`planConflictCopy`/`buildConflictCopy` de
+condicionada (QA B3)" abajo (allí, con base, **fusiona** en vez de copiar). Mismos helpers (`planConflictCopy`/`buildConflictCopy` de
 `cloudSyncLogic.ts`, `writeConflictCopy` de `conflictCopy.ts`), misma etiqueta i18n
 (`sync.conflictCopy`, inyectada con `githubSync.setConflictCopyLabel`) y mismo aviso.
 
@@ -247,7 +254,8 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   frena la caducidad de notas temporales, ver `patterns.md`).
   **Camino de conflicto (QA B3, antes de la caché):** con GitHub como backend activo, una carpeta
   con un op `stale` o con algún fichero en conflicto de tres vías no pasa por la regla de `updated`
-  sino por `resolveRemoteDirConflict` — ver "Subida condicionada (QA B3)".
+  sino por `resolveRemoteDirConflict` (fusión por fichero; copia solo si no se puede fusionar) — ver
+  "Subida condicionada (QA B3)".
   **Repo existente VACÍO (sin commits):** la Git Trees API responde **409 "Git Repository is
   empty."**; `fetchRemoteTree` (único listado: pull, espejo, `deleteRemoteDirNow`, migración v2) lo
   trata como listado **vacío y completo** — `isGitHubEmptyRepoError(status, message)` en
@@ -547,7 +555,32 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     tocar nada); (2) **todo síncrono desde aquí** (ningún guardado, timer ni mutación puede colarse):
     re-comprueba (mutaciones, pushes propios desde el listado, Cloud activado a mitad → aplaza), relee
     la carpeta local y **re-planifica** (si ya no es conflicto ni fast-forward → aplaza, sin escribir);
-    candidatos a copia = ficheros locales cambiados desde su base (o sin base), ninguno solo si **todos**
+    **(2b) fusión por fichero (2026-11-06, en vez de la copia):** si es **conflicto**,
+    `mergeGithubConflictDir` → `planGithubDirMerge` (puro, `electron/githubMerge.ts`) adapta la vista de
+    shas al **mismo planificador que Cloud** (`planThreeWayDir`, con seqs sintéticas: 1 = "sigue en la
+    base", 2 = "se movió"; base = hash del contenido de la base si se conoce, si no el del lado que sigue
+    en la base, si no `UNKNOWN_BASE_HASH`): sección cambiada en los dos lados → `mergeSectionText`
+    (diff3 con el **contenido de la base pedido a GitHub por su sha**, `GET
+    /repos/{o}/{r}/git/blobs/{sha}` — `getRemoteBlobContent`, en la fase asíncrona, solo para los
+    ficheros en conflicto de tres vías; inmutable y siempre disponible, así que GitHub no necesita
+    almacén local; contenido verificado con `gitBlobSha`; si falla → unión de dos vías, nunca aplaza),
+    marcas ⚠️ dentro de la nota si chocan las mismas líneas, nunca nota aparte; el `note.md` con
+    `mergeAnchors` (como Cloud: un lado → ese lado; los dos → ancla remota + secciones locales nuevas,
+    OR de `aiHidden`/`favorited`, unión de `tags`); sección solo cambiada en un lado → ese lado; borrada
+    aquí y sin cambios allí → sigue borrada (op `delete` journalado, el drain la borra contra la nueva
+    base); borrada aquí y editada allí → vuelve. Ejecución síncrona: escrituras/borrados locales, shas
+    remotos como base, timers cancelados y `journalCompleteDir`, y **todo lo que acaba distinto de
+    GitHub se re-sube** por `schedulePushUnguarded` (secciones antes que el `note.md`; subida
+    condicionada normal contra el sha remoto, ya base). Con marcas → aviso
+    `SyncStatus.conflictMerges` (mismo `{count, titles, at}` y *Dismiss* que las copias; marcas
+    localizadas con `githubSync.setConflictMarkerLabels`). **Sigue la copia (paso de abajo) solo donde
+    no se fusiona:** ancla cifrada o ilegible en conflicto (`whole`), ancla ausente en un lado, sección
+    no fusionable o fusión que lanza (red de seguridad) → `null` → camino histórico. **Sección borrada
+    en GitHub y editada aquí** (lo que hoy copiaba, decisión explícita): se aplica el borrado y la
+    versión local va a una copia **con solo esas secciones** (`writeConflictCopy` con `onlySections`,
+    `journalMarkConflictCopied`); el resto de la carpeta se fusiona igual. (Cloud, en cambio, conserva
+    la edición local sobre el tombstone y la re-sube — asimetría asumida.) El **fast-forward** no cambia.
+    Camino histórico (sin fusión): candidatos a copia = ficheros locales cambiados desde su base (o sin base), ninguno solo si **todos**
     los upserts pendientes de la carpeta ya están `conflictCopied` (dedupe por op: un upsert pendiente
     sin el flag — una edición hecha después de una copia cuyo aplicado falló a medias — vuelve a
     provocar copia; una copia de más es aceptable, perder esa edición no); `planConflictCopy` contra el contenido
@@ -568,22 +601,26 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     nada mutado después (`cachePulled`, `dirMutatedSince`). Cubierto por un test que falla sin la guarda.
     Los mapas se podan al soltar cada listado (`beginListing`/`endListing`): las entradas con número
     ≤ el del listado vivo más antiguo ya no pueden responder "mutado después".
-  - **Aviso**: el mismo que Cloud (ver "Botón de sync de la titlebar"); `SyncStatus.conflictCopies`,
-    solo en memoria, acumulado hasta *Dismiss*, se limpia en `disconnectGitHub()`.
+  - **Aviso**: el mismo que Cloud (ver "Botón de sync de la titlebar"); `SyncStatus.conflictCopies` y
+    `SyncStatus.conflictMerges` (notas fusionadas con marcas), solo en memoria, acumulados hasta
+    *Dismiss*, se limpian en `disconnectGitHub()`.
   - **Residuales (asumidos):** base desconocida (caché perdida, `disconnectGitHub`, ficheros nunca
     reconciliados) ⇒ LWW histórico; las ediciones **no** apuntadas en el journal (CLI con la app
     cerrada) **sí** quedan cubiertas por las tres vías del pull; una edición en la app justo después
-    de un push del CLI de la misma nota (antes de un pull de la app) da una copia espuria pero segura
-    (cachés de base separadas); ventana de actualización: un push de un build anterior no cacheado +
+    de un push del CLI de la misma nota (antes de un pull de la app) da una fusión de más (cachés de base
+    separadas; segura — en el caso típico la unión de líneas es limpia); ventana de actualización: un push de un build anterior no cacheado +
     una edición pendiente nueva ⇒ posible copia espuria en el primer pull; una sección borrada en remoto
     mientras se edita en local puede re-crearse como fichero huérfano (oculto); `settings.json`
-    ilegible ⇒ `isCloudSyncEnabledFailClosed` = true ⇒ subidas incondicionales; si el aplicado del
-    camino de conflicto falla a medias sin ops en el journal (edición del CLI), el reintento puede hacer
+    ilegible ⇒ `isCloudSyncEnabledFailClosed` = true ⇒ subidas incondicionales; la fusión de un
+    aplicado que falla a medias se rehace en el siguiente pull sin perder nada (las bases y el journal
+    solo cambian tras escribir); en el camino histórico (copias), si el aplicado
+    falla a medias sin ops en el journal (edición del CLI), el reintento puede hacer
     una segunda copia (el dedupe va por `conflictCopied` de los ops, y una edición posterior sin el flag
     también provoca otra copia — solapada, pero sin perder nada); el ancla y las secciones se suben
     en commits separados, así que si el ancla pasa la comprobación y una sección no, el remoto queda con
-    el ancla local + la sección remota (nada se pierde: la copia lleva la versión local completa); el
-    camino de conflicto no mira `updated:`: la versión remota gana la carpeta y la local va a la copia.
+    el ancla local + la sección remota (nada se pierde); el camino de conflicto no mira `updated:`. El
+    **CLI con GitHub** (`noteflow push`/`pull`, `githubResolveConflictDir`) **no** fusiona todavía: sigue
+    con la copia de conflicto de siempre (`Conflict: local changes kept as "…"`) — pendiente.
 - **Repo:** se crea automáticamente con `private: true` + `auto_init: true` si no existe.
 - **initialPullStatus** (`pending|ok|failed`) gatea pushes hasta que el primer pull tenga éxito.
 - **Catch-up de subida (`flushPendingLocalChanges`) — dos niveles de filtro:**
