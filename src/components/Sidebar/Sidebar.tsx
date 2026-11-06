@@ -907,9 +907,9 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleSearchKeyDown}
-            className="w-full pl-7 pr-7 py-1.5 bg-surface-2 border border-border rounded text-xs
+            className="w-full pl-7 pr-7 py-1.5 bg-text/[0.06] rounded-lg text-xs
                        font-mono text-text placeholder-text-muted/40 outline-none
-                       focus:border-text/30 transition-colors caret-text"
+                       focus:bg-text/[0.09] transition-colors caret-text"
           />
           {hasSearchFilter && (
             <button

@@ -133,7 +133,7 @@ export function TitleBar() {
   return (
     <>
     <div
-      className="flex items-center h-[34px] bg-surface-0 border-b border-border select-none flex-shrink-0"
+      className="flex items-center h-[34px] bg-surface-0 select-none flex-shrink-0"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       {/* App name */}
