@@ -696,7 +696,7 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - Aspecto limpio: borde fino uniforme, mismo fondo que el editor y poco relleno alrededor del código.
   El código se ve 1px más grande que el código inline.
 - Dos botones redondeados que **solo aparecen al pasar el ratón** por el bloque, flotando
-  sobre sus esquinas superiores: **Copy** a la derecha y el **selector de lenguaje** a la izquierda.
+  sobre el borde superior del bloque (lo tapan): **Copy** a la derecha y el **selector de lenguaje** a la izquierda.
 - **Selector de lenguaje**: muestra el lenguaje actual ("Plain text" si no hay ninguno). Al pulsarlo
   abre un desplegable con un buscador y la lista de lenguajes soportados; la primera opción,
   **"Plain text"**, desactiva el resaltado. Los botones siguen visibles mientras el desplegable está
