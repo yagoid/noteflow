@@ -86,7 +86,7 @@ let entitlementsFetchedAt;
 // UNKNOWN until fetched or restored from the cache — see AccountStatus.
 let entitlementsKnown = false;
 // True while the known entitlements come from the on-disk cache rather than a
-// fetch made in this run (main.ts keeps the AI auto-switch baseline off it).
+// fetch made in this run (main.ts keeps the subscribe auto-activation baseline off it).
 let entitlementsFromCache = false;
 // Refresh token on disk but undecryptable right now (keychain locked) — I1.
 let sessionLocked = false;
@@ -335,7 +335,7 @@ function getAccountStatus() {
 /**
  * Main-process only: true while the known entitlements are the ones restored
  * from the on-disk cache (no fetch has succeeded yet in this run). main.ts uses
- * it so the cached value never becomes the AI auto-switch baseline.
+ * it so the cached value never becomes the subscribe auto-activation baseline.
  */
 function areEntitlementsFromCache() {
     return entitlementsFromCache;

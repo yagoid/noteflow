@@ -110,7 +110,7 @@ export const pricingEn = {
       'No Ollama to install, no third-party account, no API key to buy, store or rotate.',
       'A <strong>monthly AI allowance</strong> is included, measured by the real compute cost of each request — so how far it goes depends on the model you pick and on how long your conversations get.',
       'Monthly or annual subscription — <strong>€5.99/month or €49.99/year</strong>, VAT included. Subscribe from inside the app: <strong>Settings → Subscription → Subscribe</strong> — checkout opens in your browser, handled by Lemon Squeezy, our merchant of record.',
-      'Once the payment goes through, NoteFlow AI activates itself as your provider — nothing to configure.',
+      'NoteFlow AI activates itself as your provider as soon as the payment goes through, and whenever you sign in to an account that has it — nothing to configure.',
     ],
     modelsTitle: 'Everyday models',
     models: [
@@ -142,6 +142,7 @@ export const pricingEn = {
       'Automatic sync across devices — no manual pushes, no waiting on a git flow.',
       'Two encryption modes: managed by default (zero secrets to keep), or opt into strict E2EE where the keys never leave your devices.',
       'Monthly or annual subscription — <strong>€3.99/month or €39.99/year</strong>, VAT included, subscribed from inside the app (Settings → Subscription).',
+      'Cloud switches itself on as soon as the payment goes through, and whenever you sign in to an account that has it — the first time, you just pick the encryption mode.',
       'For people who don’t want to create and manage a GitHub repo just to sync notes.',
     ],
     alt: {

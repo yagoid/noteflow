@@ -948,8 +948,12 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     Ajustes → IA (que ya no lleva título "Assistant (LLM)": empieza directamente con la línea "Pick one
     source…" y las dos cards) como en el **panel de IA del Cerebro** (antes solo en Ajustes). Lo mismo si la
     suscripción caduca teniéndolo activo, para que entiendas el fallo y puedas cambiar de fuente.
-    **Al suscribirte** (Subscribe → pagar → Refresh en Settings → Subscription), NoteFlow AI **se activa
-    como proveedor automáticamente**.
+    **Se activa solo lo que tienes pagado** (NoteFlow AI con el plan AI, NoteFlow Cloud con el plan
+    Cloud, ambos con el Bundle) en dos momentos: **al iniciar sesión** (primer login, dispositivo nuevo
+    o vuelta a tu cuenta) y **al suscribirte con la sesión ya abierta** (Subscribe → pagar → Refresh en
+    Settings → Subscription). Una sesión que se **restaura al arrancar la app no cuenta como login**: si
+    apagaste Cloud o elegiste tu propio proveedor, no se te vuelve a cambiar en cada arranque. Y perder
+    una suscripción **nunca apaga nada** por sí sola: la feature se te vuelve a ofrecer y decides tú.
   - **Tu proveedor / IA local (BYO; gratis y privado):** elige proveedor (Anthropic/Claude, OpenAI,
     DeepSeek, MiniMax, Moonshot, OpenRouter, Ollama local, o Custom OpenAI-compatible), pega tu **API
     key**, ajusta Base URL y modelo, y prueba la conexión. **Cada proveedor recuerda su propia
@@ -1323,6 +1327,10 @@ Flujo del panel según estado:
   un bloque ámbar destacado (copiable, con aviso rojo: perder passphrase + recovery = notas
   irrecuperables, NoteFlow no puede resetearlas) → botón "I have saved my recovery code" para
   continuar. El código no vuelve a mostrarse jamás.
+  **Cloud ya habilitado pero sin claves aún:** estado nuevo del primer uso cuando Cloud se activa solo
+  (al iniciar sesión o al suscribirte con el plan Cloud): el panel muestra estas mismas cards de modo
+  (onboarding), Cloud ya cuenta como backend activo y **GitHub Sync ya está en pausa**; la sync con la
+  nube arranca en cuanto configuras las claves.
 - **Bloqueado (`locked`):** en modo managed el panel se desbloquea solo (spinner "unlocking…",
   reintento silencioso cada 10 s — típico de un arranque offline); en modo private, un único
   input acepta **passphrase o recovery code** → "Unlock".
@@ -1350,7 +1358,9 @@ Flujo del panel según estado:
 - **Sin sesión**, el panel ya no se limita a pedirte que inicies sesión: muestra también esos
   precios, y clicar cualquier card lleva a Ajustes → Suscripción para crear la cuenta sin salir de Ajustes.
 - Antes de activar con GitHub Sync conectado, aviso ámbar: "GitHub Sync quedará en pausa" (solo
-  cuando activar Cloud está realmente al alcance, es decir con la entitlement `cloud`).
+  cuando activar Cloud está realmente al alcance, es decir con la entitlement `cloud`). Este aviso es
+  del **Enable manual**: la **auto-activación** (al iniciar sesión o al suscribirte con el plan Cloud)
+  pausa GitHub Sync **sin aviso previo**.
 
 Detalle técnico (jerarquía de claves, modos managed/e2ee, motor de sync):
 `.claude/context/monetization.md` § 4.

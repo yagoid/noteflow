@@ -30,9 +30,9 @@ import {
   planAccountTransition,
   parseAccountRestore,
   clearRestoreSurface,
-  stepAiEntitlementBaseline,
-  NO_AI_BASELINE,
-  type AiEntitlementBaseline,
+  stepEntitlementBaseline,
+  NO_ENTITLEMENT_BASELINE,
+  type EntitlementBaseline,
   type AccountRestoreRecord,
   type AccountTransitionPlan,
   type RestoreSurface,
@@ -229,13 +229,15 @@ function emitAccountStatusChanged(): void {
   })
 }
 
-// Baseline for the 'ai' entitlement, established on the FIRST FRESH status observation of the
-// CURRENT signed-in identity (the first successful fetch after app boot with a persisted
-// session, or right after sign-in) and never used to trigger anything by itself — a naive
-// false→true edge on that first read would force-switch the provider on every single launch for
-// an already-subscribed user, even one who deliberately kept a BYO-key provider active. Only a
-// REAL transition seen LATER for the SAME identity in the same run (e.g. the user subscribes,
-// comes back and hits Refresh in Settings → Account) should auto-activate the managed provider.
+// Baseline for the 'ai' and 'cloud' entitlements, established on the FIRST FRESH status
+// observation of the CURRENT signed-in identity (the first successful fetch after app boot with a
+// persisted session, or right after sign-in) and never used to trigger anything by itself — a
+// naive false→true edge on that first read would force-switch the provider / turn Cloud on at
+// every single launch for an already-subscribed user, even one who deliberately kept a BYO-key
+// provider or Cloud off. Only a REAL transition seen LATER for the SAME identity in the same run
+// (e.g. the user subscribes, comes back and hits Refresh in Settings → Account) auto-activates
+// that surface: 'ai' → managed provider, 'cloud' → NoteFlow Cloud (bundle = both). Activation on
+// a real sign-in is planAccountTransition's job, not this one's.
 // account.ts now PERSISTS the last known entitlements (account.entitlementsCache) so the UI is
 // known from t=0, but that cached value — like still-unknown entitlements — is NOT a fresh
 // observation: it neither sets nor moves the baseline (account.areEntitlementsFromCache), so
@@ -246,8 +248,8 @@ function emitAccountStatusChanged(): void {
 // account B that already had the entitlement before this process even started would look like
 // it just "transitioned" the moment it signs in after account A (which lacked it) signs out.
 // A keychain-locked session (status.sessionLocked) keeps signedIn + identity, so it is NOT a
-// sign-out for this nor for planAccountTransition. Logic: stepAiEntitlementBaseline.
-let aiEntitlementBaseline: AiEntitlementBaseline = NO_AI_BASELINE
+// sign-out for this nor for planAccountTransition. Logic: stepEntitlementBaseline.
+let entitlementBaseline: EntitlementBaseline = NO_ENTITLEMENT_BASELINE
 
 // Last observed account snapshot — the "previous" side of the sign-in/sign-out
 // edge that planAccountTransition() reasons about. Seeded at boot from the
@@ -259,8 +261,9 @@ function accountIdentityOf(status: account.AccountStatus): string | null {
   return status.signedIn ? (status.email ?? null) : null
 }
 
-// Small non-secret record of what the signing-out session had enabled, so that
-// signing back in with the SAME identity puts it back (see accountTransition.ts).
+// Small non-secret record of a pending activation of the paid surfaces: what the
+// signing-out session had enabled, or — on a sign-in whose entitlements are not
+// known yet — "switch on whatever is paid" (see accountTransition.ts).
 function readAccountRestore(): AccountRestoreRecord | null {
   return parseAccountRestore(readSettings().accountRestore)
 }
@@ -285,8 +288,9 @@ function dropRestoreSurface(surface: RestoreSurface): void {
 
 // Applies the plan of accountTransition.ts: tear the paid subsystems down on
 // sign-out (Cloud off, DEK dropped, assistant back to a BYO/local provider) and
-// put them back on a matching sign-in. Every branch is a no-op unless the plan
-// asked for it, so this runs on every account status change.
+// switch on what is paid on sign-in (or on a subscribe while signed in — see
+// handleAccountStatusChanged). Every branch is a no-op unless the plan asked for
+// it, so this runs on every account status change.
 function applyAccountTransition(plan: AccountTransitionPlan): void {
   let cloudChanged = false
 
@@ -304,10 +308,12 @@ function applyAccountTransition(plan: AccountTransitionPlan): void {
     cloudChanged = true
   }
   if (plan.enableCloud) {
-    // No initial pull from here: the DEK is null by construction on this path
-    // (the sign-out dropped it and its cache), so pulling now would only set
-    // syncError = "Cloud keys are locked". runCloudSyncCycle does it in the
-    // right order — managed auto-unlock → pull → drain journal.
+    // No initial pull from here: the DEK is normally null on this path (a
+    // sign-out drops it and its cache; a first sign-in never had one), so
+    // pulling now would only set syncError = "Cloud keys are locked".
+    // runCloudSyncCycle does it in the right order — managed auto-unlock →
+    // pull → drain journal (an e2ee user gets the passphrase prompt; no keys
+    // yet → the Cloud card's key setup).
     const res = cloudSync.enableCloudSync()
     if (res.ok) {
       startCloudAutoSync()
@@ -332,13 +338,13 @@ function handleAccountStatusChanged(): void {
   const status = account.getAccountStatus()
   const identity = status.signedIn ? (status.email ?? '') : null
 
-  const step = stepAiEntitlementBaseline(aiEntitlementBaseline, {
+  const step = stepEntitlementBaseline(entitlementBaseline, {
     identity,
-    ai: status.entitlements.ai,
+    entitlements: status.entitlements,
     fresh: status.entitlementsKnown && !account.areEntitlementsFromCache(),
   })
-  aiEntitlementBaseline = step.next
-  if (step.autoSwitch) {
+  entitlementBaseline = step.next
+  if (step.activate.ai) {
     // Same identity as before, real subscribe-while-running transition — auto-switch to the
     // managed provider unless it's already active (avoid an unnecessary settings write).
     // Written BEFORE the broadcast below so the renderer's config reload (LlmConfigView reacts
@@ -349,31 +355,36 @@ function handleAccountStatusChanged(): void {
 
   cloudSync.bindCloudSyncToAccount(account.getUserId()) // another account's Cloud sync state is reset
 
-  // Sign-out teardown / sign-in restore of the paid subsystems. Read AFTER the
+  // Sign-out teardown / sign-in activation of the paid subsystems. Read AFTER the
   // auto-switch above so the plan sees the current provider; both paths write
   // BEFORE the broadcast below, so the renderer reloads with the final state.
-  // (The two never collide: the auto-switch only fires for the SAME identity,
-  // the restore only for a matching record on a fresh sign-in.)
+  // (The two never collide: the auto-switch only fires for the SAME identity on
+  // a stable session, the plan's activation on a fresh sign-in or a pending
+  // record — and each skips what is already on.)
   const previous = lastAccountSnapshot
   lastAccountSnapshot = { signedIn: status.signedIn, identity: accountIdentityOf(status) }
   const llmCfg = readLlmSettings()
-  applyAccountTransition(
-    planAccountTransition(
-      previous,
-      {
-        signedIn: status.signedIn,
-        identity: accountIdentityOf(status),
-        entitlements: status.entitlements,
-        entitlementsKnown: status.entitlementsKnown,
-      },
-      {
-        cloudEnabled: cloudSync.isCloudSyncEnabled(),
-        aiManaged: llmCfg.active === 'noteflow',
-        aiFallbackProvider: llm.byoFallbackProvider(llmCfg),
-        restore: readAccountRestore(),
-      }
-    )
+  const cloudEnabled = cloudSync.isCloudSyncEnabled()
+  const plan = planAccountTransition(
+    previous,
+    {
+      signedIn: status.signedIn,
+      identity: accountIdentityOf(status),
+      entitlements: status.entitlements,
+      entitlementsKnown: status.entitlementsKnown,
+    },
+    {
+      cloudEnabled,
+      aiManaged: llmCfg.active === 'noteflow',
+      aiFallbackProvider: llm.byoFallbackProvider(llmCfg),
+      restore: readAccountRestore(),
+    }
   )
+  // Subscribed to Cloud while signed in (same identity, fresh false→true): switch
+  // it on through the same path as a sign-in activation. AFTER
+  // bindCloudSyncToAccount, so it lands on this account's sync state.
+  // (Spread, never mutate: the plan may be the shared NO_OP object.)
+  applyAccountTransition(step.activate.cloud && !cloudEnabled ? { ...plan, enableCloud: true } : plan)
 
   // Managed cloud keys unlock silently as soon as a session exists (fresh
   // sign-in, or account events on a restored one). No-op for e2ee / no-keys /
@@ -2410,8 +2421,13 @@ ipcMain.handle('sync:dismiss-conflict-copies', () => {
 // Enabling Cloud takes over from GitHub Sync (mutually exclusive — see
 // syncProvider.ts): the GitHub autosync stands down and the cloud autosync
 // (Realtime + safety-net loop) starts, kicking an initial pull (which flushes
-// local changes after). Shared by the IPC below and the sign-in restore path
-// (applyAccountTransition).
+// local changes after). Used by the cloud:enable IPC below — the user enables
+// Cloud by hand from an unlocked panel, so the DEK is there and pulling right
+// away is correct. applyAccountTransition (the automatic activation on sign-in
+// and on subscribe) deliberately does NOT use it: it calls enableCloudSync +
+// startCloudAutoSync + runCloudSyncCycle WITHOUT an initial pull, because the
+// DEK may be null at that point (a pull would only set "Cloud keys are locked")
+// and runCloudSyncCycle unlocks first. Don't unify the two.
 function enableCloudSyncWithInitialPull(): { ok: boolean; error?: string } {
   const res = cloudSync.enableCloudSync()
   if (res.ok) {

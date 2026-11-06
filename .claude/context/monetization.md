@@ -560,38 +560,51 @@ es **un preset más**, no una implementación nueva.
   subscribe". Ese acceso a Cuenta lo resuelve `onNavigate('account')` donde existe (paneles de Ajustes)
   y, desde el panel del Cerebro —que no tiene navegación propia—, el evento `window`
   **`noteflow:open-account`**, escuchado en `TitleBar` junto al resto de `noteflow:open-*`.
-- **Auto-activación al suscribirse:** `electron/main.ts` (junto a `account.onStatusChanged`)
-  detecta la transición real `entitlements.ai` `false→true` **dentro de la misma sesión de
-  cuenta del proceso en curso** y cambia `settings.aiLlm.active` a `'noteflow'` automáticamente
-  (si no lo era ya) antes de emitir `account:status-changed`, para que el renderer recargue ya
-  con el proveedor correcto.
-  **Matiz importante:** para no forzar el cambio en cada arranque de un usuario ya suscrito, se fija
-  una **baseline por identidad** (`aiEntitlementBaseline` = `{identity, baseline}`, identity = el
-  email de la sesión o `null` en signed-out; lógica pura `stepAiEntitlementBaseline` en
-  `accountTransition.ts`, testeada) en la PRIMERA observación **fresca** de cada identidad (primer
-  fetch OK tras el boot con sesión persistida, o tras `verifyOtp`) sin disparar nada. Las
-  entitlements desconocidas y las restauradas de la **cache en disco** (`account.entitlementsCache`,
-  ver § 2; `account.areEntitlementsFromCache()`) **no** son observaciones frescas: ni fijan ni mueven
-  la baseline, así que ni desconocida→`true` ni cacheada-`false`→`true` cuentan como transición.
-  Solo una transición posterior **para la misma identidad** en el mismo proceso (p. ej. "Subscribe"
-  en el navegador → volver → "Refresh" en Settings → Subscription) dispara el auto-switch. **La
-  identidad se re-arma en cada cambio de `signedIn`/email** — necesario porque la UI permite
-  sign-out + sign-in sin reiniciar la app: sin este reset, una cuenta B que YA tenía la
-  entitlement antes de este proceso (y se loguea después de que la cuenta A, sin entitlement,
-  cierre sesión) heredaría la baseline `false` de A y se auto-switchearía indebidamente al
-  reflejar por primera vez su propia entitlement `true`. Nunca se auto-switchea al revés (perder
-  la entitlement **no** cambia de proveedor: la suscripción caducada sigue viéndose con su motivo
-  en la UI y el usuario decide).
+- **Auto-activación al suscribirse / al iniciar sesión:** la app enciende **sola** lo que el
+  usuario tiene pagado — Cloud con la entitlement `cloud`, el asistente gestionado
+  (`settings.aiLlm.active = 'noteflow'`) con la `ai`; bundle = ambas — en **dos momentos**, y nunca
+  apaga nada al perder una entitlement (la suscripción caducada sigue viéndose con su motivo en la UI
+  y el usuario decide):
+  1. **Al iniciar sesión** (transición real signed-out→signed-in **dentro del proceso**, p. ej.
+     `verifyOtp`): lo decide `planAccountTransition` (`accountTransition.ts`) — primer login, dispositivo
+     nuevo o vuelta de la misma cuenta, da igual; ver § 4 "Cerrar sesión" → "Al iniciar sesión".
+     Una sesión **restaurada del disco al arrancar no es un login** (`lastAccountSnapshot` se siembra
+     con ella), así que a quien apagó Cloud no se le vuelve a encender en cada arranque.
+  2. **Al comprar con la sesión ya iniciada:** `electron/main.ts` (`handleAccountStatusChanged`, junto
+     a `account.onStatusChanged`) detecta la transición real `false→true` de **cada** entitlement
+     **dentro de la misma sesión de cuenta del proceso en curso** y activa esa superficie: `ai` →
+     `aiLlm.active = 'noteflow'` (si no lo era ya); `cloud` → Cloud por el mismo camino que la
+     activación por login (`applyAccountTransition` con `enableCloud`: `enableCloudSync` +
+     `startCloudAutoSync` + `runCloudSyncCycle` + `emitCloudStatusChanged`, si no estaba ya activo).
+     Todo se escribe **antes** de emitir `account:status-changed`, para que el renderer recargue ya con
+     el estado final.
+  **Matiz importante (punto 2):** para no forzar el cambio en cada arranque de un usuario ya suscrito,
+  se fija una **baseline por identidad** (`entitlementBaseline` = `{identity, ai, cloud}`, identity =
+  el email de la sesión o `null` en signed-out; lógica pura `stepEntitlementBaseline` en
+  `accountTransition.ts`, testeada, que devuelve `activate: {ai, cloud}`) en la PRIMERA observación
+  **fresca** de cada identidad (primer fetch OK tras el boot con sesión persistida, o tras `verifyOtp`)
+  sin disparar nada. Las entitlements desconocidas y las restauradas de la **cache en disco**
+  (`account.entitlementsCache`, ver § 2; `account.areEntitlementsFromCache()`) **no** son
+  observaciones frescas: ni fijan ni mueven la baseline, así que ni desconocida→`true` ni
+  cacheada-`false`→`true` cuentan como transición. Solo una transición posterior **para la misma
+  identidad** en el mismo proceso (p. ej. "Subscribe" en el navegador → volver → "Refresh" en Settings
+  → Subscription) activa la superficie. **La identidad se re-arma en cada cambio de `signedIn`/email**
+  — necesario porque la UI permite sign-out + sign-in sin reiniciar la app: sin este reset, una cuenta
+  B que YA tenía la entitlement antes de este proceso (y se loguea después de que la cuenta A, sin
+  entitlement, cierre sesión) heredaría la baseline `false` de A y se activaría por este camino al
+  reflejar por primera vez su propia entitlement `true` (en un login, la activación es cosa del punto
+  1, no de la baseline). Activar Cloud pausa GitHub Sync (exclusión mutua, ver § 4 "Settings UI" →
+  "Exclusión mutua"); el desbloqueo de claves lo resuelve el flujo normal (`runCloudSyncCycle`: auto-unlock
+  managed; e2ee → formulario de passphrase; sin claves aún → setup en la tarjeta Cloud).
 - **Al cerrar sesión, el asistente vuelve a BYO/local:** sin sesión el preset `noteflow` está roto
   (el proxy responde 401), así que el sign-out revierte `settings.aiLlm.active` al **último
   proveedor NO-`noteflow`** que el usuario tuviera activo — persistido en
   `settings.aiLlm.lastByoProvider` por `withActiveProvider()` (`ai/llm/index.ts`) en los DOS sitios
-  que activan el plan gestionado (el auto-switch de `main.ts` y el `ai:llm-set-config` de la UI) —
+  que activan el plan gestionado (las activaciones automáticas de `main.ts` y el `ai:llm-set-config` de la UI) —
   o a `DEFAULT_LLM_CONFIG.active` (`'anthropic'`) si no hay tal dato (`byoFallbackProvider()`). Las
   keys BYO no se tocan (viven en `byPreset`), así que volver es inmediato. Al volver a iniciar
-  sesión **la misma** cuenta, si la entitlement `ai` sigue viva se re-activa `noteflow`
-  automáticamente (registro `accountRestore` — ver § 4 "Cerrar sesión", donde está el mecanismo
-  completo; es un camino **aparte** del auto-switch por entitlement de arriba, e idempotente).
+  sesión (esa u otra cuenta), si tiene la entitlement `ai` se activa `noteflow` automáticamente (ver
+  arriba, punto 1, y § 4 "Cerrar sesión" → "Al iniciar sesión").
   El mismo dato llega al renderer como `LlmConfigPublic.lastByoProvider` (solo si es un preset
   conocido no gestionado): con NoteFlow AI activo, la tarjeta "Your provider / local AI" de
   Ajustes → IA (`LlmConfigView.tsx`, `byoOf`) preselecciona ese proveedor (p. ej. DeepSeek con su
@@ -1506,7 +1519,7 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
 
 **Principio: sin sesión, la app vuelve a su estado gratuito/local.** Lo de pago se presenta como
 oferta, no como posesión rota — pero **no se destruye ni configuración ni datos**. La decisión
-(qué apagar/restaurar dados el status previo, el nuevo y el registro) es una **función pura**,
+(qué apagar/activar dados el status previo, el nuevo y el registro) es una **función pura**,
 `electron/accountTransition.ts` (`planAccountTransition`, testeada en
 `tests/electron/accountTransition.test.ts`); `main.ts` la ejecuta en **cada**
 `account:status-changed` (`handleAccountStatusChanged` → `applyAccountTransition`) y aplica el plan.
@@ -1531,29 +1544,44 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   - **Memoria de restauración:** `settings.json` → `accountRestore` =
     `{identity: <email de la sesión que se cierra>, cloudEnabled, aiManaged}`. **Nunca** tokens ni
     secretos: un email y dos booleanos (`parseAccountRestore` lo valida al leerlo).
-- **Al volver a iniciar sesión:** si hay registro y la **identidad coincide** (case-insensitive), se
-  restaura lo que estaba **condicionado a la entitlement viva** (`cloudEnabled && entitlements.cloud`
-  → `enableCloudSync()`; `aiManaged && entitlements.ai` → `aiLlm.active = 'noteflow'`) y el registro
-  se **consume**. Si la identidad NO coincide (otra cuenta) el registro se borra sin aplicar nada
-  (arranque limpio). ⚠️ Las entitlements llegan **asíncronas** (`initAccount` difiere el refresh 5 s;
-  `verifyOtp` las trae al vuelo), así que el registro **se evalúa en cada cambio de status** mientras
-  la identidad coincida y solo se consume cuando ya se conocen (`AccountStatus.entitlementsKnown`) — evaluar
-  contra el placeholder `NO_ENTITLEMENTS` lo tiraría a la basura. Si la entitlement caducó, no se
-  restaura nada: la feature simplemente se vuelve a ofrecer.
-  - **El pull inicial NO se lanza desde la restauración:** en ese instante la DEK es `null` por
-    construcción (el sign-out la soltó), así que un `pullNotes()` inmediato solo dejaría
-    `syncError = "Cloud keys are locked"`. Se habilita + `startCloudAutoSync()` y se dispara
-    `runCloudSyncCycle()`, que hace el orden correcto: auto-unlock managed → pull → drenar journal.
+- **Al iniciar sesión — se activa lo pagado:** en la transición real `signedIn` false→true **dentro
+  del proceso** (`verifyOtp`; una sesión restaurada del disco al arrancar NO cuenta, porque
+  `lastAccountSnapshot` se siembra con ella), el registro efectivo pasa a ser
+  `{identity: <email nuevo>, cloudEnabled: true, aiManaged: true}` — **sustituye** cualquier registro
+  previo, sea de la misma cuenta (aunque al cerrar sesión tuviera todo apagado: un login es el momento
+  de encender lo pagado) o de otra (que nunca se filtra a esta). Así se cubren el **primer login** y el
+  **dispositivo nuevo**, no solo la vuelta de la misma identidad. Se activa cada mitad **condicionada
+  a la entitlement viva** y solo si no está ya activa (`entitlements.cloud` → `enableCloudSync()`;
+  `entitlements.ai` → `aiLlm.active = 'noteflow'`), y el registro se **consume**. Sin identidad
+  (email vacío) no se hace nada y se borra cualquier registro viejo. ⚠️ Las entitlements llegan
+  **asíncronas** (`initAccount` difiere el refresh 5 s; `verifyOtp` las trae al vuelo pero es
+  best-effort), así que si en el login aún no se conocen el registro **se persiste** y se **evalúa en
+  cada cambio de status** mientras la identidad coincida (también con la sesión ya estable, p. ej.
+  tras un reinicio), consumiéndose solo cuando ya se conocen (`AccountStatus.entitlementsKnown`) —
+  evaluar contra el placeholder `NO_ENTITLEMENTS` lo tiraría a la basura. Un registro de **otra**
+  identidad encontrado con la sesión estable se borra sin aplicar nada. Sin entitlement, no se activa
+  nada: la feature simplemente se ofrece. (El registro que escribe el sign-out sigue existiendo —
+  documenta qué tenía la sesión que se fue — pero el siguiente login lo sustituye.)
+  - **El pull inicial NO se lanza desde la activación:** en ese instante la DEK es normalmente `null`
+    (el sign-out la soltó; un primer login nunca la tuvo), así que un `pullNotes()` inmediato solo
+    dejaría `syncError = "Cloud keys are locked"`. Se habilita + `startCloudAutoSync()` y se dispara
+    `runCloudSyncCycle()`, que hace el orden correcto: auto-unlock managed → pull → drenar journal (e2ee
+    → formulario de passphrase; sin claves → setup en la tarjeta Cloud). Activar Cloud pausa GitHub
+    Sync (exclusión mutua).
   - **Corte anti-sorpresa (`clearRestoreSurface`):** una acción **explícita** del usuario logueado
-    sobre una de las dos superficies gana sobre el registro y borra **esa mitad** (IPC `cloud:enable`
-    / `cloud:disable` → mitad Cloud; `ai:llm-set-config` con `active` → mitad IA). Sin este corte, un
-    usuario que entra con el fetch de entitlements caído (el de `verifyOtp` es best-effort y,
-    hasta que uno funcione, siguen desconocidas), decide dejar Cloud apagado, y ve cómo un
-    `refreshEntitlements` posterior (o el diferido de 5 s del siguiente arranque) se lo re-enciende
-    por detrás. Por mitades y no todo-o-nada: tocar el asistente no debe tirar la restauración de
-    Cloud que sigue esperando a que lleguen las entitlements.
+    sobre una de las dos superficies gana sobre el registro pendiente y borra **esa mitad** (IPC
+    `cloud:enable` / `cloud:disable` → mitad Cloud; `ai:llm-set-config` con `active` → mitad IA). Sin
+    este corte, un usuario que entra con el fetch de entitlements caído (el de `verifyOtp` es
+    best-effort y, hasta que uno funcione, siguen desconocidas), decide dejar Cloud apagado, y ve cómo
+    un `refreshEntitlements` posterior (o el diferido de 5 s del siguiente arranque) se lo enciende
+    por detrás. Por mitades y no todo-o-nada: tocar el asistente no debe tirar la activación de Cloud
+    que sigue esperando a que lleguen las entitlements.
+  - **Comprar con la sesión ya iniciada** es el otro momento de auto-activación (baseline por
+    identidad, `stepEntitlementBaseline`) — ver § 3 "Auto-activación al suscribirse / al iniciar
+    sesión". No choca con este: en el login la baseline solo se fija (cambio de identidad), y cada
+    camino omite lo que ya está activo.
 - **Sesión bloqueada ≠ sign-out:** `status.sessionLocked` (llavero del sistema bloqueado, ver § 2)
-  mantiene `signedIn` e identidad, así que ni `planAccountTransition` ni la baseline del auto-switch
+  mantiene `signedIn` e identidad, así que ni `planAccountTransition` ni la baseline de auto-activación
   lo ven como un cierre de sesión — no se apaga Cloud ni se suelta la DEK ni se vuelve a BYO.
 - **UI:** el badge de la tarjeta Cloud (`SyncPanel.tsx`) se deriva de `enabled && signedIn` — con lo
   anterior ese caso ya no debería darse, pero el badge no puede mentir. No hizo falta copy nuevo: los

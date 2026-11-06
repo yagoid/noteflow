@@ -44,8 +44,9 @@ noteflow/
 │   │                    #   allowlist de rutas descargables — testeada; ver patterns.md
 │   ├── account.ts       # Cuenta NoteFlow (Supabase Auth email+OTP vía REST, sesión en main,
 │   │                    #   refresh token cifrado, entitlements) — ver monetization.md
-│   ├── accountTransition.ts # Lógica pura del sign-out/sign-in: qué apagar (Cloud, DEK, IA gestionada)
-│   │                    #   y qué restaurar (registro accountRestore) — testeada; ver monetization.md § 4
+│   ├── accountTransition.ts # Lógica pura del sign-out/sign-in: qué apagar (Cloud, DEK, IA gestionada),
+│   │                    #   qué activar al iniciar sesión o al suscribirse (registro accountRestore,
+│   │                    #   baseline de entitlements) — testeada; ver monetization.md §§ 3-4
 │   ├── cloudAccessErrors.ts # Pura: errores etiquetados "sin token" (sin sesión / inalcanzable /
 │   │                    #   llavero bloqueado) y su mensaje — testeada; ver monetization.md § 2 (token discriminado)
 │   ├── cloudConfig.ts   # URL + anon key del proyecto Supabase real (la anon key es pública por diseño)
@@ -553,6 +554,7 @@ Estructura de `settings.json`:
 > `whatsNewSeen` = ids de las diapositivas del tour "What's new" que ESTE dispositivo ya mostró
 > (unión, deduplicada y saneada en main por `electron/whatsNewSeen.ts`); decide qué sale en el popup
 > de arranque — ver `patterns.md` → "Tour What's new".
-> `accountRestore` recuerda, **sin secretos** (email + dos booleanos), qué features de
-> pago tenía activas la sesión que cerró, para volver a activarlas si vuelve a entrar la MISMA
-> cuenta con la entitlement viva (ver `monetization.md` § 4 "Cerrar sesión").
+> `accountRestore` es una activación pendiente de las features de pago, **sin secretos** (email +
+> dos booleanos): la escribe el sign-out (qué tenía activo la sesión que cerró) y el sign-in cuando
+> las entitlements aún no se conocen ("activar lo que resulte pagado"); se consume cuando llegan.
+> Un nuevo login lo sustituye (ver `monetization.md` § 4 "Cerrar sesión" → "Al iniciar sesión").
