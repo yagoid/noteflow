@@ -401,11 +401,13 @@ button {
    Siblings of the <pre> inside the NodeView wrapper (so the pre's horizontal scroll doesn't
    carry them along); the pre's margin collapses through the wrapper, so its top edge is the
    pre's border. Hidden until the block is hovered (or the language menu is open / a button
-   has keyboard focus); they float over the first code line, hence the solid chip look. */
+   has keyboard focus); they sit on the top border, hence the solid chip look. */
 .code-block-node { position: relative; }
 .code-block-btn {
   position: absolute;
-  top: 0.45rem;
+  /* Centred on the pre's top border (the wrapper's top edge), straddling it. */
+  top: 0;
+  transform: translateY(-50%);
   z-index: 2;
   padding: 4px 9px;
   font-family: var(--app-font-family, 'JetBrains Mono', monospace);

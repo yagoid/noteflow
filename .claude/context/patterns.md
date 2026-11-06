@@ -339,7 +339,8 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   `CodeBlockLowlight` pinta dos chips flotantes (`.code-block-btn`, radio 6px, fondo `--bg-2` +
   borde + sombra): a la izquierda el lenguaje actual ("Plain text" si `language` es null) y a la
   derecha Copy. **Ambos solo aparecen en hover** del bloque (`opacity:0` + `pointer-events:none` en
-  reposo; también visibles con `:focus-visible`) y flotan sobre la primera línea de código. Son
+  reposo; también visibles con `:focus-visible`) y quedan **centrados sobre el borde superior**
+  (`top:0` + `translateY(-50%)`), tapándolo. Son
   **hermanos del `<pre>`** dentro del wrapper (`.code-block-node`, `position: relative`), no hijos: así
   el `overflow-x:auto` del `pre` no los arrastra al hacer scroll horizontal (el margen del `pre` colapsa
   a través del wrapper, así que su borde superior coincide con el del `pre`). Mientras el dropdown está
