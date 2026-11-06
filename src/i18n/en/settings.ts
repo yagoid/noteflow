@@ -78,8 +78,8 @@ export const settings = {
     // Editor colour rows (H1/H2/H3 need no label — they show as "H1"…).
     colorItalic: 'Italic',
     colorInlineCode: 'Inline code',
-    colorCodeAccent: 'Code & quote',
-    colorCodeAccentHint: 'Left border of code blocks and quotes',
+    colorCodeAccent: 'Quote',
+    colorCodeAccentHint: 'Left border of quotes',
     smaller: 'Smaller',
     larger: 'Larger',
     immersive: 'Immersive',

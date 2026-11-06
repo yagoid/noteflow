@@ -327,17 +327,29 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   párrafos el resultado es el de siempre (`> a\n> b` → un `<p>` con `<br>`, `>` vacío → nuevo
   párrafo); con varias líneas `>` vacías seguidas ahora cuentan como en el nivel superior (párrafos
   vacíos / hard break) en vez de colapsarse. Estilo: borde izquierdo del color
-  compartido `--code-accent` (fallback `--accent`; el mismo que el borde del `pre`, personalizable —
-  ver "Colores del editor") + texto atenuado. Botón en la toolbar (icono `Quote`).
-- **Bloque de código — selector de lenguaje (`CodeBlockWithCopy.tsx`):** el NodeView de
-  `CodeBlockLowlight` pinta a la izquierda (`top-2 left-2`) un botón con el lenguaje actual ("Plain
-  text" si `language` es null) y a la derecha el botón Copy. El botón izquierdo abre un dropdown
+  `--code-accent` (fallback `--accent`; personalizable — ver "Colores del editor") + texto atenuado.
+  Botón en la toolbar (icono `Quote`).
+- **Bloque de código — aspecto (`index.css`, `.prose-editor .ProseMirror pre`):** borde fino uniforme
+  de 1px (`--border`), **fondo = el del editor** (`--bg-editor`, la superficie del `<main>` de
+  `App.tsx`), radio 6px y padding ajustado y simétrico (`0.7rem 0.9rem`): **no se reserva hueco** para
+  los botones. Sin borde izquierdo de acento (ya no usa `--code-accent`). El `pre code` mide **1px más
+  que el código inline** (`calc(0.85em + 1px)`; 12px en el chat, 11px en el grid). Overrides con scope: el chat
+  (`.chat-md`, padding propio) y el grid del overview (`.note-grid-body`, sin borde y fondo tenue).
+- **Bloque de código — botones y selector de lenguaje (`CodeBlockWithCopy.tsx`):** el NodeView de
+  `CodeBlockLowlight` pinta dos chips flotantes (`.code-block-btn`, radio 6px, fondo `--bg-2` +
+  borde + sombra): a la izquierda el lenguaje actual ("Plain text" si `language` es null) y a la
+  derecha Copy. **Ambos solo aparecen en hover** del bloque (`opacity:0` + `pointer-events:none` en
+  reposo; también visibles con `:focus-visible`) y flotan sobre la primera línea de código. Son
+  **hermanos del `<pre>`** dentro del wrapper (`.code-block-node`, `position: relative`), no hijos: así
+  el `overflow-x:auto` del `pre` no los arrastra al hacer scroll horizontal (el margen del `pre` colapsa
+  a través del wrapper, así que su borde superior coincide con el del `pre`). Mientras el dropdown está
+  abierto el wrapper lleva `is-menu-open` y los botones siguen visibles (el ratón sale del bloque para
+  llegar al menú portalado). El botón izquierdo abre un dropdown
   (portalado a `document.body` con `createPortal`, `position: fixed` para no recortarse con el
   `overflow-x:auto` del `pre`) con buscador + "Plain text" (fija `language=null`) + los lenguajes de
   `extension.options.lowlight.listLanguages()` (se filtra `plaintext`, ya cubierto por "Plain text"),
   ordenados por label legible (`LANGUAGE_LABELS`, fallback = capitalizar id). **Se guarda siempre el id
-  real de lowlight** en `node.attrs.language` (no el label) para no romper resaltado ni round-trip. El
-  botón se muestra siempre sutil si hay lenguaje (`opacity-60`) o solo en hover si es plain text.
+  real de lowlight** en `node.attrs.language` (no el label) para no romper resaltado ni round-trip.
   Posiciona el dropdown `fixed` directamente desde `getBoundingClientRect()` del botón (clampeado al
   viewport tras medirse); cierra con click-fuera y Escape. No toca `markdownHtml.ts` ni el formato. Estilos `.code-lang-*` en
   `index.css`.
@@ -1973,7 +1985,7 @@ editor** por encima del tema activo (`editorColors` en `src/stores/themeStore.ts
 | `h1` / `h2` / `h3` | `--heading-1/2/3` | `--accent` / `--cyan` / `--text` | Encabezados |
 | `italic` | `--em-color` | `--purple` | Cursiva (`em`) |
 | `inlineCode` | `--code-inline` | `--red` | Código inline (`code`, no el `pre code`) |
-| `codeAccent` | `--code-accent` | `--accent` | Borde izquierdo **compartido** de `pre` y `blockquote` |
+| `codeAccent` | `--code-accent` | `--accent` | Borde izquierdo de `blockquote` (label "Quote"; el nombre es histórico: antes también pintaba el borde izquierdo del `pre`, que ya no lo tiene) |
 
 Mecánica (la misma para los 6): el override se guarda como triplete `"r g b"`, como el centinela
 `'text'` (ver abajo) o `null` = seguir el tema; se aplica con `setProperty`/`removeProperty` sobre

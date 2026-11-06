@@ -691,12 +691,14 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - Se guardan como base64 inline en el `.md`.
 
 ### Bloques de código
-- Botón de copiar integrado en cada bloque (arriba a la derecha, visible al pasar el ratón).
-- **Selector de lenguaje** (arriba a la izquierda): muestra el lenguaje actual ("Plain text" si no
-  hay ninguno). Al pulsarlo abre un desplegable con un buscador y la lista de lenguajes soportados;
-  la primera opción, **"Plain text"**, desactiva el resaltado. Si el bloque tiene lenguaje asignado, la
-  etiqueta se ve siempre (sutil) para saber el lenguaje sin hover. Se cierra al hacer click fuera o
-  con Escape.
+- Aspecto limpio: borde fino uniforme, mismo fondo que el editor y poco relleno alrededor del código.
+  El código se ve 1px más grande que el código inline.
+- Dos botones redondeados que **solo aparecen al pasar el ratón** por el bloque, flotando
+  sobre sus esquinas superiores: **Copy** a la derecha y el **selector de lenguaje** a la izquierda.
+- **Selector de lenguaje**: muestra el lenguaje actual ("Plain text" si no hay ninguno). Al pulsarlo
+  abre un desplegable con un buscador y la lista de lenguajes soportados; la primera opción,
+  **"Plain text"**, desactiva el resaltado. Los botones siguen visibles mientras el desplegable está
+  abierto. Se cierra al hacer click fuera o con Escape.
 - Syntax highlighting con Lowlight.
 
 ### Relacionar secciones (slash command `/`)
@@ -1054,8 +1056,7 @@ Persisten entre sesiones y definidos en `src/lib/themes.ts` como sets de CSS var
 
 **Personalización sobre el tema** (misma pantalla, todo con presets + selector de color libre y
 reset por control): **fuente** de la app, **color de acento** y **colores del editor** — H1, H2, H3,
-**cursiva**, **código inline** y un color compartido para el **borde izquierdo de bloques de código y
-citas**. Cada control sin tocar sigue al tema (y cambia con él); el panel muestra un **preview en
+**cursiva**, **código inline** y el **borde izquierdo de las citas** ("Quote"). Cada control sin tocar sigue al tema (y cambia con él); el panel muestra un **preview en
 vivo** de todo.
 
 - **Swatches** (iguales en la fila de acento y en las 6 del editor): primero **"Text colour (follows
