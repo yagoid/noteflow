@@ -1468,6 +1468,94 @@ function planThreeWayDir(input) {
   return plan
 }
 
+/**
+ * Pure mirror of planGithubDirMerge (electron/githubMerge.ts): the per-file
+ * MERGE of a note folder GitHub held back (githubResolveConflictDir), through
+ * the same planner as the Cloud pull (planThreeWayDir, synthetic seqs: 1 =
+ * "still the base", 2 = "moved"). `o` = { dir, files: [{ path, base (cached
+ * blob sha | undefined), remote ({ sha, content } | null), local (content |
+ * null), localSha, baseContent? }], labels?, nowIso }. Returns { writes
+ * (sections first, note.md last), removes, copySections (section FILENAMES
+ * deleted on GitHub but edited here: the deletion is applied, the local
+ * version goes to a copy of only them), conflictMarkerSections, final
+ * (relPath → content of every local '.md' once applied) } — or null when it
+ * can't be merged (anchor missing on a side, encrypted / unreadable anchor in
+ * conflict, a section not mergeable): the historical conflict copy then.
+ */
+function planGithubDirMerge(o) {
+  const anchorRel = `${o.dir}/${NOTE_MD}`
+  const prefix = `${o.dir}/`
+  const files = o.files.filter(f => f.path.startsWith(prefix) && f.path.endsWith('.md'))
+  const anchor = files.find(f => f.path === anchorRel)
+  if (!anchor || anchor.local === null || anchor.remote === null) return null
+
+  // Deleted on GitHub, edited here since its base: the deletion wins in the
+  // note, the local text goes to a copy (the planner sees it as gone here too).
+  const deletedRemotely = files.filter(f =>
+    f.path !== anchorRel && f.base !== undefined && f.remote === null && f.local !== null && f.localSha !== f.base)
+  const goneHere = new Set(deletedRemotely.map(f => f.path))
+
+  const local = {}
+  const bases = {}
+  const baseText = new Map()
+  const remote = []
+  for (const f of files) {
+    const localContent = goneHere.has(f.path) ? null : f.local
+    if (localContent !== null) local[f.path] = localContent
+    if (f.base !== undefined) {
+      let hash = UNKNOWN_BASE_HASH
+      if (typeof f.baseContent === 'string') {
+        hash = hashForBase(f.path, f.baseContent)
+        baseText.set(f.path, f.baseContent)
+      } else if (f.local !== null && f.localSha === f.base) {
+        hash = hashForBase(f.path, f.local)
+      } else if (f.remote !== null && f.remote.sha === f.base) {
+        hash = hashForBase(f.path, f.remote.content)
+      }
+      bases[f.path] = { seq: 1, hash }
+    } else {
+      bases[f.path] = { seq: 1, hash: UNKNOWN_BASE_HASH }
+    }
+    if (f.remote !== null) {
+      const atBase = f.base !== undefined && f.remote.sha === f.base
+      remote.push({ relPath: f.path, seq: atBase ? 1 : 2, content: f.remote.content, updatedAtMs: 0 })
+    } else if (f.base !== undefined) {
+      remote.push({ relPath: f.path, seq: 2, content: null, updatedAtMs: 0 }) // deleted on GitHub
+    }
+  }
+
+  const plan = planThreeWayDir({
+    dir: o.dir,
+    local,
+    remote,
+    bases,
+    pendingUpserts: new Set(),
+    staleUpserts: new Set(),
+    copiedUpserts: new Set(),
+    pendingDeletes: new Set(),
+    baseContent: (rel, hash) => {
+      const text = baseText.get(rel)
+      return text !== undefined && hashForBase(rel, text) === hash ? text : null
+    },
+    conflictLabels: o.labels,
+    nowIso: o.nowIso,
+  })
+  if (plan.copyWhole || plan.copySections.length > 0) return null
+
+  const final = {}
+  for (const f of files) if (f.local !== null) final[f.path] = f.local
+  const removes = [...plan.removes, ...deletedRemotely.map(f => f.path)]
+  for (const rel of removes) delete final[rel]
+  for (const w of plan.writes) final[w.relPath] = w.content
+  return {
+    writes: plan.writes,
+    removes,
+    copySections: deletedRemotely.map(f => f.path.slice(prefix.length)),
+    conflictMarkerSections: plan.conflictMarkerSections,
+    final,
+  }
+}
+
 /** Pure mirror of filesNeedingCatchUp: with a base, only files that differ from it; without, `dirGate`. */
 function filesNeedingCatchUp(files, bases, dirGate) {
   const out = []
@@ -2444,6 +2532,21 @@ async function getRemoteFile(token, owner, repo, relPath) {
 }
 
 /**
+ * Content of a git blob by its sha (GET git/blobs — the base of a line merge),
+ * verified against the sha; null when it can't be read (→ two-way union).
+ * Mirror of getRemoteBlobContent (electron/githubSync.ts).
+ */
+async function getRemoteBlobContent(token, owner, repo, sha) {
+  if (!/^[0-9a-f]{40}$/.test(sha)) return null
+  try {
+    const blob = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/git/blobs/${sha}`)
+    if (!blob || blob.encoding !== 'base64' || typeof blob.content !== 'string') return null
+    const content = Buffer.from(blob.content.replace(/\n/g, ''), 'base64').toString('utf-8')
+    return gitBlobSha(content) === sha ? content : null
+  } catch { return null }
+}
+
+/**
  * Uploads one file. Returns 'written' (PUT landed), 'identical' (the remote
  * already holds it — no PUT, no empty commit) or 'conflict' (conditional note
  * file whose remote copy changed since its base — nothing sent). `bases` (the
@@ -2505,13 +2608,22 @@ async function removeRemoteFile(token, owner, repo, relPath, message, bases = nu
 }
 
 /**
- * Resolves a note folder whose push was held back (a 'conflict'): the GitHub
- * version wins the folder and the LOCAL version is kept as a conflict copy
- * when it differs (same helpers and rule as the Cloud pull's copies, and as
- * the desktop app's GitHub pull) — the copy is uploaded right away. Bases of
- * the folder become the remote blobs. Returns { copy, uploadFailed } or null
- * when the remote folder could not be read (nothing touched — 'noteflow pull'
- * or the next push retries).
+ * Resolves a note folder whose push was held back (a 'conflict': GitHub's copy
+ * changed since its base). Mirror of the desktop app's GitHub conflict path
+ * (resolveRemoteDirConflict → mergeGithubConflictDir): the folder is MERGED
+ * file by file (githubMergeConflictDir → planGithubDirMerge, the planner and
+ * line merge of the Cloud pull) — a section both sides changed is merged line
+ * by line (diff3 with the base blob fetched by sha, else a two-way union;
+ * overlapping edits keep both versions between ⚠️ markers), note.md's
+ * frontmatter with mergeAnchors — and whatever ends different from GitHub goes
+ * up through the normal conditional push, on top of the remote shas. Only
+ * when it can't be merged (encrypted / unreadable anchor, anchor missing on a
+ * side, a local file unreadable, merge failure) the historical path runs: the
+ * GitHub version wins the folder and the LOCAL version is kept as a conflict
+ * copy when it differs (preserveConflictCopy) — the copy is uploaded right
+ * away. Bases of the folder become the remote blobs. Returns { merged,
+ * conflictTitle?, copy, uploadFailed } or null when the remote folder could
+ * not be read (nothing touched — 'noteflow pull' or the next push retries).
  */
 async function githubResolveConflictDir(token, sync, dir, bases) {
   let blobs
@@ -2526,14 +2638,21 @@ async function githubResolveConflictDir(token, sync, dir, bases) {
     remote[b.path] = f
   }
   const localDirPath = path.join(NOTES_DIR, dir)
-  const localShas = {}
+  const localFiles = {} // relPath → content (null = unreadable)
   try {
     for (const f of fs.readdirSync(localDirPath)) {
       if (!f.endsWith('.md')) continue
-      try { localShas[`${dir}/${f}`] = gitBlobSha(fs.readFileSync(path.join(localDirPath, f), 'utf-8')) }
-      catch { localShas[`${dir}/${f}`] = null }
+      try { localFiles[`${dir}/${f}`] = fs.readFileSync(path.join(localDirPath, f), 'utf-8') }
+      catch { localFiles[`${dir}/${f}`] = null }
     }
   } catch { /* folder gone locally */ }
+
+  const merged = await githubMergeConflictDir(token, sync, dir, bases, remote, localFiles)
+  if (merged) return merged
+  // Not mergeable → the historical path: remote folder + conflict copy.
+
+  const localShas = {}
+  for (const [rel, content] of Object.entries(localFiles)) localShas[rel] = content === null ? null : gitBlobSha(content)
   const server = {}
   for (const [rel, f] of Object.entries(remote)) server[rel] = f.content
   const copy = preserveConflictCopy(dir, githubConflictCandidates(bases, localShas), server)
@@ -2559,13 +2678,96 @@ async function githubResolveConflictDir(token, sync, dir, bases) {
       catch { uploadFailed = true }
     }
   }
-  return { copy, uploadFailed }
+  return { merged: false, copy, uploadFailed }
 }
 
-/** Prints the outcome of githubResolveConflictDir (null = could not resolve). */
+/**
+ * The merge of a conflicting folder (see githubResolveConflictDir), or null
+ * when it can't be merged — nothing was touched then. `remote`: relPath →
+ * { content, sha } of GitHub's note files; `localFiles`: relPath → local
+ * content (null = unreadable → not merged). Executes, like the app's
+ * mergeGithubConflictDir: the conflict copy of the sections deleted on GitHub
+ * but edited here (only those; throws → the caller's catch, nothing written),
+ * local removes and writes (sections, then note.md), the remote blobs as the
+ * new bases, then the uploads of whatever ends different from GitHub
+ * (sections first, note.md last — the anchor never lists a file GitHub lacks)
+ * and the conditional delete of a remote file the merge dropped here.
+ */
+async function githubMergeConflictDir(token, sync, dir, bases, remote, localFiles) {
+  if (Object.values(localFiles).some(c => c === null)) return null
+  const prefix = `${dir}/`
+  const all = new Set([
+    ...Object.keys(remote),
+    ...Object.keys(bases).filter(rel => rel.startsWith(prefix) && isNoteFilePath(rel)),
+    ...Object.keys(localFiles),
+  ])
+  const files = []
+  for (const rel of all) {
+    const local = localFiles[rel] ?? null
+    const localSha = local === null ? null : gitBlobSha(local)
+    const r = remote[rel] || null
+    const base = bases[rel]
+    // The base content only for a three-way conflict (diff3); a failed GET = unknown (two-way union).
+    let baseContent = null
+    if (base !== undefined && r !== null && local !== null && r.sha !== base && localSha !== base && localSha !== r.sha) {
+      baseContent = await getRemoteBlobContent(token, sync.owner, sync.repo, base)
+    }
+    files.push({ path: rel, base, remote: r === null ? null : { sha: r.sha, content: r.content }, local, localSha, baseContent })
+  }
+  let merge
+  try {
+    merge = planGithubDirMerge({ dir, files, labels: conflictMarkerLabels(), nowIso: new Date().toISOString() })
+  } catch { return null } // safety net: the conflict copy instead
+  if (!merge) return null
+
+  const copy = merge.copySections.length > 0 ? writeConflictCopyDir(dir, merge.copySections) : null
+  for (const rel of merge.removes) {
+    try { fs.unlinkSync(path.join(NOTES_DIR, rel)) } catch { /* already gone */ }
+  }
+  for (const w of merge.writes) fs.writeFileSync(path.join(NOTES_DIR, w.relPath), w.content, 'utf-8')
+
+  // The remote blobs are the bases now (the merged files go up on top of them).
+  for (const rel of Object.keys(bases)) if (rel.startsWith(prefix) && !remote[rel]) delete bases[rel]
+  for (const [rel, f] of Object.entries(remote)) bases[rel] = f.sha
+
+  let uploadFailed = false
+  const anchorRel = `${prefix}${NOTE_MD}`
+  const ups = Object.entries(merge.final).filter(([rel, content]) => !remote[rel] || remote[rel].content !== content)
+  ups.sort(([a], [b]) => (a === anchorRel ? 1 : b === anchorRel ? -1 : 0))
+  for (const [rel, content] of ups) {
+    try {
+      // 'conflict' = GitHub moved again meanwhile: the next push merges again.
+      if ((await upsertRemoteFile(token, sync.owner, sync.repo, rel, content, bases)) === 'conflict') uploadFailed = true
+    } catch { uploadFailed = true }
+  }
+  // A remote file the merge left deleted here (a local deletion over an unchanged remote file).
+  for (const rel of Object.keys(remote)) {
+    if (rel in merge.final) continue
+    if ((await removeRemoteFile(token, sync.owner, sync.repo, rel, `delete: ${rel}`, bases)) === 'conflict') uploadFailed = true
+  }
+  if (copy) {
+    for (const rel of copy.relPaths) {
+      try { await upsertRemoteFile(token, sync.owner, sync.repo, rel, fs.readFileSync(path.join(NOTES_DIR, rel), 'utf-8'), bases) }
+      catch { uploadFailed = true }
+    }
+  }
+  const anchorContent = merge.final[anchorRel]
+  const conflictTitle = merge.conflictMarkerSections.length > 0 && anchorContent !== undefined ? anchorTitle(anchorContent) : undefined
+  return { merged: true, conflictTitle, copy, uploadFailed }
+}
+
+/** Prints the outcome of githubResolveConflictDir (null = could not resolve). A clean merge prints nothing. */
 function reportGithubConflict(dir, res) {
   if (!res) {
     err(`${dir}: changed on GitHub since your last pull — not uploaded. Run 'noteflow pull', then 'noteflow push'`)
+    return
+  }
+  if (res.merged) {
+    if (res.conflictTitle !== undefined) {
+      out(`  Merged with conflicts: "${res.conflictTitle}" — both versions kept, look for the ⚠️ markers`)
+    }
+    if (res.copy) out(`  Conflict: local changes kept as "${res.copy.title}"`)
+    if (res.uploadFailed) out(`  ${dir}/ was merged here but could not be uploaded yet — run 'noteflow push'`)
     return
   }
   if (res.copy) {
@@ -2579,7 +2781,8 @@ function reportGithubConflict(dir, res) {
 /**
  * Pushes the given files of a note dir ('<dirname>/<file>') to the active sync
  * backend. Returns { conflicted } — true when GitHub held the note back
- * because it changed there (resolved: remote version + conflict copy).
+ * because it changed there (resolved: merged file by file, or the remote
+ * version + a conflict copy — see githubResolveConflictDir).
  */
 async function syncPushNoteFiles(dirname, files) {
   if (cloudActive()) {
@@ -2652,9 +2855,12 @@ async function syncPushNoteFiles(dirname, files) {
       }
     }
     if (conflicted) {
-      // The note changed on GitHub since this machine last saw it: take that
-      // version and keep the local one as a conflict copy (never overwrite).
-      reportGithubConflict(dirname, await githubResolveConflictDir(token, sync, dirname, bases))
+      // The note changed on GitHub since this machine last saw it: merge it
+      // file by file (or, when it can't be merged, take that version and keep
+      // the local one as a conflict copy) — never overwrite.
+      const res = await githubResolveConflictDir(token, sync, dirname, bases)
+      reportGithubConflict(dirname, res)
+      if (res && res.merged && !res.uploadFailed) out('  Synced to GitHub')
     } else {
       out('  Synced to GitHub')
     }
@@ -5047,9 +5253,10 @@ async function cmdSectionDelete(titleQuery, name, opts) {
     catch (e) { err(`Cloud delete failed: ${e.message}`) }
     return
   }
-  // The note changed on GitHub and its version was taken (local one kept as a
-  // conflict copy): deleting a section of the version just downloaded would
-  // break it.
+  // The note changed on GitHub and was resolved: merged (the merge already
+  // deleted the section there if GitHub had not changed it, or brought it
+  // back if it had), or its version taken with a conflict copy — deleting a
+  // section of the version just downloaded would break it.
   if (conflicted) return
   const sync = getSyncSettings()
   if (sync.enabled && sync.owner && sync.repo) {
@@ -5483,8 +5690,9 @@ async function cmdPush() {
   out(`  Pushing ${relPaths.length} files to ${sync.owner}/${sync.repo}...`)
   // Base of the three-way check (see "GitHub: conditional push"): files whose
   // GitHub copy changed since this machine last saw it are NOT overwritten —
-  // their folder takes the GitHub version and the local one is kept as a
-  // conflict copy (uploaded too).
+  // their folder is merged file by file and the result uploaded (or, when it
+  // can't be merged, takes the GitHub version and the local one is kept as a
+  // conflict copy, uploaded too).
   const bases = loadGithubBases(sync)
   const conflictDirs = new Set()
   let pushed = 0, errors = 0, done = 0
@@ -5501,15 +5709,18 @@ async function cmdPush() {
   }
   try { await upsertRemoteFile(token, sync.owner, sync.repo, FORMAT_MARKER, `${FORMAT_VERSION}\n`) } catch { /* ignore */ }
   if (conflictDirs.size) out('')
+  let merged = 0 // merged with GitHub's changes and uploaded: synced, not "changed on GitHub"
   for (const dir of conflictDirs) {
     try {
       const res = await githubResolveConflictDir(token, sync, dir, bases)
       reportGithubConflict(dir, res)
       if (!res || res.uploadFailed) errors++
+      else if (res.merged) merged++
     } catch (e) { errors++; console.error(`  Failed: ${dir}/ — ${e.message}`) }
   }
   saveGithubBases(sync, bases)
-  out(`\n  Done: ${pushed} pushed, ${errors} errors${conflictDirs.size ? `, ${conflictDirs.size} changed on GitHub` : ''}`)
+  const held = conflictDirs.size - merged
+  out(`\n  Done: ${pushed} pushed, ${errors} errors${merged ? `, ${merged} merged with GitHub` : ''}${held ? `, ${held} changed on GitHub` : ''}`)
   // A failed file may be a note.md the repo still lacks — same rule as the pull.
   if (writeGithubLastSync(sync, errors, startedAt) === null) {
     out("  Last sync not updated (some files failed) — run 'noteflow push' again")
@@ -6594,7 +6805,7 @@ if (require.main === module) {
     normalizeOtpCode, planCloudLogin,
     loginFlagsError, checkPendingGithubLogin, resolveFinishRepo, desktopSettingsCandidates, desktopAppInfo,
     gitBlobSha, isNoteFilePath, planConditionalUpsert, planConditionalDelete, remoteDirChangesSinceBase,
-    nextPulledBases, githubConflictCandidates,
+    nextPulledBases, githubConflictCandidates, planGithubDirMerge, githubResolveConflictDir, cmdPush, cmdPull,
     // Cloud three-way reconcile (mirrors of electron/cloudSyncLogic.ts) + the
     // Cloud engine entry points, driven by tests against an in-memory server.
     CLOUD_BASE_UPSERT_RPC, TOMBSTONE_BASE_HASH, UNKNOWN_BASE_HASH,

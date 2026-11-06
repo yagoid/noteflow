@@ -1374,7 +1374,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
       remota. Una sección con marcas que el usuario no resuelve se sincroniza tal cual (las marcas son
       texto). El **GitHub Sync** de la app usa la misma fusión desde su camino de conflicto (base
       pedida por sha a la API de git blobs, `electron/githubMerge.ts`; ver `sync.md` "Subida
-      condicionada (QA B3)"); el CLI con GitHub aún copia.
+      condicionada (QA B3)"), y el CLI con GitHub también, en el camino de conflicto de su push
+      (`githubResolveConflictDir`).
     - **Inserciones en el mismo sitio:** con base, si los dos lados solo **añadieron** líneas donde la
       base no tenía nada (p. ej. cada dispositivo añadió una tarea al final de la misma checklist), se
       conservan las dos (primero la remota) **sin marcas**: no se pisa nada. Sin base no se puede

@@ -182,8 +182,9 @@ en la web, `docs/src/data/cli.ts`; la skill `cli/noteflow-cli/SKILL.md` **ya no 
 sino la **guía para agentes** (solo lo que el CLI no avisa por sí solo: fallos silenciosos, modelo
 mental, chuleta de una línea por comando, checklist y protocolos de sync). Al revisar la página,
 contrasta con `noteflow help` y el código, no con la skill.
-La cabecera (`data/cli.ts`) y la meta description (`cli.{en,es}.ts`) dicen CLI **v2.6.0**. Reflejan
-v2.6.0: las filas de `add`/`set`/`new`/`section add`, `login`/`cloud login` (flags en dos pasos
+La cabecera (`data/cli.ts`) y la meta description (`cli.{en,es}.ts`) dicen CLI **v2.7.0**. Reflejan
+v2.7.0: las filas de `push` y `cloud pull` (fusión por líneas en vez de copia de conflicto; copia solo
+en notas cifradas), las de `add`/`set`/`new`/`section add`, `login`/`cloud login` (flags en dos pasos
 `--no-wait`/`--finish` y `--send-code`/`--code`), `status`/`cloud status` (campo `desktopApp`) y la
 tabla de flags globales (`globalFlags`; la mantiene la web, la skill ya no tiene tabla de flags).
 **No** se reflejan en la web: el protocolo para agentes de la skill (checklist inicial, "Sincroniza

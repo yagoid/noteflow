@@ -1,4 +1,4 @@
-// Structural reference data for the /cli page — mirrors the NoteFlow CLI v2.6.0.
+// Structural reference data for the /cli page — mirrors the NoteFlow CLI v2.7.0.
 // Language-neutral fields (usage, flags, examples, colour tokens) live here once;
 // the short bilingual descriptions are inline per row (the table is ~30 rows with
 // 80% identical structure — two mirror files would drift apart).
@@ -321,8 +321,8 @@ export const cliGroups: CliGroup[] = [
         id: 'push',
         usage: 'noteflow push',
         desc: {
-          en: 'Upload every note to the repo. A note that changed on GitHub since your last pull is never overwritten: the GitHub version is kept and yours is saved as a conflict copy.',
-          es: 'Sube todas las notas al repositorio. Una nota que cambió en GitHub desde tu último pull nunca se pisa: se queda la versión de GitHub y la tuya se guarda como copia en conflicto.',
+          en: 'Upload every note to the repo. A note that changed on GitHub since your last pull is never overwritten: it is merged <strong>line by line</strong> with the GitHub version and the result uploaded, no copy. Only if both sides changed the same lines are both versions kept in the note between ⚠️ markers (<code>Merged with conflicts: "…"</code>). Encrypted notes still keep yours as a conflict copy.',
+          es: 'Sube todas las notas al repositorio. Una nota que cambió en GitHub desde tu último pull nunca se pisa: se fusiona <strong>línea a línea</strong> con la versión de GitHub y se sube el resultado, sin copia. Solo si los dos lados cambiaron las mismas líneas se guardan las dos versiones en la nota entre marcas ⚠️ (<code>Merged with conflicts: "…"</code>). Las notas cifradas siguen guardando la tuya como copia en conflicto.',
         },
       },
       {
@@ -381,8 +381,8 @@ export const cliGroups: CliGroup[] = [
         id: 'cloud-pull',
         usage: 'noteflow cloud pull',
         desc: {
-          en: 'Download and decrypt remote changes (incremental), merged <strong>section by section</strong>: a section you edited here and another edited elsewhere are both kept, no copy. If both sides changed the same section, the note takes the remote version and yours is saved as a new note holding only those sections (<code>Conflict: local changes kept as "…"</code>). Remote deletions only apply when the local copy hasn’t changed since the last sync. Notes this CLI hasn’t synced with the per-file rule yet still follow the note’s <code>updated</code> timestamp; the first run after updating the CLI re-reads the cloud once to cover them.',
-          es: 'Baja y descifra los cambios remotos (incremental), combinados <strong>sección a sección</strong>: una sección que editaste aquí y otra editada en otro sitio se conservan las dos, sin copia. Si los dos lados cambiaron la misma sección, la nota se queda con la versión remota y la tuya se guarda como nota nueva con solo esas secciones (<code>Conflict: local changes kept as "…"</code>). Los borrados remotos solo se aplican si la copia local no cambió desde el último sync. Las notas que este CLI aún no ha sincronizado con la regla por fichero siguen el <code>updated</code> de la nota; la primera ejecución tras actualizar el CLI relee la nube una vez para cubrirlas.',
+          en: 'Download and decrypt remote changes (incremental), merged <strong>section by section</strong>: a section you edited here and another edited elsewhere are both kept, no copy. If both sides changed the same section, it is merged <strong>line by line</strong> inside the note; only if they changed the same lines are both versions kept between ⚠️ markers (<code>Merged with conflicts: "…"</code>). Encrypted notes still get a conflict copy (<code>Conflict: local changes kept as "…"</code>). Remote deletions only apply when the local copy hasn’t changed since the last sync. Notes this CLI hasn’t synced with the per-file rule yet still follow the note’s <code>updated</code> timestamp; the first run after updating the CLI re-reads the cloud once to cover them.',
+          es: 'Baja y descifra los cambios remotos (incremental), combinados <strong>sección a sección</strong>: una sección que editaste aquí y otra editada en otro sitio se conservan las dos, sin copia. Si los dos lados cambiaron la misma sección, se fusiona <strong>línea a línea</strong> dentro de la nota; solo si cambiaron las mismas líneas se guardan las dos versiones entre marcas ⚠️ (<code>Merged with conflicts: "…"</code>). Las notas cifradas siguen creando una copia en conflicto (<code>Conflict: local changes kept as "…"</code>). Los borrados remotos solo se aplican si la copia local no cambió desde el último sync. Las notas que este CLI aún no ha sincronizado con la regla por fichero siguen el <code>updated</code> de la nota; la primera ejecución tras actualizar el CLI relee la nube una vez para cubrirlas.',
         },
       },
       {

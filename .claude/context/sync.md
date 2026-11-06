@@ -132,7 +132,8 @@ Sync de la app crean nota aparte cuando una sección cambió en los dos lados: l
 contenido de la base pedido por sha a la API de git blobs) y dejan las dos versiones entre marcas ⚠️
 solo si chocan las mismas líneas (aviso `conflictMerges`). Las copias quedan para lo que no se fusiona
 (notas cifradas, ancla ilegible, borrado remoto de una sección editada aquí en GitHub, el tombstone
-`'lost'` y las carpetas sin base de ancla en Cloud, la red de seguridad) y para el CLI con GitHub. Lo
+`'lost'` y las carpetas sin base de ancla en Cloud, la red de seguridad). El CLI hace lo mismo en los dos
+backends (GitHub: `githubResolveConflictDir`, ver "El CLI con GitHub" abajo). Lo
 que sigue describe esas copias. Cuando el pull de Cloud (carpetas sin base de ancla; con
 base, ver "Fusión en tres vías" en `monetization.md`: una sección que cambiaron los dos se **fusiona por
 líneas** en la nota — marcas ⚠️ si chocan las mismas líneas, aviso `conflictMerges` —, y solo una nota
@@ -181,9 +182,28 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   vacía; `logout` y `login` a otro repo la borran — nunca se comparte con el `sync-state.json` de
   la app). Sin caché (primera ejecución, otro repo) ⇒ comportamiento histórico. Tampoco hace PUTs
   idénticos (antes sí: commits vacíos). Un fichero cuya copia en GitHub cambió desde su base **no se
-  sube**: la carpeta se resuelve al final (`githubResolveConflictDir`) — baja la carpeta remota, guarda
-  la local como copia de conflicto si difiere (`preserveConflictCopy`, el helper de copias del pull de
-  Cloud), escribe la remota encima, sube la copia y avisa `Conflict: local changes kept as "…"`.
+  sube**: la carpeta se resuelve al final (`githubResolveConflictDir`), **con las mismas reglas que el
+  camino de conflicto del pull de la app** (2026-11-06): baja la carpeta remota y la **fusiona fichero a
+  fichero** (`githubMergeConflictDir` → `planGithubDirMerge`, espejo puro de `electron/githubMerge.ts`
+  sobre el `planThreeWayDir`/`mergeSectionText`/`mergeAnchors` del CLI; base = la caché de shas del CLI,
+  con el contenido de la base pedido por sha a `GET /repos/{o}/{r}/git/blobs/{sha}` solo para los
+  ficheros en conflicto de tres vías y verificado con `gitBlobSha` — si falla, unión de dos vías). Las
+  marcas ⚠️ nombran `os.hostname() + " (CLI)"` (`conflictMarkerLabels`). Escribe el resultado, toma los
+  shas remotos como base y **sube por el camino normal** (`upsertRemoteFile` condicionado contra el sha
+  remoto; secciones antes que el `note.md`; un fichero remoto que la fusión dejó borrado aquí se borra con
+  `removeRemoteFile` condicionado). Con marcas avisa `Merged with conflicts: "<título>" — both versions
+  kept, look for the ⚠️ markers` (como el pull de Cloud del CLI); una fusión limpia no avisa (el push
+  automático imprime `Synced to GitHub`; `noteflow push` la cuenta como `N merged with GitHub`, no como
+  `changed on GitHub`). Sección borrada en GitHub y editada aquí → se aplica el borrado
+  y la versión local va a una copia **con solo esas secciones** (`writeConflictCopyDir` con
+  `onlySections`). **Copia de la carpeta entera** (camino histórico: `preserveConflictCopy`, escribe la
+  remota encima, sube la copia, `Conflict: local changes kept as "…"`) solo donde no se fusiona: nota
+  cifrada, ancla ilegible o ausente en un lado, un fichero local ilegible o fusión que lanza (red de
+  seguridad). Paridad con la app fijada en `tests/cli/githubMerge.test.ts` (también e2e contra un GitHub
+  simulado con `https.request` mockeado). `noteflow pull` en sí **no** fusiona: sigue siendo LWW por
+  `updated:` (remota más nueva ⇒ sobrescribe la carpeta local, también una edición local sin subir;
+  local igual o más nueva ⇒ la salta y conserva su base, así que el siguiente push ve el cambio remoto y
+  fusiona).
   `noteflow pull` registra como base cada blob del tree **solo donde el fichero local ya es ese blob**
   tras el pull (`nextPulledBases`: una carpeta saltada por "local más nuevo" conserva su base vieja,
   para que el siguiente push vea el cambio remoto). Borrados: `noteflow delete` no borra nada en
@@ -628,8 +648,8 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     también provoca otra copia — solapada, pero sin perder nada); el ancla y las secciones se suben
     en commits separados, así que si el ancla pasa la comprobación y una sección no, el remoto queda con
     el ancla local + la sección remota (nada se pierde); el camino de conflicto no mira `updated:`. El
-    **CLI con GitHub** (`noteflow push`/`pull`, `githubResolveConflictDir`) **no** fusiona todavía: sigue
-    con la copia de conflicto de siempre (`Conflict: local changes kept as "…"`) — pendiente.
+    **CLI con GitHub** fusiona igual en su push (`githubResolveConflictDir`, mismo planificador; ver "El
+    CLI con GitHub" arriba).
 - **Repo:** se crea automáticamente con `private: true` + `auto_init: true` si no existe.
 - **initialPullStatus** (`pending|ok|failed`) gatea pushes hasta que el primer pull tenga éxito.
 - **Catch-up de subida (`flushPendingLocalChanges`) — dos niveles de filtro:**

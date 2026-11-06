@@ -196,8 +196,10 @@ mensaje de error literal y el comando para reintentar (`noteflow pull` / `notefl
 iniciar sesión). Si hubo conflicto, di el título de la copia de conflicto creada (`<título> (conflict
 copy …)`).
 
-**Conflictos en el `pull`:** si los dos lados editaron la misma sección, el `pull` la **fusiona línea
-a línea** dentro de la nota, sin copia (p. ej. una línea añadida aquí y otra allí → quedan las dos).
+**Conflictos al sincronizar** (el `pull` con Cloud; con GitHub, el `push` y la subida automática de
+cada escritura, cuando la nota cambió en GitHub desde tu último `pull`): si los dos lados editaron la
+misma sección, el CLI la **fusiona línea a línea** dentro de la nota y sube el resultado, sin copia
+(p. ej. una línea añadida aquí y otra allí → quedan las dos; con GitHub verás `Synced to GitHub`).
 Solo si tocaron **las mismas líneas** guarda las dos versiones entre marcas `> ⚠️ Sync conflict …` /
 `> ⚠️ End of sync conflict` e imprime `Merged with conflicts: "<título>" — both versions kept, look
 for the ⚠️ markers`: dile al usuario qué nota es (o deja tú la versión buena y borra las marcas si te
