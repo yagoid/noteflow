@@ -258,7 +258,7 @@ es **un preset más**, no una implementación nueva.
   `usage_events` (tabla de la 0003; `pending`, `cost_usd`, `generation_id` de la 0009; `quota_usd`
   de la 0013 — ver "Cuota por coste real"). Los `messages` viajan tal cual, así que los
   `reasoning_details` que el cliente reenvía en los turnos de tool calls llegan a OpenRouter (ver
-  `.claude/context/ai.md` § chat agéntico). Los **errores del upstream nunca se reenvían tal
+  `.agents/context/ai.md` § chat agéntico). Los **errores del upstream nunca se reenvían tal
   cual**: `mapUpstreamError` los loguea y devuelve uno de tres errores OpenAI-shaped — 4xx que
   menciona imagen/`image_url`/vision/multimodal/"unknown variant" → 400 `image_input_unsupported`
   (mensaje con el literal `image_url`, del que depende `friendlyChatError` en `electron/main.ts`);
@@ -298,7 +298,7 @@ es **un preset más**, no una implementación nueva.
   alias y ese id da 400), los **precios** (el mismo catálogo `served` se usa para reservar y para
   liquidar una petición), el **esfuerzo de razonamiento** inyectado y el cuerpo de **`GET /models`**
   (lista OpenAI con `images`, `recommended` y `cost_index` por entrada — **nunca** los precios), que
-  es lo que el cliente cachea como su catálogo (`.claude/context/ai.md` → "Catálogo de modelos de
+  es lo que el cliente cachea como su catálogo (`.agents/context/ai.md` → "Catálogo de modelos de
   NoteFlow AI"). **`AI_ALLOWED_MODELS`** (`applyAllowedModelsOverride`) solo puede **restringir**:
   se sirven los modelos del catálogo cuyo id esté en la lista, en el orden y con los metadatos del
   catálogo; un id que no esté en el catálogo se ignora (no puede **añadir** modelos: no tendría
@@ -522,7 +522,7 @@ es **un preset más**, no una implementación nueva.
   sin entitlement, en su lugar el aviso ámbar (`noteflowSignIn`/`noteflowNeedsSubscription`) que
   remite a Ajustes → Suscripción — también cuando la suscripción caduca teniéndolo activo (sigue viendo el
   motivo y puede pasarse a BYO con la otra card). Detalle del selector, del estado de vista `mode` y
-  de por qué los campos BYO se ocultan hasta activar el proveedor: `.claude/context/ai.md` § LLM.
+  de por qué los campos BYO se ocultan hasta activar el proveedor: `.agents/context/ai.md` § LLM.
   **Reactividad de la config LLM en el renderer:** el store `aiChatStore` (`llmConfig`/`presets`/
   `models`) se recarga con `loadConfig()` ante `onAccountStatusChanged` (y `onAiLlmPresetsChanged`)
   a nivel de **ventana**, no de panel: `App.tsx` (ventana principal, salvo sticky) y

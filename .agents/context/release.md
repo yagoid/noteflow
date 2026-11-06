@@ -42,7 +42,7 @@ release publicado antes de tiempo rompe la actualización de todos los usuarios 
    tsc copia los CRLF del `.ts` del checkout dentro de los template literals. Si
    `dist-electron/githubSync.js` sale modificado sin haber tocado `electron/githubSync.ts`, son esos
    CRLF en `README_CONTENT`: **no commitearlo** (dejarlo igual que en HEAD).
-6. **Docs:** `.claude/context/` (y la skill `noteflow-features`) al día si procede; `docs/` y
+6. **Docs:** `.agents/context/` (y la skill `noteflow-features`) al día si procede; `docs/` y
    `README.md` si el cambio es visible. Commits en inglés.
 7. **Commit + push a `main`, luego tag + push del tag** (el tag es lo único que dispara `release.yml`):
    ```bash
@@ -80,7 +80,7 @@ release publicado antes de tiempo rompe la actualización de todos los usuarios 
 > **Identidad git:** si la máquina no tiene config global,
 > `git config user.email "<tu-email>"` y `git config user.name "<tu-usuario>"` antes del commit.
 
-- Antes de hacer push a `main` revisar que la documentación en `.claude/context/` (y la skill `noteflow-features`) está actualizada con los nuevos cambios que se suben (solamente en caso apropiado de ser un cambio a la altura de ser añadido a la documentación).
+- Antes de hacer push a `main` revisar que la documentación en `.agents/context/` (y la skill `noteflow-features`) está actualizada con los nuevos cambios que se suben (solamente en caso apropiado de ser un cambio a la altura de ser añadido a la documentación).
 - Los mensajes de commits deben estar escritos en inglés.
 
 > Al hacer push a `main` puede aparecer `Bypassed rule violations for refs/heads/main: Changes
@@ -336,7 +336,7 @@ node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|a
 > **Deps nativas de la IA:** los binarios (`better-sqlite3`, `onnxruntime-node`, `sqlite-vec`) no
 > pueden ir dentro del `.asar`, de ahí `asarUnpack`. Y `package.json` lleva
 > `"postinstall": "electron-builder install-app-deps"` para recompilarlos al ABI de Electron tras
-> cada install. Ver el índice semántico en `.claude/context/ai.md`.
+> cada install. Ver el índice semántico en `.agents/context/ai.md`.
 
 > **Nota (electron-builder 26+):** las props del `.desktop` de Linux van dentro de
 > `desktop.entry`, NO directamente en `desktop`. Error conocido que rompió el release en v1.2.3.
@@ -349,7 +349,7 @@ Pages vía Actions (no se sirve la carpeta en crudo). URL: https://yagoid.github
 
 Todo lo demás (arquitectura del sitio, páginas `/cli` `/ai` `/features`, inventario de
 contenido ↔ fuente de verdad, gotchas de base path/hreflang/redirects, checklist de sincronización
-al cambiar la app) está en **`.claude/context/web.md`** — abrirlo antes de tocar la web o al cerrar
+al cambiar la app) está en **`.agents/context/web.md`** — abrirlo antes de tocar la web o al cerrar
 una feature que la web documente.
 
 ## Tareas frecuentes

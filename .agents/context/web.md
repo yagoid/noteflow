@@ -197,7 +197,7 @@ y verifica", "ofrécete a activar el sync") — la web solo enlaza a la skill. A
 - **Si cambia el CLI** (`cli/noteflow.js` + su `noteflow help`): reflejar comandos/flags nuevos en
   `data/cli.ts` y la prosa afectada. El badge de versión del hero también vive en el dict.
 
-### `/ai` — fuente de verdad: **el código de `electron/ai/` + `electron/main.ts`** (y `.claude/context/ai.md`)
+### `/ai` — fuente de verdad: **el código de `electron/ai/` + `electron/main.ts`** (y `.agents/context/ai.md`)
 Anclas: `#providers` `#embeddings` `#relations` `#rag` `#profile` `#agent` `#privacy`.
 
 | Sección | Documenta | Sincronizar si cambia |
@@ -231,7 +231,7 @@ Anclas: `#organize` `#templates` `#sticky` `#links` `#shortcuts` `#views` `#temp
 | `#ai-hidden` | Toggle Hide from AI (enlaza a `/ai#privacy`) | skill |
 | `#personalize` | **14 temas (11 dark + 3 light)** con swatches de valores reales, fuentes, ancho readable, índice flotante del editor | `src/lib/themes.ts` (¡los swatches llevan colores literales!) |
 
-### `/pricing` — fuente de verdad: **`.claude/context/monetization.md`** (§§ visión / 3 / 4)
+### `/pricing` — fuente de verdad: **`.agents/context/monetization.md`** (§§ visión / 3 / 4)
 Anclas: `#free` `#plans` `#ai` `#cloud` `#compare` `#privacy`. Accent **pink**. Mensaje central:
 todo lo esencial es gratis y lo seguirá siendo; los planes compran comodidad, no capacidad (ambas
 capacidades se autogestionan gratis: IA con Ollama/key propia, nube con GitHub Sync). Desde

@@ -1023,7 +1023,8 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   `App`) va memoizado, así los cambios de hover/foco/medición del shell no re-renderizan la lista. Fijado = un *spacer* en el flujo reserva el
   ancho (transición de `width` 220 ms, igual que antes) y el `aside` va encima a altura completa;
   flotante = el spacer pasa a 0 y el mismo `aside` se convierte en panel (`sidebarWidth` de ancho,
-  `left` 8 px, borde/sombra tipo TOC, `z-index` 40, entrada opacity + translate-x 150 ms). El panel
+  **toda la altura de la fila** con un inset de 8 px a izquierda/arriba/abajo (`PANEL_INSET`), borde
+  redondeado/sombra tipo TOC, `z-index` 40, entrada opacity + translate-x 150 ms). El panel
   es **hermano** de `<main>`, no hijo: así los drops dentro del sidebar no burbujean al handler de
   "soltar en el editor → split" de `main`.
 - **Interruptor.** El botón `PanelLeftClose`/`PanelLeftOpen` junto al buscador es un switch
@@ -1035,9 +1036,11 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
 - **Persistencia:** `settings.json → uiState.sidebarMode` (`'pinned' | 'floating'`, local, no
   sincroniza). Arranca fijado hasta que llega `getUiState`; las transiciones del shell están
   desactivadas hasta entonces (`sidebarAnimate`) para que un arranque flotante no reproduzca el plegado.
-- **Posición vertical medida.** Panel y mini-vista ocupan solo la **zona de contenido** del pane más a
-  la izquierda: su top/bottom salen del **ancla de contenido** visible más a la izquierda
-  (`pickSidebarAnchor` + `floatingSidebarBounds`, inset 12 px como el TOC, altura mínima 240 px).
+- **Posición vertical medida (solo la mini-vista).** La franja de la mini-vista ocupa solo la **zona de
+  contenido** del pane más a la izquierda: su top/bottom salen del **ancla de contenido** visible más a
+  la izquierda (`pickSidebarAnchor` + `floatingSidebarBounds`, inset 12 px como el TOC, altura mínima
+  240 px). El **panel no usa esa medición**: abierto cubre toda la fila de contenido (bajo la TitleBar,
+  la misma zona que el sidebar fijado), tapando también pestañas/título/toolbar del pane izquierdo.
   Anclas (`data-sidebar-anchor` + callback ref estable `sidebarAnchorRef`): el wrapper del scroller de
   `Editor` (debajo de la toolbar → recoge su alto variable), el textarea raw de `NoteEditor` y el
   cuerpo con scroll de `GroupOverview`/`NoteOverview`/`AllContentOverview` (debajo de su cabecera).
@@ -1073,9 +1076,10 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   enfocable): `Ctrl+Shift+F` (`noteflow:focus-search`) enfoca el buscador aunque esté cerrado y el
   foco lo abre; Tab desde fuera también. Abierto usa `transform: none` (no `translateX(0)`): un
   ancestro transformado sería el *containing block* de los menús/modales `fixed` del sidebar.
-- **Scroll de una pieza.** En flotante (`pinned=false`) el scroller es la raíz del `Sidebar` (buscador,
-  botones, lista y footer se desplazan juntos); fijado, solo la lista (`notes-list-scroll`) hace scroll y
-  la cabecera queda fija. Al cambiar de modo el scroll vuelve arriba (cambia el elemento que scrollea).
+- **Scroll solo de la lista.** En ambos modos solo la lista (`notes-list-scroll`) hace scroll; buscador,
+  botones de nueva nota/grupo y footer quedan fijos. La única diferencia visual del flotante en `Sidebar`
+  (`pinned=false`) es que no lleva `border-r` (el `aside` flotante dibuja su propio borde). Como el
+  elemento que scrollea es el mismo, el scroll de la lista se conserva al cambiar de modo.
 - **Mini-vista.** Sin texto, una fila por fila real del sidebar, en el mismo orden
   (`buildMiniSidebarRows`, que comparte con `Sidebar` `orderFavorites`/`isSidebarGroupShown`/
   `isSidebarFolderShown` → mismos filtros, archivados y colapsados): nota = rectángulo `text` muy
@@ -1843,7 +1847,7 @@ edición), bumpea `updated:` y hace `syncPushNoteFiles` de `note.md` + todas las
 detalle de cada comando vive en **`noteflow help <comando>`** (`cmdHelp`).
 
 **Criterio de la skill `cli/noteflow-cli/SKILL.md` (~270 líneas, desde 2026-11).** La lee un agente
-cualquiera en el equipo de un usuario final, sin el repo ni `.claude/context/` (la app la copia sola
+cualquiera en el equipo de un usuario final, sin el repo ni `.agents/context/` (la app la copia sola
 a los dirs de skills de los agentes, ver "Auto-instalación de la skill" abajo). Recoge **solo lo que el CLI no avisa por sí solo** —fallos silenciosos (sync
 con exit 0, `set` reemplaza, truncado de `noteflow.cmd`, `touch` obligatorio y que borra `.md`
 sueltos, app abierta pisando grupos/carpetas, `--force`, `add --title` parcial…), modelo mental,

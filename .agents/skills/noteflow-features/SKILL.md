@@ -6,7 +6,7 @@ description: Funcionalidades, diseño de UI y experiencia de usuario de NoteFlow
 # NoteFlow — Funcionalidades y Diseño
 
 > **Mantenimiento:** al implementar una feature importante, actualizar esta skill **y** la
-> documentación de `.claude/context/` (arquitectura/IPC/release — ver el mapa en `CLAUDE.md`). Si
+> documentación de `.agents/context/` (arquitectura/IPC/release — ver el mapa en `AGENTS.md`). Si
 > toca el CLI, también `cli/noteflow-cli/SKILL.md`. La fuente de verdad de los atajos es
 > `src/components/Settings/ShortcutsPanel.tsx`.
 >
@@ -74,11 +74,13 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
   línea guía), carpetas = cuadradito contorneado, cabeceras (favorites/groups/notes) = línea fina. Se
   hace más visible al pasar el ratón. Con muchas notas muestra una ventana centrada en la nota activa,
   como un minimapa. El texto del editor deja un pequeño margen izquierdo para no quedar debajo.
-- **Panel flotante**: es el sidebar completo (búsqueda, botones, lista, pie), mismo ancho, con borde y
-  sombra; entra deslizando desde la izquierda. Verticalmente cubre **solo la zona de contenido**:
-  empieza donde empieza el texto del panel más a la izquierda (bajo pestañas, título y toolbar, o bajo
-  la cabecera del pane en el split, o bajo la cabecera de las vistas de grupo / nota / all content) y
-  acaba en su borde inferior.
+- **Panel flotante**: es el sidebar completo (búsqueda, botones, lista, pie), mismo ancho, con borde
+  redondeado y sombra; entra deslizando desde la izquierda. Verticalmente ocupa **toda la altura** bajo
+  la barra de título (la misma zona que el sidebar fijado), separado un poco de los bordes para que se
+  vea flotante. Como en el fijado, la cabecera (búsqueda, botones de nueva nota/grupo) y el pie quedan
+  fijos y solo la lista de notas hace scroll. La mini-vista, en cambio, sigue alineada con el texto del
+  panel más a la izquierda (bajo pestañas, título y toolbar, o bajo la cabecera del pane en el split, o
+  bajo la cabecera de las vistas de grupo / nota / all content).
 - **Abre** al dejar el ratón sobre la mini-vista (~120 ms; no salta si se está seleccionando texto con
   el botón pulsado) o con un click en ella; **cierra** ~200 ms después de salir. Se queda abierto
   mientras haya foco de escritura dentro (búsqueda, renombrar, nuevo grupo/carpeta), un menú
@@ -647,7 +649,7 @@ En ambos modos el `.md` de la sección guarda markdown (el editor serializa con 
   subítems, lo anida **detrás** de ellos (antes su texto acababa encima de los subítems al reabrir).
 - Limitación del formato: una **línea en blanco** dentro de un ítem o párrafo (dos Shift+Enter
   seguidos con texto detrás) se guarda igual que dos bloques y al reabrir se parte en dos.
-  Detalle y lista completa de ambigüedades en `.claude/context/patterns.md`.
+  Detalle y lista completa de ambigüedades en `.agents/context/patterns.md`.
 
 ### Autocierre de paréntesis (modo markdown)
 - Escribir `(` inserta `()` con el cursor en medio; con texto seleccionado (en un mismo párrafo)
@@ -821,7 +823,7 @@ derivado reconstruible desde los `.md`.
 - **Reindexar:** botón "Reindex all notes" en Settings → General (debajo del toggle "Local AI", muestra progreso); el índice también
   se mantiene al día solo al guardar (incremental, debounce).
 - Roadmap: este índice alimenta la **vista cerebro** (Fase 2 ✅) y el **chat RAG** (Fase 3 ✅, ver
-  "Panel de IA" más abajo). Un índice, tres consumidores. Detalle técnico en `.claude/context/ai.md`.
+  "Panel de IA" más abajo). Un índice, tres consumidores. Detalle técnico en `.agents/context/ai.md`.
 
 ---
 
@@ -1263,7 +1265,7 @@ Settings → Startup:
   (AppImage). Dentro de la app, el botón del TitleBar muestra `%` de descarga → spinner
   "Installing…" hasta que la ventana se cierra.
 - Descargas restringidas a hosts oficiales de GitHub (allowlist de seguridad).
-- Detalle técnico (elección del asset, allowlist, instalación por plataforma): `.claude/context/patterns.md`
+- Detalle técnico (elección del asset, allowlist, instalación por plataforma): `.agents/context/patterns.md`
   § "Auto-update in-app".
 
 ---
@@ -1373,7 +1375,7 @@ Flujo del panel según estado:
   pausa GitHub Sync **sin aviso previo**.
 
 Detalle técnico (jerarquía de claves, modos managed/e2ee, motor de sync):
-`.claude/context/monetization.md` § 4.
+`.agents/context/monetization.md` § 4.
 
 ---
 
@@ -1432,7 +1434,7 @@ nadie confunda iniciar sesión con activar la sincronización: el texto sin sesi
 users:". Cuenta opcional para las suscripciones (**NoteFlow AI** — €5.99/mes · €49.99/año; **NoteFlow
 Cloud**, con panel en Settings → Sync — €3.99/mes · €39.99/año; **NoteFlow Bundle**, AI + Cloud
 juntos — €7.99/mes · €79.99/año). Los tres son comprables: las tres URLs de checkout están
-pobladas en la build (precios en `.claude/context/monetization.md` § visión, cifras de display en
+pobladas en la build (precios en `.agents/context/monetization.md` § visión, cifras de display en
 `src/lib/subscriptionPlans.ts`). Todo lo gratuito sigue funcionando sin cuenta.
 
 - **Sign-in sin contraseña:** email → "Send code" → código de acceso por email (8 dígitos) → "Verify &
@@ -1473,7 +1475,7 @@ pobladas en la build (precios en `.claude/context/monetization.md` § visión, c
 - **Builds sin backend configurado** (`cloudConfig.ts` vacío — no es el caso de las builds
   actuales): el panel solo muestra "NoteFlow account services aren't available in this build yet."
 - Privacidad: la sesión (refresh token cifrado con `safeStorage`) vive en el proceso main y nunca
-  llega al renderer; detalle técnico en `.claude/context/monetization.md`.
+  llega al renderer; detalle técnico en `.agents/context/monetization.md`.
 
 ---
 
@@ -1502,7 +1504,7 @@ ids/dirs frescos → sin conflicto, y muestran el grupo/folder destino):
 Detalles de los imports externos: el contenido entra en **modo markdown** (no en modo texto); las notas **sin
 contenido se omiten** (las filas de BD / páginas título-solo de Notion no ensucian); subcarpetas →
 grupos (1er nivel) + folders (anidados, aplanados a 2 niveles); imágenes y `.csv` de Notion no se
-importan (v1). Implementación en `.claude/context/patterns.md` (importadores + IPC).
+importan (v1). Implementación en `.agents/context/patterns.md` (importadores + IPC).
 
 ---
 

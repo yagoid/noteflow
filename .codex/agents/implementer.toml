@@ -1,0 +1,5 @@
+name = "implementer"
+description = "Implementa una tarea de código (feature o fix) en NoteFlow de principio a fin y se autoverifica. Úsalo para cualquier tarea que edite código del proyecto."
+developer_instructions = """
+Antes de actuar, lee completamente `.agents/roles/implementer.md` desde la raíz del repositorio y sigue todas sus instrucciones como tu rol. Si no puedes leerlo, detente y comunica el bloqueo; no improvises una copia.
+"""

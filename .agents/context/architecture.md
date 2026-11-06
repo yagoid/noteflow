@@ -7,8 +7,8 @@
 - **Directorio local:** raíz del repo clonado (la ruta absoluta varía por máquina).
 - **Versión actual:** ver `package.json` (`version`). Convención `vX.Y.Z`.
 - **Licencia:** ver el campo `license` de `package.json`.
-- **Documentación del proyecto:** vive en `.claude/context/*.md` (este directorio); el **índice/mapa**
-  está en el `CLAUDE.md` de la raíz, que se carga en cada sesión.
+- **Documentación del proyecto:** vive en `.agents/context/*.md` (este directorio); el **índice/mapa**
+  está en el `AGENTS.md` de la raíz, que se carga en cada sesión.
 - **Proyectos/skills hermanas:**
   - `noteflow-features` (skill) → funcionalidades, UI, UX, atajos (perspectiva de producto/usuario).
   - `noteflow-cli` (skill) → guía del CLI companion para agentes (lo que el CLI no avisa); la referencia completa es `noteflow help <comando>`.

@@ -6,7 +6,7 @@ Subsistema de IA **100% local/offline** que indexa cada **sección** de cada not
 se borra, se regenera). Plan maestro "El Cerebro": Fase 1 (índice + panel "Related notes", hecha)
 → **Fase 2 (vista cerebro/grafo, hecha)** → **Fase 3 (panel IA: chat RAG + segundo cerebro, hecha;
 falta verificar en app real)** → **Fase 4 (nube/monetización — ver
-`.claude/context/monetization.md`)**. **Principio: un índice, tres
+`.agents/context/monetization.md`)**. **Principio: un índice, tres
 consumidores** (related ✅, grafo ✅, chat ✅).
 
 - **3 procesos:** renderer (`aiStore` + `AiPanel/RelatedView`) → main (`aiIndex`, lifecycle +
@@ -133,7 +133,7 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   guarda su propia key/modelo/baseUrl** (`aiLlm.byPreset`) → cambiar de proveedor no mezcla
   credenciales. `baseUrl` editable salvo Anthropic y NoteFlow AI. El preset `noteflow` no usa API
   key: su credencial es un access token fresco de la cuenta por request (`resolveConfigAsync`;
-  detalle en `.claude/context/monetization.md` § 3). `presetOf()` con id desconocido cae en
+  detalle en `.agents/context/monetization.md` § 3). `presetOf()` con id desconocido cae en
   `anthropic`, no en `PRESETS[0]`. **Modelo efectivo** (`effectiveModel`, `llm/index.ts`): el
   guardado o, si no hay, `suggestedModels[0]`; en los presets con **catálogo curado** (los que
   llevan `modelMeta` — hoy solo `noteflow`, cuya lista rota y cuyo proxy rechaza lo que no esté en
@@ -146,7 +146,7 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   sirve en `GET <ai-proxy>/models` en formato lista OpenAI **con metadatos por entrada** (`cost_index`,
   `images`, `recommended` — `GET /models` nunca expone los precios). `cost_index` = cuántas veces
   más rápido que el modelo recomendado gasta un mensaje típico la asignación mensual (entero ≥ 1; lo
-  calcula el proxy — ver `.claude/context/monetization.md` § 3 "Cuota por coste real"). Main lo descarga (`llm.fetchManagedCatalog`, con el access token de la cuenta) en
+  calcula el proxy — ver `.agents/context/monetization.md` § 3 "Cuota por coste real"). Main lo descarga (`llm.fetchManagedCatalog`, con el access token de la cuenta) en
   segundo plano cada vez que la cuenta cambia de estado con el plan usable (`handleAccountStatusChanged`
   con `isManagedAiUsable`: cubre el arranque —el refresh de entitlements diferido de `initAccount`
   emite un cambio de estado—, el inicio de sesión y la llegada de entitlements) y en cada lectura de
@@ -364,7 +364,7 @@ Python…) quedan literales. **Borrador persistente:** las
   `content` array con `image_url`). El mock usa `res.on('close')`
   para limpiar el `setInterval` (con `req.on('close')` Node moderno lo mataba al consumir el body).
 - **Pendiente:** verificación manual en app real (necesita key/Ollama); monetización/nube (Fase 4,
-  diseño en `.claude/context/monetization.md`).
+  diseño en `.agents/context/monetization.md`).
 
 ### Chat en el editor (sidebar flotante + ventana despegada)
 El mismo chat del cerebro, accesible desde el editor. Piezas: `AiPanel/AiChatButton.tsx` (botón),
