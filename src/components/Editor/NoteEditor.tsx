@@ -1221,7 +1221,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
               </button>
               {sectionMenuOpen && (
                 <div
-                  className="absolute right-0 top-full mt-1 bg-surface-1 border border-border rounded shadow-lg z-50 py-1 min-w-[180px]"
+                  className="absolute right-0 top-full mt-1 bg-surface-1 border border-border rounded shadow-lg z-50 py-1 w-56 whitespace-nowrap"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button

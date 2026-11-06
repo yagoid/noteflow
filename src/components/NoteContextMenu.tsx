@@ -235,10 +235,10 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
   const canDeleteSection = !!currentSection && note.sections.length > 1
   // Locked encrypted notes have no readable content to export or copy.
   const isLocked = !!note.encryption && !sessionPasswords[note.id]
-  // The sticky needs readable content; "Open alongside" (note menu, main window only)
-  // doesn't depend on the encryption state — the pane shows its own unlock prompt.
+  // The sticky needs readable content; "Open alongside" (main window only) doesn't
+  // depend on the encryption state — the pane shows its own unlock prompt.
   const canOpenSticky = !isLocked
-  const canOpenAlongside = !currentSection && !standalone
+  const canOpenAlongside = !standalone
   // Section the note opens on when clicked (same order as NoteEditor: last active, else first).
   const remembered = activeSectionByNote[note.id]
   const noteOpenSectionId = remembered && note.sections.some((s) => s.id === remembered)
@@ -352,17 +352,6 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
             >
               <Pencil size={12} />
               {t.noteMenu.renameSection}
-            </button>
-          )}
-          {/* Opens a pane of its own on this section — also when the note is already open
-              in another pane (two sections of one note side by side). */}
-          {!standalone && (
-            <button
-              onClick={() => { openNoteInSplit(note.id, currentSection.id); onClose() }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              <Columns2 size={12} />
-              {t.noteMenu.openSectionAlongside}
             </button>
           )}
           {!note.encryption && (
@@ -657,7 +646,7 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
           )}
           {canOpenAlongside && (
             <button
-              onClick={() => { openNoteInSplit(note.id); onClose() }}
+              onClick={() => { openNoteInSplit(note.id, currentSection?.id); onClose() }}
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <Columns2 size={12} />

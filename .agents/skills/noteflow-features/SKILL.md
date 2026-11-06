@@ -232,7 +232,7 @@ Iconos del TitleBar:
 - `Ctrl+Click` sobre una nota, o "Open alongside" en el menú contextual, abre una **segunda nota
   lado a lado** en el área del editor. Si la nota ya está en un panel, lo enfoca (no la duplica).
 - **Dos secciones de la MISMA nota a la vez:** `Ctrl/Cmd+Click` sobre un **tag de sección** (sidebar)
-  o "Open section alongside" en el menú contextual de la sección abre un **panel nuevo en esa
+  o "Open alongside" en el menú contextual de la sección abre un **panel nuevo en esa
   sección**, aunque la nota ya esté abierta en otro panel. Si ya hay un panel exactamente en esa
   nota+sección, lo enfoca. Cada panel tiene sus pestañas y recuerda su propia sección; se editan a
   la vez sin pisarse (cada guardado solo toca la sección que edita ese panel).
@@ -530,7 +530,7 @@ salientes de un archivador (sin scroll horizontal):
   "Menú contextual" más abajo), con además **Rename section**. Duplicar y borrar actúan sobre el
   editor: la copia queda activa en ese panel y el borrado ofrece **Undo**. Se cierra con click fuera o
   Esc; al cerrarlo sin que nada se lleve el foco, el foco vuelve al editor. En una ventana de sección
-  se ocultan `Note overview` y `Open section alongside`.
+  se ocultan `Note overview` y `Open alongside`.
 - **Duplicar**: `Duplicate section` (click derecho en el tab o en un tag de sección)
   crea una copia con id nuevo, mismo contenido, mismo modo (texto/markdown) y mismo flag "oculta a la IA",
   llamada `"<nombre> (copy)"` / `"<nombre> (copia)"` según el idioma de la UI, **justo a la derecha** de
@@ -1142,12 +1142,12 @@ grupo/carpeta) y aparecen las de sección:
   ⊞ Note overview                         (no en una ventana de sección)
   ─────────────
   ✎ Rename section                        ← solo en el tab del editor: renombrado inline en el tab
-  ▥ Open section alongside                ← panel nuevo en esa sección (no en una ventana de sección)
   👁 Hide from AI / Show to AI            (no en notas cifradas)
   ⧉ Duplicate section                     ← copia a la derecha y navega a ella
   🎨 Section color
   ─────────────
   ⧉ Open as Sticky Note                   ← abre esa sección
+  ▥ Open alongside                        ← panel nuevo en esa sección (no en una ventana de sección)
   ⧉ Open in New Window                    ← ventana solo-editor en esa sección (no en notas cifradas)
   ─────────────
   🗑 Delete section  (o Delete note si es la única sección)   ← rojo
