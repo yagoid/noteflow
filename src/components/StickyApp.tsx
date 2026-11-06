@@ -85,7 +85,9 @@ function StickyTitleBar({ noteTitle, sectionName, color, onFold, isPinned, onTog
   )
 }
 
-// Compact folded pill shown when the sticky note is collapsed
+// Compact folded pill shown when the sticky note is collapsed. Fills the whole
+// window (h-screen) instead of a fixed 32px: on Windows the OS clamps the folded
+// window to ~39px tall, and a fixed height would leave the window background showing.
 function FoldedPill({ noteTitle, sectionName, color, onUnfold }: {
   noteTitle: string
   sectionName?: string
@@ -95,7 +97,7 @@ function FoldedPill({ noteTitle, sectionName, color, onUnfold }: {
   const t = useT()
   return (
     <div
-      className="h-8 flex items-center justify-between px-2 gap-1 cursor-default select-none bg-surface-0 rounded-lg overflow-hidden border border-border/40"
+      className="h-screen flex items-center justify-between px-2 gap-1 cursor-default select-none bg-surface-0 rounded-lg overflow-hidden border border-border/40"
       style={{
         WebkitAppRegion: 'drag',
         borderLeftColor: `rgb(${colorChannels(color)})`,

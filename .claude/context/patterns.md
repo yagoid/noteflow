@@ -1446,6 +1446,15 @@ componerse bien tras las actualizaciones de Windows 11 (24H2/25H2) y la ventana 
 invisible; como en Windows el redondeo ya lo aporta `setShape()` (recorte de región DWM), la
 transparencia era redundante y se desactiva. Ver el comentario en `createStickyWindow()`.
 
+**Píldora plegada y radio de la región:** el fold pide `FOLDED_W×FOLDED_H` (220×32), pero en
+Windows una ventana frameless **opaca** no puede medir menos de **39px** de alto (el SO recorta
+el `setSize`; solo `transparent: true` permite 32). Por eso `FoldedPill` (`StickyApp.tsx`) usa
+`h-screen` y no una altura fija: rellena la ventana mida lo que mida, y no asoma el fondo
+`#1e1e1e` por debajo. La región de `setShape()` usa siempre radio **8px** (`STICKY_RADIUS`,
+igual que el `rounded-lg` del CSS, también en plegado — no hay radio "media altura" de píldora)
+y se calcula con el **tamaño real** (`win.getSize()`) en cada tick de `animateStickyWindow`,
+no con el solicitado, para que el recorte DWM y el borde CSS coincidan.
+
 ### Vista dividida por paneles (`lib/paneUtils.ts` + `notesStore`)
 El área del editor muestra uno o más **paneles** `{paneId, noteId, sectionId?}` (`openPanes` +
 `activePaneId`; `activeNoteId` = nota del panel activo y se deriva en cada cambio de layout con

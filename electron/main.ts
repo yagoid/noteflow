@@ -929,13 +929,18 @@ function roundedRectRegion(w: number, h: number, r: number): { x: number; y: num
   return rects
 }
 
+// Corner radius of the sticky window's DWM region. Must match the CSS `rounded-lg`
+// (8px) used by both the expanded sticky and the folded pill (StickyApp.tsx), so the
+// clip region and the CSS border line up. Applies to the folded state too: on Windows
+// an opaque frameless window can't be shorter than ~39px, so the folded window is
+// taller than the requested FOLDED_H and the pill fills it (h-screen).
+const STICKY_RADIUS = 8
+
 function applyStickyShape(win: BrowserWindow, w?: number, h?: number) {
   // win.setShape() is Windows-only (DWM); no-op on Linux/macOS
   if (process.platform !== 'win32') return
   const [ww, hh] = w !== undefined ? [w, h!] : win.getSize()
-  // Use half-height for pills (folded state ≤40px), otherwise 8px (rounded-lg)
-  const r = hh <= 40 ? Math.floor(hh / 2) : 8
-  win.setShape(roundedRectRegion(ww, hh, r))
+  win.setShape(roundedRectRegion(ww, hh, STICKY_RADIUS))
 }
 
 // Stores the pre-fold bounds per window so unfold can restore them exactly
@@ -991,8 +996,6 @@ function animateStickyWindow(
   onComplete?: () => void
 ) {
   const startTime = Date.now()
-  const fromR = from.height <= 40 ? Math.floor(from.height / 2) : 8
-  const toR   = to.height   <= 40 ? Math.floor(to.height   / 2) : 8
   const tick = setInterval(() => {
     if (win.isDestroyed()) { clearInterval(tick); return }
     const t = Math.min((Date.now() - startTime) / duration, 1)
@@ -1001,11 +1004,12 @@ function animateStickyWindow(
     const y = Math.round(from.y + (to.y - from.y) * e)
     const w = Math.round(from.width  + (to.width  - from.width)  * e)
     const h = Math.round(from.height + (to.height - from.height) * e)
-    const r = Math.round(fromR + (toR - fromR) * e)
     win.setMinimumSize(1, 1)
     win.setSize(w, h)
     win.setPosition(x, y)
-    if (process.platform === 'win32') win.setShape(roundedRectRegion(w, h, r))
+    // Shape from the real size: the OS may clamp the request (Windows enforces a
+    // ~39px minimum height on opaque frameless windows, so 32 becomes 39).
+    applyStickyShape(win)
     if (t >= 1) { clearInterval(tick); onComplete?.() }
   }, 16)
 }
