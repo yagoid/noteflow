@@ -1195,6 +1195,36 @@ function withKeptLocalSections(chosen: AnchorMergeResult, m: AnchorMergeInput): 
   return { content: dumpAnchor({ ...fm.data, sections: [...sections, ...extras], updated: m.nowIso }, fm.body), source: 'merged' }
 }
 
+/**
+ * `anchor` (a note.md) with the `sections` entries of `from` whose file is in
+ * `files` and that `anchor` does not list appended (`updated` = nowIso; unchanged
+ * when none) — or null when either anchor is
+ * unreadable or encrypted (the caller must not guess). Used by the GitHub
+ * merge so a section whose file stays on disk never ends unlisted (an orphan
+ * the next folder write deletes). Mirrored in cli/noteflow.js.
+ */
+export function relistAnchorSections(
+  anchor: string,
+  from: string,
+  files: ReadonlySet<string>,
+  nowIso: string,
+): string | null {
+  const fm = loadAnchorFrontmatter(anchor)
+  const src = loadAnchorFrontmatter(from)
+  if (!fm || !src || fm.data.encryption || src.data.encryption) return null
+  const sections: unknown[] = Array.isArray(fm.data.sections) ? fm.data.sections : []
+  const listed = new Set(sections.map(sectionFileOf).filter((f): f is string => f !== null))
+  const extras: unknown[] = []
+  for (const sec of Array.isArray(src.data.sections) ? src.data.sections : []) {
+    const file = sectionFileOf(sec)
+    if (file === null || listed.has(file) || !files.has(file)) continue
+    listed.add(file)
+    extras.push(sec)
+  }
+  if (extras.length === 0) return anchor
+  return dumpAnchor({ ...fm.data, sections: [...sections, ...extras], updated: nowIso }, fm.body)
+}
+
 // ── Line merge of a section both sides changed ───────────────────────────────
 // A section file changed here AND on the server since its base used to leave
 // the remote in the note and the local version in a separate conflict copy,

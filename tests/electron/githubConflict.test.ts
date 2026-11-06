@@ -21,6 +21,7 @@ import {
   remoteDirChangesSinceBase,
   planGithubDirConflict,
   shouldRefreshSections,
+  sectionDeleteWaitsForAnchor,
 } from '../../electron/syncState'
 import { planGithubDirMerge, type GithubMergeFile } from '../../electron/githubMerge'
 import { gitBlobSha } from '../../electron/mirrorPlan'
@@ -371,5 +372,35 @@ describe('planGithubDirMerge', () => {
     const base = folder(T1, { s1: 'a' })
     const noRemoteAnchor = { [`${DIR}/s1.md`]: 'x' }
     expect(planGithubDirMerge({ dir: DIR, files: filesOf(base, noRemoteAnchor, folder(T3, { s1: 'y' })), nowIso: NOW })).toBeNull()
+  })
+
+  it('a section re-created on GitHub by the own PUT (deleted there, edited here) stays listed — never an orphan', () => {
+    const base = folder(T1, { s1: 'a', s2: 'b' })
+    const local = folder(T3, { s1: 'a', s2: 'b edited' })
+    // GitHub: the other device's anchor without s2 + s2.md as this device just PUT it (base = that blob).
+    const remote = { ...folder(T2, { s1: 'a' }), [`${DIR}/s2.md`]: 'b edited' }
+    const files = filesOf(base, remote, local)
+    const s2 = files.find((f) => f.path === `${DIR}/s2.md`)!
+    s2.base = gitBlobSha('b edited')
+    s2.baseContent = 'b edited'
+    const m = planGithubDirMerge({ dir: DIR, files, nowIso: NOW })!
+    expect(m.final[`${DIR}/s2.md`]).toBe('b edited')
+    expect(m.final[`${DIR}/note.md`]).toContain('file: s2.md')
+    expect(m.writes.at(-1)).toEqual({ relPath: `${DIR}/note.md`, content: m.final[`${DIR}/note.md`] })
+    expect(m.copySections).toEqual([])
+  })
+})
+
+describe('sectionDeleteWaitsForAnchor (journal drain)', () => {
+  it('a section delete waits while its note.md has an upsert journaled (pending or stale)', () => {
+    const state = emptySyncState()
+    journalRecord(state, `${DIR}/s2.md`, 'delete', NOW)
+    expect(sectionDeleteWaitsForAnchor(state, `${DIR}/s2.md`)).toBe(false)
+    journalRecord(state, `${DIR}/note.md`, 'upsert', NOW)
+    expect(sectionDeleteWaitsForAnchor(state, `${DIR}/s2.md`)).toBe(true)
+    journalMarkStale(state, `${DIR}/note.md`, 'upsert')
+    expect(sectionDeleteWaitsForAnchor(state, `${DIR}/s2.md`)).toBe(true)
+    expect(sectionDeleteWaitsForAnchor(state, `${DIR}/note.md`)).toBe(false)
+    expect(sectionDeleteWaitsForAnchor(state, 'groups.json')).toBe(false)
   })
 })

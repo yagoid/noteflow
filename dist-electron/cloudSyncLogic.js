@@ -56,6 +56,7 @@ exports.buildConflictCopy = buildConflictCopy;
 exports.hashForBase = hashForBase;
 exports.planFileReconcile = planFileReconcile;
 exports.mergeAnchors = mergeAnchors;
+exports.relistAnchorSections = relistAnchorSections;
 exports.sectionConflictLabels = sectionConflictLabels;
 exports.mergeSectionText = mergeSectionText;
 exports.planThreeWayDir = planThreeWayDir;
@@ -1004,6 +1005,33 @@ function withKeptLocalSections(chosen, m) {
     if (extras.length === 0)
         return chosen;
     return { content: dumpAnchor({ ...fm.data, sections: [...sections, ...extras], updated: m.nowIso }, fm.body), source: 'merged' };
+}
+/**
+ * `anchor` (a note.md) with the `sections` entries of `from` whose file is in
+ * `files` and that `anchor` does not list appended (`updated` = nowIso; unchanged
+ * when none) — or null when either anchor is
+ * unreadable or encrypted (the caller must not guess). Used by the GitHub
+ * merge so a section whose file stays on disk never ends unlisted (an orphan
+ * the next folder write deletes). Mirrored in cli/noteflow.js.
+ */
+function relistAnchorSections(anchor, from, files, nowIso) {
+    const fm = loadAnchorFrontmatter(anchor);
+    const src = loadAnchorFrontmatter(from);
+    if (!fm || !src || fm.data.encryption || src.data.encryption)
+        return null;
+    const sections = Array.isArray(fm.data.sections) ? fm.data.sections : [];
+    const listed = new Set(sections.map(sectionFileOf).filter((f) => f !== null));
+    const extras = [];
+    for (const sec of Array.isArray(src.data.sections) ? src.data.sections : []) {
+        const file = sectionFileOf(sec);
+        if (file === null || listed.has(file) || !files.has(file))
+            continue;
+        listed.add(file);
+        extras.push(sec);
+    }
+    if (extras.length === 0)
+        return anchor;
+    return dumpAnchor({ ...fm.data, sections: [...sections, ...extras], updated: nowIso }, fm.body);
 }
 exports.SECTION_CONFLICT_LABEL_TEMPLATES_EN = {
     local: '⚠️ Sync conflict ({time}) — version from {device}:',

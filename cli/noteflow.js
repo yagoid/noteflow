@@ -1049,6 +1049,32 @@ function withKeptLocalSections(chosen, m) {
   return { content: renderAnchorFm(blocks, fm.body), source: 'merged' }
 }
 
+/**
+ * Mirror of relistAnchorSections: `anchor` with the `sections` entries of
+ * `from` whose file is in `files` and that `anchor` does not list appended
+ * (`updated` = nowIso; unchanged when none) — null when either anchor is
+ * unreadable or encrypted.
+ */
+function relistAnchorSections(anchor, from, files, nowIso) {
+  const fm = parseAnchorFm(anchor)
+  const src = parseAnchorFm(from)
+  if (!fm || !src || fmEncrypted(fm) || fmEncrypted(src)) return null
+  const items = fmSectionItems(fm) || []
+  const listed = new Set(items.map(sectionItemFile).filter(f => f !== null))
+  const extras = []
+  for (const item of fmSectionItems(src) || []) {
+    const file = sectionItemFile(item)
+    if (file === null || listed.has(file) || !files.has(file)) continue
+    listed.add(file)
+    extras.push(item)
+  }
+  if (extras.length === 0) return anchor
+  const blocks = [...fm.blocks]
+  setFmBlock(blocks, 'sections', renderSectionItems([...items, ...extras]))
+  setFmBlock(blocks, 'updated', [`updated: ${JSON.stringify(nowIso)}`])
+  return renderAnchorFm(blocks, fm.body)
+}
+
 /** Mirror of planLegacySection: the historical per-section rule (no base). */
 function planLegacySection(row, local, pending, localUpdatedMs) {
   if (row.content === null) {
@@ -1547,8 +1573,23 @@ function planGithubDirMerge(o) {
   const removes = [...plan.removes, ...deletedRemotely.map(f => f.path)]
   for (const rel of removes) delete final[rel]
   for (const w of plan.writes) final[w.relPath] = w.content
+
+  // A section the local note.md lists whose file stays here must stay listed
+  // (e.g. deleted on GitHub, edited here and re-created there by this
+  // machine's own unconditional PUT before the anchor's merge: "unchanged",
+  // and GitHub's anchor does not list it). Unlisted, the next write deletes it.
+  let writes = plan.writes
+  const onDisk = new Set(Object.keys(final).filter(rel => rel !== anchorRel).map(rel => rel.slice(prefix.length)))
+  if (onDisk.size > 0) {
+    const relisted = relistAnchorSections(final[anchorRel], anchor.local, onDisk, o.nowIso)
+    if (relisted === null) return null // unreadable / encrypted: the conflict copy instead
+    if (relisted !== final[anchorRel]) {
+      final[anchorRel] = relisted
+      writes = [...writes.filter(w => w.relPath !== anchorRel), ...(relisted !== anchor.local ? [{ relPath: anchorRel, content: relisted }] : [])]
+    }
+  }
   return {
-    writes: plan.writes,
+    writes,
     removes,
     copySections: deletedRemotely.map(f => f.path.slice(prefix.length)),
     conflictMarkerSections: plan.conflictMarkerSections,
@@ -2727,23 +2768,39 @@ async function githubMergeConflictDir(token, sync, dir, bases, remote, localFile
   for (const w of merge.writes) fs.writeFileSync(path.join(NOTES_DIR, w.relPath), w.content, 'utf-8')
 
   // The remote blobs are the bases now (the merged files go up on top of them).
+  const anchorRel = `${prefix}${NOTE_MD}`
+  const prevAnchorBase = bases[anchorRel]
   for (const rel of Object.keys(bases)) if (rel.startsWith(prefix) && !remote[rel]) delete bases[rel]
   for (const [rel, f] of Object.entries(remote)) bases[rel] = f.sha
 
   let uploadFailed = false
-  const anchorRel = `${prefix}${NOTE_MD}`
+  let anchorFailed = false
   const ups = Object.entries(merge.final).filter(([rel, content]) => !remote[rel] || remote[rel].content !== content)
   ups.sort(([a], [b]) => (a === anchorRel ? 1 : b === anchorRel ? -1 : 0))
   for (const [rel, content] of ups) {
     try {
       // 'conflict' = GitHub moved again meanwhile: the next push merges again.
-      if ((await upsertRemoteFile(token, sync.owner, sync.repo, rel, content, bases)) === 'conflict') uploadFailed = true
-    } catch { uploadFailed = true }
+      if ((await upsertRemoteFile(token, sync.owner, sync.repo, rel, content, bases)) === 'conflict') {
+        uploadFailed = true
+        if (rel === anchorRel) anchorFailed = true
+      }
+    } catch {
+      uploadFailed = true
+      if (rel === anchorRel) anchorFailed = true
+    }
   }
-  // A remote file the merge left deleted here (a local deletion over an unchanged remote file).
-  for (const rel of Object.keys(remote)) {
-    if (rel in merge.final) continue
-    if ((await removeRemoteFile(token, sync.owner, sync.repo, rel, `delete: ${rel}`, bases)) === 'conflict') uploadFailed = true
+  // A remote file the merge left deleted here (a local deletion over an
+  // unchanged remote file) — only once the merged note.md landed: GitHub's
+  // note.md still lists it otherwise. Skipped: the anchor keeps its pre-merge
+  // base, so the next push finds it changed on GitHub again and re-merges
+  // (deleting it then) instead of a plain PUT that would leave it there.
+  const dropped = Object.keys(remote).filter(rel => !(rel in merge.final))
+  if (anchorFailed) {
+    if (dropped.length > 0 && prevAnchorBase !== undefined) bases[anchorRel] = prevAnchorBase
+  } else {
+    for (const rel of dropped) {
+      if ((await removeRemoteFile(token, sync.owner, sync.repo, rel, `delete: ${rel}`, bases)) === 'conflict') uploadFailed = true
+    }
   }
   if (copy) {
     for (const rel of copy.relPaths) {

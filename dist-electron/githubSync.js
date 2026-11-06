@@ -1135,12 +1135,19 @@ async function resolveRemoteDirConflict(token, owner, repo, notesDir, dir, remot
 function mergeGithubConflictDir(notesDir, dir, paths, remote, baseContents) {
     const state = getState();
     const prefix = `${dir}/`;
+    // A file that exists but can't be read (EBUSY from OneDrive / an antivirus…)
+    // must not pass for "deleted here" — the merge would unlist it and journal a
+    // remote delete. Not merged then: the historical path (conflict copy).
+    let unreadable = false;
     const files = paths.map((p) => {
         let local = null;
         try {
             local = fs_1.default.readFileSync(path_1.default.join(notesDir, p.path), 'utf-8');
         }
-        catch { /* absent locally */ }
+        catch (err) {
+            if (err?.code !== 'ENOENT')
+                unreadable = true;
+        }
         return {
             path: p.path,
             base: p.base,
@@ -1150,6 +1157,8 @@ function mergeGithubConflictDir(notesDir, dir, paths, remote, baseContents) {
             baseContent: baseContents.get(p.path) ?? null,
         };
     });
+    if (unreadable)
+        return null;
     let merge;
     try {
         merge = (0, githubMerge_1.planGithubDirMerge)({ dir, files, labels: conflictMarkerLabels(), nowIso: new Date().toISOString() });
@@ -2430,6 +2439,11 @@ async function retrySyncJournal(notesDir) {
             // A live debounce timer for this path will push fresher content shortly —
             // let it handle the upsert instead of racing it here.
             if (entry.op === 'upsert' && pushTimers.has(key))
+                continue;
+            // A section delete waits for its folder's note.md upsert (pending, or
+            // held back): GitHub's anchor may still list that section until it lands
+            // (e.g. the delete a conflict merge journals before its re-uploads).
+            if (entry.op === 'delete' && (0, syncState_1.sectionDeleteWaitsForAnchor)(state, key))
                 continue;
             const action = (0, syncState_1.resolveRetryAction)(entry.op, fs_1.default.existsSync(path_1.default.join(notesDir, key)));
             if (action === 'discard') {

@@ -42,6 +42,7 @@ class FakeGithub {
   blobs = new Map<string, string>() // every sha ever written → content
   calls: string[] = []
   failBlobs = false
+  failPuts = new Set<string>() // paths whose PUT answers 500
 
   put(rel: string, content: string) {
     this.files.set(rel, content)
@@ -71,6 +72,7 @@ class FakeGithub {
         return { status: 200, json: { sha: curSha, content: Buffer.from(cur).toString('base64') } }
       }
       if (method === 'PUT') {
+        if (this.failPuts.has(rel)) return { status: 500, json: { message: 'Server Error' } }
         if (body?.sha !== curSha) return { status: 409, json: { message: `${rel} does not match ${String(body?.sha)}` } }
         this.put(rel, Buffer.from(String(body?.content), 'base64').toString('utf-8'))
         return { status: 200, json: { content: { sha: gitBlobSha(this.files.get(rel)!) } } }
@@ -254,16 +256,36 @@ describe('CLI GitHub push of a note changed there since the last pull', () => {
     expect(readLocal(`${DIR}/s1.md`)).toBe('MILK\nflour\neggs')
   })
 
+  it('no remote delete while the merged note.md could not be uploaded (GitHub would still list the section)', async () => {
+    pcSave(note(T_PC, { s1: 'MILK\nflour\neggs', s2: 'call mum' }))
+    const files = cliSave(note(T_CLI, { s1: 'milk\nflour\neggs' })) // s2 removed here
+    gh.failPuts.add(ANCHOR)
+    await cli.syncPushNoteFiles(DIR, files)
+    expect(gh.files.get(`${DIR}/s2.md`)).toBe('call mum') // GitHub's note.md still lists it
+    expect(logs.some((l) => l.includes("could not be uploaded yet — run 'noteflow push'"))).toBe(true)
+    // The retry merges again and, once the anchor lands, deletes it.
+    gh.failPuts.clear()
+    await cli.cmdPush()
+    expect(gh.files.has(`${DIR}/s2.md`)).toBe(false)
+    expect(gh.files.get(ANCHOR)).toBe(readLocal(ANCHOR))
+    expect(gh.files.get(ANCHOR)).not.toContain('s2.md')
+  })
+
   it('a section deleted on GitHub, edited here and pushed with the note → the local edit is not lost', async () => {
     pcSave(note(T_PC, { s1: 'MILK\nflour\neggs' })) // s2 deleted on the PC
     const files = cliSave(note(T_CLI, { s1: 'milk\nflour\neggs\nbread', s2: 'call mum today' }))
     await cli.syncPushNoteFiles(DIR, files) // s2.md is absent on GitHub → plain PUT (like the app's push)
     expect(otherDirs()).toEqual([])
-    // Re-created on GitHub before the anchor's merge; the merged note.md (only
-    // the remote changed its sections) no longer lists it — the orphan-file
-    // residual documented for the app (sync.md, QA B3), same planner here.
+    // Re-created on GitHub before the anchor's merge ("unchanged" for the
+    // planner, and GitHub's anchor does not list it): it must stay LISTED —
+    // an orphan file would be deleted by the next folder write.
     expect(gh.files.get(`${DIR}/s2.md`)).toBe('call mum today')
     expect(readLocal(`${DIR}/s2.md`)).toBe('call mum today')
+    expect(readLocal(ANCHOR)).toContain('file: s2.md')
+    expect(gh.files.get(ANCHOR)).toBe(readLocal(ANCHOR))
+    // …so the next command's folder write keeps it.
+    const n = cli.parseNoteYaml(cli.splitFrontmatter(readLocal(ANCHOR)).frontmatter)
+    expect((n.sections as Array<{ id: string }>).map((s) => s.id)).toEqual(['s1', 's2'])
     expect(readLocal(`${DIR}/s1.md`)).toBe('MILK\nflour\neggs\nbread')
   })
 
@@ -334,6 +356,13 @@ describe('planGithubDirMerge: CLI ↔ app parity', () => {
     ['added on both sides', threeWay(folder(T1, { s1: 'a' }), folder(T2, { s1: 'a', s2: 'r' }), folder(T3, { s1: 'a', s3: 'l' }))],
     ['tags/favorited', threeWay(folder(T1, { s1: 'a' }), folder(T2, { s1: 'a' }, { tags: ['x'] }), folder(T3, { s1: 'b' }, { favorited: true }))],
     ['encrypted', threeWay(enc(T1, 'c0'), enc(T2, 'c1'), enc(T3, 'c2'))],
+    ['re-created by the own PUT (orphan guard)', (() => {
+      const f = threeWay(folder(T1, { s1: 'a', s2: 'b' }), { ...folder(T2, { s1: 'a' }), [`${DIR}/s2.md`]: 'b2' }, folder(T3, { s1: 'a', s2: 'b2' }))
+      const s2 = f.find((x) => x.path === `${DIR}/s2.md`)!
+      s2.base = gitBlobSha('b2')
+      s2.baseContent = 'b2'
+      return f
+    })()],
     ['remote anchor missing', threeWay(folder(T1, { s1: 'a' }), { [`${DIR}/s1.md`]: 'x' }, folder(T3, { s1: 'y' }))],
   ]
   // The CLI rewrites note.md's frontmatter textually (no YAML library), the app

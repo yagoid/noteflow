@@ -417,6 +417,70 @@ describe('B3: a push never overwrites a remote edit this device did not pull', (
     expect(readLocal(`${copies[0]}/s2.md`)).toBe(loc['s2.md'])
   })
 
+  it('a section deleted on GitHub, edited here and re-created there by the own push: stays LISTED (never an orphan)', async () => {
+    const two = (u: string, a: string, b: string | null) =>
+      serializeNoteFolder(
+        {
+          id: 'abc12345', title: 'G', tags: [], created: T1, updated: u,
+          sections: [{ id: 's1', name: 'A', content: a }, ...(b === null ? [] : [{ id: 's2', name: 'B', content: b }])],
+        },
+        { preserveUpdated: true },
+      ).files
+    for (const [f, c] of Object.entries(two(T1, 'a', 'b'))) remote.set(`${DIR}/${f}`, c)
+    remote.set('.noteflow-format', '2\n')
+    writeLocal(two(T1, 'a', 'b'))
+    await gh.pullNotes(notesDir)
+    remote.delete(`${DIR}/s2.md`)
+    remote.set(`${DIR}/note.md`, two(T2, 'a', null)['note.md'])
+    const loc = two(T3, 'a', 'b edited here')
+    writeLocal(loc)
+    for (const [f, c] of Object.entries(loc)) gh.schedulePush(`${DIR}/${f}`, c)
+    vi.advanceTimersByTime(5000) // s2.md is absent on GitHub → plain PUT; note.md is held back
+    await flush()
+    expect(remote.get(`${DIR}/s2.md`)).toBe(loc['s2.md'])
+    expect(syncState().ops[`${DIR}/note.md`]).toMatchObject({ op: 'upsert', stale: true })
+    const res = await gh.pullNotes(notesDir)
+    expect(res.errors).toEqual([])
+    expect(readLocal(`${DIR}/s2.md`)).toBe(loc['s2.md'])
+    expect(readLocal(`${DIR}/note.md`)).toContain('s2.md') // still listed: visible in the note
+    expect(fs.readdirSync(notesDir)).toEqual([DIR]) // no copy
+    vi.advanceTimersByTime(5000)
+    await flush()
+    expect(remote.get(`${DIR}/note.md`)).toBe(readLocal(`${DIR}/note.md`))
+    expect(remote.get(`${DIR}/note.md`)).toContain('s2.md')
+  })
+
+  it('a local file that exists but can not be read (EBUSY) is never taken for "deleted here"', async () => {
+    const two = (u: string, a: string, b: string) =>
+      serializeNoteFolder(
+        {
+          id: 'abc12345', title: 'G', tags: [], created: T1, updated: u,
+          sections: [{ id: 's1', name: 'A', content: a }, { id: 's2', name: 'B', content: b }],
+        },
+        { preserveUpdated: true },
+      ).files
+    for (const [f, c] of Object.entries(two(T1, 'a', 'b'))) remote.set(`${DIR}/${f}`, c)
+    remote.set('.noteflow-format', '2\n')
+    writeLocal(two(T1, 'a', 'b'))
+    await gh.pullNotes(notesDir)
+    for (const f of ['note.md', 's1.md']) remote.set(`${DIR}/${f}`, two(T2, 'a remote', 'b')[f])
+    const loc = two(T3, 'a local', 'b')
+    writeLocal(loc)
+    const locked = path.join(notesDir, DIR, 's2.md')
+    const realRead = fs.readFileSync
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+      if (p === locked) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+      return (realRead as (...a: unknown[]) => unknown)(p, ...rest)
+    }) as typeof fs.readFileSync)
+    await gh.pullNotes(notesDir)
+    spy.mockRestore()
+    // Not merged: nothing unlists s2 nor journals its remote delete.
+    expect(fs.existsSync(locked)).toBe(true)
+    expect(readLocal(`${DIR}/note.md`)).toContain('s2.md')
+    expect(syncState().ops[`${DIR}/s2.md`]).toBeUndefined()
+    expect(remote.has(`${DIR}/s2.md`)).toBe(true)
+  })
+
   it('a pull between the remote edit and the push ("local strictly newer") resolves it too — no overwrite afterwards', async () => {
     await syncedStart()
     remoteEdit('remote')

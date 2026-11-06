@@ -191,7 +191,8 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   marcas ⚠️ nombran `os.hostname() + " (CLI)"` (`conflictMarkerLabels`). Escribe el resultado, toma los
   shas remotos como base y **sube por el camino normal** (`upsertRemoteFile` condicionado contra el sha
   remoto; secciones antes que el `note.md`; un fichero remoto que la fusión dejó borrado aquí se borra con
-  `removeRemoteFile` condicionado). Con marcas avisa `Merged with conflicts: "<título>" — both versions
+  `removeRemoteFile` condicionado, **solo si el `note.md` fusionado subió** — si no, el ancla recupera su
+  base previa para que el siguiente push vuelva a encontrar el conflicto, refusione y borre entonces). Con marcas avisa `Merged with conflicts: "<título>" — both versions
   kept, look for the ⚠️ markers` (como el pull de Cloud del CLI); una fusión limpia no avisa (el push
   automático imprime `Synced to GitHub`; `noteflow push` la cuenta como `N merged with GitHub`, no como
   `changed on GitHub`). Sección borrada en GitHub y editada aquí → se aplica el borrado
@@ -597,7 +598,17 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     pendiente, o borrada por el CLI con la app cerrada) que sigue en GitHub como en su base no vuelve:
     el ancla fusionada deja de listarla, queda un op `delete` (no `stale`) contra el sha remoto, un pull
     antes del drain no la resucita (blob = base cacheada) y el drain la borra en GitHub (test en
-    `githubConditionalSync.test.ts`). Con marcas → aviso `SyncStatus.conflictMerges` (mismo `{count,
+    `githubConditionalSync.test.ts`) — el drain **no** ejecuta el `delete` de una sección mientras el
+    `note.md` de su carpeta tenga un `upsert` journalado, pendiente o `stale`
+    (`sectionDeleteWaitsForAnchor`): el ancla de GitHub aún la listaría. **Sin huérfanas:** una sección
+    que lista el `note.md` local y cuyo fichero sigue en la carpeta tras la fusión **se vuelve a listar** si
+    el ancla fusionada no la lista (`relistAnchorSections` en `cloudSyncLogic.ts`, espejo en el CLI). Caso:
+    borrada en GitHub, editada aquí y re-creada allí por el PUT incondicional propio (fichero ausente en
+    remoto ⇒ `put`) antes de que el ancla entre en conflicto — el planificador la ve "sin cambios" (local =
+    base = remoto) y el ancla elegida es la de GitHub; sin esto quedaría en un fichero que ninguna ancla
+    lista y la siguiente escritura de la carpeta la borraría. Si un ancla es ilegible/cifrada → `null`
+    (copia). **Fichero local que existe pero no se lee** (EBUSY de OneDrive/antivirus): `null` → camino
+    histórico, nunca "borrado aquí" (que lo deslistaría y journalaría su `delete`). Con marcas → aviso `SyncStatus.conflictMerges` (mismo `{count,
     titles, at}` y *Dismiss* que las copias). Las marcas nombran al **equipo que fusiona** y la hora
     (`> ⚠️ Sync conflict (YYYY-MM-DD HH:mm) — version from <hostname>:` / `> ⚠️ Sync conflict —
     version already synced:` / `> ⚠️ End of sync conflict`; nunca "este dispositivo", el texto se
@@ -639,7 +650,11 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     de un push del CLI de la misma nota (antes de un pull de la app) da una fusión de más (cachés de base
     separadas; segura — en el caso típico la unión de líneas es limpia); ventana de actualización: un push de un build anterior no cacheado +
     una edición pendiente nueva ⇒ posible copia espuria en el primer pull; una sección borrada en remoto
-    mientras se edita en local puede re-crearse como fichero huérfano (oculto); `settings.json`
+    mientras se edita en local puede re-crearse como fichero huérfano (oculto) **fuera** del camino de
+    conflicto (en la fusión se vuelve a listar, ver arriba); Cloud no cae en ese caso con la subida
+    condicionada v2 (la re-subida sobre el tombstone es `stale` → `keep-local` → `withKeptLocalSections`),
+    pero sí podría con el fallback v1 (`cloud_upsert_file`, sin compare-and-swap) contra un servidor sin la
+    migración 0014 — asumido; `settings.json`
     ilegible ⇒ `isCloudSyncEnabledFailClosed` = true ⇒ subidas incondicionales; la fusión de un
     aplicado que falla a medias se rehace en el siguiente pull sin perder nada (las bases y el journal
     solo cambian tras escribir); en el camino histórico (copias), si el aplicado

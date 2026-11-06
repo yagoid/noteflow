@@ -12,6 +12,7 @@
 import {
   planThreeWayDir,
   hashForBase,
+  relistAnchorSections,
   UNKNOWN_BASE_HASH,
   type SectionConflictLabels,
   type ThreeWayRemoteRow,
@@ -127,8 +128,24 @@ export function planGithubDirMerge(o: {
   const removes = [...plan.removes, ...deletedRemotely.map((f) => f.path)]
   for (const rel of removes) delete final[rel]
   for (const w of plan.writes) final[w.relPath] = w.content
+
+  // A section the local note.md lists whose file stays here must stay listed:
+  // e.g. deleted on GitHub, edited here and re-created there by this device's
+  // own (unconditional) PUT before the anchor's merge — its file is then
+  // "unchanged" (local = base = remote) and the merged anchor, GitHub's, does
+  // not list it. Unlisted, the next folder write would delete it.
+  let writes = plan.writes
+  const onDisk = new Set(Object.keys(final).filter((rel) => rel !== anchorRel).map((rel) => rel.slice(prefix.length)))
+  if (onDisk.size > 0) {
+    const relisted = relistAnchorSections(final[anchorRel], anchor.local, onDisk, o.nowIso)
+    if (relisted === null) return null // unreadable / encrypted: the conflict copy instead
+    if (relisted !== final[anchorRel]) {
+      final[anchorRel] = relisted
+      writes = [...writes.filter((w) => w.relPath !== anchorRel), ...(relisted !== anchor.local ? [{ relPath: anchorRel, content: relisted }] : [])]
+    }
+  }
   return {
-    writes: plan.writes,
+    writes,
     removes,
     copySections: deletedRemotely.map((f) => f.path.slice(prefix.length)),
     conflictMarkerSections: plan.conflictMarkerSections,

@@ -845,6 +845,20 @@ export function planGithubDirConflict(
 }
 
 /**
+ * The journal drain must not run the `delete` of a section ('<dir>/<file>.md')
+ * while its folder's note.md has an `upsert` journaled (pending or stale):
+ * GitHub's anchor may still list that section until the upsert lands — e.g.
+ * the delete a conflict merge journals before re-uploading the merged anchor,
+ * which can itself be held back. The anchor's completion (or the pull that
+ * resolves the folder, journalCompleteDir) frees it.
+ */
+export function sectionDeleteWaitsForAnchor(state: SyncState, key: string): boolean {
+  if (!isNoteFilePath(key) || key.endsWith('/note.md')) return false
+  const anchor = state.ops[`${key.slice(0, key.indexOf('/'))}/note.md`]
+  return anchor !== undefined && anchor.op === 'upsert'
+}
+
+/**
  * Completes EVERY op under '<dir>/' (upserts and deletes, stale or not): the
  * pull has just left the folder exactly as the remote holds it, so no pending
  * local mutation of it may land afterwards. The folder's own 'deleteDir' key

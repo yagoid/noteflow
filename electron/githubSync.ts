@@ -23,6 +23,7 @@ import {
   journalMarkStale,
   journalMarkDirConflictCopied,
   journalCompleteDir,
+  sectionDeleteWaitsForAnchor,
   journalClearStale,
   resolveRetryAction,
   shouldPullSkipDir,
@@ -1392,11 +1393,17 @@ function mergeGithubConflictDir(
 ): DirConflictResolution | null {
   const state = getState()
   const prefix = `${dir}/`
+  // A file that exists but can't be read (EBUSY from OneDrive / an antivirus…)
+  // must not pass for "deleted here" — the merge would unlist it and journal a
+  // remote delete. Not merged then: the historical path (conflict copy).
+  let unreadable = false
   const files: GithubMergeFile[] = paths.map((p) => {
     let local: string | null = null
     try {
       local = fs.readFileSync(path.join(notesDir, p.path), 'utf-8')
-    } catch { /* absent locally */ }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') unreadable = true
+    }
     return {
       path: p.path,
       base: p.base,
@@ -1406,6 +1413,7 @@ function mergeGithubConflictDir(
       baseContent: baseContents.get(p.path) ?? null,
     }
   })
+  if (unreadable) return null
   let merge: ReturnType<typeof planGithubDirMerge>
   try {
     merge = planGithubDirMerge({ dir, files, labels: conflictMarkerLabels(), nowIso: new Date().toISOString() })
@@ -2687,6 +2695,10 @@ export async function retrySyncJournal(notesDir: string): Promise<void> {
       // A live debounce timer for this path will push fresher content shortly —
       // let it handle the upsert instead of racing it here.
       if (entry.op === 'upsert' && pushTimers.has(key)) continue
+      // A section delete waits for its folder's note.md upsert (pending, or
+      // held back): GitHub's anchor may still list that section until it lands
+      // (e.g. the delete a conflict merge journals before its re-uploads).
+      if (entry.op === 'delete' && sectionDeleteWaitsForAnchor(state, key)) continue
 
       const action = resolveRetryAction(entry.op, fs.existsSync(path.join(notesDir, key)))
       if (action === 'discard') {
