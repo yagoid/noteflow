@@ -109,7 +109,7 @@ Iconos del TitleBar:
   N note(s) conflicted with changes made on another device and were kept as conflict copies:" + hasta 3
   títulos y "+N more", botón *Dismiss*; mientras no se descarta, el botón muestra un **punto ámbar**
   y su `aria-label` lo menciona) y, en el mismo bloque, el de **notas fusionadas con conflictos**
-  (NoteFlow Cloud: "N note(s) were changed on the same lines here and on another device. Both
+  (NoteFlow Cloud o GitHub: "N note(s) were changed on the same lines here and on another device. Both
   versions were kept in the note — look for the ⚠️ markers:" + títulos; mismo *Dismiss* y punto); y pie compacto de **iconos con tooltip**:
   candado (Cloud: cifrado Standard / Private E2EE), rayo (Cloud: verde si Real-time conectado),
   reloj ("Auto-sync every 5 min") y a la derecha el engranaje que abre Ajustes → Sync. La acción
@@ -1280,8 +1280,9 @@ ninguno → Cloud); a partir de ahí manda la elección del usuario. Con Cloud a
 > nota aparte): lo que cada uno añadió o cambió en líneas distintas se combina (p. ej. una tarea
 > añadida al final aquí y otra allí → quedan las dos). Solo si tocasteis **las mismas líneas** de
 > forma distinta, la sección guarda **las dos versiones** entre marcas legibles (`> ⚠️ Sync conflict
-> — this device’s version:` / `> ⚠️ Sync conflict — version from another device:` / `> ⚠️ End of
-> sync conflict`, en español si la app está en español) y la tarjeta del botón de sync lo avisa
+> (2026-11-06 09:38) — version from <nombre del equipo que fusionó>:` / `> ⚠️ Sync conflict — version
+> already synced:` / `> ⚠️ End of sync conflict`, en español si la app está en español; nombran al
+> equipo y la hora, no "este dispositivo", porque el texto se sincroniza a todos) y la tarjeta del botón de sync lo avisa
 > ("look for the ⚠️ markers"): te quedas con la buena y borras las marcas. Si un dispositivo no
 > conoce la versión anterior de la sección (notas sincronizadas antes de esta versión), la fusión
 > es una unión: no se pierde ninguna línea, pero una línea que el otro borró puede volver. Una nota

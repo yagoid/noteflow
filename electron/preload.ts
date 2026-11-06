@@ -173,7 +173,7 @@ const api = {
     conflictMerges?: { count: number; titles: string[]; at: string }
   }> => ipcRenderer.invoke('sync:get-status'),
   // Clears the session notice of conflict copies made by the pull of either
-  // backend, and of Cloud's merges with conflict markers (titlebar sync status card).
+  // backend, and of their merges with conflict markers (titlebar sync status card).
   dismissConflictCopies: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:dismiss-conflict-copies'),
   // Backend-tagged status of the LIVE sync provider (Cloud when enabled, else
   // GitHub, else 'none') — drives the titlebar sync button and its status card.

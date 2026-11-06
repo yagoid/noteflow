@@ -6,7 +6,12 @@
 // the pull saw "both changed" and created a separate note "<title> (conflict
 // copy …)" identical to the remote but for the added line.
 import { describe, it, expect } from 'vitest'
-import { mergeSectionText, DEFAULT_SECTION_CONFLICT_LABELS as L } from '../../electron/cloudSyncLogic'
+import {
+  mergeSectionText,
+  sectionConflictLabels,
+  SECTION_CONFLICT_LABEL_TEMPLATES_EN,
+  DEFAULT_SECTION_CONFLICT_LABELS as L,
+} from '../../electron/cloudSyncLogic'
 
 const block = (local: string[], remote: string[]) => [`> ${L.local}`, '', ...local, '', `> ${L.remote}`, '', ...remote, '', `> ${L.end}`]
 
@@ -109,6 +114,19 @@ describe('mergeSectionText — line endings and labels', () => {
 
   it('mixed endings (an editor rewrote one side as CRLF): no spurious conflict, the remote ending wins', () => {
     expect(mergeSectionText(null, 'one\r\ntwo\r\nthree', 'one\ntwo')).toEqual({ content: 'one\ntwo\nthree', conflicts: 0 })
+  })
+
+  it('markers name the merging device and the merge time — never "this device" (the text syncs everywhere)', () => {
+    const labels = sectionConflictLabels(SECTION_CONFLICT_LABEL_TEMPLATES_EN, 'DESKTOP-ABC', new Date(2026, 10, 6, 9, 38))
+    expect(labels).toEqual({
+      local: '⚠️ Sync conflict (2026-11-06 09:38) — version from DESKTOP-ABC:',
+      remote: '⚠️ Sync conflict — version already synced:',
+      end: '⚠️ End of sync conflict',
+    })
+    expect(sectionConflictLabels(SECTION_CONFLICT_LABEL_TEMPLATES_EN, '  ', new Date(2026, 0, 1)).local).toContain('version from ?:')
+    // A `$` in a hostname is inserted literally.
+    expect(sectionConflictLabels(SECTION_CONFLICT_LABEL_TEMPLATES_EN, 'pc$1', new Date(2026, 0, 1)).local).toContain('from pc$1:')
+    for (const t of Object.values(L)) expect(t).not.toMatch(/this device/i)
   })
 
   it('custom (localized) labels', () => {

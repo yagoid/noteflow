@@ -214,13 +214,16 @@ function cliEdit(section: string, content: string, updated: string) {
   fs.writeFileSync(localPath(ANCHOR), readLocal(ANCHOR).replace(/^updated:.*$/m, `updated: "${updated}"`))
 }
 const fmOf = (anchor: string) => yaml.load(splitFrontmatter(anchor).frontmatter) as Record<string, unknown>
+// The CLI names the merging computer (hostname + " (CLI)") and the merge time
+// (normalized to "(T)" by `untimed`): the merged text syncs, so never "this device".
 const LABELS = {
-  local: '⚠️ Sync conflict — this device’s version:',
-  remote: '⚠️ Sync conflict — version from another device:',
+  local: `⚠️ Sync conflict (T) — version from ${os.hostname()} (CLI):`,
+  remote: '⚠️ Sync conflict — version already synced:',
   end: '⚠️ End of sync conflict',
 }
 const markers = (local: string, remote: string) =>
   [`> ${LABELS.local}`, '', local, '', `> ${LABELS.remote}`, '', remote, '', `> ${LABELS.end}`].join('\n')
+const untimed = (s: string | null | undefined) => (s ?? '').replace(/\(\d{4}-\d\d-\d\d \d\d:\d\d\)/g, '(T)')
 const blobNames = () => (fs.existsSync(cli.CLOUD_BASE_CONTENT_DIR) ? fs.readdirSync(cli.CLOUD_BASE_CONTENT_DIR).sort() : [])
 const otherDirs = () => fs.readdirSync(notesDir).filter((d) => d !== DIR && fs.statSync(path.join(notesDir, d)).isDirectory())
 
@@ -319,8 +322,8 @@ describe('the real case: the CLI edits a section offline while the PC edited ano
     server.failUploads = false
     await cli.cloudPullNow()
     expect(otherDirs()).toEqual([])
-    expect(readLocal(`${DIR}/b.md`)).toBe(markers('b CLI', 'b PC'))
-    expect(await server.content(`${DIR}/b.md`)).toBe(markers('b CLI', 'b PC'))
+    expect(untimed(readLocal(`${DIR}/b.md`))).toBe(markers('b CLI', 'b PC'))
+    expect(await server.content(`${DIR}/b.md`)).toBe(readLocal(`${DIR}/b.md`))
     expect(logs.some((l) => l.includes('Merged with conflicts: "NOTEFLOW" — both versions kept, look for the ⚠️ markers'))).toBe(true)
     expect(logs.some((l) => l.includes('Conflict: local changes kept'))).toBe(false)
     expect(readSettings().cliCloud.pendingUpserts).toBeUndefined()
@@ -336,7 +339,8 @@ describe('the real case: the CLI edits a section offline while the PC edited ano
     await cli.syncPushNoteFiles(DIR, [NOTE_MD, 'b.md'])
     server.failUploads = false
     await cli.cloudPullNow()
-    expect(readLocal(`${DIR}/b.md`)).toContain('> ⚠️ Conflicto de sincronización — versión de este dispositivo:')
+    expect(untimed(readLocal(`${DIR}/b.md`))).toContain(`> ⚠️ Conflicto de sincronización (T) — versión de ${os.hostname()} (CLI):`)
+    expect(readLocal(`${DIR}/b.md`)).toContain('> ⚠️ Conflicto de sincronización — versión ya sincronizada:')
     expect(readLocal(`${DIR}/b.md`)).toContain('> ⚠️ Fin del conflicto de sincronización')
   })
 
@@ -529,7 +533,7 @@ describe('one-time bases bootstrap (an install that synced before bases existed)
     await pcSave(note(T_PC, { ...BASE, b: 'b PC' }), ['b'])
     cliEdit('b', 'b written by the app', '2099-01-01T00:00:00.000Z')
     await cli.cloudPullNow()
-    expect(readLocal(`${DIR}/b.md`)).toBe(markers('b written by the app', 'b PC'))
+    expect(untimed(readLocal(`${DIR}/b.md`))).toBe(markers('b written by the app', 'b PC'))
     expect(otherDirs()).toEqual([])
   })
 
@@ -554,8 +558,8 @@ describe('one-time bases bootstrap (an install that synced before bases existed)
     await pcSave(note(T_PC, { ...BASE, b: 'b PC' }), ['b'])
     cliEdit('a', 'a CLI', T_CLI)
     await cli.syncPushNoteFiles(DIR, [NOTE_MD, 'a.md', 'b.md', 'c.md'])
-    expect(readLocal(`${DIR}/b.md`)).toBe(markers('b v1', 'b PC'))
-    expect(await server.content(`${DIR}/b.md`)).toBe(markers('b v1', 'b PC'))
+    expect(untimed(readLocal(`${DIR}/b.md`))).toBe(markers('b v1', 'b PC'))
+    expect(await server.content(`${DIR}/b.md`)).toBe(readLocal(`${DIR}/b.md`))
     expect(await server.content(`${DIR}/a.md`)).toBe('a CLI')
     expect(otherDirs()).toEqual([])
   })

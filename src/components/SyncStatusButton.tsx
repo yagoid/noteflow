@@ -73,7 +73,7 @@ interface SyncStatusButtonProps {
   onRefresh: () => void
   /** Opens Settings → Sync (GitHub and the NoteFlow Cloud panel both live there). */
   onOpenSettings: () => void
-  /** Clears the conflict notice: copies (either backend) and Cloud merges with markers. */
+  /** Clears the conflict notice: copies and merges with markers (either backend). */
   onDismissConflictCopies: () => void
 }
 
@@ -345,7 +345,7 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
       <SyncActivityChart status={status} exactTime={exactTime} />
 
       {/* Conflict notice: copies (either backend) — local edits kept as new
-          notes — and Cloud merges with markers — both versions kept IN the note */}
+          notes — and merges with markers (either backend) — both versions kept IN the note */}
       {((conflicts && conflicts.count > 0) || (merges && merges.count > 0)) && (
         <div
           className="mx-3 mb-2 px-2 py-1.5 rounded border border-solid border-amber-400/30 bg-amber-400/10

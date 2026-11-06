@@ -825,8 +825,9 @@ El sync es **por fichero** (cada sección es un fichero), igual que la app de es
 - Si los dos editaron **la misma** sección, el pull la **fusiona línea a línea** dentro de la
   nota (p. ej. una línea añadida aquí y otra allí → quedan las dos, sin copia). Solo si tocaron
   **las mismas líneas** de forma distinta, la nota guarda **las dos versiones** entre marcas
-  `> ⚠️ Sync conflict — this device’s version:` / `> ⚠️ Sync conflict — version from another
-  device:` / `> ⚠️ End of sync conflict` (en español si la app está en español) y el pull
+  `> ⚠️ Sync conflict (<fecha hora>) — version from <equipo> (CLI):` (el equipo que fusionó) /
+  `> ⚠️ Sync conflict — version already synced:` (la que ya estaba en la nube) / `> ⚠️ End of
+  sync conflict` (en español si la app está en español) y el pull
   imprime `Merged with conflicts: "<título>" — both versions kept, look for the ⚠️ markers`:
   revisa esa sección y deja la versión buena (borra las marcas). Las notas **cifradas** no se
   fusionan: la versión remota se queda en la nota y la tuya va a una copia de conflicto

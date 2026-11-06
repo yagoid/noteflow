@@ -443,14 +443,13 @@ function conflictCopyLabel() {
   return uiLanguage() === 'es' ? 'copia en conflicto' : 'conflict copy'
 }
 
-/** Marker lines of the conflict blocks a section merge writes, in the app's language (mirror of electron/i18n.ts sync.conflictMarkers). */
+/**
+ * Marker lines of the conflict blocks a section merge writes, in the app's
+ * language: named after this computer + " (CLI)" and the merge time (the
+ * merged text syncs to every device — never "this device").
+ */
 function conflictMarkerLabels() {
-  if (uiLanguage() !== 'es') return DEFAULT_SECTION_CONFLICT_LABELS
-  return {
-    local: '⚠️ Conflicto de sincronización — versión de este dispositivo:',
-    remote: '⚠️ Conflicto de sincronización — versión de otro dispositivo:',
-    end: '⚠️ Fin del conflicto de sincronización',
-  }
+  return sectionConflictLabels(SECTION_CONFLICT_LABEL_TEMPLATES[uiLanguage()], `${os.hostname()} (CLI)`, new Date())
 }
 
 /**
@@ -1011,11 +1010,33 @@ function planLegacySection(row, local, pending, localUpdatedMs) {
 // when known, a two-way union otherwise — instead of a conflict copy;
 // overlapping, different edits keep both versions in the note between markers.
 
-/** Mirror of DEFAULT_SECTION_CONFLICT_LABELS (rendered as `> <text>`). */
+/** Mirror of DEFAULT_SECTION_CONFLICT_LABELS (rendered as `> <text>`; device-neutral fallback). */
 const DEFAULT_SECTION_CONFLICT_LABELS = {
-  local: '⚠️ Sync conflict — this device’s version:',
-  remote: '⚠️ Sync conflict — version from another device:',
+  local: '⚠️ Sync conflict — version from the merging device:',
+  remote: '⚠️ Sync conflict — version already synced:',
   end: '⚠️ End of sync conflict',
+}
+/** Mirrors of SECTION_CONFLICT_LABEL_TEMPLATES_EN and electron/i18n.ts sync.conflictMarkers (es). */
+const SECTION_CONFLICT_LABEL_TEMPLATES = {
+  en: {
+    local: '⚠️ Sync conflict ({time}) — version from {device}:',
+    remote: '⚠️ Sync conflict — version already synced:',
+    end: '⚠️ End of sync conflict',
+  },
+  es: {
+    local: '⚠️ Conflicto de sincronización ({time}) — versión de {device}:',
+    remote: '⚠️ Conflicto de sincronización — versión ya sincronizada:',
+    end: '⚠️ Fin del conflicto de sincronización',
+  },
+}
+
+/** Pure mirror of sectionConflictLabels: the markers of a merge made on `device` at `now` (local time). */
+function sectionConflictLabels(templates, device, now) {
+  const p = n => String(n).padStart(2, '0')
+  const time = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}`
+  const name = String(device || '').trim() || '?'
+  const fill = t => t.replace(/\{time\}/g, time).replace(/\{device\}/g, () => name)
+  return { local: fill(templates.local), remote: fill(templates.remote), end: fill(templates.end) }
 }
 const MERGE_MAX_EDIT_DISTANCE = 1500
 
@@ -1577,10 +1598,15 @@ function flushCliCloudBases() {
   cloudBaseDelta.clear()
 }
 
-/** flushCliCloudBases where a failure must not fail the command (the upload already landed). */
+/** flushCliCloudBases where a failure must not fail the command (the upload already landed). Returns whether it was saved. */
 function flushCliCloudBasesBestEffort() {
-  try { flushCliCloudBases() }
-  catch (e) { console.error(`  Warning: could not save the Cloud sync state (${e.message}) — the next pull re-establishes it`) }
+  try {
+    flushCliCloudBases()
+    return true
+  } catch (e) {
+    console.error(`  Warning: could not save the Cloud sync state (${e.message}) — the next pull re-establishes it`)
+    return false
+  }
 }
 
 /** Account switch: every base belonged to the previous account. */
@@ -4049,8 +4075,9 @@ async function cloudPullNow() {
       })
     }
   }
-  flushCliCloudBasesBestEffort() // bases of the kept-folder / conflict-copy uploads above
-  pruneCliBaseContents() // base contents no section base references any more
+  // Bases of the kept-folder / conflict-copy uploads above; only once they are
+  // saved, drop the base contents no section base references any more.
+  if (flushCliCloudBasesBestEffort()) pruneCliBaseContents()
   return { pulled, deleted, errors }
 }
 
@@ -6163,6 +6190,7 @@ if (require.main === module) {
     hashForBase, classifyBaseUpsert, planFileReconcile, mergeAnchors, planThreeWayDir, filesNeedingCatchUp,
     needsBasesBootstrap, synthesizeBootstrapBases, parseBootstrapPending, nextBootstrapPending, parseAnchorFm,
     cloudPullNow, syncPushNoteFiles, cmdCloudPush, bindCliCloudToAccount, cliCloudBasesSnapshot, CLOUD_BASES_PATH,
-    mergeSectionText, DEFAULT_SECTION_CONFLICT_LABELS, CLOUD_BASE_CONTENT_DIR,
+    mergeSectionText, DEFAULT_SECTION_CONFLICT_LABELS, SECTION_CONFLICT_LABEL_TEMPLATES, sectionConflictLabels,
+    conflictMarkerLabels, CLOUD_BASE_CONTENT_DIR,
   }
 }

@@ -1314,12 +1314,20 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     - **Bloque de conflicto** (decisión del usuario: las dos versiones en la misma nota, nunca nota
       aparte), separado por líneas en blanco para que cada marca sea su propio bloque markdown (el
       editor parte bloques por `\n\n`; sin el hueco el blockquote se tragaría las líneas):
-      `> ⚠️ Sync conflict — this device’s version:` · líneas locales · `> ⚠️ Sync conflict — version
-      from another device:` · líneas remotas · `> ⚠️ End of sync conflict` (ES: `Conflicto de
-      sincronización — versión de este dispositivo:` / `… — versión de otro dispositivo:` / `Fin del
-      conflicto de sincronización`). Desktop: `electron/i18n.ts` `sync.conflictMarkers`, inyectado desde
-      `main.ts` con `cloudSync.setConflictMarkerLabels`; CLI: según `settings.language`
-      (`conflictMarkerLabels`).
+      `> ⚠️ Sync conflict (2026-11-06 09:38) — version from DESKTOP-ABC:` · líneas del equipo que
+      fusiona · `> ⚠️ Sync conflict — version already synced:` · líneas remotas · `> ⚠️ End of sync
+      conflict` (ES: `Conflicto de sincronización (…) — versión de DESKTOP-ABC:` / `… — versión ya
+      sincronizada:` / `Fin del conflicto de sincronización`). **Nunca "este dispositivo"**: el texto
+      fusionado se sincroniza y lo leen los demás, así que la marca nombra al equipo que fusionó
+      (`os.hostname()`; en el CLI `os.hostname() + " (CLI)"`) y la fecha/hora local de la fusión, y la
+      otra versión es "la ya sincronizada" (la remota) — revisión del 2026-11-06. Plantillas con
+      `{time}`/`{device}`: desktop `electron/i18n.ts` `sync.conflictMarkers`, resueltas con
+      `sectionConflictLabels` (puro, `cloudSyncLogic.ts`) en el inyector de `main.ts`
+      (`cloudSync`/`githubSync.setConflictMarkerLabels`, se evalúa en cada fusión); CLI:
+      `SECTION_CONFLICT_LABEL_TEMPLATES` según `settings.language` (`conflictMarkerLabels`; paridad de
+      plantillas y de `sectionConflictLabels` en `tests/cli/cloudThreeWay.test.ts`). Sin etiquetas
+      inyectadas (tests) → `DEFAULT_SECTION_CONFLICT_LABELS`, neutras ("version from the merging
+      device").
     - **Finales de línea:** el resultado usa el de la remota (si no tiene, el local; si no, LF); el
       salto final: con base, en tres vías sobre el flag; sin base, el del lado que aporta la última
       línea (común/conflicto → OR). Añadir una línea al final sin `\n` da remota + línea, sin duplicar
@@ -1340,10 +1348,13 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
       dos vías. La E/S queda fuera de la lógica pura.
     - **Aviso:** desktop `CloudSyncStatus.conflictMerges` / `ActiveSyncStatus.conflictMerges`
       (`{count, titles, at}`, mismo tipo y vida que `conflictCopies`: sesión, acumulado; se limpia con
-      `sync:dismiss-conflict-copies`, al cambiar de cuenta y al desactivar Cloud) → mismo bloque ámbar y
+      `sync:dismiss-conflict-copies`, al cambiar de cuenta y al desactivar Cloud; GitHub tiene el suyo,
+      ver `sync.md`) → mismo bloque ámbar y
       punto del botón de sync ("N note(s) were changed on the same lines here and on another device. Both
       versions were kept…"). Una fusión limpia no avisa. CLI: `Merged with conflicts: "<título>" — both
       versions kept, look for the ⚠️ markers`.
+    - **Poda en el CLI:** solo si el último guardado de las bases (`flushCliCloudBasesBestEffort`) fue
+      bien — si no, el fichero de bases en disco podría referenciar blobs que la poda borraría.
     - **Residuales:** fuera de alcance y como antes: ancla en conflicto cifrada/ilegible (`whole` →
       copia de la carpeta entera), tombstone `'lost'`, ramas sin base de ancla (wholesale / por
       secciones), notas cifradas. Los finales de línea mixtos de un fichero se normalizan al de la

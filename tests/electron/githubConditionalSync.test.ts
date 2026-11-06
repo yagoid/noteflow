@@ -27,6 +27,7 @@ const remote = new Map<string, string>() // path → content
 const puts: string[] = [] // paths successfully PUT (order)
 const blobs = new Map<string, string>() // every blob the repo ever held: sha → content (git objects are immutable)
 const blobGets: string[] = []
+const fake = { failDeletes: false }
 
 function answer(method: string, url: string, body: Record<string, unknown> | undefined): [number, unknown] {
   const base = '/repos/me/notes'
@@ -59,6 +60,7 @@ function answer(method: string, url: string, body: Record<string, unknown> | und
     return [current === undefined ? 201 : 200, { content: { sha: blobSha(content) } }]
   }
   if (method === 'DELETE') {
+    if (fake.failDeletes) return [500, { message: 'Server Error' }]
     if (current === undefined) return [404, { message: 'Not Found' }]
     if (body?.sha !== blobSha(current)) return [409, { message: `${rel} is at ${blobSha(current)} but expected ${String(body?.sha)}` }]
     remote.delete(rel)
@@ -188,6 +190,7 @@ beforeEach(async () => {
   puts.length = 0
   blobs.clear()
   blobGets.length = 0
+  fake.failDeletes = false
   writeSettings()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   vi.resetModules()
@@ -235,7 +238,7 @@ describe('B3: a push never overwrites a remote edit this device did not pull', (
     )
     expect(merged.conflicts).toBe(1)
     expect(readLocal(`${DIR}/s1.md`)).toBe(merged.content)
-    expect(readLocal(`${DIR}/s1.md`)).toContain('> ⚠️ Sync conflict — this device’s version:')
+    expect(readLocal(`${DIR}/s1.md`)).toContain('> ⚠️ Sync conflict — version already synced:')
     expect(blobGets).toContain(blobSha(noteFiles(T1, 'milk')['s1.md']))
     expect(fs.readdirSync(notesDir)).toEqual([DIR]) // no conflict copy
     expect(gh.getSyncStatus().conflictCopies).toBeUndefined()
@@ -309,6 +312,63 @@ describe('B3: a push never overwrites a remote edit this device did not pull', (
     expect(s1).toContain('remote')
     expect(fs.readdirSync(notesDir)).toEqual([DIR])
   })
+
+  for (const variant of ['journaled delete (failed)', 'unjournaled (the CLI deleted it, app closed)'] as const) {
+    it(`a section deleted here (${variant}), unchanged on GitHub, while another section conflicts: stays deleted, then the drain deletes it`, async () => {
+      const two = (u: string, a: string, b: string | null) =>
+        serializeNoteFolder(
+          {
+            id: 'abc12345', title: 'G', tags: [], created: T1, updated: u,
+            sections: [{ id: 's1', name: 'A', content: a }, ...(b === null ? [] : [{ id: 's2', name: 'B', content: b }])],
+          },
+          { preserveUpdated: true },
+        ).files
+      for (const [f, c] of Object.entries(two(T1, 'a', 'b'))) remote.set(`${DIR}/${f}`, c)
+      remote.set('.noteflow-format', '2\n')
+      writeLocal(two(T1, 'a', 'b'))
+      await gh.pullNotes(notesDir)
+      const s2Sha = blobSha(remote.get(`${DIR}/s2.md`)!)
+      // The other device edits s1 (and bumps note.md); s2 stays at its base on GitHub.
+      for (const f of ['note.md', 's1.md']) remote.set(`${DIR}/${f}`, two(T2, 'a remote', 'b')[f])
+      // Here: s2 removed and s1 edited.
+      const loc = two(T3, 'a local', null)
+      fs.rmSync(path.join(notesDir, DIR, 's2.md'))
+      writeLocal(loc)
+      if (variant === 'journaled delete (failed)') {
+        fake.failDeletes = true
+        await gh.scheduleDelete(`${DIR}/s2.md`)
+        fake.failDeletes = false
+        expect(syncState().ops[`${DIR}/s2.md`]).toMatchObject({ op: 'delete' })
+        for (const [f, c] of Object.entries(loc)) gh.schedulePush(`${DIR}/${f}`, c)
+      }
+      const res = await gh.pullNotes(notesDir)
+      expect(res.errors).toEqual([])
+      // s2 does not come back; a delete op stands (conditional on the remote sha, now the base).
+      expect(fs.existsSync(path.join(notesDir, DIR, 's2.md'))).toBe(false)
+      const ops = syncState().ops
+      expect(ops[`${DIR}/s2.md`]).toMatchObject({ op: 'delete' })
+      expect(ops[`${DIR}/s2.md`].stale).toBeUndefined()
+      expect(syncState().shas[`${DIR}/s2.md`]).toBe(s2Sha)
+      expect(readLocal(`${DIR}/s1.md`)).toContain('a local')
+      expect(readLocal(`${DIR}/s1.md`)).toContain('a remote')
+      expect(readLocal(`${DIR}/note.md`)).not.toContain('s2.md')
+      // A pull BEFORE the drain does not resurrect it.
+      const again = await gh.pullNotes(notesDir)
+      expect(again.errors).toEqual([])
+      expect(fs.existsSync(path.join(notesDir, DIR, 's2.md'))).toBe(false)
+      // The merged files go up; the uploaded anchor no longer lists s2.
+      vi.advanceTimersByTime(5000)
+      await flush()
+      expect(remote.get(`${DIR}/note.md`)).toBe(readLocal(`${DIR}/note.md`))
+      expect(remote.get(`${DIR}/note.md`)).not.toContain('s2.md')
+      // The drain deletes s2 on GitHub (the remote is still at the base sha).
+      await gh.retrySyncJournal(notesDir)
+      await flush()
+      expect(remote.has(`${DIR}/s2.md`)).toBe(false)
+      expect(syncState().ops).toEqual({})
+      expect(fs.readdirSync(notesDir)).toEqual([DIR])
+    })
+  }
 
   it('an encrypted note can not be merged: the historical copy path (remote wins, local kept as a copy)', async () => {
     const enc = (u: string, ct: string) => {

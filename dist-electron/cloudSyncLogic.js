@@ -17,7 +17,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STALE_PULL_MIN_INTERVAL_MS = exports.STALE_PULL_DELAY_MS = exports.UNKNOWN_BASE_HASH = exports.DEFAULT_SECTION_CONFLICT_LABELS = exports.TOMBSTONE_BASE_HASH = exports.CLOUD_MERGEABLE_METADATA = exports.PULL_RETRY_CHUNK = exports.PULL_RETRY_MAX_APPLY_ATTEMPTS = exports.PULL_RETRY_MAX_DECRYPT_ATTEMPTS = exports.CLOUD_BASE_UPSERT_RPC = exports.CLOUD_CONDITIONAL_UPSERT_RPC = exports.CLOUD_PAGE_SIZE = exports.CLOUD_PULL_COLUMNS = exports.CLOUD_METADATA_FILENAMES = void 0;
+exports.STALE_PULL_MIN_INTERVAL_MS = exports.STALE_PULL_DELAY_MS = exports.UNKNOWN_BASE_HASH = exports.DEFAULT_SECTION_CONFLICT_LABELS = exports.SECTION_CONFLICT_LABEL_TEMPLATES_EN = exports.TOMBSTONE_BASE_HASH = exports.CLOUD_MERGEABLE_METADATA = exports.PULL_RETRY_CHUNK = exports.PULL_RETRY_MAX_APPLY_ATTEMPTS = exports.PULL_RETRY_MAX_DECRYPT_ATTEMPTS = exports.CLOUD_BASE_UPSERT_RPC = exports.CLOUD_CONDITIONAL_UPSERT_RPC = exports.CLOUD_PAGE_SIZE = exports.CLOUD_PULL_COLUMNS = exports.CLOUD_METADATA_FILENAMES = void 0;
 exports.noteDirOf = noteDirOf;
 exports.isAnchorPath = isAnchorPath;
 exports.isSafeCloudRelPath = isSafeCloudRelPath;
@@ -56,6 +56,7 @@ exports.buildConflictCopy = buildConflictCopy;
 exports.hashForBase = hashForBase;
 exports.planFileReconcile = planFileReconcile;
 exports.mergeAnchors = mergeAnchors;
+exports.sectionConflictLabels = sectionConflictLabels;
 exports.mergeSectionText = mergeSectionText;
 exports.planThreeWayDir = planThreeWayDir;
 exports.filesNeedingCatchUp = filesNeedingCatchUp;
@@ -1004,9 +1005,23 @@ function withKeptLocalSections(chosen, m) {
         return chosen;
     return { content: dumpAnchor({ ...fm.data, sections: [...sections, ...extras], updated: m.nowIso }, fm.body), source: 'merged' };
 }
+exports.SECTION_CONFLICT_LABEL_TEMPLATES_EN = {
+    local: '⚠️ Sync conflict ({time}) — version from {device}:',
+    remote: '⚠️ Sync conflict — version already synced:',
+    end: '⚠️ End of sync conflict',
+};
+/** The markers of a merge made on `device` at `now` (local time). */
+function sectionConflictLabels(templates, device, now) {
+    const p = (n) => String(n).padStart(2, '0');
+    const time = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}`;
+    const name = device.trim() || '?';
+    const fill = (t) => t.replace(/\{time\}/g, time).replace(/\{device\}/g, () => name);
+    return { local: fill(templates.local), remote: fill(templates.remote), end: fill(templates.end) };
+}
+/** Fallback when the caller passes no labels (tests, before main injects them): device-neutral. */
 exports.DEFAULT_SECTION_CONFLICT_LABELS = {
-    local: '⚠️ Sync conflict — this device’s version:',
-    remote: '⚠️ Sync conflict — version from another device:',
+    local: '⚠️ Sync conflict — version from the merging device:',
+    remote: '⚠️ Sync conflict — version already synced:',
     end: '⚠️ End of sync conflict',
 };
 /** Above this many differing lines the middle of a diff is one changed hunk (bounded time and memory). */
@@ -1175,9 +1190,9 @@ function diff3Pieces(o, a, b, out) {
  * else LF) and ends with one when the merged ending says so. A conflict block
  * is surrounded by blank lines (separate markdown blocks) and reads:
  *   > <labels.local>
- *   (this device's lines)
+ *   (the merging device's lines)
  *   > <labels.remote>
- *   (the other device's lines)
+ *   (the lines of the version already synced)
  *   > <labels.end>
  */
 function mergeSectionText(base, local, remote, labels = exports.DEFAULT_SECTION_CONFLICT_LABELS) {

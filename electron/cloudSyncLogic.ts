@@ -1205,19 +1205,47 @@ function withKeptLocalSections(chosen: AnchorMergeResult, m: AnchorMergeInput): 
 // stay IN the note, both versions, between readable markers. Pure, mirrored
 // in cli/noteflow.js (parity in tests/cli/cloudThreeWay.test.ts).
 
-/** Texts of the marker lines around a conflict block (localized by the caller; rendered as `> <text>`). */
+/**
+ * Texts of the marker lines around a conflict block (rendered as `> <text>`).
+ * The merged text is SYNCED, so they must read the same on every device:
+ * never "this device" — the merging device is named, with the merge time
+ * (sectionConflictLabels), and the other side is the version already synced.
+ */
 export interface SectionConflictLabels {
-  /** Opens the block; this device's lines follow. */
+  /** Opens the block; the merging device's lines follow. */
   local: string
-  /** Separates them from the other device's lines. */
+  /** Separates them from the lines of the version already synced (the remote). */
   remote: string
   /** Closes the block. */
   end: string
 }
 
+/** Localized templates of the markers: `{time}` (local 'YYYY-MM-DD HH:mm') and `{device}` in `local`. */
+export type SectionConflictLabelTemplates = SectionConflictLabels
+
+export const SECTION_CONFLICT_LABEL_TEMPLATES_EN: SectionConflictLabelTemplates = {
+  local: '⚠️ Sync conflict ({time}) — version from {device}:',
+  remote: '⚠️ Sync conflict — version already synced:',
+  end: '⚠️ End of sync conflict',
+}
+
+/** The markers of a merge made on `device` at `now` (local time). */
+export function sectionConflictLabels(
+  templates: SectionConflictLabelTemplates,
+  device: string,
+  now: Date,
+): SectionConflictLabels {
+  const p = (n: number) => String(n).padStart(2, '0')
+  const time = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}`
+  const name = device.trim() || '?'
+  const fill = (t: string) => t.replace(/\{time\}/g, time).replace(/\{device\}/g, () => name)
+  return { local: fill(templates.local), remote: fill(templates.remote), end: fill(templates.end) }
+}
+
+/** Fallback when the caller passes no labels (tests, before main injects them): device-neutral. */
 export const DEFAULT_SECTION_CONFLICT_LABELS: SectionConflictLabels = {
-  local: '⚠️ Sync conflict — this device’s version:',
-  remote: '⚠️ Sync conflict — version from another device:',
+  local: '⚠️ Sync conflict — version from the merging device:',
+  remote: '⚠️ Sync conflict — version already synced:',
   end: '⚠️ End of sync conflict',
 }
 
@@ -1392,9 +1420,9 @@ function diff3Pieces(o: readonly string[], a: readonly string[], b: readonly str
  * else LF) and ends with one when the merged ending says so. A conflict block
  * is surrounded by blank lines (separate markdown blocks) and reads:
  *   > <labels.local>
- *   (this device's lines)
+ *   (the merging device's lines)
  *   > <labels.remote>
- *   (the other device's lines)
+ *   (the lines of the version already synced)
  *   > <labels.end>
  */
 export function mergeSectionText(

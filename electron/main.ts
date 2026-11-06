@@ -21,7 +21,7 @@ import { spawn } from 'child_process'
 import { randomBytes } from 'crypto'
 import * as githubSync from './githubSync'
 import * as cloudSync from './cloudSync'
-import { staleResolvePullDelay } from './cloudSyncLogic'
+import { staleResolvePullDelay, sectionConflictLabels } from './cloudSyncLogic'
 import * as cloudKeys from './cloudKeys'
 import * as cloudRealtime from './cloudRealtime'
 import { getActiveSyncProvider, getActiveSyncStatus, type SyncPullResult } from './syncProvider'
@@ -4043,7 +4043,9 @@ app.whenReady().then(async () => {
   githubSync.onRemoteConflict(() => scheduleGithubConflictPull())
   // Title suffix of the conflict copies the GitHub pull makes (same as Cloud's).
   githubSync.setConflictCopyLabel(() => mainMessages().sync.conflictCopy)
-  githubSync.setConflictMarkerLabels(() => mainMessages().sync.conflictMarkers)
+  // Marker lines of the conflict blocks a line merge writes: named after THIS
+  // computer and the merge time (the merged text syncs everywhere).
+  githubSync.setConflictMarkerLabels(() => sectionConflictLabels(mainMessages().sync.conflictMarkers, os.hostname(), new Date()))
   const connected = githubSync.getSyncStatus().connected
 
   // NoteFlow Cloud: restore the cached DEK (safeStorage) and the engine
@@ -4055,8 +4057,8 @@ app.whenReady().then(async () => {
   cloudSync.onRemoteConflict(() => scheduleCloudStalePull())
   // Title suffix of the conflict copies the pull makes, in the live UI language.
   cloudSync.setConflictCopyLabel(() => mainMessages().sync.conflictCopy)
-  // Marker lines of the conflict blocks a line merge writes into a section.
-  cloudSync.setConflictMarkerLabels(() => mainMessages().sync.conflictMarkers)
+  // Marker lines of the conflict blocks a line merge writes into a section (see GitHub's above).
+  cloudSync.setConflictMarkerLabels(() => sectionConflictLabels(mainMessages().sync.conflictMarkers, os.hostname(), new Date()))
   const cloudEnabled = cloudSync.isCloudSyncEnabled()
 
   // NoteFlow account: load the persisted session and refresh entitlements in

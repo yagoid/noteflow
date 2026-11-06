@@ -49,8 +49,8 @@ const en = {
     sync: {
         conflictCopy: 'conflict copy',
         conflictMarkers: {
-            local: '⚠️ Sync conflict — this device’s version:',
-            remote: '⚠️ Sync conflict — version from another device:',
+            local: '⚠️ Sync conflict ({time}) — version from {device}:',
+            remote: '⚠️ Sync conflict — version already synced:',
             end: '⚠️ End of sync conflict',
         },
     },
@@ -93,8 +93,8 @@ const es = {
     sync: {
         conflictCopy: 'copia en conflicto',
         conflictMarkers: {
-            local: '⚠️ Conflicto de sincronización — versión de este dispositivo:',
-            remote: '⚠️ Conflicto de sincronización — versión de otro dispositivo:',
+            local: '⚠️ Conflicto de sincronización ({time}) — versión de {device}:',
+            remote: '⚠️ Conflicto de sincronización — versión ya sincronizada:',
             end: '⚠️ Fin del conflicto de sincronización',
         },
     },

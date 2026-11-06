@@ -3950,7 +3950,9 @@ electron_1.app.whenReady().then(async () => {
     githubSync.onRemoteConflict(() => scheduleGithubConflictPull());
     // Title suffix of the conflict copies the GitHub pull makes (same as Cloud's).
     githubSync.setConflictCopyLabel(() => mainMessages().sync.conflictCopy);
-    githubSync.setConflictMarkerLabels(() => mainMessages().sync.conflictMarkers);
+    // Marker lines of the conflict blocks a line merge writes: named after THIS
+    // computer and the merge time (the merged text syncs everywhere).
+    githubSync.setConflictMarkerLabels(() => (0, cloudSyncLogic_1.sectionConflictLabels)(mainMessages().sync.conflictMarkers, os_1.default.hostname(), new Date()));
     const connected = githubSync.getSyncStatus().connected;
     // NoteFlow Cloud: restore the cached DEK (safeStorage) and the engine
     // settings. Mutually exclusive with GitHub Sync — when enabled, Cloud owns
@@ -3961,8 +3963,8 @@ electron_1.app.whenReady().then(async () => {
     cloudSync.onRemoteConflict(() => scheduleCloudStalePull());
     // Title suffix of the conflict copies the pull makes, in the live UI language.
     cloudSync.setConflictCopyLabel(() => mainMessages().sync.conflictCopy);
-    // Marker lines of the conflict blocks a line merge writes into a section.
-    cloudSync.setConflictMarkerLabels(() => mainMessages().sync.conflictMarkers);
+    // Marker lines of the conflict blocks a line merge writes into a section (see GitHub's above).
+    cloudSync.setConflictMarkerLabels(() => (0, cloudSyncLogic_1.sectionConflictLabels)(mainMessages().sync.conflictMarkers, os_1.default.hostname(), new Date()));
     const cloudEnabled = cloudSync.isCloudSyncEnabled();
     // NoteFlow account: load the persisted session and refresh entitlements in
     // the background (deferred inside initAccount — never blocks boot).

@@ -571,9 +571,16 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     base); borrada aquí y editada allí → vuelve. Ejecución síncrona: escrituras/borrados locales, shas
     remotos como base, timers cancelados y `journalCompleteDir`, y **todo lo que acaba distinto de
     GitHub se re-sube** por `schedulePushUnguarded` (secciones antes que el `note.md`; subida
-    condicionada normal contra el sha remoto, ya base). Con marcas → aviso
-    `SyncStatus.conflictMerges` (mismo `{count, titles, at}` y *Dismiss* que las copias; marcas
-    localizadas con `githubSync.setConflictMarkerLabels`). **Sigue la copia (paso de abajo) solo donde
+    condicionada normal contra el sha remoto, ya base). Una sección borrada aquí (op `delete`
+    pendiente, o borrada por el CLI con la app cerrada) que sigue en GitHub como en su base no vuelve:
+    el ancla fusionada deja de listarla, queda un op `delete` (no `stale`) contra el sha remoto, un pull
+    antes del drain no la resucita (blob = base cacheada) y el drain la borra en GitHub (test en
+    `githubConditionalSync.test.ts`). Con marcas → aviso `SyncStatus.conflictMerges` (mismo `{count,
+    titles, at}` y *Dismiss* que las copias). Las marcas nombran al **equipo que fusiona** y la hora
+    (`> ⚠️ Sync conflict (YYYY-MM-DD HH:mm) — version from <hostname>:` / `> ⚠️ Sync conflict —
+    version already synced:` / `> ⚠️ End of sync conflict`; nunca "este dispositivo", el texto se
+    sincroniza), inyectadas con `githubSync.setConflictMarkerLabels` (ver `monetization.md` "Fusión de
+    líneas de una sección"). **Sigue la copia (paso de abajo) solo donde
     no se fusiona:** ancla cifrada o ilegible en conflicto (`whole`), ancla ausente en un lado, sección
     no fusionable o fusión que lanza (red de seguridad) → `null` → camino histórico. **Sección borrada
     en GitHub y editada aquí** (lo que hoy copiaba, decisión explícita): se aplica el borrado y la

@@ -326,7 +326,7 @@ describe('planGithubDirMerge', () => {
     const base = folder(T1, { s1: 'milk' })
     const m = planGithubDirMerge({ dir: DIR, files: filesOf(base, folder(T2, { s1: 'eggs' }), folder(T3, { s1: 'bread' })), nowIso: NOW })!
     expect(m.conflictMarkerSections).toEqual(['s1.md'])
-    expect(m.final[`${DIR}/s1.md`]).toContain('> ⚠️ Sync conflict — this device’s version:')
+    expect(m.final[`${DIR}/s1.md`]).toContain('> ⚠️ Sync conflict — version from the merging device:')
   })
 
   it('different sections changed on each side are both kept; the anchor keeps the later local `updated`', () => {

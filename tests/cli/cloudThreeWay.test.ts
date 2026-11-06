@@ -27,6 +27,8 @@ import {
   buildConflictCopy,
   mergeSectionText,
   DEFAULT_SECTION_CONFLICT_LABELS,
+  SECTION_CONFLICT_LABEL_TEMPLATES_EN,
+  sectionConflictLabels,
   type ThreeWayRemoteRow,
   type ThreeWayDirPlan,
   type AnchorMergeInput,
@@ -447,8 +449,17 @@ describe('catch-up and bootstrap parity', () => {
 })
 
 describe('mergeSectionText — CLI mirror', () => {
-  it('same constants', () => {
+  it('same constants, templates and labels (EN mirror of the app; ES mirror of electron/i18n.ts)', async () => {
     expect(cli.DEFAULT_SECTION_CONFLICT_LABELS).toEqual(DEFAULT_SECTION_CONFLICT_LABELS)
+    expect(cli.SECTION_CONFLICT_LABEL_TEMPLATES.en).toEqual(SECTION_CONFLICT_LABEL_TEMPLATES_EN)
+    const { getMessages } = await import('../../electron/i18n')
+    expect(cli.SECTION_CONFLICT_LABEL_TEMPLATES.en).toEqual(getMessages('en').sync.conflictMarkers)
+    expect(cli.SECTION_CONFLICT_LABEL_TEMPLATES.es).toEqual(getMessages('es').sync.conflictMarkers)
+    const now = new Date(2026, 10, 6, 9, 38)
+    for (const lang of ['en', 'es']) for (const device of ['DESKTOP-ABC (CLI)', '', 'a$&b']) {
+      expect(cli.sectionConflictLabels(cli.SECTION_CONFLICT_LABEL_TEMPLATES[lang], device, now))
+        .toEqual(sectionConflictLabels(cli.SECTION_CONFLICT_LABEL_TEMPLATES[lang], device, now))
+    }
   })
 
   it('same result over a grid of bases × local × remote (endings, final newlines, conflicts, appends)', () => {
