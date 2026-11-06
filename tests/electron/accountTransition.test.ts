@@ -3,9 +3,9 @@ import {
   planAccountTransition,
   parseAccountRestore,
   clearRestoreSurface,
-  stepAiEntitlementBaseline,
-  NO_AI_BASELINE,
-  type AiEntitlementBaseline,
+  stepEntitlementBaseline,
+  NO_ENTITLEMENT_BASELINE,
+  type EntitlementBaseline,
   type AccountLocalState,
   type AccountObservation,
   type AccountRestoreRecord,
@@ -88,9 +88,124 @@ describe('planAccountTransition — sign-out', () => {
   })
 })
 
-describe('planAccountTransition — sign-in restore', () => {
-  it('restores both halves when the identity matches and the entitlements are alive', () => {
-    const plan = planAccountTransition(SIGNED_OUT, observation(), local({ restore: record() }))
+describe('planAccountTransition — sign-in activates what is paid', () => {
+  it('first sign-in with the bundle switches on Cloud and the managed assistant', () => {
+    const plan = planAccountTransition(SIGNED_OUT, observation(), local())
+    expect(plan).toEqual({
+      disableCloud: false,
+      resetKeys: false,
+      enableCloud: true,
+      setAiProvider: 'noteflow',
+      restore: null,
+    })
+  })
+
+  it('first sign-in with only Cloud switches on only Cloud', () => {
+    const plan = planAccountTransition(SIGNED_OUT, observation({ entitlements: { ai: false, cloud: true } }), local())
+    expect(plan.enableCloud).toBe(true)
+    expect(plan.setAiProvider).toBeNull()
+    expect(plan.restore).toBeNull()
+  })
+
+  it('first sign-in with only AI switches on only the managed assistant', () => {
+    const plan = planAccountTransition(SIGNED_OUT, observation({ entitlements: { ai: true, cloud: false } }), local())
+    expect(plan.enableCloud).toBe(false)
+    expect(plan.setAiProvider).toBe('noteflow')
+    expect(plan.restore).toBeNull()
+  })
+
+  it('first sign-in with no subscription switches nothing on', () => {
+    const plan = planAccountTransition(SIGNED_OUT, observation({ entitlements: { ai: false, cloud: false } }), local())
+    expect(plan.enableCloud).toBe(false)
+    expect(plan.setAiProvider).toBeNull()
+    expect(plan.disableCloud).toBe(false)
+    expect(plan.resetKeys).toBe(false)
+    expect(plan.restore).toBeNull()
+  })
+
+  it('does not re-enable what is already on (idempotent)', () => {
+    const plan = planAccountTransition(SIGNED_OUT, observation(), local({ cloudEnabled: true, aiManaged: true }))
+    expect(plan.enableCloud).toBe(false)
+    expect(plan.setAiProvider).toBeNull()
+  })
+
+  it('supersedes a same-account record that had both features off', () => {
+    const plan = planAccountTransition(
+      SIGNED_OUT,
+      observation(),
+      local({ restore: record({ cloudEnabled: false, aiManaged: false }) })
+    )
+    expect(plan.enableCloud).toBe(true)
+    expect(plan.setAiProvider).toBe('noteflow')
+    expect(plan.restore).toBeNull()
+  })
+
+  it('another account signing in ignores the old record and gets what IT pays for', () => {
+    const plan = planAccountTransition(
+      SIGNED_OUT,
+      observation({ identity: 'other@example.com', entitlements: { ai: false, cloud: true } }),
+      local({ restore: record({ cloudEnabled: false, aiManaged: true }) })
+    )
+    expect(plan.enableCloud).toBe(true)
+    expect(plan.setAiProvider).toBeNull()
+    expect(plan.restore).toBeNull()
+  })
+
+  it('entitlements still unknown at sign-in: persists a pending record, then activates when they land', () => {
+    const atSignIn = planAccountTransition(
+      SIGNED_OUT,
+      observation({ entitlements: { ai: false, cloud: false }, entitlementsKnown: false }),
+      local({ restore: record({ identity: 'old@example.com', aiManaged: false }) })
+    )
+    expect(atSignIn).toEqual({
+      disableCloud: false,
+      resetKeys: false,
+      enableCloud: false,
+      setAiProvider: null,
+      restore: { identity: 'user@example.com', cloudEnabled: true, aiManaged: true },
+    })
+    // Next status change: still unknown → keep waiting, record untouched.
+    const waiting = planAccountTransition(
+      SIGNED_IN,
+      observation({ entitlements: { ai: false, cloud: false }, entitlementsKnown: false }),
+      local({ restore: atSignIn.restore as AccountRestoreRecord })
+    )
+    expect(waiting.restore).toBeUndefined()
+    expect(waiting.enableCloud).toBe(false)
+    // The entitlements land (Cloud only): Cloud on, record consumed.
+    const landed = planAccountTransition(
+      SIGNED_IN,
+      observation({ entitlements: { ai: false, cloud: true } }),
+      local({ restore: atSignIn.restore as AccountRestoreRecord })
+    )
+    expect(landed.enableCloud).toBe(true)
+    expect(landed.setAiProvider).toBeNull()
+    expect(landed.restore).toBeNull()
+  })
+
+  it('a sign-in without a known identity does nothing and drops any stale record', () => {
+    expect(planAccountTransition(SIGNED_OUT, observation({ identity: null }), local({ restore: record() }))).toEqual({
+      disableCloud: false,
+      resetKeys: false,
+      enableCloud: false,
+      setAiProvider: null,
+      restore: null,
+    })
+    const plan = planAccountTransition(SIGNED_OUT, observation({ identity: null }), local())
+    expect(plan.enableCloud).toBe(false)
+    expect(plan.restore).toBeUndefined()
+  })
+
+  it('a session restored at boot (previous already signed in) is NOT a sign-in: nothing is switched on', () => {
+    const plan = planAccountTransition(SIGNED_IN, observation(), local())
+    expect(plan).toEqual({ disableCloud: false, resetKeys: false, enableCloud: false, setAiProvider: null })
+    expect(plan.restore).toBeUndefined()
+  })
+})
+
+describe('planAccountTransition — pending record on a stable session', () => {
+  it('switches on both halves when the identity matches and the entitlements are alive', () => {
+    const plan = planAccountTransition(SIGNED_IN, observation(), local({ restore: record() }))
     expect(plan).toEqual({
       disableCloud: false,
       resetKeys: false,
@@ -102,7 +217,7 @@ describe('planAccountTransition — sign-in restore', () => {
 
   it('is case-insensitive on the email', () => {
     const plan = planAccountTransition(
-      SIGNED_OUT,
+      { signedIn: true, identity: 'User@Example.com' },
       observation({ identity: 'User@Example.com' }),
       local({ restore: record() })
     )
@@ -110,9 +225,9 @@ describe('planAccountTransition — sign-in restore', () => {
     expect(plan.setAiProvider).toBe('noteflow')
   })
 
-  it('restores only what the entitlements still allow, and consumes the record', () => {
+  it('switches on only what the entitlements allow, and consumes the record', () => {
     const plan = planAccountTransition(
-      SIGNED_OUT,
+      SIGNED_IN,
       observation({ entitlements: { ai: false, cloud: true } }),
       local({ restore: record() })
     )
@@ -121,9 +236,9 @@ describe('planAccountTransition — sign-in restore', () => {
     expect(plan.restore).toBeNull()
   })
 
-  it('restores nothing when the subscriptions lapsed, but still consumes the record', () => {
+  it('switches on nothing when the subscriptions lapsed, but still consumes the record', () => {
     const plan = planAccountTransition(
-      SIGNED_OUT,
+      SIGNED_IN,
       observation({ entitlements: { ai: false, cloud: false } }),
       local({ restore: record() })
     )
@@ -134,7 +249,7 @@ describe('planAccountTransition — sign-in restore', () => {
 
   it('waits for the entitlements to land instead of dropping the record', () => {
     const plan = planAccountTransition(
-      SIGNED_OUT,
+      SIGNED_IN,
       observation({ entitlements: { ai: false, cloud: false }, entitlementsKnown: false }),
       local({ restore: record() })
     )
@@ -142,11 +257,11 @@ describe('planAccountTransition — sign-in restore', () => {
     expect(plan.restore).toBeUndefined() // record untouched — re-evaluated on the next status change
   })
 
-  it('a different account gets a clean slate: the record is dropped, nothing is applied', () => {
+  it('a record of a different account is dropped, nothing is applied', () => {
     const plan = planAccountTransition(
-      SIGNED_OUT,
-      observation({ identity: 'other@example.com' }),
-      local({ restore: record() })
+      SIGNED_IN,
+      observation(),
+      local({ restore: record({ identity: 'other@example.com' }) })
     )
     expect(plan.enableCloud).toBe(false)
     expect(plan.setAiProvider).toBeNull()
@@ -155,7 +270,7 @@ describe('planAccountTransition — sign-in restore', () => {
 
   it('does not re-enable what is already on (idempotent)', () => {
     const plan = planAccountTransition(
-      SIGNED_OUT,
+      SIGNED_IN,
       observation(),
       local({ cloudEnabled: true, aiManaged: true, restore: record() })
     )
@@ -166,7 +281,7 @@ describe('planAccountTransition — sign-in restore', () => {
 
   it('drops a record that asks for nothing', () => {
     const plan = planAccountTransition(
-      SIGNED_OUT,
+      SIGNED_IN,
       observation({ entitlementsKnown: false }),
       local({ restore: record({ cloudEnabled: false, aiManaged: false }) })
     )
@@ -230,15 +345,13 @@ describe('clearRestoreSurface — an explicit user action overrules the pending 
   })
 
   it('a later entitlements refresh cannot re-enable what the user just turned off', () => {
-    // Signed in offline (entitlements unknown) → record kept…
-    const pending = record()
-    expect(
-      planAccountTransition(
-        SIGNED_OUT,
-        observation({ entitlementsKnown: false, entitlements: { ai: false, cloud: false } }),
-        local({ restore: pending })
-      ).restore
-    ).toBeUndefined()
+    // Signed in offline (entitlements unknown) → pending record persisted…
+    const pending = planAccountTransition(
+      SIGNED_OUT,
+      observation({ entitlementsKnown: false, entitlements: { ai: false, cloud: false } }),
+      local()
+    ).restore as AccountRestoreRecord
+    expect(pending).toEqual(record())
     // …user explicitly disables Cloud (IPC cloud:disable) …
     const narrowed = clearRestoreSurface(pending, true, 'cloud')
     expect(narrowed).toEqual({ identity: 'user@example.com', cloudEnabled: false, aiManaged: true })
@@ -247,6 +360,20 @@ describe('clearRestoreSurface — an explicit user action overrules the pending 
     expect(plan.enableCloud).toBe(false)
     expect(plan.setAiProvider).toBe('noteflow')
     expect(plan.restore).toBeNull()
+  })
+
+  it('after a sign-in, touching both surfaces by hand cancels the pending activation entirely', () => {
+    const pending = planAccountTransition(
+      SIGNED_OUT,
+      observation({ entitlementsKnown: false, entitlements: { ai: false, cloud: false } }),
+      local()
+    ).restore as AccountRestoreRecord
+    const afterAi = clearRestoreSurface(pending, true, 'ai') as AccountRestoreRecord
+    expect(clearRestoreSurface(afterAi, true, 'cloud')).toBeNull()
+    // With no record left, the entitlements landing switch nothing on.
+    const plan = planAccountTransition(SIGNED_IN, observation(), local())
+    expect(plan.enableCloud).toBe(false)
+    expect(plan.setAiProvider).toBeNull()
   })
 })
 
@@ -276,46 +403,53 @@ describe('parseAccountRestore', () => {
   })
 })
 
-describe('stepAiEntitlementBaseline — auto-switch to NoteFlow AI on subscribe', () => {
+describe('stepEntitlementBaseline — auto-activation on subscribe', () => {
   const ME = 'user@example.com'
-  type Obs = Parameters<typeof stepAiEntitlementBaseline>[1]
-  /** Feeds a sequence of observations and returns the autoSwitch flags. */
-  function run(observations: Obs[], start: AiEntitlementBaseline = NO_AI_BASELINE): boolean[] {
+  type Activate = ReturnType<typeof stepEntitlementBaseline>['activate']
+  interface Obs { identity: string | null; ai?: boolean; cloud?: boolean; fresh: boolean }
+  /** Feeds a sequence of observations and returns the activate flags of each step. */
+  function run(observations: Obs[], start: EntitlementBaseline = NO_ENTITLEMENT_BASELINE): Activate[] {
     let state = start
     return observations.map((obs) => {
-      const step = stepAiEntitlementBaseline(state, obs)
+      const step = stepEntitlementBaseline(state, {
+        identity: obs.identity,
+        entitlements: { ai: obs.ai ?? false, cloud: obs.cloud ?? false },
+        fresh: obs.fresh,
+      })
       state = step.next
-      return step.autoSwitch
+      return step.activate
     })
   }
+  const aiOnly = (obs: Obs[]) => run(obs).map((a) => a.ai)
+  const NONE: Activate = { ai: false, cloud: false }
 
   it('fires on a fresh false → true for the same identity', () => {
-    expect(run([
+    expect(aiOnly([
       { identity: ME, ai: false, fresh: true },
       { identity: ME, ai: true, fresh: true },
     ])).toEqual([false, true])
   })
 
   it('never fires on the first observation of an identity (boot of a subscribed user)', () => {
-    expect(run([{ identity: ME, ai: true, fresh: true }])).toEqual([false])
+    expect(run([{ identity: ME, ai: true, cloud: true, fresh: true }])).toEqual([NONE])
   })
 
   it('unknown → true is NOT a transition', () => {
     expect(run([
-      { identity: ME, ai: false, fresh: false }, // placeholder: never fetched
-      { identity: ME, ai: true, fresh: true },
-    ])).toEqual([false, false])
+      { identity: ME, fresh: false }, // placeholder: never fetched
+      { identity: ME, ai: true, cloud: true, fresh: true },
+    ])).toEqual([NONE, NONE])
   })
 
   it('a cached false (not fetched this run) is not a baseline either', () => {
     expect(run([
-      { identity: ME, ai: false, fresh: false }, // restored from settings.json
-      { identity: ME, ai: true, fresh: true },   // subscribed while the app was closed
-    ])).toEqual([false, false])
+      { identity: ME, fresh: false }, // restored from settings.json
+      { identity: ME, ai: true, cloud: true, fresh: true }, // subscribed while the app was closed
+    ])).toEqual([NONE, NONE])
   })
 
   it('an unknown observation in between does not erase a known false', () => {
-    expect(run([
+    expect(aiOnly([
       { identity: ME, ai: false, fresh: true },
       { identity: ME, ai: false, fresh: false },
       { identity: ME, ai: true, fresh: true },
@@ -323,7 +457,7 @@ describe('stepAiEntitlementBaseline — auto-switch to NoteFlow AI on subscribe'
   })
 
   it('fires only once', () => {
-    expect(run([
+    expect(aiOnly([
       { identity: ME, ai: false, fresh: true },
       { identity: ME, ai: true, fresh: true },
       { identity: ME, ai: true, fresh: true },
@@ -332,17 +466,46 @@ describe('stepAiEntitlementBaseline — auto-switch to NoteFlow AI on subscribe'
 
   it('an identity change re-establishes the baseline instead of firing', () => {
     expect(run([
-      { identity: 'a@example.com', ai: false, fresh: true },
-      { identity: null, ai: false, fresh: false },
-      { identity: 'b@example.com', ai: true, fresh: true },
-    ])).toEqual([false, false, false])
+      { identity: 'a@example.com', fresh: true },
+      { identity: null, fresh: false },
+      { identity: 'b@example.com', ai: true, cloud: true, fresh: true },
+    ])).toEqual([NONE, NONE, NONE])
   })
 
   it('signing out and back in as the same user does not carry the old false over', () => {
     expect(run([
-      { identity: ME, ai: false, fresh: true },
-      { identity: null, ai: false, fresh: false },
-      { identity: ME, ai: true, fresh: true },
-    ])).toEqual([false, false, false])
+      { identity: ME, fresh: true },
+      { identity: null, fresh: false },
+      { identity: ME, ai: true, cloud: true, fresh: true },
+    ])).toEqual([NONE, NONE, NONE])
+  })
+
+  it('subscribing to Cloud while signed in activates Cloud only', () => {
+    expect(run([
+      { identity: ME, ai: false, cloud: false, fresh: true },
+      { identity: ME, ai: false, cloud: true, fresh: true },
+    ])).toEqual([NONE, { ai: false, cloud: true }])
+  })
+
+  it('buying the bundle while signed in activates both', () => {
+    expect(run([
+      { identity: ME, ai: false, cloud: false, fresh: true },
+      { identity: ME, ai: true, cloud: true, fresh: true },
+    ])).toEqual([NONE, { ai: true, cloud: true }])
+  })
+
+  it('adding Cloud to an existing AI plan activates only Cloud', () => {
+    expect(run([
+      { identity: ME, ai: true, cloud: false, fresh: true },
+      { identity: ME, ai: true, cloud: true, fresh: true },
+    ])).toEqual([NONE, { ai: false, cloud: true }])
+  })
+
+  it('losing an entitlement never asks to switch anything (and a later re-subscribe fires again)', () => {
+    expect(run([
+      { identity: ME, ai: true, cloud: true, fresh: true },
+      { identity: ME, ai: false, cloud: false, fresh: true }, // lapsed
+      { identity: ME, ai: false, cloud: true, fresh: true }, // re-subscribed to Cloud
+    ])).toEqual([NONE, NONE, { ai: false, cloud: true }])
   })
 })

@@ -156,7 +156,9 @@ sesión y cursor propios en `settings.cliAccount`/`cliCloud`, y la misma priorid
 ver `monetization.md` § 4 "Cliente CLI (headless)".
 
 **El CLI con GitHub** (`noteflow login/push/pull`) escribe en `settings.githubSync` — en
-Windows/Linux es el **mismo `settings.json`** que la app (en macOS el CLI usa `~/.config/noteflow`).
+Windows es el **mismo `settings.json`** que la app (en Linux/macOS el CLI usa
+`~/.config/noteflow` y la app su userData `~/.config/NoteFlow` / `~/Library/Application
+Support/NoteFlow`: ficheros distintos, ver `architecture.md` § Modelo de almacenamiento).
 Por eso su `lastSync` obedece al mismo invariante que la regla de borrado del pull de la app
 ("ausente del remoto + `updated <= lastSync` ⇒ borrada"): `lastSync` solo avanza cuando el repo
 tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`). En concreto:

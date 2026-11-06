@@ -171,7 +171,7 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   `llm/index.ts` lo inyecta en el preset (`livePreset` = `withManagedCatalog(presetOf(id))`), así que
   `effectiveModel`, `acceptsModel`, `providerCapabilities` (vía `toPublic`) y `ai:llm-presets`
   (`listPresets`) usan **el mismo** catálogo: un modelo nuevo aparece en el picker con su etiqueta
-  (`LlmConfigView.modelLabel`: nombre sin prefijo de proveedor + " · Recommended" si `recommended` +
+  (`LlmConfigView.modelLabel`: nombre sin prefijo de proveedor + " (Recommended)" si `recommended` +
   "(≈N× quota)" si `costIndex >= 2`) sin release. Invariantes: refrescar **nunca** toca el modelo
   guardado (`aiLlm`), y un fallo de red / respuesta inválida **nunca** vacía ni pisa la caché buena.
   Qué pasa si el modelo guardado sale del catálogo: lo de arriba (fallback **en memoria** al primero
@@ -280,7 +280,8 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   (`BrainCanvas`). NO se fuerzan etiquetas (eso metía ruido). Prop `highlightedNoteIds`.
 - **Historial de chats:** sesiones en `userData/ai-chats.json` (local), gestionadas por `aiChatStore`
   (crear/abrir/borrar; se persiste al terminar cada respuesta). Selector de modelo en el chat
-  (cambia el modelo del preset activo). Textos del panel vía i18n (`src/i18n/{en,es}/aiPanel.ts`).
+  (cambia el modelo del preset activo; con NoteFlow AI, si el elegido tiene `costIndex >= 2`, un badge
+  rojo "xN" a su izquierda con tooltip — `ChatView`, mismo umbral que `modelLabel`). Textos del panel vía i18n (`src/i18n/{en,es}/aiPanel.ts`).
   Los **listeners del stream** (`aiChatStore.initListeners`) los monta **`App` una vez por ventana**
   (no `AiPanel`): la misma conversación corre en el cerebro y en el sidebar del editor, y una
   respuesta sigue llegando aunque se cambie de vista. `AiPanel` solo recarga config + sesiones.
@@ -458,19 +459,38 @@ tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventan
   local vía pull— lo restaurado. Main guarda **en memoria** (sesión de app, máx. 200, por `toolCallId`) la nota antes y después de
   la tool (si algo cambió) y añade `undoable: true` al `ai:chat-tool-result`; la fila de actividad
   (`ToolActivityRow`, también en el cerebro) muestra "Deshacer" (deshabilitado mientras hay streaming).
+  **Undo a 3 vías** (base = `after`, theirs = disco actual, target = `before`): solo se revierte **lo
+  que cambió esa tool**; todo lo demás se queda como está ahora en disco (ediciones del usuario en
+  otras secciones, secciones que añadió o borró después, título…). Por partes: cada sección por id
+  (cambiada por la tool → vuelve la versión `before`; añadida por la tool → se quita; sin tocar → la
+  actual), y cada campo de nota (`title`, `archived`, `favorited`, `group`+`folder` como una
+  unidad, `expiresAt`) solo si la tool lo cambió. Los **`tags` no se fusionan**: son derivados (el
+  renderer los recalcula del contenido en cada escritura y las tools no los tocan), así que se
+  **recalculan del contenido fusionado** (`extractTags` de `llm/tools.ts`, espejo del de
+  `noteUtils.ts`); en una nota cifrada se conservan los actuales. El orden de secciones es el actual.
+  El `dir` está congelado desde la creación, así que mover de grupo/carpeta no mueve ficheros. Si la
+  nota no se puede releer justo tras la tool (`after` nulo) **no se guarda snapshot** (sin base no hay
+  merge).
   `ai:chat-undo(toolCallId, force?)`: primero `undoBlock` — **nunca** (ni con `force`) si tendría que
-  re-crear la carpeta de la nota o un fichero de sección que ya no está en disco (`conflict`: se borró
-  después y puede quedar un borrado remoto pendiente para esa clave, mismo motivo que arriba) ni si la
-  nota se cifró/descifró después de la edición (`encryption`: restaurar escribiría p. ej. una copia
-  descifrada sobre la nota cifrada); la UI lo explica y quita el botón. Después, si la nota ya no
-  coincide con el snapshot post-edición
-  (`isModifiedSinceEdit`, huella sin `updated`) devuelve `modified` y la UI pide confirmación antes de
-  reintentar con `force`; `planUndo` restaura el snapshot "antes" (note.md + solo las secciones que
-  difieren, borrando las que sobran) con `applyNoteWrite` durable, o borra la nota con `applyNoteDelete`
-  si la creó la tool (la confirmación avisa de que se borrará la nota entera). La fila pasa a "Deshecho" (`ChatToolActivity.undo: 'done'`, se persiste).
-  `ai:chats-load` quita el `undo: 'available'` de las filas cuyo snapshot ya no existe (tras reiniciar)
-  → sin botón. Restaurar es de la nota entera: deshacer una edición anterior revierte también las
-  posteriores de esa nota (por eso pide confirmación).
+  re-crear la carpeta de la nota o el fichero de una sección **que la tool cambió o quitó** y ya no
+  está en disco (`conflict`: se borró después y puede quedar un borrado remoto pendiente para esa
+  clave, mismo motivo que arriba; una sección que la tool quitó también se bloquea, por conservador:
+  su borrado remoto lo encoló la propia escritura de la tool — las tools deshacibles no quitan
+  secciones, en la práctica no ocurre). Borrar después una sección que la tool **no** tocó no bloquea:
+  sigue borrada. Tampoco corre si la nota se cifró/descifró después de la edición (`encryption`:
+  restaurar escribiría p. ej. una copia descifrada sobre la nota cifrada); la UI lo explica y quita el
+  botón. Con la nota cifrada en before/after/actual (la tool solo puede cambiar campos de nota, p. ej.
+  `update_note` → grupo) se revierten esos campos y se conserva el `encryption` actual (ciphertext
+  incluido). Después, `hasUndoConflict`: devuelve `modified` (la UI pide confirmación y reintenta con
+  `force`) **solo** si algo que cambió la tool se cambió otra vez después (por el usuario o por otra
+  tool posterior); ediciones ajenas no cuentan. Con `force`, las partes en conflicto vuelven a
+  `before` y el resto de ediciones del usuario sobreviven igual. `planUndo` escribe el resultado de
+  `mergeUndo` (note.md con `updated` nuevo + solo las secciones que difieren del disco; `deleteFiles`
+  solo las que el merge quita) con `applyNoteWrite` durable, `noop` si no queda nada que revertir, o
+  borra la nota con `applyNoteDelete` si la creó la tool (ahí cualquier cambio posterior es conflicto y
+  la confirmación avisa de que se borrará la nota entera). La fila pasa a "Deshecho"
+  (`ChatToolActivity.undo: 'done'`, se persiste). `ai:chats-load` quita el `undo: 'available'` de las
+  filas cuyo snapshot ya no existe (tras reiniciar) → sin botón.
 - **Ventana despegada ("se muda"):** botón "Open in a separate window" de la cabecera del sidebar
   (deshabilitado con streaming o confirmación pendiente, con tooltip `sidebar.detachBusy`) → `aiChatStore.detachChat()` serializa `ChatHandoff` (messages,
   activeSessionId, draft, context, contextPinned, suggestions, pendingAttachments, `takenAt`) → `ai:chat-window-open`

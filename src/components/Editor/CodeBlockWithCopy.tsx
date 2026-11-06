@@ -151,36 +151,24 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
 
   const currentLabel = language ? labelFor(language) : t.editor.codeBlock.plainText
 
+  // The buttons are hover-only chips floating over the block's top corners (index.css,
+  // `.code-block-btn`). They sit outside the `<pre>` so its `overflow-x: auto` doesn't
+  // scroll them away with long lines; `is-menu-open` keeps them shown while the
+  // portaled language menu is open (the pointer leaves the block to reach it).
   return (
-    <NodeViewWrapper className="group code-block-node">
+    <NodeViewWrapper className={`code-block-node${open ? ' is-menu-open' : ''}`}>
+      <button
+        ref={buttonRef}
+        contentEditable={false}
+        onClick={() => (open ? setOpen(false) : openDropdown())}
+        className="code-block-btn code-lang-button"
+      >
+        {currentLabel}
+      </button>
+      <button contentEditable={false} onClick={handleCopy} className="code-block-btn code-copy-button">
+        {copied ? t.editor.codeBlock.copied : t.editor.codeBlock.copy}
+      </button>
       <pre className={language ? 'has-language' : undefined}>
-        <button
-          ref={buttonRef}
-          contentEditable={false}
-          onClick={() => (open ? setOpen(false) : openDropdown())}
-          className="code-lang-button absolute top-2 left-2 transition-opacity text-xs px-2 py-1 rounded opacity-60 group-hover:opacity-100"
-          style={{
-            background: 'rgb(var(--bg-2))',
-            color: 'rgb(var(--text-muted))',
-            border: '1px solid rgb(var(--border))',
-            lineHeight: 1,
-          }}
-        >
-          {currentLabel}
-        </button>
-        <button
-          contentEditable={false}
-          onClick={handleCopy}
-          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs px-2 py-1 rounded"
-          style={{
-            background: 'rgb(var(--bg-2))',
-            color: 'rgb(var(--text-muted))',
-            border: '1px solid rgb(var(--border))',
-            lineHeight: 1,
-          }}
-        >
-          {copied ? t.editor.codeBlock.copied : t.editor.codeBlock.copy}
-        </button>
         <NodeViewContent as="code" className={language ? `language-${language}` : undefined} />
       </pre>
       {open &&

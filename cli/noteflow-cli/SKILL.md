@@ -1,1040 +1,278 @@
 ---
 name: noteflow-cli
-description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.6.0
+description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
+version: 2.7.0
 ---
 
-# NoteFlow CLI — Referencia completa
+# NoteFlow CLI — guía para agentes
 
-NoteFlow CLI es un script Node.js standalone (`cli/noteflow.js`) sin dependencias externas. Escribe/lee directamente en el directorio de notas de NoteFlow, compartiendo los mismos archivos que la app de escritorio.
+`noteflow` es un script Node.js que lee y escribe directamente en el directorio de notas de la app
+de escritorio NoteFlow (los mismos ficheros). Esta guía recoge **lo que el CLI no te avisa por sí
+solo**. La sintaxis completa de cada comando está en **`noteflow help <comando>`** (y en
+https://yagoid.github.io/noteflow/cli).
 
-## Instalación
+**Si un comando falla, lee el error: dice qué hacer.** Nota o sección inexistente (`Did you mean
+"…"?` + las existentes), título ambiguo (lista las coincidencias), flag desconocido, flags
+incompatibles o uso incorrecto salen con exit 1 sin escribir nada. Corrige con lo que te dice y
+reintenta. Los datos van a stdout y los avisos y errores a stderr; con `--json`, stdout lleva solo
+el JSON.
 
-### Linux/RPi headless
-```bash
-curl -fsSL https://raw.githubusercontent.com/yagoid/noteflow/main/cli/install-cli.sh | sudo bash
-```
+## Checklist para agentes (en cada tarea)
 
-### Linux desktop / Windows
-Se instala automáticamente con el `.deb` o `.exe` de NoteFlow. No requiere pasos adicionales.
+1. **¿Hay sync?** `noteflow status --json` (cómo leerlo: [Ofrécete a activar el
+   sync](#ofrécete-a-activar-el-sync), paso 1).
+2. **Sin sync → ofrécete UNA vez a activarlo, antes de escribir** (lo haces tú; el usuario solo
+   autoriza o te da un código). Si dice que no, trabaja en local y no insistas.
+3. **Con sync, `noteflow pull` al empezar**, también si la tarea solo lee (así respondes con lo
+   último) y aunque solo vayas a añadir una línea (evita conflictos con otro dispositivo).
+4. **Haz los cambios:** nombres de sección exactos (`noteflow sections "<nota>"`), `read` (no
+   `get`) para procesar texto, `path` + editar + `touch` para ediciones parciales, `--create` solo
+   para lo que de verdad es nuevo. Relee con `read` lo que escribiste.
+5. **Mira la línea de sync de cada escritura.** Si todas mostraron `Synced to GitHub` / `Synced
+   to NoteFlow Cloud`, no hace falta nada más. Si alguna dio error de sync o no la mostró:
+   `noteflow pull`, luego `noteflow push`, y comprueba `Done: … 0 errors` (ver [Sincroniza y
+   verifica](#sincroniza-y-verifica)).
+6. **Tras un login con éxito, `noteflow push`**: lo escrito antes del login sigue solo en local.
+   Excepción: con claves `private (e2ee)`, o `No Cloud keys yet` sin `cloud setup`, el push
+   fallaría (ver paso 5 de [Ofrécete a activar el sync](#ofrécete-a-activar-el-sync)).
+7. **Informa al usuario** al final de lo que quedó sin sincronizar (solo en local, errores,
+   copias de conflicto), con el mensaje literal.
 
-> **Windows — shims:** en PATH van dos wrappers: `noteflow.cmd` (cmd.exe) y
-> `noteflow.ps1` (PowerShell lo prefiere sobre el `.cmd`). El `.ps1` pasa
-> argumentos multilínea y Unicode intactos (el `.cmd` no — ver la nota en `set`)
-> y además, dentro de una tubería, **reenvía stdin al CLI como bytes UTF-8** y
-> fija `OutputEncoding` a UTF-8 mientras dura la llamada (si no, PS 5.1 decodifica
-> la salida con la codepage OEM: `Consideración` → `Consideraci├│n`). Es decir,
-> `"texto" | noteflow set … --stdin` y `$x = noteflow read …` funcionan con
-> acentos desde PowerShell.
-> Si la ExecutionPolicy de PowerShell es `Restricted`, el `.ps1` falla con
-> "running scripts is disabled": ejecuta `noteflow.cmd` explícitamente o ajusta
-> la política (`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`).
->
-> Detalles del `.ps1` en tubería: la salida se reemite desde PowerShell, así que
-> se puede capturar (`$x = "t" | noteflow … --json`) y redirigir (`> out.json`);
-> **stderr** de esa rama va directo a la consola y **no** se captura con `2>&1`.
-> Si un `--stdin` por tubería llega vacío, el shim instalado es anterior a este
-> arreglo (`self-update` solo actualiza `noteflow.js`, no los shims): usa
-> `--file`, canaliza a `noteflow.cmd`, o actualiza NoteFlow.
+## Modelo mental
 
-### Requisito
-Node.js ≥ 18. Sin dependencias npm.
+- **Nota = título + secciones** (pestañas). Todo se direcciona **por nombre**, nunca por id:
+  `noteflow read "<título>" "<sección>"`. El título puede ser parcial (con varias coincidencias el
+  comando falla y las lista). Los nombres de sección pueden repetirse: elige uno con sufijo 1-based,
+  `"Tasks#2"`. Entrecomilla los nombres con espacios.
+- **Organización: grupos → carpetas → notas.** Una carpeta vive siempre dentro de un grupo (un solo
+  nivel); una nota puede no tener grupo.
+- **Nota diaria:** `noteflow add "<texto>"` sin `--title` escribe en la nota de hoy (título
+  `DD-MM-YYYY`, sección `Note`), que se crea sola si no existe.
+- **Dos modos de sección.** Solo cambian cómo la muestra la app; el `.md` es siempre texto/markdown.
+  - **Modo markdown** (por defecto): la app renderiza títulos, listas, `- [ ]`, tablas… Para
+    contenido estructurado que el usuario quiere ver formateado.
+  - **Modo texto** (`--raw`): se ve tal cual, sin renderizar. Para logs, comandos, salida de
+    herramientas o texto que debe verse exacto.
+  - El flag **solo cuenta al crear** la sección o la nota; sobre una existente no cambia nada (el
+    usuario cambia el modo desde la app).
+- **En disco**, cada nota es una carpeta `<slug>-<id>/` con `note.md` (metadatos e índice de
+  secciones) y un `.md` por sección. No edites `note.md` a mano: para crear o renombrar secciones,
+  `section add` / `section rename`.
+- **Notas cifradas:** el CLI las ignora en todos los comandos (no las lista ni las lee).
 
----
+## Fallos silenciosos (el CLI no avisa, o sale con exit 0)
 
-## Directorio de notas
+- **Un fallo de sync sale con exit 0.** El cambio local ya está escrito; solo la salida dice si
+  subió. Lee stdout y stderr de cada escritura ([Sincroniza y verifica](#sincroniza-y-verifica)).
+- **`set` reemplaza la sección entera; `add` añade al final.** No uses `set` para "añadir".
+- **Windows: `noteflow.cmd` trunca en silencio el contenido multilínea** en el primer salto de línea
+  (y descarta los flags que vienen detrás). Contenido no trivial (varias líneas, comillas,
+  caracteres raros) → **`--file <ruta>`** o **`--stdin`**, en cualquier sistema.
+- **Tras editar un `.md` obtenido con `path`, `noteflow touch "<título>"` es obligatorio**: sin él
+  el cambio queda solo en local y no se sincroniza.
+- **`touch` y cualquier escritura borran los `.md` sueltos** de la carpeta de la nota (todo lo que
+  no sea `note.md` ni una sección del índice). No dejes ahí temporales ni copias.
+- **`add --title`** no crea la nota sin `--create`, y con un título parcial que coincide con varias
+  notas **escribe en la primera sin avisar**: usa el título exacto. Con un `--group`/`--folder` que
+  no existe, avisa por stderr pero escribe igual, sin agrupar.
+- **`--raw` / `--markdown` sobre una sección existente no hacen nada**, y `section add` crea
+  siempre una sección nueva aunque ya exista una con ese nombre (queda duplicada).
+- **App de escritorio abierta ⇒ se pierden los grupos y carpetas creados, renombrados o borrados
+  desde el CLI**: la app reescribe `groups.json`/`folders.json` desde memoria al guardar y en su
+  auto-sync. Los cambios de nota (contenido, secciones, favorito, archivo) sí sobreviven. El CLI
+  avisa por stderr si ve la app abierta: pide al usuario que la cierre antes, o que haga esos
+  cambios desde la app.
+- **`pull --force` pisa notas locales más nuevas.** No lo uses sin que el usuario lo pida, aunque el
+  pull diga `skipped (local is newer — use --force to override)`: eso es normal y el `push` las sube.
+- **El `pull` de GitHub no aplica borrados:** si avisa `N local notes are not on GitHub (new here,
+  or deleted on another device)`, un `push` resucitaría las borradas en otro dispositivo. Haz
+  `push` si son notas nuevas (p. ej. las tuyas); si no lo sabes, pregunta al usuario.
+- **Borrar sin `--yes`** (`delete`, `section delete`, `group delete`, `folder delete`) en un agente,
+  sin terminal, responde "no": `Cancelled`, exit 0, nada borrado. Con sync, `delete` borra la nota
+  también del remoto (y de los demás dispositivos).
+- **`favorite` y `archive` alternan** (toggle): dos veces deshacen el cambio.
+- **`NOTEFLOW_NOTES_DIR=<dir>` solo cambia el directorio de notas, no la sesión de sync**: con sync
+  activo, lo que escribas en ese directorio de pruebas se sube a la cuenta real del usuario. Para
+  aislarlo, apunta también `APPDATA` (Windows) o `XDG_CONFIG_HOME` (Linux/macOS) a un directorio
+  temporal y compruébalo con `noteflow status --json`.
 
-| Plataforma | Ruta |
-|---|---|
-| Linux | `~/.local/share/noteflow-notes/` |
-| Windows / macOS | `~/noteflow-notes/` |
+## Chuleta de comandos
 
----
+Detalle de cada uno: **`noteflow help <comando>`**. `--json` (salida para máquina en stdout) existe
+en `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `groups`, `folders`, `status`,
+`cloud status` y `login --no-wait`.
 
-## Formato de nota (v2 — carpeta por nota)
+**Leer**
+- `noteflow list [--tag t] [--group g] [--folder f] [--archived] [--json]` — notas (sin las
+  archivadas salvo `--archived`); el JSON incluye los nombres de sección.
+- `noteflow sections "<nota>"` — secciones y su modo (`text` / `markdown`). Alias: `section list`.
+- `noteflow read "<nota>" ["<sección>"] [--section s] [--json]` — contenido **verbatim**, apto para
+  pipe y para procesar (sin sección: la nota entera como markdown).
+- `noteflow get "<nota>" [--section s] [--json]` — lo mismo, decorado para humanos: no lo uses para
+  procesar texto.
+- `noteflow path "<nota>" ["<sección>"] [--json]` — ruta absoluta del `.md` de la sección (o de la
+  carpeta de la nota).
 
-Cada nota es un **directorio** `<slug>-<id>/` con un `note.md` (solo frontmatter:
-metadatos + índice de secciones) y **un `.md` por sección** (markdown puro):
+**Escribir**
+- `noteflow add ["<texto>"] [--text t | --file f | --stdin] [--title nota] [--section s]
+  [--create] [--tag t] [--group g [--folder f]] [--raw] [--dry-run] [--json]` — **añade al final**.
+  `--create` crea lo que falte (la nota de `--title` y/o la sección).
+- `noteflow set "<nota>" "<sección>" (--text t | --file f | --stdin) [--create] [--raw] [--dry-run]
+  [--json]` — **reemplaza** la sección (`--create`: la crea si no existe). La nota debe existir.
+- `--dry-run` (en `add`/`set`) valida el destino sin escribir: falla igual que la ejecución real.
+- `noteflow new "<título>" [--section s] [--group g [--folder f]] [--raw] [--json]` — nota vacía.
+- `noteflow touch "<nota>"` — tras editar un `.md` a mano: relee la nota, bumpea `updated:` y
+  sincroniza.
+- `noteflow section add "<nota>" "<nombre>" [--raw]` · `section rename "<nota>" "<viejo>"
+  "<nuevo>"` · `section delete "<nota>" "<nombre>" --yes` (no borra la última).
+- `noteflow rename "<nota>" "<nuevo título>"` · `noteflow delete "<nota>" --yes [--json]` (alias `rm`).
+- `noteflow move "<nota>" --group g [--folder f]` · `noteflow move "<nota>" --ungroup`.
+- `noteflow favorite "<nota>"` (alias `pin`) · `noteflow archive "<nota>"` — toggles.
 
-```
-proyecto-alpha-abc12345/
-  note.md       ← ancla de metadatos
-  sec001.md     ← cuerpo de la sección "Note"
-  sec002.md     ← cuerpo de la sección "Tasks"
-```
+**Grupos y carpetas**
+- `noteflow groups [--json]` · `group create "<nombre>" [--color c]` · `group delete "<nombre>"
+  --yes` (sus notas quedan sin grupo y sus carpetas se borran).
+- `noteflow folders [--group g] [--json]` · `folder create "<nombre>" --group g` · `folder rename
+  "<nombre>" "<nuevo>" [--group g]` · `folder delete "<nombre>" [--group g] --yes` (sus notas
+  vuelven a la raíz del grupo).
 
-`note.md`:
-
-```
----
-id: "abc12345"
-title: "31-03-2026"
-tags: ["urgent", "backend"]
-created: "2026-03-31T10:00:00.000Z"
-updated: "2026-03-31T10:05:00.000Z"
-formatVersion: 2
-sections:
-  - id: "sec001"
-    name: "Note"
-    file: "sec001.md"
-    isRawMode: true
-  - id: "sec002"
-    name: "Tasks"
-    file: "sec002.md"
----
-```
-
-- El contenido de cada sección vive en su archivo `<sectionId>.md` (sin frontmatter).
-- `updated:` de `note.md` es el timestamp canónico de sincronización de toda la nota.
-- `isRawMode` indica el **modo de sección** (ver abajo; sin la clave = modo markdown). En ambos modos el `<sectionId>.md`
-  contiene markdown / texto plano — nunca HTML.
-- Notas con `encryption:` en `note.md` están cifradas (la carpeta solo contiene
-  `note.md`) — el CLI las ignora.
-- El marcador `.noteflow-format` (contenido `2`) en la raíz indica el formato v2.
-- La variable de entorno `NOTEFLOW_NOTES_DIR` permite apuntar a otro directorio
-  (scripting / testing).
-
-### Modos de sección (solo hay dos)
-
-El modo solo cambia **cómo muestra la app** la sección; el fichero `.md` guarda
-markdown / texto plano en los dos casos (la app serializa el editor a markdown).
-
-| Modo | `isRawMode` | Flag del CLI | Qué ve el usuario en la app |
-|---|---|---|---|
-| **Modo markdown** | `false` (o sin la clave) | `--markdown` / `--rich` (**default del CLI**) | El markdown **renderizado**: títulos, listas, checkboxes, negritas, tablas, código… |
-| **Modo texto** | `true` | `--raw` | El contenido **tal cual, sin renderizar**: un `# Título` se ve literalmente con la almohadilla, `- [ ] x` como texto |
-
-Cuándo usar cada uno:
-- Escribes **markdown que el usuario quiere ver formateado** (títulos, listas de
-  tareas, tablas, resúmenes estructurados) → default (modo markdown); no hace
-  falta flag (`--markdown`/`--rich` lo dicen explícitamente).
-- Texto plano, logs, comandos, salida de herramientas, o el usuario quiere ver el
-  texto exactamente como está → `--raw` (modo texto).
-- Los flags solo fijan el modo al **crear** la sección (o la nota); sobre una sección
-  existente no cambian su modo (el usuario lo cambia en la app: menú de la sección
-  o `Ctrl+M`).
-
----
-
-## Comandos
-
-### `add` — Añadir texto a una nota
-
-```bash
-noteflow add [<texto>] [fuente de contenido] [opciones]
-```
-
-Añade texto a la nota diaria de hoy (título `DD-MM-YYYY`; se auto-crea si no
-existe), o a la nota indicada con `--title`. **Con `--title`, la nota debe
-existir**: si no hay match el comando **falla con exit 1** salvo que pases
-`--create` (evita crear notas fantasma por un typo en el título).
-
-**Fuente del contenido** — elige UNA (posicional o flag, no ambas a la vez):
-
-| Fuente | Descripción |
-|---|---|
-| `<texto>` posicional | Texto inline como argumento |
-| `--text "<contenido>"` | Texto inline como flag |
-| `--file <ruta>` | Lee el contenido de un archivo |
-| `--stdin` | Lee de stdin (también se usa automáticamente al recibir un pipe) |
-
-| Opción | Descripción |
-|---|---|
-| `--title <título>` | Escribir en una nota con ese título en lugar de la del día |
-| `--section <nombre>` | Sección/pestaña destino, **existente** (nombre exacto; si no existe → error salvo `--create`). Default: `Note` |
-| `--create` | Crea **lo que falte**: la nota de `--title` y/o la sección de `--section` (sin él, cualquiera de las dos que falte → error) |
-| `--tag <tag>` | Añade este tag a la nota (si no lo tiene ya) |
-| `--group <nombre>` | Asigna la nota a un grupo |
-| `--folder <nombre>` | Coloca la nota en una carpeta de ese grupo (requiere `--group`) |
-| `--raw` | Sección nueva en **modo texto** (se ve tal cual, sin renderizar) |
-| `--markdown` / `--rich` | Sección nueva en **modo markdown** (la app renderiza el markdown) — default |
-| `--dry-run` | Resuelve el destino y muestra qué haría **sin escribir ni sincronizar** (falla igual que la ejecución real: sirve para validar) |
-| `--json` | Resultado JSON en stdout (líneas informativas → stderr) |
-
-**Comportamiento de append:** el texto se añade al final del contenido existente de la sección, separado por `\n`.
-
-**`--section` explícito resuelve igual que en `set`: solo nombre exacto**
-(sin distinguir mayúsculas) + sufijo `#n` para duplicados; con varios homónimos
-sin `#n` **falla** en vez de adivinar. **Nunca** escribe en una sección por
-coincidencia parcial, y **sin match exacto falla con exit 1** (no escribe nada) —
-así un typo no deja secciones basura. El error sugiere primero las parecidas
-(subcadena, mismas palabras o un typo de una/dos letras) y luego lista las existentes:
-
-```
-  Error: No section named "Improvement" in "NOTEFLOW-MOBILE". Did you mean "Improvements"?
-  Existing: Urgent, Features, Improvements, Errors
-  Use the exact name, or pass --create to create it.
-```
-
-Con `--json` el mismo error sale **además en stdout** como JSON, para que un agente
-se autocorrija: `{ "error": "<mensaje>", "code": "section_not_found", "note": "…",
-"section": "Improvement", "sections": [...todas...], "suggestions": ["Improvements"] }`.
-`--dry-run` reproduce el error (sirve para validar sin escribir). Para **crear** la
-sección a propósito: `--create` (si hay parecidas, lo avisa por **stderr**: `Note: no
-section named "EN" — created it. Similar existing: Comentario`; con `--dry-run`,
-`would create` y `createdSection: true`), o `noteflow section add`.
-
-**Sin `--section`, el default `Note` es exacto-o-crear** (sin `--create`): `noteflow
-add "texto"` a la nota diaria sigue funcionando aunque no tenga `Note`, sin el aviso
-de parecidas (no avisa cada vez de que existe `Meeting Notes`) y sin `#n`: toma la
-primera sección llamada `Note`. Si la nota se crea en ese momento (nota diaria
-auto-creada o `--title` + `--create`), su sección —`Note` o la de `--section`— se
-crea con ella.
-
-**JSON de `add`/`set`:** `{ "note": "<título>", "dirname": "…", "section": "…",
-"createdNote": bool, "createdSection": bool, "bytesWritten": n }` (con `--dry-run`
-añade `"dryRun": true` y `dirname` es `null` si la nota se crearía).
+**Sync y mantenimiento**
+- `noteflow status [--json]` — notas, directorio de notas y estado del sync.
+- `noteflow pull` (alias `update`) · `noteflow push` — con el backend activo (NoteFlow Cloud si hay
+  sesión, si no GitHub). `--force` solo en `pull` (ver arriba).
+- `noteflow login [repo] --no-wait [--json]` → `noteflow login --finish` — GitHub en dos pasos
+  (`--no-pull`: conecta sin el pull inicial). `noteflow logout`.
+- `noteflow cloud login <email> --send-code` → `noteflow cloud login <email> --code <código>` —
+  NoteFlow Cloud en dos pasos (`--no-pull` igual). También `cloud logout`, `cloud status [--json]`,
+  `cloud setup`, `cloud push`, `cloud pull`.
+- `noteflow migrate` — migración única de notas antiguas (un `.md` plano por nota) al formato de
+  carpetas.
+- `noteflow self-update` — actualiza el script del CLI. `noteflow version` — versión instalada.
 
 ```bash
-noteflow add "Fix: CORS en /api/notes"
-noteflow add "Revisar logs del servidor" --section "Tasks" --create --tag urgent
-noteflow add "Reunión con cliente" --title "Proyecto Alpha" --section "Meetings"   # "Meetings" debe existir
-noteflow add --file notas.md --title "Nota nueva" --create
+noteflow sections "Proyecto Alpha"                                  # nombres exactos
+noteflow read "Proyecto Alpha" "Tasks"                              # leer verbatim
+noteflow add "- [ ] Revisar logs" --title "Proyecto Alpha" --section "Tasks"
+noteflow set "Proyecto Alpha" "Resumen" --file resumen.md --create  # sección nueva
 git log --oneline -5 | noteflow add --stdin --section "Log" --create --raw
 ```
 
----
-
-### `new` — Crear nota vacía
-
-```bash
-noteflow new <título> [opciones]
-```
-
-| Opción | Descripción |
-|---|---|
-| `--section <nombre>` | Nombre de la primera sección. Default: `Note` |
-| `--group <nombre>` | Asignar a un grupo |
-| `--folder <nombre>` | Colocar en una carpeta de ese grupo (requiere `--group`) |
-| `--raw` | La sección en **modo texto** (default: modo markdown) |
-| `--json` | Devuelve `{ id, title, dirname }` en JSON |
-
-```bash
-noteflow new "Proyecto Alpha"
-noteflow new "Sprint 14" --group backend --section "Planning"
-noteflow new "Mi nota" --json
-```
-
----
-
-### `list` — Listar notas
-
-```bash
-noteflow list [opciones]
-```
-
-Muestra notas ordenadas por `updated` desc. Por defecto excluye archivadas.
-
-| Opción | Descripción |
-|---|---|
-| `--tag <tag>` | Filtrar por tag |
-| `--group <nombre>` | Filtrar por grupo |
-| `--folder <nombre>` | Filtrar por carpeta (desambigua con `--group` si el nombre se repite) |
-| `--archived` | Incluir notas archivadas |
-| `--json` | Array JSON con metadata completa de cada nota |
-
-Cada elemento del JSON incluye: `id`, `title`, `tags`, `group`, `folder`, `created`, `updated`, `archived`, `favorited`, `sections` (array de nombres), `dirname`.
-
-```bash
-noteflow list
-noteflow list --group backend
-noteflow list --tag urgent --json
-noteflow list --archived
-```
-
----
-
-### `get` — Ver contenido de una nota
-
-```bash
-noteflow get <título> [opciones]
-```
-
-El título puede ser parcial — si hay varios matches, muestra la lista y pide más precisión.
-
-| Opción | Descripción |
-|---|---|
-| `--section <nombre>` | Mostrar solo esta sección |
-| `--json` | JSON completo con todas las secciones y su contenido |
-
-El JSON incluye: `id`, `title`, `tags`, `group`, `folder`, `created`, `updated`, `archived`, `favorited`, `sections[]` (con `id`, `name`, `content`, `isRawMode`), `dirname`.
-
-```bash
-noteflow get "Proyecto Alpha"
-noteflow get "Proyecto Alpha" --section Tasks
-noteflow get "31-03" --json
-```
-
----
-
-### `read` — Leer el contenido tal cual (para pipes / agentes)
-
-```bash
-noteflow read <título> [sección]
-```
-
-Imprime el contenido **tal cual** en stdout, **sin indentar ni decorar** — a
-diferencia de `get`, es apto para pipe y para que un agente lo consuma directo.
-Es la forma recomendada de **leer** una sección concreta.
-
-| Forma | Resultado |
-|---|---|
-| `noteflow read "Proyecto Alpha"` | Nota entera como markdown limpio (`# título`, `## sección` + cuerpo) |
-| `noteflow read "Proyecto Alpha" "Tasks"` | Solo el cuerpo de esa sección (verbatim) |
-| `noteflow read "Proyecto Alpha" --section Tasks` | Igual, forma con flag (útil con títulos multi-palabra) |
-| `noteflow read "Proyecto Alpha" --json` | JSON con todas las secciones (o solo una si se indica) |
-
-- El título puede ser parcial. Si hay varios matches, error pidiendo precisión.
-- **Nombres de sección duplicados:** apunta a uno con un sufijo 1-based, p. ej.
-  `"Tasks#2"`. Si hay ambigüedad sin sufijo, el error te dice exactamente qué escribir.
-- **Matching tolerante (solo `read` y `path`):** si no hay nombre exacto, prueba
-  por subcadena (`"Variables"` → `Variables Entorno`) y, si tampoco, por palabras
-  ignorando mayúsculas, acentos y palabras vacías (`de`, `la`, `the`…), así
-  `"Variables de entorno"` encuentra `Variables Entorno`. Solo vale si el
-  candidato es **único** (varios → error de ambigüedad); si acierta por esta vía
-  lo avisa por **stderr** (`Note: matched section "…"`), nunca por stdout — la
-  salida sigue siendo verbatim y apta para pipe. `add`/`set` y
-  `section rename`/`delete` **no** lo usan: exigen el nombre exacto (escribirían
-  o destruirían la sección equivocada — `"EN"` está contenido en `"Comentario"`).
-
-```bash
-noteflow read "Proyecto Alpha" Tasks
-noteflow read "Proyecto Alpha" "Tasks#2"
-noteflow read "Proyecto Alpha" --json | jq '.sections[].name'
-```
-
----
-
-### `set` — Sobrescribir (o crear) una sección
-
-```bash
-noteflow set <título> <sección> [fuente de contenido] [--create] [--raw] [--dry-run] [--json]
-```
-
-**Reemplaza** el contenido de una sección **existente** (con `--create`, la crea si no
-existe). Es el complemento de `add`, que solo **añade al final**. Es la forma
-recomendada de **editar** una sección. La nota tiene que existir (`--create` en `set`
-solo crea la sección; las notas se crean con `new` o `add --title … --create`).
-
-| Fuente (gana la primera presente) | Descripción |
-|---|---|
-| `--text "<contenido>"` | Texto inline |
-| `--file <ruta>` | Lee el contenido de un archivo |
-| `--stdin` | Lee de stdin (también se usa automáticamente al recibir un pipe) |
-| `--create` | Crea la sección si no existe (sin él → error) |
-| `--raw` | Si crea la sección, la crea en modo texto (default: modo markdown; `--markdown`/`--rich` lo explicitan) |
-| `--dry-run` | Resuelve el destino y muestra qué haría **sin escribir ni sincronizar** (falla igual que la ejecución real) |
-| `--json` | Resultado JSON en stdout (mismo shape que `add`; info → stderr) |
-
-- **Solo nombre exacto** (sin distinguir mayúsculas): nunca sobrescribe una sección
-  por coincidencia parcial. Sin match exacto **falla con exit 1** igual que `add
-  --section` (`Did you mean "…"?` + `Existing: …`; con `--json`, también el objeto
-  `{ error, code: "section_not_found", note, section, sections, suggestions }` en
-  stdout). Corrige el nombre con lo que sugiere, o pasa `--create` si de verdad es
-  una sección nueva: se crea (`Created section "X"`) y, si existen parecidas, avisa
-  por **stderr** (`Note: no section named "EN" — created it. Similar existing:
-  Comentario`; con `--dry-run`: `would create`).
-- Nombres duplicados: usa el sufijo `#n` (`"Tasks#2"`). Con varios homónimos sin
-  sufijo, `set` **falla** en vez de adivinar.
-
-```bash
-noteflow set "Proyecto Alpha" Tasks --text "- [ ] deploy"
-cat todo.md | noteflow set "Proyecto Alpha" Tasks --stdin
-noteflow set "Proyecto Alpha" Notas --file ./notas.txt --create   # "Notas" es nueva
-```
-
-> **⚠ Windows — contenido multilínea o complejo:** el shim `noteflow.cmd`
-> (cmd.exe) **trunca los argumentos multilínea** en el primer salto de línea y
-> descarta el resto de la línea de comandos (se pierden hasta los flags que
-> vengan después). Desde PowerShell se usa automáticamente el shim
-> `noteflow.ps1`, que pasa argv multilínea y Unicode intactos y **sí reenvía la
-> tubería a stdin** (en UTF-8). Aun así, la vía más fiable para **varias líneas**
-> o caracteres conflictivos es **`--file <ruta>`** (o `--stdin`; el CLI ya limpia
-> el BOM que PowerShell añade). Regla práctica para agentes: **contenido no
-> trivial → `--file` o `--stdin`.** Si un `--stdin` por tubería llega vacío en
-> Windows, el CLI falla con un error que lo explica: el `noteflow.ps1` instalado
-> es anterior al arreglo (ver la nota de shims en *Instalación*).
-
-**Editar una parte concreta de una sección grande:** el CLI edita a nivel de
-sección (no hay find-replace). Con `set` el patrón es leer → modificar → sobrescribir:
-
-```bash
-noteflow read "Proyecto Alpha" Arquitectura > sec.md   # (en PowerShell, esto pasa a CRLF)
-# …editas sec.md…
-noteflow set "Proyecto Alpha" Arquitectura --file sec.md
-```
-
-> Si tienes herramientas de edición propias (un agente con edit/patch), evita el
-> round-trip: **`noteflow path` + `touch`** te dejan editar el `.md` de la sección
-> directamente en disco (ver abajo).
-
----
-
-### `path` — Ruta absoluta del `.md` de una sección (o del dir de la nota)
-
-```bash
-noteflow path <título> [sección]
-```
-
-Imprime **rutas absolutas** en stdout, **verbatim y sin decorar** (igual que `read`).
-Sirve para **editar el `.md` de una sección directamente con tus propias
-herramientas** en vez de hacer round-trips `read` → `set --file`. Después de editar,
-ejecuta **`noteflow touch <título>`** (bumpea `updated:` y sincroniza).
-
-| Forma | Resultado |
-|---|---|
-| `noteflow path "Proyecto Alpha"` | Ruta absoluta del **directorio** de la nota |
-| `noteflow path "Proyecto Alpha" Tasks` | Ruta absoluta del `.md` de esa sección |
-| `noteflow path "Proyecto Alpha" --section Tasks` | Igual, forma con flag (útil con títulos multi-palabra) |
-| `noteflow path "Proyecto Alpha" --json` | `{ id, title, dir, noteFile, sections: [{ id, name, file, isRawMode }] }` |
-| `noteflow path "Proyecto Alpha" Tasks --json` | `{ id, title, dir, section, file, isRawMode }` |
-
-- En `--json`, `file` es siempre la ruta **absoluta** del `.md`.
-- Resolución idéntica a `read`: título parcial, sufijo `#n` para nombres de sección
-  duplicados, matching tolerante como último recurso (aviso por stderr), error
-  pidiendo precisión si hay ambigüedad. Notas cifradas se ignoran.
-
-```bash
-noteflow path "Proyecto Alpha" Tasks
-# C:\Users\me\noteflow-notes\proyecto-alpha-abc12345\sec002.md
-
-noteflow path "Proyecto Alpha" --json | jq -r '.sections[] | "\(.name) → \(.file)"'
-```
-
----
-
-### `touch` — Bumpear `updated:` y sincronizar tras editar a mano
-
-```bash
-noteflow touch <título>
-```
-
-Relee la nota **desde disco** y la reescribe: bumpea el `updated:` de `note.md` (el
-timestamp canónico de sync de la nota) y empuja `note.md` + todos los `.md` de
-sección al backend de sync activo (Cloud si hay sesión, si no GitHub). Es el
-**paso obligatorio después** de editar un `.md` con `noteflow path`: sin él, el
-cambio queda solo en local y el sync no se entera.
-
-- **La app de escritorio sí detecta las ediciones externas por su cuenta** (vigila
-  el dir de notas de forma recursiva y refresca la nota abierta). Lo que aporta
-  `touch` es otra cosa: bumpear `updated:` (el timestamp canónico de sync) y
-  empujar los ficheros al backend.
-- Sin sync configurado no falla: bumpea `updated:` y no imprime línea de sync.
-- Como cualquier comando que escribe, reescribe la carpeta de la nota: los `.md`
-  que no sean `note.md` ni una sección listada en el índice **se eliminan**. No
-  dejes ficheros sueltos dentro de la carpeta de una nota.
-- No crea ni renombra secciones: para eso usa `section add` / `section rename`
-  (editar `note.md` a mano no es una vía soportada).
-
-```bash
-SEC=$(noteflow path "Proyecto Alpha" Tasks)
-# …editas $SEC con tus herramientas…
-noteflow touch "Proyecto Alpha"
-# Updated "Proyecto Alpha"  (updated: 2026-07-16T17:37:48.807Z)
-# Synced to NoteFlow Cloud
-```
-
----
-
-### `sections` — Ver secciones de una nota
-
-```bash
-noteflow sections <título>
-```
-
-Lista las secciones con nombre, número de líneas y modo (`text` = modo texto, `markdown` = modo markdown).
-
-```bash
-noteflow sections "Proyecto Alpha"
-# Secciones de "Proyecto Alpha":
-#   Note  (3 lines, text)
-#   Tasks  (5 lines, markdown)
-```
-
----
-
-### `section` — Gestionar secciones (por nombre)
-
-```bash
-noteflow section list   <título>
-noteflow section add    <título> <nombre> [--raw]
-noteflow section rename <título> <viejo> <nuevo>
-noteflow section delete <título> <nombre> [--yes]
-```
-
-Gestiona las secciones de una nota **por nombre**, sin necesidad de ids.
-
-| Subcomando | Descripción |
-|---|---|
-| `list` | Alias de `noteflow sections <título>` |
-| `add` | Crea una sección vacía, siempre nueva (aunque ya exista una con ese nombre); modo markdown por defecto, `--raw` para modo texto |
-| `rename` | Renombra una sección (la carpeta/archivo no cambia — va por id) |
-| `delete` | Borra una sección (confirm salvo `--yes`). **Rechaza borrar la última** |
-
-- Los nombres de sección **no son únicos**: desambigua duplicados con un sufijo
-  1-based, p. ej. `"Tasks#2"`. Entrecomilla los nombres con espacios.
-- `rename` y `delete` **solo aceptan el nombre exacto** (sin distinguir
-  mayúsculas). Sin match exacto fallan (exit 1, nada cambia) listando las
-  secciones y, si hay alguna parecida, `Did you mean: "…"?` — nunca actúan sobre
-  ella.
-
-```bash
-noteflow section add "Proyecto Alpha" "Meeting Notes"
-noteflow section rename "Proyecto Alpha" Tasks To-do
-noteflow section delete "Proyecto Alpha" Scratch --yes
-noteflow section delete "Proyecto Alpha" "Tasks#2"   # la 2ª sección llamada "Tasks"
-```
-
----
-
-### `delete` / `rm` — Eliminar nota
-
-```bash
-noteflow delete <título> [--yes] [--json]
-```
-
-Pide confirmación salvo con `--yes`. Si hay sync activo, también la elimina del
-remoto (Cloud o GitHub). `--json` imprime
-`{ "deleted": true|false, "note": "<título>" }` en stdout (info → stderr).
-
-```bash
-noteflow delete "Borrador temporal" --yes --json
-```
-
----
-
-### `rename` — Renombrar nota
-
-```bash
-noteflow rename <título-actual> <nuevo-título>
-```
-
-Actualiza el campo `title` de `note.md`. El nombre de la carpeta no cambia (contiene el id).
-
-```bash
-noteflow rename "Reunión" "Reunión con cliente - Q2"
-```
-
----
-
-### `move` — Mover una nota a un grupo/carpeta
-
-```bash
-noteflow move <título> --group <grupo> [--folder <carpeta>]
-noteflow move <título> --ungroup
-```
-
-Mueve una nota entre grupos y carpetas (equivalente al drag-and-drop de la app).
-
-| Forma | Resultado |
-|---|---|
-| `--group <g>` | Mueve la nota a la raíz del grupo (limpia la carpeta) |
-| `--group <g> --folder <f>` | Mueve la nota a esa carpeta (la carpeta debe existir en el grupo) |
-| `--ungroup` | Saca la nota del grupo y la carpeta (queda sin agrupar) |
-
-```bash
-noteflow move "Sprint 14" --group backend --folder Planning
-noteflow move "Sprint 14" --group backend          # a la raíz del grupo
-noteflow move "Sprint 14" --ungroup
-```
-
----
-
-### `favorite` — Marcar/desmarcar como favorita
-
-```bash
-noteflow favorite <título>
-noteflow pin <título>        # alias
-```
-
-Toggle: si es favorita la desmarca, si no lo es la marca (campo `favorited`). La app
-de escritorio muestra las favoritas en la parte superior de la lista. `pin` es un
-alias histórico del mismo comando.
-
----
-
-### `archive` — Archivar/desarchivar nota
-
-```bash
-noteflow archive <título>
-```
-
-Toggle: alterna el estado `archived`. Las notas archivadas no aparecen en `list` salvo con `--archived`.
-
----
-
-## Grupos
-
-Los grupos son categorías visuales (con color) que agrupan notas en la sidebar de la app.
-
-### `groups` — Listar grupos
-
-```bash
-noteflow groups [--json]
-```
-
-### `group create` — Crear grupo
-
-```bash
-noteflow group create <nombre> [--color <color>]
-```
-
-Colores disponibles: `accent` (default), `accent-2`, `red`, `cyan`, `purple`, `text`, `orange`, `pink`.
-
-```bash
-noteflow group create backend --color cyan
-noteflow group create "Proyectos cliente" --color orange
-```
-
-### `group delete` — Eliminar grupo
-
-```bash
-noteflow group delete <nombre> [--yes]
-```
-
-Las notas del grupo quedan sin grupo (no se eliminan). **También se borran las
-carpetas de ese grupo** (las carpetas solo existen dentro de un grupo).
-
----
-
-## Carpetas
-
-Las carpetas son **un único nivel de anidación dentro de un grupo**
-(grupo → carpeta → nota). Viven en `folders.json` como
-`{ id, name, groupId, order }`. Una nota con `folder` **siempre** tiene también
-`group`. Los nombres de carpeta pueden repetirse entre grupos distintos.
-
-### `folders` — Listar carpetas
-
-```bash
-noteflow folders [--group <grupo>] [--json]
-```
-
-Sin `--group` lista todas, agrupadas por grupo. Con `--group` solo las de ese grupo.
-
-### `folder create` — Crear carpeta
-
-```bash
-noteflow folder create <nombre> --group <grupo>
-```
-
-`--group` es **obligatorio** (una carpeta no existe fuera de un grupo).
-
-```bash
-noteflow folder create Planning --group backend
-```
-
-### `folder rename` — Renombrar carpeta
-
-```bash
-noteflow folder rename <nombre> <nuevo-nombre> [--group <grupo>]
-```
-
-Usa `--group` para desambiguar si el nombre se repite en varios grupos.
-
-### `folder delete` — Eliminar carpeta
-
-```bash
-noteflow folder delete <nombre> [--group <grupo>] [--yes]
-```
-
-Las notas de la carpeta **caen a la raíz del grupo** (conservan el grupo, pierden
-la carpeta). No se eliminan.
-
-```bash
-noteflow folder delete Planning --group backend --yes
-```
-
-### Asignar notas a carpetas
-
-```bash
-# Al crear:
-noteflow new "Sprint 14" --group backend --folder Planning
-noteflow add "texto" --title "Sprint 14" --group backend --folder Planning
-
-# Mover una existente:
-noteflow move "Sprint 14" --group backend --folder Planning
-
-# Filtrar / listar:
-noteflow list --group backend --folder Planning
-```
-
----
-
-## Sync con GitHub
-
-El CLI usa Device Flow OAuth — igual que la app de escritorio, pero guarda el token por separado (sin cifrado de OS). Si el usuario ya está logueado en la app de escritorio, el CLI necesita su propio `login`.
-
-### `login` — Conectar con GitHub
-
-```bash
-noteflow login [nombre-repo] [--no-pull]
-```
-
-Default repo: `noteflow-notes`. Muestra un código y URL para autorizar en el navegador. En headless, el usuario abre la URL desde otro dispositivo.
-
-Al conectar hace **automáticamente un primer `pull`** (sin `--force`: respeta las notas locales más nuevas), así que en una máquina nueva no hace falta lanzar `noteflow pull` a mano. Si después quedan notas locales que no están en el repo, lo dice y sugiere `noteflow push`.
-
-- `--no-pull` — solo conecta; el pull queda para `noteflow pull`.
-- Si el CLI tiene **NoteFlow Cloud activo** (`cloud login` + sync habilitado), **no** hace el pull de GitHub: el backend vivo es Cloud (GitHub queda en pausa) y lo explica en la salida.
-- Si el pull falla (red, token revocado, error de la API…; un repo vacío no es fallo, da `Done: 0 pulled`), el **login no falla** (exit 0): la conexión ya está guardada; muestra el error y `Run 'noteflow pull' to retry`.
-- El login **no marca `lastSync`** (no se ha sincronizado nada aún): lo escribe el pull. Si el pull se omite o falla, o si quedan notas locales sin subir, se conserva el `lastSync` previo (re-login al mismo repo) o no hay — un `lastSync` falso armaría la regla de borrado del pull de la app de escritorio contra notas que el remoto nunca vio (ver `pull` abajo).
-
-```bash
-noteflow login
-noteflow login mis-notas-privadas
-noteflow login --no-pull
-```
-
-### `logout` — Desconectar
-
-```bash
-noteflow logout
-```
-
-### `push` — Subir todas las notas
-
-```bash
-noteflow push
-```
-
-Marca `lastSync` solo si **todos** los ficheros subieron; si alguno falla lo dice
-(`Last sync not updated (some files failed) — run 'noteflow push' again`) y conserva el anterior.
-
-### `pull` / `update` — Bajar notas del repo
-
-```bash
-noteflow pull
-noteflow update   # alias
-```
-
-Solo sobreescribe si el `updated:` remoto es más reciente que el local.
-
-Si después quedan notas locales que no están en el repo, lo avisa
-(`N local notes are not on GitHub (new here, or deleted on another device) — run 'noteflow push'
-to upload them if new`) y **no marca `lastSync`** (conserva el anterior). El pull del CLI no aplica
-borrados, así que una nota borrada en otro dispositivo también aparece aquí: `push` la resucitaría. En Windows/Linux el `settings.json` del CLI es el de la app de
-escritorio, cuyo pull borra las notas locales ausentes del remoto con `updated <= lastSync`: marcarlo
-con notas sin subir haría que la app las borrara. Se marca en cuanto un `push` las sube.
-
-### `migrate` — Migración única al formato v2
-
-```bash
-noteflow migrate
-```
-
-Convierte las notas planas v1 (`<slug>-<id>.md` en la raíz) al formato carpeta v2
-(`<slug>-<id>/note.md` + un `.md` por sección), escribe el marcador
-`.noteflow-format` y, si hay sync con token accesible, sube el nuevo layout y
-elimina los archivos planos del remoto. Idempotente. La app de escritorio ejecuta
-la misma migración local automáticamente al arrancar.
-
-### `self-update` — Actualizar el CLI
-
-```bash
-noteflow self-update
-```
-
-Descarga la versión más reciente de `cli/noteflow.js` desde GitHub y reemplaza el script actual. Útil en RPi headless donde no hay instalador. No requiere estar conectado a GitHub sync — usa la API pública del repo.
-
-```bash
-noteflow self-update
-# Checking for updates...
-# Updated successfully → /usr/local/bin/noteflow
-```
-
-Si ya está en la última versión: `Already up to date`.
-
-### `version` — Versión del CLI
-
-```bash
-noteflow version     # o: noteflow --version / -v
-# noteflow CLI v2.6.0
-```
-
----
-
-## Sync con NoteFlow Cloud (cuenta, cifrado)
-
-Alternativa al sync de GitHub ligada a la **cuenta NoteFlow** (requiere suscripción Cloud
-para subir cambios). Todo viaja **cifrado en el cliente** (AES-256-GCM); el CLI habla
-directamente con el backend, pensado para **máquinas headless** (RPi, servidores, cron).
-
-Mientras hay sesión con Cloud habilitado, **Cloud tiene prioridad sobre GitHub**: los
-comandos `push`, `pull`, `status` y el sync automático tras cada mutación usan Cloud
-(el sync de GitHub queda en pausa aunque siga configurado).
-
-### `cloud login` — Iniciar sesión
-
-```bash
-noteflow cloud login [email]
-```
-
-Envía un código de acceso por email y lo pide por prompt (sin `[email]`, también pide el
-email). Un Enter vacío o algo que no es un código de 6 a 10 dígitos (se ignoran espacios y guiones)
-**vuelve a preguntar** sin gastar el código; si el servidor lo rechaza (erróneo o caducado)
-permite **hasta 3 intentos en total** sin reenviar el email. Es interactivo: sin stdin (pipe
-cerrado, agente, cron) falla con exit 1 en vez de quedarse esperando. La sesión del CLI es
-**independiente de la de la app de escritorio** (los tokens rotan en cada uso; compartirla
-los desconectaría mutuamente). Al iniciar sesión, el sync Cloud del CLI queda habilitado.
-
-Si la cuenta tiene claves en modo **estándar (managed)**, tras el login hace **automáticamente
-un primer `cloud pull`** (la clave se desbloquea sin passphrase). Es best-effort: si falla, la
-sesión sigue guardada y basta con `noteflow pull`. `--no-pull` lo omite. En modo **privado
-(e2ee)** o sin claves no hace pull (pediría la passphrase en mitad del login): usar
-`noteflow pull` después.
-
-### `cloud logout` — Cerrar sesión
-
-```bash
-noteflow cloud logout
-```
-
-Conserva las notas locales y el cursor de sync: volver a entrar con la **misma** cuenta retoma
-incremental. Si entras con **otra** cuenta, el `cloud login` descarta ese cursor (`Reset the Cloud
-sync cursor…`) y el siguiente pull baja todo — un cursor ajeno se saltaría las notas antiguas de la
-cuenta nueva.
-
-### `cloud setup` — Crear las claves de cifrado (modo estándar)
-
-```bash
-noteflow cloud setup
-```
-
-Solo para el modo **estándar (managed)**: genera la clave y la deposita en el servidor —
-nada que recordar. El modo **privado (e2ee)** se configura desde la **app de escritorio**
-(muestra el recovery code de un solo uso); el CLI entonces pide la passphrase o el
-recovery code en cada ejecución, o lee `NOTEFLOW_CLOUD_PASSPHRASE` para servidores/cron.
-La clave **nunca se guarda en disco** en esta máquina.
-
-### `cloud push` / `cloud pull` — Sync completo manual
-
-```bash
-noteflow cloud push   # cifra y sube lo que cambió desde el último sync + metadatos
-noteflow cloud pull   # baja y descifra los cambios remotos (incremental)
-```
-
-El primer push ejecuta automáticamente un pull inicial de reconciliación
-(`First Cloud reconcile…`) para no pisar remoto más nuevo. Tras actualizar el CLI, la
-primera subida o pull hace **una vez** una reconciliación completa
-(`One-time Cloud sync upgrade: reconciling every note file by file…`).
-
-El sync es **por fichero** (cada sección es un fichero), igual que la app de escritorio:
-- Si aquí editaste una sección y en otro dispositivo otra, el pull **fusiona** las dos (sin
-  copia) y vuelve a subir la nota.
-- Si los dos editaron **la misma** sección, el pull la **fusiona línea a línea** dentro de la
-  nota (p. ej. una línea añadida aquí y otra allí → quedan las dos, sin copia). Solo si tocaron
-  **las mismas líneas** de forma distinta, la nota guarda **las dos versiones** entre marcas
-  `> ⚠️ Sync conflict (<fecha hora>) — version from <equipo> (CLI):` (el equipo que fusionó) /
-  `> ⚠️ Sync conflict — version already synced:` (la que ya estaba en la nube) / `> ⚠️ End of
-  sync conflict` (en español si la app está en español) y el pull
-  imprime `Merged with conflicts: "<título>" — both versions kept, look for the ⚠️ markers`:
-  revisa esa sección y deja la versión buena (borra las marcas). Las notas **cifradas** no se
-  fusionan: la versión remota se queda en la nota y la tuya va a una copia de conflicto
-  (`Conflict: local changes kept as "<título> (conflict copy …)"`).
-- Cada subida lleva la versión del servidor sobre la que se hizo: si otro dispositivo cambió
-  ese fichero entretanto, se rechaza (`not uploaded: a newer version is on NoteFlow Cloud —
-  run 'noteflow pull'`) y el pull la fusiona. `push` solo sube lo que difiere de lo último
-  sincronizado (`(N unchanged since the last sync)`), y tras cada comando solo sube `note.md`
-  y las secciones que cambiaron.
-- Los borrados remotos solo se aplican si la copia local no cambió desde el último sync.
-
-### `cloud status` — Estado de la cuenta y el sync
-
-```bash
-noteflow cloud status [--json]
-```
-
-Muestra email, modo de claves (`standard (managed)` / `private (e2ee)` / `none`),
-habilitado, último sync y cursor (`seq N`, el número de cambio asignado por el servidor). JSON:
-`{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullSeq, pullCursor } | null, githubConfigured }`
-(`pullCursor` es el cursor por fecha de versiones anteriores: `null` tras el primer pull por `seq`).
-
----
-
-### `status` — Estado actual
-
-```bash
-noteflow status [--json]
-```
-
-Muestra: número de notas, directorio, grupos, estado de GitHub y última sync.
-
-JSON: `{ notesDir, noteCount, github: { owner, repo, lastSync, tokenAccessible }, groups }`.
-
-> Con NoteFlow Cloud activo, `status` enruta a `cloud status` y su JSON cambia a la
-> forma documentada arriba — los scripts que dependan del shape de GitHub deben
-> comprobar la clave `cloud`.
-
----
-
-## Flags globales
-
-| Flag | Aplica a | Descripción |
-|---|---|---|
-| `--json` | `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `groups`, `folders`, `status`, `cloud status` | Salida JSON machine-readable en stdout (líneas informativas → stderr) |
-| `--yes` | `delete`, `group delete`, `folder delete`, `section delete` | Salta confirmación interactiva (sin `--yes` y sin stdin la respuesta es "N": `Cancelled`, exit 0, nada borrado) |
-| `--archived` | `list` | Incluye notas archivadas |
-| `--section <nombre>` | `read`, `path`, `get`, `add`, `set` | Apunta a una sección por nombre |
-| `--group <nombre>` | `add`, `new`, `move`, `list`, `folders`, `folder *` | Apunta a/filtra por un grupo |
-| `--folder <nombre>` | `add`, `new`, `move`, `list` | Apunta a/filtra por una carpeta (requiere grupo) |
-| `--ungroup` | `move` | Saca la nota del grupo y la carpeta |
-| `--text` / `--file` / `--stdin` | `add`, `set` | Fuente del contenido a escribir |
-| `--create` | `add`, `set` | Crea lo que falte: en `add`, la nota de `--title` y/o la sección de `--section`; en `set`, la sección. Sin él, un nombre que no existe es error |
-| `--dry-run` | `add`, `set` | Resuelve el destino sin escribir ni sincronizar |
-| `--raw` | `add`, `set`, `new`, `section add` | Sección nueva en modo texto (default: modo markdown) |
-| `--markdown` / `--rich` | `add`, `set`, `new`, `section add` | Sección nueva en modo markdown — ya es el default; `--rich` se mantiene por compatibilidad |
-| `--force` | `pull` | Solo GitHub: sobrescribe aunque lo local sea más nuevo |
-
-**Parser estricto:** un flag desconocido (`Unknown flag: --foo`) o un flag de
-valor sin valor (`Flag --title requires a value`) son **error con exit 1** —
-nunca se ignoran en silencio.
-
-**JSON a prueba de codepage:** toda salida `--json` escapa los caracteres
-no-ASCII como `\uXXXX`, así el JSON sobrevive intacto a cualquier codepage de
-consola (PowerShell 5.1 incluido). La salida de texto plano (`read`, `get`,
-`path`) va en UTF-8 crudo; en PowerShell el shim `noteflow.ps1` pone la consola
-en UTF-8 durante la llamada para que no se convierta en mojibake.
-
----
-
-## Integración con IA / scripts
-
-Para integrar el CLI en scripts o agentes de IA, usa `--json` en los comandos de lectura:
-
-```bash
-# Obtener todas las notas como JSON
-noteflow list --json
-
-# Leer contenido de una nota específica
-noteflow get "Proyecto Alpha" --json
-
-# Crear nota y capturar el id/dirname
-noteflow new "Auto-note" --json
-
-# Verificar estado del sync antes de operar
-noteflow status --json | jq '.github.tokenAccessible'
-```
-
-El CLI escribe en stdout y los errores en stderr, con exit code 0 en éxito y 1 en error.
-
-### Flujo típico para un agente
-
-Todo se direcciona **por nombre** (título de nota + nombre de sección). No necesitas
-tocar ids nunca.
-
-```bash
-# 1. Descubrir notas y nombres de sección
-noteflow list --json
-
-# 2. Leer una sección concreta tal cual (apto para pipe — usa 'read', no 'get')
-noteflow read "título" "Sección"
-
-# 3a. Sobrescribir una sección existente (nombre EXACTO de 'list'/'sections';
-#     si no existe falla con "Did you mean" — usa --create solo si es nueva)
-noteflow set "título" "Sección" --text "contenido nuevo"
-#    …o desde stdin:
-echo "contenido" | noteflow set "título" "Sección" --stdin
-
-# 3b. …o añadir al final en vez de sobrescribir
-noteflow add "más contenido" --title "título" --section "Sección"
-#    ⚠ --title ya NO auto-crea la nota: si no existe, añade --create (o usa 'new')
-#    Regla de oro: contenido no trivial (multilínea, comillas…) → --file o --stdin
-
-# 3c. …o editar el .md de la sección con tus propias herramientas (ver abajo)
-noteflow path "título" "Sección"     # → ruta absoluta del .md
-# …lo editas…
-noteflow touch "título"              # bumpea updated: y sincroniza
-
-# 4. Gestionar la estructura de secciones si hace falta
-noteflow section rename "título" "Sección" "Nuevo nombre"
-
-# 5. Cerrar: traer lo remoto y comprobar que todo subió (ver "Sincroniza y verifica")
-noteflow pull
-noteflow push
-```
-
-### Sincroniza y verifica tras cada cambio (obligatorio para agentes)
-
-Los comandos que escriben (`new`, `set`, `add`, `touch`, `section …`, `rename`, `move`,
-`archive`, `delete`, `favorite`, `pin`, `group …`, `folder …`) suben la nota solos al
-backend activo, pero **un fallo de sync no cambia el exit code**: el cambio local ya
-está escrito y el comando sale con 0. Por eso el agente **no puede fiarse del exit
-code** y debe leer la salida (stdout **y** stderr):
-
-1. **Al empezar** una tanda de cambios: `noteflow pull`, para partir de lo último y
-   no generar conflictos con lo editado en otro dispositivo.
-2. **Tras cada comando que escribe**, busca la línea de sync:
-   - `Synced to GitHub` / `Synced to NoteFlow Cloud` → bien.
-   - `Sync failed: …`, `Cloud sync failed: …`, `changed on GitHub since your last pull
-     — not uploaded`, `not uploaded: a newer version is on NoteFlow Cloud` o
-     `Conflict: local changes kept as "…"` → ejecuta `noteflow pull` y luego
-     `noteflow push`.
-   - `Merged with conflicts: "…"` → la nota tiene las dos versiones entre marcas ⚠️:
-     dile al usuario qué nota es (o resuélvelo tú si te lo pidió) y sincroniza al acabar.
-   - Sin línea de sync → no hay sync configurado: confírmalo con
-     `noteflow status --json` y avisa al usuario de que el cambio solo está en local.
-3. **Al terminar**: `noteflow pull` y `noteflow push`, y comprueba que ambos acaban en
-   `Done: … 0 errors` sin avisos de `changed on GitHub` / `not uploaded`.
-4. **Si no se puede sincronizar** (siguen los errores, no hay red, token caducado o
-   sin acceso, conflicto…): **díselo al usuario** de forma explícita al final de tu
-   respuesta — qué notas quedaron solo en local, el mensaje de error literal y el
-   comando para reintentar (`noteflow pull` / `noteflow push`, o `noteflow login` /
-   `noteflow cloud login` si la sesión caducó). Si hubo conflicto, di el título de la
-   copia de conflicto que se creó, o de la nota que quedó con marcas ⚠️. **Nunca** des el trabajo por sincronizado sin haber
-   visto la confirmación, no reintentes en bucle y no uses `--force` sin que el
-   usuario lo pida (pisa notas locales más nuevas).
-
-> Si un comando documentado aquí da `Unknown command` (p. ej. `touch`, `path` o
-> `cloud`), el CLI instalado es más antiguo que esta guía: avisa al usuario de que
-> actualice NoteFlow (el instalador refresca CLI y shims) o ejecute
-> `noteflow self-update`.
-
-> **`read` vs `get`:** `get` es para humanos (indenta y decora); `read` emite el
-> contenido verbatim — úsalo siempre que vayas a procesar el texto.
-> **`set` vs `add`:** `set` **reemplaza** la sección; `add` **añade al final**.
-
-**Ediciones parciales de secciones grandes → `path` + `touch`, no `read` + `set`.**
-El CLI no tiene find-replace, así que con `read`/`set` toda edición parcial obliga a
-sacar la sección entera, modificarla y volver a escribirla completa. Si tu agente ya
-tiene herramientas de edición de ficheros (edit/patch), es mejor pedirle a `path` la
-ruta del `.md` de la sección, **editarlo in situ** y cerrar con `touch`:
-
-```bash
-# Alternativa a read → modificar → set --file, sin mover el contenido entero
-SEC=$(noteflow path "título" "Sección")
-# …editas $SEC con tus herramientas de edición (find-replace, patch, append…)…
-noteflow touch "título"
-```
-
-- `touch` es **obligatorio**: es quien bumpea `updated:` en `note.md` y hace el push
-  (editar el `.md` a pelo lo ve la app —vigila el dir de notas—, pero no sincroniza
-  nada por sí solo).
-- Usa `read`/`set` cuando reescribas la sección entera, o cuando no tengas acceso al
-  sistema de ficheros (p. ej. la nota vive en otra máquina).
-
-### Estilo del contenido: no abuses del código inline
-
-Al escribir notas, **no abuses del código inline** (`` `así` ``). Resérvalo para
-las pocas referencias que lo piden de verdad y escribe el resto como texto normal:
-una nota llena de píldoras monoespaciadas se lee peor y lo importante deja de destacar.
-
----
-
-## Notas importantes
-
-- El CLI **no puede descifrar** tokens guardados por la app de escritorio con `safeStorage` de Electron. Requiere su propio `login` (GitHub) y su propio `cloud login` (NoteFlow Cloud) — la sesión Cloud además **no debe** compartirse con la app: los refresh tokens rotan en cada uso y compartirla desconectaría a ambos.
-- **Dónde vive `settings.json` y su seguridad.** Windows: `%APPDATA%\noteflow\settings.json`; Linux/macOS: `${XDG_CONFIG_HOME:-~/.config}/noteflow/settings.json` (en Windows/Linux es el mismo fichero que usa la app de escritorio; en macOS la app usa `~/Library/Application Support/NoteFlow/`, así que no lo comparten). El token de GitHub (`githubSync.encryptedToken`, scope `repo`) y el refresh token de Cloud (`cliAccount.refreshToken`) se guardan en **base64, no cifrados**: un proceso Node no tiene `safeStorage`. La protección es el permiso del fichero. En Linux/macOS el CLI lo deja en **`0600`** en cada escritura y, al arrancar cualquier comando (también los de solo lectura, como `list`), endurece en silencio un fichero que esté más abierto. Si crea el directorio, lo crea en `0700`; un directorio que ya existe no lo toca. El modelo de amenaza son **otros usuarios locales**, no procesos del mismo usuario: es el mismo criterio que `gh` o `~/.ssh`. En Windows el fichero hereda las ACL del perfil del usuario.
-- En modo e2ee la passphrase se pide en cada ejecución (o `NOTEFLOW_CLOUD_PASSPHRASE`); ni la passphrase ni la clave de cifrado se guardan nunca en disco.
-- Notas encriptadas (`encryption:` en `note.md`) se **ignoran** en todos los comandos de lectura.
-- `NOTEFLOW_NOTES_DIR` (variable de entorno) redirige el directorio de notas — útil para scripts y tests.
-- **⚠ App de escritorio abierta ⇒ riesgo de perder cambios de grupos/carpetas.**
-  La app mantiene `groups.json`/`folders.json` en memoria y los **reescribe** en sus
-  propios ciclos (guardado / auto-sync cada 5 min), **pisando** los grupos y carpetas
-  creados desde el CLI mientras la app corre (los cambios a nivel de **nota** —
-  contenido, secciones, favorito, archivo — sí sobreviven, viven en carpetas por-nota).
-  El CLI ahora **avisa** por stderr si detecta `NoteFlow` en ejecución al mutar
-  grupos/carpetas. Para cambios fiables de estructura: **cierra la app** primero (o
-  hazlos desde la propia app). Silencia el aviso con `NOTEFLOW_NO_APP_CHECK=1`.
-- `noteflow help <comando>` muestra ayuda detallada de un comando concreto
-  (`help new`, `help favorite`, `help folder`, etc.).
+## Editar una sección
+
+- **Reescribirla entera:** `noteflow set "<nota>" "<sección>" --file <ruta>` (o `--stdin`).
+- **Edición parcial de una sección grande:** el CLI no tiene buscar/reemplazar. Si tienes
+  herramientas de edición de ficheros, edita el `.md` in situ y cierra con `touch`:
+  ```bash
+  SEC=$(noteflow path "Proyecto Alpha" "Arquitectura")   # ruta absoluta del .md
+  # …edita $SEC con tus herramientas…
+  noteflow touch "Proyecto Alpha"                         # obligatorio: si no, no sincroniza
+  ```
+- Sin acceso a esos ficheros (p. ej. la nota está en otra máquina): `read … > sec.md`, edita y
+  `set … --file sec.md`, con `sec.md` **fuera** de la carpeta de la nota.
+
+## Sincroniza y verifica
+
+Las escrituras (`new`, `add`, `set`, `touch`, `section …`, `rename`, `move`, `favorite`/`pin`,
+`archive`, `delete`, `group …`, `folder …`) suben la nota solas al backend activo, pero **el exit
+code no dice si subió**. Tras cada una, busca la línea de sync en stdout y stderr:
+
+- `Synced to GitHub` / `Synced to NoteFlow Cloud` → bien. **Si todas tus escrituras la mostraron,
+  no hace falta nada más** (ni `pull` ni `push` al terminar).
+- `Sync failed: …`, `Cloud sync failed: …`, `changed on GitHub since your last pull — not
+  uploaded`, `not uploaded: a newer version is on NoteFlow Cloud` o `Conflict: local changes kept
+  as "…"` → al terminar, `noteflow pull` y luego `noteflow push`.
+- Ninguna línea de sync → comprueba `noteflow status --json`. Si hay sync, al terminar `noteflow
+  pull` y luego `noteflow push`. Si no lo hay y aún no lo ofreciste en esta conversación,
+  [ofrécete a activarlo](#ofrécete-a-activar-el-sync); si no, avisa al usuario de que el cambio
+  quedó solo en local.
+
+Ese `pull` + `push` está bien si acaban en `Done: …` con `0 errors` (cuando lo muestran) y sin
+`changed on GitHub`, `not uploaded` ni líneas `Error:`. Aparte, sigue valiendo el `pull` al
+empezar (con sync) y el `push` tras activar el sync (salvo e2ee o sin claves).
+
+**Si no se puede sincronizar** (siguen los errores, no hay red, la sesión caducó, conflicto…):
+díselo al usuario al final de tu respuesta, de forma explícita: qué notas quedaron solo en local, el
+mensaje de error literal y el comando para reintentar (`noteflow pull` / `noteflow push`, o volver a
+iniciar sesión). Si hubo conflicto, di el título de la copia de conflicto creada (`<título> (conflict
+copy …)`).
+
+**Conflictos en el `pull`:** si los dos lados editaron la misma sección, el `pull` la **fusiona línea
+a línea** dentro de la nota, sin copia (p. ej. una línea añadida aquí y otra allí → quedan las dos).
+Solo si tocaron **las mismas líneas** guarda las dos versiones entre marcas `> ⚠️ Sync conflict …` /
+`> ⚠️ End of sync conflict` e imprime `Merged with conflicts: "<título>" — both versions kept, look
+for the ⚠️ markers`: dile al usuario qué nota es (o deja tú la versión buena y borra las marcas si te
+lo pidió) y sincroniza. Solo las notas **cifradas** (y pocos casos más) siguen creando una copia de
+conflicto. **Nunca** des el trabajo por sincronizado sin ver la confirmación, no reintentes en bucle
+y no uses `--force`.
+
+## Ofrécete a activar el sync
+
+El CLI no comparte la sesión de la app de escritorio: necesita su **propio** `login` (GitHub) o
+`cloud login` (NoteFlow Cloud) aunque la app ya esté conectada (nunca copies tokens de la app). Con
+sesión de Cloud activa, `push`/`pull`/`status` y el sync tras cada escritura usan Cloud y GitHub queda
+en pausa. Puedes activarlo tú sin prompts ni comandos bloqueantes: el usuario solo autoriza en GitHub
+o te da el código que le llega por email.
+
+1. **`noteflow status --json`. Casos:**
+   - **Ya hay sync → no ofrezcas nada:** `github` con `tokenAccessible: true`, o (con Cloud activo
+     el CLI devuelve la forma de `cloud status`) `cloud.enabled: true`.
+   - **(a)** `github: null` y `desktopApp` es `null` o no tiene `cloudSignedIn: true` ni `github` →
+     el usuario no usa sync.
+   - **(b)** `github` con `tokenAccessible: false` (Windows), o `github: null` con
+     `desktopApp.github` (macOS/Linux) → la app usa GitHub y el CLI necesita su propio login **al
+     mismo repo** (`github.repo` / `desktopApp.github.repo`, con la cuenta de GitHub de `owner`).
+   - **(c)** `desktopApp.cloudSignedIn: true` → la app tiene NoteFlow Cloud (`cloudSyncEnabled`
+     dice si sincroniza con él): usa `desktopApp.cloudEmail`. Si se dan (b) y (c), propón el que
+     sincroniza en la app: Cloud si `cloudSyncEnabled`, si no GitHub.
+2. **Pregunta una sola vez por conversación, antes de escribir**, de forma breve y concreta con lo
+   que viste (backend, email, repo), no con un genérico "¿GitHub o Cloud?". **Ofrécete a
+   ejecutarlo tú**; no le pases los comandos. Ejemplos:
+   - (c): *"Tu app usa NoteFlow Cloud con ana@ejemplo.com; ¿activo también el sync aquí? Te llegará
+     un código a ese correo y solo tendrás que pasármelo."*
+   - (b): *"La app sincroniza con GitHub (ana/noteflow-notes), pero este CLI necesita su propio
+     permiso; ¿lo activo? Solo tendrás que autorizar un código en github.com/login/device."*
+   - (a): *"Tus notas aquí no se sincronizan. ¿Lo activo? Puede ser con GitHub (gratis, repo
+     privado `noteflow-notes`) o con NoteFlow Cloud (cifrado, requiere suscripción); tú solo
+     autorizas o me das un código."*
+
+   Si dice que no, sigue en local y al final solo avisa de que los cambios quedaron en local.
+3. **GitHub:** `noteflow login [repo] --no-wait --json` → `{ verificationUri, userCode, expiresAt,
+   repo }` (sin repo: `noteflow-notes`, que se crea privado si no existe). Pasa al usuario la URL y
+   el código (en escritorio el navegador se abre solo) y pídele que te avise al autorizar. Ejecuta
+   `noteflow login --finish` **solo cuando lo confirme**: espera hasta que autorice o caduque el
+   código. Si el timeout de tu herramienta lo corta, relanza `--finish` (el login pendiente se
+   conserva). Debe acabar en `Connected to <usuario>/<repo>` y el pull inicial. Si caducó, vuelve a
+   empezar con `--no-wait` solo si el usuario quiere.
+4. **NoteFlow Cloud:** confirma el email, `noteflow cloud login <email> --send-code` y, con el código
+   que te dé, `noteflow cloud login <email> --code <código>`. Si es inválido o caducó, pídele que lo
+   revise y reintenta `--code`; tras 2–3 fallos, un `--send-code` nuevo (con `429 Too many attempts`,
+   espera antes de reenviar). Luego mira la línea `Cloud keys:`:
+   - `standard (managed)` → el login ya hizo el primer pull.
+   - `No Cloud keys yet` → `noteflow cloud setup` **solo si el usuario lo confirma** (crea las
+     claves de la cuenta en modo estándar) y después `noteflow pull`.
+   - `private (e2ee)` → **no** pidas ni manejes la passphrase: que el usuario ejecute `noteflow
+     pull` / `noteflow push` en su terminal o configure `NOTEFLOW_CLOUD_PASSPHRASE`.
+5. **Después, `noteflow push`**: el login trae lo remoto pero no sube nada, y lo que escribiste antes
+   sigue solo en local. Excepción: con `private (e2ee)`, o `No Cloud keys yet` sin `cloud setup`, el
+   push fallaría; díselo al usuario. Luego sigue con [Sincroniza y verifica](#sincroniza-y-verifica).
+
+Nada de bucles: no relances logins sin que el usuario lo pida, y **nunca** uses el flujo
+interactivo (`noteflow login` o `noteflow cloud login` sin esos flags): espera stdin o se queda
+bloqueado hasta 15 minutos.
+
+## Estilo del contenido
+
+Al escribir notas, **no abuses del código inline** (`` `así` ``). Resérvalo para las pocas
+referencias que lo piden de verdad y escribe el resto como texto normal: una nota llena de píldoras
+monoespaciadas se lee peor y lo importante deja de destacar.
+
+## Instalación y entorno
+
+- Se instala con la app de escritorio (`.exe` en Windows, `.deb` en Linux). Requiere Node.js ≥ 18.
+  Linux headless / Raspberry Pi:
+  `curl -fsSL https://raw.githubusercontent.com/yagoid/noteflow/main/cli/install-cli.sh | sudo bash`
+- **`Unknown command`** en un comando de esta guía (p. ej. `touch`, `path` o `cloud`) → el CLI
+  instalado es más antiguo: pide al usuario que actualice NoteFlow (refresca el CLI y sus wrappers) o
+  ejecuta `noteflow self-update`.
+- **PowerShell:** si falla con "running scripts is disabled" (ExecutionPolicy `Restricted`), usa
+  `noteflow.cmd` o `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.

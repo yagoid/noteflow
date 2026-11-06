@@ -12,15 +12,27 @@
 // (this machine must no longer be able to decrypt the user's notes, and a second
 // account signing in here must never inherit the first one's key) and we revert
 // the assistant to a BYO/local provider. What was on is remembered — WITHOUT any
-// secret — in a small `accountRestore` record so signing back in with the SAME
-// identity puts it all back, provided the entitlement is still alive.
+// secret — in a small `accountRestore` record.
+//
+// Signing IN (the real signed-out → signed-in edge in this process) switches on
+// whatever the account has PAID for: Cloud with the 'cloud' entitlement, the
+// managed assistant with the 'ai' one (bundle = both). That covers a first
+// sign-in and a new device, and supersedes any record a previous session left
+// behind (same account or another). A session restored from disk at boot is NOT
+// a sign-in, so a user who turned Cloud off is not overruled on every launch.
+//
+// While signed in, buying a plan is the other activation point: a REAL
+// false→true flip of an entitlement for the same identity (stepEntitlementBaseline)
+// switches that surface on. Losing an entitlement never switches anything off.
 
 import { Entitlements } from './entitlements'
 
 /**
- * What the signing-out session had switched on, persisted in
- * settings.json → `accountRestore`. NEVER carries tokens or secrets: an email
- * (the identity to match on the way back in) and two booleans.
+ * Pending activation of the paid surfaces, persisted in settings.json →
+ * `accountRestore`. Written on sign-out (what that session had switched on) and
+ * on sign-in while the entitlements are still unknown (both halves requested,
+ * i.e. "switch on whatever turns out to be paid"). NEVER carries tokens or
+ * secrets: an email (the identity it applies to) and two booleans.
  */
 export interface AccountRestoreRecord {
   identity: string
@@ -39,9 +51,10 @@ export interface AccountObservation {
    * (or restored from account.ts's on-disk cache for the same user — the public
    * AccountStatus.entitlementsKnown). Without a cache they arrive ASYNC
    * (initAccount defers the refresh 5 s and retries with backoff; verifyOtp
-   * brings them inline), so a restore must not be evaluated against the NO_ENTITLEMENTS
-   * placeholder — it waits, and the record is re-evaluated on every status
-   * change while the identity keeps matching.
+   * brings them inline), so a pending activation must not be evaluated against
+   * the NO_ENTITLEMENTS placeholder — it waits (persisted as the record), and the
+   * record is re-evaluated on every status change while the identity keeps
+   * matching.
    */
   entitlementsKnown: boolean
 }
@@ -136,9 +149,15 @@ export function clearRestoreSurface(
 /**
  * Decides what to do given the PREVIOUS observation of the account, the CURRENT
  * one and the local state. Idempotent by construction: it only acts on the real
- * signed-in→signed-out edge, or while a pending restore record matches the
- * signed-in identity — every other status change (an entitlements refresh, say)
- * is a no-op, so it can safely run on every `account:status-changed`.
+ * signed-in→signed-out edge, on the real signed-out→signed-in edge, or while a
+ * pending record matches the signed-in identity — every other status change
+ * (an entitlements refresh on a stable session, say) is a no-op, so it can
+ * safely run on every `account:status-changed`.
+ *
+ * On sign-in the effective record is "both halves requested" for the new
+ * identity (it replaces any older record); from there the usual rules apply:
+ * wait for the entitlements, then switch on each half whose entitlement is
+ * alive and is not already on, and consume the record.
  */
 export function planAccountTransition(
   previous: { signedIn: boolean; identity: string | null },
@@ -170,70 +189,102 @@ export function planAccountTransition(
   // A pending record simply waits here for the next sign-in.
   if (!current.signedIn) return NO_OP
 
-  // ── Signed in: consume the restore record, if any ───────────────────────────
-  const record = local.restore
-  if (!record) return NO_OP
+  // ── Sign-in (real edge in this process — never a session restored at boot) ─
+  // Switch on whatever the account pays for. This supersedes any older record:
+  // the same account's sign-out snapshot (a fresh sign-in is the moment to turn
+  // the paid features on, whatever was on before) or another account's (which
+  // must never leak into this one).
+  const signingIn = !previous.signedIn
+  let record: AccountRestoreRecord | null
+  if (signingIn) {
+    // No identity to tie the pending activation to: nothing to do, and no
+    // stale record left behind.
+    if (!current.identity) return local.restore ? { ...NO_OP, restore: null } : NO_OP
+    record = { identity: current.identity, cloudEnabled: true, aiManaged: true }
+  } else {
+    // ── Signed in (stable): consume a pending record, if any ──────────────────
+    record = local.restore
+    if (!record) return NO_OP
 
-  // A different account: clean slate — a new user must not inherit what the
-  // previous one had switched on.
-  if (!sameIdentity(record.identity, current.identity)) return { ...NO_OP, restore: null }
+    // A different account: clean slate — a new user must not inherit what the
+    // previous one had switched on.
+    if (!sameIdentity(record.identity, current.identity)) return { ...NO_OP, restore: null }
 
-  // Nothing to put back (the user had neither paid feature on) — done.
-  if (!record.cloudEnabled && !record.aiManaged) return { ...NO_OP, restore: null }
+    // Nothing left to switch on (both halves were decided by hand meanwhile,
+    // or the record asks for nothing) — done.
+    if (!record.cloudEnabled && !record.aiManaged) return { ...NO_OP, restore: null }
+  }
 
   // Entitlements not fetched yet: keep the record and wait for the next status
-  // change — restoring against the placeholder would silently drop the record.
-  if (!current.entitlementsKnown) return NO_OP
+  // change — evaluating against the placeholder would silently drop it. On the
+  // sign-in edge the record is new, so it has to be persisted now.
+  if (!current.entitlementsKnown) return signingIn ? { ...NO_OP, restore: record } : NO_OP
 
   return {
     disableCloud: false,
     resetKeys: false,
-    // Each half is restored only if its entitlement is still alive; if it is
-    // gone, the feature is simply offered again by the UI (it is not "broken").
+    // Each half is switched on only if its entitlement is alive (and it is not
+    // already on); without it the feature is simply offered by the UI.
     enableCloud: record.cloudEnabled && current.entitlements.cloud && !local.cloudEnabled,
     setAiProvider: record.aiManaged && current.entitlements.ai && !local.aiManaged ? 'noteflow' : null,
     restore: null, // consumed
   }
 }
 
-// ── AI auto-switch on subscribe ───────────────────────────────────────────────
+// ── Auto-activation on subscribe (while signed in) ───────────────────────────
+
+/** The entitlements that auto-activate their surface: 'ai' → managed provider, 'cloud' → Cloud sync. */
+export const ENTITLEMENT_KEYS = ['ai', 'cloud'] as const
+export type EntitlementKey = (typeof ENTITLEMENT_KEYS)[number]
 
 /**
- * Per-identity memory of the 'ai' entitlement for the auto-switch to the managed
- * provider. `baseline` null = no FRESH observation yet for this identity.
+ * Per-identity memory of each entitlement for the auto-activation on subscribe.
+ * A null value = no FRESH observation yet of that entitlement for this identity.
  */
-export interface AiEntitlementBaseline {
+export interface EntitlementBaseline {
   identity: string | null
-  baseline: boolean | null
+  ai: boolean | null
+  cloud: boolean | null
 }
 
-export const NO_AI_BASELINE: AiEntitlementBaseline = { identity: null, baseline: null }
+export const NO_ENTITLEMENT_BASELINE: EntitlementBaseline = { identity: null, ai: null, cloud: null }
 
 /**
- * Steps the baseline with a new observation and says whether to auto-activate
- * the managed provider. Only a REAL false→true flip seen for the SAME identity
- * triggers it (the user subscribes while the app runs and hits Refresh):
+ * Steps the baseline with a new observation and says which surfaces to
+ * auto-activate (bundle = both). Only a REAL false→true flip seen for the SAME
+ * identity triggers it (the user subscribes while the app runs and hits Refresh):
  *  - an identity change (boot, sign-in, account switch, sign-out) only
  *    establishes a fresh baseline — a naive false→true on the first read would
  *    force-switch an already-subscribed user on every launch, even one who
- *    deliberately kept a BYO-key provider;
+ *    deliberately kept a BYO-key provider or Cloud off. Activation on sign-in is
+ *    planAccountTransition's job;
  *  - `fresh` must be false for anything not fetched in THIS run (unknown, or
  *    the on-disk cache): it never sets nor moves the baseline, so unknown→true
  *    and cached-false→true are NOT transitions.
+ * It never asks to switch anything OFF: losing an entitlement just makes the UI
+ * offer the feature again.
  */
-export function stepAiEntitlementBaseline(
-  prev: AiEntitlementBaseline,
-  obs: { identity: string | null; ai: boolean; fresh: boolean }
-): { next: AiEntitlementBaseline; autoSwitch: boolean } {
+export function stepEntitlementBaseline(
+  prev: EntitlementBaseline,
+  obs: { identity: string | null; entitlements: Entitlements; fresh: boolean }
+): { next: EntitlementBaseline; activate: Record<EntitlementKey, boolean> } {
+  const none: Record<EntitlementKey, boolean> = { ai: false, cloud: false }
   if (obs.identity !== prev.identity) {
+    const seeded = obs.identity !== null && obs.fresh
     return {
-      next: { identity: obs.identity, baseline: obs.identity !== null && obs.fresh ? obs.ai : null },
-      autoSwitch: false,
+      next: {
+        identity: obs.identity,
+        ai: seeded ? obs.entitlements.ai : null,
+        cloud: seeded ? obs.entitlements.cloud : null,
+      },
+      activate: none,
     }
   }
-  if (obs.identity === null || !obs.fresh) return { next: prev, autoSwitch: false }
+  if (obs.identity === null || !obs.fresh) return { next: prev, activate: none }
+  const activate = { ...none }
+  for (const key of ENTITLEMENT_KEYS) activate[key] = prev[key] === false && obs.entitlements[key]
   return {
-    next: { identity: obs.identity, baseline: obs.ai },
-    autoSwitch: prev.baseline === false && obs.ai,
+    next: { identity: obs.identity, ai: obs.entitlements.ai, cloud: obs.entitlements.cloud },
+    activate,
   }
 }

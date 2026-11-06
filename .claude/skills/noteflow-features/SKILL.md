@@ -148,7 +148,8 @@ Iconos del TitleBar:
   `src/lib/activityPulse.ts`; bajo el gráfico, en filas título + descripción + control: **Local AI**
   (toggle de embeddings; activada, botón "Reindex all notes" con progreso), **Profile** (botón "Open
   profile setup" → abre el cerebro en la pestaña Profile y cierra Ajustes) y **Expose CLI skill to AI
-  agents** (toggle)), **Appearance** (tema/fuente/acento/colores del editor/escala),
+  agents** (toggle: copia la skill del CLI a `~/.claude/skills` y `~/.agents/skills`, y a Windsurf si
+  está instalado)), **Appearance** (tema/fuente/acento/colores del editor/escala),
   **Editor** (fuente/tamaño/ancho) — grupo **Preferences** —; **Sync** (NoteFlow Cloud + GitHub),
   **AI** (solo el proveedor del LLM), **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
   de notas), **Startup** (autostart + stickies), **Templates** (plantillas de nota) — grupo **Your
@@ -692,12 +693,14 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - Se guardan como base64 inline en el `.md`.
 
 ### Bloques de código
-- Botón de copiar integrado en cada bloque (arriba a la derecha, visible al pasar el ratón).
-- **Selector de lenguaje** (arriba a la izquierda): muestra el lenguaje actual ("Plain text" si no
-  hay ninguno). Al pulsarlo abre un desplegable con un buscador y la lista de lenguajes soportados;
-  la primera opción, **"Plain text"**, desactiva el resaltado. Si el bloque tiene lenguaje asignado, la
-  etiqueta se ve siempre (sutil) para saber el lenguaje sin hover. Se cierra al hacer click fuera o
-  con Escape.
+- Aspecto limpio: borde fino uniforme, mismo fondo que el editor y poco relleno alrededor del código.
+  El código se ve 1px más grande que el código inline.
+- Dos botones redondeados que **solo aparecen al pasar el ratón** por el bloque, flotando
+  sobre sus esquinas superiores: **Copy** a la derecha y el **selector de lenguaje** a la izquierda.
+- **Selector de lenguaje**: muestra el lenguaje actual ("Plain text" si no hay ninguno). Al pulsarlo
+  abre un desplegable con un buscador y la lista de lenguajes soportados; la primera opción,
+  **"Plain text"**, desactiva el resaltado. Los botones siguen visibles mientras el desplegable está
+  abierto. Se cierra al hacer click fuera o con Escape.
 - Syntax highlighting con Lowlight.
 
 ### Relacionar secciones (slash command `/`)
@@ -859,7 +862,10 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   token a token, botón de **parar**, y **citas** clicables debajo de la respuesta (abren la nota en su
   sección) que además **iluminan** esas notas en el cerebro. Arriba: **historial** de chats (crear,
   abrir, borrar — se guardan localmente), botón **nuevo chat**, y un **selector de modelo** para elegir
-  con qué modelo se hace la siguiente pregunta. Si no hay proveedor configurado, muestra un CTA a Ajustes.
+  con qué modelo se hace la siguiente pregunta (con NoteFlow AI, si el modelo elegido gasta la cuota al
+  menos el doble de rápido que el recomendado, un pequeño badge rojo **"x29"** a su izquierda lo avisa;
+  tooltip "This model uses 29× more of your quota than the recommended one"; también en el panel lateral).
+  Si no hay proveedor configurado, muestra un CTA a Ajustes.
   - **¿Ha terminado?** Mientras la IA trabaja siempre hay una señal al pie del chat: **"Thinking…"**
     cuando piensa sin escribir (al empezar, entre acciones o si se queda >~1 s callada a mitad de
     respuesta), **tres puntitos pulsando** mientras escribe, o la propia fila de la acción en curso /
@@ -887,9 +893,11 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     aparece justo debajo en una **fila roja** ⚠ con el motivo. Nunca se corta la respuesta en seco
     sin explicación.
   - **Deshacer lo que hizo la IA:** cada edición de una nota (crear nota, editar/renombrar/añadir
-    sección, cambiar título o grupo…) muestra un botón **Deshacer** en su fila; al pulsarlo la nota
-    vuelve a como estaba (si la IA la creó, se borra). Si tú tocaste la nota después, pregunta antes.
-    No se puede deshacer si la nota o esa sección se borraron después, ni si la nota se cifró o
+    sección, cambiar título o grupo…) muestra un botón **Deshacer** en su fila; al pulsarlo se
+    revierte **solo lo que cambió esa edición** (si la IA creó la nota, se borra): lo que tú editaste
+    después en otras secciones o en la nota se conserva. Solo pregunta antes si tú (u otra edición
+    posterior) volviste a tocar justo lo que cambió la IA ("Lo que editó la IA cambió después").
+    No se puede deshacer si la nota o la sección que cambió la IA se borraron después, ni si la nota se cifró o
     descifró después (lo avisa). Los borrados no tienen Deshacer: ya piden confirmación. Solo dura
     mientras la app está abierta (tras reiniciar, el botón desaparece).
 - **Related:** las "Related notes" por sección (lo que antes estaba al pie del cerebro), eligiendo
@@ -921,7 +929,7 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   eligen con un **selector de dos cards** (mismo patrón que Ajustes → Sincronización; badge
   Activo/Inactivo en cada una, y debajo solo la sección de la que elijas):
   - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow),
-    modelos curados (el recomendado marcado "· Recommended"; los que gastan la asignación al menos el
+    modelos curados (el recomendado marcado "(Recommended)"; los que gastan la asignación al menos el
     doble de rápido, con sufijo "(≈N× quota)" — hoy ≈2× y ≈29×; el campo "Model" es de **solo
     lectura**, se elige haciendo clic en uno de los modelos) y **barra de consumo mensual** en
     porcentaje ("N% of this month’s AI allowance used": la asignación se mide por el coste real de
@@ -942,8 +950,12 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     Ajustes → IA (que ya no lleva título "Assistant (LLM)": empieza directamente con la línea "Pick one
     source…" y las dos cards) como en el **panel de IA del Cerebro** (antes solo en Ajustes). Lo mismo si la
     suscripción caduca teniéndolo activo, para que entiendas el fallo y puedas cambiar de fuente.
-    **Al suscribirte** (Subscribe → pagar → Refresh en Settings → Subscription), NoteFlow AI **se activa
-    como proveedor automáticamente**.
+    **Se activa solo lo que tienes pagado** (NoteFlow AI con el plan AI, NoteFlow Cloud con el plan
+    Cloud, ambos con el Bundle) en dos momentos: **al iniciar sesión** (primer login, dispositivo nuevo
+    o vuelta a tu cuenta) y **al suscribirte con la sesión ya abierta** (Subscribe → pagar → Refresh en
+    Settings → Subscription). Una sesión que se **restaura al arrancar la app no cuenta como login**: si
+    apagaste Cloud o elegiste tu propio proveedor, no se te vuelve a cambiar en cada arranque. Y perder
+    una suscripción **nunca apaga nada** por sí sola: la feature se te vuelve a ofrecer y decides tú.
   - **Tu proveedor / IA local (BYO; gratis y privado):** elige proveedor (Anthropic/Claude, OpenAI,
     DeepSeek, MiniMax, Moonshot, OpenRouter, Ollama local, o Custom OpenAI-compatible), pega tu **API
     key**, ajusta Base URL y modelo, y prueba la conexión. **Cada proveedor recuerda su propia
@@ -1050,8 +1062,7 @@ Persisten entre sesiones y definidos en `src/lib/themes.ts` como sets de CSS var
 
 **Personalización sobre el tema** (misma pantalla, todo con presets + selector de color libre y
 reset por control): **fuente** de la app, **color de acento** y **colores del editor** — H1, H2, H3,
-**cursiva**, **código inline** y un color compartido para el **borde izquierdo de bloques de código y
-citas**. Cada control sin tocar sigue al tema (y cambia con él); el panel muestra un **preview en
+**cursiva**, **código inline** y el **borde izquierdo de las citas** ("Quote"). Cada control sin tocar sigue al tema (y cambia con él); el panel muestra un **preview en
 vivo** de todo.
 
 - **Swatches** (iguales en la fila de acento y en las 6 del editor): primero **"Text colour (follows
@@ -1326,6 +1337,10 @@ Flujo del panel según estado:
   un bloque ámbar destacado (copiable, con aviso rojo: perder passphrase + recovery = notas
   irrecuperables, NoteFlow no puede resetearlas) → botón "I have saved my recovery code" para
   continuar. El código no vuelve a mostrarse jamás.
+  **Cloud ya habilitado pero sin claves aún:** estado nuevo del primer uso cuando Cloud se activa solo
+  (al iniciar sesión o al suscribirte con el plan Cloud): el panel muestra estas mismas cards de modo
+  (onboarding), Cloud ya cuenta como backend activo y **GitHub Sync ya está en pausa**; la sync con la
+  nube arranca en cuanto configuras las claves.
 - **Bloqueado (`locked`):** en modo managed el panel se desbloquea solo (spinner "unlocking…",
   reintento silencioso cada 10 s — típico de un arranque offline); en modo private, un único
   input acepta **passphrase o recovery code** → "Unlock".
@@ -1353,7 +1368,9 @@ Flujo del panel según estado:
 - **Sin sesión**, el panel ya no se limita a pedirte que inicies sesión: muestra también esos
   precios, y clicar cualquier card lleva a Ajustes → Suscripción para crear la cuenta sin salir de Ajustes.
 - Antes de activar con GitHub Sync conectado, aviso ámbar: "GitHub Sync quedará en pausa" (solo
-  cuando activar Cloud está realmente al alcance, es decir con la entitlement `cloud`).
+  cuando activar Cloud está realmente al alcance, es decir con la entitlement `cloud`). Este aviso es
+  del **Enable manual**: la **auto-activación** (al iniciar sesión o al suscribirte con el plan Cloud)
+  pausa GitHub Sync **sin aviso previo**.
 
 Detalle técnico (jerarquía de claves, modos managed/e2ee, motor de sync):
 `.claude/context/monetization.md` § 4.

@@ -147,7 +147,7 @@ button {
   padding: 0.6rem 0.7rem;
   margin: 0.5rem 0;
 }
-.chat-md.prose-editor .ProseMirror pre code { font-size: 11px; }
+.chat-md.prose-editor .ProseMirror pre code { font-size: 12px; } /* +1px over inline code (11px) */
 .chat-md.prose-editor .ProseMirror ul,
 .chat-md.prose-editor .ProseMirror ol {
   padding-left: 1.25rem;
@@ -340,8 +340,8 @@ button {
 .prose-editor .ProseMirror mark  { color: rgb(var(--accent)); background: transparent; font-weight: inherit; }
 
 /* Cita / blockquote (`> texto`): borde izquierdo de acento + texto atenuado,
-   al estilo de las citas markdown de VSCode. Comparte el color del borde con `pre`
-   (`--code-accent`, personalizable en Ajustes → Apariencia; por defecto `--accent`). */
+   al estilo de las citas markdown de VSCode. Color del borde: `--code-accent` (ajuste
+   "codeAccent", personalizable en Ajustes → Apariencia; por defecto `--accent`). */
 .prose-editor .ProseMirror blockquote {
   border-left: 3px solid rgb(var(--code-accent, var(--accent)));
   padding-left: 1rem;
@@ -353,23 +353,27 @@ button {
 .prose-editor .ProseMirror code {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.85em;
-  background: rgb(var(--bg-0));
-  color: rgb(var(--code-inline, var(--red)));
-  border: 1px solid rgb(var(--border));
+  /* Borderless pill: a tint of the theme's text colour, so it sits lighter than the
+     background on dark themes; the ink is the inline-code colour lifted towards white. */
+  background: rgb(var(--text) / 0.1);
+  color: color-mix(in srgb, rgb(var(--code-inline, var(--red))) 72%, white);
   border-radius: 3px;
   padding: 0.1em 0.35em;
 }
+/* Light themes: a lighter ink would wash out on a pale background — keep the base colour. */
+:root[data-color-scheme='light'] .prose-editor .ProseMirror :not(pre) > code {
+  color: rgb(var(--code-inline, var(--red)));
+}
 
+/* Fenced code block: a thin uniform border on the editor's own background (--bg-editor,
+   the <main> surface in App.tsx), padded tight around the code. No room is reserved for
+   the language/Copy buttons: they only appear on hover, floating over the top corners
+   (.code-block-btn below). */
 .prose-editor .ProseMirror pre {
-  background: rgb(var(--bg-0));
+  background: rgb(var(--bg-editor));
   border: 1px solid rgb(var(--border));
-  border-left: 3px solid rgb(var(--code-accent, var(--accent)));
-  border-radius: 4px;
-  padding: 1rem;
-  /* Reserve top room so neither the language label (has-language, always shown)
-     nor the hover-only label/Copy buttons of plain-text blocks overlap the first
-     code line. Applies to every block; laterals/bottom keep the 1rem padding. */
-  padding-top: 2.25rem;
+  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
   margin: 1rem 0;
   overflow-x: auto;
   position: relative;
@@ -379,7 +383,7 @@ button {
   background: none;
   border: none;
   padding: 0;
-  font-size: 0.85em;
+  font-size: calc(0.85em + 1px); /* 1px larger than inline code */
   color: rgb(var(--text));
 }
 
@@ -393,9 +397,42 @@ button {
   color: rgb(var(--text));
 }
 
-/* Code block language selector (portaled to <body>, so styled outside .prose-editor).
+/* Code block buttons (CodeBlockWithCopy.tsx): language selector top-left, Copy top-right.
+   Siblings of the <pre> inside the NodeView wrapper (so the pre's horizontal scroll doesn't
+   carry them along); the pre's margin collapses through the wrapper, so its top edge is the
+   pre's border. Hidden until the block is hovered (or the language menu is open / a button
+   has keyboard focus); they float over the first code line, hence the solid chip look. */
+.code-block-node { position: relative; }
+.code-block-btn {
+  position: absolute;
+  top: 0.45rem;
+  z-index: 2;
+  padding: 4px 9px;
+  font-family: var(--app-font-family, 'JetBrains Mono', monospace);
+  font-size: 0.75rem;
+  line-height: 1;
+  color: rgb(var(--text-muted));
+  background: rgb(var(--bg-2));
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.code-block-btn:hover { color: rgb(var(--text)); }
+.code-block-node:hover > .code-block-btn,
+.code-block-node.is-menu-open > .code-block-btn,
+.code-block-btn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.code-lang-button { left: 0.5rem; }
+.code-copy-button { right: 0.5rem; }
+
+/* Code block language menu (portaled to <body>, so styled outside .prose-editor).
    Shares the minimalist look of the slash command menu. */
-.code-lang-button { cursor: pointer; }
 .code-lang-menu {
   width: 220px;
   display: flex;
@@ -1380,7 +1417,7 @@ button {
   border-radius: 4px;
   background: rgb(var(--bg-0) / 0.55);
 }
-.note-grid-body .prose-editor .ProseMirror pre code { font-size: 10px; }
+.note-grid-body .prose-editor .ProseMirror pre code { font-size: 11px; }
 .note-grid-body .prose-editor .ProseMirror blockquote { margin: 3px 0; padding-left: 8px; border-left-width: 2px; }
 .note-grid-body .prose-editor .ProseMirror hr { margin: 6px 0; }
 .note-grid-body .prose-editor .ProseMirror table { font-size: 10px; }

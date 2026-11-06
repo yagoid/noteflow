@@ -176,15 +176,24 @@ cambios en `docs/**`, así que cualquier versión/URL horneada mentiría en cuan
   warning **sin** competir con los botones ni con el disclaimer de privacidad. Cuando haya firma de
   código, esta nota **se borra**.
 
-### `/cli` — fuente de verdad: **`cli/noteflow-cli/SKILL.md`** (skill `noteflow-cli`)
-El hero/cabecera dicen CLI **v1.10.0** (no re-sincronizados: el CLI va por v2.5.0; las filas de
-`add`/`set`/`new`/`section add` y los flags `--create`/`--raw` sí reflejan v2.5.0). Anclas: `#install` `#notes-dir` `#format` `#commands` `#flags`
+### `/cli` — fuente de verdad: **`noteflow help` (`cmdHelp` en `cli/noteflow.js`) + el propio código del CLI**
+La **referencia completa** de comandos y flags es la ayuda del CLI (`noteflow help <comando>`) y,
+en la web, `docs/src/data/cli.ts`; la skill `cli/noteflow-cli/SKILL.md` **ya no es una referencia**
+sino la **guía para agentes** (solo lo que el CLI no avisa por sí solo: fallos silenciosos, modelo
+mental, chuleta de una línea por comando, checklist y protocolos de sync). Al revisar la página,
+contrasta con `noteflow help` y el código, no con la skill.
+La cabecera (`data/cli.ts`) y la meta description (`cli.{en,es}.ts`) dicen CLI **v2.6.0**. Reflejan
+v2.6.0: las filas de `add`/`set`/`new`/`section add`, `login`/`cloud login` (flags en dos pasos
+`--no-wait`/`--finish` y `--send-code`/`--code`), `status`/`cloud status` (campo `desktopApp`) y la
+tabla de flags globales (`globalFlags`; la mantiene la web, la skill ya no tiene tabla de flags).
+**No** se reflejan en la web: el protocolo para agentes de la skill (checklist inicial, "Sincroniza
+y verifica", "ofrécete a activar el sync") — la web solo enlaza a la skill. Anclas: `#install` `#notes-dir` `#format` `#commands` `#flags`
 `#agents` `#caveats` `#troubleshooting`.
 - Tabla de comandos/flags/ejemplos (38 comandos en 6 grupos, incluido el grupo **NoteFlow Cloud**
   `cloud login/logout/setup/push/pull/status`): **`src/data/cli.ts`** (estructural,
   con `desc: {en,es}` inline por fila).
 - Prosa (instalación, formato v2, avisos PowerShell/app-abierta, troubleshooting): `cli.{en,es}.ts`.
-- **Si cambia el CLI** (`cli/noteflow.js` + su SKILL.md): reflejar comandos/flags nuevos en
+- **Si cambia el CLI** (`cli/noteflow.js` + su `noteflow help`): reflejar comandos/flags nuevos en
   `data/cli.ts` y la prosa afectada. El badge de versión del hero también vive en el dict.
 
 ### `/ai` — fuente de verdad: **el código de `electron/ai/` + `electron/main.ts`** (y `.claude/context/ai.md`)
@@ -233,7 +242,7 @@ capacidades se autogestionan gratis: IA con Ollama/key propia, nube con GitHub S
 | `#free` | Lo gratis (editor, Cerebro local, IA con key propia/Ollama, cifrado, GitHub Sync, CLI) + callout "los planes suman, no sustituyen" | monetization.md § visión |
 | `#plans` | Grid de 3 cards de precio: AI €5.99/mes · €49.99/año, Cloud €3.99/mes · €39.99/año, Bundle €7.99/mes · €79.99/año (badge "Best value") + alta desde la app + MoR Lemon Squeezy; **precios con IVA incluido** (tax-inclusive pricing activado en Lemon Squeezy; LSSI art. 10.1.f — lo dicen la nota bajo las cards, los bullets de `#ai`/`#cloud` y `/terms` §3); las cifras van también al JSON-LD (`offers`, con `valueAddedTaxIncluded: true`) | monetization.md § visión "Precios" (y `src/lib/subscriptionPlans.ts`) |
 | `#ai` | Plan NoteFlow AI: **modelos curados literales** en dos bloques — "del día a día" (deepseek-v4.1-flash-1017 —recomendado—, gpt-5.6-luna, claude-haiku-5.5, mimo-v2.6-pro) y "avanzado" (gpt-5.6-sol, que gasta la asignación ~30× más rápido) —, **asignación mensual medida por el coste real de cada petición** (sin cifra de tokens ni multiplicadores: no publicar el presupuesto en USD), mensual/anual con **€5.99/mes o €49.99/año** en el bullet, alta vía Settings → Subscription → Subscribe (checkout Lemon Squeezy) | monetization.md § 3 "Cuota por coste" (catálogo vivo = tabla `ai_models`, catálogo actual en `supabase/migrations/0013_ai_cost_quota.sql` — añadir una fila NO actualiza la web: revisar esta lista a mano; el "≈30×" sale del `cost_index` de GET /models) + § visión "Precios" |
-| `#cloud` | Plan NoteFlow Cloud marcado **"Available now"**: sync automática, cifrado **dual** (managed por defecto + E2EE opt-in), bullet con **€3.99/mes o €39.99/año**; GitHub Sync sigue gratis | monetization.md § 4 (badge activo, no `--soon`; + § visión "Precios" |
+| `#cloud` | Plan NoteFlow Cloud marcado **"Available now"**: sync automática, cifrado **dual** (managed por defecto + E2EE opt-in), bullet con **€3.99/mes o €39.99/año**; se activa sola al pagar y al iniciar sesión con el plan (igual que NoteFlow AI en `#ai`); GitHub Sync sigue gratis | monetization.md § 4 (badge activo, no `--soon`; + § visión "Precios" |
 | `#compare` | Tabla gestionado vs autogestionado (IA, setup, sync, "todo lo demás gratis") | monetization.md §§ 3-4 |
 | `#privacy` | RAG local, al proxy viaja lo mismo que con key propia, `aiHidden`/cifradas nunca salen, IA gestionada ≠ nube de notas | monetization.md § 3 "Privacidad" + `/ai#privacy` |
 
@@ -254,7 +263,7 @@ revisar esos textos y su fecha.
 
 1. ¿Es visible para el usuario? → skill `noteflow-features` (ya obligatorio) **y** revisar si toca
    alguna sección de `/features` o el mock de la landing.
-2. ¿Toca el CLI? → SKILL.md del CLI (con la **misma versión** que `CLI_VERSION`, ver `patterns.md`) **y** `/cli` (`data/cli.ts` + prosa + versión del hero).
+2. ¿Toca el CLI? → `noteflow help` (`cmdHelp`) con el detalle, la SKILL.md del CLI solo si cambia algo que el CLI no avisa (y siempre con la **misma versión** que `CLI_VERSION`, ver `patterns.md`) **y** `/cli` (`data/cli.ts` + prosa + versión del hero).
 3. ¿Toca IA (presets, tools, umbrales, prompts, cuestionario)? → `/ai` (tabla de arriba).
 4. ¿Atajos o temas nuevos? → `/features#shortcuts` / `#personalize`.
 5. Verificar: `cd docs && npm run build` + revisar la página en dark y light y en EN y ES.

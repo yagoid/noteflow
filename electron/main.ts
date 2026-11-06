@@ -30,9 +30,9 @@ import {
   planAccountTransition,
   parseAccountRestore,
   clearRestoreSurface,
-  stepAiEntitlementBaseline,
-  NO_AI_BASELINE,
-  type AiEntitlementBaseline,
+  stepEntitlementBaseline,
+  NO_ENTITLEMENT_BASELINE,
+  type EntitlementBaseline,
   type AccountRestoreRecord,
   type AccountTransitionPlan,
   type RestoreSurface,
@@ -229,13 +229,15 @@ function emitAccountStatusChanged(): void {
   })
 }
 
-// Baseline for the 'ai' entitlement, established on the FIRST FRESH status observation of the
-// CURRENT signed-in identity (the first successful fetch after app boot with a persisted
-// session, or right after sign-in) and never used to trigger anything by itself — a naive
-// false→true edge on that first read would force-switch the provider on every single launch for
-// an already-subscribed user, even one who deliberately kept a BYO-key provider active. Only a
-// REAL transition seen LATER for the SAME identity in the same run (e.g. the user subscribes,
-// comes back and hits Refresh in Settings → Account) should auto-activate the managed provider.
+// Baseline for the 'ai' and 'cloud' entitlements, established on the FIRST FRESH status
+// observation of the CURRENT signed-in identity (the first successful fetch after app boot with a
+// persisted session, or right after sign-in) and never used to trigger anything by itself — a
+// naive false→true edge on that first read would force-switch the provider / turn Cloud on at
+// every single launch for an already-subscribed user, even one who deliberately kept a BYO-key
+// provider or Cloud off. Only a REAL transition seen LATER for the SAME identity in the same run
+// (e.g. the user subscribes, comes back and hits Refresh in Settings → Account) auto-activates
+// that surface: 'ai' → managed provider, 'cloud' → NoteFlow Cloud (bundle = both). Activation on
+// a real sign-in is planAccountTransition's job, not this one's.
 // account.ts now PERSISTS the last known entitlements (account.entitlementsCache) so the UI is
 // known from t=0, but that cached value — like still-unknown entitlements — is NOT a fresh
 // observation: it neither sets nor moves the baseline (account.areEntitlementsFromCache), so
@@ -246,8 +248,8 @@ function emitAccountStatusChanged(): void {
 // account B that already had the entitlement before this process even started would look like
 // it just "transitioned" the moment it signs in after account A (which lacked it) signs out.
 // A keychain-locked session (status.sessionLocked) keeps signedIn + identity, so it is NOT a
-// sign-out for this nor for planAccountTransition. Logic: stepAiEntitlementBaseline.
-let aiEntitlementBaseline: AiEntitlementBaseline = NO_AI_BASELINE
+// sign-out for this nor for planAccountTransition. Logic: stepEntitlementBaseline.
+let entitlementBaseline: EntitlementBaseline = NO_ENTITLEMENT_BASELINE
 
 // Last observed account snapshot — the "previous" side of the sign-in/sign-out
 // edge that planAccountTransition() reasons about. Seeded at boot from the
@@ -259,8 +261,9 @@ function accountIdentityOf(status: account.AccountStatus): string | null {
   return status.signedIn ? (status.email ?? null) : null
 }
 
-// Small non-secret record of what the signing-out session had enabled, so that
-// signing back in with the SAME identity puts it back (see accountTransition.ts).
+// Small non-secret record of a pending activation of the paid surfaces: what the
+// signing-out session had enabled, or — on a sign-in whose entitlements are not
+// known yet — "switch on whatever is paid" (see accountTransition.ts).
 function readAccountRestore(): AccountRestoreRecord | null {
   return parseAccountRestore(readSettings().accountRestore)
 }
@@ -285,8 +288,9 @@ function dropRestoreSurface(surface: RestoreSurface): void {
 
 // Applies the plan of accountTransition.ts: tear the paid subsystems down on
 // sign-out (Cloud off, DEK dropped, assistant back to a BYO/local provider) and
-// put them back on a matching sign-in. Every branch is a no-op unless the plan
-// asked for it, so this runs on every account status change.
+// switch on what is paid on sign-in (or on a subscribe while signed in — see
+// handleAccountStatusChanged). Every branch is a no-op unless the plan asked for
+// it, so this runs on every account status change.
 function applyAccountTransition(plan: AccountTransitionPlan): void {
   let cloudChanged = false
 
@@ -304,10 +308,12 @@ function applyAccountTransition(plan: AccountTransitionPlan): void {
     cloudChanged = true
   }
   if (plan.enableCloud) {
-    // No initial pull from here: the DEK is null by construction on this path
-    // (the sign-out dropped it and its cache), so pulling now would only set
-    // syncError = "Cloud keys are locked". runCloudSyncCycle does it in the
-    // right order — managed auto-unlock → pull → drain journal.
+    // No initial pull from here: the DEK is normally null on this path (a
+    // sign-out drops it and its cache; a first sign-in never had one), so
+    // pulling now would only set syncError = "Cloud keys are locked".
+    // runCloudSyncCycle does it in the right order — managed auto-unlock →
+    // pull → drain journal (an e2ee user gets the passphrase prompt; no keys
+    // yet → the Cloud card's key setup).
     const res = cloudSync.enableCloudSync()
     if (res.ok) {
       startCloudAutoSync()
@@ -332,13 +338,13 @@ function handleAccountStatusChanged(): void {
   const status = account.getAccountStatus()
   const identity = status.signedIn ? (status.email ?? '') : null
 
-  const step = stepAiEntitlementBaseline(aiEntitlementBaseline, {
+  const step = stepEntitlementBaseline(entitlementBaseline, {
     identity,
-    ai: status.entitlements.ai,
+    entitlements: status.entitlements,
     fresh: status.entitlementsKnown && !account.areEntitlementsFromCache(),
   })
-  aiEntitlementBaseline = step.next
-  if (step.autoSwitch) {
+  entitlementBaseline = step.next
+  if (step.activate.ai) {
     // Same identity as before, real subscribe-while-running transition — auto-switch to the
     // managed provider unless it's already active (avoid an unnecessary settings write).
     // Written BEFORE the broadcast below so the renderer's config reload (LlmConfigView reacts
@@ -349,31 +355,36 @@ function handleAccountStatusChanged(): void {
 
   cloudSync.bindCloudSyncToAccount(account.getUserId()) // another account's Cloud sync state is reset
 
-  // Sign-out teardown / sign-in restore of the paid subsystems. Read AFTER the
+  // Sign-out teardown / sign-in activation of the paid subsystems. Read AFTER the
   // auto-switch above so the plan sees the current provider; both paths write
   // BEFORE the broadcast below, so the renderer reloads with the final state.
-  // (The two never collide: the auto-switch only fires for the SAME identity,
-  // the restore only for a matching record on a fresh sign-in.)
+  // (The two never collide: the auto-switch only fires for the SAME identity on
+  // a stable session, the plan's activation on a fresh sign-in or a pending
+  // record — and each skips what is already on.)
   const previous = lastAccountSnapshot
   lastAccountSnapshot = { signedIn: status.signedIn, identity: accountIdentityOf(status) }
   const llmCfg = readLlmSettings()
-  applyAccountTransition(
-    planAccountTransition(
-      previous,
-      {
-        signedIn: status.signedIn,
-        identity: accountIdentityOf(status),
-        entitlements: status.entitlements,
-        entitlementsKnown: status.entitlementsKnown,
-      },
-      {
-        cloudEnabled: cloudSync.isCloudSyncEnabled(),
-        aiManaged: llmCfg.active === 'noteflow',
-        aiFallbackProvider: llm.byoFallbackProvider(llmCfg),
-        restore: readAccountRestore(),
-      }
-    )
+  const cloudEnabled = cloudSync.isCloudSyncEnabled()
+  const plan = planAccountTransition(
+    previous,
+    {
+      signedIn: status.signedIn,
+      identity: accountIdentityOf(status),
+      entitlements: status.entitlements,
+      entitlementsKnown: status.entitlementsKnown,
+    },
+    {
+      cloudEnabled,
+      aiManaged: llmCfg.active === 'noteflow',
+      aiFallbackProvider: llm.byoFallbackProvider(llmCfg),
+      restore: readAccountRestore(),
+    }
   )
+  // Subscribed to Cloud while signed in (same identity, fresh false→true): switch
+  // it on through the same path as a sign-in activation. AFTER
+  // bindCloudSyncToAccount, so it lands on this account's sync state.
+  // (Spread, never mutate: the plan may be the shared NO_OP object.)
+  applyAccountTransition(step.activate.cloud && !cloudEnabled ? { ...plan, enableCloud: true } : plan)
 
   // Managed cloud keys unlock silently as soon as a session exists (fresh
   // sign-in, or account events on a restored one). No-op for e2ee / no-keys /
@@ -2410,8 +2421,13 @@ ipcMain.handle('sync:dismiss-conflict-copies', () => {
 // Enabling Cloud takes over from GitHub Sync (mutually exclusive — see
 // syncProvider.ts): the GitHub autosync stands down and the cloud autosync
 // (Realtime + safety-net loop) starts, kicking an initial pull (which flushes
-// local changes after). Shared by the IPC below and the sign-in restore path
-// (applyAccountTransition).
+// local changes after). Used by the cloud:enable IPC below — the user enables
+// Cloud by hand from an unlocked panel, so the DEK is there and pulling right
+// away is correct. applyAccountTransition (the automatic activation on sign-in
+// and on subscribe) deliberately does NOT use it: it calls enableCloudSync +
+// startCloudAutoSync + runCloudSyncCycle WITHOUT an initial pull, because the
+// DEK may be null at that point (a pull would only set "Cloud keys are locked")
+// and runCloudSyncCycle unlocks first. Don't unify the two.
 function enableCloudSyncWithInitialPull(): { ok: boolean; error?: string } {
   const res = cloudSync.enableCloudSync()
   if (res.ok) {
@@ -3035,9 +3051,10 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
         if (undoable && !result.isError) {
           const noteId = chatUndo.undoNoteId(call.name, call.input, result.noteId)
           const after = noteId ? readDiskNote(noteId) : null
+          // No `after` (note unreadable right after the tool) → no undo: the 3-way merge needs it.
           const dir = before?.dir ?? after?.dir
-          if (noteId && dir && chatUndo.noteFingerprint(before?.note ?? null) !== chatUndo.noteFingerprint(after?.note ?? null)) {
-            chatUndoStore.put({ toolCallId: call.id, noteId, dir, before: before?.note ?? null, after: after?.note ?? null })
+          if (noteId && after && dir && chatUndo.noteFingerprint(before?.note ?? null) !== chatUndo.noteFingerprint(after.note)) {
+            chatUndoStore.put({ toolCallId: call.id, noteId, dir, before: before?.note ?? null, after: after.note })
             canUndo = true
           }
         }
@@ -3060,12 +3077,13 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
   }
 })
 
-// Undo one note edit of the chat agent: put the note back as it was before that tool call,
-// through the regular write/delete primitives (broadcast to every window + push + reindex).
-// Without `force`, refuses with 'modified' when the note changed after the AI's edit — the UI
-// then asks the user and retries with force. Never runs (even forced) when it would re-create a
-// note folder / section file deleted since ('conflict': a remote delete may still be queued for
-// it) or when the note's encryption changed since ('encryption') — see chatUndo.undoBlock.
+// Undo one note edit of the chat agent: revert only what that tool call changed (3-way merge,
+// later edits elsewhere in the note survive), through the regular write/delete primitives
+// (broadcast to every window + push + reindex). Without `force`, refuses with 'modified' when a
+// part the AI changed was changed again afterwards — the UI then asks the user and retries with
+// force. Never runs (even forced) when it would re-create the note folder / a section file the
+// tool changed that was deleted since ('conflict': a remote delete may still be queued for it) or
+// when the note's encryption changed since ('encryption') — see chatUndo.undoBlock.
 ipcMain.handle('ai:chat-undo', async (_event, toolCallId: unknown, force: unknown) => {
   if (typeof toolCallId !== 'string') return { ok: false, reason: 'unavailable' }
   const snapshot = chatUndoStore.get(toolCallId)
@@ -3076,7 +3094,7 @@ ipcMain.handle('ai:chat-undo', async (_event, toolCallId: unknown, force: unknow
     // Checked before 'modified' (and not overridable by force): no confirmation can make these safe.
     const block = chatUndo.undoBlock(snapshot, current)
     if (block) return { ok: false, reason: block === 'gone' ? 'conflict' : 'encryption' }
-    if (force !== true && chatUndo.isModifiedSinceEdit(snapshot, current)) return { ok: false, reason: 'modified' }
+    if (force !== true && chatUndo.hasUndoConflict(snapshot, current)) return { ok: false, reason: 'modified' }
     const plan = chatUndo.planUndo(snapshot, current)
     if (plan.kind === 'delete') {
       applyNoteDelete(plan.dir)
@@ -3663,26 +3681,48 @@ ipcMain.handle('app:set-login-item', (_event, enabled: boolean) => {
   }
 })
 
-// ── CLI skill exposure (~/.claude/skills/noteflow-cli) ────────────────────────
-// Installs the bundled noteflow-cli SKILL.md into the user's Claude skills dir so
-// AI agents (e.g. Claude Code) discover how to drive NoteFlow via the CLI without
-// any extra download. Controlled by the `exposeSkillToAgents` setting (default on)
-// and re-synced on every launch so skill updates propagate. Best-effort: never
-// throws into the startup path.
-function syncSkillToClaudeDir(): void {
+// ── CLI skill exposure (agent skill dirs) ─────────────────────────────────────
+// Installs the bundled noteflow-cli SKILL.md into the user-level skill dirs of
+// AI coding agents so they discover how to drive NoteFlow via the CLI without
+// any extra download:
+//   - ~/.claude/skills/noteflow-cli          → Claude Code (only reads this path)
+//   - ~/.agents/skills/noteflow-cli          → Agent Skills standard user path
+//     (agentskills.io): Codex, Gemini CLI, GitHub Copilot, Cursor, OpenCode…
+//   - ~/.codeium/windsurf/skills/noteflow-cli → Windsurf, only if ~/.codeium/windsurf
+//     already exists (we never create ~/.codeium on machines without Windsurf)
+// Controlled by the `exposeSkillToAgents` setting (default on) and re-synced on
+// every launch so skill updates propagate. Each destination is handled
+// independently and best-effort: a failure in one never blocks the others, and
+// nothing ever throws into the startup path.
+function skillAgentDestDirs(): string[] {
+  const home = os.homedir()
+  const dirs = [
+    path.join(home, '.claude', 'skills', 'noteflow-cli'),
+    path.join(home, '.agents', 'skills', 'noteflow-cli'),
+  ]
+  const windsurfRoot = path.join(home, '.codeium', 'windsurf')
+  try {
+    if (fs.existsSync(windsurfRoot)) dirs.push(path.join(windsurfRoot, 'skills', 'noteflow-cli'))
+  } catch { /* treat as not installed */ }
+  return dirs
+}
+
+function syncSkillToAgentDirs(): void {
   try {
     const enabled = (readSettings().exposeSkillToAgents ?? true) as boolean
-    const destDir = path.join(os.homedir(), '.claude', 'skills', 'noteflow-cli')
-    const destFile = path.join(destDir, 'SKILL.md')
+    const destDirs = skillAgentDestDirs()
 
     if (!enabled) {
-      // Opt-out: remove our file (and the folder if we left it empty). Never
-      // touch anything else under ~/.claude.
-      try {
-        if (fs.existsSync(destFile)) fs.unlinkSync(destFile)
-        if (fs.existsSync(destDir) && fs.readdirSync(destDir).length === 0) fs.rmdirSync(destDir)
-      } catch (err) {
-        console.error('Failed to remove NoteFlow skill:', err)
+      // Opt-out: remove our file (and the noteflow-cli folder if we left it
+      // empty) in every destination. Never touch anything else.
+      for (const destDir of destDirs) {
+        try {
+          const destFile = path.join(destDir, 'SKILL.md')
+          if (fs.existsSync(destFile)) fs.unlinkSync(destFile)
+          if (fs.existsSync(destDir) && fs.readdirSync(destDir).length === 0) fs.rmdirSync(destDir)
+        } catch (err) {
+          console.error('Failed to remove NoteFlow skill from', destDir, err)
+        }
       }
       return
     }
@@ -3697,12 +3737,19 @@ function syncSkillToClaudeDir(): void {
     }
 
     const srcContent = fs.readFileSync(srcFile, 'utf-8')
-    // Copy only when missing or stale, so we self-heal and pick up skill
-    // changes on update without rewriting on every launch.
-    const current = fs.existsSync(destFile) ? fs.readFileSync(destFile, 'utf-8') : null
-    if (current !== srcContent) {
-      fs.mkdirSync(destDir, { recursive: true })
-      fs.writeFileSync(destFile, srcContent, 'utf-8')
+    for (const destDir of destDirs) {
+      try {
+        const destFile = path.join(destDir, 'SKILL.md')
+        // Copy only when missing or stale, so we self-heal and pick up skill
+        // changes on update without rewriting on every launch.
+        const current = fs.existsSync(destFile) ? fs.readFileSync(destFile, 'utf-8') : null
+        if (current !== srcContent) {
+          fs.mkdirSync(destDir, { recursive: true })
+          fs.writeFileSync(destFile, srcContent, 'utf-8')
+        }
+      } catch (err) {
+        console.error('Failed to sync NoteFlow skill to', destDir, err)
+      }
     }
   } catch (err) {
     console.error('Failed to sync NoteFlow skill:', err)
@@ -3718,7 +3765,7 @@ ipcMain.handle('app:set-skill-sync', (_event, enabled: boolean) => {
   settings.exposeSkillToAgents = enabled
   writeSettings(settings)
   try {
-    syncSkillToClaudeDir()
+    syncSkillToAgentDirs()
     return { ok: true }
   } catch (err) {
     console.error('Failed to set skill sync:', err)
@@ -4195,9 +4242,10 @@ app.whenReady().then(async () => {
     }
   }
 
-  // Keep the CLI skill in ~/.claude/skills in sync (install/update/remove) so AI
-  // agents discover it. Best-effort — must never block startup.
-  try { syncSkillToClaudeDir() } catch (err) {
+  // Keep the CLI skill in the agent skill dirs (~/.claude/skills, ~/.agents/skills,
+  // Windsurf if installed) in sync (install/update/remove) so AI agents discover
+  // it. Best-effort — must never block startup.
+  try { syncSkillToAgentDirs() } catch (err) {
     console.error('Failed to sync NoteFlow skill on startup:', err)
   }
 

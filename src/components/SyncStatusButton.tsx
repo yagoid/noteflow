@@ -218,15 +218,15 @@ export function SyncStatusButton({
             <span aria-hidden className="absolute top-1.5 right-1 w-1.5 h-1.5 rounded-full bg-amber-400" />
           )}
           {state === 'syncing' ? (
-            <RefreshCw size={12} className="animate-spin text-text" />
+            <RefreshCw size={13} className="animate-spin text-text" />
           ) : state === 'uploading' ? (
-            <Cloud size={12} className="animate-pulse text-green-400" />
+            <Cloud size={13} className="animate-pulse text-green-400" />
           ) : state === 'locked' || state === 'blocked' ? (
-            <CloudOff size={12} className="text-amber-400" />
+            <CloudOff size={13} className="text-amber-400" />
           ) : state === 'error' ? (
-            <Cloud size={12} className="text-amber-400" />
+            <Cloud size={13} className="text-amber-400" />
           ) : (
-            <Cloud size={12} className="text-green-400" />
+            <Cloud size={13} className="text-green-400" />
           )}
         </button>
       </div>

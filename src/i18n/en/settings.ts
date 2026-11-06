@@ -78,8 +78,8 @@ export const settings = {
     // Editor colour rows (H1/H2/H3 need no label — they show as "H1"…).
     colorItalic: 'Italic',
     colorInlineCode: 'Inline code',
-    colorCodeAccent: 'Code & quote',
-    colorCodeAccentHint: 'Left border of code blocks and quotes',
+    colorCodeAccent: 'Quote',
+    colorCodeAccentHint: 'Left border of quotes',
     smaller: 'Smaller',
     larger: 'Larger',
     immersive: 'Immersive',
@@ -283,7 +283,7 @@ export const settings = {
     profileHint: 'Re-run the questionnaire to refresh the profile note the assistant uses for context.',
     exposeSkill: 'Expose CLI skill to AI agents',
     exposeSkillHint:
-      'Installs the NoteFlow skill into ~/.claude/skills so agents like Claude Code can drive your notes via the CLI without extra setup.',
+      'Installs the NoteFlow skill into ~/.claude/skills and ~/.agents/skills so Claude Code, Codex, Gemini CLI, Copilot, Cursor and other Agent Skills-compatible agents can drive your notes via the CLI.',
     exposeSkillTooltip: 'Expose the CLI skill',
     stopExposingSkill: 'Stop exposing the CLI skill',
   },

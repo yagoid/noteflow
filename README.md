@@ -91,7 +91,7 @@ noteflow list --group backend --json
 noteflow push
 ```
 
-Full reference → [`cli/noteflow-cli/SKILL.md`](cli/noteflow-cli/SKILL.md) or [cli.html](https://yagoid.github.io/noteflow/cli.html)
+Full reference → the [CLI page](https://yagoid.github.io/noteflow/cli) and `noteflow help <command>`. The agent guide lives in [`cli/noteflow-cli/SKILL.md`](cli/noteflow-cli/SKILL.md).
 
 ### AI Agent Skill
 

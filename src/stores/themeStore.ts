@@ -46,8 +46,9 @@ const EMPTY_EDITOR_COLORS: EditorColorOverrides = {
 
 // Each editor colour falls back to a theme var when not overridden (see index.css):
 // h1 → --accent, h2 → --cyan, h3 → --text, italic → --purple, inlineCode → --red,
-// codeAccent → --accent. `codeAccent` is a single colour shared by the left border of
-// code blocks (`pre`) and blockquotes.
+// codeAccent → --accent. `codeAccent` paints the left border of blockquotes (the name is
+// historical: it used to be shared with the code block's left border, which code blocks
+// no longer have; kept as is because it's the persisted settings key).
 const EDITOR_COLOR_VARS: Record<EditorColorKey, string> = {
   h1: '--heading-1',
   h2: '--heading-2',

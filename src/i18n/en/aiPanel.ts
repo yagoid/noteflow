@@ -60,6 +60,10 @@ export const aiPanel = {
     historyTooltip: 'Chat history',
     newChat: 'New chat',
     modelSelectTitle: 'Model used for the next question',
+    // Tooltip/aria-label of the red "x{mult}" badge next to the model picker (NoteFlow AI only),
+    // shown when the selected model spends the allowance at least twice as fast as the
+    // recommended one ({mult} = rounded relative cost of a typical message, e.g. 29).
+    modelCostBadgeTitle: 'This model uses {mult}× more of your quota than the recommended one',
     noModel: '(no model)',
     loadModelsTitle: 'Load models from provider',
     noSavedChats: 'No saved chats yet.',
@@ -70,14 +74,14 @@ export const aiPanel = {
 
     // Undo of a note edit made by the agent (button on its activity row).
     undo: 'Undo',
-    undoHint: 'Put the note back as it was before this edit',
+    undoHint: 'Revert only what this edit changed',
     undoWhileStreaming: 'Available when the reply finishes',
     undone: 'Undone',
-    undoModified: 'The note changed after this edit. Undo anyway?',
+    undoModified: 'The part the AI edited changed afterwards. Undo anyway?',
     undoAnyway: 'Undo anyway',
     undoHintCreated: 'Delete the note the AI created',
     undoModifiedCreated: 'The note changed after the AI created it. Undo anyway? The whole note will be deleted.',
-    undoConflict: "Can't undo: the note or one of its sections was deleted after this edit.",
+    undoConflict: "Can't undo: the note, or the section this edit changed, was deleted afterwards.",
     undoEncryption: "Can't undo: the note was encrypted or decrypted after this edit.",
     // {error}: raw error text from main.
     undoFailed: "Couldn't undo: {error}",
@@ -190,7 +194,7 @@ export const aiPanel = {
     // recommended model ({mult} = rounded relative cost of a typical message, shown from 2;
     // e.g. "gpt-5.6-sol (≈29× quota)").
     modelQuotaSuffix: '(≈{mult}× quota)',
-    // Appended to the recommended model's option ("deepseek-v4.1-flash-1017 · Recommended").
+    // Appended in parentheses to the recommended model's option ("deepseek-v4.1-flash-1017 (Recommended)").
     modelRecommended: 'Recommended',
     baseUrl: 'Base URL',
     apiKey: 'API key',

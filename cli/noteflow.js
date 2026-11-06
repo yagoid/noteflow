@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.6.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.7.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.6.0'
+const CLI_VERSION = '2.7.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -168,6 +168,8 @@ function getToken() {
 // every grant, so a shared session would sign the app and the CLI out of each
 // other on every refresh. The refresh token is stored base64-encoded — same
 // trade-off as the CLI's GitHub token (a plain Node process has no safeStorage).
+// Sole exception, read-only: readDesktopAppInfo() checks whether the app HAS a
+// session (and its email) for the `status --json` hint — never its token.
 
 function getCliAccount() {
   const a = readSettings().cliAccount
@@ -184,6 +186,63 @@ function clearCliAccount() {
   const settings = readSettings()
   delete settings.cliAccount
   writeSettings(settings)
+}
+
+// ── Desktop app hint (read-only) ──────────────────────────────────────────────
+//
+// `status --json` tells an agent whether the user is signed in to NoteFlow
+// Cloud in the DESKTOP app, so it can offer that backend (with that email)
+// when the CLI has no sync. Electron's userData is `<appData>/NoteFlow` (its
+// app name is package.json's productName): the CLI's own settings.json on
+// Windows (case-insensitive), a different file on macOS and Linux. Only the
+// PRESENCE of the app's session is read — never its refresh token — plus the
+// email, which the app stores in clear, and its GitHub owner/repo (no token);
+// the sessions themselves stay the app's.
+
+/** Pure: where the desktop app's settings.json lives (empty = unknown OS). */
+function desktopSettingsCandidates(platform, env, home) {
+  if (platform === 'win32') {
+    return [path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'NoteFlow', 'settings.json')]
+  }
+  if (platform === 'darwin') return [path.join(home, 'Library', 'Application Support', 'NoteFlow', 'settings.json')]
+  // NOT the lowercase ~/.config/noteflow: that is the CLI's own file, which
+  // exists without the app — it would turn "app not found" into a false "no".
+  if (platform === 'linux') return [path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'NoteFlow', 'settings.json')]
+  return []
+}
+
+/**
+ * Pure: the `desktopApp` field of `status --json` from the app's parsed
+ * settings.json (null = not found / unknown). Mirrors the app's own rule
+ * (electron/account.ts getAccountStatus): signed in = refresh token + userId.
+ */
+function desktopAppInfo(settings) {
+  if (!settings || typeof settings !== 'object') return null
+  const a = settings.account && typeof settings.account === 'object' ? settings.account : null
+  const cloudSignedIn = !!(a && a.encryptedRefreshToken && a.userId)
+  const info = {
+    cloudSignedIn,
+    cloudSyncEnabled: cloudSignedIn && !!(settings.cloudSync && settings.cloudSync.enabled === true),
+  }
+  if (cloudSignedIn && typeof a.email === 'string' && a.email.includes('@')) info.cloudEmail = a.email
+  // The app's GitHub repo (owner/repo aren't secret; its token is never read):
+  // on macOS/Linux the CLI's own githubSync lives in another file, so
+  // `github.tokenAccessible: false` can't reveal the app's connection there.
+  const gh = settings.githubSync
+  info.github = gh && typeof gh === 'object' && gh.enabled && typeof gh.owner === 'string' && gh.owner
+    && typeof gh.repo === 'string' && gh.repo
+    ? { owner: gh.owner, repo: gh.repo }
+    : null
+  return info
+}
+
+function readDesktopAppInfo() {
+  for (const file of desktopSettingsCandidates(process.platform, process.env, os.homedir())) {
+    let raw
+    try { raw = fs.readFileSync(file, 'utf-8') } catch { continue }
+    try { return desktopAppInfo(JSON.parse(raw)) } catch { return null }
+  }
+  return null
 }
 
 // { enabled, pullSeq, lastSync, userId, pendingUpserts, forceUpserts, pullRetry,
@@ -1514,8 +1573,8 @@ function bindCliCloudToAccount(presumedOwner) {
 // ── Cloud: per-file bases (cli-cloud-state.json) ──────────────────────────────
 // relPath → { seq, hash } (see hashForBase): the server seq of the version of
 // each note file this CLI last reconciled. Kept OUT of settings.json — it grows
-// with the corpus and settings.json is shared with the desktop app on
-// Windows/Linux (same choice as cli-github-state.json, and as the app, whose
+// with the corpus and, on Windows, settings.json is the desktop app's too
+// (same choice as cli-github-state.json, and as the app, whose
 // bases live in cloud-sync-state.json, apart from its settings). Owned by
 // cliCloud.userId: a file written for another account reads as empty.
 // Changes are buffered in memory (one invocation may record thousands) and
@@ -4106,16 +4165,31 @@ function isInvalidOtpResponse(json) {
   return !!msg && /expired|invalid/i.test(msg)
 }
 
-// noteflow cloud login [email] [--no-pull]
-async function cmdCloudLogin(emailArg, opts = {}) {
-  let email = (emailArg || '').trim()
-  if (!email) {
-    email = await promptUntil('Email: ',
-      a => (a.includes('@') ? a : null),
-      a => (a ? `"${a}" is not an email address — try again` : 'Type the email of your NoteFlow account'))
-    if (!email) { err(stdinClosed ? 'No email entered' : 'A valid email is required'); exit(1) }
-  } else if (!email.includes('@')) { err('A valid email is required'); exit(1) }
+/**
+ * Pure: which `cloud login` flow the flags ask for. `--send-code` / `--code`
+ * are the non-interactive two-step flow (agents, scripts: no stdin needed) and
+ * both demand the email as an argument — there is no prompt to fall back on.
+ * Returns { mode: 'interactive' | 'sendCode' | 'code', email, code? } or { error }.
+ */
+function planCloudLogin(emailArg, opts = {}) {
+  const email = (emailArg || '').trim()
+  const hasCode = opts.code !== undefined
+  if (opts.sendCode && hasCode) return { error: '--send-code and --code cannot be used together' }
+  if (!opts.sendCode && !hasCode) {
+    if (email && !email.includes('@')) return { error: 'A valid email is required' }
+    return { mode: 'interactive', email }
+  }
+  const flag = opts.sendCode ? '--send-code' : '--code <code>'
+  if (!email) return { error: `Usage: noteflow cloud login <email> ${flag}` }
+  if (!email.includes('@')) return { error: `"${email}" is not an email address — usage: noteflow cloud login <email> ${flag}` }
+  if (opts.sendCode) return { mode: 'sendCode', email }
+  const code = normalizeOtpCode(String(opts.code))
+  if (!code) return { error: `"${opts.code}" is not a valid sign-in code — pass the digits from the email (spaces and dashes are ignored)` }
+  return { mode: 'code', email, code }
+}
 
+/** Emails a one-time sign-in code (creates the account on first sign-in). Exits on failure. */
+async function sendCloudOtp(email) {
   const otp = await supabaseFetch(`${SUPABASE_URL}/auth/v1/otp`, {
     method: 'POST',
     body: { email, create_user: true },
@@ -4127,6 +4201,63 @@ async function cmdCloudLogin(emailArg, opts = {}) {
     exit(1)
   }
   out(`  Sent a sign-in code to ${email}`)
+}
+
+/**
+ * Spends ONE /verify attempt. Returns the GoTrue session, or null when the code
+ * is wrong or expired (GoTrue can't tell those apart). Exits on any other failure.
+ */
+async function verifyCloudOtp(email, code) {
+  const verify = await supabaseFetch(`${SUPABASE_URL}/auth/v1/verify`, {
+    method: 'POST',
+    body: { type: 'email', email, token: code },
+  })
+  if (verify.status < 400) {
+    const session = verify.json
+    if (!session || !session.access_token || !session.refresh_token || !session.user) {
+      err('Unexpected response from the account service'); exit(1)
+    }
+    return session
+  }
+  if (verify.status === 429) { err('Too many attempts — wait a moment and try again'); exit(1) }
+  if (!isInvalidOtpResponse(verify.json)) { err(`Could not verify the code (HTTP ${verify.status})`); exit(1) }
+  return null
+}
+
+// noteflow cloud login [email] [--no-pull]                 interactive (prompts)
+// noteflow cloud login <email> --send-code                 step 1: email the code, exit
+// noteflow cloud login <email> --code <code> [--no-pull]   step 2: verify it once
+async function cmdCloudLogin(emailArg, opts = {}) {
+  const plan = planCloudLogin(emailArg, opts)
+  if (plan.error) { err(plan.error); exit(1) }
+
+  if (plan.mode === 'sendCode') {
+    await sendCloudOtp(plan.email)
+    out(`  Next: noteflow cloud login ${plan.email} --code <code>`)
+    return
+  }
+
+  if (plan.mode === 'code') {
+    // No email is sent here: the code from the earlier --send-code stays valid
+    // until it expires, so a typo can be retried without hitting the 429.
+    const session = await verifyCloudOtp(plan.email, plan.code)
+    if (!session) {
+      err(`That code is invalid or has expired. Check it and retry with --code, or get a new one: noteflow cloud login ${plan.email} --send-code`)
+      exit(1)
+    }
+    await finishCloudLogin(session, plan.email, opts)
+    return
+  }
+
+  let email = plan.email
+  if (!email) {
+    email = await promptUntil('Email: ',
+      a => (a.includes('@') ? a : null),
+      a => (a ? `"${a}" is not an email address — try again` : 'Type the email of your NoteFlow account'))
+    if (!email) { err(stdinClosed ? 'No email entered' : 'A valid email is required'); exit(1) }
+  }
+
+  await sendCloudOtp(email)
 
   // An empty or malformed entry re-prompts locally (the emailed code stays
   // valid); only a well-formed code spends a /verify attempt.
@@ -4136,26 +4267,24 @@ async function cmdCloudLogin(emailArg, opts = {}) {
       a => (a ? `"${a}" is not a valid code — paste the code from the email` : 'Paste the code from the email'))
     if (!code) { err(stdinClosed ? 'No code entered' : 'No valid code entered — run `noteflow cloud login` again'); exit(1) }
 
-    const verify = await supabaseFetch(`${SUPABASE_URL}/auth/v1/verify`, {
-      method: 'POST',
-      body: { type: 'email', email, token: code },
-    })
-    if (verify.status < 400) {
-      session = verify.json
-      if (!session || !session.access_token || !session.refresh_token || !session.user) {
-        err('Unexpected response from the account service'); exit(1)
-      }
-    } else if (verify.status === 429) {
-      err('Too many attempts — wait a moment and try again'); exit(1)
-    } else if (!isInvalidOtpResponse(verify.json)) {
-      err(`Could not verify the code (HTTP ${verify.status})`); exit(1)
-    } else if (attempt >= OTP_VERIFY_ATTEMPTS) {
+    session = await verifyCloudOtp(email, code)
+    if (session) break
+    if (attempt >= OTP_VERIFY_ATTEMPTS) {
       err('That code is invalid or has expired. Run `noteflow cloud login` again to get a new one.'); exit(1)
-    } else {
-      const left = OTP_VERIFY_ATTEMPTS - attempt
-      out(`  That code is invalid or has expired — check it and try again (${left} ${left === 1 ? 'attempt' : 'attempts'} left)`)
     }
+    const left = OTP_VERIFY_ATTEMPTS - attempt
+    out(`  That code is invalid or has expired — check it and try again (${left} ${left === 1 ? 'attempt' : 'attempts'} left)`)
   }
+  await finishCloudLogin(session, email, opts)
+}
+
+/**
+ * Everything after a verified sign-in, shared by the interactive and the
+ * `--code` flows: saves the CLI's own session, binds the sync cursor to the
+ * account, enables Cloud sync, reports the keys mode and (managed keys) runs
+ * the first pull unless --no-pull.
+ */
+async function finishCloudLogin(session, email, opts) {
   // A re-login without `cloud logout` still has the previous session here: its
   // userId identifies the owner of a cursor written before owners were recorded.
   const previousAccount = getCliAccount()
@@ -4250,6 +4379,7 @@ async function cmdCloudStatus(opts) {
           }
         : null,
       githubConfigured: !!(gh.enabled && gh.owner && gh.repo),
+      desktopApp: readDesktopAppInfo(),
     })
     return
   }
@@ -5095,65 +5225,195 @@ async function cmdMove(titleQuery, opts) {
   await syncPushNoteFiles(note.dirname, [NOTE_MD])
 }
 
-// noteflow login [repo] [--no-pull]
-async function cmdLogin(repoName, opts = {}) {
-  const repo = repoName || DEFAULT_REPO
+// ── GitHub login (Device Flow) ───────────────────────────────────────────────
+//
+// `noteflow login --no-wait` asks for the device code and exits; the pending
+// grant waits in settings.cliGithubLogin (CLI-owned, like cliAccount/cliCloud;
+// the desktop app never reads it) until `noteflow login --finish` polls it.
+// Lets an agent with no long-lived terminal hand the code to the user.
+
+/** Pure: the `login` flag combination is invalid → its error message, else null. */
+function loginFlagsError(opts = {}) {
+  if (opts.noWait && opts.finish) return '--no-wait and --finish cannot be used together'
+  return null
+}
+
+/**
+ * Pure: validates the pending Device Flow grant saved by `login --no-wait`.
+ * Returns { ok: true, pending } or { ok: false, reason: 'missing' | 'expired' }
+ * (a malformed entry counts as missing: there is nothing usable to poll).
+ */
+function checkPendingGithubLogin(raw, nowMs) {
+  if (!raw || typeof raw !== 'object' || typeof raw.deviceCode !== 'string' || !raw.deviceCode) {
+    return { ok: false, reason: 'missing' }
+  }
+  const expiresMs = Date.parse(raw.expiresAt)
+  if (!Number.isFinite(expiresMs)) return { ok: false, reason: 'missing' }
+  if (expiresMs <= nowMs) return { ok: false, reason: 'expired' }
+  const interval = Number.isFinite(raw.interval) && raw.interval > 0 ? raw.interval : 5
+  const repo = typeof raw.repo === 'string' && raw.repo ? raw.repo : DEFAULT_REPO
+  return { ok: true, pending: { ...raw, interval, repo, expiresMs } }
+}
+
+/**
+ * Pure: the repo `login --finish` connects. The pending grant was requested for
+ * a repo and wins; a repo argument is only accepted when it names the same one
+ * (a different one is an error, never a silent switch).
+ */
+function resolveFinishRepo(pendingRepo, repoArg) {
+  if (!repoArg || repoArg === pendingRepo) return { repo: pendingRepo }
+  return { error: `The pending login is for "${pendingRepo}", not "${repoArg}". Run 'noteflow login --finish' without a repo, or start over with 'noteflow login ${repoArg} --no-wait'` }
+}
+
+function setPendingGithubLogin(pending) {
+  const settings = readSettings()
+  if (pending) settings.cliGithubLogin = pending
+  else delete settings.cliGithubLogin
+  writeSettings(settings) // owner-only (0600) on POSIX: it holds the device code
+}
+
+function openInBrowser(url) {
+  try {
+    if (process.platform === 'linux') execSync(`xdg-open "${url}" 2>/dev/null`, { stdio: 'ignore' })
+    else if (process.platform === 'win32') execSync(`start "" "${url}"`, { stdio: 'ignore', shell: true })
+    else if (process.platform === 'darwin') execSync(`open "${url}"`, { stdio: 'ignore' })
+  } catch { /* headless */ }
+}
+
+async function requestGithubDeviceCode() {
   out('\n  Authenticating with GitHub...')
   const data = await githubAuthPost('/login/device/code', { client_id: GITHUB_CLIENT_ID, scope: 'repo' })
   if (data.error) { err(data.error_description || data.error); exit(1) }
   out(`\n  Go to:  ${data.verification_uri}`)
   out(`  Enter:  ${data.user_code}\n`)
-  try {
-    if (process.platform === 'linux') execSync(`xdg-open "${data.verification_uri}" 2>/dev/null`, { stdio: 'ignore' })
-    else if (process.platform === 'win32') execSync(`start "" "${data.verification_uri}"`, { stdio: 'ignore', shell: true })
-    else if (process.platform === 'darwin') execSync(`open "${data.verification_uri}"`, { stdio: 'ignore' })
-  } catch { /* headless */ }
+  openInBrowser(data.verification_uri)
+  return data
+}
 
-  let interval = (parseInt(data.interval) || 5) * 1000
-  const expiresAt = Date.now() + parseInt(data.expires_in) * 1000
-  process.stdout.write('  Waiting for authorization')
-  while (Date.now() < expiresAt) {
-    await new Promise(r => setTimeout(r, interval))
-    process.stdout.write('.')
+/**
+ * Polls the Device Flow token endpoint until GitHub authorizes, refuses or the
+ * code expires (respects `interval` and `slow_down`). `immediate` = first poll
+ * right away (`--finish`: the user says they already authorized). Returns
+ * { token } | { expired: true } | { error } — the caller decides how to fail.
+ */
+async function pollGithubDeviceToken(deviceCode, intervalSec, expiresMs, { immediate = false } = {}) {
+  let interval = intervalSec * 1000
+  let first = immediate
+  // Progress dots: stderr under --json, so stdout stays pure JSON.
+  const progress = s => (jsonMode ? process.stderr : process.stdout).write(s)
+  progress('  Waiting for authorization')
+  while (Date.now() < expiresMs) {
+    if (!first) await new Promise(r => setTimeout(r, interval))
+    first = false
+    progress('.')
     const result = await githubAuthPost('/login/oauth/access_token', {
-      client_id: GITHUB_CLIENT_ID, device_code: data.device_code,
+      client_id: GITHUB_CLIENT_ID, device_code: deviceCode,
       grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
     })
-    if (result.access_token) {
-      process.stdout.write('\n')
-      const token = result.access_token
-      const user = await githubRequest(token, 'GET', '/user')
-      out(`  Logged in as ${user.login}`)
-      await ensureRepo(token, user.login, repo)
-      const settings = readSettings()
-      // No fresh `lastSync` here: nothing has been synced yet, and on
-      // Windows/Linux this settings.json is the desktop app's too — its pull
-      // deletes local notes absent from the remote when `updated <= lastSync`.
-      // Re-connecting the SAME repo keeps the previous sync state (lastSync,
-      // needsFullReconcile…); a different repo starts clean. The pull below
-      // writes lastSync once it really ran — and only if the repo already has
-      // every local note (see nextGithubLastSync).
-      const prev = settings.githubSync
-      const sameRepo = prev && prev.owner === user.login && prev.repo === repo
-      if (!sameRepo) clearGithubBases() // another repo: no known base (historical behaviour)
-      settings.githubSync = {
-        ...(sameRepo ? prev : {}),
-        enabled: true,
-        encryptedToken: Buffer.from(token).toString('base64'),
-        owner: user.login, repo,
-      }
-      writeSettings(settings)
-      out(`  Connected to ${user.login}/${repo}`)
-      await pullAfterLogin(opts)
-      out('')
-      return
-    }
+    if (result.access_token) { progress('\n'); return { token: result.access_token } }
     if (result.error === 'slow_down') interval += 5000
+    else if (result.error === 'expired_token') { progress('\n'); return { expired: true } }
     else if (result.error !== 'authorization_pending') {
-      process.stdout.write('\n'); err(result.error_description || result.error); exit(1)
+      progress('\n'); return { error: result.error_description || result.error }
     }
   }
-  process.stdout.write('\n'); err('Authorization expired. Try again.'); exit(1)
+  progress('\n')
+  return { expired: true }
+}
+
+// noteflow login [repo] [--no-pull]              interactive: waits for the grant
+// noteflow login [repo] --no-wait [--json]       step 1: print the code, exit
+// noteflow login --finish [--no-pull]            step 2: poll the pending grant
+async function cmdLogin(repoName, opts = {}) {
+  const flagsError = loginFlagsError(opts)
+  if (flagsError) { err(flagsError); exit(1) }
+  if (opts.finish) { await cmdLoginFinish(repoName, opts); return }
+
+  const repo = repoName || DEFAULT_REPO
+  const data = await requestGithubDeviceCode()
+  const intervalSec = parseInt(data.interval) || 5
+  const expiresMs = Date.now() + parseInt(data.expires_in) * 1000
+
+  if (opts.noWait) {
+    const expiresAt = new Date(expiresMs).toISOString()
+    setPendingGithubLogin({
+      deviceCode: data.device_code, userCode: data.user_code, verificationUri: data.verification_uri,
+      interval: intervalSec, expiresAt, repo,
+      ...(opts.noPull ? { noPull: true } : {}),
+    })
+    out(`  Authorize in the browser, then run: noteflow login --finish  (the code expires at ${expiresAt})`)
+    if (opts.json) jsonOut({ verificationUri: data.verification_uri, userCode: data.user_code, expiresAt, repo })
+    return
+  }
+
+  const result = await pollGithubDeviceToken(data.device_code, intervalSec, expiresMs)
+  if (result.error) { err(result.error); exit(1) }
+  if (!result.token) { err('Authorization expired. Try again.'); exit(1) }
+  await completeGithubLogin(result.token, repo, opts)
+}
+
+async function cmdLoginFinish(repoArg, opts) {
+  const check = checkPendingGithubLogin(readSettings().cliGithubLogin, Date.now())
+  if (!check.ok) {
+    if (check.reason === 'expired') setPendingGithubLogin(null)
+    err(check.reason === 'expired'
+      ? "The pending GitHub login has expired. Run 'noteflow login --no-wait' again"
+      : "No pending GitHub login. Run 'noteflow login --no-wait' first")
+    exit(1)
+  }
+  const { pending } = check
+  const target = resolveFinishRepo(pending.repo, repoArg)
+  if (target.error) { err(target.error); exit(1) }
+
+  out(`\n  Finishing the GitHub login (code ${pending.userCode || '?'}, repo ${target.repo})...`)
+  // A network failure throws out of here and KEEPS the pending grant, so
+  // `--finish` can simply be run again; only definitive outcomes drop it.
+  const result = await pollGithubDeviceToken(pending.deviceCode, pending.interval, pending.expiresMs, { immediate: true })
+  // From here on the device code is spent (GitHub issues one token per code):
+  // drop the pending grant now, so a failure while connecting (GET /user,
+  // creating the repo) asks for a fresh --no-wait instead of re-polling a dead code.
+  setPendingGithubLogin(null)
+  if (!result.token) {
+    err(result.error
+      ? `${String(result.error).replace(/\.+$/, '')}. Run 'noteflow login --no-wait' to start over`
+      : "Authorization expired. Run 'noteflow login --no-wait' again")
+    exit(1)
+  }
+  await completeGithubLogin(result.token, target.repo, { ...opts, noPull: opts.noPull || pending.noPull })
+}
+
+/**
+ * Everything after GitHub granted a token, shared by the interactive and the
+ * `--finish` flows: creates the repo if needed, saves githubSync (same-repo
+ * rules), drops any pending `--no-wait` grant and runs the first pull.
+ */
+async function completeGithubLogin(token, repo, opts) {
+  const user = await githubRequest(token, 'GET', '/user')
+  out(`  Logged in as ${user.login}`)
+  await ensureRepo(token, user.login, repo)
+  const settings = readSettings()
+  // No fresh `lastSync` here: nothing has been synced yet, and on Windows this
+  // settings.json is the desktop app's too (on Linux/macOS the app keeps its
+  // own in its `NoteFlow` userData dir) — its pull deletes local notes absent
+  // from the remote when `updated <= lastSync`.
+  // Re-connecting the SAME repo keeps the previous sync state (lastSync,
+  // needsFullReconcile…); a different repo starts clean. The pull below
+  // writes lastSync once it really ran — and only if the repo already has
+  // every local note (see nextGithubLastSync).
+  const prev = settings.githubSync
+  const sameRepo = prev && prev.owner === user.login && prev.repo === repo
+  if (!sameRepo) clearGithubBases() // another repo: no known base (historical behaviour)
+  settings.githubSync = {
+    ...(sameRepo ? prev : {}),
+    enabled: true,
+    encryptedToken: Buffer.from(token).toString('base64'),
+    owner: user.login, repo,
+  }
+  delete settings.cliGithubLogin // a grant used (or superseded) — nothing left to finish
+  writeSettings(settings)
+  out(`  Connected to ${user.login}/${repo}`)
+  await pullAfterLogin(opts)
+  out('')
 }
 
 /**
@@ -5258,8 +5518,8 @@ async function cmdPush() {
 
 /**
  * GitHub `lastSync` to keep after a pull/push (pure). It must mean "the repo
- * holds everything on disk": on Windows/Linux this settings.json is the
- * desktop app's too, and its pull deletes local notes absent from the repo
+ * holds everything on disk": on Windows this settings.json is the desktop
+ * app's too (see completeGithubLogin), and its pull deletes local notes absent from the repo
  * with `updated <= lastSync` (shouldRunDeletionRule in electron/syncState.ts).
  * So it only advances to `nowIso` when nothing is left unsynced (`pending` =
  * local-only note dirs after a pull, failed files after a push); otherwise
@@ -5505,6 +5765,7 @@ function cmdStatus(opts) {
         tokenAccessible: !!getToken(),
       } : null,
       groups: groups.length,
+      desktopApp: readDesktopAppInfo(),
     })
     return
   }
@@ -5540,7 +5801,7 @@ function cmdHelp(topic) {
     --create            Create whatever is missing: the --title note and/or the
                         --section (without it, a missing one is an error)
     --tag <tag>         Add a metadata tag to the note
-    --group <name>      Assign the note to a group (only when creating)
+    --group <name>      Assign the note to a group (also moves an existing one)
     --folder <name>     Put the note in a folder of that group (requires --group)
     --raw               New section in text mode: the app shows it as-is, unrendered
     --markdown          New section in markdown mode: the app renders it (default;
@@ -5561,6 +5822,14 @@ function cmdHelp(topic) {
   command (today's daily note, or --title + --create) gets its section created.
   The mode flags only apply to a section created now; existing ones keep theirs.
 
+  With --title, an exact title wins; a partial one matching several notes picks
+  the first of them, so pass the exact title. An unknown --group/--folder is
+  reported on stderr but the text is still written (without grouping).
+
+  --json result: { note, dirname, section, createdNote, createdSection,
+  bytesWritten } (--dry-run adds "dryRun": true; dirname is null for a note that
+  would be created).
+
   Windows: the noteflow.cmd shim truncates multi-line arguments (cmd.exe drops
   everything after the first newline). PowerShell automatically picks the
   noteflow.ps1 shim, which passes them intact, forwards piped stdin as UTF-8 and
@@ -5577,11 +5846,16 @@ function cmdHelp(topic) {
     list: `
   noteflow list [options]
 
+  Lists notes, most recently updated first. Archived notes are hidden unless
+  --archived; encrypted notes are never listed by the CLI.
+
   Options:
     --tag <tag>     Filter by tag
     --group <name>  Filter by group
+    --folder <name> Filter by folder (add --group if the name repeats across groups)
     --archived      Include archived notes
-    --json          Output as JSON array
+    --json          Output as JSON array: id, title, tags, group, folder, created,
+                    updated, archived, favorited, sections (names), dirname
 
   Example:
     noteflow list --group backend --json
@@ -5779,6 +6053,9 @@ function cmdHelp(topic) {
   noteflow delete <title> [--yes] [--json]   (alias: rm)
 
   Deletes a note. Title can be partial; prompts for confirmation unless --yes.
+  With no terminal to answer (pipes, agents, cron) the answer is "no": it prints
+  'Cancelled', exits 0 and deletes nothing — scripts must pass --yes (same for
+  'section delete', 'group delete' and 'folder delete').
   With sync enabled the note is also removed from the remote (Cloud or GitHub).
   --json prints { "deleted": true|false, "note": "<title>" } on stdout.
 
@@ -5794,20 +6071,69 @@ function cmdHelp(topic) {
   Example:
     noteflow rename "Projct Alpha" "Project Alpha"
 `,
+    login: `
+  noteflow login [repo] [--no-pull]
+  noteflow login [repo] --no-wait [--no-pull] [--json]
+  noteflow login --finish [--no-pull]
+
+  Connects GitHub sync with the Device Flow: open the URL, enter the code, and
+  the CLI saves its own token (the desktop app's one is not readable here),
+  creates the repo if needed (default: noteflow-notes, private) and pulls it.
+
+  Without flags it waits (up to ~15 min) until you authorize in the browser.
+  For agents/scripts that can't keep a terminal waiting, split it in two:
+    --no-wait   Print the URL and code, save the pending login and exit 0.
+                --json prints { verificationUri, userCode, expiresAt, repo }.
+    --finish    After authorizing: wait for GitHub to confirm and connect. Uses
+                the repo of the pending login (a different repo is an error).
+                Without a pending login, or once it expired, it fails — run
+                'noteflow login --no-wait' again.
+  A new --no-wait replaces the pending login. If --finish is cut off while it
+  waits (network error, a tool timeout), the pending login is kept: run --finish
+  again. The first pull never overwrites newer local notes; if it fails, the
+  login still holds and 'noteflow pull' retries. It uploads nothing: run
+  'noteflow push' for notes written before connecting.
+
+  Options:
+    --no-pull   Connect only, skip the first pull (with --no-wait it carries
+                over to --finish)
+
+  The CLI keeps its own token base64-encoded (not encrypted) in its settings.json:
+  %APPDATA%\\noteflow\\settings.json on Windows, ~/.config/noteflow/settings.json
+  on Linux/macOS (honours $XDG_CONFIG_HOME), kept owner-only (0600) there.
+
+  Examples:
+    noteflow login
+    noteflow login my-private-notes
+    noteflow login --no-wait --json      # then, once authorized:
+    noteflow login --finish
+`,
     cloud: `
   noteflow cloud login [email]    Sign in with an emailed one-time code (standard
                                   keys: then pulls your notes; --no-pull skips it)
+  noteflow cloud login <email> --send-code
+                                  Non-interactive step 1: email the code and exit
+  noteflow cloud login <email> --code <code>
+                                  Non-interactive step 2: verify it (no new email;
+                                  a wrong/expired code exits 1 and can be retried)
   noteflow cloud logout           Sign out (keeps notes and the sync cursor: signing
                                   back in with the same account resumes from it)
   noteflow cloud status [--json]  Account, keys mode and sync state
   noteflow cloud setup            Create Cloud keys (standard/managed mode)
-  noteflow cloud push             Encrypt and upload all notes
+  noteflow cloud push             Encrypt and upload local changes
   noteflow cloud pull             Download and decrypt remote changes
 
   NoteFlow Cloud is the account-based encrypted sync (a subscription is needed
   to upload). While signed in with Cloud enabled, plain 'noteflow push', 'pull',
   'status' and the automatic after-command sync use Cloud INSTEAD of GitHub.
   The first push runs an automatic initial pull to reconcile with the remote.
+
+  Sync is per file (each section is a file): edits to different sections on two
+  devices merge; if both changed the SAME section, the note keeps the remote
+  version and yours goes to a conflict copy holding only those sections
+  ("Conflict: local changes kept as …"). An upload made on a stale copy is
+  rejected ("not uploaded: a newer version is on NoteFlow Cloud") — run
+  'noteflow pull', which merges it, then 'noteflow push'.
 
   Encryption modes:
     standard (managed)  'noteflow cloud setup' — nothing to remember.
@@ -5816,10 +6142,89 @@ function cmdHelp(topic) {
                         recovery code on each run; set NOTEFLOW_CLOUD_PASSPHRASE
                         to skip the prompt on servers/cron. The key is never
                         stored on this machine.
+
+  Plain 'cloud login' prompts for the email and the code, so it needs a
+  terminal. Agents and scripts use the two steps instead (--send-code, then
+  --code); both require the email as an argument and never prompt.
+`,
+    status: `
+  noteflow status [--json]
+
+  Shows the note count, the notes directory, groups and the GitHub sync state.
+  While signed in to NoteFlow Cloud with sync enabled it shows 'cloud status'
+  instead — and its JSON shape (check for the "cloud" key).
+
+  Notes directory: ~/noteflow-notes (Windows, macOS) or
+  ~/.local/share/noteflow-notes (Linux). NOTEFLOW_NOTES_DIR overrides it — the
+  notes only: the sync session in settings.json still applies, so writes there
+  sync to the real account (point APPDATA / XDG_CONFIG_HOME elsewhere too to
+  isolate a test).
+
+  --json (GitHub): { notesDir, noteCount, github: { owner, repo, lastSync,
+                   tokenAccessible } | null, groups, desktopApp }
+  --json (Cloud):  { notesDir, noteCount, cloud: { email, enabled, keysMode,
+                   lastSync, pullSeq, pullCursor } | null, githubConfigured,
+                   desktopApp }
+
+  tokenAccessible: false  GitHub is set up, but the token belongs to the desktop
+                          app (encrypted, unreadable here): run 'noteflow login'
+                          to the same repo. Only on Windows, where the CLI and
+                          the app share settings.json.
+  desktopApp              What the desktop app on this machine syncs with:
+                          { cloudSignedIn, cloudSyncEnabled, cloudEmail?,
+                          github: { owner, repo } | null }, or null when its
+                          settings are not found. Its tokens are never read: the
+                          CLI always needs its own 'login' / 'cloud login'.
+`,
+    pull: `
+  noteflow pull [--force]   (alias: update)
+
+  Downloads remote changes from the active backend (NoteFlow Cloud when signed
+  in, else GitHub).
+
+  GitHub: a note is only overwritten when the remote 'updated:' is newer; newer
+  local notes are skipped (the next push uploads them). --force (GitHub only)
+  overwrites them anyway — it discards newer local edits. The GitHub pull does
+  not apply deletions: notes deleted on another device stay here and are
+  reported as "local notes not on GitHub" — a push would bring them back, so
+  only push them if they are new.
+
+  Cloud: incremental and merged per file (see 'noteflow help cloud').
+`,
+    push: `
+  noteflow push
+
+  Uploads every note to the active backend (NoteFlow Cloud when signed in, else
+  GitHub). Ends with "Done: N pushed, E errors". On GitHub a note that changed
+  remotely since your last pull is never overwritten: the note takes the GitHub
+  version and your local one is kept as a conflict copy ("Conflict: local
+  changes kept as …"); if that can't be resolved it says "changed on GitHub
+  since your last pull — not uploaded" — run 'noteflow pull', then push again.
+  If any file fails, the last-sync time is not advanced — run 'noteflow push'
+  again.
+
+  Commands that write already push the files they touch; a sync failure there
+  does NOT change the exit code (the local change is saved), so read the output.
+`,
+    migrate: `
+  noteflow migrate
+
+  One-time conversion of v1 notes (one flat '<slug>-<id>.md' per note in the
+  notes dir) to the folder format v2 ('<slug>-<id>/note.md' + one .md per
+  section). Idempotent. When sync is set up it also uploads the new layout and
+  removes the flat files from the remote. The desktop app runs the same local
+  migration on startup.
+`,
+    'self-update': `
+  noteflow self-update
+
+  Downloads the latest cli/noteflow.js from GitHub and replaces this script (no
+  sync login needed). It only updates noteflow.js: the Windows wrappers
+  (noteflow.cmd / noteflow.ps1) are refreshed by updating the NoteFlow app.
 `,
   }
 
-  const aliases = { folder: 'folders', group: 'groups', sections: 'section', pin: 'favorite', rm: 'delete' }
+  const aliases = { folder: 'folders', group: 'groups', sections: 'section', pin: 'favorite', rm: 'delete', update: 'pull' }
   if (topic && aliases[topic]) topic = aliases[topic]
   if (topic && topics[topic]) { out(topics[topic]); return }
 
@@ -5859,8 +6264,10 @@ function cmdHelp(topic) {
   Sync commands — pick ONE backend, sign in once, then edits sync on their own:
     login [repo]          GitHub: connect your notes repo and pull it
                           [--no-pull: connect only, skip the first pull]
+                          [--no-wait, then --finish: two steps, no waiting] — 'noteflow help login'
     cloud login           NoteFlow Cloud: sign in with your NoteFlow account
                           (encrypted; takes priority over GitHub) — 'noteflow help cloud'
+                          [<email> --send-code, then <email> --code <code>: no prompts]
     logout / cloud logout Disconnect GitHub / NoteFlow Cloud
     push                  Upload all notes to the active backend
     pull / update         Download remote changes from the active backend
@@ -5926,8 +6333,11 @@ const BOOLEAN_FLAGS = {
   '--ungroup': ['ungroup', true], '--create': ['create', true],
   '--dry-run': ['dryRun', true], '--force': ['force', true],
   '--no-pull': ['noPull', true],
+  // Non-interactive two-step sign-ins (agents): login --no-wait / --finish,
+  // cloud login <email> --send-code / --code <code>.
+  '--no-wait': ['noWait', true], '--finish': ['finish', true], '--send-code': ['sendCode', true],
 }
-const VALUE_FLAGS = ['--tag', '--title', '--section', '--group', '--folder', '--color', '--text', '--file']
+const VALUE_FLAGS = ['--tag', '--title', '--section', '--group', '--folder', '--color', '--text', '--file', '--code']
 
 function parseFlags(args) {
   const flags = {}; const positional = []
@@ -6181,7 +6591,8 @@ if (require.main === module) {
     PULL_RETRY_MAX_DECRYPT_ATTEMPTS, PULL_RETRY_MAX_APPLY_ATTEMPTS, PULL_RETRY_CHUNK, CLOUD_CONDITIONAL_UPSERT_RPC,
     mergeMetadataById, planMetadataPull, dirsPendingRetry,
     planConflictCopy, buildConflictCopy, anchorTitle, conflictCopyTitle, metadataPendingForPull,
-    normalizeOtpCode,
+    normalizeOtpCode, planCloudLogin,
+    loginFlagsError, checkPendingGithubLogin, resolveFinishRepo, desktopSettingsCandidates, desktopAppInfo,
     gitBlobSha, isNoteFilePath, planConditionalUpsert, planConditionalDelete, remoteDirChangesSinceBase,
     nextPulledBases, githubConflictCandidates,
     // Cloud three-way reconcile (mirrors of electron/cloudSyncLogic.ts) + the

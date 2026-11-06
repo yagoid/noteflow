@@ -26,7 +26,8 @@ function defaultNoteTitle(): string {
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`
 }
 
-function extractTags(content: string): string[] {
+/** Hashtags in `content` — mirror of extractTags in src/lib/noteUtils.ts (tags are derived data). */
+export function extractTags(content: string): string[] {
   const matches = content.match(/#([a-zA-Z][a-zA-Z0-9_-]*)/g)
   if (!matches) return []
   return [...new Set(matches.map((m) => m.slice(1).toLowerCase()))]

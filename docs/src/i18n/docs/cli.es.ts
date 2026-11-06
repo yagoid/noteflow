@@ -5,7 +5,7 @@ export const cliEs: CliContent = {
   meta: {
     title: 'NoteFlow CLI — notas headless desde tu terminal',
     description:
-      'Referencia completa del CLI de NoteFlow v1.10.0: crea, lee, edita y organiza notas markdown desde cualquier terminal, sincroniza con GitHub o NoteFlow Cloud e intégralo en scripts o agentes de IA. Un único script Node.js, cero dependencias.',
+      'Referencia completa del CLI de NoteFlow v2.6.0: crea, lee, edita y organiza notas markdown desde cualquier terminal, sincroniza con GitHub o NoteFlow Cloud e intégralo en scripts o agentes de IA. Un único script Node.js, cero dependencias.',
   },
 
   hero: {
