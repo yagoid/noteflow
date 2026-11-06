@@ -108,7 +108,9 @@ Iconos del TitleBar:
   bloque ámbar de **copias de conflicto** (NoteFlow Cloud o GitHub, el backend activo: "Your edits to
   N note(s) conflicted with changes made on another device and were kept as conflict copies:" + hasta 3
   títulos y "+N more", botón *Dismiss*; mientras no se descarta, el botón muestra un **punto ámbar**
-  y su `aria-label` lo menciona); y pie compacto de **iconos con tooltip**:
+  y su `aria-label` lo menciona) y, en el mismo bloque, el de **notas fusionadas con conflictos**
+  (NoteFlow Cloud: "N note(s) were changed on the same lines here and on another device. Both
+  versions were kept in the note — look for the ⚠️ markers:" + títulos; mismo *Dismiss* y punto); y pie compacto de **iconos con tooltip**:
   candado (Cloud: cifrado Standard / Private E2EE), rayo (Cloud: verde si Real-time conectado),
   reloj ("Auto-sync every 5 min") y a la derecha el engranaje que abre Ajustes → Sync. La acción
   del click ("Click to sync now" / "Click to retry" / "Unlock in Settings → Sync") va en el
@@ -1274,21 +1276,28 @@ ninguno → Cloud); a partir de ahí manda la elección del usuario. Con Cloud a
 > los datos de la nota (lo normal en cuanto cambian etiquetas, que salen del contenido), el título, el
 > grupo/carpeta y los nombres de sección los decide el otro dispositivo; las etiquetas se suman, y una
 > sección **oculta a la IA** o una nota **favorita** en cualquiera de los dos lados sigue oculta/favorita.
-> Si los dos cambiasteis **la misma sección**, la nota se queda con la versión del otro
-> dispositivo y la tuya se guarda como nota nueva "<título> (conflict copy AAAA-MM-DD HH:mm)" (en
-> español "copia en conflicto") **con solo esas secciones**, en el mismo grupo/carpeta. Una nota
-> **cifrada** no se puede combinar: gana la del servidor y tu versión entera va a la copia (sigue
-> cifrada con la misma contraseña). Si la borran (la nota o una sección) en otro dispositivo mientras
+> Si los dos cambiasteis **la misma sección**, se **fusiona línea a línea** dentro de la nota (sin
+> nota aparte): lo que cada uno añadió o cambió en líneas distintas se combina (p. ej. una tarea
+> añadida al final aquí y otra allí → quedan las dos). Solo si tocasteis **las mismas líneas** de
+> forma distinta, la sección guarda **las dos versiones** entre marcas legibles (`> ⚠️ Sync conflict
+> — this device’s version:` / `> ⚠️ Sync conflict — version from another device:` / `> ⚠️ End of
+> sync conflict`, en español si la app está en español) y la tarjeta del botón de sync lo avisa
+> ("look for the ⚠️ markers"): te quedas con la buena y borras las marcas. Si un dispositivo no
+> conoce la versión anterior de la sección (notas sincronizadas antes de esta versión), la fusión
+> es una unión: no se pierde ninguna línea, pero una línea que el otro borró puede volver. Una nota
+> **cifrada** no se puede combinar: gana la del servidor y tu versión entera va a una copia de
+> conflicto "<título> (conflict copy AAAA-MM-DD HH:mm)" (sigue cifrada con la misma contraseña). Si la borran (la nota o una sección) en otro dispositivo mientras
 > tú la editabas, tu versión se conserva y sigue visible en la nota (o va a una copia). La copia se sube como cualquier nota y se avisa en la
 > tarjeta del botón de sync del titlebar. El primer sync tras actualizar la app relee toda la nube una
 > vez para aplicar ya esta regla a todas las notas (también a ediciones offline hechas antes de ese
 > primer sync). **El CLI con Cloud hace lo mismo** (`noteflow pull`/`push` y la subida tras cada
 > comando): fusiona por secciones, sus subidas llevan la versión sobre la que se editó, la primera
-> ejecución tras actualizarlo relee la nube una vez, y sus copias de conflicto también llevan solo
-> las secciones en conflicto (`Conflict: local changes kept as "…"`). **No cubre:** notas que ese
+> ejecución tras actualizarlo relee la nube una vez, y fusiona igual las secciones que cambiaron los
+> dos (si quedan marcas imprime `Merged with conflicts: "<título>" — both versions kept, look for the
+> ⚠️ markers`). **No cubre:** notas que ese
 > cliente aún no tiene sincronizadas con la regla nueva (sin base: rigen las reglas de antes); un
 > `noteflow touch` del CLI hecho antes de esa primera relectura (no sabe qué secciones cambiaste, así
-> que una sección que el otro dispositivo tocó sale como copia de más); y un `noteflow cloud pull`
+> que una sección que el otro dispositivo tocó puede quedar con marcas de conflicto de más); y un `noteflow cloud pull`
 > sobre una edición offline de la app en una nota que el CLI aún no tiene sincronizada con la regla
 > nueva. El GitHub Sync tiene su propia
 > versión (ver "GitHub Sync" → "Si otro dispositivo cambió la nota"). Puede salir una

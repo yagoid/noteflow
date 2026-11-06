@@ -25,6 +25,8 @@ import {
   parseBootstrapPending,
   nextBootstrapPending,
   buildConflictCopy,
+  mergeSectionText,
+  DEFAULT_SECTION_CONFLICT_LABELS,
   type ThreeWayRemoteRow,
   type ThreeWayDirPlan,
   type AnchorMergeInput,
@@ -161,7 +163,7 @@ describe('constants, hashes and the v2 upload classification', () => {
 describe('planThreeWayDir — parity grid (local × remote edits)', () => {
   const names = Object.keys(VARIANTS)
   it('same plan as the app for every combination, app- and CLI-written local anchors', () => {
-    let compared = 0, merged = 0, copies = 0, uploads = 0
+    let compared = 0, merged = 0, markers = 0, uploads = 0
     for (const ln of names) for (const rn of names) for (const cliLocal of [false, true]) for (const pendingAll of [false, true]) {
       for (const [lt, rt] of [[T_LATE, T_EARLY], [T_EARLY, T_LATE]]) {
         const { localFiles, rows, bases, pending } = scenario(VARIANTS[ln](lt, 'local').n, VARIANTS[rn](rt, 'remote').n, cliLocal, pendingAll, false)
@@ -176,14 +178,15 @@ describe('planThreeWayDir — parity grid (local × remote edits)', () => {
         const anchorWrite = mine.writes.find((w) => w.relPath === ANCHOR)?.content
         const remoteAnchor = rows.find((r) => r.relPath === ANCHOR)?.content
         if (anchorWrite !== undefined && anchorWrite !== remoteAnchor) merged++
-        if (mine.copySections.length > 0) copies++
+        expect(mine.copySections).toEqual([]) // a section conflict is merged, never copied
+        if (mine.conflictMarkerSections.length > 0) markers++
         if (mine.upload.length > 0) uploads++
       }
     }
     expect(compared).toBe(names.length * names.length * 8)
     // The grid really goes through the interesting paths.
     expect(merged).toBeGreaterThan(50)
-    expect(copies).toBeGreaterThan(5)
+    expect(markers).toBeGreaterThan(5)
     expect(uploads).toBeGreaterThan(50)
   })
 
@@ -198,6 +201,21 @@ describe('planThreeWayDir — parity grid (local × remote edits)', () => {
         }
         expect(comparable(cli.planThreeWayDir(input))).toEqual(comparable(planThreeWayDir(input)))
       }
+    }
+  })
+
+  it('the same plan with base contents (diff3) and localized labels', () => {
+    const baseFiles = folder(note(T0, BASE))
+    const byHash = new Map(Object.entries(baseFiles).map(([rel, c]) => [hashForBase(rel, c), c]))
+    const labels = { local: 'ESTE', remote: 'OTRO', end: 'FIN' }
+    for (const ln of ['editA', 'editB', 'tagged']) for (const rn of ['editA', 'editB', 'delC']) {
+      const { localFiles, rows, bases, pending } = scenario(VARIANTS[ln](T_LATE, 'local').n, VARIANTS[rn](T_EARLY, 'remote').n, false, true, false)
+      const input = {
+        dir: DIR, local: localFiles, remote: rows, bases, pendingUpserts: pending, staleUpserts: pending,
+        copiedUpserts: new Set<string>(), pendingDeletes: new Set<string>(), nowIso: NOW,
+        baseContent: (_rel: string, hash: string) => byHash.get(hash) ?? null, conflictLabels: labels,
+      }
+      expect(comparable(cli.planThreeWayDir(input))).toEqual(comparable(planThreeWayDir(input)))
     }
   })
 
@@ -425,5 +443,40 @@ describe('catch-up and bootstrap parity', () => {
       expect(cli.nextBootstrapPending(prev, p)).toEqual(nextBootstrapPending(prev, p))
       expect(cli.nextBootstrapPending(null, p)).toEqual(nextBootstrapPending(null, p))
     }
+  })
+})
+
+describe('mergeSectionText — CLI mirror', () => {
+  it('same constants', () => {
+    expect(cli.DEFAULT_SECTION_CONFLICT_LABELS).toEqual(DEFAULT_SECTION_CONFLICT_LABELS)
+  })
+
+  it('same result over a grid of bases × local × remote (endings, final newlines, conflicts, appends)', () => {
+    const texts = [
+      '', '\n', 'a', 'a\n', 'a\nb\nc', 'a\nb\nc\n', 'a\r\nb\r\nc\r\n', 'a\nb\nc\nd', 'a\nB\nc', 'x\na\nb\nc',
+      'a\nb\nc\nd\ne', 'a\nc', '- [ ] one\n- [ ] two\n- [ ] three', 'a\n\n\nb', 'z',
+    ]
+    let compared = 0
+    for (const base of [null, ...texts]) for (const local of texts) for (const remote of texts) {
+      expect(cli.mergeSectionText(base, local, remote)).toEqual(mergeSectionText(base, local, remote))
+      compared++
+    }
+    expect(compared).toBe((texts.length + 1) * texts.length * texts.length)
+  })
+
+  it('same result on large / random inputs (Myers path, the distance cap)', () => {
+    let seed = 7
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+    const mutate = (lines: string[]) => lines.flatMap((l) => (rnd() < 0.1 ? [] : rnd() < 0.1 ? [l, `n${Math.floor(rnd() * 50)}`] : rnd() < 0.05 ? [`c${l}`] : [l]))
+    for (let t = 0; t < 30; t++) {
+      const base = Array.from({ length: 60 + Math.floor(rnd() * 200) }, (_, i) => `l${i % 37}`)
+      const b = base.join('\n')
+      const l = mutate(base).join('\n')
+      const r = mutate(base).join('\n')
+      expect(cli.mergeSectionText(b, l, r)).toEqual(mergeSectionText(b, l, r))
+      expect(cli.mergeSectionText(null, l, r)).toEqual(mergeSectionText(null, l, r))
+    }
+    const big = (p: string) => Array.from({ length: 2500 }, (_, i) => `${p}${i}`).join('\n')
+    expect(cli.mergeSectionText(null, big('a'), big('b'))).toEqual(mergeSectionText(null, big('a'), big('b')))
   })
 })

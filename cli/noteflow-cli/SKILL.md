@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.5.0
+version: 2.6.0
 ---
 
 # NoteFlow CLI — Referencia completa
@@ -749,7 +749,7 @@ Si ya está en la última versión: `Already up to date`.
 
 ```bash
 noteflow version     # o: noteflow --version / -v
-# noteflow CLI v2.5.0
+# noteflow CLI v2.6.0
 ```
 
 ---
@@ -822,8 +822,14 @@ primera subida o pull hace **una vez** una reconciliación completa
 El sync es **por fichero** (cada sección es un fichero), igual que la app de escritorio:
 - Si aquí editaste una sección y en otro dispositivo otra, el pull **fusiona** las dos (sin
   copia) y vuelve a subir la nota.
-- Si los dos editaron **la misma** sección de forma distinta, la nota se queda con la versión
-  remota y la tuya va a una **copia de conflicto que contiene solo esas secciones**
+- Si los dos editaron **la misma** sección, el pull la **fusiona línea a línea** dentro de la
+  nota (p. ej. una línea añadida aquí y otra allí → quedan las dos, sin copia). Solo si tocaron
+  **las mismas líneas** de forma distinta, la nota guarda **las dos versiones** entre marcas
+  `> ⚠️ Sync conflict — this device’s version:` / `> ⚠️ Sync conflict — version from another
+  device:` / `> ⚠️ End of sync conflict` (en español si la app está en español) y el pull
+  imprime `Merged with conflicts: "<título>" — both versions kept, look for the ⚠️ markers`:
+  revisa esa sección y deja la versión buena (borra las marcas). Las notas **cifradas** no se
+  fusionan: la versión remota se queda en la nota y la tuya va a una copia de conflicto
   (`Conflict: local changes kept as "<título> (conflict copy …)"`).
 - Cada subida lleva la versión del servidor sobre la que se hizo: si otro dispositivo cambió
   ese fichero entretanto, se rechaza (`not uploaded: a newer version is on NoteFlow Cloud —
@@ -963,6 +969,8 @@ code** y debe leer la salida (stdout **y** stderr):
      — not uploaded`, `not uploaded: a newer version is on NoteFlow Cloud` o
      `Conflict: local changes kept as "…"` → ejecuta `noteflow pull` y luego
      `noteflow push`.
+   - `Merged with conflicts: "…"` → la nota tiene las dos versiones entre marcas ⚠️:
+     dile al usuario qué nota es (o resuélvelo tú si te lo pidió) y sincroniza al acabar.
    - Sin línea de sync → no hay sync configurado: confírmalo con
      `noteflow status --json` y avisa al usuario de que el cambio solo está en local.
 3. **Al terminar**: `noteflow pull` y `noteflow push`, y comprueba que ambos acaban en
@@ -972,7 +980,7 @@ code** y debe leer la salida (stdout **y** stderr):
    respuesta — qué notas quedaron solo en local, el mensaje de error literal y el
    comando para reintentar (`noteflow pull` / `noteflow push`, o `noteflow login` /
    `noteflow cloud login` si la sesión caducó). Si hubo conflicto, di el título de la
-   copia de conflicto que se creó. **Nunca** des el trabajo por sincronizado sin haber
+   copia de conflicto que se creó, o de la nota que quedó con marcas ⚠️. **Nunca** des el trabajo por sincronizado sin haber
    visto la confirmación, no reintentes en bucle y no uses `--force` sin que el
    usuario lo pida (pisa notas locales más nuevas).
 

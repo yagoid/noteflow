@@ -73,7 +73,7 @@ interface SyncStatusButtonProps {
   onRefresh: () => void
   /** Opens Settings → Sync (GitHub and the NoteFlow Cloud panel both live there). */
   onOpenSettings: () => void
-  /** Clears the "kept as conflict copies" notice (either backend). */
+  /** Clears the conflict notice: copies (either backend) and Cloud merges with markers. */
   onDismissConflictCopies: () => void
 }
 
@@ -112,9 +112,15 @@ export function SyncStatusButton({
   const backendName = status.backend === 'cloud' ? s.backendCloud : s.backendGithub
   const ariaVars = { backend: backendName, status: stateLabel(state, s) }
   const hint = clickHint(state, s)
-  const conflictCount = status.conflictCopies?.count ?? 0
+  const copyCount = status.conflictCopies?.count ?? 0
+  const mergeCount = status.conflictMerges?.count ?? 0
+  const conflictCount = copyCount + mergeCount
   const baseAriaLabel = hint ? tf(s.ariaLabelWithHint, { ...ariaVars, hint }) : tf(s.ariaLabel, ariaVars)
-  const ariaLabel = conflictCount > 0 ? `${baseAriaLabel}. ${plural(s.conflictCopiesAria, conflictCount)}` : baseAriaLabel
+  const ariaLabel = [
+    baseAriaLabel,
+    ...(copyCount > 0 ? [plural(s.conflictCopiesAria, copyCount)] : []),
+    ...(mergeCount > 0 ? [plural(s.conflictMergesAria, mergeCount)] : []),
+  ].join('. ')
 
   const wrapperRef = useRef<HTMLDivElement>(null)
   const openTimer = useRef<number | null>(null)
@@ -207,7 +213,7 @@ export function SyncStatusButton({
           className="relative flex items-center gap-1 px-2 h-full text-text-muted hover:text-text transition-colors disabled:opacity-60"
           aria-label={ariaLabel}
         >
-          {/* Attention dot: the card has a conflict-copies notice to read. */}
+          {/* Attention dot: the card has a conflict notice to read (copies or merges with markers). */}
           {conflictCount > 0 && (
             <span aria-hidden className="absolute top-1.5 right-1 w-1.5 h-1.5 rounded-full bg-amber-400" />
           )}
@@ -296,6 +302,7 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
   })
   const realtimeOn = status.cloud?.realtimeConnected === true
   const conflicts = status.conflictCopies
+  const merges = status.conflictMerges
   const realtimeTip = tf(s.realtimeTooltip, { state: realtimeOn ? s.realtimeConnected : s.realtimeDisconnected })
   const autoSyncTip =
     status.autoSyncIntervalMs !== undefined
@@ -337,23 +344,33 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
 
       <SyncActivityChart status={status} exactTime={exactTime} />
 
-      {/* Conflict copies (either backend): local edits kept as new notes */}
-      {conflicts && conflicts.count > 0 && (
+      {/* Conflict notice: copies (either backend) — local edits kept as new
+          notes — and Cloud merges with markers — both versions kept IN the note */}
+      {((conflicts && conflicts.count > 0) || (merges && merges.count > 0)) && (
         <div
           className="mx-3 mb-2 px-2 py-1.5 rounded border border-solid border-amber-400/30 bg-amber-400/10
                      text-amber-400 leading-snug break-words"
         >
-          <div>{plural(s.conflictCopiesNotice, conflicts.count)}</div>
-          <ul className="mt-1 text-text select-text">
-            {conflicts.titles.slice(-CONFLICT_TITLES_SHOWN).map((title, i) => (
-              <li key={`${i}-${title}`} className="truncate" title={title}>
-                {title}
-              </li>
+          {[
+            { key: 'copies', notice: conflicts, text: s.conflictCopiesNotice },
+            { key: 'merges', notice: merges, text: s.conflictMergesNotice },
+          ]
+            .filter((part) => part.notice && part.notice.count > 0)
+            .map(({ key, notice, text }, idx) => (
+              <div key={key} className={idx > 0 ? 'mt-1.5' : undefined}>
+                <div>{plural(text, notice!.count)}</div>
+                <ul className="mt-1 text-text select-text">
+                  {notice!.titles.slice(-CONFLICT_TITLES_SHOWN).map((title, i) => (
+                    <li key={`${i}-${title}`} className="truncate" title={title}>
+                      {title}
+                    </li>
+                  ))}
+                </ul>
+                {notice!.count > CONFLICT_TITLES_SHOWN && (
+                  <div className="opacity-90">{tf(s.conflictCopiesMore, { count: notice!.count - CONFLICT_TITLES_SHOWN })}</div>
+                )}
+              </div>
             ))}
-          </ul>
-          {conflicts.count > CONFLICT_TITLES_SHOWN && (
-            <div className="opacity-90">{tf(s.conflictCopiesMore, { count: conflicts.count - CONFLICT_TITLES_SHOWN })}</div>
-          )}
           <div className="flex justify-end mt-1">
             <button
               onClick={onDismissConflictCopies}

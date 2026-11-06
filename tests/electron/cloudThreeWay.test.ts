@@ -27,6 +27,7 @@ import {
   TOMBSTONE_BASE_HASH,
   parseBootstrapPending,
   nextBootstrapPending,
+  DEFAULT_SECTION_CONFLICT_LABELS,
   type ThreeWayRemoteRow,
   type ThreeWayDirPlan,
 } from '../../electron/cloudSyncLogic'
@@ -71,6 +72,12 @@ function folder(n: DiskNote): Record<string, string> {
     out[`${DIR}/${name}`] = content
   }
   return out
+}
+
+/** A section merged two-way/diff3 where both sides changed the same (only) line: both versions between markers. */
+function markers(local: string, remote: string): string {
+  const L = DEFAULT_SECTION_CONFLICT_LABELS
+  return [`> ${L.local}`, '', local, '', `> ${L.remote}`, '', remote, '', `> ${L.end}`].join('\n')
 }
 
 function frontmatterOf(anchor: string): Record<string, unknown> {
@@ -363,6 +370,8 @@ class Device {
   pullSeq = 0
   copies: Array<Record<string, string>> = []
   lastPlan: ThreeWayDirPlan | null = null
+  /** The base content store (cloudBaseStore.ts): hash → content of section bases. */
+  blobs = new Map<string, string>()
 
   constructor(private server: Server, private nowIso: string) {}
 
@@ -391,6 +400,7 @@ class Device {
         continue
       }
       this.bases[rel] = { seq, hash: hashForBase(rel, content) }
+      if (rel !== ANCHOR) this.blobs.set(hashForBase(rel, content), content)
       this.pending.delete(rel)
     }
   }
@@ -423,6 +433,7 @@ class Device {
         lastSyncMs: bootstrap.lastSyncMs,
       })
       Object.assign(this.bases, synth.seen)
+      for (const r of remote) if (r.content !== null && r.relPath !== ANCHOR) this.blobs.set(hashForBase(r.relPath, r.content), r.content)
       bases = { ...synth.assumed, ...this.bases }
     }
     const plan = planThreeWayDir({
@@ -434,9 +445,11 @@ class Device {
       staleUpserts: new Set(this.stale),
       copiedUpserts: new Set(),
       pendingDeletes: new Set(),
+      baseContent: (_rel, hash) => this.blobs.get(hash) ?? null,
       nowIso: this.nowIso,
     })
     this.lastPlan = plan
+    for (const [rel, content] of Object.entries(plan.baseContents)) this.blobs.set(hashForBase(rel, content), content)
     if (plan.copySections.length > 0) {
       const local: Record<string, string> = {}
       for (const [rel, content] of Object.entries(this.files)) local[rel.slice(DIR.length + 1)] = content
@@ -473,11 +486,23 @@ function syncedFriday() {
   const mk = () => {
     const d = new Device(server, NOW)
     d.files = { ...fri }
-    for (const [rel, r] of server.rows) d.bases[rel] = { seq: r.seq, hash: hashForBase(rel, r.content as string) }
+    for (const [rel, r] of server.rows) {
+      d.bases[rel] = { seq: r.seq, hash: hashForBase(rel, r.content as string) }
+      if (rel !== ANCHOR) d.blobs.set(hashForBase(rel, r.content as string), r.content as string)
+    }
     d.pullSeq = Math.max(...[...server.rows.values()].map((r) => r.seq))
     return d
   }
   return { server, laptop: mk(), pc: mk() }
+}
+
+/** Both devices sync one more version of the note (`sections`) — it becomes their base everywhere. */
+function syncedWith(sections: Sections, server: Server, ...devices: Device[]): Sections {
+  const [first, ...rest] = devices
+  first.save(note(T_FRI, sections), Object.keys(sections))
+  first.upload()
+  for (const d of rest) d.pull()
+  return sections
 }
 
 describe('scenario: laptop edits offline while the PC edited other sections', () => {
@@ -511,40 +536,47 @@ describe('scenario: laptop edits offline while the PC edited other sections', ()
     expect(pc.pending.size).toBe(0)
   })
 
-  it('both edited the same section: the remote goes into the note, the local one into a copy with only that section', () => {
+  it('both edited the same line of a section: both versions stay IN the note between markers, no copy', () => {
     const { server, laptop, pc } = syncedFriday()
     pc.save(note(T_SUN, { ...FRIDAY, errors: 'errors PC', features: 'features PC' }), ['errors', 'features'])
     pc.upload()
     laptop.save(note(T_MON, { ...FRIDAY, errors: 'errors laptop', ideas: 'ideas laptop' }), ['errors', 'ideas'])
     laptop.pull()
-    // The note: B (errors) and C (features) from the PC, A (ideas) from the laptop.
-    expect(laptop.files[`${DIR}/errors.md`]).toBe('errors PC')
+    // The note: C (features) from the PC, A (ideas) from the laptop, B (errors) with both.
+    expect(laptop.files[`${DIR}/errors.md`]).toBe(markers('errors laptop', 'errors PC'))
     expect(laptop.files[`${DIR}/features.md`]).toBe('features PC')
     expect(laptop.files[`${DIR}/ideas.md`]).toBe('ideas laptop')
-    // The copy holds ONLY the conflicting section, with the laptop's version.
-    expect(laptop.lastPlan?.copySections).toEqual(['errors.md'])
-    expect(laptop.copies).toHaveLength(1)
-    const copy = laptop.copies[0]
-    expect(Object.keys(copy).sort()).toEqual(['errors.md', NOTE_MD])
-    expect(copy['errors.md']).toBe('errors laptop')
-    expect(sectionFiles(copy[NOTE_MD])).toEqual(['errors.md'])
+    expect(laptop.lastPlan?.copySections).toEqual([])
+    expect(laptop.lastPlan?.conflictMarkerSections).toEqual(['errors.md'])
+    expect(laptop.copies).toEqual([])
+    // The merged section goes up on top of the PC's seq (its base now).
+    expect(laptop.bases[`${DIR}/errors.md`]).toEqual({ seq: server.rows.get(`${DIR}/errors.md`)!.seq, hash: hashForBase(`${DIR}/errors.md`, 'errors PC') })
+    expect(laptop.pending.has(`${DIR}/errors.md`)).toBe(true)
     laptop.upload()
-    expect(server.content(`${DIR}/errors.md`)).toBe('errors PC')
+    expect(laptop.pending.size).toBe(0)
+    expect(server.content(`${DIR}/errors.md`)).toBe(markers('errors laptop', 'errors PC'))
     expect(server.content(`${DIR}/ideas.md`)).toBe('ideas laptop')
+    expect(server.content(`${DIR}/features.md`)).toBe('features PC')
     pc.pull()
     expect(pc.files).toEqual(laptop.files)
+    expect(pc.copies).toEqual([])
   })
 
-  it('both edited ONLY the same section: copy of it, the note takes the remote, nothing to upload', () => {
+  it('both edited ONLY the same section, on different lines: a clean merge, uploaded, no copy', () => {
     const { server, laptop, pc } = syncedFriday()
-    pc.save(note(T_SUN, { ...FRIDAY, errors: 'errors PC' }), ['errors'])
+    const v1 = 'one\ntwo\nthree'
+    const synced = syncedWith({ ...FRIDAY, errors: v1 }, server, laptop, pc)
+    pc.save(note(T_SUN, { ...synced, errors: 'one PC\ntwo\nthree' }), ['errors'])
     pc.upload()
-    laptop.save(note(T_MON, { ...FRIDAY, errors: 'errors laptop' }), ['errors'])
+    laptop.save(note(T_MON, { ...synced, errors: 'one\ntwo\nthree laptop' }), ['errors'])
     laptop.pull()
-    expect(laptop.lastPlan?.copySections).toEqual(['errors.md'])
-    expect(laptop.files[ANCHOR]).toBe(server.content(ANCHOR))
-    expect(laptop.files[`${DIR}/errors.md`]).toBe('errors PC')
-    expect(laptop.pending.size).toBe(0)
+    expect(laptop.lastPlan?.copySections).toEqual([])
+    expect(laptop.lastPlan?.conflictMarkerSections).toEqual([])
+    expect(laptop.files[`${DIR}/errors.md`]).toBe('one PC\ntwo\nthree laptop')
+    laptop.upload()
+    expect(server.content(`${DIR}/errors.md`)).toBe('one PC\ntwo\nthree laptop')
+    pc.pull()
+    expect(pc.files).toEqual(laptop.files)
   })
 
   it('the historical bug, for the record: the 0011 rule (no bases) lets the offline laptop clobber the PC', () => {
@@ -629,29 +661,81 @@ describe('planThreeWayDir', () => {
     expect(plan.writes).toEqual([])
   })
 
-  it('a conflict already kept in a copy (half-failed apply retried) is not copied again', () => {
-    const local = { ...fri, [`${DIR}/errors.md`]: 'errors laptop' }
+  it('a section both changed is merged with the base content (diff3), recorded as the new base content', () => {
+    const rel = `${DIR}/errors.md`
+    const local = { ...fri, [rel]: 'errors v1\nlaptop line' }
     const plan = input({
       local,
-      remote: [row('errors.md', 20, 'errors PC')],
-      pendingUpserts: new Set([`${DIR}/errors.md`]),
-      copiedUpserts: new Set([`${DIR}/errors.md`]),
+      remote: [row('errors.md', 20, 'PC line\nerrors v1')],
+      pendingUpserts: new Set([rel]),
+      baseContent: (r, hash) => (r === rel && hash === bases[rel].hash ? 'errors v1' : null),
     })
-    expect(plan.copySections).toEqual([])
-    expect(plan.writes).toEqual([{ relPath: `${DIR}/errors.md`, content: 'errors PC' }])
+    expect(plan.writes).toEqual([{ relPath: rel, content: 'PC line\nerrors v1\nlaptop line' }])
+    expect(plan.bases[rel]).toEqual({ seq: 20, hash: hashForBase(rel, 'PC line\nerrors v1') })
+    expect(plan.baseContents[rel]).toBe('PC line\nerrors v1')
+    expect(plan.upload).toContain(rel)
+    expect(plan.settle).not.toContain(rel)
+    expect(plan.conflictMarkerSections).toEqual([])
+    // A blob that does not match the base hash is ignored (two-way union: same result here).
+    const wrong = input({ local, remote: [row('errors.md', 20, 'PC line\nerrors v1')], pendingUpserts: new Set([rel]), baseContent: () => 'garbage' })
+    expect(wrong.writes).toEqual(plan.writes)
   })
 
-  it('a row without a base keeps the historical per-section rule (anchor `updated` decides, pending → copy)', () => {
+  it('a merge that ends equal to the remote is applied (settled, nothing to upload)', () => {
+    const rel = `${DIR}/errors.md`
+    const plan = input({
+      local: { ...fri, [rel]: 'errors v1\nshared' },
+      remote: [row('errors.md', 20, 'errors v1\nshared\nmore')],
+      pendingUpserts: new Set([rel]),
+      baseContent: () => 'errors v1',
+    })
+    expect(plan.writes).toEqual([{ relPath: rel, content: 'errors v1\nshared\nmore' }])
+    expect(plan.settle).toContain(rel)
+    expect(plan.upload).not.toContain(rel)
+  })
+
+  it('an encrypted note is never merged: copy of the section (and a copy already made is not made again)', () => {
+    const rel = `${DIR}/errors.md`
+    const encLocal = { ...fri, [ANCHOR]: fri[ANCHOR].replace(/^title:/m, 'encryption:\n  v: 1\ntitle:'), [rel]: 'errors laptop' }
+    const plan = input({ local: encLocal, remote: [row('errors.md', 20, 'errors PC')], pendingUpserts: new Set([rel]) })
+    expect(plan.copySections).toEqual(['errors.md'])
+    expect(plan.writes).toEqual([{ relPath: rel, content: 'errors PC' }])
+    const again = input({
+      local: encLocal,
+      remote: [row('errors.md', 20, 'errors PC')],
+      pendingUpserts: new Set([rel]),
+      copiedUpserts: new Set([rel]),
+    })
+    expect(again.copySections).toEqual([])
+    expect(again.writes).toEqual([{ relPath: rel, content: 'errors PC' }])
+  })
+
+  it('the merge failing (safety net) falls back to the conflict copy', () => {
+    const rel = `${DIR}/errors.md`
+    const plan = input({
+      local: { ...fri, [rel]: 'errors laptop' },
+      remote: [row('errors.md', 20, 'errors PC')],
+      pendingUpserts: new Set([rel]),
+      baseContent: () => {
+        throw new Error('disk')
+      },
+    })
+    expect(plan.copySections).toEqual(['errors.md'])
+    expect(plan.writes).toEqual([{ relPath: rel, content: 'errors PC' }])
+  })
+
+  it('a row without a base keeps the historical per-section rule (anchor `updated` decides; pending → two-way merge)', () => {
     const noIdeas = { ...bases }
     delete noIdeas[`${DIR}/ideas.md`]
     const local = { ...folder(note(T_MON, { ...FRIDAY, ideas: 'ideas laptop' })) }
     // Remote older than the local anchor → kept.
     expect(input({ local, bases: noIdeas, remote: [row('ideas.md', 20, 'ideas PC')] }).writes).toEqual([])
-    // Remote newer + pending local edit → applied, local kept as a copy.
+    // Remote newer + pending local edit → merged two-way (no base content): both versions.
     const newer = { ...row('ideas.md', 20, 'ideas PC'), updatedAtMs: Date.parse(NOW) }
     const plan = input({ local, bases: noIdeas, remote: [newer], pendingUpserts: new Set([`${DIR}/ideas.md`]) })
-    expect(plan.writes).toEqual([{ relPath: `${DIR}/ideas.md`, content: 'ideas PC' }])
-    expect(plan.copySections).toEqual(['ideas.md'])
+    expect(plan.writes.find((w) => w.relPath === `${DIR}/ideas.md`)?.content).toBe(markers('ideas laptop', 'ideas PC'))
+    expect(plan.copySections).toEqual([])
+    expect(plan.conflictMarkerSections).toEqual(['ideas.md'])
   })
 
   it('an encrypted note in conflict: the remote wins wholesale and the whole local folder is copied', () => {
@@ -792,17 +876,16 @@ describe('scenario: laptop just updated (no bases yet) edits offline before its 
     expect(Object.keys(laptop.bases).sort()).toEqual(Object.keys(laptop.files).sort())
   })
 
-  it('both edited the same section: the remote goes into the note, the local one into a copy (never a silent overwrite)', () => {
+  it('both edited the same section: merged two-way (content unknown) — both versions in the note, never a silent overwrite', () => {
     const { server, laptop, pc } = syncedFridayLaptopWithoutBases()
     pc.save(note(T_SUN, { ...FRIDAY, errors: 'errors PC' }), ['errors'])
     pc.upload()
     laptop.save(note(T_MON, { ...FRIDAY, errors: 'errors laptop' }), ['errors'])
     laptop.pull({ lastSyncMs })
-    expect(laptop.files[`${DIR}/errors.md`]).toBe('errors PC')
-    expect(laptop.copies).toHaveLength(1)
-    expect(laptop.copies[0]['errors.md']).toBe('errors laptop')
+    expect(laptop.files[`${DIR}/errors.md`]).toBe(markers('errors laptop', 'errors PC'))
+    expect(laptop.copies).toEqual([])
     laptop.upload()
-    expect(server.content(`${DIR}/errors.md`)).toBe('errors PC')
+    expect(server.content(`${DIR}/errors.md`)).toBe(markers('errors laptop', 'errors PC'))
   })
 
   it('no remote change: the offline edit is simply kept and uploaded (no spurious copy, the note is not reverted)', () => {
@@ -815,16 +898,15 @@ describe('scenario: laptop just updated (no bases yet) edits offline before its 
     expect(server.content(`${DIR}/ideas.md`)).toBe('ideas laptop')
   })
 
-  it('an UNJOURNALED local edit (Cloud disabled / CLI) of a section the PC also changed → copy, not overwritten', () => {
+  it('an UNJOURNALED local edit (Cloud disabled / CLI) of a section the PC also changed → both kept, not overwritten', () => {
     const { laptop, pc } = syncedFridayLaptopWithoutBases()
     pc.save(note(T_SUN, { ...FRIDAY, errors: 'errors PC' }), ['errors'])
     pc.upload()
     laptop.save(note(T_MON, { ...FRIDAY, errors: 'errors cli' }), ['errors'])
     laptop.pending.clear() // never journaled by the app
     laptop.pull({ lastSyncMs })
-    expect(laptop.files[`${DIR}/errors.md`]).toBe('errors PC')
-    expect(laptop.copies).toHaveLength(1)
-    expect(laptop.copies[0]['errors.md']).toBe('errors cli')
+    expect(laptop.files[`${DIR}/errors.md`]).toBe(markers('errors cli', 'errors PC'))
+    expect(laptop.copies).toEqual([])
   })
 })
 
@@ -1008,9 +1090,10 @@ describe('review: echo of an upload still in flight', () => {
       nowIso: NOW,
     }
     // Without the in-flight hash it looks like a conflict…
-    expect(planThreeWayDir(input).copySections).toEqual(['errors.md'])
+    expect(planThreeWayDir(input).conflictMarkerSections).toEqual(['errors.md'])
     // …with it, the row is this device's own first save: base, keep the second save.
     const plan = planThreeWayDir({ ...input, inFlightHashes: new Map([[rel, hashForBase(rel, 'errors first save')]]) })
+    expect(plan.conflictMarkerSections).toEqual([])
     expect(plan.copySections).toEqual([])
     expect(plan.writes).toEqual([])
     expect(plan.bases[rel]).toEqual({ seq: 20, hash: hashForBase(rel, 'errors first save') })
@@ -1068,5 +1151,56 @@ describe('review: folders whose bootstrap reconcile failed keep the bootstrap co
     laptop.upload()
     expect(server.content(`${DIR}/errors.md`)).toBe('errors PC')
     expect(server.content(`${DIR}/ideas.md`)).toBe('ideas laptop')
+  })
+})
+
+describe('the real case (2026-11-06): the CLI appended a line on top of a remote change the app had already written to disk', () => {
+  it('a stale upload, then the pull leaves ONE note with both changes — no copy', () => {
+    const { server, laptop: cli, pc } = syncedFriday()
+    const improvements = '- [ ] one\n- [ ] two'
+    syncedWith({ ...FRIDAY, errors: improvements }, server, pc, cli)
+    // The PC adds an item; the desktop app on the CLI's machine downloads it
+    // (same notes dir) — but the CLI's own base stays at the old version.
+    const withDesktop = `${improvements}\n- [ ] desktop`
+    pc.save(note(T_SUN, { ...FRIDAY, errors: withDesktop }), ['errors'])
+    pc.upload()
+    cli.files[`${DIR}/errors.md`] = withDesktop
+    cli.files[ANCHOR] = server.content(ANCHOR) as string
+    // `noteflow add "- [ ] cli" --section …`: appends at the end, push is stale.
+    const added = `${withDesktop}\n- [ ] cli`
+    cli.save(note(T_MON, { ...FRIDAY, errors: added }), ['errors'])
+    cli.upload()
+    expect(cli.stale.has(`${DIR}/errors.md`)).toBe(true)
+    // `noteflow pull`.
+    cli.pull()
+    expect(cli.copies).toEqual([])
+    expect(cli.lastPlan?.copySections).toEqual([])
+    expect(cli.lastPlan?.conflictMarkerSections).toEqual([])
+    expect(cli.files[`${DIR}/errors.md`]).toBe(added)
+    cli.upload()
+    expect(cli.pending.size).toBe(0)
+    expect(server.content(`${DIR}/errors.md`)).toBe(added)
+    pc.pull()
+    expect(pc.files[`${DIR}/errors.md`]).toBe(added)
+    expect(pc.copies).toEqual([])
+  })
+
+  it('the same without any base content (bases from before the base store): the two-way union gives the same note', () => {
+    const { server, laptop: cli, pc } = syncedFriday()
+    const improvements = '- [ ] one\n- [ ] two\n'
+    syncedWith({ ...FRIDAY, errors: improvements }, server, pc, cli)
+    cli.blobs.clear()
+    const withDesktop = `${improvements}- [ ] desktop\n`
+    pc.save(note(T_SUN, { ...FRIDAY, errors: withDesktop }), ['errors'])
+    pc.upload()
+    cli.files[`${DIR}/errors.md`] = withDesktop
+    const added = `${withDesktop}- [ ] cli\n`
+    cli.save(note(T_MON, { ...FRIDAY, errors: added }), ['errors'])
+    cli.upload()
+    cli.pull()
+    expect(cli.copies).toEqual([])
+    expect(cli.files[`${DIR}/errors.md`]).toBe(added)
+    cli.upload()
+    expect(server.content(`${DIR}/errors.md`)).toBe(added)
   })
 })

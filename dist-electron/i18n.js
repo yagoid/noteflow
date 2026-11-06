@@ -48,6 +48,11 @@ const en = {
     },
     sync: {
         conflictCopy: 'conflict copy',
+        conflictMarkers: {
+            local: '⚠️ Sync conflict — this device’s version:',
+            remote: '⚠️ Sync conflict — version from another device:',
+            end: '⚠️ End of sync conflict',
+        },
     },
 };
 // `: Messages` forces key parity with English at compile time.
@@ -87,6 +92,11 @@ const es = {
     },
     sync: {
         conflictCopy: 'copia en conflicto',
+        conflictMarkers: {
+            local: '⚠️ Conflicto de sincronización — versión de este dispositivo:',
+            remote: '⚠️ Conflicto de sincronización — versión de otro dispositivo:',
+            end: '⚠️ Fin del conflicto de sincronización',
+        },
     },
 };
 /**

@@ -1075,8 +1075,10 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     stale, edición en T5 con las claves bloqueadas, otro dispositivo borra en T4 < T5 → al
     desbloquear se perdería T5). Sin pendientes → regla de borrado de siempre.
   - **Copias de conflicto (QA "B2").** (Lo que sigue es el camino de las carpetas **sin base de ancla**
-    — ramas wholesale / por secciones. Con base, el pull decide por fichero y la copia lleva **solo las
-    secciones en conflicto**: ver "Fusión en tres vías"; reutiliza `writeConflictCopy`, el aviso y el
+    — ramas wholesale / por secciones —, el tombstone `'lost'` y el ancla cifrada/ilegible. Con base, el
+    pull decide por fichero y una sección que cambiaron los dos **se fusiona por líneas dentro de la
+    nota** (sin copia, ver "Fusión de líneas de una sección"); la copia de solo esas secciones queda
+    como red de seguridad (nota cifrada, fusión fallida) y reutiliza `writeConflictCopy`, el aviso y el
     dedupe por `conflictCopied`.) Sin ellas, una edición hecha **sin conexión** se perdía en
     silencio en todas partes: A edita X offline (el upsert queda en el journal), B edita X y llega
     al servidor; al reconectar, el pull de A ve el ancla remota estrictamente más nueva → rama
@@ -1138,7 +1140,9 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     mismo espejo en la rama wholesale (carpetas sin base de ancla; con base, la rama de tres vías del
     CLI) con `pendingUpserts` (mismas reglas y helpers; idioma según
     `settings.language`), sube la copia con `cloudPushFile` (lo que no llega queda en
-    `pendingUpserts` para `noteflow push`) e imprime `Conflict: local changes kept as "…"`; su
+    `pendingUpserts` para `noteflow push`) e imprime `Conflict: local changes kept as "…"` (en la rama
+    de tres vías, una sección fusionada con marcas imprime en su lugar `Merged with conflicts: "…" —
+    both versions kept, look for the ⚠️ markers`); su
     tombstone siempre conserva con subidas pendientes, así que no necesita copia. Dedupe del CLI: al
     crear la copia la carpeta pasa a `reconciledDirs` (sus pendientes salen de `pendingUpserts` en la
     escritura final aunque el aplicado falle); **residual:** un CLI matado antes de esa escritura
@@ -1150,7 +1154,7 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     - `noteflow cloud pull` ejecutado mientras la app tiene una edición offline en **su** journal
       (mismo dir de notas): el CLI solo conoce sus propios `pendingUpserts`. En carpetas con base del
       CLI se protege igual (el fichero difiere de la base del CLI → cambio local: se conserva y se
-      sube, o copia si el remoto también cambió); sin base del CLI, la regla LWW de antes la puede
+      sube, o fusión por líneas si el remoto también cambió); sin base del CLI, la regla LWW de antes la puede
       sobrescribir sin copia.
     - La comparación del ancla es **textual** (sin `updated:`): otro cliente que formatee el YAML de
       otra manera produce una copia espuria (segura).
@@ -1250,10 +1254,17 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
        `settlePathUpload`); mismo contenido → **adopt** (base + settle); tombstone sobre cambio local →
        **keep-local** (base = seq del tombstone con hash `''`, re-subida; **forzada** si el tombstone es
        más nuevo que la versión local, como antes — así también funciona contra un servidor sin 0014);
-       distinto → **conflicto**: la remota va a la nota, la local a una **copia de conflicto con solo
-       las secciones en conflicto** (`buildConflictCopy`/`writeConflictCopy` con `onlySections`: su
-       `note.md` lista solo esas; dedupe por `conflictCopied` de esos ops, `journalMarkConflictCopied`).
-       Las secciones con `delete` pendiente no se tocan.
+       distinto → **conflicto** → **fusión de líneas** (`mergeSectionText`, ver "Fusión de líneas de una
+       sección" abajo; también para el conflicto de la regla histórica sin base de sección,
+       `planLegacySection`): se escribe el resultado, la base pasa a `{seq remota, hash(remota)}` (y se
+       guarda su contenido), la sección va a `upload` (re-subida sobre la seq remota; quita `stale`) y a
+       las conservadas (sigue listada; el ancla lleva el `updated` local si es posterior); si tiene
+       bloques de conflicto va a `plan.conflictMarkerSections`. Si el resultado es idéntico a la remota
+       → como *apply* (settle). **Red de seguridad:** nota cifrada (`encryption:` en el ancla local o
+       remota) o fusión que lanza / devuelve algo inesperado → como antes: la remota a la nota y la
+       local a una **copia de conflicto con solo esas secciones** (`plan.copySections`,
+       `buildConflictCopy`/`writeConflictCopy` con `onlySections`; dedupe por `conflictCopied` de esos
+       ops, `journalMarkConflictCopied`). Las secciones con `delete` pendiente no se tocan.
     3. **Ancla** (si viene en el lote, `mergeAnchors`, comparando sin `updated:` contra la base): solo
        cambió un lado → ese lado (si gana el local y el `updated` remoto no es anterior, el resultado
        lleva `updated` = ahora: el `updated` del servidor nunca retrocede, lo leen los clientes LWW);
@@ -1280,8 +1291,64 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
        que acaba distinto del servidor — el ancla fusionada se sube con base = seq remota.
     El escenario del bug queda: secciones del PC aplicadas (el portátil no las tocó), la del portátil
     conservada, ancla con el `updated` del portátil re-subida con base = seq del PC, sin copia; el
-    catch-up solo sube la sección del portátil. Si ambos tocaron la misma sección → la del PC en la nota
-    + copia con solo la del portátil.
+    catch-up solo sube la sección del portátil. Si ambos tocaron la misma sección → fusión de líneas en
+    la nota (marcas ⚠️ solo si tocaron las mismas líneas), sin copia.
+  - **Fusión de líneas de una sección (2026-11-06).** El bug: el CLI (`noteflow add "- [ ] …" --section
+    "Improvements"`) añadió una línea al final de una sección cuya versión remota la app de escritorio
+    ya había bajado al mismo dir de notas; la base del CLI seguía en la versión anterior → push `stale`
+    → el pull veía "cambiaron los dos" y creaba "<título> (copia en conflicto …)" idéntica a la remota
+    salvo la línea. Ahora `mergeSectionText(base | null, local, remote, labels) → {content, conflicts}`
+    (puro, `cloudSyncLogic.ts`; espejo en `cli/noteflow.js`, paridad en
+    `tests/cli/cloudThreeWay.test.ts`; casos en `tests/electron/sectionMerge.test.ts`):
+    - **Por líneas**, comparadas sin terminador (LF/CRLF); LCS con Myers (prefijo/sufijo común
+      recortados; más de 1500 líneas distintas → el medio es un único hunk, tiempo y memoria acotados).
+    - **Con base:** diff3 — las líneas de la base que conservan los dos son estables; entre ellas, un
+      trozo que cambió un solo lado toma ese lado, el mismo cambio en los dos se toma una vez y uno que
+      cambiaron los dos distinto se **refina con la unión de dos vías** (las líneas comunes a las dos
+      versiones no son conflicto: así el caso real — base vieja `[a,b]`, remota `[a,b,X]`, local
+      `[a,b,X,Y]` — da `[a,b,X,Y]` limpio).
+    - **Sin base** (o sin su contenido): unión de dos vías del diff local↔remota — un hunk con líneas de
+      un solo lado se conserva (adición; un borrado de un lado **resucita**, asumido), uno con líneas de
+      los dos lados es conflicto. Consecuencia: sin contenido de base, una línea editada en un solo lado
+      no se distingue de un conflicto (sale con marcas).
+    - **Bloque de conflicto** (decisión del usuario: las dos versiones en la misma nota, nunca nota
+      aparte), separado por líneas en blanco para que cada marca sea su propio bloque markdown (el
+      editor parte bloques por `\n\n`; sin el hueco el blockquote se tragaría las líneas):
+      `> ⚠️ Sync conflict — this device’s version:` · líneas locales · `> ⚠️ Sync conflict — version
+      from another device:` · líneas remotas · `> ⚠️ End of sync conflict` (ES: `Conflicto de
+      sincronización — versión de este dispositivo:` / `… — versión de otro dispositivo:` / `Fin del
+      conflicto de sincronización`). Desktop: `electron/i18n.ts` `sync.conflictMarkers`, inyectado desde
+      `main.ts` con `cloudSync.setConflictMarkerLabels`; CLI: según `settings.language`
+      (`conflictMarkerLabels`).
+    - **Finales de línea:** el resultado usa el de la remota (si no tiene, el local; si no, LF); el
+      salto final: con base, en tres vías sobre el flag; sin base, el del lado que aporta la última
+      línea (común/conflicto → OR). Añadir una línea al final sin `\n` da remota + línea, sin duplicar
+      ni pegar.
+    - **Contenido de la base** (para el diff3 de verdad): almacén **direccionado por contenido**, un
+      fichero por hash (`hashForBase` de una sección = sha-256 del contenido). Desktop:
+      `userData/cloud-base-content/<hash>` (`electron/cloudBaseStore.ts`); CLI:
+      `<dir de ajustes>/cli-cloud-base-content/<hash>`. Solo ficheros de **sección** (el `note.md` se
+      fusiona con `mergeAnchors`). Se escribe en cada registro de base de sección con contenido conocido
+      (`recordPulledBase` en todas las ramas del pull, `plan.baseContents` del planificador — incluido
+      el eco en vuelo —, bases "vistas" del bootstrap, subida aceptada por la v2), tmp + rename,
+      best-effort. Al final de un pull correcto se **podan** los blobs que no referencia ninguna base de
+      sección (desktop tras el `patchSettings` del watermark; CLI al final de `cloudPullNow`, contra
+      `cliCloudBasesSnapshot`). Un cambio de cuenta borra el directorio (`resetCloudSyncState` /
+      `clearCliCloudBases`). El planificador recibe `baseContent(relPath, hash)` y **verifica** el hash
+      de lo que devuelve; un blob que falta (bases de antes de este cambio, poda concurrente de otro
+      proceso del CLI), corrupto, una base `''` (tombstone) o `UNKNOWN_BASE_HASH` (bootstrap) → unión de
+      dos vías. La E/S queda fuera de la lógica pura.
+    - **Aviso:** desktop `CloudSyncStatus.conflictMerges` / `ActiveSyncStatus.conflictMerges`
+      (`{count, titles, at}`, mismo tipo y vida que `conflictCopies`: sesión, acumulado; se limpia con
+      `sync:dismiss-conflict-copies`, al cambiar de cuenta y al desactivar Cloud) → mismo bloque ámbar y
+      punto del botón de sync ("N note(s) were changed on the same lines here and on another device. Both
+      versions were kept…"). Una fusión limpia no avisa. CLI: `Merged with conflicts: "<título>" — both
+      versions kept, look for the ⚠️ markers`.
+    - **Residuales:** fuera de alcance y como antes: ancla en conflicto cifrada/ilegible (`whole` →
+      copia de la carpeta entera), tombstone `'lost'`, ramas sin base de ancla (wholesale / por
+      secciones), notas cifradas. Los finales de línea mixtos de un fichero se normalizan al de la
+      remota. Una sección con marcas que el usuario no resuelve se sincroniza tal cual (las marcas son
+      texto). El GitHub Sync tiene su propio camino (ver `sync.md` "Subida condicionada (QA B3)").
   - **Bootstrap de bases (una sola vez, al actualizar):** sin él, un portátil recién actualizado que
     edita offline una nota antes de que tenga base repetiría el bug tal cual. `needsBasesBootstrap`
     (puro): dispositivo con estado previo (`pullSeq`, `pullCursor` heredado o `lastSync`) y sin
@@ -1298,8 +1365,9 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
       debajo de la de la fila: si el fichero tiene **upsert pendiente** (edición offline antes del primer
       pull de esta versión), o la carpeta tiene **ediciones no apuntadas** (`note.md` sin op pero con
       `updated` > `lastSync`: Cloud desactivado, CLI) → contenido desconocido (`UNKNOWN_BASE_HASH`) →
-      idéntico = adopt, distinto = **conflicto** (la remota a la nota y la local a una copia; el
-      `note.md` se fusiona) — **nunca se pisa en silencio**; si no, el fichero local se toma como no
+      idéntico = adopt, distinto = **conflicto** (unión de dos vías de la sección en la nota — sin
+      contenido de base —, marcas si los dos lados tienen líneas propias; el `note.md` se fusiona) —
+      **nunca se pisa en silencio**; si no, el fichero local se toma como no
       cambiado desde el último sync (su propio hash; `''` si falta) → se aplica el cambio remoto.
     `basesBootstrapped = true` se escribe en el **mismo** `patchSettings` que avanza `pullSeq` (en todo
     pull correcto: también un primer sync o un dispositivo que ya tiene bases, que no lo necesitan); un
@@ -1353,10 +1421,12 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
       editada allí — la edición remota vuelve y queda listada, ver paso 3.)
     - El eco de una subida propia se reconoce por el hash de lo que está **en vuelo** en este proceso;
       si la app se cierra con la subida comprometida en el servidor pero sin respuesta, y el usuario ya
-      había guardado otra versión, el siguiente pull ve un conflicto y hace una **copia espuria** (con la
-      versión más nueva; no se pierde nada).
-    - Un conflicto **sin op en el journal** (edición no apuntada: Cloud desactivado, CLI) no tiene flag de
-      dedupe: si el aplicado falla a medias, el reintento puede hacer una segunda copia.
+      había guardado otra versión, el siguiente pull ve un conflicto y lo **fusiona** (marcas espurias si
+      las dos versiones tocan las mismas líneas; no se pierde nada).
+    - Un conflicto que acaba en **copia** (red de seguridad) **sin op en el journal** (edición no
+      apuntada: Cloud desactivado, CLI) no tiene flag de dedupe: si el aplicado falla a medias, el
+      reintento puede hacer una segunda copia. La fusión de líneas es idempotente en el reintento (la
+      base ya es la remota → `keep` y re-subida).
     - Con el servidor **sin la 0014**, el pull fusiona en tres vías pero las subidas vuelven a la regla
       de `updated_at` (y no devuelven seq: las bases se pierden tras cada subida y se re-establecen con
       el eco del pull).
@@ -1763,10 +1833,12 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
     del ancla (que sigue con su lógica: `pendingUnderDir` → conservar y re-subir forzado) y de "carpeta
     local inexistente" (wholesale, que ya registra bases). Pide antes de escribir las secciones listadas
     por el ancla remota que faltan en disco (o pendientes sin base) — fallo → `abortPull` —; copia
-    primero (solo las secciones en conflicto con `writeConflictCopyDir(dir, copySections)`, o la
-    carpeta entera si las anclas no se pueden fusionar; imprime `Conflict: local changes kept as "…"`
-    y la sube como las demás copias), borrados, escrituras (secciones primero, `note.md` el último),
-    bases.
+    primero (red de seguridad: solo las secciones no fusionables con `writeConflictCopyDir(dir,
+    copySections)`, o la carpeta entera si las anclas no se pueden fusionar; imprime `Conflict: local
+    changes kept as "…"` y la sube como las demás copias), borrados, escrituras (secciones primero —
+    las fusionadas por líneas con `mergeSectionText`, diff3 con `cli-cloud-base-content/` —, `note.md`
+    el último), bases; con marcas imprime `Merged with conflicts: "<título>" — both versions kept, look
+    for the ⚠️ markers`.
   - **Subidas:** `cloudPushFile` usa la v2 con `p_base_seq = cliCloudBase(rel)?.seq ?? null`
     (número → nueva base con el hash de lo subido; `null` → `stale`; fallback 0011 → base borrada;
     forzadas y json sin cambios). **Qué se sube** (`cloudFilesToUpload`): un fichero pendiente
@@ -1789,10 +1861,11 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
     —mismo dir de notas en Windows/Linux—, un editor externo o un `touch` previo sin red): contenido
     desconocido → idéntico = adopt, distinto = copia, nunca se pisa.
   - **Desviaciones / residuales del CLI:** sin flag `conflictCopied`, un aplicado que falla a medias
-    tras crear la copia puede **copiar otra vez** en el reintento (como las ediciones no apuntadas en la
-    app). Antes del bootstrap no hay bases: un `touch` (pasa todas las secciones) apunta todas como
-    pendientes → una sección que el otro dispositivo cambió y este no tocó sale como copia de
-    conflicto (conservador; `set`/`add` solo apuntan la sección escrita y fusionan limpio). Cuando el
+    tras crear una copia (red de seguridad) puede **copiar otra vez** en el reintento (como las
+    ediciones no apuntadas en la app). Antes del bootstrap no hay bases: un `touch` (pasa todas las
+    secciones) apunta todas como pendientes → una sección que el otro dispositivo cambió y este no tocó
+    se fusiona en dos vías sin contenido de base (con una sola línea cambiada, sale con marcas ⚠️;
+    conservador; `set`/`add` solo apuntan la sección escrita y fusionan limpio). Cuando el
     CLI reescribe un `note.md` en **su** formato (`serializeNoteMd`: comillas, `tags` en flow, sin
     `expiresAt`), el hash del ancla cambia aunque no haya edición real: frente a la app, la rama
     "ambos cambiaron" (base = ancla remota + OR de `aiHidden`/`favorited` + unión de `tags`) corre

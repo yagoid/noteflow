@@ -172,7 +172,7 @@ const api = {
     conflictCopies?: { count: number; titles: string[]; at: string }
   }> => ipcRenderer.invoke('sync:get-status'),
   // Clears the session notice of conflict copies made by the pull of either
-  // backend (titlebar sync status card).
+  // backend, and of Cloud's merges with conflict markers (titlebar sync status card).
   dismissConflictCopies: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:dismiss-conflict-copies'),
   // Backend-tagged status of the LIVE sync provider (Cloud when enabled, else
   // GitHub, else 'none') — drives the titlebar sync button and its status card.
@@ -187,6 +187,7 @@ const api = {
     history?: Array<{ at: string; files: number; ok: boolean }>
     filesToday?: number
     conflictCopies?: { count: number; titles: string[]; at: string }
+    conflictMerges?: { count: number; titles: string[]; at: string }
     github?: { owner?: string; repo?: string }
     cloud?: {
       keysState: 'unlocked' | 'locked' | 'no-keys'
@@ -314,6 +315,7 @@ const api = {
     initialPullStatus: 'pending' | 'ok' | 'failed'
     realtimeConnected: boolean
     conflictCopies?: { count: number; titles: string[]; at: string }
+    conflictMerges?: { count: number; titles: string[]; at: string }
   }> => ipcRenderer.invoke('cloud:get-status'),
   cloudSetup: (passphrase: string): Promise<{ ok: boolean; recoveryCode?: string; error?: string }> =>
     ipcRenderer.invoke('cloud:setup', passphrase),

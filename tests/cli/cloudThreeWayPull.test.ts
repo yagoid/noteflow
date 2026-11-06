@@ -214,6 +214,14 @@ function cliEdit(section: string, content: string, updated: string) {
   fs.writeFileSync(localPath(ANCHOR), readLocal(ANCHOR).replace(/^updated:.*$/m, `updated: "${updated}"`))
 }
 const fmOf = (anchor: string) => yaml.load(splitFrontmatter(anchor).frontmatter) as Record<string, unknown>
+const LABELS = {
+  local: '⚠️ Sync conflict — this device’s version:',
+  remote: '⚠️ Sync conflict — version from another device:',
+  end: '⚠️ End of sync conflict',
+}
+const markers = (local: string, remote: string) =>
+  [`> ${LABELS.local}`, '', local, '', `> ${LABELS.remote}`, '', remote, '', `> ${LABELS.end}`].join('\n')
+const blobNames = () => (fs.existsSync(cli.CLOUD_BASE_CONTENT_DIR) ? fs.readdirSync(cli.CLOUD_BASE_CONTENT_DIR).sort() : [])
 const otherDirs = () => fs.readdirSync(notesDir).filter((d) => d !== DIR && fs.statSync(path.join(notesDir, d)).isDirectory())
 
 beforeEach(async () => {
@@ -303,26 +311,33 @@ describe('the real case: the CLI edits a section offline while the PC edited ano
     expect(bases[`${DIR}/a.md`].hash).toBe(cli.hashForBase(`${DIR}/a.md`, 'a CLI'))
   })
 
-  it('both edited B: the PC version goes into the note, a copy holds ONLY the CLI version of B', async () => {
+  it('both edited the same line of B: both versions stay in the note between ⚠️ markers, no copy', async () => {
     await pcSave(note(T_PC, { ...BASE, b: 'b PC' }, { tags: ['dev', 'pc'] }), ['b'])
     server.failUploads = true
     cliEdit('b', 'b CLI', T_CLI)
     await cli.syncPushNoteFiles(DIR, [NOTE_MD, 'b.md'])
     server.failUploads = false
     await cli.cloudPullNow()
-    expect(readLocal(`${DIR}/b.md`)).toBe('b PC')
-    expect(await server.content(`${DIR}/b.md`)).toBe('b PC')
-    const [copyDir] = otherDirs()
-    expect(copyDir).toBeDefined()
-    expect(fs.readdirSync(path.join(notesDir, copyDir)).sort()).toEqual(['b.md', NOTE_MD])
-    expect(fs.readFileSync(path.join(notesDir, copyDir, 'b.md'), 'utf-8')).toBe('b CLI')
-    const copyFm = fmOf(fs.readFileSync(path.join(notesDir, copyDir, NOTE_MD), 'utf-8'))
-    expect((copyFm.sections as Array<{ file: string }>).map((s) => s.file)).toEqual(['b.md'])
-    expect(String(copyFm.title)).toMatch(/^NOTEFLOW \(conflict copy /)
-    expect(logs.some((l) => l.includes('Conflict: local changes kept as "NOTEFLOW (conflict copy'))).toBe(true)
-    // The copy reached the server; nothing stays pending.
-    expect(await server.content(`${copyDir}/b.md`)).toBe('b CLI')
+    expect(otherDirs()).toEqual([])
+    expect(readLocal(`${DIR}/b.md`)).toBe(markers('b CLI', 'b PC'))
+    expect(await server.content(`${DIR}/b.md`)).toBe(markers('b CLI', 'b PC'))
+    expect(logs.some((l) => l.includes('Merged with conflicts: "NOTEFLOW" — both versions kept, look for the ⚠️ markers'))).toBe(true)
+    expect(logs.some((l) => l.includes('Conflict: local changes kept'))).toBe(false)
     expect(readSettings().cliCloud.pendingUpserts).toBeUndefined()
+  })
+
+  it('markers follow the language setting', async () => {
+    const st = readSettings()
+    st.language = 'es'
+    fs.writeFileSync(settingsPath(), JSON.stringify(st))
+    await pcSave(note(T_PC, { ...BASE, b: 'b PC' }), ['b'])
+    server.failUploads = true
+    cliEdit('b', 'b CLI', T_CLI)
+    await cli.syncPushNoteFiles(DIR, [NOTE_MD, 'b.md'])
+    server.failUploads = false
+    await cli.cloudPullNow()
+    expect(readLocal(`${DIR}/b.md`)).toContain('> ⚠️ Conflicto de sincronización — versión de este dispositivo:')
+    expect(readLocal(`${DIR}/b.md`)).toContain('> ⚠️ Fin del conflicto de sincronización')
   })
 
   it('a section deleted on the PC and edited here offline is kept, listed and re-uploaded', async () => {
@@ -339,6 +354,53 @@ describe('the real case: the CLI edits a section offline while the PC edited ano
     expect(files).toContain('b.md')
     expect(otherDirs()).toEqual([])
     expect(readSettings().cliCloud.pendingUpserts).toBeUndefined()
+  })
+})
+
+describe('the real case (2026-11-06): `noteflow add` appends a line on top of a remote change the app already wrote here', () => {
+  it('the push goes stale, the pull leaves ONE note with both changes (no copy), uploaded on top of the remote seq', async () => {
+    // The PC appends to B; the desktop app on THIS machine downloads it to the
+    // shared notes dir — the CLI's base of B stays at the old version.
+    await pcSave(note(T_PC, { ...BASE, b: 'b v1\n- [ ] desktop' }), ['b'])
+    fs.writeFileSync(localPath(`${DIR}/b.md`), 'b v1\n- [ ] desktop')
+    // `noteflow add "- [ ] cli" --section B`: one more line at the end.
+    cliEdit('b', 'b v1\n- [ ] desktop\n- [ ] cli', T_CLI)
+    await cli.syncPushNoteFiles(DIR, [NOTE_MD, 'b.md'])
+    expect(logs.some((l) => l.includes('not uploaded: a newer version is on NoteFlow Cloud'))).toBe(true)
+    expect(readSettings().cliCloud.pendingUpserts).toContain(`${DIR}/b.md`)
+    const remoteSeqB = await server.seqOf(`${DIR}/b.md`)
+    await cli.cloudPullNow()
+    expect(otherDirs()).toEqual([]) // no "(conflict copy …)" note
+    expect(logs.some((l) => l.includes('Conflict:') || l.includes('Merged with conflicts'))).toBe(false)
+    expect(readLocal(`${DIR}/b.md`)).toBe('b v1\n- [ ] desktop\n- [ ] cli')
+    expect(await server.content(`${DIR}/b.md`)).toBe('b v1\n- [ ] desktop\n- [ ] cli')
+    expect(server.v2BaseSeqs).toContain(remoteSeqB)
+    expect(readSettings().cliCloud.pendingUpserts).toBeUndefined()
+    // The base store holds exactly the contents of the current section bases.
+    const bases = cli.cliCloudBasesSnapshot()
+    const expected = ['a.md', 'b.md', 'c.md'].map((f) => bases[`${DIR}/${f}`].hash).sort()
+    expect(blobNames()).toEqual(expected)
+  })
+})
+
+describe('base content store (cli-cloud-base-content/)', () => {
+  it('the first pull stores the content of every section base (note.md excluded)', () => {
+    const bases = cli.cliCloudBasesSnapshot()
+    expect(blobNames()).toEqual(['a.md', 'b.md', 'c.md'].map((f) => bases[`${DIR}/${f}`].hash).sort())
+    expect(fs.readFileSync(path.join(cli.CLOUD_BASE_CONTENT_DIR, bases[`${DIR}/a.md`].hash), 'utf-8')).toBe('a v1')
+  })
+
+  it('a pull prunes the contents no base references; an account switch drops the store', async () => {
+    fs.writeFileSync(path.join(cli.CLOUD_BASE_CONTENT_DIR, 'f'.repeat(64)), 'orphan')
+    await pcSave(note(T_PC, { ...BASE, a: 'a PC' }), ['a'])
+    await cli.cloudPullNow()
+    const bases = cli.cliCloudBasesSnapshot()
+    expect(blobNames()).toEqual(['a.md', 'b.md', 'c.md'].map((f) => bases[`${DIR}/${f}`].hash).sort())
+    const s = readSettings()
+    s.cliAccount.userId = 'user-2'
+    fs.writeFileSync(settingsPath(), JSON.stringify(s))
+    cli.bindCliCloudToAccount()
+    expect(fs.existsSync(cli.CLOUD_BASE_CONTENT_DIR)).toBe(false)
   })
 })
 
@@ -462,14 +524,13 @@ describe('one-time bases bootstrap (an install that synced before bases existed)
     expect(bases[`${DIR}/c.md`].seq).toBeLessThanOrEqual(seen)
   })
 
-  it('an UNJOURNALED local edit (the app / an editor wrote it, `updated` after lastSync) of a section the PC also changed → copy, never overwritten', async () => {
+  it('an UNJOURNALED local edit (the app / an editor wrote it, `updated` after lastSync) of a section the PC also changed → both kept, never overwritten', async () => {
     preBasesInstall()
     await pcSave(note(T_PC, { ...BASE, b: 'b PC' }), ['b'])
     cliEdit('b', 'b written by the app', '2099-01-01T00:00:00.000Z')
     await cli.cloudPullNow()
-    expect(readLocal(`${DIR}/b.md`)).toBe('b PC')
-    const [copyDir] = otherDirs()
-    expect(fs.readFileSync(path.join(notesDir, copyDir, 'b.md'), 'utf-8')).toBe('b written by the app')
+    expect(readLocal(`${DIR}/b.md`)).toBe(markers('b written by the app', 'b PC'))
+    expect(otherDirs()).toEqual([])
   })
 
   it('a command push before the bootstrap runs it first (never a timestamp-only upload over unseen remote edits)', async () => {
@@ -485,18 +546,18 @@ describe('one-time bases bootstrap (an install that synced before bases existed)
     expect(otherDirs()).toEqual([])
   })
 
-  it('a `touch` (every section passed) before the bootstrap: an unseen remote edit lands in the note, the local text in a copy', async () => {
+  it('a `touch` (every section passed) before the bootstrap: an unseen remote edit is merged two-way with the local text (both kept)', async () => {
     // Without bases the CLI can't tell which sections an external editor changed
-    // before `touch`: every one is a local edit → conservative (copy, never overwrite).
+    // before `touch`: every one is a local edit with unknown base content →
+    // conservative two-way union (here both versions between markers, never an overwrite).
     preBasesInstall()
     await pcSave(note(T_PC, { ...BASE, b: 'b PC' }), ['b'])
     cliEdit('a', 'a CLI', T_CLI)
     await cli.syncPushNoteFiles(DIR, [NOTE_MD, 'a.md', 'b.md', 'c.md'])
-    expect(await server.content(`${DIR}/b.md`)).toBe('b PC')
-    expect(readLocal(`${DIR}/b.md`)).toBe('b PC')
+    expect(readLocal(`${DIR}/b.md`)).toBe(markers('b v1', 'b PC'))
+    expect(await server.content(`${DIR}/b.md`)).toBe(markers('b v1', 'b PC'))
     expect(await server.content(`${DIR}/a.md`)).toBe('a CLI')
-    const [copyDir] = otherDirs()
-    expect(fs.readdirSync(path.join(notesDir, copyDir)).sort()).toEqual(['b.md', NOTE_MD])
+    expect(otherDirs()).toEqual([])
   })
 
   it('a folder whose bootstrap reconcile fails keeps the bootstrap context (persisted) until it reconciles', async () => {

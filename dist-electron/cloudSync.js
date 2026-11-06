@@ -80,6 +80,7 @@ exports.initCloudSync = initCloudSync;
 exports.isCloudSyncEnabled = isCloudSyncEnabled;
 exports.getCloudSyncStatus = getCloudSyncStatus;
 exports.setConflictCopyLabel = setConflictCopyLabel;
+exports.setConflictMarkerLabels = setConflictMarkerLabels;
 exports.dismissConflictCopies = dismissConflictCopies;
 exports.onStatusChanged = onStatusChanged;
 exports.onRemoteConflict = onRemoteConflict;
@@ -110,6 +111,7 @@ const noteFormat_1 = require("./noteFormat");
 const cloudCrypto_1 = require("./cloudCrypto");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
 const conflictCopy_1 = require("./conflictCopy");
+const cloudBaseStore_1 = require("./cloudBaseStore");
 const syncState_1 = require("./syncState");
 const syncHistory_1 = require("./syncHistory");
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -167,6 +169,10 @@ let statusListener = null;
 // import main), English until then.
 let conflictCopies;
 let conflictCopyLabel = () => 'conflict copy';
+// Notes merged with conflict blocks this session, and the localized marker
+// lines of those blocks (injected by main.ts like the copy label).
+let conflictMerges;
+let conflictMarkerLabels = () => cloudSyncLogic_1.DEFAULT_SECTION_CONFLICT_LABELS;
 // Pending debounced pushes, keyed by relPath (same semantics as githubSync).
 const pushTimers = new Map();
 // Session-only activity history for the titlebar sync card (see syncHistory.ts).
@@ -229,6 +235,29 @@ function persistState() {
         console.error('[CloudSync] failed to persist cloud-sync-state.json:', String(err));
     }
 }
+// ── Base contents (cloudBaseStore.ts) ─────────────────────────────────────────
+// The text behind the base hash of each SECTION file, for the line merge of a
+// section both sides changed (diff3). note.md is merged field by field
+// (mergeAnchors) and needs none.
+function getBaseStoreDir() {
+    return path_1.default.join(electron_1.app.getPath('userData'), 'cloud-base-content');
+}
+function isSectionRelPath(relPath) {
+    return (0, cloudSyncLogic_1.noteDirOf)(relPath) !== null && !(0, cloudSyncLogic_1.isAnchorPath)(relPath);
+}
+/** A section's base was just recorded with this content: keep the text behind its hash. */
+function storeBaseContent(relPath, content) {
+    if (isSectionRelPath(relPath))
+        (0, cloudBaseStore_1.writeBaseBlob)(getBaseStoreDir(), content);
+}
+/** End of a correct pull: drop the base contents no section base references any more. */
+function pruneBaseContents() {
+    const keep = new Set();
+    for (const [rel, base] of Object.entries(getState().bases))
+        if (isSectionRelPath(rel))
+            keep.add(base.hash);
+    (0, cloudBaseStore_1.pruneBaseBlobs)(getBaseStoreDir(), keep);
+}
 // ── Public lifecycle / status ─────────────────────────────────────────────────
 function loadCloudSyncSettings() {
     const settings = readSettings();
@@ -256,15 +285,21 @@ function getCloudSyncStatus() {
         initialPullStatus,
         realtimeConnected: cloudRealtime.isCloudRealtimeConnected(),
         conflictCopies,
+        conflictMerges,
     };
 }
 /** main.ts injects the localized "conflict copy" label (electron/i18n.ts), resolved at copy time. */
 function setConflictCopyLabel(label) {
     conflictCopyLabel = label;
 }
-/** The user dismissed the conflict-copies notice of the sync status card. */
+/** main.ts injects the localized marker lines of the conflict blocks a merge writes (electron/i18n.ts). */
+function setConflictMarkerLabels(labels) {
+    conflictMarkerLabels = labels;
+}
+/** The user dismissed the conflict notice of the sync status card (copies and merges with markers). */
 function dismissConflictCopies() {
     conflictCopies = undefined;
+    conflictMerges = undefined;
 }
 function onStatusChanged(cb) {
     statusListener = cb;
@@ -363,6 +398,8 @@ function resetCloudSyncState(userId) {
     entitlementBlocked = false;
     syncError = undefined;
     conflictCopies = undefined; // the previous account's notice
+    conflictMerges = undefined;
+    (0, cloudBaseStore_1.clearBaseBlobs)(getBaseStoreDir()); // the previous account's base contents
     patchSettings({
         userId,
         pullSeq: undefined,
@@ -412,6 +449,7 @@ function disableCloudSync() {
     pushTimers.forEach((t) => clearTimeout(t));
     pushTimers.clear();
     conflictCopies = undefined; // the notice belongs to the Cloud session being turned off
+    conflictMerges = undefined;
     patchSettings({ enabled: false });
     // GitHub Sync is about to resume with a `lastSync` it can't trust: while Cloud
     // was on it received no pushes, and notes that arrived here from another device
@@ -640,7 +678,7 @@ async function uploadFileRowNow(relPath, content, force) {
             if (res.outcome === 'uploaded') {
                 entitlementBlocked = false;
                 // The new base: the seq the server just gave this content (unknown → forgotten).
-                recordUploadedBase(gen, relPath, res.seq === null ? null : { seq: res.seq, hash: (0, cloudSyncLogic_1.hashForBase)(relPath, content) });
+                recordUploadedBase(gen, relPath, res.seq === null ? null : { seq: res.seq, hash: (0, cloudSyncLogic_1.hashForBase)(relPath, content) }, content);
                 return 'uploaded';
             }
             // 'missing': 0014 not deployed yet — 0011 below, for the rest of the session.
@@ -713,9 +751,11 @@ async function uploadFileRowNow(relPath, content, force) {
  * seq is unknown (0011 / plain upsert) — forgets it. Skipped when the account
  * switched while the upload was in flight (the state is another account's).
  */
-function recordUploadedBase(gen, relPath, base) {
+function recordUploadedBase(gen, relPath, base, content) {
     if (gen !== stateGeneration)
         return;
+    if (base && content !== undefined)
+        storeBaseContent(relPath, content);
     if ((0, syncState_1.setCloudBase)(getState(), relPath, base))
         persistState();
 }
@@ -1298,6 +1338,7 @@ function recordPulledBase(entry) {
         return (0, syncState_1.setCloudBase)(getState(), entry.relPath, null);
     if (entry.seq === null)
         return false;
+    storeBaseContent(entry.relPath, entry.content);
     return (0, syncState_1.setCloudBase)(getState(), entry.relPath, { seq: entry.seq, hash: (0, cloudSyncLogic_1.hashForBase)(entry.relPath, entry.content) });
 }
 /** Every '.md' of a local note folder: '<dir>/<file>.md' → content. */
@@ -1320,7 +1361,9 @@ function readLocalNoteFiles(dirPath, dir) {
  * settled flagged stale + timers cancelled (a half-failed apply never drains
  * them), removes, writes (sections, then note.md), bases, settles and the
  * re-uploads of whatever ends different from the server. Returns the files
- * changed on disk, the copy made (if any) and whether the journal changed.
+ * changed on disk, the copy made (if any), the note's title when a section
+ * was merged WITH conflict blocks (null otherwise) and whether the journal
+ * changed.
  */
 async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink, bootstrap) {
     const state = getState();
@@ -1384,6 +1427,9 @@ async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink
             lastSyncMs: bootstrap.lastSyncMs,
         });
         for (const [rel, base] of Object.entries(synth.seen)) {
+            const row = remote.find((r) => r.relPath === rel && r.content !== null && (0, cloudSyncLogic_1.hashForBase)(rel, r.content) === base.hash);
+            if (row?.content != null)
+                storeBaseContent(rel, row.content);
             if ((0, syncState_1.setCloudBase)(state, rel, base))
                 stateChanged = true;
         }
@@ -1399,6 +1445,8 @@ async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink
         copiedUpserts,
         pendingDeletes,
         inFlightHashes: inFlightUploads,
+        baseContent: (_rel, hash) => (0, cloudBaseStore_1.readBaseBlob)(getBaseStoreDir(), hash),
+        conflictLabels: conflictMarkerLabels(),
         nowIso: new Date().toISOString(),
     });
     let copy = null;
@@ -1433,6 +1481,8 @@ async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink
         finalContent[w.relPath] = w.content;
         changed++;
     }
+    for (const [rel, content] of Object.entries(plan.baseContents))
+        storeBaseContent(rel, content);
     for (const [rel, base] of Object.entries(plan.bases)) {
         if ((0, syncState_1.setCloudBase)(state, rel, base))
             stateChanged = true;
@@ -1447,7 +1497,9 @@ async function reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, sink
             continue;
         schedulePushUnguarded(rel, content, undefined, undefined, plan.force.includes(rel) ? { force: true } : undefined);
     }
-    return { changed, copy, stateChanged };
+    const anchorContent = finalContent[`${dir}/${noteFormat_1.NOTE_MD}`];
+    const conflictMergeTitle = plan.conflictMarkerSections.length > 0 && anchorContent !== undefined ? (0, cloudSyncLogic_1.anchorTitle)(anchorContent) : null;
+    return { changed, copy, conflictMergeTitle, stateChanged };
 }
 /**
  * Incremental pull: fetches rows with seq > pullSeq (or a full reconcile, see
@@ -1508,6 +1560,7 @@ async function pullNotes(notesDir) {
     let backedUp = 0;
     let mergedMetadata = 0;
     let conflictCopiesMade = 0;
+    let conflictMergesMade = 0;
     // One-time bases bootstrap (a device that synced with a build without
     // bases): everything is re-read and every local folder reconciled
     // three-way with synthesized bases — see needsBasesBootstrap.
@@ -1660,6 +1713,12 @@ async function pullNotes(notesDir) {
                     // note and the local version into a copy holding only those sections.
                     const result = await reconcileDirThreeWay(notesDir, dir, group, anchor, dek, gen, { fetchedForDir, decryptFailures, errors }, dirCtx);
                     noteConflictCopy(result.copy);
+                    if (result.conflictMergeTitle !== null) {
+                        // Both versions of a conflicting section are in the note, between
+                        // ⚠️ markers: tell the user where to look (sync card notice).
+                        conflictMerges = (0, conflictCopy_1.appendConflictCopyNotice)(conflictMerges, result.conflictMergeTitle, new Date().toISOString());
+                        conflictMergesMade++;
+                    }
                     if (result.stateChanged)
                         stateChanged = true;
                     changed = result.changed;
@@ -1846,6 +1905,9 @@ async function pullNotes(notesDir) {
         if (conflictCopiesMade > 0) {
             console.log(`[CloudSync] ${conflictCopiesMade} local version(s) kept as conflict copies`);
         }
+        if (conflictMergesMade > 0) {
+            console.log(`[CloudSync] ${conflictMergesMade} note(s) merged with conflict markers`);
+        }
         // No await from here to the watermark write: one check covers the rest.
         assertGeneration(gen);
         // Root metadata json — remote wins (LWW, like the GitHub pull), except an
@@ -1935,6 +1997,8 @@ async function pullNotes(notesDir) {
         });
         if (bootstrap)
             console.log('[CloudSync] bases bootstrap pull done');
+        // Base contents no section base references any more (replaced, dropped).
+        pruneBaseContents();
         // Errors stay visible (a later successful push clears syncError, but the
         // status still reports a non-empty retry set — see getCloudSyncStatus).
         syncError = errors.length > 0

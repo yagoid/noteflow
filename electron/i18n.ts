@@ -54,6 +54,11 @@ export interface SyncMessages {
   // Suffix of the title of a conflict copy made by the NoteFlow Cloud pull:
   // '<title> (<conflictCopy> YYYY-MM-DD HH:mm)'.
   conflictCopy: string
+  // Marker lines around a conflict block the NoteFlow Cloud pull writes INTO a
+  // section both devices changed on the same lines (rendered as `> <text>`):
+  // opening (this device's lines follow), separator (the other device's lines
+  // follow) and closing.
+  conflictMarkers: { local: string; remote: string; end: string }
 }
 
 export interface Messages {
@@ -100,6 +105,11 @@ const en: Messages = {
   },
   sync: {
     conflictCopy: 'conflict copy',
+    conflictMarkers: {
+      local: '⚠️ Sync conflict — this device’s version:',
+      remote: '⚠️ Sync conflict — version from another device:',
+      end: '⚠️ End of sync conflict',
+    },
   },
 }
 
@@ -140,6 +150,11 @@ const es: Messages = {
   },
   sync: {
     conflictCopy: 'copia en conflicto',
+    conflictMarkers: {
+      local: '⚠️ Conflicto de sincronización — versión de este dispositivo:',
+      remote: '⚠️ Conflicto de sincronización — versión de otro dispositivo:',
+      end: '⚠️ Fin del conflicto de sincronización',
+    },
   },
 }
 

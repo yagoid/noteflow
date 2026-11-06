@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.5.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.6.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.5.0'
+const CLI_VERSION = '2.6.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -429,16 +429,28 @@ function buildConflictCopy(localFiles, { newId, title, nowIso, onlySections }) {
   return { dir: noteDirname(newId, title), files }
 }
 
-/** "conflict copy" in the app's language setting (settings.json `language`: en | es | system). */
-function conflictCopyLabel() {
+/** The app's language setting (settings.json `language`: en | es | system) → 'en' | 'es'. */
+function uiLanguage() {
   const setting = readSettings().language
-  let lang = setting === 'en' || setting === 'es' ? setting : null
-  if (!lang) {
-    let locale = ''
-    try { locale = Intl.DateTimeFormat().resolvedOptions().locale || '' } catch { locale = '' }
-    lang = locale.toLowerCase().startsWith('es') ? 'es' : 'en'
+  if (setting === 'en' || setting === 'es') return setting
+  let locale = ''
+  try { locale = Intl.DateTimeFormat().resolvedOptions().locale || '' } catch { locale = '' }
+  return locale.toLowerCase().startsWith('es') ? 'es' : 'en'
+}
+
+/** "conflict copy" in the app's language setting. */
+function conflictCopyLabel() {
+  return uiLanguage() === 'es' ? 'copia en conflicto' : 'conflict copy'
+}
+
+/** Marker lines of the conflict blocks a section merge writes, in the app's language (mirror of electron/i18n.ts sync.conflictMarkers). */
+function conflictMarkerLabels() {
+  if (uiLanguage() !== 'es') return DEFAULT_SECTION_CONFLICT_LABELS
+  return {
+    local: '⚠️ Conflicto de sincronización — versión de este dispositivo:',
+    remote: '⚠️ Conflicto de sincronización — versión de otro dispositivo:',
+    end: '⚠️ Fin del conflicto de sincronización',
   }
-  return lang === 'es' ? 'copia en conflicto' : 'conflict copy'
 }
 
 /**
@@ -992,20 +1004,187 @@ function planLegacySection(row, local, pending, localUpdatedMs) {
   return pending ? 'conflict' : 'apply'
 }
 
+// ── Cloud: line merge of a section both sides changed ─────────────────────────
+// Pure mirror of mergeSectionText (electron/cloudSyncLogic.ts): a section file
+// changed here AND remotely since its base is merged line by line — diff3
+// against the base content (cli-cloud-base-content/, see readCliBaseContent)
+// when known, a two-way union otherwise — instead of a conflict copy;
+// overlapping, different edits keep both versions in the note between markers.
+
+/** Mirror of DEFAULT_SECTION_CONFLICT_LABELS (rendered as `> <text>`). */
+const DEFAULT_SECTION_CONFLICT_LABELS = {
+  local: '⚠️ Sync conflict — this device’s version:',
+  remote: '⚠️ Sync conflict — version from another device:',
+  end: '⚠️ End of sync conflict',
+}
+const MERGE_MAX_EDIT_DISTANCE = 1500
+
+function splitMergeLines(text) {
+  if (text === '') return { lines: [], eol: null, finalNewline: false }
+  const eol = text.includes('\r\n') ? '\r\n' : text.includes('\n') ? '\n' : null
+  const lines = text.split(/\r?\n/)
+  const finalNewline = lines[lines.length - 1] === ''
+  if (finalNewline) lines.pop()
+  return { lines, eol, finalNewline }
+}
+
+/** Myers diff of the middle (no common prefix/suffix): matched index pairs, ascending. */
+function myersMatches(a, b) {
+  const n = a.length, m = b.length
+  if (n === 0 || m === 0) return []
+  const max = n + m
+  const off = max + 1
+  const v = new Int32Array(2 * max + 3)
+  const trace = []
+  let found = -1
+  for (let d = 0; d <= max && found < 0; d++) {
+    if (d > MERGE_MAX_EDIT_DISTANCE) return []
+    trace.push(v.slice(off - d - 1, off + d + 2))
+    for (let k = -d; k <= d; k += 2) {
+      let x = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1]) ? v[off + k + 1] : v[off + k - 1] + 1
+      let y = x - k
+      while (x < n && y < m && a[x] === b[y]) { x++; y++ }
+      v[off + k] = x
+      if (x >= n && y >= m) { found = d; break }
+    }
+  }
+  const out = []
+  let x = n, y = m
+  for (let d = found; d >= 0; d--) {
+    const w = trace[d]
+    const at = k => w[k + d + 1]
+    const k = x - y
+    const prevK = k === -d || (k !== d && at(k - 1) < at(k + 1)) ? k + 1 : k - 1
+    const prevX = at(prevK)
+    const prevY = prevX - prevK
+    while (x > prevX && y > prevY) { out.push([x - 1, y - 1]); x--; y-- }
+    x = prevX
+    y = prevY
+  }
+  return out.reverse()
+}
+
+function lineMatches(a, b) {
+  let start = 0
+  while (start < a.length && start < b.length && a[start] === b[start]) start++
+  let endA = a.length, endB = b.length
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) { endA--; endB-- }
+  const out = []
+  for (let i = 0; i < start; i++) out.push([i, i])
+  for (const [i, j] of myersMatches(a.slice(start, endA), b.slice(start, endB))) out.push([i + start, j + start])
+  for (let i = 0; i < a.length - endA; i++) out.push([endA + i, endB + i])
+  return out
+}
+
+function sameLines(a, b) {
+  return a.length === b.length && a.every((l, i) => l === b[i])
+}
+
+function unionPieces(a, b, out) {
+  let i = 0, j = 0
+  const hunk = (ei, ej) => {
+    const la = a.slice(i, ei), lb = b.slice(j, ej)
+    if (la.length > 0 && lb.length > 0) out.push({ local: la, remote: lb })
+    else for (const line of la) out.push({ line, side: 'local' })
+    if (la.length === 0) for (const line of lb) out.push({ line, side: 'remote' })
+  }
+  for (const [x, y] of lineMatches(a, b)) {
+    hunk(x, y)
+    out.push({ line: a[x], side: 'both' })
+    i = x + 1
+    j = y + 1
+  }
+  hunk(a.length, b.length)
+}
+
+function diff3Pieces(o, a, b, out) {
+  const ma = new Map(lineMatches(o, a))
+  const mb = new Map(lineMatches(o, b))
+  let io = 0, ia = 0, ib = 0
+  const chunk = (eo, ea, eb) => {
+    const co = o.slice(io, eo), ca = a.slice(ia, ea), cb = b.slice(ib, eb)
+    if (sameLines(ca, co)) for (const line of cb) out.push({ line, side: sameLines(cb, co) ? 'both' : 'remote' })
+    else if (sameLines(cb, co)) for (const line of ca) out.push({ line, side: 'local' })
+    else if (sameLines(ca, cb)) for (const line of ca) out.push({ line, side: 'both' })
+    else unionPieces(ca, cb, out)
+  }
+  for (let k = 0; k < o.length; k++) {
+    const x = ma.get(k), y = mb.get(k)
+    if (x === undefined || y === undefined || x < ia || y < ib) continue
+    chunk(k, x, y)
+    out.push({ line: o[k], side: 'both' })
+    io = k + 1
+    ia = x + 1
+    ib = y + 1
+  }
+  chunk(o.length, a.length, b.length)
+}
+
+/** Pure mirror of mergeSectionText: → { content, conflicts }. */
+function mergeSectionText(base, local, remote, labels = DEFAULT_SECTION_CONFLICT_LABELS) {
+  const l = splitMergeLines(local)
+  const r = splitMergeLines(remote)
+  const o = base === null ? null : splitMergeLines(base)
+  const pieces = []
+  if (o) diff3Pieces(o.lines, l.lines, r.lines, pieces)
+  else unionPieces(l.lines, r.lines, pieces)
+  const lines = []
+  let conflicts = 0
+  let padNext = false
+  for (const p of pieces) {
+    if ('line' in p) {
+      if (padNext && p.line.trim() !== '') lines.push('')
+      padNext = false
+      lines.push(p.line)
+      continue
+    }
+    conflicts++
+    if (lines.length > 0 && lines[lines.length - 1].trim() !== '') lines.push('')
+    lines.push(`> ${labels.local}`, '', ...p.local, '', `> ${labels.remote}`, '', ...p.remote, '', `> ${labels.end}`)
+    padNext = true
+  }
+  let finalNewline
+  const last = pieces[pieces.length - 1]
+  if (o) {
+    if (l.finalNewline === o.finalNewline) finalNewline = r.finalNewline
+    else if (r.finalNewline === o.finalNewline) finalNewline = l.finalNewline
+    else finalNewline = l.finalNewline || r.finalNewline
+  } else if (last && 'line' in last && last.side === 'local') {
+    finalNewline = l.finalNewline
+  } else if (last && 'line' in last && last.side === 'remote') {
+    finalNewline = r.finalNewline
+  } else {
+    finalNewline = l.finalNewline || r.finalNewline
+  }
+  const eol = r.eol ?? l.eol ?? (o ? o.eol : null) ?? '\n'
+  const content = lines.length === 0 ? '' : lines.join(eol) + (finalNewline ? eol : '')
+  return { content, conflicts }
+}
+
+/** Mirror of anchorLooksEncrypted: an encrypted note's sections are never merged. */
+function anchorLooksEncrypted(content) {
+  return /^encryption:/m.test(content)
+}
+
 /**
  * Pure mirror of planThreeWayDir (electron/cloudSyncLogic.ts): three-way
  * reconcile of ONE local note folder whose anchor has a known base. `input` =
  * { dir, local (relPath → content, must hold note.md), remote ([{ relPath,
  * seq, content (null = tombstone), updatedAtMs }]), bases, pendingUpserts,
- * staleUpserts, copiedUpserts, pendingDeletes (Sets), inFlightHashes?, nowIso }.
+ * staleUpserts, copiedUpserts, pendingDeletes (Sets), inFlightHashes?,
+ * baseContent? ((relPath, hash) → text | null), conflictLabels?, nowIso }.
  * Returns { writes (sections first, note.md last), removes, bases (null =
- * drop), settle, upload, force, copySections, copyWhole }.
+ * drop), settle, upload, force, copySections, copyWhole,
+ * conflictMarkerSections, baseContents }.
  */
 function planThreeWayDir(input) {
   const { dir } = input
   const prefix = `${dir}/`
   const anchorRel = `${dir}/${NOTE_MD}`
-  const plan = { writes: [], removes: [], bases: {}, settle: [], upload: [], force: [], copySections: [], copyWhole: false }
+  const plan = {
+    writes: [], removes: [], bases: {}, settle: [], upload: [], force: [], copySections: [], copyWhole: false,
+    conflictMarkerSections: [], baseContents: {},
+  }
   const localAnchor = input.local[anchorRel]
   if (localAnchor === undefined) throw new Error('three-way reconcile: the local folder has no note.md')
   const localUpdatedMs = updatedMsOf(localAnchor)
@@ -1018,6 +1197,7 @@ function planThreeWayDir(input) {
     const hash = hashForBase(rel, row.content)
     if (!input.inFlightHashes || input.inFlightHashes.get(rel) !== hash) return base
     plan.bases[rel] = { seq: row.seq, hash }
+    if (rel !== anchorRel) plan.baseContents[rel] = row.content
     return plan.bases[rel]
   }
   const anchorBase = anchorRow ? echoBase(anchorRel, anchorRow) : input.bases[anchorRel]
@@ -1044,7 +1224,29 @@ function planThreeWayDir(input) {
   const after = new Map() // relPath → content once applied (null = removed)
   const recordBase = (rel, seq, content) => {
     if (content === null) plan.bases[rel] = null
-    else if (seq !== null) plan.bases[rel] = { seq, hash: hashForBase(rel, content) }
+    else if (seq !== null) {
+      plan.bases[rel] = { seq, hash: hashForBase(rel, content) }
+      if (rel !== anchorRel) plan.baseContents[rel] = content
+    }
+  }
+  // Sections of an encrypted note are never merged — the conflict copy, as before.
+  const mergeable = !anchorLooksEncrypted(localAnchor) && !(anchorRow && anchorLooksEncrypted(anchorRow.content))
+  const labels = input.conflictLabels || DEFAULT_SECTION_CONFLICT_LABELS
+  // The line merge of a section both sides changed, or null → the conflict copy (safety net).
+  const mergeSection = (rel, base, local, remote) => {
+    if (!mergeable) return null
+    try {
+      let baseText = null
+      if (base && base.hash !== TOMBSTONE_BASE_HASH && base.hash !== UNKNOWN_BASE_HASH && input.baseContent) {
+        const text = input.baseContent(rel, base.hash)
+        if (typeof text === 'string' && hashForBase(rel, text) === base.hash) baseText = text
+      }
+      const merged = mergeSectionText(baseText, local, remote, labels)
+      if (!merged || typeof merged.content !== 'string' || !Number.isSafeInteger(merged.conflicts) || merged.conflicts < 0) return null
+      return merged
+    } catch {
+      return null
+    }
   }
   for (const row of input.remote) {
     const rel = row.relPath
@@ -1096,13 +1298,26 @@ function planThreeWayDir(input) {
         if (tombstoneNewer) plan.force.push(rel)
         break
       }
-      case 'conflict':
-        conflicts.push(rel)
-        plan.writes.push({ relPath: rel, content: row.content })
-        after.set(rel, row.content)
-        recordBase(rel, row.seq, row.content)
-        plan.settle.push(rel)
+      case 'conflict': {
+        // Both changed, differently: merged line by line (base = the remote, the
+        // result goes up on top of its seq); not mergeable → the conflict copy.
+        const remoteText = row.content
+        const merged = local === null ? null : mergeSection(rel, base, local, remoteText)
+        recordBase(rel, row.seq, remoteText)
+        if (merged === null || merged.content === remoteText) {
+          if (merged === null) conflicts.push(rel)
+          if (local !== remoteText) plan.writes.push({ relPath: rel, content: remoteText })
+          after.set(rel, remoteText)
+          plan.settle.push(rel)
+          break
+        }
+        if (merged.content !== local) plan.writes.push({ relPath: rel, content: merged.content })
+        after.set(rel, merged.content)
+        keptLocal.add(fileName(rel))
+        plan.upload.push(rel)
+        if (merged.conflicts > 0) plan.conflictMarkerSections.push(fileName(rel))
         break
+      }
     }
   }
 
@@ -1334,7 +1549,10 @@ function dropCliCloudBasesUnder(dir) {
 /** The disk now holds this remote row (written or found identical): its base. A tombstone drops it. */
 function recordPulledBase(entry) {
   if (entry.deleted) setCliCloudBase(entry.relPath, null)
-  else if (entry.seq !== null && entry.seq !== undefined) setCliCloudBase(entry.relPath, { seq: entry.seq, hash: hashForBase(entry.relPath, entry.content) })
+  else if (entry.seq !== null && entry.seq !== undefined) {
+    storeCliBaseContent(entry.relPath, entry.content)
+    setCliCloudBase(entry.relPath, { seq: entry.seq, hash: hashForBase(entry.relPath, entry.content) })
+  }
 }
 
 /** Writes this run's base changes on top of the file's CURRENT content (tmp + rename). Throws on IO errors. */
@@ -1366,6 +1584,58 @@ function clearCliCloudBases() {
   cloudBaseDelta.clear()
   cloudBasesCache = {}
   try { fs.unlinkSync(CLOUD_BASES_PATH) } catch { /* not there */ }
+  try { fs.rmSync(CLOUD_BASE_CONTENT_DIR, { recursive: true, force: true }) } catch { /* best effort */ }
+}
+
+// ── Cloud: base contents (cli-cloud-base-content/) ────────────────────────────
+// The text behind the base hash of each SECTION file, for the line merge of a
+// section both sides changed (diff3 — mergeSectionText). Content-addressed:
+// one file per hash (sha-256 of the content = hashForBase of a section), next
+// to cli-cloud-state.json; mirror of the app's electron/cloudBaseStore.ts. A
+// missing / corrupt blob only means "unknown" → two-way union. Pruned at the
+// end of a correct pull (blobs no base references), dropped on account switch.
+
+const CLOUD_BASE_CONTENT_DIR = path.join(getSettingsDir(), 'cli-cloud-base-content')
+const BASE_BLOB_RE = /^[0-9a-f]{64}$/
+
+function isSectionRelPath(relPath) {
+  return noteDirOf(relPath) !== null && !isAnchorPath(relPath)
+}
+
+/** A section's base was just recorded with this content: keep the text behind its hash (best effort). */
+function storeCliBaseContent(relPath, content) {
+  if (!isSectionRelPath(relPath)) return
+  const file = path.join(CLOUD_BASE_CONTENT_DIR, createHash('sha256').update(content, 'utf8').digest('hex'))
+  try {
+    if (fs.existsSync(file)) return
+    fs.mkdirSync(CLOUD_BASE_CONTENT_DIR, { recursive: true, mode: 0o700 })
+    const tmp = `${file}.${process.pid}.tmp`
+    fs.writeFileSync(tmp, content, { encoding: 'utf-8', mode: 0o600 })
+    fs.renameSync(tmp, file)
+  } catch { /* only the diff3 is lost — the merge falls back to the two-way union */ }
+}
+
+/** The content stored under `hash`, or null (unknown, missing or corrupt). */
+function readCliBaseContent(hash) {
+  if (!BASE_BLOB_RE.test(hash)) return null
+  try {
+    const content = fs.readFileSync(path.join(CLOUD_BASE_CONTENT_DIR, hash), 'utf-8')
+    return createHash('sha256').update(content, 'utf8').digest('hex') === hash ? content : null
+  } catch {
+    return null
+  }
+}
+
+/** End of a correct pull: drop the base contents no section base references any more. */
+function pruneCliBaseContents() {
+  let names
+  try { names = fs.readdirSync(CLOUD_BASE_CONTENT_DIR) } catch { return }
+  const keep = new Set()
+  for (const [rel, base] of Object.entries(cliCloudBasesSnapshot())) if (isSectionRelPath(rel)) keep.add(base.hash)
+  for (const name of names) {
+    if (BASE_BLOB_RE.test(name) && keep.has(name)) continue
+    try { fs.unlinkSync(path.join(CLOUD_BASE_CONTENT_DIR, name)) } catch { /* gone meanwhile */ }
+  }
 }
 
 /**
@@ -3005,6 +3275,7 @@ async function cloudPushFile(dek, noteKey, relPath, { force = false } = {}) {
       if (res.outcome === 'stale') return 'stale'
       if (res.outcome === 'uploaded') {
         // The new base: the seq the server just gave this content (unknown → forgotten).
+        if (res.seq !== null) storeCliBaseContent(relPath, content)
         setCliCloudBase(relPath, res.seq === null ? null : { seq: res.seq, hash: hashForBase(relPath, content) })
         return 'uploaded'
       }
@@ -3236,9 +3507,11 @@ function readLocalNoteFiles(dir) {
  * has no drain — what must still go up is re-uploaded by the pull itself,
  * including the folder's pending files this batch did not touch); no upload is
  * ever in flight during a pull, and there are no pending deletes or
- * conflict-copied flags. Returns { changed, copy, errors, settle, upload:
- * [{ relPath, force }] } — the caller drops `settle` from pendingUpserts and
- * re-uploads `upload` (with base = the seq just reconciled).
+ * conflict-copied flags. A section both sides changed is merged line by line
+ * (planThreeWayDir; diff3 with the stored base content). Returns { changed,
+ * copy, errors, settle, upload: [{ relPath, force }], conflictMarkerSections }
+ * — the caller drops `settle` from pendingUpserts and re-uploads `upload`
+ * (with base = the seq just reconciled).
  */
 async function cloudReconcileDirThreeWay(dir, group, anchor, dek, pending, dirBases, ctx, sink) {
   const inGroup = new Set(group.map(e => e.relPath))
@@ -3277,7 +3550,11 @@ async function cloudReconcileDirThreeWay(dir, group, anchor, dek, pending, dirBa
       notSeen: new Set(rows.filter(e => ctx.retryKeys.has(e.pathKey)).map(e => e.relPath)),
       lastSyncMs: ctx.lastSyncMs,
     })
-    for (const [rel, base] of Object.entries(synth.seen)) setCliCloudBase(rel, base)
+    for (const [rel, base] of Object.entries(synth.seen)) {
+      const row = remote.find(r => r.relPath === rel && r.content !== null && hashForBase(rel, r.content) === base.hash)
+      if (row) storeCliBaseContent(rel, row.content)
+      setCliCloudBase(rel, base)
+    }
     bases = { ...synth.assumed, ...dirBases, ...synth.seen }
   }
   const plan = planThreeWayDir({
@@ -3289,6 +3566,8 @@ async function cloudReconcileDirThreeWay(dir, group, anchor, dek, pending, dirBa
     staleUpserts: pendingSet,
     copiedUpserts: new Set(),
     pendingDeletes: new Set(),
+    baseContent: (_rel, hash) => readCliBaseContent(hash),
+    conflictLabels: conflictMarkerLabels(),
     nowIso: new Date().toISOString(),
   })
 
@@ -3304,6 +3583,7 @@ async function cloudReconcileDirThreeWay(dir, group, anchor, dek, pending, dirBa
     fs.writeFileSync(path.join(NOTES_DIR, w.relPath), w.content, 'utf-8')
     changed++
   }
+  for (const [rel, content] of Object.entries(plan.baseContents)) storeCliBaseContent(rel, content)
   for (const [rel, base] of Object.entries(plan.bases)) setCliCloudBase(rel, base)
   // The app's journal drain runs right after its pull and uploads the pending
   // edits the batch did not touch (a section edited offline whose row did not
@@ -3324,6 +3604,7 @@ async function cloudReconcileDirThreeWay(dir, group, anchor, dek, pending, dirBa
     errors: fetched.errors,
     settle: plan.settle,
     upload: upload.map(rel => ({ relPath: rel, force: forced.has(rel) })),
+    conflictMarkerSections: plan.conflictMarkerSections,
   }
 }
 
@@ -3459,15 +3740,20 @@ async function cloudPullNow() {
         // THREE-WAY (the anchor has a known base): every remote row is decided
         // against its file's base and the local file, not by note.md's
         // `updated:` — an offline edit of one section and a remote edit of
-        // another MERGE; a section both sides changed differently → the remote
-        // goes into the note and the local version into a copy holding only
-        // those sections. Replaces both branches below for this folder.
+        // another MERGE; a section both sides changed differently
+        // is merged line by line (overlapping edits: both versions in the
+        // note, between ⚠️ markers). Replaces both branches below for this folder.
         const result = await cloudReconcileDirThreeWay(dir, group, anchor, dek, pending, dirBases, dirCtx,
           { fetchedForDir, decryptFailures, forceUpserts: c.forceUpserts })
         errors += result.errors
         if (result.copy) {
           conflictCopies.push(result.copy)
           out(`  Conflict: local changes kept as "${result.copy.title}"`)
+        }
+        if (result.conflictMarkerSections.length > 0) {
+          let title = dir
+          try { title = anchorTitle(fs.readFileSync(localAnchorPath, 'utf-8')) } catch { /* keep the folder name */ }
+          out(`  Merged with conflicts: "${title}" — both versions kept, look for the ⚠️ markers`)
         }
         // Reconciled to the server's content (written or identical) → leave pendingUpserts.
         reconciledPaths.push(...result.settle)
@@ -3760,6 +4046,7 @@ async function cloudPullNow() {
     }
   }
   flushCliCloudBasesBestEffort() // bases of the kept-folder / conflict-copy uploads above
+  pruneCliBaseContents() // base contents no section base references any more
   return { pulled, deleted, errors }
 }
 
@@ -5872,5 +6159,6 @@ if (require.main === module) {
     hashForBase, classifyBaseUpsert, planFileReconcile, mergeAnchors, planThreeWayDir, filesNeedingCatchUp,
     needsBasesBootstrap, synthesizeBootstrapBases, parseBootstrapPending, nextBootstrapPending, parseAnchorFm,
     cloudPullNow, syncPushNoteFiles, cmdCloudPush, bindCliCloudToAccount, cliCloudBasesSnapshot, CLOUD_BASES_PATH,
+    mergeSectionText, DEFAULT_SECTION_CONFLICT_LABELS, CLOUD_BASE_CONTENT_DIR,
   }
 }

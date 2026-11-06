@@ -4054,6 +4054,8 @@ app.whenReady().then(async () => {
   cloudSync.onRemoteConflict(() => scheduleCloudStalePull())
   // Title suffix of the conflict copies the pull makes, in the live UI language.
   cloudSync.setConflictCopyLabel(() => mainMessages().sync.conflictCopy)
+  // Marker lines of the conflict blocks a line merge writes into a section.
+  cloudSync.setConflictMarkerLabels(() => mainMessages().sync.conflictMarkers)
   const cloudEnabled = cloudSync.isCloudSyncEnabled()
 
   // NoteFlow account: load the persisted session and refresh entitlements in

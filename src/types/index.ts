@@ -420,6 +420,8 @@ export interface CloudSyncStatus {
   realtimeConnected: boolean
   /** Conflict copies the Cloud pull made this session, until dismissed — mirror of ConflictCopiesNotice in electron/conflictCopy.ts. */
   conflictCopies?: ConflictCopiesNotice
+  /** Notes the Cloud pull merged WITH conflict blocks (both versions kept in the note, between ⚠️ markers), until dismissed. */
+  conflictMerges?: ConflictCopiesNotice
 }
 
 /**
@@ -463,6 +465,8 @@ export interface ActiveSyncStatus {
   filesToday?: number
   /** Conflict copies the live backend's pulls made this session, until dismissed. */
   conflictCopies?: ConflictCopiesNotice
+  /** Notes the live backend's pulls merged WITH conflict blocks (Cloud only), until dismissed with `conflictCopies`. */
+  conflictMerges?: ConflictCopiesNotice
   github?: { owner?: string; repo?: string }
   cloud?: {
     keysState: CloudSyncStatus['keysState']

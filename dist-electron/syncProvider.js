@@ -103,6 +103,7 @@ function getActiveSyncStatus(pendingUploads) {
             history: cloudSync.getSyncHistory(),
             filesToday: cloudSync.getSyncFilesToday(),
             conflictCopies: c.conflictCopies,
+            conflictMerges: c.conflictMerges,
             cloud: {
                 keysState: c.keysState,
                 keysMode: c.keysMode,

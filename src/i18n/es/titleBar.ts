@@ -47,6 +47,11 @@ export const titleBar = {
     conflictCopiesAria: { one: '{count} copia en conflicto creada', other: '{count} copias en conflicto creadas' },
     conflictCopiesMore: 'y {count} más',
     conflictCopiesDismiss: 'Descartar aviso',
+    conflictMergesNotice: {
+      one: '{count} nota se cambió en las mismas líneas aquí y en otro dispositivo. Se guardaron las dos versiones en la nota; busca las marcas ⚠️:',
+      other: '{count} notas se cambiaron en las mismas líneas aquí y en otro dispositivo. Se guardaron las dos versiones en cada nota; busca las marcas ⚠️:',
+    },
+    conflictMergesAria: { one: '{count} nota fusionada con conflictos', other: '{count} notas fusionadas con conflictos' },
     encryptionTooltip: 'Cifrado: {mode}',
     encryptionStandard: 'Estándar',
     encryptionPrivate: 'Privado (E2EE)',

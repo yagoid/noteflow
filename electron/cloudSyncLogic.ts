@@ -983,7 +983,8 @@ export function hashForBase(relPath: string, content: string): string {
  *   - 'adopt'      → both changed to the SAME content: record the base, settle;
  *   - 'keep-local' → remote tombstone over a changed local file: keep it and
  *                    re-upload it (its base becomes the tombstone's seq);
- *   - 'conflict'   → both changed, to different contents.
+ *   - 'conflict'   → both changed, to different contents (a section is then
+ *                    merged line by line — planThreeWayDir).
  * `localChanged` = local hash ≠ base hash OR a pending upsert in the journal.
  * Hashes are hashForBase (null = file missing locally / remote tombstone).
  */
@@ -1194,6 +1195,254 @@ function withKeptLocalSections(chosen: AnchorMergeResult, m: AnchorMergeInput): 
   return { content: dumpAnchor({ ...fm.data, sections: [...sections, ...extras], updated: m.nowIso }, fm.body), source: 'merged' }
 }
 
+// ── Line merge of a section both sides changed ───────────────────────────────
+// A section file changed here AND on the server since its base used to leave
+// the remote in the note and the local version in a separate conflict copy,
+// even when the two edits did not touch the same lines (typically: one side
+// appended a line). mergeSectionText merges them line by line instead: diff3
+// against the base content when it is known (the content-addressed base store
+// of each client), a two-way union otherwise. Overlapping, different edits
+// stay IN the note, both versions, between readable markers. Pure, mirrored
+// in cli/noteflow.js (parity in tests/cli/cloudThreeWay.test.ts).
+
+/** Texts of the marker lines around a conflict block (localized by the caller; rendered as `> <text>`). */
+export interface SectionConflictLabels {
+  /** Opens the block; this device's lines follow. */
+  local: string
+  /** Separates them from the other device's lines. */
+  remote: string
+  /** Closes the block. */
+  end: string
+}
+
+export const DEFAULT_SECTION_CONFLICT_LABELS: SectionConflictLabels = {
+  local: '⚠️ Sync conflict — this device’s version:',
+  remote: '⚠️ Sync conflict — version from another device:',
+  end: '⚠️ End of sync conflict',
+}
+
+export interface SectionMergeResult {
+  content: string
+  /** Conflict blocks written (0 = clean merge). */
+  conflicts: number
+}
+
+/** Above this many differing lines the middle of a diff is one changed hunk (bounded time and memory). */
+const MERGE_MAX_EDIT_DISTANCE = 1500
+
+interface SplitText {
+  lines: string[]
+  eol: string | null
+  finalNewline: boolean
+}
+
+/** Lines WITHOUT their terminators (LF or CRLF), its line ending and whether it ends with one. */
+function splitLines(text: string): SplitText {
+  if (text === '') return { lines: [], eol: null, finalNewline: false }
+  const eol = text.includes('\r\n') ? '\r\n' : text.includes('\n') ? '\n' : null
+  const lines = text.split(/\r?\n/)
+  const finalNewline = lines[lines.length - 1] === ''
+  if (finalNewline) lines.pop()
+  return { lines, eol, finalNewline }
+}
+
+/** Myers diff of the middle (no common prefix/suffix): matched index pairs, ascending. */
+function myersMatches(a: readonly string[], b: readonly string[]): Array<[number, number]> {
+  const n = a.length
+  const m = b.length
+  if (n === 0 || m === 0) return []
+  const max = n + m
+  const off = max + 1
+  const v = new Int32Array(2 * max + 3)
+  const trace: Int32Array[] = []
+  let found = -1
+  for (let d = 0; d <= max && found < 0; d++) {
+    if (d > MERGE_MAX_EDIT_DISTANCE) return []
+    // State before step d, window k ∈ [-d-1, d+1] (what the backtrack reads).
+    trace.push(v.slice(off - d - 1, off + d + 2))
+    for (let k = -d; k <= d; k += 2) {
+      let x = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1]) ? v[off + k + 1] : v[off + k - 1] + 1
+      let y = x - k
+      while (x < n && y < m && a[x] === b[y]) {
+        x++
+        y++
+      }
+      v[off + k] = x
+      if (x >= n && y >= m) {
+        found = d
+        break
+      }
+    }
+  }
+  const out: Array<[number, number]> = []
+  let x = n
+  let y = m
+  for (let d = found; d >= 0; d--) {
+    const w = trace[d]
+    const at = (k: number) => w[k + d + 1]
+    const k = x - y
+    const prevK = k === -d || (k !== d && at(k - 1) < at(k + 1)) ? k + 1 : k - 1
+    const prevX = at(prevK)
+    const prevY = prevX - prevK
+    while (x > prevX && y > prevY) {
+      out.push([x - 1, y - 1])
+      x--
+      y--
+    }
+    x = prevX
+    y = prevY
+  }
+  return out.reverse()
+}
+
+/** Longest-common-subsequence matches of two line arrays (index pairs, ascending). */
+function lineMatches(a: readonly string[], b: readonly string[]): Array<[number, number]> {
+  let start = 0
+  while (start < a.length && start < b.length && a[start] === b[start]) start++
+  let endA = a.length
+  let endB = b.length
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA--
+    endB--
+  }
+  const out: Array<[number, number]> = []
+  for (let i = 0; i < start; i++) out.push([i, i])
+  for (const [i, j] of myersMatches(a.slice(start, endA), b.slice(start, endB))) out.push([i + start, j + start])
+  for (let i = 0; i < a.length - endA; i++) out.push([endA + i, endB + i])
+  return out
+}
+
+type MergePiece =
+  | { line: string; side: 'both' | 'local' | 'remote' }
+  | { local: string[]; remote: string[] }
+
+function sameLines(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((l, i) => l === b[i])
+}
+
+/**
+ * Two-way union of local × remote: common lines once; a hunk with lines of
+ * only one side is kept (an addition — never lose a line; a deletion on one
+ * side comes back); a hunk with lines of both sides is a conflict.
+ */
+function unionPieces(a: readonly string[], b: readonly string[], out: MergePiece[]): void {
+  let i = 0
+  let j = 0
+  const hunk = (ei: number, ej: number) => {
+    const la = a.slice(i, ei)
+    const lb = b.slice(j, ej)
+    if (la.length > 0 && lb.length > 0) out.push({ local: la, remote: lb })
+    else for (const line of la) out.push({ line, side: 'local' })
+    if (la.length === 0) for (const line of lb) out.push({ line, side: 'remote' })
+  }
+  for (const [x, y] of lineMatches(a, b)) {
+    hunk(x, y)
+    out.push({ line: a[x], side: 'both' })
+    i = x + 1
+    j = y + 1
+  }
+  hunk(a.length, b.length)
+}
+
+/**
+ * diff3 of base × local × remote: the base lines both sides kept are stable;
+ * between them, a chunk only one side changed takes that side, the same change
+ * on both sides is taken once, and a chunk both changed differently is refined
+ * with the two-way union (lines common to both versions are not a conflict —
+ * e.g. this device appended a line on top of a remote addition it already had).
+ */
+function diff3Pieces(o: readonly string[], a: readonly string[], b: readonly string[], out: MergePiece[]): void {
+  const ma = new Map(lineMatches(o, a))
+  const mb = new Map(lineMatches(o, b))
+  let io = 0
+  let ia = 0
+  let ib = 0
+  const chunk = (eo: number, ea: number, eb: number) => {
+    const co = o.slice(io, eo)
+    const ca = a.slice(ia, ea)
+    const cb = b.slice(ib, eb)
+    if (sameLines(ca, co)) for (const line of cb) out.push({ line, side: sameLines(cb, co) ? 'both' : 'remote' })
+    else if (sameLines(cb, co)) for (const line of ca) out.push({ line, side: 'local' })
+    else if (sameLines(ca, cb)) for (const line of ca) out.push({ line, side: 'both' })
+    else unionPieces(ca, cb, out)
+  }
+  for (let k = 0; k < o.length; k++) {
+    const x = ma.get(k)
+    const y = mb.get(k)
+    if (x === undefined || y === undefined || x < ia || y < ib) continue
+    chunk(k, x, y)
+    out.push({ line: o[k], side: 'both' })
+    io = k + 1
+    ia = x + 1
+    ib = y + 1
+  }
+  chunk(o.length, a.length, b.length)
+}
+
+/**
+ * Line merge of a section file both sides changed since `base` (null = its
+ * content is unknown → two-way union). Lines compare without their
+ * terminators: the result uses the remote's line ending (else the local's,
+ * else LF) and ends with one when the merged ending says so. A conflict block
+ * is surrounded by blank lines (separate markdown blocks) and reads:
+ *   > <labels.local>
+ *   (this device's lines)
+ *   > <labels.remote>
+ *   (the other device's lines)
+ *   > <labels.end>
+ */
+export function mergeSectionText(
+  base: string | null,
+  local: string,
+  remote: string,
+  labels: SectionConflictLabels = DEFAULT_SECTION_CONFLICT_LABELS,
+): SectionMergeResult {
+  const l = splitLines(local)
+  const r = splitLines(remote)
+  const o = base === null ? null : splitLines(base)
+  const pieces: MergePiece[] = []
+  if (o) diff3Pieces(o.lines, l.lines, r.lines, pieces)
+  else unionPieces(l.lines, r.lines, pieces)
+
+  const lines: string[] = []
+  let conflicts = 0
+  let padNext = false
+  for (const p of pieces) {
+    if ('line' in p) {
+      if (padNext && p.line.trim() !== '') lines.push('')
+      padNext = false
+      lines.push(p.line)
+      continue
+    }
+    conflicts++
+    if (lines.length > 0 && lines[lines.length - 1].trim() !== '') lines.push('')
+    lines.push(`> ${labels.local}`, '', ...p.local, '', `> ${labels.remote}`, '', ...p.remote, '', `> ${labels.end}`)
+    padNext = true
+  }
+
+  let finalNewline: boolean
+  const last = pieces[pieces.length - 1]
+  if (o) {
+    if (l.finalNewline === o.finalNewline) finalNewline = r.finalNewline
+    else if (r.finalNewline === o.finalNewline) finalNewline = l.finalNewline
+    else finalNewline = l.finalNewline || r.finalNewline
+  } else if (last && 'line' in last && last.side === 'local') {
+    finalNewline = l.finalNewline
+  } else if (last && 'line' in last && last.side === 'remote') {
+    finalNewline = r.finalNewline
+  } else {
+    finalNewline = l.finalNewline || r.finalNewline
+  }
+  const eol = r.eol ?? l.eol ?? o?.eol ?? '\n'
+  const content = lines.length === 0 ? '' : lines.join(eol) + (finalNewline ? eol : '')
+  return { content, conflicts }
+}
+
+/** An encrypted note's anchor (top-level `encryption:` key): its sections are never merged. */
+function anchorLooksEncrypted(content: string): boolean {
+  return /^encryption:/m.test(content)
+}
+
 /** One remote row of a folder for planThreeWayDir (decrypted). */
 export interface ThreeWayRemoteRow {
   relPath: string
@@ -1220,6 +1469,14 @@ export interface ThreeWayDirInput {
   pendingDeletes: ReadonlySet<string>
   /** relPath → hashForBase of this device's uploads still waiting for their answer (their echo is adopted). */
   inFlightHashes?: ReadonlyMap<string, string>
+  /**
+   * Content of a section's base (the local base store, keyed by its hash), or
+   * null when unknown — a section both sides changed is then merged two-way.
+   * Whatever it returns is checked against the hash (a wrong blob = unknown).
+   */
+  baseContent?: (relPath: string, hash: string) => string | null
+  /** Localized marker lines of the conflict blocks (mergeSectionText). */
+  conflictLabels?: SectionConflictLabels
   nowIso: string
 }
 
@@ -1236,10 +1493,18 @@ export interface ThreeWayDirPlan {
   upload: string[]
   /** Subset of `upload` sent unconditionally (no base: the legacy tombstone-over-pending-edit rule). */
   force: string[]
-  /** Section FILENAMES whose local version goes to a conflict copy holding only them. */
+  /**
+   * Section FILENAMES whose local version goes to a conflict copy holding only
+   * them — only when a section both sides changed could not be merged
+   * (encrypted note, or the line merge failed: the safety net).
+   */
   copySections: string[]
   /** The anchors could not be merged: the WHOLE local folder goes to a conflict copy. */
   copyWhole: boolean
+  /** Section FILENAMES merged line by line WITH conflict blocks (both versions kept in the note, between markers). */
+  conflictMarkerSections: string[]
+  /** relPath → content of each new section base the plan records (the caller stores it in its base store). */
+  baseContents: Record<string, string>
 }
 
 /** Historical per-section rule (no base): the anchor's `updated` decides, pending edits are guarded. */
@@ -1271,8 +1536,13 @@ function planLegacySection(
  * then the writes, the bases, the settles and the uploads) and handles the
  * anchor tombstone before (historical rule). Per remote section row:
  * planFileReconcile (rows without a base → planLegacySection, the historical
- * per-section rule). A conflicting section: the remote goes into the note and
- * the local version into a copy holding ONLY the conflicting sections
+ * per-section rule). A section both sides changed differently is MERGED line
+ * by line (mergeSectionText: diff3 with the base content from
+ * `baseContent`, else a two-way union); overlapping edits keep both versions
+ * in the note between markers (`conflictMarkerSections`). Its base becomes
+ * the remote and the merged file goes up on top of that seq. Only when it
+ * can't be merged (encrypted note, the merge failed) the remote goes into the
+ * note and the local version into a copy holding ONLY those sections
  * (`copySections`; an op already flagged conflictCopied is not copied twice).
  * The anchor is decided by mergeAnchors once the sections are known (which
  * files remain, whether local edits are kept); an unmergeable conflict
@@ -1292,6 +1562,8 @@ export function planThreeWayDir(input: ThreeWayDirInput): ThreeWayDirPlan {
     force: [],
     copySections: [],
     copyWhole: false,
+    conflictMarkerSections: [],
+    baseContents: {},
   }
   const localAnchor = input.local[anchorRel]
   if (localAnchor === undefined) throw new Error('three-way reconcile: the local folder has no note.md')
@@ -1308,6 +1580,7 @@ export function planThreeWayDir(input: ThreeWayDirInput): ThreeWayDirPlan {
     const hash = hashForBase(rel, row.content)
     if (input.inFlightHashes?.get(rel) !== hash) return base
     plan.bases[rel] = { seq: row.seq, hash }
+    if (rel !== anchorRel) plan.baseContents[rel] = row.content
     return plan.bases[rel] as CloudBase
   }
   const anchorBase = anchorRow ? echoBase(anchorRel, anchorRow) : input.bases[anchorRel]
@@ -1335,7 +1608,30 @@ export function planThreeWayDir(input: ThreeWayDirInput): ThreeWayDirPlan {
   const after = new Map<string, string | null>() // relPath → content once applied (null = removed)
   const recordBase = (rel: string, seq: number | null, content: string | null) => {
     if (content === null) plan.bases[rel] = null
-    else if (seq !== null) plan.bases[rel] = { seq, hash: hashForBase(rel, content) }
+    else if (seq !== null) {
+      plan.bases[rel] = { seq, hash: hashForBase(rel, content) }
+      if (rel !== anchorRel) plan.baseContents[rel] = content
+    }
+  }
+  // Sections of an encrypted note are never merged (nor would they exist: its
+  // content lives in the anchor's ciphertext) — the conflict copy, as before.
+  const mergeable = !anchorLooksEncrypted(localAnchor) && !(anchorRow && anchorLooksEncrypted(anchorRow.content as string))
+  const labels = input.conflictLabels ?? DEFAULT_SECTION_CONFLICT_LABELS
+  /** The line merge of a section both sides changed, or null → the conflict copy (safety net: never lose data). */
+  const mergeSection = (rel: string, base: CloudBase | undefined, local: string, remote: string): SectionMergeResult | null => {
+    if (!mergeable) return null
+    try {
+      let baseText: string | null = null
+      if (base && base.hash !== TOMBSTONE_BASE_HASH && base.hash !== UNKNOWN_BASE_HASH && input.baseContent) {
+        const text = input.baseContent(rel, base.hash)
+        if (typeof text === 'string' && hashForBase(rel, text) === base.hash) baseText = text
+      }
+      const merged = mergeSectionText(baseText, local, remote, labels)
+      if (typeof merged?.content !== 'string' || !Number.isSafeInteger(merged.conflicts) || merged.conflicts < 0) return null
+      return merged
+    } catch {
+      return null
+    }
   }
   for (const row of input.remote) {
     const rel = row.relPath
@@ -1395,13 +1691,28 @@ export function planThreeWayDir(input: ThreeWayDirInput): ThreeWayDirPlan {
         if (tombstoneNewer) plan.force.push(rel)
         break
       }
-      case 'conflict':
-        conflicts.push(rel)
-        plan.writes.push({ relPath: rel, content: row.content as string })
-        after.set(rel, row.content)
-        recordBase(rel, row.seq, row.content)
-        plan.settle.push(rel)
+      case 'conflict': {
+        // Both changed, differently: merged line by line into the note (base =
+        // the remote, the result goes up on top of its seq); conflicting lines
+        // keep both versions between markers. Not mergeable → the remote goes
+        // into the note and the local version into a copy (the old behaviour).
+        const remoteText = row.content as string
+        const merged = local === null ? null : mergeSection(rel, base, local, remoteText)
+        recordBase(rel, row.seq, remoteText)
+        if (merged === null || merged.content === remoteText) {
+          if (merged === null) conflicts.push(rel)
+          if (local !== remoteText) plan.writes.push({ relPath: rel, content: remoteText })
+          after.set(rel, remoteText)
+          plan.settle.push(rel)
+          break
+        }
+        if (merged.content !== local) plan.writes.push({ relPath: rel, content: merged.content })
+        after.set(rel, merged.content)
+        keptLocal.add(fileName(rel))
+        plan.upload.push(rel)
+        if (merged.conflicts > 0) plan.conflictMarkerSections.push(fileName(rel))
         break
+      }
     }
   }
 

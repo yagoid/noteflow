@@ -31,6 +31,8 @@ noteflow/
 │   │                    #   + decisiones de tres vías de la subida condicionada de GitHub — ver sync.md
 │   ├── conflictCopy.ts  # Lado disco de las copias de conflicto (escribir la copia + aviso de sesión),
 │   │                    #   compartido por cloudSync.ts y githubSync.ts — ver sync.md / monetization.md
+│   ├── cloudBaseStore.ts # Almacén direccionado por contenido del texto de las bases de sección de Cloud
+│   │                    #   (userData/cloud-base-content/<sha256>) para el diff3 de mergeSectionText — ver monetization.md
 │   ├── mirrorPlan.ts    # Lógica pura del espejo local→GitHub (plan + allowlist de borrado) — ver sync.md
 │   ├── syncHistory.ts   # Lógica pura del historial de actividad en memoria (gráfica de la tarjeta de sync) — ver sync.md
 │   ├── activityLog.ts   # Lógica pura del log de ediciones por día y dispositivo (userData/activity-log.json):
@@ -319,8 +321,8 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `window:set-always-on-top` | on | Alterna `alwaysOnTop` de la ventana emisora (sticky; chincheta de la ventana de chat) |
 | `window:fold-to-corner` / `window:unfold` | on | Anima el plegado/desplegado de stickies |
 | `sync:get-status` | handle | Estado del sync **GitHub** (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`, `conflictCopies?`) |
-| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, history?: [{at, files, ok}], filesToday?, conflictCopies?: {count, titles, at}, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`; `conflictCopies` = aviso de copias de conflicto del backend activo, sea Cloud o GitHub) |
-| `sync:dismiss-conflict-copies` | handle | Descarta el aviso de **copias de conflicto** de la tarjeta del botón de sync (limpia el de **ambos** backends — `cloudSync`/`githubSync.dismissConflictCopies()` — y emite `cloud:status-changed` + `sync:status-changed`); las copias siguen siendo notas |
+| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, history?: [{at, files, ok}], filesToday?, conflictCopies?: {count, titles, at}, conflictMerges?: {count, titles, at}, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`; `conflictCopies` = aviso de copias de conflicto del backend activo, sea Cloud o GitHub; `conflictMerges` = notas fusionadas con marcas de conflicto ⚠️, mismo formato) |
+| `sync:dismiss-conflict-copies` | handle | Descarta el aviso de **copias de conflicto** y de **fusiones con marcas** (`conflictMerges`) de la tarjeta del botón de sync (limpia el de **ambos** backends — `cloudSync`/`githubSync.dismissConflictCopies()` — y emite `cloud:status-changed` + `sync:status-changed`); las copias siguen siendo notas |
 | `sync:initiate` | handle | Inicia Device Flow OAuth (recibe `repo`); al completar → `sync-auth-complete` + autosync |
 | `sync:cancel-auth` | handle | Cancela un Device Flow en curso |
 | `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings |

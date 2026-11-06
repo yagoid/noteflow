@@ -107,7 +107,7 @@ const api = {
     // GitHub Sync
     getSyncStatus: () => electron_1.ipcRenderer.invoke('sync:get-status'),
     // Clears the session notice of conflict copies made by the pull of either
-    // backend (titlebar sync status card).
+    // backend, and of Cloud's merges with conflict markers (titlebar sync status card).
     dismissConflictCopies: () => electron_1.ipcRenderer.invoke('sync:dismiss-conflict-copies'),
     // Backend-tagged status of the LIVE sync provider (Cloud when enabled, else
     // GitHub, else 'none') — drives the titlebar sync button and its status card.

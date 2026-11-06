@@ -122,11 +122,14 @@ RPC `cloud_upsert_file_v2`, que rechaza ("stale") la subida si la fila del servi
 `seq` base del fichero (sin base: la regla de `updated_at` de la 0011; servidor sin la 0014 → fallback
 a `cloud_upsert_file`). El ciclo de Cloud hace **pull (y emite su resultado) antes de drenar el
 journal**, y el pull **fusiona por fichero**: una edición offline de una sección y una remota de otras
-se combinan; si ambos tocaron la misma sección, la remota va a la nota y la local a una copia con solo
-esas secciones. Detalle (stale/force, metadatos, cambio de cuenta, bases, residuales) en
+se combinan; si ambos tocaron la misma sección, se **fusiona por líneas** dentro de la nota (diff3 con
+el contenido de la base guardado en local, o unión de dos vías; si tocaron las mismas líneas, las dos
+versiones entre marcas `> ⚠️ Sync conflict …`, sin nota aparte). Detalle (stale/force, metadatos, cambio de cuenta, bases, residuales) en
 `monetization.md` § 4 "Subidas condicionadas" y "Fusión en tres vías".
 📌 **Copias de conflicto (los dos backends):** cuando el pull de Cloud (carpetas sin base de ancla; con
-base, ver "Fusión en tres vías" en `monetization.md`: copia solo de las secciones en conflicto) va a
+base, ver "Fusión en tres vías" en `monetization.md`: una sección que cambiaron los dos se **fusiona por
+líneas** en la nota — marcas ⚠️ si chocan las mismas líneas, aviso `conflictMerges` —, y solo una nota
+cifrada o una fusión fallida acaba en copia de esas secciones) va a
 sobrescribir (ancla remota más
 nueva, o una sección remota suelta) o borrar (tombstone `'lost'`) una carpeta con una edición local
 **apuntada en el journal** que difiere de la versión del servidor, antes guarda la versión local
