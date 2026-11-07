@@ -109,3 +109,49 @@ export function noteMatchesQuery(
     idx.tags.some((t) => t.includes(q))
   )
 }
+
+/** Sections of a listed note that a sidebar search points at (see sectionSearchMatch). */
+export interface SectionSearchMatch {
+  /** Indices of the sections to show, in order. */
+  shown: number[]
+  /** Indices (subset of `shown`) of the sections that match; the rest are dimmed. */
+  matched: number[]
+}
+
+/**
+ * Which sections of a note a parsed sidebar query points at, from the cached index. Null
+ * when there's nothing section-level to show: no query, or a text query that only
+ * matched the note's title/tags (the note row keeps its folded line).
+ * - `#section` filter: only the sections whose name matches are shown (as the sidebar
+ *   always did); with a text query too, those whose name/body hold it are the matches
+ *   (all of them when none does — the note matched by title or tags).
+ * - Text query alone: every section is shown, the ones whose name or body hold it match.
+ */
+export function sectionSearchMatch(
+  note: NoteForSearch,
+  parsed: ParsedQuery,
+): SectionSearchMatch | null {
+  const idx = getNoteSearchIndex(note)
+  const tq = normalize(parsed.textQuery)
+  const holds = (i: number) => idx.sectionNames[i].includes(tq) || idx.sectionContents[i].includes(tq)
+
+  if (parsed.sectionFilter) {
+    const sf = normalize(parsed.sectionFilter)
+    const shown: number[] = []
+    for (let i = 0; i < idx.sectionNames.length; i++) {
+      if (idx.sectionNames[i].includes(sf)) shown.push(i)
+    }
+    if (shown.length === 0) return null
+    if (!tq) return { shown, matched: shown }
+    const matched = shown.filter(holds)
+    return { shown, matched: matched.length > 0 ? matched : shown }
+  }
+
+  if (!tq) return null
+  const matched: number[] = []
+  for (let i = 0; i < idx.sectionNames.length; i++) {
+    if (holds(i)) matched.push(i)
+  }
+  if (matched.length === 0) return null
+  return { shown: idx.sectionNames.map((_, i) => i), matched }
+}

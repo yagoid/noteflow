@@ -28,6 +28,15 @@ Dos invariantes para que el sidebar siga fluido con muchas notas — fáciles de
   re-renderiza. Solo se pinta la ventana visible (ver "Sidebar flotante").
 - **Peek de grupo colapsado:** su estado vive en `GroupPeek`, no en `Sidebar`; las cabeceras reciben
   handlers estables y el hover no re-renderiza la lista (ver "Peek de grupo colapsado").
+- **Item de nota (mapa plegado):** el despliegue al hover es estado local de `NoteSectionMap`, la sección
+  abierta solo llega a la fila activa, la medida del tope de 2 filas solo existe en ella
+  (`OpenSectionMap`) y el FLIP entre filas no cuesta nada sin cambio de nota activa (ver
+  "Sidebar: item de nota").
+- **Grupos y carpetas (guías, cursor):** nada de eso re-renderiza la lista. El cursor y la marca de
+  plegado los mueve `GroupGuides` (montado una vez, imperativo, con `ResizeObserver`/`MutationObserver` coalescidos a un
+  rAF); a `NoteRow` solo le llegan primitivas nuevas (`staggerIndex` capado, y en favoritas
+  `groupColor`/`groupName`). Solo el arrastre de nota (estado `noteMoveTarget`, ya existente)
+  re-renderiza al cambiar de destino (ver "Sidebar: grupos y carpetas").
 
 ### Importación desde otras apps (`electron/importers/`, `src/lib/notionHtml.ts`)
 Importa notas de **Markdown folder**, **Notion** (export HTML `.zip`) y **Google Keep** (Takeout
@@ -98,7 +107,8 @@ cierra las otras y seleccionar una nota devuelve el editor. `App.tsx` la renderi
 prioridad de routing (all-content → brain → group → note → editor) y `onClose = closeFullView()` (vuelve al
 editor, o a "All content" si se vino de ahí). **Entradas:** el botón `LayoutGrid` de las acciones del mapa de
 secciones de `NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual **de sección**
-(tag de sección en sidebar/vistas o tab del editor; el menú de la nota en sí no lo ofrece). Sin IPC nuevo.
+(tag de sección en sidebar/vistas o tab del editor; el menú de la nota en sí no lo ofrece). El clic en la
+fila de la nota en el sidebar **no** es una entrada: abre el editor en la primera sección. Sin IPC nuevo.
 
 **Es el mapa de secciones con la vista previa dentro** (`NoteOverview/NoteOverview.tsx`, lógica pura en
 `src/lib/noteOverviewGrid.ts` con test en `tests/lib/noteOverviewGrid.test.ts`, estilos `.note-grid*` en
@@ -244,6 +254,11 @@ creación de nota limpia `allViewOpen` y `cameFromAllView`.
 **OverviewNoteCard compartida:** la tarjeta de nota (antes inline en `GroupOverview`) vive en
 `components/OverviewNoteCard.tsx` (exporta `OverviewNoteCard`, `NoteCardProps` y la helper `formatCardDate`);
 la usan group overview y all-content. Las props de reorder/selección son opcionales (la all-content no las pasa).
+Sus secciones van en la fila con scroll de celdas (`SectionTabsRow placement="card"`, siempre, sin depender del
+ajuste de Apariencia; ver "Sidebar: item de nota" → `SectionTabsRow`): sangra `-ml-[13px] -mr-3` /
+`pl-[13px] pr-3` para cuadrar con el `p-3 pl-4` de la tarjeta sin pisar su línea de acento de 3 px (ni las celdas
+que pasan por el borde ni la flecha izquierda la tapan), sin sección abierta marcada (la vista sustituye al editor). Clic en celda
+→ `onOpenSection` (con `selectionActive`, alterna la selección); clic derecho → menú de sección.
 
 ### Previsualización de sección (hover + cerebro)
 Reutiliza `SectionPreviewCard` en dos interacciones, sin IPC nuevo (el contenido de toda sección ya está
@@ -252,7 +267,10 @@ en memoria en `notesStore`):
   portal a `document.body`. El hook `useSectionHoverPreview()` (en `hoverPreviewContext.ts`, archivo
   aparte por la regla `react-refresh/only-export-components`) expone `previewProps(noteId, sectionId, opts)`
   que devuelve handlers de ratón para escupir sobre cualquier disparador. Disparadores cableados:
-  `SectionTabsRow` (sidebar, peek de grupo colapsado y group overview), pestañas del editor (omite la activa), `RelatedView`/`ChatView`.
+  `SectionCell` (celdas de las filas de nota del sidebar —mapa abierto, peek, búsqueda y fila con
+  scroll—, peek de grupo colapsado y tarjetas de las vistas de grupo/all-content, vía `SectionTabsRow`;
+  omite la abierta), pestañas del
+  editor (omite la activa), `RelatedView`/`ChatView`.
   `placement: 'cursor-below'` ancla la esquina sup-izq junto al cursor (sidebar/grupos/editor);
   `'element-right'` (default) al lado del elemento (IA). Retardo ~380 ms; el popover es `pointer-events-none`
   y se cierra con **cualquier click** (listener `pointerdown` global en el provider — esto evita que se quede
@@ -778,8 +796,10 @@ estilos `.section-map*` en `index.css`). Un único bloque `flex-wrap` (gap 4 px,
 `overflow: hidden`, así que solo se redondean las esquinas exteriores) que baja de fila como los
 salientes de un archivador; las juntas dejan ver `--bg-editor` (la fila ya no tiene banda de fondo
 propia). Lo usan los paneles del editor y la ventana de sección (`SectionWindowApp` monta
-`NoteEditor`); **no** es `Sidebar/SectionTabsRow.tsx` (los chips de sección del sidebar, otro
-componente con su propia `.section-tabs-scroll`). La **vista de nota** es el mismo bloque con la vista
+`NoteEditor`); **no** es `Sidebar/SectionTabsRow.tsx` (la fila con scroll de celdas `SectionCell` del
+sidebar, del peek de grupo y de las tarjetas de las vistas generales, con su propia `.section-tabs-scroll`) ni el mapa de las filas de nota del sidebar
+(`Sidebar/NoteSectionMap.tsx`, que imita su aspecto en pequeño y reutiliza `.section-map-corner` y
+`resolveSectionInk`; ver "Sidebar: item de nota"). La **vista de nota** es el mismo bloque con la vista
 previa dentro y comparte piezas con él (`.section-map-corner`, más grande allí, `.section-map-drop`,
 `reorderDropSide`, `resolveSectionInk`): si cambias una, revisa también "Vista de nota (note overview)". Decisiones a
 respetar si se toca:
@@ -821,7 +841,9 @@ respetar si se toca:
   depende del plan y el ancho del bloque viene del padre, así que medir no realimenta. Un
   `ResizeObserver` sobre el bloque (ancho del panel) y la capa (fuentes que cargan tarde) re-mide; el
   `useLayoutEffect` re-mide solo con cambios que afectan al ancho (firma id+nombre+`aiHidden`, sección
-  activa, renombrado, idioma), no al teclear.
+  activa, renombrado, idioma), no al teclear. El mismo plan (con `maxRows: 2` y **sin** `addWidth`:
+  opcional, sin pestaña `+` no se añade ningún elemento, ni siquiera de ancho 0, que costaría una junta)
+  lo usa el mapa abierto de la fila del sidebar (ver "Sidebar: item de nota" → `open`).
 - **Secciones fijadas:** la activa y la que se está renombrando nunca quedan plegadas
   (`visibleSectionIndices(total, pinned, count)`): si caen entre las ocultas ocupan los últimos huecos
   visibles — **solo visualmente**, el orden de los datos no cambia. Sin esto, renombrar desde el menú
@@ -1160,9 +1182,10 @@ orden del sidebar; cada entrada lleva su carpeta o `null`), `filterGroupPeekEntr
 cabecera, clamp al viewport: sube si no cabe abajo).
 - **Datos:** usa el `item` de grupo que ya deriva `Sidebar` (`useSidebarGroups`), así respeta búsqueda/
   tag/archivados sin recalcular. Las filas son un `PeekRow` memoizado (título 11.5 px + fecha, etiqueta
-  `Folder`+nombre de carpeta si viene de una, chips con `SectionTabsRow compact`). Clicks = los
-  `rowHandlers` estables del sidebar (`click`/`sectionClick`: Ctrl/Cmd → split, nota con >1 sección →
-  note overview…); `RowHandlers.click` acepta también `KeyboardEvent` porque Enter lo reutiliza.
+  `Folder`+nombre de carpeta si viene de una; secciones según el ajuste "Sections in the sidebar", como el
+  sidebar y en compacto, ver "Sidebar: item de nota" → `GroupPeek`). Clicks = los
+  `rowHandlers` estables del sidebar (`click`/`sectionClick`: Ctrl/Cmd → split; si no, editor en la
+  primera sección / en esa sección…); `RowHandlers.click` acepta también `KeyboardEvent` porque Enter lo reutiliza.
   `formatNoteDate`/`renderHighlightedText` viven en `Sidebar/rowText.tsx` (compartidos).
 - **Rendimiento:** el estado abierto/cerrado vive en `GroupPeek` (montado una vez en `Sidebar`); las
   cabeceras solo reciben `onPeekHover`/`onPeekLeave` estables (`useCallback([])` → `peekRef`, un
@@ -1197,6 +1220,229 @@ cabecera, clamp al viewport: sube si no cabe abajo).
   lleva `data-sidebar-portal` (`SIDEBAR_PORTAL_ATTR` en `sidebarAnchor.ts`) para el *watchdog* de hover
   del shell (ver "Sidebar flotante"): al pulsar una nota del peek este se desmonta bajo el puntero, el
   navegador no emite `mouseout` de un nodo eliminado y React nunca entrega el `mouseleave` del `aside`.
+
+### Sidebar: item de nota (mapa plegado + despliegue)
+Las secciones de cada fila de nota del sidebar (`NoteRow` en `Sidebar.tsx`) las pinta
+`Sidebar/NoteSectionMap.tsx` (estilos `.nsm-*` en `index.css`; lógica pura en `src/lib/sectionLine.ts`
+y `sectionSearchMatch` en `searchUtils.ts`, con tests en `tests/lib/sectionLine.test.ts` y
+`searchUtils.test.ts`). Habla el mismo lenguaje que el mapa de secciones del editor: cada celda es un
+`Sidebar/SectionCell.tsx` (fondo neutro `--text/0.065`, la esquina plegada `.section-map-corner` del
+editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` vía `useSectionInk`;
+`.is-ai-hidden` con la esquina gris y `EyeOff`). Cuatro modos (el `flipKey` de la fila):
+- **`line` (nota cerrada):** bajo título+fecha, una línea de 4 px (9 px de margen arriba y 4 px abajo) con un segmento por sección (color de
+  la sección al 42 %, ancho ∝ `section.content.length`; `sectionLineWeights`: proporcional, suelo del 3 %
+  sin pasar del reparto igual; todo vacío → partes iguales), 2 px entre segmentos y 4 px de mínimo.
+  **Sin IPC ni disco**: el contenido ya está en memoria. Con muchas secciones la junta y el mínimo
+  encogen con `min()`/`calc()` sobre `--nsm-n` (nº de secciones) para que la línea nunca desborde.
+  Hover en la fila → 7 px y color al 90 %; la caja mide 4 px y la línea crece centrada (spine
+  `absolute`), así que el hover no mueve la lista. Las ocultas a la IA, más tenues (20 % / 45 %).
+  Accesible como `role="img"` con `aria-label` "Sections: a, b, c" (`sidebar.sectionsSummary`).
+- **Despliegue (peek):** el puntero quieto **140 ms** sobre la línea (zona de detección ±7 px con un
+  `::before`; `pointerenter` arma el temporizador y `pointerleave` de la línea lo cancela, así que barrer
+  la lista no lo abre) hace flotar el mismo mapa con nombres. Va en **portal a `document.body`, `fixed`**
+  (`z-index` 45, bajo los menús contextuales; con `data-sidebar-portal` para el watchdog del sidebar
+  flotante), no `absolute` en la fila: los cuerpos de grupo/carpeta llevan `overflow:hidden` (animación
+  de colapso) y recortarían el de la última nota. Se alinea con la línea (sus celdas = ancho de la
+  línea), sube si no cabe abajo, entra con fade 160 ms y las celdas salen de sus segmentos (FLIP 380 ms;
+  etiquetas con `nsm-label-in` 150 ms después). Mientras está abierto, la línea se oculta
+  (`.is-peeking`) y la fila conserva su fondo de hover (`[data-peeking]` en el `li`, mismo color que su
+  `hover:bg-surface-3`: con el puntero sobre el portal la fila ya no está en `:hover`); ambas marcas se
+  ponen por DOM (sin re-render), se quitan en cuanto empieza el cierre y vuelven si se reabre durante
+  el fade. Se cierra al salir de fila+peek (`pointerleave` nativo
+  de ambos mirando `relatedTarget`: el portal no es descendiente DOM de la fila) con fade 130 ms; al
+  instante con scroll, blur/resize de la ventana o `dragstart`; también con cualquier tecla que no sea
+  un modificador (Ctrl/Cmd sigue sirviendo para abrir al lado). Nunca con botones pulsados ni en táctil.
+  No es alcanzable con teclado (celdas del peek `tabIndex=-1`): con teclado se abre la nota y su mapa sí
+  es navegable.
+- **`open` (nota activa = `noteViewId ?? activeNoteId`, como el resaltado de la fila):** bloque
+  reticulado `flex-wrap` (celdas 22 px, juntas 3 px, radio 6 fuera / 3 dentro; etiqueta capada a
+  120 px con el truco del *sizer* del editor). La sección abierta va en sólido y crece
+  (`flex-grow: 2.6`); al cambiarla, transición CSS como en el editor.
+  La resuelve `Sidebar` para la fila activa (`resolveOpenSectionId`:
+  sección del panel que muestra la nota → la recordada → la primera; si ningún panel la muestra —p. ej.
+  su note overview abierta sin que la nota esté en ningún panel; si un panel la tiene, manda la sección
+  de ese panel—, solo la recordada o ninguna) desde dos selectores primitivos del store, y solo esa
+  fila recibe `openSectionId` (las demás `null`): teclear no re-renderiza filas. Celdas focusables
+  (`role="button"`, Enter/Espacio; Espacio con `preventDefault` para no hacer scroll).
+  **Tope de 2 filas** (`OpenSectionMap`, subcomponente que **solo se monta en la fila activa y sin
+  coincidencias de búsqueda**; también en el mapa compacto del peek de grupo): mismo algoritmo que el tope de 3 filas del
+  editor (`planSectionMap` con `maxRows: 2` y sin `addWidth` + `visibleSectionIndices` de
+  `src/lib/sectionMap.ts`), medido sobre una capa oculta `.nsm-measure` con todas las celdas a su ancho
+  natural (`SectionCell measure`: copia inerte **sin `data-flip`**, foco, preview ni handlers, para que el
+  FLIP no la vea) y la píldora `+N` con N = total; `useLayoutEffect` (firma id+nombre+`aiHidden`, sección
+  abierta, idioma) + `ResizeObserver` (ancho del mapa y la capa). Lo que no cabe se pliega en la celda
+  **`+N`** (`.nsm-cell.nsm-pill`: neutra, a su ancho natural, sin esquina; `sidebar.moreSections`
+  `'+{count}'`, corto por el ancho del sidebar, con tooltip/aria-label plural `sidebar.showAllSections`);
+  la abierta queda siempre visible (fijada). Pulsarla despliega todas y aparece una celda con `ChevronUp`
+  (`sidebar.showLessSections`) para replegar. Las píldoras son `span role="button"` (están dentro del
+  `<button>` de la fila): clic y Enter/Espacio con `stopPropagation`, no abren ni cambian la nota; con
+  teclado el foco pasa a la píldora que aparece. `expanded` es estado local: al dejar de estar activa la
+  nota (o al empezar a coincidir con una búsqueda) el subcomponente se desmonta y vuelve plegado. Desplegar/plegar anima
+  las celdas que siguen (FLIP 300 ms sobre el mapa), las que aparecen entran con fade y las filas de
+  debajo se deslizan (`captureRowTops`/`playRowShift` de `NoteSectionFlip.tsx`, los mismos de
+  `RowShiftFlip`, sobre la lista con scroll más cercana: sidebar o peek de grupo); nada con
+  reduced-motion. **Sin tope** cuando la búsqueda o el `#filtro` coinciden con alguna de sus secciones
+  (`match`: una sección que coincide no puede quedar tras `+N`; se pinta el mapa completo, sin medir ni
+  píldoras), ni en `search` ni en el despliegue flotante, que es un vistazo completo.
+- **`search` (búsqueda o `#filtro` activos):** las notas cuyas secciones coinciden muestran el mapa **en
+  línea** (no flotante), sin apuntar a la línea: `#filtro` muestra **solo** las secciones cuyo nombre
+  coincide (como en la fila con scroll); con texto, todas, con las coincidentes (nombre o cuerpo) teñidas de
+  su color al 20 % y el resto atenuadas (45 %). El término (filtro o texto) se resalta con
+  `renderHighlightedText`. Si la nota solo coincide por título/tags, conserva su línea. La nota activa
+  muestra siempre todas sus secciones (con el marcado de coincidencias encima).
+- **Sin secciones** (p. ej. nota cifrada y bloqueada: `sections: []`) → no se pinta nada (igual en
+  `SectionTabsRow`). Desbloqueada, sus secciones están en memoria y se ve como cualquier otra.
+- **Clics:** fila → `handlers.click` (editor en la **primera sección**, vía el mismo `openAtSection` que
+  `sectionClick`; sin secciones → solo `setActiveNote`); celda (mapa abierto,
+  búsqueda o peek) → `handlers.sectionClick` (Ctrl/Cmd → panel al lado; resto igual que antes); clic
+  derecho en celda → menú de sección. Preview de sección al hover en todas las celdas salvo la abierta
+  (ya está en el editor). Los **segmentos no llevan preview**: el peek (140 ms) se adelanta al preview
+  (~380 ms) y los tapa, así que el preview vive en las celdas del peek. Arrastrar/reordenar la nota no
+  cambia (la fila sigue siendo el `<button draggable>`; el peek está fuera de él).
+- **FLIP entre filas (`Sidebar/NoteSectionFlip.tsx` + `src/lib/flip.ts`):** al cambiar de nota activa,
+  la fila nueva se despliega y la anterior se pliega **en el mismo commit**. `FlipScope` (componente de
+  clase) usa `getSnapshotBeforeUpdate` —corre tras el render y **antes de tocar el DOM**, para todo el
+  árbol a la vez— para medir los `[data-flip]` (clave = id de sección, en segmentos y celdas) relativos a
+  la caja `.nsm` (`display: flow-root`, así su origen no cambia entre modos), y tras el commit los anima
+  de la caja vieja a la nueva (translate+scale, 460 ms, `cubic-bezier(.22,.9,.24,1)`). La animación
+  **no** se lanza en el propio `componentDidUpdate` sino en un `queueMicrotask` (`afterSyncRenders`;
+  igual en `RowShiftFlip`): el tope de 2 filas del mapa abierto calcula su primer plan en un
+  `useLayoutEffect` y pliega en un **segundo commit síncrono** (React lo vacía al final del primero,
+  antes de pintar); medir el "Last" antes vería el mapa sin plegar y las celdas aterrizarían mal. Las
+  secciones plegadas no tienen celda: no se animan (aparecen/desaparecen), el resto sí. Si el
+  peek estaba abierto mide **sus** celdas: clic en una celda del peek → el mapa flotante "se convierte"
+  en el de la nota sin cortes (el peek se desmonta en ese mismo commit; uno en fade-out se ignora).
+  Desde la línea, las etiquetas entran 200 ms después. **Solo** anima transiciones desde/hacia `open`:
+  una búsqueda cambia muchas filas a la vez entre `line` y `search` y medirlas por tecla no compensa
+  (cambio instantáneo). `RowShiftFlip` (`PureComponent` montado una vez en `Sidebar`), cuando cambia la
+  nota activa, recorre en el mismo snapshot **todas** las filas `[data-note-row]` leyendo su
+  `getBoundingClientRect` (barato: el layout está limpio antes de mutar; no se corta al pasar el borde
+  inferior porque las filas de un grupo colapsado siguen maquetadas dentro de su caja de alto 0 y no
+  respetan el orden visual), se queda con las de alto > 0 que caen en el rect del sidebar (máx. 200) y
+  desliza con `translateY` las que se movieron. Sin cambio de nota activa ambos salen en la comparación de props:
+  coste cero al teclear. `prefers-reduced-motion`: sin FLIP, fades ni transiciones.
+- **Rendimiento:** `NoteRow` sigue memoizada con `handlers` estables; el estado del peek es **local** de
+  `NoteSectionMap` (un `setState` al abrir y otro al cerrar, nunca por `pointermove`) y el temporizador
+  y las animaciones van por refs / Web Animations, así que el hover no re-renderiza la lista. La medida
+  del tope de filas (capa oculta, `ResizeObserver`, `useLayoutEffect`) vive en `OpenSectionMap`, que
+  solo existe en la fila activa: las cerradas nunca miden.
+- **Ajuste "Sections in the sidebar"** (Ajustes → Apariencia; `themeStore.sidebarSectionsStyle`:
+  `'map'` por defecto | `'row'`; **local**, en `localStorage` `noteflow-sidebar-sections`, como la
+  escala de UI): `'row'` pinta las secciones con `SectionTabsRow` (ver abajo), siempre visibles, sin
+  línea ni despliegue. `Sidebar` lee el ajuste una vez y lo pasa a `NoteRow` como prop primitiva
+  (cambiarlo re-renderiza las filas una vez; nada más). El peek de grupo colapsado lo sigue igual (ver
+  `GroupPeek` abajo); las tarjetas de las vistas generales van **siempre** en fila con scroll.
+- **`SectionTabsRow` (fila con scroll de celdas):** una sola línea sin salto con scroll horizontal
+  (scrollbar nativa oculta con `.section-tabs-scroll`, máscara en los bordes, flechas al desbordar) de
+  celdas `SectionCell` a su ancho natural (`.nsm-scroll`, `flex: 0 0 auto`, etiqueta capada a 160 px; la
+  abierta en sólido con `useSectionInk`). Es su **único diseño** (los antiguos chips de color y su
+  atenuación `dimmed` se eliminaron) y lo usan tres sitios: la fila del sidebar y la del **peek de grupo
+  colapsado** con el ajuste `'row'`, y las **tarjetas de las vistas de grupo / all-content**
+  (`OverviewNoteCard`), estas **siempre**, sin depender del ajuste. La prop `placement` (`'sidebar'` |
+  `'peek'` | `'card'`) fija el sangrado lateral para que la fila llegue de borde a borde (`-mx-2.5`/`px-2.5`
+  en la fila, `-mx-2`/`px-2` en el peek, `-ml-[13px] -mr-3`/`pl-[13px] pr-3` en la tarjeta: empieza tras su
+  acento de 3 px) y `'peek'` añade `.nsm-compact`: celdas de 19 px, letra 10 px, esquina 5 px (7 px al
+  hover), `EyeOff` 8 px y etiqueta capada a 130 px.
+  La celda abierta (`activeSectionId`) se mantiene a la vista: al montar (al instante) y al cambiar la
+  sección abierta (suave, salvo reduced-motion) se ajusta solo el `scrollLeft` de la fila (no
+  `scrollIntoView`, que movería también la lista en vertical), con 22 px de margen para librar el borde
+  difuminado y las flechas. El `#filtro` (`sectionFilter`) filtra las celdas y se resalta el término
+  (el filtro o, si no hay, el texto de `searchQuery`). Preview de sección al hover, clic y clic derecho
+  los da `SectionCell` (el peek suprime el menú contextual; las tarjetas abren el menú de sección).
+- **Sección abierta marcada:** la fila del sidebar y el peek resuelven la de la nota resaltada con
+  `resolveOpenSectionId` sobre los dos selectores primitivos de `Sidebar/useOpenNoteSection.ts`
+  (compartidos; el peek solo se suscribe mientras está abierto) y solo la fila activa recibe el id. Las
+  tarjetas de las vistas generales no marcan ninguna: la vista sustituye al editor.
+- **`GroupPeek`** (peek de grupo colapsado) sigue el mismo ajuste que el sidebar (selector primitivo en
+  `GroupPeekPanel`, que solo existe mientras está abierto), siempre en compacto (`.nsm-compact`):
+  - `'row'`: `SectionTabsRow placement="peek"`.
+  - `'map'` (por defecto): `NoteSectionMap inGroupPeek`, con los mismos modos que en el sidebar (línea
+    en las cerradas con su despliegue a los 140 ms, mapa abierto en la activa, `search` con la query del
+    peek; el mapa abierto, también con el tope de 2 filas y `+N`). En compacto la línea lleva 7/3 px de
+    margen, el mapa abierto 5 px arriba y sus celdas 19 px con etiqueta capada a 100 px (las de 22 px pesaban demasiado bajo títulos de 11.5 px). El `<li>` de
+    `PeekRow` lleva `data-note-row` (lo que `NoteSectionMap` toma como su fila: hover que engorda la
+    línea, salida del despliegue y `[data-peeking]`, con su regla para `button[data-peek-index]`; no
+    lleva `data-note-id`, que `Sidebar` busca en el documento). Celdas → `onOpenSection` del peek
+    (modificadores incluidos, cierra el peek) vía un `mapHandlers` memoizado; sin menú contextual.
+  - **Despliegue sobre el peek:** el mapa flotante va en portal a `document.body` con
+    `.is-over-group-peek` (`z-index` 51, sobre el `z-50` del peek) y `data-group-peek-portal`
+    (`GROUP_PEEK_PORTAL_ATTR` en `sidebarAnchor.ts`): el `pointerdown` global del peek no lo trata como
+    "fuera", así que el clic en una celda llega. Pasar del peek al despliegue no lo cierra: el portal es
+    hijo React del panel y los `onMouseEnter/Leave` de React siguen el árbol React (salir del despliegue
+    hacia fuera sí cuenta como salir del peek); con `data-sidebar-portal`, el watchdog del sidebar
+    flotante también lo cuenta como dentro. El despliegue se cierra con cualquier scroll (también el de
+    la lista del peek), con tecla y al salir de fila+despliegue; al cerrarse el peek se desmonta con él.
+    Sin FLIP al abrir el peek (`FlipScope` solo anima cambios de modo hacia/desde `open`, nunca al montar;
+    `RowShiftFlip` solo mide filas dentro del sidebar).
+  - Alto de la lista por modo (`LIST_MAX_HEIGHT`, ≈ cinco notas): `map` 200 px (≈39 px por nota cerrada;
+    la activa ≈49), `row` 240 px (≈48 px por nota). `ESTIMATED_HEIGHT`: 260 / 300.
+  - Sin atenuación de las notas no activas (los chips usaban `dimmed`): las celdas ya son neutras (fondo
+    `--text/0.065`, texto apagado), como en el sidebar, donde tampoco se atenúan; `.is-dim` queda
+    reservado al "no coincide" de la búsqueda.
+
+### Sidebar: grupos y carpetas (Índice con guías)
+Cabeceras y cuerpos de grupo/carpeta en `Sidebar.tsx` (`renderFolder` y el bloque de grupos),
+`NoteGroupHeader.tsx`, `NoteFolderHeader.tsx` (+ `FolderGlyph`) y `GroupGuides.tsx`;
+estilos en el bloque `.sbg-*` al final de `index.css`; números y helpers puros en
+`src/lib/sidebarGuides.ts` (tests en `tests/lib/sidebarGuides.test.ts`).
+- **Color:** `--g` = `colorChannels(group.color)` en el `li` del grupo (`style`); todo el CSS usa
+  `rgb(var(--g) / a)`, así vale para variables del tema y para color libre. Solo variables del tema
+  (`--text`, `--text-muted`, `--bg-1` = fondo del sidebar, también flotante): claro y oscuro igual.
+- **Geometría** (x desde el `li`; el `ul` ya tiene `px-2.5`): pestaña 4–17 (13×10, esquina plegada
+  6 px → 9 px plegado) · guía de grupo x=10 (1,5 px, 38 %) · notas sueltas con el título en x=25 (=
+  nombre del grupo: `wrapperClassName='pl-[17px]'` + `indent=8` de `renderNoteButton`) · carpeta: icono
+  23–37, guía x=30 (26 %), notas en x=43 (`pl-[35px]` + 8). La guía del grupo nace 4 px bajo la pestaña
+  (conector `.sbg-gh::before`) y sigue en `.sbg-in::before` por todo el cuerpo, carpetas incluidas.
+- **Sticky:** cabecera de grupo `top: 0` (34 px, `.sbg-gh` = el wrapper arrastrable para reordenar
+  grupos, hijo directo del `li`, así se pega mientras dure el grupo) y de carpeta `top: 34px`. El sticky
+  se corta en un ancestro con `overflow: hidden`, así que el interior del cuerpo (`.sbg-clip`) es
+  `overflow: visible` expandido y en reposo, y `hidden` solo plegado o mientras pliega/despliega
+  (`[data-anim]`, puesto por `GroupGuides` al ver cambiar `collapsedGroupIds`/`collapsedFolderIds` —
+  identidad de los Sets del store— y quitado a los 360+80 ms). Las filas llevan `scroll-margin-top`
+  para que la navegación de la búsqueda (`scrollIntoView`) no las deje bajo las cabeceras.
+- **Nota activa:** fondo neutro `--text/0.07` (sin tinte del grupo; también favoritas, sin grupo y
+  peek). El color lo pone el **cursor**: un `<i class="sbg-cur">` por grupo en `.sbg-in`, que
+  `GroupGuides` coloca imperativamente junto a la fila (`top = offsetTop + 7`, alto − 14; x 8,5 en la
+  guía del grupo o 28,5 en la de su carpeta). Mide con la **cadena `offsetTop`** (las filas pueden estar
+  en FLIP con `transform`). Se desliza (CSS 450 ms) solo cuando cambia la nota abierta; cualquier otro
+  recolocado (resize de un cuerpo: carpetas plegando, el mapa de la fila activa que cambia de alto,
+  ancho del sidebar; o mutaciones de la lista) es instantáneo, salvo dentro de la ventana de 450 ms
+  de un deslizamiento en curso. Oculto si la nota no está en el grupo o su carpeta está plegada; al
+  reaparecer salta y hace fade-in. Grupo plegado con la nota abierta (`has-open`): pestaña al 40 % y el
+  título de la nota junto al nombre (`.sbg-gact`); carpeta plegada: trazo del icono en el color.
+- **Sin foco al pasar por la cabecera:** el prototipo atenuaba el resto de la lista al dejar el ratón
+  sobre la cabecera de un grupo expandido; se quitó a petición del usuario (no le gustaba). La
+  atenuación solo existe durante el arrastre de una nota (abajo). El hover de la cabecera solo
+  muestra el chevron y alimenta el peek de grupo plegado.
+- **Plegar/desplegar** (360 ms, `cubic-bezier(.22,.9,.24,1)`): la guía se recoge (240 ms ease-in) y las
+  filas se desvanecen (−3 px); al desplegar la guía se dibuja (480 ms) y las filas entran escalonadas
+  30 ms (`--i`: `NoteRow` recibe `staggerIndex` primitivo capado a 10 y monta el estilo dentro; las
+  cabeceras de carpeta cuentan tras las sueltas). Las notas de carpeta llevan su índice **en la
+  carpeta**; el `.sbg-f` lleva `--fi` (el paso de su cabecera) y el CSS las retrasa a
+  `min(--fi + 1 + --i, 10)` al desplegar el grupo (entran tras su cabecera) y a `--i` al desplegar
+  solo la carpeta (`.sbg-f[data-anim]`). Así reordenar notas fuera de la carpeta no re-renderiza sus
+  filas. El hueco "Drop in…" alinea su texto con los títulos (x 25 / 43, compensando borde y padding).
+- **StrictMode (dev):** `GroupGuides` sobrevive al mount→unmount→mount de la misma instancia
+  (reinicia `unmounted` y deja los observers a `null` al desmontar); test en
+  `tests/components/groupGuides.test.ts` (happy-dom).
+- **Arrastre de nota a otro grupo/carpeta:** el destino (`noteMoveTarget`, ahora con el id de la nota
+  arrastrada) lleva `is-drop-group` en el `li` (guía 75 %, foco: `.sbg-list.is-drop-spot` atenúa el
+  resto) e `is-drop` en el grupo o la carpeta concretos (subrayado `::after` bajo su cabecera, 340 ms
+  desde la izquierda). Al final de la lista destino, hueco `.sbg-slot` "Drop in {name}"
+  (`sidebar.dropIn`) si la nota no está ya ahí (`dropChangesPlace`; arrastrar desde favoritas a su propio
+  grupo no lo muestra). Un destino plegado se abre a los 650 ms con `toggleGroupCollapsed`/
+  `toggleFolderCollapsed` (persistido, como un clic). Sustituye al recuadro con tinte anterior. Ojo: el
+  id del arrastre se copia como primitivo (`String(ref.current)`) antes de ir al estado; el valor crudo
+  de un ref en un `setState` hace que el React Compiler abandone el componente (lint
+  `preserve-manual-memoization` sobre `rowHandlers`).
+- **Peek de grupo plegado:** misma pestaña (esquina 9 px) y nombre 12,5/650 en caja normal en la
+  cabecera; la barra de 2 px del borde pasa a ser la guía del grupo a la izquierda de la lista
+  (`.sbg-peek-list::before`, fuera del scroller para que no se desplace con él).
+- **Favoritas:** estrella en la cabecera y, en cada favorita con grupo, su pestaña pequeña (11×9) antes
+  del título (`title` = nombre del grupo).
+- **Accesibilidad:** cabeceras `role="button"`, `tabIndex=0`, `aria-expanded`; Enter/Espacio pliegan;
+  el chevron (oculto en reposo) aparece con hover o `:focus-visible`. `prefers-reduced-motion`: sin
+  transiciones ni escalonado (bloque propio al final del `.sbg-*`).
 
 ### Relaciones sección↔sección (slash command + cerebro)
 Enlaces explícitos que el usuario crea **inline mientras escribe**: en el editor rich teclea `/` →

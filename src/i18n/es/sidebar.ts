@@ -6,6 +6,10 @@ export const sidebar = {
   expiresInDays: 'caduca en {d}d',
 
   openSideBySide: 'Ctrl/Cmd + clic para abrir en paralelo',
+  sectionsSummary: 'Secciones: {names}',
+  moreSections: '+{count}',
+  showAllSections: { one: 'Mostrar {count} sección más', other: 'Mostrar {count} secciones más' },
+  showLessSections: 'Volver a plegar las secciones en dos filas',
 
   searchPlaceholder: 'Buscar... o #sección',
   clearSearch: 'Limpiar búsqueda',
@@ -27,6 +31,7 @@ export const sidebar = {
   favoritesHeader: 'favoritos',
   groupsHeader: 'grupos',
   notesHeader: 'notas',
+  dropIn: 'Soltar en {name}',
 
   viewGroup: 'Ver grupo',
   archiveGroup: 'Archivar grupo',

@@ -85,6 +85,13 @@ export const settings = {
     immersive: 'Immersive',
     lightweight: 'Lightweight',
     brainViewHint: '3D looks better but uses more resources. If the brain feels slow, switch to 2D.',
+    // How the sidebar note rows show their sections.
+    sidebarSections: 'Sections in the sidebar',
+    sidebarSectionsMap: 'Folded map',
+    sidebarSectionsMapDesc: 'A thin line; hover it to see them',
+    sidebarSectionsRow: 'Scroll row',
+    sidebarSectionsRowDesc: 'Always visible, scroll sideways',
+    sidebarSectionsHint: 'The open note always shows its sections. Only on this device.',
     // Live preview mock content.
     previewActiveNote: 'Active note',
     previewAnotherNote: 'Another note',

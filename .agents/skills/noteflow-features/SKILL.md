@@ -43,12 +43,13 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 │  favorites                              │                            │
 │    NOTEFLOW               20:31 ⭐      │   (Ctrl+Click una nota →   │
 │  ─────────────────────────────          │    se abre en paralelo)    │
-│  ▼ WORK (grupo)                         │                            │
-│    ▼ 📁 Backend (carpeta)               │                            │
-│      NOTEFLOW             20:31         │                            │
-│         [Urgent][Features]              │                            │
-│    Meeting                14:30 ⏱       │                            │
-│  ▶ PERSONAL (grupo, colapsado)          │                            │
+│  ◥ Work (grupo, cabecera fija)   3      │                            │
+│  ┆ Meeting               14:30 ⏱        │                            │
+│  ┆ ━━━━━━━ ━━ ━━━━━━━━━━━━━━━━━         │                            │
+│  ┆ 📁 Backend (carpeta)       2         │                            │
+│  ┆   ┃ NOTEFLOW          20:31          │                            │
+│  ┆   ┃ [Urgent◥|▓Features▓▓|Ideas◥]     │                            │
+│  ◥ Personal · Diario (plegado)   4      │                            │
 │  ─ Sin grupo ──────────────────         │                            │
 │    Project: Neural Netw…  19/03         │                            │
 │  ─────────────────────────────          │                            │
@@ -57,6 +58,8 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 ```
 
 `[📌⮜]` = interruptor **fijar / contraer** el sidebar (ver "Sidebar fijado / flotante" abajo).
+`◥` = pestaña del grupo (esquina plegada de su color) · `┆` = guía del grupo / de la carpeta · `┃` =
+cursor de la nota abierta sobre su guía (ver "Grupos y carpetas" abajo).
 
 ### Sidebar fijado / flotante
 - **Dos modos.** *Fijado* (por defecto): el sidebar ocupa su ancho en el layout, como siempre.
@@ -89,6 +92,46 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
   cierra y devuelve el foco al editor. `Ctrl+Shift+F` lo abre y enfoca la búsqueda.
 - La **vista cerebro** no cambia: su sidebar de notas se muestra/oculta aparte (columna de 24 px),
   nunca flota.
+
+### Item de nota del sidebar (mapa plegado)
+Cada nota del sidebar muestra título + fecha (con candado si está cifrada y reloj si es temporal) y,
+debajo, sus **secciones** en el lenguaje del mapa de secciones del editor:
+- **Nota cerrada → línea plegada:** una línea fina con un tramo por sección, del color de la sección y
+  tan ancho como larga es la sección (las vacías, un tramo mínimo). Al pasar por la fila, la línea se
+  engrosa y se satura un poco (sin mover la lista). Con muchas secciones los tramos se estrechan, nunca
+  se salen. Las ocultas a la IA, más tenues.
+- **Despliegue:** si dejas el ratón quieto un instante (~0,15 s) sobre la línea, flota encima de la
+  lista el mapa de esa nota con los nombres (las celdas salen de sus tramos). Barrer la lista con el
+  ratón no lo abre. Se cierra al salir de la fila, al hacer scroll o al teclear. Sus celdas tienen la
+  preview de sección al hover y el menú de sección con clic derecho; **clic en una celda** abre la nota
+  en esa sección y el mapa flotante se convierte en el de la nota, sin cortes (Ctrl/Cmd+clic → esa
+  sección en un panel al lado).
+- **Nota abierta → mapa:** la línea se despliega en un bloque de celdas (como las pestañas del editor,
+  en pequeño, bajando de fila si no caben): neutras con la esquina doblada del color, la sección abierta
+  en sólido y más ancha. Al cambiar de sección o de nota todo se reparte con una animación suave (sin
+  animación si el sistema pide reducir el movimiento); la nota que dejas vuelve a su línea. Las celdas
+  se pueden recorrer con Tab y abrir con Enter/Espacio. **Máximo 2 filas** (el editor, 3): con muchas
+  secciones, las que no caben se agrupan en una celda **`+N`** (la sección abierta siempre se ve);
+  pulsarla despliega todas y aparece una celda con una flecha hacia arriba para volver a plegar. Ni una
+  ni otra abren la nota (con teclado, el foco pasa a la que aparece). Al cambiar a otra nota, el mapa
+  vuelve a plegado. Si una búsqueda coincide con secciones de la nota, se ven todas (ninguna coincidencia
+  queda escondida); en el despliegue flotante también se ven siempre todas.
+- **Clic en la fila** (fuera de las celdas): abre la nota en el editor **en su primera sección**,
+  tenga las secciones que tenga (la vista de nota ya no se abre al pulsar la nota; ver "Cómo entrar" en
+  [Vista de nota](#vista-de-nota-note-overview)). Una nota cifrada y bloqueada se abre sin más (pide
+  desbloquear).
+- **Buscando:** las notas cuyas secciones coinciden muestran el mapa desplegado sin apuntar a nada; con
+  `#sección`, solo las secciones que encajan (como antes); con texto, todas, las coincidentes teñidas de
+  su color y el resto atenuadas, con el término resaltado. Si la nota solo coincide por el título, se
+  queda con su línea.
+- Una nota **cifrada y bloqueada** no muestra secciones (no hay contenido en memoria).
+- **Ajustes → Apariencia → "Sections in the sidebar":** *Folded map* (por defecto, lo de arriba) o
+  *Scroll row*: las secciones de cada nota siempre visibles en una sola fila con scroll horizontal
+  (bordes difuminados y flechas al desbordar), con las celdas del diseño nuevo a su ancho natural y la
+  abierta en sólido; sin línea ni despliegue. Solo para este dispositivo (no se sincroniza).
+- El peek de un grupo colapsado sigue **el mismo ajuste** (línea plegada con su despliegue y mapa en la
+  nota activa, o fila con scroll), en tamaño compacto. Las tarjetas de las vistas de grupo / *All content*
+  usan **siempre** la fila con scroll de celdas, sea cual sea el ajuste.
 
 Iconos del TitleBar:
 - **⬇ update**: aparece solo si hay una versión nueva; descarga e instala in-app (muestra el %
@@ -151,7 +194,7 @@ Iconos del TitleBar:
   (toggle de embeddings; activada, botón "Reindex all notes" con progreso), **Profile** (botón "Open
   profile setup" → abre el cerebro en la pestaña Profile y cierra Ajustes) y **Expose CLI skill to AI
   agents** (toggle: copia la skill del CLI a `~/.claude/skills` y `~/.agents/skills`, y a Windsurf si
-  está instalado)), **Appearance** (tema/fuente/acento/colores del editor/escala),
+  está instalado)), **Appearance** (tema/fuente/acento/colores del editor/escala/secciones del sidebar/vista cerebro),
   **Editor** (fuente/tamaño/ancho) — grupo **Preferences** —; **Sync** (NoteFlow Cloud + GitHub),
   **AI** (solo el proveedor del LLM), **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
   de notas), **Startup** (autostart + stickies), **Templates** (plantillas de nota) — grupo **Your
@@ -178,7 +221,7 @@ Iconos del TitleBar:
 ### Organizar
 - **Favorites** → aparece en la sección "favorites" al top del sidebar (etiqueta pequeña + notas planas). La nota también sigue visible en su grupo si tiene uno. Toggle desde el menú contextual o el botón ⭐ en la toolbar del editor.
 - **Drag-to-reorder** → las notas se pueden arrastrar dentro de su contexto (favorites, grupo, carpeta o sin grupo) para fijar un orden manual. El orden persiste en `note-order.json` (sincronizado con GitHub). Una línea indicadora muestra dónde se insertará la nota al soltar.
-- **Drag-to-move (entre grupos/carpetas)** → arrastrar una nota y soltarla sobre **otro grupo** (cabecera o cuerpo) la reasigna a la raíz de ese grupo; soltarla sobre una **carpeta** la mueve a esa carpeta. El destino se resalta con un borde/tinte del color del grupo mientras se arrastra. Reordenar dentro del mismo contexto y mover a otro distinto conviven en el mismo gesto (la cabecera de un grupo colapsado también es zona de drop). Equivale a `updateNote({ group, folder })`; sin IPC nuevo.
+- **Drag-to-move (entre grupos/carpetas)** → arrastrar una nota y soltarla sobre **otro grupo** (cabecera o cuerpo) la reasigna a la raíz de ese grupo; soltarla sobre una **carpeta** la mueve a esa carpeta. Mientras se arrastra, el destino se marca con un **subrayado del color del grupo** que crece bajo su cabecera, su guía a pleno color, el resto de la lista atenuado y, al final de su lista, un hueco discontinuo **"Drop in {nombre}"** (si la nota no está ya ahí). Un grupo o carpeta **plegado** se abre solo tras ~650 ms encima (y se queda abierto). Reordenar dentro del mismo contexto y mover a otro distinto conviven en el mismo gesto (la cabecera de un grupo colapsado también es zona de drop). Equivale a `updateNote({ group, folder })`; sin IPC nuevo.
 - **Archive** → se oculta de la lista principal (toggle "Show archived" en footer).
 - **Duplicate** → copia completa con todas sus secciones; conserva el grupo y la carpeta de la original.
 - **Open alongside** → abre la nota en paralelo (vista dividida) junto a la actual.
@@ -265,15 +308,30 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
 ### Grupos
 - **Crear**: botón-icono `FolderPlus` (arriba a la derecha del `+` de nueva nota) → input de nombre debajo (nombre + color).
 - **Renombrar / Eliminar / Color / View group / Archive**: menú contextual en la cabecera del grupo.
-- **Colapsar / Expandir**: click en la cabecera (estado persiste entre sesiones).
+- **Aspecto ("índice con guías")**: cabecera **fija** al hacer scroll (y la de la carpeta justo
+  debajo), sin cajas ni divisor: **pestaña** gris con la esquina plegada del color del grupo, nombre
+  en caja normal, contador y un chevron que solo aparece al pasar el ratón o con el foco del teclado.
+  Del pie de la pestaña baja una **guía** fina del color del grupo que recorre todo su contenido
+  (carpetas incluidas); cada carpeta tiene su propia guía bajo su icono. Los títulos de las notas se
+  alinean con el nombre de lo que las contiene (la sangría dice el nivel).
+- **Nota abierta**: fondo neutro (sin tinte del grupo) y un **cursor** del color del grupo sobre la
+  guía, a su altura, que **se desliza** al abrir otra nota (salta a la guía de la carpeta si está en
+  una; se oculta si su carpeta está plegada). Si el grupo está **plegado**, su pestaña se tiñe y el
+  título de la nota abierta aparece junto al nombre (`Personal · Diario`); una carpeta plegada que la
+  contiene pinta su icono del color del grupo.
+- **Colapsar / Expandir**: click en la cabecera, o Enter/Espacio con ella enfocada (estado persiste
+  entre sesiones). Al plegar, la guía se recoge y las notas se desvanecen; al desplegar, la guía se
+  dibuja y las notas entran escalonadas (sin animación con *reduce motion*).
 - **Peek de grupo colapsado**: dejar el ratón ~400 ms sobre la cabecera de un grupo **colapsado** (con
   notas) abre a la derecha del sidebar una ventanita con sus notas en pequeño (título + fecha y, debajo,
-  los tags de sección como chips mini); las notas de sus **carpetas** van en la misma lista, después de
+  sus secciones como en el sidebar según *Sections in the sidebar*, en pequeño: línea plegada que se
+  despliega al dejar el ratón encima y mapa abierto en la nota activa, o fila con scroll de celdas; la
+  sección abierta de la nota activa va en sólido); las notas de sus **carpetas** van en la misma lista, después de
   las sueltas, con una etiqueta discreta (icono de carpeta + nombre). Altura ≈ 5 notas, con scroll.
   Arriba, un **buscador** ("Search in {grupo}…", admite `#sección`) que **recibe el foco** al abrirse:
   basta con empezar a escribir. ↑/↓ mueven la selección (la primera marcada por defecto), **Enter**
   abre la nota, **Esc** cierra y devuelve el foco donde estaba (p. ej. el editor, con su caret). Click en
-  el título abre la nota y en un chip, esa sección (misma semántica que el sidebar, Ctrl/Cmd incluido);
+  el título abre la nota y en una celda, esa sección (misma semántica que el sidebar, Ctrl/Cmd incluido);
   la nota activa va resaltada. Se cierra al sacar el ratón de cabecera+ventanita (con margen para cruzar
   el hueco), salvo si ya se tecleó en el buscador: entonces solo con click fuera, Esc o al abrir algo.
   También al expandir el grupo, hacer scroll en el sidebar, cambiar de ventana o arrastrar. No aparece
@@ -287,7 +345,8 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
   recuperarlo: "Unarchive group" (en el menú contextual del grupo atenuado, o el botón "Archived"
   de la cabecera de la group overview).
 - **Asignar nota**: drag & drop, o menú contextual → "Add to group".
-- Cada grupo tiene un color que tiñe los dots/carpetas de sus notas: los **8 colores del tema** o
+- Cada grupo tiene un color (pestaña, guías, cursor y marcas de arrastre; en **favorites**, una
+  pestaña pequeña antes del título de cada favorita con grupo): los **8 colores del tema** o
   cualquier **color libre** (swatch con degradado al final de la paleta → selector nativo del SO).
 - Las notas sin grupo aparecen al final, en "Sin grupo".
 
@@ -297,7 +356,8 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
   carpetas del grupo). "Group root" la saca de la carpeta sin sacarla del grupo.
 - **Renombrar / Eliminar**: menú contextual de la cabecera de carpeta. Al borrar una carpeta sus
   notas vuelven a la raíz del grupo.
-- **Colapsar / Expandir**: independiente de los grupos (estado persistido).
+- **Colapsar / Expandir**: independiente de los grupos (estado persistido). El icono de carpeta abre
+  su solapa cuando está expandida.
 
 > Grupos y carpetas se guardan en `groups.json` / `folders.json` dentro del dir de notas y **se
 > sincronizan con GitHub** (no en `settings.json`).
@@ -323,13 +383,14 @@ cabecera. Seleccionar cualquier nota —también desde el sidebar— cierra la v
   del grupo, y una banda **"Archived"** al final con las notas archivadas del grupo.
 - Dentro de cada banda, las notas en **cuadrícula responsiva** de tarjetas.
 
-**Tarjeta de nota:** título + **secciones** (mismos tags de sección que el sidebar, clicables → te
-llevan directamente a esa sección de la nota) + fecha de actualización (`dd/MM/yyyy · HH:mm`).
+**Tarjeta de nota:** título + **secciones** (fila con scroll de celdas de sección —fondo neutro y esquina plegada
+en su color, como el modo *Scroll row* del sidebar—, bordes difuminados y flechas al desbordar; clicables → te
+llevan directamente a esa sección de la nota; hover → previsualización; click derecho → menú de sección) + fecha de actualización (`dd/MM/yyyy · HH:mm`).
 Acento del color del grupo a la izquierda.
 
 **Acciones:**
-- **Abrir nota** → click en la tarjeta (abre la primera sección); click en un tag de sección abre
-  esa sección concreta.
+- **Abrir nota** → click en la tarjeta (abre la primera sección); click en una celda de sección abre
+  esa sección concreta (con una selección activa, la alterna).
 - **Reorganizar** → arrastrar una tarjeta a otra banda mueve la nota de carpeta (la banda
   "Archived" no es zona de drop).
 - **Crear** → botones "New note" / "New folder" en la cabecera.
@@ -384,6 +445,7 @@ vuelve al editor.
   de la estrella de favoritos**.
 - **Click derecho** sobre un **tag de sección** (sidebar / vistas) o un **tab del editor** →
   **"Note overview"** (el menú de la nota en sí no lo ofrece).
+- Pulsar la nota en el sidebar **no** la abre: va al editor, a la primera sección.
 
 **Cómo salir:** `Esc` (si no hay selección), el botón **⊞ activo** de la cabecera (resaltado en el
 color de acento: "estás en la vista de nota"; vuelve al editor, o a "All content" si veniste de ahí),
@@ -453,7 +515,7 @@ interruptor fijar/contraer el sidebar (mismo estilo/tamaño que este).
 
 **Disposición** (misma estética que la vista de grupo: cabecera fija + área scroll + tarjetas en grid):
 - **Favorites** — las notas marcadas como favoritas, como tarjetas de nota (mismas que la vista de grupo:
-  título + tags de sección clicables + fecha).
+  título + celdas de sección clicables + fecha).
 - **Groups** — cada grupo como un **tile compacto** (barra de color + icono de carpeta tintado + nombre +
   nº de notas). Los tiles son **desplegables en acordeón**: click en un tile lo **expande inline** (chevron
   que gira) y abre, a lo ancho de la rejilla, un panel con sus notas sueltas y sus carpetas (cabecera de
@@ -580,8 +642,9 @@ contenido a tamaño real dentro de su rejilla. Permite ojear el contenido
 sin navegar.
 
 **Dónde aparece:**
-- **Sidebar** → tags de sección de cada nota.
-- **Vista de grupo** → tags de sección en las tarjetas.
+- **Sidebar** → celdas de sección de cada nota (mapa abierto, despliegue flotante, búsqueda o fila
+  con scroll), salvo la sección abierta.
+- **Vista de grupo / All content** → celdas de sección de las tarjetas; **peek de grupo colapsado** → sus celdas.
 - **Editor** → pestañas de sección (excepto la sección activa, que ya estás viendo).
 - **Paneles de IA** (Related / Chat) → resultados que apuntan a una sección.
 

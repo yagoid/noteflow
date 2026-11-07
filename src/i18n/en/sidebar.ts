@@ -10,6 +10,13 @@ export const sidebar = {
 
   // Note row.
   openSideBySide: 'Ctrl/Cmd + click to open side by side',
+  // Accessible name of a note row's folded section line ({names} = comma-separated).
+  sectionsSummary: 'Sections: {names}',
+  // Open note's section map, capped at two rows: the cell that unfolds the rest ({count} =
+  // hidden sections; short, the sidebar is narrow), its tooltip, and the one that folds back.
+  moreSections: '+{count}',
+  showAllSections: { one: 'Show {count} more section', other: 'Show {count} more sections' },
+  showLessSections: 'Fold the sections back to two rows',
 
   // Search box.
   searchPlaceholder: 'Search... or #section',
@@ -38,6 +45,8 @@ export const sidebar = {
   favoritesHeader: 'favorites',
   groupsHeader: 'groups',
   notesHeader: 'notes',
+  // Slot at the end of a group/folder while a note is dragged over it. {name} = group or folder.
+  dropIn: 'Drop in {name}',
 
   // Group context menu.
   viewGroup: 'View group',

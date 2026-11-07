@@ -1185,6 +1185,187 @@ button {
   .section-map-add { transition: none !important; }
 }
 
+/* ── Sidebar note row: folded section map (Sidebar/NoteSectionMap.tsx) ──────
+   Closed note: a 3px line, one segment per section (width ∝ its size, --w), that
+   thickens on row hover. Resting on it floats the peek (.nsm-peek, portaled).
+   Open note: a block of cells like the editor's section map, smaller. Each segment/
+   cell sets --c (section colour channels, `var(--x)` or `r g b`); cells also set
+   --sm-color (for the shared .section-map-corner) and the open one --nsm-ink. */
+/* flow-root: the children's top margins stay inside, so the box (the FLIP origin) starts
+   right under the title in every mode. */
+.nsm, .nsm-peek, .nsm-scroll { --nsm-ease: cubic-bezier(.22, .9, .24, 1); }
+.nsm { display: flow-root; }
+/* The box is 3px tall; the hit zone reaches 7px above and below, and the line grows
+   centred inside it, so hovering never moves the list. */
+.nsm-line { position: relative; height: 4px; margin: 9px 0 4px; }
+.nsm-line::before { content: ''; position: absolute; left: -4px; right: -4px; top: -7px; bottom: -7px; }
+.nsm-spine {
+  /* Many sections: joints and minimum widths shrink so the line never overflows. */
+  --nsm-gap: min(2px, calc(50% / var(--nsm-n, 1)));
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 4px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--nsm-gap);
+  pointer-events: none;
+  transition: height 260ms var(--nsm-ease), opacity 150ms ease;
+}
+.nsm-seg {
+  flex: var(--w) 1 0px;
+  min-width: min(4px, calc((100% - (var(--nsm-n, 1) - 1) * var(--nsm-gap)) / var(--nsm-n, 1)));
+  height: 100%;
+  border-radius: 2px;
+  background: rgb(var(--c) / 0.42);
+  transition:
+    flex-grow 300ms var(--nsm-ease),
+    height 200ms var(--nsm-ease),
+    background-color 200ms ease;
+}
+/* Hidden from the AI: a fainter segment (the cell shows the grey corner + EyeOff). */
+.nsm-seg.is-ai-hidden { background: rgb(var(--c) / 0.2); }
+[data-note-row]:hover .nsm-spine { height: 7px; }
+[data-note-row]:hover .nsm-seg { background: rgb(var(--c) / 0.9); }
+[data-note-row]:hover .nsm-seg.is-ai-hidden { background: rgb(var(--c) / 0.45); }
+.nsm-line.is-peeking .nsm-spine { opacity: 0; }
+/* The peek is portaled (outside the row's DOM): its row keeps the hover background while
+   it is up — same colour as the row button's `hover:bg-surface-3`. */
+[data-note-row][data-peeking] > button[data-note-id] { background-color: rgb(var(--bg-3)); }
+/* Same for a row of the collapsed-group peek (its `hover:bg-surface-3`). */
+[data-note-row][data-peeking] > button[data-peek-index] { background-color: rgb(var(--bg-3)); }
+
+.nsm-map {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 7px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.nsm-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 3px;
+  background: rgb(var(--text) / 0.065);
+  color: rgb(var(--text-muted));
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 22px;
+  cursor: pointer;
+  transition:
+    flex-grow 450ms var(--nsm-ease),
+    background-color 250ms ease,
+    color 250ms ease,
+    opacity 200ms ease;
+}
+.nsm-cell:not(.is-active):hover { background: rgb(var(--text) / 0.11); color: rgb(var(--text)); }
+.nsm-cell.is-active {
+  flex-grow: 2.6;
+  background: rgb(var(--c));
+  color: var(--nsm-ink, rgb(var(--bg-0)));
+  font-weight: 600;
+}
+.nsm-cell.is-ai-hidden:not(.is-active) { background: rgb(var(--text) / 0.035); }
+.nsm-cell.is-ai-hidden:not(.is-active):hover { background: rgb(var(--text) / 0.07); }
+.nsm-cell.is-ai-hidden.is-active { background: color-mix(in srgb, rgb(var(--c)) 72%, rgb(var(--bg-editor))); }
+/* Search: matching cells tinted with their colour, the rest dimmed. */
+.nsm-cell.is-match:not(.is-active) { background: rgb(var(--c) / 0.2); color: rgb(var(--text)); }
+.nsm-cell.is-dim:not(.is-active) { opacity: 0.45; }
+.nsm-cell.is-dim:hover { opacity: 1; }
+.nsm-cell:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px rgb(var(--accent)); }
+/* The editor's folded corner (.section-map-corner), smaller. */
+.nsm-cell .section-map-corner { width: 6px; height: 6px; border-top-right-radius: 3px; }
+.nsm-cell:not(.is-active):hover .section-map-corner { width: 9px; height: 9px; }
+/* Label width from an invisible sizer (capped), the text laid over it with ellipsis —
+   same trick as the editor's tabs: the cell's basis never depends on hover. */
+.nsm-label { position: relative; flex: 1 1 auto; min-width: 0; align-self: stretch; }
+.nsm-label-sizer {
+  display: block;
+  visibility: hidden;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 120px;
+}
+.nsm-label-text {
+  position: absolute;
+  inset: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Open map capped at two rows (OpenSectionMap in NoteSectionMap.tsx): "+N" unfolds the
+   rest, the chevron folds them back. Neutral cells at their natural width, no corner. */
+.nsm-pill { flex: 0 0 auto; justify-content: center; font-weight: 600; white-space: nowrap; }
+/* Hidden layer with every cell at its natural width, which the row cap measures. */
+.nsm-measure {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+.nsm-measure > div { display: flex; gap: 3px; width: max-content; }
+.nsm-measure .nsm-cell { flex: none; }
+.nsm-measure,
+.nsm-measure * { transition: none !important; }
+/* Scroll row of cells (Sidebar/SectionTabsRow.tsx: the "Scroll row" appearance option of
+   the sidebar, the collapsed-group peek and the overview note cards): natural widths. */
+.nsm-scroll { gap: 3px; }
+.nsm-scroll .nsm-cell { flex: 0 0 auto; }
+.nsm-scroll .nsm-label-sizer { max-width: 160px; }
+/* Compact (`.nsm-compact`): the collapsed-group peek's denser list (GroupPeek.tsx) — its
+   scroll row (SectionTabsRow placement="peek") and its folded map (NoteSectionMap
+   inGroupPeek: inline root and floating map). Smaller cells, corner and line margins. */
+.nsm-compact .nsm-cell { height: 19px; line-height: 19px; padding: 0 7px; gap: 3px; font-size: 10px; }
+.nsm-compact .nsm-cell svg { width: 8px; height: 8px; }
+.nsm-compact .nsm-label-sizer { max-width: 100px; }
+.nsm-scroll.nsm-compact .nsm-label-sizer { max-width: 130px; }
+.nsm-compact .nsm-cell .section-map-corner { width: 5px; height: 5px; border-top-right-radius: 2.5px; }
+.nsm-compact .nsm-cell:not(.is-active):hover .section-map-corner { width: 7px; height: 7px; }
+.nsm.nsm-compact .nsm-line { margin: 7px 0 3px; }
+.nsm.nsm-compact .nsm-map { margin-top: 5px; }
+
+/* The peek: the map with names floating over the list (fixed, in document.body). */
+.nsm-peek {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 45;
+  padding: 4px;
+  border-radius: 9px;
+  background: rgb(var(--bg-2));
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 14px 28px -10px rgb(0 0 0 / 0.55);
+}
+html[data-color-scheme="light"] .nsm-peek {
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 14px 28px -10px rgb(0 0 0 / 0.18);
+}
+/* Opened from a collapsed-group peek's row: over that peek (fixed, z-50). */
+.nsm-peek.is-over-group-peek { z-index: 51; }
+.nsm-peek .nsm-map { margin-top: 0; }
+.nsm-peek .nsm-label-text { animation: nsm-label-in 260ms ease-out 150ms both; }
+.nsm-peek.is-closing { pointer-events: none; }
+@keyframes nsm-label-in { from { opacity: 0; transform: translateY(2px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .nsm-spine,
+  .nsm-seg,
+  .nsm-cell,
+  .nsm-cell * { transition: none !important; }
+  .nsm-peek .nsm-label-text { animation: none; }
+}
+
 /* ── Note overview grid (NoteOverview/NoteOverview.tsx) ──────────────────────
    The section map's block with the content preview inside: one block of cells
    in justified rows (lib/noteOverviewGrid.ts plans them; each slot is
@@ -1541,7 +1722,7 @@ button {
 .notes-list-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; }
 .notes-list-scroll:hover::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); }
 
-/* ── Sidebar section tabs: hide native scrollbar (edges faded via CSS mask) */
+/* ── Section cells scroll row (SectionTabsRow): hide native scrollbar (edges faded via CSS mask) */
 .section-tabs-scroll { -ms-overflow-style: none; scrollbar-width: none; }
 .section-tabs-scroll::-webkit-scrollbar { display: none; }
 
@@ -2767,3 +2948,214 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
 :root[data-color-scheme='light'] .border-green-500\/30  { border-color: rgb(22 163 74 / 0.45); }
 :root[data-color-scheme='light'] .border-amber-300\/35,
 :root[data-color-scheme='light'] .border-amber-300\/45  { border-color: rgb(217 119 6 / 0.45); }
+
+/* ── Sidebar: grupos y carpetas (G4 · Índice con guías) ─────────────────────
+   Geometry (x from the group's `li`; the list `ul` already has px-2.5):
+   group tab 4–17 · group guide x=10 · group notes' titles at x=25 (= group name)
+   folder icon 23–37 · folder guide x=30 · folder notes' titles at x=43 (= folder name).
+   The group colour is `--g` (channels, from colorChannels) on the group's `li`.
+   `[data-anim]` (folding) and the cursor are set by Sidebar/GroupGuides.tsx.
+   Timings mirror src/lib/sidebarGuides.ts. */
+/* Dragging a note onto a group/folder: the rest of the list dims */
+.sbg-list > * { transition: opacity 220ms ease; }
+.sbg-list.is-drop-spot > :not(.is-drop-group) { opacity: 0.26; }
+
+.sbg-g { position: relative; }
+
+/* Group header: sticky, opaque (sidebar background, also floating), no divider. */
+.sbg-gh {
+  position: sticky; top: 0; z-index: 4; height: 34px;
+  background: rgb(var(--bg-1));
+}
+/* Connector: the guide starts 4 px under the tab */
+.sbg-gh::before {
+  content: ''; position: absolute; left: 9.25px; width: 1.5px; top: 26px; bottom: 0;
+  background: rgb(var(--g) / 0.38); pointer-events: none;
+  transform-origin: top;
+  transition: transform 140ms cubic-bezier(.22, .9, .24, 1), background-color 200ms;
+}
+.sbg-g.is-collapsed > .sbg-gh::before { transform: scaleY(0); transition-delay: 200ms, 0s; }
+/* Drop underline while dragging a note onto the group / folder */
+.sbg-gh::after, .sbg-fh::after {
+  content: ''; position: absolute; left: 25px; right: 6px; bottom: 3px; height: 2px; border-radius: 2px;
+  background: rgb(var(--g)); pointer-events: none;
+  transform: scaleX(0); transform-origin: left;
+  transition: transform 340ms cubic-bezier(.22, .9, .24, 1);
+}
+.sbg-fh::after { left: 26px; }
+.sbg-g.is-drop > .sbg-gh::after,
+.sbg-f.is-drop > .sbg-fh::after { transform: scaleX(1); }
+
+.sbg-ghb {
+  display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 6px 0 4px;
+  cursor: pointer; outline: none;
+}
+.sbg-ghb:focus-visible, .sbg-fh:focus-visible { box-shadow: inset 0 0 0 1.5px rgb(var(--accent)); border-radius: 6px; }
+
+/* Group tab: folded corner in the group colour (bigger when collapsed) */
+.sbg-tab {
+  position: relative; flex: none; display: block; width: 13px; height: 10px; border-radius: 2.5px;
+  background: rgb(var(--text) / 0.15); overflow: hidden;
+  transition: background-color 300ms;
+}
+.sbg-tab::after {
+  content: ''; position: absolute; top: 0; right: 0; width: 6px; height: 6px;
+  background: rgb(var(--g)); clip-path: polygon(0 0, 100% 0, 100% 100%);
+  transition: width 320ms cubic-bezier(.22, .9, .24, 1), height 320ms cubic-bezier(.22, .9, .24, 1);
+}
+.sbg-g.is-collapsed .sbg-tab::after, .sbg-tab.is-folded::after { width: 9px; height: 9px; }
+.sbg-g.is-collapsed.has-open .sbg-tab { background: rgb(var(--g) / 0.4); }
+/* Favorites: small tab of the note's group before its title */
+.sbg-tab.is-small { width: 11px; height: 9px; }
+
+.sbg-gname, .sbg-fname {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4;
+  transition: color 200ms;
+}
+.sbg-gname { font-size: 12.5px; font-weight: 650; color: rgb(var(--text) / 0.92); cursor: pointer; }
+.sbg-g.is-collapsed .sbg-gname { color: rgb(var(--text) / 0.7); font-weight: 600; }
+.sbg-gname:hover { color: rgb(var(--text)); }
+/* Collapsed group holding the open note: its title beside the name */
+.sbg-gact {
+  display: block; flex: 0 1 auto; min-width: 0; max-width: 0; opacity: 0;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 1.4;
+  font-size: 11.5px; color: rgb(var(--text-muted) / 0.8);
+  transition: max-width 380ms cubic-bezier(.22, .9, .24, 1), opacity 240ms;
+}
+.sbg-gact::before { content: '· '; color: rgb(var(--g)); }
+.sbg-g.is-collapsed.has-open .sbg-gact { max-width: 130px; opacity: 1; transition-delay: 160ms; }
+.sbg-sp { flex: 1 1 0; min-width: 4px; }
+.sbg-count {
+  flex: none; font-size: 10.5px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums;
+  color: rgb(var(--text-muted) / 0.5);
+}
+.sbg-chev {
+  flex: none; display: grid; place-items: center; color: rgb(var(--text-muted)); opacity: 0;
+  transition: transform 320ms cubic-bezier(.22, .9, .24, 1), opacity 180ms;
+}
+.sbg-g:not(.is-collapsed) > .sbg-gh .sbg-chev,
+.sbg-f:not(.is-collapsed) > .sbg-fh .sbg-chev { transform: rotate(90deg); }
+.sbg-ghb:hover .sbg-chev, .sbg-ghb:focus-visible .sbg-chev,
+.sbg-fh:hover .sbg-chev, .sbg-fh:focus-visible .sbg-chev { opacity: 0.75; }
+
+/* Collapsible bodies. `overflow: hidden` only collapsed or while folding: the folder
+   headers inside are sticky, and sticky stops at an `overflow: hidden` ancestor. */
+.sbg-body {
+  display: grid; grid-template-rows: 1fr;
+  transition: grid-template-rows 360ms cubic-bezier(.22, .9, .24, 1);
+}
+.sbg-g.is-collapsed > .sbg-body, .sbg-f.is-collapsed > .sbg-body { grid-template-rows: 0fr; }
+.sbg-clip { min-height: 0; overflow: hidden; }
+.sbg-g:not(.is-collapsed):not([data-anim]) > .sbg-body > .sbg-clip,
+.sbg-f:not(.is-collapsed):not([data-anim]) > .sbg-body > .sbg-clip { overflow: visible; }
+.sbg-in { position: relative; display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; }
+.sbg-fin { position: relative; display: flex; flex-direction: column; padding-bottom: 4px; }
+.sbg-loose, .sbg-flist { display: flex; flex-direction: column; gap: 2px; }
+/* scrollIntoView (keyboard search results) stops below the sticky header(s) */
+.sbg-in [data-note-id] { scroll-margin-top: 38px; }
+.sbg-fin [data-note-id] { scroll-margin-top: 66px; }
+
+/* Guides: the group's runs through all its content (folders included); a folder's, its notes */
+.sbg-in::before, .sbg-fin::before {
+  content: ''; position: absolute; top: 0; bottom: 10px; width: 1.5px; border-radius: 1px; pointer-events: none;
+  transform-origin: top;
+  transition: transform 480ms cubic-bezier(.22, .9, .24, 1) 60ms, background-color 200ms;
+}
+.sbg-in::before { left: 9.25px; background: rgb(var(--g) / 0.38); }
+.sbg-fin::before { left: 29.25px; background: rgb(var(--g) / 0.26); }
+.sbg-g.is-collapsed .sbg-in::before, .sbg-f.is-collapsed .sbg-fin::before {
+  transform: scaleY(0);
+  transition: transform 240ms ease-in, background-color 200ms;
+}
+/* Drop target: the guide brightens */
+.sbg-g.is-drop-group .sbg-in::before,
+.sbg-g.is-drop-group > .sbg-gh::before { background: rgb(var(--g) / 0.75); }
+.sbg-g.is-drop-group .sbg-fin::before,
+.sbg-f.is-drop .sbg-fin::before { background: rgb(var(--g) / 0.5); }
+
+/* Folder header: sticky under the group header */
+.sbg-fh {
+  position: sticky; top: 34px; z-index: 3; margin-left: 17px;
+  display: flex; align-items: center; gap: 6px; padding: 6px 6px 5px 6px;
+  background: rgb(var(--bg-1)); cursor: pointer; outline: none;
+}
+.sbg-fname { font-size: 12px; font-weight: 550; color: rgb(var(--text-muted)); }
+.sbg-f.is-collapsed.has-open .sbg-fname { color: rgb(var(--text) / 0.85); }
+.sbg-folder { flex: none; overflow: visible; }
+.sbg-folder-b, .sbg-folder-f {
+  stroke: rgb(var(--text-muted) / 0.85); stroke-width: 1.3; stroke-linejoin: round;
+  transition: stroke 300ms, fill 300ms;
+}
+.sbg-folder-b { fill: rgb(var(--text) / 0.05); }
+.sbg-folder-f {
+  fill: rgb(var(--bg-1));
+  transform-box: fill-box; transform-origin: 50% 100%;
+  transition: transform 300ms cubic-bezier(.22, .9, .24, 1), stroke 300ms, fill 300ms;
+}
+.sbg-f:not(.is-collapsed) > .sbg-fh .sbg-folder-f { transform: skewX(-18deg) scaleY(0.8) translateX(1px); }
+.sbg-f.is-collapsed.has-open > .sbg-fh .sbg-folder-b,
+.sbg-f.is-collapsed.has-open > .sbg-fh .sbg-folder-f { stroke: rgb(var(--g)); }
+
+/* Cursor: the open note's mark, sliding along the guide (placed by GroupGuides) */
+.sbg-cur {
+  position: absolute; z-index: 2; left: 8.5px; top: 0; width: 3px; height: 0; border-radius: 3px;
+  background: rgb(var(--g)); pointer-events: none;
+  transition: top 450ms cubic-bezier(.22, .9, .24, 1), height 450ms cubic-bezier(.22, .9, .24, 1),
+    left 450ms cubic-bezier(.22, .9, .24, 1), opacity 200ms;
+}
+.sbg-cur.is-off { opacity: 0; }
+.sbg-cur.is-track { transition: opacity 200ms; }
+
+/* Unfold: rows enter staggered (--i, capped index set on the row); fold: they fade out */
+.sbg-in [data-note-row], .sbg-in .sbg-fh {
+  transition-property: opacity, transform;
+  transition-duration: 260ms, 420ms;
+  transition-timing-function: ease, cubic-bezier(.22, .9, .24, 1);
+  transition-delay: calc(var(--i, 0) * 30ms + 70ms), calc(var(--i, 0) * 30ms + 70ms);
+}
+/* A folder's notes carry their index in the folder (--i). Unfolding the group, they enter
+   after their folder header (--fi = the header's index, on .sbg-f); unfolding only the
+   folder ([data-anim] on it), from 0. Before the .is-collapsed rules: those must win. */
+.sbg-in .sbg-fin [data-note-row] {
+  transition-delay: calc(min(var(--fi, 0) + 1 + var(--i, 0), 10) * 30ms + 70ms),
+    calc(min(var(--fi, 0) + 1 + var(--i, 0), 10) * 30ms + 70ms);
+}
+.sbg-f[data-anim] .sbg-fin [data-note-row] {
+  transition-delay: calc(var(--i, 0) * 30ms + 70ms), calc(var(--i, 0) * 30ms + 70ms);
+}
+.sbg-g.is-collapsed .sbg-in [data-note-row],
+.sbg-g.is-collapsed .sbg-in .sbg-fh,
+.sbg-f.is-collapsed .sbg-fin [data-note-row] {
+  opacity: 0; transform: translateY(-3px);
+  transition-duration: 150ms, 220ms; transition-delay: 0s;
+}
+
+/* "Drop in …" slot at the end of the target list while dragging a note. Text aligned with the
+   titles: 17 (or 35) margin + 1.5 border + 6.5 padding = x 25 (or 43). */
+.sbg-slot {
+  position: relative; display: flex; align-items: center; height: 30px; padding: 0 10px 0 6.5px; overflow: hidden;
+  border-radius: 7px; border: 1.5px dashed rgb(var(--g) / 0.55); background: rgb(var(--g) / 0.06);
+  font-size: 11.5px; font-weight: 500; color: rgb(var(--g)); white-space: nowrap;
+  animation: sbg-slot-in 260ms cubic-bezier(.22, .9, .24, 1) both;
+}
+.sbg-slot > span { overflow: hidden; text-overflow: ellipsis; }
+.sbg-loose > .sbg-slot { margin-left: 17px; }
+.sbg-flist > .sbg-slot { margin-left: 35px; }
+@keyframes sbg-slot-in { from { height: 0; opacity: 0; } }
+
+/* Collapsed-group peek: the group guide left of its list (replaces the 2 px edge bar) */
+.sbg-peek-list { position: relative; margin-left: 8px; }
+.sbg-peek-list::before {
+  content: ''; position: absolute; left: 5px; top: 6px; bottom: 12px; width: 1.5px; border-radius: 1px;
+  background: rgb(var(--g) / 0.38); pointer-events: none;
+}
+.sbg-pname { font-size: 12.5px; font-weight: 650; line-height: 1.4; color: rgb(var(--text) / 0.92); }
+
+@media (prefers-reduced-motion: reduce) {
+  .sbg-list > *, .sbg-gh::before, .sbg-gh::after, .sbg-fh::after, .sbg-tab, .sbg-tab::after,
+  .sbg-gname, .sbg-fname, .sbg-gact, .sbg-chev, .sbg-body, .sbg-in::before, .sbg-fin::before,
+  .sbg-folder-b, .sbg-folder-f, .sbg-cur, .sbg-in [data-note-row], .sbg-in .sbg-fh {
+    transition: none !important;
+  }
+  .sbg-slot { animation: none; }
+}

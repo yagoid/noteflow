@@ -5,6 +5,7 @@ import {
   buildSearchRegex,
   parseSearchQuery,
   noteMatchesQuery,
+  sectionSearchMatch,
 } from '../../src/lib/searchUtils'
 
 // Minimal note fixture shaped like NoteForSearch (the structural type the
@@ -128,5 +129,42 @@ describe('noteMatchesQuery', () => {
 
   it('a section filter with empty text matches any note that has the section', () => {
     expect(noteMatchesQuery(note(), { sectionFilter: 'tasks', textQuery: '' })).toBe(true)
+  })
+})
+
+describe('sectionSearchMatch', () => {
+  const sections = [
+    { name: 'Note', content: 'Some café notes here' },
+    { name: 'Tasks', content: 'buy milk' },
+    { name: 'Tasks done', content: 'paint the fence' },
+  ]
+
+  it('is null without a query', () => {
+    expect(sectionSearchMatch(note({ sections }), { sectionFilter: null, textQuery: '' })).toBeNull()
+  })
+
+  it('text query: shows every section, matches by name or body (accent-insensitive)', () => {
+    expect(sectionSearchMatch(note({ sections }), { sectionFilter: null, textQuery: 'cafe' }))
+      .toEqual({ shown: [0, 1, 2], matched: [0] })
+    expect(sectionSearchMatch(note({ sections }), { sectionFilter: null, textQuery: 'TASKS' }))
+      .toEqual({ shown: [0, 1, 2], matched: [1, 2] })
+  })
+
+  it('text query that only hits the title or tags: null (the row keeps its line)', () => {
+    expect(sectionSearchMatch(note({ sections }), { sectionFilter: null, textQuery: 'project' })).toBeNull()
+    expect(sectionSearchMatch(note({ sections }), { sectionFilter: null, textQuery: 'idea' })).toBeNull()
+  })
+
+  it('#section filter: shows only the sections whose name matches', () => {
+    expect(sectionSearchMatch(note({ sections }), { sectionFilter: 'task', textQuery: '' }))
+      .toEqual({ shown: [1, 2], matched: [1, 2] })
+    expect(sectionSearchMatch(note({ sections }), { sectionFilter: 'nope', textQuery: '' })).toBeNull()
+  })
+
+  it('#section filter + text: those holding the text match; all of them if none does', () => {
+    expect(sectionSearchMatch(note({ sections }), { sectionFilter: 'task', textQuery: 'fence' }))
+      .toEqual({ shown: [1, 2], matched: [2] })
+    expect(sectionSearchMatch(note({ sections }), { sectionFilter: 'task', textQuery: 'project' }))
+      .toEqual({ shown: [1, 2], matched: [1, 2] })
   })
 })

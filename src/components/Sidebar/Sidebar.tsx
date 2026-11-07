@@ -2,7 +2,7 @@ import { Fragment, memo, useCallback, useMemo, useRef, useEffect, useLayoutEffec
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, ArchiveRestore, Search, PanelLeftClose, PanelLeftOpen, Trash2, Lock, FolderPlus, Folder, FolderOpen, X, Plus, Timer, LayoutGrid } from 'lucide-react'
+import { Archive, ArchiveRestore, Search, PanelLeftClose, PanelLeftOpen, Trash2, Lock, FolderPlus, X, Plus, Timer, LayoutGrid, Star } from 'lucide-react'
 import { ConfirmModal } from '../ConfirmModal'
 import { ContextMenu } from '../ContextMenu'
 import { CustomColorSwatch } from '../CustomColorSwatch'
@@ -18,9 +18,16 @@ import {
 import { modKey } from '../../lib/platform'
 import { parseSearchQuery, noteMatchesQuery } from '../../lib/searchUtils'
 import { NoteGroupHeader } from './NoteGroupHeader'
-import { NoteFolderHeader } from './NoteFolderHeader'
+import { NoteFolderHeader, FolderGlyph } from './NoteFolderHeader'
+import { GroupGuides } from './GroupGuides'
+import { DROP_SPRING_OPEN_MS, dropChangesPlace, staggerStep } from '../../lib/sidebarGuides'
 import { useSidebarGroups, type SidebarFolder } from './useSidebarGroups'
 import { SectionTabsRow } from './SectionTabsRow'
+import { NoteSectionMap } from './NoteSectionMap'
+import { RowShiftFlip } from './NoteSectionFlip'
+import { resolveOpenSectionId } from '../../lib/sectionLine'
+import { useOpenNoteSection } from './useOpenNoteSection'
+import { useThemeStore, type SidebarSectionsStyle } from '../../stores/themeStore'
 import { GroupPeek, type GroupPeekController } from './GroupPeek'
 import { formatExpiry, formatNoteDate, renderHighlightedText } from './rowText'
 import { useT } from '../../i18n/useT'
@@ -59,8 +66,12 @@ interface RowHandlers {
 
 interface NoteRowProps {
   note: Note
+  /** Favorites only: colour and name of the note's group (small tab before the title). */
   groupColor: GroupColor | null
+  groupName?: string
   indent?: number
+  /** Position in its group/folder body (capped): unfold stagger delay. */
+  staggerIndex?: number
   inFavorites?: boolean
   wrapperClassName?: string
   contextKey: string
@@ -71,6 +82,10 @@ interface NoteRowProps {
   searchQuery: string
   sectionFilter: string | null
   sectionTagColors: TagColorMap
+  /** Section open on the note when it's the active one (null on every other row). */
+  openSectionId: string | null
+  /** Appearance setting: folded section map (default) or the horizontal-scroll row. */
+  sectionsStyle: SidebarSectionsStyle
   handlers: RowHandlers
 }
 
@@ -81,7 +96,9 @@ interface NoteRowProps {
 const NoteRow = memo(function NoteRow({
   note,
   groupColor,
+  groupName,
   indent,
+  staggerIndex,
   inFavorites,
   wrapperClassName,
   contextKey,
@@ -92,12 +109,15 @@ const NoteRow = memo(function NoteRow({
   searchQuery,
   sectionFilter,
   sectionTagColors,
+  openSectionId,
+  sectionsStyle,
   handlers,
 }: NoteRowProps) {
   const t = useT()
   return (
     <li
-      style={{ position: 'relative' }}
+      data-note-row
+      style={{ position: 'relative', ...(staggerIndex != null ? { '--i': staggerIndex } : {}) } as React.CSSProperties}
       className={wrapperClassName}
       onDragOver={(e) => handlers.reorderDragOver(e, note, contextKey)}
       onDragLeave={() => handlers.reorderDragLeave(note.id)}
@@ -121,14 +141,20 @@ const NoteRow = memo(function NoteRow({
           ${isSearchTarget ? 'ring-1 ring-inset ring-text/25' : ''}`}
         style={{
           ...(indent != null ? { paddingLeft: indent } : {}),
-          ...(isActive
-            ? { background: groupColor ? `rgb(${colorChannels(groupColor)} / 0.14)` : 'rgb(var(--text) / 0.1)' }
-            : {}),
+          // Neutral: the group colour is carried by the guide cursor and the section map.
+          ...(isActive ? { background: 'rgb(var(--text) / 0.07)' } : {}),
           ...(isSearchTarget && !isActive ? { background: 'rgb(var(--text) / 0.06)' } : {}),
         }}
         title={t.sidebar.openSideBySide}
       >
         <div className="flex items-center gap-1 min-w-0">
+          {inFavorites && groupColor && (
+            <i
+              className="sbg-tab is-small mr-0.5"
+              title={groupName}
+              style={{ '--g': colorChannels(groupColor) } as React.CSSProperties}
+            />
+          )}
           {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
           {note.expiresAt && <span title={formatExpiry(note.expiresAt, t)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
           <span className={`text-[13px] font-mono font-medium truncate flex-1
@@ -139,17 +165,27 @@ const NoteRow = memo(function NoteRow({
             {formatNoteDate(note.updated, t)}
           </span>
         </div>
-        <SectionTabsRow
-          noteId={note.id}
-          sections={note.sections}
-          searchQuery={searchQuery}
-          sectionFilter={sectionFilter}
-          sectionTagColors={sectionTagColors}
-          onSectionClick={(sectionId, e) => handlers.sectionClick(e, note, sectionId)}
-          onSectionContextMenu={(e, sectionId) => handlers.sectionContextMenu(e, note, sectionId)}
-          renderHighlightedText={renderHighlightedText}
-          dimmed={!isActive}
-        />
+        {sectionsStyle === 'row' ? (
+          <SectionTabsRow
+            noteId={note.id}
+            sections={note.sections}
+            searchQuery={searchQuery}
+            sectionFilter={sectionFilter}
+            sectionTagColors={sectionTagColors}
+            activeSectionId={openSectionId}
+            onSectionClick={(sectionId, e) => handlers.sectionClick(e, note, sectionId)}
+            onSectionContextMenu={(e, sectionId) => handlers.sectionContextMenu(e, note, sectionId)}
+          />
+        ) : (
+          <NoteSectionMap
+            note={note}
+            isActive={isActive}
+            openSectionId={openSectionId}
+            searchQuery={searchQuery}
+            sectionTagColors={sectionTagColors}
+            handlers={handlers}
+          />
+        )}
       </button>
     </li>
   )
@@ -166,7 +202,6 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
 
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setGroupView = useNotesStore((s) => s.setGroupView)
-  const setNoteView = useNotesStore((s) => s.setNoteView)
   const setAllView = useNotesStore((s) => s.setAllView)
   const updateNote = useNotesStore((s) => s.updateNote)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
@@ -177,6 +212,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const createTempNote = useNotesStore((s) => s.createTempNote)
 
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
+  const sectionsStyle = useThemeStore((s) => s.sidebarSectionsStyle)
+  // Section the editor stands on for the note shown as open (= the highlighted row):
+  // primitives, so typing doesn't re-render the rows. Resolved per row in renderNoteButton.
+  const { paneSectionId: openRowPaneSectionId, rememberedSectionId: openRowRememberedSectionId } = useOpenNoteSection()
 
   const groups = useGroupsStore((s) => s.groups)
   const folders = useGroupsStore((s) => s.folders)
@@ -261,7 +300,8 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     contextKey: string
   } | null>(null)
   // â”€â”€ Note move-to-group/folder via drag & drop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const [noteMoveTarget, setNoteMoveTarget] = useState<{ groupId: string; folderId?: string } | null>(null)
+  // noteId = the dragged note (to tell whether the target already holds it: "Drop in …" slot).
+  const [noteMoveTarget, setNoteMoveTarget] = useState<{ groupId: string; folderId?: string; noteId: string } | null>(null)
   const draggingNoteContextRef = useRef<string | null>(null)
   const draggingNoteIdRef = useRef<string | null>(null)
 
@@ -291,6 +331,20 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     window.addEventListener('click', close)
     return () => window.removeEventListener('click', close)
   }, [])
+
+  // Dragging a note over a collapsed group/folder opens it after a short hold (persisted,
+  // as if the user had opened it). Leaving the target first cancels it.
+  const moveTargetGroupId = noteMoveTarget?.groupId ?? null
+  const moveTargetFolderId = noteMoveTarget?.folderId ?? null
+  useEffect(() => {
+    if (!moveTargetGroupId) return
+    const timer = window.setTimeout(() => {
+      const s = useGroupsStore.getState()
+      if (s.collapsedGroupIds.has(moveTargetGroupId)) s.toggleGroupCollapsed(moveTargetGroupId)
+      if (moveTargetFolderId && s.collapsedFolderIds.has(moveTargetFolderId)) s.toggleFolderCollapsed(moveTargetFolderId)
+    }, DROP_SPRING_OPEN_MS)
+    return () => window.clearTimeout(timer)
+  }, [moveTargetGroupId, moveTargetFolderId])
 
   useEffect(() => {
     const handler = () => {
@@ -377,6 +431,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     hasSearchFilter && keyboardResultIndex >= 0 && keyboardResultIndex < visibleNoteIds.length
       ? visibleNoteIds[keyboardResultIndex]
       : null
+  // The note shown as open (= the highlighted row): a collapsed group shows its title and a
+  // collapsed folder tints its icon when they hold it.
+  const openNoteId = noteViewId ?? activeNoteId
+  const openNote = openNoteId ? rawNotes.find((n) => n.id === openNoteId) : undefined
 
   // Mini-view of this list while the sidebar floats (SidebarShell draws it).
   // Same rows, order and visibility rules as the list rendered below.
@@ -530,8 +588,11 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     e.preventDefault()
     if (folderId) e.stopPropagation()
     e.dataTransfer.dropEffect = 'move'
+    // Copied as a primitive: a raw ref value flowing into state makes the React Compiler
+    // bail out of this component (and the stable rowHandlers memo with it).
+    const noteId = String(draggingNoteIdRef.current)
     setNoteMoveTarget((prev) =>
-      prev?.groupId === groupId && prev.folderId === folderId ? prev : { groupId, folderId }
+      prev?.groupId === groupId && prev.folderId === folderId ? prev : { groupId, folderId, noteId }
     )
   }
 
@@ -670,7 +731,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     void reorderGroups(without)
   }
 
-  function renderNoteButton(note: Note, group?: { id: string; color: GroupColor } | null, indent?: number, inFavorites?: boolean, wrapperClassName?: string) {
+  function renderNoteButton(note: Note, group?: { id: string; color: GroupColor; name?: string } | null, indent?: number, inFavorites?: boolean, wrapperClassName?: string, staggerIndex?: number) {
     // When the note overview is open the editor is hidden, so the highlighted
     // note must follow that view; otherwise fall back to the active editor note.
     const isActive = noteViewId != null ? noteViewId === note.id : activeNoteId === note.id
@@ -678,12 +739,17 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     const contextKey = getNoteContextKey(note, inFavorites)
     const isDropBefore = noteDropTarget?.noteId === note.id && noteDropTarget.position === 'before'
     const isDropAfter = noteDropTarget?.noteId === note.id && noteDropTarget.position === 'after'
+    const openSectionId = isActive
+      ? resolveOpenSectionId(note.sections.map((sec) => sec.id), openRowPaneSectionId, openRowRememberedSectionId)
+      : null
     return (
       <NoteRow
         key={inFavorites ? `fav-${note.id}` : note.id}
         note={note}
-        groupColor={group?.color ?? null}
+        groupColor={inFavorites ? group?.color ?? null : null}
+        groupName={inFavorites ? group?.name : undefined}
         indent={indent}
+        staggerIndex={staggerIndex}
         inFavorites={inFavorites}
         wrapperClassName={wrapperClassName}
         contextKey={contextKey}
@@ -694,32 +760,45 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         searchQuery={searchQuery}
         sectionFilter={sectionFilter}
         sectionTagColors={sectionTagColors}
+        openSectionId={openSectionId}
+        sectionsStyle={sectionsStyle}
         handlers={rowHandlers}
       />
     )
   }
 
-  function renderFolder(group: { id: string; color: GroupColor }, sf: SidebarFolder) {
+  // "Drop in …" slot at the end of the list a dragged note would land in (only when the
+  // note isn't there already). Rendered by the group/folder that is the move target.
+  function renderDropSlot(name: string) {
+    const dragged = noteMoveTarget ? rawNotes.find((n) => n.id === noteMoveTarget.noteId) : undefined
+    if (!noteMoveTarget || !dropChangesPlace(dragged, noteMoveTarget.groupId, noteMoveTarget.folderId)) return null
+    return (
+      <li className="sbg-slot font-mono" aria-hidden>
+        <span>{tf(t.sidebar.dropIn, { name })}</span>
+      </li>
+    )
+  }
+
+  function renderFolder(group: { id: string; color: GroupColor }, sf: SidebarFolder, staggerIndex: number) {
     const { folder, notes: folderNotes } = sf
     const collapsed = collapsedFolderIds.has(folder.id)
     if (!isSidebarFolderShown(folderNotes.length, hasActiveFilters)) return null
     const isMoveTarget = noteMoveTarget?.folderId === folder.id
+    const hasOpenNote = openNote?.group === group.id && openNote.folder === folder.id
     return (
       <div
         key={`folder-${folder.id}`}
-        className="rounded-md"
+        data-sbg-folder={folder.id}
+        className={`sbg-f${collapsed ? ' is-collapsed' : ''}${hasOpenNote ? ' has-open' : ''}${isMoveTarget ? ' is-drop' : ''}`}
+        // --fi: the header's stagger step; its notes enter after it when the group unfolds.
+        style={{ '--fi': staggerIndex } as React.CSSProperties}
         onDragOver={(e) => handleNoteMoveDragOver(e, group.id, folder.id)}
         onDragLeave={(e) => handleNoteMoveDragLeave(e, group.id, folder.id)}
         onDrop={(e) => handleNoteMoveDrop(e, group.id, folder.id)}
-        style={
-          isMoveTarget
-            ? { boxShadow: `inset 0 0 0 1.5px rgb(${colorChannels(group.color)} / 0.7)`, background: `rgb(${colorChannels(group.color)} / 0.07)` }
-            : undefined
-        }
       >
         {editingFolderId === folder.id ? (
-          <div className="flex items-center gap-1.5 pl-2.5 pr-2 py-1">
-            <FolderOpen size={12} className="flex-shrink-0" fill={`rgb(${colorChannels(group.color)} / 0.22)`} style={{ color: `rgb(${colorChannels(group.color)})` }} />
+          <div className="flex items-center gap-1.5 ml-[17px] px-1.5 py-1">
+            <FolderGlyph />
             <input
               autoFocus
               value={editingFolderName}
@@ -735,16 +814,16 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
                 }
                 if (e.key === 'Escape') setEditingFolderId(null)
               }}
-              className="flex-1 text-[11.5px] font-mono bg-surface-1 border border-text/25 rounded px-1 outline-none text-text"
+              className="flex-1 min-w-0 text-[12px] font-mono bg-surface-1 border border-text/25 rounded px-1 outline-none text-text"
               onClick={(e) => e.stopPropagation()}
             />
           </div>
         ) : (
           <NoteFolderHeader
             folder={folder}
-            groupColor={group.color}
             noteCount={folderNotes.length}
             collapsed={collapsed}
+            staggerIndex={staggerIndex}
             onToggle={() => toggleFolderCollapsed(folder.id)}
             onContextMenu={(e) => {
               setFolderContextMenu({ x: e.clientX, y: e.clientY, folderId: folder.id })
@@ -752,38 +831,27 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
           />
         )}
 
-        {/* Animated collapsible body with a colored guide line */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateRows: collapsed ? '0fr' : '1fr',
-            transition: 'grid-template-rows 180ms ease',
-          }}
-        >
-          <div style={{ overflow: 'hidden', position: 'relative' }}>
-            <div style={{
-              position: 'absolute',
-              left: '14px', top: '3px', bottom: '5px',
-              width: '1px',
-              background: `rgb(${colorChannels(group.color)} / 0.22)`,
-              pointerEvents: 'none',
-              zIndex: 1,
-            }} />
-            <ul className="flex flex-col gap-0.5 mt-0.5">
-              {/* Row starts 2px past the guide line (left 14px); 17px + 9px padding keeps the text at 26px */}
-              {folderNotes.map((note) => renderNoteButton(note, group, 9, false, 'pl-[17px]'))}
-              {folderNotes.length === 0 && (
-                <li>
-                  <button
-                    onClick={() => createNoteInFolder(group.id, folder.id)}
-                    className="w-full text-left pl-[26px] pr-2.5 py-2 text-xs font-mono text-text-muted hover:text-text flex items-center gap-1.5 transition-colors"
-                  >
-                    <Plus size={10} />
-                    {t.common.newNote}
-                  </button>
-                </li>
-              )}
-            </ul>
+        {/* Collapsible body; its guide (.sbg-fin::before) runs under the folder icon */}
+        <div className="sbg-body">
+          <div className="sbg-clip">
+            <div className="sbg-fin">
+              <ul className="sbg-flist">
+                {/* Titles at x=43 (= folder name): 35px wrapper + 8px row padding */}
+                {folderNotes.map((note, j) => renderNoteButton(note, group, 8, false, 'pl-[35px]', staggerStep(j)))}
+                {folderNotes.length === 0 && (
+                  <li>
+                    <button
+                      onClick={() => createNoteInFolder(group.id, folder.id)}
+                      className="w-full text-left pl-[43px] pr-2.5 py-2 text-xs font-mono text-text-muted hover:text-text flex items-center gap-1.5 transition-colors"
+                    >
+                      <Plus size={10} />
+                      {t.common.newNote}
+                    </button>
+                  </li>
+                )}
+                {isMoveTarget && renderDropSlot(folder.name)}
+              </ul>
+            </div>
           </div>
         </div>
       </div>
@@ -795,6 +863,39 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   // forwards to whatever lives here now â€” keeping each row's props stable so memoization
   // holds while these closures still read current state (items, noteOrder, â€¦).
   useLayoutEffect(() => {
+    // Normal (non-split) open of `note` at `sectionId`, shared by the row click (first
+    // section) and the section-tag click. The synchronous request-section event serves the
+    // case where the target editor is already mounted and stays mounted (e.g. clicking
+    // another section of the single open note): it jumps there immediately. When the click
+    // remounts the editor the event is lost (it reaches the editor that's about to
+    // unmount), so we also stash the target section below.
+    const openAtSection = (note: Note, sectionId: string) => {
+      window.dispatchEvent(new CustomEvent('noteflow:request-section', {
+        detail: { noteId: note.id, sectionId },
+      }))
+      // A normal click collapses the layout to this single note. The editor remounts when
+      // the group / note / all-content overview or brain view is open (editor unmounted), OR when a split
+      // with more than one open pane is collapsed to one — in both cases the synchronous
+      // event above never reaches the freshly mounted editor. Stash the target section (the
+      // editor reads it on mount, prioritised over the last-visited one) and re-emit once
+      // it's listening (next macrotask) — same as GroupOverview / BrainView.
+      const { groupViewId, noteViewId: nv, brainViewOpen, allViewOpen, openPanes } = useNotesStore.getState()
+      const editorUnmounted = groupViewId !== null || nv !== null || brainViewOpen || allViewOpen
+      const willRemount = editorUnmounted || openPanes.length > 1
+      if (willRemount) {
+        useNotesStore.setState({ pendingInitialSectionId: sectionId })
+      }
+      setOpenNoteIds([note.id])
+      setActiveNote(note.id)
+      if (willRemount) {
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('noteflow:request-section', {
+            detail: { noteId: note.id, sectionId },
+          }))
+        }, 0)
+      }
+    }
+
     rowApiRef.current = {
       reorderDragOver: (e, note, contextKey) => handleNoteReorderDragOver(e, note, contextKey),
       reorderDragLeave: (noteId) => setNoteDropTarget((prev) => (prev?.noteId === noteId ? null : prev)),
@@ -816,11 +917,13 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
           openNoteInSplit(note.id)
           return
         }
-        // Clicking the note itself opens the note overview (every section with a content
-        // preview). With a single section there's nothing to choose, so go straight to it.
-        // Clicking a section tag (sectionClick) always jumps to that section regardless.
-        if (note.sections.length > 1) {
-          setNoteView(note.id)
+        // Clicking the note itself opens it in the editor at its FIRST section, whatever the
+        // section count (the note overview stays reachable from the editor's overview button
+        // and the section context menu). A locked encrypted note has no sections yet
+        // (`sections: []`): just open it so the editor shows the unlock prompt.
+        const firstSectionId = note.sections[0]?.id
+        if (firstSectionId) {
+          openAtSection(note, firstSectionId)
           return
         }
         setOpenNoteIds([note.id])
@@ -836,43 +939,15 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
           openNoteInSplit(note.id, sectionId)
           return
         }
-        // The synchronous request-section event serves the case where the target editor is
-        // already mounted and stays mounted (e.g. clicking another section of the single
-        // open note): it jumps there immediately. When the click remounts the editor the
-        // event is lost (it reaches the editor that's about to unmount), so we also stash
-        // the target section below.
-        window.dispatchEvent(new CustomEvent('noteflow:request-section', {
-          detail: { noteId: note.id, sectionId },
-        }))
-        // A normal click collapses the layout to this single note. The editor remounts when
-        // the group / note / all-content overview or brain view is open (editor unmounted), OR when a split
-        // with more than one open pane is collapsed to one â€” in both cases the synchronous
-        // event above never reaches the freshly mounted editor. Stash the target section (the
-        // editor reads it on mount, prioritised over the last-visited one) and re-emit once
-        // it's listening (next macrotask) â€” same as GroupOverview / BrainView.
-        const { groupViewId, noteViewId: nv, brainViewOpen, allViewOpen, openPanes } = useNotesStore.getState()
-        const editorUnmounted = groupViewId !== null || nv !== null || brainViewOpen || allViewOpen
-        const willRemount = editorUnmounted || openPanes.length > 1
-        if (willRemount) {
-          useNotesStore.setState({ pendingInitialSectionId: sectionId })
-        }
-        setOpenNoteIds([note.id])
-        setActiveNote(note.id)
-        if (willRemount) {
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('noteflow:request-section', {
-              detail: { noteId: note.id, sectionId },
-            }))
-          }, 0)
-        }
+        openAtSection(note, sectionId)
       },
     }
   })
 
   return (
-    // Floating: the whole panel scrolls as one (search + buttons + list + footer);
-    // pinned: only the notes list scrolls and the header stays put.
-    <div ref={rootRef} className={`flex flex-col h-full bg-surface-1${pinned ? ' border-r border-border' : ' overflow-y-auto notes-list-scroll'}`}>
+    // Both modes: only the notes list scrolls; search, buttons and footer stay put.
+    // Floating has no right border (the floating panel draws its own).
+    <div ref={rootRef} className={`flex flex-col h-full bg-surface-1${pinned ? ' border-r border-border' : ''}`}>
       {modal && (
         <ConfirmModal
           title={modal.title}
@@ -893,6 +968,15 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         sectionTagColors={sectionTagColors}
         handlers={rowHandlers}
         sidebarRef={rootRef}
+      />
+      {/* Opening a note unfolds its row and folds the previous one: slide the rows between. */}
+      <RowShiftFlip activeKey={noteViewId ?? activeNoteId} rootRef={rootRef} />
+      {/* Groups' guide cursor and folding marker: imperative, never re-renders the list. */}
+      <GroupGuides
+        activeKey={noteViewId ?? activeNoteId}
+        rootRef={rootRef}
+        collapsedGroupIds={collapsedGroupIds}
+        collapsedFolderIds={collapsedFolderIds}
       />
 
       {/* â”€â”€ Search + all content + collapse â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
@@ -1008,20 +1092,21 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
       </div>
 
       {/* â”€â”€ Notes list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      <div className={`flex-1${pinned ? ' overflow-y-auto notes-list-scroll' : ''}`}>
+      <div className="flex-1 overflow-y-auto notes-list-scroll">
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-text-muted gap-2">
             <span className="text-2xl opacity-20">âˆ…</span>
             <span className="text-xs font-mono">{rawNotes.length > 0 ? t.sidebar.noNotesMatch : t.sidebar.noNotes}</span>
           </div>
         ) : (
-          <ul className="flex flex-col gap-0.5 px-2.5 pt-2 pb-8">
+          <ul className={`sbg-list flex flex-col gap-0.5 px-2.5 pt-2 pb-8${noteMoveTarget ? ' is-drop-spot' : ''}`}>
             {/* â”€â”€ Favorites section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
             {(() => {
               if (favoriteNotes.length === 0) return null
               return (
                 <>
-                  <li className="px-1 pt-0.5 pb-0.5">
+                  <li className="flex items-center gap-1.5 px-1 pt-0.5 pb-0.5">
+                    <Star size={10} strokeWidth={2.4} className="flex-shrink-0" style={{ color: 'rgb(var(--accent) / 0.8)' }} aria-hidden />
                     <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">{t.sidebar.favoritesHeader}</span>
                   </li>
                   {favoriteNotes.map((note) => {
@@ -1039,6 +1124,9 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
                 // "Show archived" is on (then shown dimmed)
                 if (!isSidebarGroupShown(item, { hasActiveFilters, showArchived })) return null
                 const isFirstGroup = group.id === firstRenderableGroupId
+                const isMoveGroup = noteMoveTarget?.groupId === group.id
+                const isMoveRoot = isMoveGroup && !noteMoveTarget?.folderId
+                const hasOpenNote = openNote?.group === group.id
                 return (
                   <Fragment key={`group-${group.id}`}>
                     {isFirstGroup && (
@@ -1046,20 +1134,20 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
                         <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">{t.sidebar.groupsHeader}</span>
                       </li>
                     )}
+                  {/* "Index with guides" (`.sbg-*` in index.css): --g = group colour for the tab,
+                      guides, cursor and drop marks. */}
                   <li
-                    className={`${isFirstGroup ? '' : 'first:mt-0 mt-1.5'} ${group.archived ? 'opacity-50' : ''} rounded-md`}
+                    data-sbg-group={group.id}
+                    className={`sbg-g${collapsed ? ' is-collapsed' : ''}${hasOpenNote ? ' has-open' : ''}${isMoveGroup ? ' is-drop-group' : ''}${isMoveRoot ? ' is-drop' : ''}${isFirstGroup ? '' : ' first:mt-0 mt-1'}${group.archived ? ' opacity-50' : ''}`}
+                    style={{ '--g': colorChannels(group.color) } as React.CSSProperties}
                     onDragOver={(e) => handleNoteMoveDragOver(e, group.id)}
                     onDragLeave={(e) => handleNoteMoveDragLeave(e, group.id)}
                     onDrop={(e) => handleNoteMoveDrop(e, group.id)}
-                    style={
-                      noteMoveTarget?.groupId === group.id && !noteMoveTarget.folderId
-                        ? { boxShadow: `inset 0 0 0 1.5px rgb(${colorChannels(group.color)} / 0.7)`, background: `rgb(${colorChannels(group.color)} / 0.07)` }
-                        : undefined
-                    }
                   >
-                    {/* Group header / rename input â€” draggable to reorder groups */}
+                    {/* Sticky group header / rename input — draggable to reorder groups */}
                     <div
-                      style={{ position: 'relative', opacity: draggingGroupId === group.id ? 0.4 : 1 }}
+                      className="sbg-gh"
+                      style={draggingGroupId === group.id ? { opacity: 0.4 } : undefined}
                       draggable={editingGroupId !== group.id}
                       onDragStart={(e) => handleGroupDragStart(e, group.id)}
                       onDragOver={(e) => handleGroupDragOver(e, group.id)}
@@ -1080,11 +1168,8 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
                         }} />
                       )}
                       {editingGroupId === group.id ? (
-                        <div className="flex items-center gap-2 px-2 py-1.5">
-                          <span
-                            className="w-2 h-2 rounded-full flex-shrink-0"
-                            style={{ background: `rgb(${colorChannels(group.color)})` }}
-                          />
+                        <div className="flex items-center gap-2 h-full pl-1 pr-1.5">
+                          <span className="sbg-tab" aria-hidden />
                           <input
                             autoFocus
                             value={editingGroupName}
@@ -1100,7 +1185,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
                               }
                               if (e.key === 'Escape') setEditingGroupId(null)
                             }}
-                            className="flex-1 text-[11px] font-mono bg-surface-1 border border-text/25 rounded px-1 outline-none text-text"
+                            className="flex-1 min-w-0 text-[12.5px] font-mono bg-surface-1 border border-text/25 rounded px-1 outline-none text-text"
                             onClick={(e) => e.stopPropagation()}
                           />
                         </div>
@@ -1109,6 +1194,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
                           group={group}
                           noteCount={item.visibleCount}
                           collapsed={collapsed}
+                          openNoteTitle={hasOpenNote ? (openNote.title || t.common.untitled) : null}
                           onToggle={() => toggleGroupCollapsed(group.id)}
                           onOpenGroupView={() => setGroupView(group.id)}
                           onContextMenu={(e) => {
@@ -1120,65 +1206,51 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
                       )}
                     </div>
 
-                    {/* Animated container */}
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateRows: collapsed ? '0fr' : '1fr',
-                        transition: 'grid-template-rows 180ms ease',
-                      }}
-                    >
-                      {/* overflow:hidden reveals the notes topâ†’bottom as the grid expands */}
-                      <div style={{ overflow: 'hidden', position: 'relative' }}>
-                        {/* Group guide line â€” sits one level left of the folder guides */}
-                        <div style={{
-                          position: 'absolute',
-                          left: '1px', top: '3px', bottom: '5px',
-                          width: '1px',
-                          background: `rgb(${colorChannels(group.color)} / 0.5)`,
-                          pointerEvents: 'none',
-                          zIndex: 1,
-                        }} />
-                        {/* Inline "new folder" input */}
-                        {newFolderInput?.groupId === group.id && (
-                          <div className="flex items-center gap-1.5 pl-2.5 pr-2 py-1">
-                            <Folder size={12} className="flex-shrink-0" fill={`rgb(${colorChannels(group.color)} / 0.16)`} style={{ color: `rgb(${colorChannels(group.color)})` }} />
-                            <input
-                              autoFocus
-                              value={newFolderName}
-                              onChange={(e) => setNewFolderName(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') void commitNewFolder()
-                                if (e.key === 'Escape') { setNewFolderInput(null); setNewFolderName('') }
-                              }}
-                              onBlur={() => void commitNewFolder()}
-                              placeholder={t.common.folderNamePlaceholder}
-                              className="flex-1 text-[11.5px] font-mono bg-surface-1 border border-text/25 rounded px-1 outline-none text-text placeholder-text-muted/40"
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          </div>
-                        )}
-                        <ul className="flex flex-col gap-0.5 mt-0.5">
-                          {/* Row starts 2px past the guide line (left 1px); 4px + 6px padding keeps the text at 10px */}
-                          {groupNotes.map((note) => renderNoteButton(note, group, 6, false, 'pl-[4px]'))}
-                          {groupNotes.length === 0 && groupFolders.length === 0 && !newFolderInput && (
-                            <li>
-                              <button
-                                onClick={() => createNoteInGroup(group.id)}
-                                className="w-full text-left px-2.5 py-2 text-xs font-mono text-text-muted hover:text-text flex items-center gap-1.5 transition-colors"
-                              >
-                                <Plus size={10} />
-                                {t.common.newNote}
-                              </button>
-                            </li>
+                    {/* Collapsible body (overflow handled in CSS: hidden only collapsed or
+                        folding, so the folder headers inside can stick). The group guide is
+                        .sbg-in::before; the cursor <i> is placed by GroupGuides. */}
+                    <div className="sbg-body">
+                      <div className="sbg-clip">
+                        <div className="sbg-in">
+                          <i className="sbg-cur is-off" aria-hidden />
+                          {/* Inline "new folder" input */}
+                          {newFolderInput?.groupId === group.id && (
+                            <div className="flex items-center gap-1.5 ml-[17px] px-1.5 py-1">
+                              <FolderGlyph />
+                              <input
+                                autoFocus
+                                value={newFolderName}
+                                onChange={(e) => setNewFolderName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') void commitNewFolder()
+                                  if (e.key === 'Escape') { setNewFolderInput(null); setNewFolderName('') }
+                                }}
+                                onBlur={() => void commitNewFolder()}
+                                placeholder={t.common.folderNamePlaceholder}
+                                className="flex-1 min-w-0 text-[12px] font-mono bg-surface-1 border border-text/25 rounded px-1 outline-none text-text placeholder-text-muted/40"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </div>
                           )}
-                        </ul>
-                        {/* Subfolders */}
-                        {groupFolders.length > 0 && (
-                          <div className="flex flex-col gap-0.5 mt-0.5">
-                            {groupFolders.map((sf) => renderFolder(group, sf))}
-                          </div>
-                        )}
+                          <ul className="sbg-loose">
+                            {/* Titles at x=25 (= group name): 17px wrapper + 8px row padding */}
+                            {groupNotes.map((note, i) => renderNoteButton(note, group, 8, false, 'pl-[17px]', staggerStep(i)))}
+                            {groupNotes.length === 0 && groupFolders.length === 0 && !newFolderInput && (
+                              <li>
+                                <button
+                                  onClick={() => createNoteInGroup(group.id)}
+                                  className="w-full text-left pl-[25px] pr-2.5 py-2 text-xs font-mono text-text-muted hover:text-text flex items-center gap-1.5 transition-colors"
+                                >
+                                  <Plus size={10} />
+                                  {t.common.newNote}
+                                </button>
+                              </li>
+                            )}
+                            {isMoveRoot && renderDropSlot(group.name)}
+                          </ul>
+                          {/* Subfolders (their headers count in the unfold stagger after the loose notes) */}
+                          {groupFolders.map((sf, k) => renderFolder(group, sf, staggerStep(groupNotes.length + k)))}
+                        </div>
                       </div>
                     </div>
                   </li>

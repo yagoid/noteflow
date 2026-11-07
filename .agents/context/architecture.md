@@ -96,7 +96,7 @@ noteflow/
 │   │   ├── groupsStore.ts            # Grupos — persistidos en groups.json (IPC)
 │   │   ├── templatesStore.ts         # Plantillas de nota — persistidas en templates.json (IPC)
 │   │   ├── snippetsStore.ts          # Fragmentos del toolbar — snippets.json (IPC, carga perezosa, autoguardado)
-│   │   ├── themeStore.ts             # Tema/fuente/acento/colores editor — SINCRONIZADO en ui-settings.json (IPC sendSync); escala de UI en localStorage (por dispositivo)
+│   │   ├── themeStore.ts             # Tema/fuente/acento/colores editor — SINCRONIZADO en ui-settings.json (IPC sendSync); escala de UI y estilo de secciones del sidebar en localStorage (por dispositivo)
 │   │   ├── languageStore.ts          # Idioma UI (i18n) — settings.json vía IPC; dict de src/i18n; cambio en caliente vía broadcast
 │   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible/índice (TOC) del editor — SINCRONIZADO en ui-settings.json (IPC)
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
@@ -133,7 +133,11 @@ noteflow/
 │   │   │   ├── Sidebar.tsx              # Lista de notas, filtros, búsqueda, grupos/carpetas
 │   │   │   ├── NoteGroupHeader.tsx      # Cabecera de grupo (nombre→group overview; resto→colapsar)
 │   │   │   ├── NoteFolderHeader.tsx     # Cabecera colapsable de carpeta (dentro de grupo)
-│   │   │   ├── SectionTabsRow.tsx       # Fila de tags de secciones en la tarjeta de nota
+│   │   │   ├── NoteSectionMap.tsx       # Secciones de la fila de nota: línea plegada → peek al hover → mapa
+│   │   │   │                            #   abierto (patterns.md "Sidebar: item de nota"); + SectionCell.tsx
+│   │   │   │                            #   (celda), NoteSectionFlip.tsx (FLIP entre filas), useSectionInk.ts
+│   │   │   ├── SectionTabsRow.tsx       # Fila de celdas de sección con scroll horizontal (ajuste "Scroll row"
+│   │   │   │                            #   de la fila, peek de grupo, tarjetas de overview); + useOpenNoteSection.ts
 │   │   │   ├── SidebarShell.tsx         # Aloja el Sidebar fijado (en el layout) o flotante (panel
 │   │   │   │                            #   superpuesto + mini-vista); ver patterns.md "Sidebar flotante"
 │   │   │   ├── MiniSidebar.tsx          # Mini-vista sin texto del sidebar (modo flotante)
@@ -452,7 +456,9 @@ Contenido del dir de notas:
   locales y hacen seed una vez), `null` = override borrado explícitamente ("sigue al tema"),
   string = valor. Los stores (`themeStore`, `editorSettingsStore`) siguen dual-escribiendo las
   fuentes legacy (settings.json / localStorage) por compatibilidad con downgrade. NO se
-  sincronizan: escala de UI (`noteflow-ui-scale`, localStorage) ni idioma (por dispositivo).
+  sincronizan: escala de UI (`noteflow-ui-scale`, localStorage), estilo de las secciones en las filas
+  del sidebar (`noteflow-sidebar-sections`: ausente = mapa plegado, `'row'` = fila con scroll;
+  localStorage) ni idioma (por dispositivo).
 
 > El dir es configurable desde Settings → "Choose notes directory".
 

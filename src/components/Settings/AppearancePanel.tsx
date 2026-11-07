@@ -63,6 +63,8 @@ export function AppearancePanel() {
   const resetEditorColors = useThemeStore((s) => s.resetEditorColors)
   const uiScale = useThemeStore((s) => s.uiScale)
   const changeUiScale = useThemeStore((s) => s.changeUiScale)
+  const sidebarSectionsStyle = useThemeStore((s) => s.sidebarSectionsStyle)
+  const setSidebarSectionsStyle = useThemeStore((s) => s.setSidebarSectionsStyle)
   const prefer3D = useBrainSettingsStore((s) => s.prefer3D)
   const setPrefer3D = useBrainSettingsStore((s) => s.setPrefer3D)
   const t = useT()
@@ -415,6 +417,38 @@ export function AppearancePanel() {
               <Plus size={14} />
             </button>
           </div>
+        </section>
+
+        {/* Sections of the sidebar note rows (per device) */}
+        <section>
+          <SectionTitle>{t.settings.appearance.sidebarSections}</SectionTitle>
+          <div className="grid grid-cols-2 gap-1.5">
+            {([
+              { value: 'map', label: t.settings.appearance.sidebarSectionsMap, desc: t.settings.appearance.sidebarSectionsMapDesc },
+              { value: 'row', label: t.settings.appearance.sidebarSectionsRow, desc: t.settings.appearance.sidebarSectionsRowDesc },
+            ] as const).map((opt) => {
+              const selected = sidebarSectionsStyle === opt.value
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => setSidebarSectionsStyle(opt.value)}
+                  aria-pressed={selected}
+                  className={`rounded-md border px-3 py-2 text-left transition-colors ${
+                    selected ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className={`text-sm font-mono ${selected ? 'text-accent' : 'text-text'}`}>{opt.label}</span>
+                    {selected && <Check size={12} className="text-accent flex-shrink-0" />}
+                  </div>
+                  <div className="text-[11px] text-text-muted">{opt.desc}</div>
+                </button>
+              )
+            })}
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-text-muted/80">
+            {t.settings.appearance.sidebarSectionsHint}
+          </p>
         </section>
 
         {/* Brain view */}

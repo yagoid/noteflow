@@ -3,6 +3,7 @@ import type { Ref, RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Folder, Lock, Search, Timer } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
+import { useThemeStore, type SidebarSectionsStyle } from '../../stores/themeStore'
 import { colorChannels } from '../../lib/tagColors'
 import { parseSearchQuery } from '../../lib/searchUtils'
 import {
@@ -12,6 +13,10 @@ import {
   moveGroupPeekSelection,
 } from '../../lib/groupPeek'
 import { SectionTabsRow } from './SectionTabsRow'
+import { NoteSectionMap, type NoteSectionHandlers } from './NoteSectionMap'
+import { GROUP_PEEK_PORTAL_ATTR } from './sidebarAnchor'
+import { useOpenNoteSection } from './useOpenNoteSection'
+import { resolveOpenSectionId } from '../../lib/sectionLine'
 import { formatExpiry, formatNoteDate, renderHighlightedText } from './rowText'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
@@ -24,10 +29,14 @@ const OPEN_DELAY = 400
 /** Grace period to cross the gap between header and peek before it closes. */
 const CLOSE_DELAY = 250
 const PEEK_WIDTH = 248
-/** List height cap ≈ five notes with their section chips; it scrolls past that. */
-const LIST_MAX_HEIGHT = 212
+/**
+ * List height cap ≈ five notes, per "Sections in the sidebar" style; it scrolls past that.
+ * 'map': ≈39px per closed note (title + the compact folded line; the active one ≈49px
+ * with its open map). 'row': ≈48px per note (title + a row of compact section cells).
+ */
+const LIST_MAX_HEIGHT: Record<SidebarSectionsStyle, number> = { map: 200, row: 240 }
 /** First-paint height guess, before the panel is measured (it's hidden until then). */
-const ESTIMATED_HEIGHT = 280
+const ESTIMATED_HEIGHT: Record<SidebarSectionsStyle, number> = { map: 260, row: 300 }
 
 /** Why the peek closed — decides where focus goes afterwards. */
 type CloseReason =
@@ -258,6 +267,8 @@ export function GroupPeek({
       if (hoverRef.current) suppressRef.current = hoverRef.current.groupId
       if (!openRef.current) return
       if (e.target instanceof Node && panelRef.current?.contains(e.target)) return
+      // A row's floating section map is portaled out of the panel but belongs to it.
+      if (e.target instanceof Element && e.target.closest(`[${GROUP_PEEK_PORTAL_ATTR}]`)) return
       engine.close('outside')
     }
     // Typing elsewhere (editor) with the pointer resting on a header: don't pop the
@@ -355,13 +366,15 @@ function GroupPeekPanel({
 }: GroupPeekPanelProps) {
   const t = useT()
   const group = item.group
+  // Same "Sections in the sidebar" style as the sidebar's rows (read only while open).
+  const sectionsStyle = useThemeStore((s) => s.sidebarSectionsStyle)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
   const [pos, setPos] = useState(() => groupPeekPosition(
     { top: anchorTop, sidebarRight },
-    { width: PEEK_WIDTH, height: ESTIMATED_HEIGHT },
+    { width: PEEK_WIDTH, height: ESTIMATED_HEIGHT[sectionsStyle] },
     { width: window.innerWidth, height: window.innerHeight },
   ))
   const [ready, setReady] = useState(false)
@@ -370,6 +383,8 @@ function GroupPeekPanel({
   const filtered = useMemo(() => filterGroupPeekEntries(entries, query), [entries, query])
   const { sectionFilter, textQuery } = useMemo(() => parseSearchQuery(query), [query])
   const selectedIndex = filtered.length === 0 ? -1 : Math.min(selected, filtered.length - 1)
+  // Section open on the highlighted note, resolved as the sidebar does for its row.
+  const { paneSectionId, rememberedSectionId } = useOpenNoteSection()
 
   // Measured once, unfiltered (the tallest it gets — filtering only removes rows),
   // so the panel doesn't jump while typing. Hidden until then: no first-frame flash.
@@ -408,7 +423,14 @@ function GroupPeekPanel({
     onClose('navigate')
   }, [handlers, onClose])
 
-  // Escape from anywhere in the peek (search box, a Tab-focused chip…).
+  // The folded map's callbacks ('map' style): a cell opens its section, as a scroll-row
+  // cell does; no context menu in the peek.
+  const mapHandlers = useMemo<NoteSectionHandlers>(
+    () => ({ sectionClick: openSection, sectionContextMenu: suppressContextMenu }),
+    [openSection],
+  )
+
+  // Escape from anywhere in the peek (search box, a Tab-focused section cell…).
   const handlePanelKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'Escape') return
     e.preventDefault()
@@ -447,17 +469,16 @@ function GroupPeekPanel({
         width: PEEK_WIDTH,
         visibility: ready ? 'visible' : 'hidden',
         '--peek-accent': accent,
+        '--g': accent,
       } as React.CSSProperties}
       onMouseEnter={onPointerEnter}
       onMouseLeave={onPointerLeave}
       onKeyDown={handlePanelKeyDown}
     >
-      {/* Thin group-color accent on the left edge, like the group overview */}
-      <div className="absolute left-0 top-0 bottom-0 w-[2px] pointer-events-none" style={{ background: `rgb(${accent} / 0.55)` }} />
-
-      <div className="flex items-center gap-1.5 pl-3 pr-2.5 pt-2 pb-1">
-        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: `rgb(${accent})` }} />
-        <span className="min-w-0 flex-1 truncate text-[10px] font-mono uppercase tracking-wider text-text-muted">
+      {/* Same tab (folded corner, as a collapsed group) and name as the sidebar header */}
+      <div className="flex items-center gap-2 pl-3 pr-2.5 pt-2 pb-1">
+        <span className="sbg-tab is-folded" aria-hidden />
+        <span className="sbg-pname min-w-0 flex-1 truncate font-mono">
           {group.name}
         </span>
         <span className="flex-shrink-0 text-[10px] font-mono text-text-muted/60">
@@ -488,32 +509,44 @@ function GroupPeekPanel({
         </div>
       </div>
 
-      <ul
-        ref={listRef}
-        className="flex flex-col gap-px overflow-y-auto notes-list-scroll pl-2 pr-1.5 pb-1.5"
-        style={{ maxHeight: LIST_MAX_HEIGHT }}
-      >
-        {filtered.length === 0 ? (
-          <li className="px-2 py-2 text-[11px] font-mono text-text-muted/50">{t.sidebar.peekNoMatches}</li>
-        ) : (
-          filtered.map((entry, index) => (
-            <PeekRow
-              key={entry.note.id}
-              note={entry.note}
-              folderName={entry.folder?.name ?? null}
-              index={index}
-              groupColor={group.color}
-              isActive={entry.note.id === activeNoteId}
-              isSelected={index === selectedIndex}
-              textQuery={textQuery}
-              sectionFilter={sectionFilter}
-              sectionTagColors={sectionTagColors}
-              onOpenNote={openNote}
-              onOpenSection={openSection}
-            />
-          ))
-        )}
-      </ul>
+      {/* The group guide runs left of the list (.sbg-peek-list::before, outside the scroller) */}
+      <div className="sbg-peek-list">
+        <ul
+          ref={listRef}
+          className="flex flex-col gap-px overflow-y-auto notes-list-scroll pl-[14px] pr-1.5 pb-1.5"
+          style={{ maxHeight: LIST_MAX_HEIGHT[sectionsStyle] }}
+        >
+          {filtered.length === 0 ? (
+            <li className="px-2 py-2 text-[11px] font-mono text-text-muted/50">{t.sidebar.peekNoMatches}</li>
+          ) : (
+            filtered.map((entry, index) => {
+              const isActive = entry.note.id === activeNoteId
+              return (
+                <PeekRow
+                  key={entry.note.id}
+                  note={entry.note}
+                  folderName={entry.folder?.name ?? null}
+                  index={index}
+                  groupColor={group.color}
+                  isActive={isActive}
+                  openSectionId={isActive
+                    ? resolveOpenSectionId(entry.note.sections.map((s) => s.id), paneSectionId, rememberedSectionId)
+                    : null}
+                  isSelected={index === selectedIndex}
+                  query={query}
+                  textQuery={textQuery}
+                  sectionFilter={sectionFilter}
+                  sectionTagColors={sectionTagColors}
+                  sectionsStyle={sectionsStyle}
+                  mapHandlers={mapHandlers}
+                  onOpenNote={openNote}
+                  onOpenSection={openSection}
+                />
+              )
+            })
+          )}
+        </ul>
+      </div>
     </div>,
     document.body,
   )
@@ -525,33 +558,45 @@ interface PeekRowProps {
   index: number
   groupColor: GroupColor
   isActive: boolean
+  /** Section open on the note when it's the active one (null on every other row). */
+  openSectionId: string | null
   isSelected: boolean
+  /** The peek's raw search (the folded map parses it itself, as in the sidebar). */
+  query: string
   textQuery: string
   sectionFilter: string | null
   sectionTagColors: TagColorMap
+  sectionsStyle: SidebarSectionsStyle
+  mapHandlers: NoteSectionHandlers
   onOpenNote: (e: React.MouseEvent | React.KeyboardEvent, note: Note) => void
   onOpenSection: (e: React.MouseEvent, note: Note, sectionId: string) => void
 }
 
 const suppressContextMenu = (e: React.MouseEvent) => e.preventDefault()
 
-// One note of the peek: a smaller sidebar row (title + date, section chips below).
+// One note of the peek: a smaller sidebar row (title + date; below, its sections in the
+// sidebar's style — folded map or scroll row — with compact cells).
 const PeekRow = memo(function PeekRow({
   note,
   folderName,
   index,
   groupColor,
   isActive,
+  openSectionId,
   isSelected,
+  query,
   textQuery,
   sectionFilter,
   sectionTagColors,
+  sectionsStyle,
+  mapHandlers,
   onOpenNote,
   onOpenSection,
 }: PeekRowProps) {
   const t = useT()
   return (
-    <li>
+    // data-note-row: what NoteSectionMap treats as its row (hover, peek leave, [data-peeking]).
+    <li data-note-row>
       <button
         type="button"
         data-peek-index={index}
@@ -561,7 +606,7 @@ const PeekRow = memo(function PeekRow({
           ${!isActive ? 'hover:bg-surface-3' : ''}
           ${isSelected ? 'ring-1 ring-inset ring-text/20' : ''}`}
         style={{
-          ...(isActive ? { background: `rgb(${colorChannels(groupColor)} / 0.14)` } : {}),
+          ...(isActive ? { background: 'rgb(var(--text) / 0.07)' } : {}),
           ...(isSelected && !isActive ? { background: 'rgb(var(--text) / 0.06)' } : {}),
         }}
         title={t.sidebar.openSideBySide}
@@ -583,18 +628,29 @@ const PeekRow = memo(function PeekRow({
             {formatNoteDate(note.updated, t)}
           </span>
         </div>
-        <SectionTabsRow
-          compact
-          noteId={note.id}
-          sections={note.sections}
-          searchQuery={textQuery}
-          sectionFilter={sectionFilter}
-          sectionTagColors={sectionTagColors}
-          onSectionClick={(sectionId, e) => onOpenSection(e, note, sectionId)}
-          onSectionContextMenu={suppressContextMenu}
-          renderHighlightedText={renderHighlightedText}
-          dimmed={!isActive}
-        />
+        {sectionsStyle === 'row' ? (
+          <SectionTabsRow
+            placement="peek"
+            noteId={note.id}
+            sections={note.sections}
+            searchQuery={textQuery}
+            sectionFilter={sectionFilter}
+            sectionTagColors={sectionTagColors}
+            activeSectionId={openSectionId}
+            onSectionClick={(sectionId, e) => onOpenSection(e, note, sectionId)}
+            onSectionContextMenu={suppressContextMenu}
+          />
+        ) : (
+          <NoteSectionMap
+            inGroupPeek
+            note={note}
+            isActive={isActive}
+            openSectionId={openSectionId}
+            searchQuery={query}
+            sectionTagColors={sectionTagColors}
+            handlers={mapHandlers}
+          />
+        )}
       </button>
     </li>
   )

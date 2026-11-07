@@ -1,48 +1,63 @@
-import { ChevronRight, Folder, FolderOpen } from 'lucide-react'
-import { colorChannels } from '../../lib/tagColors'
-import type { NoteFolder, GroupColor } from '../../types'
+import { ChevronRight } from 'lucide-react'
+import type { NoteFolder } from '../../types'
 
 interface NoteFolderHeaderProps {
   folder: NoteFolder
-  groupColor: GroupColor
   noteCount: number
   collapsed: boolean
+  /** Position in its group's body (unfold stagger), already capped. */
+  staggerIndex: number
   onToggle: () => void
   onContextMenu: (e: React.MouseEvent) => void
 }
 
+/**
+ * Folder icon with a flap that opens when the folder is expanded (`.sbg-folder` in
+ * index.css). Also used by the inline folder rename / new-folder inputs.
+ */
+export function FolderGlyph() {
+  return (
+    <svg className="sbg-folder" width="14" height="13" viewBox="0 0 16 14" aria-hidden>
+      <path className="sbg-folder-b" d="M1.5 3.1c0-.9.7-1.6 1.6-1.6h3.2l1.6 1.7h5c.9 0 1.6.7 1.6 1.6v6.5c0 .9-.7 1.6-1.6 1.6H3.1c-.9 0-1.6-.7-1.6-1.6z" />
+      <path className="sbg-folder-f" d="M1.5 6h13v5.3c0 .9-.7 1.6-1.6 1.6H3.1c-.9 0-1.6-.7-1.6-1.6z" />
+    </svg>
+  )
+}
+
+/**
+ * Folder header inside a group ("index with guides"): sticky under the group header,
+ * folder icon, name, count and a hover/focus-only chevron. Colour (`--g`), collapsed and
+ * open-note state come from the `.sbg-f` wrapper in Sidebar. Styles: `.sbg-*` in index.css.
+ */
 export function NoteFolderHeader({
   folder,
-  groupColor,
   noteCount,
   collapsed,
+  staggerIndex,
   onToggle,
   onContextMenu,
 }: NoteFolderHeaderProps) {
   return (
     <div
-      className={`flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-md cursor-pointer select-none transition-colors hover:bg-surface-3
-        ${collapsed ? '' : 'bg-surface-3/75'}`}
+      role="button"
+      tabIndex={0}
+      aria-expanded={!collapsed}
+      className="sbg-fh select-none"
+      style={{ '--i': staggerIndex } as React.CSSProperties}
       onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+        e.preventDefault()
+        onToggle()
+      }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e) }}
     >
-      <ChevronRight
-        size={11}
-        className="flex-shrink-0 transition-transform duration-150"
-        style={{
-          transform: collapsed ? 'none' : 'rotate(90deg)',
-          color: `rgb(${colorChannels(groupColor)} / 0.7)`,
-        }}
-      />
-      {collapsed
-        ? <Folder size={12} className="flex-shrink-0" fill={`rgb(${colorChannels(groupColor)} / 0.16)`} style={{ color: `rgb(${colorChannels(groupColor)})` }} />
-        : <FolderOpen size={12} className="flex-shrink-0" fill={`rgb(${colorChannels(groupColor)} / 0.22)`} style={{ color: `rgb(${colorChannels(groupColor)})` }} />
-      }
-      <span className="flex-1 text-[11.5px] font-mono font-medium text-text/70 truncate">
-        {folder.name}
-      </span>
-      <span className="text-[10px] font-mono text-text-muted/50 flex-shrink-0">
-        {noteCount}
+      <FolderGlyph />
+      <span className="sbg-fname font-mono">{folder.name}</span>
+      <span className="sbg-sp" />
+      <span className="sbg-count font-mono">{noteCount}</span>
+      <span className="sbg-chev" aria-hidden>
+        <ChevronRight size={12} strokeWidth={2.6} />
       </span>
     </div>
   )

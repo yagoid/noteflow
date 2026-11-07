@@ -1,5 +1,6 @@
 // Pure layout + colour logic of the editor's section map (Editor/SectionMap.tsx): the block
-// of section tabs that wraps onto rows like the tabs of a filing cabinet. The reorder side
+// of section tabs that wraps onto rows like the tabs of a filing cabinet. The row cap is
+// shared with the open map of the sidebar's note row (Sidebar/NoteSectionMap.tsx). The reorder side
 // and the colour helpers are shared with the note overview grid (lib/noteOverviewGrid.ts,
 // lib/sectionInk.ts).
 //
@@ -65,8 +66,8 @@ export interface SectionMapPlanInput {
   tabWidths: readonly number[]
   /** Sections that must stay visible (see visibleSectionIndices). */
   pinned: readonly number[]
-  /** Width of the "+" (add section) tab, always last. */
-  addWidth: number
+  /** Width of the "+" (add section) tab, always last. Omitted when there is none (sidebar). */
+  addWidth?: number
   /** Width of the "+N more" tab (measured with the widest N it can show). */
   moreWidth: number
   containerWidth: number
@@ -90,13 +91,15 @@ export function planSectionMap(input: SectionMapPlanInput): SectionMapPlan {
   const { tabWidths, pinned, addWidth, moreWidth, containerWidth, gap } = input
   const maxRows = input.maxRows ?? SECTION_MAP_MAX_ROWS
   const total = tabWidths.length
-  if (containerWidth <= 0 || countRows([...tabWidths, addWidth], containerWidth, gap) <= maxRows) {
+  // No "+" tab → nothing appended (a 0-wide item would still cost a gap, maybe a row).
+  const tail = addWidth === undefined ? [] : [addWidth]
+  if (containerWidth <= 0 || countRows([...tabWidths, ...tail], containerWidth, gap) <= maxRows) {
     return { visibleCount: total, overflowing: false }
   }
   const minimum = Math.min(total, Math.max(1, visibleSectionIndices(total, pinned, 0).length))
   for (let count = total - 1; count > minimum; count--) {
     const widths = visibleSectionIndices(total, pinned, count).map((i) => tabWidths[i])
-    if (countRows([...widths, moreWidth, addWidth], containerWidth, gap) <= maxRows) {
+    if (countRows([...widths, moreWidth, ...tail], containerWidth, gap) <= maxRows) {
       return { visibleCount: count, overflowing: true }
     }
   }

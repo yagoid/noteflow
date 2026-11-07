@@ -12,6 +12,10 @@ export const SIDEBAR_ANCHOR_ATTR = 'data-sidebar-anchor'
  *  floating panel's hover watchdog counts the pointer on it as inside. */
 export const SIDEBAR_PORTAL_ATTR = 'data-sidebar-portal'
 
+/** Marks an element portaled out of the collapsed-group peek (GroupPeek.tsx) — the
+ *  floating section map of one of its rows: a pointer down on it doesn't close the peek. */
+export const GROUP_PEEK_PORTAL_ATTR = 'data-group-peek-portal'
+
 const listeners = new Set<() => void>()
 
 /** Subscribe to anchors mounting/unmounting. Returns the unsubscribe. */

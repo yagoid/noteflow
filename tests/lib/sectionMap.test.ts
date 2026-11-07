@@ -106,6 +106,23 @@ describe('planSectionMap', () => {
     expect(plan.overflowing).toBe(true)
     expect(plan.visibleCount).toBe(1)
   })
+
+  it('without a "+" tab (sidebar) counts no phantom item', () => {
+    // 100 + 3 + 100 fills the row exactly: a 0-wide "+" would still cost a gap → 2nd row.
+    const input = { tabWidths: [100, 100], pinned: [0], moreWidth: 30, gap: 3, containerWidth: 203.5, maxRows: 1 }
+    expect(planSectionMap(input)).toEqual({ visibleCount: 2, overflowing: false })
+    expect(planSectionMap({ ...input, addWidth: 0 }).overflowing).toBe(true)
+  })
+
+  it('folds the sidebar map into two rows with "+N" and no "+" tab', () => {
+    const plan = planSectionMap({
+      tabWidths: Array(6).fill(60), pinned: [5], moreWidth: 30, gap: 3, containerWidth: 130, maxRows: 2,
+    })
+    expect(plan).toEqual({ visibleCount: 3, overflowing: true })
+    const shown = visibleSectionIndices(6, [5], plan.visibleCount)
+    expect(shown).toEqual([0, 1, 5])
+    expect(countRows([...shown.map(() => 60), 30], 130, 3)).toBe(2)
+  })
 })
 
 describe('colour helpers', () => {

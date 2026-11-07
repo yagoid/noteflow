@@ -119,7 +119,9 @@ export function OverviewNoteCard({
         {note.title || t.common.untitled}
       </span>
 
+      {/* No open section to mark: the overview replaces the editor. */}
       <SectionTabsRow
+        placement="card"
         noteId={note.id}
         sections={note.sections}
         searchQuery=""
@@ -135,7 +137,6 @@ export function OverviewNoteCard({
           e.stopPropagation()
           onContextMenu({ x: e.clientX, y: e.clientY, noteId: note.id, sectionId })
         }}
-        renderHighlightedText={(text) => text}
       />
 
       <span className="text-[10px] font-mono text-text-muted/50 mt-auto">

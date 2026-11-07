@@ -18,6 +18,8 @@ const ACCENT_OVERRIDE_KEY = 'noteflow-accent-override'
 // existing users survive the upgrade with no migration step.
 const EDITOR_COLORS_KEY = 'noteflow-heading-overrides'
 const UI_SCALE_KEY = 'noteflow-ui-scale'
+// How the sidebar note rows show their sections — per device, like the UI scale.
+const SIDEBAR_SECTIONS_KEY = 'noteflow-sidebar-sections'
 
 // "r g b" triplet shape — mirror of RGB_TRIPLET in electron/uiSettings.ts (used
 // to pre-validate the migration seed so it always survives main's sanitizer).
@@ -107,6 +109,20 @@ function applyEditorColors(overrides: EditorColorOverrides, theme: Theme) {
 // Preset UI scale steps. Small 5% increments so bumping the size never jumps
 // jarringly. Applied as the native page zoom (Electron webFrame) so the whole UI
 // scales proportionally while viewport, scrolling and coordinates stay consistent.
+/**
+ * Sections of a sidebar note row: 'map' = folded line that unfolds into the section map
+ * (default); 'row' = always-visible cells in one horizontal-scroll row.
+ */
+export type SidebarSectionsStyle = 'map' | 'row'
+
+function readSidebarSectionsStyle(): SidebarSectionsStyle {
+  try {
+    return localStorage.getItem(SIDEBAR_SECTIONS_KEY) === 'row' ? 'row' : 'map'
+  } catch {
+    return 'map'
+  }
+}
+
 export const UI_SCALES = [0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3]
 export const DEFAULT_UI_SCALE = 1.0
 
@@ -167,6 +183,8 @@ interface ThemeState {
   editorColors: EditorColorOverrides
   /** UI zoom factor (one of UI_SCALES). */
   uiScale: number
+  /** Sections of the sidebar note rows (local to this device, localStorage). */
+  sidebarSectionsStyle: SidebarSectionsStyle
   initTheme: () => void
   /**
    * Re-reads ui-settings.json and re-applies it (idempotent, NEVER writes back
@@ -181,6 +199,7 @@ interface ThemeState {
   resetEditorColors: () => void
   /** Step the UI scale up (+1) or down (-1) through the preset steps. */
   changeUiScale: (direction: 1 | -1) => void
+  setSidebarSectionsStyle: (style: SidebarSectionsStyle) => void
 }
 
 function currentTheme(id: string): Theme {
@@ -193,6 +212,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   accentOverride: null,
   editorColors: { ...EMPTY_EDITOR_COLORS },
   uiScale: DEFAULT_UI_SCALE,
+  sidebarSectionsStyle: readSidebarSectionsStyle(),
 
   initTheme: () => {
     // Synced ui-settings.json wins; each key ABSENT from it falls back to the
@@ -313,5 +333,11 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     localStorage.setItem(UI_SCALE_KEY, String(next))
     applyUiScale(next)
     set({ uiScale: next })
+  },
+
+  setSidebarSectionsStyle: (style) => {
+    if (style === 'row') localStorage.setItem(SIDEBAR_SECTIONS_KEY, 'row')
+    else localStorage.removeItem(SIDEBAR_SECTIONS_KEY)
+    set({ sidebarSectionsStyle: style })
   },
 }))
