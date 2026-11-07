@@ -15,6 +15,7 @@ const METADATA = [
   'section-colors.json',
   'note-order.json',
   'templates.json',
+  'snippets.json',
   'ui-settings.json',
 ] as const
 

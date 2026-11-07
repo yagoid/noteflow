@@ -69,6 +69,7 @@ const activityLog_1 = require("./activityLog");
 const i18n_1 = require("./i18n");
 const settingsFile_1 = require("./settingsFile");
 const whatsNewSeen_1 = require("./whatsNewSeen");
+const snippetsFile_1 = require("./snippetsFile");
 function getIconPath() {
     if (process.platform === 'win32')
         return path_1.default.join(__dirname, '../public/icon.ico');
@@ -682,6 +683,7 @@ const FOLDERS_FILE = path_1.default.join(NOTES_DIR, 'folders.json');
 const SECTION_COLORS_FILE = path_1.default.join(NOTES_DIR, 'section-colors.json');
 const NOTE_ORDER_FILE = path_1.default.join(NOTES_DIR, 'note-order.json');
 const TEMPLATES_FILE = path_1.default.join(NOTES_DIR, 'templates.json');
+const SNIPPETS_FILE = path_1.default.join(NOTES_DIR, 'snippets.json');
 const UI_SETTINGS_FILE = path_1.default.join(NOTES_DIR, 'ui-settings.json');
 const SECTION_COLOR_VALUES = new Set([
     '--accent',
@@ -743,6 +745,7 @@ const RESERVED_ROOT_NAMES = new Set([
     'section-colors.json',
     'note-order.json',
     'templates.json',
+    'snippets.json',
     'ui-settings.json',
     'README.md',
     noteFormat.FORMAT_MARKER_FILE,
@@ -3880,6 +3883,30 @@ electron_1.ipcMain.handle('templates:set', (event, templates) => {
         }
     });
     (0, syncProvider_1.getActiveSyncProvider)().schedulePush('templates.json', content);
+});
+// Editor snippets (toolbar "Snippets" button). Sanitized both ways: the file can
+// arrive from another device through a pull. Other windows get a dedicated
+// event — a path-less `notes-updated` would make them reload every note.
+electron_1.ipcMain.handle('snippets:get', () => {
+    try {
+        return (0, snippetsFile_1.sanitizeSnippets)(JSON.parse(fs_1.default.readFileSync(SNIPPETS_FILE, 'utf-8')), new Date().toISOString());
+    }
+    catch {
+        return [];
+    }
+});
+electron_1.ipcMain.handle('snippets:set', (event, snippets) => {
+    // A malformed payload must never replace the file with [] (and push that).
+    if (!Array.isArray(snippets))
+        return;
+    const content = JSON.stringify((0, snippetsFile_1.sanitizeSnippets)(snippets, new Date().toISOString()), null, 2);
+    fs_1.default.writeFileSync(SNIPPETS_FILE, content, 'utf-8');
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+        if (win.webContents.id !== event.sender.id) {
+            win.webContents.send('snippets-updated');
+        }
+    });
+    (0, syncProvider_1.getActiveSyncProvider)().schedulePush('snippets.json', content);
 });
 // Window controls
 electron_1.ipcMain.on('window:minimize', (event) => {

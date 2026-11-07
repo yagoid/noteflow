@@ -941,6 +941,55 @@ de `src/lib/autoCloseBrackets.ts`; toda la lógica vive en el lib, sin DOM, para
   plugin de input rules se resetea y **Backspace ya no revierte la imagen** a texto (`undoInputRule`)
   en ese caso; `Ctrl+Z` sí.
 
+### Editor: fragmentos (botón partido del toolbar)
+Contenido reutilizable que el usuario configura y se inserta en el cursor desde el toolbar
+(`Editor/SnippetsButton.tsx` + `SnippetsModal.tsx`; lógica pura en `lib/snippets.ts`, tests en
+`tests/lib/snippets.test.ts` y `tests/lib/snippetInsert.test.ts`). Persistencia en `snippets.json`
+(ver `architecture.md`); UX en la skill `noteflow-features`.
+- **Variables:** `{date:FORMATO}`, `{time:FORMATO}` y `{datetime:FORMATO}` formatean **el mismo
+  instante** (el del clic); solo cambia el formato por defecto sin `:FORMATO` (o con `{date:}` vacío):
+  `DD-MM-YYYY`, `HH:mm`, `DD-MM-YYYY HH:mm`. Cualquier otra `{…}` se deja tal cual (no hay escape: el
+  único caso afectado es querer escribir literalmente `{date}`). El formato no puede contener llaves.
+- **Formato estilo moment/dayjs con tokenizador propio** (`formatDateToken`), no los tokens de date-fns
+  (donde `dd`, `D` o `YYYY` significan otra cosa): `YYYY YY MMMM MMM MM M DD D dddd ddd HH H hh h mm m
+  ss s A a`, texto literal entre `[corchetes]`, cualquier otro carácter se copia. Coincidencia más
+  larga primero. `yyyy`/`yy` en minúscula se aceptan como alias del año (`y` no significa nada más
+  aquí). **`MM` = mes, `mm` = minutos**: la leyenda del modal lo avisa y la vista previa en vivo lo hace
+  evidente ("dddd-mm-yy" da minutos).
+- **Nombres de día/mes = tablas estáticas EN/ES** por idioma de la UI (`languageStore.lang`), no
+  `Intl.DateTimeFormat`: la salida debe ser idéntica en cualquier build de ICU (los meses cortos en
+  español varían entre "sept"/"sep" y con o sin punto) y testeable. Español en minúscula ("sábado,
+  7 de noviembre"); AM/PM igual en los dos idiomas.
+- **Inserción** (`snippetCommands.ts`): el texto expandido sigue el mismo camino que pegar markdown
+  (`htmlFromMarkdown` → `DOMParser.parseSlice` → `replaceSelection`), así encabezados, listas y
+  checkboxes se renderizan. Una sola línea sin sintaxis de bloque (`isInlineSnippet`) entra como
+  **slice inline abierto** — se une al texto del cursor en vez de partir el párrafo — conservando los
+  espacios de los bordes, que el parseo recorta. Un fragmento de bloques que acaba en línea en blanco
+  añade un párrafo vacío final para que el caret quede debajo (p. ej. bajo el encabezado del diario).
+  Dentro de un bloque de código entra como texto plano (misma regla que el pegado). El toolbar no existe
+  en Modo texto (`isRawMode`) ni en solo lectura/stickies, así que no hay rama para el textarea crudo.
+- **Modal portalizado dentro del árbol del editor:** los eventos React burbujean igualmente hasta
+  `Editor.tsx`/`NoteEditor.tsx` (Enter tras un `<hr>`, pegado de imágenes, atajos del panel), así que la
+  raíz del modal para `keydown`/`paste`/`drop` y lleva `OWN_KEYS_PROPS`; Escape va por un listener de
+  `window` en captura.
+- **Sin siembra inicial:** con la lista vacía el clic principal abre el modal, con las sugerencias a la
+  vista. Sembrar "Fecha de hoy" duplicaría la entrada al fusionar dos dispositivos (ids distintos) y
+  volvería tras borrarla. Las sugerencias se copian en el idioma actual al añadirlas (nombre y textos
+  internos como "Asistentes"); luego son contenido del usuario.
+- **Autoguardado** (`snippetsStore`): cambios estructurales (añadir, borrar, reordenar, por defecto) se
+  escriben al instante; lo tecleado en el modal con debounce de 400 ms y `flush()` al cerrar.
+  **Merge al recargar** (`snippets-updated` o pull): manda la lista de disco (orden, altas, bajas, por
+  defecto — lo estructural ya se escribió al instante) y encima se re-aplican solo los campos
+  `name`/`content` tecleados aún sin escribir (`pendingEdits` → `applyPendingEdits`, puro y testeado; una
+  edición de un fragmento borrado en otro lado se descarta); la escritura con debounce pendiente guarda
+  luego ese resultado fusionado. Nunca al revés: descartar el reload y escribir la lista local pisaría (y
+  subiría) los cambios de la otra ventana o del remoto. Cada patch se borra de `pendingEdits` solo cuando
+  su escritura aterriza, y una lectura que se solapa con una escritura propia (podría ser anterior a ella)
+  se descarta y se repite al terminar las escrituras. `snippets:set` en main ignora un payload que no sea
+  array (no vacía el fichero). El store se carga perezosamente
+  desde el primer toolbar que se monta (ventana principal y ventanas de sección) y se suscribe a
+  `snippets-updated` y al `notes-updated` sin ruta de los pulls.
+
 ### Búsqueda en nota (Ctrl+F): el match activo se centra
 Al escribir la consulta / cambiar mayúsculas (si hay match) y en cada next/prev, el match activo queda
 **centrado verticalmente** en el área de scroll del editor (el navegador clampa al principio/final).

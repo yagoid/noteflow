@@ -1190,7 +1190,7 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     contenido viejo). Los guards del journal del pull (`shouldPullSkipDir`/`File`,
     guard de borrado) mantienen a salvo lo pendiente.
   - **Metadatos con edición local pendiente** (necesario ahora que el pull va antes del drain;
-    `planMetadataPull`, puro): `groups.json`/`folders.json`/`templates.json` → se escribe la
+    `planMetadataPull`, puro): `groups.json`/`folders.json`/`templates.json`/`snippets.json` → se escribe la
     **unión por `id` prefiriendo lo local** (`mergeMetadataById`) y se re-arma la subida con ella;
     `note-order.json`, `section-colors.json`, `ui-settings.json` → se salta lo remoto (gana lo local,
     el drain lo sube). **Solo con un `lastSync` previo:** en el primer pull de un dispositivo o
@@ -1551,7 +1551,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   perdían los grupos/carpetas/plantillas propios del dispositivo). Ahora (`planMetadataPull`): antes
   de sobrescribir **cualquier** json cuyo contenido local difiera se copia a
   `userData/cloud-metadata-backups/<ISO con ':'→'-'>/<fichero>` (nunca dentro del dir de notas, que
-  se sincroniza); los tres mergeables reciben la **unión por `id` prefiriendo lo remoto**
+  se sincroniza); los mergeables (`CLOUD_MERGEABLE_METADATA`: groups, folders, templates y
+  snippets) reciben la **unión por `id` prefiriendo lo remoto**
   (`mergeMetadataById`: colisiones → lado preferido, su orden primero y luego los extras del otro;
   si alguno no es un array de objetos con `id` string, no se mezcla) y el catch-up la sube; los
   demás: gana lo remoto (con copia). En pulls posteriores gana lo remoto como siempre, salvo la regla
@@ -1773,8 +1774,8 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
 - **`cloud setup` = solo managed** (deposita la DEK en la Edge Function; 409 si ya hay claves); el
   setup e2ee (recovery code una vez) es exclusivo de la app de escritorio.
 - **Crypto y mapeo = puertos 1:1 de `cloudCrypto.ts`/`cloudSyncLogic.ts`** (params idénticos;
-  espejo `CLOUD_METADATA_FILES` con los **6** json de raíz — el `METADATA_FILES` de GitHub del CLI
-  tiene 5, sin `templates.json`). Interop verificada por round-trip contra los módulos compilados
+  espejo `CLOUD_METADATA_FILES` con los **7** json de raíz — el `METADATA_FILES` de GitHub del CLI
+  tiene 5, sin `templates.json` ni `snippets.json`; también espeja `CLOUD_MERGEABLE_METADATA`, sin test que lo compare). Interop verificada por round-trip contra los módulos compilados
   de `dist-electron/`. Cuando se importa como módulo (`require`), el CLI exporta esas funciones
   puras para tests.
 - **Prioridad Cloud sobre GitHub** (espejo de `syncProvider.ts`): con `cliCloud.enabled` + sesión,

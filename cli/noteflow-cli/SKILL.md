@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.7.0
+version: 2.8.0
 ---
 
 # NoteFlow CLI — guía para agentes

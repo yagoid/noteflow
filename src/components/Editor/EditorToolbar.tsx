@@ -34,6 +34,7 @@ import {
 import { setColumnAlign, getColumnAlign } from './tableUtils'
 import { convertTaskListToBoard, insertDefaultBoard, kanbanDefaultColumns, topLevelTaskList } from './kanbanCommands'
 import { useT } from '../../i18n/useT'
+import { SnippetsButton } from './SnippetsButton'
 
 interface ToolbarProps {
   editor: Editor
@@ -76,7 +77,8 @@ export function EditorToolbar({ editor }: ToolbarProps) {
   // Inside a top-level task list the kanban button converts it (as the `/` menu does).
   const inTaskList = topLevelTaskList(editor) !== null
 
-  const buttons: (ToolbarButton | 'sep')[] = [
+  // 'snippets' = the split button of the snippets (its own component: dropdown + modal).
+  const buttons: (ToolbarButton | 'sep' | 'snippets')[] = [
     {
       icon: <Heading1 size={14} />,
       action: () => editor.chain().focus().toggleHeading({ level: 1 }).run(),
@@ -194,6 +196,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       },
       title: inTaskList ? t.editor.slash.convertToKanban : t.editor.toolbar.insertKanban,
     },
+    'snippets',
     'sep',
     {
       icon: <Undo2 size={14} />,
@@ -214,6 +217,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
           if (btn === 'sep') {
             return <div key={`sep-${i}`} className="w-px h-4 bg-border mx-1" />
           }
+          if (btn === 'snippets') return <SnippetsButton key="snippets" editor={editor} />
           return (
             <button
               key={btn.title}

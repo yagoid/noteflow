@@ -50,6 +50,17 @@ export interface NoteTemplate {
   createdAt: string        // ISO timestamp
 }
 
+// A reusable editor snippet inserted from the toolbar ("Snippets" button). Stored in
+// snippets.json (synced) as a plain array in display order — mergeable by id like
+// templates.json. Variables in `content` ({date:FORMAT}…) expand on insert (lib/snippets.ts).
+export interface Snippet {
+  id: string          // nanoid(8)
+  name: string        // label in the toolbar dropdown / modal list
+  content: string     // markdown with date/time variables
+  createdAt: string   // ISO timestamp
+  isDefault?: true    // the toolbar's main-click snippet (fallback: the first one)
+}
+
 // A subfolder inside a group (single nesting level: group → folder → note)
 export interface NoteFolder {
   id: string        // nanoid(8)
@@ -555,6 +566,11 @@ declare global {
       setNoteOrder: (order: Record<string, string[]>) => Promise<void>
       getTemplates: () => Promise<NoteTemplate[]>
       setTemplates: (templates: NoteTemplate[]) => Promise<void>
+      /** Editor snippets (snippets.json in the notes dir, synced); sanitized by main on read and write. */
+      getSnippets: () => Promise<Snippet[]>
+      setSnippets: (snippets: Snippet[]) => Promise<void>
+      /** Another window saved snippets.json (pulls arrive as a path-less `notes-updated`). */
+      onSnippetsUpdated: (callback: () => void) => () => void
       getAppVersion: () => Promise<string>
       /** `error`: the check failed (offline/timeout/bad answer) — it does NOT mean "up to date". */
       checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string; error?: true }>

@@ -69,6 +69,13 @@ const api = {
     setNoteOrder: (order) => electron_1.ipcRenderer.invoke('note-order:set', order),
     getTemplates: () => electron_1.ipcRenderer.invoke('templates:get'),
     setTemplates: (templates) => electron_1.ipcRenderer.invoke('templates:set', templates),
+    getSnippets: () => electron_1.ipcRenderer.invoke('snippets:get'),
+    setSnippets: (snippets) => electron_1.ipcRenderer.invoke('snippets:set', snippets),
+    onSnippetsUpdated: (callback) => {
+        const wrapper = () => callback();
+        electron_1.ipcRenderer.on('snippets-updated', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('snippets-updated', wrapper);
+    },
     // Window controls
     openSticky: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-sticky', noteId, sectionId),
     // Editor-only window for one section (focuses an existing window already on it).

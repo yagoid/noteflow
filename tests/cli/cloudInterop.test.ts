@@ -107,7 +107,7 @@ describe('CLI cloud crypto interop with the app', () => {
 })
 
 describe('CLI cloud mapping parity with cloudSyncLogic', () => {
-  it('mirrors the 6 root metadata filenames', () => {
+  it('mirrors the 7 root metadata filenames', () => {
     expect([...cli.CLOUD_METADATA_FILES]).toEqual([...CLOUD_METADATA_FILENAMES])
   })
 

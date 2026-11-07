@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.7.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.8.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.7.0'
+const CLI_VERSION = '2.8.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -37,8 +37,8 @@ const METADATA_FILES = ['groups.json', 'folders.json', 'section-colors.json', 'n
 
 // Root metadata files synced to NoteFlow Cloud. ⚠️ keep in sync with
 // CLOUD_METADATA_FILENAMES in electron/cloudSyncLogic.ts — note it carries
-// templates.json, which the GitHub METADATA_FILES list above does not.
-const CLOUD_METADATA_FILES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json', 'templates.json', 'ui-settings.json']
+// templates.json and snippets.json, which the GitHub METADATA_FILES list above does not.
+const CLOUD_METADATA_FILES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json', 'templates.json', 'snippets.json', 'ui-settings.json']
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -3258,7 +3258,7 @@ function countDroppedRetries(failures, next) {
 }
 
 // Root metadata merge — ports of mergeMetadataById / planMetadataPull.
-const CLOUD_MERGEABLE_METADATA = ['groups.json', 'folders.json', 'templates.json']
+const CLOUD_MERGEABLE_METADATA = ['groups.json', 'folders.json', 'templates.json', 'snippets.json']
 
 function parseIdArray(json) {
   if (json === null) return null

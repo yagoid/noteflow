@@ -150,10 +150,11 @@ describe('mergeMetadataById (groups / folders / templates)', () => {
     expect(mergeMetadataById('[]', json(remote), 'local')).toBe(json(remote))
   })
 
-  it('only the three id-array files are mergeable', () => {
+  it('only the four id-array files are mergeable', () => {
     expect(isMergeableMetadata('groups.json')).toBe(true)
     expect(isMergeableMetadata('folders.json')).toBe(true)
     expect(isMergeableMetadata('templates.json')).toBe(true)
+    expect(isMergeableMetadata('snippets.json')).toBe(true)
     expect(isMergeableMetadata('note-order.json')).toBe(false)
     expect(isMergeableMetadata('ui-settings.json')).toBe(false)
     expect(isMergeableMetadata('section-colors.json')).toBe(false)

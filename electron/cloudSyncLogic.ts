@@ -33,6 +33,7 @@ export const CLOUD_METADATA_FILENAMES = [
   'section-colors.json',
   'note-order.json',
   'templates.json',
+  'snippets.json',
   'ui-settings.json',
 ] as const
 
@@ -628,7 +629,7 @@ export function shouldResetCloudState(
 // ── Root metadata merge (first sync / unsynced local edits) ───────────────────
 
 /** Root metadata files that are arrays of `{ id }` objects and can be merged by id. */
-export const CLOUD_MERGEABLE_METADATA = ['groups.json', 'folders.json', 'templates.json'] as const
+export const CLOUD_MERGEABLE_METADATA = ['groups.json', 'folders.json', 'templates.json', 'snippets.json'] as const
 
 export function isMergeableMetadata(relPath: string): boolean {
   return (CLOUD_MERGEABLE_METADATA as readonly string[]).includes(relPath)
@@ -652,13 +653,13 @@ function parseIdArray(json: string | null): Array<Record<string, unknown> & { id
 
 /**
  * Union by `id` of two metadata JSON arrays (groups.json / folders.json /
- * templates.json — arrays of objects with a string id). Colliding ids take the
+ * templates.json / snippets.json — arrays of objects with a string id). Colliding ids take the
  * `prefer` side's object; the preferred side's order comes first, then the
  * other side's extras in their order. Returns the merged JSON in the app's
  * on-disk format (2-space indent), or null when either side isn't such an
  * array (not mergeable — the caller picks a side). These entries have no
  * tombstones, so one deleted on a single side comes back from the other:
- * accepted — losing a device's groups/folders/templates is worse.
+ * accepted — losing a device's groups/folders/templates/snippets is worse.
  */
 export function mergeMetadataById(
   localJson: string | null,

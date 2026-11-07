@@ -756,6 +756,35 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   títulos de columna. Los previews de sección (hover, vistas de grupo/nota) y el chat de IA lo
   muestran como un mini tablero de solo lectura.
 
+### Fragmentos (Snippets) — botón del toolbar
+Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del momento.
+- **Botón partido** en la toolbar (icono de sello, tras el kanban): el clic principal inserta el
+  **fragmento por defecto** (tooltip *Insert snippet: <nombre>*); el chevron abre la lista de todos
+  (nombre + vista previa de una línea, ya con la fecha de ahora) y al final **Configure snippets…**.
+  Sin fragmentos, el clic principal abre directamente la configuración. El editor no pierde la
+  selección (lo seleccionado se sustituye). Solo en Modo markdown (en Modo texto no hay toolbar).
+- Se inserta como **markdown**: encabezados, listas y checkboxes se renderizan; un fragmento de una
+  línea sin sintaxis de bloque entra inline en el texto. En un bloque de código entra literal.
+- **Modal "Snippets"** (ventana dentro de la app, Escape cierra, autoguardado): lista a la izquierda
+  (`+` nuevo, estrella = por defecto, ↑/↓ reordenar, papelera = borrar con confirmación en la propia fila) y
+  editor del seleccionado: nombre + contenido (textarea markdown).
+  - **Insert date / time**: formatos predefinidos (`DD-MM-YYYY`, `DD/MM/YY`, `YYYY-MM-DD`, fecha larga
+    con nombre del día y del mes, `ddd DD-MM-YY`, `D MMM YYYY`, `HH:mm`, `hh:mm A`, `DD-MM-YYYY HH:mm`,
+    `YYYY-MM-DD HH:mm:ss`) o **formato personalizado** libre, con el **resultado en vivo**; *Insert
+    into snippet* mete la variable en la posición del cursor del contenido. Leyenda de tokens
+    (desplegable *Tokens*) y aviso: **el mes es `MM`, `mm` son minutos**.
+  - **Preview** del fragmento completo expandido con la fecha actual.
+  - **Suggestions** con *Add*: Today's date, Date and time, Journal entry (`## <fecha larga>` + línea
+    vacía), Meeting (encabezado con fecha + Attendees / Notes / Action items con `- [ ]`), Divider
+    with time (`---` + hora en negrita), Signature. Se añaden en el idioma de la UI como fragmento
+    editable. La lista empieza vacía (sin siembra), con las sugerencias a la vista.
+- **Variables:** `{date}` (`DD-MM-YYYY`), `{time}` (`HH:mm`), `{datetime}` (`DD-MM-YYYY HH:mm`), o con
+  formato `{date:dddd, D [de] MMMM}`; `date`/`time`/`datetime` son el mismo instante (el del clic).
+  Tokens estilo moment: `YYYY YY MMMM MMM MM M DD D dddd ddd HH H hh h mm m ss s A a`, `[texto]` literal.
+  Los nombres de día y mes van en el idioma de la UI (español en minúscula). Otras `{…}` se dejan tal cual.
+- Se guardan en `snippets.json` del dir de notas → se **sincronizan** (GitHub y NoteFlow Cloud; Cloud
+  los fusiona por id entre dispositivos).
+
 ### Búsqueda dentro de la nota
 - `Ctrl+F` (con el editor enfocado) → barra de "Find in note" que resalta coincidencias (también
   dentro de los tableros kanban).
@@ -1407,7 +1436,8 @@ Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
   (`noteflow push` y el push de cada comando) tampoco pisa, pero aún **no fusiona**: guarda tu versión
   como copia de conflicto e imprime `Conflict: local changes kept as "…"`.
 - Se sincronizan notas + `groups.json`, `folders.json`, `section-colors.json`, `note-order.json`,
-  `templates.json`, `ui-settings.json` (apariencia y ajustes del editor).
+  `templates.json`, `snippets.json` (fragmentos del toolbar), `ui-settings.json` (apariencia y ajustes
+  del editor).
 - El repositorio se crea como **privado** automáticamente si no existe.
 
 ### Panel de sync
@@ -1570,7 +1600,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 
 - Notas en `~/noteflow-notes/` (Windows/macOS) / `~/.local/share/noteflow-notes/` (Linux).
 - Junto a ellas: `groups.json`, `folders.json`, `section-colors.json`, `note-order.json`,
-  `templates.json`, `ui-settings.json` (todo sincronizable).
+  `templates.json`, `snippets.json`, `ui-settings.json` (todo sincronizable).
 - Auto-save con debounce tras cada cambio.
 - Formato v2 (carpeta por nota): `note.md` con el frontmatter YAML + un `.md` por sección.
 - Carpeta configurable desde Settings → Data → "Choose notes directory".

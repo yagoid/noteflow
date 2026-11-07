@@ -436,12 +436,18 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     cualquier error no toca ninguno de los dos. Guarda de reentrada `mirrorInFlight` (doble clic) y
     cancelación de los `pushTimers` al empezar (como `pushAllNotes`).
 - **Metadata:** `METADATA_FILENAMES` = groups.json, **folders.json**, section-colors.json,
-  **note-order.json**, templates.json, ui-settings.json (los dos en negrita se pusheaban pero NO
-  se pulleaban — bug arreglado con el cambio de formato). `templates.json` (plantillas) y
-  `ui-settings.json` (apariencia + ajustes del editor, ver `architecture.md`) siguen el mismo
-  patrón simple que note-order: push debounced + pull. ⚠️ La lista tiene un espejo en
-  `CLOUD_METADATA_FILENAMES` (`cloudSyncLogic.ts`), en `RESERVED_ROOT_NAMES` (`main.ts`) y en
-  `METADATA_FILES` del CLI (`cli/noteflow.js`) — mantener las cuatro en sync al añadir un JSON raíz.
+  **note-order.json**, templates.json, snippets.json, ui-settings.json (los dos en negrita se pusheaban
+  pero NO se pulleaban — bug arreglado con el cambio de formato). `templates.json` (plantillas),
+  `snippets.json` (fragmentos del toolbar) y `ui-settings.json` (apariencia + ajustes del editor, ver
+  `architecture.md`) siguen el mismo patrón simple que note-order: push debounced + pull. ⚠️ La lista
+  tiene espejos en `CLOUD_METADATA_FILENAMES` (`cloudSyncLogic.ts`; si el JSON es un array de objetos
+  con `id`, valorar también `CLOUD_MERGEABLE_METADATA`), en `RESERVED_ROOT_NAMES` (`main.ts`) y en el
+  CLI (`cli/noteflow.js`: `CLOUD_METADATA_FILES` — un test de interop lo compara con el de escritorio —
+  y `CLOUD_MERGEABLE_METADATA`; su `METADATA_FILES` de GitHub es más corto: no lleva templates ni
+  snippets) — mantenerlas en sync al añadir un JSON raíz.
+  **Clientes antiguos:** un desktop/CLI anterior que reciba de Cloud un JSON raíz que no conoce lo salta
+  como `unsafe remote path skipped` (error de ese pull, no se reintenta); por GitHub lo ignora (ni lo
+  pullea ni lo borra en el espejo).
   📌 **Pendiente (no implementado):** el pull de metadatos **no arbitra por timestamp** — si el
   contenido difiere gana el remoto. Lo único que hoy evita que un repo con metadatos obsoletos pise
   `groups.json`/`folders.json`/`note-order.json` locales es la caché de SHAs; si esa caché se vacía

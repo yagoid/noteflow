@@ -72,6 +72,7 @@ import {
 import { resolveLang, getTrayMessages, getMessages, type LanguageSetting } from './i18n'
 import { writeSettingsFile } from './settingsFile'
 import { sanitizeSeenIds, mergeSeenIds } from './whatsNewSeen'
+import { sanitizeSnippets } from './snippetsFile'
 
 
 function getIconPath(): string {
@@ -721,6 +722,7 @@ const FOLDERS_FILE = path.join(NOTES_DIR, 'folders.json')
 const SECTION_COLORS_FILE = path.join(NOTES_DIR, 'section-colors.json')
 const NOTE_ORDER_FILE = path.join(NOTES_DIR, 'note-order.json')
 const TEMPLATES_FILE = path.join(NOTES_DIR, 'templates.json')
+const SNIPPETS_FILE = path.join(NOTES_DIR, 'snippets.json')
 const UI_SETTINGS_FILE = path.join(NOTES_DIR, 'ui-settings.json')
 const SECTION_COLOR_VALUES = new Set([
   '--accent',
@@ -781,6 +783,7 @@ const RESERVED_ROOT_NAMES = new Set([
   'section-colors.json',
   'note-order.json',
   'templates.json',
+  'snippets.json',
   'ui-settings.json',
   'README.md',
   noteFormat.FORMAT_MARKER_FILE,
@@ -3968,6 +3971,28 @@ ipcMain.handle('templates:set', (event, templates: unknown[]) => {
     }
   })
   getActiveSyncProvider().schedulePush('templates.json', content)
+})
+
+// Editor snippets (toolbar "Snippets" button). Sanitized both ways: the file can
+// arrive from another device through a pull. Other windows get a dedicated
+// event — a path-less `notes-updated` would make them reload every note.
+ipcMain.handle('snippets:get', () => {
+  try {
+    return sanitizeSnippets(JSON.parse(fs.readFileSync(SNIPPETS_FILE, 'utf-8')), new Date().toISOString())
+  } catch { return [] }
+})
+
+ipcMain.handle('snippets:set', (event, snippets: unknown) => {
+  // A malformed payload must never replace the file with [] (and push that).
+  if (!Array.isArray(snippets)) return
+  const content = JSON.stringify(sanitizeSnippets(snippets, new Date().toISOString()), null, 2)
+  fs.writeFileSync(SNIPPETS_FILE, content, 'utf-8')
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (win.webContents.id !== event.sender.id) {
+      win.webContents.send('snippets-updated')
+    }
+  })
+  getActiveSyncProvider().schedulePush('snippets.json', content)
 })
 
 // Window controls

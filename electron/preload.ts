@@ -103,6 +103,13 @@ const api = {
   setNoteOrder: (order: Record<string, string[]>): Promise<void> => ipcRenderer.invoke('note-order:set', order),
   getTemplates: (): Promise<unknown[]> => ipcRenderer.invoke('templates:get'),
   setTemplates: (templates: unknown[]): Promise<void> => ipcRenderer.invoke('templates:set', templates),
+  getSnippets: (): Promise<unknown[]> => ipcRenderer.invoke('snippets:get'),
+  setSnippets: (snippets: unknown[]): Promise<void> => ipcRenderer.invoke('snippets:set', snippets),
+  onSnippetsUpdated: (callback: () => void) => {
+    const wrapper = () => callback()
+    ipcRenderer.on('snippets-updated', wrapper)
+    return () => ipcRenderer.removeListener('snippets-updated', wrapper)
+  },
 
   // Window controls
   openSticky: (noteId: string, sectionId: string) => ipcRenderer.send('window:open-sticky', noteId, sectionId),

@@ -40,6 +40,7 @@ noteflow/
 │   ├── activityLog.ts   # Lógica pura del log de ediciones por día y dispositivo (userData/activity-log.json):
 │   │                    #   parse/dedupe/poda — testeada; lo persiste main (canales activity:*)
 │   ├── syncProvider.ts  # Interfaz SyncProvider + getActiveSyncProvider() (GitHub ⟂ Cloud) — ver sync.md
+│   ├── snippetsFile.ts  # Pura: saneo de snippets.json (fragmentos del toolbar) en lectura y escritura — testeada
 │   ├── whatsNewSeen.ts  # Pura: saneo/unión de settings.whatsNewSeen (tour "What's new") — testeada;
 │   │                    #   espejo de src/lib/whatsNew.ts — ver patterns.md
 │   ├── tempNoteExpiry.ts # Lógica pura: cuándo puede correr el autoborrado de notas temporales
@@ -94,6 +95,7 @@ noteflow/
 │   │   │                             #   (updateSection/mutateSections), rol de ventana (main/sticky/section)
 │   │   ├── groupsStore.ts            # Grupos — persistidos en groups.json (IPC)
 │   │   ├── templatesStore.ts         # Plantillas de nota — persistidas en templates.json (IPC)
+│   │   ├── snippetsStore.ts          # Fragmentos del toolbar — snippets.json (IPC, carga perezosa, autoguardado)
 │   │   ├── themeStore.ts             # Tema/fuente/acento/colores editor — SINCRONIZADO en ui-settings.json (IPC sendSync); escala de UI en localStorage (por dispositivo)
 │   │   ├── languageStore.ts          # Idioma UI (i18n) — settings.json vía IPC; dict de src/i18n; cambio en caliente vía broadcast
 │   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible/índice (TOC) del editor — SINCRONIZADO en ui-settings.json (IPC)
@@ -107,6 +109,8 @@ noteflow/
 │   │   │   ├── editorExtensions.ts      #   extensiones que definen el esquema (nodos/marcas/atributos); las usan Editor.tsx y el harness de round-trip
 │   │   │   ├── NoteEditor.tsx           # Wrapper con tabs de secciones (click derecho → NoteContextMenu), atajos de fuente
 │   │   │   ├── EditorToolbar.tsx        # Toolbar de formato
+│   │   │   ├── SnippetsButton.tsx       #   botón partido de fragmentos (insertar el por defecto / elegir) + SnippetsModal.tsx
+│   │   │   ├── snippetCommands.ts       #   inserción de un fragmento expandido como markdown (slice inline o de bloques)
 │   │   │   ├── EditorToc.tsx            # Índice flotante H1–H3 (+ useEditorToc.ts: lectura del doc)
 │   │   │   ├── DeadlineTaskItem.ts      # Extensión TipTap: task item con deadline+alarma
 │   │   │   ├── DeadlineTaskItemView.tsx # NodeView React para DeadlineTaskItem
@@ -242,6 +246,8 @@ noteflow/
 │   │   │                         #   conversión con listas de tareas) — testeado
 │   │   ├── kanbanSearch.ts       #   búsqueda en nota dentro de tableros (conteo + resaltado) — testeado
 │   │   ├── whatsNew.ts           # Lógica pura del tour "What's new" (qué mostrar, saneo, media) — testeado
+│   │   ├── snippets.ts           # Fragmentos: variables {date:FORMATO}, tokenizador de formato estilo
+│   │   │                         #   moment, sugerencias y operaciones de lista — testeado (ver patterns.md)
 │   │   └── themes.ts             # Definición de los 14 temas (CSS vars)
 │   ├── i18n/                     # Sistema i18n propio (EN/ES, sin deps): en/ = fuente de verdad
 │   │                            #   del tipo Messages, es/ forzado a paridad; format.ts (tf/plural),
@@ -310,6 +316,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `section-colors:get` / `section-colors:set` | handle | Color por sección → `section-colors.json` (saneado, se sincroniza) |
 | `note-order:get` / `note-order:set` | handle | Orden manual de notas → `note-order.json` (en dir de notas, se sincroniza) |
 | `templates:get` / `templates:set` | handle | Plantillas de nota → `templates.json` (en dir de notas, se sincroniza) |
+| `snippets:get` / `snippets:set` | handle | Fragmentos del toolbar → `snippets.json` (dir de notas, se sincroniza). Main sanea en las dos direcciones (`electron/snippetsFile.ts`); `set` hace broadcast **`snippets-updated`** (no `notes-updated`, que recargaría todas las notas) a las demás ventanas + `schedulePush` |
 | `notes:export` | handle | Exporta a `.noteflow`/`.json`/`.md`/`.txt` (diálogo de guardado) |
 | `notes:parse-import-file` | handle | Abre y parsea un archivo de importación (incluye `.md`/`.txt`) |
 | `notes:parse-external-import` | handle | Importa de otras apps (`'md-folder'\|'notion'\|'keep'`): solo IO en main, devuelve `ExternalNote[]` normalizado; la conversión html→md y grupos son del renderer (detalle en `patterns.md` → Importación) |
@@ -425,6 +432,12 @@ Contenido del dir de notas:
   validador var-only en `sanitizeSectionColors`: borraría los colores personalizados del usuario al guardar.
 - `note-order.json` — orden manual de notas por contexto (`Record<contextKey, string[]>`); contextKey: `'ungrouped'`, `'group:<id>'`, `'folder:<id>'`, `'favorites'`. Gestionado desde `groupsStore` (`noteOrder`, `setContextNoteOrder`).
 - `templates.json` — array de plantillas de nota (`NoteTemplate[]`: `{id,name,title,sections,createdAt}`). Gestionado desde `templatesStore`. Crear nota desde plantilla regenera ids de sección y usa `createPopulatedNote`; "Save as template" en el menú ⋯ del editor captura título + secciones (oculto si la nota está cifrada y bloqueada). UI en Settings → Templates.
+- `snippets.json` — fragmentos del botón del toolbar: **array plano** en orden de visualización de
+  `Snippet` (`{id,name,content,createdAt,isDefault?: true}`); el por defecto es el marcado (si no hay,
+  el primero). Array de objetos con id → Cloud lo **fusiona por id** como `templates.json` (si dos
+  dispositivos marcan uno cada uno, el saneador deja solo el primero). El saneador de main conserva claves
+  desconocidas de cada ítem (compatibilidad hacia delante). No va en `ui-settings.json` porque el móvil
+  re-sanea ese fichero y borraría la clave. Sintaxis y decisiones en `patterns.md` § "Editor: fragmentos".
 - `ui-settings.json` — apariencia (tema, fuente de app, acento, colores del editor) + ajustes del
   editor (tamaño/familia de fuente, ancho legible, índice flotante `showToc`) sincronizados entre dispositivos. Formato y
   saneado/merge en `electron/uiSettings.ts` (módulo puro, tests en `tests/electron/uiSettings.test.ts`).
