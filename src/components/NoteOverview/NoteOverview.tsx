@@ -269,7 +269,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
   // Navigate straight to a clicked section. Stash it in pendingInitialSectionId so the editor
   // (which mounts fresh once the overview closes) opens on the right section with no flash, and
   // re-assert it via the request-section event once the editor is listening — same dance the
-  // group overview and brain view use.
+  // content view and brain view use.
   const openSection = (sectionId: string) => {
     useNotesStore.setState({ pendingInitialSectionId: sectionId })
     setOpenNoteIds([noteId])

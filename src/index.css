@@ -3159,3 +3159,286 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
   }
   .sbg-slot { animation: none; }
 }
+
+/* ── Content view (components/ContentView/) ─────────────────────────────────
+   Header + places rail | notes by date (sections always visible) | section preview.
+   Group colour = `--g` (colorChannels) on a rail group, a row or a tab; the cells reuse
+   the sidebar map's `.nsm-map` / `.nsm-cell` and the line its `.nsm-spine` / `.nsm-seg`
+   (decorative here: no hover growth, no floating unfold). Entry animations use
+   `backwards` fill only: a filling transform would turn the box into a containing block. */
+.cv-root {
+  --nsm-ease: cubic-bezier(.22, .9, .24, 1);
+  --cv-ease: cubic-bezier(.22, .9, .24, 1);
+  display: flex; flex-direction: column; width: 100%; height: 100%;
+  background: rgb(var(--bg-editor)); color: rgb(var(--text)); font-size: 13px; line-height: 1.6;
+}
+.cv-root .sbg-folder-f { fill: rgb(var(--bg-editor)); }
+.cv-root button { text-align: left; }
+@keyframes cv-in { from { opacity: 0; transform: translateY(5px); } }
+
+/* Header */
+.cv-head {
+  flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 16px 22px 14px;
+  animation: cv-in 300ms var(--cv-ease) backwards;
+}
+.cv-head-tt { display: flex; align-items: baseline; gap: 10px; flex: 1 1 auto; min-width: 0; }
+.cv-head-ico, .cv-head-star, .cv-tab-lg { flex: none; align-self: center; }
+.cv-head-ico { color: rgb(var(--text-muted)); }
+.cv-head-star { color: rgb(var(--accent) / 0.85); }
+.sbg-tab.cv-tab-lg { width: 20px; height: 15px; border-radius: 3.5px; }
+.sbg-tab.cv-tab-lg::after { width: 10px; height: 10px; }
+.cv-head-path { flex: none; font-size: 13px; font-weight: 500; line-height: 1.2; color: rgb(var(--text-muted) / 0.8); white-space: nowrap; }
+.cv-head-name {
+  margin: 0; min-width: 0; font-size: 19px; font-weight: 650; line-height: 1.2; letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cv-head-sum {
+  min-width: 0; font-size: 11.5px; line-height: 1.2; color: rgb(var(--text-muted) / 0.7);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums;
+}
+.cv-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cv-search {
+  display: flex; align-items: center; gap: 7px; width: 220px; max-width: 100%; height: 30px; padding: 0 10px;
+  border-radius: 8px; background: rgb(var(--text) / 0.06); color: rgb(var(--text-muted) / 0.75);
+}
+.cv-search:focus-within { box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.55); }
+.cv-search input {
+  flex: 1; min-width: 0; border: 0; outline: none; background: none; color: rgb(var(--text));
+  font: inherit; font-size: 12.5px;
+}
+.cv-search input::placeholder { color: rgb(var(--text-muted) / 0.6); }
+.cv-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 8px;
+  background: rgb(var(--text) / 0.06); color: rgb(var(--text-muted)); font-size: 12px; font-weight: 500;
+  white-space: nowrap; cursor: pointer; transition: background-color 160ms, color 160ms;
+}
+.cv-btn:hover { background: rgb(var(--text) / 0.1); color: rgb(var(--text)); }
+.cv-btn.is-square { justify-content: center; width: 30px; padding: 0; }
+.cv-btn:focus-visible, .cv-ri:focus-visible, .cv-pv-x:focus-visible, .cv-menu-item:focus-visible {
+  outline: none; box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
+}
+.cv-more { position: relative; }
+.cv-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; min-width: 190px; padding: 4px;
+  border-radius: 8px; background: rgb(var(--bg-2));
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 14px 28px -10px rgb(0 0 0 / 0.55);
+  animation: cv-in 140ms ease-out backwards;
+}
+html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--border)), 0 14px 28px -10px rgb(0 0 0 / 0.18); }
+.cv-menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: 6px;
+  font-size: 12px; color: rgb(var(--text)); cursor: pointer;
+}
+.cv-menu-item:hover { background: rgb(var(--text) / 0.07); }
+.cv-menu-check {
+  flex: none; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 4px;
+  border: 1.5px solid rgb(var(--text) / 0.4); color: transparent;
+}
+.cv-menu-check.is-on { border-color: rgb(var(--text)); background: rgb(var(--text)); color: rgb(var(--bg-editor)); }
+
+/* Body: the three columns. A container, so the column widths follow the view's (cqw; the
+   variables are used — and their cqw resolved — on the columns, inside this container).
+   Hand-set widths (ContentView's handles) arrive inline as --cv-rail-w and --cv-pv-w (absent =
+   the default). The list keeps 320px: when room runs out the preview gives way first (down to
+   its floor, 280px or half the view), then the rail (down to 180px); below that, the list.
+   Same arithmetic as lib/contentView.ts clampRailWidth / clampPreviewWidth (COLUMN_LIMITS). */
+.cv-body {
+  /* What the rail measures beyond its setting (the floating sidebar's mini-view reserve). */
+  --cv-rail-extra: 0px;
+  /* The preview's floor while it's shown (`.has-preview`), counted against the rail. */
+  --cv-pv-floor: 0px;
+  --cv-rail-real: calc(
+    clamp(180px, var(--cv-rail-w, 260px), 100cqw - 320px - var(--cv-pv-floor) - var(--cv-rail-extra))
+    + var(--cv-rail-extra)
+  );
+  flex: 1; min-height: 0; display: flex; border-top: 1px solid rgb(var(--border)); container-type: inline-size;
+  animation: cv-in 300ms var(--cv-ease) 50ms backwards;
+}
+.cv-body.has-preview { --cv-pv-floor: min(280px, 50cqw); }
+/* Floating sidebar: the rail also makes room for its mini-view on the left edge. */
+.sidebar-floating .cv-body { --cv-rail-extra: calc(max(14px, var(--mini-sidebar-reserve)) - 14px); }
+/* Handle between two columns: centred on the border, taking no room. */
+.cv-rsz { position: relative; z-index: 4; margin: 0 -2px; }
+.cv-col { min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgb(var(--text) / 0.16) transparent; }
+
+/* Column 1 · places */
+.cv-rail {
+  flex: none; display: flex; flex-direction: column; gap: 1px; width: var(--cv-rail-real); padding: 10px 10px 24px 14px;
+  border-right: 1px solid rgb(var(--border)); user-select: none;
+}
+/* Floating sidebar: room for its mini-view on the left edge (the width is in --cv-rail-real). */
+.sidebar-floating .cv-rail { padding-left: max(14px, var(--mini-sidebar-reserve)); }
+.cv-ri {
+  position: relative; flex: none; display: flex; align-items: center; gap: 8px; min-width: 0; height: 29px; padding: 0 8px;
+  border-radius: 7px; font-size: 12.5px; font-weight: 550; color: rgb(var(--text) / 0.82); cursor: pointer;
+  transition: background-color 150ms, color 150ms, box-shadow 150ms;
+}
+.cv-ri:hover { background: rgb(var(--text) / 0.045); }
+.cv-ri.is-on { background: rgb(var(--text) / 0.08); color: rgb(var(--text)); }
+.cv-ri.is-on::before {
+  content: ''; position: absolute; left: -8px; top: 7px; bottom: 7px; width: 3px; border-radius: 3px;
+  background: rgb(var(--g, var(--accent)));
+}
+.cv-ri.is-drop { background: rgb(var(--g, var(--text)) / 0.12); box-shadow: inset 0 0 0 1.5px rgb(var(--g, var(--text)) / 0.6); }
+.cv-ri-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-ri-ico { flex: none; color: rgb(var(--text-muted)); }
+.cv-ri-star { flex: none; width: 13px; color: rgb(var(--accent) / 0.85); }
+.cv-count {
+  flex: none; font-size: 10.5px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums;
+  color: rgb(var(--text-muted) / 0.5);
+}
+.cv-rail-lab {
+  padding: 14px 8px 6px; font-size: 10px; font-weight: 500; line-height: 1; letter-spacing: 0.14em;
+  text-transform: uppercase; color: rgb(var(--text-muted) / 0.55);
+}
+/* A group and its folders under the group's guide (as the sidebar's `.sbg-in::before`). The
+   guide lives on `.cv-rg-in` (group + folders), so it ends on the last folder and leaves
+   "+ Folder" (and its input) out; a group without folders has none. */
+.cv-rg { position: relative; display: flex; flex-direction: column; gap: 1px; }
+.cv-rg-in { position: relative; display: flex; flex-direction: column; gap: 1px; }
+.cv-rg-in.has-folders::before {
+  content: ''; position: absolute; left: 14.25px; top: 25px; bottom: 6px; width: 1.5px; border-radius: 1px;
+  background: rgb(var(--g) / 0.3); pointer-events: none;
+}
+.cv-rg + .cv-rg { margin-top: 3px; }
+.cv-rg.is-archived { opacity: 0.55; }
+.cv-ri.is-folder { margin-left: 18px; font-size: 12px; font-weight: 500; color: rgb(var(--text-muted)); }
+.cv-ri.is-folder.is-on { color: rgb(var(--text)); }
+.cv-ri.is-ungrouped { margin-top: 4px; }
+.cv-add { font-size: 12px; font-weight: 500; }
+/* Quieter than the folder names (`.cv-ri.is-folder`, text-muted): same specificity, declared after. */
+.cv-ri.cv-add { color: rgb(var(--text-muted) / 0.45); }
+.cv-ri.cv-add:hover { color: rgb(var(--text)); }
+.cv-add-ico { flex: none; width: 13px; }
+.cv-ri-input { cursor: text; background: rgb(var(--text) / 0.045); }
+.cv-ri-input:focus-within { box-shadow: inset 0 0 0 1px rgb(var(--g, var(--accent)) / 0.6); }
+.cv-ri-input input {
+  flex: 1; min-width: 0; border: 0; outline: none; background: none; color: rgb(var(--text)); font: inherit;
+}
+.cv-ri-input input::placeholder { color: rgb(var(--text-muted) / 0.5); }
+.sbg-tab.cv-tab-new { --g: var(--accent); }
+
+/* Column 2 · notes by date */
+.cv-listwrap { position: relative; flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.cv-list { flex: 1; padding: 0 14px 72px; outline: none; }
+.cv-block { margin: 0; }
+.cv-bh {
+  position: sticky; top: 0; z-index: 3; display: flex; align-items: baseline; gap: 10px; margin: 0;
+  padding: 12px 10px 7px; background: rgb(var(--bg-editor));
+  font-size: 12.5px; font-weight: 600; line-height: 1; color: rgb(var(--text) / 0.9);
+}
+.cv-bh span { font-size: 10.5px; font-weight: 400; color: rgb(var(--text-muted) / 0.55); font-variant-numeric: tabular-nums; }
+.cv-row {
+  position: relative; display: grid; grid-template-columns: 50px minmax(0, 1fr) minmax(70px, 140px);
+  align-items: center; column-gap: 14px; padding: 8px 10px 10px; border-radius: 8px; cursor: pointer;
+  scroll-margin-top: 40px; transition: background-color 160ms, opacity 220ms;
+}
+.cv-row + .cv-row { margin-top: 2px; }
+.cv-row:hover { background: rgb(var(--text) / 0.04); }
+.cv-row.is-checked { background: rgb(var(--text) / 0.05); }
+.cv-row.is-sel { background: rgb(var(--text) / 0.07); }
+.cv-row.is-sel::before {
+  content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 3px;
+  background: rgb(var(--g));
+}
+.cv-row.is-dragging { opacity: 0.3; }
+.cv-row.is-archived > :not(.cv-time) { opacity: 0.6; }
+/* Time column; the tick takes its place on hover and for as long as there's a selection. */
+.cv-time { position: relative; align-self: start; display: flex; align-items: center; justify-content: flex-end; height: 20px; }
+.cv-time-label {
+  font-size: 11px; line-height: 1; white-space: nowrap; font-variant-numeric: tabular-nums;
+  color: rgb(var(--text-muted) / 0.6); transition: opacity 150ms;
+}
+.cv-tick {
+  position: absolute; right: 0; top: 50%; display: grid; place-items: center; width: 16px; height: 16px;
+  transform: translateY(-50%); border-radius: 4px; border: 1.5px solid rgb(var(--text) / 0.4);
+  background: rgb(var(--bg-editor) / 0.6); color: transparent; opacity: 0; cursor: pointer;
+  transition: opacity 150ms, background-color 150ms, border-color 150ms;
+}
+.cv-tick:hover { border-color: rgb(var(--text) / 0.7); }
+.cv-tick[aria-checked="true"] { border-color: rgb(var(--text)); background: rgb(var(--text)); color: rgb(var(--bg-editor)); }
+.cv-row:hover .cv-tick, .cv-list.is-selecting .cv-tick { opacity: 1; }
+.cv-row:hover .cv-time-label, .cv-list.is-selecting .cv-time-label { opacity: 0; }
+.cv-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cv-title { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 13px; font-weight: 550; color: rgb(var(--text) / 0.88); }
+.cv-row.is-sel .cv-title { color: rgb(var(--text)); }
+.cv-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-lock, .cv-arch { flex: none; }
+.cv-arch { color: rgb(var(--text-muted)); }
+.cv-route {
+  display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap;
+  font-size: 11.5px; color: rgb(var(--text-muted) / 0.78);
+}
+.cv-route > span { overflow: hidden; text-overflow: ellipsis; }
+.cv-sl { flex: none; color: rgb(var(--text-muted) / 0.4); }
+/* The sidebar's folded line, decorative: no hover growth, no unfold. */
+.cv-line { position: relative; align-self: start; height: 4px; margin-top: 9px; }
+.nsm-map.cv-map { grid-column: 2 / 4; margin-top: 8px; }
+.cv-empty { margin: 0; padding: 18px 10px; font-size: 11.5px; color: rgb(var(--text-muted) / 0.5); }
+.cv-sbar {
+  position: absolute; left: 0; right: 0; bottom: 16px; z-index: 20; display: flex; justify-content: center;
+  padding: 0 12px; pointer-events: none;
+}
+
+/* Column 3 · preview (the X closes it and the list takes the width). Its width: the hand-set
+   one (or the responsive default), never over 70% of the view, and giving way (down to its
+   floor: 280px, or half the view under 560px) so the list keeps 320px next to the rail. Same
+   caps as `clampPreviewWidth` (lib/contentView.ts). The inner box keeps it while closing. */
+.cv-pv {
+  --cv-pv-real: min(var(--cv-pv-w, clamp(300px, 34cqw, 440px)), 70cqw, max(min(280px, 50cqw), 100cqw - var(--cv-rail-real) - 320px));
+  flex: none; width: var(--cv-pv-real); overflow: hidden; border-left: 1px solid rgb(var(--border));
+  transition: width 380ms var(--cv-ease), border-color 200ms;
+}
+.cv-pv.is-closed { width: 0; border-left-color: transparent; }
+/* Dragging a handle: the width follows the pointer (the animation is for opening / closing). */
+.cv-body.is-resizing .cv-pv { transition: none; }
+.cv-pv-in {
+  position: relative; width: var(--cv-pv-real); height: 100%; overflow-y: auto; padding: 18px 22px 28px;
+  scrollbar-width: thin; transition: opacity 220ms;
+}
+.cv-pv.is-closed .cv-pv-in { opacity: 0; pointer-events: none; }
+.cv-pv-x {
+  position: absolute; top: 12px; right: 12px; z-index: 2; display: grid; place-items: center; width: 28px; height: 28px;
+  border-radius: 7px; color: rgb(var(--text-muted)); cursor: pointer; transition: background-color 150ms, color 150ms;
+}
+.cv-pv-x:hover { background: rgb(var(--text) / 0.08); color: rgb(var(--text)); }
+.cv-pv-card { display: flex; flex-direction: column; gap: 12px; animation: cv-in 260ms var(--cv-ease) backwards; }
+.cv-pv-crumb {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 7px; padding-right: 34px;
+  font-size: 12px; font-weight: 500; line-height: 1.3; color: rgb(var(--text-muted) / 0.85);
+}
+.cv-pv-note { color: rgb(var(--text) / 0.85); }
+.cv-pv-title { display: flex; align-items: center; gap: 9px; min-width: 0; margin: 0; font-size: 18px; font-weight: 650; line-height: 1.25; }
+.cv-pv-title > span { min-width: 0; overflow-wrap: anywhere; }
+.cv-pv-title > i { flex: none; width: 12px; height: 12px; border-radius: 3px; background: rgb(var(--c)); }
+.cv-pv-meta { font-size: 11px; line-height: 1.4; color: rgb(var(--text-muted) / 0.65); font-variant-numeric: tabular-nums; }
+/* The section's real content, read-only, at reading size (integer px: see .note-grid-body). */
+.cv-pv-body .prose-editor .ProseMirror { font-size: 13px; line-height: 1.65; color: rgb(var(--text) / 0.86); }
+.cv-pv-body .prose-editor .ProseMirror h1 { margin: 14px 0 6px; font-size: 18px; }
+.cv-pv-body .prose-editor .ProseMirror h2 { margin: 12px 0 5px; font-size: 16px; }
+.cv-pv-body .prose-editor .ProseMirror h3 { margin: 10px 0 4px; font-size: 14px; }
+.cv-pv-body .prose-editor .ProseMirror code { font-size: 12px; }
+.cv-pv-body .prose-editor .ProseMirror pre code { font-size: 12px; }
+.cv-pv-raw {
+  margin: 0; font-family: var(--prose-font-family, 'JetBrains Mono', monospace); font-size: 12px; line-height: 1.6;
+  color: rgb(var(--text) / 0.8); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.cv-pv-sub { margin: 0; font-size: 12px; color: rgb(var(--text-muted) / 0.75); }
+.cv-pv-locked { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 0; font-size: 13px; color: rgb(var(--text-muted)); }
+.cv-pv-locked p { margin: 0; }
+.cv-pv-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.cv-kbd {
+  padding: 3px 5px; border-radius: 4px; background: rgb(var(--text) / 0.08);
+  font-size: 10.5px; line-height: 1; color: rgb(var(--text-muted));
+}
+
+/* Footer: keyboard hints */
+.cv-hint {
+  flex: none; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 7px 22px 9px; border-top: 1px solid rgb(var(--border));
+  font-size: 11px; line-height: 1.4; color: rgb(var(--text-muted) / 0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-head, .cv-body, .cv-menu, .cv-pv-card { animation: none; }
+  .cv-ri, .cv-row, .cv-time-label, .cv-tick, .cv-pv, .cv-pv-in, .cv-btn { transition: none !important; }
+}

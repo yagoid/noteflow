@@ -131,28 +131,30 @@ noteflow/
 │   │   │   └── RawNoteSearchBar.tsx     # Barra búsqueda dentro de la nota (modo texto, `isRawMode`)
 │   │   ├── Sidebar/
 │   │   │   ├── Sidebar.tsx              # Lista de notas, filtros, búsqueda, grupos/carpetas
-│   │   │   ├── NoteGroupHeader.tsx      # Cabecera de grupo (nombre→group overview; resto→colapsar)
+│   │   │   ├── NoteGroupHeader.tsx      # Cabecera de grupo (nombre→vista de contenido del grupo; resto→colapsar)
 │   │   │   ├── NoteFolderHeader.tsx     # Cabecera colapsable de carpeta (dentro de grupo)
 │   │   │   ├── NoteSectionMap.tsx       # Secciones de la fila de nota: línea plegada → peek al hover → mapa
 │   │   │   │                            #   abierto (patterns.md "Sidebar: item de nota"); + SectionCell.tsx
 │   │   │   │                            #   (celda), NoteSectionFlip.tsx (FLIP entre filas), useSectionInk.ts
 │   │   │   ├── SectionTabsRow.tsx       # Fila de celdas de sección con scroll horizontal (ajuste "Scroll row"
-│   │   │   │                            #   de la fila, peek de grupo, tarjetas de overview); + useOpenNoteSection.ts
+│   │   │   │                            #   de la fila y del peek de grupo); + useOpenNoteSection.ts
 │   │   │   ├── SidebarShell.tsx         # Aloja el Sidebar fijado (en el layout) o flotante (panel
 │   │   │   │                            #   superpuesto + mini-vista); ver patterns.md "Sidebar flotante"
 │   │   │   ├── MiniSidebar.tsx          # Mini-vista sin texto del sidebar (modo flotante)
 │   │   │   ├── sidebarAnchor.ts         # Anclas de contenido (data-sidebar-anchor) que mide el panel flotante
 │   │   │   └── useSidebarGroups.ts      # Hook: agrupa/ordena notas por grupo→carpeta
-│   │   ├── OverviewNoteCard.tsx         # Tarjeta de nota compartida (group + all-content) + formatCardDate
-│   │   ├── GroupOverview/
-│   │   │   └── GroupOverview.tsx        # Vista de grupo (sustituye editor): bandas por carpeta
-│   │   │                                #   + "No folder" + "Archived"; reutiliza useSidebarGroups
+│   │   ├── ContentView/                 # Vista de contenido unificada (sustituye editor; patterns.md
+│   │   │   │                            #   "Vista de contenido unificada"; lógica pura en lib/contentView.ts)
+│   │   │   ├── ContentView.tsx          #   Cabecera + estado (lugar, selección, multiselección, teclado, anchos de columna)
+│   │   │   ├── PlacesRail.tsx           #   Columna 1: All / Favorites / grupos+carpetas / Ungrouped (+ Folder / + Group, rename, drop)
+│   │   │   ├── NoteTimeline.tsx         #   Columna 2: notas por bloques de fecha con sus secciones (filas memo)
+│   │   │   └── SectionPreviewPane.tsx   #   Columna 3: contenido real de la sección (solo lectura) + "Open in the editor"
+│   │   ├── SelectionBar.tsx             # Barra flotante de acciones por lotes sobre notas (vista de contenido)
+│   │   ├── GroupContextMenu.tsx         # Menú contextual de grupo (sidebar + columna de lugares de la vista de contenido)
+│   │   ├── FolderContextMenu.tsx        # Menú contextual de carpeta (ídem); clases comunes en contextMenuStyles.ts
 │   │   ├── NoteOverview/
 │   │   │   └── NoteOverview.tsx         # Vista de nota (sustituye editor): el mapa de secciones con la
 │   │   │                                #   vista previa dentro (bloque reticulado, lib/noteOverviewGrid.ts)
-│   │   ├── AllContentOverview/
-│   │   │   └── AllContentOverview.tsx   # Vista "All content" (sustituye editor): índice global —
-│   │   │                                #   Favorites + tiles de grupo + notas sueltas; back inteligente
 │   │   ├── SectionPreview/              # Previsualización de sección reutilizable
 │   │   │   ├── SectionPreviewCard.tsx   #   Tarjeta mini-mock pura (la usan el hover y el cerebro)
 │   │   │   ├── HoverPreviewProvider.tsx #   Provider + popover flotante de hover (sidebar/grupos/editor/IA);
@@ -237,6 +239,8 @@ noteflow/
 │   │   │                         #   vars del tema; mapa del editor + vista de nota)
 │   │   ├── noteOverviewGrid.ts   # Vista de nota: columnas por ancho, filas justificadas, foco por flechas,
 │   │   │                         #   pie de tarjeta (tareas/palabras), recorte del preview — testeado
+│   │   ├── contentView.ts        # Vista de contenido: lugares (all/fav/none/g:/f:), filtro por lugar y archivadas,
+│   │   │                         #   bloques por fecha, ruta de la fila, selección por defecto y rango — testeado
 │   │   ├── searchUtils.ts        # Helpers de búsqueda (normalización, matching)
 │   │   ├── keyScope.ts           # OWN_KEYS_PROPS/ownsKeys: campos que los atajos globales (capture) respetan
 │   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 vars del tema o hex libre);

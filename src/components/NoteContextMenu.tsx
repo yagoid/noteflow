@@ -49,7 +49,7 @@ interface NoteContextMenuProps {
 /**
  * Right-click menu for a note (and optionally a specific section). Self-contained:
  * owns its submenu pickers and the confirm / encryption modals so it can be dropped
- * into any view (sidebar, group overview…). The parent should render it
+ * into any view (sidebar, content view…). The parent should render it
  * unconditionally and toggle visibility through `request`.
  *
  * The modals live here (not in the keyed body) so dismissing the menu doesn't kill

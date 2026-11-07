@@ -3,13 +3,12 @@ export const common = {
   cancel: 'Cancelar',
   confirm: 'Confirmar',
   close: 'Cerrar',
-  closeEsc: 'Cerrar (Esc)',
   delete: 'Eliminar',
   loading: 'Cargando...',
   untitled: 'Sin título',
 
   allContent: 'Todo el contenido',
-  openGroupView: 'Abrir vista de grupo',
+  openGroupView: 'Abrir en la vista de contenido',
 
   newNote: 'Nueva nota',
   newFolder: 'Nueva carpeta',

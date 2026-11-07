@@ -6,14 +6,13 @@ export const common = {
   cancel: 'Cancel',
   confirm: 'Confirm',
   close: 'Close',
-  closeEsc: 'Close (Esc)',
   delete: 'Delete',
   loading: 'Loading...',
   untitled: 'Untitled',
 
   // Shared navigation / view names.
   allContent: 'All content',
-  openGroupView: 'Open group view',
+  openGroupView: 'Open in the content view',
 
   // Note actions shared by the context menu and the overviews.
   newNote: 'New note',

@@ -199,9 +199,9 @@ export const featuresEn = {
   },
 
   views: {
-    title: 'Four ways to see everything',
+    title: 'Three ways to see everything',
     intro: [
-      'Beyond the editor, NoteFlow has four <strong>full-area views</strong> that replace the editing surface (the sidebar stays as context). They\'re mutually exclusive — opening one closes the others, and selecting any note drops you back into the editor.',
+      'Beyond the editor, NoteFlow has three <strong>full-area views</strong> that replace the editing surface (the sidebar stays as context). They\'re mutually exclusive — opening one closes the others, and selecting any note drops you back into the editor.',
       'Want the full width? <strong>Unpin the sidebar</strong> (the button next to its search box, or <kbd>Ctrl</kbd>+<kbd>\'</kbd>): it folds into a faint, text-free <strong>mini-map</strong> at the left edge of the text — one tiny mark per note, group and folder, tinted with their colors — and floats back over the content when you hover it.',
     ],
     cards: [
@@ -211,17 +211,12 @@ export const featuresEn = {
         desc: 'Every section of a note in one grid, with its real content and the one open in the editor highlighted — drag to reorder, double-click a name to rename, add one from the “New section” cell, or multi-select for batch <em>Hide from AI</em> / <em>Delete</em>. Opened from the grid button (⊞) next to the favorite star, or right-click → “Note overview”.',
       },
       {
-        tag: '02 / group overview',
-        name: 'One group, folder by folder',
-        desc: 'A band per folder (plus “No folder” and “Archived”), each a responsive grid of note cards. Drag cards between bands to re-file them, multi-select for batch favorite / archive / move / delete, and widen the cards with a slider to reveal more sections. Opened by clicking a group\'s name.',
+        tag: '02 / content view',
+        name: 'Everything, or one group, by date',
+        desc: 'Three columns: places (all, favorites, each group with its folders, ungrouped), the place\'s notes in date blocks (Today, Yesterday, This week…) with every section visible as a cell, and a read-only preview of the chosen section. Search it, drag notes onto a place to re-file them, add folders and groups inline, multi-select for batch favorite / archive / move / delete, and show archived notes from its ⋯ menu. Opened from the grid button (⊞) next to the sidebar search bar, or by clicking a group\'s name.',
       },
       {
-        tag: '03 / all content',
-        name: 'The whole vault, indexed',
-        desc: 'Favorites, groups (as accordion tiles that expand inline) and loose notes on one screen — with its own search box and a date filter (Today / Week / Month, plus a calendar with per-day activity markers). Opened from the grid button (⊞) next to the sidebar search bar.',
-      },
-      {
-        tag: '04 / brain view',
+        tag: '03 / brain view',
         name: 'The graph',
         desc: 'The window splits into two resizable halves: the AI panel (chat, related notes, profile) on the left, the neural graph — structure edges plus semantic content edges — on the right.',
       },

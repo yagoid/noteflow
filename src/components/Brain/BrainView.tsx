@@ -4,6 +4,7 @@ import { useAiStore } from '../../stores/aiStore'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useNotesStore } from '../../stores/notesStore'
 import { useBrainSettingsStore } from '../../stores/brainSettingsStore'
+import { groupPlace } from '../../lib/contentView'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
 import { useBrainGraph } from './useBrainGraph'
@@ -59,7 +60,7 @@ export function BrainView({ onClose }: { onClose: () => void }) {
 
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
-  const setGroupView = useNotesStore((s) => s.setGroupView)
+  const setContentView = useNotesStore((s) => s.setContentView)
 
   // Clicking a note/section node pins a preview card next to it; clicking the card
   // navigates to that section. (Canvas nodes are drawn, not DOM, so the handlers
@@ -146,7 +147,7 @@ export function BrainView({ onClose }: { onClose: () => void }) {
     }
   }, [setOpenNoteIds, setActiveNote])
 
-  const openGroup = useCallback((groupId: string) => setGroupView(groupId), [setGroupView])
+  const openGroup = useCallback((groupId: string) => setContentView(groupPlace(groupId)), [setContentView])
 
   const enableAi = async () => {
     setEnabling(true)

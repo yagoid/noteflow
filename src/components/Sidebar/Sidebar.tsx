@@ -2,12 +2,13 @@ import { Fragment, memo, useCallback, useMemo, useRef, useEffect, useLayoutEffec
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, ArchiveRestore, Search, PanelLeftClose, PanelLeftOpen, Trash2, Lock, FolderPlus, X, Plus, Timer, LayoutGrid, Star } from 'lucide-react'
-import { ConfirmModal } from '../ConfirmModal'
+import { Archive, Search, PanelLeftClose, PanelLeftOpen, Lock, FolderPlus, X, Plus, Timer, LayoutGrid, Star } from 'lucide-react'
 import { ContextMenu } from '../ContextMenu'
-import { CustomColorSwatch } from '../CustomColorSwatch'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
-import { colorChannels, resolveGroupColor, TAG_COLOR_VARS } from '../../lib/tagColors'
+import { GroupContextMenu, type GroupContextMenuRequest } from '../GroupContextMenu'
+import { FolderContextMenu, type FolderContextMenuRequest } from '../FolderContextMenu'
+import { colorChannels, NEW_GROUP_COLOR, resolveGroupColor } from '../../lib/tagColors'
+import { ALL_PLACE, groupPlace } from '../../lib/contentView'
 import {
   buildMiniSidebarRows,
   isSidebarFolderShown,
@@ -45,8 +46,6 @@ interface SidebarProps {
   /** Receives the mini-view rows (lib/miniSidebar.ts) â€” passed by SidebarShell only while floating. */
   onMiniRows?: (rows: MiniSidebarRow[]) => void
 }
-
-const GROUP_COLORS: GroupColor[] = [...TAG_COLOR_VARS]
 
 // Stable row callbacks shared by every NoteRow. The Sidebar keeps a ref to the live
 // implementations and exposes this fixed-identity object so the memoized rows never
@@ -201,8 +200,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const showArchived = useNotesStore((s) => s.showArchived)
 
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
-  const setGroupView = useNotesStore((s) => s.setGroupView)
-  const setAllView = useNotesStore((s) => s.setAllView)
+  const setContentView = useNotesStore((s) => s.setContentView)
   const updateNote = useNotesStore((s) => s.updateNote)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
@@ -223,14 +221,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const collapsedFolderIds = useGroupsStore((s) => s.collapsedFolderIds)
   const createGroup = useGroupsStore((s) => s.createGroup)
   const renameGroup = useGroupsStore((s) => s.renameGroup)
-  const setGroupColor = useGroupsStore((s) => s.setGroupColor)
-  const toggleGroupArchived = useGroupsStore((s) => s.toggleGroupArchived)
-  const deleteGroup = useGroupsStore((s) => s.deleteGroup)
   const reorderGroups = useGroupsStore((s) => s.reorderGroups)
   const toggleGroupCollapsed = useGroupsStore((s) => s.toggleGroupCollapsed)
   const createFolder = useGroupsStore((s) => s.createFolder)
   const renameFolder = useGroupsStore((s) => s.renameFolder)
-  const deleteFolder = useGroupsStore((s) => s.deleteFolder)
   const toggleFolderCollapsed = useGroupsStore((s) => s.toggleFolderCollapsed)
   const noteOrder = useGroupsStore((s) => s.noteOrder)
   const setContextNoteOrder = useGroupsStore((s) => s.setContextNoteOrder)
@@ -248,18 +242,12 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const [contextMenu, setContextMenu] = useState<NoteContextMenuRequest | null>(null)
 
   // â”€â”€ Group context menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const [groupContextMenu, setGroupContextMenu] = useState<{
-    x: number
-    y: number
-    groupId: string
-  } | null>(null)
+  const [groupContextMenu, setGroupContextMenu] = useState<GroupContextMenuRequest | null>(null)
+  const closeGroupMenu = useCallback(() => setGroupContextMenu(null), [])
 
   // â”€â”€ Folder context menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const [folderContextMenu, setFolderContextMenu] = useState<{
-    x: number
-    y: number
-    folderId: string
-  } | null>(null)
+  const [folderContextMenu, setFolderContextMenu] = useState<FolderContextMenuRequest | null>(null)
+  const closeFolderMenu = useCallback(() => setFolderContextMenu(null), [])
 
   // â”€â”€ Folder rename inline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null)
@@ -280,15 +268,6 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   // â”€â”€ Group drag-to-reorder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null)
   const [groupDropTarget, setGroupDropTarget] = useState<{ groupId: string; position: 'before' | 'after' } | null>(null)
-
-  // â”€â”€ Confirm modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const [modal, setModal] = useState<{
-    title: string
-    message: string
-    confirmLabel: string
-    danger: boolean
-    onConfirm: () => void
-  } | null>(null)
 
   const [keyboardResultIndex, setKeyboardResultIndex] = useState(-1)
   const [newNoteCtx, setNewNoteCtx] = useState<{ x: number; y: number } | null>(null)
@@ -418,11 +397,12 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     }
     return null
   })()
-  // The peek stays shut while something else owns the sidebar: a drag, a menu or
-  // modal, or an inline rename / new group-folder input (it would steal its focus).
+  // The peek stays shut while something else owns the sidebar: a drag, a menu, or an
+  // inline rename / new group-folder input (it would steal its focus). The menus' delete
+  // confirmations (Group/FolderContextMenu) cover the screen, so no header can be hovered.
   const peekBlocked =
     draggingGroupId != null || contextMenu != null || groupContextMenu != null ||
-    folderContextMenu != null || newNoteCtx != null || modal != null ||
+    folderContextMenu != null || newNoteCtx != null ||
     editingGroupId != null || editingFolderId != null || newFolderInput != null || newGroupInput
   // Only label the ungrouped remainder ("notes") when something sits above it â€”
   // a flat list with no favorites and no groups needs no header.
@@ -874,13 +854,13 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         detail: { noteId: note.id, sectionId },
       }))
       // A normal click collapses the layout to this single note. The editor remounts when
-      // the group / note / all-content overview or brain view is open (editor unmounted), OR when a split
+      // the content view, note overview or brain view is open (editor unmounted), OR when a split
       // with more than one open pane is collapsed to one — in both cases the synchronous
       // event above never reaches the freshly mounted editor. Stash the target section (the
       // editor reads it on mount, prioritised over the last-visited one) and re-emit once
-      // it's listening (next macrotask) — same as GroupOverview / BrainView.
-      const { groupViewId, noteViewId: nv, brainViewOpen, allViewOpen, openPanes } = useNotesStore.getState()
-      const editorUnmounted = groupViewId !== null || nv !== null || brainViewOpen || allViewOpen
+      // it's listening (next macrotask) — same as the content view / BrainView.
+      const { contentPlace, noteViewId: nv, brainViewOpen, openPanes } = useNotesStore.getState()
+      const editorUnmounted = contentPlace !== null || nv !== null || brainViewOpen
       const willRemount = editorUnmounted || openPanes.length > 1
       if (willRemount) {
         useNotesStore.setState({ pendingInitialSectionId: sectionId })
@@ -948,16 +928,6 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     // Both modes: only the notes list scrolls; search, buttons and footer stay put.
     // Floating has no right border (the floating panel draws its own).
     <div ref={rootRef} className={`flex flex-col h-full bg-surface-1${pinned ? ' border-r border-border' : ''}`}>
-      {modal && (
-        <ConfirmModal
-          title={modal.title}
-          message={modal.message}
-          confirmLabel={modal.confirmLabel}
-          danger={modal.danger}
-          onConfirm={modal.onConfirm}
-          onCancel={() => setModal(null)}
-        />
-      )}
       <NoteContextMenu request={contextMenu} onClose={() => setContextMenu(null)} />
       <GroupPeek
         controllerRef={peekRef}
@@ -1006,7 +976,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
           )}
         </div>
         <button
-          onClick={() => setAllView(true)}
+          onClick={() => setContentView(ALL_PLACE)}
           title={t.sidebar.viewAllContent}
           aria-label={t.sidebar.viewAllContent}
           className="flex-shrink-0 p-1.5 rounded text-text-muted/50 hover:text-text-muted
@@ -1075,7 +1045,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
             onChange={(e) => setNewGroupName(e.target.value)}
             onKeyDown={async (e) => {
               if (e.key === 'Enter' && newGroupName.trim()) {
-                await createGroup(newGroupName.trim(), '--accent')
+                await createGroup(newGroupName.trim(), NEW_GROUP_COLOR)
                 setNewGroupInput(false)
                 setNewGroupName('')
               }
@@ -1196,7 +1166,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
                           collapsed={collapsed}
                           openNoteTitle={hasOpenNote ? (openNote.title || t.common.untitled) : null}
                           onToggle={() => toggleGroupCollapsed(group.id)}
-                          onOpenGroupView={() => setGroupView(group.id)}
+                          onOpenGroupView={() => setContentView(groupPlace(group.id))}
                           onContextMenu={(e) => {
                             setGroupContextMenu({ x: e.clientX, y: e.clientY, groupId: group.id })
                           }}
@@ -1292,167 +1262,29 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         </ContextMenu>
       )}
 
-      {/* â”€â”€ Group Context Menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      {groupContextMenu && (() => {
-        const group = groups.find(g => g.id === groupContextMenu.groupId)
-        if (!group) return null
-        return (
-          <ContextMenu
-            x={groupContextMenu.x}
-            y={groupContextMenu.y}
-            className="fixed z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 w-44 overflow-hidden animate-in fade-in zoom-in duration-100"
-          >
-            <button
-              onClick={(e) => { e.stopPropagation(); setGroupView(group.id); closeAllMenus() }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              <LayoutGrid size={12} />
-              {t.sidebar.viewGroup}
-            </button>
-            <div className="h-px bg-border my-1" />
-            <button
-              onClick={(e) => { e.stopPropagation(); createNoteInGroup(group.id) }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              <Plus size={12} />
-              {t.common.newNote}
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); startNewFolder(group.id) }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              <FolderPlus size={12} />
-              {t.common.newFolder}
-            </button>
-            <div className="h-px bg-border my-1" />
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setEditingGroupId(group.id)
-                setEditingGroupName(group.name)
-                setGroupContextMenu(null)
-              }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              {t.common.renameGroup}
-            </button>
-
-            {/* Color picker */}
-            <div className="px-3 py-2">
-              <div className="flex gap-1">
-                {GROUP_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    title={color.replace('--', '')}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      void setGroupColor(group.id, color)
-                      setGroupContextMenu(null)
-                    }}
-                    className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${group.color === color ? 'ring-1 ring-white/50 ring-offset-1 ring-offset-surface-2' : ''}`}
-                    style={{ background: `rgb(${colorChannels(color)})` }}
-                  />
-                ))}
-                <CustomColorSwatch
-                  value={group.color}
-                  onPick={(c) => { void setGroupColor(group.id, c) }}
-                />
-              </div>
-            </div>
-
-            <div className="h-px bg-border my-1" />
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                toggleGroupArchived(group.id)
-                setGroupContextMenu(null)
-              }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              {group.archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}
-              {group.archived ? t.common.unarchiveGroup : t.sidebar.archiveGroup}
-            </button>
-
-            <div className="h-px bg-border my-1" />
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setGroupContextMenu(null)
-                setModal({
-                  title: t.sidebar.deleteGroup,
-                  message: tf(t.sidebar.deleteGroupMessage, { name: group.name }),
-                  confirmLabel: t.common.delete,
-                  danger: true,
-                  onConfirm: async () => {
-                    setModal(null)
-                    // Clear group field from all notes in this group
-                    const affectedNotes = rawNotes.filter(n => n.group === group.id)
-                    for (const n of affectedNotes) {
-                      await updateNote(n.id, { group: undefined })
-                    }
-                    deleteGroup(group.id)
-                  },
-                })
-              }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-red-400 hover:bg-red-400/10 flex items-center gap-2 transition-colors"
-            >
-              <Trash2 size={12} />
-              {t.sidebar.deleteGroup}
-            </button>
-          </ContextMenu>
-        )
-      })()}
-
-      {/* â”€â”€ Folder Context Menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      {folderContextMenu && (() => {
-        const folder = folders.find(f => f.id === folderContextMenu.folderId)
-        if (!folder) return null
-        return (
-          <ContextMenu
-            x={folderContextMenu.x}
-            y={folderContextMenu.y}
-            className="fixed z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 w-44 overflow-hidden animate-in fade-in zoom-in duration-100"
-          >
-            <button
-              onClick={(e) => { e.stopPropagation(); createNoteInFolder(folder.groupId, folder.id) }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              <Plus size={12} />
-              {t.common.newNote}
-            </button>
-            <div className="h-px bg-border my-1" />
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setEditingFolderId(folder.id)
-                setEditingFolderName(folder.name)
-                setFolderContextMenu(null)
-              }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              {t.common.renameFolder}
-            </button>
-            <div className="h-px bg-border my-1" />
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setFolderContextMenu(null)
-                setModal({
-                  title: t.common.deleteFolder,
-                  message: tf(t.common.deleteFolderMessage, { name: folder.name }),
-                  confirmLabel: t.common.delete,
-                  danger: true,
-                  onConfirm: () => { setModal(null); deleteFolder(folder.id) },
-                })
-              }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-red-400 hover:bg-red-400/10 flex items-center gap-2 transition-colors"
-            >
-              <Trash2 size={12} />
-              {t.common.deleteFolder}
-            </button>
-          </ContextMenu>
-        )
-      })()}
+      {/* Group / folder context menus (shared with the content view's places rail) */}
+      <GroupContextMenu
+        request={groupContextMenu}
+        onClose={closeGroupMenu}
+        onOpenGroupView={(groupId) => setContentView(groupPlace(groupId))}
+        onNewFolder={(groupId) => startNewFolder(groupId)}
+        onRename={(groupId) => {
+          const group = groups.find((g) => g.id === groupId)
+          if (!group) return
+          setEditingGroupId(group.id)
+          setEditingGroupName(group.name)
+        }}
+      />
+      <FolderContextMenu
+        request={folderContextMenu}
+        onClose={closeFolderMenu}
+        onRename={(folderId) => {
+          const folder = folders.find((f) => f.id === folderId)
+          if (!folder) return
+          setEditingFolderId(folder.id)
+          setEditingFolderName(folder.name)
+        }}
+      />
 
       {/* â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="mx-8 h-px shrink-0 bg-border" />

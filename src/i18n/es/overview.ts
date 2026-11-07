@@ -1,19 +1,5 @@
 export const overview = {
   doubleClickRename: 'Doble clic para renombrar',
-  groupColor: 'Color del grupo',
-  archivedBadge: 'Archivado',
-  cardWidth: 'Ancho de tarjeta',
-  newNoteInGroup: 'Nueva nota en este grupo',
-  groupEmpty: 'Este grupo está vacío',
-  noFolder: 'Sin carpeta',
-  archived: 'Archivadas',
-  emptyDropHint: 'Vacío — suelta una nota aquí',
-  empty: 'Vacío',
-
-  selectAllNotesTooltip: 'Seleccionar todas las notas de este grupo (Ctrl/Cmd+A)',
-  deselectAllNotesTooltip: 'Limpiar la selección (Ctrl/Cmd+A)',
-  selectBandTooltip: 'Seleccionar todas las notas de "{name}"',
-  deselectBandTooltip: 'Deseleccionar todas las notas de "{name}"',
 
   deleteNotes: 'Eliminar notas',
   deleteNotesMessage: '{count} notas se eliminarán permanentemente.',

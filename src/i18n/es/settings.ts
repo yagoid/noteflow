@@ -342,7 +342,7 @@ export const settings = {
     deleteSectionShortcut: 'Eliminar sección',
     nextSection: 'Sección siguiente',
     prevSection: 'Sección anterior',
-    selectAllSections: 'Seleccionar todo (secciones en la vista de nota, notas en la vista de grupo)',
+    selectAllSections: 'Seleccionar todo (secciones en la vista de nota, notas en la vista de contenido)',
     deleteSelectedNote: 'Eliminar la nota seleccionada (cuando no se está editando)',
     openSectionSticky: 'Abrir la sección actual como nota flotante',
     openAllSticky: 'Abrir todas las secciones como notas flotantes',

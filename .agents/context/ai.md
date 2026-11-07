@@ -24,7 +24,7 @@ consumidores** (related ✅, grafo ✅, chat ✅).
   exponen (`get_note`/`list_notes` en `llm/tools.ts` la omiten). Como el modelo no ve su `section_id`,
   tampoco puede editarla. UI: toggle "Hide from AI"/"Show to AI" en (1) el menú ⋯ del editor (sección
   activa) y (2) el `NoteContextMenu` compartido (click derecho sobre un tag de sección en el sidebar,
-  en la group overview, sobre las tarjetas de la note overview y sobre los tabs del editor). Indicador `EyeOff` en la pestaña del
+  en la vista de contenido, sobre las tarjetas de la note overview y sobre los tabs del editor). Indicador `EyeOff` en la pestaña del
   editor, en los tags del sidebar y como badge en las tarjetas de la note overview.
 - **DB:** `userData/ai-index/index.db` (en dev `userData` = `.electron-dev/`). **Fuera del dir de
   notas** → NO se sincroniza a GitHub. Tablas: `notes`, `chunks`, `vec_chunks` (vec0),
@@ -61,7 +61,7 @@ consumidores** (related ✅, grafo ✅, chat ✅).
   contenido** del grafo; la **estructura** (grupo→carpeta→nota) la arma el renderer con
   `useSidebarGroups`. Consumido por `aiStore.fetchGraphEdges` → `useBrainGraph`.
 - **Vista cerebro (`src/components/Brain/`):** modo full-screen conmutable (botón "Cerebro" en el
-  TitleBar → `notesStore.brainViewOpen`, espejo de `groupViewId`; sustituye el editor en `App.tsx`,
+  TitleBar → `notesStore.brainViewOpen`, espejo de `contentPlace`; sustituye el editor en `App.tsx`,
   `setActiveNote` lo cierra). **`BrainView` elige el render según WebGL** (`detectWebGL()`):
   - **`BrainScene.tsx` (3D, POR DEFECTO — Fase 2.5):** cerebro inmersivo con **three.js**
     (`WebGLRenderer` + `EffectComposer`/`UnrealBloomPass` + `OrbitControls`). La forma es una malla

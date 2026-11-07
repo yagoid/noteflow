@@ -4,7 +4,7 @@ import { sidebar } from './sidebar'
 import { shell } from './shell'
 import { noteMenu } from './noteMenu'
 import { overview } from './overview'
-import { allContent } from './allContent'
+import { contentView } from './contentView'
 import { editor } from './editor'
 import { exportImport } from './exportImport'
 import { encryption } from './encryption'
@@ -24,7 +24,7 @@ export const en = {
   shell,
   noteMenu,
   overview,
-  allContent,
+  contentView,
   editor,
   exportImport,
   encryption,

@@ -70,42 +70,153 @@ Dep nueva: `adm-zip` (JS puro, sin binario nativo → no toca `asarUnpack`/posti
   `scripts/import-notion-verify.cjs` (e2e: corre la conversión REAL del renderer en una ventana
   oculta de Electron + esbuild, escribe a un dir temporal; valida 0 pérdida de contenido).
 
-### Vista de grupo (group overview)
-`notesStore` tiene `groupViewId: string | null` + `setGroupView(id)`. Cuando no es `null`,
-`App.tsx` renderiza `GroupOverview` en lugar del editor/paneles (sidebar y TitleBar siguen
-montados). `setActiveNote()` limpia `groupViewId` (seleccionar cualquier nota cierra la vista y
-devuelve el editor). El componente reutiliza `useSidebarGroups` y `updateNote({group,folder})`
-para reorganizar por drag&drop. La navegación a una sección concreta usa `pendingInitialSectionId`
-+ un `noteflow:request-section` diferido con `setTimeout(0)` (el editor monta tras cerrar la vista;
-bajo StrictMode el efecto de montaje consume el `pending` dos veces, de ahí el re-aviso por evento).
-El ancho de tarjeta se guarda en `localStorage` (`noteflow:group-view-card-width`). Sin IPC nuevo.
-`App.tsx` **keya la vista por `groupViewId`** (igual que `NoteOverview` por `noteViewId`): cambiar de
-grupo remonta el componente, así que la selección múltiple y el resto de estado local (rename inline,
-popover de color) no se filtran al grupo nuevo — importante porque las acciones por lotes se calculan
-contra `notes` global, no contra la vista.
-**Selección múltiple:** estado local `selectedIds: Set<string>` en `GroupOverview`; cada `NoteCard`
-recibe `selected`/`selectionActive`/`onToggleSelect` y muestra una checkbox (hover o marcada).
-**Select-all a dos niveles:** el memo `allViewNotes` (notas de las carpetas + sueltas + archivadas, en
-orden de render) es la única fuente para el botón "Select all/Deselect all" de la cabecera y su atajo
-`Ctrl/Cmd+A` (mismo `toggleSelectAll`, con la guarda de INPUT/TEXTAREA/contentEditable y sin `alt`/`shift`,
-que también cubre los inline-edit); cada `Band` recibe `allSelected`/`someSelected`/`onToggleSelectAll`
-(helper `bandSelectProps`) y pinta una checkbox tri-estado en su cabecera que solo añade/quita las notas
-de esa banda (estado parcial → `aria-checked="mixed"` + icono `Minus`). Las
-acciones por lotes (`SelectionBar`, componente al pie del mismo archivo) reusan los primitivos del
-store: `updateNote({favorited})`, `archiveNote` (toggle), `updateNote({group,folder})` y `deleteNote`
-iterando sobre la selección (favorite/archive calculan el target como `!todasYaLoTienen`); el borrado
-pasa por `ConfirmModal`. **Color del grupo:** el punto de la cabecera es un botón que abre un popover
-con la paleta `TAG_COLOR_VARS` + el swatch de color libre (`CustomColorSwatch`) y llama a
-`useGroupsStore.setGroupColor` (misma acción que usa el color picker del menú contextual del sidebar). `Esc` cierra el popover de color si está abierto; si no, limpia
-la selección; si no, cierra la vista (los inline-edit siguen gestionando su propio `Esc`). Sin IPC nuevo.
+### Vista de contenido unificada (`ContentView/`, `lib/contentView.ts`)
+Sustituye a la antigua vista de grupo (`GroupOverview`) y a "All content" (`AllContentOverview`), y con
+ellas a `OverviewNoteCard` (borrados). Una sola vista full-area con cabecera y tres columnas: **lugares**
+(`PlacesRail`), **notas por fecha** (`NoteTimeline`) y **vista previa** (`SectionPreviewPane`), montadas por
+`ContentView.tsx`; estilos `.cv-*` al final de `index.css`. Lógica pura en `src/lib/contentView.ts` con
+tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
+- **Estado (`notesStore`):** `contentPlace: ContentPlace | null` (null = cerrada) + `setContentView(place)`,
+  que también cambia de lugar con la vista abierta. `ContentPlace` es un string tipado: `'all' | 'fav' |
+  'none' | 'g:<groupId>' | 'f:<folderId>'` (helpers `groupPlace`/`folderPlace`/`parsePlace`). Sustituye a
+  `groupViewId`/`setGroupView` y `allViewOpen`/`setAllView`; `openGroupFromAll`/`openNoteFromAll`
+  desaparecen y `cameFromAllView` pasa a `contentReturnPlace` (ver "Vista de nota"). `filterDate` (el
+  filtro de fecha que vivía en "All content") se eliminó del store: los bloques por fecha hacen ese papel.
+- **Entradas:** botón `LayoutGrid` del sidebar → `'all'`; nombre del grupo en el sidebar
+  (`NoteGroupHeader.onOpenGroupView`), "View group" del menú del grupo y clic en un grupo del cerebro
+  (`BrainView.openGroup`) → `groupPlace(id)`. `App.tsx` la monta **sin `key`** (al revés que la vista de
+  nota): cambiar de lugar conserva la nota elegida si sigue en la lista. Es la primera en la prioridad
+  de routing (contenido → cerebro → nota → editor).
+- **Lugares y filtrado:** `noteLocation` resuelve grupo/carpeta efectivos con la misma guarda que
+  `useSidebarGroups` (grupo inexistente → sin grupo; carpeta de otro grupo → raíz). `noteShown` aplica
+  el toggle local **"Show archived"** (menú ⋯ de la cabecera, apagado al abrir; ya no se usa el
+  `showArchived` del sidebar): sin él se ocultan las notas archivadas y las de grupos archivados, salvo
+  las del grupo archivado en el que está la vista (para que abrirlo desde el cerebro no salga vacío).
+  `noteInPlace` filtra por lugar. Los contadores de la columna 1 salen del conjunto mostrado (sin la
+  búsqueda). Si el grupo/carpeta del lugar desaparece (borrado o sync) → `'all'` (`placeExists`).
+- **Anchos de columna (tiradores):** `ColumnHandle` (en `ContentView.tsx`, `role=separator`) entre lugares y
+  notas y entre notas y vista previa (este solo con la vista previa visible); aspecto del tirador del sidebar
+  (`w-1 cursor-col-resize hover:bg-text/30`) y `.cv-rsz` lo centra sobre el borde sin ocupar sitio (margen
+  −2 px). Estado `columnWidths: { rail, preview | null }` persistido en `localStorage`
+  **`noteflow:content-view-widths`** (JSON; lectura y escritura en try/catch; `parseColumnWidths` valida y
+  recorta). Límites en `COLUMN_LIMITS` (`lib/contentView.ts`, con tests): lugares 180–360 (260 por defecto),
+  vista previa 280–1200 y ≤ 70 % de la vista (en pantalla completa el tope real suele ser dejar 320 a la
+  lista), lista 320. `preview: null` = el ancho responsive de siempre
+  (`clamp(300px, 34cqw, 440px)`). Los anchos guardados llegan como `--cv-rail-w` / `--cv-pv-w` inline en
+  `.cv-body` y **el CSS pinta con los mismos topes que los clamps de JS** (sin `ResizeObserver`):
+  - `--cv-rail-real = clamp(180px, rail, 100cqw − 320px − suelo de la vista previa − reserva) + reserva`. La
+    reserva (`--cv-rail-extra`) es la de la mini-vista del sidebar flotante (`.sidebar-floating .cv-body`); el
+    suelo de la vista previa (`--cv-pv-floor = min(280px, 50cqw)`) solo cuenta con `.cv-body.has-preview`.
+  - `--cv-pv-real = min(ancho, 70cqw, max(min(280px, 50cqw), 100cqw − rail real − 320px))` (suelo:
+    `previewFloor`, con `previewFloorShare` 0,5; techo: `previewMaxShare` 0,7 y `previewMax` 1200).
+  - Resultado: la lista conserva 320 px; si falta sitio cede **primero la vista previa** hasta su suelo y
+    **después la columna de lugares** hasta 180; por debajo de eso (p. ej. ventana mínima con sidebar ancho)
+    solo encoge la lista. El 50 % gana al mínimo de 280: en una vista de menos de 560 px la vista previa se
+    pinta a la mitad (y ahí su tirador no tiene recorrido). Lo guardado no se toca al estrechar la ventana:
+    al volver a ensancharla cada columna recupera su ancho.
+  Arrastre: se mide al empezar el ancho del `.cv-body`, el **ancho pintado** de la columna (punto de partida,
+  así no salta) y la reserva (`padding-left` del rail − `railPadding`); se clampa con `clampRailWidth` /
+  `clampPreviewWidth` (misma aritmética que el CSS, `previewFloor`). Cada movimiento escribe la variable CSS
+  **directamente en el DOM** (sin re-render) y al soltar se guarda en estado + `localStorage` (un clic sin
+  mover no guarda nada, para que el primer clic del doble clic no fije el ancho; soltar fuera de la ventana
+  termina el arrastre por `buttons === 0`). Mientras se arrastra, `.cv-body.is-resizing` quita la transición
+  de `width` de `.cv-pv` (la animación es solo de abrir/cerrar). Doble clic → ancho por defecto.
+- **Columna 1:** All, Favorites, "Places", cada grupo (pestaña `.sbg-tab` del sidebar + contador) con
+  sus carpetas (`FolderGlyph`) bajo una guía vertical del color (`.cv-rg-in.has-folders::before`, como
+  `.sbg-in::before`): `.cv-rg-in` envuelve solo grupo + carpetas, así la guía **termina en la última carpeta**
+  y deja fuera "+ Folder" y su input; un grupo sin carpetas no lleva guía. Luego "+ Group" y Ungrouped. Grupos
+  archivados al final y atenuados (solo con el toggle o si son el lugar). Lugar elegido = fondo neutro + barra
+  de 3 px del color (`::before`). "+ Folder" / "+ Group" van más apagados que los nombres de carpeta
+  (`.cv-ri.cv-add`: `text-muted` al 45 %, `text` al hover; el selector de dos clases es necesario para ganar
+  a `.cv-ri.is-folder`). **Edición inline (`InlineName`)**: estado `railEdit` de `ContentView` (`RailEdit`:
+  add-folder / add-group / rename-group / rename-folder; vive en la vista porque los menús contextuales también
+  la abren). "+ Folder" / "+ Group": Enter o blur con texto crea (`createFolder` / `createGroup(name,
+  NEW_GROUP_COLOR)` — constante de `lib/tagColors.ts` que usa también el "+ grupo" del sidebar, `'--accent'`)
+  y selecciona el lugar nuevo; Esc o blur vacío cancela; un `doneRef` evita el doble alta por el blur tardío.
+  Rename: el mismo input en el sitio del nombre, con el nombre seleccionado; guarda solo si cambia.
+- **Menús contextuales de grupo y carpeta (compartidos con el sidebar):** `components/GroupContextMenu.tsx` y
+  `components/FolderContextMenu.tsx` (clases en `components/contextMenuStyles.ts`), extraídos del `Sidebar`
+  y usados en los dos sitios con las mismas acciones. Patrón de `NoteContextMenu`: siempre montados con
+  `request | null`, se cierran con clic fuera o Esc, y el `ConfirmModal` de borrar vive en el componente (sobrevive
+  al cierre del menú). Grupo: View group (prop opcional `onOpenGroupView`; la columna 1 no la pasa porque ya
+  está en la vista), new note, new folder, rename, color (8 del tema + `CustomColorSwatch`), archive y delete
+  (quita el grupo de sus notas y `deleteGroup`). Carpeta: new note, rename y delete. Las acciones que dependen
+  de la lista (new folder, rename) son callbacks: el sidebar abre sus inputs y la vista, `railEdit`. Borrar el
+  grupo o la carpeta que es el lugar actual cae a `'all'` por el efecto de `placeExists`. El snapshot del Esc
+  cuenta también estos menús.
+  Grupos, carpetas y Ungrouped son destino de soltar (`placeMovePatch` → `updateNote({group, folder})`,
+  no-op con `alreadyInPlace`); aceptan también notas arrastradas desde el sidebar (`application/x-noteflow-note-id`).
+  Con el sidebar flotante la columna reserva `--mini-sidebar-reserve` a la izquierda (mini-vista).
+- **Columna 2:** notas por `updated` desc (`sortByUpdatedDesc`) en bloques `dateBlock`: today, yesterday,
+  week (el resto de los últimos 7 días naturales: desde las 00:00 de hace 6 días), month
+  (últimos 30 días desde ahora) y older; aritmética de calendario (DST) y una hora futura (reloj de otro
+  dispositivo) cuenta como hoy. Cabecera de bloque sticky con contador. `now` es estado que solo cambia
+  cuando cambia el día (intervalo de 60 s), así las filas no se re-renderizan cada minuto. Fila = grid
+  `50px | 1fr | minmax(70px,140px)`: hora (`timeLabelKind`: HH:mm hoy y ayer, `EEE` esta semana,
+  `d MMM` antes; formateada **en la fila** con `formatDate` para seguir el idioma), título (+ candado,
+  + icono de archivo si archivada), ruta según `routeMode` (full / folder / none: se omite lo que dice el
+  lugar) y la línea de segmentos (`.nsm-spine`/`.nsm-seg` + `sectionLineWeights`) **decorativa**: la fila
+  no lleva `data-note-row`, así que no engorda al hover ni despliega. **Secciones siempre visibles:** un
+  `.nsm-map.cv-map` (de la columna del título al final) con `SectionCell` (`focusable={false}`), la elegida
+  `active` con la tinta de `useSectionInk`; con búsqueda, `sectionSearchMatch` tiñe las que coinciden y atenúa
+  el resto. El hover preview de `SectionCell` se mantiene. `TimelineRow` es `memo` con props planas (nota +
+  primitivas: la vista rehace sus entradas cuando cambia la lista) y handlers por fachada estable (ref en
+  `useLayoutEffect`, como `Sidebar.rowHandlers`). `--nsm-ease` se define en `.cv-root` (las transiciones de
+  `.nsm-cell` lo necesitan y aquí no hay `.nsm`).
+- **Selección (una nota + sección):** estado `selection`, pero lo que se pinta es `reconcileSelection(lista,
+  selection)` (derivado, sin effect): se mantiene la nota si sigue listada (la sección si existe, si no la
+  primera) y si no, la primera nota con su primera sección. Al abrir no hay selección → la primera de la
+  lista con la vista previa abierta. Al cambiar de lugar se ajusta en render (patrón `prevPlace`) y se
+  limpian la multiselección y el menú. Fila elegida = fondo neutro 7 % + barra de 3 px del color del grupo,
+  **solo con la vista previa abierta** (como el prototipo). Clic en celda → esa sección; clic en la fila →
+  primera sección (repetir sobre la elegida no cambia la sección); doble clic / Enter → editor; clic
+  derecho → `NoteContextMenu` de nota o de sección. Los clics devuelven el foco a la lista
+  (`tabIndex=0`, `role=listbox`) para que las flechas sigan funcionando.
+- **Multiselección:** `checkedIds` local; la casilla sustituye a la hora al hover y queda visible mientras
+  haya selección (`.cv-list.is-selecting`). Ctrl/Cmd+clic alterna, Shift+clic marca el rango visible
+  (`selectionRange` desde el ancla = la última alternada o la nota elegida), Ctrl/Cmd+A alterna todas las
+  listadas (guarda de INPUT/TEXTAREA/contentEditable, sin Alt/Shift); con selección, el clic normal
+  alterna. Las acciones solo actúan sobre las **marcadas que siguen listadas** (`checkedNotes`: una búsqueda
+  que estrecha la lista no toca notas ocultas). Barra al pie de la columna 2: `components/SelectionBar.tsx`
+  (la de la antigua vista de grupo, ahora compartida; "Move to folder" solo si el lugar es un grupo o una
+  carpeta) con las mismas acciones (favorite/archive como toggle, move to group/folder, delete con
+  `ConfirmModal`) y sus claves i18n de `overview.*`. Arrastrar una fila marcada arrastra todas las marcadas
+  (`dragIdsRef`); la opacidad del arrastre se pone en el siguiente frame (si no, también la coge la imagen
+  del drag). Red de seguridad `dragend`/`drop` en `window` (la fila de origen puede desmontarse al moverse).
+  El root hace `stopPropagation` de `dragover`/`drop` para que un drop fallido no llegue al "soltar en el
+  editor → split" de `<main>`; `App` tampoco pinta su overlay de drop con la vista abierta.
+- **Columna 3:** ancho `--cv-pv-real` (ver "Anchos de columna"; por defecto `clamp(300px, 34cqw, 440px)`,
+  `.cv-body` es `container-type: inline-size`), que pasa a 0 al cerrar con transición de `width`; el interior
+  (`.cv-pv-in`, mismo `--cv-pv-real`) mantiene su ancho y se desvanece. Ruta + nombre con
+  cuadradito de color + `Section n of m · stats · edited …` (`sectionCardStats`, `formatNoteDate`) + el
+  contenido real: `htmlFromMarkdown(clipPreviewMarkdown(md, 40 000))` dentro de `.note-preview >
+  .prose-editor > .ProseMirror` con `--prose-font-family = proseFontStack(...)` (como la vista de nota); raw →
+  `<pre>` tal cual; cifrada bloqueada → el aviso de la vista de nota (`overview.noteEncrypted`). Solo se
+  renderiza el markdown de esta sección (memo por contenido). "Open in the editor" usa el baile
+  `pendingInitialSectionId` + `noteflow:request-section` diferido (`setTimeout(0)`) tras `setOpenNoteIds([id])`
+  + `setActiveNote(id)`. La X la cierra (`previewOpen=false`) y **no** se reabre al cambiar de lugar ni con la
+  lista; sí al elegir nota o sección (clic o flechas).
+- **Teclado:** en la lista (`onKeyDown`), ↑/↓ nota (`stepNote`, conserva la sección si es la misma nota), ←/→
+  sección (`stepSection`), Enter abre (con la vista previa visible); las flechas hacen `scrollIntoView
+  ({block:'nearest'})` de la fila (`scroll-margin-top` libra la cabecera sticky). `Esc` (listener de `window`
+  en burbuja): menú ⋯ → multiselección → vista previa → cerrar la vista. No actúa con un menú contextual o
+  un modal abiertos al empezar la pulsación (snapshot en captura, igual que la vista de nota), con el
+  `ConfirmModal` propio ni en campos `data-own-keys` (los inputs inline paran su Esc). En el buscador, el
+  primer Esc lo vacía y ↓ baja a la lista. La lista recibe el foco al abrir.
+- **Animaciones:** entrada de cabecera/cuerpo, tarjeta de la vista previa y menú con `animation-fill-mode:
+  backwards` (nunca `both`/`forwards`: un `transform` que se queda aplicado haría del contenedor el
+  *containing block* de los `fixed`). Todo se apaga con `prefers-reduced-motion`.
+- `.cv-body` es el **ancla de contenido** del sidebar flotante (`data-sidebar-anchor` + `sidebarAnchorRef`).
 
 ### Vista de nota (note overview)
 `notesStore` tiene `noteViewId: string | null` + `setNoteView(id)`. Es una de las **vistas full-area
-mutuamente excluyentes** (group / note / brain / all-content): todos los setters (`setGroupView`,
-`setNoteView`, `setBrainView`, `setAllView`) y `setActiveNote` se limpian entre sí, así que abrir una
-cierra las otras y seleccionar una nota devuelve el editor. `App.tsx` la renderiza (`NoteOverview`) con la
-prioridad de routing (all-content → brain → group → note → editor) y `onClose = closeFullView()` (vuelve al
-editor, o a "All content" si se vino de ahí). **Entradas:** el botón `LayoutGrid` de las acciones del mapa de
+mutuamente excluyentes** (contenido / nota / cerebro): los setters (`setContentView`, `setNoteView`,
+`setBrainView`) y `setActiveNote` se limpian entre sí, así que abrir una cierra las otras y seleccionar una
+nota devuelve el editor. `App.tsx` la renderiza (`NoteOverview`) con la prioridad de routing (contenido →
+cerebro → nota → editor) y `onClose = closeFullView()`. **Back inteligente:** si `setNoteView` se llama con la
+vista de contenido abierta (menú de sección → "Note overview"), guarda su lugar en `contentReturnPlace` (y lo
+conserva si se salta a la vista de otra nota); `closeFullView()` vuelve entonces a la vista de contenido en
+ese lugar, y si no, al editor. Crear/seleccionar una nota, abrir el cerebro o la vista de contenido lo limpian. **Entradas:** el botón `LayoutGrid` de las acciones del mapa de
 secciones de `NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual **de sección**
 (tag de sección en sidebar/vistas o tab del editor; el menú de la nota en sí no lo ofrece). El clic en la
 fila de la nota en el sidebar **no** es una entrada: abre el editor en la primera sección. Sin IPC nuevo.
@@ -202,64 +313,6 @@ Decisiones a respetar si se toca:
 - El reset global `button { border: none }` obliga a dar `border` con estilo explícito (la casilla usa
   `border: 1.5px solid …`).
 
-### Vista "All content" (índice global)
-`notesStore` tiene `allViewOpen: boolean` + `setAllView(open)`. Es la **cuarta vista full-area** (prioridad
-de routing más alta en `App.tsx`: all-content → brain → group → note → editor). **Entrada:** botón "View all
-content" (icono `LayoutGrid`) en la cabecera del sidebar, bajo "+ New note". El componente
-(`AllContentOverview/AllContentOverview.tsx`) modela su layout sobre `GroupOverview` (header fijo + área scroll
-+ grids `repeat(auto-fill, minmax(220px,1fr))`) y muestra TODO el contenido visible en bandas: **Favorites**
-(notas `favorited`), **Groups** (un `GroupTile` compacto por grupo no-archivado: barra de color + icono `Folder`
-tintado + nombre + nº de notas) y **Notes** (notas sueltas/ungrouped).
-**Groups desplegables (acordeón):** cada `GroupTile` es un `<div>` (no `<button>`, para anidar acciones sin
-botón-dentro-de-botón) con un botón principal que **expande/colapsa inline** (chevron que rota 90°) y un botón
-secundario `Maximize2` ("Open group view", visible en hover) que entra al grupo (`openGroupFromAll`). El botón
-principal es `w-full min-h-[78px]`, así que **todo el área del tile es clicable** para desplegar/plegar; el botón
-secundario (`absolute z-10` + `stopPropagation`) y la barra de color (`absolute z-10`) quedan por encima y siguen
-funcionando. Al expandir, un **panel hermano a ancho completo** cae en la rejilla (`gridColumn: '1 / -1'`,
-borde-izq con el color del grupo) que muestra las notas sueltas del grupo y sus folders (con sub-cabecera
-`Folder`/`FolderOpen` colapsable) con sus notas — igual que el sidebar, reutilizando `OverviewNoteCard`. Ese panel
-se envuelve en un componente local **`AccordionPanel`** que anima la apertura/cierre con la técnica
-`grid-template-rows: 0fr↔1fr` + `overflow-hidden` (misma que el sidebar, ~200ms ease, con un leve fade de
-opacidad). El **mismo `AccordionPanel` también envuelve la rejilla de notas de cada folder** dentro del panel del
-grupo, así que plegar/desplegar un folder tiene idéntica animación. El `gridColumn: '1 / -1'` (que hace caer el
-panel del grupo a ancho completo en la rejilla de tiles) **no está hardcodeado**: `AccordionPanel` acepta una prop
-opcional `style?: React.CSSProperties` que se mezcla en su wrapper externo — el uso del **grupo** pasa
-`style={{ gridColumn: '1 / -1' }}` y el uso del **folder** (que vive en un `space-y` normal, no en la rejilla de
-tiles) no pasa style. El contenido del `GroupTile` se alinea arriba (`items-start`) ya que el tile es alto
-(`min-h-[78px]`). **Por rendimiento, las previews de notas solo se montan cuando el grupo está expandido** (cada
-`OverviewNoteCard` pinta markdown y es caro): se mantienen montadas durante la animación de cierre y se desmontan
-en `onTransitionEnd`. La animación de apertura se dispara montando a `0fr` y pasando a `1fr` en el siguiente frame
-(`requestAnimationFrame`). **Estado de expansión LOCAL a
-la vista** (`expandedGroupIds`/`collapsedFolderIds` como `Set`), **colapsado por defecto**, no persistido (no usa
-`groupsStore`). Con búsqueda activa, todos los grupos/folders visibles se tratan como expandidos y las notas
-mostradas se filtran a las que matchean (revela resultados); las folders que quedan vacías con la query se omiten. Reutiliza
-`useSidebarGroups` para derivar grupos/sueltas y `OverviewNoteCard` para las tarjetas de nota (color = el del
-grupo de la nota, o `--text-muted` si no tiene). Búsqueda local (`searchQuery` de estado, **no** el global del
-store) con `parseSearchQuery`/`noteMatchesQuery` de `lib/searchUtils`: filtra favoritos y sueltas, y muestra un
-grupo si su nombre matchea o si contiene alguna nota que matchee. Click en sección usa el mismo baile
-`pendingInitialSectionId` + `noteflow:request-section` diferido. `Esc` cierra. Sin IPC nuevo.
-**Filtro de fecha/calendario (vive AQUÍ, no en el sidebar):** toolbar fija bajo la cabecera con los botones
-segmentados `All/Today/Week/Month` + toggle de calendario desplegable. Lee `filterDate`/`setFilterDate` del
-`notesStore` (campo compartido) y mantiene estado **local** `selectedDayKey`/`calendarMonth`/`calendarExpanded`.
-El filtrado (`dateBaseNotes` no-archivadas → `dateFilteredNotes`) replica la lógica que antes vivía en el
-sidebar: con día elegido, notas creadas o modificadas ese día; si no, rango sobre `updated`. Se aplica al
-**conjunto base** (`visibleNotes`) antes de derivar favoritos/grupos/sueltas, así que afecta a las tres bandas
-y se combina con la búsqueda local. `calendarDays`/`dayMarkers` (puntos verde=created, neutro=updated) se
-calculan como en el sidebar (helpers `toDayKey`/`toDayKeyFromIso`/`dayKeyToDate` a nivel de módulo). El
-sidebar ya **no** tiene este filtro (solo búsqueda/tags/archived); su botón "All content" perdió el borde.
-**Back inteligente:** entrar a un grupo/nota DESDE esta vista usa `openGroupFromAll(id)`/`openNoteFromAll(id)`,
-que marcan `cameFromAllView: true`. El "atrás" de group/note overview llama a `closeFullView()`: si
-`cameFromAllView` vuelve a "All content" (no al editor); si no, cierra al editor. Cualquier `setActiveNote`/
-creación de nota limpia `allViewOpen` y `cameFromAllView`.
-**OverviewNoteCard compartida:** la tarjeta de nota (antes inline en `GroupOverview`) vive en
-`components/OverviewNoteCard.tsx` (exporta `OverviewNoteCard`, `NoteCardProps` y la helper `formatCardDate`);
-la usan group overview y all-content. Las props de reorder/selección son opcionales (la all-content no las pasa).
-Sus secciones van en la fila con scroll de celdas (`SectionTabsRow placement="card"`, siempre, sin depender del
-ajuste de Apariencia; ver "Sidebar: item de nota" → `SectionTabsRow`): sangra `-ml-[13px] -mr-3` /
-`pl-[13px] pr-3` para cuadrar con el `p-3 pl-4` de la tarjeta sin pisar su línea de acento de 3 px (ni las celdas
-que pasan por el borde ni la flecha izquierda la tapan), sin sección abierta marcada (la vista sustituye al editor). Clic en celda
-→ `onOpenSection` (con `selectionActive`, alterna la selección); clic derecho → menú de sección.
-
 ### Previsualización de sección (hover + cerebro)
 Reutiliza `SectionPreviewCard` en dos interacciones, sin IPC nuevo (el contenido de toda sección ya está
 en memoria en `notesStore`):
@@ -268,8 +321,7 @@ en memoria en `notesStore`):
   aparte por la regla `react-refresh/only-export-components`) expone `previewProps(noteId, sectionId, opts)`
   que devuelve handlers de ratón para escupir sobre cualquier disparador. Disparadores cableados:
   `SectionCell` (celdas de las filas de nota del sidebar —mapa abierto, peek, búsqueda y fila con
-  scroll—, peek de grupo colapsado y tarjetas de las vistas de grupo/all-content, vía `SectionTabsRow`;
-  omite la abierta), pestañas del
+  scroll—, peek de grupo colapsado y filas de la vista de contenido; omite la abierta), pestañas del
   editor (omite la activa), `RelatedView`/`ChatView`.
   `placement: 'cursor-below'` ancla la esquina sup-izq junto al cursor (sidebar/grupos/editor);
   `'element-right'` (default) al lado del elemento (IA). Retardo ~380 ms; el popover es `pointer-events-none`
@@ -1114,7 +1166,7 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   la misma zona que el sidebar fijado), tapando también pestañas/título/toolbar del pane izquierdo.
   Anclas (`data-sidebar-anchor` + callback ref estable `sidebarAnchorRef`): el wrapper del scroller de
   `Editor` (debajo de la toolbar → recoge su alto variable), el textarea raw de `NoteEditor` y el
-  cuerpo con scroll de `GroupOverview`/`NoteOverview`/`AllContentOverview` (debajo de su cabecera).
+  cuerpo con scroll de `NoteOverview` y las tres columnas de `ContentView` (debajo de su cabecera).
   Sin ancla (cargando, sin nota, nota cifrada bloqueada) → toda la fila. Se re-mide (rAF) con un
   `ResizeObserver` sobre la fila y sobre el ancla elegida (toolbar que pasa a 2 filas, banners encima,
   hint de overflow del split, animación del spacer…), al montar/desmontar un ancla (el callback ref
@@ -1134,7 +1186,7 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   el drag un `drop` en cualquier sitio y el primer `mousemove` posterior; al terminar, queda abierto
   solo si el punto final está sobre el panel). Escape (salvo en un input de rename, o con un menú
   abierto) cierra y devuelve el foco al editor del pane activo (`focusContentAnchor`) y hace
-  `stopPropagation` (si no, el Escape global — listener de `window` en burbuja — de `GroupOverview`/`NoteOverview`/`AllContentOverview` cerraría la vista); la franja no
+  `stopPropagation` (si no, el Escape global — listener de `window` en burbuja — de `ContentView`/`NoteOverview` cerraría la vista); la franja no
   reabre hasta que el ratón sale de ella. Seleccionar una nota no lo cierra.
 - **Watchdog de hover.** El `hovered` sale de `onMouseEnter/Leave` del `aside`, que React deriva de
   pares `mouseout`/`mouseover`; si se elimina el nodo bajo el puntero (nota pulsada en el peek de grupo,
@@ -1203,7 +1255,7 @@ cabecera, clamp al viewport: sube si no cabe abajo).
   cancela; pasar a otra cabecera colapsada cambia de peek). Si el usuario **teclea o usa ↑/↓** en el
   buscador queda **anclado**: solo cierra con click fuera, Esc o navegación. También cierra al abrir
   nota/sección (desde él o desde cualquier sitio: `useNotesStore.subscribe` sobre activeNoteId/
-  noteViewId/groupViewId/brain/all), scroll dentro del sidebar, blur/resize de la ventana o `dragstart`.
+  noteViewId/contentPlace/brain), scroll dentro del sidebar, blur/resize de la ventana o `dragstart`.
   Si el grupo se expande/vacía o el sidebar pasa a `blocked`, se descarta en render.
 - **Foco:** guarda `document.activeElement` al abrir y lo devuelve al cerrar por ratón-fuera/Esc/
   dismiss (`focus({preventScroll})`; ProseMirror re-aplica su selección al recibir el foco, así que el
@@ -1331,28 +1383,27 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
   escala de UI): `'row'` pinta las secciones con `SectionTabsRow` (ver abajo), siempre visibles, sin
   línea ni despliegue. `Sidebar` lee el ajuste una vez y lo pasa a `NoteRow` como prop primitiva
   (cambiarlo re-renderiza las filas una vez; nada más). El peek de grupo colapsado lo sigue igual (ver
-  `GroupPeek` abajo); las tarjetas de las vistas generales van **siempre** en fila con scroll.
+  `GroupPeek` abajo); la vista de contenido no depende del ajuste (siempre el mapa completo).
 - **`SectionTabsRow` (fila con scroll de celdas):** una sola línea sin salto con scroll horizontal
   (scrollbar nativa oculta con `.section-tabs-scroll`, máscara en los bordes, flechas al desbordar) de
   celdas `SectionCell` a su ancho natural (`.nsm-scroll`, `flex: 0 0 auto`, etiqueta capada a 160 px; la
   abierta en sólido con `useSectionInk`). Es su **único diseño** (los antiguos chips de color y su
-  atenuación `dimmed` se eliminaron) y lo usan tres sitios: la fila del sidebar y la del **peek de grupo
-  colapsado** con el ajuste `'row'`, y las **tarjetas de las vistas de grupo / all-content**
-  (`OverviewNoteCard`), estas **siempre**, sin depender del ajuste. La prop `placement` (`'sidebar'` |
-  `'peek'` | `'card'`) fija el sangrado lateral para que la fila llegue de borde a borde (`-mx-2.5`/`px-2.5`
-  en la fila, `-mx-2`/`px-2` en el peek, `-ml-[13px] -mr-3`/`pl-[13px] pr-3` en la tarjeta: empieza tras su
-  acento de 3 px) y `'peek'` añade `.nsm-compact`: celdas de 19 px, letra 10 px, esquina 5 px (7 px al
+  atenuación `dimmed` se eliminaron) y lo usan dos sitios con el ajuste `'row'`: la fila del sidebar y la del
+  **peek de grupo colapsado** (la variante `'card'` de las tarjetas de las antiguas vistas de grupo /
+  all-content se eliminó con ellas). La prop `placement` (`'sidebar'` | `'peek'`) fija el sangrado lateral
+  para que la fila llegue de borde a borde (`-mx-2.5`/`px-2.5` en la fila, `-mx-2`/`px-2` en el peek) y
+  `'peek'` añade `.nsm-compact`: celdas de 19 px, letra 10 px, esquina 5 px (7 px al
   hover), `EyeOff` 8 px y etiqueta capada a 130 px.
   La celda abierta (`activeSectionId`) se mantiene a la vista: al montar (al instante) y al cambiar la
   sección abierta (suave, salvo reduced-motion) se ajusta solo el `scrollLeft` de la fila (no
   `scrollIntoView`, que movería también la lista en vertical), con 22 px de margen para librar el borde
   difuminado y las flechas. El `#filtro` (`sectionFilter`) filtra las celdas y se resalta el término
   (el filtro o, si no hay, el texto de `searchQuery`). Preview de sección al hover, clic y clic derecho
-  los da `SectionCell` (el peek suprime el menú contextual; las tarjetas abren el menú de sección).
+  los da `SectionCell` (el peek suprime el menú contextual).
 - **Sección abierta marcada:** la fila del sidebar y el peek resuelven la de la nota resaltada con
   `resolveOpenSectionId` sobre los dos selectores primitivos de `Sidebar/useOpenNoteSection.ts`
-  (compartidos; el peek solo se suscribe mientras está abierto) y solo la fila activa recibe el id. Las
-  tarjetas de las vistas generales no marcan ninguna: la vista sustituye al editor.
+  (compartidos; el peek solo se suscribe mientras está abierto) y solo la fila activa recibe el id. La
+  vista de contenido marca su propia selección (la sección de la vista previa), no la del editor.
 - **`GroupPeek`** (peek de grupo colapsado) sigue el mismo ajuste que el sidebar (selector primitivo en
   `GroupPeekPanel`, que solo existe mientras está abierto), siempre en compacto (`.nsm-compact`):
   - `'row'`: `SectionTabsRow placement="peek"`.
@@ -2349,7 +2400,7 @@ temas** (claros y oscuros), porque el mismo color se usa en ambos.
 Un color de grupo/sección (`GroupColor` en `src/types/index.ts`) es **una de las 8 CSS vars del tema**
 (`ThemeColorVar` = `TAG_COLOR_VARS` en `src/lib/tagColors.ts`) **o un hex libre** `CustomColor`
 (`'#rrggbb'` en minúsculas). Los pickers (menú contextual de sección —tag o tab del editor—, menú
-del grupo en el sidebar, punto de color de la Group Overview) muestran los 8 presets + el botón *auto*
+del grupo en el sidebar y del menú de nota) muestran los 8 presets + el botón *auto*
 (solo secciones) + un **swatch de color libre** (`src/components/CustomColorSwatch.tsx`), mismo patrón
 que Ajustes → Apariencia: círculo con degradado cónico y un `<input type="color">` transparente encima
 que abre el selector del SO.

@@ -291,9 +291,8 @@ export function GroupPeek({
       if (
         s.activeNoteId !== prev.activeNoteId ||
         s.noteViewId !== prev.noteViewId ||
-        s.groupViewId !== prev.groupViewId ||
-        s.brainViewOpen !== prev.brainViewOpen ||
-        s.allViewOpen !== prev.allViewOpen
+        s.contentPlace !== prev.contentPlace ||
+        s.brainViewOpen !== prev.brainViewOpen
       ) engine.close('navigate')
     })
     return () => {

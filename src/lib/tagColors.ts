@@ -12,6 +12,9 @@ export const TAG_COLOR_VARS: readonly ThemeColorVar[] = [
   '--pink',
 ] as const
 
+/** Colour of a group created from the sidebar or the content view (recoloured later from its menu). */
+export const NEW_GROUP_COLOR: GroupColor = '--accent'
+
 export type TagColorMap = Partial<Record<string, GroupColor>>
 
 const HEX6_RE = /^#[0-9a-f]{6}$/i

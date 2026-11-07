@@ -83,7 +83,7 @@ cursor de la nota abierta sobre su guía (ver "Grupos y carpetas" abajo).
   vea flotante. Como en el fijado, la cabecera (búsqueda, botones de nueva nota/grupo) y el pie quedan
   fijos y solo la lista de notas hace scroll. La mini-vista, en cambio, sigue alineada con el texto del
   panel más a la izquierda (bajo pestañas, título y toolbar, o bajo la cabecera del pane en el split, o
-  bajo la cabecera de las vistas de grupo / nota / all content).
+  bajo la cabecera de la vista de contenido o la de nota).
 - **Abre** al dejar el ratón sobre la mini-vista (~120 ms; no salta si se está seleccionando texto con
   el botón pulsado) o con un click en ella; **cierra** ~200 ms después de salir. Se queda abierto
   mientras haya foco de escritura dentro (búsqueda, renombrar, nuevo grupo/carpeta), un menú
@@ -130,8 +130,8 @@ debajo, sus **secciones** en el lenguaje del mapa de secciones del editor:
   (bordes difuminados y flechas al desbordar), con las celdas del diseño nuevo a su ancho natural y la
   abierta en sólido; sin línea ni despliegue. Solo para este dispositivo (no se sincroniza).
 - El peek de un grupo colapsado sigue **el mismo ajuste** (línea plegada con su despliegue y mapa en la
-  nota activa, o fila con scroll), en tamaño compacto. Las tarjetas de las vistas de grupo / *All content*
-  usan **siempre** la fila con scroll de celdas, sea cual sea el ajuste.
+  nota activa, o fila con scroll), en tamaño compacto. La **vista de contenido** enseña **siempre** todas
+  las secciones de cada nota como celdas en varias líneas (sin scroll), sea cual sea el ajuste.
 
 Iconos del TitleBar:
 - **⬇ update**: aparece solo si hay una versión nueva; descarga e instala in-app (muestra el %
@@ -337,13 +337,13 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
   También al expandir el grupo, hacer scroll en el sidebar, cambiar de ventana o arrastrar. No aparece
   mientras se escribe en el editor con el ratón quieto encima, durante un drag, un rename o con un menú
   contextual abierto. Funciona igual con el sidebar fijado y flotante.
-- **Ver grupo (group overview)**: click en **el nombre** del grupo (hover sutil sobre el texto), o
-  "View group" en el menú contextual. Click en el resto de la cabecera = colapsar/expandir.
+- **Ver el grupo**: click en **el nombre** del grupo (hover sutil sobre el texto), o "View group" en el
+  menú contextual → abre la **vista de contenido** con ese grupo como lugar. Click en el resto de la
+  cabecera = colapsar/expandir.
 - **Archivar grupo**: menú contextual → "Archive group". Oculta el grupo **y todas sus notas** de
   la lista (las notas conservan su propio estado `archived`). Se revela con el mismo toggle
   **"Show archived"** del footer: los grupos archivados aparecen atenuados y al final. Para
-  recuperarlo: "Unarchive group" (en el menú contextual del grupo atenuado, o el botón "Archived"
-  de la cabecera de la group overview).
+  recuperarlo: "Unarchive group" en el menú contextual del grupo atenuado.
 - **Asignar nota**: drag & drop, o menú contextual → "Add to group".
 - Cada grupo tiene un color (pestaña, guías, cursor y marcas de arrastre; en **favorites**, una
   pestaña pequeña antes del título de cada favorita con grupo): los **8 colores del tema** o
@@ -351,11 +351,12 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
 - Las notas sin grupo aparecen al final, en "Sin grupo".
 
 ### Carpetas (subcarpetas dentro de un grupo)
-- **Crear**: desde el submenú "Move to folder" → "+ New folder…", o en la cabecera del grupo.
+- **Crear**: desde el submenú "Move to folder" → "+ New folder…", el menú contextual del grupo, o
+  **"+ Folder"** bajo las carpetas del grupo en la vista de contenido.
 - **Mover nota a carpeta**: menú contextual de la nota → "Move to folder" (submenú con las
   carpetas del grupo). "Group root" la saca de la carpeta sin sacarla del grupo.
-- **Renombrar / Eliminar**: menú contextual de la cabecera de carpeta. Al borrar una carpeta sus
-  notas vuelven a la raíz del grupo.
+- **Renombrar / Eliminar**: menú contextual de la cabecera de carpeta (o de la carpeta en la columna de
+  lugares de la vista de contenido). Al borrar una carpeta sus notas vuelven a la raíz del grupo.
 - **Colapsar / Expandir**: independiente de los grupos (estado persistido). El icono de carpeta abre
   su solapa cuando está expandida.
 
@@ -364,68 +365,86 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
 
 ---
 
-## Vista de grupo (group overview)
+## Vista de contenido (todo el contenido y cada grupo)
 
-Vista amplia que **sustituye el área del editor** para ver de un vistazo todo el contenido de un
-grupo. El sidebar permanece visible como contexto. Pensada para ubicar notas y entender la
-distribución de un grupo cuando hay muchas notas/carpetas.
+Una sola vista amplia que **sustituye el área del editor** (el sidebar sigue visible) para recorrer el
+contenido por **lugares**: todo, favoritas, cada grupo, cada carpeta o las notas sin grupo. Sustituye a
+las antiguas vista de grupo y "All content".
 
-**Cómo entrar:** click en el **nombre** del grupo en el sidebar (hover sutil sobre el texto), o
-click derecho en la cabecera del grupo → **"View group"**.
+**Cómo entrar:**
+- Botón-icono **"View all content"** (`LayoutGrid`) de la fila del buscador del sidebar → lugar *All*.
+- Click en el **nombre de un grupo** (sidebar, cerebro) o **"View group"** en su menú contextual → ese
+  grupo como lugar.
+- Al entrar se elige la **primera nota** de la lista (la última editada) y su **primera sección**, con la
+  vista previa abierta.
 
-**Cómo salir:** click en una nota (abre esa nota en el editor), `Esc`, o el botón `✕` de la
-cabecera. Seleccionar cualquier nota —también desde el sidebar— cierra la vista.
+**Cómo salir:** `Esc` (cuando ya no queda nada que cerrar, ver Teclado), abrir una nota en el editor
+(doble clic, `Intro` o "Open in the editor"), crear una nota, o seleccionar cualquier nota en el sidebar.
 
-**Disposición** (estética mono-minimalista, acento fino del color del grupo):
-- Cabecera: punto de color (clicable → paleta) + nombre + contadores (`N notas · M carpetas`) +
-  acciones.
-- Una **banda por carpeta** (con su contador), una banda **"No folder"** para las notas sueltas
-  del grupo, y una banda **"Archived"** al final con las notas archivadas del grupo.
-- Dentro de cada banda, las notas en **cuadrícula responsiva** de tarjetas.
+**Cabecera:** icono del lugar (pestaña grande del grupo con su esquina plegada de color; rejilla para
+*All*; estrella para *Favorites*), la ruta si es carpeta ("Trabajo /"), el nombre y el resumen
+`N notes · M folders · last edited X`. A la derecha: **buscador** local ("Search note or section", admite
+`#sección`; no toca la búsqueda del sidebar; `Esc` lo vacía y `↓` baja a la lista), **"+ Note"** (crea la
+nota en el grupo/carpeta del lugar; en *All*, *Favorites* y *Ungrouped*, sin grupo) y **⋯** con el
+interruptor **"Show archived"** (de la vista, apagado al abrir): con él se listan también las notas
+archivadas (icono de archivo, algo atenuadas) y los grupos archivados en la columna de lugares.
 
-**Tarjeta de nota:** título + **secciones** (fila con scroll de celdas de sección —fondo neutro y esquina plegada
-en su color, como el modo *Scroll row* del sidebar—, bordes difuminados y flechas al desbordar; clicables → te
-llevan directamente a esa sección de la nota; hover → previsualización; click derecho → menú de sección) + fecha de actualización (`dd/MM/yyyy · HH:mm`).
-Acento del color del grupo a la izquierda.
+**Columnas redimensionables:** un tirador vertical entre lugares y notas y otro entre notas y vista
+previa (este solo con la vista previa abierta); se arrastran para cambiar el ancho y **doble clic**
+vuelve al ancho por defecto. Lugares: 180–360 px (260 por defecto). Vista previa: desde 280 px hasta 1200 px
+o el 70 % de la vista, dejando siempre sitio a la lista (por defecto, un ancho que sigue al de la ventana;
+en una vista muy estrecha, la mitad aunque sea menos de 280). La lista de notas conserva unos 320 px: si falta sitio cede primero la
+vista previa hasta su mínimo y luego la columna de lugares hasta 180; solo si aun así no cabe, encoge la
+lista. Al volver a ensanchar la ventana cada columna recupera su ancho. Los anchos se recuerdan entre
+sesiones.
 
-**Acciones:**
-- **Abrir nota** → click en la tarjeta (abre la primera sección); click en una celda de sección abre
-  esa sección concreta (con una selección activa, la alterna).
-- **Reorganizar** → arrastrar una tarjeta a otra banda mueve la nota de carpeta (la banda
-  "Archived" no es zona de drop).
-- **Crear** → botones "New note" / "New folder" en la cabecera.
-- **Renombrar el grupo** → doble clic en el nombre de la cabecera (o el lápiz al hacer hover).
-- **Cambiar el color del grupo** → click en el punto de color de la cabecera: abre un popover con la
-  paleta (la misma del menú contextual del grupo en el sidebar) más el swatch de **color libre**; el
-  color actual va marcado. Se cierra al elegir un preset, con click fuera o con `Esc` (que en ese caso
-  no cierra la vista); al usar el color libre el popover se queda abierto mientras se arrastra.
-- **Renombrar / eliminar una carpeta** → botones lápiz/papelera en la cabecera de su banda (aparecen
-  al hover; borrar pide confirmación y devuelve sus notas a la raíz del grupo).
-- **Ancho de tarjeta** → slider discreto en la cabecera (atenuado, se realza al hover); ensanchar
-  las tarjetas revela más secciones a la vez. El valor se persiste en `localStorage`.
-- Solo se listan notas **no archivadas** en las bandas de carpetas/"No folder"; las archivadas van
-  a su banda propia.
+**Columna 1 · Lugares:** *All*, *Favorites*, la etiqueta "Places", cada grupo (pestaña + nombre +
+contador) con sus carpetas debajo, sangradas bajo la guía vertical del color del grupo (que termina en
+la última carpeta), y al final *Ungrouped*. El lugar elegido lleva fondo neutro y una barra de 3 px de su
+color a la izquierda.
+- **"+ Folder"** al final de cada grupo (fuera de la guía) y **"+ Group"** tras los grupos, ambos más
+  apagados que los nombres de carpeta: se convierten en un campo; `Intro` (o salir con texto) crea y abre
+  el lugar nuevo; `Esc` o salir vacío cancela.
+- **Clic derecho** en un grupo o una carpeta → **el mismo menú que en el sidebar** (sin "View group",
+  porque ya estás en la vista): new note / new folder, rename, color (8 del tema + color libre), archive y
+  delete en grupos; new note, rename y delete en carpetas. **Rename** edita en la propia columna (`Intro`
+  guarda, `Esc` cancela). Si borras el lugar en el que estás, la vista pasa a *All*.
+- **Arrastrar** una nota (o la selección múltiple) desde la lista hasta un grupo, una carpeta o
+  *Ungrouped* la mueve; el destino se resalta. También acepta notas arrastradas desde el sidebar.
 
-**Selección múltiple (acciones por lotes):** marca varias notas a la vez para operar sobre todas.
-- **Marcar** → cada tarjeta muestra una **checkbox** (esquina sup-der) al pasar el ratón; click en
-  ella la selecciona/deselecciona. Con una selección activa, un **click normal en la tarjeta**
-  alterna su marca (en vez de abrir la nota); **Ctrl/Cmd+click** alterna siempre (e inicia la
-  selección). Las tarjetas seleccionadas se resaltan (anillo). Funciona en todas las bandas,
-  incluida "Archived".
-- **Seleccionar todo** → botón **"Select all" / "Deselect all"** en la cabecera (junto a "New note";
-  solo si hay notas) y atajo **`Ctrl/Cmd+A`**: marca **todas** las notas de la vista (carpetas +
-  "No folder" + "Archived"); si ya lo están, limpia la selección.
-- **Seleccionar una banda** → checkbox en la cabecera de cada banda (carpeta, "No folder" o
-  "Archived"), visible al pasar el ratón por la banda o siempre que haya una selección activa:
-  marca/desmarca solo las notas de esa banda. Si solo hay algunas marcadas se muestra en estado
-  intermedio (guion).
-- **Barra de acciones** flotante (abajo, centrada, sticky al hacer scroll) cuando hay ≥1 marcada:
-  contador "N selected" + **Favorite/Unfavorite**, **Archive/Unarchive** (ambos como toggle: si
-  todas ya lo tienen, lo quitan; si no, lo ponen), **Move to group** (cualquier grupo o "No group"),
-  **Move to folder** (carpetas del grupo actual o "Group root"), **Delete** (con confirmación; "N
-  notes will be permanently deleted") y **✕** para limpiar la selección.
-- `Esc` cierra el popover de color si está abierto; si no, limpia la selección si hay alguna; si no,
-  cierra la group overview.
+**Columna 2 · Notas por fecha:** las del lugar, de la más reciente a la más antigua, en bloques con
+cabecera fija y contador: **Today**, **Yesterday**, **This week**, **Last 30 days**, **Earlier**.
+- Cada fila: la hora a la izquierda (`HH:mm` hoy y ayer, día de la semana esta semana, `d MMM` antes),
+  el título (candado si está cifrada) y debajo la ruta, sin lo que ya dice el lugar (en *All* /
+  *Favorites* / *Ungrouped*: pestaña + "Grupo / Carpeta"; en un grupo: la carpeta o "In the group"; en
+  una carpeta: nada). A la derecha, la línea de colores de las secciones del sidebar, **solo
+  decorativa** (no engorda ni despliega).
+- **Debajo de cada nota, todas sus secciones** como celdas (las mismas del mapa del sidebar, en varias
+  líneas). Clic en una celda → elige esa sección (se rellena de su color) y abre la vista previa; clic
+  en la fila → la nota con su primera sección; **doble clic** o `Intro` → abre en el editor; clic derecho
+  → menú de la nota o de la sección; hover en una celda → previsualización flotante. Con búsqueda, las
+  celdas que coinciden se tiñen y el resto se atenúa.
+- **Selección múltiple:** casilla en la columna de la hora al pasar el ratón (siempre visible mientras
+  haya selección); `Ctrl/Cmd+clic` alterna, `Mayús+clic` marca el rango visible, `Ctrl/Cmd+A` marca
+  todas las visibles, y con algo marcado basta un clic. Barra flotante al pie de la lista: contador,
+  **Favorite/Unfavorite**, **Archive/Unarchive** (toggle), **Move to group** (o "No group"), **Move to
+  folder** (solo con un grupo o carpeta como lugar), **Delete** (con confirmación) y ✕. Cambiar de lugar
+  limpia la selección.
+- Al cambiar de lugar, la nota elegida se mantiene si sigue en la lista; si no, pasa a la primera.
+
+**Columna 3 · Vista previa** (se anima al abrir y cerrar): ruta (pestaña + Grupo / Carpeta / Nota),
+nombre de la sección con su cuadradito de color, `Section n of m · X words · edited …` y el **contenido
+real** de la sección en solo lectura (mismo render que el editor, con su fuente; en modo texto, tal
+cual). Notas cifradas bloqueadas: aviso "This note is encrypted". Botón **"Open in the editor"**
+(`Intro`). La **X** la cierra y la lista gana el ancho; no se reabre sola hasta que eliges otra sección
+o nota.
+
+**Teclado** (con el foco en la lista, que lo recibe al abrir): `↑ ↓` nota, `← →` sección, `Intro` abre
+en el editor. `Esc`, por orden: cierra el menú ⋯, limpia la selección múltiple, cierra la vista previa
+y, si no queda nada, cierra la vista. Un pie recuerda los atajos.
+
+**Volver desde la vista de nota:** si abres la vista de nota desde aquí (clic derecho en una sección →
+"Note overview"), su botón de cerrar/`Esc` te devuelve a la vista de contenido en el mismo lugar.
 
 ---
 
@@ -437,8 +456,7 @@ celdas de un mismo bloque reticulado (juntas finas, esquinas exteriores redondea
 sombras), en el **orden de las pestañas**, cada una con su contenido real legible. El sidebar
 permanece visible como contexto. Pensada para saltar rápido a una sección, repasar la estructura de
 una nota con muchas secciones o reorganizarla. Es una de las vistas full-area mutuamente excluyentes
-(grupo / nota / cerebro / all content): abrir una cierra las otras, y seleccionar cualquier nota
-vuelve al editor.
+(contenido / nota / cerebro): abrir una cierra las otras, y seleccionar cualquier nota vuelve al editor.
 
 **Cómo entrar:**
 - Botón **⊞** (icono de cuadrícula) de las acciones del mapa de secciones del editor, justo **al lado
@@ -448,7 +466,8 @@ vuelve al editor.
 - Pulsar la nota en el sidebar **no** la abre: va al editor, a la primera sección.
 
 **Cómo salir:** `Esc` (si no hay selección), el botón **⊞ activo** de la cabecera (resaltado en el
-color de acento: "estás en la vista de nota"; vuelve al editor, o a "All content" si veniste de ahí),
+color de acento: "estás en la vista de nota"; vuelve al editor, o a la vista de contenido —en el mismo
+lugar— si veniste de ahí),
 o click en una tarjeta (abre esa sección en el editor).
 
 **Cabecera** (en el mismo plano que el contenido, sin banda): candado si está cifrada + **título de la
@@ -501,46 +520,6 @@ hay secciones) + separador + **⊞ activo** + **estrella** de favorito + **`⋯`
   selección y, si no hay, vuelve al editor.
 - Notas **cifradas y bloqueadas** muestran un estado "encrypted" (sin rejilla) hasta desbloquear en el
   editor.
-
----
-
-## Vista "All content" (índice global)
-
-Vista a pantalla completa (sustituye el editor; el sidebar sigue visible) que muestra **todo el
-contenido** del usuario de un vistazo, a modo de índice. Hermana de la vista de grupo y la de nota.
-
-**Cómo entrar:** botón-icono **"View all content"** (`LayoutGrid`, solo icono, sin texto; tooltip y
-aria-label "View all content") en la fila del buscador del sidebar, entre la barra de búsqueda y el
-interruptor fijar/contraer el sidebar (mismo estilo/tamaño que este).
-
-**Disposición** (misma estética que la vista de grupo: cabecera fija + área scroll + tarjetas en grid):
-- **Favorites** — las notas marcadas como favoritas, como tarjetas de nota (mismas que la vista de grupo:
-  título + celdas de sección clicables + fecha).
-- **Groups** — cada grupo como un **tile compacto** (barra de color + icono de carpeta tintado + nombre +
-  nº de notas). Los tiles son **desplegables en acordeón**: click en un tile lo **expande inline** (chevron
-  que gira) y abre, a lo ancho de la rejilla, un panel con sus notas sueltas y sus carpetas (cabecera de
-  carpeta colapsable + notas dentro), igual que el sidebar. Para abrir la group overview completa del grupo
-  está el botón **"Open group view"** (icono de maximizar) que aparece al pasar el ratón por el tile. La
-  expansión es **local a esta vista y arranca colapsada** (no se recuerda entre sesiones). Pueden expandirse
-  varios grupos a la vez.
-- **Notes** — las notas sueltas (sin grupo), como tarjetas de nota.
-- Si no hay nada, un **empty state** centrado.
-
-**Búsqueda:** input en la cabecera (placeholder "Search...", local a esta vista — no afecta al filtro del
-sidebar). Filtra favoritos y notas sueltas; un grupo se muestra si su nombre coincide o si contiene alguna
-nota que coincida. Con una búsqueda activa, los grupos (y sus carpetas) se **despliegan automáticamente** y
-solo muestran dentro las notas que coinciden, para revelar los resultados. Acepta el filtro `#sección` igual
-que la búsqueda del sidebar.
-
-**Filtro de fecha/calendario:** toolbar fija justo debajo de la cabecera (botones segmentados
-`All/Today/Week/Month` + toggle de **calendario** desplegable con marcadores de actividad por día). Vive
-**aquí** (antes estaba en el sidebar). Filtra por `updated` (o, con un día elegido, por creadas/modificadas
-ese día) y se combina con la búsqueda; afecta a las tres bandas (Favorites, Groups y su contenido, Notes).
-Ver "Filtros por fecha" más abajo.
-
-**Volver (back inteligente):** si entras a un grupo o a una nota **desde** esta vista, el botón cerrar/`Esc`
-de esa group/note overview te devuelve a "All content" (no al editor). Cerrar "All content" con la X o `Esc`
-vuelve al editor. Seleccionar cualquier nota (aquí o en el sidebar) también vuelve al editor.
 
 ---
 
@@ -614,7 +593,7 @@ salientes de un archivador (sin scroll horizontal):
   oculta **nunca** se indexa ni aparece en el chat, en "Related notes", en el grafo del cerebro ni en
   las tools del agente — la IA actúa como si no existiera (el resto de la app la trata con normalidad).
   Disponible en el **menú `⋯` del editor** (sección activa) y en el **click derecho sobre un tag de
-  sección** (sidebar, vista de grupo y tarjetas de la vista de nota). Las secciones ocultas muestran
+  sección** (sidebar, vista de contenido y tarjetas de la vista de nota). Las secciones ocultas muestran
   un icono `EyeOff` (pestaña del editor, tags del sidebar, cabecera y pie de la tarjeta en la vista de nota); `Show to AI` lo
   revierte (re-indexa la sección). Útil para datos sensibles o ruido que no quieres que el modelo use.
 
@@ -644,7 +623,7 @@ sin navegar.
 **Dónde aparece:**
 - **Sidebar** → celdas de sección de cada nota (mapa abierto, despliegue flotante, búsqueda o fila
   con scroll), salvo la sección abierta.
-- **Vista de grupo / All content** → celdas de sección de las tarjetas; **peek de grupo colapsado** → sus celdas.
+- **Vista de contenido** → celdas de sección de cada nota; **peek de grupo colapsado** → sus celdas.
 - **Editor** → pestañas de sección (excepto la sección activa, que ya estás viendo).
 - **Paneles de IA** (Related / Chat) → resultados que apuntan a una sección.
 
@@ -939,7 +918,7 @@ cualquier nota. Es **aditivo** — la lista de siempre sigue siendo el modo prin
   contenido** y atenúa el resto. **Click en un nodo de nota/sección** ancla junto a él una
   **ventanita de previsualización clicable** (misma tarjeta que el resto de la app); al **pulsar
   dentro de la ventanita** se navega a esa sección en el editor. Se cierra con click fuera o `Esc`.
-  Click en un grupo abre su group overview. Los nombres de las notas aparecen al acercar el zoom.
+  Click en un grupo abre la vista de contenido en ese grupo. Los nombres de las notas aparecen al acercar el zoom.
 - **Toggle "Contenido":** botón en la barra superior para mostrar/ocultar la capa de contenido y
   dejar solo la estructura.
 - **Sin IA:** el cerebro funciona igualmente mostrando solo la estructura + el CTA de activación.
@@ -1117,17 +1096,10 @@ cada respuesta). Sin IA configurada, ofrece ir a **Ajustes → IA**.
   hay proveedor LLM configurado, la pregunta queda en cola y se envía en cuanto configuras uno.
 - **What's new / Tutorial** abre el tour completo de novedades (ver "Tour What's new").
 
-### Filtros por fecha (en la vista "All content")
-```
-[All] [Today] [Week] [Month]   +   [📅 calendario]
-```
-- **Ubicación:** este filtro vive en la **vista "All content"** (toolbar fija bajo la cabecera), no
-  en el sidebar. El sidebar ya **no** tiene filtro de fecha (solo búsqueda, tags y archived).
-- Botones rápidos por fecha de modificación (`updated`).
-- El icono de calendario despliega un mes navegable para filtrar por un **día concreto** (marca
-  los días con actividad: punto verde = creadas, punto neutro = modificadas; elegir día filtra notas
-  creadas o modificadas ese día). Estado `filterDate` en el store + estado local del día/mes/expandido.
-- Se **combina** con la búsqueda local de la vista y afecta a Favorites, Groups (y su contenido) y Notes.
+### Fechas
+- No hay filtro de fecha ni calendario: la **vista de contenido** agrupa las notas en bloques por fecha
+  (Today, Yesterday, This week, Last 30 days, Earlier). El sidebar tampoco tiene filtro de fecha (solo
+  búsqueda, tags y archived).
 
 ### Filtros por tags
 - Click en un tag del sidebar → filtra notas con ese tag. Click de nuevo → limpia.
@@ -1226,7 +1198,7 @@ en el título de la cabecera). **Open in New Window** reutiliza la ventana de se
 nota completa con sus tabs: se abre en la sección en la que se abriría la nota al pulsarla (la última
 activa en esta sesión, `activeSectionByNote`; si no, la primera).
 
-Click sobre un **tag de sección** (sidebar, vista de grupo, tarjetas de la vista de nota) o sobre un
+Click sobre un **tag de sección** (sidebar, vista de contenido, tarjetas de la vista de nota) o sobre un
 **tab del editor**: se ocultan las acciones de nota (favorito, archivar, split, duplicar/exportar nota,
 grupo/carpeta) y aparecen las de sección:
 ```
@@ -1636,7 +1608,8 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+W` | Eliminar sección |
 | `Ctrl+Tab` | Siguiente sección |
 | `Ctrl+Shift+Tab` | Sección anterior |
-| `Ctrl+A` | Seleccionar todo (secciones en la vista de nota, notas en la vista de grupo) |
+| `Ctrl+A` | Seleccionar todo (secciones en la vista de nota, notas visibles en la vista de contenido) |
+| `↑ ↓` / `← →` / `Intro` | Vista de contenido: cambiar de nota / de sección / abrir en el editor |
 | `← → ↑ ↓` / `Intro` / `F2` | Vista de nota: mover el foco entre tarjetas / abrir la sección / renombrarla |
 | `Delete` | Borrar nota seleccionada (cuando no se edita) |
 

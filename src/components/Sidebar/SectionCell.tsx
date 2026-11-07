@@ -32,8 +32,9 @@ export interface SectionCellProps {
 /**
  * One section of a note, drawn like the editor's section map tab (neutral cell + folded
  * corner in the section colour; solid when open). Shared by the sidebar row's folded map
- * (NoteSectionMap: open map, hover peek, search map) and the horizontal-scroll row
- * (SectionTabsRow: sidebar "Scroll row", collapsed-group peek, overview note cards).
+ * (NoteSectionMap: open map, hover peek, search map), the horizontal-scroll row
+ * (SectionTabsRow: sidebar "Scroll row", collapsed-group peek) and the content view's
+ * note rows (ContentView/NoteTimeline).
  * Styles: `.nsm-cell*` in index.css.
  */
 export function SectionCell({

@@ -21,6 +21,7 @@ import { flushPendingEdits, hasPendingEdits } from '../lib/pendingEdits'
 import { hoursFromNow, TEMP_NOTE_DEFAULT_HOURS } from '../lib/dateUtils'
 import { isUnsafeEncryptedSectionsWrite, redecryptWithSession, relockNotes } from '../lib/encryptedSession'
 import { keepNotesChangedDuringLoad } from '../lib/reloadGuard'
+import type { ContentPlace } from '../lib/contentView'
 import {
   type OpenPane,
   type PaneLayout,
@@ -126,17 +127,15 @@ interface NotesState {
   activeNoteId: string | null   // = note of the active pane (kept in sync by every layout change)
   openPanes: OpenPane[]          // split view: one entry per editor pane (same note may repeat)
   activePaneId: string | null
-  groupViewId: string | null  // when set, the main area shows the group overview instead of the editor
+  contentPlace: ContentPlace | null  // when set, the main area shows the content view on that place (lib/contentView.ts)
   noteViewId: string | null   // when set, the main area shows the single-note overview instead of the editor
   brainViewOpen: boolean      // when true, the main area shows the brain graph instead of the editor
-  allViewOpen: boolean        // when true, the main area shows the "All content" index instead of the editor
-  cameFromAllView: boolean    // true while a group/note overview was opened FROM the all-content view (smart back)
+  contentReturnPlace: ContentPlace | null  // place of the content view a note overview was opened from (smart back)
   notesDir: string
 
   // UI state
   searchQuery: string
   filterSection: string  // section name filter, or 'all'
-  filterDate: 'all' | 'today' | 'week' | 'month'
   filterTag: string | null
   showArchived: boolean
   commandPaletteOpen: boolean
@@ -150,7 +149,7 @@ interface NotesState {
   pendingInitialSectionId: string | null
 
   // Last active section per note (in-memory). Survives editor remounts — e.g. when
-  // the brain/group/note overview opens and the editor unmounts — so closing them
+  // the brain view, content view or note overview opens and the editor unmounts — so closing them
   // returns to the section the user was on instead of falling back to the first one.
   activeSectionByNote: Record<string, string>
 
@@ -185,13 +184,12 @@ interface NotesState {
   navigateToSection: (noteId: string, sectionId: string) => void
   /** Legacy: one pane per note id (existing panes reused). `[id]` = show only that note. */
   setOpenNoteIds: (ids: string[]) => void
-  setGroupView: (id: string | null) => void
+  /** Opens the content view on `place` (or changes its place while open); null closes it. */
+  setContentView: (place: ContentPlace | null) => void
+  /** Opens the note overview; opened from the content view, its "back" returns there. */
   setNoteView: (id: string | null) => void
   setBrainView: (open: boolean) => void
-  setAllView: (open: boolean) => void
-  openGroupFromAll: (id: string) => void
-  openNoteFromAll: (id: string) => void
-  closeFullView: () => void   // smart back: returns to the all-content view if we came from it
+  closeFullView: () => void   // smart back: returns to the content view (same place) if we came from it
   /** Opens a note — or one of its sections, in a pane of its own — alongside the current panes. */
   openNoteInSplit: (id: string, sectionId?: string) => void
   closePane: (paneId: string) => void
@@ -201,7 +199,6 @@ interface NotesState {
   setPaneSection: (paneId: string, sectionId: string) => void
   setSearchQuery: (q: string) => void
   setFilterSection: (s: string) => void
-  setFilterDate: (f: 'all' | 'today' | 'week' | 'month') => void
   setFilterTag: (tag: string | null) => void
   setShowArchived: (v: boolean) => void
   clearFilters: () => void
@@ -327,15 +324,13 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   activeNoteId: null,
   openPanes: [],
   activePaneId: null,
-  groupViewId: null,
+  contentPlace: null,
   noteViewId: null,
   brainViewOpen: false,
-  allViewOpen: false,
-  cameFromAllView: false,
+  contentReturnPlace: null,
   notesDir: '',
   searchQuery: '',
   filterSection: 'all',
-  filterDate: 'all',
   filterTag: null,
   showArchived: false,
   commandPaletteOpen: false,
@@ -540,11 +535,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       notes: [note, ...s.notes],
       ...layoutState(singlePane(layoutOf(s), note.id, newPaneId())),
       newlyCreatedNoteId: note.id,
-      groupViewId: null,
+      contentPlace: null,
       noteViewId: null,
       brainViewOpen: false,
-      allViewOpen: false,
-      cameFromAllView: false,
+      contentReturnPlace: null,
     }))
     return note
   },
@@ -572,7 +566,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // Deliberately NOT setting newlyCreatedNoteId: we don't want the editor to auto-focus
       // and select the title field, which is what let a stale title draft overwrite this one.
       ...(activate
-        ? { ...layoutState(singlePane(layoutOf(s), note.id, newPaneId())), groupViewId: null, noteViewId: null, brainViewOpen: false, allViewOpen: false, cameFromAllView: false }
+        ? { ...layoutState(singlePane(layoutOf(s), note.id, newPaneId())), contentPlace: null, noteViewId: null, brainViewOpen: false, contentReturnPlace: null }
         : {}),
     }))
     return note
@@ -590,11 +584,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       notes: [note, ...s.notes],
       ...layoutState(singlePane(layoutOf(s), note.id, newPaneId())),
       newlyCreatedNoteId: note.id,
-      groupViewId: null,
+      contentPlace: null,
       noteViewId: null,
       brainViewOpen: false,
-      allViewOpen: false,
-      cameFromAllView: false,
+      contentReturnPlace: null,
     }))
     return note
   },
@@ -626,11 +619,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       notes: [note, ...s.notes],
       ...layoutState(singlePane(layoutOf(s), note.id, newPaneId())),
       newlyCreatedNoteId: note.id,
-      groupViewId: null,
+      contentPlace: null,
       noteViewId: null,
       brainViewOpen: false,
-      allViewOpen: false,
-      cameFromAllView: false,
+      contentReturnPlace: null,
     }))
     return note
   },
@@ -732,8 +724,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const prev = get().activeNoteId
     if (prev && prev !== id) maybePruneOnLeave(get, prev)
     set((s) => {
-      // Selecting a note always returns to the editor (closes the group / note / brain / all views)
-      const closeViews = { groupViewId: null, noteViewId: null, brainViewOpen: false, allViewOpen: false, cameFromAllView: false }
+      // Selecting a note always returns to the editor (closes the content / note / brain views)
+      const closeViews = { contentPlace: null, noteViewId: null, brainViewOpen: false, contentReturnPlace: null }
       if (!id) return { activeNoteId: null, ...closeViews }
       // Already in a pane → focus it (split kept); otherwise collapse to a single pane.
       return { ...layoutState(focusOrReplace(layoutOf(s), id, newPaneId())), ...closeViews }
@@ -744,7 +736,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const target = get().notes.find((n) => n.id === noteId)
     if (!target || !target.sections.some((s) => s.id === sectionId)) return
     // Stash the requested section so the editor lands on it on (re)mount, then
-    // re-dispatch on the next tick: when a full-area view (group/note/brain) is
+    // re-dispatch on the next tick: when a full-area view (content/note/brain) is
     // open the editor is unmounted and only starts listening after setActiveNote
     // closes the view. Same mechanism used by the overviews and the brain.
     set({ pendingInitialSectionId: sectionId })
@@ -758,18 +750,22 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       )
     }, 0)
   },
-  // Group overview, note overview, brain view and all-content view are mutually exclusive
-  // full-area views: opening one closes the others.
-  setGroupView: (id) => set({ groupViewId: id, noteViewId: null, brainViewOpen: false, allViewOpen: false, cameFromAllView: false }),
-  setNoteView: (id) => set({ noteViewId: id, groupViewId: null, brainViewOpen: false, allViewOpen: false, cameFromAllView: false }),
-  setBrainView: (open) => set((s) => ({ brainViewOpen: open, groupViewId: open ? null : s.groupViewId, noteViewId: open ? null : s.noteViewId, allViewOpen: open ? false : s.allViewOpen, cameFromAllView: open ? false : s.cameFromAllView })),
-  setAllView: (open) => set({ allViewOpen: open, groupViewId: null, noteViewId: null, brainViewOpen: false, cameFromAllView: false }),
-  // Drill into a group/note FROM the all-content view: remember it so "back" returns to the index.
-  openGroupFromAll: (id) => set({ groupViewId: id, allViewOpen: false, cameFromAllView: true, noteViewId: null, brainViewOpen: false }),
-  openNoteFromAll: (id) => set({ noteViewId: id, allViewOpen: false, cameFromAllView: true, groupViewId: null, brainViewOpen: false }),
+  // Content view, note overview and brain view are mutually exclusive full-area views:
+  // opening one closes the others.
+  setContentView: (place) => set({ contentPlace: place, noteViewId: null, brainViewOpen: false, contentReturnPlace: null }),
+  // Opened from the content view (a section's "Note overview"), remember its place so the
+  // overview's "back" returns there; switching to another note's overview keeps it.
+  setNoteView: (id) => set((s) => ({
+    noteViewId: id,
+    contentPlace: null,
+    brainViewOpen: false,
+    contentReturnPlace: id ? (s.contentPlace ?? (s.noteViewId ? s.contentReturnPlace : null)) : null,
+  })),
+  setBrainView: (open) => set((s) => ({ brainViewOpen: open, contentPlace: open ? null : s.contentPlace, noteViewId: open ? null : s.noteViewId, contentReturnPlace: open ? null : s.contentReturnPlace })),
   closeFullView: () => {
-    if (get().cameFromAllView) get().setAllView(true)
-    else set({ groupViewId: null, noteViewId: null, brainViewOpen: false })
+    const back = get().contentReturnPlace
+    if (back) set({ contentPlace: back, noteViewId: null, brainViewOpen: false, contentReturnPlace: null })
+    else set({ contentPlace: null, noteViewId: null, brainViewOpen: false })
   },
   setOpenNoteIds: (ids) => {
     set((s) => {
@@ -795,7 +791,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     set((s) => ({
       ...layoutState(openInSplit(layoutOf(s), id, section, newPaneId())),
       // The new pane must be visible: leave any full-area view.
-      groupViewId: null, noteViewId: null, brainViewOpen: false, allViewOpen: false, cameFromAllView: false,
+      contentPlace: null, noteViewId: null, brainViewOpen: false, contentReturnPlace: null,
     }))
     saveUiState({ activeNoteId: id, ...(section ? { activeSectionId: section } : {}) })
   },
@@ -836,13 +832,11 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
   setSearchQuery:       (q)   => set({ searchQuery: q }),
   setFilterSection:     (s)   => set({ filterSection: s }),
-  setFilterDate:        (f)   => set({ filterDate: f }),
   setFilterTag:         (tag) => set({ filterTag: tag }),
   setShowArchived:      (v)   => set({ showArchived: v }),
   clearFilters:         ()    => set({
     searchQuery: '',
     filterSection: 'all',
-    filterDate: 'all',
     filterTag: null,
     showArchived: false,
   }),

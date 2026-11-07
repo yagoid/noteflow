@@ -11,10 +11,9 @@ import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { SidebarShell } from './components/Sidebar/SidebarShell'
 import { NoteEditor } from './components/Editor/NoteEditor'
-import { GroupOverview } from './components/GroupOverview/GroupOverview'
 import { NoteOverview } from './components/NoteOverview/NoteOverview'
 import { BrainView } from './components/Brain/BrainView'
-import { AllContentOverview } from './components/AllContentOverview/AllContentOverview'
+import { ContentView } from './components/ContentView/ContentView'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { WhatsNewHost } from './components/WhatsNew/WhatsNewHost'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
@@ -94,12 +93,10 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
   const openPanes = useNotesStore((s) => s.openPanes)
   const activePaneId = useNotesStore((s) => s.activePaneId)
-  const groupViewId = useNotesStore((s) => s.groupViewId)
+  const contentPlace = useNotesStore((s) => s.contentPlace)
   const noteViewId = useNotesStore((s) => s.noteViewId)
   const brainViewOpen = useNotesStore((s) => s.brainViewOpen)
   const setBrainView = useNotesStore((s) => s.setBrainView)
-  const allViewOpen = useNotesStore((s) => s.allViewOpen)
-  const setAllView = useNotesStore((s) => s.setAllView)
   const closeFullView = useNotesStore((s) => s.closeFullView)
   const closePane = useNotesStore((s) => s.closePane)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
@@ -599,7 +596,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
   const sidebarFloating = !brainViewOpen && !sidebarPinned
   const sidebarDocked = brainViewOpen ? brainSidebarVisible : sidebarPinned
   // The AI chat sidebar only floats over the plain editor (not the brain / overviews).
-  const editorViewShown = !allViewOpen && !brainViewOpen && !groupViewId && !noteViewId
+  const editorViewShown = !contentPlace && !brainViewOpen && !noteViewId
 
   if (isSticky) {
     return (
@@ -675,14 +672,11 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
           onDragLeave={handleEditorDragLeave}
           onDrop={handleEditorDrop}
         >
-          {allViewOpen ? (
-            <AllContentOverview onClose={() => setAllView(false)} />
+          {contentPlace ? (
+            // Not keyed by place: changing place keeps the selected note when it's still listed.
+            <ContentView place={contentPlace} onClose={() => closeFullView()} />
           ) : brainViewOpen ? (
             <BrainView onClose={() => setBrainView(false)} />
-          ) : groupViewId ? (
-            // Keyed by group (like NoteOverview below): switching groups remounts the view so
-            // its local state — multi-selection above all — never leaks into the new group.
-            <GroupOverview key={groupViewId} groupId={groupViewId} onClose={() => closeFullView()} />
           ) : noteViewId ? (
             <NoteOverview key={noteViewId} noteId={noteViewId} onClose={() => closeFullView()} />
           ) : isLoading && notes.length === 0 ? (
@@ -798,7 +792,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
             )
           )}
 
-          {draggingNoteId && !groupViewId && !noteViewId && !brainViewOpen && (
+          {draggingNoteId && !contentPlace && !noteViewId && !brainViewOpen && (
             <>
               <div
                 className={`absolute inset-5 z-20 pointer-events-none rounded-lg border-2 border-dashed transition-colors ${

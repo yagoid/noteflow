@@ -200,9 +200,9 @@ export const featuresEs: FeaturesContent = {
   },
 
   views: {
-    title: 'Cuatro maneras de verlo todo',
+    title: 'Tres maneras de verlo todo',
     intro: [
-      'Más allá del editor, NoteFlow tiene cuatro <strong>vistas a área completa</strong> que sustituyen la superficie de edición (el sidebar se queda como contexto). Son mutuamente excluyentes — abrir una cierra las demás, y seleccionar cualquier nota te devuelve al editor.',
+      'Más allá del editor, NoteFlow tiene tres <strong>vistas a área completa</strong> que sustituyen la superficie de edición (el sidebar se queda como contexto). Son mutuamente excluyentes — abrir una cierra las demás, y seleccionar cualquier nota te devuelve al editor.',
       '¿Quieres todo el ancho? <strong>Desfija el sidebar</strong> (el botón junto a su buscador, o <kbd>Ctrl</kbd>+<kbd>\'</kbd>): se pliega en un <strong>minimapa</strong> tenue y sin texto en el borde izquierdo del texto — una marca diminuta por nota, grupo y carpeta, con sus colores — y vuelve a flotar sobre el contenido al pasar el ratón.',
     ],
     cards: [
@@ -212,17 +212,12 @@ export const featuresEs: FeaturesContent = {
         desc: 'Todas las secciones de una nota en una cuadrícula, con su contenido real y la abierta en el editor destacada — arrastra para reordenar, doble clic en un nombre para renombrar, añade una desde la celda “New section”, o selecciona varias para <em>Hide from AI</em> / <em>Delete</em> por lotes. Se abre desde el botón de cuadrícula (⊞) junto a la estrella de favorito, o con click derecho → “Note overview”.',
       },
       {
-        tag: '02 / vista de grupo',
-        name: 'Un grupo, carpeta a carpeta',
-        desc: 'Una banda por carpeta (más “No folder” y “Archived”), cada una una cuadrícula responsiva de tarjetas de nota. Arrastra tarjetas entre bandas para reubicarlas, selecciona varias para favorito / archivar / mover / borrar por lotes, y ensancha las tarjetas con un slider para revelar más secciones. Se abre haciendo click en el nombre de un grupo.',
+        tag: '02 / vista de contenido',
+        name: 'Todo, o un grupo, por fecha',
+        desc: 'Tres columnas: lugares (todo, favoritas, cada grupo con sus carpetas, sin grupo), las notas del lugar en bloques por fecha (Today, Yesterday, This week…) con todas sus secciones a la vista como celdas, y una vista previa de solo lectura de la sección elegida. Busca en ella, arrastra notas a un lugar para reubicarlas, crea carpetas y grupos en línea, selecciona varias para favorito / archivar / mover / borrar por lotes y muestra las archivadas desde su menú ⋯. Se abre desde el botón de cuadrícula (⊞) junto al buscador del sidebar, o haciendo click en el nombre de un grupo.',
       },
       {
-        tag: '03 / all content',
-        name: 'Todo el vault, indexado',
-        desc: 'Favoritos, grupos (como tiles en acordeón que se expanden inline) y notas sueltas en una sola pantalla — con su propio buscador y un filtro de fecha (Today / Week / Month, más un calendario con marcadores de actividad por día). Se abre desde el botón de cuadrícula (⊞) junto al buscador del sidebar.',
-      },
-      {
-        tag: '04 / vista cerebro',
+        tag: '03 / vista cerebro',
         name: 'El grafo',
         desc: 'La ventana se parte en dos mitades redimensionables: el panel de IA (chat, notas relacionadas, perfil) a la izquierda, y el grafo neuronal — aristas de estructura más aristas semánticas de contenido — a la derecha.',
       },

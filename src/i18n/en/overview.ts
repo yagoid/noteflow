@@ -1,28 +1,13 @@
-// Group overview + note overview + shared note/section cards.
+// Note overview + the notes selection bar (content view) + shared section cards.
 export const overview = {
-  // ── Group overview ──────────────────────────────────────────────────────────
+  // Inline rename hint (note overview's section names).
   doubleClickRename: 'Double-click to rename',
-  groupColor: 'Group color',
-  archivedBadge: 'Archived',
-  cardWidth: 'Card width',
-  newNoteInGroup: 'New note in this group',
-  groupEmpty: 'This group is empty',
-  noFolder: 'No folder',
-  archived: 'Archived',
-  emptyDropHint: 'Empty — drop a note here',
-  empty: 'Empty',
 
-  // Select-all in the group view: header button (Ctrl/Cmd+A) + per-band checkbox.
-  selectAllNotesTooltip: 'Select every note in this group (Ctrl/Cmd+A)',
-  deselectAllNotesTooltip: 'Clear the selection (Ctrl/Cmd+A)',
-  selectBandTooltip: 'Select all notes in "{name}"',
-  deselectBandTooltip: 'Deselect all notes in "{name}"',
-
-  // Group-overview delete confirmations.
+  // Batch delete of the content view's multi-selection.
   deleteNotes: 'Delete notes',
   deleteNotesMessage: '{count} notes will be permanently deleted.',
 
-  // Selection action bar (group overview).
+  // Selection action bar (SelectionBar: the content view's multi-selection).
   selectedCount: '{count} selected',
   favorite: 'Favorite',
   unfavorite: 'Unfavorite',

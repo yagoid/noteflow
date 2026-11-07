@@ -18,18 +18,14 @@ const ACTIVE_CELL_MARGIN = 22
 
 /**
  * Where the row sits. It bleeds out of its parent's lateral padding and re-adds it inside,
- * so it spans edge to edge: the sidebar note row is `px-2.5`, the collapsed-group peek's
- * row `px-2` and the overview note card `p-3 pl-4` (its flex `gap-2` spaces it from the
- * title). On the card it stops 3px short of the left edge, after the group-colour accent
- * line, so neither the cells scrolling past nor the left arrow cover it. 'peek' also draws
- * the smaller cells of that denser list (`.nsm-compact`).
+ * so it spans edge to edge: the sidebar note row is `px-2.5` and the collapsed-group peek's
+ * row `px-2`. 'peek' also draws the smaller cells of that denser list (`.nsm-compact`).
  */
-export type SectionTabsRowPlacement = 'sidebar' | 'peek' | 'card'
+export type SectionTabsRowPlacement = 'sidebar' | 'peek'
 
 const PLACEMENT_CLASSES: Record<SectionTabsRowPlacement, { outer: string; inner: string }> = {
   sidebar: { outer: 'mt-[7px] -mx-2.5', inner: 'px-2.5' },
   peek: { outer: 'mt-1 -mx-2', inner: 'px-2 nsm-compact' },
-  card: { outer: '-ml-[13px] -mr-3', inner: 'pl-[13px] pr-3' },
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -55,8 +51,8 @@ interface SectionTabsRowProps {
  * A note's sections as one non-wrapping, horizontally scrollable line of section-map cells
  * (SectionCell: neutral cell + folded corner in the section colour, the open one solid),
  * at their natural width (`.nsm-scroll`), edges faded by a mask and arrows on overflow.
- * Used by the sidebar note row ("Sections in the sidebar → Scroll row"), the collapsed-group
- * peek and the overview note cards (group / all-content views).
+ * Used by the sidebar note row ("Sections in the sidebar → Scroll row") and the
+ * collapsed-group peek.
  */
 export function SectionTabsRow({
   noteId,
