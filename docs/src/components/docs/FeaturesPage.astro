@@ -3,9 +3,11 @@
 // src/pages/features.astro and src/pages/es/features.astro). Layout + shell
 // behaviour come from DocsShell; all prose lives in src/i18n/docs/features.{en,es}.ts.
 // Structural, non-translatable data (colour tokens for the hierarchy mock, the
-// theme swatch palette pulled from src/lib/themes.ts) lives here.
+// theme swatch palette pulled from src/lib/themes.ts) lives here. Every block follows
+// the visual pattern described above the styles (lede → clip/mock → one-line facts).
 import DocsShell from '../../layouts/DocsShell.astro';
 import StickyMock from './StickyMock.astro';
+import FeatureClip from './FeatureClip.astro';
 import { getFeaturesContent } from '../../i18n/docs/features';
 import { getRelativeLocaleUrl } from 'astro:i18n';
 import type { Lang } from '../../i18n';
@@ -21,7 +23,7 @@ const t = getFeaturesContent(lang);
 // placeholders so the prose stays plain data.
 const aiUrl = getRelativeLocaleUrl(lang, '/ai');
 const cliUrl = getRelativeLocaleUrl(lang, '/cli');
-const organizeWhy = t.organize.whyP.replace('%AI_URL%', `${aiUrl}#embeddings`);
+const organizeLede = t.organize.lede.replace('%AI_URL%', `${aiUrl}#embeddings`);
 const fillPrivacy = (s: string) =>
   s.replace(/%AI_URL%/g, `${aiUrl}#privacy`).replace(/%CLI_URL%/g, cliUrl);
 
@@ -99,6 +101,23 @@ const themeSwatches = {
     { name: 'Parchment', bg: '220 220 218', ink: '42 38 32', ac: '75 118 188' },
   ],
 };
+
+// Shortcut combos: when every alternative shares the same modifiers (Ctrl+Z / Ctrl+Y),
+// draw the modifiers once and only the last keys as alternatives — "Ctrl + Z / Y".
+const sharedCombo = (combos: string[][]) => {
+  const mods = combos[0].slice(0, -1);
+  const shared =
+    combos.length > 1 &&
+    mods.length > 0 &&
+    combos.every((c) => c.length === mods.length + 1 && c.slice(0, -1).join('+') === mods.join('+'));
+  return shared ? { mods, alts: combos.map((c) => c[c.length - 1]) } : null;
+};
+
+// Encryption mock: a deterministic pseudo-ciphertext per line (base64 alphabet, same
+// length as the plaintext) — decorative, it only has to look like ciphertext.
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const pseudoCipher = (s: string, seed: number) =>
+  Array.from(s, (ch, i) => B64[(ch.charCodeAt(0) * 31 + i * 17 + seed * 7) % 64]).join('');
 ---
 
 <DocsShell
@@ -117,183 +136,261 @@ const themeSwatches = {
   <section id="organize" data-reveal>
     <div class="nf-sec-head">{kickerFor('organize')}</div>
     <h2>{t.organize.title}</h2>
-    {t.organize.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <p class="nf-feat-lede" set:html={organizeLede} />
 
-    <!-- Hierarchy mock: colour-coded groups → folders → notes → their sections (folded map) -->
-    <figure class="nf-tree nf-edge" role="img" aria-label={t.organize.tree.aria}>
-      <div class="nf-tree-cols">
-        {treeCols.map((col) => (
-          <div class={`nf-tree-group${col.gc ? '' : ' is-ungrouped'}`} style={col.gc ? `--gc:var(--${col.gc});` : undefined}>
-            <div class="nf-tree-ghead">{col.gc && <span class="nf-tree-gdot" aria-hidden="true"></span>}{col.name}</div>
-            <div class="nf-tree-gbody">
-              {col.rows.map((r) => (
-                <div class={r.folder !== null ? 'nf-tree-folder' : 'nf-tree-loose'}>
-                  {r.folder !== null && (
-                    <div class="nf-tree-fhead">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-                      {r.folder}
-                    </div>
-                  )}
-                  <div class="nf-tree-notes">
-                    {r.notes.map((n) => (
-                      <div class={`nf-tree-note${n.open ? ' is-open' : ''}`}>
-                        <span class="nf-tree-ntitle">{n.title}</span>
-                        {!n.open && (
-                          <span class="nf-tree-line" aria-hidden="true">
-                            {n.secs.map((s) => <span class="nf-tree-seg" style={`--tc:var(--${s.tok});flex-grow:${s.weight};`}></span>)}
-                          </span>
-                        )}
-                        <span class="nf-tree-map">
-                          {n.secs.map((s, si) => <span class={`nf-tree-cell${n.open && si === 0 ? ' is-active' : ''}`} style={`--tc:var(--${s.tok});`}>{s.name}</span>)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+    <FeatureClip
+      id="section-map"
+      lang={lang}
+      label={t.organize.clipLabel}
+      caption={t.organize.clipCaption}
+      playLabel={t.clip.play}
+      pauseLabel={t.clip.pause}
+    />
+
+    <div class="nf-feat-split">
+      <ul class="nf-feat-facts">
+        {t.organize.facts.map((f) => (
+          <li class="nf-feat-fact">
+            <strong>{f.title}</strong>
+            <span set:html={f.desc} />
+          </li>
         ))}
-      </div>
-      <figcaption class="nf-tree-caption">{t.organize.tree.caption}</figcaption>
-    </figure>
+      </ul>
 
-    <h3>{t.organize.sectionsH3}</h3>
-    {t.organize.sectionsP.map((p) => <p class="nf-docs-p" set:html={p} />)}
-    <p class="nf-docs-p" set:html={organizeWhy} />
+      <!-- Hierarchy mock: colour-coded groups → folders → notes → their sections (folded map) -->
+      <figure class="nf-tree nf-edge" role="img" aria-label={t.organize.tree.aria}>
+        <div class="nf-tree-cols">
+          {treeCols.map((col) => (
+            <div class={`nf-tree-group${col.gc ? '' : ' is-ungrouped'}`} style={col.gc ? `--gc:var(--${col.gc});` : undefined}>
+              <div class="nf-tree-ghead">{col.gc && <span class="nf-tree-gdot" aria-hidden="true"></span>}{col.name}</div>
+              <div class="nf-tree-gbody">
+                {col.rows.map((r) => (
+                  <div class={r.folder !== null ? 'nf-tree-folder' : 'nf-tree-loose'}>
+                    {r.folder !== null && (
+                      <div class="nf-tree-fhead">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                        {r.folder}
+                      </div>
+                    )}
+                    <div class="nf-tree-notes">
+                      {r.notes.map((n) => (
+                        <div class={`nf-tree-note${n.open ? ' is-open' : ''}`}>
+                          <span class="nf-tree-ntitle">{n.title}</span>
+                          {!n.open && (
+                            <span class="nf-tree-line" aria-hidden="true">
+                              {n.secs.map((s) => <span class="nf-tree-seg" style={`--tc:var(--${s.tok});flex-grow:${s.weight};`}></span>)}
+                            </span>
+                          )}
+                          <span class="nf-tree-map">
+                            {n.secs.map((s, si) => <span class={`nf-tree-cell${n.open && si === 0 ? ' is-active' : ''}`} style={`--tc:var(--${s.tok});`}>{s.name}</span>)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <figcaption class="nf-tree-caption">{t.organize.tree.caption}</figcaption>
+      </figure>
+    </div>
   </section>
 
-  <!-- ── Templates ── -->
+  <!-- ── Templates: lede + the two steps as a mini flow (UI path chips) + sync note ── -->
   <section id="templates" data-reveal>
     <div class="nf-sec-head">{kickerFor('templates')}</div>
     <h2>{t.templates.title}</h2>
-    {t.templates.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
-    <ol class="nf-feat-steps">
-      {t.templates.steps.map((s, i) => (
-        <li class="nf-feat-step">
-          <span class="nf-feat-step-num">{String(i + 1).padStart(2, '0')}</span>
-          <div class="nf-feat-step-body">
-            <h3>{s.title}</h3>
-            <p set:html={s.desc} />
-          </div>
+    <p class="nf-feat-lede" set:html={t.templates.lede} />
+    <ol class="nf-flow" aria-label={t.templates.flowAria}>
+      {t.templates.steps.map((s) => (
+        <li class="nf-flow-step nf-edge">
+          <span class="nf-flow-tag">{s.tag}</span>
+          <span class="nf-flow-path">
+            {s.path.map((p, pi) => (
+              <>
+                {pi > 0 && <span class="nf-flow-arrow" aria-hidden="true">→</span>}
+                <span class={`nf-flow-chip${pi === s.path.length - 1 ? ' is-action' : ''}`}>{p}</span>
+              </>
+            ))}
+          </span>
+          <span class="nf-flow-desc" set:html={s.desc} />
         </li>
       ))}
     </ol>
-    <p class="nf-docs-p" set:html={t.templates.syncP} />
+    <p class="nf-feat-note" set:html={t.templates.syncP} />
   </section>
 
-  <!-- ── Sticky notes ── -->
+  <!-- ── Sticky notes: clip | interactive sticky mock, then four facts ── -->
   <section id="sticky" data-reveal>
     <div class="nf-sec-head">{kickerFor('sticky')}</div>
     <h2>{t.sticky.title}</h2>
-    {t.sticky.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <p class="nf-feat-lede" set:html={t.sticky.lede} />
 
-    <StickyMock
-      winTitle={t.sticky.mock.winTitle}
-      items={t.sticky.mock.items}
-      caption={t.sticky.mock.caption}
-      foldAria={t.sticky.mock.foldAria}
-      closeAria={t.sticky.mock.closeAria}
-      switchHint={t.sticky.mock.switchHint}
-    />
+    <div class="nf-feat-split is-media-first is-center">
+      <FeatureClip
+        id="windows"
+        lang={lang}
+        label={t.sticky.clipLabel}
+        caption={t.sticky.clipCaption}
+        playLabel={t.clip.play}
+        pauseLabel={t.clip.pause}
+      />
+      <StickyMock
+        winTitle={t.sticky.mock.winTitle}
+        items={t.sticky.mock.items}
+        caption={t.sticky.mock.caption}
+        foldAria={t.sticky.mock.foldAria}
+        closeAria={t.sticky.mock.closeAria}
+        switchHint={t.sticky.mock.switchHint}
+      />
+    </div>
 
-    <ul class="nf-docs-ul">
-      {t.sticky.bullets.map((b) => <li set:html={b} />)}
+    <ul class="nf-feat-facts is-2">
+      {t.sticky.facts.map((f) => (
+        <li class="nf-feat-fact"><strong>{f.title}</strong><span set:html={f.desc} /></li>
+      ))}
     </ul>
-    <h3>{t.sticky.startupH3}</h3>
-    <p class="nf-docs-p" set:html={t.sticky.startupP} />
   </section>
 
-  <!-- ── Section links ── -->
+  <!-- ── Section links: pill mock + facts | clip, then kanban as a small aside ── -->
   <section id="links" data-reveal>
     <div class="nf-sec-head">{kickerFor('links')}</div>
     <h2>{t.links.title}</h2>
-    {t.links.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <p class="nf-feat-lede" set:html={t.links.lede} />
 
-    <!-- Pill mock: a live pill in flowing text, a broken one, and the raw form -->
-    <div class="nf-linkmock nf-edge">
-      <p class="nf-linkmock-line">
-        {t.links.mock.before}<span class="nf-pill"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>{t.links.mock.pill}</span>{t.links.mock.after}
-      </p>
-      <p class="nf-linkmock-line is-note">
-        {t.links.mock.brokenLabel}
-        <span class="nf-pill is-broken"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>{t.links.mock.brokenPill}</span>
-      </p>
-      <div class="nf-linkmock-raw">
-        <span class="nf-linkmock-rawlabel">{t.links.mock.rawLabel}</span>
-        <code>{t.links.mock.raw}</code>
+    <div class="nf-feat-split is-media-last">
+      <FeatureClip
+        id="links-palette"
+        lang={lang}
+        label={t.links.clipLabel}
+        caption={t.links.clipCaption}
+        playLabel={t.clip.play}
+        pauseLabel={t.clip.pause}
+      />
+      <div class="nf-feat-stack">
+        <!-- Pill mock: a live pill in flowing text, a broken one, and the raw form -->
+        <div class="nf-linkmock nf-edge">
+          <p class="nf-linkmock-line">
+            {t.links.mock.before}<span class="nf-pill"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>{t.links.mock.pill}</span>{t.links.mock.after}
+          </p>
+          <div class="nf-linkmock-row">
+            <span class="nf-linkmock-rawlabel">{t.links.mock.brokenLabel}</span>
+            <span class="nf-pill is-broken"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>{t.links.mock.brokenPill}</span>
+          </div>
+          <div class="nf-linkmock-row is-raw">
+            <span class="nf-linkmock-rawlabel">{t.links.mock.rawLabel}</span>
+            <code>{t.links.mock.raw}</code>
+          </div>
+        </div>
+        <ul class="nf-feat-facts">
+          {t.links.facts.map((f) => (
+            <li class="nf-feat-fact"><strong>{f.title}</strong><span set:html={f.desc} /></li>
+          ))}
+        </ul>
       </div>
     </div>
 
-    <ul class="nf-docs-ul">
-      {t.links.bullets.map((b) => <li set:html={b} />)}
-    </ul>
-    <p class="nf-docs-p" set:html={t.links.rawP} />
-    <p class="nf-docs-p" set:html={t.links.brainP} />
+    <div class="nf-feat-mini">
+      <FeatureClip
+        id="kanban"
+        lang={lang}
+        label={t.links.kanban.clipLabel}
+        caption={t.links.kanban.clipCaption}
+        playLabel={t.clip.play}
+        pauseLabel={t.clip.pause}
+      />
+      <div class="nf-feat-mini-body">
+        <strong>{t.links.kanban.title}</strong>
+        <p set:html={t.links.kanban.desc} />
+      </div>
+    </div>
   </section>
 
-  <!-- ── Snippets ── -->
+  <!-- ── Snippets: clip | source→inserted mock + facts ── -->
   <section id="snippets" data-reveal>
     <div class="nf-sec-head">{kickerFor('snippets')}</div>
     <h2>{t.snippets.title}</h2>
-    {t.snippets.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <p class="nf-feat-lede" set:html={t.snippets.lede} />
 
-    <!-- Snippet mock: the stored markdown with its variables → what lands in the note
-         (the source starts with `## `, so the output is drawn as a rendered heading) -->
-    <div class="nf-snipmock nf-edge">
-      <div class="nf-snipmock-row">
-        <span class="nf-snipmock-label">{t.snippets.mock.sourceLabel}</span>
-        <code>{t.snippets.mock.source}</code>
-      </div>
-      <div class="nf-snipmock-row is-output">
-        <span class="nf-snipmock-label">{t.snippets.mock.outputLabel}</span>
-        <span class="nf-snipmock-out">{t.snippets.mock.output}</span>
+    <div class="nf-feat-split is-media-first">
+      <FeatureClip
+        id="snippets"
+        lang={lang}
+        label={t.snippets.clipLabel}
+        caption={t.snippets.clipCaption}
+        playLabel={t.clip.play}
+        pauseLabel={t.clip.pause}
+      />
+      <div class="nf-feat-stack">
+        <!-- Snippet mock: the stored markdown with its variables → what lands in the note
+             (the source starts with `## `, so the output is drawn as a rendered heading) -->
+        <div class="nf-snipmock nf-edge">
+          <div class="nf-snipmock-row">
+            <span class="nf-snipmock-label">{t.snippets.mock.sourceLabel}</span>
+            <code>{t.snippets.mock.source}</code>
+          </div>
+          <div class="nf-snipmock-row is-output">
+            <span class="nf-snipmock-label">{t.snippets.mock.outputLabel}</span>
+            <span class="nf-snipmock-out">{t.snippets.mock.output}</span>
+          </div>
+        </div>
+        <ul class="nf-feat-facts">
+          {t.snippets.facts.map((f) => (
+            <li class="nf-feat-fact"><strong>{f.title}</strong><span set:html={f.desc} /></li>
+          ))}
+        </ul>
       </div>
     </div>
-
-    <ul class="nf-docs-ul">
-      {t.snippets.bullets.map((b) => <li set:html={b} />)}
-    </ul>
-    <p class="nf-docs-p" set:html={t.snippets.syncP} />
   </section>
 
-  <!-- ── Shortcuts ── -->
+  <!-- ── Shortcuts: one card per group (keys | action), flowing in two columns ── -->
   <section id="shortcuts" data-reveal>
     <div class="nf-sec-head">{kickerFor('shortcuts')}</div>
     <h2>{t.shortcuts.title}</h2>
-    {t.shortcuts.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
-    <aside class="nf-feat-callout"><p set:html={t.shortcuts.macNote} /></aside>
+    <p class="nf-feat-lede" set:html={t.shortcuts.lede} />
 
-    {t.shortcuts.groups.map((g) => (
-      <div class="nf-keys-group">
-        <h3 class="nf-keys-label"><span class="nf-keys-dot" aria-hidden="true"></span>{g.label}</h3>
-        <table class="nf-ref-table nf-keys-table">
-          <thead><tr><th>{t.shortcuts.colShortcut}</th><th>{t.shortcuts.colAction}</th></tr></thead>
-          <tbody>
-            {g.rows.map((r) => (
-              <tr>
-                <td class="nf-keys-combo">
-                  {r.combos.map((combo, ci) => (
-                    <>
-                      {ci > 0 && <span class="nf-keys-sep">/</span>}
-                      <span class="nf-keys-kbds">{combo.map((k, ki) => (<>{ki > 0 && <span class="nf-keys-plus">+</span>}<kbd>{k}</kbd></>))}</span>
-                    </>
-                  ))}
-                </td>
-                <td>{r.desc}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    ))}
+    <div class="nf-keys-grid">
+      {t.shortcuts.groups.map((g) => (
+        <div class="nf-keys-card nf-edge">
+          <h3 class="nf-keys-label"><span class="nf-keys-dot" aria-hidden="true"></span>{g.label}</h3>
+          <dl class="nf-keys-list">
+            {g.rows.map((r) => {
+              const shared = sharedCombo(r.combos);
+              return (
+                <div class="nf-keys-row">
+                  <dt class="nf-keys-combo">
+                    {shared ? (
+                      <span class="nf-keys-kbds">
+                        {shared.mods.map((k) => (<><kbd>{k}</kbd><span class="nf-keys-plus">+</span></>))}
+                        {shared.alts.map((k, ai) => (<>{ai > 0 && <span class="nf-keys-sep">/</span>}<kbd>{k}</kbd></>))}
+                      </span>
+                    ) : (
+                      r.combos.map((combo, ci) => (
+                        <>
+                          {ci > 0 && <span class="nf-keys-sep">/</span>}
+                          <span class="nf-keys-kbds">{combo.map((k, ki) => (<>{ki > 0 && <span class="nf-keys-plus">+</span>}<kbd>{k}</kbd></>))}</span>
+                        </>
+                      ))
+                    )}
+                  </dt>
+                  <dd>{r.desc}</dd>
+                </div>
+              );
+            })}
+          </dl>
+        </div>
+      ))}
+    </div>
+    <p class="nf-feat-note" set:html={t.shortcuts.macNote} />
   </section>
 
-  <!-- ── Views ── -->
+  <!-- ── Views: three cards, two clips side by side, the floating sidebar in one line ── -->
   <section id="views" data-reveal>
     <div class="nf-sec-head">{kickerFor('views')}</div>
     <h2>{t.views.title}</h2>
-    {t.views.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <p class="nf-feat-lede" set:html={t.views.lede} />
     <div class="nf-view-grid">
       {t.views.cards.map((c) => (
         <article class="nf-view-card nf-edge">
@@ -303,44 +400,138 @@ const themeSwatches = {
         </article>
       ))}
     </div>
+    <div class="nf-feat-duo">
+      <FeatureClip
+        id="brain"
+        lang={lang}
+        label={t.views.brainClip.label}
+        caption={t.views.brainClip.caption}
+        playLabel={t.clip.play}
+        pauseLabel={t.clip.pause}
+      />
+      <FeatureClip
+        id="floating-sidebar"
+        lang={lang}
+        label={t.views.sidebarClip.label}
+        caption={t.views.sidebarClip.caption}
+        playLabel={t.clip.play}
+        pauseLabel={t.clip.pause}
+      />
+    </div>
+    <p class="nf-feat-note" set:html={t.views.sidebarNote} />
   </section>
 
-  <!-- ── Temporary notes ── -->
+  <!-- ── Temporary notes: facts | clip ── -->
   <section id="temp" data-reveal>
     <div class="nf-sec-head">{kickerFor('temp')}</div>
     <h2>{t.temp.title}</h2>
-    {t.temp.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
-    <ul class="nf-docs-ul">
-      {t.temp.bullets.map((b) => <li set:html={b} />)}
-    </ul>
+    <p class="nf-feat-lede" set:html={t.temp.lede} />
+
+    <div class="nf-feat-split is-media-last is-center">
+      <FeatureClip
+        id="quick-capture"
+        lang={lang}
+        label={t.temp.clipLabel}
+        caption={t.temp.clipCaption}
+        playLabel={t.clip.play}
+        pauseLabel={t.clip.pause}
+      />
+      <ul class="nf-feat-facts">
+        {t.temp.facts.map((f) => (
+          <li class="nf-feat-fact"><strong>{f.title}</strong><span set:html={f.desc} /></li>
+        ))}
+      </ul>
+    </div>
   </section>
 
-  <!-- ── Encryption ── -->
-  <section id="encryption" data-reveal>
-    <div class="nf-sec-head">{kickerFor('encryption')}</div>
-    <h2>{t.encryption.title}</h2>
-    {t.encryption.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
-    <ul class="nf-docs-ul">
-      {t.encryption.bullets.map((b) => <li set:html={fillPrivacy(b)} />)}
-    </ul>
-  </section>
+  <!-- ── Privacy pair: encryption | hide from AI (two columns when there's room) ── -->
+  <div class="nf-feat-pair">
+    <div class="nf-feat-pair-grid">
+      <section id="encryption" data-reveal>
+        <div class="nf-sec-head">{kickerFor('encryption')}</div>
+        <h2>{t.encryption.title}</h2>
+        <p class="nf-feat-lede" set:html={t.encryption.lede} />
 
-  <!-- ── Hide from AI ── -->
-  <section id="ai-hidden" data-reveal>
-    <div class="nf-sec-head">{kickerFor('ai-hidden')}</div>
-    <h2>{t.aiHidden.title}</h2>
-    {t.aiHidden.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
-    <ul class="nf-docs-ul">
-      {t.aiHidden.bullets.map((b) => <li set:html={b} />)}
-    </ul>
-    <p class="nf-docs-p" set:html={fillPrivacy(t.aiHidden.moreP)} />
-  </section>
+        <!-- Lock mock: the note's lines sweep into ciphertext when locked (button toggles it;
+             the script locks it once when it scrolls into view). Locked is the no-JS state. -->
+        <figure class="nf-crypt is-locked" data-crypt>
+          <div class="nf-crypt-card nf-edge">
+            <div class="nf-crypt-bar">
+              <span class="nf-crypt-title">{t.encryption.mock.title}</span>
+              <button
+                type="button"
+                class="nf-crypt-btn"
+                data-crypt-toggle
+                data-label-lock={t.encryption.mock.lockAria}
+                data-label-unlock={t.encryption.mock.unlockAria}
+                aria-label={t.encryption.mock.unlockAria}
+                hidden
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path class="nf-crypt-shackle" d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              </button>
+            </div>
+            <ul class="nf-crypt-lines">
+              {t.encryption.mock.lines.map((line, i) => (
+                <li style={`--i:${i};`}>
+                  <span class="nf-crypt-plain">{line}</span>
+                  <span class="nf-crypt-cipher" aria-hidden="true">{pseudoCipher(line, i)}</span>
+                </li>
+              ))}
+            </ul>
+            <div class="nf-crypt-foot" aria-hidden="true">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              {t.encryption.mock.lockedLabel}
+            </div>
+          </div>
+        </figure>
 
-  <!-- ── Personalize ── -->
+        <ul class="nf-feat-facts">
+          {t.encryption.facts.map((f) => (
+            <li class="nf-feat-fact"><strong>{f.title}</strong><span set:html={fillPrivacy(f.desc)} /></li>
+          ))}
+        </ul>
+      </section>
+
+      <section id="ai-hidden" data-reveal>
+        <div class="nf-sec-head">{kickerFor('ai-hidden')}</div>
+        <h2>{t.aiHidden.title}</h2>
+        <p class="nf-feat-lede" set:html={t.aiHidden.lede} />
+
+        <!-- Hidden-section mock: three section cells feed the AI; the hidden one is cut off -->
+        <figure class="nf-hide" role="img" aria-label={t.aiHidden.mock.aria}>
+          <div class="nf-hide-cols">
+            {t.aiHidden.mock.sections.map((name, i) => (
+              <div class={`nf-hide-col${i === t.aiHidden.mock.hiddenIndex ? ' is-hidden' : ''}`} style={`--tc:var(--${tagToks[(i + 1) % tagToks.length]});`}>
+                <span class="nf-hide-cell">
+                  {i === t.aiHidden.mock.hiddenIndex && (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+                  )}
+                  {name}
+                </span>
+                <span class="nf-hide-stem"></span>
+              </div>
+            ))}
+          </div>
+          <div class="nf-hide-target">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>
+            {t.aiHidden.mock.target}
+          </div>
+        </figure>
+
+        <ul class="nf-feat-facts">
+          {t.aiHidden.facts.map((f) => (
+            <li class="nf-feat-fact"><strong>{f.title}</strong><span set:html={fillPrivacy(f.desc)} /></li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <!-- ── Personalize: the 14 real theme swatches, then three facts | clip `themes` ── -->
   <section id="personalize" data-reveal>
     <div class="nf-sec-head">{kickerFor('personalize')}</div>
     <h2>{t.personalize.title}</h2>
-    {t.personalize.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <p class="nf-feat-lede" set:html={t.personalize.lede} />
 
     <div class="nf-swatch-rows">
       {(['dark', 'light'] as const).map((mode) => (
@@ -362,13 +553,89 @@ const themeSwatches = {
       ))}
     </div>
 
-    <p class="nf-docs-p" set:html={t.personalize.moreP} />
-    <p class="nf-docs-p" set:html={t.personalize.widthP} />
+    <div class="nf-feat-split is-media-last is-center">
+      <FeatureClip
+        id="themes"
+        lang={lang}
+        label={t.personalize.clipLabel}
+        caption={t.personalize.clipCaption}
+        playLabel={t.clip.play}
+        pauseLabel={t.clip.pause}
+      />
+      <ul class="nf-feat-facts">
+        {t.personalize.facts.map((f) => (
+          <li class="nf-feat-fact"><strong>{f.title}</strong><span set:html={f.desc} /></li>
+        ))}
+      </ul>
+    </div>
   </section>
 </DocsShell>
 
 <style is:global>
   /* ── /features page-specific styles (shared widgets live in docs.css). Accent = orange. ── */
+
+  /* Visual block pattern (every block): kicker + h2 + short lede → visual (clip from
+     FeatureClip.astro and/or an HTML/CSS mock) → a few one-line facts. Splits put two of
+     those side by side from 760px up (facts | mock, clip | mock, clip | facts…). */
+  .nf-feat-lede { margin: 0; max-width: 62ch; font-size: clamp(16.5px, 1.6vw, 18px); line-height: 1.55; color: var(--ink-dim); }
+  .nf-feat-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    column-gap: 28px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .nf-feat-fact {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 13px 0;
+    border-top: 1px solid var(--line);
+  }
+  .nf-feat-fact > strong {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink-strong);
+  }
+  .nf-feat-fact > strong::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--page-accent);
+    box-shadow: 0 0 8px rgb(var(--orange) / .55);
+  }
+  .nf-feat-fact > span { padding-left: 15px; font-size: 14.5px; line-height: 1.55; color: var(--ink-dim); }
+  .nf-feat-fact kbd { font-size: 11px; padding: 1px 6px; }
+  .nf-feat-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; margin: 6px 0 8px; align-items: start; }
+  .nf-feat-split .nf-feat-facts { grid-template-columns: 1fr; }
+  .nf-feat-split .nf-feat-fact:first-child { border-top: 0; padding-top: 2px; }
+  .nf-feat-split .nf-tree { margin: 0; padding: 18px 18px 13px; }
+  .nf-feat-split .nf-tree-cols { gap: 18px 24px; }
+  .nf-feat-split .nf-tree-group { flex-basis: 150px; min-width: 140px; }
+  .nf-feat-split .nf-clip, .nf-feat-split .nf-sticky-scene { margin: 0; }
+  .nf-feat-split.is-center { align-items: center; }
+  .nf-feat-lede + .nf-feat-split { margin-top: 26px; }
+  .nf-feat-split + .nf-feat-facts { margin-top: 22px; }
+  .nf-swatch-rows + .nf-feat-split { margin-top: 34px; }
+  /* Two-up facts row (sticky) */
+  .nf-feat-facts.is-2 { grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 640px) {
+    .nf-feat-facts.is-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (min-width: 760px) {
+    .nf-feat-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr); gap: 32px; }
+    /* Media-led splits: the clip takes the wider column, on the left (media-first) or the
+       right (media-last). The clip always comes first in the DOM, so on mobile it stacks on top. */
+    .nf-feat-split.is-media-first { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+    .nf-feat-split.is-media-last { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
+    .nf-feat-split.is-media-last > :first-child { order: 2; }
+  }
 
   /* Hierarchy mock: groups → folders → notes → sections (folded line / map) */
   .nf-tree {
@@ -509,45 +776,114 @@ const themeSwatches = {
     color: var(--ink-faint);
   }
 
-  /* Numbered steps (templates) — same language as the RAG steps on /ai */
-  .nf-feat-steps { margin: 18px 0 8px; padding: 0; list-style: none; max-width: 72ch; }
-  .nf-feat-step { display: flex; gap: 18px; padding: 15px 0; border-bottom: 1px solid var(--line); }
-  .nf-feat-step:last-child { border-bottom: 0; }
-  .nf-feat-step-num {
-    flex: 0 0 auto;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    letter-spacing: .1em;
-    color: rgb(var(--orange));
-    padding-top: 2px;
-  }
-  .nf-feat-step-body h3 { margin: 0 0 5px; font-size: 15.5px; }
-  .nf-feat-step-body p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-dim); }
-
-  /* Highlighted callout (macOS keys note) */
-  .nf-feat-callout {
-    margin: 18px 0 22px;
-    padding: 15px 19px;
-    border: 1px solid var(--line-2);
-    border-left: 2px solid rgb(var(--orange));
-    border-radius: 10px;
-    background: var(--card);
-    box-shadow: 0 0 24px rgb(var(--orange) / .06);
+  /* One-line aside under a block (templates sync, macOS keys, floating sidebar) */
+  .nf-feat-note {
+    margin: 18px 0 0;
     max-width: 72ch;
+    padding: 2px 0 2px 14px;
+    border-left: 2px solid var(--page-accent);
+    font-size: 14.5px;
+    line-height: 1.6;
+    color: var(--ink-dim);
   }
-  .nf-feat-callout p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-dim); }
+  .nf-feat-note kbd { font-size: 11px; padding: 1px 6px; }
 
-  /* Section-link pill mock */
-  .nf-linkmock {
-    margin: 22px 0 24px;
-    padding: 18px 20px;
+  /* Templates: two steps as a mini flow — a mono tag, the UI path as chips, one line */
+  .nf-flow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 30px;
+    margin: 26px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .nf-flow-step {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 18px 15px;
     border: 1px solid var(--line-2);
     border-radius: 12px;
     background: var(--card);
-    max-width: 640px;
   }
-  .nf-linkmock-line { margin: 0 0 12px; font-size: 15.5px; line-height: 1.9; color: var(--ink-dim); }
-  .nf-linkmock-line.is-note { font-size: 13.5px; color: var(--ink-faint); }
+  /* Connector between the steps: an accent arrow (down when stacked, right side by side) */
+  .nf-flow-step + .nf-flow-step::before {
+    content: '↓';
+    position: absolute;
+    top: -26px;
+    left: 26px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    line-height: 22px;
+    color: var(--page-accent);
+  }
+  @media (min-width: 640px) {
+    .nf-flow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 38px; }
+    .nf-flow-step + .nf-flow-step::before { content: '→'; top: 50%; left: -29px; transform: translateY(-50%); }
+  }
+  .nf-flow-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--page-accent);
+  }
+  .nf-flow-path { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .nf-flow-chip {
+    padding: 4px 10px;
+    border: 1px solid var(--line-2);
+    border-radius: 7px;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--card-2);
+    white-space: nowrap;
+  }
+  .nf-flow-chip.is-action {
+    font-weight: 600;
+    color: var(--ink-strong);
+    border-color: rgb(var(--orange) / .45);
+    background: rgb(var(--orange) / .14);
+  }
+  .nf-flow-arrow { font-size: 12px; color: var(--ink-faint); }
+  .nf-flow-desc { font-size: 14px; line-height: 1.55; color: var(--ink-dim); }
+
+  /* A column of mock + facts inside a split */
+  .nf-feat-stack { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+
+  /* Small clip + a two-line aside (kanban under section links) */
+  .nf-feat-mini {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    align-items: center;
+    margin: 30px 0 8px;
+    padding-top: 26px;
+    border-top: 1px dashed var(--line-2);
+  }
+  .nf-feat-mini .nf-clip { margin: 0; }
+  .nf-feat-mini-body strong { display: block; margin-bottom: 6px; font-size: 16.5px; font-weight: 600; color: var(--ink-strong); }
+  .nf-feat-mini-body p { margin: 0; max-width: 46ch; font-size: 14.5px; line-height: 1.6; color: var(--ink-dim); }
+  .nf-feat-mini-body kbd { font-size: 11px; padding: 1px 6px; }
+  @media (min-width: 640px) {
+    .nf-feat-mini { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 26px; }
+  }
+
+  /* Two clips side by side (views) */
+  .nf-feat-duo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px 22px; margin: 26px 0 0; }
+  .nf-feat-duo .nf-clip { margin: 0 0 14px; }
+  @media (min-width: 760px) {
+    .nf-feat-duo { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  }
+
+  /* Section-link pill mock */
+  .nf-linkmock {
+    padding: 16px 18px 6px;
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    background: var(--card);
+  }
+  .nf-linkmock-line { margin: 0 0 10px; font-size: 15px; line-height: 1.9; color: var(--ink-dim); }
   .nf-pill {
     display: inline-flex;
     align-items: center;
@@ -563,122 +899,310 @@ const themeSwatches = {
     white-space: nowrap;
     vertical-align: baseline;
   }
+  [data-theme='light'] .nf-pill { color: var(--detail); }
   .nf-pill svg { flex: 0 0 auto; opacity: .8; }
   .nf-pill.is-broken {
+    margin: 0;
     color: var(--ink-faint);
     background: var(--card-2);
     border-color: var(--line-2);
     text-decoration: line-through;
     text-decoration-color: rgb(var(--red) / .6);
   }
-  .nf-linkmock-raw {
+  .nf-linkmock-row {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
-    gap: 8px 14px;
-    margin-top: 4px;
-    padding-top: 13px;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 10px 0;
     border-top: 1px dashed var(--line-2);
   }
   .nf-linkmock-rawlabel {
+    flex: 0 0 auto;
+    min-width: 92px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
     letter-spacing: .18em;
     text-transform: uppercase;
     color: var(--ink-faint);
   }
-  .nf-linkmock-raw code {
+  .nf-docs-content .nf-linkmock-row code {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--ink-dim);
     word-break: break-all;
   }
 
   /* Snippet mock: stored markdown with variables → the rendered result */
   .nf-snipmock {
-    margin: 22px 0 24px;
-    padding: 6px 20px;
+    padding: 4px 18px;
     border: 1px solid var(--line-2);
     border-radius: 12px;
     background: var(--card);
-    max-width: 640px;
   }
   .nf-snipmock-row {
     display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 8px 14px;
-    padding: 12px 0;
+    flex-direction: column;
+    gap: 6px;
+    padding: 11px 0;
   }
   .nf-snipmock-row.is-output { border-top: 1px dashed var(--line-2); }
   .nf-snipmock-label {
-    flex: 0 0 84px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
     letter-spacing: .18em;
     text-transform: uppercase;
     color: var(--ink-faint);
   }
-  .nf-snipmock-row code {
+  .nf-docs-content .nf-snipmock-row code {
+    padding: 0;
+    border: 0;
+    background: none;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--ink-dim);
     word-break: break-word;
   }
-  .nf-snipmock-out { font-size: 18px; font-weight: 600; line-height: 1.35; color: var(--ink-strong); }
+  .nf-snipmock-out { font-size: 17px; font-weight: 600; line-height: 1.35; color: var(--ink-strong); }
 
-  /* Shortcut tables */
-  .nf-keys-group { margin-top: 26px; }
-  .nf-keys-label {
+  /* Shortcuts: a card per group, flowing in two columns; keys | action as a grid */
+  .nf-keys-grid { columns: 2 330px; column-gap: 16px; margin: 24px 0 0; }
+  .nf-keys-card {
+    break-inside: avoid;
+    margin: 0 0 16px;
+    padding: 14px 16px 6px;
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    background: var(--card);
+  }
+  .nf-docs-content .nf-keys-label {
     display: flex;
     align-items: center;
     gap: 9px;
-    margin: 0 0 4px;
+    margin: 0 0 6px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 500;
     letter-spacing: .2em;
     text-transform: uppercase;
     color: var(--ink);
   }
-  .nf-keys-dot { width: 8px; height: 8px; border-radius: 50%; background: rgb(var(--orange)); box-shadow: 0 0 9px rgb(var(--orange) / .6); }
-  .nf-keys-combo { width: 38%; min-width: 210px; white-space: nowrap; }
-  .nf-keys-kbds { display: inline-flex; align-items: center; gap: 3px; }
-  .nf-keys-plus, .nf-keys-sep { color: var(--ink-faint); font-size: 12px; }
-  .nf-keys-sep { margin: 0 7px; }
-  @media (max-width: 719px) {
-    .nf-keys-table thead { display: none; }
-    .nf-keys-table tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
-    .nf-keys-table td { display: block; border-bottom: 0; padding: 2px 0; }
-    .nf-keys-combo { width: auto; min-width: 0; white-space: normal; }
+  .nf-keys-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--page-accent); box-shadow: 0 0 9px rgb(var(--orange) / .6); }
+  /* Narrow cards: keys above their action; from 480px, keys | action in two aligned columns */
+  .nf-keys-list { display: grid; grid-template-columns: minmax(0, 1fr); margin: 0; }
+  .nf-keys-row { display: contents; }
+  .nf-keys-row > dt { padding: 9px 0 3px; border-top: 1px solid var(--line); }
+  .nf-keys-row > dd { padding: 0 0 9px; }
+  .nf-keys-row:first-child > dt { border-top: 0; }
+  @media (min-width: 480px) {
+    .nf-keys-list { grid-template-columns: max-content minmax(0, 1fr); }
+    .nf-keys-row > dt, .nf-keys-row > dd { padding: 8px 0; border-top: 1px solid var(--line); }
+    .nf-keys-row > dt { padding-right: 16px; }
+    .nf-keys-row:first-child > dt, .nf-keys-row:first-child > dd { border-top: 0; }
   }
+  .nf-keys-row > dd { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--ink-dim); }
+  .nf-keys-kbds { display: inline-flex; align-items: center; gap: 3px; }
+  .nf-keys-card kbd { font-size: 11px; padding: 1px 6px; }
+  .nf-keys-plus, .nf-keys-sep { color: var(--ink-faint); font-size: 11px; }
+  .nf-keys-sep { margin: 0 4px; }
 
   /* Views cards */
   .nf-view-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 14px;
-    margin: 20px 0 8px;
+    margin: 24px 0 0;
   }
   .nf-view-card {
-    padding: 18px 20px;
+    padding: 16px 18px;
     border: 1px solid var(--line-2);
     border-radius: 10px;
     background: var(--card);
   }
   .nf-view-tag {
-    margin-bottom: 10px;
+    margin-bottom: 9px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 10.5px;
     letter-spacing: .18em;
     text-transform: uppercase;
-    color: rgb(var(--orange));
+    color: var(--page-accent);
   }
-  .nf-view-card h3 { margin: 0 0 8px; font-size: 16.5px; }
-  .nf-view-card p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-dim); }
+  .nf-docs-content .nf-view-card h3 { margin: 0 0 6px; font-size: 16px; }
+  .nf-view-card p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink-dim); }
+
+  /* Privacy pair: encryption | hide from AI side by side when the column is wide enough.
+     The wrapper carries the section divider; the two sections drop their own. */
+  .nf-feat-pair { container-type: inline-size; border-top: 1px solid var(--line); }
+  .nf-docs-content .nf-feat-pair section[id] { border-top: 0; padding-top: clamp(44px, 6vw, 68px); }
+  .nf-docs-content .nf-feat-pair section[id] + section[id] { border-top: 1px solid var(--line); }
+  @container (min-width: 760px) {
+    .nf-feat-pair-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .nf-docs-content .nf-feat-pair section[id]:first-child { padding-right: 30px; }
+    .nf-docs-content .nf-feat-pair section[id] + section[id] { border-top: 0; border-left: 1px solid var(--line); padding-left: 30px; }
+    .nf-docs-content .nf-feat-pair section > h2 { font-size: clamp(25px, 2.5vw, 30px); }
+  }
+  .nf-feat-pair .nf-feat-facts { grid-template-columns: 1fr; margin-top: 22px; }
+
+  /* Encryption mock: a note whose lines sweep into ciphertext when locked */
+  .nf-crypt { margin: 24px 0 0; }
+  .nf-crypt-card {
+    max-width: 380px;
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    background: var(--card);
+    overflow: hidden;
+  }
+  .nf-crypt-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 38px;
+    padding: 0 8px 0 15px;
+    border-bottom: 1px solid var(--line);
+    background: var(--card-2);
+  }
+  .nf-crypt-title { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--ink-strong); }
+  .nf-crypt-btn {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--line-2);
+    border-radius: 7px;
+    color: var(--ink-dim);
+    background: transparent;
+    cursor: pointer;
+    transition: color .2s ease, border-color .2s ease, background .2s ease;
+  }
+  .nf-crypt-btn[hidden] { display: none; }
+  .nf-crypt-btn:hover { color: var(--ink-strong); border-color: var(--page-accent); }
+  .nf-crypt-btn:focus-visible { outline: 2px solid var(--page-accent); outline-offset: 2px; }
+  .nf-crypt.is-locked .nf-crypt-btn { color: var(--page-accent); border-color: rgb(var(--orange) / .45); background: rgb(var(--orange) / .1); }
+  /* Open padlock: the shackle lifts and swings to the side */
+  .nf-crypt-shackle { transform-origin: 16px 11px; transform: translateY(-2px) rotate(28deg); transition: transform .35s ease; }
+  .nf-crypt.is-locked .nf-crypt-shackle { transform: none; }
+  .nf-crypt-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    margin: 0;
+    padding: 15px 15px 6px;
+    list-style: none;
+  }
+  /* Plain text and ciphertext share one cell; locking wipes one into the other, line by line */
+  .nf-crypt-lines li { display: grid; font-size: 14px; line-height: 1.45; }
+  .nf-crypt-plain, .nf-crypt-cipher {
+    grid-area: 1 / 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
+    transition: clip-path .7s cubic-bezier(.6, 0, .3, 1) calc(var(--i) * .14s);
+  }
+  .nf-crypt-plain { color: var(--ink); clip-path: inset(0 0 0 0); }
+  .nf-crypt-cipher {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    letter-spacing: .02em;
+    color: var(--page-accent);
+    clip-path: inset(0 100% 0 0);
+  }
+  [data-theme='light'] .nf-crypt-cipher { color: var(--detail); }
+  .nf-crypt.is-locked .nf-crypt-plain { clip-path: inset(0 0 0 100%); }
+  .nf-crypt.is-locked .nf-crypt-cipher { clip-path: inset(0 0 0 0); }
+  .nf-crypt-foot {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 15px 13px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: .16em;
+    color: var(--ink-faint);
+    opacity: 0;
+    transition: opacity .3s ease .5s;
+  }
+  .nf-crypt.is-locked .nf-crypt-foot { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .nf-crypt-plain, .nf-crypt-cipher, .nf-crypt-foot, .nf-crypt-shackle, .nf-crypt-btn { transition: none; }
+  }
+
+  /* Hide-from-AI mock: section cells with a stem down into the AI box; the hidden one is cut */
+  .nf-hide { margin: 24px 0 0; max-width: 380px; }
+  .nf-hide-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .nf-hide-col { display: flex; flex-direction: column; align-items: center; }
+  .nf-hide-cell {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    width: 100%;
+    padding: 7px 8px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Folded corner in the section colour, like the app's section map */
+  .nf-hide-cell::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    border-style: solid;
+    border-width: 0 8px 8px 0;
+    border-color: transparent rgb(var(--tc)) transparent transparent;
+  }
+  .nf-hide-stem { width: 2px; height: 30px; background: rgb(var(--orange) / .55); }
+  .nf-hide-col.is-hidden .nf-hide-cell { color: var(--ink-faint); border-style: dashed; border-color: var(--line-2); background: transparent; }
+  .nf-hide-col.is-hidden .nf-hide-stem {
+    position: relative;
+    height: 12px;
+    margin-bottom: 18px;
+    background: none;
+    border-left: 2px dashed var(--line-2);
+    width: 0;
+  }
+  /* The cut: a small × where the stem stops */
+  .nf-hide-col.is-hidden .nf-hide-stem::after {
+    content: '×';
+    position: absolute;
+    top: 9px;
+    left: -6px;
+    font-size: 15px;
+    line-height: 1;
+    color: rgb(var(--red));
+  }
+  .nf-hide-target {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid rgb(var(--orange) / .4);
+    border-radius: 10px;
+    background: rgb(var(--orange) / .08);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink);
+    text-align: center;
+  }
+  .nf-hide-target svg { flex: 0 0 auto; color: var(--page-accent); }
 
   /* Theme swatch strips */
-  .nf-swatch-rows { display: flex; flex-direction: column; gap: 20px; margin: 22px 0 24px; }
+  .nf-swatch-rows { display: flex; flex-direction: column; gap: 20px; margin: 26px 0 0; }
   .nf-swatch-rowlabel {
     display: block;
     margin-bottom: 11px;
@@ -734,10 +1258,39 @@ const themeSwatches = {
   }
 
   /* Prose links on this page underline with the orange accent (mirrors CliPage/AiPage) */
-  .nf-docs-p a, .nf-docs-ul a, .nf-feat-callout a {
+  .nf-docs-p a, .nf-docs-ul a, .nf-feat-note a, .nf-feat-lede a, .nf-feat-fact a, .nf-feat-mini-body a {
     color: var(--ink);
     text-decoration: underline;
     text-decoration-color: var(--page-accent);
     text-underline-offset: 3px;
   }
 </style>
+
+<script>
+  // Encryption mock: the lock button toggles the demo note; the first time it scrolls
+  // into view it locks itself once (its text wipes into ciphertext). The markup ships
+  // locked (the no-JS state); with motion allowed it starts unlocked so the wipe shows.
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.querySelectorAll<HTMLElement>('[data-crypt]').forEach((fig) => {
+    const btn = fig.querySelector<HTMLButtonElement>('[data-crypt-toggle]');
+    if (!btn) return;
+    let touched = false;
+    const setLocked = (on: boolean) => {
+      fig.classList.toggle('is-locked', on);
+      btn.setAttribute('aria-label', (on ? btn.dataset.labelUnlock : btn.dataset.labelLock) || '');
+    };
+    btn.addEventListener('click', () => {
+      touched = true;
+      setLocked(!fig.classList.contains('is-locked'));
+    });
+    btn.hidden = false;
+    if (reduceMotion || !('IntersectionObserver' in window)) return;
+    setLocked(false);
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      setTimeout(() => { if (!touched) setLocked(true); }, 900);
+    }, { threshold: 0.6 });
+    io.observe(fig);
+  });
+</script>
