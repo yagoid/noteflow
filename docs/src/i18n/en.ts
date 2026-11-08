@@ -3,7 +3,6 @@
 // page renders lives here; `es.ts` must satisfy the same type (no missing keys).
 // Strings that carry inline HTML (<strong>, <em>, <code>, <span>, <br>) are kept
 // as raw strings and rendered with `set:html` in Home.astro.
-import type { NoteBlock } from './types';
 
 export const en = {
   // Document <title> + meta description (passed to Base.astro).
@@ -19,8 +18,7 @@ export const en = {
   rail: {
     home: 'home',
     brain: 'The Brain',
-    notes: 'Notes',
-    themes: 'Themes',
+    what: 'What is it',
     profile: 'Profile',
     download: 'Download',
     toggleTheme: 'Toggle theme',
@@ -38,98 +36,34 @@ export const en = {
     scroll: 'Scroll',
   },
 
-  notesSection: {
+  // "What is NoteFlow": intro copy + the clip mosaic (the big demo video surrounded by short
+  // clips of single features). Structural data of each clip (aspect, files, layout) lives in
+  // Home.astro; only the copy is here. `clips` is keyed by clip id.
+  intro: {
     kicker: 'What is NoteFlow',
     h2: 'Quick notes. Zero friction.',
-    p: `A dark-first desktop notebook for technical people. It lives in your system tray, writes plain Markdown to your own disk, and stays out of the way until you need it. The brain is optional — the speed isn't.`,
-    modeRaw: 'Text section',
-    modeRich: 'Markdown section',
-    listAria: 'NoteFlow features',
-    // Contextual CTA under the notes widget → the /cli docs page.
-    cliCta: 'CLI reference →',
-    // Keyed by feature id (structural fields id/tok/time/mode live in Home.astro).
-    notes: {
-      brain: {
-        title: 'A brain that mirrors you',
-        date: 'Jun 24, 2026 · 22:10',
-        tags: ['Brain'],
-        body: [
-          { t: 'p', html: 'NoteFlow turns your notes into a living <strong>3D neural graph</strong>. The more order you give them, the more legible your brain becomes — clusters form, neurons connect, structure emerges.' },
-          { t: 'ul', items: ['Tidy groups → clean clusters', 'Linked notes → stronger connections', 'Each section is its own neuron'] },
-          { t: 'p', html: 'Organize on the left, watch it take shape in the <code>Brain</code> view.' },
-        ] as NoteBlock[],
-      },
-      headless: {
-        title: 'Drive it headless',
-        date: 'Jun 21, 2026 · 20:48',
-        tags: ['CLI'],
-        body: [
-          { t: 'p', html: 'No screen? No problem. Run NoteFlow on a <strong>Raspberry Pi</strong>, a VPS or a home server through its companion CLI.' },
-          { t: 'code', lines: ['$ ssh pi@home', '$ nf new "Backup plan" --group infra', '✓ created · synced'] },
-          { t: 'p', html: 'Full control over your notes and groups from any terminal — perfect for scripts and pipelines.' },
-        ] as NoteBlock[],
-      },
-      import: {
-        title: 'Bring your notes along',
-        date: 'Jun 17, 2026 · 18:33',
-        tags: ['Import'],
-        body: [
-          { t: 'p', html: 'Switching is painless. Import what you already wrote elsewhere — NoteFlow speaks the formats you already use.' },
-          { t: 'check', items: [
-            { done: true, text: 'Notion exports' },
-            { done: true, text: 'Obsidian vaults' },
-            { done: true, text: 'Google Keep' },
-            { done: false, text: '…and plain Markdown from anywhere' },
-          ] },
-        ] as NoteBlock[],
-      },
-      ai: {
-        title: 'AI that knows you',
-        date: 'Jun 14, 2026 · 16:05',
-        tags: ['Agent'],
-        body: [
-          { t: 'p', html: 'The agent reads your <strong>profile</strong> and the full context of your notes before it answers — so its replies land closer to what you actually mean than any generic chat ever could.' },
-          { t: 'ul', items: ['Knows who you are and how you work', 'Sees every note as context', 'Answers in your language, on your terms'] },
-        ] as NoteBlock[],
-      },
-      sticky: {
-        title: 'Pin it to your desktop',
-        date: 'Jun 10, 2026 · 13:27',
-        tags: ['Sticky'],
-        body: [
-          { t: 'p', html: 'Pop any note out as a <strong>sticky note</strong> that floats over your desktop — always in view while you work.' },
-          { t: 'check', items: [
-            { done: true, text: 'Stays on top, outside the main window' },
-            { done: true, text: 'Edits sync straight back to the note' },
-          ] },
-        ] as NoteBlock[],
-      },
-      private: {
-        title: 'Private by design',
-        date: 'Jun 06, 2026 · 08:52',
-        tags: ['Privacy'],
-        body: [
-          { t: 'p', html: 'Your notes, your rules. Sync runs through a repo <strong>you</strong> own, and you can plug in <strong>local AI models</strong> so nothing ever leaves your machine.' },
-          { t: 'check', items: [
-            { done: true, text: 'Sync to a GitHub repo you control' },
-            { done: true, text: 'Run local LLMs — fully offline AI' },
-            { done: true, text: 'Your keys, your data, your disk' },
-          ] },
-        ] as NoteBlock[],
-      },
-    },
-  },
-
-  showcase: {
-    kicker: 'Dark-first · 14 themes',
-    h2: `The magic is in <em style="font-style:italic;">the small details.</em>`,
-    p: 'Fourteen hand-tuned themes — Carbon, Tokyo Night, Dracula, Parchment and more. Flip the switch and the whole app follows.',
-    toggleTheme: 'Toggle theme',
-    themesLabel: 'Themes',
-    themesCaption: 'Carbon · Tokyo Night · Midnight · Dracula · Synthwave · Parchment …',
+    p: `A dark-first desktop notebook for technical people. It lives in your system tray, writes plain Markdown to your own disk and stays out of the way until you need it. The brain is optional — the speed isn't.`,
+    mosaicAria: 'NoteFlow in short clips',
     videoAria: 'NoteFlow desktop app demo',
-    // Contextual CTA → the /features docs page.
+    // Theme switch under the mosaic: every clip swaps to its dark/light take.
+    toggleTheme: 'Switch theme — every clip follows',
+    // Global pause/play for the looping clips (WCAG 2.2.2).
+    pauseClips: 'Pause clips',
+    playClips: 'Play clips',
+    // Contextual CTAs under the mosaic → /cli and /features.
+    cliCta: 'CLI reference →',
     featuresCta: 'Every detail →',
+    // caption = tiny mono chip on the tile · label = aria-label describing what the clip shows.
+    clips: {
+      'brain-orbit': { caption: 'Brain · 3D graph', label: 'The Brain: the 3D graph of your notes, slowly rotating' },
+      'sections-tab': { caption: 'Ctrl+Tab · sections', label: "Ctrl+Tab cycling through a note's sections" },
+      'temp-note': { caption: 'Ctrl+Shift+N · temp note', label: 'Ctrl+Shift+N opens a temporary note that cleans itself up after 24 hours' },
+      kanban: { caption: '/kanban · drag a card', label: 'A kanban board inside a note, with a card dragged to another column' },
+      'slash-snippets': { caption: '/ menu · snippets', label: "The / menu inserting a snippet with today's date" },
+      sticky: { caption: 'Sticky · sections', label: 'A floating sticky note switching section from its title' },
+      'section-preview': { caption: 'Hover · section preview', label: "Hovering a note's section map shows a preview of that section" },
+      themes: { caption: '14 themes', label: 'Switching through several NoteFlow themes' },
+    },
   },
 
   brain: {

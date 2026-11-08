@@ -20,7 +20,7 @@ npm run check    # astro check (0 errores es lo esperado)
 
 | Ruta | Qué es | Componente | Prosa i18n |
 |---|---|---|---|
-| `/` | Landing one-pager (hero, notes, showcase, brain, profile, download) | `src/components/Home.astro` | `src/i18n/en.ts` + `es.ts` |
+| `/` | Landing one-pager (hero, `#what` = qué es + mosaico de clips, brain, profile, download) | `src/components/Home.astro` | `src/i18n/en.ts` + `es.ts` |
 | `/cli` | Doc completa del CLI | `src/components/docs/CliPage.astro` | `src/i18n/docs/cli.{en,es}.ts` + datos en `src/data/cli.ts` |
 | `/ai` | Internals de la IA (proveedores, embeddings, RAG, perfil, agente) | `src/components/docs/AiPage.astro` | `src/i18n/docs/ai.{en,es}.ts` |
 | `/features` | Detalles de producto (jerarquía, stickies, atajos, vistas, cifrado…) | `src/components/docs/FeaturesPage.astro` | `src/i18n/docs/features.{en,es}.ts` |
@@ -54,7 +54,9 @@ enlaza al aviso legal vía `%LEGAL_NOTICE_URL%`; con placeholders, dice solo "el
 independiente que opera NoteFlow" + email, sin enlace (nunca hay enlaces rotos).
 
 Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas),
-`public/mobile-privacy-policy.html`, `public/screenshots/`, `public/video/`, `public/clips/` (clips cortos de `/features`, ver abajo), `public/brain/*.js`.
+`public/mobile-privacy-policy.html`, `public/screenshots/`, `public/video/` (demo grande de la landing),
+`public/mosaic/` (clips del mosaico de la landing, ver "Landing" abajo), `public/clips/` (clips cortos de
+`/features`, ver abajo), `public/brain/*.js`.
 
 ## Arquitectura (lo VIVO)
 
@@ -143,14 +145,44 @@ Cuando cambie algo en la app, este mapa dice qué tocar en la web. Editar siempr
 `.en.ts` + `.es.ts` (el tipo obliga).
 
 ### Landing `/` (`src/i18n/{en,es}.ts`)
-Features del mock de notas, chat mock, mockup de perfil, botones de descarga (ver
-"Descargas del landing" abajo), CTAs a `/cli`, `/ai` y `/features` (+ footer, que enlaza también a `/pricing`,
-`/privacy` y `/terms` **sin `data-nav`** — el script de sinapsis de la home no los conoce). El mock de notas
-(`.nf-note` en `Home.astro`) dibuja las secciones como el item del sidebar de la app: línea plegada en
-las notas cerradas y mapa de celdas (sección abierta en sólido) en la activa. El kicker/párrafo del
-showcase cita el nº de temas (**14**, igual que `/features#personalize`). Vídeos/capturas por tema en
-`public/video/` y `public/screenshots/`. Actualizar al cambiar UX visible o al hacer release con
-features nuevas destacables.
+Secciones en orden: hero → `#what` (qué es + mosaico de clips) → `#brain` (chat mock) → `#profile`
+(mockup de perfil) → `#get` (botones de descarga, ver "Descargas del landing" abajo). CTAs a `/cli` y
+`/features` (bajo el mosaico) y `/ai` (en `#brain`) + footer, que enlaza también a `/pricing`, `/privacy`
+y `/terms` **sin `data-nav`** — el script de sinapsis de la home no los conoce. Rail de neuronas: home ·
+`what` · brain · profile · download (scroll-spy `SPY` + `NAV_BRAIN`/`NAV_COLORS` del script de `Home.astro`
+con las mismas claves). Actualizar al cambiar UX visible o al hacer release con features nuevas destacables.
+
+**`#what` — "What is NoteFlow" + mosaico** (antes eran dos secciones, `#notes` con un mock de notas
+interactivo y `#themes` con el vídeo; se fusionaron y el mock se eliminó. `#notes`/`#themes` siguen como
+anclas vacías dentro de `#what` para no romper enlaces viejos). Kicker + `h2` + párrafo (`t.intro`) y un
+**tablero tipo pinboard**: el demo grande en el centro y 8 clips cortos de una sola feature alrededor,
+con tamaños según su aspecto, pequeños desplazamientos y giros de ±1–2° — suelto a propósito, no una
+rejilla uniforme. Son la estrella visual (marketing reutiliza los mismos clips).
+- **Material**: demo grande `public/video/demo-{dark,light}.{webm,mp4}` + póster `demo-{dark,light}.webp`
+  (1280×820). Clips `public/mosaic/<id>-{dark,light}.{webm,mp4,webp}` (webp = póster), salvo `themes`,
+  una sola toma `themes.{webm,mp4,webp}` para ambos temas (ya va cambiando de tema). Manifiesto
+  (`mosaicTiles` en el frontmatter de `Home.astro`: id, área, aspecto, giro/offset/ancho, color del chip):
+  `brain-orbit` 1:1 · `sections-tab` 4:3 · `temp-note` 4:3 · `kanban` 16:10 · `slash-snippets` 4:5 ·
+  `sticky` 4:5 · `section-preview` 16:10 · `themes` 1:1. Copy por clip en `t.intro.clips[id]`: `caption`
+  (chip mono, corto — en tiles estrechos tiene ~17 caracteres de sitio) y `label` (aria-label que describe
+  el clip). El chip de `themes` cita el nº de temas (**14**, igual que `/features#personalize`). Si cambia
+  la UI que enseña un clip, regrabarlo (dark y light) y revisar su caption/label.
+- **Layout** (CSS en `<style is:global>` de `Home.astro`, `.nf-mosaic`): `grid-template-areas` de 12
+  columnas en escritorio (demo de 7 columnas × 2 filas, columna izquierda 2, derecha 3, fila inferior
+  4/2/4/2); ≤1179px 6 columnas con el demo arriba a todo el ancho y los tiles emparejados por altura;
+  ≤639px demo + rejilla de 2 columnas sin giros (los 16:10 a dos columnas; el chip pasa a pie de foto).
+  La "soltura" va en variables inline por tile (`--r --dx --dy --w --j`) multiplicadas por `--k`
+  (1 / .6 / 0 según ancho). Hover: el tile se endereza, sube y crece un poco.
+- **Vídeo** (script de `Home.astro`, bloque "mosaic"): cada `<video data-mosaic-video>` lleva sus fuentes
+  dark/light en `data-{dark,light}-{webm,mp4,poster}` y los `<source>` salen vacíos. Un IntersectionObserver
+  (rootMargin 120px) asigna las fuentes del tema actual al acercarse (el demo grande ya al cargar, con
+  `preload="metadata"`; los tiles `preload="none"`), reproduce en pantalla y pausa al salir. El toggle de
+  tema bajo el mosaico (y el del rail) cambia póster + fuentes de todos los tiles conservando su estado
+  (`themes` no se recarga). Botón global **Pause/Play clips** (WCAG 2.2.2); con `prefers-reduced-motion`
+  no hay autoplay (solo pósters) hasta pulsar Play.
+- **Reveal**: `data-reveal` + `data-reveal-delay` (ms) escalona la entrada de los tiles. La red de
+  seguridad de 2,6 s del script solo revela lo que ya está en (o por encima de) la pantalla — revelarlo
+  todo hacía que las entradas de más abajo se reprodujeran fuera de vista.
 
 **Descargas del landing (`#get`)** — fila flex con los **dos botones de descarga** (Windows `nf-lift`
 primario + Linux `nf-ghost` con `dlGhost`, 14px), ambos a `/releases/latest` y con su `data-dl`
@@ -309,7 +341,7 @@ revisar esos textos y su fecha.
 ## Checklist al cerrar una feature de la app
 
 1. ¿Es visible para el usuario? → skill `noteflow-features` (ya obligatorio) **y** revisar si toca
-   alguna sección de `/features` o el mock de la landing.
+   alguna sección de `/features` o algún clip del mosaico de la landing (`#what`).
 2. ¿Toca el CLI? → `noteflow help` (`cmdHelp`) con el detalle, la SKILL.md del CLI solo si cambia algo que el CLI no avisa (y siempre con la **misma versión** que `CLI_VERSION`, ver `patterns.md`) **y** `/cli` (`data/cli.ts` + prosa + versión del hero).
 3. ¿Toca IA (presets, tools, umbrales, prompts, cuestionario)? → `/ai` (tabla de arriba).
 4. ¿Atajos o temas nuevos? → `/features#shortcuts` / `#personalize`.

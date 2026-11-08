@@ -2,7 +2,7 @@
 // docs pages (where the EN dict defines the shape via `typeof`), every legal dict is
 // annotated with this explicit interface: the pages share one renderer (LegalPage.astro),
 // so the shape must be identical across pages, not just across locales.
-// The `t` discriminator mirrors the NoteBlock pattern of the landing (types.ts).
+// The `t` discriminator is a string-literal union so the renderer can narrow on it.
 
 export type LegalBlock =
   | { t: 'p'; html: string }

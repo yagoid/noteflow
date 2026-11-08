@@ -16,8 +16,7 @@ export const es: Content = {
   rail: {
     home: 'inicio',
     brain: 'El Cerebro',
-    notes: 'Notas',
-    themes: 'Temas',
+    what: 'Qué es',
     profile: 'Perfil',
     download: 'Descargar',
     toggleTheme: 'Cambiar tema',
@@ -34,95 +33,27 @@ export const es: Content = {
     scroll: 'Baja',
   },
 
-  notesSection: {
+  intro: {
     kicker: 'Qué es NoteFlow',
     h2: 'Notas rápidas. Cero fricción.',
-    p: 'Un cuaderno de escritorio dark-first para personas técnicas. Vive en la bandeja del sistema, escribe Markdown plano en tu propio disco y se mantiene fuera del camino hasta que lo necesitas. El cerebro es opcional — la velocidad no.',
-    modeRaw: 'Sección de texto',
-    modeRich: 'Sección markdown',
-    listAria: 'Funcionalidades de NoteFlow',
-    cliCta: 'Referencia del CLI →',
-    notes: {
-      brain: {
-        title: 'Un cerebro que te refleja',
-        date: '24 jun 2026 · 22:10',
-        tags: ['Cerebro'],
-        body: [
-          { t: 'p', html: 'NoteFlow convierte tus notas en un <strong>grafo neuronal 3D</strong> vivo. Cuanto más orden les das, más legible se vuelve tu cerebro — se forman clusters, las neuronas se conectan, emerge la estructura.' },
-          { t: 'ul', items: ['Grupos ordenados → clusters limpios', 'Notas enlazadas → conexiones más fuertes', 'Cada sección es su propia neurona'] },
-          { t: 'p', html: 'Organiza a la izquierda y observa cómo toma forma en la vista <code>Cerebro</code>.' },
-        ],
-      },
-      headless: {
-        title: 'Manéjalo sin pantalla',
-        date: '21 jun 2026 · 20:48',
-        tags: ['CLI'],
-        body: [
-          { t: 'p', html: '¿Sin pantalla? Sin problema. Ejecuta NoteFlow en una <strong>Raspberry Pi</strong>, un VPS o un servidor casero a través de su CLI companion.' },
-          { t: 'code', lines: ['$ ssh pi@home', '$ nf new "Plan de backup" --group infra', '✓ creada · sincronizada'] },
-          { t: 'p', html: 'Control total sobre tus notas y grupos desde cualquier terminal — perfecto para scripts y pipelines.' },
-        ],
-      },
-      import: {
-        title: 'Trae tus notas contigo',
-        date: '17 jun 2026 · 18:33',
-        tags: ['Importar'],
-        body: [
-          { t: 'p', html: 'Cambiar no duele. Importa lo que ya escribiste en otro sitio — NoteFlow habla los formatos que ya usas.' },
-          { t: 'check', items: [
-            { done: true, text: 'Exportaciones de Notion' },
-            { done: true, text: 'Vaults de Obsidian' },
-            { done: true, text: 'Google Keep' },
-            { done: false, text: '…y Markdown plano de cualquier parte' },
-          ] },
-        ],
-      },
-      ai: {
-        title: 'IA que te conoce',
-        date: '14 jun 2026 · 16:05',
-        tags: ['Agente'],
-        body: [
-          { t: 'p', html: 'El agente lee tu <strong>perfil</strong> y el contexto completo de tus notas antes de responder — así sus respuestas se acercan más a lo que de verdad quieres decir de lo que jamás podría un chat genérico.' },
-          { t: 'ul', items: ['Sabe quién eres y cómo trabajas', 'Ve cada nota como contexto', 'Responde en tu idioma, en tus términos'] },
-        ],
-      },
-      sticky: {
-        title: 'Fíjala en tu escritorio',
-        date: '10 jun 2026 · 13:27',
-        tags: ['Sticky'],
-        body: [
-          { t: 'p', html: 'Saca cualquier nota como una <strong>sticky note</strong> que flota sobre tu escritorio — siempre a la vista mientras trabajas.' },
-          { t: 'check', items: [
-            { done: true, text: 'Se mantiene encima, fuera de la ventana principal' },
-            { done: true, text: 'Los cambios se sincronizan directo con la nota' },
-          ] },
-        ],
-      },
-      private: {
-        title: 'Privada por diseño',
-        date: '06 jun 2026 · 08:52',
-        tags: ['Privacidad'],
-        body: [
-          { t: 'p', html: 'Tus notas, tus reglas. La sincronización pasa por un repo que es <strong>tuyo</strong>, y puedes conectar <strong>modelos de IA locales</strong> para que nada salga nunca de tu máquina.' },
-          { t: 'check', items: [
-            { done: true, text: 'Sincroniza a un repo de GitHub que controlas' },
-            { done: true, text: 'Ejecuta LLMs locales — IA totalmente offline' },
-            { done: true, text: 'Tus claves, tus datos, tu disco' },
-          ] },
-        ],
-      },
-    },
-  },
-
-  showcase: {
-    kicker: 'Dark-first · 14 temas',
-    h2: `La magia está en <em style="font-style:italic;">los pequeños detalles.</em>`,
-    p: 'Catorce temas afinados a mano — Carbon, Tokyo Night, Dracula, Parchment y más. Pulsa el interruptor y toda la app le sigue.',
-    toggleTheme: 'Cambiar tema',
-    themesLabel: 'Temas',
-    themesCaption: 'Carbon · Tokyo Night · Midnight · Dracula · Synthwave · Parchment …',
+    p: 'Un cuaderno de escritorio dark-first para personas técnicas. Vive en la bandeja del sistema, escribe Markdown plano en tu propio disco y no estorba hasta que lo necesitas. El cerebro es opcional — la velocidad no.',
+    mosaicAria: 'NoteFlow en clips cortos',
     videoAria: 'Demo de la app de escritorio NoteFlow',
+    toggleTheme: 'Cambia el tema — todos los clips le siguen',
+    pauseClips: 'Pausar clips',
+    playClips: 'Reproducir clips',
+    cliCta: 'Referencia del CLI →',
     featuresCta: 'Cada detalle →',
+    clips: {
+      'brain-orbit': { caption: 'Cerebro · 3D', label: 'El Cerebro: el grafo 3D de tus notas girando despacio' },
+      'sections-tab': { caption: 'Ctrl+Tab · secciones', label: 'Ctrl+Tab recorriendo las secciones de una nota' },
+      'temp-note': { caption: 'Ctrl+Shift+N · nota temporal', label: 'Ctrl+Shift+N abre una nota temporal que se borra sola a las 24 horas' },
+      kanban: { caption: '/kanban · arrastra', label: 'Un tablero kanban dentro de una nota, con una tarjeta arrastrada a otra columna' },
+      'slash-snippets': { caption: 'Menú / · fragmentos', label: 'El menú / insertando un fragmento con la fecha de hoy' },
+      sticky: { caption: 'Sticky · secciones', label: 'Una sticky note flotante cambiando de sección desde su título' },
+      'section-preview': { caption: 'Hover · vista previa', label: 'Al pasar sobre el mapa de secciones de una nota se previsualiza esa sección' },
+      themes: { caption: '14 temas', label: 'Cambiando entre varios temas de NoteFlow' },
+    },
   },
 
   brain: {

@@ -4,7 +4,7 @@ import { en } from './en';
 import { es } from './es';
 
 export type { Content } from './en';
-export type { NoteBlock, Lang } from './types';
+export type { Lang } from './types';
 
 import type { Lang } from './types';
 

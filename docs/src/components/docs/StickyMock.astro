@@ -1,7 +1,7 @@
 ---
 // A NoteFlow sticky note (300 × 300) recreated in pure HTML/CSS for the /features
-// page. Theme-aware via the same `--nf-*` RGB-triple trick as the `.nf-notes` block
-// on the landing (Carbon palette in dark, Arctic Day in light). Interactive bits:
+// page. Theme-aware via `--nf-*` RGB triples defined below (the app's Carbon palette in
+// dark, Arctic Day in light — values from src/lib/themes.ts). Interactive bits:
 //   · the checklist boxes really toggle (plain checkboxes, styled like the app),
 //   · the ─ button folds the note into a pill (`.is-folded`, ~450 ms transition),
 //     clicking the pill unfolds it,
@@ -59,8 +59,8 @@ const { winTitle, items, caption, foldAria, closeAria, switchHint } = Astro.prop
 </div>
 
 <style is:global>
-  /* Scene: centres the mock and carries the app palette (same triples as the
-     landing's .nf-notes: Carbon in dark, Arctic Day under the light site theme). */
+  /* Scene: centres the mock and carries the app palette (rgb triples from
+     src/lib/themes.ts: Carbon in dark, Arctic Day under the light site theme). */
   .nf-sticky-scene {
     --nf-bg-0: 9 9 9; --nf-bg-1: 17 17 17; --nf-bg-2: 26 26 26; --nf-bg-3: 38 38 38;
     --nf-border: 42 42 42;
