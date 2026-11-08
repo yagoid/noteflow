@@ -58,7 +58,7 @@ export const common = {
   duplicateSection: 'Duplicate section',
   // Name of the copy created by "Duplicate section".
   sectionCopyName: '{name} (copy)',
-  // Date label shared by the editor's date line and the section preview cards.
+  // Date label of the editor's date line under the note title.
   // `createdAt` is the SECTION's creation date (falls back to the note's).
   createdAt: 'Created {date}',
   exportNote: 'Export note…',

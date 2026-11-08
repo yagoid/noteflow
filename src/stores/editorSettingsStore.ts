@@ -16,9 +16,9 @@ export type FontFamily = 'mono' | 'inter'
 /**
  * CSS font stack for the editor's font setting. The single source for every surface
  * that shows note content in the editor font: the TipTap editor and the raw textarea
- * (NoteEditor), plus the read-only previews (note overview grid, section hover card,
- * SectionPreviewCard), which set it as `--prose-font-family` since they render outside
- * the editor.
+ * (NoteEditor), plus the read-only previews (note overview grid, the section preview
+ * card of the hover and Brain previews, the content view's preview pane), which set it
+ * as `--prose-font-family` since they render outside the editor.
  */
 export function proseFontStack(fontFamily: FontFamily): string {
   return fontFamily === 'inter' ? "'Inter', sans-serif" : "'JetBrains Mono', 'Fira Code', monospace"

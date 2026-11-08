@@ -69,11 +69,11 @@ button {
 }
 
 /* Read-only section previews that render the exact prose markup the editor uses
-   (static HTML from htmlFromMarkdown): SectionPreviewCard (Brain preview) shrinks
-   it via `zoom` into a miniature of the open note; the note overview grid and the
-   section hover card (.note-grid-body.note-preview) restyle it at reading size. The
-   container supplies its own insets, so the ProseMirror padding is zeroed and the
-   first block's top margin is removed. */
+   (static HTML from htmlFromMarkdown): the note overview grid cells and the section
+   preview card (hover + Brain), both via .note-grid-body.note-preview, and the content
+   view's preview pane (.cv-pv-body.note-preview). The container supplies its own
+   insets, so the ProseMirror padding is zeroed and the first block's top margin is
+   removed. */
 .note-preview .prose-editor {
   height: auto;
 }
@@ -1659,12 +1659,14 @@ html[data-color-scheme="light"] .nsm-peek {
 /* The map's drop bar, above the cells' own layers. */
 .note-grid .section-map-drop { z-index: 4; }
 
-/* ── Section hover preview (SectionPreview/SectionHoverCard.tsx) ───────────────
+/* ── Section preview card (SectionPreview/SectionHoverCard.tsx) ────────────────
+   Used by the hover preview and the Brain view's pinned preview.
    A note-grid cell as a floating landscape card: it reuses .note-grid-head and the
    cell's body/foot (.note-grid-body / -raw / -empty / -foot) and the map's folded
    corner, and only adds what differs — an opaque surface with border and shadow (it
    floats over anything), the section name in its colour and the note title on the
-   right of the header. HoverPreviewProvider sizes and positions it; the card sets
+   right of the header. Its host (HoverPreviewProvider / BrainNodePreview) sizes it
+   (SectionPreview/previewSize.ts) and positions it; the card sets
    --sm-color, --prose-font-family and --ng-accent-ink itself (it's in a portal). */
 .section-hover-card {
   position: relative;
@@ -1711,6 +1713,26 @@ html[data-color-scheme="light"] .section-hover-card {
   color: rgb(var(--text-muted));
 }
 .section-hover-card .section-map-corner { z-index: 1; width: 14px; height: 14px; }
+
+/* Clickable variant: the Brain view's pinned preview (Brain/BrainNodePreview.tsx) wraps
+   the same card in a <button> that opens the section. The button is a bare box the card
+   fills (no border/background/padding of its own); the card's border firms up on hover
+   and keyboard focus shows an accent ring. The card's children are pointer-events: none
+   (.note-grid-head/-body/-foot), so clicks land on the card and bubble to the button. */
+.section-preview-button {
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  color: inherit;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.section-preview-button .section-hover-card { transition: border-color 150ms ease; }
+.section-preview-button:hover .section-hover-card { border-color: rgb(var(--text) / 0.3); }
+.section-preview-button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
 
 /* Header buttons (same plane as the content, no band). */
 .note-grid-ghost {

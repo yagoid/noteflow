@@ -928,8 +928,9 @@ cualquier nota. Es **aditivo** — la lista de siempre sigue siendo el modo prin
 - **Interacción:** navegación libre estilo Obsidian — arrastrar el lienzo (pan), **rueda para zoom**,
   arrastrar un nodo para recolocarlo. **Hover/seleccionar** una nota **resalta sus conexiones de
   contenido** y atenúa el resto. **Click en un nodo de nota/sección** ancla junto a él una
-  **ventanita de previsualización clicable** (una mini-representación del editor con esa sección); al **pulsar
-  dentro de la ventanita** se navega a esa sección en el editor. Se cierra con click fuera o `Esc`.
+  **ventanita de previsualización clicable** (la misma tarjeta apaisada que la
+  [previsualización al hover](#previsualización-de-sección-al-hover), del mismo tamaño; su borde se
+  marca al pasar el ratón); al **pulsar dentro de la ventanita** se navega a esa sección en el editor. Se cierra con click fuera o `Esc`.
   Click en un grupo abre la vista de contenido en ese grupo. Los nombres de las notas aparecen al acercar el zoom.
 - **Toggle "Contenido":** botón en la barra superior para mostrar/ocultar la capa de contenido y
   dejar solo la estructura.
