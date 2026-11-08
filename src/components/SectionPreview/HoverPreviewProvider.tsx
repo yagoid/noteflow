@@ -12,6 +12,11 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { SectionHoverCard } from './SectionHoverCard'
 import {
+  PREVIEW_CARD_HEIGHT,
+  PREVIEW_VIEWPORT_MARGIN as VIEWPORT_MARGIN,
+  previewCardWidth,
+} from './previewSize'
+import {
   HoverPreviewContext,
   type Placement,
   type PreviewHandlers,
@@ -27,16 +32,9 @@ const GAP = 8
 // sits just below-right of the pointer instead of right under the arrow tip.
 const CURSOR_OFFSET_X = 8
 const CURSOR_OFFSET_Y = 14
-// Keep the card this far from the viewport edges when clamping.
-const VIEWPORT_MARGIN = 8
-// The floating card is landscape and fixed-size, so every preview is the same
-// rectangle: header 34 + body ~128 + foot 26 (+ 1px border each side). The body
-// fades out at the bottom (see SectionHoverCard / .section-hover-card).
-const HOVER_WIDTH = 360
-const HOVER_HEIGHT = 190
 // Used only for the first paint, before the card is measured — keeps the very
 // first frame near its final spot so there's no visible jump.
-const ESTIMATED_HEIGHT = HOVER_HEIGHT
+const ESTIMATED_HEIGHT = PREVIEW_CARD_HEIGHT
 
 interface PreviewTarget {
   noteId: string
@@ -121,9 +119,6 @@ export function HoverPreviewProvider({ children }: { children: ReactNode }) {
   )
 }
 
-// Card width: HOVER_WIDTH, capped so it never overflows a narrow window.
-const hoverWidth = () => Math.max(0, Math.min(HOVER_WIDTH, window.innerWidth - 2 * VIEWPORT_MARGIN))
-
 const clampH = (v: number, width: number) =>
   Math.max(VIEWPORT_MARGIN, Math.min(v, window.innerWidth - width - VIEWPORT_MARGIN))
 
@@ -156,7 +151,7 @@ function HoverPreviewPopover({ target }: { target: PreviewTarget }) {
   const note = useNotesStore((s) => s.notes.find((n) => n.id === target.noteId) ?? null)
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
   const ref = useRef<HTMLDivElement>(null)
-  const width = hoverWidth()
+  const width = previewCardWidth()
   // First paint uses an estimated height so the card starts near its final spot;
   // it's still invisible (ready=false) until measured, so no jump is visible.
   const [pos, setPos] = useState(() => computePos(target, ESTIMATED_HEIGHT, width))
@@ -183,7 +178,7 @@ function HoverPreviewPopover({ target }: { target: PreviewTarget }) {
       className="fixed z-[9999] pointer-events-none transition-opacity duration-100"
       style={{
         width,
-        height: HOVER_HEIGHT,
+        height: PREVIEW_CARD_HEIGHT,
         left: pos.left,
         top: pos.top,
         opacity: ready ? 1 : 0,

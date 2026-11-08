@@ -77,8 +77,6 @@ export const overview = {
   rawBadge: 'Text',
   selectionActions: 'Selection actions',
 
-  // Section preview card (shared with the hover popover).
-  rawSection: 'Text section',
-  richSection: 'Markdown section',
+  // Content view's section preview pane: placeholder of an empty section.
   emptySection: 'Empty section',
 }

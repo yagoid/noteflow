@@ -155,10 +155,10 @@ noteflow/
 │   │   ├── NoteOverview/
 │   │   │   ├── NoteOverview.tsx         # Vista de nota (sustituye editor): el mapa de secciones con la
 │   │   │   │                            #   vista previa dentro (bloque reticulado, lib/noteOverviewGrid.ts)
-│   │   │   └── SectionCardContent.tsx   #   Cuerpo + pie de una tarjeta de sección (celda y hover)
+│   │   │   └── SectionCardContent.tsx   #   Cuerpo + pie de una tarjeta de sección (celda y preview)
 │   │   ├── SectionPreview/              # Previsualización de sección reutilizable
-│   │   │   ├── SectionPreviewCard.tsx   #   Tarjeta mini-mock pura (la usa el cerebro)
-│   │   │   ├── SectionHoverCard.tsx     #   Tarjeta del hover: celda de la vista de nota en apaisado
+│   │   │   ├── SectionHoverCard.tsx     #   Tarjeta de preview (hover y cerebro): celda de la vista de nota en apaisado
+│   │   │   ├── previewSize.ts           #   Tamaño fijo 360×190 de la tarjeta + ancho capado en ventanas estrechas
 │   │   │   ├── HoverPreviewProvider.tsx #   Provider + popover flotante de hover (sidebar/grupos/editor/IA);
 │   │   │   │                            #     1 popover central, cierra con cualquier click (pointerdown global)
 │   │   │   └── hoverPreviewContext.ts   #   Contexto + hook useSectionHoverPreview (archivo aparte: fast-refresh)
@@ -189,7 +189,7 @@ noteflow/
 │   │   │   ├── useForceLayout.ts        #   Simulación d3-force del fallback 2D (estructura + contenido)
 │   │   │   ├── brainColors.ts           #   Resuelve color de nodo → RGB: CSS var del tema o hex libre
 │   │   │   │                            #   (readColor; lo usan 2D y 3D)
-│   │   │   └── BrainNodePreview.tsx     #   Ventanita clicable al pulsar un nodo nota/sección (click→navega)
+│   │   │   └── BrainNodePreview.tsx     #   Tarjeta de preview (SectionHoverCard) clicable al pulsar un nodo nota/sección (click→navega)
 │   │   ├── NoteCard/                    # Tarjeta de nota en sidebar
 │   │   ├── TitleBar.tsx                 # Barra de título personalizada (frameless);
 │   │   │                                #   el ⚙ abre la ventana de Ajustes (SettingsModal)
@@ -249,7 +249,7 @@ noteflow/
 │   │   │                         #   normalizeGroupColor (validación) y colorChannels (TODO render de
 │   │   │                         #   color de grupo/sección debe pasar por él, no interpolar `var(...)`)
 │   │   ├── markdownHtml.ts       # Conversión markdown↔HTML (htmlFromMarkdown/htmlToMarkdown);
-│   │   │                         #   usado por el editor TipTap, SectionPreviewCard (previews) y el chat IA — testeado
+│   │   │                         #   usado por el editor TipTap, los previews (vista de nota, tarjeta de preview, panel de la vista de contenido) y el chat IA — testeado
 │   │   ├── markdownInline.ts     # Hoja compartida: inlineToHtml, escapeHtml, anotaciones de tarea 📅⏰🔺
 │   │   ├── kanban.ts             # Tableros kanban en la nota: modelo + md↔datos↔HTML (ver patterns.md) — testeado
 │   │   ├── kanbanOps.ts          #   transformaciones puras del tablero (columnas, tarjetas, columna done,

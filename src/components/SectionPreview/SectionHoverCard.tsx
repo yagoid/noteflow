@@ -16,11 +16,12 @@ interface SectionHoverCardProps {
   sectionTagColors: SectionTagColorMap
 }
 
-// The floating card of the section hover preview (HoverPreviewProvider): a note overview
-// cell (NoteOverview's SectionCell) as a landscape card — neutral header with the section
-// name in its colour and the note title on the right, the folded corner, the content at
-// reading size and the stats foot. Pure presentation; it fills the box the provider
-// positions and sizes. Rendered in a portal, so it sets the CSS vars the shared
+// The section preview card, shown by the hover preview (HoverPreviewProvider) and the
+// Brain view's pinned preview (Brain/BrainNodePreview, clickable): a note overview cell
+// (NoteOverview's SectionCell) as a landscape card — neutral header with the section name
+// in its colour and the note title on the right, the folded corner, the content at reading
+// size and the stats foot. Pure presentation; it fills the box its host positions and
+// sizes (both at the fixed size of previewSize.ts). Rendered in a portal, so it sets the CSS vars the shared
 // .note-grid-* classes read (they're defined on the note overview's root otherwise).
 export function SectionHoverCard({ note, section, sectionTagColors }: SectionHoverCardProps) {
   const t = useT()

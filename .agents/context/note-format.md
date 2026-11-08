@@ -72,8 +72,8 @@ encryption:
   antiguas ni en la migración v1→v2, y no se reescriben ficheros para backfill: la UI hace el
   fallback al mostrar con `firstValidDate(section.created, note.created)` (`src/lib/dateUtils.ts`;
   un valor no parseable —p. ej. editado a mano— también cae a `note.created`, y si ninguno es
-  válido no se muestra la fecha) — línea `Created …` bajo el título del editor y tarjetas
-  `SectionPreviewCard` (cerebro; la vista de nota y la tarjeta del hover no muestran fecha).
+  válido no se muestra la fecha) — solo en la línea `Created …` bajo el título del editor (ninguna
+  tarjeta de preview —vista de nota, hover, cerebro— muestra la fecha de la sección).
 - Tags se extraen del contenido con `#nombre` (`extractTags`).
 - `NOTEFLOW_NOTES_DIR` (env) redirige el dir de notas en app y CLI (testing/scripting).
 - Los parsers toleran BOM UTF-8 (editores externos como Notepad lo añaden).

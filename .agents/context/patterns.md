@@ -223,8 +223,8 @@ fila de la nota en el sidebar **no** es una entrada: abre el editor en la primer
 
 **Es el mapa de secciones con la vista previa dentro** (`NoteOverview/NoteOverview.tsx`, lógica pura en
 `src/lib/noteOverviewGrid.ts` con test en `tests/lib/noteOverviewGrid.test.ts`, estilos `.note-grid*` en
-`index.css`). Ya **no** usa `SectionPreviewCard` (el mini-mock con zoom solo sigue en el cerebro; el hover
-usa `SectionHoverCard`, una celda de esta vista en tarjeta flotante — ver abajo).
+`index.css`). Las previsualizaciones de sección (hover y cerebro) usan `SectionHoverCard`, una celda de
+esta vista en tarjeta flotante — ver abajo (el antiguo mini-mock con `zoom`, `SectionPreviewCard`, se eliminó).
 Decisiones a respetar si se toca:
 - **Un bloque reticulado**, como el mapa: juntas de 4 px sobre `--bg-editor`, radio 8 px fuera
   (`overflow: hidden` en `.note-grid`) y 4 px en las celdas, fondo `--text / 0.06` (hover 0.09, sin bordes
@@ -263,8 +263,8 @@ Decisiones a respetar si se toca:
   `lib/sectionUtils.ts`; no-op si ya es la última). La barra va en la junta antes de esa celda, o —si es
   una franja propia porque la última fila estaba llena— dentro del borde derecho de la última tarjeta.
 - **Vista previa** (`SectionCell`, `memo`; cuerpo + pie en `NoteOverview/SectionCardContent.tsx`, compartido
-  con la tarjeta del hover): el HTML de `htmlFromMarkdown` (el mismo renderizado que el
-  editor y el antiguo mini-mock) dentro de `.note-grid-body.note-preview > .prose-editor > .ProseMirror`,
+  con la tarjeta de preview de hover y cerebro): el HTML de `htmlFromMarkdown` (el mismo renderizado que el
+  editor) dentro de `.note-grid-body.note-preview > .prose-editor > .ProseMirror`,
   restilado **a tamaño real** (11 px, títulos 12 px seminegrita en color de texto, código 10 px mono), sin
   título de nota, fecha ni toolbar falsa, con `mask-image` que lo desvanece abajo. **Fuente = la del
   editor:** `.note-grid` define `--prose-font-family` con `proseFontStack(fontFamily)` (de
@@ -316,12 +316,14 @@ Decisiones a respetar si se toca:
   `border: 1.5px solid …`).
 
 ### Previsualización de sección (hover + cerebro)
-Dos interacciones sin IPC nuevo (el contenido de toda sección ya está en memoria en `notesStore`), cada
-una con su tarjeta:
+Dos interacciones sin IPC nuevo (el contenido de toda sección ya está en memoria en `notesStore`) con
+**la misma tarjeta**: `SectionPreview/SectionHoverCard.tsx` = **una celda de la vista de nota en
+apaisado**, siempre al tamaño fijo **360×190** de `SectionPreview/previewSize.ts` (fuente única:
+`PREVIEW_CARD_WIDTH`/`PREVIEW_CARD_HEIGHT`, margen de viewport y `previewCardWidth()`, que capa el ancho a
+`innerWidth - 2·margen` en ventanas estrechas), así todas las previews son el mismo rectángulo. La
+tarjeta es presentación pura y rellena la caja que su anfitrión posiciona y dimensiona.
 - **Hover** (`SectionPreview/HoverPreviewProvider.tsx`, montado en `App.tsx`): un **único** popover en
-  portal a `document.body` con `SectionPreview/SectionHoverCard.tsx` = **una celda de la vista de nota
-  en apaisado**, tamaño fijo **360×190** (`HOVER_WIDTH`/`HOVER_HEIGHT`; el ancho se capa a
-  `innerWidth - 2·margen` en ventanas estrechas), así todas las previews son el mismo rectángulo.
+  portal a `document.body` con la tarjeta.
   Reutiliza las clases de la celda (`.note-grid-head`, y cuerpo + pie vía `SectionCardContent`: contenido
   a tamaño de lectura con su fade, raw → `.note-grid-raw`, vacía → `.note-grid-empty`, pie con
   estadísticas y badges "Text"/"Hidden from AI") y la esquina doblada (`.section-map-corner`, 14 px); en
@@ -343,11 +345,16 @@ una con su tarjeta:
   pegado al pasar una pestaña del editor a "activa" y perder sus handlers). `title:''` en los handlers
   suprime el tooltip nativo del ancestro. Posición flash-free: primera pintura con altura estimada +
   `opacity:0`, se mide en `useLayoutEffect` y se revela.
-- **Cerebro** (`Brain/BrainNodePreview.tsx`, con el mini-mock `SectionPreviewCard`): NO es hover. Click
+- **Cerebro** (`Brain/BrainNodePreview.tsx`, con la misma `SectionHoverCard`): NO es hover. Click
   en un nodo nota/sección llama `onNodeActivate(noteId, sectionId, clientX, clientY)` (en vez de
-  navegar) → `BrainView` fija una tarjeta
-  **clicable** junto al click; pulsarla navega (`openNote`), click fuera o `Esc` la cierra. Sustituyó al
-  antiguo "fly-in" de cámara (eliminado).
+  navegar) → `BrainView` fija la tarjeta **clicable** (un `<button>` en portal, `title`/`aria-label` =
+  `overview.openSection`) bajo el click, centrada, volteada encima si desborda y acotada al viewport
+  con el ancho capado; como el tamaño es fijo se coloca sin pasada de medida. Pulsarla navega
+  (`openNote`), click fuera (`pointerdown`) o `Esc` la cierra. Estado interactivo en
+  `.section-preview-button` (`index.css`): el botón es una caja desnuda que la tarjeta rellena (sin
+  borde/fondo/padding propios), el borde de la tarjeta pasa de `--text / 0.12` a `0.3` en hover y el
+  foco de teclado muestra un anillo `--accent`. Los hijos de la tarjeta son `pointer-events: none`, así
+  que el click cae en la tarjeta y burbujea al botón. Sustituyó al antiguo "fly-in" de cámara (eliminado).
 
 ### Editor: marcas y bloques markdown (round-trip md↔html)
 El editor TipTap (`src/components/Editor/Editor.tsx`) registra las extensiones **una a una** (sin
@@ -360,7 +367,7 @@ extensión que cambie el esquema va ahí**. Todo elemento soportado **round-trip
 (y lo vigila `tests/lib/editorRoundTrip.test.ts`, ver "Harness de round-trip" abajo): marcas inline en
 `inlineToHtml` (vive en `src/lib/markdownInline.ts`, hoja compartida con `kanban.ts` para no crear
 ciclos) / `inlineElToMd`, bloques en el bucle de `htmlFromMarkdown`/`blockElToMd`. Las mismas
-funciones las usan `SectionPreviewCard` y la vista de nota, así que un elemento nuevo aparece también en los previews sin
+funciones las usan los previews (vista de nota, tarjeta de preview, panel de la vista de contenido), así que un elemento nuevo aparece también en ellos sin
 código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.css`).
 - **Bold neutro + highlight de acento (decisión):** la negrita (`**`) ya **no** usa el color de
   acento (`strong { color: inherit }`); el texto en color de acento es una marca aparte, **highlight**
@@ -698,7 +705,7 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     Next/prev sobre un match de tablero no mueve la selección; `InNoteSearchBar` centra el
     `.nf-search-match-active` (y desplaza el `.kanban-scroll` en horizontal si hace falta, ver
     "Búsqueda en nota"). Tests en `tests/lib/kanbanSearch.test.ts`.
-  - **Previews:** `SectionPreviewCard`/overviews/chat pintan el HTML estático de `htmlFromMarkdown`; el
+  - **Previews:** vista de nota/tarjeta de preview/chat pintan el HTML estático de `htmlFromMarkdown`; el
     CSS de `.prose-editor .ProseMirror div[data-type="kanban"]` lo muestra como mini tablero de solo
     lectura (columnas en fila, compactas, `overflow: hidden`; en `.chat-md` más estrechas). También es
     el fallback si el NodeView aún no se montó.
@@ -1235,7 +1242,8 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   texto queda bajo la mini-vista. Las previews `.note-preview` (vista de nota, hover, cerebro; también
   `.prose-editor`) quedan fuera a propósito. Esas previews se pintan fuera del contenedor del editor, así
   que definen ellas mismas `--prose-font-family` con `proseFontStack()` (la vista de nota en `.note-grid`,
-  la tarjeta del hover en `.section-hover-card`, `SectionPreviewCard` en su `.note-preview`) para seguir
+  la tarjeta de preview de hover y cerebro en `.section-hover-card`, el panel de la vista de contenido
+  en su `.note-preview`) para seguir
   el ajuste de fuente del editor.
   Es el espejo izquierdo de `--toc-reserve`; se aplica a todos los panes (en el split solo el primero
   la necesita, la diferencia es de 10 px).
@@ -1523,7 +1531,7 @@ arista en el cerebro **aunque la IA esté apagada**.
   `src/lib/sectionRelations.ts` (`buildRelationUrl`, `parseRelationUrl`, `extractSectionRelations`).
 - **Round-trip md↔html** (`src/lib/markdownHtml.ts`): `inlineToHtml` convierte el link `noteflow://`
   en `<span data-type="section-relation" data-note-id data-section-id>` **antes** del regex genérico
-  de links; `inlineElToMd` lo revierte. Por eso `SectionPreviewCard` (que usa `htmlFromMarkdown`)
+  de links; `inlineElToMd` lo revierte. Por eso los previews (que usan `htmlFromMarkdown`)
   pinta la pill en los previews sin código extra (estilo por atributo en `index.css`).
 - **Editor (`src/components/Editor/`):** `SectionRelation.ts` (nodo inline atom + comando
   `insertSectionRelation`, NodeView React `SectionRelationView.tsx`: nombre en vivo desde el store,

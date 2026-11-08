@@ -1,13 +1,17 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useNotesStore } from '../../stores/notesStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { SectionPreviewCard } from '../SectionPreview/SectionPreviewCard'
+import { useT } from '../../i18n/useT'
+import { tf } from '../../i18n/format'
+import { SectionHoverCard } from '../SectionPreview/SectionHoverCard'
+import {
+  PREVIEW_CARD_HEIGHT,
+  PREVIEW_VIEWPORT_MARGIN as MARGIN,
+  previewCardWidth,
+} from '../SectionPreview/previewSize'
 
-const WIDTH = 240
-const MARGIN = 8
 const CURSOR_GAP = 12
-const ESTIMATED_HEIGHT = 220
 
 export interface PinnedPreview {
   noteId: string
@@ -17,19 +21,19 @@ export interface PinnedPreview {
 }
 
 // Below the click, centred; flipped above if it would overflow the viewport.
-function computePos(pinned: PinnedPreview, height: number) {
+function computePos(pinned: PinnedPreview, height: number, width: number) {
   const vw = window.innerWidth
   const vh = window.innerHeight
-  const left = Math.max(MARGIN, Math.min(pinned.x - WIDTH / 2, vw - WIDTH - MARGIN))
+  const left = Math.max(MARGIN, Math.min(pinned.x - width / 2, vw - width - MARGIN))
   let top = pinned.y + CURSOR_GAP
   if (top + height + MARGIN > vh) top = pinned.y - CURSOR_GAP - height
   if (top < MARGIN) top = MARGIN
   return { left, top }
 }
 
-// A clickable preview card pinned next to a clicked brain node. Unlike the hover
-// preview it stays put and navigates to the section when clicked. Dismisses on an
-// outside click or Escape.
+// The section preview card (the same SectionHoverCard as the hover preview, at the same
+// fixed size) pinned next to a clicked brain node. Unlike the hover preview it stays put
+// and navigates to the section when clicked. Dismisses on an outside click or Escape.
 export function BrainNodePreview({
   pinned,
   onOpen,
@@ -39,19 +43,13 @@ export function BrainNodePreview({
   onOpen: (noteId: string, sectionId?: string) => void
   onDismiss: () => void
 }) {
+  const t = useT()
   const note = useNotesStore((s) => s.notes.find((n) => n.id === pinned.noteId) ?? null)
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
   const ref = useRef<HTMLButtonElement>(null)
-  const [pos, setPos] = useState(() => computePos(pinned, ESTIMATED_HEIGHT))
 
+  // A node may not carry a section id → fall back to the note's first one.
   const section = note?.sections.find((s) => s.id === pinned.sectionId) ?? note?.sections[0] ?? null
-
-  // Re-place once the card is measured (real height may flip it above the click).
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el || !section) return
-    setPos(computePos(pinned, el.offsetHeight))
-  }, [pinned, section])
 
   // Dismiss on outside click / Escape. Registered after mount, so the click that
   // opened the card (already handled on pointerup) doesn't immediately close it.
@@ -70,19 +68,26 @@ export function BrainNodePreview({
     }
   }, [onDismiss])
 
+  // Section not in memory (e.g. an encrypted note that's still locked) → nothing to show.
   if (!note || !section) return null
+
+  // Fixed-size card, so it's placed straight away (no measuring pass); the width is
+  // capped on narrow windows, like the hover preview's.
+  const width = previewCardWidth()
+  const pos = computePos(pinned, PREVIEW_CARD_HEIGHT, width)
+  const label = tf(t.overview.openSection, { name: section.name })
 
   return createPortal(
     <button
       ref={ref}
+      type="button"
       onClick={() => onOpen(pinned.noteId, section.id)}
-      title={`Open "${section.name}"`}
-      className="group fixed z-[9999] text-left rounded-lg border border-solid border-text/30 bg-surface-1
-                 shadow-2xl overflow-hidden flex flex-col cursor-pointer hover:border-text/55 transition-colors
-                 animate-in fade-in zoom-in-95 duration-100"
-      style={{ width: WIDTH, left: pos.left, top: pos.top }}
+      title={label}
+      aria-label={label}
+      className="section-preview-button fixed z-[9999] animate-in fade-in zoom-in-95 duration-100"
+      style={{ width, height: PREVIEW_CARD_HEIGHT, left: pos.left, top: pos.top }}
     >
-      <SectionPreviewCard note={note} section={section} sectionTagColors={sectionTagColors} compact />
+      <SectionHoverCard note={note} section={section} sectionTagColors={sectionTagColors} />
     </button>,
     document.body,
   )

@@ -62,7 +62,5 @@ export const overview = {
   rawBadge: 'Texto',
   selectionActions: 'Acciones de la selección',
 
-  rawSection: 'Sección de texto',
-  richSection: 'Sección markdown',
   emptySection: 'Sección vacía',
 }
