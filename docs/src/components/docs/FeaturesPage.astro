@@ -6,6 +6,7 @@
 // theme swatch palette pulled from src/lib/themes.ts) lives here.
 import DocsShell from '../../layouts/DocsShell.astro';
 import StickyMock from './StickyMock.astro';
+import FeatureClip from './FeatureClip.astro';
 import { getFeaturesContent } from '../../i18n/docs/features';
 import { getRelativeLocaleUrl } from 'astro:i18n';
 import type { Lang } from '../../i18n';
@@ -21,7 +22,7 @@ const t = getFeaturesContent(lang);
 // placeholders so the prose stays plain data.
 const aiUrl = getRelativeLocaleUrl(lang, '/ai');
 const cliUrl = getRelativeLocaleUrl(lang, '/cli');
-const organizeWhy = t.organize.whyP.replace('%AI_URL%', `${aiUrl}#embeddings`);
+const organizeLede = t.organize.lede.replace('%AI_URL%', `${aiUrl}#embeddings`);
 const fillPrivacy = (s: string) =>
   s.replace(/%AI_URL%/g, `${aiUrl}#privacy`).replace(/%CLI_URL%/g, cliUrl);
 
@@ -117,50 +118,66 @@ const themeSwatches = {
   <section id="organize" data-reveal>
     <div class="nf-sec-head">{kickerFor('organize')}</div>
     <h2>{t.organize.title}</h2>
-    {t.organize.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <p class="nf-feat-lede" set:html={organizeLede} />
 
-    <!-- Hierarchy mock: colour-coded groups → folders → notes → their sections (folded map) -->
-    <figure class="nf-tree nf-edge" role="img" aria-label={t.organize.tree.aria}>
-      <div class="nf-tree-cols">
-        {treeCols.map((col) => (
-          <div class={`nf-tree-group${col.gc ? '' : ' is-ungrouped'}`} style={col.gc ? `--gc:var(--${col.gc});` : undefined}>
-            <div class="nf-tree-ghead">{col.gc && <span class="nf-tree-gdot" aria-hidden="true"></span>}{col.name}</div>
-            <div class="nf-tree-gbody">
-              {col.rows.map((r) => (
-                <div class={r.folder !== null ? 'nf-tree-folder' : 'nf-tree-loose'}>
-                  {r.folder !== null && (
-                    <div class="nf-tree-fhead">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-                      {r.folder}
-                    </div>
-                  )}
-                  <div class="nf-tree-notes">
-                    {r.notes.map((n) => (
-                      <div class={`nf-tree-note${n.open ? ' is-open' : ''}`}>
-                        <span class="nf-tree-ntitle">{n.title}</span>
-                        {!n.open && (
-                          <span class="nf-tree-line" aria-hidden="true">
-                            {n.secs.map((s) => <span class="nf-tree-seg" style={`--tc:var(--${s.tok});flex-grow:${s.weight};`}></span>)}
-                          </span>
-                        )}
-                        <span class="nf-tree-map">
-                          {n.secs.map((s, si) => <span class={`nf-tree-cell${n.open && si === 0 ? ' is-active' : ''}`} style={`--tc:var(--${s.tok});`}>{s.name}</span>)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+    <FeatureClip
+      id="section-map"
+      lang={lang}
+      label={t.organize.clipLabel}
+      caption={t.organize.clipCaption}
+      playLabel={t.clip.play}
+      pauseLabel={t.clip.pause}
+    />
+
+    <div class="nf-feat-split">
+      <ul class="nf-feat-facts">
+        {t.organize.facts.map((f) => (
+          <li class="nf-feat-fact">
+            <strong>{f.title}</strong>
+            <span set:html={f.desc} />
+          </li>
         ))}
-      </div>
-      <figcaption class="nf-tree-caption">{t.organize.tree.caption}</figcaption>
-    </figure>
+      </ul>
 
-    <h3>{t.organize.sectionsH3}</h3>
-    {t.organize.sectionsP.map((p) => <p class="nf-docs-p" set:html={p} />)}
-    <p class="nf-docs-p" set:html={organizeWhy} />
+      <!-- Hierarchy mock: colour-coded groups → folders → notes → their sections (folded map) -->
+      <figure class="nf-tree nf-edge" role="img" aria-label={t.organize.tree.aria}>
+        <div class="nf-tree-cols">
+          {treeCols.map((col) => (
+            <div class={`nf-tree-group${col.gc ? '' : ' is-ungrouped'}`} style={col.gc ? `--gc:var(--${col.gc});` : undefined}>
+              <div class="nf-tree-ghead">{col.gc && <span class="nf-tree-gdot" aria-hidden="true"></span>}{col.name}</div>
+              <div class="nf-tree-gbody">
+                {col.rows.map((r) => (
+                  <div class={r.folder !== null ? 'nf-tree-folder' : 'nf-tree-loose'}>
+                    {r.folder !== null && (
+                      <div class="nf-tree-fhead">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                        {r.folder}
+                      </div>
+                    )}
+                    <div class="nf-tree-notes">
+                      {r.notes.map((n) => (
+                        <div class={`nf-tree-note${n.open ? ' is-open' : ''}`}>
+                          <span class="nf-tree-ntitle">{n.title}</span>
+                          {!n.open && (
+                            <span class="nf-tree-line" aria-hidden="true">
+                              {n.secs.map((s) => <span class="nf-tree-seg" style={`--tc:var(--${s.tok});flex-grow:${s.weight};`}></span>)}
+                            </span>
+                          )}
+                          <span class="nf-tree-map">
+                            {n.secs.map((s, si) => <span class={`nf-tree-cell${n.open && si === 0 ? ' is-active' : ''}`} style={`--tc:var(--${s.tok});`}>{s.name}</span>)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <figcaption class="nf-tree-caption">{t.organize.tree.caption}</figcaption>
+      </figure>
+    </div>
   </section>
 
   <!-- ── Templates ── -->
@@ -369,6 +386,53 @@ const themeSwatches = {
 
 <style is:global>
   /* ── /features page-specific styles (shared widgets live in docs.css). Accent = orange. ── */
+
+  /* Visual block pattern: short lede → clip (FeatureClip.astro) → a few one-line facts,
+     optionally split with a second visual (facts | mock) from 760px up. */
+  .nf-feat-lede { margin: 0; max-width: 62ch; font-size: clamp(16.5px, 1.6vw, 18px); line-height: 1.55; color: var(--ink-dim); }
+  .nf-feat-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    column-gap: 28px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .nf-feat-fact {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 13px 0;
+    border-top: 1px solid var(--line);
+  }
+  .nf-feat-fact strong {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink-strong);
+  }
+  .nf-feat-fact strong::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--page-accent);
+    box-shadow: 0 0 8px rgb(var(--orange) / .55);
+  }
+  .nf-feat-fact > span { padding-left: 15px; font-size: 14.5px; line-height: 1.55; color: var(--ink-dim); }
+  .nf-feat-fact kbd { font-size: 11px; padding: 1px 6px; }
+  .nf-feat-split { display: grid; gap: 22px; margin: 6px 0 8px; align-items: start; }
+  .nf-feat-split .nf-feat-facts { grid-template-columns: 1fr; }
+  .nf-feat-split .nf-feat-fact:first-child { border-top: 0; padding-top: 2px; }
+  .nf-feat-split .nf-tree { margin: 0; padding: 18px 18px 13px; }
+  .nf-feat-split .nf-tree-cols { gap: 18px 24px; }
+  .nf-feat-split .nf-tree-group { flex-basis: 150px; min-width: 140px; }
+  @media (min-width: 760px) {
+    .nf-feat-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr); gap: 32px; }
+  }
 
   /* Hierarchy mock: groups → folders → notes → sections (folded line / map) */
   .nf-tree {
@@ -734,7 +798,7 @@ const themeSwatches = {
   }
 
   /* Prose links on this page underline with the orange accent (mirrors CliPage/AiPage) */
-  .nf-docs-p a, .nf-docs-ul a, .nf-feat-callout a {
+  .nf-docs-p a, .nf-docs-ul a, .nf-feat-callout a, .nf-feat-lede a, .nf-feat-fact a {
     color: var(--ink);
     text-decoration: underline;
     text-decoration-color: var(--page-accent);

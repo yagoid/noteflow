@@ -32,12 +32,20 @@ export const featuresEn = {
     { id: 'personalize', label: 'Personalize' },
   ],
 
+  // Labels of the pause/play button on every clip (FeatureClip.astro).
+  clip: { play: 'Play clip', pause: 'Pause clip' },
+
   organize: {
     title: 'Groups, folders, notes — and sections',
-    intro: [
-      'NoteFlow keeps the hierarchy deliberately shallow: <strong>groups</strong> hold <strong>folders</strong>, folders hold <strong>notes</strong> — one level of nesting, no infinite trees to get lost in. Each group has its own <strong>color</strong>, and that color tints everything inside it: its tab, the guide line that runs down its folders and notes, the marker on the note you have open, its region in the brain view. Notes without a group simply live at the bottom of the sidebar.',
-      'Folders can wear an <strong>icon of their own</strong>: right-click a folder → <strong>Change icon</strong> unfolds a grid of 27 (work, home, ideas, book, code, calendar, travel, music…), and <em>Default</em> brings the folder glyph back. The icon follows the folder into the sidebar, the content view, the collapsed-group peek and the “Move to folder” lists — and it syncs with the rest of your folders.',
-      'A <strong>collapsed group</strong> still lets you in: rest the mouse on its header and a small window lists its notes (folders included), with a search box that already has the focus — just type, move with <kbd>↑</kbd> / <kbd>↓</kbd> and press <kbd>Enter</kbd> to open one.',
+    lede: 'A shallow tree outside, a map of sections inside: <strong>one note, one topic — sections are its facets</strong>, each one <a href="%AI_URL%">indexed on its own</a>.',
+    clipLabel:
+      'Screen recording: resting the mouse on a note in the sidebar unfolds its folded line into the section map, hovering a section shows its preview card and a click opens it in the editor; then Settings → Appearance → Sections in the sidebar switches between folded map and scroll row.',
+    clipCaption: 'hover · preview · open',
+    facts: [
+      { title: 'Colored groups', desc: 'Groups → folders → notes, one level deep. The group\'s color tints everything inside.' },
+      { title: 'Section map', desc: '<kbd>Ctrl</kbd>+<kbd>T</kbd> adds, double-click renames, drag reorders, <kbd>Ctrl</kbd>+<kbd>Tab</kbd> cycles.' },
+      { title: 'Folded sidebar', desc: 'A line per note, a stretch per section. Hover to unfold and preview.' },
+      { title: 'Icons & peeks', desc: '27 folder icons (right-click → Change icon). Hover a collapsed group to search its notes.' },
     ],
     tree: {
       aria: 'The NoteFlow hierarchy: colour-coded groups containing folders and notes, each note with its sections drawn as a folded map',
@@ -65,13 +73,6 @@ export const featuresEn = {
       ungroupedLabel: 'No group',
       ungroupedNotes: [{ title: 'Scratchpad', sections: ['Ideas'] }],
     },
-    sectionsH3: 'Sections: a map inside the note',
-    sectionsP: [
-      'The fourth level lives <em>inside</em> the note: every note can hold multiple independent <strong>sections</strong>, laid out across the top of the editor as a <strong>section map</strong> — one block of cells that drops onto a new row when they don\'t fit, like the tabs of a filing cabinet, instead of scrolling sideways. The open section is solid in its color; the rest are neutral with a folded corner in theirs. Past three rows the remainder gathers into a <code>+N more</code> cell, and the open section is never the one hidden. Create one with <kbd>Ctrl</kbd>+<kbd>T</kbd> (or the <code>+</code> cell), <strong>rename</strong> with a double-click on its cell, <strong>reorder</strong> by dragging, and cycle through them with <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>.',
-      'The sidebar speaks the same language. Under each note\'s title, a closed note shows a <strong>folded map</strong>: a thin line with one stretch per section, in its color and as wide as the section is long. Rest the mouse on it and the map unfolds over the list with the names; the note you have open shows it unfolded, as small cells. And wherever something points at a section — sidebar, section map, content view, a link pill — hovering it brings up a <strong>landscape preview card</strong> styled like the note view: the section\'s name in its color, the note\'s title, the real content at reading size and its word or task count.',
-    ],
-    whyP:
-      'Sections are what keep the hierarchy shallow without turning notes into junk drawers: <strong>one note = one topic, sections = its facets</strong>. A project note carries its own <em>Notes</em>, <em>Tasks</em> and <em>Questions</em> instead of spawning three sibling notes. And the granularity pays off everywhere else — every section is one click away from the sidebar, the <a href="%AI_URL%">semantic index embeds each section separately</a>, and <a href="#links">links</a> point at sections, not whole notes.',
   },
 
   templates: {

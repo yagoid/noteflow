@@ -1,0 +1,215 @@
+---
+// A short looping screen recording of the app (public/clips/<id>.<lang>.webm, 960×600,
+// muted, dark app theme) inside a minimal window frame. Reusable across the docs pages.
+//   · Lazy for real: the <video> ships with `preload="none"` and its source in `data-src`;
+//     the script assigns `src` only when the clip comes near the viewport, then plays it,
+//     and pauses it again when it scrolls away.
+//   · The poster (<id>.<lang>.webp, the clip's first frame) is what you see without JS
+//     and under prefers-reduced-motion, where nothing autoplays until you press play.
+//   · WCAG 2.2.2: a pause/play button over the corner (revealed by the script, so the
+//     no-JS page never shows a dead control). A clip paused by hand stays paused when
+//     it comes back into view. Clicking the video itself toggles it too.
+// Always the page's language: the recordings are localised like the app's UI.
+import { asset } from '../../lib/url';
+import type { Lang } from '../../i18n';
+
+interface Props {
+  /** Clip id: public/clips/<id>.<lang>.{webm,webp}. */
+  id: string;
+  lang: Lang;
+  /** Accessible description of what the clip shows (aria-label of the video). */
+  label: string;
+  /** Short mono caption under the frame. */
+  caption?: string;
+  /** Button labels (i18n). */
+  playLabel: string;
+  pauseLabel: string;
+  class?: string;
+}
+
+const { id, lang, label, caption, playLabel, pauseLabel, class: className } = Astro.props;
+---
+
+<figure class:list={['nf-clip', className]} data-clip data-state="idle">
+  <div class="nf-clip-frame">
+    <div class="nf-clip-chrome" aria-hidden="true"><span></span><span></span><span></span></div>
+    <div class="nf-clip-stage">
+      <video
+        class="nf-clip-video"
+        width="960"
+        height="600"
+        muted
+        loop
+        playsinline
+        preload="none"
+        poster={asset(`clips/${id}.${lang}.webp`)}
+        data-src={asset(`clips/${id}.${lang}.webm`)}
+        aria-label={label}
+      ></video>
+      <button
+        type="button"
+        class="nf-clip-toggle"
+        data-clip-toggle
+        data-label-play={playLabel}
+        data-label-pause={pauseLabel}
+        aria-label={playLabel}
+        hidden
+      >
+        <svg class="nf-clip-ico-play" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.6-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>
+        <svg class="nf-clip-ico-pause" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4.5" width="4" height="15" rx="1"/><rect x="14" y="4.5" width="4" height="15" rx="1"/></svg>
+      </button>
+    </div>
+  </div>
+  {caption && <figcaption class="nf-clip-caption">{caption}</figcaption>}
+</figure>
+
+<style is:global>
+  .nf-clip { margin: 24px 0 22px; }
+  .nf-clip-frame {
+    overflow: hidden;
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    background: var(--card);
+    box-shadow: 0 22px 48px -26px rgba(0, 0, 0, .7);
+    transition: border-color .2s ease;
+  }
+  .nf-clip-frame:hover { border-color: var(--detail); }
+  [data-theme='light'] .nf-clip-frame { box-shadow: 0 22px 44px -26px rgba(40, 34, 24, .38); }
+  /* Minimal window chrome: three neutral dots, the first one in the page accent */
+  .nf-clip-chrome {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--card-2);
+  }
+  .nf-clip-chrome span { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); }
+  .nf-clip-chrome span:first-child { background: var(--page-accent, var(--detail)); opacity: .75; }
+  .nf-clip-stage { position: relative; }
+  .nf-clip-video {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 10;
+    object-fit: cover;
+    background: var(--card-2);
+    cursor: pointer;
+  }
+  /* Pause/play: small glass button in the corner; before the first play (idle —
+     e.g. under reduced motion) it sits in the middle, bigger, as the call to action. */
+  .nf-clip-toggle {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--line-2);
+    border-radius: 50%;
+    color: var(--ink);
+    background: color-mix(in srgb, var(--card) 80%, transparent);
+    backdrop-filter: blur(6px);
+    cursor: pointer;
+    opacity: .8;
+    transition: opacity .2s ease, border-color .2s ease, color .2s ease;
+  }
+  .nf-clip-toggle[hidden] { display: none; }
+  .nf-clip-toggle:hover, .nf-clip-toggle:focus-visible { opacity: 1; color: var(--ink-strong); border-color: var(--page-accent, var(--detail)); }
+  .nf-clip-toggle:focus-visible { outline: 2px solid var(--page-accent, var(--detail)); outline-offset: 2px; }
+  .nf-clip[data-state='idle'] .nf-clip-toggle {
+    right: auto;
+    bottom: auto;
+    left: 50%;
+    top: 50%;
+    width: 54px;
+    height: 54px;
+    transform: translate(-50%, -50%);
+    opacity: 1;
+  }
+  .nf-clip[data-state='idle'] .nf-clip-toggle svg { width: 20px; height: 20px; margin-left: 3px; }
+  .nf-clip-ico-pause { display: none; }
+  .nf-clip[data-state='playing'] .nf-clip-ico-play { display: none; }
+  .nf-clip[data-state='playing'] .nf-clip-ico-pause { display: block; }
+  .nf-clip-caption {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .nf-clip-caption::before { content: ''; width: 14px; height: 1px; background: var(--page-accent, var(--detail)); }
+  @media (prefers-reduced-motion: reduce) {
+    .nf-clip-frame, .nf-clip-toggle { transition: none; }
+  }
+</style>
+
+<script>
+  // One bundle for every clip on the page.
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const clips = Array.from(document.querySelectorAll<HTMLElement>('[data-clip]'));
+
+  clips.forEach((fig) => {
+    const video = fig.querySelector<HTMLVideoElement>('video');
+    const btn = fig.querySelector<HTMLButtonElement>('[data-clip-toggle]');
+    if (!video || !btn) return;
+    video.muted = true;
+
+    // Paused by the user (or never started under reduced motion): don't resume on scroll.
+    let held = reduce.matches;
+    let started = false;
+
+    const render = () => {
+      const playing = !video.paused;
+      if (playing) started = true;
+      fig.dataset.state = playing ? 'playing' : started ? 'paused' : 'idle';
+      btn.setAttribute('aria-label', (playing ? btn.dataset.labelPause : btn.dataset.labelPlay) || '');
+    };
+    const play = () => {
+      const src = video.dataset.src;
+      if (src && !video.getAttribute('src')) video.src = src;
+      video.play().catch(() => { /* blocked or interrupted — stays on the poster */ });
+    };
+    const toggle = () => {
+      if (video.paused) {
+        held = false;
+        play();
+      } else {
+        held = true;
+        video.pause();
+      }
+    };
+
+    video.addEventListener('play', render);
+    video.addEventListener('pause', render);
+    btn.addEventListener('click', toggle);
+    video.addEventListener('click', toggle);
+    reduce.addEventListener('change', (e) => {
+      if (e.matches) { held = true; video.pause(); }
+    });
+
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            if (!held) play();
+          } else if (!video.paused) {
+            video.pause();
+          }
+        });
+      }, { rootMargin: '200px 0px' }).observe(fig);
+    } else if (!held) {
+      play();
+    }
+
+    btn.hidden = false;
+    render();
+  });
+</script>

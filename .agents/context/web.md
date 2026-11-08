@@ -54,7 +54,7 @@ enlaza al aviso legal vía `%LEGAL_NOTICE_URL%`; con placeholders, dice solo "el
 independiente que opera NoteFlow" + email, sin enlace (nunca hay enlaces rotos).
 
 Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas),
-`public/mobile-privacy-policy.html`, `public/screenshots/`, `public/video/`, `public/brain/*.js`.
+`public/mobile-privacy-policy.html`, `public/screenshots/`, `public/video/`, `public/clips/` (clips cortos de `/features`, ver abajo), `public/brain/*.js`.
 
 ## Arquitectura (lo VIVO)
 
@@ -93,7 +93,8 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
   lugar, porque las páginas legales comparten renderer). Getters en
   `index.ts`/`common.ts`/`cli.ts`/`ai.ts`/`features.ts`/`pricing.ts`/`privacy.ts`/`terms.ts`/`legal-notice.ts`.
 - **Componentes de docs**: `src/components/docs/` — `Term.astro` (marco terminal con typing),
-  `StickyMock.astro` (sticky note en HTML/CSS con plegado a píldora), y las `XPage.astro`.
+  `StickyMock.astro` (sticky note en HTML/CSS con plegado a píldora), `FeatureClip.astro` (clip de la app
+  en bucle, ver "Clips de /features") y las `XPage.astro`.
   Wrappers finos en `src/pages/{x,es/x}.astro`.
 - **LEGACY MUERTO (no usar, no imitar)**: `src/components/{Nav,ChatMock,BrainGlyph,Pillar,
   Terminal,ScreenshotFrame}.astro`, `ThemeToggle.tsx`, `src/brain/*.tsx`, `src/styles/{tokens,global}.css`,
@@ -223,7 +224,7 @@ Anclas: `#organize` `#templates` `#sticky` `#links` `#snippets` `#shortcuts` `#v
 
 | Sección | Documenta | Sincronizar si cambia |
 |---|---|---|
-| `#organize` | Jerarquía grupos→carpetas→notas→secciones (mock con guías, línea plegada y mapa abierto; hover = mapa flotante), icono personalizado de carpeta, peek de grupo plegado, mapa de secciones del editor, item del sidebar (mapa plegado) y preview de sección al hover (tarjeta apaisada) | skill (Grupos/Carpetas, Item de nota del sidebar, Secciones, Previsualización al hover) |
+| `#organize` | **Bloque visual** (ver "Clips de /features"): lede de 1 frase (una nota = un tema, secciones = facetas; enlace a `/ai#embeddings`), clip `section-map` y 4 *facts* de una línea (grupos con color · atajos del mapa de secciones · sidebar plegado + preview al hover · 27 iconos de carpeta y peek de grupo plegado) junto al mock HTML/CSS de la jerarquía (guías, línea plegada y mapa abierto; hover = mapa flotante) | skill (Grupos/Carpetas, Item de nota del sidebar, Secciones, Previsualización al hover) |
 | `#templates` | Save as template, Settings→Templates, `templates.json` | skill (Plantillas) |
 | `#sticky` | Mock CSS 300×300 plegable (con el `⌄` del selector de sección, decorativo), Ctrl+S/Ctrl+G, desplegable de secciones en la barra de título, startup de stickies | skill (Ventana sticky) + `StickyMock.astro` |
 | `#links` | Slash command, pills vivas/rotas, forma raw `[Name](noteflow://…)`; un bullet sobre el tablero kanban (`/kanban`) que enlaza a `#snippets` | skill + `src/lib/sectionRelations.ts` + `src/lib/kanban.ts` |
@@ -234,6 +235,24 @@ Anclas: `#organize` `#templates` `#sticky` `#links` `#snippets` `#shortcuts` `#v
 | `#encryption` | AES-256-GCM + PBKDF2 310k, sin backdoor, CLI las ignora | skill / `noteUtils` |
 | `#ai-hidden` | Toggle Hide from AI (enlaza a `/ai#privacy`) | skill |
 | `#personalize` | **14 temas (11 dark + 3 light)** con swatches de valores reales, fuentes, ancho readable, índice flotante del editor | `src/lib/themes.ts` (¡los swatches llevan colores literales!) |
+
+**Clips de /features (rediseño visual en curso).** La página se está pasando de prosa larga a bloques
+visuales; de momento solo `#organize` sigue el patrón, el resto conserva la prosa. Patrón de bloque:
+kicker + `h2` + **lede** de 1-2 frases (`.nf-feat-lede`) + **clip** + **facts** (`.nf-feat-facts`: título
+en negrita + una línea, ≤ ~15 palabras) y, opcionalmente, `.nf-feat-split` (facts | segundo visual, en
+2 columnas desde 760px). Objetivo ≤ ~90 palabras visibles por bloque; el detalle vive en la app.
+- **Material**: `public/clips/<id>.<lang>.webm` (960×600, VP9, 5-9 s, bucle, sin audio, tema oscuro de
+  la app, cursor falso) + póster `<id>.<lang>.webp` (primer frame). ids: `sections`, `section-map`,
+  `windows`, `links-palette`, `kanban`, `snippets`, `floating-sidebar`, `quick-capture`, `more`,
+  `brain`; idiomas `en`/`es` (siempre el de la página). Si cambia la UI que enseña un clip, hay que
+  regrabarlo (y su póster).
+- **`FeatureClip.astro`** (props `id`, `lang`, `label` = aria-label i18n, `caption?`, `playLabel`,
+  `pauseLabel`; labels en `features.{en,es}.ts` → `clip`): marco tipo ventana (tokens, vale en dark y
+  light) con `<video muted loop playsinline preload="none">` y la fuente en `data-src`. Un único script
+  con IntersectionObserver (rootMargin 200px) asigna `src` al acercarse (carga perezosa real), reproduce
+  y pausa al salir. Botón pausa/play (WCAG 2.2.2) que el script revela (sin JS solo se ve el póster);
+  pausado a mano no se reanuda al volver a verlo. Con `prefers-reduced-motion` no hay autoplay: póster +
+  play centrado.
 
 ### `/pricing` — fuente de verdad: **`.agents/context/monetization.md`** (§§ visión / 3 / 4)
 Anclas: `#free` `#plans` `#ai` `#cloud` `#compare` `#privacy`. Accent **pink**. Mensaje central:

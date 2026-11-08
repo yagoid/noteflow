@@ -33,12 +33,19 @@ export const featuresEs: FeaturesContent = {
     { id: 'personalize', label: 'Personalizar' },
   ],
 
+  clip: { play: 'Reproducir clip', pause: 'Pausar clip' },
+
   organize: {
     title: 'Grupos, carpetas, notas — y secciones',
-    intro: [
-      'NoteFlow mantiene la jerarquía deliberadamente plana: los <strong>grupos</strong> contienen <strong>carpetas</strong>, las carpetas contienen <strong>notas</strong> — un solo nivel de anidación, sin árboles infinitos en los que perderse. Cada grupo tiene su propio <strong>color</strong>, y ese color tiñe todo lo que hay dentro: su pestaña, la línea guía que recorre sus carpetas y notas, la marca sobre la nota que tienes abierta, su región en la vista cerebro. Las notas sin grupo simplemente viven al final del sidebar.',
-      'Las carpetas pueden llevar un <strong>icono propio</strong>: click derecho en una carpeta → <strong>Change icon</strong> despliega una rejilla de 27 (trabajo, casa, ideas, libro, código, calendario, viajes, música…), y <em>Default</em> devuelve el icono de carpeta. El icono acompaña a la carpeta en el sidebar, la vista de contenido, el vistazo de grupo plegado y las listas de “Move to folder” — y se sincroniza con el resto de tus carpetas.',
-      'Un <strong>grupo plegado</strong> no te cierra la puerta: deja el ratón sobre su cabecera y una ventanita lista sus notas (las de sus carpetas incluidas), con un buscador que ya tiene el foco — basta con escribir, moverte con <kbd>↑</kbd> / <kbd>↓</kbd> y pulsar <kbd>Enter</kbd> para abrir una.',
+    lede: 'Árbol plano por fuera, mapa de secciones por dentro: <strong>una nota, un tema; las secciones, sus facetas</strong>, cada una <a href="%AI_URL%">indexada aparte</a>.',
+    clipLabel:
+      'Grabación de pantalla: al dejar el ratón sobre una nota del sidebar, su línea plegada se despliega en el mapa de secciones, al pasar por una sección aparece su tarjeta de vista previa y un clic la abre en el editor; después, en Ajustes → Apariencia se elige cómo ver las secciones en el sidebar: mapa plegado o fila con scroll.',
+    clipCaption: 'señala · previsualiza · abre',
+    facts: [
+      { title: 'Grupos con color', desc: 'Grupos → carpetas → notas, un solo nivel. Su color tiñe todo lo de dentro.' },
+      { title: 'Mapa de secciones', desc: '<kbd>Ctrl</kbd>+<kbd>T</kbd> crea, doble clic renombra, arrastrar reordena, <kbd>Ctrl</kbd>+<kbd>Tab</kbd> las recorre.' },
+      { title: 'Sidebar plegado', desc: 'Una línea por nota, un tramo por sección. Pasa el ratón para desplegar y previsualizar.' },
+      { title: 'Iconos y vistazos', desc: '27 iconos de carpeta (clic derecho → Cambiar icono). Grupo plegado: pasa el ratón y busca en sus notas.' },
     ],
     tree: {
       aria: 'La jerarquía de NoteFlow: grupos con código de color que contienen carpetas y notas, cada nota con sus secciones dibujadas como un mapa plegado',
@@ -66,13 +73,6 @@ export const featuresEs: FeaturesContent = {
       ungroupedLabel: 'Sin grupo',
       ungroupedNotes: [{ title: 'Borrador rápido', sections: ['Ideas'] }],
     },
-    sectionsH3: 'Secciones: un mapa dentro de la nota',
-    sectionsP: [
-      'El cuarto nivel vive <em>dentro</em> de la nota: cada nota puede tener múltiples <strong>secciones</strong> independientes, dispuestas en la parte superior del editor como un <strong>mapa de secciones</strong> — un único bloque de celdas que, cuando no caben, baja de fila como los salientes de un archivador, en vez de hacer scroll lateral. La sección abierta va en sólido con su color; el resto, neutras con una esquina doblada del suyo. Pasadas tres filas, las que sobran se agrupan en una celda <code>+N more</code>, y la abierta nunca es la que queda oculta. Crea una con <kbd>Ctrl</kbd>+<kbd>T</kbd> (o la celda <code>+</code>), <strong>renómbrala</strong> con doble click en su celda, <strong>reordénalas</strong> arrastrando, y recórrelas con <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>.',
-      'El sidebar habla el mismo idioma. Bajo el título de cada nota, una nota cerrada muestra un <strong>mapa plegado</strong>: una línea fina con un tramo por sección, de su color y tan ancho como larga es la sección. Deja el ratón encima y el mapa se despliega sobre la lista con los nombres; la nota que tienes abierta lo muestra desplegado, en celdas pequeñas. Y allí donde algo apunta a una sección — sidebar, mapa de secciones, vista de contenido, una pill de enlace — pasar el ratón muestra una <strong>tarjeta de vista previa apaisada</strong> con el estilo de la vista de nota: el nombre de la sección en su color, el título de la nota, el contenido real a tamaño de lectura y sus palabras o tareas.',
-    ],
-    whyP:
-      'Las secciones son lo que mantiene la jerarquía plana sin convertir las notas en cajones de sastre: <strong>una nota = un tema, las secciones = sus facetas</strong>. Una nota de proyecto lleva sus propias <em>Notas</em>, <em>Tareas</em> y <em>Dudas</em> en vez de engendrar tres notas hermanas. Y esa granularidad rinde en todas partes: cada sección está a un click desde el sidebar, el <a href="%AI_URL%">índice semántico embebe cada sección por separado</a> y los <a href="#links">enlaces</a> apuntan a secciones, no a notas enteras.',
   },
 
   templates: {
