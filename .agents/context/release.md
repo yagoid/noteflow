@@ -268,23 +268,31 @@ node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|a
 - La maquinaria compartida (lanzar Electron sobre dirs temporales, mock LLM, cursor falso + pastillas,
   `actor`, grabador CDP, `writeConcat`/ffmpeg, máscaras/sombras) vive en `scripts/lib/capture-kit.cjs`
   y el cuaderno demo (EN/ES, ids estables `ID`, `seedNotes`) en `scripts/lib/demo-notes.cjs`; los usan
-  este script y el del vídeo de la landing (abajo). `focusEditorEnd`/`focusLastTask` esperan a que el
+  este script y los dos de la landing (abajo). `focusEditorEnd`/`focusLastTask` esperan a que el
   editor tenga el foco de verdad (TipTap lo aplica en un `requestAnimationFrame`): sin esa espera, en
   `quick-capture` la primera tecla caía en el título auto-seleccionado de la nota nueva. Un cambio en
-  la kit afecta a ambos: probar
+  la kit afecta a los tres: probar
   `whats-new-capture.cjs --only sections --lang en --out <dir temporal>` (sin pisar `src/assets/`).
+- El cuaderno demo tiene una versión **completa** opt-in (`seedNotes(..., { full: true })` /
+  `demoContent(lang, { full: true })`): ~50 notas con ~67 enlaces `noteflow://` entre ellas, un 4.º
+  grupo (Business: Marketing / Clients / Meetings) y carpetas nuevas en Personal y Learning, para que
+  la vista cerebro salga llena. Las notas extra viven en Engineering y en los grupos Personal /
+  Learning / Business, así que el grupo Work de la sidebar conserva sus filas. Sin la opción, el
+  cuaderno es el de siempre (14 notas): **el tour What's new no la usa** y sus clips no cambian.
 
 ### Vídeo de la landing + GIF del README (`scripts/demo-capture.cjs`)
 
-Graba con un guion fijo sobre el cuaderno demo (UI en inglés) el vídeo del escaparate de la landing
-(`docs/src/components/Home.astro`) y el GIF del README, uno por tema:
-`docs/public/video/demo-dark.{mp4,webm}` (Midnight Blue) y `demo-light.{mp4,webm}` (Arctic Day) +
-pósters `docs/public/screenshots/app-main-midnightblue.png` / `app-main-articday.png` + (solo oscuro)
-`docs/public/screenshots/demo-dark.gif`. Regenerarlo cuando la UI que sale cambie de forma visible.
+Graba con un guion fijo sobre el cuaderno demo **completo** (UI en inglés) el vídeo del escaparate de
+la landing (`docs/src/components/Home.astro`) y el GIF del README, uno por tema:
+`docs/public/video/demo-dark.{mp4,webm}` (**NoteFlow Dark**) y `demo-light.{mp4,webm}` (**NoteFlow
+Light**) + pósters `docs/public/video/demo-dark.webp` / `demo-light.webp` (primer fotograma) + (solo
+oscuro) `docs/public/screenshots/demo-dark.gif`. Regenerarlo cuando la UI que sale cambie de forma
+visible. Con `--marketing <dir>` escribe además `demo-<tema>.mp4` de alta calidad (1280 de ancho,
+H.264 `crf 17`) para el equipo de marketing (fuera del repo).
 
 ```bash
 node scripts/demo-capture.cjs --app <dir> [--theme dark|light|all] [--video-out <dir>] [--shots-out <dir>]
-                              [--samples <dir>] [--frames <dir>] [--no-gif]
+                              [--marketing <dir>] [--samples <dir>] [--frames <dir>] [--no-gif]
 ```
 
 - Mismas reglas de seguridad que el de los clips (dirs temporales, nunca el CLI, sin GitHub/Cloud,
@@ -298,17 +306,71 @@ node scripts/demo-capture.cjs --app <dir> [--theme dark|light|all] [--video-out 
   `/` inserta un fragmento (`snippets.json` sembrado) → sidebar: el mapa plegado de una nota se
   despliega y reposar en una celda abre la preview apaisada → peek de un grupo plegado → icono de
   carpeta desde su menú contextual → `Ctrl+S` saca la sección a una sticky y su desplegable de título
-  cambia de sección → (corte) vista cerebro + respuesta del chat con sus fuentes.
+  cambia de sección → (corte) vista cerebro, con zoom de rueda sobre el cerebro para que llene el
+  panel, + respuesta del chat con sus fuentes. Personal, Learning, Business y Engineering van
+  plegados, así que las ~36 notas extra solo se ven en el cerebro.
 - La **sticky se compone** sobre la ventana principal en su desplazamiento real (cada ventana se graba
   por CDP por separado; máscara redondeada + sombra con ffmpeg). Ventana a 1120×717 CSS px, captura a
   DPR 1.5 → máster sin pérdida 1280×820 a 30 fps (×1,2 de velocidad). El final funde 0,5 s con el
   primer fotograma (sin cursor, que entra después) y ese mismo fotograma es el póster: póster → vídeo
-  → bucle sin saltos. webm VP9 `crf 32`, mp4 H.264 `crf 22` + `faststart`, póster PNG de 256 colores.
+  → bucle sin saltos. webm VP9 `crf 32` con techo de `1400k`, mp4 H.264 `crf 22` con `maxrate 1800k`
+  + `faststart`, póster webp. El techo importa: sin él, los ~3 s de zoom + giro del cerebro (miles de
+  líneas de alambre moviéndose) se comían ~2,5 MB del webm.
 - GIF del README: montaje a cortes secos de ~12 s (mapa de secciones, mapa plegado + preview + peek de
   grupo, desplegable de la sticky, respuesta con citas), 760 px de ancho a 12 fps con paleta propia.
   Tope **≤ ~5 MB**; si crece, bajar `fps`/ancho en `encodeGif` o acortar los rangos.
 - Revisar a ojo (`--samples <dir>` deja 8 PNG por tema). Los nombres de los ficheros los fija
-  `Home.astro`/`README.md`: si cambian allí, cambiar `THEMES` en el script.
+  `Home.astro`/`README.md`: si cambian allí, cambiar `THEMES` en el script. Los antiguos pósters
+  `docs/public/screenshots/app-main-midnightblue.png` / `app-main-articday.png` ya **no** los escribe
+  (solo los usaba `Home.astro`).
+
+### Clips del mosaico de la landing (`scripts/mosaic-capture.cjs`)
+
+Clips cortos (4–8 s, sin audio, UI en inglés, solo datos demo) de **una** función cada uno, con
+encuadre ajustado, para el mosaico alrededor del vídeo grande y para las redes del equipo de
+marketing. Cada clip se graba con **NoteFlow Dark** y **NoteFlow Light** (salvo `themes`, una sola
+variante). Manifiesto fijo (la web programa contra estos ids/proporciones: **no renombrar**):
+
+| id | aspecto | tamaño web | qué enseña |
+|---|---|---|---|
+| `brain-orbit` | 1:1 | 720×720 | solo el cerebro (cuaderno completo + IA local), con zoom, girando solo (auto-rotate); sin panel de chat ni cabecera |
+| `sections-tab` | 4:3 | 720×540 | nota de proyecto; `Ctrl+Tab` recorre Tasks → Meeting notes → Commands → Roadmap → Tasks con el mapa de secciones arriba |
+| `temp-note` | 4:3 | 720×540 | `Ctrl+Shift+N` → nota temporal → título → bloque `bash` + pegar un comando; se ve "Deletes …" |
+| `kanban` | 16:10 | 800×500 | tablero kanban en una nota; una tarjeta se arrastra a Done (queda marcada) |
+| `slash-snippets` | 4:5 | 576×720 | `/` abre el menú; el cursor baja a SNIPPETS e inserta uno con la fecha de hoy |
+| `sticky` | 4:5 | 576×720 | sticky flotante (compuesta sobre la ventana principal desenfocada); su desplegable de título cambia de sección |
+| `section-preview` | 16:10 | 800×500 | sidebar: el mapa plegado de una nota se despliega y reposar en una celda abre la preview apaisada |
+| `themes` | 1:1 | 720×720 | la misma nota por NoteFlow Dark → Tokyo Night → Dracula → GruvBox Dark → NoteFlow Light → Arctic Day, con fundidos |
+
+```bash
+node scripts/mosaic-capture.cjs --app <dir> [--only id,id] [--theme dark|light|all] [--out <dir>]
+                                [--marketing <dir>] [--samples <dir>] [--frames <dir>]
+```
+
+- Salida web en `docs/public/mosaic/`: `<id>-dark.{webm,mp4,webp}` y `<id>-light.{webm,mp4,webp}`
+  (`themes.{webm,mp4,webp}`); el webp es el póster (primer fotograma). Codificado al tamaño web:
+  webm VP9 (`crf` ~36) + mp4 H.264 `faststart` `yuv420p`. `brain-orbit` (alambre girando, caro de
+  comprimir) va a 2 pasadas con bitrate fijo y 24 fps. Presupuesto: **≤ ~600 KB por webm** y
+  **≤ ~10 MB** el directorio.
+- `--marketing <dir>`: además un mp4 de alta calidad por clip (`<id>-<dark|light>.mp4`,
+  `themes.mp4`) al **doble del tamaño web** con el lado largo capado a 1440 px (H.264 `crf 17`). Se
+  dejan fuera del repo (el repo `noteflow-growth` no se toca desde aquí).
+- Captura a un DPR por clip (2–3) para que el recorte sea ≥ 2× el tamaño web → máster sin pérdida
+  al doble del tamaño web → web/marketing. El cerebro se pinta a DPR ≤ 2 (`BrainScene` lo capa), así
+  que su recorte es de 720 CSS px. Las ventanas respetan el mínimo de la principal (700×500); el
+  codificador usa el viewport real.
+- **Bucle sin saltos**: o la toma acaba como empieza (el cursor vuelve a su sitio; `sections-tab`
+  da la vuelta completa), o los últimos 0,3–0,8 s se funden con los primeros (`loopCrossfade` de la
+  kit: el vídeo empieza justo después del tramo fundido, así que no hay fotograma congelado).
+- Detalles por clip: `brain-orbit` mide la caja del cerebro en una captura del canvas para elegir el
+  zoom (~76 % del recorte) y centrar el recorte en él (el cerebro queda por encima del objetivo de la
+  cámara: la ventana es alta para que el recorte suba sin tocar la cabecera). `temp-note` pega con un
+  `ClipboardEvent` sintético (no toca el portapapeles del sistema) y fija el foco en el título de la
+  nota nueva antes de escribir (el autofocus del editor puede competir con el del título). `themes`
+  cambia de tema por la vía de sincronización de apariencia de la app (escribe `ui-settings.json` y
+  manda `notes-updated` a la ventana) y funde 0,3 s entre temas. `sticky` compone la sticky (máscara
+  + sombra) sobre una captura fija de la ventana principal, desenfocada y oscurecida.
+- Revisar a ojo con `--samples <dir>` (5 PNG por clip). Mismas reglas de seguridad que los otros dos.
 
 ### Artefactos
 

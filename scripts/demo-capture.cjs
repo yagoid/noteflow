@@ -4,24 +4,27 @@
 //
 // Usage:
 //   node scripts/demo-capture.cjs [--app <dir>] [--theme dark|light|all] [--video-out <dir>]
-//                                 [--shots-out <dir>] [--samples <dir>] [--frames <dir>] [--no-gif]
+//                                 [--shots-out <dir>] [--marketing <dir>] [--samples <dir>]
+//                                 [--frames <dir>] [--no-gif]
 //
 //   --app        app dir to launch (needs a built dist/ + dist-electron/). Default: repo root.
-//   --theme      dark (Midnight Blue) | light (Arctic Day) | all (default).
-//   --video-out  default docs/public/video → demo-<theme>.mp4 + demo-<theme>.webm.
-//   --shots-out  default docs/public/screenshots → the poster (app-main-midnightblue.png /
-//                app-main-articday.png) and, for the dark take, demo-dark.gif (README).
+//   --theme      dark (NoteFlow Dark) | light (NoteFlow Light) | all (default).
+//   --video-out  default docs/public/video → demo-<theme>.mp4 + demo-<theme>.webm + the poster
+//                demo-<theme>.webp (first frame).
+//   --shots-out  default docs/public/screenshots → demo-dark.gif (README, dark take only).
+//   --marketing  also write a high-quality demo-<theme>.mp4 (1280 wide, H.264 crf 17) here.
 //   --samples    write 8 sample PNGs per theme here (visual review).
 //   --frames     keep the raw captured frames + intermediates here (debug); default: temp, deleted.
 //   --no-gif     skip the README GIF.
 //
-// The take (~33 s, UI in English): the note's section map → switch section and add a task →
-// "/" inserts a custom snippet → sidebar: a note's folded map unfolds and resting on a cell shows
-// the landscape section preview → resting on a collapsed group peeks at its notes → a folder gets
-// a custom icon from its context menu → Ctrl+S pops the section out as a sticky (composited over
-// the main window) and its title dropdown switches section → the brain view + an AI chat answer
-// with its cited notes. The end crossfades into the first frame so the loop restarts cleanly.
-// The GIF is a ~12 s montage of the liveliest parts (hard cuts).
+// The take (~33 s, UI in English) runs over the fuller demo notebook (~50 notes, many links): the
+// note's section map → switch section and add a task → "/" inserts a custom snippet → sidebar: a
+// note's folded map unfolds and resting on a cell shows the landscape section preview → resting on
+// a collapsed group peeks at its notes → a folder gets a custom icon from its context menu →
+// Ctrl+S pops the section out as a sticky (composited over the main window) and its title
+// dropdown switches section → the brain view, zoomed in on the brain, + an AI chat answer with its
+// cited notes. The end crossfades into the first frame so the loop restarts cleanly. The GIF is a
+// ~12 s montage of the liveliest parts (hard cuts).
 //
 // Effects / safety (same rules as whats-new-capture.cjs):
 //   - Throwaway Electron profile + notes dir under the OS temp dir, deleted at the end. Demo notes
@@ -33,10 +36,11 @@
 //   - Only the Electron processes launched here are closed. Windows open on screen while
 //     recording: do not use the mouse/keyboard on them meanwhile.
 //   - Capture = CDP screencast at DPR 1.5 → 1280×820, 30 fps. webm = VP9, mp4 = H.264 (faststart),
-//     posters = 256-colour PNG, GIF = 760 px wide with its own palette (≤ ~5 MB).
+//     posters = webp, GIF = 760 px wide with its own palette (≤ ~5 MB).
 //   Requires: playwright (devDependency) and ffmpeg in the PATH. Review the result by eye.
+//   The short feature clips of the landing mosaic are recorded by mosaic-capture.cjs.
 // ─────────────────────────────────────────────────────────────────────────────
-const HELP_LINES = 38
+const HELP_LINES = 41
 
 const fs = require('fs')
 const os = require('os')
@@ -55,14 +59,14 @@ const MODEL = 'Xenova/paraphrase-multilingual-MiniLM-L12-v2' // smallest multili
 const STICKY = { x: 735, y: 236, width: 345, height: 330 } // sticky bounds, relative to the main window
 
 const THEMES = {
-  dark: { id: 'midnight-blue', video: 'demo-dark', poster: 'app-main-midnightblue.png', gif: 'demo-dark.gif', ink: '255,255,255' },
-  light: { id: 'arctic-day', video: 'demo-light', poster: 'app-main-articday.png', gif: null, ink: '22,34,58' },
+  dark: { id: 'noteflow-dark', video: 'demo-dark', gif: 'demo-dark.gif', ink: '255,255,255' },
+  light: { id: 'noteflow-light', video: 'demo-light', gif: null, ink: '22,34,58' },
 }
 
 function parseArgs(argv) {
   const o = {
     app: REPO, theme: 'all', videoOut: path.join(REPO, 'docs', 'public', 'video'),
-    shotsOut: path.join(REPO, 'docs', 'public', 'screenshots'), samples: null, frames: null, gif: true, scale: 1.5,
+    shotsOut: path.join(REPO, 'docs', 'public', 'screenshots'), marketing: null, samples: null, frames: null, gif: true, scale: 1.5,
   }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -71,6 +75,7 @@ function parseArgs(argv) {
     else if (a === '--theme') o.theme = next()
     else if (a === '--video-out') o.videoOut = path.resolve(next())
     else if (a === '--shots-out') o.shotsOut = path.resolve(next())
+    else if (a === '--marketing') o.marketing = path.resolve(next())
     else if (a === '--samples') o.samples = path.resolve(next())
     else if (a === '--frames') o.frames = path.resolve(next())
     else if (a === '--no-gif') o.gif = false
@@ -109,10 +114,11 @@ const TEXT = {
 
 function seed(theme) {
   return ({ notes, profile }) => {
+    // The fuller notebook: a busy brain. Its extra notes sit in the collapsed groups/folders below.
     seedNotes(notes, 'en', TEXT.extra, (c) => {
       // No favourites: the sidebar shows the groups (and the collapsed ones) without scrolling.
       for (const n of c.notes) delete n.favorited
-    })
+    }, { full: true })
     fs.writeFileSync(path.join(notes, 'snippets.json'), JSON.stringify(TEXT.snippets.map((sn, i) => ({
       id: `snipdem${i}`, name: sn.name, content: sn.content, createdAt: new Date().toISOString(), ...(i === 0 ? { isDefault: true } : {}),
     })), null, 2))
@@ -122,7 +128,7 @@ function seed(theme) {
       language: 'en', theme: theme.id, openAtLogin: false,
       uiState: {
         activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'pinned',
-        collapsedGroupIds: [ID.gPersonal, ID.gLearn], collapsedFolderIds: [ID.fEng],
+        collapsedGroupIds: [ID.gPersonal, ID.gLearn, ID.gBusiness], collapsedFolderIds: [ID.fEng],
       },
     }, null, 2))
   }
@@ -254,6 +260,10 @@ async function take(ctx, theme) {
     return { x: r.x, y: r.y, w: r.width, h: r.height }
   })
   const cx = cb.x + cb.w * 0.5, cy = cb.y + cb.h * 0.5
+  // Zoom in on the brain (wheel = OrbitControls dolly toward its target) so it fills the view.
+  await a.move(cx - 40, cy + 20, 500)
+  for (let i = 0; i < 5; i++) { await page.mouse.wheel(0, -40); await sleep(60) }
+  await sleep(450)
   await a.dragFrom(cx - 40, cy + 20, cx + 110, cy + 50, { ms: 900, after: 250 })
   await a.click(page.locator('textarea').last(), { fx: 0.3, after: 120 })
   await a.type(TEXT.question, { min: 24, max: 50 })
@@ -315,19 +325,24 @@ function encodeLoop(master, work) {
   return looped
 }
 
+// Constant quality with a bitrate ceiling: the zoomed, turning brain (thousands of moving
+// wireframe lines) would otherwise eat most of the file in a couple of seconds.
 function encodeVideos(looped, base) {
-  ffmpeg(['-i', looped, '-vf', 'format=yuv420p', '-c:v', 'libvpx-vp9', '-crf', '32', '-b:v', '0', '-row-mt', '1',
+  ffmpeg(['-i', looped, '-vf', 'format=yuv420p', '-c:v', 'libvpx-vp9', '-crf', '32', '-b:v', '1400k', '-row-mt', '1',
     '-deadline', 'good', '-cpu-used', '1', '-an', base + '.webm'])
   ffmpeg(['-i', looped, '-vf', 'format=yuv420p', '-c:v', 'libx264', '-preset', 'veryslow', '-crf', '22', '-tune', 'animation',
-    '-profile:v', 'high', '-movflags', '+faststart', '-an', base + '.mp4'])
+    '-maxrate', '1800k', '-bufsize', '3600k', '-profile:v', 'high', '-movflags', '+faststart', '-an', base + '.mp4'])
 }
 
 // The poster is the first frame (no cursor yet), so poster → video → loop is seamless.
-// 256-colour palette PNG (like the What's new posters): ~half the size of a truecolour one.
 function encodePoster(master, at, file) {
-  ffmpeg(['-ss', at.toFixed(3), '-i', master, '-frames:v', '1', '-vf',
-    'split[a][b];[a]palettegen=max_colors=256:stats_mode=single[p];[b][p]paletteuse=dither=sierra2_4a',
-    '-compression_level', '9', file])
+  ffmpeg(['-ss', at.toFixed(3), '-i', master, '-frames:v', '1', '-c:v', 'libwebp', '-quality', '85', file])
+}
+
+// Marketing master: same take, higher quality (H.264 crf 17, 1280 wide).
+function encodeMarketing(looped, file) {
+  ffmpeg(['-i', looped, '-vf', 'format=yuv420p', '-c:v', 'libx264', '-preset', 'slow', '-crf', '17', '-profile:v', 'high',
+    '-movflags', '+faststart', '-an', file])
 }
 
 // README GIF: hard-cut montage of [from, to] ranges (seconds in the master), own palette.
@@ -379,8 +394,13 @@ async function recordTheme(opts, themeKey, work) {
   const looped = encodeLoop(master, dir)
   const base = path.join(opts.videoOut, theme.video)
   encodeVideos(looped, base)
-  encodePoster(master, 0, path.join(opts.shotsOut, theme.poster))
-  const out = [base + '.webm', base + '.mp4', path.join(opts.shotsOut, theme.poster)]
+  encodePoster(master, 0, base + '.webp')
+  const out = [base + '.webm', base + '.mp4', base + '.webp']
+  if (opts.marketing) {
+    const mk = path.join(opts.marketing, theme.video + '.mp4')
+    encodeMarketing(looped, mk)
+    out.push(mk)
+  }
   if (opts.gif && theme.gif) {
     const gif = path.join(opts.shotsOut, theme.gif)
     // Section map → folded map + preview + group peek → sticky dropdown → the cited answer.
@@ -396,7 +416,7 @@ async function main() {
   if (!fs.existsSync(path.join(opts.app, 'dist', 'index.html')) || !fs.existsSync(path.join(opts.app, 'dist-electron', 'main.js'))) {
     throw new Error(`${opts.app} has no built dist/ + dist-electron/ (run npm run build there)`)
   }
-  for (const d of [opts.videoOut, opts.shotsOut]) fs.mkdirSync(d, { recursive: true })
+  for (const d of [opts.videoOut, opts.shotsOut, opts.marketing]) if (d) fs.mkdirSync(d, { recursive: true })
   const work = opts.frames || fs.mkdtempSync(path.join(os.tmpdir(), 'nf-demo-frames-'))
   const themes = opts.theme === 'all' ? ['dark', 'light'] : [opts.theme]
   try {
@@ -404,7 +424,7 @@ async function main() {
       console.log(`- ${key} …`)
       for (const file of await recordTheme(opts, key, work)) {
         const kb = (fs.statSync(file).size / 1024).toFixed(0)
-        const dur = file.endsWith('.png') ? '' : `${probeDuration(file).toFixed(1)}s, `
+        const dur = file.endsWith('.webp') ? '' : `${probeDuration(file).toFixed(1)}s, `
         console.log(`  ${path.relative(REPO, file)}: ${dur}${kb} KB`)
       }
     }

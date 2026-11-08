@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // capture-kit.cjs — shared machinery of the scripts that record the real app on video
-// (whats-new-capture.cjs, demo-capture.cjs): launch Electron on a throwaway profile + notes
+// (whats-new-capture.cjs, demo-capture.cjs, mosaic-capture.cjs): launch Electron on a throwaway profile + notes
 // dir, a local mock LLM, the in-page fake cursor / keystroke pills, a human-ish actor, the CDP
 // screencast recorder and the ffmpeg helpers. Nothing here touches the user's data: callers
 // seed the temp dirs (see demo-notes.cjs) and never use the NoteFlow CLI.
@@ -146,6 +146,12 @@ const OVERLAY_SRC = ({ ink = '255,255,255' } = {}) => {
       p.style.left = state.x + 'px'; p.style.top = state.y + 'px'
       root.appendChild(p); setTimeout(() => p.remove(), 600)
       cur.animate([{ transform: cur.style.transform + ' scale(1)' }, { transform: cur.style.transform + ' scale(.78)' }, { transform: cur.style.transform + ' scale(1)' }], { duration: 220 })
+    },
+    // Moves the keystroke pills (default: bottom-centre of the window) so they land inside a
+    // tight crop: (x, y) = CSS px of the pills' bottom-centre.
+    placeKeys(x, y) {
+      keys.style.left = x + 'px'; keys.style.top = y + 'px'; keys.style.bottom = 'auto'
+      keys.style.transform = 'translate(-50%,-100%)'
     },
     keys(list, ms) {
       keys.innerHTML = list.map((k, i) => (i ? '<span>+</span>' : '') + `<kbd>${k}</kbd>`).join('')
@@ -417,6 +423,29 @@ async function probeBrainNode(page, cb) {
   return hits[0]
 }
 
+// Grows a CSS-px rect to the `aspect` (w/h) around its centre and keeps it inside `bounds`
+// ({ w, h }, origin 0,0); shrinks it (same aspect) if it no longer fits.
+function fitAspect(rect, aspect, bounds) {
+  let { x, y, w, h } = rect
+  if (w / h > aspect) { const nh = w / aspect; y -= (nh - h) / 2; h = nh } else { const nw = h * aspect; x -= (nw - w) / 2; w = nw }
+  const k = Math.min(1, bounds.w / w, bounds.h / h)
+  if (k < 1) { x += (w - w * k) / 2; y += (h - h * k) / 2; w *= k; h *= k }
+  x = Math.max(0, Math.min(bounds.w - w, x)); y = Math.max(0, Math.min(bounds.h - h, y))
+  return { x, y, w, h }
+}
+
+// Seamless loop of a (lossless) clip: its last `d` s crossfade into its first `d` s, and the output
+// starts right after them, so the end blends into what follows the restart (no still frame, no
+// jump). Output = duration - d. `d` = 0 just copies.
+function loopCrossfade(src, out, d) {
+  if (!d) { fs.copyFileSync(src, out); return }
+  const dur = probeDuration(src)
+  ffmpeg(['-i', src, '-i', src, '-filter_complex',
+    `[0:v]trim=start=${d},setpts=PTS-STARTPTS,settb=1/30[a];[1:v]trim=end=${d},setpts=PTS-STARTPTS,settb=1/30[b];` +
+    `[a][b]xfade=transition=fade:duration=${d}:offset=${(dur - 2 * d).toFixed(3)}[out]`,
+    '-map', '[out]', '-c:v', 'ffv1', '-an', out])
+}
+
 // ffmpeg geq expression: alpha of a rounded rectangle (radius r) filling the frame.
 const roundedAlpha = (r) =>
   `255*lte(pow(max(max(${r}-X\\,X-(W-1-${r}))\\,0)\\,2)+pow(max(max(${r}-Y\\,Y-(H-1-${r}))\\,0)\\,2)\\,${r}*${r})`
@@ -468,6 +497,6 @@ async function launchElectron({ appDir, scale, size, seed, tmpPrefix = 'nf-captu
 module.exports = {
   REPO, sleep, rand, startMockLlm, launchEnv, launchElectron, setMainBounds, closeApp,
   injectOverlay, easeInOut, follow, actor, startRecording, writeConcat, ffmpeg, probeDuration, jpegSize,
-  sampleFrames, focusEditorEnd, focusLastTask, configureMockLlm, reloadMain, probeBrainNode,
-  roundedAlpha, makeMask, makeShadow, clipTime,
+  sampleFrames, waitEditorFocus, focusEditorEnd, focusLastTask, configureMockLlm, reloadMain, probeBrainNode,
+  roundedAlpha, makeMask, makeShadow, clipTime, fitAspect, loopCrossfade,
 }
