@@ -4,7 +4,7 @@
   # NoteFlow
 
   **Fast notes for Windows, Linux & macOS developers.**
-  *Local files, optional private GitHub sync. No telemetry. Just you and your thoughts.*
+  *Local Markdown files, optional sync (private GitHub repo or encrypted NoteFlow Cloud). No telemetry. Just you and your thoughts.*
 
   [![GitHub Release](https://img.shields.io/github/v/release/yagoid/noteflow?style=flat-square&color=3de8c2)](https://github.com/yagoid/noteflow/releases/latest)
   [![License](https://img.shields.io/github/license/yagoid/noteflow?style=flat-square)](LICENSE)
@@ -21,14 +21,17 @@ Built specifically for software engineers and power users who need something fas
 
 ## Features
 
-- **Markdown-first editor** — headings (with a hover-to-expand table of contents to jump between them), bold, italic, inline code, code blocks, interactive task lists with checkboxes, and in-note kanban boards (drag cards between columns; stored as plain markdown).
-- **Snippets** — one-click toolbar button that inserts your own reusable text at the cursor, with today's date/time in the format you pick (`{date:DD-MM-YYYY}`, `{time:HH:mm}`…).
-- **Floating sticky notes** — launch any note as an independent floating window that stays on top while you work.
-- **Note groups & deadlines** — organize notes into color-coded groups and attach due dates to any task.
+- **Sections inside every note** — split a note into independent sections (each in markdown or plain-text mode), shown as a section map you can reorder, open side by side, or pop out into their own window. Hover a section to preview it.
+- **Markdown-first editor** — headings (with a hover-to-expand table of contents), inline code, code blocks, tables, images, interactive task lists with deadlines, alarms and priority, and in-note kanban boards (stored as plain markdown). Type `/` for commands, links to other notes' sections and your snippets.
+- **Snippets** — reusable text from a toolbar button or the `/` menu, with today's date/time in the format you pick (`{date:DD-MM-YYYY}`, `{time:HH:mm}`…).
+- **Quick capture** — summon the app from anywhere with `Ctrl+Shift+Space`, or jot a temporary note (`Ctrl+Shift+N`) that cleans itself up after 24 h.
+- **Floating sticky notes** — launch any note as an always-on-top window and switch between its sections from the title bar.
+- **Groups & folders** — color-coded groups with sub-folders (each with its own icon), a sidebar that can stay pinned or float in on hover, a content view per group, templates, tags and a command palette (`Ctrl+P`).
+- **The Brain (AI, optional)** — a local, offline semantic index that surfaces related notes, a 3D graph of your knowledge, and an AI chat that answers from your notes with citations. Bring your own provider (Anthropic, OpenAI, Ollama…) or use NoteFlow AI. Any section can be hidden from the AI.
 - **Encrypted notes** — lock individual notes with a password; stored as ciphertext, no master key, no backdoor.
-- **Private GitHub sync** — connect via Device Flow OAuth (no personal access tokens) and sync to a private repo you control. No third-party cloud, no telemetry.
-- **Headless CLI** — a zero-dependency Node.js companion CLI that reads/writes the same notes directory. Works over SSH, on Raspberry Pi, in cron jobs, and with AI agents.
-- **4 built-in themes** — Carbon, Midnight Blue, Tokyo Night, Arctic Day — with JetBrains Mono and minimal chrome.
+- **Sync, your way** — a private GitHub repo you control (Device Flow OAuth, no personal access tokens), or NoteFlow Cloud, an encrypted paid cloud with section-level merging across devices. Or no sync at all.
+- **Headless CLI** — a zero-dependency Node.js companion CLI that reads/writes the same notes. Works over SSH, on Raspberry Pi, in cron jobs, and with AI agents.
+- **14 themes, EN/ES interface** — dark and light themes (NoteFlow Dark, Tokyo Night, Dracula, Gruvbox, Arctic Day…), selectable fonts, and a built-in "What's new" tour.
 
 ## Download
 
@@ -76,7 +79,7 @@ chmod +x NoteFlow-2.1.0.AppImage
 
 > The [`PKGBUILD`](PKGBUILD) in this repo is currently **not working** (the installed app is missing its `node_modules` and the native modules are not built for the system `electron`). Use the AppImage until it is fixed.
 
-*[Landing page](https://yagoid.github.io/noteflow/) · [CLI reference](https://yagoid.github.io/noteflow/cli.html)*
+*[Landing page](https://yagoid.github.io/noteflow/) · [Features](https://yagoid.github.io/noteflow/features) · [AI](https://yagoid.github.io/noteflow/ai) · [CLI reference](https://yagoid.github.io/noteflow/cli)*
 
 ## CLI
 
