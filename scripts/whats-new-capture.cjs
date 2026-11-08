@@ -10,7 +10,7 @@
 //             Tip: point it at a clean worktree of HEAD (npm run build there) so a dirty
 //             tree or a parallel build never ends up in the clips.
 //   --only    comma-separated clip ids (default: all). Ids: sections, kanban, links-palette,
-//             quick-capture, windows, brain, ai, sync, more.
+//             quick-capture, windows, brain, ai, sync, section-map, floating-sidebar, snippets, more.
 //   --lang    en | es | all (default: all).
 //   --out     output dir (default: src/assets/whats-new). Writes <id>.<lang>.webm + .png poster.
 //   --frames  keep the raw captured frames + sample PNGs here (debug); default: temp dir, deleted.
@@ -46,7 +46,8 @@ const http = require('http')
 const { spawnSync } = require('child_process')
 
 const REPO = path.resolve(__dirname, '..')
-const CLIP_IDS = ['sections', 'kanban', 'links-palette', 'quick-capture', 'windows', 'brain', 'ai', 'sync', 'more']
+const CLIP_IDS = ['sections', 'kanban', 'links-palette', 'quick-capture', 'windows', 'brain', 'ai', 'sync',
+  'section-map', 'floating-sidebar', 'snippets', 'more']
 const OUT_W = 960
 const OUT_H = 600 // every clip is 16:10 so the tour modal never jumps
 
@@ -305,7 +306,7 @@ function seedNotes(notesDir, lang, extraSections = {}) {
   }
 }
 
-const WHATS_NEW_SEEN = ['sections', 'kanban', 'links-palette', 'quick-capture', 'windows', 'brain', 'ai', 'sync', 'more']
+const WHATS_NEW_SEEN = [...CLIP_IDS]
 
 function seedProfile(profileDir, lang, extra = {}) {
   const settings = {
@@ -728,6 +729,13 @@ const TEXT = {
     syncWith: 'Sync with ', linkQuery: 'endp', paletteQuery: 'lisb',
     quick: 'Call Ana about the demo — Thursday 4pm',
     stickyLine: 'Book the photographer',
+    hiringExtra: [['Offers', '- Ana — offer sent, answer by Friday'], ['Onboarding', '- [ ] Laptop + accounts\n- [ ] First-week buddy']],
+    snippets: [
+      { name: 'Journal entry', content: '## {date:dddd, MMMM D}\n\n' },
+      { name: 'Meeting', content: '## Meeting — {date:DD-MM-YYYY}\n\n**Attendees:** \n\n- [ ] ' },
+      { name: 'Signature', content: '— Alex, {date:DD-MM-YYYY}' },
+    ],
+    journalLine: 'Long run by the river, then wrote the launch FAQ.',
     template: { name: 'Weekly 1:1', sections: [['Agenda', '- Wins since last week\n- Blockers\n- Career'], ['Notes', ''], ['Action items', '- [ ] ']] },
     question: 'Summarize the launch plan',
     answer: 'The **Q4 launch** ships in three waves, two weeks apart:\n\n1. **Wave 1** — private beta with 50 design partners\n2. **Wave 2** — waitlist + pricing page go live\n3. **Wave 3** — public launch with the press kit\n\nLock down the API *Endpoints* and the design-system *Components* first.',
@@ -736,6 +744,8 @@ const TEXT = {
       enableAi: 'Enable local AI', cancel: 'Cancel', addCard: 'Add card', done: 'Done', expiry: 'Change when this note is deleted',
       hours8: 'Delete in 8 hours from now', connectGh: 'Connect with GitHub',
       sectionOptions: 'Section options', encrypt: 'Encrypt note', templates: 'Templates', newNote: 'New note', appearance: 'Appearance',
+      sidebarSections: 'Sections in the sidebar', sectionsMap: 'Folded map', sectionsRow: 'Scroll row',
+      insertSnippet: 'Insert snippet: ', chooseSnippet: 'Choose a snippet',
     },
   },
   es: {
@@ -745,6 +755,13 @@ const TEXT = {
     syncWith: 'Coordinar con ', linkQuery: 'endp', paletteQuery: 'lisb',
     quick: 'Llamar a Ana por la demo — jueves 16:00',
     stickyLine: 'Reservar el fotógrafo',
+    hiringExtra: [['Ofertas', '- Ana — oferta enviada, responde el viernes'], ['Onboarding', '- [ ] Portátil + cuentas\n- [ ] Compañero de la primera semana']],
+    snippets: [
+      { name: 'Entrada de diario', content: '## {date:dddd, D [de] MMMM}\n\n' },
+      { name: 'Reunión', content: '## Reunión — {date:DD-MM-YYYY}\n\n**Asistentes:** \n\n- [ ] ' },
+      { name: 'Firma', content: '— Alex, {date:DD-MM-YYYY}' },
+    ],
+    journalLine: 'Carrera larga junto al río y después la FAQ del lanzamiento.',
     template: { name: '1:1 semanal', sections: [['Agenda', '- Logros desde la última semana\n- Bloqueos\n- Carrera'], ['Notas', ''], ['Acciones', '- [ ] ']] },
     question: 'Resume el plan de lanzamiento',
     answer: 'El **lanzamiento del Q4** sale en tres oleadas, cada dos semanas:\n\n1. **Oleada 1** — beta privada con 50 clientes piloto\n2. **Oleada 2** — lista de espera + página de precios\n3. **Oleada 3** — lanzamiento público con kit de prensa\n\nCierra primero los *Endpoints* de la API y los *Componentes* del sistema de diseño.',
@@ -753,6 +770,8 @@ const TEXT = {
       enableAi: 'Activar la IA local', cancel: 'Cancelar', addCard: 'Añadir tarjeta', done: 'Hecho', expiry: 'Cambiar cuándo se elimina esta nota',
       hours8: 'Eliminar dentro de 8 horas', connectGh: 'Conectar con GitHub',
       sectionOptions: 'Opciones de sección', encrypt: 'Cifrar nota', templates: 'Plantillas', newNote: 'Nueva nota', appearance: 'Apariencia',
+      sidebarSections: 'Secciones en la barra lateral', sectionsMap: 'Mapa plegado', sectionsRow: 'Fila con scroll',
+      insertSnippet: 'Insertar fragmento: ', chooseSnippet: 'Elegir un fragmento',
     },
   },
 }
@@ -1104,6 +1123,114 @@ const CLIPS = {
       await a.click(page.getByText(T.ui.cloud, { exact: true }).first(), { after: 450 })
       await a.move(845, 120, 500)
       await sleep(750)
+      return { rec: await rec.stop() }
+    },
+  },
+
+  // Rest on the folded line under a note → its section map unfolds → click a cell → the note
+  // opens there (its map stays open in the row); then Settings → Appearance, the two styles.
+  'section-map': {
+    speed: 1.2,
+    launch: (T) => ({
+      size: { width: 900, height: 563 },
+      // Product folder collapsed: a tidier list (Product launch still shows in Favorites).
+      uiState: { activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'pinned', collapsedFolderIds: [ID.fProduct] },
+      // Hiring (near the top of the list) with four sections: a map worth unfolding.
+      extraSections: { [ID.hiring]: T.hiringExtra.map(([name, content], i) => ({ id: `shirx${i}`, name, content })) },
+    }),
+    async run({ page, lang }, a, T) {
+      const now = () => Date.now() / 1000
+      const { S } = demoContent(lang)
+      await a.show(620, 330)
+      const rec = await startRecording(page)
+      await sleep(350)
+      const p = await a.moveTo(page.locator(`button[data-note-id="${ID.hiring}"] .nsm-line`).first(), { fx: 0.35 })
+      await page.locator('.nsm-peek .nsm-cell').first().waitFor({ timeout: 3000 })
+      await sleep(800)
+      // Browse the unfolded cells a little before picking one.
+      await a.move(p.x + 40, p.y, 350)
+      await sleep(300)
+      await a.click(page.locator('.nsm-peek .nsm-cell', { hasText: S.loop }).first(), { after: 900 })
+      await a.move(620, 300, 700)
+      await sleep(500)
+      const posterTs = now()
+      await sleep(400)
+      // Settings → Appearance → "Sections in the sidebar" (opening it is cut).
+      const c0 = now()
+      await page.locator(`button[title="${T.ui.settings}"]`).first().click()
+      await page.getByText(T.ui.appearance, { exact: true }).first().click()
+      await sleep(300)
+      await page.getByText(T.ui.sidebarSections, { exact: true }).first().evaluate((el) => el.scrollIntoView({ block: 'center' }))
+      await sleep(350)
+      const row = page.locator('button', { hasText: T.ui.sectionsRow }).first()
+      const rb = await row.boundingBox()
+      await a.show(rb.x + rb.width / 2, rb.y + rb.height + 70)
+      await sleep(80)
+      const cuts = [[c0, now()]]
+      await sleep(250)
+      await a.moveTo(row, { ms: 600 })
+      await sleep(700)
+      await a.moveTo(page.locator('button', { hasText: T.ui.sectionsMap }).first(), { ms: 600 })
+      await sleep(900)
+      return { rec: await rec.stop(), cuts, posterTs }
+    },
+  },
+
+  // Ctrl+' folds the sidebar into the minimap → the left edge brings it back as a panel →
+  // resting on a collapsed group peeks at its notes.
+  'floating-sidebar': {
+    speed: 1.2,
+    launch: { size: { width: 900, height: 563 }, uiState: { activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'pinned', collapsedGroupIds: [ID.gWork, ID.gLearn] } },
+    async run({ app, page, size, lang }, a) {
+      const work = demoContent(lang).groups.find((g) => g.id === ID.gWork).name
+      // The group peek only opens in a focused window.
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus())
+      await focusEditorEnd(page)
+      await a.show(600, 300)
+      const rec = await startRecording(page)
+      await sleep(500)
+      await a.keys("Control+'", null, 1100)
+      await sleep(1300)
+      // Left edge → the floating panel slides in.
+      await a.move(11, size.height * 0.45, 800)
+      await sleep(900)
+      const header = page.locator('.sbg-ghb').filter({ has: page.locator('.sbg-gname', { hasText: work }) }).first()
+      await a.moveTo(header, { fx: 0.72, ms: 700 })
+      await page.locator('[data-peek-index]').first().waitFor({ timeout: 3000 })
+      await sleep(900)
+      // On the title, not on the row's section line (that would unfold its map over the list).
+      await a.moveTo(page.locator('[data-peek-index="1"]').first(), { fx: 0.55, fy: 0.25, ms: 650 })
+      await sleep(1300)
+      return { rec: await rec.stop() }
+    },
+  },
+
+  // The stamp button drops the default snippet (today's date) at the caret; its arrow lists the rest.
+  snippets: {
+    speed: 1.25,
+    launch: (T) => ({
+      size: { width: 800, height: 500 },
+      uiState: { activeNoteId: ID.habits, activeSectionId: 'shabit', sidebarMode: 'floating' },
+      files: {
+        'snippets.json': JSON.stringify(T.snippets.map((sn, i) => ({
+          id: `snipdem${i}`, name: sn.name, content: sn.content, createdAt: new Date().toISOString(), ...(i === 0 ? { isDefault: true } : {}),
+        })), null, 2),
+      },
+    }),
+    async run({ page }, a, T) {
+      // Caret on a fresh paragraph below the task list.
+      await focusLastTask(page)
+      await page.keyboard.press('Enter')
+      await page.keyboard.press('Enter')
+      await a.show(520, 330)
+      const rec = await startRecording(page)
+      await sleep(350)
+      await a.click(page.locator(`button[aria-label^="${T.ui.insertSnippet}"]`).first(), { after: 450 })
+      await a.type(T.journalLine, { min: 22, max: 48 })
+      await sleep(450)
+      await a.click(page.locator(`button[aria-label="${T.ui.chooseSnippet}"]`).first(), { after: 450 })
+      await a.moveTo(page.locator('[role="menu"] [role="menuitem"]').nth(1), { fx: 0.35, ms: 600 })
+      await sleep(1300)
       return { rec: await rec.stop() }
     },
   },

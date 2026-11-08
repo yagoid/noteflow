@@ -10,9 +10,12 @@ import {
   Link2,
   Lock,
   Palette,
+  PanelLeftOpen,
   PanelsTopLeft,
+  Rows3,
   Sparkles,
   SquareTerminal,
+  Stamp,
   Wand2,
   Zap,
   type LucideIcon,
@@ -88,6 +91,12 @@ export const WHATS_NEW_SLIDES: WhatsNewSlide[] = [
   },
   { id: 'ai', since: '2.2.0', i18nKey: 'ai', icon: Sparkles, accent: 'accent', keys: [] },
   { id: 'sync', since: '2.2.0', i18nKey: 'sync', icon: Cloud, accent: 'cyan', keys: [] },
+  { id: 'section-map', since: '2.2.0', i18nKey: 'section-map', icon: Rows3, accent: 'cyan', keys: [] },
+  {
+    id: 'floating-sidebar', since: '2.2.0', i18nKey: 'floating-sidebar', icon: PanelLeftOpen, accent: 'accent-2',
+    keys: [{ id: 'toggle', combo: ['Ctrl', "'"] }],
+  },
+  { id: 'snippets', since: '2.2.0', i18nKey: 'snippets', icon: Stamp, accent: 'accent-3', keys: [] },
   {
     id: 'more', since: '2.2.0', i18nKey: 'more', icon: Wand2, accent: 'accent-2', keys: [],
     extras: [

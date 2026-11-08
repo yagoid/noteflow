@@ -51,6 +51,18 @@ export const whatsNew: Messages['whatsNew'] = {
       title: 'Tus notas, en todos tus dispositivos',
       body: 'Sincroniza en privado con tu propio repo de GitHub o activa NoteFlow Cloud con cifrado de extremo a extremo opcional.',
     },
+    'section-map': {
+      title: 'Todas tus secciones de un vistazo',
+      body: 'Bajo cada nota del sidebar, una línea fina dibuja sus secciones: deja el ratón encima para desplegarlas y haz clic en una para ir directo. ¿Prefieres la fila siempre visible? Cámbialo en Ajustes → Apariencia → Secciones en la barra lateral.',
+    },
+    'floating-sidebar': {
+      title: 'Un sidebar que se aparta',
+      body: '{toggle} pliega el sidebar en un minimapa finísimo: acerca el ratón al borde izquierdo y vuelve a aparecer. Déjalo sobre un grupo cerrado para ver sus notas sin abrirlo.',
+    },
+    snippets: {
+      title: 'Fragmentos a un clic',
+      body: 'El botón del sello en la barra de herramientas inserta tu fragmento por defecto en el cursor, con la fecha de hoy. Su flecha muestra el resto y te deja crear los tuyos.',
+    },
     more: {
       title: 'Y mucho más',
       body: 'Pequeños detalles que marcan la diferencia. Los irás encontrando por el camino.',
