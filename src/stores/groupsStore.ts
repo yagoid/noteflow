@@ -22,6 +22,8 @@ interface GroupsState {
 
   createFolder: (groupId: string, name: string) => Promise<NoteFolder>
   renameFolder: (id: string, name: string) => Promise<void>
+  /** Sets a folder's icon key (lib/folderIcons.ts); null drops the field (default glyph). */
+  setFolderIcon: (id: string, icon: string | null) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
   toggleFolderCollapsed: (id: string) => void
 }
@@ -162,6 +164,19 @@ export const useGroupsStore = create<GroupsState>((set, get) => ({
 
   renameFolder: async (id, name) => {
     const updated = get().folders.map((f) => (f.id === id ? { ...f, name } : f))
+    set({ folders: updated })
+    await window.noteflow.setFolders(updated)
+  },
+
+  setFolderIcon: async (id, icon) => {
+    const updated = get().folders.map((f) => {
+      if (f.id !== id) return f
+      if (icon) return { ...f, icon }
+      // Back to the default: drop the key (folders.json never carries `icon: null`).
+      const next = { ...f }
+      delete next.icon
+      return next
+    })
     set({ folders: updated })
     await window.noteflow.setFolders(updated)
   },

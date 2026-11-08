@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import type { CSSProperties, DragEvent, MouseEvent, ReactNode, Ref } from 'react'
 import { LayoutGrid, Plus, Star } from 'lucide-react'
-import { FolderGlyph } from '../Sidebar/NoteFolderHeader'
+import { FolderGlyph, FolderIcon } from '../Sidebar/NoteFolderHeader'
 import { colorChannels } from '../../lib/tagColors'
 import {
   ALL_PLACE, FAVORITES_PLACE, UNGROUPED_PLACE, folderPlace, groupPlace, type ContentPlace,
@@ -144,7 +144,7 @@ export function PlacesRail({
                 <InlineName
                   key={`rename-${folder.id}`}
                   className="is-folder"
-                  icon={<FolderGlyph />}
+                  icon={<FolderIcon icon={folder.icon} />}
                   initialValue={folder.name}
                   placeholder={t.common.folderNamePlaceholder}
                   onCommit={(name) => { closeEdit(); if (name !== folder.name) onRenameFolder(folder.id, name) }}
@@ -153,7 +153,7 @@ export function PlacesRail({
               ) : (
                 item(
                   folderPlace(folder.id),
-                  <><FolderGlyph /><span className="cv-ri-name">{folder.name}</span></>,
+                  <><FolderIcon icon={folder.icon} /><span className="cv-ri-name">{folder.name}</span></>,
                   folderCount,
                   { className: 'is-folder', droppable: true, onContextMenu: (e) => onFolderContextMenu(e, folder.id) },
                 )

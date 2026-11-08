@@ -10,13 +10,20 @@ export interface GroupPeekSource<N> {
   /** Loose notes at the group root, in sidebar order. */
   notes: readonly N[]
   /** Subfolders in sidebar order, each with its notes in sidebar order. */
-  folders: readonly { folder: { id: string; name: string }; notes: readonly N[] }[]
+  folders: readonly { folder: GroupPeekFolder; notes: readonly N[] }[]
+}
+
+/** What a peek row shows of a note's folder (`icon`: `NoteFolder.icon`, when set). */
+export interface GroupPeekFolder {
+  id: string
+  name: string
+  icon?: string
 }
 
 export interface GroupPeekEntry<N> {
   note: N
   /** The folder the note sits in (null for loose notes at the group root). */
-  folder: { id: string; name: string } | null
+  folder: GroupPeekFolder | null
 }
 
 /**
@@ -26,7 +33,9 @@ export interface GroupPeekEntry<N> {
 export function flattenGroupPeekEntries<N>(src: GroupPeekSource<N>): GroupPeekEntry<N>[] {
   const entries: GroupPeekEntry<N>[] = src.notes.map((note) => ({ note, folder: null }))
   for (const { folder, notes } of src.folders) {
-    const ref = { id: folder.id, name: folder.name }
+    const ref: GroupPeekFolder = folder.icon
+      ? { id: folder.id, name: folder.name, icon: folder.icon }
+      : { id: folder.id, name: folder.name }
     for (const note of notes) entries.push({ note, folder: ref })
   }
   return entries

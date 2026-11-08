@@ -11,6 +11,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { CustomColorSwatch } from './CustomColorSwatch'
 import { EncryptionModal } from './EncryptionModal'
 import { ContextMenu } from './ContextMenu'
+import { FolderListIcon } from './Sidebar/NoteFolderHeader'
 import { useT } from '../i18n/useT'
 import { tf } from '../i18n/format'
 import type { Note, GroupColor } from '../types'
@@ -487,7 +488,7 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
                       }}
                       className={`w-full text-left px-3 py-1.5 text-xs font-mono flex items-center gap-2 transition-colors hover:bg-surface-3 hover:text-text ${note.folder === f.id ? 'text-text' : 'text-text-muted'}`}
                     >
-                      <Folder size={12} className="flex-shrink-0" style={{ color: `rgb(${colorChannels(currentGroup.color)})` }} />
+                      <FolderListIcon icon={f.icon} size={12} className="flex-shrink-0" style={{ color: `rgb(${colorChannels(currentGroup.color)})` }} />
                       <span className="truncate">{f.name}</span>
                     </button>
                   ))}

@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { CSSProperties, Ref } from 'react'
 import { ExternalLink, Lock, X } from 'lucide-react'
-import { FolderGlyph } from '../Sidebar/NoteFolderHeader'
+import { FolderIcon } from '../Sidebar/NoteFolderHeader'
 import { formatNoteDate } from '../Sidebar/rowText'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { clipPreviewMarkdown, sectionCardStats } from '../../lib/noteOverviewGrid'
@@ -24,6 +24,8 @@ interface SectionPreviewPaneProps {
   groupName: string | null
   groupChannels: string | null
   folderName: string | null
+  /** The folder's icon key (`NoteFolder.icon`; undefined: default glyph). */
+  folderIcon: string | undefined
   sectionTagColors: TagColorMap
   onClose: () => void
   onOpenInEditor: () => void
@@ -36,7 +38,7 @@ interface SectionPreviewPaneProps {
  * width is hand-set with the handle on its left edge (ContentView) and capped in CSS.
  */
 export function SectionPreviewPane({
-  paneRef, open, note, sectionId, groupName, groupChannels, folderName, sectionTagColors, onClose, onOpenInEditor,
+  paneRef, open, note, sectionId, groupName, groupChannels, folderName, folderIcon, sectionTagColors, onClose, onOpenInEditor,
 }: SectionPreviewPaneProps) {
   const t = useT()
   const proseFont = proseFontStack(useEditorSettingsStore((s) => s.fontFamily))
@@ -79,7 +81,7 @@ export function SectionPreviewPane({
             <div className="cv-pv-crumb">
               <i className="sbg-tab is-small" style={{ '--g': groupChannels ?? 'var(--text-muted)' } as CSSProperties} aria-hidden />
               <span>{groupName ?? t.contentView.ungrouped}</span>
-              {folderName && <><span className="cv-sl">/</span><FolderGlyph /><span>{folderName}</span></>}
+              {folderName && <><span className="cv-sl">/</span><FolderIcon icon={folderIcon} /><span>{folderName}</span></>}
               <span className="cv-sl">/</span>
               <span className="cv-pv-note">{note.title || t.common.untitled}</span>
             </div>

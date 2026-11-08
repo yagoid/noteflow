@@ -1,4 +1,5 @@
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Folder, type LucideProps } from 'lucide-react'
+import { resolveFolderIcon } from '../../lib/folderIcons'
 import type { NoteFolder } from '../../types'
 
 interface NoteFolderHeaderProps {
@@ -12,8 +13,9 @@ interface NoteFolderHeaderProps {
 }
 
 /**
- * Folder icon with a flap that opens when the folder is expanded (`.sbg-folder` in
- * index.css). Also used by the inline folder rename / new-folder inputs.
+ * Default folder icon, with a flap that opens when the folder is expanded (`.sbg-folder` in
+ * index.css). Shown by FolderIcon when the folder has no custom icon, and as is by the
+ * new-folder inputs.
  */
 export function FolderGlyph() {
   return (
@@ -22,6 +24,26 @@ export function FolderGlyph() {
       <path className="sbg-folder-f" d="M1.5 6h13v5.3c0 .9-.7 1.6-1.6 1.6H3.1c-.9 0-1.6-.7-1.6-1.6z" />
     </svg>
   )
+}
+
+/**
+ * A specific folder's icon in lucide-styled lists (move-to-folder menus, group peek): its
+ * custom icon (`NoteFolder.icon`, lib/folderIcons.ts), or lucide's Folder when unset / unknown.
+ */
+export function FolderListIcon({ icon, ...props }: { icon?: string } & LucideProps) {
+  const Icon = resolveFolderIcon(icon) ?? Folder
+  // eslint-disable-next-line react-hooks/static-components -- a module-level lucide icon (stable identity), not a component created here
+  return <Icon {...props} />
+}
+
+/**
+ * A specific folder's icon where the folder glyph is shown (sidebar, content view): its
+ * custom icon at the glyph's size, or the default FolderGlyph when unset / unknown.
+ * `.sbg-folder-ico` in index.css gives it the glyph's muted colour and open-note accent.
+ */
+export function FolderIcon({ icon }: { icon?: string }) {
+  if (!resolveFolderIcon(icon)) return <FolderGlyph />
+  return <FolderListIcon icon={icon} className="sbg-folder-ico" size={13} strokeWidth={2} aria-hidden />
 }
 
 /**
@@ -52,7 +74,7 @@ export function NoteFolderHeader({
       }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e) }}
     >
-      <FolderGlyph />
+      <FolderIcon icon={folder.icon} />
       <span className="sbg-fname font-mono">{folder.name}</span>
       <span className="sbg-sp" />
       <span className="sbg-count font-mono">{noteCount}</span>
