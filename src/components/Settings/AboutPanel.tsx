@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { AlertCircle, Check, Download, ExternalLink, Github, RefreshCw } from 'lucide-react'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import { FeedbackSection } from './FeedbackSection'
 import { SectionTitle, settingsButtonClass } from './ui'
 
 export function AboutPanel() {
@@ -56,7 +57,7 @@ export function AboutPanel() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="settings-rows space-y-6">
       {/* Version */}
       <section className="flex items-center justify-between gap-4">
         <div>
@@ -70,7 +71,7 @@ export function AboutPanel() {
 
       {/* Updates */}
       <section>
-        <SectionTitle>{t.settings.about.updates}</SectionTitle>
+        <SectionTitle underline={false}>{t.settings.about.updates}</SectionTitle>
         <div className="flex items-center gap-2">
           <button
             onClick={handleCheck}
@@ -126,7 +127,7 @@ export function AboutPanel() {
 
       {/* Links */}
       <section>
-        <SectionTitle>{t.settings.about.links}</SectionTitle>
+        <SectionTitle underline={false}>{t.settings.about.links}</SectionTitle>
         <button
           onClick={() => window.noteflow.openUrl('https://github.com/yagoid/noteflow')}
           className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left ${settingsButtonClass}`}
@@ -136,6 +137,9 @@ export function AboutPanel() {
           <ExternalLink size={11} className="text-text-muted flex-shrink-0" />
         </button>
       </section>
+
+      {/* Feedback (bugs / suggestions → Supabase, no account needed) */}
+      <FeedbackSection />
     </div>
   )
 }

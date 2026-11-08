@@ -19,7 +19,7 @@ export const privacyEs: LegalContent = {
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Política de<br />privacidad',
-    tagline: 'Última actualización: 24 de octubre de 2026',
+    tagline: 'Última actualización: 8 de noviembre de 2026',
   },
 
   summary: {
@@ -35,6 +35,7 @@ export const privacyEs: LegalContent = {
     { id: 'payments', label: 'Pagos' },
     { id: 'ai', label: 'NoteFlow AI' },
     { id: 'cloud', label: 'NoteFlow Cloud' },
+    { id: 'feedback', label: 'Comentarios' },
     { id: 'website', label: 'Sitio web' },
     { id: 'processors', label: 'Proveedores' },
     { id: 'transfers', label: 'Transferencias' },
@@ -79,7 +80,7 @@ export const privacyEs: LegalContent = {
             'Las notas, los grupos, los ajustes, las plantillas y el índice semántico de la IA se guardan <strong>localmente en tu dispositivo</strong> como archivos y una base de datos local.',
             'En la app <strong>no hay telemetría, ni analítica, ni informes de errores, ni publicidad</strong>.',
             'El cifrado por nota ocurre íntegramente en tu dispositivo; las notas cifradas solo pueden abrirse con tu contraseña.',
-            'No se transmite nada a ningún sitio salvo que actives explícitamente alguna de las funciones opcionales descritas abajo.',
+            'No se transmite nada a ningún sitio salvo que actives explícitamente alguna de las funciones opcionales descritas abajo, o decidas enviarnos comentarios desde la app (sección 8).',
           ],
         },
       ],
@@ -124,7 +125,7 @@ export const privacyEs: LegalContent = {
         },
         {
           t: 'p',
-          html: 'Estos datos se almacenan en <strong>Supabase</strong>, nuestro proveedor de backend (ver sección 9).',
+          html: 'Estos datos se almacenan en <strong>Supabase</strong>, nuestro proveedor de backend (ver sección 10).',
         },
       ],
     },
@@ -181,13 +182,37 @@ export const privacyEs: LegalContent = {
         },
         {
           t: 'p',
-          html: 'Los datos de la nube se almacenan en <strong>Supabase</strong> (ver sección 9).',
+          html: 'Los datos de la nube se almacenan en <strong>Supabase</strong> (ver sección 10).',
+        },
+      ],
+    },
+    {
+      id: 'feedback',
+      title: '8. Comentarios desde la app',
+      blocks: [
+        {
+          t: 'p',
+          html: 'La app de escritorio tiene un formulario de <strong>Enviar comentarios</strong> (Ajustes → Acerca de) para informar de errores o hacer sugerencias. Es totalmente opcional, funciona <strong>con o sin cuenta</strong>, y no se envía nada hasta que pulsas <strong>Enviar</strong>. Cada envío guarda:',
+        },
+        {
+          t: 'ul',
+          items: [
+            'El <strong>tipo</strong> que eliges (bug, sugerencia u otro) y el <strong>mensaje</strong> que escribes.',
+            'Una <strong>dirección de correo</strong>, solo si la escribes para que podamos responderte.',
+            'Solo si marcas <strong>«Incluir versión de la app y del sistema»</strong> (desmarcado por defecto): la versión de la app, el sistema operativo y la arquitectura de CPU, la versión del sistema y el idioma de la interfaz.',
+            'Si has iniciado sesión en una cuenta de NoteFlow, tu <strong>ID de usuario</strong>, que vincula el envío a tu cuenta. Si no has iniciado sesión, se envía sin ningún vínculo a una cuenta.',
+            '<strong>Nunca incluye tus notas</strong> ni ningún otro contenido de tu dispositivo. Como en cualquier petición, nuestro proveedor de infraestructura conserva los registros habituales del servicio (dirección IP, marcas de tiempo).',
+          ],
+        },
+        {
+          t: 'p',
+          html: 'Finalidades y bases legales (RGPD): leer y responder a tu mensaje — tu consentimiento, que das al decidir enviarlo y qué incluir (art. 6.1.a) — y usarlo para corregir errores y mejorar NoteFlow (interés legítimo, art. 6.1.f). Los comentarios se almacenan en <strong>Supabase</strong> (ver sección 10) y solo nosotros tenemos acceso a ellos.',
         },
       ],
     },
     {
       id: 'website',
-      title: '8. Sitio web',
+      title: '9. Sitio web',
       blocks: [
         {
           t: 'p',
@@ -208,7 +233,7 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'processors',
-      title: '9. Proveedores de servicio (encargados y destinatarios)',
+      title: '10. Proveedores de servicio (encargados y destinatarios)',
       blocks: [
         {
           t: 'table',
@@ -217,7 +242,7 @@ export const privacyEs: LegalContent = {
             [
               'Supabase',
               'Infraestructura de backend (autenticación, base de datos, funciones)',
-              'Correo de la cuenta, estado de suscripción, medición de IA, datos cifrados de la nube, registros del servicio',
+              'Correo de la cuenta, estado de suscripción, medición de IA, datos cifrados de la nube, comentarios enviados desde la app, registros del servicio',
             ],
             [
               'Lemon Squeezy',
@@ -254,7 +279,7 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'transfers',
-      title: '10. Transferencias internacionales',
+      title: '11. Transferencias internacionales',
       blocks: [
         {
           t: 'p',
@@ -264,7 +289,7 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'retention',
-      title: '11. Conservación de los datos',
+      title: '12. Conservación de los datos',
       blocks: [
         {
           t: 'ul',
@@ -272,6 +297,7 @@ export const privacyEs: LegalContent = {
             'Los <strong>datos de la cuenta</strong> se conservan mientras tu cuenta exista.',
             'Los <strong>registros de medición de IA</strong> se conservan mientras tu cuenta exista, para aplicar la cuota y prevenir abusos.',
             'Los <strong>datos de la nube (texto cifrado)</strong> se conservan hasta que los borres o borres tu cuenta. Si tu suscripción caduca, sigues pudiendo descargar y borrar tus datos de la nube.',
+            'Los <strong>comentarios</strong> que envías desde la app se conservan hasta que se han atendido y mientras sigan siendo útiles para mejorar NoteFlow, y se borran cuando lo pidas. Si borras tu cuenta, dejan de estar vinculados a ella; pídenoslo si también quieres que se borren.',
             'Para <strong>borrar tu cuenta y todos los datos asociados en el servidor</strong>, escríbenos a la dirección de arriba y los eliminaremos sin dilación indebida. (El borrado de cuenta autoservicio desde la app está planificado.)',
           ],
         },
@@ -283,7 +309,7 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'rights',
-      title: '12. Tus derechos',
+      title: '13. Tus derechos',
       blocks: [
         {
           t: 'p',
@@ -297,7 +323,7 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'children',
-      title: '13. Menores',
+      title: '14. Menores',
       blocks: [
         {
           t: 'p',
@@ -307,7 +333,7 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'changes',
-      title: '14. Cambios en esta política',
+      title: '15. Cambios en esta política',
       blocks: [
         {
           t: 'p',
@@ -317,7 +343,7 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'contact',
-      title: '15. Contacto',
+      title: '16. Contacto',
       blocks: [{ t: 'p', html: '<strong>yago.igle@gmail.com</strong>' }],
     },
   ],

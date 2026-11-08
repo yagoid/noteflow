@@ -26,6 +26,7 @@ import * as cloudKeys from './cloudKeys'
 import * as cloudRealtime from './cloudRealtime'
 import { getActiveSyncProvider, getActiveSyncStatus, type SyncPullResult } from './syncProvider'
 import * as account from './account'
+import * as feedback from './feedback'
 import {
   planAccountTransition,
   parseAccountRestore,
@@ -1719,6 +1720,13 @@ ipcMain.handle('app:open-notes-folder', () =>
 )
 
 ipcMain.handle('app:get-version', () => app.getVersion())
+
+// In-app feedback (Settings → About). No account required: electron/feedback.ts
+// sends it with the session token when there is one, anonymously otherwise.
+// The UI language goes along only if the user ticked the diagnostics box.
+ipcMain.handle('feedback:send', (_event, payload: unknown) => {
+  return feedback.sendFeedback(payload, currentTrayLang())
+})
 
 // E2E COUPLING: scripts/update-e2e.cjs tests the updater on real installed builds by
 // monkeypatching `https.get` (this handler) and `net.fetch` (app:download-and-install)

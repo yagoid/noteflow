@@ -393,6 +393,21 @@ export interface AccountOpResult {
   errorCode?: AccountErrorCode
 }
 
+// In-app feedback (Settings → About → "Send feedback"); mirrors
+// electron/feedbackLogic.ts. Main validates the payload and adds diagnostics.
+export type FeedbackKind = 'bug' | 'suggestion' | 'other'
+
+export interface FeedbackPayload {
+  kind: FeedbackKind
+  message: string
+  contact?: string           // optional email so the developer can reply
+  includeDiagnostics: boolean
+}
+
+// 'invalid' = payload rejected by main's validation; 'network' = unreachable /
+// timeout; 'server' = the backend refused or failed the insert.
+export type FeedbackSendResult = { ok: true } | { ok: false; reason: 'invalid' | 'network' | 'server' }
+
 // Renderer-safe view of the account session — never carries tokens.
 export interface AccountStatus {
   configured: boolean   // false while the build has no Supabase project configured
@@ -579,6 +594,8 @@ declare global {
       checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string; error?: true }>
       openUrl: (url: string) => Promise<void>
       downloadAndInstall: (url: string) => Promise<{ success: boolean; error?: string }>
+      /** In-app feedback → public.feedback (Supabase). Works signed out (sent anonymously). */
+      sendFeedback: (payload: FeedbackPayload) => Promise<FeedbackSendResult>
       onUpdateProgress: (callback: (percent: number) => void) => () => void
       onUpdateInstalling: (callback: () => void) => () => void
       exportNotes: (entries: NoteflowExportEntry[] | PlainExportEntry[], format: string, hint?: string) => Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }>

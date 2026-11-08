@@ -466,5 +466,42 @@ export const settings = {
     updateTo: 'Update to v{version}',
     links: 'Links',
     githubRepo: 'GitHub repository',
+    // "Send feedback" form → public.feedback in Supabase (electron/feedback.ts).
+    // Works signed out; the developer reads the reports from the Supabase dashboard.
+    feedback: {
+      title: 'Send feedback',
+      intro: 'Found a bug or have an idea? Tell us — every message is read.',
+      kindLabel: 'Type',
+      kinds: {
+        bug: 'Bug',
+        suggestion: 'Suggestion',
+        other: 'Other',
+      },
+      messageLabel: 'Message',
+      // Placeholder of the textarea, per selected type.
+      placeholders: {
+        bug: 'What happened, and what did you expect? Steps to reproduce help a lot.',
+        suggestion: 'What would you like NoteFlow to do?',
+        other: 'Tell us anything…',
+      },
+      // Character counter under the textarea.
+      charCount: '{count} / {max}',
+      contactLabel: 'Email (optional)',
+      contactPlaceholder: 'you@example.com',
+      contactHint: 'Only if you want a reply.',
+      contactInvalid: 'Enter a valid email or leave it empty.',
+      includeDiagnostics: 'Include app and system version',
+      // What the diagnostics checkbox adds — keep in sync with collectDiagnostics() in electron/feedback.ts.
+      diagnosticsDetail: 'App version, operating system and its version, and interface language.',
+      privacy: "Sent to NoteFlow's servers. It never includes your notes. If you're signed in, it's linked to your account.",
+      // Link after the privacy line → website privacy policy, "Feedback" section.
+      privacyLink: 'Privacy policy',
+      send: 'Send',
+      sending: 'Sending…',
+      sent: 'Thanks! Your feedback was sent.',
+      errorNetwork: "Couldn't send your feedback. Check your connection and try again.",
+      errorServer: "Couldn't send your feedback right now. Please try again in a moment.",
+      errorInvalid: "Couldn't send your feedback. Check the message and email, then try again.",
+    },
   },
 }

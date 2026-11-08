@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webFrame } from 'electron'
 // Type-only import (erased at compile time — the preload runs sandboxed, with
 // no Node/module loading beyond electron itself).
 import type { AccountErrorCode } from './account'
+import type { FeedbackSendResult } from './feedbackLogic'
 
 export type NoteDirRecord = {
   dir: string
@@ -139,6 +140,14 @@ const api = {
     ipcRenderer.invoke('app:open-url', url),
   downloadAndInstall: (url: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('app:download-and-install', url),
+  // In-app feedback (Settings → About). Main validates the payload and adds the
+  // diagnostics itself (only when includeDiagnostics is true); no account needed.
+  sendFeedback: (payload: {
+    kind: 'bug' | 'suggestion' | 'other'
+    message: string
+    contact?: string
+    includeDiagnostics: boolean
+  }): Promise<FeedbackSendResult> => ipcRenderer.invoke('feedback:send', payload),
   onUpdateProgress: (callback: (percent: number) => void) => {
     const wrapper = (_event: any, percent: number) => callback(percent)
     ipcRenderer.on('update:download-progress', wrapper)

@@ -199,7 +199,16 @@ Iconos del TitleBar:
   **AI** (solo el proveedor del LLM), **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
   de notas), **Startup** (autostart + stickies), **Templates** (plantillas de nota) — grupo **Your
   notes** —; y **Tutorial** (el tour "What's new", ver abajo), **Keyboard shortcuts** y **About**
-  (versión + updates + repo) — grupo **Help**. Cada grupo lleva un título pequeño en mayúsculas y
+  (versión + updates + **Send feedback** + repo) — grupo **Help**. **Send feedback** es un formulario
+  para reportar bugs / sugerencias / lo que sea: tipo (Bug · Suggestion · Other, control segmentado),
+  mensaje (máx. 5000 caracteres, contador, `Ctrl+Enter` envía), email opcional "solo si quieres
+  respuesta" (validación laxa), checkbox **Include app and system version** (opt-in real, **desmarcado** por
+  defecto y al limpiar tras enviar: versión de la app, SO + arquitectura y su versión, idioma de la
+  interfaz) y nota de privacidad (va a los servidores de NoteFlow, nunca incluye notas; con sesión
+  queda vinculado a la cuenta) con enlace a la política de privacidad de la web (`/privacy#feedback`). **No exige
+  cuenta**. Estados Sending… / "Thanks!" (limpia el formulario) / error con hint de reintentar. Se
+  guarda en la tabla `feedback` de Supabase y el desarrollador lo lee desde el dashboard
+  (`FeedbackSection.tsx`, IPC `feedback:send`; ver `architecture.md` y `supabase/README.md` § 8). Cada grupo lleva un título pequeño en mayúsculas y
   un espacio de separación en la nav. Tamaño fijo proporcional a la ventana de la app. El orden y los grupos viven en el array `NAV` de
   `SettingsModal.tsx`; las labels vienen del diccionario i18n por id. La paleta de comandos y los
   atajos pueden abrirla directamente en otra sección (p. ej. shortcuts, startup, sync).

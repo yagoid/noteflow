@@ -545,3 +545,44 @@ para que un usuario con la suscripción caducada pueda seguir bajando y borrando
 no subiendo). En `user_keys` basta ownership en todas las operaciones (el material de claves
 debe poder crearse/leerse siempre); los endpoints de `cloud-keys` tampoco exigen entitlement,
 por el mismo motivo.
+
+## 8. Feedback in-app (reportes de bugs / sugerencias)
+
+El formulario **Ajustes → About → Send feedback** de la app de escritorio (`electron/feedback.ts`)
+inserta cada envío en la tabla `public.feedback`. **No exige cuenta**: con sesión iniciada va con el
+token del usuario (la fila guarda su `user_id`); sin sesión va como anónimo (`user_id` null).
+
+1. **Correr la migración 0015** (`supabase/migrations/0015_feedback.sql`), igual que las anteriores
+   (SQL Editor o `supabase db push`; si `db push` se niega por migraciones "fuera de orden", ver
+   § 7 → `--include-all` / `supabase migration repair --status applied 0015`). Crea la tabla con
+   RLS y **una sola policy, de INSERT**, para `anon` y `authenticated`, y concede INSERT solo
+   sobre las columnas que manda el cliente (`id`, `created_at` y `user_id` los ponen sus defaults).
+   ⚠️ **Aplicarla ANTES de publicar la versión de la app que trae el formulario**: sin la tabla,
+   PostgREST responde 404 y el usuario ve "Couldn't send your feedback right now" (sin más efectos).
+
+2. **Leer el feedback.** Ningún cliente puede leer la tabla (no hay policy de SELECT); se lee desde
+   el dashboard, que usa el service role:
+   - **Table Editor → `feedback`** (ordenar por `created_at` descendente), o
+   - **SQL Editor**:
+
+     ```sql
+     select f.created_at, f.kind, f.message, f.contact,
+            f.app_version, f.platform, f.os_version, f.locale,
+            u.email as account_email
+       from public.feedback f
+       left join auth.users u on u.id = f.user_id
+      order by f.created_at desc
+      limit 100;
+     ```
+
+   `contact` es el email que el usuario escribió para que le respondas (opcional); `account_email`
+   es el de su cuenta NoteFlow si envió con sesión iniciada. Las columnas de diagnóstico van a
+   `null` si no marcó "Include app and system version" (opt-in, desmarcado por defecto).
+
+3. **Borrar** (spam, pruebas): desde el Table Editor o `delete from public.feedback where ...` en
+   el SQL Editor. Borrar una cuenta no borra su feedback: `user_id` pasa a `null`.
+
+Anti-abuso: la anon key es pública, así que cualquiera puede insertar. Cada fila está acotada por
+checks de longitud (mensaje ≤ 5000, email ≤ 254, diagnóstico ≤ 64/128), pero **no hay rate
+limiting**. Si llegara spam, la vía es un trigger con límite por ventana de tiempo o mover el envío a
+una Edge Function con captcha/limitación por IP.

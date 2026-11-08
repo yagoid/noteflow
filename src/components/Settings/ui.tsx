@@ -25,14 +25,19 @@ interface SectionTitleProps {
   icon?: ReactNode
   /** Optional right-hand slot for section-level actions (e.g. "Theme default"). */
   action?: ReactNode
+  /** Draw the full-width rule under the title (default). Off in panels that separate
+   *  sections with `.settings-rows` dividers *between* them (General-style). */
+  underline?: boolean
 }
 
 // Heading of a subsection inside a Settings panel. Readable colour + weight, and a
 // full-width rule underneath that anchors it as a header instead of floating over
 // the content (the previous `text-text-muted/70` label was nearly invisible).
-export function SectionTitle({ children, icon, action }: SectionTitleProps) {
+export function SectionTitle({ children, icon, action, underline = true }: SectionTitleProps) {
   return (
-    <div className="flex items-center justify-between gap-2 mb-3 pb-1.5 border-b border-border">
+    <div
+      className={`flex items-center justify-between gap-2 mb-3 ${underline ? 'pb-1.5 border-b border-border' : ''}`}
+    >
       <div className="flex items-center gap-1.5 min-w-0">
         {icon}
         <h3 className="text-[11px] font-mono font-semibold text-text uppercase tracking-widest truncate">

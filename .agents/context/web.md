@@ -32,7 +32,9 @@ npm run check    # astro check (0 errores es lo esperado)
 Las páginas legales van **fuera del rail** de neuronas: solo se enlazan desde los footers
 (landing y footer slim de DocsShell) y /privacy y /terms también desde la línea de aceptación del
 sign-in de la app (`src/components/Settings/AccountPanel.tsx` → URLs absolutas
-`…/noteflow[/es]/{terms,privacy}`).
+`…/noteflow[/es]/{terms,privacy}`); /privacy además desde la nota de privacidad del formulario de
+feedback de Ajustes → About (`FeedbackSection.tsx` → `…/privacy#feedback`: no renombrar el id
+`feedback` de esa sección).
 Comparten renderer (`LegalPage.astro`: callout de resumen + secciones numeradas con bloques
 `p`/`ul`/`table`; las celdas de tabla son texto escapado, el resto `set:html`), forma común
 `LegalContent` en `src/i18n/docs/legal.ts` (aquí el ES se tipa contra la interfaz, no contra

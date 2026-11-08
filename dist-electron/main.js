@@ -50,6 +50,7 @@ const cloudKeys = __importStar(require("./cloudKeys"));
 const cloudRealtime = __importStar(require("./cloudRealtime"));
 const syncProvider_1 = require("./syncProvider");
 const account = __importStar(require("./account"));
+const feedback = __importStar(require("./feedback"));
 const accountTransition_1 = require("./accountTransition");
 const cloudConfig_1 = require("./cloudConfig");
 const aiIndex = __importStar(require("./ai/aiIndex"));
@@ -1670,6 +1671,12 @@ electron_1.ipcMain.handle('fs:read-all-notes', async () => {
 electron_1.ipcMain.handle('fs:notes-dir', () => NOTES_DIR);
 electron_1.ipcMain.handle('app:open-notes-folder', () => electron_1.shell.openPath(NOTES_DIR).catch(err => console.error('Failed to open notes folder:', err)));
 electron_1.ipcMain.handle('app:get-version', () => electron_1.app.getVersion());
+// In-app feedback (Settings → About). No account required: electron/feedback.ts
+// sends it with the session token when there is one, anonymously otherwise.
+// The UI language goes along only if the user ticked the diagnostics box.
+electron_1.ipcMain.handle('feedback:send', (_event, payload) => {
+    return feedback.sendFeedback(payload, currentTrayLang());
+});
 // E2E COUPLING: scripts/update-e2e.cjs tests the updater on real installed builds by
 // monkeypatching `https.get` (this handler) and `net.fetch` (app:download-and-install)
 // from outside. Switching either HTTP client (or the URLs) requires updating that

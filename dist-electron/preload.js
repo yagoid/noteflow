@@ -95,6 +95,9 @@ const api = {
     checkUpdate: () => electron_1.ipcRenderer.invoke('app:check-update'),
     openUrl: (url) => electron_1.ipcRenderer.invoke('app:open-url', url),
     downloadAndInstall: (url) => electron_1.ipcRenderer.invoke('app:download-and-install', url),
+    // In-app feedback (Settings → About). Main validates the payload and adds the
+    // diagnostics itself (only when includeDiagnostics is true); no account needed.
+    sendFeedback: (payload) => electron_1.ipcRenderer.invoke('feedback:send', payload),
     onUpdateProgress: (callback) => {
         const wrapper = (_event, percent) => callback(percent);
         electron_1.ipcRenderer.on('update:download-progress', wrapper);

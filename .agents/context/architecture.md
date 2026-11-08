@@ -47,6 +47,10 @@ noteflow/
 │   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
 │   ├── updateAsset.ts   # Lógica pura del auto-update: qué asset/URL ofrecer por plataforma y
 │   │                    #   allowlist de rutas descargables — testeada; ver patterns.md
+│   ├── feedback.ts      # Formulario de feedback (Ajustes → About): INSERT en public.feedback vía PostgREST,
+│   │                    #   con el token de la sesión si la hay y si no anónimo (no exige cuenta) — migración 0015
+│   ├── feedbackLogic.ts # Pura: validación del payload (tipo, mensaje 1..5000, email opcional laxo), fila a
+│   │                    #   insertar y decisión ante 401/403 — testeada (incluye el espejo de límites de la 0015)
 │   ├── account.ts       # Cuenta NoteFlow (Supabase Auth email+OTP vía REST, sesión en main,
 │   │                    #   refresh token cifrado, entitlements) — ver monetization.md
 │   ├── accountTransition.ts # Lógica pura del sign-out/sign-in: qué apagar (Cloud, DEK, IA gestionada),
@@ -320,6 +324,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `app:check-update` | handle | Consulta la última release en la API de GitHub → `{hasUpdate, latestVersion?, downloadUrl?, error?}` (`error: true` = el chequeo falló, no "al día") |
 | `app:download-and-install` | handle | Descarga el instalador (allowlist de hosts) e instala; emite progreso |
 | `app:open-url` | handle | Abre URL externa (solo https, validada) |
+| `feedback:send` | handle | Formulario "Send feedback" de Ajustes → About: `{kind: 'bug'\|'suggestion'\|'other', message, contact?, includeDiagnostics}` → `{ok:true} \| {ok:false, reason:'invalid'\|'network'\|'server'}`. Main revalida (`feedbackLogic.ts`), añade él mismo el diagnóstico (versión de la app, `process.platform` + arch, `process.getSystemVersion()`, idioma de la UI; no el locale del SO, que lleva la región) **solo** si `includeDiagnostics`, y hace `POST /rest/v1/feedback` (`Prefer: return=minimal`, timeout 15 s) con el access token si hay sesión — si no hay, el llavero está bloqueado o la petición con token se rechaza (401/403), se envía **anónimo** (solo `apikey`; solo un 401 invalida el token, contrato de `account.invalidateAccessToken`). El checkbox de diagnóstico de la UI es opt-in (desmarcado por defecto); lo recoge la política de privacidad de la web (§ 8 Feedback). No exige cuenta. Tabla y RLS en `supabase/migrations/0015_feedback.sql` |
 | `settings:get-theme` / `settings:set-theme` | on (sync/async) | Tema en settings.json (sendSync para leer) — hoy es dual-write legacy: la fuente sincronizada del tema es `ui-settings.json` |
 | `ui-settings:get` / `ui-settings:set` | on (sync) / handle | Apariencia + ajustes del editor SINCRONIZADOS → `ui-settings.json` (dir de notas). `get` es sendSync (initTheme lo necesita antes del primer paint); `set` recibe un patch PARCIAL que main mergea sobre el fichero (saneador puro en `electron/uiSettings.ts`, con tests), hace broadcast `notes-updated` y `schedulePush`. La escala de UI y el idioma quedan fuera (por dispositivo) |
 | `settings:get-language` / `settings:set-language` | on (sync/async) | Idioma UI (`'system'\|'en'\|'es'`) en settings.json; el setter persiste, refresca el tray y hace broadcast `language-changed` a todas las ventanas (cambio en caliente) |

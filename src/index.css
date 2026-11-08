@@ -115,6 +115,19 @@ button {
   background: rgb(var(--border) / 0.5);
   pointer-events: none;
 }
+/* Stronger, edge-to-edge rule before a section that starts a distinct block
+   (e.g. "Send feedback" at the end of About). Bleeds into .settings-content's px-5
+   so it spans the whole panel, and doubles the gap (space-y-6's margin wins on
+   specificity, hence !important) with the rule centred in it. */
+.settings-rows > section.settings-row-break {
+  margin-top: 3rem !important;
+}
+.settings-rows > section.settings-row-break::before {
+  top: -1.5rem;
+  left: -1.25rem;
+  right: -1.25rem;
+  background: rgb(var(--border));
+}
 
 /* AI chat markdown. Reuses the editor's prose markup (via htmlFromMarkdown) but
    scaled down to the chat panel: 12px base, compact headings/spacing, and no

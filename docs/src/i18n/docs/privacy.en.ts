@@ -21,7 +21,7 @@ export const privacyEn: LegalContent = {
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Privacy<br />Policy',
-    tagline: 'Last updated: October 24, 2026',
+    tagline: 'Last updated: November 8, 2026',
   },
 
   summary: {
@@ -37,6 +37,7 @@ export const privacyEn: LegalContent = {
     { id: 'payments', label: 'Payments' },
     { id: 'ai', label: 'NoteFlow AI' },
     { id: 'cloud', label: 'NoteFlow Cloud' },
+    { id: 'feedback', label: 'Feedback' },
     { id: 'website', label: 'Website' },
     { id: 'processors', label: 'Service providers' },
     { id: 'transfers', label: 'Transfers' },
@@ -81,7 +82,7 @@ export const privacyEn: LegalContent = {
             'Notes, groups, settings, templates and the AI semantic index are stored <strong>locally on your device</strong> as files and a local database.',
             'There is <strong>no telemetry, no analytics, no crash reporting and no advertising</strong> in the app.',
             'Note-level encryption happens entirely on your device; encrypted notes can only be opened with your password.',
-            'Nothing is transmitted anywhere unless you explicitly enable one of the optional features described below.',
+            'Nothing is transmitted anywhere unless you explicitly enable one of the optional features described below, or choose to send us feedback from the app (section 8).',
           ],
         },
       ],
@@ -126,7 +127,7 @@ export const privacyEn: LegalContent = {
         },
         {
           t: 'p',
-          html: 'This data is stored with <strong>Supabase</strong>, our backend provider (see section 9).',
+          html: 'This data is stored with <strong>Supabase</strong>, our backend provider (see section 10).',
         },
       ],
     },
@@ -183,13 +184,37 @@ export const privacyEn: LegalContent = {
         },
         {
           t: 'p',
-          html: 'Cloud data is stored with <strong>Supabase</strong> (see section 9).',
+          html: 'Cloud data is stored with <strong>Supabase</strong> (see section 10).',
+        },
+      ],
+    },
+    {
+      id: 'feedback',
+      title: '8. Feedback from the app',
+      blocks: [
+        {
+          t: 'p',
+          html: 'The desktop app has a <strong>Send feedback</strong> form (Settings → About) for reporting bugs or making suggestions. It is entirely optional, works <strong>with or without an account</strong>, and nothing is sent until you press <strong>Send</strong>. Each submission stores:',
+        },
+        {
+          t: 'ul',
+          items: [
+            'The <strong>type</strong> you pick (bug, suggestion or other) and the <strong>message</strong> you write.',
+            'An <strong>email address</strong>, only if you type one so we can reply.',
+            'Only if you tick <strong>“Include app and system version”</strong> (unticked by default): the app version, operating system and CPU architecture, OS version and interface language.',
+            'If you are signed in to a NoteFlow Account, your <strong>user ID</strong>, linking the submission to your account. If you are not signed in, it is sent without any account link.',
+            'It <strong>never includes your notes</strong> or any other content from your device. As with any request, our infrastructure provider keeps standard service logs (IP address, timestamps).',
+          ],
+        },
+        {
+          t: 'p',
+          html: 'Purposes and legal bases (GDPR): reading and answering your report — your consent, given by choosing to send it and what to include (art. 6(1)(a)) — and using it to fix bugs and improve NoteFlow (legitimate interest, art. 6(1)(f)). Feedback is stored with <strong>Supabase</strong> (see section 10) and only we can access it.',
         },
       ],
     },
     {
       id: 'website',
-      title: '8. Website',
+      title: '9. Website',
       blocks: [
         {
           t: 'p',
@@ -210,7 +235,7 @@ export const privacyEn: LegalContent = {
     },
     {
       id: 'processors',
-      title: '9. Service providers (processors and recipients)',
+      title: '10. Service providers (processors and recipients)',
       blocks: [
         {
           t: 'table',
@@ -219,7 +244,7 @@ export const privacyEn: LegalContent = {
             [
               'Supabase',
               'Backend infrastructure (authentication, database, functions)',
-              'Account email, subscription status, AI metering, encrypted cloud data, service logs',
+              'Account email, subscription status, AI metering, encrypted cloud data, feedback sent from the app, service logs',
             ],
             [
               'Lemon Squeezy',
@@ -256,7 +281,7 @@ export const privacyEn: LegalContent = {
     },
     {
       id: 'transfers',
-      title: '10. International transfers',
+      title: '11. International transfers',
       blocks: [
         {
           t: 'p',
@@ -266,7 +291,7 @@ export const privacyEn: LegalContent = {
     },
     {
       id: 'retention',
-      title: '11. Data retention',
+      title: '12. Data retention',
       blocks: [
         {
           t: 'ul',
@@ -274,6 +299,7 @@ export const privacyEn: LegalContent = {
             '<strong>Account data</strong> is kept while your account exists.',
             '<strong>AI metering records</strong> are kept while your account exists, for quota enforcement and abuse prevention.',
             '<strong>Cloud data (ciphertext)</strong> is kept until you delete it or delete your account. If your subscription lapses, you can still download and delete your cloud data.',
+            '<strong>Feedback</strong> you send from the app is kept until it has been handled and while it remains useful to improve NoteFlow, and is deleted on request at any time. If you delete your account, your feedback is unlinked from it; ask us if you also want it deleted.',
             'To <strong>delete your account and all associated server data</strong>, contact us at the address above and we will remove it without undue delay. (Self-serve account deletion in the app is planned.)',
           ],
         },
@@ -285,7 +311,7 @@ export const privacyEn: LegalContent = {
     },
     {
       id: 'rights',
-      title: '12. Your rights',
+      title: '13. Your rights',
       blocks: [
         {
           t: 'p',
@@ -299,7 +325,7 @@ export const privacyEn: LegalContent = {
     },
     {
       id: 'children',
-      title: '13. Children',
+      title: '14. Children',
       blocks: [
         {
           t: 'p',
@@ -309,7 +335,7 @@ export const privacyEn: LegalContent = {
     },
     {
       id: 'changes',
-      title: '14. Changes to this policy',
+      title: '15. Changes to this policy',
       blocks: [
         {
           t: 'p',
@@ -319,7 +345,7 @@ export const privacyEn: LegalContent = {
     },
     {
       id: 'contact',
-      title: '15. Contact',
+      title: '16. Contact',
       blocks: [{ t: 'p', html: '<strong>yago.igle@gmail.com</strong>' }],
     },
   ],
