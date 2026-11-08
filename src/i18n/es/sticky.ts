@@ -8,6 +8,9 @@ export const sticky = {
   minimizeShort: 'Minimizar',
   closeShort: 'Cerrar',
 
+  switchSection: 'Cambiar de sección',
+  sections: 'Secciones',
+
   loadingSticky: 'Cargando nota adhesiva...',
   notFound: 'No encontrada',
   noteNotFound: 'Nota no encontrada',
