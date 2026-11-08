@@ -5,9 +5,12 @@ import { useThemeStore } from '../stores/themeStore'
 import { useEditorSettingsStore } from '../stores/editorSettingsStore'
 import { colorChannels, resolveGroupColor } from '../lib/tagColors'
 import { Editor } from './Editor/Editor'
-import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp, Pin, PinOff } from 'lucide-react'
+import { ContextMenu } from './ContextMenu'
+import { MENU_ITEM_CLASS } from './contextMenuStyles'
+import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp, Pin, PinOff, Check } from 'lucide-react'
 import { decryptSections } from '../lib/cryptoUtils'
-import { createDebouncedSave } from '../lib/pendingEdits'
+import { createDebouncedSave, flushPendingEdits } from '../lib/pendingEdits'
+import { menuNavIndex, showStickySectionName, stickyHashWithSection } from '../lib/stickySectionMenu'
 import {
   createContentSync, mapOffsetThroughChange, needsSave, recordSave, resolveExternalContent, type ContentSync,
 } from '../lib/externalContentSync'
@@ -21,16 +24,163 @@ const FOLDED_H = 32
 // The bottom one must stay below `.sticky-editor .ProseMirror` padding-bottom.
 const STICKY_CARET_SCROLL_GAP = { top: 8, bottom: 32 }
 
+// Same look as the sidebar context menus (MENU_CLASS), sized for the small sticky window
+// (300px wide by default, 200×200 minimum) and scrolling when the note has many sections.
+const SECTION_MENU_CLASS = 'fixed z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 w-max min-w-40 max-w-[calc(100vw-16px)] max-h-[calc(100vh-40px)] overflow-y-auto animate-in fade-in zoom-in duration-100'
+
+const NO_DRAG = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
+
+interface SectionOption {
+  id: string
+  name: string
+  color: GroupColor
+}
+
+// Title-bar section switcher: the section name opens a menu with every section of the
+// note (note order). Closes on Escape, Tab, an outside click (a transparent backdrop,
+// which also takes the title bar's drag region out while open), window blur, or after
+// picking one. Escape / Tab return the focus to the trigger, an outside click leaves it.
+function SectionSwitcher({ sectionName, color, sections, currentSectionId, onSelect }: {
+  sectionName: string
+  color: GroupColor
+  sections: SectionOption[]
+  currentSectionId: string
+  onSelect: (sectionId: string) => void
+}) {
+  const t = useT()
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const open = menuPos !== null
+
+  const openMenu = () => {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (rect) setMenuPos({ x: rect.left, y: rect.bottom + 4 })
+  }
+  const closeMenu = (refocusTrigger: boolean) => {
+    setMenuPos(null)
+    if (refocusTrigger) triggerRef.current?.focus()
+  }
+
+  // The current section gets the focus on open, so the arrows start from it.
+  useEffect(() => {
+    if (!open) return
+    const current = Math.max(0, sections.findIndex((s) => s.id === currentSectionId))
+    itemRefs.current[current]?.focus()
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // On the window, not the menu: a click on the menu's padding leaves the focus on the
+  // body, and Escape / the arrows must still work. Enter / Space are the focused item's
+  // own button activation.
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'Tab') {
+        e.preventDefault()
+        setMenuPos(null)
+        triggerRef.current?.focus()
+        return
+      }
+      const items = itemRefs.current.filter((el): el is HTMLButtonElement => el !== null)
+      const next = menuNavIndex(e.key, items.findIndex((el) => el === document.activeElement), items.length)
+      if (next !== null) {
+        e.preventDefault()
+        items[next].focus()
+      }
+    }
+    const onBlur = () => setMenuPos(null)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [open])
+
+  // Another section: the focus goes to its content (StickyApp). The current one changes
+  // nothing, so it closes like Escape (a keyboard pick returns to the trigger).
+  const select = (sectionId: string, viaKeyboard: boolean) => {
+    if (sectionId === currentSectionId) {
+      closeMenu(viaKeyboard)
+      return
+    }
+    closeMenu(false)
+    onSelect(sectionId)
+  }
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="flex items-center gap-1 min-w-0 -mx-1 px-1 rounded font-light hover:bg-surface-2 focus-visible:bg-surface-2 outline-none transition-colors"
+        style={{ ...NO_DRAG, color: `rgb(${colorChannels(color)})` }}
+        onClick={() => (open ? closeMenu(false) : openMenu())}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown' && !open) {
+            e.preventDefault()
+            openMenu()
+          }
+        }}
+        title={t.sticky.switchSection}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <span className="truncate">{sectionName}</span>
+        <ChevronDown size={10} className="flex-shrink-0 opacity-70" />
+      </button>
+      {menuPos && (
+        <>
+          <div className="fixed inset-0 z-40" style={NO_DRAG} onMouseDown={() => closeMenu(false)} />
+          <ContextMenu x={menuPos.x} y={menuPos.y} className={SECTION_MENU_CLASS}>
+            <div role="menu" aria-label={t.sticky.sections} style={NO_DRAG}>
+              {sections.map((s, i) => {
+                const isCurrent = s.id === currentSectionId
+                return (
+                  <button
+                    key={s.id}
+                    ref={(el) => { itemRefs.current[i] = el }}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={isCurrent}
+                    tabIndex={-1}
+                    className={`${MENU_ITEM_CLASS} focus:bg-surface-3 outline-none`}
+                    // Keyboard activation (Enter / Space) fires a click with detail 0.
+                    onClick={(e) => select(s.id, e.detail === 0)}
+                    onMouseEnter={(e) => e.currentTarget.focus()}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: `rgb(${colorChannels(s.color)})` }}
+                    />
+                    <span className={`flex-1 min-w-0 truncate ${isCurrent ? 'font-semibold' : ''}`}>{s.name}</span>
+                    <Check size={12} className={`flex-shrink-0 ${isCurrent ? '' : 'invisible'}`} />
+                  </button>
+                )
+              })}
+            </div>
+          </ContextMenu>
+        </>
+      )}
+    </>
+  )
+}
+
 // Custom TitleBar for the sticky window
-function StickyTitleBar({ noteTitle, sectionName, color, onFold, isPinned, onTogglePin }: {
+function StickyTitleBar({ noteTitle, sectionName, color, onFold, isPinned, onTogglePin, sections, currentSectionId, onSelectSection }: {
   noteTitle: string
   sectionName?: string
   color: GroupColor
   onFold: () => void
   isPinned?: boolean
   onTogglePin?: () => void
+  /** With 2+ sections (and `onSelectSection`), the section name becomes a switcher. */
+  sections?: SectionOption[]
+  currentSectionId?: string
+  onSelectSection?: (sectionId: string) => void
 }) {
   const t = useT()
+  const canSwitch = !!sectionName && !!onSelectSection && !!currentSectionId && !!sections && sections.length >= 2
   return (
     <div
       className="h-8 bg-surface-0 border-b border-border/40 flex items-center justify-between px-2 cursor-default select-none"
@@ -41,7 +191,17 @@ function StickyTitleBar({ noteTitle, sectionName, color, onFold, isPinned, onTog
         {sectionName && (
           <>
             <span className="h-3 w-px bg-border/40 flex-shrink-0" />
-            <span className="truncate font-light" style={{ color: `rgb(${colorChannels(color)})` }}>{sectionName}</span>
+            {canSwitch ? (
+              <SectionSwitcher
+                sectionName={sectionName}
+                color={color}
+                sections={sections}
+                currentSectionId={currentSectionId}
+                onSelect={onSelectSection}
+              />
+            ) : (
+              <span className="truncate font-light" style={{ color: `rgb(${colorChannels(color)})` }}>{sectionName}</span>
+            )}
           </>
         )}
       </div>
@@ -251,6 +411,8 @@ export function StickyApp() {
     if (tracked?.key !== section.id) {
       rawSyncRef.current = { key: section.id, sync: createContentSync(incoming) }
       rawDeferredRef.current = false
+      // A textarea unmounted mid-composition (keyed by section) never fires compositionend.
+      rawComposingRef.current = false
       if (incoming !== rawContent) setRawContent(incoming)
       return
     }
@@ -277,6 +439,19 @@ export function StickyApp() {
   const syncRawFromStoreRef = useRef(syncRawFromStore)
   useEffect(() => { syncRawFromStoreRef.current = syncRawFromStore })
 
+  // After a switch from the section menu the focus goes to the new section's content:
+  // the rich Editor autofocuses on mount; the raw / read-only textarea (keyed by
+  // section) is focused here once mounted, caret at the start.
+  const focusContentRef = useRef(false)
+  useEffect(() => {
+    if (!focusContentRef.current) return
+    focusContentRef.current = false
+    const textarea = rawTextareaRef.current
+    if (!textarea) return
+    textarea.focus()
+    textarea.setSelectionRange(0, 0)
+  }, [section?.id])
+
   // A controlled textarea whose value is replaced puts the caret at the end.
   useLayoutEffect(() => {
     const selection = rawSelectionRef.current
@@ -287,7 +462,9 @@ export function StickyApp() {
   // Debounced write of the raw text, remembering it so its echo isn't taken for an
   // external update. "Nothing to write" = equal to our last write still in flight, not
   // to the store (Backspace back to the store's text while that write is queued must
-  // still be written). Read-only (unlocked encrypted) stickies never write.
+  // still be written). Read-only (unlocked encrypted) stickies never write. Target
+  // captured now (the section switcher can show another section before it fires) and
+  // used as the debounce target: one scheduled for another section runs the pending one.
   const scheduleRawSave = (content: string) => {
     if (unlockedSections || !noteId || !sectionId) return
     const targetNoteId = noteId
@@ -303,7 +480,7 @@ export function StickyApp() {
         return
       }
       void updateSection(targetNoteId, targetSectionId, { content })
-    })
+    }, `${targetNoteId}/${targetSectionId}`)
   }
 
   // Focus password input when encrypted note is detected
@@ -424,7 +601,30 @@ export function StickyApp() {
     scheduleRawSave(content)
   }
 
-  const showSectionName = section.name !== 'New' && section.name !== 'Main'
+  // Sections the switcher lists (note order): the decrypted ones of an unlocked
+  // encrypted note (they stay read-only). aiHidden only hides a section from the AI.
+  const switchableSections = unlockedSections ?? note.sections
+  const sectionOptions = switchableSections.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: resolveGroupColor(s.name, sectionTagColors),
+  }))
+
+  // Shows another section in place. The pending edits of the one shown are written
+  // first, still to it (raw: target captured at schedule time; rich: the Editor is keyed
+  // by section). The raw buffer starts from the new section's text (syncRawFromStore
+  // then re-keys its echo tracking), and the hash follows so a reload reopens it.
+  const handleSelectSection = (nextSectionId: string) => {
+    const next = switchableSections.find((s) => s.id === nextSectionId)
+    if (!next || nextSectionId === section.id) return
+    flushPendingEdits(note.id)
+    setRawContent(next.content)
+    focusContentRef.current = true
+    setSectionId(nextSectionId)
+    window.history.replaceState(null, '', stickyHashWithSection(window.location.hash, nextSectionId))
+  }
+
+  const showSectionName = showStickySectionName(section.name, switchableSections.length)
   const sectionColor = resolveGroupColor(section.name, sectionTagColors)
 
   if (isFolded) {
@@ -450,6 +650,9 @@ export function StickyApp() {
         onFold={handleFold}
         isPinned={isPinned}
         onTogglePin={handleTogglePin}
+        sections={sectionOptions}
+        currentSectionId={section.id}
+        onSelectSection={handleSelectSection}
       />
       {isReadOnly && (
         <div className="flex items-center gap-1 px-2 py-1 bg-amber-500/10 border-b border-amber-500/20">
@@ -460,6 +663,9 @@ export function StickyApp() {
       <div className="flex-1 overflow-hidden mr-1" onKeyDown={(e) => e.stopPropagation()}>
         {(section.isRawMode || isReadOnly) ? (
           <textarea
+            // Per section: a fresh textarea (scroll at the top, no native undo history
+            // reaching into the previous section's text).
+            key={section.id}
             ref={rawTextareaRef}
             value={isReadOnly ? section.content : rawContent}
             onChange={handleRawChange}

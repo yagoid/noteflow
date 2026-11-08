@@ -10,6 +10,10 @@ export const sticky = {
   minimizeShort: 'Minimize',
   closeShort: 'Close',
 
+  // Section switcher (title-bar dropdown).
+  switchSection: 'Switch section',
+  sections: 'Sections',
+
   // Loading / not-found states.
   loadingSticky: 'Loading sticky note...',
   notFound: 'Not Found',

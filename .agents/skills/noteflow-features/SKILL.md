@@ -1229,6 +1229,14 @@ Botón `⧉` en la toolbar del editor (o `Ctrl+S` para la sección actual, `Ctrl
 - Se pueden abrir varias a la vez.
 - **Plegar/desplegar** (fold/unfold) desde su barra de título: se contrae a una píldora animada
   en la esquina de la pantalla (las píldoras se apilan).
+- **Cambiar de sección** sin abrir otra ventana: si la nota tiene 2+ secciones, el nombre de la sección
+  en la barra de título (con `⌄`, tooltip *Switch section*) abre un desplegable con todas las secciones
+  (punto de color + nombre, ✓ en la actual). Teclado: Enter/Espacio/↓ abre, ↑/↓ (cíclico), Home/End,
+  Enter/Espacio elige (el foco pasa al contenido de la nueva sección), Escape/Tab cierra. La sticky
+  recuerda la sección elegida si se recarga esa ventana (Ctrl+R); no al reiniciar la app: las stickies
+  configuradas para abrirse al arrancar vuelven con su sección configurada. Con una
+  sola sección llamada `New`/`Main` no se muestra el nombre. En notas cifradas desbloqueadas también
+  funciona (todas siguen en solo lectura).
 
 ---
 

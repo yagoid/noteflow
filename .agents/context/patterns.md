@@ -1805,6 +1805,30 @@ igual que el `rounded-lg` del CSS, también en plegado — no hay radio "media a
 y se calcula con el **tamaño real** (`win.getSize()`) en cada tick de `animateStickyWindow`,
 no con el solicitado, para que el recorte DWM y el borde CSS coincidan.
 
+**Cambiar de sección en el sitio (`SectionSwitcher` en `StickyApp.tsx`):** con 2+ secciones el nombre
+de la sección de la barra de título es un botón (`no-drag`) que abre un menú con todas las secciones
+(orden `note.sections`; en una nota cifrada desbloqueada, las `unlockedSections`, que siguen en solo
+lectura; las `aiHidden` se listan igual). Regla de visibilidad pura en `lib/stickySectionMenu.ts`
+(`showStickySectionName`, tests en `tests/lib/stickySectionMenu.test.ts`): el nombre `New`/`Main` solo
+se oculta si la nota tiene una única sección (también en la píldora plegada, que no es interactiva).
+Elegir otra sección: `flushPendingEdits(noteId)` **antes** de `setSectionId` (el raw guarda en la
+sección capturada al programar —y usa `noteId/sectionId` como target del debounce—; el `Editor` rich
+va keyed por sección), el buffer raw arranca con el texto nuevo (el textarea va keyed por sección:
+scroll arriba y sin undo nativo hacia la otra sección) y el hash se reescribe con
+`history.replaceState` (`stickyHashWithSection`) para que una recarga reabra la sección mostrada. El
+main no sabe qué sección muestra cada sticky (sin IPC); el hash solo cubre la recarga de esa
+ventana: al reiniciar la app, las stickies de arranque se abren con su sección configurada. Cierre:
+Escape/Tab (devuelven el foco al trigger), clic fuera (backdrop transparente `no-drag`, que además
+anula la región de arrastre de la barra mientras está abierto: sin él, los clics en la barra no llegan
+al renderer; no mueve el foco), blur de la ventana o al elegir. Teclado: listener de `window` mientras
+está abierto (flechas con wrap, Home/End vía `menuNavIndex`); Enter/Espacio son la activación nativa
+del botón del ítem. **Foco tras elegir otra sección** (ratón o teclado): al contenido de la nueva —
+el `Editor` rich se autoenfoca al montar; el textarea raw/solo lectura lo enfoca un efecto sobre
+`section.id` (flag `focusContentRef`, caret al inicio). Elegir la sección actual no cambia nada y
+cierra como Escape (con teclado, foco al trigger: `click` con `detail` 0 = teclado). Al re-keyear el
+buffer raw se resetea también `rawComposingRef` (un textarea desmontado a mitad de una composición IME
+no dispara `compositionend`).
+
 ### Vista dividida por paneles (`lib/paneUtils.ts` + `notesStore`)
 El área del editor muestra uno o más **paneles** `{paneId, noteId, sectionId?}` (`openPanes` +
 `activePaneId`; `activeNoteId` = nota del panel activo y se deriva en cada cambio de layout con
