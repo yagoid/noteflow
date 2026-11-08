@@ -798,13 +798,18 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   títulos de columna. Los previews de sección (hover, vistas de grupo/nota) y el chat de IA lo
   muestran como un mini tablero de solo lectura.
 
-### Fragmentos (Snippets) — botón del toolbar
+### Fragmentos (Snippets) — botón del toolbar y menú `/`
 Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del momento.
 - **Botón partido** en la toolbar (icono de sello, tras el kanban): el clic principal inserta el
   **fragmento por defecto** (tooltip *Insert snippet: <nombre>*); el chevron abre la lista de todos
   (nombre + vista previa de una línea, ya con la fecha de ahora) y al final **Configure snippets…**.
   Sin fragmentos, el clic principal abre directamente la configuración. El editor no pierde la
   selección (lo seleccionado se sustituye). Solo en Modo markdown (en Modo texto no hay toolbar).
+- **También con `/`**: el menú de comandos lista los fragmentos tras los comandos integrados, bajo el
+  encabezado *Snippets* y con el icono de sello, con su vista previa de una línea. Se filtran
+  escribiendo parte del nombre (`/diar…`), y `/snippet` o `/fragmento` los muestra todos en cualquier
+  idioma. Funciona aunque el botón esté oculto del toolbar; los fragmentos vacíos no aparecen. Solo en
+  Modo markdown, como el resto de `/` (en Modo texto `/` es un carácter más).
 - Se inserta como **markdown**: encabezados, listas y checkboxes se renderizan; un fragmento de una
   línea sin sintaxis de bloque entra inline en el texto. En un bloque de código entra literal.
 - **Modal "Snippets"** (ventana dentro de la app, Escape cierra, autoguardado): lista a la izquierda

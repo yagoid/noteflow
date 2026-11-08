@@ -1831,7 +1831,10 @@ html[data-color-scheme="light"] .nsm-peek {
   border: 1px solid rgb(var(--text) / 0.15);
   background: rgb(var(--bg-1));
   box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
-  overflow: hidden;
+  /* The user's snippets can make it long: it scrolls (the selection follows). */
+  max-height: min(360px, 60vh);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .slash-menu-empty { padding: 8px 10px; font-size: 13px; color: rgb(var(--text-muted)); }
 .slash-menu-item {
@@ -1849,6 +1852,30 @@ html[data-color-scheme="light"] .nsm-peek {
 .slash-menu-item.is-selected { background: rgb(var(--text) / 0.08); }
 .slash-menu-item-title { font-size: 13px; color: rgb(var(--text)); }
 .slash-menu-item-desc { font-size: 11px; color: rgb(var(--text-muted)); }
+/* User snippets: a heading (not an item) after the commands, the toolbar's
+   Stamp icon, and one-line name + preview (user content, can be long). */
+.slash-menu-heading {
+  padding: 6px 9px 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgb(var(--text-muted));
+}
+.slash-menu-heading:not(:first-child) {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgb(var(--text) / 0.08);
+}
+.slash-menu-item--snippet { flex-direction: row; align-items: flex-start; gap: 8px; }
+.slash-menu-item-icon { flex-shrink: 0; margin-top: 3px; color: rgb(var(--text-muted)); }
+.slash-menu-item-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.slash-menu-item--snippet .slash-menu-item-title,
+.slash-menu-item--snippet .slash-menu-item-desc {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 
 /* ── Kanban board (KanbanBoardView.tsx) ──────────────────────────────────────
    Full bleed: the board ignores the readable column and cancels the editor's

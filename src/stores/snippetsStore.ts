@@ -3,10 +3,11 @@ import { nanoid } from 'nanoid'
 import type { Snippet } from '../types'
 import { applyPendingEdits, moveSnippet, setDefaultSnippet, type PendingSnippetEdits } from '../lib/snippets'
 
-// Editor snippets (toolbar "Snippets" button) — persisted to snippets.json in
-// the notes dir (IPC snippets:get/set, synced). Loaded lazily by the first
-// toolbar that mounts (main window, section windows), which also subscribes this
-// window to changes: `snippets-updated` (another window saved) and a path-less
+// Editor snippets (toolbar "Snippets" button and the "/" menu) — persisted to
+// snippets.json in the notes dir (IPC snippets:get/set, synced). Loaded lazily
+// by the first rich editor created in the window (SlashCommands' onCreate: main,
+// section and sticky windows) or the toolbar button, whichever comes first; that
+// first call also subscribes this window to changes: `snippets-updated` (another window saved) and a path-less
 // `notes-updated` (a pull may have brought a new snippets.json). Edits autosave:
 // structural changes write at once, typing in the modal is debounced. A reload
 // that lands while typed edits are unwritten takes the disk list and re-applies

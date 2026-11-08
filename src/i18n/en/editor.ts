@@ -135,6 +135,10 @@ export const editor = {
     convertToKanban: 'Convert task list to board',
     convertToKanbanDescription: 'Turn this task list into a kanban board',
     noCommands: 'No commands',
+    // Heading over the user's snippets in the menu.
+    snippetsHeading: 'Snippets',
+    // Description of a snippet entry with no previewable text.
+    snippet: 'Snippet',
   },
 
   // Section-link picker overlay.

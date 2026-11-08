@@ -12,10 +12,19 @@ import {
   topLevelTaskList,
   type KanbanDefaultColumns,
 } from './kanbanCommands'
+import { insertSnippet } from './snippetCommands'
+import { expandSnippet } from '../../lib/snippets'
+import { filterSlashItems, snippetSlashEntries } from '../../lib/slashItems'
+import { useSnippetsStore } from '../../stores/snippetsStore'
+import { useLanguageStore } from '../../stores/languageStore'
 
 export interface SlashCommandItem {
+  /** Stable React key — titles can repeat (two snippets with one name, or a snippet named like a command). */
+  id: string
   title: string
   description?: string
+  /** 'snippet' = one of the user's snippets (rendered with its icon, under a heading). Default: a command. */
+  kind?: 'command' | 'snippet'
   /** Extra (untranslated) words that also match the typed query. */
   keywords?: string[]
   // Runs after the typed `/query` range has been deleted.
@@ -31,6 +40,10 @@ export interface SlashCommandLabels {
   convertToKanbanDescription: string
   /** Column names of a new board (to do / in progress / done). */
   kanbanColumns: KanbanDefaultColumns
+  /** Title of a snippet without a name. */
+  snippetUntitled: string
+  /** Description of a snippet with no previewable line. */
+  snippetDescription: string
 }
 
 /**
@@ -47,6 +60,8 @@ export function getSlashCommands(t: Messages): SlashCommandLabels {
     convertToKanban: t.editor.slash.convertToKanban,
     convertToKanbanDescription: t.editor.slash.convertToKanbanDescription,
     kanbanColumns: kanbanDefaultColumns(t),
+    snippetUntitled: t.editor.snippets.untitled,
+    snippetDescription: t.editor.slash.snippet,
   }
 }
 
@@ -86,8 +101,17 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
         convertToKanban: 'Convert task list to board',
         convertToKanbanDescription: 'Turn this task list into a kanban board',
         kanbanColumns: ['To do', 'In progress', 'Done'],
+        snippetUntitled: 'Untitled snippet',
+        snippetDescription: 'Snippet',
       }),
     }
+  },
+
+  // The snippets are listed in the menu: load them (and follow external changes)
+  // with the editor, not only when the toolbar's snippets button mounts — that
+  // button can be hidden. Idempotent: the first call in the window wins.
+  onCreate() {
+    void useSnippetsStore.getState().ensureLoaded()
   },
 
   addProseMirrorPlugins() {
@@ -107,6 +131,7 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
           const labels = getLabels()
           const all: SlashCommandItem[] = [
             {
+              id: 'link-section',
               title: labels.linkSection,
               description: labels.linkSectionDescription,
               run: (editor) => onLinkSection(editor),
@@ -115,6 +140,7 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
           // Inside a top-level task list: offer to turn it into a board.
           if (topLevelTaskList(editor)) {
             all.push({
+              id: 'convert-to-kanban',
               title: labels.convertToKanban,
               description: labels.convertToKanbanDescription,
               keywords: ['kanban', 'board'],
@@ -122,16 +148,33 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
             })
           }
           all.push({
+            id: 'kanban',
             title: labels.kanban,
             description: labels.kanbanDescription,
             // `/kanban` and `/board` find it in any UI language.
             keywords: ['kanban', 'board'],
             run: (editor) => insertDefaultBoard(editor, labels.kanbanColumns),
           })
-          const q = query.trim().toLowerCase()
-          return q
-            ? all.filter((i) => i.title.toLowerCase().includes(q) || i.keywords?.some((k) => k.startsWith(q)))
-            : all
+          // The user's snippets, after the commands and in their configured
+          // order. Read fresh on every keystroke (the store follows edits made
+          // in the modal or another window); variables expand on insertion.
+          const snippetEntries = snippetSlashEntries(
+            useSnippetsStore.getState().snippets,
+            { untitled: labels.snippetUntitled, fallbackDescription: labels.snippetDescription },
+            new Date(),
+            useLanguageStore.getState().lang,
+          )
+          for (const entry of snippetEntries) {
+            all.push({
+              id: entry.id,
+              kind: 'snippet',
+              title: entry.title,
+              description: entry.description,
+              keywords: entry.keywords,
+              run: (editor) => insertSnippet(editor, expandSnippet(entry.snippet.content, new Date(), useLanguageStore.getState().lang)),
+            })
+          }
+          return filterSlashItems(all, query)
         },
         command: ({ editor, range, props }) => {
           editor.chain().focus().deleteRange(range).run()

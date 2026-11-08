@@ -115,6 +115,8 @@ export const editor = {
     convertToKanban: 'Convertir lista de tareas en tablero',
     convertToKanbanDescription: 'Convierte esta lista de tareas en un tablero kanban',
     noCommands: 'Sin comandos',
+    snippetsHeading: 'Fragmentos',
+    snippet: 'Fragmento',
   },
 
   sectionLink: {
