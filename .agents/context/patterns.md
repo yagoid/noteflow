@@ -1015,7 +1015,7 @@ de `src/lib/autoCloseBrackets.ts`; toda la lógica vive en el lib, sin DOM, para
   plugin de input rules se resetea y **Backspace ya no revierte la imagen** a texto (`undoInputRule`)
   en ese caso; `Ctrl+Z` sí.
 
-### Editor: fragmentos (botón partido del toolbar)
+### Editor: fragmentos (botón partido del toolbar + menú `/`)
 Contenido reutilizable que el usuario configura y se inserta en el cursor desde el toolbar
 (`Editor/SnippetsButton.tsx` + `SnippetsModal.tsx`; lógica pura en `lib/snippets.ts`, tests en
 `tests/lib/snippets.test.ts` y `tests/lib/snippetInsert.test.ts`). Persistencia en `snippets.json`
@@ -1042,6 +1042,20 @@ Contenido reutilizable que el usuario configura y se inserta en el cursor desde 
   añade un párrafo vacío final para que el caret quede debajo (p. ej. bajo el encabezado del diario).
   Dentro de un bloque de código entra como texto plano (misma regla que el pegado). El toolbar no existe
   en Modo texto (`isRawMode`) ni en solo lectura/stickies, así que no hay rama para el textarea crudo.
+- **También en el menú `/`** (`SlashCommands.ts`): tras los comandos integrados, bajo un encabezado
+  *Snippets* (no es item: ↑/↓ solo recorren `items`) y con el icono `Stamp` del toolbar, van los
+  fragmentos en el orden configurado. Lógica pura en `lib/slashItems.ts` (`filterSlashItems` = la regla
+  de filtro de siempre: subcadena del título o keyword que empieza por la consulta;
+  `snippetSlashEntries`), tests en `tests/lib/slashItems.test.ts`. Filtran por nombre (contenido del
+  usuario, sin traducir) y con las keywords sin traducir `snippets`/`fragmentos` (`/snippet`,
+  `/fragmento` listan todos en cualquier idioma). Los de contenido en blanco se omiten; sin nombre
+  muestran *Untitled snippet*. La descripción es `snippetPreviewLine` en el momento de abrir y la
+  inserción reexpande con `new Date()` y llama al mismo `insertSnippet` que el botón (por eso su tipo
+  `Editor` es el de `@tiptap/core`). La lista y el idioma se leen de los stores en cada pulsación, y la
+  extensión hace `ensureLoaded()` en su `onCreate`: el botón del toolbar es configurable y puede estar
+  oculto, así que no se depende de que monte. `SlashCommandItem.id` es la key de React (los títulos se
+  repiten: dos fragmentos con el mismo nombre, o uno llamado como un comando). El popup tiene
+  `max-height` con scroll y la selección se mantiene visible. Como todo `/`, solo en Modo markdown.
 - **Modal portalizado dentro del árbol del editor:** los eventos React burbujean igualmente hasta
   `Editor.tsx`/`NoteEditor.tsx` (Enter tras un `<hr>`, pegado de imágenes, atajos del panel), así que la
   raíz del modal para `keydown`/`paste`/`drop` y lleva `OWN_KEYS_PROPS`; Escape va por un listener de
@@ -1060,9 +1074,10 @@ Contenido reutilizable que el usuario configura y se inserta en el cursor desde 
   subiría) los cambios de la otra ventana o del remoto. Cada patch se borra de `pendingEdits` solo cuando
   su escritura aterriza, y una lectura que se solapa con una escritura propia (podría ser anterior a ella)
   se descarta y se repite al terminar las escrituras. `snippets:set` en main ignora un payload que no sea
-  array (no vacía el fichero). El store se carga perezosamente
-  desde el primer toolbar que se monta (ventana principal y ventanas de sección) y se suscribe a
-  `snippets-updated` y al `notes-updated` sin ruta de los pulls.
+  array (no vacía el fichero). El store se carga perezosamente con el primer editor rich que se crea
+  en la ventana (`onCreate` de `SlashCommands`: ventana principal, de sección y stickies) o con el botón
+  del toolbar, lo que llegue antes, y esa primera carga se suscribe a `snippets-updated` y al
+  `notes-updated` sin ruta de los pulls.
 
 ### Búsqueda en nota (Ctrl+F): el match activo se centra
 Al escribir la consulta / cambiar mayúsculas (si hay match) y en cada next/prev, el match activo queda

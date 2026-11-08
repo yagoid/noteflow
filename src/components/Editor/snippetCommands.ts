@@ -1,4 +1,4 @@
-import type { Editor } from '@tiptap/react'
+import type { Editor } from '@tiptap/core'
 import { DOMParser as ProseMirrorDOMParser, Fragment, Slice, type Schema } from '@tiptap/pm/model'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { isInlineSnippet } from '../../lib/snippets'
