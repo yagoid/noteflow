@@ -116,8 +116,8 @@ export function PlacesRail({
           className={`cv-rg${group.archived ? ' is-archived' : ''}`}
           style={{ '--g': colorChannels(group.color) } as CSSProperties}
         >
-          {/* The group and its folders, under the guide; "+ Folder" stays outside it. */}
-          <div className={`cv-rg-in${folders.length > 0 ? ' has-folders' : ''}`}>
+          {/* The group and its folders; the guide (on `.cv-rg`) also runs past "+ Folder". */}
+          <div className="cv-rg-in">
             {edit?.kind === 'rename-group' && edit.id === group.id ? (
               <InlineName
                 key={`rename-${group.id}`}

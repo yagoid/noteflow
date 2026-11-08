@@ -19,6 +19,11 @@ export const contentView = {
   newNoteIn: 'Nueva nota en {name}',
   moreActions: 'Más acciones',
   showArchived: 'Mostrar archivadas',
+  sortLabel: 'Orden de las notas',
+  sortByDate: 'Por fecha',
+  sortByDateTooltip: 'Las últimas editadas primero, en bloques por fecha',
+  sortAsSidebar: 'Como en la sidebar',
+  sortAsSidebarTooltip: 'El orden y las carpetas de la barra lateral',
 
   // ── Notas por fecha ─────────────────────────────────────────────────────────
   listLabel: 'Notas: ↑ ↓ nota, ← → sección, Intro abre en el editor',

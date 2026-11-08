@@ -12,20 +12,21 @@ import { SelectionBar } from '../SelectionBar'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { formatNoteDate } from '../Sidebar/rowText'
 import { PlacesRail, type RailEdit, type RailGroup } from './PlacesRail'
-import { NoteTimeline, type TimelineEntry, type TimelineHandlers } from './NoteTimeline'
+import { NoteTimeline, type TimeKind, type TimelineEntry, type TimelineHandlers } from './NoteTimeline'
 import { SectionPreviewPane } from './SectionPreviewPane'
 import {
-  ALL_PLACE, COLUMN_LIMITS, DEFAULT_COLUMN_WIDTHS, alreadyInPlace, buildPlaceContext, clampPreviewWidth, clampRailWidth, folderPlace,
-  groupByDateBlock, groupPlace, noteInPlace, noteLocation, noteShown, noteTime, parseColumnWidths, parsePlace,
-  placeExists, placeGroupId, placeMovePatch, reconcileSelection, routeMode, selectionRange, sortByUpdatedDesc,
-  stepNote, stepSection, timeLabelKind,
-  type ColumnWidths, type ContentPlace, type ContentSelection,
+  ALL_PLACE, COLUMN_LIMITS, CONTENT_SORTS, DEFAULT_COLUMN_WIDTHS, DEFAULT_CONTENT_SORT, alreadyInPlace, buildNoteList,
+  buildPlaceContext, clampPreviewWidth, clampRailWidth, folderPlace, groupPlace, noteInPlace, noteListOrder,
+  noteLocation, noteShown, noteTime, parseColumnWidths, parseContentSort, parsePlace, placeExists, placeGroupId,
+  placeMovePatch, reconcileSelection, selectionRange, sortByUpdatedDesc, stepNote, stepSection, timeLabelKind,
+  type ColumnWidths, type ContentPlace, type ContentSelection, type ContentSort, type NoteListSection,
 } from '../../lib/contentView'
 import { parseSearchQuery, noteMatchesQuery } from '../../lib/searchUtils'
 import { colorChannels, NEW_GROUP_COLOR } from '../../lib/tagColors'
 import { ownsKeys } from '../../lib/keyScope'
 import { useT } from '../../i18n/useT'
 import { plural, tf } from '../../i18n/format'
+import type { Note } from '../../types'
 
 interface ContentViewProps {
   place: ContentPlace
@@ -35,6 +36,8 @@ interface ContentViewProps {
 const NOTE_DRAG_TYPE = 'application/x-noteflow-note-id'
 // Hand-set widths of the places rail and the preview (lib/contentView.ts parseColumnWidths).
 const COLUMN_WIDTHS_KEY = 'noteflow:content-view-widths'
+// Order of column 2: by date / as in the sidebar (lib/contentView.ts parseContentSort).
+const SORT_KEY = 'noteflow:content-view-sort'
 const EMPTY_IDS: ReadonlySet<string> = new Set()
 const hasOpenModal = () => document.querySelector('[aria-modal="true"]') !== null
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
@@ -51,9 +54,21 @@ function storeColumnWidths(widths: ColumnWidths): void {
   try { localStorage.setItem(COLUMN_WIDTHS_KEY, JSON.stringify(widths)) } catch { /* storage unavailable */ }
 }
 
+function readSort(): ContentSort {
+  try {
+    return parseContentSort(localStorage.getItem(SORT_KEY))
+  } catch {
+    return DEFAULT_CONTENT_SORT
+  }
+}
+
+function storeSort(sort: ContentSort): void {
+  try { localStorage.setItem(SORT_KEY, sort) } catch { /* storage unavailable */ }
+}
+
 /**
- * The unified content view (replaces the editor area): places rail, the place's notes by
- * date with their sections always visible, and the selected section's preview. Opened with
+ * The unified content view (replaces the editor area): places rail, the place's notes (by
+ * date or as in the sidebar) with their sections always visible, and the selected section's preview. Opened with
  * a place from the sidebar ("All content", a group's name), the brain and the group menu.
  * See "Vista de contenido unificada" in .agents/context/patterns.md.
  */
@@ -69,6 +84,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   const archiveNote = useNotesStore((s) => s.archiveNote)
   const groups = useGroupsStore((s) => s.groups)
   const folders = useGroupsStore((s) => s.folders)
+  const noteOrder = useGroupsStore((s) => s.noteOrder)
   const createFolder = useGroupsStore((s) => s.createFolder)
   const createGroup = useGroupsStore((s) => s.createGroup)
   const renameGroup = useGroupsStore((s) => s.renameGroup)
@@ -94,6 +110,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   const [groupMenu, setGroupMenu] = useState<GroupContextMenuRequest | null>(null)
   const [folderMenu, setFolderMenu] = useState<FolderContextMenuRequest | null>(null)
   const [columnWidths, setColumnWidths] = useState<ColumnWidths>(readColumnWidths)
+  const [sort, setSort] = useState<ContentSort>(readSort)
   const [resizing, setResizing] = useState(false)
   // Day boundaries of the date blocks: refreshed when the date changes, not every render.
   const [now, setNow] = useState(() => Date.now())
@@ -118,10 +135,17 @@ export function ContentView({ place, onClose }: ContentViewProps) {
     () => (hasQuery ? placeNotes.filter((n) => noteMatchesQuery(n, parsed)) : placeNotes),
     [placeNotes, hasQuery, parsed],
   )
-  const listedIds = useMemo(() => listed.map((n) => n.id), [listed])
+  // Column 2's sections in the chosen order; arrows, shift-click and the default selection
+  // follow the same visual order (`noteListOrder`).
+  const noteList = useMemo(
+    () => buildNoteList(listed, { sort, place, groups, folders, noteOrder, now }),
+    [listed, sort, place, groups, folders, noteOrder, now],
+  )
+  const ordered = useMemo(() => noteListOrder(noteList), [noteList])
+  const listedIds = useMemo(() => ordered.map((n) => n.id), [ordered])
   const selectable = useMemo(
-    () => listed.map((n) => ({ id: n.id, sectionIds: n.sections.map((s) => s.id) })),
-    [listed],
+    () => ordered.map((n) => ({ id: n.id, sectionIds: n.sections.map((s) => s.id) })),
+    [ordered],
   )
 
   // ── Selection ────────────────────────────────────────────────────────────────
@@ -172,6 +196,24 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   useEffect(() => {
     listRef.current?.scrollTo({ top: 0 })
   }, [place])
+
+  // A new order keeps the selected note in view (it moves with the order); none → the top.
+  const sortScrollRef = useRef(false)
+  const changeSort = (next: ContentSort) => {
+    if (next === sort) return
+    setSort(next)
+    storeSort(next)
+    sortScrollRef.current = true
+  }
+  useLayoutEffect(() => {
+    if (!sortScrollRef.current) return
+    sortScrollRef.current = false
+    const row = currentNoteId
+      ? listRef.current?.querySelector<HTMLElement>(`[data-cv-row="${CSS.escape(currentNoteId)}"]`)
+      : null
+    if (row) row.scrollIntoView({ block: 'nearest' })
+    else listRef.current?.scrollTo({ top: 0 })
+  }, [sort, currentNoteId])
 
   // The list takes the keys when the view opens.
   useEffect(() => { listRef.current?.focus({ preventScroll: true }) }, [])
@@ -559,24 +601,31 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   }, [shownNotes, ctx, place, groups, folders, showArchived])
 
   // ── Timeline entries ─────────────────────────────────────────────────────────
-  const blocks = useMemo(() => {
-    const entries = listed.map((note) => {
+  // Time column: by date, as its block prints it; as in the sidebar, the sidebar item's date.
+  const sections = useMemo((): NoteListSection<TimelineEntry>[] => {
+    const toEntry = (note: Note, timeKind: TimeKind): TimelineEntry => {
       const loc = noteLocation(note, ctx)
       const group = loc.groupId ? ctx.groupsById.get(loc.groupId) ?? null : null
       const folder = loc.folderId ? ctx.foldersById.get(loc.folderId) ?? null : null
       return {
         note,
+        time: noteTime(note),
+        timeKind,
         groupName: group?.name ?? null,
         groupChannels: group ? colorChannels(group.color) : null,
         folderName: folder?.name ?? null,
         folderIcon: folder?.icon,
       }
+    }
+    return noteList.map((s) => {
+      const timeKind: TimeKind = s.heading?.kind === 'date' ? timeLabelKind(s.heading.block) : 'relative'
+      return {
+        ...s,
+        items: s.items.map((n) => toEntry(n, timeKind)),
+        folders: s.folders.map((f) => ({ folder: f.folder, items: f.items.map((n) => toEntry(n, timeKind)) })),
+      }
     })
-    return groupByDateBlock(entries, (e) => noteTime(e.note), now).map(({ block, items }) => ({
-      block,
-      items: items.map((e): TimelineEntry => ({ ...e, time: noteTime(e.note), timeKind: timeLabelKind(block) })),
-    }))
-  }, [listed, ctx, now])
+  }, [noteList, ctx])
 
   // ── Header ───────────────────────────────────────────────────────────────────
   const parsedPlace = parsePlace(place)
@@ -630,7 +679,10 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   const previewFolder = previewLoc?.folderId ? ctx.foldersById.get(previewLoc.folderId) ?? null : null
 
   const emptyLabel = listed.length > 0 ? null : hasQuery ? t.contentView.noMatches : t.contentView.emptyPlace
-  const route = routeMode(place)
+  const sortLabels: Record<ContentSort, { label: string; tooltip: string }> = {
+    date: { label: t.contentView.sortByDate, tooltip: t.contentView.sortByDateTooltip },
+    sidebar: { label: t.contentView.sortAsSidebar, tooltip: t.contentView.sortAsSidebarTooltip },
+  }
 
   return (
     <div
@@ -684,6 +736,21 @@ export function ContentView({ place, onClose }: ContentViewProps) {
               }}
             />
           </label>
+          <div className="cv-seg" role="radiogroup" aria-label={t.contentView.sortLabel}>
+            {CONTENT_SORTS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="radio"
+                aria-checked={sort === option}
+                className={`cv-seg-opt${sort === option ? ' is-on' : ''}`}
+                title={sortLabels[option].tooltip}
+                onClick={() => changeSort(option)}
+              >
+                {sortLabels[option].label}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             className="cv-btn"
@@ -764,8 +831,8 @@ export function ContentView({ place, onClose }: ContentViewProps) {
         <div className="cv-listwrap">
           <NoteTimeline
             listRef={listRef}
-            blocks={blocks}
-            route={route}
+            sections={sections}
+            sort={sort}
             selectedNoteId={previewVisible ? currentNoteId : null}
             selectedSectionId={previewVisible ? currentSectionId : null}
             checkedIds={visibleChecked}

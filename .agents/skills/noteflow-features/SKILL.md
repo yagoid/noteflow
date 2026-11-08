@@ -381,8 +381,8 @@ las antiguas vista de grupo y "All content".
 - Botón-icono **"View all content"** (`LayoutGrid`) de la fila del buscador del sidebar → lugar *All*.
 - Click en el **nombre de un grupo** (sidebar, cerebro) o **"View group"** en su menú contextual → ese
   grupo como lugar.
-- Al entrar se elige la **primera nota** de la lista (la última editada) y su **primera sección**, con la
-  vista previa abierta.
+- Al entrar se elige la **primera nota** de la lista (la última editada, o la primera del sidebar con
+  "As in the sidebar") y su **primera sección**, con la vista previa abierta.
 
 **Cómo salir:** `Esc` (cuando ya no queda nada que cerrar, ver Teclado), abrir una nota en el editor
 (doble clic, `Intro` o "Open in the editor"), crear una nota, o seleccionar cualquier nota en el sidebar.
@@ -390,7 +390,9 @@ las antiguas vista de grupo y "All content".
 **Cabecera:** icono del lugar (pestaña grande del grupo con su esquina plegada de color; rejilla para
 *All*; estrella para *Favorites*), la ruta si es carpeta ("Trabajo /"), el nombre y el resumen
 `N notes · M folders · last edited X`. A la derecha: **buscador** local ("Search note or section", admite
-`#sección`; no toca la búsqueda del sidebar; `Esc` lo vacía y `↓` baja a la lista), **"+ Note"** (crea la
+`#sección`; no toca la búsqueda del sidebar; `Esc` lo vacía y `↓` baja a la lista), el **selector de
+orden** de la lista (control segmentado pequeño **"By date"** / **"As in the sidebar"**, ver Columna 2; se
+recuerda entre sesiones), **"+ Note"** (crea la
 nota en el grupo/carpeta del lugar; en *All*, *Favorites* y *Ungrouped*, sin grupo) y **⋯** con el
 interruptor **"Show archived"** (de la vista, apagado al abrir): con él se listan también las notas
 archivadas (icono de archivo, algo atenuadas) y los grupos archivados en la columna de lugares.
@@ -405,10 +407,10 @@ lista. Al volver a ensanchar la ventana cada columna recupera su ancho. Los anch
 sesiones.
 
 **Columna 1 · Lugares:** *All*, *Favorites*, la etiqueta "Places", cada grupo (pestaña + nombre +
-contador) con sus carpetas debajo, sangradas bajo la guía vertical del color del grupo (que termina en
-la última carpeta), y al final *Ungrouped*. El lugar elegido lleva fondo neutro y una barra de 3 px de su
+contador) con sus carpetas debajo, sangradas bajo la guía vertical del color del grupo (que baja hasta
+"+ Folder"), y al final *Ungrouped*. El lugar elegido lleva fondo neutro y una barra de 3 px de su
 color a la izquierda.
-- **"+ Folder"** al final de cada grupo (fuera de la guía) y **"+ Group"** tras los grupos, ambos más
+- **"+ Folder"** al final de cada grupo (junto a la guía) y **"+ Group"** tras los grupos, ambos más
   apagados que los nombres de carpeta: se convierten en un campo; `Intro` (o salir con texto) crea y abre
   el lugar nuevo; `Esc` o salir vacío cancela.
 - **Clic derecho** en un grupo o una carpeta → **el mismo menú que en el sidebar** (sin "View group",
@@ -418,9 +420,19 @@ color a la izquierda.
 - **Arrastrar** una nota (o la selección múltiple) desde la lista hasta un grupo, una carpeta o
   *Ungrouped* la mueve; el destino se resalta. También acepta notas arrastradas desde el sidebar.
 
-**Columna 2 · Notas por fecha:** las del lugar, de la más reciente a la más antigua, en bloques con
-cabecera fija y contador: **Today**, **Yesterday**, **This week**, **Last 30 days**, **Earlier**.
-- Cada fila: la hora a la izquierda (`HH:mm` hoy y ayer, día de la semana esta semana, `d MMM` antes),
+**Columna 2 · Notas:** las del lugar, en uno de dos órdenes (selector de la cabecera):
+- **By date** (por defecto): de la más reciente a la más antigua, en bloques con cabecera fija y
+  contador: **Today**, **Yesterday**, **This week**, **Last 30 days**, **Earlier**.
+- **As in the sidebar**: el mismo orden y agrupación que el sidebar (incluido el orden manual por
+  arrastre). En un **grupo**: primero sus notas sueltas y luego cada carpeta con su cabecera fija (icono +
+  nombre + contador). En una **carpeta**, *Favorites* o *Ungrouped*: sus notas en el orden del sidebar,
+  sin cabeceras. En **All**: una cabecera por grupo (pestaña del color + nombre + contador), las carpetas
+  como subcabeceras más pequeñas y sangradas que se quedan fijas bajo la del grupo, y al final
+  **Ungrouped**; los grupos archivados solo con "Show archived". La hora muestra la fecha del item del
+  sidebar (`14:32`, "Yesterday", `Oct 28`) y la ruta no repite lo que dicen las cabeceras. Las cabeceras
+  que una búsqueda deja vacías desaparecen. Las flechas, `Mayús+clic` y la nota elegida al entrar siguen
+  el orden que se ve.
+- Cada fila: la hora a la izquierda (por fecha: `HH:mm` hoy y ayer, día de la semana esta semana, `d MMM` antes),
   el título (candado si está cifrada) y debajo la ruta, sin lo que ya dice el lugar (en *All* /
   *Favorites* / *Ungrouped*: pestaña + "Grupo / Carpeta"; en un grupo: la carpeta o "In the group"; en
   una carpeta: nada). A la derecha, la línea de colores de las secciones del sidebar, **solo
@@ -1110,8 +1122,9 @@ cada respuesta). Sin IA configurada, ofrece ir a **Ajustes → IA**.
 - **What's new / Tutorial** abre el tour completo de novedades (ver "Tour What's new").
 
 ### Fechas
-- No hay filtro de fecha ni calendario: la **vista de contenido** agrupa las notas en bloques por fecha
-  (Today, Yesterday, This week, Last 30 days, Earlier). El sidebar tampoco tiene filtro de fecha (solo
+- No hay filtro de fecha ni calendario: la **vista de contenido**, en su orden por defecto («By date»),
+  agrupa las notas en bloques por fecha (Today, Yesterday, This week, Last 30 days, Earlier); el selector
+  de la cabecera permite verlas «As in the sidebar», por grupos y carpetas. El sidebar tampoco tiene filtro de fecha (solo
   búsqueda, tags y archived).
 
 ### Filtros por tags

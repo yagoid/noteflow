@@ -4,7 +4,9 @@ import {
   dateBlock, folderPlace, groupByDateBlock, groupPlace, noteInPlace,
   noteLocation, noteShown, parseColumnWidths, parsePlace, previewFloor, placeExists, placeGroupId, placeMovePatch, reconcileSelection,
   routeMode, selectionRange, sortByUpdatedDesc, stepNote, stepSection, timeLabelKind,
+  DEFAULT_CONTENT_SORT, buildNoteList, noteListOrder, parseContentSort, type ContentPlace,
 } from '../../src/lib/contentView'
+import { buildSidebarItems, compareSidebarNotes } from '../../src/lib/sidebarGroups'
 import type { NoteFolder, NoteGroup } from '../../src/types'
 
 const groups: NoteGroup[] = [
@@ -238,5 +240,127 @@ describe('column widths', () => {
     expect(clampPreviewWidth(300, { viewWidth: 400, railWidth: 180 })).toBe(200)
     expect(previewFloor(400)).toBe(200)
     expect(previewFloor(1200)).toBe(COLUMN_LIMITS.previewMin)
+  })
+})
+
+describe('list order', () => {
+  const now = new Date(2026, 10, 7, 19, 0).getTime()
+  const sGroups: NoteGroup[] = [
+    { id: 'b', name: 'B', color: '--cyan', order: 1 },
+    { id: 'a', name: 'A', color: '--accent', order: 0 },
+    { id: 'z', name: 'Z', color: '--red', order: 2, archived: true },
+  ]
+  const sFolders: NoteFolder[] = [
+    { id: 'f2', name: 'F2', groupId: 'a', order: 1 },
+    { id: 'f1', name: 'F1', groupId: 'a', order: 0 },
+    { id: 'empty', name: 'Empty', groupId: 'a', order: 2 },
+  ]
+  // `created` decides the sidebar's base order (newest first); `updated`, the date blocks.
+  type L = { id: string; group?: string; folder?: string; favorited?: boolean; created: string; updated: string }
+  const mk = (id: string, day: number, extra: Partial<L> = {}): L => {
+    const iso = new Date(2026, 10, day, 12).toISOString()
+    return { id, created: iso, updated: iso, ...extra }
+  }
+  const notes: L[] = [
+    mk('a-loose-old', 1, { group: 'a' }),
+    mk('a-loose-new', 5, { group: 'a' }),
+    mk('f1-x', 2, { group: 'a', folder: 'f1' }),
+    mk('f2-x', 3, { group: 'a', folder: 'f2', favorited: true }),
+    mk('b-x', 4, { group: 'b', favorited: true }),
+    mk('z-x', 4, { group: 'z' }),
+    mk('loose-1', 6),
+    mk('loose-2', 7, { group: 'gone' }), // stale group → ungrouped
+  ]
+  const opts = (place: ContentPlace, noteOrder: Record<string, string[]> = {}) =>
+    ({ sort: 'sidebar' as const, place, groups: sGroups, folders: sFolders, noteOrder, now })
+  const ids = <T extends { id: string }>(list: readonly T[]) => list.map((n) => n.id)
+
+  it('reads the stored order, defaulting to by date', () => {
+    expect(parseContentSort('sidebar')).toBe('sidebar')
+    expect(parseContentSort('date')).toBe('date')
+    expect(parseContentSort(null)).toBe(DEFAULT_CONTENT_SORT)
+    expect(parseContentSort('bogus')).toBe('date')
+  })
+
+  it('by date: newest edited first in date blocks, with the place route', () => {
+    const list = buildNoteList(notes, { ...opts(groupPlace('a')), sort: 'date' })
+    expect(list.map((s) => s.heading)).toEqual([
+      { kind: 'date', block: 'today' },
+      { kind: 'date', block: 'yesterday' },
+      { kind: 'date', block: 'week' },
+    ])
+    expect(list.every((s) => s.route === 'folder' && s.folders.length === 0)).toBe(true)
+    expect(ids(noteListOrder(list))).toEqual(['loose-2', 'loose-1', 'a-loose-new', 'b-x', 'z-x', 'f2-x', 'f1-x', 'a-loose-old'])
+  })
+
+  it('a group: its loose notes without a header, then each non-empty folder in sidebar order', () => {
+    const inA = notes.filter((n) => n.group === 'a')
+    const list = buildNoteList(inA, opts(groupPlace('a')))
+    expect(list.map((s) => s.key)).toEqual(['loose:a', 'folder:f1', 'folder:f2'])
+    expect(list[0].heading).toBeNull()
+    expect(list[0].route).toBe('folder')
+    expect(list[1].heading).toEqual({ kind: 'folder', folder: sFolders[1] })
+    expect(list[1].route).toBe('none')
+    expect(ids(noteListOrder(list))).toEqual(['a-loose-new', 'a-loose-old', 'f1-x', 'f2-x'])
+  })
+
+  it('follows the manual sidebar order (noteOrder), unordered notes after', () => {
+    const inA = notes.filter((n) => n.group === 'a' && !n.folder)
+    const list = buildNoteList(inA, opts(groupPlace('a'), { 'group:a': ['a-loose-old'] }))
+    expect(ids(noteListOrder(list))).toEqual(['a-loose-old', 'a-loose-new'])
+  })
+
+  it('a folder: its notes without headers', () => {
+    const list = buildNoteList(notes.filter((n) => n.folder === 'f1'), opts(folderPlace('f1')))
+    expect(list).toHaveLength(1)
+    expect(list[0].heading).toBeNull()
+    expect(list[0].route).toBe('none')
+    expect(ids(list[0].items)).toEqual(['f1-x'])
+  })
+
+  it('favorites and ungrouped: the sidebar order of those sections', () => {
+    const favs = notes.filter((n) => n.favorited)
+    expect(ids(noteListOrder(buildNoteList(favs, opts('fav'))))).toEqual(['b-x', 'f2-x'])
+    expect(ids(noteListOrder(buildNoteList(favs, opts('fav', { favorites: ['f2-x'] }))))).toEqual(['f2-x', 'b-x'])
+    const loose = notes.filter((n) => n.id.startsWith('loose'))
+    const list = buildNoteList(loose, opts('none', { ungrouped: ['loose-1'] }))
+    expect(list[0].heading).toBeNull()
+    expect(list[0].route).toBe('full')
+    expect(ids(noteListOrder(list))).toEqual(['loose-1', 'loose-2'])
+  })
+
+  it('everything: a header per group (folders as sub-sections, archived last), then Ungrouped', () => {
+    const list = buildNoteList(notes, opts('all'))
+    expect(list.map((s) => s.key)).toEqual(['group:a', 'group:b', 'group:z', 'ungrouped'])
+    const a = list[0]
+    expect(a.heading).toEqual({ kind: 'group', group: sGroups[1] })
+    expect(a.route).toBe('none')
+    expect(ids(a.items)).toEqual(['a-loose-new', 'a-loose-old'])
+    // The empty folder is left out.
+    expect(a.folders.map((f) => f.folder.id)).toEqual(['f1', 'f2'])
+    expect(a.count).toBe(4)
+    expect(list[3].heading).toEqual({ kind: 'ungrouped' })
+    expect(ids(noteListOrder(list))).toEqual([
+      'a-loose-new', 'a-loose-old', 'f1-x', 'f2-x', 'b-x', 'z-x', 'loose-2', 'loose-1',
+    ])
+  })
+
+  it('everything: groups and folders without listed notes (search, archived) drop their header', () => {
+    const list = buildNoteList(notes.filter((n) => n.id === 'f2-x' || n.id === 'loose-1'), opts('all'))
+    expect(list.map((s) => s.key)).toEqual(['group:a', 'ungrouped'])
+    expect(list[0].items).toEqual([])
+    expect(list[0].folders.map((f) => f.folder.id)).toEqual(['f2'])
+    // Only ungrouped notes left: no "Ungrouped" header over a lone section.
+    const only = buildNoteList(notes.filter((n) => n.id === 'loose-1'), opts('all'))
+    expect(only).toHaveLength(1)
+    expect(only[0].heading).toBeNull()
+    expect(buildNoteList([], opts('all'))).toEqual([])
+  })
+
+  it('the sidebar grouping keeps its base order and guards stale ids', () => {
+    const items = buildSidebarItems([...notes].sort(compareSidebarNotes), sGroups, sFolders)
+    expect(items.map((it) => (it.kind === 'group' ? `g:${it.group.id}` : it.note.id))).toEqual([
+      'g:a', 'g:b', 'g:z', 'loose-2', 'loose-1',
+    ])
   })
 })

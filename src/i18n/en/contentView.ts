@@ -22,6 +22,12 @@ export const contentView = {
   newNoteIn: 'New note in {name}',
   moreActions: 'More actions',
   showArchived: 'Show archived',
+  // Segmented control after the search: how column 2 orders the notes.
+  sortLabel: 'Order of the notes',
+  sortByDate: 'By date',
+  sortByDateTooltip: 'Newest edited first, in date blocks',
+  sortAsSidebar: 'As in the sidebar',
+  sortAsSidebarTooltip: 'The order and folders of the sidebar',
 
   // ── Timeline ────────────────────────────────────────────────────────────────
   listLabel: 'Notes: ↑ ↓ note, ← → section, Enter opens in the editor',

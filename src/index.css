@@ -3345,6 +3345,18 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
   border: 1.5px solid rgb(var(--text) / 0.4); color: transparent;
 }
 .cv-menu-check.is-on { border-color: rgb(var(--text)); background: rgb(var(--text)); color: rgb(var(--bg-editor)); }
+/* Order of column 2 (after the search): small segmented control, the chosen option raised. */
+.cv-seg {
+  display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 3px; border-radius: 8px;
+  background: rgb(var(--text) / 0.06);
+}
+.cv-seg-opt {
+  height: 24px; padding: 0 9px; border-radius: 6px; font-size: 11.5px; font-weight: 500; line-height: 24px;
+  color: rgb(var(--text-muted)); white-space: nowrap; cursor: pointer; transition: background-color 160ms, color 160ms;
+}
+.cv-seg-opt:hover { color: rgb(var(--text)); }
+.cv-seg-opt.is-on { background: rgb(var(--bg-editor)); color: rgb(var(--text)); box-shadow: 0 0 0 1px rgb(var(--border)); }
+.cv-seg-opt:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px rgb(var(--accent)); }
 
 /* Body: the three columns. A container, so the column widths follow the view's (cqw; the
    variables are used — and their cqw resolved — on the columns, inside this container).
@@ -3401,12 +3413,11 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
   padding: 14px 8px 6px; font-size: 10px; font-weight: 500; line-height: 1; letter-spacing: 0.14em;
   text-transform: uppercase; color: rgb(var(--text-muted) / 0.55);
 }
-/* A group and its folders under the group's guide (as the sidebar's `.sbg-in::before`). The
-   guide lives on `.cv-rg-in` (group + folders), so it ends on the last folder and leaves
-   "+ Folder" (and its input) out; a group without folders has none. */
+/* A group, its folders and its "+ Folder" under the group's guide (as the sidebar's
+   `.sbg-in::before`): the guide runs down the whole `.cv-rg`, to "+ Folder" (or its input). */
 .cv-rg { position: relative; display: flex; flex-direction: column; gap: 1px; }
 .cv-rg-in { position: relative; display: flex; flex-direction: column; gap: 1px; }
-.cv-rg-in.has-folders::before {
+.cv-rg::before {
   content: ''; position: absolute; left: 14.25px; top: 25px; bottom: 6px; width: 1.5px; border-radius: 1px;
   background: rgb(var(--g) / 0.3); pointer-events: none;
 }
@@ -3438,12 +3449,25 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
   font-size: 12.5px; font-weight: 600; line-height: 1; color: rgb(var(--text) / 0.9);
 }
 .cv-bh span { font-size: 10.5px; font-weight: 400; color: rgb(var(--text-muted) / 0.55); font-variant-numeric: tabular-nums; }
+.cv-bh-name { font-weight: inherit; }
+/* "As in the sidebar": group / folder headers carry their tab or icon. A group's header has a
+   fixed height so its folders' sub-headers (smaller, indented) stick right under it. */
+.cv-bh.has-icon { align-items: center; gap: 8px; }
+.cv-bh.has-icon .cv-bh-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-bh.is-group { height: 34px; padding-top: 8px; padding-bottom: 4px; }
+.cv-bh.is-sub {
+  top: 34px; z-index: 2; padding: 6px 10px 5px 31px; gap: 7px;
+  font-size: 11.5px; font-weight: 550; color: rgb(var(--text-muted));
+}
+.cv-sub .cv-row { scroll-margin-top: 64px; }
 .cv-row {
   position: relative; display: grid; grid-template-columns: 50px minmax(0, 1fr) minmax(70px, 140px);
   align-items: center; column-gap: 14px; padding: 8px 10px 10px; border-radius: 8px; cursor: pointer;
   scroll-margin-top: 40px; transition: background-color 160ms, opacity 220ms;
 }
 .cv-row + .cv-row { margin-top: 2px; }
+/* "As in the sidebar": the time column prints the sidebar item's date ("Yesterday", "Oct 28"). */
+.cv-list.is-sort-sidebar .cv-row { grid-template-columns: 62px minmax(0, 1fr) minmax(70px, 140px); }
 .cv-row:hover { background: rgb(var(--text) / 0.04); }
 .cv-row.is-checked { background: rgb(var(--text) / 0.05); }
 .cv-row.is-sel { background: rgb(var(--text) / 0.07); }
@@ -3550,5 +3574,5 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
 
 @media (prefers-reduced-motion: reduce) {
   .cv-head, .cv-body, .cv-menu, .cv-pv-card { animation: none; }
-  .cv-ri, .cv-row, .cv-time-label, .cv-tick, .cv-pv, .cv-pv-in, .cv-btn { transition: none !important; }
+  .cv-ri, .cv-row, .cv-time-label, .cv-tick, .cv-pv, .cv-pv-in, .cv-btn, .cv-seg-opt { transition: none !important; }
 }

@@ -1,9 +1,11 @@
 // Pure logic of the unified content view (components/ContentView/): the "place" the view
 // shows (everything, favorites, ungrouped, a group or a folder), which notes belong to it,
-// the date blocks of the timeline, the route each row prints, the default selection and the
-// shift-click range. Covered by tests/lib/contentView.test.ts. See "Vista de contenido
-// unificada" in .agents/context/patterns.md.
+// the date blocks of the timeline, the list's order (by date / as in the sidebar), the route
+// each row prints, the default selection and the shift-click range. Covered by
+// tests/lib/contentView.test.ts. See "Vista de contenido unificada" in .agents/context/patterns.md.
 import type { Note, NoteFolder, NoteGroup } from '../types'
+import { orderFavorites } from './miniSidebar'
+import { buildSidebarItems, compareSidebarNotes } from './sidebarGroups'
 
 // ── Places ────────────────────────────────────────────────────────────────────────────
 
@@ -37,7 +39,7 @@ export function parsePlace(place: ContentPlace): ParsedPlace {
 
 /**
  * Groups and folders as the view resolves a note's location. Same guard as the sidebar
- * (useSidebarGroups): a note's group only counts if it exists, and its folder only if it
+ * (`buildSidebarItems` in lib/sidebarGroups.ts): a note's group only counts if it exists, and its folder only if it
  * exists inside that group — stale ids fall back to "ungrouped" / "in the group".
  */
 export interface PlaceContext {
@@ -214,6 +216,146 @@ export function groupByDateBlock<T>(
   return DATE_BLOCKS.filter((b) => byBlock.has(b)).map((block) => ({ block, items: byBlock.get(block)! }))
 }
 
+// ── List order ────────────────────────────────────────────────────────────────────────
+
+/** How column 2 orders the notes: by edit date in blocks, or as the sidebar lists them. */
+export type ContentSort = 'date' | 'sidebar'
+
+export const CONTENT_SORTS: readonly ContentSort[] = ['date', 'sidebar']
+export const DEFAULT_CONTENT_SORT: ContentSort = 'date'
+
+/** Stored order (localStorage); anything else falls back to the default. */
+export function parseContentSort(raw: string | null): ContentSort {
+  return raw === 'sidebar' ? 'sidebar' : DEFAULT_CONTENT_SORT
+}
+
+/** The sticky header of a list section. */
+export type NoteListHeading =
+  | { kind: 'date'; block: DateBlock }
+  | { kind: 'group'; group: NoteGroup }
+  | { kind: 'folder'; folder: NoteFolder }
+  | { kind: 'ungrouped' }
+
+/** How much of a note's location its row prints (see `routeMode`). */
+export type RouteMode = 'full' | 'folder' | 'none'
+
+/** A folder nested under a group heading (sidebar order, everything). */
+export interface NoteListFolder<T> {
+  folder: NoteFolder
+  items: T[]
+}
+
+export interface NoteListSection<T> {
+  /** Stable React key. */
+  key: string
+  /** Null: no header (the place already says it). */
+  heading: NoteListHeading | null
+  /** Notes right under the heading (a group's loose notes). */
+  items: T[]
+  /** Sub-sections with their own, smaller header — only a group under "everything". */
+  folders: NoteListFolder<T>[]
+  /** Notes in the section, sub-sections included. */
+  count: number
+  /** What the rows of `items` print as their route (sub-section rows: nothing). */
+  route: RouteMode
+}
+
+/** What `buildNoteList` reads of a note (a `Note` satisfies it). */
+export type ListableNote = Pick<Note, 'id' | 'group' | 'folder' | 'created' | 'updated'>
+
+export interface NoteListOptions {
+  sort: ContentSort
+  place: ContentPlace
+  groups: readonly NoteGroup[]
+  folders: readonly NoteFolder[]
+  /** groupsStore `noteOrder`: the sidebar's manual order per context. */
+  noteOrder: Record<string, string[]>
+  /** For the date blocks. */
+  now: number
+}
+
+const section = <T>(
+  key: string,
+  heading: NoteListHeading | null,
+  items: T[],
+  route: RouteMode,
+  folders: NoteListFolder<T>[] = [],
+): NoteListSection<T> => ({
+  key, heading, items, folders, route,
+  count: items.length + folders.reduce((sum, f) => sum + f.items.length, 0),
+})
+
+/**
+ * Column 2's sections for the listed notes (place, archived and search filters already
+ * applied; any order). By date: newest edited first in date blocks. As in the sidebar: the
+ * sidebar's own order and grouping (`buildSidebarItems` over its base order, manual
+ * `noteOrder` included) for the place — a group: its loose notes (no header) then one
+ * section per folder; a folder / ungrouped: their notes; favorites: the sidebar's favorites
+ * order; everything: one section per group (loose notes + its folders as sub-sections), then
+ * "Ungrouped" (headed only below some group). Folders and groups without listed notes are left out.
+ */
+export function buildNoteList<N extends ListableNote>(
+  notes: readonly N[],
+  opts: NoteListOptions,
+): NoteListSection<N>[] {
+  const placeRoute = routeMode(opts.place)
+  if (opts.sort === 'date') {
+    return groupByDateBlock(sortByUpdatedDesc(notes), noteTime, opts.now)
+      .map(({ block, items }) => section(`date:${block}`, { kind: 'date', block }, items, placeRoute))
+  }
+
+  const base = [...notes].sort(compareSidebarNotes)
+  const p = parsePlace(opts.place)
+  if (p.kind === 'fav') {
+    const items = orderFavorites(base, opts.noteOrder['favorites'])
+    return items.length > 0 ? [section('fav', null, items, placeRoute)] : []
+  }
+
+  const items = buildSidebarItems(base, opts.groups, opts.folders, opts.noteOrder)
+  const ungrouped = items.flatMap((it) => (it.kind === 'note' ? [it.note] : []))
+  const groupItems = items.flatMap((it) => (it.kind === 'group' ? [it] : []))
+  const nonEmptyFolders = (it: (typeof groupItems)[number]) =>
+    it.folders.filter((f) => f.notes.length > 0).map((f) => ({ folder: f.folder, items: f.notes }))
+
+  if (p.kind === 'none') return ungrouped.length > 0 ? [section('none', null, ungrouped, placeRoute)] : []
+  if (p.kind === 'folder') {
+    const notesOf = groupItems.flatMap((it) => it.folders).find((f) => f.folder.id === p.id)?.notes ?? []
+    return notesOf.length > 0 ? [section(`folder:${p.id}`, null, notesOf, placeRoute)] : []
+  }
+  if (p.kind === 'group') {
+    const item = groupItems.find((it) => it.group.id === p.id)
+    if (!item) return []
+    const out: NoteListSection<N>[] = []
+    if (item.notes.length > 0) out.push(section(`loose:${p.id}`, null, item.notes, placeRoute))
+    for (const f of nonEmptyFolders(item)) {
+      out.push(section(`folder:${f.folder.id}`, { kind: 'folder', folder: f.folder }, f.items, 'none'))
+    }
+    return out
+  }
+
+  // Everything.
+  const out: NoteListSection<N>[] = []
+  for (const item of groupItems) {
+    const subs = nonEmptyFolders(item)
+    if (item.notes.length === 0 && subs.length === 0) continue
+    out.push(section(`group:${item.group.id}`, { kind: 'group', group: item.group }, item.notes, 'none', subs))
+  }
+  if (ungrouped.length > 0) {
+    out.push(section('ungrouped', out.length > 0 ? { kind: 'ungrouped' } : null, ungrouped, 'none'))
+  }
+  return out
+}
+
+/** The notes of the sections in visual order (arrow keys, shift-click range, default selection). */
+export function noteListOrder<T>(sections: readonly NoteListSection<T>[]): T[] {
+  const out: T[] = []
+  for (const s of sections) {
+    out.push(...s.items)
+    for (const f of s.folders) out.push(...f.items)
+  }
+  return out
+}
+
 // ── Row route ─────────────────────────────────────────────────────────────────────────
 
 /**
@@ -221,7 +363,7 @@ export function groupByDateBlock<T>(
  * everything / favorites / ungrouped → group tab + "Group / Folder"; a group → its folder (or
  * "in the group"); a folder → nothing.
  */
-export function routeMode(place: ContentPlace): 'full' | 'folder' | 'none' {
+export function routeMode(place: ContentPlace): RouteMode {
   const kind = parsePlace(place).kind
   if (kind === 'group') return 'folder'
   if (kind === 'folder') return 'none'

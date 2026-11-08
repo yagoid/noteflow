@@ -143,12 +143,12 @@ noteflow/
 │   │   │   │                            #   superpuesto + mini-vista); ver patterns.md "Sidebar flotante"
 │   │   │   ├── MiniSidebar.tsx          # Mini-vista sin texto del sidebar (modo flotante)
 │   │   │   ├── sidebarAnchor.ts         # Anclas de contenido (data-sidebar-anchor) que mide el panel flotante
-│   │   │   └── useSidebarGroups.ts      # Hook: agrupa/ordena notas por grupo→carpeta
+│   │   │   └── useSidebarGroups.ts      # Hook: useMemo de lib/sidebarGroups.ts (agrupa/ordena por grupo→carpeta)
 │   │   ├── ContentView/                 # Vista de contenido unificada (sustituye editor; patterns.md
 │   │   │   │                            #   "Vista de contenido unificada"; lógica pura en lib/contentView.ts)
-│   │   │   ├── ContentView.tsx          #   Cabecera + estado (lugar, selección, multiselección, teclado, anchos de columna)
+│   │   │   ├── ContentView.tsx          #   Cabecera (buscador + selector de orden, `noteflow:content-view-sort`) + estado (lugar, selección, multiselección, teclado, anchos de columna)
 │   │   │   ├── PlacesRail.tsx           #   Columna 1: All / Favorites / grupos+carpetas / Ungrouped (+ Folder / + Group, rename, drop)
-│   │   │   ├── NoteTimeline.tsx         #   Columna 2: notas por bloques de fecha con sus secciones (filas memo)
+│   │   │   ├── NoteTimeline.tsx         #   Columna 2: notas con sus secciones (filas memo): por bloques de fecha o como en la sidebar (cabeceras de grupo y subcabeceras de carpeta)
 │   │   │   └── SectionPreviewPane.tsx   #   Columna 3: contenido real de la sección (solo lectura) + "Open in the editor"
 │   │   ├── SelectionBar.tsx             # Barra flotante de acciones por lotes sobre notas (vista de contenido)
 │   │   ├── GroupContextMenu.tsx         # Menú contextual de grupo (sidebar + columna de lugares de la vista de contenido)
@@ -245,7 +245,10 @@ noteflow/
 │   │   ├── noteOverviewGrid.ts   # Vista de nota: columnas por ancho, filas justificadas, foco por flechas,
 │   │   │                         #   pie de tarjeta (tareas/palabras), recorte del preview — testeado
 │   │   ├── contentView.ts        # Vista de contenido: lugares (all/fav/none/g:/f:), filtro por lugar y archivadas,
-│   │   │                         #   bloques por fecha, ruta de la fila, selección por defecto y rango — testeado
+│   │   │                         #   bloques por fecha, orden "como en el sidebar" (buildNoteList), ruta de la fila,
+│   │   │                         #   selección por defecto y rango — testeado
+│   │   ├── sidebarGroups.ts      # Modelo de la lista del sidebar: orden base (created desc) + agrupado
+│   │   │                         #   grupo→carpeta con noteOrder (buildSidebarItems) — testeado vía contentView
 │   │   ├── searchUtils.ts        # Helpers de búsqueda (normalización, matching)
 │   │   ├── keyScope.ts           # OWN_KEYS_PROPS/ownsKeys: campos que los atajos globales (capture) respetan
 │   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 vars del tema o hex libre);

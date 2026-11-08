@@ -4,11 +4,11 @@ import { Archive, Check, Lock } from 'lucide-react'
 import { SectionCell } from '../Sidebar/SectionCell'
 import { FolderIcon } from '../Sidebar/NoteFolderHeader'
 import { useSectionInk } from '../Sidebar/useSectionInk'
-import { renderHighlightedText } from '../Sidebar/rowText'
+import { formatNoteDate, renderHighlightedText } from '../Sidebar/rowText'
 import { colorChannels, resolveGroupColor, type TagColorMap } from '../../lib/tagColors'
 import { sectionLineWeights } from '../../lib/sectionLine'
 import { sectionSearchMatch, type ParsedQuery } from '../../lib/searchUtils'
-import type { DateBlock, DateBlockGroup } from '../../lib/contentView'
+import type { ContentSort, DateBlock, NoteListHeading, NoteListSection, RouteMode } from '../../lib/contentView'
 import { useT } from '../../i18n/useT'
 import { formatDate } from '../../i18n/formatDate'
 import type { Messages } from '../../i18n'
@@ -17,9 +17,12 @@ import type { Note } from '../../types'
 /** A listed note with what its row prints, precomputed by the view (primitives only). */
 export interface TimelineEntry {
   note: Note
-  /** Edit time and how its block prints it (formatted in the row, so it follows the UI language). */
+  /**
+   * Edit time and how the row prints it (formatted in the row, so it follows the UI language):
+   * by its date block, or `relative` = the sidebar item's date (`formatNoteDate`).
+   */
   time: number
-  timeKind: 'time' | 'weekday' | 'date'
+  timeKind: TimeKind
   groupName: string | null
   /** `colorChannels` of the note's group (null: ungrouped). */
   groupChannels: string | null
@@ -27,6 +30,8 @@ export interface TimelineEntry {
   /** The folder's icon key (`NoteFolder.icon`; undefined: default glyph). */
   folderIcon: string | undefined
 }
+
+export type TimeKind = 'time' | 'weekday' | 'date' | 'relative'
 
 /** Stable callbacks shared by every row (the view forwards them to its live handlers). */
 export interface TimelineHandlers {
@@ -41,8 +46,8 @@ export interface TimelineHandlers {
 
 interface NoteTimelineProps {
   listRef: Ref<HTMLDivElement>
-  blocks: DateBlockGroup<TimelineEntry>[]
-  route: 'full' | 'folder' | 'none'
+  sections: NoteListSection<TimelineEntry>[]
+  sort: ContentSort
   selectedNoteId: string | null
   selectedSectionId: string | null
   checkedIds: ReadonlySet<string>
@@ -66,21 +71,79 @@ const blockLabel = (block: DateBlock, t: Messages): string => ({
   older: t.contentView.blockOlder,
 })[block]
 
+const headingLabel = (heading: NoteListHeading, t: Messages): string => {
+  if (heading.kind === 'date') return blockLabel(heading.block, t)
+  if (heading.kind === 'group') return heading.group.name
+  if (heading.kind === 'folder') return heading.folder.name
+  return t.contentView.ungrouped
+}
+
+/** A section's sticky header: label + count (a group: its tab first; a folder: its icon). */
+function SectionHeading({ heading, count, sub = false }: { heading: NoteListHeading; count: number; sub?: boolean }) {
+  const t = useT()
+  const Tag = sub ? 'h4' : 'h3'
+  return (
+    <Tag
+      className={[
+        'cv-bh',
+        (heading.kind === 'group' || heading.kind === 'folder') && 'has-icon',
+        heading.kind === 'group' && 'is-group',
+        sub && 'is-sub',
+      ].filter(Boolean).join(' ')}
+      aria-hidden
+    >
+      {heading.kind === 'group' && (
+        <i className="sbg-tab" style={{ '--g': colorChannels(heading.group.color) } as CSSProperties} />
+      )}
+      {heading.kind === 'folder' && <FolderIcon icon={heading.folder.icon} />}
+      <b className="cv-bh-name">{headingLabel(heading, t)}</b>
+      {heading.kind === 'group' && heading.group.archived && <Archive size={11} className="cv-arch" />}
+      <span>{count}</span>
+    </Tag>
+  )
+}
+
 /**
- * Column 2 of the content view: the place's notes, newest first, in date blocks with a
- * sticky header. Each row shows the time, the title, the route (minus what the place says),
- * the decorative section line and, underneath, every section as a cell. Styles: `.cv-*`.
+ * Column 2 of the content view: the place's notes in sections with a sticky header — by
+ * date (newest first, in date blocks) or as the sidebar lists them (groups / folders; see
+ * `buildNoteList`). Each row shows the time, the title, the route (minus what the place and
+ * the headers say), the decorative section line and, underneath, every section as a cell.
+ * Styles: `.cv-*`.
  */
 export function NoteTimeline({
-  listRef, blocks, route, selectedNoteId, selectedSectionId, checkedIds, draggingIds, parsed, highlight,
+  listRef, sections, sort, selectedNoteId, selectedSectionId, checkedIds, draggingIds, parsed, highlight,
   sectionTagColors, handlers, emptyLabel, onKeyDown,
 }: NoteTimelineProps) {
   const t = useT()
   const selectionActive = checkedIds.size > 0
+  const renderRow = (entry: TimelineEntry, route: RouteMode) => {
+    const selected = entry.note.id === selectedNoteId
+    return (
+      <TimelineRow
+        key={entry.note.id}
+        note={entry.note}
+        time={entry.time}
+        timeKind={entry.timeKind}
+        groupName={entry.groupName}
+        groupChannels={entry.groupChannels}
+        folderName={entry.folderName}
+        folderIcon={entry.folderIcon}
+        route={route}
+        selected={selected}
+        activeSectionId={selected ? selectedSectionId : null}
+        checked={checkedIds.has(entry.note.id)}
+        dragging={draggingIds.has(entry.note.id)}
+        parsed={parsed}
+        highlight={highlight}
+        sectionTagColors={sectionTagColors}
+        handlers={handlers}
+      />
+    )
+  }
   return (
     <div
       ref={listRef}
-      className={`cv-list cv-col${selectionActive ? ' is-selecting' : ''}`}
+      className={`cv-list cv-col${sort === 'sidebar' ? ' is-sort-sidebar' : ''}${selectionActive ? ' is-selecting' : ''}`}
       tabIndex={0}
       role="listbox"
       aria-label={t.contentView.listLabel}
@@ -90,36 +153,21 @@ export function NoteTimeline({
       {emptyLabel ? (
         <p className="cv-empty">{emptyLabel}</p>
       ) : (
-        blocks.map(({ block, items }) => (
-          <section key={block} className="cv-block" role="group" aria-label={blockLabel(block, t)}>
-            <h3 className="cv-bh" aria-hidden>
-              {blockLabel(block, t)}
-              <span>{items.length}</span>
-            </h3>
-            {items.map((entry) => {
-              const selected = entry.note.id === selectedNoteId
-              return (
-                <TimelineRow
-                  key={entry.note.id}
-                  note={entry.note}
-                  time={entry.time}
-                  timeKind={entry.timeKind}
-                  groupName={entry.groupName}
-                  groupChannels={entry.groupChannels}
-                  folderName={entry.folderName}
-                  folderIcon={entry.folderIcon}
-                  route={route}
-                  selected={selected}
-                  activeSectionId={selected ? selectedSectionId : null}
-                  checked={checkedIds.has(entry.note.id)}
-                  dragging={draggingIds.has(entry.note.id)}
-                  parsed={parsed}
-                  highlight={highlight}
-                  sectionTagColors={sectionTagColors}
-                  handlers={handlers}
-                />
-              )
-            })}
+        sections.map(({ key, heading, items, folders, count, route }) => (
+          <section
+            key={key}
+            className="cv-block"
+            role="group"
+            aria-label={heading ? headingLabel(heading, t) : undefined}
+          >
+            {heading && <SectionHeading heading={heading} count={count} />}
+            {items.map((entry) => renderRow(entry, route))}
+            {folders.map(({ folder, items: folderItems }) => (
+              <section key={folder.id} className="cv-sub" role="group" aria-label={folder.name}>
+                <SectionHeading heading={{ kind: 'folder', folder }} count={folderItems.length} sub />
+                {folderItems.map((entry) => renderRow(entry, 'none'))}
+              </section>
+            ))}
           </section>
         ))
       )}
@@ -130,7 +178,7 @@ export function NoteTimeline({
 // Flattened entry: the view rebuilds its entries whenever the list changes, so the row
 // compares the note and primitives, never the entry object.
 interface TimelineRowProps extends TimelineEntry {
-  route: 'full' | 'folder' | 'none'
+  route: RouteMode
   /** The selected note (with the preview open): highlighted, its section solid. */
   selected: boolean
   activeSectionId: string | null
@@ -207,7 +255,9 @@ const TimelineRow = memo(function TimelineRow({
       onContextMenu={(e) => handlers.contextMenu(e, note.id, null)}
     >
       <span className="cv-time">
-        <span className="cv-time-label">{formatDate(time, TIME_FORMATS[timeKind])}</span>
+        <span className="cv-time-label">
+          {timeKind === 'relative' ? formatNoteDate(note.updated, t) : formatDate(time, TIME_FORMATS[timeKind])}
+        </span>
         <span
           role="checkbox"
           aria-checked={checked}

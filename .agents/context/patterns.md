@@ -73,7 +73,7 @@ Dep nueva: `adm-zip` (JS puro, sin binario nativo → no toca `asarUnpack`/posti
 ### Vista de contenido unificada (`ContentView/`, `lib/contentView.ts`)
 Sustituye a la antigua vista de grupo (`GroupOverview`) y a "All content" (`AllContentOverview`), y con
 ellas a `OverviewNoteCard` (borrados). Una sola vista full-area con cabecera y tres columnas: **lugares**
-(`PlacesRail`), **notas por fecha** (`NoteTimeline`) y **vista previa** (`SectionPreviewPane`), montadas por
+(`PlacesRail`), **notas** (`NoteTimeline`; por fecha o como en el sidebar) y **vista previa** (`SectionPreviewPane`), montadas por
 `ContentView.tsx`; estilos `.cv-*` al final de `index.css`. Lógica pura en `src/lib/contentView.ts` con
 tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
 - **Estado (`notesStore`):** `contentPlace: ContentPlace | null` (null = cerrada) + `setContentView(place)`,
@@ -122,9 +122,8 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
   termina el arrastre por `buttons === 0`). Mientras se arrastra, `.cv-body.is-resizing` quita la transición
   de `width` de `.cv-pv` (la animación es solo de abrir/cerrar). Doble clic → ancho por defecto.
 - **Columna 1:** All, Favorites, "Places", cada grupo (pestaña `.sbg-tab` del sidebar + contador) con
-  sus carpetas (`FolderGlyph`) bajo una guía vertical del color (`.cv-rg-in.has-folders::before`, como
-  `.sbg-in::before`): `.cv-rg-in` envuelve solo grupo + carpetas, así la guía **termina en la última carpeta**
-  y deja fuera "+ Folder" y su input; un grupo sin carpetas no lleva guía. Luego "+ Group" y Ungrouped. Grupos
+  sus carpetas (`FolderGlyph`) bajo una guía vertical del color (`.cv-rg::before`, como
+  `.sbg-in::before`) que baja hasta "+ Folder" (o su input), también en un grupo sin carpetas. Luego "+ Group" y Ungrouped. Grupos
   archivados al final y atenuados (solo con el toggle o si son el lugar). Lugar elegido = fondo neutro + barra
   de 3 px del color (`::before`). "+ Folder" / "+ Group" van más apagados que los nombres de carpeta
   (`.cv-ri.cv-add`: `text-muted` al 45 %, `text` al hover; el selector de dos clases es necesario para ganar
@@ -147,7 +146,35 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
   Grupos, carpetas y Ungrouped son destino de soltar (`placeMovePatch` → `updateNote({group, folder})`,
   no-op con `alreadyInPlace`); aceptan también notas arrastradas desde el sidebar (`application/x-noteflow-note-id`).
   Con el sidebar flotante la columna reserva `--mini-sidebar-reserve` a la izquierda (mini-vista).
-- **Columna 2:** notas por `updated` desc (`sortByUpdatedDesc`) en bloques `dateBlock`: today, yesterday,
+- **Orden de la columna 2 (`ContentSort`: `'date'` | `'sidebar'`):** control segmentado `.cv-seg` en la
+  cabecera, en `.cv-tools` entre el buscador y "+ Note" (`role=radiogroup`, "By date" / "As in the sidebar").
+  Persistido en `localStorage` **`noteflow:content-view-sort`** (try/catch; `parseContentSort`, por defecto
+  `'date'`). `buildNoteList(listadas, {sort, place, groups, folders, noteOrder, now})` devuelve las secciones
+  (`NoteListSection`: `heading` | null, `items`, `folders` = subsecciones, `count`, `route`) y
+  `noteListOrder` las aplana: **ese orden plano** alimenta ↑/↓, el rango de Shift+clic, Ctrl/Cmd+A y la
+  selección por defecto (`reconcileSelection`). Las búsquedas filtran antes (`listed`), así que una cabecera
+  sin notas visibles no se pinta.
+  - **"As in the sidebar" reutiliza el modelo del sidebar**, no lo reimplementa: `lib/sidebarGroups.ts`
+    (`buildSidebarItems`, extraído de `useSidebarGroups`, que ahora es solo su `useMemo`; lo usan el sidebar,
+    el cerebro y esta vista) sobre el orden base del sidebar `compareSidebarNotes` (`created` desc, el mismo
+    `.sort` de `Sidebar.tsx`) con el orden manual `noteOrder` de `groupsStore` (`group:<id>`,
+    `folder:<id>`, `ungrouped`); favoritas con `orderFavorites` (`lib/miniSidebar.ts`, clave `favorites`).
+    Por lugar: **grupo** → sueltas sin cabecera (ruta `folder`: "In the group") y luego cada carpeta con
+    cabecera (icono + nombre + contador; ruta `none`), como el sidebar (sueltas antes que carpetas);
+    **carpeta / favoritas / sin grupo** → una sección sin cabecera con la ruta de `routeMode`; **todo** → una
+    sección por grupo (cabecera `.cv-bh.is-group`: pestaña `.sbg-tab` del color + nombre + contador, icono de
+    archivo si está archivado; los archivados al final y solo con "Show archived", porque `noteShown` ya
+    deja fuera sus notas) con sus carpetas como subcabeceras `.cv-bh.is-sub` (más pequeñas, sangradas y
+    sticky justo debajo: la del grupo mide 34 px fijos y la sub va en `top: 34px`; `.cv-sub .cv-row` sube el
+    `scroll-margin-top`), y al final "Ungrouped" (con cabecera solo si hay algún grupo encima, como la
+    etiqueta "notes" del sidebar). En "todo" las filas no repiten grupo ni carpeta (ruta `none`). Todo no
+    lista las favoritas aparte (no se duplican filas).
+  - **Columna de la hora** en este modo: `timeKind: 'relative'` → `formatNoteDate` (`Sidebar/rowText`, la
+    fecha del item del sidebar: `HH:mm` hoy, "Yesterday", `MMM d`), y `.cv-list.is-sort-sidebar` ensancha
+    la columna a 62 px para que quepa "Yesterday". Como en el sidebar, esa etiqueta no se refresca sola al
+    cambiar de día (la fila es `memo`).
+  - Al cambiar de orden la nota elegida se mantiene y se trae a la vista (`scrollIntoView nearest`).
+- **Columna 2:** por fecha, notas por `updated` desc (`sortByUpdatedDesc`) en bloques `dateBlock`: today, yesterday,
   week (el resto de los últimos 7 días naturales: desde las 00:00 de hace 6 días), month
   (últimos 30 días desde ahora) y older; aritmética de calendario (DST) y una hora futura (reloj de otro
   dispositivo) cuenta como hoy. Cabecera de bloque sticky con contador. `now` es estado que solo cambia

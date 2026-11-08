@@ -23,6 +23,7 @@ import { NoteFolderHeader, FolderGlyph, FolderIcon } from './NoteFolderHeader'
 import { GroupGuides } from './GroupGuides'
 import { DROP_SPRING_OPEN_MS, dropChangesPlace, staggerStep } from '../../lib/sidebarGuides'
 import { useSidebarGroups, type SidebarFolder } from './useSidebarGroups'
+import { compareSidebarNotes } from '../../lib/sidebarGroups'
 import { SectionTabsRow } from './SectionTabsRow'
 import { NoteSectionMap } from './NoteSectionMap'
 import { RowShiftFlip } from './NoteSectionFlip'
@@ -353,7 +354,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         if (!searchQuery.trim()) return true
         return noteMatchesQuery(n, { sectionFilter, textQuery: sectionTextQuery })
       })
-      .sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime())
+      .sort(compareSidebarNotes)
   }, [rawNotes, showArchived, filterTag, searchQuery, sectionFilter, sectionTextQuery, archivedGroupIds])
 
   const items = useSidebarGroups(notes, groups, folders, noteOrder)
