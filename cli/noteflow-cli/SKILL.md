@@ -12,8 +12,9 @@ solo**. La sintaxis completa de cada comando está en **`noteflow help <comando>
 https://yagoid.github.io/noteflow/cli).
 
 **Si un comando falla, lee el error: dice qué hacer.** Nota o sección inexistente (`Did you mean
-"…"?` + las existentes), título ambiguo (lista las coincidencias), flag desconocido, flags
-incompatibles o uso incorrecto salen con exit 1 sin escribir nada. Corrige con lo que te dice y
+"…"?` + las existentes), título ambiguo (lista las coincidencias), grupo o carpeta inexistente, flag
+desconocido o que ese comando no admite (p. ej. `--dry-run` en `delete`), flags incompatibles o uso
+incorrecto salen con exit 1 sin escribir nada. Corrige con lo que te dice y
 reintenta. Los datos van a stdout y los avisos y errores a stderr; con `--json`, stdout lleva solo
 el JSON.
 
@@ -21,17 +22,19 @@ el JSON.
 
 1. **¿Hay sync?** `noteflow status --json` (cómo leerlo: [Ofrécete a activar el
    sync](#ofrécete-a-activar-el-sync), paso 1).
-2. **Sin sync → ofrécete UNA vez a activarlo, antes de escribir** (lo haces tú; el usuario solo
-   autoriza o te da un código). Si dice que no, trabaja en local y no insistas.
-3. **Con sync, `noteflow pull` al empezar**, también si la tarea solo lee (así respondes con lo
+2. **Con sync, `noteflow pull` al empezar**, también si la tarea solo lee (así respondes con lo
    último) y aunque solo vayas a añadir una línea (evita conflictos con otro dispositivo).
-4. **Haz los cambios:** nombres de sección exactos (`noteflow sections "<nota>"`), `read` (no
+3. **Haz los cambios:** nombres de sección exactos (`noteflow sections "<nota>"`), `read` (no
    `get`) para procesar texto, `path` + editar + `touch` para ediciones parciales, `--create` solo
-   para lo que de verdad es nuevo. Relee con `read` lo que escribiste.
-5. **Mira la línea de sync de cada escritura.** Si todas mostraron `Synced to GitHub` / `Synced
-   to NoteFlow Cloud`, no hace falta nada más. Si alguna dio error de sync o no la mostró:
-   `noteflow pull`, luego `noteflow push`, y comprueba `Done: … 0 errors` (ver [Sincroniza y
-   verifica](#sincroniza-y-verifica)).
+   para lo que de verdad es nuevo. Escribe solo lo que te pidieron y con el formato que ya tiene la
+   nota ([Estilo del contenido](#estilo-del-contenido)). Relee con `read` lo que escribiste.
+4. **Mira la línea de sync de cada escritura.** Si todas mostraron `Synced to GitHub` / `Synced
+   to NoteFlow Cloud` **y ninguna mostró `Conflict`, `not uploaded` ni `Error:`**, no hace falta
+   nada más. Si no (con sync): `noteflow pull`, luego `noteflow push`, y comprueba `Done: … 0 errors` (ver
+   [Sincroniza y verifica](#sincroniza-y-verifica)).
+5. **Sin sync → haz la tarea igualmente y, en esa misma respuesta, ofrécete UNA vez a activarlo**
+   (lo haces tú; el usuario solo autoriza o te da un código). No esperes su respuesta para trabajar:
+   si acepta, el `push` tras el login sube lo ya escrito. Si dice que no, no insistas.
 6. **Tras un login con éxito, `noteflow push`**: lo escrito antes del login sigue solo en local.
    Excepción: con claves `private (e2ee)`, o `No Cloud keys yet` sin `cloud setup`, el push
    fallaría (ver paso 5 de [Ofrécete a activar el sync](#ofrécete-a-activar-el-sync)).
@@ -41,8 +44,9 @@ el JSON.
 ## Modelo mental
 
 - **Nota = título + secciones** (pestañas). Todo se direcciona **por nombre**, nunca por id:
-  `noteflow read "<título>" "<sección>"`. El título puede ser parcial (con varias coincidencias el
-  comando falla y las lista). Los nombres de sección pueden repetirse: elige uno con sufijo 1-based,
+  `noteflow read "<título>" "<sección>"`. En todos los comandos (también `add --title`) el título
+  exacto gana y uno parcial vale si solo coincide con una nota; con varias, el comando falla y las
+  lista. Los nombres de sección pueden repetirse: elige uno con sufijo 1-based,
   `"Tasks#2"`. Entrecomilla los nombres con espacios.
 - **Organización: grupos → carpetas → notas.** Una carpeta vive siempre dentro de un grupo (un solo
   nivel); una nota puede no tener grupo.
@@ -72,9 +76,6 @@ el JSON.
   el cambio queda solo en local y no se sincroniza.
 - **`touch` y cualquier escritura borran los `.md` sueltos** de la carpeta de la nota (todo lo que
   no sea `note.md` ni una sección del índice). No dejes ahí temporales ni copias.
-- **`add --title`** no crea la nota sin `--create`, y con un título parcial que coincide con varias
-  notas **escribe en la primera sin avisar**: usa el título exacto. Con un `--group`/`--folder` que
-  no existe, avisa por stderr pero escribe igual, sin agrupar.
 - **`--raw` / `--markdown` sobre una sección existente no hacen nada**, y `section add` crea
   siempre una sección nueva aunque ya exista una con ese nombre (queda duplicada).
 - **App de escritorio abierta ⇒ se pierden los grupos y carpetas creados, renombrados o borrados
@@ -99,8 +100,8 @@ el JSON.
 ## Chuleta de comandos
 
 Detalle de cada uno: **`noteflow help <comando>`**. `--json` (salida para máquina en stdout) existe
-en `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `groups`, `folders`, `status`,
-`cloud status` y `login --no-wait`.
+en `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `groups`, `folders`, `group create`,
+`folder create`, `status`, `cloud status` y `login --no-wait`; en los demás es un error.
 
 **Leer**
 - `noteflow list [--tag t] [--group g] [--folder f] [--archived] [--json]` — notas (sin las
@@ -116,7 +117,8 @@ en `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `groups`, `fold
 **Escribir**
 - `noteflow add ["<texto>"] [--text t | --file f | --stdin] [--title nota] [--section s]
   [--create] [--tag t] [--group g [--folder f]] [--raw] [--dry-run] [--json]` — **añade al final**.
-  `--create` crea lo que falte (la nota de `--title` y/o la sección).
+  `--create` crea lo que falte (la nota de `--title` y/o la sección); con `--create`, usa el título
+  exacto (uno parcial que coincide con una sola nota escribe en ella).
 - `noteflow set "<nota>" "<sección>" (--text t | --file f | --stdin) [--create] [--raw] [--dry-run]
   [--json]` — **reemplaza** la sección (`--create`: la crea si no existe). La nota debe existir.
 - `--dry-run` (en `add`/`set`) valida el destino sin escribir: falla igual que la ejecución real.
@@ -167,8 +169,10 @@ git log --oneline -5 | noteflow add --stdin --section "Log" --create --raw
   # …edita $SEC con tus herramientas…
   noteflow touch "Proyecto Alpha"                         # obligatorio: si no, no sincroniza
   ```
-- Sin acceso a esos ficheros (p. ej. la nota está en otra máquina): `read … > sec.md`, edita y
-  `set … --file sec.md`, con `sec.md` **fuera** de la carpeta de la nota.
+- Sin acceso a esos ficheros (p. ej. la nota está en otra máquina), en una tubería:
+  `noteflow read "<nota>" "<sección>" | <transformar> | noteflow set "<nota>" "<sección>" --stdin`.
+  Si pasas por un fichero, déjalo **fuera** de la carpeta de la nota y, en PowerShell, guárdalo con
+  `Out-File -Encoding utf8` (no con `>`).
 
 ## Sincroniza y verifica
 
@@ -176,8 +180,10 @@ Las escrituras (`new`, `add`, `set`, `touch`, `section …`, `rename`, `move`, `
 `archive`, `delete`, `group …`, `folder …`) suben la nota solas al backend activo, pero **el exit
 code no dice si subió**. Tras cada una, busca la línea de sync en stdout y stderr:
 
-- `Synced to GitHub` / `Synced to NoteFlow Cloud` → bien. **Si todas tus escrituras la mostraron,
-  no hace falta nada más** (ni `pull` ni `push` al terminar).
+- `Synced to GitHub` / `Synced to NoteFlow Cloud` → bien. **Si todas tus escrituras la mostraron y
+  ninguna mostró `Conflict`, `not uploaded` ni `Error:`, no hace falta nada más** (ni `pull` ni
+  `push` al terminar). Ojo: con Cloud una misma escritura puede dar `Conflict: local changes kept
+  as …` y después `Synced to NoteFlow Cloud`; eso es un conflicto (ver abajo).
 - `Sync failed: …`, `Cloud sync failed: …`, `changed on GitHub since your last pull — not
   uploaded`, `not uploaded: a newer version is on NoteFlow Cloud` o `Conflict: local changes kept
   as "…"` → al terminar, `noteflow pull` y luego `noteflow push`.
@@ -222,24 +228,30 @@ o te da el código que le llega por email.
      el usuario no usa sync.
    - **(b)** `github` con `tokenAccessible: false` (Windows), o `github: null` con
      `desktopApp.github` (macOS/Linux) → la app usa GitHub y el CLI necesita su propio login **al
-     mismo repo** (`github.repo` / `desktopApp.github.repo`, con la cuenta de GitHub de `owner`).
+     mismo repo**: a `noteflow login` pásale **`owner/repo`** (`github.owner`/`github.repo`, o
+     `desktopApp.github.owner`/`repo`, p. ej. `ana/noteflow-notes`). Con el owner, si el usuario
+     autoriza con otra cuenta de GitHub el login falla sin crear nada; con solo el nombre crearía un
+     repo nuevo en esa otra cuenta.
    - **(c)** `desktopApp.cloudSignedIn: true` → la app tiene NoteFlow Cloud (`cloudSyncEnabled`
      dice si sincroniza con él): usa `desktopApp.cloudEmail`. Si se dan (b) y (c), propón el que
      sincroniza en la app: Cloud si `cloudSyncEnabled`, si no GitHub.
-2. **Pregunta una sola vez por conversación, antes de escribir**, de forma breve y concreta con lo
-   que viste (backend, email, repo), no con un genérico "¿GitHub o Cloud?". **Ofrécete a
-   ejecutarlo tú**; no le pases los comandos. Ejemplos:
+2. **Ofrécelo una sola vez por conversación, sin bloquear la tarea:** haz primero lo que te pidió
+   y, en esa misma respuesta, pregunta de forma breve y concreta con lo que viste (backend, email,
+   repo), no con un genérico "¿GitHub o Cloud?". **Ofrécete a ejecutarlo tú**; no le pases los
+   comandos. Ejemplos:
    - (c): *"Tu app usa NoteFlow Cloud con ana@ejemplo.com; ¿activo también el sync aquí? Te llegará
      un código a ese correo y solo tendrás que pasármelo."*
    - (b): *"La app sincroniza con GitHub (ana/noteflow-notes), pero este CLI necesita su propio
-     permiso; ¿lo activo? Solo tendrás que autorizar un código en github.com/login/device."*
+     permiso; ¿lo activo? Solo tendrás que autorizar un código en github.com/login/device con la
+     cuenta ana."* → luego `noteflow login ana/noteflow-notes --no-wait --json`.
    - (a): *"Tus notas aquí no se sincronizan. ¿Lo activo? Puede ser con GitHub (gratis, repo
      privado `noteflow-notes`) o con NoteFlow Cloud (cifrado, requiere suscripción); tú solo
      autorizas o me das un código."*
 
    Si dice que no, sigue en local y al final solo avisa de que los cambios quedaron en local.
 3. **GitHub:** `noteflow login [repo] --no-wait --json` → `{ verificationUri, userCode, expiresAt,
-   repo }` (sin repo: `noteflow-notes`, que se crea privado si no existe). Pasa al usuario la URL y
+   repo }`. En (b), `owner/repo` de la app (ver arriba); en (a), sin repo (`noteflow-notes`, que se
+   crea privado si no existe) o solo el nombre que el usuario quiera. Pasa al usuario la URL y
    el código (en escritorio el navegador se abre solo) y pídele que te avise al autorizar. Ejecuta
    `noteflow login --finish` **solo cuando lo confirme**: espera hasta que autorice o caduque el
    código. Si el timeout de tu herramienta lo corta, relanza `--finish` (el login pendiente se
@@ -263,6 +275,10 @@ interactivo (`noteflow login` o `noteflow cloud login` sin esos flags): espera s
 bloqueado hasta 15 minutos.
 
 ## Estilo del contenido
+
+Escribe **solo lo que el usuario pidió**: no rellenes secciones con contenido inventado. Respeta el
+formato que ya tiene la nota (p. ej. lista simple frente a checkbox `- [ ]`) y pregunta solo si es
+ambiguo de verdad.
 
 Al escribir notas, **no abuses del código inline** (`` `así` ``). Resérvalo para las pocas
 referencias que lo piden de verdad y escribe el resto como texto normal: una nota llena de píldoras

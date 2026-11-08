@@ -105,7 +105,7 @@ export const cliEs: CliContent = {
 
   flags: {
     title: 'Flags globales, colores y variables de entorno',
-    intro: ['Algunos flags se repiten entre comandos con el mismo significado en todos:'],
+    intro: ['Algunos flags se repiten entre comandos con el mismo significado en todos. Un flag que el comando no admite es un error (exit 1, no hace nada), nunca se ignora en silencio:'],
     colFlag: 'Flag',
     colApplies: 'Aplica a',
     colDesc: 'Descripción',
@@ -134,7 +134,7 @@ export const cliEs: CliContent = {
   agents: {
     title: 'Una herramienta pensada para agentes de IA',
     intro: [
-      'El CLI es deliberadamente agent-friendly: todos los comandos de lectura aceptan <code>--json</code> para salida machine-readable, los resultados van a <strong>stdout</strong> y los errores a <strong>stderr</strong>, y el exit code es <code>0</code> en éxito y <code>1</code> en error. Como todo se direcciona por título de nota y nombre de sección, un agente nunca necesita rastrear ids.',
+      'El CLI es deliberadamente agent-friendly: los comandos de lectura (<code>list</code>, <code>get</code>, <code>read</code>, <code>path</code>, <code>status</code>…) aceptan <code>--json</code> para salida machine-readable, los resultados van a <strong>stdout</strong> y los errores a <strong>stderr</strong>, y el exit code es <code>0</code> en éxito y <code>1</code> en error. Como todo se direcciona por título de nota y nombre de sección, un agente nunca necesita rastrear ids.',
       'Dos convenciones importan: <code>read</code> vs <code>get</code> — <code>get</code> es para humanos (indenta y decora) mientras <code>read</code> emite el contenido verbatim, así que los agentes deben usar siempre <code>read</code>. Y <code>set</code> vs <code>add</code> — <code>set</code> <strong>reemplaza</strong> una sección, <code>add</code> <strong>añade al final</strong>. Un nombre de sección explícito debe coincidir <strong>exactamente</strong> con uno existente: uno desconocido falla con un “Did you mean” y la lista de secciones — también en JSON con <code>--json</code> — para que el agente reintente con el nombre correcto; <code>--create</code> es para secciones nuevas de verdad.',
       'Para <strong>ediciones parciales de una sección grande</strong> hay un atajo: el CLI no tiene find-replace, así que <code>read</code> + <code>set</code> obliga a sacar la sección entera y volver a escribirla. Si tu agente ya tiene herramientas de edición de ficheros, pídele a <code>path</code> el <code>.md</code> de la sección, edítalo in situ y cierra con <code>touch</code> — que bumpea <code>updated:</code> y hace el push.',
     ],

@@ -1946,6 +1946,25 @@ function resolveFolder(nameOrId, opts) {
   return matches[0]
 }
 
+/**
+ * --group [--folder] of 'add'/'new' → { groupId, folderId? }, or null without
+ * --group. Exits 1 on an unknown group, a folder missing from (or ambiguous in)
+ * that group, or --folder without --group — callers run it before writing.
+ */
+function resolveGroupPlacement(opts) {
+  if (!opts.group) {
+    if (opts.folder) { err('--folder requires --group'); exit(1) }
+    return null
+  }
+  const g = findGroup(opts.group)
+  if (!g) { err(`Group not found: "${opts.group}"`); exit(1) }
+  if (!opts.folder) return { groupId: g.id }
+  const matches = findFolders(opts.folder, g.id)
+  if (!matches.length) { err(`Folder "${opts.folder}" not found in group "${g.name}"`); exit(1) }
+  if (matches.length > 1) { err(`Multiple folders match "${opts.folder}" in "${g.name}"`); exit(1) }
+  return { groupId: g.id, folderId: matches[0].id }
+}
+
 // ── YAML parser ───────────────────────────────────────────────────────────────
 
 function splitFrontmatter(raw) {
@@ -2148,12 +2167,16 @@ function extractUpdatedTimestamp(content) {
 function resolveNote(titleQuery) {
   const matches = findNoteByTitle(titleQuery)
   if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
-  if (matches.length > 1) {
-    out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`))
-    exit(1)
-  }
+  failIfAmbiguousNote(matches)
   return matches[0]
+}
+
+/** Several (partial) title matches: list them and exit 1 — never pick one. */
+function failIfAmbiguousNote(matches) {
+  if (matches.length <= 1) return
+  out('  Multiple matches — be more specific:')
+  matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`))
+  exit(1)
 }
 
 function sectionNamesOf(note) {
@@ -2330,25 +2353,66 @@ function similarSectionsNote(note, baseName, dryRun) {
   return `  Note: no section named "${baseName}" — ${dryRun ? 'would create' : 'created'} it. Similar existing: ${similar.join(', ')}`
 }
 
+/** Raw stdin bytes (decoded by decodeInputBuffer, which also handles UTF-16). */
 function readStdin() {
   return new Promise(resolve => {
-    let data = ''
-    process.stdin.setEncoding('utf-8')
-    process.stdin.on('data', c => { data += c })
-    process.stdin.on('end', () => resolve(data))
+    const chunks = []
+    process.stdin.on('data', c => { chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)) })
+    process.stdin.on('end', () => resolve(Buffer.concat(chunks)))
   })
 }
 
-/** Content for `set`: --text wins, then --file, then stdin (explicit --stdin or a non-TTY pipe). */
+/**
+ * Pure: bytes with a NUL in most code units of one parity — the shape of
+ * UTF-16 text (ASCII-range chars are one byte + one NUL) that no UTF-8 text has.
+ */
+function looksLikeUtf16(buf) {
+  const pairs = Math.floor(Math.min(buf.length, 4096) / 2)
+  if (pairs < 2) return false
+  let evenNul = 0, oddNul = 0
+  for (let i = 0; i < pairs; i++) {
+    if (buf[2 * i] === 0) evenNul++
+    if (buf[2 * i + 1] === 0) oddNul++
+  }
+  return Math.max(evenNul, oddNul) / pairs >= 0.3
+}
+
+/**
+ * Pure: decodes --file / --stdin bytes. UTF-8 by default; a UTF-16 BOM (what
+ * PowerShell 5.1's `>` / Out-File write: FF FE) is decoded as such. UTF-16
+ * without a BOM can't be told apart reliably → { error } instead of saving
+ * garbage. Returns { text } | { error }.
+ */
+function decodeInputBuffer(buf) {
+  if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) return { text: buf.subarray(2).toString('utf16le') }
+  if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) {
+    const body = Buffer.from(buf.subarray(2, 2 + ((buf.length - 2) & ~1)))
+    return { text: body.swap16().toString('utf16le') }
+  }
+  if (looksLikeUtf16(buf)) {
+    return { error: "The content looks like UTF-16 without a byte order mark, which can't be read reliably.\n"
+      + '  Pipe it instead (… | noteflow set "<title>" "<section>" --stdin), or save the file as UTF-8\n'
+      + "  (PowerShell: … | Out-File -Encoding utf8 <file>, not '>')." }
+  }
+  return { text: buf.toString('utf-8') }
+}
+
+/** Content for `set`/`add`: --text wins, then --file, then stdin (explicit --stdin or a non-TTY pipe). */
 async function resolveSetContent(opts) {
   let raw
   let fromStdin = false
+  let bytes = null
   if (typeof opts.text === 'string') raw = opts.text
   else if (opts.file) {
-    try { raw = fs.readFileSync(path.resolve(opts.file), 'utf-8') }
+    try { bytes = fs.readFileSync(path.resolve(opts.file)) }
     catch (e) { err(`Cannot read --file: ${e.message}`); exit(1) }
-  } else if (opts.stdin || !process.stdin.isTTY) { fromStdin = true; raw = await readStdin() }
+  } else if (opts.stdin || !process.stdin.isTTY) { fromStdin = true; bytes = await readStdin() }
   else { err('No content. Provide --text "..." , --file <path>, or pipe content with --stdin'); exit(1) }
+  if (bytes) {
+    const decoded = decodeInputBuffer(bytes)
+    if (decoded.error) { err(decoded.error); exit(1) }
+    raw = decoded.text
+  }
   // Strip a leading BOM (PowerShell pipes/here-strings add one) and normalize
   // CRLF/CR to LF so piped/echoed input round-trips cleanly.
   const content = raw.replace(/^﻿+/, '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
@@ -2390,9 +2454,9 @@ function githubRequest(token, method, endpoint, body) {
         if (res.statusCode === 204) return resolve(null)
         try {
           const json = JSON.parse(raw)
-          if (res.statusCode >= 400) reject(new Error(json.message || `HTTP ${res.statusCode}`))
+          if (res.statusCode >= 400) reject(Object.assign(new Error(json.message || `HTTP ${res.statusCode}`), { status: res.statusCode }))
           else resolve(json)
-        } catch { reject(new Error(`HTTP ${res.statusCode}: unparseable`)) }
+        } catch { reject(Object.assign(new Error(`HTTP ${res.statusCode}: unparseable`), { status: res.statusCode })) }
       })
     })
     req.on('error', reject)
@@ -2428,10 +2492,16 @@ function githubAuthPost(authPath, params) {
   })
 }
 
+/**
+ * Creates the private notes repo only when GitHub says it doesn't exist (404).
+ * Any other failure (network, 401, 5xx…) propagates: guessing "missing" there
+ * would create a stray repo and point the sync at it.
+ */
 async function ensureRepo(token, owner, repo) {
   try {
     await githubRequest(token, 'GET', `/repos/${owner}/${repo}`)
-  } catch {
+  } catch (e) {
+    if (e.status !== 404) throw new Error(`Could not check the repo ${owner}/${repo}: ${e.message}`)
     out(`  Creating private repo ${owner}/${repo}...`)
     await githubRequest(token, 'POST', '/user/repos', {
       name: repo, private: true, description: 'NoteFlow notes — auto-synced', auto_init: true,
@@ -4796,6 +4866,29 @@ async function cmdAdd(positionalText, opts) {
     err('Provide the content either as an argument or via --text/--file/--stdin — not both')
     exit(1)
   }
+
+  // The target (note + group/folder) is resolved BEFORE reading the content, so
+  // a wrong name fails fast — before stdin is consumed and before any write
+  // (also under --dry-run, which must fail exactly like the real run).
+  // --title resolves like every other note command: an exact title wins, a
+  // partial one is fine when unique, several matches exit listing them.
+  let existing = null
+  if (opts.title) {
+    const matches = findNoteByTitle(opts.title)
+    failIfAmbiguousNote(matches) // also with --create: a near-miss must not spawn a sibling note
+    existing = matches[0] || null
+    // No match → creating a brand-new note is opt-in (--create), so a typo in
+    // --title fails loudly instead of silently spawning a stray note.
+    if (!existing && !opts.create) {
+      err(`Note "${opts.title}" not found. Pass --create to create it, or use 'noteflow new'.`)
+      exit(1)
+    }
+  } else {
+    existing = findTodayNote() // the daily note keeps its auto-create behavior
+  }
+  // An unknown --group/--folder is an error (same messages as 'new'), never a silent "ungrouped".
+  const placement = resolveGroupPlacement(opts)
+
   let text
   if (positionalText) text = positionalText.replace(/^﻿+/, '').replace(/\r\n?/g, '\n')
   else if (hasFlagSource || !process.stdin.isTTY) text = await resolveSetContent(opts)
@@ -4810,21 +4903,6 @@ async function cmdAdd(positionalText, opts) {
   // text mode (shown as-is). Existing sections never change mode.
   const isRaw = opts.raw === true
   const bytesWritten = Buffer.byteLength(text, 'utf-8')
-
-  // Find existing note by title
-  let existing = null
-  if (opts.title) {
-    const matches = findNoteByTitle(opts.title)
-    if (matches.length) existing = matches[0]
-    // No match → creating a brand-new note is opt-in (--create), so a typo in
-    // --title fails loudly instead of silently spawning a stray note.
-    if (!existing && !opts.create) {
-      err(`Note "${opts.title}" not found. Pass --create to create it, or use 'noteflow new'.`)
-      exit(1)
-    }
-  } else {
-    existing = findTodayNote() // the daily note keeps its auto-create behavior
-  }
 
   if (existing) {
     const note = readNoteFolder(existing.dirname)
@@ -4866,18 +4944,12 @@ async function cmdAdd(positionalText, opts) {
     const base = (sec.content || '').replace(/\n$/, '')
     sec.content = base ? base + '\n' + text : text
     if (opts.tag && !note.tags.includes(opts.tag)) note.tags.push(opts.tag)
-    if (opts.group) {
-      const g = findGroup(opts.group)
-      if (g) {
-        note.group = g.id
-        if (opts.folder) {
-          const matches = findFolders(opts.folder, g.id)
-          if (matches.length === 1) note.folder = matches[0].id
-          else err(matches.length ? `Multiple folders match "${opts.folder}" in "${g.name}"` : `Folder "${opts.folder}" not found in group "${g.name}"`)
-        }
-      } else err(`Group not found: "${opts.group}"`)
-    } else if (opts.folder) {
-      err('--folder requires --group')
+    if (placement) {
+      // Like 'move': a folder belongs to one group, so changing the group
+      // without --folder takes the note to the new group's root.
+      if (placement.folderId) note.folder = placement.folderId
+      else if (note.group !== placement.groupId) delete note.folder
+      note.group = placement.groupId
     }
     writeNoteFolder(note.dirname, note)
     if (opts.json) jsonOut({ note: note.title, dirname: note.dirname, section: sec.name, createdNote: false, createdSection, bytesWritten })
@@ -4893,20 +4965,7 @@ async function cmdAdd(positionalText, opts) {
     }
     const id = nanoid(8)
     const now = new Date().toISOString()
-    let groupId, folderId
-    if (opts.group) {
-      const g = findGroup(opts.group)
-      if (g) {
-        groupId = g.id
-        if (opts.folder) {
-          const matches = findFolders(opts.folder, g.id)
-          if (matches.length === 1) folderId = matches[0].id
-          else err(matches.length ? `Multiple folders match "${opts.folder}" in "${g.name}"` : `Folder "${opts.folder}" not found in group "${g.name}"`)
-        }
-      } else err(`Group not found: "${opts.group}"`)
-    } else if (opts.folder) {
-      err('--folder requires --group')
-    }
+    const { groupId, folderId } = placement || {}
     const note = {
       id, title: targetTitle,
       tags: opts.tag ? [opts.tag] : [],
@@ -4928,20 +4987,7 @@ async function cmdNew(title, opts) {
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
   const id = nanoid(8)
   const now = new Date().toISOString()
-  let groupId, folderId
-  if (opts.group) {
-    const g = findGroup(opts.group)
-    if (!g) { err(`Group not found: "${opts.group}"`); exit(1) }
-    groupId = g.id
-    if (opts.folder) {
-      const matches = findFolders(opts.folder, g.id)
-      if (!matches.length) { err(`Folder "${opts.folder}" not found in group "${g.name}"`); exit(1) }
-      if (matches.length > 1) { err(`Multiple folders match "${opts.folder}" in "${g.name}"`); exit(1) }
-      folderId = matches[0].id
-    }
-  } else if (opts.folder) {
-    err('--folder requires --group'); exit(1)
-  }
+  const { groupId, folderId } = resolveGroupPlacement(opts) || {}
   const note = {
     id, title, tags: [], created: now, updated: now,
     sections: [{ id: nanoid(6), name: opts.section || 'Note', content: '', isRawMode: opts.raw === true, created: now }],
@@ -5499,6 +5545,7 @@ async function cmdMove(titleQuery, opts) {
 /** Pure: the `login` flag combination is invalid → its error message, else null. */
 function loginFlagsError(opts = {}) {
   if (opts.noWait && opts.finish) return '--no-wait and --finish cannot be used together'
+  if (opts.json && !opts.noWait) return "--json only works with 'login --no-wait' (the other forms print no JSON)"
   return null
 }
 
@@ -5516,17 +5563,55 @@ function checkPendingGithubLogin(raw, nowMs) {
   if (expiresMs <= nowMs) return { ok: false, reason: 'expired' }
   const interval = Number.isFinite(raw.interval) && raw.interval > 0 ? raw.interval : 5
   const repo = typeof raw.repo === 'string' && raw.repo ? raw.repo : DEFAULT_REPO
-  return { ok: true, pending: { ...raw, interval, repo, expiresMs } }
+  const owner = typeof raw.owner === 'string' && raw.owner ? raw.owner : undefined
+  return { ok: true, pending: { ...raw, interval, repo, owner, expiresMs } }
+}
+
+const GITHUB_NAME_RE = /^[A-Za-z0-9._-]+$/
+
+/**
+ * Pure: the `login` repo argument — `repo` or `owner/repo` (default
+ * noteflow-notes) → { repo, owner? } | { error }. Validated before asking for
+ * a device code. The owner can't be checked until GitHub says who signed in
+ * (loginOwnerError).
+ */
+function parseRepoSpec(spec) {
+  if (spec === undefined || spec === null || spec === '') return { repo: DEFAULT_REPO }
+  const parts = String(spec).split('/')
+  const bad = parts.length > 2 || parts.some(p => !GITHUB_NAME_RE.test(p) || p === '.' || p === '..')
+  if (bad) return { error: `"${spec}" is not a valid GitHub repo: use a repo name (letters, digits, '.', '-', '_'), optionally as owner/repo` }
+  return parts.length === 2 ? { owner: parts[0], repo: parts[1] } : { repo: parts[0] }
+}
+
+/**
+ * Pure: an `owner/repo` of ANOTHER account → the error, else null. The CLI only
+ * syncs repos of the account that signed in (it creates the repo under it if
+ * missing), so a foreign owner must fail before anything is created or saved.
+ */
+function loginOwnerError(target, userLogin) {
+  if (!target.owner || target.owner.toLowerCase() === String(userLogin).toLowerCase()) return null
+  return `"${target.owner}/${target.repo}" is not a repo of the account you signed in with (${userLogin}): `
+    + 'the CLI only syncs repos of that account. Nothing was created or saved. '
+    + `Run 'noteflow login ${target.repo}' to use ${userLogin}/${target.repo}, or sign in to GitHub as ${target.owner} and log in again`
 }
 
 /**
  * Pure: the repo `login --finish` connects. The pending grant was requested for
  * a repo and wins; a repo argument is only accepted when it names the same one
- * (a different one is an error, never a silent switch).
+ * (a different one is an error, never a silent switch). An owner given now
+ * (with no owner pending) is kept so it is still checked against the account.
+ * Returns { repo, owner? } | { error }.
  */
-function resolveFinishRepo(pendingRepo, repoArg) {
-  if (!repoArg || repoArg === pendingRepo) return { repo: pendingRepo }
-  return { error: `The pending login is for "${pendingRepo}", not "${repoArg}". Run 'noteflow login --finish' without a repo, or start over with 'noteflow login ${repoArg} --no-wait'` }
+function resolveFinishRepo(pendingRepo, repoArg, pendingOwner) {
+  const pending = pendingOwner ? { repo: pendingRepo, owner: pendingOwner } : { repo: pendingRepo }
+  if (!repoArg) return pending
+  const arg = parseRepoSpec(repoArg)
+  if (arg.error) return { error: arg.error }
+  const sameRepo = arg.repo.toLowerCase() === pendingRepo.toLowerCase()
+  const sameOwner = !arg.owner || !pendingOwner || arg.owner.toLowerCase() === pendingOwner.toLowerCase()
+  if (sameRepo && sameOwner) return arg.owner && !pendingOwner ? { repo: pendingRepo, owner: arg.owner } : pending
+  const label = pendingOwner ? `${pendingOwner}/${pendingRepo}` : pendingRepo
+  return { error: `The pending login is for "${label}", not "${repoArg}". Run 'noteflow login --finish' without a repo, or start over with 'noteflow login ${repoArg} --no-wait'` }
 }
 
 function setPendingGithubLogin(pending) {
@@ -5593,7 +5678,10 @@ async function cmdLogin(repoName, opts = {}) {
   if (flagsError) { err(flagsError); exit(1) }
   if (opts.finish) { await cmdLoginFinish(repoName, opts); return }
 
-  const repo = repoName || DEFAULT_REPO
+  // `repo` or `owner/repo`, validated before asking GitHub for a code.
+  const target = parseRepoSpec(repoName)
+  if (target.error) { err(target.error); exit(1) }
+  const { repo } = target
   const data = await requestGithubDeviceCode()
   const intervalSec = parseInt(data.interval) || 5
   const expiresMs = Date.now() + parseInt(data.expires_in) * 1000
@@ -5603,6 +5691,7 @@ async function cmdLogin(repoName, opts = {}) {
     setPendingGithubLogin({
       deviceCode: data.device_code, userCode: data.user_code, verificationUri: data.verification_uri,
       interval: intervalSec, expiresAt, repo,
+      ...(target.owner ? { owner: target.owner } : {}),
       ...(opts.noPull ? { noPull: true } : {}),
     })
     out(`  Authorize in the browser, then run: noteflow login --finish  (the code expires at ${expiresAt})`)
@@ -5613,10 +5702,12 @@ async function cmdLogin(repoName, opts = {}) {
   const result = await pollGithubDeviceToken(data.device_code, intervalSec, expiresMs)
   if (result.error) { err(result.error); exit(1) }
   if (!result.token) { err('Authorization expired. Try again.'); exit(1) }
-  await completeGithubLogin(result.token, repo, opts)
+  await completeGithubLogin(result.token, target, opts)
 }
 
 async function cmdLoginFinish(repoArg, opts) {
+  const argError = repoArg ? parseRepoSpec(repoArg).error : null
+  if (argError) { err(argError); exit(1) }
   const check = checkPendingGithubLogin(readSettings().cliGithubLogin, Date.now())
   if (!check.ok) {
     if (check.reason === 'expired') setPendingGithubLogin(null)
@@ -5626,7 +5717,7 @@ async function cmdLoginFinish(repoArg, opts) {
     exit(1)
   }
   const { pending } = check
-  const target = resolveFinishRepo(pending.repo, repoArg)
+  const target = resolveFinishRepo(pending.repo, repoArg, pending.owner)
   if (target.error) { err(target.error); exit(1) }
 
   out(`\n  Finishing the GitHub login (code ${pending.userCode || '?'}, repo ${target.repo})...`)
@@ -5643,17 +5734,22 @@ async function cmdLoginFinish(repoArg, opts) {
       : "Authorization expired. Run 'noteflow login --no-wait' again")
     exit(1)
   }
-  await completeGithubLogin(result.token, target.repo, { ...opts, noPull: opts.noPull || pending.noPull })
+  await completeGithubLogin(result.token, target, { ...opts, noPull: opts.noPull || pending.noPull })
 }
 
 /**
  * Everything after GitHub granted a token, shared by the interactive and the
- * `--finish` flows: creates the repo if needed, saves githubSync (same-repo
- * rules), drops any pending `--no-wait` grant and runs the first pull.
+ * `--finish` flows: checks an `owner/` prefix against the account, creates the
+ * repo if needed, saves githubSync (same-repo rules), drops any pending
+ * `--no-wait` grant and runs the first pull. `target` = { repo, owner? }.
  */
-async function completeGithubLogin(token, repo, opts) {
+async function completeGithubLogin(token, target, opts) {
   const user = await githubRequest(token, 'GET', '/user')
   out(`  Logged in as ${user.login}`)
+  // Before ensureRepo and writeSettings: a foreign owner creates/saves nothing.
+  const ownerError = loginOwnerError(target, user.login)
+  if (ownerError) { err(ownerError); exit(1) }
+  const { repo } = target
   await ensureRepo(token, user.login, repo)
   const settings = readSettings()
   // No fresh `lastSync` here: nothing has been synced yet, and on Windows this
@@ -6060,7 +6156,7 @@ function cmdHelp(topic) {
 
   Content source (pick ONE — positional <text> or a flag):
     --text "<content>"   Inline text
-    --file <path>        Read content from a file
+    --file <path>        Read content from a file (UTF-8, or UTF-16 with a BOM)
     --stdin              Read content from stdin (also auto-used when piped)
 
   Options:
@@ -6090,9 +6186,11 @@ function cmdHelp(topic) {
   command (today's daily note, or --title + --create) gets its section created.
   The mode flags only apply to a section created now; existing ones keep theirs.
 
-  With --title, an exact title wins; a partial one matching several notes picks
-  the first of them, so pass the exact title. An unknown --group/--folder is
-  reported on stderr but the text is still written (without grouping).
+  --title resolves like the other note commands: an exact title wins, a partial
+  one works when it matches a single note, and several matches are an error that
+  lists them (nothing written — also with --create). An unknown --group/--folder
+  is an error too (exit 1, nothing written). Changing an existing note's group
+  without --folder takes it to the new group's root, like 'move'.
 
   --json result: { note, dirname, section, createdNote, createdSection,
   bytesWritten } (--dry-run adds "dryRun": true; dirname is null for a note that
@@ -6204,8 +6302,12 @@ function cmdHelp(topic) {
 
   Content source (first one wins):
     --text "<content>"   Inline text
-    --file <path>        Read content from a file
+    --file <path>        Read content from a file (UTF-8, or UTF-16 with a BOM)
     --stdin              Read content from stdin (also auto-used when piped)
+
+  PowerShell 5.1's '>' writes UTF-16 with a BOM, which is decoded fine; UTF-16
+  without a BOM is refused (exit 1) — pipe the text instead
+  (... | noteflow set "<title>" "<section>" --stdin) or use Out-File -Encoding utf8.
 
   Other options:
     --create             Create the section if it doesn't exist
@@ -6348,6 +6450,14 @@ function cmdHelp(topic) {
   the CLI saves its own token (the desktop app's one is not readable here),
   creates the repo if needed (default: noteflow-notes, private) and pulls it.
 
+  [repo] is 'repo' or 'owner/repo'. A bare name is a repo of whichever account
+  you authorize with (created there if missing). With 'owner/repo', authorizing
+  with another account fails (exit 1) and nothing is created or saved — the CLI
+  only syncs repos of its own account. To connect an EXISTING repo (e.g. the one
+  the desktop app uses), pass owner/repo so a wrong account can't create a copy.
+  The repo is only created when GitHub answers that it does not exist; any
+  other error (network, permissions) fails the login instead.
+
   Without flags it waits (up to ~15 min) until you authorize in the browser.
   For agents/scripts that can't keep a terminal waiting, split it in two:
     --no-wait   Print the URL and code, save the pending login and exit 0.
@@ -6373,6 +6483,7 @@ function cmdHelp(topic) {
   Examples:
     noteflow login
     noteflow login my-private-notes
+    noteflow login ana/noteflow-notes    # only if you authorize as ana
     noteflow login --no-wait --json      # then, once authorized:
     noteflow login --finish
 `,
@@ -6545,8 +6656,10 @@ function cmdHelp(topic) {
     self-update           Update this CLI script to the latest version
     version / --version   Print the CLI version
 
-  Flags available on most commands:
-    --json                Machine-readable JSON output (info lines go to stderr)
+  Flags (a flag a command doesn't support is an error, never ignored):
+    --json                Machine-readable JSON output (info lines go to stderr) —
+                          list/get/read/path/new/add/set/delete, groups/folders,
+                          group create/folder create, status/cloud status, login --no-wait
     --yes                 Skip confirmation prompts
     --dry-run             add/set: resolve the target without writing anything
     --create              add/set: create a missing section (add: or note) —
@@ -6608,7 +6721,7 @@ const BOOLEAN_FLAGS = {
 const VALUE_FLAGS = ['--tag', '--title', '--section', '--group', '--folder', '--color', '--text', '--file', '--code']
 
 function parseFlags(args) {
-  const flags = {}; const positional = []
+  const flags = {}; const positional = []; const seen = []
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     // Object.hasOwn: a plain `BOOLEAN_FLAGS[a]` would hit Object.prototype for
@@ -6617,15 +6730,65 @@ function parseFlags(args) {
     if (Object.hasOwn(BOOLEAN_FLAGS, a)) {
       const [key, value] = BOOLEAN_FLAGS[a]
       flags[key] = value
+      seen.push(a)
     } else if (VALUE_FLAGS.includes(a)) {
       if (i + 1 >= args.length) { err(`Flag ${a} requires a value`); exit(1) }
       flags[a.slice(2)] = args[++i]
+      seen.push(a)
     } else if (a.startsWith('--')) {
       err(`Unknown flag: ${a}`)
       exit(1)
     } else positional.push(a)
   }
-  return { flags, positional }
+  return { flags, positional, seen }
+}
+
+// Flags each command really reads (beyond --yes). A known flag the command
+// doesn't use is an error, never silently ignored: `delete --dry-run` used to
+// delete for real, and `--json` on a command with no JSON output left stdout
+// empty with exit 0. ⚠️ Keep in sync with what each cmd* reads (and with its
+// help): a flag missing here is rejected even if the command honours it.
+const GLOBAL_FLAGS = ['--yes'] // harmless where nothing prompts
+const RAW_FLAGS = ['--raw', '--markdown', '--rich']
+const CONTENT_FLAGS = ['--text', '--file', '--stdin']
+const COMMAND_FLAGS = {
+  add: [...CONTENT_FLAGS, '--title', '--section', '--create', '--tag', '--group', '--folder', ...RAW_FLAGS, '--dry-run', '--json'],
+  set: [...CONTENT_FLAGS, '--section', '--create', ...RAW_FLAGS, '--dry-run', '--json'],
+  new: ['--section', '--group', '--folder', ...RAW_FLAGS, '--json'],
+  list: ['--tag', '--group', '--folder', '--archived', '--json'],
+  get: ['--section', '--json'], read: ['--section', '--json'], path: ['--section', '--json'],
+  delete: ['--json'], rename: [], sections: [], touch: [], favorite: [], archive: [],
+  'section list': [], 'section add': RAW_FLAGS, 'section rename': [], 'section delete': [],
+  move: ['--group', '--folder', '--ungroup'],
+  groups: ['--json'], 'group create': ['--color', '--json'], 'group delete': [],
+  folders: ['--group', '--json'], 'folder list': ['--group', '--json'], 'folder create': ['--group', '--json'],
+  'folder rename': ['--group'], 'folder delete': ['--group'],
+  // --json only with --no-wait (loginFlagsError): the other forms print no JSON.
+  login: ['--no-pull', '--no-wait', '--finish', '--json'], logout: [],
+  push: [], pull: ['--force'], status: ['--json'], migrate: [], 'self-update': [],
+  'cloud login': ['--no-pull', '--send-code', '--code'], 'cloud logout': [], 'cloud status': ['--json'],
+  'cloud setup': [], 'cloud push': [], 'cloud pull': [],
+}
+const COMMAND_ALIASES = { rm: 'delete', pin: 'favorite', update: 'pull' }
+const SUBCOMMAND_PARENTS = ['section', 'group', 'folder', 'cloud']
+
+/**
+ * Pure: the first flag in `seen` that `cmd [sub]` doesn't support → its error
+ * message, else null. Unknown commands/subcommands → null (their own usage
+ * error follows).
+ */
+function unsupportedFlagError(cmd, sub, seen) {
+  const base = COMMAND_ALIASES[cmd] || cmd
+  let key = base, label = cmd
+  if (SUBCOMMAND_PARENTS.includes(base)) {
+    key = `${base} ${sub === 'rm' ? 'delete' : sub}`
+    label = `${cmd} ${sub}`
+  }
+  if (!Object.hasOwn(COMMAND_FLAGS, key)) return null
+  const allowed = COMMAND_FLAGS[key]
+  const bad = seen.find(f => !GLOBAL_FLAGS.includes(f) && !allowed.includes(f))
+  if (!bad) return null
+  return `Flag ${bad} is not supported by '${label}' — nothing was done (see 'noteflow help ${base}')`
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -6642,8 +6805,10 @@ async function main() {
   if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') { cmdHelp(args[1]); return }
   if (cmd === 'version' || cmd === '--version' || cmd === '-v') { out(`noteflow CLI v${CLI_VERSION}`); return }
 
-  const { flags, positional } = parseFlags(args.slice(1))
+  const { flags, positional, seen } = parseFlags(args.slice(1))
   if (flags.json) jsonMode = true // reroute informational out() lines to stderr
+  const flagError = unsupportedFlagError(cmd, positional[0], seen)
+  if (flagError) { err(flagError); exit(1) }
 
   switch (cmd) {
     case 'add': {
@@ -6861,6 +7026,8 @@ if (require.main === module) {
     planConflictCopy, buildConflictCopy, anchorTitle, conflictCopyTitle, metadataPendingForPull,
     normalizeOtpCode, planCloudLogin,
     loginFlagsError, checkPendingGithubLogin, resolveFinishRepo, desktopSettingsCandidates, desktopAppInfo,
+    parseRepoSpec, loginOwnerError, completeGithubLogin, ensureRepo,
+    unsupportedFlagError, COMMAND_FLAGS, decodeInputBuffer, looksLikeUtf16,
     gitBlobSha, isNoteFilePath, planConditionalUpsert, planConditionalDelete, remoteDirChangesSinceBase,
     nextPulledBases, githubConflictCandidates, planGithubDirMerge, githubResolveConflictDir, cmdPush, cmdPull,
     // Cloud three-way reconcile (mirrors of electron/cloudSyncLogic.ts) + the

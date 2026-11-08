@@ -2192,11 +2192,11 @@ reescribe cada `<secId>.md` desde `note.sections[].content`, así que una copia 
 edición), bumpea `updated:` y hace `syncPushNoteFiles` de `note.md` + todas las secciones. El
 detalle de cada comando vive en **`noteflow help <comando>`** (`cmdHelp`).
 
-**Criterio de la skill `cli/noteflow-cli/SKILL.md` (~270 líneas, desde 2026-11).** La lee un agente
+**Criterio de la skill `cli/noteflow-cli/SKILL.md` (~300 líneas, desde 2026-11).** La lee un agente
 cualquiera en el equipo de un usuario final, sin el repo ni `.agents/context/` (la app la copia sola
 a los dirs de skills de los agentes, ver "Auto-instalación de la skill" abajo). Recoge **solo lo que el CLI no avisa por sí solo** —fallos silenciosos (sync
 con exit 0, `set` reemplaza, truncado de `noteflow.cmd`, `touch` obligatorio y que borra `.md`
-sueltos, app abierta pisando grupos/carpetas, `--force`, `add --title` parcial…), modelo mental,
+sueltos, app abierta pisando grupos/carpetas, `--force`, `pull` de GitHub sin borrados…), modelo mental,
 chuleta de una línea por comando, checklist y protocolos de sync—; lo que el CLI ya bloquea con un
 error autocorregible (`Did you mean`, flag desconocido, uso incorrecto) se resume en "lee el error".
 Detalle útil que no sea un riesgo → a `cmdHelp`, no a la skill (las pruebas con modelos pequeños
@@ -2243,10 +2243,10 @@ y al humano solo le queda autorizar en GitHub o dar el código del email:
 - **GitHub:** `login [repo] --no-wait` pide el device code, lo imprime (abre el navegador
   best-effort; con `--json`, `{ verificationUri, userCode, expiresAt, repo }`) y guarda la concesión
   pendiente en `settings.cliGithubLogin` (`{ deviceCode, userCode, verificationUri, interval,
-  expiresAt, repo, noPull? }`, clave propia del CLI, `writeSettings` → 0600). `login --finish` la
+  expiresAt, repo, owner?, noPull? }`, clave propia del CLI, `writeSettings` → 0600). `login --finish` la
   valida (`checkPendingGithubLogin`: ausente/mal formada o caducada → exit 1 pidiendo `--no-wait`
   otra vez), hace el polling con el **primer intento inmediato** (respeta `interval`/`slow_down`) y
-  sigue por `completeGithubLogin`, el mismo final que el login interactivo (`ensureRepo`, reglas
+  sigue por `completeGithubLogin`, el mismo final que el login interactivo (owner, `ensureRepo`, reglas
   `sameRepo`/`clearGithubBases`, `pullAfterLogin`). El pendiente se borra en cuanto el polling
   termina (token concedido, caducado o error definitivo como `access_denied`). Un fallo de red
   **durante el polling** (o que el timeout de la herramienta del agente corte el comando) lo
@@ -2267,6 +2267,44 @@ y al humano solo le queda autorizar en GitHub o dar el código del email:
   otro fichero y esta es la única forma de saberlo. Así el agente propone al usuario el mismo
   backend que usa en la app. Protocolo del agente en la skill (`cli/noteflow-cli/SKILL.md`
   § "Ofrécete a activar el sync"). Tests en `tests/cli/agentLogin.test.ts`.
+
+**Escrituras estrictas: nada de fallos silenciosos (v2.8.0).** Pruebas con un modelo pequeño
+siguiendo la skill destaparon casos que "salían bien" con un resultado equivocado; el criterio es
+**arreglarlo en el CLI** (error con exit 1 antes de escribir) en vez de avisarlo en la skill:
+- **`login owner/repo`:** el argumento es `repo` u `owner/repo` (`parseRepoSpec`: nombres
+  `[A-Za-z0-9._-]+`, como mucho una `/`), validado **antes** de pedir el device code (también con
+  `--no-wait` y `--finish`). Tras `GET /user`, un owner distinto (sin distinguir mayúsculas) de
+  `user.login` → exit 1 **antes** de `ensureRepo` y de `writeSettings` (`loginOwnerError`): el CLI
+  solo sincroniza repos de su propia cuenta. Antes `ensureRepo(…, "ana/notas")` fallaba el GET y
+  creaba un repo con nombre equivocado. El owner viaja en el pendiente (`owner?`) y
+  `resolveFinishRepo` lo compara. Por eso, para conectar un repo **existente** (caso (b) de la
+  skill: el mismo que usa la app) se pasa `owner/repo`: con solo el nombre, autorizar con otra
+  cuenta haría que `ensureRepo` reciba un 404 y cree `<otra>/<repo>` con exit 0. Sin repo o solo
+  el nombre queda para un repo nuevo (caso (a)). Tests en `tests/cli/loginRepoSpec.test.ts`.
+- **`ensureRepo` solo crea ante un 404** (`githubRequest` adjunta `status` al error); red, 401 o
+  5xx se propagan y el login falla, en vez de crear un repo nuevo y apuntar el sync a él.
+- **`add --title`** resuelve como `resolveNote` (`failIfAmbiguousNote`): exacto gana, parcial único
+  vale, varios → exit 1 listándolos, **también con `--create`** (sin ninguna coincidencia,
+  `--create` crea la nota como siempre). Antes escribía en la primera coincidencia.
+- **`add --group/--folder` inexistente** → exit 1 antes de escribir, también con `--dry-run`
+  (`resolveGroupPlacement`, compartida con `new`; mismos mensajes que `move`). Antes avisaba,
+  escribía sin agrupar y salía con 0. La nota y el grupo se resuelven **antes** de leer el
+  contenido (como `set`). Cambiar de grupo sin `--folder` limpia `note.folder` (como `move`; antes
+  quedaba apuntando a una carpeta del grupo anterior); el mismo grupo sin `--folder` la conserva.
+- **Flags por comando** (`COMMAND_FLAGS` + `unsupportedFlagError`, validado en `main()` tras
+  `parseFlags`): un flag conocido que el comando no lee → `Flag --dry-run is not supported by
+  'delete'`, exit 1, sin ejecutar nada (antes `delete X --yes --dry-run` borraba de verdad).
+  Global solo `--yes` (inocuo donde no hay prompt). `--json` solo en los comandos que emiten JSON
+  (`list get read path new add set delete groups folders group create folder create status
+  cloud status`, y `login` solo con `--no-wait` vía `loginFlagsError`): en los demás `jsonMode`
+  mandaba el texto a stderr y dejaba stdout vacío con exit 0.
+  ⚠️ Al añadir un flag a un comando, añádelo a la tabla o se rechazará; los comandos/subcomandos
+  desconocidos no se validan (sale su propio error de uso).
+- **`--file`/`--stdin` en UTF-16** (`decodeInputBuffer`, en `resolveSetContent` → `add` y `set`):
+  se leen como bytes; BOM `FF FE`/`FE FF` → se decodifica UTF-16 LE/BE (lo que escribe el `>` de
+  PowerShell 5.1); sin BOM pero con NUL en ≥30% de las unidades de una paridad (`looksLikeUtf16`)
+  → exit 1 sugiriendo `| noteflow set … --stdin` u `Out-File -Encoding utf8`. Antes se guardaba
+  basura con exit 0. Tests en `tests/cli/strictWrites.test.ts`.
 
 **Shims de Windows (`cli/noteflow.cmd`, `cli/noteflow.ps1`).** PowerShell prefiere el `.ps1` sobre el
 `.cmd`, así que el `.ps1` carga con dos rarezas de PS 5.1: (1) en una **tubería** PowerShell se queda
