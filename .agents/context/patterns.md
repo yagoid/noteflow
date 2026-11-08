@@ -1462,7 +1462,7 @@ estilos en el bloque `.sbg-*` al final de `index.css`; números y helpers puros 
   reaparecer salta y hace fade-in. Grupo plegado con la nota abierta (`has-open`): pestaña al 40 % y el
   título de la nota junto al nombre (`.sbg-gact`); carpeta plegada: trazo del icono en el color.
 - **Icono personalizado de carpeta** (menú contextual de la carpeta → "Change icon", fila que despliega
-  in situ una rejilla 7×4: "Default" + 27 iconos; elegir aplica y cierra). `NoteFolder.icon` guarda una
+  in situ una rejilla de 6 columnas: "Default" + 27 iconos a 16px; elegir aplica y cierra). `NoteFolder.icon` guarda una
   **clave estable** del set curado `FOLDER_ICONS` (`src/lib/folderIcons.ts`; claves = objeto dibujado,
   no el nombre del export de lucide, que cambia entre versiones), nunca un componente. Sin clave o con
   una desconocida (cliente más nuevo) → `FolderGlyph`. Solo se **añaden** claves al final (renombrar o

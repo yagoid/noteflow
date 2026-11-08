@@ -23,10 +23,10 @@ interface FolderContextMenuProps {
   onRename: (folderId: string) => void
 }
 
-// A cell of the icon picker grid (7 per row fill the w-44 menu); the current icon is ringed
+// A cell of the icon picker grid (6 per row fill the w-44 menu); the current icon is ringed
 // like the group colour swatches. The text colour lives only in the on/off classes (muted and
 // text in the same class list would let the later Tailwind rule win).
-const ICON_CELL_CLASS = 'h-5 flex items-center justify-center rounded hover:bg-surface-3 hover:text-text transition-colors'
+const ICON_CELL_CLASS = 'h-6 flex items-center justify-center rounded hover:bg-surface-3 hover:text-text transition-colors'
 const ICON_CELL_ON_CLASS = 'bg-surface-3 text-text ring-1 ring-text/40'
 const ICON_CELL_OFF_CLASS = 'text-text-muted'
 
@@ -97,7 +97,7 @@ export function FolderContextMenu({ request, onClose, onRename }: FolderContextM
               onClose()
             }
             return (
-              <div className="fld-ico-menu px-3 pt-1 pb-2 grid grid-cols-7 gap-0.5">
+              <div className="fld-ico-menu px-2 pt-1 pb-2 grid grid-cols-6 gap-0.5">
                 <button
                   type="button"
                   title={t.common.defaultFolderIcon}
@@ -120,7 +120,7 @@ export function FolderContextMenu({ request, onClose, onRename }: FolderContextM
                       onClick={(e) => pick(e, key)}
                       className={`${ICON_CELL_CLASS} ${current === key ? ICON_CELL_ON_CLASS : ICON_CELL_OFF_CLASS}`}
                     >
-                      <Icon size={12} />
+                      <Icon size={16} />
                     </button>
                   )
                 })}

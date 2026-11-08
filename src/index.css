@@ -3100,6 +3100,7 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
 .sbg-f.is-collapsed.has-open > .sbg-fh .sbg-folder-ico { color: rgb(var(--g)); }
 /* In the folder icon picker (FolderContextMenu) the glyph follows its cell like the lucide
    icons: stroke = the cell's text colour, front flap = the cell's background. */
+.fld-ico-menu .sbg-folder { width: 17px; height: 15px; }
 .fld-ico-menu .sbg-folder-b, .fld-ico-menu .sbg-folder-f { stroke: currentColor; }
 .fld-ico-menu .sbg-folder-f { fill: rgb(var(--bg-2)); }
 .fld-ico-menu button:hover .sbg-folder-f, .fld-ico-menu button[aria-pressed='true'] .sbg-folder-f { fill: rgb(var(--bg-3)); }
