@@ -1064,7 +1064,8 @@ const CLIPS = {
       const rec = await startRecording(page)
       await sleep(200)
       // 1 · Encrypt the open note.
-      await a.click(page.locator(`button[title="${T.ui.sectionOptions}"]`).first(), { after: 300 })
+      // The note's ⋯ menu (the section map's chevrons share the title, so skip them).
+      await a.click(page.locator(`button[title="${T.ui.sectionOptions}"]:not(.section-map-chevron)`).first(), { after: 300 })
       await a.click(page.getByText(T.ui.encrypt, { exact: true }).first(), { after: 300 })
       const pw = page.locator('input[type="password"]')
       await a.click(pw.nth(0), { after: 80, fx: 0.8 })
