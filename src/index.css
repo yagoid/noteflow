@@ -3143,7 +3143,9 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
 /* Collapsible bodies. `overflow: hidden` only collapsed or while folding: the folder
    headers inside are sticky, and sticky stops at an `overflow: hidden` ancestor. */
 .sbg-body {
-  display: grid; grid-template-rows: 1fr;
+  /* minmax(0, 1fr): an `auto` column grows to the rows' min-content (a long title is
+     nowrap), which pushed the row past the sidebar edge whenever .sbg-clip is visible. */
+  display: grid; grid-template-rows: 1fr; grid-template-columns: minmax(0, 1fr);
   transition: grid-template-rows 360ms cubic-bezier(.22, .9, .24, 1);
 }
 .sbg-g.is-collapsed > .sbg-body, .sbg-f.is-collapsed > .sbg-body { grid-template-rows: 0fr; }
