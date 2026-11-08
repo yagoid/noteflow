@@ -19,7 +19,7 @@ import {
 import { modKey } from '../../lib/platform'
 import { parseSearchQuery, noteMatchesQuery } from '../../lib/searchUtils'
 import { NoteGroupHeader } from './NoteGroupHeader'
-import { NoteFolderHeader, FolderGlyph } from './NoteFolderHeader'
+import { NoteFolderHeader, FolderGlyph, FolderIcon } from './NoteFolderHeader'
 import { GroupGuides } from './GroupGuides'
 import { DROP_SPRING_OPEN_MS, dropChangesPlace, staggerStep } from '../../lib/sidebarGuides'
 import { useSidebarGroups, type SidebarFolder } from './useSidebarGroups'
@@ -778,7 +778,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
       >
         {editingFolderId === folder.id ? (
           <div className="flex items-center gap-1.5 ml-[17px] px-1.5 py-1">
-            <FolderGlyph />
+            <FolderIcon icon={folder.icon} />
             <input
               autoFocus
               value={editingFolderName}

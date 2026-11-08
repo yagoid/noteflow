@@ -1461,6 +1461,18 @@ estilos en el bloque `.sbg-*` al final de `index.css`; números y helpers puros 
   de un deslizamiento en curso. Oculto si la nota no está en el grupo o su carpeta está plegada; al
   reaparecer salta y hace fade-in. Grupo plegado con la nota abierta (`has-open`): pestaña al 40 % y el
   título de la nota junto al nombre (`.sbg-gact`); carpeta plegada: trazo del icono en el color.
+- **Icono personalizado de carpeta** (menú contextual de la carpeta → "Change icon", fila que despliega
+  in situ una rejilla 7×4: "Default" + 27 iconos; elegir aplica y cierra). `NoteFolder.icon` guarda una
+  **clave estable** del set curado `FOLDER_ICONS` (`src/lib/folderIcons.ts`; claves = objeto dibujado,
+  no el nombre del export de lucide, que cambia entre versiones), nunca un componente. Sin clave o con
+  una desconocida (cliente más nuevo) → `FolderGlyph`. Solo se **añaden** claves al final (renombrar o
+  quitar una devuelve al predeterminado las carpetas que la usan) + su etiqueta en `common.folderIcons`
+  (EN/ES; un test exige etiqueta por clave). `groupsStore.setFolderIcon(id, null)` borra el campo (no
+  escribe `icon: null`). Render: `FolderIcon` (donde va el glyph: cabecera y rename del sidebar,
+  columna de lugares, ruta de la fila y miga de la vista previa en la vista de contenido; lucide 13 px
+  con `.sbg-folder-ico` = mismo gris y mismo acento `has-open` que el glyph, sin solapa animada) y
+  `FolderListIcon` (listas con lucide `Folder` de fallback: submenú "Move to folder", barra de
+  selección, etiqueta de carpeta del peek). Los inputs de **nueva** carpeta siguen con el glyph.
 - **Sin foco al pasar por la cabecera:** el prototipo atenuaba el resto de la lista al dejar el ratón
   sobre la cabecera de un grupo expandido; se quitó a petición del usuario (no le gustaba). La
   atenuación solo existe durante el arrastre de una nota (abajo). El hover de la cabecera solo

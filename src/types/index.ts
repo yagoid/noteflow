@@ -67,6 +67,9 @@ export interface NoteFolder {
   name: string      // user-visible label
   groupId: string   // parent NoteGroup id
   order: number     // sort order ascending within the group
+  /** Key from the curated folder icon set (`FOLDER_ICONS` in lib/folderIcons.ts). Absent =
+   *  the default folder glyph; an unknown key (newer client) falls back to it too. */
+  icon?: string
 }
 
 export interface NoteMeta {

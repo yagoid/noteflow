@@ -132,7 +132,8 @@ noteflow/
 │   │   ├── Sidebar/
 │   │   │   ├── Sidebar.tsx              # Lista de notas, filtros, búsqueda, grupos/carpetas
 │   │   │   ├── NoteGroupHeader.tsx      # Cabecera de grupo (nombre→vista de contenido del grupo; resto→colapsar)
-│   │   │   ├── NoteFolderHeader.tsx     # Cabecera colapsable de carpeta (dentro de grupo)
+│   │   │   ├── NoteFolderHeader.tsx     # Cabecera colapsable de carpeta (dentro de grupo) + FolderGlyph /
+│   │   │   │                            #   FolderIcon / FolderListIcon (icono de una carpeta concreta)
 │   │   │   ├── NoteSectionMap.tsx       # Secciones de la fila de nota: línea plegada → peek al hover → mapa
 │   │   │   │                            #   abierto (patterns.md "Sidebar: item de nota"); + SectionCell.tsx
 │   │   │   │                            #   (celda), NoteSectionFlip.tsx (FLIP entre filas), useSectionInk.ts
@@ -226,6 +227,8 @@ noteflow/
 │   │   ├── alarmUtils.ts         # Recolección de alarmas/deadlines (líneas de tarea, también indentadas) — testeado
 │   │   ├── paneUtils.ts          # Modelo puro de paneles del split (abrir/cerrar/reordenar/enfocar) — testeado
 │   │   ├── tocUtils.ts           # Lógica pura del índice flotante del editor (entradas, activo) — testeado
+│   │   ├── folderIcons.ts        # Set curado de iconos de carpeta (clave estable → icono lucide) +
+│   │   │                         #   resolveFolderIcon — testeado
 │   │   ├── miniSidebar.ts        # Lógica pura del sidebar flotante (filas de la mini-vista, ventana,
 │   │   │                         #   ancla/posición del panel, reglas de visibilidad compartidas) — testeado
 │   │   ├── keyedQueue.ts         # Cola serial por clave (escrituras de una nota en orden) — testeada
@@ -434,7 +437,11 @@ Contenido del dir de notas:
 - `.noteflow-format` — marcador de versión del formato (`2`).
 - `groups.json` — definición de grupos (`{id,name,color,order,archived?}`; `archived?` oculta el
   grupo y sus notas salvo con "Show archived").
-- `folders.json` — definición de carpetas (subcarpetas de grupos).
+- `folders.json` — definición de carpetas (subcarpetas de grupos): array `NoteFolder[]`
+  (`{id,name,groupId,order,icon?}`). `icon?` = clave del set curado de `src/lib/folderIcons.ts`
+  (ausente o desconocida → icono de carpeta por defecto); se escribe tal cual (sin campo `icon`
+  cuando vuelve al predeterminado). CLI, tools de la IA y móvil hacen `{...f, name}` al renombrar, así
+  que conservan campos que no conocen: añadir campos opcionales aquí es compatible en ambos sentidos.
 - `section-colors.json` — mapa `nombreSección(normalizado) → color`: una CSS var del tema (`--accent`…)
   **o** un hex libre `#rrggbb` (ver "Color de grupos y secciones" en `patterns.md`). No reintroducir un
   validador var-only en `sanitizeSectionColors`: borraría los colores personalizados del usuario al guardar.

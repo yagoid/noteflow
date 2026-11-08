@@ -563,11 +563,13 @@ export function ContentView({ place, onClose }: ContentViewProps) {
     const entries = listed.map((note) => {
       const loc = noteLocation(note, ctx)
       const group = loc.groupId ? ctx.groupsById.get(loc.groupId) ?? null : null
+      const folder = loc.folderId ? ctx.foldersById.get(loc.folderId) ?? null : null
       return {
         note,
         groupName: group?.name ?? null,
         groupChannels: group ? colorChannels(group.color) : null,
-        folderName: loc.folderId ? ctx.foldersById.get(loc.folderId)?.name ?? null : null,
+        folderName: folder?.name ?? null,
+        folderIcon: folder?.icon,
       }
     })
     return groupByDateBlock(entries, (e) => noteTime(e.note), now).map(({ block, items }) => ({
@@ -809,6 +811,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
           groupName={previewGroup?.name ?? null}
           groupChannels={previewGroup ? colorChannels(previewGroup.color) : null}
           folderName={previewFolder?.name ?? null}
+          folderIcon={previewFolder?.icon}
           sectionTagColors={sectionTagColors}
           onClose={() => { setPreviewOpen(false); focusList() }}
           onOpenInEditor={() => { if (current) openInEditor(current.noteId, current.sectionId) }}

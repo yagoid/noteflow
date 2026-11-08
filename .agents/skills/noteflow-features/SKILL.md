@@ -355,10 +355,16 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
   **"+ Folder"** bajo las carpetas del grupo en la vista de contenido.
 - **Mover nota a carpeta**: menú contextual de la nota → "Move to folder" (submenú con las
   carpetas del grupo). "Group root" la saca de la carpeta sin sacarla del grupo.
-- **Renombrar / Eliminar**: menú contextual de la cabecera de carpeta (o de la carpeta en la columna de
-  lugares de la vista de contenido). Al borrar una carpeta sus notas vuelven a la raíz del grupo.
-- **Colapsar / Expandir**: independiente de los grupos (estado persistido). El icono de carpeta abre
-  su solapa cuando está expandida.
+- **Renombrar / Cambiar icono / Eliminar**: menú contextual de la cabecera de carpeta (o de la carpeta
+  en la columna de lugares de la vista de contenido). Al borrar una carpeta sus notas vuelven a la raíz
+  del grupo.
+- **Icono personalizado**: "Change icon" despliega dentro del menú una rejilla de iconos (trabajo,
+  personal, casa, ideas, libro, código, calendario, viajes, música…, 27 en total; tooltip con su nombre)
+  con "Default" primero (vuelve al icono de carpeta). El actual va marcado con un anillo; elegir uno lo
+  aplica y cierra el menú. Se ve en el sidebar, la vista de contenido, el peek de grupo y las listas de
+  "Move to folder". Se sincroniza con `folders.json`.
+- **Colapsar / Expandir**: independiente de los grupos (estado persistido). El icono de carpeta por
+  defecto abre su solapa cuando está expandida (los iconos personalizados no tienen solapa).
 
 > Grupos y carpetas se guardan en `groups.json` / `folders.json` dentro del dir de notas y **se
 > sincronizan con GitHub** (no en `settings.json`).

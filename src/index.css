@@ -3095,6 +3095,14 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
 .sbg-f:not(.is-collapsed) > .sbg-fh .sbg-folder-f { transform: skewX(-18deg) scaleY(0.8) translateX(1px); }
 .sbg-f.is-collapsed.has-open > .sbg-fh .sbg-folder-b,
 .sbg-f.is-collapsed.has-open > .sbg-fh .sbg-folder-f { stroke: rgb(var(--g)); }
+/* A folder's custom icon (FolderIcon, lucide): the glyph's colour and open-note accent. */
+.sbg-folder-ico { flex: none; color: rgb(var(--text-muted) / 0.85); transition: color 300ms; }
+.sbg-f.is-collapsed.has-open > .sbg-fh .sbg-folder-ico { color: rgb(var(--g)); }
+/* In the folder icon picker (FolderContextMenu) the glyph follows its cell like the lucide
+   icons: stroke = the cell's text colour, front flap = the cell's background. */
+.fld-ico-menu .sbg-folder-b, .fld-ico-menu .sbg-folder-f { stroke: currentColor; }
+.fld-ico-menu .sbg-folder-f { fill: rgb(var(--bg-2)); }
+.fld-ico-menu button:hover .sbg-folder-f, .fld-ico-menu button[aria-pressed='true'] .sbg-folder-f { fill: rgb(var(--bg-3)); }
 
 /* Cursor: the open note's mark, sliding along the guide (placed by GroupGuides) */
 .sbg-cur {
@@ -3154,7 +3162,7 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
 @media (prefers-reduced-motion: reduce) {
   .sbg-list > *, .sbg-gh::before, .sbg-gh::after, .sbg-fh::after, .sbg-tab, .sbg-tab::after,
   .sbg-gname, .sbg-fname, .sbg-gact, .sbg-chev, .sbg-body, .sbg-in::before, .sbg-fin::before,
-  .sbg-folder-b, .sbg-folder-f, .sbg-cur, .sbg-in [data-note-row], .sbg-in .sbg-fh {
+  .sbg-folder-b, .sbg-folder-f, .sbg-folder-ico, .sbg-cur, .sbg-in [data-note-row], .sbg-in .sbg-fh {
     transition: none !important;
   }
   .sbg-slot { animation: none; }

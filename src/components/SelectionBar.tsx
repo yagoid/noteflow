@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X, Folder, Star, StarOff, Trash2, FolderInput, ChevronRight, FolderMinus, Archive } from 'lucide-react'
 import { colorChannels } from '../lib/tagColors'
+import { FolderListIcon } from './Sidebar/NoteFolderHeader'
 import { useT } from '../i18n/useT'
 import { tf } from '../i18n/format'
 import type { NoteGroup, NoteFolder } from '../types'
@@ -140,7 +141,7 @@ export function SelectionBar({
                   onClick={() => { onMoveToFolder?.(f.id) }}
                   className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
                 >
-                  <Folder size={12} className="flex-shrink-0" />
+                  <FolderListIcon icon={f.icon} size={12} className="flex-shrink-0" />
                   <span className="truncate">{f.name}</span>
                 </button>
               ))}

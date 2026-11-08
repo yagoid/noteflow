@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Ref, RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { Folder, Lock, Search, Timer } from 'lucide-react'
+import { Lock, Search, Timer } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useThemeStore, type SidebarSectionsStyle } from '../../stores/themeStore'
 import { colorChannels } from '../../lib/tagColors'
@@ -13,6 +13,7 @@ import {
   moveGroupPeekSelection,
 } from '../../lib/groupPeek'
 import { SectionTabsRow } from './SectionTabsRow'
+import { FolderListIcon } from './NoteFolderHeader'
 import { NoteSectionMap, type NoteSectionHandlers } from './NoteSectionMap'
 import { GROUP_PEEK_PORTAL_ATTR } from './sidebarAnchor'
 import { useOpenNoteSection } from './useOpenNoteSection'
@@ -525,6 +526,7 @@ function GroupPeekPanel({
                   key={entry.note.id}
                   note={entry.note}
                   folderName={entry.folder?.name ?? null}
+                  folderIcon={entry.folder?.icon}
                   index={index}
                   groupColor={group.color}
                   isActive={isActive}
@@ -554,6 +556,8 @@ function GroupPeekPanel({
 interface PeekRowProps {
   note: Note
   folderName: string | null
+  /** The folder's icon key (`NoteFolder.icon`; undefined: lucide's Folder). */
+  folderIcon: string | undefined
   index: number
   groupColor: GroupColor
   isActive: boolean
@@ -578,6 +582,7 @@ const suppressContextMenu = (e: React.MouseEvent) => e.preventDefault()
 const PeekRow = memo(function PeekRow({
   note,
   folderName,
+  folderIcon,
   index,
   groupColor,
   isActive,
@@ -619,7 +624,7 @@ const PeekRow = memo(function PeekRow({
           </span>
           {folderName && (
             <span className="flex items-center gap-0.5 min-w-0 max-w-[40%] flex-shrink-0 text-[9.5px] font-mono text-text-muted/55">
-              <Folder size={8} className="flex-shrink-0" style={{ color: `rgb(${colorChannels(groupColor)} / 0.7)` }} />
+              <FolderListIcon icon={folderIcon} size={8} className="flex-shrink-0" style={{ color: `rgb(${colorChannels(groupColor)} / 0.7)` }} />
               <span className="truncate">{folderName}</span>
             </span>
           )}

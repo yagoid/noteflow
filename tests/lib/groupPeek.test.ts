@@ -39,6 +39,18 @@ describe('flattenGroupPeekEntries', () => {
     expect(entries[2].folder).toEqual({ id: 'fa', name: 'Work' })
   })
 
+  it("carries the folder's custom icon only when it has one", () => {
+    const entries = flattenGroupPeekEntries({
+      notes: [],
+      folders: [
+        { folder: { id: 'fa', name: 'Work', icon: 'briefcase' }, notes: [inA] },
+        { folder: { id: 'fb', name: 'Money' }, notes: [inB1] },
+      ],
+    })
+    expect(entries[0].folder).toStrictEqual({ id: 'fa', name: 'Work', icon: 'briefcase' })
+    expect(entries[1].folder).toStrictEqual({ id: 'fb', name: 'Money' })
+  })
+
   it('handles a group with only folders, or nothing at all', () => {
     expect(flattenGroupPeekEntries({ notes: [], folders: source.folders }).map((e) => e.note.id)).toEqual(['a1', 'b1', 'b2'])
     expect(flattenGroupPeekEntries({ notes: [], folders: [] })).toEqual([])

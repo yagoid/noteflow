@@ -2,7 +2,7 @@ import { memo, useMemo } from 'react'
 import type { CSSProperties, DragEvent, KeyboardEvent, MouseEvent, Ref } from 'react'
 import { Archive, Check, Lock } from 'lucide-react'
 import { SectionCell } from '../Sidebar/SectionCell'
-import { FolderGlyph } from '../Sidebar/NoteFolderHeader'
+import { FolderIcon } from '../Sidebar/NoteFolderHeader'
 import { useSectionInk } from '../Sidebar/useSectionInk'
 import { renderHighlightedText } from '../Sidebar/rowText'
 import { colorChannels, resolveGroupColor, type TagColorMap } from '../../lib/tagColors'
@@ -24,6 +24,8 @@ export interface TimelineEntry {
   /** `colorChannels` of the note's group (null: ungrouped). */
   groupChannels: string | null
   folderName: string | null
+  /** The folder's icon key (`NoteFolder.icon`; undefined: default glyph). */
+  folderIcon: string | undefined
 }
 
 /** Stable callbacks shared by every row (the view forwards them to its live handlers). */
@@ -105,6 +107,7 @@ export function NoteTimeline({
                   groupName={entry.groupName}
                   groupChannels={entry.groupChannels}
                   folderName={entry.folderName}
+                  folderIcon={entry.folderIcon}
                   route={route}
                   selected={selected}
                   activeSectionId={selected ? selectedSectionId : null}
@@ -141,7 +144,7 @@ interface TimelineRowProps extends TimelineEntry {
 
 // Memoized: with hundreds of notes, a selection change only re-renders the rows it touches.
 const TimelineRow = memo(function TimelineRow({
-  note, time, timeKind, groupName, groupChannels, folderName, route, selected, activeSectionId, checked, dragging,
+  note, time, timeKind, groupName, groupChannels, folderName, folderIcon, route, selected, activeSectionId, checked, dragging,
   parsed, highlight, sectionTagColors, handlers,
 }: TimelineRowProps) {
   const t = useT()
@@ -184,7 +187,7 @@ const TimelineRow = memo(function TimelineRow({
   } else if (route === 'folder') {
     routeNode = (
       <span className="cv-route">
-        {folderName ? <><FolderGlyph /><span>{folderName}</span></> : <span>{t.contentView.inGroup}</span>}
+        {folderName ? <><FolderIcon icon={folderIcon} /><span>{folderName}</span></> : <span>{t.contentView.inGroup}</span>}
       </span>
     )
   }
