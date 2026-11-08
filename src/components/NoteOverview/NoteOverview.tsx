@@ -11,11 +11,11 @@ import { useThemeStore } from '../../stores/themeStore'
 import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { ConfirmModal } from '../ConfirmModal'
+import { SectionCardContent } from './SectionCardContent'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
-import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { colorChannels, resolveGroupColor } from '../../lib/tagColors'
 import { firstValidDate } from '../../lib/dateUtils'
 import { moveSectionInList, moveSectionToEnd } from '../../lib/sectionUtils'
@@ -24,8 +24,7 @@ import { reorderDropSide } from '../../lib/sectionMap'
 import { resolveSectionInk } from '../../lib/sectionInk'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
 import {
-  PREVIEW_MAX_CHARS, clipPreviewMarkdown, gridColumnCount, gridNeighbor, planNoteGrid,
-  sectionCardStats, type GridDirection,
+  gridColumnCount, gridNeighbor, planNoteGrid, type GridDirection,
 } from '../../lib/noteOverviewGrid'
 import type { NoteSection } from '../../types'
 
@@ -894,20 +893,6 @@ const SectionCell = memo(function SectionCell({
   section, color, ink, isOpen, selected, dragging, renaming, renameValue, actions,
 }: SectionCellProps) {
   const t = useT()
-  const raw = !!section.isRawMode
-  const hasContent = section.content.trim().length > 0
-  // The same HTML the editor renders (as the old miniature did), at reading size; only
-  // the start of a long section, and only when its content changes.
-  const html = useMemo(
-    () => (hasContent && !raw ? htmlFromMarkdown(clipPreviewMarkdown(section.content)) : ''),
-    [section.content, hasContent, raw],
-  )
-  const stats = useMemo(() => sectionCardStats(section.content), [section.content])
-  const statLabel = stats.kind === 'empty'
-    ? t.overview.emptyStat
-    : stats.kind === 'tasks'
-      ? tf(t.overview.tasksProgress, { done: stats.done, total: stats.total })
-      : plural(t.overview.wordsPlural, stats.count)
   const label = tf(isOpen ? t.overview.backToSection : t.overview.openSection, { name: section.name })
 
   const className = [
@@ -969,32 +954,8 @@ const SectionCell = memo(function SectionCell({
         {isOpen && !renaming && <span className="note-grid-tag">{t.overview.openTag}</span>}
       </div>
 
-      <div className="note-grid-body note-preview" aria-hidden>
-        {!hasContent ? (
-          <div className="note-grid-empty">
-            <Plus size={11} strokeWidth={2.2} />
-            {t.overview.emptySectionHint}
-          </div>
-        ) : raw ? (
-          <pre className="note-grid-raw">{section.content.slice(0, PREVIEW_MAX_CHARS)}</pre>
-        ) : (
-          <div className="prose-editor">
-            <div className="ProseMirror" dangerouslySetInnerHTML={{ __html: html }} />
-          </div>
-        )}
-      </div>
-
-      <div className="note-grid-foot">
-        <span className="truncate min-w-0">{statLabel}</span>
-        <span className="flex-1" />
-        {raw && (
-          <span className="note-grid-badge">
-            <Code size={11} />
-            {t.overview.rawBadge}
-          </span>
-        )}
-        {section.aiHidden && <span className="note-grid-badge">{t.common.hiddenFromAI}</span>}
-      </div>
+      {/* Body + foot (memoised by content inside), shared with the hover card. */}
+      <SectionCardContent content={section.content} raw={!!section.isRawMode} aiHidden={!!section.aiHidden} />
 
       <button
         className="note-grid-open"

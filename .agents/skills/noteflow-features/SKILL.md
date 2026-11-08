@@ -614,11 +614,12 @@ navegar directamente a esa sección.
 ## Previsualización de sección al hover
 
 Cualquier elemento que **navega a una sección concreta** muestra, al pasar el ratón, una
-**tarjeta flotante con una previsualización** de esa sección — una mini-representación del
-editor (etiqueta de sección + título + fecha + unas líneas del contenido renderizado con la fuente
-del editor, recortadas con fade). La [vista de nota](#vista-de-nota-note-overview) ya no usa esta tarjeta: muestra el
-contenido a tamaño real dentro de su rejilla. Permite ojear el contenido
-sin navegar.
+**tarjeta flotante con una previsualización** de esa sección — con el mismo aspecto que una tarjeta
+de la [vista de nota](#vista-de-nota-note-overview) pero apaisada (más ancha que alta, siempre del
+mismo tamaño): cabecera con el **nombre de la sección en su color** y, a la derecha, el **título de la
+nota** atenuado; la esquina doblada del color; el contenido real a tamaño de lectura con la fuente del
+editor, recortado con fade; y el pie con palabras/tareas y las marcas "Text" / "Hidden from AI".
+Permite ojear el contenido sin navegar.
 
 **Dónde aparece:**
 - **Sidebar** → celdas de sección de cada nota (mapa abierto, despliegue flotante, búsqueda o fila
@@ -633,7 +634,7 @@ sin navegar.
   cursor** (hacia abajo-derecha), para no tapar el contenido a la derecha del ratón; en los
   paneles de IA sale al lado del elemento. Se voltea/recoloca si no cabe en pantalla.
 - Se cierra al **quitar el ratón** o con **cualquier click**.
-- Secciones **vacías** muestran "Empty section"; secciones de notas **cifradas y bloqueadas** no
+- Secciones **vacías** muestran "Empty section · click to write"; secciones de notas **cifradas y bloqueadas** no
   se previsualizan (no hay contenido en memoria).
 
 > En la **vista cerebro** la interacción es distinta (click en vez de hover): ver esa sección.
@@ -916,7 +917,7 @@ cualquier nota. Es **aditivo** — la lista de siempre sigue siendo el modo prin
 - **Interacción:** navegación libre estilo Obsidian — arrastrar el lienzo (pan), **rueda para zoom**,
   arrastrar un nodo para recolocarlo. **Hover/seleccionar** una nota **resalta sus conexiones de
   contenido** y atenúa el resto. **Click en un nodo de nota/sección** ancla junto a él una
-  **ventanita de previsualización clicable** (misma tarjeta que el resto de la app); al **pulsar
+  **ventanita de previsualización clicable** (una mini-representación del editor con esa sección); al **pulsar
   dentro de la ventanita** se navega a esa sección en el editor. Se cierra con click fuera o `Esc`.
   Click en un grupo abre la vista de contenido en ese grupo. Los nombres de las notas aparecen al acercar el zoom.
 - **Toggle "Contenido":** botón en la barra superior para mostrar/ocultar la capa de contenido y

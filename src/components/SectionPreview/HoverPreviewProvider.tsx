@@ -10,7 +10,7 @@ import {
 import { createPortal } from 'react-dom'
 import { useNotesStore } from '../../stores/notesStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { SectionPreviewCard } from './SectionPreviewCard'
+import { SectionHoverCard } from './SectionHoverCard'
 import {
   HoverPreviewContext,
   type Placement,
@@ -29,13 +29,14 @@ const CURSOR_OFFSET_X = 8
 const CURSOR_OFFSET_Y = 14
 // Keep the card this far from the viewport edges when clamping.
 const VIEWPORT_MARGIN = 8
-// The floating card is a touch smaller than the Note-overview grid cards.
-const HOVER_WIDTH = 224
-const HOVER_PREVIEW_HEIGHT = 118
-const HOVER_PREVIEW_ZOOM = 0.58
+// The floating card is landscape and fixed-size, so every preview is the same
+// rectangle: header 34 + body ~128 + foot 26 (+ 1px border each side). The body
+// fades out at the bottom (see SectionHoverCard / .section-hover-card).
+const HOVER_WIDTH = 360
+const HOVER_HEIGHT = 190
 // Used only for the first paint, before the card is measured — keeps the very
 // first frame near its final spot so there's no visible jump.
-const ESTIMATED_HEIGHT = 200
+const ESTIMATED_HEIGHT = HOVER_HEIGHT
 
 interface PreviewTarget {
   noteId: string
@@ -120,25 +121,29 @@ export function HoverPreviewProvider({ children }: { children: ReactNode }) {
   )
 }
 
-const clampH = (v: number) => Math.max(VIEWPORT_MARGIN, Math.min(v, window.innerWidth - HOVER_WIDTH - VIEWPORT_MARGIN))
+// Card width: HOVER_WIDTH, capped so it never overflows a narrow window.
+const hoverWidth = () => Math.max(0, Math.min(HOVER_WIDTH, window.innerWidth - 2 * VIEWPORT_MARGIN))
+
+const clampH = (v: number, width: number) =>
+  Math.max(VIEWPORT_MARGIN, Math.min(v, window.innerWidth - width - VIEWPORT_MARGIN))
 
 // Place the card: 'element-right' to the side of the anchor (flipped on overflow),
 // 'cursor-below' centred just under the cursor (flipped above on overflow).
-function computePos(target: PreviewTarget, height: number) {
+function computePos(target: PreviewTarget, height: number, width: number) {
   const { rect, placement } = target
   const vw = window.innerWidth
   const vh = window.innerHeight
   if (placement === 'cursor-below') {
     // Top-left corner sits just below-right of the cursor, so the card extends down-right.
-    const left = clampH(rect.left + CURSOR_OFFSET_X)
+    const left = clampH(rect.left + CURSOR_OFFSET_X, width)
     let top = rect.bottom + CURSOR_OFFSET_Y
     if (top + height + VIEWPORT_MARGIN > vh) top = rect.top - CURSOR_OFFSET_Y - height
     if (top < VIEWPORT_MARGIN) top = VIEWPORT_MARGIN
     return { left, top }
   }
   let left = rect.right + GAP
-  if (left + HOVER_WIDTH + VIEWPORT_MARGIN > vw) left = rect.left - GAP - HOVER_WIDTH
-  left = clampH(left)
+  if (left + width + VIEWPORT_MARGIN > vw) left = rect.left - GAP - width
+  left = clampH(left, width)
   let top = rect.top
   if (top + height + VIEWPORT_MARGIN > vh) top = vh - height - VIEWPORT_MARGIN
   if (top < VIEWPORT_MARGIN) top = VIEWPORT_MARGIN
@@ -151,9 +156,10 @@ function HoverPreviewPopover({ target }: { target: PreviewTarget }) {
   const note = useNotesStore((s) => s.notes.find((n) => n.id === target.noteId) ?? null)
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
   const ref = useRef<HTMLDivElement>(null)
+  const width = hoverWidth()
   // First paint uses an estimated height so the card starts near its final spot;
   // it's still invisible (ready=false) until measured, so no jump is visible.
-  const [pos, setPos] = useState(() => computePos(target, ESTIMATED_HEIGHT))
+  const [pos, setPos] = useState(() => computePos(target, ESTIMATED_HEIGHT, width))
   const [ready, setReady] = useState(false)
 
   // A node may not carry a section id → fall back to the note's first one.
@@ -163,9 +169,9 @@ function HoverPreviewPopover({ target }: { target: PreviewTarget }) {
   useLayoutEffect(() => {
     const el = ref.current
     if (!el || !section) return
-    setPos(computePos(target, el.offsetHeight))
+    setPos(computePos(target, el.offsetHeight, width))
     setReady(true)
-  }, [target, section])
+  }, [target, section, width])
 
   // Section not in memory (e.g. an encrypted note that's still locked) → nothing
   // to preview.
@@ -174,23 +180,16 @@ function HoverPreviewPopover({ target }: { target: PreviewTarget }) {
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[9999] pointer-events-none rounded-lg border border-solid border-text/25
-                 bg-surface-1 shadow-xl overflow-hidden flex flex-col transition-opacity duration-100"
+      className="fixed z-[9999] pointer-events-none transition-opacity duration-100"
       style={{
-        width: HOVER_WIDTH,
+        width,
+        height: HOVER_HEIGHT,
         left: pos.left,
         top: pos.top,
         opacity: ready ? 1 : 0,
       }}
     >
-      <SectionPreviewCard
-        note={note}
-        section={section}
-        sectionTagColors={sectionTagColors}
-        compact
-        previewHeight={HOVER_PREVIEW_HEIGHT}
-        previewZoom={HOVER_PREVIEW_ZOOM}
-      />
+      <SectionHoverCard note={note} section={section} sectionTagColors={sectionTagColors} />
     </div>,
     document.body,
   )

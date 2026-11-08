@@ -223,7 +223,8 @@ fila de la nota en el sidebar **no** es una entrada: abre el editor en la primer
 
 **Es el mapa de secciones con la vista previa dentro** (`NoteOverview/NoteOverview.tsx`, lógica pura en
 `src/lib/noteOverviewGrid.ts` con test en `tests/lib/noteOverviewGrid.test.ts`, estilos `.note-grid*` en
-`index.css`). Ya **no** usa `SectionPreviewCard` (el mini-mock con zoom sigue para el hover y el cerebro).
+`index.css`). Ya **no** usa `SectionPreviewCard` (el mini-mock con zoom solo sigue en el cerebro; el hover
+usa `SectionHoverCard`, una celda de esta vista en tarjeta flotante — ver abajo).
 Decisiones a respetar si se toca:
 - **Un bloque reticulado**, como el mapa: juntas de 4 px sobre `--bg-editor`, radio 8 px fuera
   (`overflow: hidden` en `.note-grid`) y 4 px en las celdas, fondo `--text / 0.06` (hover 0.09, sin bordes
@@ -261,7 +262,8 @@ Decisiones a respetar si se toca:
 - **Soltar sobre "New section"** lleva la tarjeta **al final** (`moveSectionToEnd` de
   `lib/sectionUtils.ts`; no-op si ya es la última). La barra va en la junta antes de esa celda, o —si es
   una franja propia porque la última fila estaba llena— dentro del borde derecho de la última tarjeta.
-- **Vista previa** (`SectionCell`, `memo`): el HTML de `htmlFromMarkdown` (el mismo renderizado que el
+- **Vista previa** (`SectionCell`, `memo`; cuerpo + pie en `NoteOverview/SectionCardContent.tsx`, compartido
+  con la tarjeta del hover): el HTML de `htmlFromMarkdown` (el mismo renderizado que el
   editor y el antiguo mini-mock) dentro de `.note-grid-body.note-preview > .prose-editor > .ProseMirror`,
   restilado **a tamaño real** (11 px, títulos 12 px seminegrita en color de texto, código 10 px mono), sin
   título de nota, fecha ni toolbar falsa, con `mask-image` que lo desvanece abajo. **Fuente = la del
@@ -314,10 +316,22 @@ Decisiones a respetar si se toca:
   `border: 1.5px solid …`).
 
 ### Previsualización de sección (hover + cerebro)
-Reutiliza `SectionPreviewCard` en dos interacciones, sin IPC nuevo (el contenido de toda sección ya está
-en memoria en `notesStore`):
+Dos interacciones sin IPC nuevo (el contenido de toda sección ya está en memoria en `notesStore`), cada
+una con su tarjeta:
 - **Hover** (`SectionPreview/HoverPreviewProvider.tsx`, montado en `App.tsx`): un **único** popover en
-  portal a `document.body`. El hook `useSectionHoverPreview()` (en `hoverPreviewContext.ts`, archivo
+  portal a `document.body` con `SectionPreview/SectionHoverCard.tsx` = **una celda de la vista de nota
+  en apaisado**, tamaño fijo **360×190** (`HOVER_WIDTH`/`HOVER_HEIGHT`; el ancho se capa a
+  `innerWidth - 2·margen` en ventanas estrechas), así todas las previews son el mismo rectángulo.
+  Reutiliza las clases de la celda (`.note-grid-head`, y cuerpo + pie vía `SectionCardContent`: contenido
+  a tamaño de lectura con su fade, raw → `.note-grid-raw`, vacía → `.note-grid-empty`, pie con
+  estadísticas y badges "Text"/"Hidden from AI") y la esquina doblada (`.section-map-corner`, 14 px); en
+  `.section-hover-*` solo lo distinto: superficie **opaca** (`--bg-editor` + el tinte 0.06 de la celda,
+  borde `--text / 0.12`, radio 8 px, sombra más suave en tema claro), el **nombre en el color de la
+  sección** (prioridad: hasta el 60 % de la cabecera) y a la derecha el **título de la nota** atenuado
+  a 11 px (contexto en Chat/Related; fallback "Untitled"); la cabecera reserva 24 px a la derecha para
+  la esquina. Oculta a la IA: `EyeOff`, nombre al 60 %, tinte/cabecera más tenues y esquina gris. Como
+  vive en un portal, la propia tarjeta define `--prose-font-family` (`proseFontStack`) y
+  `--ng-accent-ink` (`resolveSectionInk('--accent')`, recalculado al cambiar tema/acento). El hook `useSectionHoverPreview()` (en `hoverPreviewContext.ts`, archivo
   aparte por la regla `react-refresh/only-export-components`) expone `previewProps(noteId, sectionId, opts)`
   que devuelve handlers de ratón para escupir sobre cualquier disparador. Disparadores cableados:
   `SectionCell` (celdas de las filas de nota del sidebar —mapa abierto, peek, búsqueda y fila con
@@ -329,8 +343,9 @@ en memoria en `notesStore`):
   pegado al pasar una pestaña del editor a "activa" y perder sus handlers). `title:''` en los handlers
   suprime el tooltip nativo del ancestro. Posición flash-free: primera pintura con altura estimada +
   `opacity:0`, se mide en `useLayoutEffect` y se revela.
-- **Cerebro** (`Brain/BrainNodePreview.tsx`): NO es hover. Click en un nodo nota/sección llama
-  `onNodeActivate(noteId, sectionId, clientX, clientY)` (en vez de navegar) → `BrainView` fija una tarjeta
+- **Cerebro** (`Brain/BrainNodePreview.tsx`, con el mini-mock `SectionPreviewCard`): NO es hover. Click
+  en un nodo nota/sección llama `onNodeActivate(noteId, sectionId, clientX, clientY)` (en vez de
+  navegar) → `BrainView` fija una tarjeta
   **clicable** junto al click; pulsarla navega (`openNote`), click fuera o `Esc` la cierra. Sustituyó al
   antiguo "fly-in" de cámara (eliminado).
 
@@ -1220,7 +1235,8 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   texto queda bajo la mini-vista. Las previews `.note-preview` (vista de nota, hover, cerebro; también
   `.prose-editor`) quedan fuera a propósito. Esas previews se pintan fuera del contenedor del editor, así
   que definen ellas mismas `--prose-font-family` con `proseFontStack()` (la vista de nota en `.note-grid`,
-  `SectionPreviewCard` en su `.note-preview`) para seguir el ajuste de fuente del editor.
+  la tarjeta del hover en `.section-hover-card`, `SectionPreviewCard` en su `.note-preview`) para seguir
+  el ajuste de fuente del editor.
   Es el espejo izquierdo de `--toc-reserve`; se aplica a todos los panes (en el split solo el primero
   la necesita, la diferencia es de 10 px).
 
