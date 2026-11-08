@@ -19,9 +19,11 @@ interface Props {
   caption: string;
   foldAria: string;
   closeAria: string;
+  /** Tooltip of the section name: in the app it opens the section switcher (decorative here). */
+  switchHint?: string;
 }
 
-const { winTitle, items, caption, foldAria, closeAria } = Astro.props;
+const { winTitle, items, caption, foldAria, closeAria, switchHint } = Astro.props;
 ---
 
 <div class="nf-sticky-scene" data-reveal>
@@ -29,7 +31,12 @@ const { winTitle, items, caption, foldAria, closeAria } = Astro.props;
     <div class="nf-sticky" data-sticky>
       <div class="nf-sticky-bar">
         <span class="nf-sticky-dot" aria-hidden="true"></span>
-        <span class="nf-sticky-title">{winTitle}</span>
+        <span class="nf-sticky-title" title={switchHint}>
+          <span class="nf-sticky-title-text">{winTitle}</span>
+          {switchHint && (
+            <svg class="nf-sticky-chev" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          )}
+        </span>
         <button type="button" class="nf-sticky-btn" data-sticky-fold aria-label={foldAria}>─</button>
         <button type="button" class="nf-sticky-btn nf-sticky-close" data-sticky-close aria-label={closeAria}>×</button>
       </div>
@@ -121,17 +128,26 @@ const { winTitle, items, caption, foldAria, closeAria } = Astro.props;
     background: rgb(var(--nf-pink));
     box-shadow: 0 0 10px rgb(var(--nf-pink) / 0.7);
   }
+  /* Section name + the ⌄ of the section switcher (the app opens a dropdown here). */
   .nf-sticky-title {
     flex: 1;
     min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
     font-family: 'Inter', system-ui, sans-serif;
     font-size: 12.5px;
     font-weight: 500;
     color: rgb(var(--nf-text) / 0.85);
+  }
+  .nf-sticky-title-text {
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .nf-sticky-chev { flex: 0 0 auto; color: rgb(var(--nf-text-muted)); }
+  .nf-sticky.is-folded .nf-sticky-chev { display: none; }
   .nf-sticky-btn {
     flex: 0 0 auto;
     display: grid;

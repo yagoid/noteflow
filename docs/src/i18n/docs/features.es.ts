@@ -9,7 +9,7 @@ export const featuresEs: FeaturesContent = {
   meta: {
     title: 'Funcionalidades de NoteFlow — sticky notes, plantillas, cifrado y más',
     description:
-      'Los detalles que hacen distinto a NoteFlow: grupos, carpetas y secciones, plantillas de nota, sticky notes siempre encima que se pliegan a píldora, enlaces sección-a-sección, notas cifradas con AES-256, privacidad de IA por sección, 14 temas y el mapa de teclado completo.',
+      'Los detalles que hacen distinto a NoteFlow: grupos, carpetas y secciones, plantillas de nota, sticky notes siempre encima que se pliegan a píldora, enlaces sección-a-sección, fragmentos con fechas vivas, notas cifradas con AES-256, privacidad de IA por sección, 14 temas y el mapa de teclado completo.',
   },
 
   hero: {
@@ -24,6 +24,7 @@ export const featuresEs: FeaturesContent = {
     { id: 'templates', label: 'Plantillas' },
     { id: 'sticky', label: 'Sticky notes' },
     { id: 'links', label: 'Enlaces de sección' },
+    { id: 'snippets', label: 'Fragmentos' },
     { id: 'shortcuts', label: 'Atajos' },
     { id: 'views', label: 'Vistas' },
     { id: 'temp', label: 'Notas temporales' },
@@ -35,10 +36,12 @@ export const featuresEs: FeaturesContent = {
   organize: {
     title: 'Grupos, carpetas, notas — y secciones',
     intro: [
-      'NoteFlow mantiene la jerarquía deliberadamente plana: los <strong>grupos</strong> contienen <strong>carpetas</strong>, las carpetas contienen <strong>notas</strong> — un solo nivel de anidación, sin árboles infinitos en los que perderse. Cada grupo tiene su propio <strong>color</strong>, y ese color tiñe todo lo que hay dentro: los puntos junto a sus notas, sus carpetas, su región en la vista cerebro. Las notas sin grupo simplemente viven al final del sidebar.',
+      'NoteFlow mantiene la jerarquía deliberadamente plana: los <strong>grupos</strong> contienen <strong>carpetas</strong>, las carpetas contienen <strong>notas</strong> — un solo nivel de anidación, sin árboles infinitos en los que perderse. Cada grupo tiene su propio <strong>color</strong>, y ese color tiñe todo lo que hay dentro: su pestaña, la línea guía que recorre sus carpetas y notas, la marca sobre la nota que tienes abierta, su región en la vista cerebro. Las notas sin grupo simplemente viven al final del sidebar.',
+      'Las carpetas pueden llevar un <strong>icono propio</strong>: click derecho en una carpeta → <strong>Change icon</strong> despliega una rejilla de 27 (trabajo, casa, ideas, libro, código, calendario, viajes, música…), y <em>Default</em> devuelve el icono de carpeta. El icono acompaña a la carpeta en el sidebar, la vista de contenido, el vistazo de grupo plegado y las listas de “Move to folder” — y se sincroniza con el resto de tus carpetas.',
+      'Un <strong>grupo plegado</strong> no te cierra la puerta: deja el ratón sobre su cabecera y una ventanita lista sus notas (las de sus carpetas incluidas), con un buscador que ya tiene el foco — basta con escribir, moverte con <kbd>↑</kbd> / <kbd>↓</kbd> y pulsar <kbd>Enter</kbd> para abrir una.',
     ],
     tree: {
-      aria: 'La jerarquía de NoteFlow: grupos con código de color que contienen carpetas, notas y sus tags de sección',
+      aria: 'La jerarquía de NoteFlow: grupos con código de color que contienen carpetas y notas, cada nota con sus secciones dibujadas como un mapa plegado',
       caption: 'grupo → carpeta → nota → secciones',
       groups: [
         {
@@ -63,12 +66,13 @@ export const featuresEs: FeaturesContent = {
       ungroupedLabel: 'Sin grupo',
       ungroupedNotes: [{ title: 'Borrador rápido', sections: ['Ideas'] }],
     },
-    sectionsH3: 'Secciones: pestañas dentro de una nota',
+    sectionsH3: 'Secciones: un mapa dentro de la nota',
     sectionsP: [
-      'El cuarto nivel vive <em>dentro</em> de la nota: cada nota puede tener múltiples <strong>secciones</strong> independientes, mostradas como pestañas en la parte superior del editor. Crea una con <kbd>Ctrl</kbd>+<kbd>T</kbd> (o el botón <code>+</code>), <strong>renómbrala</strong> con doble click en la pestaña, <strong>reordénalas</strong> arrastrando las pestañas, y recórrelas con <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>.',
+      'El cuarto nivel vive <em>dentro</em> de la nota: cada nota puede tener múltiples <strong>secciones</strong> independientes, dispuestas en la parte superior del editor como un <strong>mapa de secciones</strong> — un único bloque de celdas que, cuando no caben, baja de fila como los salientes de un archivador, en vez de hacer scroll lateral. La sección abierta va en sólido con su color; el resto, neutras con una esquina doblada del suyo. Pasadas tres filas, las que sobran se agrupan en una celda <code>+N more</code>, y la abierta nunca es la que queda oculta. Crea una con <kbd>Ctrl</kbd>+<kbd>T</kbd> (o la celda <code>+</code>), <strong>renómbrala</strong> con doble click en su celda, <strong>reordénalas</strong> arrastrando, y recórrelas con <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>.',
+      'El sidebar habla el mismo idioma. Bajo el título de cada nota, una nota cerrada muestra un <strong>mapa plegado</strong>: una línea fina con un tramo por sección, de su color y tan ancho como larga es la sección. Deja el ratón encima y el mapa se despliega sobre la lista con los nombres; la nota que tienes abierta lo muestra desplegado, en celdas pequeñas. Y allí donde algo apunta a una sección — sidebar, mapa de secciones, vista de contenido, una pill de enlace — pasar el ratón muestra una <strong>tarjeta de vista previa apaisada</strong> con el estilo de la vista de nota: el nombre de la sección en su color, el título de la nota, el contenido real a tamaño de lectura y sus palabras o tareas.',
     ],
     whyP:
-      'Las secciones son lo que mantiene la jerarquía plana sin convertir las notas en cajones de sastre: <strong>una nota = un tema, las secciones = sus facetas</strong>. Una nota de proyecto lleva sus propias <em>Notas</em>, <em>Tareas</em> y <em>Dudas</em> en vez de engendrar tres notas hermanas. Y esa granularidad rinde en todas partes: las secciones aparecen como tags clicables en cada tarjeta de nota, el <a href="%AI_URL%">índice semántico embebe cada sección por separado</a> y los <a href="#links">enlaces</a> apuntan a secciones, no a notas enteras.',
+      'Las secciones son lo que mantiene la jerarquía plana sin convertir las notas en cajones de sastre: <strong>una nota = un tema, las secciones = sus facetas</strong>. Una nota de proyecto lleva sus propias <em>Notas</em>, <em>Tareas</em> y <em>Dudas</em> en vez de engendrar tres notas hermanas. Y esa granularidad rinde en todas partes: cada sección está a un click desde el sidebar, el <a href="%AI_URL%">índice semántico embebe cada sección por separado</a> y los <a href="#links">enlaces</a> apuntan a secciones, no a notas enteras.',
   },
 
   templates: {
@@ -104,6 +108,7 @@ export const featuresEs: FeaturesContent = {
         { done: false, text: 'Publicar las release notes' },
       ],
       caption: 'Ctrl+S · siempre encima · se pliega a píldora',
+      switchHint: 'Cambiar de sección',
       foldAria: 'Plegar la sticky note a una píldora',
       closeAria: 'Cerrar (decorativo en esta demo)',
     },
@@ -113,6 +118,7 @@ export const featuresEs: FeaturesContent = {
       'Cada sticky es un editor completo: <strong>modo markdown (renderizado) o modo texto (tal cual)</strong>, igual que la ventana principal.',
       'Los cambios se sincronizan con la ventana principal <strong>en tiempo real</strong> — es la misma sección, no una copia.',
       'Abre <strong>tantas como quieras</strong>; las stickies plegadas se apilan como píldoras en la esquina de tu pantalla.',
+      '<strong>Cambia de sección</strong> sin abrir otra ventana: si la nota tiene dos o más, el nombre de la sección en la barra de título abre un desplegable con todas (punto de color + nombre, ✓ en la actual). También con teclado — <kbd>↓</kbd> para abrir, flechas para moverte, <kbd>Enter</kbd> para elegir, <kbd>Esc</kbd> para cerrar.',
     ],
     startupH3: 'Stickies al arrancar',
     startupP:
@@ -137,12 +143,35 @@ export const featuresEs: FeaturesContent = {
       '<strong>Click</strong> en una pill navega a la sección destino — en la misma nota o en cualquier otra. <strong>Hover</strong> muestra la misma previsualización flotante que usa el resto de la app.',
       'La pill muestra el nombre del destino <strong>en vivo</strong>: renombra la sección y todas las pills que apuntan a ella se actualizan. Borra el destino y la pill pasa a estado <strong>roto</strong> (atenuada, tachada, sin navegación).',
       'El buscador excluye notas cifradas, archivadas y temporales; el comando <kbd>/</kbd> existe solo en modo markdown.',
-      'El mismo menú <kbd>/</kbd> inserta un <strong>tablero kanban</strong> (<kbd>/kanban</kbd>): columnas y tarjetas que arrastras, con los chips de las tareas (📅 fecha límite, ⏰ alarma, 🔺 importancia), dentro de la propia nota — y guardado como markdown plano, como todo lo demás.',
+      'El mismo menú <kbd>/</kbd> inserta un <strong>tablero kanban</strong> (<kbd>/kanban</kbd>): columnas y tarjetas que arrastras, con los chips de las tareas (📅 fecha límite, ⏰ alarma, 🔺 importancia), dentro de la propia nota — y guardado como markdown plano, como todo lo demás. También lista tus propios <a href="#snippets">fragmentos</a>.',
     ],
     rawP:
       'Por debajo, una pill no tiene nada de exótico — es un enlace markdown normal, <code>[Nombre](noteflow://noteId/sectionId)</code>, guardado dentro del texto de la sección. Eso es exactamente lo que ves en modo texto, y por eso los enlaces <strong>sobreviven al sync, al export y al import</strong> sin cambios.',
     brainP:
       'Estos enlaces también aparecen como <strong>aristas en la vista cerebro</strong>, conectando las dos secciones — y como son estructura explícita tuya, funcionan incluso con la IA y los embeddings <strong>completamente desactivados</strong>.',
+  },
+
+  snippets: {
+    title: 'Fragmentos, con la fecha ya puesta',
+    intro: [
+      'El texto que no paras de escribir a mano — la cabecera del diario, el esqueleto de una reunión, un separador con la hora, tu firma — puede convertirse en un <strong>fragmento</strong>: markdown reutilizable que cae en el cursor con un click, sellado con la fecha y la hora del momento en que lo insertas.',
+    ],
+    mock: {
+      sourceLabel: 'fragmento',
+      source: '## {date:dddd, D [de] MMMM [de] YYYY} · {time}',
+      outputLabel: 'insertado',
+      output: 'domingo, 8 de noviembre de 2026 · 09:30',
+    },
+    bullets: [
+      'Un <strong>botón partido</strong> en la toolbar del editor (el icono de sello, justo tras el del kanban): el click principal inserta tu fragmento <strong>por defecto</strong>; el chevron los lista todos con una vista previa de una línea — ya con la fecha de hoy — y termina en <em>Configure snippets…</em>.',
+      'También están en el menú <kbd>/</kbd>, tras los comandos integrados y bajo el encabezado <em>Snippets</em>: escribe parte del nombre para filtrar, o <kbd>/fragmento</kbd> para verlos todos — aunque el botón esté oculto de la toolbar.',
+      'Los fragmentos entran como <strong>markdown</strong>: encabezados, listas y checkboxes se renderizan, y un fragmento de una línea sin sintaxis de bloque entra en línea con tu texto.',
+      'Variables: <code>{date}</code>, <code>{time}</code>, <code>{datetime}</code>, o tu propio formato como <code>{date:dddd, D [de] MMMM}</code> con tokens estilo moment. El editor de fragmentos te las construye — formatos predefinidos o uno personalizado, con el resultado en vivo — y te recuerda que <code>MM</code> es el mes y <code>mm</code> los minutos. Los nombres de día y mes siguen el idioma de la app.',
+      'Empieza desde las <strong>sugerencias</strong> — fecha de hoy, fecha y hora, entrada de diario, reunión, separador con hora, firma — y edítalas a tu gusto; una estrella marca el de por defecto.',
+      'Como el resto de la toolbar y del menú <kbd>/</kbd>, los fragmentos solo existen en modo markdown.',
+    ],
+    syncP:
+      'Los fragmentos se guardan en <code>snippets.json</code> dentro de tu directorio de notas, así que se sincronizan como tus plantillas — por GitHub o por NoteFlow Cloud.',
   },
 
   shortcuts: {
@@ -203,13 +232,13 @@ export const featuresEs: FeaturesContent = {
     title: 'Tres maneras de verlo todo',
     intro: [
       'Más allá del editor, NoteFlow tiene tres <strong>vistas a área completa</strong> que sustituyen la superficie de edición (el sidebar se queda como contexto). Son mutuamente excluyentes — abrir una cierra las demás, y seleccionar cualquier nota te devuelve al editor.',
-      '¿Quieres todo el ancho? <strong>Desfija el sidebar</strong> (el botón junto a su buscador, o <kbd>Ctrl</kbd>+<kbd>\'</kbd>): se pliega en un <strong>minimapa</strong> tenue y sin texto en el borde izquierdo del texto — una marca diminuta por nota, grupo y carpeta, con sus colores — y vuelve a flotar sobre el contenido al pasar el ratón.',
+      '¿Quieres todo el ancho? <strong>Desfija el sidebar</strong> (el botón junto a su buscador, o <kbd>Ctrl</kbd>+<kbd>\'</kbd>): se pliega en un <strong>minimapa</strong> tenue y sin texto en el borde izquierdo del texto — una marca diminuta por nota, grupo y carpeta, con sus colores. Acerca el ratón y el sidebar entero entra deslizando sobre el contenido, a toda la altura; se cierra al salir, y se queda abierto mientras escribes en él o arrastras una nota desde él. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> lo abre directamente en el buscador, y <kbd>Esc</kbd> te devuelve al editor.',
     ],
     cards: [
       {
         tag: '01 / vista de nota',
         name: 'Una nota, todas sus secciones',
-        desc: 'Todas las secciones de una nota en una cuadrícula, con su contenido real y la abierta en el editor destacada — arrastra para reordenar, doble clic en un nombre para renombrar, añade una desde la celda “New section”, o selecciona varias para <em>Hide from AI</em> / <em>Delete</em> por lotes. Se abre desde el botón de cuadrícula (⊞) junto a la estrella de favorito, o con click derecho → “Note overview”.',
+        desc: 'El mapa de secciones con el contenido dentro: cada sección de una nota es una celda de una misma cuadrícula, en el mismo orden que el mapa de secciones, con su contenido real a tamaño de lectura — la abierta en el editor ocupa dos columnas, marcada <em>OPEN</em>. Arrastra para reordenar, doble clic en un nombre para renombrar, añade una desde la celda “New section”, o selecciona varias para <em>Hide from AI</em> / <em>Text mode</em> / <em>Delete</em> por lotes. Se abre desde el botón de cuadrícula (⊞) junto a la estrella de favorito, o con click derecho en una sección → “Note overview”.',
       },
       {
         tag: '02 / vista de contenido',
@@ -253,11 +282,11 @@ export const featuresEs: FeaturesContent = {
   aiHidden: {
     title: 'Secciones que la IA nunca ve',
     intro: [
-      'El cifrado es la herramienta pesada; a veces solo quieres que el modelo se salte algo — una nota de salario, una sección de diario, ruido sin más. <strong>Hide from AI</strong> es un toggle por sección: actívalo en el menú <code>⋯</code> del editor, o con click derecho sobre cualquier tag de sección en el sidebar y las vistas.',
+      'El cifrado es la herramienta pesada; a veces solo quieres que el modelo se salte algo — una nota de salario, una sección de diario, ruido sin más. <strong>Hide from AI</strong> es un toggle por sección: actívalo en el menú <code>⋯</code> del editor, o con click derecho sobre cualquier sección en el sidebar, la vista de contenido o la vista de nota.',
     ],
     bullets: [
       'Una sección oculta se cae del <strong>índice semántico</strong> (y se borra de él si ya estaba indexada), nunca entra al <strong>contexto del chat</strong> ni a <strong>Related notes</strong>, desaparece del <strong>grafo del cerebro</strong> y se omite de las <strong>tools del agente</strong> — el modelo ni siquiera ve su id.',
-      'Las secciones ocultas llevan un icono <strong>EyeOff</strong> en su pestaña del editor, en los tags del sidebar y en las tarjetas de las vistas; <em>Show to AI</em> revierte el toggle y re-indexa la sección.',
+      'Las secciones ocultas llevan un icono <strong>EyeOff</strong> en su celda del mapa de secciones y del sidebar, y en su tarjeta de la vista de nota; <em>Show to AI</em> revierte el toggle y re-indexa la sección.',
       'El resto de la app trata las secciones ocultas con total normalidad — es una frontera de IA, no de la app.',
     ],
     moreP:

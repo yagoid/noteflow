@@ -121,9 +121,9 @@ export const en = {
   },
 
   showcase: {
-    kicker: 'Dark-first · 12 themes',
+    kicker: 'Dark-first · 14 themes',
     h2: `The magic is in <em style="font-style:italic;">the small details.</em>`,
-    p: 'Twelve hand-tuned themes — Carbon, Tokyo Night, Dracula, Parchment and more. Flip the switch and the whole app follows.',
+    p: 'Fourteen hand-tuned themes — Carbon, Tokyo Night, Dracula, Parchment and more. Flip the switch and the whole app follows.',
     toggleTheme: 'Toggle theme',
     themesLabel: 'Themes',
     themesCaption: 'Carbon · Tokyo Night · Midnight · Dracula · Synthwave · Parchment …',

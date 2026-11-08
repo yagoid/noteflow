@@ -238,9 +238,16 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
                   <span class="nf-note-title">{f.title}</span>
                   <span class="nf-note-time">{f.time}</span>
                 </span>
-                <span class="nf-note-tags">
+                {/* Sections like the app's sidebar: a folded line while the note is
+                    closed, the map of cells (open section solid) once it's the active one */}
+                <span class="nf-note-line" aria-hidden="true">
                   {f.tags.map((tg) => (
-                    <span class="nf-note-tag" style={`--tc:var(--nf-${tg.tok});`}>{tg.name}</span>
+                    <span class="nf-note-seg" style={`--tc:var(--nf-${tg.tok});`}></span>
+                  ))}
+                </span>
+                <span class="nf-note-tags">
+                  {f.tags.map((tg, i) => (
+                    <span class={`nf-note-tag${i === 0 ? ' is-open' : ''}`} style={`--tc:var(--nf-${tg.tok});`}>{tg.name}</span>
                   ))}
                 </span>
               </button>
@@ -635,17 +642,35 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
     .nf-note:hover .nf-note-title,
     .nf-note.is-active .nf-note-title { color: rgb(var(--nf-text)); }
     .nf-note-time { font-size: 12px; color: rgb(var(--nf-text-muted) / 0.62); flex-shrink: 0; }
-    .nf-note-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
-    /* Section tag — identical recipe to the app: colour text + 0.12 fill + 0.28 border */
+    /* Sections, as in the app's sidebar: a closed note shows a folded line (one
+       stretch per section); the active note unfolds it into the section map —
+       neutral cells with a folded corner in the section colour, the open one solid. */
+    .nf-note-line { display: flex; gap: 2px; height: 3px; margin-top: 9px; }
+    .nf-note-seg { flex: 1 1 0; border-radius: 2px; background: rgb(var(--tc) / 0.7); transition: background 0.18s ease; }
+    .nf-note:hover .nf-note-seg { background: rgb(var(--tc)); }
+    .nf-note-tags { display: none; flex-wrap: wrap; gap: 1.5px; margin-top: 7px; border-radius: 5px; overflow: hidden; }
+    .nf-note.is-active .nf-note-line { display: none; }
+    .nf-note.is-active .nf-note-tags { display: flex; }
     .nf-note-tag {
+      position: relative;
+      flex: 1 1 auto;
       font-size: 11.5px;
       line-height: 1.55;
-      padding: 1px 6px;
-      border-radius: 5px;
-      color: rgb(var(--tc));
-      background: rgb(var(--tc) / 0.12);
-      border: 1px solid rgb(var(--tc) / 0.28);
+      padding: 2px 14px 2px 8px;
+      color: rgb(var(--nf-text) / 0.75);
+      background: rgb(var(--nf-bg-3));
     }
+    .nf-note-tag::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      border-style: solid;
+      border-width: 0 7px 7px 0;
+      border-color: transparent rgb(var(--tc)) transparent transparent;
+    }
+    .nf-note-tag.is-open { font-weight: 600; color: rgb(var(--nf-bg-0)); background: rgb(var(--tc)); }
+    .nf-note-tag.is-open::after { display: none; }
 
     /* ── Right · the floating section-preview card (swaps on select) ── */
     .nf-card-stage {

@@ -8,7 +8,7 @@ export const featuresEn = {
   meta: {
     title: 'NoteFlow features — sticky notes, templates, encryption & more',
     description:
-      'The details that make NoteFlow feel different: groups, folders and sections, note templates, always-on-top sticky notes that fold into pills, section-to-section links, AES-256 encrypted notes, per-section AI privacy, 14 themes and a full keyboard map.',
+      'The details that make NoteFlow feel different: groups, folders and sections, note templates, always-on-top sticky notes that fold into pills, section-to-section links, snippets with live dates, AES-256 encrypted notes, per-section AI privacy, 14 themes and a full keyboard map.',
   },
 
   hero: {
@@ -23,6 +23,7 @@ export const featuresEn = {
     { id: 'templates', label: 'Templates' },
     { id: 'sticky', label: 'Sticky notes' },
     { id: 'links', label: 'Section links' },
+    { id: 'snippets', label: 'Snippets' },
     { id: 'shortcuts', label: 'Shortcuts' },
     { id: 'views', label: 'Views' },
     { id: 'temp', label: 'Temporary notes' },
@@ -34,10 +35,12 @@ export const featuresEn = {
   organize: {
     title: 'Groups, folders, notes — and sections',
     intro: [
-      'NoteFlow keeps the hierarchy deliberately shallow: <strong>groups</strong> hold <strong>folders</strong>, folders hold <strong>notes</strong> — one level of nesting, no infinite trees to get lost in. Each group has its own <strong>color</strong>, and that color tints everything inside it: the dots next to its notes, its folders, its region in the brain view. Notes without a group simply live at the bottom of the sidebar.',
+      'NoteFlow keeps the hierarchy deliberately shallow: <strong>groups</strong> hold <strong>folders</strong>, folders hold <strong>notes</strong> — one level of nesting, no infinite trees to get lost in. Each group has its own <strong>color</strong>, and that color tints everything inside it: its tab, the guide line that runs down its folders and notes, the marker on the note you have open, its region in the brain view. Notes without a group simply live at the bottom of the sidebar.',
+      'Folders can wear an <strong>icon of their own</strong>: right-click a folder → <strong>Change icon</strong> unfolds a grid of 27 (work, home, ideas, book, code, calendar, travel, music…), and <em>Default</em> brings the folder glyph back. The icon follows the folder into the sidebar, the content view, the collapsed-group peek and the “Move to folder” lists — and it syncs with the rest of your folders.',
+      'A <strong>collapsed group</strong> still lets you in: rest the mouse on its header and a small window lists its notes (folders included), with a search box that already has the focus — just type, move with <kbd>↑</kbd> / <kbd>↓</kbd> and press <kbd>Enter</kbd> to open one.',
     ],
     tree: {
-      aria: 'The NoteFlow hierarchy: colour-coded groups containing folders, notes and their section tags',
+      aria: 'The NoteFlow hierarchy: colour-coded groups containing folders and notes, each note with its sections drawn as a folded map',
       caption: 'group → folder → note → sections',
       groups: [
         {
@@ -62,12 +65,13 @@ export const featuresEn = {
       ungroupedLabel: 'No group',
       ungroupedNotes: [{ title: 'Scratchpad', sections: ['Ideas'] }],
     },
-    sectionsH3: 'Sections: tabs inside a note',
+    sectionsH3: 'Sections: a map inside the note',
     sectionsP: [
-      'The fourth level lives <em>inside</em> the note: every note can hold multiple independent <strong>sections</strong>, shown as tabs across the top of the editor. Create one with <kbd>Ctrl</kbd>+<kbd>T</kbd> (or the <code>+</code> button), <strong>rename</strong> with a double-click on the tab, <strong>reorder</strong> by dragging the tabs, and cycle through them with <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>.',
+      'The fourth level lives <em>inside</em> the note: every note can hold multiple independent <strong>sections</strong>, laid out across the top of the editor as a <strong>section map</strong> — one block of cells that drops onto a new row when they don\'t fit, like the tabs of a filing cabinet, instead of scrolling sideways. The open section is solid in its color; the rest are neutral with a folded corner in theirs. Past three rows the remainder gathers into a <code>+N more</code> cell, and the open section is never the one hidden. Create one with <kbd>Ctrl</kbd>+<kbd>T</kbd> (or the <code>+</code> cell), <strong>rename</strong> with a double-click on its cell, <strong>reorder</strong> by dragging, and cycle through them with <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>.',
+      'The sidebar speaks the same language. Under each note\'s title, a closed note shows a <strong>folded map</strong>: a thin line with one stretch per section, in its color and as wide as the section is long. Rest the mouse on it and the map unfolds over the list with the names; the note you have open shows it unfolded, as small cells. And wherever something points at a section — sidebar, section map, content view, a link pill — hovering it brings up a <strong>landscape preview card</strong> styled like the note view: the section\'s name in its color, the note\'s title, the real content at reading size and its word or task count.',
     ],
     whyP:
-      'Sections are what keep the hierarchy shallow without turning notes into junk drawers: <strong>one note = one topic, sections = its facets</strong>. A project note carries its own <em>Notes</em>, <em>Tasks</em> and <em>Questions</em> instead of spawning three sibling notes. And the granularity pays off everywhere else — sections show up as clickable tags on every note card, the <a href="%AI_URL%">semantic index embeds each section separately</a>, and <a href="#links">links</a> point at sections, not whole notes.',
+      'Sections are what keep the hierarchy shallow without turning notes into junk drawers: <strong>one note = one topic, sections = its facets</strong>. A project note carries its own <em>Notes</em>, <em>Tasks</em> and <em>Questions</em> instead of spawning three sibling notes. And the granularity pays off everywhere else — every section is one click away from the sidebar, the <a href="%AI_URL%">semantic index embeds each section separately</a>, and <a href="#links">links</a> point at sections, not whole notes.',
   },
 
   templates: {
@@ -103,6 +107,7 @@ export const featuresEn = {
         { done: false, text: 'Publish release notes' },
       ],
       caption: 'Ctrl+S · always on top · fold to pill',
+      switchHint: 'Switch section',
       foldAria: 'Fold the sticky note into a pill',
       closeAria: 'Close (decorative in this demo)',
     },
@@ -112,6 +117,7 @@ export const featuresEn = {
       'Each sticky is a full editor: <strong>markdown mode (rendered) or text mode (shown as-is)</strong>, same as the main window.',
       'Edits sync with the main window <strong>in real time</strong> — it\'s the same section, not a copy.',
       'Open <strong>as many as you want</strong>; folded stickies stack as pills in the corner of your screen.',
+      '<strong>Switch sections</strong> without opening another window: when the note has two or more, the section name in the title bar opens a dropdown with all of them (color dot + name, ✓ on the current one). It works from the keyboard too — <kbd>↓</kbd> to open, arrows to move, <kbd>Enter</kbd> to pick, <kbd>Esc</kbd> to close.',
     ],
     startupH3: 'Stickies at startup',
     startupP:
@@ -136,12 +142,35 @@ export const featuresEn = {
       '<strong>Click</strong> a pill to jump to the target section — in the same note or any other. <strong>Hover</strong> shows the same floating preview used across the app.',
       'The pill shows the target\'s name <strong>live</strong>: rename the section and every pill pointing at it updates. Delete the target and the pill switches to a <strong>broken</strong> state (dimmed, struck through, no navigation).',
       'The search excludes encrypted, archived and temporary notes; the <kbd>/</kbd> command exists in markdown mode only.',
-      'The same <kbd>/</kbd> menu inserts a <strong>kanban board</strong> (<kbd>/kanban</kbd>): columns and cards you drag around, with the task chips (📅 deadline, ⏰ alarm, 🔺 importance), right inside the note — and saved as plain markdown, like everything else.',
+      'The same <kbd>/</kbd> menu inserts a <strong>kanban board</strong> (<kbd>/kanban</kbd>): columns and cards you drag around, with the task chips (📅 deadline, ⏰ alarm, 🔺 importance), right inside the note — and saved as plain markdown, like everything else. It also lists your own <a href="#snippets">snippets</a>.',
     ],
     rawP:
       'Under the hood a pill is nothing exotic — it\'s a plain markdown link, <code>[Name](noteflow://noteId/sectionId)</code>, stored inside the section\'s text. That\'s exactly what you see in text mode, and it\'s why links <strong>survive sync, export and import</strong> unchanged.',
     brainP:
       'These links also appear as <strong>edges in the brain view</strong>, connecting the two sections — and since they\'re your own explicit structure, they work even with the AI and embeddings <strong>completely disabled</strong>.',
+  },
+
+  snippets: {
+    title: 'Snippets, with the date filled in',
+    intro: [
+      'The text you keep typing by hand — a journal heading, a meeting skeleton, a divider with the time, your signature — can become a <strong>snippet</strong>: reusable markdown that drops in at the cursor with one click, stamped with the date and time of the moment you insert it.',
+    ],
+    mock: {
+      sourceLabel: 'snippet',
+      source: '## {date:dddd, D MMMM YYYY} · {time}',
+      outputLabel: 'inserted',
+      output: 'Sunday, 8 November 2026 · 09:30',
+    },
+    bullets: [
+      'A <strong>split button</strong> in the editor toolbar (the stamp icon, right after the kanban one): the main click inserts your <strong>default</strong> snippet; the chevron lists all of them with a one-line preview — already showing today\'s date — and ends with <em>Configure snippets…</em>.',
+      'They\'re in the <kbd>/</kbd> menu too, after the built-in commands under a <em>Snippets</em> heading: type part of a name to filter, or <kbd>/snippet</kbd> to list them all — even with the toolbar button hidden.',
+      'Snippets go in as <strong>markdown</strong>: headings, lists and checkboxes render, and a one-line snippet without block syntax flows inline with your text.',
+      'Variables: <code>{date}</code>, <code>{time}</code>, <code>{datetime}</code>, or your own format like <code>{date:dddd, D MMMM}</code> with moment-style tokens. The snippet editor builds them for you — preset formats or a custom one, with the result live — and reminds you that <code>MM</code> is the month and <code>mm</code> the minutes. Day and month names follow the app\'s language.',
+      'Start from the <strong>suggestions</strong> — today\'s date, date and time, journal entry, meeting, divider with time, signature — and edit them freely; a star marks the default.',
+      'Like the rest of the toolbar and the <kbd>/</kbd> menu, snippets live in markdown mode only.',
+    ],
+    syncP:
+      'Snippets are stored in <code>snippets.json</code> inside your notes directory, so they sync like your templates — through GitHub or NoteFlow Cloud.',
   },
 
   shortcuts: {
@@ -202,13 +231,13 @@ export const featuresEn = {
     title: 'Three ways to see everything',
     intro: [
       'Beyond the editor, NoteFlow has three <strong>full-area views</strong> that replace the editing surface (the sidebar stays as context). They\'re mutually exclusive — opening one closes the others, and selecting any note drops you back into the editor.',
-      'Want the full width? <strong>Unpin the sidebar</strong> (the button next to its search box, or <kbd>Ctrl</kbd>+<kbd>\'</kbd>): it folds into a faint, text-free <strong>mini-map</strong> at the left edge of the text — one tiny mark per note, group and folder, tinted with their colors — and floats back over the content when you hover it.',
+      'Want the full width? <strong>Unpin the sidebar</strong> (the button next to its search box, or <kbd>Ctrl</kbd>+<kbd>\'</kbd>): it folds into a faint, text-free <strong>mini-map</strong> at the left edge of the text — one tiny mark per note, group and folder, tinted with their colors. Bring the mouse to it and the whole sidebar slides in over the content, full height; it closes when you leave, and stays open while you type in it or drag a note out of it. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> opens it straight into the search, and <kbd>Esc</kbd> sends you back to the editor.',
     ],
     cards: [
       {
         tag: '01 / note overview',
         name: 'One note, all its sections',
-        desc: 'Every section of a note in one grid, with its real content and the one open in the editor highlighted — drag to reorder, double-click a name to rename, add one from the “New section” cell, or multi-select for batch <em>Hide from AI</em> / <em>Delete</em>. Opened from the grid button (⊞) next to the favorite star, or right-click → “Note overview”.',
+        desc: 'The section map with the content inside: every section of a note as a cell of one grid, in the section map\'s order, with its real content at reading size — the one open in the editor spans two columns, marked <em>OPEN</em>. Drag to reorder, double-click a name to rename, add one from the “New section” cell, or multi-select for batch <em>Hide from AI</em> / <em>Text mode</em> / <em>Delete</em>. Opened from the grid button (⊞) next to the favorite star, or by right-clicking a section → “Note overview”.',
       },
       {
         tag: '02 / content view',
@@ -252,11 +281,11 @@ export const featuresEn = {
   aiHidden: {
     title: 'Sections the AI never sees',
     intro: [
-      'Encryption is the heavy tool; sometimes you just want the model to skip something — a salary note, a private journal section, plain noise. <strong>Hide from AI</strong> is a per-section toggle: flip it in the editor\'s <code>⋯</code> menu, or right-click any section tag in the sidebar and the overviews.',
+      'Encryption is the heavy tool; sometimes you just want the model to skip something — a salary note, a private journal section, plain noise. <strong>Hide from AI</strong> is a per-section toggle: flip it in the editor\'s <code>⋯</code> menu, or right-click any section in the sidebar, the content view or the note view.',
     ],
     bullets: [
       'A hidden section is dropped from the <strong>semantic index</strong> (and deleted from it if it was already indexed), never enters <strong>chat context</strong> or <strong>Related notes</strong>, disappears from the <strong>brain graph</strong>, and is omitted from the <strong>agent\'s tools</strong> — the model never even sees its id.',
-      'Hidden sections wear an <strong>EyeOff</strong> icon on their editor tab, sidebar tags and overview cards; <em>Show to AI</em> reverts the toggle and re-indexes the section.',
+      'Hidden sections wear an <strong>EyeOff</strong> icon on their cell in the section map and the sidebar, and on their note-view card; <em>Show to AI</em> reverts the toggle and re-indexes the section.',
       'The rest of the app treats hidden sections completely normally — this is an AI boundary, not an app one.',
     ],
     moreP:

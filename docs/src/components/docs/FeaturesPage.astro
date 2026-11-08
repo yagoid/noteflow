@@ -41,9 +41,42 @@ const kickerFor = (id: string) => {
 };
 
 // Hierarchy mock: colour tokens are structural (names come from the dictionary).
+// Each note draws its sections like the app's sidebar: a closed note is a folded
+// line (one stretch per section, as wide as the section is long — `secWeight`), the
+// open one (`isOpen`: the first note of the first folder) is the unfolded map of
+// cells with its open section solid. Hovering a closed note floats its map over it.
 const groupToks = ['cyan', 'orange'];
 const tagToks = ['purple', 'accent', 'pink', 'cyan', 'orange'];
 const tagTok = (noteIdx: number, secIdx: number) => tagToks[(noteIdx + secIdx) % tagToks.length];
+const secWeights = [5, 3, 4, 2, 6];
+const secWeight = (noteIdx: number, secIdx: number) => secWeights[(noteIdx * 2 + secIdx) % secWeights.length];
+
+interface TreeNote { title: string; open: boolean; secs: { name: string; tok: string; weight: number }[] }
+interface TreeRow { folder: string | null; notes: TreeNote[] }
+interface TreeCol { name: string; gc: string | null; rows: TreeRow[] }
+const treeNote = (n: { title: string; sections: string[] }, colorIdx: number, open = false): TreeNote => ({
+  title: n.title,
+  open,
+  secs: n.sections.map((name, si) => ({ name, tok: tagTok(colorIdx, si), weight: secWeight(colorIdx, si) })),
+});
+const treeCols: TreeCol[] = [
+  ...t.organize.tree.groups.map((g, gi) => ({
+    name: g.name,
+    gc: groupToks[gi % groupToks.length],
+    rows: [
+      ...g.folders.map((f, fi) => ({
+        folder: f.name,
+        notes: f.notes.map((n, ni) => treeNote(n, ni, gi === 0 && fi === 0 && ni === 0)),
+      })),
+      { folder: null, notes: g.notes.map((n, ni) => treeNote(n, ni + 2)) },
+    ],
+  })),
+  {
+    name: t.organize.tree.ungroupedLabel,
+    gc: null,
+    rows: [{ folder: null, notes: t.organize.tree.ungroupedNotes.map((n, ni) => treeNote(n, ni + 4)) }],
+  },
+];
 
 // Theme swatches — palette values verbatim from src/lib/themes.ts (--bg-0 / --text / --accent).
 const themeSwatches = {
@@ -86,48 +119,41 @@ const themeSwatches = {
     <h2>{t.organize.title}</h2>
     {t.organize.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
 
-    <!-- Hierarchy mock: colour-coded groups → folders → notes → section tags -->
+    <!-- Hierarchy mock: colour-coded groups → folders → notes → their sections (folded map) -->
     <figure class="nf-tree nf-edge" role="img" aria-label={t.organize.tree.aria}>
       <div class="nf-tree-cols">
-        {t.organize.tree.groups.map((g, gi) => (
-          <div class="nf-tree-group" style={`--gc:var(--${groupToks[gi % groupToks.length]});`}>
-            <div class="nf-tree-ghead"><span class="nf-tree-gdot" aria-hidden="true"></span>{g.name}</div>
-            {g.folders.map((f) => (
-              <div class="nf-tree-folder">
-                <div class="nf-tree-fhead">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-                  {f.name}
-                </div>
-                <div class="nf-tree-fbody">
-                  {f.notes.map((n, ni) => (
-                    <div class="nf-tree-note">
-                      <span class="nf-tree-ndot" aria-hidden="true"></span>
-                      <span class="nf-tree-ntitle">{n.title}</span>
-                      <span class="nf-tree-ntags">{n.sections.map((s, si) => <span class="nf-tree-tag" style={`--tc:var(--${tagTok(ni, si)});`}>{s}</span>)}</span>
+        {treeCols.map((col) => (
+          <div class={`nf-tree-group${col.gc ? '' : ' is-ungrouped'}`} style={col.gc ? `--gc:var(--${col.gc});` : undefined}>
+            <div class="nf-tree-ghead">{col.gc && <span class="nf-tree-gdot" aria-hidden="true"></span>}{col.name}</div>
+            <div class="nf-tree-gbody">
+              {col.rows.map((r) => (
+                <div class={r.folder !== null ? 'nf-tree-folder' : 'nf-tree-loose'}>
+                  {r.folder !== null && (
+                    <div class="nf-tree-fhead">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                      {r.folder}
                     </div>
-                  ))}
+                  )}
+                  <div class="nf-tree-notes">
+                    {r.notes.map((n) => (
+                      <div class={`nf-tree-note${n.open ? ' is-open' : ''}`}>
+                        <span class="nf-tree-ntitle">{n.title}</span>
+                        {!n.open && (
+                          <span class="nf-tree-line" aria-hidden="true">
+                            {n.secs.map((s) => <span class="nf-tree-seg" style={`--tc:var(--${s.tok});flex-grow:${s.weight};`}></span>)}
+                          </span>
+                        )}
+                        <span class="nf-tree-map">
+                          {n.secs.map((s, si) => <span class={`nf-tree-cell${n.open && si === 0 ? ' is-active' : ''}`} style={`--tc:var(--${s.tok});`}>{s.name}</span>)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-            {g.notes.map((n, ni) => (
-              <div class="nf-tree-note">
-                <span class="nf-tree-ndot" aria-hidden="true"></span>
-                <span class="nf-tree-ntitle">{n.title}</span>
-                <span class="nf-tree-ntags">{n.sections.map((s, si) => <span class="nf-tree-tag" style={`--tc:var(--${tagTok(ni + 2, si)});`}>{s}</span>)}</span>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         ))}
-        <div class="nf-tree-group is-ungrouped">
-          <div class="nf-tree-ghead">{t.organize.tree.ungroupedLabel}</div>
-          {t.organize.tree.ungroupedNotes.map((n, ni) => (
-            <div class="nf-tree-note">
-              <span class="nf-tree-ndot" aria-hidden="true"></span>
-              <span class="nf-tree-ntitle">{n.title}</span>
-              <span class="nf-tree-ntags">{n.sections.map((s, si) => <span class="nf-tree-tag" style={`--tc:var(--${tagTok(ni + 4, si)});`}>{s}</span>)}</span>
-            </div>
-          ))}
-        </div>
       </div>
       <figcaption class="nf-tree-caption">{t.organize.tree.caption}</figcaption>
     </figure>
@@ -168,6 +194,7 @@ const themeSwatches = {
       caption={t.sticky.mock.caption}
       foldAria={t.sticky.mock.foldAria}
       closeAria={t.sticky.mock.closeAria}
+      switchHint={t.sticky.mock.switchHint}
     />
 
     <ul class="nf-docs-ul">
@@ -203,6 +230,31 @@ const themeSwatches = {
     </ul>
     <p class="nf-docs-p" set:html={t.links.rawP} />
     <p class="nf-docs-p" set:html={t.links.brainP} />
+  </section>
+
+  <!-- ── Snippets ── -->
+  <section id="snippets" data-reveal>
+    <div class="nf-sec-head">{kickerFor('snippets')}</div>
+    <h2>{t.snippets.title}</h2>
+    {t.snippets.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+
+    <!-- Snippet mock: the stored markdown with its variables → what lands in the note
+         (the source starts with `## `, so the output is drawn as a rendered heading) -->
+    <div class="nf-snipmock nf-edge">
+      <div class="nf-snipmock-row">
+        <span class="nf-snipmock-label">{t.snippets.mock.sourceLabel}</span>
+        <code>{t.snippets.mock.source}</code>
+      </div>
+      <div class="nf-snipmock-row is-output">
+        <span class="nf-snipmock-label">{t.snippets.mock.outputLabel}</span>
+        <span class="nf-snipmock-out">{t.snippets.mock.output}</span>
+      </div>
+    </div>
+
+    <ul class="nf-docs-ul">
+      {t.snippets.bullets.map((b) => <li set:html={b} />)}
+    </ul>
+    <p class="nf-docs-p" set:html={t.snippets.syncP} />
   </section>
 
   <!-- ── Shortcuts ── -->
@@ -318,7 +370,7 @@ const themeSwatches = {
 <style is:global>
   /* ── /features page-specific styles (shared widgets live in docs.css). Accent = orange. ── */
 
-  /* Hierarchy mock: groups → folders → notes → section tags */
+  /* Hierarchy mock: groups → folders → notes → sections (folded line / map) */
   .nf-tree {
     margin: 24px 0 26px;
     padding: 20px 22px 15px;
@@ -351,9 +403,11 @@ const themeSwatches = {
     background: rgb(var(--gc));
     box-shadow: 0 0 10px rgb(var(--gc) / .65);
   }
-  /* Folders inherit the group colour (like the app) */
-  .nf-tree-folder { margin: 0 0 8px 6px; padding-left: 12px; border-left: 1px solid rgb(var(--gc) / .35); }
-  .nf-tree-group.is-ungrouped .nf-tree-note { margin-left: 6px; }
+  /* Guides: a fine line in the group colour runs down the whole group, and each
+     folder has its own under its icon (like the app's "index with guides"). */
+  .nf-tree-gbody { margin-left: 4px; padding-left: 12px; border-left: 1px solid rgb(var(--gc) / .35); }
+  .nf-tree-group.is-ungrouped .nf-tree-gbody { border-left-color: transparent; }
+  .nf-tree-folder { margin: 0 0 8px; }
   .nf-tree-fhead {
     display: flex;
     align-items: center;
@@ -363,35 +417,86 @@ const themeSwatches = {
     font-weight: 500;
     color: rgb(var(--gc) / .9);
   }
-  .nf-tree-fbody { padding-left: 6px; }
+  .nf-tree-folder .nf-tree-notes { margin-left: 5px; padding-left: 12px; border-left: 1px solid rgb(var(--gc) / .35); }
   .nf-tree-note {
+    position: relative;
     display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 5px 8px;
+    flex-direction: column;
+    gap: 6px;
     padding: 5px 0;
-    margin-left: 6px;
   }
-  .nf-tree-ndot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: rgb(var(--gc, 128 128 128) / .85);
-    flex: 0 0 auto;
+  /* The open note: a marker in the group colour sitting on its guide */
+  .nf-tree-note.is-open::before {
+    content: '';
+    position: absolute;
+    left: -14px;
+    top: 6px;
+    bottom: 6px;
+    width: 3px;
+    border-radius: 2px;
+    background: rgb(var(--gc));
   }
-  .nf-tree-group.is-ungrouped .nf-tree-ndot { background: var(--ink-faint); }
   .nf-tree-ntitle { font-size: 14px; color: var(--ink); }
-  .nf-tree-ntags { display: inline-flex; flex-wrap: wrap; gap: 5px; }
-  /* Section tag — same recipe as the app: colour text + 0.12 fill + 0.28 border */
-  .nf-tree-tag {
+  .nf-tree-note.is-open .nf-tree-ntitle { color: var(--ink-strong); }
+  /* Closed note → folded line: one stretch per section, as wide as the section is long */
+  .nf-tree-line { display: flex; gap: 2px; height: 3px; max-width: 220px; }
+  .nf-tree-seg { flex: 1 1 0; min-width: 4px; border-radius: 2px; background: rgb(var(--tc) / .75); transition: background .18s ease; }
+  .nf-tree-note:hover .nf-tree-seg { background: rgb(var(--tc)); }
+  /* Unfolded map: neutral cells with a folded corner in the section colour, the open one solid */
+  .nf-tree-map {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5px;
+    max-width: 260px;
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .nf-tree-cell {
+    position: relative;
+    flex: 1 1 auto;
+    padding: 2px 13px 2px 7px;
     font-size: 10.5px;
     line-height: 1.5;
-    padding: 0.5px 6px;
-    border-radius: 5px;
-    color: rgb(var(--tc));
-    background: rgb(var(--tc) / .12);
-    border: 1px solid rgb(var(--tc) / .28);
     white-space: nowrap;
+    color: var(--ink-dim);
+    background: var(--card-2);
+  }
+  .nf-tree-cell::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    border-style: solid;
+    border-width: 0 7px 7px 0;
+    border-color: transparent rgb(var(--tc)) transparent transparent;
+  }
+  .nf-tree-cell.is-active { font-weight: 600; color: var(--bg); background: rgb(var(--tc)); }
+  .nf-tree-cell.is-active::after { display: none; }
+  [data-theme='light'] .nf-tree-cell.is-active { color: var(--ink-strong); }
+  /* Closed notes float their map over the list when the mouse rests on them */
+  .nf-tree-note:not(.is-open) .nf-tree-map {
+    position: absolute;
+    left: -6px;
+    top: calc(100% - 9px);
+    z-index: 2;
+    padding: 5px 6px;
+    border: 1px solid var(--line-2);
+    border-radius: 7px;
+    background: var(--card);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, .28);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .15s ease, visibility 0s linear .15s;
+  }
+  .nf-tree-note:not(.is-open):hover .nf-tree-map {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity .15s ease .15s, visibility 0s linear .15s;
+  }
+  [data-theme='light'] .nf-tree-note:not(.is-open) .nf-tree-map { box-shadow: 0 10px 24px rgba(40, 34, 24, .16); }
+  @media (prefers-reduced-motion: reduce) {
+    .nf-tree-note:not(.is-open) .nf-tree-map,
+    .nf-tree-note:not(.is-open):hover .nf-tree-map { transition: none; }
   }
   .nf-tree-caption {
     margin-top: 16px;
@@ -488,6 +593,39 @@ const themeSwatches = {
     color: var(--ink-dim);
     word-break: break-all;
   }
+
+  /* Snippet mock: stored markdown with variables → the rendered result */
+  .nf-snipmock {
+    margin: 22px 0 24px;
+    padding: 6px 20px;
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    background: var(--card);
+    max-width: 640px;
+  }
+  .nf-snipmock-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 14px;
+    padding: 12px 0;
+  }
+  .nf-snipmock-row.is-output { border-top: 1px dashed var(--line-2); }
+  .nf-snipmock-label {
+    flex: 0 0 84px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .nf-snipmock-row code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    word-break: break-word;
+  }
+  .nf-snipmock-out { font-size: 18px; font-weight: 600; line-height: 1.35; color: var(--ink-strong); }
 
   /* Shortcut tables */
   .nf-keys-group { margin-top: 26px; }

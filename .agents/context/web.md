@@ -93,7 +93,7 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
   lugar, porque las páginas legales comparten renderer). Getters en
   `index.ts`/`common.ts`/`cli.ts`/`ai.ts`/`features.ts`/`pricing.ts`/`privacy.ts`/`terms.ts`/`legal-notice.ts`.
 - **Componentes de docs**: `src/components/docs/` — `Term.astro` (marco terminal con typing),
-  `StickyMock.astro` (sticky note en HTML/CSS con plegado a píldora), y las 4 `XPage.astro`.
+  `StickyMock.astro` (sticky note en HTML/CSS con plegado a píldora), y las `XPage.astro`.
   Wrappers finos en `src/pages/{x,es/x}.astro`.
 - **LEGACY MUERTO (no usar, no imitar)**: `src/components/{Nav,ChatMock,BrainGlyph,Pillar,
   Terminal,ScreenshotFrame}.astro`, `ThemeToggle.tsx`, `src/brain/*.tsx`, `src/styles/{tokens,global}.css`,
@@ -144,7 +144,10 @@ Cuando cambie algo en la app, este mapa dice qué tocar en la web. Editar siempr
 ### Landing `/` (`src/i18n/{en,es}.ts`)
 Features del mock de notas, chat mock, mockup de perfil, botones de descarga (ver
 "Descargas del landing" abajo), CTAs a `/cli`, `/ai` y `/features` (+ footer, que enlaza también a `/pricing`,
-`/privacy` y `/terms` **sin `data-nav`** — el script de sinapsis de la home no los conoce). Vídeos/capturas por tema en
+`/privacy` y `/terms` **sin `data-nav`** — el script de sinapsis de la home no los conoce). El mock de notas
+(`.nf-note` en `Home.astro`) dibuja las secciones como el item del sidebar de la app: línea plegada en
+las notas cerradas y mapa de celdas (sección abierta en sólido) en la activa. El kicker/párrafo del
+showcase cita el nº de temas (**14**, igual que `/features#personalize`). Vídeos/capturas por tema en
 `public/video/` y `public/screenshots/`. Actualizar al cambiar UX visible o al hacer release con
 features nuevas destacables.
 
@@ -215,17 +218,18 @@ código desactualiza la web. Los prompts se compararon byte a byte al publicarlo
 fidelidad (viven en `ai.en.ts` como constantes exportadas).
 
 ### `/features` — fuente de verdad: **skill `noteflow-features`** (y el código que ella cita)
-Anclas: `#organize` `#templates` `#sticky` `#links` `#shortcuts` `#views` `#temp` `#encryption`
-`#ai-hidden` `#personalize`.
+Anclas: `#organize` `#templates` `#sticky` `#links` `#snippets` `#shortcuts` `#views` `#temp`
+`#encryption` `#ai-hidden` `#personalize`.
 
 | Sección | Documenta | Sincronizar si cambia |
 |---|---|---|
-| `#organize` | Jerarquía grupos→carpetas→notas→secciones | skill (Grupos/Carpetas/Secciones) |
+| `#organize` | Jerarquía grupos→carpetas→notas→secciones (mock con guías, línea plegada y mapa abierto; hover = mapa flotante), icono personalizado de carpeta, peek de grupo plegado, mapa de secciones del editor, item del sidebar (mapa plegado) y preview de sección al hover (tarjeta apaisada) | skill (Grupos/Carpetas, Item de nota del sidebar, Secciones, Previsualización al hover) |
 | `#templates` | Save as template, Settings→Templates, `templates.json` | skill (Plantillas) |
-| `#sticky` | Mock CSS 300×300 plegable, Ctrl+S/Ctrl+G, startup de stickies | skill (Sticky notes) + `StickyMock.astro` |
-| `#links` | Slash command, pills vivas/rotas, forma raw `[Name](noteflow://…)`; un bullet sobre el tablero kanban (`/kanban`) | skill + `src/lib/sectionRelations.ts` + `src/lib/kanban.ts` |
+| `#sticky` | Mock CSS 300×300 plegable (con el `⌄` del selector de sección, decorativo), Ctrl+S/Ctrl+G, desplegable de secciones en la barra de título, startup de stickies | skill (Ventana sticky) + `StickyMock.astro` |
+| `#links` | Slash command, pills vivas/rotas, forma raw `[Name](noteflow://…)`; un bullet sobre el tablero kanban (`/kanban`) que enlaza a `#snippets` | skill + `src/lib/sectionRelations.ts` + `src/lib/kanban.ts` |
+| `#snippets` | Fragmentos: botón partido del toolbar, entrada en el menú `/`, variables `{date}`/`{time}`/`{datetime}`/`{date:FMT}`, sugerencias, `snippets.json` sincronizado; mock fuente→insertado (la fecha del mock es un ejemplo fijo) | skill (Fragmentos) + `src/lib/snippets.ts` |
 | `#shortcuts` | Tabla completa de atajos (datos en `features.en.ts` como `combos`) | `src/components/Settings/ShortcutsPanel.tsx` |
-| `#views` | Note overview, vista de contenido, Brain view; párrafo del sidebar flotante (desfijar → minimapa) | skill (Vistas, Sidebar fijado / flotante) |
+| `#views` | Vista de nota (mapa de secciones con el contenido dentro), vista de contenido unificada, Brain view; párrafo del sidebar flotante (desfijar → minimapa → panel completo al acercar el ratón) | skill (Vista de contenido, Vista de nota, Sidebar fijado / flotante) |
 | `#temp` | Notas temporales 24h | skill |
 | `#encryption` | AES-256-GCM + PBKDF2 310k, sin backdoor, CLI las ignora | skill / `noteUtils` |
 | `#ai-hidden` | Toggle Hide from AI (enlaza a `/ai#privacy`) | skill |

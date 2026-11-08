@@ -115,9 +115,9 @@ export const es: Content = {
   },
 
   showcase: {
-    kicker: 'Dark-first · 12 temas',
+    kicker: 'Dark-first · 14 temas',
     h2: `La magia está en <em style="font-style:italic;">los pequeños detalles.</em>`,
-    p: 'Doce temas afinados a mano — Carbon, Tokyo Night, Dracula, Parchment y más. Pulsa el interruptor y toda la app le sigue.',
+    p: 'Catorce temas afinados a mano — Carbon, Tokyo Night, Dracula, Parchment y más. Pulsa el interruptor y toda la app le sigue.',
     toggleTheme: 'Cambiar tema',
     themesLabel: 'Temas',
     themesCaption: 'Carbon · Tokyo Night · Midnight · Dracula · Synthwave · Parchment …',
