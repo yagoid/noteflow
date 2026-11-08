@@ -222,37 +222,60 @@ fidelidad (viven en `ai.en.ts` como constantes exportadas).
 Anclas: `#organize` `#templates` `#sticky` `#links` `#snippets` `#shortcuts` `#views` `#temp`
 `#encryption` `#ai-hidden` `#personalize`.
 
-| Sección | Documenta | Sincronizar si cambia |
-|---|---|---|
-| `#organize` | **Bloque visual** (ver "Clips de /features"): lede de 1 frase (una nota = un tema, secciones = facetas; enlace a `/ai#embeddings`), clip `section-map` y 4 *facts* de una línea (grupos con color · atajos del mapa de secciones · sidebar plegado + preview al hover · 27 iconos de carpeta y peek de grupo plegado) junto al mock HTML/CSS de la jerarquía (guías, línea plegada y mapa abierto; hover = mapa flotante) | skill (Grupos/Carpetas, Item de nota del sidebar, Secciones, Previsualización al hover) |
-| `#templates` | Save as template, Settings→Templates, `templates.json` | skill (Plantillas) |
-| `#sticky` | Mock CSS 300×300 plegable (con el `⌄` del selector de sección, decorativo), Ctrl+S/Ctrl+G, desplegable de secciones en la barra de título, startup de stickies | skill (Ventana sticky) + `StickyMock.astro` |
-| `#links` | Slash command, pills vivas/rotas, forma raw `[Name](noteflow://…)`; un bullet sobre el tablero kanban (`/kanban`) que enlaza a `#snippets` | skill + `src/lib/sectionRelations.ts` + `src/lib/kanban.ts` |
-| `#snippets` | Fragmentos: botón partido del toolbar, entrada en el menú `/`, variables `{date}`/`{time}`/`{datetime}`/`{date:FMT}`, sugerencias, `snippets.json` sincronizado; mock fuente→insertado (la fecha del mock es un ejemplo fijo) | skill (Fragmentos) + `src/lib/snippets.ts` |
-| `#shortcuts` | Tabla completa de atajos (datos en `features.en.ts` como `combos`) | `src/components/Settings/ShortcutsPanel.tsx` |
-| `#views` | Vista de nota (mapa de secciones con el contenido dentro), vista de contenido unificada, Brain view; párrafo del sidebar flotante (desfijar → minimapa → panel completo al acercar el ratón) | skill (Vista de contenido, Vista de nota, Sidebar fijado / flotante) |
-| `#temp` | Notas temporales 24h | skill |
-| `#encryption` | AES-256-GCM + PBKDF2 310k, sin backdoor, CLI las ignora | skill / `noteUtils` |
-| `#ai-hidden` | Toggle Hide from AI (enlaza a `/ai#privacy`) | skill |
-| `#personalize` | **14 temas (11 dark + 3 light)** con swatches de valores reales, fuentes, ancho readable, índice flotante del editor | `src/lib/themes.ts` (¡los swatches llevan colores literales!) |
+Todas las secciones siguen el **patrón de bloque visual** (ver "Clips de /features" abajo): lede de 1-2
+frases + clip y/o mock HTML/CSS + 3-4 *facts* de una línea. Los hechos están condensados de la skill; si la
+app cambia, corregir el *fact* (no volver a añadir prosa).
 
-**Clips de /features (rediseño visual en curso).** La página se está pasando de prosa larga a bloques
-visuales; de momento solo `#organize` sigue el patrón, el resto conserva la prosa. Patrón de bloque:
-kicker + `h2` + **lede** de 1-2 frases (`.nf-feat-lede`) + **clip** + **facts** (`.nf-feat-facts`: título
-en negrita + una línea, ≤ ~15 palabras) y, opcionalmente, `.nf-feat-split` (facts | segundo visual, en
-2 columnas desde 760px). Objetivo ≤ ~90 palabras visibles por bloque; el detalle vive en la app.
+| Sección | Composición · documenta | Sincronizar si cambia |
+|---|---|---|
+| `#organize` | Clip `section-map` a ancho completo + split facts \| mock de la jerarquía (guías, línea plegada y mapa abierto; hover = mapa flotante). Lede: una nota = un tema, secciones = facetas (enlace a `/ai#embeddings`); facts: grupos con color · atajos del mapa de secciones · sidebar plegado + preview al hover · 27 iconos de carpeta y peek de grupo plegado | skill (Grupos/Carpetas, Item de nota del sidebar, Secciones, Previsualización al hover) |
+| `#templates` | Sin clip. Mini-flujo de 2 tarjetas con la ruta de UI en chips (`⋯ → Save as template` → `Settings → Templates → New note`; en ES con las etiquetas de la app en español) + nota de una línea: `templates.json` sincronizado | skill (Plantillas) |
+| `#sticky` | Split clip `windows` \| `StickyMock` interactivo (plegable a píldora, `⌄` decorativo del selector de sección) + 4 facts en 2 columnas: píldora / en vivo / desplegable de secciones / stickies al arrancar (Settings → Startup). Ctrl+S / Ctrl+G en el lede | skill (Ventana sticky) + `StickyMock.astro` |
+| `#links` | Split (mock de pills: viva, rota y forma raw `[Name](noteflow://…)` + 3 facts) \| clip `links-palette`; debajo, fila mini con clip `kanban` pequeño + 2 líneas sobre `/kanban` | skill + `src/lib/sectionRelations.ts` + `src/lib/kanban.ts` |
+| `#snippets` | Split clip `snippets` \| (mock fuente→insertado, fecha de ejemplo fija + 4 facts: botón partido · menú `/` (`/snippet`, ES `/fragmento`) · variables · `snippets.json`) | skill (Fragmentos) + `src/lib/snippets.ts` |
+| `#shortcuts` | Tarjetas por grupo (App / Secciones / Sticky / Editor) en 2 columnas CSS, `dl` teclas \| acción (en <480px la acción va debajo). Datos en `features.{en,es}.ts` como `combos`; si todas las alternativas comparten modificadores se pintan una vez (`Ctrl + Z / Y`). Nota de macOS en una línea | `src/components/Settings/ShortcutsPanel.tsx` |
+| `#views` | 3 tarjetas de una línea (vista de nota / de contenido / cerebro) + dúo de clips `brain` y `floating-sidebar` + nota de una línea del sidebar flotante (Ctrl+' → minimapa → panel al acercar el ratón) | skill (Vista de contenido, Vista de nota, Sidebar fijado / flotante) |
+| `#temp` | Split 3 facts \| clip `quick-capture` (Ctrl+Shift+N → nota temporal, menú *Delete in* → 8 h): Ctrl+Shift+N / botón reloj · borrado también del remoto de sync · chevron de *Deletes …* (1-48 h o permanente) | skill (Notas temporales) |
+| `#encryption` | Sin clip. Mock interactivo: nota cuyas líneas se barren a pseudo-cifrado (base64 determinista, decorativo) con botón candado; se bloquea sola una vez al entrar en vista (con reduced-motion/sin JS ya sale bloqueada). Facts: AES-256-GCM + PBKDF2 310k · sin backdoor · CLI e índice de IA no las leen | skill / `noteUtils` |
+| `#ai-hidden` | Sin clip. Mock estático: 3 celdas de sección con tallo hacia una caja "índice · chat · grafo · tools"; la oculta (EyeOff, borde discontinuo) queda cortada con ×. 3 facts (superficies de IA · solo afecta a la IA · enlace a `/ai#privacy`). Va **en pareja con `#encryption`** (`.nf-feat-pair`: dos columnas por container query ≥760px, apiladas si no; ambos `section id` se conservan) | skill |
+| `#personalize` | Swatches de los **14 temas (11 dark + 3 light)** con valores reales + split 3 facts (ajustes de Apariencia · ancho legible · índice flotante del editor) \| clip `themes` (Ajustes → Apariencia cambiando de tema en vivo) | `src/lib/themes.ts` (¡los swatches llevan colores literales!) |
+
+**Clips de /features.** Toda la página sigue el patrón de bloque visual: kicker + `h2` + **lede** de 1-2
+frases (`.nf-feat-lede`) + visual (**clip** y/o **mock** HTML/CSS) + **facts** (`.nf-feat-facts`: título en
+negrita + una línea, ≤ ~15 palabras; `.is-2` = dos columnas). Objetivo ≤ ~90 palabras visibles por bloque;
+el detalle vive en la app. Piezas de composición en `FeaturesPage.astro` (reutilizables, solo tokens de
+`brain-site.css`): `.nf-feat-split` (2 columnas desde 760px; `.is-media-first`/`.is-media-last` = el clip
+ocupa la columna ancha a izquierda/derecha — siempre va primero en el DOM para quedar arriba en móvil;
+`.is-center` alinea al centro), `.nf-feat-stack` (mock + facts en una columna), `.nf-feat-mini` (clip
+pequeño + 2 líneas), `.nf-feat-duo` (2 clips lado a lado), `.nf-feat-note` (aside de una línea con borde
+de acento), `.nf-flow` (pasos con chips de ruta de UI), `.nf-feat-pair` (dos secciones en columnas por
+container query). La composición alterna (ancho completo / clip izquierda / clip derecha / tarjetas) para
+que la página no sea monótona. Todo grid lleva `minmax(0, 1fr)` para no desbordar a 375px.
 - **Material**: `public/clips/<id>.<lang>.webm` (960×600, VP9, 5-9 s, bucle, sin audio, tema oscuro de
-  la app, cursor falso) + póster `<id>.<lang>.webp` (primer frame). ids: `sections`, `section-map`,
-  `windows`, `links-palette`, `kanban`, `snippets`, `floating-sidebar`, `quick-capture`, `more`,
-  `brain`; idiomas `en`/`es` (siempre el de la página). Si cambia la UI que enseña un clip, hay que
-  regrabarlo (y su póster).
-- **`FeatureClip.astro`** (props `id`, `lang`, `label` = aria-label i18n, `caption?`, `playLabel`,
-  `pauseLabel`; labels en `features.{en,es}.ts` → `clip`): marco tipo ventana (tokens, vale en dark y
-  light) con `<video muted loop playsinline preload="none">` y la fuente en `data-src`. Un único script
-  con IntersectionObserver (rootMargin 200px) asigna `src` al acercarse (carga perezosa real), reproduce
-  y pausa al salir. Botón pausa/play (WCAG 2.2.2) que el script revela (sin JS solo se ve el póster);
+  la app, cursor falso) + póster `<id>.<lang>.webp` (primer frame). Los graba
+  `scripts/whats-new-capture.cjs` (los mismos del tour "What's new"). ids usados aquí: `section-map`,
+  `windows`, `links-palette`, `kanban`, `snippets`, `brain`, `floating-sidebar`, `quick-capture` y
+  `themes` (este último es el tramo de Ajustes → Apariencia del clip `more` del tour, recortado desde
+  5,2 s, 3,7 s). `more` (montaje cifrar + plantilla + tema que abre con el diálogo de cifrado, fuera de
+  lugar en `#personalize`) **no se usa en la web y se borró de `public/clips`** (tampoco `sections`, `ai` ni `sync`: solo se copian
+  los clips que usa alguna página). Para refrescar uno: copiar el `.webm` de `src/assets/whats-new/` y
+  convertir su `.png` a `.webp` (`ffmpeg -i x.png -c:v libwebp -quality 82 x.webp`). Idiomas `en`/`es` (siempre el de la página). Si cambia
+  la UI que enseña un clip, hay que regrabarlo (y su póster) y revisar su `clipLabel`.
+- **`FeatureClip.astro`** (props `id`, `lang`, `label` = aria-label i18n que describe lo que pasa en el
+  clip, `caption?` mono corto, `playLabel`, `pauseLabel`; labels en `features.{en,es}.ts` → `clip` y los
+  `clipLabel`/`clipCaption` de cada bloque): marco tipo ventana (tokens, vale en dark y light) con
+  `<video muted loop playsinline preload="none">` y la fuente en `data-src`. Un único script con
+  IntersectionObserver (rootMargin 200px) asigna `src` al acercarse (carga perezosa real), reproduce y
+  pausa al salir. Botón pausa/play (WCAG 2.2.2) que el script revela (sin JS solo se ve el póster);
   pausado a mano no se reanuda al volver a verlo. Con `prefers-reduced-motion` no hay autoplay: póster +
   play centrado.
+- **Mocks animados**: `StickyMock` (demo de plegado una vez) y el candado de `#encryption` (se bloquea una
+  vez) solo animan una vez o por interacción — nada en
+  bucle infinito; con reduced-motion o sin JS, estado estático.
+- **Scroll-spy del TOC** (`DocsShell.astro`, todas las páginas de docs): un clic en el TOC fija el
+  resaltado en su destino hasta que termina el scroll suave (`scrollend`, con timeout de respaldo), para
+  que dos secciones en la misma franja (el par `#encryption`/`#ai-hidden`) no se lo quiten. Al hacer
+  scroll a mano con el par a la vista, gana la última en el DOM (`#ai-hidden`).
 
 ### `/pricing` — fuente de verdad: **`.agents/context/monetization.md`** (§§ visión / 3 / 4)
 Anclas: `#free` `#plans` `#ai` `#cloud` `#compare` `#privacy`. Accent **pink**. Mensaje central:

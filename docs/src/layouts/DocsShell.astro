@@ -205,7 +205,22 @@ const railLabel =
         list.scrollTo({ left: li.offsetLeft - list.clientWidth / 2 + li.clientWidth / 2, behavior: 'smooth' });
       }
     };
+    // A TOC click pins the highlight to its target until the smooth scroll settles, so
+    // sections that share a band (e.g. side-by-side ones on /features) don't steal it.
+    let pinned = false;
+    let unpinTimer = 0;
+    const unpin = () => { pinned = false; window.clearTimeout(unpinTimer); };
+    tocLinks.forEach((a) => a.addEventListener('click', () => {
+      setActive((a.getAttribute('href') || '').slice(1));
+      pinned = true;
+      window.clearTimeout(unpinTimer);
+      // Where `scrollend` exists it ends the pin; elsewhere (and when the click doesn't scroll
+      // at all, e.g. already there) a timeout does.
+      unpinTimer = window.setTimeout(unpin, 'onscrollend' in window ? 3000 : 1500);
+    }));
+    window.addEventListener('scrollend', unpin);
     const spy = new IntersectionObserver((ents) => {
+      if (pinned) return;
       ents.forEach((e) => { if (e.isIntersecting) setActive((e.target as HTMLElement).id); });
     }, { rootMargin: '-20% 0px -70% 0px' });
     document.querySelectorAll('.nf-docs-content section[id]').forEach((s) => spy.observe(s));
