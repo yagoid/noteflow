@@ -153,10 +153,12 @@ noteflow/
 │   │   ├── GroupContextMenu.tsx         # Menú contextual de grupo (sidebar + columna de lugares de la vista de contenido)
 │   │   ├── FolderContextMenu.tsx        # Menú contextual de carpeta (ídem); clases comunes en contextMenuStyles.ts
 │   │   ├── NoteOverview/
-│   │   │   └── NoteOverview.tsx         # Vista de nota (sustituye editor): el mapa de secciones con la
-│   │   │                                #   vista previa dentro (bloque reticulado, lib/noteOverviewGrid.ts)
+│   │   │   ├── NoteOverview.tsx         # Vista de nota (sustituye editor): el mapa de secciones con la
+│   │   │   │                            #   vista previa dentro (bloque reticulado, lib/noteOverviewGrid.ts)
+│   │   │   └── SectionCardContent.tsx   #   Cuerpo + pie de una tarjeta de sección (celda y hover)
 │   │   ├── SectionPreview/              # Previsualización de sección reutilizable
-│   │   │   ├── SectionPreviewCard.tsx   #   Tarjeta mini-mock pura (la usan el hover y el cerebro)
+│   │   │   ├── SectionPreviewCard.tsx   #   Tarjeta mini-mock pura (la usa el cerebro)
+│   │   │   ├── SectionHoverCard.tsx     #   Tarjeta del hover: celda de la vista de nota en apaisado
 │   │   │   ├── HoverPreviewProvider.tsx #   Provider + popover flotante de hover (sidebar/grupos/editor/IA);
 │   │   │   │                            #     1 popover central, cierra con cualquier click (pointerdown global)
 │   │   │   └── hoverPreviewContext.ts   #   Contexto + hook useSectionHoverPreview (archivo aparte: fast-refresh)

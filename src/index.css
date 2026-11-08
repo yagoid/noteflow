@@ -69,9 +69,9 @@ button {
 }
 
 /* Read-only section previews that render the exact prose markup the editor uses
-   (static HTML from htmlFromMarkdown): SectionPreviewCard (hover popover, Brain
-   preview) shrinks it via `zoom` into a miniature of the open note; the note
-   overview grid (.note-grid-body.note-preview) restyles it at reading size. The
+   (static HTML from htmlFromMarkdown): SectionPreviewCard (Brain preview) shrinks
+   it via `zoom` into a miniature of the open note; the note overview grid and the
+   section hover card (.note-grid-body.note-preview) restyle it at reading size. The
    container supplies its own insets, so the ProseMirror padding is zeroed and the
    first block's top margin is removed. */
 .note-preview .prose-editor {
@@ -1554,8 +1554,8 @@ html[data-color-scheme="light"] .nsm-peek {
   mask-image: linear-gradient(to bottom, #000 62%, transparent);
 }
 /* Whole-pixel sizes on purpose: fractional ones blur monospace fonts in Chromium, and
-   the family follows the editor font setting (--prose-font-family, set on .note-grid),
-   which may be the mono one. */
+   the family follows the editor font setting (--prose-font-family, set on .note-grid
+   or .section-hover-card), which may be the mono one. */
 .note-grid-body .prose-editor .ProseMirror {
   font-size: 11px;
   line-height: 1.55;
@@ -1658,6 +1658,59 @@ html[data-color-scheme="light"] .nsm-peek {
 
 /* The map's drop bar, above the cells' own layers. */
 .note-grid .section-map-drop { z-index: 4; }
+
+/* ── Section hover preview (SectionPreview/SectionHoverCard.tsx) ───────────────
+   A note-grid cell as a floating landscape card: it reuses .note-grid-head and the
+   cell's body/foot (.note-grid-body / -raw / -empty / -foot) and the map's folded
+   corner, and only adds what differs — an opaque surface with border and shadow (it
+   floats over anything), the section name in its colour and the note title on the
+   right of the header. HoverPreviewProvider sizes and positions it; the card sets
+   --sm-color, --prose-font-family and --ng-accent-ink itself (it's in a portal). */
+.section-hover-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border: 1px solid rgb(var(--text) / 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+  background: linear-gradient(rgb(var(--text) / 0.06), rgb(var(--text) / 0.06)), rgb(var(--bg-editor));
+  box-shadow: 0 16px 36px -10px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.2);
+}
+html[data-color-scheme="light"] .section-hover-card {
+  box-shadow: 0 16px 36px -10px rgb(0 0 0 / 0.22), 0 2px 8px rgb(0 0 0 / 0.08);
+}
+.section-hover-card.is-ai-hidden {
+  background: linear-gradient(rgb(var(--text) / 0.035), rgb(var(--text) / 0.035)), rgb(var(--bg-editor));
+}
+/* Right padding clears the folded corner (no checkbox here, unlike the cell). */
+.section-hover-head { padding-right: 24px; }
+.section-hover-card.is-ai-hidden .section-hover-head {
+  background: rgb(var(--text) / 0.03);
+  color: rgb(var(--text-muted));
+}
+/* The name keeps priority: it takes up to 60% before the note title gets squeezed. */
+.section-hover-name {
+  flex: 0 0 auto;
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--sm-color);
+}
+.section-hover-card.is-ai-hidden .section-hover-name { opacity: 0.6; }
+.section-hover-note {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  font-weight: 400;
+  color: rgb(var(--text-muted));
+}
+.section-hover-card .section-map-corner { z-index: 1; width: 14px; height: 14px; }
 
 /* Header buttons (same plane as the content, no band). */
 .note-grid-ghost {

@@ -21,17 +21,16 @@ interface SectionPreviewCardProps {
   note: Note
   section: NoteSection
   sectionTagColors: SectionTagColorMap
-  // `compact` keeps the section header smaller (used by the hover popover and the
-  // Brain preview); the height/zoom of the body preview are overridable for the
-  // same reason.
+  // `compact` keeps the section header smaller (used by the Brain preview); the
+  // height/zoom of the body preview are overridable for the same reason.
   compact?: boolean
   previewHeight?: number
   previewZoom?: number
 }
 
 // A small mock of the editor when that section is open. Pure presentation — the
-// caller decides how to wrap it (the floating popover when hovering a navigation
-// trigger, the Brain view's node preview).
+// caller decides how to wrap it (the Brain view's node preview). The section hover
+// preview no longer uses it: see SectionHoverCard.
 export function SectionPreviewCard({
   note,
   section,
