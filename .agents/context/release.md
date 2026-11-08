@@ -265,6 +265,50 @@ node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|a
   Revisar los clips a ojo (`--frames <dir>` guarda los frames y 4 PNG de muestra por clip).
 - Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~7,2 MB con los pósters: cerca del
   tope; al añadir clips nuevos, revisar el tamaño o bajar duración/`crf`).
+- La maquinaria compartida (lanzar Electron sobre dirs temporales, mock LLM, cursor falso + pastillas,
+  `actor`, grabador CDP, `writeConcat`/ffmpeg, máscaras/sombras) vive en `scripts/lib/capture-kit.cjs`
+  y el cuaderno demo (EN/ES, ids estables `ID`, `seedNotes`) en `scripts/lib/demo-notes.cjs`; los usan
+  este script y el del vídeo de la landing (abajo). `focusEditorEnd`/`focusLastTask` esperan a que el
+  editor tenga el foco de verdad (TipTap lo aplica en un `requestAnimationFrame`): sin esa espera, en
+  `quick-capture` la primera tecla caía en el título auto-seleccionado de la nota nueva. Un cambio en
+  la kit afecta a ambos: probar
+  `whats-new-capture.cjs --only sections --lang en --out <dir temporal>` (sin pisar `src/assets/`).
+
+### Vídeo de la landing + GIF del README (`scripts/demo-capture.cjs`)
+
+Graba con un guion fijo sobre el cuaderno demo (UI en inglés) el vídeo del escaparate de la landing
+(`docs/src/components/Home.astro`) y el GIF del README, uno por tema:
+`docs/public/video/demo-dark.{mp4,webm}` (Midnight Blue) y `demo-light.{mp4,webm}` (Arctic Day) +
+pósters `docs/public/screenshots/app-main-midnightblue.png` / `app-main-articday.png` + (solo oscuro)
+`docs/public/screenshots/demo-dark.gif`. Regenerarlo cuando la UI que sale cambie de forma visible.
+
+```bash
+node scripts/demo-capture.cjs --app <dir> [--theme dark|light|all] [--video-out <dir>] [--shots-out <dir>]
+                              [--samples <dir>] [--frames <dir>] [--no-gif]
+```
+
+- Mismas reglas de seguridad que el de los clips (dirs temporales, nunca el CLI, sin GitHub/Cloud,
+  mock LLM local, solo cierra los Electron que lanza). Diferencia: activa **de verdad** el índice
+  semántico local (para que la respuesta del chat cite sus notas y el cerebro las ilumine) con el
+  modelo pequeño `Xenova/paraphrase-multilingual-MiniLM-L12-v2`, **copiado** de `.electron-dev/ai-models`
+  si existe (si no, la app lo descarga en el primer uso, ~130 MB). Antes de la toma calienta el modelo
+  y la vista cerebro, y vuelve a cargar el modelo en el corte previo al cerebro (el worker lo suelta
+  a los 10 s sin uso y su toast "Downloading model" saldría bajo la respuesta).
+- Guion (~33 s, una sola toma con un corte): mapa de secciones de la nota → otra sección + una tarea →
+  `/` inserta un fragmento (`snippets.json` sembrado) → sidebar: el mapa plegado de una nota se
+  despliega y reposar en una celda abre la preview apaisada → peek de un grupo plegado → icono de
+  carpeta desde su menú contextual → `Ctrl+S` saca la sección a una sticky y su desplegable de título
+  cambia de sección → (corte) vista cerebro + respuesta del chat con sus fuentes.
+- La **sticky se compone** sobre la ventana principal en su desplazamiento real (cada ventana se graba
+  por CDP por separado; máscara redondeada + sombra con ffmpeg). Ventana a 1120×717 CSS px, captura a
+  DPR 1.5 → máster sin pérdida 1280×820 a 30 fps (×1,2 de velocidad). El final funde 0,5 s con el
+  primer fotograma (sin cursor, que entra después) y ese mismo fotograma es el póster: póster → vídeo
+  → bucle sin saltos. webm VP9 `crf 32`, mp4 H.264 `crf 22` + `faststart`, póster PNG de 256 colores.
+- GIF del README: montaje a cortes secos de ~12 s (mapa de secciones, mapa plegado + preview + peek de
+  grupo, desplegable de la sticky, respuesta con citas), 760 px de ancho a 12 fps con paleta propia.
+  Tope **≤ ~5 MB**; si crece, bajar `fps`/ancho en `encodeGif` o acortar los rangos.
+- Revisar a ojo (`--samples <dir>` deja 8 PNG por tema). Los nombres de los ficheros los fija
+  `Home.astro`/`README.md`: si cambian allí, cambiar `THEMES` en el script.
 
 ### Artefactos
 

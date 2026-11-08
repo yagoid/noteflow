@@ -34,16 +34,22 @@
 //     them over a desktop-like backdrop. "brain" dismisses the "Enable local AI" prompt as it
 //     mounts (no embeddings in the temp profile; section links still draw the graph) and cuts the
 //     hidden node-probing step out of the take. "more" is a montage with hard cuts.
+//   Shared machinery (launch, overlay, actor, recorder, ffmpeg helpers) lives in lib/capture-kit.cjs
+//   and the demo notebook in lib/demo-notes.cjs (also used by demo-capture.cjs).
 //   Requires: playwright (devDependency) and ffmpeg in the PATH. The output is a set of real
 //   screenshots of the UI: re-record after visible UI changes and review the clips by eye.
 // ─────────────────────────────────────────────────────────────────────────────
-const HELP_LINES = 39
+const HELP_LINES = 41
 
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const http = require('http')
-const { spawnSync } = require('child_process')
+const {
+  sleep, startMockLlm, launchElectron, closeApp, injectOverlay, actor, startRecording, writeConcat, ffmpeg,
+  probeDuration, sampleFrames, focusEditorEnd, focusLastTask, configureMockLlm, reloadMain,
+  probeBrainNode, makeMask, makeShadow, clipTime,
+} = require('./lib/capture-kit.cjs')
+const { ID, demoContent, seedNotes } = require('./lib/demo-notes.cjs')
 
 const REPO = path.resolve(__dirname, '..')
 const CLIP_IDS = ['sections', 'kanban', 'links-palette', 'quick-capture', 'windows', 'brain', 'ai', 'sync',
@@ -71,241 +77,6 @@ function parseArgs(argv) {
   return o
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const rand = (a, b) => a + Math.random() * (b - a)
-
-// ── Demo content ────────────────────────────────────────────────────────────
-// Stable ids so scenarios can address notes/sections directly.
-const ID = {
-  gWork: 'grpwork1', gPersonal: 'grppers1', gLearn: 'grplern1',
-  fProduct: 'fldprod1', fEng: 'fldeng01',
-  launch: 'nlaunch1', api: 'napides1', reading: 'nreadin1', design: 'ndesign1', hiring: 'nhiring1',
-  review: 'nreview1', lisbon: 'nlisbon1', ideas: 'nideas01', rust: 'nrustln1', research: 'nresrch1',
-  okrs: 'nokrs001', recipes: 'nrecipe1', standup: 'nstandu1', habits: 'nhabits1',
-}
-
-function demoContent(lang) {
-  const es = lang === 'es'
-  const L = (en, esText) => (es ? esText : en)
-  const rel = (name, noteId, secId) => `[${name}](noteflow://${noteId}/${secId})`
-
-  const groups = [
-    { id: ID.gWork, name: L('Work', 'Trabajo'), color: '--accent', order: 0 },
-    { id: ID.gPersonal, name: L('Personal', 'Personal'), color: '--pink', order: 1 },
-    { id: ID.gLearn, name: L('Learning', 'Aprendizaje'), color: '--cyan', order: 2 },
-  ]
-  const folders = [
-    { id: ID.fProduct, name: L('Product', 'Producto'), groupId: ID.gWork, order: 0 },
-    { id: ID.fEng, name: L('Engineering', 'Ingeniería'), groupId: ID.gWork, order: 1 },
-  ]
-
-  // Section names used by relations (kept in one place so pills read right).
-  const S = {
-    roadmap: L('Roadmap', 'Roadmap'), tasks: L('Tasks', 'Tareas'), meeting: L('Meeting notes', 'Notas de reunión'),
-    endpoints: L('Endpoints', 'Endpoints'), auth: L('Auth', 'Autenticación'), openq: L('Open questions', 'Preguntas abiertas'),
-    books: L('Books', 'Libros'), articles: L('Articles', 'Artículos'),
-    colors: L('Colors', 'Colores'), components: L('Components', 'Componentes'),
-    candidates: L('Candidates', 'Candidatos'), loop: L('Interview loop', 'Entrevistas'),
-    wins: L('Wins', 'Logros'), next: L('Next week', 'Próxima semana'),
-    itinerary: L('Itinerary', 'Itinerario'), packing: L('Packing', 'Equipaje'),
-    inbox: L('Inbox', 'Bandeja'), ownership: L('Ownership', 'Ownership'), async: L('Async', 'Async'),
-    interviews: L('User interviews', 'Entrevistas a usuarios'), insights: L('Insights', 'Hallazgos'),
-    q4: L('Q4 goals', 'Objetivos Q4'), metrics: L('Metrics', 'Métricas'),
-    weeknight: L('Weeknight', 'Entre semana'), standup: L('Monday', 'Lunes'), habits: L('Daily', 'Diario'),
-  }
-
-  const notes = [
-    {
-      id: ID.launch, title: L('Product launch', 'Lanzamiento del producto'), group: ID.gWork, folder: ID.fProduct, daysAgo: 6, favorited: true,
-      sections: [
-        { id: 'sroadm', name: S.roadmap, content: [
-          L('## Q4 launch plan', '## Plan de lanzamiento Q4'),
-          '',
-          L('Ship the public beta in **three waves**, one every two weeks.', 'Lanzar la beta pública en **tres oleadas**, una cada dos semanas.'),
-          '',
-          L('- **Wave 1** — private beta with 50 design partners', '- **Oleada 1** — beta privada con 50 clientes piloto'),
-          L('- **Wave 2** — waitlist opens, pricing page goes live', '- **Oleada 2** — se abre la lista de espera y la página de precios'),
-          L('- **Wave 3** — public launch + press kit', '- **Oleada 3** — lanzamiento público + kit de prensa'),
-          '',
-          L(`Depends on ${rel(S.endpoints, ID.api, 'sendpt')} and ${rel(S.components, ID.design, 'scompo')}.`,
-            `Depende de ${rel(S.endpoints, ID.api, 'sendpt')} y ${rel(S.components, ID.design, 'scompo')}.`),
-        ].join('\n') },
-        { id: 'stasks', name: S.tasks, content: [
-          L('- [x] Freeze the feature list', '- [x] Cerrar la lista de funcionalidades'),
-          L('- [x] Book the launch webinar', '- [x] Reservar el webinar de lanzamiento'),
-          L('- [ ] Write the release notes', '- [ ] Escribir las notas de versión'),
-          L('- [ ] Record the demo video', '- [ ] Grabar el vídeo de demo'),
-          L('- [ ] Final QA pass on Windows and macOS', '- [ ] Último repaso de QA en Windows y macOS'),
-          '',
-          L(`Hiring: ${rel(S.candidates, ID.hiring, 'scandi')}`, `Contratación: ${rel(S.candidates, ID.hiring, 'scandi')}`),
-        ].join('\n') },
-        { id: 'smeetn', name: S.meeting, content: [
-          L('### Kick-off — Monday', '### Kick-off — lunes'),
-          L('- Marketing wants the landing page one week earlier', '- Marketing quiere la landing una semana antes'),
-          L('- Support needs a FAQ before wave 2', '- Soporte necesita una FAQ antes de la oleada 2'),
-          L('- Decision: pricing stays at three tiers', '- Decisión: los precios se quedan en tres planes'),
-          '',
-          L(`Follow-up in ${rel(S.metrics, ID.okrs, 'smetri')}`, `Seguimiento en ${rel(S.metrics, ID.okrs, 'smetri')}`),
-        ].join('\n') },
-      ],
-    },
-    {
-      id: ID.api, title: L('API design', 'Diseño de la API'), group: ID.gWork, folder: ID.fEng, daysAgo: 9,
-      sections: [
-        { id: 'sendpt', name: S.endpoints, content: [
-          L('## REST endpoints', '## Endpoints REST'),
-          '',
-          '- `GET /v1/projects` — ' + L('list projects', 'listar proyectos'),
-          '- `POST /v1/projects` — ' + L('create a project', 'crear un proyecto'),
-          '- `PATCH /v1/projects/:id` — ' + L('partial update', 'actualización parcial'),
-          '',
-          L(`Auth flow in ${rel(S.auth, ID.api, 'sauthx')}.`, `Flujo de login en ${rel(S.auth, ID.api, 'sauthx')}.`),
-        ].join('\n') },
-        { id: 'sauthx', name: S.auth, content: [
-          L('OAuth 2.0 with PKCE. Tokens expire after **15 min**.', 'OAuth 2.0 con PKCE. Los tokens caducan a los **15 min**.'),
-          '',
-          L('- Refresh tokens rotate on every use', '- Los refresh tokens rotan en cada uso'),
-          L('- Scopes: `read`, `write`, `admin`', '- Scopes: `read`, `write`, `admin`'),
-        ].join('\n') },
-        { id: 'sopenq', name: S.openq, content: [
-          L('- Do we need cursor-based pagination from day one?', '- ¿Necesitamos paginación por cursor desde el primer día?'),
-          L('- Rate limits per key or per workspace?', '- ¿Límites por clave o por espacio de trabajo?'),
-          '',
-          L(`See ${rel(S.roadmap, ID.launch, 'sroadm')}`, `Ver ${rel(S.roadmap, ID.launch, 'sroadm')}`),
-        ].join('\n') },
-      ],
-    },
-    {
-      id: ID.design, title: L('Design system', 'Sistema de diseño'), group: ID.gWork, folder: ID.fProduct, daysAgo: 12,
-      sections: [
-        { id: 'scolor', name: S.colors, content: L('Primary `#E5484D`, neutrals from slate. Dark mode first.', 'Primario `#E5484D`, neutros de slate. Primero el modo oscuro.') },
-        { id: 'scompo', name: S.components, content: [
-          L('- Button, Input, Select — **done**', '- Button, Input, Select — **hecho**'),
-          L('- Modal, Toast — in review', '- Modal, Toast — en revisión'),
-          L('- Data table — next sprint', '- Tabla de datos — próximo sprint'),
-          '',
-          L(`Tokens: ${rel(S.colors, ID.design, 'scolor')}`, `Tokens: ${rel(S.colors, ID.design, 'scolor')}`),
-        ].join('\n') },
-      ],
-    },
-    {
-      id: ID.hiring, title: L('Hiring', 'Contratación'), group: ID.gWork, daysAgo: 15,
-      sections: [
-        { id: 'scandi', name: S.candidates, content: [
-          L('- Ana — senior frontend, strong on accessibility', '- Ana — frontend senior, muy fuerte en accesibilidad'),
-          L('- Marc — backend, Go + Postgres', '- Marc — backend, Go + Postgres'),
-          '',
-          L(`Process: ${rel(S.loop, ID.hiring, 'sloopx')}`, `Proceso: ${rel(S.loop, ID.hiring, 'sloopx')}`),
-        ].join('\n') },
-        { id: 'sloopx', name: S.loop, content: L('1. Intro call\n2. Take-home (2h max)\n3. Pairing session\n4. Team chat', '1. Llamada inicial\n2. Prueba en casa (máx. 2h)\n3. Sesión de pairing\n4. Charla con el equipo') },
-      ],
-    },
-    {
-      id: ID.okrs, title: L('Team OKRs', 'OKRs del equipo'), group: ID.gWork, daysAgo: 20,
-      sections: [
-        { id: 'sq4gol', name: S.q4, content: L(`- Launch the public beta (${rel(S.roadmap, ID.launch, 'sroadm')})\n- Hire two engineers`, `- Lanzar la beta pública (${rel(S.roadmap, ID.launch, 'sroadm')})\n- Contratar a dos ingenieros`) },
-        { id: 'smetri', name: S.metrics, content: L('- Weekly active users: **1,240**\n- Activation rate: **38%**\n- NPS: **52**', '- Usuarios activos semanales: **1.240**\n- Tasa de activación: **38%**\n- NPS: **52**') },
-      ],
-    },
-    {
-      id: ID.standup, title: L('Standup notes', 'Notas del daily'), group: ID.gWork, folder: ID.fEng, daysAgo: 1,
-      sections: [
-        { id: 'sstand', name: S.standup, content: L(`- Unblocked the auth refactor (${rel(S.auth, ID.api, 'sauthx')})\n- Pairing with Ana on the table component`, `- Desbloqueado el refactor de login (${rel(S.auth, ID.api, 'sauthx')})\n- Pairing con Ana en el componente de tabla`) },
-      ],
-    },
-    {
-      id: ID.research, title: L('User research', 'Investigación de usuarios'), group: ID.gWork, folder: ID.fProduct, daysAgo: 8,
-      sections: [
-        { id: 'sinter', name: S.interviews, content: L('Eight interviews done. People want **faster capture** and offline mode.', 'Ocho entrevistas hechas. Piden **captura más rápida** y modo offline.') },
-        { id: 'sinsig', name: S.insights, content: L(`- Keyboard-first is a must\n- Feeds into ${rel(S.roadmap, ID.launch, 'sroadm')}`, `- Imprescindible poder usarlo solo con teclado\n- Alimenta el ${rel(S.roadmap, ID.launch, 'sroadm')}`) },
-      ],
-    },
-    {
-      id: ID.reading, title: L('Reading list', 'Lista de lectura'), group: ID.gLearn, daysAgo: 4,
-      sections: [
-        { id: 'sbooks', name: S.books, content: L('- [x] *Shape Up* — Ryan Singer\n- [ ] *The Pragmatic Programmer*\n- [ ] *Designing Data-Intensive Applications*', '- [x] *Shape Up* — Ryan Singer\n- [ ] *El programador pragmático*\n- [ ] *Designing Data-Intensive Applications*') },
-        { id: 'sartic', name: S.articles, content: L(`- Local-first software (Ink & Switch)\n- Related: ${rel(S.ownership, ID.ideas, 'sownsh')}`, `- Local-first software (Ink & Switch)\n- Relacionado: ${rel(S.ownership, ID.ideas, 'sownsh')}`) },
-      ],
-    },
-    {
-      id: ID.rust, title: L('Learning Rust', 'Aprendiendo Rust'), group: ID.gLearn, daysAgo: 18,
-      sections: [
-        { id: 'srust1', name: L('Ownership', 'Ownership'), content: L('Every value has a single owner. Borrowing: `&T` shared, `&mut T` exclusive.', 'Cada valor tiene un único dueño. Préstamos: `&T` compartido, `&mut T` exclusivo.') },
-        { id: 'srust2', name: L('Exercises', 'Ejercicios'), content: L(`- [x] Rustlings 1–20\n- [ ] Build a CLI todo app\n- [ ] Read ${rel(S.books, ID.reading, 'sbooks')}`, `- [x] Rustlings 1–20\n- [ ] Hacer una app de tareas en CLI\n- [ ] Leer ${rel(S.books, ID.reading, 'sbooks')}`) },
-      ],
-    },
-    {
-      id: ID.ideas, title: L('Ideas', 'Ideas'), group: ID.gLearn, daysAgo: 3,
-      sections: [
-        { id: 'sinbox', name: S.inbox, content: L('- A weekly digest of my notes\n- Voice memos → notes', '- Un resumen semanal de mis notas\n- Notas de voz → notas') },
-        { id: 'sownsh', name: S.ownership, content: L('Own your data: plain Markdown files, synced where *you* decide.', 'Tus datos son tuyos: Markdown plano, sincronizado donde *tú* decidas.') },
-      ],
-    },
-    {
-      id: ID.review, title: L('Weekly review', 'Revisión semanal'), group: ID.gPersonal, daysAgo: 2,
-      sections: [
-        { id: 'swinsx', name: S.wins, content: L(`- Finished the launch plan (${rel(S.roadmap, ID.launch, 'sroadm')})\n- Ran three times`, `- Terminado el plan de lanzamiento (${rel(S.roadmap, ID.launch, 'sroadm')})\n- Salí a correr tres veces`) },
-        { id: 'snextw', name: S.next, content: L(`- Prepare ${rel(S.itinerary, ID.lisbon, 'sitine')}\n- Finish *Shape Up*`, `- Preparar el ${rel(S.itinerary, ID.lisbon, 'sitine')}\n- Terminar *Shape Up*`) },
-      ],
-    },
-    {
-      id: ID.lisbon, title: L('Trip to Lisbon', 'Viaje a Lisboa'), group: ID.gPersonal, daysAgo: 10,
-      sections: [
-        { id: 'sitine', name: S.itinerary, content: L('- **Fri** — Alfama + Fado night\n- **Sat** — Sintra day trip\n- **Sun** — LX Factory, Belém', '- **Vie** — Alfama + noche de fado\n- **Sáb** — excursión a Sintra\n- **Dom** — LX Factory, Belém') },
-        { id: 'spacki', name: S.packing, content: L('- [ ] Passport\n- [ ] Charger\n- [x] Comfortable shoes', '- [ ] Pasaporte\n- [ ] Cargador\n- [x] Zapatillas cómodas') },
-      ],
-    },
-    {
-      id: ID.recipes, title: L('Recipes', 'Recetas'), group: ID.gPersonal, daysAgo: 25,
-      sections: [
-        { id: 'swknit', name: S.weeknight, content: L('- Lemon pasta (15 min)\n- Chickpea curry\n- Shakshuka', '- Pasta al limón (15 min)\n- Curry de garbanzos\n- Shakshuka') },
-      ],
-    },
-    {
-      id: ID.habits, title: L('Habits', 'Hábitos'), group: ID.gPersonal, daysAgo: 5,
-      sections: [
-        { id: 'shabit', name: S.habits, content: L(`- [x] 20 min reading (${rel(S.books, ID.reading, 'sbooks')})\n- [ ] Stretch\n- [x] No phone after 22:00`, `- [x] 20 min de lectura (${rel(S.books, ID.reading, 'sbooks')})\n- [ ] Estirar\n- [x] Sin móvil después de las 22:00`) },
-      ],
-    },
-  ]
-  return { groups, folders, notes, S }
-}
-
-function noteDirname(id, title) {
-  const slug = title.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 40)
-  return `${slug ? `${slug}-` : ''}${id}`
-}
-
-function yamlStr(s) { return JSON.stringify(s) }
-
-// Writes the v2 note folders + groups/folders JSON straight into the temp notes dir.
-function seedNotes(notesDir, lang, extraSections = {}) {
-  const { groups, folders, notes } = demoContent(lang)
-  for (const n of notes) if (extraSections[n.id]) n.sections.push(...extraSections[n.id])
-  fs.writeFileSync(path.join(notesDir, '.noteflow-format'), '2')
-  fs.writeFileSync(path.join(notesDir, 'groups.json'), JSON.stringify(groups, null, 2))
-  fs.writeFileSync(path.join(notesDir, 'folders.json'), JSON.stringify(folders, null, 2))
-  const now = Date.now()
-  for (const n of notes) {
-    const created = new Date(now - n.daysAgo * 86400000 - 3600000 * 3).toISOString()
-    const updated = new Date(now - n.daysAgo * 86400000 * 0.4 - 600000).toISOString()
-    const dir = path.join(notesDir, noteDirname(n.id, n.title))
-    fs.mkdirSync(dir, { recursive: true })
-    const lines = ['---', `id: ${n.id}`, `title: ${yamlStr(n.title)}`, 'tags: []', `created: ${created}`, `updated: ${updated}`, 'formatVersion: 2']
-    if (n.group) lines.push(`group: ${n.group}`)
-    if (n.folder) lines.push(`folder: ${n.folder}`)
-    if (n.favorited) lines.push('favorited: true')
-    lines.push('sections:')
-    for (const s of n.sections) {
-      lines.push(`  - id: ${s.id}`, `    name: ${yamlStr(s.name)}`, `    file: ${s.id}.md`, `    created: ${yamlStr(created)}`)
-      fs.writeFileSync(path.join(dir, `${s.id}.md`), s.content + '\n')
-    }
-    lines.push('---', '')
-    fs.writeFileSync(path.join(dir, 'note.md'), lines.join('\n'))
-  }
-}
-
 const WHATS_NEW_SEEN = [...CLIP_IDS]
 
 function seedProfile(profileDir, lang, extra = {}) {
@@ -319,355 +90,16 @@ function seedProfile(profileDir, lang, extra = {}) {
   fs.writeFileSync(path.join(profileDir, 'settings.json'), JSON.stringify(settings, null, 2))
 }
 
-// ── Mock OpenAI-compatible LLM (AI clip) ────────────────────────────────────
-function startMockLlm(getAnswer) {
-  const server = http.createServer((req, res) => {
-    if (req.method === 'GET' && req.url.endsWith('/models')) {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ data: [{ id: 'gpt-4o' }, { id: 'gpt-4o-mini' }] }))
-      return
-    }
-    if (req.method === 'POST' && req.url.endsWith('/chat/completions')) {
-      let body = ''
-      req.on('data', (c) => { body += c })
-      req.on('end', () => {
-        let parsed = {}
-        try { parsed = JSON.parse(body) } catch { /* ignore */ }
-        const msgs = parsed.messages || []
-        const lastUser = [...msgs].reverse().find((m) => m.role === 'user')
-        const userText = typeof lastUser?.content === 'string' ? lastUser.content
-          : Array.isArray(lastUser?.content) ? lastUser.content.map((p) => p.text || '').join(' ') : ''
-        const text = getAnswer(userText, parsed)
-        if (!parsed.stream) {
-          res.writeHead(200, { 'content-type': 'application/json' })
-          res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: text } }] }))
-          return
-        }
-        res.writeHead(200, { 'content-type': 'text/event-stream' })
-        // Stream in small word-ish chunks with a human-ish cadence.
-        const chunks = text.match(/\S+\s*|\s+/g) || [text]
-        let i = 0
-        const tick = () => {
-          if (res.writableEnded) return
-          if (i < chunks.length) {
-            const n = 2 + Math.floor(Math.random() * 2)
-            const piece = chunks.slice(i, i + n).join('')
-            i += n
-            res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`)
-            setTimeout(tick, 22 + Math.random() * 30)
-          } else {
-            res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`)
-            res.write('data: [DONE]\n\n')
-            res.end()
-          }
-        }
-        setTimeout(tick, 380)
-      })
-      return
-    }
-    res.writeHead(404); res.end()
-  })
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)))
-}
-
-// ── App launch ──────────────────────────────────────────────────────────────
-function launchEnv(notes) {
-  const env = { ...process.env, NOTEFLOW_NATIVE: '1', NOTEFLOW_NOTES_DIR: notes, NOTEFLOW_DISABLE_WHATS_NEW: '1' }
-  delete env.ELECTRON_RUN_AS_NODE
-  return env
-}
-
 async function launchApp(opts, lang, { settings = {}, uiState = {}, extraSections = {}, files = {}, size = { width: 960, height: 600 } } = {}) {
-  const { _electron } = require(path.join(REPO, 'node_modules', 'playwright'))
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-whatsnew-'))
-  const profile = path.join(tmpRoot, 'profile')
-  const notes = path.join(tmpRoot, 'notes')
-  fs.mkdirSync(profile); fs.mkdirSync(notes)
-  seedNotes(notes, lang, extraSections)
-  for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(notes, name), content)
-  seedProfile(profile, lang, { settings, uiState })
-  const exe = process.platform === 'win32'
-    ? path.join(REPO, 'node_modules', 'electron', 'dist', 'electron.exe')
-    : require(path.join(REPO, 'node_modules', 'electron'))
-  const app = await _electron.launch({
-    executablePath: exe,
-    args: [opts.app, `--user-data-dir=${profile}`, `--force-device-scale-factor=${opts.scale}`,
-      '--disable-features=CalculateNativeWinOcclusion', '--disable-renderer-backgrounding', '--disable-background-timer-throttling'],
-    cwd: opts.app,
-    env: launchEnv(notes),
-    timeout: 60000,
+  const ctx = await launchElectron({
+    appDir: opts.app, scale: opts.scale, size, tmpPrefix: 'nf-whatsnew-',
+    seed: ({ notes, profile }) => {
+      seedNotes(notes, lang, extraSections)
+      for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(notes, name), content)
+      seedProfile(profile, lang, { settings, uiState })
+    },
   })
-  const page = await app.firstWindow()
-  await page.waitForLoadState('domcontentloaded')
-  await setMainBounds(app, { x: 60, y: 60, ...size })
-  // No red squiggles under demo text.
-  await app.evaluate(({ session }) => session.defaultSession.setSpellCheckerEnabled(false))
-  await page.waitForTimeout(1800)
-  const ctx = { app, page, tmpRoot, notes, profile, lang, size }
-  return ctx
-}
-
-async function setMainBounds(app, b) {
-  await app.evaluate(({ BrowserWindow }, b) => {
-    const w = BrowserWindow.getAllWindows().find((x) => !x.webContents.getURL().includes('#')) || BrowserWindow.getAllWindows()[0]
-    if (w.isMaximized()) w.unmaximize()
-    w.setBounds(b)
-    w.show()
-  }, b)
-}
-
-async function closeApp(ctx) {
-  try { await ctx.app.close() } catch { /* already gone */ }
-  try { fs.rmSync(ctx.tmpRoot, { recursive: true, force: true }) } catch { /* locked files: leave in temp */ }
-}
-
-// ── Overlay: fake cursor + keystroke pills (injected only during capture) ───
-const OVERLAY_SRC = () => {
-  if (window.__nfo) return
-  const root = document.createElement('div')
-  root.id = '__nf_capture_overlay'
-  root.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;'
-  const style = document.createElement('style')
-  style.textContent = `
-    #__nf_cursor{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;
-      background:radial-gradient(circle,rgba(255,255,255,.95) 0 4px,rgba(255,255,255,.35) 5px,rgba(255,255,255,.14) 12px,rgba(255,255,255,0) 13px);
-      box-shadow:0 0 0 1.5px rgba(255,255,255,.55),0 2px 10px rgba(0,0,0,.45);opacity:0;transition:opacity .25s;will-change:transform}
-    #__nf_cursor.on{opacity:1}
-    .__nf_pulse{position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;border:2px solid rgba(255,255,255,.85);
-      animation:__nfp .5s ease-out forwards}
-    @keyframes __nfp{from{transform:scale(.6);opacity:.9}to{transform:scale(2.1);opacity:0}}
-    #__nf_keys{position:absolute;left:50%;bottom:34px;transform:translateX(-50%);display:flex;gap:8px;align-items:center;
-      font:600 15px/1 Inter,Segoe UI,system-ui,sans-serif;color:#fff;opacity:0;transition:opacity .2s, transform .2s}
-    #__nf_keys.on{opacity:1}
-    #__nf_keys kbd{font:inherit;padding:9px 13px;border-radius:9px;background:rgba(24,24,30,.86);border:1px solid rgba(255,255,255,.22);
-      box-shadow:0 6px 20px rgba(0,0,0,.4), inset 0 -2px 0 rgba(255,255,255,.08);min-width:18px;text-align:center}
-    #__nf_keys span{opacity:.6;font-weight:500}`
-  root.appendChild(style)
-  const cur = document.createElement('div'); cur.id = '__nf_cursor'; root.appendChild(cur)
-  const keys = document.createElement('div'); keys.id = '__nf_keys'; root.appendChild(keys)
-  document.documentElement.appendChild(root)
-  const state = { x: -50, y: -50, raf: 0, keysTimer: 0 }
-  const place = (x, y) => { state.x = x; state.y = y; cur.style.transform = `translate(${x}px,${y}px)` }
-  const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
-  window.__nfo = {
-    show(x, y) { place(x, y); cur.classList.add('on') },
-    hide() { cur.classList.remove('on') },
-    moveTo(x, y, ms, straight) {
-      cancelAnimationFrame(state.raf)
-      const sx = state.x, sy = state.y, t0 = performance.now()
-      // Slight arc so the path feels hand-made.
-      const dx = x - sx, dy = y - sy
-      const bend = straight ? 0 : Math.min(60, Math.hypot(dx, dy) * 0.12)
-      const nx = -dy / (Math.hypot(dx, dy) || 1), ny = dx / (Math.hypot(dx, dy) || 1)
-      return new Promise((resolve) => {
-        const step = (now) => {
-          const t = Math.min(1, (now - t0) / ms)
-          const e = ease(t)
-          const arc = Math.sin(Math.PI * e) * bend
-          place(sx + dx * e + nx * arc, sy + dy * e + ny * arc)
-          if (t < 1) state.raf = requestAnimationFrame(step)
-          else resolve()
-        }
-        state.raf = requestAnimationFrame(step)
-      })
-    },
-    pos() { return { x: state.x, y: state.y } },
-    pulse() {
-      const p = document.createElement('div'); p.className = '__nf_pulse'
-      p.style.left = state.x + 'px'; p.style.top = state.y + 'px'
-      root.appendChild(p); setTimeout(() => p.remove(), 600)
-      cur.animate([{ transform: cur.style.transform + ' scale(1)' }, { transform: cur.style.transform + ' scale(.78)' }, { transform: cur.style.transform + ' scale(1)' }], { duration: 220 })
-    },
-    keys(list, ms) {
-      keys.innerHTML = list.map((k, i) => (i ? '<span>+</span>' : '') + `<kbd>${k}</kbd>`).join('')
-      keys.classList.add('on')
-      clearTimeout(state.keysTimer)
-      state.keysTimer = setTimeout(() => keys.classList.remove('on'), ms || 1300)
-    },
-  }
-}
-
-async function injectOverlay(page) { await page.evaluate(OVERLAY_SRC) }
-
-const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
-
-// Moves the real pointer from → to over `dur` ms of wall time (same easing as the fake cursor).
-async function follow(page, from, to, dur, every) {
-  const t0 = Date.now()
-  for (;;) {
-    const t = Math.min(1, (Date.now() - t0) / dur)
-    const e = easeInOut(t)
-    await page.mouse.move(from.x + (to.x - from.x) * e, from.y + (to.y - from.y) * e)
-    if (t >= 1) break
-    await sleep(every)
-  }
-}
-
-// Human-ish actions on a page (fake cursor animated in-page, real input via Playwright).
-function actor(page) {
-  const a = {
-    async show(x, y) { await page.evaluate(([x, y]) => window.__nfo.show(x, y), [x, y]) },
-    async hide() { await page.evaluate(() => window.__nfo.hide()) },
-    async move(x, y, ms) {
-      const from = await page.evaluate(() => window.__nfo.pos())
-      const dist = Math.hypot(x - from.x, y - from.y)
-      if (dist < 2) return
-      const dur = ms ?? Math.max(380, Math.min(950, 260 + dist * 0.9))
-      const anim = page.evaluate(([x, y, d]) => window.__nfo.moveTo(x, y, d), [x, y, dur])
-      // Real pointer follows (time-based) so hover states light up along the way.
-      await follow(page, from, { x, y }, dur, 60)
-      await anim
-    },
-    async moveTo(locator, { dx = 0, dy = 0, ms, fx = 0.5, fy = 0.5 } = {}) {
-      const b = await locator.boundingBox()
-      if (!b) throw new Error('moveTo: element has no box')
-      const x = b.x + b.width * fx + dx, y = b.y + b.height * fy + dy
-      await a.move(x, y, ms)
-      return { x, y }
-    },
-    async click(locator, o = {}) {
-      await a.moveTo(locator, o)
-      await sleep(o.pause ?? 140)
-      await page.evaluate(() => window.__nfo.pulse())
-      const p = await page.evaluate(() => window.__nfo.pos())
-      await page.mouse.click(p.x, p.y, { button: o.button || 'left' })
-      await sleep(o.after ?? 260)
-    },
-    async clickAt(x, y, o = {}) {
-      await a.move(x, y, o.ms)
-      await sleep(o.pause ?? 140)
-      await page.evaluate(() => window.__nfo.pulse())
-      await page.mouse.click(x, y)
-      await sleep(o.after ?? 260)
-    },
-    async drag(locator, toX, toY, o = {}) {
-      const p = await a.moveTo(locator, o)
-      await a.dragFrom(p.x, p.y, toX, toY, o)
-    },
-    async dragFrom(fromX, fromY, toX, toY, o = {}) {
-      await a.move(fromX, fromY)
-      const p = { x: fromX, y: fromY }
-      await sleep(180)
-      await page.evaluate(() => window.__nfo.pulse())
-      await page.mouse.down()
-      const dur = o.ms ?? 1000
-      // Straight path: whatever is dragged follows the real pointer, so the fake one must too.
-      const anim = page.evaluate(([x, y, d]) => window.__nfo.moveTo(x, y, d, true), [toX, toY, dur])
-      await follow(page, p, { x: toX, y: toY }, dur, 16)
-      await anim
-      await sleep(220)
-      await page.mouse.up()
-      await sleep(o.after ?? 300)
-    },
-    async type(text, { min = 38, max = 95 } = {}) {
-      for (const ch of text) {
-        await page.keyboard.type(ch)
-        let d = rand(min, max)
-        if (ch === ' ') d += rand(10, 50)
-        if (/[.,:;!?]/.test(ch)) d += rand(80, 160)
-        await sleep(d)
-      }
-    },
-    // Shortcut with on-screen pills. `combo` like 'Control+T'.
-    async keys(combo, label, ms) {
-      const shown = label || combo.split('+').map((k) => ({ Control: 'Ctrl', Shift: 'Shift', Alt: 'Alt', Meta: 'Cmd' }[k] || k))
-      await page.evaluate(([l, ms]) => window.__nfo.keys(l, ms), [shown, ms])
-      await sleep(170)
-      await page.keyboard.press(combo)
-    },
-    async press(key, label) {
-      if (label) await page.evaluate(([l]) => window.__nfo.keys(l, 900), [[label]])
-      await page.keyboard.press(key)
-    },
-  }
-  return a
-}
-
-// ── Recorder: CDP Page.startScreencast (all frames, timestamped) ────────────
-async function startRecording(page, ctxForSession) {
-  const session = await (ctxForSession || page.context()).newCDPSession(page)
-  const frames = []
-  session.on('Page.screencastFrame', (f) => {
-    frames.push({ data: Buffer.from(f.data, 'base64'), ts: f.metadata.timestamp, w: f.metadata.deviceWidth, h: f.metadata.deviceHeight })
-    session.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => {})
-  })
-  await session.send('Page.startScreencast', { format: 'jpeg', quality: 92, maxWidth: 4000, maxHeight: 4000, everyNthFrame: 1 })
-  const t0 = Date.now() / 1000
-  // Nudge one paint so the first frame lands immediately.
-  await page.evaluate(() => { document.documentElement.style.outline = '0px solid transparent'; requestAnimationFrame(() => { document.documentElement.style.outline = '' }) })
-  return {
-    t0,
-    async stop() {
-      const t1 = Date.now() / 1000
-      await session.send('Page.stopScreencast').catch(() => {})
-      await sleep(100)
-      await session.detach().catch(() => {})
-      return { frames, t0, t1 }
-    },
-  }
-}
-
-// Writes frames to disk + an ffconcat with their real on-screen durations (screencast frames
-// only arrive when something repaints). `cuts` = [[t0, t1], …] wall-clock spans to drop (e.g. a
-// hidden setup step in the middle of a take). Returns the list path + the frame pixel size.
-function writeConcat(rec, dir, { from, to, cuts = [], speed = 1 } = {}) {
-  fs.mkdirSync(dir, { recursive: true })
-  const start = from ?? rec.t0
-  const end = to ?? rec.t1
-  let firstIdx = 0
-  for (let i = 0; i < rec.frames.length; i++) if (rec.frames[i].ts <= start) firstIdx = i
-  const use = rec.frames.slice(firstIdx).filter((f) => f.ts < end)
-  if (!use.length) throw new Error('no frames captured')
-  const items = []
-  use.forEach((f, i) => {
-    // The first frame also covers the lead-in before the first repaint.
-    const a = i === 0 ? start : Math.max(f.ts, start)
-    const b = i + 1 < use.length ? Math.max(use[i + 1].ts, start) : end
-    let segs = [[a, b]]
-    for (const [c0, c1] of cuts) {
-      segs = segs.flatMap(([s, e]) => (e <= c0 || s >= c1 ? [[s, e]] : [[s, Math.min(e, c0)], [Math.max(s, c1), e]].filter(([x, y]) => y - x > 1e-4)))
-    }
-    const dur = segs.reduce((acc, [s, e]) => acc + (e - s), 0)
-    if (dur > 1e-4) items.push({ f, dur: dur / speed })
-  })
-  const lines = ['ffconcat version 1.0']
-  let last = ''
-  items.forEach(({ f, dur }, i) => {
-    const file = path.join(dir, `f${String(i).padStart(5, '0')}.jpg`).replace(/\\/g, '/')
-    fs.writeFileSync(file, f.data)
-    lines.push(`file '${file}'`, `duration ${dur.toFixed(4)}`)
-    last = file
-  })
-  // concat demuxer quirk: repeat the last file so its duration is honoured.
-  lines.push(`file '${last}'`)
-  const listPath = path.join(dir, 'list.ffconcat')
-  fs.writeFileSync(listPath, lines.join('\n'))
-  const { w, h } = jpegSize(path.join(dir, 'f00000.jpg'))
-  return { listPath, frameW: w, frameH: h, duration: items.reduce((s, x) => s + x.dur, 0) }
-}
-
-function ffmpeg(args) {
-  const r = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-  if (r.status !== 0) throw new Error(`ffmpeg failed: ${r.stderr || r.error}`)
-}
-
-function probeDuration(file) {
-  const r = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { encoding: 'utf8' })
-  return Number(r.stdout.trim())
-}
-
-function jpegSize(file) {
-  // Minimal JPEG SOF parser (avoids an image dependency).
-  const b = fs.readFileSync(file)
-  let i = 2
-  while (i < b.length) {
-    if (b[i] !== 0xff) { i++; continue }
-    const m = b[i + 1]
-    const len = b.readUInt16BE(i + 2)
-    if (m >= 0xc0 && m <= 0xc3) return { h: b.readUInt16BE(i + 5), w: b.readUInt16BE(i + 7) }
-    i += 2 + len
-  }
-  throw new Error('bad jpeg')
+  return { ...ctx, lang }
 }
 
 // crop: CSS-px rect in the window ({x,y,w,h}); it is grown to 16:10 around its center.
@@ -704,21 +136,6 @@ function finishClip(srcLossless, outBase, { posterAt, fadeIn = 0.25, fadeOut = 0
     '-compression_level', '9', outBase + '.png'])
   fs.rmSync(srcLossless, { force: true })
 }
-
-// Extracts sample frames of a finished clip for visual review.
-function sampleFrames(webm, dir, n = 4) {
-  fs.mkdirSync(dir, { recursive: true })
-  const dur = probeDuration(webm)
-  const out = []
-  for (let i = 0; i < n; i++) {
-    const t = (dur * (i + 0.5)) / n
-    const file = path.join(dir, `${path.basename(webm, '.webm')}-${i}.png`)
-    ffmpeg(['-ss', t.toFixed(3), '-i', webm, '-frames:v', '1', file])
-    out.push(file)
-  }
-  return out
-}
-
 
 // ── Per-language strings: demo text typed in the takes + UI labels used as selectors ──
 const TEXT = {
@@ -774,32 +191,6 @@ const TEXT = {
       insertSnippet: 'Insertar fragmento: ', chooseSnippet: 'Elegir un fragmento',
     },
   },
-}
-
-const focusEditorEnd = (page) => page.evaluate(() => {
-  const el = [...document.querySelectorAll('.ProseMirror')].find((e) => e.editor)
-  el.editor.commands.focus('end')
-})
-
-// Caret at the end of the last task item, so Enter starts a new task.
-const focusLastTask = (page) => page.evaluate(() => {
-  const el = [...document.querySelectorAll('.ProseMirror')].find((e) => e.editor)
-  const items = el.querySelectorAll('li[data-type="taskItem"] p')
-  const target = items[items.length - 1]
-  const pos = el.editor.view.posAtDOM(target, target.childNodes.length)
-  el.editor.chain().focus().setTextSelection(pos).run()
-})
-
-async function configureMockLlm(ctx, port) {
-  await ctx.page.evaluate((port) => window.noteflow.aiLlmSetConfig({
-    active: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'sk-demo-not-a-real-key', model: 'gpt-4o',
-  }), port)
-}
-
-async function reloadMain(ctx) {
-  await ctx.page.reload()
-  await ctx.page.waitForLoadState('domcontentloaded')
-  await ctx.page.waitForTimeout(1800)
 }
 
 // Takes are played back a bit faster than real time: snappier loops, typing still looks human.
@@ -1237,31 +628,6 @@ const CLIPS = {
   },
 }
 
-// Scans the brain canvas with the (real) pointer for a note/section node: the scene shows a
-// pointer cursor over clickable nodes and a full-opacity, non-bold label for the hovered
-// note/section. Groups (bold label) are skipped — clicking one navigates away.
-async function probeBrainNode(page, cb) {
-  const hits = []
-  const x0 = cb.x + cb.w * 0.2, x1 = cb.x + cb.w * 0.8, y0 = cb.y + cb.h * 0.2, y1 = cb.y + cb.h * 0.75
-  for (let y = y0; y < y1; y += 13) {
-    for (let x = x0; x < x1; x += 13) {
-      await page.mouse.move(x, y)
-      const label = await page.evaluate(() => {
-        const c = [...document.querySelectorAll('canvas')].find((el) => el.style.cursor)
-        if (!c || c.style.cursor !== 'pointer') return null
-        const lbl = [...c.parentElement.querySelectorAll('div')].find((d) => d.style.opacity === '1' && d.style.fontWeight === '400')
-        return lbl ? lbl.textContent : null
-      })
-      if (label) hits.push({ x, y, label })
-    }
-  }
-  if (!hits.length) return null
-  // Prefer a node near the middle of the canvas.
-  const mx = cb.x + cb.w / 2, my = cb.y + cb.h / 2
-  hits.sort((p, q) => Math.hypot(p.x - mx, p.y - my) - Math.hypot(q.x - mx, q.y - my))
-  return hits[0]
-}
-
 // Where the main window and the sticky sit on the composed "desktop" (CSS px).
 function windowsLayout(size, sticky) {
   const main = { x: 0, y: 0, w: size.width, h: size.height }
@@ -1274,19 +640,6 @@ function windowsLayout(size, sticky) {
   if (w / h > target) { const nh = w / target; minY -= (nh - h) / 2; h = nh } else { const nw = h * target; minX -= (nw - w) / 2; w = nw }
   const off = (r) => ({ ...r, x: r.x - minX, y: r.y - minY })
   return { canvas: { w, h }, main: off(main), sticky: off(st) }
-}
-
-// ffmpeg geq expression: alpha of a rounded rectangle (radius r) filling the frame.
-const roundedAlpha = (r) =>
-  `255*lte(pow(max(max(${r}-X\\,X-(W-1-${r}))\\,0)\\,2)+pow(max(max(${r}-Y\\,Y-(H-1-${r}))\\,0)\\,2)\\,${r}*${r})`
-
-function makeMask(file, w, h, r) {
-  ffmpeg(['-f', 'lavfi', '-i', `color=c=black:s=${w}x${h}`, '-frames:v', '1', '-vf', `format=gray,geq=lum='${roundedAlpha(r)}'`, file])
-}
-
-function makeShadow(file, w, h, m, strength) {
-  ffmpeg(['-f', 'lavfi', '-i', `color=c=black:s=${w + 2 * m}x${h + 2 * m}`, '-frames:v', '1', '-vf',
-    `format=rgba,geq=r=0:g=0:b=0:a='if(between(X\\,${m}\\,W-1-${m})*between(Y\\,${m}\\,H-1-${m})\\,${strength}\\,0)',gblur=sigma=${Math.round(m / 2.4)}`, file])
 }
 
 function makeBackdrop(file, w, h) {
@@ -1331,13 +684,6 @@ function encodeWindows(result, work, outBase, scale) {
     '-loop', '1', '-framerate', '30', '-i', mSh, '-loop', '1', '-framerate', '30', '-i', sSh,
     '-filter_complex', fc, '-map', '[out]', '-t', mainList.duration.toFixed(3), '-c:v', 'ffv1', '-an', tmp])
   return tmp
-}
-
-// Wall-clock instant of a take → time in the encoded clip (after cuts and speed-up).
-function clipTime(ts, t0, cuts, speed) {
-  let t = ts - t0
-  for (const [c0, c1] of cuts) if (c0 < ts) t -= Math.min(ts, c1) - c0
-  return Math.max(0, t / speed)
 }
 
 // ── Runner ──────────────────────────────────────────────────────────────────
