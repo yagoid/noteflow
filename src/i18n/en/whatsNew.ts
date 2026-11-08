@@ -55,6 +55,18 @@ export const whatsNew = {
       title: 'Your notes, on every device',
       body: 'Sync privately to your own GitHub repo, or turn on NoteFlow Cloud with optional end-to-end encryption.',
     },
+    'section-map': {
+      title: 'Every section at a glance',
+      body: 'Under each note in the sidebar, a thin line maps its sections: rest the mouse on it to unfold them, click one to jump straight there. Prefer the always-visible row? Switch it in Settings → Appearance → Sections in the sidebar.',
+    },
+    'floating-sidebar': {
+      title: 'A sidebar that gets out of the way',
+      body: '{toggle} folds the sidebar into a slim minimap: bring the mouse to the left edge and it slides back in. Rest it on a collapsed group to peek at its notes without opening it.',
+    },
+    snippets: {
+      title: 'Snippets, one click away',
+      body: "The stamp button in the toolbar drops your default snippet at the cursor, today's date included. Its arrow lists the rest and lets you build your own.",
+    },
     more: {
       title: 'And much more',
       body: 'Small things that make a big difference. You will run into them as you go.',

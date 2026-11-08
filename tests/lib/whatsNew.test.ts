@@ -151,7 +151,8 @@ describe('mediaFileName', () => {
 describe('the deck (whatsNewSlides.ts)', () => {
   it('keeps the fixed ids (stored in settings.json and used by the clip capture script)', () => {
     expect(WHATS_NEW_SLIDES.map((s) => s.id)).toEqual([
-      'sections', 'brain', 'links-palette', 'quick-capture', 'windows', 'kanban', 'ai', 'sync', 'more',
+      'sections', 'brain', 'links-palette', 'quick-capture', 'windows', 'kanban', 'ai', 'sync',
+      'section-map', 'floating-sidebar', 'snippets', 'more',
     ])
     expect(sanitizeSeenIds(WHATS_NEW_SLIDES.map((s) => s.id))).toHaveLength(WHATS_NEW_SLIDES.length)
   })

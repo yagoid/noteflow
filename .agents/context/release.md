@@ -243,7 +243,8 @@ candidata desde el checkout (mismo `electron-builder` que la release), no reusa 
 
 Graba desde la app real (Playwright `_electron` + ffmpeg) los clips en bucle del tour →
 `src/assets/whats-new/<id>.<lang>.webm` + póster `<id>.<lang>.png` (ids fijos: `sections`, `kanban`,
-`links-palette`, `quick-capture`, `windows`, `brain`, `ai`, `sync`, `more`; idiomas `en`/`es`).
+`links-palette`, `quick-capture`, `windows`, `brain`, `ai`, `sync`, `section-map`, `floating-sidebar`,
+`snippets`, `more`; idiomas `en`/`es`).
 Regenerarlos cuando cambie de forma visible la UI que aparece en ellos:
 
 ```bash
@@ -262,7 +263,8 @@ node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|a
 - Captura por CDP `Page.startScreencast` a DPR 1.5 (no `recordVideo`, que sale borroso) → 960×600
   VP9; el cursor falso y las pastillas de teclas se inyectan solo en la página durante la toma.
   Revisar los clips a ojo (`--frames <dir>` guarda los frames y 4 PNG de muestra por clip).
-- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~5,6 MB con los pósters).
+- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~7,2 MB con los pósters: cerca del
+  tope; al añadir clips nuevos, revisar el tamaño o bajar duración/`crf`).
 
 ### Artefactos
 

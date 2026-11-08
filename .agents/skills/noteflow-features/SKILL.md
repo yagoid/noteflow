@@ -1290,11 +1290,13 @@ Settings → Startup:
   clip, un icono animado con anillos y partículas en el color de la diapositiva) + título + texto
   breve + chips de atajos (`Ctrl`/`⌘` según la plataforma). Diapositivas actuales, en orden: secciones
   en pestañas, el Cerebro, enlazar secciones + paleta, captura rápida (`Ctrl+Shift+Space`, nota
-  temporal), sticky / ventanas separadas, kanban, la IA, sync (GitHub / NoteFlow Cloud) y "And much more"
+  temporal), sticky / ventanas separadas, kanban, la IA, sync (GitHub / NoteFlow Cloud), el mapa de
+  secciones plegado del sidebar, el sidebar flotante (`Ctrl+'`, minimapa + peek de grupo colapsado),
+  los fragmentos del botón del sello y "And much more"
   (rejilla: notas cifradas, plantillas, temas y acentos, tareas con alarma, vista dividida
   `Ctrl+Click`, CLI, importar de Notion y Keep). Los clips pueden estar grabados por idioma de la UI.
 - **Navegación:** Atrás / Siguiente, puntos de progreso clicables (el activo se estira), contador
-  "3 / 9", `←`/`→`, `Enter` (siguiente), `Esc` (cerrar) y **Skip** discreto. La última diapositiva
+  "3 / 12", `←`/`→`, `Enter` (siguiente), `Esc` (cerrar) y **Skip** discreto. La última diapositiva
   termina con **"Start writing"**. Transiciones direccionales con reveal escalonado; con
   `prefers-reduced-motion` todo se queda en fundidos y los clips no se reproducen (se ve su imagen
   fija o el icono sin animar). Mientras está abierto, el resto de la app no recibe teclas (ni
