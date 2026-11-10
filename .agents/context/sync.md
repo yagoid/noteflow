@@ -174,6 +174,11 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   `note.md` fallido es una nota que el repo no tiene; con errores avisa `Last sync not updated`.
 - El valor escrito es la hora **de inicio** del comando (`startedAt`, tomada antes de leer el disco,
   como `githubSync.ts`): una nota escrita mientras corre el push/pull queda con `updated > lastSync`.
+- La escritura **relee** `settings.json` justo antes de guardar y solo parchea `lastSync` sobre la
+  conexión actual (`githubSyncWithLastSync`): si `githubSync` desapareció o apunta a otro
+  owner/repo (la app desconectó/reconectó mientras corría el comando), **no escribe nada** — antes
+  reescribía la foto leída al empezar y deshacía ese cambio (incluido el token `safe:` en Windows).
+  `push` avisa entonces `Last sync not updated (the GitHub connection changed while pushing)`.
 - El push automático por comando (`syncPushNoteFiles`) **no** toca `lastSync`.
 - **Subida condicionada (QA B3, espejo de la app):** `noteflow push` y el push automático de cada
   comando que edita (`syncPushNoteFiles`) hacen la misma comprobación de tres vías por fichero de

@@ -9,6 +9,7 @@ exports.getSyncFilesToday = getSyncFilesToday;
 exports.hasPendingRemoteMutations = hasPendingRemoteMutations;
 exports.loadSyncSettings = loadSyncSettings;
 exports.getSyncStatus = getSyncStatus;
+exports.getConnectionForCli = getConnectionForCli;
 exports.setNotesDir = setNotesDir;
 exports.setConflictCopyLabel = setConflictCopyLabel;
 exports.setConflictMarkerLabels = setConflictMarkerLabels;
@@ -740,6 +741,24 @@ function getSyncStatus() {
         conflictCopies,
         conflictMerges,
     };
+}
+/**
+ * The connected repo and its PLAINTEXT token, for Settings → Sync → "Connect
+ * the CLI too" (electron/cliConnect.ts) only — after the user confirmed handing
+ * it to the CLI. Never sent to the renderer. Null when not connected or the
+ * token can't be decrypted.
+ */
+function getConnectionForCli() {
+    const s = syncSettings ?? loadSyncSettings();
+    if (!s.encryptedToken || !s.owner || !s.repo)
+        return null;
+    try {
+        const token = decryptToken(s.encryptedToken);
+        return token ? { owner: s.owner, repo: s.repo, token } : null;
+    }
+    catch {
+        return null;
+    }
 }
 /** Boot hook (main.ts): the notes dir, for the debounced push's disk-still-current check. */
 function setNotesDir(notesDir) {

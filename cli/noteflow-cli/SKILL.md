@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.9.0
+version: 2.10.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -220,7 +220,9 @@ El CLI no comparte la sesión de la app de escritorio: necesita su **propio** `l
 `cloud login` (NoteFlow Cloud) aunque la app ya esté conectada (nunca copies tokens de la app). Con
 sesión de Cloud activa, `push`/`pull`/`status` y el sync tras cada escritura usan Cloud y GitHub queda
 en pausa. Puedes activarlo tú sin prompts ni comandos bloqueantes: el usuario solo autoriza en GitHub
-o te da el código que le llega por email.
+o te da el código que le llega por email. El usuario también puede hacerlo él mismo desde la app:
+**Ajustes → Sync → "Connect the CLI too"** (en GitHub copia allí el token de la app al CLI, sin
+autorizar de nuevo); después `status --json` ya sale conectado.
 
 1. **`noteflow status --json`. Casos:**
    - **Ya hay sync → no ofrezcas nada:** `github` con `tokenAccessible: true`, o (con Cloud activo

@@ -31,6 +31,24 @@ describe('nextGithubLastSync (GitHub pull/push)', () => {
   })
 })
 
+describe('githubSyncWithLastSync (re-read before writing lastSync)', () => {
+  const githubSyncWithLastSync = cli.githubSyncWithLastSync as (
+    current: unknown, sync: { owner?: string; repo?: string }, lastSync: string,
+  ) => Record<string, unknown> | null
+  const started = { owner: 'ana', repo: 'notes', encryptedToken: 'old', lastSync: 'L0' }
+
+  it('patches only lastSync on the CURRENT githubSync (keeps a token changed meanwhile)', () => {
+    const current = { enabled: true, owner: 'ana', repo: 'notes', encryptedToken: 'safe:new', needsFullReconcile: true }
+    expect(githubSyncWithLastSync(current, started, NOW)).toEqual({ ...current, lastSync: NOW })
+  })
+
+  it('writes nothing when the connection vanished or moved to another repo', () => {
+    expect(githubSyncWithLastSync(undefined, started, NOW)).toBeNull()
+    expect(githubSyncWithLastSync({ owner: 'ana', repo: 'other' }, started, NOW)).toBeNull()
+    expect(githubSyncWithLastSync({ owner: 'bob', repo: 'notes' }, started, NOW)).toBeNull()
+  })
+})
+
 describe('localOnlyNoteDirs (GitHub pull)', () => {
   it('counts a remote dir with sections but no note.md as local-only', () => {
     const remote = new Map([['a', ['note.md', 's1.md']], ['b', ['s1.md', 's2.md']]])

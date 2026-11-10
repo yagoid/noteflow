@@ -627,7 +627,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
 
           {/* ── Standard → Private upgrade (managed only) ── */}
           {status.keysMode === 'managed' && (
-            <div className="space-y-3 pt-3 border-t border-border">
+            <div className="space-y-3">
               {!showUpgrade ? (
                 <button
                   onClick={() => { setShowUpgrade(true); setError(null) }}

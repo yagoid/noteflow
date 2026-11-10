@@ -50,6 +50,7 @@ const cloudKeys = __importStar(require("./cloudKeys"));
 const cloudRealtime = __importStar(require("./cloudRealtime"));
 const syncProvider_1 = require("./syncProvider");
 const account = __importStar(require("./account"));
+const cliConnect = __importStar(require("./cliConnect"));
 const feedback = __importStar(require("./feedback"));
 const accountTransition_1 = require("./accountTransition");
 const cloudConfig_1 = require("./cloudConfig");
@@ -2272,6 +2273,9 @@ electron_1.ipcMain.handle('sync:cancel-auth', () => {
 electron_1.ipcMain.handle('sync:disconnect', () => {
     stopAutoSync();
     githubSync.disconnectGitHub();
+    // On Windows the CLI shares this settings.json: its copy of the token
+    // ("Connect the CLI too") must not outlive the connection it was for.
+    cliConnect.cleanupAfterAppGithubDisconnect();
     return { ok: true };
 });
 // Manual GitHub pull + its broadcast (shared by sync:pull and sync:pull-active).
@@ -2348,6 +2352,40 @@ electron_1.ipcMain.handle('sync:mirror-to-github', async () => {
 electron_1.ipcMain.handle('sync:pull-active', async () => {
     return cloudSync.isCloudSyncEnabled() ? cloudManualPull() : githubManualPull();
 });
+// ── Settings → Sync → "Connect the CLI too" (electron/cliConnect.ts) ─────────
+// The CLI gets its OWN access to the backend the app uses: its own Cloud
+// session (the CLI's login, run as a child process) or a copy of the app's
+// GitHub token. The email / token come from main, never from the renderer.
+electron_1.ipcMain.handle('cli-connect:get-status', () => cliConnect.getStatus());
+function cliConnectEmail() {
+    const status = account.getAccountStatus();
+    return status.signedIn && status.email ? status.email : null;
+}
+electron_1.ipcMain.handle('cli-connect:cloud-send-code', async () => {
+    const email = cliConnectEmail();
+    if (!email)
+        return { ok: false, error: 'notSignedIn' };
+    return cliConnect.cloudSendCode(email);
+});
+electron_1.ipcMain.handle('cli-connect:cloud-verify', async (_event, code) => {
+    const email = cliConnectEmail();
+    if (!email)
+        return { ok: false, error: 'notSignedIn' };
+    // Digits (spaces/dashes tolerated, like the CLI's normalizeOtpCode) — anything
+    // else never reaches the CLI's argv.
+    const clean = typeof code === 'string' ? code.replace(/[\s-]/g, '') : '';
+    if (!/^\d{6,10}$/.test(clean))
+        return { ok: false, error: 'invalidCode' };
+    return cliConnect.cloudVerifyCode(email, clean);
+});
+electron_1.ipcMain.handle('cli-connect:cloud-disconnect', async () => cliConnect.cloudDisconnect());
+electron_1.ipcMain.handle('cli-connect:github-connect', () => {
+    const connection = githubSync.getConnectionForCli();
+    if (!connection)
+        return { ok: false, error: 'notConnected' };
+    return cliConnect.githubConnect(connection);
+});
+electron_1.ipcMain.handle('cli-connect:github-disconnect', () => cliConnect.githubDisconnect());
 // ── NoteFlow account (Supabase Auth + entitlements) ───────────────────────────
 // Session/tokens live in electron/account.ts (main-process only); the renderer
 // exchanges exclusively the public status.

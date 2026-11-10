@@ -4,6 +4,7 @@ import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { ConfirmModal } from '../ConfirmModal'
+import { CliConnectSection } from './CliConnectSection'
 import { CloudPanel } from './CloudPanel'
 import type { SettingsSection } from './SettingsModal'
 import { settingsButtonClass } from './ui'
@@ -127,6 +128,12 @@ export function SyncPanel({ onNavigate }: { onNavigate?: (section: SettingsSecti
           </div>
         )}
       </section>
+
+      {/* "Connect the CLI too" — only for the selected backend, and only while
+          the app itself is connected to it (Cloud: active with a session). */}
+      {(backend === 'cloud' ? cloudEnabled && cloudSignedIn : githubConnected) && (
+        <CliConnectSection key={backend} backend={backend} />
+      )}
     </div>
   )
 }

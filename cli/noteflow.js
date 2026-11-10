@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.9.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.10.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.9.0'
+const CLI_VERSION = '2.10.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -151,13 +151,37 @@ function writeSettings(data) {
 
 function getSyncSettings() { return readSettings().githubSync || { enabled: false } }
 
+/** Pure: a base64 GitHub token the CLI can read, or null (absent, or the app's safeStorage ciphertext). */
+function decodeGithubToken(b64) {
+  if (typeof b64 !== 'string' || !b64 || b64.startsWith('safe:')) return null
+  const decoded = Buffer.from(b64, 'base64').toString('utf-8')
+  return /^[\x20-\x7e]+$/.test(decoded) ? decoded : null
+}
+
+/**
+ * Pure: the GitHub token the CLI syncs with, or null. First githubSync's own
+ * (base64, written by `noteflow login`). When that one is the desktop app's
+ * safeStorage ciphertext (`safe:…`, or a legacy unprefixed one) — on Windows
+ * this settings.json IS the app's — the CLI's own copy `cliGithubToken`
+ * ({ owner, token: base64 }), written by the app's Settings → Sync → "Connect
+ * the CLI too" so the app's encrypted token is never replaced. The copy only
+ * counts for the same GitHub account as githubSync (`owner`): a copy left from
+ * an earlier connection is ignored. Mirror of resolveCliGithubToken
+ * (electron/cliConnectLogic.ts).
+ */
+function resolveGithubToken(sync, cliToken) {
+  if (!sync || !sync.encryptedToken) return null
+  const own = decodeGithubToken(sync.encryptedToken)
+  if (own) return own
+  if (cliToken && typeof cliToken === 'object' && typeof cliToken.owner === 'string' && cliToken.owner === sync.owner) {
+    return decodeGithubToken(cliToken.token)
+  }
+  return null
+}
+
 function getToken() {
-  const sync = getSyncSettings()
-  if (!sync.encryptedToken) return null
-  if (sync.encryptedToken.startsWith('safe:')) return null
-  const decoded = Buffer.from(sync.encryptedToken, 'base64').toString('utf-8')
-  if (!/^[\x20-\x7e]+$/.test(decoded)) return null
-  return decoded
+  const settings = readSettings()
+  return resolveGithubToken(settings.githubSync, settings.cliGithubToken)
 }
 
 // ── NoteFlow Cloud settings (CLI-owned) ───────────────────────────────────────
@@ -5770,6 +5794,7 @@ async function completeGithubLogin(token, target, opts) {
     owner: user.login, repo,
   }
   delete settings.cliGithubLogin // a grant used (or superseded) — nothing left to finish
+  delete settings.cliGithubToken // githubSync now holds a token the CLI reads — the app's copy is stale
   writeSettings(settings)
   out(`  Connected to ${user.login}/${repo}`)
   await pullAfterLogin(opts)
@@ -5807,6 +5832,7 @@ async function pullAfterLogin(opts) {
 function cmdLogout() {
   const settings = readSettings()
   delete settings.githubSync
+  delete settings.cliGithubToken // the CLI's copy of the app's token (see resolveGithubToken)
   writeSettings(settings)
   clearGithubBases() // bases of the conditional push belong to that repo
   out('  Disconnected from GitHub')
@@ -5876,7 +5902,9 @@ async function cmdPush() {
   out(`\n  Done: ${pushed} pushed, ${errors} errors${merged ? `, ${merged} merged with GitHub` : ''}${held ? `, ${held} changed on GitHub` : ''}`)
   // A failed file may be a note.md the repo still lacks — same rule as the pull.
   if (writeGithubLastSync(sync, errors, startedAt) === null) {
-    out("  Last sync not updated (some files failed) — run 'noteflow push' again")
+    out(errors > 0
+      ? "  Last sync not updated (some files failed) — run 'noteflow push' again"
+      : '  Last sync not updated (the GitHub connection changed while pushing)')
   }
 }
 
@@ -5894,14 +5922,30 @@ function nextGithubLastSync(pending, nowIso) {
 }
 
 /**
- * Persists nextGithubLastSync (no write when it says keep). `startedAt` must be
- * taken before the command read the disk. Returns the value written, or null.
+ * Pure: the githubSync to persist with a new lastSync — the CURRENT one on disk
+ * with only lastSync patched — or null when the connection the command synced
+ * (`sync`, read when it started) is gone or now points at another owner/repo.
+ * Never the old snapshot: on Windows githubSync is the desktop app's too, and
+ * writing it back would undo a disconnect or a token/repo change made meanwhile.
+ */
+function githubSyncWithLastSync(current, sync, lastSync) {
+  if (!current || typeof current !== 'object') return null
+  if (current.owner !== sync.owner || current.repo !== sync.repo) return null
+  return { ...current, lastSync }
+}
+
+/**
+ * Persists nextGithubLastSync (no write when it says keep, or when the
+ * connection changed meanwhile — see githubSyncWithLastSync). `startedAt` must
+ * be taken before the command read the disk. Returns the value written, or null.
  */
 function writeGithubLastSync(sync, pending, startedAt) {
   const lastSync = nextGithubLastSync(pending, startedAt)
   if (lastSync === null) return null
-  const settings = readSettings()
-  settings.githubSync = { ...sync, lastSync }
+  const settings = readSettings() // fresh, right before the write
+  const next = githubSyncWithLastSync(settings.githubSync, sync, lastSync)
+  if (!next) return null
+  settings.githubSync = next
   writeSettings(settings)
   return lastSync
 }
@@ -6629,13 +6673,15 @@ function cmdHelp(topic) {
 
   tokenAccessible: false  GitHub is set up, but the token belongs to the desktop
                           app (encrypted, unreadable here): run 'noteflow login'
-                          to the same repo. Only on Windows, where the CLI and
-                          the app share settings.json.
+                          to the same repo, or use "Connect the CLI too" in the
+                          app (Settings > Sync). Only on Windows, where the CLI
+                          and the app share settings.json.
   desktopApp              What the desktop app on this machine syncs with:
                           { cloudSignedIn, cloudSyncEnabled, cloudEmail?,
                           github: { owner, repo } | null }, or null when its
                           settings are not found. Its tokens are never read: the
-                          CLI always needs its own 'login' / 'cloud login'.
+                          CLI needs its own 'login' / 'cloud login' (or "Connect
+                          the CLI too" in the app, Settings > Sync).
 `,
     pull: `
   noteflow pull [--force]   (alias: update)
@@ -7105,13 +7151,13 @@ if (require.main === module) {
     resolveRowUpdatedAt, shouldApplyRemoteDir, shouldApplyRemoteSection, shouldApplyRemoteDeletion,
     planPullQuery, parseRowSeq, nextPullSeq, collectSeqPages, buildFileUpsertRow, decryptFileRow,
     CLOUD_METADATA_FILES, CLOUD_PULL_COLUMNS, CLOUD_PAGE_SIZE,
-    nextGithubLastSync, localOnlyNoteDirs, localOnlyHint, cliCloudForUser,
+    nextGithubLastSync, githubSyncWithLastSync, localOnlyNoteDirs, localOnlyHint, cliCloudForUser,
     nextPendingUpserts, pendingUnderDir, isPendingUpsert, dropReconciledPending,
     classifyConditionalUpsert, parsePullRetry, mergeRetryRows, nextPullRetry, countDroppedRetries,
     PULL_RETRY_MAX_DECRYPT_ATTEMPTS, PULL_RETRY_MAX_APPLY_ATTEMPTS, PULL_RETRY_CHUNK, CLOUD_CONDITIONAL_UPSERT_RPC,
     mergeMetadataById, planMetadataPull, dirsPendingRetry,
     planConflictCopy, buildConflictCopy, anchorTitle, conflictCopyTitle, metadataPendingForPull,
-    normalizeOtpCode, planCloudLogin,
+    normalizeOtpCode, planCloudLogin, decodeGithubToken, resolveGithubToken, getToken,
     loginFlagsError, checkPendingGithubLogin, resolveFinishRepo, desktopSettingsCandidates, desktopAppInfo,
     parseRepoSpec, loginOwnerError, completeGithubLogin, ensureRepo,
     unsupportedFlagError, COMMAND_FLAGS, decodeInputBuffer, looksLikeUtf16,

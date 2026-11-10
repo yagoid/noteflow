@@ -134,6 +134,15 @@ const api = {
     mirrorToGitHub: () => electron_1.ipcRenderer.invoke('sync:mirror-to-github'),
     // Manual pull routed to the LIVE backend (Cloud when enabled, else GitHub).
     pullActiveNotes: () => electron_1.ipcRenderer.invoke('sync:pull-active'),
+    // Settings → Sync → "Connect the CLI too" (electron/cliConnect.ts). Cloud:
+    // the CLI's own login with an emailed code (to the app account's email);
+    // GitHub: a copy of the app's token. Main picks the email/token.
+    cliConnectGetStatus: () => electron_1.ipcRenderer.invoke('cli-connect:get-status'),
+    cliConnectCloudSendCode: () => electron_1.ipcRenderer.invoke('cli-connect:cloud-send-code'),
+    cliConnectCloudVerify: (code) => electron_1.ipcRenderer.invoke('cli-connect:cloud-verify', code),
+    cliConnectCloudDisconnect: () => electron_1.ipcRenderer.invoke('cli-connect:cloud-disconnect'),
+    cliConnectGithubConnect: () => electron_1.ipcRenderer.invoke('cli-connect:github-connect'),
+    cliConnectGithubDisconnect: () => electron_1.ipcRenderer.invoke('cli-connect:github-disconnect'),
     onSyncAuthComplete: (cb) => {
         const wrapper = (_event, result) => cb(result);
         electron_1.ipcRenderer.on('sync-auth-complete', wrapper);

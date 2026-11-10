@@ -27,6 +27,8 @@ noteflow/
 │   ├── migration.ts     # Migración única v1→v2 (flat .md → carpetas), idempotente
 │   ├── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull por carpeta,
 │   │                    #   Trees API, migración remota, cifrado token)
+│   ├── cliConnect.ts    # Ajustes → Sync → "Connect the CLI too": ejecuta el CLI empaquetado (Cloud) y
+│   │                    #   escribe su settings.json (GitHub); lógica pura en cliConnectLogic.ts — ver patterns.md § CLI
 │   ├── syncState.ts     # Lógica pura del journal de mutaciones + sha-cache (la usan GitHub y Cloud)
 │   │                    #   + decisiones de tres vías de la subida condicionada de GitHub — ver sync.md
 │   ├── conflictCopy.ts  # Lado disco de las copias de conflicto (escribir la copia + aviso de sesión),
@@ -209,6 +211,7 @@ noteflow/
 │   │   │   ├── TemplatesPanel.tsx       #   Plantillas de nota (listar/usar/renombrar/borrar)
 │   │   │   ├── StartupPanel.tsx         #   Autostart + stickies al arrancar
 │   │   │   ├── SyncPanel.tsx            #   Selector de backend (Cloud/GitHub, excluyentes) + sección GitHub
+│   │   │   ├── CliConnectSection.tsx    #   "Connect the CLI too" bajo el panel del backend (Cloud: código; GitHub: copia del token)
 │   │   │   ├── CloudPanel.tsx           #   NoteFlow Cloud (cifrado, suscripción) — ver monetization.md
 │   │   │   ├── AccountPanel.tsx         #   Cuenta NoteFlow (OTP, entitlements) — ver monetization.md
 │   │   │   ├── AiPanel.tsx              #   Solo el proveedor del LLM (LlmConfigView embebido)
@@ -358,7 +361,11 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `sync:dismiss-conflict-copies` | handle | Descarta el aviso de **copias de conflicto** y de **fusiones con marcas** (`conflictMerges`) de la tarjeta del botón de sync (limpia el de **ambos** backends — `cloudSync`/`githubSync.dismissConflictCopies()` — y emite `cloud:status-changed` + `sync:status-changed`); las copias siguen siendo notas |
 | `sync:initiate` | handle | Inicia Device Flow OAuth (recibe `repo`); al completar → `sync-auth-complete` + autosync |
 | `sync:cancel-auth` | handle | Cancela un Device Flow en curso |
-| `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings |
+| `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings. Después borra la copia del token del CLI (`cliGithubToken`) si quedó huérfana (`cliConnect.cleanupAfterAppGithubDisconnect`; en Windows el `githubSync` borrado era también el del CLI) |
+| `cli-connect:get-status` | handle | Ajustes → Sync → "Connect the CLI too": qué tiene el CLI, leído de **su** `settings.json` → `{available, cloud: {connected, email?}, github: {connected, owner?, repo?, canDisconnect}}` (`available` = se encontró el CLI empaquetado). Cloud = presencia de `cliAccount` (nunca se lee su refresh token). Detalle en `patterns.md` § CLI "Conectar también el CLI" |
+| `cli-connect:cloud-send-code` / `cli-connect:cloud-verify` | handle | Cloud, pasos 1 y 2: ejecuta el CLI empaquetado (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`) con `cloud login <email> --send-code` y `cloud login <email> --code <código> --no-pull`. El email es el de la cuenta de la app (lo pone main); el código se valida en main (`^\d{6,10}$` tras quitar espacios/guiones) antes de llegar al argv → `{ok:true, status} \| {ok:false, error, detail?}` (`error`: `invalidCode`/`rateLimited`/`network`/`notSignedIn`/`cliMissing`/`failed`; `detail` = línea `Error:` del CLI) |
+| `cli-connect:cloud-disconnect` | handle | `cloud logout` del CLI (revoca solo su sesión, `scope=local`) |
+| `cli-connect:github-connect` / `cli-connect:github-disconnect` | handle | GitHub: copia owner/repo/token de la app al CLI (`githubSync.getConnectionForCli()`, tras confirmar en la UI) o lo quita. **Nunca** escribe el `githubSync` del fichero en Windows (es el de la app): ahí usa la clave propia del CLI `cliGithubToken`. `error: 'notConnected' \| 'noRepo' \| 'mismatch' \| 'failed'` |
 | `sync:pull` | handle | Pull manual desde el remoto **GitHub** (lo usa Settings → Sync) |
 | `sync:pull-active` | handle | Pull manual enrutado al backend **activo** (Cloud si `enabled`, GitHub si no) — lo usa el botón de la titlebar |
 | `sync:mirror-to-github` | handle | **Espejo local → repo**: deja GitHub como copia exacta del disco (sube lo que difiere, borra lo que ya no existe). **Solo con Cloud habilitado** (gate en `main.ts`; si no → `{ok:false, error:'cloud-required'}`). No cambia nada local — ver `sync.md` |
@@ -503,12 +510,13 @@ dual-write legacy — la fuente sincronizada es `ui-settings.json` del dir de no
 > `githubSync`, y `status --json` lee el de la app aparte para la pista `desktopApp` (ver
 > `patterns.md` § CLI). Como un
 > proceso Node no tiene `safeStorage`, guarda su token de GitHub (`githubSync.encryptedToken`, scope
-> `repo`) y su refresh token de Cloud (`cliAccount.refreshToken`) **solo en base64**. Lo que los
+> `repo`, o la copia `cliGithubToken` que escribe la app con "Connect the CLI too") y su refresh token
+> de Cloud (`cliAccount.refreshToken`) **solo en base64**. Lo que los
 > protege es el permiso del fichero: en Linux/macOS el CLI deja `settings.json` en **`0600`**
 > (`restrictSettingsPerms()` al arrancar cualquier comando + `writeSettings`). Se protege frente a
 > otros usuarios locales, no frente a procesos del mismo usuario (el criterio de `gh` / `~/.ssh`).
 > Los writers de la app (`writeSettings` en `main.ts`, `githubSync.ts`, `account.ts`, `cloudSync.ts`,
-> `cloudKeys.ts`) escriben todos vía `writeSettingsFile` (`electron/settingsFile.ts`): **in-place**
+> `cloudKeys.ts`, y `cliConnect.ts` sobre el `settings.json` del CLI) escriben todos vía `writeSettingsFile` (`electron/settingsFile.ts`): **in-place**
 > con `writeFileSync` y `mode: 0o600` (aplica al crear el fichero), más un `chmod 0600` previo si el
 > fichero existente está más abierto — en POSIX `settings.json` queda siempre owner-only, también
 > cuando lo crea la app. Un writer nuevo de este fichero debe usar ese helper. **No** cambies a

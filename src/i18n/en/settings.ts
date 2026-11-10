@@ -198,6 +198,43 @@ export const settings = {
     repoName: 'Repository name',
     repoHint: "Will be created as private if it doesn't exist.",
     connectWithGitHub: 'Connect with GitHub',
+    // "Connect the CLI too" — below the backend panel. Gives the bundled
+    // `noteflow` CLI its OWN access to the backend in use (electron/cliConnect.ts).
+    cli: {
+      title: 'Command line (CLI)',
+      descCloud: 'Sign the noteflow CLI in to NoteFlow Cloud with {email}, so notes written from the terminal or by AI agents can sync too. The CLI gets its own session — the app stays signed in.',
+      // Account keys in private (e2ee) mode: the CLI can only sync once unlocked with the passphrase.
+      e2eeNotice: 'Your account uses private (E2EE) encryption: the CLI can only sync after unlocking it with your passphrase. It asks for it on each run in a terminal, or reads it from the NOTEFLOW_CLOUD_PASSPHRASE environment variable — without either, the CLI (and AI agents using it) cannot sync.',
+      descGithub: 'Let the noteflow CLI sync with {repo} too, so notes written from the terminal or by AI agents can sync. No new authorization needed.',
+      connect: 'Connect the CLI too',
+      connectedTo: 'CLI connected ({target})',
+      disconnect: 'Disconnect CLI',
+      // Cloud, step 2: the code the CLI asked for.
+      codeSent: 'We emailed a sign-in code to {email}. Enter it to connect the CLI:',
+      code: 'Code',
+      verify: 'Connect CLI',
+      resend: 'Send a new code',
+      codeResent: 'New code sent.',
+      // Windows, token stored without the OS keyring: the CLI reads the app's own connection.
+      sharedWithApp: "The CLI uses the app's GitHub connection: disconnecting GitHub here disconnects it too.",
+      githubConfirmTitle: 'Give the CLI access to GitHub?',
+      githubConfirmMessage: 'The CLI gets a copy of this GitHub token (access to your repositories) to sync {repo}. It stores it in its settings file encoded in base64, NOT encrypted with the system keyring like the app does: any program running as your user could read it. You can remove it at any time with "Disconnect CLI".',
+      githubConfirmAction: 'Copy token',
+      errors: {
+        cliMissing: 'The noteflow CLI was not found in this installation.',
+        notSignedIn: 'Sign in to your NoteFlow account first.',
+        notConnected: 'Connect GitHub in the app first.',
+        // Windows: the CLI's settings.json is the installed app's — never suggest
+        // `noteflow login` there (it would replace that app's encrypted token).
+        noRepoShared: 'The CLI shares its settings with the installed NoteFlow app, and that app has no GitHub connection (it may sync with NoteFlow Cloud, or not be installed). Connect this repository in the installed NoteFlow app, then try again.',
+        mismatchShared: 'The CLI shares its settings with the installed NoteFlow app, which is connected to another GitHub repository. Connect this same repository in that app, then try again.',
+        mismatch: "The CLI is already set up with another GitHub repository. Run noteflow logout in a terminal, then try again.",
+        invalidCode: 'That code is invalid or has expired. Check it, or send a new one.',
+        rateLimited: 'Too many attempts — wait a moment and try again.',
+        network: 'Could not reach the server. Check your connection and try again.',
+        failed: 'Could not complete the operation on the CLI.',
+      },
+    },
   },
 
   // NoteFlow Cloud (encrypted sync) — lives on the Sync page above GitHub Sync.

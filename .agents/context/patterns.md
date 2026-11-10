@@ -2516,6 +2516,50 @@ y al humano solo le queda autorizar en GitHub o dar el código del email:
   backend que usa en la app. Protocolo del agente en la skill (`cli/noteflow-cli/SKILL.md`
   § "Ofrécete a activar el sync"). Tests en `tests/cli/agentLogin.test.ts`.
 
+**Conectar también el CLI desde la app (Ajustes → Sync, CLI v2.10.0).** Debajo del panel del backend
+seleccionado, `CliConnectSection` (solo si ese backend está conectado en la app: Cloud activo con
+sesión, o GitHub conectado) da al CLI **su propio** acceso; IO en `electron/cliConnect.ts`, reglas
+puras en `electron/cliConnectLogic.ts` (tests en `tests/electron/cliConnectLogic.test.ts`). El estado
+se lee del `settings.json` **del CLI** (`cliSettingsPath`, espejo de `getSettingsDir()`), así que un CLI
+conectado desde la terminal también sale como "CLI connected (…)".
+- **Cloud (código, sin cambios en el servidor):** la app ejecuta el CLI empaquetado
+  (`resources/cli/noteflow.js`; en dev `cli/noteflow.js`) con `process.execPath` +
+  `ELECTRON_RUN_AS_NODE=1` (sin Node instalado; stdin cerrado, timeout 60 s): `cloud login <email>
+  --send-code` y luego `--code <código> --no-pull` (sin pull: la app ya sincroniza esas notas), con
+  el email de la cuenta de la app. Así la sesión es la del CLI (`cliAccount`/`cliCloud`, escrita por
+  el propio CLI): **nunca** se comparte la de la app (GoTrue rota el refresh token). Errores del CLI
+  → `classifyCliCloudError` (su línea `Error:`). Desconectar = `cloud logout` del CLI. Si las claves
+  de la cuenta de la app son **e2ee** (`getCloudStatus().keysMode`), la sección muestra un aviso
+  ámbar (antes y después de conectar, si el CLI está en esa misma cuenta): el CLI solo sincroniza
+  desbloqueando con la passphrase (prompt en cada ejecución o `NOTEFLOW_CLOUD_PASSPHRASE`), así que
+  "CLI connected" no implica que un agente pueda sincronizar.
+- **GitHub (sin código, copia del token tras confirmar):** el CLI lo guarda en base64, sin el llavero
+  del sistema (lo dice el diálogo). Regla dura: **nunca** sobrescribir ni degradar el
+  `githubSync.encryptedToken` cifrado (`safe:`) de la app. `planGithubConnect`:
+  - **Windows** (`isCliSettingsShared`: `%APPDATA%\noteflow` es el userData de la app instalada,
+    también cuando la instancia en curso usa otro user-data-dir, como `npm run dev`) o cualquier
+    `githubSync` con token ilegible para el CLI → el `githubSync` no se toca; el token va a la clave
+    propia del CLI **`cliGithubToken` = `{ owner, token: base64 }`**, solo si ese `githubSync` es el
+    mismo owner/repo (sin `githubSync` → `noRepo`; otro repo → `mismatch` — en Windows solo pasa en
+    dev con la app instalada ausente, en Cloud o en otro repo; la UI pide conectar el repo en la app
+    instalada y **nunca** sugiere `noteflow login` en Windows, que degradaría su token `safe:`). El CLI (`resolveGithubToken`, v2.10.0) usa primero el token
+    de `githubSync` si lo puede leer y, si es el `safe:` de la app, la copia **solo si `owner`
+    coincide** (una copia de otra conexión se ignora). Se eligió así porque el `githubSync` de Windows
+    lo reescribe la app desde su caché en memoria en cada push/pull (pisaría cualquier cambio del
+    CLI) y porque `lastSync`/estado siguen compartidos como hasta ahora; la copia aparte no toca nada
+    de la app.
+  - **macOS/Linux** (fichero propio del CLI): se escribe `githubSync` como `completeGithubLogin`
+    (mismo repo conserva su estado, otro empieza limpio + borra `cli-github-state.json`).
+  - **Desconectar CLI** (`planGithubDisconnect`) quita `cliGithubToken`, y en macOS/Linux también el
+    `githubSync` del CLI; en Windows **nunca** el `githubSync` (es la conexión de la app). Si el CLI
+    lee directamente el token de la app (token sin `safe:` porque el SO no ofrecía safeStorage)
+    `canDisconnect: false` y la UI lo explica. `noteflow logout` y `completeGithubLogin` borran también
+    `cliGithubToken`; el "Disconnect" de GitHub de la app borra la copia si queda huérfana
+    (`dropOrphanCliGithubToken`).
+  Escrituras: lectura fresca + escritura síncrona (`writeSettingsFile`) sin `await` en medio, como el
+  resto de writers; un `settings.json` del CLI ilegible/corrupto **no** se reescribe (en Windows
+  borraría los ajustes de la app).
+
 **Escrituras estrictas: nada de fallos silenciosos (v2.8.0).** Pruebas con un modelo pequeño
 siguiendo la skill destaparon casos que "salían bien" con un resultado equivocado; el criterio es
 **arreglarlo en el CLI** (error con exit 1 antes de escribir) en vez de avisarlo en la skill:

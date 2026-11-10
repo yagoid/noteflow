@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer, webFrame } from 'electron'
 // no Node/module loading beyond electron itself).
 import type { AccountErrorCode } from './account'
 import type { FeedbackSendResult } from './feedbackLogic'
+import type { CliConnectResult, CliConnectStatus } from './cliConnectLogic'
 
 export type NoteDirRecord = {
   dir: string
@@ -252,6 +253,16 @@ const api = {
     hadDeletions: boolean
     hadMetadataChanges: boolean
   }> => ipcRenderer.invoke('sync:pull-active'),
+  // Settings → Sync → "Connect the CLI too" (electron/cliConnect.ts). Cloud:
+  // the CLI's own login with an emailed code (to the app account's email);
+  // GitHub: a copy of the app's token. Main picks the email/token.
+  cliConnectGetStatus: (): Promise<CliConnectStatus> => ipcRenderer.invoke('cli-connect:get-status'),
+  cliConnectCloudSendCode: (): Promise<CliConnectResult> => ipcRenderer.invoke('cli-connect:cloud-send-code'),
+  cliConnectCloudVerify: (code: string): Promise<CliConnectResult> =>
+    ipcRenderer.invoke('cli-connect:cloud-verify', code),
+  cliConnectCloudDisconnect: (): Promise<CliConnectResult> => ipcRenderer.invoke('cli-connect:cloud-disconnect'),
+  cliConnectGithubConnect: (): Promise<CliConnectResult> => ipcRenderer.invoke('cli-connect:github-connect'),
+  cliConnectGithubDisconnect: (): Promise<CliConnectResult> => ipcRenderer.invoke('cli-connect:github-disconnect'),
   onSyncAuthComplete: (
     cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void
   ) => {

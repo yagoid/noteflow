@@ -408,6 +408,25 @@ export interface FeedbackPayload {
 // timeout; 'server' = the backend refused or failed the insert.
 export type FeedbackSendResult = { ok: true } | { ok: false; reason: 'invalid' | 'network' | 'server' }
 
+// Settings → Sync → "Connect the CLI too" — mirror of electron/cliConnectLogic.ts.
+// What the bundled CLI has (read from ITS settings, never its tokens).
+export interface CliConnectStatus {
+  available: boolean   // the bundled CLI script was found
+  cloud: { connected: boolean; email?: string }
+  // canDisconnect: false when the CLI reads the app's own githubSync token
+  // (Windows, token stored without safeStorage) — only the app's Disconnect can remove it.
+  github: { connected: boolean; owner?: string; repo?: string; canDisconnect: boolean }
+}
+
+export type CliConnectError =
+  | 'cliMissing' | 'notSignedIn' | 'notConnected' | 'noRepo' | 'mismatch'
+  | 'invalidCode' | 'rateLimited' | 'network' | 'failed'
+
+// detail = the CLI's own error line (English, shown verbatim like GitHub API errors).
+export type CliConnectResult =
+  | { ok: true; status: CliConnectStatus }
+  | { ok: false; error: CliConnectError; detail?: string }
+
 // Renderer-safe view of the account session — never carries tokens.
 export interface AccountStatus {
   configured: boolean   // false while the build has no Supabase project configured
@@ -633,6 +652,14 @@ declare global {
         warnings: Array<'deletions-skipped-unreadable'>
         error?: 'cloud-required' | 'cloud-initial-pull-pending' | 'not-connected' | 'in-progress' | 'token'
       }>
+      // Settings → Sync → "Connect the CLI too" — the CLI gets its own access
+      // to the backend the app uses (main picks the email / token).
+      cliConnectGetStatus: () => Promise<CliConnectStatus>
+      cliConnectCloudSendCode: () => Promise<CliConnectResult>
+      cliConnectCloudVerify: (code: string) => Promise<CliConnectResult>
+      cliConnectCloudDisconnect: () => Promise<CliConnectResult>
+      cliConnectGithubConnect: () => Promise<CliConnectResult>
+      cliConnectGithubDisconnect: () => Promise<CliConnectResult>
       // Manual pull routed to the live backend (Cloud when enabled, else GitHub).
       pullActiveNotes: () => Promise<{
         pulled: number

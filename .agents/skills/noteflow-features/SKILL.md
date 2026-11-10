@@ -1415,6 +1415,21 @@ backend que esté realmente en uso (Cloud activado → Cloud; si no, GitHub cone
 ninguno → Cloud); a partir de ahí manda la elección del usuario. Con Cloud activado, GitHub queda
 **en pausa** (badge amarillo + aviso ámbar en su panel; la config de GitHub se conserva).
 
+**Command line (CLI) — "Connect the CLI too".** Debajo de todo, si el backend seleccionado está
+conectado en la app (Cloud activo con sesión, o GitHub conectado), una sección da al CLI `noteflow` su
+propio acceso a ese backend, para que lo que se escribe desde la terminal o por agentes de IA también
+se sincronice:
+- **Cloud:** el botón envía un código al email de la cuenta de la app; aparece un campo inline para
+  el código ("Connect CLI", "Send a new code", Cancel; código inválido/caducado se muestra inline). El
+  CLI inicia **su propia** sesión (la app sigue con la suya) y no hace pull. Si la cuenta usa cifrado
+  privado (E2EE), un aviso ámbar explica que el CLI solo sincroniza con la passphrase (prompt en cada
+  ejecución o `NOTEFLOW_CLOUD_PASSPHRASE`).
+- **GitHub:** sin código; antes de copiar el token, un diálogo avisa de que el CLI lo guarda en
+  base64, sin el cifrado del llavero del sistema ("Copy token").
+- **Conectado:** "CLI connected (email)" / "CLI connected (owner/repo)" + **Disconnect CLI**, que solo
+  quita lo del CLI (nunca la conexión de la app). Si el CLI ya estaba conectado desde la terminal,
+  sale igual como conectado. Detalle técnico en `.agents/context/patterns.md` § CLI.
+
 ## NoteFlow Cloud (Settings → Sync)
 
 > **Fusión por secciones y copias de conflicto:** si editas una nota **en la app con NoteFlow Cloud
