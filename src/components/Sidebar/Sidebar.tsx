@@ -2,7 +2,7 @@ import { Fragment, memo, useCallback, useMemo, useRef, useEffect, useLayoutEffec
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, Search, PanelLeftClose, PanelLeftOpen, Lock, FolderPlus, X, Plus, Timer, LayoutGrid, Star } from 'lucide-react'
+import { Search, PanelLeftClose, PanelLeftOpen, Lock, FolderPlus, X, Plus, Timer, LayoutGrid, Star, MoreHorizontal } from 'lucide-react'
 import { ContextMenu } from '../ContextMenu'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { GroupContextMenu, type GroupContextMenuRequest } from '../GroupContextMenu'
@@ -31,11 +31,15 @@ import { resolveOpenSectionId } from '../../lib/sectionLine'
 import { useOpenNoteSection } from './useOpenNoteSection'
 import { useThemeStore, type SidebarSectionsStyle } from '../../stores/themeStore'
 import { GroupPeek, type GroupPeekController } from './GroupPeek'
+import { SidebarFooterMenu } from './SidebarFooterMenu'
 import { formatExpiry, formatNoteDate, renderHighlightedText } from './rowText'
 import { useT } from '../../i18n/useT'
-import { tf } from '../../i18n/format'
+import { plural, tf } from '../../i18n/format'
 import type { GroupColor, Note } from '../../types'
 import type { TagColorMap } from '../../lib/tagColors'
+
+// Width of the footer ⋯ menu (w-52), to right-align it with its button.
+const FOOTER_MENU_WIDTH = 208
 
 interface SidebarProps {
   /** Docked in the layout (true) or floating over the content (false). */
@@ -204,7 +208,6 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const setContentView = useNotesStore((s) => s.setContentView)
   const updateNote = useNotesStore((s) => s.updateNote)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
-  const setShowArchived = useNotesStore((s) => s.setShowArchived)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const createNote = useNotesStore((s) => s.createNote)
@@ -272,6 +275,9 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
 
   const [keyboardResultIndex, setKeyboardResultIndex] = useState(-1)
   const [newNoteCtx, setNewNoteCtx] = useState<{ x: number; y: number } | null>(null)
+  // Footer ⋯ menu: opens upwards above its button (x = left edge, y = bottom edge).
+  const [footerMenu, setFooterMenu] = useState<{ x: number; y: number } | null>(null)
+  const closeFooterMenu = useCallback(() => setFooterMenu(null), [])
 
   // â”€â”€ Note reorder via drag & drop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [noteDropTarget, setNoteDropTarget] = useState<{
@@ -307,10 +313,20 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
       setGroupContextMenu(null)
       setFolderContextMenu(null)
       setNewNoteCtx(null)
+      setFooterMenu(null)
     }
     window.addEventListener('click', close)
     return () => window.removeEventListener('click', close)
   }, [])
+
+  useEffect(() => {
+    if (!footerMenu) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setFooterMenu(null) }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [footerMenu])
 
   // Dragging a note over a collapsed group/folder opens it after a short hold (persisted,
   // as if the user had opened it). Leaving the target first cancels it.
@@ -374,7 +390,9 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const hasTagFilter = Boolean(filterTag)
   const hasArchivedFilter = showArchived
   const hasActiveFilters = hasSearchFilter || hasTagFilter || hasArchivedFilter
-  const scopedTotal = rawNotes.filter((n) => showArchived || !n.archived).length
+  // Footer "N notes · M sections": exactly what the list shows (archived / tag / search
+  // filters applied; locked encrypted notes hold no sections in memory → count 0).
+  const sectionCount = useMemo(() => notes.reduce((sum, n) => sum + n.sections.length, 0), [notes])
 
   // Section headers ("groups" / "notes") mirror the favorites label. Compute the
   // first group that will actually render and the first ungrouped note, so each
@@ -403,7 +421,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   // confirmations (Group/FolderContextMenu) cover the screen, so no header can be hovered.
   const peekBlocked =
     draggingGroupId != null || contextMenu != null || groupContextMenu != null ||
-    folderContextMenu != null || newNoteCtx != null ||
+    folderContextMenu != null || newNoteCtx != null || footerMenu != null ||
     editingGroupId != null || editingFolderId != null || newFolderInput != null || newGroupInput
   // Only label the ungrouped remainder ("notes") when something sits above it â€”
   // a flat list with no favorites and no groups needs no header.
@@ -1288,22 +1306,35 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
       />
 
       {/* â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      <div className="mx-8 h-px shrink-0 bg-border" />
-      <div className="px-3 py-2 flex items-center justify-between">
-        <button
-          onClick={() => setShowArchived(!showArchived)}
-          className={`flex items-center gap-1 text-xs font-mono transition-colors
-            ${showArchived ? 'text-text' : 'text-text-muted hover:text-text'}`}
-        >
-          <Archive size={10} />
-          {showArchived ? t.sidebar.hideArchived : t.sidebar.showArchived}
-        </button>
-        <span className="text-xs font-mono text-text-muted/40">
-          {hasActiveFilters
-            ? tf(t.sidebar.notesCountFiltered, { count: notes.length, total: scopedTotal })
-            : tf(t.sidebar.notesCount, { count: notes.length })}
+      <div className="h-px shrink-0 bg-border" />
+      <div className="h-10 shrink-0 pl-3 pr-1.5 flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-xs font-mono text-text-muted/40">
+          {plural(t.common.notesPlural, notes.length)} · {plural(t.overview.sectionsPlural, sectionCount)}
         </span>
+        <button
+          onClick={(e) => {
+            // Stop here: the window click listener would close the menu right away.
+            e.stopPropagation()
+            if (footerMenu) { setFooterMenu(null); return }
+            const r = e.currentTarget.getBoundingClientRect()
+            setFooterMenu({ x: Math.max(8, r.right - FOOTER_MENU_WIDTH), y: r.top - 4 })
+          }}
+          title={t.sidebar.moreOptions}
+          aria-label={t.sidebar.moreOptions}
+          aria-haspopup="menu"
+          aria-expanded={footerMenu != null}
+          className={`flex-shrink-0 p-1.5 rounded transition-colors ${
+            footerMenu ? 'text-text-muted bg-surface-2' : 'text-text-muted/50 hover:text-text-muted hover:bg-surface-2'
+          }`}
+        >
+          <MoreHorizontal size={14} />
+        </button>
       </div>
+
+      {/* Footer ⋯ menu (theme · sections · archived): opens upwards, just above the button. */}
+      {footerMenu && (
+        <SidebarFooterMenu x={footerMenu.x} y={footerMenu.y} onClose={closeFooterMenu} />
+      )}
     </div>
   )
 }

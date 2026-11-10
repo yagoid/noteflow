@@ -38,10 +38,15 @@ export const sidebar = {
   deleteGroup: 'Eliminar grupo',
   deleteGroupMessage: '"{name}" se eliminará. Las notas dentro quedarán sin grupo.',
 
+  moreOptions: 'Más opciones',
+  menuTheme: 'Tema',
+  themeLight: 'Claro',
+  themeDark: 'Oscuro',
+  menuSections: 'Secciones',
+  sectionsAsMap: 'En mapa',
+  sectionsAsRow: 'En fila',
   hideArchived: 'Ocultar archivadas',
   showArchived: 'Mostrar archivadas',
-  notesCount: '{count} notas',
-  notesCountFiltered: '{count} / {total} notas',
 
   scrollSectionsLeft: 'Desplazar secciones a la izquierda',
   scrollSectionsRight: 'Desplazar secciones a la derecha',

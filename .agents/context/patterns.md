@@ -229,7 +229,9 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
   en burbuja): menú ⋯ → multiselección → vista previa → cerrar la vista. No actúa con un menú contextual o
   un modal abiertos al empezar la pulsación (snapshot en captura, igual que la vista de nota), con el
   `ConfirmModal` propio ni en campos `data-own-keys` (los inputs inline paran su Esc). En el buscador, el
-  primer Esc lo vacía y ↓ baja a la lista. La lista recibe el foco al abrir.
+  primer Esc lo vacía y ↓ baja a la lista. La lista recibe el foco al abrir. Con ratón, el botón ✕
+  (`X`, `.cv-btn is-square`, `contentView.closeView`) a la derecha del ⋯ de la cabecera llama al mismo
+  `onClose` que el último Esc (en cualquier lugar, no solo "All content").
 - **Animaciones:** entrada de cabecera/cuerpo, tarjeta de la vista previa y menú con `animation-fill-mode:
   backwards` (nunca `both`/`forwards`: un `transform` que se queda aplicado haría del contenedor el
   *containing block* de los `fixed`). Todo se apaga con `prefers-reduced-motion`.
@@ -386,7 +388,11 @@ tarjeta es presentación pura y rellena la caja que su anfitrión posiciona y di
   y se cierra con **cualquier click** (listener `pointerdown` global en el provider — esto evita que se quede
   pegado al pasar una pestaña del editor a "activa" y perder sus handlers). `title:''` en los handlers
   suprime el tooltip nativo del ancestro. Posición flash-free: primera pintura con altura estimada +
-  `opacity:0`, se mide en `useLayoutEffect` y se revela.
+  `opacity:0`, se mide en `useLayoutEffect` y se revela con `.section-hover-pop` (`index.css`): fade +
+  `translateX(-6px → 0)` en 140 ms ease-out, solo `opacity`/`transform` (barato en GPUs lentas) y
+  `animation-fill-mode: backwards` (sin transform residual). Con `prefers-reduced-motion`, solo el fade.
+  Cada apertura remonta el popover (al salir del disparador `target` pasa a `null`), así que la
+  entrada se reproduce en cada preview.
 - **Cerebro** (`Brain/BrainNodePreview.tsx`, con la misma `SectionHoverCard`): NO es hover. Click
   en un nodo nota/sección llama `onNodeActivate(noteId, sectionId, clientX, clientY)` (en vez de
   navegar) → `BrainView` fija la tarjeta **clicable** (un `<button>` en portal, `title`/`aria-label` =
@@ -1282,6 +1288,29 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   botones de nueva nota/grupo y footer quedan fijos. La única diferencia visual del flotante en `Sidebar`
   (`pinned=false`) es que no lleva `border-r` (el `aside` flotante dibuja su propio borde). Como el
   elemento que scrollea es el mismo, el scroll de la lista se conserva al cambiar de modo.
+- **Footer.** Divisor `h-px` de borde a borde y franja `h-10`: a la izquierda "N notes · M sections"
+  (`common.notesPlural` + `overview.sectionsPlural`, `text-text-muted/40`) y a la derecha un ⋯
+  (`sidebar.moreOptions`) que abre `Sidebar/SidebarFooterMenu.tsx`: un `ContextMenu` `fixed` con
+  `placement="above"`. El botón pasa `x = right − 208` (ancho `w-52`, `FOOTER_MENU_WIDTH`) e
+  `y = top − 4`, y `ContextMenu` mide su alto y pone `top = y − height`. Así el borde inferior queda 4 px
+  sobre el botón, alineado a su derecha; medido en Chromium: menú de 212 px, hueco de 4 px. Es `fixed` y
+  no `absolute bottom-full` dentro del pie porque el sidebar puede medir 180 px (`SIDEBAR_MIN`), menos
+  que el menú. **`ContextMenu` solo conoce `x`/`y` y su tamaño medido, no los `transform` de su
+  `className`**: subirlo con `-translate-y-full` hacía que su *clamp* al viewport (pensado para `y` =
+  borde superior) lo recolocara y el translate lo subiera otra vez (unos 180 px de hueco). Para abrir hacia
+  arriba, usar `placement="above"`. Tres bloques (`role="group"` + `aria-label` = su título)
+  separados por `h-px`: **Theme** (Light / Dark = `LIGHT_THEME_ID` / `DEFAULT_THEME_ID` de
+  `lib/themes.ts`, ítems radio con check; con otro tema activo ninguno lleva check y elegir uno cambia a
+  ese), **Sections** (As map / As row = el ajuste local "Sections in the sidebar") y el toggle "Show
+  archived"/"Hide archived". Al abrir, el foco va al primer ítem; al cerrar vuelve al ⋯ si no se ha movido
+  a otro sitio. Usa las mismas acciones que Ajustes → Apariencia (`themeStore.setTheme` /
+  `setSidebarSectionsStyle`), sin lógica propia; el menú solo se monta abierto, así sus suscripciones al
+  `themeStore` no re-renderizan el `Sidebar`. El
+  contador es **lo que lista el sidebar**: el `notes` ya filtrado (archivadas y grupos archivados salvo con
+  "Show archived", tag y búsqueda) y la suma de sus `sections` (`useMemo([notes])`; una cifrada
+  bloqueada no tiene secciones en memoria → 0). Sustituyó al antiguo "N notes" / "N / M notes".
+  El menú se cierra con clic fuera (el listener `click` de `window` del sidebar), Esc o al elegir, y
+  cuenta en `peekBlocked`.
 - **Mini-vista.** Sin texto, una fila por fila real del sidebar, en el mismo orden
   (`buildMiniSidebarRows`, que comparte con `Sidebar` `orderFavorites`/`isSidebarGroupShown`/
   `isSidebarFolderShown` → mismos filtros, archivados y colapsados): nota = rectángulo `text` muy
@@ -1464,7 +1493,7 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
   y las animaciones van por refs / Web Animations, así que el hover no re-renderiza la lista. La medida
   del tope de filas (capa oculta, `ResizeObserver`, `useLayoutEffect`) vive en `OpenSectionMap`, que
   solo existe en la fila activa: las cerradas nunca miden.
-- **Ajuste "Sections in the sidebar"** (Ajustes → Apariencia; `themeStore.sidebarSectionsStyle`:
+- **Ajuste "Sections in the sidebar"** (Ajustes → Apariencia y menú ⋯ del footer; `themeStore.sidebarSectionsStyle`:
   `'map'` por defecto | `'row'`; **local**, en `localStorage` `noteflow-sidebar-sections`, como la
   escala de UI): `'row'` pinta las secciones con `SectionTabsRow` (ver abajo), siempre visibles, sin
   línea ni despliegue. `Sidebar` lee el ajuste una vez y lo pasa a `NoteRow` como prop primitiva
@@ -1929,7 +1958,51 @@ fallback **incluye su propia barra arrastrable + minimizar/cerrar** (`window.not
 Stickies = BrowserWindows extra que cargan la app con hash `#sticky?noteId=...&sectionId=...`,
 `alwaysOnTop`. En Windows se usa `win.setShape()` (región redondeada calculada píxel a píxel)
 porque el DWM ignora `border-radius` al perder foco. Plegado/desplegado animado en el main
-(`fold-to-corner`/`unfold`) apilando las píldoras en la esquina.
+(`fold-to-corner`/`unfold`, `animateStickyWindow`): por defecto apila las píldoras en la esquina
+superior derecha del display (`getFoldedPosition`: columna `x` del borde derecho, cada píldora debajo de
+la más baja de esa columna); `unfold` vuelve a los bounds pre-fold (`prevBoundsMap`, solo en memoria).
+Una animación nueva **sustituye** a la que corra en esa ventana (`stickyAnimations`; p. ej. desplegar a
+mitad del plegado) en vez de pelearse dos `setInterval` por la ventana.
+
+**Geometría recordada por PC (`settings.json` → `stickyBounds`):** lógica pura en
+`electron/stickyBounds.ts` (tests en `tests/electron/stickyBounds.test.ts`); el cableado en `main.ts`.
+Clave = `noteId/sectionId` **con que se abrió** la ventana (`stickyKeys`; el mismo par que
+`startupStickies`, así una sticky de arranque encuentra su geometría tras reiniciar; cambiar de sección
+en el sitio no cambia la clave). Cada entrada guarda `expanded` (últimos bounds desplegada) y/o `folded`
+(dónde dejó el usuario la píldora). LRU con tope de 200 entradas (orden de claves del objeto; no se
+limpian al borrar notas). Local, nunca se sincroniza (los monitores son de cada máquina).
+- **Cuándo se guarda:** `rememberStickyBounds(win)` tras `moved`/`resized` (solo Windows/macOS; Linux
+  no los emite) con **debounce final por ventana de 400 ms** (`createKeyedDebounce` en
+  `stickyBounds.ts`, `scheduleRememberStickyBounds`): en Windows salen una vez al soltar el arrastre,
+  pero en macOS `moved` es alias de `move` y salta **continuamente** mientras se arrastra (y con los
+  `setPosition` programáticos); sin debounce cada arrastre serían decenas de reescrituras in-place de
+  `settings.json`, que guarda PAT, refresh token y DEK (más riesgo de lectura rota por el CLI). Los
+  guards se evalúan **al disparar** el timer, no al programarlo. Puntos de guardado inmediatos
+  (`rememberStickyBoundsNow`: cancela el pendiente y guarda ya; también son el guardado de Linux): al
+  plegar (bounds desplegados), al desplegar (píldora) y en `close`; `closed` cancela el timer. Nunca
+  durante una animación (`stickyAnimations`), con la ventana minimizada (Windows reporta `-32000`),
+  antes de colocarla (`stickyWindows`) ni si el rect no sería restaurable (ver visibilidad), para no
+  pisar un sitio bueno.
+- **Píldora: solo si el usuario la movió.** Al acabar la animación de plegado se apuntan sus bounds
+  reales (`foldedSettledBounds`; el SO puede subir el alto a 39). Solo si al guardar difieren (>2 px,
+  `rectChanged`) se recuerda como su sitio: una píldora que se quedó en la pila de la esquina no guarda
+  nada y sigue apilándose. No hay "olvidar": arrastrarla a la esquina guarda ese sitio.
+- **Cuándo se aplica:** al plegar, si hay `folded` va ahí con su tamaño; si no, a la pila de la
+  esquina (`getFoldedPosition` se calcula **antes** de añadir la ventana a `foldedWindows`, para que
+  sus bounds desplegados no cuenten como píldora de la columna). La protección contra solapes es
+  **solo en un sentido**: una píldora por defecto se coloca debajo de la más baja de la columna,
+  incluida una recordada que esté ahí (no la pisa); pero una píldora recordada va a su sitio **sin
+  mirar** qué hay, así que puede caer encima de una píldora por defecto (o de otra recordada) que ya
+  ocupe ese hueco. Al abrir
+  (`ready-to-show`), si hay `expanded` se usa (con mínimo 200×200) en vez de la cascada
+  `getStickyInitialPosition`.
+- **Fallback al sitio por defecto:** si el rect ya no es visible (`isRectVisible` contra los
+  `display.bounds` —no `workArea`: la sticky es always-on-top y puede quedar sobre la barra de tareas—:
+  ≥50 % dentro de **un** display y su borde superior, el asa de arrastre, en él; monitor desconectado →
+  no) o si otra ventana abierta con la **misma clave** ya está (la misma sección abierta dos veces;
+  `stickyKeyInUse`) en `stickyWindows` (abrir) / `foldedWindows` (plegar).
+- No hay IPC nuevo: todo vive en main; el renderer (`StickyApp`) sigue llamando a
+  `foldToCorner(FOLDED_W, FOLDED_H)`/`unfold()` igual (el tamaño pedido solo se usa sin sitio recordado).
 
 **Transparencia dependiente de plataforma:** en **Linux/macOS** la ventana es `transparent: true`
 (`backgroundColor: '#00000000'`) y el redondeo lo da el CSS. En **Windows** se crea **opaca**

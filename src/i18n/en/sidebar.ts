@@ -54,11 +54,18 @@ export const sidebar = {
   deleteGroup: 'Delete group',
   deleteGroupMessage: '"{name}" will be deleted. Notes inside will become ungrouped.',
 
-  // Footer.
+  // Footer: "N notes · M sections" (common.notesPlural + overview.sectionsPlural) and the ⋯
+  // menu (Sidebar/SidebarFooterMenu.tsx): theme · sections style · archived toggle.
+  moreOptions: 'More options',
+  menuTheme: 'Theme',
+  themeLight: 'Light',
+  themeDark: 'Dark',
+  // Same setting as Settings → Appearance → "Sections in the sidebar" (short labels).
+  menuSections: 'Sections',
+  sectionsAsMap: 'As map',
+  sectionsAsRow: 'As row',
   hideArchived: 'Hide archived',
   showArchived: 'Show archived',
-  notesCount: '{count} notes',
-  notesCountFiltered: '{count} / {total} notes',
 
   // Section tabs row (scroll arrows).
   scrollSectionsLeft: 'Scroll sections left',

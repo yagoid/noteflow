@@ -43,6 +43,8 @@ noteflow/
 │   ├── snippetsFile.ts  # Pura: saneo de snippets.json (fragmentos del toolbar) en lectura y escritura — testeada
 │   ├── whatsNewSeen.ts  # Pura: saneo/unión de settings.whatsNewSeen (tour "What's new") — testeada;
 │   │                    #   espejo de src/lib/whatsNew.ts — ver patterns.md
+│   ├── stickyBounds.ts  # Pura: geometría recordada de las stickies (settings.stickyBounds, por PC):
+│   │                    #   saneo/LRU/visibilidad en displays — testeada; ver patterns.md § Ventanas sticky
 │   ├── tempNoteExpiry.ts # Lógica pura: cuándo puede correr el autoborrado de notas temporales
 │   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
 │   ├── updateAsset.ts   # Lógica pura del auto-update: qué asset/URL ofrecer por plataforma y
@@ -528,6 +530,12 @@ Estructura de `settings.json`:
   "startupStickies": [
     { "noteId": "xyz", "sectionId": "sec001" }
   ],
+  "stickyBounds": {
+    "xyz/sec001": {
+      "expanded": { "x": 800, "y": 120, "width": 320, "height": 380 },
+      "folded":   { "x": 40, "y": 1000, "width": 220, "height": 39 }
+    }
+  },
   "githubSync": {
     "enabled": true,
     "encryptedToken": "<cifrado con safeStorage o base64 fallback>",

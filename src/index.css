@@ -1726,6 +1726,15 @@ html[data-color-scheme="light"] .section-hover-card {
   color: rgb(var(--text-muted));
 }
 .section-hover-card .section-map-corner { z-index: 1; width: 14px; height: 14px; }
+/* Entrance of the hover popover (SectionPreview/HoverPreviewProvider.tsx): a short fade +
+   slide in from the left, once it's measured and placed. Only opacity/transform (compositor-
+   only, cheap on slow GPUs); with reduced motion, just the fade. */
+@keyframes section-hover-in { from { opacity: 0; transform: translateX(-6px); } }
+@keyframes section-hover-fade { from { opacity: 0; } }
+.section-hover-pop { animation: section-hover-in 140ms ease-out backwards; }
+@media (prefers-reduced-motion: reduce) {
+  .section-hover-pop { animation-name: section-hover-fade; }
+}
 
 /* Clickable variant: the Brain view's pinned preview (Brain/BrainNodePreview.tsx) wraps
    the same card in a <button> that opens the section. The button is a bare box the card

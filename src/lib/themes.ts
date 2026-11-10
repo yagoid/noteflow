@@ -408,3 +408,5 @@ export const THEMES: Theme[] = [
 ]
 
 export const DEFAULT_THEME_ID = 'noteflow-dark'
+/** The app's own light theme: the "Light" of the sidebar footer's quick Light / Dark switch. */
+export const LIGHT_THEME_ID = 'noteflow-light'

@@ -175,13 +175,14 @@ function HoverPreviewPopover({ target }: { target: PreviewTarget }) {
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[9999] pointer-events-none transition-opacity duration-100"
+      // Hidden until measured and placed; then .section-hover-pop plays the entrance (index.css).
+      className={`fixed z-[9999] pointer-events-none${ready ? ' section-hover-pop' : ''}`}
       style={{
         width,
         height: PREVIEW_CARD_HEIGHT,
         left: pos.left,
         top: pos.top,
-        opacity: ready ? 1 : 0,
+        opacity: ready ? undefined : 0,
       }}
     >
       <SectionHoverCard note={note} section={section} sectionTagColors={sectionTagColors} />

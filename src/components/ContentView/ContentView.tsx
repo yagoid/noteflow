@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
-import { Check, LayoutGrid, MoreHorizontal, Plus, Search, Star } from 'lucide-react'
+import { Check, LayoutGrid, MoreHorizontal, Plus, Search, Star, X } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
@@ -789,6 +789,15 @@ export function ContentView({ place, onClose }: ContentViewProps) {
               </div>
             )}
           </div>
+          <button
+            type="button"
+            className="cv-btn is-square"
+            title={t.contentView.closeView}
+            aria-label={t.contentView.closeView}
+            onClick={onClose}
+          >
+            <X size={14} aria-hidden />
+          </button>
         </div>
       </header>
 

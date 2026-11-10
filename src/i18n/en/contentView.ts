@@ -22,6 +22,8 @@ export const contentView = {
   newNoteIn: 'New note in {name}',
   moreActions: 'More actions',
   showArchived: 'Show archived',
+  // ✕ after the ⋯ button: leaves the view (same as Esc with nothing else open).
+  closeView: 'Close the view (Esc)',
   // Segmented control after the search: how column 2 orders the notes.
   sortLabel: 'Order of the notes',
   sortByDate: 'By date',

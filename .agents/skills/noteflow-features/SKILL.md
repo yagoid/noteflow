@@ -53,7 +53,7 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 │  ─ Sin grupo ──────────────────         │                            │
 │    Project: Neural Netw…  19/03         │                            │
 │  ─────────────────────────────          │                            │
-│  ⊞ Show archived       3 notes         │                            │
+│  9 notes · 31 sections             ⋯   │                            │
 └─────────────────────────────────────────┴────────────────────────────┘
 ```
 
@@ -128,7 +128,7 @@ debajo, sus **secciones** en el lenguaje del mapa de secciones del editor:
 - **Ajustes → Apariencia → "Sections in the sidebar":** *Folded map* (por defecto, lo de arriba) o
   *Scroll row*: las secciones de cada nota siempre visibles en una sola fila con scroll horizontal
   (bordes difuminados y flechas al desbordar), con las celdas del diseño nuevo a su ancho natural y la
-  abierta en sólido; sin línea ni despliegue. Solo para este dispositivo (no se sincroniza).
+  abierta en sólido; sin línea ni despliegue. Solo para este dispositivo (no se sincroniza). También desde el menú ⋯ del footer (*As map* / *As row*).
 - El peek de un grupo colapsado sigue **el mismo ajuste** (línea plegada con su despliegue y mapa en la
   nota activa, o fila con scroll), en tamaño compacto. La **vista de contenido** enseña **siempre** todas
   las secciones de cada nota como celdas en varias líneas (sin scroll), sea cual sea el ajuste.
@@ -231,7 +231,7 @@ Iconos del TitleBar:
 - **Favorites** → aparece en la sección "favorites" al top del sidebar (etiqueta pequeña + notas planas). La nota también sigue visible en su grupo si tiene uno. Toggle desde el menú contextual o el botón ⭐ en la toolbar del editor.
 - **Drag-to-reorder** → las notas se pueden arrastrar dentro de su contexto (favorites, grupo, carpeta o sin grupo) para fijar un orden manual. El orden persiste en `note-order.json` (sincronizado con GitHub). Una línea indicadora muestra dónde se insertará la nota al soltar.
 - **Drag-to-move (entre grupos/carpetas)** → arrastrar una nota y soltarla sobre **otro grupo** (cabecera o cuerpo) la reasigna a la raíz de ese grupo; soltarla sobre una **carpeta** la mueve a esa carpeta. Mientras se arrastra, el destino se marca con un **subrayado del color del grupo** que crece bajo su cabecera, su guía a pleno color, el resto de la lista atenuado y, al final de su lista, un hueco discontinuo **"Drop in {nombre}"** (si la nota no está ya ahí). Un grupo o carpeta **plegado** se abre solo tras ~650 ms encima (y se queda abierto). Reordenar dentro del mismo contexto y mover a otro distinto conviven en el mismo gesto (la cabecera de un grupo colapsado también es zona de drop). Equivale a `updateNote({ group, folder })`; sin IPC nuevo.
-- **Archive** → se oculta de la lista principal (toggle "Show archived" en footer).
+- **Archive** → se oculta de la lista principal (toggle "Show archived" en el menú ⋯ del footer).
 - **Duplicate** → copia completa con todas sus secciones; conserva el grupo y la carpeta de la original.
 - **Open alongside** → abre la nota en paralelo (vista dividida) junto a la actual.
 - **Asignar a grupo / carpeta** → drag & drop o menú contextual.
@@ -351,7 +351,7 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
   cabecera = colapsar/expandir.
 - **Archivar grupo**: menú contextual → "Archive group". Oculta el grupo **y todas sus notas** de
   la lista (las notas conservan su propio estado `archived`). Se revela con el mismo toggle
-  **"Show archived"** del footer: los grupos archivados aparecen atenuados y al final. Para
+  **"Show archived"** del menú ⋯ del footer: los grupos archivados aparecen atenuados y al final. Para
   recuperarlo: "Unarchive group" en el menú contextual del grupo atenuado.
 - **Asignar nota**: drag & drop, o menú contextual → "Add to group".
 - Cada grupo tiene un color (pestaña, guías, cursor y marcas de arrastre; en **favorites**, una
@@ -468,7 +468,8 @@ o nota.
 
 **Teclado** (con el foco en la lista, que lo recibe al abrir): `↑ ↓` nota, `← →` sección, `Intro` abre
 en el editor. `Esc`, por orden: cierra el menú ⋯, limpia la selección múltiple, cierra la vista previa
-y, si no queda nada, cierra la vista. Un pie recuerda los atajos.
+y, si no queda nada, cierra la vista. Un pie recuerda los atajos. Con ratón, la **✕** a la derecha del
+⋯ de la cabecera ("Close the view (Esc)") sale de la vista directamente.
 
 **Volver desde la vista de nota:** si abres la vista de nota desde aquí (clic derecho en una sección →
 "Note overview"), su botón de cerrar/`Esc` te devuelve a la vista de contenido en el mismo lugar.
@@ -660,7 +661,9 @@ Permite ojear el contenido sin navegar.
 - **Paneles de IA** (Related / Chat) → resultados que apuntan a una sección.
 
 **Comportamiento:**
-- Aparece tras un breve retardo (~380 ms) para no parpadear al barrer varias pestañas.
+- Aparece tras un breve retardo (~380 ms) para no parpadear al barrer varias pestañas, con una
+  entrada sutil (fundido + desliza unos px de izquierda a derecha, ~140 ms; solo fundido con
+  "reducir movimiento" del sistema).
 - **Posición:** en sidebar/grupos/editor cuelga con su esquina superior izquierda **junto al
   cursor** (hacia abajo-derecha), para no tapar el contenido a la derecha del ratón; en los
   paneles de IA sale al lado del elemento. Se voltea/recoloca si no cabe en pantalla.
@@ -1144,8 +1147,18 @@ cada respuesta). Sin IA configurada, ofrece ir a **Ajustes → IA**.
 - Click en un tag del sidebar → filtra notas con ese tag. Click de nuevo → limpia.
 
 ### Notas archivadas
-- Ocultas por defecto. Toggle `Show archived` en el footer. El mismo toggle revela también los
-  **grupos archivados** (atenuados, al final de la lista).
+- Ocultas por defecto. Toggle `Show archived` / `Hide archived` en el menú ⋯ del footer. El mismo
+  toggle revela también los **grupos archivados** (atenuados, al final de la lista).
+
+### Footer del sidebar
+- Franja fija bajo la lista (divisor de borde a borde). A la izquierda, **"N notes · M sections"**:
+  cuenta lo que lista el sidebar en ese momento (sin archivadas salvo con "Show archived", y con el
+  filtro de tag o la búsqueda aplicados; una nota cifrada bloqueada no suma secciones).
+- A la derecha, **⋯** ("More options") abre un menú hacia arriba con tres bloques:
+  **Theme** — *Light* / *Dark* (los temas NoteFlow Light y NoteFlow Dark, con check en el activo; con
+  otro tema activo ninguno lleva check y elegir uno cambia a él; igual que elegirlo en Ajustes →
+  Apariencia) · **Sections** — *As map* / *As row* (el ajuste "Sections in the sidebar", solo en este
+  dispositivo) · **Show archived** / **Hide archived**. Se cierra al elegir, con clic fuera o `Esc`.
 
 ### Orden de la lista
 - **Sección favorites** (top del sidebar): notas marcadas como favoritas, en orden manual (drag-to-reorder).
@@ -1261,13 +1274,20 @@ grupo/carpeta) y aparecen las de sección:
 ## Ventana sticky (nota flotante)
 
 Botón `⧉` en la toolbar del editor (o `Ctrl+S` para la sección actual, `Ctrl+G` para todas):
-- Siempre encima (`alwaysOnTop`). Tamaño 300×300px, redimensionable (mín. 200×200).
+- Siempre encima (`alwaysOnTop`). Tamaño 300×300px la primera vez, redimensionable (mín. 200×200).
+- **Recuerda dónde la dejaste** (por PC, también tras reiniciar el ordenador): al volver a abrir esa
+  sticky (a mano o al arrancar) aparece en su último sitio y con su último tamaño. Si ese sitio quedó
+  en un monitor que ya no está conectado, o esa misma sticky ya está abierta, se abre en la posición
+  por defecto (en cascada arriba, centrada).
 - Frameless con barra de título propia y esquinas redondeadas.
 - Modo markdown o modo texto, igual que el editor principal.
 - Cambios sincronizados con la ventana principal en tiempo real.
 - Se pueden abrir varias a la vez.
 - **Plegar/desplegar** (fold/unfold) desde su barra de título: se contrae a una píldora animada
-  en la esquina de la pantalla (las píldoras se apilan).
+  en la esquina de la pantalla (las píldoras se apilan). La píldora se puede **mover y redimensionar**:
+  si la mueves, esa sticky recuerda el sitio y tamaño de su píldora (por PC, también tras reiniciar) y
+  las próximas veces se pliega ahí en vez de a la esquina; las que nunca se movieron siguen apilándose
+  en la esquina. Para volver a la esquina, arrastra la píldora hasta allí.
 - **Cambiar de sección** sin abrir otra ventana: si la nota tiene 2+ secciones, el nombre de la sección
   en la barra de título (con `⌄`, tooltip *Switch section*) abre un desplegable con todas las secciones
   (punto de color + nombre, ✓ en la actual). Teclado: Enter/Espacio/↓ abre, ↑/↓ (cíclico), Home/End,

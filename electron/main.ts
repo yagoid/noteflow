@@ -73,6 +73,16 @@ import {
 import { resolveLang, getTrayMessages, getMessages, type LanguageSetting } from './i18n'
 import { writeSettingsFile } from './settingsFile'
 import { sanitizeSeenIds, mergeSeenIds } from './whatsNewSeen'
+import {
+  sanitizeStickyBounds,
+  withStickyBounds,
+  stickyBoundsKey,
+  isRectVisible,
+  rectChanged,
+  createKeyedDebounce,
+  type StickyRect,
+  type StickyBoundsEntry,
+} from './stickyBounds'
 import { sanitizeSnippets } from './snippetsFile'
 
 
@@ -940,6 +950,9 @@ function roundedRectRegion(w: number, h: number, r: number): { x: number; y: num
 // taller than the requested FOLDED_H and the pill fills it (h-screen).
 const STICKY_RADIUS = 8
 
+// Minimum width/height of an expanded sticky (lifted while folded).
+const STICKY_MIN_SIZE = 200
+
 function applyStickyShape(win: BrowserWindow, w?: number, h?: number) {
   // win.setShape() is Windows-only (DWM); no-op on Linux/macOS
   if (process.platform !== 'win32') return
@@ -955,6 +968,84 @@ const stickyWindows = new Set<BrowserWindow>()
 
 // Tracks currently folded sticky windows to stack their pills vertically
 const foldedWindows = new Set<BrowserWindow>()
+
+// ── Remembered sticky geometry (settings.json → stickyBounds, per PC) ────────
+// See electron/stickyBounds.ts. win.id → key of the (noteId, sectionId) the
+// sticky was opened with.
+const stickyKeys = new Map<number, string>()
+// win.id → bounds the folded pill had when the fold animation ended. A pill
+// still there was not moved/resized by the user, so nothing new is remembered.
+const foldedSettledBounds = new Map<number, StickyRect>()
+// win.id → running fold/unfold animation. Programmatic moves/resizes made by it
+// are never remembered as the user's choice (macOS emits 'moved' for them too).
+const stickyAnimations = new Map<number, ReturnType<typeof setInterval>>()
+
+function saveStickyBounds(key: string, patch: StickyBoundsEntry): void {
+  const settings = readSettings()
+  const next = withStickyBounds(sanitizeStickyBounds(settings.stickyBounds), key, patch)
+  if (JSON.stringify(next) === JSON.stringify(settings.stickyBounds)) return
+  settings.stickyBounds = next
+  writeSettings(settings)
+}
+
+// The remembered rect of `kind` for `key`, only if it is still on a connected
+// display (a disconnected monitor → null → default placement).
+function rememberedStickyRect(key: string, kind: keyof StickyBoundsEntry): StickyRect | null {
+  const rect = sanitizeStickyBounds(readSettings().stickyBounds)[key]?.[kind]
+  if (!rect) return null
+  return isRectVisible(rect, screen.getAllDisplays().map((d) => d.bounds)) ? rect : null
+}
+
+// Another open sticky of the same key already uses its remembered spot (the
+// same note/section opened twice): place this one by default instead of on top.
+function stickyKeyInUse(win: BrowserWindow, key: string, among: Iterable<BrowserWindow>): boolean {
+  for (const w of among) {
+    if (w !== win && !w.isDestroyed() && stickyKeys.get(w.id) === key) return true
+  }
+  return false
+}
+
+// 'moved'/'resized' → one save ~400 ms after the last event. On Windows they fire
+// once at the end of a drag, but on macOS 'moved' is an alias of 'move' and fires
+// continuously while dragging (and on programmatic setPosition). The guards in
+// rememberStickyBounds are evaluated when the timer fires, not when scheduled.
+const STICKY_BOUNDS_SAVE_DEBOUNCE_MS = 400
+const stickyBoundsSaveDebounce = createKeyedDebounce<number>(STICKY_BOUNDS_SAVE_DEBOUNCE_MS)
+
+function scheduleRememberStickyBounds(win: BrowserWindow): void {
+  stickyBoundsSaveDebounce.schedule(win.id, () => rememberStickyBounds(win))
+}
+
+// Save points that must not wait (fold, unfold, close): drop the pending debounced
+// save and remember the current bounds right now.
+function rememberStickyBoundsNow(win: BrowserWindow): void {
+  stickyBoundsSaveDebounce.cancel(win.id)
+  rememberStickyBounds(win)
+}
+
+// Called (debounced) after the user moves/resizes a sticky ('moved'/'resized':
+// Windows/macOS; Linux has neither) and, as the cross-platform save points, on
+// fold, unfold and close. Mid-animation bounds are never saved.
+function rememberStickyBounds(win: BrowserWindow): void {
+  // Minimized: the OS may report parking coordinates (e.g. -32000 on Windows).
+  if (win.isDestroyed() || win.isMinimized() || stickyAnimations.has(win.id)) return
+  const key = stickyKeys.get(win.id)
+  // Not yet placed (ready-to-show adds it to stickyWindows after positioning).
+  if (!key || !stickyWindows.has(win)) return
+  const bounds = win.getBounds()
+  // Never overwrite a good spot with one that wouldn't be restored anyway.
+  if (!isRectVisible(bounds, screen.getAllDisplays().map((d) => d.bounds))) return
+  if (!foldedWindows.has(win)) {
+    saveStickyBounds(key, { expanded: bounds })
+    return
+  }
+  // Folded: only a pill the user actually moved/resized becomes its spot; one
+  // left where the fold put it (e.g. the default corner stack) changes nothing.
+  const settled = foldedSettledBounds.get(win.id)
+  if (!settled || !rectChanged(bounds, settled)) return
+  foldedSettledBounds.set(win.id, bounds)
+  saveStickyBounds(key, { folded: bounds })
+}
 
 function getFoldedPosition(display: Electron.Display, foldedW: number, _foldedH: number): { x: number; y: number } {
   const { x, y, width } = display.workArea
@@ -999,9 +1090,14 @@ function animateStickyWindow(
   duration: number,
   onComplete?: () => void
 ) {
+  const id = win.id
+  // A new animation replaces the running one (e.g. unfold clicked mid-fold)
+  // instead of both intervals fighting over the window.
+  const running = stickyAnimations.get(id)
+  if (running) clearInterval(running)
   const startTime = Date.now()
   const tick = setInterval(() => {
-    if (win.isDestroyed()) { clearInterval(tick); return }
+    if (win.isDestroyed()) { clearInterval(tick); stickyAnimations.delete(id); return }
     const t = Math.min((Date.now() - startTime) / duration, 1)
     const e = 1 - Math.pow(1 - t, 3)  // ease-out cubic
     const x = Math.round(from.x + (to.x - from.x) * e)
@@ -1014,8 +1110,9 @@ function animateStickyWindow(
     // Shape from the real size: the OS may clamp the request (Windows enforces a
     // ~39px minimum height on opaque frameless windows, so 32 becomes 39).
     applyStickyShape(win)
-    if (t >= 1) { clearInterval(tick); onComplete?.() }
+    if (t >= 1) { clearInterval(tick); stickyAnimations.delete(id); onComplete?.() }
   }, 16)
+  stickyAnimations.set(id, tick)
 }
 
 function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
@@ -1028,8 +1125,8 @@ function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
   const win = new BrowserWindow({
     width: 300,
     height: 300,
-    minWidth: 200,
-    minHeight: 200,
+    minWidth: STICKY_MIN_SIZE,
+    minHeight: STICKY_MIN_SIZE,
     frame: false,
     transparent: !isWin,
     backgroundColor: isWin ? '#1e1e1e' : '#00000000',
@@ -1057,15 +1154,37 @@ function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
   // Apply the OS-level window shape so Windows DWM respects the rounded corners
   // even when the window loses focus (CSS border-radius is ignored by DWM).
   win.on('resize', () => applyStickyShape(win))
+  const key = stickyBoundsKey(noteId, sectionId)
+  stickyKeys.set(win.id, key)
+  win.on('moved', () => scheduleRememberStickyBounds(win))
+  win.on('resized', () => scheduleRememberStickyBounds(win))
+  win.on('close', () => rememberStickyBoundsNow(win))
   win.on('closed', () => {
+    stickyBoundsSaveDebounce.cancel(win.id)
     prevBoundsMap.delete(win.id)
     stickyWindows.delete(win)
     foldedWindows.delete(win)
+    stickyKeys.delete(win.id)
+    foldedSettledBounds.delete(win.id)
+    const running = stickyAnimations.get(win.id)
+    if (running) clearInterval(running)
+    stickyAnimations.delete(win.id)
   })
 
   win.once('ready-to-show', () => {
-    const { x, y } = getStickyInitialPosition(300, 300)
-    win.setPosition(x, y)
+    // Reopen where the user last left this sticky (and at that size), unless it
+    // is off every connected display or the same sticky is already open there.
+    const remembered = rememberedStickyRect(key, 'expanded')
+    if (remembered && !stickyKeyInUse(win, key, stickyWindows)) {
+      win.setBounds({
+        ...remembered,
+        width: Math.max(remembered.width, STICKY_MIN_SIZE),
+        height: Math.max(remembered.height, STICKY_MIN_SIZE),
+      })
+    } else {
+      const { x, y } = getStickyInitialPosition(300, 300)
+      win.setPosition(x, y)
+    }
     stickyWindows.add(win)
     applyStickyShape(win)
     win.show()
@@ -4070,13 +4189,25 @@ ipcMain.on('window:set-always-on-top', (event, flag: boolean) => {
 ipcMain.on('window:fold-to-corner', (event, foldedW: number, foldedH: number) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win) return
+  // Expanded bounds as of now (Linux has no 'moved'/'resized': this is its save point).
+  rememberStickyBoundsNow(win)
   const from = win.getBounds()
   prevBoundsMap.set(win.id, from)
+  // Go back to where the user left this pill last time (same size); otherwise
+  // (never moved, display gone, or the same sticky already folded there) stack it
+  // in the default corner. Computed before adding `win` to foldedWindows so its
+  // own expanded bounds don't count as a pill of the corner stack.
+  const key = stickyKeys.get(win.id)
+  const remembered = key ? rememberedStickyRect(key, 'folded') : null
+  const to = remembered && key && !stickyKeyInUse(win, key, foldedWindows)
+    ? remembered
+    : { ...getFoldedPosition(screen.getDisplayNearestPoint(from), foldedW, foldedH), width: foldedW, height: foldedH }
   foldedWindows.add(win)
-  const display = screen.getDisplayNearestPoint(from)
-  const { x: toX, y: toY } = getFoldedPosition(display, foldedW, foldedH)
-  const to = { x: toX, y: toY, width: foldedW, height: foldedH }
-  animateStickyWindow(win, from, to, 300)
+  foldedSettledBounds.delete(win.id)
+  animateStickyWindow(win, from, to, 300, () => {
+    // Real bounds (the OS may clamp the height): the baseline to tell a user move.
+    if (!win.isDestroyed()) foldedSettledBounds.set(win.id, win.getBounds())
+  })
 })
 
 ipcMain.on('window:unfold', (event) => {
@@ -4084,11 +4215,14 @@ ipcMain.on('window:unfold', (event) => {
   if (!win) return
   const prev = prevBoundsMap.get(win.id)
   if (!prev) return
+  // Where the pill is now, if the user moved it (Linux save point, see above).
+  rememberStickyBoundsNow(win)
   foldedWindows.delete(win)
+  foldedSettledBounds.delete(win.id)
   const from = win.getBounds()
   animateStickyWindow(win, from, prev, 280, () => {
     if (!win.isDestroyed()) {
-      win.setMinimumSize(200, 200)
+      win.setMinimumSize(STICKY_MIN_SIZE, STICKY_MIN_SIZE)
       applyStickyShape(win)
     }
   })
