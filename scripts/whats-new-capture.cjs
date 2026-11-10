@@ -10,7 +10,8 @@
 //             Tip: point it at a clean worktree of HEAD (npm run build there) so a dirty
 //             tree or a parallel build never ends up in the clips.
 //   --only    comma-separated clip ids (default: all). Ids: sections, kanban, links-palette,
-//             quick-capture, windows, brain, ai, sync, section-map, floating-sidebar, snippets, more.
+//             quick-capture, windows, brain, ai, agents, sync, section-map, floating-sidebar,
+//             snippets, more.
 //   --lang    en | es | all (default: all).
 //   --out     output dir (default: src/assets/whats-new). Writes <id>.<lang>.webm + .png poster.
 //   --frames  keep the raw captured frames + sample PNGs here (debug); default: temp dir, deleted.
@@ -31,7 +32,11 @@
 //     fade in/out so the loop restarts cleanly. Takes play back ~1.15–1.4× faster than real time.
 //     A fake cursor and keystroke pills are injected into the page ONLY during the capture
 //     (nothing in src/). "windows" records the main window and the sticky separately and composes
-//     them over a desktop-like backdrop. "brain" dismisses the "Enable local AI" prompt as it
+//     them over a desktop-like backdrop. "agents" does the same with a fake AI-agent terminal (a
+//     plain HTML page in an extra window of the launched Electron) and the app: the `noteflow add`
+//     it shows is SIMULATED — the script writes the exact files that command would write (with the
+//     CLI's own note.md serializer) into the temp notes dir, and the app picks them up through its
+//     notes-dir watcher. The real CLI never runs. "brain" dismisses the "Enable local AI" prompt as it
 //     mounts (no embeddings in the temp profile; section links still draw the graph) and cuts the
 //     hidden node-probing step out of the take. "more" is a montage with hard cuts.
 //   Shared machinery (launch, overlay, actor, recorder, ffmpeg helpers) lives in lib/capture-kit.cjs
@@ -39,20 +44,20 @@
 //   Requires: playwright (devDependency) and ffmpeg in the PATH. The output is a set of real
 //   screenshots of the UI: re-record after visible UI changes and review the clips by eye.
 // ─────────────────────────────────────────────────────────────────────────────
-const HELP_LINES = 41
+const HELP_LINES = 46
 
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const {
-  sleep, startMockLlm, launchElectron, closeApp, injectOverlay, actor, startRecording, writeConcat, ffmpeg,
+  sleep, rand, startMockLlm, launchElectron, closeApp, injectOverlay, actor, startRecording, writeConcat, ffmpeg,
   probeDuration, sampleFrames, focusEditorEnd, focusLastTask, configureMockLlm, reloadMain,
   probeBrainNode, makeMask, makeShadow, clipTime,
 } = require('./lib/capture-kit.cjs')
 const { ID, demoContent, seedNotes } = require('./lib/demo-notes.cjs')
 
 const REPO = path.resolve(__dirname, '..')
-const CLIP_IDS = ['sections', 'kanban', 'links-palette', 'quick-capture', 'windows', 'brain', 'ai', 'sync',
+const CLIP_IDS = ['sections', 'kanban', 'links-palette', 'quick-capture', 'windows', 'brain', 'ai', 'agents', 'sync',
   'section-map', 'floating-sidebar', 'snippets', 'more']
 const OUT_W = 960
 const OUT_H = 600 // every clip is 16:10 so the tour modal never jumps
@@ -90,11 +95,11 @@ function seedProfile(profileDir, lang, extra = {}) {
   fs.writeFileSync(path.join(profileDir, 'settings.json'), JSON.stringify(settings, null, 2))
 }
 
-async function launchApp(opts, lang, { settings = {}, uiState = {}, extraSections = {}, files = {}, size = { width: 960, height: 600 } } = {}) {
+async function launchApp(opts, lang, { settings = {}, uiState = {}, extraSections = {}, tweak = null, files = {}, size = { width: 960, height: 600 } } = {}) {
   const ctx = await launchElectron({
     appDir: opts.app, scale: opts.scale, size, tmpPrefix: 'nf-whatsnew-',
     seed: ({ notes, profile }) => {
-      seedNotes(notes, lang, extraSections)
+      seedNotes(notes, lang, extraSections, tweak)
       for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(notes, name), content)
       seedProfile(profile, lang, { settings, uiState })
     },
@@ -156,6 +161,14 @@ const TEXT = {
     template: { name: 'Weekly 1:1', sections: [['Agenda', '- Wins since last week\n- Blockers\n- Career'], ['Notes', ''], ['Action items', '- [ ] ']] },
     question: 'Summarize the launch plan',
     answer: 'The **Q4 launch** ships in three waves, two weeks apart:\n\n1. **Wave 1** — private beta with 50 design partners\n2. **Wave 2** — waitlist + pricing page go live\n3. **Wave 3** — public launch with the press kit\n\nLock down the API *Endpoints* and the design-system *Components* first.',
+    // "agents": the fake agent terminal (its CLI output stays in English, like the real CLI).
+    agent: {
+      window: 'AI agent — ~/projects', thinking: 'Thinking…', noteQuery: 'launch',
+      request: 'Note in my launch plan that we need to book the photographer for Thursday',
+      status: "I'll add it as a task in your launch note.",
+      task: '- [ ] Book the photographer — Thursday',
+      done: 'Done: “Book the photographer — Thursday” is now in Product launch → Tasks.',
+    },
     ui: {
       openBrain: 'Open brain view', openChat: 'Open AI chat', settings: 'Settings', sync: 'Sync', github: 'GitHub Sync', cloud: 'NoteFlow Cloud',
       enableAi: 'Enable local AI', cancel: 'Cancel', addCard: 'Add card', done: 'Done', expiry: 'Change when this note is deleted',
@@ -182,6 +195,13 @@ const TEXT = {
     template: { name: '1:1 semanal', sections: [['Agenda', '- Logros desde la última semana\n- Bloqueos\n- Carrera'], ['Notas', ''], ['Acciones', '- [ ] ']] },
     question: 'Resume el plan de lanzamiento',
     answer: 'El **lanzamiento del Q4** sale en tres oleadas, cada dos semanas:\n\n1. **Oleada 1** — beta privada con 50 clientes piloto\n2. **Oleada 2** — lista de espera + página de precios\n3. **Oleada 3** — lanzamiento público con kit de prensa\n\nCierra primero los *Endpoints* de la API y los *Componentes* del sistema de diseño.',
+    agent: {
+      window: 'Agente IA — ~/proyectos', thinking: 'Pensando…', noteQuery: 'lanzamiento',
+      request: 'Apunta en el plan de lanzamiento que hay que reservar al fotógrafo para el jueves',
+      status: 'Lo añado como tarea en tu nota de lanzamiento.',
+      task: '- [ ] Reservar el fotógrafo — jueves',
+      done: 'Hecho: «Reservar el fotógrafo — jueves» ya está en Lanzamiento del producto → Tareas.',
+    },
     ui: {
       openBrain: 'Abrir la vista cerebro', openChat: 'Abrir el chat con IA', settings: 'Ajustes', sync: 'Sincronización', github: 'GitHub Sync', cloud: 'NoteFlow Cloud',
       enableAi: 'Activar la IA local', cancel: 'Cancelar', addCard: 'Añadir tarjeta', done: 'Hecho', expiry: 'Cambiar cuándo se elimina esta nota',
@@ -192,6 +212,19 @@ const TEXT = {
     },
   },
 }
+
+// "agents" clip: layout on the composed desktop (CSS px, 16:10). The terminal opens centred alone,
+// then slides to the top-left while the app comes in from the right, over its lower-right part.
+const AGENTS = {
+  canvas: { w: 1104, h: 690 },
+  term: { w: 680, h: 420 },
+  app: { w: 800, h: 500 },
+  enterMs: 700, // wall-clock ms of the app's entrance (the slide itself runs on the encoded timeline)
+}
+AGENTS.termFrom = { x: (AGENTS.canvas.w - AGENTS.term.w) / 2, y: (AGENTS.canvas.h - AGENTS.term.h) / 2 }
+AGENTS.termTo = { x: 34, y: 34 }
+AGENTS.appTo = { x: AGENTS.canvas.w - 34 - AGENTS.app.w, y: AGENTS.canvas.h - 34 - AGENTS.app.h }
+AGENTS.appFrom = { x: AGENTS.appTo.x + 150, y: AGENTS.appTo.y + 24 }
 
 // Takes are played back a bit faster than real time: snappier loops, typing still looks human.
 const DEFAULT_SPEED = 1.15
@@ -432,6 +465,80 @@ const CLIPS = {
       await a.move(430, 420, 700)
       await sleep(900)
       return { rec: await rec.stop() }
+    },
+  },
+
+  // An AI agent in a terminal gets a plain-language request and runs the NoteFlow CLI; then the
+  // app slides in and the new task shows up in it live. Composed over a backdrop (see encodeAgents).
+  // The `noteflow add` is SIMULATED: simulateCliAdd() writes what the CLI would write.
+  agents: {
+    speed: 1.2,
+    composite: 'agents',
+    launch: {
+      size: { width: AGENTS.app.w, height: AGENTS.app.h },
+      uiState: { activeNoteId: ID.launch, activeSectionId: 'stasks', sidebarMode: 'floating' },
+      // Tasks ends on its task list (no trailing "Hiring: …" line), so the appended task joins it.
+      tweak: ({ notes }) => {
+        const sec = notes.find((n) => n.id === ID.launch).sections.find((s) => s.id === 'stasks')
+        sec.content = sec.content.split('\n').filter((l) => l.startsWith('- [')).join('\n')
+      },
+    },
+    async run(ctx, a, T) {
+      const { app, page, notes } = ctx
+      const A = T.agent
+      const note = readCliNote(notes, ID.launch)
+      const sec = note.sections.find((s) => s.id === 'stasks')
+      const taskText = A.task.replace(/^- \[ \] /, '')
+      const q = (s) => `"${s}"`
+      const cmdSections = `noteflow sections ${q(A.noteQuery)}`
+      const cmdAdd = `noteflow add ${q(A.task)} --title ${q(note.title)} --section ${q(sec.name)}`
+      // The terminal: an extra frameless window of the launched app, shown without stealing focus.
+      const winP = app.waitForEvent('window')
+      await app.evaluate(({ BrowserWindow }, b) => {
+        const w = new BrowserWindow({ ...b, useContentSize: true, frame: false, show: false, resizable: false, backgroundColor: '#0d1117' })
+        w.loadURL('about:blank')
+        w.showInactive()
+      }, { x: 140, y: 90, width: AGENTS.term.w, height: AGENTS.term.h })
+      const term = await winP
+      await term.waitForLoadState('domcontentloaded')
+      await term.setContent(terminalHtml(A.window))
+      await term.evaluate(() => document.fonts.ready)
+      await highlightNewTask(page, taskText)
+      // No blinking text caret in the app: the agent writes, not the user.
+      await page.evaluate(() => document.activeElement?.blur())
+      const appRec = await startRecording(page)
+      const rec = await startRecording(term)
+      await sleep(650)
+      // Typed through the page API: Playwright inserts non-ASCII characters (á, ó…) without a keydown.
+      for (const ch of A.request) {
+        await term.evaluate((c) => window.T.key(c), ch)
+        await sleep(rand(16, 38) + (ch === ' ' ? rand(10, 50) : 0))
+      }
+      await sleep(380)
+      await term.evaluate(() => window.T.submit())
+      await term.evaluate((t) => window.T.think(t), A.thinking)
+      await sleep(900)
+      await term.evaluate((t) => window.T.say(t), A.status)
+      await sleep(320)
+      let call = await term.evaluate((c) => window.T.tool(c), cmdSections)
+      await sleep(700)
+      await term.evaluate(([i, out]) => window.T.toolDone(i, out), [call, cliSectionsOutput(note)])
+      await sleep(550)
+      call = await term.evaluate((c) => window.T.tool(c), cmdAdd)
+      await sleep(250)
+      // NoteFlow slides in while the command "runs"; the write lands once it has settled.
+      const enterTs = Date.now() / 1000
+      await sleep(AGENTS.enterMs + 380)
+      const res = simulateCliAdd(notes, ID.launch, sec.name, A.task)
+      await page.waitForFunction((needle) => [...document.querySelectorAll('li[data-type="taskItem"]')]
+        .some((li) => li.textContent.includes(needle)), taskText, { timeout: 8000 })
+      await sleep(150)
+      await term.evaluate(([i, out]) => window.T.toolDone(i, out), [call, [`Added to "${res.title}" → "${res.section}" (+${A.task.length} chars)`]])
+      await sleep(450)
+      await term.evaluate((t) => window.T.say(t, true), A.done)
+      await sleep(1900)
+      const termRec = await rec.stop()
+      return { rec: termRec, app: await appRec.stop(), enterTs }
     },
   },
 
@@ -686,6 +793,194 @@ function encodeWindows(result, work, outBase, scale) {
   return tmp
 }
 
+// ── "agents": fake agent terminal + simulated `noteflow add` + composition ──
+// The CLI's own note.md parser/serializer (pure functions; requiring the CLI runs nothing and
+// opens no Cloud/GitHub session — it only runs commands when executed as a script).
+const cliFormat = () => require('../cli/noteflow.js')
+
+function noteDirById(notesDir, noteId) {
+  const dir = fs.readdirSync(notesDir).find((d) => d === noteId || d.endsWith(`-${noteId}`))
+  if (!dir) throw new Error(`note ${noteId} not found in ${notesDir}`)
+  return path.join(notesDir, dir)
+}
+
+// Reads a note folder the way the CLI's readNoteFolder does (section content as on disk).
+function readCliNote(notesDir, noteId) {
+  const { splitFrontmatter, parseNoteYaml } = cliFormat()
+  const dir = noteDirById(notesDir, noteId)
+  const note = parseNoteYaml(splitFrontmatter(fs.readFileSync(path.join(dir, 'note.md'), 'utf8')).frontmatter)
+  for (const s of note.sections) {
+    s.content = fs.readFileSync(path.join(dir, path.basename(s.file || `${s.id}.md`)), 'utf8').replace(/\r\n/g, '\n')
+  }
+  return { ...note, dir }
+}
+
+// What `noteflow sections "<q>"` prints (cmdSections), without its blank first/last lines.
+function cliSectionsOutput(note) {
+  const lines = (c) => (c ? c.split('\n').length : 0)
+  return [`Sections of "${note.title}":`, ...note.sections.map((s) =>
+    `  ${s.name}  (${lines(s.content)} lines${s.isRawMode ? ', text' : ', markdown'}${s.aiHidden ? ', hidden from AI' : ''})`)]
+}
+
+// The exact file change of `noteflow add "<text>" --title <note> --section <existing section>`
+// (cmdAdd → writeNoteFolder): append to the section, then rewrite note.md (fresh `updated`) and
+// every section file. Done here, in the throwaway notes dir — NEVER by running the CLI, whose
+// NoteFlow Cloud session NOTEFLOW_NOTES_DIR does not isolate.
+function simulateCliAdd(notesDir, noteId, sectionName, text) {
+  const note = readCliNote(notesDir, noteId)
+  const sec = note.sections.find((s) => s.name.toLowerCase() === sectionName.toLowerCase())
+  const base = (sec.content || '').replace(/\n$/, '')
+  sec.content = base ? base + '\n' + text : text
+  fs.writeFileSync(path.join(note.dir, 'note.md'), cliFormat().serializeNoteMd(note), 'utf-8')
+  for (const s of note.sections) fs.writeFileSync(path.join(note.dir, `${s.id}.md`), s.content || '', 'utf-8')
+  return { title: note.title, section: sec.name }
+}
+
+// Briefly lights up the task the agent adds, as soon as the app renders it (capture-only overlay).
+async function highlightNewTask(page, needle) {
+  await page.evaluate((needle) => {
+    const style = document.createElement('style')
+    style.textContent = `.__nf_hl{position:fixed;pointer-events:none;z-index:2147483646;border-radius:7px;
+      background:rgb(var(--accent) / .2);box-shadow:0 0 0 1.5px rgb(var(--accent) / .55);animation:__nfhl 2.4s ease-out forwards}
+      @keyframes __nfhl{0%{opacity:0;transform:scale(.97)}14%{opacity:1;transform:none}100%{opacity:.6}}`
+    document.head.appendChild(style)
+    const find = () => [...document.querySelectorAll('li[data-type="taskItem"]')].find((li) => li.textContent.includes(needle))
+    const mo = new MutationObserver(() => {
+      const li = find()
+      if (!li) return
+      mo.disconnect()
+      requestAnimationFrame(() => {
+        const r = li.getBoundingClientRect()
+        const range = document.createRange()
+        range.selectNodeContents(li.querySelector('p') || li)
+        const right = Math.max(r.left + 80, range.getBoundingClientRect().right)
+        const d = document.createElement('div')
+        d.className = '__nf_hl'
+        d.style.cssText = `left:${r.left - 8}px;top:${r.top - 3}px;width:${right - r.left + 22}px;height:${r.height + 6}px`
+        document.body.appendChild(d)
+      })
+    })
+    mo.observe(document.body, { childList: true, subtree: true, characterData: true })
+  }, needle)
+}
+
+// A neutral, generic AI-agent chat in a terminal (no real product's name or look). `window.T`
+// drives it: key → submit → think → say → tool → toolDone.
+function terminalHtml(title) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0d1117;color-scheme:dark}
+  body{font:14px/1.6 'Cascadia Mono','Cascadia Code',Consolas,'DejaVu Sans Mono',monospace;color:#c9d1d9}
+  .bar{height:34px;display:flex;align-items:center;padding:0 14px;background:#161b22;border-bottom:1px solid #21262d;
+    font:500 12.5px 'Segoe UI',system-ui,sans-serif;color:#8b949e}
+  .dots{display:flex;gap:7px;width:60px}.dots i{width:11px;height:11px;border-radius:50%;background:#30363d}
+  .bar b{flex:1;text-align:center;font-weight:500}.bar s{width:60px}
+  #log{padding:16px 22px 0}
+  .l{white-space:pre-wrap;padding-left:var(--i,2ch);text-indent:calc(-1 * var(--i,2ch))}
+  .gap{margin-top:9px}
+  .pr{color:#56d4a8;font-weight:700}.req{color:#f0f3f6}
+  .dim{color:#6e7681}.ag{color:#d2a8ff}.ok{color:#56d4a8}
+  .tk{color:#79c0ff}.st{color:#e3b26b}.fl{color:#8b949e}.cmd{color:#f0f3f6}
+  .out{white-space:pre;color:#8b949e;margin-left:4ch;padding-left:1.4ch;border-left:1px solid #30363d}
+  .caret{display:inline-block;width:.6em;height:1.15em;vertical-align:-.2em;background:#c9d1d9;margin-left:1px;animation:bl 1.05s steps(1) infinite}
+  @keyframes bl{50%{opacity:0}}
+  </style></head><body><div class="bar"><span class="dots"><i></i><i></i><i></i></span><b>${esc(title)}</b><s></s></div>
+  <div id="log"></div><script>
+  const log = document.getElementById('log')
+  const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e }
+  const caret = () => el('span', 'caret')
+  const spinner = (node) => { let i = 0; const h = setInterval(() => { node.textContent = SPIN[i++ % SPIN.length] }, 80); return () => clearInterval(h) }
+  let input = null, thinking = null
+  function prompt(gap) {
+    const line = el('div', 'l' + (gap ? ' gap' : '')); line.append(el('span', 'pr', '❯ '))
+    input = el('span', 'req'); line.append(input, caret()); log.append(line)
+  }
+  prompt(false)
+  const calls = []
+  // Command line with light syntax colours: noteflow · subcommand · "strings" · --flags.
+  function command(cmd) {
+    const f = document.createDocumentFragment()
+    cmd.match(/"[^"]*"|\\S+|\\s+/g).forEach((t, i) => {
+      const cls = /^\\s/.test(t) ? null : i === 0 ? 'tk' : t.startsWith('"') ? 'st' : t.startsWith('--') ? 'fl' : 'cmd'
+      f.append(cls ? el('span', cls, t) : document.createTextNode(t))
+    })
+    return f
+  }
+  window.T = {
+    key(ch) { input.textContent += ch },
+    submit() { input.parentElement.querySelector('.caret').remove() },
+    think(text) {
+      const line = el('div', 'l gap dim'); const s = el('span', 'ag', SPIN[0]); line.append(s, ' ' + text)
+      log.append(line); thinking = { line, stop: spinner(s) }
+    },
+    // Agent message, streamed word by word. last = then show a fresh prompt.
+    say(text, last) {
+      if (thinking) { thinking.stop(); thinking.line.remove(); thinking = null }
+      const line = el('div', 'l gap'); line.append(el('span', last ? 'ok' : 'ag', last ? '✓ ' : '● '))
+      const body = el('span'); line.append(body); log.append(line)
+      const words = text.match(/\\S+\\s*/g)
+      return new Promise((done) => {
+        let i = 0
+        const tick = () => { body.textContent += words[i++]; if (i < words.length) setTimeout(tick, 34); else { if (last) prompt(true); done() } }
+        tick()
+      })
+    },
+    tool(cmd) {
+      const line = el('div', 'l gap'); line.style.setProperty('--i', '4ch')
+      const s = el('span', 'ag', SPIN[0]); line.append(s, el('span', 'dim', ' $ '), command(cmd))
+      log.append(line); calls.push({ s, stop: spinner(s) }); return calls.length - 1
+    },
+    toolDone(i, lines) {
+      const c = calls[i]; c.stop(); c.s.textContent = '✓'; c.s.className = 'ok'
+      const out = el('div', 'out', lines.join('\\n')); log.append(out)
+    },
+  }
+  </script></body></html>`
+}
+
+// Terminal (master take) + the app, over the backdrop: the terminal opens centred alone; at the
+// app's entrance it slides top-left while the app fades and slides in from the right.
+function encodeAgents(result, work, outBase, scale) {
+  const { rec, app, enterTs } = result
+  const speed = result.speed || 1
+  const termList = writeConcat(rec, path.join(work, 'term'), { speed })
+  const appList = writeConcat(app, path.join(work, 'app'), { from: rec.t0, to: rec.t1, speed })
+  const px = (v) => Math.round((v * scale) / 2) * 2
+  const L = AGENTS
+  const CW = px(L.canvas.w), CH = px(L.canvas.h)
+  const tw = termList.frameW, th = termList.frameH, aw = appList.frameW, ah = appList.frameH
+  const sm = px(28)
+  const bg = path.join(work, 'bg.png'); makeBackdrop(bg, CW, CH)
+  const tMask = path.join(work, 'tmask.png'); makeMask(tMask, tw, th, px(10))
+  const aMask = path.join(work, 'amask.png'); makeMask(aMask, aw, ah, px(9))
+  const tSh = path.join(work, 'tshadow.png'); makeShadow(tSh, tw, th, sm, 160)
+  const aSh = path.join(work, 'ashadow.png'); makeShadow(aSh, aw, ah, sm, 170)
+  const at = Math.max(0, (enterTs - rec.t0) / speed)
+  const dur = L.enterMs / 1000 / speed
+  // Ease-out cubic between two CSS-px positions, from the app's entrance on (ffmpeg expr, per frame).
+  const ease = `(1-pow(1-clip((t-${at.toFixed(3)})/${dur.toFixed(3)},0,1),3))`
+  const pos = (from, to, off = 0) => `'${px(from) + off}+(${px(to) - px(from)})*${ease}'`
+  const fadeIn = `fade=t=in:st=${at.toFixed(3)}:d=${(0.3 / speed).toFixed(3)}:alpha=1`
+  const fc = [
+    '[1:v]fps=30,format=rgba[tv]', '[2:v]format=gray[tm]', '[tv][tm]alphamerge[term]',
+    '[3:v]fps=30,format=rgba[av]', '[4:v]format=gray[am]', `[av][am]alphamerge,${fadeIn}[app]`,
+    `[6:v]format=rgba,${fadeIn}[ash]`,
+    `[0:v][5:v]overlay=x=${pos(L.termFrom.x, L.termTo.x, -sm)}:y=${pos(L.termFrom.y, L.termTo.y, -sm + px(10))}[b1]`,
+    `[b1][term]overlay=x=${pos(L.termFrom.x, L.termTo.x)}:y=${pos(L.termFrom.y, L.termTo.y)}[b2]`,
+    `[b2][ash]overlay=x=${pos(L.appFrom.x, L.appTo.x, -sm)}:y=${pos(L.appFrom.y, L.appTo.y, -sm + px(12))}[b3]`,
+    `[b3][app]overlay=x=${pos(L.appFrom.x, L.appTo.x)}:y=${pos(L.appFrom.y, L.appTo.y)}[b4]`,
+    `[b4]scale=${OUT_W}:${OUT_H}:flags=lanczos,format=yuv420p[out]`,
+  ].join(';')
+  const tmp = outBase + '.tmp.mkv'
+  ffmpeg(['-loop', '1', '-framerate', '30', '-i', bg,
+    '-f', 'concat', '-safe', '0', '-i', termList.listPath, '-loop', '1', '-framerate', '30', '-i', tMask,
+    '-f', 'concat', '-safe', '0', '-i', appList.listPath, '-loop', '1', '-framerate', '30', '-i', aMask,
+    '-loop', '1', '-framerate', '30', '-i', tSh, '-loop', '1', '-framerate', '30', '-i', aSh,
+    '-filter_complex', fc, '-map', '[out]', '-t', termList.duration.toFixed(3), '-c:v', 'ffv1', '-an', tmp])
+  return tmp
+}
+
 // ── Runner ──────────────────────────────────────────────────────────────────
 async function recordClip(opts, id, lang, work) {
   const clip = CLIPS[id]
@@ -710,7 +1005,8 @@ async function recordClip(opts, id, lang, work) {
   if (result.posterTs) result.posterAt = clipTime(result.posterTs, result.rec.t0, result.cuts || [], speed)
   try {
     if (clip.composite) {
-      const tmp = encodeWindows({ ...result, speed }, clipWork, outBase, opts.scale)
+      const encode = clip.composite === 'agents' ? encodeAgents : encodeWindows
+      const tmp = encode({ ...result, speed }, clipWork, outBase, opts.scale)
       finishClip(tmp, outBase, { posterAt: result.posterAt })
     } else {
       const list = writeConcat(result.rec, clipWork, { cuts: result.cuts || [], speed })

@@ -243,8 +243,8 @@ candidata desde el checkout (mismo `electron-builder` que la release), no reusa 
 
 Graba desde la app real (Playwright `_electron` + ffmpeg) los clips en bucle del tour →
 `src/assets/whats-new/<id>.<lang>.webm` + póster `<id>.<lang>.png` (ids fijos: `sections`, `kanban`,
-`links-palette`, `quick-capture`, `windows`, `brain`, `ai`, `sync`, `section-map`, `floating-sidebar`,
-`snippets`, `more`; idiomas `en`/`es`).
+`links-palette`, `quick-capture`, `windows`, `brain`, `ai`, `agents`, `sync`, `section-map`,
+`floating-sidebar`, `snippets`, `more`; idiomas `en`/`es`).
 Regenerarlos cuando cambie de forma visible la UI que aparece en ellos:
 
 ```bash
@@ -263,8 +263,20 @@ node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|a
 - Captura por CDP `Page.startScreencast` a DPR 1.5 (no `recordVideo`, que sale borroso) → 960×600
   VP9; el cursor falso y las pastillas de teclas se inyectan solo en la página durante la toma.
   Revisar los clips a ojo (`--frames <dir>` guarda los frames y 4 PNG de muestra por clip).
-- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~7,2 MB con los pósters: cerca del
-  tope; al añadir clips nuevos, revisar el tamaño o bajar duración/`crf`).
+- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~7,9 MB con los pósters, 13 clips × 2
+  idiomas: **en el tope**; antes de añadir otro clip, recortar duración/`crf` o los pósters).
+- Composiciones sobre un "escritorio" (fondo degradado + ventanas con esquinas redondeadas y sombra,
+  cada superficie grabada por separado con sus tiempos reales): `windows` (ventana principal +
+  sticky, `encodeWindows`) y `agents` (`encodeAgents`: un terminal falso con un agente de IA genérico
+  — página HTML en una ventana extra sin marco del Electron lanzado, manejada por `window.T` — se
+  abre centrado y solo; al "ejecutarse" `noteflow add` se desplaza arriba a la izquierda mientras la
+  app entra por la derecha con fundido, ambos movimientos como expresiones `overlay` de ffmpeg en
+  función de `t`). En `agents` el `noteflow add` se **simula**: `simulateCliAdd()` escribe lo mismo
+  que `cmdAdd` → `writeNoteFolder` (append a la sección, `note.md` con el `serializeNoteMd` del CLI
+  importado como módulo — exportarlo no ejecuta comandos — y todas las secciones) en el dir de notas
+  temporal, y la toma **espera** a que la app pinte la tarea (su `fs.watch`): si un cambio rompiera
+  el watcher, la grabación falla en vez de salir sin la tarea. La petición se teclea vía `window.T.key`
+  (Playwright inserta los caracteres no ASCII sin `keydown`).
 - La maquinaria compartida (lanzar Electron sobre dirs temporales, mock LLM, cursor falso + pastillas,
   `actor`, grabador CDP, `writeConcat`/ffmpeg, máscaras/sombras) vive en `scripts/lib/capture-kit.cjs`
   y el cuaderno demo (EN/ES, ids estables `ID`, `seedNotes`) en `scripts/lib/demo-notes.cjs`; los usan

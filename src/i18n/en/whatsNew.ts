@@ -51,6 +51,10 @@ export const whatsNew = {
       title: 'AI that knows your notes',
       body: 'Chat with your notes, let the agent organize them and grow your second brain. Bring your own API key or use NoteFlow AI.',
     },
+    agents: {
+      title: 'Your AI agents take notes too',
+      body: 'Claude Code, Codex or any script can read and write your notes through the noteflow CLI. Just ask in plain words: the changes show up live in the app.',
+    },
     sync: {
       title: 'Your notes, on every device',
       body: 'Sync privately to your own GitHub repo, or turn on NoteFlow Cloud with optional end-to-end encryption.',

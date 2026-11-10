@@ -47,6 +47,10 @@ export const whatsNew: Messages['whatsNew'] = {
       title: 'IA que conoce tus notas',
       body: 'Chatea con tus notas, deja que el agente las organice y haz crecer tu segundo cerebro. Conecta tu propia API o usa NoteFlow AI.',
     },
+    agents: {
+      title: 'Tus agentes de IA también toman notas',
+      body: 'Claude Code, Codex o cualquier script pueden leer y escribir tus notas con el CLI noteflow. Pídeselo con tus palabras: los cambios aparecen al momento en la app.',
+    },
     sync: {
       title: 'Tus notas, en todos tus dispositivos',
       body: 'Sincroniza en privado con tu propio repo de GitHub o activa NoteFlow Cloud con cifrado de extremo a extremo opcional.',

@@ -1,6 +1,7 @@
 import {
   AlarmClock,
   AppWindow,
+  Bot,
   Brain,
   Cloud,
   Columns2,
@@ -90,6 +91,7 @@ export const WHATS_NEW_SLIDES: WhatsNewSlide[] = [
     keys: [{ id: 'kanban', combo: ['/kanban'] }],
   },
   { id: 'ai', since: '2.2.0', i18nKey: 'ai', icon: Sparkles, accent: 'accent', keys: [] },
+  { id: 'agents', since: '2.2.0', i18nKey: 'agents', icon: Bot, accent: 'accent-3', keys: [] },
   { id: 'sync', since: '2.2.0', i18nKey: 'sync', icon: Cloud, accent: 'cyan', keys: [] },
   { id: 'section-map', since: '2.2.0', i18nKey: 'section-map', icon: Rows3, accent: 'cyan', keys: [] },
   {

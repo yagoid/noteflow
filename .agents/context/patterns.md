@@ -1728,7 +1728,16 @@ diapositivas que este dispositivo no ha visto. Piezas:
   emite cada clip a `dist/assets/` y lo referencia con `new URL(…, import.meta.url)` (vale bajo
   `file://`); la CSP de `index.html` tiene `media-src 'self' data:` (los <4 KB se inlinean como
   `data:`). En `more`, sin clip se pinta la rejilla de chips dentro del marco; con clip, la rejilla
-  pasa en lista a la columna de texto.
+  pasa en lista a la columna de texto. Los clips los graba `scripts/whats-new-capture.cjs` desde la
+  app real (detalle en `release.md` § "Clips del tour What's new"). El de **`agents`** es el único
+  que no abre en NoteFlow: un terminal falso con un agente de IA genérico (una página HTML en una
+  ventana extra del Electron lanzado, sin nombre ni estética de ningún producto real) recibe una
+  petición en lenguaje natural, "ejecuta" `noteflow sections` / `noteflow add` (salida copiada de los
+  `out()` reales de `cmdSections`/`cmdAdd`) y luego entra la app, donde la tarea aparece en vivo. El
+  `noteflow add` es **simulado**: el script escribe en el dir de notas temporal exactamente los
+  ficheros que escribiría el CLI (append a la sección + `note.md` reescrito con el `serializeNoteMd`
+  del propio CLI, importado como módulo) y la app lo recoge con su `fs.watch` del dir de notas. El
+  CLI real **nunca** se ejecuta durante la captura (`NOTEFLOW_NOTES_DIR` no aísla su sesión de Cloud).
 - **Animación** (`index.css` § "What's new" tour, clases `.wn-*`): entrada del modal con easing
   spring + blur; fondo "aurora" (blobs difuminados con `--wn-c` = color de la diapositiva y el
   acento del tema; el cambio de color entre diapositivas se anima porque los elementos transicionan
