@@ -56,7 +56,7 @@ enlaza al aviso legal vía `%LEGAL_NOTICE_URL%`; con placeholders, dice solo "el
 independiente que opera NoteFlow" + email, sin enlace (nunca hay enlaces rotos).
 
 Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas),
-`public/mobile-privacy-policy.html`, `public/screenshots/`, `public/video/` (demo grande de la landing),
+`public/mobile-privacy-policy.html`, `public/screenshots/`, `public/video/` (demo general, primer clip del mosaico de la landing),
 `public/mosaic/` (clips del mosaico de la landing, ver "Landing" abajo), `public/clips/` (clips cortos de
 `/features`, ver abajo), `public/brain/*.js`.
 
@@ -157,32 +157,58 @@ con las mismas claves). Actualizar al cambiar UX visible o al hacer release con 
 **`#what` — "What is NoteFlow" + mosaico** (antes eran dos secciones, `#notes` con un mock de notas
 interactivo y `#themes` con el vídeo; se fusionaron y el mock se eliminó. `#notes`/`#themes` siguen como
 anclas vacías dentro de `#what` para no romper enlaces viejos). Kicker + `h2` + párrafo (`t.intro`) y un
-**tablero tipo pinboard**: el demo grande en el centro y 8 clips cortos de una sola feature alrededor,
-con tamaños según su aspecto, pequeños desplazamientos y giros de ±1–2° — suelto a propósito, no una
-rejilla uniforme. Son la estrella visual (marketing reutiliza los mismos clips).
-- **Material**: demo grande `public/video/demo-{dark,light}.{webm,mp4}` + póster `demo-{dark,light}.webp`
-  (1280×820). Clips `public/mosaic/<id>-{dark,light}.{webm,mp4,webp}` (webp = póster), salvo `themes`,
-  una sola toma `themes.{webm,mp4,webp}` para ambos temas (ya va cambiando de tema). Manifiesto
-  (`mosaicTiles` en el frontmatter de `Home.astro`: id, área, aspecto, giro/offset/ancho, color del chip):
-  `brain-orbit` 1:1 · `sections-tab` 4:3 · `temp-note` 4:3 · `kanban` 16:10 · `slash-snippets` 4:5 ·
-  `sticky` 4:5 · `section-preview` 16:10 · `themes` 1:1. Copy por clip en `t.intro.clips[id]`: `caption`
-  (chip mono, corto — en tiles estrechos tiene ~17 caracteres de sitio) y `label` (aria-label que describe
-  el clip). El chip de `themes` cita el nº de temas (**14**, igual que `/features#personalize`). Si cambia
-  la UI que enseña un clip, regrabarlo (dark y light) y revisar su caption/label.
-- **Layout** (CSS en `<style is:global>` de `Home.astro`, `.nf-mosaic`): `grid-template-areas` de 12
-  columnas en escritorio (demo de 7 columnas × 2 filas, columna izquierda 2, derecha 3, fila inferior
-  4/2/4/2); ≤1179px 6 columnas con el demo arriba a todo el ancho y los tiles emparejados por altura;
-  ≤639px demo + rejilla de 2 columnas sin giros (los 16:10 a dos columnas; el chip pasa a pie de foto).
-  La "soltura" va en variables inline por tile (`--r --dx --dy --w --j`) multiplicadas por `--k`
-  (1 / .6 / 0 según ancho). Hover: el tile se endereza, sube y crece un poco.
-- **Vídeo** (script de `Home.astro`, bloque "mosaic"): cada `<video data-mosaic-video>` lleva sus fuentes
-  dark/light en `data-{dark,light}-{webm,mp4,poster}` y los `<source>` salen vacíos. Un IntersectionObserver
-  (rootMargin 120px) asigna las fuentes del tema actual al acercarse (el demo grande ya al cargar, con
-  `preload="metadata"`; los tiles `preload="none"`), reproduce en pantalla y pausa al salir. El toggle de
-  tema bajo el mosaico (y el del rail) cambia póster + fuentes de todos los tiles conservando su estado
-  (`themes` no se recarga). Botón global **Pause/Play clips** (WCAG 2.2.2); con `prefers-reduced-motion`
-  no hay autoplay (solo pósters) hasta pulsar Play.
-- **Reveal**: `data-reveal` + `data-reveal-delay` (ms) escalona la entrada de los tiles. La red de
+**escenario + tablero**: un escenario grande reproduce **un** clip casi a su resolución nativa, recto y
+"elevado" (sombra profunda, z-index por encima), y los 9 clips (el activo incluido) quedan pinchados
+alrededor como **miniaturas-póster** con giros/offsets de pinboard y chip colgando; las miniaturas son el
+selector y el orden de la rotación. Es la estrella visual (marketing reutiliza los mismos clips).
+(Hasta 2026-11 era un pinboard de 9 vídeos a la vez en un grid de 12 columnas que los pintaba a 30-50 %
+de su tamaño → texto de la app ilegible; por eso el rediseño.)
+- **Material** (manifiesto `mosaicClips` en el frontmatter de `Home.astro`: id, carpeta, cómo varía, lado,
+  giro/offset y tono). Cada clip es `<base>.{webm,mp4,webp}` (webp = póster) y varía de una de tres formas:
+  `theme` = toma dark y light (`<id>-{dark,light}.*`), `single` = una toma para ambos temas, `lang` = una
+  toma por idioma de la página (`<id>.{en,es}.*`, igual en claro y oscuro). Orden (= orden DOM y de
+  rotación): `demo` (`public/video/demo-{dark,light}.*`, 1280×820, ~33 s, theme) · `agents`
+  (`public/mosaic/agents.{en,es}.*`, 960×600, ~9,5 s, lang — copia del clip del tour "What's new"
+  `src/assets/whats-new/agents.<lang>.webm`; mp4 H.264 CRF 26 + faststart y póster webp del fotograma
+  de 9 s, generados con ffmpeg) · `sections-tab` 720×540 · `temp-note` 720×540 · `kanban` 800×500 ·
+  `slash-snippets` 576×720 · `sticky` 576×720 · `section-preview` 800×500 (todos theme) · `themes`
+  720×720 (single: ya va cambiando de tema). Copy por clip en `t.intro.clips[id]`: `caption` (chip mono
+  corto de la miniatura y del escenario — en miniaturas de ~120-140 px parte en dos líneas) y `label`
+  (aria-label de la miniatura y del vídeo del escenario). El chip de `themes` cita el nº de temas
+  (**14**, igual que `/features#personalize`). Si cambia la UI que enseña un clip, regrabarlo (dark y
+  light, o por idioma) y revisar su caption/label. El clip `brain-orbit` (grafo 3D del Cerebro) se sacó del mosaico
+  y se borraron sus ficheros de `public/mosaic/` (el script de captura aún sabe grabarlo, ver
+  `release.md`).
+- **Layout** (CSS en `<style is:global>` de `Home.astro`, `.nf-mosaic`/`.nf-stage*`/`.nf-thumb*`):
+  escritorio = grid `miniaturas | escenario | miniaturas` (columnas laterales `clamp(118px, 9.7vw, 140px)`,
+  4 miniaturas a la izquierda y 5 a la derecha repartidas con `space-around` sobre la altura del escenario,
+  así los lados se intercalan). El escenario tiene marco fijo `aspect-ratio: 1280/820` (~890 px de ancho a
+  1440 px → demo al 70 %, el resto ≥ 80 % de su resolución) para que no salte el layout: vídeo en
+  `object-fit: contain` sobre el póster del mismo clip (nítido, `.nf-stage-still`) y, detrás, el póster
+  desenfocado y atenuado (`.nf-stage-backdrop`), así los 1:1 / 4:5 no dejan bandas. Pósters como
+  **fondos CSS** (`--poster-dark`/`--poster-light` inline + regla `[data-theme='light']`): solo se descarga
+  el del tema actual y el cambio de tema no necesita script. Miniaturas 16:10 recortadas desde arriba.
+  ≤1179px: escenario a todo el ancho y miniaturas debajo en filas centradas de 5 + 4 (`.nf-thumbs-col` pasa
+  a `display: contents`); ≤639px: sin giros, el escenario sangra hasta 8 px del borde y las miniaturas son
+  una **tira con scroll horizontal propio** (también sangrada; la página no hace scroll lateral) con el
+  caption como pie. La "soltura" va en `--r --dx --dy` inline × `--k` (1 / .6 / 0).
+- **Controlador** (script de `Home.astro`, bloque "mosaic"): **un solo `<video>`** (el escenario); las
+  miniaturas no tienen vídeo y llevan sus fuentes en `data-{dark,light}-{webm,mp4,poster}` (las lang/single
+  repiten el mismo fichero). Los `<source>` salen vacíos: un IntersectionObserver sobre el escenario
+  (rootMargin 120px) los asigna al acercarse y reproduce solo en pantalla. El activo va **sin `loop`**: al
+  `ended` pasa al siguiente (circular). Clic / Enter / Espacio en una miniatura → pasa a principal al
+  instante (y reanuda si estaba en pausa); con `(hover: hover)` también un hover de ~300 ms; flechas mueven
+  el foco entre miniaturas. Miniatura activa: `aria-pressed`, se endereza/sube, anillo en su tono y
+  **barra de progreso** del clip (rAF); las demás se atenúan (solo con `data-ready`, o sea con JS). Al
+  cambiar, el escenario "sube" desde el rect de la miniatura (FLIP con Web Animations, 460 ms,
+  `cubic-bezier(.2,.7,.2,1)`; fundido+escala si la miniatura no está visible). En la tira de móvil la
+  rotación hace scroll de la tira (no de la página) para mostrar la activa. Cambio de tema: recarga la
+  toma del otro tema conservando `currentTime` (las lang/single no se recargan). **Pause/Play clips**
+  (WCAG 2.2.2) para reproducción y rotación; en pausa aparece además un botón play centrado en el
+  escenario. Con `prefers-reduced-motion`: sin autoplay, sin rotación, sin hover-select y sin FLIP — elegir
+  una miniatura la reproduce una vez y al terminar se queda parada.
+- **Reveal**: `data-reveal` en el escenario y en cada miniatura + `data-reveal-delay` (ms) escalona su
+  entrada (la animación va en el `<button>`; giros y FLIP van en hijos, no chocan). La red de
   seguridad de 2,6 s del script solo revela lo que ya está en (o por encima de) la pantalla — revelarlo
   todo hacía que las entradas de más abajo se reprodujeran fuera de vista.
 

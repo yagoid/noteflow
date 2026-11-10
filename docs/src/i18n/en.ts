@@ -30,32 +30,33 @@ export const en = {
   hero: {
     kicker: 'NoteFlow · The Brain',
     title: `Notes with<br />a <em style="font-style:italic;font-weight:500;">brain.</em>`,
-    tagline: 'Our niche is people with taste.',
+    tagline: 'Streamline the experience',
     download: 'Download free',
     cta: 'Explore the brain ↓',
     scroll: 'Scroll',
   },
 
-  // "What is NoteFlow": intro copy + the clip mosaic (the big demo video surrounded by short
-  // clips of single features). Structural data of each clip (aspect, files, layout) lives in
-  // Home.astro; only the copy is here. `clips` is keyed by clip id.
+  // "What is NoteFlow": intro copy + the clip mosaic (a big stage playing one clip, the rest
+  // pinned around it as selectable thumbnails). Structural data of each clip (files, order,
+  // layout) lives in Home.astro; only the copy is here. `clips` is keyed by clip id.
   intro: {
     kicker: 'What is NoteFlow',
     h2: 'Quick notes. Zero friction.',
     p: `A dark-first desktop notebook for technical people. It lives in your system tray, writes plain Markdown to your own disk and stays out of the way until you need it. The brain is optional — the speed isn't.`,
     mosaicAria: 'NoteFlow in short clips',
-    videoAria: 'NoteFlow desktop app demo',
     // Theme switch under the mosaic: every clip swaps to its dark/light take.
     toggleTheme: 'Switch theme — every clip follows',
-    // Global pause/play for the looping clips (WCAG 2.2.2).
+    // Global pause/play for the stage and its auto-rotation (WCAG 2.2.2).
     pauseClips: 'Pause clips',
     playClips: 'Play clips',
     // Contextual CTAs under the mosaic → /cli and /features.
     cliCta: 'CLI reference →',
     featuresCta: 'Every detail →',
-    // caption = tiny mono chip on the tile · label = aria-label describing what the clip shows.
+    // caption = mono chip on the thumbnail and the stage · label = aria-label describing what
+    // the clip shows (thumbnail button + stage video).
     clips: {
-      'brain-orbit': { caption: 'Brain · 3D graph', label: 'The Brain: the 3D graph of your notes, slowly rotating' },
+      demo: { caption: 'Tour · the whole app', label: 'A tour of the NoteFlow desktop app' },
+      agents: { caption: 'AI agent · CLI', label: 'Your AI agent writes to your notes: from a terminal it runs noteflow sections and noteflow add, and the task appears live in NoteFlow' },
       'sections-tab': { caption: 'Ctrl+Tab · sections', label: "Ctrl+Tab cycling through a note's sections" },
       'temp-note': { caption: 'Ctrl+Shift+N · temp note', label: 'Ctrl+Shift+N opens a temporary note that cleans itself up after 24 hours' },
       kanban: { caption: '/kanban · drag a card', label: 'A kanban board inside a note, with a card dragged to another column' },

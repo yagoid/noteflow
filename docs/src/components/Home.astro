@@ -57,59 +57,61 @@ const label =
 const cardP = 'margin:0;font-size:17px;line-height:1.5;color:var(--ink-dim);';
 
 // ── "What is NoteFlow" mosaic ──
-// The big demo (public/video/demo-<theme>.*, 1280×820) is the centre piece; the small tiles are
-// short loops of single features (public/mosaic/<id>-<theme>.{webm,mp4,webp}, webp = poster).
-// Every clip has a dark and a light take and swaps with the site theme, except `themes`, a single
-// recording (it already cycles through themes) used in both. Structural data only — the caption
-// chip and aria-label of each clip are in the i18n dict (t.intro.clips).
+// A stage plays ONE clip near its native size; every clip (the active one included) is pinned
+// around it as a poster thumbnail that doubles as its selector. The stage rotates through them in
+// order when a clip ends. Material, by how a clip varies:
+//  - 'theme': a dark and a light take, swapped with the site theme (`<dir>/<id>-<theme>.*`);
+//  - 'single': one recording for both themes (`themes`, which already cycles through them);
+//  - 'lang': one take per page language, same in both themes (`agents`, from the app's tour).
+// Files: <base>.{webm,mp4,webp} (webp = poster). The demo lives in /video, the rest in /mosaic.
+// Structural data only — the caption chip and aria-label of each clip are in t.intro.clips.
 type ClipId = keyof typeof t.intro.clips;
 type Theme = 'dark' | 'light';
 interface ClipSources { webm: string; mp4: string; poster: string }
-const mosaicSrc = (id: ClipId, theme: Theme, single?: boolean): ClipSources => {
-  const base = single ? `/mosaic/${id}` : `/mosaic/${id}-${theme}`;
+interface MosaicClip {
+  id: ClipId;
+  dir: 'video' | 'mosaic';
+  vary: 'theme' | 'single' | 'lang';
+  side: 'left' | 'right'; // desktop column the thumbnail is pinned in (DOM order = rotation order)
+  // "Pinboard" looseness of the thumbnail, softened on tablet and dropped on phones (--k in CSS):
+  r: number;              // rotation, deg
+  dx: number;             // offset, px
+  dy: number;
+  tone: string;           // site palette token for the chip dot / active ring / progress bar
+}
+const clipSrc = (clip: MosaicClip, theme: Theme): ClipSources => {
+  const suffix = clip.vary === 'theme' ? `-${theme}` : clip.vary === 'lang' ? `.${lang}` : '';
+  const base = `/${clip.dir}/${clip.id}${suffix}`;
   return { webm: asset(`${base}.webm`), mp4: asset(`${base}.mp4`), poster: asset(`${base}.webp`) };
 };
-const heroSrc = (theme: Theme): ClipSources => ({
-  webm: asset(`/video/demo-${theme}.webm`),
-  mp4: asset(`/video/demo-${theme}.mp4`),
-  poster: asset(`/video/demo-${theme}.webp`),
-});
-// Nominal pixel size per aspect: width/height attributes reserve the box (no layout shift);
-// the CSS aspect-ratio + object-fit:cover keep the frame exact whatever the file's size.
-const ASPECT = {
-  '1:1': [720, 720],
-  '4:3': [960, 720],
-  '16:10': [960, 600],
-  '4:5': [720, 900],
-} as const;
-interface MosaicTile {
-  id: ClipId;
-  area: string;            // grid-area name (see .nf-mosaic templates)
-  aspect: keyof typeof ASPECT;
-  single?: boolean;        // one recording for both themes
-  // "Pinboard" looseness, scaled down at tablet and dropped on phones (--k in CSS):
-  r: number;               // rotation, deg
-  dx: number;              // offset, px
-  dy: number;
-  w?: number;              // width inside its grid area, % (default 100)
-  justify?: 'start' | 'center' | 'end';
-  chip?: 'left' | 'right'; // which bottom corner the caption chip hangs from
-  tone: string;            // site palette token for the chip's dot
-}
-// DOM order = reading order (and the order of the staggered reveal); the visual placement
-// comes from the grid areas.
-const mosaicTiles: MosaicTile[] = [
-  { id: 'brain-orbit', area: 'orbit', aspect: '1:1', r: 1.4, dx: 8, dy: 10, w: 90, justify: 'start', tone: 'purple' },
-  { id: 'sections-tab', area: 'tabs', aspect: '4:3', r: 1.2, dx: 0, dy: -16, chip: 'right', tone: 'accent' },
-  { id: 'temp-note', area: 'temp', aspect: '4:3', r: -1.5, dx: -6, dy: 8, w: 92, justify: 'end', tone: 'orange' },
-  { id: 'kanban', area: 'kanban', aspect: '16:10', r: -1, dx: 0, dy: 12, w: 96, justify: 'start', tone: 'cyan' },
-  { id: 'slash-snippets', area: 'slash', aspect: '4:5', r: -1.8, dx: 0, dy: -12, tone: 'pink' },
-  { id: 'sticky', area: 'sticky', aspect: '4:5', r: 2, dx: 0, dy: -18, chip: 'right', tone: 'accent-2' },
-  { id: 'section-preview', area: 'preview', aspect: '16:10', r: -0.8, dx: 6, dy: 22, w: 94, justify: 'center', tone: 'cyan' },
-  { id: 'themes', area: 'themes', aspect: '1:1', single: true, r: 1.6, dx: -4, dy: -4, chip: 'right', tone: 'pink' },
+// Desktop: 4 thumbnails on the left, 5 on the right, each column spread over the stage's height
+// so the two sides interleave. Tablet/phone: one strip below the stage, same order.
+const mosaicClips: MosaicClip[] = [
+  { id: 'demo', dir: 'video', vary: 'theme', side: 'left', r: -1.4, dx: 6, dy: 0, tone: 'accent' },
+  { id: 'agents', dir: 'mosaic', vary: 'lang', side: 'left', r: 1.6, dx: -4, dy: 0, tone: 'purple' },
+  { id: 'sections-tab', dir: 'mosaic', vary: 'theme', side: 'left', r: -1, dx: 8, dy: 0, tone: 'accent' },
+  { id: 'temp-note', dir: 'mosaic', vary: 'theme', side: 'left', r: 1.8, dx: -2, dy: 0, tone: 'orange' },
+  { id: 'kanban', dir: 'mosaic', vary: 'theme', side: 'right', r: 1.2, dx: -6, dy: 0, tone: 'cyan' },
+  { id: 'slash-snippets', dir: 'mosaic', vary: 'theme', side: 'right', r: -1.7, dx: 4, dy: 0, tone: 'pink' },
+  { id: 'sticky', dir: 'mosaic', vary: 'theme', side: 'right', r: 1.4, dx: -8, dy: 0, tone: 'accent-2' },
+  { id: 'section-preview', dir: 'mosaic', vary: 'theme', side: 'right', r: -1.1, dx: 2, dy: 0, tone: 'cyan' },
+  { id: 'themes', dir: 'mosaic', vary: 'single', side: 'right', r: 1.7, dx: -4, dy: 0, tone: 'pink' },
 ];
-const heroDark = heroSrc('dark');
-const heroLight = heroSrc('light');
+const mosaicItems = mosaicClips.map((clip, i) => ({
+  clip,
+  index: i,
+  copy: t.intro.clips[clip.id],
+  dark: clipSrc(clip, 'dark'),
+  light: clipSrc(clip, 'light'),
+}));
+const mosaicSides = {
+  left: mosaicItems.filter((m) => m.clip.side === 'left'),
+  right: mosaicItems.filter((m) => m.clip.side === 'right'),
+};
+// The stage is server-rendered on the first clip; the controller takes over from there.
+const stageFirst = mosaicItems[0];
+const posterVars = (d: ClipSources, l: ClipSources) => `--poster-dark:url('${d.poster}');--poster-light:url('${l.poster}');`;
+const pad2 = (n: number) => String(n).padStart(2, '0');
 
 // Accent colour per Brain feature card (structural — matches the original design).
 const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(--purple))'];
@@ -219,68 +221,80 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
             <p style="margin:24px 0 0;font-size:clamp(19px,1.5vw,22px);line-height:1.62;color:var(--ink-dim);">{t.intro.p}</p>
           </div>
 
-          {/* A loose pinboard: the big demo in the middle, short single-feature loops around it.
-              Sources are assigned by the controller script (theme-aware, lazy, viewport-gated),
-              so no <source> carries a src in the HTML: only the small webp posters load up front. */}
+          {/* A stage + a pinboard of thumbnails. The stage plays one clip near its native size,
+              lifted above the board; the thumbnails (posters only, no video) are its selectors and
+              the order of the auto-rotation. Sources are assigned by the controller script
+              (theme/lang-aware, lazy, viewport-gated), so no <source> carries a src in the HTML:
+              only the webp posters load up front, as CSS backgrounds that follow the theme. */}
           <div class="nf-mosaic" role="group" aria-label={t.intro.mosaicAria} data-mosaic>
-            <div class="nf-tile nf-tile--hero" data-reveal style="grid-area:hero;">
-              <div class="nf-tile-glow" aria-hidden="true"></div>
-              <figure class="nf-tile-pin">
-                <div class="nf-tile-card">
+            <div
+              class="nf-stage"
+              data-stage
+              data-reveal
+              style={`${posterVars(stageFirst.dark, stageFirst.light)}--tone:rgb(var(--${stageFirst.clip.tone}));`}
+            >
+              <div class="nf-stage-glow" aria-hidden="true"></div>
+              <figure class="nf-stage-pin" data-stage-pin>
+                <div class="nf-stage-card">
+                  <div class="nf-stage-backdrop" aria-hidden="true"></div>
+                  <div class="nf-stage-still" aria-hidden="true"></div>
                   <video
-                    class="nf-tile-video"
-                    data-mosaic-video
-                    data-eager
-                    data-dark-webm={heroDark.webm} data-dark-mp4={heroDark.mp4} data-dark-poster={heroDark.poster}
-                    data-light-webm={heroLight.webm} data-light-mp4={heroLight.mp4} data-light-poster={heroLight.poster}
-                    width="1280" height="820" muted loop playsinline preload="metadata" disablepictureinpicture
-                    aria-label={t.intro.videoAria}
-                    style="aspect-ratio:1280/820;"
+                    id="nf-stage-video"
+                    class="nf-stage-video"
+                    data-stage-video
+                    width="1280" height="820" muted playsinline preload="none" disablepictureinpicture
+                    aria-label={stageFirst.copy.label}
                   >
                     <source type="video/webm" />
                     <source type="video/mp4" />
                   </video>
+                  <button type="button" class="nf-stage-play" data-stage-play aria-label={t.intro.playClips} hidden>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.6-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>
+                  </button>
                 </div>
+                <figcaption class="nf-stage-chip" aria-hidden="true">
+                  <span class="nf-stage-count" data-stage-count>{pad2(1)} / {pad2(mosaicItems.length)}</span>
+                  <span class="nf-stage-caption" data-stage-caption>{stageFirst.copy.caption}</span>
+                </figcaption>
               </figure>
             </div>
 
-            {mosaicTiles.map((tile, i) => {
-              const dark = mosaicSrc(tile.id, 'dark', tile.single);
-              const light = mosaicSrc(tile.id, 'light', tile.single);
-              const [w, h] = ASPECT[tile.aspect];
-              const copy = t.intro.clips[tile.id];
-              return (
-                <div
-                  class="nf-tile"
-                  data-area={tile.area}
-                  data-reveal
-                  data-reveal-delay={i * 70}
-                  style={`grid-area:${tile.area};--r:${tile.r}deg;--dx:${tile.dx}px;--dy:${tile.dy}px;--w:${tile.w ?? 100}%;--j:${tile.justify ?? 'stretch'};--tone:rgb(var(--${tile.tone}));`}
-                >
-                  <figure class={`nf-tile-pin${tile.chip === 'right' ? ' is-chip-right' : ''}`}>
-                    <div class="nf-tile-card">
-                      <video
-                        class="nf-tile-video"
-                        data-mosaic-video
-                        data-dark-webm={dark.webm} data-dark-mp4={dark.mp4} data-dark-poster={dark.poster}
-                        data-light-webm={light.webm} data-light-mp4={light.mp4} data-light-poster={light.poster}
-                        width={w} height={h} muted loop playsinline preload="none" disablepictureinpicture
-                        aria-label={copy.label}
-                        style={`aspect-ratio:${w}/${h};`}
-                      >
-                        <source type="video/webm" />
-                        <source type="video/mp4" />
-                      </video>
-                    </div>
-                    <figcaption class="nf-tile-chip" aria-hidden="true"><span>{copy.caption}</span></figcaption>
-                  </figure>
+            <div class="nf-thumbs" data-thumbs>
+              {(['left', 'right'] as const).map((side) => (
+                <div class={`nf-thumbs-col is-${side}`}>
+                  {mosaicSides[side].map(({ clip, index, copy, dark, light }) => (
+                    <button
+                      type="button"
+                      class={`nf-thumb${index === 0 ? ' is-active' : ''}`}
+                      data-thumb
+                      data-reveal
+                      data-reveal-delay={index * 60}
+                      data-caption={copy.caption}
+                      data-label={copy.label}
+                      data-tone={`rgb(var(--${clip.tone}))`}
+                      data-dark-webm={dark.webm} data-dark-mp4={dark.mp4} data-dark-poster={dark.poster}
+                      data-light-webm={light.webm} data-light-mp4={light.mp4} data-light-poster={light.poster}
+                      aria-label={copy.label}
+                      aria-pressed={index === 0 ? 'true' : 'false'}
+                      aria-controls="nf-stage-video"
+                      style={`--r:${clip.r}deg;--dx:${clip.dx}px;--dy:${clip.dy}px;--tone:rgb(var(--${clip.tone}));${posterVars(dark, light)}`}
+                    >
+                      <span class="nf-thumb-pin">
+                        <span class="nf-thumb-card">
+                          <span class="nf-thumb-img"></span>
+                          <span class="nf-thumb-bar"><span class="nf-thumb-progress" data-thumb-progress></span></span>
+                        </span>
+                        <span class="nf-thumb-chip" aria-hidden="true"><span>{copy.caption}</span></span>
+                      </span>
+                    </button>
+                  ))}
                 </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
 
           {/* Under the mosaic: the theme switch (the whole board swaps to its light/dark takes),
-              a global pause for the loops, and the contextual docs CTAs. */}
+              a pause for the stage and its rotation, and the contextual docs CTAs. */}
           <div class="nf-what-foot" data-reveal>
             <div class="nf-what-controls">
               <button data-theme-toggle class="nf-edge nf-what-btn">
@@ -318,7 +332,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
               <div style="position:absolute;bottom:14px;left:14px;z-index:4;font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);pointer-events:none;">{t.brain.hoverHint}</div>
             </div>
 
-            <div style="flex:1 1 320px;display:flex;flex-direction:column;border:1px solid var(--line-2);border-radius:16px;background:var(--card);overflow:hidden;height:540px;max-height:540px;">
+            <div style="flex:1 1 min(320px,100%);display:flex;flex-direction:column;border:1px solid var(--line-2);border-radius:16px;background:var(--card);overflow:hidden;height:540px;max-height:540px;">
               <div style="display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line);">
                 <span style="width:9px;height:9px;border-radius:50%;background:var(--detail);box-shadow:0 0 12px var(--detail);"></span>
                 <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink);letter-spacing:.02em;">{t.brain.chatHeader}</span>
@@ -364,7 +378,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
           </div>
 
           <div data-reveal style="display:flex;flex-wrap:wrap;align-items:stretch;gap:18px;margin-top:clamp(46px,6vw,68px);">
-            <div style="flex:1 1 320px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:26px;display:flex;flex-direction:column;gap:18px;">
+            <div style="flex:1 1 min(320px,100%);background:var(--card);border:1px solid var(--line);border-radius:16px;padding:26px;display:flex;flex-direction:column;gap:18px;">
               <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint);">{t.profile.signal.heading}</div>
               <div style="display:flex;flex-direction:column;gap:12px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><span style="font-size:17px;color:var(--ink-dim);">{t.profile.signal.weekends.label}</span><span style="display:inline-flex;border:1px solid var(--line-2);border-radius:9px;overflow:hidden;font-size:12px;font-family:'JetBrains Mono',monospace;"><span style="padding:7px 12px;background:rgb(var(--orange)/.18);color:rgb(var(--orange));">{t.profile.signal.weekends.a}</span><span style="padding:7px 12px;color:var(--ink-faint);">{t.profile.signal.weekends.b}</span></span></div>
@@ -389,7 +403,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
               </div>
             </div>
 
-            <div style="flex:1 1 320px;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;">
+            <div style="flex:1 1 min(320px,100%);background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;">
               <div style="display:flex;align-items:center;gap:9px;padding:13px 18px;border-bottom:1px solid var(--line);">
                 <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:rgb(var(--orange));background:rgb(var(--orange)/.16);border-radius:6px;padding:3px 8px;">{t.profile.card.badge}</span>
                 <span style="font-size:17px;font-weight:600;color:var(--ink-strong);">{t.profile.card.title}</span>
@@ -480,119 +494,248 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
 
   <style is:global>
     /* ── What is NoteFlow · the clip mosaic ─────────────────────────────────── */
-    /* A designer's pinboard rather than a uniform grid: named grid areas keep it balanced,
-       while each small tile gets its own width, offset and a ±1–2° tilt (inline --w/--j/--dx/
-       --dy/--r). --k scales that looseness: 1 on desktop, softer on tablet, 0 on phones. */
+    /* A stage + a designer's pinboard. The stage plays one clip near its native resolution
+       (1280/820 frame, ~900px wide on a 1440px screen), dead straight and lifted above the
+       board; the thumbnails around it keep the loose pinboard look (inline --r/--dx/--dy tilt
+       and offset, scaled by --k: 1 on desktop, softer on tablet, 0 on phones) and act as the
+       selectors. Posters are CSS backgrounds (--poster-dark / --poster-light) so only the
+       current theme's file loads and a theme switch needs no script. */
     .nf-anchor { position: absolute; top: 0; left: 0; width: 0; height: 0; }
     .nf-mosaic {
       --k: 1;
+      --thumb-w: clamp(118px, 9.7vw, 140px);
       display: grid;
-      grid-template-columns: repeat(12, minmax(0, 1fr));
-      grid-template-areas:
-        "slash  slash  hero   hero   hero    hero    hero    hero    hero    tabs    tabs   tabs"
-        "orbit  orbit  hero   hero   hero    hero    hero    hero    hero    temp    temp   temp"
-        "kanban kanban kanban kanban sticky  sticky  preview preview preview preview themes themes";
-      column-gap: clamp(18px, 1.8vw, 28px);
-      row-gap: clamp(36px, 3.6vw, 50px);
-      align-items: start;
+      grid-template-columns: var(--thumb-w) minmax(0, 1fr) var(--thumb-w);
+      column-gap: clamp(22px, 2.2vw, 30px);
+      align-items: stretch;
       margin-top: clamp(56px, 7vw, 92px);
     }
-    .nf-tile {
-      position: relative;
-      min-width: 0;
-      width: var(--w, 100%);
-      justify-self: var(--j, stretch);
-    }
-    .nf-tile--hero { align-self: center; }
-    .nf-tile-glow {
+    .nf-stage { position: relative; z-index: 2; grid-column: 2; grid-row: 1; align-self: center; min-width: 0; }
+    .nf-stage-glow {
       position: absolute;
-      inset: -10% -6% -16%;
-      background: radial-gradient(60% 60% at 50% 42%, rgb(var(--accent) / .16), transparent 70%);
-      filter: blur(30px);
+      inset: -9% -7% -15%;
+      background: radial-gradient(60% 60% at 50% 44%, color-mix(in srgb, var(--tone, rgb(var(--accent))) 20%, transparent), transparent 70%);
+      filter: blur(34px);
       pointer-events: none;
     }
-    .nf-tile-pin {
-      position: relative;
-      margin: 0;
-      transform:
-        translate(calc(var(--dx, 0px) * var(--k)), calc(var(--dy, 0px) * var(--k)))
-        rotate(calc(var(--r, 0deg) * var(--k)));
-      transition: transform .45s cubic-bezier(.2, .7, .2, 1);
-    }
-    .nf-tile-card {
+    .nf-stage-pin { position: relative; margin: 0; will-change: transform; }
+    .nf-stage-card {
       position: relative;
       overflow: hidden;
+      aspect-ratio: 1280 / 820;
       border: 1px solid var(--line-2);
-      border-radius: 12px;
+      border-radius: 14px;
       background: var(--card-2);
-      box-shadow: 0 22px 48px -26px rgba(0, 0, 0, .7);
-      transition: border-color .25s ease, box-shadow .35s ease;
+      box-shadow: 0 54px 120px -34px rgba(0, 0, 0, .78), 0 18px 40px -24px rgba(0, 0, 0, .6);
     }
-    [data-theme='light'] .nf-tile-card { box-shadow: 0 22px 44px -26px rgba(40, 34, 24, .38); }
-    .nf-tile--hero .nf-tile-card { border-radius: 14px; box-shadow: 0 40px 100px -30px rgba(0, 0, 0, .5); }
-    [data-theme='light'] .nf-tile--hero .nf-tile-card { box-shadow: 0 40px 90px -36px rgba(40, 34, 24, .42); }
-    .nf-tile-video {
+    [data-theme='light'] .nf-stage-card { box-shadow: 0 50px 110px -36px rgba(40, 34, 24, .5), 0 16px 36px -22px rgba(40, 34, 24, .3); }
+    /* Clips of other aspects (1:1, 4:5…) are letterboxed over their own poster, blurred and
+       knocked back, so the frame never changes size and never shows bare bands. */
+    .nf-stage-backdrop {
+      position: absolute;
+      inset: -10%;
+      background: var(--poster-dark) center / cover no-repeat;
+      filter: blur(26px) saturate(1.15);
+      opacity: .4;
+    }
+    [data-theme='light'] .nf-stage-backdrop { background-image: var(--poster-light); opacity: .5; }
+    /* The crisp poster under the video: what shows before the first frame (and without JS). */
+    .nf-stage-still { position: absolute; inset: 0; background: var(--poster-dark) center / contain no-repeat; }
+    [data-theme='light'] .nf-stage-still { background-image: var(--poster-light); }
+    .nf-stage-video {
+      position: absolute;
+      inset: 0;
       display: block;
       width: 100%;
-      height: auto;
-      object-fit: cover;
-      background: var(--card-2);
+      height: 100%;
+      object-fit: contain;
     }
-    /* Caption chip hanging off a bottom corner of the frame, like a label pinned to a print */
-    .nf-tile-chip {
+    .nf-stage-play {
       position: absolute;
-      left: 12px;
-      bottom: -11px;
+      left: 50%;
+      top: 50%;
       z-index: 2;
+      display: grid;
+      place-items: center;
+      width: 64px;
+      height: 64px;
+      margin: -32px 0 0 -32px;
+      padding: 0 0 0 3px;
+      color: var(--ink-strong);
+      background: color-mix(in srgb, var(--card) 82%, transparent);
+      border: 1px solid var(--line-2);
+      border-radius: 50%;
+      box-shadow: 0 14px 36px -12px rgba(0, 0, 0, .6);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      cursor: pointer;
+    }
+    .nf-stage-play[hidden] { display: none; }
+    .nf-stage-play:hover { border-color: var(--detail); }
+    .nf-stage-play:focus-visible { outline: 2px solid var(--detail); outline-offset: 3px; }
+    /* Caption chip hanging off the stage's bottom-left corner, like a label pinned to a print */
+    .nf-stage-chip {
+      position: absolute;
+      left: 18px;
+      bottom: -14px;
+      z-index: 3;
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      max-width: calc(100% - 24px);
-      padding: 5px 9px;
+      gap: 10px;
+      max-width: calc(100% - 36px);
+      padding: 7px 12px;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 10.5px;
+      font-size: 11.5px;
       line-height: 1.25;
       letter-spacing: .02em;
       color: var(--ink);
       background: var(--card);
       border: 1px solid var(--line-2);
       border-radius: 6px;
-      box-shadow: 0 8px 18px -10px rgba(0, 0, 0, .55);
+      box-shadow: 0 10px 22px -12px rgba(0, 0, 0, .6);
     }
-    [data-theme='light'] .nf-tile-chip { box-shadow: 0 8px 18px -10px rgba(40, 34, 24, .35); }
-    .nf-tile-chip::before {
+    [data-theme='light'] .nf-stage-chip { box-shadow: 0 10px 22px -12px rgba(40, 34, 24, .35); }
+    .nf-stage-chip::before {
       content: '';
       flex: none;
-      width: 6px;
-      height: 6px;
+      order: 1;
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
       background: var(--tone, var(--detail));
+      box-shadow: 0 0 9px var(--tone, var(--detail));
+    }
+    .nf-stage-count { order: 0; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+    .nf-stage-caption { order: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Thumbnails: desktop = two columns flanking the stage, each spread over its height (4 on
+       the left, 5 on the right, so the two sides interleave). The wrapper is transparent to
+       the grid here and becomes a strip on smaller screens. */
+    .nf-thumbs { display: contents; }
+    .nf-thumbs-col {
+      grid-row: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-around;
+      gap: 24px;
+      padding: 12px 0;
+      min-width: 0;
+    }
+    .nf-thumbs-col.is-left { grid-column: 1; }
+    .nf-thumbs-col.is-right { grid-column: 3; }
+    .nf-thumb {
+      position: relative;
+      display: block;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      font: inherit;
+      color: inherit;
+      text-align: left;
+      background: none;
+      border: 0;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .nf-thumb-pin {
+      position: relative;
+      display: block;
+      transform:
+        translate(calc(var(--dx, 0px) * var(--k)), calc(var(--dy, 0px) * var(--k)))
+        rotate(calc(var(--r, 0deg) * var(--k)));
+      transition: transform .45s cubic-bezier(.2, .7, .2, 1), opacity .3s ease;
+    }
+    .nf-thumb-card {
+      position: relative;
+      display: block;
+      overflow: hidden;
+      aspect-ratio: 16 / 10;
+      border: 1px solid var(--line-2);
+      border-radius: 9px;
+      background: var(--card-2);
+      box-shadow: 0 18px 36px -22px rgba(0, 0, 0, .7);
+      transition: border-color .25s ease, box-shadow .35s ease;
+    }
+    [data-theme='light'] .nf-thumb-card { box-shadow: 0 18px 34px -22px rgba(40, 34, 24, .38); }
+    /* Cropped from the top: the tall posters (4:5) keep the note's title and first lines */
+    .nf-thumb-img { position: absolute; inset: 0; background: var(--poster-dark) center top / cover no-repeat; }
+    [data-theme='light'] .nf-thumb-img { background-image: var(--poster-light); }
+    /* Progress of the clip on stage, along the bottom edge of its thumbnail */
+    .nf-thumb-bar {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 3px;
+      background: color-mix(in srgb, var(--bg) 55%, transparent);
+      opacity: 0;
+      transition: opacity .25s ease;
+    }
+    .nf-thumb-progress {
+      display: block;
+      height: 100%;
+      background: var(--tone, var(--detail));
       box-shadow: 0 0 8px var(--tone, var(--detail));
+      transform: scaleX(0);
+      transform-origin: left center;
     }
-    .nf-tile-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .is-chip-right .nf-tile-chip { left: auto; right: 12px; }
-    /* Narrow prints (the 2-column ones on small desktops): a smaller chip that may hang a
-       little past the frame's edge rather than truncate its caption. */
-    .nf-tile-pin { container-type: inline-size; }
-    @container (max-width: 210px) {
-      .nf-tile-chip { left: 6px; max-width: calc(100% + 14px); padding: 4px 7px; font-size: 9.5px; gap: 6px; }
-      .is-chip-right .nf-tile-chip { left: auto; right: 6px; }
+    .nf-thumb.is-active .nf-thumb-bar { opacity: 1; }
+    .nf-thumb-chip {
+      position: absolute;
+      left: 8px;
+      bottom: -10px;
+      z-index: 2;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: calc(100% + 4px);
+      padding: 4px 7px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9.5px;
+      line-height: 1.25;
+      letter-spacing: .02em;
+      color: var(--ink);
+      background: var(--card);
+      border: 1px solid var(--line-2);
+      border-radius: 5px;
+      box-shadow: 0 8px 18px -10px rgba(0, 0, 0, .55);
     }
-    /* Hover: the print straightens, lifts and comes forward */
+    [data-theme='light'] .nf-thumb-chip { box-shadow: 0 8px 18px -10px rgba(40, 34, 24, .35); }
+    .nf-thumb-chip::before {
+      content: '';
+      flex: none;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--tone, var(--detail));
+      box-shadow: 0 0 7px var(--tone, var(--detail));
+    }
+    .nf-thumb-chip > span { min-width: 0; }
+    /* Active: the print on stage straightens, lifts and rings in its tone; once the controller
+       is running the others step back a little. */
+    .nf-thumb.is-active .nf-thumb-pin {
+      transform:
+        translate(calc(var(--dx, 0px) * var(--k)), calc(var(--dy, 0px) * var(--k) - 4px))
+        rotate(0deg) scale(1.05);
+    }
+    .nf-thumb.is-active .nf-thumb-card {
+      border-color: var(--tone, var(--detail));
+      box-shadow: 0 0 0 1px var(--tone, var(--detail)), 0 16px 34px -14px color-mix(in srgb, var(--tone, var(--detail)) 55%, transparent);
+    }
+    .nf-mosaic[data-ready] .nf-thumb:not(.is-active) .nf-thumb-pin { opacity: .7; }
+    .nf-mosaic[data-ready] .nf-thumb:not(.is-active):focus-visible .nf-thumb-pin { opacity: 1; }
+    .nf-thumb:focus-visible { outline: none; }
+    .nf-thumb:focus-visible .nf-thumb-card { outline: 2px solid var(--detail); outline-offset: 3px; }
+    @media (hover: hover) {
+      .nf-mosaic[data-ready] .nf-thumb:not(.is-active):hover .nf-thumb-pin { opacity: 1; }
+      .nf-thumb:not(.is-active):hover .nf-thumb-card { border-color: var(--detail); }
+    }
     @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-      .nf-tile:not(.nf-tile--hero) .nf-tile-pin:hover {
-        z-index: 3;
+      .nf-thumb:not(.is-active):hover .nf-thumb-pin {
         transform:
-          translate(calc(var(--dx, 0px) * var(--k)), calc(var(--dy, 0px) * var(--k) - 6px))
+          translate(calc(var(--dx, 0px) * var(--k)), calc(var(--dy, 0px) * var(--k) - 3px))
           rotate(0deg) scale(1.03);
       }
-    }
-    @media (hover: hover) {
-      .nf-tile:not(.nf-tile--hero) .nf-tile-pin:hover .nf-tile-card {
-        border-color: var(--detail);
-        box-shadow: 0 30px 60px -28px rgba(0, 0, 0, .8);
-      }
-      [data-theme='light'] .nf-tile:not(.nf-tile--hero) .nf-tile-pin:hover .nf-tile-card { box-shadow: 0 30px 56px -28px rgba(40, 34, 24, .5); }
     }
 
     /* Under the mosaic: theme switch + pause on the left, docs CTAs on the right */
@@ -625,61 +768,62 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
     .nf-what-btn[data-paused='true'] .nf-ico-play { display: block; }
     .nf-what-btn[data-paused='true'] .nf-ico-pause { display: none; }
 
-    /* Tablet: the demo on top at full width, the tiles paired by matching heights below */
+    /* Tablet: the stage on top at full width, the thumbnails below in two staggered rows
+       (5 + 4, centred). The column wrappers drop out so the thumbs flow as one list. */
     @media (max-width: 1179px) {
-      .nf-mosaic {
-        --k: .6;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-        grid-template-areas:
-          "hero    hero    hero    hero    hero   hero"
-          "slash   slash   kanban  kanban  kanban kanban"
-          "tabs    tabs    tabs    temp    temp   temp"
-          "preview preview preview preview sticky sticky"
-          "orbit   orbit   orbit   themes  themes themes";
+      .nf-mosaic { --k: .6; display: block; }
+      /* Full-width stage: the glow may not reach past the column (it would scroll the page) */
+      .nf-stage-glow { inset: -9% 0 -15%; }
+      .nf-thumbs {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 34px 18px;
+        margin-top: 46px;
       }
-      /* Two 1:1 tiles over three columns each would be the biggest thing on the board */
-      .nf-mosaic .nf-tile[data-area='orbit'] { width: 76%; justify-self: end; }
-      .nf-mosaic .nf-tile[data-area='themes'] { width: 76%; justify-self: start; }
+      .nf-thumbs-col { display: contents; }
+      .nf-thumb { width: calc((100% - 4 * 18px) / 5); }
     }
-    /* Phone: demo first, then a straight 2-column grid (no tilt) — same-aspect tiles side by
-       side, the 16:10 ones across both columns so they stay legible */
+    /* Phone: no tilt; the thumbnails become a horizontal strip that bleeds to the screen edges
+       (scrolls on its own, never the page) and the chip turns into a caption line. */
     @media (max-width: 639px) {
-      .nf-mosaic {
-        --k: 0;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        grid-template-areas:
-          "hero    hero"
-          "slash   sticky"
-          "kanban  kanban"
-          "tabs    temp"
-          "preview preview"
-          "orbit   themes";
-        column-gap: 12px;
-        row-gap: 22px;
+      .nf-mosaic { --k: 0; }
+      /* Every pixel counts here: the stage bleeds into the section padding, short of the edges */
+      .nf-stage { margin-inline: calc(-1 * clamp(22px, 5vw, 64px) + 8px); }
+      .nf-stage-card { border-radius: 10px; }
+      .nf-stage-chip { left: 10px; bottom: -12px; max-width: calc(100% - 20px); padding: 5px 9px; font-size: 10.5px; gap: 8px; }
+      .nf-stage-play { width: 52px; height: 52px; margin: -26px 0 0 -26px; }
+      .nf-thumbs {
+        position: relative;
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        gap: 12px;
+        margin: 34px calc(-1 * clamp(22px, 5vw, 64px)) 0;
+        padding: 4px clamp(22px, 5vw, 64px) 8px;
+        overflow-x: auto;
+        scroll-snap-type: x proximity;
+        scroll-padding-inline: clamp(22px, 5vw, 64px);
+        scrollbar-width: none;
       }
-      .nf-mosaic .nf-tile,
-      .nf-mosaic .nf-tile[data-area='orbit'],
-      .nf-mosaic .nf-tile[data-area='themes'] { width: 100%; justify-self: stretch; }
-      .nf-tile-card { border-radius: 9px; }
-      .nf-tile--hero .nf-tile-card { border-radius: 10px; }
-      /* Tiles are ~130px wide here: the chip would cover them, so it becomes a caption line */
-      .nf-tile-chip,
-      .is-chip-right .nf-tile-chip {
+      .nf-thumbs::-webkit-scrollbar { display: none; }
+      .nf-thumb { flex: 0 0 128px; width: 128px; scroll-snap-align: start; }
+      .nf-thumb.is-active .nf-thumb-pin { transform: none; }
+      .nf-thumb-card { border-radius: 8px; }
+      .nf-thumb-chip {
         position: static;
         max-width: 100%;
         margin-top: 8px;
         padding: 0;
         font-size: 10px;
-        letter-spacing: .02em;
         color: var(--ink-dim);
         background: none;
         border: 0;
         box-shadow: none;
       }
-      .nf-tile-chip > span { white-space: normal; }
+      [data-theme='light'] .nf-thumb-chip { box-shadow: none; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .nf-tile-pin, .nf-tile-card { transition: none; }
+      .nf-thumb-pin, .nf-thumb-card, .nf-thumb-bar { transition: none; }
     }
 
     /* ── Neuron rail (home-only chrome) ─────────────────────────────────────── */
@@ -856,98 +1000,247 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       onHeroScroll();
     }
 
-    // ── "What is NoteFlow" mosaic: theme-aware, lazy, viewport-gated loops ──
-    // Every <video data-mosaic-video> carries its dark and light sources + posters in data-*;
-    // its <source>s ship empty. A clip is "armed" (sources assigned for the current theme) when
-    // it nears the viewport — the hero demo right away, with preload=metadata — plays only
-    // while on screen and pauses when it leaves. Under prefers-reduced-motion nothing autoplays
-    // (posters only) until the visitor presses "Play clips"; the same button pauses them all
-    // (WCAG 2.2.2). On a theme switch every tile swaps poster + sources, keeping its state.
-    const mosaicVideos = Array.from(document.querySelectorAll<HTMLVideoElement>('video[data-mosaic-video]'));
+    // ── "What is NoteFlow" mosaic: one stage, thumbnails as selectors, auto-rotation ──
+    // A single <video> (the stage) plays the active clip; the thumbnails are posters only (CSS
+    // backgrounds) and carry each clip's dark/light sources in data-* (lang/single clips repeat
+    // the same file in both). The stage's <source>s ship empty: they're assigned once the stage
+    // nears the viewport, for the current theme. The active clip plays without loop and, on
+    // `ended`, the next one (circular, DOM order) takes the stage — only while it's on screen.
+    // Click / Enter / Space on a thumbnail puts it on stage at once (and resumes playback if it
+    // was paused); on hover-capable pointers a ~300ms dwell does too. The stage "rises" from the
+    // chosen thumbnail (FLIP, Web Animations API). "Pause clips" stops playback AND rotation
+    // (WCAG 2.2.2). Under prefers-reduced-motion: no autoplay, no rotation, no hover-select, no
+    // FLIP — the visitor picks a clip and plays it.
+    const mosaicEl = document.querySelector<HTMLElement>('[data-mosaic]');
+    const stageEl = mosaicEl?.querySelector<HTMLElement>('[data-stage]') ?? null;
+    const stagePin = mosaicEl?.querySelector<HTMLElement>('[data-stage-pin]') ?? null;
+    const stageVideo = mosaicEl?.querySelector<HTMLVideoElement>('[data-stage-video]') ?? null;
+    const stageCaption = mosaicEl?.querySelector<HTMLElement>('[data-stage-caption]') ?? null;
+    const stageCount = mosaicEl?.querySelector<HTMLElement>('[data-stage-count]') ?? null;
+    const stagePlay = mosaicEl?.querySelector<HTMLButtonElement>('[data-stage-play]') ?? null;
+    const thumbStrip = mosaicEl?.querySelector<HTMLElement>('[data-thumbs]') ?? null;
+    const thumbs = Array.from(mosaicEl?.querySelectorAll<HTMLButtonElement>('[data-thumb]') ?? []);
     const mosaicPauseBtn = document.querySelector<HTMLButtonElement>('[data-mosaic-pause]');
     const mosaicPauseLabel = mosaicPauseBtn?.querySelector<HTMLElement>('[data-mosaic-pause-label]') ?? null;
     const mosaicReduce = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const mosaicArmed = new Set<HTMLVideoElement>();
-    const mosaicOnScreen = new Set<HTMLVideoElement>();
-    let mosaicHeld = mosaicReduce.matches; // paused by the visitor, or reduced motion
+    const LIFT_EASE = 'cubic-bezier(.2,.7,.2,1)';
+    let stageActive = 0;
+    let stageHeld = mosaicReduce.matches; // paused by the visitor, or reduced motion
+    let stageArmed = false; // sources assigned (the stage has neared the viewport)
+    let stageOnScreen = false;
+    let progressRaf = 0;
 
     const clipTheme = () => (root.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
-    const clipSources = (v: HTMLVideoElement) => {
+    const thumbSources = (b: HTMLElement) => {
       const th = clipTheme();
-      return { webm: v.dataset[`${th}Webm`] || '', mp4: v.dataset[`${th}Mp4`] || '', poster: v.dataset[`${th}Poster`] || '' };
+      return { webm: b.dataset[`${th}Webm`] || '', mp4: b.dataset[`${th}Mp4`] || '', poster: b.dataset[`${th}Poster`] || '' };
     };
-    const playClip = (v: HTMLVideoElement) => { v.play().catch(() => { /* blocked or interrupted — stays on the poster */ }); };
-    // Poster always; sources only once armed, and only reloading when the file actually changes
-    // (the single-take `themes` tile keeps playing through a theme switch).
-    const paintClip = (v: HTMLVideoElement) => {
-      const s = clipSources(v);
-      if (s.poster && v.getAttribute('poster') !== s.poster) v.poster = s.poster;
-      if (!mosaicArmed.has(v)) return;
-      const webm = v.querySelector<HTMLSourceElement>('source[type="video/webm"]');
-      const mp4 = v.querySelector<HTMLSourceElement>('source[type="video/mp4"]');
-      if (!webm || !mp4 || webm.getAttribute('src') === s.webm) return;
-      webm.src = s.webm;
-      mp4.src = s.mp4;
-      v.load();
-      if (!mosaicHeld && mosaicOnScreen.has(v)) playClip(v);
-    };
-    const armClip = (v: HTMLVideoElement) => {
-      if (mosaicArmed.has(v)) return;
-      mosaicArmed.add(v);
-      paintClip(v);
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const playStage = () => { stageVideo?.play().catch(() => { /* blocked or interrupted — stays on the poster */ }); };
+    const setProgress = (b: HTMLElement | undefined, p: number) => {
+      const bar = b?.querySelector<HTMLElement>('[data-thumb-progress]');
+      if (bar) bar.style.transform = `scaleX(${Math.min(1, Math.max(0, p))})`;
     };
     const renderMosaicBtn = () => {
-      if (!mosaicPauseBtn) return;
-      const label = (mosaicHeld ? mosaicPauseBtn.dataset.labelPlay : mosaicPauseBtn.dataset.labelPause) || '';
-      mosaicPauseBtn.dataset.paused = mosaicHeld ? 'true' : 'false';
-      if (mosaicPauseLabel) mosaicPauseLabel.textContent = label;
+      if (mosaicPauseBtn) {
+        const label = (stageHeld ? mosaicPauseBtn.dataset.labelPlay : mosaicPauseBtn.dataset.labelPause) || '';
+        mosaicPauseBtn.dataset.paused = stageHeld ? 'true' : 'false';
+        if (mosaicPauseLabel) mosaicPauseLabel.textContent = label;
+      }
+      if (stagePlay) stagePlay.hidden = !stageHeld;
     };
 
-    mosaicVideos.forEach((v) => {
-      v.muted = true;
-      paintClip(v);
-      if (v.hasAttribute('data-eager')) armClip(v);
-    });
-    if (mosaicVideos.length && 'IntersectionObserver' in window) {
-      const clipIO = new IntersectionObserver((entries) => {
-        entries.forEach((e) => {
-          const v = e.target as HTMLVideoElement;
-          if (e.isIntersecting) {
-            mosaicOnScreen.add(v);
-            armClip(v);
-            if (!mosaicHeld) playClip(v);
-          } else {
-            mosaicOnScreen.delete(v);
-            if (!v.paused) v.pause();
-          }
-        });
-      }, { rootMargin: '120px 0px' });
-      mosaicVideos.forEach((v) => clipIO.observe(v));
-    } else if (!mosaicHeld) {
-      mosaicVideos.forEach((v) => { mosaicOnScreen.add(v); armClip(v); playClip(v); });
-    }
-    mosaicPauseBtn?.addEventListener('click', () => {
-      mosaicHeld = !mosaicHeld;
-      mosaicVideos.forEach((v) => {
-        if (mosaicHeld) v.pause();
-        else if (mosaicOnScreen.has(v)) { armClip(v); playClip(v); }
+    // Assign the active clip's sources for the current theme. `keepTime` (theme switch) resumes
+    // the new take where the old one was; a file that doesn't change (lang/single clips) is left
+    // playing untouched.
+    const loadStage = (keepTime: boolean) => {
+      const b = thumbs[stageActive];
+      if (!stageVideo || !b) return;
+      const s = thumbSources(b);
+      if (s.poster && stageVideo.getAttribute('poster') !== s.poster) stageVideo.poster = s.poster;
+      if (!stageArmed) return;
+      const webm = stageVideo.querySelector<HTMLSourceElement>('source[type="video/webm"]');
+      const mp4 = stageVideo.querySelector<HTMLSourceElement>('source[type="video/mp4"]');
+      if (!webm || !mp4 || webm.getAttribute('src') === s.webm) return;
+      const at = keepTime ? stageVideo.currentTime : 0;
+      webm.src = s.webm;
+      mp4.src = s.mp4;
+      stageVideo.load();
+      if (at > 0) {
+        stageVideo.addEventListener('loadedmetadata', () => {
+          stageVideo.currentTime = Math.min(at, Math.max(0, stageVideo.duration - 0.2));
+        }, { once: true });
+      }
+      if (!stageHeld && stageOnScreen) playStage();
+    };
+    const armStage = () => {
+      if (stageArmed || !stageVideo) return;
+      stageArmed = true;
+      stageVideo.preload = 'metadata';
+      loadStage(false);
+    };
+
+    // Caption, counter, aria, tone and posters of the stage + the pressed state of the thumbs.
+    const paintStageMeta = () => {
+      const b = thumbs[stageActive];
+      if (!b || !stageEl) return;
+      stageEl.style.setProperty('--poster-dark', `url('${b.dataset.darkPoster || ''}')`);
+      stageEl.style.setProperty('--poster-light', `url('${b.dataset.lightPoster || ''}')`);
+      stageEl.style.setProperty('--tone', b.dataset.tone || '');
+      stageVideo?.setAttribute('aria-label', b.dataset.label || '');
+      if (stageCaption) stageCaption.textContent = b.dataset.caption || '';
+      if (stageCount) stageCount.textContent = `${pad2(stageActive + 1)} / ${pad2(thumbs.length)}`;
+      thumbs.forEach((t, i) => {
+        const on = i === stageActive;
+        t.classList.toggle('is-active', on);
+        t.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (!on) setProgress(t, 0);
       });
+    };
+
+    // "Rises above the board": the stage animates from the chosen thumbnail's rect to its own
+    // (FLIP). If that thumbnail isn't visible (off screen, scrolled out of the phone strip) a
+    // short fade + scale stands in.
+    const liftFrom = (b: HTMLElement) => {
+      if (!stagePin || mosaicReduce.matches || typeof stagePin.animate !== 'function') return;
+      stagePin.getAnimations().forEach((a) => a.cancel());
+      const to = stagePin.getBoundingClientRect();
+      const from = b.querySelector('.nf-thumb-card')?.getBoundingClientRect();
+      const clip = thumbStrip && thumbStrip.scrollWidth > thumbStrip.clientWidth + 1 ? thumbStrip.getBoundingClientRect() : null;
+      const visible = !!from && from.width > 0 && to.width > 0 &&
+        from.bottom > 0 && from.top < window.innerHeight && from.right > 0 && from.left < window.innerWidth &&
+        (!clip || (from.left >= clip.left - 1 && from.right <= clip.right + 1));
+      if (visible && from) {
+        const dx = from.left - to.left, dy = from.top - to.top;
+        stagePin.animate([
+          { transformOrigin: '0 0', transform: `translate(${dx}px, ${dy}px) scale(${from.width / to.width}, ${from.height / to.height})`, opacity: 0.6 },
+          { transformOrigin: '0 0', transform: 'none', opacity: 1 },
+        ], { duration: 460, easing: LIFT_EASE });
+      } else {
+        stagePin.animate([
+          { transform: 'scale(.97)', opacity: 0 },
+          { transform: 'none', opacity: 1 },
+        ], { duration: 340, easing: LIFT_EASE });
+      }
+    };
+    // Phone strip: keep the clip on stage in view as the rotation advances (scrolls the strip
+    // only — never the page).
+    const revealThumb = (b: HTMLElement) => {
+      if (!thumbStrip || thumbStrip.scrollWidth <= thumbStrip.clientWidth + 1) return;
+      const sr = thumbStrip.getBoundingClientRect(), br = b.getBoundingClientRect();
+      const pad = parseFloat(getComputedStyle(thumbStrip).paddingLeft) || 0;
+      if (br.left >= sr.left + pad - 1 && br.right <= sr.right - pad + 1) return;
+      thumbStrip.scrollTo({ left: thumbStrip.scrollLeft + (br.left - sr.left) - pad, behavior: mosaicReduce.matches ? 'auto' : 'smooth' });
+    };
+
+    type Pick = 'auto' | 'click' | 'hover';
+    const selectClip = (i: number, how: Pick) => {
+      if (!thumbs.length) return;
+      const next = ((i % thumbs.length) + thumbs.length) % thumbs.length;
+      // An explicit pick is a request to watch it: it lifts a pause (reduced motion included —
+      // that playback is user-initiated, and it won't rotate on).
+      if (how === 'click' && stageHeld) {
+        stageHeld = false;
+        renderMosaicBtn();
+      }
+      if (next === stageActive) {
+        if (how === 'click') { armStage(); if (stageOnScreen) playStage(); }
+        return;
+      }
+      stageActive = next;
+      const b = thumbs[next];
+      paintStageMeta();
+      liftFrom(b);
+      if (how === 'auto') revealThumb(b);
+      if (how === 'click') armStage();
+      loadStage(false);
+    };
+
+    if (mosaicEl && stageVideo && thumbs.length) {
+      stageVideo.muted = true;
+      mosaicEl.dataset.ready = '';
+      loadStage(false);
+
+      // Progress bar of the active thumbnail, frame-synced while playing.
+      const tick = () => {
+        const d = stageVideo.duration;
+        if (d > 0) setProgress(thumbs[stageActive], stageVideo.currentTime / d);
+        progressRaf = requestAnimationFrame(tick);
+      };
+      stageVideo.addEventListener('playing', () => { cancelAnimationFrame(progressRaf); progressRaf = requestAnimationFrame(tick); });
+      ['pause', 'emptied'].forEach((ev) => stageVideo.addEventListener(ev, () => cancelAnimationFrame(progressRaf)));
+      stageVideo.addEventListener('ended', () => {
+        cancelAnimationFrame(progressRaf);
+        setProgress(thumbs[stageActive], 1);
+        if (mosaicReduce.matches) { stageHeld = true; renderMosaicBtn(); return; }
+        if (!stageHeld && stageOnScreen) selectClip(stageActive + 1, 'auto');
+      });
+
+      thumbs.forEach((b, i) => {
+        b.addEventListener('click', () => selectClip(i, 'click'));
+        // Arrow keys walk the thumbnails (focus only; Enter/Space picks, as any button).
+        b.addEventListener('keydown', (e) => {
+          const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+          if (!step) return;
+          e.preventDefault();
+          thumbs[(i + step + thumbs.length) % thumbs.length].focus();
+        });
+      });
+      // Hover with intent (~300ms dwell) on real pointers; never on touch (a tap would fire
+      // mouseenter without a matching mouseleave) and never under reduced motion.
+      if (window.matchMedia('(hover: hover)').matches) {
+        thumbs.forEach((b, i) => {
+          let dwell = 0;
+          b.addEventListener('mouseenter', () => {
+            clearTimeout(dwell);
+            if (mosaicReduce.matches || i === stageActive) return;
+            dwell = window.setTimeout(() => selectClip(i, 'hover'), 300);
+          });
+          b.addEventListener('mouseleave', () => clearTimeout(dwell));
+        });
+      }
+
+      if ('IntersectionObserver' in window && stageEl) {
+        new IntersectionObserver((entries) => {
+          const e = entries[entries.length - 1];
+          stageOnScreen = e.isIntersecting;
+          if (stageOnScreen) {
+            armStage();
+            if (!stageHeld) playStage();
+          } else if (!stageVideo.paused) {
+            stageVideo.pause();
+          }
+        }, { rootMargin: '120px 0px' }).observe(stageEl);
+      } else {
+        stageOnScreen = true;
+        armStage();
+        if (!stageHeld) playStage();
+      }
+
+      const toggleHold = () => {
+        stageHeld = !stageHeld;
+        if (stageHeld) stageVideo.pause();
+        else { armStage(); if (stageOnScreen) playStage(); }
+        renderMosaicBtn();
+      };
+      mosaicPauseBtn?.addEventListener('click', toggleHold);
+      stagePlay?.addEventListener('click', toggleHold);
+      mosaicReduce.addEventListener?.('change', (e) => {
+        if (!e.matches) return;
+        stageHeld = true;
+        stageVideo.pause();
+        renderMosaicBtn();
+      });
+      if (mosaicPauseBtn) mosaicPauseBtn.hidden = false;
       renderMosaicBtn();
-    });
-    mosaicReduce.addEventListener?.('change', (e) => {
-      if (!e.matches) return;
-      mosaicHeld = true;
-      mosaicVideos.forEach((v) => v.pause());
-      renderMosaicBtn();
-    });
-    if (mosaicPauseBtn) { mosaicPauseBtn.hidden = false; renderMosaicBtn(); }
+    }
 
     // ── theme ──
     const themeIcons = Array.from(document.querySelectorAll('.nf-theme-icon'));
     const syncThemeIcon = () => {
       const dark = root.getAttribute('data-theme') !== 'light';
       themeIcons.forEach((el) => (el.textContent = dark ? '☀' : '☾'));
-      mosaicVideos.forEach(paintClip);
+      loadStage(true);
     };
     syncThemeIcon();
 
