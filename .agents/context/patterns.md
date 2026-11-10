@@ -1312,8 +1312,13 @@ cabecera, clamp al viewport: sube si no cabe abajo).
   locales y se mide **una vez** en `useLayoutEffect` (oculto hasta entonces; la altura sin filtrar es la
   máxima, así no salta al teclear). Entrada con el keyframe `group-peek-in` (tailwind, 120 ms).
 - **Apertura:** temporizador desde el `mouseenter` (y `mousemove`, que re-arma); no abre si el grupo no
-  está colapsado/está vacío, si la ventana no tiene foco, ni con `blocked` (drag de grupo, cualquier
-  menú contextual o modal del sidebar, rename/nuevo grupo-carpeta). Cualquier **tecla** cancela el
+  está colapsado/está vacío, ni con `blocked` (drag de grupo, cualquier
+  menú contextual o modal del sidebar, rename/nuevo grupo-carpeta). **Abre también con la ventana sin
+  foco** (otra app en primer plano y NoteFlow visible), igual que el sidebar flotante: no hay
+  comprobación de `document.hasFocus()`; el `focus()` del buscador ahí solo mueve el foco del DOM, no
+  activa la ventana. A cambio, el `blur` de la ventana cancela también el temporizador pendiente (si no,
+  un Alt+Tab con el ratón parado sobre una cabecera abriría el peek a espaldas del usuario; mover el
+  ratón lo re-arma). Cualquier **tecla** cancela el
   temporizador pendiente: si el usuario escribe en el editor con el ratón parado sobre una cabecera, el
   peek no le roba el foco a mitad de frase (moverlo de nuevo lo re-arma). Tras un click o un cierre con
   el puntero aún en la cabecera, esa cabecera no reabre hasta que el ratón sale (`suppressRef`).

@@ -180,7 +180,10 @@ export function GroupPeek({
 
     const openPeek = (groupId: string, el: HTMLElement) => {
       const live = liveRef.current
-      if (live.blocked || !el.isConnected || !document.hasFocus()) return
+      // No window-focus check: hovering works in an inactive window too (as the floating
+      // sidebar does). Focusing the search box there only moves the DOM focus — it
+      // doesn't activate the window.
+      if (live.blocked || !el.isConnected) return
       if (!live.collapsedGroupIds.has(groupId)) return
       const item = findGroupItem(live.items, groupId)
       if (!item || item.visibleCount === 0) return
@@ -281,11 +284,17 @@ export function GroupPeek({
       if (target instanceof Node && liveRef.current.sidebarRef.current?.contains(target)) engine.close('dismiss')
     }
     const dismiss = () => engine.close('dismiss')
+    // Switching to another app with the pointer resting on a header: drop the pending
+    // open too (the peek would pop up behind the user's back). A pointer move re-arms it.
+    const onWindowBlur = () => {
+      engine.clearOpenTimer()
+      engine.close('dismiss')
+    }
     window.addEventListener('pointerdown', onPointerDown, true)
     window.addEventListener('keydown', onKeyDown, true)
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('dragstart', dismiss, true)
-    window.addEventListener('blur', dismiss)
+    window.addEventListener('blur', onWindowBlur)
     window.addEventListener('resize', dismiss)
     // Navigating anywhere (sidebar, palette, shortcuts…) closes it too.
     const unsubscribe = useNotesStore.subscribe((s, prev) => {
@@ -301,7 +310,7 @@ export function GroupPeek({
       window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('dragstart', dismiss, true)
-      window.removeEventListener('blur', dismiss)
+      window.removeEventListener('blur', onWindowBlur)
       window.removeEventListener('resize', dismiss)
       unsubscribe()
       engine.clearOpenTimer()
