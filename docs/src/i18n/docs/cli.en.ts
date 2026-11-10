@@ -166,9 +166,9 @@ export const cliEn = {
     title: 'Caveats worth knowing',
     items: [
       {
-        title: 'Desktop app open ⇒ group/folder changes can be lost',
+        title: 'Desktop app v2.1.0 or older open ⇒ group/folder changes can be lost',
         html:
-          'The app keeps <code>groups.json</code> / <code>folders.json</code> in memory and <strong>rewrites them on its own cycles</strong> (saves and the 5-minute auto-sync), overwriting groups and folders created from the CLI while it runs. Note-level changes — content, sections, favorite, archive — do survive: they live in per-note folders. The CLI <strong>warns on stderr</strong> when it detects NoteFlow running while you mutate groups/folders (silence it with <code>NOTEFLOW_NO_APP_CHECK=1</code>). For reliable structural changes, close the app first — or make them in the app.',
+          'Up to v2.1.0, the app keeps <code>groups.json</code> / <code>folders.json</code> in memory and <strong>rewrites them on its own cycles</strong> (saves and the 5-minute auto-sync), overwriting groups and folders created from the CLI while it runs; later versions reload the CLI’s changes. Note-level changes — content, sections, favorite, archive — always survive: they live in per-note folders. The CLI <strong>warns on stderr</strong> when it detects NoteFlow running while you mutate groups/folders (silence it with <code>NOTEFLOW_NO_APP_CHECK=1</code>). With an older or unknown app version, close the app first — or make those group/folder changes in the app.',
       },
       {
         title: 'PowerShell: multiline --text can truncate silently',
@@ -204,7 +204,7 @@ export const cliEn = {
       {
         q: 'My CLI-made groups or folders vanished / pull didn’t change anything',
         a:
-          'Two sync rules: the desktop app’s auto-sync rewrites <code>groups.json</code> / <code>folders.json</code> while it runs (see <a href="#caveats">caveats</a>), and <code>pull</code> only overwrites a local note when the remote <code>updated:</code> timestamp is newer. Close the app for structural changes, and check <code>noteflow status</code> for the last sync.',
+          'Two sync rules: the auto-sync of desktop app v2.1.0 or older rewrites <code>groups.json</code> / <code>folders.json</code> while it runs (see <a href="#caveats">caveats</a>), and <code>pull</code> only overwrites a local note when the remote <code>updated:</code> timestamp is newer. With those app versions, close the app for structural changes, and check <code>noteflow status</code> for the last sync.',
       },
     ],
   },

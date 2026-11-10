@@ -1999,6 +1999,31 @@ main observa el dir de notas con `fs.watch` (debounce 150ms) para detectar cambi
 de la sincronización desde otro dispositivo. Los writes propios se marcan en
 `recentInternalWrites` para ignorarlos y evitar bucles.
 
+- **Carpetas de nota:** debounce por carpeta → `notes-updated` con la ruta de la carpeta (o sin ruta si
+  desapareció). En Linux no hay `fs.watch` recursivo: watcher de la raíz + uno por carpeta de nota.
+- **Ficheros de la raíz:** se ignoran (json, README, marcador) **salvo los metadatos de grupos**
+  (`groups.json`, `folders.json`, `note-order.json` — `isGroupsMetadataFile` en
+  `electron/notesWatchFilter.ts`, con test). Un cambio externo (el CLI) emite, con debounce de 150 ms
+  y una sola clave para los tres, el evento ligero **`groups-updated`**, y el renderer recarga solo
+  `groupsStore.loadGroups()`. Sin esto, la siguiente acción de grupos de la app reescribía la lista
+  entera desde memoria y deshacía (y subía con el sync) lo hecho por el CLI. `applyGroupsSet`,
+  `applyFoldersSet` y `note-order:set` marcan su escritura como interna para no reaccionar a sí
+  mismos. Los pulls de sync no la marcan (escriben desde `githubSync.ts`/`cloudSync.ts`, sin acceso
+  a `markInternalWrite`): el `groups-updated` extra se suma a su `notes-updated` y es una recarga de
+  solo lectura, inofensiva. Escrituras atómicas tmp+rename: el temporal no coincide y el `rename`
+  final llega con el nombre real (las dos ramas del watcher ven los ficheros de la raíz).
+- **Ventana de 1,5 s:** una escritura externa que caiga justo dentro de la ventana de
+  `recentInternalWrites` de una escritura propia del mismo fichero se pierde (mismo compromiso que en
+  las carpetas de nota).
+- **Escribir el metadato antes de otros awaits:** las acciones de `groupsStore` escriben
+  `groups.json`/`folders.json` justo tras el `set` del store. `deleteGroup`/`deleteFolder` lo hacen
+  ANTES de desagrupar sus notas (como `group delete` del CLI): una recarga entre medias releería el
+  fichero viejo y resucitaría el grupo. Si falla a medias, las notas con ids huérfanos salen como sin
+  grupo (`sidebarGroups.ts` los ignora). **Carrera residual:** un `loadGroups()` cuya lectura ya
+  estaba en vuelo (unos ms) puede aterrizar tras el `set` y devolver al store la lista vieja (el disco
+  queda bien hasta la siguiente acción de grupos, que reescribe la lista vieja desde memoria y deshace
+  la anterior); no se protege.
+
 ### Recuperación de fallos del renderer
 `render-process-gone` / `unresponsive` recargan la ventana automáticamente (común tras
 suspender/reanudar). `powerMonitor.on('resume')` reemite `notes-updated` con delays escalonados
@@ -2248,7 +2273,8 @@ si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
   dentro de la propia ventana (con un `noteId` fijo el editor quedaría en una sección de otra nota).
 - Recibe `notes-updated` como cualquier ventana (filtrado por `windowId`) y carga grupos, plantillas
   (necesarias: "Save as template" reescribe `templates.json` entero) y colores de sección. Tiene su
-  propio handler de atajos (`Ctrl+T/W/M/F/S/G`); no hay paleta ni `Ctrl+N`.
+  propio handler de atajos (`Ctrl+T/W/M/F/S/G`); no hay paleta ni `Ctrl+N`. También escucha
+  `groups-updated` (metadatos de grupos cambiados por el CLI, ver "fs.watch de cambios externos").
 
 
 ### Motor de alarmas y notas temporales (en main)

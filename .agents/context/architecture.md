@@ -421,7 +421,10 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `ai:profile-get-status` / `ai:profile-set-completed` | handle | `settings.aiProfile` = `{completedAt, noteId?}` (cuestionario mostrado una vez + id de la nota de perfil generada, para enlazar/regenerar sin duplicar). `set-completed(noteId?)`: sin `noteId` = "Not now" (saltado) |
 
 **Eventos main → renderer** (suscripción vía `window.noteflow.on*`):
-`new-note`, `notes-updated` (filePath?, senderId?), `update:download-progress` (percent),
+`new-note`, `notes-updated` (filePath?, senderId?), `snippets-updated` (sin payload — otra ventana
+guardó `snippets.json`), `groups-updated` (sin payload — el watcher vio `groups.json` / `folders.json` /
+`note-order.json` escritos FUERA de la app, p. ej. por el CLI; `App.tsx` (principal y sticky) y
+`SectionWindowApp.tsx` recargan solo `groupsStore.loadGroups()`), `update:download-progress` (percent),
 `update:installing` (fase de instalación, post-descarga),
 `sync-auth-complete`, `sync:push-state` (`'pushing'|'idle'`), `sync:status-changed`,
 `account:status-changed` (broadcast del status público de la cuenta a todas las ventanas; main lo emite

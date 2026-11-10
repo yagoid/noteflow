@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.10.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.10.1 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.10.0'
+const CLI_VERSION = '2.10.1'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -4874,7 +4874,7 @@ function isDesktopAppRunning() {
 function warnIfDesktopRunning(opts) {
   if ((opts && opts.json) || process.env.NOTEFLOW_NO_APP_CHECK) return
   if (isDesktopAppRunning())
-    console.error('  ⚠ NoteFlow desktop appears to be running — it may overwrite group/folder changes made here. Close it first, or these changes may be lost on its next sync.')
+    console.error('  ⚠ NoteFlow desktop appears to be running — v2.1.0 and older may overwrite group/folder changes made here. Close or update it first, or these changes may be lost on its next sync.')
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────

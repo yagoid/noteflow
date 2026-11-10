@@ -109,6 +109,11 @@ const api = {
   setSectionTagColors: (colors: Record<string, string>): Promise<void> => ipcRenderer.invoke('section-colors:set', colors),
   getNoteOrder: (): Promise<Record<string, string[]>> => ipcRenderer.invoke('note-order:get'),
   setNoteOrder: (order: Record<string, string[]>): Promise<void> => ipcRenderer.invoke('note-order:set', order),
+  onGroupsUpdated: (callback: () => void) => {
+    const wrapper = () => callback()
+    ipcRenderer.on('groups-updated', wrapper)
+    return () => ipcRenderer.removeListener('groups-updated', wrapper)
+  },
   getTemplates: (): Promise<unknown[]> => ipcRenderer.invoke('templates:get'),
   setTemplates: (templates: unknown[]): Promise<void> => ipcRenderer.invoke('templates:set', templates),
   getSnippets: (): Promise<unknown[]> => ipcRenderer.invoke('snippets:get'),

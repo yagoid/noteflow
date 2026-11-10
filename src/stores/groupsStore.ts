@@ -109,6 +109,16 @@ export const useGroupsStore = create<GroupsState>((set, get) => ({
       collapsedGroupIds: nextCollapsed,
       collapsedFolderIds: nextCollapsedFolders,
     })
+    // Persist the metadata BEFORE the per-note awaits: a loadGroups() fired in
+    // between (groups-updated from the CLI, a pull's notes-updated) would reread
+    // the old files and resurrect the group in the store. Notes still pointing at
+    // the deleted group/folders render as ungrouped (sidebarGroups ignores stale
+    // ids), so a note write failing halfway leaves nothing broken — same order
+    // as the CLI's `group delete`.
+    await Promise.all([
+      window.noteflow.setGroups(updated),
+      window.noteflow.setFolders(updatedFolders),
+    ])
     await window.noteflow.setUiState({
       collapsedGroupIds: [...nextCollapsed],
       collapsedFolderIds: [...nextCollapsedFolders],
@@ -117,9 +127,6 @@ export const useGroupsStore = create<GroupsState>((set, get) => ({
     const notesStore = useNotesStore.getState()
     const notesToUngroup = notesStore.notes.filter((n) => n.group === id)
     await Promise.all(notesToUngroup.map((n) => notesStore.updateNote(n.id, { group: undefined, folder: undefined })))
-
-    await window.noteflow.setGroups(updated)
-    await window.noteflow.setFolders(updatedFolders)
   },
 
   reorderGroups: async (orderedIds) => {
@@ -187,14 +194,14 @@ export const useGroupsStore = create<GroupsState>((set, get) => ({
     nextCollapsed.delete(id)
 
     set({ folders: updated, collapsedFolderIds: nextCollapsed })
+    // Metadata first, before the per-note awaits — see deleteGroup.
+    await window.noteflow.setFolders(updated)
     await window.noteflow.setUiState({ collapsedFolderIds: [...nextCollapsed] })
 
     // Notes inside this folder fall back to the group root (keep their group)
     const notesStore = useNotesStore.getState()
     const notesInFolder = notesStore.notes.filter((n) => n.folder === id)
     await Promise.all(notesInFolder.map((n) => notesStore.updateNote(n.id, { folder: undefined })))
-
-    await window.noteflow.setFolders(updated)
   },
 
   toggleFolderCollapsed: (id) => {

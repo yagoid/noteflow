@@ -70,6 +70,11 @@ const api = {
     setSectionTagColors: (colors) => electron_1.ipcRenderer.invoke('section-colors:set', colors),
     getNoteOrder: () => electron_1.ipcRenderer.invoke('note-order:get'),
     setNoteOrder: (order) => electron_1.ipcRenderer.invoke('note-order:set', order),
+    onGroupsUpdated: (callback) => {
+        const wrapper = () => callback();
+        electron_1.ipcRenderer.on('groups-updated', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('groups-updated', wrapper);
+    },
     getTemplates: () => electron_1.ipcRenderer.invoke('templates:get'),
     setTemplates: (templates) => electron_1.ipcRenderer.invoke('templates:set', templates),
     getSnippets: () => electron_1.ipcRenderer.invoke('snippets:get'),

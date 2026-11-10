@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.10.0
+version: 2.10.1
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -78,11 +78,11 @@ el JSON.
   no sea `note.md` ni una sección del índice). No dejes ahí temporales ni copias.
 - **`--raw` / `--markdown` sobre una sección existente no hacen nada**, y `section add` crea
   siempre una sección nueva aunque ya exista una con ese nombre (queda duplicada).
-- **App de escritorio abierta ⇒ se pierden los grupos y carpetas creados, renombrados o borrados
-  desde el CLI**: la app reescribe `groups.json`/`folders.json` desde memoria al guardar y en su
-  auto-sync. Los cambios de nota (contenido, secciones, favorito, archivo) sí sobreviven. El CLI
-  avisa por stderr si ve la app abierta: pide al usuario que la cierre antes, o que haga esos
-  cambios desde la app.
+- **App de escritorio abierta en v2.1.0 o anterior ⇒ se pierden los grupos y carpetas creados,
+  renombrados o borrados desde el CLI**: esas versiones reescriben `groups.json`/`folders.json`
+  desde memoria. Las posteriores recargan los cambios del CLI. Los cambios de nota sí sobreviven
+  siempre. El CLI avisa por stderr si ve la app abierta: si no sabes su versión, pide al usuario
+  que la cierre antes o que haga esos cambios desde la app.
 - **`pull --force` pisa notas locales más nuevas.** No lo uses sin que el usuario lo pida, aunque el
   pull diga `skipped (local is newer — use --force to override)`: eso es normal y el `push` las sube.
 - **El `pull` de GitHub no aplica borrados:** si avisa `N local notes are not on GitHub (new here,

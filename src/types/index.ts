@@ -607,6 +607,8 @@ declare global {
       setSectionTagColors: (colors: Record<string, GroupColor>) => Promise<void>
       getNoteOrder: () => Promise<Record<string, string[]>>
       setNoteOrder: (order: Record<string, string[]>) => Promise<void>
+      /** groups.json / folders.json / note-order.json changed outside the app (e.g. the CLI) — reload the groups store. */
+      onGroupsUpdated: (callback: () => void) => () => void
       getTemplates: () => Promise<NoteTemplate[]>
       setTemplates: (templates: NoteTemplate[]) => Promise<void>
       /** Editor snippets (snippets.json in the notes dir, synced); sanitized by main on read and write. */

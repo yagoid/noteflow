@@ -341,6 +341,14 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
     }
   }, [createNote, loadNotes, loadGroups, loadTemplates, loadSectionTagColors])
 
+  // groups.json / folders.json / note-order.json changed outside the app (CLI):
+  // reload only the groups store, or the next group action would rewrite the
+  // whole list from memory and undo the external change.
+  useEffect(() => {
+    if (!window.noteflow?.onGroupsUpdated) return
+    return window.noteflow.onGroupsUpdated(() => { void loadGroups() })
+  }, [loadGroups])
+
   // ── Resize drag handlers ──────────────────────────────────────────────────
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()

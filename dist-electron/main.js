@@ -73,6 +73,7 @@ const settingsFile_1 = require("./settingsFile");
 const whatsNewSeen_1 = require("./whatsNewSeen");
 const stickyBounds_1 = require("./stickyBounds");
 const snippetsFile_1 = require("./snippetsFile");
+const notesWatchFilter_1 = require("./notesWatchFilter");
 function getIconPath() {
     if (process.platform === 'win32')
         return path_1.default.join(__dirname, '../public/icon.ico');
@@ -1525,7 +1526,10 @@ function toggleWindow() {
  * Events are normalized to '<dir>' or '<dir>/<file>' (forward slashes) and
  * debounced per note dir; the broadcast always carries the note DIRECTORY path
  * so the renderer re-reads the whole note. Root-level files (metadata json,
- * README, format marker, leftover flat .md) are ignored.
+ * README, format marker, leftover flat .md) are ignored — except the groups
+ * metadata (groups.json / folders.json / note-order.json, e.g. written by the
+ * CLI), which broadcasts a light `groups-updated` so the renderer reloads only
+ * its groups store (otherwise its next group action would undo the CLI edit).
  *
  * Windows/macOS use native recursive watching. Node has no recursive fs.watch
  * on Linux, so there we watch the root (dir add/remove) plus one watcher per
@@ -1547,6 +1551,21 @@ function startNotesWatcher() {
             pendingWatchDebounce.set('__all__', setTimeout(() => {
                 pendingWatchDebounce.delete('__all__');
                 broadcastAll();
+            }, 150));
+            return;
+        }
+        // Groups metadata written outside the app (CLI). Our own writes are marked
+        // internal (applyGroupsSet / applyFoldersSet / note-order:set). One debounce
+        // key for the three files: a CLI command can touch several at once.
+        if ((0, notesWatchFilter_1.isGroupsMetadataFile)(rel)) {
+            if (recentInternalWrites.has(rel))
+                return;
+            const existing = pendingWatchDebounce.get('__groups__');
+            if (existing)
+                clearTimeout(existing);
+            pendingWatchDebounce.set('__groups__', setTimeout(() => {
+                pendingWatchDebounce.delete('__groups__');
+                electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('groups-updated'));
             }, 150));
             return;
         }
@@ -3903,6 +3922,8 @@ electron_1.ipcMain.handle('groups:get', () => {
 });
 function applyGroupsSet(groups, senderId, opts) {
     const content = JSON.stringify(groups, null, 2);
+    // Our own write: the notes watcher must not echo it back as `groups-updated`.
+    markInternalWrite('groups.json');
     fs_1.default.writeFileSync(GROUPS_FILE, content, 'utf-8');
     // Broadcast to other windows so their groups reload immediately
     electron_1.BrowserWindow.getAllWindows().forEach((win) => {
@@ -3937,6 +3958,7 @@ electron_1.ipcMain.handle('folders:get', () => {
 });
 function applyFoldersSet(folders, senderId, opts) {
     const content = JSON.stringify(folders, null, 2);
+    markInternalWrite('folders.json'); // see applyGroupsSet
     fs_1.default.writeFileSync(FOLDERS_FILE, content, 'utf-8');
     // Broadcast to other windows so their folders reload immediately
     electron_1.BrowserWindow.getAllWindows().forEach((win) => {
@@ -4019,6 +4041,7 @@ electron_1.ipcMain.handle('note-order:get', () => {
 });
 electron_1.ipcMain.handle('note-order:set', (event, order) => {
     const content = JSON.stringify(order, null, 2);
+    markInternalWrite('note-order.json'); // see applyGroupsSet
     fs_1.default.writeFileSync(NOTE_ORDER_FILE, content, 'utf-8');
     electron_1.BrowserWindow.getAllWindows().forEach((win) => {
         if (win.webContents.id !== event.sender.id) {

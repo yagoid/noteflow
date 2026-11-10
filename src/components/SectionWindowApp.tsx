@@ -82,7 +82,14 @@ export function SectionWindowApp() {
         useEditorSettingsStore.getState().reloadUiSettings()
       }
     })
-    return () => unbind()
+    // Groups metadata changed outside the app (CLI) — see App.tsx.
+    const unbindGroups = window.noteflow.onGroupsUpdated?.(() => {
+      void useGroupsStore.getState().loadGroups()
+    })
+    return () => {
+      unbind()
+      unbindGroups?.()
+    }
   }, [loadNotes])
 
   // Editor shortcuts (the main window's global handler isn't mounted here). Only the

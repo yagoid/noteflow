@@ -164,9 +164,9 @@ export const cliEs: CliContent = {
     title: 'Avisos que conviene conocer',
     items: [
       {
-        title: 'App de escritorio abierta ⇒ los cambios de grupos/carpetas pueden perderse',
+        title: 'App de escritorio v2.1.0 o anterior abierta ⇒ los cambios de grupos/carpetas pueden perderse',
         html:
-          'La app mantiene <code>groups.json</code> / <code>folders.json</code> en memoria y <strong>los reescribe en sus propios ciclos</strong> (guardados y el auto-sync cada 5 minutos), pisando los grupos y carpetas creados desde el CLI mientras corre. Los cambios a nivel de nota — contenido, secciones, favorito, archivo — sí sobreviven: viven en carpetas por-nota. El CLI <strong>avisa por stderr</strong> si detecta NoteFlow en ejecución al mutar grupos/carpetas (siléncialo con <code>NOTEFLOW_NO_APP_CHECK=1</code>). Para cambios estructurales fiables, cierra la app primero — o hazlos desde la propia app.',
+          'Hasta la v2.1.0, la app mantiene <code>groups.json</code> / <code>folders.json</code> en memoria y <strong>los reescribe en sus propios ciclos</strong> (guardados y el auto-sync cada 5 minutos), pisando los grupos y carpetas creados desde el CLI mientras corre; las versiones posteriores recargan los cambios del CLI. Los cambios a nivel de nota — contenido, secciones, favorito, archivo — sobreviven siempre: viven en carpetas por-nota. El CLI <strong>avisa por stderr</strong> si detecta NoteFlow en ejecución al mutar grupos/carpetas (siléncialo con <code>NOTEFLOW_NO_APP_CHECK=1</code>). Con una versión antigua o desconocida de la app, ciérrala primero — o haz esos cambios de grupos/carpetas desde la propia app.',
       },
       {
         title: 'PowerShell: --text multilínea puede truncarse en silencio',
@@ -202,7 +202,7 @@ export const cliEs: CliContent = {
       {
         q: 'Mis grupos o carpetas creados desde el CLI desaparecieron / pull no cambió nada',
         a:
-          'Dos reglas de sync: el auto-sync de la app de escritorio reescribe <code>groups.json</code> / <code>folders.json</code> mientras corre (mira los <a href="#caveats">avisos</a>), y <code>pull</code> solo sobreescribe una nota local cuando el <code>updated:</code> remoto es más reciente. Cierra la app para cambios estructurales, y consulta la última sync con <code>noteflow status</code>.',
+          'Dos reglas de sync: el auto-sync de la app de escritorio v2.1.0 o anterior reescribe <code>groups.json</code> / <code>folders.json</code> mientras corre (mira los <a href="#caveats">avisos</a>), y <code>pull</code> solo sobreescribe una nota local cuando el <code>updated:</code> remoto es más reciente. Con esas versiones, cierra la app para cambios estructurales, y consulta la última sync con <code>noteflow status</code>.',
       },
     ],
   },
