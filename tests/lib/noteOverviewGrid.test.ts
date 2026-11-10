@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import {
   NOTE_GRID_MIN_COLUMN,
+  PREVIEW_LINE_CHARS,
   TASK_STATS_MIN,
+  WIDE_CARD_MIN_LINES,
   clipPreviewMarkdown,
   gridColumnCount,
   gridNeighbor,
   planNoteGrid,
+  sectionCardIsWide,
   sectionCardStats,
   type NoteGridRow,
 } from '../../src/lib/noteOverviewGrid'
@@ -83,6 +86,87 @@ describe('planNoteGrid', () => {
   it('treats a fractional or invalid column count as at least one whole column', () => {
     expect(shape(planNoteGrid(['a', 'b'], null, 2.7))).toEqual(['a:1 b:1', '~+:2'])
     expect(shape(planNoteGrid(['a'], null, 0))).toEqual(['a:1', '~+:1'])
+  })
+})
+
+describe('planNoteGrid with wide cards', () => {
+  const wide = (...ids: string[]) => new Set(ids)
+
+  it('gives a long section one and a half columns', () => {
+    expect(shape(planNoteGrid(['a', 'b', 'c', 'd'], null, 4, wide('b'))))
+      .toEqual(['a:1 b:1.5 c:1', 'd:1 +:3'])
+    expect(shape(planNoteGrid(['a', 'b'], null, 3, wide('a', 'b')))).toEqual(['a:1.5 b:1.5', '~+:3'])
+  })
+
+  it('places a wide section as a square when only a square fits', () => {
+    expect(shape(planNoteGrid(['a', 'b', 'c', 'd'], null, 4, wide('a', 'b', 'c', 'd'))))
+      .toEqual(['a:1.5 b:1.5 c:1', 'd:1.5 +:2.5'])
+  })
+
+  it('closes the row half a unit short when not even a square fits', () => {
+    expect(shape(planNoteGrid(['a', 'b', 'c', 'd'], null, 4, wide('a'))))
+      .toEqual(['a:1.5 b:1 c:1', 'd:1 +:3'])
+  })
+
+  it('shrinks the wide cards of a row back to squares to let the open section in', () => {
+    expect(shape(planNoteGrid(['a', 'b', 'c'], 'c', 4, wide('a', 'b')))).toEqual(['a:1 b:1 c:2', '~+:4'])
+    expect(shape(planNoteGrid(['a', 'b'], 'b', 3, wide('a')))).toEqual(['a:1 b:2', '~+:3'])
+    // Only as many as needed, from the end of the row.
+    expect(shape(planNoteGrid(['a', 'b', 'c', 'd'], 'd', 6, wide('a', 'b', 'c'))))
+      .toEqual(['a:1.5 b:1.5 c:1 d:2', '~+:6'])
+    // Not enough to gain: the row stays as it is.
+    expect(shape(planNoteGrid(['a', 'b', 'c', 'd'], 'd', 4, wide('a'))))
+      .toEqual(['a:1.5 b:1 c:1', 'd:2 +:2'])
+  })
+
+  it('keeps the open section at two columns even when it is long', () => {
+    expect(shape(planNoteGrid(['a', 'b'], 'a', 4, wide('a', 'b')))).toEqual(['a:2 b:1.5', '~+:4'])
+  })
+
+  it('puts "New section" on a slim row when less than a column is left', () => {
+    expect(shape(planNoteGrid(['a', 'b', 'c'], null, 4, wide('a')))).toEqual(['a:1.5 b:1 c:1', '~+:4'])
+  })
+
+  it('has no wide cards with one or two columns', () => {
+    expect(shape(planNoteGrid(['a', 'b'], null, 2, wide('a', 'b')))).toEqual(['a:1 b:1', '~+:2'])
+    expect(shape(planNoteGrid(['a'], null, 1, wide('a')))).toEqual(['a:1', '~+:1'])
+  })
+
+  it('always leaves a wide card narrower than the open one', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
+    const share = (rows: NoteGridRow[], pick: (units: number, id: string) => boolean) =>
+      rows.flatMap((row) => {
+        const total = row.cells.reduce((sum, c) => sum + c.units, 0)
+        return row.cells.flatMap((c) => (c.kind === 'section' && pick(c.units, c.id) ? [c.units / total] : []))
+      })
+    for (let columns = 3; columns <= 7; columns++) {
+      for (let mask = 0; mask < 1 << ids.length; mask += 7) {
+        const wideIds = new Set(ids.filter((_, i) => mask & (1 << i)))
+        for (const openId of ids) {
+          const rows = planNoteGrid(ids, openId, columns, wideIds)
+          const [open] = share(rows, (_, id) => id === openId)
+          for (const s of share(rows, (units) => units === 1.5)) expect(s).toBeLessThan(open)
+        }
+      }
+    }
+  })
+})
+
+describe('sectionCardIsWide', () => {
+  it('is false for empty and short content', () => {
+    expect(sectionCardIsWide('')).toBe(false)
+    expect(sectionCardIsWide('- [ ] one\n- [ ] two\n\n\n\n\n\n\n\n\n\n\n\nend')).toBe(false)
+  })
+
+  it(`is true from ${WIDE_CARD_MIN_LINES} lines of content`, () => {
+    const lines = (count: number) => Array.from({ length: count }, (_, i) => `- item ${i}`).join('\n')
+    expect(sectionCardIsWide(lines(WIDE_CARD_MIN_LINES - 1))).toBe(false)
+    expect(sectionCardIsWide(lines(WIDE_CARD_MIN_LINES))).toBe(true)
+  })
+
+  it('counts a long line as the lines it wraps to', () => {
+    expect(sectionCardIsWide('x'.repeat(PREVIEW_LINE_CHARS * (WIDE_CARD_MIN_LINES - 1)))).toBe(false)
+    expect(sectionCardIsWide('x'.repeat(PREVIEW_LINE_CHARS * (WIDE_CARD_MIN_LINES - 1) + 1))).toBe(true)
   })
 })
 

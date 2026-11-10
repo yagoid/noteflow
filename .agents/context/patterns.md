@@ -256,13 +256,28 @@ Decisiones a respetar si se toca:
 - **Un bloque reticulado**, como el mapa: juntas de 4 px sobre `--bg-editor`, radio 8 px fuera
   (`overflow: hidden` en `.note-grid`) y 4 px en las celdas, fondo `--text / 0.06` (hover 0.09, sin bordes
   ni sombras). Las tarjetas van en el **orden de las pestañas**.
-- **Filas explícitas, no `flex-wrap`:** `planNoteGrid(ids, openId, columns)` reparte en filas de
+- **Filas explícitas, no `flex-wrap`:** `planNoteGrid(ids, openId, columns, wideIds?)` reparte en filas de
   `columns` unidades; cada slot es `flex: <unidades> 1 0px` (filas justificadas, alto fijo 196 px). La
   sección **abierta en el editor** cuenta 2 unidades (solo si hay > 2 columnas). Una sección que no cabe
   cierra la fila antes (sus celdas se estiran). El hueco final de la última fila es la celda **"New
-  section"** (añade una sección y la abre en el editor); si la última fila está llena (o no hay secciones)
-  va en una **franja de 40 px** propia. Las celdas pueden remontarse al cambiar de fila (reordenar,
-  redimensionar): aquí da igual porque la sección abierta no cambia mientras la vista está abierta (abrir
+  section"** (añade una sección y la abre en el editor) si mide ≥ 1 unidad; si no (fila llena o a media
+  unidad de estarlo, o no hay secciones) va en una **franja de 40 px** propia.
+- **Mosaico: tarjetas anchas por contenido.** No todas las tarjetas son el cuadrado base: una sección con
+  contenido largo cuenta **1,5 unidades** (`NOTE_GRID_WIDE_SPAN`, solo si hay > 2 columnas), un rectángulo
+  intermedio entre el cuadrado y la abierta. La regla es `sectionCardIsWide(md)`: ≥ 12 líneas de preview
+  (`WIDE_CARD_MIN_LINES`; las líneas en blanco no cuentan y una línea larga cuenta lo que ocuparía
+  partida a ~36 caracteres, `PREVIEW_LINE_CHARS`) — determinista y derivada del contenido, con el umbral
+  bien por encima de las ~8 líneas que enseña un cuadrado para que rara vez salte al teclear (no hay histéresis: cruzar el umbral sí la cambia). `NoteOverview`
+  pasa los ids anchos a `planNoteGrid(ids, openId, columns, wideIds)` vía una clave memoizada (el plan solo
+  cambia cuando una sección cruza el umbral). **Ancha es una preferencia, nunca deja huecos:** si una ancha
+  solo cabe como cuadrado entra como cuadrado, y las anchas de una fila vuelven a cuadrado (desde el final,
+  las justas) si así cabe la abierta. Por eso una fila con anchas queda como mucho a media unidad de
+  llenarse, lo que garantiza que **una ancha siempre es más estrecha que la abierta** aunque la fila se
+  estire (hay un test de propiedad). La abierta sigue en 2 unidades aunque sea larga. Solo varía el ancho:
+  el alto de fila es fijo (tarjetas más altas exigirían abandonar las filas explícitas, de las que dependen
+  las juntas de drop y el foco por flechas).
+- **Remontado:** las celdas pueden remontarse al cambiar de fila (reordenar, redimensionar, o una sección
+  que cruza el umbral de ancha): aquí da igual porque la sección abierta no cambia mientras la vista está abierta (abrir
   otra cierra la vista), al contrario que en el mapa del editor.
 - **Columnas adaptativas:** `gridColumnCount(ancho)` = tantas de ≥ 220 px como quepan (mín. 1), medido con
   un `ResizeObserver` sobre el contenedor en un `useLayoutEffect` (sin parpadeo).

@@ -24,7 +24,7 @@ import { reorderDropSide } from '../../lib/sectionMap'
 import { resolveSectionInk } from '../../lib/sectionInk'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
 import {
-  gridColumnCount, gridNeighbor, planNoteGrid, type GridDirection,
+  gridColumnCount, gridNeighbor, planNoteGrid, sectionCardIsWide, type GridDirection,
 } from '../../lib/noteOverviewGrid'
 import type { NoteSection } from '../../types'
 
@@ -158,9 +158,20 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
     ? null
     : [paneSectionId, rememberedSectionId, sections[0]?.id]
         .find((id) => id && sections.some((s) => s.id === id)) ?? null
+  // Sections with a long content get a wider card (a key, so the plan only changes when a
+  // section crosses the threshold, not on every edit).
+  const wideIdsKey = useMemo(
+    () => sections?.filter((s) => sectionCardIsWide(s.content)).map((s) => s.id).join('\u0000') ?? '',
+    [sections],
+  )
   const plan = useMemo(
-    () => planNoteGrid(sectionIdsKey ? sectionIdsKey.split('\u0000') : [], openId, columns),
-    [sectionIdsKey, openId, columns],
+    () => planNoteGrid(
+      sectionIdsKey ? sectionIdsKey.split('\u0000') : [],
+      openId,
+      columns,
+      new Set(wideIdsKey ? wideIdsKey.split('\u0000') : []),
+    ),
+    [sectionIdsKey, openId, columns, wideIdsKey],
   )
 
   // ── Inks: on the open section's solid header, and on the accent (checkboxes) ──

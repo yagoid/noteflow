@@ -9,6 +9,15 @@ export const NOTE_GRID_MIN_COLUMN = 220
 export const NOTE_GRID_GAP = 4
 /** Columns the section open in the editor spans, when there are more than two columns. */
 export const NOTE_GRID_OPEN_SPAN = 2
+/**
+ * Columns a section with a long content spans (more than two columns only): a rectangle
+ * between the square base card and the open one. Always below NOTE_GRID_OPEN_SPAN.
+ */
+export const NOTE_GRID_WIDE_SPAN = 1.5
+/** A card is wide from this many preview lines of content (a square card shows ~8). */
+export const WIDE_CARD_MIN_LINES = 12
+/** Characters a line of the preview holds in a square card, roughly (11px text, ~200px). */
+export const PREVIEW_LINE_CHARS = 36
 /** The footer shows task progress instead of the word count from this many tasks. */
 export const TASK_STATS_MIN = 3
 /** Markdown rendered into a card preview at most (chars): only ~8 lines are visible. */
@@ -34,35 +43,63 @@ export interface NoteGridRow {
   slim: boolean
 }
 
+const NO_WIDE: ReadonlySet<string> = new Set()
+
 /**
- * Splits the sections (in tab order) into justified rows of `columns` units. The section
- * open in the editor (`openId`) takes NOTE_GRID_OPEN_SPAN units when there are more than
- * two columns, one otherwise. A section that doesn't fit closes the row early (its cells
- * stretch: the browser shares the width by units, `flex: units 1 0px`). The hole left at
- * the end of the last row becomes the "New section" cell; when the last row is full (or
- * there are no sections) it goes on a slim row of its own spanning every column.
+ * Splits the sections (in tab order) into justified rows of `columns` units. With more than
+ * two columns the cards aren't all the same: the section open in the editor (`openId`) takes
+ * NOTE_GRID_OPEN_SPAN units and the ones in `wideIds` (long content, see sectionCardIsWide)
+ * NOTE_GRID_WIDE_SPAN; every other card — and all of them with one or two columns — takes one.
+ *
+ * Wide is a preference, so a row never wastes room on it: a wide section that only fits as a
+ * square goes in as a square, and the wide cards of a row shrink back to squares when that
+ * lets the open section in. Otherwise a section that doesn't fit closes the row early (its
+ * cells stretch: the browser shares the width by units, `flex: units 1 0px`). A row holding
+ * a wide card is therefore never more than half a unit short, which keeps every wide card
+ * narrower than the open one whatever the stretch.
+ *
+ * The hole left at the end of the last row becomes the "New section" cell when it is at
+ * least one unit; otherwise (or with no sections) that cell goes on a slim row of its own
+ * spanning every column.
  */
 export function planNoteGrid(
   sectionIds: readonly string[],
   openId: string | null,
   columns: number,
+  wideIds: ReadonlySet<string> = NO_WIDE,
 ): NoteGridRow[] {
   const n = Math.max(1, Math.floor(columns))
-  const openSpan = n > 2 ? NOTE_GRID_OPEN_SPAN : 1
+  const spans = n > 2
   const rows: NoteGridRow[] = []
   let cells: NoteGridCell[] = []
   let used = 0
+  const closeRow = () => {
+    rows.push({ cells, slim: false })
+    cells = []
+    used = 0
+  }
   for (const id of sectionIds) {
-    const units = id === openId ? openSpan : 1
+    const isOpen = id === openId
+    let units = !spans ? 1 : isOpen ? NOTE_GRID_OPEN_SPAN : wideIds.has(id) ? NOTE_GRID_WIDE_SPAN : 1
     if (used + units > n && cells.length > 0) {
-      rows.push({ cells, slim: false })
-      cells = []
-      used = 0
+      const perWide = NOTE_GRID_WIDE_SPAN - 1
+      const shrinks = Math.ceil((used + units - n) / perWide)
+      const wide = cells.filter((c) => c.kind === 'section' && c.units === NOTE_GRID_WIDE_SPAN)
+      if (isOpen && wide.length >= shrinks) {
+        // The row's last wide cards go back to squares to let the open section in.
+        const shrunk = new Set(wide.slice(-shrinks))
+        cells = cells.map((c) => (shrunk.has(c) ? { ...c, units: 1 } : c))
+        used -= shrinks * perWide
+      } else if (!isOpen && units > 1 && used + 1 <= n) {
+        units = 1
+      } else {
+        closeRow()
+      }
     }
     cells.push({ kind: 'section', id, units })
     used += units
   }
-  if (cells.length > 0 && used < n) {
+  if (cells.length > 0 && n - used >= 1) {
     cells.push({ kind: 'add', units: n - used })
     rows.push({ cells, slim: false })
   } else {
@@ -70,6 +107,25 @@ export function planNoteGrid(
     rows.push({ cells: [{ kind: 'add', units: n }], slim: true })
   }
   return rows
+}
+
+/**
+ * Whether a section gets a wide card (NOTE_GRID_WIDE_SPAN): its content runs to
+ * WIDE_CARD_MIN_LINES or more lines of a square card's preview (blank lines don't count, a
+ * long line counts as the lines it wraps to). A threshold well above what a square card
+ * shows, so the size follows the amount of content and rarely flips while typing (no hysteresis:
+ * crossing the threshold does flip it).
+ * Only the part the preview renders is measured (PREVIEW_MAX_CHARS).
+ */
+export function sectionCardIsWide(markdown: string): boolean {
+  let lines = 0
+  for (const line of markdown.slice(0, PREVIEW_MAX_CHARS).split('\n')) {
+    const length = line.trim().length
+    if (length === 0) continue
+    lines += Math.ceil(length / PREVIEW_LINE_CHARS)
+    if (lines >= WIDE_CARD_MIN_LINES) return true
+  }
+  return false
 }
 
 export type GridDirection = 'left' | 'right' | 'up' | 'down'

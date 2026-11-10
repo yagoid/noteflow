@@ -509,8 +509,12 @@ hay secciones) + separador + **⊞ activo** + **estrella** de favorito + **`⋯`
   fijo: todas llegan al mismo borde; una tarjeta que no cabe cierra la fila y las de esa fila se estiran.
 - La sección **abierta en el editor** (si la nota está en algún panel) ocupa **dos columnas** (si hay
   más de dos), con la cabecera en su **color sólido** y la etiqueta **OPEN**.
+- **Mosaico**: las tarjetas no son todas el mismo cuadrado. Las secciones con **mucho contenido** (unas
+  12 líneas o más) ocupan **columna y media** —un rectángulo, siempre más estrecho que la abierta—; el
+  resto son cuadradas. Si una ancha no cabe en la fila entra como cuadrada (no deja huecos). Con una o
+  dos columnas todas miden lo mismo.
 - El hueco final de la última fila es la celda **"New section"** (crea una sección y te lleva al editor
-  en ella); si la última fila está llena, aparece como una franja fina debajo. Ya no hay botón "Add
+  en ella); si la última fila está llena (o le queda menos de una columna), aparece como una franja fina debajo. Ya no hay botón "Add
   section" en la cabecera.
 
 **Tarjeta de sección:**
