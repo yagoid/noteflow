@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertCircle, Check, Loader, MessageSquare, Send } from 'lucide-react'
+import { AlertCircle, Check, Loader, Send } from 'lucide-react'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { useLanguageStore } from '../../stores/languageStore'
@@ -88,7 +88,7 @@ export function FeedbackSection() {
 
   return (
     <section className="settings-row-break">
-      <SectionTitle underline={false} icon={<MessageSquare size={11} className="text-text-muted flex-shrink-0" />}>
+      <SectionTitle>
         {f.title}
       </SectionTitle>
       <div className="space-y-3">

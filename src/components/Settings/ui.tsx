@@ -21,26 +21,19 @@ export const settingsRaisedButtonClass =
 
 interface SectionTitleProps {
   children: ReactNode
-  /** Optional leading icon, rendered before the label. */
-  icon?: ReactNode
   /** Optional right-hand slot for section-level actions (e.g. "Theme default"). */
   action?: ReactNode
-  /** Draw the full-width rule under the title (default). Off in panels that separate
-   *  sections with `.settings-rows` dividers *between* them (General-style). */
-  underline?: boolean
 }
 
-// Heading of a subsection inside a Settings panel. Readable colour + weight, and a
-// full-width rule underneath that anchors it as a header instead of floating over
-// the content (the previous `text-text-muted/70` label was nearly invisible).
-export function SectionTitle({ children, icon, action, underline = true }: SectionTitleProps) {
+// Heading of a subsection inside a Settings panel: sentence case, readable colour +
+// weight, one step below the panel's own `text-sm` title. Never draw a rule under
+// it — sections are separated by dividers *before* their title, which the panel
+// gets by wrapping its `<section>`s in `.settings-rows` (see index.css).
+export function SectionTitle({ children, action }: SectionTitleProps) {
   return (
-    <div
-      className={`flex items-center justify-between gap-2 mb-3 ${underline ? 'pb-1.5 border-b border-border' : ''}`}
-    >
+    <div className="flex items-center justify-between gap-2 mb-3">
       <div className="flex items-center gap-1.5 min-w-0">
-        {icon}
-        <h3 className="text-[11px] font-mono font-semibold text-text uppercase tracking-widest truncate">
+        <h3 className="text-xs font-mono font-semibold text-text truncate">
           {children}
         </h3>
       </div>

@@ -71,7 +71,7 @@ export function AboutPanel() {
 
       {/* Updates */}
       <section>
-        <SectionTitle underline={false}>{t.settings.about.updates}</SectionTitle>
+        <SectionTitle>{t.settings.about.updates}</SectionTitle>
         <div className="flex items-center gap-2">
           <button
             onClick={handleCheck}
@@ -127,7 +127,7 @@ export function AboutPanel() {
 
       {/* Links */}
       <section>
-        <SectionTitle underline={false}>{t.settings.about.links}</SectionTitle>
+        <SectionTitle>{t.settings.about.links}</SectionTitle>
         <button
           onClick={() => window.noteflow.openUrl('https://github.com/yagoid/noteflow')}
           className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left ${settingsButtonClass}`}

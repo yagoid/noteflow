@@ -68,8 +68,8 @@ export function TutorialPanel() {
   }, [loaded])
 
   return (
-    <div className="space-y-6">
-      <div
+    <div className="settings-rows space-y-6">
+      <section
         className="relative overflow-hidden rounded-lg border border-border bg-surface-2/40 px-5 py-5"
         style={accentVars('accent')}
       >
@@ -91,9 +91,9 @@ export function TutorialPanel() {
             {t.whatsNew.settings.playTour}
           </button>
         </div>
-      </div>
+      </section>
 
-      <div>
+      <section>
         <SectionTitle>{t.whatsNew.settings.slidesTitle}</SectionTitle>
         <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(180px,1fr))]">
           {WHATS_NEW_SLIDES.map((slide) => (
@@ -105,7 +105,7 @@ export function TutorialPanel() {
             />
           ))}
         </div>
-      </div>
+      </section>
     </div>
   )
 }

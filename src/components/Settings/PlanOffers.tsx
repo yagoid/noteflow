@@ -213,7 +213,7 @@ export function PlanOffers({
 
       {benefits && (
         <div className="space-y-1.5 normal-case">
-          <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-text-muted/70">
+          <p className="text-[11px] font-mono font-semibold text-text-muted">
             {t.settings.planBenefits.title}
           </p>
           <ul className="space-y-1">

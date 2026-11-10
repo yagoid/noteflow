@@ -78,9 +78,9 @@ export function ShortcutsPanel() {
   const sections = buildSections(t)
 
   return (
-    <div className="space-y-6">
+    <div className="settings-rows space-y-6">
       {sections.map((section) => (
-        <div key={section.title}>
+        <section key={section.title}>
           <SectionTitle>{section.title}</SectionTitle>
           <div className="space-y-0.5">
             {section.shortcuts.map((s) => (
@@ -101,7 +101,7 @@ export function ShortcutsPanel() {
               </div>
             ))}
           </div>
-        </div>
+        </section>
       ))}
     </div>
   )

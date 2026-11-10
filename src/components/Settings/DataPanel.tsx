@@ -16,7 +16,7 @@ export function DataPanel({ onOpenExportImport }: DataPanelProps) {
   }, [])
 
   return (
-    <div className="space-y-6">
+    <div className="settings-rows space-y-6">
       {/* Export / Import */}
       <section>
         <SectionTitle>{t.settings.data.backup}</SectionTitle>

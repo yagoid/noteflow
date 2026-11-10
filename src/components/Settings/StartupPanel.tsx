@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Bookmark } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { getTagColor } from '../../lib/tagColors'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
@@ -59,9 +58,9 @@ export function StartupPanel() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="settings-rows space-y-6">
       {/* Open at login toggle */}
-      <div className="flex items-center justify-between gap-4">
+      <section className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">{t.settings.startup.launchOnStartup}</p>
           <p className="text-[11px] font-mono text-text-muted mt-1">
@@ -81,11 +80,11 @@ export function StartupPanel() {
             }`}
           />
         </button>
-      </div>
+      </section>
 
       {/* Sticky notes section */}
-      <div>
-        <SectionTitle icon={<Bookmark size={11} className="text-text-muted flex-shrink-0" />}>
+      <section>
+        <SectionTitle>
           {t.settings.startup.openAsSticky}
         </SectionTitle>
         {!openAtLogin && (
@@ -143,7 +142,7 @@ export function StartupPanel() {
             ? plural(t.settings.startup.willOpen, startupStickies.length)
             : t.settings.startup.noTabsSelected}
         </p>
-      </div>
+      </section>
     </div>
   )
 }

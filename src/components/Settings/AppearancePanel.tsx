@@ -202,7 +202,7 @@ export function AppearancePanel() {
   return (
     <div className="flex min-h-0 gap-4">
       {/* ── Controls ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 space-y-6">
+      <div className="settings-rows flex-1 space-y-6">
         {/* Theme */}
         <section>
           <SectionTitle>{t.settings.appearance.theme}</SectionTitle>

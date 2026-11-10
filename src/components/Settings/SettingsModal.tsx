@@ -170,7 +170,7 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
           {/* ── Content ──────────────────────────────────────────────────── */}
           <div className="flex-1 min-w-0 flex flex-col">
             {/* Title of the section being viewed: the top of the hierarchy inside the
-                window (subsection headers below use the smaller uppercase SectionTitle). */}
+                window (subsection headers below use the smaller SectionTitle). */}
             <div className="px-5 pt-4 pb-3">
               <h2 className="text-sm font-mono font-semibold text-text">{activeLabel}</h2>
             </div>

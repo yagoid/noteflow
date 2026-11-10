@@ -1678,7 +1678,7 @@ la prop `initialSection` de `SettingsModal` y el `useState<SettingsSection>` del
 quien la abre; la paleta de comandos solo cambia esa sección vía eventos).
 Sustituyó al antiguo dropdown del titlebar y a los modales sueltos (eliminados);
 `ExportImportModal` se conserva y se lanza desde el `DataPanel` por callback. Tamaño **fijo
-proporcional** `w-[min(940px,92vw)] h-[min(680px,90vh)]`. Cada panel gestiona su propio
+proporcional** `w-[min(1040px,94vw)] h-[min(760px,92vh)]`. Cada panel gestiona su propio
 estado/efectos. El `CommandPalette` dispara los mismos eventos de siempre
 (`noteflow:open-shortcuts/-startup/-github-sync/check-for-update/-export/-import`) y el TitleBar
 los reinterpreta para abrir la ventana en la sección correcta (export/import siguen abriendo el
@@ -1690,19 +1690,27 @@ Ajustes → Suscripción (los paneles que ya viven dentro de Ajustes usan su pro
 Los 13 paneles repetían a mano el estilo de sus encabezados y botones, y la jerarquía se había
 perdido (títulos casi invisibles en `text-text-muted/70`, botones "fantasma" que eran solo texto).
 La fuente única de verdad ahora es:
-- **`<SectionTitle>`** — encabezado de subsección: `text-[11px] font-mono font-semibold text-text
-  uppercase tracking-widest` + **línea `border-b border-border` a todo el ancho** (se eligió el
-  borde inferior sobre un chip con fondo: no compite con las tarjetas, que ya tienen fondo). Props:
-  `children`, `icon?` (icono a la izquierda) y `action?` (slot a la derecha para acciones de la
-  subsección, p. ej. los "Theme default" de Appearance).
+- **`<SectionTitle>`** — encabezado de subsección: `text-xs font-mono font-semibold text-text
+  truncate`, en **caja normal** (sin `uppercase`/`tracking`; el copy i18n va en caja de frase).
+  **Nunca lleva línea debajo**: en Ajustes los divisores van **antes** del título (entre
+  secciones), no después. **Sin icono delante.** Props: `children` y `action?` (slot a la
+  derecha para acciones de la subsección, p. ej. los "Theme default" de Appearance).
+- **Divisores entre secciones = `.settings-rows`** (`src/index.css`): el contenedor del panel lleva
+  `className="settings-rows space-y-6"` y cada bloque es un **`<section>` hijo directo**; la regla
+  `.settings-rows > section + section::before` pinta una línea tenue en el hueco, encima del título
+  de la sección siguiente. `section.settings-row-break` da un corte mayor (línea a todo el ancho y
+  más aire) para separar grupos (p. ej. Feedback). Lo usan General, Editor, Appearance (columna de
+  controles), Data, Startup, Shortcuts, Tutorial y About. Un bloque que no sea un `<section>` hijo
+  directo en el DOM (p. ej. un `<div>`, o un `<section>` dentro de otro wrapper) **no** recibe
+  divisor, y un hermano que no sea `<section>` en medio corta el `section + section`.
 - **`settingsButtonClass`** — cuerpo del botón **secundario** (el default): `bg-surface-2 border
   border-border text-text hover:bg-surface-3` + estados `disabled`. **No** incluye tamaño/padding/
   rounded: cada llamada mantiene los suyos. Los botones **primarios** (`border-text/20`, en Account/
   Cloud/Sync) y los **destructivos** (rojo) conservan su propio color — la distinción es intencional.
 - **`settingsRaisedButtonClass`** — el mismo botón pero con `bg-surface-3`, para los que van **sobre
   una tarjeta `surface-2`** (las filas de Templates), donde un fill `surface-2` desaparecería.
-Jerarquía resultante: título de la sección activa (`SettingsModal`, `text-sm font-semibold` + regla
-inferior) → `SectionTitle` de cada subsección → etiqueta `text-text` + su hint a `mt-1` →
+Jerarquía resultante: título de la sección activa (`SettingsModal`, `text-sm font-semibold`, sin
+regla) → `SectionTitle` de cada subsección → etiqueta `text-text` + su hint a `mt-1` →
 contenido. Los contenedores de panel van a `space-y-6`. Toggles/switches, swatches de color y
 tarjetas seleccionables (tema/fuente/backend) **no** usan estas clases: tienen su propio lenguaje.
 Todo en **tokens del tema** (`surface-*`, `border`, `text`, `text-muted`) — nunca colores
