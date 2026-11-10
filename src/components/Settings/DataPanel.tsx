@@ -20,7 +20,7 @@ export function DataPanel({ onOpenExportImport }: DataPanelProps) {
       {/* Export / Import */}
       <section>
         <SectionTitle>{t.settings.data.backup}</SectionTitle>
-        <div className="flex flex-col items-start gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => onOpenExportImport('export')}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono text-left ${settingsButtonClass}`}
