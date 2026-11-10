@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 'use strict'
-// v2.8.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.9.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
 const https = require('node:https')
 const { randomBytes, webcrypto, createHash } = require('node:crypto')
-const { execSync } = require('node:child_process')
+const { execSync, execFileSync } = require('node:child_process')
 const readline = require('node:readline')
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.8.0'
+const CLI_VERSION = '2.9.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -6079,6 +6079,7 @@ async function cmdMigrate() {
 }
 
 const SELF_UPDATE_URL = 'https://raw.githubusercontent.com/yagoid/noteflow/main/cli/noteflow.js'
+const SKILL_UPDATE_URL = 'https://raw.githubusercontent.com/yagoid/noteflow/main/cli/noteflow-cli/SKILL.md'
 
 async function cmdSelfUpdate() {
   out('  Checking for updates...')
@@ -6108,13 +6109,94 @@ async function cmdSelfUpdate() {
   if (newContent === currentContent) {
     fs.unlinkSync(tmpPath)
     out('  Already up to date')
-    return
+  } else {
+    // Replace self atomically
+    fs.renameSync(tmpPath, selfPath)
+    try { fs.chmodSync(selfPath, 0o755) } catch { /* Windows — no-op */ }
+    out(`  Updated successfully → ${selfPath}`)
   }
 
-  // Replace self atomically
-  fs.renameSync(tmpPath, selfPath)
-  try { fs.chmodSync(selfPath, 0o755) } catch { /* Windows — no-op */ }
-  out(`  Updated successfully → ${selfPath}`)
+  // Also when the script was already current: a skill copy may be stale (or
+  // reverted by an older desktop app). Best-effort, never fails the command.
+  try {
+    await selfUpdateSkill()
+  } catch (e) {
+    console.error(`  Warning: could not update the AI agent skill (${e.message})`)
+  }
+}
+
+// The user-level agent skill dirs that get noteflow-cli/SKILL.md. ⚠️ keep in
+// sync with skillAgentDestDirs() in electron/main.ts (the desktop app installs
+// the skill there on every launch) and with cli/install-cli.sh.
+function skillAgentDestDirs(home) {
+  const dirs = [
+    path.join(home, '.claude', 'skills', 'noteflow-cli'),
+    path.join(home, '.agents', 'skills', 'noteflow-cli'),
+  ]
+  const windsurfRoot = path.join(home, '.codeium', 'windsurf')
+  try {
+    if (fs.existsSync(windsurfRoot)) dirs.push(path.join(windsurfRoot, 'skills', 'noteflow-cli'))
+  } catch { /* treat as not installed */ }
+  return dirs
+}
+
+// Rewrites only the SKILL.md copies that already exist: self-update never
+// installs the skill where it wasn't — nor brings it back where the user turned
+// it off (the app's "Expose CLI skill to AI agents" deletes the copies). Each
+// destination is independent; files already identical are left untouched.
+function refreshInstalledSkills(home, content) {
+  const result = { updated: [], current: [], failed: [] }
+  for (const dir of skillAgentDestDirs(home)) {
+    const file = path.join(dir, 'SKILL.md')
+    try {
+      if (!fs.existsSync(file)) continue
+      if (fs.readFileSync(file, 'utf-8') === content) { result.current.push(file); continue }
+      fs.writeFileSync(file, content, 'utf-8')
+      result.updated.push(file)
+    } catch {
+      result.failed.push(file)
+    }
+  }
+  return result
+}
+
+// `sudo noteflow self-update` (needed to rewrite /usr/local/bin/noteflow) runs
+// with root's HOME, but the skills live in the invoking user's home.
+function skillHome() {
+  const user = process.env.SUDO_USER
+  const isRoot = typeof process.getuid === 'function' && process.getuid() === 0
+  if (!isRoot || !user || user === 'root' || !/^[A-Za-z0-9._][A-Za-z0-9._-]*$/.test(user)) return os.homedir()
+  const quiet = { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+  try {
+    const home = execFileSync('getent', ['passwd', user], quiet).split(':')[5]?.trim()
+    if (home) return home
+  } catch { /* no getent (macOS) */ }
+  try {
+    const m = execFileSync('dscl', ['.', '-read', `/Users/${user}`, 'NFSHomeDirectory'], quiet)
+      .match(/NFSHomeDirectory:\s*(.+)/)
+    if (m) return m[1].trim()
+  } catch { /* not macOS */ }
+  return os.homedir()
+}
+
+async function selfUpdateSkill() {
+  const home = skillHome()
+  const installed = skillAgentDestDirs(home).some(d => fs.existsSync(path.join(d, 'SKILL.md')))
+  if (!installed) return
+  let content
+  try {
+    const res = await fetch(SKILL_UPDATE_URL, { headers: { 'User-Agent': 'NoteFlow-CLI' } })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    content = await res.text()
+    if (!content.startsWith('---')) throw new Error('unexpected content')
+  } catch (e) {
+    console.error(`  Warning: could not update the AI agent skill (${e.message})`)
+    return
+  }
+  const { updated, current, failed } = refreshInstalledSkills(home, content)
+  if (updated.length) out(`  AI agent skill updated → ${updated.join(', ')}`)
+  else if (current.length) out('  AI agent skill already up to date')
+  if (failed.length) console.error(`  Warning: could not write the AI agent skill → ${failed.join(', ')}`)
 }
 
 function cmdStatus(opts) {
@@ -6598,8 +6680,11 @@ function cmdHelp(topic) {
   noteflow self-update
 
   Downloads the latest cli/noteflow.js from GitHub and replaces this script (no
-  sync login needed). It only updates noteflow.js: the Windows wrappers
-  (noteflow.cmd / noteflow.ps1) are refreshed by updating the NoteFlow app.
+  sync login needed). It also refreshes the AI agent skill (noteflow-cli/SKILL.md)
+  in the agent skill dirs where it is already installed (~/.claude/skills,
+  ~/.agents/skills, ~/.codeium/windsurf/skills) — it never installs it anywhere
+  new. The Windows wrappers (noteflow.cmd / noteflow.ps1) are refreshed by
+  updating the NoteFlow app.
 `,
   }
 
@@ -6653,7 +6738,7 @@ function cmdHelp(topic) {
                           [--force: GitHub only — overwrite even if local is newer]
     status / cloud status Show GitHub / NoteFlow Cloud sync status
     migrate               One-time migration: flat .md notes → folder format v2
-    self-update           Update this CLI script to the latest version
+    self-update           Update this CLI script (and its installed agent skill)
     version / --version   Print the CLI version
 
   Flags (a flag a command doesn't support is an error, never ignored):
@@ -6679,7 +6764,9 @@ function cmdHelp(topic) {
 
   AI agent integration:
     NoteFlow ships with an AI agent skill that teaches LLMs how to use this CLI.
-    Install it into your agent (Claude Code, Cursor, etc.) with:
+    The desktop app and the headless installer (install-cli.sh) already put it
+    in ~/.claude/skills and ~/.agents/skills. To add it by hand (Claude Code,
+    Cursor, etc.):
       npx skills add yagoid/noteflow/cli/noteflow-cli
     Or fetch the raw skill definition directly:
       https://raw.githubusercontent.com/yagoid/noteflow/main/cli/noteflow-cli/SKILL.md
@@ -7038,5 +7125,6 @@ if (require.main === module) {
     cloudPullNow, syncPushNoteFiles, cmdCloudPush, bindCliCloudToAccount, cliCloudBasesSnapshot, CLOUD_BASES_PATH,
     mergeSectionText, DEFAULT_SECTION_CONFLICT_LABELS, SECTION_CONFLICT_LABEL_TEMPLATES, sectionConflictLabels,
     conflictMarkerLabels, CLOUD_BASE_CONTENT_DIR,
+    skillAgentDestDirs, refreshInstalledSkills,
   }
 }

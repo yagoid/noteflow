@@ -53,7 +53,7 @@ export const cliEn = {
     desktopH3: 'Linux desktop / Windows',
     desktopP:
       'Nothing to do — the CLI installs automatically with NoteFlow’s <code>.deb</code> and <code>.exe</code> desktop installers.',
-    reqP: 'Only requirement: <strong>Node.js ≥ 18</strong>. To update a standalone install later, run <code>noteflow self-update</code>.',
+    reqP: 'Only requirement: <strong>Node.js ≥ 18</strong>. The script also installs the CLI’s AI agent skill into <code>~/.claude/skills</code> and <code>~/.agents/skills</code>. To update later, run it again or use <code>noteflow self-update</code> (it refreshes the installed skill too).',
   },
 
   notesDir: {
@@ -157,7 +157,7 @@ export const cliEn = {
     ],
     skillH3: 'Install the skill',
     skillP:
-      'Running Claude Code or another skills-compatible agent? Install the NoteFlow CLI skill and your agent gets the full command reference, gotchas included:',
+      'Running Claude Code or another skills-compatible agent? The NoteFlow CLI skill gives your agent the full command reference, gotchas included. The desktop app and the headless installer already put it in your agent skill dirs; to add it by hand:',
     skillTermTitle: 'skills',
     skillCmd: 'npx skills add yagoid/noteflow/cli/noteflow-cli',
   },

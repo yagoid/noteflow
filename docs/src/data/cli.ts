@@ -412,8 +412,8 @@ export const cliGroups: CliGroup[] = [
         id: 'self-update',
         usage: 'noteflow self-update',
         desc: {
-          en: 'Download the latest <code>cli/noteflow.js</code> from GitHub and replace the current script. Uses the public repo API — no sync login needed. Handy on a headless RPi with no installer.',
-          es: 'Descarga el último <code>cli/noteflow.js</code> de GitHub y reemplaza el script actual. Usa la API pública del repo — no requiere login de sync. Útil en una RPi headless sin instalador.',
+          en: 'Download the latest <code>cli/noteflow.js</code> from GitHub and replace the current script. Also refreshes the AI agent skill (<code>noteflow-cli/SKILL.md</code>) wherever it is already installed — it never adds it anywhere new. Uses the public repo — no sync login needed. Handy on a headless RPi with no installer.',
+          es: 'Descarga el último <code>cli/noteflow.js</code> de GitHub y reemplaza el script actual. Refresca también la skill para agentes de IA (<code>noteflow-cli/SKILL.md</code>) donde ya esté instalada — nunca la añade en sitios nuevos. Usa el repo público — no requiere login de sync. Útil en una RPi headless sin instalador.',
         },
       },
       {

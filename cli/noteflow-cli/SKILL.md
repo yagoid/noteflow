@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.8.0
+version: 2.9.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -149,7 +149,8 @@ en `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `groups`, `fold
   `cloud setup`, `cloud push`, `cloud pull`.
 - `noteflow migrate` — migración única de notas antiguas (un `.md` plano por nota) al formato de
   carpetas.
-- `noteflow self-update` — actualiza el script del CLI. `noteflow version` — versión instalada.
+- `noteflow self-update` — actualiza el script del CLI y esta skill donde ya esté instalada.
+  `noteflow version` — versión instalada.
 
 ```bash
 noteflow sections "Proyecto Alpha"                                  # nombres exactos
@@ -289,6 +290,8 @@ monoespaciadas se lee peor y lo importante deja de destacar.
 - Se instala con la app de escritorio (`.exe` en Windows, `.deb` en Linux). Requiere Node.js ≥ 18.
   Linux headless / Raspberry Pi:
   `curl -fsSL https://raw.githubusercontent.com/yagoid/noteflow/main/cli/install-cli.sh | sudo bash`
+  (instala también esta skill en `~/.claude/skills` y `~/.agents/skills`; volver a ejecutarlo
+  actualiza ambos).
 - **`Unknown command`** en un comando de esta guía (p. ej. `touch`, `path` o `cloud`) → el CLI
   instalado es más antiguo: pide al usuario que actualice NoteFlow (refresca el CLI y sus wrappers) o
   ejecuta `noteflow self-update`.

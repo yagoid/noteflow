@@ -86,7 +86,7 @@ chmod +x NoteFlow-2.1.0.AppImage
 A standalone CLI ships with every install and is also available for headless systems:
 
 ```bash
-# Headless install (Linux / Raspberry Pi)
+# Headless install (Linux / Raspberry Pi) — also installs the AI agent skill; re-run to update
 curl -fsSL https://raw.githubusercontent.com/yagoid/noteflow/main/cli/install-cli.sh | sudo bash
 
 # Usage
@@ -99,7 +99,7 @@ Full reference → the [CLI page](https://yagoid.github.io/noteflow/cli) and `no
 
 ### AI Agent Skill
 
-Install the NoteFlow skill in your AI agent (Claude Code, Cursor, etc.) to interact with your notes from any conversation:
+The NoteFlow skill lets your AI agent (Claude Code, Cursor, etc.) work with your notes from any conversation. The desktop app and the headless installer already place it in `~/.claude/skills` and `~/.agents/skills`; to install it by hand:
 
 ```bash
 npx skills add yagoid/noteflow/cli/noteflow-cli

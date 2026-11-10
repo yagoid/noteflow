@@ -58,7 +58,7 @@ trabajando en paralelo** en features/fixes distintos, o de trabajo previo. Por t
   `electron/noteFormat.ts` y `cli/noteflow.js`?
 - **Versión CLI = versión skill:** si el diff toca `cli/noteflow.js` o `cli/noteflow-cli/SKILL.md`,
   ¿se subieron juntos y con el **mismo número** `CLI_VERSION`, la cabecera `// v`, el `version:` del
-  frontmatter de la skill y su ejemplo de `noteflow version`? (ver `.agents/context/patterns.md` § CLI)
+  frontmatter de la skill? (ver `.agents/context/patterns.md` § CLI)
 - **Documentación de contexto (obligatorio):** primero **decide si el cambio es documentable** —
   cambia arquitectura/IPC, formato de nota, sync, IA, release, una **feature** de usuario, una
   **decisión de diseño** o un **patrón** reseñable. Si lo es, ¿se actualizó el `.agents/context/*.md`

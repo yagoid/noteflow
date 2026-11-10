@@ -2342,12 +2342,13 @@ con cuerpo en modo markdown, igual que `parseLegacyNoteRaw` del escritorio (ante
 modo texto).
 
 **Versionado del CLI y su skill — siempre la misma versión.** `CLI_VERSION` (`cli/noteflow.js`), el
-marcador `// v` de su cabecera, el `version:` del frontmatter de `cli/noteflow-cli/SKILL.md` y el ejemplo
-de salida de `noteflow version` en esa skill llevan **el mismo número**, y se suben juntos: cambio de
-comportamiento del CLI → semver del CLI (minor/major) en los cuatro sitios; cambio solo de redacción de la
-skill → patch en los cuatro. **Independiente de la versión del escritorio** (`package.json`): el CLI tiene
-canal propio (`self-update` baja `noteflow.js` de `main` sin release de la app), así que no van a la par.
-`self-update` compara el fichero entero, no la versión.
+marcador `// v` de su cabecera y el `version:` del frontmatter de `cli/noteflow-cli/SKILL.md` llevan
+**el mismo número**, y se suben juntos: cambio de comportamiento del CLI → semver del CLI (minor/major) en
+los tres sitios; cambio solo de redacción de la skill → patch en los tres. (La skill ya no trae un ejemplo
+de salida de `noteflow version` desde v2.6.0; si se vuelve a añadir, entra en el mismo bump.)
+**Independiente de la versión del escritorio** (`package.json`): el CLI tiene canal propio
+(`self-update` baja `noteflow.js` —y refresca la skill instalada— de `main` sin release de la app), así
+que no van a la par. `self-update` compara el fichero entero, no la versión.
 Pensado para
 agentes de IA: **`read`** imprime contenido raw apto para pipe (vs `get`, decorado para humanos) y
 **`set`** sobrescribe una sección (vs `add`, que solo añade al final). Como el CLI no tiene
@@ -2359,8 +2360,8 @@ edición), bumpea `updated:` y hace `syncPushNoteFiles` de `note.md` + todas las
 detalle de cada comando vive en **`noteflow help <comando>`** (`cmdHelp`).
 
 **Criterio de la skill `cli/noteflow-cli/SKILL.md` (~300 líneas, desde 2026-11).** La lee un agente
-cualquiera en el equipo de un usuario final, sin el repo ni `.agents/context/` (la app la copia sola
-a los dirs de skills de los agentes, ver "Auto-instalación de la skill" abajo). Recoge **solo lo que el CLI no avisa por sí solo** —fallos silenciosos (sync
+cualquiera en el equipo de un usuario final, sin el repo ni `.agents/context/` (la app y el instalador
+headless la copian solos a los dirs de skills de los agentes, ver "Auto-instalación de la skill" abajo). Recoge **solo lo que el CLI no avisa por sí solo** —fallos silenciosos (sync
 con exit 0, `set` reemplaza, truncado de `noteflow.cmd`, `touch` obligatorio y que borra `.md`
 sueltos, app abierta pisando grupos/carpetas, `--force`, `pull` de GitHub sin borrados…), modelo mental,
 chuleta de una línea por comando, checklist y protocolos de sync—; lo que el CLI ya bloquea con un
@@ -2481,7 +2482,8 @@ y `> out.json` saldrían vacíos; el stderr de esa rama va a consola y no lo cap
 5.1 decodifica la salida del hijo con la **codepage OEM** (`Consideración` → `Consideraci├│n`) → fija
 `[Console]::OutputEncoding` a UTF-8 mientras dura la llamada y la restaura al salir. El `--json` ya
 era inmune (escapa a `\uXXXX`); esto arregla el texto plano de `read`/`get`/`path`.
-⚠️ `self-update` **solo** descarga `noteflow.js`, así que los shims viejos siguen instalados hasta
+⚠️ `self-update` descarga `noteflow.js` (y refresca la skill ya instalada, ver abajo) pero **no** los
+shims, así que los shims viejos siguen instalados hasta
 actualizar la app → `resolveSetContent()` detecta el caso "stdin vacío en win32" y explica la salida
 (`--file`, `noteflow.cmd`, o actualizar).
 
@@ -2503,6 +2505,27 @@ vano). Controlado por el setting local `exposeSkillToAgents` (default `true`) en
 desactivarlo borra nuestro `SKILL.md` en todos los destinos y la carpeta `noteflow-cli` si queda vacía
 (nunca toca nada más). Toggle **"Expose CLI skill to AI agents"** en Settings → General
 (`GeneralPanel.tsx`), IPC `app:get-skill-sync` / `app:set-skill-sync`.
+
+**Sin la app (CLI v2.9.0+), los mismos destinos con las mismas reglas** — ⚠️ tres copias de la lista que
+hay que mantener en sync: `skillAgentDestDirs()` de `electron/main.ts`, `skillAgentDestDirs()` de
+`cli/noteflow.js` y `install_skill` de `cli/install-cli.sh`:
+- **`cli/install-cli.sh`** (headless, `curl … | sudo bash`): tras instalar el binario descarga
+  `SKILL.md` de `main` y lo copia a los destinos (crea las carpetas; copia solo si difiere, `cmp`). Como
+  corre con `sudo`, el home es el del **usuario real** (`SUDO_USER` → `getent passwd`; en macOS `dscl`;
+  último recurso `~$SUDO_USER`, con el nombre validado antes del `eval`) y lo que crea se `chown`ea a ese
+  usuario (la carpeta más alta que no existía, `-R`; o solo el fichero). Sin sudo usa `$HOME`.
+  **Best-effort:** un fallo de la skill avisa y no tumba la instalación del CLI (`install_skill || true`;
+  ojo: dentro de una función llamada desde `||`/`if` el `set -e` no aplica → cada paso lleva `|| return 1`).
+  Re-ejecutar el instalador = actualizar CLI + skill.
+- **`noteflow self-update`** (`selfUpdateSkill()` / `refreshInstalledSkills()`): tras el binario —también
+  si ya estaba al día— reescribe la skill **solo donde ya existe `noteflow-cli/SKILL.md`**: nunca la
+  instala donde no estaba ni la resucita si el usuario la desactivó en la app (el toggle borra las
+  copias). Si no hay ninguna copia, ni descarga. Bajo `sudo` resuelve el home con `SUDO_USER`
+  (`skillHome()`); como solo sobrescribe ficheros existentes, conservan su propietario. Best-effort:
+  un fallo solo emite un `Warning:` por stderr. Tests en `tests/cli/skillUpdate.test.ts`.
+- ⚠️ Con la app instalada, cada arranque re-sincroniza la skill a la versión **empaquetada**: tras un
+  `self-update` la skill de `main` dura hasta el siguiente arranque de una app más antigua, que la
+  devuelve a la suya (el `noteflow.js` actualizado se queda) — desfase temporal y aceptado.
 
 ## Temas
 

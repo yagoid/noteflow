@@ -22,8 +22,8 @@ La **documentación del proyecto** vive en `.agents/context/*.md` (abajo el mapa
 - Al cerrar una feature importante, **actualizar la documentación** (el `.agents/context/*.md` que
   toque y la skill `noteflow-features` si es UX) y, si es visible, `docs/` y `README.md`.
 - **CLI y su skill llevan siempre la misma versión:** si tocas `cli/noteflow.js` o
-  `cli/noteflow-cli/SKILL.md`, sube juntos `CLI_VERSION` (+ cabecera `// v`) y el `version:` de la
-  skill (+ su ejemplo de `noteflow version`). Independiente de la versión del escritorio (detalle en
+  `cli/noteflow-cli/SKILL.md`, sube juntos `CLI_VERSION` (+ cabecera `// v`) y el `version:` del
+  frontmatter de la skill. Independiente de la versión del escritorio (detalle en
   `.agents/context/patterns.md` § CLI).
 - **Al cerrar un desarrollo, valora si también tiene sentido en móvil** (`yagoid/noteflow-mobile`). Si
   sí, déjalo pendiente con el CLI en la nota `NOTEFLOW-MOBILE` (en Git Bash, `noteflow.cmd`): elige la
