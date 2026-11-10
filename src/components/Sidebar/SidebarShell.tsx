@@ -17,8 +17,8 @@ import { useT } from '../../i18n/useT'
  *  close delay bridges moving between the strip and the panel. */
 const OPEN_DELAY = 120
 const CLOSE_DELAY = 200
-/** Gap (px) between the window's left edge and the floating panel. */
-const PANEL_LEFT = 8
+/** Gap (px) between the floating panel and the edges of the content row (left, top and bottom). */
+const PANEL_INSET = 8
 /** Docked width animation (ms) — same as before the floating mode existed. */
 const DOCK_TRANSITION_MS = 220
 
@@ -56,9 +56,10 @@ function isKeyboardFocus(el: EventTarget | null): boolean {
  * Hosts the (single) Sidebar instance in either mode without remounting it:
  *  - docked: an in-flow spacer reserves the width and the sidebar sits over it
  *    at full height (the width animates on show/hide, as in the brain view);
- *  - floating: the same sidebar becomes an overlay panel spanning the content
- *    area of the leftmost pane (measured from its content anchor), opened by
- *    hovering the mini-view strip at the content's left edge. It stays open
+ *  - floating: the same sidebar becomes an overlay panel spanning the whole
+ *    content row (inset a little, like a card), opened by hovering the mini-view
+ *    strip — which lines up with the text of the leftmost pane (measured from
+ *    its content anchor) — at the content's left edge. It stays open
  *    while hovered, while it holds text/keyboard focus, while a menu or modal
  *    launched from it is open, and during a drag started in it.
  */
@@ -136,7 +137,8 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
     if (active instanceof HTMLElement && hostRef.current?.contains(active) && !isKeyboardFocus(active)) active.blur()
   }, [floating])
 
-  // ── Placement: line up with the content anchor of the leftmost pane ────────
+  // ── Strip placement: line up with the content anchor of the leftmost pane ──
+  // (Only the mini-view strip uses `bounds`; the panel spans the whole row.)
   useEffect(() => {
     if (!floating) return
     const container = containerRef.current
@@ -361,11 +363,11 @@ export function SidebarShell({ containerRef, floating, visible, width, animate, 
   const hostStyle: React.CSSProperties = floating
     ? {
         position: 'absolute',
-        left: PANEL_LEFT,
-        top: bounds?.top ?? 12,
-        bottom: bounds?.bottom ?? 12,
+        left: PANEL_INSET,
+        top: PANEL_INSET,
+        bottom: PANEL_INSET,
         width,
-        maxWidth: `calc(100% - ${PANEL_LEFT * 2}px)`,
+        maxWidth: `calc(100% - ${PANEL_INSET * 2}px)`,
         zIndex: 40,
         overflow: 'hidden',
         opacity: open ? 1 : 0,

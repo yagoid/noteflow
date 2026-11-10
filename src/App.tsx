@@ -639,7 +639,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
         {sidebarDocked && (
           <div
             onMouseDown={handleDragStart}
-            className="w-1 flex-shrink-0 cursor-col-resize hover:bg-text/30 active:bg-text/50
+            className="w-1 flex-shrink-0 cursor-col-resize bg-[rgb(var(--bg-editor))] hover:bg-text/30 active:bg-text/50
                        transition-colors group relative z-10"
             title={t.shell.dragToResize}
           />

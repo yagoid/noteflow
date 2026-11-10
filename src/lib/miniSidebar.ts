@@ -222,7 +222,7 @@ export function miniSidebarWindow(total: number, capacity: number, focusIndex: n
   return { start, end: start + capacity }
 }
 
-// ── Floating panel placement ──────────────────────────────────────────────────
+// ── Mini-view strip placement ─────────────────────────────────────────────────
 
 export interface RectLike {
   top: number
@@ -232,7 +232,7 @@ export interface RectLike {
 }
 
 /**
- * The content anchor the floating sidebar lines up with: the leftmost visible
+ * The content anchor the mini-view strip lines up with: the leftmost visible
  * one (in a split, the first pane on screen), the topmost on a tie. Anchors
  * with no area or entirely outside the container (scrolled-away panes) are
  * ignored. -1 when none qualifies.
@@ -250,16 +250,17 @@ export function pickSidebarAnchor(anchors: readonly RectLike[], container: RectL
   return best
 }
 
-/** Inset (px) between the content edges and the floating panel / mini-view (like the TOC's top-3/bottom-3). */
+/** Inset (px) between the content edges and the mini-view strip (like the TOC's top-3/bottom-3). */
 export const FLOATING_SIDEBAR_INSET = 12
-/** Minimum height (px) of the floating panel: a too-short content area grows it downwards first, then upwards. */
+/** Minimum height (px) of the mini-view strip: a too-short content area grows it downwards first, then upwards. */
 export const FLOATING_SIDEBAR_MIN_HEIGHT = 240
 
 /**
- * Vertical placement of the floating panel inside `container` (both offsets
+ * Vertical placement of the mini-view strip inside `container` (both offsets
  * relative to the container: `top` from its top edge, `bottom` from its bottom
  * edge). It spans the anchor's box — where the text of the leftmost pane starts
- * and ends — inset a little; without an anchor, the whole container.
+ * and ends — inset a little; without an anchor, the whole container. (The
+ * floating panel itself doesn't use it: it spans the whole row.)
  */
 export function floatingSidebarBounds(
   container: { top: number; bottom: number },
