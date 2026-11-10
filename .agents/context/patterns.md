@@ -1054,6 +1054,53 @@ justo para ver el caret, que queda pegado al borde inferior (el `padding-bottom:
   8/32 px en `StickyApp.tsx`, con `.sticky-editor .ProseMirror` a `padding-bottom: 2.5rem`): en una
   ventana de 200–300 px las franjas de 40+96 px casi se solaparían.
 
+### Editor: historial de deshacer por sección (sobrevive a remontajes)
+`Ctrl+Z`/`Ctrl+Shift+Z` conservan el historial **de cada sección** (nunca uno global que salte entre
+secciones) al cambiar de sección, de nota o de vista (contenido, cerebro, overview…), aunque el editor
+se desmonte. Cachés a nivel de módulo, una por renderer (la ventana de sección tiene la suya), clave
+`noteId/sectionId`, LRU de 30 (`UNDO_HISTORY_LIMIT`): `src/lib/undoHistoryCache.ts` (puro, tests en
+`tests/lib/undoHistoryCache.test.ts`) + singletons y poda en `components/Editor/undoHistory.ts`.
+- **Modo markdown:** el `<Editor key={nota-sección}>` se recrea a propósito en cada cambio (estado
+  limpio), así que el historial se **saca por fuera**: prop opt-in `persistHistory` (solo `NoteEditor`;
+  sticky no). Al desmontar (tras el `contentSave.flush()`) `snapshotEditorHistory` lo guarda; al montar,
+  `restoreEditorHistory` lo repone con `view.updateState` (no emite `update` → no guarda) y solo si el
+  editor nuevo no tiene historial propio (StrictMode). `src/lib/editorHistory.ts`, tests en
+  `tests/lib/editorHistory.test.ts` (ProseMirror pelado) y `editorHistoryTiptap.test.ts` (TipTap real).
+  - **No se guarda el `EditorState`:** cada instancia TipTap crea **su propio `Schema`** y ProseMirror
+    compara tipos de nodo/marca por identidad (`doc.eq` entre esquemas siempre es falso, y los pasos del
+    historial viejo meterían nodos del esquema viejo); además el esquema retiene el editor destruido. El
+    snapshot es JSON sin esquema: doc final, doc anterior al nivel de undo más antiguo (`base`) y los
+    pasos de cada nivel de undo (los pasos de cada `undo` invertidos) y de redo. Restaurar = reproducir
+    sobre `base` con el esquema nuevo (un estado con **solo** el plugin de history, cada nivel con
+    `closeHistory`), reproducir los redo y deshacerlos, comprobar que el doc resultante es **exactamente**
+    el del snapshot y `reconfigure` con los plugins del editor nuevo (el campo de history se conserva:
+    su `PluginKey` es de módulo; el resto se inicializa limpio).
+  - **Validación por contenido:** solo se restaura si el doc del snapshot es igual al que el editor
+    nuevo parseó del store, o si el `content` del store es el markdown que el editor serializó al
+    desmontarse (mismo guardado → nada que guardar). Si no (sync, CLI, agente, otra ventana o el Modo
+    texto lo cambiaron mientras tanto) se **descarta**: Ctrl+Z no debe revertir (y guardar) un cambio
+    externo — misma regla que `replaceDocKeepingSelection`. La selección es la del editor nuevo
+    (inicio), no la del snapshot.
+- **Modo texto:** las pilas (`RawUndoHistory`: undo/redo/`lastPush`/`content`) viven en la caché en
+  vez de en refs de `NoteEditor` (`recordRawEdit`/`undoRaw`/`redoRaw`). `content` = el buffer en el que
+  acaban: **solo aplican mientras el buffer sigue siéndolo** (lo comprueban las tres funciones), así que
+  una sección cambiada mientras no estabas deja su historial inerte (no se borra al volver: otro panel
+  puede estar usándolo). Una actualización externa aplicada o fusionada en un panel solo lo borra si es
+  **el de ese buffer** (`isRawHistoryOf(historial, rawContent)`). Insertar imágenes también es un nivel
+  de undo; tras un undo/redo la siguiente edición abre nivel nuevo y vacía el redo.
+- **Invalidación (texto en claro):** una suscripción al store poda las entradas de notas o secciones
+  borradas y de notas cifradas sin contraseña de sesión (bloquear/cifrar dejan `sections: []`). Va
+  síncrona con el `set`, **antes** de que React desmonte los editores, por eso el snapshot al desmontar
+  comprueba `canKeepUndoHistory` (si no, una nota recién bloqueada o borrada volvería a la caché).
+- **Paneles con la misma sección:**
+  - *Markdown:* cada `Editor` tiene su historial vivo; la caché solo lo guarda entre montajes. El primero
+    en montar se lleva la entrada (`take`); al desmontarse, gana el último.
+  - *Modo texto:* el historial de la sección es **uno solo, compartido en vivo** por los paneles que la
+    tengan abierta (misma entrada de la caché). Lo que escribe el panel 1 llega al panel 2 como
+    actualización externa (`apply`): el panel 2 **no** lo borra (el historial acaba en el buffer del
+    panel 1, no en el suyo) y Ctrl+Z sigue funcionando en el panel 1. Cuando el panel 2 ya muestra ese
+    mismo texto, también puede deshacer con él (y su edición pasa a ser la del historial).
+
 ### Editor: autocierre de paréntesis
 Extensión `components/Editor/AutoCloseBrackets.ts` (registrada en `Editor.tsx`) que envuelve el plugin
 de `src/lib/autoCloseBrackets.ts`; toda la lógica vive en el lib, sin DOM, para testearla contra un

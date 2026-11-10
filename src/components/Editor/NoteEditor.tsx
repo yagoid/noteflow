@@ -27,6 +27,8 @@ import { TempNoteExpiryMenu } from './TempNoteExpiryMenu'
 import { SectionMap } from './SectionMap'
 import { AiChatButton } from '../AiPanel/AiChatButton'
 import { createDebouncedSave } from '../../lib/pendingEdits'
+import { isRawHistoryOf, recordRawEdit, redoRaw, undoRaw } from '../../lib/undoHistoryCache'
+import { rawUndoHistory } from './undoHistory'
 import {
   createContentSync, mapOffsetThroughChange, needsSave, recordSave, resolveExternalContent, type ContentSync,
 } from '../../lib/externalContentSync'
@@ -134,11 +136,6 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   // Debounced saves are registered in lib/pendingEdits (pruning a note or closing the
   // window flushes them first) and flushed when this editor goes away.
   useEffect(() => () => { rawSave.flush(); titleSave.flush() }, [rawSave, titleSave])
-
-  // Per-section undo/redo stacks for raw mode
-  const undoStackMap = useRef<Map<string, string[]>>(new Map())
-  const redoStackMap = useRef<Map<string, string[]>>(new Map())
-  const lastUndoPushRef = useRef<Map<string, number>>(new Map())
 
   // Tab rename state
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -311,15 +308,20 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   // the old text over the update. Echoes of our own saves are ignored, genuine
   // external content is applied when no raw edit is in flight, or merged with it
   // (and the merge saved). The caret is kept across the replacement. The section's raw
-  // undo/redo history is dropped instead of recording the pre-update text: Ctrl+Z must
-  // not silently revert the external change and save that (same rule as the rich editor).
+  // undo/redo history is dropped (when it ends at this pane's buffer — another pane on the
+  // same section may own it, see isRawHistoryOf) instead of recording the pre-update text:
+  // Ctrl+Z must not silently revert the external change and save that (same rule as the
+  // rich editor).
   const rawKey = note && activeSection ? `${note.id}/${activeSection.id}` : null
   const syncRawFromStore = () => {
-    if (!rawKey || !activeSection) return
+    if (!rawKey || !note || !activeSection) return
     const incoming = activeSection.content
     const tracked = rawSyncRef.current
     if (tracked?.key !== rawKey) {
       // Another section in the buffer, just loaded (no edit of it yet): follow the store.
+      // Its text-mode history (kept across section switches and remounts) only applies
+      // while the buffer is the one it ends at (undoRaw/recordRawEdit check it): changed
+      // meanwhile, it's inert here. Not deleted — another pane may be editing it live.
       rawSyncRef.current = { key: rawKey, sync: createContentSync(incoming) }
       rawDeferredRef.current = false
       if (rawContent !== incoming) setRawContent(incoming)
@@ -333,9 +335,11 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     const result = resolveExternalContent(tracked.sync, { incoming, current: rawContent, pending: rawSave.isPending() })
     if (result.kind !== 'apply' && result.kind !== 'merge') return
     const next = result.kind === 'apply' ? incoming : result.merged
-    undoStackMap.current.delete(activeSection.id)
-    redoStackMap.current.delete(activeSection.id)
-    lastUndoPushRef.current.delete(activeSection.id)
+    // Only if the history is this buffer's: another pane on this section shares it, and
+    // its edit reaching us here as an external update must keep its Ctrl+Z working.
+    if (isRawHistoryOf(rawUndoHistory.get(note.id, activeSection.id), rawContent)) {
+      rawUndoHistory.delete(note.id, activeSection.id)
+    }
     const textarea = rawTextareaRef.current
     if (textarea && textarea === document.activeElement) {
       const before = rawDisplay(rawContent)
@@ -439,16 +443,14 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Undo/Redo logic ────────────────────────────────────────────────────────
-  const pushToUndoStack = useCallback((sectionId: string, prevContent: string) => {
-    const now = Date.now()
-    const lastTime = lastUndoPushRef.current.get(sectionId) ?? 0
-    if (now - lastTime > 500) {
-      const stack = undoStackMap.current.get(sectionId) ?? []
-      undoStackMap.current.set(sectionId, [...stack, prevContent].slice(-100))
-      lastUndoPushRef.current.set(sectionId, now)
-      redoStackMap.current.delete(sectionId)
-    }
-  }, [])
+  // Text mode keeps its own per-section history in a module-level cache (not a ref), so
+  // it survives this editor unmounting (content / brain / overview views): undoHistory.ts.
+  const recordRawUndo = (prev: string, next: string) => {
+    const noteId = noteRef.current?.id
+    const sectionId = activeSection?.id
+    if (!noteId || !sectionId) return
+    rawUndoHistory.set(noteId, sectionId, recordRawEdit(rawUndoHistory.get(noteId, sectionId), prev, next, Date.now()))
+  }
 
   // Debounced save of the raw buffer to the section shown now — every local raw
   // edit goes through here, so "a raw edit is pending" == rawSave.isPending().
@@ -500,6 +502,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     const textarea = rawTextareaRef.current
     const pos = textarea?.selectionStart ?? rawContent.length
     const newValue = rawContent.substring(0, pos) + insertText + rawContent.substring(pos)
+    recordRawUndo(rawContent, newValue)
     setRawContent(newValue)
     scheduleRawSave(newValue)
   }, [rawContent, activeSection, updateSection]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -948,7 +951,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
       return src ? `${prefix}(${src})` : `${prefix}([image])`
     })
 
-    if (activeSection) pushToUndoStack(activeSection.id, rawContent)
+    recordRawUndo(rawContent, newContent)
     setRawContent(newContent)
     scheduleRawSave(newContent)
   }
@@ -959,30 +962,15 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     const sectionId = activeSection?.id
     if (!sectionId) return
 
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+    const undoKey = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey
+    const redoKey = (e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))
+    if (undoKey || redoKey) {
       e.preventDefault()
-      const stack = undoStackMap.current.get(sectionId) ?? []
-      if (stack.length > 0) {
-        const prev = stack[stack.length - 1]
-        undoStackMap.current.set(sectionId, stack.slice(0, -1))
-        const redoStack = redoStackMap.current.get(sectionId) ?? []
-        redoStackMap.current.set(sectionId, [...redoStack, rawContent])
-        setRawContent(prev)
-        scheduleRawSave(prev)
-      }
-      return
-    }
-
-    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
-      e.preventDefault()
-      const redoStack = redoStackMap.current.get(sectionId) ?? []
-      if (redoStack.length > 0) {
-        const next = redoStack[redoStack.length - 1]
-        redoStackMap.current.set(sectionId, redoStack.slice(0, -1))
-        const undoStack = undoStackMap.current.get(sectionId) ?? []
-        undoStackMap.current.set(sectionId, [...undoStack, rawContent])
-        setRawContent(next)
-        scheduleRawSave(next)
+      const step = (undoKey ? undoRaw : redoRaw)(rawUndoHistory.get(note.id, sectionId), rawContent)
+      if (step) {
+        rawUndoHistory.set(note.id, sectionId, step.history)
+        setRawContent(step.content)
+        scheduleRawSave(step.content)
       }
       return
     }
@@ -1445,6 +1433,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                 autoFocus={renamingId === null}
                 currentSectionId={activeSection?.id ?? null}
                 showToc={showToc}
+                persistHistory
               />
               {searchOpen && (
                 <InNoteSearchBar

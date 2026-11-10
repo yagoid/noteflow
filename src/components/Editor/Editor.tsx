@@ -1,6 +1,7 @@
 import { useEditor, EditorContent } from '@tiptap/react'
 import type { Editor as TiptapEditor } from '@tiptap/react'
 import History from '@tiptap/extension-history'
+import { redoDepth, undoDepth } from '@tiptap/pm/history'
 import Placeholder from '@tiptap/extension-placeholder'
 import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
@@ -23,6 +24,8 @@ import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../lib/m
 import { isEditorWidgetTarget, widgetFieldHasFocus } from '../../lib/editorFocus'
 import { createDebouncedSave, type SaveRun } from '../../lib/pendingEdits'
 import { createContentSync, needsSave, recordSave, resolveExternalContent } from '../../lib/externalContentSync'
+import { restoreEditorHistory, snapshotEditorHistory } from '../../lib/editorHistory'
+import { canKeepUndoHistory, richUndoHistory } from './undoHistory'
 import { useT } from '../../i18n/useT'
 
 /**
@@ -114,6 +117,10 @@ interface EditorProps {
   /** Show the floating table of contents (H1–H3) at the right of the editor.
    *  Off by default: only the main note editor opts in (not sticky windows). */
   showToc?: boolean
+  /** Keep the undo/redo history of this section (`noteId` + `currentSectionId`) across
+   *  remounts: snapshotted on unmount, restored on mount if the content is still the
+   *  same (components/Editor/undoHistory.ts). Only the main note editor opts in. */
+  persistHistory?: boolean
 }
 
 export interface EditorHandle {
@@ -134,6 +141,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   currentSectionId,
   caretScrollGap = DEFAULT_CARET_SCROLL_GAP,
   showToc = false,
+  persistHistory = false,
 }, ref) {
   // Debounced save of the content (400 ms after the last change). Registered in
   // lib/pendingEdits while pending, and flushed on unmount (section/note switch,
@@ -243,6 +251,41 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       contentSave.schedule(noteId, 400, (run) => saveContent(editor, run))
     },
   })
+
+  // The section's undo history across remounts (`persistHistory`). Restored once, on
+  // mount, onto the untouched editor — only if the content is still what it was
+  // snapshotted at (lib/editorHistory.ts). Snapshotted when the editor goes away,
+  // after its pending save is flushed (the effect above flushes too: the second
+  // flush is a no-op), unless the section may no longer keep it (deleted, or its
+  // note locked/encrypted: the store prune already ran — components/Editor/undoHistory.ts).
+  useEffect(() => {
+    const sectionId = currentSectionId
+    if (!editor || !persistHistory || readOnly || !noteId || !sectionId) return
+    const cached = richUndoHistory.take(noteId, sectionId)
+    if (cached && undoDepth(editor.state) === 0 && redoDepth(editor.state) === 0) {
+      const restored = restoreEditorHistory(cached, editor.state, contentRef.current)
+      if (restored) {
+        editor.view.updateState(restored)
+        // Lets TipTap's listeners (toolbar, TOC) see the new state. Not an edit: no save.
+        editor.view.dispatch(editor.state.tr.setMeta('addToHistory', false).setMeta('preventUpdate', true))
+      }
+    }
+    return () => {
+      contentSave.flush()
+      const { state } = editor
+      if (undoDepth(state) === 0 && redoDepth(state) === 0) return
+      if (!canKeepUndoHistory(noteId, sectionId)) return
+      // Best effort: a failed snapshot just loses the history, never the unmount.
+      try {
+        const snapshot = snapshotEditorHistory(state, htmlToMarkdown(editor.getHTML()))
+        if (snapshot) richUndoHistory.set(noteId, sectionId, snapshot)
+      } catch {
+        richUndoHistory.delete(noteId, sectionId)
+      }
+    }
+    // Once per editor instance (it's keyed by section, so these props don't change).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor])
 
   // Hands the editor's markdown to the store, remembering it so its echo isn't
   // taken for an external update. This is THE "nothing changed" check (the

@@ -117,6 +117,7 @@ noteflow/
 │   │   │   ├── Editor.tsx               # Instancia TipTap (conversión md↔html en lib/markdownHtml.ts)
 │   │   │   ├── editorExtensions.ts      #   extensiones que definen el esquema (nodos/marcas/atributos); las usan Editor.tsx y el harness de round-trip
 │   │   │   ├── NoteEditor.tsx           # Wrapper con tabs de secciones (click derecho → NoteContextMenu), atajos de fuente
+│   │   │   ├── undoHistory.ts           #   cachés (una por ventana) del historial undo/redo por sección + poda al borrar/bloquear (ver patterns.md)
 │   │   │   ├── EditorToolbar.tsx        # Toolbar de formato
 │   │   │   ├── SnippetsButton.tsx       #   botón partido de fragmentos (insertar el por defecto / elegir) + SnippetsModal.tsx
 │   │   │   ├── snippetCommands.ts       #   inserción de un fragmento expandido como markdown (slice inline o de bloques)

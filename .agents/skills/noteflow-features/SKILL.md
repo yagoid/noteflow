@@ -690,7 +690,10 @@ sin renderizar (un `# Título` se ve con la almohadilla).
 En ambos modos el `.md` de la sección guarda markdown (el editor serializa con `htmlToMarkdown`).
 
 - Alternar con `Ctrl+M` (o el icono Eye/Edit en la toolbar).
-- Undo/Redo con `Ctrl+Z` / `Ctrl+Y`.
+- Undo/Redo con `Ctrl+Z` / `Ctrl+Y` (o `Ctrl+Shift+Z`). Cada sección tiene **su propio historial**, que
+  se conserva al cambiar de sección, de nota o de vista y volver (hasta ~30 secciones recientes); se
+  descarta si la sección cambió por fuera mientras tanto (sync, CLI, IA, otra ventana) y al bloquear o
+  cifrar la nota.
 
 ### Formatos soportados
 | Elemento | Markdown | Atajo |
