@@ -804,9 +804,11 @@ function isAllowedRedirectUpdateUrl(url) {
     return ALLOWED_UPDATE_REDIRECT_HOSTS.has(url.hostname);
 }
 function createWindow(hidden = false) {
+    // Default size, clamped to the work area so it never overflows small screens.
+    const workArea = electron_1.screen.getPrimaryDisplay().workAreaSize;
     const win = new electron_1.BrowserWindow({
-        width: 1280,
-        height: 820,
+        width: Math.max(700, Math.min(1440, Math.round(workArea.width * 0.92))),
+        height: Math.max(500, Math.min(920, Math.round(workArea.height * 0.92))),
         minWidth: 700,
         minHeight: 500,
         frame: false,
