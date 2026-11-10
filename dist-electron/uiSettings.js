@@ -22,9 +22,18 @@
 //     to the theme's triple on every theme change. PENDING in the mobile mirror:
 //     its sanitizer still only accepts triplets, so the phone ignores "text"
 //     (follows the theme) and drops it from the file on its next write.
-// `theme` and the `editor` fields always hold concrete values, so null is not
-// accepted for them (invalid values are silently dropped, like
-// sanitizeSectionColors does).
+// `theme`, `lastDarkThemeId` / `lastLightThemeId` and the `editor` fields always
+// hold concrete values, so null is not accepted for them (invalid values are
+// silently dropped, like sanitizeSectionColors does).
+//
+// `lastDarkThemeId` / `lastLightThemeId`: the last theme of each kind the user
+// had, for the sidebar footer's quick Light / Dark switch (src/lib/themeMemory.ts).
+// Shape-validated only, like `theme`; the renderer drops ids that aren't a theme
+// of that kind. Older desktops and the mobile mirror (PENDING) don't know them:
+// their sanitizer drops them when rebuilding the file, so they erase them on their
+// next ui-settings write of any kind (font size, showToc…), and the file is
+// last-write-wins as a whole on GitHub and Cloud. The desktop then falls back to
+// its in-memory memory or NoteFlow Dark / Light, with no errors.
 //
 // `ui-settings:set` receives a PARTIAL patch that main merges over what is on
 // disk (shallow per top-level key; per-key for editorColors/editor), so the two
@@ -75,6 +84,10 @@ function sanitizeUiSettings(raw) {
     const out = {};
     if (isShortString(input.theme))
         out.theme = input.theme;
+    if (isShortString(input.lastDarkThemeId))
+        out.lastDarkThemeId = input.lastDarkThemeId;
+    if (isShortString(input.lastLightThemeId))
+        out.lastLightThemeId = input.lastLightThemeId;
     if (input.appFont === null)
         out.appFont = null;
     else if (isShortString(input.appFont))
@@ -137,6 +150,10 @@ function mergeUiSettings(current, patch) {
     const merged = { ...current };
     if ('theme' in clean)
         merged.theme = clean.theme;
+    if ('lastDarkThemeId' in clean)
+        merged.lastDarkThemeId = clean.lastDarkThemeId;
+    if ('lastLightThemeId' in clean)
+        merged.lastLightThemeId = clean.lastLightThemeId;
     if ('appFont' in clean)
         merged.appFont = clean.appFont;
     if ('accent' in clean)

@@ -54,9 +54,24 @@ export const sidebar = {
   deleteGroup: 'Delete group',
   deleteGroupMessage: '"{name}" will be deleted. Notes inside will become ungrouped.',
 
-  // Footer: "N notes · M sections" (common.notesPlural + overview.sectionsPlural) and the ⋯
-  // menu (Sidebar/SidebarFooterMenu.tsx): theme · sections style · archived toggle.
+  // Footer identity line (Sidebar/SidebarIdentity.tsx): "<home folder> · <storage>", or
+  // "<home folder> · <plan> ⌄" with an active NoteFlow plan. {repo} = repo name, no owner.
+  storageLocal: 'Local notes',
+  storageGithub: 'GitHub · {repo}',
+  storageCloud: 'NoteFlow Cloud',
+  planBundle: 'Bundle',
+  planCloud: 'Cloud',
+  planAi: 'AI',
+  // Plan name button ({plan} = one of the names above) and its small menu into Settings.
+  planMenuButton: '{plan} plan',
+  planMenuLabel: 'Plan settings',
+  planMenuSync: 'Sync',
+  planMenuAi: 'AI',
+
+  // Footer ⋯ menu (Sidebar/SidebarFooterMenu.tsx): sync (no plan; with one, the plan menu has
+  // it) · theme · sections style · archived toggle.
   moreOptions: 'More options',
+  menuSync: 'Sync',
   menuTheme: 'Theme',
   themeLight: 'Light',
   themeDark: 'Dark',

@@ -32,9 +32,10 @@ import { useOpenNoteSection } from './useOpenNoteSection'
 import { useThemeStore, type SidebarSectionsStyle } from '../../stores/themeStore'
 import { GroupPeek, type GroupPeekController } from './GroupPeek'
 import { SidebarFooterMenu } from './SidebarFooterMenu'
+import { SidebarIdentity } from './SidebarIdentity'
 import { formatExpiry, formatNoteDate, renderHighlightedText } from './rowText'
 import { useT } from '../../i18n/useT'
-import { plural, tf } from '../../i18n/format'
+import { tf } from '../../i18n/format'
 import type { GroupColor, Note } from '../../types'
 import type { TagColorMap } from '../../lib/tagColors'
 
@@ -278,6 +279,8 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   // Footer ⋯ menu: opens upwards above its button (x = left edge, y = bottom edge).
   const [footerMenu, setFooterMenu] = useState<{ x: number; y: number } | null>(null)
   const closeFooterMenu = useCallback(() => setFooterMenu(null), [])
+  // The identity line's plan menu (owned by SidebarIdentity), only for peekBlocked.
+  const [identityMenuOpen, setIdentityMenuOpen] = useState(false)
 
   // â”€â”€ Note reorder via drag & drop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [noteDropTarget, setNoteDropTarget] = useState<{
@@ -390,9 +393,6 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const hasTagFilter = Boolean(filterTag)
   const hasArchivedFilter = showArchived
   const hasActiveFilters = hasSearchFilter || hasTagFilter || hasArchivedFilter
-  // Footer "N notes · M sections": exactly what the list shows (archived / tag / search
-  // filters applied; locked encrypted notes hold no sections in memory → count 0).
-  const sectionCount = useMemo(() => notes.reduce((sum, n) => sum + n.sections.length, 0), [notes])
 
   // Section headers ("groups" / "notes") mirror the favorites label. Compute the
   // first group that will actually render and the first ungrouped note, so each
@@ -421,7 +421,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   // confirmations (Group/FolderContextMenu) cover the screen, so no header can be hovered.
   const peekBlocked =
     draggingGroupId != null || contextMenu != null || groupContextMenu != null ||
-    folderContextMenu != null || newNoteCtx != null || footerMenu != null ||
+    folderContextMenu != null || newNoteCtx != null || footerMenu != null || identityMenuOpen ||
     editingGroupId != null || editingFolderId != null || newFolderInput != null || newGroupInput
   // Only label the ungrouped remainder ("notes") when something sits above it â€”
   // a flat list with no favorites and no groups needs no header.
@@ -1308,9 +1308,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
       {/* â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="h-px shrink-0 bg-border" />
       <div className="h-10 shrink-0 pl-3 pr-1.5 flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-xs font-mono text-text-muted/40">
-          {plural(t.common.notesPlural, notes.length)} · {plural(t.overview.sectionsPlural, sectionCount)}
-        </span>
+        <SidebarIdentity onMenuOpenChange={setIdentityMenuOpen} />
         <button
           onClick={(e) => {
             // Stop here: the window click listener would close the menu right away.
@@ -1331,7 +1329,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
         </button>
       </div>
 
-      {/* Footer ⋯ menu (theme · sections · archived): opens upwards, just above the button. */}
+      {/* Footer ⋯ menu (sign in · theme · sections · archived): opens upwards, just above the button. */}
       {footerMenu && (
         <SidebarFooterMenu x={footerMenu.x} y={footerMenu.y} onClose={closeFooterMenu} />
       )}

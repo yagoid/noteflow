@@ -15,6 +15,9 @@ const api = {
     // low-power laptop chips; os.cpus() exposes the CPU model (with base clock) and
     // os.totalmem() the real RAM.
     hardware: electron_1.ipcRenderer.sendSync('app:get-hardware'),
+    // Name of the user's home folder (basename of ~), static: read once here so the sidebar
+    // footer's identity line needs no IPC round-trip.
+    systemUserName: electron_1.ipcRenderer.sendSync('app:get-user-name'),
     // File system (folder-per-note: one dir per note, one .md per section)
     readAllNotes: () => electron_1.ipcRenderer.invoke('fs:read-all-notes'),
     readNoteDir: (dir) => electron_1.ipcRenderer.invoke('fs:read-note-dir', dir),

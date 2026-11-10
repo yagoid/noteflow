@@ -104,12 +104,13 @@ noteflow/
 │   │   ├── groupsStore.ts            # Grupos — persistidos en groups.json (IPC)
 │   │   ├── templatesStore.ts         # Plantillas de nota — persistidas en templates.json (IPC)
 │   │   ├── snippetsStore.ts          # Fragmentos del toolbar — snippets.json (IPC, carga perezosa, autoguardado)
-│   │   ├── themeStore.ts             # Tema/fuente/acento/colores editor — SINCRONIZADO en ui-settings.json (IPC sendSync); escala de UI y estilo de secciones del sidebar en localStorage (por dispositivo)
+│   │   ├── themeStore.ts             # Tema/fuente/acento/colores editor + último tema oscuro/claro — SINCRONIZADO en ui-settings.json (IPC sendSync); escala de UI y estilo de secciones del sidebar en localStorage (por dispositivo)
 │   │   ├── languageStore.ts          # Idioma UI (i18n) — settings.json vía IPC; dict de src/i18n; cambio en caliente vía broadcast
 │   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible/índice (TOC) del editor — SINCRONIZADO en ui-settings.json (IPC)
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
 │   │   ├── aiStore.ts                # Estado del índice IA (enabled, related, grafo, progreso) vía IPC ai:*
 │   │   ├── whatsNewStore.ts          # Tour "What's new": ids vistos (settings.json vía IPC whats-new:*) + tour abierto
+│   │   ├── identityStore.ts          # Cuenta (sesión + plan) y backend de sync vivo para la línea de identidad del pie del sidebar (account:/sync:/cloud: status, ref-count connectIdentity)
 │   │   └── aiChatStore.ts            # Estado del chat/LLM (config por proveedor, modelos, mensajes, sesiones) vía IPC ai:llm-*/ai:chat*/ai:chats-*
 │   ├── components/
 │   │   ├── Editor/
@@ -150,6 +151,8 @@ noteflow/
 │   │   │   ├── SidebarShell.tsx         # Aloja el Sidebar fijado (en el layout) o flotante (panel
 │   │   │   │                            #   superpuesto + mini-vista); ver patterns.md "Sidebar flotante"
 │   │   │   ├── MiniSidebar.tsx          # Mini-vista sin texto del sidebar (modo flotante)
+│   │   │   ├── SidebarIdentity.tsx      # Pie: línea de identidad (inicial · usuario · almacenamiento/plan ⌄)
+│   │   │   ├── SidebarFooterMenu.tsx    # Pie: menú ⋯ (sync sin plan · tema claro/oscuro · secciones · archivadas) + menú del plan
 │   │   │   ├── sidebarAnchor.ts         # Anclas de contenido (data-sidebar-anchor) que mide el panel flotante
 │   │   │   └── useSidebarGroups.ts      # Hook: useMemo de lib/sidebarGroups.ts (agrupa/ordena por grupo→carpeta)
 │   │   ├── ContentView/                 # Vista de contenido unificada (sustituye editor; patterns.md
@@ -350,6 +353,8 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `alarms:schedule` | on | Registra el set de alarmas en el motor del main; dispara las vencidas |
 | `window:minimize` / `maximize` / `close` | on | Controles de ventana (frameless). Actúan sobre la ventana EMISORA; `close` oculta la principal (tray) y destruye cualquier otra (sticky, ventana de sección) |
 | `window:get-id` | on (sync) | webContents id de la ventana (para filtrar broadcasts) |
+| `app:get-hardware` | on (sync) | Núcleos, modelo/velocidad de CPU y RAM (`os`); el preload lo lee una vez al cargar → `window.noteflow.hardware` (ver `ai.md`) |
+| `app:get-user-name` | on (sync) | Nombre de la carpeta home (`path.basename(os.homedir())`); el preload lo lee una vez → `window.noteflow.systemUserName` (línea de identidad del pie del sidebar) |
 | `window:open-sticky` | on | Abre ventana sticky flotante |
 | `window:open-section-window` | on | `(noteId, sectionId)` → abre una ventana solo-editor (`#section-window?…`, `SectionWindowApp`); si una ventana de sección ya muestra esa nota+sección, la enfoca |
 | `window:section-window-target` | on | La ventana de sección informa de la nota+sección que muestra (para el "enfocar si ya existe" del canal anterior y la recarga tras crash) |
@@ -361,7 +366,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `sync:dismiss-conflict-copies` | handle | Descarta el aviso de **copias de conflicto** y de **fusiones con marcas** (`conflictMerges`) de la tarjeta del botón de sync (limpia el de **ambos** backends — `cloudSync`/`githubSync.dismissConflictCopies()` — y emite `cloud:status-changed` + `sync:status-changed`); las copias siguen siendo notas |
 | `sync:initiate` | handle | Inicia Device Flow OAuth (recibe `repo`); al completar → `sync-auth-complete` + autosync |
 | `sync:cancel-auth` | handle | Cancela un Device Flow en curso |
-| `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings. Después borra la copia del token del CLI (`cliGithubToken`) si quedó huérfana (`cliConnect.cleanupAfterAppGithubDisconnect`; en Windows el `githubSync` borrado era también el del CLI) |
+| `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings y emite `sync:status-changed` (`disconnectGitHub` solo lo emite si cambia `initialPullStatus`). Después borra la copia del token del CLI (`cliGithubToken`) si quedó huérfana (`cliConnect.cleanupAfterAppGithubDisconnect`; en Windows el `githubSync` borrado era también el del CLI) |
 | `cli-connect:get-status` | handle | Ajustes → Sync → "Connect the CLI too": qué tiene el CLI, leído de **su** `settings.json` → `{available, cloud: {connected, email?}, github: {connected, owner?, repo?, canDisconnect}}` (`available` = se encontró el CLI empaquetado). Cloud = presencia de `cliAccount` (nunca se lee su refresh token). Detalle en `patterns.md` § CLI "Conectar también el CLI" |
 | `cli-connect:cloud-send-code` / `cli-connect:cloud-verify` | handle | Cloud, pasos 1 y 2: ejecuta el CLI empaquetado (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`) con `cloud login <email> --send-code` y `cloud login <email> --code <código> --no-pull`. El email es el de la cuenta de la app (lo pone main); el código se valida en main (`^\d{6,10}$` tras quitar espacios/guiones) antes de llegar al argv → `{ok:true, status} \| {ok:false, error, detail?}` (`error`: `invalidCode`/`rateLimited`/`network`/`notSignedIn`/`cliMissing`/`failed`; `detail` = línea `Error:` del CLI) |
 | `cli-connect:cloud-disconnect` | handle | `cloud logout` del CLI (revoca solo su sesión, `scope=local`) |
@@ -472,7 +477,8 @@ Contenido del dir de notas:
   dispositivos marcan uno cada uno, el saneador deja solo el primero). El saneador de main conserva claves
   desconocidas de cada ítem (compatibilidad hacia delante). No va en `ui-settings.json` porque el móvil
   re-sanea ese fichero y borraría la clave. Sintaxis y decisiones en `patterns.md` § "Editor: fragmentos".
-- `ui-settings.json` — apariencia (tema, fuente de app, acento, colores del editor) + ajustes del
+- `ui-settings.json` — apariencia (tema, último tema oscuro/claro `lastDarkThemeId`/`lastLightThemeId`
+  para el Light / Dark del ⋯ del footer, fuente de app, acento, colores del editor) + ajustes del
   editor (tamaño/familia de fuente, ancho legible, índice flotante `showToc`) sincronizados entre dispositivos. Formato y
   saneado/merge en `electron/uiSettings.ts` (módulo puro, tests en `tests/electron/uiSettings.test.ts`).
   **Espejo en noteflow-mobile** (`src/core/uiSettings.ts`): su saneador también descarta claves
@@ -481,7 +487,11 @@ Contenido del dir de notas:
   acento). Todo campo nuevo del esquema hay que añadirlo en los dos. **Excepción consciente:** el
   valor centinela `'text'` de `accent`/`editorColors.*` (color "texto" adaptativo) aún no está en el espejo
   móvil — riesgos y compatibilidad con versiones anteriores en **Color "texto" adaptativo** de `patterns.md`
-  (sección "Colores del editor").
+  (sección "Colores del editor"). Tampoco están aún en el espejo móvil `lastDarkThemeId`/`lastLightThemeId`:
+  los desktops anteriores a ese cambio y el móvil las borran en su siguiente escritura de
+  `ui-settings.json` (de cualquier tipo, no solo de tema); el escritorio cae a la memoria en RAM o a
+  NoteFlow Dark / Light, sin errores — ver "Light / Dark recuerda el último tema de cada tipo" en
+  `patterns.md`.
   Claves de override tri-estado: AUSENTE = nunca escrita (los stores caen a las fuentes legacy
   locales y hacen seed una vez), `null` = override borrado explícitamente ("sigue al tema"),
   string = valor. Los stores (`themeStore`, `editorSettingsStore`) siguen dual-escribiendo las

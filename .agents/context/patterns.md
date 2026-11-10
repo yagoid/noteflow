@@ -1288,9 +1288,9 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   botones de nueva nota/grupo y footer quedan fijos. La única diferencia visual del flotante en `Sidebar`
   (`pinned=false`) es que no lleva `border-r` (el `aside` flotante dibuja su propio borde). Como el
   elemento que scrollea es el mismo, el scroll de la lista se conserva al cambiar de modo.
-- **Footer.** Divisor `h-px` de borde a borde y franja `h-10`: a la izquierda "N notes · M sections"
-  (`common.notesPlural` + `overview.sectionsPlural`, `text-text-muted/40`) y a la derecha un ⋯
-  (`sidebar.moreOptions`) que abre `Sidebar/SidebarFooterMenu.tsx`: un `ContextMenu` `fixed` con
+- **Footer.** Divisor `h-px` de borde a borde y franja `h-10`: a la izquierda la **línea de identidad**
+  (`Sidebar/SidebarIdentity.tsx`) y a la derecha un ⋯ (`sidebar.moreOptions`) que abre
+  `Sidebar/SidebarFooterMenu.tsx`: un `ContextMenu` `fixed` con
   `placement="above"`. El botón pasa `x = right − 208` (ancho `w-52`, `FOOTER_MENU_WIDTH`) e
   `y = top − 4`, y `ContextMenu` mide su alto y pone `top = y − height`. Así el borde inferior queda 4 px
   sobre el botón, alineado a su derecha; medido en Chromium: menú de 212 px, hueco de 4 px. Es `fixed` y
@@ -1298,19 +1298,69 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   que el menú. **`ContextMenu` solo conoce `x`/`y` y su tamaño medido, no los `transform` de su
   `className`**: subirlo con `-translate-y-full` hacía que su *clamp* al viewport (pensado para `y` =
   borde superior) lo recolocara y el translate lo subiera otra vez (unos 180 px de hueco). Para abrir hacia
-  arriba, usar `placement="above"`. Tres bloques (`role="group"` + `aria-label` = su título)
-  separados por `h-px`: **Theme** (Light / Dark = `LIGHT_THEME_ID` / `DEFAULT_THEME_ID` de
-  `lib/themes.ts`, ítems radio con check; con otro tema activo ninguno lleva check y elegir uno cambia a
-  ese), **Sections** (As map / As row = el ajuste local "Sections in the sidebar") y el toggle "Show
+  arriba, usar `placement="above"`. Arriba del todo, **solo sin plan activo** (`plan == null` de
+  `identityStore`, es decir, cuando la línea de identidad no tiene chevron de plan; con o sin sesión), un
+  ítem **Sync** (`sidebar.menuSync`, `RefreshCw`) + separador que abre Ajustes → Sync con el mismo evento
+  `noteflow:open-github-sync` del menú del plan; con plan no se duplica porque ese menú ya lo ofrece.
+  Luego tres bloques (`role="group"` + `aria-label` = su título)
+  separados por `h-px`: **Theme** (Light / Dark, ítems radio con check; ver **Light / Dark recuerda el
+  último tema de cada tipo** abajo), **Sections** (As map / As row = el ajuste local "Sections in the sidebar") y el toggle "Show
   archived"/"Hide archived". Al abrir, el foco va al primer ítem; al cerrar vuelve al ⋯ si no se ha movido
-  a otro sitio. Usa las mismas acciones que Ajustes → Apariencia (`themeStore.setTheme` /
-  `setSidebarSectionsStyle`), sin lógica propia; el menú solo se monta abierto, así sus suscripciones al
-  `themeStore` no re-renderizan el `Sidebar`. El
-  contador es **lo que lista el sidebar**: el `notes` ya filtrado (archivadas y grupos archivados salvo con
-  "Show archived", tag y búsqueda) y la suma de sus `sections` (`useMemo([notes])`; una cifrada
-  bloqueada no tiene secciones en memoria → 0). Sustituyó al antiguo "N notes" / "N / M notes".
+  a otro sitio (`useMenuFocus`, compartido con el menú del plan). Usa las mismas acciones que Ajustes →
+  Apariencia (`themeStore.setTheme` / `setSidebarSectionsStyle`), sin lógica propia; el menú solo se monta
+  abierto, así sus suscripciones al `themeStore` no re-renderizan el `Sidebar`.
   El menú se cierra con clic fuera (el listener `click` de `window` del sidebar), Esc o al elegir, y
   cuenta en `peekBlocked`.
+- **Light / Dark recuerda el último tema de cada tipo.** "Dark" aplica el último tema oscuro que tuvo el
+  usuario y "Light" el último claro (`colorScheme` de `THEMES`), con NoteFlow Dark / NoteFlow Light
+  (`DEFAULT_THEME_ID` / `LIGHT_THEME_ID`) por defecto. El check va por el `colorScheme` del tema activo,
+  no por su id: con Tokyo Night activo, "Dark" lleva check (y elegirlo no cambia nada). Lógica pura en
+  `lib/themeMemory.ts` (tests en `tests/lib/themeMemory.test.ts`): `resolveSchemeTheme` (el recordado si
+  existe y es de ese tipo; si no, el por defecto), `themeScheme` (id desconocido = oscuro, como
+  `currentTheme`), `rememberTheme` y `sanitizeThemeMemory`. El catálogo es estático (no hay temas de
+  usuario), así que un id recordado que ya no está en `THEMES` cae al por defecto. **Un solo sitio
+  registra la memoria:** `themeStore.themeMemory` incorpora el tema activo en `initTheme`,
+  `reloadUiSettings` (tema llegado por sync o desde otra ventana) y `setTheme` (Ajustes → Apariencia y
+  este menú); ningún llamador la toca. **Persistencia:** como el tema se sincroniza, la memoria también:
+  `lastDarkThemeId` / `lastLightThemeId` en `ui-settings.json` (saneador de `electron/uiSettings.ts`,
+  solo forma, como `theme`). Solo `setTheme` las escribe, y escribe las dos: así también queda guardado
+  el tema saliente si solo llegó por un reload (que nunca escribe). Límites conocidos: un cliente que
+  solo escribe `theme` (desktop antiguo, móvil) no actualiza la memoria, así que lo que llegue después
+  del fichero puede pisar en memoria un tema que solo vio por reload. Además, los **desktops anteriores
+  a este cambio y el móvil** (espejo `noteflow-mobile` `src/core/uiSettings.ts`, pendiente) no conocen
+  las claves: su saneador reconstruye el fichero solo con las que conoce, así que **las borran en su
+  siguiente escritura de `ui-settings.json` de cualquier tipo** (tamaño de fuente, `showToc`…, no solo un
+  cambio de tema), y el fichero viaja entero con last-write-wins en GitHub y Cloud. El escritorio cae
+  entonces a la memoria en RAM (si la clave falta en el fichero, `reloadUiSettings` conserva la suya) o a
+  NoteFlow Dark / Light, sin errores.
+- **Línea de identidad del footer** (`SidebarIdentity`, sustituyó al contador "N notes · M sections").
+  Una sola línea: círculo de 18 px con una inicial en mayúscula (`bg-text/20 text-text/90`: discreto, sigue
+  al color de texto del tema —gris claro con letra casi blanca en oscuro—; mismo para todos) y el texto `text-xs font-mono text-text-muted/40`:
+  - **Sin plan** (sin sesión, o con sesión free/caducada/plan aún desconocido): `<usuario> · <almacenamiento>`
+    en un único `span truncate`, así que se recorta por el final. Almacenamiento = `Local notes` sin
+    sync, `GitHub · <repo>` (solo el nombre, sin owner) con GitHub o `NoteFlow Cloud` si Cloud es el
+    backend vivo; sin indicador de estado de sync. Inicial: la del correo con sesión, si no la del usuario.
+  - **Con plan** (`activePlan` de `lib/subscriptionPlans.ts`: ambas entitlements → `Bundle`, si no
+    `Cloud` o `AI`; desconocidas = sin plan): `<usuario> · <Plan> ⌄`, inicial del correo. Solo el usuario
+    se recorta (`min-w-0 truncate`); el ` · ` y el botón del plan son `shrink-0`. El botón (texto
+    `text-text-muted/70`, `ChevronDown` 12 px, `aria-haspopup="menu"`) abre `SidebarPlanMenu`
+    (en `SidebarFooterMenu.tsx`): `ContextMenu` `w-40` `placement="above"` en `x = left` del botón,
+    `y = top − 4`, con **Sync** → `noteflow:open-github-sync` (Ajustes → Sync) y **AI** →
+    `noteflow:open-ai-settings` (Ajustes → AI). Mismo foco/a11y que el ⋯. Se cierra con Esc, al elegir o
+    con un clic fuera, escuchado en **captura** (`window`, ignora el botón y `[data-plan-menu]`): el ⋯
+    hace `stopPropagation`, y así abrir el ⋯ cierra el del plan; a la inversa, el botón del plan no para
+    la propagación y el listener del sidebar cierra el ⋯. Informa de su apertura con
+    `onMenuOpenChange` → `identityMenuOpen` del `Sidebar`, que cuenta en `peekBlocked`.
+  - **Datos:** `<usuario>` = nombre de la carpeta home (`window.noteflow.systemUserName`, valor estático
+    leído una vez por el preload con `app:get-user-name`). Cuenta y sync vienen de
+    `stores/identityStore.ts`: primitivas planas (`email`, `plan`, `syncBackend`, `githubRepo`) que el componente lee con selectores finos. `connectIdentity()`
+    (ref-count; lo llama `SidebarIdentity` al montar) hace `getAccountStatus` + `getActiveSyncStatus` y
+    sigue `account:status-changed`, `sync-auth-complete`, `sync:status-changed` y `cloud:status-changed`
+    (solo aplica la última petición de cada tipo). `SidebarIdentity` va en `memo` con una sola prop estable:
+    los cambios de cuenta/sync no re-renderizan el `Sidebar`.
+  - **Truncado medido a 180 px** (Chromium): franja de 180, ⋯ de 23 px pegado a la derecha (`right =
+    174`), círculo 18×18 fijo; quedan ~105 px de texto (sin plan, "yagoi · Local notes" ya se recorta) y,
+    con "Bundle ⌄" (65 px), ~22 px para el usuario ("ya…").
 - **Mini-vista.** Sin texto, una fila por fila real del sidebar, en el mismo orden
   (`buildMiniSidebarRows`, que comparte con `Sidebar` `orderFavorites`/`isSidebarGroupShown`/
   `isSidebarFolderShown` → mismos filtros, archivados y colapsados): nota = rectángulo `text` muy

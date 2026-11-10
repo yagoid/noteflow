@@ -533,6 +533,9 @@ export interface ActiveSyncStatus {
 // theme's --text). `ui-settings:set` takes a PARTIAL patch merged in main.
 export interface UiSettings {
   theme?: string
+  /** Last dark / light theme the user had (quick Light / Dark switch, src/lib/themeMemory.ts). */
+  lastDarkThemeId?: string
+  lastLightThemeId?: string
   appFont?: string | null
   accent?: string | null
   editorColors?: Partial<Record<'h1' | 'h2' | 'h3' | 'italic' | 'inlineCode' | 'codeAccent', string | null>>
@@ -552,6 +555,9 @@ declare global {
         cpuSpeedMHz: number
         totalMemGiB: number
       }
+      // Name of the user's home folder (basename of ~), read once by the preload.
+      // Optional like `hardware`.
+      systemUserName?: string
       readAllNotes: () => Promise<NoteDirRecord[]>
       readNoteDir: (dir: string) => Promise<NoteDirRecord | null>
       writeNote: (payload: NoteWritePayload) => Promise<{ ok: boolean; error?: string }>

@@ -15,6 +15,8 @@ describe('sanitizeUiSettings (tolerant validation)', () => {
   it('accepts the full valid shape', () => {
     const input: UiSettings = {
       theme: 'carbon',
+      lastDarkThemeId: 'carbon',
+      lastLightThemeId: 'parchment',
       appFont: 'inter',
       accent: '129 140 248',
       editorColors: { h1: '255 0 0', h2: null },
@@ -30,6 +32,14 @@ describe('sanitizeUiSettings (tolerant validation)', () => {
     expect(sanitizeUiSettings({ theme: null })).toEqual({}) // theme can never be null
     expect(sanitizeUiSettings({ theme: 7 })).toEqual({})
     expect(sanitizeUiSettings({ appFont: 42 })).toEqual({})
+  })
+
+  it('validates lastDarkThemeId / lastLightThemeId by shape only, like theme (never null)', () => {
+    expect(sanitizeUiSettings({ lastDarkThemeId: 'not-in-catalog' })).toEqual({ lastDarkThemeId: 'not-in-catalog' })
+    expect(sanitizeUiSettings({ lastDarkThemeId: '', lastLightThemeId: '  ' })).toEqual({})
+    expect(sanitizeUiSettings({ lastDarkThemeId: null, lastLightThemeId: null })).toEqual({})
+    expect(sanitizeUiSettings({ lastLightThemeId: 7 })).toEqual({})
+    expect(sanitizeUiSettings({ lastLightThemeId: 'x'.repeat(65) })).toEqual({})
   })
 
   it('keeps explicit nulls on override keys (cleared ≠ absent)', () => {
@@ -115,6 +125,13 @@ describe('mergeUiSettings (partial patch over the file)', () => {
 
   it('leaves untouched the top-level keys absent from the patch', () => {
     expect(mergeUiSettings(current, { theme: 'paper' })).toEqual({ ...current, theme: 'paper' })
+  })
+
+  it('merges the last dark / light theme ids with the theme and keeps them on unrelated patches', () => {
+    const withMemory = mergeUiSettings(current, { theme: 'paper', lastDarkThemeId: 'carbon', lastLightThemeId: 'paper' })
+    expect(withMemory).toEqual({ ...current, theme: 'paper', lastDarkThemeId: 'carbon', lastLightThemeId: 'paper' })
+    expect(mergeUiSettings(withMemory, { accent: null })).toMatchObject({ lastDarkThemeId: 'carbon', lastLightThemeId: 'paper' })
+    expect(mergeUiSettings(withMemory, { lastDarkThemeId: null })).toEqual(withMemory)
   })
 
   it('merges editorColors and editor per key (stores own different slices)', () => {

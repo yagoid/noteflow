@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  activePlan,
   hasKnownEntitlement,
   isPlanOffered,
   isPlanUnknown,
@@ -48,5 +49,19 @@ describe('hasKnownEntitlement', () => {
     expect(hasKnownEntitlement(account({ entitlements: { ai: false, cloud: true } }), 'ai')).toBe(false)
     expect(hasKnownEntitlement(account({ entitlementsKnown: false, entitlements: { ai: true, cloud: true } }), 'cloud')).toBe(false)
     expect(hasKnownEntitlement(account({ signedIn: false, entitlements: { ai: true, cloud: true } }), 'ai')).toBe(false)
+  })
+})
+
+describe('activePlan', () => {
+  it('names the bundle when both entitlements are on, else the single one', () => {
+    expect(activePlan(account({ entitlements: { ai: true, cloud: true } }))).toBe('bundle')
+    expect(activePlan(account({ entitlements: { ai: false, cloud: true } }))).toBe('cloud')
+    expect(activePlan(account({ entitlements: { ai: true, cloud: false } }))).toBe('ai')
+  })
+
+  it('is null without a plan, without a session or while the plan is unknown', () => {
+    expect(activePlan(account())).toBeNull()
+    expect(activePlan(account({ signedIn: false, entitlements: { ai: true, cloud: true } }))).toBeNull()
+    expect(activePlan(account({ entitlementsKnown: false, entitlements: { ai: true, cloud: true } }))).toBeNull()
   })
 })

@@ -2276,6 +2276,9 @@ electron_1.ipcMain.handle('sync:disconnect', () => {
     // On Windows the CLI shares this settings.json: its copy of the token
     // ("Connect the CLI too") must not outlive the connection it was for.
     cliConnect.cleanupAfterAppGithubDisconnect();
+    // The renderer's sync surfaces (titlebar button, sidebar identity line) follow this event;
+    // disconnectGitHub only emits it when initialPullStatus actually changes.
+    emitSyncStatusChanged();
     return { ok: true };
 });
 // Manual GitHub pull + its broadcast (shared by sync:pull and sync:pull-active).
@@ -4081,6 +4084,11 @@ electron_1.ipcMain.on('app:get-hardware', (event) => {
         cpuSpeedMHz: cpus[0]?.speed ?? 0,
         totalMemGiB: os_1.default.totalmem() / (1024 ** 3),
     };
+});
+// Name of the user's home folder (basename of ~), read once by the preload: the sidebar
+// footer's identity line shows it.
+electron_1.ipcMain.on('app:get-user-name', (event) => {
+    event.returnValue = path_1.default.basename(os_1.default.homedir());
 });
 // Acts on the sender's window (main or a section window).
 electron_1.ipcMain.on('window:maximize', (event) => {

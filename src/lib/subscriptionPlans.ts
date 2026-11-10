@@ -49,3 +49,18 @@ export function isPlanOffered(account: PlanAccountView, product: SubscriptionPro
   if (product === 'bundle') return !ai && !cloud
   return product === 'ai' ? !ai : !cloud
 }
+
+/**
+ * The plan to NAME for a session (sidebar footer): 'bundle' when both entitlements are on,
+ * else the single one, else null (signed out, free / lapsed, or entitlements still unknown —
+ * unknown is not shown as a plan). Entitlements don't say how they were bought, so two
+ * separate AI + Cloud subscriptions also read as 'bundle'.
+ */
+export function activePlan(account: PlanAccountView): SubscriptionProduct | null {
+  if (!account.signedIn || !account.entitlementsKnown) return null
+  const { ai, cloud } = account.entitlements
+  if (ai && cloud) return 'bundle'
+  if (cloud) return 'cloud'
+  if (ai) return 'ai'
+  return null
+}

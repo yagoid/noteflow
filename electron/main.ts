@@ -2347,6 +2347,9 @@ ipcMain.handle('sync:disconnect', () => {
   // On Windows the CLI shares this settings.json: its copy of the token
   // ("Connect the CLI too") must not outlive the connection it was for.
   cliConnect.cleanupAfterAppGithubDisconnect()
+  // The renderer's sync surfaces (titlebar button, sidebar identity line) follow this event;
+  // disconnectGitHub only emits it when initialPullStatus actually changes.
+  emitSyncStatusChanged()
   return { ok: true }
 })
 
@@ -4180,6 +4183,11 @@ ipcMain.on('app:get-hardware', (event) => {
     cpuSpeedMHz: cpus[0]?.speed ?? 0,
     totalMemGiB: os.totalmem() / (1024 ** 3),
   }
+})
+// Name of the user's home folder (basename of ~), read once by the preload: the sidebar
+// footer's identity line shows it.
+ipcMain.on('app:get-user-name', (event) => {
+  event.returnValue = path.basename(os.homedir())
 })
 // Acts on the sender's window (main or a section window).
 ipcMain.on('window:maximize', (event) => {

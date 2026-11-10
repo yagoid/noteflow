@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { THEMES, DEFAULT_THEME_ID, APP_FONTS, DEFAULT_APP_FONT } from '../lib/themes'
 import type { Theme } from '../lib/themes'
 import { THEME_TEXT_COLOR, resolveThemeColor } from '../lib/colorUtils'
+import { rememberTheme, sanitizeThemeMemory, type ThemeMemory } from '../lib/themeMemory'
 import type { UiSettings } from '../types'
 
 // Appearance is SYNCED across devices via ui-settings.json in the notes dir
@@ -185,6 +186,12 @@ interface ThemeState {
   uiScale: number
   /** Sections of the sidebar note rows (local to this device, localStorage). */
   sidebarSectionsStyle: SidebarSectionsStyle
+  /**
+   * Last dark / light theme the user had, for the footer's quick Light / Dark switch
+   * (lib/themeMemory.ts). Always includes the active theme (folded in on init, reload and
+   * setTheme); synced as ui-settings.json lastDarkThemeId / lastLightThemeId, written by setTheme.
+   */
+  themeMemory: ThemeMemory
   initTheme: () => void
   /**
    * Re-reads ui-settings.json and re-applies it (idempotent, NEVER writes back
@@ -206,6 +213,17 @@ function currentTheme(id: string): Theme {
   return THEMES.find((t) => t.id === id) ?? THEMES[0]
 }
 
+/** Theme memory of the file (keys absent from it fall back to `fallback`) plus the active theme. */
+function themeMemoryFromUi(ui: UiSettings, fallback: ThemeMemory, activeId: string): ThemeMemory {
+  const fromFile = sanitizeThemeMemory({
+    dark: 'lastDarkThemeId' in ui ? ui.lastDarkThemeId : fallback.dark,
+    light: 'lastLightThemeId' in ui ? ui.lastLightThemeId : fallback.light,
+  })
+  return rememberTheme(fromFile, activeId)
+}
+
+const EMPTY_THEME_MEMORY: ThemeMemory = { dark: null, light: null }
+
 export const useThemeStore = create<ThemeState>((set, get) => ({
   activeThemeId: DEFAULT_THEME_ID,
   fontOverride: null,
@@ -213,6 +231,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   editorColors: { ...EMPTY_EDITOR_COLORS },
   uiScale: DEFAULT_UI_SCALE,
   sidebarSectionsStyle: readSidebarSectionsStyle(),
+  themeMemory: { dark: DEFAULT_THEME_ID, light: null },
 
   initTheme: () => {
     // Synced ui-settings.json wins; each key ABSENT from it falls back to the
@@ -236,7 +255,8 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     applyTheme(theme, fontOverride, accentOverride)
     applyEditorColors(editorColors, theme)
     applyUiScale(uiScale)
-    set({ activeThemeId: theme.id, fontOverride, accentOverride, editorColors, uiScale })
+    const themeMemory = themeMemoryFromUi(ui, EMPTY_THEME_MEMORY, theme.id)
+    set({ activeThemeId: theme.id, fontOverride, accentOverride, editorColors, uiScale, themeMemory })
 
     // One-time migration seed: push the legacy values the synced file doesn't
     // know about yet. Only values that will SURVIVE main's sanitizer are sent
@@ -278,7 +298,10 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     const editorColors = ui.editorColors ? editorColorsFromUi(ui.editorColors) : state.editorColors
     applyTheme(theme, fontOverride, accentOverride)
     applyEditorColors(editorColors, theme)
-    set({ activeThemeId: theme.id, fontOverride, accentOverride, editorColors })
+    // A theme synced from another device counts as the last of its kind here too (kept in
+    // memory only: this path never writes; the next setTheme persists it).
+    const themeMemory = themeMemoryFromUi(ui, state.themeMemory, theme.id)
+    set({ activeThemeId: theme.id, fontOverride, accentOverride, editorColors, themeMemory })
   },
 
   setTheme: (id) => {
@@ -289,8 +312,14 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     // Re-resolve the editor colours too: a THEME_TEXT_COLOR one follows the new `--text`.
     applyEditorColors(editorColors, theme)
     window.noteflow.setTheme(id) // legacy dual-write (settings.json)
-    void window.noteflow.setUiSettings?.({ theme: id })
-    set({ activeThemeId: id })
+    // The memory already holds the outgoing theme (folded in when it became active), so writing
+    // both kinds also persists one that only arrived through a reload.
+    const themeMemory = rememberTheme(get().themeMemory, id)
+    const patch: UiSettings = { theme: id }
+    if (themeMemory.dark) patch.lastDarkThemeId = themeMemory.dark
+    if (themeMemory.light) patch.lastLightThemeId = themeMemory.light
+    void window.noteflow.setUiSettings?.(patch)
+    set({ activeThemeId: id, themeMemory })
   },
 
   setFontOverride: (id) => {

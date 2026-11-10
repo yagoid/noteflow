@@ -53,7 +53,7 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 │  ─ Sin grupo ──────────────────         │                            │
 │    Project: Neural Netw…  19/03         │                            │
 │  ─────────────────────────────          │                            │
-│  9 notes · 31 sections             ⋯   │                            │
+│  (Y) yagoi · GitHub · notes        ⋯   │                            │
 └─────────────────────────────────────────┴────────────────────────────┘
 ```
 
@@ -1151,13 +1151,23 @@ cada respuesta). Sin IA configurada, ofrece ir a **Ajustes → IA**.
   toggle revela también los **grupos archivados** (atenuados, al final de la lista).
 
 ### Footer del sidebar
-- Franja fija bajo la lista (divisor de borde a borde). A la izquierda, **"N notes · M sections"**:
-  cuenta lo que lista el sidebar en ese momento (sin archivadas salvo con "Show archived", y con el
-  filtro de tag o la búsqueda aplicados; una nota cifrada bloqueada no suma secciones).
-- A la derecha, **⋯** ("More options") abre un menú hacia arriba con tres bloques:
-  **Theme** — *Light* / *Dark* (los temas NoteFlow Light y NoteFlow Dark, con check en el activo; con
-  otro tema activo ninguno lleva check y elegir uno cambia a él; igual que elegirlo en Ajustes →
-  Apariencia) · **Sections** — *As map* / *As row* (el ajuste "Sections in the sidebar", solo en este
+- Franja fija bajo la lista (divisor de borde a borde). A la izquierda, una **línea de identidad** en
+  una sola línea (si no cabe, se recorta con "…"; el círculo y el ⋯ nunca se encogen):
+  - **Sin plan de NoteFlow**: círculo pequeño con la inicial (gris discreto según el tema) ·
+    `<usuario> · <almacenamiento>`. Usuario = nombre de la carpeta home del sistema. Almacenamiento =
+    *Local notes*, *GitHub · <repo>* (solo el nombre del repo) o *NoteFlow Cloud*, sin estado de sync.
+    La inicial es la del usuario, o la del correo si hay sesión (sesión sin plan activo se ve igual).
+  - **Con plan activo**: `<usuario> · <Plan> ⌄` (*Bundle*, *Cloud* o *AI*; inicial del correo de la
+    cuenta). El nombre del plan es un mini desplegable hacia arriba: **Sync** (Ajustes → Sync) y **AI**
+    (Ajustes → AI). Se cierra al elegir, con clic fuera o `Esc`.
+- A la derecha, **⋯** ("More options") abre un menú hacia arriba. Sin plan activo (con o sin sesión),
+  arriba del todo y separado, **Sync** (abre Ajustes → Sync); con plan no aparece porque ya está en el
+  desplegable del plan. Luego tres bloques:
+  **Theme** — *Light* / *Dark*: cada uno vuelve al **último tema de ese tipo** que usó el usuario
+  (p. ej. Dark → Tokyo Night si fue el último oscuro), con NoteFlow Light / NoteFlow Dark si no hay
+  ninguno recordado; el check marca el tipo del tema activo (con Dracula, *Dark*). Se recuerda elija el
+  tema donde lo elija (Ajustes → Apariencia, este menú o llegado por sync) y se sincroniza con el tema
+  · **Sections** — *As map* / *As row* (el ajuste "Sections in the sidebar", solo en este
   dispositivo) · **Show archived** / **Hide archived**. Se cierra al elegir, con clic fuera o `Esc`.
 
 ### Orden de la lista

@@ -96,7 +96,9 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     `planRemoteDelete` en `cloudSyncLogic.ts` (ver § 4 "Deletes = tombstones"). Para las ofertas, en
     cambio, la cache **sí** cuenta como conocida (una cache `ai:false` muestra las cards: aceptado).
     Helpers puros del renderer en `src/lib/subscriptionPlans.ts` (`isPlanUnknown`,
-    `isPlanOffered`, `hasKnownEntitlement`).
+    `isPlanOffered`, `hasKnownEntitlement`, y `activePlan` — el plan que se **nombra** en la línea de
+    identidad del pie del sidebar: ambas entitlements → `bundle`, si no `cloud`/`ai`; desconocidas o
+    ninguna → `null`, así que dos suscripciones sueltas AI + Cloud también se leen como Bundle).
   - **Cache persistida:** cada fetch OK guarda `settings.json` → `account.entitlementsCache =
     {userId, ai, cloud, fetchedAt}` (no es secreto). Al cargar solo se usa si `userId` coincide con
     el de la sesión guardada (`parseEntitlementsCache`): entonces `entitlementsKnown` es `true` desde

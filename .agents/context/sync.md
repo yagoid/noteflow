@@ -39,7 +39,10 @@ y su pull manual va por `sync:pull-active` (Cloud si `enabled`, GitHub si no). E
 cuando CUALQUIER backend está `active` (antes solo con GitHub conectado → un usuario solo-Cloud se
 quedaba sin sync manual) y se suscribe a `sync:status-changed`, `cloud:status-changed`,
 `notes-updated` y `sync:push-state` (refresca en **cada** cambio de push-state, no solo en `idle`,
-para que el contador de pendientes vaya al día). El botón y su **tarjeta de estado al hover** viven
+para que el contador de pendientes vaya al día). La línea de identidad del pie del sidebar
+(`stores/identityStore.ts`) también lee `sync:get-active-status`, pero solo `backend` + nombre del repo,
+y solo refresca con `sync-auth-complete`, `sync:status-changed` y `cloud:status-changed` (por eso
+`sync:disconnect` emite `sync:status-changed`). El botón y su **tarjeta de estado al hover** viven
 en `SyncStatusButton.tsx` (sin `title` nativo; `aria-label` con resumen); la prioridad del estado
 mostrado (syncing → uploading → locked → blocked → error → pending → synced) es lógica pura en
 `src/lib/syncStatus.ts` (testeada). Además de lo normalizado, el status lleva `pendingUploads`

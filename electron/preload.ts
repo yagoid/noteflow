@@ -24,6 +24,8 @@ export type FsResult = { ok: boolean; error?: string }
 // dir). Mirror of UiSettings in electron/uiSettings.ts and src/types/index.ts.
 export type UiSettingsPayload = {
   theme?: string
+  lastDarkThemeId?: string
+  lastLightThemeId?: string
   appFont?: string | null
   accent?: string | null
   editorColors?: Partial<Record<'h1' | 'h2' | 'h3' | 'italic' | 'inlineCode' | 'codeAccent', string | null>>
@@ -46,6 +48,10 @@ const api = {
   // low-power laptop chips; os.cpus() exposes the CPU model (with base clock) and
   // os.totalmem() the real RAM.
   hardware: ipcRenderer.sendSync('app:get-hardware'),
+
+  // Name of the user's home folder (basename of ~), static: read once here so the sidebar
+  // footer's identity line needs no IPC round-trip.
+  systemUserName: ipcRenderer.sendSync('app:get-user-name') as string,
 
   // File system (folder-per-note: one dir per note, one .md per section)
   readAllNotes: (): Promise<NoteDirRecord[]> => ipcRenderer.invoke('fs:read-all-notes'),
