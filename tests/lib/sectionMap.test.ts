@@ -9,6 +9,7 @@ import {
   planSectionMap,
   relativeLuminance,
   visibleSectionIndices,
+  wrapRows,
   type Rgb,
 } from '../../src/lib/sectionMap'
 
@@ -28,6 +29,47 @@ describe('countRows', () => {
     // 100 + 4 + 96 = 200 exactly: treated as not fitting, never a hidden extra row.
     expect(countRows([100, 96], 200, 4)).toBe(2)
     expect(countRows([100, 95], 200, 4)).toBe(1)
+  })
+})
+
+describe('wrapRows', () => {
+  it('gives the index where each row starts, with the same greedy break as countRows', () => {
+    expect(wrapRows([100, 100, 100], 210, 4)).toEqual([0, 2])
+    expect(wrapRows([100, 100, 100], 400, 4)).toEqual([0])
+    expect(wrapRows([], 300, 4)).toEqual([])
+    // An oversized item takes a row of its own, and the next one starts another.
+    expect(wrapRows([50, 500, 50], 300, 4)).toEqual([0, 1, 2])
+  })
+
+  it("fills each row greedily: it fits, and the next row's first item would not", () => {
+    const widths = [80, 120, 60, 200, 32, 90, 140, 70, 32]
+    const span = (from: number, to: number) =>
+      widths.slice(from, to).reduce((sum, w) => sum + w, 0) + 4 * (to - from - 1)
+    for (const container of [150, 250, 333, 480, 1000]) {
+      const starts = wrapRows(widths, container, 4)
+      expect(starts[0]).toBe(0)
+      starts.forEach((start, r) => {
+        const end = starts[r + 1] ?? widths.length
+        // A row of several items fits (an oversized one is alone in its row)...
+        if (end - start > 1) expect(span(start, end)).toBeLessThan(container)
+        // ...and taking the next row's first item would overflow it.
+        if (r + 1 < starts.length) expect(span(start, end + 1)).toBeGreaterThanOrEqual(container - 0.5)
+      })
+    }
+  })
+
+  it('puts the "+" (last item) on the next row when it lands exactly on the edge', () => {
+    // Row 1: 3 tabs + "+" = 100 + 4 + 100 + 4 + 56 + 4 + 32 = 300 → exactly the width:
+    // treated as not fitting (sub-pixel slack), so "+" opens row 2...
+    expect(wrapRows([100, 100, 56, 32], 300, 4)).toEqual([0, 3])
+    // ...and half a pixel less keeps it on row 1.
+    expect(wrapRows([100, 100, 55.5, 32], 300, 4)).toEqual([0])
+  })
+
+  it('splits the folded map (tabs + "+N more" + "+") within the row cap', () => {
+    // Same case as the planSectionMap fold below: 4 tabs, then "+N more" (70) and "+" (32).
+    const widths = [100, 100, 100, 100, 70, 32]
+    expect(wrapRows(widths, 210, 4)).toEqual([0, 2, 4])
   })
 })
 

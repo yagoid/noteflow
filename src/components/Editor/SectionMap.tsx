@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react'
+import { flushSync } from 'react-dom'
 import { Check, ChevronDown, EyeOff, Plus } from 'lucide-react'
 import type { NoteSection } from '../../types'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { useThemeStore } from '../../stores/themeStore'
 import { colorChannels, resolveGroupColor } from '../../lib/tagColors'
 import {
-  planSectionMap, reorderDropSide, visibleSectionIndices, type SectionMapPlan,
+  planSectionMap, reorderDropSide, visibleSectionIndices, wrapRows,
 } from '../../lib/sectionMap'
 import { resolveSectionInk } from '../../lib/sectionInk'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
@@ -27,6 +28,20 @@ interface DropTarget {
   /** The joint is the block's edge (clipped): draw the bar inside the tab instead. */
   inside: boolean
 }
+
+/** Natural widths read from the measure layer, and the block's width. */
+interface MapMetrics {
+  tabWidths: number[]
+  moreWidth: number
+  lessWidth: number
+  addWidth: number
+  containerWidth: number
+}
+
+const sameMetrics = (a: MapMetrics, b: MapMetrics) =>
+  a.moreWidth === b.moreWidth && a.lessWidth === b.lessWidth && a.addWidth === b.addWidth
+  && a.containerWidth === b.containerWidth && a.tabWidths.length === b.tabWidths.length
+  && a.tabWidths.every((w, i) => w === b.tabWidths[i])
 
 export interface SectionMapProps {
   noteId: string
@@ -52,7 +67,9 @@ export interface SectionMapProps {
 /**
  * The editor's section tabs as one reticulated block that wraps onto rows (filing-cabinet
  * tabs): rows are justified (the active tab grows more), past three rows the rest fold
- * into a "+N more" tab. See "Editor: mapa de secciones" in .claude/context/patterns.md.
+ * into a "+N more" tab. The line breaks are forced from the measured final widths, so
+ * nothing changes row while the active tab animates. See "Editor: mapa de secciones" in
+ * .agents/context/patterns.md.
  */
 export function SectionMap({
   noteId, sections, activeSectionId, renamingId, renameValue, renameRef,
@@ -68,67 +85,106 @@ export function SectionMap({
 
   const blockRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLDivElement>(null)
+  const widthProbeRef = useRef<HTMLDivElement>(null)
 
   // ── Row cap ──────────────────────────────────────────────────────────────────
   // Per editor instance, not persisted (the editor remounts the map per note).
   const [expanded, setExpanded] = useState(false)
-  const [plan, setPlan] = useState<SectionMapPlan | null>(null)
+  const [metrics, setMetrics] = useState<MapMetrics | null>(null)
 
   const total = sections.length
   const activeIndex = sections.findIndex((s) => s.id === activeSectionId)
   const renamingIndex = renamingId ? sections.findIndex((s) => s.id === renamingId) : -1
-  // Never folded away: the active section, and the one being renamed (its input must
-  // stay mounted, and it is wider than the tab it replaces).
-  const pinKey = `${activeIndex}|${renamingIndex}`
 
   // The hidden measure layer holds every section tab at its natural width (as it renders
-  // in its current state, active included), then "+N more" and "+". It never depends on
-  // the plan, and the block's width comes from its parent, so measuring can't loop.
+  // in its current, final state — active included, no transitions), then "+N more",
+  // "Show less" and "+". It never depends on the plan, and the block's width comes from
+  // its parent, so measuring can't loop.
   const measure = useCallback(() => {
     const block = blockRef.current
     const row = measureRef.current?.firstElementChild
     if (!block || !row) return
     const widths = Array.from(row.children, (el) => el.getBoundingClientRect().width)
-    const count = widths.length - 2
+    const count = widths.length - 3
     if (count < 0) return
-    const next = planSectionMap({
+    const next: MapMetrics = {
       tabWidths: widths.slice(0, count),
-      pinned: pinKey.split('|').map(Number),
       moreWidth: widths[count],
-      addWidth: widths[count + 1],
+      lessWidth: widths[count + 1],
+      addWidth: widths[count + 2],
       containerWidth: block.getBoundingClientRect().width,
-      gap: GAP,
-    })
-    setPlan((prev) =>
-      prev && prev.visibleCount === next.visibleCount && prev.overflowing === next.overflowing ? prev : next)
-  }, [pinKey])
-
-  const measureRefFn = useRef(measure)
-  useLayoutEffect(() => { measureRefFn.current = measure })
+    }
+    setMetrics((prev) => (prev && sameMetrics(prev, next) ? prev : next))
+  }, [])
 
   // Re-measure when anything that changes a tab's width changes (typing in a section
-  // rebuilds `sections` but leaves this signature alone).
+  // rebuilds `sections` but leaves this signature alone). Before paint, so a new active
+  // tab is never painted with the rows of the previous one.
   const layoutKey = sections.map((s) => `${s.id}\u0000${s.name}\u0000${s.aiHidden ? 1 : 0}`).join('\u0001')
   const moreLabel = plural(t.editor.moreSections, total)
-  useLayoutEffect(() => { measure() }, [measure, layoutKey, renamingId, moreLabel])
+  const lessLabel = t.editor.showLessSections
+  useLayoutEffect(() => { measure() }, [measure, layoutKey, activeSectionId, renamingId, moreLabel, lessLabel])
 
-  // Width of the pane, and late font loads (they resize the measure layer).
+  // Width of the pane, and late font loads (they resize the measure layer). Synchronous
+  // (the callback runs before paint): a deferred update would paint one frame with the
+  // breaks of the old width, and on a narrower pane a forced row would overflow onto a
+  // line of its own. The width probe is 0px tall, so the re-render (whose breaks change
+  // the block's height) doesn't resize anything observed — no ResizeObserver loop.
   useEffect(() => {
-    const block = blockRef.current
+    const probe = widthProbeRef.current
     const row = measureRef.current?.firstElementChild
-    if (!block || !row) return
-    const ro = new ResizeObserver(() => measureRefFn.current())
-    ro.observe(block)
+    if (!probe || !row) return
+    const ro = new ResizeObserver(() => flushSync(measure))
+    ro.observe(probe)
     ro.observe(row)
     return () => ro.disconnect()
-  }, [])
+  }, [measure])
+
+  // Widths of another section list (a render before the re-measure lands) are ignored.
+  const live = metrics && metrics.tabWidths.length === total ? metrics : null
+  const plan = useMemo(() => live && planSectionMap({
+    tabWidths: live.tabWidths,
+    // Never folded away: the active section, and the one being renamed (its input must
+    // stay mounted, and it is wider than the tab it replaces).
+    pinned: [activeIndex, renamingIndex],
+    moreWidth: live.moreWidth,
+    addWidth: live.addWidth,
+    containerWidth: live.containerWidth,
+    gap: GAP,
+  }), [live, activeIndex, renamingIndex])
 
   const overflowing = plan?.overflowing ?? false
   const folded = overflowing && !expanded
-  const shown = folded
-    ? visibleSectionIndices(total, [activeIndex, renamingIndex], plan?.visibleCount ?? total)
-    : sections.map((_, i) => i)
+  const visibleCount = plan?.visibleCount ?? total
+  const shown = useMemo(
+    () => (folded
+      ? visibleSectionIndices(total, [activeIndex, renamingIndex], visibleCount)
+      : Array.from({ length: total }, (_, i) => i)),
+    [folded, total, activeIndex, renamingIndex, visibleCount],
+  )
   const hiddenCount = total - shown.length
+  const pill: 'more' | 'less' | null = folded && hiddenCount > 0 ? 'more' : overflowing && expanded ? 'less' : null
+
+  // Explicit rows: the line breaks come from the final widths (wrapRows), not from the
+  // browser, which would wrap with the widths mid-transition when the active tab changes
+  // (a tab or the "+" hopping up a row and back). Null until there is a measured width:
+  // the block then wraps on its own.
+  const rowEnds = useMemo(() => {
+    if (!live || live.containerWidth <= 0) return null
+    const widths = [
+      ...shown.map((i) => live.tabWidths[i]),
+      ...(pill === 'more' ? [live.moreWidth] : pill === 'less' ? [live.lessWidth] : []),
+      live.addWidth,
+    ]
+    // Item before each row start (but the first) ends a row.
+    return new Set(wrapRows(widths, live.containerWidth, GAP).slice(1).map((start) => start - 1))
+  }, [live, shown, pill])
+  // A forced line break after the item at this display position (a 4px row of its own:
+  // it is the joint between the rows). Keyed by the item it follows and only added or
+  // removed, so the tabs keep their DOM nodes (and running transitions, focus) when the
+  // rows change.
+  const breakAfter = (position: number, key: string) =>
+    rowEnds?.has(position) ? <span key={`${key}:break`} className="section-map-break" aria-hidden /> : null
 
   // ── Drag & drop reorder ──────────────────────────────────────────────────────
   // The id lives in a ref for the handlers; the visual "hole" is set a frame later so
@@ -370,14 +426,18 @@ export function SectionMap({
     <div className="relative min-w-0 font-mono">
       <div
         ref={blockRef}
-        className="section-map"
+        className={rowEnds ? 'section-map has-rows' : 'section-map'}
         onDragOver={handleBlockDragOver}
         onDrop={handleBlockDrop}
         onDragLeave={handleBlockDragLeave}
       >
-        {shown.map((i) => renderTab(sections[i], false))}
-        {folded && hiddenCount > 0 && (
+        {shown.flatMap((i, position) => [
+          renderTab(sections[i], false),
+          breakAfter(position, sections[i].id),
+        ])}
+        {pill === 'more' && (
           <button
+            key="more"
             className="section-map-pill"
             onClick={() => setExpanded(true)}
             title={t.editor.showAllSections}
@@ -385,15 +445,17 @@ export function SectionMap({
             {plural(t.editor.moreSections, hiddenCount)}
           </button>
         )}
-        {overflowing && expanded && (
+        {pill === 'less' && (
           <button
+            key="less"
             className="section-map-pill"
             onClick={() => setExpanded(false)}
             title={t.editor.showLessSectionsHint}
           >
-            {t.editor.showLessSections}
+            {lessLabel}
           </button>
         )}
+        {pill && breakAfter(shown.length, 'pill')}
         <button
           className="section-map-add"
           onClick={onAdd}
@@ -404,10 +466,12 @@ export function SectionMap({
         </button>
       </div>
 
+      <div ref={widthProbeRef} className="section-map-width-probe" aria-hidden />
       <div ref={measureRef} className="section-map-measure" aria-hidden>
         <div>
           {sections.map((section) => renderTab(section, true))}
           <span className="section-map-pill">{moreLabel}</span>
+          <span className="section-map-pill">{lessLabel}</span>
           <span className="section-map-add" />
         </div>
       </div>

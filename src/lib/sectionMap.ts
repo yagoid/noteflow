@@ -4,9 +4,10 @@
 // and the colour helpers are shared with the note overview grid (lib/noteOverviewGrid.ts,
 // lib/sectionInk.ts).
 //
-// The browser does the actual wrapping (one `flex-wrap` container). These helpers only
-// simulate that wrapping from the tabs' natural widths, to decide how many sections fit
-// in the row cap before the rest are folded into a "+N more" tab.
+// Both maps are one `flex-wrap` container. These helpers simulate its wrapping from the
+// tabs' natural widths, to decide how many sections fit in the row cap before the rest are
+// folded into a "+N more" tab. The editor's map also uses the simulated rows to force its
+// line breaks (wrapRows): mid-transition the browser would wrap with the animating widths.
 
 export type Rgb = [number, number, number]
 
@@ -20,23 +21,29 @@ export const SECTION_MAP_MAX_ROWS = 3
 const FIT_SLACK = 0.5
 
 /**
- * Rows a `flex-wrap` line-break would produce for items of these widths (CSS greedy
- * algorithm: an item goes on the current line if it fits with the gap, else it opens a
- * new one; an item wider than the container takes a line of its own).
+ * Where a `flex-wrap` line-break would start each row for items of these widths: the index
+ * of each row's first item (`[]` for no items). CSS greedy algorithm: an item goes on the
+ * current line if it fits with the gap, else it opens a new one; an item wider than the
+ * container takes a line of its own.
  */
-export function countRows(widths: readonly number[], containerWidth: number, gap: number): number {
+export function wrapRows(widths: readonly number[], containerWidth: number, gap: number): number[] {
   const limit = containerWidth - FIT_SLACK
-  let rows = 0
+  const starts: number[] = []
   let used = 0
-  for (const w of widths) {
-    if (rows === 0 || used + gap + w > limit) {
-      rows += 1
+  widths.forEach((w, i) => {
+    if (starts.length === 0 || used + gap + w > limit) {
+      starts.push(i)
       used = w
     } else {
       used += gap + w
     }
-  }
-  return rows
+  })
+  return starts
+}
+
+/** Rows a `flex-wrap` line-break would produce for items of these widths (see wrapRows). */
+export function countRows(widths: readonly number[], containerWidth: number, gap: number): number {
+  return wrapRows(widths, containerWidth, gap).length
 }
 
 /**

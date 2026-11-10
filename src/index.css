@@ -969,7 +969,10 @@ button {
 /* ── Editor section map (Editor/SectionMap.tsx) ──────────────────────────────
    One block of cells that wraps onto rows: only its outer corners are rounded
    (overflow hidden), the 4px joints show the editor background. Each tab sets
-   --sm-color (its section colour, `rgb(...)`) and the active one --sm-ink. */
+   --sm-color (its section colour, `rgb(...)`) and the active one --sm-ink.
+   Once measured (.has-rows) the component forces the line breaks: a
+   .section-map-break after each row's last item, a 4px line of its own that is the
+   joint between rows (hence no row-gap, which would double it). */
 .section-map {
   position: relative; /* offsetParent of the tabs (drop-indicator edge test) */
   display: flex;
@@ -978,6 +981,8 @@ button {
   border-radius: 8px;
   overflow: hidden;
 }
+.section-map.has-rows { row-gap: 0; }
+.section-map-break { flex: 0 0 100%; height: 4px; }
 .section-map-tab {
   position: relative;
   display: flex;
@@ -1035,7 +1040,12 @@ button {
   cursor: inherit;
   transition: padding 450ms cubic-bezier(.22, .9, .24, 1);
 }
-.is-active > .section-map-main { padding-right: 2px; }
+/* Gaining the active state, the padding shrinks on the chevron's timing (see below),
+   so their sum only grows. */
+.is-active > .section-map-main {
+  padding-right: 2px;
+  transition: padding 300ms cubic-bezier(.22, .9, .24, 1) 120ms;
+}
 .section-map-main:focus-visible,
 .section-map-chevron:focus-visible,
 .section-map-pill:focus-visible,
@@ -1044,10 +1054,13 @@ button {
 /* The label's width comes from an invisible sizer capped at 150px (340px when active),
    so the tab's flex basis never depends on hover; the visible text is laid over the
    whole label box and uses whatever room the justified row gives it.
-   Widths that feed the wrapping (sizer max-width, chevron max-width) only animate while
-   GROWING into the active state; losing it is instant. Otherwise, mid-transition, the old
-   active would still be wide while the new one grows, and the bases could add up to more
-   than the final layout — a momentary extra row (beyond the 3-row cap). */
+   The rows are forced from the FINAL widths (SectionMap's measure layer), so the widths
+   animating mid-transition can't move a tab (or the "+") to another row. A forced row
+   still wraps if its bases add up to more than the final ones, so every width that
+   feeds a tab's basis may only stay below its final value while it animates: the sizer
+   and chevron max-width animate while GROWING into the active state and drop instantly
+   when losing it; the padding grows back (12px) when losing it and, when gaining it,
+   shrinks (to 2px) on the chevron's timing, which more than makes up for it. */
 .section-map-label { position: relative; flex: 1 1 auto; min-width: 0; align-self: stretch; }
 .section-map-label-sizer {
   display: block;
@@ -1202,6 +1215,15 @@ button {
 .section-map-measure .section-map-tab { flex: none; }
 .section-map-measure,
 .section-map-measure * { transition: none !important; }
+/* The block's width, without its height (SectionMap's ResizeObserver). */
+.section-map-width-probe {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 0;
+  pointer-events: none;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .section-map-tab,

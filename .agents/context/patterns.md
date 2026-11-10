@@ -914,7 +914,7 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
 ### Editor: mapa de secciones (pestañas que bajan de fila)
 Las pestañas de sección del editor no son una tira con scroll horizontal: son un **mapa de secciones**
 (`Editor/SectionMap.tsx`, lógica pura en `src/lib/sectionMap.ts` con test en `tests/lib/sectionMap.test.ts`,
-estilos `.section-map*` en `index.css`). Un único bloque `flex-wrap` (gap 4 px, `border-radius: 8px` +
+estilos `.section-map*` en `index.css`). Un único bloque `flex-wrap` (juntas de 4 px, `border-radius: 8px` +
 `overflow: hidden`, así que solo se redondean las esquinas exteriores) que baja de fila como los
 salientes de un archivador; las juntas dejan ver `--bg-editor` (la fila ya no tiene banda de fondo
 propia). Lo usan los paneles del editor y la ventana de sección (`SectionWindowApp` monta
@@ -928,14 +928,31 @@ respetar si se toca:
 - **Filas justificadas:** inactivas `flex: 1 1 auto`, activa `flex-grow: 2.6` → cada fila llena el
   ancho y el mapa es un rectángulo. Al cambiar de sección `flex-grow` transiciona 450 ms (color/fondo
   250 ms, `max-width` de la etiqueta 450 ms, el chevron entra con retraso); con
-  `prefers-reduced-motion` no hay transiciones. **Solo se anima el crecimiento** de lo que alimenta
-  el wrap (`max-width` del sizer y del chevron al *pasar a* activa); al dejar de serlo es instantáneo.
-  Si ambos sentidos se animaran, durante la transición la antigua activa seguiría ancha mientras crece
-  la nueva, la suma de bases superaría la final y el wrap podría sacar una fila de más (una 4.ª por
-  encima del tope) durante ~450 ms. Coste: una antigua activa con título >150 px estrecha su base de
-  golpe (el reparto de `flex-grow` sí sigue animado). El `+` es la última celda (`flex: 0 0 32px`, una sola
+  `prefers-reduced-motion` no hay transiciones. El `+` es la última celda (`flex: 0 0 32px`, una sola
   instancia); las acciones (vista general, favorito, `⋯`) van fuera del bloque alineadas con la
   primera fila.
+- **Filas forzadas, no decididas por el navegador a mitad de animación.** El salto de línea de
+  `flex-wrap` se decide con el tamaño *base* (no con `flex-grow`), y la base de una pestaña cambia al
+  ganar/perder la activa (`max-width` del sizer 150→340, del chevron 0→24, `padding-right` 12→2). Si
+  el navegador repartiera las filas con los anchos a medio animar, una pestaña o el `+` subirían de
+  fila un instante y volverían a bajar. Por eso, una vez medido, el componente calcula las filas con
+  los **anchos finales** de la capa de medida (`wrapRows()`, el mismo voraz con holgura que
+  `countRows`) sobre los elementos visibles en orden (pestañas mostradas + pill `+N more`/`Show less` +
+  `+`) y **fuerza los cortes**: tras el último elemento de cada fila un `.section-map-break`
+  (`flex: 0 0 100%`, 4 px de alto: es la junta entre filas, por eso el bloque `.has-rows` lleva
+  `row-gap: 0`). Los cortes van **en el mismo contenedor** y solo se añaden/quitan (clave = el
+  elemento al que siguen): las pestañas nunca cambian de padre ni se mueven en el DOM, así que no
+  se remontan al cambiar de fila (conservan su transición, el foco y el nodo bajo un doble clic);
+  filas como contenedores separados sí las remontarían. Sin medida (ancho 0, o una lista de
+  secciones que aún no se ha re-medido) no hay cortes y el bloque envuelve solo con `gap` 4 px.
+  **Invariante CSS:** dentro de una fila forzada el navegador aún podría partir si la suma de bases
+  a mitad de transición superase la final, así que todo lo que alimenta la base solo puede estar
+  **por debajo** de su valor final mientras anima: `max-width` del sizer y del chevron animan al
+  *pasar a* activa y caen de golpe al dejar de serlo; el `padding-right` vuelve a 12 px animado al
+  perderla y, al ganarla, baja a 2 px con la misma curva/duración/retraso que el chevron (−10 px
+  frente a +24 px: la suma solo crece). Coste: una antigua activa con título >150 px estrecha su
+  base de golpe (el reparto de `flex-grow` sí sigue animado). Si se añade otra propiedad animada que
+  cambie la base, respetar esto.
 - **Ancho de la etiqueta por un "sizer" invisible**, no por el texto: un `<span>` oculto con
   `max-width` 150 px (340 px la activa) fija la base flex y el texto visible va `absolute` encima de
   toda la caja con elipsis. Así el texto usa todo el sitio que le da la fila justificada y el **hover
@@ -956,25 +973,31 @@ respetar si se toca:
   (el editor monta el mapa con `key={note.id}`, así que se repliega al cambiar de nota) y sin
   persistir. **Medición sin bucles:** una **capa invisible** (`.section-map-measure`, `width:0` +
   `overflow:hidden` con un hijo `width: max-content` sin wrap ni transiciones) pinta todas las pestañas a su ancho
-  natural en su estado final, más `+N more` (con N = total, el más ancho posible) y `+`. En un
-  `useLayoutEffect` (antes de pintar: sin parpadeo) se leen sus anchos y el del bloque y
+  natural en su estado final, más `+N more` (con N = total, el más ancho posible), `Show less` y `+`.
+  En un `useLayoutEffect` (antes de pintar: sin parpadeo, y una activa nueva nunca se pinta con las
+  filas de la anterior) se guardan sus anchos y el del bloque (estado `metrics`), y en el render
   `planSectionMap()` **simula** el salto de línea de `flex-wrap` (voraz, con 0.5 px de holgura para
-  errar hacia "no cabe": a lo sumo se pliega una pestaña de más, nunca sale una 4.ª fila). La capa no
+  errar hacia "no cabe": a lo sumo se pliega una pestaña de más, nunca sale una 4.ª fila) y
+  `wrapRows()` da los cortes forzados (ver arriba). La capa no
   depende del plan y el ancho del bloque viene del padre, así que medir no realimenta. Un
-  `ResizeObserver` sobre el bloque (ancho del panel) y la capa (fuentes que cargan tarde) re-mide; el
-  `useLayoutEffect` re-mide solo con cambios que afectan al ancho (firma id+nombre+`aiHidden`, sección
-  activa, renombrado, idioma), no al teclear. El mismo plan (con `maxRows: 2` y **sin** `addWidth`:
+  `ResizeObserver` re-mide al redimensionar, **también síncrono** (`flushSync` en su callback, que
+  corre antes de pintar): una actualización diferida pintaría un frame con los cortes del ancho
+  anterior y, al estrechar el panel, una fila forzada que ya no cabe mandaría su último elemento a
+  una línea propia (fila extra de un frame). Observa la capa (fuentes que cargan tarde) y una
+  **sonda de ancho** (`.section-map-width-probe`, absoluta `left:0; right:0; height:0`), no el
+  bloque: el re-render síncrono cambia la altura del bloque (los cortes) y observarlo provocaría el
+  aviso "ResizeObserver loop". El `useLayoutEffect` re-mide solo con cambios que afectan al ancho
+  (firma id+nombre+`aiHidden`, sección activa, renombrado, idioma), no al teclear. El mismo plan (con `maxRows: 2` y **sin** `addWidth`:
   opcional, sin pestaña `+` no se añade ningún elemento, ni siquiera de ancho 0, que costaría una junta)
   lo usa el mapa abierto de la fila del sidebar (ver "Sidebar: item de nota" → `open`).
 - **Secciones fijadas:** la activa y la que se está renombrando nunca quedan plegadas
   (`visibleSectionIndices(total, pinned, count)`): si caen entre las ocultas ocupan los últimos huecos
   visibles — **solo visualmente**, el orden de los datos no cambia. Sin esto, renombrar desde el menú
   una pestaña cerca del tope (el input es más ancho) la plegaría y desmontaría el input.
-- **Equilibrado de la última fila: no implementado.** Forzar cortes de fila en un único `flex-wrap`
-  exige elementos de salto (`flex-basis:100%`), que con `row-gap` duplican la junta, o filas como
-  contenedores separados, que remontan la pestaña al cambiar de fila (se pierde la transición y un
-  doble clic puede caer en dos nodos distintos). La última fila puede quedar con 1–2 pestañas
-  estiradas.
+- **Equilibrado de la última fila: no implementado.** Los cortes forzados replican el reparto voraz
+  del navegador; la última fila puede quedar con 1–2 pestañas estiradas. Equilibrarla bastaría con
+  cambiar el reparto de `wrapRows` (los cortes ya existen), pero movería pestañas de fila al cambiar
+  de activa más a menudo.
 - **Arrastrar para reordenar** (estado local del mapa): el id va en una ref y el "hueco" visual
   (`is-dragging`: fondo muy tenue, contenido invisible) se pone un frame después, para que la imagen
   de arrastre se capture de la pestaña tal cual. El destino es una barra `--accent` de 4 px **en la
