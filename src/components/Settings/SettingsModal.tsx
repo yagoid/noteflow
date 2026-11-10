@@ -174,7 +174,9 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
             <div className="px-5 pt-4 pb-3">
               <h2 className="text-sm font-mono font-semibold text-text">{activeLabel}</h2>
             </div>
-            <div className="settings-content flex-1 overflow-y-auto px-5 py-5">
+            {/* Opaque background (the window's own colour): lets Chromium scroll this on the
+                compositor on standard-DPI screens instead of repainting it on every scroll frame. */}
+            <div className="settings-content flex-1 overflow-y-auto px-5 py-5 bg-surface-1">
               {section === 'general' && <GeneralPanel onClose={onClose} />}
               {section === 'ai' && <AiPanel onNavigate={setSection} />}
               {section === 'sync' && <SyncPanel onNavigate={setSection} />}

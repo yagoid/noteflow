@@ -73,9 +73,9 @@ export function TutorialPanel() {
         className="relative overflow-hidden rounded-lg border border-border bg-surface-2/40 px-5 py-5"
         style={accentVars('accent')}
       >
-        <div className="wn-aurora !inset-[-60%] !opacity-50" aria-hidden>
-          <span className="wn-blob wn-blob-a" />
-          <span className="wn-blob wn-blob-b" />
+        <div className="wn-card-aurora" aria-hidden>
+          <span className="wn-card-blob wn-card-blob-a" />
+          <span className="wn-card-blob wn-card-blob-b" />
         </div>
         <div className="relative flex items-center gap-4">
           <div className="flex-1 min-w-0">

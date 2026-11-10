@@ -218,7 +218,7 @@ export function WhatsNewTour({ tour }: { tour: OpenTour }) {
           <SlideFrame label={`noteflow · ${s.id}`}>
             {s.extras && !clip
               ? <ExtrasGrid extras={s.extras} t={t} />
-              : <SlideClip slide={s} lang={lang} />}
+              : <SlideClip slide={s} lang={lang} still={state === 'exit'} />}
           </SlideFrame>
         </div>
         <div className="wn-text" aria-live={state === 'enter' ? 'polite' : undefined}>

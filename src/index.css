@@ -2485,13 +2485,10 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
    between slides animate because the elements transition their computed
    background-color / box-shadow. `--dx` (−1 | 0.5 | 1) is the direction of the
    last move and `--wn-base` the delay before the slide's reveal starts.
-   prefers-reduced-motion: only opacity fades remain (block at the end). */
-
-@property --wn-angle {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
+   prefers-reduced-motion: only opacity fades remain (block at the end).
+   Performance (old laptops, software compositing): the loops that never stop
+   (aurora, frame light) only animate `transform` on layers that are painted once
+   — no filter or paint has to be redone per frame. Keep it that way. */
 
 .wn-root {
   position: fixed;
@@ -2530,34 +2527,90 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
 }
 .wn-root.is-closing .wn-modal { animation: wn-modal-out 240ms cubic-bezier(0.4, 0, 1, 1) both; }
 
-/* Aurora: three blurred blobs drifting slowly — slide colour + theme accent. */
+/* Aurora: three soft blobs drifting slowly — slide colour + theme accent.
+   Each blob is the picture of an ellipse under a 72px gaussian blur, drawn as a
+   radial gradient instead of with `filter: blur()`: a filter around the moving
+   blobs had to be recomputed on every frame, for as long as the tour is open.
+   The ellipse is the inner half of the box (the box is twice its size, to hold
+   the soft edge), so its edge sits at 50% of the gradient ray; the stops follow
+   the gaussian falloff every half sigma around it. `--wn-bs` (sigma) and
+   `--wn-bd` (edge offset) are fitted per blob against the real blur, at the
+   middle of its drift scale. The colour is `color`, so it can transition. */
 .wn-aurora {
   position: absolute;
   inset: -25%;
   pointer-events: none;
-  filter: blur(72px);
   opacity: 0.6;
 }
 .wn-blob {
   position: absolute;
-  border-radius: 50%;
-  transition: background-color 900ms ease;
+  --wn-be: calc(50% + var(--wn-bd));
+  background-image: radial-gradient(closest-side,
+    currentColor calc(var(--wn-be) - 3 * var(--wn-bs)),
+    color-mix(in srgb, currentColor 99.38%, transparent) calc(var(--wn-be) - 2.5 * var(--wn-bs)),
+    color-mix(in srgb, currentColor 97.72%, transparent) calc(var(--wn-be) - 2 * var(--wn-bs)),
+    color-mix(in srgb, currentColor 93.32%, transparent) calc(var(--wn-be) - 1.5 * var(--wn-bs)),
+    color-mix(in srgb, currentColor 84.13%, transparent) calc(var(--wn-be) - var(--wn-bs)),
+    color-mix(in srgb, currentColor 69.15%, transparent) calc(var(--wn-be) - 0.5 * var(--wn-bs)),
+    color-mix(in srgb, currentColor 50%, transparent) var(--wn-be),
+    color-mix(in srgb, currentColor 30.85%, transparent) calc(var(--wn-be) + 0.5 * var(--wn-bs)),
+    color-mix(in srgb, currentColor 15.87%, transparent) calc(var(--wn-be) + var(--wn-bs)),
+    color-mix(in srgb, currentColor 6.68%, transparent) calc(var(--wn-be) + 1.5 * var(--wn-bs)),
+    color-mix(in srgb, currentColor 2.28%, transparent) calc(var(--wn-be) + 2 * var(--wn-bs)),
+    color-mix(in srgb, currentColor 0.62%, transparent) calc(var(--wn-be) + 2.5 * var(--wn-bs)),
+    transparent calc(var(--wn-be) + 3 * var(--wn-bs)));
+  transition: color 900ms ease;
 }
+/* Ellipse 52% × 58% at left 2%, top 14%. */
 .wn-blob-a {
-  width: 52%; height: 58%; left: 2%; top: 14%;
-  background-color: rgb(var(--wn-c) / 0.42);
+  width: 104%; height: 116%; left: -24%; top: -15%;
+  color: rgb(var(--wn-c) / 0.42);
+  --wn-bs: 80px; --wn-bd: -10px;
   animation: wn-drift-a 21s ease-in-out infinite alternate;
 }
+/* Ellipse 46% × 52% at right 0, top 0. */
 .wn-blob-b {
-  width: 46%; height: 52%; right: 0%; top: 0%;
-  background-color: rgb(var(--accent) / 0.3);
+  width: 92%; height: 104%; right: -23%; top: -26%;
+  color: rgb(var(--accent) / 0.3);
+  --wn-bs: 90px; --wn-bd: -14px;
   animation: wn-drift-b 27s ease-in-out infinite alternate;
 }
+/* Ellipse 40% × 46% at left 38%, bottom 0. */
 .wn-blob-c {
-  width: 40%; height: 46%; left: 38%; bottom: 0%;
-  background-color: rgb(var(--wn-c) / 0.22);
+  width: 80%; height: 92%; left: 18%; bottom: -23%;
+  color: rgb(var(--wn-c) / 0.22);
+  --wn-bs: 78px; --wn-bd: -12px;
   animation: wn-drift-c 33s ease-in-out infinite alternate;
 }
+/* Banner of Settings → Tutorial: the same two blobs over a wide, flat card. There
+   the ellipses are far flatter than the blur is wide, which a gradient cannot
+   draw, so each one keeps a real blur — on a child that never changes, inside the
+   element that moves: it is painted once and then only composited. */
+.wn-card-aurora {
+  position: absolute;
+  inset: -60%;
+  pointer-events: none;
+  opacity: 0.5;
+}
+.wn-card-blob { position: absolute; }
+.wn-card-blob::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  filter: blur(72px);
+  transition: background-color 900ms ease;
+}
+.wn-card-blob-a {
+  width: 52%; height: 58%; left: 2%; top: 14%;
+  animation: wn-card-drift-a 21s ease-in-out infinite alternate;
+}
+.wn-card-blob-a::before { background-color: rgb(var(--wn-c) / 0.42); }
+.wn-card-blob-b {
+  width: 46%; height: 52%; right: 0%; top: 0%;
+  animation: wn-card-drift-b 27s ease-in-out infinite alternate;
+}
+.wn-card-blob-b::before { background-color: rgb(var(--accent) / 0.3); }
 /* Dot grid fading out from the centre: texture over the aurora. */
 .wn-dots {
   position: absolute;
@@ -2701,7 +2754,10 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
   overflow: hidden;
   isolation: isolate;
 }
-/* A light sweeping around the border (conic gradient masked to a 1px ring). */
+/* A light sweeping around the border (conic gradient masked to a 1px ring). The
+   gradient is painted once on a square that covers the frame (125% of its width
+   > the diagonal of a 3:2 box) and that square rotates: same picture as turning
+   the gradient's start angle, without repainting it on every frame. */
 .wn-frame-glow {
   position: absolute;
   inset: 0;
@@ -2709,11 +2765,21 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
   border-radius: inherit;
   padding: 1px;
   pointer-events: none;
-  background: conic-gradient(from var(--wn-angle), transparent 0 62%, rgb(var(--wn-c) / 0.95) 80%, transparent 96%);
+  overflow: hidden; /* rounds the square's corners like the box's own background was */
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: wn-angle 7s linear infinite;
+}
+.wn-frame-glow::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 125%;
+  aspect-ratio: 1;
+  margin: -62.5% 0 0 -62.5%;
+  background: conic-gradient(transparent 0 62%, rgb(var(--wn-c) / 0.95) 80%, transparent 96%);
+  animation: wn-spin 7s linear infinite;
 }
 .wn-frame-bar {
   position: absolute;
@@ -2958,12 +3024,13 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
 @keyframes wn-modal-in {
   from { opacity: 0; transform: translateY(18px) scale(0.9); filter: blur(10px); }
   60% { opacity: 1; filter: blur(0); }
-  to { opacity: 1; transform: none; filter: blur(0); }
+  /* `none`, not blur(0): a filter left applied keeps the whole modal in an offscreen pass. */
+  to { opacity: 1; transform: none; filter: none; }
 }
 @keyframes wn-modal-out { to { opacity: 0; transform: translateY(8px) scale(0.96); filter: blur(6px); } }
 @keyframes wn-media-in {
   from { opacity: 0; transform: translateX(calc(var(--dx, 1) * 80px)) scale(0.96); filter: blur(6px); }
-  to { opacity: 1; transform: none; filter: blur(0); }
+  to { opacity: 1; transform: none; filter: none; }
 }
 @keyframes wn-media-out { to { opacity: 0; transform: translateX(calc(var(--dx, 1) * -60px)) scale(0.97); filter: blur(4px); } }
 @keyframes wn-text-in {
@@ -2975,10 +3042,13 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
   0%, 30%, 100% { transform: none; box-shadow: 0 1px 0 rgb(0 0 0 / 0.18), 0 0 0 0 rgb(var(--wn-c) / 0); }
   12% { transform: translateY(1.5px); border-bottom-width: 1px; box-shadow: 0 0 0 0 rgb(0 0 0 / 0), 0 0 0 4px rgb(var(--wn-c) / 0.22); }
 }
-@keyframes wn-drift-a { to { transform: translate(18%, 12%) scale(1.15); } }
-@keyframes wn-drift-b { to { transform: translate(-22%, 18%) scale(0.9); } }
-@keyframes wn-drift-c { to { transform: translate(-28%, -16%) scale(1.2); } }
-@keyframes wn-angle { to { --wn-angle: 360deg; } }
+/* Translations are % of the blob's box, which is twice its ellipse (see .wn-blob):
+   half the distance of the banner's blobs, whose box is the ellipse itself. */
+@keyframes wn-drift-a { to { transform: translate(9%, 6%) scale(1.15); } }
+@keyframes wn-drift-b { to { transform: translate(-11%, 9%) scale(0.9); } }
+@keyframes wn-drift-c { to { transform: translate(-14%, -8%) scale(1.2); } }
+@keyframes wn-card-drift-a { to { transform: translate(18%, 12%) scale(1.15); } }
+@keyframes wn-card-drift-b { to { transform: translate(-22%, 18%) scale(0.9); } }
 @keyframes wn-ring {
   0% { transform: scale(0.55); opacity: 0; }
   14% { opacity: 0.9; }
@@ -3022,7 +3092,7 @@ body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
   .wn-root.is-closing .wn-modal,
   .wn-slide[data-state="exit"] .wn-media,
   .wn-slide[data-state="exit"] .wn-reveal { animation-name: wn-fade-out; }
-  .wn-blob, .wn-frame-glow, .wn-fb-ring, .wn-fb-orbit, .wn-fb-core,
+  .wn-blob, .wn-card-blob, .wn-frame-glow::before, .wn-fb-ring, .wn-fb-orbit, .wn-fb-core,
   .wn-btn-cta, .wn-btn-cta::after, .wn-btn-cta .wn-btn-arrow,
   .wn-slide[data-state="enter"] .wn-combo .wn-kbd { animation: none; }
   .wn-fb-particles, .wn-btn-cta::after { display: none; }

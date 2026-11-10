@@ -109,6 +109,12 @@ interface SlideClipProps {
    */
   thumb?: boolean
   playing?: boolean
+  /**
+   * The slide on its way out (it is a fresh mount, never the element that was
+   * playing): the poster as a still image instead of a second <video> that would
+   * load and decode from frame 0 just to be faded away, right when the next clip starts.
+   */
+  still?: boolean
 }
 
 /**
@@ -116,15 +122,14 @@ interface SlideClipProps {
  * it fails to load — the animated fallback. Under prefers-reduced-motion nothing
  * moves: the poster as a still image, or the fallback (its loops are stopped in CSS).
  */
-export function SlideClip({ slide, lang, thumb = false, playing = false }: SlideClipProps) {
+export function SlideClip({ slide, lang, thumb = false, playing = false, still = false }: SlideClipProps) {
   const media = getSlideMedia(slide.id, lang)
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const [reducedMotion] = useState(prefersReducedMotion)
-  if (reducedMotion) {
-    return media.poster
-      ? <img className="wn-clip" src={media.poster} alt="" aria-hidden draggable={false} />
-      : <SlideFallback slide={slide} thumb={thumb} />
+  if (media.poster && (reducedMotion || still)) {
+    return <img className="wn-clip" src={media.poster} alt="" aria-hidden draggable={false} />
   }
+  if (reducedMotion) return <SlideFallback slide={slide} thumb={thumb} />
   if (!media.video || failedSrc === media.video) return <SlideFallback slide={slide} thumb={thumb} />
   const src = media.video
   if (thumb) {
@@ -154,10 +159,15 @@ export function SlideClip({ slide, lang, thumb = false, playing = false }: Slide
  * clips fade in from black. The <img> is hidden only once the video is actually
  * playing (no black flash while the first frame decodes) and comes back on stop.
  * Without a poster the video just pauses where it is (never rewinds to black).
+ * With one, the <video> is only mounted the first time the card plays: until then
+ * the poster covers it anyway, and a media pipeline per card (the whole deck at
+ * once) is a lot to set up just to open Settings → Tutorial.
  */
 function ThumbClip({ src, poster, playing, onError }: { src: string; poster: string | null; playing: boolean; onError: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [started, setStarted] = useState(false)
+  const [mounted, setMounted] = useState(!poster)
+  if (playing && !mounted) setMounted(true)
 
   useEffect(() => {
     const v = videoRef.current
@@ -173,19 +183,21 @@ function ThumbClip({ src, poster, playing, onError }: { src: string; poster: str
   const showPoster = !!poster && !(playing && started)
   return (
     <>
-      <video
-        ref={videoRef}
-        className="wn-clip"
-        src={src}
-        muted
-        loop
-        playsInline
-        preload="metadata"
-        onPlaying={() => setStarted(true)}
-        onPause={() => setStarted(false)}
-        onError={onError}
-        aria-hidden
-      />
+      {mounted && (
+        <video
+          ref={videoRef}
+          className="wn-clip"
+          src={src}
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          onPlaying={() => setStarted(true)}
+          onPause={() => setStarted(false)}
+          onError={onError}
+          aria-hidden
+        />
+      )}
       {poster && (
         <img
           className={`wn-clip wn-clip-poster${showPoster ? '' : ' is-hidden'}`}

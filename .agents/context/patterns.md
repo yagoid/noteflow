@@ -1761,9 +1761,10 @@ diapositivas que este dispositivo no ha visto. Piezas:
 - **Animación** (`index.css` § "What's new" tour, clases `.wn-*`): entrada del modal con easing
   spring + blur; fondo "aurora" (blobs difuminados con `--wn-c` = color de la diapositiva y el
   acento del tema; el cambio de color entre diapositivas se anima porque los elementos transicionan
-  su `background-color`/`box-shadow` computados); transición direccional (`--dx`) con parallax
+  su `color`/`background-color`/`box-shadow` computados); transición direccional (`--dx`) con parallax
   media/texto y reveal escalonado (título → cuerpo → chips, que hacen un "press" uno tras otro);
-  luz que recorre el borde del marco (`@property --wn-angle`). `prefers-reduced-motion`: todo se
+  luz que recorre el borde del marco (un cuadrado con el `conic-gradient` que rota dentro del anillo
+  enmascarado). `prefers-reduced-motion`: todo se
   queda en fades de opacidad y los bucles se paran; el clip **no** se reproduce (ni autoplay ni
   loop): se muestra el póster como imagen fija o, sin póster, el fallback estático (`SlideClip`,
   `matchMedia` leído al montar, como `ActivityPulse`/`PlanCardBackdrop`). Lo mismo en las
@@ -1780,7 +1781,41 @@ diapositivas que este dispositivo no ha visto. Piezas:
   solo pinta `poster` hasta que el vídeo se reproduce por primera vez, y tras un hover (pausa +
   rebobinado) la tarjeta se quedaba en el fotograma 0 del clip, que es **negro** (los clips entran
   con fundido desde negro). El `<img>` se oculta solo cuando el vídeo ya está reproduciendo y
-  vuelve al instante al parar. Click → tour completo empezando en esa diapositiva.
+  vuelve al instante al parar. Click → tour completo empezando en esa diapositiva. Con póster, el
+  `<video>` de la miniatura **no se monta hasta el primer hover/foco** (el póster lo tapa igual): una
+  tubería de vídeo por tarjeta, todas a la vez, pesaba al abrir el panel.
+- **Rendimiento (equipos viejos / composición por software) — invariantes:** los bucles infinitos
+  solo animan `transform` sobre capas que se pintan **una vez**; nada de filtros ni repintados por
+  frame. Si se toca, mantenerlo:
+  - **Aurora del tour sin `filter`:** cada `.wn-blob` es un `radial-gradient` que dibuja la elipse
+    ya difuminada (caída gaussiana, un stop cada ½ sigma; `--wn-bs`/`--wn-bd` ajustados por blob
+    contra el `blur(72px)` real). La caja mide el doble que la elipse (para el borde suave), así que
+    posición, tamaño y los `translate` de `wn-drift-*` van a la mitad/al doble respecto a la elipse.
+    El color es `color` (`currentColor` en los stops), que sí transiciona. Antes era
+    `filter: blur(72px)` en el contenedor con los blobs moviéndose dentro → blur de ~1,1 MP **en cada
+    frame** mientras el tour está abierto. Diferencia medida contra el original: ≤ 7 niveles de 255
+    en el peor píxel, media < 0,6.
+  - **Banner de Ajustes → Tutorial (`.wn-card-aurora`/`.wn-card-blob-*`):** ahí las elipses son
+    mucho más planas que el radio del blur y un gradiente no lo reproduce, así que conserva el blur
+    real, pero en un `::before` **estático** dentro del elemento que se mueve: Chromium puede
+    componerlo sin recalcular el blur (no garantizado con composición por software, pero nunca peor
+    que antes). No volver a poner el `filter` en el contenedor.
+  - **Luz del marco:** el `conic-gradient` se pinta una vez en `.wn-frame-glow::before` (cuadrado
+    del 125 % del ancho, > la diagonal de la caja 3:2) y rota con `transform`; antes se animaba el
+    ángulo con `@property`, que repinta el gradiente en el hilo principal cada frame. Si cambia la
+    proporción del marco, revisar ese 125 %.
+  - **Keyframes de entrada (`wn-modal-in`, `wn-media-in`) acaban en `filter: none`**, no `blur(0)`:
+    con `fill-mode: both` un filtro que se queda aplicado mantiene modal y media en una pasada
+    offscreen permanente.
+  - **Diapositiva saliente:** se remonta (su `key` cambia), así que su clip sería un `<video>` nuevo
+    cargando desde el fotograma 0 durante 380 ms; pinta el **póster** (`SlideClip still`).
+  - `.settings-content` (scroll de Ajustes) lleva `bg-surface-1` opaco, el mismo color de la
+    ventana: en pantallas de DPI estándar Chromium solo compone el scroll de un contenedor con fondo
+    opaco; sin él repinta el contenido en cada frame de scroll.
+  - **Pendiente / no tocado por cambiar el aspecto:** los `backdrop-filter` a pantalla completa
+    (`.wn-backdrop` 10 px, `backdrop-blur-sm` del overlay de Ajustes y del resto de modales) se
+    recalculan en la zona dañada en cada frame que cambia algo encima; es probablemente el mayor
+    coste que queda.
 
 **Añadir diapositivas en un release:** (1) entrada nueva en `WHATS_NEW_SLIDES` **antes de `more`**
 (que cierra el tour completo) con `since` = la versión del release; (2) su copy en
