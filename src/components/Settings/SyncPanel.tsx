@@ -428,7 +428,7 @@ function GitHubSyncSection({
           <div className="flex gap-2">
             <button
               onClick={() => window.noteflow.openUrl(verificationUri ?? 'https://github.com/login/device')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors"
             >
               <ExternalLink size={11} />
               {t.settings.sync.openBrowser}
@@ -460,7 +460,7 @@ function GitHubSyncSection({
             <button
               onClick={handlePull}
               disabled={isLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
             >
               {step === 'pulling' ? (
                 <Loader size={11} className="animate-spin" />
@@ -476,7 +476,7 @@ function GitHubSyncSection({
             <button
               onClick={() => setConfirmMirror(true)}
               disabled={isLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
             >
               {step === 'mirroring' ? (
                 <Loader size={11} className="animate-spin" />
@@ -522,7 +522,7 @@ function GitHubSyncSection({
           <button
             onClick={handleInitiate}
             disabled={isLoading || !repo.trim()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {step === 'waiting-auth' && !userCode ? (
               <Loader size={11} className="animate-spin" />

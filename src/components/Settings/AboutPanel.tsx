@@ -76,7 +76,7 @@ export function AboutPanel() {
           <button
             onClick={handleCheck}
             disabled={checking}
-            className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono ${settingsButtonClass}`}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono ${settingsButtonClass}`}
           >
             {checking
               ? <RefreshCw size={13} className="animate-spin text-text-muted" />
@@ -97,7 +97,7 @@ export function AboutPanel() {
             <button
               onClick={handleUpdate}
               disabled={downloading || installing}
-              className="flex items-center gap-2 px-3 py-2 rounded-md border border-accent/60 bg-accent/[0.1] text-xs font-mono text-accent hover:bg-accent/[0.18] transition-colors disabled:opacity-60"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-accent/60 bg-accent/[0.1] text-xs font-mono text-accent hover:bg-accent/[0.18] transition-colors disabled:opacity-60"
             >
               {installing ? (
                 <>
@@ -130,7 +130,7 @@ export function AboutPanel() {
         <SectionTitle>{t.settings.about.links}</SectionTitle>
         <button
           onClick={() => window.noteflow.openUrl('https://github.com/yagoid/noteflow')}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left ${settingsButtonClass}`}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono text-left ${settingsButtonClass}`}
         >
           <Github size={13} className="text-text-muted flex-shrink-0" />
           <span className="flex-1">{t.settings.about.githubRepo}</span>

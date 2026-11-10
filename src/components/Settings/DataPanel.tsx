@@ -20,17 +20,17 @@ export function DataPanel({ onOpenExportImport }: DataPanelProps) {
       {/* Export / Import */}
       <section>
         <SectionTitle>{t.settings.data.backup}</SectionTitle>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col items-start gap-2">
           <button
             onClick={() => onOpenExportImport('export')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left ${settingsButtonClass}`}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono text-left ${settingsButtonClass}`}
           >
             <Download size={13} className="text-text-muted flex-shrink-0" />
             <span className="flex-1">{t.settings.data.exportNotes}</span>
           </button>
           <button
             onClick={() => onOpenExportImport('import')}
-            className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left ${settingsButtonClass}`}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono text-left ${settingsButtonClass}`}
           >
             <Upload size={13} className="text-text-muted flex-shrink-0" />
             <span className="flex-1">{t.settings.data.importNotes}</span>
@@ -44,7 +44,7 @@ export function DataPanel({ onOpenExportImport }: DataPanelProps) {
         <p className="text-[11px] font-mono text-text-muted break-all mb-2">{notesDir || '…'}</p>
         <button
           onClick={() => window.noteflow.openNotesFolder()}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left ${settingsButtonClass}`}
+          className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono text-left ${settingsButtonClass}`}
         >
           <FolderOpen size={13} className="text-text-muted flex-shrink-0" />
           <span className="flex-1">{t.settings.data.openNotesFolder}</span>

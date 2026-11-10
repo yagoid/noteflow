@@ -266,7 +266,7 @@ export function AccountPanel() {
             <button
               onClick={handleRefresh}
               disabled={busy}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
             >
               {busy ? <Loader size={11} className="animate-spin" /> : <RefreshCw size={11} />}
               {t.settings.account.refresh}
@@ -274,7 +274,7 @@ export function AccountPanel() {
             <button
               onClick={handleSignOut}
               disabled={busy}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-red hover:bg-red/10 transition-colors disabled:opacity-40"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-text-muted hover:text-red hover:bg-red/10 transition-colors disabled:opacity-40"
             >
               <LogOut size={11} />
               {t.settings.account.signOut}
@@ -307,7 +307,7 @@ export function AccountPanel() {
           <button
             onClick={handleSendCode}
             disabled={busy || !email.trim()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busy ? <Loader size={11} className="animate-spin" /> : <Mail size={11} />}
             {t.settings.account.sendCode}
@@ -392,7 +392,7 @@ export function AccountPanel() {
             <button
               onClick={handleVerify}
               disabled={busy || !code.trim()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {busy ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
               {t.settings.account.verifyAndSignIn}
@@ -402,7 +402,7 @@ export function AccountPanel() {
             <button
               onClick={() => sendCode('resend')}
               disabled={busy || resendCooldown > 0}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono ${settingsButtonClass}`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
             >
               <Send size={11} />
               {resendCooldown > 0
@@ -412,7 +412,7 @@ export function AccountPanel() {
             <button
               onClick={handleUseDifferentEmail}
               disabled={busy}
-              className={`px-3 py-1.5 rounded text-xs font-mono ${settingsButtonClass}`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
             >
               {t.settings.account.useDifferentEmail}
             </button>

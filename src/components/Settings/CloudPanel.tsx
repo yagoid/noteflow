@@ -280,7 +280,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
           <div className="flex gap-2">
             <button
               onClick={handleCopyRecovery}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors"
             >
               {copied ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
               {copied ? t.settings.cloud.copied : t.settings.cloud.copyCode}
@@ -431,7 +431,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
             <button
               onClick={handleSetupManaged}
               disabled={isLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {busy === 'setup' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
               {t.settings.cloud.modeStandardEnable}
@@ -469,7 +469,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
               <button
                 onClick={handleSetup}
                 disabled={isLoading || !passphrase || !confirmPassphrase}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {busy === 'setup' ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
                 {t.settings.cloud.createPassphrase}
@@ -511,7 +511,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
           <button
             onClick={handleUnlock}
             disabled={isLoading || !secret.trim()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busy === 'unlock' ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
             {t.settings.cloud.unlock}
@@ -584,7 +584,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
                 <button
                   onClick={handlePull}
                   disabled={isLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
                 >
                   {busy === 'pull' ? <Loader size={11} className="animate-spin" /> : <RefreshCw size={11} />}
                   {t.settings.sync.syncNow}
@@ -603,7 +603,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
                 <button
                   onClick={handleEnable}
                   disabled={isLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40"
                 >
                   {busy === 'toggle' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
                   {t.settings.cloud.enableSync}
@@ -674,7 +674,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
                     <button
                       onClick={handleUpgrade}
                       disabled={isLoading || !passphrase || !confirmPassphrase}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {busy === 'upgrade' ? <Loader size={11} className="animate-spin" /> : <ShieldCheck size={11} />}
                       {t.settings.cloud.upgradeSubmit}
@@ -723,7 +723,7 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
                     <button
                       onClick={handleDowngrade}
                       disabled={isLoading}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {busy === 'downgrade' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
                       {t.settings.cloud.downgradeSubmit}

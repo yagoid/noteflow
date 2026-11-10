@@ -1755,7 +1755,7 @@ La fuente única de verdad ahora es:
   divisor, y un hermano que no sea `<section>` en medio corta el `section + section`.
 - **`settingsButtonClass`** — cuerpo del botón **secundario** (el default): `bg-surface-2 border
   border-border text-text hover:bg-surface-3` + estados `disabled`. **No** incluye tamaño/padding/
-  rounded: cada llamada mantiene los suyos. Los botones **primarios** (`border-text/20`, en Account/
+  rounded: cada llamada mantiene los suyos, pero **todos los botones de acción de Ajustes van a `rounded-lg`** (incluidos primarios y destructivos; no los segmentos, tarjetas seleccionables ni iconos sin fondo). En temas oscuros `.settings-btn` (`src/index.css`) aclara el relleno con un velo del color de texto. Los botones **primarios** (`border-text/20`, en Account/
   Cloud/Sync) y los **destructivos** (rojo) conservan su propio color — la distinción es intencional.
 - **`settingsRaisedButtonClass`** — el mismo botón pero con `bg-surface-3`, para los que van **sobre
   una tarjeta `surface-2`** (las filas de Templates), donde un fill `surface-2` desaparecería.

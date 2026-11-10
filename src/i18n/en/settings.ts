@@ -308,8 +308,8 @@ export const settings = {
 
   data: {
     backup: 'Backup',
-    exportNotes: 'Export notes…',
-    importNotes: 'Import notes…',
+    exportNotes: 'Export notes',
+    importNotes: 'Import notes',
     notesLocation: 'Notes location',
     openNotesFolder: 'Open notes folder',
   },

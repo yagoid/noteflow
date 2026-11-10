@@ -251,8 +251,8 @@ export const settings = {
 
   data: {
     backup: 'Copia de seguridad',
-    exportNotes: 'Exportar notas…',
-    importNotes: 'Importar notas…',
+    exportNotes: 'Exportar notas',
+    importNotes: 'Importar notas',
     notesLocation: 'Ubicación de las notas',
     openNotesFolder: 'Abrir carpeta de notas',
   },

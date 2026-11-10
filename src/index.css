@@ -129,6 +129,18 @@ button {
   background: rgb(var(--border));
 }
 
+/* Filled Settings buttons (.settings-btn: settingsButtonClass and the inline primary
+   ones). On dark themes surface-2/3 sit only a few levels above the panel background,
+   so the button barely reads as pressable. Lift it with a tint of the ink colour
+   layered over its own fill — works on any surface (base and raised variants) and
+   keeps each theme's hue. Light themes are untouched. */
+:root[data-color-scheme='dark'] .settings-btn {
+  background-image: linear-gradient(rgb(var(--text) / 0.07), rgb(var(--text) / 0.07));
+}
+:root[data-color-scheme='dark'] .settings-btn:hover:not(:disabled) {
+  background-image: linear-gradient(rgb(var(--text) / 0.12), rgb(var(--text) / 0.12));
+}
+
 /* AI chat markdown. Reuses the editor's prose markup (via htmlFromMarkdown) but
    scaled down to the chat panel: 12px base, compact headings/spacing, and no
    editor padding (the message bubble supplies its own insets). */

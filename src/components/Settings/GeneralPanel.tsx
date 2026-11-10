@@ -120,7 +120,7 @@ export function GeneralPanel({ onClose }: { onClose: () => void }) {
             <button
               onClick={() => void reindexAll()}
               disabled={busy}
-              className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono ${settingsButtonClass}`}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono ${settingsButtonClass}`}
             >
               {busy ? <Loader2 size={13} className="animate-spin text-text-muted" /> : <RefreshCw size={13} className="text-text-muted" />}
               {t.settings.ai.reindexAll}
@@ -142,7 +142,7 @@ export function GeneralPanel({ onClose }: { onClose: () => void }) {
         </div>
         <button
           onClick={openProfile}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left flex-shrink-0 ${settingsButtonClass}`}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono text-left flex-shrink-0 ${settingsButtonClass}`}
         >
           <Sparkles size={13} className="text-text-muted flex-shrink-0" />
           <span>{t.settings.ai.openProfileSetup}</span>

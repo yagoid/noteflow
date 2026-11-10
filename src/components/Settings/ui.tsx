@@ -10,13 +10,13 @@ import type { ReactNode } from 'react'
 // just text and did not read as clickable.
 // Primary (accent) and destructive (red) buttons keep their own colours.
 export const settingsButtonClass =
-  'bg-surface-2 border border-border text-text hover:bg-surface-3 hover:border-text-muted/40 ' +
+  'settings-btn bg-surface-2 border border-border text-text hover:bg-surface-3 hover:border-text-muted/40 ' +
   'transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
 
 // Same button, one surface up: for buttons that sit ON a surface-2 card (e.g. the
 // template rows), where a surface-2 fill would melt into its background.
 export const settingsRaisedButtonClass =
-  'bg-surface-3 border border-border text-text hover:border-text-muted/60 ' +
+  'settings-btn bg-surface-3 border border-border text-text hover:border-text-muted/60 ' +
   'transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
 
 interface SectionTitleProps {

@@ -218,7 +218,7 @@ export function AppearancePanel() {
               )}
               <button
                 onClick={() => setShowAllThemes((v) => !v)}
-                className={`mt-2 flex items-center gap-1 px-2 py-1 rounded text-[11px] font-mono ${settingsButtonClass}`}
+                className={`mt-2 flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-mono ${settingsButtonClass}`}
               >
                 <ChevronDown size={11} className={`transition-transform ${showAllThemes ? 'rotate-180' : ''}`} />
                 {showAllThemes ? t.settings.appearance.fewerThemes : tf(t.settings.appearance.moreThemes, { count: moreThemes.length })}
@@ -234,7 +234,7 @@ export function AppearancePanel() {
               fontOverride !== null && (
                 <button
                   onClick={() => setFontOverride(null)}
-                  className={`flex flex-shrink-0 items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono ${settingsButtonClass}`}
+                  className={`flex flex-shrink-0 items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-mono ${settingsButtonClass}`}
                 >
                   <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
                 </button>
@@ -274,7 +274,7 @@ export function AppearancePanel() {
               accentOverride !== null && (
                 <button
                   onClick={() => setAccentOverride(null)}
-                  className={`flex flex-shrink-0 items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono ${settingsButtonClass}`}
+                  className={`flex flex-shrink-0 items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-mono ${settingsButtonClass}`}
                 >
                   <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
                 </button>
@@ -325,7 +325,7 @@ export function AppearancePanel() {
               editorColorsOverridden && (
                 <button
                   onClick={resetEditorColors}
-                  className={`flex flex-shrink-0 items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono ${settingsButtonClass}`}
+                  className={`flex flex-shrink-0 items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-mono ${settingsButtonClass}`}
                 >
                   <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
                 </button>
@@ -402,7 +402,7 @@ export function AppearancePanel() {
             <button
               onClick={() => changeUiScale(-1)}
               disabled={atMinScale}
-              className={`w-8 h-8 flex items-center justify-center rounded-md ${settingsButtonClass}`}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg ${settingsButtonClass}`}
               title={t.settings.appearance.smaller}
             >
               <Minus size={14} />
@@ -411,7 +411,7 @@ export function AppearancePanel() {
             <button
               onClick={() => changeUiScale(1)}
               disabled={atMaxScale}
-              className={`w-8 h-8 flex items-center justify-center rounded-md ${settingsButtonClass}`}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg ${settingsButtonClass}`}
               title={t.settings.appearance.larger}
             >
               <Plus size={14} />

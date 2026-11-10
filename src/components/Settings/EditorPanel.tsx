@@ -22,17 +22,17 @@ export function EditorPanel() {
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
             onClick={() => changeFontSize(-1)}
-            className={`w-7 h-7 flex items-center justify-center rounded-md ${settingsButtonClass}`}
+            className={`w-7 h-7 flex items-center justify-center rounded-lg ${settingsButtonClass}`}
             title={tf(t.settings.editor.decrease, { keys: `${modKey}+-` })}
           >−</button>
           <button
             onClick={resetFontSize}
-            className={`w-12 h-7 text-center rounded-md text-xs font-mono ${settingsButtonClass}`}
+            className={`w-12 h-7 text-center rounded-lg text-xs font-mono ${settingsButtonClass}`}
             title={tf(t.settings.editor.reset, { keys: `${modKey}+0` })}
           >{fontSize}px</button>
           <button
             onClick={() => changeFontSize(1)}
-            className={`w-7 h-7 flex items-center justify-center rounded-md ${settingsButtonClass}`}
+            className={`w-7 h-7 flex items-center justify-center rounded-lg ${settingsButtonClass}`}
             title={tf(t.settings.editor.increase, { keys: `${modKey}++` })}
           >+</button>
         </div>
@@ -46,7 +46,7 @@ export function EditorPanel() {
         </div>
         <button
           onClick={() => setFontFamily(fontFamily === 'mono' ? 'inter' : 'mono')}
-          className="flex items-center gap-0.5 text-[11px] font-mono px-2 py-1 rounded-md border border-border bg-surface-2 text-text-muted hover:text-text transition-colors flex-shrink-0"
+          className="flex items-center gap-0.5 text-[11px] font-mono px-2 py-1 rounded-lg border border-border settings-btn bg-surface-2 text-text-muted hover:text-text transition-colors flex-shrink-0"
         >
           <span className={fontFamily === 'mono' ? 'text-text' : ''}>Mono</span>
           <span className="opacity-30 px-0.5">/</span>
@@ -62,7 +62,7 @@ export function EditorPanel() {
         </div>
         <button
           onClick={() => setReadableWidth(!readableWidth)}
-          className="flex items-center gap-0.5 text-[11px] font-mono px-2 py-1 rounded-md border border-border bg-surface-2 text-text-muted hover:text-text transition-colors flex-shrink-0"
+          className="flex items-center gap-0.5 text-[11px] font-mono px-2 py-1 rounded-lg border border-border settings-btn bg-surface-2 text-text-muted hover:text-text transition-colors flex-shrink-0"
         >
           <span className={!readableWidth ? 'text-text' : ''}>{t.settings.editor.full}</span>
           <span className="opacity-30 px-0.5">/</span>

@@ -213,7 +213,7 @@ export function FeedbackSection() {
             type="button"
             onClick={() => void handleSend()}
             disabled={!canSend}
-            className="flex items-center gap-2 px-3 py-2 rounded-md border border-accent/60 bg-accent/[0.1] text-xs font-mono text-accent hover:bg-accent/[0.18] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-accent/60 bg-accent/[0.1] text-xs font-mono text-accent hover:bg-accent/[0.18] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {sending ? <Loader size={13} className="animate-spin" /> : <Send size={13} />}
             {sending ? f.sending : f.send}
