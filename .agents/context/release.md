@@ -53,7 +53,8 @@ release publicado antes de tiempo rompe la actualización de todos los usuarios 
    ```
 8. **Esperar a la CI** (`gh run list --limit 5`, `gh run watch <id>`). El job `release` crea el
    release como **draft** (`draft: true`): invisible para `/releases/latest`, así que ningún cliente
-   lo ve todavía.
+   lo ve todavía. Revisar también los avisos del run (`gh run view <id>` → ANNOTATIONS): ahí GitHub
+   anuncia con antelación la retirada de runners y acciones (así se habría visto venir la de `macos-14`).
 9. **Verificar los assets del draft** (`gh release view vX.Y.Z --json assets --jq '.assets[].name'`).
    Deben estar exactamente: `NoteFlow-X.Y.Z-Setup.exe` (+ `.blockmap`, `latest.yml`),
    `NoteFlow-X.Y.Z-arm64.dmg` (+ `.blockmap`, `latest-mac.yml`), `noteflow_X.Y.Z_amd64.deb`,
@@ -124,9 +125,9 @@ git push origin main                       # 4. push — NO crear tag
 
 - **No** ejecutar `git tag` / `git push origin vX.Y.Z`: eso es lo único que arranca `release.yml`.
 - Subir `dist-electron/` si se tocó `electron/` (está versionado).
-- Efecto secundario esperado: si el push incluye cambios en `docs/**`, el workflow `pages.yml`
-  redeploya la web de GitHub Pages. Eso **no** es una release de la app, solo el sitio; es
-  inofensivo y no requiere acción.
+- Efecto secundario esperado: si el push incluye cambios en `docs/**` (o en el propio `pages.yml`),
+  el workflow `pages.yml` redeploya la web de GitHub Pages. Eso **no** es una release de la app, solo
+  el sitio; es inofensivo y no requiere acción.
 
 ### Qué hace el workflow (`.github/workflows/release.yml`)
 
@@ -137,7 +138,7 @@ local antes de taggear. Dos jobs:
    el 2026-11-02: el job de mac acababa *cancelled* sin arrancar ("The configuration
    'macos-14-arm64-us-default' is not supported") y el job `release`, que necesita los tres, no corría.
    Cuando retiren `macos-15`, subir la etiqueta (ver `actions/runner-images`) y recrear el tag. Pasos:
-   - checkout → setup Node 20 → `npm ci`
+   - checkout → setup Node 24 → `npm ci`
    - deriva y valida la versión del tag (`vX.Y.Z` → `APP_VERSION`)
    - sincroniza `package.json` (`npm pkg set version=...`) y verifica que coincida (red de seguridad;
      el bump real se hace antes en el repo, paso 2 del checklist)
@@ -162,6 +163,13 @@ local antes de taggear. Dos jobs:
 
 > Los `.blockmap` / `latest*.yml` son metadatos de electron-builder (canal de updates); aunque
 > el auto-update in-app actual descarga el instalador a mano, conviene seguir publicándolos.
+
+> **Node 24** (actualizado el 2026-11-11): los tres workflows usan majors de acciones que corren en
+> Node 24 y compilan con `node-version: 24`. Antes, las `@v4` y `action-gh-release@v2` apuntaban a
+> Node 20 (GitHub ya las forzaba a Node 24) y se compilaba con Node 20, sin soporte y por debajo de lo
+> que pide `@electron/rebuild` 4 en el `postinstall` de `npm ci` (≥ 22.12). Se eligió 24 por ser la
+> versión local de desarrollo. Antes de taggear, mirar los avisos de deprecación del último run
+> (`gh run view <id>`).
 
 ### Test E2E del updater (`scripts/update-e2e.cjs`)
 
@@ -520,8 +528,9 @@ npm run dist:store     # = npm run build + electron-builder --win appx --x64 --p
 ## Web pública (GitHub Pages)
 
 `docs/` es un **proyecto Astro independiente** que se despliega con el workflow **`pages.yml`**:
-cualquier push a `main` que toque `docs/**` construye el sitio y publica `docs/dist` en GitHub
-Pages vía Actions (no se sirve la carpeta en crudo). URL: https://yagoid.github.io/noteflow/.
+cualquier push a `main` que toque `docs/**` (o el propio `pages.yml`) construye el sitio y publica
+`docs/dist` en GitHub Pages vía Actions (no se sirve la carpeta en crudo).
+URL: https://yagoid.github.io/noteflow/.
 
 Todo lo demás (arquitectura del sitio, páginas `/cli` `/ai` `/features`, inventario de
 contenido ↔ fuente de verdad, gotchas de base path/hreflang/redirects, checklist de sincronización
@@ -555,5 +564,6 @@ git push origin vX.Y.Z
 4. `npm run build` (recompila `dist-electron/`) e incluirlo en el commit.
 
 ### Tras una feature importante
-Actualizar **esta skill** (arquitectura/IPC/release) y **`noteflow-features`** (UX/atajos). Si
-toca el CLI, también `cli/noteflow-cli/SKILL.md`. Si es visible, revisar `docs/` y el `README.md`.
+Actualizar el **`.agents/context/*.md`** que toque (arquitectura/IPC/release…) y la skill
+**`noteflow-features`** (UX/atajos). Si toca el CLI, también `cli/noteflow-cli/SKILL.md`. Si es
+visible, revisar `docs/` y el `README.md`.

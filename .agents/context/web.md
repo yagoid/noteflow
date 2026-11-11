@@ -2,8 +2,8 @@
 
 Sitio de marketing + documentación pública. **Proyecto Astro independiente** dentro del repo
 (`docs/package.json` propio). URL: https://yagoid.github.io/noteflow/ · deploy automático con el
-workflow `pages.yml` en cada push a `main` que toque `docs/**` (publica `docs/dist`, la carpeta no
-se sirve en crudo).
+workflow `pages.yml` en cada push a `main` que toque `docs/**` o el propio `pages.yml` (publica
+`docs/dist`, la carpeta no se sirve en crudo).
 
 **Objetivo de este fichero:** que un agente sepa **qué contenido hay publicado en la web y de qué
 fuente de verdad bebe cada sección**, para actualizarla cuando cambie la app (o corregir
