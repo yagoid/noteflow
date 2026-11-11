@@ -300,7 +300,8 @@ noteflow/
 ├── PKGBUILD               # Paquete Arch (electron del sistema, NOTEFLOW_NATIVE) — ROTO/no soportado, ver release.md
 └── .github/workflows/
     ├── release.yml        # CI/CD: build matrix (win+linux+mac) + release al pushear un tag
-    └── pages.yml          # Build Astro de docs/ + deploy a GitHub Pages (push a main que toque docs/**)
+    ├── update-e2e.yml     # E2E del updater sobre builds empaquetadas (manual, antes de publicar)
+    └── pages.yml          # Build Astro de docs/ + deploy a GitHub Pages (push a main que toque docs/** o pages.yml)
 ```
 
 ## Arquitectura IPC (Electron)
