@@ -26,7 +26,11 @@ const {
   jsonLd,
 } = Astro.props;
 
-const canonical = new URL(Astro.url.pathname, Astro.site).href;
+// Canonical always ends in '/': GitHub Pages serves every page as a directory and
+// redirects the slashless form (e.g. /noteflow → /noteflow/), so a slashless
+// canonical would point search engines at a redirect.
+const pagePath = Astro.url.pathname.endsWith('/') ? Astro.url.pathname : `${Astro.url.pathname}/`;
+const canonical = new URL(pagePath, Astro.site).href;
 const ogImage = new URL(image, Astro.site).href;
 // hreflang alternates: English is x-default (no URL prefix), Spanish under /es/.
 const enUrl = getAbsoluteLocaleUrl('en', path);
