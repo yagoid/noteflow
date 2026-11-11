@@ -468,7 +468,12 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   párrafo); con varias líneas `>` vacías seguidas ahora cuentan como en el nivel superior (párrafos
   vacíos / hard break) en vez de colapsarse. Estilo: borde izquierdo del color
   `--code-accent` (fallback `--accent`; personalizable — ver "Colores del editor") + texto atenuado.
-  Botón en la toolbar (icono `Quote`).
+  Botón en la toolbar (icono `Quote`). La cita **no tiene atajo de teclado** (`Quote` en `editorExtensions.ts` vacía el `Mod-Shift-b` de TipTap); se
+  crea con el botón de la toolbar o la regla `> `. **Ctrl/Cmd+Shift+B = bloque de código**, enlazado en
+  el keymap de la extensión (`CodeBlock`, junto al `Mod-Alt-c` de TipTap), no en un `onKeyDown` del
+  wrapper: antes ambos disparaban y el bloque salía envuelto en una cita (`> ``` …`). Dentro de una cita
+  crea el bloque dentro de la cita; en un ítem de lista lo saca de la lista (`setNode` → `clearNodes`,
+  igual que la toolbar). Tests en `tests/lib/editorShortcuts.test.ts`.
 - **Bloque de código — aspecto (`index.css`, `.prose-editor .ProseMirror pre`):** borde fino uniforme
   de 1px (`--border`), **fondo = el del editor** (`--bg-editor`, la superficie del `<main>` de
   `App.tsx`), radio 6px y padding ajustado y simétrico (`0.7rem 0.9rem`): **no se reserva hueco** para
@@ -696,7 +701,7 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     no se difiere (no hay borrador; diferir dejaría que la siguiente operación del tablero guardase lo
     viejo). Los popups portalados a `<body>` no cuentan, pero al aplicar devuelven el foco a la raíz.
   - **Handlers del wrapper de `Editor.tsx`** (`onPaste`/`onDrop` de imágenes, `onKeyDown` con
-    Ctrl+Shift+B / Enter tras HR) **ignoran** eventos nacidos en widgets de NodeView o sus popups
+    Enter tras HR) **ignoran** eventos nacidos en widgets de NodeView o sus popups
     (`isEditorWidgetTarget`: `[data-kanban-interactive]`, `.kanban-menu`, pickers de tarea): actúan
     sobre la selección de ProseMirror, que puede ser una NodeSelection del propio tablero (pegar una
     captura la reemplazaba). Un drop de ficheros sobre el tablero solo hace `preventDefault` (que el

@@ -92,6 +92,26 @@ const LineBreak = HardBreak.extend({
   },
 })
 
+// Ctrl/Cmd+Shift+B is NoteFlow's code block shortcut (toolbar tooltip, Settings →
+// Shortcuts). TipTap's Blockquote binds the same chord (`Mod-Shift-b`) to
+// toggleBlockquote, so it's dropped there and bound on the code block instead,
+// next to TipTap's own `Mod-Alt-c`. One keymap entry, one command: a separate
+// handler for the chord ran on top of the blockquote one and wrapped the new code
+// block in a quote. Quotes still come from the toolbar button and the `> ` rule.
+const CodeBlock = CodeBlockWithCopy.extend({
+  addKeyboardShortcuts() {
+    return {
+      ...this.parent?.(),
+      'Mod-Shift-b': () => this.editor.commands.toggleCodeBlock(),
+    }
+  },
+})
+const Quote = Blockquote.extend({
+  addKeyboardShortcuts() {
+    return {}
+  },
+})
+
 /** The schema-defining extensions of the note editor (fresh instances per call). */
 export function schemaExtensions(): Extensions {
   return [
@@ -106,11 +126,11 @@ export function schemaExtensions(): Extensions {
     // highlight (styled via CSS, no background) — see index.css `.ProseMirror mark`.
     Highlight,
     Code,
-    CodeBlockWithCopy.configure({ lowlight }),
+    CodeBlock.configure({ lowlight }),
     Heading.configure({ levels: [1, 2, 3] }),
     // `> ` input rule → blockquote (VSCode/markdown-style citation). Round-trips
     // to markdown via markdownHtml.ts; styled in index.css `.ProseMirror blockquote`.
-    Blockquote,
+    Quote,
     BulletList,
     OrderedList,
     ListItem.extend({ content: LIST_ITEM_CONTENT }),

@@ -442,13 +442,6 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       if (!editor) return
       // Keys typed in a NodeView widget (kanban fields) aren't editor input.
       if (isEditorWidgetTarget(e.target)) return
-      // Ctrl/Cmd+Shift+B → code block
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'B') {
-        e.preventDefault()
-        editor.chain().focus().toggleCodeBlock().run()
-        return
-      }
-
       // Intercept Enter to ensure we don't get trapped after a horizontal rule
       // or lose focus in weird edge cases.
       if (e.key === 'Enter' && !e.shiftKey) {
