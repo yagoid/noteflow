@@ -19,5 +19,5 @@ export const noteMenu = {
   removeFromGroup: 'Quitar del grupo',
   addToGroup: 'Añadir a grupo',
 
-  openAsSticky: 'Abrir como nota adhesiva',
+  openAsSticky: 'Abrir como nota flotante',
 }

@@ -45,7 +45,7 @@ export const editor = {
     copySectionText: 'Copiar texto de la sección',
     showToAiHint: 'La IA volverá a indexar y usar esta sección',
     hideFromAiHint: 'La IA nunca indexará, leerá ni referenciará esta sección',
-    openAsSticky: 'Abrir como nota adhesiva',
+    openAsSticky: 'Abrir como nota flotante',
     archiveNote: 'Archivar nota',
     unarchiveNote: 'Desarchivar nota',
     encryptNote: 'Cifrar nota',

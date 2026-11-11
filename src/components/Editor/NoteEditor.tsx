@@ -886,6 +886,32 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     else rawTextareaRef.current?.focus()
   }
 
+  // Same, with the caret at the very start of the body (and scrolled to it).
+  const focusEditorBodyStart = () => {
+    const editor = editorRef.current?.editor
+    if (editor) {
+      editor.commands.focus('start')
+      return
+    }
+    const textarea = rawTextareaRef.current
+    if (!textarea) return
+    textarea.focus()
+    textarea.setSelectionRange(0, 0)
+    textarea.scrollTop = 0
+  }
+
+  // Enter in the title (as in Notion/Obsidian): commit it like a blur and go write the
+  // active section from its start. preventDefault keeps the Enter from reaching the body
+  // (no line break). Not during IME composition (Enter confirms the candidate) nor with
+  // modifiers.
+  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+    if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return
+    e.preventDefault()
+    handleTitleBlur()
+    focusEditorBodyStart()
+  }
+
   const handleStartRename = (section: NoteSection) => {
     openRename(section.id, section.name)
   }
@@ -1338,6 +1364,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
             value={titleDraft}
             onChange={handleTitleChange}
             onBlur={handleTitleBlur}
+            onKeyDown={handleTitleKeyDown}
             placeholder={t.common.untitled}
             className="flex-1 min-w-0 bg-transparent text-xl font-bold font-mono text-text
                        placeholder-text-muted/30 border-none outline-none caret-text"

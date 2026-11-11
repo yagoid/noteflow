@@ -238,7 +238,9 @@ Iconos del TitleBar:
 - **Delete** → con confirmación modal.
 
 ### Propiedades de una nota
-- Título editable (auto-save). Título por defecto: `DD/MM/YYYY`.
+- Título editable (auto-save). Título por defecto: `DD/MM/YYYY`. **Enter** en el título lo confirma y
+  lleva el foco al cuerpo de la sección activa con el cursor al principio (Modo markdown y Modo texto;
+  no actúa durante composición IME ni con modificadores).
 - Tags: extraídos automáticamente del contenido con `#nombre`.
 - Timestamps: `created` y `updated` automáticos. Cada **sección** guarda además su propio `created`
   (al crearla); las secciones antiguas sin él muestran la fecha de creación de la nota.
