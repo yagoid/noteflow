@@ -1077,6 +1077,22 @@ justo para ver el caret, que queda pegado al borde inferior (el `padding-bottom:
   8/32 px en `StickyApp.tsx`, con `.sticky-editor .ProseMirror` a `padding-bottom: 2.5rem`): en una
   ventana de 200–300 px las franjas de 40+96 px casi se solaparían.
 
+### Editor: foco al abrir una nota (título de la nota nueva vs autofocus del cuerpo)
+El `Editor` TipTap se autoenfoca al montar (prop `autoFocus`, por defecto `true`): TipTap aplica su
+opción `autofocus` en un `setTimeout(0)` tras crear el editor, y el `focus` en sí cae **un frame
+después** (`requestAnimationFrame`). Por eso un `setTimeout(0)` que enfoque otro campo **pierde** la
+carrera (era el bug del título de la nota nueva, que se enfocaba así y acababa perdiendo el foco).
+- **Nota recién creada** (`createNote`/`createTempNote`/`duplicateNote` ponen `newlyCreatedNoteId`):
+  `NoteEditor` calcula en render `titleClaimsFocus` (nota = `newlyCreatedNoteId` y panel activo) y
+  monta el `Editor` con `autoFocus={false}`; también se salta el foco del textarea del Modo texto
+  (efecto de nota vacía). Un efecto enfoca y selecciona el título sin timers cuando `titleDraft` ya es
+  el de la nota nueva (un `NoteEditor` reutilizado pinta aún el título anterior en el primer render;
+  reemplazarlo después perdería la selección) y consume el flag (`setNewlyCreatedNoteId(null)`).
+- `Editor.tsx` **congela `autoFocus` al montar** (`useState`): `useEditor` re-sincroniza las opciones
+  en cada render y TipTap lee `autofocus` en vivo al disparar su timeout, así que consumir el flag (o
+  cerrar un rename) re-renderizando con `autoFocus` a `true` volvería a robar el foco.
+- `createPopulatedNote` (plantillas, perfil IA) no pone el flag a propósito (ver comentario en el store).
+
 ### Editor: historial de deshacer por sección (sobrevive a remontajes)
 `Ctrl+Z`/`Ctrl+Shift+Z` conservan el historial **de cada sección** (nunca uno global que salte entre
 secciones) al cambiar de sección, de nota o de vista (contenido, cerebro, overview…), aunque el editor

@@ -378,7 +378,8 @@ node scripts/mosaic-capture.cjs --app <dir> [--only id,id] [--theme dark|light|a
   zoom (~76 % del recorte) y centrar el recorte en él (el cerebro queda por encima del objetivo de la
   cámara: la ventana es alta para que el recorte suba sin tocar la cabecera). `temp-note` pega con un
   `ClipboardEvent` sintético (no toca el portapapeles del sistema) y fija el foco en el título de la
-  nota nueva antes de escribir (el autofocus del editor puede competir con el del título). `themes`
+  nota nueva antes de escribir (redundante desde que la app ya deja el foco en el título de forma
+  determinista —el cuerpo de una nota recién creada no se autoenfoca—, pero inocuo). `themes`
   cambia de tema por la vía de sincronización de apariencia de la app (escribe `ui-settings.json` y
   manda `notes-updated` a la ventana) y funde 0,3 s entre temas. `sticky` compone la sticky (máscara
   + sombra) sobre una captura fija de la ventana principal, desenfocada y oscurecida.

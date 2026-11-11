@@ -106,7 +106,8 @@ interface EditorProps {
   hideToolbar?: boolean
   fontSize?: number
   /** Whether to grab focus on mount. Disabled while a section rename is in progress
-   *  so the editor doesn't steal focus from the tab-name input. */
+   *  so the editor doesn't steal focus from the tab-name input, and for a just-created
+   *  note (its title takes the focus). Read once, at mount: later changes are ignored. */
   autoFocus?: boolean
   /** Id of the section being edited — excluded from the "Link section" picker. */
   currentSectionId?: string | null
@@ -169,6 +170,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   const t = useT()
   const tRef = useRef(t)
   useEffect(() => { tRef.current = t }, [t])
+
+  // TipTap applies `autofocus` from a timeout after creating the editor (the focus itself
+  // lands a frame later) and reads the option live, as re-synced on every render. Frozen
+  // at mount so a prop flipped in between (NoteEditor releasing a new note's title focus,
+  // a rename closing) can't turn it back on and steal the focus.
+  const [autoFocusOnMount] = useState(autoFocus)
 
   const editor = useEditor({
     editorProps: {
@@ -246,7 +253,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     ],
     content: htmlFromMarkdown(content),
     editable: !readOnly,
-    autofocus: autoFocus,
+    autofocus: autoFocusOnMount,
     onUpdate({ editor }) {
       contentSave.schedule(noteId, 400, (run) => saveContent(editor, run))
     },

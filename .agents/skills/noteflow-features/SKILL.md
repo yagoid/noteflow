@@ -241,6 +241,11 @@ Iconos del TitleBar:
 - Título editable (auto-save). Título por defecto: `DD/MM/YYYY`. **Enter** en el título lo confirma y
   lleva el foco al cuerpo de la sección activa con el cursor al principio (Modo markdown y Modo texto;
   no actúa durante composición IME ni con modificadores).
+- Una nota **recién creada** (`+`, `Ctrl+N`, nota temporal, *Duplicate*, *New note* de grupo/carpeta,
+  paleta, tray) se abre con el **título enfocado y seleccionado** para escribir el nombre encima; el
+  cuerpo no se autoenfoca en ese caso (`newlyCreatedNoteId` del store → `titleClaimsFocus` en
+  `NoteEditor.tsx`, que apaga el `autoFocus` del `Editor` al montar). Las notas desde plantilla o perfil
+  IA no (`createPopulatedNote`). Abrir una nota existente sigue enfocando el cuerpo.
 - Tags: extraídos automáticamente del contenido con `#nombre`.
 - Timestamps: `created` y `updated` automáticos. Cada **sección** guarda además su propio `created`
   (al crearla); las secciones antiguas sin él muestran la fecha de creación de la nota.

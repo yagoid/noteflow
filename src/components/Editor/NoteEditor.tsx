@@ -87,6 +87,12 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     const targetId = noteId ?? s.activeNoteId
     return s.notes.find((n) => n.id === targetId) ?? null
   })
+  // A note just created (createNote / createTempNote / duplicateNote) opens with its title
+  // focused and selected, to type the name over the default one. Known from the first
+  // render that shows it, so the body mounts with its autofocus off instead of racing the
+  // title for the focus. Only the active pane: the one the new note was opened in.
+  const newlyCreatedNoteId = useNotesStore((s) => s.newlyCreatedNoteId)
+  const titleClaimsFocus = !!note && note.id === newlyCreatedNoteId && isPaneActive
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setNoteView = useNotesStore((s) => s.setNoteView)
   const updateNote = useNotesStore((s) => s.updateNote)
@@ -278,29 +284,18 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   }, [noteId, paneId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-focus title field when new note is created ───────────────────────
+  // Nothing else grabs the focus for it (the body's autofocus is off, see titleClaimsFocus),
+  // so it's done straight from the effect, no timers. Waits for the draft to show the new
+  // note's title: on a reused editor the first render still has the previous note's, and
+  // its replacement would drop the selection. Then the one-shot flag is consumed.
   useEffect(() => {
-    const newlyCreatedNoteId = useNotesStore.getState().newlyCreatedNoteId
-    const currentNoteId = note?.id
-
-    if (currentNoteId === newlyCreatedNoteId) {
-      setTimeout(() => {
-        const store = useNotesStore.getState()
-        const { newlyCreatedNoteId: updatedNewlyCreatedNoteId } = store
-
-        if (updatedNewlyCreatedNoteId && updatedNewlyCreatedNoteId === currentNoteId) {
-          try {
-            if (titleRef.current && document.activeElement !== titleRef.current) {
-              titleRef.current.focus()
-              titleRef.current.select()
-              store.setNewlyCreatedNoteId(null)
-            }
-          } catch (error) {
-            console.error('Failed to focus title element:', error)
-          }
-        }
-      }, 0)
-    }
-  }, [note?.id])
+    if (!note || !titleClaimsFocus || titleDraft !== note.title) return
+    const title = titleRef.current
+    if (!title) return
+    title.focus()
+    title.select()
+    useNotesStore.getState().setNewlyCreatedNoteId(null)
+  }, [note, titleClaimsFocus, titleDraft])
 
   // ── Sync raw buffer with store updates (external changes) ──────────────────
   // Same rule as the rich editor (Editor.tsx): also while the textarea is focused —
@@ -434,7 +429,9 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   }, [note?.id, isPaneActive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-focus editor on new note ──────────────────────────────────────────
+  // Not for a just-created note: its title has the focus (titleClaimsFocus).
   useEffect(() => {
+    if (titleClaimsFocus) return
     if (note && note.sections.length === 1 && note.sections[0].content === '') {
       requestAnimationFrame(() => {
         rawTextareaRef.current?.focus()
@@ -1457,7 +1454,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                 noteId={note.id}
                 placeholder={tf(t.editor.sectionStartWriting, { name: activeSection?.name ?? t.editor.sectionFallback })}
                 fontSize={fontSize}
-                autoFocus={renamingId === null}
+                autoFocus={renamingId === null && !titleClaimsFocus}
                 currentSectionId={activeSection?.id ?? null}
                 showToc={showToc}
                 persistHistory
