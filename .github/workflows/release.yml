@@ -14,7 +14,10 @@ jobs:
             platform: win
           - os: ubuntu-latest
             platform: linux
-          - os: macos-14
+          # Apple Silicon (arm64) runner. GitHub retired macos-14 on 2026-11-02
+          # (jobs end "cancelled" without starting); bump this label when
+          # macos-15 is retired too (see github.com/actions/runner-images).
+          - os: macos-15
             platform: mac
 
     runs-on: ${{ matrix.os }}

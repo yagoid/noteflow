@@ -133,7 +133,10 @@ git push origin main                       # 4. push — NO crear tag
 Se dispara con tags `v*`. **No corre tests ni lint** (solo `npm ci` + `npm run dist`): eso se hace en
 local antes de taggear. Dos jobs:
 
-1. **build** (matrix `windows-latest` + `ubuntu-latest` + `macos-14`):
+1. **build** (matrix `windows-latest` + `ubuntu-latest` + `macos-15`, arm64). GitHub retiró `macos-14`
+   el 2026-11-02: el job de mac acababa *cancelled* sin arrancar ("The configuration
+   'macos-14-arm64-us-default' is not supported") y el job `release`, que necesita los tres, no corría.
+   Cuando retiren `macos-15`, subir la etiqueta (ver `actions/runner-images`) y recrear el tag. Pasos:
    - checkout → setup Node 20 → `npm ci`
    - deriva y valida la versión del tag (`vX.Y.Z` → `APP_VERSION`)
    - sincroniza `package.json` (`npm pkg set version=...`) y verifica que coincida (red de seguridad;

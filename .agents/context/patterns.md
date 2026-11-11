@@ -2544,7 +2544,7 @@ abrir el dmg en Finder** (no reemplazo automático). Qué cambió y qué NO:
   `~/noteflow-notes` por **paridad con el CLI**), barra de título (`frame:false` → los semáforos nativos
   quedan ocultos y se usan los controles propios de la derecha, sin solapamiento).
 - **Sí cambió:** bloque `mac` en electron-builder + `public/icon.icns`; ramas `darwin` en `app:check-update`
-  y `app:download-and-install` (`main.ts`); `.dmg` en la allowlist de update; matrix `macos-14` + globs en
+  y `app:download-and-install` (`main.ts`); `.dmg` en la allowlist de update; matrix `macos-15` + globs en
   el workflow; `preload.ts` expone `platform` y el renderer muestra `⌘`/`⌃` vía `src/lib/platform.ts`
   (`modKey`/`controlKey`/`keyLabel`); fix `Editor.tsx` Ctrl+Shift+B → acepta `metaKey`.
 - **El único punto sin verificar es el runtime en un Mac real** (Gatekeeper + carga de módulos nativos
