@@ -24,13 +24,18 @@
 //
 // While signed in, buying a plan is the other activation point: a REAL
 // false→true flip of an entitlement for the same identity (stepEntitlementBaseline)
-// switches that surface on. Losing an entitlement never switches anything off.
+// switches that surface on. The opposite is symmetrical but stricter: once the
+// app CONFIRMS that an entitlement is gone (a fresh server answer, never the
+// unknown placeholder nor the on-disk cache), the surface it paid for is switched
+// off exactly as on sign-out — Cloud disabled (journal kept, GitHub Sync resumes),
+// the assistant back to the last BYO provider (planEntitlementSurfaces).
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.NO_ENTITLEMENT_BASELINE = exports.ENTITLEMENT_KEYS = void 0;
 exports.parseAccountRestore = parseAccountRestore;
 exports.clearRestoreSurface = clearRestoreSurface;
 exports.planAccountTransition = planAccountTransition;
 exports.stepEntitlementBaseline = stepEntitlementBaseline;
+exports.planEntitlementSurfaces = planEntitlementSurfaces;
 const NO_OP = {
     disableCloud: false,
     resetKeys: false,
@@ -183,8 +188,8 @@ exports.NO_ENTITLEMENT_BASELINE = { identity: null, ai: null, cloud: null };
  *  - `fresh` must be false for anything not fetched in THIS run (unknown, or
  *    the on-disk cache): it never sets nor moves the baseline, so unknown→true
  *    and cached-false→true are NOT transitions.
- * It never asks to switch anything OFF: losing an entitlement just makes the UI
- * offer the feature again.
+ * It never asks to switch anything OFF — that is planEntitlementSurfaces' job,
+ * which composes this step with the confirmed-loss rule.
  */
 function stepEntitlementBaseline(prev, obs) {
     const none = { ai: false, cloud: false };
@@ -207,5 +212,38 @@ function stepEntitlementBaseline(prev, obs) {
     return {
         next: { identity: obs.identity, ai: obs.entitlements.ai, cloud: obs.entitlements.cloud },
         activate,
+    };
+}
+/**
+ * What an account status change means for the paid surfaces WHILE SIGNED IN
+ * (sign-in / sign-out edges are planAccountTransition's): steps the baseline
+ * (stepEntitlementBaseline — a real false→true for the same identity switches
+ * the surface on) and applies the confirmed-loss rule:
+ *
+ *  - a FRESH observation (fetched from the server in this run) that says an
+ *    entitlement is missing while its surface is on switches it OFF, like a
+ *    sign-out does: `cloud` → Cloud disabled; `ai` → the assistant back to the
+ *    BYO fallback. Bundle = both; each half only for its own entitlement.
+ *    It is a state check, not an edge, so it also covers a subscription that
+ *    lapsed while the app was closed (boot with Cloud/AI on, first fetch says
+ *    false) — and is idempotent (already off → nothing).
+ *  - unknown entitlements and the on-disk cache are NEVER enough to switch
+ *    anything off: a failed fetch or a stale cache must not tear down a paid
+ *    feature. (A failed fetch keeps the last known answer — account.ts never
+ *    turns a failure into "no entitlements".)
+ *
+ * The two directions never collide: switching on needs the entitlement true,
+ * switching off needs it false, in the same observation.
+ */
+function planEntitlementSurfaces(prev, obs, local) {
+    const step = stepEntitlementBaseline(prev, obs);
+    const confirmed = obs.identity !== null && obs.fresh;
+    const lostCloud = confirmed && !obs.entitlements.cloud && local.cloudEnabled;
+    const lostAi = confirmed && !obs.entitlements.ai && local.aiManaged;
+    return {
+        next: step.next,
+        enableCloud: step.activate.cloud && !local.cloudEnabled,
+        disableCloud: lostCloud,
+        setAiProvider: step.activate.ai && !local.aiManaged ? 'noteflow' : lostAi ? local.aiFallbackProvider : null,
     };
 }

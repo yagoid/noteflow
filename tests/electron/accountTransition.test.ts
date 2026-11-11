@@ -4,6 +4,7 @@ import {
   parseAccountRestore,
   clearRestoreSurface,
   stepEntitlementBaseline,
+  planEntitlementSurfaces,
   NO_ENTITLEMENT_BASELINE,
   type EntitlementBaseline,
   type AccountLocalState,
@@ -501,11 +502,137 @@ describe('stepEntitlementBaseline — auto-activation on subscribe', () => {
     ])).toEqual([NONE, { ai: false, cloud: true }])
   })
 
-  it('losing an entitlement never asks to switch anything (and a later re-subscribe fires again)', () => {
+  it('losing an entitlement activates nothing (and a later re-subscribe fires again)', () => {
     expect(run([
       { identity: ME, ai: true, cloud: true, fresh: true },
       { identity: ME, ai: false, cloud: false, fresh: true }, // lapsed
       { identity: ME, ai: false, cloud: true, fresh: true }, // re-subscribed to Cloud
     ])).toEqual([NONE, NONE, { ai: false, cloud: true }])
+  })
+})
+
+describe('planEntitlementSurfaces — on with a subscribe, off with a confirmed lapse', () => {
+  const ME = 'user@example.com'
+  interface Obs { identity: string | null; ai?: boolean; cloud?: boolean; fresh: boolean }
+  interface Local { cloudEnabled: boolean; aiManaged: boolean }
+  type Plan = Omit<ReturnType<typeof planEntitlementSurfaces>, 'next'>
+  /**
+   * Feeds a sequence of observations, applying each plan to the local state the
+   * way main.ts does, and returns the plans (without the baseline).
+   */
+  function run(
+    observations: Obs[],
+    start: Local = { cloudEnabled: false, aiManaged: false },
+    baseline: EntitlementBaseline = NO_ENTITLEMENT_BASELINE
+  ): Plan[] {
+    let state = baseline
+    const current = { ...start }
+    return observations.map((obs) => {
+      const { next, ...plan } = planEntitlementSurfaces(
+        state,
+        { identity: obs.identity, entitlements: { ai: obs.ai ?? false, cloud: obs.cloud ?? false }, fresh: obs.fresh },
+        { ...current, aiFallbackProvider: 'deepseek' }
+      )
+      state = next
+      if (plan.enableCloud) current.cloudEnabled = true
+      if (plan.disableCloud) current.cloudEnabled = false
+      if (plan.setAiProvider) current.aiManaged = plan.setAiProvider === 'noteflow'
+      return plan
+    })
+  }
+  const NOTHING: Plan = { enableCloud: false, disableCloud: false, setAiProvider: null }
+  const BOTH_ON: Local = { cloudEnabled: true, aiManaged: true }
+
+  it('a fresh "no entitlements" while both are on switches both off (Refresh after a lapse)', () => {
+    expect(run([
+      { identity: ME, ai: true, cloud: true, fresh: true },
+      { identity: ME, ai: false, cloud: false, fresh: true },
+    ], BOTH_ON)).toEqual([
+      NOTHING,
+      { enableCloud: false, disableCloud: true, setAiProvider: 'deepseek' },
+    ])
+  })
+
+  it('lapsed while the app was closed: the first fresh fetch after boot switches off', () => {
+    expect(run([
+      { identity: ME, ai: true, cloud: true, fresh: false }, // restored from the on-disk cache
+      { identity: ME, ai: false, cloud: false, fresh: true },
+    ], BOTH_ON)).toEqual([
+      NOTHING,
+      { enableCloud: false, disableCloud: true, setAiProvider: 'deepseek' },
+    ])
+  })
+
+  it('also when that first fresh fetch is the very first observation of the identity', () => {
+    expect(run([{ identity: ME, ai: false, cloud: false, fresh: true }], BOTH_ON)).toEqual([
+      { enableCloud: false, disableCloud: true, setAiProvider: 'deepseek' },
+    ])
+  })
+
+  it('unknown or cached entitlements never switch anything off', () => {
+    expect(run([
+      { identity: ME, fresh: false }, // placeholder: never fetched
+      { identity: ME, ai: false, cloud: false, fresh: false }, // cached false
+    ], BOTH_ON)).toEqual([NOTHING, NOTHING])
+  })
+
+  it('only the surface whose entitlement is missing goes off', () => {
+    expect(run([{ identity: ME, ai: true, cloud: false, fresh: true }], BOTH_ON)).toEqual([
+      { enableCloud: false, disableCloud: true, setAiProvider: null },
+    ])
+    expect(run([{ identity: ME, ai: false, cloud: true, fresh: true }], BOTH_ON)).toEqual([
+      { enableCloud: false, disableCloud: false, setAiProvider: 'deepseek' },
+    ])
+  })
+
+  it('already off: nothing to do (idempotent on every later status change)', () => {
+    expect(run([
+      { identity: ME, ai: false, cloud: false, fresh: true },
+      { identity: ME, ai: false, cloud: false, fresh: true },
+    ])).toEqual([NOTHING, NOTHING])
+    expect(run([
+      { identity: ME, ai: false, cloud: false, fresh: true },
+      { identity: ME, ai: false, cloud: false, fresh: true },
+    ], BOTH_ON)).toEqual([
+      { enableCloud: false, disableCloud: true, setAiProvider: 'deepseek' },
+      NOTHING,
+    ])
+  })
+
+  it('signed out: nothing (the sign-out teardown belongs to planAccountTransition)', () => {
+    expect(run([{ identity: null, fresh: false }], BOTH_ON)).toEqual([NOTHING])
+  })
+
+  it('a false → true for the same identity still switches on; lapse → re-subscribe round-trips', () => {
+    expect(run([
+      { identity: ME, ai: true, cloud: true, fresh: true },
+      { identity: ME, ai: false, cloud: false, fresh: true }, // lapsed → off
+      { identity: ME, ai: true, cloud: true, fresh: true }, // re-subscribed (bundle) → on
+    ], BOTH_ON)).toEqual([
+      NOTHING,
+      { enableCloud: false, disableCloud: true, setAiProvider: 'deepseek' },
+      { enableCloud: true, disableCloud: false, setAiProvider: 'noteflow' },
+    ])
+  })
+
+  it('a subscribed user booting with Cloud/AI deliberately off is not switched on', () => {
+    expect(run([{ identity: ME, ai: true, cloud: true, fresh: true }])).toEqual([NOTHING])
+  })
+
+  it('an identity change re-arms the baseline: B already subscribed is not "activated", B without plan is switched off', () => {
+    // A (no plan) → sign-out → B with the bundle: the baseline is B's own, no activation.
+    expect(run([
+      { identity: 'a@example.com', fresh: true },
+      { identity: null, fresh: false },
+      { identity: 'b@example.com', ai: true, cloud: true, fresh: true },
+    ])).toEqual([NOTHING, NOTHING, NOTHING])
+    // A (bundle, surfaces on) → B without a plan whose first fresh answer says so: off.
+    expect(run([
+      { identity: 'a@example.com', ai: true, cloud: true, fresh: true },
+      { identity: 'b@example.com', ai: false, cloud: false, fresh: true },
+    ], BOTH_ON)).toEqual([
+      NOTHING,
+      { enableCloud: false, disableCloud: true, setAiProvider: 'deepseek' },
+    ])
   })
 })

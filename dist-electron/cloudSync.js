@@ -208,6 +208,21 @@ let pendingMutations = 0;
 // also says "no cloud" so an expired subscription doesn't retry-loop every
 // poll tick. Cleared by any successful write.
 let entitlementBlocked = false;
+/**
+ * An RLS 403 on a write: the server says the subscription is gone. Pauses the
+ * drain (entitlementBlocked) and re-checks the plan right away — fire-and-forget,
+ * like the AI proxy's 403 — unless the local view already KNOWS (fresh) that
+ * there is no cloud entitlement: the fresh "no cloud" answer is what switches
+ * Cloud off (main.ts → planEntitlementSurfaces) instead of waiting for the
+ * next scheduled refresh. Concurrent calls share one in-flight fetch.
+ */
+function markEntitlementBlocked() {
+    entitlementBlocked = true;
+    const status = account.getAccountStatus();
+    const knownNoCloud = status.entitlementsKnown && !status.entitlements.cloud && !account.areEntitlementsFromCache();
+    if (!knownNoCloud)
+        void account.refreshEntitlements();
+}
 let retryInFlight = false;
 // ── Durable journal (reuses syncState.ts, own file — never GitHub's) ──────────
 let syncState = null;
@@ -666,7 +681,7 @@ async function uploadFileRowNow(relPath, content, force) {
             });
             const res = (0, cloudSyncLogic_1.classifyBaseUpsert)(v2.status, v2.json);
             if (res.outcome === 'forbidden') {
-                entitlementBlocked = true;
+                markEntitlementBlocked();
                 throw new Error(SUBSCRIPTION_ERROR);
             }
             if (res.outcome === 'error')
@@ -701,7 +716,7 @@ async function uploadFileRowNow(relPath, content, force) {
         });
         const outcome = (0, cloudSyncLogic_1.classifyConditionalUpsert)(rpc.status, rpc.json);
         if (outcome === 'forbidden') {
-            entitlementBlocked = true;
+            markEntitlementBlocked();
             throw new Error(SUBSCRIPTION_ERROR);
         }
         if (outcome === 'error')
@@ -733,7 +748,7 @@ async function uploadFileRowNow(relPath, content, force) {
     if (isWriteForbidden(res.status)) {
         // RLS rejected the write — no active cloud entitlement. Actionable error,
         // and entitlementBlocked pauses journal drains (no retry loop).
-        entitlementBlocked = true;
+        markEntitlementBlocked();
         throw new Error(SUBSCRIPTION_ERROR);
     }
     if (res.status >= 400)
@@ -2168,9 +2183,13 @@ async function retrySyncJournal(notesDir) {
     // every write would 403 again — skip this tick instead of retry-looping.
     // (Physical deletes WOULD be allowed by RLS, but removeRemotePaths prefers
     // tombstones when entitled; keeping the whole drain paused is simpler and
-    // the ops are not lost.)
-    if (entitlementBlocked && !account.getAccountStatus().entitlements.cloud)
+    // the ops are not lost.) The pull that ran before this drain cleared
+    // syncError, so put the subscription error back: with changes still waiting
+    // to go up, the status (and a manual "Sync now") must not read as all good.
+    if (entitlementBlocked && !account.getAccountStatus().entitlements.cloud) {
+        syncError = SUBSCRIPTION_ERROR;
         return;
+    }
     // An account switch mid-drain stops it: the remaining ops belonged to the
     // previous account and its journal is gone.
     const gen = stateGeneration;

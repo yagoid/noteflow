@@ -1072,14 +1072,18 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     API keys, más barato con los modelos más eficientes, con tools e imágenes, asignación mensual con consumo visible, catálogo
     siempre al día). Esto vale tanto en
     Ajustes → IA (que ya no lleva título "Assistant (LLM)": empieza directamente con la línea "Pick one
-    source…" y las dos cards) como en el **panel de IA del Cerebro** (antes solo en Ajustes). Lo mismo si la
-    suscripción caduca teniéndolo activo, para que entiendas el fallo y puedas cambiar de fuente.
+    source…" y las dos cards) como en el **panel de IA del Cerebro** (antes solo en Ajustes).
     **Se activa solo lo que tienes pagado** (NoteFlow AI con el plan AI, NoteFlow Cloud con el plan
     Cloud, ambos con el Bundle) en dos momentos: **al iniciar sesión** (primer login, dispositivo nuevo
     o vuelta a tu cuenta) y **al suscribirte con la sesión ya abierta** (Subscribe → pagar → Refresh en
     Settings → Subscription). Una sesión que se **restaura al arrancar la app no cuenta como login**: si
-    apagaste Cloud o elegiste tu propio proveedor, no se te vuelve a cambiar en cada arranque. Y perder
-    una suscripción **nunca apaga nada** por sí sola: la feature se te vuelve a ofrecer y decides tú.
+    apagaste Cloud o elegiste tu propio proveedor, no se te vuelve a cambiar en cada arranque. Al revés,
+    cuando la app **confirma** con el servidor que una suscripción ya no está activa (p. ej. Refresh en
+    Settings → Subscription, o el primer chequeo tras abrir la app si caducó con ella cerrada), **apaga
+    sola** lo que pagaba, igual que al cerrar sesión: NoteFlow Cloud se desactiva (los cambios pendientes
+    de subir no se pierden y GitHub Sync se reanuda si lo tenías conectado) y el asistente vuelve a tu
+    último proveedor propio. Si no se pudo verificar el plan (sin red), no se apaga nada. Volver a
+    suscribirte con la app abierta lo reactiva solo.
   - **Tu proveedor / IA local (BYO; gratis y privado):** elige proveedor (Anthropic/Claude, OpenAI,
     DeepSeek, MiniMax, Moonshot, OpenRouter, Ollama local, o Custom OpenAI-compatible), pega tu **API
     key**, ajusta Base URL y modelo, y prueba la conexión. **Cada proveedor recuerda su propia
@@ -1539,8 +1543,12 @@ Flujo del panel según estado:
   **"What you get"** de Cloud (cifrado en tránsito y en reposo, sync automático, elegir Estándar o
   Privado E2EE, sin repo de GitHub). El panel Cloud ya no tiene párrafo de introducción propio (lo
   describe la card del selector). **Unlock, Sync now,
-  Disable y Lock funcionan sin suscripción**: quien ya tiene claves y datos subidos puede seguir
-  desbloqueando y bajándose sus notas aunque caduque.
+  Disable y Lock no se bloquean por suscripción** (la nube solo rechaza escrituras), pero cuando la app
+  confirma que la suscripción caducó **desactiva Cloud sola** (ver § "Panel de IA", "Se activa solo
+  lo que tienes pagado"): tus notas siguen en local y los cambios sin subir se quedan pendientes para
+  cuando vuelvas a suscribirte. Mientras Cloud siga activo y la nube rechace las subidas por falta de
+  suscripción, "Sync now" baja lo que haya pero **muestra el error de suscripción** en vez de dar todo
+  por bueno.
 - **Sin sesión**, el panel ya no se limita a pedirte que inicies sesión: muestra también esos
   precios, y clicar cualquier card lleva a Ajustes → Suscripción para crear la cuenta sin salir de Ajustes.
 - Antes de activar con GitHub Sync conectado, aviso ámbar: "GitHub Sync quedará en pausa" (solo

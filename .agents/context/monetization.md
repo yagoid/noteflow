@@ -522,8 +522,9 @@ es **un preset más**, no una implementación nueva.
   aparece en el `<select>` de proveedores** (se filtra por id). Su sección: barra de consumo mensual +
   botón "Use NoteFlow AI" (`changeProvider('noteflow')`) **solo con entitlement `ai`**; sin sesión o
   sin entitlement, en su lugar el aviso ámbar (`noteflowSignIn`/`noteflowNeedsSubscription`) que
-  remite a Ajustes → Suscripción — también cuando la suscripción caduca teniéndolo activo (sigue viendo el
-  motivo y puede pasarse a BYO con la otra card). Detalle del selector, del estado de vista `mode` y
+  remite a Ajustes → Suscripción. Si la suscripción caduca teniéndolo activo, main lo devuelve solo a
+  BYO en cuanto lo confirma un fetch fresco de entitlements (ver "Auto-activación…" → "Al confirmar
+  la pérdida"); hasta entonces el chat ve el 403 del proxy con su motivo. Detalle del selector, del estado de vista `mode` y
   de por qué los campos BYO se ocultan hasta activar el proveedor: `.agents/context/ai.md` § LLM.
   **Reactividad de la config LLM en el renderer:** el store `aiChatStore` (`llmConfig`/`presets`/
   `models`) se recarga con `loadConfig()` ante `onAccountStatusChanged` (y `onAiLlmPresetsChanged`)
@@ -564,9 +565,8 @@ es **un preset más**, no una implementación nueva.
   **`noteflow:open-account`**, escuchado en `TitleBar` junto al resto de `noteflow:open-*`.
 - **Auto-activación al suscribirse / al iniciar sesión:** la app enciende **sola** lo que el
   usuario tiene pagado — Cloud con la entitlement `cloud`, el asistente gestionado
-  (`settings.aiLlm.active = 'noteflow'`) con la `ai`; bundle = ambas — en **dos momentos**, y nunca
-  apaga nada al perder una entitlement (la suscripción caducada sigue viéndose con su motivo en la UI
-  y el usuario decide):
+  (`settings.aiLlm.active = 'noteflow'`) con la `ai`; bundle = ambas — en **dos momentos**, y la
+  **apaga sola cuando confirma que la entitlement se perdió** (punto 3):
   1. **Al iniciar sesión** (transición real signed-out→signed-in **dentro del proceso**, p. ej.
      `verifyOtp`): lo decide `planAccountTransition` (`accountTransition.ts`) — primer login, dispositivo
      nuevo o vuelta de la misma cuenta, da igual; ver § 4 "Cerrar sesión" → "Al iniciar sesión".
@@ -598,6 +598,29 @@ es **un preset más**, no una implementación nueva.
   1, no de la baseline). Activar Cloud pausa GitHub Sync (exclusión mutua, ver § 4 "Settings UI" →
   "Exclusión mutua"); el desbloqueo de claves lo resuelve el flujo normal (`runCloudSyncCycle`: auto-unlock
   managed; e2ee → formulario de passphrase; sin claves aún → setup en la tarjeta Cloud).
+  3. **Al confirmar la pérdida (decisión 2026-11, antes "nunca apaga nada"):** cuando una observación
+     **fresca** (`entitlementsKnown && !account.areEntitlementsFromCache()`: respuesta del servidor en
+     este proceso) dice que falta una entitlement y su superficie está encendida, se apaga **igual
+     que en el sign-out**: `cloud` → `disableCloud` de `applyAccountTransition` (`disableCloudSync` +
+     `stopCloudAutoSync` + `emitCloudStatusChanged`; **no** `resetKeys` — misma cuenta — y el journal
+     / `cloud-sync-state.json` / `lastSync` / `pullSeq` se conservan, así que al reactivar se drena lo
+     pendiente; libera la exclusión mutua, GitHub Sync se reanuda en su tick si estaba conectado, con
+     `markNeedsFullReconcile`); `ai` con `aiLlm.active === 'noteflow'` → `byoFallbackProvider()`
+     (`lastByoProvider`, si no `'anthropic'`). Solo la superficie cuya entitlement falta (bundle =
+     ambas). Es una comprobación de **estado**, no de flanco: cubre la caducidad dentro del proceso
+     (Refresh en Ajustes → Suscripción, o el refresh que lanza un 403 de RLS de Cloud o del proxy de
+     IA) y la ocurrida **con la app cerrada** (arranque con Cloud/AI encendidos y el primer fetch ya
+     dice `false`), y es idempotente (ya apagado → nada). Entitlements **desconocidas o de la cache
+     nunca apagan nada** (un fetch fallido conserva la última respuesta; `account.ts` nunca convierte
+     un fallo en "sin entitlements"). Se escribe **antes** del broadcast `account:status-changed`.
+     La baseline queda en `false`, así que volver a suscribirse en el mismo proceso reactiva por el
+     punto 2. Consecuencia asumida: con Cloud apagado el panel ya no ofrece "Sync now" de la nube
+     (ver § 4 "Gating"); las notas siguen en local.
+  Lógica pura: `planEntitlementSurfaces` (`accountTransition.ts`, testeada en
+  `tests/electron/accountTransition.test.ts`) compone `stepEntitlementBaseline` (encendido, punto 2)
+  con la regla de pérdida (punto 3) y devuelve `{next, enableCloud, disableCloud, setAiProvider}`;
+  `handleAccountStatusChanged` la fusiona con el plan de `planAccountTransition` (sign-in/sign-out) —
+  nunca chocan: encender exige la entitlement `true` y apagar `false` en la misma observación.
 - **Al cerrar sesión, el asistente vuelve a BYO/local:** sin sesión el preset `noteflow` está roto
   (el proxy responde 401), así que el sign-out revierte `settings.aiLlm.active` al **último
   proveedor NO-`noteflow`** que el usuario tuviera activo — persistido en
@@ -1523,8 +1546,13 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   claves bloqueadas o offline quedan journaled y drenan tras unlock/reconexión
   (`retrySyncJournal`, mismo contrato que GitHub, salvo que se salta los ops `stale` y sube
   forzados los `force`). Un 403 de RLS (suscripción caducada) se mapea
-  a `syncError` accionable y **pausa** el drain de escrituras mientras la entitlement local
-  también diga "no cloud" (sin bucle de reintentos). Los logs de consola del motor **no llevan
+  a `syncError` accionable, **pausa** el drain de escrituras mientras la entitlement local
+  también diga "no cloud" (sin bucle de reintentos) y lanza un `account.refreshEntitlements()`
+  fire-and-forget (`markEntitlementBlocked`, salvo que la vista local ya sepa —fresca— que no hay
+  `cloud`), cuya respuesta fresca "sin `cloud`" **desactiva Cloud** (§ 3, "Auto-activación…" punto 3).
+  Mientras siga activo, el drain pausado **repone `syncError` = error de suscripción** (el pull previo
+  del ciclo lo había limpiado), para que la UI y "Sync now" no den por bueno un sync que no puede subir
+  nada; el pull sigue permitido. Los logs de consola del motor **no llevan
   relPaths ni dirs** (contienen el título de la nota; los errores de `fs` se loguean solo por su
   `code`, `redactError`); los `syncError` de la UI sí pueden llevarlos (no se loguean).
 - Gate de push hasta el primer pull OK (`initialPullStatus`, como GitHub) +
@@ -1671,6 +1699,10 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
     identidad, `stepEntitlementBaseline`) — ver § 3 "Auto-activación al suscribirse / al iniciar
     sesión". No choca con este: en el login la baseline solo se fija (cambio de identidad), y cada
     camino omite lo que ya está activo.
+- **Perder la suscripción con la sesión iniciada** apaga la superficie por el mismo camino que el
+  sign-out (`disableCloud` / vuelta a BYO), pero **sin** `resetKeys` ni registro `accountRestore` (la
+  cuenta no cambia): solo cuando un fetch **fresco** confirma la pérdida — ver § 3 "Auto-activación…"
+  punto 3 (`planEntitlementSurfaces`).
 - **Sesión bloqueada ≠ sign-out:** `status.sessionLocked` (llavero del sistema bloqueado, ver § 2)
   mantiene `signedIn` e identidad, así que ni `planAccountTransition` ni la baseline de auto-activación
   lo ven como un cierre de sesión — no se apaga Cloud ni se suelta la DEK ni se vuelve a BYO.
@@ -1709,12 +1741,13 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   estado sin sesión del panel muestra ese mismo bloque de planes (precios + acceso a Ajustes →
   Cuenta) en vez de solo el "sign in first". El setup se gatea porque **crear claves para una nube
   que no se puede activar no tiene sentido**, y no compromete la recuperación de datos: quien no
-  tiene claves tampoco tiene nada subido. **Unlock/Sync now/Disable/Lock NO se gatean** (RLS solo
-  bloquea escrituras; un suscriptor caducado tiene que poder desbloquear y bajarse sus datos), y los
-  switches de modo managed↔e2ee tampoco. ⚠️ Matiz preexistente (no es del gate): **Sync now solo se
-  renderiza con `status.enabled`**, así que un caducado que pulse Disable pierde el pull manual y no
-  puede reactivar (el botón Enable sí está gateado) — el camino de salida de datos existe mientras
-  no desactive. Con entitlements **desconocidas** (`!entitlementsKnown`) `subscriptionGate` es
+  tiene claves tampoco tiene nada subido. **Unlock/Sync now/Disable/Lock NO se gatean en la UI** (RLS
+  solo bloquea escrituras), y los switches de modo managed↔e2ee tampoco. Pero **Sync now solo se
+  renderiza con `status.enabled`**, y desde 2026-11 main **desactiva Cloud solo** en cuanto confirma
+  (fetch fresco) que falta la entitlement `cloud` (§ 3, "Auto-activación…" punto 3): un caducado
+  pierde el pull manual de la nube y no puede reactivar (Enable está gateado) hasta volver a
+  suscribirse. Sus notas siguen en local (local-first) y el journal pendiente se conserva; lo único
+  que no puede hacer es bajar cambios de otros dispositivos que no hubiera recibido antes. Con entitlements **desconocidas** (`!entitlementsKnown`) `subscriptionGate` es
   `PlanUnknownNotice` y ni el onboarding ni **Enable** se ofrecen (estado neutro: ni paywall ni
   activar a ciegas); la condición es `hasKnownEntitlement(account, 'cloud')`. Ojo: este gating es
   **solo de la UI del renderer** — los

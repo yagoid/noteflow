@@ -23,7 +23,11 @@
 //
 // While signed in, buying a plan is the other activation point: a REAL
 // false→true flip of an entitlement for the same identity (stepEntitlementBaseline)
-// switches that surface on. Losing an entitlement never switches anything off.
+// switches that surface on. The opposite is symmetrical but stricter: once the
+// app CONFIRMS that an entitlement is gone (a fresh server answer, never the
+// unknown placeholder nor the on-disk cache), the surface it paid for is switched
+// off exactly as on sign-out — Cloud disabled (journal kept, GitHub Sync resumes),
+// the assistant back to the last BYO provider (planEntitlementSurfaces).
 
 import { Entitlements } from './entitlements'
 
@@ -261,8 +265,8 @@ export const NO_ENTITLEMENT_BASELINE: EntitlementBaseline = { identity: null, ai
  *  - `fresh` must be false for anything not fetched in THIS run (unknown, or
  *    the on-disk cache): it never sets nor moves the baseline, so unknown→true
  *    and cached-false→true are NOT transitions.
- * It never asks to switch anything OFF: losing an entitlement just makes the UI
- * offer the feature again.
+ * It never asks to switch anything OFF — that is planEntitlementSurfaces' job,
+ * which composes this step with the confirmed-loss rule.
  */
 export function stepEntitlementBaseline(
   prev: EntitlementBaseline,
@@ -286,5 +290,62 @@ export function stepEntitlementBaseline(
   return {
     next: { identity: obs.identity, ai: obs.entitlements.ai, cloud: obs.entitlements.cloud },
     activate,
+  }
+}
+
+// ── Entitlement changes while signed in: switch on what is bought, off what lapsed ──
+
+/** Local state planEntitlementSurfaces reads (a subset of AccountLocalState). */
+export interface EntitlementSurfacesLocal {
+  cloudEnabled: boolean
+  /** True when settings.aiLlm.active === 'noteflow' (the managed plan). */
+  aiManaged: boolean
+  /** Provider to revert to when the managed plan is lost (last BYO, else the default). */
+  aiFallbackProvider: string
+}
+
+export interface EntitlementSurfacesPlan {
+  next: EntitlementBaseline
+  enableCloud: boolean
+  disableCloud: boolean
+  /** Preset id to write into settings.aiLlm.active ('noteflow' or the BYO fallback), or null. */
+  setAiProvider: string | null
+}
+
+/**
+ * What an account status change means for the paid surfaces WHILE SIGNED IN
+ * (sign-in / sign-out edges are planAccountTransition's): steps the baseline
+ * (stepEntitlementBaseline — a real false→true for the same identity switches
+ * the surface on) and applies the confirmed-loss rule:
+ *
+ *  - a FRESH observation (fetched from the server in this run) that says an
+ *    entitlement is missing while its surface is on switches it OFF, like a
+ *    sign-out does: `cloud` → Cloud disabled; `ai` → the assistant back to the
+ *    BYO fallback. Bundle = both; each half only for its own entitlement.
+ *    It is a state check, not an edge, so it also covers a subscription that
+ *    lapsed while the app was closed (boot with Cloud/AI on, first fetch says
+ *    false) — and is idempotent (already off → nothing).
+ *  - unknown entitlements and the on-disk cache are NEVER enough to switch
+ *    anything off: a failed fetch or a stale cache must not tear down a paid
+ *    feature. (A failed fetch keeps the last known answer — account.ts never
+ *    turns a failure into "no entitlements".)
+ *
+ * The two directions never collide: switching on needs the entitlement true,
+ * switching off needs it false, in the same observation.
+ */
+export function planEntitlementSurfaces(
+  prev: EntitlementBaseline,
+  obs: { identity: string | null; entitlements: Entitlements; fresh: boolean },
+  local: EntitlementSurfacesLocal
+): EntitlementSurfacesPlan {
+  const step = stepEntitlementBaseline(prev, obs)
+  const confirmed = obs.identity !== null && obs.fresh
+  const lostCloud = confirmed && !obs.entitlements.cloud && local.cloudEnabled
+  const lostAi = confirmed && !obs.entitlements.ai && local.aiManaged
+  return {
+    next: step.next,
+    enableCloud: step.activate.cloud && !local.cloudEnabled,
+    disableCloud: lostCloud,
+    setAiProvider: step.activate.ai && !local.aiManaged ? 'noteflow' : lostAi ? local.aiFallbackProvider : null,
   }
 }

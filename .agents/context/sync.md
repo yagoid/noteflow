@@ -21,8 +21,10 @@ GitHub"** (`mirrorToGitHub`, abajo), que lo deja exacto.
 que conserva `lastSync`/`pullSeq`/journal) → se **libera la exclusión mutua** y GitHub Sync
 vuelve a sincronizar solo en su siguiente tick si estaba conectado. Sin ese apagado la app se
 quedaba sin ningún backend activo (Cloud sin sesión no puede sincronizar y GitHub seguía "Paused").
-Lógica pura de la transición: `electron/accountTransition.ts` (ver `monetization.md` § 4 "Cerrar
-sesión").
+Lo mismo cuando la app **confirma** (fetch fresco de entitlements) que la suscripción Cloud caducó con
+la sesión iniciada: mismo `disableCloudSync()`, journal conservado. Lógica pura de la transición:
+`electron/accountTransition.ts` (ver `monetization.md` § 4 "Cerrar sesión" y § 3 "Auto-activación…"
+punto 3).
 
 Superficie (extraída de lo que `main.ts` consumía de `githubSync.ts`; ambos adapters son finos y
 delegan 1:1 sin cambiar comportamiento): `isConnected()`, `schedulePush(relPath, content,
@@ -351,8 +353,8 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   llaman **`enableCloudSync()` Y `disableCloudSync()`** — marcar también a la **salida** es lo que
   protege a) a los usuarios que ya tenían Cloud activo de builds anteriores (nunca recibieron el flag
   al entrar y no hay backfill en el arranque) y b) a las notas que Cloud trajo de otro dispositivo con
-  un `updated` viejo, que el flush normal nunca sube. Cerrar sesión pasa por `disableCloudSync()`, así
-  que también marca. El **primer pull que termine OK** lo consume y corre `flushPendingLocalChanges`
+  un `updated` viejo, que el flush normal nunca sube. Cerrar sesión (y el apagado por suscripción
+  caducada) pasa por `disableCloudSync()`, así que también marca. El **primer pull que termine OK** lo consume y corre `flushPendingLocalChanges`
   con `previousLastSync = undefined`, que re-encola todas las carpetas de nota **cuyo `updated` sea
   parseable** (las que no lo sea se saltan, igual que en el flush normal) — y dentro de cada una,
   solo los ficheros que **difieran** del remoto (filtro por blob sha, abajo: es justo el caso que

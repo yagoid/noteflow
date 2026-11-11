@@ -234,7 +234,8 @@ function emitAccountStatusChanged() {
 // account B that already had the entitlement before this process even started would look like
 // it just "transitioned" the moment it signs in after account A (which lacked it) signs out.
 // A keychain-locked session (status.sessionLocked) keeps signedIn + identity, so it is NOT a
-// sign-out for this nor for planAccountTransition. Logic: stepEntitlementBaseline.
+// sign-out for this nor for planAccountTransition. Logic: stepEntitlementBaseline, composed by
+// planEntitlementSurfaces (which also switches a surface OFF on a confirmed lapse).
 let entitlementBaseline = accountTransition_1.NO_ENTITLEMENT_BASELINE;
 // Last observed account snapshot — the "previous" side of the sign-in/sign-out
 // edge that planAccountTransition() reasons about. Seeded at boot from the
@@ -319,28 +320,35 @@ function applyAccountTransition(plan) {
 function handleAccountStatusChanged() {
     const status = account.getAccountStatus();
     const identity = status.signedIn ? (status.email ?? '') : null;
-    const step = (0, accountTransition_1.stepEntitlementBaseline)(entitlementBaseline, {
+    // Entitlement changes while signed in: a real fresh false→true for the same
+    // identity switches the surface on (subscribed while running), and a FRESH
+    // answer that an entitlement is gone switches its surface off, like a
+    // sign-out (lapsed — also on the first fetch after a boot). Unknown/cached
+    // entitlements never switch anything off. See planEntitlementSurfaces.
+    const llmBefore = readLlmSettings();
+    const surfaces = (0, accountTransition_1.planEntitlementSurfaces)(entitlementBaseline, {
         identity,
         entitlements: status.entitlements,
         fresh: status.entitlementsKnown && !account.areEntitlementsFromCache(),
+    }, {
+        cloudEnabled: cloudSync.isCloudSyncEnabled(),
+        aiManaged: llmBefore.active === 'noteflow',
+        aiFallbackProvider: llm.byoFallbackProvider(llmBefore),
     });
-    entitlementBaseline = step.next;
-    if (step.activate.ai) {
-        // Same identity as before, real subscribe-while-running transition — auto-switch to the
-        // managed provider unless it's already active (avoid an unnecessary settings write).
-        // Written BEFORE the broadcast below so the renderer's config reload (LlmConfigView reacts
-        // to onAccountStatusChanged) already sees the new active provider.
-        const cfg = readLlmSettings();
-        if (cfg.active !== 'noteflow')
-            writeLlmSettings(llm.withActiveProvider(cfg, 'noteflow'));
+    entitlementBaseline = surfaces.next;
+    if (surfaces.setAiProvider && llmBefore.active !== surfaces.setAiProvider) {
+        // Written BEFORE the broadcast below so the renderer's config reload (aiChatStore /
+        // LlmConfigView react to onAccountStatusChanged) already sees the new active provider.
+        writeLlmSettings(llm.withActiveProvider(llmBefore, surfaces.setAiProvider));
     }
     cloudSync.bindCloudSyncToAccount(account.getUserId()); // another account's Cloud sync state is reset
     // Sign-out teardown / sign-in activation of the paid subsystems. Read AFTER the
-    // auto-switch above so the plan sees the current provider; both paths write
+    // provider switch above so the plan sees the current provider; both paths write
     // BEFORE the broadcast below, so the renderer reloads with the final state.
-    // (The two never collide: the auto-switch only fires for the SAME identity on
-    // a stable session, the plan's activation on a fresh sign-in or a pending
-    // record — and each skips what is already on.)
+    // (The two never collide: the entitlement plan only acts for the SAME identity
+    // on a stable session or on a confirmed loss, the transition plan's activation
+    // on a fresh sign-in or a pending record — needing the entitlement true, which
+    // excludes a loss in the same observation — and each skips what is already on.)
     const previous = lastAccountSnapshot;
     lastAccountSnapshot = { signedIn: status.signedIn, identity: accountIdentityOf(status) };
     const llmCfg = readLlmSettings();
@@ -357,10 +365,18 @@ function handleAccountStatusChanged() {
         restore: readAccountRestore(),
     });
     // Subscribed to Cloud while signed in (same identity, fresh false→true): switch
-    // it on through the same path as a sign-in activation. AFTER
+    // it on through the same path as a sign-in activation; a confirmed lapse
+    // switches it off through the sign-out one (disableCloud keeps the journal and
+    // lets GitHub Sync resume — the keys are NOT reset: same account). AFTER
     // bindCloudSyncToAccount, so it lands on this account's sync state.
     // (Spread, never mutate: the plan may be the shared NO_OP object.)
-    applyAccountTransition(step.activate.cloud && !cloudEnabled ? { ...plan, enableCloud: true } : plan);
+    applyAccountTransition(surfaces.enableCloud || surfaces.disableCloud
+        ? {
+            ...plan,
+            enableCloud: plan.enableCloud || surfaces.enableCloud,
+            disableCloud: plan.disableCloud || surfaces.disableCloud,
+        }
+        : plan);
     // Managed cloud keys unlock silently as soon as a session exists (fresh
     // sign-in, or account events on a restored one). No-op for e2ee / no-keys /
     // already-unlocked sessions — see cloudKeys.autoUnlockManaged.
