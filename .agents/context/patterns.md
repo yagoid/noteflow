@@ -2415,6 +2415,10 @@ si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
   venza la copia de B, antes de que el push de A llegue, puede perderse frente al pull de B.
 
 ### Auto-update in-app
+> **Versión Microsoft Store:** todo esto está apagado (`IS_STORE_BUILD`): `app:check-update` → `{hasUpdate:false}`,
+> `app:download-and-install` se niega y Ajustes → Acerca de solo dice que la Store la actualiza. Ver
+> `release.md` § Microsoft Store.
+
 `app:check-update` consulta la última release (API GitHub, endpoint `/releases/latest` → **ignora
 prereleases**; compara con `latest !== current`, así que cualquier versión local distinta dispara
 el update — útil para probar el flujo bajando a una versión inferior a la publicada). **Un chequeo
@@ -2668,6 +2672,9 @@ sesión, o GitHub conectado) da al CLI **su propio** acceso; IO en `electron/cli
 puras en `electron/cliConnectLogic.ts` (tests en `tests/electron/cliConnectLogic.test.ts`). El estado
 se lee del `settings.json` **del CLI** (`cliSettingsPath`, espejo de `getSettingsDir()`), así que un CLI
 conectado desde la terminal también sale como "CLI connected (…)".
+**Versión Microsoft Store:** no lleva CLI (sin `PATH`; en Windows el CLI solo llega con el instalador NSIS),
+así que `CliConnectSection` muestra solo una explicación —nunca el estado/Desconectar de un `cliAccount`
+heredado de una instalación directa— y `cliConnect.ts` responde `cliMissing`. Ver `release.md` § Microsoft Store.
 - **Cloud (código, sin cambios en el servidor):** la app ejecuta el CLI empaquetado
   (`resources/cli/noteflow.js`; en dev `cli/noteflow.js`) con `process.execPath` +
   `ELECTRON_RUN_AS_NODE=1` (sin Node instalado; stdin cerrado, timeout 60 s): `cloud login <email>
@@ -2775,7 +2782,10 @@ impide los demás) y copia solo si el contenido difiere (auto-cura y recoge upda
 vano). Controlado por el setting local `exposeSkillToAgents` (default `true`) en `settings.json`; al
 desactivarlo borra nuestro `SKILL.md` en todos los destinos y la carpeta `noteflow-cli` si queda vacía
 (nunca toca nada más). Toggle **"Expose CLI skill to AI agents"** en Settings → General
-(`GeneralPanel.tsx`), IPC `app:get-skill-sync` / `app:set-skill-sync`.
+(`GeneralPanel.tsx`), IPC `app:get-skill-sync` / `app:set-skill-sync`. En la **versión Microsoft Store**
+(sin CLI) `syncSkillToAgentDirs()` no hace nada —ni instala ni borra: la skill podría ser de una
+instalación directa—, `app:set-skill-sync` se niega y el toggle se sustituye por una explicación
+(ver `release.md` § Microsoft Store).
 
 **Sin la app (CLI v2.9.0+), los mismos destinos con las mismas reglas** — ⚠️ tres copias de la lista que
 hay que mantener en sync: `skillAgentDestDirs()` de `electron/main.ts`, `skillAgentDestDirs()` de

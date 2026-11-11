@@ -42,10 +42,14 @@ export function GeneralPanel({ onClose }: { onClose: () => void }) {
   const setBrainView = useNotesStore((s) => s.setBrainView)
   const openAiPanel = useAiChatStore((s) => s.openAiPanel)
   const [exposeSkill, setExposeSkill] = useState(true)
+  // null until known, so the skill row doesn't flash the toggle in the Store build
+  // (which ships no CLI, hence no skill to expose).
+  const [isStore, setIsStore] = useState<boolean | null>(null)
   const t = useT()
 
   useEffect(() => {
     void window.noteflow.getSkillSync().then(({ enabled }) => setExposeSkill(enabled))
+    void window.noteflow.getDistribution().then((d) => setIsStore(d === 'store'))
   }, [])
 
   const handleToggleSkill = async (next: boolean) => {
@@ -150,17 +154,25 @@ export function GeneralPanel({ onClose }: { onClose: () => void }) {
       </section>
 
       {/* ── AI agents (CLI skill) ───────────────────────────────────── */}
-      <section className="flex items-center justify-between gap-4">
-        <div>
+      {isStore === true && (
+        <section>
           <p className="text-xs font-mono font-medium text-text">{t.settings.ai.exposeSkill}</p>
-          <p className="text-[11px] font-mono text-text-muted mt-1 leading-relaxed">{t.settings.ai.exposeSkillHint}</p>
-        </div>
-        <Toggle
-          on={exposeSkill}
-          title={exposeSkill ? t.settings.ai.stopExposingSkill : t.settings.ai.exposeSkillTooltip}
-          onToggle={() => void handleToggleSkill(!exposeSkill)}
-        />
-      </section>
+          <p className="text-[11px] font-mono text-text-muted mt-1 leading-relaxed">{t.settings.ai.exposeSkillStore}</p>
+        </section>
+      )}
+      {isStore === false && (
+        <section className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-mono font-medium text-text">{t.settings.ai.exposeSkill}</p>
+            <p className="text-[11px] font-mono text-text-muted mt-1 leading-relaxed">{t.settings.ai.exposeSkillHint}</p>
+          </div>
+          <Toggle
+            on={exposeSkill}
+            title={exposeSkill ? t.settings.ai.stopExposingSkill : t.settings.ai.exposeSkillTooltip}
+            onToggle={() => void handleToggleSkill(!exposeSkill)}
+          />
+        </section>
+      )}
     </div>
   )
 }

@@ -1413,6 +1413,10 @@ Settings → Startup:
   (AppImage). Dentro de la app, el botón del TitleBar muestra `%` de descarga → spinner
   "Installing…" hasta que la ventana se cierra.
 - Descargas restringidas a hosts oficiales de GitHub (allowlist de seguridad).
+- **Versión Microsoft Store** ("NoteFlow - Quick Notes"): sin auto-actualización (la actualiza la
+  Store; Settings → About solo lo indica), sin "Launch on system startup", sin CLI (ni "Connect the
+  CLI too" ni la skill para agentes): cada panel muestra una explicación y remite a instalar NoteFlow
+  desde GitHub. Detalle en `.agents/context/release.md` § Microsoft Store.
 - Detalle técnico (elección del asset, allowlist, instalación por plataforma): `.agents/context/patterns.md`
   § "Auto-update in-app".
 

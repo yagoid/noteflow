@@ -129,6 +129,8 @@ export const settings = {
   startup: {
     launchOnStartup: 'Launch on system startup',
     launchOnStartupHint: 'NoteFlow starts automatically when you turn on your computer',
+    // Microsoft Store build: the app can't register itself to start with Windows.
+    storeUnavailable: "The Microsoft Store version of NoteFlow can't open by itself when Windows starts yet. To have it, install NoteFlow from GitHub.",
     enableLaunch: 'Enable launch on startup',
     disableLaunch: 'Disable launch on startup',
     openAsSticky: 'Open as sticky at startup',
@@ -202,6 +204,8 @@ export const settings = {
     // `noteflow` CLI its OWN access to the backend in use (electron/cliConnect.ts).
     cli: {
       title: 'Command line (CLI)',
+      // Microsoft Store build: it ships without the CLI — shown instead of the whole section.
+      storeUnavailable: "The Microsoft Store version of NoteFlow doesn't include the noteflow CLI. To use it from the terminal or with AI agents, install NoteFlow from GitHub.",
       descCloud: 'Sign the noteflow CLI in to NoteFlow Cloud with {email}, so notes written from the terminal or by AI agents can sync too. The CLI gets its own session — the app stays signed in.',
       // Account keys in private (e2ee) mode: the CLI can only sync once unlocked with the passphrase.
       e2eeNotice: 'Your account uses private (E2EE) encryption: the CLI can only sync after unlocking it with your passphrase. It asks for it on each run in a terminal, or reads it from the NOTEFLOW_CLOUD_PASSPHRASE environment variable — without either, the CLI (and AI agents using it) cannot sync.',
@@ -330,6 +334,8 @@ export const settings = {
       'Installs the NoteFlow skill into ~/.claude/skills and ~/.agents/skills so Claude Code, Codex, Gemini CLI, Copilot, Cursor and other Agent Skills-compatible agents can drive your notes via the CLI.',
     exposeSkillTooltip: 'Expose the CLI skill',
     stopExposingSkill: 'Stop exposing the CLI skill',
+    // Microsoft Store build: no CLI, so no skill — shown instead of the toggle.
+    exposeSkillStore: "The Microsoft Store version of NoteFlow doesn't include the noteflow CLI, so it can't expose its skill to AI agents. To use it, install NoteFlow from GitHub.",
   },
 
   account: {
@@ -498,6 +504,8 @@ export const settings = {
     // The check itself failed (offline, timeout…) — the button stays clickable to retry.
     checkFailed: "Couldn't check for updates",
     checkFailedHint: 'Check your connection and try again.',
+    // Microsoft Store build: no update button, the Store updates the app.
+    storeUpdates: 'Microsoft Store keeps NoteFlow up to date.',
     installing: 'Installing…',
     downloading: 'Downloading…',
     updateTo: 'Update to v{version}',

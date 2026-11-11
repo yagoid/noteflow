@@ -99,6 +99,8 @@ const api = {
     unfold: () => electron_1.ipcRenderer.send('window:unfold'),
     // Updates
     getAppVersion: () => electron_1.ipcRenderer.invoke('app:get-version'),
+    // 'store' = Microsoft Store package (updates and login item belong to Windows).
+    getDistribution: () => electron_1.ipcRenderer.invoke('app:get-distribution'),
     // error: the check itself failed (offline/timeout/bad answer) — not "up to date".
     checkUpdate: () => electron_1.ipcRenderer.invoke('app:check-update'),
     openUrl: (url) => electron_1.ipcRenderer.invoke('app:open-url', url),

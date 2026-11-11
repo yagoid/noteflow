@@ -405,6 +405,58 @@ node scripts/mosaic-capture.cjs --app <dir> [--only id,id] [--theme dark|light|a
   (generado por `scripts/gen-icons.cjs` con sharp; regenerar si cambia `public/icon.png`).
 - Salida: `release/`.
 
+### Microsoft Store (MSIX/APPX)
+
+Ficha **NoteFlow - Quick Notes** (Store ID `9NLP519T4X5F`, https://apps.microsoft.com/detail/9NLP519T4X5F).
+No va en `release.yml`: se genera **a mano** desde el tag ya publicado y se sube en Partner Center
+(Paquetes → nuevo envío). La Store lo firma: no hace falta certificado.
+
+```bash
+git checkout vX.Y.Z    # solo tags posteriores a este cambio: v2.1.0 y anteriores no tienen build.appx ni dist:store
+npm run dist:store     # = npm run build + electron-builder --win appx --x64 --publish never
+# → release/NoteFlow-X.Y.Z-Store.appx (no se instala en local: va sin firmar)
+```
+
+- **Identidad** (`build.appx` en `package.json`): `identityName`, `publisher` y `publisherDisplayName`
+  salen de Partner Center → Identidad del producto. Si no casan exactamente, la Store rechaza el
+  paquete. `displayName` = el nombre reservado (**NoteFlow - Quick Notes**; "NoteFlow" a secas estaba
+  cogido).
+- **Versión:** `X.Y.Z.0`. La Store exige que cada envío lleve una versión mayor que el anterior.
+- **Logos:** `build/appx/` (escalas 100/200 + `targetsize` sin placa para la barra de tareas),
+  generados con `node scripts/gen-appx-assets.cjs` desde `public/icon.png`. Regenerar si cambia el icono.
+- **Qué cambia dentro del paquete** (`process.windowsStore`, `IS_STORE_BUILD` en `main.ts`):
+  - **Updater apagado:** `app:check-update` → `{hasUpdate:false}`, `app:download-and-install` se
+    niega; Ajustes → Acerca de dice que la Store la mantiene al día. Las actualizaciones llegan al
+    subir el siguiente paquete.
+  - **Abrir al iniciar sesión, no disponible:** la clave `Run` de HKCU queda en el registro virtual
+    del paquete y Windows no la lee. `app:get-login-item` devuelve siempre `false` y
+    `app:set-login-item` se niega sin tocar `settings.json`; Ajustes → Inicio lo explica. **Pendiente
+    de implementar:** electron-builder 26 ya sabe declarar la extensión `windows.startupTask` en el
+    manifiesto con `build.appx.addAutoLaunchExtension: true` (o sola si `electron-winstore-auto-launch`
+    está en `dependencies`; ver `getExtensions` en `node_modules/app-builder-lib/out/targets/AppxTarget.js`;
+    el `TaskId` sale fijo como `SlackStartup`). Lo que falta es activarla/desactivarla desde la app con
+    la API WinRT `StartupTask` (p. ej. con el paquete `electron-winstore-auto-launch`) y detectar ese
+    arranque de otra forma: la startupTask no pasa argumentos, así que `--noteflow-startup` no llega.
+  - **Sin CLI** (`cliConnect.cliAvailable()` → false): en Windows el CLI solo llega con el instalador
+    NSIS (`build/nsis-include.nsh` mete `resources\cli` en el `PATH` de usuario; `scripts/install-cli.sh`
+    es solo Linux/macOS y el CLI no se publica en npm), y un MSIX no puede tocar el `PATH`. Así que **la
+    versión Store no tiene CLI**. Consecuencias:
+    - Ajustes → Sincronización sustituye "Conectar también el CLI" por una explicación, aunque
+      `settings.json` traiga un `cliAccount` heredado de una instalación directa (`githubConnect`/
+      `githubDisconnect` también se niegan con `cliMissing`).
+    - `syncSkillToAgentDirs()` no hace nada (ni instala ni borra la skill en `~/.claude/skills`,
+      `~/.agents/skills`, Windsurf: podría ser de una instalación directa) y `app:set-skill-sync` se
+      niega sin tocar `settings.json`; Ajustes → General muestra una explicación en lugar del toggle.
+    - Para usar el CLI hay que instalar NoteFlow desde GitHub.
+- **Instalación directa + Store a la vez: desaconsejado.** Ambas usan `%APPDATA%\NoteFlow`. MSIX deja
+  a la app de la Store **modificar** los ficheros que ya existían ahí (el `settings.json` se escribe
+  in situ, así que si ya existía se comparte), pero manda los ficheros **nuevos** —incluido el
+  temporal de cualquier escritura atómica temp+rename, cuyo resultado acaba entonces en la copia— a una
+  copia privada del paquete (`%LOCALAPPDATA%\Packages\<familia>\LocalCache\Roaming\…`) que solo ve la
+  app de la Store. El estado de ajustes/cachés de una y otra puede bifurcarse sin aviso. Recomendar
+  tener solo una (desinstalar la otra). Las notas (`~/noteflow-notes`, fuera de `AppData`) no se
+  virtualizan y las ven ambas.
+
 ### Convención de versiones
 `vX.Y.Z` estable. Patch = bugfixes; Minor = features; Major = cambios de arquitectura.
 

@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "dist": "npm run build && electron-builder",
+    "dist:store": "npm run build && electron-builder --win appx --x64 --publish never",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
@@ -112,6 +113,21 @@
     },
     "nsis": {
       "include": "build/nsis-include.nsh"
+    },
+    "appx": {
+      "identityName": "yagoidz.NoteFlow-QuickNotes",
+      "publisher": "CN=049BE40A-61A5-4C73-B5E5-27E20CB0E605",
+      "publisherDisplayName": "yagoidz",
+      "applicationId": "NoteFlow",
+      "displayName": "NoteFlow - Quick Notes",
+      "backgroundColor": "transparent",
+      "minVersion": "10.0.17763.0",
+      "maxVersionTested": "10.0.26100.0",
+      "languages": [
+        "en-US",
+        "es-ES"
+      ],
+      "artifactName": "${productName}-${version}-Store.${ext}"
     },
     "mac": {
       "target": [

@@ -18,14 +18,18 @@ export function StartupPanel() {
   const [openAtLogin, setOpenAtLogin] = useState(false)
   const [startupStickies, setStartupStickies] = useState<StartupSticky[]>([])
   const [loading, setLoading] = useState(true)
+  // Microsoft Store build: the app can't register itself to start with Windows.
+  const [isStore, setIsStore] = useState(false)
 
   useEffect(() => {
     Promise.all([
       window.noteflow.getLoginItem(),
       window.noteflow.getStartupStickies(),
-    ]).then(([loginItem, stickies]) => {
+      window.noteflow.getDistribution(),
+    ]).then(([loginItem, stickies, distribution]) => {
       setOpenAtLogin(loginItem.openAtLogin)
       setStartupStickies(stickies)
+      setIsStore(distribution === 'store')
       setLoading(false)
     })
   }, [])
@@ -53,6 +57,14 @@ export function StartupPanel() {
     return (
       <div className="flex items-center justify-center text-text-muted text-xs font-mono py-8">
         {t.common.loading}
+      </div>
+    )
+  }
+
+  if (isStore) {
+    return (
+      <div className="settings-rows">
+        <p className="text-[11px] font-mono text-text-muted">{t.settings.startup.storeUnavailable}</p>
       </div>
     )
   }

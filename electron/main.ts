@@ -699,6 +699,10 @@ function stopCloudAutoSync(): void {
   }
 }
 
+// Running from the Microsoft Store package (MSIX/APPX). Electron sets
+// process.windowsStore only inside a packaged Windows Store app.
+const IS_STORE_BUILD = process.windowsStore === true
+
 const OLD_NOTES_DIR = path.join(os.homedir(), 'scratch-notes')
 
 // On Linux, follow XDG Base Directory Specification using ~/.local/share as base.
@@ -1861,6 +1865,11 @@ ipcMain.handle('app:open-notes-folder', () =>
 
 ipcMain.handle('app:get-version', () => app.getVersion())
 
+// Microsoft Store build (MSIX). The Store installs updates itself, and inside the
+// package the app can't run the NSIS installer, write the HKCU Run key (registry
+// writes are virtualized) or put the bundled CLI on PATH — see IS_STORE_BUILD uses.
+ipcMain.handle('app:get-distribution', () => (IS_STORE_BUILD ? 'store' : 'direct'))
+
 // In-app feedback (Settings → About). No account required: electron/feedback.ts
 // sends it with the session token when there is one, anonymously otherwise.
 // The UI language goes along only if the user ticked the diagnostics box.
@@ -1875,6 +1884,8 @@ ipcMain.handle('feedback:send', (_event, payload: unknown) => {
 // build it updates FROM still makes the old calls.
 ipcMain.handle('app:check-update', () => {
   // if (!app.isPackaged) return { hasUpdate: false }
+  // Store build: updates come from the Microsoft Store, never from GitHub.
+  if (IS_STORE_BUILD) return Promise.resolve<UpdateCheckResult>({ hasUpdate: false })
   // A failed check (offline, timeout, rate limit, bad answer) resolves
   // UPDATE_CHECK_FAILED — never a bare {hasUpdate:false}, which the UI would
   // show as "Up to date".
@@ -1961,6 +1972,7 @@ function relaunchAppImageAfterExit(appImagePath: string): void {
 // environ: the relaunch helper must keep passing the AppImage path (under that dir) and
 // unrelated env vars such as NOTEFLOW_NOTES_DIR (sanitizeAppImageEnv keeps them).
 ipcMain.handle('app:download-and-install', async (_event, url: string) => {
+  if (IS_STORE_BUILD) return { success: false, error: 'Updates come from the Microsoft Store' }
   try {
     const initialUrl = parseHttpsUrl(url)
     if (!initialUrl || !isAllowedInitialUpdateUrl(initialUrl)) {
@@ -3825,11 +3837,17 @@ ipcMain.on('settings:set-language', (_event, setting: LanguageSetting) => {
 })
 
 ipcMain.handle('app:get-login-item', () => {
+  // Store build: never on (see applyLoginItemSettings), even if settings.json
+  // was inherited from a direct install that had it enabled.
+  if (IS_STORE_BUILD) return { openAtLogin: false }
   const openAtLogin = (readSettings().openAtLogin ?? false) as boolean
   return { openAtLogin }
 })
 
 function applyLoginItemSettings(enabled: boolean): void {
+  // Store build: the Run key would land in the package's virtual registry and
+  // Windows would never read it. The Settings panel hides the toggle there.
+  if (IS_STORE_BUILD) return
   if (process.platform === 'linux') {
     // On Linux, manually manage the autostart .desktop file so that the
     // --noteflow-startup arg is reliably included. app.setLoginItemSettings
@@ -3868,6 +3886,8 @@ function applyLoginItemSettings(enabled: boolean): void {
 }
 
 ipcMain.handle('app:set-login-item', (_event, enabled: boolean) => {
+  // Store build: not available — leave the setting alone (a direct install may share it).
+  if (IS_STORE_BUILD) return { ok: false, error: 'Not available in the Microsoft Store version' }
   const settings = readSettings()
   settings.openAtLogin = enabled
   writeSettings(settings)
@@ -3893,6 +3913,9 @@ ipcMain.handle('app:set-login-item', (_event, enabled: boolean) => {
 // every launch so skill updates propagate. Each destination is handled
 // independently and best-effort: a failure in one never blocks the others, and
 // nothing ever throws into the startup path.
+// Store build: skipped entirely (no install, no removal) — it ships no `noteflow`
+// command on PATH, so the skill would point agents at a CLI that isn't there; and
+// a direct install on the same machine may own the files.
 function skillAgentDestDirs(): string[] {
   const home = os.homedir()
   const dirs = [
@@ -3907,6 +3930,7 @@ function skillAgentDestDirs(): string[] {
 }
 
 function syncSkillToAgentDirs(): void {
+  if (IS_STORE_BUILD) return
   try {
     const enabled = (readSettings().exposeSkillToAgents ?? true) as boolean
     const destDirs = skillAgentDestDirs()
@@ -3960,6 +3984,8 @@ ipcMain.handle('app:get-skill-sync', () => ({
 }))
 
 ipcMain.handle('app:set-skill-sync', (_event, enabled: boolean) => {
+  // Store build: no CLI to expose — leave the setting alone (Settings hides the toggle).
+  if (IS_STORE_BUILD) return { ok: false, error: 'Not available in the Microsoft Store version' }
   const settings = readSettings()
   settings.exposeSkillToAgents = enabled
   writeSettings(settings)

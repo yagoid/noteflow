@@ -145,6 +145,8 @@ const api = {
 
   // Updates
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:get-version'),
+  // 'store' = Microsoft Store package (updates and login item belong to Windows).
+  getDistribution: (): Promise<'store' | 'direct'> => ipcRenderer.invoke('app:get-distribution'),
   // error: the check itself failed (offline/timeout/bad answer) — not "up to date".
   checkUpdate: (): Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string; error?: true }> =>
     ipcRenderer.invoke('app:check-update'),

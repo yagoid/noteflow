@@ -52,7 +52,14 @@ function cliScriptPath(): string {
     : path.join(__dirname, '..', 'cli', 'noteflow.js')
 }
 
+// Microsoft Store build: the bundled CLI isn't on PATH, and the CLI's
+// settings.json (in AppData) would be written into the package's private,
+// virtualized copy, invisible to a CLI installed outside the Store. Settings →
+// Sync shows an explanation instead of this section there.
+const IS_STORE_BUILD = process.windowsStore === true
+
 function cliAvailable(): boolean {
+  if (IS_STORE_BUILD) return false
   try {
     return fs.existsSync(cliScriptPath())
   } catch {
@@ -173,6 +180,7 @@ export function cloudDisconnect(): Promise<CliConnectResult> {
 // ── GitHub ────────────────────────────────────────────────────────────────────
 
 export function githubConnect(target: GithubTarget): CliConnectResult {
+  if (IS_STORE_BUILD) return { ok: false, error: 'cliMissing' }
   const settings = readCliSettings()
   if (!settings) return { ok: false, error: 'failed' }
   const plan = planGithubConnect(settings, target, shared())
@@ -183,6 +191,7 @@ export function githubConnect(target: GithubTarget): CliConnectResult {
 }
 
 export function githubDisconnect(): CliConnectResult {
+  if (IS_STORE_BUILD) return { ok: false, error: 'cliMissing' }
   const settings = readCliSettings()
   if (!settings) return { ok: false, error: 'failed' }
   const plan = planGithubDisconnect(settings, shared())

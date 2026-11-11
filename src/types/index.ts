@@ -617,6 +617,8 @@ declare global {
       /** Another window saved snippets.json (pulls arrive as a path-less `notes-updated`). */
       onSnippetsUpdated: (callback: () => void) => () => void
       getAppVersion: () => Promise<string>
+      /** 'store' = Microsoft Store package: updates and open-at-login belong to Windows. */
+      getDistribution: () => Promise<'store' | 'direct'>
       /** `error`: the check failed (offline/timeout/bad answer) — it does NOT mean "up to date". */
       checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string; error?: true }>
       openUrl: (url: string) => Promise<void>

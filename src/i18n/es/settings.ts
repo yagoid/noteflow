@@ -109,6 +109,7 @@ export const settings = {
   startup: {
     launchOnStartup: 'Abrir al iniciar el sistema',
     launchOnStartupHint: 'NoteFlow se abre automáticamente al encender el ordenador',
+    storeUnavailable: 'La versión de NoteFlow de la Microsoft Store todavía no puede abrirse sola al iniciar Windows. Si lo necesitas, instala NoteFlow desde GitHub.',
     enableLaunch: 'Activar apertura al iniciar',
     disableLaunch: 'Desactivar apertura al iniciar',
     openAsSticky: 'Abrir como nota flotante al iniciar',
@@ -166,6 +167,7 @@ export const settings = {
     connectWithGitHub: 'Conectar con GitHub',
     cli: {
       title: 'Línea de comandos (CLI)',
+      storeUnavailable: 'La versión de NoteFlow de la Microsoft Store no incluye el CLI noteflow. Para usarlo desde la terminal o con agentes de IA, instala NoteFlow desde GitHub.',
       descCloud: 'Inicia sesión en NoteFlow Cloud con {email} también en el CLI noteflow, para que puedan sincronizarse las notas escritas desde la terminal o por agentes de IA. El CLI tiene su propia sesión: la app sigue con la suya.',
       e2eeNotice: 'Tu cuenta usa cifrado privado (E2EE): el CLI solo puede sincronizar tras desbloquearlo con tu passphrase. La pide en cada ejecución en una terminal, o la lee de la variable de entorno NOTEFLOW_CLOUD_PASSPHRASE; sin ninguna de las dos, el CLI (y los agentes de IA que lo usen) no puede sincronizar.',
       descGithub: 'Deja que el CLI noteflow sincronice también con {repo}, para que puedan sincronizarse las notas escritas desde la terminal o por agentes de IA. No hace falta autorizar de nuevo.',
@@ -273,6 +275,7 @@ export const settings = {
       'Instala la skill de NoteFlow en ~/.claude/skills y ~/.agents/skills para que Claude Code, Codex, Gemini CLI, Copilot, Cursor y otros agentes compatibles con el estándar Agent Skills gestionen tus notas a través del CLI.',
     exposeSkillTooltip: 'Exponer la skill del CLI',
     stopExposingSkill: 'Dejar de exponer la skill del CLI',
+    exposeSkillStore: 'La versión de NoteFlow de la Microsoft Store no incluye el CLI noteflow, así que no puede exponer su skill a los agentes de IA. Para usarlo, instala NoteFlow desde GitHub.',
   },
 
   account: {
@@ -411,6 +414,7 @@ export const settings = {
     checkForUpdates: 'Buscar actualizaciones',
     checkFailed: 'No se pudo buscar actualizaciones',
     checkFailedHint: 'Revisa tu conexión e inténtalo de nuevo.',
+    storeUpdates: 'La Microsoft Store mantiene NoteFlow actualizado.',
     installing: 'Instalando…',
     downloading: 'Descargando…',
     updateTo: 'Actualizar a v{version}',

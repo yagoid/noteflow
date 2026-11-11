@@ -17,10 +17,14 @@ type Step = 'idle' | 'sending' | 'code' | 'verifying' | 'resending' | 'connectin
 //  - GitHub: after a confirmation, the CLI gets a copy of the app's token.
 // Its state is read from the CLI's settings, so a CLI connected from the
 // terminal shows up as connected too.
+// Microsoft Store build: it ships no CLI, so only an explanation is shown —
+// never the connected state of a CLI from a direct install sharing settings.json.
 export function CliConnectSection({ backend }: { backend: 'cloud' | 'github' }) {
   const t = useT()
   const tc = t.settings.sync.cli
   const [status, setStatus] = useState<CliConnectStatus | null>(null)
+  // null until known: nothing renders before, so the Store build never flashes the controls.
+  const [isStore, setIsStore] = useState<boolean | null>(null)
   // The app's email (Cloud) / owner/repo (GitHub) — the description's target.
   const [appTarget, setAppTarget] = useState<string | null>(null)
   // Cloud: the app account's keys mode — e2ee means the CLI needs the passphrase to sync.
@@ -35,6 +39,7 @@ export function CliConnectSection({ backend }: { backend: 'cloud' | 'github' }) 
   useEffect(() => {
     let alive = true
     window.noteflow.cliConnectGetStatus().then((s) => { if (alive) setStatus(s) })
+    window.noteflow.getDistribution().then((d) => { if (alive) setIsStore(d === 'store') })
     if (backend === 'cloud') {
       window.noteflow.getAccountStatus().then((a) => { if (alive) setAppTarget(a.email ?? null) })
       window.noteflow.getCloudStatus().then((c) => { if (alive) setKeysMode(c.keysMode) })
@@ -112,6 +117,15 @@ export function CliConnectSection({ backend }: { backend: 'cloud' | 'github' }) 
     setStep('idle')
   }
 
+  if (isStore === null) return null
+  if (isStore) {
+    return (
+      <section className="pt-4 border-t border-border">
+        <h3 className="mb-3 text-sm font-mono font-semibold text-text">{tc.title}</h3>
+        <p className="text-[11px] font-mono text-text-muted leading-relaxed">{tc.storeUnavailable}</p>
+      </section>
+    )
+  }
   if (!status) return null
 
   const cli = backend === 'cloud' ? status.cloud : status.github

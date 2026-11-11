@@ -16,9 +16,13 @@ export function AboutPanel() {
   const [downloading, setDownloading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [installing, setInstalling] = useState(false)
+  // Microsoft Store build: the Store installs updates, so no check/update buttons.
+  // null until known: the Updates block isn't drawn before, so its buttons never flash.
+  const [isStore, setIsStore] = useState<boolean | null>(null)
 
   useEffect(() => {
     window.noteflow.getAppVersion().then(setVersion)
+    window.noteflow.getDistribution().then((d) => setIsStore(d === 'store'))
     const unsubProgress = window.noteflow.onUpdateProgress((p) => setProgress(p))
     const unsubInstalling = window.noteflow.onUpdateInstalling(() => setInstalling(true))
     return () => {
@@ -69,61 +73,69 @@ export function AboutPanel() {
         </span>
       </section>
 
-      {/* Updates */}
-      <section>
-        <SectionTitle>{t.settings.about.updates}</SectionTitle>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleCheck}
-            disabled={checking}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono ${settingsButtonClass}`}
-          >
-            {checking
-              ? <RefreshCw size={13} className="animate-spin text-text-muted" />
-              : upToDate
-              ? <Check size={13} className="text-green-400" />
-              : checkFailed
-              ? <AlertCircle size={13} className="text-red" />
-              : <RefreshCw size={13} className="text-text-muted" />}
-            {checking
-              ? t.settings.about.checking
-              : upToDate
-              ? t.settings.about.upToDate
-              : checkFailed
-              ? t.settings.about.checkFailed
-              : t.settings.about.checkForUpdates}
-          </button>
-          {updateInfo && (
-            <button
-              onClick={handleUpdate}
-              disabled={downloading || installing}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-accent/60 bg-accent/[0.1] text-xs font-mono text-accent hover:bg-accent/[0.18] transition-colors disabled:opacity-60"
-            >
-              {installing ? (
-                <>
-                  <RefreshCw size={13} className="animate-spin" />
-                  {t.settings.about.installing}
-                </>
-              ) : downloading ? (
-                <>
-                  <Download size={13} />
-                  {progress > 0 ? `${progress}%` : t.settings.about.downloading}
-                </>
-              ) : (
-                <>
-                  <Download size={13} />
-                  {tf(t.settings.about.updateTo, { version: updateInfo.latestVersion })}
-                </>
+      {/* Updates (not drawn until the distribution is known) */}
+      {isStore !== null && (
+        <section>
+          <SectionTitle>{t.settings.about.updates}</SectionTitle>
+          {isStore ? (
+            <p className="text-[11px] font-mono text-text-muted">{t.settings.about.storeUpdates}</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCheck}
+                  disabled={checking}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono ${settingsButtonClass}`}
+                >
+                  {checking
+                    ? <RefreshCw size={13} className="animate-spin text-text-muted" />
+                    : upToDate
+                    ? <Check size={13} className="text-green-400" />
+                    : checkFailed
+                    ? <AlertCircle size={13} className="text-red" />
+                    : <RefreshCw size={13} className="text-text-muted" />}
+                  {checking
+                    ? t.settings.about.checking
+                    : upToDate
+                    ? t.settings.about.upToDate
+                    : checkFailed
+                    ? t.settings.about.checkFailed
+                    : t.settings.about.checkForUpdates}
+                </button>
+                {updateInfo && (
+                  <button
+                    onClick={handleUpdate}
+                    disabled={downloading || installing}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-accent/60 bg-accent/[0.1] text-xs font-mono text-accent hover:bg-accent/[0.18] transition-colors disabled:opacity-60"
+                  >
+                    {installing ? (
+                      <>
+                        <RefreshCw size={13} className="animate-spin" />
+                        {t.settings.about.installing}
+                      </>
+                    ) : downloading ? (
+                      <>
+                        <Download size={13} />
+                        {progress > 0 ? `${progress}%` : t.settings.about.downloading}
+                      </>
+                    ) : (
+                      <>
+                        <Download size={13} />
+                        {tf(t.settings.about.updateTo, { version: updateInfo.latestVersion })}
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+              {checkFailed && !checking && (
+                <p role="status" className="text-[11px] font-mono text-text-muted mt-2">
+                  {t.settings.about.checkFailedHint}
+                </p>
               )}
-            </button>
+            </>
           )}
-        </div>
-        {checkFailed && !checking && (
-          <p role="status" className="text-[11px] font-mono text-text-muted mt-2">
-            {t.settings.about.checkFailedHint}
-          </p>
-        )}
-      </section>
+        </section>
+      )}
 
       {/* Links */}
       <section>
