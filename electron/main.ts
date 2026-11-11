@@ -25,6 +25,7 @@ import { staleResolvePullDelay, sectionConflictLabels } from './cloudSyncLogic'
 import * as cloudKeys from './cloudKeys'
 import * as cloudRealtime from './cloudRealtime'
 import { getActiveSyncProvider, getActiveSyncStatus, type SyncPullResult } from './syncProvider'
+import { createCoalescedRunner, trackInFlight, waitUntil } from './syncCycle'
 import * as account from './account'
 import * as cliConnect from './cliConnect'
 import * as feedback from './feedback'
@@ -121,10 +122,41 @@ function markInternalWrite(relPath: string) {
 // transitions): the sync button shows an uploading indicator and its hover
 // card re-reads the in-flight count on each event.
 const pendingPushFiles = new Set<string>()
+// Remote deletes in flight (note folders and dropped section files — keyed like
+// the journal: '<dir>' / '<dir>/<file>'), see scheduleRemoteDelete. A separate
+// set so a delete settling never clears an upload of the same path.
+const pendingRemoteDeletes = new Set<string>()
+
+/** Uploads + deletes in flight — the 'pushing' state and the card's floor count. */
+function inFlightRemoteWrites(): number {
+  return pendingPushFiles.size + pendingRemoteDeletes.size
+}
 
 function notifyPushState(): void {
-  const state: 'pushing' | 'idle' = pendingPushFiles.size > 0 ? 'pushing' : 'idle'
+  const state: 'pushing' | 'idle' = inFlightRemoteWrites() > 0 ? 'pushing' : 'idle'
   BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('sync:push-state', state))
+}
+
+/**
+ * Deletes a note folder ('dir') or a single file ('<dir>/<file>.md') on the
+ * live backend, tracked as in flight (trackInFlight): the backend journals the
+ * delete synchronously, so without this the renderer's refresh right after the
+ * local delete would see a journal entry with no push timer → "not uploaded",
+ * and nothing would re-read the status once the delete landed. In flight it
+ * shows as "uploading"; when it settles the push-state event refreshes the
+ * status (synced, or the error/journal entry if it failed). No-op tracking
+ * when no backend is connected (the backend returns right away).
+ */
+function scheduleRemoteDelete(kind: 'dir' | 'file', key: string): void {
+  const sync = getActiveSyncProvider()
+  const work = () => (kind === 'dir' ? sync.scheduleDeleteDir(key) : sync.scheduleDelete(key))
+  if (!sync.isConnected()) {
+    void work()
+    return
+  }
+  trackInFlight(pendingRemoteDeletes, key, work, notifyPushState).catch((err) => {
+    console.error('[Sync] remote delete failed:', String(err))
+  })
 }
 
 // ── Alarm engine ─────────────────────────────────────────────────────────────
@@ -183,7 +215,7 @@ function checkExpiredNotes(): void {
         } catch { /* ignore */ }
         fs.rmSync(dirPath, { recursive: true, force: true })
         BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
-        getActiveSyncProvider().scheduleDeleteDir(dir)
+        scheduleRemoteDelete('dir', dir)
       } catch {
         // ignore per-note errors
       }
@@ -453,22 +485,32 @@ function indexPulledNotes(result: SyncPullResult): void {
   if (result.hadDeletions || result.hadMetadataChanges) aiIndex.markStaleUnknown()
 }
 
-function broadcastPullResult(result: SyncPullResult, backend: SyncBackendId): void {
-  indexPulledNotes(result)
-  if (result.hadDeletions || result.hadMetadataChanges) {
+/** Renderer reload for the files of a pull, the same for both backends. */
+function broadcastPulledNotes(result: SyncPullResult, opts: { manual: boolean }): void {
+  // A manual sync also reloads everything when the pull brought nothing: it
+  // covers files already on disk (written by an auto-sync) whose event the UI
+  // missed — a manual sync should always bring the store in sync with disk.
+  if (result.hadDeletions || result.hadMetadataChanges || (opts.manual && result.pulled === 0)) {
     BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
   } else {
     for (const filePath of result.updatedFiles) {
-      BrowserWindow.getAllWindows().forEach((win) => {
-        win.webContents.send('notes-updated', filePath, null)
-      })
+      BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated', filePath, null))
     }
   }
+}
+
+function broadcastPullResult(
+  result: SyncPullResult,
+  backend: SyncBackendId,
+  opts: { manual: boolean } = { manual: false },
+): void {
+  indexPulledNotes(result)
+  broadcastPulledNotes(result, opts)
   emitSyncStatusChanged()
   expireNotesAfterPull(result, backend)
 }
 
-// Every pull funnels here (broadcastPullResult + the two manual pulls): with sync
+// Every pull funnels here (broadcastPullResult + the manual GitHub pull): with sync
 // connected this is the only place temporary notes are expired — see maybeCheckExpiredNotes.
 function expireNotesAfterPull(result: SyncPullResult, backend: SyncBackendId): void {
   maybeCheckExpiredNotes({
@@ -571,11 +613,23 @@ function emitCloudStatusChanged(): void {
   })
 }
 
-// Single-flight guard: Realtime signals and the safety-net timer both funnel
-// into runCloudSyncCycle — a cycle requested while one is running marks it
-// dirty and re-runs ONCE at the end (coalesces bursts, never overlaps pulls).
-let cloudSyncCycleRunning = false
-let cloudSyncCycleDirty = false
+/** `manual`: requested by the user (titlebar button / Settings → "Sync now"), see runCloudSyncCycleOnce. */
+interface CloudSyncCycleFlags {
+  manual: boolean
+}
+
+// How long a MANUAL cycle waits for uploads/deletions already in flight to
+// land before it pulls (an automatic cycle stands down right away instead).
+const MANUAL_SYNC_SETTLE_TIMEOUT_MS = 15_000
+
+// Single-flight guard: Realtime signals, the safety-net timer, the stale-resolve
+// pull AND the manual sync all funnel into this runner — a cycle requested
+// while one is running queues ONE more cycle after it (coalesces bursts, never
+// overlaps pulls), and each caller waits for the cycle that covers its request.
+const cloudSyncCycle = createCoalescedRunner<CloudSyncCycleFlags, SyncPullResult | null>(
+  (flags) => runCloudSyncCycleOnce(flags),
+  (queued, incoming) => ({ manual: queued.manual || incoming.manual }),
+)
 
 /**
  * One cloud sync cycle: managed auto-unlock if needed → stand down if writes
@@ -588,46 +642,51 @@ let cloudSyncCycleDirty = false
  * guards (pending deleteDir/delete/upsert) keep unsynced local intents safe.
  */
 async function runCloudSyncCycle(): Promise<void> {
-  if (cloudSyncCycleRunning) {
-    cloudSyncCycleDirty = true
-    return
-  }
-  cloudSyncCycleRunning = true
-  try {
-    do {
-      cloudSyncCycleDirty = false
-      await runCloudSyncCycleOnce()
-    } while (cloudSyncCycleDirty)
-  } finally {
-    cloudSyncCycleRunning = false
-  }
+  await cloudSyncCycle.run({ manual: false })
 }
 
-async function runCloudSyncCycleOnce(): Promise<void> {
-  if (!cloudSync.isCloudSyncEnabled()) return
+/**
+ * The body of a cycle; resolves with the pull result (null when the cycle
+ * stood down before pulling). A MANUAL cycle differs in three ways: with the
+ * keys still locked it pulls anyway (the pull reports "Cloud keys are locked",
+ * which is what the user who clicked needs to see — the drain stays a no-op);
+ * with writes in flight it waits for them to land (bounded) instead of standing
+ * down; and its notes broadcast is the manual one (full reload when nothing
+ * was pulled — broadcastPulledNotes).
+ */
+async function runCloudSyncCycleOnce({ manual }: CloudSyncCycleFlags): Promise<SyncPullResult | null> {
+  if (!cloudSync.isCloudSyncEnabled()) return null
   // Locked keys: managed sessions re-unlock silently (e.g. the boot attempt
   // ran offline); e2ee stays locked until the user types the passphrase.
   // Pending ops stay journaled and drain after unlock either way.
   if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked') {
     const changed = await cloudKeys.autoUnlockManaged().catch(() => false)
     if (changed) emitCloudStatusChanged()
-    if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked') return
+    if (!manual && cloudSync.getCloudSyncStatus().keysState !== 'unlocked') return null
   }
   // Stand down while writes are in flight (the next cycle runs once they
   // land): pulling now could resurrect a note whose remote delete hasn't
-  // landed yet.
+  // landed yet. A manual sync gives them a moment to land first.
   if (cloudSync.hasPendingRemoteMutations()) {
-    console.log('[CloudAutoSync] skipping cycle — remote mutations pending')
-    return
+    const settled =
+      manual &&
+      (await waitUntil(() => !cloudSync.hasPendingRemoteMutations(), MANUAL_SYNC_SETTLE_TIMEOUT_MS))
+    if (!settled) {
+      console.log('[CloudAutoSync] skipping cycle — remote mutations pending')
+      if (manual) emitCloudStatusChanged()
+      return null
+    }
   }
+  let result: SyncPullResult | null = null
   try {
-    const result = await cloudSync.pullNotes(NOTES_DIR)
+    result = await cloudSync.pullNotes(NOTES_DIR)
     // Broadcast BEFORE the drain: an open editor must reload the pulled
     // version right away — the drain can take a while, and every second the
     // editor keeps the old content is a chance to save it over the pull.
-    broadcastPullResult(result, 'cloud')
+    broadcastPullResult(result, 'cloud', { manual })
   } catch (err) {
     console.error('[CloudAutoSync] pull failed:', String(err))
+    if (manual) result = { ...emptyPullResult(), errors: [String(err)] }
   }
   try {
     await cloudSync.retrySyncJournal(NOTES_DIR)
@@ -635,6 +694,11 @@ async function runCloudSyncCycleOnce(): Promise<void> {
     console.error('[CloudAutoSync] journal retry failed:', String(err))
   }
   emitCloudStatusChanged()
+  return result
+}
+
+function emptyPullResult(): SyncPullResult {
+  return { pulled: 0, deleted: 0, errors: [], updatedFiles: [], hadDeletions: false, hadMetadataChanges: false }
 }
 
 // A conditional Cloud upload came back stale (cloudSync.onRemoteConflict: the
@@ -1788,7 +1852,7 @@ function applyNoteWrite(payload: NoteWritePayload, senderId?: number, opts?: { d
 
   const sync = getActiveSyncProvider()
   const connected = sync.isConnected()
-  for (const f of deletes) sync.scheduleDelete(`${dir}/${f}`)
+  for (const f of deletes) scheduleRemoteDelete('file', `${dir}/${f}`)
 
   // Keep the semantic index up to date (debounced; no-op when AI is disabled).
   if (aiIndex.isEnabled()) aiIndex.scheduleIndex(dirPath)
@@ -1841,7 +1905,7 @@ function applyNoteDelete(dirOrPath: string): void {
   BrowserWindow.getAllWindows().forEach((win) => {
     win.webContents.send('notes-updated')
   })
-  getActiveSyncProvider().scheduleDeleteDir(dir)
+  scheduleRemoteDelete('dir', dir)
   aiIndex.removeFromIndex(dirPath)
 }
 
@@ -2364,9 +2428,9 @@ ipcMain.handle('sync:get-status', () => {
 
 // Backend-tagged status of whichever sync provider is live (Cloud when enabled,
 // else GitHub, else 'none') — drives the titlebar sync button and its status
-// card. pendingPushFiles lives here (not in syncProvider), so it's passed in.
+// card. The in-flight sets live here (not in syncProvider), so their size is passed in.
 ipcMain.handle('sync:get-active-status', () => {
-  return getActiveSyncStatus(pendingPushFiles.size)
+  return getActiveSyncStatus(inFlightRemoteWrites())
 })
 
 ipcMain.handle('sync:initiate', async (_event, repo: string) => {
@@ -2408,8 +2472,17 @@ ipcMain.handle('sync:disconnect', () => {
   return { ok: true }
 })
 
-// Manual GitHub pull + its broadcast (shared by sync:pull and sync:pull-active).
+// Manual GitHub sync + its broadcast (shared by sync:pull and sync:pull-active).
+// Drains the journal first, like the autosync tick (startAutoSync): pushes
+// that failed offline go up on the click instead of waiting for the next
+// 5-min tick. No-op until the first pull succeeded (retrySyncJournal gates
+// itself). Unlike the tick, the pull is not deferred by writes in flight.
 async function githubManualPull(): Promise<SyncPullResult> {
+  try {
+    await githubSync.retrySyncJournal(NOTES_DIR)
+  } catch (err) {
+    console.error('[Sync] manual journal retry failed:', String(err))
+  }
   const result = await githubSync.pullNotes(NOTES_DIR)
   indexPulledNotes(result)
   // Guarded no-op once the remote is already on format v2
@@ -2421,16 +2494,7 @@ async function githubManualPull(): Promise<SyncPullResult> {
   }).catch((err) => {
     console.error('[Sync] remote format migration failed:', String(err))
   })
-  if (result.hadDeletions || result.hadMetadataChanges || result.pulled === 0) {
-    // Full reload: covers deletions AND the case where the file was already on disk
-    // (written by auto-sync) but the UI missed the event — manual sync should always
-    // bring the store in sync with disk.
-    BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
-  } else {
-    for (const filePath of result.updatedFiles) {
-      BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated', filePath, null))
-    }
-  }
+  broadcastPulledNotes(result, { manual: true })
   expireNotesAfterPull(result, 'github')
   return result
 }
@@ -2482,7 +2546,7 @@ ipcMain.handle('sync:mirror-to-github', async () => {
 // enabled (they are mutually exclusive), GitHub otherwise. Same broadcast
 // contract as sync:pull / cloud:pull so the store reloads either way.
 ipcMain.handle('sync:pull-active', async () => {
-  return cloudSync.isCloudSyncEnabled() ? cloudManualPull() : githubManualPull()
+  return cloudSync.isCloudSyncEnabled() ? cloudManualSync() : githubManualPull()
 })
 
 // ── Settings → Sync → "Connect the CLI too" (electron/cliConnect.ts) ─────────
@@ -2567,6 +2631,24 @@ ipcMain.handle('account:open-checkout', (_event, product: string): account.Accou
   return { ok: true }
 })
 
+// "Manage subscription": opens the Lemon Squeezy customer portal (cancel,
+// change plan, payment method, invoices). account.resolveBillingPortal asks the
+// billing-portal Edge Function for the user's pre-signed link and falls back to
+// the store's generic portal (sign-in by email); either URL is already checked
+// against the https + *.lemonsqueezy.com allowlist. `via` lets the UI explain
+// the fallback.
+ipcMain.handle('account:open-billing-portal', async (): Promise<account.BillingPortalResult> => {
+  const target = await account.resolveBillingPortal()
+  if (!target.ok) return target
+  try {
+    await shell.openExternal(target.url)
+  } catch (err) {
+    console.error('Failed to open the billing portal:', err)
+    return { ok: false, error: 'Could not open the billing portal.', errorCode: 'billingPortalUnavailable' }
+  }
+  return { ok: true, via: target.via }
+})
+
 // ── NoteFlow Cloud (encrypted sync — phase 4.2) ───────────────────────────────
 // Key material lives in electron/cloudKeys.ts (main-process memory only); the
 // renderer exchanges exclusively the public CloudSyncStatus. These handlers
@@ -2628,7 +2710,9 @@ ipcMain.handle('cloud:refresh-keys-mode', async () => {
 })
 
 // passphrase or recovery code → unlocks the key session. Pending journaled
-// pushes drain on the next autosync tick.
+// pushes drain in the sync cycle that the Realtime join triggers (the status
+// broadcast starts the subscription — syncCloudRealtimeState), or on the
+// next autosync tick at the latest.
 ipcMain.handle('cloud:unlock', async (_event, secret: string) => {
   const res = await cloudKeys.unlockCloudKeys(secret)
   emitCloudStatusChanged()
@@ -2692,24 +2776,21 @@ ipcMain.handle('cloud:disable', () => {
   return res
 })
 
-// Manual Cloud pull + its broadcast (shared by cloud:pull and sync:pull-active).
-async function cloudManualPull(): Promise<SyncPullResult> {
-  const result = await cloudSync.pullNotes(NOTES_DIR)
-  indexPulledNotes(result)
-  if (result.hadDeletions || result.hadMetadataChanges || result.pulled === 0) {
-    BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
-  } else {
-    for (const filePath of result.updatedFiles) {
-      BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated', filePath, null))
-    }
-  }
-  emitCloudStatusChanged()
-  expireNotesAfterPull(result, 'cloud')
-  return result
+// Manual Cloud sync (shared by cloud:pull and sync:pull-active): a FULL cycle
+// through the same single-flight runner as the autosync — pull (+ the manual
+// notes broadcast) then drain the journal — so edits whose push failed offline
+// go up on the click instead of waiting for the next 5-min tick. Clicked while
+// a cycle runs, it waits for a fresh one queued after it. Returns the pull
+// result (empty when the cycle stood down: Cloud just disabled, or writes
+// still in flight after the settle timeout — the status then shows them as
+// pending changes).
+async function cloudManualSync(): Promise<SyncPullResult> {
+  const result = await cloudSyncCycle.run({ manual: true })
+  return result ?? emptyPullResult()
 }
 
-// Manual pull (same broadcast contract as sync:pull).
-ipcMain.handle('cloud:pull', async () => cloudManualPull())
+// Manual sync (same broadcast contract as sync:pull).
+ipcMain.handle('cloud:pull', async () => cloudManualSync())
 
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 

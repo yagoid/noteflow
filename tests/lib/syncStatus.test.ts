@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getSyncDisplayState, relativeAge, syncChartBars } from '../../src/lib/syncStatus'
+import { getSyncDisplayState, pendingChangeCount, relativeAge, syncChartBars } from '../../src/lib/syncStatus'
 import type { ActiveSyncStatus, SyncHistoryEntry } from '../../src/types'
 
 const github = (over: Partial<ActiveSyncStatus> = {}): ActiveSyncStatus => ({
@@ -7,6 +7,7 @@ const github = (over: Partial<ActiveSyncStatus> = {}): ActiveSyncStatus => ({
   active: true,
   initialPullStatus: 'ok',
   pendingUploads: 0,
+  pendingChanges: 0,
   github: { owner: 'me', repo: 'notes' },
   ...over,
 })
@@ -19,6 +20,7 @@ const cloud = (
   active: true,
   initialPullStatus: 'ok',
   pendingUploads: 0,
+  pendingChanges: 0,
   cloud: { keysState, keysMode: 'managed', realtimeConnected: true },
   ...over,
 })
@@ -51,6 +53,34 @@ describe('getSyncDisplayState', () => {
   it('an error outranks a pending first pull', () => {
     expect(getSyncDisplayState(github({ initialPullStatus: 'pending', error: 'x' }), false, false)).toBe('error')
     expect(getSyncDisplayState(github({ initialPullStatus: 'pending' }), false, false)).toBe('pending')
+  })
+
+  it('journaled local changes are never shown as synced (pull OK, error cleared)', () => {
+    // The QA repro: two pushes failed offline, a later pull succeeded and
+    // cleared the error — the journal still holds them.
+    expect(getSyncDisplayState(cloud('unlocked', { pendingChanges: 2 }), false, false)).toBe('unsynced')
+    expect(getSyncDisplayState(github({ pendingChanges: 1 }), false, false)).toBe('unsynced')
+  })
+
+  it('unsynced ranks below syncing, uploading, locked, blocked, error and a pending first pull', () => {
+    const unsynced = { pendingChanges: 3 }
+    expect(getSyncDisplayState(cloud('unlocked', unsynced), true, false)).toBe('syncing')
+    expect(getSyncDisplayState(cloud('unlocked', unsynced), false, true)).toBe('uploading')
+    expect(getSyncDisplayState(cloud('locked', unsynced), false, false)).toBe('locked')
+    expect(getSyncDisplayState(github({ ...unsynced, initialPullStatus: 'failed' }), false, false)).toBe('blocked')
+    expect(getSyncDisplayState(github({ ...unsynced, error: 'fetch failed' }), false, false)).toBe('error')
+    expect(getSyncDisplayState(github({ ...unsynced, initialPullStatus: 'pending' }), false, false)).toBe('pending')
+  })
+})
+
+describe('pendingChangeCount', () => {
+  it('is the journal count, which already includes the files in flight', () => {
+    expect(pendingChangeCount(cloud('unlocked', { pendingChanges: 2, pendingUploads: 1 }))).toBe(2)
+    expect(pendingChangeCount(github())).toBe(0)
+  })
+
+  it('never drops below the uploads in flight', () => {
+    expect(pendingChangeCount(github({ pendingChanges: 0, pendingUploads: 3 }))).toBe(3)
   })
 })
 

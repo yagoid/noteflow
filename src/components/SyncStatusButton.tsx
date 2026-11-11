@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Clock, Cloud, CloudOff, Github, Lock, RefreshCw, Settings, Zap } from 'lucide-react'
+import { Clock, Cloud, CloudOff, CloudUpload, Github, Lock, RefreshCw, Settings, Zap } from 'lucide-react'
 import { useT } from '../i18n/useT'
 import { plural, tf } from '../i18n/format'
 import { formatDate } from '../i18n/formatDate'
@@ -8,6 +8,7 @@ import type { Messages } from '../i18n'
 import type { ActiveSyncStatus } from '../types'
 import {
   getSyncDisplayState,
+  pendingChangeCount,
   relativeAge,
   syncChartBars,
   SYNC_CHART_MAX_BARS,
@@ -49,6 +50,7 @@ const PILL_STYLE: Record<SyncDisplayState, { dot: string; text: string }> = {
   locked: { dot: 'bg-amber-400', text: 'text-amber-400' },
   blocked: { dot: 'bg-amber-400', text: 'text-amber-400' },
   pending: { dot: 'bg-text-muted', text: 'text-text-muted' },
+  unsynced: { dot: 'bg-amber-400', text: 'text-amber-400' },
 }
 
 function stateLabel(state: SyncDisplayState, s: SyncMessages): string {
@@ -59,6 +61,7 @@ function stateLabel(state: SyncDisplayState, s: SyncMessages): string {
     case 'blocked': return s.statusBlocked
     case 'error': return s.statusError
     case 'pending': return s.statusPending
+    case 'unsynced': return s.statusUnsynced
     case 'synced': return s.statusSynced
   }
 }
@@ -225,6 +228,8 @@ export function SyncStatusButton({
             <CloudOff size={13} className="text-amber-400" />
           ) : state === 'error' ? (
             <Cloud size={13} className="text-amber-400" />
+          ) : state === 'unsynced' ? (
+            <CloudUpload size={13} className="text-amber-400" />
           ) : (
             <Cloud size={13} className="text-green-400" />
           )}
@@ -301,6 +306,7 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
       : '—',
   })
   const realtimeOn = status.cloud?.realtimeConnected === true
+  const pendingCount = pendingChangeCount(status)
   const conflicts = status.conflictCopies
   const merges = status.conflictMerges
   const realtimeTip = tf(s.realtimeTooltip, { state: realtimeOn ? s.realtimeConnected : s.realtimeDisconnected })
@@ -338,7 +344,7 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
 
         <dt className="text-text-muted whitespace-nowrap">{s.pendingUploads}</dt>
         <dd className="text-right min-w-0 truncate">
-          {status.pendingUploads > 0 ? plural(s.files, status.pendingUploads) : s.pendingNone}
+          {pendingCount > 0 ? plural(s.files, pendingCount) : s.pendingNone}
         </dd>
       </dl>
 
@@ -379,6 +385,16 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
               {s.conflictCopiesDismiss}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Local changes the backend doesn't have yet (e.g. pushes that failed offline) */}
+      {state === 'unsynced' && (
+        <div
+          className="mx-3 mb-2 px-2 py-1.5 rounded border border-solid border-amber-400/30 bg-amber-400/10
+                     text-amber-400 leading-snug break-words"
+        >
+          {s.unsyncedNotice}
         </div>
       )}
 

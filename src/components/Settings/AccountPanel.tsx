@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, KeyRound, Loader, Lock, LogOut, Mail, MailCheck, RefreshCw, Send, UserCircle } from 'lucide-react'
+import { AlertCircle, CreditCard, Info, KeyRound, Loader, Lock, LogOut, Mail, MailCheck, RefreshCw, Send, UserCircle } from 'lucide-react'
 import type { AccountErrorCode, AccountOpResult, AccountStatus } from '../../types'
 import type { SubscriptionProduct } from '../../lib/subscriptionPlans'
 import { tf } from '../../i18n/format'
@@ -39,6 +39,10 @@ export function AccountPanel() {
   const [codeNotice, setCodeNotice] = useState<string | null>(null)
   const [shakeCode, setShakeCode] = useState(false)
   const [resendCooldown, setResendCooldown] = useState(0)
+  // "Manage subscription": its own spinner (the Edge Function round-trip takes
+  // a moment) and a note when the generic store portal had to be opened.
+  const [portalBusy, setPortalBusy] = useState(false)
+  const [portalNotice, setPortalNotice] = useState<string | null>(null)
   const codeInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -164,9 +168,20 @@ export function AccountPanel() {
     if (!result.ok) setError(describeError(result, t.settings.account.couldNotOpenCheckout))
   }
 
+  async function handleManageSubscription() {
+    setPortalBusy(true)
+    setError(null)
+    setPortalNotice(null)
+    const result = await window.noteflow.accountOpenBillingPortal()
+    setPortalBusy(false)
+    if (!result.ok) setError(describeError(result, t.settings.account.errors.billingPortalUnavailable))
+    else if (result.via === 'storePortal') setPortalNotice(t.settings.account.storePortalOpened)
+  }
+
   async function handleSignOut() {
     setBusy(true)
     setError(null)
+    setPortalNotice(null)
     await window.noteflow.accountSignOut()
     setBusy(false)
     setStep('email')
@@ -247,6 +262,33 @@ export function AccountPanel() {
             <p className="text-[11px] font-mono text-text-muted/60">
               {tf(t.settings.account.lastChecked, { time: new Date(status.entitlementsFetchedAt).toLocaleString() })}
             </p>
+          )}
+
+          {/* Manage subscription — only with a Lemon Squeezy subscription (any
+              status: past_due needs the card, canceled/expired keep invoices);
+              never for comps (provider 'manual') nor while the plan is unknown.
+              Opens the customer portal; main falls back to the store's generic
+              portal when the user's own link can't be fetched. */}
+          {status.hasBillingSubscription && (
+            <div className="space-y-1.5">
+              <button
+                onClick={handleManageSubscription}
+                disabled={busy || portalBusy}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {portalBusy ? <Loader size={11} className="animate-spin" /> : <CreditCard size={11} />}
+                {t.settings.account.manageSubscription}
+              </button>
+              <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed">
+                {t.settings.account.manageSubscriptionHint}
+              </p>
+              {portalNotice && (
+                <p role="status" className="flex items-start gap-1.5 text-[11px] font-mono text-text-muted leading-relaxed">
+                  <Info size={12} className="shrink-0 mt-[1px]" />
+                  <span>{portalNotice}</span>
+                </p>
+              )}
+            </div>
           )}
 
           {/* Subscription plans — each plan shows only while its entitlement is

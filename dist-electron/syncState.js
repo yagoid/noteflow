@@ -22,6 +22,7 @@ exports.planAnchorTombstone = planAnchorTombstone;
 exports.journalComplete = journalComplete;
 exports.journalFail = journalFail;
 exports.resolveRetryAction = resolveRetryAction;
+exports.countPendingChanges = countPendingChanges;
 exports.shouldPullSkipDir = shouldPullSkipDir;
 exports.shouldPullSkipFile = shouldPullSkipFile;
 exports.shouldDeletionRuleSkipDir = shouldDeletionRuleSkipDir;
@@ -304,6 +305,22 @@ function resolveRetryAction(op, localFileExists) {
     if (op === 'upsert' && !localFileExists)
         return 'discard';
     return op;
+}
+/**
+ * Local changes the remote does not have yet: the journal entries (uploads and
+ * deletions — failed, `stale` or in flight) EXCEPT those still inside the push
+ * debounce (`isScheduled`: a live push timer for the key — an upsert is
+ * journaled when its timer is armed, and counting it would flash "not
+ * uploaded" after every save). Feeds the `pendingChanges` of the sync status,
+ * so the UI never reads "synced" while the journal still holds work (e.g.
+ * pushes that failed offline, which a later successful pull doesn't clear).
+ */
+function countPendingChanges(state, isScheduled = () => false) {
+    let count = 0;
+    for (const key of Object.keys(state.ops))
+        if (!isScheduled(key))
+            count++;
+    return count;
 }
 // ── Pull decisions ────────────────────────────────────────────────────────────
 /**

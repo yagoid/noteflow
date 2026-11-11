@@ -214,6 +214,7 @@ const api = {
     error?: string
     initialPullStatus: 'pending' | 'ok' | 'failed'
     pendingUploads: number
+    pendingChanges: number
     autoSyncIntervalMs?: number
     history?: Array<{ at: string; files: number; ok: boolean }>
     filesToday?: number
@@ -257,7 +258,8 @@ const api = {
     warnings: Array<'deletions-skipped-unreadable'>
     error?: 'cloud-required' | 'cloud-initial-pull-pending' | 'not-connected' | 'in-progress' | 'token'
   }> => ipcRenderer.invoke('sync:mirror-to-github'),
-  // Manual pull routed to the LIVE backend (Cloud when enabled, else GitHub).
+  // Manual sync routed to the LIVE backend (Cloud when enabled, else GitHub):
+  // drains the backend's journal of pending uploads/deletions too, not just a pull.
   pullActiveNotes: (): Promise<{
     pulled: number
     deleted: number
@@ -307,6 +309,7 @@ const api = {
     aiCheckoutConfigured: boolean
     cloudCheckoutConfigured: boolean
     bundleCheckoutConfigured: boolean
+    hasBillingSubscription: boolean  // has (or had) a Lemon Squeezy subscription — gates "Manage subscription"
   }> => ipcRenderer.invoke('account:get-status'),
   // Failures carry a machine-readable `errorCode` (see AccountErrorCode in
   // electron/account.ts) so the renderer can localize them; `error` is the
@@ -323,6 +326,14 @@ const api = {
   // is built in main so the id never crosses the bridge.
   accountOpenCheckout: (product: 'ai' | 'cloud' | 'bundle'): Promise<{ ok: boolean; error?: string; errorCode?: AccountErrorCode }> =>
     ipcRenderer.invoke('account:open-checkout', product),
+  // Opens the Lemon Squeezy customer portal: the user's pre-signed link, or the
+  // store's generic portal as fallback (`via` says which).
+  accountOpenBillingPortal: (): Promise<{
+    ok: boolean
+    error?: string
+    errorCode?: AccountErrorCode
+    via?: 'customerPortal' | 'storePortal'
+  }> => ipcRenderer.invoke('account:open-billing-portal'),
   onAccountStatusChanged: (
     cb: (status: {
       configured: boolean
@@ -335,6 +346,7 @@ const api = {
       aiCheckoutConfigured: boolean
       cloudCheckoutConfigured: boolean
       bundleCheckoutConfigured: boolean
+      hasBillingSubscription: boolean
     }) => void
   ) => {
     const wrapper = (_event: unknown, status: Parameters<typeof cb>[0]) => cb(status)
@@ -354,6 +366,7 @@ const api = {
     lastSync?: string
     error?: string
     initialPullStatus: 'pending' | 'ok' | 'failed'
+    pendingChanges: number
     realtimeConnected: boolean
     conflictCopies?: { count: number; titles: string[]; at: string }
     conflictMerges?: { count: number; titles: string[]; at: string }
@@ -382,6 +395,7 @@ const api = {
   cloudLock: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:lock'),
   cloudEnable: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('cloud:enable'),
   cloudDisable: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:disable'),
+  // Manual Cloud sync ("Sync now"): a full cycle — pull, then journal drain.
   cloudPull: (): Promise<{
     pulled: number
     deleted: number
@@ -400,6 +414,7 @@ const api = {
       lastSync?: string
       error?: string
       initialPullStatus: 'pending' | 'ok' | 'failed'
+      pendingChanges: number
     }) => void
   ) => {
     const wrapper = (_event: unknown, status: Parameters<typeof cb>[0]) => cb(status)

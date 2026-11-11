@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.10.1 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.11.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.10.1'
+const CLI_VERSION = '2.11.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -3414,6 +3414,25 @@ function planMetadataPull(relPath, localContent, remoteContent, opts) {
   return { action: 'write', content: remoteContent, backup, merged: false }
 }
 
+/**
+ * Mirror of planGithubMetadataPull (electron/githubMetadata.ts): GitHub pull of
+ * a root metadata file. Reconciled before (a base sha) → remote wins, as
+ * always. Never reconciled with this repo (first login, another repo, lost
+ * base cache) → Cloud's first-pull rule (planMetadataPull with firstPull):
+ * local backed up, id arrays united preferring remote. `push` = what stays on
+ * disk differs from the remote (it holds local entries GitHub lacks).
+ */
+function planGithubMetadataPull(relPath, localContent, remoteContent, opts) {
+  if (opts.reconciled) {
+    return localContent === remoteContent
+      ? { action: 'keep', push: false }
+      : { action: 'write', content: remoteContent, backup: false, merged: false, push: false }
+  }
+  const decision = planMetadataPull(relPath, localContent, remoteContent, { pendingUpsert: false, firstPull: true })
+  if (decision.action === 'keep') return { action: 'keep', push: localContent !== null && localContent !== remoteContent }
+  return { ...decision, push: decision.content !== remoteContent }
+}
+
 async function buildFileUpsertRow(dek, noteKey, relPath, content, updatedAt, deleted = false) {
   return {
     path_key: await derivePathKeyHmac(dek, relPath),
@@ -6039,9 +6058,39 @@ async function cmdPull(opts = {}) {
     } catch (e) { err(`${dir}: ${e.message}`) }
   }
 
+  // Root metadata (same rules as the app's pull): unchanged on GitHub since
+  // its base → an existing local file stays (it may hold an edit not pushed
+  // yet); a MISSING one is restored from GitHub (the app never deletes them);
+  // changed → remote wins; never reconciled with this repo (no base: first
+  // login, another repo) → planGithubMetadataPull merges instead of dropping
+  // the local groups/folders, after backing the local file up outside the
+  // notes dir. `noteflow push` uploads what GitHub lacks.
+  const prevBases = loadGithubBases(sync)
+  const remoteShas = new Map(blobs.map(b => [b.path, b.sha]))
+  let metaBackupDir = null, metaBackedUp = 0, metaMerged = 0
+  const metaToPush = []
   for (const m of METADATA_FILES) {
-    try { fs.writeFileSync(path.join(NOTES_DIR, m), await fetchRemote(m), 'utf-8') }
-    catch { /* optional */ }
+    try {
+      const metaPath = path.join(NOTES_DIR, m)
+      if (!force && prevBases[m] !== undefined && prevBases[m] === remoteShas.get(m) && fs.existsSync(metaPath)) {
+        if (gitBlobSha(fs.readFileSync(metaPath, 'utf-8')) !== prevBases[m]) metaToPush.push(m)
+        continue
+      }
+      const remoteContent = await fetchRemote(m)
+      const localContent = fs.existsSync(metaPath) ? fs.readFileSync(metaPath, 'utf-8') : null
+      const decision = planGithubMetadataPull(m, localContent, remoteContent, { reconciled: prevBases[m] !== undefined })
+      if (decision.action === 'write') {
+        if (decision.backup && localContent !== null) {
+          metaBackupDir = metaBackupDir || path.join(getSettingsDir(), 'github-metadata-backups', new Date().toISOString().replace(/:/g, '-'))
+          fs.mkdirSync(metaBackupDir, { recursive: true })
+          fs.writeFileSync(path.join(metaBackupDir, m), localContent, 'utf-8')
+          metaBackedUp++
+        }
+        fs.writeFileSync(metaPath, decision.content, 'utf-8')
+        if (decision.merged) metaMerged++
+      }
+      if (decision.push) metaToPush.push(m)
+    } catch { /* optional: missing on GitHub, or unreadable */ }
   }
   // Bases of the conditional push: a listed blob becomes the base only where
   // the local file now IS that blob (folders skipped as "local newer" keep
@@ -6051,7 +6100,7 @@ async function cmdPull(opts = {}) {
     try { localShas[b.path] = gitBlobSha(fs.readFileSync(path.join(NOTES_DIR, b.path), 'utf-8')) }
     catch { localShas[b.path] = null }
   }
-  saveGithubBases(sync, nextPulledBases(loadGithubBases(sync), blobs, localShas))
+  saveGithubBases(sync, nextPulledBases(prevBases, blobs, localShas))
   const localOnly = localOnlyNoteDirs(listLocalNoteDirs(), remoteDirs)
   // Local-only notes mean the repo does NOT know everything on disk yet: a
   // fresh lastSync would arm the desktop app's deletion rule against them
@@ -6059,6 +6108,12 @@ async function cmdPull(opts = {}) {
   writeGithubLastSync(sync, localOnly.length, startedAt)
   out(`  Done: ${pulled} pulled${skipped ? `, ${skipped} skipped (local is newer — use --force to override)` : ''}`)
   if (localOnly.length) out(`  ${localOnlyHint(localOnly.length)}`)
+  if (metaBackedUp || metaMerged) {
+    out(`  Metadata: ${metaBackedUp} file(s) backed up to ${metaBackupDir || getSettingsDir()}, ${metaMerged} merged with GitHub's`)
+  }
+  if (metaToPush.length) {
+    out(`  ${metaToPush.join(', ')} ${metaToPush.length === 1 ? 'has' : 'have'} local entries not on GitHub — run 'noteflow push' to upload`)
+  }
   return { pulled, skipped, localOnly }
 }
 
@@ -7155,7 +7210,7 @@ if (require.main === module) {
     nextPendingUpserts, pendingUnderDir, isPendingUpsert, dropReconciledPending,
     classifyConditionalUpsert, parsePullRetry, mergeRetryRows, nextPullRetry, countDroppedRetries,
     PULL_RETRY_MAX_DECRYPT_ATTEMPTS, PULL_RETRY_MAX_APPLY_ATTEMPTS, PULL_RETRY_CHUNK, CLOUD_CONDITIONAL_UPSERT_RPC,
-    mergeMetadataById, planMetadataPull, dirsPendingRetry,
+    mergeMetadataById, planMetadataPull, planGithubMetadataPull, dirsPendingRetry,
     planConflictCopy, buildConflictCopy, anchorTitle, conflictCopyTitle, metadataPendingForPull,
     normalizeOtpCode, planCloudLogin, decodeGithubToken, resolveGithubToken, getToken,
     loginFlagsError, checkPendingGithubLogin, resolveFinishRepo, desktopSettingsCandidates, desktopAppInfo,

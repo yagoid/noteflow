@@ -385,6 +385,7 @@ export type AccountErrorCode =
   | 'sessionLocked'
   | 'checkoutUnavailable'
   | 'checkoutInvalidUrl'
+  | 'billingPortalUnavailable'
 
 // Result of any account IPC call (mirror of AccountOpResult in electron/account.ts).
 export interface AccountOpResult {
@@ -444,6 +445,9 @@ export interface AccountStatus {
   aiCheckoutConfigured: boolean   // true when the build ships a NoteFlow AI checkout URL
   cloudCheckoutConfigured: boolean  // same, for the NoteFlow Cloud product
   bundleCheckoutConfigured: boolean  // same, for the NoteFlow Bundle (AI + Cloud) product
+  // Has (or had) a Lemon Squeezy subscription — gates "Manage subscription".
+  // False while entitlements are unknown and for comps (provider 'manual').
+  hasBillingSubscription: boolean
 }
 
 // ── NoteFlow Cloud (E2EE sync) ───────────────────────────────────────────────
@@ -464,6 +468,8 @@ export interface CloudSyncStatus {
   lastSync?: string
   error?: string
   initialPullStatus: 'pending' | 'ok' | 'failed'
+  /** Local changes the server does not have yet (entries of main's Cloud journal: failed/offline pushes, pending deletions, uploads in flight). */
+  pendingChanges: number
   /** True while the main process holds a live Realtime subscription (shown in the titlebar sync card; no event on change). */
   realtimeConnected: boolean
   /** Conflict copies the Cloud pull made this session, until dismissed — mirror of ConflictCopiesNotice in electron/conflictCopy.ts. */
@@ -503,8 +509,16 @@ export interface ActiveSyncStatus {
   lastSync?: string
   error?: string
   initialPullStatus: 'pending' | 'ok' | 'failed'
-  /** Files whose push is in flight (main's pendingPushFiles; debounced edits not counted yet). */
+  /** Uploads + deletions in flight (main's pendingPushFiles + pendingRemoteDeletes; debounced edits not counted yet). */
   pendingUploads: number
+  /**
+   * Local changes the live backend does not have yet (entries of its journal:
+   * failed/offline pushes, pending deletions, uploads in flight — not the
+   * files still inside the push debounce).
+   * Survives a failed push, unlike `pendingUploads` — the UI must not read
+   * "synced" while it is > 0. 0 when 'none'.
+   */
+  pendingChanges: number
   /** Cadence of the backend's periodic auto-sync loop (absent when 'none'). */
   autoSyncIntervalMs?: number
   /** This session's sync activity of the live backend, oldest first (in-memory in main; absent when 'none'). */
@@ -670,7 +684,8 @@ declare global {
       cliConnectCloudDisconnect: () => Promise<CliConnectResult>
       cliConnectGithubConnect: () => Promise<CliConnectResult>
       cliConnectGithubDisconnect: () => Promise<CliConnectResult>
-      // Manual pull routed to the live backend (Cloud when enabled, else GitHub).
+      // Manual sync routed to the live backend (Cloud when enabled, else GitHub):
+      // pull + drain of the backend's journal of pending uploads/deletions.
       pullActiveNotes: () => Promise<{
         pulled: number
         deleted: number
@@ -689,6 +704,9 @@ declare global {
       accountSignOut: () => Promise<AccountOpResult>
       accountRefreshEntitlements: () => Promise<AccountOpResult & { entitlements: AccountEntitlements }>
       accountOpenCheckout: (product: 'ai' | 'cloud' | 'bundle') => Promise<AccountOpResult>
+      // Lemon Squeezy customer portal; `via` = which portal was opened
+      // ('storePortal' = generic store page, the user signs in there by email).
+      accountOpenBillingPortal: () => Promise<AccountOpResult & { via?: 'customerPortal' | 'storePortal' }>
       onAccountStatusChanged: (cb: (status: AccountStatus) => void) => () => void
       // NoteFlow Cloud (encrypted sync) — keys never cross this bridge
       getCloudStatus: () => Promise<CloudSyncStatus>
@@ -704,6 +722,7 @@ declare global {
       cloudLock: () => Promise<{ ok: boolean }>
       cloudEnable: () => Promise<{ ok: boolean; error?: string }>
       cloudDisable: () => Promise<{ ok: boolean }>
+      // Manual Cloud sync ("Sync now"): a full cycle — pull, then journal drain.
       cloudPull: () => Promise<{
         pulled: number
         deleted: number

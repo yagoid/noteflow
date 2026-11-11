@@ -4,6 +4,7 @@ import {
   entitlementsRetryDelayMs,
   isRetryableEntitlementsFailure,
   parseEntitlementsCache,
+  parseCachedBillingFlag,
   isManagedAiUsable,
 } from '../../electron/entitlementsRetry'
 
@@ -85,6 +86,33 @@ describe('parseEntitlementsCache', () => {
     expect(parseEntitlementsCache({ ...cache, cloud: undefined }, 'u1')).toBeNull()
     expect(parseEntitlementsCache({ ...cache, fetchedAt: 'not a date' }, 'u1')).toBeNull()
     expect(parseEntitlementsCache({ ...cache, fetchedAt: 42 }, 'u1')).toBeNull()
+  })
+})
+
+describe('parseCachedBillingFlag', () => {
+  const cache = { userId: 'u1', ai: true, cloud: false, fetchedAt: '2026-10-20T10:00:00.000Z' }
+
+  it('reads billing from a valid cache of the stored session', () => {
+    expect(parseCachedBillingFlag({ ...cache, billing: true }, 'u1')).toBe(true)
+    expect(parseCachedBillingFlag({ ...cache, billing: false }, 'u1')).toBe(false)
+  })
+
+  it('false for caches written before the flag existed, or non-boolean values', () => {
+    expect(parseCachedBillingFlag(cache, 'u1')).toBe(false)
+    expect(parseCachedBillingFlag({ ...cache, billing: 'yes' }, 'u1')).toBe(false)
+  })
+
+  it('false when the cache itself is rejected (other user, malformed)', () => {
+    expect(parseCachedBillingFlag({ ...cache, billing: true }, 'u2')).toBe(false)
+    expect(parseCachedBillingFlag({ ...cache, billing: true, ai: 'x' }, 'u1')).toBe(false)
+    expect(parseCachedBillingFlag(null, 'u1')).toBe(false)
+  })
+
+  it('does not change what parseEntitlementsCache returns', () => {
+    expect(parseEntitlementsCache({ ...cache, billing: true }, 'u1')).toEqual({
+      entitlements: { ai: true, cloud: false },
+      fetchedAt: '2026-10-20T10:00:00.000Z',
+    })
   })
 })
 

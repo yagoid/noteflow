@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeEntitlements, type SubscriptionRow } from '../../electron/entitlements'
+import { computeEntitlements, hasBillingSubscription, type SubscriptionRow } from '../../electron/entitlements'
 
 function row(product: string, status: string): SubscriptionRow {
   return { product, status, renews_at: null }
@@ -49,5 +49,32 @@ describe('computeEntitlements', () => {
         row('ai', 'active'),
       ])
     ).toEqual({ ai: true, cloud: false })
+  })
+})
+
+describe('hasBillingSubscription — gates "Manage subscription"', () => {
+  const billed = (status: string, provider: string | null | undefined): SubscriptionRow => ({
+    product: 'ai',
+    status,
+    renews_at: null,
+    provider,
+  })
+
+  it('true for a Lemon Squeezy row in any status', () => {
+    for (const status of ['active', 'past_due', 'canceled', 'expired']) {
+      expect(hasBillingSubscription([billed(status, 'lemonsqueezy')]), status).toBe(true)
+    }
+  })
+
+  it('false for comps (provider manual), unknown providers and no rows', () => {
+    expect(hasBillingSubscription([billed('active', 'manual')])).toBe(false)
+    expect(hasBillingSubscription([billed('active', null), billed('active', undefined)])).toBe(false)
+    expect(hasBillingSubscription([])).toBe(false)
+    expect(hasBillingSubscription(null)).toBe(false)
+    expect(hasBillingSubscription([null as unknown as SubscriptionRow])).toBe(false)
+  })
+
+  it('a comp next to a Lemon Squeezy row still counts the latter', () => {
+    expect(hasBillingSubscription([billed('active', 'manual'), billed('expired', 'lemonsqueezy')])).toBe(true)
   })
 })

@@ -266,7 +266,7 @@ webhooks, verifica la firma HMAC y escribe en `public.subscriptions` vía la RPC
 > `updated_at` posterior al reembolso — `subscription_updated` mientras no se cancele y, al
 > cancelarla, `subscription_cancelled` (que mapeamos a `active` hasta `ends_at`) — y el guard
 > `p_event_at >= updated_at` de `apply_subscription_event` la volvería a poner `active`. Con `'infinity'` ningún evento de LS puede ganarle. Nada más lee
-> `subscriptions.updated_at` (el cliente pide solo `product,status,renews_at`). Para **deshacerlo**
+> `subscriptions.updated_at` (el cliente pide solo `product,status,renews_at,provider`). Para **deshacerlo**
 > (reembolso por error, sin haber cancelado en LS): `set status = 'active', updated_at = now()` y
 > el siguiente evento de LS la deja como corresponda.
 
@@ -275,6 +275,42 @@ webhooks, verifica la firma HMAC y escribe en `public.subscriptions` vía la RPC
 > implementado en la fase 4.1). Las compras SIN ese dato no se pueden atribuir a ninguna cuenta:
 > el webhook las loguea (`console.warn`) y **no inserta** fila nueva (solo actualizaría una
 > suscripción ya existente).
+
+### 5.1 Portal de cliente ("Manage subscription")
+
+Cancelar, cambiar de plan, actualizar la tarjeta y descargar facturas se hace en el **customer
+portal** de Lemon Squeezy. La app lo abre desde Settings → Subscription → **Manage subscription**
+(solo para cuentas con alguna fila `provider='lemonsqueezy'`; las comps `manual` no lo ven). El
+enlace por suscripción que da LS (`data.attributes.urls.customer_portal`) está **pre-firmado y
+caduca a las 24 h**, así que no se guarda desde el webhook: la Edge Function
+`supabase/functions/billing-portal` lo pide a la API de LS en cada clic (resuelve al usuario por
+su JWT, elige su fila de LS más relevante con el service role y llama a
+`GET https://api.lemonsqueezy.com/v1/subscriptions/<provider_ref>`). Pasos del operador:
+
+1. **Crear una API key de LS** (dashboard → Settings → **API** → *New API key*), en **live mode**
+   (una key de test solo ve suscripciones de test). Da acceso completo a la store: es un secreto
+   de servidor, nunca va en el cliente.
+2. **Ponerla como secreto** y **desplegar la función con verificación de JWT** (el default, sin
+   `--no-verify-jwt`: la llama la app con el access token del usuario):
+
+   ```bash
+   supabase secrets set LEMONSQUEEZY_API_KEY=<api-key-de-live>
+   supabase functions deploy billing-portal
+   ```
+
+3. **Comprobar** (con el access token de una cuenta que tenga suscripción de LS; sin token → 401
+   `missing_token`; sin suscripción → 404 `no_subscription`):
+
+   ```bash
+   curl -sX POST https://<project-ref>.supabase.co/functions/v1/billing-portal \
+     -H "Authorization: Bearer <access-token>" -H "apikey: <anon-key>"
+   # → {"url":"https://<store>.lemonsqueezy.com/billing?expires=…&signature=…"}
+   ```
+
+**Fallback (no requiere nada):** si la función no está desplegada, falta el secreto, LS falla o
+no hay fila, la app abre el portal genérico de la store (`https://<store>.lemonsqueezy.com/billing`,
+derivado de las URLs de checkout de `electron/cloudConfig.ts`), donde el cliente entra con el
+correo de la compra. Así el botón funciona desde el primer día; la función solo ahorra ese login.
 
 ## 6. NoteFlow AI (proxy LLM)
 

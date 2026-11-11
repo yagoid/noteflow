@@ -14,6 +14,8 @@
 //                                                would sign out every device and
 //                                                the CLI too)
 // Entitlements come from PostgREST: GET /rest/v1/subscriptions (RLS-scoped).
+// "Manage subscription" asks the billing-portal Edge Function for a fresh
+// Lemon Squeezy customer-portal link (resolveBillingPortal).
 //
 // Security model: the refresh token is encrypted at rest and NEVER crosses to
 // the renderer; the access token lives only in main-process memory. The
@@ -38,14 +40,28 @@ import { app, net, powerMonitor } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { encryptSecret, decryptSecret } from './ai/llm/secret'
-import { SUPABASE_URL, SUPABASE_ANON_KEY, LEMONSQUEEZY_CHECKOUT_URLS, isCloudConfigured } from './cloudConfig'
-import { computeEntitlements, Entitlements, NO_ENTITLEMENTS, SubscriptionRow } from './entitlements'
+import {
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
+  LEMONSQUEEZY_CHECKOUT_URLS,
+  LEMONSQUEEZY_STORE_PORTAL_URL,
+  BILLING_PORTAL_FN_URL,
+  isCloudConfigured,
+} from './cloudConfig'
+import { computeEntitlements, hasBillingSubscription, Entitlements, NO_ENTITLEMENTS, SubscriptionRow } from './entitlements'
 import {
   entitlementsRetryDelayMs,
   isRetryableEntitlementsFailure,
+  parseCachedBillingFlag,
   parseEntitlementsCache,
   type EntitlementsCache,
 } from './entitlementsRetry'
+import {
+  parseBillingPortalUrl,
+  portalErrorCode,
+  portalUrlFromFunctionResponse,
+  type BillingPortalVia,
+} from './billingPortal'
 import { writeSettingsFile } from './settingsFile'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -81,6 +97,12 @@ export interface AccountStatus {
   cloudCheckoutConfigured: boolean
   /** Same, for the NoteFlow Bundle (AI + Cloud) product. */
   bundleCheckoutConfigured: boolean
+  /**
+   * The account has (or had) a Lemon Squeezy subscription — gates "Manage
+   * subscription". False while entitlements are unknown and for comps
+   * (provider 'manual'), which have nothing to manage.
+   */
+  hasBillingSubscription: boolean
 }
 
 /**
@@ -109,6 +131,7 @@ export type AccountErrorCode =
   | 'sessionLocked'      // the saved session can't be decrypted right now (keychain locked)
   | 'checkoutUnavailable'// no checkout URL for that product in this build
   | 'checkoutInvalidUrl' // the configured checkout URL didn't parse
+  | 'billingPortalUnavailable' // neither the user's portal link nor the store portal could be opened
 
 export interface AccountOpResult {
   ok: boolean
@@ -119,6 +142,9 @@ export interface AccountOpResult {
 }
 
 export type RefreshEntitlementsResult = AccountOpResult & { entitlements: Entitlements }
+
+/** account:open-billing-portal — on success, which portal was opened. */
+export type BillingPortalResult = AccountOpResult & { via?: BillingPortalVia }
 
 /** Why no access token could be produced — the internal, discriminated form. */
 export type AccessTokenFailure = 'noSession' | 'network' | 'server' | 'locked'
@@ -158,6 +184,8 @@ let entitlementsKnown = false
 // True while the known entitlements come from the on-disk cache rather than a
 // fetch made in this run (main.ts keeps the subscribe auto-activation baseline off it).
 let entitlementsFromCache = false
+// hasBillingSubscription of the same fetch (or cache) as `entitlements`.
+let billingSubscription = false
 
 // Refresh token on disk but undecryptable right now (keychain locked) — I1.
 let sessionLocked = false
@@ -276,6 +304,7 @@ function applyEntitlementsCache(): void {
   entitlementsFetchedAt = cached.fetchedAt
   entitlementsKnown = true
   entitlementsFromCache = true
+  billingSubscription = parseCachedBillingFlag(accountSettings?.entitlementsCache, accountSettings?.userId)
 }
 
 /**
@@ -375,6 +404,7 @@ function clearSession(): void {
   entitlementsFetchedAt = undefined
   entitlementsKnown = false
   entitlementsFromCache = false
+  billingSubscription = false
   sessionLocked = false
   // The in-memory session is gone either way. A failed removal is retried
   // (timer, next account operation, before-quit) so the signed-out session
@@ -425,6 +455,7 @@ export function getAccountStatus(): AccountStatus {
     aiCheckoutConfigured: LEMONSQUEEZY_CHECKOUT_URLS.ai.length > 0,
     cloudCheckoutConfigured: LEMONSQUEEZY_CHECKOUT_URLS.cloud.length > 0,
     bundleCheckoutConfigured: LEMONSQUEEZY_CHECKOUT_URLS.bundle.length > 0,
+    hasBillingSubscription: signedIn && entitlementsKnown && billingSubscription,
   }
 }
 
@@ -521,6 +552,7 @@ export async function verifyOtp(email: string, code: string): Promise<AccountOpR
     entitlementsFetchedAt = undefined
     entitlementsKnown = false
     entitlementsFromCache = false
+    billingSubscription = false
     sessionLocked = false
 
     persistAccountSettings({
@@ -668,6 +700,60 @@ export async function signOut(): Promise<AccountOpResult> {
   return { ok: true }
 }
 
+// ── Billing portal ("Manage subscription") ────────────────────────────────────
+
+/**
+ * Asks the billing-portal Edge Function for the user's fresh, pre-signed Lemon
+ * Squeezy customer-portal link. On ANY failure (function not deployed yet, no
+ * session, no LS subscription, LS down, offline, a URL outside the allowlist)
+ * falls back to the store's generic portal, where the customer signs in by
+ * email. Returns the URL to open — already allowlisted — or an error when not
+ * even the fallback exists in this build. Never throws.
+ */
+export async function resolveBillingPortal(): Promise<
+  { ok: true; url: string; via: BillingPortalVia } | { ok: false; error: string; errorCode: AccountErrorCode }
+> {
+  let reason = 'not signed in'
+  if (isCloudConfigured()) {
+    const tokenResult = await getAccessTokenResult()
+    if (!tokenResult.ok) {
+      reason = `no access token (${tokenResult.reason})`
+    } else {
+      try {
+        const res = await fetch(BILLING_PORTAL_FN_URL, {
+          method: 'POST',
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${tokenResult.token}`,
+            'Content-Type': 'application/json',
+          },
+          body: '{}',
+          signal: AbortSignal.timeout(15000),
+        })
+        let json: unknown = null
+        try {
+          json = await res.json()
+        } catch {
+          // non-JSON body (e.g. the gateway's 404 before the function is deployed)
+        }
+        const url = portalUrlFromFunctionResponse(res.status, json)
+        if (url) return { ok: true, url: url.toString(), via: 'customerPortal' }
+        if (res.status === 401) invalidateAccessToken(tokenResult.token)
+        reason = `HTTP ${res.status} (${res.status === 200 ? 'url not allowed' : portalErrorCode(json)})`
+      } catch (err: unknown) {
+        reason = String(err)
+      }
+    }
+  }
+
+  const fallback = parseBillingPortalUrl(LEMONSQUEEZY_STORE_PORTAL_URL)
+  console.warn(`[Account] billing portal link unavailable (${reason}) — ${fallback ? 'opening the store portal' : 'no store portal either'}`)
+  if (!fallback) {
+    return { ok: false, error: 'The billing portal is not available in this build.', errorCode: 'billingPortalUnavailable' }
+  }
+  return { ok: true, url: fallback.toString(), via: 'storePortal' }
+}
+
 // ── Entitlements (fetch + retry) ──────────────────────────────────────────────
 
 const TOKEN_FAILURE_RESULT: Record<AccessTokenFailure, { error: string; errorCode: AccountErrorCode }> = {
@@ -711,7 +797,7 @@ async function fetchEntitlements(): Promise<RefreshEntitlementsResult> {
 
   let res: SupabaseResponse
   try {
-    res = await supabaseRequest('/rest/v1/subscriptions?select=product,status,renews_at', {
+    res = await supabaseRequest('/rest/v1/subscriptions?select=product,status,renews_at,provider', {
       accessToken: tokenResult.token,
     })
   } catch (err: unknown) {
@@ -732,6 +818,7 @@ async function fetchEntitlements(): Promise<RefreshEntitlementsResult> {
   }
 
   entitlements = computeEntitlements(res.json as SubscriptionRow[])
+  billingSubscription = hasBillingSubscription(res.json as SubscriptionRow[])
   entitlementsFetchedAt = new Date().toISOString()
   entitlementsKnown = true
   entitlementsFromCache = false
@@ -745,6 +832,7 @@ async function fetchEntitlements(): Promise<RefreshEntitlementsResult> {
         ai: entitlements.ai,
         cloud: entitlements.cloud,
         fetchedAt: entitlementsFetchedAt,
+        billing: billingSubscription,
       },
     })
   }

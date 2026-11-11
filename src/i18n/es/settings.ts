@@ -231,6 +231,10 @@ export const settings = {
     unlocking: 'Desbloqueando…',
     syncEnabled: 'Sincronización activada',
     syncDisabled: 'Sincronización desactivada',
+    pendingChanges: {
+      one: '{count} cambio local aún sin subir; «Sincronizar ahora» lo reintenta.',
+      other: '{count} cambios locales aún sin subir; «Sincronizar ahora» los reintenta.',
+    },
     enableSync: 'Activar sincronización',
     disableSync: 'Desactivar sincronización',
     enableFailed: 'No se pudo activar la sincronización en la nube.',
@@ -298,6 +302,7 @@ export const settings = {
       sessionLocked: 'No se pudo desbloquear tu sesión guardada — puede que el llavero del sistema esté bloqueado. Desbloquéalo e inténtalo de nuevo.',
       checkoutUnavailable: 'Este plan todavía no está a la venta.',
       checkoutInvalidUrl: 'El enlace de pago no es válido en esta versión.',
+      billingPortalUnavailable: 'No se pudo abrir el portal de facturación. Usa el enlace del correo de recibo de Lemon Squeezy.',
     },
     resendCode: 'Reenviar código',
     resendCodeIn: 'Reenviar en {seconds} s',
@@ -323,6 +328,9 @@ export const settings = {
     alreadySubscribed: '¿Ya tienes suscripción?',
     signIn: 'Inicia sesión',
     couldNotOpenCheckout: 'No se pudo abrir la página de pago.',
+    manageSubscription: 'Gestionar suscripción',
+    manageSubscriptionHint: 'Cancela, cambia de plan, actualiza tu método de pago o descarga facturas. Se abre en tu navegador.',
+    storePortalOpened: 'Se abrió la página de facturación en tu navegador — inicia sesión allí con el correo con el que te suscribiste.',
     refresh: 'Actualizar',
     signOut: 'Cerrar sesión',
     signInDesc:

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Brain, Download, Minus, RefreshCw, Settings, Square, X } from 'lucide-react'
 import { useNotesStore } from '../stores/notesStore'
 import { useT } from '../i18n/useT'
@@ -22,9 +22,11 @@ export function TitleBar() {
   const [exportNoteId, setExportNoteId] = useState<string | undefined>(undefined)
   // Backend-tagged status of whichever sync provider is live (GitHub or NoteFlow
   // Cloud — they are mutually exclusive). The button routes to the active one.
-  const [syncStatus, setSyncStatus] = useState<ActiveSyncStatus>({ backend: 'none', active: false, initialPullStatus: 'pending', pendingUploads: 0 })
+  const [syncStatus, setSyncStatus] = useState<ActiveSyncStatus>({ backend: 'none', active: false, initialPullStatus: 'pending', pendingUploads: 0, pendingChanges: 0 })
   const [syncing, setSyncing] = useState(false)
   const [pushing, setPushing] = useState(false)
+  // Latest 'sync:push-state' received — see the onSyncPushState handler.
+  const pushStateRef = useRef<'pushing' | 'idle'>('idle')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
 
@@ -46,10 +48,18 @@ export function TitleBar() {
     const unsubInstalling = window.noteflow.onUpdateInstalling(() => setInstalling(true))
     const unsubNotes = window.noteflow.onNotesUpdated(() => refreshSyncStatus())
     const unsubPush = window.noteflow.onSyncPushState((state) => {
-      setPushing(state === 'pushing')
+      pushStateRef.current = state
+      if (state === 'pushing') setPushing(true)
       // Refresh on every transition (not just 'idle') so the status card's
-      // pending-uploads count tracks files as they start and finish.
-      refreshSyncStatus()
+      // pending-uploads count tracks files as they start and finish. 'idle' is
+      // applied together with the fresh status: dropping `pushing` first would
+      // show the previous status — whose journal still counts the upload or
+      // delete that just landed — as "not uploaded" for a moment. The ref keeps
+      // a 'pushing' that arrived meanwhile from being overwritten.
+      window.noteflow.getActiveSyncStatus().then((status) => {
+        setSyncStatus(status)
+        setPushing(pushStateRef.current === 'pushing')
+      })
     })
     const unsubStatus = window.noteflow.onSyncStatusChanged(() => refreshSyncStatus())
     // Cloud emits its own status-changed event (enable/disable, unlock, pull) —

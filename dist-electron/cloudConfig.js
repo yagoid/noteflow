@@ -10,8 +10,9 @@
 // embedded for the sync Device Flow): it grants nothing by itself — security
 // comes from Row Level Security policies and per-user Auth JWTs.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LEMONSQUEEZY_CHECKOUT_URLS = exports.CLOUD_KEYS_URL = exports.AI_PROXY_URL = exports.SUPABASE_ANON_KEY = exports.SUPABASE_URL = void 0;
+exports.LEMONSQUEEZY_STORE_PORTAL_URL = exports.LEMONSQUEEZY_CHECKOUT_URLS = exports.BILLING_PORTAL_FN_URL = exports.CLOUD_KEYS_URL = exports.AI_PROXY_URL = exports.SUPABASE_ANON_KEY = exports.SUPABASE_URL = void 0;
 exports.isCloudConfigured = isCloudConfigured;
+const billingPortal_1 = require("./billingPortal");
 /** Supabase project URL, e.g. 'https://xyzcompany.supabase.co' (no trailing slash). */
 exports.SUPABASE_URL = 'https://bolnhekicavuzscdjoty.supabase.co';
 /** Supabase anon (public) API key. */
@@ -20,6 +21,8 @@ exports.SUPABASE_ANON_KEY = 'sb_publishable_1Ifj7iwZ7w_Xx5B2aLcDfQ_4AbBeFFx';
 exports.AI_PROXY_URL = `${exports.SUPABASE_URL}/functions/v1/ai-proxy`;
 /** NoteFlow Cloud managed-mode key service (Edge Function cloud-keys: setup/unlock). */
 exports.CLOUD_KEYS_URL = `${exports.SUPABASE_URL}/functions/v1/cloud-keys`;
+/** Fresh Lemon Squeezy customer-portal link for the caller (Edge Function billing-portal). */
+exports.BILLING_PORTAL_FN_URL = `${exports.SUPABASE_URL}/functions/v1/billing-portal`;
 /**
  * Lemon Squeezy checkout URLs per product. Filled in once the products exist
  * in the LS store (see supabase/README.md § 6). While a URL is empty, its
@@ -31,6 +34,13 @@ exports.LEMONSQUEEZY_CHECKOUT_URLS = {
     cloud: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/0010d7c7-46c5-4635-b214-0e2b378230b0',
     bundle: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/4eb2e564-2c2b-4765-bfd0-a20bf3752cad',
 };
+/**
+ * The store's generic customer portal (`https://<store>.lemonsqueezy.com/billing`,
+ * sign-in by email) — the "Manage subscription" fallback when the billing-portal
+ * function can't produce the user's pre-signed link. Derived from the checkout
+ * URLs above so the store subdomain lives in one place; '' while none is set.
+ */
+exports.LEMONSQUEEZY_STORE_PORTAL_URL = (0, billingPortal_1.deriveStorePortalUrl)(Object.values(exports.LEMONSQUEEZY_CHECKOUT_URLS));
 /** True once the build carries a real Supabase project configuration. */
 function isCloudConfigured() {
     return exports.SUPABASE_URL.length > 0 && exports.SUPABASE_ANON_KEY.length > 0;

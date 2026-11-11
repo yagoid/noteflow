@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.10.1
+version: 2.11.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -83,11 +83,15 @@ el JSON.
   desde memoria. Las posteriores recargan los cambios del CLI. Los cambios de nota sí sobreviven
   siempre. El CLI avisa por stderr si ve la app abierta: si no sabes su versión, pide al usuario
   que la cierre antes o que haga esos cambios desde la app.
-- **`pull --force` pisa notas locales más nuevas.** No lo uses sin que el usuario lo pida, aunque el
-  pull diga `skipped (local is newer — use --force to override)`: eso es normal y el `push` las sube.
+- **`pull --force` pisa notas locales más nuevas** (con GitHub, también los cambios sin subir de
+  `groups.json`/`folders.json`, que el `pull` normal conserva). No lo uses sin que el usuario lo pida,
+  aunque el pull diga `skipped (local is newer — use --force to override)`: eso es normal y el `push`
+  las sube.
 - **El `pull` de GitHub no aplica borrados:** si avisa `N local notes are not on GitHub (new here,
   or deleted on another device)`, un `push` resucitaría las borradas en otro dispositivo. Haz
   `push` si son notas nuevas (p. ej. las tuyas); si no lo sabes, pregunta al usuario.
+  Si avisa `groups.json … local entries not on GitHub` (p. ej. tras el `login` a un repo que ya
+  tenía sus grupos/carpetas: el pull los **une** con los locales, no los pisa), un `push` sube la unión.
 - **Borrar sin `--yes`** (`delete`, `section delete`, `group delete`, `folder delete`) en un agente,
   sin terminal, responde "no": `Cancelled`, exit 0, nada borrado. Con sync, `delete` borra la nota
   también del remoto (y de los demás dispositivos).

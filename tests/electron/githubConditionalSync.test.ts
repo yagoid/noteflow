@@ -632,3 +632,126 @@ describe('B3: a push never overwrites a remote edit this device did not pull', (
     expect([...remote.keys()].filter((k) => k.startsWith(`${DIR}/`))).toEqual([])
   })
 })
+
+describe('root metadata on a pull this device never reconciled (first connect to a used repo)', () => {
+  const json = (v: unknown) => JSON.stringify(v, null, 2)
+  const localGroups = json([{ id: 'qa', name: 'QA-Grupo' }])
+  const remoteGroups = json([{ id: 'work', name: 'Work' }])
+  const localFolders = json([{ id: 'f-qa', name: 'QA-Carpeta', groupId: 'qa' }])
+  const localTemplates = json([{ id: 't-qa', name: 'QA-Plantilla' }])
+  const backupsDir = () => path.join(env.userData, 'github-metadata-backups')
+
+  function seedRepoAndLocal() {
+    remote.set('.noteflow-format', '2\n')
+    remote.set('groups.json', remoteGroups)
+    remote.set('folders.json', '[]')
+    remote.set('templates.json', '[]')
+    remote.set('ui-settings.json', '{"theme":"remote"}')
+    fs.writeFileSync(path.join(notesDir, 'groups.json'), localGroups, 'utf-8')
+    fs.writeFileSync(path.join(notesDir, 'folders.json'), localFolders, 'utf-8')
+    fs.writeFileSync(path.join(notesDir, 'templates.json'), localTemplates, 'utf-8')
+    fs.writeFileSync(path.join(notesDir, 'ui-settings.json'), '{"theme":"local"}', 'utf-8')
+  }
+
+  it('merges groups/folders/templates instead of overwriting them, backs the local files up and uploads the union', async () => {
+    seedRepoAndLocal()
+    const res = await gh.pullNotes(notesDir)
+    expect(res.errors).toEqual([])
+    expect(res.hadMetadataChanges).toBe(true)
+
+    const mergedGroups = json([{ id: 'work', name: 'Work' }, { id: 'qa', name: 'QA-Grupo' }])
+    expect(readLocal('groups.json')).toBe(mergedGroups)
+    expect(readLocal('folders.json')).toBe(localFolders) // remote was [] → nothing lost
+    expect(readLocal('templates.json')).toBe(localTemplates)
+    // Not an id array: remote wins (Cloud's first-pull rule), the local one is backed up.
+    expect(readLocal('ui-settings.json')).toBe('{"theme":"remote"}')
+
+    const [stamp] = fs.readdirSync(backupsDir())
+    const backup = (f: string) => fs.readFileSync(path.join(backupsDir(), stamp, f), 'utf-8')
+    expect(backup('groups.json')).toBe(localGroups)
+    expect(backup('ui-settings.json')).toBe('{"theme":"local"}')
+    // folders/templates were not overwritten (the union IS the local file): no backup needed.
+    expect(fs.readdirSync(path.join(backupsDir(), stamp)).sort()).toEqual(['groups.json', 'ui-settings.json'])
+
+    // The union goes up (journaled, debounced) — the repo learns the local entries.
+    expect(Object.keys(syncState().ops).sort()).toEqual(['folders.json', 'groups.json', 'templates.json'])
+    vi.advanceTimersByTime(5000)
+    await flush()
+    expect(remote.get('groups.json')).toBe(mergedGroups)
+    expect(remote.get('folders.json')).toBe(localFolders)
+    expect(remote.get('templates.json')).toBe(localTemplates)
+    expect(remote.get('ui-settings.json')).toBe('{"theme":"remote"}')
+    expect(syncState().ops).toEqual({})
+
+    // Next pull: everything reconciled — no further merge, backup or upload.
+    puts.length = 0
+    const again = await gh.pullNotes(notesDir)
+    expect(again.errors).toEqual([])
+    expect(again.hadMetadataChanges).toBe(false)
+    expect(fs.readdirSync(backupsDir())).toHaveLength(1)
+    vi.advanceTimersByTime(5000)
+    await flush()
+    expect(puts).toEqual([])
+  })
+
+  it('a pull before the union was uploaded does not merge (nor back up) again', async () => {
+    seedRepoAndLocal()
+    await gh.pullNotes(notesDir)
+    const merged = readLocal('groups.json')
+    const again = await gh.pullNotes(notesDir) // the debounced upload has not fired yet
+    expect(again.errors).toEqual([])
+    expect(readLocal('groups.json')).toBe(merged)
+    expect(fs.readdirSync(backupsDir())).toHaveLength(1)
+  })
+
+  it('backup fails → the local file is NOT overwritten (logged); the next pull merges once it can', async () => {
+    seedRepoAndLocal()
+    fs.writeFileSync(backupsDir(), 'not a dir') // mkdir of the backup dir fails
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await gh.pullNotes(notesDir)
+    expect(res.errors).toEqual([])
+    expect(readLocal('groups.json')).toBe(localGroups)
+    expect(readLocal('ui-settings.json')).toBe('{"theme":"local"}')
+    expect(errorSpy.mock.calls.some((c) => String(c[0]).includes('metadata backup failed, groups.json'))).toBe(true)
+    // Not cached as reconciled: no upload of anything for it either.
+    expect(syncState().shas['groups.json']).toBeUndefined()
+    expect(syncState().ops['groups.json']).toBeUndefined()
+    errorSpy.mockRestore()
+
+    fs.rmSync(backupsDir())
+    await gh.pullNotes(notesDir)
+    expect(readLocal('groups.json')).toBe(json([{ id: 'work', name: 'Work' }, { id: 'qa', name: 'QA-Grupo' }]))
+    expect(fs.readFileSync(path.join(backupsDir(), fs.readdirSync(backupsDir())[0], 'groups.json'), 'utf-8')).toBe(localGroups)
+  })
+
+  it('reconciled and unchanged on GitHub, but deleted locally → the pull restores it', async () => {
+    seedRepoAndLocal()
+    await gh.pullNotes(notesDir)
+    vi.advanceTimersByTime(5000)
+    await flush()
+    const synced = readLocal('groups.json')
+    fs.rmSync(path.join(notesDir, 'groups.json'))
+    const res = await gh.pullNotes(notesDir)
+    expect(res.errors).toEqual([])
+    expect(readLocal('groups.json')).toBe(synced)
+    expect(fs.readdirSync(backupsDir())).toHaveLength(1) // nothing to back up
+  })
+
+  it('steady state (already reconciled): a remote change still wins, without backup or upload', async () => {
+    seedRepoAndLocal()
+    await gh.pullNotes(notesDir)
+    vi.advanceTimersByTime(5000)
+    await flush()
+
+    // Another device rewrites groups.json (e.g. deleted the QA group there).
+    remote.set('groups.json', remoteGroups)
+    puts.length = 0
+    const res = await gh.pullNotes(notesDir)
+    expect(res.errors).toEqual([])
+    expect(readLocal('groups.json')).toBe(remoteGroups)
+    expect(fs.readdirSync(backupsDir())).toHaveLength(1) // only the first connect's
+    vi.advanceTimersByTime(5000)
+    await flush()
+    expect(puts).toEqual([])
+  })
+})

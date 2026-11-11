@@ -59,6 +59,8 @@ export interface EntitlementsCache {
   ai: boolean
   cloud: boolean
   fetchedAt: string // ISO
+  /** hasBillingSubscription of that fetch (optional: caches written before it existed lack it). */
+  billing?: boolean
 }
 
 /**
@@ -75,6 +77,16 @@ export function parseEntitlementsCache(
   if (typeof o.ai !== 'boolean' || typeof o.cloud !== 'boolean') return null
   if (typeof o.fetchedAt !== 'string' || Number.isNaN(Date.parse(o.fetchedAt))) return null
   return { entitlements: { ai: o.ai, cloud: o.cloud }, fetchedAt: o.fetchedAt }
+}
+
+/**
+ * The cached "has a Lemon Squeezy subscription" flag (gates "Manage
+ * subscription"). Only read from a cache parseEntitlementsCache accepts for
+ * `userId`; absent / malformed → false (the boot fetch fills it in).
+ */
+export function parseCachedBillingFlag(raw: unknown, userId: string | undefined | null): boolean {
+  if (!parseEntitlementsCache(raw, userId)) return false
+  return (raw as Record<string, unknown>).billing === true
 }
 
 /** The bits of the public AccountStatus the known/unknown rule looks at. */

@@ -139,11 +139,18 @@ Iconos del TitleBar:
 - **☁ sync**: estado del backend de sync **activo** (NoteFlow Cloud o GitHub; oculto si no hay
   ninguno). Icono: nube verde = sincronizado · verde pulsante = subiendo cambios · ↻ girando =
   sincronizando · nube ámbar = error · nube tachada ámbar = bloqueado (claves de Cloud sin
-  desbloquear o primer pull fallido). **Click** = sync manual. **Hover** (~450 ms) abre una
+  desbloquear o primer pull fallido) · nube con flecha ámbar = **cambios sin subir** (el journal del
+  backend aún tiene subidas/borrados que no llegaron, p. ej. pushes que fallaron sin red: nunca se
+  muestra "Synced" mientras queden). **Click** = sync manual **completo**: baja lo remoto **y
+  reintenta lo pendiente de subir** (Cloud: el mismo ciclo que el auto-sync; GitHub: drena su journal y
+  luego hace pull) — no hay que esperar al tick de 5 min. **Hover** (~450 ms) abre una
   mini-tarjeta flotante (`SyncStatusButton.tsx`, sin tooltip nativo; ~208 px) bajo el botón:
   cabecera de **una sola fila** con el nombre del repo (GitHub; `owner/repo` en el tooltip) o
   "NoteFlow Cloud" + píldora de estado (Synced / Uploading / Syncing / Error / Locked / Blocked /
-  Pending); filas *Last sync* (relativo; hora exacta en el tooltip) y *Pending uploads*; una
+  Pending / Not uploaded); filas *Last sync* (relativo; hora exacta en el tooltip) y *Pending uploads*
+  (cambios del journal aún no subidos, incluidos los que están subiendo; las ediciones dentro del
+  debounce de 5 s no cuentan); con *Not uploaded*, aviso ámbar "Some local changes haven't been
+  uploaded yet…"; una
   **mini gráfica de barras** de la actividad de sync de esta sesión (una barra por minuto con
   actividad, hasta 24, la más reciente a la derecha; altura ∝ ficheros movidos, stub mínimo si
   fueron 0; verde = bien, ámbar = falló; tooltip "14:32 · 3 files"; crecen al abrir salvo con
@@ -1525,8 +1532,10 @@ Flujo del panel según estado:
   reintento silencioso cada 10 s — típico de un arranque offline); en modo private, un único
   input acepta **passphrase o recovery code** → "Unlock".
 - **Desbloqueado:** badge del modo activo (Standard / Private E2EE), badge Sync enabled/disabled,
-  "Last sync", botones **Enable/Disable sync**, **Sync now** (pull manual con resultado tipo
-  GitHub) y **Lock** (solo en modo private — en managed se re-desbloquearía solo). En managed,
+  "Last sync", línea ámbar "N local changes not uploaded yet" si el journal tiene cambios sin subir
+  (entonces el resultado no dice "Already up to date"), botones **Enable/Disable sync**, **Sync now**
+  (ciclo completo: pull + reintento de lo pendiente de subir; resultado tipo GitHub) y **Lock** (solo
+  en modo private — en managed se re-desbloquearía solo). En managed,
   botón **"Switch to private mode"**: upgrade a E2EE (pide passphrase, muestra el
   recovery code una vez y borra la copia del servidor), con aviso de que las notas ya
   sincronizadas pudieron ser técnicamente accesibles hasta ese momento. En private, botón
@@ -1586,16 +1595,27 @@ Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
   borra y tu texto va a una copia con solo esa sección. Lo mismo si borras una nota (o una sección) que
   cambió en GitHub: no se borra allí y vuelve en el siguiente sync. Si solo cambió el otro lado, todo
   sigue como siempre. Con NoteFlow Cloud activado GitHub es un espejo y no hace esto. El CLI
-  (`noteflow push` y el push de cada comando) tampoco pisa, pero aún **no fusiona**: guarda tu versión
-  como copia de conflicto e imprime `Conflict: local changes kept as "…"`.
+  (`noteflow push` y el push de cada comando) tampoco pisa y **fusiona igual** (con marcas imprime
+  `Merged with conflicts: "…"`); solo lo que no se puede fusionar acaba en copia de conflicto
+  (`Conflict: local changes kept as "…"`).
 - Se sincronizan notas + `groups.json`, `folders.json`, `section-colors.json`, `note-order.json`,
   `templates.json`, `snippets.json` (fragmentos del toolbar), `ui-settings.json` (apariencia y ajustes
   del editor).
+- **Conectar a un repo que ya tiene sus grupos/carpetas** (usado antes por otro dispositivo, o tras
+  perder el estado de sync): los grupos, carpetas, plantillas y fragmentos de este dispositivo **se
+  unen** con los del repo (si coinciden en id, gana la versión del repo) y la unión se sube — no se
+  pierde nada. La apariencia, los colores de sección y el orden de notas toman los del repo. En ambos
+  casos la versión local que se reemplazó se guarda antes en `<userData>/github-metadata-backups/<fecha>/`
+  (sin aviso en la UI). Ya sincronizado, un cambio en el repo gana como siempre. El CLI hace lo mismo
+  en el `pull` (tras `noteflow login`) pero solo con **grupos y carpetas** (por GitHub no sincroniza
+  plantillas ni fragmentos), con la copia en `<dir de ajustes del CLI>/github-metadata-backups/`, y
+  avisa de que un `noteflow push` suba la unión.
 - El repositorio se crea como **privado** automáticamente si no existe.
 
 ### Panel de sync
 - Estado (conectado / subiendo / error), cuenta y repo vinculados.
-- "Sync now" para pull manual · "Disconnect" para desconectar.
+- "Sync now" para sync manual (primero reintenta las subidas/borrados pendientes del journal, luego
+  pull) · "Disconnect" para desconectar.
 - **"Mirror to GitHub" / "Espejar en GitHub"** — botón que aparece entre los dos anteriores **solo
   con NoteFlow Cloud activado** (es entonces cuando GitHub queda en pausa como espejo de solo
   escritura y el repo se va quedando obsoleto: no le llegan los borrados ni las notas que Cloud
@@ -1630,7 +1650,17 @@ pobladas en la build (precios en `.agents/context/monetization.md` § visión, c
   línea "New code sent — check your inbox.". Los mensajes de error vienen **traducidos** (el
   proceso main manda un código de error, no texto en inglés).
 - **Con sesión:** muestra el email, badges de plan ("NoteFlow AI" / "NoteFlow Cloud" con estado
-  Active/—), la sección de **planes**, botón "Refresh" (relee las suscripciones) y "Sign out".
+  Active/—), **"Manage subscription"** (si aplica, ver abajo), la sección de **planes**, botón
+  "Refresh" (relee las suscripciones) y "Sign out".
+- **"Manage subscription" / "Gestionar suscripción":** solo si la cuenta tiene (o tuvo) una
+  suscripción pagada con Lemon Squeezy — en cualquier estado (activa, cancelada, con pago fallido o
+  expirada: sigue habiendo facturas); las suscripciones regaladas a mano (comps) no lo ven, y tampoco
+  sale mientras el plan está "Couldn't check". Debajo, el hint "Cancel, change plan, update your payment
+  method or download invoices. Opens in your browser.". Al pulsarlo (spinner mientras tanto) abre en el
+  navegador el **portal de cliente de Lemon Squeezy** ya identificado; si la app no consigue ese enlace
+  (servidor sin desplegar, sin red, LS caído…) abre la página de facturación genérica de la store y
+  avisa en una línea: "…sign in there with the email you used to subscribe." Es la única vía en la app
+  para cancelar o cambiar de plan (antes solo por los correos de LS).
 - **Plan aún sin comprobar:** si la app no ha podido consultar tu plan todavía (arranque sin red,
   servidor caído) y no tiene uno guardado de la última vez, los badges dicen **"Couldn't check"** y
   en los gates de IA y Cloud, en vez de las cards de Subscribe o del "requiere suscripción", aparece

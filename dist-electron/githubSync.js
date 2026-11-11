@@ -7,6 +7,7 @@ exports.RemoteChangedError = exports.GITHUB_AUTO_SYNC_INTERVAL_MS = void 0;
 exports.getSyncHistory = getSyncHistory;
 exports.getSyncFilesToday = getSyncFilesToday;
 exports.hasPendingRemoteMutations = hasPendingRemoteMutations;
+exports.getPendingChangeCount = getPendingChangeCount;
 exports.loadSyncSettings = loadSyncSettings;
 exports.getSyncStatus = getSyncStatus;
 exports.getConnectionForCli = getConnectionForCli;
@@ -40,6 +41,7 @@ const syncState_1 = require("./syncState");
 const mirrorPlan_1 = require("./mirrorPlan");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
 const githubMerge_1 = require("./githubMerge");
+const githubMetadata_1 = require("./githubMetadata");
 const conflictCopy_1 = require("./conflictCopy");
 const syncHistory_1 = require("./syncHistory");
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -720,6 +722,14 @@ function enqueueMutation(task) {
 /** True while remote writes/deletes are queued or in flight (auto-sync defers). */
 function hasPendingRemoteMutations() {
     return pendingMutations > 0;
+}
+/**
+ * Local changes GitHub does not have yet (entries of sync-state.json's journal
+ * minus the files still inside the push debounce, countPendingChanges) — the
+ * titlebar shows "not uploaded yet" while > 0.
+ */
+function getPendingChangeCount() {
+    return (0, syncState_1.countPendingChanges)(getState(), (key) => pushTimers.has(key));
 }
 let deviceFlow = null;
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -1612,7 +1622,14 @@ async function pullNotes(notesDir) {
                 catch { /* ignore */ }
             }
         }
-        // Pull optional metadata JSON files used by non-note features.
+        // Pull optional metadata JSON files used by non-note features. Remote wins
+        // once this device has reconciled the file (cached sha); a file it never
+        // reconciled with this repo (first connect, lost sync-state.json) follows
+        // Cloud's first-pull rule instead — backup + union by id, then upload the
+        // result (planGithubMetadataPull).
+        let metadataBackupDir = null;
+        let backedUpMetadata = 0;
+        let mergedMetadata = 0;
         for (const metadataFilename of METADATA_FILENAMES) {
             try {
                 // The tree already tells us whether the file exists and its blob SHA —
@@ -1620,25 +1637,61 @@ async function pullNotes(notesDir) {
                 const metadataTreeSha = treeShaByPath.get(metadataFilename);
                 if (!metadataTreeSha)
                     continue; // not on remote
-                if ((0, syncState_1.getCachedSha)(state, metadataFilename) === metadataTreeSha)
+                const cachedMetadataSha = (0, syncState_1.getCachedSha)(state, metadataFilename);
+                const metadataPath = path_1.default.join(notesDir, metadataFilename);
+                // Reconciled and unchanged on GitHub → nothing to do, unless the local
+                // file is gone (the app never deletes these): then restore it below
+                // (reconciled → the remote is written as is).
+                if (cachedMetadataSha === metadataTreeSha && fs_1.default.existsSync(metadataPath))
                     continue;
                 const remoteMetadata = await getRemoteFile(token, s.owner, s.repo, metadataFilename);
                 if (!remoteMetadata)
                     continue;
-                const metadataPath = path_1.default.join(notesDir, metadataFilename);
                 const localContent = fs_1.default.existsSync(metadataPath)
                     ? fs_1.default.readFileSync(metadataPath, 'utf-8')
                     : null;
-                if (localContent !== remoteMetadata.content) {
-                    fs_1.default.writeFileSync(metadataPath, remoteMetadata.content, 'utf-8');
+                const decision = (0, githubMetadata_1.planGithubMetadataPull)(metadataFilename, localContent, remoteMetadata.content, {
+                    reconciled: cachedMetadataSha !== undefined,
+                });
+                if (decision.action === 'write') {
+                    if (decision.backup && localContent !== null) {
+                        // Never inside the notes dir — it syncs.
+                        metadataBackupDir ?? (metadataBackupDir = path_1.default.join(electron_1.app.getPath('userData'), 'github-metadata-backups', new Date().toISOString().replace(/:/g, '-')));
+                        try {
+                            fs_1.default.mkdirSync(metadataBackupDir, { recursive: true });
+                            fs_1.default.writeFileSync(path_1.default.join(metadataBackupDir, metadataFilename), localContent, 'utf-8');
+                        }
+                        catch (err) {
+                            // No backup → no overwrite: the local file stays as it was and,
+                            // uncached, the next pull tries again.
+                            console.error(`[GitHubSync] metadata backup failed, ${metadataFilename} left untouched:`, String(err));
+                            continue;
+                        }
+                        backedUpMetadata++;
+                    }
+                    fs_1.default.writeFileSync(metadataPath, decision.content, 'utf-8');
                     hadMetadataChanges = true;
                     filesDown++;
+                    if (decision.merged)
+                        mergedMetadata++;
                 }
+                // The remote blob is reconciled either way: if the push below hasn't
+                // landed by the next pull, that pull skips the file instead of merging
+                // (and backing it up) again; the push then caches its own sha.
                 cachePulled(metadataFilename, metadataTreeSha);
+                if (decision.push) {
+                    // Local entries the repo lacks: upload the file as it now is on disk
+                    // (journaled — survives a restart; the gate is bypassed like the
+                    // catch-up's, this IS the pull).
+                    schedulePushUnguarded(metadataFilename, decision.action === 'write' ? decision.content : localContent);
+                }
             }
             catch {
                 // Optional metadata file is missing or unreadable remotely.
             }
+        }
+        if (backedUpMetadata > 0 || mergedMetadata > 0) {
+            console.log(`[GitHubSync] metadata: ${backedUpMetadata} file(s) backed up, ${mergedMetadata} merged`);
         }
         // Keep the SHA cache bounded: drop entries for blobs gone from the tree —
         // except the paths this device itself pushed after the listing (their

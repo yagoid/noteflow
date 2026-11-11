@@ -391,6 +391,21 @@ export function resolveRetryAction(op: SyncOpType, localFileExists: boolean): Re
   return op
 }
 
+/**
+ * Local changes the remote does not have yet: the journal entries (uploads and
+ * deletions — failed, `stale` or in flight) EXCEPT those still inside the push
+ * debounce (`isScheduled`: a live push timer for the key — an upsert is
+ * journaled when its timer is armed, and counting it would flash "not
+ * uploaded" after every save). Feeds the `pendingChanges` of the sync status,
+ * so the UI never reads "synced" while the journal still holds work (e.g.
+ * pushes that failed offline, which a later successful pull doesn't clear).
+ */
+export function countPendingChanges(state: SyncState, isScheduled: (key: string) => boolean = () => false): number {
+  let count = 0
+  for (const key of Object.keys(state.ops)) if (!isScheduled(key)) count++
+  return count
+}
+
 // ── Pull decisions ────────────────────────────────────────────────────────────
 
 /**

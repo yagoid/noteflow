@@ -116,11 +116,20 @@ export interface ActiveSyncStatus {
   error?: string
   initialPullStatus: 'pending' | 'ok' | 'failed'
   /**
-   * Files whose push is in flight right now (main.ts `pendingPushFiles` — the
-   * same set behind `sync:push-state`). Edits still inside the 5 s push
-   * debounce are not counted yet.
+   * Remote writes in flight right now: uploads (main.ts `pendingPushFiles`)
+   * plus deletions (`pendingRemoteDeletes`) — the same sets behind
+   * `sync:push-state`. Edits still inside the 5 s push debounce are not
+   * counted yet.
    */
   pendingUploads: number
+  /**
+   * Local changes the live backend does not have yet: entries of its journal
+   * (failed/offline pushes, pending deletions, uploads in flight; files still
+   * inside the push debounce don't count — see syncState.countPendingChanges).
+   * Unlike `pendingUploads` it survives a failed push, so the UI never reads
+   * "synced" while the journal still holds work. 0 when 'none'.
+   */
+  pendingChanges: number
   /** Cadence of the backend's periodic auto-sync loop (absent when 'none'). */
   autoSyncIntervalMs?: number
   /**
@@ -155,7 +164,7 @@ export interface ActiveSyncStatus {
   }
 }
 
-/** `pendingUploads` is owned by main.ts (pendingPushFiles), so the caller passes it in. */
+/** `pendingUploads` is owned by main.ts (its in-flight sets), so the caller passes it in. */
 export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
   if (cloudSync.isCloudSyncEnabled()) {
     const c = cloudSync.getCloudSyncStatus()
@@ -166,6 +175,7 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       error: c.error,
       initialPullStatus: c.initialPullStatus,
       pendingUploads,
+      pendingChanges: c.pendingChanges,
       autoSyncIntervalMs: cloudSync.CLOUD_AUTO_SYNC_INTERVAL_MS,
       history: cloudSync.getSyncHistory(),
       filesToday: cloudSync.getSyncFilesToday(),
@@ -187,6 +197,7 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       error: g.error,
       initialPullStatus: g.initialPullStatus,
       pendingUploads,
+      pendingChanges: githubSync.getPendingChangeCount(),
       autoSyncIntervalMs: githubSync.GITHUB_AUTO_SYNC_INTERVAL_MS,
       history: githubSync.getSyncHistory(),
       filesToday: githubSync.getSyncFilesToday(),
@@ -195,5 +206,5 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       github: { owner: g.owner, repo: g.repo },
     }
   }
-  return { backend: 'none', active: false, initialPullStatus: 'pending', pendingUploads }
+  return { backend: 'none', active: false, initialPullStatus: 'pending', pendingUploads, pendingChanges: 0 }
 }

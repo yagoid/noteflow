@@ -283,6 +283,12 @@ export const settings = {
     // Unlocked controls.
     syncEnabled: 'Sync enabled',
     syncDisabled: 'Sync disabled',
+    // Local changes the journal still holds (e.g. pushes that failed offline):
+    // shown instead of "Already up to date" while > 0.
+    pendingChanges: {
+      one: '{count} local change not uploaded yet — "Sync now" retries it.',
+      other: '{count} local changes not uploaded yet — "Sync now" retries them.',
+    },
     enableSync: 'Enable sync',
     disableSync: 'Disable sync',
     enableFailed: 'Could not enable cloud sync.',
@@ -361,6 +367,7 @@ export const settings = {
       sessionLocked: "Couldn't unlock your saved session — your system keychain may be locked. Unlock it and try again.",
       checkoutUnavailable: "This plan isn't available for purchase yet.",
       checkoutInvalidUrl: 'The checkout link is not valid in this build.',
+      billingPortalUnavailable: "Couldn't open the billing portal. Use the link in your Lemon Squeezy receipt email instead.",
     },
     // "Resend code" control under the code input (step 2 of sign-in).
     resendCode: 'Resend code',
@@ -403,6 +410,13 @@ export const settings = {
     alreadySubscribed: 'Already subscribed?',
     signIn: 'Sign in',
     couldNotOpenCheckout: 'Could not open the checkout.',
+    // "Manage subscription" (signed in with a Lemon Squeezy subscription): opens
+    // the customer portal in the browser.
+    manageSubscription: 'Manage subscription',
+    manageSubscriptionHint: 'Cancel, change plan, update your payment method or download invoices. Opens in your browser.',
+    // The user's own portal link couldn't be fetched, so the store's generic
+    // billing page was opened instead (it asks for the purchase email).
+    storePortalOpened: 'Opened the billing page in your browser — sign in there with the email you used to subscribe.',
     refresh: 'Refresh',
     signOut: 'Sign out',
     signInDesc:

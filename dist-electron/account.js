@@ -15,6 +15,8 @@
 //                                                would sign out every device and
 //                                                the CLI too)
 // Entitlements come from PostgREST: GET /rest/v1/subscriptions (RLS-scoped).
+// "Manage subscription" asks the billing-portal Edge Function for a fresh
+// Lemon Squeezy customer-portal link (resolveBillingPortal).
 //
 // Security model: the refresh token is encrypted at rest and NEVER crosses to
 // the renderer; the access token lives only in main-process memory. The
@@ -50,6 +52,7 @@ exports.getAccessTokenResult = getAccessTokenResult;
 exports.invalidateAccessToken = invalidateAccessToken;
 exports.getAccessToken = getAccessToken;
 exports.signOut = signOut;
+exports.resolveBillingPortal = resolveBillingPortal;
 exports.refreshEntitlements = refreshEntitlements;
 exports.initAccount = initAccount;
 const electron_1 = require("electron");
@@ -59,6 +62,7 @@ const secret_1 = require("./ai/llm/secret");
 const cloudConfig_1 = require("./cloudConfig");
 const entitlements_1 = require("./entitlements");
 const entitlementsRetry_1 = require("./entitlementsRetry");
+const billingPortal_1 = require("./billingPortal");
 const settingsFile_1 = require("./settingsFile");
 // ── Settings helpers (same idiom as githubSync) ───────────────────────────────
 function getSettingsPath() {
@@ -88,6 +92,8 @@ let entitlementsKnown = false;
 // True while the known entitlements come from the on-disk cache rather than a
 // fetch made in this run (main.ts keeps the subscribe auto-activation baseline off it).
 let entitlementsFromCache = false;
+// hasBillingSubscription of the same fetch (or cache) as `entitlements`.
+let billingSubscription = false;
 // Refresh token on disk but undecryptable right now (keychain locked) — I1.
 let sessionLocked = false;
 // Bumped by every sign-out (clearSession) and sign-in (verifyOtp). Anything that
@@ -188,6 +194,7 @@ function applyEntitlementsCache() {
     entitlementsFetchedAt = cached.fetchedAt;
     entitlementsKnown = true;
     entitlementsFromCache = true;
+    billingSubscription = (0, entitlementsRetry_1.parseCachedBillingFlag)(accountSettings?.entitlementsCache, accountSettings?.userId);
 }
 /**
  * Writes the in-memory section to disk — or REMOVES it (`remove`, sign-out) —
@@ -283,6 +290,7 @@ function clearSession() {
     entitlementsFetchedAt = undefined;
     entitlementsKnown = false;
     entitlementsFromCache = false;
+    billingSubscription = false;
     sessionLocked = false;
     // The in-memory session is gone either way. A failed removal is retried
     // (timer, next account operation, before-quit) so the signed-out session
@@ -330,6 +338,7 @@ function getAccountStatus() {
         aiCheckoutConfigured: cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.ai.length > 0,
         cloudCheckoutConfigured: cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.cloud.length > 0,
         bundleCheckoutConfigured: cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.bundle.length > 0,
+        hasBillingSubscription: signedIn && entitlementsKnown && billingSubscription,
     };
 }
 /**
@@ -417,6 +426,7 @@ async function verifyOtp(email, code) {
         entitlementsFetchedAt = undefined;
         entitlementsKnown = false;
         entitlementsFromCache = false;
+        billingSubscription = false;
         sessionLocked = false;
         persistAccountSettings({
             email: session.user.email ?? email.trim(),
@@ -563,6 +573,60 @@ async function signOut() {
     notifyStatusChanged();
     return { ok: true };
 }
+// ── Billing portal ("Manage subscription") ────────────────────────────────────
+/**
+ * Asks the billing-portal Edge Function for the user's fresh, pre-signed Lemon
+ * Squeezy customer-portal link. On ANY failure (function not deployed yet, no
+ * session, no LS subscription, LS down, offline, a URL outside the allowlist)
+ * falls back to the store's generic portal, where the customer signs in by
+ * email. Returns the URL to open — already allowlisted — or an error when not
+ * even the fallback exists in this build. Never throws.
+ */
+async function resolveBillingPortal() {
+    let reason = 'not signed in';
+    if ((0, cloudConfig_1.isCloudConfigured)()) {
+        const tokenResult = await getAccessTokenResult();
+        if (!tokenResult.ok) {
+            reason = `no access token (${tokenResult.reason})`;
+        }
+        else {
+            try {
+                const res = await fetch(cloudConfig_1.BILLING_PORTAL_FN_URL, {
+                    method: 'POST',
+                    headers: {
+                        apikey: cloudConfig_1.SUPABASE_ANON_KEY,
+                        Authorization: `Bearer ${tokenResult.token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: '{}',
+                    signal: AbortSignal.timeout(15000),
+                });
+                let json = null;
+                try {
+                    json = await res.json();
+                }
+                catch {
+                    // non-JSON body (e.g. the gateway's 404 before the function is deployed)
+                }
+                const url = (0, billingPortal_1.portalUrlFromFunctionResponse)(res.status, json);
+                if (url)
+                    return { ok: true, url: url.toString(), via: 'customerPortal' };
+                if (res.status === 401)
+                    invalidateAccessToken(tokenResult.token);
+                reason = `HTTP ${res.status} (${res.status === 200 ? 'url not allowed' : (0, billingPortal_1.portalErrorCode)(json)})`;
+            }
+            catch (err) {
+                reason = String(err);
+            }
+        }
+    }
+    const fallback = (0, billingPortal_1.parseBillingPortalUrl)(cloudConfig_1.LEMONSQUEEZY_STORE_PORTAL_URL);
+    console.warn(`[Account] billing portal link unavailable (${reason}) — ${fallback ? 'opening the store portal' : 'no store portal either'}`);
+    if (!fallback) {
+        return { ok: false, error: 'The billing portal is not available in this build.', errorCode: 'billingPortalUnavailable' };
+    }
+    return { ok: true, url: fallback.toString(), via: 'storePortal' };
+}
 // ── Entitlements (fetch + retry) ──────────────────────────────────────────────
 const TOKEN_FAILURE_RESULT = {
     noSession: { error: 'Not signed in.', errorCode: 'notSignedIn' },
@@ -604,7 +668,7 @@ async function fetchEntitlements() {
         return entitlementsFailure(TOKEN_FAILURE_RESULT[tokenResult.reason]);
     let res;
     try {
-        res = await supabaseRequest('/rest/v1/subscriptions?select=product,status,renews_at', {
+        res = await supabaseRequest('/rest/v1/subscriptions?select=product,status,renews_at,provider', {
             accessToken: tokenResult.token,
         });
     }
@@ -627,6 +691,7 @@ async function fetchEntitlements() {
         });
     }
     entitlements = (0, entitlements_1.computeEntitlements)(res.json);
+    billingSubscription = (0, entitlements_1.hasBillingSubscription)(res.json);
     entitlementsFetchedAt = new Date().toISOString();
     entitlementsKnown = true;
     entitlementsFromCache = false;
@@ -640,6 +705,7 @@ async function fetchEntitlements() {
                 ai: entitlements.ai,
                 cloud: entitlements.cloud,
                 fetchedAt: entitlementsFetchedAt,
+                billing: billingSubscription,
             },
         });
     }

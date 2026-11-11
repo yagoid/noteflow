@@ -4,12 +4,16 @@
 // and the renderer only ever sees the derived {ai, cloud} booleans in the public
 // account status. Covered by tests/electron/entitlements.test.ts.
 
-/** A row of public.subscriptions as returned by PostgREST (select=product,status,renews_at). */
+/** A row of public.subscriptions as returned by PostgREST (select=product,status,renews_at,provider). */
 export interface SubscriptionRow {
   product: string
   status: string
   renews_at?: string | null
+  provider?: string | null
 }
+
+/** `subscriptions.provider` of rows written by the Lemon Squeezy webhook. */
+export const BILLING_PROVIDER = 'lemonsqueezy'
 
 export interface Entitlements {
   ai: boolean
@@ -33,4 +37,15 @@ export function computeEntitlements(rows: SubscriptionRow[] | null | undefined):
     if (row.product === 'cloud' || row.product === 'bundle') cloud = true
   }
   return { ai, cloud }
+}
+
+/**
+ * Does the account have (or had) a subscription billed through Lemon Squeezy —
+ * one the customer portal can manage (cancel, change plan, card, invoices)?
+ * Any status counts: past_due needs the card updated, and a canceled/expired
+ * one still has its invoices there. `provider='manual'` rows (comps granted by
+ * the operator) have nothing to manage and never count.
+ */
+export function hasBillingSubscription(rows: SubscriptionRow[] | null | undefined): boolean {
+  return (rows ?? []).some((row) => !!row && row.provider === BILLING_PROVIDER)
 }

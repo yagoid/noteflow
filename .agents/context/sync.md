@@ -37,19 +37,34 @@ propios llaman a los módulos directamente.
 **Botón de sync de la titlebar** (`TitleBar.tsx`): NO está cableado a GitHub. Consume
 `sync:get-active-status` (helper `getActiveSyncStatus()` en `syncProvider.ts`, espejo de
 `getActiveSyncProvider()`) → status normalizado y etiquetado con `backend` (`'github'|'cloud'|'none'`),
-y su pull manual va por `sync:pull-active` (Cloud si `enabled`, GitHub si no). El botón se muestra
+y su sync manual va por `sync:pull-active` (Cloud si `enabled`, GitHub si no). **El sync manual no es
+solo un pull: también drena el journal** (lo pendiente de subir/borrar, p. ej. pushes que fallaron sin
+red). Cloud (`cloudManualSync`, también `cloud:pull` = "Sync now" del panel) corre el **mismo ciclo**
+que el auto-sync (`runCloudSyncCycleOnce` vía el runner single-flight, ver `monetization.md` § 4 "Orden
+del ciclo"); GitHub (`githubManualPull`, también `sync:pull`) drena el journal y luego hace pull, como el
+tick. Antes el manual solo hacía pull: el journal esperaba al tick de 5 min y el pull OK limpiaba
+`syncError`, así que la UI decía "Synced" con subidas pendientes (QA 2026-11-11). El botón se muestra
 cuando CUALQUIER backend está `active` (antes solo con GitHub conectado → un usuario solo-Cloud se
 quedaba sin sync manual) y se suscribe a `sync:status-changed`, `cloud:status-changed`,
 `notes-updated` y `sync:push-state` (refresca en **cada** cambio de push-state, no solo en `idle`,
-para que el contador de pendientes vaya al día). La línea de identidad del pie del sidebar
+para que el contador de pendientes vaya al día; el paso a `idle` se aplica **junto con** el status
+re-leído — bajar `pushing` antes mostraría un instante el status anterior, cuyo journal aún cuenta la
+subida/borrado recién aterrizado, como "Not uploaded"; un `pushStateRef` evita pisar un `pushing` llegado
+entretanto). La línea de identidad del pie del sidebar
 (`stores/identityStore.ts`) también lee `sync:get-active-status`, pero solo `backend` + nombre del repo,
 y solo refresca con `sync-auth-complete`, `sync:status-changed` y `cloud:status-changed` (por eso
 `sync:disconnect` emite `sync:status-changed`). El botón y su **tarjeta de estado al hover** viven
 en `SyncStatusButton.tsx` (sin `title` nativo; `aria-label` con resumen); la prioridad del estado
-mostrado (syncing → uploading → locked → blocked → error → pending → synced) es lógica pura en
-`src/lib/syncStatus.ts` (testeada). Además de lo normalizado, el status lleva `pendingUploads`
-(tamaño de `pendingPushFiles` de `main.ts`, que se lo pasa a `getActiveSyncStatus(pendingUploads)`:
-ficheros con push **en vuelo** — las ediciones aún dentro del debounce de 5 s no cuentan),
+mostrado (syncing → uploading → locked → blocked → error → pending → **unsynced** → synced) es lógica
+pura en `src/lib/syncStatus.ts` (testeada). Además de lo normalizado, el status lleva `pendingUploads`
+(`pendingPushFiles` + `pendingRemoteDeletes` de `main.ts`, que se lo pasa a
+`getActiveSyncStatus(pendingUploads)`: subidas y borrados **en vuelo** — las ediciones aún dentro del
+debounce de 5 s no cuentan),
+`pendingChanges` (entradas del **journal** del backend activo — subidas/borrados fallidos, `stale` o en
+vuelo — menos los ficheros con timer de debounce vivo: `countPendingChanges` de `syncState.ts`, vía
+`CloudSyncStatus.pendingChanges` / `githubSync.getPendingChangeCount()`; sobrevive a un push fallido y a
+un pull OK que limpia `syncError` → estado **`unsynced`** "Not uploaded", icono `CloudUpload` ámbar, en
+vez de "Synced"; la fila *Pending uploads* de la tarjeta muestra `max(pendingChanges, pendingUploads)`),
 `autoSyncIntervalMs` (`GITHUB_AUTO_SYNC_INTERVAL_MS` en `githubSync.ts` /
 `CLOUD_AUTO_SYNC_INTERVAL_MS` en `cloudSync.ts`), en Cloud `cloud.realtimeConnected` (sin
 evento propio: se lee al refrescar; la tarjeta re-lee el status al abrirse y cada 30 s) y
@@ -88,7 +103,17 @@ en el status (`getSyncFilesToday()`). Es "hoy en esta sesión": tampoco se persi
   cambios (tick de 5 min) deja un "stub" de 0 ficheros = el latido.
 El indicador "pushing" (`sync:push-state`) vale para **ambos** backends: `applyNoteWrite` en
 `main.ts` engancha los callbacks `onStart/onComplete` de `schedulePush` del proveedor activo (y el
-push durable de las tools del chat) a `pendingPushFiles`. Los deletes no pasan por ese set.
+push durable de las tools del chat) a `pendingPushFiles`. Los **borrados remotos** (nota borrada —
+`applyNoteDelete`, también desde las tools del chat —, nota temporal expirada, sección eliminada en
+`applyNoteWrite`) pasan por `scheduleRemoteDelete` de `main.ts`, que los marca en vuelo en
+`pendingRemoteDeletes` (`trackInFlight` de `syncCycle.ts`, puro y testeado) mientras el backend está
+conectado: `scheduleDelete`/`scheduleDeleteDir` journalan el op **síncronamente**, así que sin esto el
+refresco del renderer tras `notes-updated` veía una entrada de journal sin timer → "Not uploaded", y
+nada re-leía el status cuando el borrado aterrizaba (los backends no emiten status al terminar un
+delete) → ámbar pegado hasta el siguiente evento. Así el borrado se ve como "uploading" y al asentarse
+(OK o fallo) el `sync:push-state` idle re-lee el status (synced, o el error y su entrada de journal).
+Set aparte de `pendingPushFiles` para que un delete que termina no borre la subida en vuelo de la
+misma ruta.
 `sync:pull` (GitHub puro) se mantiene intacto para Settings → Sync.
 
 **Cloud Sync** (`electron/cloudSync.ts`, mismo modelo que GitHub pero contra Supabase con E2EE,
@@ -222,6 +247,18 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   siguiente `pull` la vuelve a bajar), y `noteflow section delete` no borra una sección cambiada en
   GitHub (ni ninguna si el push del ancla acaba de resolver un conflicto). Con `cloudSync.enabled` en
   el `settings.json` (la app usa Cloud) todo es incondicional, como en la app.
+- **Metadatos en `noteflow pull`** (`METADATA_FILES`; desde CLI 2.11.0 — antes se sobrescribían
+  siempre, también en el pull de tras el `login` a un repo con sus propios grupos/carpetas): con base
+  en `cli-github-state.json` igual al sha del tree → **no se toca** si existe (puede llevar una edición
+  local sin subir, como el skip por caché de la app; `--force` lo desactiva y vuelve a pisar) y se
+  **restaura** del remoto si falta en local; con base distinta
+  → gana el remoto; **sin base** → `planGithubMetadataPull` (espejo del de la app, paridad en
+  `tests/electron/githubMetadata.test.ts`): copia de lo local en
+  `<dir de ajustes del CLI>/github-metadata-backups/<ISO>/` y unión por `id` de groups/folders. El
+  pull del CLI **no sube nada**: si lo local queda distinto del remoto avisa
+  `<fichero> has local entries not on GitHub — run 'noteflow push' to upload` (el `push` sube todos los
+  `METADATA_FILES`). Como la unión no es "el blob listado", la base no se fija hasta el `push`; un pull
+  intermedio vuelve a unir, pero es idempotente (sale igual a lo local → sin escribir ni copiar).
 
 ⚠️ **Pendiente — CLI con Cloud + app con GitHub sobre el mismo `settings.json`:** un pull de Cloud
 del CLI deja en disco notas con su `updated` original (antiguo) que no están en el repo de GitHub.
@@ -458,16 +495,50 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   **Clientes antiguos:** un desktop/CLI anterior que reciba de Cloud un JSON raíz que no conoce lo salta
   como `unsafe remote path skipped` (error de ese pull, no se reintenta); por GitHub lo ignora (ni lo
   pullea ni lo borra en el espejo).
-  📌 **Pendiente (no implementado):** el pull de metadatos **no arbitra por timestamp** — si el
-  contenido difiere gana el remoto. Lo único que hoy evita que un repo con metadatos obsoletos pise
-  `groups.json`/`folders.json`/`note-order.json` locales es la caché de SHAs; si esa caché se vacía
-  (`sync-state.json` perdido o corrupto, `disconnectGitHub`, `pruneShas`), el primer pull tras una
-  pausa larga de Cloud sobrescribe los metadatos locales con los viejos. Las notas sobreviven (la
-  regla de borrado ya no corre en ese escenario), pero pierden carpeta/grupo/orden.
-  👉 Lo que **hoy resuelve** ese escenario es la acción de **espejo** (arriba): sube los metadatos
-  locales al repo y re-cachea sus SHAs, así que el siguiente pull ya no tiene nada viejo que pisar.
+  **Pull de metadatos (`planGithubMetadataPull`, puro en `electron/githubMetadata.ts`, testeado en
+  `tests/electron/githubMetadata.test.ts` + e2e en `githubConditionalSync.test.ts`).** El pull solo
+  hace GET de un json cuyo sha del tree difiere del cacheado — o, con el sha igual, si el fichero
+  **falta en local** (la app nunca los borra: se restaura desde el remoto; antes se saltaba para
+  siempre y las notas quedaban con ids de grupo/carpeta colgando). Entonces decide según haya
+  **base** (sha cacheado en `SyncState.shas`):
+  - **Con base (estado estable):** gana el remoto si el contenido difiere (LWW; los metadatos no
+    tienen versión ni timestamp). Comportamiento histórico, sin cambios.
+  - **Sin base** — este dispositivo nunca reconcilió ese fichero con este repo: **primer connect**
+    (`initiateDeviceFlow` → `pullNotes`, también a un repo que ya usó otro dispositivo), tras
+    `disconnectGitHub` + reconectar, `sync-state.json` perdido/corrupto, o un json que reaparece en
+    el remoto tras `pruneShas`. Antes también ganaba el remoto y se perdían **en silencio** los
+    grupos/carpetas/plantillas locales (las notas quedaban con ids colgando → "sin grupo"), y el
+    `pushAllNotes` del connect propagaba la pérdida. Ahora sigue **la regla del primer pull de
+    Cloud reutilizando su mismo `planMetadataPull`** (`firstPull: true`, sin espejo nuevo): copia de
+    lo local que se vaya a sobrescribir en `userData/github-metadata-backups/<ISO con ':'→'-'>/`
+    (fuera del dir de notas; si la copia falla, `console.error` y **no se sobrescribe** ni se cachea:
+    el siguiente pull lo reintenta), los `CLOUD_MERGEABLE_METADATA`
+    (groups, folders, templates, snippets) reciben la **unión por `id` prefiriendo el remoto**
+    (`mergeMetadataById`), y los que no son arrays con `id` (`ui-settings.json`,
+    `section-colors.json`, `note-order.json`) toman el remoto (con copia) — igual que Cloud: no tienen
+    una unión segura (una apariencia mezclada o un orden parcial no es mejor que el del repo) y la
+    pérdida es recuperable de la copia. Si lo que queda en disco **difiere del remoto** (la unión
+    aporta entradas locales, o lo local ya contenía todo lo remoto), el pull lo **sube**
+    (`schedulePushUnguarded`, journalado; el catch-up `flushPendingLocalChanges` solo mira carpetas de
+    nota). Se cachea el sha remoto como base igualmente: un pull antes de que aterrice esa subida
+    salta el fichero en vez de volver a fusionar/copiar, y la subida cachea luego su propio sha. Sin
+    tombstones, una entrada borrada solo en un lado sin sincronizar vuelve desde el otro (asumido,
+    como en Cloud). Se loguean solo recuentos. Aplica también con Cloud activo (el pull inicial del
+    connect de GitHub): unir es estrictamente mejor que sobrescribir.
+  ⚠️ **Residual (preexistente, no arreglado): edición local de metadatos aún sin subir + cambio
+  remoto.** Las subidas de metadatos son **incondicionales** (`isConditionalMutation` exige
+  `isNoteFilePath`), así que no tienen la comprobación de disco ni la de tres vías → nunca quedan
+  `superseded` ni `stale`. Secuencia: se edita `groups.json` (L en disco, timer de 5 s armado con L) y
+  otro dispositivo sube R; un pull que cae **dentro del debounce** (`hasPendingRemoteMutations` solo
+  cuenta mutaciones ya encoladas, no timers) escribe R en disco y cachea R; luego el timer dispara y
+  hace PUT de **L** igualmente, y `recordPushedBase` cachea L. Resultado: disco = R, remoto = L, y el
+  siguiente pull lo salta (caché = tree) → **divergen** hasta la siguiente edición local de ese
+  fichero (que sube lo que haya en disco y pisa L). Ninguna de las dos versiones se fusiona. La acción
+  de **espejo** (arriba) deja el repo exactamente como lo local.
 - **Autosync:** cada 5 min (`AUTO_SYNC_INTERVAL_MS`) mientras esté conectado: primero drena el
-  journal (`retrySyncJournal`), luego pull (que se pospone si quedan mutaciones en vuelo).
+  journal (`retrySyncJournal`), luego pull (que se pospone si quedan mutaciones en vuelo). El **sync
+  manual** (`githubManualPull`: "Sync now" de Settings y el botón de la titlebar) hace lo mismo — drena
+  y luego pull — pero el pull no se pospone por mutaciones en vuelo.
 - **Delete:** `scheduleDelete(relPath)` (sección suelta) y `scheduleDeleteDir(dir)` (lista el
   árbol y borra cada blob bajo `<dir>/` — si el listado viene **truncado** (`truncated: true`, repos
   enormes) `deleteRemoteDirNow` **lanza antes de borrar nada** (`planRemoteDirDelete`, puro): con
@@ -491,7 +562,8 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     `retrySyncJournal(notesDir)` lo drena: upserts releen el contenido ACTUAL de disco (si el
     fichero local ya no existe, se descarta la entrada — el borrado lo cubre su propia entrada),
     deletes se re-ejecutan; **no bumpea `lastSync`** (mismo motivo que `pushPathsNow`). Lo llama
-    `main.ts` en cada tick del autosync ANTES de `pullNotes` y tras el pull inicial OK; gated por
+    `main.ts` en cada tick del autosync y en el sync manual ANTES de `pullNotes`, y tras el pull
+    inicial OK; gated por
     `initialPullStatus === 'ok'`. Se **salta los ops `stale`** (subida/borrado ya retenidos por la
     comprobación de tres vías — los resuelve el pull) y los que ya no son el op del snapshot
     (completados o sustituidos mientras drenaba). Un dir con upsert pendiente que **también** cambió en
@@ -513,7 +585,8 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     **BASE** de la subida condicionada (abajo). Se poda a los paths presentes en el tree (más los que
     este dispositivo subió después del listado). El espejo (`mirrorToGitHub`) cachea sin request las
     anclas y metadatos que encuentra idénticos; lo que sube lo cachea la propia subida.
-    Los `METADATA_FILENAMES` usan el mismo cache (solo GET cuando el sha del tree difiere).
+    Los `METADATA_FILENAMES` usan el mismo cache (solo GET cuando el sha del tree difiere); que un
+    json **no tenga** entrada aquí es lo que activa su fusión con copia en el pull (ver "Metadata").
     La lógica de transiciones/decisiones es pura en `syncState.ts` (sin imports de Electron, patrón
     `entitlements.ts`) y está cubierta por `tests/electron/syncState.test.ts`.
 - **⚠️ Serialización de mutaciones remotas (INVARIANTE — leer antes de tocar el sync):** la

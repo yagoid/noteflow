@@ -61,7 +61,16 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
     // re-read it on open: another device may have switched it meanwhile. Main
     // broadcasts cloud:status-changed (caught below) when it did change.
     window.noteflow.cloudRefreshKeysMode()
-    return window.noteflow.onCloudStatusChanged(setStatus)
+    const unsubStatus = window.noteflow.onCloudStatusChanged(setStatus)
+    // A push that fails (or lands) emits no cloud:status-changed — re-read the
+    // status when the uploads settle so the pending-changes line stays current.
+    const unsubPush = window.noteflow.onSyncPushState((state) => {
+      if (state === 'idle') window.noteflow.getCloudStatus().then(setStatus)
+    })
+    return () => {
+      unsubStatus()
+      unsubPush()
+    }
   }, [])
 
   useEffect(() => {
@@ -550,16 +559,24 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
             </p>
           )}
 
+          {/* Local changes not uploaded yet (journal) — a successful pull clears
+              the error but not these, so they are never shown as "up to date" */}
+          {status.enabled && status.pendingChanges > 0 && (
+            <p className="text-[11px] font-mono text-yellow-400">
+              {plural(t.settings.cloud.pendingChanges, status.pendingChanges)}
+            </p>
+          )}
+
           {/* Pull result */}
-          {pullResult && (
+          {pullResult && (pullResult.pulled > 0 || pullResult.errors.length > 0 || status.pendingChanges === 0) && (
             <div className={`px-3 py-2 rounded-lg text-xs font-mono ${
               pullResult.errors.length > 0
                 ? 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
                 : 'bg-green-500/10 border border-green-500/30 text-green-400'
             }`}>
-              {pullResult.pulled === 0
-                ? t.settings.sync.alreadyUpToDate
-                : plural(t.settings.sync.pulled, pullResult.pulled)}
+              {pullResult.pulled > 0
+                ? plural(t.settings.sync.pulled, pullResult.pulled)
+                : pullResult.errors.length === 0 && t.settings.sync.alreadyUpToDate}
               {pullResult.errors.length > 0 && (
                 <div className="mt-1 text-[11px] text-red-400">{pullResult.errors.join(', ')}</div>
               )}

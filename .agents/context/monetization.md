@@ -166,6 +166,37 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   abre en el navegador vía el IPC `account:open-checkout` (main construye la URL con
   `checkout[custom][user_id]=<uuid>` — la correlación del webhook — y la abre con
   `shell.openExternal`; el userId nunca cruza al renderer). Implementado en la fase 4.1.
+- **Gestionar la suscripción — customer portal de LS (implementado en cliente + función; deploy
+  pendiente del operador, ver `supabase/README.md` § 5.1):** cancelar, cambiar de plan, actualizar
+  la tarjeta y ver facturas solo se hace en el portal de Lemon Squeezy. Settings → Subscription
+  (`AccountPanel`) muestra **"Manage subscription"** + hint cuando `AccountStatus.hasBillingSubscription`
+  — derivado en main con `hasBillingSubscription(rows)` (`electron/entitlements.ts`): alguna fila con
+  `provider='lemonsqueezy'` **en cualquier estado** (past_due necesita la tarjeta; una
+  cancelada/expirada conserva sus facturas); las comps `provider='manual'` **no** lo ven, y es `false`
+  mientras las entitlements son desconocidas. Por eso el fetch de entitlements pide
+  `select=product,status,renews_at,provider`; el flag se cachea con ellas
+  (`entitlementsCache.billing`, opcional — caches antiguas → `false` hasta el fetch del boot;
+  `parseCachedBillingFlag` en `entitlementsRetry.ts`). El enlace `urls.customer_portal` de LS es
+  **pre-firmado y caduca a las 24 h**, así que no se guarda desde el webhook: el IPC
+  `account:open-billing-portal` llama (`account.resolveBillingPortal`, con el access token) a la
+  Edge Function **`supabase/functions/billing-portal`** (Deno, cero deps, verify JWT; flujo completo
+  en `logic.ts` con `fetch` inyectado, testeado en `tests/supabase/billing-portal.test.ts`): resuelve
+  al usuario por `/auth/v1/user`, lee **sus** filas `provider=eq.lemonsqueezy` con el service role y
+  filtro explícito `user_id`, elige la más relevante (`pickPortalSubscription`: active > past_due >
+  canceled > expired, luego `renews_at` y `created_at` más recientes; `provider_ref` solo numérico) y
+  pide `GET https://api.lemonsqueezy.com/v1/subscriptions/<id>` con el secreto
+  **`LEMONSQUEEZY_API_KEY`** → `{url}` validada (https + `lemonsqueezy.com`/subdominio, sin
+  credenciales ni puerto). Errores `{error:{message,code}}`: `missing_token`/`invalid_token` 401,
+  `no_subscription` 404, `provider_error`/`provider_unreachable`/`invalid_portal_url` 502,
+  `not_configured`/`query_failed` 500. **Fallback** en main ante **cualquier** fallo (función sin
+  desplegar, sin secreto, sin red, sin fila, LS caído, URL fuera de la allowlist): abre el portal
+  genérico de la store `LEMONSQUEEZY_STORE_PORTAL_URL` (`https://<store>.lemonsqueezy.com/billing`,
+  derivado de `LEMONSQUEEZY_CHECKOUT_URLS` en `cloudConfig.ts` con `deriveStorePortalUrl`), donde el
+  cliente entra con el correo de la compra; la UI lo explica con una nota (`via: 'storePortal'`).
+  Main **revalida** toda URL con la misma allowlist (`parseBillingPortalUrl`,
+  `electron/billingPortal.ts`, testeado en `tests/electron/billingPortal.test.ts`) antes de
+  `shell.openExternal`. Sin ningún portal posible → `errorCode: 'billingPortalUnavailable'`. Igual
+  en la build de Microsoft Store (compra y gestión son las mismas que en la directa).
 - **Webhook de billing (implementado):** Edge Function `supabase/functions/billing-webhook`
   (Deno, cero dependencias) — verifica la firma HMAC-SHA256 de la cabecera `X-Signature` contra el
   body crudo (secret en `LEMONSQUEEZY_WEBHOOK_SECRET`; comparación constant-time vía
@@ -201,7 +232,7 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     llegando eventos más nuevos (`subscription_updated`; y `subscription_cancelled`, que mapeamos
     a `active` hasta `ends_at`) que, con `now()`, la reactivarían vía el guard de orden; con
     `infinity` ningún evento puede ganarle. Nada más lee `subscriptions.updated_at` (cliente:
-    `product,status,renews_at`; ai-proxy y RLS de `files`: `product,status`). Un reembolso antes de
+    `product,status,renews_at,provider`; ai-proxy y RLS de `files`: `product,status`). Un reembolso antes de
     que exista la fila es no-op (devuelve 0, se loguea). Hay que **suscribir
     `subscription_payment_refunded` y `subscription_plan_changed`** en el webhook de LS.
     - ⚠️ **Cancelar la suscripción en LS es OBLIGATORIO** tras todo reembolso total (automático o
@@ -671,10 +702,15 @@ es **un preset más**, no una implementación nueva.
     se identifican por `provider_ref` o porque se crearon antes del 2026-10-19. Al hacer el
     cambio solo había dos filas, ambas del operador: `ai` 2332140 (ya `expired`) y bundle
     `provider_ref=2370478`, que se **expiró** el 2026-10-19.
-  - **Cuenta del operador (comp permanente):** fila `provider='manual'`,
-    `provider_ref='operator-comp'`, `product='bundle'`, `status='active'`, `renews_at=null`,
-    insertada a mano por SQL. Da AI + Cloud sin pagar y el webhook nunca la toca (otro
-    `provider`). Es el patrón para regalar acceso: una fila `manual` por usuario.
+  - **Cuenta del operador (comp, DESACTIVADA desde 2026-11-11):** fila `provider='manual'`,
+    `provider_ref='operator-comp'`, `product='bundle'`, `renews_at=null`, insertada a mano por SQL.
+    Mientras estuvo `active` dio AI + Cloud sin pagar. Desde el 2026-11-11 está en
+    `status='expired'` (no se borró): el operador paga como un usuario normal, con su suscripción
+    de Lemon Squeezy. El webhook nunca toca filas `manual` (otro `provider`) y la reconciliación
+    tampoco. **Patrón para regalar acceso:** una fila `manual` por usuario; para reactivar la del
+    operador basta con
+    `update public.subscriptions set status='active' where provider='manual' and provider_ref='operator-comp';`.
+    El acceso solo depende de esa fila: no hay ninguna lista de emails ni excepción en el código.
   - **Volver a probar en test:** añadir sus IDs al map reabre el agujero. Hay que mantener esa
     ventana lo más corta posible y, al retirar los IDs, expirar o borrar las filas que se hayan
     creado durante ella (si no, quedan activas para siempre).
@@ -758,9 +794,9 @@ diferencial de privacidad, no como peaje.
 > ella la app cae a `cloud_upsert_file` (0011) el resto de la sesión — el pull sigue fusionando en tres
 > vías, pero las subidas vuelven a decidirse por `updated_at`.
 > La suscripción manual de pruebas de Cloud que hubo aquí ya no existe (comprobado 2026-10-19).
-> ⚠️ La única fila `provider='manual'` es la **comp permanente del operador**
-> (`provider_ref='operator-comp'`, ver § 3 "Cuenta del operador"): **no borrar** filas
-> `manual` en bloque.
+> ⚠️ La única fila `provider='manual'` es la **comp del operador**
+> (`provider_ref='operator-comp'`, `expired` desde 2026-11-11, ver § 3 "Cuenta del operador"):
+> **no borrar** filas `manual` en bloque (se conserva para poder reactivarla).
 
 ### Modos de cifrado (managed | e2ee)
 
@@ -1214,6 +1250,26 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
     traída cuanto antes (el drain puede tardar, y mientras el editor podría guardar encima el
     contenido viejo). Los guards del journal del pull (`shouldPullSkipDir`/`File`,
     guard de borrado) mantienen a salvo lo pendiente.
+    **Quién lo corre:** Realtime (cada evento y cada re-join), el tick de 5 min, el pull de
+    resolución de stale **y el sync manual** (botón de la titlebar → `sync:pull-active`, "Sync now"
+    del panel → `cloud:pull`; los dos en `cloudManualSync`) — todos por el **mismo runner
+    single-flight** (`createCoalescedRunner`, `electron/syncCycle.ts`, puro y testeado): un ciclo
+    pedido mientras corre otro encola **uno** más (las peticiones se funden) y cada llamante espera al
+    ciclo que **empezó después** de su petición, así el manual nunca devuelve el resultado de un pull
+    ya en marcha ni solapa dos pulls. Antes el manual solo hacía `pullNotes` (sin drain, y en paralelo
+    al ciclo): lo pendiente de subir esperaba al tick y la UI decía "Synced" porque el pull OK limpia
+    `syncError` (QA 2026-11-11). El ciclo **manual** difiere en tres cosas: con las claves aún
+    bloqueadas tras el auto-unlock **pulla igualmente** (el pull devuelve "Cloud keys are locked", que
+    es lo que el usuario que pulsó necesita ver; el drain es no-op); con mutaciones en vuelo **espera**
+    a que aterricen (`waitUntil`, hasta 15 s, `MANUAL_SYNC_SETTLE_TIMEOUT_MS`) en vez de saltarse el
+    ciclo (si no aterrizan, devuelve un resultado vacío y el estado las muestra como pendientes); y su
+    broadcast de notas es el manual (recarga completa si no se bajó nada — `broadcastPulledNotes`).
+    Los guards de entitlement (`entitlementBlocked`) y de pull inicial siguen dentro de
+    `retrySyncJournal`.
+    **Estado "sin subir":** `CloudSyncStatus.pendingChanges` = entradas del journal (menos las que
+    tienen timer de debounce vivo; `countPendingChanges` en `syncState.ts`). Un pull OK limpia
+    `syncError` pero no esto, así que la titlebar muestra **"Not uploaded"** y el panel "N local changes
+    not uploaded yet" hasta que el journal drena (ver `sync.md` § botón de sync).
   - **Metadatos con edición local pendiente** (necesario ahora que el pull va antes del drain;
     `planMetadataPull`, puro): `groups.json`/`folders.json`/`templates.json`/`snippets.json` → se escribe la
     **unión por `id` prefiriendo lo local** (`mergeMetadataById`) y se re-arma la subida con ella;
@@ -1543,7 +1599,9 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   persiste en su PROPIO `userData/cloud-sync-state.json` (los dos backends no deben reproducirse
   ops mutuamente); el sha-cache no aplica (el pull incremental ya evita trabajo), pero el mismo fichero
   guarda las **bases** de la fusión en tres vías (`bases`, ver "Fusión en tres vías"). Pushes con
-  claves bloqueadas o offline quedan journaled y drenan tras unlock/reconexión
+  claves bloqueadas o offline quedan journaled y drenan tras unlock/reconexión (en el ciclo que dispara
+  la unión al canal Realtime — al desbloquear arranca la suscripción, y tras un corte de red el re-join
+  —, en un sync manual o, como tarde, en el tick de 5 min)
   (`retrySyncJournal`, mismo contrato que GitHub, salvo que se salta los ops `stale` y sube
   forzados los `force`). Un 403 de RLS (suscripción caducada) se mapea
   a `syncError` accionable, **pausa** el drain de escrituras mientras la entitlement local
@@ -1619,8 +1677,9 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   a la publicación `supabase_realtime`; sin `replica identity full` — `user_id` está en la PK).
   **El payload del evento NO se aplica en caliente** (es ciphertext): es solo una **señal** que
   `main.ts` debouncea (1,5 s — un push ajeno llega como ráfaga de filas) y convierte en un ciclo
-  de sync normal (`runCloudSyncCycle`, single-flight con marca dirty: auto-unlock managed → skip
-  si hay mutaciones en vuelo → `pullNotes` → `retrySyncJournal` → broadcast). Detalles: heartbeat cada
+  de sync normal (`runCloudSyncCycle`, runner single-flight que funde peticiones — ver "Orden del
+  ciclo": auto-unlock managed → skip si hay mutaciones en vuelo → `pullNotes` → `retrySyncJournal` →
+  broadcast). Detalles: heartbeat cada
   25 s (ack perdido = reconectar), token JWT fresco en cada reconexión + push `access_token`
   cada 45 min (expiran ~1 h), backoff exponencial con jitter (1 s → cap 60 s, reset al unirse),
   silencioso offline; **cada unión correcta al canal (la primera y cada re-join) dispara también el
@@ -1731,8 +1790,11 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   bloque ámbar que oculta el resto del panel hasta pulsar "I have saved my recovery code" (vive solo
   en estado local del componente, con botón Copy y aviso rojo de irrecuperabilidad); `locked` → un
   único input acepta passphrase O recovery (el backend distingue) → `cloudUnlock`; `unlocked` →
-  badge enabled/disabled + Last sync + `syncError` (rojo, accionable) + botones Enable/Disable,
-  Sync now (`cloudPull`, resultado tipo GitHub) y Lock.
+  badge enabled/disabled + Last sync + `syncError` (rojo, accionable) + línea ámbar
+  `pendingChanges` ("N local changes not uploaded yet"; con ella el resultado del pull no dice
+  "Already up to date"; el panel re-lee el status también en cada `sync:push-state` idle, porque un push
+  fallido no emite `cloud:status-changed`) + botones Enable/Disable, Sync now (`cloudPull` → ciclo
+  completo pull + drain, resultado tipo GitHub) y Lock.
 - **Gating (decisión):** en la UI se gatean por entitlement `cloud` **el setup/onboarding** (estado
   `no-keys`) y **Enable sync** (estado `unlocked` + disabled). En ambos casos se muestra el MISMO
   bloque (constante `subscriptionGate` de `CloudPanel.tsx`, para que no se separen): mensaje
@@ -2033,7 +2095,8 @@ puro vía `fetch` desde el proceso main.
   `tsconfig.electron.json` (`rootDir: 'electron'`) no puede importar de `src/` y el renderer solo
   ve los booleanos derivados. Testeada en `tests/electron/entitlements.test.ts`.
 - **IPC** — handlers `account:get-status` / `account:request-otp` / `account:verify-otp` /
-  `account:sign-out` / `account:refresh-entitlements`; evento `account:status-changed` (broadcast
+  `account:sign-out` / `account:refresh-entitlements` (+ `account:open-checkout` y
+  `account:open-billing-portal`, ver § 2); evento `account:status-changed` (broadcast
   del status público a todas las ventanas, patrón `sync:status-changed`). Bridge en `preload.ts`
   (`getAccountStatus`, `accountRequestOtp`, `accountVerifyOtp`, `accountSignOut`,
   `accountRefreshEntitlements`, `onAccountStatusChanged`) y tipos `AccountStatus` /
@@ -2042,7 +2105,7 @@ puro vía `fetch` desde el proceso main.
   (fallback para logs), un **`errorCode`** de una unión cerrada (`notConfigured`, `invalidEmail`,
   `emptyCode`, `invalidCode`, `rateLimited`, `network`, `unexpectedResponse`, `sendFailed`,
   `verifyFailed`, `notSignedIn`, `refreshFailed`, `sessionLocked`, `checkoutUnavailable`,
-  `checkoutInvalidUrl`) para
+  `checkoutInvalidUrl`, `billingPortalUnavailable`) para
   que el renderer pinte el mensaje **en el idioma de la app** en vez del string crudo de GoTrue.
   La unión está **triplicada** (main `electron/account.ts` → renderer `src/types/index.ts` → una
   clave por código en `settings.account.errors` de los dicts EN/ES) y el espejo lo fija el test
@@ -2053,7 +2116,7 @@ puro vía `fetch` desde el proceso main.
   textos vía i18n `t.settings.account.*`): no configurado → placeholder informativo; signed out →
   email → código de acceso; signed in → email + badges de plan + el bloque compartido
   `PlanOffers` con los **planes y sus precios** (Bundle/AI/Cloud — ver § 3 "UI" y § visión
-  "Precios") + Refresh + Sign out.
+  "Precios") + **Manage subscription** (solo con suscripción de LS, ver § 2) + Refresh + Sign out.
   **Dos superficies de error, nunca a la vez:** la caja roja de arriba (`error`) para el paso de
   email, refresh y checkout (`handleSignOut` ignora el resultado de `accountSignOut()`: no pinta
   error, solo lo limpia); e **inline bajo el input del código** (`codeError`) para el

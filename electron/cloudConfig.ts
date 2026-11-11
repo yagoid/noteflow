@@ -9,6 +9,8 @@
 // embedded for the sync Device Flow): it grants nothing by itself — security
 // comes from Row Level Security policies and per-user Auth JWTs.
 
+import { deriveStorePortalUrl } from './billingPortal'
+
 /** Supabase project URL, e.g. 'https://xyzcompany.supabase.co' (no trailing slash). */
 export const SUPABASE_URL = 'https://bolnhekicavuzscdjoty.supabase.co'
 
@@ -21,6 +23,9 @@ export const AI_PROXY_URL = `${SUPABASE_URL}/functions/v1/ai-proxy`
 /** NoteFlow Cloud managed-mode key service (Edge Function cloud-keys: setup/unlock). */
 export const CLOUD_KEYS_URL = `${SUPABASE_URL}/functions/v1/cloud-keys`
 
+/** Fresh Lemon Squeezy customer-portal link for the caller (Edge Function billing-portal). */
+export const BILLING_PORTAL_FN_URL = `${SUPABASE_URL}/functions/v1/billing-portal`
+
 /**
  * Lemon Squeezy checkout URLs per product. Filled in once the products exist
  * in the LS store (see supabase/README.md § 6). While a URL is empty, its
@@ -32,6 +37,14 @@ export const LEMONSQUEEZY_CHECKOUT_URLS: { ai: string; cloud: string; bundle: st
   cloud: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/0010d7c7-46c5-4635-b214-0e2b378230b0',
   bundle: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/4eb2e564-2c2b-4765-bfd0-a20bf3752cad',
 }
+
+/**
+ * The store's generic customer portal (`https://<store>.lemonsqueezy.com/billing`,
+ * sign-in by email) — the "Manage subscription" fallback when the billing-portal
+ * function can't produce the user's pre-signed link. Derived from the checkout
+ * URLs above so the store subdomain lives in one place; '' while none is set.
+ */
+export const LEMONSQUEEZY_STORE_PORTAL_URL = deriveStorePortalUrl(Object.values(LEMONSQUEEZY_CHECKOUT_URLS))
 
 /** True once the build carries a real Supabase project configuration. */
 export function isCloudConfigured(): boolean {

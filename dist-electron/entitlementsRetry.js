@@ -17,6 +17,7 @@ exports.ENTITLEMENTS_RETRY_DELAYS_MS = void 0;
 exports.entitlementsRetryDelayMs = entitlementsRetryDelayMs;
 exports.isRetryableEntitlementsFailure = isRetryableEntitlementsFailure;
 exports.parseEntitlementsCache = parseEntitlementsCache;
+exports.parseCachedBillingFlag = parseCachedBillingFlag;
 exports.isManagedAiUsable = isManagedAiUsable;
 /**
  * Backoff between entitlement fetch attempts: quick at first (the usual cause
@@ -64,6 +65,16 @@ function parseEntitlementsCache(raw, userId) {
     if (typeof o.fetchedAt !== 'string' || Number.isNaN(Date.parse(o.fetchedAt)))
         return null;
     return { entitlements: { ai: o.ai, cloud: o.cloud }, fetchedAt: o.fetchedAt };
+}
+/**
+ * The cached "has a Lemon Squeezy subscription" flag (gates "Manage
+ * subscription"). Only read from a cache parseEntitlementsCache accepts for
+ * `userId`; absent / malformed → false (the boot fetch fills it in).
+ */
+function parseCachedBillingFlag(raw, userId) {
+    if (!parseEntitlementsCache(raw, userId))
+        return false;
+    return raw.billing === true;
 }
 /**
  * May the managed NoteFlow AI preset be used? Signed in AND (entitled, or not

@@ -14,6 +14,7 @@ import {
   conflictCopyCandidates,
   planAnchorTombstone,
   resolveRetryAction,
+  countPendingChanges,
   shouldPullSkipDir,
   shouldPullSkipFile,
   shouldDeletionRuleSkipDir,
@@ -184,6 +185,40 @@ describe('resolveRetryAction', () => {
     expect(resolveRetryAction('delete', true)).toBe('delete')
     expect(resolveRetryAction('deleteDir', false)).toBe('deleteDir')
     expect(resolveRetryAction('deleteDir', true)).toBe('deleteDir')
+  })
+})
+
+describe('countPendingChanges', () => {
+  it('is 0 for an empty journal', () => {
+    expect(countPendingChanges(emptySyncState())).toBe(0)
+  })
+
+  it('counts every op kind, failed, stale and in flight alike', () => {
+    const s = emptySyncState()
+    journalRecord(s, 'note-a/note.md', 'upsert', NOW)
+    journalFail(s, 'note-a/note.md', 'upsert') // pushed offline, failed
+    journalRecord(s, 'note-a/sec1.md', 'upsert', NOW)
+    journalMarkStale(s, 'note-a/sec1.md')
+    journalRecord(s, 'note-b/sec2.md', 'delete', NOW)
+    journalRecord(s, 'note-c', 'deleteDir', NOW)
+    expect(countPendingChanges(s)).toBe(4)
+  })
+
+  it('skips the files still inside the push debounce (live timer)', () => {
+    const s = emptySyncState()
+    journalRecord(s, 'note-a/note.md', 'upsert', NOW) // failed earlier, no timer
+    journalRecord(s, 'note-a/sec1.md', 'upsert', NOW) // just edited: timer armed
+    const armed = new Set(['note-a/sec1.md'])
+    expect(countPendingChanges(s, (key) => armed.has(key))).toBe(1)
+  })
+
+  it('drops to 0 once the drain completes the ops', () => {
+    const s = emptySyncState()
+    journalRecord(s, 'note-a/note.md', 'upsert', NOW)
+    journalRecord(s, 'note-a/sec1.md', 'upsert', NOW)
+    journalComplete(s, 'note-a/note.md', 'upsert')
+    journalComplete(s, 'note-a/sec1.md', 'upsert')
+    expect(countPendingChanges(s)).toBe(0)
   })
 })
 

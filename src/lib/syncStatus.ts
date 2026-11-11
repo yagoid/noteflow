@@ -8,7 +8,9 @@ import type { ActiveSyncStatus, SyncHistoryEntry } from '../types'
  * What the sync indicator shows, in priority order: a manual sync in progress,
  * then an upload in flight, then the states that block syncing (Cloud keys
  * locked, failed first pull), then a plain error, then "first pull not done
- * yet", else synced.
+ * yet", then local changes the backend does not have yet (its journal — e.g.
+ * pushes that failed offline; a later successful pull clears `error` but not
+ * these), else synced.
  */
 export type SyncDisplayState =
   | 'syncing'
@@ -17,6 +19,7 @@ export type SyncDisplayState =
   | 'blocked'
   | 'error'
   | 'pending'
+  | 'unsynced'
   | 'synced'
 
 export function getSyncDisplayState(
@@ -32,7 +35,18 @@ export function getSyncDisplayState(
   if (status.initialPullStatus === 'failed') return 'blocked'
   if (status.error) return 'error'
   if (status.initialPullStatus === 'pending') return 'pending'
+  if (status.pendingChanges > 0) return 'unsynced'
   return 'synced'
+}
+
+/**
+ * The card's "Pending uploads" count: the backend's journal of local changes
+ * not on the remote yet. It already includes the files in flight (journaled
+ * when their push is armed); `pendingUploads` (main's in-flight set) is only a
+ * floor in case a push is in flight without a journal entry.
+ */
+export function pendingChangeCount(status: ActiveSyncStatus): number {
+  return Math.max(status.pendingChanges, status.pendingUploads)
 }
 
 /** Coarse age of a timestamp, for "just now" / "3 min ago" / "2 h ago" / "4 days ago". */

@@ -142,7 +142,8 @@ const api = {
     // rejects it otherwise with error: 'cloud-required', and with
     // 'cloud-initial-pull-pending' until this device's Cloud initial pull is done).
     mirrorToGitHub: () => electron_1.ipcRenderer.invoke('sync:mirror-to-github'),
-    // Manual pull routed to the LIVE backend (Cloud when enabled, else GitHub).
+    // Manual sync routed to the LIVE backend (Cloud when enabled, else GitHub):
+    // drains the backend's journal of pending uploads/deletions too, not just a pull.
     pullActiveNotes: () => electron_1.ipcRenderer.invoke('sync:pull-active'),
     // Settings → Sync → "Connect the CLI too" (electron/cliConnect.ts). Cloud:
     // the CLI's own login with an emailed code (to the app account's email);
@@ -181,6 +182,9 @@ const api = {
     // Opens the subscription checkout in the browser; the URL (with the user id)
     // is built in main so the id never crosses the bridge.
     accountOpenCheckout: (product) => electron_1.ipcRenderer.invoke('account:open-checkout', product),
+    // Opens the Lemon Squeezy customer portal: the user's pre-signed link, or the
+    // store's generic portal as fallback (`via` says which).
+    accountOpenBillingPortal: () => electron_1.ipcRenderer.invoke('account:open-billing-portal'),
     onAccountStatusChanged: (cb) => {
         const wrapper = (_event, status) => cb(status);
         electron_1.ipcRenderer.on('account:status-changed', wrapper);
@@ -207,6 +211,7 @@ const api = {
     cloudLock: () => electron_1.ipcRenderer.invoke('cloud:lock'),
     cloudEnable: () => electron_1.ipcRenderer.invoke('cloud:enable'),
     cloudDisable: () => electron_1.ipcRenderer.invoke('cloud:disable'),
+    // Manual Cloud sync ("Sync now"): a full cycle — pull, then journal drain.
     cloudPull: () => electron_1.ipcRenderer.invoke('cloud:pull'),
     onCloudStatusChanged: (cb) => {
         const wrapper = (_event, status) => cb(status);

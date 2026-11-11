@@ -298,6 +298,7 @@ function getCloudSyncStatus() {
         lastSync: s.lastSync,
         error: syncError ?? (hasPendingPullRetries() ? PULL_RETRY_PENDING_ERROR : undefined),
         initialPullStatus,
+        pendingChanges: (0, syncState_1.countPendingChanges)(getState(), (key) => pushTimers.has(key)),
         realtimeConnected: cloudRealtime.isCloudRealtimeConnected(),
         conflictCopies,
         conflictMerges,

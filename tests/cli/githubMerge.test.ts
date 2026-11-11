@@ -327,6 +327,53 @@ describe('encrypted note: the conflict copy, as before', () => {
   })
 })
 
+describe('noteflow pull: root metadata (first login to a repo that has its own groups)', () => {
+  const json = (v: unknown) => JSON.stringify(v, null, 2)
+  const LOCAL = json([{ id: 'qa', name: 'QA-Grupo' }])
+  const REMOTE = json([{ id: 'work', name: 'Work' }])
+  const UNION = json([{ id: 'work', name: 'Work' }, { id: 'qa', name: 'QA-Grupo' }])
+  const backups = () => path.join(configDir, 'noteflow', 'github-metadata-backups')
+
+  it('no base for groups.json → merged (not overwritten), local backed up, `push` uploads the union', async () => {
+    fs.writeFileSync(localPath('groups.json'), LOCAL)
+    gh.put('groups.json', REMOTE)
+    await cli.cmdPull()
+    expect(readLocal('groups.json')).toBe(UNION)
+    const [stamp] = fs.readdirSync(backups())
+    expect(fs.readFileSync(path.join(backups(), stamp, 'groups.json'), 'utf-8')).toBe(LOCAL)
+    expect(gh.files.get('groups.json')).toBe(REMOTE) // the pull itself uploads nothing
+    expect(logs.some((l) => l.includes("groups.json has local entries not on GitHub — run 'noteflow push'"))).toBe(true)
+
+    await cli.cmdPush()
+    expect(gh.files.get('groups.json')).toBe(UNION)
+    logs.length = 0
+    await cli.cmdPull() // reconciled now: nothing merged or backed up again
+    expect(readLocal('groups.json')).toBe(UNION)
+    expect(fs.readdirSync(backups())).toHaveLength(1)
+    expect(logs.some((l) => l.includes('groups.json'))).toBe(false)
+  })
+
+  it('reconciled: unchanged on GitHub keeps a local edit; changed on GitHub wins (as before)', async () => {
+    gh.put('groups.json', REMOTE)
+    await cli.cmdPull() // base = REMOTE
+    expect(readLocal('groups.json')).toBe(REMOTE)
+
+    fs.writeFileSync(localPath('groups.json'), UNION) // a local edit not pushed yet
+    await cli.cmdPull()
+    expect(readLocal('groups.json')).toBe(UNION)
+
+    fs.rmSync(localPath('groups.json')) // gone locally, unchanged on GitHub → restored
+    await cli.cmdPull()
+    expect(readLocal('groups.json')).toBe(REMOTE)
+
+    const OTHER = json([{ id: 'home', name: 'Home' }])
+    gh.put('groups.json', OTHER)
+    await cli.cmdPull()
+    expect(readLocal('groups.json')).toBe(OTHER)
+    expect(fs.existsSync(backups())).toBe(false)
+  })
+})
+
 describe('planGithubDirMerge: CLI ↔ app parity', () => {
   const NOW = '2026-11-06T10:00:00.000Z'
   const LABELS = { local: 'L', remote: 'R', end: 'E' }

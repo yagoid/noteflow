@@ -117,6 +117,7 @@ import {
   conflictCopyCandidates,
   planAnchorTombstone,
   resolveRetryAction,
+  countPendingChanges,
   shouldPullSkipDir,
   shouldPullSkipFile,
   hasPendingUpsert,
@@ -208,6 +209,14 @@ export interface CloudSyncStatus {
   lastSync?: string
   error?: string
   initialPullStatus: InitialPullStatus
+  /**
+   * Local changes the server does not have yet: the entries of this device's
+   * journal (cloud-sync-state.json — failed/offline pushes, pending deletions,
+   * uploads in flight), minus the files still inside the push debounce
+   * (countPendingChanges). A successful pull clears `error` but not this, so
+   * the UI shows "not uploaded yet" instead of "synced" until the journal drains.
+   */
+  pendingChanges: number
   /**
    * True while the Realtime channel is joined. Informational: shown in the
    * titlebar sync status card. Joining/dropping the channel emits no event —
@@ -452,6 +461,7 @@ export function getCloudSyncStatus(): CloudSyncStatus {
     lastSync: s.lastSync,
     error: syncError ?? (hasPendingPullRetries() ? PULL_RETRY_PENDING_ERROR : undefined),
     initialPullStatus,
+    pendingChanges: countPendingChanges(getState(), (key) => pushTimers.has(key)),
     realtimeConnected: cloudRealtime.isCloudRealtimeConnected(),
     conflictCopies,
     conflictMerges,
