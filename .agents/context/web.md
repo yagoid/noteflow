@@ -216,12 +216,12 @@ de su tamaño → texto de la app ilegible; por eso el rediseño.)
 primario + Linux `nf-ghost` con `dlGhost`, 14px), con su `data-dl` (`win`/`linux`) → rótulo de
 versión → nota de la Store (`download.winStoreNote`) → disclaimer → nota de SmartScreen.
 
-- **Windows = Microsoft Store** (desde el 12-nov-2026): el botón `win` va a `STORE_URL`
-  (https://apps.microsoft.com/detail/9NLP519T4X5F, ficha «NoteFlow - Quick Notes») y el script **no lo
-  toca**. La Store firma el paquete: sin aviso de SmartScreen. Pero la versión de la Store **no trae el
-  CLI ni puede abrirse al iniciar sesión** (ver `release.md` § Microsoft Store), y la nota bajo los
-  botones lo dice con un enlace `data-dl="win-exe"` al instalador de GitHub, que es el que el script
-  convierte en el `.exe` exacto. Si la versión de la Store gana esas dos cosas, la nota se quita. Los dos botones pesan **igual** a propósito: los dos
+- **Microsoft Store, como opción** (desde el 12-nov-2026; lo decidió Yago): el botón de Windows
+  sigue descargando el instalador de GitHub, que es el recomendado. La nota bajo los botones
+  (`download.winStoreNote`) ofrece la Store (https://apps.microsoft.com/detail/9NLP519T4X5F, ficha
+  «NoteFlow - Quick Notes») con lo que gana (sin aviso de SmartScreen) y lo que pierde: **no trae el
+  CLI ni puede abrirse al iniciar sesión** (ver `release.md` § Microsoft Store). El README hace lo
+  mismo. Si la versión de la Store gana esas dos cosas, se actualiza la nota. Los dos botones pesan **igual** a propósito: los dos
 son descargas, ninguno debe leerse como la opción menor. **Nada se hornea en build time** y no hay dependencia del `package.json` raíz: la web solo se redespliega con
 cambios en `docs/**`, así que cualquier versión/URL horneada mentiría en cuanto salga un release.
 

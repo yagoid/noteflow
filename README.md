@@ -35,11 +35,10 @@ Built specifically for software engineers and power users who need something fas
 
 ## Download
 
-**Windows:** get it from the [Microsoft Store](https://apps.microsoft.com/detail/9NLP519T4X5F) (listed as *NoteFlow - Quick Notes*). It installs without the SmartScreen warning and updates through the Store. The Store version **does not include the CLI** and **can't open by itself when Windows starts**; for either of those, use the installer from GitHub below (`NoteFlow-X.Y.Z-Setup.exe`).
+Get the latest release from the [Releases page](https://github.com/yagoid/noteflow/releases/latest).
 
-Everything else is on the [Releases page](https://github.com/yagoid/noteflow/releases/latest).
-
-- **Windows (installer)**: `NoteFlow-X.Y.Z-Setup.exe` — includes the CLI and the open-at-login option. It isn't code-signed yet, so Windows may show a SmartScreen warning: click **More info → Run anyway**.
+- **Windows**: `NoteFlow-X.Y.Z-Setup.exe` (recommended: includes the CLI and the open-at-login option)
+  - Optionally, from the [Microsoft Store](https://apps.microsoft.com/detail/9NLP519T4X5F) (*NoteFlow - Quick Notes*): it installs without the SmartScreen warning and updates through the Store, but it **does not include the CLI** and **can't open by itself when Windows starts**.
 - **macOS (Apple Silicon)**: `NoteFlow-X.Y.Z-arm64.dmg`
 - **Debian/Ubuntu/Mint**: `noteflow_X.Y.Z_amd64.deb`
 - **Arch/CachyOS/Manjaro**: use the AppImage below (the [`PKGBUILD`](PKGBUILD) is currently not working)

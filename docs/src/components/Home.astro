@@ -38,10 +38,6 @@ const GITHUB = 'https://github.com/yagoid/noteflow';
 // goes stale) and let the client script upgrade it to the exact asset. Nothing is baked at build
 // time: Pages only redeploys on `docs/**` changes, so a baked version would lie after a release.
 const RELEASES_LATEST_URL = `${GITHUB}/releases/latest`;
-// Windows button → the Microsoft Store listing ("NoteFlow - Quick Notes"): Microsoft signs it,
-// so there is no SmartScreen warning. The Store build has no CLI and can't open at login; the
-// note under the buttons says so and links the GitHub installer (`data-dl="win-exe"`).
-const STORE_URL = 'https://apps.microsoft.com/detail/9NLP519T4X5F';
 
 const jsonLd = {
   '@context': 'https://schema.org',
@@ -435,7 +431,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
           <div class="nf-plate" style={`display:inline-flex;align-items:center;gap:11px;margin-bottom:22px;padding:8px 14px;${label}`}><span style="width:18px;height:1px;background:var(--detail);"></span>{t.download.kicker}</div>
           <h2 style="margin:0;font-size:clamp(40px,6vw,82px);line-height:1.02;letter-spacing:-.018em;font-weight:500;color:var(--ink-strong);" set:html={t.download.h2}></h2>
           <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:14px;margin-top:42px;">
-            <a href={STORE_URL} data-dl="win" target="_blank" rel="noopener" class="nf-lift" style="display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:14px;letter-spacing:.02em;color:var(--bg);background:var(--ink-strong);padding:16px 30px;border-radius:5px;box-shadow:0 12px 36px rgba(0,0,0,.32);">{t.download.windows}</a>
+            <a href={RELEASES_LATEST_URL} data-dl="win" target="_blank" rel="noopener" class="nf-lift" style="display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:14px;letter-spacing:.02em;color:var(--bg);background:var(--ink-strong);padding:16px 30px;border-radius:5px;box-shadow:0 12px 36px rgba(0,0,0,.32);">{t.download.windows}</a>
             <a href={RELEASES_LATEST_URL} data-dl="linux" target="_blank" rel="noopener" class="nf-ghost" style={dlGhost}>{t.download.linux}</a>
           </div>
           {/* Hidden until the client script reports the real tag_name — `visibility` (not `display`)
@@ -444,8 +440,9 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
           {/* `inline-block` so the plate hugs the line instead of spanning the whole column;
               the parent is text-align:center, so it still centres. */}
           <p data-dl-version-row class="nf-plate" style="visibility:hidden;display:inline-block;margin:16px 0 0;padding:7px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.02em;color:var(--ink-faint);">{t.download.versionLabel} <span data-dl-version></span></p>
-          {/* What the Store build (the Windows button) lacks, with the GitHub installer as the way
-              to get it. Footnote weight, right under the buttons it qualifies. */}
+          {/* The Microsoft Store ("NoteFlow - Quick Notes") as an alternative to the Windows
+              installer: no SmartScreen warning, but no CLI and no open-at-login. Footnote weight,
+              right under the buttons it qualifies. */}
           <p class="nf-plate" style="margin:14px auto 0;max-width:496px;padding:10px 16px;font-size:14px;line-height:1.55;color:var(--ink-dim);" set:html={t.download.winStoreNote}></p>
           {/* max-width carries the horizontal padding on top of the original 460px text
               column (box-sizing is border-box site-wide), so the copy wraps exactly as before
@@ -1554,8 +1551,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
     // A direct binary shouldn't open a blank tab, so `target` goes away with the rewrite.
     // Missing asset → that button is left alone on /releases/latest, still a correct landing spot.
     (async () => {
-      // `win` is the Microsoft Store button and stays as it is; the installer is `win-exe`.
-      const win = document.querySelector<HTMLAnchorElement>('[data-dl="win-exe"]');
+      const win = document.querySelector<HTMLAnchorElement>('[data-dl="win"]');
       const linux = document.querySelector<HTMLAnchorElement>('[data-dl="linux"]');
       if (!win && !linux) return;
       try {

@@ -101,12 +101,12 @@ export const es: Content = {
   download: {
     kicker: 'Gratis · Abierto · Privado',
     h2: `Dale un <em style="font-style:italic;">cerebro</em> a tus notas.`,
-    windows: 'Windows · Microsoft Store',
+    windows: 'Descargar para Windows',
     linux: 'Descargar para Linux',
-    winStoreNote: `La versión de la Store no trae el CLI y no puede abrirse sola al iniciar Windows. Para las dos cosas, <a data-dl="win-exe" href="https://github.com/yagoid/noteflow/releases/latest" target="_blank" rel="noopener" style="color:var(--ink);text-decoration:underline;text-underline-offset:3px;">usa el instalador de GitHub</a>.`,
+    winStoreNote: `¿Prefieres la Microsoft Store? <a href="https://apps.microsoft.com/detail/9NLP519T4X5F" target="_blank" rel="noopener" style="color:var(--ink);text-decoration:underline;text-underline-offset:3px;">Instálala desde allí</a>: Windows no muestra el aviso, pero esa versión no trae el CLI y no puede abrirse sola al iniciar Windows.`,
     versionLabel: 'Última versión',
     disclaimer: `Tus notas se quedan en tu máquina como archivos <span style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--ink-dim);">.md</span> planos. La sincronización es tu propio repo privado de GitHub. Usa tu propia clave de modelo. Sin servidores, sin telemetría.`,
-    winNote: `Windows puede avisar del instalador de GitHub: aún no está firmado, no es inseguro — el código es abierto y está en GitHub. Pulsa <strong style="font-weight:500;color:var(--detail);">Más información → Ejecutar de todas formas</strong>. La versión de la Store no muestra este aviso.`,
+    winNote: `Windows puede avisar del instalador: aún no está firmado, no es inseguro — el código es abierto y está en GitHub. Pulsa <strong style="font-weight:500;color:var(--detail);">Más información → Ejecutar de todas formas</strong>.`,
     footer: {
       brand: 'NoteFlow',
       tagline: 'Notas rápidas, con cerebro.',
