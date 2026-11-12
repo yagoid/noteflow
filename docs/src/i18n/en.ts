@@ -114,15 +114,19 @@ export const en = {
   download: {
     kicker: 'Free · Open · Private',
     h2: `Give your notes <em style="font-style:italic;">a brain.</em>`,
-    windows: 'Download for Windows',
+    // Windows button → the Microsoft Store listing (no SmartScreen warning there).
+    windows: 'Windows · Microsoft Store',
     linux: 'Download for Linux',
+    // Under the buttons: what the Store build lacks, and the GitHub installer that has it. The
+    // `data-dl="win-exe"` link is upgraded to the exact .exe by the download script.
+    winStoreNote: `The Store version doesn't include the CLI and can't open by itself when Windows starts. For both, <a data-dl="win-exe" href="https://github.com/yagoid/noteflow/releases/latest" target="_blank" rel="noopener" style="color:var(--ink);text-decoration:underline;text-underline-offset:3px;">use the installer from GitHub</a>.`,
     // Version label under the buttons, followed by the tag (e.g. "v2.0.0"). Hidden until the
     // client script reads the tag from the GitHub API — no version is known at build time.
     versionLabel: 'Latest release',
     disclaimer: `Your notes stay on your machine as plain <span style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--ink-dim);">.md</span> files. Sync is your own private GitHub repo. Bring your own model key. No servers, no telemetry.`,
     // Footnote to the Windows button: unsigned installers trip SmartScreen on first run.
     // Kept to one line — what the warning is, what it is *not*, and the clicks to get past it.
-    winNote: `Windows may warn about the installer: it isn't code-signed yet, not unsafe — the source is open on GitHub. Click <strong style="font-weight:500;color:var(--detail);">More info → Run anyway</strong>.`,
+    winNote: `Windows may warn about the GitHub installer: it isn't code-signed yet, not unsafe — the source is open on GitHub. Click <strong style="font-weight:500;color:var(--detail);">More info → Run anyway</strong>. The Store version doesn't show this warning.`,
     footer: {
       brand: 'NoteFlow',
       tagline: 'Fast notes, with a brain.',

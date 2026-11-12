@@ -213,8 +213,15 @@ de su tamaño → texto de la app ilegible; por eso el rediseño.)
   todo hacía que las entradas de más abajo se reprodujeran fuera de vista.
 
 **Descargas del landing (`#get`)** — fila flex con los **dos botones de descarga** (Windows `nf-lift`
-primario + Linux `nf-ghost` con `dlGhost`, 14px), ambos a `/releases/latest` y con su `data-dl`
-(`win`/`linux`) → rótulo de versión → disclaimer → nota de SmartScreen. Los dos botones pesan **igual** a propósito: los dos
+primario + Linux `nf-ghost` con `dlGhost`, 14px), con su `data-dl` (`win`/`linux`) → rótulo de
+versión → nota de la Store (`download.winStoreNote`) → disclaimer → nota de SmartScreen.
+
+- **Windows = Microsoft Store** (desde el 12-nov-2026): el botón `win` va a `STORE_URL`
+  (https://apps.microsoft.com/detail/9NLP519T4X5F, ficha «NoteFlow - Quick Notes») y el script **no lo
+  toca**. La Store firma el paquete: sin aviso de SmartScreen. Pero la versión de la Store **no trae el
+  CLI ni puede abrirse al iniciar sesión** (ver `release.md` § Microsoft Store), y la nota bajo los
+  botones lo dice con un enlace `data-dl="win-exe"` al instalador de GitHub, que es el que el script
+  convierte en el `.exe` exacto. Si la versión de la Store gana esas dos cosas, la nota se quita. Los dos botones pesan **igual** a propósito: los dos
 son descargas, ninguno debe leerse como la opción menor. **Nada se hornea en build time** y no hay dependencia del `package.json` raíz: la web solo se redespliega con
 cambios en `docs/**`, así que cualquier versión/URL horneada mentiría en cuanto salga un release.
 
