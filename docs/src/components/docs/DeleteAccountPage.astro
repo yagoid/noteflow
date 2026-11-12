@@ -1,0 +1,19 @@
+---
+// The /delete-account page — public "how to delete your NoteFlow Account" page that
+// Google Play requires for apps that create accounts (both locales render through this
+// component — see src/pages/delete-account.astro and src/pages/es/delete-account.astro).
+// Rendering lives in LegalPage.astro (shared with /privacy); prose in
+// src/i18n/docs/delete-account.{en,es}.ts. Off-rail like the legal pages; linked from
+// /privacy §14 and from the Play Console, not from the footers.
+import LegalPage from './LegalPage.astro';
+import { getDeleteAccountContent } from '../../i18n/docs/delete-account';
+import type { Lang } from '../../i18n';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+---
+
+<LegalPage lang={lang} page="delete-account" t={getDeleteAccountContent(lang)} />

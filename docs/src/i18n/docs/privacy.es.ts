@@ -1,7 +1,8 @@
 // Copy en español de la página /privacy — traducción fiel del texto legal de
-// privacy.en.ts (misma estructura de secciones y bloques; mantener en sync). El párrafo
-// del responsable (§1) nombra al titular y enlaza al aviso legal solo cuando
-// legal-notice.owner.ts está relleno.
+// privacy.en.ts (misma estructura de secciones y bloques; mantener en sync). Desde el
+// 2026-11-12 cubre la app de escritorio Y la app de Android. El párrafo del responsable
+// (§1) nombra al titular y enlaza al aviso legal solo cuando legal-notice.owner.ts está
+// relleno. Los ids `feedback` y `deletion` se enlazan desde fuera: no renombrarlos.
 import type { LegalContent } from './legal';
 import { OWNER, legalNoticeReady, ownerNameHtml } from './legal-notice.owner';
 
@@ -13,33 +14,35 @@ export const privacyEs: LegalContent = {
   meta: {
     title: 'Política de privacidad — NoteFlow',
     description:
-      'Cómo trata NoteFlow los datos: la app de escritorio es local-first y sin telemetría, y los servicios opcionales (cuenta de NoteFlow, NoteFlow AI, NoteFlow Cloud) solo tratan el mínimo descrito aquí — con sincronización en la nube cifrada y cifrado de extremo a extremo opcional.',
+      'Cómo trata NoteFlow los datos en sus apps de escritorio y de Android: local-first y sin telemetría, y los servicios opcionales (cuenta de NoteFlow, NoteFlow AI, NoteFlow Cloud) solo tratan el mínimo descrito aquí — con sincronización en la nube cifrada, cifrado de extremo a extremo opcional y borrado de la cuenta desde la app.',
   },
 
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Política de<br />privacidad',
-    tagline: 'Última actualización: 8 de noviembre de 2026',
+    tagline: 'Última actualización: 12 de noviembre de 2026',
   },
 
   summary: {
     title: 'Resumen',
-    html: 'NoteFlow es local-first. Tus notas son archivos Markdown planos guardados en tu propio dispositivo, y la aplicación de escritorio no contiene telemetría, analítica ni anuncios. No hace falta ninguna cuenta para usarla. Si decides crear una cuenta de NoteFlow y suscribirte a los servicios gestionados opcionales, tratamos los datos mínimos que se describen abajo — y NoteFlow Cloud siempre cifra tus notas, con un modo cifrado de extremo a extremo opcional en el que no podemos leerlas ni siquiera cuando están almacenadas en nuestros servidores.',
+    html: 'NoteFlow es local-first. Tus notas son archivos Markdown planos guardados en tu propio dispositivo, y ni la aplicación de escritorio ni la de Android contienen telemetría, analítica ni anuncios. No hace falta ninguna cuenta para usarlas. Si decides crear una cuenta de NoteFlow y usar los servicios gestionados opcionales, tratamos los datos mínimos que se describen abajo — y NoteFlow Cloud siempre cifra tus notas, con un modo cifrado de extremo a extremo opcional en el que no podemos leerlas ni siquiera cuando están almacenadas en nuestros servidores. Puedes eliminar tu cuenta cuando quieras, desde la app de Android o por correo.',
   },
 
   toc: [
     { id: 'controller', label: 'Quiénes somos' },
     { id: 'local-first', label: 'Local-first por defecto' },
+    { id: 'android', label: 'La app de Android' },
     { id: 'optional', label: 'Integraciones opcionales' },
     { id: 'account', label: 'Cuenta de NoteFlow' },
     { id: 'payments', label: 'Pagos' },
     { id: 'ai', label: 'NoteFlow AI' },
     { id: 'cloud', label: 'NoteFlow Cloud' },
-    { id: 'feedback', label: 'Comentarios' },
+    { id: 'feedback', label: 'Comentarios y denuncias de IA' },
     { id: 'website', label: 'Sitio web' },
     { id: 'processors', label: 'Proveedores' },
     { id: 'transfers', label: 'Transferencias' },
     { id: 'retention', label: 'Conservación' },
+    { id: 'deletion', label: 'Eliminar tu cuenta' },
     { id: 'rights', label: 'Tus derechos' },
     { id: 'children', label: 'Menores' },
     { id: 'changes', label: 'Cambios' },
@@ -53,7 +56,7 @@ export const privacyEs: LegalContent = {
       blocks: [
         {
           t: 'p',
-          html: 'NoteFlow es una aplicación de escritorio para tomar notas, un sitio web público y un conjunto de servicios online opcionales (la cuenta de NoteFlow, NoteFlow AI y NoteFlow Cloud) desarrollados y operados por un desarrollador independiente con base en España («NoteFlow», «nosotros»).',
+          html: 'NoteFlow es una aplicación para tomar notas para escritorio (Windows, macOS y Linux) y Android, un sitio web público y un conjunto de servicios online opcionales (la cuenta de NoteFlow, NoteFlow AI y NoteFlow Cloud) desarrollados y operados por un desarrollador independiente con base en España («NoteFlow», «nosotros»).',
         },
         { t: 'p', html: controllerHtml },
         {
@@ -62,32 +65,69 @@ export const privacyEs: LegalContent = {
         },
         {
           t: 'p',
-          html: 'La app móvil de NoteFlow tiene su propia política de privacidad, separada: <a href="%MOBILE_PRIVACY_URL%">política de privacidad de NoteFlow Mobile</a>.',
+          html: 'Esta política cubre <strong>tanto la app de escritorio como la app de NoteFlow para Android</strong> (sustituye a la anterior política de privacidad, separada, de la app móvil). Donde las dos apps se comportan de forma distinta, se indica la diferencia.',
         },
       ],
     },
     {
       id: 'local-first',
-      title: '2. La app por defecto: tus datos se quedan en tu dispositivo',
+      title: '2. Las apps por defecto: tus datos se quedan en tu dispositivo',
       blocks: [
         {
           t: 'p',
-          html: 'Recién instalada, la aplicación de escritorio <strong>no recoge ningún dato personal</strong>:',
+          html: 'Recién instaladas, ninguna de las dos apps recoge <strong>ningún dato personal</strong>:',
         },
         {
           t: 'ul',
           items: [
-            'Las notas, los grupos, los ajustes, las plantillas y el índice semántico de la IA se guardan <strong>localmente en tu dispositivo</strong> como archivos y una base de datos local.',
-            'En la app <strong>no hay telemetría, ni analítica, ni informes de errores, ni publicidad</strong>.',
+            'Las notas, los grupos, los ajustes, las plantillas, el historial del chat de IA y el índice de búsqueda de la IA se guardan <strong>localmente en tu dispositivo</strong> como archivos y una base de datos local.',
+            'En ninguna de las dos apps <strong>hay telemetría, ni analítica, ni informes de errores, ni publicidad</strong>.',
             'El cifrado por nota ocurre íntegramente en tu dispositivo; las notas cifradas solo pueden abrirse con tu contraseña.',
-            'No se transmite nada a ningún sitio salvo que actives explícitamente alguna de las funciones opcionales descritas abajo, o decidas enviarnos comentarios desde la app (sección 8).',
+            'No se transmite nada a ningún sitio salvo que actives explícitamente alguna de las funciones opcionales descritas abajo, o decidas enviarnos comentarios o denunciar una respuesta de la IA desde la app (sección 9).',
           ],
         },
       ],
     },
     {
+      id: 'android',
+      title: '3. La app de Android: funciones del dispositivo y permisos',
+      blocks: [
+        {
+          t: 'p',
+          html: 'La app de Android usa estas funciones del dispositivo. Todas funcionan <strong>en tu dispositivo</strong>, y ninguna nos envía datos:',
+        },
+        {
+          t: 'ul',
+          items: [
+            '<strong>Almacenamiento local.</strong> Tus notas son archivos Markdown en el almacenamiento privado de la app, con una base de datos de búsqueda local y tus ajustes al lado. Los tokens de sesión, las claves de API y las credenciales de sincronización se guardan en el almacenamiento cifrado de Android. El historial del chat de IA se queda en el dispositivo y nunca se sincroniza.',
+            '<strong>Cámara y fotos.</strong> Solo cuando decides insertar una imagen en una nota: o haces una foto con la cámara o eliges una con el selector de fotos de Android. La imagen se redimensiona y se guarda <strong>dentro de esa nota</strong>. No se sube a ningún sitio — salvo que sincronices la nota (GitHub Sync o NoteFlow Cloud), en cuyo caso viaja como parte de la nota. El permiso de cámara solo se pide la primera vez que haces una foto.',
+            '<strong>Notificaciones (recordatorios de tareas).</strong> Cuando pones un recordatorio a una tarea, la app programa una notificación <strong>local</strong> con Android. No hay servidor de notificaciones push ni token de notificaciones: los recordatorios nunca pasan por nosotros. La notificación muestra el título de la nota y el texto de la tarea, así que puede verse en la pantalla de bloqueo según tus ajustes de Android. Las notas cifradas nunca programan recordatorios. El permiso de notificaciones se pide la primera vez que pones un recordatorio.',
+            '<strong>Widgets de la pantalla de inicio.</strong> Si añades un widget de NoteFlow, muestra la nota o la lista que elijas — títulos y contenido de las secciones — en tu pantalla de inicio, donde cualquiera que vea tu pantalla puede leerlo. Los widgets se dibujan en el dispositivo a partir de tus notas locales. Las notas cifradas solo muestran su título y un candado.',
+            '<strong>Importar, exportar y compartir.</strong> Los archivos que importas vienen del selector de archivos de Android, y lo que compartes va, a través del menú para compartir de Android, solo a la app que elijas.',
+            '<strong>Copia de seguridad de Android.</strong> La app permite la copia de seguridad del sistema de Android. Si la copia de seguridad está activada en tu dispositivo, Android puede incluir los datos locales de la app (como tus notas y ajustes) en la copia de tu dispositivo, bajo las condiciones de Google; el almacenamiento cifrado que guarda tus tokens y claves queda excluido.',
+          ],
+        },
+        {
+          t: 'table',
+          head: ['Permiso de Android', 'Para qué se usa'],
+          rows: [
+            ['Cámara', 'Hacer una foto para insertarla en una nota (solo cuando tú lo decides).'],
+            ['Notificaciones', 'Mostrar los recordatorios de tareas que pongas.'],
+            ['Ejecutar al iniciar', 'Volver a programar tus recordatorios después de reiniciar el dispositivo.'],
+            ['Internet', 'Solo para las funciones opcionales: cuenta de NoteFlow, NoteFlow AI, NoteFlow Cloud, GitHub Sync, los proveedores de IA que configures y el envío de comentarios o denuncias de IA.'],
+            ['Almacenamiento (Android 12 y anteriores)', 'Importar y exportar los archivos de notas que elijas.'],
+            ['Vibración', 'Respuesta háptica en algunas interacciones.'],
+          ],
+        },
+        {
+          t: 'p',
+          html: 'Puedes retirar cualquier permiso en cualquier momento desde los ajustes de Android; la función relacionada simplemente deja de funcionar. La app se distribuye a través de <strong>Google Play</strong>, que trata datos sobre tu instalación bajo la <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">política de privacidad</a> de Google.',
+        },
+      ],
+    },
+    {
       id: 'optional',
-      title: '3. Integraciones opcionales que tú controlas',
+      title: '4. Integraciones opcionales que tú controlas',
       blocks: [
         {
           t: 'p',
@@ -97,19 +137,19 @@ export const privacyEs: LegalContent = {
           t: 'ul',
           items: [
             '<strong>GitHub Sync (gratis).</strong> Tus notas se suben a un repositorio privado de GitHub que te pertenece, y se descargan de él. Tu token de GitHub se guarda cifrado en tu dispositivo y solo se envía a la API de GitHub. A los datos de tu repositorio les aplica la <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">declaración de privacidad</a> de GitHub.',
-            '<strong>IA con tu propia clave o modelos locales (gratis).</strong> Si configuras un proveedor de IA con tu propia clave de API, tus mensajes de chat, junto con los extractos relevantes de tus notas (recuperados localmente), se envían directamente desde tu dispositivo a ese proveedor, bajo la política de privacidad de ese proveedor. Con un proveedor local (Ollama), nada sale de tu máquina.',
-            'En todas las funciones de IA: las secciones que marques como <strong>«Hide from AI»</strong> y las <strong>notas cifradas</strong> quedan excluidas del índice semántico y, por tanto, nunca se incluyen en nada que se envíe a ningún proveedor de IA. El propio índice semántico (los embeddings) se calcula y se guarda localmente.',
+            '<strong>IA con tu propia clave o modelos locales (gratis).</strong> Si configuras un proveedor de IA con tu propia clave de API, tus mensajes de chat, junto con el contenido relevante de tus notas (recuperado localmente, o leído por las herramientas del asistente cuando necesita abrir una nota), se envían directamente desde tu dispositivo a ese proveedor, bajo la política de privacidad de ese proveedor. Con un proveedor local (como Ollama), nada sale de tu máquina.',
+            'En todas las funciones de IA: las secciones que marques como <strong>«Hide from AI»</strong> y las <strong>notas cifradas</strong> quedan excluidas del índice de búsqueda de la IA y de las herramientas del asistente y, por tanto, nunca se incluyen en nada que se envíe a ningún proveedor de IA. El propio índice de búsqueda se calcula y se guarda localmente (embeddings semánticos en escritorio, un índice de texto completo en Android).',
           ],
         },
       ],
     },
     {
       id: 'account',
-      title: '4. La cuenta de NoteFlow',
+      title: '5. La cuenta de NoteFlow',
       blocks: [
         {
           t: 'p',
-          html: 'Crear una cuenta es opcional y solo hace falta para los servicios de pago. Cuando creas una, tratamos:',
+          html: 'Crear una cuenta es opcional y solo hace falta para los servicios gestionados. Puedes iniciar sesión con la misma cuenta desde la app de escritorio y desde la de Android. Cuando creas una, tratamos:',
         },
         {
           t: 'ul',
@@ -125,17 +165,17 @@ export const privacyEs: LegalContent = {
         },
         {
           t: 'p',
-          html: 'Estos datos se almacenan en <strong>Supabase</strong>, nuestro proveedor de backend (ver sección 10).',
+          html: 'Estos datos se almacenan en <strong>Supabase</strong>, nuestro proveedor de backend (ver sección 11). Puedes eliminar tu cuenta en cualquier momento (ver sección 14).',
         },
       ],
     },
     {
       id: 'payments',
-      title: '5. Pagos',
+      title: '6. Pagos',
       blocks: [
         {
           t: 'p',
-          html: 'Los planes de pago se venden a través de <strong>Lemon Squeezy</strong>, que actúa como <strong>Merchant of Record</strong>: Lemon Squeezy es el vendedor legal y se encarga del checkout, el procesamiento del pago, la facturación, los impuestos/IVA y los reembolsos. <strong>Nunca recibimos los datos de tu tarjeta ni de tu pago.</strong> De Lemon Squeezy solo recibimos eventos que describen el estado de tu suscripción (producto, estado, fecha de renovación), vinculados a tu cuenta.',
+          html: 'Los planes de pago se venden a través de <strong>Lemon Squeezy</strong>, que actúa como <strong>Merchant of Record</strong>: Lemon Squeezy es el vendedor legal y se encarga del checkout, el procesamiento del pago, la facturación, los impuestos/IVA y los reembolsos. <strong>Nunca recibimos los datos de tu tarjeta ni de tu pago.</strong> De Lemon Squeezy solo recibimos eventos que describen el estado de tu suscripción (producto, estado, fecha de renovación), vinculados a tu cuenta. La app de Android no procesa ningún pago.',
         },
         {
           t: 'p',
@@ -145,17 +185,17 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'ai',
-      title: '6. NoteFlow AI (plan de IA gestionada)',
+      title: '7. NoteFlow AI (plan de IA gestionada)',
       blocks: [
         {
           t: 'p',
-          html: 'Cuando usas el plan de IA gestionada, cada petición funciona así:',
+          html: 'Cuando usas el plan de IA gestionada, desde cualquiera de las dos apps, cada petición funciona así:',
         },
         {
           t: 'ul',
           items: [
-            'Tu mensaje de chat, junto con los extractos relevantes de tus notas recuperados <strong>localmente en tu dispositivo</strong>, se envían por TLS a nuestro proxy de IA, que los reenvía a <strong>OpenRouter</strong>, que los encamina al proveedor del modelo de IA que hayas elegido. Son <strong>exactamente los mismos datos</strong> que viajarían si usaras ese proveedor con tu propia clave de API.',
-            '<strong>No registramos ni almacenamos en nuestros servidores el contenido de tus prompts ni las respuestas del modelo.</strong> Lo único que anotamos por petición son datos de medición: tu ID de usuario, el modelo usado, el número de tokens, el coste de la petición según OpenRouter, el ID de generación de OpenRouter y una marca de tiempo — necesarios para aplicar la asignación mensual de uso, que se mide por ese coste.',
+            'Tu mensaje de chat, junto con el contenido relevante de tus notas recuperado <strong>localmente en tu dispositivo</strong>, se envían por TLS a nuestro proxy de IA, que los reenvía a <strong>OpenRouter</strong>, que los encamina al proveedor del modelo de IA que hayas elegido. Son <strong>exactamente los mismos datos</strong> que viajarían si usaras ese proveedor con tu propia clave de API.',
+            '<strong>No registramos ni almacenamos en nuestros servidores el contenido de tus prompts ni las respuestas del modelo.</strong> Lo único que anotamos por petición son datos de medición: tu ID de usuario, el modelo usado, el número de tokens, el coste de la petición según OpenRouter, el ID de generación de OpenRouter y una marca de tiempo — necesarios para aplicar la asignación mensual de uso, que se mide por ese coste. (Una respuesta que decidas denunciar solo nos llega como se describe en la sección 9.)',
             'OpenRouter y el proveedor del modelo subyacente tratan la petición bajo sus propias políticas de privacidad (<a href="https://openrouter.ai/privacy" target="_blank" rel="noopener">política de privacidad de OpenRouter</a>). Nuestra configuración de OpenRouter no se acoge a programas de registro de prompts ni de entrenamiento.',
             'Como siempre, las secciones «Hide from AI» y las notas cifradas nunca salen de tu dispositivo.',
             'NoteFlow AI es <strong>independiente de NoteFlow Cloud</strong>: usar el plan de IA no sube tus notas a nuestros servidores ni las almacena en ellos.',
@@ -165,34 +205,34 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'cloud',
-      title: '7. NoteFlow Cloud (sincronización cifrada)',
+      title: '8. NoteFlow Cloud (sincronización cifrada)',
       blocks: [
         {
           t: 'p',
-          html: 'Tus notas se <strong>cifran en tu dispositivo</strong> (AES-256-GCM) antes de subirse. Tú eliges cuánta confianza depositar en nosotros, mediante uno de dos modos:',
+          html: 'NoteFlow Cloud sincroniza tus notas entre tus dispositivos de escritorio y Android. Tus notas se <strong>cifran en tu dispositivo</strong> (AES-256-GCM) antes de subirse. Tú eliges cuánta confianza depositar en nosotros, mediante uno de dos modos:',
         },
         {
           t: 'ul',
           items: [
             '<strong>Modo gestionado (el de por defecto).</strong> La clave que protege tus notas se guarda en el servidor envuelta por una clave que custodiamos nosotros. Esto permite que la sincronización funcione automáticamente sin que tengas que recordar nada, pero significa que <strong>técnicamente podemos descifrar el contenido de tus notas</strong>. Solo accedemos a él donde sea estrictamente necesario para operar el servicio, nunca para leer tus notas con ningún otro fin.',
             '<strong>Modo privado (opcional, cifrado de extremo a extremo).</strong> Si lo activas, la clave está protegida por una <strong>passphrase que solo tú conoces</strong>, y el servidor solo almacena claves <em>envueltas</em> que no puede abrir. En este modo <strong>no podemos leer tus notas</strong>, y por lo mismo <strong>no podemos restablecer tu passphrase</strong>: si pierdes la passphrase y también el código de recuperación, tus datos en la nube quedan irrecuperables para siempre — para cualquiera.',
-            'En ambos modos, el servidor almacena el contenido de tus notas, las rutas de archivo y la estructura de carpetas solo como <strong>texto cifrado</strong>, junto a identificadores de ruta opacos y marcas de tiempo de modificación.',
+            'En ambos modos, el servidor almacena el contenido de tus notas (incluidas las imágenes que contengan), las rutas de archivo y la estructura de carpetas solo como <strong>texto cifrado</strong>, junto a identificadores de ruta opacos y marcas de tiempo de modificación.',
             'Los metadatos de sincronización que sí podemos ver se limitan a datos técnicos: marcas de tiempo de las filas, tamaños aproximados y registros de peticiones (IP, marcas de tiempo) en nuestro proveedor de infraestructura.',
           ],
         },
         {
           t: 'p',
-          html: 'Los datos de la nube se almacenan en <strong>Supabase</strong> (ver sección 10).',
+          html: 'Los datos de la nube se almacenan en <strong>Supabase</strong> (ver sección 11).',
         },
       ],
     },
     {
       id: 'feedback',
-      title: '8. Comentarios desde la app',
+      title: '9. Comentarios y denuncias de respuestas de IA desde las apps',
       blocks: [
         {
           t: 'p',
-          html: 'La app de escritorio tiene un formulario de <strong>Enviar comentarios</strong> (Ajustes → Acerca de) para informar de errores o hacer sugerencias. Es totalmente opcional, funciona <strong>con o sin cuenta</strong>, y no se envía nada hasta que pulsas <strong>Enviar</strong>. Cada envío guarda:',
+          html: '<strong>Comentarios (app de escritorio).</strong> La app de escritorio tiene un formulario de <strong>Enviar comentarios</strong> (Ajustes → Acerca de) para informar de errores o hacer sugerencias. Es totalmente opcional, funciona <strong>con o sin cuenta</strong>, y no se envía nada hasta que pulsas <strong>Enviar</strong>. Cada envío guarda:',
         },
         {
           t: 'ul',
@@ -206,13 +246,26 @@ export const privacyEs: LegalContent = {
         },
         {
           t: 'p',
-          html: 'Finalidades y bases legales (RGPD): leer y responder a tu mensaje — tu consentimiento, que das al decidir enviarlo y qué incluir (art. 6.1.a) — y usarlo para corregir errores y mejorar NoteFlow (interés legítimo, art. 6.1.f). Los comentarios se almacenan en <strong>Supabase</strong> (ver sección 10) y solo nosotros tenemos acceso a ellos.',
+          html: '<strong>Denunciar una respuesta de la IA (app de Android).</strong> En el asistente de IA de la app de Android puedes denunciar cualquier respuesta que te parezca ofensiva, dañina o errónea. No se envía nada hasta que confirmas la denuncia. Cada denuncia guarda:',
+        },
+        {
+          t: 'ul',
+          items: [
+            'El <strong>texto de la respuesta denunciada</strong> (acortado si es muy largo), el <strong>motivo</strong> que escribas, si lo escribes, y qué proveedor y modelo de IA la generaron.',
+            'La <strong>versión de la app</strong> y la plataforma (Android).',
+            'Si has iniciado sesión en una cuenta de NoteFlow, tu <strong>ID de usuario</strong>; si no, se envía sin ningún vínculo a una cuenta.',
+            '<strong>Nunca incluye tus notas, el resto de la conversación ni una dirección de contacto</strong>. Ten en cuenta, eso sí, que una respuesta de la IA puede citar contenido de tus notas: revísala antes de denunciarla.',
+          ],
+        },
+        {
+          t: 'p',
+          html: 'Finalidades y bases legales (RGPD): leer y responder a tus comentarios y revisar las respuestas de IA denunciadas — tu consentimiento, que das al decidir enviarlos y qué incluir (art. 6.1.a) — y usarlos para corregir errores, mejorar NoteFlow y mantener seguras sus funciones de IA (interés legítimo, art. 6.1.f). Los comentarios y las denuncias se almacenan en <strong>Supabase</strong> (ver sección 11) y solo nosotros tenemos acceso a ellos.',
         },
       ],
     },
     {
       id: 'website',
-      title: '9. Sitio web',
+      title: '10. Sitio web',
       blocks: [
         {
           t: 'p',
@@ -227,13 +280,13 @@ export const privacyEs: LegalContent = {
         },
         {
           t: 'p',
-          html: 'Las descargas de la app se sirven desde GitHub Releases.',
+          html: 'Las descargas de la app de escritorio se sirven desde GitHub Releases.',
         },
       ],
     },
     {
       id: 'processors',
-      title: '10. Proveedores de servicio (encargados y destinatarios)',
+      title: '11. Proveedores de servicio (encargados y destinatarios)',
       blocks: [
         {
           t: 'table',
@@ -242,7 +295,7 @@ export const privacyEs: LegalContent = {
             [
               'Supabase',
               'Infraestructura de backend (autenticación, base de datos, funciones)',
-              'Correo de la cuenta, estado de suscripción, medición de IA, datos cifrados de la nube, comentarios enviados desde la app, registros del servicio',
+              'Correo de la cuenta, estado de suscripción, medición de IA, datos cifrados de la nube, comentarios y denuncias de respuestas de IA enviados desde las apps, registros del servicio',
             ],
             [
               'Lemon Squeezy',
@@ -261,13 +314,13 @@ export const privacyEs: LegalContent = {
             ],
             [
               'GitHub',
-              'Alojamiento del sitio web, descargas de la app; GitHub Sync opcional (tu propio repositorio)',
+              'Alojamiento del sitio web, descargas de la app de escritorio; GitHub Sync opcional (tu propio repositorio)',
               'Registros del servidor web; tus notas sincronizadas si activas GitHub Sync',
             ],
             [
               'Google',
-              'Analítica y fuentes del sitio web (solo el sitio web, no la app)',
-              'Cookies, IP, uso del sitio web',
+              'Analítica y fuentes del sitio web; distribución de la app de Android en Google Play (responsable independiente); copia de seguridad de Android si la activas',
+              'Sitio web: cookies, IP, uso. Android: datos de la instalación bajo las condiciones de Google; la copia de seguridad de tu dispositivo',
             ],
           ],
         },
@@ -279,7 +332,7 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'transfers',
-      title: '11. Transferencias internacionales',
+      title: '12. Transferencias internacionales',
       blocks: [
         {
           t: 'p',
@@ -289,31 +342,62 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'retention',
-      title: '12. Conservación de los datos',
+      title: '13. Conservación de los datos',
       blocks: [
         {
           t: 'ul',
           items: [
             'Los <strong>datos de la cuenta</strong> se conservan mientras tu cuenta exista.',
             'Los <strong>registros de medición de IA</strong> se conservan mientras tu cuenta exista, para aplicar la cuota y prevenir abusos.',
-            'Los <strong>datos de la nube (texto cifrado)</strong> se conservan hasta que los borres o borres tu cuenta. Si tu suscripción caduca, sigues pudiendo descargar y borrar tus datos de la nube.',
-            'Los <strong>comentarios</strong> que envías desde la app se conservan hasta que se han atendido y mientras sigan siendo útiles para mejorar NoteFlow, y se borran cuando lo pidas. Si borras tu cuenta, dejan de estar vinculados a ella; pídenoslo si también quieres que se borren.',
-            'Para <strong>borrar tu cuenta y todos los datos asociados en el servidor</strong>, escríbenos a la dirección de arriba y los eliminaremos sin dilación indebida. (El borrado de cuenta autoservicio desde la app está planificado.)',
+            'Los <strong>datos de la nube (texto cifrado)</strong> se conservan hasta que los borres o elimines tu cuenta. Si tu suscripción caduca, sigues pudiendo descargar y borrar tus datos de la nube.',
+            'Los <strong>comentarios y las denuncias de respuestas de IA</strong> se conservan hasta que se han atendido y mientras sigan siendo útiles para mejorar NoteFlow, y se borran cuando lo pidas. Si eliminas tu cuenta, dejan de estar vinculados a ella; pídenoslo si también quieres que se borren.',
+            'Los <strong>registros de seguridad y del servicio</strong> que conserva nuestro proveedor de infraestructura (eventos de inicio de sesión, direcciones IP, marcas de tiempo) se borran automáticamente tras un periodo limitado, de 90 días como máximo.',
           ],
         },
         {
           t: 'p',
-          html: 'Todo lo que se guarda localmente en tu dispositivo es tuyo, para conservarlo o borrarlo cuando quieras — las notas son archivos Markdown planos.',
+          html: 'Todo lo que se guarda localmente en tu dispositivo es tuyo, para conservarlo o borrarlo cuando quieras — las notas son archivos Markdown planos. Desinstalar la app de Android borra sus datos locales del dispositivo.',
+        },
+      ],
+    },
+    {
+      id: 'deletion',
+      title: '14. Eliminar tu cuenta',
+      blocks: [
+        {
+          t: 'p',
+          html: 'Puedes eliminar tu cuenta de NoteFlow y sus datos en el servidor en cualquier momento, de cualquiera de estas formas (instrucciones paso a paso en la <a href="%DELETE_ACCOUNT_URL%">página de eliminación de la cuenta</a>):',
+        },
+        {
+          t: 'ul',
+          items: [
+            '<strong>En la app de Android:</strong> Ajustes → Suscripción → <strong>Eliminar cuenta</strong> (con la sesión iniciada). El borrado es inmediato.',
+            '<strong>Por correo:</strong> escribe a <strong>yago.igle@gmail.com</strong> desde la dirección de tu cuenta. Comprobaremos que la petición es tuya y la completaremos en un plazo de 30 días.',
+          ],
+        },
+        {
+          t: 'p',
+          html: 'Eliminar tu cuenta:',
+        },
+        {
+          t: 'ul',
+          items: [
+            '<strong>Cancela cualquier suscripción activa</strong>, para que no se te vuelva a cobrar. Si en ese momento no se puede cancelar una suscripción, no se borra nada y la app te pide que lo intentes de nuevo.',
+            '<strong>Borra para siempre</strong> de nuestros servidores tu cuenta (dirección de correo e ID de usuario), tus datos y claves de NoteFlow Cloud, tus registros de medición de IA y tus registros de suscripción. No se puede deshacer.',
+            '<strong>No borra las notas de tus dispositivos</strong>: son archivos locales que nunca hemos tenido, y se quedan donde están (igual que cualquier repositorio de GitHub con el que sincronices).',
+            'Conserva tus comentarios y denuncias de respuestas de IA, <strong>desvinculados de tu cuenta</strong>; pídenoslo si quieres que también se borren.',
+            'Lemon Squeezy, como Merchant of Record, conserva sus propios registros de las transacciones pasadas durante el tiempo que exija la ley, bajo su política de privacidad. Los registros de seguridad y del servicio caducan como se describe en la sección 13.',
+          ],
         },
       ],
     },
     {
       id: 'rights',
-      title: '13. Tus derechos',
+      title: '15. Tus derechos',
       blocks: [
         {
           t: 'p',
-          html: 'Bajo el RGPD puedes pedirnos el acceso a tus datos personales, su rectificación o supresión, la limitación de su tratamiento u oposición a él, y su portabilidad. La portabilidad de tus notas viene de serie: son archivos Markdown planos en tu propio disco, y los datos de la nube pueden descargarse desde la app en cualquier momento.',
+          html: 'Bajo el RGPD puedes pedirnos el acceso a tus datos personales, su rectificación o supresión, la limitación de su tratamiento u oposición a él, y su portabilidad. La portabilidad de tus notas viene de serie: son archivos Markdown planos en tu propio dispositivo, y los datos de la nube pueden descargarse desde la app en cualquier momento.',
         },
         {
           t: 'p',
@@ -323,7 +407,7 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'children',
-      title: '14. Menores',
+      title: '16. Menores',
       blocks: [
         {
           t: 'p',
@@ -333,7 +417,7 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'changes',
-      title: '15. Cambios en esta política',
+      title: '17. Cambios en esta política',
       blocks: [
         {
           t: 'p',
@@ -343,7 +427,7 @@ export const privacyEs: LegalContent = {
     },
     {
       id: 'contact',
-      title: '16. Contacto',
+      title: '18. Contacto',
       blocks: [{ t: 'p', html: '<strong>yago.igle@gmail.com</strong>' }],
     },
   ],

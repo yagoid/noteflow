@@ -12,11 +12,11 @@ información errónea/desactualizada) sin tener que re-explorar el sitio.
 ```bash
 cd docs
 npm run dev      # http://localhost:4321/noteflow/
-npm run build    # → docs/dist/ (14 páginas; 16 cuando /legal-notice tiene los datos del titular)
+npm run build    # → docs/dist/ (16 páginas; 18 cuando /legal-notice tiene los datos del titular)
 npm run check    # astro check (0 errores es lo esperado)
 ```
 
-## Mapa del sitio (14-16 páginas, EN + espejo ES bajo /es/ con el MISMO slug)
+## Mapa del sitio (16-18 páginas, EN + espejo ES bajo /es/ con el MISMO slug)
 
 | Ruta | Qué es | Componente | Prosa i18n |
 |---|---|---|---|
@@ -25,22 +25,33 @@ npm run check    # astro check (0 errores es lo esperado)
 | `/ai` | Internals de la IA (proveedores, embeddings, RAG, perfil, agente) | `src/components/docs/AiPage.astro` | `src/i18n/docs/ai.{en,es}.ts` |
 | `/features` | Detalles de producto (jerarquía, stickies, atajos, vistas, cifrado…) | `src/components/docs/FeaturesPage.astro` | `src/i18n/docs/features.{en,es}.ts` |
 | `/pricing` | Precios: todo lo esencial gratis + planes gestionados opcionales (NoteFlow AI / NoteFlow Cloud) | `src/components/docs/PricingPage.astro` | `src/i18n/docs/pricing.{en,es}.ts` |
-| `/privacy` | Política de privacidad (texto legal canónico, EN fuente) | `src/components/docs/PrivacyPage.astro` → `LegalPage.astro` | `src/i18n/docs/privacy.{en,es}.ts` |
+| `/privacy` | Política de privacidad (texto legal canónico, EN fuente) — cubre **escritorio y app de Android** desde 2026-11-12 | `src/components/docs/PrivacyPage.astro` → `LegalPage.astro` | `src/i18n/docs/privacy.{en,es}.ts` |
+| `/delete-account` | Cómo eliminar la cuenta (app de Android o email), qué se borra y qué se conserva — **página exigida por Google Play** (URL registrada en la Play Console) | `src/components/docs/DeleteAccountPage.astro` → `LegalPage.astro` | `src/i18n/docs/delete-account.{en,es}.ts` |
 | `/terms` | Términos del servicio (cuenta + planes de pago; la app se rige por su licencia GPL-3.0-or-later) | `src/components/docs/TermsPage.astro` → `LegalPage.astro` | `src/i18n/docs/terms.{en,es}.ts` |
 | `/legal-notice` (ES: `/es/legal-notice`) | Aviso legal LSSI-CE art. 10 (titular persona física autónoma, objeto, PI, responsabilidad, ley aplicable) — **gateada**, ver abajo | `src/components/docs/LegalNoticePage.astro` → `LegalPage.astro` | `src/i18n/docs/legal-notice.{en,es}.ts` + datos del titular en `legal-notice.owner.ts` |
 
 Las páginas legales van **fuera del rail** de neuronas: solo se enlazan desde los footers
+(`/delete-account` ni eso: la enlazan `/privacy#deletion` y la Play Console)
 (landing y footer slim de DocsShell) y /privacy y /terms también desde la línea de aceptación del
 sign-in de la app (`src/components/Settings/AccountPanel.tsx` → URLs absolutas
 `…/noteflow[/es]/{terms,privacy}`); /privacy además desde la nota de privacidad del formulario de
 feedback de Ajustes → About (`FeedbackSection.tsx` → `…/privacy#feedback`: no renombrar el id
 `feedback` de esa sección).
 Comparten renderer (`LegalPage.astro`: callout de resumen + secciones numeradas con bloques
-`p`/`ul`/`table`; las celdas de tabla son texto escapado, el resto `set:html`), forma común
+`p`/`ul`/`ol`/`table`; las celdas de tabla son texto escapado, el resto `set:html`), forma común
 `LegalContent` en `src/i18n/docs/legal.ts` (aquí el ES se tipa contra la interfaz, no contra
 `typeof xEn`) y accent **cyan**. Placeholders que `LegalPage.astro` rellena con URLs base-aware
-del locale: `%MOBILE_PRIVACY_URL%` (→ `public/mobile-privacy-policy.html`, página legacy que sigue
-viva porque la enlaza la Play Store), `%PRIVACY_URL%`, `%TERMS_URL%` y `%LEGAL_NOTICE_URL%`.
+del locale: `%PRIVACY_URL%`, `%TERMS_URL%`, `%LEGAL_NOTICE_URL%` y `%DELETE_ACCOUNT_URL%`.
+`public/mobile-privacy-policy.html` (la antigua política aparte de la app móvil, URL que tenía la ficha
+de Play) es desde 2026-11-12 solo un **meta-refresh** a `/privacy/#android` (patrón de `cli.html`): la
+política única cubre la app de Android (§3 `#android`: almacenamiento local, cámara/fotos, recordatorios
+con notificaciones locales, widgets, backup de Android, tabla de permisos; §9 `#feedback` incluye las
+**denuncias de respuestas de IA** del móvil; §14 `#deletion`). **Ids enlazados desde fuera, no
+renombrar:** `feedback` (escritorio), `deletion` (desde `/delete-account`), `android` (redirect legacy).
+La ruta dentro de la app que citan `/privacy#deletion` y `/delete-account` (**Settings → Subscription →
+Delete account** / **Ajustes → Suscripción → Eliminar cuenta**) debe coincidir con las etiquetas de
+`noteflow-mobile/src/i18n/{en,es}/settings.ts`; y lo que dicen que se borra/conserva, con
+`supabase/functions/delete-account` (ver `monetization.md`).
 
 **`/legal-notice` está gateada por los datos del titular.** Nombre, NIF y domicilio viven UNA sola
 vez en `src/i18n/docs/legal-notice.owner.ts` (`OWNER`, compartido por EN y ES). Mientras alguno
@@ -361,7 +372,9 @@ capacidades se autogestionan gratis: IA con Ollama/key propia, nube con GitHub S
 | `#privacy` | RAG local, al proxy viaja lo mismo que con key propia, `aiHidden`/cifradas nunca salen, IA gestionada ≠ nube de notas | monetization.md § 3 "Privacidad" + `/ai#privacy` |
 
 ### `/privacy`, `/terms` y `/legal-notice` — texto legal canónico (el EN es la fuente; el ES es traducción fiel)
-Los hechos que citan (Supabase/Lemon Squeezy/OpenRouter como proveedores, Lemon Squeezy como MoR,
+Los hechos que citan (Supabase/Lemon Squeezy/OpenRouter como proveedores, permisos y funciones de la
+app de Android (`noteflow-mobile/app.json`), qué borra el borrado de cuenta y los plazos (inmediato en
+la app, 30 días por email, logs ≤ 90 días), Lemon Squeezy como MoR,
 asignación mensual de IA medida por el coste de cómputo de cada petición (sin cifra publicada), datos de medición por petición de la IA gestionada (`/privacy`: usuario, modelo, tokens, coste según OpenRouter, id de generación y fecha — espejo de las columnas de `usage_events`), E2EE de Cloud sin reset de passphrase, edad mínima 14, licencia del código,
 contacto yago.igle@gmail.com, fecha "Last updated") deben seguir siendo ciertos: **si cambia un proveedor, la cuota, el flujo de
 pagos o la arquitectura E2EE, hay que revisar ambos textos y actualizar la fecha**. Cambios de

@@ -1,4 +1,4 @@
-// Shared shape of the legal pages (/privacy, /terms, /legal-notice). Unlike the other
+// Shared shape of the legal pages (/privacy, /terms, /legal-notice, /delete-account). Unlike the other
 // docs pages (where the EN dict defines the shape via `typeof`), every legal dict is
 // annotated with this explicit interface: the pages share one renderer (LegalPage.astro),
 // so the shape must be identical across pages, not just across locales.
@@ -7,6 +7,7 @@
 export type LegalBlock =
   | { t: 'p'; html: string }
   | { t: 'ul'; items: string[] }
+  | { t: 'ol'; items: string[] }
   | { t: 'table'; head: string[]; rows: string[][] };
 
 export interface LegalSection {
