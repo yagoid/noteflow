@@ -197,6 +197,31 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   `electron/billingPortal.ts`, testeado en `tests/electron/billingPortal.test.ts`) antes de
   `shell.openExternal`. Sin ningún portal posible → `errorCode: 'billingPortalUnavailable'`. Igual
   en la build de Microsoft Store (compra y gestión son las mismas que en la directa).
+- **Borrado de cuenta (backend implementado; cliente solo en móvil):** Edge Function
+  **`supabase/functions/delete-account`** (mismo patrón que `billing-portal`: `logic.ts` con `fetch`
+  inyectado, testeado en `tests/supabase/delete-account.test.ts`; verify JWT). `POST` sin body →
+  `{ok:true}` 200 · 401 `missing_token`/`invalid_token` · **502 `billing_cancel_failed`** (no se
+  pudo cancelar una suscripción de LS → **no se ha borrado nada**) · 500 resto
+  (`auth_unreachable`/`query_failed`/`delete_failed`/`not_configured`); errores
+  `{error:"<code>", message}` (string, no el objeto de billing-portal: contrato del móvil). Orden:
+  1) usuario por `/auth/v1/user`; 2) por **cada** fila `provider='lemonsqueezy'` (aunque aquí esté
+  `expired`: un reembolso total la expira sin cancelarla en LS) `GET /v1/subscriptions/<id>` y, si
+  LS no la da por `cancelled`/`expired`, `DELETE` (= cancelar; el periodo pagado se agota sin más
+  cobros); **cualquier** 404 de LS = 502 (key de test o fila de test: nunca borrar a ciegas); 3)
+  `DELETE` con service role de
+  `USER_DATA_TABLES` (`files`, `user_keys`, `usage_events`, `subscriptions` — el test las ata a las
+  tablas `on delete cascade` de las migraciones); 4) `DELETE /auth/v1/admin/users/<id>`. Idempotente:
+  un reintento ve las suscripciones ya canceladas, los deletes son no-ops, admin 404 = éxito y un
+  token cuyo usuario ya no existe (`user_not_found`) responde 200. `feedback` se conserva anónimo
+  (`on delete set null`). Los eventos de LS que llegan después (`subscription_cancelled`/`expired`
+  con el `user_id` borrado) violan la FK: `billing-webhook` responde 200 `ignored` ante un 409
+  `23503` (`isUnknownUserViolation`) en vez de dejar a LS reintentando; si el estado **crudo** de LS
+  (`MapResult.lemonStatus`, porque `STATUS_MAP` pliega `cancelled` en `active`) no es
+  `cancelled`/`expired` (`deletedUserEventAction` → `'alert'`: checkout pagado tras el borrado,
+  suscripción reanudada, `user_id` ajeno) loguea `console.error` "CANCEL subscription … in Lemon
+  Squeezy" para el operador. Despliegue:
+  `supabase/README.md` § 9; páginas públicas `/privacy#deletion` y `/delete-account` (web.md).
+  ⚠️ El escritorio **no** tiene aún acción de borrar cuenta (follow-up; hoy se pide por email).
 - **Webhook de billing (implementado):** Edge Function `supabase/functions/billing-webhook`
   (Deno, cero dependencias) — verifica la firma HMAC-SHA256 de la cabecera `X-Signature` contra el
   body crudo (secret en `LEMONSQUEEZY_WEBHOOK_SECRET`; comparación constant-time vía

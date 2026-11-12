@@ -30,7 +30,7 @@ export interface SubscriptionEventRow {
 
 export type MapResult =
   /** warning: something the caller should log (e.g. a malformed custom_data.user_id). */
-  | { kind: 'apply'; row: SubscriptionEventRow; warning?: string }
+  | { kind: 'apply'; row: SubscriptionEventRow; warning?: string; lemonStatus: string }
   /**
    * Full refund of a subscription payment: expire the subscription for good
    * (RPC expire_subscription_ref, migration 0010). providerRef = the LS
@@ -249,9 +249,46 @@ export function mapLemonEvent(
   const result: Extract<MapResult, { kind: 'apply' }> = {
     kind: 'apply',
     row: { userId, product, status, renewsAt, providerRef, eventAt },
+    lemonStatus: lsStatus,
   }
   if (hasRawUserId && userId === null) {
     result.warning = `custom_data.user_id is not a UUID (${String(rawUserId).slice(0, 64)}); treated as absent`
   }
   return result
+}
+
+/**
+ * True when a failed `apply_subscription_event` RPC is a foreign-key violation
+ * (Postgres 23503, which PostgREST answers with 409): the event names a user
+ * that does not exist in auth.users. That happens after an account deletion
+ * (supabase/functions/delete-account cancels the subscription, deletes the
+ * account, and LS then sends `subscription_cancelled` / `subscription_expired`
+ * carrying the old user id) or with a well-formed but unknown custom user id.
+ * Neither will ever apply, so the webhook acknowledges it (200) instead of
+ * putting Lemon Squeezy in a retry loop.
+ */
+export function isUnknownUserViolation(status: number, bodyText: string): boolean {
+  if (status !== 409) return false
+  try {
+    const body = JSON.parse(bodyText) as { code?: unknown } | null
+    return body?.code === '23503'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * What to do with an event whose user no longer exists (isUnknownUserViolation),
+ * from the RAW Lemon Squeezy status (STATUS_MAP folds `cancelled` into 'active',
+ * so the mapped status can't tell "winding down" from "still charging"):
+ *   - 'ignore' — `cancelled`/`expired`: LS will never charge again; this is the
+ *     normal tail of an account deletion (delete-account cancels first).
+ *   - 'alert'  — anything else: LS may still be BILLING a subscription with no
+ *     account behind it (a checkout paid after the deletion, a subscription
+ *     resumed from the LS portal, a foreign user id). Retrying can never apply
+ *     it, so the webhook still answers 200, but logs at error level so the
+ *     operator cancels it in Lemon Squeezy.
+ */
+export function deletedUserEventAction(lemonStatus: string): 'ignore' | 'alert' {
+  return lemonStatus === 'cancelled' || lemonStatus === 'expired' ? 'ignore' : 'alert'
 }

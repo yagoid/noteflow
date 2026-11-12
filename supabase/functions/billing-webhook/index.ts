@@ -16,7 +16,13 @@
 //   SUPABASE_URL                   injected
 //   SUPABASE_SERVICE_ROLE_KEY      injected
 
-import { verifyWebhookSignature, parseVariantMap, mapLemonEvent } from './logic.ts'
+import {
+  verifyWebhookSignature,
+  parseVariantMap,
+  mapLemonEvent,
+  isUnknownUserViolation,
+  deletedUserEventAction,
+} from './logic.ts'
 
 // Minimal surface of the Deno global we use (this file is deployed to Deno;
 // it is excluded from the repo's tsc builds, which know nothing about Deno).
@@ -158,6 +164,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
+    if (isUnknownUserViolation(res.status, detail)) {
+      // The event names a user that no longer exists (account deleted via
+      // delete-account, or a foreign id). It can never apply, so retrying is
+      // pointless: 200 either way. But if LS may still be charging it, the
+      // operator must cancel it by hand — error level, like the refund path.
+      if (deletedUserEventAction(result.lemonStatus) === 'ignore') {
+        console.warn(
+          `billing-webhook: ${result.lemonStatus} event for subscription ${row.providerRef} names a user ` +
+            'that no longer exists (deleted account) — ignored'
+        )
+      } else {
+        console.error(
+          `billing-webhook: subscription ${row.providerRef} is "${result.lemonStatus}" but its user no longer ` +
+            `exists (deleted account?) — CANCEL subscription ${row.providerRef} in Lemon Squeezy (it may keep charging)`
+        )
+      }
+      return json(200, { ignored: 'unknown user (deleted account)' })
+    }
     console.error(`billing-webhook: apply_subscription_event failed (${res.status}): ${detail}`)
     // 500 → Lemon Squeezy retries the delivery later.
     return json(500, { error: 'failed to apply event' })

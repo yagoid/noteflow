@@ -622,3 +622,99 @@ Anti-abuso: la anon key es pública, así que cualquiera puede insertar. Cada fi
 checks de longitud (mensaje ≤ 5000, email ≤ 254, diagnóstico ≤ 64/128), pero **no hay rate
 limiting**. Si llegara spam, la vía es un trigger con límite por ventana de tiempo o mover el envío a
 una Edge Function con captcha/limitación por IP.
+
+## 9. Borrado de cuenta (in-app + página pública)
+
+Google Play exige que una app que crea cuentas permita **borrarlas desde la propia app** y que haya
+una **página web pública** que explique cómo pedirlo. La app móvil lo hace desde **Settings → Account
+→ Delete account** llamando a la Edge Function `supabase/functions/delete-account`; la página
+pública es `https://yagoid.github.io/noteflow/delete-account/` (y `/es/delete-account/`), que
+también ofrece la vía por email.
+
+**Qué hace** (`POST` sin body, `Authorization: Bearer <access token>`):
+
+1. Resuelve al usuario por `/auth/v1/user`.
+2. **Cancela en Lemon Squeezy** toda suscripción suya que LS siga cobrando (mira **todas** sus filas
+   `provider='lemonsqueezy'`, también las `expired` aquí: un reembolso total la expira sin
+   cancelarla en LS). Si alguna no se puede cancelar → **502 `{error:"billing_cancel_failed"}` y no
+   se borra nada**. La cancelación es la normal de LS: no hay más cobros y el periodo pagado se agota.
+3. Borra sus filas de `files`, `user_keys`, `usage_events` y `subscriptions` (service role, filtro
+   explícito por `user_id`). NoteFlow Cloud no usa Storage: los blobs cifrados viven en `files`.
+4. Borra el usuario de Auth (`DELETE /auth/v1/admin/users/<id>`). Las tablas tienen además
+   `on delete cascade` a `auth.users`.
+
+Respuestas: 200 `{ok:true}` · 401 `missing_token`/`invalid_token` · 502 `billing_cancel_failed` ·
+500 `not_configured`/`auth_unreachable`/`query_failed`/`delete_failed` (todas con `message`). Es
+**idempotente**: reintentar tras un fallo a medias termina el trabajo, y un reintento tras un
+borrado completo (el token sigue siendo válido pero su usuario ya no existe) responde 200.
+
+**Qué NO borra:** las filas de `feedback` (pasan a `user_id = null`: reportes anónimos), el
+historial de pedidos/clientes de Lemon Squeezy (es el Merchant of Record y conserva sus registros
+fiscales) y, por supuesto, las notas locales de los dispositivos del usuario.
+
+Pasos del operador:
+
+1. **Secretos:** usa el mismo `LEMONSQUEEZY_API_KEY` (live) que `billing-portal` (§ 5.1). Si ya está
+   puesto no hay nada que hacer; si no:
+
+   ```bash
+   supabase secrets set LEMONSQUEEZY_API_KEY=<api-key-de-live>
+   ```
+
+   ⚠️ Si LS responde **404** a cualquiera de sus suscripciones (key de **test mode**, o una fila de
+   test que quedó en la tabla al pasar a live), la función se niega a borrar la cuenta
+   (`billing_cancel_failed`, log `not found in Lemon Squeezy (test-mode row or wrong API key?)`),
+   también si la fila está `expired`: un reembolso total la expira aquí sin cancelarla en LS. Es a
+   propósito: nunca borrar dejando a alguien pagando. Arreglo: corregir la key o borrar la fila de
+   test, y que el usuario reintente.
+
+2. **Redesplegar `billing-webhook`** (desde este cambio responde 200 `ignored` a los eventos de LS
+   que llegan después de borrar la cuenta — `subscription_cancelled`/`subscription_expired` con el
+   `user_id` ya borrado violan la FK y antes dejaban a LS reintentando con 500). Si el estado **crudo**
+   de LS de ese evento **no** es `cancelled`/`expired` (un checkout pagado después del borrado, una
+   suscripción reanudada desde el portal de LS, un `user_id` ajeno), también responde 200 pero loguea
+   a nivel **error** `… CANCEL subscription <id> in Lemon Squeezy (it may keep charging)`: buscar esa
+   línea en los logs de `billing-webhook` y cancelarla a mano en LS:
+
+   ```bash
+   supabase functions deploy billing-webhook --no-verify-jwt
+   ```
+
+3. **Desplegar la función** — CON verificación de JWT (el default):
+
+   ```bash
+   supabase functions deploy delete-account
+   ```
+
+4. **Comprobar** con una cuenta **de pruebas** (¡borra de verdad!; sin token → 401 `missing_token`):
+
+   ```bash
+   curl -sX POST https://<project-ref>.supabase.co/functions/v1/delete-account \
+     -H "Authorization: Bearer <access-token-de-prueba>" -H "apikey: <anon-key>"
+   # → {"ok":true}
+   ```
+
+   Logs: Dashboard → Edge Functions → delete-account → Logs (`delete-account: cancelled Lemon
+   Squeezy subscription …`, `delete-account: deleted user …`).
+
+5. ⚠️ **Retención de los logs de Auth (lo promete la web).** `/privacy` §13 y `/delete-account`
+   dicen que los registros de seguridad (eventos de inicio de sesión, IP) se borran **en ≤ 90 días**.
+   Los logs de plataforma de Supabase ya caducan solos (según el plan, muy por debajo de 90 días),
+   pero GoTrue además escribe cada evento de Auth en la tabla **`auth.audit_log_entries`**, que
+   **no caduca nunca** y que el borrado de un usuario **no limpia** (guarda su email en el payload).
+   Elegir una de las dos (una vez):
+   - Dashboard → **Authentication → Audit Logs** (o *Settings*): desactivar la escritura de los audit
+     logs en la base de datos (siguen visibles en el Logs Explorer, con su retención limitada); o
+   - con `pg_cron` (Dashboard → Database → Extensions), una purga diaria:
+
+     ```sql
+     select cron.schedule('purge-auth-audit-log', '30 4 * * *',
+       $$delete from auth.audit_log_entries where created_at < now() - interval '90 days'$$);
+     ```
+
+**Peticiones por email** (usuarios sin la app, o que no pueden iniciar sesión): la página pública
+dirige a yago.igle@gmail.com. Verificar que el remitente es el dueño de la cuenta (p. ej. pedirle que
+responda desde esa dirección) y entonces, en este orden: cancelar sus suscripciones en LS (dashboard →
+Subscriptions → *Cancel subscription*), y borrar el usuario en Dashboard → **Authentication → Users →
+… → Delete user** (las tablas caen por `on delete cascade`; `feedback` queda anónimo). Plazo
+comprometido en la página: **30 días**.

@@ -159,6 +159,7 @@ describe('mapLemonEvent', () => {
         providerRef: '424242',
         eventAt: '2026-07-06T10:00:00Z',
       },
+      lemonStatus: 'active',
     })
   })
 
