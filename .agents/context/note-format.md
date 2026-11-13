@@ -90,7 +90,11 @@ encryption:
   `sync:pull` manual y al conectar. Importa los planos remotos que falten o sean más nuevos que
   la carpeta local, hace `pushAllNotes`, borra los planos del remoto y sube el marcador
   `.noteflow-format` AL FINAL. Mientras el remoto siga en v1 (planos y sin marcador), el pull es
-  **solo aditivo** (borrados deshabilitados) para no perder carpetas recién migradas.
+  **solo aditivo** (borrados deshabilitados) para no perder carpetas recién migradas. Un plano que
+  **no se pudo leer o convertir** (GET fallido, >1 MB sin poder bajar sus bytes, parse que lanza)
+  **no se borra** del remoto, y entonces no se sube el marcador ni se guarda
+  `remoteFormatMigratedAt`: la migración se reintenta en el siguiente disparo (arranque, pull manual,
+  conectar — ninguno periódico, sin bucle) y solo relee los planos que quedan.
 - **Orden de despliegue:** actualizar TODOS los clientes (desktop, CLI, móvil) antes de migrar;
   un cliente v1 que escriba después re-crearía archivos planos (la migración los re-absorbe en
   el siguiente arranque, pero mejor evitarlo).

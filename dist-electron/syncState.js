@@ -1,13 +1,4 @@
 "use strict";
-// Pure state logic for GitHub sync durability: a persistent journal of pending
-// remote mutations (so pushes/deletes that fail are retried instead of lost) and
-// a cache of already-reconciled blob SHAs (so pullNotes can skip unchanged note
-// dirs / metadata files without a per-file GET, and the BASE of the conditional
-// push's three-way check — see "GitHub conditional push" below). Lives in electron/ but imports
-// nothing from Electron — githubSync.ts injects the file IO — following the same
-// pure-module pattern as electron/entitlements.ts. Persisted by githubSync.ts as
-// `sync-state.json` in userData (LOCAL device state — never in the notes dir, it
-// must not sync). Covered by tests/electron/syncState.test.ts.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.emptySyncState = emptySyncState;
 exports.parseSyncState = parseSyncState;
@@ -37,6 +28,8 @@ exports.setCachedSha = setCachedSha;
 exports.planRemoteDirDelete = planRemoteDirDelete;
 exports.shouldRefreshSections = shouldRefreshSections;
 exports.planSectionRefresh = planSectionRefresh;
+exports.planEmptyFileRepair = planEmptyFileRepair;
+exports.shouldHoldBackEmptyUpload = shouldHoldBackEmptyUpload;
 exports.pruneShas = pruneShas;
 exports.isGitHubEmptyRepoError = isGitHubEmptyRepoError;
 exports.isNoteFilePath = isNoteFilePath;
@@ -50,6 +43,16 @@ exports.sectionDeleteWaitsForAnchor = sectionDeleteWaitsForAnchor;
 exports.journalCompleteDir = journalCompleteDir;
 exports.journalClearStale = journalClearStale;
 exports.dropCachedShasUnder = dropCachedShasUnder;
+// Pure state logic for GitHub sync durability: a persistent journal of pending
+// remote mutations (so pushes/deletes that fail are retried instead of lost) and
+// a cache of already-reconciled blob SHAs (so pullNotes can skip unchanged note
+// dirs / metadata files without a per-file GET, and the BASE of the conditional
+// push's three-way check — see "GitHub conditional push" below). Lives in electron/ but imports
+// nothing from Electron — githubSync.ts injects the file IO — following the same
+// pure-module pattern as electron/entitlements.ts. Persisted by githubSync.ts as
+// `sync-state.json` in userData (LOCAL device state — never in the notes dir, it
+// must not sync). Covered by tests/electron/syncState.test.ts.
+const githubContents_1 = require("./githubContents");
 const OP_TYPES = ['upsert', 'delete', 'deleteDir'];
 function emptySyncState() {
     return { version: 1, ops: {}, shas: {}, bases: {} };
@@ -112,6 +115,8 @@ function parseSyncState(raw) {
             state.bases[key] = { seq, hash };
         }
     }
+    if (obj.emptyFileRepairDone === true)
+        state.emptyFileRepairDone = true;
     return state;
 }
 function serializeSyncState(state) {
@@ -122,6 +127,7 @@ function serializeSyncState(state) {
         ops: state.ops,
         shas: state.shas,
         ...(Object.keys(bases).length > 0 ? { bases } : {}),
+        ...(state.emptyFileRepairDone === true ? { emptyFileRepairDone: true } : {}),
     });
 }
 // ── Journal transitions ───────────────────────────────────────────────────────
@@ -518,6 +524,61 @@ function planSectionRefresh(state, sections, localSha, opts) {
             plan.changed.push(blob);
     }
     return plan;
+}
+// ── One-time repair of files emptied by the 1 MB Contents API bug ─────────────
+// Builds before the fix decoded the Contents API answer of a file over 1 MB
+// (`content: ""`, `encoding: "none"`) as '' — the pull wrote the file EMPTY
+// and cached its real, non-empty sha as the base, so the next local save of
+// the folder uploaded the empty version (base == remote → 'put') and every
+// device lost the content (sections embed images as base64 data URIs). Such a
+// device holds a 0-byte local file whose base is a non-empty blob.
+/**
+ * Remote files (tree blobs: note files and root metadata) to re-download once:
+ * the local file exists with 0 bytes, the blob this device reconciled (its
+ * base) is NOT the empty blob, and the remote blob is not empty either (the
+ * remote is the version to restore — if it moved since the base, the remote
+ * one). Unknown base → never (the buggy pull always cached one). Skipped:
+ * pending remote deletions of the file or its folder. A pending upsert does
+ * NOT exclude it: the buggy pull could journal the empty content itself — a
+ * section legitimately cleared here but not uploaded yet comes back once,
+ * which beats losing its images. [] once `emptyFileRepairDone`.
+ */
+function planEmptyFileRepair(state, blobs, localSize) {
+    if (state.emptyFileRepairDone === true)
+        return [];
+    const out = [];
+    for (const b of blobs) {
+        if (b.sha === githubContents_1.EMPTY_BLOB_SHA)
+            continue;
+        const base = state.shas[b.path];
+        if (base === undefined || base === githubContents_1.EMPTY_BLOB_SHA)
+            continue;
+        const slash = b.path.indexOf('/');
+        if (slash > 0 && shouldPullSkipDir(state, b.path.slice(0, slash)))
+            continue;
+        if (shouldPullSkipFile(state, b.path))
+            continue;
+        if (localSize(b.path) !== 0)
+            continue;
+        out.push(b);
+    }
+    return out;
+}
+/**
+ * Safety net of the push while the repair is pending (`emptyFileRepairDone`
+ * unset): hold back a conditional upload of EMPTY content over a non-empty
+ * remote file that is still this device's base — exactly what a device
+ * poisoned by the old pull would send (the three-way check alone answers
+ * 'put'). The caller treats it like a remote change (op stale, pull
+ * requested), and that pull's repair restores the file. Inactive once the
+ * repair has run.
+ */
+function shouldHoldBackEmptyUpload(state, base, remote, content) {
+    return (state.emptyFileRepairDone !== true &&
+        content === '' &&
+        remote !== null &&
+        remote !== githubContents_1.EMPTY_BLOB_SHA &&
+        base === remote);
 }
 /** Drops cached SHAs for paths no longer present in the remote tree (keeps the file bounded). */
 function pruneShas(state, presentPaths) {

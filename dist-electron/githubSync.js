@@ -39,6 +39,7 @@ const settingsFile_1 = require("./settingsFile");
 const noteFormat_1 = require("./noteFormat");
 const syncState_1 = require("./syncState");
 const mirrorPlan_1 = require("./mirrorPlan");
+const githubContents_1 = require("./githubContents");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
 const githubMerge_1 = require("./githubMerge");
 const githubMetadata_1 = require("./githubMetadata");
@@ -212,7 +213,9 @@ async function githubRequest(token, method, endpoint, body) {
             });
         });
         req.on('error', reject);
-        req.setTimeout(15000, () => {
+        // Idle timeout scaled with the body sent (a multi-MB PUT is written at once,
+        // then GitHub takes a while to commit it) — see githubRequestTimeoutMs.
+        req.setTimeout((0, githubContents_1.githubRequestTimeoutMs)(payload ? Buffer.byteLength(payload) : 0), () => {
             req.destroy();
             reject(new Error('GitHub API request timed out'));
         });
@@ -366,30 +369,46 @@ function rootFlatNoteBlobs(blobs) {
     return blobs.filter((b) => !b.path.includes('/') && b.path.endsWith('.md') && b.path !== 'README.md');
 }
 /**
- * Content of a git blob by its sha (`GET /repos/{o}/{r}/git/blobs/{sha}`):
- * immutable and always available, so the base of a file (the blob this device
- * last reconciled) needs no local store. null on any failure or a content
- * that does not hash to `sha` (the merge then falls back to a two-way union).
+ * Content of a git blob by its sha (`GET /repos/{o}/{r}/git/blobs/{sha}`, up to
+ * 100 MB): immutable and always available, so the base of a file (the blob
+ * this device last reconciled) needs no local store — and the source of the
+ * bytes of a file the Contents API does not inline (getRemoteFile). null on
+ * any failure or bytes that do not hash to `sha` (decodeGitBlob; the merge
+ * then falls back to a two-way union).
+ * ⚠️ Mirror of getRemoteBlobContent in cli/noteflow.js.
  */
 async function getRemoteBlobContent(token, owner, repo, sha) {
     if (!/^[0-9a-f]{40}$/.test(sha))
         return null;
     try {
         const blob = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/git/blobs/${sha}`));
-        if (!blob || blob.encoding !== 'base64' || typeof blob.content !== 'string')
-            return null;
-        const content = Buffer.from(blob.content.replace(/\n/g, ''), 'base64').toString('utf-8');
-        return (0, mirrorPlan_1.gitBlobSha)(content) === sha ? content : null;
+        return (0, githubContents_1.decodeGitBlob)(blob, sha);
     }
     catch {
         return null;
     }
 }
+/**
+ * FULL text of a remote file + its blob sha, or null when it can't be had (the
+ * GET failed — swallowed here —, the path is gone or is not a file, or the
+ * bytes could not be fetched/verified). The Contents API inlines a file only
+ * up to 1 MB (above it answers `content: ""`, `encoding: "none"` with the real
+ * sha and size — see decodeContentsApiFile); then the bytes come from the Git
+ * Blobs API by that sha, verified against it. ⚠️ FAIL-CLOSED: never '' or
+ * partial text for a non-empty remote file — every caller treats null as "not
+ * reconciled" and writes nothing. A genuinely empty file (`size: 0`) is ''.
+ * ⚠️ Mirror of getRemoteFile in cli/noteflow.js.
+ */
 async function getRemoteFile(token, owner, repo, relPath) {
     try {
         const file = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`));
-        const content = Buffer.from(file.content.replace(/\n/g, ''), 'base64').toString('utf-8');
-        return { content, sha: file.sha };
+        if (!file || typeof file.sha !== 'string')
+            return null;
+        const inline = (0, githubContents_1.decodeContentsApiFile)(file);
+        if (inline !== null)
+            return { content: inline, sha: file.sha };
+        const content = await getRemoteBlobContent(token, owner, repo, file.sha);
+        return content === null ? null : { content, sha: file.sha };
     }
     catch {
         return null;
@@ -488,6 +507,14 @@ async function upsertRemoteFileNow(token, owner, repo, relPath, content, opts = 
     // the blob this device last reconciled (sha cache); if the remote moved away
     // from it, the PUT is held back and the pull resolves the folder.
     if (conditional && (0, syncState_1.planConditionalUpsert)((0, syncState_1.getCachedSha)(getState(), relPath), sha ?? null, localSha) === 'conflict') {
+        throw new RemoteChangedError(relPath);
+    }
+    // Until the one-time repair of files emptied by the 1 MB Contents API bug
+    // has run (planEmptyFileRepair, in the pull): never send EMPTY content over
+    // a non-empty remote that is still the base — what a device poisoned by the
+    // old pull would upload. Held back like a remote change: the pull it
+    // requests restores the file.
+    if (conditional && (0, syncState_1.shouldHoldBackEmptyUpload)(getState(), (0, syncState_1.getCachedSha)(getState(), relPath), sha ?? null, content)) {
         throw new RemoteChangedError(relPath);
     }
     // note.md carries the title; section files fall back to '<dir>/<file>' label
@@ -1344,6 +1371,68 @@ async function pullNotes(notesDir) {
                 return;
             cachePulled(relPath, sha);
         };
+        // ⚠️ One-time repair (planEmptyFileRepair): files a build before the 1 MB
+        // Contents API fix wrote EMPTY while caching their real sha. Re-downloaded
+        // whatever the journal says (their pending upsert — possibly the empty
+        // content the old pull queued — is dropped), BEFORE the folder loop so the
+        // conflict path sees them reconciled. Only while GitHub is the active
+        // provider (same gate as the section refresh). The flag is set only when
+        // the listing was complete and every candidate was restored; until then
+        // the push holds back empty uploads over non-empty remotes
+        // (shouldHoldBackEmptyUpload) and the next pull tries again.
+        if (conflictsAllowed && !state.emptyFileRepairDone) {
+            const syncedBlobs = blobs.filter((b) => {
+                const slash = b.path.indexOf('/');
+                if (slash < 0)
+                    return METADATA_FILENAMES.includes(b.path);
+                return (0, syncState_1.isNoteFilePath)(b.path) && remoteNoteDirs.has(b.path.slice(0, slash));
+            });
+            const localSize = (rel) => {
+                try {
+                    const st = fs_1.default.statSync(path_1.default.join(notesDir, rel));
+                    return st.isFile() ? st.size : null;
+                }
+                catch {
+                    return null;
+                }
+            };
+            let repairComplete = !truncated;
+            for (const blob of (0, syncState_1.planEmptyFileRepair)(state, syncedBlobs, localSize)) {
+                const file = mutatedSince(blob.path, treeSeq) ? null : await getRemoteFile(token, s.owner, s.repo, blob.path);
+                // null, or the remote moved since the listing: retried on the next pull.
+                if (!file || file.sha !== blob.sha) {
+                    repairComplete = false;
+                    incomplete = true;
+                    continue;
+                }
+                // Synchronous from here: a save that landed during the GET wins.
+                if (localSize(blob.path) !== 0 || !(0, syncState_1.shouldRefreshSections)(needsFullReconcile, isCloudSyncEnabledFailClosed())) {
+                    repairComplete = false;
+                    continue;
+                }
+                fs_1.default.writeFileSync(path_1.default.join(notesDir, blob.path), file.content, 'utf-8');
+                filesDown++;
+                cachePulled(blob.path, blob.sha);
+                if ((0, syncState_1.journalComplete)(state, blob.path, 'upsert'))
+                    stateChanged = true;
+                const slash = blob.path.indexOf('/');
+                if (slash < 0) {
+                    hadMetadataChanges = true;
+                }
+                else {
+                    const dirPath = path_1.default.join(notesDir, blob.path.slice(0, slash));
+                    if (!updatedFiles.includes(dirPath)) {
+                        updatedFiles.push(dirPath);
+                        pulled++;
+                    }
+                }
+                console.warn(`[GitHubSync] restored ${blob.path}: it had been emptied by an earlier sync`);
+            }
+            if (repairComplete) {
+                state.emptyFileRepairDone = true;
+                stateChanged = true;
+            }
+        }
         // Pull each remote note directory. The note dir is the unit of conflict
         // resolution: note.md's `updated:` decides, and a newer remote wins
         // WHOLESALE (all its section files mirrored, stale local sections removed).
@@ -1470,8 +1559,11 @@ async function pullNotes(notesDir) {
                     continue;
                 }
                 const localExists = fs_1.default.existsSync(localAnchorPath);
-                const localUpdatedTs = localExists
-                    ? parseUpdatedTimestamp(extractUpdatedTimestamp(fs_1.default.readFileSync(localAnchorPath, 'utf-8')))
+                // The local anchor the decision below is based on (null = absent) —
+                // re-checked right before a wholesale write.
+                const localAnchorRaw = localExists ? fs_1.default.readFileSync(localAnchorPath, 'utf-8') : null;
+                const localUpdatedTs = localAnchorRaw !== null
+                    ? parseUpdatedTimestamp(extractUpdatedTimestamp(localAnchorRaw))
                     : null;
                 const remoteUpdatedTs = parseUpdatedTimestamp(extractUpdatedTimestamp(remoteAnchor.content));
                 const remoteNotNewer = localUpdatedTs !== null && remoteUpdatedTs !== null && remoteUpdatedTs <= localUpdatedTs;
@@ -1526,9 +1618,15 @@ async function pullNotes(notesDir) {
                     }
                     continue;
                 }
-                fs_1.default.mkdirSync(localDirPath, { recursive: true });
-                fs_1.default.writeFileSync(localAnchorPath, remoteAnchor.content, 'utf-8');
-                filesDown++;
+                // Every section is fetched BEFORE anything is written: one that can't
+                // be had (failed GET, bytes over 1 MB that the blob fallback could not
+                // get — getRemoteFile is fail-closed) leaves the folder untouched and
+                // unreconciled (anchor not cached → the next pull retries it whole),
+                // and no local section is removed on the strength of a partial fetch.
+                // It used to write the anchor and the rest, skip that section
+                // silently and cache the anchor as reconciled.
+                const remoteSections = [];
+                let sectionsFetched = true;
                 for (const f of remoteFilesInDir) {
                     if (f === noteFormat_1.NOTE_MD)
                         continue;
@@ -1536,12 +1634,38 @@ async function pullNotes(notesDir) {
                     if ((0, syncState_1.shouldPullSkipFile)(state, `${dir}/${f}`))
                         continue;
                     const remoteSection = await getRemoteFile(token, s.owner, s.repo, `${dir}/${f}`);
-                    if (remoteSection) {
-                        fs_1.default.writeFileSync(path_1.default.join(localDirPath, f), remoteSection.content, 'utf-8');
-                        filesDown++;
-                        // Reconciled section blob (see planSectionRefresh).
-                        cachePulled(`${dir}/${f}`, remoteSection.sha);
+                    if (!remoteSection) {
+                        sectionsFetched = false;
+                        break;
                     }
+                    remoteSections.push([f, remoteSection]);
+                }
+                if (!sectionsFetched) {
+                    incomplete = true;
+                    continue;
+                }
+                // ── Synchronous from here on. ── The GETs above can take a while (blob
+                // downloads of several MB): if this device pushed into the folder since
+                // the listing, or the local anchor changed since the decision (a save
+                // landed meanwhile), the decision is stale — write and cache nothing,
+                // the next pull decides again.
+                let localAnchorNow = null;
+                try {
+                    localAnchorNow = fs_1.default.readFileSync(localAnchorPath, 'utf-8');
+                }
+                catch { /* absent */ }
+                if (dirMutatedSince(dir, treeSeq) || localAnchorNow !== localAnchorRaw) {
+                    incomplete = true;
+                    continue;
+                }
+                fs_1.default.mkdirSync(localDirPath, { recursive: true });
+                fs_1.default.writeFileSync(localAnchorPath, remoteAnchor.content, 'utf-8');
+                filesDown++;
+                for (const [f, remoteSection] of remoteSections) {
+                    fs_1.default.writeFileSync(path_1.default.join(localDirPath, f), remoteSection.content, 'utf-8');
+                    filesDown++;
+                    // Reconciled section blob (see planSectionRefresh).
+                    cachePulled(`${dir}/${f}`, remoteSection.sha);
                 }
                 // Sections removed remotely → remove their local files
                 try {
@@ -2607,11 +2731,17 @@ async function migrateRemoteToV2IfNeeded(notesDir) {
         // 1) Convert remote flat notes locally first so nothing is lost: notes that
         //    only exist remotely (or are NEWER remotely — an old client pushed after
         //    our local migration) are written as local folders before deletion.
+        //    A flat note that could not be read or converted is NOT deleted in
+        //    step 3 (it would be lost: the local folder may lack it), and the
+        //    migration is not recorded — see `unconverted` below.
+        const unconverted = new Set();
         for (const blob of flatNotes) {
             try {
                 const remote = await getRemoteFile(token, s.owner, s.repo, blob.path);
-                if (!remote)
+                if (!remote) {
+                    unconverted.add(blob.path);
                     continue;
+                }
                 const dir = blob.path.replace(/\.md$/i, '');
                 const localAnchorPath = path_1.default.join(notesDir, dir, noteFormat_1.NOTE_MD);
                 if (fs_1.default.existsSync(localAnchorPath)) {
@@ -2628,19 +2758,32 @@ async function migrateRemoteToV2IfNeeded(notesDir) {
                 }
             }
             catch (err) {
+                unconverted.add(blob.path);
                 console.error(`[GitHubSync] remote migration: failed to convert ${blob.path}:`, String(err));
             }
         }
         // 2) Push every local note folder + metadata
         await pushAllNotes(notesDir);
-        // 3) Delete the old flat files from the remote
+        // 3) Delete the old flat files from the remote — except the unconverted ones
         for (const blob of flatNotes) {
+            if (unconverted.has(blob.path))
+                continue;
             try {
                 await removeRemoteFile(token, s.owner, s.repo, blob.path);
             }
             catch (err) {
                 console.error(`[GitHubSync] remote migration: failed to delete ${blob.path}:`, String(err));
             }
+        }
+        // Some flat note could not be converted: no marker and no
+        // `remoteFormatMigratedAt`, so the remote stays "not v2" (every pull stays
+        // additive-only, other clients keep their deletion rule off) and the
+        // migration runs again on the next trigger — boot, manual pull, connect;
+        // never a loop (none of them is periodic). Converted notes are already
+        // gone from the remote, so the retry only re-reads the failed ones.
+        if (unconverted.size > 0) {
+            console.warn(`[GitHubSync] remote migration incomplete: ${unconverted.size} flat note(s) could not be read — kept on GitHub, retried later`);
+            return true;
         }
         // 4) Marker LAST — it flips other clients into full v2 behaviour
         await upsertRemoteFile(token, s.owner, s.repo, noteFormat_1.FORMAT_MARKER_FILE, `${noteFormat_1.NOTE_FORMAT_VERSION}\n`);

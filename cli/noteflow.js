@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.11.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.11.1 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.11.0'
+const CLI_VERSION = '2.11.1'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -2459,6 +2459,17 @@ async function resolveSetContent(opts) {
 
 // ── GitHub API ────────────────────────────────────────────────────────────────
 
+/**
+ * Socket-idle timeout of one GitHub API request: 15 s + 1 s per 32 KB of the
+ * body it SENDS (a multi-MB PUT is written at once, then GitHub takes a while
+ * to commit it), capped at 10 min. Mirror of githubRequestTimeoutMs
+ * (electron/githubContents.ts).
+ */
+function githubRequestTimeoutMs(payloadBytes) {
+  const bytes = Number.isFinite(payloadBytes) && payloadBytes > 0 ? payloadBytes : 0
+  return Math.min(15000 + Math.ceil(bytes / 32768) * 1000, 10 * 60000)
+}
+
 function githubRequest(token, method, endpoint, body) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : undefined
@@ -2484,7 +2495,8 @@ function githubRequest(token, method, endpoint, body) {
       })
     })
     req.on('error', reject)
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Request timed out')) })
+    // Idle timeout scaled with the body sent (a multi-MB PUT) — githubRequestTimeoutMs.
+    req.setTimeout(githubRequestTimeoutMs(payload ? Buffer.byteLength(payload) : 0), () => { req.destroy(); reject(new Error('Request timed out')) })
     if (payload) req.write(payload)
     req.end()
   })
@@ -2576,6 +2588,31 @@ function gitBlobSha(content) {
   return createHash('sha1').update(`blob ${body.length}\0`, 'utf-8').update(body).digest('hex')
 }
 
+/** Blob sha of an empty file: a genuinely empty remote file. Mirror of EMPTY_BLOB_SHA (electron/githubContents.ts). */
+const EMPTY_BLOB_SHA = gitBlobSha('')
+
+/**
+ * Text of a Contents API answer ONLY when it carries the whole file inline,
+ * else null (→ Git Blobs API). Above 1 MB GitHub answers `content: ""`,
+ * `encoding: "none"` with the real sha/size — decoding that as base64 gave ''
+ * and an image-heavy section was written (and later pushed) EMPTY. A genuinely
+ * empty file (size 0) is ''. Mirror of decodeContentsApiFile (electron/githubContents.ts).
+ */
+function decodeContentsApiFile(file) {
+  if (!file || file.encoding !== 'base64' || typeof file.content !== 'string') return null
+  const bytes = Buffer.from(file.content.replace(/\n/g, ''), 'base64')
+  if (typeof file.size === 'number' && bytes.length !== file.size) return null
+  return bytes.toString('utf-8')
+}
+
+/** Text of a Git Blobs API answer, null unless its BYTES hash to `sha`. Mirror of decodeGitBlob (electron/githubContents.ts). */
+function decodeGitBlob(blob, sha) {
+  if (!blob || blob.encoding !== 'base64' || typeof blob.content !== 'string') return null
+  const bytes = Buffer.from(blob.content.replace(/\n/g, ''), 'base64')
+  const actual = createHash('sha1').update(`blob ${bytes.length}\0`, 'utf-8').update(bytes).digest('hex')
+  return actual === sha ? bytes.toString('utf-8') : null
+}
+
 /** '<dir>/<file>.md' — the only conditional remote paths. Mirror of isNoteFilePath. */
 function isNoteFilePath(relPath) {
   return /^[^/]+\/[^/]+\.md$/.test(relPath)
@@ -2645,11 +2682,27 @@ function loadGithubBases(sync) {
   return {}
 }
 
-function saveGithubBases(sync, shas) {
+/**
+ * Has the one-time repair of files emptied by the 1 MB Contents API bug run
+ * for the connected repo (`emptyFileRepairDone` in cli-github-state.json —
+ * see repairEmptiedFiles)? A lost/other-repo file answers false: the next
+ * `noteflow pull` runs the (cheap) repair again.
+ */
+function githubEmptyRepairDone(sync) {
+  try {
+    const data = JSON.parse(fs.readFileSync(GITHUB_BASES_PATH, 'utf-8'))
+    return !!data && data.owner === sync.owner && data.repo === sync.repo && data.emptyFileRepairDone === true
+  } catch { return false }
+}
+
+/** Writes the bases; the repair flag is kept as it is unless `emptyFileRepairDone` is given. */
+function saveGithubBases(sync, shas, emptyFileRepairDone = githubEmptyRepairDone(sync)) {
   try {
     const dir = path.dirname(GITHUB_BASES_PATH)
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-    fs.writeFileSync(GITHUB_BASES_PATH, JSON.stringify({ owner: sync.owner, repo: sync.repo, shas }), 'utf-8')
+    fs.writeFileSync(GITHUB_BASES_PATH, JSON.stringify({
+      owner: sync.owner, repo: sync.repo, shas, ...(emptyFileRepairDone ? { emptyFileRepairDone: true } : {}),
+    }), 'utf-8')
   } catch { /* best effort: a lost cache only means "unknown base" next time */ }
 }
 
@@ -2657,27 +2710,34 @@ function clearGithubBases() {
   try { fs.unlinkSync(GITHUB_BASES_PATH) } catch { /* not there */ }
 }
 
-/** GET of one remote file: { content, sha } or null (absent / failed). */
+/**
+ * FULL text of one remote file: { content, sha } or null (absent / failed /
+ * bytes unobtainable). The Contents API inlines only up to 1 MB; above it the
+ * bytes come from the Git Blobs API by the file's sha, verified. FAIL-CLOSED:
+ * never '' or partial text for a non-empty remote file — callers write
+ * nothing on null. Mirror of getRemoteFile (electron/githubSync.ts).
+ */
 async function getRemoteFile(token, owner, repo, relPath) {
   try {
     const f = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`)
-    if (typeof f.sha !== 'string' || typeof f.content !== 'string') return null
-    return { content: Buffer.from(f.content.replace(/\n/g, ''), 'base64').toString('utf-8'), sha: f.sha }
+    if (!f || typeof f.sha !== 'string') return null
+    const inline = decodeContentsApiFile(f)
+    if (inline !== null) return { content: inline, sha: f.sha }
+    const content = await getRemoteBlobContent(token, owner, repo, f.sha)
+    return content === null ? null : { content, sha: f.sha }
   } catch { return null }
 }
 
 /**
- * Content of a git blob by its sha (GET git/blobs — the base of a line merge),
+ * Content of a git blob by its sha (GET git/blobs, up to 100 MB — the base of
+ * a line merge, and the bytes of a file the Contents API does not inline),
  * verified against the sha; null when it can't be read (→ two-way union).
  * Mirror of getRemoteBlobContent (electron/githubSync.ts).
  */
 async function getRemoteBlobContent(token, owner, repo, sha) {
   if (!/^[0-9a-f]{40}$/.test(sha)) return null
   try {
-    const blob = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/git/blobs/${sha}`)
-    if (!blob || blob.encoding !== 'base64' || typeof blob.content !== 'string') return null
-    const content = Buffer.from(blob.content.replace(/\n/g, ''), 'base64').toString('utf-8')
-    return gitBlobSha(content) === sha ? content : null
+    return decodeGitBlob(await githubRequest(token, 'GET', `/repos/${owner}/${repo}/git/blobs/${sha}`), sha)
   } catch { return null }
 }
 
@@ -2697,6 +2757,14 @@ async function upsertRemoteFile(token, owner, repo, relPath, content, bases = nu
   if (sha === local) {
     if (bases) bases[relPath] = local
     return 'identical'
+  }
+  // Until `noteflow pull` has run the one-time repair (repairEmptiedFiles):
+  // never send an EMPTY file over non-empty GitHub content — what a machine
+  // whose earlier pull emptied a file over 1 MB would upload, wiping it on
+  // every device. Desktop counterpart: shouldHoldBackEmptyUpload.
+  if (content === '' && sha !== undefined && sha !== EMPTY_BLOB_SHA && githubConditionalActive() &&
+      !githubEmptyRepairDone({ owner, repo })) {
+    throw new Error(`${relPath} is empty here but not on GitHub — run 'noteflow pull' once: it restores GitHub's content of this file (an earlier sync may have emptied it). If you emptied it on purpose, clear it again after the pull`)
   }
   if (bases && isNoteFilePath(relPath) && githubConditionalActive() &&
       planConditionalUpsert(bases[relPath], sha === undefined ? null : sha, local) === 'conflict') {
@@ -5988,6 +6056,49 @@ function localOnlyHint(n) {
   return `${n} local ${notes} not on GitHub (new here, or deleted on another device) — run 'noteflow push' to upload ${n === 1 ? 'it' : 'them'} if new`
 }
 
+/**
+ * One-time repair run by `noteflow pull` (flag `emptyFileRepairDone` in
+ * cli-github-state.json): before 2.11.1 a file over 1 MB came back from the
+ * Contents API as '' and the pull wrote it EMPTY (sections embed images as
+ * base64). Re-downloads, by the tree's blob sha (verified), every synced file
+ * — note files of anchored folders and METADATA_FILES — whose local copy is
+ * 0 bytes while GitHub's blob is not empty. Unlike the app's
+ * planEmptyFileRepair there is no base condition: the CLI's pull never
+ * recorded a base for the emptied file. A section cleared here and not
+ * uploaded yet comes back once (acceptable; lost images are not). Only while
+ * GitHub is the active backend (githubConditionalActive — like the app): with
+ * NoteFlow Cloud on, GitHub is a stale mirror and must not restore anything;
+ * the flag stays unset then.
+ * Returns { restored, done } — done = flag to store (every candidate restored).
+ */
+async function repairEmptiedFiles(token, sync, blobs, remoteDirs) {
+  if (githubEmptyRepairDone(sync)) return { restored: 0, done: true }
+  if (!githubConditionalActive()) return { restored: 0, done: false }
+  let restored = 0, failed = 0
+  for (const b of blobs) {
+    const slash = b.path.indexOf('/')
+    const synced = slash < 0
+      ? METADATA_FILES.includes(b.path)
+      : isNoteFilePath(b.path) && (remoteDirs.get(b.path.slice(0, slash)) || []).includes(NOTE_MD)
+    if (!synced || b.sha === EMPTY_BLOB_SHA) continue
+    let size = null
+    try {
+      const st = fs.statSync(path.join(NOTES_DIR, b.path))
+      if (st.isFile()) size = st.size
+    } catch { /* absent locally: nothing emptied */ }
+    if (size !== 0) continue
+    const content = await getRemoteBlobContent(token, sync.owner, sync.repo, b.sha)
+    if (content === null) {
+      failed++
+      err(`could not restore ${b.path} from GitHub — run 'noteflow pull' again`)
+      continue
+    }
+    fs.writeFileSync(path.join(NOTES_DIR, b.path), content, 'utf-8')
+    restored++
+  }
+  return { restored, done: failed === 0 }
+}
+
 // Errors are THROWN, not exit()ed: `noteflow pull` gets the same "Error: …" +
 // exit 1 from the handler at the bottom of main(), while `login` can catch them
 // (a failed first pull must not look like a failed login).
@@ -6024,9 +6135,12 @@ async function cmdPull(opts = {}) {
     remoteDirs.get(dir).push(rest)
   }
 
+  // Full text of a remote file (getRemoteFile: blob fallback above 1 MB) —
+  // THROWS when it can't be had, never resolves to '' for a non-empty file.
   async function fetchRemote(relPath) {
-    const remote = await githubRequest(token, 'GET', `/repos/${sync.owner}/${sync.repo}/contents/${encodeRemotePath(relPath)}`)
-    return Buffer.from(remote.content.replace(/\n/g, ''), 'base64').toString('utf-8')
+    const remote = await getRemoteFile(token, sync.owner, sync.repo, relPath)
+    if (!remote) throw new Error(`could not download ${relPath} from GitHub`)
+    return remote.content
   }
 
   let pulled = 0, skipped = 0
@@ -6041,13 +6155,16 @@ async function cmdPull(opts = {}) {
         const ru = extractUpdatedTimestamp(remoteAnchor)
         if (lu && ru && ru <= lu) { skipped++; continue }
       }
+      // Every section BEFORE writing anything: one that can't be downloaded
+      // leaves the whole folder as it was (an error for it, retried by the
+      // next pull) — it used to be skipped after the anchor was written.
+      const sections = []
+      for (const f of files) {
+        if (f !== NOTE_MD) sections.push([f, await fetchRemote(`${dir}/${f}`)])
+      }
       fs.mkdirSync(localDirPath, { recursive: true })
       fs.writeFileSync(localAnchorPath, remoteAnchor, 'utf-8')
-      for (const f of files) {
-        if (f === NOTE_MD) continue
-        try { fs.writeFileSync(path.join(localDirPath, f), await fetchRemote(`${dir}/${f}`), 'utf-8') }
-        catch { /* skip unreadable section */ }
-      }
+      for (const [f, content] of sections) fs.writeFileSync(path.join(localDirPath, f), content, 'utf-8')
       // Sections removed remotely → remove their local files
       for (const lf of fs.readdirSync(localDirPath)) {
         if (lf.endsWith('.md') && lf !== NOTE_MD && !files.includes(lf)) {
@@ -6092,6 +6209,8 @@ async function cmdPull(opts = {}) {
       if (decision.push) metaToPush.push(m)
     } catch { /* optional: missing on GitHub, or unreadable */ }
   }
+  const repair = await repairEmptiedFiles(token, sync, blobs, remoteDirs)
+  if (repair.restored) out(`  Restored ${repair.restored} file(s) an earlier sync had left empty`)
   // Bases of the conditional push: a listed blob becomes the base only where
   // the local file now IS that blob (folders skipped as "local newer" keep
   // their previous base — the next push must still see the remote change).
@@ -6100,7 +6219,7 @@ async function cmdPull(opts = {}) {
     try { localShas[b.path] = gitBlobSha(fs.readFileSync(path.join(NOTES_DIR, b.path), 'utf-8')) }
     catch { localShas[b.path] = null }
   }
-  saveGithubBases(sync, nextPulledBases(prevBases, blobs, localShas))
+  saveGithubBases(sync, nextPulledBases(prevBases, blobs, localShas), repair.done)
   const localOnly = localOnlyNoteDirs(listLocalNoteDirs(), remoteDirs)
   // Local-only notes mean the repo does NOT know everything on disk yet: a
   // fresh lastSync would arm the desktop app's deletion rule against them
@@ -7218,6 +7337,7 @@ if (require.main === module) {
     unsupportedFlagError, COMMAND_FLAGS, decodeInputBuffer, looksLikeUtf16,
     gitBlobSha, isNoteFilePath, planConditionalUpsert, planConditionalDelete, remoteDirChangesSinceBase,
     nextPulledBases, githubConflictCandidates, planGithubDirMerge, githubResolveConflictDir, cmdPush, cmdPull,
+    EMPTY_BLOB_SHA, decodeContentsApiFile, decodeGitBlob, githubRequestTimeoutMs, getRemoteFile,
     // Cloud three-way reconcile (mirrors of electron/cloudSyncLogic.ts) + the
     // Cloud engine entry points, driven by tests against an in-memory server.
     CLOUD_BASE_UPSERT_RPC, TOMBSTONE_BASE_HASH, UNKNOWN_BASE_HASH,

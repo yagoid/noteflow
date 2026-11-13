@@ -7,6 +7,7 @@
 // pure-module pattern as electron/entitlements.ts. Persisted by githubSync.ts as
 // `sync-state.json` in userData (LOCAL device state — never in the notes dir, it
 // must not sync). Covered by tests/electron/syncState.test.ts.
+import { EMPTY_BLOB_SHA } from './githubContents'
 
 export type SyncOpType = 'upsert' | 'delete' | 'deleteDir'
 
@@ -80,6 +81,14 @@ export interface SyncState {
    * (state of an earlier build, never reconciled) → historical behaviour.
    */
   bases: Record<string, CloudBase>
+  /**
+   * GitHub only: the one-time repair of files emptied by the 1 MB Contents API
+   * bug (planEmptyFileRepair) has run and every candidate was restored. Absent
+   * = not yet — the repair runs on the next GitHub pull, and meanwhile a
+   * conditional upload of an EMPTY file over non-empty remote content is held
+   * back (shouldHoldBackEmptyUpload).
+   */
+  emptyFileRepairDone?: true
 }
 
 /**
@@ -154,6 +163,8 @@ export function parseSyncState(raw: string | null | undefined): SyncState {
     }
   }
 
+  if (obj.emptyFileRepairDone === true) state.emptyFileRepairDone = true
+
   return state
 }
 
@@ -165,6 +176,7 @@ export function serializeSyncState(state: SyncState): string {
     ops: state.ops,
     shas: state.shas,
     ...(Object.keys(bases).length > 0 ? { bases } : {}),
+    ...(state.emptyFileRepairDone === true ? { emptyFileRepairDone: true } : {}),
   })
 }
 
@@ -645,6 +657,69 @@ export function planSectionRefresh(
     else if (opts.refreshAllowed && opts.isListedLocally(blob.path)) plan.changed.push(blob)
   }
   return plan
+}
+
+// ── One-time repair of files emptied by the 1 MB Contents API bug ─────────────
+// Builds before the fix decoded the Contents API answer of a file over 1 MB
+// (`content: ""`, `encoding: "none"`) as '' — the pull wrote the file EMPTY
+// and cached its real, non-empty sha as the base, so the next local save of
+// the folder uploaded the empty version (base == remote → 'put') and every
+// device lost the content (sections embed images as base64 data URIs). Such a
+// device holds a 0-byte local file whose base is a non-empty blob.
+
+/**
+ * Remote files (tree blobs: note files and root metadata) to re-download once:
+ * the local file exists with 0 bytes, the blob this device reconciled (its
+ * base) is NOT the empty blob, and the remote blob is not empty either (the
+ * remote is the version to restore — if it moved since the base, the remote
+ * one). Unknown base → never (the buggy pull always cached one). Skipped:
+ * pending remote deletions of the file or its folder. A pending upsert does
+ * NOT exclude it: the buggy pull could journal the empty content itself — a
+ * section legitimately cleared here but not uploaded yet comes back once,
+ * which beats losing its images. [] once `emptyFileRepairDone`.
+ */
+export function planEmptyFileRepair(
+  state: SyncState,
+  blobs: readonly TreeBlobRef[],
+  localSize: (relPath: string) => number | null,
+): TreeBlobRef[] {
+  if (state.emptyFileRepairDone === true) return []
+  const out: TreeBlobRef[] = []
+  for (const b of blobs) {
+    if (b.sha === EMPTY_BLOB_SHA) continue
+    const base = state.shas[b.path]
+    if (base === undefined || base === EMPTY_BLOB_SHA) continue
+    const slash = b.path.indexOf('/')
+    if (slash > 0 && shouldPullSkipDir(state, b.path.slice(0, slash))) continue
+    if (shouldPullSkipFile(state, b.path)) continue
+    if (localSize(b.path) !== 0) continue
+    out.push(b)
+  }
+  return out
+}
+
+/**
+ * Safety net of the push while the repair is pending (`emptyFileRepairDone`
+ * unset): hold back a conditional upload of EMPTY content over a non-empty
+ * remote file that is still this device's base — exactly what a device
+ * poisoned by the old pull would send (the three-way check alone answers
+ * 'put'). The caller treats it like a remote change (op stale, pull
+ * requested), and that pull's repair restores the file. Inactive once the
+ * repair has run.
+ */
+export function shouldHoldBackEmptyUpload(
+  state: SyncState,
+  base: string | undefined,
+  remote: string | null,
+  content: string,
+): boolean {
+  return (
+    state.emptyFileRepairDone !== true &&
+    content === '' &&
+    remote !== null &&
+    remote !== EMPTY_BLOB_SHA &&
+    base === remote
+  )
 }
 
 /** Drops cached SHAs for paths no longer present in the remote tree (keeps the file bounded). */
