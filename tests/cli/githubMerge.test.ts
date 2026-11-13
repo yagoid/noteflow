@@ -20,6 +20,7 @@ import yaml from 'js-yaml'
 import { serializeNoteFolder, splitFrontmatter, NOTE_MD, type DiskNote } from '../../electron/noteFormat'
 import { planGithubDirMerge, type GithubMergeFile } from '../../electron/githubMerge'
 import { gitBlobSha } from '../../electron/mirrorPlan'
+import { EMPTY_BLOB_SHA, decodeContentsApiFile, githubRequestTimeoutMs } from '../../electron/githubContents'
 
 const require = createRequire(import.meta.url)
 const CLI_PATH = require.resolve('../../cli/noteflow.js')
@@ -43,6 +44,9 @@ class FakeGithub {
   calls: string[] = []
   failBlobs = false
   failPuts = new Set<string>() // paths whose PUT answers 500
+  // Bytes above which the Contents API does not inline a file (GitHub: 1 MB):
+  // `content: ""`, `encoding: "none"`, real sha and size.
+  largeThreshold = Infinity
 
   put(rel: string, content: string) {
     this.files.set(rel, content)
@@ -69,7 +73,9 @@ class FakeGithub {
       const curSha = cur === undefined ? undefined : gitBlobSha(cur)
       if (method === 'GET') {
         if (cur === undefined) return { status: 404, json: { message: 'Not Found' } }
-        return { status: 200, json: { sha: curSha, content: Buffer.from(cur).toString('base64') } }
+        const size = Buffer.byteLength(cur)
+        if (size > this.largeThreshold) return { status: 200, json: { sha: curSha, size, encoding: 'none', content: '' } }
+        return { status: 200, json: { sha: curSha, size, encoding: 'base64', content: Buffer.from(cur).toString('base64') } }
       }
       if (method === 'PUT') {
         if (this.failPuts.has(rel)) return { status: 500, json: { message: 'Server Error' } }
@@ -429,4 +435,129 @@ describe('planGithubDirMerge: CLI ↔ app parity', () => {
       expect(normalized(cli.planGithubDirMerge(input))).toEqual(normalized(planGithubDirMerge(input)))
     })
   }
+})
+
+// Files over 1 MB: the Contents API answers `content: ""`, `encoding: "none"`
+// (real sha and size). Before 2.11.1 the CLI decoded that as '' — `noteflow
+// pull` and the conflict merge wrote an image-heavy section EMPTY, and the
+// next push uploaded it. Now the bytes come from the Git Blobs API (verified),
+// fail-closed; `noteflow pull` repairs files an earlier pull emptied, once.
+describe('GitHub files over the Contents API limit', () => {
+  const BIG = `![img](data:image/png;base64,${'iVBORw0KGgo'.repeat(300)})\nholiday photos ✓`
+  const statePath = () => path.join(configDir, 'noteflow', 'cli-github-state.json')
+  const cliState = () => JSON.parse(fs.readFileSync(statePath(), 'utf-8'))
+
+  beforeEach(() => {
+    gh.largeThreshold = 1000 // note.md stays inline, BIG does not
+  })
+
+  it('`noteflow pull` of a newer remote note with a big section writes the real content (and its base)', async () => {
+    pcSave(note(T_PC, { s1: BIG, s2: 'call mum' }))
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s1.md`)).toBe(BIG)
+    expect(readLocal(ANCHOR)).toContain(T_PC)
+    expect(cliState().shas[`${DIR}/s1.md`]).toBe(gitBlobSha(BIG))
+  })
+
+  it('blob download failing → the folder is left as it was (error), nothing emptied', async () => {
+    pcSave(note(T_PC, { s1: BIG, s2: 'call dad' }))
+    gh.failBlobs = true
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s1.md`)).toBe('milk\nflour\neggs')
+    expect(readLocal(`${DIR}/s2.md`)).toBe('call mum')
+    expect(readLocal(ANCHOR)).toContain(T0)
+    expect(logs.some((l) => l.includes(`could not download ${DIR}/s1.md from GitHub`))).toBe(true)
+    gh.failBlobs = false
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s1.md`)).toBe(BIG)
+  })
+
+  it('conflict merge with a big section changed on GitHub keeps it (here and there)', async () => {
+    pcSave(note(T_PC, { s1: BIG, s2: 'call mum' }))
+    const files = cliSave(note(T_CLI, { s1: 'milk\nflour\neggs', s2: 'call dad' }))
+    const { conflicted } = await cli.syncPushNoteFiles(DIR, files)
+    expect(conflicted).toBe(true)
+    expect(readLocal(`${DIR}/s1.md`)).toBe(BIG)
+    expect(gh.files.get(`${DIR}/s1.md`)).toBe(BIG)
+    expect(gh.files.get(`${DIR}/s2.md`)).toBe('call dad')
+    expect(otherDirs()).toEqual([])
+  })
+
+  it('conflict merge whose big remote section can not be downloaded → nothing written, nothing uploaded', async () => {
+    pcSave(note(T_PC, { s1: BIG, s2: 'call mum' }))
+    const files = cliSave(note(T_CLI, { s1: 'milk\nflour\neggs', s2: 'call dad' }))
+    gh.failBlobs = true
+    gh.calls = []
+    await cli.syncPushNoteFiles(DIR, files)
+    expect(readLocal(`${DIR}/s1.md`)).toBe('milk\nflour\neggs')
+    expect(readLocal(`${DIR}/s2.md`)).toBe('call dad')
+    expect(gh.files.get(`${DIR}/s1.md`)).toBe(BIG)
+    expect(gh.calls.filter((c) => c.startsWith('PUT') && c.includes(`${DIR}/s1.md`))).toEqual([])
+  })
+
+  it('a machine emptied by an earlier pull: the empty upload is refused until `noteflow pull` restores the file once', async () => {
+    pcSave(note(T0, { s1: BIG, s2: 'call mum' }))
+    // What the old pull left: the section empty here; the repair flag absent (pre-2.11.1 state file).
+    fs.writeFileSync(localPath(`${DIR}/s1.md`), '')
+    const st = cliState()
+    delete st.emptyFileRepairDone
+    fs.writeFileSync(statePath(), JSON.stringify(st))
+
+    await cli.syncPushNoteFiles(DIR, ['s1.md'])
+    expect(gh.files.get(`${DIR}/s1.md`)).toBe(BIG) // not wiped
+    expect(logs.some((l) => l.includes("is empty here but not on GitHub — run 'noteflow pull' once"))).toBe(true)
+    expect(logs.some((l) => l.includes('If you emptied it on purpose, clear it again after the pull'))).toBe(true)
+
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s1.md`)).toBe(BIG)
+    expect(logs).toContain('  Restored 1 file(s) an earlier sync had left empty')
+    expect(cliState().emptyFileRepairDone).toBe(true)
+    expect(cliState().shas[`${DIR}/s1.md`]).toBe(gitBlobSha(BIG))
+
+    // From then on, emptying a section is a normal edit.
+    fs.writeFileSync(localPath(`${DIR}/s1.md`), '')
+    await cli.syncPushNoteFiles(DIR, ['s1.md'])
+    expect(gh.files.get(`${DIR}/s1.md`)).toBe('')
+    // …and a later pull does not "restore" it.
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s1.md`)).toBe('')
+  })
+
+  it('with NoteFlow Cloud on (GitHub a mirror) the pull restores nothing and the repair stays pending', async () => {
+    pcSave(note(T0, { s1: BIG, s2: 'call mum' }))
+    fs.writeFileSync(localPath(`${DIR}/s1.md`), '')
+    const st = cliState()
+    delete st.emptyFileRepairDone
+    fs.writeFileSync(statePath(), JSON.stringify(st))
+    const s = JSON.parse(fs.readFileSync(settingsPath(), 'utf-8'))
+    fs.writeFileSync(settingsPath(), JSON.stringify({ ...s, cloudSync: { enabled: true } }))
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s1.md`)).toBe('')
+    expect(cliState().emptyFileRepairDone).toBeUndefined()
+  })
+
+  it('a genuinely empty remote section is pulled as empty', async () => {
+    pcSave(note(T_PC, { s1: BIG, s2: '' }))
+    await cli.cmdPull()
+    expect(readLocal(`${DIR}/s2.md`)).toBe('')
+    expect(readLocal(`${DIR}/s1.md`)).toBe(BIG)
+  })
+
+  it('pure helpers mirror the app (electron/githubContents.ts)', () => {
+    expect(cli.EMPTY_BLOB_SHA).toBe(EMPTY_BLOB_SHA)
+    for (const n of [0, -1, 1, 32_768, 32_769, 5 * 1024 * 1024, 500 * 1024 * 1024]) {
+      expect(cli.githubRequestTimeoutMs(n)).toBe(githubRequestTimeoutMs(n))
+    }
+    const b64 = (s: string) => Buffer.from(s).toString('base64')
+    const answers = [
+      { encoding: 'base64', content: b64('héllo'), size: Buffer.byteLength('héllo') },
+      { encoding: 'none', content: '', size: 2_000_000 },
+      { encoding: 'base64', content: b64('partial'), size: 999 },
+      { encoding: 'base64', content: '', size: 0 },
+      { encoding: 'base64', content: b64('no size') },
+    ]
+    for (const a of answers) expect(cli.decodeContentsApiFile(a)).toBe(decodeContentsApiFile(a))
+    expect(cli.decodeGitBlob({ encoding: 'base64', content: b64(BIG) }, gitBlobSha(BIG))).toBe(BIG)
+    expect(cli.decodeGitBlob({ encoding: 'base64', content: b64(BIG.slice(1)) }, gitBlobSha(BIG))).toBeNull()
+  })
 })

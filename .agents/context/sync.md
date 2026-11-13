@@ -319,7 +319,7 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   `lastSync` solo alimenta la regla de borrado y el catch-up. **Coste:** el pull NO hace un GET por
   nota — si el blob-sha del `note.md` en el tree coincide con el último reconciliado (sha cache,
   abajo) **y** también los de sus secciones, la carpeta se salta sin ninguna request; solo las
-  carpetas con sha nuevo pagan el GET del ancla + comparación de `updated`. Si ese GET falla (`getRemoteFile` se traga el error y devuelve `null`) o el tree viene
+  carpetas con sha nuevo pagan el GET del ancla + comparación de `updated`. Si ese GET falla (`getRemoteFile` se traga el error y devuelve `null`; también si no logra los bytes de un fichero de más de 1 MB, ver "Ficheros de más de 1 MB") o el tree viene
   truncado, el pull no añade nada a `errors` pero devuelve `incomplete: true` (no se muestra; solo
   frena la caducidad de notas temporales, ver `patterns.md`).
   **Camino de conflicto (QA B3, antes de la caché):** con GitHub como backend activo, una carpeta
@@ -554,7 +554,7 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
   borra **nada** — gana la edición remota y la nota vuelve en el siguiente pull.
 - **Journal + sha cache (`electron/syncState.ts` + `userData/sync-state.json`):** estado LOCAL de
   durabilidad (deliberadamente fuera del dir de notas — no debe sincronizarse; se limpia en
-  `disconnectGitHub()`; corrupto/ausente degrada a estado vacío, nunca bloquea el sync). Dos mapas:
+  `disconnectGitHub()`; corrupto/ausente degrada a estado vacío, nunca bloquea el sync). Dos mapas y un flag:
   - **`ops` (journal de mutaciones remotas pendientes):** cada push debounced se apunta como
     `upsert` **al armar el timer** (sobrevive a cerrar la app durante el debounce) — keyed por
     relPath; `scheduleDelete`/`scheduleDeleteDir` como `delete`/`deleteDir` (este último descarta
@@ -589,6 +589,57 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
     json **no tenga** entrada aquí es lo que activa su fusión con copia en el pull (ver "Metadata").
     La lógica de transiciones/decisiones es pura en `syncState.ts` (sin imports de Electron, patrón
     `entitlements.ts`) y está cubierta por `tests/electron/syncState.test.ts`.
+  - **`emptyFileRepairDone` (flag one-shot, ausente = pendiente):** la reparación única de ficheros
+    vaciados por el bug de 1 MB ya corrió y restauró todo — ver "Ficheros de más de 1 MB".
+- **⚠️ Ficheros de más de 1 MB — la Contents API no los trae (bug de pérdida de datos real,
+  arreglado 2026-11).** `GET /repos/{o}/{r}/contents/{path}` (media type por defecto) solo incluye el
+  contenido hasta 1 MB: entre 1 MB y 100 MB responde **200 con `content: ""`, `encoding: "none"`** y
+  el `sha`/`size` reales (verificado en vivo). Las secciones llevan las imágenes como data URIs
+  base64, así que pasan de 1 MB. Antes se decodificaba `content` como base64 → `''`: el pull escribía
+  la sección **vacía** y cacheaba el sha real como base, y el siguiente push (base == remoto → `put`)
+  subía la versión vacía a todos los dispositivos (le pasó a un usuario).
+  - **Lectura:** `getRemoteFile` (app) / `getRemoteFile` (CLI, espejo) devuelve el texto **completo**
+    o `null`. Usa el contenido inline solo si es base64 y su longitud en bytes coincide con `size`
+    (`decodeContentsApiFile`, puro en `electron/githubContents.ts`); si no, baja los bytes por la
+    **Git Blobs API** (`GET git/blobs/{sha}`, base64 hasta 100 MB — `getRemoteBlobContent`) y exige
+    que **los bytes** den ese sha (`decodeGitBlob`). Un fichero realmente vacío (`size: 0`) es `''`.
+  - **Fail-closed (regla):** nunca se escribe texto vacío/parcial de un fichero remoto no vacío; todo
+    `null` es "no reconciliado": el pull no escribe ni cachea. La escritura completa de una carpeta
+    (remoto más nuevo) baja **todas** las secciones **antes** de escribir nada; si una falla, la
+    carpeta queda intacta e `incomplete` (antes se saltaba la sección en silencio y se cacheaba el
+    ancla). Tras las descargas (pueden tardar), re-comprobación síncrona antes de escribir: si este
+    dispositivo subió algo a la carpeta desde el listado (`dirMutatedSince`) o el `note.md` local cambió
+    desde la decisión (un guardado entre medias), no escribe ni cachea nada e `incomplete`. La
+    migración remota v1→v2 no borra un plano que no pudo leer (ver `note-format.md`). El
+    CLI: `noteflow pull` igual (baja todo antes de escribir; si falla, error para esa nota) y
+    `githubResolveConflictDir` ya devolvía `null` sin tocar nada.
+  - **Reparación única (app):** `planEmptyFileRepair` (`syncState.ts`) — en el pull, antes del bucle
+    de carpetas y solo con GitHub activo: ficheros del tree (de nota y metadatos) con el local de **0
+    bytes**, base cacheada **no vacía** y blob remoto no vacío se re-bajan (por `getRemoteFile`,
+    exigiendo el sha del listado), se cachean y se **completa su `upsert` pendiente** (el pull viejo
+    podía haber journalado el vacío). Una sección vaciada a propósito y aún sin subir reaparece una
+    vez — aceptable frente a perder imágenes. El flag `emptyFileRepairDone` solo se pone con listado
+    completo y todos los candidatos restaurados. Mientras falte, **red de seguridad en el push**
+    (`shouldHoldBackEmptyUpload` en `upsertRemoteFileNow`): una subida condicionada de contenido vacío
+    sobre un remoto no vacío que **sigue siendo la base** se retiene como `RemoteChangedError` (op
+    `stale`, se pide pull, que repara). **CLI:** `repairEmptiedFiles` en `noteflow pull` (flag en
+    `cli-github-state.json`; **sin** condición de base, porque el pull del CLI nunca guardó base para
+    el fichero vaciado) y, hasta que corra, `upsertRemoteFile` **rechaza** subir un fichero vacío
+    sobre contenido no vacío en GitHub (`… run 'noteflow pull' once …`, que avisa de que el pull
+    restaura el contenido de GitHub y, si el vaciado era intencionado, hay que volver a vaciarlo); el
+    CLI tampoco repara con Cloud activo (`githubConditionalActive`, como la app). Lo que ya se subió
+    vacío no se recupera solo: el blob anterior sigue en el historial de git (por su sha).
+    Tampoco se detecta un dispositivo envenenado cuyo usuario **ya editó** la sección vaciada (local
+    no vacío, sin las imágenes): esa edición se sube sin obstáculo — recuperación desde el historial
+    de git por el sha del blob anterior.
+  - **Timeout:** `githubRequest` (app y CLI) usa un timeout de inactividad de socket
+    **escalado con el cuerpo enviado** (`githubRequestTimeoutMs`: 15 s + 1 s por 32 KB, tope 10 min) —
+    un PUT de varios MB se escribe de golpe y GitHub tarda en commitearlo. Las descargas siguen en 15 s
+    (cada `data` reinicia el temporizador). `githubAuthPost` y las requests de Cloud no cambian.
+  - Comparaciones por sha (salto por idéntico del catch-up, `planGithubDirMerge`, base por blob) no
+    dependen del tamaño: con el contenido correcto funcionan igual. Tests:
+    `tests/electron/githubLargeFiles.test.ts` y `tests/cli/githubMerge.test.ts` (fakes con umbral
+    configurable).
 - **⚠️ Serialización de mutaciones remotas (INVARIANTE — leer antes de tocar el sync):** la
   Contents API de GitHub **commitea de una en una por rama** (cada PUT/DELETE mueve el HEAD), así
   que dos escrituras/borrados **concurrentes** chocan con un `409/422` por SHA obsoleto. Por eso

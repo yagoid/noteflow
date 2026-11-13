@@ -48,7 +48,8 @@ function answer(method: string, url: string, body: Record<string, unknown> | und
   const current = remote.get(rel)
   if (method === 'GET') {
     if (current === undefined) return [404, { message: 'Not Found' }]
-    return [200, { sha: blobSha(current), content: Buffer.from(current).toString('base64') }]
+    // As GitHub answers a file under 1 MB (over it: githubLargeFiles.test.ts).
+    return [200, { sha: blobSha(current), size: Buffer.byteLength(current), encoding: 'base64', content: Buffer.from(current).toString('base64') }]
   }
   if (method === 'PUT') {
     const sha = body?.sha as string | undefined
