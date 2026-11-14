@@ -32,10 +32,7 @@ import { rawUndoHistory } from './undoHistory'
 import {
   createContentSync, mapOffsetThroughChange, needsSave, recordSave, resolveExternalContent, type ContentSync,
 } from '../../lib/externalContentSync'
-
-/** Raw textarea text: base64 image data shown as `[image]` (restored on change). */
-const rawDisplay = (content: string) =>
-  content.replace(/!\[([^\]]*)\]\(data:[^)]+\)/g, (_, alt) => `![${alt}]([image])`)
+import { rawSectionDisplayText, sectionTextForClipboard } from '../../lib/sectionClipboard'
 
 // ---------------------------------------------------------------------------
 // Confirm modal state type
@@ -337,8 +334,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     }
     const textarea = rawTextareaRef.current
     if (textarea && textarea === document.activeElement) {
-      const before = rawDisplay(rawContent)
-      const after = rawDisplay(next)
+      const before = rawSectionDisplayText(rawContent)
+      const after = rawSectionDisplayText(next)
       rawSelectionRef.current = {
         start: mapOffsetThroughChange(before, after, textarea.selectionStart),
         end: mapOffsetThroughChange(before, after, textarea.selectionEnd),
@@ -707,7 +704,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   }
 
   const handleCopyAllText = () => {
-    const text = activeSection?.content ?? ''
+    const text = sectionTextForClipboard(rawMode, rawContent, editorRef.current?.editor)
     navigator.clipboard.writeText(text)
   }
 
@@ -979,7 +976,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     scheduleRawSave(newContent)
   }
 
-  const displayContent = rawDisplay(rawContent)
+  const displayContent = rawSectionDisplayText(rawContent)
 
   const handleRawKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const sectionId = activeSection?.id
