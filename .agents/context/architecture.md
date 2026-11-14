@@ -196,14 +196,23 @@ noteflow/
 │   │   │   ├── BrainView.tsx            #   Split AiPanel | canvas (Fase 3); divisor redimensionable;
 │   │   │   │                            #     ELIGE el render: 3D si hay WebGL, si no fallback 2D
 │   │   │   ├── BrainScene.tsx           #   *** RENDER POR DEFECTO *** — cerebro 3D inmersivo
-│   │   │   │                            #     (three.js: wireframe + bloom + orbit/zoom + impulsos)
-│   │   │   ├── brainMesh.ts             #   Malla 3D procedural del cerebro (icosphere deformada +
-│   │   │   │                            #     relleno interior + cerebelo + tronco; edges/BFS path)
-│   │   │   ├── assignVertices.ts        #   Asigna cada nodo del grafo a un vértice de la malla 3D
-│   │   │   ├── tunerState.ts            #   Params de forma/look del 3D (DEFAULT_LOOK, persistencia)
-│   │   │   ├── BrainTuner.tsx           #   Panel dev de escultura de la forma 3D (SHOW_TUNER=false)
+│   │   │   │                            #     (three.js: alambre + puntos con oclusión real, bloom, órbita,
+│   │   │   │                            #     impulsos/ondas/latido; ver ai.md § Render 3D)
+│   │   │   ├── brainLook.ts             #   BRAIN_LOOK: todos los números del aspecto 3D + presupuestos
+│   │   │   ├── brainShaders.ts          #   GLSL del 3D (líneas, puntos, nodos, pasada final "grade")
+│   │   │   ├── brainData.ts             #   Datos derivados del grafo para el 3D (rutas, fibras, foco; puro,
+│   │   │   │                            #     sin three) — testeado
+│   │   │   ├── brainBuffers.ts          #   Empaquetado compacto de segmentos de línea (44 B) — testeado
+│   │   │   ├── brainMesh.ts             #   Malla 3D del cerebro, de forma FIJA (cerebro levantado por perfiles
+│   │   │   │                            #     medidos + giros/surcos como geometría + entramado interior +
+│   │   │   │                            #     cerebelo + tronco; pesos por arista/vértice; rutas A*). Singleton
+│   │   │   │                            #     de sesión (getBrainMesh) — testeado (ver ai.md § Vista cerebro)
+│   │   │   ├── assignVertices.ts        #   Asigna cada nodo del grafo a un vértice de la malla 3D (notas en la
+│   │   │   │                            #     corteza, grupos repartidos, perfil de IA en el núcleo) — testeado
 │   │   │   ├── BrainCanvas.tsx          #   FALLBACK 2D (sin WebGL): <canvas> + d3-force, pan/zoom/drag
-│   │   │   ├── useBrainGraph.ts         #   Modelo compartido: nodos (grupo/carpeta/nota/sección) + 2 capas de aristas
+│   │   │   ├── useBrainGraph.ts         #   Modelo compartido: nodos (grupo/carpeta/nota/sección; `centered` en el
+│   │   │   │                            #     grupo del perfil de IA, `groupId` en lo que cuelga de un grupo)
+│   │   │   │                            #     + 2 capas de aristas — testeado
 │   │   │   ├── useForceLayout.ts        #   Simulación d3-force del fallback 2D (estructura + contenido)
 │   │   │   ├── brainColors.ts           #   Resuelve color de nodo → RGB: CSS var del tema o hex libre
 │   │   │   │                            #   (readColor; lo usan 2D y 3D)
@@ -267,6 +276,8 @@ noteflow/
 │   │   │                         #   selección por defecto y rango — testeado
 │   │   ├── sidebarGroups.ts      # Modelo de la lista del sidebar: orden base (created desc) + agrupado
 │   │   │                         #   grupo→carpeta con noteOrder (buildSidebarItems) — testeado vía contentView
+│   │   ├── aiGroup.ts            # AI_GROUP_NAME ('IA Generated', el grupo fijo del perfil de IA) + isAiGroupName
+│   │   │                         #   (lo leen ProfileFlow y el grafo del cerebro)
 │   │   ├── searchUtils.ts        # Helpers de búsqueda (normalización, matching)
 │   │   ├── keyScope.ts           # OWN_KEYS_PROPS/ownsKeys: campos que los atajos globales (capture) respetan
 │   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 vars del tema o hex libre);
@@ -436,6 +447,7 @@ guardó `snippets.json`), `groups-updated` (sin payload — el watcher vio `grou
 `note-order.json` escritos FUERA de la app, p. ej. por el CLI; `App.tsx` (principal y sticky) y
 `SectionWindowApp.tsx` recargan solo `groupsStore.loadGroups()`), `update:download-progress` (percent),
 `update:installing` (fase de instalación, post-descarga),
+`window:visibility` (boolean — solo la ventana principal, en `show`/`hide`/`minimize`/`restore`: `isVisible() && !isMinimized()`; con `backgroundThrottling: false` `document.hidden` nunca cambia, así que `BrainScene` para su bucle con esto vía `onWindowVisibility`),
 `sync-auth-complete`, `sync:push-state` (`'pushing'|'idle'`), `sync:status-changed`,
 `account:status-changed` (broadcast del status público de la cuenta a todas las ventanas; main lo emite
 DESPUÉS de reescribir `settings.aiLlm.active` si toca, y `App.tsx` / `AiChatWindowApp.tsx` recargan la

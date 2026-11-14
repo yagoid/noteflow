@@ -5,16 +5,12 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useAiChatStore, type ProfilePickedFile } from '../../stores/aiChatStore'
 import type { Note, NoteGroup, NoteSection } from '../../types'
-
-// Notes the AI generates land in a single, fixed group so they're easy to find and keep
-// separate from the user's own notes. The fixed name doubles as the cross-machine signal
-// that a profile exists: groups.json and each note's `group` field both sync, so any PC can
-// tell the profile is done just by finding a note in this group — no local-only flag needed.
-export const AI_GROUP_NAME = 'IA Generated'
+// The AI group's fixed name, and how to recognise it, live in lib/aiGroup (the brain graph reads them too).
+import { AI_GROUP_NAME, isAiGroupName } from '../../lib/aiGroup'
 
 /** The synced profile note, if one exists: the (oldest) note inside the AI group. */
 export function findAiProfileNote(groups: NoteGroup[], notes: Note[]): Note | undefined {
-  const aiGroup = groups.find((g) => g.name.trim().toLowerCase() === AI_GROUP_NAME.toLowerCase())
+  const aiGroup = groups.find((g) => isAiGroupName(g.name))
   if (!aiGroup) return undefined
   return notes
     .filter((n) => n.group === aiGroup.id)
@@ -160,7 +156,7 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
       // Make sure the fixed "AI generated" group exists (match by name, case-insensitive) and
       // reuse it across runs so we never spawn duplicates.
       const aiGroup =
-        groups.find((g) => g.name.trim().toLowerCase() === AI_GROUP_NAME.toLowerCase()) ??
+        groups.find((g) => isAiGroupName(g.name)) ??
         (await createGroup(AI_GROUP_NAME, '--text'))
 
       // Reuse the existing profile note if it's still around (regenerating after "Start over"),

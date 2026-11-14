@@ -2,7 +2,6 @@
 // dialogs). Dialog bodies are full sentences; the words to emphasize are separate
 // keys that appear verbatim inside the body and get wrapped at render time (see
 // `highlightTerms` in BrainView), so translations stay whole and grammatical.
-// The dev-only BrainTuner is intentionally not translated.
 export const brain = {
   title: 'Brain',
   nodesCount: { one: '{count} node', other: '{count} nodes' },

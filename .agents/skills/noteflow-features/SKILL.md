@@ -992,8 +992,21 @@ cualquier nota. Es **aditivo** — la lista de siempre sigue siendo el modo prin
   - **Estructura** (líneas sólidas): la jerarquía `grupo → carpeta → nota` que tú creas.
   - **Contenido** (líneas tenues): notas que **hablan de lo mismo** según la IA, aunque estén en
     grupos distintos. Salen del índice semántico (necesita la IA activada).
-- **Interacción:** navegación libre estilo Obsidian — arrastrar el lienzo (pan), **rueda para zoom**,
-  arrastrar un nodo para recolocarlo. **Hover/seleccionar** una nota **resalta sus conexiones de
+- **Aspecto 3D (por defecto):** un **cerebro humano de alambre y puntos** —silueta lateral
+  reconocible, circunvoluciones en relieve (bandas con el contorno brillante y surcos vacíos),
+  cerebelo y tronco— que deja ver su interior tenue. Las **notas viven en la corteza** agrupadas
+  alrededor de su grupo (cada carpeta con su parche), las relaciones viajan por dentro, las **notas
+  sueltas favoritas** van al cerebelo y el **perfil de IA** ("IA Generated") ocupa el núcleo. Está
+  vivo: se "enciende" desde el núcleo al abrir, **impulsos** recorren las ramas de cada grupo y las
+  relaciones se disparan solas, hay **ondas** al tocar una nota y cuando la IA responde, y un
+  **latido** suave desde el núcleo. Con "reducir movimiento" del sistema queda quieto en reposo
+  (solo se mueve lo que responde a tus acciones: girar, pasar el ratón, la IA escribiendo); con la
+  ventana minimizada u oculta en la bandeja deja de dibujar.
+- **Interacción (3D):** **arrastrar gira** el cerebro alrededor de su centro (deja de rotar solo al
+  primer toque) y la **rueda hace zoom** sobre ese mismo centro. Los nombres aparecen por niveles al
+  acercarse: grupos siempre, luego carpetas, luego notas; nunca se solapan y los de la cara de atrás
+  salen atenuados. En el fallback 2D (sin WebGL o equipos modestos): pan, zoom y arrastrar nodos.
+  **Hover/seleccionar** una nota **resalta sus conexiones de
   contenido** y atenúa el resto. **Click en un nodo de nota/sección** ancla junto a él una
   **ventanita de previsualización clicable** (la misma tarjeta apaisada que la
   [previsualización al hover](#previsualización-de-sección-al-hover), del mismo tamaño; su borde se
@@ -1003,7 +1016,8 @@ cualquier nota. Es **aditivo** — la lista de siempre sigue siendo el modo prin
   dejar solo la estructura.
 - **Sin IA:** el cerebro funciona igualmente mostrando solo la estructura + el CTA de activación.
 - **Iluminación por chat:** cuando el chat responde, las notas que usó **se encienden** en el grafo
-  (halo brillante que parpadea en 3D / glow en 2D) — no se llenan de etiquetas, solo brillan.
+  (anillos que se expanden y una onda desde cada nota en 3D / glow en 2D) — no se llenan de
+  etiquetas, solo brillan. Mientras la IA escribe, varias notas "barren" sus relaciones a la vez.
 
 ---
 

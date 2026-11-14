@@ -1,19 +1,31 @@
-// The scaffold of "El Cerebro 3D": a procedural, asset-free brain silhouette. An icosphere is
-// deformed by a radial brain function (elongated ellipsoid + domed top / tapered+flattened base +
-// longitudinal fissure + temporal bulges + value noise) forms the OUTER silhouette. The interior
-// is then filled with RANDOM loose vertices wired to their nearest neighbours (short edges only),
-// so the brain has real interior volume without nested shells. A small lumpy cerebellum sphere
-// and a short brain-stem stalk are fused in. Edges come straight from the icosphere triangles +
-// the interior nearest-neighbour links — no Delaunay. (`shells` can still nest copies if set.)
+// The scaffold of "El Cerebro 3D": a low-poly human brain, asset-free and fully deterministic.
 //
-// Local control: the user shapes specific spots via CONTROL POINTS — gaussians over the surface
-// direction. `bulges` push/pull a region (rounder/bigger or dented); `densityPoints` trigger
-// adaptive face subdivision (more vertices/edges) near a spot. Per-lobe sliders are just presets
-// of these points. Click-sculpting in BrainScene appends custom ones.
+// SHAPE. The cerebrum is LOFTED FROM MEASURED PROFILES rather than sculpted: the lateral outline
+// (dorsal and ventral contours traced from Gray's lateral plate, rescaled toward MRI proportions)
+// and the outline seen from above define a cross-section at every point of the front–back axis.
+// That pins the two silhouettes people recognise a brain by.
+//
+// FOLDS. Gyri are geometry, not texture. A labyrinth field (a warped gyroid, with the real
+// landmarks forced in: longitudinal fissure, lateral fissure, central sulcus and the gyri that
+// flank them) splits the surface into gyri and sulci. Lattice vertices slide along the surface
+// onto the gyrus/sulcus boundary, so that boundary runs along mesh edges and every triangle is
+// cleanly one or the other; gyri are pushed out and sulci pulled in. Each edge carries a weight:
+// the outline of a gyrus is the bright line, edges inside a gyrus are dimmer, inside a sulcus
+// almost gone.
+//
+// The solid is sampled radially over an icosphere topology. The interior (white matter) is a
+// lattice of random points wired to their nearest neighbours. The cerebellum is built from
+// horizontal rings (folia) and the brainstem is a tapered tube with the pons; hidden weight-0
+// seams stitch the three parts together so routes can cross between them.
 //
 // Vertices double as anchor points where graph nodes get pinned (assignVertices.ts), plus
-// per-vertex region labels (lobes), adjacency and BFS pathfinding. All shape lives in
-// BrainShapeParams. Everything is deterministic (fixed hash noise, fixed topology).
+// per-vertex region labels, adjacency and lattice routing (A*). The shape is fixed — no params —
+// so the mesh is identical on every build and is built once per session (getBrainMesh).
+//
+// This is the approved design, reproduced number for number: the tests hold it against a
+// fingerprint of the original (tests/helpers/brainMeshRef.ts). The order of the floating-point
+// operations and the order vertices and edges are added in are therefore part of the contract —
+// speed it up by doing less work, never by rearranging the arithmetic.
 
 export type Vec3 = [number, number, number]
 
@@ -22,141 +34,42 @@ export type Region = (typeof REGIONS)[number]
 export const REGION_CODE: Record<Region, number> = {
   frontal: 0, parietal: 1, temporal: 2, occipital: 3, cerebellum: 4, stem: 5,
 }
-export type Lobe = 'frontal' | 'parietal' | 'temporal' | 'occipital'
-
-// A sculpt control point: a gaussian over the surface direction (x,y,z normalized).
-export interface BulgePoint { x: number; y: number; z: number; radius: number; strength: number }
-export interface DensityPoint { x: number; y: number; z: number; radius: number; level: number }
-
-// Random interior fill: scatter loose vertices through the cerebrum volume and wire each to its
-// nearest neighbours, so the brain reads as a filled lattice (not a hollow shell or nested shells)
-// with short edges only. fillDensity = interior points per surface vertex; margin keeps points
-// inside the surface; neighbors = how many nearest vertices each one links to; maxEdge caps edge
-// length so nothing stretches across the brain.
-export interface InteriorFill { fillDensity: number; margin: number; neighbors: number; maxEdge: number }
-
-export interface LobeControl { scale: number; density: number }
-
-export interface BrainShapeParams {
-  detail: number
-  ax: number; ay: number; az: number
-  topDome: number
-  bottomTaper: number
-  bottomFlatten: number
-  baseFlatten: number
-  fissureDepth: number; fissureWidth: number; hemisphereSpread: number
-  temporalBulge: number
-  noiseAmp: number; noiseFreq: number
-  shells: number[]
-  interior: InteriorFill
-  centerY: number
-  rotation: Vec3   // cerebrum-only orientation in degrees, baked into the cerebrum vertices
-                   // (cerebellum + stem stay fixed); pivot = shape center (0, centerY, 0)
-  lobes: Record<Lobe, LobeControl>
-  bulges: BulgePoint[]
-  densityPoints: DensityPoint[]
-  cerebellum: { detail: number; scale: Vec3; center: Vec3; wrinkleAmp: number; wrinkleFreq: number }
-  stem: { points: number; top: Vec3; bottom: Vec3; strands: number; spread: number }
-}
-
-// Baked from the design session (the user's final sculpt in the Brain Tuner).
-export const DEFAULT_BRAIN_PARAMS: BrainShapeParams = {
-  detail: 2.4,
-  ax: 0.8, ay: 0.83, az: 1.15,
-  topDome: 0.13,
-  bottomTaper: 0.34,
-  bottomFlatten: 0,
-  baseFlatten: 0.72,
-  fissureDepth: 0.16, fissureWidth: 0.08, hemisphereSpread: 0.04,
-  temporalBulge: 0.11,
-  noiseAmp: 0.065, noiseFreq: 2.4,
-  shells: [1], // single outer shell = the brain silhouette; the interior is filled below
-  // Random interior lattice (region-tagged → notes can live inside too, not just on the surface).
-  interior: { fillDensity: 0.5, margin: 0.92, neighbors: 3, maxEdge: 0.4 },
-  centerY: 0.2,
-  rotation: [-8, 0, 0],
-  lobes: {
-    frontal: { scale: 0.81, density: 0 },
-    parietal: { scale: 0.74, density: 0 },
-    temporal: { scale: 0.9, density: 0 },
-    occipital: { scale: 0.9, density: 0 },
-  },
-  bulges: [
-    { x: 0.36258189862548323, y: -0.6148027480554756, z: 0.7003941374487475, radius: 0.35, strength: -0.14 },
-    { x: 0.0014222987611771703, y: -0.6511899177061468, z: 0.7589134786944395, radius: 0.35, strength: -0.14 },
-    { x: -0.3494717980173508, y: -0.6247386732824586, z: 0.6982628820836703, radius: 0.35, strength: -0.14 },
-    { x: 0.562971642608837, y: -0.6270229992367372, z: 0.5384283499654103, radius: 0.35, strength: -0.14 },
-    { x: -0.5986325830260595, y: -0.5479024454905748, z: 0.5843303353112826, radius: 0.35, strength: -0.14 },
-    { x: 0.5410098214688089, y: -0.8327376423924832, z: 0.11771317690427256, radius: 0.35, strength: 0.14 },
-    { x: 0.019433177709388558, y: -0.9760790587453959, z: 0.2165456595797231, radius: 0.35, strength: 0.14 },
-    { x: -0.36302245328870864, y: -0.909984043042981, z: 0.20035902728701133, radius: 0.35, strength: 0.14 },
-    { x: -0.025401903091053436, y: -0.5409730914569073, z: 0.8406562065665781, radius: 0.5, strength: 0.06 },
-    { x: -0.02133451094986953, y: -0.582068046492168, z: 0.8128601527294356, radius: 0.5, strength: 0.06 },
-  ],
-  densityPoints: [],
-  cerebellum: {
-    detail: 2, scale: [0.26, 0.22, 0.36], center: [0.01, -0.6, -0.51], wrinkleAmp: 0.28, wrinkleFreq: 7,
-  },
-  stem: { points: 9, top: [-0.01, -0.53, -0.12], bottom: [0.01, -1.06, -0.33], strands: 4, spread: 0.075 },
-}
-
-// Lobe-wide control points sit at these directions; a slider != neutral injects a wide gaussian.
-const LOBE_CENTERS: Record<Lobe, Vec3[]> = {
-  frontal: [[0, 0.15, 1]],
-  parietal: [[0, 1, -0.1]],
-  temporal: [[0.95, -0.35, 0.2], [-0.95, -0.35, 0.2]],
-  occipital: [[0, 0.15, -1]],
-}
-const LOBE_RADIUS = 1.0       // angular falloff (radians) for a lobe-wide effect
-const LOBE_BULGE_GAIN = 0.6   // maps (scale-1) → bulge strength
 
 export interface BrainMesh {
   positions: Float32Array
   edges: Uint32Array
-  faces: Uint32Array          // surface triangles (outer shell + cerebellum) for raycasting/sculpt
+  faces: Uint32Array          // the skin: cerebrum + cerebellum (both closed) + brainstem (a tube, open at its ends)
   regionOf: Int8Array
   adjacency: number[][]
-  centroid: Vec3
   vertexCount: number
   verticesByRegion: Record<Region, number[]>
   interiorVertices: number[]   // indices of the random interior-fill points (for routing through the volume)
+  edgeW: Float32Array          // per-edge weight (0 = hidden seam: routed over, never drawn)
+  vertW: Float32Array          // per-vertex weight (how bright its dot is)
+  cortex: Uint8Array           // 1 = a cortex vertex a note may sit on (on a gyrus, not underneath, not in the fissure)
+  kind: Uint8Array             // 0 cerebrum · 1 cerebellum · 2 brainstem
+  surface: Uint8Array          // 1 = on the surface, 0 = interior lattice
+  center: Vec3                 // origin of the sampling rays (the core)
+  boundCenter: Vec3            // bounding sphere of the cerebral surface (mean position + max distance)
+  boundRadius: number
+  // Shortest lattice path by raw Euclidean edge length (structure routes hug the surface unless
+  // diving through the interior is literally shorter). Cached per unordered pair, so the result may
+  // come back oriented either way and must not be mutated.
   pathBetween: (a: number, b: number) => number[] | null
-  // Same lattice routing as pathBetween, but penalises edges near the outer shell so the path dives
-  // through the interior fill and crosses the core. Used as the per-edge fallback when a content
-  // edge isn't part of a batch route.
+  // Same lattice routing, but penalises edges near the outer shell so the path dives through the
+  // interior fill and crosses the core. Used as the per-edge fallback when a content edge isn't
+  // part of a batch route.
   pathThroughInterior: (a: number, b: number) => number[] | null
   // Congestion-aware batch router for content edges (synapses): routes all relations together so
   // they fan out onto parallel corridors instead of stacking onto one (which would hide each
-  // other). Pass pairs strongest-first; returns a map keyed by the unordered pair (min*N+max).
+  // other). Pass pairs strongest-first; returns a map keyed by the unordered pair (min*V+max).
+  // The map is the caller's, but the path arrays in it are shared with the mesh: don't mutate them.
   routeContentEdges: (pairs: Array<readonly [number, number]>) => Map<number, number[]>
 }
 
-// ── deterministic value noise (no deps) ─────────────────────────────────────────
-function hash3(x: number, y: number, z: number): number {
-  let h = (x | 0) * 374761393 + (y | 0) * 668265263 + (z | 0) * 1274126177
-  h = (h ^ (h >>> 13)) >>> 0
-  h = (h * 1274126177) >>> 0
-  h = (h ^ (h >>> 16)) >>> 0
-  return h / 4294967295
-}
-const fade = (t: number) => t * t * (3 - 2 * t)
-function valueNoise(x: number, y: number, z: number): number {
-  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z)
-  const xf = x - xi, yf = y - yi, zf = z - zi
-  const u = fade(xf), v = fade(yf), w = fade(zf)
-  const lerp = (a: number, b: number, t: number) => a + (b - a) * t
-  const c000 = hash3(xi, yi, zi), c100 = hash3(xi + 1, yi, zi)
-  const c010 = hash3(xi, yi + 1, zi), c110 = hash3(xi + 1, yi + 1, zi)
-  const c001 = hash3(xi, yi, zi + 1), c101 = hash3(xi + 1, yi, zi + 1)
-  const c011 = hash3(xi, yi + 1, zi + 1), c111 = hash3(xi + 1, yi + 1, zi + 1)
-  return lerp(
-    lerp(lerp(c000, c100, u), lerp(c010, c110, u), v),
-    lerp(lerp(c001, c101, u), lerp(c011, c111, u), v),
-    w,
-  )
-}
 // Deterministic PRNG (mulberry32) for the interior fill — fixed seed → same lattice every build.
-function mulberry32(seed: number): () => number {
+// (Exported for the scene, whose "random" phases and seeds must also repeat on every open.)
+export function mulberry32(seed: number): () => number {
   let a = seed >>> 0
   return () => {
     a = (a + 0x6d2b79f5) >>> 0
@@ -167,43 +80,28 @@ function mulberry32(seed: number): () => number {
   }
 }
 
+const normalize = (v: Vec3): Vec3 => {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1
+  return [v[0] / l, v[1] / l, v[2] / l]
+}
 const smoothstep = (a: number, b: number, x: number) => {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)))
   return t * t * (3 - 2 * t)
 }
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+const mix = (a: number, b: number, t: number) => a + (b - a) * t
 
-function normalize(v: Vec3): Vec3 {
-  const l = Math.hypot(v[0], v[1], v[2]) || 1
-  return [v[0] / l, v[1] / l, v[2] / l]
-}
+// ── topology: an icosphere (shared-vertex subdivision) ──────────────────────────
+type Face = [number, number, number]
+interface Topology { verts: Vec3[]; faces: Face[] }
 
-const DEG = Math.PI / 180
-const rotX = (v: Vec3, a: number): Vec3 => { const c = Math.cos(a), s = Math.sin(a); return [v[0], v[1] * c - v[2] * s, v[1] * s + v[2] * c] }
-const rotY = (v: Vec3, a: number): Vec3 => { const c = Math.cos(a), s = Math.sin(a); return [v[0] * c + v[2] * s, v[1], -v[0] * s + v[2] * c] }
-const rotZ = (v: Vec3, a: number): Vec3 => { const c = Math.cos(a), s = Math.sin(a); return [v[0] * c - v[1] * s, v[0] * s + v[1] * c, v[2]] }
-
-// Rotate point p (XYZ-euler degrees) around center c. `inverse` undoes it — used by the sculpt
-// raycaster to map a clicked surface point on the rotated cerebrum back to its base direction.
-export function rotateAround(p: Vec3, deg: Vec3, c: Vec3, inverse = false): Vec3 {
-  const rx = deg[0] * DEG, ry = deg[1] * DEG, rz = deg[2] * DEG
-  let v: Vec3 = [p[0] - c[0], p[1] - c[1], p[2] - c[2]]
-  if (!inverse) { v = rotX(v, rx); v = rotY(v, ry); v = rotZ(v, rz) }
-  else { v = rotZ(v, -rz); v = rotY(v, -ry); v = rotX(v, -rx) }
-  return [v[0] + c[0], v[1] + c[1], v[2] + c[2]]
-}
-
-// ── icosphere (shared-vertex subdivision) ───────────────────────────────────────
-interface RawSphere { verts: Vec3[]; faces: [number, number, number][] }
-
-function icosahedron(): RawSphere {
+function icosahedron(): Topology {
   const t = (1 + Math.sqrt(5)) / 2
   const verts: Vec3[] = ([
     [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
     [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
     [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
   ] as Vec3[]).map(normalize)
-  const faces: [number, number, number][] = [
+  const faces: Face[] = [
     [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
     [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
     [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
@@ -212,289 +110,422 @@ function icosahedron(): RawSphere {
   return { verts, faces }
 }
 
-function icosphere(detail: number): RawSphere {
-  const { verts, faces: f0 } = icosahedron()
-  let faces = f0
+// Every face split in four, `detail` times; a midpoint is shared by the two faces on its edge.
+function topology(detail: number): Topology {
+  const base = icosahedron()
+  const verts = base.verts.slice()
+  const mid = new Map<number, number>()
+  const getMid = (a: number, b: number): number => {
+    const key = a < b ? a * 65536 + b : b * 65536 + a
+    const found = mid.get(key)
+    if (found !== undefined) return found
+    const va = verts[a], vb = verts[b]
+    verts.push(normalize([(va[0] + vb[0]) / 2, (va[1] + vb[1]) / 2, (va[2] + vb[2]) / 2]))
+    mid.set(key, verts.length - 1)
+    return verts.length - 1
+  }
+  let faces = base.faces
   for (let i = 0; i < detail; i++) {
-    const mid = new Map<string, number>()
-    const getMid = (a: number, b: number): number => {
-      const key = a < b ? `${a}_${b}` : `${b}_${a}`
-      const found = mid.get(key)
-      if (found !== undefined) return found
-      const va = verts[a], vb = verts[b]
-      const m = normalize([(va[0] + vb[0]) / 2, (va[1] + vb[1]) / 2, (va[2] + vb[2]) / 2])
-      const idx = verts.length
-      verts.push(m); mid.set(key, idx)
-      return idx
-    }
-    const next: [number, number, number][] = []
-    for (const [a, b, c] of faces) {
-      const ab = getMid(a, b), bc = getMid(b, c), ca = getMid(c, a)
-      next.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca])
+    const next: Face[] = []
+    for (const f of faces) {
+      const ab = getMid(f[0], f[1]), bc = getMid(f[1], f[2]), ca = getMid(f[2], f[0])
+      next.push([f[0], ab, ca], [f[1], bc, ab], [f[2], ca, bc], [ab, bc, ca])
     }
     faces = next
   }
   return { verts, faces }
 }
 
-// Cerebrum topology with LOCAL adaptive subdivision near density points (extra detail in a spot),
-// plus a FRACTIONAL global `detail`: e.g. 3.5 subdivides a deterministic ~half of the level-3 faces
-// one extra level, so total vertex count ramps smoothly instead of quadrupling per integer level.
-function cerebrumTopology(detail: number, density: DensityPoint[], maxExtra = 2): RawSphere {
-  const baseLevel = Math.max(0, Math.floor(detail))
-  const frac = detail - baseLevel
-  const base = icosphere(baseLevel)
-  const verts = base.verts.slice()
-  const mid = new Map<string, number>()
-  const getMid = (a: number, b: number): number => {
-    const key = a < b ? `${a}_${b}` : `${b}_${a}`
-    const found = mid.get(key)
-    if (found !== undefined) return found
-    const va = verts[a], vb = verts[b]
-    const m = normalize([(va[0] + vb[0]) / 2, (va[1] + vb[1]) / 2, (va[2] + vb[2]) / 2])
-    const idx = verts.length
-    verts.push(m); mid.set(key, idx)
-    return idx
+// ── measured profiles ───────────────────────────────────────────────────────────
+// A smooth curve through [z, value] samples (cubic Hermite, finite-difference tangents).
+function curve(pts: ReadonlyArray<readonly [number, number]>): (z: number) => number {
+  const n = pts.length
+  const xs = new Float64Array(n), ys = new Float64Array(n), m = new Float64Array(n)
+  for (let i = 0; i < n; i++) { xs[i] = pts[i][0]; ys[i] = pts[i][1] }
+  for (let i = 0; i < n; i++) {
+    const a = i > 0 ? (ys[i] - ys[i - 1]) / (xs[i] - xs[i - 1]) : null
+    const b = i < n - 1 ? (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]) : null
+    m[i] = a == null ? (b ?? 0) : b == null ? a : a * b <= 0 ? 0 : (a + b) / 2 // flat at extrema: no overshoot
   }
-  const dnorm = density.map((d) => ({ n: normalize([d.x, d.y, d.z]), radius: d.radius, level: d.level }))
-  const extraFor = (a: number, b: number, c: number): number => {
-    const va = verts[a], vb = verts[b], vc = verts[c]
-    const cen = normalize([(va[0] + vb[0] + vc[0]) / 3, (va[1] + vb[1] + vc[1]) / 3, (va[2] + vb[2] + vc[2]) / 3])
-    // Fractional global detail: deterministically subdivide a `frac` share of faces one extra level.
-    let lvl = frac > 0.001 && hash3(Math.round(cen[0] * 997), Math.round(cen[1] * 997), Math.round(cen[2] * 997)) < frac ? 1 : 0
-    for (const d of dnorm) {
-      const ang = Math.acos(clamp(cen[0] * d.n[0] + cen[1] * d.n[1] + cen[2] * d.n[2], -1, 1))
-      if (ang < d.radius) lvl = Math.max(lvl, Math.round(d.level * (1 - ang / d.radius)))
-    }
-    return Math.min(lvl, maxExtra)
+  // The segment of the last query: consecutive queries walk along a ray, so it rarely moves.
+  let i = 0
+  return (z) => {
+    if (z <= xs[0]) return ys[0]
+    if (z >= xs[n - 1]) return ys[n - 1]
+    while (z > xs[i + 1]) i++
+    while (z <= xs[i]) i--
+    const h = xs[i + 1] - xs[i], t = (z - xs[i]) / h, t2 = t * t, t3 = t2 * t
+    return (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h * m[i + 1]
   }
-  const out: [number, number, number][] = []
-  const subdiv = (face: [number, number, number], level: number) => {
-    if (level <= 0) { out.push(face); return }
-    const [a, b, c] = face
-    const ab = getMid(a, b), bc = getMid(b, c), ca = getMid(c, a)
-    subdiv([a, ab, ca], level - 1); subdiv([b, bc, ab], level - 1)
-    subdiv([c, ca, bc], level - 1); subdiv([ab, bc, ca], level - 1)
-  }
-  for (const face of base.faces) subdiv(face, extraFor(face[0], face[1], face[2]))
-  return { verts, faces: out }
 }
 
-// ── shaping: unit direction → cerebrum vertex position ──────────────────────────
-interface NormBulge { n: Vec3; radius: number; strength: number }
+// z+ is the front (frontal pole at +1.15), y+ is up. One unit ≈ 75 mm.
+const ZB = -1.15, ZF = 1.15
+// Dorsal contour: a blunt frontal pole, the vertex behind the middle, a tapering occipital end.
+const TOP = curve([[-1.15, 0.22], [-1.139, 0.355], [-1.07, 0.557], [-0.948, 0.739], [-0.784, 0.89], [-0.58, 1.025], [-0.377, 1.11], [-0.173, 1.138], [0.03, 1.133], [0.235, 1.102], [0.437, 1.043], [0.642, 0.967], [0.805, 0.874], [0.966, 0.739], [1.07, 0.66], [1.125, 0.565], [1.15, 0.42]])
+// Ventral contour seen from the side: the temporal lobe hangs below the orbital surface and its
+// pole stops well short of the frontal pole.
+const BOT = curve([[-1.15, 0.22], [-1.13, 0.09], [-1.07, -0.03], [-0.987, -0.1], [-0.823, -0.18], [-0.58, -0.27], [-0.377, -0.345], [-0.173, -0.38], [0.03, -0.38], [0.235, -0.362], [0.437, -0.326], [0.56, -0.25], [0.615, -0.11], [0.655, 0.02], [0.72, 0.045], [0.844, 0.083], [1.007, 0.163], [1.09, 0.25], [1.135, 0.33], [1.15, 0.42]])
+// The underside along the midline (between the temporal lobes it stays high: room for the stem).
+const MED = curve([[-1.15, 0.22], [-1.12, 0.1], [-1.0, -0.05], [-0.8, -0.14], [-0.5, -0.24], [-0.2, -0.29], [0.1, -0.29], [0.33, -0.25], [0.5, -0.15], [0.62, -0.01], [0.72, 0.045], [0.844, 0.083], [1.007, 0.163], [1.09, 0.25], [1.135, 0.33], [1.15, 0.42]])
+// Half-width seen from above: an egg, widest behind the middle, narrower at the forehead.
+const SLIM = 0.86 // overall width: the measured outline read a little too broad
+const WID0 = curve([[-1.15, 0], [-1.1155, 0.23], [-1.081, 0.39], [-0.966, 0.62], [-0.805, 0.78], [-0.575, 0.885], [-0.345, 0.92], [-0.115, 0.92], [0.115, 0.885], [0.345, 0.84], [0.575, 0.76], [0.805, 0.62], [0.966, 0.46], [1.081, 0.28], [1.127, 0.16], [1.15, 0]])
+const WID = (z: number) => WID0(z) * SLIM
+// Landmarks: the lateral (Sylvian) fissure rises gently toward the back; the central sulcus
+// runs from the midline down and slightly forward, stopping just above it.
+const sylY = (z: number) => 0.014 + 0.241 * Math.max(0, Math.min(1.15, (0.62 - z) / 0.99))
+const cenZ = (u: number) => -0.3 + 0.38 * Math.pow(Math.min(1, Math.max(0, u)), 0.8)
+const CENTER: Vec3 = [0, 0.42, 0]
 
-function cerebrumVertex(dir: Vec3, p: BrainShapeParams, bulges: NormBulge[]): Vec3 {
-  const [dx, dy, dz] = dir
-  let x = dx * p.ax, y = dy * p.ay, z = dz * p.az
-
-  const n = (valueNoise(dx * p.noiseFreq + 11, dy * p.noiseFreq + 4, dz * p.noiseFreq + 7) - 0.5) * p.noiseAmp
-  const temporal = p.temporalBulge *
-    smoothstep(-0.05, -0.55, dy) * smoothstep(0.35, 0.75, Math.abs(dx)) * smoothstep(-0.45, 0.4, dz)
-
-  // Control-point bulges (lobe presets + click-sculpt): gaussian over the surface direction.
-  let bulge = 0
-  for (const b of bulges) {
-    const ang = Math.acos(clamp(dx * b.n[0] + dy * b.n[1] + dz * b.n[2], -1, 1))
-    bulge += b.strength * Math.exp(-((ang / b.radius) ** 2))
+function inside(x: number, y: number, z: number): boolean {
+  if (z <= ZB || z >= ZF) return false
+  let w = WID(z)
+  if (w <= 1e-4) return false
+  const sm = smoothstep(-0.6, -0.3, z) * (1 - smoothstep(0.42, 0.6, z))
+  if (sm > 0) { const q = (y - sylY(z)) / 0.06; w *= 1 - 0.045 * Math.exp(-q * q) * sm }   // the fissure dents the lateral wall
+  const u = Math.abs(x) / w
+  if (u >= 1) return false
+  const top = TOP(z), bl = BOT(z)
+  const yc = bl + 0.4 * (top - bl)                       // the widest point sits low on the side
+  if (y >= yc) return y < yc + (top - yc) * Math.pow(1 - Math.pow(u, 2.3), 1 / 2.3)
+  const bm = MED(z)
+  const bot = bm + (bl - bm) * smoothstep(0.2, 0.5, u)   // the temporal lobes are lateral
+  return y > yc - (yc - bot) * Math.pow(1 - Math.pow(u, 2.8), 1 / 2.8)
+}
+// Spread the rays like the brain's own ellipsoid so the lattice stays even along its length.
+const warp = (d: Vec3): Vec3 => normalize([d[0] * 0.92 * SLIM, d[1] * 0.76, d[2] * 1.15])
+function solveRadius(dir: Vec3): number {
+  // start just outside a bounding ellipsoid and walk in: the outermost crossing is the surface
+  let r = 1 / Math.sqrt((dir[0] / 0.97) ** 2 + (dir[1] / 0.86) ** 2 + (dir[2] / 1.2) ** 2) + 0.06
+  while (r > 0.04 && !inside(CENTER[0] + dir[0] * r, CENTER[1] + dir[1] * r, CENTER[2] + dir[2] * r)) r -= 0.025
+  let lo = r, hi = r + 0.025
+  for (let i = 0; i < 10; i++) {
+    const m = (lo + hi) / 2
+    if (inside(CENTER[0] + dir[0] * m, CENTER[1] + dir[1] * m, CENTER[2] + dir[2] * m)) lo = m; else hi = m
   }
-
-  const s = 1 + n + temporal + bulge
-  x *= s; y *= s; z *= s
-
-  // Rounder above than below: dome the crown, taper + flatten the base.
-  y += p.topDome * smoothstep(0.0, 1.0, dy)
-  const taper = 1 - p.bottomTaper * smoothstep(0.0, -1.0, dy)
-  x *= taper; z *= taper
-  if (dy < 0) y *= 1 - p.bottomFlatten
-  const baseY = -p.ay * 0.5
-  if (y < baseY) y = baseY + (y - baseY) * (1 - p.baseFlatten)
-
-  // Longitudinal fissure.
-  const fissure = p.fissureDepth * Math.exp(-((dx / p.fissureWidth) ** 2)) * smoothstep(-0.05, 0.65, dy)
-  y -= fissure
-  x += Math.sign(dx) * p.hemisphereSpread * Math.exp(-((dx / (p.fissureWidth * 1.5)) ** 2)) * smoothstep(0.0, 0.7, dy)
-
-  return [x, y, z]
+  return lo
+}
+const surfacePoint = (d: Vec3): Vec3 => {
+  const r = solveRadius(d)
+  return [CENTER[0] + d[0] * r, CENTER[1] + d[1] * r, CENTER[2] + d[2] * r]
 }
 
-function regionForCerebrum(dir: Vec3): Region {
-  const [dx, dy, dz] = dir
-  if (dy < -0.18 && Math.abs(dx) > 0.42 && dz > -0.25) return 'temporal'
-  if (dz > 0.42) return 'frontal'
-  if (dz < -0.4) return 'occipital'
-  return 'parietal'
+// ── the fold field: > C0 is a gyrus, < C0 a sulcus ──────────────────────────────
+const GF = 15.5, GW = 1.15, C0 = -0.12
+const bump = (d: number, a: number, b: number) => smoothstep(a * 0.7, a, d) * (1 - smoothstep(b, b * 1.3, d))
+function gyri(x: number, y: number, z: number): number {
+  const ax = Math.abs(x) + 0.05 * Math.sin(z * 3.1 + (x > 0 ? 0 : 1.9)) // near-mirror hemispheres, not identical
+  let qx = ax * GF, qy = y * GF, qz = z * GF
+  const wx = GW * Math.sin(qz * 0.63 + 1.7), wy = GW * Math.sin(qx * 0.63 + 4.1), wz = GW * Math.sin(qy * 0.63 + 2.9)
+  qx += wx; qy += wy; qz += wz
+  let g = Math.sin(qx) * Math.cos(qy) + Math.sin(qy) * Math.cos(qz) + Math.sin(qz) * Math.cos(qx)
+  const w = Math.max(WID(z), 1e-4), u = Math.abs(x) / w, sy = sylY(z)
+  const upper = smoothstep(sy + 0.05, sy + 0.16, y), lat = smoothstep(0.35, 0.55, u)
+  const zs = smoothstep(-0.55, -0.3, z) * (1 - smoothstep(0.5, 0.62, z))
+  const dC = Math.abs(z - cenZ(u)), dS = y - sy
+  g = mix(g, 1.0, 0.85 * upper * bump(dC, 0.085, 0.2))                 // pre- and post-central gyri
+  g = mix(g, 1.0, 0.85 * lat * zs * bump(-dS, 0.075, 0.2))             // superior temporal gyrus
+  g = mix(g, -1.2, upper * (1 - smoothstep(0.03, 0.075, dC)))          // central sulcus
+  g = mix(g, -1.2, lat * zs * (1 - smoothstep(0.03, 0.07, Math.abs(dS)))) // lateral fissure
+  g = mix(g, -1.2, 1 - smoothstep(0.035, 0.085, Math.abs(x)))          // longitudinal fissure
+  return g
+}
+function regionAt(x: number, y: number, z: number): Region {
+  const u = Math.abs(x) / Math.max(WID(z), 1e-4)
+  if (y < sylY(z) && z < 0.66 && z > -0.62 && u > 0.3) return 'temporal'
+  if (z < -0.74) return 'occipital'
+  return z > cenZ(u) ? 'frontal' : 'parietal'
 }
 
-// Lobe sliders → control points, merged with the user's custom click-sculpt points.
-function effectiveBulges(p: BrainShapeParams): NormBulge[] {
-  const out: NormBulge[] = (p.bulges ?? []).map((b) => ({ n: normalize([b.x, b.y, b.z]), radius: b.radius, strength: b.strength }))
-  for (const lobe of ['frontal', 'parietal', 'temporal', 'occipital'] as Lobe[]) {
-    const scale = p.lobes?.[lobe]?.scale ?? 1
-    if (Math.abs(scale - 1) > 0.001) {
-      for (const c of LOBE_CENTERS[lobe]) out.push({ n: normalize(c), radius: LOBE_RADIUS, strength: (scale - 1) * LOBE_BULGE_GAIN })
-    }
-  }
-  return out
-}
-function effectiveDensity(p: BrainShapeParams): DensityPoint[] {
-  const out: DensityPoint[] = [...(p.densityPoints ?? [])]
-  for (const lobe of ['frontal', 'parietal', 'temporal', 'occipital'] as Lobe[]) {
-    const d = p.lobes?.[lobe]?.density ?? 0
-    if (d > 0) for (const c of LOBE_CENTERS[lobe]) { const n = normalize(c); out.push({ x: n[0], y: n[1], z: n[2], radius: LOBE_RADIUS, level: d }) }
-  }
-  return out
-}
+const DETAIL = 4            // icosphere subdivisions: the fold bands need this fixed, dense lattice
+// The mesh lives the whole session, so the route caches are bounded (emptied when they fill up).
+// Above the vertex count: a graph can't have more structure edges than that, so one never thrashes.
+const PATH_CACHE_MAX = 8192
 
 // ── assembly ────────────────────────────────────────────────────────────────────
-export function buildBrainMesh(params: BrainShapeParams = DEFAULT_BRAIN_PARAMS): BrainMesh {
-  const positions: number[] = []
-  const regionOf: number[] = []
-  const edgeSet = new Set<number>()
-  const edgePairs: [number, number][] = []
-  const surfaceFaces: number[] = []
-  let vCount = 0
-
-  const pushVertex = (px: number, py: number, pz: number, region: Region): number => {
-    const idx = vCount++
-    positions.push(px, py, pz)
-    regionOf.push(REGION_CODE[region])
-    return idx
+export function buildBrainMesh(): BrainMesh {
+  const positions: number[] = [], regionOf: number[] = [], kind: number[] = [], surface: number[] = []
+  const edgeSet = new Map<number, number>(), edgeLo: number[] = [], edgeHi: number[] = [], edgeWs: number[] = []
+  const faces: number[] = []
+  let V = 0
+  const push = (x: number, y: number, z: number, region: Region, k: number, isSurf: boolean): number => {
+    positions.push(x, y, z); regionOf.push(REGION_CODE[region]); kind.push(k); surface.push(isSurf ? 1 : 0)
+    return V++
   }
-  const addEdge = (a: number, b: number) => {
+  // Insertion order is the edge order; a repeated pair keeps its slot and the larger weight.
+  const addEdge = (a: number, b: number, w: number) => {
     if (a === b) return
-    const lo = Math.min(a, b), hi = Math.max(a, b)
-    const key = lo * 1000000 + hi
-    if (edgeSet.has(key)) return
-    edgeSet.add(key); edgePairs.push([lo, hi])
+    const lo = Math.min(a, b), hi = Math.max(a, b), key = lo * 8192 + hi
+    const at = edgeSet.get(key)
+    if (at !== undefined) { if (w > edgeWs[at]) edgeWs[at] = w; return }
+    edgeSet.set(key, edgeLo.length); edgeLo.push(lo); edgeHi.push(hi); edgeWs.push(w)
   }
-  const addFaceEdges = (faces: [number, number, number][], offset: number) => {
-    for (const [a, b, c] of faces) {
-      addEdge(a + offset, b + offset); addEdge(b + offset, c + offset); addEdge(c + offset, a + offset)
+  const C = CENTER
+
+  // ── cerebrum surface ──
+  const topo = topology(DETAIL)
+  const nC = topo.verts.length, nF = topo.faces.length
+  // mean angular edge length → how far a vertex may slide to reach a fold boundary
+  let ang = 0
+  const sample = Math.min(nF, 400)
+  for (let i = 0; i < sample; i++) {
+    const a = topo.verts[topo.faces[i][0]], b = topo.verts[topo.faces[i][1]]
+    ang += Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])))
+  }
+  const maxStep = (ang / sample) * 0.42
+
+  const base: Vec3[] = [], dirs: Vec3[] = [], fold: number[] = [], snapped = new Uint8Array(nC)
+  for (let i = 0; i < nC; i++) {
+    let d = warp(topo.verts[i])
+    // p / g always belong to the current d, so the last pair is the vertex itself
+    let p = surfacePoint(d), g = gyri(p[0], p[1], p[2])
+    for (let it = 0; it < 2; it++) {
+      // two tangents on the ray sphere
+      const up: Vec3 = Math.abs(d[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]
+      const t1 = normalize([d[1] * up[2] - d[2] * up[1], d[2] * up[0] - d[0] * up[2], d[0] * up[1] - d[1] * up[0]])
+      const t2: Vec3 = [d[1] * t1[2] - d[2] * t1[1], d[2] * t1[0] - d[0] * t1[2], d[0] * t1[1] - d[1] * t1[0]]
+      const e = 0.012
+      const p1 = surfacePoint(normalize([d[0] + e * t1[0], d[1] + e * t1[1], d[2] + e * t1[2]]))
+      const p2 = surfacePoint(normalize([d[0] + e * t2[0], d[1] + e * t2[1], d[2] + e * t2[2]]))
+      const g1 = (gyri(p1[0], p1[1], p1[2]) - g) / e, g2 = (gyri(p2[0], p2[1], p2[2]) - g) / e, gg = g1 * g1 + g2 * g2
+      if (gg < 1e-6) break
+      const s1 = ((C0 - g) * g1) / gg, s2 = ((C0 - g) * g2) / gg, len = Math.hypot(s1, s2)
+      if (len > maxStep * (it === 0 ? 1 : 0.5)) break
+      d = normalize([d[0] + s1 * t1[0] + s2 * t2[0], d[1] + s1 * t1[1] + s2 * t2[1], d[2] + s1 * t1[2] + s2 * t2[2]])
+      snapped[i] = 1
+      p = surfacePoint(d); g = gyri(p[0], p[1], p[2])
     }
+    dirs.push(d); base.push(p); fold.push(g)
   }
 
-  const cy = params.centerY
-  const bulges = effectiveBulges(params)
-  const density = effectiveDensity(params)
-
-  // Cerebrum topology (with local density) → deformed positions → concentric shells.
-  const topo = cerebrumTopology(params.detail, density)
-  const outerPos: Vec3[] = topo.verts.map((d) => cerebrumVertex(d, params, bulges))
-  const shells = params.shells?.length ? params.shells : [1]
-  const shellIndex: number[][] = []
-  for (const scale of shells) {
-    const idxMap: number[] = []
-    const off = vCount
-    for (let i = 0; i < outerPos.length; i++) {
-      const o = outerPos[i]
-      idxMap.push(pushVertex(o[0] * scale, cy + (o[1] - cy) * scale, o[2] * scale, regionForCerebrum(topo.verts[i])))
-    }
-    addFaceEdges(topo.faces, off)
-    shellIndex.push(idxMap)
+  // classify faces at their centroid, then drop single-triangle islands
+  const fc = new Uint8Array(nF)
+  for (let i = 0; i < nF; i++) {
+    const f = topo.faces[i], a = base[f[0]], b = base[f[1]], c = base[f[2]]
+    fc[i] = gyri((a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3) > C0 ? 1 : 0
   }
-  for (let s = 0; s < shellIndex.length - 1; s++) {
-    for (let i = 0; i < outerPos.length; i++) addEdge(shellIndex[s][i], shellIndex[s + 1][i])
-  }
-  const cerebrumIndex = shellIndex[0]
-  const outerOff = shellIndex[0][0]
-  for (const [a, b, c] of topo.faces) surfaceFaces.push(a + outerOff, b + outerOff, c + outerOff)
-
-  // Interior fill: random vertices through the cerebrum volume + short edges to nearest neighbours.
-  // The volume is star-shaped from C, so a random direction → its surface point S gives a ray, and
-  // a cube-root radius spreads points uniformly along it. Region-tagged like the surface, so notes
-  // can be pinned inside too. Deterministic (seeded RNG); edges capped to maxEdge so none stretch
-  // across the brain (nearest-neighbour fallback keeps stray points from floating unconnected).
-  const interiorVertices: number[] = []
-  const fill = params.interior
-  if (fill && fill.fillDensity > 0) {
-    const rng = mulberry32(0x1a2b3c4d)
-    const C: Vec3 = [0, cy, 0]
-    const nInterior = Math.round(outerPos.length * fill.fillDensity)
-    const intPos: Vec3[] = []
-    for (let i = 0; i < nInterior; i++) {
-      const u = rng() * 2 - 1, theta = rng() * Math.PI * 2, sq = Math.sqrt(1 - u * u)
-      const dir: Vec3 = [sq * Math.cos(theta), u, sq * Math.sin(theta)]
-      const surf = cerebrumVertex(dir, params, bulges)
-      const r = Math.cbrt(rng()) * fill.margin
-      const p: Vec3 = [C[0] + (surf[0] - C[0]) * r, C[1] + (surf[1] - C[1]) * r, C[2] + (surf[2] - C[2]) * r]
-      interiorVertices.push(pushVertex(p[0], p[1], p[2], regionForCerebrum(dir)))
-      intPos.push(p)
+  // the surface edges in first-seen order, each with the (up to) two faces that share it
+  const slotOf = new Map<number, number>()
+  const seLo: number[] = [], seHi: number[] = [], seF0: number[] = [], seF1: number[] = []
+  const faceEdge = new Int32Array(nF * 3)
+  for (let i = 0; i < nF; i++) {
+    const f = topo.faces[i]
+    for (let k = 0; k < 3; k++) {
+      const a = f[k], b = f[(k + 1) % 3], lo = a < b ? a : b, hi = a < b ? b : a, key = lo * 8192 + hi
+      let s = slotOf.get(key)
+      if (s === undefined) { s = seLo.length; slotOf.set(key, s); seLo.push(lo); seHi.push(hi); seF0.push(i); seF1.push(-1) }
+      else seF1[s] = i
+      faceEdge[i * 3 + k] = s
     }
-    // Candidates each interior point may link to: the outer shell + the other interior points.
-    const candIdx = [...cerebrumIndex, ...interiorVertices]
-    const candPos = [...outerPos, ...intPos]
-    const maxE2 = fill.maxEdge * fill.maxEdge
-    for (let i = 0; i < interiorVertices.length; i++) {
-      const pi = intPos[i]
-      const near: { idx: number; d2: number }[] = []
-      let bestIdx = -1, bestD2 = Infinity
-      for (let j = 0; j < candIdx.length; j++) {
-        if (candIdx[j] === interiorVertices[i]) continue
-        const pj = candPos[j]
-        const d2 = (pi[0] - pj[0]) ** 2 + (pi[1] - pj[1]) ** 2 + (pi[2] - pj[2]) ** 2
-        if (d2 < bestD2) { bestD2 = d2; bestIdx = candIdx[j] }
-        if (d2 <= maxE2) near.push({ idx: candIdx[j], d2 })
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    const next = fc.slice()
+    for (let i = 0; i < nF; i++) {
+      let other = 0
+      for (let k = 0; k < 3; k++) {
+        const s = faceEdge[i * 3 + k], nb = seF0[s] === i ? seF1[s] : seF0[s]
+        if (nb >= 0 && fc[nb] !== fc[i]) other++
       }
-      near.sort((a, b) => a.d2 - b.d2)
-      const k = Math.min(fill.neighbors, near.length)
-      for (let n = 0; n < k; n++) addEdge(interiorVertices[i], near[n].idx)
-      if (k === 0 && bestIdx >= 0) addEdge(interiorVertices[i], bestIdx) // never leave a point orphaned
+      if (other === 3) next[i] = 1 - fc[i]
+    }
+    fc.set(next)
+  }
+  // displace: gyri out, sulci in, boundaries stay on the lofted surface
+  const cerebrumIndex: number[] = []
+  for (let i = 0; i < nC; i++) {
+    const g = fold[i], d = dirs[i], b = base[i]
+    let h = snapped[i] ? -0.004 : g > C0 ? 0.032 * smoothstep(C0, C0 + 0.7, g) : -0.06 * smoothstep(C0, C0 - 0.7, g)
+    h -= 0.13 * Math.exp(-Math.pow(b[0] / 0.07, 2)) * smoothstep(-0.3, 0.05, d[1])
+    cerebrumIndex.push(push(b[0] + d[0] * h, b[1] + d[1] * h, b[2] + d[2] * h, regionAt(b[0], b[1], b[2]), 0, true))
+  }
+  const vertW: number[] = []
+  for (let i = 0; i < nC; i++) vertW.push(0.22)
+  for (let i = 0; i < nF; i++) {
+    const f = topo.faces[i]
+    faces.push(f[0], f[1], f[2])
+    if (fc[i]) for (const v of f) if (vertW[v] < 0.5) vertW[v] = 0.5
+  }
+  for (let s = 0; s < seLo.length; s++) {
+    const a = seLo[s], b = seHi[s]
+    const ca = fc[seF0[s]], cb = seF1[s] >= 0 ? fc[seF1[s]] : ca
+    const under = dirs[a][1] < -0.5 && dirs[b][1] < -0.5 ? 0.6 : 1
+    const w = (ca !== cb ? 1 : ca ? 0.3 : 0.045) * under   // the outline of a gyrus is the bright line
+    addEdge(a, b, w)
+    if (ca !== cb) { vertW[a] = Math.max(vertW[a], under); vertW[b] = Math.max(vertW[b], under) }
+  }
+
+  // ── interior lattice (white matter): random points inside, wired to their nearest neighbours ──
+  const interiorVertices: number[] = []
+  {
+    const rng = mulberry32(0x1a2b3c4d)
+    const n = Math.round(Math.min(2400, nC * 0.65))
+    // Link candidates, in index order: the cortex at its lofted (un-displaced) position, then the
+    // interior points. Candidate j is vertex j.
+    const N = nC + n
+    const cand = new Float64Array(N * 3)
+    for (let i = 0; i < nC; i++) { const b = base[i]; cand[i * 3] = b[0]; cand[i * 3 + 1] = b[1]; cand[i * 3 + 2] = b[2] }
+    for (let i = 0; i < n; i++) {
+      const u = rng() * 2 - 1, th = rng() * Math.PI * 2, sq = Math.sqrt(1 - u * u)
+      const d = warp([sq * Math.cos(th), u, sq * Math.sin(th)])
+      const r = solveRadius(d) * Math.cbrt(rng()) * 0.88
+      const x = C[0] + d[0] * r, y = C[1] + d[1] * r, z = C[2] + d[2] * r
+      const v = push(x, y, z, regionAt(x, y, z), 0, false)
+      interiorVertices.push(v); vertW.push(0.6)
+      cand[v * 3] = x; cand[v * 3 + 1] = y; cand[v * 3 + 2] = z
+    }
+
+    // Each interior point links to its (up to) 3 nearest candidates within maxE; ties resolve by
+    // candidate index, exactly as a stable sort of the full candidate sweep would. A uniform grid
+    // (RINGS cells span maxE, plus a hair so rounding can never hide a candidate in range) is
+    // searched ring by ring around the point's cell: once ring k is done every unseen candidate
+    // lies more than k cells away, so the search stops as soon as the third nearest is closer.
+    const maxE = 0.42, maxE2 = maxE * maxE
+    const RINGS = 3, cell = (maxE / RINGS) * 1.000001
+    let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+    for (let j = 0; j < N; j++) {
+      const x = cand[j * 3], y = cand[j * 3 + 1], z = cand[j * 3 + 2]
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
+      if (z < minZ) minZ = z
+      if (z > maxZ) maxZ = z
+    }
+    const gx = Math.floor((maxX - minX) / cell) + 1, gy = Math.floor((maxY - minY) / cell) + 1, gz = Math.floor((maxZ - minZ) / cell) + 1
+    const cellX = new Int32Array(N), cellY = new Int32Array(N), cellZ = new Int32Array(N)
+    const cellStart = new Int32Array(gx * gy * gz + 1), cellItems = new Int32Array(N)
+    for (let j = 0; j < N; j++) {
+      cellX[j] = Math.floor((cand[j * 3] - minX) / cell); cellY[j] = Math.floor((cand[j * 3 + 1] - minY) / cell); cellZ[j] = Math.floor((cand[j * 3 + 2] - minZ) / cell)
+      cellStart[(cellX[j] * gy + cellY[j]) * gz + cellZ[j] + 1]++
+    }
+    for (let c = 0; c < gx * gy * gz; c++) cellStart[c + 1] += cellStart[c]
+    {
+      const fill = cellStart.slice(0, gx * gy * gz)
+      for (let j = 0; j < N; j++) cellItems[fill[(cellX[j] * gy + cellY[j]) * gz + cellZ[j]]++] = j
+    }
+    for (let i = 0; i < n; i++) {
+      const self = interiorVertices[i]
+      const px = cand[self * 3], py = cand[self * 3 + 1], pz = cand[self * 3 + 2]
+      const ix = cellX[self], iy = cellY[self], iz = cellZ[self]
+      // the three nearest so far, ordered by (distance, candidate index)
+      let b0 = -1, b1 = -1, b2 = -1, q0 = Infinity, q1 = Infinity, q2 = Infinity
+      for (let k = 0; k <= RINGS; k++) {
+        const x0 = Math.max(0, ix - k), x1 = Math.min(gx - 1, ix + k)
+        const y0 = Math.max(0, iy - k), y1 = Math.min(gy - 1, iy + k)
+        const z0 = Math.max(0, iz - k), z1 = Math.min(gz - 1, iz + k)
+        for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) {
+          // only the shell of the block: its inside was covered by the previous rings
+          const edge = Math.abs(cx - ix) === k || Math.abs(cy - iy) === k
+          for (let cz = z0; cz <= z1; cz++) {
+            if (!edge && Math.abs(cz - iz) !== k) continue
+            const c = (cx * gy + cy) * gz + cz
+            for (let s = cellStart[c], end = cellStart[c + 1]; s < end; s++) {
+              const j = cellItems[s]
+              if (j === self) continue
+              const q = (px - cand[j * 3]) ** 2 + (py - cand[j * 3 + 1]) ** 2 + (pz - cand[j * 3 + 2]) ** 2
+              if (q > maxE2 || q > q2 || (q === q2 && j > b2)) continue
+              if (q < q1 || (q === q1 && j < b1)) {
+                q2 = q1; b2 = b1
+                if (q < q0 || (q === q0 && j < b0)) { q1 = q0; b1 = b0; q0 = q; b0 = j } else { q1 = q; b1 = j }
+              } else { q2 = q; b2 = j }
+            }
+          }
+        }
+        const clear = k * cell * 0.999999 // nothing unseen is nearer than this
+        if (b2 >= 0 && q2 < clear * clear) break
+      }
+      if (b0 >= 0) {
+        addEdge(self, b0, 0.3)
+        if (b1 >= 0) addEdge(self, b1, 0.3)
+        if (b2 >= 0) addEdge(self, b2, 0.3)
+      } else {
+        // nothing within maxE: never leave a point orphaned — link it to the nearest candidate
+        let bestIdx = -1, bestD2 = Infinity
+        for (let j = 0; j < N; j++) {
+          if (j === self) continue
+          const q = (px - cand[j * 3]) ** 2 + (py - cand[j * 3 + 1]) ** 2 + (pz - cand[j * 3 + 2]) ** 2
+          if (q < bestD2) { bestD2 = q; bestIdx = j }
+        }
+        if (bestIdx >= 0) addEdge(self, bestIdx, 0.3)
+      }
     }
   }
 
-  // Cerebellum: small, lumpy, tucked back-and-down.
-  const cb = icosphere(params.cerebellum.detail)
-  const cbOff = vCount
-  const { scale: cbS, center: cbC, wrinkleAmp, wrinkleFreq } = params.cerebellum
+  // ── cerebellum: tucked under the occipital lobes; horizontal rings read as folia, with a
+  // flattened top (it sits under the tentorium) and a notch between its two hemispheres ──
   const cbIndex: number[] = []
-  for (const dir of cb.verts) {
-    const wrinkle = (valueNoise(dir[0] * wrinkleFreq + 30, dir[1] * wrinkleFreq, dir[2] * wrinkleFreq) - 0.5) * wrinkleAmp
-    cbIndex.push(pushVertex(
-      cbC[0] + dir[0] * cbS[0] * (1 + wrinkle),
-      cbC[1] + dir[1] * cbS[1] * (1 + wrinkle),
-      cbC[2] + dir[2] * cbS[2] * (1 + wrinkle),
-      'cerebellum',
-    ))
-  }
-  addFaceEdges(cb.faces, cbOff)
-  for (const [a, b, c] of cb.faces) surfaceFaces.push(a + cbOff, b + cbOff, c + cbOff)
-
-  // Brain stem: a few short strands of points.
-  const { points: nStem, top: sTop, bottom: sBot, strands, spread } = params.stem
-  const stemIndex: number[] = []
-  for (let st = 0; st < strands; st++) {
-    const ang = (st / Math.max(1, strands)) * Math.PI * 2
-    const ox = Math.cos(ang) * spread, oz = Math.sin(ang) * spread
-    let prev = -1
-    for (let i = 0; i < nStem; i++) {
-      const t = i / Math.max(1, nStem - 1)
-      const idx = pushVertex(
-        sTop[0] + (sBot[0] - sTop[0]) * t + ox * (1 - t * 0.3),
-        sTop[1] + (sBot[1] - sTop[1]) * t,
-        sTop[2] + (sBot[2] - sTop[2]) * t + oz * (1 - t * 0.3),
-        'stem',
+  {
+    const cc: Vec3 = [0, -0.31, -0.7], rr: Vec3 = [0.4 * SLIM, 0.235, 0.33], R = 12, S = 18
+    const at = (i: number, j: number): number => {
+      const th = (Math.PI * i) / R, ph = (Math.PI * 2 * (j + (i % 2) * 0.5)) / S
+      const d: Vec3 = [Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)]
+      const notch = (1 - 0.3 * Math.exp(-Math.pow(d[0] / 0.22, 2)) * (0.55 - 0.45 * d[2])) * (1 + 0.1 * Math.pow(Math.abs(d[0]), 1.5))
+      const ridge = i % 2 ? 1.025 : 0.985          // alternate rings in and out: folia
+      return push(
+        cc[0] + d[0] * rr[0] * notch * ridge,
+        cc[1] + d[1] * rr[1] * (d[1] > 0 ? 0.88 : 1) * (1 - 0.22 * Math.exp(-Math.pow(d[0] / 0.2, 2)) * Math.max(0, -d[1])),
+        cc[2] + d[2] * rr[2] * notch * ridge,
+        'cerebellum', 1, true,
       )
-      if (prev !== -1) addEdge(prev, idx)
-      prev = idx
-      if (st === 0) stemIndex.push(idx)
     }
+    const top = at(0, 0); vertW.push(0.6)
+    const rings: number[][] = []
+    for (let i = 1; i < R; i++) {
+      const ring: number[] = []
+      for (let j = 0; j < S; j++) { ring.push(at(i, j)); vertW.push(i % 2 ? 0.9 : 0.4) }
+      rings.push(ring)
+    }
+    const bottom = at(R, 0); vertW.push(0.4)
+    cbIndex.push(top, bottom)
+    rings.forEach((ring, i) => {
+      for (let j = 0; j < S; j++) {
+        const a = ring[j], b = ring[(j + 1) % S]
+        cbIndex.push(a)
+        addEdge(a, b, (i + 1) % 2 ? 0.95 : 0.4)
+        if (i === 0) { faces.push(top, a, b); addEdge(top, a, 0.3) }
+        if (i < rings.length - 1) {
+          // consecutive rings are offset by half a step → a clean zig-zag band of triangles
+          const lower = rings[i + 1], l0 = lower[j], l1 = lower[(j + 1) % S]
+          if (i % 2) { faces.push(a, l0, b, b, l0, l1); addEdge(a, l0, 0.3); addEdge(b, l0, 0.3) }
+          else { faces.push(a, l0, l1, a, l1, b); addEdge(a, l0, 0.3); addEdge(a, l1, 0.3) }
+        } else { faces.push(bottom, b, a); addEdge(bottom, a, 0.2) }
+      }
+    })
+  }
+
+  // ── brainstem: midbrain → pons (bulging forward) → medulla, leaning back as it descends ──
+  const stemIndex: number[] = []
+  const L = 9, M = 8
+  {
+    const T: Vec3 = [0, 0.0, -0.1], B: Vec3 = [0, -0.82, -0.37]
+    const rings: number[][] = []
+    for (let i = 0; i < L; i++) {
+      const t = i / (L - 1), pons = Math.exp(-Math.pow((t - 0.32) / 0.17, 2))
+      const rad = 0.19 * (1 - t) + 0.09 * t + 0.085 * pons
+      const cx = T[0] + (B[0] - T[0]) * t, cy = T[1] + (B[1] - T[1]) * t, cz = T[2] + (B[2] - T[2]) * t + 0.05 * pons
+      const ring: number[] = []
+      for (let j = 0; j < M; j++) {
+        const a = (Math.PI * 2 * (j + (i % 2) * 0.5)) / M
+        ring.push(push(cx + Math.cos(a) * rad * 1.05, cy, cz + Math.sin(a) * rad, 'stem', 2, true)); vertW.push(0.7)
+      }
+      rings.push(ring)
+    }
+    rings.forEach((ring, i) => {
+      for (let j = 0; j < M; j++) {
+        const a = ring[j], b = ring[(j + 1) % M]
+        stemIndex.push(a)
+        addEdge(a, b, 0.6)
+        if (i < L - 1) {
+          const lower = rings[i + 1]
+          const l0 = i % 2 ? lower[j] : lower[(j + M - 1) % M], l1 = i % 2 ? lower[(j + 1) % M] : lower[j]
+          faces.push(a, l0, l1, a, l1, b); addEdge(a, l0, 0.6); addEdge(a, l1, 0.6)
+        }
+      }
+    })
   }
 
   const posArr = new Float32Array(positions)
-
-  // Bake the cerebrum-only rotation: rotate just the cerebrum vertices (region < 4) around the
-  // shape center; cerebellum + stem stay put. Done before bridges so they reconnect to the new
-  // positions, and before adjacency/centroid so everything downstream is consistent.
-  const rot = params.rotation ?? [0, 0, 0]
-  if (rot[0] || rot[1] || rot[2]) {
-    const S: Vec3 = [0, cy, 0]
-    for (let i = 0; i < vCount; i++) {
-      if (regionOf[i] >= REGION_CODE.cerebellum) continue
-      const r = rotateAround([posArr[i * 3], posArr[i * 3 + 1], posArr[i * 3 + 2]], rot, S)
-      posArr[i * 3] = r[0]; posArr[i * 3 + 1] = r[1]; posArr[i * 3 + 2] = r[2]
-    }
-  }
-
   const dist2 = (i: number, j: number) =>
     (posArr[i * 3] - posArr[j * 3]) ** 2 + (posArr[i * 3 + 1] - posArr[j * 3 + 1]) ** 2 + (posArr[i * 3 + 2] - posArr[j * 3 + 2]) ** 2
   const nearestIn = (target: number, pool: number[]): number => {
@@ -502,190 +533,172 @@ export function buildBrainMesh(params: BrainShapeParams = DEFAULT_BRAIN_PARAMS):
     for (const j of pool) { const d = dist2(target, j); if (d < bestD) { bestD = d; best = j } }
     return best
   }
+  // stitch the three parts so routes can cross between them (hidden links: weight 0)
+  for (const v of cbIndex) if (posArr[v * 3 + 1] > -0.2 && posArr[v * 3 + 2] < -0.7) addEdge(v, nearestIn(v, cerebrumIndex), 0)
+  for (let j = 0; j < M; j += 2) addEdge(stemIndex[j], nearestIn(stemIndex[j], interiorVertices), 0)
+  addEdge(stemIndex[3 * M + 6], nearestIn(stemIndex[3 * M + 6], cbIndex), 0)
+  addEdge(stemIndex[5 * M + 6], nearestIn(stemIndex[5 * M + 6], cbIndex), 0)
 
-  for (const v of cbIndex) {
-    if (posArr[v * 3 + 1] > cbC[1] + 0.16) addEdge(v, nearestIn(v, cerebrumIndex))
-  }
-  if (stemIndex.length) {
-    addEdge(stemIndex[0], nearestIn(stemIndex[0], cerebrumIndex))
-    addEdge(stemIndex[Math.floor(stemIndex.length / 2)], nearestIn(stemIndex[Math.floor(stemIndex.length / 2)], cbIndex))
-  }
+  // cortex = a cerebral vertex a note may sit on: on a gyrus, not the underside, not in the fissure
+  const cortex = new Uint8Array(V)
+  for (let i = 0; i < nC; i++) cortex[i] = vertW[i] >= 0.5 && dirs[i][1] > -0.38 && Math.abs(posArr[i * 3]) > 0.1 ? 1 : 0
 
-  const adjacency: number[][] = Array.from({ length: vCount }, () => [])
-  for (const [a, b] of edgePairs) { adjacency[a].push(b); adjacency[b].push(a) }
-
+  const E = edgeLo.length
+  const adjacency: number[][] = Array.from({ length: V }, () => [])
+  for (let e = 0; e < E; e++) { adjacency[edgeLo[e]].push(edgeHi[e]); adjacency[edgeHi[e]].push(edgeLo[e]) }
   const verticesByRegion: Record<Region, number[]> = {
     frontal: [], parietal: [], temporal: [], occipital: [], cerebellum: [], stem: [],
   }
-  for (let i = 0; i < vCount; i++) verticesByRegion[REGIONS[regionOf[i]]].push(i)
+  for (let i = 0; i < V; i++) verticesByRegion[REGIONS[regionOf[i]]].push(i)
 
-  let sx = 0, sy = 0, sz = 0
-  for (let i = 0; i < vCount; i++) { sx += posArr[i * 3]; sy += posArr[i * 3 + 1]; sz += posArr[i * 3 + 2] }
-  const centroid: Vec3 = [sx / vCount, sy / vCount, sz / vCount]
+  // bounding sphere of the cerebral surface (the first nC vertices): depth-cue normalisation
+  let bx = 0, by = 0, bz = 0
+  for (let v = 0; v < nC; v++) { bx += posArr[v * 3]; by += posArr[v * 3 + 1]; bz += posArr[v * 3 + 2] }
+  bx /= nC; by /= nC; bz /= nC
+  let boundRadius = 0
+  for (let v = 0; v < nC; v++) boundRadius = Math.max(boundRadius, Math.hypot(posArr[v * 3] - bx, posArr[v * 3 + 1] - by, posArr[v * 3 + 2] - bz))
 
-  // Per-vertex radial fraction: distance from the shape center (0, cy, 0) normalised by the max, so
-  // ~1 on the outer shell and →0 toward the core. The interior-biased router uses this to make
-  // surface travel expensive (see below).
-  const radialFrac = new Float64Array(vCount)
+  // ── routing: shortest lattice paths (A*), an interior-biased variant for content relations and a
+  // congestion-aware batch. The search state lives in arrays shared by every search and reset by a
+  // generation stamp, so a route costs no allocation beyond its own path. ──
+  // Per-vertex radial fraction: distance from the core normalised by the max, so ~1 on the outer
+  // shell and →0 toward the core. The interior-biased weight uses it to make surface travel dear.
+  const radialFrac = new Float64Array(V)
   {
     let rMax = 0
-    for (let i = 0; i < vCount; i++) {
-      const r = Math.hypot(posArr[i * 3], posArr[i * 3 + 1] - cy, posArr[i * 3 + 2])
-      radialFrac[i] = r
-      if (r > rMax) rMax = r
+    for (let i = 0; i < V; i++) {
+      radialFrac[i] = Math.hypot(posArr[i * 3] - C[0], posArr[i * 3 + 1] - C[1], posArr[i * 3 + 2] - C[2])
+      if (radialFrac[i] > rMax) rMax = radialFrac[i]
     }
-    if (rMax > 0) for (let i = 0; i < vCount; i++) radialFrac[i] /= rMax
+    for (let i = 0; i < V; i++) radialFrac[i] /= rMax
+  }
+  // Adjacency in flat form (same neighbour order as `adjacency`) with the edge id of every slot, and
+  // both edge weights precomputed: raw Euclidean length, and length × exterior penalty.
+  const adjStart = new Int32Array(V + 1), adjTo = new Int32Array(E * 2), adjEdge = new Int32Array(E * 2)
+  const edgeLen = new Float64Array(E), edgeContent = new Float64Array(E)
+  {
+    for (let e = 0; e < E; e++) { adjStart[edgeLo[e] + 1]++; adjStart[edgeHi[e] + 1]++ }
+    for (let v = 0; v < V; v++) adjStart[v + 1] += adjStart[v]
+    const fill = adjStart.slice(0, V)
+    for (let e = 0; e < E; e++) {
+      const u = edgeLo[e], v = edgeHi[e]
+      adjTo[fill[u]] = v; adjEdge[fill[u]++] = e
+      adjTo[fill[v]] = u; adjEdge[fill[v]++] = e
+      edgeLen[e] = Math.sqrt(dist2(u, v))
+      edgeContent[e] = Math.sqrt(dist2(u, v)) * (1 + 5.5 * 0.5 * (radialFrac[u] ** 3 + radialFrac[v] ** 3))
+    }
+  }
+  const edgeKey = (u: number, v: number) => (u < v ? u * V + v : v * V + u)
+  const edgeBetween = (u: number, v: number): number => {
+    for (let s = adjStart[u], end = adjStart[u + 1]; s < end; s++) if (adjTo[s] === v) return adjEdge[s]
+    return -1
   }
 
-  // Undirected edge-id lookup: maps a vertex pair to its index in edgePairs so the congestion-aware
-  // content router can track how many content routes already traverse each lattice edge.
-  const edgeId = new Map<number, number>()
-  for (let i = 0; i < edgePairs.length; i++) edgeId.set(edgePairs[i][0] * vCount + edgePairs[i][1], i)
-  const edgeKey = (u: number, v: number) => (u < v ? u * vCount + v : v * vCount + u)
-
-  // Shortest path over the lattice via Dijkstra with a pluggable edge weight (lazy-deleting binary
-  // min-heap). The returned path is reversed by callers when they need a fixed start.
-  const dijkstra = (a: number, b: number, weight: (u: number, v: number) => number): number[] | null => {
+  const dist = new Float64Array(V), score = new Float64Array(V), prev = new Int32Array(V)
+  const seenAt = new Uint32Array(V), doneAt = new Uint32Array(V)
+  const heap = new Int32Array(E * 2 + 2) // every directed edge relaxes at most once
+  let stamp = 0
+  // A* over the lattice (lazy-deleting binary min-heap, straight-line distance as the heuristic).
+  // The edge cost is weight[e], times (1 + CONGESTION · usage[e]) when a usage table is given.
+  const CONGESTION = 2.6
+  const search = (a: number, b: number, weight: Float64Array, usage: Float64Array | null): number[] | null => {
     if (a === b) return [a]
-    const dist = new Float64Array(vCount).fill(Infinity)
-    const prev = new Int32Array(vCount).fill(-1)
-    const done = new Uint8Array(vCount)
-    dist[a] = 0
-    const heap: number[] = [a]
-    const swap = (i: number, j: number) => { const t = heap[i]; heap[i] = heap[j]; heap[j] = t }
-    const siftUp = (i: number) => { while (i > 0) { const p = (i - 1) >> 1; if (dist[heap[p]] <= dist[heap[i]]) break; swap(p, i); i = p } }
-    const siftDown = (i: number) => {
-      const n = heap.length
-      for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < n && dist[heap[l]] < dist[heap[m]]) m = l; if (r < n && dist[heap[r]] < dist[heap[m]]) m = r; if (m === i) break; swap(m, i); i = m }
-    }
+    if (++stamp === 0xffffffff) { seenAt.fill(0); doneAt.fill(0); stamp = 1 }
+    seenAt[a] = stamp; dist[a] = 0; prev[a] = -1; score[a] = Math.sqrt(dist2(a, b))
+    let n = 0
+    heap[n++] = a
     let found = false
-    while (heap.length) {
-      const cur = heap[0]
-      const last = heap.pop()!
-      if (heap.length) { heap[0] = last; siftDown(0) }
-      if (done[cur]) continue
-      done[cur] = 1
+    while (n > 0) {
+      const cur = heap[0], last = heap[--n]
+      if (n > 0) {
+        heap[0] = last
+        for (let i = 0; ;) {
+          const l = 2 * i + 1, r = l + 1
+          let m = i
+          if (l < n && score[heap[l]] < score[heap[m]]) m = l
+          if (r < n && score[heap[r]] < score[heap[m]]) m = r
+          if (m === i) break
+          const t = heap[m]; heap[m] = heap[i]; heap[i] = t
+          i = m
+        }
+      }
+      if (doneAt[cur] === stamp) continue
+      doneAt[cur] = stamp
       if (cur === b) { found = true; break }
       const dcur = dist[cur]
-      for (const nb of adjacency[cur]) {
-        if (done[nb]) continue
-        const nd = dcur + weight(cur, nb)
-        if (nd < dist[nb]) { dist[nb] = nd; prev[nb] = cur; heap.push(nb); siftUp(heap.length - 1) }
+      for (let s = adjStart[cur], end = adjStart[cur + 1]; s < end; s++) {
+        const nb = adjTo[s]
+        if (doneAt[nb] === stamp) continue
+        const e = adjEdge[s]
+        const nd = dcur + (usage ? weight[e] * (1 + CONGESTION * usage[e]) : weight[e])
+        if (seenAt[nb] !== stamp || nd < dist[nb]) {
+          seenAt[nb] = stamp; dist[nb] = nd; score[nb] = nd + Math.sqrt(dist2(nb, b)); prev[nb] = cur
+          let i = n
+          heap[n++] = nb
+          while (i > 0) {
+            const p = (i - 1) >> 1
+            if (score[heap[p]] <= score[heap[i]]) break
+            const t = heap[p]; heap[p] = heap[i]; heap[i] = t
+            i = p
+          }
+        }
       }
     }
     if (!found) return null
     const path: number[] = []
     for (let cur = b; cur !== -1; cur = prev[cur]) path.push(cur)
-    path.reverse()
-    return path
+    return path.reverse()
   }
-
   // A cached single-weight pather, keyed by the unordered {a,b} pair.
-  const makePather = (weight: (u: number, v: number) => number) => {
+  const makePather = (weight: Float64Array) => {
     const cache = new Map<number, number[] | null>()
     return (a: number, b: number): number[] | null => {
       if (a === b) return [a]
-      const key = edgeKey(a, b)
-      const cached = cache.get(key)
-      if (cached !== undefined) return cached
-      const path = dijkstra(a, b, weight)
-      cache.set(key, path)
-      return path
-    }
-  }
-
-  // Structure routes (group→folder→note) follow the scaffold by raw EUCLIDEAN edge length: a relation
-  // dives through the interior only when that's literally shorter, otherwise it hugs the surface.
-  const pathBetween = makePather((u, v) => Math.sqrt(dist2(u, v)))
-
-  // Content edges (synapses) penalise edges near the outer shell by their radial fraction, so the
-  // cheapest route bends inward through the interior fill and crosses the core before surfacing at
-  // the far note — relations visibly pass through the middle of the brain rather than skimming the
-  // exterior. EXTERIOR_BIAS controls how hard the path is pulled inward; EXTERIOR_POW (>1) makes the
-  // very outer shell disproportionately expensive so routes only surface right at their endpoints.
-  const EXTERIOR_BIAS = 5.5
-  const EXTERIOR_POW = 3
-  const contentWeight = (u: number, v: number) =>
-    Math.sqrt(dist2(u, v)) * (1 + EXTERIOR_BIAS * 0.5 * (radialFrac[u] ** EXTERIOR_POW + radialFrac[v] ** EXTERIOR_POW))
-  const pathThroughInterior = makePather(contentWeight)
-
-  // Batch-route every content edge TOGETHER with congestion awareness, so two relations don't
-  // collapse onto the same corridor (where one line hides the other, looking like a single edge).
-  // Each chosen route adds load to the lattice edges it uses; the next route pays CONGESTION per
-  // unit of existing load on an edge, so it fans out onto a parallel path through the interior fill
-  // instead of overlapping. Routes are processed in the order given, so callers pass the strongest
-  // relations first — they win the cleaner, directer path and weaker ones detour around them.
-  // Returns a map keyed by the unordered pair (edgeKey); callers orient each path to their start.
-  const CONGESTION = 2.6
-  const routeContentEdges = (pairs: Array<readonly [number, number]>): Map<number, number[]> => {
-    const usage = new Float64Array(edgePairs.length)
-    const routes = new Map<number, number[]>()
-    for (const [a, b] of pairs) {
-      const key = edgeKey(a, b)
-      if (routes.has(key)) continue
-      const path = a === b ? [a] : dijkstra(a, b, (u, v) => {
-        const eid = edgeId.get(edgeKey(u, v))
-        return contentWeight(u, v) * (1 + CONGESTION * (eid != null ? usage[eid] : 0))
-      })
-      const seq = path && path.length >= 2 ? path : [a, b]
-      routes.set(key, seq)
-      for (let i = 0; i < seq.length - 1; i++) {
-        const eid = edgeId.get(edgeKey(seq[i], seq[i + 1]))
-        if (eid != null) usage[eid] += 1
+      const k = edgeKey(a, b)
+      let p = cache.get(k)
+      if (p === undefined) {
+        p = search(a, b, weight, null)
+        if (cache.size >= PATH_CACHE_MAX) cache.clear()
+        cache.set(k, p)
       }
+      return p
     }
-    return routes
+  }
+  const pathBetween = makePather(edgeLen)
+  const pathThroughInterior = makePather(edgeContent)
+  // Each chosen route adds load to the lattice edges it uses; the next route pays CONGESTION per
+  // unit of load, so it fans out onto a parallel corridor instead of overlapping. The last batch
+  // is remembered: the same pairs in the same order (re-opening the brain, rebuilding the scene)
+  // get the same routes back without routing again.
+  let lastPairs: Int32Array | null = null, lastRoutes: Map<number, number[]> | null = null
+  const routeContentEdges = (pairs: Array<readonly [number, number]>): Map<number, number[]> => {
+    const flat = new Int32Array(pairs.length * 2)
+    for (let i = 0; i < pairs.length; i++) { flat[i * 2] = pairs[i][0]; flat[i * 2 + 1] = pairs[i][1] }
+    if (lastPairs && lastRoutes && lastPairs.length === flat.length && lastPairs.every((v, i) => v === flat[i])) return new Map(lastRoutes)
+    const usage = new Float64Array(E), routes = new Map<number, number[]>()
+    for (const pr of pairs) {
+      const k = edgeKey(pr[0], pr[1])
+      if (routes.has(k)) continue
+      const path = pr[0] === pr[1] ? [pr[0]] : search(pr[0], pr[1], edgeContent, usage)
+      const seq = path && path.length >= 2 ? path : [pr[0], pr[1]]
+      routes.set(k, seq)
+      for (let i = 0; i < seq.length - 1; i++) { const id = edgeBetween(seq[i], seq[i + 1]); if (id >= 0) usage[id] += 1 }
+    }
+    lastPairs = flat; lastRoutes = routes
+    return new Map(routes)
   }
 
-  const edges = new Uint32Array(edgePairs.length * 2)
-  for (let i = 0; i < edgePairs.length; i++) { edges[i * 2] = edgePairs[i][0]; edges[i * 2 + 1] = edgePairs[i][1] }
-
+  const edges = new Uint32Array(E * 2)
+  for (let e = 0; e < E; e++) { edges[e * 2] = edgeLo[e]; edges[e * 2 + 1] = edgeHi[e] }
   return {
-    positions: posArr, edges, faces: new Uint32Array(surfaceFaces), regionOf: new Int8Array(regionOf),
-    adjacency, centroid, vertexCount: vCount, verticesByRegion, interiorVertices, pathBetween, pathThroughInterior,
-    routeContentEdges,
+    positions: posArr, edges, faces: new Uint32Array(faces), regionOf: new Int8Array(regionOf), adjacency, vertexCount: V,
+    verticesByRegion, interiorVertices, edgeW: new Float32Array(edgeWs), vertW: new Float32Array(vertW), cortex,
+    kind: new Uint8Array(kind), surface: new Uint8Array(surface), center: [C[0], C[1], C[2]],
+    boundCenter: [bx, by, bz], boundRadius, pathBetween, pathThroughInterior, routeContentEdges,
   }
 }
 
-// Fill any missing fields (older saved tuner states) from defaults so build never crashes.
-/* eslint-disable @typescript-eslint/no-explicit-any */
-export function normalizeShape(s?: any): BrainShapeParams {
-  const d = DEFAULT_BRAIN_PARAMS
-  if (!s) return structuredClone(d)
-  const lobe = (l: Lobe): LobeControl => ({ ...d.lobes[l], ...(s.lobes?.[l] ?? {}) })
-  return {
-    ...structuredClone(d), ...s,
-    cerebellum: { ...d.cerebellum, ...(s.cerebellum ?? {}) },
-    stem: { ...d.stem, ...(s.stem ?? {}) },
-    interior: { ...d.interior, ...(s.interior ?? {}) },
-    lobes: { frontal: lobe('frontal'), parietal: lobe('parietal'), temporal: lobe('temporal'), occipital: lobe('occipital') },
-    bulges: Array.isArray(s.bulges) ? s.bulges : [],
-    densityPoints: Array.isArray(s.densityPoints) ? s.densityPoints : [],
-    shells: Array.isArray(s.shells) && s.shells.length ? s.shells : [...d.shells],
-    rotation: Array.isArray(s.rotation) && s.rotation.length === 3 ? s.rotation : [...d.rotation],
-  }
-}
-/* eslint-enable @typescript-eslint/no-explicit-any */
-
-// Adaptive scaffold density: the wireframe should feel sparse with a handful of notes and grow
-// denser as the graph fills up — instead of always rendering the full hand-tuned lattice. The
-// cerebrum is an icosphere whose vertex count is V(d) ≈ 10·4^d + 2; we pick the `detail` that
-// yields ~VERTS_PER_NODE free vertices per graph node (room for clustering + path routing without
-// nodes spilling out of their region), then clamp to a range that still reads as a brain.
-//
-// Tune here: lower VERTS_PER_NODE / DETAIL_MIN for an even sparser look, raise for denser.
-const VERTS_PER_NODE = 5
-const DETAIL_MIN = 1.6
-const DETAIL_MAX = 3.2
-export function adaptiveDetail(nodeCount: number): number {
-  const target = Math.max(40, nodeCount * VERTS_PER_NODE)
-  // Invert V(d) = 10·4^d + 2  →  d = log4((target − 2) / 10).
-  const d = Math.log((target - 2) / 10) / Math.log(4)
-  const clamped = Math.max(DETAIL_MIN, Math.min(DETAIL_MAX, d))
-  return Math.round(clamped * 10) / 10 // 0.1 steps → stable, avoids micro-rebuilds
-}
-
-// Built once with defaults, reused across opens/sessions.
+// The shape is fixed, so one mesh serves every open of the brain for the whole session.
 let cached: BrainMesh | null = null
 export function getBrainMesh(): BrainMesh {
   if (!cached) cached = buildBrainMesh()

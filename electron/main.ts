@@ -990,6 +990,20 @@ function createWindow(hidden = false): BrowserWindow {
     }
   })
 
+  // Tell the renderer when the window stops being seen. With backgroundThrottling off (above)
+  // Chromium never reports the page as hidden: `document.hidden` stays false and
+  // requestAnimationFrame keeps firing at full rate while the window sits minimised or hidden in
+  // the tray, so anything that animates (the 3D brain) would keep drawing for nobody. The state
+  // is read when the event fires rather than inferred from which event it was.
+  const sendVisibility = () => {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) return
+    win.webContents.send('window:visibility', win.isVisible() && !win.isMinimized())
+  }
+  win.on('show', sendVisibility)
+  win.on('hide', sendVisibility)
+  win.on('minimize', sendVisibility)
+  win.on('restore', sendVisibility)
+
   // Auto-recover when the renderer process crashes or is killed by the OS
   // (common after system suspend/resume or prolonged idle under memory pressure).
   win.webContents.on('render-process-gone', (_event, details) => {

@@ -64,15 +64,13 @@ consumidores** (related ✅, grafo ✅, chat ✅).
   TitleBar → `notesStore.brainViewOpen`, espejo de `contentPlace`; sustituye el editor en `App.tsx`,
   `setActiveNote` lo cierra). **`BrainView` elige el render según WebGL** (`detectWebGL()`):
   - **`BrainScene.tsx` (3D, POR DEFECTO — Fase 2.5):** cerebro inmersivo con **three.js**
-    (`WebGLRenderer` + `EffectComposer`/`UnrealBloomPass` + `OrbitControls`). La forma es una malla
-    procedural (`brainMesh.ts`: icosphere deformada + relleno interior + cerebelo + tronco); cada
-    nodo del grafo se fija a un vértice (`assignVertices.ts`). Capas: wireframe tenue (vértices=dots,
-    aristas), estructura grupo→carpeta→nota y dendritas nota→sección (líneas), sinapsis de contenido
-    nota↔nota (ruteadas por la malla), nodos (dot + anillo de color) y labels HTML proyectados. Look
-    en `tunerState.ts` (`DEFAULT_LOOK`: bloom, `wireOpacity`, `dotOpacity`, fog…). Impulsos eléctricos:
-    pulso único en hover (nodo→relacionada) + chispas ambientales aleatorias por el wireframe.
-    `BrainTuner.tsx` es un panel dev de escultura (`SHOW_TUNER=false`). Click en nota → fly-in +
-    `openSection`. Forzar 2D: `localStorage 'noteflow:brain-force-2d'`. En equipos de pocos recursos
+    (`WebGLRenderer` + `EffectComposer`/`UnrealBloomPass` + `OrbitControls`). Aspecto "Corriente
+    afinada · Bandas" (aprobado en prototipo, 2026-11): **solo alambre y puntos** sobre la malla fija
+    de `brainMesh.ts`, con cada nodo del grafo fijado a un vértice (`assignVertices.ts`). Detalle
+    abajo en § "Malla y asignación" y § "Render 3D". Click en nota/sección → tarjeta de vista previa
+    anclada (`onNodeActivate` → `BrainNodePreview`, que abre la nota desde ahí); click en grupo → su
+    vista (`onOpenGroup`); click en carpeta → la selecciona (foco); hover de nota/sección → barrido de
+    sus relaciones de contenido. Forzar 2D: `localStorage 'noteflow:brain-force-2d'`. En equipos de pocos recursos
     el cerebro arranca por defecto en 2D y muestra un popup una-vez ofreciendo cambiar a 3D; la
     elección explícita del usuario (o el legacy force-2D) se marca con `localStorage
     'noteflow:brain-3d-chosen'` y ya no vuelve a nudgear.
@@ -96,7 +94,122 @@ consumidores** (related ✅, grafo ✅, chat ✅).
     (`useForceLayout.ts`) con pan/zoom/drag/hover.
   Ambos comparten el modelo (`useBrainGraph.ts`) con dos capas de aristas: estructura sólida (color de
   grupo) + contenido tenue (resaltada al seleccionar/hover, con toggle). Excluye notas
-  archivadas/cifradas/temporales. Smoke headless: `scripts/ai-graph-smoke.cjs`.
+  archivadas/cifradas/temporales. Dos campos del nodo son solo para el 3D: **`centered`** en el nodo
+  del grupo del perfil de IA (nombre = `AI_GROUP_NAME` de `src/lib/aiGroup.ts`, comparado con
+  `isAiGroupName`: trim + sin distinguir mayúsculas) y **`groupId`** (`g:<id>`) en carpetas, notas y
+  secciones que cuelgan de un grupo (las notas sueltas no lo llevan). Test:
+  `tests/components/useBrainGraph.test.ts`. Smoke headless: `scripts/ai-graph-smoke.cjs`.
+  - **Malla y asignación (lógica pura, sin three):**
+    - **`brainMesh.ts` — forma FIJA, sin parámetros.** Es un port exacto del prototipo aprobado
+      (mismos vértices, aristas y caras, en el mismo orden): **4499 vértices · 11684 aristas · 5644
+      caras** (2562 de superficie cerebral, 1665 interiores, 200 de cerebelo, 72 de tronco). El cerebro
+      se **levanta a partir de perfiles medidos** (curvas `TOP`/`BOT`/`MED`/`WID`, `inside()` +
+      `solveRadius()` sobre una icosfera de 4 subdivisiones); los **giros son geometría**: el campo
+      `gyri()` separa giro/surco, los vértices se deslizan hasta la frontera y se desplazan
+      radialmente. Cada arista lleva un peso `edgeW` (contorno de giro 1 · dentro de giro 0.3 · dentro
+      de surco 0.045 · ×0.6 por debajo · **0 = costura oculta** entre cerebro/cerebelo/tronco: se
+      enruta por ella pero no se dibuja) y cada vértice un `vertW`. `cortex` marca los 1315 vértices
+      donde puede vivir una nota (sobre un giro, ni por debajo ni en la fisura); `kind` = 0 cerebro ·
+      1 cerebelo · 2 tronco; `surface` = 0 en el entramado interior; `center` = núcleo `[0, 0.42, 0]`;
+      `boundCenter`/`boundRadius` = esfera envolvente de la superficie cerebral. **No cambiar el orden
+      de las operaciones en coma flotante ni el de inserción de vértices/aristas**: los tests fijan la
+      huella del prototipo (`tests/helpers/brainMeshRef.ts`, `tests/components/brainMesh.test.ts`).
+    - **Singleton de sesión:** `getBrainMesh()` construye una vez y la reutiliza en cada apertura del
+      cerebro (medido: ≈65-70 ms la primera llamada en frío, ≈40 ms con el JIT caliente, tanto en
+      Node 24 como con el V8 de Electron 35); ya no depende de cuántas notas hay (se fueron
+      `adaptiveDetail`, `BrainShapeParams` y el panel de escultura). `buildBrainMesh()` es el
+      constructor puro (tests/bench). El módulo no importa three.
+    - **Rutas (A\* sobre el entramado):** `pathBetween` (longitud euclídea; estructura),
+      `pathThroughInterior` (penaliza la capa exterior) y `routeContentEdges(pairs)` (lote con
+      congestión: cada ruta encarece las aristas que usa, así las siguientes se abren en paralelo).
+      El estado de búsqueda vive en arrays compartidos con sello de generación (una ruta no reserva
+      nada); las cachés por par están acotadas y `routeContentEdges` recuerda el último lote (mismos
+      pares en el mismo orden → mismas rutas sin recalcular). Los arrays de ruta devueltos son
+      compartidos: no mutarlos. Coste real: **≈0,3 ms por arista de contenido** (el A\* con peso de
+      interior + congestión explora ~la mitad del entramado), es decir ~0,5 s para ~1800 relaciones.
+    - **Isla suelta:** la malla aprobada tiene **7 vértices interiores** (polo occipital) conectados
+      solo entre sí; `pathBetween` hacia ellos devuelve `null` (los llamadores ya caen a la recta
+      `[a, b]`). `assignVertices` nunca coloca nodos ahí.
+    - **`assignVertices.ts` — "corteza primero":** los grupos se siembran por muestreo del punto más
+      lejano sobre toda la corteza (el primero, frontal-lateral); cada carpeta coge un parche propio
+      junto a su grupo; las notas se agrupan alrededor de su padre sin ocupar vértices adyacentes
+      mientras haya sitio; las sueltas rellenan huecos (punto más lejano) y las sueltas favoritas van
+      al cerebelo; el grupo `centered` (perfil de IA) va al vértice interior más cercano al núcleo y
+      sus notas se quedan dentro; cada sección cuelga de un vecino libre de su nota. Mientras hay
+      sitio en la corteza el resultado es idéntico al del prototipo; **si se llena** (más nodos que
+      los 1315 vértices de corteza: el prototipo los descartaba) los nodos se desbordan al resto del
+      cerebro en vez de desaparecer, y el primer grupo nunca cae sobre un vértice ya ocupado.
+      **Compacidad (desviación deliberada del prototipo, que dispersaba los grupos grandes):** el
+      hueco de una nota se busca recorriendo solo la **superficie** del cerebro (sin atajar por el
+      entramado interior), el hueco "espaciado" vale dentro de `min(AIR_REACH = 0.45, territorio)`
+      —territorio = mitad de la distancia al grupo más cercano— y, agotado, la nota toma el giro libre
+      más cercano aunque toque a una hermana; sin giros libres en el territorio, el hueco de
+      superficie más cercano (surco/fisura/cara inferior). Con ≤ ~10 notas por ancla (lo que se vio
+      en el prototipo) el resultado sigue siendo idéntico al suyo. Medido: 40 notas por grupo → máx.
+      0,41 de su padre (antes 1,97; el cerebro mide 2,3). Tests: `tests/components/assignVertices.test.ts`.
+  - **Render 3D (`BrainScene.tsx` + `brainLook.ts`, `brainShaders.ts`, `brainData.ts`, `brainBuffers.ts`):**
+    - **Módulos:** `brainLook.ts` = TODOS los números del aspecto (`BRAIN_LOOK`) + presupuestos
+      (`BRAIN_BUDGET`); no hay presets ni sliders. `brainShaders.ts` = GLSL (líneas, puntos, nodos,
+      grade). `brainData.ts` (puro, sin three, testeado) = datos derivados del grafo: nodos colocados,
+      rutas de estructura con arco acumulado y `count` (troncos), dendritas, segmentos de sinapsis sin
+      duplicar, `edgePaths`, `fibre()` (Catmull-Rom centrípeto), `focusMask`, `outwardFaces`.
+      `brainBuffers.ts` (puro, testeado) = empaquetado por segmento (44 B; 36 B sin arco).
+    - **Canal de color = el del prototipo (three r128 sin gestión de color), a propósito:** los
+      triples sRGB del tema entran tal cual (`setRGB` sin espacio de color), `outputColorSpace =
+      LinearSRGBColorSpace`, composer con destino de **8 bits** (`UnsignedByteType`). Así los valores
+      de `BRAIN_LOOK` son los aprobados 1:1 (calibrado con capturas lado a lado: luminancia media
+      30,9 vs 31,0, p99 120,3 vs 120,5). **No reintroducir `SRGBColorSpace` ni el destino half-float
+      por defecto**: cambian el aspecto y el bloom.
+    - **Oclusión real:** las caras de la malla se dibujan primero como **piel invisible** que solo
+      escribe profundidad (`outwardFaces`: cerebelo y tronco vienen enrollados hacia dentro y se
+      voltean; el tronco, tubo abierto, va en ambos sentidos). Alambre, puntos, rutas y nodos se
+      dibujan dos veces desde la misma geometría: visible (`LessEqualDepth`) y **oculto**
+      (`GreaterDepth`, mucho más tenue: cara trasera + relleno interior). Sinapsis, impulsos, halos
+      y barridos ignoran la profundidad.
+    - **Capas (orden fijo, tabla `ORDER`; three no desempata por orden de creación):** constelación
+      lejana + motas (fondo), suelo (solo oscuro), alambre ±oculto (quads instanciados con grosor y
+      suavizado; peso `edgeW`), puntos ±ocultos (`vertW`), sinapsis en reposo (contenido +
+      relaciones de usuario en una malla; `uShowContent` apaga las de contenido), chispas
+      ambientales, rutas + dendritas ±ocultas (una llamada por pase; troncos más gruesos cerca del
+      grupo), impulsos, halo de nodos, barridos de hover/pensando, nodos ±ocultos y marcador del nodo
+      enfocado. Post: `RenderPass` → `UnrealBloomPass` (solo temas
+      oscuros) → `GRADE` (viñeta + grano; además **suma ahí el bloom** —el dibujo de mezcla del pase
+      se oculta con `blendMaterial.visible = false`— y la **luz interior**, que ya no es un sprite).
+      Temas claros: sin bloom, sin luz interior ni suelo, mezcla normal.
+    - **Movimiento (todo por uniforms; el bucle solo escribe las 6 chispas):** entrada desde el
+      núcleo (una vez por montaje), impulsos por las ramas y en las sinapsis, 4 ranuras de onda
+      (`uWaves`: foco, ambientales, **latido cada 6,5 s**, "pensando", cascada desde las notas
+      citadas), foco que atenúa lo no relacionado, barridos de hover/`thinking` como fibras suaves.
+    - **Cámara:** tres cuartos lateral, posición `(3.16, 1.01, 1.03)`, objetivo `(0, 0.3, 0)`
+      (órbita y zoom sobre el centro del cerebro); `fitCamera` aleja en ventanas estrechas.
+      **Etiquetas** HTML atenuadas por profundidad y sin solaparse; niveles por zoom (grupos siempre,
+      carpetas < 2,8, notas < 2,2, secciones solo enfocadas). Contrato con `scripts/lib/capture-kit.cjs`
+      (`probeBrainNode`): la etiqueta enfocada lleva en línea `opacity: 1` + `font-weight: 400` y el
+      canvas `cursor: pointer`.
+    - **Adaptaciones fuera del prototipo** (casos que su grafo de ejemplo no tenía): impulsos solo
+      en las 160 relaciones más fuertes y fibras ×3 (el prototipo: todas, ×6); en **tema claro** las
+      sinapsis en reposo bajan de opacidad con la densidad (`syn.lightRef`/`lightMin`) y las
+      rutas/dendritas neutras (`--text`) usan un gris (`color.lightNeutral`) en vez de negro.
+    - **Rendimiento (requisito: no consumir más que el cerebro anterior).** Sin MSAA
+      (`antialias: false`), destino de 8 bits, cero asignaciones por fotograma, picking como mucho una
+      vez por fotograma, etiquetas que solo tocan el DOM si cambian, malla cacheada, `rebuildData`
+      solo si cambia el modelo. **Pausa:** el bucle se detiene con la ventana minimizada u oculta en
+      la bandeja mediante el evento IPC **`window:visibility`** (`onWindowVisibility` del preload) —
+      `document.hidden` NO sirve porque la ventana principal tiene `backgroundThrottling: false`—.
+      Con **`prefers-reduced-motion`**: sin auto-rotación, impulsos, ondas (ni ambientales, ni de
+      "pensando", ni la cascada de citadas), latido, chispas ni entrada; las notas citadas llevan una
+      señal estática; y **render bajo demanda** (0 fotogramas en reposo, también con notas citadas).
+      Marcas `performance.measure`: `brain:mesh`, `brain:data`, `brain:scene`.
+    - **Sin aceleración por GPU (WebGL por software, SwiftShader/llvmpipe) este render es ~4× más
+      lento que el anterior** (medido a 1028×866: ≈280 ms por fotograma frente a 66): el coste son los
+      quads instanciados de las líneas (alambre visible + oculto ≈140 ms, impulsos ≈55, sinapsis ≈25),
+      que un rasterizador por software paga por segmento. `detectWebGL()` no distingue ese caso y la
+      heurística de gama baja es por CPU/RAM, no por GPU.
+    - **Depuración/medida:** `localStorage['noteflow:brain-debug'] = '1'` expone `window.__nfBrain`
+      (cámara, controles, renderer, composer, uniforms, `data()`, `setTime`, `setHover`, `setRotate`,
+      `fireWave`, `replay`, `info()`); sin la clave no se expone ni se ejecuta nada.
+    - **Pendiente aparte:** el espejo web (`docs/public/brain/`, `docs/src/brain/`) y el clip
+      `brain-orbit` del mosaico siguen con el cerebro anterior.
 - **Activación:** flag `settings.ai.enabled` (default `false`). **UI principal de activación: el
   overlay/CTA dentro de la vista cerebro** (con IA off el cerebro muestra solo estructura; activar
   desde ahí descarga el modelo + reindexa con barra de progreso). También hay toggle + "Reindex all"

@@ -366,5 +366,13 @@ const api = {
         electron_1.ipcRenderer.on('notes-updated', wrapper);
         return () => electron_1.ipcRenderer.removeListener('notes-updated', wrapper);
     },
+    // Whether the main window can be seen (shown and not minimised). The page cannot tell by itself:
+    // that window runs with backgroundThrottling off, so `document.hidden` never changes. Only the
+    // main window emits it.
+    onWindowVisibility: (callback) => {
+        const wrapper = (_event, visible) => callback(visible === true);
+        electron_1.ipcRenderer.on('window:visibility', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('window:visibility', wrapper);
+    },
 };
 electron_1.contextBridge.exposeInMainWorld('noteflow', api);

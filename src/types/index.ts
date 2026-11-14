@@ -599,6 +599,8 @@ declare global {
       setSectionWindowTarget: (noteId: string, sectionId: string) => void
       onNewNote: (cb: () => void) => () => void
       onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => () => void
+      /** Main window shown / hidden / minimised / restored. `document.hidden` can't tell (backgroundThrottling is off). */
+      onWindowVisibility: (cb: (visible: boolean) => void) => () => void
       windowId: () => number
       getTheme: () => string | null
       setTheme: (id: string) => void

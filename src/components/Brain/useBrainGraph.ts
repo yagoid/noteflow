@@ -5,6 +5,7 @@ import { useGroupsStore } from '../../stores/groupsStore'
 import { useAiStore } from '../../stores/aiStore'
 import { useSidebarGroups } from '../Sidebar/useSidebarGroups'
 import { extractSectionRelations } from '../../lib/sectionRelations'
+import { isAiGroupName } from '../../lib/aiGroup'
 
 // Two-layer brain graph model. Node ids are prefixed so groups, folders, notes and sections never
 // collide: `g:<groupId>`, `f:<folderId>`, `n:<noteId>`, `s:<sectionId>`.
@@ -19,6 +20,8 @@ export interface BrainNode {
   noteId?: string        // note + section nodes (section's parent note)
   sectionId?: string     // note: first section (click target); section: its own id
   favorited?: boolean     // note + section nodes — drives the cerebellum mapping
+  centered?: boolean      // group node of the AI profile group — pinned to the core of the 3D brain
+  groupId?: string        // folder, note + section nodes under a group: that group's node id (`g:<id>`)
 }
 
 export interface BrainStructureEdge { source: string; target: string }
@@ -61,7 +64,7 @@ export function useBrainGraph(): BrainGraphModel {
     // has 2+ sections, otherwise the collapsed `n:` soma. Used to anchor user relation edges.
     const sectionNodeId = new Map<string, string>()
 
-    const addNote = (note: Note, colorVar: GroupColor): string => {
+    const addNote = (note: Note, colorVar: GroupColor, groupId?: string): string => {
       const id = `n:${note.id}`
       nodes.push({
         id, kind: 'note',
@@ -69,6 +72,7 @@ export function useBrainGraph(): BrainGraphModel {
         colorVar, refId: note.id, noteId: note.id,
         sectionId: note.sections[0]?.id,
         favorited: note.favorited,
+        groupId,
       })
       noteNodeIds.add(note.id)
       // A single-section note collapses to just the soma: one node that already carries that
@@ -87,6 +91,7 @@ export function useBrainGraph(): BrainGraphModel {
           label: sec.name?.trim() || 'Section',
           colorVar, refId: sec.id, noteId: note.id,
           sectionId: sec.id, favorited: note.favorited,
+          groupId,
         })
         structureEdges.push({ source: id, target: sid })
         sectionNodeId.set(sec.id, sid)
@@ -103,18 +108,20 @@ export function useBrainGraph(): BrainGraphModel {
 
       const gColor = item.group.color
       const gId = `g:${item.group.id}`
-      nodes.push({ id: gId, kind: 'group', label: item.group.name, colorVar: gColor, refId: item.group.id })
+      const gNode: BrainNode = { id: gId, kind: 'group', label: item.group.name, colorVar: gColor, refId: item.group.id }
+      if (isAiGroupName(item.group.name)) gNode.centered = true
+      nodes.push(gNode)
 
       for (const note of item.notes) {
-        structureEdges.push({ source: gId, target: addNote(note, gColor) })
+        structureEdges.push({ source: gId, target: addNote(note, gColor, gId) })
       }
       for (const sf of item.folders) {
         if (sf.notes.length === 0) continue
         const fId = `f:${sf.folder.id}`
-        nodes.push({ id: fId, kind: 'folder', label: sf.folder.name, colorVar: gColor, refId: sf.folder.id })
+        nodes.push({ id: fId, kind: 'folder', label: sf.folder.name, colorVar: gColor, refId: sf.folder.id, groupId: gId })
         structureEdges.push({ source: gId, target: fId })
         for (const note of sf.notes) {
-          structureEdges.push({ source: fId, target: addNote(note, gColor) })
+          structureEdges.push({ source: fId, target: addNote(note, gColor, gId) })
         }
       }
     }

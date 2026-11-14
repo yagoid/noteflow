@@ -1882,7 +1882,9 @@ arista en el cerebro **aunque la IA esté apagada**.
 - **Cerebro (capa de relaciones):** `useBrainGraph` añade `relationEdges` derivado de escanear el
   contenido de las secciones visibles (`extractSectionRelations`) → independiente del índice IA.
   Render con el **mismo estilo tenue** que las aristas de contenido pero **siempre visible**: en 3D
-  (`BrainScene`) van en un `relationGroup` propio (no se ocultan con el toggle `showContentEdges`); en
+  (`BrainScene`) comparten malla con las de contenido y se distinguen por un flag por segmento
+  (`FLAG_CONTENT` de `brainBuffers.ts`): el uniform `uShowContent` apaga solo las de contenido, así
+  que no se ocultan con el toggle `showContentEdges`; en
   2D (`BrainCanvas`) un loop aparte siempre dibujado; `useForceLayout` las incluye como links de
   contenido. Endpoints resueltos a `s:<sectionId>` (o `n:<noteId>` si la nota colapsa/sección no
   existe). 100% renderer — sin IPC, sin cambios en `electron/`/`dist-electron/`.
