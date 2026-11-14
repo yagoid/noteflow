@@ -26,10 +26,12 @@ La **documentación del proyecto** vive en `.agents/context/*.md` (abajo el mapa
   frontmatter de la skill. Independiente de la versión del escritorio (detalle en
   `.agents/context/patterns.md` § CLI).
 - **Al cerrar un desarrollo, valora si también tiene sentido en móvil** (`yagoid/noteflow-mobile`). Si
-  sí, déjalo pendiente con el CLI en la nota `NOTEFLOW-MOBILE` (en Git Bash, `noteflow.cmd`): elige la
-  sección que encaje con el tipo de cambio (`noteflow sections "NOTEFLOW-MOBILE"`) y añade un ítem sin
+  sí, déjalo pendiente con el CLI en la nota `NoteFlow Mobile` (en Git Bash, `noteflow.cmd`): elige la
+  sección que encaje con el tipo de cambio (`noteflow sections "NoteFlow Mobile"`) y añade un ítem sin
   marcar, en una sola línea, con
-  `noteflow add "- [ ] <tarea>" --title "NOTEFLOW-MOBILE" --section "<nombre exacto>"`. Si falla
+  `noteflow add "- [ ] <tarea>" --title "NoteFlow Mobile" --section "<nombre exacto>"`. Usa siempre el
+  título completo: `--title` sin distinguir mayúsculas coincide por subcadena, y un `"NoteFlow"` a secas
+  es ambiguo entre `NoteFlow Mobile` y `NoteFlow Desktop` (el backlog del escritorio). Si falla
   porque la sección no existe, reintenta con el nombre sugerido; **nunca `--create`**. Solo añadir: no
   crear secciones, ni reordenar ni tachar (si la checklist no cierra la sección, insértalo en su sitio con
   `noteflow path` + editar + `noteflow touch`). Di en tu respuesta qué ítem añadiste; sin CLI a mano,
