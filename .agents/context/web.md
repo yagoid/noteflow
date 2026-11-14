@@ -14,6 +14,8 @@ cd docs
 npm run dev      # http://localhost:4321/noteflow/
 npm run build    # → docs/dist/ (16 páginas; 18 cuando /legal-notice tiene los datos del titular)
 npm run check    # astro check (0 errores es lo esperado)
+npm run brain    # regenera la lógica del cerebro 3D desde la app (ver "Fondo cerebro tech")
+npm run brain:check  # falla si esa lógica está desfasada respecto a la app
 ```
 
 ## Mapa del sitio (16-18 páginas, EN + espejo ES bajo /es/ con el MISMO slug)
@@ -91,16 +93,76 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
   las páginas de docs. Los estilos propios de cada página van inline + `<style is:global>` en su
   componente (patrón Home.astro).
 - **Fondo "cerebro tech"**: web components vanilla en `public/brain/` — `<nf-netbg>` (malla 2D
-  canvas, reacciona a `data-theme`) y `<noteflow-brain>` (wireframe 3D three.js, solo en la home).
-  OJO — el wireframe visible lo renderizan **solo** los assets servidos `public/brain/*.js`
-  (`nf-brain.js` define el custom element; `nf-mesh.js` la malla; `nf-graph.js` el grafo de ejemplo
-  + asignación de vértices). Esos `.js` son un **port vanilla mantenido a mano** de `src/brain/*.ts`
-  (`mesh.ts`, `graph.ts`, `sampleGraph.ts`, `assign.ts`) — que son la **fuente/espejo** pero NO se
-  bundlean en ninguna página (`BrainHero.tsx`/`BrainScene.tsx` son un tuner de dev sin importadores).
-  Al tocar el grafo (nodos, sinapsis, colocación) hay que **sincronizar ambos lados**: editar el
-  `.ts` correspondiente Y su port en `public/brain/*.js`, o el cambio no se ve en la web.
-  Ej.: el grupo central "IA Generated" (perfil del segundo cerebro) se ancla al núcleo vía el flag
-  `centered` en `graph.ts`/`sampleGraph.ts`/`assign.ts` y su espejo `nf-graph.js`.
+  canvas de fondo, reacciona a `data-theme`) y `<noteflow-brain>` (el **cerebro 3D de la app**, el
+  aprobado "Corriente afinada · Bandas", solo en la home: hero, panel de `#brain` y pie `#get`).
+  `nf-load.js` carga three **r128** (build global por unpkg) + los `examples/js` de postprocesado y,
+  en orden, `nf-mesh.js` → `nf-graph.js` → `nf-brain.js`. Lo que se VE lo pintan solo esos `.js`
+  servidos; nada de `src/brain/` se importa desde una página.
+  - **Generado — no editar a mano:** `nf-mesh.js` (`window.NF.mesh`: la malla fija) y `nf-graph.js`
+    (`NF.graph`: grafo de ejemplo, `assignVertices`, `buildBrainData`, buffers de segmentos, paleta;
+    `NF.look`: `BRAIN_LOOK`/`BRAIN_BUDGET`/tamaños de nodo y el GLSL). Los produce **`npm run brain`**
+    (`docs/scripts/build-brain.mjs`) en dos pasos: (1) copia los módulos puros de la app
+    `src/components/Brain/{brainMesh,assignVertices,brainData,brainBuffers,brainLook,brainShaders}.ts`
+    a `docs/src/brain/{mesh,assign,data,buffers,look,shaders}.ts` reescribiendo solo sus imports
+    relativos (cabecera "GENERATED"); (2) empaqueta `docs/src/brain/nf-{mesh,graph}.entry.ts` con
+    esbuild (IIFE, ES2020, sin minificar: nada se rebaja, la malla es coma flotante cuya huella fijan
+    los tests de la app). La transformación de las copias vive en `docs/scripts/brain-sync.mjs`
+    (`toWebCopy`: acepta comillas simples o dobles y rechaza imports de paquetes, `import()` y
+    `require()`). **Tres guardas contra divergir:** `npm run brain:check` (falla si copias o bundles no
+    están al día); el workflow `pages.yml` lo ejecuta antes del build (no publica un cerebro
+    desfasado); y el test de la app `tests/components/brainWebSync.test.ts` compara las copias con
+    `src/components/Brain/` usando ese mismo `toWebCopy`, así que **`npm test` falla al cambiar un
+    módulo del cerebro de la app** con el aviso "run `npm --prefix docs run brain`" (el test no cubre
+    los bundles: eso lo hace `brain:check`). esbuild va fijado como devDependency exacta (`0.27.7`)
+    para que la salida no dependa de la versión que arrastren astro/vite; al subirlo, regenerar. Paridad verificada: la malla de
+    `nf-mesh.js` da la misma huella SHA-1 que `tests/helpers/brainMeshRef.ts` y la asignación /
+    `buildBrainData` de `nf-graph.js` coinciden con las de la app sobre el mismo modelo.
+  - **Propio de la web, a mano** (en `docs/src/brain/`, tipado por `astro check`): `graph.ts` (tipos
+    del modelo, espejo de los de `useBrainGraph.ts`: incluye `centered`, `groupId`, `relationEdges`),
+    `sampleGraph.ts` (`buildSampleGraph()`: grupos con sus notas primero y luego carpetas, como el
+    sidebar; el grupo "IA Generated" lleva `centered` y va al núcleo. 89 nodos: 8 grupos —IA
+    Generated (`--text`), Engineering (`--accent`), Research (`--purple`), Product (`--accent-2`),
+    Writing (`--orange`), Design (`--pink`), Learning (`--cyan`), Personal (`--red`): un color de
+    grupo por cada token `--brain-*`—, 7 carpetas, 46 notas (6 sueltas, 3 favoritas → cerebelo) y
+    28 secciones; 62 relaciones de contenido (9 salen del perfil del núcleo) y 5 de usuario. Se
+    amplió desde 35 nodos para que haya más zonas de color en la corteza. **Sus
+    ids de nota los cita el mock de chat de `Home.astro`** —`cites`, `NAV_BRAIN`—: no renombrarlos),
+    `palette.ts` (fondo `--brain-bg`, tinta `--brain-text` y `--accent`/`--purple`/… remapeados a sus
+    `--brain-*` saturados; la escena les aplica después el tratamiento de la app, `BRAIN_LOOK.color`:
+    desaturación, oscurecido en claro…) y las dos entradas `nf-*.entry.ts`.
+  - **A mano:** `nf-brain.js` = port de `BrainScene.tsx` de la app contra r128 (mismos shaders, capas
+    y orden, piel de profundidad + pases visible/oculto, bloom solo en oscuro sumado en el GRADE, luz
+    interior, suelo, constelación, motas, entrada desde el núcleo, impulsos, ondas/latido, foco,
+    barridos de hover/"pensando", cascada de citadas, etiquetas por zoom sin solaparse). Diferencias
+    obligadas por r128: el blend propio del bloom se apaga con `materialCopy.visible = false` (en
+    0.169 es `blendMaterial`); sin `outputColorSpace` ni destino half-float (r128 ya es lineal y su
+    composer es de 8 bits, que es lo que emula la app); sin `forceSinglePass` (no existe); el
+    auto-giro de OrbitControls se escala por `dt` (r128 gira un ángulo fijo por `update()`); en
+    WebGL1 el `textureLod` del GRADE pasa a `texture2D`. **Si cambia `BrainScene.tsx` hay que portarlo
+    aquí a mano; si cambian los módulos puros, `npm run brain`.** En ambos casos, subir los `?v=`
+    de `nf-load.js` (gotcha 7).
+  - **Contrato de `<noteflow-brain>`:** atributos `data-controls` (arrastre, zoom, hover y clic),
+    `data-labels`, `data-transparent` (lienzo con alfa: sin fondo, sin suelo, sin viñeta ni grano;
+    el GRADE no toca el alfa y en oscuro bloom/luz interior se suman sobre la página),
+    `data-content-edges`, `data-cam` (distancia al objetivo a lo largo de la dirección de tres
+    cuartos de `BRAIN_LOOK.camera`; por defecto la de la app, ≈ 3,4), `data-target-y` (desplaza el
+    objetivo —y la cámara— en vertical respecto al de la app), `data-shift-x` (desplaza la imagen,
+    fracción del ancho, con view offset; se atenúa en cajas más estrechas que el `fitAspect` de la
+    app, p. ej. un móvil en vertical), `data-rotate-speed`. Métodos: `setHighlight(Set<noteId>)`
+    (citadas; se compara por identidad), `setThinking(bool)`, `setContentEdges(bool)`,
+    `setScroll(0..1)` (el hero acerca la cámara hasta un 45 % de su distancia), `resetView()`,
+    `_rebuildAll()` (cambio de `data-theme`: conserva renderer y vista, no repite la entrada). Evento
+    `nodeactivate` (`{ id, info: { kind, label, refId, noteId, sectionId, groupId }, clientX, clientY }`);
+    el clic además fija/quita el foco del nodo (útil en táctil). `_info()` = estado para verificar
+    (modo `motion`/`reduced`/`still`, fotogramas dibujados, cámara…), sin coste si no se llama.
+  - **Encuadres actuales (`Home.astro`):** hero `data-cam="2.0" data-shift-x="0.1" data-target-y="0"`
+    (grande, a la derecha tras el titular; opacidad .82, .72 en oscuro por `brain-site.css`); panel
+    `#brain` `data-cam="3.4"` (entero, como en la app, a opacidad completa); pie `#get`
+    `data-transparent data-cam="4.0" data-target-y="-0.4"` (ambiental, opacidad .6; centrado tras el
+    titular y los botones, no a todo el ancho).
+  - **Una vez por página y compartido** por las tres instancias: malla, grafo colocado
+    (`buildBrainData`), fibras de los impulsos y la detección de WebGL por software. Cada instancia
+    tiene un solo renderer en toda su vida (el cambio de tema reconstruye la escena, no el contexto).
 - **i18n**: `src/i18n/{en,es}.ts` (landing) y
   `src/i18n/docs/{common,cli,ai,features,pricing,privacy,terms,legal-notice}.{en,es}.ts` (docs). Patrón: el
   `.en.ts` define la forma (`type X = typeof xEn`) y el `.es.ts` la satisface → TypeScript fuerza
@@ -112,7 +174,7 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
   en bucle, ver "Clips de /features") y las `XPage.astro`.
   Wrappers finos en `src/pages/{x,es/x}.astro`.
 - **LEGACY MUERTO (no usar, no imitar)**: `src/components/{Nav,ChatMock,BrainGlyph,Pillar,
-  Terminal,ScreenshotFrame}.astro`, `ThemeToggle.tsx`, `src/brain/*.tsx`, `src/styles/{tokens,global}.css`,
+  Terminal,ScreenshotFrame}.astro`, `ThemeToggle.tsx`, `src/styles/{tokens,global}.css`,
   y los HTML de la raíz `docs/` (`index.html`, `style.css`, `main.js` — no se sirven).
 
 ## Reglas y gotchas
@@ -131,14 +193,38 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
    sola vez en `ai.en.ts`; `ai.es.ts` los importa) — son los prompts reales del código y no se traducen.
 6. El sitio se publica solo al pushear a `main`; no publicar a medias (el rail/footer de docs enlaza
    entre sí las cuatro páginas de docs y las legales).
-7. **Cerebros three.js y móvil**: `nf-brain.js` pausa su rAF fuera de viewport (IntersectionObserver
-   sobre el host + `visibilitychange`) y en `(pointer: coarse)` corre en tier *lowPower* (pixelRatio
-   ≤1.5, **sin** EffectComposer/UnrealBloom — `composer`/`bloom` pueden ser `null`). Los contenedores
-   ambient (sin `data-controls`) llevan `pointer-events:none` y el interactivo `touch-action:pan-y`
-   para no matar el scroll táctil. Tras tocar `nf-mesh.js`/`nf-graph.js`/`nf-brain.js` (los tres
-   módulos que carga `nf-load.js`), **subir el `?v=` de las tres entradas en `nf-load.js`**
-   (cache-buster compartido). `nf-netbg.js` y el propio `nf-load.js` van directos en `Base.astro`
-   sin `?v=` — dependen del TTL HTTP normal.
+7. **Cerebros three.js: coste, pausa y móvil** (requisito: no consumir más que el cerebro anterior;
+   medido con Playwright sin vsync en una GPU real, el hero da los mismos fotogramas por segundo o
+   algo más que el anterior). `nf-brain.js` solo dibuja con el host en pantalla (IntersectionObserver)
+   y la pestaña visible (`visibilitychange`); el reloj de animación avanza solo con el bucle (al
+   volver no salta) y la **entrada desde el núcleo arranca la primera vez que cada instancia entra en
+   pantalla**, no al montarse. Cero asignaciones por fotograma (como la app).
+   - **`(pointer: coarse)`** → tier *lowPower*: pixelRatio ≤ 1,5 y **sin** UnrealBloom (`bloom` puede
+     ser `null`; el composer y el GRADE se mantienen).
+   - **`prefers-reduced-motion`** → como en la app (sin auto-giro, impulsos, ondas, latido, chispas
+     ni entrada; citadas con señal estática) y **render bajo demanda: 0 rAF en reposo**; el
+     interactivo redibuja al arrastrar/zoom/hover y mientras el chat "piensa".
+   - **Sin GPU** (WebGL por software: renderer SwiftShader/llvmpipe/softpipe/"Basic Render", o un
+     contexto con `failIfMajorPerformanceCaveat` que falla donde uno normal funciona; detectado una
+     vez por página; ahí la escena cuesta cientos de ms por fotograma) → modo `still`: lo de
+     reducido + foco y barrido de hover instantáneos, sin barridos de "pensando" y sin amortiguación
+     del arrastre; los ambientales dibujan **un único fotograma** e ignoran `setHighlight`,
+     `setThinking` y `setScroll`.
+   - Lo que la página cambie con la instancia parada (fuera de pantalla, pestaña oculta) —citadas,
+     "pensando", capa de contenido— se recoge en el primer fotograma al volver (al reanudar siempre se
+     pide un fotograma, que decide si dibuja); un "pensando" a medias sigue donde se quedó. Tras
+     desconectar el elemento, `resetView()` y los setters no tocan nada (flag `disposed`) y el hook
+     de depuración `_info` queda a `null`.
+   - Sin WebGL en absoluto, el elemento se queda vacío (se ve la página). Los contenedores ambient
+     (sin `data-controls`) llevan `pointer-events:none`, así que el scroll táctil pasa a través. El
+     interactivo lleva `touch-action:pan-y`, pero **eso no salva el scroll táctil sobre el panel**: las
+     OrbitControls de r128 registran `touchstart` con `passive: false` y hacen `preventDefault()`, así
+     que un gesto que empieza sobre el panel lo gira y no desplaza la página (igual que el cerebro
+     anterior; con la rueda del ratón pasa lo mismo: hace zoom). El arrastre captura el puntero
+     (`setPointerCapture`): soltar fuera del canvas también lo termina.
+   - Tras tocar `nf-mesh.js`/`nf-graph.js`/`nf-brain.js` (los tres módulos que carga `nf-load.js`),
+     **subir el `?v=` de las tres entradas en `nf-load.js`** (cache-buster compartido). `nf-netbg.js`
+     y el propio `nf-load.js` van directos en `Base.astro` sin `?v=` — dependen del TTL HTTP normal.
 8. **Consentimiento de cookies (GDPR/AEPD, opt-in por bloqueo)**: GA **no** se carga hasta aceptar.
    Estado en `localStorage['noteflow:cookie-consent']` = `'granted' | 'denied'` (ausente = sin decidir).
    Todo vive en `Base.astro`: un `<script is:inline>` en el `<head>` define `window.nfLoadGA()` (inyecta

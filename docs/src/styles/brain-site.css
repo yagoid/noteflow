@@ -99,10 +99,10 @@ a { color: inherit; text-decoration: none; }
 .nf-theme-btn { transition: border-color .25s ease, color .25s ease, transform .2s ease; }
 .nf-theme-btn:hover { border-color: var(--detail); color: var(--ink-strong); transform: translateY(-1px); }
 
-/* Dark mode: dial the wireframe glow back a touch — additive blending makes it read
-   too bright on the near-black background. Light theme keeps the inline opacity. */
+/* Dark mode: dial the hero brain back a touch behind the headline. Light theme keeps the
+   inline opacity. The interactive panel (.nf-brain-panel) is drawn at full strength, as in
+   the app: its look is already calibrated for the dark background. */
 [data-theme="dark"] .nf-brain-hero { opacity: .72 !important; }
-[data-theme="dark"] .nf-brain-panel { opacity: .62 !important; }
 
 /* Hero title — on very large screens (≥1700px / 2K) cap the size and widen the
    copy column so more of the headline fits per line instead of ballooning. */

@@ -208,8 +208,15 @@ consumidores** (related ✅, grafo ✅, chat ✅).
     - **Depuración/medida:** `localStorage['noteflow:brain-debug'] = '1'` expone `window.__nfBrain`
       (cámara, controles, renderer, composer, uniforms, `data()`, `setTime`, `setHover`, `setRotate`,
       `fireWave`, `replay`, `info()`); sin la clave no se expone ni se ejecuta nada.
-    - **Pendiente aparte:** el espejo web (`docs/public/brain/`, `docs/src/brain/`) y el clip
-      `brain-orbit` del mosaico siguen con el cerebro anterior.
+    - **Espejo web (`docs/`, ya con este cerebro):** la lógica pura (malla, asignación,
+      `brainData`, `brainBuffers`, `brainLook`, `brainShaders`) se **genera** desde estos módulos con
+      `npm run brain` en `docs/` (copia + bundle; si quedó desfasada lo detectan `npm test` —
+      `tests/components/brainWebSync.test.ts`— y `npm run brain:check`, que corre en `pages.yml`) y la
+      escena es un **port a mano** de `BrainScene.tsx` a three r128 (`docs/public/brain/nf-brain.js`).
+      Al cambiar estos módulos: `npm run brain`; al cambiar `BrainScene.tsx`: portarlo a mano. Detalle
+      en `web.md` § "Fondo cerebro tech". La web sí distingue el WebGL sin GPU (pinta un fotograma
+      fijo). El clip `brain-orbit` ya no está en el mosaico de la landing (se sacó y se borraron sus
+      ficheros), así que no hay que regrabarlo.
 - **Activación:** flag `settings.ai.enabled` (default `false`). **UI principal de activación: el
   overlay/CTA dentro de la vista cerebro** (con IA off el cerebro muestra solo estructura; activar
   desde ahí descarga el modelo + reindexa con barra de progreso). También hay toggle + "Reindex all"
