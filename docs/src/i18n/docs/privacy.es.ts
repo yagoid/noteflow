@@ -20,12 +20,12 @@ export const privacyEs: LegalContent = {
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Política de<br />privacidad',
-    tagline: 'Última actualización: 12 de noviembre de 2026',
+    tagline: 'Última actualización: 14 de noviembre de 2026',
   },
 
   summary: {
     title: 'Resumen',
-    html: 'NoteFlow es local-first. Tus notas son archivos Markdown planos guardados en tu propio dispositivo, y ni la aplicación de escritorio ni la de Android contienen telemetría, analítica ni anuncios. No hace falta ninguna cuenta para usarlas. Si decides crear una cuenta de NoteFlow y usar los servicios gestionados opcionales, tratamos los datos mínimos que se describen abajo — y NoteFlow Cloud siempre cifra tus notas, con un modo cifrado de extremo a extremo opcional en el que no podemos leerlas ni siquiera cuando están almacenadas en nuestros servidores. Puedes eliminar tu cuenta cuando quieras, desde la app de Android o por correo.',
+    html: 'NoteFlow es local-first. Tus notas son archivos Markdown planos guardados en tu propio dispositivo, y ni la aplicación de escritorio ni la de Android contienen telemetría, analítica ni anuncios. No hace falta ninguna cuenta para usarlas. Si decides crear una cuenta de NoteFlow y usar los servicios gestionados opcionales, tratamos los datos mínimos que se describen abajo — y NoteFlow Cloud siempre cifra tus notas, con un modo cifrado de extremo a extremo opcional en el que no podemos leerlas ni siquiera cuando están almacenadas en nuestros servidores. Puedes eliminar tu cuenta cuando quieras, desde la app de escritorio o la de Android, o por correo.',
   },
 
   toc: [
@@ -371,6 +371,7 @@ export const privacyEs: LegalContent = {
         {
           t: 'ul',
           items: [
+            '<strong>En la app de escritorio:</strong> Ajustes → Suscripción → <strong>Eliminar cuenta</strong> (con la sesión iniciada). El borrado es inmediato, y las notas de tu ordenador se conservan.',
             '<strong>En la app de Android:</strong> Ajustes → Suscripción → <strong>Eliminar cuenta</strong> (con la sesión iniciada). El borrado es inmediato.',
             '<strong>Por correo:</strong> escribe a <strong>yago.igle@gmail.com</strong> desde la dirección de tu cuenta. Comprobaremos que la petición es tuya y la completaremos en un plazo de 30 días.',
           ],

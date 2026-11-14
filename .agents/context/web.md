@@ -28,7 +28,7 @@ npm run brain:check  # falla si esa lógica está desfasada respecto a la app
 | `/features` | Detalles de producto (jerarquía, stickies, atajos, vistas, cifrado…) | `src/components/docs/FeaturesPage.astro` | `src/i18n/docs/features.{en,es}.ts` |
 | `/pricing` | Precios: todo lo esencial gratis + planes gestionados opcionales (NoteFlow AI / NoteFlow Cloud) | `src/components/docs/PricingPage.astro` | `src/i18n/docs/pricing.{en,es}.ts` |
 | `/privacy` | Política de privacidad (texto legal canónico, EN fuente) — cubre **escritorio y app de Android** desde 2026-11-12 | `src/components/docs/PrivacyPage.astro` → `LegalPage.astro` | `src/i18n/docs/privacy.{en,es}.ts` |
-| `/delete-account` | Cómo eliminar la cuenta (app de Android o email), qué se borra y qué se conserva — **página exigida por Google Play** (URL registrada en la Play Console) | `src/components/docs/DeleteAccountPage.astro` → `LegalPage.astro` | `src/i18n/docs/delete-account.{en,es}.ts` |
+| `/delete-account` | Cómo eliminar la cuenta (app de Android, app de escritorio o email), qué se borra y qué se conserva — **página exigida por Google Play** (URL registrada en la Play Console) | `src/components/docs/DeleteAccountPage.astro` → `LegalPage.astro` | `src/i18n/docs/delete-account.{en,es}.ts` |
 | `/terms` | Términos del servicio (cuenta + planes de pago; la app se rige por su licencia GPL-3.0-or-later) | `src/components/docs/TermsPage.astro` → `LegalPage.astro` | `src/i18n/docs/terms.{en,es}.ts` |
 | `/legal-notice` (ES: `/es/legal-notice`) | Aviso legal LSSI-CE art. 10 (titular persona física autónoma, objeto, PI, responsabilidad, ley aplicable) — **gateada**, ver abajo | `src/components/docs/LegalNoticePage.astro` → `LegalPage.astro` | `src/i18n/docs/legal-notice.{en,es}.ts` + datos del titular en `legal-notice.owner.ts` |
 
@@ -51,8 +51,10 @@ con notificaciones locales, widgets, backup de Android, tabla de permisos; §9 `
 **denuncias de respuestas de IA** del móvil; §14 `#deletion`). **Ids enlazados desde fuera, no
 renombrar:** `feedback` (escritorio), `deletion` (desde `/delete-account`), `android` (redirect legacy).
 La ruta dentro de la app que citan `/privacy#deletion` y `/delete-account` (**Settings → Subscription →
-Delete account** / **Ajustes → Suscripción → Eliminar cuenta**) debe coincidir con las etiquetas de
-`noteflow-mobile/src/i18n/{en,es}/settings.ts`; y lo que dicen que se borra/conserva, con
+Delete account** / **Ajustes → Suscripción → Eliminar cuenta**, igual en Android y escritorio) debe
+coincidir con las etiquetas de `noteflow-mobile/src/i18n/{en,es}/settings.ts` y de este repo
+(`src/i18n/{en,es}/settings.ts`: `settings.nav.account` + `settings.account.deleteAccount`); y lo que dicen que se
+borra/conserva, con
 `supabase/functions/delete-account` (ver `monetization.md`).
 
 **`/legal-notice` está gateada por los datos del titular.** Nombre, NIF y domicilio viven UNA sola
@@ -460,7 +462,7 @@ capacidades se autogestionan gratis: IA con Ollama/key propia, nube con GitHub S
 ### `/privacy`, `/terms` y `/legal-notice` — texto legal canónico (el EN es la fuente; el ES es traducción fiel)
 Los hechos que citan (Supabase/Lemon Squeezy/OpenRouter como proveedores, permisos y funciones de la
 app de Android (`noteflow-mobile/app.json`), qué borra el borrado de cuenta y los plazos (inmediato en
-la app, 30 días por email, logs ≤ 90 días), Lemon Squeezy como MoR,
+las apps, 30 días por email, logs ≤ 90 días), Lemon Squeezy como MoR,
 asignación mensual de IA medida por el coste de cómputo de cada petición (sin cifra publicada), datos de medición por petición de la IA gestionada (`/privacy`: usuario, modelo, tokens, coste según OpenRouter, id de generación y fecha — espejo de las columnas de `usage_events`), E2EE de Cloud sin reset de passphrase, edad mínima 14, licencia del código,
 contacto yago.igle@gmail.com, fecha "Last updated") deben seguir siendo ciertos: **si cambia un proveedor, la cuota, el flujo de
 pagos o la arquitectura E2EE, hay que revisar ambos textos y actualizar la fecha**. Cambios de

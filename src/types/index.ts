@@ -390,12 +390,24 @@ export type AccountErrorCode =
   | 'planChangeUnavailable'
   | 'planChangeNotEligible'
   | 'planChangeSubscriptionInactive'
+  | 'sessionExpired'
+  | 'deleteBillingFailed'
+  | 'deleteFailed'
 
 // Result of any account IPC call (mirror of AccountOpResult in electron/account.ts).
 export interface AccountOpResult {
   ok: boolean
   error?: string             // English fallback, shown when there is no errorCode
   errorCode?: AccountErrorCode
+}
+
+// Result of account:delete (mirror of DeleteAccountResult in electron/account.ts).
+export interface DeleteAccountResult extends AccountOpResult {
+  // ok without a confirmed deletion: the retry found the session gone (most
+  // likely an earlier attempt deleted the account but its answer was lost).
+  accountGone?: boolean
+  // ok, deleted, but a different session took over meanwhile: leave its view alone.
+  staleSession?: boolean
 }
 
 // In-app feedback (Settings → About → "Send feedback"); mirrors
@@ -712,6 +724,9 @@ declare global {
       accountRequestOtp: (email: string) => Promise<AccountOpResult>
       accountVerifyOtp: (email: string, code: string) => Promise<AccountOpResult>
       accountSignOut: () => Promise<AccountOpResult>
+      // Permanently deletes the account (Edge Function delete-account); on success
+      // main signs out locally and switches NoteFlow Cloud off — local notes stay.
+      accountDelete: () => Promise<DeleteAccountResult>
       accountRefreshEntitlements: () => Promise<AccountOpResult & { entitlements: AccountEntitlements }>
       accountOpenCheckout: (product: 'ai' | 'cloud' | 'bundle') => Promise<AccountOpResult>
       // Lemon Squeezy customer portal; `via` = which portal was opened

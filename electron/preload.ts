@@ -321,6 +321,16 @@ const api = {
     ipcRenderer.invoke('account:verify-otp', email, code),
   accountSignOut: (): Promise<{ ok: boolean; error?: string; errorCode?: AccountErrorCode }> =>
     ipcRenderer.invoke('account:sign-out'),
+  // Permanently deletes the account server-side (Edge Function delete-account);
+  // on success main signs out locally and switches NoteFlow Cloud off. Local
+  // notes are never touched.
+  accountDelete: (): Promise<{
+    ok: boolean
+    error?: string
+    errorCode?: AccountErrorCode
+    accountGone?: boolean
+    staleSession?: boolean
+  }> => ipcRenderer.invoke('account:delete'),
   accountRefreshEntitlements: (): Promise<{ ok: boolean; error?: string; errorCode?: AccountErrorCode; entitlements: { ai: boolean; cloud: boolean } }> =>
     ipcRenderer.invoke('account:refresh-entitlements'),
   // Opens the subscription checkout in the browser; the URL (with the user id)

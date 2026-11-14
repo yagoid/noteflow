@@ -24,12 +24,12 @@ export const privacyEn: LegalContent = {
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Privacy<br />Policy',
-    tagline: 'Last updated: November 12, 2026',
+    tagline: 'Last updated: November 14, 2026',
   },
 
   summary: {
     title: 'Summary',
-    html: 'NoteFlow is local-first. Your notes are plain Markdown files stored on your own device, and neither the desktop app nor the Android app contains telemetry, analytics or ads. No account is required to use them. If you choose to create a NoteFlow Account and use the optional managed services, we process the minimum data described below — and NoteFlow Cloud always encrypts your notes, with an optional end-to-end encrypted mode in which we cannot read them even when they are stored on our servers. You can delete your account at any time, from the Android app or by email.',
+    html: 'NoteFlow is local-first. Your notes are plain Markdown files stored on your own device, and neither the desktop app nor the Android app contains telemetry, analytics or ads. No account is required to use them. If you choose to create a NoteFlow Account and use the optional managed services, we process the minimum data described below — and NoteFlow Cloud always encrypts your notes, with an optional end-to-end encrypted mode in which we cannot read them even when they are stored on our servers. You can delete your account at any time, from the desktop or Android app, or by email.',
   },
 
   toc: [
@@ -370,11 +370,12 @@ export const privacyEn: LegalContent = {
       blocks: [
         {
           t: 'p',
-          html: 'You can delete your NoteFlow Account and its server data at any time, in either of these ways (step-by-step instructions on the <a href="%DELETE_ACCOUNT_URL%">account deletion page</a>):',
+          html: 'You can delete your NoteFlow Account and its server data at any time, in any of these ways (step-by-step instructions on the <a href="%DELETE_ACCOUNT_URL%">account deletion page</a>):',
         },
         {
           t: 'ul',
           items: [
+            '<strong>In the desktop app:</strong> Settings → Subscription → <strong>Delete account</strong> (you need to be signed in). Deletion happens immediately, and the notes on your computer are kept.',
             '<strong>In the Android app:</strong> Settings → Subscription → <strong>Delete account</strong> (you need to be signed in). Deletion happens immediately.',
             '<strong>By email:</strong> write to <strong>yago.igle@gmail.com</strong> from the address of your account. We will confirm the request comes from you and complete it within 30 days.',
           ],

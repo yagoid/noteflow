@@ -206,7 +206,8 @@ Iconos del TitleBar:
   **AI** (solo el proveedor del LLM), **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
   de notas), **Startup** (autostart + stickies), **Templates** (plantillas de nota) — grupo **Your
   notes** —; y **Tutorial** (el tour "What's new", ver abajo), **Keyboard shortcuts** y **About**
-  (versión + updates + **Send feedback** + repo) — grupo **Help**. **Send feedback** es un formulario
+  (versión + updates + **Send feedback** + enlaces: repo de GitHub y **Latest release notes**, que abre
+  `github.com/yagoid/noteflow/releases/latest` en el navegador) — grupo **Help**. **Send feedback** es un formulario
   para reportar bugs / sugerencias / lo que sea: tipo (Bug · Suggestion · Other, control segmentado),
   mensaje (máx. 5000 caracteres, contador, `Ctrl+Enter` envía), email opcional "solo si quieres
   respuesta" (validación laxa), checkbox **Include app and system version** (opt-in real, **desmarcado** por
@@ -1715,7 +1716,7 @@ pobladas en la build (precios en `.agents/context/monetization.md` § visión, c
   proceso main manda un código de error, no texto en inglés).
 - **Con sesión:** muestra el email, badges de plan ("NoteFlow AI" / "NoteFlow Cloud" con estado
   Active/—), **"Manage subscription"** (si aplica, ver abajo), la sección de **planes**, botón
-  "Refresh" (relee las suscripciones) y "Sign out".
+  "Refresh" (relee las suscripciones), "Sign out" y, separado al final, **"Delete account"**.
 - **"Manage subscription" / "Gestionar suscripción":** solo si la cuenta tiene (o tuvo) una
   suscripción pagada con Lemon Squeezy — en cualquier estado (activa, cancelada, con pago fallido o
   expirada: sigue habiendo facturas); las suscripciones regaladas a mano (comps) no lo ven, y tampoco
@@ -1737,6 +1738,16 @@ pobladas en la build (precios en `.agents/context/monetization.md` § visión, c
   "Couldn't unlock your saved session — your system keychain may be locked…" con Refresh para
   reintentar o Sign out. Se recupera sola en cuanto el llavero se desbloquea.
 - **Sign out** cierra solo la sesión de este equipo (otros dispositivos y el CLI siguen dentro).
+- **"Delete account" / "Eliminar cuenta"** (solo con sesión): botón rojo con el hint "Permanently
+  deletes your NoteFlow account and your NoteFlow Cloud data, and cancels any active subscription.
+  Notes on this computer are kept.". Pide confirmación en un modal ("Delete your NoteFlow
+  account?" → "Delete permanently"); mientras borra, spinner "Deleting account…" y el resto de
+  botones bloqueados. Si va bien, se cierra la sesión, **NoteFlow Cloud se desactiva** en este
+  ordenador (las notas locales no se tocan) y queda un aviso verde "Your NoteFlow account has been
+  deleted. Notes on this computer were kept." sobre el formulario de inicio de sesión. Los fallos
+  salen bajo el botón y la sesión sigue como estaba: sesión no válida ("Sign out, sign in again and
+  retry"), suscripción que no se pudo cancelar ("…so nothing was deleted"), o error genérico/de red
+  (reintentar). Mismo comportamiento que la app de Android.
 - **Sección de planes:** cards en orden **Bundle → AI → Cloud**, cada una con nombre y precio
   ("€7.99/month · €79.99/year" para Bundle — con subtítulo "AI + Cloud" y badge **"Best value"** —,
   €5.99/€49.99 para AI, €3.99/€39.99 para Cloud; cifras de `src/lib/subscriptionPlans.ts`). Un plan

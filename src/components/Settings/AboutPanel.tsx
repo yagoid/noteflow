@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
-import { AlertCircle, Check, Download, ExternalLink, Github, RefreshCw } from 'lucide-react'
+import { AlertCircle, Check, Download, ExternalLink, Github, RefreshCw, ScrollText } from 'lucide-react'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { FeedbackSection } from './FeedbackSection'
 import { SectionTitle, settingsButtonClass } from './ui'
+
+// GitHub redirects /releases/latest to the newest published release.
+const RELEASE_NOTES_URL = 'https://github.com/yagoid/noteflow/releases/latest'
 
 export function AboutPanel() {
   const t = useT()
@@ -140,14 +143,24 @@ export function AboutPanel() {
       {/* Links */}
       <section>
         <SectionTitle>{t.settings.about.links}</SectionTitle>
-        <button
-          onClick={() => window.noteflow.openUrl('https://github.com/yagoid/noteflow')}
-          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono text-left ${settingsButtonClass}`}
-        >
-          <Github size={13} className="text-text-muted flex-shrink-0" />
-          <span className="flex-1">{t.settings.about.githubRepo}</span>
-          <ExternalLink size={11} className="text-text-muted flex-shrink-0" />
-        </button>
+        <div className="flex flex-col items-start gap-2">
+          <button
+            onClick={() => window.noteflow.openUrl('https://github.com/yagoid/noteflow')}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono text-left ${settingsButtonClass}`}
+          >
+            <Github size={13} className="text-text-muted flex-shrink-0" />
+            <span className="flex-1">{t.settings.about.githubRepo}</span>
+            <ExternalLink size={11} className="text-text-muted flex-shrink-0" />
+          </button>
+          <button
+            onClick={() => window.noteflow.openUrl(RELEASE_NOTES_URL)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono text-left ${settingsButtonClass}`}
+          >
+            <ScrollText size={13} className="text-text-muted flex-shrink-0" />
+            <span className="flex-1">{t.settings.about.releaseNotes}</span>
+            <ExternalLink size={11} className="text-text-muted flex-shrink-0" />
+          </button>
+        </div>
       </section>
 
       {/* Feedback (bugs / suggestions → Supabase, no account needed) */}

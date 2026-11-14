@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, CreditCard, Info, KeyRound, Loader, Lock, LogOut, Mail, MailCheck, RefreshCw, Send, UserCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, CreditCard, Info, KeyRound, Loader, Lock, LogOut, Mail, MailCheck, RefreshCw, Send, Trash2, UserCircle } from 'lucide-react'
 import type { AccountErrorCode, AccountOpResult, AccountStatus } from '../../types'
 import type { SubscriptionProduct } from '../../lib/subscriptionPlans'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { useLanguageStore } from '../../stores/languageStore'
+import { ConfirmModal } from '../ConfirmModal'
 import { PlanOffers } from './PlanOffers'
 import { settingsButtonClass } from './ui'
 
@@ -43,6 +44,13 @@ export function AccountPanel() {
   // a moment) and a note when the generic store portal had to be opened.
   const [portalBusy, setPortalBusy] = useState(false)
   const [portalNotice, setPortalNotice] = useState<string | null>(null)
+  // "Delete account": confirmation modal, its own spinner, its error (reported
+  // right under the button) and the "account deleted" notice, which outlives
+  // the session — it is shown above the sign-in form afterwards.
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const codeInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -99,6 +107,7 @@ export function AccountPanel() {
     if (!trimmed) return
     setBusy(true)
     setError(null)
+    setNotice(null)
     setCodeError(null)
     setCodeNotice(null)
     const result = await window.noteflow.accountRequestOtp(trimmed)
@@ -182,6 +191,7 @@ export function AccountPanel() {
     setBusy(true)
     setError(null)
     setPortalNotice(null)
+    setDeleteError(null)
     await window.noteflow.accountSignOut()
     setBusy(false)
     setStep('email')
@@ -190,6 +200,35 @@ export function AccountPanel() {
     setCodeError(null)
     setCodeNotice(null)
     setResendCooldown(0)
+  }
+
+  // Server-side deletion (Edge Function delete-account). On success main has
+  // already signed out locally and switched NoteFlow Cloud off; local notes are
+  // never touched. A failure leaves the session exactly as it was.
+  async function handleDeleteAccount() {
+    setConfirmDelete(false)
+    setDeleting(true)
+    setError(null)
+    setPortalNotice(null)
+    setDeleteError(null)
+    setNotice(null)
+    const result = await window.noteflow.accountDelete()
+    setDeleting(false)
+    if (!result.ok) {
+      setDeleteError(describeError(result, t.settings.account.couldNotDeleteAccount))
+      return
+    }
+    // Another session took over meanwhile: the deletion happened, but what is
+    // on screen is that other account — leave its view alone (a "deleted"
+    // notice would sit on top of an account that is still signed in).
+    if (result.staleSession) return
+    setStep('email')
+    setEmail('')
+    setCode('')
+    setCodeError(null)
+    setCodeNotice(null)
+    setResendCooldown(0)
+    setNotice(result.accountGone ? t.settings.account.accountGone : t.settings.account.accountDeleted)
   }
 
   // ── Initial status fetch ──
@@ -222,6 +261,17 @@ export function AccountPanel() {
         >
           <AlertCircle size={13} className="shrink-0 mt-[1px]" />
           <span>{error}</span>
+        </div>
+      )}
+
+      {/* Account deleted — stays above the sign-in form once the session is gone. */}
+      {notice && (
+        <div
+          role="status"
+          className="flex items-start gap-2 px-3 py-2 bg-green-500/10 border border-green-500/30 rounded text-xs font-mono text-green-400 leading-relaxed"
+        >
+          <CheckCircle2 size={13} className="shrink-0 mt-[1px]" />
+          <span>{notice}</span>
         </div>
       )}
 
@@ -273,7 +323,7 @@ export function AccountPanel() {
             <div className="space-y-1.5">
               <button
                 onClick={handleManageSubscription}
-                disabled={busy || portalBusy}
+                disabled={busy || portalBusy || deleting}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {portalBusy ? <Loader size={11} className="animate-spin" /> : <CreditCard size={11} />}
@@ -299,7 +349,7 @@ export function AccountPanel() {
           <PlanOffers
             products={['bundle', 'ai', 'cloud']}
             account={status}
-            busy={busy}
+            busy={busy || deleting}
             showUnknownNotice={false}
             onSubscribe={handleSubscribe}
           />
@@ -307,7 +357,7 @@ export function AccountPanel() {
           <div className="flex gap-2">
             <button
               onClick={handleRefresh}
-              disabled={busy}
+              disabled={busy || deleting}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
             >
               {busy ? <Loader size={11} className="animate-spin" /> : <RefreshCw size={11} />}
@@ -315,13 +365,49 @@ export function AccountPanel() {
             </button>
             <button
               onClick={handleSignOut}
-              disabled={busy}
+              disabled={busy || deleting}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-text-muted hover:text-red hover:bg-red/10 transition-colors disabled:opacity-40"
             >
               <LogOut size={11} />
               {t.settings.account.signOut}
             </button>
           </div>
+
+          {/* Delete account — permanent and server-side (account, Cloud data,
+              subscription), behind a confirmation. Local notes stay on this
+              computer. Errors are reported right under the button. */}
+          <div className="pt-3 border-t border-border space-y-1.5">
+            <button
+              onClick={() => setConfirmDelete(true)}
+              disabled={busy || portalBusy || deleting}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-red border border-red/30 hover:bg-red/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {deleting ? <Loader size={11} className="animate-spin" /> : <Trash2 size={11} />}
+              {deleting ? t.settings.account.deletingAccount : t.settings.account.deleteAccount}
+            </button>
+            {deleteError && (
+              <p role="alert" className="flex items-start gap-1.5 text-[11px] font-mono text-red leading-relaxed">
+                <AlertCircle size={12} className="shrink-0 mt-[1px]" />
+                <span>{deleteError}</span>
+              </p>
+            )}
+            <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed">
+              {t.settings.account.deleteAccountHint}
+            </p>
+          </div>
+
+          {confirmDelete && (
+            <ConfirmModal
+              title={t.settings.account.deleteAccountConfirmTitle}
+              message={t.settings.account.deleteAccountConfirm}
+              confirmLabel={t.settings.account.deleteAccountConfirmAction}
+              cancelLabel={t.common.cancel}
+              danger
+              confirmOnEnter={false}
+              onConfirm={() => void handleDeleteAccount()}
+              onCancel={() => setConfirmDelete(false)}
+            />
+          )}
         </>
       )}
 

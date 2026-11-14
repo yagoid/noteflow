@@ -10,7 +10,7 @@
 // embedded for the sync Device Flow): it grants nothing by itself — security
 // comes from Row Level Security policies and per-user Auth JWTs.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LEMONSQUEEZY_STORE_PORTAL_URL = exports.LEMONSQUEEZY_CHECKOUT_URLS = exports.BILLING_CHANGE_PLAN_FN_URL = exports.BILLING_PORTAL_FN_URL = exports.CLOUD_KEYS_URL = exports.AI_PROXY_URL = exports.SUPABASE_ANON_KEY = exports.SUPABASE_URL = void 0;
+exports.LEMONSQUEEZY_STORE_PORTAL_URL = exports.LEMONSQUEEZY_CHECKOUT_URLS = exports.DELETE_ACCOUNT_FN_URL = exports.BILLING_CHANGE_PLAN_FN_URL = exports.BILLING_PORTAL_FN_URL = exports.CLOUD_KEYS_URL = exports.AI_PROXY_URL = exports.SUPABASE_ANON_KEY = exports.SUPABASE_URL = void 0;
 exports.isCloudConfigured = isCloudConfigured;
 const billingPortal_1 = require("./billingPortal");
 /** Supabase project URL, e.g. 'https://xyzcompany.supabase.co' (no trailing slash). */
@@ -25,6 +25,8 @@ exports.CLOUD_KEYS_URL = `${exports.SUPABASE_URL}/functions/v1/cloud-keys`;
 exports.BILLING_PORTAL_FN_URL = `${exports.SUPABASE_URL}/functions/v1/billing-portal`;
 /** Upgrade AI / Cloud → Bundle by changing the plan of the same LS subscription (Edge Function billing-change-plan). */
 exports.BILLING_CHANGE_PLAN_FN_URL = `${exports.SUPABASE_URL}/functions/v1/billing-change-plan`;
+/** Permanently deletes the caller's account, its Cloud data and its subscription (Edge Function delete-account). */
+exports.DELETE_ACCOUNT_FN_URL = `${exports.SUPABASE_URL}/functions/v1/delete-account`;
 /**
  * Lemon Squeezy checkout URLs per product. Filled in once the products exist
  * in the LS store (see supabase/README.md § 6). While a URL is empty, its

@@ -3,30 +3,33 @@
 // Console's Data safety form, next to the privacy policy). Same LegalContent shape and
 // renderer as /privacy. The facts here mirror /privacy §14 (`deletion`) and what the
 // delete-account Edge Function does (supabase/functions/delete-account) — keep the
-// three in sync. The in-app path must match the Android app's labels (Settings →
-// Subscription → Delete account in noteflow-mobile's src/i18n/en/settings.ts).
+// three in sync. The in-app paths must match the apps' labels (Settings →
+// Subscription → Delete account): the Android app's in noteflow-mobile's
+// src/i18n/en/settings.ts, the desktop app's in this repo's src/i18n/en/settings.ts
+// (settings.nav.account + settings.account.deleteAccount).
 import type { LegalContent } from './legal';
 
 export const deleteAccountEn: LegalContent = {
   meta: {
     title: 'Delete your account — NoteFlow',
     description:
-      'How to delete your NoteFlow Account — in the NoteFlow Android app or by email — and what is deleted and what is kept: your account and NoteFlow Cloud data are erased and any subscription is cancelled; the notes on your devices stay yours.',
+      'How to delete your NoteFlow Account — in the NoteFlow desktop or Android app, or by email — and what is deleted and what is kept: your account and NoteFlow Cloud data are erased and any subscription is cancelled; the notes on your devices stay yours.',
   },
 
   hero: {
     kicker: 'NoteFlow · Account',
     h1: 'Delete your<br />account',
-    tagline: 'Last updated: November 12, 2026',
+    tagline: 'Last updated: November 14, 2026',
   },
 
   summary: {
     title: 'In short',
-    html: 'You can delete your NoteFlow Account at any time, from the <strong>NoteFlow Android app</strong> or <strong>by email</strong>. Deleting it cancels any active subscription and permanently erases your account and your NoteFlow Cloud data from our servers. <strong>The notes on your devices are not touched.</strong> You don’t need an account to use NoteFlow — if you never signed in, there is nothing to delete.',
+    html: 'You can delete your NoteFlow Account at any time, from the <strong>NoteFlow desktop app</strong>, the <strong>NoteFlow Android app</strong> or <strong>by email</strong>. Deleting it cancels any active subscription and permanently erases your account and your NoteFlow Cloud data from our servers. <strong>The notes on your devices are not touched.</strong> You don’t need an account to use NoteFlow — if you never signed in, there is nothing to delete.',
   },
 
   toc: [
     { id: 'in-app', label: 'In the Android app' },
+    { id: 'desktop', label: 'In the desktop app' },
     { id: 'email', label: 'By email' },
     { id: 'deleted', label: 'What is deleted' },
     { id: 'kept', label: 'What is kept' },
@@ -52,18 +55,36 @@ export const deleteAccountEn: LegalContent = {
       ],
     },
     {
+      id: 'desktop',
+      title: '2. Delete it in the desktop app',
+      blocks: [
+        {
+          t: 'ol',
+          items: [
+            'Open <strong>NoteFlow</strong> on your computer (Windows, macOS or Linux).',
+            'Go to <strong>Settings → Subscription</strong>. If you are not signed in, sign in with your account’s email address (we send you a one-time code).',
+            'Click <strong>Delete account</strong> and confirm.',
+          ],
+        },
+        {
+          t: 'p',
+          html: 'Deletion happens <strong>immediately</strong>: you are signed out on that computer and NoteFlow Cloud sync is turned off there. <strong>The notes on your computer are kept</strong> as they are. It cannot be undone. As in the Android app, if a subscription cannot be cancelled at that moment, <strong>nothing is deleted</strong> and the app shows an error.',
+        },
+      ],
+    },
+    {
       id: 'email',
-      title: '2. Ask us by email',
+      title: '3. Ask us by email',
       blocks: [
         {
           t: 'p',
-          html: 'If you use the desktop app, no longer have the Android app or cannot sign in, email <strong>yago.igle@gmail.com</strong> with the subject “Delete my NoteFlow account”, <strong>from the email address of your account</strong>. We will confirm the request comes from you and delete the account as described below <strong>within 30 days</strong>, and let you know when it is done.',
+          html: 'If you can’t use either app or cannot sign in, email <strong>yago.igle@gmail.com</strong> with the subject “Delete my NoteFlow account”, <strong>from the email address of your account</strong>. We will confirm the request comes from you and delete the account as described below <strong>within 30 days</strong>, and let you know when it is done.',
         },
       ],
     },
     {
       id: 'deleted',
-      title: '3. What is deleted',
+      title: '4. What is deleted',
       blocks: [
         {
           t: 'ul',
@@ -76,13 +97,13 @@ export const deleteAccountEn: LegalContent = {
         },
         {
           t: 'p',
-          html: 'This data is deleted from our servers right away (immediately in the app; once your email request is processed).',
+          html: 'This data is deleted from our servers right away (immediately in the apps; once your email request is processed).',
         },
       ],
     },
     {
       id: 'kept',
-      title: '4. What is kept',
+      title: '5. What is kept',
       blocks: [
         {
           t: 'ul',

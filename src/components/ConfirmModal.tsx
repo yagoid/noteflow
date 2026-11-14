@@ -8,6 +8,13 @@ interface ConfirmModalProps {
   confirmLabel?: string
   cancelLabel?: string
   danger?: boolean
+  /**
+   * Enter confirms from anywhere in the window (default). Pass false for
+   * irreversible actions: Enter then only activates the focused button (native
+   * behaviour; Cancel has focus on open), so neither an Enter meant for Cancel
+   * nor the autorepeat of the Enter that opened the modal can confirm.
+   */
+  confirmOnEnter?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
@@ -18,26 +25,29 @@ export function ConfirmModal({
   confirmLabel,
   cancelLabel,
   danger       = false,
+  confirmOnEnter = true,
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
   const t = useT()
   const cancelRef = useRef<HTMLButtonElement>(null)
 
-  // Focus cancel by default so Enter doesn't accidentally confirm
+  // Focus Cancel on open. With confirmOnEnter (the default) Enter still confirms
+  // globally whatever has focus; only confirmOnEnter={false} makes Enter act on
+  // the focused button instead.
   useEffect(() => {
     cancelRef.current?.focus()
   }, [])
 
-  // Keyboard: Escape → cancel, Enter → confirm
+  // Keyboard: Escape → cancel, Enter → confirm (unless confirmOnEnter is false)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.preventDefault(); onCancel() }
-      if (e.key === 'Enter')  { e.preventDefault(); onConfirm() }
+      if (e.key === 'Enter' && confirmOnEnter) { e.preventDefault(); onConfirm() }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onCancel, onConfirm])
+  }, [onCancel, onConfirm, confirmOnEnter])
 
   return (
     <div

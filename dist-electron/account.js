@@ -18,7 +18,8 @@
 // "Manage subscription" asks the billing-portal Edge Function for a fresh
 // Lemon Squeezy customer-portal link (resolveBillingPortal); "Upgrade to
 // Bundle" asks billing-change-plan to change the plan of the current
-// subscription (upgradeToBundle).
+// subscription (upgradeToBundle). "Delete account" asks delete-account to
+// delete the user server-side (deleteAccount); main.ts then switches Cloud off.
 //
 // Security model: the refresh token is encrypted at rest and NEVER crosses to
 // the renderer; the access token lives only in main-process memory. The
@@ -56,6 +57,7 @@ exports.getAccessToken = getAccessToken;
 exports.signOut = signOut;
 exports.resolveBillingPortal = resolveBillingPortal;
 exports.upgradeToBundle = upgradeToBundle;
+exports.deleteAccount = deleteAccount;
 exports.refreshEntitlements = refreshEntitlements;
 exports.initAccount = initAccount;
 const electron_1 = require("electron");
@@ -67,6 +69,7 @@ const entitlements_1 = require("./entitlements");
 const entitlementsRetry_1 = require("./entitlementsRetry");
 const billingPortal_1 = require("./billingPortal");
 const planChange_1 = require("./planChange");
+const deleteAccount_1 = require("./deleteAccount");
 const settingsFile_1 = require("./settingsFile");
 // ── Settings helpers (same idiom as githubSync) ───────────────────────────────
 function getSettingsPath() {
@@ -717,6 +720,109 @@ function pollEntitlementsAfterPlanChange(generation, step = 0) {
             return;
         pollEntitlementsAfterPlanChange(generation, step + 1);
     }, PLAN_CHANGE_POLL_DELAYS_MS[step]);
+}
+// ── Account deletion ("Delete account") ───────────────────────────────────────
+const DELETE_FAILED_ERROR = 'Could not delete your account. Please try again.';
+/**
+ * Permanently deletes the account server-side through the delete-account Edge
+ * Function (auth user + Cloud rows, after cancelling the Lemon Squeezy
+ * subscription) — answer read by deleteAccountOutcome. Never throws.
+ *
+ * A 401 drops the in-memory token and tries ONCE more with a freshly minted one
+ * (a token can die between minting and use). If that mint is refused because
+ * the refresh token was rejected, refreshAccessToken has already cleared the
+ * session (and notified) and the answer is `{ok: true, accountGone: true}`: a
+ * deleted user's tokens fail exactly like that, which is what a retry looks like
+ * after a first attempt that deleted the account but lost its response.
+ *
+ * On success the local session is cleared like a sign-out — without the
+ * /logout call: the user it would revoke no longer exists. The status listener
+ * (main.ts → handleAccountStatusChanged) then sees the sign-out edge; the
+ * account:delete handler adds the deletion-specific teardown on top (Cloud off,
+ * no restore record). Billing failure (502), a second 401 and any other error
+ * leave the session exactly as it was.
+ *
+ * Guarded by the session generation: a result that arrives after the session
+ * changed is not applied to whatever session is here now; if that is a
+ * DIFFERENT live session, the answer says so (`staleSession`).
+ */
+async function deleteAccount() {
+    if (!(0, cloudConfig_1.isCloudConfigured)())
+        return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured' };
+    if (!getAccountStatus().signedIn)
+        return { ok: false, ...TOKEN_FAILURE_RESULT.noSession };
+    const generation = sessionGeneration;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const tokenResult = await getAccessTokenResult();
+        // After a 401: the refresh was rejected and the session cleared itself
+        // (that is what bumped the generation) — see `accountGone` above.
+        if (attempt === 1 && !tokenResult.ok && tokenResult.reason === 'noSession' && !getAccountStatus().signedIn) {
+            return { ok: true, accountGone: true };
+        }
+        if (generation !== sessionGeneration)
+            return { ok: false, ...TOKEN_FAILURE_RESULT.noSession };
+        if (!tokenResult.ok)
+            return { ok: false, ...TOKEN_FAILURE_RESULT[tokenResult.reason] };
+        let status;
+        let json = null;
+        try {
+            const res = await fetch(cloudConfig_1.DELETE_ACCOUNT_FN_URL, {
+                method: 'POST',
+                headers: {
+                    apikey: cloudConfig_1.SUPABASE_ANON_KEY,
+                    Authorization: `Bearer ${tokenResult.token}`,
+                },
+                // The function waits on Lemon Squeezy twice (read + cancel, 10 s each)
+                // plus the Supabase deletes.
+                signal: AbortSignal.timeout(45000),
+            });
+            status = res.status;
+            try {
+                json = await res.json();
+            }
+            catch {
+                // non-JSON body (e.g. a gateway error page)
+            }
+        }
+        catch (err) {
+            console.error('[Account] deleteAccount request failed:', String(err));
+            return { ok: false, error: NETWORK_ERROR, errorCode: 'network' };
+        }
+        const outcome = (0, deleteAccount_1.deleteAccountOutcome)(status, json);
+        if (outcome === 'deleted') {
+            // Only tear down the session the request was made for: if it already went
+            // away meanwhile there is nothing left to clear, and if ANOTHER session
+            // took its place, that one is not ours to touch.
+            if (generation === sessionGeneration) {
+                console.warn('[Account] account deleted — clearing the local session');
+                clearSession();
+                notifyStatusChanged();
+                return { ok: true };
+            }
+            return getAccountStatus().signedIn ? { ok: true, staleSession: true } : { ok: true };
+        }
+        if (outcome === 'unauthorized') {
+            invalidateAccessToken(tokenResult.token);
+            if (attempt === 0)
+                continue;
+            return {
+                ok: false,
+                error: 'Your session is no longer valid. Sign out, sign in again and retry.',
+                errorCode: 'sessionExpired',
+            };
+        }
+        if (outcome === 'billingFailed') {
+            return {
+                ok: false,
+                error: "Your subscription couldn't be cancelled, so nothing was deleted. Please try again later.",
+                errorCode: 'deleteBillingFailed',
+            };
+        }
+        console.warn(`[Account] deleteAccount rejected with HTTP ${status}`);
+        return { ok: false, error: DELETE_FAILED_ERROR, errorCode: 'deleteFailed' };
+    }
+    // Unreachable (the loop returns on its second pass); keeps the type checker honest.
+    return { ok: false, error: DELETE_FAILED_ERROR, errorCode: 'deleteFailed' };
 }
 // ── Entitlements (fetch + retry) ──────────────────────────────────────────────
 const TOKEN_FAILURE_RESULT = {

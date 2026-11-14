@@ -271,7 +271,7 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     actualizar la tarjeta; al cobrar, LS la vuelve a `active` y el webhook restaura ambas.
     Pendiente: decidir si se acepta o se mitiga (p. ej. aviso de `past_due` en Ajustes →
     Suscripción, y no ofrecer checkouts con una fila de LS `past_due`).
-- **Borrado de cuenta (backend implementado; cliente solo en móvil):** Edge Function
+- **Borrado de cuenta (backend implementado; cliente en móvil y escritorio):** Edge Function
   **`supabase/functions/delete-account`** (mismo patrón que `billing-portal`: `logic.ts` con `fetch`
   inyectado, testeado en `tests/supabase/delete-account.test.ts`; verify JWT). `POST` sin body →
   `{ok:true}` 200 · 401 `missing_token`/`invalid_token` · **502 `billing_cancel_failed`** (no se
@@ -295,7 +295,27 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   suscripción reanudada, `user_id` ajeno) loguea `console.error` "CANCEL subscription … in Lemon
   Squeezy" para el operador. Despliegue:
   `supabase/README.md` § 9; páginas públicas `/privacy#deletion` y `/delete-account` (web.md).
-  ⚠️ El escritorio **no** tiene aún acción de borrar cuenta (follow-up; hoy se pide por email).
+  - **Cliente de escritorio** (Ajustes → Suscripción → **Delete account**, solo con sesión; réplica
+    del móvil `noteflow-mobile/src/core/accountSession.ts` `deleteAccount`):
+    `account.deleteAccount()` (`electron/account.ts`) → `POST ${SUPABASE_URL}/functions/v1/delete-account`
+    (`DELETE_ACCOUNT_FN_URL`, Bearer + apikey, sin body, timeout 45 s) con el token de
+    `getAccessTokenResult()` (refresca si caduca en <60 s). La respuesta la lee la función pura
+    `deleteAccountOutcome` (`electron/deleteAccount.ts`, `tests/electron/deleteAccount.test.ts`):
+    2xx → borrada · 401 → `invalidateAccessToken` y **un** reintento con token nuevo; si en ese
+    reintento el refresh token también es rechazado (la sesión se limpia sola) → `{ok:true,
+    accountGone:true}` (lo más probable: un intento anterior borró la cuenta y se perdió la
+    respuesta); un segundo 401 → `sessionExpired` · 502 **con** `billing_cancel_failed` →
+    `deleteBillingFailed` (no se borró nada) · resto (500, 404 sin desplegar, 502 de pasarela) →
+    `deleteFailed` · red/timeout → `network`. Cualquier fallo deja la sesión **como estaba**.
+    Tras 2xx: `clearSession()` + notificar, como un sign-out pero **sin** `/logout` (el usuario ya
+    no existe) — el flanco de sign-out de `handleAccountStatusChanged` hace el teardown habitual
+    (Cloud off, sesión de claves borrada, IA → BYO). Encima, el handler IPC **`account:delete`**
+    (`main.ts`) apaga Cloud otra vez como red de seguridad (`disableCloudSync` +
+    `stopCloudAutoSync`; **no toca las notas locales** ni el journal) y **borra el registro
+    `accountRestore`** que acaba de escribir ese flanco (una cuenta nueva con el mismo email no debe
+    heredar la reactivación de la borrada). Con guarda de `sessionGeneration`: si la sesión cambió
+    durante la petición, no se aplica nada a la sesión actual (`staleSession` si es otra sesión
+    viva, y el handler se salta su teardown). UI en `AccountPanel` (ver § "UI" más abajo).
 - **Webhook de billing (implementado):** Edge Function `supabase/functions/billing-webhook`
   (Deno, cero dependencias) — verifica la firma HMAC-SHA256 de la cabecera `X-Signature` contra el
   body crudo (secret en `LEMONSQUEEZY_WEBHOOK_SECRET`; comparación constant-time vía
@@ -2200,17 +2220,19 @@ puro vía `fetch` desde el proceso main.
   ve los booleanos derivados. Testeada en `tests/electron/entitlements.test.ts`.
 - **IPC** — handlers `account:get-status` / `account:request-otp` / `account:verify-otp` /
   `account:sign-out` / `account:refresh-entitlements` (+ `account:open-checkout`,
-  `account:open-billing-portal` y `account:upgrade-to-bundle`, ver § 2); evento `account:status-changed` (broadcast
+  `account:open-billing-portal` y `account:upgrade-to-bundle`, ver § 2, y `account:delete`, ver
+  "Borrado de cuenta"); evento `account:status-changed` (broadcast
   del status público a todas las ventanas, patrón `sync:status-changed`). Bridge en `preload.ts`
-  (`getAccountStatus`, `accountRequestOtp`, `accountVerifyOtp`, `accountSignOut`,
+  (`getAccountStatus`, `accountRequestOtp`, `accountVerifyOtp`, `accountSignOut`, `accountDelete`,
   `accountRefreshEntitlements`, `onAccountStatusChanged`) y tipos `AccountStatus` /
-  `AccountEntitlements` en `src/types/index.ts`.
+  `AccountEntitlements` / `DeleteAccountResult` en `src/types/index.ts`.
 - **Errores tipados (`AccountErrorCode`)** — `AccountOpResult` lleva, además del `error` en inglés
   (fallback para logs), un **`errorCode`** de una unión cerrada (`notConfigured`, `invalidEmail`,
   `emptyCode`, `invalidCode`, `rateLimited`, `network`, `unexpectedResponse`, `sendFailed`,
   `verifyFailed`, `notSignedIn`, `refreshFailed`, `sessionLocked`, `checkoutUnavailable`,
   `checkoutInvalidUrl`, `billingPortalUnavailable`, `planChangeUnavailable`, `planChangeNotEligible`,
-  `planChangeSubscriptionInactive`) para
+  `planChangeSubscriptionInactive`, y los del borrado de cuenta `sessionExpired`,
+  `deleteBillingFailed`, `deleteFailed`) para
   que el renderer pinte el mensaje **en el idioma de la app** en vez del string crudo de GoTrue.
   La unión está **triplicada** (main `electron/account.ts` → renderer `src/types/index.ts` → una
   clave por código en `settings.account.errors` de los dicts EN/ES) y el espejo lo fija el test
@@ -2221,7 +2243,14 @@ puro vía `fetch` desde el proceso main.
   textos vía i18n `t.settings.account.*`): no configurado → placeholder informativo; signed out →
   email → código de acceso; signed in → email + badges de plan + el bloque compartido
   `PlanOffers` con los **planes y sus precios** (Bundle/AI/Cloud — ver § 3 "UI" y § visión
-  "Precios") + **Manage subscription** (solo con suscripción de LS, ver § 2) + Refresh + Sign out.
+  "Precios") + **Manage subscription** (solo con suscripción de LS, ver § 2) + Refresh + Sign out
+  + **Delete account** (bloque separado al final, botón rojo con texto explicativo; abre
+  `ConfirmModal` `danger` con `confirmOnEnter={false}` (Enter solo activa el botón enfocado —
+  Cancel al abrir —, nunca confirma globalmente) — cuenta + datos de Cloud borrados, suscripción cancelada, notas del
+  ordenador conservadas, irreversible —; spinner "Deleting account…" que bloquea el resto de
+  botones; su error se pinta **justo debajo del botón** (`deleteError`, mensaje por código); al
+  terminar, aviso verde `notice` ("account deleted" / `accountGone`) que sigue visible sobre el
+  formulario de sign-in hasta que se pide un código nuevo).
   **Dos superficies de error, nunca a la vez:** la caja roja de arriba (`error`) para el paso de
   email, refresh y checkout (`handleSignOut` ignora el resultado de `accountSignOut()`: no pinta
   error, solo lo limpia); e **inline bajo el input del código** (`codeError`) para el

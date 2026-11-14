@@ -29,6 +29,9 @@ export const BILLING_PORTAL_FN_URL = `${SUPABASE_URL}/functions/v1/billing-porta
 /** Upgrade AI / Cloud → Bundle by changing the plan of the same LS subscription (Edge Function billing-change-plan). */
 export const BILLING_CHANGE_PLAN_FN_URL = `${SUPABASE_URL}/functions/v1/billing-change-plan`
 
+/** Permanently deletes the caller's account, its Cloud data and its subscription (Edge Function delete-account). */
+export const DELETE_ACCOUNT_FN_URL = `${SUPABASE_URL}/functions/v1/delete-account`
+
 /**
  * Lemon Squeezy checkout URLs per product. Filled in once the products exist
  * in the LS store (see supabase/README.md § 6). While a URL is empty, its

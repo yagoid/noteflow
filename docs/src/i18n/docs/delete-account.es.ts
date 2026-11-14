@@ -1,29 +1,31 @@
 // Copy en español de la página /delete-account — traducción fiel de delete-account.en.ts
-// (misma estructura; mantener en sync). La ruta dentro de la app debe coincidir con las
-// etiquetas de la app de Android en español (Ajustes → Suscripción → Eliminar cuenta, en
-// src/i18n/es/settings.ts de noteflow-mobile).
+// (misma estructura; mantener en sync). Las rutas dentro de las apps deben coincidir con
+// sus etiquetas en español (Ajustes → Suscripción → Eliminar cuenta): las de Android en
+// src/i18n/es/settings.ts de noteflow-mobile y las de escritorio en src/i18n/es/settings.ts
+// de este repo.
 import type { LegalContent } from './legal';
 
 export const deleteAccountEs: LegalContent = {
   meta: {
     title: 'Eliminar tu cuenta — NoteFlow',
     description:
-      'Cómo eliminar tu cuenta de NoteFlow — desde la app de NoteFlow para Android o por correo — y qué se borra y qué se conserva: se borran tu cuenta y tus datos de NoteFlow Cloud y se cancela cualquier suscripción; las notas de tus dispositivos siguen siendo tuyas.',
+      'Cómo eliminar tu cuenta de NoteFlow — desde la app de NoteFlow para escritorio o para Android, o por correo — y qué se borra y qué se conserva: se borran tu cuenta y tus datos de NoteFlow Cloud y se cancela cualquier suscripción; las notas de tus dispositivos siguen siendo tuyas.',
   },
 
   hero: {
     kicker: 'NoteFlow · Cuenta',
     h1: 'Eliminar tu<br />cuenta',
-    tagline: 'Última actualización: 12 de noviembre de 2026',
+    tagline: 'Última actualización: 14 de noviembre de 2026',
   },
 
   summary: {
     title: 'En resumen',
-    html: 'Puedes eliminar tu cuenta de NoteFlow en cualquier momento, desde la <strong>app de NoteFlow para Android</strong> o <strong>por correo</strong>. Eliminarla cancela cualquier suscripción activa y borra para siempre tu cuenta y tus datos de NoteFlow Cloud de nuestros servidores. <strong>Las notas de tus dispositivos no se tocan.</strong> No necesitas una cuenta para usar NoteFlow — si nunca iniciaste sesión, no hay nada que eliminar.',
+    html: 'Puedes eliminar tu cuenta de NoteFlow en cualquier momento, desde la <strong>app de NoteFlow para escritorio</strong>, la <strong>app de NoteFlow para Android</strong> o <strong>por correo</strong>. Eliminarla cancela cualquier suscripción activa y borra para siempre tu cuenta y tus datos de NoteFlow Cloud de nuestros servidores. <strong>Las notas de tus dispositivos no se tocan.</strong> No necesitas una cuenta para usar NoteFlow — si nunca iniciaste sesión, no hay nada que eliminar.',
   },
 
   toc: [
     { id: 'in-app', label: 'En la app de Android' },
+    { id: 'desktop', label: 'En la app de escritorio' },
     { id: 'email', label: 'Por correo' },
     { id: 'deleted', label: 'Qué se borra' },
     { id: 'kept', label: 'Qué se conserva' },
@@ -49,18 +51,36 @@ export const deleteAccountEs: LegalContent = {
       ],
     },
     {
+      id: 'desktop',
+      title: '2. Elimínala desde la app de escritorio',
+      blocks: [
+        {
+          t: 'ol',
+          items: [
+            'Abre <strong>NoteFlow</strong> en tu ordenador (Windows, macOS o Linux).',
+            'Ve a <strong>Ajustes → Suscripción</strong>. Si no has iniciado sesión, inicia sesión con el correo de tu cuenta (te enviamos un código de un solo uso).',
+            'Haz clic en <strong>Eliminar cuenta</strong> y confirma.',
+          ],
+        },
+        {
+          t: 'p',
+          html: 'El borrado es <strong>inmediato</strong>: se cierra la sesión en ese ordenador y se desactiva allí la sincronización con NoteFlow Cloud. <strong>Las notas de tu ordenador se conservan</strong> tal cual. No se puede deshacer. Igual que en la app de Android, si en ese momento no se puede cancelar una suscripción, <strong>no se borra nada</strong> y la app muestra un error.',
+        },
+      ],
+    },
+    {
       id: 'email',
-      title: '2. Pídenoslo por correo',
+      title: '3. Pídenoslo por correo',
       blocks: [
         {
           t: 'p',
-          html: 'Si usas la app de escritorio, ya no tienes la app de Android o no puedes iniciar sesión, escribe a <strong>yago.igle@gmail.com</strong> con el asunto «Eliminar mi cuenta de NoteFlow», <strong>desde la dirección de correo de tu cuenta</strong>. Comprobaremos que la petición es tuya, eliminaremos la cuenta como se describe abajo <strong>en un plazo de 30 días</strong> y te avisaremos cuando esté hecho.',
+          html: 'Si no puedes usar ninguna de las dos apps o no puedes iniciar sesión, escribe a <strong>yago.igle@gmail.com</strong> con el asunto «Eliminar mi cuenta de NoteFlow», <strong>desde la dirección de correo de tu cuenta</strong>. Comprobaremos que la petición es tuya, eliminaremos la cuenta como se describe abajo <strong>en un plazo de 30 días</strong> y te avisaremos cuando esté hecho.',
         },
       ],
     },
     {
       id: 'deleted',
-      title: '3. Qué se borra',
+      title: '4. Qué se borra',
       blocks: [
         {
           t: 'ul',
@@ -73,13 +93,13 @@ export const deleteAccountEs: LegalContent = {
         },
         {
           t: 'p',
-          html: 'Estos datos se borran de nuestros servidores en el momento (al instante desde la app; en cuanto se tramita tu petición por correo).',
+          html: 'Estos datos se borran de nuestros servidores en el momento (al instante desde las apps; en cuanto se tramita tu petición por correo).',
         },
       ],
     },
     {
       id: 'kept',
-      title: '4. Qué se conserva',
+      title: '5. Qué se conserva',
       blocks: [
         {
           t: 'ul',

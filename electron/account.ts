@@ -17,7 +17,8 @@
 // "Manage subscription" asks the billing-portal Edge Function for a fresh
 // Lemon Squeezy customer-portal link (resolveBillingPortal); "Upgrade to
 // Bundle" asks billing-change-plan to change the plan of the current
-// subscription (upgradeToBundle).
+// subscription (upgradeToBundle). "Delete account" asks delete-account to
+// delete the user server-side (deleteAccount); main.ts then switches Cloud off.
 //
 // Security model: the refresh token is encrypted at rest and NEVER crosses to
 // the renderer; the access token lives only in main-process memory. The
@@ -49,6 +50,7 @@ import {
   LEMONSQUEEZY_STORE_PORTAL_URL,
   BILLING_PORTAL_FN_URL,
   BILLING_CHANGE_PLAN_FN_URL,
+  DELETE_ACCOUNT_FN_URL,
   isCloudConfigured,
 } from './cloudConfig'
 import {
@@ -74,6 +76,7 @@ import {
   type BillingPortalVia,
 } from './billingPortal'
 import { planChangeOutcome } from './planChange'
+import { deleteAccountOutcome } from './deleteAccount'
 import { writeSettingsFile } from './settingsFile'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -153,6 +156,9 @@ export type AccountErrorCode =
   | 'planChangeUnavailable' // the Bundle upgrade failed (function missing, LS error, offline…)
   | 'planChangeNotEligible' // no single LS AI/Cloud subscription to upgrade (comp, two subscriptions…)
   | 'planChangeSubscriptionInactive' // the LS subscription is cancelled / past due / paused
+  | 'sessionExpired'     // delete-account: 401 even with a freshly minted access token
+  | 'deleteBillingFailed'// delete-account: 502, the subscription could not be cancelled, NOTHING was deleted
+  | 'deleteFailed'       // delete-account: any other failure (500, unexpected status), safe to retry
 
 export interface AccountOpResult {
   ok: boolean
@@ -163,6 +169,24 @@ export interface AccountOpResult {
 }
 
 export type RefreshEntitlementsResult = AccountOpResult & { entitlements: Entitlements }
+
+/** account:delete — see deleteAccount for when each flag is set. */
+export interface DeleteAccountResult extends AccountOpResult {
+  /**
+   * `ok: true` WITHOUT a confirmed deletion: a retry got a 401 and the refresh
+   * token was then rejected too, so the session is gone. The likeliest cause is
+   * an earlier attempt that deleted the account but whose answer never arrived;
+   * it can also be a session revoked elsewhere. The caller cleans up as after a
+   * deletion and words it as "deleted, or your session ended".
+   */
+  accountGone?: boolean
+  /**
+   * `ok: true`, deleted server-side, but the session here NOW is a different one
+   * (it changed while the request was in flight): the caller must leave the
+   * live session's local state alone.
+   */
+  staleSession?: boolean
+}
 
 /** account:open-billing-portal — on success, which portal was opened. */
 export type BillingPortalResult = AccountOpResult & { via?: BillingPortalVia }
@@ -855,6 +879,108 @@ function pollEntitlementsAfterPlanChange(generation: number, step = 0): void {
     if (entitlementsKnown && entitlements.ai && entitlements.cloud) return
     pollEntitlementsAfterPlanChange(generation, step + 1)
   }, PLAN_CHANGE_POLL_DELAYS_MS[step])
+}
+
+// ── Account deletion ("Delete account") ───────────────────────────────────────
+
+const DELETE_FAILED_ERROR = 'Could not delete your account. Please try again.'
+
+/**
+ * Permanently deletes the account server-side through the delete-account Edge
+ * Function (auth user + Cloud rows, after cancelling the Lemon Squeezy
+ * subscription) — answer read by deleteAccountOutcome. Never throws.
+ *
+ * A 401 drops the in-memory token and tries ONCE more with a freshly minted one
+ * (a token can die between minting and use). If that mint is refused because
+ * the refresh token was rejected, refreshAccessToken has already cleared the
+ * session (and notified) and the answer is `{ok: true, accountGone: true}`: a
+ * deleted user's tokens fail exactly like that, which is what a retry looks like
+ * after a first attempt that deleted the account but lost its response.
+ *
+ * On success the local session is cleared like a sign-out — without the
+ * /logout call: the user it would revoke no longer exists. The status listener
+ * (main.ts → handleAccountStatusChanged) then sees the sign-out edge; the
+ * account:delete handler adds the deletion-specific teardown on top (Cloud off,
+ * no restore record). Billing failure (502), a second 401 and any other error
+ * leave the session exactly as it was.
+ *
+ * Guarded by the session generation: a result that arrives after the session
+ * changed is not applied to whatever session is here now; if that is a
+ * DIFFERENT live session, the answer says so (`staleSession`).
+ */
+export async function deleteAccount(): Promise<DeleteAccountResult> {
+  if (!isCloudConfigured()) return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured' }
+  if (!getAccountStatus().signedIn) return { ok: false, ...TOKEN_FAILURE_RESULT.noSession }
+  const generation = sessionGeneration
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const tokenResult = await getAccessTokenResult()
+    // After a 401: the refresh was rejected and the session cleared itself
+    // (that is what bumped the generation) — see `accountGone` above.
+    if (attempt === 1 && !tokenResult.ok && tokenResult.reason === 'noSession' && !getAccountStatus().signedIn) {
+      return { ok: true, accountGone: true }
+    }
+    if (generation !== sessionGeneration) return { ok: false, ...TOKEN_FAILURE_RESULT.noSession }
+    if (!tokenResult.ok) return { ok: false, ...TOKEN_FAILURE_RESULT[tokenResult.reason] }
+
+    let status: number
+    let json: unknown = null
+    try {
+      const res = await fetch(DELETE_ACCOUNT_FN_URL, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${tokenResult.token}`,
+        },
+        // The function waits on Lemon Squeezy twice (read + cancel, 10 s each)
+        // plus the Supabase deletes.
+        signal: AbortSignal.timeout(45_000),
+      })
+      status = res.status
+      try {
+        json = await res.json()
+      } catch {
+        // non-JSON body (e.g. a gateway error page)
+      }
+    } catch (err: unknown) {
+      console.error('[Account] deleteAccount request failed:', String(err))
+      return { ok: false, error: NETWORK_ERROR, errorCode: 'network' }
+    }
+
+    const outcome = deleteAccountOutcome(status, json)
+    if (outcome === 'deleted') {
+      // Only tear down the session the request was made for: if it already went
+      // away meanwhile there is nothing left to clear, and if ANOTHER session
+      // took its place, that one is not ours to touch.
+      if (generation === sessionGeneration) {
+        console.warn('[Account] account deleted — clearing the local session')
+        clearSession()
+        notifyStatusChanged()
+        return { ok: true }
+      }
+      return getAccountStatus().signedIn ? { ok: true, staleSession: true } : { ok: true }
+    }
+    if (outcome === 'unauthorized') {
+      invalidateAccessToken(tokenResult.token)
+      if (attempt === 0) continue
+      return {
+        ok: false,
+        error: 'Your session is no longer valid. Sign out, sign in again and retry.',
+        errorCode: 'sessionExpired',
+      }
+    }
+    if (outcome === 'billingFailed') {
+      return {
+        ok: false,
+        error: "Your subscription couldn't be cancelled, so nothing was deleted. Please try again later.",
+        errorCode: 'deleteBillingFailed',
+      }
+    }
+    console.warn(`[Account] deleteAccount rejected with HTTP ${status}`)
+    return { ok: false, error: DELETE_FAILED_ERROR, errorCode: 'deleteFailed' }
+  }
+  // Unreachable (the loop returns on its second pass); keeps the type checker honest.
+  return { ok: false, error: DELETE_FAILED_ERROR, errorCode: 'deleteFailed' }
 }
 
 // ── Entitlements (fetch + retry) ──────────────────────────────────────────────

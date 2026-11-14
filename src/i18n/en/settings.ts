@@ -371,6 +371,10 @@ export const settings = {
       planChangeUnavailable: "Couldn't change your plan right now. Please try again in a moment.",
       planChangeNotEligible: "Your current plan can't be switched to the Bundle from the app. Contact support and we'll do it for you.",
       planChangeSubscriptionInactive: 'Your current subscription is cancelled or has a pending payment. Resume it or update your card in Manage subscription, then try again.',
+      // Answers of the account-deletion endpoint (Edge Function delete-account).
+      sessionExpired: 'Your session is no longer valid. Sign out, sign in again and retry.',
+      deleteBillingFailed: "Your subscription couldn't be cancelled, so nothing was deleted. Please try again later.",
+      deleteFailed: 'Could not delete your account. Please try again.',
     },
     // "Resend code" control under the code input (step 2 of sign-in).
     resendCode: 'Resend code',
@@ -433,6 +437,19 @@ export const settings = {
     storePortalOpened: 'Opened the billing page in your browser — sign in there with the email you used to subscribe.',
     refresh: 'Refresh',
     signOut: 'Sign out',
+    // "Delete account" (signed in): permanent, server-side. Local notes on this
+    // computer are never touched; NoteFlow Cloud is switched off.
+    deleteAccount: 'Delete account',
+    deleteAccountHint: 'Permanently deletes your NoteFlow account and your NoteFlow Cloud data, and cancels any active subscription. Notes on this computer are kept.',
+    deleteAccountConfirmTitle: 'Delete your NoteFlow account?',
+    deleteAccountConfirm: "This permanently deletes your NoteFlow account and your NoteFlow Cloud data on our servers, and cancels any active subscription. It can't be undone. Notes stored on this computer stay on this computer.",
+    deleteAccountConfirmAction: 'Delete permanently',
+    deletingAccount: 'Deleting account…',
+    couldNotDeleteAccount: 'Could not delete your account.',
+    accountDeleted: 'Your NoteFlow account has been deleted. Notes on this computer were kept.',
+    // The retry found no session left (most likely an earlier attempt deleted
+    // the account but its answer never arrived).
+    accountGone: 'Your NoteFlow account has been deleted or your session ended. Notes on this computer were kept.',
     signInDesc:
       'For paid users: sign in with your email to access your NoteFlow subscription.',
     signInCodeHint: "We'll send you a one-time code.",
@@ -539,6 +556,8 @@ export const settings = {
     updateTo: 'Update to v{version}',
     links: 'Links',
     githubRepo: 'GitHub repository',
+    // Opens github.com/yagoid/noteflow/releases/latest in the browser.
+    releaseNotes: 'Latest release notes',
     // "Send feedback" form → public.feedback in Supabase (electron/feedback.ts).
     // Works signed out; the developer reads the reports from the Supabase dashboard.
     feedback: {

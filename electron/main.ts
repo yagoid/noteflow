@@ -2672,6 +2672,39 @@ ipcMain.handle('account:sign-out', () => {
   return account.signOut()
 })
 
+// "Delete account": account.deleteAccount asks the delete-account Edge Function
+// and, on success, clears the session — whose sign-out edge already runs the
+// usual teardown in handleAccountStatusChanged (Cloud off, DEK dropped, assistant
+// back to BYO). On top of that, here:
+//  - Cloud is switched off again as a safety net: the remote copy is gone, so
+//    nothing may keep pushing even if that edge was not observed. Local notes are
+//    never touched (disableCloudSync keeps the files, the journal and lastSync);
+//  - the accountRestore record that sign-out edge wrote is dropped: a brand-new
+//    account created later with the same email must not get Cloud / NoteFlow AI
+//    switched on by a record of the deleted one (a real sign-in still activates
+//    whatever that account pays for).
+// A failure (billing not cancelled, session expired, network…) and `staleSession`
+// (another session took over meanwhile — its state is not ours) skip all of it.
+ipcMain.handle('account:delete', async (): Promise<account.DeleteAccountResult> => {
+  const result = await account.deleteAccount()
+  if (!result.ok || result.staleSession) return result
+  try {
+    if (cloudSync.isCloudSyncEnabled()) {
+      cloudSync.disableCloudSync()
+      stopCloudAutoSync()
+      emitCloudStatusChanged()
+    }
+  } catch (err) {
+    console.error('[Account] failed to disable Cloud sync after deleting the account:', String(err))
+  }
+  try {
+    writeAccountRestore(null)
+  } catch (err) {
+    console.error('[Account] failed to drop the restore record after deleting the account:', String(err))
+  }
+  return result
+})
+
 ipcMain.handle('account:refresh-entitlements', () => {
   return account.refreshEntitlements()
 })
