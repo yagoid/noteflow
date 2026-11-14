@@ -3622,17 +3622,20 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
   font-size: 11.5px; font-weight: 550; color: rgb(var(--text-muted));
 }
 .cv-sub .cv-row { scroll-margin-top: 64px; }
+/* Each row is a card a step off the column's background, the chosen one a step further. Neutral
+   `--text` tints like the rest of the view: lighter on dark themes, darker on light ones. */
 .cv-row {
-  position: relative; display: grid; grid-template-columns: 50px minmax(0, 1fr) minmax(70px, 140px);
+  position: relative; display: grid; grid-template-columns: 50px minmax(0, 1fr);
   align-items: center; column-gap: 14px; padding: 8px 10px 10px; border-radius: 8px; cursor: pointer;
+  background: rgb(var(--text) / 0.03);
   scroll-margin-top: 40px; transition: background-color 160ms, opacity 220ms;
 }
-.cv-row + .cv-row { margin-top: 2px; }
+.cv-row + .cv-row { margin-top: 6px; }
 /* "As in the sidebar": the time column prints the sidebar item's date ("Yesterday", "Oct 28"). */
-.cv-list.is-sort-sidebar .cv-row { grid-template-columns: 62px minmax(0, 1fr) minmax(70px, 140px); }
-.cv-row:hover { background: rgb(var(--text) / 0.04); }
-.cv-row.is-checked { background: rgb(var(--text) / 0.05); }
-.cv-row.is-sel { background: rgb(var(--text) / 0.07); }
+.cv-list.is-sort-sidebar .cv-row { grid-template-columns: 62px minmax(0, 1fr); }
+.cv-row:hover { background: rgb(var(--text) / 0.05); }
+.cv-row.is-checked { background: rgb(var(--text) / 0.065); }
+.cv-row.is-sel { background: rgb(var(--text) / 0.095); }
 .cv-row.is-sel::before {
   content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 3px;
   background: rgb(var(--g));
@@ -3667,6 +3670,7 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
 .cv-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .cv-title { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 13px; font-weight: 550; color: rgb(var(--text) / 0.88); }
 .cv-row.is-sel .cv-title { color: rgb(var(--text)); }
+/* The title keeps its natural width and only truncates once the line beside it is gone. */
 .cv-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-lock, .cv-arch { flex: none; }
 .cv-arch { color: rgb(var(--text-muted)); }
@@ -3676,9 +3680,16 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
 }
 .cv-route > span { overflow: hidden; text-overflow: ellipsis; }
 .cv-sl { flex: none; color: rgb(var(--text-muted) / 0.4); }
-/* The sidebar's folded line, decorative: no hover growth, no unfold. */
-.cv-line { position: relative; align-self: start; height: 4px; margin-top: 9px; }
-.nsm-map.cv-map { grid-column: 2 / 4; margin-top: 8px; }
+/* The sidebar's folded line, decorative: no hover growth, no unfold. It sits in the title's flex
+   row and only gets the room the title leaves (basis 0, up to 140px + its 9px lead, pushed right by
+   the auto margin): a long title shrinks it and, under ~30px, hides it — it never covers the title. */
+.cv-line {
+  container: cv-line / inline-size;
+  position: relative; flex: 1 1 0px; min-width: 0; max-width: 149px; height: 4px; margin-left: auto;
+}
+.cv-line .nsm-spine { left: 9px; }
+@container cv-line (max-width: 38px) { .cv-line .nsm-spine { display: none; } }
+.nsm-map.cv-map { grid-column: 2; margin-top: 8px; }
 .cv-empty { margin: 0; padding: 18px 10px; font-size: 11.5px; color: rgb(var(--text-muted) / 0.5); }
 .cv-sbar {
   position: absolute; left: 0; right: 0; bottom: 16px; z-index: 20; display: flex; justify-content: center;

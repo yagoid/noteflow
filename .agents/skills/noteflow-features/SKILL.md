@@ -472,8 +472,10 @@ color a la izquierda.
 - Cada fila: la hora a la izquierda (por fecha: `HH:mm` hoy y ayer, día de la semana esta semana, `d MMM` antes),
   el título (candado si está cifrada) y debajo la ruta, sin lo que ya dice el lugar (en *All* /
   *Favorites* / *Ungrouped*: pestaña + "Grupo / Carpeta"; en un grupo: la carpeta o "In the group"; en
-  una carpeta: nada). A la derecha, la línea de colores de las secciones del sidebar, **solo
-  decorativa** (no engorda ni despliega).
+  una carpeta: nada). A la derecha del título, la línea de colores de las secciones del sidebar, **solo
+  decorativa** (no engorda ni despliega); el título manda: con uno largo la línea se encoge y
+  desaparece antes de que el título se corte con "…". Cada fila es una tarjeta con un fondo un punto
+  más marcado que el de la columna (separadas entre sí); la elegida, más marcada aún.
 - **Debajo de cada nota, todas sus secciones** como celdas (las mismas del mapa del sidebar, en varias
   líneas). Clic en una celda → elige esa sección (se rellena de su color) y abre la vista previa; clic
   en la fila → la nota con su primera sección; **doble clic** o `Intro` → abre en el editor; clic derecho
@@ -1152,8 +1154,8 @@ ancho ajustable arrastrando su borde izquierdo.
 conversación e historial** que el chat del cerebro, y se mantiene tal cual al cambiar de nota.
 Cabecera sin título visible (solo el icono ✦), selector de modelo y tres botones de
 icono a la vista: **Historial**, **Nuevo chat** y **Abrir en una ventana aparte**. A diferencia del
-cerebro y de la ventana aparte, este panel **no muestra preguntas sugeridas** (ni al empezar ni tras
-cada respuesta). Sin IA configurada, ofrece ir a **Ajustes → IA**.
+cerebro, este chat (el panel y su ventana aparte) **no muestra preguntas sugeridas** (ni al empezar ni
+tras cada respuesta). Sin IA configurada, ofrece ir a **Ajustes → IA**.
 
 - **Contexto (barra sobre el campo de escribir):** decides qué ve la IA además de tu perfil. Tres
   botones: **Sección: …** (la sección abierta), **Nota: …** (la nota entera abierta) y **Todas las

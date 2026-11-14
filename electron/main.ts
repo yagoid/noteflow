@@ -67,6 +67,7 @@ import {
   UPDATE_CHECK_FAILED,
   type UpdateCheckResult,
 } from './updateAsset'
+import { secondInstanceRelaunchArgs } from './relaunchArgs'
 import {
   parseActivityLog,
   pruneActivityLog,
@@ -108,6 +109,14 @@ let tray: Tray | null = null
 // as module state so the tooltip survives a language change (applyTrayMenu re-reads it).
 let shortcutUnavailable = false
 let isQuitting = false
+// A relaunch (second instance) that arrived before the startup path created the main
+// window: whenReady brings the window up once it's ready (see revealMainWindow).
+let showMainWindowWhenCreated = false
+// A launch that arrived while quitting already scheduled its relaunch after exit (once).
+let relaunchAfterQuitScheduled = false
+// The in-app updater is quitting to install: it relaunches NoteFlow itself, so a launch
+// that arrives meanwhile must not schedule another one (see revealMainWindow).
+let quittingForUpdate = false
 let autoSyncTimer: ReturnType<typeof setInterval> | null = null
 
 // Track paths recently written by the app so fs.watch can ignore them.
@@ -1726,6 +1735,73 @@ function showWindow() {
   mainWindow.focus()
 }
 
+/**
+ * A relaunch request (pinned taskbar/dock icon → 'second-instance', macOS dock
+ * 'activate'): shows the main window. Before the startup path has created it
+ * (whenReady still awaiting the migration, the welcome note or, at login, up to
+ * 10 s of initial pull) the request is remembered and honoured once the window
+ * is ready, instead of being dropped. A destroyed main window is not expected
+ * (its close only hides it until quitting) but is recreated rather than leaving
+ * the click without effect. While quitting there is nothing to show: the launch
+ * is relaunched after this process exits instead (relaunchAfterQuit).
+ */
+function revealMainWindow(argv: readonly string[] = []) {
+  if (isQuitting) {
+    relaunchAfterQuit(argv)
+    return
+  }
+  if (!mainWindow) {
+    showMainWindowWhenCreated = true
+    return
+  }
+  if (mainWindow.isDestroyed()) {
+    mainWindow = createWindow(true)
+    mainWindow.once('ready-to-show', () => showWindow())
+    return
+  }
+  showWindow()
+}
+
+/**
+ * A launch (the pinned taskbar/dock icon clicked right after "Quit") that reached
+ * this process while it was quitting: start NoteFlow again once we've exited, so
+ * the click isn't lost ("the first click doesn't open it").
+ *
+ * Why it reaches us at all: Electron keeps the single-instance lock until 'quit',
+ * after every window has closed (renderers unloading, pending edits flushing), so
+ * a launch in between loses the lock, notifies us via 'second-instance' and
+ * exits. The lock is deliberately NOT released earlier (before-quit): the new
+ * instance would start while this one still flushes edits, rewrites the sync
+ * state (cloud-sync-state.json, GitHub's) and activity-log.json, and holds the
+ * LevelDB lock of localStorage in userData — Chromium could leave the new
+ * renderer with an in-memory localStorage (theme and settings lost for that
+ * session). A relaunch after exit has no overlap at all.
+ *
+ * Once per quit, however many launches arrive. app.relaunch() spawns its
+ * relauncher right away, which waits for this process to exit, so it works at any
+ * point of the quit; after 'quit' the lock is free and no 'second-instance'
+ * arrives any more (the new launch just starts). AppImage: app.relaunch's helper
+ * lives in the old FUSE mount, unmounted on exit, so use the detached shell
+ * helper that waits for our pid (relaunchAppImageAfterExit, no args → no startup
+ * flag). Skipped when the updater is quitting to install: it relaunches itself,
+ * and the Windows installer must not have the old exe started under it.
+ */
+function relaunchAfterQuit(argv: readonly string[]) {
+  if (relaunchAfterQuitScheduled || quittingForUpdate) return
+  relaunchAfterQuitScheduled = true
+  const appImagePath = process.env.APPIMAGE
+  const ownAppImage = process.platform === 'linux' && isRunningFromOwnAppImage({
+    appImage: appImagePath,
+    appDir: process.env.APPDIR,
+    execPath: process.execPath,
+  })
+  if (appImagePath && ownAppImage) {
+    relaunchAppImageAfterExit(appImagePath)
+    return
+  }
+  app.relaunch({ args: secondInstanceRelaunchArgs(argv) })
+}
+
 function toggleWindow() {
   if (!mainWindow) return
   if (mainWindow.isVisible() && mainWindow.isFocused()) {
@@ -2188,6 +2264,7 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
           })
           proc.on('close', (code) => {
             if (code === 0) {
+              quittingForUpdate = true
               app.relaunch()
               app.quit()
             }
@@ -2218,6 +2295,7 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
             fs.copyFileSync(dest, tmpTarget)
             fs.chmodSync(tmpTarget, 0o755)
             fs.renameSync(tmpTarget, appImagePath)
+            quittingForUpdate = true
             relaunchAppImageAfterExit(appImagePath)
             app.quit()
           } catch (err) {
@@ -2260,6 +2338,7 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
         stdio: 'ignore',
       })
       installer.unref()
+      quittingForUpdate = true
       setTimeout(() => app.quit(), 1000)
     }
     return { success: true }
@@ -4844,6 +4923,12 @@ app.whenReady().then(async () => {
   } else {
     mainWindow = createWindow()
   }
+  // Relaunched (pinned icon clicked) while the startup path above was still running:
+  // the window wasn't there to show, so bring it up — even in startup mode — once ready.
+  if (showMainWindowWhenCreated) {
+    showMainWindowWhenCreated = false
+    mainWindow.once('ready-to-show', () => showWindow())
+  }
 
   createTray()
   registerGlobalShortcut()
@@ -4868,7 +4953,8 @@ app.whenReady().then(async () => {
   startNotesWatcher()
 
   app.on('activate', () => {
-    showWindow()
+    // A dock click while quitting isn't a launch: nothing to relaunch.
+    if (!isQuitting) revealMainWindow()
   })
 
   app.on('before-quit', () => {
@@ -4906,6 +4992,7 @@ app.on('will-quit', () => {
   flushActivityLog()
 })
 
-app.on('second-instance', () => {
-  showWindow()
+// While quitting, revealMainWindow relaunches after exit with this launch's argv.
+app.on('second-instance', (_event, argv) => {
+  revealMainWindow(argv)
 })

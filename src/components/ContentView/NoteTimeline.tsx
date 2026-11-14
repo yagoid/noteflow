@@ -294,22 +294,24 @@ const TimelineRow = memo(function TimelineRow({
           {note.encryption && <Lock size={10} className="cv-lock text-amber-400" aria-label={t.contentView.encrypted} />}
           {note.archived && <Archive size={11} className="cv-arch" aria-label={t.contentView.archivedNote} />}
           <span className="cv-title-text">{renderHighlightedText(note.title || t.common.untitled, highlight)}</span>
+          {/* On the title's line, after it: it only takes the room the title leaves (the title
+              never gets covered; the line shrinks and hides first). */}
+          {sections.length > 0 && (
+            <span className="cv-line" aria-hidden>
+              <span className="nsm-spine" style={{ '--nsm-n': sections.length } as CSSProperties}>
+                {sections.map((s, i) => (
+                  <span
+                    key={s.id}
+                    className={`nsm-seg${s.aiHidden ? ' is-ai-hidden' : ''}`}
+                    style={{ '--w': weights[i], '--c': colorChannels(colors[i]) } as CSSProperties}
+                  />
+                ))}
+              </span>
+            </span>
+          )}
         </span>
         {routeNode}
       </div>
-      {sections.length > 0 ? (
-        <div className="cv-line" aria-hidden>
-          <div className="nsm-spine" style={{ '--nsm-n': sections.length } as CSSProperties}>
-            {sections.map((s, i) => (
-              <span
-                key={s.id}
-                className={`nsm-seg${s.aiHidden ? ' is-ai-hidden' : ''}`}
-                style={{ '--w': weights[i], '--c': colorChannels(colors[i]) } as CSSProperties}
-              />
-            ))}
-          </div>
-        </div>
-      ) : <span aria-hidden />}
       {sections.length > 0 && (
         <div className="nsm-map cv-map">
           {sections.map((s, i) => (

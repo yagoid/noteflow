@@ -526,13 +526,15 @@ tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventan
   cerebro/overviews) y si el ancla está en pantalla; la conversación vive en el store, así que ocultarlo
   o cambiar de nota no la toca (mensajes, borrador, streaming).
 - **Conversación compartida con el cerebro:** mismo `aiChatStore` (historial, hilo activo) y mismo
-  `ChatView`, en variante `compact` con `renderHeader` (cabecera propia: sin texto de título — `sidebar.title` queda solo como aria-label y título de la ventana aparte —,
+  `ChatView`, envuelto en `EditorChatView` (compartido con la ventana despegada: es la única fuente de
+  lo que distingue al chat del editor del del cerebro) en variante `compact` con `renderHeader` (cabecera propia: sin texto de título — `sidebar.title` queda solo como aria-label y título de la ventana aparte —,
   selector de modelo y tres botones de icono a la vista — Historial (activo mientras el overlay está
   abierto, `historyOpen`), Nuevo chat y Abrir en ventana aparte), `contextBar`, `withContext` y
-  `showSuggestions={false}`: el sidebar **no muestra los chips de sugerencias** (ni los starters del chat
-  vacío ni los de seguimiento; el marcador del LLM se sigue quitando del texto con `splitSuggestions`).
-  Es una prop propia y no cuelga de `compact` porque la ventana despegada también es `compact` y sí los
-  muestra, como el cerebro. El cerebro sigue igual: sin
+  `showSuggestions={false}`: el chat del editor (sidebar **y** ventana despegada) **no muestra los chips de
+  sugerencias** (ni los starters del chat vacío ni los de seguimiento; el marcador del LLM se sigue
+  quitando del texto con `splitSuggestions`). Solo el cerebro los muestra: por eso siguen vivos
+  `buildStarterSuggestions`, `aiChatStore.suggestions` y su paso por el handoff (la conversación vuelve a
+  la principal y el cerebro puede enseñar los de seguimiento). El cerebro sigue igual: sin
   barra de contexto ni `context` en el payload, y es el único que consume `pendingPrompt` ("Ask AI" de la
   paleta; `autoSendPendingPrompt`). Sin IA configurada: tarjeta con botón a **Ajustes → IA** (evento
   `noteflow:open-ai-settings`, lo atiende `TitleBar`).

@@ -207,8 +207,9 @@ export function ChatView({
   withContext?: boolean
   /** Auto-send a prompt queued from the command palette ("Ask AI" — the brain chat consumes it). */
   autoSendPendingPrompt?: boolean
-  /** Show the prompt chips above the composer (starters + the model's follow-ups). The editor
-   *  sidebar turns them off; the marker is stripped from the shown text either way. */
+  /** Show the prompt chips above the composer (starters + the model's follow-ups). Only the
+   *  brain chat does; the editor chat (EditorChatView) turns them off. The marker is stripped
+   *  from the shown text either way. */
   showSuggestions?: boolean
 }) {
   const t = useT()

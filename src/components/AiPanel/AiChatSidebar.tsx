@@ -3,8 +3,7 @@ import { ExternalLink, History, Plus, Sparkles } from 'lucide-react'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useNotesStore } from '../../stores/notesStore'
 import { useT } from '../../i18n/useT'
-import { ChatView } from './ChatView'
-import { ChatContextBar } from './ChatContextBar'
+import { EditorChatView } from './EditorChatView'
 import { AI_CHAT_ANCHOR_ATTR, onAiChatAnchorChange } from './aiChatAnchor'
 
 const WIDTH_KEY = 'noteflow-ai-chat-width'
@@ -185,14 +184,9 @@ export function AiChatSidebar({ containerRef, active }: { containerRef: RefObjec
         title={t.aiPanel.sidebar.resize}
         className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-text/20 active:bg-text/35 transition-colors z-40"
       />
-      <ChatView
-        compact
-        withContext
-        autoSendPendingPrompt={false}
-        showSuggestions={false}
+      <EditorChatView
         onOpenNote={openNote}
         onConfigure={openAiSettings}
-        contextBar={<ChatContextBar />}
         renderHeader={(c) => (
           <div className="flex-shrink-0 flex items-center gap-1 pl-3 pr-1.5 h-10 border-b border-border">
             <Sparkles size={13} className="shrink-0 text-accent" />

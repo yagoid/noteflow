@@ -195,11 +195,15 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
   (últimos 30 días desde ahora) y older; aritmética de calendario (DST) y una hora futura (reloj de otro
   dispositivo) cuenta como hoy. Cabecera de bloque sticky con contador. `now` es estado que solo cambia
   cuando cambia el día (intervalo de 60 s), así las filas no se re-renderizan cada minuto. Fila = grid
-  `50px | 1fr | minmax(70px,140px)`: hora (`timeLabelKind`: HH:mm hoy y ayer, `EEE` esta semana,
+  `50px | 1fr` (tarjeta: fondo `--text` al 3 %, 6 px entre filas; hover 5 %, marcada 6,5 %, elegida 9,5 %
+  — tintes neutros de `--text`, válidos en temas claros y oscuros): hora (`timeLabelKind`: HH:mm hoy y ayer, `EEE` esta semana,
   `d MMM` antes; formateada **en la fila** con `formatDate` para seguir el idioma), título (+ candado,
   + icono de archivo si archivada), ruta según `routeMode` (full / folder / none: se omite lo que dice el
   lugar) y la línea de segmentos (`.nsm-spine`/`.nsm-seg` + `sectionLineWeights`) **decorativa**: la fila
-  no lleva `data-note-row`, así que no engorda al hover ni despliega. **Secciones siempre visibles:** un
+  no lleva `data-note-row`, así que no engorda al hover ni despliega. La línea va **dentro de `.cv-title`**,
+  tras el texto: `flex: 1 1 0` hasta 140 px (+ 9 px de separación) y `margin-left: auto`, así solo ocupa lo
+  que el título deja libre (el título nunca queda tapado ni se corta mientras quede línea); un container
+  query (`cv-line`) la oculta por debajo de ~30 px. **Secciones siempre visibles:** un
   `.nsm-map.cv-map` (de la columna del título al final) con `SectionCell` (`focusable={false}`), la elegida
   `active` con la tinta de `useSectionInk`; con búsqueda, `sectionSearchMatch` tiñe las que coinciden y atenúa
   el resto. El hover preview de `SectionCell` se mantiene. `TimelineRow` es `memo` con props planas (nota +
@@ -210,7 +214,7 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
   selection)` (derivado, sin effect): se mantiene la nota si sigue listada (la sección si existe, si no la
   primera) y si no, la primera nota con su primera sección. Al abrir no hay selección → la primera de la
   lista con la vista previa abierta. Al cambiar de lugar se ajusta en render (patrón `prevPlace`) y se
-  limpian la multiselección y el menú. Fila elegida = fondo neutro 7 % + barra de 3 px del color del grupo,
+  limpian la multiselección y el menú. Fila elegida = fondo neutro 9,5 % + barra de 3 px del color del grupo,
   **solo con la vista previa abierta** (como el prototipo). Clic en celda → esa sección; clic en la fila →
   primera sección (repetir sobre la elegida no cambia la sección); doble clic / Enter → editor; clic
   derecho → `NoteContextMenu` de nota o de sección. Los clics devuelven el foco a la lista
@@ -2098,9 +2102,11 @@ de UI visible). Los usuarios que ya vieron el resto recibirán solo las nuevas e
 arranque. **Nunca** renombrar ni reutilizar un id (lo guarda `whatsNewSeen` y lo usa el script de
 captura de clips); para retirar una diapositiva, quitarla del array (su id guardado es inocuo).
 
-### Single instance y activación de la ventana (Windows)
+### Single instance y activación de la ventana
 `app.requestSingleInstanceLock()` — una segunda instancia trae la existente al frente
-(`second-instance` → `showWindow()`). Detalles no obvios, todos en `electron/main.ts`:
+(`second-instance` → `revealMainWindow()` → `showWindow()`; en macOS `activate` usa la misma ruta fuera de
+la salida).
+Detalles no obvios, todos en `electron/main.ts`:
 
 - El proceso que **pierde** el lock llama a `app.quit()`, pero eso no aborta el arranque: el callback
   de `app.whenReady()` empieza con un `if (!gotTheLock) return` para que ese proceso condenado no
@@ -2113,6 +2119,35 @@ captura de clips); para retirar una diapositiva, quitarla del array (su id guard
   la app oculta en el tray, Windows lanza un segundo proceso que pasa a ser el de primer plano y
   bloquea `SetForegroundWindow` para nosotros; sin el rebote la ventana aparecía **detrás** y hacía
   falta un segundo click.
+- **Lanzamiento durante la salida → relanzar tras salir.** Electron retiene el lock hasta `quit`, cuando
+  ya se han cerrado todas las ventanas (renderers descargando, ediciones pendientes volcándose); un
+  lanzamiento en ese intervalo —el icono anclado pulsado justo tras "Salir"— pierde el lock, avisa al
+  proceso moribundo (`second-instance`) y muere: "con el primer click no abre" tras salir (Windows y
+  Linux). `revealMainWindow(argv)` con `isQuitting` llama a `relaunchAfterQuit(argv)`: **una sola vez**
+  por salida, `app.relaunch({ args })` con el argv recibido limpiado por `secondInstanceRelaunchArgs`
+  (`electron/relaunchArgs.ts`, testeada: quita `argv[0]`, `--noteflow-startup` —el usuario ha pulsado el
+  icono y quiere ver la ventana— y los switches que inyecta Chromium, `--allow-file-access-from-files` y
+  `--original-process-start-time`). `app.relaunch` lanza su relauncher en el acto y este espera a que
+  muera el proceso, así que vale en cualquier punto de la salida; tras `quit` el lock ya está libre y no
+  llegan más `second-instance` (el lanzamiento arranca solo). **AppImage:** `app.relaunch` no sirve (su
+  helper vive en el montaje FUSE viejo, que se desmonta al salir); se usa `relaunchAppImageAfterExit`, el
+  `/bin/sh` desacoplado del updater que espera al pid y hace `exec` sin args. No se relanza si el updater
+  está saliendo para instalar (`quittingForUpdate`): ya relanza él, y en Windows no hay que arrancar el
+  exe viejo debajo del instalador. `activate` (Dock de macOS) durante la salida no relanza. Medido con
+  una ventana que tarda ~1 s en cerrarse: el click pierde el lock, y la instancia relanzada arranca
+  ~1 s después del `quit` del proceso viejo (ya muerto), coge el lock y muestra la ventana aunque el
+  click llevara `--noteflow-startup`.
+- **No soltar el lock antes (`releaseSingleInstanceLock()` en `before-quit`).** Se probó y se descartó:
+  la instancia nueva arrancaba mientras la vieja aún volcaba ediciones (`beforeunload` de `App.tsx`),
+  reescribía el estado de sync (`cloud-sync-state.json`, el de GitHub) y `activity-log.json` (`will-quit`)
+  y, sobre todo, retenía el lock del LevelDB de localStorage de `userData`: Chromium podía dejar al
+  renderer nuevo con localStorage en memoria (tema y ajustes perdidos en esa sesión). Relanzar tras
+  salir no tiene ningún solape.
+- `revealMainWindow()` fuera de la salida: si `whenReady` aún no ha creado la ventana (espera la
+  migración, la nota de bienvenida o, al arrancar con el sistema, hasta 10 s de pull inicial) recuerda la
+  petición en `showMainWindowWhenCreated` y la muestra en su `ready-to-show` —también en modo
+  `--noteflow-startup`, que la crearía oculta—; si estuviera destruida (no debería: su `close` solo
+  oculta hasta salir) la recrea.
 
 ### Sync entre ventanas
 Al escribir/borrar una nota, main hace broadcast (`notes-updated`) a todas las BrowserWindows.

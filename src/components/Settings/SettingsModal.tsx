@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Database,
   Globe,
@@ -103,6 +103,13 @@ interface SettingsModalProps {
 export function SettingsModal({ initialSection = 'general', onClose, onOpenExportImport }: SettingsModalProps) {
   const [section, setSection] = useState<SettingsSection>(initialSection)
   const t = useT()
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  // One scroll container serves every section: start each one at the top instead of
+  // keeping the previous section's offset (nav clicks and in-panel onNavigate alike).
+  useLayoutEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0
+  }, [section])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -176,7 +183,7 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
             </div>
             {/* Opaque background (the window's own colour): lets Chromium scroll this on the
                 compositor on standard-DPI screens instead of repainting it on every scroll frame. */}
-            <div className="settings-content flex-1 overflow-y-auto px-5 py-5 bg-surface-1">
+            <div ref={contentRef} className="settings-content flex-1 overflow-y-auto px-5 py-5 bg-surface-1">
               {section === 'general' && <GeneralPanel onClose={onClose} />}
               {section === 'ai' && <AiPanel onNavigate={setSection} />}
               {section === 'sync' && <SyncPanel onNavigate={setSection} />}

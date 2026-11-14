@@ -6,8 +6,7 @@ import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { useThemeStore } from '../../stores/themeStore'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { useT } from '../../i18n/useT'
-import { ChatView } from './ChatView'
-import { ChatContextBar } from './ChatContextBar'
+import { EditorChatView } from './EditorChatView'
 import { ChatMoreMenu } from './ChatMoreMenu'
 import { reconcileHandoff } from '../../lib/chatHandoff'
 
@@ -20,9 +19,10 @@ const noDrag = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
  * when the window closes (its close button, "Back to the main window" or an OS close, which main
  * turns into `ai:chat-window-request-close`). A running reply is cancelled before handing back.
  *
- * Secondary window (store role 'section'): it loads the notes only for the context chips, the
- * starter suggestions and the hover previews; the context bar follows the note/section open in
- * the MAIN window, relayed by main. Opening a note or the AI settings is done by the main window.
+ * Secondary window (store role 'section'): it loads the notes only for the context chips and the
+ * hover previews; the context bar follows the note/section open in the MAIN window, relayed by
+ * main. Opening a note or the AI settings is done by the main window. Same chat as the editor
+ * sidebar (EditorChatView: no prompt suggestions).
  */
 export function AiChatWindowApp() {
   const t = useT()
@@ -43,7 +43,7 @@ export function AiChatWindowApp() {
     document.title = `NoteFlow — ${t.aiPanel.sidebar.title}`
   }, [t])
 
-  // Notes (chips, starters, previews) + live sync, like the section window.
+  // Notes (context chips, previews) + live sync, like the section window.
   useEffect(() => {
     const loadAll = () => Promise.all([
       useNotesStore.getState().loadNotes(),
@@ -147,13 +147,9 @@ export function AiChatWindowApp() {
     <div className="flex flex-col h-screen bg-surface-1 text-text overflow-hidden">
       {ready ? (
         <div className="flex-1 min-h-0">
-          <ChatView
-            compact
-            withContext
-            autoSendPendingPrompt={false}
+          <EditorChatView
             onOpenNote={openNote}
             onConfigure={openAiSettings}
-            contextBar={<ChatContextBar />}
             renderHeader={(c) => titleBar(c)}
           />
         </div>
