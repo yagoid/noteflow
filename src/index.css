@@ -3643,7 +3643,9 @@ html[data-color-scheme="light"] .cv-menu { box-shadow: 0 0 0 1px rgb(var(--borde
   content: ''; position: absolute; left: 6px; right: 6px; height: 2px; border-radius: 2px;
   background: rgb(var(--text) / 0.45); pointer-events: none;
 }
-.cv-row.is-drop-before::after { top: -2px; }
+/* Inside the row (not -2px): the first row sits flush with the top of the scroller (.cv-list,
+   overflow auto, no top padding), which would clip a line drawn above it. */
+.cv-row.is-drop-before::after { top: 0; }
 .cv-row.is-drop-after::after { bottom: -2px; }
 .cv-row.is-archived > :not(.cv-time) { opacity: 0.6; }
 /* Time column; the tick takes its place on hover and for as long as there's a selection. */
