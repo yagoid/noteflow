@@ -37,6 +37,7 @@ const path_1 = __importDefault(require("path"));
 const https_1 = __importDefault(require("https"));
 const settingsFile_1 = require("./settingsFile");
 const noteFormat_1 = require("./noteFormat");
+const localOnlyNotes_1 = require("./localOnlyNotes");
 const syncState_1 = require("./syncState");
 const mirrorPlan_1 = require("./mirrorPlan");
 const githubContents_1 = require("./githubContents");
@@ -1734,6 +1735,9 @@ async function pullNotes(notesDir) {
                 const localDirPath = path_1.default.join(notesDir, dir);
                 try {
                     const localContent = fs_1.default.readFileSync(path_1.default.join(localDirPath, noteFormat_1.NOTE_MD), 'utf-8');
+                    // A local-only note is absent from the remote by design (localOnlyNotes.ts).
+                    if ((0, localOnlyNotes_1.isLocalOnlyNoteMd)(localContent))
+                        continue;
                     const localUpdatedTime = parseUpdatedTimestamp(extractUpdatedTimestamp(localContent));
                     if (localUpdatedTime === null)
                         continue; // can't determine age — skip to be safe
@@ -1896,7 +1900,7 @@ async function pullNotes(notesDir) {
  */
 function listLocalSyncPaths(notesDir) {
     const relPaths = [];
-    for (const dir of (0, noteFormat_1.listNoteDirs)(notesDir)) {
+    for (const dir of (0, localOnlyNotes_1.listSyncedNoteDirs)(notesDir)) {
         for (const f of fs_1.default.readdirSync(path_1.default.join(notesDir, dir))) {
             if (f.endsWith('.md'))
                 relPaths.push(`${dir}/${f}`);
@@ -2258,6 +2262,8 @@ async function pushPathsNow(notesDir, relPaths) {
     let stateChanged = false;
     notesDirPath = notesDir;
     for (const relPath of relPaths) {
+        if ((0, localOnlyNotes_1.isLocalOnlySyncPath)(notesDir, relPath))
+            continue; // never synced (localOnlyNotes.ts)
         // Supersede any debounced timer for this path — we're pushing it now.
         const existing = pushTimers.get(relPath);
         if (existing) {
@@ -2303,6 +2309,12 @@ async function pushPathsNow(notesDir, relPaths) {
 function schedulePush(relPath, content, onStart, onComplete) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
+        onComplete?.();
+        return;
+    }
+    // A local-only note (the first-run welcome note) never goes up — not even
+    // journaled (localOnlyNotes.ts).
+    if ((0, localOnlyNotes_1.isLocalOnlySyncPath)(notesDirPath, relPath)) {
         onComplete?.();
         return;
     }
@@ -2409,6 +2421,8 @@ function flushPendingLocalChanges(notesDir, previousLastSync, remoteShaByPath) {
         const dirPath = path_1.default.join(notesDir, dir);
         try {
             const anchor = fs_1.default.readFileSync(path_1.default.join(dirPath, noteFormat_1.NOTE_MD), 'utf-8');
+            if ((0, localOnlyNotes_1.isLocalOnlyNoteMd)(anchor))
+                continue; // never synced (localOnlyNotes.ts)
             const updatedMs = parseUpdatedTimestamp(extractUpdatedTimestamp(anchor));
             if (updatedMs === null)
                 continue;
@@ -2446,6 +2460,8 @@ async function scheduleDelete(relPath) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo)
         return;
+    if ((0, localOnlyNotes_1.isLocalOnlySyncPath)(notesDirPath, relPath))
+        return; // never synced: nothing remote to delete
     // Cancel any pending push for this file before deleting
     const existing = pushTimers.get(relPath);
     if (existing) {
@@ -2543,6 +2559,10 @@ function handleDeleteDirConflict(dir) {
 async function scheduleDeleteDir(dir) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo)
+        return;
+    // Never synced: nothing remote to delete. The folder is usually gone by now —
+    // isLocalOnlyDir answers from its memory of local-only folders.
+    if (notesDirPath && (0, localOnlyNotes_1.isLocalOnlyDir)(notesDirPath, dir))
         return;
     // Cancel any pending pushes for files inside this dir
     for (const key of [...pushTimers.keys()]) {

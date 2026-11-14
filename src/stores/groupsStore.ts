@@ -22,6 +22,8 @@ interface GroupsState {
 
   createFolder: (groupId: string, name: string) => Promise<NoteFolder>
   renameFolder: (id: string, name: string) => Promise<void>
+  /** Rewrites the `order` of a group's folders to follow `orderedIds` (drag & drop). */
+  reorderFolders: (groupId: string, orderedIds: string[]) => Promise<void>
   /** Sets a folder's icon key (lib/folderIcons.ts); null drops the field (default glyph). */
   setFolderIcon: (id: string, icon: string | null) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
@@ -171,6 +173,26 @@ export const useGroupsStore = create<GroupsState>((set, get) => ({
 
   renameFolder: async (id, name) => {
     const updated = get().folders.map((f) => (f.id === id ? { ...f, name } : f))
+    set({ folders: updated })
+    await window.noteflow.setFolders(updated)
+  },
+
+  reorderFolders: async (groupId, orderedIds) => {
+    const { folders } = get()
+    const position = new Map(orderedIds.map((id, index) => [id, index]))
+    // The group's folders by their new position; any missing from the list (safety) keep
+    // their relative order after the listed ones.
+    const siblings = folders
+      .filter((f) => f.groupId === groupId)
+      .sort((a, b) =>
+        (position.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (position.get(b.id) ?? Number.MAX_SAFE_INTEGER) ||
+        a.order - b.order,
+      )
+    const nextOrder = new Map(siblings.map((f, index) => [f.id, index]))
+    const updated = folders.map((f) => {
+      const order = nextOrder.get(f.id)
+      return order === undefined || order === f.order ? f : { ...f, order }
+    })
     set({ folders: updated })
     await window.noteflow.setFolders(updated)
   },

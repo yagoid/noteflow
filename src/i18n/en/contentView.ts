@@ -63,4 +63,6 @@ export const contentView = {
   hintOpen: 'open in the editor',
   hintClose: 'close',
   hintDrag: 'Drag a note onto a place to move it',
+  /** Only "As in the sidebar": rows can be dragged within their group / folder. */
+  hintReorder: 'or between notes to reorder them',
 }

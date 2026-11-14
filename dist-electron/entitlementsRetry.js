@@ -18,6 +18,7 @@ exports.entitlementsRetryDelayMs = entitlementsRetryDelayMs;
 exports.isRetryableEntitlementsFailure = isRetryableEntitlementsFailure;
 exports.parseEntitlementsCache = parseEntitlementsCache;
 exports.parseCachedBillingFlag = parseCachedBillingFlag;
+exports.parseCachedBundleUpgradeFlag = parseCachedBundleUpgradeFlag;
 exports.isManagedAiUsable = isManagedAiUsable;
 /**
  * Backoff between entitlement fetch attempts: quick at first (the usual cause
@@ -75,6 +76,16 @@ function parseCachedBillingFlag(raw, userId) {
     if (!parseEntitlementsCache(raw, userId))
         return false;
     return raw.billing === true;
+}
+/**
+ * The cached "can upgrade to the Bundle by plan change" flag. Same rules as
+ * parseCachedBillingFlag: only from a cache of `userId`; absent / malformed →
+ * false (the upgrade card simply waits for the boot fetch).
+ */
+function parseCachedBundleUpgradeFlag(raw, userId) {
+    if (!parseEntitlementsCache(raw, userId))
+        return false;
+    return raw.bundleUpgrade === true;
 }
 /**
  * May the managed NoteFlow AI preset be used? Signed in AND (entitled, or not

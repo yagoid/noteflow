@@ -16,7 +16,9 @@
 //                                                the CLI too)
 // Entitlements come from PostgREST: GET /rest/v1/subscriptions (RLS-scoped).
 // "Manage subscription" asks the billing-portal Edge Function for a fresh
-// Lemon Squeezy customer-portal link (resolveBillingPortal).
+// Lemon Squeezy customer-portal link (resolveBillingPortal); "Upgrade to
+// Bundle" asks billing-change-plan to change the plan of the current
+// subscription (upgradeToBundle).
 //
 // Security model: the refresh token is encrypted at rest and NEVER crosses to
 // the renderer; the access token lives only in main-process memory. The
@@ -53,6 +55,7 @@ exports.invalidateAccessToken = invalidateAccessToken;
 exports.getAccessToken = getAccessToken;
 exports.signOut = signOut;
 exports.resolveBillingPortal = resolveBillingPortal;
+exports.upgradeToBundle = upgradeToBundle;
 exports.refreshEntitlements = refreshEntitlements;
 exports.initAccount = initAccount;
 const electron_1 = require("electron");
@@ -63,6 +66,7 @@ const cloudConfig_1 = require("./cloudConfig");
 const entitlements_1 = require("./entitlements");
 const entitlementsRetry_1 = require("./entitlementsRetry");
 const billingPortal_1 = require("./billingPortal");
+const planChange_1 = require("./planChange");
 const settingsFile_1 = require("./settingsFile");
 // ── Settings helpers (same idiom as githubSync) ───────────────────────────────
 function getSettingsPath() {
@@ -94,6 +98,12 @@ let entitlementsKnown = false;
 let entitlementsFromCache = false;
 // hasBillingSubscription of the same fetch (or cache) as `entitlements`.
 let billingSubscription = false;
+// canUpgradeToBundle of the same fetch (or cache) as `entitlements`.
+let bundleUpgrade = false;
+// After a successful plan change: re-fetch until the webhook has moved the row
+// to 'bundle' (it lands a few seconds after Lemon Squeezy applies the change).
+let planChangePollTimer = null;
+const PLAN_CHANGE_POLL_DELAYS_MS = [2000, 4000, 8000, 15000, 30000];
 // Refresh token on disk but undecryptable right now (keychain locked) — I1.
 let sessionLocked = false;
 // Bumped by every sign-out (clearSession) and sign-in (verifyOtp). Anything that
@@ -195,6 +205,7 @@ function applyEntitlementsCache() {
     entitlementsKnown = true;
     entitlementsFromCache = true;
     billingSubscription = (0, entitlementsRetry_1.parseCachedBillingFlag)(accountSettings?.entitlementsCache, accountSettings?.userId);
+    bundleUpgrade = (0, entitlementsRetry_1.parseCachedBundleUpgradeFlag)(accountSettings?.entitlementsCache, accountSettings?.userId);
 }
 /**
  * Writes the in-memory section to disk — or REMOVES it (`remove`, sign-out) —
@@ -279,9 +290,15 @@ function cancelEntitlementsRetry() {
         clearInterval(onlinePollTimer);
     onlinePollTimer = null;
 }
+function cancelPlanChangePoll() {
+    if (planChangePollTimer)
+        clearTimeout(planChangePollTimer);
+    planChangePollTimer = null;
+}
 function clearSession() {
     sessionGeneration++;
     cancelEntitlementsRetry();
+    cancelPlanChangePoll();
     pendingPersist = false;
     accountSettings = {};
     accessToken = null;
@@ -291,6 +308,7 @@ function clearSession() {
     entitlementsKnown = false;
     entitlementsFromCache = false;
     billingSubscription = false;
+    bundleUpgrade = false;
     sessionLocked = false;
     // The in-memory session is gone either way. A failed removal is retried
     // (timer, next account operation, before-quit) so the signed-out session
@@ -339,6 +357,7 @@ function getAccountStatus() {
         cloudCheckoutConfigured: cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.cloud.length > 0,
         bundleCheckoutConfigured: cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.bundle.length > 0,
         hasBillingSubscription: signedIn && entitlementsKnown && billingSubscription,
+        bundleUpgradeAvailable: signedIn && entitlementsKnown && bundleUpgrade,
     };
 }
 /**
@@ -422,11 +441,13 @@ async function verifyOtp(email, code) {
         // session must not land on this one, and its entitlements start UNKNOWN.
         sessionGeneration++;
         cancelEntitlementsRetry();
+        cancelPlanChangePoll();
         entitlements = entitlements_1.NO_ENTITLEMENTS;
         entitlementsFetchedAt = undefined;
         entitlementsKnown = false;
         entitlementsFromCache = false;
         billingSubscription = false;
+        bundleUpgrade = false;
         sessionLocked = false;
         persistAccountSettings({
             email: session.user.email ?? email.trim(),
@@ -627,6 +648,76 @@ async function resolveBillingPortal() {
     }
     return { ok: true, url: fallback.toString(), via: 'storePortal' };
 }
+// ── Plan change ("Upgrade to Bundle") ─────────────────────────────────────────
+/**
+ * Upgrades the account's single AI / Cloud subscription to the Bundle through
+ * the billing-change-plan Edge Function, which CHANGES THE PLAN of that same
+ * Lemon Squeezy subscription (prorated, invoiced now, same interval) — never a
+ * second subscription. The entitlement itself arrives via the billing webhook,
+ * so a success starts a short re-fetch loop until both are on. Never throws;
+ * there is no fallback (a failure must not open a checkout that bills twice).
+ */
+async function upgradeToBundle() {
+    if (!(0, cloudConfig_1.isCloudConfigured)())
+        return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured' };
+    const generation = sessionGeneration;
+    const tokenResult = await getAccessTokenResult();
+    if (!tokenResult.ok)
+        return { ok: false, ...TOKEN_FAILURE_RESULT[tokenResult.reason] };
+    let status;
+    let json = null;
+    try {
+        const res = await fetch(cloudConfig_1.BILLING_CHANGE_PLAN_FN_URL, {
+            method: 'POST',
+            headers: {
+                apikey: cloudConfig_1.SUPABASE_ANON_KEY,
+                Authorization: `Bearer ${tokenResult.token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ plan: 'bundle' }),
+            // The function waits on Lemon Squeezy twice (read + change, 15 s each).
+            signal: AbortSignal.timeout(40000),
+        });
+        status = res.status;
+        try {
+            json = await res.json();
+        }
+        catch {
+            // non-JSON body (e.g. the gateway's 404 before the function is deployed)
+        }
+    }
+    catch (err) {
+        console.error('[Account] plan change request failed:', String(err));
+        return { ok: false, error: NETWORK_ERROR, errorCode: 'network' };
+    }
+    const outcome = (0, planChange_1.planChangeOutcome)(status, json);
+    if (!outcome.ok) {
+        if (status === 401)
+            invalidateAccessToken(tokenResult.token);
+        console.warn(`[Account] plan change to the Bundle failed: HTTP ${status} (${outcome.serverCode})`);
+        return { ok: false, error: 'Could not change the plan.', errorCode: outcome.errorCode };
+    }
+    if (generation === sessionGeneration)
+        pollEntitlementsAfterPlanChange(generation);
+    return { ok: true };
+}
+/** Re-fetches entitlements on PLAN_CHANGE_POLL_DELAYS_MS until the Bundle shows up (or the session changes). */
+function pollEntitlementsAfterPlanChange(generation, step = 0) {
+    cancelPlanChangePoll();
+    if (step >= PLAN_CHANGE_POLL_DELAYS_MS.length)
+        return;
+    planChangePollTimer = setTimeout(async () => {
+        planChangePollTimer = null;
+        if (generation !== sessionGeneration)
+            return;
+        await refreshEntitlements();
+        if (generation !== sessionGeneration)
+            return;
+        if (entitlementsKnown && entitlements.ai && entitlements.cloud)
+            return;
+        pollEntitlementsAfterPlanChange(generation, step + 1);
+    }, PLAN_CHANGE_POLL_DELAYS_MS[step]);
+}
 // ── Entitlements (fetch + retry) ──────────────────────────────────────────────
 const TOKEN_FAILURE_RESULT = {
     noSession: { error: 'Not signed in.', errorCode: 'notSignedIn' },
@@ -692,6 +783,7 @@ async function fetchEntitlements() {
     }
     entitlements = (0, entitlements_1.computeEntitlements)(res.json);
     billingSubscription = (0, entitlements_1.hasBillingSubscription)(res.json);
+    bundleUpgrade = (0, entitlements_1.canUpgradeToBundle)(res.json);
     entitlementsFetchedAt = new Date().toISOString();
     entitlementsKnown = true;
     entitlementsFromCache = false;
@@ -706,6 +798,7 @@ async function fetchEntitlements() {
                 cloud: entitlements.cloud,
                 fetchedAt: entitlementsFetchedAt,
                 billing: billingSubscription,
+                bundleUpgrade,
             },
         });
     }

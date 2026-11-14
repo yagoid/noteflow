@@ -40,6 +40,7 @@ export interface DiskNote {
   group?: string
   folder?: string
   expiresAt?: string
+  localOnly?: boolean  // never synced (localOnlyNotes.ts) — only the first-run welcome note
   encryption?: Record<string, unknown>  // passed through opaquely
   sections: DiskSection[]
 }
@@ -150,6 +151,7 @@ function parseDiskMeta(data: Record<string, unknown>): Omit<DiskNote, 'sections'
   if (typeof data.folder === 'string' && data.folder) note.folder = data.folder
   const expiresAt = isoString(data.expiresAt)
   if (expiresAt) note.expiresAt = expiresAt
+  if (data.localOnly === true) note.localOnly = true
   if (data.encryption && typeof data.encryption === 'object') {
     note.encryption = data.encryption as Record<string, unknown>
   }
@@ -268,6 +270,7 @@ export function serializeNoteFolder(
   if (note.group)      fm.group      = note.group
   if (note.folder)     fm.folder     = note.folder
   if (note.expiresAt)  fm.expiresAt  = note.expiresAt
+  if (note.localOnly)  fm.localOnly  = true
 
   const yamlStr = yaml.dump(fm, { lineWidth: -1, quotingType: '"' })
   const files: Record<string, string> = { [NOTE_MD]: `---\n${yamlStr}---\n` }

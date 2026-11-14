@@ -66,6 +66,8 @@ const noteFormat = __importStar(require("./noteFormat"));
 const uiSettings_1 = require("./uiSettings");
 const importers = __importStar(require("./importers"));
 const migration_1 = require("./migration");
+const localOnlyNotes_1 = require("./localOnlyNotes");
+const welcomeNote_1 = require("./welcomeNote");
 const tempNoteExpiry_1 = require("./tempNoteExpiry");
 const updateAsset_1 = require("./updateAsset");
 const activityLog_1 = require("./activityLog");
@@ -744,8 +746,10 @@ if (process.platform === 'linux') {
         fs_1.default.renameSync(legacyLinuxDir, NOTES_DIR);
     }
 }
-// Ensure notes directory exists
-if (!fs_1.default.existsSync(NOTES_DIR)) {
+// Ensure notes directory exists. Remembered for the first-run welcome note: a
+// dir created just now is certainly empty (no need to retry its listing).
+const NOTES_DIR_CREATED_AT_STARTUP = !fs_1.default.existsSync(NOTES_DIR);
+if (NOTES_DIR_CREATED_AT_STARTUP) {
     fs_1.default.mkdirSync(NOTES_DIR, { recursive: true });
 }
 const GROUPS_FILE = path_1.default.join(NOTES_DIR, 'groups.json');
@@ -978,6 +982,10 @@ function roundedRectRegion(w, h, r) {
 const STICKY_RADIUS = 8;
 // Minimum width/height of an expanded sticky (lifted while folded).
 const STICKY_MIN_SIZE = 200;
+// Size of the folded pill when a sticky opens already folded (startup). Must match
+// FOLDED_W/FOLDED_H in StickyApp.tsx, which the renderer sends on a regular fold.
+const STICKY_FOLDED_W = 220;
+const STICKY_FOLDED_H = 32;
 function applyStickyShape(win, w, h) {
     // win.setShape() is Windows-only (DWM); no-op on Linux/macOS
     if (process.platform !== 'win32')
@@ -1016,6 +1024,15 @@ function rememberedStickyRect(key, kind) {
     if (!rect)
         return null;
     return (0, stickyBounds_1.isRectVisible)(rect, electron_1.screen.getAllDisplays().map((d) => d.bounds)) ? rect : null;
+}
+function wasStickyLeftFolded(key) {
+    return (0, stickyBounds_1.sanitizeStickyBounds)(readSettings().stickyBounds)[key]?.isFolded === true;
+}
+// Remembers whether the sticky of `key` is folded (fold/unfold, and an expanded open):
+// a startup sticky reopens in that state after a reboot. Only writes on a change.
+function rememberStickyFolded(key, folded) {
+    if (wasStickyLeftFolded(key) !== folded)
+        saveStickyBounds(key, { isFolded: folded });
 }
 // Another open sticky of the same key already uses its remembered spot (the
 // same note/section opened twice): place this one by default instead of on top.
@@ -1139,7 +1156,9 @@ function animateStickyWindow(win, from, to, duration, onComplete) {
     }, 16);
     stickyAnimations.set(id, tick);
 }
-function createStickyWindow(noteId, sectionId) {
+// `restoreFolded` (startup stickies): reopen folded if it was left folded last time.
+// A sticky opened from the app always opens expanded.
+function createStickyWindow(noteId, sectionId, { restoreFolded = false } = {}) {
     // On Windows, `transparent: true` stops compositing correctly after some Win11
     // updates (24H2/25H2), leaving the sticky window near-invisible. The rounded
     // corners come from setShape() (DWM region clip) there, so transparency is
@@ -1164,8 +1183,10 @@ function createStickyWindow(noteId, sectionId) {
             nodeIntegration: false,
         },
     });
-    // Hash routing pattern for the sticky page
-    const hash = `#sticky?noteId=${encodeURIComponent(noteId)}&sectionId=${encodeURIComponent(sectionId)}`;
+    const key = (0, stickyBounds_1.stickyBoundsKey)(noteId, sectionId);
+    const startFolded = restoreFolded && wasStickyLeftFolded(key);
+    // Hash routing pattern for the sticky page (`folded=1`: StickyApp starts as the pill)
+    const hash = `#sticky?noteId=${encodeURIComponent(noteId)}&sectionId=${encodeURIComponent(sectionId)}${startFolded ? '&folded=1' : ''}`;
     if (isDev) {
         win.loadURL(`http://localhost:5173/${hash}`);
     }
@@ -1176,7 +1197,6 @@ function createStickyWindow(noteId, sectionId) {
     // Apply the OS-level window shape so Windows DWM respects the rounded corners
     // even when the window loses focus (CSS border-radius is ignored by DWM).
     win.on('resize', () => applyStickyShape(win));
-    const key = (0, stickyBounds_1.stickyBoundsKey)(noteId, sectionId);
     stickyKeys.set(win.id, key);
     win.on('moved', () => scheduleRememberStickyBounds(win));
     win.on('resized', () => scheduleRememberStickyBounds(win));
@@ -1197,20 +1217,45 @@ function createStickyWindow(noteId, sectionId) {
         // Reopen where the user last left this sticky (and at that size), unless it
         // is off every connected display or the same sticky is already open there.
         const remembered = rememberedStickyRect(key, 'expanded');
-        if (remembered && !stickyKeyInUse(win, key, stickyWindows)) {
-            win.setBounds({
+        const expanded = remembered && !stickyKeyInUse(win, key, stickyWindows)
+            ? {
                 ...remembered,
                 width: Math.max(remembered.width, STICKY_MIN_SIZE),
                 height: Math.max(remembered.height, STICKY_MIN_SIZE),
-            });
+            }
+            : { ...getStickyInitialPosition(300, 300), width: 300, height: 300 };
+        if (startFolded) {
+            // Reopen as the pill, like a fold without the animation: the expanded bounds
+            // are only what unfold goes back to (never resized to the pill's size), and
+            // the pill goes to its remembered spot or the default corner stack (computed
+            // before adding `win` to foldedWindows, as in window:fold-to-corner).
+            prevBoundsMap.set(win.id, expanded);
+            const rememberedPill = rememberedStickyRect(key, 'folded');
+            const pill = rememberedPill && !stickyKeyInUse(win, key, foldedWindows)
+                ? rememberedPill
+                : {
+                    ...getFoldedPosition(electron_1.screen.getDisplayNearestPoint(expanded), STICKY_FOLDED_W, STICKY_FOLDED_H),
+                    width: STICKY_FOLDED_W,
+                    height: STICKY_FOLDED_H,
+                };
+            win.setMinimumSize(1, 1);
+            win.setBounds(pill);
+            foldedWindows.add(win);
         }
         else {
-            const { x, y } = getStickyInitialPosition(300, 300);
-            win.setPosition(x, y);
+            win.setBounds(expanded);
+            // Opened expanded: that is now its state to restore (unless the same sticky
+            // is still folded in another window).
+            if (!stickyKeyInUse(win, key, foldedWindows))
+                rememberStickyFolded(key, false);
         }
         stickyWindows.add(win);
         applyStickyShape(win);
         win.show();
+        // Real bounds once shown (the OS may clamp the pill's height): the baseline to
+        // tell a pill the user moved from one left where it opened.
+        if (startFolded)
+            foldedSettledBounds.set(win.id, win.getBounds());
     });
     return win;
 }
@@ -2544,6 +2589,13 @@ electron_1.ipcMain.handle('account:open-billing-portal', async () => {
     }
     return { ok: true, via: target.via };
 });
+// "Upgrade to Bundle" (one of AI / Cloud already on a Lemon Squeezy
+// subscription): changes the plan of THAT subscription server-side (Edge
+// Function billing-change-plan, prorated) — never a second checkout. The
+// Bundle entitlement arrives via the webhook; account.ts re-fetches until then.
+electron_1.ipcMain.handle('account:upgrade-to-bundle', () => {
+    return account.upgradeToBundle();
+});
 // ── NoteFlow Cloud (encrypted sync — phase 4.2) ───────────────────────────────
 // Key material lives in electron/cloudKeys.ts (main-process memory only); the
 // renderer exchanges exclusively the public CloudSyncStatus. These handlers
@@ -2684,6 +2736,95 @@ function readSettings() {
 }
 function writeSettings(data) {
     (0, settingsFile_1.writeSettingsFile)(path_1.default.join(electron_1.app.getPath('userData'), 'settings.json'), data); // owner-only (0600) on POSIX
+}
+// ── First-run welcome note (welcomeNote.ts) ──────────────────────────────────
+/** One listing of the notes dir: any note folder or loose `.md`? Unreadable → true (never create in it). */
+function notesDirHasNotesOnce() {
+    try {
+        return fs_1.default.readdirSync(NOTES_DIR, { withFileTypes: true }).some((e) => e.isDirectory()
+            ? fs_1.default.existsSync(path_1.default.join(NOTES_DIR, e.name, noteFormat.NOTE_MD))
+            : e.name.toLowerCase().endsWith('.md'));
+    }
+    catch {
+        return true;
+    }
+}
+/**
+ * Whether the notes dir holds any note. Same retry as fs:read-all-notes: on
+ * Windows readdirSync can return [] without throwing while the filesystem isn't
+ * ready (boot, wake from sleep). Skipped when this start created the dir (it is
+ * empty for sure — a real first install pays no delay).
+ */
+async function notesDirHasNotes() {
+    const attempts = NOTES_DIR_CREATED_AT_STARTUP ? 1 : 6;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        if (attempt > 0)
+            await new Promise((r) => setTimeout(r, 800));
+        if (notesDirHasNotesOnce())
+            return true;
+    }
+    return false;
+}
+/**
+ * Creates the local-only welcome note on a real first run and records the
+ * decision (`welcomeNoteSeeded`) in settings.json either way — see
+ * welcomeNote.ts. Called at startup after the format migration, before the
+ * initial pull and the watcher. A fresh install is told apart by settings.json
+ * NOT EXISTING yet (nothing writes it before this point of the startup): an
+ * install that already has one is an existing user updating → never created.
+ * A settings.json that exists but can't be parsed is left alone (writing it back
+ * would wipe it); the decision waits for a start where it reads fine.
+ */
+async function seedWelcomeNoteIfFirstRun() {
+    let settings = {};
+    let settingsExisted = true;
+    try {
+        settings = JSON.parse(fs_1.default.readFileSync(path_1.default.join(electron_1.app.getPath('userData'), 'settings.json'), 'utf-8'));
+    }
+    catch (err) {
+        if (err.code !== 'ENOENT')
+            return;
+        settingsExisted = false;
+    }
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings))
+        return;
+    const current = settings;
+    const alreadySeeded = current[welcomeNote_1.WELCOME_SEEDED_KEY] === true;
+    if (alreadySeeded)
+        return;
+    const decision = (0, welcomeNote_1.planWelcomeNote)({
+        alreadySeeded,
+        settingsExisted,
+        // Only listed when it can change the answer (a fresh settings.json).
+        hasNotes: settingsExisted ? true : await notesDirHasNotes(),
+        syncConfigured: (0, welcomeNote_1.isSyncConfigured)(current),
+    });
+    if (decision === 'skip')
+        return;
+    if (decision === 'create') {
+        const newId = (chars) => (0, crypto_1.randomBytes)(Math.ceil(chars / 2)).toString('hex').slice(0, chars);
+        const note = (0, welcomeNote_1.buildWelcomeNote)(currentTrayLang(), process.platform, new Date().toISOString(), newId);
+        const dirPath = path_1.default.join(NOTES_DIR, noteFormat.noteDirname(note.id, note.title));
+        try {
+            const { files } = noteFormat.serializeNoteFolder(note, { preserveUpdated: true });
+            fs_1.default.mkdirSync(dirPath, { recursive: true });
+            // note.md first, like applyNoteWrite: an interrupted write leaves a consistent anchor.
+            fs_1.default.writeFileSync(path_1.default.join(dirPath, noteFormat.NOTE_MD), files[noteFormat.NOTE_MD], 'utf-8');
+            for (const [file, content] of Object.entries(files)) {
+                if (file !== noteFormat.NOTE_MD)
+                    fs_1.default.writeFileSync(path_1.default.join(dirPath, file), content, 'utf-8');
+            }
+        }
+        catch (err) {
+            console.error('[Welcome] could not create the welcome note:', String(err));
+            try {
+                fs_1.default.rmSync(dirPath, { recursive: true, force: true });
+            }
+            catch { /* ignore */ }
+            return; // not recorded: retried on the next start
+        }
+    }
+    writeSettings({ ...readSettings(), [welcomeNote_1.WELCOME_SEEDED_KEY]: true });
 }
 // ── AI / Semantic index ───────────────────────────────────────────────────────
 function readAiSettings() {
@@ -4294,6 +4435,9 @@ electron_1.ipcMain.on('window:fold-to-corner', (event, foldedW, foldedH) => {
         : { ...getFoldedPosition(electron_1.screen.getDisplayNearestPoint(from), foldedW, foldedH), width: foldedW, height: foldedH };
     foldedWindows.add(win);
     foldedSettledBounds.delete(win.id);
+    // A startup sticky reopens folded after a reboot.
+    if (key)
+        rememberStickyFolded(key, true);
     animateStickyWindow(win, from, to, 300, () => {
         // Real bounds (the OS may clamp the height): the baseline to tell a user move.
         if (!win.isDestroyed())
@@ -4311,6 +4455,9 @@ electron_1.ipcMain.on('window:unfold', (event) => {
     rememberStickyBoundsNow(win);
     foldedWindows.delete(win);
     foldedSettledBounds.delete(win.id);
+    const key = stickyKeys.get(win.id);
+    if (key)
+        rememberStickyFolded(key, false);
     const from = win.getBounds();
     animateStickyWindow(win, from, prev, 280, () => {
         if (!win.isDestroyed()) {
@@ -4341,6 +4488,11 @@ electron_1.app.whenReady().then(async () => {
     // One-time local format migration (v1 flat .md → v2 folder-per-note).
     // MUST run before the initial pull and before the fs watcher starts.
     const migrationResult = (0, migration_1.migrateNotesDirToV2)(NOTES_DIR);
+    // First run: a local-only welcome note so the app doesn't open empty. Then
+    // remember every local-only folder so deleting one later never reaches the
+    // remote (localOnlyNotes.ts). Both before any sync code runs.
+    await seedWelcomeNoteIfFirstRun();
+    (0, localOnlyNotes_1.primeLocalOnlyDirs)(NOTES_DIR);
     githubSync.loadSyncSettings();
     githubSync.setNotesDir(NOTES_DIR);
     githubSync.onStatusChanged(() => emitSyncStatusChanged());
@@ -4508,7 +4660,7 @@ electron_1.app.whenReady().then(async () => {
         mainWindow = createWindow(true);
         const stickyWins = [];
         for (const { noteId, sectionId } of startupStickies) {
-            stickyWins.push(createStickyWindow(noteId, sectionId));
+            stickyWins.push(createStickyWindow(noteId, sectionId, { restoreFolded: true }));
         }
         // Fallback for Wayland: the compositor may not honour ready-to-show, or
         // the window may be obscured by GNOME Shell's startup animation.

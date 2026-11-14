@@ -56,4 +56,5 @@ export const contentView = {
   hintOpen: 'abrir en el editor',
   hintClose: 'cerrar',
   hintDrag: 'Arrastra una nota a un lugar para moverla',
+  hintReorder: 'o entre notas para reordenarlas',
 }

@@ -7,6 +7,7 @@ import {
   ALL_PLACE, FAVORITES_PLACE, UNGROUPED_PLACE, folderPlace, groupPlace, type ContentPlace,
 } from '../../lib/contentView'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
+import { moveIdNextTo, type DropPosition } from '../../lib/sidebarGroups'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import type { NoteFolder, NoteGroup } from '../../types'
@@ -45,6 +46,8 @@ interface PlacesRailProps {
   onCreateGroup: (name: string) => void
   onRenameGroup: (groupId: string, name: string) => void
   onRenameFolder: (folderId: string, name: string) => void
+  /** A folder dragged onto another of its group: the group's folders in their new order. */
+  onReorderFolders: (groupId: string, orderedIds: string[]) => void
   /** Right click on a group / folder: the sidebar's menus (GroupContextMenu / FolderContextMenu). */
   onGroupContextMenu: (e: MouseEvent, groupId: string) => void
   onFolderContextMenu: (e: MouseEvent, folderId: string) => void
@@ -55,15 +58,49 @@ interface PlacesRailProps {
  * under the group's guide (it ends on the last folder) and a "+ Folder" after it, "+ Group"
  * and "Ungrouped". Groups, folders and "Ungrouped" are drop targets for notes dragged from
  * the timeline (or the sidebar); groups and folders open the sidebar's context menus and
- * rename inline here. Styles: `.cv-rail*` in index.css.
+ * rename inline here. A folder can be dragged among its group's folders to reorder them (the
+ * same `order` the sidebar follows). Styles: `.cv-rail*` in index.css.
  */
 export function PlacesRail({
   railRef, place, groups, allCount, favoritesCount, ungroupedCount, dropPlace, onSelect,
   onDragOverPlace, onDragLeavePlace, onDropPlace, edit, onEditChange, onCreateFolder, onCreateGroup,
-  onRenameGroup, onRenameFolder, onGroupContextMenu, onFolderContextMenu,
+  onRenameGroup, onRenameFolder, onReorderFolders, onGroupContextMenu, onFolderContextMenu,
 }: PlacesRailProps) {
   const t = useT()
   const closeEdit = () => onEditChange(null)
+
+  // ── Folder reorder (drag a folder among the folders of its group) ──
+  const [folderDrag, setFolderDrag] = useState<{ id: string; groupId: string } | null>(null)
+  const [folderDrop, setFolderDrop] = useState<{ id: string; position: DropPosition } | null>(null)
+  const endFolderDrag = () => {
+    setFolderDrag(null)
+    setFolderDrop(null)
+  }
+  const folderDragOver = (e: DragEvent, target: { id: string; groupId: string }) => {
+    if (!folderDrag || folderDrag.groupId !== target.groupId) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    if (target.id === folderDrag.id) {
+      setFolderDrop(null)
+      return
+    }
+    const rect = e.currentTarget.getBoundingClientRect()
+    const position: DropPosition = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    setFolderDrop((prev) => (prev?.id === target.id && prev.position === position ? prev : { id: target.id, position }))
+  }
+  const folderDropOn = (e: DragEvent, target: { id: string; groupId: string }) => {
+    if (!folderDrag) return
+    e.preventDefault()
+    e.stopPropagation()
+    const dragged = folderDrag
+    const position = folderDrop?.id === target.id ? folderDrop.position : null
+    endFolderDrag()
+    if (dragged.groupId !== target.groupId || !position) return
+    const ids = groups.find((g) => g.group.id === target.groupId)?.folders.map((f) => f.folder.id) ?? []
+    const next = moveIdNextTo(ids, dragged.id, target.id, position)
+    if (next) onReorderFolders(target.groupId, next)
+  }
 
   const item = (
     p: ContentPlace,
@@ -75,29 +112,62 @@ export function PlacesRail({
       droppable?: boolean
       title?: string
       onContextMenu?: (e: MouseEvent) => void
+      /** A folder: draggable to reorder it within its group. */
+      folder?: { id: string; groupId: string }
     } = {},
-  ) => (
-    <button
-      key={p}
-      type="button"
-      className={`cv-ri${opts.className ? ` ${opts.className}` : ''}${place === p ? ' is-on' : ''}${dropPlace === p ? ' is-drop' : ''}`}
-      style={opts.color ? ({ '--g': opts.color } as CSSProperties) : undefined}
-      aria-current={place === p ? 'true' : undefined}
-      title={opts.title}
-      onClick={() => onSelect(p)}
-      onContextMenu={opts.onContextMenu}
-      {...(opts.droppable
-        ? {
-            onDragOver: (e: DragEvent) => onDragOverPlace(e, p),
-            onDragLeave: (e: DragEvent) => onDragLeavePlace(e, p),
-            onDrop: (e: DragEvent) => onDropPlace(e, p),
-          }
-        : {})}
-    >
-      {content}
-      <span className="cv-count">{count}</span>
-    </button>
-  )
+  ) => {
+    const folder = opts.folder
+    const reorderMark = folder && folderDrop?.id === folder.id ? ` is-drop-${folderDrop.position}` : ''
+    return (
+      <button
+        key={p}
+        type="button"
+        className={`cv-ri${opts.className ? ` ${opts.className}` : ''}${place === p ? ' is-on' : ''}${dropPlace === p ? ' is-drop' : ''}${reorderMark}${folder && folderDrag?.id === folder.id ? ' is-dragging' : ''}`}
+        style={opts.color ? ({ '--g': opts.color } as CSSProperties) : undefined}
+        aria-current={place === p ? 'true' : undefined}
+        title={opts.title}
+        onClick={() => onSelect(p)}
+        onContextMenu={opts.onContextMenu}
+        {...(folder
+          ? {
+              draggable: true,
+              onDragStart: (e: DragEvent) => {
+                e.dataTransfer.setData('application/x-noteflow-folder-id', folder.id)
+                e.dataTransfer.effectAllowed = 'move'
+                setFolderDrag(folder)
+              },
+              onDragEnd: endFolderDrag,
+            }
+          : {})}
+        {...(opts.droppable
+          ? {
+              // While a folder is dragged the places aren't note drop targets: only its siblings take it.
+              onDragOver: (e: DragEvent) => {
+                if (folderDrag) { if (folder) folderDragOver(e, folder); return }
+                onDragOverPlace(e, p)
+              },
+              onDragLeave: (e: DragEvent) => {
+                if (folderDrag) {
+                  const next = e.relatedTarget as Node | null
+                  if (folder && !(next && e.currentTarget.contains(next))) {
+                    setFolderDrop((prev) => (prev?.id === folder.id ? null : prev))
+                  }
+                  return
+                }
+                onDragLeavePlace(e, p)
+              },
+              onDrop: (e: DragEvent) => {
+                if (folderDrag) { if (folder) folderDropOn(e, folder); return }
+                onDropPlace(e, p)
+              },
+            }
+          : {})}
+      >
+        {content}
+        <span className="cv-count">{count}</span>
+      </button>
+    )
+  }
 
   return (
     <nav ref={railRef} className="cv-rail cv-col" aria-label={t.contentView.placesLabel}>
@@ -155,7 +225,12 @@ export function PlacesRail({
                   folderPlace(folder.id),
                   <><FolderIcon icon={folder.icon} /><span className="cv-ri-name">{folder.name}</span></>,
                   folderCount,
-                  { className: 'is-folder', droppable: true, onContextMenu: (e) => onFolderContextMenu(e, folder.id) },
+                  {
+                    className: 'is-folder',
+                    droppable: true,
+                    onContextMenu: (e) => onFolderContextMenu(e, folder.id),
+                    folder: { id: folder.id, groupId: group.id },
+                  },
                 )
               ),
             )}

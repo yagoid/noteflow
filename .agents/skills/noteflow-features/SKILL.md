@@ -355,8 +355,11 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
   basta con empezar a escribir. ↑/↓ mueven la selección (la primera marcada por defecto), **Enter**
   abre la nota, **Esc** cierra y devuelve el foco donde estaba (p. ej. el editor, con su caret). Click en
   el título abre la nota y en una celda, esa sección (misma semántica que el sidebar, Ctrl/Cmd incluido);
-  la nota activa va resaltada. Se cierra al sacar el ratón de cabecera+ventanita (con margen para cruzar
-  el hueco), salvo si ya se tecleó en el buscador: entonces solo con click fuera, Esc o al abrir algo.
+  la nota activa va resaltada. **Abrir con click no la cierra**: la ventanita sigue abierta mientras el
+  ratón esté encima (la nota recién abierta pasa a ser la activa) para poder abrir otra, y se cierra al
+  sacarlo; Enter desde el buscador sí abre y cierra. Se cierra al sacar el ratón de cabecera+ventanita
+  (con margen para cruzar el hueco), salvo si ya se tecleó en el buscador: entonces solo con click fuera,
+  Esc o al abrir algo (un click en una nota vuelve a dejarla en modo hover: se cierra al salir).
   También al expandir el grupo, hacer scroll en el sidebar, cambiar de ventana o arrastrar. No aparece
   mientras se escribe en el editor con el ratón quieto encima, durante un drag, un rename o con un menú
   contextual abierto. Funciona igual con el sidebar fijado y flotante.
@@ -388,6 +391,11 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
   "Move to folder". Se sincroniza con `folders.json`.
 - **Colapsar / Expandir**: independiente de los grupos (estado persistido). El icono de carpeta por
   defecto abre su solapa cuando está expandida (los iconos personalizados no tienen solapa).
+- **Reordenar carpetas**: arrastrar la cabecera de una carpeta (sidebar) o la carpeta en la columna de
+  lugares de la vista de contenido y soltarla sobre otra carpeta **del mismo grupo**; una línea marca si
+  queda antes o después (en el sidebar cuenta todo el bloque de la carpeta, con sus notas). El orden es el
+  campo `order` de `folders.json` (se sincroniza) y lo siguen el sidebar, la vista de contenido y el peek.
+  No mueve carpetas entre grupos.
 
 > Grupos y carpetas se guardan en `groups.json` / `folders.json` dentro del dir de notas y **se
 > sincronizan con GitHub** (no en `settings.json`).
@@ -442,6 +450,8 @@ color a la izquierda.
   guarda, `Esc` cancela). Si borras el lugar en el que estás, la vista pasa a *All*.
 - **Arrastrar** una nota (o la selección múltiple) desde la lista hasta un grupo, una carpeta o
   *Ungrouped* la mueve; el destino se resalta. También acepta notas arrastradas desde el sidebar.
+- **Arrastrar una carpeta** sobre otra del mismo grupo las **reordena** (línea antes/después; mismo orden
+  que el sidebar). Mientras se arrastra una carpeta, los lugares no son destino de notas.
 
 **Columna 2 · Notas:** las del lugar, en uno de dos órdenes (selector de la cabecera):
 - **By date** (por defecto): de la más reciente a la más antigua, en bloques con cabecera fija y
@@ -454,7 +464,10 @@ color a la izquierda.
   **Ungrouped**; los grupos archivados solo con "Show archived". La hora muestra la fecha del item del
   sidebar (`14:32`, "Yesterday", `Oct 28`) y la ruta no repite lo que dicen las cabeceras. Las cabeceras
   que una búsqueda deja vacías desaparecen. Las flechas, `Mayús+clic` y la nota elegida al entrar siguen
-  el orden que se ve.
+  el orden que se ve. **Reordenar**: arrastrar una nota (una sola, no la selección múltiple) y soltarla
+  entre las notas de **su mismo contexto** (sueltas del grupo, una carpeta, *Ungrouped*, o *Favorites*
+  en ese lugar); una línea marca el hueco. Escribe el mismo orden manual que el sidebar
+  (`note-order.json`), así que el sidebar cambia a la vez. El pie añade "or between notes to reorder them".
 - Cada fila: la hora a la izquierda (por fecha: `HH:mm` hoy y ayer, día de la semana esta semana, `d MMM` antes),
   el título (candado si está cifrada) y debajo la ruta, sin lo que ya dice el lugar (en *All* /
   *Favorites* / *Ungrouped*: pestaña + "Grupo / Carpeta"; en un grupo: la carpeta o "In the group"; en
@@ -684,6 +697,9 @@ Permite ojear el contenido sin navegar.
 - Se cierra al **quitar el ratón** o con **cualquier click**.
 - Secciones **vacías** muestran "Empty section · click to write"; secciones de notas **cifradas y bloqueadas** no
   se previsualizan (no hay contenido en memoria).
+- Las **imágenes pegadas** se ven como miniatura (alto máx. 120 px, respetando el ancho al que se
+  redimensionaron), igual que en las celdas de la vista de nota; nunca su base64. En secciones en
+  modo texto se ven como `![alt]([image])`, como en el propio textarea.
 
 > En la **vista cerebro** la interacción es distinta (click en vez de hover): ver esa sección.
 
@@ -900,8 +916,14 @@ Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del m
   ancho del área del editor) y `Readable` (columna de lectura centrada de ~72 caracteres, estilo
   Obsidian/iA Writer).
 - En modo `Readable` se centran los bloques de texto (párrafos, headings, listas, citas,
-  separadores) **y los bloques de código**; solo **tablas e imágenes rompen la columna** y siguen
-  a ancho completo (los **tableros kanban** van más allá: ocupan el editor de borde a borde). El ancho de columna se deriva del tamaño de fuente base del cuerpo (no del de
+  separadores) **y los bloques de código**; las **tablas** siguen a ancho completo (los **tableros
+  kanban** van más allá: ocupan el editor de borde a borde). Las **imágenes** viven en la columna:
+  mientras caben (sin redimensionar, o redimensionadas hasta el ancho de la columna) quedan
+  alineadas a la izquierda de la columna, como en `Full`; si el usuario las **agranda más allá de
+  la columna** con el tirador, **rompen los márgenes**, creciendo centradas sobre la columna (media
+  por cada lado) hasta ocupar **todo el ancho de la nota**. El tirador sigue al cursor en ambos
+  tramos y no deja guardar un ancho mayor que el que se puede mostrar. Solo las imágenes de un
+  párrafo de primer nivel (no las de listas, citas o tablas). El ancho de columna se deriva del tamaño de fuente base del cuerpo (no del de
   cada elemento), así los headings comparten la misma columna. Aplica a ambos modos (markdown y
   texto); no afecta a los stickies.
 - En `Readable`, las acciones de cada tarea (importancia + deadline/badge) se sacan al margen
@@ -1070,8 +1092,8 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     AI" para activarlo (o check "Active" si ya lo es). Sin sesión o sin suscripción, la card sigue
     visible pero en vez del botón muestra, sin sesión, "Already subscribed?" + botón **"Sign in"** (lleva a
     Ajustes → Suscripción) y, con sesión sin suscripción, el aviso "requires subscription" (badge "Paid")
-    **+ el bloque de planes con precios**: NoteFlow AI y, si tampoco tienes Cloud, el Bundle (con
-    badge "Best value"). **La card entera es clickable**: con sesión y checkout configurado abre la
+    **+ el bloque de planes con precios**: NoteFlow AI y el Bundle (con badge "Best value"; si ya
+    pagas Cloud, en modo **"Upgrade"** = cambio de plan prorrateado, ver Ajustes → Suscripción). **La card entera es clickable**: con sesión y checkout configurado abre la
     pasarela de pago de ESE plan (antes había un botón "Subscribe" dentro; ahora la card muestra un CTA
     "Subscribe"); sin sesión, clicar la card lleva a Ajustes → Suscripción (CTA "Go to Subscription" con flecha);
     con sesión pero sin checkout en el build muestra "coming soon" y queda inerte. Bajo los planes,
@@ -1319,6 +1341,11 @@ Botón `⧉` en la toolbar del editor (o `Ctrl+S` para la sección actual, `Ctrl
   si la mueves, esa sticky recuerda el sitio y tamaño de su píldora (por PC, también tras reiniciar) y
   las próximas veces se pliega ahí en vez de a la esquina; las que nunca se movieron siguen apilándose
   en la esquina. Para volver a la esquina, arrastra la píldora hasta allí.
+- **Recuerda si estaba plegada** (por PC): una sticky configurada para abrirse al arrancar el
+  ordenador (Ajustes → Startup) que dejaste plegada vuelve a abrirse **ya plegada** (como píldora, en
+  su sitio recordado o en la pila de la esquina, sin animación); al desplegarla recupera su tamaño y
+  sitio normales. Si la dejaste desplegada, se abre desplegada. Abrirla a mano desde la app la abre
+  siempre desplegada.
 - **Cambiar de sección** sin abrir otra ventana: si la nota tiene 2+ secciones, el nombre de la sección
   en la barra de título (con `⌄`, tooltip *Switch section*) abre un desplegable con todas las secciones
   (punto de color + nombre, ✓ en la actual). Teclado: Enter/Espacio/↓ abre, ↑/↓ (cíclico), Home/End,
@@ -1409,6 +1436,28 @@ Settings → Startup:
   versión en que se añadió). Click en una tarjeta → abre el tour en esa diapositiva (navegable a
   todas). También desde la paleta de comandos: **What's new / Tutorial**. El tour se abre encima de
   Ajustes, que sigue abierto debajo.
+
+---
+
+## Nota de bienvenida (primera ejecución)
+
+Para que la app no se abra vacía, la **primera vez** que se ejecuta en un equipo (sin ninguna nota en el
+dir de notas y sin sync configurado) crea una nota **"Welcome to NoteFlow"** / **"Bienvenida a
+NoteFlow"** (según el idioma de la UI en ese momento; después es contenido normal y no cambia con el
+idioma) y la abre, porque es la única. Seis secciones en modo markdown que enseñan lo básico: bienvenida
+y atajo global, notas (crear, temporal, paleta, búsqueda, grupos/carpetas, favoritos, abrir en paralelo),
+secciones (`Ctrl+T/W/Tab`, renombrar, reordenar, menú), escritura (markdown, `/`, bloque de código,
+checklist con tareas que se pueden marcar, `Ctrl+M`), notas flotantes (`Ctrl+S/G`) y sync + IA. Las
+teclas salen como en la plataforma (`⌘`/`⌃` en macOS).
+- **Nunca se sincroniza** (ni NoteFlow Cloud ni GitHub, tampoco desde el CLI), aunque se edite: si el
+  usuario instala la app en otro ordenador que ya sincroniza con su cuenta o su repo, la nota no llega a
+  los demás dispositivos ni al remoto, y borrarla no borra nada allí. La propia nota lo dice. No hay
+  botón para convertirla en nota normal (para conservar algo, se copia a otra nota); *Duplicate* sí crea
+  una nota normal que se sincroniza.
+- **No vuelve:** se puede borrar como cualquier nota y no se recrea. Solo sale en una instalación nueva
+  (sin ajustes guardados de antes): a quien ya usaba la app y actualiza no le aparece nunca, tenga o no
+  notas o sync. Detalle técnico: `architecture.md` (`welcomeNoteSeeded`) y `sync.md` ("Notas
+  solo-locales").
 
 ---
 
@@ -1547,8 +1596,9 @@ Flujo del panel según estado:
 - **Gating por suscripción:** exigen la entitlement `cloud` **crear las claves** (la elección de
   modo del estado `no-keys` — configurar una nube que no podrías activar no lleva a ninguna parte)
   y el botón **Enable sync**. En ambos casos, en su lugar: mensaje "requires subscription" + el
-  **mismo bloque de planes** que Ajustes → Suscripción — NoteFlow Cloud y, si tampoco tienes AI, el
-  Bundle con badge "Best value" —, cada card clickable para abrir su checkout, y debajo la lista
+  **mismo bloque de planes** que Ajustes → Suscripción — NoteFlow Cloud y el Bundle con badge "Best
+  value" (si ya pagas AI, en modo **"Upgrade"**: cambio de plan prorrateado con confirmación en la
+  app) —, cada card clickable, y debajo la lista
   **"What you get"** de Cloud (cifrado en tránsito y en reposo, sync automático, elegir Estándar o
   Privado E2EE, sin repo de GitHub). El panel Cloud ya no tiene párrafo de introducción propio (lo
   describe la card del selector). **Unlock, Sync now,
@@ -1680,6 +1730,15 @@ pobladas en la build (precios en `.agents/context/monetization.md` § visión, c
   si faltan **ambas** — evita pagar dos veces lo mismo); con todo contratado la sección desaparece.
   **Cada card es clickable** (CTA "Subscribe" con estrella) → abre el checkout de Lemon Squeezy en el
   navegador; si una build no trae URL para ese producto, la card indica "Coming soon" y queda inerte.
+  **Pasarse al Bundle teniendo ya AI o Cloud:** si pagas **una** de las dos con una suscripción de
+  Lemon Squeezy, la card del Bundle aparece en modo **mejora** (subtítulo "Replaces your current
+  plan", CTA **"Upgrade"**): no abre checkout, sino una **confirmación dentro de la app** ("Upgrade to
+  NoteFlow Bundle?") que explica que es un **cambio de plan de tu suscripción actual, no una
+  segunda**, y que se **prorratea** (se abona lo no usado del periodo actual y se cobra ya solo la
+  diferencia a la tarjeta guardada; desde la próxima renovación, precio del Bundle con el mismo ciclo
+  mensual/anual; la fecha de renovación no cambia). "Confirm upgrade" lo aplica y el Bundle se activa
+  en unos segundos. No aparece con una comp, con las dos suscripciones sueltas ni con el plan sin
+  verificar. Igual en los gates de IA y de Cloud (allí junto a la card del otro plan).
   Debajo, un único hint genérico: el checkout se abre en el navegador y el plan se activa solo tras el pago
   ("Refresh" si no aparece). Tras pagar AI, **el proveedor NoteFlow AI se activa solo** en
   Settings → AI.

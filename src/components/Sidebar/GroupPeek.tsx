@@ -44,7 +44,7 @@ type CloseReason =
   | 'leave'     // pointer left header + peek (not anchored)
   | 'escape'    // Escape in the search box
   | 'outside'   // pointer down outside the peek
-  | 'navigate'  // a note / section was opened (from the peek or anywhere)
+  | 'navigate'  // a note / section was opened (Enter in the peek, or from anywhere else)
   | 'dismiss'   // sidebar scroll, window blur / resize, drag start
 
 /** Imperative API the group headers drive (through stable handlers in Sidebar). */
@@ -123,6 +123,8 @@ export function GroupPeek({
   /** Element that had focus before the peek took it — given back on close. */
   const prevFocusRef = useRef<HTMLElement | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  /** A click in the peek is opening a note / section right now: that navigation doesn't close it. */
+  const selfNavRef = useRef(false)
   const liveRef = useRef({ items, collapsedGroupIds, blocked, sidebarRef })
 
   useLayoutEffect(() => {
@@ -234,11 +236,42 @@ export function GroupPeek({
       if (openRef.current && !anchoredRef.current) scheduleClose()
     }
 
+    // A note / section clicked in the peek: it opens, and the peek stays up (the pointer is on
+    // it — the user may open another one) until the pointer leaves, like a plain hover.
+    const navigateFromPeek = (navigate: () => void) => {
+      selfNavRef.current = true
+      try {
+        navigate()
+      } finally {
+        selfNavRef.current = false
+      }
+      if (!openRef.current) return
+      // Typing had pinned it: from now on, leaving closes it.
+      anchoredRef.current = false
+      // The focus held before the peek belonged to the note that was open then: don't give it back.
+      prevFocusRef.current = null
+    }
+
     return {
       close,
       headerHover,
       headerLeave,
       clearOpenTimer,
+      navigateFromPeek,
+      isPointerOutside: (target: EventTarget | null) => {
+        if (!(target instanceof Node)) return true
+        if (panelRef.current?.contains(target) || hoverRef.current?.el.contains(target)) return false
+        return !(target instanceof Element && target.closest(`[${GROUP_PEEK_PORTAL_ATTR}]`))
+      },
+      // Watchdog close (see the hover watchdog below): only when nothing else is pending.
+      leaveUnnoticed: () => {
+        if (!openRef.current || anchoredRef.current || closeTimerRef.current) return null
+        scheduleClose()
+        return closeTimerRef.current
+      },
+      cancelClose: (timer: ReturnType<typeof setTimeout> | null) => {
+        if (timer && closeTimerRef.current === timer) clearCloseTimer()
+      },
       panelEnter: clearCloseTimer,
       panelLeave: () => { if (!anchoredRef.current) scheduleClose() },
       anchor: () => { anchoredRef.current = true; clearCloseTimer() },
@@ -297,7 +330,9 @@ export function GroupPeek({
     window.addEventListener('blur', onWindowBlur)
     window.addEventListener('resize', dismiss)
     // Navigating anywhere (sidebar, palette, shortcuts…) closes it too.
+    // Not the peek's own clicks (navigateFromPeek): it stays up while the pointer is on it.
     const unsubscribe = useNotesStore.subscribe((s, prev) => {
+      if (selfNavRef.current) return
       if (
         s.activeNoteId !== prev.activeNoteId ||
         s.noteViewId !== prev.noteViewId ||
@@ -318,6 +353,32 @@ export function GroupPeek({
     }
   }, [engine])
 
+  // ── Hover watchdog: a leave React never reports ──────────────────────────────
+  // Opening a note from the peek can remove the element under the pointer (the row's
+  // floating section map, portaled to <body>); the browser fires no mouseout for a removed
+  // node, so the panel's mouseleave may never come and the peek would outlive the pointer.
+  // While open, a pointer seen outside panel / header / its portals closes it as a leave
+  // would; coming back cancels only the close this watchdog scheduled.
+  const isOpen = open !== null
+  useEffect(() => {
+    if (!isOpen) return
+    let ownTimer: ReturnType<typeof setTimeout> | null = null
+    const onPointer = (e: MouseEvent) => {
+      if (!engine.isPointerOutside(e.target)) {
+        engine.cancelClose(ownTimer)
+        ownTimer = null
+        return
+      }
+      ownTimer = engine.leaveUnnoticed() ?? ownTimer
+    }
+    window.addEventListener('mouseover', onPointer, { capture: true, passive: true })
+    window.addEventListener('mousemove', onPointer, { capture: true, passive: true })
+    return () => {
+      window.removeEventListener('mouseover', onPointer, { capture: true })
+      window.removeEventListener('mousemove', onPointer, { capture: true })
+    }
+  }, [isOpen, engine])
+
   const item = open ? findGroupItem(items, open.groupId) : null
   const valid = !!open && !!item && !blocked && collapsedGroupIds.has(open.groupId) && item.visibleCount > 0
   // The group was expanded, emptied or the sidebar got busy while open: drop it
@@ -336,6 +397,7 @@ export function GroupPeek({
       handlers={handlers}
       panelRef={panelRef}
       onClose={engine.close}
+      onNavigate={engine.navigateFromPeek}
       onAnchor={engine.anchor}
       onPointerEnter={engine.panelEnter}
       onPointerLeave={engine.panelLeave}
@@ -353,6 +415,8 @@ interface GroupPeekPanelProps {
   handlers: GroupPeekHandlers
   panelRef: RefObject<HTMLDivElement | null>
   onClose: (reason: CloseReason) => void
+  /** Runs a click's navigation without closing the peek (it closes when the pointer leaves). */
+  onNavigate: (navigate: () => void) => void
   onAnchor: () => void
   onPointerEnter: () => void
   onPointerLeave: () => void
@@ -368,6 +432,7 @@ function GroupPeekPanel({
   handlers,
   panelRef,
   onClose,
+  onNavigate,
   onAnchor,
   onPointerEnter,
   onPointerLeave,
@@ -422,15 +487,20 @@ function GroupPeekPanel({
     }
   }, [selectedIndex])
 
+  // A click keeps the peek up under the pointer (it closes on leave, as when hovering);
+  // Enter from the search box opens and closes it — the keyboard flow picks and goes.
   const openNote = useCallback((e: React.MouseEvent | React.KeyboardEvent, note: Note) => {
-    handlers.click(e, note)
-    onClose('navigate')
-  }, [handlers, onClose])
+    if (e.type === 'keydown') {
+      handlers.click(e, note)
+      onClose('navigate')
+      return
+    }
+    onNavigate(() => handlers.click(e, note))
+  }, [handlers, onClose, onNavigate])
 
   const openSection = useCallback((e: React.MouseEvent, note: Note, sectionId: string) => {
-    handlers.sectionClick(e, note, sectionId)
-    onClose('navigate')
-  }, [handlers, onClose])
+    onNavigate(() => handlers.sectionClick(e, note, sectionId))
+  }, [handlers, onNavigate])
 
   // The folded map's callbacks ('map' style): a cell opens its section, as a scroll-row
   // cell does; no context menu in the peek.

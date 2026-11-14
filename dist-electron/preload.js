@@ -185,6 +185,9 @@ const api = {
     // Opens the Lemon Squeezy customer portal: the user's pre-signed link, or the
     // store's generic portal as fallback (`via` says which).
     accountOpenBillingPortal: () => electron_1.ipcRenderer.invoke('account:open-billing-portal'),
+    // Upgrades the current AI / Cloud subscription to the Bundle (plan change of
+    // the same Lemon Squeezy subscription, prorated — never a second one).
+    accountUpgradeToBundle: () => electron_1.ipcRenderer.invoke('account:upgrade-to-bundle'),
     onAccountStatusChanged: (cb) => {
         const wrapper = (_event, status) => cb(status);
         electron_1.ipcRenderer.on('account:status-changed', wrapper);

@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { menuNavIndex, showStickySectionName, stickyHashWithSection } from '../../src/lib/stickySectionMenu'
+import {
+  isStickyHashFolded,
+  menuNavIndex,
+  showStickySectionName,
+  stickyHashWithFolded,
+  stickyHashWithSection,
+} from '../../src/lib/stickySectionMenu'
 
 describe('showStickySectionName', () => {
   it('hides a lone default-named section', () => {
@@ -56,5 +62,25 @@ describe('stickyHashWithSection', () => {
   it('encodes the id', () => {
     const hash = stickyHashWithSection('#sticky?noteId=n1&sectionId=s1', 'a&b c')
     expect(new URLSearchParams(hash.split('?')[1]).get('sectionId')).toBe('a&b c')
+  })
+})
+
+describe('sticky folded hash', () => {
+  it('reads folded=1 from the hash', () => {
+    expect(isStickyHashFolded('#sticky?noteId=n1&sectionId=s1&folded=1')).toBe(true)
+    expect(isStickyHashFolded('#sticky?noteId=n1&sectionId=s1')).toBe(false)
+    expect(isStickyHashFolded('#sticky?folded=0')).toBe(false)
+    expect(isStickyHashFolded('#sticky')).toBe(false)
+  })
+
+  it('sets and clears the flag keeping the other params', () => {
+    const folded = stickyHashWithFolded('#sticky?noteId=n1&sectionId=s1', true)
+    expect(folded).toBe('#sticky?noteId=n1&sectionId=s1&folded=1')
+    expect(stickyHashWithFolded(folded, false)).toBe('#sticky?noteId=n1&sectionId=s1')
+    expect(stickyHashWithFolded('#sticky?folded=1', false)).toBe('#sticky')
+  })
+
+  it('a section switch keeps the folded flag', () => {
+    expect(isStickyHashFolded(stickyHashWithSection('#sticky?noteId=n1&sectionId=s1&folded=1', 's2'))).toBe(true)
   })
 })

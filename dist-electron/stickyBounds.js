@@ -11,6 +11,10 @@
 // startup stickies use, so a startup sticky finds its geometry after a reboot. Switching
 // sections in place (SectionSwitcher) does not change the key: main doesn't know which
 // section a sticky shows, and the geometry belongs to the window, not to the section.
+//
+// Besides the geometry, each entry remembers whether the sticky was last left folded,
+// so a startup sticky reopens folded after a reboot. `expanded` is never touched while
+// folded: unfolding a sticky that started folded goes back to its normal size.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MAX_STICKY_BOUNDS_ENTRIES = void 0;
 exports.stickyBoundsKey = stickyBoundsKey;
@@ -55,7 +59,12 @@ function sanitizeEntry(raw) {
         entry.expanded = expanded;
     if (folded)
         entry.folded = folded;
-    return expanded || folded ? entry : null;
+    if (r.isFolded === true)
+        entry.isFolded = true;
+    return isEmptyEntry(entry) ? null : entry;
+}
+function isEmptyEntry(entry) {
+    return !entry.expanded && !entry.folded && !entry.isFolded;
 }
 /** Cleans what settings.json holds (hand-editable, older builds): keeps valid entries, capped. */
 function sanitizeStickyBounds(raw) {
@@ -73,7 +82,8 @@ function sanitizeStickyBounds(raw) {
 }
 /**
  * Merges `patch` into the entry of `key` and moves it to the most-recent end, evicting
- * the oldest entries beyond the cap. Returns a new map (the input is not mutated).
+ * the oldest entries beyond the cap. An entry left empty (e.g. `isFolded: false` on a
+ * key with nothing else) is dropped instead. Returns a new map (the input is not mutated).
  */
 function withStickyBounds(map, key, patch) {
     if (!key || key.length > MAX_KEY_LENGTH)
@@ -85,7 +95,13 @@ function withStickyBounds(map, key, patch) {
         merged.expanded = expanded;
     if (folded)
         merged.folded = folded;
+    if (patch.isFolded === true)
+        merged.isFolded = true;
+    else if (patch.isFolded === false)
+        delete merged.isFolded;
     const rest = Object.entries(map).filter(([k]) => k !== key);
+    if (isEmptyEntry(merged))
+        return key in map ? Object.fromEntries(rest) : map;
     rest.push([key, merged]);
     return Object.fromEntries(rest.slice(-exports.MAX_STICKY_BOUNDS_ENTRIES));
 }

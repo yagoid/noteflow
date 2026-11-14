@@ -1,11 +1,12 @@
 // Pure logic of the unified content view (components/ContentView/): the "place" the view
 // shows (everything, favorites, ungrouped, a group or a folder), which notes belong to it,
-// the date blocks of the timeline, the list's order (by date / as in the sidebar), the route
+// the date blocks of the timeline, the list's order (by date / as in the sidebar, and its
+// manual reorder context), the route
 // each row prints, the default selection and the shift-click range. Covered by
 // tests/lib/contentView.test.ts. See "Vista de contenido unificada" in .agents/context/patterns.md.
 import type { Note, NoteFolder, NoteGroup } from '../types'
 import { orderFavorites } from './miniSidebar'
-import { buildSidebarItems, compareSidebarNotes } from './sidebarGroups'
+import { buildSidebarItems, compareSidebarNotes, noteOrderKey } from './sidebarGroups'
 
 // ── Places ────────────────────────────────────────────────────────────────────────────
 
@@ -344,6 +345,50 @@ export function buildNoteList<N extends ListableNote>(
     out.push(section('ungrouped', out.length > 0 ? { kind: 'ungrouped' } : null, ungrouped, 'none'))
   }
   return out
+}
+
+// ── Manual order ("As in the sidebar") ──────────────────────────────────────────────────
+
+/**
+ * The sidebar's manual-order context (`noteOrder` key) a row belongs to: `favorites` on the
+ * favorites place (its own order, as the sidebar's favorites), else the note's effective
+ * location (`folder:<id>` / `group:<id>` / `ungrouped`). Rows reorder only within one context.
+ */
+export function noteOrderContext(
+  note: Pick<Note, 'group' | 'folder'>,
+  place: ContentPlace,
+  ctx: PlaceContext,
+): string {
+  if (parsePlace(place).kind === 'fav') return 'favorites'
+  const loc = noteLocation(note, ctx)
+  return noteOrderKey(loc.groupId, loc.folderId)
+}
+
+/**
+ * Every note of a context in the sidebar's order (`notes` unfiltered: archived and hidden
+ * notes included, so reordering the visible ones keeps the others where they were). This
+ * full list is what a drop writes back to `noteOrder`.
+ */
+export function contextNoteIds(
+  notes: readonly (ListableNote & Pick<Note, 'favorited'>)[],
+  contextKey: string,
+  opts: Pick<NoteListOptions, 'groups' | 'folders' | 'noteOrder'>,
+): string[] {
+  const base = [...notes].sort(compareSidebarNotes)
+  if (contextKey === 'favorites') {
+    return orderFavorites(base.filter((n) => n.favorited), opts.noteOrder['favorites']).map((n) => n.id)
+  }
+  const ids: string[] = []
+  for (const item of buildSidebarItems(base, opts.groups, opts.folders, opts.noteOrder)) {
+    if (item.kind === 'note') {
+      if (contextKey === 'ungrouped') ids.push(item.note.id)
+      continue
+    }
+    if (contextKey === `group:${item.group.id}`) return item.notes.map((n) => n.id)
+    const folder = item.folders.find((f) => contextKey === `folder:${f.folder.id}`)
+    if (folder) return folder.notes.map((n) => n.id)
+  }
+  return ids
 }
 
 /** The notes of the sections in visual order (arrow keys, shift-click range, default selection). */

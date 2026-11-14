@@ -368,6 +368,9 @@ export const settings = {
       checkoutUnavailable: "This plan isn't available for purchase yet.",
       checkoutInvalidUrl: 'The checkout link is not valid in this build.',
       billingPortalUnavailable: "Couldn't open the billing portal. Use the link in your Lemon Squeezy receipt email instead.",
+      planChangeUnavailable: "Couldn't change your plan right now. Please try again in a moment.",
+      planChangeNotEligible: "Your current plan can't be switched to the Bundle from the app. Contact support and we'll do it for you.",
+      planChangeSubscriptionInactive: 'Your current subscription is cancelled or has a pending payment. Resume it or update your card in Manage subscription, then try again.',
     },
     // "Resend code" control under the code input (step 2 of sign-in).
     resendCode: 'Resend code',
@@ -410,6 +413,17 @@ export const settings = {
     alreadySubscribed: 'Already subscribed?',
     signIn: 'Sign in',
     couldNotOpenCheckout: 'Could not open the checkout.',
+    // Bundle card when the user already pays for exactly one of AI / Cloud: it is
+    // a PLAN CHANGE of that subscription (prorated), never a second checkout. The
+    // card asks for confirmation in the app because no checkout page is shown.
+    upgrade: 'Upgrade',
+    planUpgradeNote: 'Replaces your current plan',
+    upgradeConfirmTitle: 'Upgrade to NoteFlow Bundle?',
+    upgradeConfirmBody: 'Your {plan} subscription is switched to the Bundle — it is not a second subscription, so you never pay for {plan} twice.',
+    upgradeProration: "The price is prorated: the unused part of your current billing period is credited and you're charged only the difference for the rest of it, right away, to the card on file. From your next renewal you pay the Bundle price ({monthly}/month or {yearly}/year, matching your current billing cycle). Your renewal date stays the same.",
+    upgradeConfirm: 'Confirm upgrade',
+    upgradeRequested: 'Plan changed — the Bundle activates in a few seconds.',
+    couldNotUpgrade: 'Could not change your plan.',
     // "Manage subscription" (signed in with a Lemon Squeezy subscription): opens
     // the customer portal in the browser.
     manageSubscription: 'Manage subscription',

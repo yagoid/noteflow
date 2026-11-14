@@ -136,6 +136,7 @@ export function serializeNoteFolder(
     if (note.group)      fm.group      = note.group
     if (note.folder)     fm.folder     = note.folder
     if (note.expiresAt)  fm.expiresAt  = note.expiresAt
+    if (note.localOnly)  fm.localOnly  = true
     const yamlStr = yaml.dump(fm, { lineWidth: -1, quotingType: '"' })
     return { files: { [NOTE_MD]: `---\n${yamlStr}---\n` }, sectionFiles: [] }
   }
@@ -162,6 +163,7 @@ export function serializeNoteFolder(
   if (note.group)      fm.group      = note.group
   if (note.folder)     fm.folder     = note.folder
   if (note.expiresAt)  fm.expiresAt  = note.expiresAt
+  if (note.localOnly)  fm.localOnly  = true
 
   const yamlStr = yaml.dump(fm, { lineWidth: -1, quotingType: '"' })
   const files: Record<string, string> = { [NOTE_MD]: `---\n${yamlStr}---\n` }
@@ -361,6 +363,7 @@ function parseMetaFields(
     ...(typeof data.folder === 'string' && data.folder ? { folder: data.folder } : {}),
     ...(encryption ? { encryption } : {}),
     ...(expiresAt ? { expiresAt } : {}),
+    ...(data.localOnly === true ? { localOnly: true } : {}),
   }
 }
 

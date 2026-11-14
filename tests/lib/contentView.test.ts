@@ -4,9 +4,10 @@ import {
   dateBlock, folderPlace, groupByDateBlock, groupPlace, noteInPlace,
   noteLocation, noteShown, parseColumnWidths, parsePlace, previewFloor, placeExists, placeGroupId, placeMovePatch, reconcileSelection,
   routeMode, selectionRange, sortByUpdatedDesc, stepNote, stepSection, timeLabelKind,
-  DEFAULT_CONTENT_SORT, buildNoteList, noteListOrder, parseContentSort, type ContentPlace,
+  DEFAULT_CONTENT_SORT, buildNoteList, contextNoteIds, noteListOrder, noteOrderContext, parseContentSort,
+  type ContentPlace,
 } from '../../src/lib/contentView'
-import { buildSidebarItems, compareSidebarNotes } from '../../src/lib/sidebarGroups'
+import { buildSidebarItems, compareSidebarNotes, moveIdNextTo, noteOrderKey } from '../../src/lib/sidebarGroups'
 import type { NoteFolder, NoteGroup } from '../../src/types'
 
 const groups: NoteGroup[] = [
@@ -362,5 +363,72 @@ describe('list order', () => {
     expect(items.map((it) => (it.kind === 'group' ? `g:${it.group.id}` : it.note.id))).toEqual([
       'g:a', 'g:b', 'g:z', 'loose-2', 'loose-1',
     ])
+  })
+})
+
+describe('manual reorder', () => {
+  it('moves an id right before / after the target', () => {
+    const ids = ['a', 'b', 'c', 'd']
+    expect(moveIdNextTo(ids, 'd', 'a', 'before')).toEqual(['d', 'a', 'b', 'c'])
+    expect(moveIdNextTo(ids, 'a', 'c', 'after')).toEqual(['b', 'c', 'a', 'd'])
+    expect(moveIdNextTo(ids, 'a', 'd', 'after')).toEqual(['b', 'c', 'd', 'a'])
+    expect(moveIdNextTo(ids, 'c', 'b', 'before')).toEqual(['a', 'c', 'b', 'd'])
+  })
+
+  it('returns null when nothing would change or the target is missing', () => {
+    const ids = ['a', 'b', 'c']
+    expect(moveIdNextTo(ids, 'b', 'b', 'before')).toBeNull()
+    expect(moveIdNextTo(ids, 'b', 'a', 'after')).toBeNull()
+    expect(moveIdNextTo(ids, 'b', 'c', 'before')).toBeNull()
+    expect(moveIdNextTo(ids, 'a', 'gone', 'before')).toBeNull()
+  })
+
+  it('inserts an id that was not listed yet', () => {
+    expect(moveIdNextTo(['a', 'b'], 'new', 'b', 'before')).toEqual(['a', 'new', 'b'])
+  })
+
+  it('names the order context of a location', () => {
+    expect(noteOrderKey('work', 'clients')).toBe('folder:clients')
+    expect(noteOrderKey('work', null)).toBe('group:work')
+    expect(noteOrderKey(null, null)).toBe('ungrouped')
+  })
+
+  it('resolves the context of a row from its effective location, or favorites on that place', () => {
+    expect(noteOrderContext({ group: 'work', folder: 'clients' }, 'all', ctx)).toBe('folder:clients')
+    expect(noteOrderContext({ group: 'work', folder: 'attic' }, groupPlace('work'), ctx)).toBe('group:work')
+    expect(noteOrderContext({ group: 'gone' }, 'all', ctx)).toBe('ungrouped')
+    expect(noteOrderContext({ group: 'work' }, 'fav', ctx)).toBe('favorites')
+  })
+
+  describe('full order of a context', () => {
+    type L = { id: string; group?: string; folder?: string; favorited?: boolean; archived?: boolean; created: string; updated: string }
+    const mk = (id: string, day: number, extra: Partial<L> = {}): L => {
+      const iso = new Date(2026, 10, day, 12).toISOString()
+      return { id, created: iso, updated: iso, ...extra }
+    }
+    const notes: L[] = [
+      mk('w1', 1, { group: 'work' }),
+      mk('w2', 2, { group: 'work', archived: true }),
+      mk('w3', 3, { group: 'work', favorited: true }),
+      mk('c1', 4, { group: 'work', folder: 'clients', favorited: true }),
+      mk('c2', 5, { group: 'work', folder: 'clients' }),
+      mk('u1', 6),
+      mk('u2', 7, { group: 'gone' }),
+    ]
+    const opts = (noteOrder: Record<string, string[]> = {}) => ({ groups, folders, noteOrder })
+
+    it('lists every note of the context (archived included) in the sidebar order', () => {
+      expect(contextNoteIds(notes, 'group:work', opts())).toEqual(['w3', 'w2', 'w1'])
+      expect(contextNoteIds(notes, 'group:work', opts({ 'group:work': ['w1'] }))).toEqual(['w1', 'w3', 'w2'])
+      expect(contextNoteIds(notes, 'folder:clients', opts({ 'folder:clients': ['c1', 'c2'] }))).toEqual(['c1', 'c2'])
+      expect(contextNoteIds(notes, 'ungrouped', opts())).toEqual(['u2', 'u1'])
+      expect(contextNoteIds(notes, 'favorites', opts({ favorites: ['w3'] }))).toEqual(['w3', 'c1'])
+      expect(contextNoteIds(notes, 'folder:gone', opts())).toEqual([])
+    })
+
+    it('a drop rewrites the whole context, hidden notes kept in place', () => {
+      const ids = contextNoteIds(notes, 'group:work', opts())
+      expect(moveIdNextTo(ids, 'w1', 'w3', 'before')).toEqual(['w1', 'w3', 'w2'])
+    })
   })
 })

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.11.1 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.12.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.11.1'
+const CLI_VERSION = '2.12.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -2101,7 +2101,30 @@ function serializeNoteMd(note, opts = {}) {
   if (note.favorited)  y += 'favorited: true\n'
   if (note.group)    y += `group: ${q(note.group)}\n`
   if (note.folder)   y += `folder: ${q(note.folder)}\n`
+  if (note.localOnly === true) y += 'localOnly: true\n'
   return `---\n${y}---\n`
+}
+
+// ── Local-only notes (never synced) ───────────────────────────────────────────
+// Mirror of electron/localOnlyNotes.ts: a note whose note.md carries
+// `localOnly: true` (today only the desktop app's first-run welcome note) never
+// goes to GitHub or NoteFlow Cloud — no push, no remote delete — and doesn't
+// count as "not on GitHub yet" after a pull. Not to be confused with
+// localOnlyNoteDirs() further down (notes the remote doesn't have YET).
+
+// Only an UNQUOTED YAML boolean true, exactly like the desktop parsers.
+const LOCAL_ONLY_LINE = /^localOnly:[ \t]*(?:true|True|TRUE)[ \t]*(?:#.*)?$/m
+
+/** Pure: whether a note.md declares `localOnly: true` (top-level frontmatter key only). */
+function isLocalOnlyNoteMd(noteMd) {
+  const { frontmatter } = splitFrontmatter(String(noteMd || ''))
+  return !!frontmatter && LOCAL_ONLY_LINE.test(frontmatter)
+}
+
+/** Whether the note folder `dirname` (in NOTES_DIR) is local-only. */
+function isLocalOnlyNoteDir(dirname) {
+  try { return isLocalOnlyNoteMd(fs.readFileSync(path.join(NOTES_DIR, dirname, NOTE_MD), 'utf-8')) }
+  catch { return false }
 }
 
 // ── Note folder helpers ───────────────────────────────────────────────────────
@@ -3004,6 +3027,10 @@ function reportGithubConflict(dir, res) {
  * version + a conflict copy — see githubResolveConflictDir).
  */
 async function syncPushNoteFiles(dirname, files) {
+  if (isLocalOnlyNoteDir(dirname)) {
+    if (cloudActive() || getSyncSettings().enabled) out('  Local-only note — not synced')
+    return { conflicted: false }
+  }
   if (cloudActive()) {
     // Cloud takes priority: never double-push to GitHub while Cloud is active
     // (mirror of the desktop app's syncProvider routing). Sync errors are
@@ -4877,7 +4904,7 @@ async function cmdCloudPush() {
   // pushing them would send old sections with the new anchor's timestamp.
   const halfApplied = dirsPendingRetry(getCliCloud().pullRetry)
   const noteFiles = []
-  for (const dir of listLocalNoteDirs()) {
+  for (const dir of listSyncedNoteDirs()) {
     if (halfApplied.has(dir)) continue
     for (const f of fs.readdirSync(path.join(NOTES_DIR, dir))) {
       if (f.endsWith('.md')) noteFiles.push(`${dir}/${f}`)
@@ -5209,9 +5236,11 @@ async function cmdDelete(titleQuery, opts) {
       return
     }
   }
+  const localOnlyNote = isLocalOnlyNoteDir(note.dirname) // read before the folder is gone
   fs.rmSync(note.filePath, { recursive: true, force: true })
   if (opts.json) jsonOut({ deleted: true, note: note.title })
   else out(`  Deleted "${note.title}"`)
+  if (localOnlyNote) return // never synced: nothing to remove remotely
 
   // Remove the note from the remote too — Cloud (tombstones) takes priority.
   if (cloudActive()) {
@@ -5461,6 +5490,7 @@ async function cmdSectionDelete(titleQuery, name, opts) {
   writeNoteFolder(note.dirname, note) // drops the orphan <id>.md (not in the keep set)
   out(`  Deleted section "${sec.name}" from "${note.title}"`)
   const { conflicted } = await syncPushNoteFiles(note.dirname, [NOTE_MD])
+  if (isLocalOnlyNoteDir(note.dirname)) return // never synced: nothing to remove remotely
   // Remove the section's file from the remote too, or a pull would resurrect it
   if (cloudActive()) {
     try { await cloudTombstoneRelPaths([`${note.dirname}/${removedFile}`]) }
@@ -5932,6 +5962,11 @@ function listLocalNoteDirs() {
     .map(e => e.name)
 }
 
+/** listLocalNoteDirs minus the local-only notes (isLocalOnlyNoteDir): what push/pull reconcile. */
+function listSyncedNoteDirs() {
+  return listLocalNoteDirs().filter(dir => !isLocalOnlyNoteDir(dir))
+}
+
 async function cmdPush() {
   const sync = getSyncSettings()
   if (!sync.enabled || !sync.owner || !sync.repo) { err('Not connected. Run: noteflow login'); exit(1) }
@@ -5944,7 +5979,7 @@ async function cmdPush() {
 
   // Every file of every note folder + root metadata + the format marker
   const relPaths = []
-  for (const dir of listLocalNoteDirs()) {
+  for (const dir of listSyncedNoteDirs()) {
     for (const f of fs.readdirSync(path.join(NOTES_DIR, dir))) {
       if (f.endsWith('.md')) relPaths.push(`${dir}/${f}`)
     }
@@ -6220,7 +6255,8 @@ async function cmdPull(opts = {}) {
     catch { localShas[b.path] = null }
   }
   saveGithubBases(sync, nextPulledBases(prevBases, blobs, localShas), repair.done)
-  const localOnly = localOnlyNoteDirs(listLocalNoteDirs(), remoteDirs)
+  // listSyncedNoteDirs: a never-synced (`localOnly: true`) note is not "missing" from GitHub.
+  const localOnly = localOnlyNoteDirs(listSyncedNoteDirs(), remoteDirs)
   // Local-only notes mean the repo does NOT know everything on disk yet: a
   // fresh lastSync would arm the desktop app's deletion rule against them
   // (see nextGithubLastSync). The push that uploads them writes it instead.
@@ -7317,7 +7353,7 @@ if (require.main === module) {
   // pure name-matching helpers. The CLI always runs as a script.
   module.exports = {
     sectionTokens, fuzzySectionMatches, looseSectionMatches, editDistance, sectionSuggestions,
-    splitFrontmatter, parseNoteYaml, serializeNoteMd,
+    splitFrontmatter, parseNoteYaml, serializeNoteMd, isLocalOnlyNoteMd, listSyncedNoteDirs,
     toB64Url, fromB64Url, deriveKek, normalizeRecoveryCode, looksLikeRecoveryCode,
     derivePathKeyHmac, wrapKey, unwrapKey, encryptContent, decryptContent,
     generateDek, generateNoteKey,

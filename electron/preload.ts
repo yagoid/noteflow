@@ -310,6 +310,7 @@ const api = {
     cloudCheckoutConfigured: boolean
     bundleCheckoutConfigured: boolean
     hasBillingSubscription: boolean  // has (or had) a Lemon Squeezy subscription — gates "Manage subscription"
+    bundleUpgradeAvailable: boolean  // one of AI / Cloud on one LS subscription — Bundle offered as a plan change
   }> => ipcRenderer.invoke('account:get-status'),
   // Failures carry a machine-readable `errorCode` (see AccountErrorCode in
   // electron/account.ts) so the renderer can localize them; `error` is the
@@ -334,6 +335,10 @@ const api = {
     errorCode?: AccountErrorCode
     via?: 'customerPortal' | 'storePortal'
   }> => ipcRenderer.invoke('account:open-billing-portal'),
+  // Upgrades the current AI / Cloud subscription to the Bundle (plan change of
+  // the same Lemon Squeezy subscription, prorated — never a second one).
+  accountUpgradeToBundle: (): Promise<{ ok: boolean; error?: string; errorCode?: AccountErrorCode }> =>
+    ipcRenderer.invoke('account:upgrade-to-bundle'),
   onAccountStatusChanged: (
     cb: (status: {
       configured: boolean
@@ -347,6 +352,7 @@ const api = {
       cloudCheckoutConfigured: boolean
       bundleCheckoutConfigured: boolean
       hasBillingSubscription: boolean
+      bundleUpgradeAvailable: boolean
     }) => void
   ) => {
     const wrapper = (_event: unknown, status: Parameters<typeof cb>[0]) => cb(status)

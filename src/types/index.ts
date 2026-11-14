@@ -84,6 +84,7 @@ export interface NoteMeta {
   folder?: string      // folderId — undefined = at group root (requires group)
   encryption?: NoteEncryption  // present iff note is encrypted
   expiresAt?: string   // ISO timestamp — present only on temporary notes
+  localOnly?: boolean  // never synced (GitHub/Cloud) — only the first-run welcome note; see electron/localOnlyNotes.ts
 }
 
 export interface Note extends NoteMeta {
@@ -386,6 +387,9 @@ export type AccountErrorCode =
   | 'checkoutUnavailable'
   | 'checkoutInvalidUrl'
   | 'billingPortalUnavailable'
+  | 'planChangeUnavailable'
+  | 'planChangeNotEligible'
+  | 'planChangeSubscriptionInactive'
 
 // Result of any account IPC call (mirror of AccountOpResult in electron/account.ts).
 export interface AccountOpResult {
@@ -448,6 +452,10 @@ export interface AccountStatus {
   // Has (or had) a Lemon Squeezy subscription — gates "Manage subscription".
   // False while entitlements are unknown and for comps (provider 'manual').
   hasBillingSubscription: boolean
+  // Exactly one of AI / Cloud, from exactly one active Lemon Squeezy subscription:
+  // the Bundle is then offered as a PLAN CHANGE (accountUpgradeToBundle), not as a
+  // second checkout. False while entitlements are unknown.
+  bundleUpgradeAvailable: boolean
 }
 
 // ── NoteFlow Cloud (E2EE sync) ───────────────────────────────────────────────
@@ -707,6 +715,9 @@ declare global {
       // Lemon Squeezy customer portal; `via` = which portal was opened
       // ('storePortal' = generic store page, the user signs in there by email).
       accountOpenBillingPortal: () => Promise<AccountOpResult & { via?: 'customerPortal' | 'storePortal' }>
+      // Upgrades the current AI / Cloud subscription to the Bundle (plan change of
+      // the same Lemon Squeezy subscription, prorated) — never a second checkout.
+      accountUpgradeToBundle: () => Promise<AccountOpResult>
       onAccountStatusChanged: (cb: (status: AccountStatus) => void) => () => void
       // NoteFlow Cloud (encrypted sync) — keys never cross this bridge
       getCloudStatus: () => Promise<CloudSyncStatus>

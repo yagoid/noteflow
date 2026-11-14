@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.11.1
+version: 2.12.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -95,6 +95,10 @@ el JSON.
 - **Borrar sin `--yes`** (`delete`, `section delete`, `group delete`, `folder delete`) en un agente,
   sin terminal, responde "no": `Cancelled`, exit 0, nada borrado. Con sync, `delete` borra la nota
   también del remoto (y de los demás dispositivos).
+- **Las notas con `localOnly: true` en su `note.md` nunca se sincronizan** (hoy solo la nota de
+  bienvenida que crea la app de escritorio en la primera ejecución): escribir en ellas imprime
+  `Local-only note — not synced`, `push` no las sube y `delete` no las borra del remoto. Lo que tenga que
+  llegar a otros dispositivos, escríbelo en otra nota.
 - **`favorite` y `archive` alternan** (toggle): dos veces deshacen el cambio.
 - **`NOTEFLOW_NOTES_DIR=<dir>` solo cambia el directorio de notas, no la sesión de sync**: con sync
   activo, lo que escribas en ese directorio de pruebas se sube a la cuenta real del usuario. Para

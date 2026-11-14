@@ -10,6 +10,10 @@
 // startup stickies use, so a startup sticky finds its geometry after a reboot. Switching
 // sections in place (SectionSwitcher) does not change the key: main doesn't know which
 // section a sticky shows, and the geometry belongs to the window, not to the section.
+//
+// Besides the geometry, each entry remembers whether the sticky was last left folded,
+// so a startup sticky reopens folded after a reboot. `expanded` is never touched while
+// folded: unfolding a sticky that started folded goes back to its normal size.
 
 export interface StickyRect {
   x: number
@@ -23,6 +27,21 @@ export interface StickyBoundsEntry {
   expanded?: StickyRect
   /** Where the user left the folded pill (absent = stack it in the default corner). */
   folded?: StickyRect
+  /** The sticky was folded when last left (only `true` is stored; absent = expanded). */
+  isFolded?: true
+}
+
+/** The rect kinds of an entry (what `rememberedStickyRect` in main can restore). */
+export type StickyRectKind = 'expanded' | 'folded'
+
+/**
+ * A patch for `withStickyBounds`: rects to remember, and/or the folded state
+ * (`false` clears it).
+ */
+export interface StickyBoundsPatch {
+  expanded?: StickyRect
+  folded?: StickyRect
+  isFolded?: boolean
 }
 
 export type StickyBoundsMap = Record<string, StickyBoundsEntry>
@@ -59,7 +78,12 @@ function sanitizeEntry(raw: unknown): StickyBoundsEntry | null {
   const folded = sanitizeRect(r.folded)
   if (expanded) entry.expanded = expanded
   if (folded) entry.folded = folded
-  return expanded || folded ? entry : null
+  if (r.isFolded === true) entry.isFolded = true
+  return isEmptyEntry(entry) ? null : entry
+}
+
+function isEmptyEntry(entry: StickyBoundsEntry): boolean {
+  return !entry.expanded && !entry.folded && !entry.isFolded
 }
 
 /** Cleans what settings.json holds (hand-editable, older builds): keeps valid entries, capped. */
@@ -76,12 +100,13 @@ export function sanitizeStickyBounds(raw: unknown): StickyBoundsMap {
 
 /**
  * Merges `patch` into the entry of `key` and moves it to the most-recent end, evicting
- * the oldest entries beyond the cap. Returns a new map (the input is not mutated).
+ * the oldest entries beyond the cap. An entry left empty (e.g. `isFolded: false` on a
+ * key with nothing else) is dropped instead. Returns a new map (the input is not mutated).
  */
 export function withStickyBounds(
   map: StickyBoundsMap,
   key: string,
-  patch: StickyBoundsEntry,
+  patch: StickyBoundsPatch,
 ): StickyBoundsMap {
   if (!key || key.length > MAX_KEY_LENGTH) return map
   const merged: StickyBoundsEntry = { ...map[key] }
@@ -89,7 +114,10 @@ export function withStickyBounds(
   const folded = sanitizeRect(patch.folded)
   if (expanded) merged.expanded = expanded
   if (folded) merged.folded = folded
+  if (patch.isFolded === true) merged.isFolded = true
+  else if (patch.isFolded === false) delete merged.isFolded
   const rest = Object.entries(map).filter(([k]) => k !== key)
+  if (isEmptyEntry(merged)) return key in map ? Object.fromEntries(rest) : map
   rest.push([key, merged])
   return Object.fromEntries(rest.slice(-MAX_STICKY_BOUNDS_ENTRIES))
 }

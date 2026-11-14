@@ -1,4 +1,5 @@
-// Pure helpers of the sticky window's section switcher (title-bar dropdown, StickyApp.tsx).
+// Pure helpers of the sticky window (StickyApp.tsx): its section switcher (title-bar
+// dropdown) and the state it keeps in its hash (`#sticky?noteId=…&sectionId=…&folded=1`).
 
 /**
  * Whether the sticky shows the section name next to the note title. A lone default-named
@@ -36,4 +37,25 @@ export function stickyHashWithSection(hash: string, sectionId: string): string {
   const params = new URLSearchParams(q === -1 ? '' : hash.slice(q + 1))
   params.set('sectionId', sectionId)
   return `${route || '#sticky'}?${params.toString()}`
+}
+
+/**
+ * Whether the sticky's hash says it is folded (`folded=1`): main opens a startup sticky
+ * that was left folded with it, and the sticky keeps it in step on fold/unfold so a
+ * reload shows the pill while main still has the window folded.
+ */
+export function isStickyHashFolded(hash: string): boolean {
+  const q = hash.indexOf('?')
+  return q !== -1 && new URLSearchParams(hash.slice(q + 1)).get('folded') === '1'
+}
+
+/** The sticky's hash with `folded=1` set (folded) or removed, keeping its other params. */
+export function stickyHashWithFolded(hash: string, folded: boolean): string {
+  const q = hash.indexOf('?')
+  const route = q === -1 ? hash : hash.slice(0, q)
+  const params = new URLSearchParams(q === -1 ? '' : hash.slice(q + 1))
+  if (folded) params.set('folded', '1')
+  else params.delete('folded')
+  const query = params.toString()
+  return `${route || '#sticky'}${query ? `?${query}` : ''}`
 }

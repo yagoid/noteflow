@@ -28,6 +28,37 @@ export function compareSidebarNotes(a: Pick<Note, 'created'>, b: Pick<Note, 'cre
   return new Date(b.created).getTime() - new Date(a.created).getTime()
 }
 
+/** Where a dragged item lands relative to the one under the pointer. */
+export type DropPosition = 'before' | 'after'
+
+/**
+ * Manual reorder by drag & drop (folders of a group, notes of a context): `ids` with
+ * `draggedId` moved right before / after `targetId`. Null when the target isn't listed, is
+ * the dragged item itself, or the order wouldn't change.
+ */
+export function moveIdNextTo(
+  ids: readonly string[],
+  draggedId: string,
+  targetId: string,
+  position: DropPosition,
+): string[] | null {
+  if (draggedId === targetId) return null
+  const next = ids.filter((id) => id !== draggedId)
+  let index = next.indexOf(targetId)
+  if (index === -1) return null
+  if (position === 'after') index += 1
+  next.splice(index, 0, draggedId)
+  if (next.length === ids.length && next.every((id, i) => id === ids[i])) return null
+  return next
+}
+
+/** The `noteOrder` key (manual order context) of a note's effective location. */
+export function noteOrderKey(groupId: string | null, folderId: string | null): string {
+  if (folderId) return `folder:${folderId}`
+  if (groupId) return `group:${groupId}`
+  return 'ungrouped'
+}
+
 function applyOrder<N extends SidebarNoteLike>(notes: N[], orderedIds: string[] | undefined): N[] {
   if (!orderedIds || orderedIds.length === 0) return notes
   const idSet = new Set(orderedIds)

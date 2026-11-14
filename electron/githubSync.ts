@@ -11,6 +11,7 @@ import {
   parseLegacyNoteRaw,
   serializeNoteFolder,
 } from './noteFormat'
+import { isLocalOnlyDir, isLocalOnlyNoteMd, isLocalOnlySyncPath, listSyncedNoteDirs } from './localOnlyNotes'
 import {
   type SyncState,
   emptySyncState,
@@ -1976,6 +1977,8 @@ export async function pullNotes(notesDir: string): Promise<{
         const localDirPath = path.join(notesDir, dir)
         try {
           const localContent = fs.readFileSync(path.join(localDirPath, NOTE_MD), 'utf-8')
+          // A local-only note is absent from the remote by design (localOnlyNotes.ts).
+          if (isLocalOnlyNoteMd(localContent)) continue
           const localUpdatedTime = parseUpdatedTimestamp(extractUpdatedTimestamp(localContent))
           if (localUpdatedTime === null) continue // can't determine age — skip to be safe
           if (localUpdatedTime > lastSyncTime) continue // created locally after last sync, not yet pushed
@@ -2141,7 +2144,7 @@ export async function pullNotes(notesDir: string): Promise<{
  */
 function listLocalSyncPaths(notesDir: string): string[] {
   const relPaths: string[] = []
-  for (const dir of listNoteDirs(notesDir)) {
+  for (const dir of listSyncedNoteDirs(notesDir)) {
     for (const f of fs.readdirSync(path.join(notesDir, dir))) {
       if (f.endsWith('.md')) relPaths.push(`${dir}/${f}`)
     }
@@ -2522,6 +2525,7 @@ export async function pushPathsNow(notesDir: string, relPaths: string[]): Promis
   let stateChanged = false
   notesDirPath = notesDir
   for (const relPath of relPaths) {
+    if (isLocalOnlySyncPath(notesDir, relPath)) continue // never synced (localOnlyNotes.ts)
     // Supersede any debounced timer for this path — we're pushing it now.
     const existing = pushTimers.get(relPath)
     if (existing) { clearTimeout(existing); pushTimers.delete(relPath) }
@@ -2560,6 +2564,12 @@ export async function pushPathsNow(notesDir: string, relPaths: string[]): Promis
 export function schedulePush(relPath: string, content: string, onStart?: () => void, onComplete?: (error?: string) => void): void {
   const s = syncSettings ?? loadSyncSettings()
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
+    onComplete?.()
+    return
+  }
+  // A local-only note (the first-run welcome note) never goes up — not even
+  // journaled (localOnlyNotes.ts).
+  if (isLocalOnlySyncPath(notesDirPath, relPath)) {
     onComplete?.()
     return
   }
@@ -2674,6 +2684,7 @@ function flushPendingLocalChanges(
     const dirPath = path.join(notesDir, dir)
     try {
       const anchor = fs.readFileSync(path.join(dirPath, NOTE_MD), 'utf-8')
+      if (isLocalOnlyNoteMd(anchor)) continue // never synced (localOnlyNotes.ts)
       const updatedMs = parseUpdatedTimestamp(extractUpdatedTimestamp(anchor))
       if (updatedMs === null) continue
       if (lastSyncMs !== null && updatedMs <= lastSyncMs) continue
@@ -2705,6 +2716,7 @@ function flushPendingLocalChanges(
 export async function scheduleDelete(relPath: string): Promise<void> {
   const s = syncSettings ?? loadSyncSettings()
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return
+  if (isLocalOnlySyncPath(notesDirPath, relPath)) return // never synced: nothing remote to delete
 
   // Cancel any pending push for this file before deleting
   const existing = pushTimers.get(relPath)
@@ -2801,6 +2813,9 @@ function handleDeleteDirConflict(dir: string): void {
 export async function scheduleDeleteDir(dir: string): Promise<void> {
   const s = syncSettings ?? loadSyncSettings()
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return
+  // Never synced: nothing remote to delete. The folder is usually gone by now —
+  // isLocalOnlyDir answers from its memory of local-only folders.
+  if (notesDirPath && isLocalOnlyDir(notesDirPath, dir)) return
 
   // Cancel any pending pushes for files inside this dir
   for (const key of [...pushTimers.keys()]) {

@@ -2,8 +2,7 @@ import { useMemo } from 'react'
 import { Plus, Code } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
-import { htmlFromMarkdown } from '../../lib/markdownHtml'
-import { PREVIEW_MAX_CHARS, clipPreviewMarkdown, sectionCardStats } from '../../lib/noteOverviewGrid'
+import { rawPreviewText, sectionCardStats, sectionPreviewHtml } from '../../lib/noteOverviewGrid'
 
 interface SectionCardContentProps {
   content: string
@@ -22,7 +21,7 @@ export function SectionCardContent({ content, raw, aiHidden }: SectionCardConten
   // The same HTML the editor renders, at reading size; only the start of a long section,
   // and only when its content changes.
   const html = useMemo(
-    () => (hasContent && !raw ? htmlFromMarkdown(clipPreviewMarkdown(content)) : ''),
+    () => (hasContent && !raw ? sectionPreviewHtml(content) : ''),
     [content, hasContent, raw],
   )
   const stats = useMemo(() => sectionCardStats(content), [content])
@@ -41,7 +40,7 @@ export function SectionCardContent({ content, raw, aiHidden }: SectionCardConten
             {t.overview.emptySectionHint}
           </div>
         ) : raw ? (
-          <pre className="note-grid-raw">{content.slice(0, PREVIEW_MAX_CHARS)}</pre>
+          <pre className="note-grid-raw">{rawPreviewText(content)}</pre>
         ) : (
           <div className="prose-editor">
             <div className="ProseMirror" dangerouslySetInnerHTML={{ __html: html }} />

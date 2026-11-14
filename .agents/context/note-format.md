@@ -40,6 +40,7 @@ sections:
     created: "2026-01-05T10:00:00.000Z"   # opcional — creación de ESTA sección (ver abajo)
 archived: true    # solo presente si true
 favorited: true   # solo presente si true
+localOnly: true   # solo presente si true — la nota NUNCA se sincroniza (hoy solo la de bienvenida)
 ---
 ```
 
@@ -74,6 +75,15 @@ encryption:
   un valor no parseable —p. ej. editado a mano— también cae a `note.created`, y si ninguno es
   válido no se muestra la fecha) — solo en la línea `Created …` bajo el título del editor (ninguna
   tarjeta de preview —vista de nota, hover, cerebro— muestra la fecha de la sección).
+- **`localOnly: true`** (clave de primer nivel de `note.md`, también en notas cifradas: va fuera del
+  bloque `encryption`): la nota no sale nunca de este dispositivo — ningún camino de sync de GitHub, Cloud
+  ni el CLI la sube, la journala ni la borra en remoto (detalle en `sync.md` "Notas solo-locales"). Hoy
+  solo la lleva la **nota de bienvenida** de la primera ejecución (`electron/welcomeNote.ts`); no hay UI
+  para ponerla ni quitarla. Los **tres espejos** la conservan en el round-trip (`parseMetaFields`/
+  `serializeNoteFolder` de `noteUtils.ts`, `parseDiskMeta`/`serializeNoteFolder` de `noteFormat.ts`,
+  `parseNoteYaml`/`serializeNoteMd` del CLI): si uno la perdiera al guardar, la nota empezaría a
+  sincronizarse. *Duplicate* crea una nota normal (construye el borrador campo a campo); exportar la
+  conserva (bundle tal cual), así que una nota solo-local importada en otro equipo sigue siendo solo-local.
 - Tags se extraen del contenido con `#nombre` (`extractTags`).
 - `NOTEFLOW_NOTES_DIR` (env) redirige el dir de notas en app y CLI (testing/scripting).
 - Los parsers toleran BOM UTF-8 (editores externos como Notepad lo añaden).

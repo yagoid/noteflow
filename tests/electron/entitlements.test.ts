@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeEntitlements, hasBillingSubscription, type SubscriptionRow } from '../../electron/entitlements'
+import { canUpgradeToBundle, computeEntitlements, hasBillingSubscription, type SubscriptionRow } from '../../electron/entitlements'
 
 function row(product: string, status: string): SubscriptionRow {
   return { product, status, renews_at: null }
@@ -76,5 +76,39 @@ describe('hasBillingSubscription — gates "Manage subscription"', () => {
 
   it('a comp next to a Lemon Squeezy row still counts the latter', () => {
     expect(hasBillingSubscription([billed('active', 'manual'), billed('expired', 'lemonsqueezy')])).toBe(true)
+  })
+})
+
+describe('canUpgradeToBundle — Bundle offered as a plan change', () => {
+  const sub = (product: string, status = 'active', provider: string | null = 'lemonsqueezy'): SubscriptionRow => ({
+    product,
+    status,
+    renews_at: null,
+    provider,
+  })
+
+  it('true for exactly one active Lemon Squeezy AI or Cloud subscription', () => {
+    expect(canUpgradeToBundle([sub('ai')])).toBe(true)
+    expect(canUpgradeToBundle([sub('cloud')])).toBe(true)
+    // Old, lapsed rows next to it do not matter.
+    expect(canUpgradeToBundle([sub('cloud'), sub('ai', 'expired'), sub('bundle', 'expired')])).toBe(true)
+  })
+
+  it('false with nothing entitled, or both already (bundle, or two separate subscriptions)', () => {
+    expect(canUpgradeToBundle([])).toBe(false)
+    expect(canUpgradeToBundle(null)).toBe(false)
+    expect(canUpgradeToBundle([sub('ai', 'past_due')])).toBe(false)
+    expect(canUpgradeToBundle([sub('bundle')])).toBe(false)
+    expect(canUpgradeToBundle([sub('ai'), sub('cloud')])).toBe(false)
+    // A comp for the other product also means "both".
+    expect(canUpgradeToBundle([sub('ai'), sub('cloud', 'active', 'manual')])).toBe(false)
+  })
+
+  it('false when the single entitlement is a comp (nothing to change in Lemon Squeezy)', () => {
+    expect(canUpgradeToBundle([sub('ai', 'active', 'manual')])).toBe(false)
+  })
+
+  it('false with two active Lemon Squeezy subscriptions of the same product (ambiguous)', () => {
+    expect(canUpgradeToBundle([sub('ai'), sub('ai')])).toBe(false)
   })
 })

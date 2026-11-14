@@ -10,13 +10,21 @@ import { MENU_ITEM_CLASS } from './contextMenuStyles'
 import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp, Pin, PinOff, Check } from 'lucide-react'
 import { decryptSections } from '../lib/cryptoUtils'
 import { createDebouncedSave, flushPendingEdits } from '../lib/pendingEdits'
-import { menuNavIndex, showStickySectionName, stickyHashWithSection } from '../lib/stickySectionMenu'
+import {
+  isStickyHashFolded,
+  menuNavIndex,
+  showStickySectionName,
+  stickyHashWithFolded,
+  stickyHashWithSection,
+} from '../lib/stickySectionMenu'
 import {
   createContentSync, mapOffsetThroughChange, needsSave, recordSave, resolveExternalContent, type ContentSync,
 } from '../lib/externalContentSync'
 import { useT } from '../i18n/useT'
 import type { GroupColor, NoteSection } from '../types'
 
+// Requested size of the folded pill. Mirrored by STICKY_FOLDED_W/H in electron/main.ts
+// (a startup sticky that opens already folded).
 const FOLDED_W = 220
 const FOLDED_H = 32
 // Caret breathing room for the small sticky window (default 300px tall, min
@@ -321,7 +329,8 @@ export function StickyApp() {
   // unmount too.
   const [rawSave] = useState(createDebouncedSave)
   useEffect(() => () => rawSave.flush(), [rawSave])
-  const [isFolded, setIsFolded] = useState(false)
+  // A startup sticky left folded opens already folded (main adds `folded=1` to the hash).
+  const [isFolded, setIsFolded] = useState(() => isStickyHashFolded(window.location.hash))
   // Sticky windows are created with alwaysOnTop: true in the main process,
   // so the pin starts active.
   const [isPinned, setIsPinned] = useState(true)
@@ -504,10 +513,26 @@ export function StickyApp() {
     }
   }
 
+  // The hash follows the fold state so a reload keeps showing what main has (pill or not).
+  const handleUnfold = () => {
+    window.noteflow.unfold()
+    window.history.replaceState(null, '', stickyHashWithFolded(window.location.hash, false))
+    // Delay UI switch until the unfold animation finishes (280ms in main process)
+    setTimeout(() => setIsFolded(false), 260)
+  }
+
+  // Opened folded (startup) while the note is still loading, locked or missing: the
+  // pill, with the title those screens would show; unfolding reveals them.
+  const isStillLoading = (isLoading && notes.length === 0) || !noteId || !sectionId
+  if (isFolded && (isStillLoading || !note || !section || (note.encryption && !unlockedSections))) {
+    const pillTitle = isStillLoading ? t.common.loading : note ? note.title || t.common.untitled : t.sticky.notFound
+    return <FoldedPill noteTitle={pillTitle} color="--accent" onUnfold={handleUnfold} />
+  }
+
   // Only block on the loading screen during the very first load (no notes yet).
   // A background reload from sync keeps the previous notes in memory, so we must
   // not unmount the sticky editor mid-session — that resets its scroll/focus.
-  if ((isLoading && notes.length === 0) || !noteId || !sectionId) {
+  if (isStillLoading) {
     return (
       <div className="flex flex-col h-screen bg-surface-0 rounded-lg overflow-hidden border border-border">
         <StickyTitleBar noteTitle={t.common.loading} color="--accent" onFold={() => {}} />
@@ -570,6 +595,7 @@ export function StickyApp() {
 
   const handleFold = () => {
     window.noteflow.foldToCorner(FOLDED_W, FOLDED_H)
+    window.history.replaceState(null, '', stickyHashWithFolded(window.location.hash, true))
     setIsFolded(true)
   }
 
@@ -577,12 +603,6 @@ export function StickyApp() {
     const next = !isPinned
     window.noteflow.setAlwaysOnTop(next)
     setIsPinned(next)
-  }
-
-  const handleUnfold = () => {
-    window.noteflow.unfold()
-    // Delay UI switch until the unfold animation finishes (280ms in main process)
-    setTimeout(() => setIsFolded(false), 260)
   }
 
   // updateSection merges onto the latest sections: a sync of another section that

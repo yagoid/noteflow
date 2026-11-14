@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   activePlan,
   hasKnownEntitlement,
+  isBundleUpgradeOffered,
   isPlanOffered,
   isPlanUnknown,
   type PlanAccountView,
@@ -40,6 +41,30 @@ describe('isPlanOffered — never offer a plan on an unknown', () => {
     expect(isPlanOffered(aiOnly, 'ai')).toBe(false)
     expect(isPlanOffered(aiOnly, 'cloud')).toBe(true)
     expect(isPlanOffered(aiOnly, 'bundle')).toBe(false)
+  })
+})
+
+describe('isBundleUpgradeOffered — Bundle as a plan change, never a second checkout', () => {
+  it('offered with exactly one entitlement that main can upgrade', () => {
+    expect(isBundleUpgradeOffered(account({ entitlements: { ai: true, cloud: false }, bundleUpgradeAvailable: true }))).toBe(true)
+    expect(isBundleUpgradeOffered(account({ entitlements: { ai: false, cloud: true }, bundleUpgradeAvailable: true }))).toBe(true)
+  })
+
+  it('not offered without the flag (comp, older main), with none or both, signed out or unknown', () => {
+    expect(isBundleUpgradeOffered(account({ entitlements: { ai: true, cloud: false } }))).toBe(false)
+    expect(isBundleUpgradeOffered(account({ bundleUpgradeAvailable: true }))).toBe(false)
+    expect(isBundleUpgradeOffered(account({ entitlements: { ai: true, cloud: true }, bundleUpgradeAvailable: true }))).toBe(false)
+    expect(isBundleUpgradeOffered(account({ signedIn: false, entitlements: { ai: true, cloud: false }, bundleUpgradeAvailable: true }))).toBe(false)
+    expect(isBundleUpgradeOffered(account({ entitlementsKnown: false, entitlements: { ai: true, cloud: false }, bundleUpgradeAvailable: true }))).toBe(false)
+  })
+
+  it('never overlaps with the Bundle checkout card', () => {
+    for (const ai of [false, true]) {
+      for (const cloud of [false, true]) {
+        const view = account({ entitlements: { ai, cloud }, bundleUpgradeAvailable: true })
+        expect(isBundleUpgradeOffered(view) && isPlanOffered(view, 'bundle')).toBe(false)
+      }
+    }
   })
 })
 

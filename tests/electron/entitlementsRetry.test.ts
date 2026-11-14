@@ -5,6 +5,7 @@ import {
   isRetryableEntitlementsFailure,
   parseEntitlementsCache,
   parseCachedBillingFlag,
+  parseCachedBundleUpgradeFlag,
   isManagedAiUsable,
 } from '../../electron/entitlementsRetry'
 
@@ -113,6 +114,23 @@ describe('parseCachedBillingFlag', () => {
       entitlements: { ai: true, cloud: false },
       fetchedAt: '2026-10-20T10:00:00.000Z',
     })
+  })
+})
+
+describe('parseCachedBundleUpgradeFlag', () => {
+  const cache = { userId: 'u1', ai: true, cloud: false, fetchedAt: '2026-10-20T10:00:00.000Z' }
+
+  it('reads bundleUpgrade from a valid cache of the stored session', () => {
+    expect(parseCachedBundleUpgradeFlag({ ...cache, bundleUpgrade: true }, 'u1')).toBe(true)
+    expect(parseCachedBundleUpgradeFlag({ ...cache, bundleUpgrade: false }, 'u1')).toBe(false)
+  })
+
+  it('false for older caches, non-boolean values, another user or a malformed cache', () => {
+    expect(parseCachedBundleUpgradeFlag(cache, 'u1')).toBe(false)
+    expect(parseCachedBundleUpgradeFlag({ ...cache, bundleUpgrade: 'yes' }, 'u1')).toBe(false)
+    expect(parseCachedBundleUpgradeFlag({ ...cache, bundleUpgrade: true }, 'u2')).toBe(false)
+    expect(parseCachedBundleUpgradeFlag({ ...cache, bundleUpgrade: true, cloud: 1 }, 'u1')).toBe(false)
+    expect(parseCachedBundleUpgradeFlag(null, 'u1')).toBe(false)
   })
 })
 

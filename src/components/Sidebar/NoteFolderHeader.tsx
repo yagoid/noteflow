@@ -10,6 +10,9 @@ interface NoteFolderHeaderProps {
   staggerIndex: number
   onToggle: () => void
   onContextMenu: (e: React.MouseEvent) => void
+  /** Drag the header to reorder the folder within its group (Sidebar owns the drop logic). */
+  onDragStart?: (e: React.DragEvent) => void
+  onDragEnd?: () => void
 }
 
 /**
@@ -58,6 +61,8 @@ export function NoteFolderHeader({
   staggerIndex,
   onToggle,
   onContextMenu,
+  onDragStart,
+  onDragEnd,
 }: NoteFolderHeaderProps) {
   return (
     <div
@@ -73,6 +78,9 @@ export function NoteFolderHeader({
         onToggle()
       }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e) }}
+      draggable={onDragStart != null}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
     >
       <FolderIcon icon={folder.icon} />
       <span className="sbg-fname font-mono">{folder.name}</span>

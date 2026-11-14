@@ -96,7 +96,7 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     `planRemoteDelete` en `cloudSyncLogic.ts` (ver § 4 "Deletes = tombstones"). Para las ofertas, en
     cambio, la cache **sí** cuenta como conocida (una cache `ai:false` muestra las cards: aceptado).
     Helpers puros del renderer en `src/lib/subscriptionPlans.ts` (`isPlanUnknown`,
-    `isPlanOffered`, `hasKnownEntitlement`, y `activePlan` — el plan que se **nombra** en la línea de
+    `isPlanOffered`, `isBundleUpgradeOffered`, `hasKnownEntitlement`, y `activePlan` — el plan que se **nombra** en la línea de
     identidad del pie del sidebar: ambas entitlements → `bundle`, si no `cloud`/`ai`; desconocidas o
     ninguna → `null`, así que dos suscripciones sueltas AI + Cloud también se leen como Bundle).
   - **Cache persistida:** cada fetch OK guarda `settings.json` → `account.entitlementsCache =
@@ -197,6 +197,80 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   `electron/billingPortal.ts`, testeado en `tests/electron/billingPortal.test.ts`) antes de
   `shell.openExternal`. Sin ningún portal posible → `errorCode: 'billingPortalUnavailable'`. Igual
   en la build de Microsoft Store (compra y gestión son las mismas que en la directa).
+- **Pasar al Bundle teniendo ya AI o Cloud = CAMBIO DE PLAN, no segunda suscripción (implementado
+  en cliente + función `billing-change-plan`, 2026-11-14; deploy pendiente del operador, ver
+  `supabase/README.md` § 5.2):** antes, con una sola de las dos, la UI solo ofrecía comprar la otra
+  (el Bundle exigía que faltaran ambas) y pasarse al Bundle por checkout habría sido una **segunda**
+  suscripción cobrando el producto ya pagado dos veces. Ahora:
+  - **Cuándo se ofrece:** `canUpgradeToBundle(rows)` (`electron/entitlements.ts`, en main, sobre las
+    mismas filas del fetch de entitlements): exactamente una de AI/Cloud y procede de **exactamente
+    una** fila `active` `provider='lemonsqueezy'` con `product` `ai`|`cloud`. Llega al renderer como
+    `AccountStatus.bundleUpgradeAvailable` (`false` mientras las entitlements son desconocidas; se
+    cachea como `entitlementsCache.bundleUpgrade`, opcional → `false` en caches antiguas,
+    `parseCachedBundleUpgradeFlag`). **No** se ofrece con una comp `manual` (no hay nada que cambiar
+    en LS), con dos suscripciones sueltas AI + Cloud (ya tiene ambas) ni con dos filas activas del
+    mismo producto (ambiguo). `PlanOffers` pinta entonces la card del Bundle en modo mejora (CTA
+    "Upgrade", nota "Replaces your current plan") en las tres superficies que listan `bundle`.
+  - **Confirmación en la app:** no hay página de checkout que muestre el cargo, así que la card abre
+    un panel de confirmación con el aviso de **prorrateo** (i18n `settings.account.upgrade*`): se abona
+    lo no usado del periodo actual, se cobra **ya** solo la diferencia a la tarjeta guardada, desde la
+    próxima renovación se paga el Bundle con el **mismo ciclo** mensual/anual y la fecha de renovación
+    no cambia. Solo "Confirm upgrade" llama al IPC `account:upgrade-to-bundle`.
+  - **Servidor — Edge Function `supabase/functions/billing-change-plan`** (Deno, cero deps, verify
+    JWT; `logic.ts` con `fetch` inyectado, testeado en `tests/supabase/billing-change-plan.test.ts`).
+    `POST {"plan":"bundle"}`: resuelve al usuario (`/auth/v1/user`), lee **todas** sus filas con el
+    service role (`pickUpgradeSubscription`, espejo de `canUpgradeToBundle` + `provider_ref`
+    numérico: 409 `already_entitled` si ya tiene ambas por cualquier vía, 404 `no_subscription`,
+    409 `multiple_subscriptions`), `GET /v1/subscriptions/<id>` en LS y: si su variante **ya es de
+    bundle** → 200 `{ok, changed:false}` sin volver a parchear (reintento, doble clic, webhook en
+    vuelo); si LS no la da por `active` sin `cancelled` (cancelada-aún-pagada, `past_due`, `paused`,
+    `on_trial`) → 409 `subscription_not_active` (cambiarle el plan a una cancelada la reanudaría en
+    silencio: el usuario la reactiva antes desde el portal); si no, `PATCH /v1/subscriptions/<id>`
+    con `variant_id` = la variante de Bundle **del mismo intervalo** e **`invoice_immediately:
+    true`** (prorrateo activo — sin `disable_prorations` — y cobro inmediato de la diferencia en vez
+    de sumarla a la próxima factura, el default de LS: así no cabe "mejorar, usar el Bundle y
+    cancelar antes de renovar" sin pagar la diferencia). La variante destino sale del secreto nuevo
+    **`LEMONSQUEEZY_BUNDLE_UPGRADE_MAP`** (`"<variante ai|cloud>:<variante bundle>,…"`), que se
+    valida contra `LEMONSQUEEZY_VARIANT_MAP` (origen ai/cloud, destino bundle; si no, 500
+    `not_configured`) para no mover nunca a un cliente a una variante que el webhook no reconozca
+    como `bundle` (cobrado sin entitlement). `parseVariantMap` está duplicado del webhook (cada
+    función se despliega autocontenida); el test fija que ambos parsean igual. Otros errores: 401
+    `missing_token`/`invalid_token`, 400 `unsupported_plan`, 502 `provider_error`/
+    `provider_unreachable`, 500 `not_configured`/`query_failed`; forma `{error:{message,code}}` como
+    `billing-portal`.
+  - **Entitlements sin duplicar ni perder:** la función **no escribe** en `subscriptions`. LS manda
+    `subscription_updated` + `subscription_plan_changed` de la **misma** suscripción (mismo
+    `data.id`) con el `variant_id` nuevo; `billing-webhook` lo mapea a `product='bundle'` y
+    `apply_subscription_event` hace upsert sobre `(provider, provider_ref)` actualizando `product`
+    en **la misma fila** (también por el camino sin `user_id`). Una sola fila → ni doble
+    entitlement ni pérdida; el webhook sigue siendo el único escritor.
+  - **Cliente:** `account.upgradeToBundle()` (POST con el access token, timeout 40 s;
+    `planChangeOutcome` en `electron/planChange.ts` traduce la respuesta a
+    `planChangeUnavailable` / `planChangeNotEligible` / `planChangeSubscriptionInactive`; testeado en
+    `tests/electron/planChange.test.ts`). **Sin fallback** (a diferencia del portal): un fallo nunca
+    abre un checkout. Tras el OK re-pide entitlements a los 2/4/8/15/30 s (generación de sesión
+    capturada) hasta ver ambas; la auto-activación de la superficie nueva (§ 3 "Auto-activación…",
+    punto 2) se dispara sola por la transición `false→true`.
+  - **Dos suscripciones sueltas AI + Cloud (€9,98/mes vs €7,99 del Bundle):** **no** se fusionan
+    automáticamente (la app no ofrece nada: ya tiene ambas; la función respondería
+    `already_entitled`). Si un cliente lo pide, a mano: runbook en `supabase/README.md` § 5.2.
+  - **Mensual vs anual:** el cambio conserva el intervalo (mensual → Bundle mensual, anual → Bundle
+    anual). Cambiar de intervalo no se ofrece en la app (portal de LS / operador).
+  - ⚠️ **A verificar en test mode antes de publicar la app** (no se ha llamado a la API real): que
+    el `PATCH` con solo `variant_id` basta para mover entre **productos** distintos de la store (si
+    LS exigiera también `product_id`, añadirlo en `buildPlanChangeBody`), el importe prorrateado que
+    factura de verdad, y qué pasa si el cobro inmediato falla (se espera `past_due` vía webhook).
+  - ⚠️ **Si el cobro inmediato falla (riesgo conocido, sin mitigar):** el `PATCH` ya ha cambiado la
+    variante, así que la función responde OK y la UI ya ha dicho "Plan changed". Si LS pone la
+    suscripción en `past_due`, el webhook deja **la misma fila** en `product='bundle'`,
+    `status='past_due'` → `computeEntitlements` da `{ai:false, cloud:false}`: el usuario pierde
+    **también** el AI/Cloud que ya tenía pagado (y la regla de pérdida apaga esa superficie, § 3
+    punto 3). Además `PlanOffers` vuelve a ofrecer los **checkouts** de AI, Cloud y Bundle (ninguna
+    entitlement, `bundleUpgradeAvailable` en `false`), lo que invita a una segunda suscripción en vez
+    de arreglar la tarjeta. Salida actual: "Manage subscription" (la fila sigue siendo de LS) para
+    actualizar la tarjeta; al cobrar, LS la vuelve a `active` y el webhook restaura ambas.
+    Pendiente: decidir si se acepta o se mitiga (p. ej. aviso de `past_due` en Ajustes →
+    Suscripción, y no ofrecer checkouts con una fila de LS `past_due`).
 - **Borrado de cuenta (backend implementado; cliente solo en móvil):** Edge Function
   **`supabase/functions/delete-account`** (mismo patrón que `billing-portal`: `logic.ts` con `fetch`
   inyectado, testeado en `tests/supabase/delete-account.test.ts`; verify JWT). `POST` sin body →
@@ -606,8 +680,10 @@ es **un preset más**, no una implementación nueva.
   que no se puede comprar. Con sesión y entitlements **desconocidas** no pinta ninguna card: muestra
   `PlanUnknownNotice` ("Couldn't verify your plan yet — Retry"), salvo con `showUnknownNotice={false}`
   (Ajustes → Suscripción, donde ya lo dicen los badges). Un plan solo aparece mientras se **sepa** que
-  falta su entitlement, y **Bundle exige que falten AMBAS** (para no facilitar doble facturación); si
-  no queda ninguno, no renderiza. Nombre y
+  falta su entitlement, y **Bundle exige que falten AMBAS** (para no facilitar doble facturación) —
+  **salvo como mejora**: con exactamente una de las dos y `AccountStatus.bundleUpgradeAvailable`
+  (`isBundleUpgradeOffered`), la card del Bundle sale en modo **"Upgrade"** (cambio de plan, no
+  checkout; ver § 2 "Pasar al Bundle"); si no queda ninguno, no renderiza. Nombre y
   precio salen de `src/lib/subscriptionPlans.ts` (`SUBSCRIPTION_PRICES`, display-only) y el Bundle
   lleva badge "Best value". **La card entera es el call-to-action** (`<button>` cuando es clickable,
   para foco + teclado; el CTA de dentro es un `<span>` porque un button no puede anidar otro button).
@@ -1000,6 +1076,9 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   interfaz **`SyncProvider`** (`electron/syncProvider.ts`, ver `sync.md`); **mutuamente
   excluyentes**: si `cloudSync.enabled`, Cloud tiene prioridad y el loop de GitHub se salta
   (enforcement en Settings UI = tramo 4).
+- **Notas solo-locales** (`localOnly: true` en `note.md`, hoy solo la de bienvenida): ni se suben, ni
+  se journalan, ni se tombstonean, ni entran en la primera subida del corpus — ver `sync.md` "Notas
+  solo-locales" (también el cliente CLI desde 2.12.0).
 - **Sin cola de mutaciones:** Postgres soporta upserts concurrentes — el invariante de
   serialización del GitHub Sync es un workaround de la Contents API que aquí no aplica. Las filas de
   nota se suben **condicionadas** (RPC `cloud_upsert_file_v2`, migración 0014, con fallback a
@@ -2120,8 +2199,8 @@ puro vía `fetch` desde el proceso main.
   `tsconfig.electron.json` (`rootDir: 'electron'`) no puede importar de `src/` y el renderer solo
   ve los booleanos derivados. Testeada en `tests/electron/entitlements.test.ts`.
 - **IPC** — handlers `account:get-status` / `account:request-otp` / `account:verify-otp` /
-  `account:sign-out` / `account:refresh-entitlements` (+ `account:open-checkout` y
-  `account:open-billing-portal`, ver § 2); evento `account:status-changed` (broadcast
+  `account:sign-out` / `account:refresh-entitlements` (+ `account:open-checkout`,
+  `account:open-billing-portal` y `account:upgrade-to-bundle`, ver § 2); evento `account:status-changed` (broadcast
   del status público a todas las ventanas, patrón `sync:status-changed`). Bridge en `preload.ts`
   (`getAccountStatus`, `accountRequestOtp`, `accountVerifyOtp`, `accountSignOut`,
   `accountRefreshEntitlements`, `onAccountStatusChanged`) y tipos `AccountStatus` /
@@ -2130,7 +2209,8 @@ puro vía `fetch` desde el proceso main.
   (fallback para logs), un **`errorCode`** de una unión cerrada (`notConfigured`, `invalidEmail`,
   `emptyCode`, `invalidCode`, `rateLimited`, `network`, `unexpectedResponse`, `sendFailed`,
   `verifyFailed`, `notSignedIn`, `refreshFailed`, `sessionLocked`, `checkoutUnavailable`,
-  `checkoutInvalidUrl`, `billingPortalUnavailable`) para
+  `checkoutInvalidUrl`, `billingPortalUnavailable`, `planChangeUnavailable`, `planChangeNotEligible`,
+  `planChangeSubscriptionInactive`) para
   que el renderer pinte el mensaje **en el idioma de la app** en vez del string crudo de GoTrue.
   La unión está **triplicada** (main `electron/account.ts` → renderer `src/types/index.ts` → una
   clave por código en `settings.account.errors` de los dicts EN/ES) y el espejo lo fija el test

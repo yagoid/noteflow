@@ -108,6 +108,7 @@ const cloudAccessErrors_1 = require("./cloudAccessErrors");
 const cloudConfig_1 = require("./cloudConfig");
 const settingsFile_1 = require("./settingsFile");
 const noteFormat_1 = require("./noteFormat");
+const localOnlyNotes_1 = require("./localOnlyNotes");
 const cloudCrypto_1 = require("./cloudCrypto");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
 const conflictCopy_1 = require("./conflictCopy");
@@ -871,7 +872,9 @@ async function listRemotePaths(dek) {
 function schedulePush(relPath, content, onStart, onComplete) {
     const s = cloudSettings ?? loadCloudSyncSettings();
     const action = () => (0, cloudSyncLogic_1.planLocalPush)({ enabled: s.enabled, configured: (0, cloudConfig_1.isCloudConfigured)(), initialPullStatus });
-    if (action() === 'ignore') {
+    // A local-only note (the first-run welcome note) never goes up — not even
+    // journaled (localOnlyNotes.ts).
+    if (action() === 'ignore' || (0, localOnlyNotes_1.isLocalOnlySyncPath)(notesDirPath, relPath)) {
         onComplete?.();
         return;
     }
@@ -969,6 +972,7 @@ async function pushPathsNow(notesDir, relPaths) {
     const s = cloudSettings ?? loadCloudSyncSettings();
     if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)())
         return { pushed: 0, errors: [] };
+    relPaths = relPaths.filter((relPath) => !(0, localOnlyNotes_1.isLocalOnlySyncPath)(notesDir, relPath)); // never synced (localOnlyNotes.ts)
     ensureStateOwner();
     if ((0, cloudSyncLogic_1.planLocalPush)({ enabled: s.enabled, configured: true, initialPullStatus }) === 'journal') {
         let journaled = false;
@@ -1041,6 +1045,8 @@ async function scheduleDelete(relPath) {
     const s = cloudSettings ?? loadCloudSyncSettings();
     if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)())
         return;
+    if ((0, localOnlyNotes_1.isLocalOnlySyncPath)(notesDirPath, relPath))
+        return; // never synced: nothing remote to tombstone
     ensureStateOwner();
     const existing = pushTimers.get(relPath);
     if (existing) {
@@ -1072,6 +1078,10 @@ async function scheduleDelete(relPath) {
 async function scheduleDeleteDir(dir) {
     const s = cloudSettings ?? loadCloudSyncSettings();
     if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)())
+        return;
+    // Never synced: nothing remote to tombstone. The folder is usually gone by
+    // now — isLocalOnlyDir answers from its memory of local-only folders.
+    if (notesDirPath && (0, localOnlyNotes_1.isLocalOnlyDir)(notesDirPath, dir))
         return;
     ensureStateOwner();
     for (const key of [...pushTimers.keys()]) {
@@ -2081,6 +2091,8 @@ function flushPendingLocalChanges(notesDir, previousLastSync) {
         const dirPath = path_1.default.join(notesDir, dir);
         try {
             const anchor = fs_1.default.readFileSync(path_1.default.join(dirPath, noteFormat_1.NOTE_MD), 'utf-8');
+            if ((0, localOnlyNotes_1.isLocalOnlyNoteMd)(anchor))
+                continue; // never goes up (localOnlyNotes.ts)
             const updatedMs = (0, cloudSyncLogic_1.parseUpdatedTimestamp)((0, cloudSyncLogic_1.extractUpdatedTimestamp)(anchor));
             // Historical folder gate, for files without a known base.
             const dirGate = updatedMs !== null && (lastSyncMs === null || updatedMs > lastSyncMs);

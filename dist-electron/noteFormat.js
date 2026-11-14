@@ -144,6 +144,8 @@ function parseDiskMeta(data) {
     const expiresAt = isoString(data.expiresAt);
     if (expiresAt)
         note.expiresAt = expiresAt;
+    if (data.localOnly === true)
+        note.localOnly = true;
     if (data.encryption && typeof data.encryption === 'object') {
         note.encryption = data.encryption;
     }
@@ -260,6 +262,8 @@ function serializeNoteFolder(note, opts) {
         fm.folder = note.folder;
     if (note.expiresAt)
         fm.expiresAt = note.expiresAt;
+    if (note.localOnly)
+        fm.localOnly = true;
     const yamlStr = js_yaml_1.default.dump(fm, { lineWidth: -1, quotingType: '"' });
     const files = { [exports.NOTE_MD]: `---\n${yamlStr}---\n` };
     const sectionFiles = [];

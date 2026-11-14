@@ -35,8 +35,9 @@ Dos invariantes para que el sidebar siga fluido con muchas notas — fáciles de
 - **Grupos y carpetas (guías, cursor):** nada de eso re-renderiza la lista. El cursor y la marca de
   plegado los mueve `GroupGuides` (montado una vez, imperativo, con `ResizeObserver`/`MutationObserver` coalescidos a un
   rAF); a `NoteRow` solo le llegan primitivas nuevas (`staggerIndex` capado, y en favoritas
-  `groupColor`/`groupName`). Solo el arrastre de nota (estado `noteMoveTarget`, ya existente)
-  re-renderiza al cambiar de destino (ver "Sidebar: grupos y carpetas").
+  `groupColor`/`groupName`). Solo los arrastres re-renderizan al cambiar de destino: el de nota
+  (`noteMoveTarget`) y el de carpeta para reordenar (`draggingFolder` al empezar/terminar y
+  `folderDropTarget` por destino; ver "Sidebar: grupos y carpetas").
 
 ### Importación desde otras apps (`electron/importers/`, `src/lib/notionHtml.ts`)
 Importa notas de **Markdown folder**, **Notion** (export HTML `.zip`) y **Google Keep** (Takeout
@@ -145,6 +146,12 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
   cuenta también estos menús.
   Grupos, carpetas y Ungrouped son destino de soltar (`placeMovePatch` → `updateNote({group, folder})`,
   no-op con `alreadyInPlace`); aceptan también notas arrastradas desde el sidebar (`application/x-noteflow-note-id`).
+  **Reordenar carpetas:** cada carpeta es `draggable` (`application/x-noteflow-folder-id`); estado local de
+  `PlacesRail` (`folderDrag`/`folderDrop`). Solo sus hermanas del mismo grupo aceptan el drop (antes/después
+  por mitades, línea `.cv-ri.is-drop-before/after::after`; la arrastrada `.is-dragging`), y mientras se
+  arrastra una carpeta los lugares no actúan como destino de notas. Al soltar: `moveIdNextTo` sobre las
+  carpetas del grupo (`RailGroup.folders`, ya por `order`) → `onReorderFolders` → `groupsStore.reorderFolders`
+  (reescribe `order` 0..n de las carpetas del grupo en `folders.json`, sincronizado; igual que el sidebar).
   Con el sidebar flotante la columna reserva `--mini-sidebar-reserve` a la izquierda (mini-vista).
 - **Orden de la columna 2 (`ContentSort`: `'date'` | `'sidebar'`):** control segmentado `.cv-seg` en la
   cabecera, en `.cv-tools` entre el buscador y "+ Note" (`role=radiogroup`, "By date" / "As in the sidebar").
@@ -174,6 +181,15 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
     la columna a 62 px para que quepa "Yesterday". Como en el sidebar, esa etiqueta no se refresca sola al
     cambiar de día (la fila es `memo`).
   - Al cambiar de orden la nota elegida se mantiene y se trae a la vista (`scrollIntoView nearest`).
+  - **Reordenar notas** (solo en este modo): al empezar el arrastre de **una** nota (no la multiselección)
+    se guarda su contexto de orden manual en `dragOrderKeyRef` (`noteOrderContext`: `favorites` en el lugar
+    Favoritas; si no, `noteOrderKey` de su ubicación efectiva → `folder:`/`group:`/`ungrouped`). Las filas
+    (`TimelineHandlers.dragOver/dragLeave/drop`) solo aceptan el drop si son de ese mismo contexto; la marca
+    (`rowDrop`, prop primitiva `dropPosition` → `.cv-row.is-drop-before/after::after`) solo re-renderiza las
+    filas que cambian. Al soltar se reescribe el contexto **completo** — `contextNoteIds` sobre todas las
+    notas del store (archivadas y ocultas por búsqueda incluidas, así conservan su sitio) — con
+    `moveIdNextTo` y `setContextNoteOrder` (`note-order.json`, el mismo orden que el sidebar). El pie añade
+    `contentView.hintReorder`. Arrastrar a un lugar de la columna 1 sigue funcionando igual.
 - **Columna 2:** por fecha, notas por `updated` desc (`sortByUpdatedDesc`) en bloques `dateBlock`: today, yesterday,
   week (el resto de los últimos 7 días naturales: desde las 00:00 de hace 6 días), month
   (últimos 30 días desde ahora) y older; aritmética de calendario (DST) y una hora futura (reloj de otro
@@ -216,9 +232,9 @@ tests en `tests/lib/contentView.test.ts`. Sin IPC nuevo.
   `.cv-body` es `container-type: inline-size`), que pasa a 0 al cerrar con transición de `width`; el interior
   (`.cv-pv-in`, mismo `--cv-pv-real`) mantiene su ancho y se desvanece. Ruta + nombre con
   cuadradito de color + `Section n of m · stats · edited …` (`sectionCardStats`, `formatNoteDate`) + el
-  contenido real: `htmlFromMarkdown(clipPreviewMarkdown(md, 40 000))` dentro de `.note-preview >
+  contenido real: `sectionPreviewHtml(md, 40 000)` (ver "Vista previa" de la vista de nota) dentro de `.note-preview >
   .prose-editor > .ProseMirror` con `--prose-font-family = proseFontStack(...)` (como la vista de nota); raw →
-  `<pre>` tal cual; cifrada bloqueada → el aviso de la vista de nota (`overview.noteEncrypted`). Solo se
+  `<pre>` con `rawPreviewText` (imágenes pegadas como `[image]`); cifrada bloqueada → el aviso de la vista de nota (`overview.noteEncrypted`). Solo se
   renderiza el markdown de esta sección (memo por contenido). "Open in the editor" usa el baile
   `pendingInitialSectionId` + `noteflow:request-section` diferido (`setTimeout(0)`) tras `setOpenNoteIds([id])`
   + `setActiveNote(id)`. La X la cierra (`previewOpen=false`) y **no** se reabre al cambiar de lugar ni con la
@@ -317,10 +333,27 @@ Decisiones a respetar si se toca:
   fallback mono de `.prose-editor .ProseMirror`. Tamaños enteros a propósito (los fraccionarios
   emborronan la mono en Chromium, como en `.chat-md`, y la fuente del editor puede ser la mono), por eso
   no los 11,5 px del boceto. Secciones raw → texto crudo (`.note-grid-raw`, con la misma
-  `--prose-font-family` que el textarea raw). Solo se renderiza el principio de una sección larga
-  (`clipPreviewMarkdown`, 4000 chars, corta en límite de bloque y cierra un fence abierto) y el HTML/las
+  `--prose-font-family` que el textarea raw; `rawPreviewText` muestra las imágenes pegadas como
+  `![alt]([image])`, como el textarea). Solo se renderiza el principio de una sección larga
+  (`sectionPreviewHtml` → `clipHoldingImages`, 4000 chars, corta en límite de bloque y cierra un fence
+  abierto; `clipPreviewMarkdown` es el mismo recorte devuelto como markdown) y el HTML/las
   estadísticas se memoizan por contenido; los handlers llegan a las celdas por una fachada estable (ref),
   así que teclear en una sección (otra ventana/pane) solo re-renderiza su tarjeta.
+- **Imágenes en la preview** (`noteOverviewGrid.ts`): las imágenes pegadas guardan su data URI en el
+  markdown (decenas de miles de chars). Antes el recorte de 4000 chars caía **dentro** del base64 y la
+  tarjeta pintaba el markdown crudo. Ahora, para recortar, cada fuente `data:` se sustituye por un
+  marcador de `PREVIEW_IMAGE_CHARS` (400) chars (`IMAGE_HOLD` + índice + `IMAGE_PAD`* + `IMAGE_HOLD`, privados U+E010/U+E011 —en el código
+  siempre como escape `\uE010`, nunca el carácter invisible—, distintos de los U+E000/U+E001 de
+  `inlineToHtml`; los U+E010/U+E011 que ya traiga el texto del usuario se apartan antes igual, como
+  marcador sin relleno, para que nunca se lean como una imagen), así una imagen cuesta "unas líneas" de presupuesto (≤ ~10 por
+  tarjeta) y el corte nunca la parte (una imagen sin su `)` se descarta). `sectionPreviewHtml` (lo que
+  usan `SectionCardContent` y el panel de la vista de contenido) pasa además el **markdown con los
+  marcadores** por `htmlFromMarkdown` y repone las fuentes (escapadas como atributo) en el HTML final:
+  el hover remonta la tarjeta en cada apertura y no debe correr las regex del parser sobre megas de
+  base64. En las tarjetas (`.note-grid-body.note-preview`) la imagen es miniatura: `max-height: 120px`
+  + `object-fit: contain` a la izquierda (respeta el `width` redimensionado sin deformarla); el panel
+  de la vista de contenido la deja a su tamaño. Imágenes por URL (`https://…`) no se tocan (su fuente
+  es corta). En el formato v2 no hay imágenes como ficheros aparte: todas van inline en el `.md`.
 - **Pie:** `sectionCardStats(md)` → "Empty" / `hechas/total tasks` con ≥ 3 tareas (`- [ ]`/`- [x]` como
   `markdownHtml`, fuera de fences; las tarjetas de kanban cuentan) / nº de palabras (sin sintaxis, URLs de
   links, anotaciones 📅⏰🔺 ni comentarios HTML). A la derecha, "Text" (modo texto, `isRawMode`) y "Hidden from AI".
@@ -916,6 +949,34 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   - Esquema del editor web móvil: `listItem`/`taskItem` con contenido `paragraph+ list*` y
     Shift+Enter en heading = partir (si su editor lo permite).
 
+### Editor: imágenes redimensionables y la columna Readable
+La imagen es un nodo **inline** (`ResizableImage.tsx`, `inline: true`, `allowBase64`) dentro de un
+párrafo; el ancho redimensionado es el atributo `width` (`![alt](src){width=N}`). Estructura DOM:
+`p > span.react-renderer.node-image > span.nf-image[data-node-view-wrapper] > img`.
+- **Readable (decisión del usuario):** una imagen pequeña queda alineada a la izquierda **de la
+  columna** (como en Full); si se agranda por encima de la columna **rompe sus márgenes**: crece
+  centrada sobre la columna (media por lado, hacia los márgenes) hasta todo el ancho de contenido del
+  editor. Solo imágenes **con `width`** en párrafos **de primer nivel** (`.ProseMirror > p`; en listas,
+  citas o tablas siguen acotadas a su bloque); una sin `width` se queda en la columna aunque su tamaño
+  natural sea mayor.
+- **CSS** (`index.css`, `.nf-image.is-sized`): el wrapper recibe `--img-w` y un **ancho explícito**
+  `min(--img-w, max(100%, 100cqw - --pm-pad-l - --pm-pad-r - 6px))` (con shrink-to-fit se quedaría en el
+  ancho del párrafo) y `margin-left: min(0px, (100% - ancho) / 2)` — 0 mientras cabe, negativo y
+  centrado al pasarse. `100%` = el párrafo (bloque contenedor); `100cqw` = el contenedor
+  `.editor-readable`, que incluye el scrollbar del scroller: se restan siempre sus 6 px
+  (`::-webkit-scrollbar`), así a lo sumo quedan 3 px por lado sin usar cuando no hay scroll, nunca se
+  mete en el padding. Los márgenes verticales del wrapper van inline (`marginTop/Bottom`) y el
+  horizontal en CSS (un `margin` inline ganaría a la regla).
+- **Arrastre** (`resizeBounds`): para que el tirador siga al cursor, mientras la imagen cabe se ancla
+  a la izquierda (`ancho = derecha − izquierda`) y al romper la columna, al centro
+  (`ancho = 2·(derecha − centro de la columna)`); continuo en el ancho de la columna. El ancho se
+  **acota** a lo mostrable: en Readable, con los mismos términos que el tope CSS (ancho de
+  `.editor-readable` − paddings del `.ProseMirror` − 6 px, `SCROLLBAR_WIDTH`), así lo guardado coincide
+  con lo pintado; en el resto, el párrafo. Sin "zona muerta" al encoger tras pasarse. Para el
+  breakout exige la misma estructura que el selector CSS (`.ProseMirror > p > .node-image > .nf-image`;
+  una imagen dentro de un enlace, p. ej., no rompe la columna). Imágenes antiguas con un `width` mayor
+  que la columna (antes se veían acotadas) ahora rompen la columna al abrirlas en Readable.
+
 ### Editor: mapa de secciones (pestañas que bajan de fila)
 Las pestañas de sección del editor no son una tira con scroll horizontal: son un **mapa de secciones**
 (`Editor/SectionMap.tsx`, lógica pura en `src/lib/sectionMap.ts` con test en `tests/lib/sectionMap.test.ts`,
@@ -1510,9 +1571,23 @@ cabecera, clamp al viewport: sube si no cabe abajo).
 - **Cierre:** salir de cabecera+peek → 250 ms de gracia (cruzar el hueco; volver a la cabecera lo
   cancela; pasar a otra cabecera colapsada cambia de peek). Si el usuario **teclea o usa ↑/↓** en el
   buscador queda **anclado**: solo cierra con click fuera, Esc o navegación. También cierra al abrir
-  nota/sección (desde él o desde cualquier sitio: `useNotesStore.subscribe` sobre activeNoteId/
-  noteViewId/contentPlace/brain), scroll dentro del sidebar, blur/resize de la ventana o `dragstart`.
-  Si el grupo se expande/vacía o el sidebar pasa a `blocked`, se descarta en render.
+  nota/sección desde cualquier otro sitio (`useNotesStore.subscribe` sobre activeNoteId/
+  noteViewId/contentPlace/brain), con Enter en su buscador, scroll dentro del sidebar, blur/resize de la
+  ventana o `dragstart`. Si el grupo se expande/vacía o el sidebar pasa a `blocked`, se descarta en render.
+- **Click dentro del peek = no cierra** (petición del usuario): abrir una nota o sección con el ratón
+  pasa por `navigateFromPeek`, que ejecuta el handler del sidebar con `selfNavRef` a `true` (la
+  suscripción al store lo ignora: la navegación es síncrona — `setOpenNoteIds`/`setActiveNote`/
+  `openNoteInSplit` — así que el flag basta) y después **desancla** el peek (si se había tecleado, salir ya
+  lo cierra) y olvida el foco previo (era de la nota anterior: el cierre por `leave` no lo devuelve). El
+  peek sigue abierto bajo el puntero, la nota abierta pasa a ser la activa en su lista y se cierra al
+  sacar el ratón como un hover normal. Enter (teclado) sigue abriendo y cerrando.
+- **Watchdog de hover propio:** abrir una sección desde el despliegue flotante de una fila lo desmonta
+  bajo el puntero (portal a `body`, puede sobresalir del panel); el navegador no emite `mouseout` de un
+  nodo eliminado y el `mouseleave` del panel podría no llegar nunca. Mientras está abierto, un
+  `mouseover`/`mousemove` en captura fuera del panel, la cabecera bajo el puntero y
+  `[data-group-peek-portal]` programa el cierre normal (`leaveUnnoticed`, solo si no hay otro pendiente
+  ni está anclado); volver dentro cancela solo el cierre que programó él (mismo patrón que el watchdog de
+  `SidebarShell`).
 - **Foco:** guarda `document.activeElement` al abrir y lo devuelve al cerrar por ratón-fuera/Esc/
   dismiss (`focus({preventScroll})`; ProseMirror re-aplica su selección al recibir el foco, así que el
   caret se conserva). Click fuera: se devuelve **después** del click y solo si no se llevó el foco a
@@ -1526,8 +1601,9 @@ cabecera, clamp al viewport: sube si no cabe abajo).
   como "dentro" para `SidebarShell`: el panel flotante no se cierra mientras se usa el peek. El hueco de
   6 px dispara un leave del `aside`, pero el enter del peek cancela su cierre (200 ms). El panel del peek
   lleva `data-sidebar-portal` (`SIDEBAR_PORTAL_ATTR` en `sidebarAnchor.ts`) para el *watchdog* de hover
-  del shell (ver "Sidebar flotante"): al pulsar una nota del peek este se desmonta bajo el puntero, el
-  navegador no emite `mouseout` de un nodo eliminado y React nunca entrega el `mouseleave` del `aside`.
+  del shell (ver "Sidebar flotante"): cuando el peek (o el despliegue de una de sus filas) se desmonta
+  bajo el puntero —Enter, Esc, o una sección abierta desde el despliegue—, el navegador no emite
+  `mouseout` de un nodo eliminado y React nunca entrega el `mouseleave` del `aside`.
 
 ### Sidebar: item de nota (mapa plegado + despliegue)
 Las secciones de cada fila de nota del sidebar (`NoteRow` en `Sidebar.tsx`) las pinta
@@ -1754,6 +1830,23 @@ estilos en el bloque `.sbg-*` al final de `index.css`; números y helpers puros 
   id del arrastre se copia como primitivo (`String(ref.current)`) antes de ir al estado; el valor crudo
   de un ref en un `setState` hace que el React Compiler abandone el componente (lint
   `preserve-manual-memoization` sobre `rowHandlers`).
+- **Reordenar carpetas (dentro de su grupo):** la cabecera `.sbg-fh` es `draggable` (props
+  `onDragStart`/`onDragEnd` de `NoteFolderHeader`; `application/x-noteflow-folder-id`). Estado
+  `draggingFolder {id, groupId}` + `folderDropTarget` en `Sidebar` (re-render solo al empezar/terminar o
+  cambiar de destino, como el de grupos; también entra en `peekBlocked`). El destino es **todo el bloque**
+  `.sbg-f` de una carpeta hermana (cabecera + notas; antes/después por mitades): sus handlers de
+  `dragover`/`drop` derivan al reorden si hay carpeta arrastrada y, si no, al "mover nota" de siempre. Los
+  handlers de las filas de nota (`li` de `NoteRow`) que caen dentro del bloque **no deben tragarse** el
+  evento de una carpeta: sin nota del sidebar arrastrada (`draggingNoteContextRef` a null),
+  `handleNoteReorderDragOver` y `handleNoteReorderDrop` salen **antes** de `preventDefault`/
+  `stopPropagation` y el evento sube al `.sbg-f` (si no, soltar sobre las notas de una carpeta hermana
+  desplegada no haría nada aunque se viera la línea). Los de mover nota salen sin nota arrastrada y los
+  de grupo sin grupo arrastrado. La línea de inserción es un `div`
+  de alto 0 con `position: relative` al principio o al final del `.sbg-f` (no se le pone `relative` al
+  `.sbg-f`: cambiaría el `offsetParent` de las filas que mide `GroupGuides`). Al soltar: `moveIdNextTo`
+  (`lib/sidebarGroups.ts`) sobre **todas** las carpetas del grupo por `order` (también las que un filtro
+  oculta) → `groupsStore.reorderFolders(groupId, ids)`, que reescribe `order` 0..n de las carpetas del
+  grupo y guarda `folders.json` (sincronizado; `noteflow folders` del CLI lista por `order`). Sin IPC nuevo.
 - **Peek de grupo plegado:** misma pestaña (esquina 9 px) y nombre 12,5/650 en caja normal en la
   cabecera; la barra de 2 px del borde pasa a ser la guía del grupo a la izquierda de la lista
   (`.sbg-peek-list::before`, fuera del scroller para que no se desplace con él).
@@ -2134,7 +2227,8 @@ Stickies = BrowserWindows extra que cargan la app con hash `#sticky?noteId=...&s
 porque el DWM ignora `border-radius` al perder foco. Plegado/desplegado animado en el main
 (`fold-to-corner`/`unfold`, `animateStickyWindow`): por defecto apila las píldoras en la esquina
 superior derecha del display (`getFoldedPosition`: columna `x` del borde derecho, cada píldora debajo de
-la más baja de esa columna); `unfold` vuelve a los bounds pre-fold (`prevBoundsMap`, solo en memoria).
+la más baja de esa columna); `unfold` vuelve a los bounds pre-fold (`prevBoundsMap`, solo en memoria; en
+una sticky de arranque abierta ya plegada, los desplegados calculados al abrirla — ver abajo).
 Una animación nueva **sustituye** a la que corra en esa ventana (`stickyAnimations`; p. ej. desplegar a
 mitad del plegado) en vez de pelearse dos `setInterval` por la ventana.
 
@@ -2177,6 +2271,28 @@ limpian al borrar notas). Local, nunca se sincroniza (los monitores son de cada 
   `stickyKeyInUse`) en `stickyWindows` (abrir) / `foldedWindows` (plegar).
 - No hay IPC nuevo: todo vive en main; el renderer (`StickyApp`) sigue llamando a
   `foldToCorner(FOLDED_W, FOLDED_H)`/`unfold()` igual (el tamaño pedido solo se usa sin sitio recordado).
+
+**Estado plegado recordado (`isFolded` en la misma entrada de `stickyBounds`):** solo se guarda `true`
+(ausente = desplegada; `withStickyBounds(…, { isFolded: false })` lo borra y descarta la entrada si queda
+vacía). `rememberStickyFolded(key, folded)` (solo escribe si cambia) se llama al plegar (`true`), al
+desplegar (`false`) y al abrir una sticky **desplegada** (`false`, salvo que otra ventana de la misma
+clave siga plegada en `foldedWindows`), así refleja cómo se dejó por última vez.
+- **Solo se restaura en el arranque:** `createStickyWindow(…, { restoreFolded: true })` solo desde las
+  `startupStickies` del modo startup; abrir una sticky a mano desde la app la abre siempre desplegada.
+- **Abrir ya plegada** (sin animación), en `ready-to-show`: se calcula el rect desplegado igual que en una
+  apertura normal (recordado `expanded` o cascada 300×300) y se guarda **solo** en `prevBoundsMap` (lo
+  que usará `unfold`); la ventana va directa a la píldora (`folded` recordado o pila de la esquina con
+  `STICKY_FOLDED_W/H` = 220×32, espejo de `FOLDED_W/H` de `StickyApp`), `setMinimumSize(1, 1)`, se
+  añade a `foldedWindows` y, tras `show()`, `foldedSettledBounds` toma los bounds reales (alto recortado
+  a 39 en Windows) como línea base. Así el tamaño de la píldora nunca pisa `expanded` (mientras está
+  plegada, `rememberStickyBounds` solo toca `folded`) y desplegar vuelve al tamaño normal.
+- **Renderer:** main añade `&folded=1` al hash; `StickyApp` inicializa `isFolded` con
+  `isStickyHashFolded` (`lib/stickySectionMenu.ts`, testeado) para pintar la píldora desde el primer
+  render. Mientras carga, está cifrada sin desbloquear o la nota no existe, la píldora muestra el título de
+  esa pantalla (Loading / título / Not found) y desplegar la revela. El hash sigue el estado
+  (`stickyHashWithFolded` en fold/unfold, y `stickyHashWithSection` conserva el parámetro), de modo
+  que una recarga de la ventana plegada muestra la píldora en vez de la UI desplegada dentro de la
+  ventana pequeña.
 
 **Transparencia dependiente de plataforma:** en **Linux/macOS** la ventana es `transparent: true`
 (`backgroundColor: '#00000000'`) y el redondeo lo da el CSS. En **Windows** se crea **opaca**

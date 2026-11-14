@@ -26,6 +26,9 @@ export const CLOUD_KEYS_URL = `${SUPABASE_URL}/functions/v1/cloud-keys`
 /** Fresh Lemon Squeezy customer-portal link for the caller (Edge Function billing-portal). */
 export const BILLING_PORTAL_FN_URL = `${SUPABASE_URL}/functions/v1/billing-portal`
 
+/** Upgrade AI / Cloud → Bundle by changing the plan of the same LS subscription (Edge Function billing-change-plan). */
+export const BILLING_CHANGE_PLAN_FN_URL = `${SUPABASE_URL}/functions/v1/billing-change-plan`
+
 /**
  * Lemon Squeezy checkout URLs per product. Filled in once the products exist
  * in the LS store (see supabase/README.md § 6). While a URL is empty, its

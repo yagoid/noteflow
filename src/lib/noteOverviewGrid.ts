@@ -3,6 +3,9 @@
 // (lib/sectionMap.ts) but with the content preview inside. Covered by
 // tests/lib/noteOverviewGrid.test.ts.
 
+import { htmlFromMarkdown } from './markdownHtml'
+import { escapeHtml } from './markdownInline'
+
 /** Narrowest column the grid allows (px): as many columns as fit, at least one. */
 export const NOTE_GRID_MIN_COLUMN = 220
 /** Joint between cells (px). Matches `.note-grid` / `.note-grid-row { gap }` in index.css. */
@@ -238,23 +241,99 @@ export function sectionCardStats(markdown: string): SectionCardStats {
   return { kind: 'words', count: words }
 }
 
+// ── Preview clipping ───────────────────────────────────────────────────────────────────
+
 /**
- * The start of a long section, cut for its card preview so a huge section doesn't build a
- * huge DOM per card: up to `maxChars`, preferably at a block boundary (blank line) or else
- * a line break, closing a code fence the cut left open (or the rest of the preview would
- * render as code-fence text). Short markdown is returned as is.
+ * Budget (chars) a pasted image takes in a clipped preview, whatever the length of its data
+ * URI: about the lines its picture fills. Without it a single base64 image ate the whole
+ * budget and the cut fell inside its source, which then rendered as raw text.
  */
-export function clipPreviewMarkdown(markdown: string, maxChars = PREVIEW_MAX_CHARS): string {
-  if (markdown.length <= maxChars) return markdown
-  const head = markdown.slice(0, maxChars)
+export const PREVIEW_IMAGE_CHARS = 400
+
+// Pasted images keep their data inline (`![alt](data:…)`, the editor's Image node). While
+// clipping, each source is held behind a placeholder of PREVIEW_IMAGE_CHARS chars:
+// HOLD + index + PADs + HOLD, private-use characters U+E010/U+E011 (not the U+E000/U+E001
+// inlineToHtml holds with), no `)` nor line break. Any U+E010/U+E011 already in the user's
+// text is held first the same way (a placeholder without pad), so it can never be read as one.
+const IMAGE_HOLD = '\uE010'
+const IMAGE_PAD = '\uE011'
+const HOLD_CHAR_RE = /[\uE010\uE011]/g
+const DATA_IMAGE_RE = /(!\[[^\]\n]*\]\()(data:[^)\n]+)\)/g
+const HELD_RE = /\uE010(\d+)\uE011*\uE010/g
+// An image whose `)` the cut left out (the placeholder whole or halved): dropped.
+const CUT_IMAGE_RE = /!\[[^\]\n]*\]\(\uE010[^)\n]*$/
+
+/** Puts the held values (images' sources, the user's own hold characters) back in `text`. */
+function restoreHeld(text: string, held: readonly string[], escape: (s: string) => string = (s) => s): string {
+  const source = (v: string): string => v.replace(HELD_RE, (m, i: string) => {
+    const value = held[Number(i)]
+    return value === undefined ? m : source(value)
+  })
+  return text.replace(HELD_RE, (m, i: string) => {
+    const value = held[Number(i)]
+    return value === undefined ? m : escape(source(value))
+  })
+}
+
+/** `clipPreviewMarkdown` with the values still held (`held[i]` ↔ placeholder i). */
+function clipHoldingImages(markdown: string, maxChars: number): { text: string; held: string[] } {
+  const held: string[] = []
+  const hold = (value: string, pad = 0) => {
+    const token = `${IMAGE_HOLD}${held.push(value) - 1}`
+    return `${token}${IMAGE_PAD.repeat(Math.max(0, pad - token.length - 1))}${IMAGE_HOLD}`
+  }
+  const text = markdown
+    .replace(HOLD_CHAR_RE, (ch) => hold(ch))
+    .replace(DATA_IMAGE_RE, (_, open: string, src: string) => `${open}${hold(src, PREVIEW_IMAGE_CHARS)})`)
+  if (text.length <= maxChars) return { text, held }
+  const head = text.slice(0, maxChars)
   const minCut = Math.floor(maxChars / 2)
   const block = head.lastIndexOf('\n\n')
   const line = head.lastIndexOf('\n')
   const cut = block >= minCut ? block : line >= minCut ? line : maxChars
-  const clipped = head.slice(0, cut).replace(/\s+$/, '')
+  let clipped = head.slice(0, cut).replace(/\s+$/, '').replace(CUT_IMAGE_RE, '')
+  // A hard cut can still halve a held character's placeholder: its opener is then unpaired.
+  if ((clipped.split(IMAGE_HOLD).length - 1) % 2 === 1) clipped = clipped.slice(0, clipped.lastIndexOf(IMAGE_HOLD))
+  clipped = clipped.replace(/\s+$/, '')
   let inFence = false
   for (const l of clipped.split('\n')) {
     if (inFence ? FENCE_CLOSE_RE.test(l) : FENCE_OPEN_RE.test(l)) inFence = !inFence
   }
-  return inFence ? `${clipped}\n\`\`\`` : clipped
+  return { text: inFence ? `${clipped}\n\`\`\`` : clipped, held }
+}
+
+/**
+ * The start of a long section, cut for its card preview so a huge section doesn't build a
+ * huge DOM per card: up to `maxChars`, preferably at a block boundary (blank line) or else
+ * a line break, closing a code fence the cut left open (or the rest of the preview would
+ * render as code-fence text). A pasted image counts PREVIEW_IMAGE_CHARS, not its data URI's
+ * length, and the cut never splits one (an image left without its `)` is dropped). Short
+ * markdown is returned as is. The cards render through sectionPreviewHtml (same clipping).
+ */
+export function clipPreviewMarkdown(markdown: string, maxChars = PREVIEW_MAX_CHARS): string {
+  if (markdown.length <= maxChars) return markdown
+  const { text, held } = clipHoldingImages(markdown, maxChars)
+  return restoreHeld(text, held)
+}
+
+/**
+ * The preview HTML of a section (`htmlFromMarkdown` of `clipPreviewMarkdown`), rendered with
+ * the image sources still held so the markdown pass doesn't run its regexes over megabytes
+ * of base64 on every hover; the sources go back into the HTML (attribute-escaped) at the end.
+ */
+export function sectionPreviewHtml(markdown: string, maxChars = PREVIEW_MAX_CHARS): string {
+  const { text, held } = clipHoldingImages(markdown, maxChars)
+  const html = htmlFromMarkdown(text)
+  if (held.length === 0) return html
+  return restoreHeld(html, held, (s) => escapeHtml(s).replace(/"/g, '&quot;'))
+}
+
+/**
+ * Text of a section in text mode (`isRawMode`) for a preview: as in its textarea
+ * (NoteEditor), pasted image data shows as `[image]`; only `maxChars` of it.
+ */
+export function rawPreviewText(markdown: string, maxChars = PREVIEW_MAX_CHARS): string {
+  return markdown
+    .replace(DATA_IMAGE_RE, (_, open: string) => `${open}[image])`)
+    .slice(0, maxChars)
 }

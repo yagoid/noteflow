@@ -3,8 +3,7 @@ import type { CSSProperties, Ref } from 'react'
 import { ExternalLink, Lock, X } from 'lucide-react'
 import { FolderIcon } from '../Sidebar/NoteFolderHeader'
 import { formatNoteDate } from '../Sidebar/rowText'
-import { htmlFromMarkdown } from '../../lib/markdownHtml'
-import { clipPreviewMarkdown, sectionCardStats } from '../../lib/noteOverviewGrid'
+import { rawPreviewText, sectionCardStats, sectionPreviewHtml } from '../../lib/noteOverviewGrid'
 import { colorChannels, resolveGroupColor, type TagColorMap } from '../../lib/tagColors'
 import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { useT } from '../../i18n/useT'
@@ -51,7 +50,7 @@ export function SectionPreviewPane({
 
   // Only this section's markdown is rendered, and only when it changes.
   const html = useMemo(
-    () => (hasContent && !raw ? htmlFromMarkdown(clipPreviewMarkdown(content, PREVIEW_PANE_MAX_CHARS)) : ''),
+    () => (hasContent && !raw ? sectionPreviewHtml(content, PREVIEW_PANE_MAX_CHARS) : ''),
     [content, hasContent, raw],
   )
   const stats = useMemo(() => sectionCardStats(content), [content])
@@ -107,7 +106,7 @@ export function SectionPreviewPane({
                   {!hasContent ? (
                     <p className="cv-pv-sub">{t.overview.emptySection}</p>
                   ) : raw ? (
-                    <pre className="cv-pv-raw">{content.slice(0, PREVIEW_PANE_MAX_CHARS)}</pre>
+                    <pre className="cv-pv-raw">{rawPreviewText(content, PREVIEW_PANE_MAX_CHARS)}</pre>
                   ) : (
                     <div className="prose-editor">
                       <div className="ProseMirror" dangerouslySetInnerHTML={{ __html: html }} />

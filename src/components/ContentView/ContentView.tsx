@@ -12,16 +12,17 @@ import { SelectionBar } from '../SelectionBar'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { formatNoteDate } from '../Sidebar/rowText'
 import { PlacesRail, type RailEdit, type RailGroup } from './PlacesRail'
-import { NoteTimeline, type TimeKind, type TimelineEntry, type TimelineHandlers } from './NoteTimeline'
+import { NoteTimeline, type TimeKind, type TimelineDropMark, type TimelineEntry, type TimelineHandlers } from './NoteTimeline'
 import { SectionPreviewPane } from './SectionPreviewPane'
 import {
   ALL_PLACE, COLUMN_LIMITS, CONTENT_SORTS, DEFAULT_COLUMN_WIDTHS, DEFAULT_CONTENT_SORT, alreadyInPlace, buildNoteList,
-  buildPlaceContext, clampPreviewWidth, clampRailWidth, folderPlace, groupPlace, noteInPlace, noteListOrder,
-  noteLocation, noteShown, noteTime, parseColumnWidths, parseContentSort, parsePlace, placeExists, placeGroupId,
+  buildPlaceContext, clampPreviewWidth, clampRailWidth, contextNoteIds, folderPlace, groupPlace, noteInPlace, noteListOrder,
+  noteLocation, noteOrderContext, noteShown, noteTime, parseColumnWidths, parseContentSort, parsePlace, placeExists, placeGroupId,
   placeMovePatch, reconcileSelection, selectionRange, sortByUpdatedDesc, stepNote, stepSection, timeLabelKind,
   type ColumnWidths, type ContentPlace, type ContentSelection, type ContentSort, type NoteListSection,
 } from '../../lib/contentView'
 import { parseSearchQuery, noteMatchesQuery } from '../../lib/searchUtils'
+import { moveIdNextTo, type DropPosition } from '../../lib/sidebarGroups'
 import { colorChannels, NEW_GROUP_COLOR } from '../../lib/tagColors'
 import { ownsKeys } from '../../lib/keyScope'
 import { useT } from '../../i18n/useT'
@@ -89,6 +90,8 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   const createGroup = useGroupsStore((s) => s.createGroup)
   const renameGroup = useGroupsStore((s) => s.renameGroup)
   const renameFolder = useGroupsStore((s) => s.renameFolder)
+  const reorderFolders = useGroupsStore((s) => s.reorderFolders)
+  const setContextNoteOrder = useGroupsStore((s) => s.setContextNoteOrder)
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
 
   const ctx = useMemo(() => buildPlaceContext(groups, folders), [groups, folders])
@@ -104,6 +107,8 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   const [anchorId, setAnchorId] = useState<string | null>(null)
   const [draggingIds, setDraggingIds] = useState<ReadonlySet<string>>(EMPTY_IDS)
   const [dropPlace, setDropPlace] = useState<ContentPlace | null>(null)
+  // "As in the sidebar": where a dragged note would be reordered to.
+  const [rowDrop, setRowDrop] = useState<TimelineDropMark | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   // Rail: its inline input (+ Folder / + Group / rename) and the group / folder menus.
   const [railEdit, setRailEdit] = useState<RailEdit | null>(null)
@@ -303,10 +308,15 @@ export function ContentView({ place, onClose }: ContentViewProps) {
 
   // ── Drag a note (or the checked ones) onto a place ───────────────────────────
   const dragIdsRef = useRef<string[] | null>(null)
+  // Manual-order context (`noteOrder` key) of a single note dragged "As in the sidebar": it can
+  // also be dropped between the rows of that same context to reorder it (the sidebar's order).
+  const dragOrderKeyRef = useRef<string | null>(null)
   const endDrag = useCallback(() => {
     dragIdsRef.current = null
+    dragOrderKeyRef.current = null
     setDraggingIds(EMPTY_IDS)
     setDropPlace(null)
+    setRowDrop(null)
   }, [])
   // Safety net: the source row may unmount mid-drag (moved out of the list) and never get its dragend.
   useEffect(() => {
@@ -386,6 +396,8 @@ export function ContentView({ place, onClose }: ContentViewProps) {
       dragStart: (e, noteId) => {
         const ids = visibleChecked.has(noteId) ? checkedNotes.map((n) => n.id) : [noteId]
         dragIdsRef.current = ids
+        const dragged = ids.length === 1 && sort === 'sidebar' ? listed.find((n) => n.id === noteId) : undefined
+        dragOrderKeyRef.current = dragged ? noteOrderContext(dragged, place, ctx) : null
         e.dataTransfer.setData(NOTE_DRAG_TYPE, noteId)
         e.dataTransfer.setData('text/plain', noteId)
         e.dataTransfer.effectAllowed = 'move'
@@ -393,6 +405,38 @@ export function ContentView({ place, onClose }: ContentViewProps) {
         requestAnimationFrame(() => { if (dragIdsRef.current === ids) setDraggingIds(new Set(ids)) })
       },
       dragEnd: () => endDrag(),
+      dragOver: (e, noteId) => {
+        const key = dragOrderKeyRef.current
+        const draggedId = dragIdsRef.current?.[0]
+        const target = key && draggedId && draggedId !== noteId ? listed.find((n) => n.id === noteId) : undefined
+        // Not a reorder (by date, several notes, from the sidebar, itself, another context).
+        if (!target || noteOrderContext(target, place, ctx) !== key) {
+          setRowDrop((prev) => (prev === null ? prev : null))
+          return
+        }
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        const rect = e.currentTarget.getBoundingClientRect()
+        const position: DropPosition = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+        setRowDrop((prev) => (prev?.noteId === noteId && prev.position === position ? prev : { noteId, position }))
+      },
+      dragLeave: (e, noteId) => {
+        const next = e.relatedTarget as Node | null
+        if (next && e.currentTarget.contains(next)) return
+        setRowDrop((prev) => (prev?.noteId === noteId ? null : prev))
+      },
+      drop: (e, noteId) => {
+        const key = dragOrderKeyRef.current
+        const draggedId = dragIdsRef.current?.[0]
+        const mark = rowDrop
+        if (!key || !draggedId || mark?.noteId !== noteId) return
+        e.preventDefault()
+        endDrag()
+        // The context's full order (hidden and archived notes keep their place).
+        const ids = contextNoteIds(notes, key, { groups, folders, noteOrder })
+        const next = moveIdNextTo(ids, draggedId, noteId, mark.position)
+        if (next) void setContextNoteOrder(key, next)
+      },
     }
   })
   const handlers = useMemo<TimelineHandlers>(() => ({
@@ -403,6 +447,9 @@ export function ContentView({ place, onClose }: ContentViewProps) {
     contextMenu: (e, id, sid) => liveRef.current?.contextMenu(e, id, sid),
     dragStart: (e, id) => liveRef.current?.dragStart(e, id),
     dragEnd: () => liveRef.current?.dragEnd(),
+    dragOver: (e, id) => liveRef.current?.dragOver(e, id),
+    dragLeave: (e, id) => liveRef.current?.dragLeave(e, id),
+    drop: (e, id) => liveRef.current?.drop(e, id),
   }), [])
 
   // ── Keyboard ─────────────────────────────────────────────────────────────────
@@ -829,6 +876,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
           onCreateGroup={(name) => void handleCreateGroup(name)}
           onRenameGroup={(groupId, name) => void renameGroup(groupId, name)}
           onRenameFolder={(folderId, name) => void renameFolder(folderId, name)}
+          onReorderFolders={(groupId, ids) => void reorderFolders(groupId, ids)}
           onGroupContextMenu={openGroupMenu}
           onFolderContextMenu={openFolderMenu}
         />
@@ -846,6 +894,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
             selectedSectionId={previewVisible ? currentSectionId : null}
             checkedIds={visibleChecked}
             draggingIds={draggingIds}
+            dropMark={rowDrop}
             parsed={parsed}
             highlight={highlight}
             sectionTagColors={sectionTagColors}
@@ -901,6 +950,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
         <span><span className="cv-kbd">Enter</span> {t.contentView.hintOpen}</span>
         <span><span className="cv-kbd">Esc</span> {t.contentView.hintClose}</span>
         <span>{t.contentView.hintDrag}</span>
+        {sort === 'sidebar' && <span>{t.contentView.hintReorder}</span>}
       </footer>
 
       {confirmDelete && (

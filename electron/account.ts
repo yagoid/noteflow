@@ -15,7 +15,9 @@
 //                                                the CLI too)
 // Entitlements come from PostgREST: GET /rest/v1/subscriptions (RLS-scoped).
 // "Manage subscription" asks the billing-portal Edge Function for a fresh
-// Lemon Squeezy customer-portal link (resolveBillingPortal).
+// Lemon Squeezy customer-portal link (resolveBillingPortal); "Upgrade to
+// Bundle" asks billing-change-plan to change the plan of the current
+// subscription (upgradeToBundle).
 //
 // Security model: the refresh token is encrypted at rest and NEVER crosses to
 // the renderer; the access token lives only in main-process memory. The
@@ -46,13 +48,22 @@ import {
   LEMONSQUEEZY_CHECKOUT_URLS,
   LEMONSQUEEZY_STORE_PORTAL_URL,
   BILLING_PORTAL_FN_URL,
+  BILLING_CHANGE_PLAN_FN_URL,
   isCloudConfigured,
 } from './cloudConfig'
-import { computeEntitlements, hasBillingSubscription, Entitlements, NO_ENTITLEMENTS, SubscriptionRow } from './entitlements'
+import {
+  canUpgradeToBundle,
+  computeEntitlements,
+  hasBillingSubscription,
+  Entitlements,
+  NO_ENTITLEMENTS,
+  SubscriptionRow,
+} from './entitlements'
 import {
   entitlementsRetryDelayMs,
   isRetryableEntitlementsFailure,
   parseCachedBillingFlag,
+  parseCachedBundleUpgradeFlag,
   parseEntitlementsCache,
   type EntitlementsCache,
 } from './entitlementsRetry'
@@ -62,6 +73,7 @@ import {
   portalUrlFromFunctionResponse,
   type BillingPortalVia,
 } from './billingPortal'
+import { planChangeOutcome } from './planChange'
 import { writeSettingsFile } from './settingsFile'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -103,6 +115,12 @@ export interface AccountStatus {
    * (provider 'manual'), which have nothing to manage.
    */
   hasBillingSubscription: boolean
+  /**
+   * Exactly one of AI / Cloud, from exactly one active Lemon Squeezy
+   * subscription: the Bundle is offered as a PLAN CHANGE of that subscription
+   * (upgradeToBundle), not as a second checkout. False while unknown.
+   */
+  bundleUpgradeAvailable: boolean
 }
 
 /**
@@ -132,6 +150,9 @@ export type AccountErrorCode =
   | 'checkoutUnavailable'// no checkout URL for that product in this build
   | 'checkoutInvalidUrl' // the configured checkout URL didn't parse
   | 'billingPortalUnavailable' // neither the user's portal link nor the store portal could be opened
+  | 'planChangeUnavailable' // the Bundle upgrade failed (function missing, LS error, offline…)
+  | 'planChangeNotEligible' // no single LS AI/Cloud subscription to upgrade (comp, two subscriptions…)
+  | 'planChangeSubscriptionInactive' // the LS subscription is cancelled / past due / paused
 
 export interface AccountOpResult {
   ok: boolean
@@ -186,6 +207,12 @@ let entitlementsKnown = false
 let entitlementsFromCache = false
 // hasBillingSubscription of the same fetch (or cache) as `entitlements`.
 let billingSubscription = false
+// canUpgradeToBundle of the same fetch (or cache) as `entitlements`.
+let bundleUpgrade = false
+// After a successful plan change: re-fetch until the webhook has moved the row
+// to 'bundle' (it lands a few seconds after Lemon Squeezy applies the change).
+let planChangePollTimer: ReturnType<typeof setTimeout> | null = null
+const PLAN_CHANGE_POLL_DELAYS_MS = [2_000, 4_000, 8_000, 15_000, 30_000]
 
 // Refresh token on disk but undecryptable right now (keychain locked) — I1.
 let sessionLocked = false
@@ -305,6 +332,7 @@ function applyEntitlementsCache(): void {
   entitlementsKnown = true
   entitlementsFromCache = true
   billingSubscription = parseCachedBillingFlag(accountSettings?.entitlementsCache, accountSettings?.userId)
+  bundleUpgrade = parseCachedBundleUpgradeFlag(accountSettings?.entitlementsCache, accountSettings?.userId)
 }
 
 /**
@@ -393,9 +421,15 @@ function cancelEntitlementsRetry(): void {
   onlinePollTimer = null
 }
 
+function cancelPlanChangePoll(): void {
+  if (planChangePollTimer) clearTimeout(planChangePollTimer)
+  planChangePollTimer = null
+}
+
 function clearSession(): void {
   sessionGeneration++
   cancelEntitlementsRetry()
+  cancelPlanChangePoll()
   pendingPersist = false
   accountSettings = {}
   accessToken = null
@@ -405,6 +439,7 @@ function clearSession(): void {
   entitlementsKnown = false
   entitlementsFromCache = false
   billingSubscription = false
+  bundleUpgrade = false
   sessionLocked = false
   // The in-memory session is gone either way. A failed removal is retried
   // (timer, next account operation, before-quit) so the signed-out session
@@ -456,6 +491,7 @@ export function getAccountStatus(): AccountStatus {
     cloudCheckoutConfigured: LEMONSQUEEZY_CHECKOUT_URLS.cloud.length > 0,
     bundleCheckoutConfigured: LEMONSQUEEZY_CHECKOUT_URLS.bundle.length > 0,
     hasBillingSubscription: signedIn && entitlementsKnown && billingSubscription,
+    bundleUpgradeAvailable: signedIn && entitlementsKnown && bundleUpgrade,
   }
 }
 
@@ -548,11 +584,13 @@ export async function verifyOtp(email: string, code: string): Promise<AccountOpR
     // session must not land on this one, and its entitlements start UNKNOWN.
     sessionGeneration++
     cancelEntitlementsRetry()
+    cancelPlanChangePoll()
     entitlements = NO_ENTITLEMENTS
     entitlementsFetchedAt = undefined
     entitlementsKnown = false
     entitlementsFromCache = false
     billingSubscription = false
+    bundleUpgrade = false
     sessionLocked = false
 
     persistAccountSettings({
@@ -754,6 +792,71 @@ export async function resolveBillingPortal(): Promise<
   return { ok: true, url: fallback.toString(), via: 'storePortal' }
 }
 
+// ── Plan change ("Upgrade to Bundle") ─────────────────────────────────────────
+
+/**
+ * Upgrades the account's single AI / Cloud subscription to the Bundle through
+ * the billing-change-plan Edge Function, which CHANGES THE PLAN of that same
+ * Lemon Squeezy subscription (prorated, invoiced now, same interval) — never a
+ * second subscription. The entitlement itself arrives via the billing webhook,
+ * so a success starts a short re-fetch loop until both are on. Never throws;
+ * there is no fallback (a failure must not open a checkout that bills twice).
+ */
+export async function upgradeToBundle(): Promise<AccountOpResult> {
+  if (!isCloudConfigured()) return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured' }
+  const generation = sessionGeneration
+  const tokenResult = await getAccessTokenResult()
+  if (!tokenResult.ok) return { ok: false, ...TOKEN_FAILURE_RESULT[tokenResult.reason] }
+
+  let status: number
+  let json: unknown = null
+  try {
+    const res = await fetch(BILLING_CHANGE_PLAN_FN_URL, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${tokenResult.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ plan: 'bundle' }),
+      // The function waits on Lemon Squeezy twice (read + change, 15 s each).
+      signal: AbortSignal.timeout(40_000),
+    })
+    status = res.status
+    try {
+      json = await res.json()
+    } catch {
+      // non-JSON body (e.g. the gateway's 404 before the function is deployed)
+    }
+  } catch (err: unknown) {
+    console.error('[Account] plan change request failed:', String(err))
+    return { ok: false, error: NETWORK_ERROR, errorCode: 'network' }
+  }
+
+  const outcome = planChangeOutcome(status, json)
+  if (!outcome.ok) {
+    if (status === 401) invalidateAccessToken(tokenResult.token)
+    console.warn(`[Account] plan change to the Bundle failed: HTTP ${status} (${outcome.serverCode})`)
+    return { ok: false, error: 'Could not change the plan.', errorCode: outcome.errorCode }
+  }
+  if (generation === sessionGeneration) pollEntitlementsAfterPlanChange(generation)
+  return { ok: true }
+}
+
+/** Re-fetches entitlements on PLAN_CHANGE_POLL_DELAYS_MS until the Bundle shows up (or the session changes). */
+function pollEntitlementsAfterPlanChange(generation: number, step = 0): void {
+  cancelPlanChangePoll()
+  if (step >= PLAN_CHANGE_POLL_DELAYS_MS.length) return
+  planChangePollTimer = setTimeout(async () => {
+    planChangePollTimer = null
+    if (generation !== sessionGeneration) return
+    await refreshEntitlements()
+    if (generation !== sessionGeneration) return
+    if (entitlementsKnown && entitlements.ai && entitlements.cloud) return
+    pollEntitlementsAfterPlanChange(generation, step + 1)
+  }, PLAN_CHANGE_POLL_DELAYS_MS[step])
+}
+
 // ── Entitlements (fetch + retry) ──────────────────────────────────────────────
 
 const TOKEN_FAILURE_RESULT: Record<AccessTokenFailure, { error: string; errorCode: AccountErrorCode }> = {
@@ -819,6 +922,7 @@ async function fetchEntitlements(): Promise<RefreshEntitlementsResult> {
 
   entitlements = computeEntitlements(res.json as SubscriptionRow[])
   billingSubscription = hasBillingSubscription(res.json as SubscriptionRow[])
+  bundleUpgrade = canUpgradeToBundle(res.json as SubscriptionRow[])
   entitlementsFetchedAt = new Date().toISOString()
   entitlementsKnown = true
   entitlementsFromCache = false
@@ -833,6 +937,7 @@ async function fetchEntitlements(): Promise<RefreshEntitlementsResult> {
         cloud: entitlements.cloud,
         fetchedAt: entitlementsFetchedAt,
         billing: billingSubscription,
+        bundleUpgrade,
       },
     })
   }

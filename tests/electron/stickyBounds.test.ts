@@ -65,6 +65,31 @@ describe('stickyBounds (main)', () => {
     expect(next['n/s']).toEqual({ expanded })
   })
 
+  it('remembers whether the sticky was left folded without touching its rects', () => {
+    const expanded = { x: 100, y: 100, width: 300, height: 400 }
+    const folded = { x: 50, y: 900, width: 220, height: 39 }
+    const map = withStickyBounds({}, 'n/s', { expanded, folded })
+    const foldedMap = withStickyBounds(map, 'n/s', { isFolded: true })
+    expect(foldedMap['n/s']).toEqual({ expanded, folded, isFolded: true })
+    // unfolding clears the flag; the expanded size is still the normal one
+    expect(withStickyBounds(foldedMap, 'n/s', { isFolded: false })['n/s']).toEqual({ expanded, folded })
+    // a rect save keeps the flag
+    expect(withStickyBounds(foldedMap, 'n/s', { folded: { ...folded, y: 10 } })['n/s']?.isFolded).toBe(true)
+  })
+
+  it('keeps an entry with only the folded flag, and drops one left empty', () => {
+    const map = withStickyBounds({}, 'n/s', { isFolded: true })
+    expect(map).toEqual({ 'n/s': { isFolded: true } })
+    expect(withStickyBounds(map, 'n/s', { isFolded: false })).toEqual({})
+    const empty = {}
+    expect(withStickyBounds(empty, 'other/s', { isFolded: false })).toBe(empty)
+  })
+
+  it('sanitizes the folded flag (only true survives)', () => {
+    expect(sanitizeStickyBounds({ 'a/1': { isFolded: true }, 'b/2': { isFolded: 'yes' }, 'c/3': { isFolded: false } }))
+      .toEqual({ 'a/1': { isFolded: true } })
+  })
+
   it('is an LRU bounded to the cap: the latest save survives, the oldest goes', () => {
     let map = {}
     const r = { x: 0, y: 0, width: 300, height: 300 }

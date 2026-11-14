@@ -312,6 +312,66 @@ no hay fila, la app abre el portal genérico de la store (`https://<store>.lemon
 derivado de las URLs de checkout de `electron/cloudConfig.ts`), donde el cliente entra con el
 correo de la compra. Así el botón funciona desde el primer día; la función solo ahorra ese login.
 
+### 5.2 Pasar al Bundle (cambio de plan, "Upgrade")
+
+Con **una** de AI / Cloud pagada en Lemon Squeezy, la app ofrece el Bundle como **cambio de plan de
+esa misma suscripción** (no una segunda): la Edge Function `supabase/functions/billing-change-plan`
+comprueba la suscripción en LS y hace `PATCH https://api.lemonsqueezy.com/v1/subscriptions/<id>`
+con la variante de Bundle **del mismo intervalo** e `invoice_immediately: true` (prorrateo: se abona
+lo no usado y se cobra ya la diferencia; desde la renovación, precio del Bundle; misma fecha de
+renovación). Las entitlements las actualiza el webhook de siempre: LS manda `subscription_updated` /
+`subscription_plan_changed` de la misma suscripción con el `variant_id` nuevo y `billing-webhook`
+pone esa misma fila en `product='bundle'`. Diseño completo en `.agents/context/monetization.md` § 2
+("Pasar al Bundle"). Pasos del operador:
+
+1. **Requisitos ya existentes:** `LEMONSQUEEZY_API_KEY` (de live, § 5.1) y `LEMONSQUEEZY_VARIANT_MAP`
+   (§ 5, paso 3) — los secretos son de proyecto, la función nueva los lee igual. El webhook de live
+   debe escuchar `subscription_updated` (y `subscription_plan_changed`).
+2. **Secreto nuevo** — de cada variante de AI y Cloud a la variante de Bundle **del mismo
+   intervalo** (IDs de live de monetization.md § 3, "Billing en live mode"):
+
+   ```bash
+   supabase secrets set LEMONSQUEEZY_BUNDLE_UPGRADE_MAP=2268405:2268409,2268404:2268410,2268416:2268409,2268417:2268410
+   ```
+
+   (AI mensual→Bundle mensual, AI anual→Bundle anual, Cloud mensual→Bundle mensual, Cloud
+   anual→Bundle anual.) La función lo valida contra `LEMONSQUEEZY_VARIANT_MAP` (origen `ai`/`cloud`,
+   destino `bundle`); si no cuadra responde 500 `not_configured` y loguea el motivo.
+3. **Desplegar con verificación de JWT** (el default, como `billing-portal`):
+
+   ```bash
+   supabase functions deploy billing-change-plan
+   ```
+
+   ⚠️ **Antes de publicar la versión de la app** que muestra "Upgrade": sin la función, el botón
+   responde "Couldn't change your plan right now" (no hay fallback a checkout, a propósito).
+4. **Probar en test mode** (proyecto Supabase de pruebas o ventana corta, ver § 5 sobre los riesgos
+   de meter IDs de test): suscripción de AI de test → "Upgrade" → comprobar en LS la factura
+   prorrateada, que la suscripción pasa a la variante de Bundle **sin** crear otra, y que la fila de
+   `public.subscriptions` cambia a `product='bundle'` (misma `provider_ref`). Verificar también que
+   el `PATCH` solo con `variant_id` basta para cambiar de producto (si LS pidiera `product_id`,
+   añadirlo en `buildPlanChangeBody`).
+5. **Comprobar** (cuenta con una sola suscripción de LS activa):
+
+   ```bash
+   curl -sX POST https://<project-ref>.supabase.co/functions/v1/billing-change-plan \
+     -H "Authorization: Bearer <access-token>" -H "apikey: <anon-key>" \
+     -H "Content-Type: application/json" -d '{"plan":"bundle"}'
+   # → {"ok":true,"product":"bundle","changed":true}   (repetido: "changed":false, sin nuevo cargo)
+   ```
+
+   Errores: 404 `no_subscription` (sin suscripción de LS o solo una comp), 409 `already_entitled` /
+   `multiple_subscriptions` / `subscription_not_active` (cancelada, impagada, pausada o en trial: el
+   cliente la reactiva antes en el portal), 502 si LS falla.
+
+**Dos suscripciones sueltas AI + Cloud** (paga €9,98/mes en vez de €7,99): la app no ofrece nada
+(ya tiene ambas) y la función responde `already_entitled`. Si el cliente pide unificarlas, a mano en
+LS: cambiar **una** a la variante de Bundle de su intervalo (dashboard → la suscripción → *Change
+plan*, o el mismo `PATCH`; prorrateado) y **cancelar la otra** (sigue activa hasta su `ends_at`; LS
+no reembolsa solo el resto — decidir un reembolso parcial si procede: un reembolso **total** la
+expiraría por el webhook, ver "Reembolsos" en § 5). La fila cancelada queda `active` hasta `ends_at`
+y luego `expired`; el Bundle cubre ambas entitlements entretanto, sin duplicar acceso.
+
 ## 6. NoteFlow AI (proxy LLM)
 
 La Edge Function `supabase/functions/ai-proxy` expone un endpoint OpenAI-compatible

@@ -9,6 +9,7 @@ import { colorChannels, resolveGroupColor, type TagColorMap } from '../../lib/ta
 import { sectionLineWeights } from '../../lib/sectionLine'
 import { sectionSearchMatch, type ParsedQuery } from '../../lib/searchUtils'
 import type { ContentSort, DateBlock, NoteListHeading, NoteListSection, RouteMode } from '../../lib/contentView'
+import type { DropPosition } from '../../lib/sidebarGroups'
 import { useT } from '../../i18n/useT'
 import { formatDate } from '../../i18n/formatDate'
 import type { Messages } from '../../i18n'
@@ -42,6 +43,16 @@ export interface TimelineHandlers {
   contextMenu: (e: MouseEvent, noteId: string, sectionId: string | null) => void
   dragStart: (e: DragEvent, noteId: string) => void
   dragEnd: () => void
+  /** A row under a dragged note: reordering within its context ("As in the sidebar"). */
+  dragOver: (e: DragEvent<HTMLElement>, noteId: string) => void
+  dragLeave: (e: DragEvent<HTMLElement>, noteId: string) => void
+  drop: (e: DragEvent<HTMLElement>, noteId: string) => void
+}
+
+/** Where a reordered note would land: the row and the side of it. */
+export interface TimelineDropMark {
+  noteId: string
+  position: DropPosition
 }
 
 interface NoteTimelineProps {
@@ -52,6 +63,7 @@ interface NoteTimelineProps {
   selectedSectionId: string | null
   checkedIds: ReadonlySet<string>
   draggingIds: ReadonlySet<string>
+  dropMark: TimelineDropMark | null
   parsed: ParsedQuery
   highlight: string
   sectionTagColors: TagColorMap
@@ -111,7 +123,7 @@ function SectionHeading({ heading, count, sub = false }: { heading: NoteListHead
  * Styles: `.cv-*`.
  */
 export function NoteTimeline({
-  listRef, sections, sort, selectedNoteId, selectedSectionId, checkedIds, draggingIds, parsed, highlight,
+  listRef, sections, sort, selectedNoteId, selectedSectionId, checkedIds, draggingIds, dropMark, parsed, highlight,
   sectionTagColors, handlers, emptyLabel, onKeyDown,
 }: NoteTimelineProps) {
   const t = useT()
@@ -133,6 +145,7 @@ export function NoteTimeline({
         activeSectionId={selected ? selectedSectionId : null}
         checked={checkedIds.has(entry.note.id)}
         dragging={draggingIds.has(entry.note.id)}
+        dropPosition={dropMark?.noteId === entry.note.id ? dropMark.position : null}
         parsed={parsed}
         highlight={highlight}
         sectionTagColors={sectionTagColors}
@@ -184,6 +197,8 @@ interface TimelineRowProps extends TimelineEntry {
   activeSectionId: string | null
   checked: boolean
   dragging: boolean
+  /** Insertion line of a reorder drop on this row (null: none). */
+  dropPosition: DropPosition | null
   parsed: ParsedQuery
   highlight: string
   sectionTagColors: TagColorMap
@@ -193,7 +208,7 @@ interface TimelineRowProps extends TimelineEntry {
 // Memoized: with hundreds of notes, a selection change only re-renders the rows it touches.
 const TimelineRow = memo(function TimelineRow({
   note, time, timeKind, groupName, groupChannels, folderName, folderIcon, route, selected, activeSectionId, checked, dragging,
-  parsed, highlight, sectionTagColors, handlers,
+  dropPosition, parsed, highlight, sectionTagColors, handlers,
 }: TimelineRowProps) {
   const t = useT()
   const sections = note.sections
@@ -216,6 +231,7 @@ const TimelineRow = memo(function TimelineRow({
     selected && 'is-sel',
     checked && 'is-checked',
     dragging && 'is-dragging',
+    dropPosition && `is-drop-${dropPosition}`,
     note.archived && 'is-archived',
   ].filter(Boolean).join(' ')
 
@@ -250,6 +266,9 @@ const TimelineRow = memo(function TimelineRow({
       draggable
       onDragStart={(e) => handlers.dragStart(e, note.id)}
       onDragEnd={handlers.dragEnd}
+      onDragOver={(e) => handlers.dragOver(e, note.id)}
+      onDragLeave={(e) => handlers.dragLeave(e, note.id)}
+      onDrop={(e) => handlers.drop(e, note.id)}
       onClick={(e) => handlers.rowClick(e, note.id)}
       onDoubleClick={() => handlers.open(note.id)}
       onContextMenu={(e) => handlers.contextMenu(e, note.id, null)}

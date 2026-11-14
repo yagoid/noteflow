@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   NOTE_GRID_MIN_COLUMN,
+  PREVIEW_IMAGE_CHARS,
   PREVIEW_LINE_CHARS,
   TASK_STATS_MIN,
   WIDE_CARD_MIN_LINES,
@@ -8,11 +9,14 @@ import {
   gridColumnCount,
   gridNeighbor,
   planNoteGrid,
+  rawPreviewText,
   sectionCardIsWide,
   sectionCardStats,
+  sectionPreviewHtml,
   type NoteGridRow,
 } from '../../src/lib/noteOverviewGrid'
 import { reorderDropSide } from '../../src/lib/sectionMap'
+import { htmlFromMarkdown } from '../../src/lib/markdownHtml'
 
 // Compact view of a plan: each row as "id:units" / "+:units", slim rows marked with "~".
 const shape = (rows: NoteGridRow[]) =>
@@ -268,6 +272,72 @@ describe('clipPreviewMarkdown', () => {
     expect(clipped.startsWith('intro\n\n```js\n')).toBe(true)
     expect(clipped.endsWith('\n```')).toBe(true)
     expect(clipped.length).toBeLessThanOrEqual(124)
+  })
+
+  // A pasted image keeps its data inline: thousands of base64 chars in one source.
+  const dataSrc = `data:image/png;base64,${'A'.repeat(20_000)}`
+
+  it('counts a pasted image as PREVIEW_IMAGE_CHARS, not its data length', () => {
+    const md = `intro\n\n![shot](${dataSrc}){width=320}\n\nafter`
+    expect(clipPreviewMarkdown(md, 1000)).toBe(md)
+  })
+
+  it('never cuts inside an image: one the cut would split is dropped', () => {
+    const md = `${'a'.repeat(30)}\n${'b'.repeat(30)} ![x](${dataSrc}) tail`
+    const clipped = clipPreviewMarkdown(md, 60 + PREVIEW_IMAGE_CHARS / 2)
+    expect(clipped).toBe(`${'a'.repeat(30)}\n${'b'.repeat(30)}`)
+    expect(clipped).not.toContain('base64')
+  })
+
+  it('keeps the images that fit the budget and puts their sources back', () => {
+    const img = (n: number) => `![i${n}](data:image/png;base64,${String(n).repeat(5_000)})`
+    const md = [img(1), img(2), img(3), img(4)].join('\n\n')
+    const clipped = clipPreviewMarkdown(md, PREVIEW_IMAGE_CHARS * 2 + 40)
+    expect(clipped).toBe(`${img(1)}\n\n${img(2)}`)
+  })
+})
+
+describe('sectionPreviewHtml', () => {
+  const dataSrc = `data:image/png;base64,${'Q'.repeat(10_000)}`
+
+  it('renders a pasted image as an <img> with its full source', () => {
+    const html = sectionPreviewHtml(`text\n\n![shot](${dataSrc}){width=200}\n\nmore`)
+    expect(html).toContain(`src="${dataSrc}"`)
+    expect(html).toContain('width="200"')
+    expect(html).toContain('more')
+    expect(html).not.toMatch(/[\uE010\uE011]/)
+  })
+
+  it('renders short markdown with linked images as htmlFromMarkdown does', () => {
+    const md = '# Title\n\n- [ ] task\n\n![a](https://example.com/a.png)'
+    expect(sectionPreviewHtml(md)).toBe(htmlFromMarkdown(md))
+  })
+
+  it('leaves a data URI inside a code span as text', () => {
+    const html = sectionPreviewHtml(`\`![x](${dataSrc})\``)
+    expect(html).toContain(`<code>![x](${dataSrc})</code>`)
+  })
+
+  it("never reads the user's own private-use characters as a held image", () => {
+    const literal = 'literal \uE0100\uE010 here'
+    const md = [literal, `![shot](${dataSrc})`].join('\n\n')
+    const html = sectionPreviewHtml(md)
+    expect(html).toContain(literal)
+    expect(html.split(dataSrc)).toHaveLength(2)
+    expect(html).toContain(`src="${dataSrc}"`)
+    expect(clipPreviewMarkdown(md, 1000)).toBe(md)
+  })
+
+  it('drops a held character the hard cut halved', () => {
+    expect(clipPreviewMarkdown(`${'x'.repeat(10)}\uE010${'y'.repeat(5)}`, 11)).toBe('x'.repeat(10))
+  })
+})
+
+describe('rawPreviewText', () => {
+  it('shows pasted image data as [image] and caps the length', () => {
+    const md = `a ![shot](data:image/png;base64,${'Z'.repeat(5_000)}) b`
+    expect(rawPreviewText(md)).toBe('a ![shot]([image]) b')
+    expect(rawPreviewText('x'.repeat(50), 10)).toBe('x'.repeat(10))
   })
 })
 

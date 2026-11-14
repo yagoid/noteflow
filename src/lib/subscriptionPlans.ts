@@ -19,6 +19,11 @@ export interface PlanAccountView {
   entitlements: { ai: boolean; cloud: boolean }
   /** False = entitlements never fetched for this session: UNKNOWN, not "not entitled". */
   entitlementsKnown: boolean
+  /**
+   * Main says the single entitlement comes from exactly one Lemon Squeezy
+   * subscription whose plan can be changed to the Bundle (AccountStatus field).
+   */
+  bundleUpgradeAvailable?: boolean
 }
 
 /**
@@ -48,6 +53,19 @@ export function isPlanOffered(account: PlanAccountView, product: SubscriptionPro
   const { ai, cloud } = account.entitlements
   if (product === 'bundle') return !ai && !cloud
   return product === 'ai' ? !ai : !cloud
+}
+
+/**
+ * Is the Bundle offered as an UPGRADE (plan change of the current
+ * subscription, prorated) instead of a checkout? Signed in, entitlements KNOWN,
+ * exactly one of AI / Cloud, and main confirmed that one is a single Lemon
+ * Squeezy subscription it can change. Never at the same time as
+ * isPlanOffered(account, 'bundle') (that one needs both missing).
+ */
+export function isBundleUpgradeOffered(account: PlanAccountView): boolean {
+  if (!account.signedIn || !account.entitlementsKnown) return false
+  const { ai, cloud } = account.entitlements
+  return ai !== cloud && account.bundleUpgradeAvailable === true
 }
 
 /**

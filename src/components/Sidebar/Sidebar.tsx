@@ -23,7 +23,7 @@ import { NoteFolderHeader, FolderGlyph, FolderIcon } from './NoteFolderHeader'
 import { GroupGuides } from './GroupGuides'
 import { DROP_SPRING_OPEN_MS, dropChangesPlace, staggerStep } from '../../lib/sidebarGuides'
 import { useSidebarGroups, type SidebarFolder } from './useSidebarGroups'
-import { compareSidebarNotes } from '../../lib/sidebarGroups'
+import { compareSidebarNotes, moveIdNextTo, type DropPosition } from '../../lib/sidebarGroups'
 import { SectionTabsRow } from './SectionTabsRow'
 import { NoteSectionMap } from './NoteSectionMap'
 import { RowShiftFlip } from './NoteSectionFlip'
@@ -230,6 +230,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const toggleGroupCollapsed = useGroupsStore((s) => s.toggleGroupCollapsed)
   const createFolder = useGroupsStore((s) => s.createFolder)
   const renameFolder = useGroupsStore((s) => s.renameFolder)
+  const reorderFolders = useGroupsStore((s) => s.reorderFolders)
   const toggleFolderCollapsed = useGroupsStore((s) => s.toggleFolderCollapsed)
   const noteOrder = useGroupsStore((s) => s.noteOrder)
   const setContextNoteOrder = useGroupsStore((s) => s.setContextNoteOrder)
@@ -273,6 +274,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   // â”€â”€ Group drag-to-reorder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null)
   const [groupDropTarget, setGroupDropTarget] = useState<{ groupId: string; position: 'before' | 'after' } | null>(null)
+
+  // ── Folder drag-to-reorder (within its group) ──
+  const [draggingFolder, setDraggingFolder] = useState<{ id: string; groupId: string } | null>(null)
+  const [folderDropTarget, setFolderDropTarget] = useState<{ folderId: string; position: DropPosition } | null>(null)
 
   const [keyboardResultIndex, setKeyboardResultIndex] = useState(-1)
   const [newNoteCtx, setNewNoteCtx] = useState<{ x: number; y: number } | null>(null)
@@ -420,7 +425,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   // inline rename / new group-folder input (it would steal its focus). The menus' delete
   // confirmations (Group/FolderContextMenu) cover the screen, so no header can be hovered.
   const peekBlocked =
-    draggingGroupId != null || contextMenu != null || groupContextMenu != null ||
+    draggingGroupId != null || draggingFolder != null || contextMenu != null || groupContextMenu != null ||
     folderContextMenu != null || newNoteCtx != null || footerMenu != null || identityMenuOpen ||
     editingGroupId != null || editingFolderId != null || newFolderInput != null || newGroupInput
   // Only label the ungrouped remainder ("notes") when something sits above it â€”
@@ -634,6 +639,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   }
 
   function handleNoteReorderDrop(e: React.DragEvent<HTMLLIElement>, targetNote: (typeof rawNotes)[0], contextKey: string) {
+    // Not a sidebar note drag (e.g. a folder being reordered): let the drop bubble to the
+    // folder block (`.sbg-f`) untouched. Nothing else reaches here — the rows' dragover
+    // only accepts sidebar note drags, so no outside drop lands on a row.
+    if (!draggingNoteContextRef.current) return
     // Cross-context drops are handled by the group/folder move zones (which this
     // would otherwise bubble into); only reorder within the same context here.
     if (draggingNoteContextRef.current && draggingNoteContextRef.current !== contextKey) {
@@ -730,6 +739,69 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     void reorderGroups(without)
   }
 
+  // ── Folder reorder via drag & drop (only among the folders of its own group) ──
+  // The whole folder block (header + notes) is the target: before / after it by halves.
+  // Note drags never reach here (draggingFolder is null) and vice versa: the note handlers
+  // bail out without a dragged note.
+  function handleFolderDragStart(e: React.DragEvent, folderId: string, groupId: string) {
+    e.dataTransfer.setData('application/x-noteflow-folder-id', folderId)
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggingFolder({ id: folderId, groupId })
+  }
+
+  function handleFolderDragEnd() {
+    setDraggingFolder(null)
+    setFolderDropTarget(null)
+  }
+
+  function handleFolderDragOver(e: React.DragEvent<HTMLElement>, folderId: string, groupId: string) {
+    if (!draggingFolder || draggingFolder.groupId !== groupId) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    if (folderId === draggingFolder.id) {
+      setFolderDropTarget(null)
+      return
+    }
+    const rect = e.currentTarget.getBoundingClientRect()
+    const position: DropPosition = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    setFolderDropTarget((prev) =>
+      prev?.folderId === folderId && prev.position === position ? prev : { folderId, position }
+    )
+  }
+
+  function handleFolderDragLeave(e: React.DragEvent, folderId: string) {
+    const next = e.relatedTarget as Node | null
+    if (next && e.currentTarget.contains(next)) return
+    setFolderDropTarget((prev) => (prev?.folderId === folderId ? null : prev))
+  }
+
+  function handleFolderDrop(e: React.DragEvent, folderId: string, groupId: string) {
+    if (!draggingFolder) return
+    e.preventDefault()
+    e.stopPropagation()
+    const dragged = draggingFolder
+    const position = folderDropTarget?.folderId === folderId ? folderDropTarget.position : null
+    handleFolderDragEnd()
+    if (dragged.groupId !== groupId || !position) return
+    const ids = folders
+      .filter((f) => f.groupId === groupId)
+      .sort((a, b) => a.order - b.order)
+      .map((f) => f.id)
+    const next = moveIdNextTo(ids, dragged.id, folderId, position)
+    if (next) void reorderFolders(groupId, next)
+  }
+
+  // Insertion line of a folder drop: a zero-height box at the block's top or bottom edge
+  // (the line straddles the boundary without moving the list).
+  function renderFolderDropLine() {
+    return (
+      <div aria-hidden style={{ position: 'relative', height: 0 }}>
+        <div style={{ position: 'absolute', top: -1, left: 17, right: 4, height: 2, borderRadius: 2, background: 'rgb(var(--text) / 0.5)', zIndex: 5, pointerEvents: 'none' }} />
+      </div>
+    )
+  }
+
   function renderNoteButton(note: Note, group?: { id: string; color: GroupColor; name?: string } | null, indent?: number, inFavorites?: boolean, wrapperClassName?: string, staggerIndex?: number) {
     // When the note overview is open the editor is hidden, so the highlighted
     // note must follow that view; otherwise fall back to the active editor note.
@@ -784,17 +856,28 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     if (!isSidebarFolderShown(folderNotes.length, hasActiveFilters)) return null
     const isMoveTarget = noteMoveTarget?.folderId === folder.id
     const hasOpenNote = openNote?.group === group.id && openNote.folder === folder.id
+    const folderDrop = folderDropTarget?.folderId === folder.id ? folderDropTarget.position : null
     return (
       <div
         key={`folder-${folder.id}`}
         data-sbg-folder={folder.id}
         className={`sbg-f${collapsed ? ' is-collapsed' : ''}${hasOpenNote ? ' has-open' : ''}${isMoveTarget ? ' is-drop' : ''}`}
         // --fi: the header's stagger step; its notes enter after it when the group unfolds.
-        style={{ '--fi': staggerIndex } as React.CSSProperties}
-        onDragOver={(e) => handleNoteMoveDragOver(e, group.id, folder.id)}
-        onDragLeave={(e) => handleNoteMoveDragLeave(e, group.id, folder.id)}
-        onDrop={(e) => handleNoteMoveDrop(e, group.id, folder.id)}
+        style={{ '--fi': staggerIndex, ...(draggingFolder?.id === folder.id ? { opacity: 0.4 } : {}) } as React.CSSProperties}
+        onDragOver={(e) => {
+          if (draggingFolder) handleFolderDragOver(e, folder.id, group.id)
+          else handleNoteMoveDragOver(e, group.id, folder.id)
+        }}
+        onDragLeave={(e) => {
+          if (draggingFolder) handleFolderDragLeave(e, folder.id)
+          else handleNoteMoveDragLeave(e, group.id, folder.id)
+        }}
+        onDrop={(e) => {
+          if (draggingFolder) handleFolderDrop(e, folder.id, group.id)
+          else handleNoteMoveDrop(e, group.id, folder.id)
+        }}
       >
+        {folderDrop === 'before' && renderFolderDropLine()}
         {editingFolderId === folder.id ? (
           <div className="flex items-center gap-1.5 ml-[17px] px-1.5 py-1">
             <FolderIcon icon={folder.icon} />
@@ -827,6 +910,8 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
             onContextMenu={(e) => {
               setFolderContextMenu({ x: e.clientX, y: e.clientY, folderId: folder.id })
             }}
+            onDragStart={(e) => handleFolderDragStart(e, folder.id, group.id)}
+            onDragEnd={handleFolderDragEnd}
           />
         )}
 
@@ -853,6 +938,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
             </div>
           </div>
         </div>
+        {folderDrop === 'after' && renderFolderDropLine()}
       </div>
     )
   }

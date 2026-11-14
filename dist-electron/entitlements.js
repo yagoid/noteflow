@@ -8,6 +8,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.NO_ENTITLEMENTS = exports.BILLING_PROVIDER = void 0;
 exports.computeEntitlements = computeEntitlements;
 exports.hasBillingSubscription = hasBillingSubscription;
+exports.canUpgradeToBundle = canUpgradeToBundle;
 /** `subscriptions.provider` of rows written by the Lemon Squeezy webhook. */
 exports.BILLING_PROVIDER = 'lemonsqueezy';
 exports.NO_ENTITLEMENTS = { ai: false, cloud: false };
@@ -39,4 +40,24 @@ function computeEntitlements(rows) {
  */
 function hasBillingSubscription(rows) {
     return (rows ?? []).some((row) => !!row && row.provider === exports.BILLING_PROVIDER);
+}
+/**
+ * Can the account move to the Bundle by CHANGING THE PLAN of its current
+ * subscription (Edge Function billing-change-plan) instead of buying a second
+ * one? Exactly one of AI / Cloud is entitled, and it comes from exactly one
+ * active Lemon Squeezy 'ai' | 'cloud' row. Not for a 'manual' comp (nothing to
+ * change in LS), nor for two separate AI + Cloud subscriptions (already both
+ * entitled). MIRROR of pickUpgradeSubscription in
+ * supabase/functions/billing-change-plan/logic.ts, which is the real judge
+ * (it also checks the subscription with LS).
+ */
+function canUpgradeToBundle(rows) {
+    const { ai, cloud } = computeEntitlements(rows);
+    if (ai === cloud)
+        return false; // none, or both already
+    const upgradable = (rows ?? []).filter((row) => !!row &&
+        row.status === 'active' &&
+        row.provider === exports.BILLING_PROVIDER &&
+        (row.product === 'ai' || row.product === 'cloud'));
+    return upgradable.length === 1;
 }

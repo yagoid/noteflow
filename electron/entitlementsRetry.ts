@@ -61,6 +61,8 @@ export interface EntitlementsCache {
   fetchedAt: string // ISO
   /** hasBillingSubscription of that fetch (optional: caches written before it existed lack it). */
   billing?: boolean
+  /** canUpgradeToBundle of that fetch (optional: caches written before it existed lack it). */
+  bundleUpgrade?: boolean
 }
 
 /**
@@ -87,6 +89,16 @@ export function parseEntitlementsCache(
 export function parseCachedBillingFlag(raw: unknown, userId: string | undefined | null): boolean {
   if (!parseEntitlementsCache(raw, userId)) return false
   return (raw as Record<string, unknown>).billing === true
+}
+
+/**
+ * The cached "can upgrade to the Bundle by plan change" flag. Same rules as
+ * parseCachedBillingFlag: only from a cache of `userId`; absent / malformed →
+ * false (the upgrade card simply waits for the boot fetch).
+ */
+export function parseCachedBundleUpgradeFlag(raw: unknown, userId: string | undefined | null): boolean {
+  if (!parseEntitlementsCache(raw, userId)) return false
+  return (raw as Record<string, unknown>).bundleUpgrade === true
 }
 
 /** The bits of the public AccountStatus the known/unknown rule looks at. */

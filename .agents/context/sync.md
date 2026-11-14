@@ -196,8 +196,9 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
 - `login` **no** escribe `lastSync` (re-login al mismo repo conserva el estado previo; otro repo
   empieza limpio) y hace un primer `pull` automático (salvo `--no-pull` o Cloud activo en el CLI).
 - **Todo** `pull` de GitHub (`pull`, su alias `update`, `--force` y el de tras el login) lo escribe
-  solo si no quedan notas solo-locales (`localOnlyNoteDirs`: sin `note.md` en el remoto, aunque
-  tenga secciones); si quedan, conserva el valor previo (o ninguno) y avisa con un texto neutro
+  solo si no quedan **notas aún no subidas** (`localOnlyNoteDirs`: sin `note.md` en el remoto, aunque
+  tenga secciones; desde CLI 2.12.0 cuenta sobre `listSyncedNoteDirs`, así que no incluye las notas
+  `localOnly: true` de "Notas solo-locales" abajo — concepto distinto pese al nombre); si quedan, conserva el valor previo (o ninguno) y avisa con un texto neutro
   (`… not on GitHub (new here, or deleted on another device) — run 'noteflow push' … if new`): el
   pull del CLI no aplica borrados, así que una nota borrada en otro dispositivo también sale aquí.
 - `push` (y `migrate`, que lo llama) lo escribe solo si **ningún** fichero falló al subir — un
@@ -268,6 +269,51 @@ La app solo desactiva la regla de borrado si `cloudSync.enabled` (`isCloudSyncEn
 `isCloudSyncEnabledFailClosed` devuelve true también con `cliCloud.enabled === true`, y el CLI marca
 `githubSync.needsFullReconcile` en `cloud login` y `cloud logout` (espejo de
 `enableCloudSync`/`disableCloudSync`).
+
+### Notas solo-locales (`localOnly: true`) — nunca se sincronizan
+
+Una nota cuyo `note.md` lleva `localOnly: true` (clave de primer nivel; ver `note-format.md`) **no sale
+nunca de este dispositivo**. Hoy solo la tiene la **nota de bienvenida** de la primera ejecución
+(`electron/welcomeNote.ts`, ver `architecture.md` § `welcomeNoteSeeded`): si el usuario instala en un
+segundo equipo que ya sincroniza con su cuenta o su repo, esa nota no aparece en los demás ni en el remoto.
+Sigue siendo local **aunque se edite** (los tres espejos del formato conservan la clave); no hay UI para
+"convertirla en normal" — el propio texto de la nota lo explica y basta con copiar lo que interese a otra.
+
+La marca vive **en la nota** (sobrevive reinicios y la ve el CLI). Módulo `electron/localOnlyNotes.ts`
+(testeado en `tests/electron/localOnlyNotes.test.ts`): `isLocalOnlyNoteMd` (puro, solo mira el
+frontmatter; solo cuenta el booleano **sin comillas** `true`/`True`/`TRUE`, igual que los parsers, que
+descartan `"true"` como string), `isLocalOnlyDir`/`isLocalOnlySyncPath` (leen el ancla) y
+`listSyncedNoteDirs` = `listNoteDirs` menos las solo-locales. **Borrados:** cuando llega el `scheduleDeleteDir` la carpeta ya no
+existe en disco (`applyNoteDelete` la borra antes), así que `isLocalOnlyDir` **recuerda en memoria** cada
+carpeta que vio con la marca y responde por ella; `main.ts` la ceba al arrancar
+(`primeLocalOnlyDirs(NOTES_DIR)`, justo tras crear la de bienvenida y antes de cualquier código de sync).
+
+Dónde se aplica la exclusión (sin journal, sin request, `onComplete` inmediato):
+- **GitHub (`githubSync.ts`):** `schedulePush`, `pushPathsNow` (salta esas rutas), `scheduleDelete`,
+  `scheduleDeleteDir`; `listLocalSyncPaths` usa `listSyncedNoteDirs` (→ `pushAllNotes`, migración remota
+  v2 y **espejo** `mirrorToGitHub`); el catch-up del pull (`flushPendingLocalChanges`) y la **regla de
+  borrado del pull** comprueban `isLocalOnlyNoteMd` sobre el ancla que **ya leen** (sin I/O extra; en la
+  regla, solo para las carpetas ausentes del remoto). Sin esto la regla la borraría: está ausente del
+  repo por diseño y su `updated` acaba siendo `<= lastSync`. Cubierto e2e contra un GitHub simulado en
+  `tests/electron/localOnlySync.test.ts`.
+- **Cloud (`cloudSync.ts`):** `schedulePush` (tampoco se journala con la puerta cerrada), `pushPathsNow`,
+  `scheduleDelete`, `scheduleDeleteDir` y el catch-up `flushPendingLocalChanges` (primera subida de todo
+  el corpus; mismo chequeo sobre el ancla ya leída). El pull no toca carpetas que el servidor no tiene,
+  así que no necesita nada más. Test: `tests/electron/localOnlyCloud.test.ts`.
+- **Metadatos de raíz** (sí se sincronizan): `note-order.json` puede llevar el **id** de la nota de
+  bienvenida si el usuario la reordena, y `section-colors.json` los **nombres** de sus secciones si les
+  pone color. En los demás dispositivos son referencias colgantes inofensivas (un id de orden sin nota se
+  ignora; un color por nombre solo se aplica a secciones que se llamen así).
+- **`main.ts`** no filtra nada: todo pasa por esas funciones (escrituras del editor, imports, tools del
+  chat con push durable, borrados, caducidad de temporales).
+- **CLI (`cli/noteflow.js`, desde 2.12.0):** espejo `isLocalOnlyNoteMd`/`isLocalOnlyNoteDir`;
+  `syncPushNoteFiles` no sube nada de esas notas (imprime `Local-only note — not synced` si hay backend),
+  `push` (GitHub) y `cloud push` las excluyen (`listSyncedNoteDirs`), `delete` y `section delete` no
+  borran en remoto, y el aviso del `pull` de GitHub "N local notes are not on GitHub" no las cuenta (si
+  no, `lastSync` no avanzaría nunca). ⚠️ Un CLI **anterior a 2.12.0** sí la subiría con `noteflow push`.
+- **IA:** sin excepción — se indexa y la ve el chat como cualquier nota (es contenido del usuario en
+  cuanto la edita, y el agente puede usarla para responder "¿cómo hago…?"). Con la IA desactivada por
+  defecto, en la primera ejecución no se indexa nada.
 
 ### GitHub Sync (`electron/githubSync.ts`)
 - **Auth:** Device Flow OAuth — sin client secret; el usuario autoriza en

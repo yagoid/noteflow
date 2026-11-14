@@ -25,6 +25,10 @@ noteflow/
 │   ├── noteFormat.ts    # Formato v2 en el main (espejo de src/lib/noteUtils.ts):
 │   │                    #   parseNoteDir, serializeNoteFolder, listNoteDirs, parser legacy v1
 │   ├── migration.ts     # Migración única v1→v2 (flat .md → carpetas), idempotente
+│   ├── localOnlyNotes.ts # Notas solo-locales (`localOnly: true` en note.md): detección + carpetas que el
+│   │                    #   sync puede tocar (listSyncedNoteDirs) — testeada; ver sync.md "Notas solo-locales"
+│   ├── welcomeNote.ts   # Nota de bienvenida de la primera ejecución (decisión pura + contenido EN/ES) —
+│   │                    #   testeada; la crea main.ts al arrancar (seedWelcomeNoteIfFirstRun)
 │   ├── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull por carpeta,
 │   │                    #   Trees API, migración remota, cifrado token)
 │   ├── cliConnect.ts    # Ajustes → Sync → "Connect the CLI too": ejecuta el CLI empaquetado (Cloud) y
@@ -45,8 +49,9 @@ noteflow/
 │   ├── snippetsFile.ts  # Pura: saneo de snippets.json (fragmentos del toolbar) en lectura y escritura — testeada
 │   ├── whatsNewSeen.ts  # Pura: saneo/unión de settings.whatsNewSeen (tour "What's new") — testeada;
 │   │                    #   espejo de src/lib/whatsNew.ts — ver patterns.md
-│   ├── stickyBounds.ts  # Pura: geometría recordada de las stickies (settings.stickyBounds, por PC):
-│   │                    #   saneo/LRU/visibilidad en displays — testeada; ver patterns.md § Ventanas sticky
+│   ├── stickyBounds.ts  # Pura: geometría y estado plegado recordados de las stickies
+│   │                    #   (settings.stickyBounds, por PC): saneo/LRU/visibilidad en displays —
+│   │                    #   testeada; ver patterns.md § Ventanas sticky
 │   ├── tempNoteExpiry.ts # Lógica pura: cuándo puede correr el autoborrado de notas temporales
 │   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
 │   ├── updateAsset.ts   # Lógica pura del auto-update: qué asset/URL ofrecer por plataforma y
@@ -377,12 +382,13 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `sync:pull` | handle | Sync manual de **GitHub** (Settings → Sync → GitHub "Sync now"): drena el journal y luego pull. Rechazado con Cloud activo (`error: 'cloud-enabled'`, ver `sync.md`) |
 | `sync:pull-active` | handle | Sync manual enrutado al backend **activo** (Cloud si `enabled`, GitHub si no): pull **y** drain del journal (ver `sync.md`) — lo usa el botón de la titlebar |
 | `sync:mirror-to-github` | handle | **Espejo local → repo**: deja GitHub como copia exacta del disco (sube lo que difiere, borra lo que ya no existe). **Solo con Cloud habilitado** (gate en `main.ts`; si no → `{ok:false, error:'cloud-required'}`). No cambia nada local — ver `sync.md` |
-| `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsKnown, entitlementsFetchedAt, sessionLocked, aiCheckoutConfigured, cloudCheckoutConfigured, bundleCheckoutConfigured, hasBillingSubscription}`; `entitlementsKnown: false` = desconocidas, no "sin plan" (ver `monetization.md` § 2); `hasBillingSubscription` = tiene/tuvo una suscripción de Lemon Squeezy, gate de "Manage subscription") — **nunca** tokens |
+| `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsKnown, entitlementsFetchedAt, sessionLocked, aiCheckoutConfigured, cloudCheckoutConfigured, bundleCheckoutConfigured, hasBillingSubscription, bundleUpgradeAvailable}`; `entitlementsKnown: false` = desconocidas, no "sin plan" (ver `monetization.md` § 2); `hasBillingSubscription` = tiene/tuvo una suscripción de Lemon Squeezy, gate de "Manage subscription"; `bundleUpgradeAvailable` = una sola de AI/Cloud vía una sola suscripción de LS activa → el Bundle se ofrece como cambio de plan) — **nunca** tokens |
 | `account:request-otp` | handle | Envía el código OTP (8 dígitos) por email (Supabase GoTrue, `create_user: true`) |
 | `account:verify-otp` | handle | Verifica `(email, code)` → guarda sesión (refresh token cifrado en `settings.account`) + primer fetch de entitlements |
 | `account:sign-out` | handle | Logout best-effort en el servidor (`/auth/v1/logout?scope=local`: solo esta sesión) + limpia la sección `account` y el estado. La app vuelve a su estado gratuito: Cloud `enabled=false`, **sesión de claves borrada** (DEK + cache + `keysMode`/`remoteKeysKnown`), IA gestionada → proveedor BYO/local, y se guarda `accountRestore` (ver `monetization.md` § 4 "Cerrar sesión") |
 | `account:refresh-entitlements` | handle | Relee `subscriptions` vía PostgREST/RLS y re-deriva `{ai, cloud}` (y las cachea en `account.entitlementsCache`). **Single-flight** (comparte la petición en curso de la misma sesión); un fallo transitorio entra en el **backoff** de reintentos automáticos (también al volver de suspensión / recuperar la red). `errorCode`: `network` (sin conexión — también si falla el refresh del token por red), `sessionLocked` (llavero del sistema bloqueado), `refreshFailed` (error del servidor), `notSignedIn`, `notConfigured`. Ver `monetization.md` § 2 |
 | `account:open-checkout` | handle | Abre el checkout de Lemon Squeezy en el navegador con `checkout[custom][user_id]` (URL construida en main — el userId no cruza al renderer) |
+| `account:upgrade-to-bundle` | handle | "Upgrade" del Bundle con AI o Cloud ya pagado: `account.upgradeToBundle` llama (con el access token) a la Edge Function `billing-change-plan`, que **cambia el plan** de esa misma suscripción de Lemon Squeezy (prorrateado, cobro inmediato, mismo intervalo) — nunca un segundo checkout; tras el OK re-pide entitlements hasta ver el Bundle. Sin fallback. Ver `monetization.md` § 2 "Pasar al Bundle" |
 | `account:open-billing-portal` | handle | "Manage subscription": pide a la Edge Function `billing-portal` (con el access token) el enlace pre-firmado del customer portal de Lemon Squeezy y lo abre con `shell.openExternal`; ante **cualquier** fallo abre el portal genérico de la store (`LEMONSQUEEZY_STORE_PORTAL_URL`, login por email). Ambas URLs pasan la allowlist https + `*.lemonsqueezy.com` (`electron/billingPortal.ts`). Devuelve `{ok, via: 'customerPortal'\|'storePortal'}` o `errorCode: 'billingPortalUnavailable'`. Ver `monetization.md` § 2 |
 | `cloud:get-status` | handle | Estado público de NoteFlow Cloud (`{configured, enabled, signedIn, keysState: 'unlocked'\|'locked'\|'no-keys', keysMode: 'managed'\|'e2ee'\|null, lastSync, error, initialPullStatus, realtimeConnected, conflictCopies?, conflictMerges?}`) — **nunca** material de claves |
 | `cloud:setup` | handle | Passphrase → genera DEK + recovery code, sube `user_keys` y desbloquea; **devuelve el recovery code UNA vez** (no se persiste) — setup en modo e2ee (privado) |
@@ -469,7 +475,8 @@ Contenido del dir de notas:
 - `groups.json` — definición de grupos (`{id,name,color,order,archived?}`; `archived?` oculta el
   grupo y sus notas salvo con "Show archived").
 - `folders.json` — definición de carpetas (subcarpetas de grupos): array `NoteFolder[]`
-  (`{id,name,groupId,order,icon?}`). `icon?` = clave del set curado de `src/lib/folderIcons.ts`
+  (`{id,name,groupId,order,icon?}`). `order` = posición dentro de su grupo (ascendente; el usuario la
+  cambia arrastrando carpetas en el sidebar o en la vista de contenido → `groupsStore.reorderFolders`). `icon?` = clave del set curado de `src/lib/folderIcons.ts`
   (ausente o desconocida → icono de carpeta por defecto); se escribe tal cual (sin campo `icon`
   cuando vuelve al predeterminado). CLI, tools de la IA y móvil hacen `{...f, name}` al renombrar, así
   que conservan campos que no conocen: añadir campos opcionales aquí es compatible en ambos sentidos.
@@ -558,7 +565,8 @@ Estructura de `settings.json`:
   "stickyBounds": {
     "xyz/sec001": {
       "expanded": { "x": 800, "y": 120, "width": 320, "height": 380 },
-      "folded":   { "x": 40, "y": 1000, "width": 220, "height": 39 }
+      "folded":   { "x": 40, "y": 1000, "width": 220, "height": 39 },
+      "isFolded": true
     }
   },
   "githubSync": {
@@ -572,7 +580,7 @@ Estructura de `settings.json`:
     "email": "user@example.com",
     "userId": "<uuid de auth.users>",
     "encryptedRefreshToken": "<cifrado con safeStorage o base64 fallback>",
-    "entitlementsCache": { "userId": "<uuid>", "ai": true, "cloud": false, "fetchedAt": "<ISO>" }
+    "entitlementsCache": { "userId": "<uuid>", "ai": true, "cloud": false, "fetchedAt": "<ISO>", "billing": true, "bundleUpgrade": true }
   },
   "cloudSync": {
     "enabled": true,
@@ -601,6 +609,7 @@ Estructura de `settings.json`:
   },
   "aiProfile": { "completedAt": "2026-06-14T10:00:00.000Z", "noteId": "abc12345" },
   "whatsNewSeen": ["sections", "kanban", "links-palette"],
+  "welcomeNoteSeeded": true,
   "aiChatWindow": { "bounds": { "x": 1200, "y": 120, "width": 440, "height": 680 } }
 }
 ```
@@ -631,6 +640,23 @@ Estructura de `settings.json`:
 > `whatsNewSeen` = ids de las diapositivas del tour "What's new" que ESTE dispositivo ya mostró
 > (unión, deduplicada y saneada en main por `electron/whatsNewSeen.ts`); decide qué sale en el popup
 > de arranque — ver `patterns.md` → "Tour What's new".
+> `welcomeNoteSeeded` = la decisión de la **nota de bienvenida** ya se tomó en este dispositivo (se
+> creara o no). Al arrancar, tras la migración v1→v2 y antes del pull inicial y del watcher,
+> `seedWelcomeNoteIfFirstRun()` (`main.ts`, decisión pura `planWelcomeNote` en `electron/welcomeNote.ts`)
+> crea la nota solo en una **instalación nueva**: `settings.json` **no existe** todavía (nada lo escribe
+> antes en el arranque; comprobado — es la señal fiable, porque la clave es nueva y ningún usuario existente
+> la tiene), el dir de notas no tiene ninguna nota (carpeta con `note.md` ni `.md` suelto; dir ilegible =
+> "tiene notas"; el listado se reintenta como en `fs:read-all-notes` —6 × 800 ms— salvo si este arranque
+> acaba de crear el dir, que está vacío seguro) y no hay GitHub Sync ni Cloud con `enabled: true`. Un
+> `settings.json` existente sin la clave = usuario que actualiza → solo se escribe la clave (un `readdir`
+> vacío transitorio de Windows al arrancar no puede colarle la nota). En cualquier caso distinto de crear
+> solo se escribe la clave, así que no se recrea si el usuario la borra. En Windows el CLI comparte
+> `settings.json`: quien usó el CLI antes de instalar la app tampoco la recibe. Un `settings.json` que
+> existe pero no parsea no se toca (escribirlo lo borraría): la decisión espera a un arranque en que se
+> lea bien. Si falla escribir la nota, se borra
+> la carpeta a medias y no se apunta la clave; solo se reintenta si en el siguiente arranque `settings.json` sigue sin existir (lo normal es que otro código ya lo haya escrito durante la sesión, y entonces solo se apunta la clave). La nota es **solo-local**
+> (`localOnly: true`, ver `sync.md` "Notas solo-locales"), con el contenido en el idioma de la UI de ese
+> momento y las teclas de la plataforma (⌘/⌃ en macOS).
 > `accountRestore` es una activación pendiente de las features de pago, **sin secretos** (email +
 > dos booleanos): la escribe el sign-out (qué tenía activo la sesión que cerró) y el sign-in cuando
 > las entitlements aún no se conocen ("activar lo que resulte pagado"); se consume cuando llegan.
