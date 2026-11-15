@@ -1,8 +1,9 @@
-// NoteFlow Cloud per-section version history — read side (I/O). Lists and
-// decrypts the rows a server trigger keeps in public.file_versions (the
-// previous content of a files row each time its content_ct changes). Pure
-// logic in cloudVersionsLogic.ts; IPC in main.ts (cloud:versions-list /
-// cloud:versions-get).
+// NoteFlow Cloud per-section version history (I/O). Lists and decrypts the
+// rows a server trigger keeps in public.file_versions (the previous content of
+// a files row each time its content_ct changes), and asks the server to keep
+// the CURRENT content as one more version before the renderer restores an old
+// one (snapshot). Pure logic in cloudVersionsLogic.ts; IPC in main.ts
+// (cloud:versions-list / cloud:versions-get / cloud:versions-snapshot).
 //
 // Never returns key material (DEK, note keys) nor the path_key, and never a raw
 // error message: every failure is a CloudVersionsErrorCode. Does NOT require
@@ -11,16 +12,22 @@
 //
 // Restoring a version has no IPC on purpose: the renderer writes the old text
 // as a normal edit, the sync engine uploads it, and the trigger saves the
-// replaced content as one more version.
+// replaced content as one more version. The trigger keeps at most one 'edit'
+// version per file every 10 minutes, so the renderer first calls the snapshot
+// (RPC cloud_snapshot_file, migration 0017): the text about to be replaced is
+// then guaranteed to be in the history.
 
 import fs from 'fs'
 import path from 'path'
 import * as account from './account'
 import * as cloudKeys from './cloudKeys'
+import * as cloudSync from './cloudSync'
 import { isCloudConfigured } from './cloudConfig'
 import { derivePathKeyHmac, unwrapKey, decryptContent } from './cloudCrypto'
 import { NOTE_MD } from './noteFormat'
 import {
+  classifySnapshotFlush,
+  classifySnapshotHttp,
   classifyVersionsError,
   classifyVersionsHttp,
   mapVersionRows,
@@ -29,12 +36,15 @@ import {
   parseVersionTarget,
   redactVersionsError,
   resolveSectionRelPath,
+  SNAPSHOT_RPC,
   versionGetEndpoint,
   versionListEndpoint,
   withOneRetry,
   type CloudVersionGetResult,
   type CloudVersionsErrorCode,
   type CloudVersionsListResult,
+  type CloudVersionsSnapshotErrorCode,
+  type CloudVersionsSnapshotResult,
 } from './cloudVersionsLogic'
 
 /** Injectable collaborators (tests); defaults are the real modules. */
@@ -43,6 +53,10 @@ export interface CloudVersionsDeps {
   isSignedIn: () => boolean
   getDek: () => Uint8Array | null
   rest: (endpoint: string) => Promise<cloudKeys.SupabaseRestResponse>
+  /** POST with a JSON body (the snapshot RPC). */
+  restPost: (endpoint: string, body: unknown) => Promise<cloudKeys.SupabaseRestResponse>
+  /** Lands the file's pending Cloud upload now (cloudSync.flushPathForSnapshot). */
+  flushPath: (notesDir: string, relPath: string) => Promise<cloudSync.SnapshotFlushOutcome>
   retryDelayMs: number
   platform: NodeJS.Platform | string
 }
@@ -52,6 +66,8 @@ const DEFAULT_DEPS: CloudVersionsDeps = {
   isSignedIn: () => account.getAccountStatus().signedIn,
   getDek: () => cloudKeys.getDek(),
   rest: (endpoint) => cloudKeys.supabaseRest(endpoint),
+  restPost: (endpoint, body) => cloudKeys.supabaseRest(endpoint, { method: 'POST', body }),
+  flushPath: (notesDir, relPath) => cloudSync.flushPathForSnapshot(notesDir, relPath),
   retryDelayMs: 1000,
   platform: process.platform,
 }
@@ -59,12 +75,12 @@ const DEFAULT_DEPS: CloudVersionsDeps = {
 type Failure = { ok: false; errorCode: CloudVersionsErrorCode }
 const fail = (errorCode: CloudVersionsErrorCode): Failure => ({ ok: false, errorCode })
 
-/** The gates + the section's path_key, shared by list and get. */
+/** The gates + the section's relPath and path_key, shared by list, get and snapshot. */
 async function resolvePathKey(
   notesDir: string,
   target: unknown,
   deps: CloudVersionsDeps
-): Promise<{ ok: true; dek: Uint8Array; pathKey: string } | Failure> {
+): Promise<{ ok: true; dek: Uint8Array; pathKey: string; relPath: string } | Failure> {
   if (!deps.isConfigured()) return fail('unavailable')
   if (!deps.isSignedIn()) return fail('not-signed-in')
   const dek = deps.getDek()
@@ -79,7 +95,7 @@ async function resolvePathKey(
   }
   const resolved = resolveSectionRelPath(parsed.dir, parsed.sectionId, noteMd)
   if (!resolved.ok) return resolved
-  return { ok: true, dek, pathKey: await derivePathKeyHmac(dek, resolved.relPath) }
+  return { ok: true, dek, pathKey: await derivePathKeyHmac(dek, resolved.relPath), relPath: resolved.relPath }
 }
 
 function logUnexpected(op: string, err: unknown): void {
@@ -154,5 +170,58 @@ export async function getSectionVersion(
     const code = classifyVersionsError(err)
     if (code === 'unknown') logUnexpected('get', err)
     return fail(code)
+  }
+}
+
+/** The read-side codes the snapshot never reports (it reads no version row). */
+function toSnapshotCode(code: CloudVersionsErrorCode): CloudVersionsSnapshotErrorCode {
+  return code === 'not-found' || code === 'decrypt-failed' ? 'unknown' : code
+}
+
+/** Whether the section file holds any text on this device (a missing file holds none). */
+function localFileHasContent(notesDir: string, relPath: string): boolean {
+  try {
+    return fs.readFileSync(path.join(notesDir, relPath), 'utf-8').length > 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Keeps the section's CURRENT content as one more version, before a restore
+ * replaces it. First makes sure the server holds this device's text — its
+ * pending upload is landed now through the sync engine (never a second upload
+ * path) — then calls the snapshot RPC. `{ ok: true }` only when the history is
+ * known to hold the current text, or there is no text to keep (no live server
+ * row and an empty / missing local file). The renderer flushes its pending
+ * editor saves and waits for the note's write queue before calling.
+ */
+export async function snapshotSectionVersion(
+  notesDir: string,
+  target: unknown,
+  overrides: Partial<CloudVersionsDeps> = {}
+): Promise<CloudVersionsSnapshotResult> {
+  const deps = { ...DEFAULT_DEPS, ...overrides }
+  try {
+    const key = await resolvePathKey(notesDir, target, deps)
+    if (!key.ok) return { ok: false, errorCode: toSnapshotCode(key.errorCode) }
+    const flushError = classifySnapshotFlush(await deps.flushPath(notesDir, key.relPath))
+    if (flushError) return { ok: false, errorCode: flushError }
+    const res = await withOneRetry(
+      () => deps.restPost(`/rest/v1/rpc/${SNAPSHOT_RPC}`, { p_path_key: key.pathKey }),
+      deps.retryDelayMs
+    )
+    const answer = classifySnapshotHttp(res.status, res.json)
+    if (answer === 'captured') return { ok: true }
+    if (answer === 'no-row') {
+      // Nothing on the server to keep: fine only when there is no text here either.
+      return localFileHasContent(notesDir, key.relPath) ? { ok: false, errorCode: 'sync-pending' } : { ok: true }
+    }
+    if (answer === 'unknown') console.error('[CloudVersions] snapshot failed: HTTP', res.status)
+    return { ok: false, errorCode: answer }
+  } catch (err) {
+    const code = classifyVersionsError(err)
+    if (code === 'unknown') logUnexpected('snapshot', err)
+    return { ok: false, errorCode: toSnapshotCode(code) }
   }
 }

@@ -74,3 +74,26 @@ describe('createKeyedQueue().idle', () => {
     await expect(createKeyedQueue().idle()).resolves.toBeUndefined()
   })
 })
+
+describe('createKeyedQueue().idleKey', () => {
+  it('waits for that key only, including tasks queued on it while waiting', async () => {
+    const q = createKeyedQueue()
+    const log: string[] = []
+    let releaseB: () => void = () => {}
+    q.run('b', () => new Promise<void>((resolve) => { releaseB = resolve }))
+    q.run('a', async () => {
+      await tick()
+      log.push('a')
+      q.run('a', async () => { await tick(); log.push('a2') })
+    })
+    await q.idleKey('a')
+    expect(log).toEqual(['a', 'a2'])
+    expect(q.size()).toBe(1) // 'b' still running
+    releaseB()
+    await q.idle()
+  })
+
+  it('resolves right away for a key with nothing queued', async () => {
+    await expect(createKeyedQueue().idleKey('x')).resolves.toBeUndefined()
+  })
+})

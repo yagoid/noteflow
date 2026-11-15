@@ -91,6 +91,7 @@ exports.enableCloudSync = enableCloudSync;
 exports.disableCloudSync = disableCloudSync;
 exports.schedulePush = schedulePush;
 exports.pushPathsNow = pushPathsNow;
+exports.flushPathForSnapshot = flushPathForSnapshot;
 exports.scheduleDelete = scheduleDelete;
 exports.scheduleDeleteDir = scheduleDeleteDir;
 exports.pullNotes = pullNotes;
@@ -1038,6 +1039,31 @@ async function pushPathsNow(notesDir, relPaths) {
     if (pushed > 0 && errors.length === 0)
         syncError = undefined;
     return { pushed, errors };
+}
+/**
+ * Lands one file's pending upload NOW before a version-history snapshot
+ * (cloudVersions.snapshotSectionVersion) and says where it stands with the
+ * server — decisions in cloudSyncLogic.planSnapshotFlush. Reuses pushPathsNow
+ * (journal, stale flag, the normal CONDITIONAL upload — forced only when the
+ * journal op already was) — no second upload path. An upload already in flight
+ * for the path is awaited first (bounded).
+ */
+async function flushPathForSnapshot(notesDir, relPath, opts = {}) {
+    const s = cloudSettings ?? loadCloudSyncSettings();
+    return (0, cloudSyncLogic_1.planSnapshotFlush)({
+        ...opts,
+        enabled: s.enabled && (0, cloudConfig_1.isCloudConfigured)(),
+        localOnly: (0, localOnlyNotes_1.isLocalOnlySyncPath)(notesDir, relPath),
+        gateOpen: () => {
+            ensureStateOwner();
+            return (0, cloudSyncLogic_1.planLocalPush)({ enabled: true, configured: true, initialPullStatus }) === 'push';
+        },
+        inFlight: () => inFlightUploads.has(relPath),
+        timerArmed: () => pushTimers.has(relPath),
+        journalOp: () => getState().ops[relPath],
+        push: () => pushPathsNow(notesDir, [relPath]),
+        entitlementBlocked: () => entitlementBlocked,
+    });
 }
 // ── Delete (tombstones) ───────────────────────────────────────────────────────
 /** Tombstones a single remote file ('<dir>/<file>.md') — dropped sections. */

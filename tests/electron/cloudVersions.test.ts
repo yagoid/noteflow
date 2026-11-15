@@ -19,6 +19,8 @@ import {
   withOneRetry,
   versionListEndpoint,
   VERSION_LIST_COLUMNS,
+  classifySnapshotHttp,
+  classifySnapshotFlush,
 } from '../../electron/cloudVersionsLogic'
 import { encryptContent, generateDek, generateNoteKey, derivePathKeyHmac } from '../../electron/cloudCrypto'
 import { buildFileUpsertRow } from '../../electron/cloudSyncLogic'
@@ -96,13 +98,22 @@ describe('mapVersionRows', () => {
       row({ seq: -1 }),
       row({ updated_at: 'not a date' }),
       row({ created_at: undefined }),
-      row({ reason: 'restore' }),
       row({ size: 'big' }),
       row({ size: null }),
       null,
       'row',
     ]
     expect(mapVersionRows(rows).map((v) => v.id)).toEqual([1])
+  })
+
+  it('keeps manual snapshots, and reads an unknown or missing reason as a plain edit', () => {
+    const out = mapVersionRows([
+      row({ id: 1, seq: 1, reason: 'manual' }),
+      row({ id: 2, seq: 2, reason: 'restore' }),
+      row({ id: 3, seq: 3, reason: null }),
+      row({ id: 4, seq: 4, reason: 'shrink' }),
+    ])
+    expect(out.map((v) => [v.id, v.reason])).toEqual([[4, 'shrink'], [3, 'edit'], [2, 'edit'], [1, 'manual']])
   })
 
   it('sorts by seq DESC, then id DESC', () => {
@@ -130,7 +141,8 @@ describe('parseVersionRow', () => {
   it('malformed metadata → unknown; unusable blobs → decrypt-failed', () => {
     expect(parseVersionRow({ ...ok, seq: 'x' })).toEqual({ ok: false, errorCode: 'unknown' })
     expect(parseVersionRow({ ...ok, path_key: null })).toEqual({ ok: false, errorCode: 'unknown' })
-    expect(parseVersionRow({ ...ok, reason: 'nope' })).toEqual({ ok: false, errorCode: 'unknown' })
+    expect(parseVersionRow({ ...ok, reason: 'manual' })).toMatchObject({ ok: true, reason: 'manual' })
+    expect(parseVersionRow({ ...ok, reason: 'nope' })).toMatchObject({ ok: true, reason: 'edit' })
     expect(parseVersionRow({ ...ok, key_ct: null })).toEqual({ ok: false, errorCode: 'decrypt-failed' })
     expect(parseVersionRow({ ...ok, key_ct: '' })).toEqual({ ok: false, errorCode: 'decrypt-failed' })
     expect(parseVersionRow({ ...ok, content_ct: 5 })).toEqual({ ok: false, errorCode: 'decrypt-failed' })
@@ -258,6 +270,32 @@ describe('error classification', () => {
     const fn = vi.fn(async () => { throw new Error(NOT_SIGNED_IN_TAG) })
     await expect(withOneRetry(fn, 0)).rejects.toThrow(NOT_SIGNED_IN_TAG)
     expect(fn).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('snapshot classification', () => {
+  it('RPC answer: true / false / missing function / no subscription / server / other', () => {
+    expect(classifySnapshotHttp(200, true)).toBe('captured')
+    expect(classifySnapshotHttp(200, false)).toBe('no-row')
+    expect(classifySnapshotHttp(404, { code: 'PGRST202', message: 'Could not find the function' })).toBe('unavailable')
+    expect(classifySnapshotHttp(404, null)).toBe('unavailable')
+    expect(classifySnapshotHttp(400, { code: 'PGRST202' })).toBe('unavailable')
+    expect(classifySnapshotHttp(403, { code: '42501' })).toBe('no-subscription')
+    expect(classifySnapshotHttp(401, { code: '42501' })).toBe('no-subscription')
+    expect(classifySnapshotHttp(503, null)).toBe('unreachable')
+    expect(classifySnapshotHttp(400, { code: 'XX000' })).toBe('unknown')
+    expect(classifySnapshotHttp(200, null)).toBe('unknown')
+    expect(classifySnapshotHttp(200, [true])).toBe('unknown')
+  })
+
+  it('pending-upload outcome: only clean / uploaded let the snapshot run', () => {
+    expect(classifySnapshotFlush('clean')).toBeNull()
+    expect(classifySnapshotFlush('uploaded')).toBeNull()
+    expect(classifySnapshotFlush('disabled')).toBe('sync-off')
+    expect(classifySnapshotFlush('forbidden')).toBe('no-subscription')
+    expect(classifySnapshotFlush('gated')).toBe('sync-pending')
+    expect(classifySnapshotFlush('stale')).toBe('sync-pending')
+    expect(classifySnapshotFlush('failed')).toBe('sync-pending')
   })
 })
 
@@ -400,5 +438,98 @@ describe('cloudVersions I/O', () => {
     fs.writeFileSync(path.join(notesDir, DIR, 'note.md'), `---\nid: abcd1234\nlocalOnly: true\n---\n`, 'utf-8')
     expect(await cv.listSectionVersions(notesDir, target(), deps())).toEqual({ ok: false, errorCode: 'unsupported-note' })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+  describe('snapshotSectionVersion', () => {
+    const flushed: string[] = []
+    const snapDeps = (outcome: Parameters<typeof classifySnapshotFlush>[0] = 'clean') => ({
+      ...deps(),
+      flushPath: async (_dir: string, relPath: string) => { flushed.push(relPath); return outcome },
+    })
+    beforeEach(() => { flushed.length = 0 })
+
+    it('lands the pending upload of the section file, then calls the RPC with its path_key', async () => {
+      const pathKey = await derivePathKeyHmac(dek, REL)
+      fetchMock.mockResolvedValueOnce(reply(200, true))
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps('uploaded'))).toEqual({ ok: true })
+      expect(flushed).toEqual([REL])
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(new URL(url as string).pathname).toBe('/rest/v1/rpc/cloud_snapshot_file')
+      const req = init as { method: string; body: string; headers: Record<string, string> }
+      expect(req.method).toBe('POST')
+      expect(JSON.parse(req.body)).toEqual({ p_path_key: pathKey })
+      expect(req.headers['Content-Type']).toBe('application/json')
+    })
+
+    it('false (no live row): ok only when the local file has no text', async () => {
+      fetchMock.mockResolvedValue(reply(200, false))
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps())).toEqual({ ok: false, errorCode: 'sync-pending' })
+      fs.writeFileSync(path.join(notesDir, REL), '', 'utf-8')
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps())).toEqual({ ok: true })
+      fs.rmSync(path.join(notesDir, REL))
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps())).toEqual({ ok: true })
+    })
+
+    it('server without migration 0017 (404 PGRST202) → unavailable', async () => {
+      fetchMock.mockResolvedValue(reply(404, { code: 'PGRST202', message: 'Could not find the function public.cloud_snapshot_file' }))
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps())).toEqual({ ok: false, errorCode: 'unavailable' })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('403 / 42501 → no-subscription (not retried)', async () => {
+      fetchMock.mockResolvedValue(reply(403, { code: '42501', message: 'permission denied' }))
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps())).toEqual({ ok: false, errorCode: 'no-subscription' })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('network: one retry, then unreachable; a 5xx then true → ok; two 5xx → unreachable', async () => {
+      fetchMock.mockRejectedValue(new TypeError('fetch failed'))
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps())).toEqual({ ok: false, errorCode: 'unreachable' })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      fetchMock.mockReset()
+      fetchMock.mockResolvedValueOnce(reply(502, null)).mockResolvedValueOnce(reply(200, true))
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps())).toEqual({ ok: true })
+      fetchMock.mockReset()
+      fetchMock.mockResolvedValue(reply(500, null))
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps())).toEqual({ ok: false, errorCode: 'unreachable' })
+    })
+
+    it('a pending upload that cannot land stops before the RPC', async () => {
+      const cases = [
+        ['disabled', 'sync-off'],
+        ['gated', 'sync-pending'],
+        ['stale', 'sync-pending'],
+        ['failed', 'sync-pending'],
+        ['forbidden', 'no-subscription'],
+      ] as const
+      for (const [outcome, errorCode] of cases) {
+        expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps(outcome))).toEqual({ ok: false, errorCode })
+      }
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('gates and target validation run before any flush or request', async () => {
+      expect(await cv.snapshotSectionVersion(notesDir, target(), { ...snapDeps(), getDek: () => null }))
+        .toEqual({ ok: false, errorCode: 'locked' })
+      expect(await cv.snapshotSectionVersion(notesDir, target(), { ...snapDeps(), isConfigured: () => false }))
+        .toEqual({ ok: false, errorCode: 'unavailable' })
+      session.signedIn = false
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps())).toEqual({ ok: false, errorCode: 'not-signed-in' })
+      session.signedIn = true
+      expect(await cv.snapshotSectionVersion(notesDir, { notePath: tmp, sectionId: 's1' }, snapDeps()))
+        .toEqual({ ok: false, errorCode: 'invalid-path' })
+      expect(await cv.snapshotSectionVersion(notesDir, { notePath: path.join(notesDir, DIR), sectionId: '../s1' }, snapDeps()))
+        .toEqual({ ok: false, errorCode: 'invalid-path' })
+      expect(await cv.snapshotSectionVersion(notesDir, null, snapDeps())).toEqual({ ok: false, errorCode: 'invalid-path' })
+      fs.writeFileSync(path.join(notesDir, DIR, 'note.md'), `---\nid: abcd1234\nlocalOnly: true\n---\n`, 'utf-8')
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps())).toEqual({ ok: false, errorCode: 'unsupported-note' })
+      expect(flushed).toEqual([])
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('a keychain-locked session → session-locked (no retry)', async () => {
+      session.token = { ok: false, reason: 'locked' }
+      expect(await cv.snapshotSectionVersion(notesDir, target(), snapDeps())).toEqual({ ok: false, errorCode: 'session-locked' })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
   })
 })

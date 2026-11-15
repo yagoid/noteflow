@@ -48,6 +48,7 @@ exports.mergeMetadataById = mergeMetadataById;
 exports.metadataPendingForPull = metadataPendingForPull;
 exports.planMetadataPull = planMetadataPull;
 exports.planRemoteDelete = planRemoteDelete;
+exports.planSnapshotFlush = planSnapshotFlush;
 exports.planLocalPush = planLocalPush;
 exports.planConflictCopy = planConflictCopy;
 exports.anchorTitle = anchorTitle;
@@ -658,6 +659,36 @@ function planRemoteDelete(s) {
     // 403 from RLS: no active entitlement server-side. Only a verified local view
     // may fall through to the physical DELETE (a stale verified `true` included).
     return s.verified ? 'delete' : 'defer';
+}
+async function planSnapshotFlush(deps) {
+    if (!deps.enabled || deps.localOnly)
+        return 'disabled';
+    if (!deps.gateOpen())
+        return 'gated';
+    // A debounced push that already fired: wait for it to settle (its journal op
+    // completes, or is flagged stale / failed) instead of racing a second upload.
+    const now = deps.now ?? Date.now;
+    const sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    const deadline = now() + (deps.inFlightWaitMs ?? 30000);
+    while (deps.inFlight()) {
+        if (now() > deadline)
+            return 'failed';
+        await sleep(deps.pollMs ?? 50);
+    }
+    const entry = deps.journalOp();
+    const armed = deps.timerArmed();
+    const pending = armed || entry?.op === 'upsert';
+    if (!pending)
+        return entry ? 'failed' : 'clean'; // a pending delete of this path: not capturable
+    // Flagged stale with no new edit since: re-sending would be refused again.
+    if (!armed && entry?.stale)
+        return 'stale';
+    const { pushed, errors } = await deps.push();
+    if (errors.length > 0)
+        return deps.entitlementBlocked() ? 'forbidden' : 'failed';
+    if (pushed > 0)
+        return 'uploaded';
+    return deps.journalOp()?.stale ? 'stale' : 'failed';
 }
 function planLocalPush(s) {
     if (!s.enabled || !s.configured)

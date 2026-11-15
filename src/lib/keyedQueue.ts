@@ -26,6 +26,10 @@ export function createKeyedQueue() {
     async idle(): Promise<void> {
       while (tails.size > 0) await Promise.all(tails.values())
     },
+    /** Resolves once `key` has no queued/running work (including tasks queued meanwhile). */
+    async idleKey(key: string): Promise<void> {
+      for (let tail = tails.get(key); tail; tail = tails.get(key)) await tail
+    },
     /** Number of keys with queued/running work (for tests). */
     size(): number {
       return tails.size

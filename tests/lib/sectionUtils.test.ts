@@ -29,6 +29,14 @@ describe('duplicateSectionInList', () => {
     expect(result?.sections[2]).toBe(result?.section)
   })
 
+  it('takes the given content instead of the original one (restored version)', () => {
+    const result = duplicateSectionInList(base(), 'b', { id: 'new', name: 'Beta (v)', created: NOW, content: 'old text' })
+    expect(result?.section).toEqual({
+      id: 'new', name: 'Beta (v)', content: 'old text', isRawMode: true, aiHidden: true, created: NOW,
+    })
+    expect(result?.sections[1].content).toBe('# two')
+  })
+
   it('does not mutate the input', () => {
     const sections = base()
     const snapshot = JSON.parse(JSON.stringify(sections))

@@ -3225,16 +3225,24 @@ async function cloudManualSync(): Promise<SyncPullResult> {
 // Manual sync (same broadcast contract as sync:pull).
 ipcMain.handle('cloud:pull', async () => cloudManualSync())
 
-// Per-section version history (read-only; electron/cloudVersions.ts). Never
-// throw: every failure is { ok: false, errorCode }. Restoring a version has no
-// IPC on purpose — the renderer saves the old text as a normal edit, and the
-// server trigger keeps the content it replaces as one more version.
+// Per-section version history (electron/cloudVersions.ts). Never throw: every
+// failure is { ok: false, errorCode }. Restoring a version has no IPC on
+// purpose — the renderer saves the old text as a normal edit, and the server
+// trigger keeps the content it replaces as one more version.
 ipcMain.handle('cloud:versions-list', (_event, target: unknown) =>
   cloudVersions.listSectionVersions(NOTES_DIR, target)
 )
 
 ipcMain.handle('cloud:versions-get', (_event, target: unknown, id: unknown) =>
   cloudVersions.getSectionVersion(NOTES_DIR, target, id)
+)
+
+// Before a restore: keeps the section's CURRENT content as one more version
+// (lands its pending Cloud upload first, then RPC cloud_snapshot_file). Never
+// throws; failures are { ok: false, errorCode } and the renderer asks before
+// replacing anything.
+ipcMain.handle('cloud:versions-snapshot', (_event, target: unknown) =>
+  cloudVersions.snapshotSectionVersion(NOTES_DIR, target)
 )
 
 // ── Settings (userData/settings.json) ────────────────────────────────────────

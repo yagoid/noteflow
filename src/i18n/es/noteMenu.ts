@@ -7,6 +7,7 @@ export const noteMenu = {
   duplicateNote: 'Duplicar nota',
   noteOverview: 'Vista de la nota',
   renameSection: 'Renombrar sección',
+  versionHistory: 'Historial de versiones',
   renameNote: 'Renombrar nota',
 
   aiShowTooltip: 'La IA volverá a indexar y usar esta sección',

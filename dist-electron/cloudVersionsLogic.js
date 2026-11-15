@@ -1,7 +1,7 @@
 "use strict";
-// Pure logic of the NoteFlow Cloud per-section version history (read side).
-// No Electron, no fs, no network: the I/O lives in cloudVersions.ts. Covered
-// by tests/electron/cloudVersions.test.ts.
+// Pure logic of the NoteFlow Cloud per-section version history (list, get and
+// the snapshot of the current content). No Electron, no fs, no network: the I/O
+// lives in cloudVersions.ts. Covered by tests/electron/cloudVersions.test.ts.
 //
 // Server side, a trigger copies the PREVIOUS row of public.files into
 // public.file_versions whenever its content_ct changes. The copied blobs are
@@ -17,7 +17,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.VERSION_LIST_LIMIT = exports.VERSION_GET_COLUMNS = exports.VERSION_LIST_COLUMNS = void 0;
+exports.VERSION_LIST_LIMIT = exports.VERSION_GET_COLUMNS = exports.VERSION_LIST_COLUMNS = exports.SNAPSHOT_RPC = void 0;
 exports.versionListEndpoint = versionListEndpoint;
 exports.versionGetEndpoint = versionGetEndpoint;
 exports.isValidSectionId = isValidSectionId;
@@ -28,6 +28,8 @@ exports.estimatePlaintextSize = estimatePlaintextSize;
 exports.mapVersionRows = mapVersionRows;
 exports.parseVersionRow = parseVersionRow;
 exports.classifyVersionsHttp = classifyVersionsHttp;
+exports.classifySnapshotHttp = classifySnapshotHttp;
+exports.classifySnapshotFlush = classifySnapshotFlush;
 exports.classifyVersionsError = classifyVersionsError;
 exports.withOneRetry = withOneRetry;
 exports.redactVersionsError = redactVersionsError;
@@ -38,13 +40,15 @@ const cloudSyncLogic_1 = require("./cloudSyncLogic");
 const cloudAccessErrors_1 = require("./cloudAccessErrors");
 const localOnlyNotes_1 = require("./localOnlyNotes");
 const linkedNotesLogic_1 = require("./linkedNotesLogic");
+/** RPC of migration 0017: copies the live row of a path_key into file_versions. */
+exports.SNAPSHOT_RPC = 'cloud_snapshot_file';
 /** Columns of the list query (no blobs). */
 exports.VERSION_LIST_COLUMNS = 'id,seq,updated_at,created_at,size,reason';
 /** Columns of the single-version query. */
 exports.VERSION_GET_COLUMNS = 'id,path_key,content_ct,key_ct,updated_at,seq,reason';
 /** Server-side cap on the listed versions of one file. */
 exports.VERSION_LIST_LIMIT = 200;
-const REASONS = ['edit', 'delete', 'shrink'];
+const REASONS = ['edit', 'delete', 'shrink', 'manual'];
 const MAX_SECTION_ID_LENGTH = 128;
 // ── Queries ───────────────────────────────────────────────────────────────────
 function versionListEndpoint(pathKey) {
@@ -177,10 +181,15 @@ function parseIso(value) {
     const ms = Date.parse(value);
     return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
+/**
+ * A known reason as is; anything else (a reason added server-side later, or a
+ * missing one) reads as 'edit' — the row is still a valid version, shown
+ * without a label. Never drops the row.
+ */
 function parseReason(value) {
     return typeof value === 'string' && REASONS.includes(value)
         ? value
-        : null;
+        : 'edit';
 }
 /** Metadata of one row, or null when any field is malformed. */
 function parseVersionMeta(raw) {
@@ -193,7 +202,7 @@ function parseVersionMeta(raw) {
     const savedAt = parseIso(r.created_at);
     const reason = parseReason(r.reason);
     const size = typeof r.size === 'string' && r.size.trim() !== '' ? Number(r.size) : r.size;
-    if (id === null || seq === null || editedAt === null || savedAt === null || reason === null)
+    if (id === null || seq === null || editedAt === null || savedAt === null)
         return null;
     if (typeof size !== 'number' || !Number.isFinite(size))
         return null;
@@ -217,7 +226,7 @@ function mapVersionRows(json) {
 }
 /**
  * Validates a single-version row. Malformed metadata (id/seq/updated_at/
- * reason/path_key) → 'unknown'; missing or non-string blobs → 'decrypt-failed'
+ * path_key) → 'unknown' (an unknown reason reads as 'edit'); missing or non-string blobs → 'decrypt-failed'
  * (the content can't be opened). content_ct may be '' (decrypts to '').
  */
 function parseVersionRow(raw) {
@@ -228,7 +237,7 @@ function parseVersionRow(raw) {
     const seq = parseBigint(r.seq, 0);
     const editedAt = parseIso(r.updated_at);
     const reason = parseReason(r.reason);
-    if (id === null || seq === null || editedAt === null || reason === null)
+    if (id === null || seq === null || editedAt === null)
         return { ok: false, errorCode: 'unknown' };
     if (typeof r.path_key !== 'string' || !r.path_key)
         return { ok: false, errorCode: 'unknown' };
@@ -250,6 +259,50 @@ function classifyVersionsHttp(status, json) {
     if (status >= 400 || status < 200)
         return 'unknown';
     return null;
+}
+/**
+ * Answer of the snapshot RPC → what happened:
+ *   - 'captured'  true: a version of the live row exists now (idempotent);
+ *   - 'no-row'    false: no live row with content for that path_key;
+ *   - an error code otherwise: 404 / PGRST202 (function not in the schema
+ *     cache — a server without migration 0017) → 'unavailable'; 403 / 42501
+ *     (no active Cloud subscription) → 'no-subscription'; a 5xx left after the
+ *     retry → 'unreachable'; anything else (incl. a 2xx that isn't a boolean)
+ *     → 'unknown'.
+ */
+function classifySnapshotHttp(status, json) {
+    const code = json && typeof json === 'object' ? json.code : undefined;
+    if (status === 404 || code === 'PGRST202')
+        return 'unavailable';
+    if (status === 403 || code === '42501')
+        return 'no-subscription';
+    if (status >= 500)
+        return 'unreachable';
+    if (status < 200 || status >= 300)
+        return 'unknown';
+    if (json === true)
+        return 'captured';
+    if (json === false)
+        return 'no-row';
+    return 'unknown';
+}
+/**
+ * Outcome of landing the file's pending upload before a snapshot
+ * (cloudSync.flushPathForSnapshot) → null when the server now holds this
+ * device's content, else the snapshot error code.
+ */
+function classifySnapshotFlush(outcome) {
+    switch (outcome) {
+        case 'clean':
+        case 'uploaded':
+            return null;
+        case 'disabled':
+            return 'sync-off';
+        case 'forbidden':
+            return 'no-subscription';
+        default:
+            return 'sync-pending';
+    }
 }
 /** An error thrown around a request (supabaseRest / fetch) → error code. */
 function classifyVersionsError(err) {

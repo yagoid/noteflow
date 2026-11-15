@@ -5,7 +5,7 @@ import type { AccountErrorCode } from './account'
 import type { LinkedNoteWire, LinkedWriteResult, LinkError, LinkedMetaPatch } from './linkedNotes'
 import type { FeedbackSendResult } from './feedbackLogic'
 import type { CliConnectResult, CliConnectStatus } from './cliConnectLogic'
-import type { CloudVersionTarget, CloudVersionsListResult, CloudVersionGetResult } from './cloudVersionsLogic'
+import type { CloudVersionTarget, CloudVersionsListResult, CloudVersionGetResult, CloudVersionsSnapshotResult } from './cloudVersionsLogic'
 
 export type NoteDirRecord = {
   dir: string
@@ -472,12 +472,15 @@ const api = {
     hadDeletions: boolean
     hadMetadataChanges: boolean
   }> => ipcRenderer.invoke('cloud:pull'),
-  // Per-section version history (read-only; metadata + decrypted text — never
-  // keys nor path_keys). Restoring = a normal edit from the renderer.
+  // Per-section version history (metadata + decrypted text — never keys nor
+  // path_keys). Restoring = a normal edit from the renderer, after a snapshot.
   cloudListVersions: (target: CloudVersionTarget): Promise<CloudVersionsListResult> =>
     ipcRenderer.invoke('cloud:versions-list', target),
   cloudGetVersion: (target: CloudVersionTarget, id: number): Promise<CloudVersionGetResult> =>
     ipcRenderer.invoke('cloud:versions-get', target, id),
+  // Before a restore: keeps the section's current content as one more version.
+  cloudSnapshotVersion: (target: CloudVersionTarget): Promise<CloudVersionsSnapshotResult> =>
+    ipcRenderer.invoke('cloud:versions-snapshot', target),
   onCloudStatusChanged: (
     cb: (status: {
       configured: boolean

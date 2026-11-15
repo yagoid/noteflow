@@ -569,10 +569,11 @@ export interface CloudSyncStatus {
   conflictMerges?: ConflictCopiesNotice
 }
 
-// Per-section version history of NoteFlow Cloud (read-only) — mirror of
+// Per-section version history of NoteFlow Cloud — mirror of
 // electron/cloudVersionsLogic.ts. Restoring a version is a normal edit made by
 // the renderer (the server keeps the replaced content as one more version).
-export type CloudVersionReason = 'edit' | 'delete' | 'shrink'
+// 'manual' = kept by cloud_snapshot_file before a restore; an unknown server reason arrives as 'edit'.
+export type CloudVersionReason = 'edit' | 'delete' | 'shrink' | 'manual'
 export interface CloudVersionMeta {
   id: number         // file_versions id
   seq: number        // seq of the replaced row (ordering)
@@ -597,6 +598,13 @@ export type CloudVersionsListResult = { ok: true; versions: CloudVersionMeta[] }
 export type CloudVersionGetResult =
   | { ok: true; version: { id: number; seq: number; editedAt: string; reason: CloudVersionReason; content: string } }
   | { ok: false; errorCode: CloudVersionsErrorCode }
+// Snapshot of the CURRENT content before a restore (cloud:versions-snapshot).
+export type CloudVersionsSnapshotErrorCode =
+  | Exclude<CloudVersionsErrorCode, 'not-found' | 'decrypt-failed'>
+  | 'sync-off'         // Cloud sync off (or GitHub active): the server may not hold this device's text
+  | 'sync-pending'     // the latest local text isn't on the server and couldn't be uploaded now
+  | 'no-subscription'  // the server refused it: no active Cloud subscription
+export type CloudVersionsSnapshotResult = { ok: true } | { ok: false; errorCode: CloudVersionsSnapshotErrorCode }
 
 /**
  * Local edits that lost against a remote version this device never saw and
@@ -892,9 +900,11 @@ declare global {
         hadDeletions: boolean
         hadMetadataChanges: boolean
       }>
-      // Per-section version history (read-only). Restoring = a normal edit from the renderer.
+      // Per-section version history. Restoring = a normal edit from the renderer (after a snapshot).
       cloudListVersions: (target: CloudVersionTarget) => Promise<CloudVersionsListResult>
       cloudGetVersion: (target: CloudVersionTarget, id: number) => Promise<CloudVersionGetResult>
+      // Before a restore: keeps the section's current content as one more version.
+      cloudSnapshotVersion: (target: CloudVersionTarget) => Promise<CloudVersionsSnapshotResult>
       onCloudStatusChanged: (cb: (status: CloudSyncStatus) => void) => () => void
       scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) => void
       // AI / Semantic index

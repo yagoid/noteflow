@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
-import { useNotesStore, saveUiState, linkedSectionsForCopy } from '../../stores/notesStore'
+import { useNotesStore, saveUiState, linkedSectionsForCopy, getWindowRole } from '../../stores/notesStore'
 import { useTemplatesStore } from '../../stores/templatesStore'
 import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { Editor } from './Editor'
@@ -11,7 +11,7 @@ import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
   ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer,
-  Share, Link2Off,
+  Share, Link2Off, History, X,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
 import { useT } from '../../i18n/useT'
@@ -27,14 +27,16 @@ import { TempNoteExpiryMenu } from './TempNoteExpiryMenu'
 import { SectionMap } from './SectionMap'
 import { AiChatButton } from '../AiPanel/AiChatButton'
 import { createDebouncedSave } from '../../lib/pendingEdits'
-import { isRawHistoryOf, recordRawEdit, redoRaw, undoRaw } from '../../lib/undoHistoryCache'
+import { isRawHistoryOf, recordRawEdit, recordRawStep, redoRaw, undoRaw } from '../../lib/undoHistoryCache'
 import { rawUndoHistory } from './undoHistory'
+import { pendingForcedRestore } from '../../lib/sectionRestore'
 import {
   createContentSync, mapOffsetThroughChange, needsSave, recordSave, resolveExternalContent, type ContentSync,
 } from '../../lib/externalContentSync'
 import { rawSectionDisplayText, sectionTextForClipboard } from '../../lib/sectionClipboard'
 import { isLinkedNote, isLinkedReadOnly, isPlainTextLinked, sectionShowsRaw } from '../../lib/linkedNotes'
 import { LinkedNoteHeader } from '../LinkedNote/LinkedNoteHeader'
+import { VersionHistoryPanel, type VersionRestoreResult } from '../VersionHistory/VersionHistoryPanel'
 import { fileNameOf } from '../LinkedNote/linkedActions'
 
 // ---------------------------------------------------------------------------
@@ -138,6 +140,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   const rawDeferredRef = useRef(false)
   const rawRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => { if (rawRetryTimerRef.current) clearTimeout(rawRetryTimerRef.current) }, [])
+  // Token of the last restored version the text-mode buffer applied (lib/sectionRestore).
+  const rawRestoreTokenRef = useRef<number | null>(null)
 
   // Debounced saves are registered in lib/pendingEdits (pruning a note or closing the
   // window flushes them first) and flushed when this editor goes away.
@@ -175,6 +179,12 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   const [encryptModalMode, setEncryptModalMode] = useState<'encrypt' | 'remove' | null>(null)
   // null = modal closed; a string = the draft name being edited before saving the template
   const [templateNameDraft, setTemplateNameDraft] = useState<string | null>(null)
+  // Section whose NoteFlow Cloud version history is open (VersionHistoryPanel), and the
+  // brief notice shown after a restore.
+  const [historySectionId, setHistorySectionId] = useState<string | null>(null)
+  const [restoreNotice, setRestoreNotice] = useState<{ noteId: string; text: string } | null>(null)
+  const restoreNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (restoreNoticeTimerRef.current) clearTimeout(restoreNoticeTimerRef.current) }, [])
 
   const titleRef = useRef<HTMLInputElement>(null)
   const pendingSectionRef = useRef<string | null>(null)
@@ -336,6 +346,28 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
       return
     }
     rawDeferredRef.current = false
+    // A restored version (version history): replaces the buffer exactly — never merged
+    // with a raw edit in flight (dropped) — and is one text-mode undo step, not saved back.
+    const restore = pendingForcedRestore(note.id, activeSection.id, incoming, rawRestoreTokenRef.current)
+    if (restore) {
+      rawRestoreTokenRef.current = restore.token
+      rawSave.cancel()
+      rawSyncRef.current = { key: rawKey, sync: createContentSync(incoming) }
+      if (rawContent === incoming) return
+      // An undo step of its own: never grouped with a keystroke right before or after.
+      rawUndoHistory.set(note.id, activeSection.id, recordRawStep(rawUndoHistory.get(note.id, activeSection.id), rawContent, incoming))
+      const textarea = rawTextareaRef.current
+      if (textarea && textarea === document.activeElement) {
+        const before = rawDisplay(rawContent)
+        const after = rawDisplay(incoming)
+        rawSelectionRef.current = {
+          start: mapOffsetThroughChange(before, after, textarea.selectionStart),
+          end: mapOffsetThroughChange(before, after, textarea.selectionEnd),
+        }
+      }
+      setRawContent(incoming)
+      return
+    }
     const result = resolveExternalContent(tracked.sync, { incoming, current: rawContent, pending: rawSave.isPending() })
     if (result.kind !== 'apply' && result.kind !== 'merge') return
     const next = result.kind === 'apply' ? incoming : result.merged
@@ -900,6 +932,51 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     setSectionUndo(null)
   }
 
+  // ── Version history (NoteFlow Cloud) ───────────────────────────────────────
+  // Main window only (not section / sticky windows), and only notes the Cloud keeps a
+  // history of: not linked (an external file), password-protected nor local-only.
+  const canShowHistory = !standalone && getWindowRole() === 'main' && !isLinked && !note.encryption && !note.localOnly
+  const openVersionHistory = (sectionId: string) => {
+    setSectionMenuOpen(false)
+    setTabMenu(null)
+    setHistorySectionId(sectionId)
+  }
+
+  const closeVersionHistory = () => {
+    setHistorySectionId(null)
+    // Focus left on nothing (the panel's opener unmounted): back to the body.
+    requestAnimationFrame(() => {
+      if (!document.activeElement || document.activeElement === document.body) focusEditorBody()
+    })
+  }
+
+  // After a restore the pane lands on the restored section (or the new one), and a
+  // brief notice says what happened.
+  const handleVersionRestored = (result: VersionRestoreResult) => {
+    const currentNote = noteRef.current
+    setHistorySectionId(null)
+    if (!currentNote) return
+    if (result.sectionId !== activeSectionIdRef.current) {
+      if (rawMode) rawSave.flush()
+      const content = result.kind === 'copy'
+        ? result.content
+        : useNotesStore.getState().notes.find((n) => n.id === currentNote.id)?.sections.find((s) => s.id === result.sectionId)?.content ?? ''
+      setRawContent(content)
+      setActiveSectionId(result.sectionId)
+      if (isPaneActive) saveUiState({ activeSectionId: result.sectionId })
+    }
+    const text = result.kind === 'copy'
+      ? tf(t.versionHistory.restoredAsNewNotice, { name: result.name })
+      : tf(t.versionHistory.restoredNotice, { date: formatDate(new Date(result.editedAt), t.versionHistory.noticeDateFormat) })
+    if (restoreNoticeTimerRef.current) clearTimeout(restoreNoticeTimerRef.current)
+    setRestoreNotice({ noteId: currentNote.id, text })
+    restoreNoticeTimerRef.current = setTimeout(() => {
+      restoreNoticeTimerRef.current = null
+      setRestoreNotice(null)
+    }, 5000)
+    requestAnimationFrame(focusEditorBody)
+  }
+
   const handleDeleteSection = (sectionId: string) => {
     const section = note?.sections.find((s) => s.id === sectionId)
     if (!section) return
@@ -980,6 +1057,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     },
     duplicate: (sectionId) => { void handleDuplicateSection(sectionId) },
     delete: handleDeleteSection,
+    history: canShowHistory ? openVersionHistory : undefined,
   }
 
   // Closing the menu hands focus back to the editor when nothing else took it: the
@@ -1119,6 +1197,16 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
         sectionActions={tabMenuSectionActions}
         standalone={standalone}
       />
+
+      {historySectionId && canShowHistory && (
+        <VersionHistoryPanel
+          key={`${note.id}/${historySectionId}`}
+          note={note}
+          sectionId={historySectionId}
+          onClose={closeVersionHistory}
+          onRestored={handleVersionRestored}
+        />
+      )}
 
       {encryptModalMode && (
         <EncryptionModal
@@ -1296,6 +1384,15 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                     <Copy size={13} />
                     {t.editor.menu.copySectionText}
                   </button>
+                  {canShowHistory && activeSection && (
+                    <button
+                      onClick={() => openVersionHistory(activeSection.id)}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                    >
+                      <History size={13} />
+                      {t.noteMenu.versionHistory}
+                    </button>
+                  )}
                   {!(note.encryption && !sessionPasswords[note.id]) && (
                     <button
                       onClick={() => {
@@ -1394,6 +1491,23 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
             >
               <RotateCcw size={10} />
               {t.editor.undo}
+            </button>
+          </div>
+        )}
+
+        {restoreNotice && restoreNotice.noteId === note.id && (
+          <div role="status" className="mx-3 mt-2 px-3 py-2 rounded border border-accent-2/30 bg-accent-2/10 flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2 text-[11px] font-mono text-text-muted min-w-0">
+              <History size={11} className="text-accent-2 flex-shrink-0" />
+              <span className="truncate">{restoreNotice.text}</span>
+            </span>
+            <button
+              onClick={() => setRestoreNotice(null)}
+              aria-label={t.versionHistory.dismiss}
+              title={t.versionHistory.dismiss}
+              className="p-0.5 rounded text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
+            >
+              <X size={11} />
             </button>
           </div>
         )}

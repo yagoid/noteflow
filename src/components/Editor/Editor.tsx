@@ -1,7 +1,7 @@
 import { useEditor, EditorContent } from '@tiptap/react'
 import type { Editor as TiptapEditor } from '@tiptap/react'
 import History from '@tiptap/extension-history'
-import { redoDepth, undoDepth } from '@tiptap/pm/history'
+import { closeHistory, redoDepth, undoDepth } from '@tiptap/pm/history'
 import Placeholder from '@tiptap/extension-placeholder'
 import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
@@ -27,6 +27,7 @@ import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../lib/m
 import { isEditorWidgetTarget, widgetFieldHasFocus } from '../../lib/editorFocus'
 import { createDebouncedSave, type SaveRun } from '../../lib/pendingEdits'
 import { createContentSync, needsSave, recordSave, resolveExternalContent } from '../../lib/externalContentSync'
+import { pendingForcedRestore } from '../../lib/sectionRestore'
 import { restoreEditorHistory, snapshotEditorHistory } from '../../lib/editorHistory'
 import { canKeepUndoHistory, richUndoHistory } from './undoHistory'
 import { useT } from '../../i18n/useT'
@@ -39,8 +40,11 @@ import { useT } from '../../i18n/useT'
  * open card field) survive and undo keeps working for edits outside it. The
  * selection is kept: positions before the change stay, after it shift by the
  * size delta, inside it go to the change's start. Doesn't take focus.
+ * `undoable`: a restored version (lib/sectionRestore) — still no update emitted,
+ * but recorded as ONE undo step of its own (history closed before AND after it: never
+ * grouped with a keystroke right before or after), so Ctrl+Z takes the restore back.
  */
-function replaceDocKeepingSelection(editor: TiptapEditor, doc: ProseMirrorNode) {
+function replaceDocKeepingSelection(editor: TiptapEditor, doc: ProseMirrorNode, undoable = false) {
   const { state } = editor
   const start = state.doc.content.findDiffStart(doc.content)
   if (start == null) return
@@ -74,8 +78,13 @@ function replaceDocKeepingSelection(editor: TiptapEditor, doc: ProseMirrorNode) 
   } else {
     next = TextSelection.between(tr.doc.resolve(map(sel.anchor)), tr.doc.resolve(map(sel.head)))
   }
-  tr.setSelection(next).setMeta('addToHistory', false).setMeta('preventUpdate', true)
+  tr.setSelection(next).setMeta('preventUpdate', true)
+  if (undoable) closeHistory(tr)
+  else tr.setMeta('addToHistory', false)
   editor.view.dispatch(tr)
+  if (undoable) {
+    editor.view.dispatch(closeHistory(editor.state.tr).setMeta('addToHistory', false).setMeta('preventUpdate', true))
+  }
 }
 
 // Linked notes: how this editor renders and serializes plain Markdown, for the store to keep
@@ -172,6 +181,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   // An external update left for later because a widget field (an open kanban
   // card) had focus or an IME composition was running — see syncExternalContent.
   const deferredSyncRef = useRef(false)
+  // Token of the last restored version this editor applied (lib/sectionRestore).
+  const appliedRestoreRef = useRef<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   // Whether the editor viewport is wide enough to host the TOC next to the text
   // (narrow windows / split panes hide it rather than squeeze the text).
@@ -347,6 +358,25 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   // deferred until it ends.
   const syncExternalContent = (ed: TiptapEditor, localEdit = false) => {
     if (ed.isDestroyed) return
+    // A restored version (version history): replaces the text exactly — never merged
+    // with a local edit in flight, which is dropped with the outbox — as one undoable
+    // step, not saved back (it IS the store's content). Only an IME composition
+    // defers it (the retry below runs it once the composition ends).
+    const restore = pendingForcedRestore(noteId, currentSectionId, contentRef.current, appliedRestoreRef.current)
+    if (restore) {
+      if (ed.view.composing && !localEdit) {
+        deferredSyncRef.current = true
+        return
+      }
+      appliedRestoreRef.current = restore.token
+      deferredSyncRef.current = false
+      contentSave.cancel()
+      contentSync.base = contentRef.current
+      contentSync.outbox.length = 0
+      const doc = createDocument(htmlFromMarkdown(contentRef.current, { plain }), ed.schema)
+      if (!doc.eq(ed.state.doc)) replaceDocKeepingSelection(ed, doc, true)
+      return
+    }
     const blocked = ed.view.composing
       || widgetFieldHasFocus(document.hasFocus(), ed.view.dom, document.activeElement)
     if (!localEdit && blocked) {

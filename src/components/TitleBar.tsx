@@ -7,7 +7,7 @@ import type { ActiveSyncStatus } from '../types'
 import { ExportImportModal } from './ExportImportModal'
 import { SettingsModal } from './Settings/SettingsModal'
 import { SyncStatusButton } from './SyncStatusButton'
-import type { SettingsSection } from './Settings/SettingsModal'
+import type { SettingsIntent, SettingsSection } from './Settings/SettingsModal'
 
 export function TitleBar() {
   const t = useT()
@@ -29,11 +29,13 @@ export function TitleBar() {
   const pushStateRef = useRef<'pushing' | 'idle'>('idle')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
+  const [settingsIntent, setSettingsIntent] = useState<SettingsIntent | undefined>(undefined)
 
   const refreshSyncStatus = () => window.noteflow.getActiveSyncStatus().then(setSyncStatus)
 
-  const openSettings = (section: SettingsSection) => {
+  const openSettings = (section: SettingsSection, intent?: SettingsIntent) => {
     setSettingsSection(section)
+    setSettingsIntent(intent)
     setSettingsOpen(true)
   }
 
@@ -91,6 +93,12 @@ export function TitleBar() {
     const openAccount = () => openSettings('account')
     // The editor's AI chat sidebar / detached chat window with no provider configured.
     const openAiSettings = () => openSettings('ai')
+    // Generic: any section, with an optional intent — `detail: { section, intent? }` (the
+    // version history's "View NoteFlow Cloud" → Sync with the Cloud plan detail).
+    const openSettingsAt = (e: Event) => {
+      const detail = (e as CustomEvent<{ section?: SettingsSection; intent?: SettingsIntent } | null>).detail
+      openSettings(detail?.section ?? 'general', detail?.intent)
+    }
     const doSync = () => {
       setSyncing(true)
       window.noteflow.pullActiveNotes().then(() => {
@@ -106,6 +114,7 @@ export function TitleBar() {
     window.addEventListener('noteflow:check-for-update', openUpdates)
     window.addEventListener('noteflow:open-account', openAccount)
     window.addEventListener('noteflow:open-ai-settings', openAiSettings)
+    window.addEventListener('noteflow:open-settings', openSettingsAt)
     window.addEventListener('noteflow:sync-notes', doSync)
     return () => {
       window.removeEventListener('noteflow:open-export', openExport)
@@ -116,6 +125,7 @@ export function TitleBar() {
       window.removeEventListener('noteflow:check-for-update', openUpdates)
       window.removeEventListener('noteflow:open-account', openAccount)
       window.removeEventListener('noteflow:open-ai-settings', openAiSettings)
+      window.removeEventListener('noteflow:open-settings', openSettingsAt)
       window.removeEventListener('noteflow:sync-notes', doSync)
     }
   }, [])
@@ -255,6 +265,7 @@ export function TitleBar() {
     {settingsOpen && (
       <SettingsModal
         initialSection={settingsSection}
+        initialIntent={settingsIntent}
         onClose={() => setSettingsOpen(false)}
         onOpenExportImport={(mode) => {
           setSettingsOpen(false)

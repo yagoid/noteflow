@@ -16,6 +16,7 @@ import { brain } from './brain'
 import { titleBar } from './titleBar'
 import { whatsNew } from './whatsNew'
 import { linked } from './linked'
+import { versionHistory } from './versionHistory'
 
 // The `: Messages` annotation makes TypeScript enforce key-for-key parity with
 // English at compile time — a missing or misspelled key fails `npm run build`.
@@ -37,4 +38,5 @@ export const es: Messages = {
   titleBar,
   whatsNew,
   linked,
+  versionHistory,
 }
