@@ -1,12 +1,16 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Cloud, CloudOff, ExternalLink, Github, Loader, Pause, RefreshCw, Unlink, UploadCloud } from 'lucide-react'
+import { ArrowLeft, Check, Cloud, CloudOff, ExternalLink, Github, HardDrive, Loader, Pause, RefreshCw, Unlink, UploadCloud } from 'lucide-react'
+import type { AccountStatus } from '../../types'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { ConfirmModal } from '../ConfirmModal'
 import { CliConnectSection } from './CliConnectSection'
 import { CloudPanel } from './CloudPanel'
-import type { SettingsSection } from './SettingsModal'
+import { PlanTag } from './PlanOffers'
+import { useOfferTag } from './planOffersShared'
+import { hasKnownEntitlement } from '../../lib/subscriptionPlans'
+import type { SettingsIntent } from './SettingsModal'
 import { settingsButtonClass } from './ui'
 
 interface SyncStatus {
@@ -23,21 +27,33 @@ type Step = 'idle' | 'waiting-auth' | 'completing' | 'pulling' | 'mirroring'
 type MirrorResult = Awaited<ReturnType<typeof window.noteflow.mirrorToGitHub>>
 
 type Backend = 'cloud' | 'github'
+// 'choose' = the first-run chooser: no backend in use and none picked yet.
+type View = Backend | 'choose'
 
-// The Sync page: pick ONE backend — NoteFlow Cloud (encrypted, paid) or GitHub
-// Sync (free) — and configure it below. The two are mutually exclusive: Cloud
-// takes priority in electron/syncProvider.ts and pauses GitHub while enabled;
-// here we surface that choice as a two-card selector.
-export function SyncPanel({ onNavigate }: { onNavigate?: (section: SettingsSection) => void }) {
+// The Sync page: ONE backend — NoteFlow Cloud (encrypted, paid) or GitHub Sync
+// (free). The two are mutually exclusive: Cloud takes priority in
+// electron/syncProvider.ts and pauses GitHub while enabled.
+// - Nothing in use yet → a chooser: both options side by side at the same level
+//   (value first, the price only as a tag; nothing preselected), and from it the
+//   detail of the one picked, with a link back.
+// - A backend in use → the two-card selector with status badges, preselecting the
+//   one in use, and the panel of the selected one below.
+export function SyncPanel({ intent }: { intent?: SettingsIntent }) {
   const t = useT()
   const [cloudEnabled, setCloudEnabled] = useState(false)
   const [cloudSignedIn, setCloudSignedIn] = useState(false)
   const [githubConnected, setGithubConnected] = useState(false)
-  // null until both statuses land: the selector preselects the backend that is
-  // actually in use, and only then. It is resolved once — a later status change
-  // (enabling Cloud, disconnecting GitHub) must never move the user off the
-  // panel they are on.
-  const [backend, setBackend] = useState<Backend | null>(null)
+  const [account, setAccount] = useState<AccountStatus | null>(null)
+  // null until both statuses land: the view is resolved once, from what is actually
+  // in use — a later status change (enabling Cloud, disconnecting GitHub) must never
+  // move the user off the panel they are on. Whether the page shows the first-run
+  // chooser or the backend selector, on the other hand, follows the LIVE state: once
+  // something syncs (connected from the chooser itself), "← Sync options" lands on
+  // the selector, never on "Only on this device".
+  const [view, setView] = useState<View | null>(null)
+  // Settings → Account's "View" on NoteFlow Cloud / the Bundle lands on the Cloud detail.
+  const offer = intent?.offer
+  const [openCloudDetail] = useState(offer === 'cloud' || offer === 'bundle')
 
   useEffect(() => {
     Promise.all([window.noteflow.getCloudStatus(), window.noteflow.getSyncStatus()]).then(
@@ -45,7 +61,7 @@ export function SyncPanel({ onNavigate }: { onNavigate?: (section: SettingsSecti
         setCloudEnabled(cloud.enabled)
         setCloudSignedIn(cloud.signedIn)
         setGithubConnected(github.connected)
-        setBackend(cloud.enabled || !github.connected ? 'cloud' : 'github')
+        setView(cloud.enabled || openCloudDetail ? 'cloud' : github.connected ? 'github' : 'choose')
       },
     )
     const offCloud = window.noteflow.onCloudStatusChanged((s) => {
@@ -54,15 +70,20 @@ export function SyncPanel({ onNavigate }: { onNavigate?: (section: SettingsSecti
     })
     // Signing out turns Cloud sync off in main (electron/accountTransition.ts),
     // so both statuses move together — but listen to the account too, so the
-    // badge can never claim "Active" while the session is gone.
-    const offAccount = window.noteflow.onAccountStatusChanged((s) => setCloudSignedIn(s.signedIn))
+    // badge can never claim "Active" while the session is gone. The full status
+    // also feeds the price tag of the chooser.
+    void window.noteflow.getAccountStatus().then(setAccount)
+    const offAccount = window.noteflow.onAccountStatusChanged((s) => {
+      setAccount(s)
+      setCloudSignedIn(s.signedIn)
+    })
     return () => {
       offCloud()
       offAccount()
     }
-  }, [])
+  }, [openCloudDetail])
 
-  if (backend === null) {
+  if (view === null) {
     return (
       <div className="flex items-center gap-2 text-text-muted">
         <Loader size={12} className="animate-spin" />
@@ -70,6 +91,14 @@ export function SyncPanel({ onNavigate }: { onNavigate?: (section: SettingsSecti
       </div>
     )
   }
+
+  const backendInUse = cloudEnabled || githubConnected
+
+  // ── First run: nothing in use yet ──
+  if (!backendInUse && view === 'choose') {
+    return <SyncChooser account={account} onPick={setView} />
+  }
+  const backend: Backend = view === 'choose' ? 'cloud' : view
 
   // GitHub keeps its config while Cloud owns the sync loop — that is "paused",
   // not "disconnected".
@@ -88,33 +117,44 @@ export function SyncPanel({ onNavigate }: { onNavigate?: (section: SettingsSecti
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
-        <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-          {t.settings.sync.chooseBackendDesc}
-        </p>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <BackendCard
-            icon={<Cloud size={12} className={backend === 'cloud' ? 'text-accent' : 'text-text-muted'} />}
-            title={t.settings.cloud.title}
-            desc={t.settings.sync.cloudCardDesc}
-            badge={cloudBadge}
-            selected={backend === 'cloud'}
-            onSelect={() => setBackend('cloud')}
-          />
-          <BackendCard
-            icon={<Github size={12} className={backend === 'github' ? 'text-accent' : 'text-text-muted'} />}
-            title={t.settings.sync.githubTitle}
-            desc={t.settings.sync.githubCardDesc}
-            badge={githubBadge}
-            selected={backend === 'github'}
-            onSelect={() => setBackend('github')}
-          />
+      {backendInUse ? (
+        <div className="space-y-3">
+          <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+            {t.settings.sync.chooseBackendDesc}
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <BackendCard
+              icon={<Cloud size={12} className={backend === 'cloud' ? 'text-accent' : 'text-text-muted'} />}
+              title={t.settings.cloud.title}
+              desc={account && hasKnownEntitlement(account, 'cloud') ? t.settings.sync.cloudCardDescOwned : t.settings.sync.cloudCardDesc}
+              badge={cloudBadge}
+              selected={backend === 'cloud'}
+              onSelect={() => setView('cloud')}
+            />
+            <BackendCard
+              icon={<Github size={12} className={backend === 'github' ? 'text-accent' : 'text-text-muted'} />}
+              title={t.settings.sync.githubTitle}
+              desc={t.settings.sync.githubCardDesc}
+              badge={githubBadge}
+              selected={backend === 'github'}
+              onSelect={() => setView('github')}
+            />
+          </div>
         </div>
-      </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setView('choose')}
+          className="flex items-center gap-1.5 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
+        >
+          <ArrowLeft size={11} />
+          {t.settings.sync.backToOptions}
+        </button>
+      )}
 
       <section>
         {backend === 'cloud' ? (
-          <CloudPanel onNavigate={onNavigate} />
+          <CloudPanel initialBundle={offer === 'bundle'} />
         ) : (
           <div className="space-y-4">
             {/* Paused while NoteFlow Cloud owns the sync loop (config is kept). */}
@@ -134,6 +174,103 @@ export function SyncPanel({ onNavigate }: { onNavigate?: (section: SettingsSecti
       {(backend === 'cloud' ? cloudEnabled && cloudSignedIn : githubConnected) && (
         <CliConnectSection key={backend} backend={backend} />
       )}
+    </div>
+  )
+}
+
+// First-run chooser: NoteFlow Cloud and GitHub Sync as two equal cards — who each
+// one is for, three points of value, a discreet price tag and its own button.
+function SyncChooser({ account, onPick }: { account: AccountStatus | null; onPick: (view: Backend) => void }) {
+  const t = useT()
+  const cloudTag = useOfferTag(account, 'cloud')
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <p className="flex items-center gap-2 text-xs font-mono text-text-muted">
+          <HardDrive size={12} className="shrink-0" />
+          {t.settings.sync.localOnly}
+        </p>
+        <p className="text-[11px] font-mono text-text-muted/80 leading-relaxed">{t.settings.sync.chooseIntro}</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ChoiceCard
+          icon={<Cloud size={13} className="text-text-muted" />}
+          title={t.settings.cloud.title}
+          tag={cloudTag}
+          audience={t.settings.sync.choiceCloud.audience}
+          points={t.settings.sync.choiceCloud.points}
+          cta={t.settings.sync.choiceCloud.cta}
+          onPick={() => onPick('cloud')}
+        />
+        <ChoiceCard
+          icon={<Github size={13} className="text-text-muted" />}
+          title={t.settings.sync.githubTitle}
+          tag={t.settings.plans.free}
+          audience={t.settings.sync.choiceGithub.audience}
+          points={t.settings.sync.choiceGithub.points}
+          cta={t.settings.sync.choiceGithub.cta}
+          onPick={() => onPick('github')}
+        />
+      </div>
+      {/* Returning subscribers: the Cloud detail carries the inline sign-in. */}
+      {account?.configured && !account.signedIn && (
+        <p className="text-[11px] font-mono text-text-muted/80">
+          {t.settings.sync.haveCloud}{' '}
+          <button
+            type="button"
+            onClick={() => onPick('cloud')}
+            className="underline underline-offset-2 text-text-muted hover:text-text transition-colors"
+          >
+            {t.settings.account.signIn}
+          </button>
+        </p>
+      )}
+    </div>
+  )
+}
+
+function ChoiceCard({
+  icon,
+  title,
+  tag,
+  audience,
+  points,
+  cta,
+  onPick,
+}: {
+  icon: ReactNode
+  title: string
+  tag: string | null
+  audience: string
+  points: readonly string[]
+  cta: string
+  onPick: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-3 p-3.5 rounded-xl border border-solid border-border bg-surface-0">
+      <div className="space-y-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          {icon}
+          <span className="text-xs font-mono font-semibold text-text">{title}</span>
+          {tag && <PlanTag>{tag}</PlanTag>}
+        </div>
+        <p className="text-[11px] font-mono text-text-muted leading-relaxed">{audience}</p>
+      </div>
+      <ul className="space-y-1">
+        {points.map((point) => (
+          <li key={point} className="flex items-start gap-2 text-[11px] font-mono text-text-muted leading-relaxed">
+            <Check size={11} className="mt-[3px] shrink-0 text-accent" />
+            <span>{point}</span>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        onClick={onPick}
+        className={`mt-auto self-start px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
+      >
+        {cta}
+      </button>
     </div>
   )
 }

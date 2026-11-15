@@ -16,6 +16,7 @@ import {
   X,
 } from 'lucide-react'
 import { useT } from '../../i18n/useT'
+import type { SubscriptionProduct } from '../../lib/subscriptionPlans'
 import { GeneralPanel } from './GeneralPanel'
 import { AccountPanel } from './AccountPanel'
 import { AppearancePanel } from './AppearancePanel'
@@ -42,6 +43,18 @@ export type SettingsSection =
   | 'shortcuts'
   | 'tutorial'
   | 'about'
+
+/**
+ * Optional "what to open" that travels with an in-panel navigation: Settings →
+ * Account's "View" on a paid plan opens that plan's detail (`offer`: 'cloud' /
+ * 'bundle' → Sync → NoteFlow Cloud, with the Bundle chosen for 'bundle'; 'ai' →
+ * AI → NoteFlow AI). Read once by the target panel when it mounts.
+ */
+export interface SettingsIntent {
+  offer?: SubscriptionProduct
+}
+
+export type SettingsNavigate = (section: SettingsSection, intent?: SettingsIntent) => void
 
 interface NavEntry {
   id: SettingsSection
@@ -102,7 +115,12 @@ interface SettingsModalProps {
 
 export function SettingsModal({ initialSection = 'general', onClose, onOpenExportImport }: SettingsModalProps) {
   const [section, setSection] = useState<SettingsSection>(initialSection)
+  const [intent, setIntent] = useState<SettingsIntent | undefined>(undefined)
   const t = useT()
+  const navigate: SettingsNavigate = (next, nextIntent) => {
+    setSection(next)
+    setIntent(nextIntent)
+  }
   const contentRef = useRef<HTMLDivElement>(null)
 
   // One scroll container serves every section: start each one at the top instead of
@@ -158,7 +176,7 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
                   return (
                     <button
                       key={entry.id}
-                      onClick={() => setSection(entry.id)}
+                      onClick={() => navigate(entry.id)}
                       className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs font-mono text-left transition-colors ${
                         active
                           ? 'bg-surface-3 text-text'
@@ -185,9 +203,9 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
                 compositor on standard-DPI screens instead of repainting it on every scroll frame. */}
             <div ref={contentRef} className="settings-content flex-1 overflow-y-auto px-5 py-5 bg-surface-1">
               {section === 'general' && <GeneralPanel onClose={onClose} />}
-              {section === 'ai' && <AiPanel onNavigate={setSection} />}
-              {section === 'sync' && <SyncPanel onNavigate={setSection} />}
-              {section === 'account' && <AccountPanel />}
+              {section === 'ai' && <AiPanel intent={intent} />}
+              {section === 'sync' && <SyncPanel intent={intent} />}
+              {section === 'account' && <AccountPanel onNavigate={navigate} />}
               {section === 'appearance' && <AppearancePanel />}
               {section === 'editor' && <EditorPanel />}
               {section === 'templates' && <TemplatesPanel onClose={onClose} />}

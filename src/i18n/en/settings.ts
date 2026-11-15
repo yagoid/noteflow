@@ -15,7 +15,7 @@ export const settings = {
     sync: 'Sync',
     data: 'Data',
     ai: 'AI',
-    account: 'Subscription',
+    account: 'Account',
     shortcuts: 'Keyboard shortcuts',
     tutorial: 'Tutorial',
     about: 'About',
@@ -147,6 +147,7 @@ export const settings = {
     // Backend selector (the two sync backends are mutually exclusive).
     chooseBackendDesc: 'Choose how your notes sync across devices. Only one backend can be active at a time.',
     cloudCardDesc: 'Encrypted sync through NoteFlow servers. Nothing to set up — requires a subscription.',
+    cloudCardDescOwned: 'Encrypted sync through NoteFlow servers. Nothing to set up — included in your plan.',
     githubTitle: 'GitHub Sync',
     githubCardDesc: 'Sync through a private GitHub repository of your own. Free, needs a GitHub account.',
     // Backend status badges.
@@ -156,6 +157,31 @@ export const settings = {
     // Shown in the GitHub subsection while NoteFlow Cloud is enabled — the
     // sync router gives Cloud priority (see electron/syncProvider.ts).
     pausedByCloud: 'GitHub Sync is paused while NoteFlow Cloud is enabled. Your GitHub configuration is kept — disable NoteFlow Cloud to resume syncing through GitHub.',
+    // First-run chooser (no backend in use yet): both options side by side, at the
+    // same level — the paid one is not preselected, and its price is just a tag.
+    localOnly: 'Only on this device — your notes are not syncing yet.',
+    chooseIntro: 'Choose how to keep your notes in sync across your devices.',
+    choiceCloud: {
+      audience: 'For syncing with nothing to set up.',
+      points: [
+        'Automatic sync across your devices',
+        'Encrypted — Standard, or Private end-to-end',
+        'No repository to create or maintain',
+      ],
+      cta: 'See NoteFlow Cloud',
+    },
+    choiceGithub: {
+      audience: 'For people who already use GitHub.',
+      points: [
+        'Your notes in a private repository of your own',
+        'Syncs on its own every 5 minutes',
+        'Version history kept by Git',
+      ],
+      cta: 'Connect with GitHub',
+    },
+    haveCloud: 'Already have NoteFlow Cloud?',
+    // Back link from the Cloud / GitHub detail to the chooser.
+    backToOptions: 'Sync options',
     connected: 'Connected',
     // Also used as the GitHub badge in the backend selector.
     notConnected: 'Not connected',
@@ -385,43 +411,18 @@ export const settings = {
     // Entitlements never fetched yet (offline boot, keychain locked…): the plan
     // is UNKNOWN — shown instead of the Subscribe cards / "not subscribed" state
     // so a paying user is never offered a plan they already have.
-    planUnknownBadge: "Couldn't check",
     planUnknown: "Couldn't verify your plan yet.",
     planChecking: 'Checking your plan…',
     planRetry: 'Retry',
     // The session's refresh token can't be decrypted right now (system keychain
     // locked). Recoverable: retried automatically, or Retry / Sign out by hand.
     sessionLocked: "Couldn't unlock your saved session — your system keychain may be locked. Unlock it and retry, or sign out.",
-    // Plans block (signed in, entitlements missing). Price figures are NOT in
-    // the dicts — they live in src/lib/subscriptionPlans.ts; only the pattern
-    // is translated and filled with tf().
-    planBundleSubtitle: 'AI + Cloud',
-    planBestValue: 'Best value',
-    planPrice: '{monthly}/month · {yearly}/year',
-    // Suffixes for the split price on the plan cards: the monthly figure is the
-    // hero, the yearly one a small line under it (mirrors the /pricing web cards).
-    planPerMonth: '/month',
-    planPerYear: '/year',
-    subscribe: 'Subscribe',
     comingSoon: 'Coming soon',
-    subscribeHint: 'Opens the checkout in your browser. The plan activates automatically after payment — hit Refresh if it does not show up.',
-    // Under the plan cards: Lemon Squeezy is set to tax-inclusive pricing, so the
-    // listed price is what the customer pays (stating it is required by LSSI art. 10.1.f).
-    pricesIncludeVat: 'Prices include VAT.',
-    // Shown instead of subscribeHint when the plans block renders without a
-    // session (AI / Cloud gates), next to the shortcut into Settings → Subscription.
-    signInToSubscribe: 'Sign in to your NoteFlow account to subscribe.',
-    goToAccount: 'Go to Subscription',
-    // Signed-out AI / Cloud gates: the account is only for paid users, so the
-    // prompt is addressed to existing subscribers, with a button into Settings → Subscription.
-    alreadySubscribed: 'Already subscribed?',
     signIn: 'Sign in',
     couldNotOpenCheckout: 'Could not open the checkout.',
-    // Bundle card when the user already pays for exactly one of AI / Cloud: it is
-    // a PLAN CHANGE of that subscription (prorated), never a second checkout. The
-    // card asks for confirmation in the app because no checkout page is shown.
-    upgrade: 'Upgrade',
-    planUpgradeNote: 'Replaces your current plan',
+    // Switching a single AI / Cloud subscription to the Bundle is a PLAN CHANGE of
+    // that subscription (prorated), never a second checkout. It asks for
+    // confirmation in the app because no checkout page is shown.
     upgradeConfirmTitle: 'Upgrade to NoteFlow Bundle?',
     upgradeConfirmBody: 'Your {plan} subscription is switched to the Bundle — it is not a second subscription, so you never pay for {plan} twice.',
     upgradeProration: "The price is prorated: the unused part of your current billing period is credited and you're charged only the difference for the rest of it, right away, to the card on file. From your next renewal you pay the Bundle price ({monthly}/month or {yearly}/year, matching your current billing cycle). Your renewal date stays the same.",
@@ -450,8 +451,6 @@ export const settings = {
     // The retry found no session left (most likely an earlier attempt deleted
     // the account but its answer never arrived).
     accountGone: 'Your NoteFlow account has been deleted or your session ended. Notes on this computer were kept.',
-    signInDesc:
-      'For paid users: sign in with your email to access your NoteFlow subscription.',
     signInCodeHint: "We'll send you a one-time code.",
     email: 'Email',
     sendCode: 'Send code',
@@ -471,11 +470,11 @@ export const settings = {
     legalSuffix: '.',
   },
 
-  // "What you get" list under the plan cards of the AI and Cloud gates (PlanOffers
-  // `benefits` prop) — what the managed plan adds over the free self-managed route
-  // (own provider / GitHub Sync). Not shown in Settings → Subscription.
+  // "What's included" column of the NoteFlow Cloud / NoteFlow AI detail (PlanDetail):
+  // what the managed plan adds over the free self-managed route (own provider /
+  // GitHub Sync).
   planBenefits: {
-    title: 'What you get',
+    title: "What's included",
     ai: [
       'Works the moment you subscribe — no Ollama to install, no third-party accounts, no API keys to buy or rotate.',
       'More affordable — we use the most efficient models (GPT Luna, Claude Haiku, DeepSeek…), all with agent tools and image support.',
@@ -488,6 +487,82 @@ export const settings = {
       'Choose your encryption: Standard (nothing to remember) or Private end-to-end, where only you can read your notes.',
       'Nothing to set up — no GitHub repository to create or maintain.',
     ],
+    // Last line of the list: what happens if the subscription ends.
+    keepOnCancel: {
+      ai: 'If you cancel, you can go back to your own API key or a local model at any time.',
+      cloud: 'If you cancel, your notes stay on your computer.',
+    },
+  },
+
+  // How the paid plans are offered (PlanOffers.tsx + Settings → Account). Price
+  // figures are NOT in the dicts: they live in src/lib/subscriptionPlans.ts as
+  // numbers and are formatted for the UI language ({price} = "€3.99" / "3,99 €").
+  plans: {
+    perMonth: '{price}/month',
+    perYear: '{price}/year',
+    // Suffix after the big price of the plan box.
+    monthSuffix: '/month',
+    free: 'Free',
+    // Price tag of a plan the account already has / could add to its current one.
+    inYourPlan: 'In your plan',
+    addToYourPlan: 'Add to your plan',
+    // Line under the big (monthly) price.
+    yearlyAlternative: 'or {price}/year · save {percent}%',
+    // The Lemon Squeezy checkout has its own Monthly / Yearly selector; the app can't
+    // preselect it, so the plan box has no period switch of its own.
+    periodAtCheckout: 'You pick monthly or yearly on the payment page.',
+    bundleSubtitle: 'Cloud + AI',
+    continueToPayment: 'Continue to payment',
+    signInToSubscribe: 'Sign in with your email to subscribe — or to use a plan you already have.',
+    // Lemon Squeezy is set to tax-inclusive pricing, so the listed price is what the
+    // customer pays (stating it is required by LSSI art. 10.1.f).
+    paymentNote: 'VAT included · you pay on a secure page (Lemon Squeezy) · cancel anytime',
+    checkoutOpened: 'Checkout opened in your browser. The plan activates on its own after payment.',
+    // Discreet line under the plan box: the Bundle is an option, not a hero card.
+    bundleLine: {
+      ai: 'Want your notes synced too? NoteFlow Bundle brings AI and Cloud together for {price}/month.',
+      cloud: 'Also interested in AI? NoteFlow Bundle brings Cloud and AI together for {price}/month.',
+    },
+    chooseBundle: 'Choose the Bundle',
+    // Same line once the Bundle is chosen, to go back to the single plan.
+    singleLine: 'Just {plan}: {price}/month.',
+    chooseSingle: 'Choose {plan} only',
+    // Settings → Account.
+    yourPlan: 'Your plan: {plan}',
+    yourPlanTitle: 'Your plan',
+    currentPlan: 'Current plan',
+    freeIncludes: [
+      'Unlimited notes on this computer',
+      'Sync with GitHub',
+      'The Brain and related notes with local AI',
+      'Chat with your own API key or Ollama',
+    ],
+    noAccountNeeded: "You don't need an account for any of this.",
+    optionalUpgrades: 'Optional upgrades',
+    rowDesc: {
+      ai: 'Chat with your notes — no API keys',
+      cloud: 'Encrypted sync, nothing to set up',
+      bundle: 'Cloud + AI',
+    },
+    bundleSaves: 'saves {price}/month vs. buying them separately',
+    view: 'View',
+    alreadySubscribed: 'Already have a subscription?',
+    signInHint: 'Sign in with the email you subscribed with.',
+    // A single plan already paid: the other product as a folded row.
+    addProduct: 'Add {plan} to your plan',
+    addValue: {
+      ai: 'Chat with your notes without API keys or local models — a monthly allowance included.',
+      cloud: 'Encrypted, automatic sync across your devices — nothing to set up.',
+    },
+    becomesBundle: 'Your subscription becomes the Bundle (Cloud + AI): you never pay for two subscriptions.',
+    upgradeDifference: '+{price}/month',
+    upgradeDifferenceYearly: '+{price}/year if you pay yearly',
+    upgradeTotal: '{monthly}/month in total ({yearly}/year on yearly billing) · you only pay the prorated part of the current period',
+    switchToBundle: 'Switch to Bundle',
+    notNow: 'Not now',
+    // Single plan whose subscription can't be switched to the Bundle (e.g. a
+    // complimentary one): the other product is its own subscription.
+    standaloneNote: 'Billed as a separate subscription.',
   },
 
   shortcuts: {

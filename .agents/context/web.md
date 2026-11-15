@@ -51,9 +51,16 @@ con notificaciones locales, widgets, backup de Android, tabla de permisos; §9 `
 **denuncias de respuestas de IA** del móvil; §14 `#deletion`). **Ids enlazados desde fuera, no
 renombrar:** `feedback` (escritorio), `deletion` (desde `/delete-account`), `android` (redirect legacy).
 La ruta dentro de la app que citan `/privacy#deletion` y `/delete-account` (**Settings → Subscription →
-Delete account** / **Ajustes → Suscripción → Eliminar cuenta**, igual en Android y escritorio) debe
+Delete account** / **Ajustes → Suscripción → Eliminar cuenta**) debe
 coincidir con las etiquetas de `noteflow-mobile/src/i18n/{en,es}/settings.ts` y de este repo
-(`src/i18n/{en,es}/settings.ts`: `settings.nav.account` + `settings.account.deleteAccount`); y lo que dicen que se
+(`src/i18n/{en,es}/settings.ts`: `settings.nav.account` + `settings.account.deleteAccount`). ⚠️ **Desfase
+pendiente (2026-11-15):** en el escritorio la sección pasó a llamarse **Account / Cuenta** (rediseño de
+planes). La parte de **escritorio** de la web se actualiza **con el próximo release de escritorio**, sin
+depender del móvil: la sección desktop de `/delete-account` (`docs/src/i18n/docs/delete-account.{en,es}.ts`)
+y `/pricing` (`pricing.{en,es}.ts`, que dicen "Settings → Subscription" y "→ Subscribe"; en la app ahora
+se paga desde el detalle de cada plan, "Continue to payment"). Lo que la web atribuye al móvil (y
+`privacy`, si nombra la ruta de ambos) sigue a la etiqueta del móvil, que aún dice "Subscription /
+Suscripción". Y lo que dicen que se
 borra/conserva, con
 `supabase/functions/delete-account` (ver `monetization.md`).
 

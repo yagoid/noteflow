@@ -1,33 +1,56 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Check, KeyRound, Loader2, RefreshCw, Sparkles, X } from 'lucide-react'
+import { ArrowLeft, Check, Cpu, KeyRound, Loader2, RefreshCw, Sparkles, X } from 'lucide-react'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
-import type { AccountStatus, LlmConfigPublic } from '../../types'
-import { hasKnownEntitlement, isPlanUnknown, type SubscriptionProduct } from '../../lib/subscriptionPlans'
-import type { SettingsSection } from '../Settings/SettingsModal'
+import type { AccountStatus, LlmConfigPublic, LlmPreset } from '../../types'
+import { hasKnownEntitlement, isPlanUnknown } from '../../lib/subscriptionPlans'
 import { Card, FieldLabel, FIELD_INPUT } from './ui'
-import { PlanOffers, PlanUnknownNotice } from '../Settings/PlanOffers'
-import { settingsButtonClass } from '../Settings/ui'
+import { PlanDetail, PlanTag, PlanUnknownNotice } from '../Settings/PlanOffers'
+import { useOfferTag } from '../Settings/planOffersShared'
 
-// The two mutually exclusive ways of powering the assistant. Kept as VIEW state
-// (see below) — the source of truth for what is actually in use is llmConfig.active.
-type Mode = 'noteflow' | 'byo'
+// The three ways of powering the assistant, offered at the same level: the managed plan, your
+// own API key (presets that need one) or a model on your computer (presets that don't — Ollama,
+// Custom). Kept as VIEW state (see below) — the source of truth for what is actually in use is
+// llmConfig.active.
+type Source = 'noteflow' | 'key' | 'local'
+type ByoSource = Exclude<Source, 'noteflow'>
 
-// Provider preselected in the BYO <select> when the managed plan is the active one and no
-// earlier BYO provider is remembered (main's presetOf() falls back to 'anthropic' for unknown
-// ids too).
-const DEFAULT_BYO_PRESET = 'anthropic'
+// Provider preselected in each BYO card when neither the active provider nor the remembered
+// lastByoProvider belongs to it (main's presetOf() falls back to 'anthropic' for unknown ids too).
+const DEFAULT_PRESET: Record<ByoSource, string> = { key: 'anthropic', local: 'ollama' }
 
-// Initial view state, derived from the provider that is actually in use. Null while the config
-// has not landed yet (the panel shows a spinner) — never a fallback, or the first paint would
-// preselect the wrong card.
-const modeOf = (cfg: LlmConfigPublic | null): Mode | null =>
-  cfg ? (cfg.active === 'noteflow' ? 'noteflow' : 'byo') : null
-// With NoteFlow AI active, the BYO card points at the provider the user had before it
-// (lastByoProvider, e.g. DeepSeek with its saved key), not the generic default.
-const byoOf = (cfg: LlmConfigPublic | null): string =>
-  cfg && cfg.active !== 'noteflow' ? cfg.active : cfg?.lastByoProvider || DEFAULT_BYO_PRESET
+const fitsSource = (p: LlmPreset | undefined, source: ByoSource): boolean =>
+  !!p && p.id !== 'noteflow' && (source === 'key' ? p.needsKey : !p.needsKey)
+
+const sourceOfPreset = (id: string, presets: LlmPreset[]): Source =>
+  id === 'noteflow' ? 'noteflow' : presets.find((p) => p.id === id)?.needsKey === false ? 'local' : 'key'
+
+// Initial view, derived from the provider that is actually in use. `undefined` while the config has
+// not landed yet (the panel shows a spinner — never a fallback, or the first paint would preselect
+// the wrong card); `null` = nothing usable is configured (a fresh install: Anthropic without a key),
+// so no card is preselected and the status line says so. `initialOffer` (Settings → Account's
+// "View" on NoteFlow AI) opens the managed plan's detail.
+const viewOf = (
+  cfg: LlmConfigPublic | null,
+  presets: LlmPreset[],
+  initialOffer: 'ai' | 'bundle' | undefined,
+): Source | null | undefined => {
+  if (!cfg) return undefined
+  if (initialOffer || cfg.active === 'noteflow') return 'noteflow'
+  if (!cfg.configured) return null
+  return sourceOfPreset(cfg.active, presets)
+}
+
+// Which provider the BYO card's <select> points at: the active one if it belongs to that card,
+// else the provider the user had before NoteFlow AI (lastByoProvider, e.g. DeepSeek with its saved
+// key) if it does, else the card's default (Ollama for "Local model").
+const byoFor = (source: ByoSource, cfg: LlmConfigPublic | null, presets: LlmPreset[]): string => {
+  const find = (id: string) => presets.find((p) => p.id === id)
+  if (cfg && fitsSource(find(cfg.active), source)) return cfg.active
+  if (cfg?.lastByoProvider && fitsSource(find(cfg.lastByoProvider), source)) return cfg.lastByoProvider
+  return DEFAULT_PRESET[source]
+}
 
 // Share of the NoteFlow AI monthly allowance spent, as a whole percentage. The proxy
 // reports abstract units (only used/limit is meaningful). Floored, so "100%" only shows
@@ -39,10 +62,11 @@ function usagePercent(used: number, limit: number): number {
 
 export function LlmConfigView({
   embedded = false,
-  onNavigate,
+  initialOffer,
 }: {
   embedded?: boolean
-  onNavigate?: (section: SettingsSection) => void
+  /** Open the NoteFlow AI plan detail (with the Bundle chosen for 'bundle'). */
+  initialOffer?: 'ai' | 'bundle'
 } = {}) {
   const t = useT()
   const llmConfig = useAiChatStore((s) => s.llmConfig)
@@ -55,8 +79,6 @@ export function LlmConfigView({
   const testConnection = useAiChatStore((s) => s.testConnection)
 
   const preset = useMemo(() => presets.find((p) => p.id === llmConfig?.active) ?? null, [presets, llmConfig?.active])
-  // The managed plan has its own card in the selector, so it is never a <select> option.
-  const selectablePresets = useMemo(() => presets.filter((p) => p.id !== 'noteflow'), [presets])
   // Chips offered for the active preset. For a curated catalog (preset.modelMeta — the managed
   // plan) the list is EXACTLY the catalog main has in force (downloaded from the proxy's /models
   // and cached, else its backup constants): main refuses to store anything else, so a chip from
@@ -75,17 +97,25 @@ export function LlmConfigView({
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
   const [account, setAccount] = useState<AccountStatus | null>(null)
-  const [checkoutError, setCheckoutError] = useState<string | null>(null)
   const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null)
+  const [offerBundle, setOfferBundle] = useState(initialOffer === 'bundle')
   const lastActive = useRef<string | null>(null)
-  // `mode` is VIEW state, not the active provider: it is resolved ONCE, from the provider in use
+  // `view` is VIEW state, not the active provider: it is resolved ONCE, from the provider in use
   // the first time the config is available, and never moves on its own afterwards — a later change
   // of the active provider (subscribing activates NoteFlow AI from main, for instance) must not
-  // yank the user out of the panel they are reading. Same contract as `backend` in SyncPanel.
-  const [mode, setMode] = useState<Mode | null>(() => modeOf(useAiChatStore.getState().llmConfig))
+  // yank the user out of the panel they are reading. Same contract as `view` in SyncPanel.
+  const [view, setView] = useState<Source | null | undefined>(() => {
+    const s = useAiChatStore.getState()
+    return viewOf(s.llmConfig, s.presets, initialOffer)
+  })
   // Which BYO provider the <select> is pointing at. Decoupled from llmConfig.active so the
-  // dropdown always shows a real preset — with NoteFlow AI active there is no BYO active one.
-  const [byoId, setByoId] = useState(() => byoOf(useAiChatStore.getState().llmConfig))
+  // dropdown always shows a real preset of the card on screen.
+  const [byoId, setByoId] = useState(() => {
+    const s = useAiChatStore.getState()
+    return byoFor(viewOf(s.llmConfig, s.presets, initialOffer) === 'local' ? 'local' : 'key', s.llmConfig, s.presets)
+  })
+  // Price tag of the NoteFlow AI card (hook: before the early return below).
+  const aiTag = useOfferTag(account, 'ai')
 
   // The NoteFlow AI preset gates on the account session + 'ai' entitlement:
   // track the public status and re-pull the config (its `configured` flag is
@@ -109,16 +139,17 @@ export function LlmConfigView({
   }, [account])
 
   // Mounted before the config landed (the parents load it asynchronously): resolve the initial
-  // mode on the first store update that carries it, then unsubscribe — from there on `mode` only
+  // view on the first store update that carries it, then unsubscribe — from there on `view` only
   // moves when the user picks a card.
   useEffect(() => {
-    if (mode !== null) return
+    if (view !== undefined) return
     return useAiChatStore.subscribe((s) => {
       if (!s.llmConfig) return
-      setMode(modeOf(s.llmConfig))
-      setByoId(byoOf(s.llmConfig))
+      const next = viewOf(s.llmConfig, s.presets, initialOffer)
+      setView(next)
+      setByoId(byoFor(next === 'local' ? 'local' : 'key', s.llmConfig, s.presets))
     })
-  }, [mode])
+  }, [view, initialOffer])
 
   // Reset the editable fields whenever the active provider changes.
   useEffect(() => {
@@ -131,7 +162,7 @@ export function LlmConfigView({
     }
   }, [llmConfig])
 
-  if (!llmConfig || !preset || mode === null) {
+  if (!llmConfig || !preset || view === undefined) {
     return (
       <div className="flex items-center justify-center h-full text-text-muted/60">
         <Loader2 size={16} className="animate-spin" />
@@ -163,21 +194,6 @@ export function LlmConfigView({
     if (!res.ok) setModelsError(res.error ?? t.aiPanel.provider.error)
   }
 
-  // Checkout for the plans advertised in the gate below — opens in the browser;
-  // the entitlement lands on its own via onAccountStatusChanged.
-  const openCheckout = async (product: SubscriptionProduct) => {
-    setCheckoutError(null)
-    const result = await window.noteflow.accountOpenCheckout(product)
-    if (!result.ok) setCheckoutError(result.error ?? t.settings.account.couldNotOpenCheckout)
-  }
-
-  // Settings → AI can switch section in place; the brain panel has no navigation
-  // of its own, so it asks TitleBar to open Settings → Account via the event bus.
-  const goToAccount = () => {
-    if (onNavigate) onNavigate('account')
-    else window.dispatchEvent(new Event('noteflow:open-account'))
-  }
-
   const runTest = async () => {
     setTesting(true)
     setTestResult(null)
@@ -185,15 +201,29 @@ export function LlmConfigView({
     setTesting(false)
   }
 
+  const pickSource = (source: Source) => {
+    setView(source)
+    if (source !== 'noteflow') setByoId(byoFor(source, llmConfig, presets))
+  }
+
   const managedActive = llmConfig.active === 'noteflow'
   // Presets carrying `modelMeta` (today only the managed plan) serve a CURATED catalog: the
   // model is picked from the chips, never typed. Main enforces the same rule (llm.acceptsModel).
   const curatedCatalog = !!preset.modelMeta
   // KNOWN to have the 'ai' entitlement. Never-fetched entitlements are UNKNOWN (planUnknown):
-  // neither the paywall nor "not subscribed" — main still lets the managed preset run then
-  // (the proxy is the judge), and the gate shows a neutral "couldn't verify — Retry".
+  // neither the offer nor "not subscribed" — main still lets the managed preset run then
+  // (the proxy is the judge), and the section shows a neutral "couldn't verify — Retry".
   const entitled = !!account && hasKnownEntitlement(account, 'ai')
   const planUnknown = !!account && isPlanUnknown(account)
+  // NoteFlow AI picked without the plan: its detail (value, one plan box with the inline
+  // sign-in, or the Bundle plan change for a Cloud subscriber) replaces the cards, with a
+  // link back to them.
+  const showOfferDetail = view === 'noteflow' && !!account && !entitled && !planUnknown
+  // The card the ACTIVE provider belongs to. Only marked "Active" when it can really answer
+  // (llmConfig.configured): a fresh install sits on Anthropic without a key, which is no source.
+  const activeSource = sourceOfPreset(llmConfig.active, presets)
+  const byoSource: ByoSource = view === 'local' ? 'local' : 'key'
+  const byoChoices = presets.filter((p) => fitsSource(p, byoSource))
   // The BYO provider on screen owns the config only while it is the active one: baseUrl / key /
   // model all write to whatever provider is active, so those fields stay HIDDEN until the picked
   // provider is activated — otherwise editing them here would silently overwrite the config of
@@ -201,13 +231,7 @@ export function LlmConfigView({
   const byoActive = llmConfig.active === byoId
   const byoPreset = presets.find((p) => p.id === byoId) ?? null
 
-  const activeBadge = { label: t.aiPanel.provider.badgeActive, className: 'bg-green-500/15 text-green-400' }
-  const inactiveBadge = {
-    label: t.aiPanel.provider.badgeInactive,
-    className: 'border-solid border border-border text-text-muted',
-  }
-
-  // Model + connection test — shared by both modes. Always edits the ACTIVE provider, so it is
+  // Model + connection test — shared by every source. Always edits the ACTIVE provider, so it is
   // only rendered when the provider shown on screen is the active one. Built as an element (not a
   // nested component) so it keeps its identity across renders and the input never loses focus.
   const modelCard = (
@@ -270,201 +294,205 @@ export function LlmConfigView({
     </Box>
   )
 
+  const sources: { id: Source; icon: ReactNode; title: string; desc: string; tag: string | null }[] = [
+    {
+      id: 'noteflow',
+      icon: <Sparkles size={12} />,
+      title: 'NoteFlow AI',
+      desc: t.aiPanel.provider.noteflowCard.subtitle,
+      tag: aiTag,
+    },
+    {
+      id: 'key',
+      icon: <KeyRound size={12} />,
+      title: t.aiPanel.provider.keyCard.title,
+      desc: t.aiPanel.provider.keyCard.subtitle,
+      tag: t.settings.plans.free,
+    },
+    {
+      id: 'local',
+      icon: <Cpu size={12} />,
+      title: t.aiPanel.provider.localCard.title,
+      desc: t.aiPanel.provider.localCard.subtitle,
+      tag: t.settings.plans.free,
+    },
+  ]
+
   return (
     <div className={`flex flex-col gap-6 text-[13px] font-mono ${embedded ? '' : 'p-3 overflow-y-auto'}`}>
-      {/* Pick ONE source for the assistant: the managed plan or a BYO-key / local provider. */}
-      <div className="flex flex-col gap-3">
-        <p className="text-[11px] text-text-muted normal-case leading-relaxed">
-          {t.aiPanel.provider.chooseSourceDesc}
+      {/* Honest status: "ready" only when the active provider can actually answer. */}
+      <div className="flex flex-col gap-1.5 normal-case">
+        <p className="flex items-center gap-2 text-xs text-text-muted">
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${llmConfig.configured ? 'bg-green-400' : 'bg-text-muted/50'}`}
+            aria-hidden
+          />
+          {llmConfig.configured
+            ? tf(t.aiPanel.provider.statusReady, { provider: preset.label })
+            : t.aiPanel.provider.statusNotSetUp}
         </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <SourceCard
-            icon={<Sparkles size={12} className={mode === 'noteflow' ? 'text-accent' : 'text-text-muted'} />}
-            title="NoteFlow AI"
-            desc={t.aiPanel.provider.noteflowCard.subtitle}
-            badge={managedActive ? activeBadge : inactiveBadge}
-            selected={mode === 'noteflow'}
-            onSelect={() => setMode('noteflow')}
-          />
-          <SourceCard
-            icon={<KeyRound size={12} className={mode === 'byo' ? 'text-accent' : 'text-text-muted'} />}
-            title={t.aiPanel.provider.byoCard.title}
-            desc={t.aiPanel.provider.byoCard.subtitle}
-            badge={managedActive ? inactiveBadge : activeBadge}
-            selected={mode === 'byo'}
-            onSelect={() => setMode('byo')}
-          />
-        </div>
+        {!showOfferDetail && (
+          <p className="text-[11px] text-text-muted/80 leading-relaxed">{t.aiPanel.provider.chooseSourceDesc}</p>
+        )}
       </div>
 
-      <section className="flex flex-col gap-4">
-        {mode === 'noteflow' ? (
-          <>
-            {/* Managed plan: no endpoint, no key — just the quota, the gate and the model.
-                Rendered once the account status lands (there is nothing to say before that). */}
-            {account && (
-              <Box className="gap-3">
-                {/* Monthly consumption (share of the allowance). Hidden while unknown or without entitlement. */}
-                {entitled && usage && usage.limit > 0 && (
-                  <div className="flex flex-col gap-1">
-                    <div className="h-1.5 rounded-full bg-border/50 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${usage.used >= usage.limit ? 'bg-amber-400' : 'bg-accent'}`}
-                        style={{ width: `${Math.min(100, (usage.used / usage.limit) * 100)}%` }}
-                      />
+      {showOfferDetail && account ? (
+        <section className="flex flex-col gap-4">
+          <button
+            type="button"
+            onClick={() => setView(null)}
+            className="self-start flex items-center gap-1.5 text-[11px] text-text-muted hover:text-text transition-colors normal-case"
+          >
+            <ArrowLeft size={11} />
+            {t.aiPanel.provider.backToOptions}
+          </button>
+          <PlanDetail product="ai" account={account} bundle={offerBundle} onBundleChange={setOfferBundle} />
+        </section>
+      ) : (
+        <>
+          {/* Three sources at the same level: three columns in Settings, one per row (full
+              width) in the brain panel, which is narrow and resizable. Grid rows keep the cards
+              of a row the same height. */}
+          <div className={`grid gap-2 ${embedded ? 'sm:grid-cols-3' : 'grid-cols-1'}`}>
+            {sources.map((source) => (
+              <SourceCard
+                key={source.id}
+                icon={source.icon}
+                title={source.title}
+                desc={source.desc}
+                tag={source.tag}
+                activeLabel={llmConfig.configured && activeSource === source.id ? t.aiPanel.provider.badgeActive : null}
+                selected={view === source.id}
+                onSelect={() => pickSource(source.id)}
+              />
+            ))}
+          </div>
+
+          {view === 'noteflow' && (
+            <section className="flex flex-col gap-4">
+              {/* Managed plan with the entitlement (or a plan that couldn't be verified yet):
+                  no endpoint, no key — just the quota, the activation and the model. */}
+              {/* Active managed plan: the card above already says "Active", so the box
+                  only carries the quota (and is left out when there is none to show). */}
+              {account && (planUnknown || !managedActive || (entitled && usage && usage.limit > 0)) && (
+                <Box className="gap-3">
+                  {/* Monthly consumption (share of the allowance). Hidden while unknown or without entitlement. */}
+                  {entitled && usage && usage.limit > 0 && (
+                    <div className="flex flex-col gap-1">
+                      <div className="h-1.5 rounded-full bg-border/50 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${usage.used >= usage.limit ? 'bg-amber-400' : 'bg-accent'}`}
+                          style={{ width: `${Math.min(100, (usage.used / usage.limit) * 100)}%` }}
+                        />
+                      </div>
+                      <span className={`text-[11px] normal-case ${usage.used >= usage.limit ? 'text-amber-300' : 'text-text-muted/70'}`}>
+                        {tf(t.aiPanel.provider.noteflowCard.usage, { percent: usagePercent(usage.used, usage.limit) })}
+                      </span>
                     </div>
-                    <span className={`text-[11px] normal-case ${usage.used >= usage.limit ? 'text-amber-300' : 'text-text-muted/70'}`}>
-                      {tf(t.aiPanel.provider.noteflowCard.usage, { percent: usagePercent(usage.used, usage.limit) })}
-                    </span>
+                  )}
+
+                  {planUnknown ? (
+                    <PlanUnknownNotice />
+                  ) : managedActive ? null : (
+                    <button
+                      onClick={() => changeProvider('noteflow')}
+                      className="self-start px-3 py-1.5 rounded-lg bg-text text-surface-0 text-[12px] font-bold"
+                    >
+                      {t.aiPanel.provider.noteflowCard.useButton}
+                    </button>
+                  )}
+                </Box>
+              )}
+
+              {managedActive && modelCard}
+            </section>
+          )}
+
+          {(view === 'key' || view === 'local') && (
+            <section className="flex flex-col gap-4">
+              {/* Connection: provider + endpoint + key, grouped together. */}
+              <Box className="gap-4">
+                {/* Provider — only the presets of the card on screen (with or without a key). */}
+                <div className="flex flex-col gap-1.5">
+                  <FieldLabel>{t.aiPanel.provider.provider}</FieldLabel>
+                  <select
+                    value={byoId}
+                    onChange={(e) => {
+                      const id = e.target.value
+                      setByoId(id)
+                      // While the picked provider IS the active one, the <select> keeps switching
+                      // providers directly. Otherwise it only picks a candidate — activation is an
+                      // explicit click on the button below.
+                      if (byoActive) changeProvider(id)
+                    }}
+                    className={FIELD_INPUT}
+                  >
+                    {byoChoices.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                  </select>
+                  <span className="text-[11px] text-text-muted/60 normal-case">
+                    {byoPreset?.impl === 'anthropic' ? t.aiPanel.provider.hintAnthropic : byoPreset?.needsKey ? t.aiPanel.provider.hintOpenAiCompat : t.aiPanel.provider.hintLocal}
+                  </span>
+                </div>
+
+                {!byoActive && (
+                  <button
+                    onClick={() => changeProvider(byoId)}
+                    className="self-start px-3 py-1.5 rounded-lg bg-text text-surface-0 text-[12px] font-bold"
+                  >
+                    {t.aiPanel.provider.useProviderButton}
+                  </button>
+                )}
+
+                {/* Base URL */}
+                {byoActive && preset.editableBaseUrl && (
+                  <div className="flex flex-col gap-1.5">
+                    <FieldLabel>{t.aiPanel.provider.baseUrl}</FieldLabel>
+                    <input
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
+                      onBlur={saveBaseUrl}
+                      placeholder={preset.baseUrl || 'https://…/v1'}
+                      className={`${FIELD_INPUT} py-1.5`}
+                    />
                   </div>
                 )}
 
-                {/* Gate: without a session or the 'ai' entitlement there is nothing to activate —
-                    show what the plans cost (AI, or the Bundle when Cloud is missing too) and,
-                    below them, the way into Settings → Account. */}
-                {planUnknown ? (
-                  <div className="flex flex-col gap-2 items-start">
-                    {managedActive && (
-                      <span className="flex items-center gap-1 text-[12px] font-bold text-accent">
-                        <Check size={12} /> {t.aiPanel.provider.badgeActive}
-                      </span>
-                    )}
-                    <PlanUnknownNotice />
-                  </div>
-                ) : !account.signedIn || !entitled ? (
-                  <div className="flex flex-col gap-2 items-start">
-                    {!account.signedIn ? (
-                      // The account is only for paid users: address existing subscribers
-                      // (same prompt as the Cloud panel) instead of a generic "sign in".
-                      <div className="flex flex-wrap items-center gap-2 normal-case">
-                        <span className="text-[13px] text-text-muted normal-case">{t.settings.account.alreadySubscribed}</span>
-                        <button
-                          onClick={goToAccount}
-                          className={`px-3 py-1.5 rounded-lg border-solid text-[12px] font-bold normal-case ${settingsButtonClass}`}
-                        >
-                          {t.settings.account.signIn}
+                {/* API key */}
+                {byoActive && preset.needsKey && (
+                  <div className="flex flex-col gap-1.5">
+                    <FieldLabel>{t.aiPanel.provider.apiKey}</FieldLabel>
+                    {llmConfig.hasKey ? (
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-1 text-[12px] text-emerald-400"><Check size={12} /> {t.aiPanel.provider.keySaved}</span>
+                        <button onClick={clearKey} className="text-[11px] text-text-muted hover:text-red-300 flex items-center gap-1">
+                          <X size={11} /> {t.aiPanel.remove}
                         </button>
                       </div>
                     ) : (
-                      <p className="text-[11px] text-text-muted normal-case leading-relaxed">
-                        {t.aiPanel.provider.noteflowNeedsSubscription}
-                        <span className="ml-1.5 align-middle text-[10px] px-1.5 py-0.5 rounded-md border border-solid border-border text-text-muted">
-                          {t.aiPanel.provider.paidLabel}
-                        </span>
-                      </p>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="password"
+                          value={keyInput}
+                          onChange={(e) => setKeyInput(e.target.value)}
+                          placeholder="sk-…"
+                          className={`flex-1 ${FIELD_INPUT} py-1.5`}
+                        />
+                        <button onClick={saveKey} disabled={!keyInput.trim()} className="px-3 py-1 rounded-lg bg-text text-surface-0 text-[12px] font-bold disabled:opacity-50">
+                          {t.common.save}
+                        </button>
+                      </div>
                     )}
-                    {/* Sign-in hint off: the prompt above already covers it. */}
-                    <PlanOffers
-                      products={['ai', 'bundle']}
-                      account={account}
-                      showSignInHint={false}
-                      benefits="ai"
-                      onSubscribe={openCheckout}
-                      onGoToAccount={goToAccount}
-                    />
-                    {checkoutError && <span className="text-[11px] text-red-400 normal-case">{checkoutError}</span>}
                   </div>
-                ) : managedActive ? (
-                  <span className="flex items-center gap-1 text-[12px] font-bold text-accent">
-                    <Check size={12} /> {t.aiPanel.provider.badgeActive}
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => changeProvider('noteflow')}
-                    className="self-start px-3 py-1.5 rounded-lg bg-text text-surface-0 text-[12px] font-bold"
-                  >
-                    {t.aiPanel.provider.noteflowCard.useButton}
-                  </button>
                 )}
               </Box>
-            )}
 
-            {managedActive && modelCard}
-          </>
-        ) : (
-          <>
-            {/* Connection: provider + endpoint + key, grouped together. */}
-            <Box className="gap-4">
-              {/* Provider */}
-              <div className="flex flex-col gap-1.5">
-                <FieldLabel>{t.aiPanel.provider.provider}</FieldLabel>
-                <select
-                  value={byoId}
-                  onChange={(e) => {
-                    const id = e.target.value
-                    setByoId(id)
-                    // While the picked provider IS the active one, the <select> keeps switching
-                    // providers directly. With NoteFlow AI active it only picks a candidate —
-                    // activation is an explicit click on the button below.
-                    if (byoActive) changeProvider(id)
-                  }}
-                  className={FIELD_INPUT}
-                >
-                  {selectablePresets.map((p) => (
-                    <option key={p.id} value={p.id}>{p.label}</option>
-                  ))}
-                </select>
-                <span className="text-[11px] text-text-muted/60 normal-case">
-                  {byoPreset?.impl === 'anthropic' ? t.aiPanel.provider.hintAnthropic : byoPreset?.needsKey ? t.aiPanel.provider.hintOpenAiCompat : t.aiPanel.provider.hintLocal}
-                </span>
-              </div>
-
-              {!byoActive && (
-                <button
-                  onClick={() => changeProvider(byoId)}
-                  className="self-start px-3 py-1.5 rounded-lg bg-text text-surface-0 text-[12px] font-bold"
-                >
-                  {t.aiPanel.provider.byoCard.useButton}
-                </button>
-              )}
-
-              {/* Base URL */}
-              {byoActive && preset.editableBaseUrl && (
-                <div className="flex flex-col gap-1.5">
-                  <FieldLabel>{t.aiPanel.provider.baseUrl}</FieldLabel>
-                  <input
-                    value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
-                    onBlur={saveBaseUrl}
-                    placeholder={preset.baseUrl || 'https://…/v1'}
-                    className={`${FIELD_INPUT} py-1.5`}
-                  />
-                </div>
-              )}
-
-              {/* API key */}
-              {byoActive && preset.needsKey && (
-                <div className="flex flex-col gap-1.5">
-                  <FieldLabel>{t.aiPanel.provider.apiKey}</FieldLabel>
-                  {llmConfig.hasKey ? (
-                    <div className="flex items-center gap-2">
-                      <span className="flex items-center gap-1 text-[12px] text-emerald-400"><Check size={12} /> {t.aiPanel.provider.keySaved}</span>
-                      <button onClick={clearKey} className="text-[11px] text-text-muted hover:text-red-300 flex items-center gap-1">
-                        <X size={11} /> {t.aiPanel.remove}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex gap-1.5">
-                      <input
-                        type="password"
-                        value={keyInput}
-                        onChange={(e) => setKeyInput(e.target.value)}
-                        placeholder="sk-…"
-                        className={`flex-1 ${FIELD_INPUT} py-1.5`}
-                      />
-                      <button onClick={saveKey} disabled={!keyInput.trim()} className="px-3 py-1 rounded-lg bg-text text-surface-0 text-[12px] font-bold disabled:opacity-50">
-                        {t.common.save}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </Box>
-
-            {byoActive && modelCard}
-          </>
-        )}
-      </section>
+              {byoActive && modelCard}
+            </section>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -475,22 +503,27 @@ function Box({ className = '', children }: { className?: string; children: React
   return <Card className={`flex flex-col p-3.5 ${className}`}>{children}</Card>
 }
 
-// Selector card for the two assistant sources — the this-or-that of SyncPanel's BackendCard
-// (Active/Inactive badge, same accent fill), but borderless: the pick reads from the fill alone, so
-// the only boxes on screen are the config ones below, whose radius it shares. `aria-pressed`
-// exposes the state to AT.
+// Selector card for the three assistant sources — same box as SyncPanel's cards (border, surface
+// fill, accent border on hover / when picked). "Active" only marks the source that can really
+// answer; the others carry their price tag ("Free" / the plan price / "In your plan").
+// `aria-pressed` exposes the pick to AT. A <button> centers its content vertically by default, so
+// it is a top-aligned flex column: cards of different text lengths line up in a row.
+// `border-solid` is explicit because of the global `button { border: none }` reset.
 function SourceCard({
   icon,
   title,
   desc,
-  badge,
+  tag,
+  activeLabel,
   selected,
   onSelect,
 }: {
   icon: ReactNode
   title: string
   desc: string
-  badge: { label: string; className: string }
+  tag: string | null
+  /** "Active" label when this source is the one answering; replaces the price tag. */
+  activeLabel: string | null
   selected: boolean
   onSelect: () => void
 }) {
@@ -499,14 +532,18 @@ function SourceCard({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`text-left p-3 rounded-xl transition-colors ${
-        selected ? 'bg-accent/[0.08]' : 'hover:bg-surface-2'
+      className={`flex h-full flex-col items-stretch justify-start text-left p-3 rounded-xl border border-solid transition-colors ${
+        selected ? 'border-accent bg-accent/[0.08]' : 'border-border bg-surface-0 hover:border-accent/60'
       }`}
     >
       <div className="flex items-center gap-2 flex-wrap">
-        {icon}
+        <span className={selected ? 'text-accent' : 'text-text-muted'}>{icon}</span>
         <span className={`text-xs font-semibold ${selected ? 'text-text' : 'text-text-muted'}`}>{title}</span>
-        <span className={`text-[10px] px-1.5 py-0.5 rounded ${badge.className}`}>{badge.label}</span>
+        {activeLabel ? (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 normal-case">{activeLabel}</span>
+        ) : (
+          tag && <PlanTag>{tag}</PlanTag>
+        )}
       </div>
       <p className="text-[11px] text-text-muted mt-1.5 normal-case leading-relaxed">{desc}</p>
     </button>

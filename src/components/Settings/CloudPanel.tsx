@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Check, Cloud, CloudOff, Copy, KeyRound, Loader, Lock, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react'
 import type { AccountStatus, CloudSyncStatus } from '../../types'
-import { hasKnownEntitlement, isPlanUnknown, type SubscriptionProduct } from '../../lib/subscriptionPlans'
+import { hasKnownEntitlement, isPlanUnknown } from '../../lib/subscriptionPlans'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
-import type { SettingsSection } from './SettingsModal'
-import { PlanOffers, PlanUnknownNotice } from './PlanOffers'
+import { PlanDetail, PlanUnknownNotice } from './PlanOffers'
 import { settingsButtonClass } from './ui'
 
 // UI-only floor (the backend imposes no minimum); the passphrase only wraps
@@ -26,7 +25,7 @@ type Busy = 'idle' | 'setup' | 'unlock' | 'pull' | 'toggle' | 'upgrade' | 'downg
 // private mode" (managed → e2ee) and "switch to standard mode" (e2ee →
 // managed, which invalidates the passphrase and recovery code — warned before
 // confirming, never silent).
-export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSection) => void }) {
+export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean }) {
   const t = useT()
   const loadNotes = useNotesStore((s) => s.loadNotes)
 
@@ -36,6 +35,9 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
   const [busy, setBusy] = useState<Busy>('idle')
   const [error, setError] = useState<string | null>(null)
   const [pullResult, setPullResult] = useState<{ pulled: number; errors: string[] } | null>(null)
+  // Bundle chosen in the plan detail. Lives here, not in PlanDetail, so the choice
+  // survives the remount when the user signs in from the detail itself.
+  const [offerBundle, setOfferBundle] = useState(initialBundle)
 
   // Onboarding (state: no-keys): which mode card is selected. Standard is the
   // default and the recommended one.
@@ -223,12 +225,6 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
     await window.noteflow.cloudLock()
   }
 
-  async function handleSubscribe(product: SubscriptionProduct) {
-    setError(null)
-    const result = await window.noteflow.accountOpenCheckout(product)
-    if (!result.ok) setError(result.error ?? t.settings.account.couldNotOpenCheckout)
-  }
-
   function handleCopyRecovery() {
     if (!recoveryCode) return
     navigator.clipboard.writeText(recoveryCode).then(() => {
@@ -237,9 +233,9 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
     })
   }
 
-  // No title or intro here: the backend selector card in SyncPanel already names
-  // and describes the panel (t.settings.cloud.title + sync.cloudCardDesc), and the
-  // pitch (encryption included) lives in the plans block's "What you get" list.
+  // No title or intro here: SyncPanel already names the panel (its backend card or
+  // the chooser), and the pitch (encryption included) lives in the plan detail's
+  // "What's included" column.
 
   // ── Initial status fetch ──
   if (!status || !account) {
@@ -306,37 +302,10 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
     )
   }
 
-  // ── Signed out ──
+  // ── Signed out ── what Cloud includes, then one plan box whose call to action is
+  // the inline sign-in (also the way in for someone who already pays).
   if (!status.signedIn) {
-    return (
-      <div className="space-y-4">
-        <div className="space-y-2">
-          {/* The NoteFlow account is only for paid users: address existing
-              subscribers, so signing in isn't mistaken for "turn on sync". */}
-          {onNavigate && (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[13px] font-mono text-text-muted">{t.settings.account.alreadySubscribed}</span>
-              <button
-                onClick={() => onNavigate('account')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
-              >
-                {t.settings.account.signIn}
-              </button>
-            </div>
-          )}
-          {/* What Cloud costs, before asking for a sign-in (the Bundle joins in
-              while the AI plan is missing too). Carries its own way into Subscription;
-              the sign-in hint is off because the prompt above already covers it. */}
-          <PlanOffers
-            products={['cloud', 'bundle']}
-            account={account}
-            showSignInHint={false}
-            benefits="cloud"
-            onGoToAccount={onNavigate ? () => onNavigate('account') : undefined}
-          />
-        </div>
-      </div>
-    )
+    return <PlanDetail product="cloud" account={account} bundle={offerBundle} onBundleChange={setOfferBundle} />
   }
 
   const isLoading = busy !== 'idle'
@@ -350,27 +319,16 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
 
   // Entitlement gate — shared by the two places where the panel stops short of
   // Cloud: the onboarding (no keys yet: creating keys for a cloud you cannot use
-  // is pointless) and the enable button (unlocked but not enabled). Same copy and
-  // same offers in both so the paywall reads identically wherever it shows up.
-  // Unlock, Sync now, Disable and Lock stay ungated: whoever already has keys and
-  // data up there must keep being able to read and take it out after lapsing.
-  // Cloud, plus the Bundle while the AI plan is missing too. Display prices —
-  // the authoritative figure is the checkout's.
+  // is pointless) and the enable button (unlocked but not enabled). The same plan
+  // detail in both so the offer reads identically wherever it shows up (value,
+  // one plan box, the Bundle as a line — or the Bundle plan change for an AI-only
+  // subscriber). Unlock, Sync now, Disable and Lock stay ungated: whoever already
+  // has keys and data up there must keep being able to read and take it out after
+  // lapsing. Display prices — the authoritative figure is the checkout's.
   const subscriptionGate = planUnknown ? (
     <PlanUnknownNotice />
   ) : (
-    <div className="space-y-2">
-      <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-        {t.settings.cloud.requiresSubscription}
-      </p>
-      <PlanOffers
-        products={['cloud', 'bundle']}
-        account={account}
-        busy={isLoading}
-        benefits="cloud"
-        onSubscribe={handleSubscribe}
-      />
-    </div>
+    <PlanDetail product="cloud" account={account} bundle={offerBundle} onBundleChange={setOfferBundle} />
   )
 
   return (
@@ -593,7 +551,16 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
 
           {/* Gate in front of Enable sync — it replaces the button (the other
               controls of this state stay open, see the constant above). */}
-          {!status.enabled && !cloudEntitled && subscriptionGate}
+          {!status.enabled && !cloudEntitled && (
+            <div className="space-y-3">
+              {!planUnknown && (
+                <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+                  {t.settings.cloud.requiresSubscription}
+                </p>
+              )}
+              {subscriptionGate}
+            </div>
+          )}
 
           <div className="flex gap-2 flex-wrap">
             {status.enabled ? (

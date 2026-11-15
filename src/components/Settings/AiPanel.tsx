@@ -1,9 +1,9 @@
 import { useEffect } from 'react'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { LlmConfigView } from '../AiPanel/LlmConfigView'
-import type { SettingsSection } from './SettingsModal'
+import type { SettingsIntent } from './SettingsModal'
 
-export function AiPanel({ onNavigate }: { onNavigate?: (section: SettingsSection) => void }) {
+export function AiPanel({ intent }: { intent?: SettingsIntent }) {
   const loadConfig = useAiChatStore((s) => s.loadConfig)
   const configLoaded = useAiChatStore((s) => s.configLoaded)
 
@@ -13,13 +13,16 @@ export function AiPanel({ onNavigate }: { onNavigate?: (section: SettingsSection
     if (!configLoaded) void loadConfig()
   }, [configLoaded, loadConfig])
 
+  // Settings → Account's "View" on NoteFlow AI (or the Bundle) opens its plan detail.
+  const initialOffer = intent?.offer === 'ai' || intent?.offer === 'bundle' ? intent.offer : undefined
+
   return (
     <div className="space-y-6">
       {/* ── Assistant (LLM provider) — no title: LlmConfigView opens with its own
-             "pick one source" line, followed by the two source cards. Local AI, the
-             profile and the CLI skill toggle live in Settings → General. ── */}
+             status line and the three source cards. Local AI, the profile and the
+             CLI skill toggle live in Settings → General. ── */}
       <section>
-        <LlmConfigView embedded onNavigate={onNavigate} />
+        <LlmConfigView embedded initialOffer={initialOffer} />
       </section>
     </div>
   )

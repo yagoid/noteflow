@@ -1,45 +1,57 @@
-import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, CheckCircle2, CreditCard, Info, KeyRound, Loader, Lock, LogOut, Mail, MailCheck, RefreshCw, Send, Trash2, UserCircle } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  Cloud,
+  CreditCard,
+  ExternalLink,
+  Info,
+  Layers,
+  Loader,
+  Lock,
+  LogOut,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  UserCircle,
+} from 'lucide-react'
 import type { AccountErrorCode, AccountOpResult, AccountStatus } from '../../types'
-import type { SubscriptionProduct } from '../../lib/subscriptionPlans'
+import {
+  SUBSCRIPTION_PRICES,
+  activePlan,
+  bundleSavings,
+  isPlanOffered,
+  isPlanUnknown,
+  productOffer,
+  type SubscriptionProduct,
+} from '../../lib/subscriptionPlans'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
-import { useLanguageStore } from '../../stores/languageStore'
 import { ConfirmModal } from '../ConfirmModal'
-import { PlanOffers } from './PlanOffers'
+import { BundleUpgradeOffer, PlanUnknownNotice } from './PlanOffers'
+import { PLAN_NAMES, PRIMARY_BUTTON, isCheckoutConfigured, usePrice } from './planOffersShared'
+import type { SettingsNavigate } from './SettingsModal'
+import { SignInInline } from './SignInInline'
 import { settingsButtonClass } from './ui'
 
-// Public legal pages on the website; Spanish UI links to the /es mirrors.
-const LEGAL_BASE = 'https://yagoid.github.io/noteflow'
+const PRODUCT_ICONS: Record<SubscriptionProduct, typeof Cloud> = { ai: Sparkles, cloud: Cloud, bundle: Layers }
 
-type Step = 'email' | 'code'
-
-// Seconds the "Resend code" button stays disabled after a code is emailed.
-// Matches GoTrue's per-email OTP rate limit (~60 s): a shorter cooldown let the
-// first resend fail with `rateLimited` ("Too many attempts").
-const RESEND_COOLDOWN_S = 60
-
-// Settings → Account: NoteFlow account (Supabase email + OTP) and plan badges.
-// All session/token handling lives in the main process — this panel only ever
-// sees the public AccountStatus.
-export function AccountPanel() {
+// Settings → Account: the NoteFlow account (Supabase email + OTP) and the plan.
+// Leads with "Your plan" — Free (with what it includes, no account needed) or the
+// paid one — and only then the optional upgrades, as compact rows that open each
+// plan's detail. Someone who already pays sees no price card: the other product is
+// a folded "Add … to your plan" row (a Bundle plan change). All session/token
+// handling lives in the main process — this panel only ever sees the public
+// AccountStatus.
+export function AccountPanel({ onNavigate }: { onNavigate?: SettingsNavigate }) {
   const t = useT()
-  const lang = useLanguageStore((s) => s.lang)
-  const legalUrl = (page: 'terms' | 'privacy') =>
-    `${LEGAL_BASE}${lang === 'es' ? '/es' : ''}/${page}`
   const [status, setStatus] = useState<AccountStatus | null>(null)
-  const [step, setStep] = useState<Step>('email')
-  const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
-  // `error` = the box at the top (email step, refresh, checkout, sign out).
-  // `codeError` = inline under the code input; the two never show at once, so a
-  // failed verification is reported exactly where the user is looking.
+  // The box at the top (refresh, sign out). Sign-in and checkout report inline.
   const [error, setError] = useState<string | null>(null)
-  const [codeError, setCodeError] = useState<string | null>(null)
-  const [codeNotice, setCodeNotice] = useState<string | null>(null)
-  const [shakeCode, setShakeCode] = useState(false)
-  const [resendCooldown, setResendCooldown] = useState(0)
   // "Manage subscription": its own spinner (the Edge Function round-trip takes
   // a moment) and a note when the generic store portal had to be opened.
   const [portalBusy, setPortalBusy] = useState(false)
@@ -51,19 +63,11 @@ export function AccountPanel() {
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const codeInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     window.noteflow.getAccountStatus().then(setStatus)
     return window.noteflow.onAccountStatusChanged(setStatus)
   }, [])
-
-  // Resend cooldown ticker — only alive while it is counting down.
-  useEffect(() => {
-    if (resendCooldown <= 0) return
-    const id = setTimeout(() => setResendCooldown((s) => s - 1), 1000)
-    return () => clearTimeout(id)
-  }, [resendCooldown])
 
   /** Localized reason for a failed account op, falling back to main's English string. */
   function describeError(result: AccountOpResult, fallback: string): string {
@@ -72,109 +76,15 @@ export function AccountPanel() {
     return result.error ?? fallback
   }
 
-  // Deferred to the next frame: the input is `disabled` while busy, and React
-  // hasn't re-enabled it yet when this runs right after `setBusy(false)`.
-  function focusCodeInput(select: boolean) {
-    requestAnimationFrame(() => {
-      codeInputRef.current?.focus()
-      if (select) codeInputRef.current?.select()
-    })
-  }
-
-  // The shake is one-shot: clear the flag so a second wrong code nudges again.
-  // A timer rather than onAnimationEnd, because under `prefers-reduced-motion`
-  // the `motion-safe:` variant keeps the animation — and its end event — from
-  // ever running, which would leave the flag stuck on.
-  useEffect(() => {
-    if (!shakeCode) return
-    const id = setTimeout(() => setShakeCode(false), 400)
-    return () => clearTimeout(id)
-  }, [shakeCode])
-
-  /** Marks the code input as rejected: red border, a nudge, and ready to retype. */
-  function rejectCode(message: string) {
-    setCodeError(message)
-    setCodeNotice(null)
-    setShakeCode(true)
-    // Select what's there so the next keystroke replaces the wrong code.
-    focusCodeInput(true)
-  }
-
-  // Emails a code. From the email step this advances to the code step; from the
-  // code step ("Resend code") it stays put and reports inline.
-  async function sendCode(mode: 'initial' | 'resend') {
-    const trimmed = email.trim()
-    if (!trimmed) return
-    setBusy(true)
-    setError(null)
-    setNotice(null)
-    setCodeError(null)
-    setCodeNotice(null)
-    const result = await window.noteflow.accountRequestOtp(trimmed)
-    setBusy(false)
-    if (result.ok) {
-      setStep('code')
-      setCode('')
-      setResendCooldown(RESEND_COOLDOWN_S)
-      if (mode === 'resend') {
-        setCodeNotice(t.settings.account.codeResent)
-        focusCodeInput(false)
-      }
-      return
-    }
-    const message = describeError(result, t.settings.account.couldNotSendCode)
-    if (mode === 'resend') rejectCode(message)
-    else setError(message)
-  }
-
-  function handleSendCode() {
-    return sendCode('initial')
-  }
-
-  async function handleVerify() {
-    const trimmed = code.trim()
-    if (!trimmed) return
-    setBusy(true)
-    setError(null)
-    setCodeError(null)
-    setCodeNotice(null)
-    const result = await window.noteflow.accountVerifyOtp(email.trim(), trimmed)
-    setBusy(false)
-    if (result.ok) {
-      // Status arrives via onAccountStatusChanged; reset the form for next time.
-      setStep('email')
-      setCode('')
-      setEmail('')
-      setResendCooldown(0)
-    } else {
-      rejectCode(describeError(result, t.settings.account.couldNotVerify))
-    }
-  }
-
-  function handleUseDifferentEmail() {
-    setStep('email')
-    setCode('')
-    setError(null)
-    setCodeError(null)
-    setCodeNotice(null)
-    setResendCooldown(0)
-  }
-
   async function handleRefresh() {
     setBusy(true)
     setError(null)
     const result = await window.noteflow.accountRefreshEntitlements()
     setBusy(false)
-    // A locked keychain is already explained by its own notice above the badges.
+    // A locked keychain is already explained by its own notice above the plan.
     if (!result.ok && result.errorCode !== 'sessionLocked') {
       setError(describeError(result, t.settings.account.couldNotRefresh))
     }
-  }
-
-  async function handleSubscribe(product: SubscriptionProduct) {
-    setError(null)
-    const result = await window.noteflow.accountOpenCheckout(product)
-    if (!result.ok) setError(describeError(result, t.settings.account.couldNotOpenCheckout))
   }
 
   async function handleManageSubscription() {
@@ -194,12 +104,6 @@ export function AccountPanel() {
     setDeleteError(null)
     await window.noteflow.accountSignOut()
     setBusy(false)
-    setStep('email')
-    setEmail('')
-    setCode('')
-    setCodeError(null)
-    setCodeNotice(null)
-    setResendCooldown(0)
   }
 
   // Server-side deletion (Edge Function delete-account). On success main has
@@ -222,12 +126,6 @@ export function AccountPanel() {
     // on screen is that other account — leave its view alone (a "deleted"
     // notice would sit on top of an account that is still signed in).
     if (result.staleSession) return
-    setStep('email')
-    setEmail('')
-    setCode('')
-    setCodeError(null)
-    setCodeNotice(null)
-    setResendCooldown(0)
     setNotice(result.accountGone ? t.settings.account.accountGone : t.settings.account.accountDeleted)
   }
 
@@ -250,10 +148,43 @@ export function AccountPanel() {
     )
   }
 
+  // Unknown (never fetched) is its own state — neither Free nor a paid plan, and
+  // no offer at all (it may already be paid for).
+  const unknown = isPlanUnknown(status)
+  const plan = activePlan(status)
+  const single = plan === 'ai' || plan === 'cloud' ? plan : null
+  const free = !unknown && plan === null
+
+  // Manage subscription — only with a Lemon Squeezy subscription (any status:
+  // past_due needs the card, canceled/expired keep invoices); never for comps
+  // (provider 'manual') nor while the plan is unknown. Opens the customer portal;
+  // main falls back to the store's generic portal when the user's own link can't
+  // be fetched.
+  const manageBlock = status.hasBillingSubscription && (
+    <div className="space-y-1.5 pt-1">
+      <button
+        onClick={handleManageSubscription}
+        disabled={busy || portalBusy || deleting}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
+      >
+        {portalBusy ? <Loader size={11} className="animate-spin" /> : <CreditCard size={11} />}
+        {t.settings.account.manageSubscription}
+      </button>
+      <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed">
+        {t.settings.account.manageSubscriptionHint}
+      </p>
+      {portalNotice && (
+        <p role="status" className="flex items-start gap-1.5 text-[11px] font-mono text-text-muted leading-relaxed">
+          <Info size={12} className="shrink-0 mt-[1px]" />
+          <span>{portalNotice}</span>
+        </p>
+      )}
+    </div>
+  )
+
   return (
-    <div className="space-y-4">
-      {/* Error box — everything except the code step, which reports inline
-          under its own input (see below) so the two never say the same thing. */}
+    <div className="space-y-5">
+      {/* Error box — refresh, portal, sign out. */}
       {error && (
         <div
           role="alert"
@@ -275,16 +206,14 @@ export function AccountPanel() {
         </div>
       )}
 
-      {/* ── Signed in ── */}
       {status.signedIn && (
-        <>
+        <div className="space-y-2">
           <div className="flex items-center gap-2">
             <UserCircle size={13} className="text-green-400" />
             <span className="text-xs font-mono text-text">{status.email}</span>
           </div>
-
           {/* Keychain locked: the session is still there (NOT signed out) but its
-              token can't be decrypted right now. Main retries on its own; Retry
+              token can't be decrypted right now. Main retries on its own; Refresh
               forces it, Sign out (below) is the way out if it never unlocks. */}
           {status.sessionLocked && (
             <div
@@ -295,74 +224,91 @@ export function AccountPanel() {
               <span>{t.settings.account.sessionLocked}</span>
             </div>
           )}
+        </div>
+      )}
 
-          {/* Unknown (never fetched) is its own state — not "inactive". */}
-          <div className="space-y-2">
-            <PlanBadge
-              name="NoteFlow AI"
-              state={!status.entitlementsKnown ? 'unknown' : status.entitlements.ai ? 'active' : 'inactive'}
+      {/* ── Your plan ── */}
+      <div className="space-y-2.5 rounded-lg border border-solid border-border bg-surface-0 px-3.5 py-3">
+        {unknown ? (
+          <>
+            <p className="text-xs font-mono font-semibold text-text">{t.settings.plans.yourPlanTitle}</p>
+            <PlanUnknownNotice />
+          </>
+        ) : plan ? (
+          <>
+            <PlanHeading
+              title={tf(t.settings.plans.yourPlan, { plan: PLAN_NAMES[plan] })}
+              badge={t.settings.account.active}
+              badgeClassName="text-green-400 bg-green-500/10 border-green-500/30"
             />
-            <PlanBadge
-              name="NoteFlow Cloud"
-              state={!status.entitlementsKnown ? 'unknown' : status.entitlements.cloud ? 'active' : 'inactive'}
+            {manageBlock}
+          </>
+        ) : (
+          <>
+            <PlanHeading
+              title={tf(t.settings.plans.yourPlan, { plan: t.settings.plans.free })}
+              badge={t.settings.plans.currentPlan}
+              badgeClassName="text-accent border-accent/40"
             />
-          </div>
+            <ul className="space-y-1">
+              {t.settings.plans.freeIncludes.map((item) => (
+                <li key={item} className="flex items-start gap-2 text-[11px] font-mono text-text-muted leading-relaxed">
+                  <Check size={11} className="mt-[3px] shrink-0 text-accent" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+            {!status.signedIn && (
+              <p className="text-[11px] font-mono text-text-muted/70">{t.settings.plans.noAccountNeeded}</p>
+            )}
+            {manageBlock}
+          </>
+        )}
+      </div>
 
+      {/* ── One plan already paid: the other product, folded ── */}
+      {single && <AddOnRow account={status} current={single} />}
+
+      {/* ── Free: the optional upgrades as compact rows — each opens its detail ── */}
+      {free && (
+        <div className="space-y-2">
+          <p className="text-[11px] font-mono font-semibold text-text-muted">{t.settings.plans.optionalUpgrades}</p>
+          {(['cloud', 'ai', 'bundle'] as const)
+            .filter((product) => isPlanOffered(status, product))
+            .map((product) => (
+              <UpgradeRow
+                key={product}
+                product={product}
+                onView={
+                  onNavigate
+                    ? () => onNavigate(product === 'ai' ? 'ai' : 'sync', { offer: product })
+                    : undefined
+                }
+              />
+            ))}
+        </div>
+      )}
+
+      {status.signedIn ? (
+        <>
           {status.entitlementsFetchedAt && (
             <p className="text-[11px] font-mono text-text-muted/60">
               {tf(t.settings.account.lastChecked, { time: new Date(status.entitlementsFetchedAt).toLocaleString() })}
             </p>
           )}
 
-          {/* Manage subscription — only with a Lemon Squeezy subscription (any
-              status: past_due needs the card, canceled/expired keep invoices);
-              never for comps (provider 'manual') nor while the plan is unknown.
-              Opens the customer portal; main falls back to the store's generic
-              portal when the user's own link can't be fetched. */}
-          {status.hasBillingSubscription && (
-            <div className="space-y-1.5">
-              <button
-                onClick={handleManageSubscription}
-                disabled={busy || portalBusy || deleting}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {portalBusy ? <Loader size={11} className="animate-spin" /> : <CreditCard size={11} />}
-                {t.settings.account.manageSubscription}
-              </button>
-              <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed">
-                {t.settings.account.manageSubscriptionHint}
-              </p>
-              {portalNotice && (
-                <p role="status" className="flex items-start gap-1.5 text-[11px] font-mono text-text-muted leading-relaxed">
-                  <Info size={12} className="shrink-0 mt-[1px]" />
-                  <span>{portalNotice}</span>
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Subscription plans — each plan shows only while its entitlement is
-              KNOWN to be missing (Bundle needs both missing, to avoid double
-              billing). A plan without a checkout URL in this build shows "Coming
-              soon". While the plan is unknown the badges above already say so and
-              Refresh below retries, so no extra notice here. */}
-          <PlanOffers
-            products={['bundle', 'ai', 'cloud']}
-            account={status}
-            busy={busy || deleting}
-            showUnknownNotice={false}
-            onSubscribe={handleSubscribe}
-          />
-
           <div className="flex gap-2">
-            <button
-              onClick={handleRefresh}
-              disabled={busy || deleting}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
-            >
-              {busy ? <Loader size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-              {t.settings.account.refresh}
-            </button>
+            {/* Plan still unknown: the PlanUnknownNotice in "Your plan" already offers Retry. */}
+            {!unknown && (
+              <button
+                onClick={handleRefresh}
+                disabled={busy || deleting}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
+              >
+                {busy ? <Loader size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                {t.settings.account.refresh}
+              </button>
+            )}
             <button
               onClick={handleSignOut}
               disabled={busy || deleting}
@@ -409,164 +355,176 @@ export function AccountPanel() {
             />
           )}
         </>
-      )}
-
-      {/* ── Signed out: step 1 — email ── */}
-      {!status.signedIn && step === 'email' && (
-        <div className="space-y-3 pt-1">
-          <div className="text-[11px] font-mono text-text-muted leading-relaxed">
-            <p>{t.settings.account.signInDesc}</p>
-            <p>{t.settings.account.signInCodeHint}</p>
+      ) : (
+        // ── Signed out: the way in for whoever already pays ──
+        <div className="pt-4 border-t border-border space-y-2.5">
+          <div className="space-y-0.5">
+            <p className="text-xs font-mono font-semibold text-text">{t.settings.plans.alreadySubscribed}</p>
+            <p className="text-[11px] font-mono text-text-muted leading-relaxed">{t.settings.plans.signInHint}</p>
           </div>
-          <div>
-            <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-              {t.settings.account.email}
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleSendCode() }}
-              placeholder="you@example.com"
-              disabled={busy}
-              className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
-            />
-          </div>
-          <button
-            onClick={handleSendCode}
-            disabled={busy || !email.trim()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {busy ? <Loader size={11} className="animate-spin" /> : <Mail size={11} />}
-            {t.settings.account.sendCode}
-          </button>
-          {/* Legal acceptance line — links open in the default browser via the
-              existing openUrl bridge (shell.openExternal in main). */}
-          <p className="text-[10px] font-mono text-text-muted/60 leading-relaxed">
-            {t.settings.account.legalPrefix}
-            <button
-              onClick={() => window.noteflow.openUrl(legalUrl('terms'))}
-              className="underline underline-offset-2 hover:text-text transition-colors"
-            >
-              {t.settings.account.legalTerms}
-            </button>
-            {t.settings.account.legalMiddle}
-            <button
-              onClick={() => window.noteflow.openUrl(legalUrl('privacy'))}
-              className="underline underline-offset-2 hover:text-text transition-colors"
-            >
-              {t.settings.account.legalPrivacy}
-            </button>
-            {t.settings.account.legalSuffix}
-          </p>
-        </div>
-      )}
-
-      {/* ── Signed out: step 2 — verification code ── */}
-      {!status.signedIn && step === 'code' && (
-        <div className="space-y-3 pt-1">
-          <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            {t.settings.account.codeSentPrefix}
-            <span className="text-text">{email.trim()}</span>
-            {t.settings.account.codeSentSuffix}
-          </p>
-          <div>
-            <label
-              htmlFor="account-code"
-              className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider"
-            >
-              {t.settings.account.code}
-            </label>
-            <input
-              id="account-code"
-              ref={codeInputRef}
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              value={code}
-              onChange={(e) => {
-                setCode(e.target.value)
-                // Typing means "let me try again" — clear the rejection.
-                if (codeError) setCodeError(null)
-                if (codeNotice) setCodeNotice(null)
-              }}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleVerify() }}
-              placeholder="12345678"
-              disabled={busy}
-              aria-invalid={!!codeError}
-              aria-describedby={codeError ? 'account-code-error' : undefined}
-              className={`w-full px-3 py-1.5 rounded text-xs font-mono tracking-widest bg-surface-0 border text-text placeholder:text-text-muted/40 focus:outline-none disabled:opacity-40 transition-colors ${
-                codeError ? 'border-red/50 focus:border-red/70' : 'border-border focus:border-text/30'
-              } ${shakeCode ? 'motion-safe:animate-shake' : ''}`}
-            />
-            {codeError && (
-              <p
-                id="account-code-error"
-                role="alert"
-                className="flex items-start gap-1.5 mt-1.5 text-[11px] font-mono text-red leading-relaxed"
-              >
-                <AlertCircle size={12} className="shrink-0 mt-[1px]" />
-                <span>{codeError}</span>
-              </p>
-            )}
-            {!codeError && codeNotice && (
-              <p className="flex items-center gap-1.5 mt-1.5 text-[11px] font-mono text-text-muted">
-                <MailCheck size={12} className="shrink-0" />
-                {codeNotice}
-              </p>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={handleVerify}
-              disabled={busy || !code.trim()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {busy ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
-              {t.settings.account.verifyAndSignIn}
-            </button>
-            {/* Didn't arrive / expired: a new code without going back to the
-                email step. Cooldown = the server's rate limit (RESEND_COOLDOWN_S). */}
-            <button
-              onClick={() => sendCode('resend')}
-              disabled={busy || resendCooldown > 0}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
-            >
-              <Send size={11} />
-              {resendCooldown > 0
-                ? tf(t.settings.account.resendCodeIn, { seconds: resendCooldown })
-                : t.settings.account.resendCode}
-            </button>
-            <button
-              onClick={handleUseDifferentEmail}
-              disabled={busy}
-              className={`px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
-            >
-              {t.settings.account.useDifferentEmail}
-            </button>
-          </div>
+          <SignInInline onStart={() => setNotice(null)} />
         </div>
       )}
     </div>
   )
 }
 
-function PlanBadge({ name, state }: { name: string; state: 'active' | 'inactive' | 'unknown' }) {
-  const t = useT()
+function PlanHeading({ title, badge, badgeClassName }: { title: string; badge: string; badgeClassName: string }) {
   return (
-    <div className="flex items-center justify-between px-3 py-2 rounded bg-surface-0 border border-border">
-      <span className="text-xs font-mono text-text">{name}</span>
-      {state === 'active' ? (
-        <span className="text-[11px] font-mono text-green-400 bg-green-500/10 border border-green-500/30 rounded px-2 py-0.5">
-          {t.settings.account.active}
-        </span>
-      ) : state === 'unknown' ? (
-        <span className="text-[11px] font-mono text-text-muted/70 border border-border rounded px-2 py-0.5">
-          {t.settings.account.planUnknownBadge}
-        </span>
-      ) : (
-        <span className="text-[11px] font-mono text-text-muted/60">—</span>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <span className="text-xs font-mono font-semibold text-text">{title}</span>
+      <span className={`text-[11px] font-mono border border-solid rounded px-2 py-0.5 ${badgeClassName}`}>{badge}</span>
+    </div>
+  )
+}
+
+/** Compact row of an optional upgrade: name, one line of value, a small price and "View". */
+function UpgradeRow({ product, onView }: { product: SubscriptionProduct; onView?: () => void }) {
+  const t = useT()
+  const price = usePrice()
+  const Icon = PRODUCT_ICONS[product]
+  return (
+    <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-solid border-border bg-surface-0">
+      <Icon size={12} className="shrink-0 text-text-muted" />
+      <div className="flex-1 min-w-0">
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <span className="text-xs font-mono font-semibold text-text">{PLAN_NAMES[product]}</span>
+          <span className="text-[11px] font-mono text-text-muted">{t.settings.plans.rowDesc[product]}</span>
+        </div>
+        {product === 'bundle' && (
+          <p className="text-[11px] font-mono text-text-muted/70">
+            {tf(t.settings.plans.bundleSaves, { price: price(bundleSavings('monthly')) })}
+          </p>
+        )}
+      </div>
+      <span className="shrink-0 text-[11px] font-mono text-text-muted whitespace-nowrap">
+        {tf(t.settings.plans.perMonth, { price: price(SUBSCRIPTION_PRICES[product].monthly) })}
+      </span>
+      {onView && (
+        <button
+          type="button"
+          onClick={onView}
+          className={`shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-mono ${settingsButtonClass}`}
+        >
+          {t.settings.plans.view}
+        </button>
       )}
+    </div>
+  )
+}
+
+/**
+ * One product already paid: the other one as a folded "Add … to your plan" row —
+ * no price in sight until the user opens it. Opened, it is the Bundle plan change
+ * (productOffer 'upgrade'; the only offer then, never the product on its own) or,
+ * when that subscription can't be changed (a comp…), the product as its own
+ * subscription — never a Bundle checkout, which would bill the owned one twice.
+ */
+function AddOnRow({ account, current }: { account: AccountStatus; current: 'ai' | 'cloud' }) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const added = current === 'ai' ? 'cloud' : 'ai'
+  const offer = productOffer(account, added)
+  if (offer !== 'upgrade' && offer !== 'checkout') return null
+
+  let body: ReactNode
+  if (offer === 'upgrade') {
+    body = <BundleUpgradeOffer account={account} current={current} onDismiss={() => setOpen(false)} />
+  } else {
+    body = <StandaloneAddOn account={account} product={added} onDismiss={() => setOpen(false)} />
+  }
+
+  return (
+    <div className="rounded-lg border border-solid border-border bg-surface-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
+      >
+        <span className="flex items-center gap-2 text-xs font-mono text-text">
+          <Plus size={12} className="shrink-0 text-text-muted" />
+          {tf(t.settings.plans.addProduct, { plan: PLAN_NAMES[added] })}
+        </span>
+        <ChevronDown
+          size={13}
+          className={`shrink-0 text-text-muted transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open && <div className="px-3 pb-3 pt-1">{body}</div>}
+    </div>
+  )
+}
+
+/** The product as its own subscription (single plan that can't be switched to the Bundle). */
+function StandaloneAddOn({
+  account,
+  product,
+  onDismiss,
+}: {
+  account: AccountStatus
+  product: 'ai' | 'cloud'
+  onDismiss: () => void
+}) {
+  const t = useT()
+  const price = usePrice()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [opened, setOpened] = useState(false)
+
+  async function openCheckout() {
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await window.noteflow.accountOpenCheckout(product)
+      if (result.ok) setOpened(true)
+      else {
+        setError(
+          (result.errorCode && t.settings.account.errors[result.errorCode]) ||
+            result.error ||
+            t.settings.account.couldNotOpenCheckout,
+        )
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] font-mono text-text leading-relaxed">{t.settings.plans.addValue[product]}</p>
+      <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+        {tf(t.settings.plans.perMonth, { price: price(SUBSCRIPTION_PRICES[product].monthly) })} ·{' '}
+        {tf(t.settings.plans.perYear, { price: price(SUBSCRIPTION_PRICES[product].yearly) })} ·{' '}
+        {t.settings.plans.standaloneNote}
+      </p>
+      {error && (
+        <p role="alert" className="flex items-start gap-1.5 text-[11px] font-mono text-red leading-relaxed">
+          <AlertCircle size={12} className="shrink-0 mt-[1px]" />
+          <span>{error}</span>
+        </p>
+      )}
+      {opened && (
+        <p role="status" className="text-[11px] font-mono text-text-muted leading-relaxed">{t.settings.plans.checkoutOpened}</p>
+      )}
+      <div className="flex flex-wrap gap-2 pt-1">
+        {isCheckoutConfigured(account, product) ? (
+          <button type="button" onClick={openCheckout} disabled={busy} className={PRIMARY_BUTTON}>
+            {busy ? <Loader size={11} className="animate-spin" /> : <ExternalLink size={11} />}
+            {t.settings.plans.continueToPayment}
+          </button>
+        ) : (
+          <span className="text-[11px] font-mono text-text-muted/60">{t.settings.account.comingSoon}</span>
+        )}
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="px-3 py-1.5 rounded-lg text-xs font-mono text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+        >
+          {t.settings.plans.notNow}
+        </button>
+      </div>
+      <p className="text-[10px] font-mono text-text-muted/60 leading-relaxed">{t.settings.plans.paymentNote}</p>
     </div>
   )
 }

@@ -6,9 +6,9 @@
 > **end-to-end** (alta de cuenta, checkout, entitlement aplicada, chat vía el preset `noteflow`)
 > — primero en modo test. **Live mode activado (2026-10-19):** store verificada, los tres productos
 > copiados a live ("Copy to Live Mode"), webhook de live dado de alta y URLs de checkout de live en
-> `cloudConfig.ts` (detalle en § 3, "Billing en live mode"). Cuenta NoteFlow en la app + entitlements + esquema SQL + panel Settings → Subscription
-> (ver "Fase 4.0 — implementación" abajo) y la **IA gestionada**: `usage_events` + `get_month_usage`
-> + preset `noteflow` en el cliente + botón de suscripción en Settings → Subscription + auto-activación
+> `cloudConfig.ts` (detalle en § 3, "Billing en live mode"). Cuenta NoteFlow en la app + entitlements + esquema SQL + panel Settings → Account
+> (antes "Subscription"; ver "Fase 4.0 — implementación" abajo) y la **IA gestionada**: `usage_events` + `get_month_usage`
+> + preset `noteflow` en el cliente + suscripción desde la app (ver § 3 "Bloque de planes") + auto-activación
 > del preset al suscribirse + sección dedicada en `LlmConfigView` (ver § 3, "implementación"). El
 > **proyecto Supabase real está conectado** (`electron/cloudConfig.ts`).
 > Decisiones tomadas con el usuario (2026-07): backend **Supabase**, pagos por **Merchant of
@@ -27,7 +27,7 @@ Dos áreas de suscripción (mensual/anual), pensadas para el usuario que "no qui
    (push por websocket, no pull cada 5 min), sin fricción de push/pull, más rápido y fiable.
    Futuro no-foco: historial de versiones y compartir notas entre usuarios en tiempo real.
 
-**Precios (decididos 2026-07, EUR** — publicados en la app (Settings → Subscription) y en `/pricing` de la web):
+**Precios (decididos 2026-07, EUR** — publicados en la app (Ajustes → Cuenta y el detalle de cada plan, ver § 3 "Bloque de planes") y en `/pricing` de la web):
 
 | Plan | Mensual | Anual |
 |---|---|---|
@@ -37,12 +37,23 @@ Dos áreas de suscripción (mensual/anual), pensadas para el usuario que "no qui
 
 El **Bundle** es el tercer producto (resuelve la vieja duda "un paquete vs dos planes": hay ambos):
 una fila `product='bundle'` activa las dos entitlements (`electron/entitlements.ts` ya lo soporta).
-Las cifras de display viven en `src/lib/subscriptionPlans.ts` (la autoritativa es siempre la del
-checkout de Lemon Squeezy — mantener en sync con las variantes de LS y con la web). Los **tres
-productos existen en LS** y sus tres URLs están pobladas en `LEMONSQUEEZY_CHECKOUT_URLS`
-(`electron/cloudConfig.ts`), así que los tres planes ofrecen botón Subscribe. Ese es el único
-interruptor: una URL vacía deja `<product>CheckoutConfigured` en `false` y esa card pasa a mostrar
-"Coming soon" en vez del botón.
+Las cifras de display viven en `src/lib/subscriptionPlans.ts` (`SUBSCRIPTION_PRICES`, **números**
+en EUR; la autoritativa es siempre la del checkout de Lemon Squeezy — mantener en sync con las
+variantes de LS y con la web). La UI las formatea por idioma con `formatPrice` (`Intl.NumberFormat`:
+en → "€3.99", es → "3,99 €"), y los derivados se calculan, no se escriben a mano:
+`yearlySavingsPercent` (ahorro anual, redondeado hacia abajo: Cloud 16 %, Bundle 16 %, AI 30 %),
+`bundleSavings` (AI + Cloud − Bundle: 1,99 €/mes) y
+`bundleUpgradeDifference` (Bundle − plan actual: +4,00 €/mes desde Cloud, +2,00 €/mes desde AI). Los
+**tres productos existen en LS** y sus tres URLs están pobladas en `LEMONSQUEEZY_CHECKOUT_URLS`
+(`electron/cloudConfig.ts`), así que los tres planes se pueden pagar desde la app. Ese es el único
+interruptor: una URL vacía deja `<product>CheckoutConfigured` en `false` y ese plan muestra
+"Coming soon" en vez del botón de pago. **Una URL por producto, y el periodo se elige en el
+checkout:** la página de pago de LS de cada producto trae su propio selector Monthly / Yearly (con
+el mensual marcado por defecto; verificado 2026-11-15 en la de Cloud). Por eso la app **no** tiene
+interruptor de periodo propio (uno que no llegase al pago sería engañoso): enseña el precio mensual,
+el anual con su ahorro debajo, y la línea "You pick monthly or yearly on the payment page"
+(`t.settings.plans.periodAtCheckout`). Preseleccionar el anual requeriría los IDs de variante en el
+cliente (hoy solo están en los secrets de Supabase) y `?variant=` en la URL — sin hacer.
 
 ## 1. Backend: Supabase (veredicto y caveats)
 
@@ -86,17 +97,18 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   - **Desconocidas ≠ falsas.** `AccountStatus.entitlementsKnown` es `false` hasta el primer fetch
     OK (o hasta restaurar la cache). Mientras tanto `entitlements` es un placeholder y **ningún
     consumidor actúa sobre él**: el preset `noteflow` se deja usar (`isManagedAiUsable`: sesión y
-    (`ai` o desconocidas) — el proxy es el juez, responde 403 si no hay plan); `PlanOffers`,
-    `CloudPanel` y `LlmConfigView` no pintan ni las cards de Subscribe ni el estado "sin plan" ni el
-    botón Enable de Cloud, sino un aviso neutro **"Couldn't verify your plan yet — Retry"**
-    (`PlanUnknownNotice`, Retry = `accountRefreshEntitlements`); `AccountPanel` muestra los badges
-    en estado "Couldn't check". `cloudSync.removeRemoteByPathKeys` con entitlements **no verificadas**
+    (`ai` o desconocidas) — el proxy es el juez, responde 403 si no hay plan); `PlanDetail`,
+    `CloudPanel`, `LlmConfigView` y `AccountPanel` no pintan ninguna oferta (ni precio, ni checkout,
+    ni cambio a Bundle) ni el estado "sin plan" ni el botón Enable de Cloud, sino un aviso neutro
+    **"Couldn't verify your plan yet — Retry"** (`PlanUnknownNotice`, Retry =
+    `accountRefreshEntitlements`; en Ajustes → Cuenta, dentro de la tarjeta "Your plan"); las
+    etiquetas de precio de las cards (`useOfferTag`) desaparecen. `cloudSync.removeRemoteByPathKeys` con entitlements **no verificadas**
     — desconocidas **o restauradas de la cache** (`account.areEntitlementsFromCache()`) — intenta el
     tombstone y **nunca** cae al `DELETE` físico (lanza → la op sigue en el journal); decisión pura
     `planRemoteDelete` en `cloudSyncLogic.ts` (ver § 4 "Deletes = tombstones"). Para las ofertas, en
-    cambio, la cache **sí** cuenta como conocida (una cache `ai:false` muestra las cards: aceptado).
+    cambio, la cache **sí** cuenta como conocida (una cache `ai:false` muestra las ofertas: aceptado).
     Helpers puros del renderer en `src/lib/subscriptionPlans.ts` (`isPlanUnknown`,
-    `isPlanOffered`, `isBundleUpgradeOffered`, `hasKnownEntitlement`, y `activePlan` — el plan que se **nombra** en la línea de
+    `isPlanOffered`, `isBundleUpgradeOffered`, `productOffer`, `hasKnownEntitlement`, y `activePlan` — el plan que se **nombra** en la línea de
     identidad del pie del sidebar: ambas entitlements → `bundle`, si no `cloud`/`ai`; desconocidas o
     ninguna → `null`, así que dos suscripciones sueltas AI + Cloud también se leen como Bundle).
   - **Cache persistida:** cada fetch OK guarda `settings.json` → `account.entitlementsCache =
@@ -168,8 +180,8 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   `shell.openExternal`; el userId nunca cruza al renderer). Implementado en la fase 4.1.
 - **Gestionar la suscripción — customer portal de LS (implementado en cliente + función; deploy
   pendiente del operador, ver `supabase/README.md` § 5.1):** cancelar, cambiar de plan, actualizar
-  la tarjeta y ver facturas solo se hace en el portal de Lemon Squeezy. Settings → Subscription
-  (`AccountPanel`) muestra **"Manage subscription"** + hint cuando `AccountStatus.hasBillingSubscription`
+  la tarjeta y ver facturas solo se hace en el portal de Lemon Squeezy. Ajustes → Cuenta
+  (`AccountPanel`, dentro de la tarjeta "Your plan") muestra **"Manage subscription"** + hint cuando `AccountStatus.hasBillingSubscription`
   — derivado en main con `hasBillingSubscription(rows)` (`electron/entitlements.ts`): alguna fila con
   `provider='lemonsqueezy'` **en cualquier estado** (past_due necesita la tarjeta; una
   cancelada/expirada conserva sus facturas); las comps `provider='manual'` **no** lo ven, y es `false`
@@ -209,10 +221,23 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     cachea como `entitlementsCache.bundleUpgrade`, opcional → `false` en caches antiguas,
     `parseCachedBundleUpgradeFlag`). **No** se ofrece con una comp `manual` (no hay nada que cambiar
     en LS), con dos suscripciones sueltas AI + Cloud (ya tiene ambas) ni con dos filas activas del
-    mismo producto (ambiguo). `PlanOffers` pinta entonces la card del Bundle en modo mejora (CTA
-    "Upgrade", nota "Replaces your current plan") en las tres superficies que listan `bundle`.
-  - **Confirmación en la app:** no hay página de checkout que muestre el cargo, así que la card abre
-    un panel de confirmación con el aviso de **prorrateo** (i18n `settings.account.upgrade*`): se abona
+    mismo producto (ambiguo). La oferta es entonces `productOffer(account, <el otro>) === 'upgrade'`
+    y se pinta con `BundleUpgradeOffer` (`PlanOffers.tsx`): valor, "tu suscripción pasa a Bundle, no
+    pagas dos", el **diferencial** (`bundleUpgradeDifference`; el cliente no conoce el periodo de la
+    suscripción, así que muestra el mensual y el anual: "+4,00 €/mes · +40,00 €/año si pagas anual"),
+    el total del Bundle y "Switch to Bundle". En Ajustes → Cuenta va **plegado** (fila "Add NoteFlow AI
+    to your plan" con chevron; "Not now" la pliega); en el detalle de Cloud / NoteFlow AI (el usuario lo
+    eligió) va desplegado en la caja del plan.
+  - **Con un plan suelto mejorable, la mejora es la ÚNICA oferta del otro producto** (`isPlanOffered`,
+    2026-11-15): antes Cuenta y el selector de IA ofrecían además el otro producto **suelto** (Cloud +
+    AI suelta = 9,98 €/mes, más caro que el Bundle de 7,99 €). Si `bundleUpgradeAvailable` es `false`
+    (comp `manual`, dos filas del mismo producto…) el otro producto **sí** se ofrece suelto (checkout
+    propio, plegado en Cuenta con la nota "Billed as a separate subscription"): comprar un producto
+    distinto nunca cobra dos veces el que ya tiene, mientras que un checkout de Bundle encima sí lo
+    haría, y avisar de "cancela el actual" deja el doble cobro en manos del usuario. Tests:
+    `tests/lib/subscriptionPlans.test.ts`.
+  - **Confirmación en la app:** no hay página de checkout que muestre el cargo, así que "Switch to
+    Bundle" abre un panel de confirmación con el aviso de **prorrateo** (i18n `settings.account.upgrade*`): se abona
     lo no usado del periodo actual, se cobra **ya** solo la diferencia a la tarjeta guardada, desde la
     próxima renovación se paga el Bundle con el **mismo ciclo** mensual/anual y la fecha de renovación
     no cambia. Solo "Confirm upgrade" llama al IPC `account:upgrade-to-bundle`.
@@ -265,12 +290,12 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
     suscripción en `past_due`, el webhook deja **la misma fila** en `product='bundle'`,
     `status='past_due'` → `computeEntitlements` da `{ai:false, cloud:false}`: el usuario pierde
     **también** el AI/Cloud que ya tenía pagado (y la regla de pérdida apaga esa superficie, § 3
-    punto 3). Además `PlanOffers` vuelve a ofrecer los **checkouts** de AI, Cloud y Bundle (ninguna
+    punto 3). Además las superficies de planes vuelven a ofrecer los **checkouts** de AI, Cloud y Bundle (ninguna
     entitlement, `bundleUpgradeAvailable` en `false`), lo que invita a una segunda suscripción en vez
     de arreglar la tarjeta. Salida actual: "Manage subscription" (la fila sigue siendo de LS) para
     actualizar la tarjeta; al cobrar, LS la vuelve a `active` y el webhook restaura ambas.
     Pendiente: decidir si se acepta o se mitiga (p. ej. aviso de `past_due` en Ajustes →
-    Suscripción, y no ofrecer checkouts con una fila de LS `past_due`).
+    Cuenta, y no ofrecer checkouts con una fila de LS `past_due`).
 - **Borrado de cuenta (backend implementado; cliente en móvil y escritorio):** Edge Function
   **`supabase/functions/delete-account`** (mismo patrón que `billing-portal`: `logic.ts` con `fetch`
   inyectado, testeado en `tests/supabase/delete-account.test.ts`; verify JWT). `POST` sin body →
@@ -295,7 +320,7 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   suscripción reanudada, `user_id` ajeno) loguea `console.error` "CANCEL subscription … in Lemon
   Squeezy" para el operador. Despliegue:
   `supabase/README.md` § 9; páginas públicas `/privacy#deletion` y `/delete-account` (web.md).
-  - **Cliente de escritorio** (Ajustes → Suscripción → **Delete account**, solo con sesión; réplica
+  - **Cliente de escritorio** (Ajustes → Cuenta → **Delete account**, solo con sesión; réplica
     del móvil `noteflow-mobile/src/core/accountSession.ts` `deleteAccount`):
     `account.deleteAccount()` (`electron/account.ts`) → `POST ${SUPABASE_URL}/functions/v1/delete-account`
     (`DELETE_ACCOUNT_FN_URL`, Bearer + apikey, sin body, timeout 45 s) con el token de
@@ -666,15 +691,16 @@ es **un preset más**, no una implementación nueva.
   texto crudo (es una API key mala).
   Capabilities: imágenes **según el modelo activo** (`modelMeta`; los text-only las desactivan);
   PDF no (anthropic-only).
-- **UI:** `LlmConfigView` presenta las dos fuentes del asistente como **opciones excluyentes** —
-  selector de dos cards (**NoteFlow AI** vs **proveedor propio / IA local**, ambas siempre visibles,
-  con badge Activo/Inactivo) y debajo solo la sección de la elegida. El preset **NoteFlow AI no
-  aparece en el `<select>` de proveedores** (se filtra por id). Su sección: barra de consumo mensual +
-  botón "Use NoteFlow AI" (`changeProvider('noteflow')`) **solo con entitlement `ai`**; sin sesión o
-  sin entitlement, en su lugar el aviso ámbar (`noteflowSignIn`/`noteflowNeedsSubscription`) que
-  remite a Ajustes → Suscripción. Si la suscripción caduca teniéndolo activo, main lo devuelve solo a
+- **UI:** `LlmConfigView` presenta las fuentes del asistente como **tres cards al mismo nivel**
+  (**NoteFlow AI** con su etiqueta de precio, **Your API key** "Free", **Local model** "Free"), con una
+  línea de estado honesta encima ("Chat not set up" si el proveedor activo no puede responder: una
+  instalación nueva, Anthropic sin clave, no marca ninguna card como activa), y debajo solo la
+  sección de la elegida. El preset **NoteFlow AI no aparece en ningún `<select>`** (se filtra por id).
+  Su sección: barra de consumo mensual + botón "Use NoteFlow AI" (`changeProvider('noteflow')`)
+  **solo con entitlement `ai`**; sin sesión o sin entitlement, elegir la card abre el **detalle del
+  plan** (`PlanDetail`, ver "Bloque de planes"), con el inicio de sesión dentro. Si la suscripción caduca teniéndolo activo, main lo devuelve solo a
   BYO en cuanto lo confirma un fetch fresco de entitlements (ver "Auto-activación…" → "Al confirmar
-  la pérdida"); hasta entonces el chat ve el 403 del proxy con su motivo. Detalle del selector, del estado de vista `mode` y
+  la pérdida"); hasta entonces el chat ve el 403 del proxy con su motivo. Detalle del selector, del estado de vista `view` (`Source | null`) y
   de por qué los campos BYO se ocultan hasta activar el proveedor: `.agents/context/ai.md` § LLM.
   **Reactividad de la config LLM en el renderer:** el store `aiChatStore` (`llmConfig`/`presets`/
   `models`) se recarga con `loadConfig()` ante `onAccountStatusChanged` (y `onAiLlmPresetsChanged`)
@@ -684,37 +710,55 @@ es **un preset más**, no una implementación nueva.
   suscribirse o restaurar (antes solo lo veía `LlmConfigView`, que además conserva su propio
   `onAccountStatusChanged` para el estado de cuenta). Si el `active` recargado difiere del anterior,
   `loadConfig` vacía `models` (eran del proveedor anterior), igual que `setLlmConfig`.
-- **Bloque de planes (`src/components/Settings/PlanOffers.tsx`):** componente **compartido** por los
-  cuatro sitios donde un gate puede acabar en compra, para que precio, reglas de visibilidad y copy
-  no se separen entre superficies:
-  1. **Ajustes → Suscripción** (`AccountPanel`, con sesión): `['bundle', 'ai', 'cloud']`.
-  2. **Ajustes → IA** y 3. **panel de IA del Cerebro** (`LlmConfigView`, mismo componente en ambas):
-     `['ai', 'bundle']` dentro del gate.
-  4. **Ajustes → Sincronización → NoteFlow Cloud** (`CloudPanel`): `['cloud', 'bundle']`, tanto en el
-     estado sin sesión como en el gate de entitlement (que cubre setup y enable — ver § 4, "Gating").
-  Prop opcional `benefits: 'ai' | 'cloud'`: lista "What you get" (`t.settings.planBenefits`) entre
-  las cards y la letra pequeña, con las ventajas del plan gestionado frente a la vía gratis
-  autogestionada; la pasan los gates de IA (`LlmConfigView`) y Cloud (`CloudPanel`), **no**
-  Ajustes → Suscripción. Al vivir dentro del bloque hereda sus reglas de visibilidad.
-  Reglas: si `!account.configured` (build sin Supabase) no pinta nada — no se anuncian precios de algo
-  que no se puede comprar. Con sesión y entitlements **desconocidas** no pinta ninguna card: muestra
-  `PlanUnknownNotice` ("Couldn't verify your plan yet — Retry"), salvo con `showUnknownNotice={false}`
-  (Ajustes → Suscripción, donde ya lo dicen los badges). Un plan solo aparece mientras se **sepa** que
-  falta su entitlement, y **Bundle exige que falten AMBAS** (para no facilitar doble facturación) —
-  **salvo como mejora**: con exactamente una de las dos y `AccountStatus.bundleUpgradeAvailable`
-  (`isBundleUpgradeOffered`), la card del Bundle sale en modo **"Upgrade"** (cambio de plan, no
-  checkout; ver § 2 "Pasar al Bundle"); si no queda ninguno, no renderiza. Nombre y
-  precio salen de `src/lib/subscriptionPlans.ts` (`SUBSCRIPTION_PRICES`, display-only) y el Bundle
-  lleva badge "Best value". **La card entera es el call-to-action** (`<button>` cuando es clickable,
-  para foco + teclado; el CTA de dentro es un `<span>` porque un button no puede anidar otro button).
-  Con sesión y checkout configurado, clicar la card dispara `onSubscribe(product)` → IPC
-  `account:open-checkout` (`'ai' | 'cloud' | 'bundle'`; main construye la URL con
-  `checkout%5Bcustom%5D%5Buser_id%5D=<uuid>` y la abre con `shell.openExternal`; el userId
-  **no cruza al renderer**). URL vacía = card inerte con nota "Coming soon". Sin sesión, clicar la card
-  dispara `onGoToAccount` (lleva a Ajustes → Suscripción), y debajo se muestra la línea "sign in to
-  subscribe". Ese acceso a Cuenta lo resuelve `onNavigate('account')` donde existe (paneles de Ajustes)
-  y, desde el panel del Cerebro —que no tiene navegación propia—, el evento `window`
-  **`noteflow:open-account`**, escuchado en `TitleBar` junto al resto de `noteflow:open-*`.
+- **Bloque de planes (`src/components/Settings/PlanOffers.tsx` + `planOffersShared.ts`; rediseño
+  2026-11-15):** principio de producto — a quien acaba de instalar no se le "planta" un precio: las
+  opciones (también las gratis) se comparan al mismo nivel, primero el **valor** y después **un solo
+  precio**; a quien ya paga no se le pone el precio de una mejora delante sin que lo pida. Precios
+  siempre visibles (nunca escondidos), pero secundarios. Reglas de visibilidad en
+  `src/lib/subscriptionPlans.ts` — `productOffer(account, 'ai'|'cloud')` da una sola respuesta por
+  producto para todas las superficies: `'unknown'` (plan sin verificar → `PlanUnknownNotice`, ninguna
+  oferta), `'owned'`, `'upgrade'` (tiene el otro en una suscripción mejorable → solo el cambio a
+  Bundle) o `'checkout'` (suscripción nueva). El Bundle como checkout solo con **ambas** ausentes
+  (`isPlanOffered(…, 'bundle')`). Piezas:
+  1. **Etiquetas de precio** (`useOfferTag` + `PlanTag`) en las cards que comparan rutas: "€3.99/month"
+     (checkout), "In your plan" (owned), "Add to your plan" (upgrade, sin precio), nada si el plan es
+     desconocido o la build no tiene Supabase. Las rutas gratis llevan "Free".
+  2. **`PlanDetail`** (detalle de Cloud en Ajustes → Sync, de NoteFlow AI en Ajustes → IA y en el
+     panel del Cerebro): a la izquierda "What's included" (`t.settings.planBenefits[product]` + qué pasa
+     si cancelas, `keepOnCancel`); a la derecha **una** caja de plan con el precio mensual grande y
+     debajo el anual con su ahorro calculado ("o 39,99 €/año · ahorra un 16 %"; sin interruptor de
+     periodo: se elige en el checkout, ver "Precios"), y la llamada a la acción: **sin sesión, el
+     inicio de sesión inline** (`SignInInline`, el mismo componente email → código que usa Ajustes →
+     Cuenta; nadie sale de la pantalla para iniciar sesión); con sesión, "Continue to payment" →
+     `account:open-checkout` del producto elegido (main añade el `user_id`; el userId **no cruza al
+     renderer**; abre la URL del producto, ver "Precios"); sin URL en la build, "Coming soon". Al pie,
+     "You pick monthly or yearly on the payment page" y "VAT included · you pay on a secure page (Lemon
+     Squeezy) · cancel anytime". El **Bundle** no es una card:
+     una línea discreta al pie ("Also interested in AI? NoteFlow Bundle brings Cloud and AI together for
+     €7.99/month" + "Choose the Bundle", que cambia la caja al Bundle; y de vuelta "Choose … only"). Con
+     `productOffer === 'upgrade'` la caja es `BundleUpgradeOffer` desplegado. La elección de Bundle se
+     puede controlar desde el padre (`bundle`/`onBundleChange`) para que sobreviva al remontaje cuando
+     el usuario inicia sesión desde la propia caja (`CloudPanel` cambia de rama). Columnas con
+     `flex-wrap` + `flex-basis` y `min-w-0` (no `min-width` ni breakpoints de viewport): en el panel
+     del Cerebro (estrecho, redimensionable hasta el 25 % de la ventana) se apilan y encogen sin
+     desbordar. Quien tiene un plan no mejorable y abre el detalle del otro producto ve, bajo el
+     precio, "Billed as a separate subscription" (`standaloneNote`, igual que en Cuenta).
+  3. **Ajustes → Cuenta** (`AccountPanel`; la sección se llamaba "Subscription"/"Suscripción", el id
+     interno sigue siendo `account`): arriba la tarjeta **"Your plan: …"** — *Free* con badge "Current
+     plan", lo que incluye gratis y, sin sesión, "You don't need an account for any of this"; o el plan
+     de pago (`activePlan`) con badge Active y "Manage subscription"; o `PlanUnknownNotice` si es
+     desconocido. Con plan Free, **"Optional upgrades"** como **filas compactas** (Cloud, AI, Bundle con
+     "saves €1.99/month vs. buying them separately"), cada una con su precio pequeño y "View", que navega
+     al detalle (`SettingsNavigate` con `SettingsIntent { offer }`: Cloud y Bundle → Ajustes → Sync con
+     el detalle de Cloud abierto, el Bundle ya elegido; AI → Ajustes → IA con el detalle de NoteFlow AI).
+     Con **un** plan (AI o Cloud), ninguna tarjeta de precio: una fila plegada "Add <el otro> to your
+     plan" (`BundleUpgradeOffer` o, si la suscripción no se puede cambiar, el producto suelto). Con los
+     dos, nada. Sin sesión, al pie "Already have a subscription?" + `SignInInline`.
+  4. **`BundleUpgradeOffer`**: ver § 2 "Pasar al Bundle".
+  Si `!account.configured` (build sin Supabase) no se anuncia ningún precio (las etiquetas
+  desaparecen y el detalle dice "not available"). Desde el panel del Cerebro ya no hace falta navegar
+  a Cuenta (el inicio de sesión va inline); el evento `noteflow:open-account` del `TitleBar` queda
+  disponible pero sin emisor.
 - **Auto-activación al suscribirse / al iniciar sesión:** la app enciende **sola** lo que el
   usuario tiene pagado — Cloud con la entitlement `cloud`, el asistente gestionado
   (`settings.aiLlm.active = 'noteflow'`) con la `ai`; bundle = ambas — en **dos momentos**, y la
@@ -741,8 +785,8 @@ es **un preset más**, no una implementación nueva.
   (`account.entitlementsCache`, ver § 2; `account.areEntitlementsFromCache()`) **no** son
   observaciones frescas: ni fijan ni mueven la baseline, así que ni desconocida→`true` ni
   cacheada-`false`→`true` cuentan como transición. Solo una transición posterior **para la misma
-  identidad** en el mismo proceso (p. ej. "Subscribe" en el navegador → volver → "Refresh" en Settings
-  → Subscription) activa la superficie. **La identidad se re-arma en cada cambio de `signedIn`/email**
+  identidad** en el mismo proceso (p. ej. pagar en el navegador → volver → "Refresh" en Ajustes
+  → Cuenta) activa la superficie. **La identidad se re-arma en cada cambio de `signedIn`/email**
   — necesario porque la UI permite sign-out + sign-in sin reiniciar la app: sin este reset, una cuenta
   B que YA tenía la entitlement antes de este proceso (y se loguea después de que la cuenta A, sin
   entitlement, cierre sesión) heredaría la baseline `false` de A y se activaría por este camino al
@@ -760,7 +804,7 @@ es **un preset más**, no una implementación nueva.
      `markNeedsFullReconcile`); `ai` con `aiLlm.active === 'noteflow'` → `byoFallbackProvider()`
      (`lastByoProvider`, si no `'anthropic'`). Solo la superficie cuya entitlement falta (bundle =
      ambas). Es una comprobación de **estado**, no de flanco: cubre la caducidad dentro del proceso
-     (Refresh en Ajustes → Suscripción, o el refresh que lanza un 403 de RLS de Cloud o del proxy de
+     (Refresh en Ajustes → Cuenta, o el refresh que lanza un 403 de RLS de Cloud o del proxy de
      IA) y la ocurrida **con la app cerrada** (arranque con Cloud/AI encendidos y el primer fetch ya
      dice `false`), y es idempotente (ya apagado → nada). Entitlements **desconocidas o de la cache
      nunca apagan nada** (un fetch fallido conserva la última respuesta; `account.ts` nunca convierte
@@ -783,9 +827,10 @@ es **un preset más**, no una implementación nueva.
   sesión (esa u otra cuenta), si tiene la entitlement `ai` se activa `noteflow` automáticamente (ver
   arriba, punto 1, y § 4 "Cerrar sesión" → "Al iniciar sesión").
   El mismo dato llega al renderer como `LlmConfigPublic.lastByoProvider` (solo si es un preset
-  conocido no gestionado): con NoteFlow AI activo, la tarjeta "Your provider / local AI" de
-  Ajustes → IA (`LlmConfigView.tsx`, `byoOf`) preselecciona ese proveedor (p. ej. DeepSeek con su
-  key guardada) y solo cae a `'anthropic'` si no hay ninguno.
+  conocido no gestionado): con NoteFlow AI activo, las cards "Your API key" / "Local model" de
+  Ajustes → IA (`LlmConfigView.tsx`, `byoFor`) preseleccionan ese proveedor si pertenece a la card
+  (p. ej. DeepSeek con su key guardada en "Your API key") y si no caen a la de la card (`'anthropic'`
+  / `'ollama'`).
 - **Cuota ponderada (0007) desplegada** en su día con el endpoint `/usage`; la **sustituye** la cuota
   por coste de la 0013 (arriba).
 - **Catálogo en BD (0012) + cuota por coste (0013) desplegados (2026-10-24):** migraciones 0012 +
@@ -844,8 +889,8 @@ es **un preset más**, no una implementación nueva.
   producto, no el slug del producto. **Precios con IVA incluido** (decidido 2026-10-19): la store
   tiene activado "tax-inclusive pricing", así que el cliente paga exactamente la cifra publicada
   y el neto baja según el IVA del país. La web (`/pricing`, `/terms`) lo indica (LSSI art.
-  10.1.f); la nota "IVA incluido" en la app (Settings → Subscription, `PlanOffers.tsx`) está
-  **pendiente**. Ver `supabase/README.md` §§ 5-6 para repetir el proceso en
+  10.1.f); en la app lo dice la nota de la caja de plan (`t.settings.plans.paymentNote`, "VAT
+  included · …", `PlanOffers.tsx`). Ver `supabase/README.md` §§ 5-6 para repetir el proceso en
   otro proyecto.
 - **Privacidad (documentar en UI/landing):** el índice RAG sigue siendo 100% local; lo que viaja
   al proxy es lo mismo que viajaría a cualquier proveedor con key propia (pregunta + chunks
@@ -1890,24 +1935,34 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   mantiene `signedIn` e identidad, así que ni `planAccountTransition` ni la baseline de auto-activación
   lo ven como un cierre de sesión — no se apaga Cloud ni se suelta la DEK ni se vuelve a BYO.
 - **UI:** el badge de la tarjeta Cloud (`SyncPanel.tsx`) se deriva de `enabled && signedIn` — con lo
-  anterior ese caso ya no debería darse, pero el badge no puede mentir. No hizo falta copy nuevo: los
-  estados existentes (`t.settings.cloud.signInFirst`, aviso ámbar `noteflowSignIn` de `LlmConfigView`)
-  ya cubren el "sin sesión".
+  anterior ese caso ya no debería darse, pero el badge no puede mentir. No hizo falta copy nuevo: el
+  "sin sesión" lo cubren el detalle del plan con su inicio de sesión inline (`PlanDetail`, en Cloud y
+  en NoteFlow AI) y la línea de estado "Chat not set up" de `LlmConfigView`.
 
 ### Settings UI (tramo 4 — implementado)
-- **Ubicación:** la página **Settings → Sync** (`SyncPanel.tsx`) empieza por un **selector de
-  backend de dos tarjetas** (NoteFlow Cloud / GitHub Sync, patrón visual de las cards de modo de
-  cifrado: `aria-pressed` + `border-accent bg-accent/[0.08]`), cada una con un **badge de estado**
-  derivado del estado real (Active / Paused / Inactive / Not connected). Debajo se renderiza SOLO
-  el panel del backend seleccionado: `src/components/Settings/CloudPanel.tsx` o el componente
-  interno `GitHubSyncSection` de `SyncPanel.tsx`. La preselección resuelve **una sola vez** cuando
-  llegan ambos status (Cloud enabled → Cloud; si no, GitHub conectado → GitHub; si ninguno →
-  Cloud) y nunca vuelve a pisar la elección del usuario. `CloudPanel` no repite su título (lo dice
-  la tarjeta): solo su párrafo `desc`. Textos vía i18n `t.settings.cloud.*` +
-  `t.settings.sync.*` (`chooseBackendDesc`, `cloudCardDesc`, `githubTitle`, `githubCardDesc`,
-  `badgeActive`/`badgePaused`/`badgeInactive`, `pausedByCloud`).
-- **El panel renderiza según `keysState` + cuenta:** sin sesión → "sign in en Settings → Subscription";
-  `no-keys` **sin entitlement `cloud`** → el bloque de planes (ver "Gating" abajo), sin onboarding;
+- **Ubicación:** la página **Settings → Sync** (`SyncPanel.tsx`). La vista se resuelve **una sola
+  vez** cuando llegan ambos status y nunca vuelve a pisar la elección del usuario:
+  - **Nada en uso** (Cloud no activado y GitHub no conectado) → **elección** (`SyncChooser`): línea de
+    estado "Only on this device", y NoteFlow Cloud y GitHub Sync como **dos cards iguales** (para quién
+    es, 3 viñetas, etiqueta de precio discreta — Cloud con `useOfferTag`, GitHub "Free" — y su botón
+    "See NoteFlow Cloud" / "Connect with GitHub"); **ninguna preseleccionada** (antes caía en Cloud,
+    o sea en el paywall). Debajo, sin sesión, "Already have NoteFlow Cloud? Sign in" (lleva al detalle
+    de Cloud, que tiene el inicio de sesión). Al elegir, el panel del backend con un enlace "← Sync
+    options".
+  - **Un backend en uso** → el **selector de dos tarjetas** de siempre (patrón visual de las cards de
+    modo de cifrado: `aria-pressed` + `border-accent bg-accent/[0.08]`), cada una con un **badge de
+    estado** derivado del estado real (Active / Paused / Inactive / Not connected), preseleccionando
+    el que está en uso (Cloud enabled → Cloud; si no, GitHub).
+  - `SettingsIntent { offer: 'cloud' | 'bundle' }` (filas de Ajustes → Cuenta) abre directamente el
+    detalle de Cloud (con el Bundle elegido para `'bundle'`).
+  Debajo se renderiza SOLO el panel del backend seleccionado: `src/components/Settings/CloudPanel.tsx`
+  o el componente interno `GitHubSyncSection` de `SyncPanel.tsx`. `CloudPanel` no repite su título.
+  Textos vía i18n `t.settings.cloud.*` + `t.settings.sync.*` (`localOnly`, `chooseIntro`,
+  `choiceCloud`/`choiceGithub`, `haveCloud`, `backToOptions`, `chooseBackendDesc`, `cloudCardDesc`,
+  `githubTitle`, `githubCardDesc`, `badgeActive`/`badgePaused`/`badgeInactive`, `pausedByCloud`).
+- **El panel renderiza según `keysState` + cuenta:** sin sesión → el detalle del plan (`PlanDetail`,
+  con el inicio de sesión inline en la caja); `no-keys` **sin entitlement `cloud`** → el mismo detalle
+  (ver "Gating" abajo), sin onboarding;
   `no-keys` **con entitlement** → onboarding de elección de modo (dos cards, Estándar/managed
   preseleccionada) → botón directo `cloudSetupManaged`, o formulario de passphrase (input +
   confirmación, mínimo 8 chars) → `cloudSetup` → el **recovery code se muestra UNA vez** en un
@@ -1921,11 +1976,11 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   completo pull + drain, resultado tipo GitHub) y Lock.
 - **Gating (decisión):** en la UI se gatean por entitlement `cloud` **el setup/onboarding** (estado
   `no-keys`) y **Enable sync** (estado `unlocked` + disabled). En ambos casos se muestra el MISMO
-  bloque (constante `subscriptionGate` de `CloudPanel.tsx`, para que no se separen): mensaje
-  "requires subscription" + el compartido `PlanOffers` con Cloud (y Bundle si falta también la
-  entitlement `ai`); un plan sin URL en `LEMONSQUEEZY_CHECKOUT_URLS` se queda en "Coming soon". El
-  estado sin sesión del panel muestra ese mismo bloque de planes (precios + acceso a Ajustes →
-  Cuenta) en vez de solo el "sign in first". El setup se gatea porque **crear claves para una nube
+  bloque (constante `subscriptionGate` de `CloudPanel.tsx`, para que no se separen): el
+  `PlanDetail` de Cloud (el Bundle como línea si falta también la entitlement `ai`; el cambio a Bundle
+  si ya paga AI y es mejorable), precedido en el estado `unlocked` del mensaje "requires
+  subscription"; un plan sin URL en `LEMONSQUEEZY_CHECKOUT_URLS` se queda en "Coming soon". El estado
+  sin sesión del panel muestra ese mismo detalle. El setup se gatea porque **crear claves para una nube
   que no se puede activar no tiene sentido**, y no compromete la recuperación de datos: quien no
   tiene claves tampoco tiene nada subido. **Unlock/Sync now/Disable/Lock NO se gatean en la UI** (RLS
   solo bloquea escrituras), y los switches de modo managed↔e2ee tampoco. Pero **Sync now solo se
@@ -2240,10 +2295,11 @@ puro vía `fetch` desde el proceso main.
   equivocado y a uno caducado con el mismo payload (`error_code: otp_expired` / "Token has expired
   or is invalid"), así que `invalidCode` cubre ambos y la UI ofrece reenviar.
 - **UI** — `src/components/Settings/AccountPanel.tsx` (sección "Account" en `SettingsModal`,
-  textos vía i18n `t.settings.account.*`): no configurado → placeholder informativo; signed out →
-  email → código de acceso; signed in → email + badges de plan + el bloque compartido
-  `PlanOffers` con los **planes y sus precios** (Bundle/AI/Cloud — ver § 3 "UI" y § visión
-  "Precios") + **Manage subscription** (solo con suscripción de LS, ver § 2) + Refresh + Sign out
+  textos vía i18n `t.settings.account.*` + `t.settings.plans.*`): no configurado → placeholder
+  informativo; siempre la tarjeta "Your plan" y las mejoras opcionales (ver § 3 "Bloque de planes");
+  signed out → al pie, email → código de acceso (`SignInInline.tsx`, compartido con el detalle de los
+  planes); signed in → email + **Manage subscription** (solo con suscripción de LS, ver § 2; dentro de
+  la tarjeta "Your plan") + Refresh + Sign out
   + **Delete account** (bloque separado al final, botón rojo con texto explicativo; abre
   `ConfirmModal` `danger` con `confirmOnEnter={false}` (Enter solo activa el botón enfocado —
   Cancel al abrir —, nunca confirma globalmente) — cuenta + datos de Cloud borrados, suscripción cancelada, notas del

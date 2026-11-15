@@ -301,32 +301,47 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   catálogo hardcodeado; ninguna release pública los lleva); este cliente ni siquiera las envía,
   porque su `effectiveModel` ya cae al primero. Tests: `tests/electron/managedCatalog.test.ts`.
 - **UI del proveedor (`LlmConfigView`, embebida en Settings → IA y en la pestaña "settings" del panel
-  del cerebro):** **selector de dos cards mutuamente excluyentes** (mismo patrón que Settings → Sync,
-  con badge Activo/Inactivo) — **NoteFlow AI** (gestionado) vs **proveedor propio / IA local** (BYO key
-  u Ollama). Las cards van **sin borde**: la elección se lee solo del relleno de acento
-  (`bg-accent/[0.08]`, el tono de Settings → Sync). **Radios:** manda el lenguaje del panel del cerebro
-  (`Card` de `AiPanel/ui.tsx`: `rounded-xl` en cajas, `rounded-lg` en controles) — se usa igual en
-  Ajustes, y **Settings → Sync/Cloud se alinearon a él** (2026-07). Las **dos cards se ven siempre**
-  (también sin entitlement); debajo, tras un `border-t`, se pinta **solo** la sección del modo elegido.
-  NoteFlow AI **no aparece en el `<select>`** (que solo lista el resto de presets); su sección es la
-  barra de consumo mensual + el gate (aviso ámbar → Ajustes → Suscripción) o el botón "Use NoteFlow AI"
-  (solo con entitlement `ai`). La barra muestra un **porcentaje** ("N% of this month’s AI allowance
-  used", `usagePercent`: `used/limit` con suelo, 100 % solo al agotarla): `GET /usage` devuelve
-  unidades abstractas (límite 3.000.000, la escala de la antigua cuota de tokens) y solo el cociente
-  significa algo.
+  del cerebro):** arriba una **línea de estado honesta** — "Chat ready · <proveedor>" solo si
+  `llmConfig.configured` (el proveedor activo puede responder: clave guardada si la necesita, modelo,
+  y para `noteflow` sesión + entitlement); si no, "Chat not set up". Una instalación nueva queda en
+  Anthropic **sin clave** → "Chat not set up" y **ninguna** card marcada como activa. Debajo, **tres
+  cards al mismo nivel** (`SourceCard`): **NoteFlow AI** (gestionado; etiqueta de precio
+  `useOfferTag`: "€5.99/month", "In your plan" o "Add to your plan"), **Your API key** (presets con
+  `needsKey`; etiqueta "Free", "pagas a tu proveedor") y **Local model** (presets sin clave: Ollama,
+  Custom; "Free"). El badge "Active" solo sale en la card del proveedor activo **y** configurado
+  (sustituye a la etiqueta). Las cards son el mismo recuadro que las de Settings → Sync (borde,
+  fondo `surface-0`, borde de acento al pasar por encima y `border-accent bg-accent/[0.08]` la elegida),
+  con el contenido alineado arriba (un `<button>` centra su contenido en vertical por defecto: la card
+  es una columna flex `justify-start`) y en rejilla (misma altura por fila): tres columnas en Ajustes
+  (`embedded`, `sm:grid-cols-3`) y **una por fila, a ancho completo**, en el panel del cerebro
+  (`embedded` false: estrecho y redimensionable). **Radios:** manda el lenguaje del panel del cerebro (`Card` de
+  `AiPanel/ui.tsx`: `rounded-xl` en cajas, `rounded-lg` en controles) — se usa igual en Ajustes, y
+  **Settings → Sync/Cloud se alinearon a él** (2026-07). Debajo se pinta **solo** la sección de la card
+  elegida. NoteFlow AI **no aparece en ningún `<select>`**; su sección (con entitlement `ai`, o con el
+  plan sin verificar → `PlanUnknownNotice`) es la barra de consumo mensual + el botón "Use NoteFlow AI"
+  o el check "Active". **Sin el plan** (sin sesión, sin entitlement, o con solo Cloud), elegir NoteFlow
+  AI sustituye las cards por el **detalle del plan** (`PlanDetail product="ai"`, con enlace "← AI
+  options"; ver `monetization.md` § "Bloque de planes"). La barra muestra un **porcentaje** ("N% of
+  this month’s AI allowance used", `usagePercent`: `used/limit` con suelo, 100 % solo al agotarla):
+  `GET /usage` devuelve unidades abstractas (límite 3.000.000, la escala de la antigua cuota de tokens)
+  y solo el cociente significa algo.
   - **Campo "Model":** texto libre en los presets BYO, pero **solo lectura** (`disabled` + hint
     `modelCuratedHint`) en los de catálogo curado (`preset.modelMeta`) — ahí se elige con los chips.
     Si fuera editable, teclear un id que no está en el catálogo lo persistiría en `ps.model` mientras
     `effectiveModel` sigue resolviendo al primer modelo curado: guardado y usado divergirían (y el
     input "saltaría" a cada tecla). Main aplica la misma regla como defensa en profundidad:
     `ai:llm-set-config` descarta un `model` que `llm.acceptsModel()` rechace.
-  - `mode` (`'noteflow' | 'byo'`) es **estado de vista**, no el proveedor activo: se resuelve **una
-    vez** desde `llmConfig.active` cuando la config está disponible (lazy init desde
+  - `view` (`'noteflow' | 'key' | 'local' | null`) es **estado de vista**, no el proveedor activo: se
+    resuelve **una vez** (`viewOf`) cuando la config está disponible (lazy init desde
     `useAiChatStore.getState()`, o una suscripción al store si aún no ha cargado) y **no se mueve solo**
     — que main active NoteFlow AI tras suscribirse no debe sacar al usuario de la vista en la que está
-    (mismo contrato que `backend` en `SyncPanel`).
-  - En modo BYO hay un `byoId` local al que se enlaza el `<select>` (si el activo es `noteflow`, cae en
-    `anthropic`). **baseUrl / API key / modelo / test solo se muestran cuando `byoId === llmConfig.active`**:
+    (mismo contrato que `view` en `SyncPanel`). Activo `noteflow` (o `initialOffer` desde Ajustes →
+    Cuenta) → `'noteflow'`; nada configurado → `null` (ninguna card elegida); si no, la card del preset
+    activo (`needsKey` → `'key'`, si no → `'local'`).
+  - En las cards BYO hay un `byoId` local al que se enlaza el `<select>`, que solo lista los presets de
+    esa card (`fitsSource`). `byoFor` elige el activo si pertenece a la card, si no `lastByoProvider` si
+    pertenece, y si no el de la card (**Anthropic** en "Your API key", **Ollama** en "Local model").
+    **baseUrl / API key / modelo / test solo se muestran cuando `byoId === llmConfig.active`**:
     esos campos escriben sobre la config del **proveedor activo**, así que editarlos sin activar el
     proveedor elegido corrompería la config del otro. Mientras no coincidan, solo se ofrece el `<select>`
     + botón "Use this provider" (`setLlmConfig({ active })`).

@@ -1095,9 +1095,13 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   quedan en una sección final de baja relevancia y la IA tiene **prohibido sacarlos a colación** en
   conversaciones que no vienen a cuento (te recomienda directo, sin "como te gusta tal película…").
   La app nunca procesa los documentos: se los pasa directamente al modelo.
-- **⚙ Settings (proveedor):** el asistente se alimenta de **una de dos fuentes, excluyentes**, y se
-  eligen con un **selector de dos cards** (mismo patrón que Ajustes → Sincronización; badge
-  Activo/Inactivo en cada una, y debajo solo la sección de la que elijas):
+- **⚙ Settings (proveedor):** arriba, una **línea de estado honesta**: "Chat ready · <proveedor>" solo
+  si el proveedor activo puede responder; si no (p. ej. recién instalada: Anthropic elegido **sin
+  clave**), **"Chat not set up"** y ninguna opción marcada como activa. Debajo, **tres cards al mismo
+  nivel** — **NoteFlow AI** (etiqueta "€5.99/month"; "In your plan" si lo tienes; "Add to your plan" si
+  pagas Cloud), **Your API key** ("Free" — pagas a tu proveedor) y **Local model** ("Free", Ollama) —;
+  la del proveedor en uso lleva el badge **Active** (solo si de verdad funciona). Al pulsar una, debajo
+  solo su sección. En el panel del Cerebro, estrecho, las cards se apilan.
   - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow),
     modelos curados (el recomendado marcado "(Recommended)"; los que gastan la asignación al menos el
     doble de rápido, con sufijo "(≈N× quota)" — hoy ≈2× y ≈29×; el campo "Model" es de **solo
@@ -1106,37 +1110,43 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     cada petición, así que los modelos caros la gastan antes). La lista de
     modelos la sirve el servidor: los modelos nuevos **aparecen solos** (sin actualizar la app; "Load"
     fuerza el refresco), se recuerda entre arranques y offline, y tu modelo elegido no cambia. Botón "Use NoteFlow
-    AI" para activarlo (o check "Active" si ya lo es). Sin sesión o sin suscripción, la card sigue
-    visible pero en vez del botón muestra, sin sesión, "Already subscribed?" + botón **"Sign in"** (lleva a
-    Ajustes → Suscripción) y, con sesión sin suscripción, el aviso "requires subscription" (badge "Paid")
-    **+ el bloque de planes con precios**: NoteFlow AI y el Bundle (con badge "Best value"; si ya
-    pagas Cloud, en modo **"Upgrade"** = cambio de plan prorrateado, ver Ajustes → Suscripción). **La card entera es clickable**: con sesión y checkout configurado abre la
-    pasarela de pago de ESE plan (antes había un botón "Subscribe" dentro; ahora la card muestra un CTA
-    "Subscribe"); sin sesión, clicar la card lleva a Ajustes → Suscripción (CTA "Go to Subscription" con flecha);
-    con sesión pero sin checkout en el build muestra "coming soon" y queda inerte. Bajo los planes,
-    una lista **"What you get"** con las ventajas de NoteFlow AI frente a la vía gratis (sin Ollama ni
-    API keys, más barato con los modelos más eficientes, con tools e imágenes, asignación mensual con consumo visible, catálogo
-    siempre al día). Esto vale tanto en
-    Ajustes → IA (que ya no lleva título "Assistant (LLM)": empieza directamente con la línea "Pick one
-    source…" y las dos cards) como en el **panel de IA del Cerebro** (antes solo en Ajustes).
+    AI" para activarlo (o check "Active" si ya lo es). **Sin el plan** (sin sesión o sin suscripción),
+    elegir la card abre el **detalle del plan** en lugar de las cards (enlace "← AI options"): a la
+    izquierda **"What's included"** (sin Ollama ni API keys, modelos eficientes con tools e imágenes,
+    asignación mensual con consumo visible, catálogo siempre al día, y "si cancelas, vuelves a tu
+    propia clave o a un modelo local"); a la derecha **una caja de plan** con el precio mensual y
+    debajo el anual con su ahorro ("or €49.99/year · save 30%"; mensual o anual se elige en la página
+    de pago, y la caja lo dice), y la acción: **sin
+    sesión, el inicio de sesión ahí mismo** (correo → código; también para quien ya paga); con sesión,
+    **"Continue to payment"** (abre el checkout de Lemon Squeezy en el navegador). Nota "VAT included ·
+    you pay on a secure page (Lemon Squeezy) · cancel anytime". El **Bundle** es solo una línea al pie
+    ("Want your notes synced too? NoteFlow Bundle brings AI and Cloud together for €7.99/month" →
+    "Choose the Bundle"). **Si ya pagas Cloud**, la caja es la **mejora a Bundle** (no te vende la IA
+    suelta: Cloud + AI sueltas costarían más que el Bundle): "Your subscription becomes the Bundle…", el
+    diferencial **"+€4.00/month"** (y "+€40.00/year si pagas anual"), el total y "Switch to Bundle" →
+    confirmación con el prorrateo (ver Ajustes → Cuenta). Con el plan sin verificar, "Couldn't verify
+    your plan yet — Retry" en vez de cualquier oferta. Los precios salen en el formato del idioma
+    ("€5.99" en inglés, "5,99 €" en español). Vale igual en Ajustes → IA y en el **panel de IA del
+    Cerebro**.
     **Se activa solo lo que tienes pagado** (NoteFlow AI con el plan AI, NoteFlow Cloud con el plan
     Cloud, ambos con el Bundle) en dos momentos: **al iniciar sesión** (primer login, dispositivo nuevo
-    o vuelta a tu cuenta) y **al suscribirte con la sesión ya abierta** (Subscribe → pagar → Refresh en
-    Settings → Subscription). Una sesión que se **restaura al arrancar la app no cuenta como login**: si
+    o vuelta a tu cuenta) y **al suscribirte con la sesión ya abierta** (pagar → Refresh en
+    Ajustes → Cuenta). Una sesión que se **restaura al arrancar la app no cuenta como login**: si
     apagaste Cloud o elegiste tu propio proveedor, no se te vuelve a cambiar en cada arranque. Al revés,
     cuando la app **confirma** con el servidor que una suscripción ya no está activa (p. ej. Refresh en
-    Settings → Subscription, o el primer chequeo tras abrir la app si caducó con ella cerrada), **apaga
+    Ajustes → Cuenta, o el primer chequeo tras abrir la app si caducó con ella cerrada), **apaga
     sola** lo que pagaba, igual que al cerrar sesión: NoteFlow Cloud se desactiva (los cambios pendientes
     de subir no se pierden y GitHub Sync se reanuda si lo tenías conectado) y el asistente vuelve a tu
     último proveedor propio. Si no se pudo verificar el plan (sin red), no se apaga nada. Volver a
     suscribirte con la app abierta lo reactiva solo.
-  - **Tu proveedor / IA local (BYO; gratis y privado):** elige proveedor (Anthropic/Claude, OpenAI,
-    DeepSeek, MiniMax, Moonshot, OpenRouter, Ollama local, o Custom OpenAI-compatible), pega tu **API
-    key**, ajusta Base URL y modelo, y prueba la conexión. **Cada proveedor recuerda su propia
-    key/modelo** — cambiar de proveedor no las mezcla. Las claves se guardan cifradas y nunca salen de
-    tu máquina. Si el activo es NoteFlow AI, esta sección solo muestra el desplegable + un botón
-    **"Use this provider"**: los campos (key, Base URL, modelo) aparecen al activarlo, porque siempre
-    editan la config del **proveedor activo**.
+  - **Your API key / Local model (gratis):** "Your API key" lista los proveedores con clave
+    (Anthropic/Claude, OpenAI, DeepSeek, MiniMax, Moonshot, OpenRouter, OpenCode Zen) y "Local model"
+    los que no la necesitan (**Ollama** preseleccionado, o Custom OpenAI-compatible). Eliges proveedor,
+    pegas tu **API key** si hace falta, ajustas Base URL y modelo, y pruebas la conexión. **Cada
+    proveedor recuerda su propia key/modelo** — cambiar de proveedor no las mezcla. Las claves se
+    guardan cifradas y nunca salen de tu máquina. Si el proveedor elegido no es el activo, la sección
+    solo muestra el desplegable + un botón **"Use this provider"**: los campos (key, Base URL, modelo)
+    aparecen al activarlo, porque siempre editan la config del **proveedor activo**.
 
 > **Dos interruptores independientes:** la **IA local** (embeddings, se activa en el cerebro) da
 > contexto RAG y conexiones de contenido; el **proveedor LLM** (Ajustes) da el chat. El chat funciona
@@ -1508,13 +1518,18 @@ teclas salen como en la plataforma (`⌘`/`⌃` en macOS).
 
 ## Settings → Sync: elegir backend
 
-La página **Sync** empieza con un **selector de dos tarjetas** — **NoteFlow Cloud** y **GitHub
-Sync** — porque son **mutuamente excluyentes**: solo un backend puede estar activo a la vez. Cada
-tarjeta lleva un **badge de estado** (Active / Paused / Inactive / Not connected) y, al pulsarla,
-debajo se muestra **solo el panel de ese backend**. Al abrir la página viene preseleccionado el
-backend que esté realmente en uso (Cloud activado → Cloud; si no, GitHub conectado → GitHub; si
-ninguno → Cloud); a partir de ahí manda la elección del usuario. Con Cloud activado, GitHub queda
-**en pausa** (badge amarillo + aviso ámbar en su panel; la config de GitHub se conserva).
+**NoteFlow Cloud** y **GitHub Sync** son **mutuamente excluyentes**: solo un backend puede estar
+activo a la vez.
+- **Si aún no sincronizas nada**, la página es una **elección**: arriba "Only on this device — your
+  notes are not syncing yet", y las dos opciones como **dos tarjetas iguales**, ninguna preseleccionada:
+  para quién es cada una, tres ventajas, una etiqueta de precio discreta (Cloud "€3.99/month", GitHub
+  "Free") y su botón ("See NoteFlow Cloud" / "Connect with GitHub"). Debajo, "Already have NoteFlow
+  Cloud? Sign in". Al elegir, se abre ese panel con un enlace "← Sync options" para volver.
+- **Si ya usas uno**, la página empieza con el **selector de dos tarjetas** con **badge de estado**
+  (Active / Paused / Inactive / Not connected), con el que está en uso preseleccionado; al pulsar
+  otra, debajo se muestra **solo el panel de ese backend**. A partir de ahí manda la elección del
+  usuario. Con Cloud activado, GitHub queda **en pausa** (badge amarillo + aviso ámbar en su panel; la
+  config de GitHub se conserva).
 
 **Command line (CLI) — "Connect the CLI too".** Debajo de todo, si el backend seleccionado está
 conectado en la app (Cloud activo con sesión, o GitHub conectado), una sección da al CLI `noteflow` su
@@ -1581,8 +1596,13 @@ Los dos modos (se eligen al configurar, con dos cards):
   notas. Perderlos ambos = notas irrecuperables (aviso explícito).
 
 Flujo del panel según estado:
-- **Sin sesión:** "Already subscribed?" + botón **"Sign in"** (lleva a Ajustes → Suscripción) — la cuenta
-  es solo para usuarios de pago, así que no se presenta como "inicia sesión para sincronizar".
+- **Sin sesión:** el **detalle del plan**: "What's included" (cifrado, sync automático, Estándar o
+  Privado E2EE, sin repo; y "si cancelas, tus notas siguen en tu equipo") y una **caja de plan** con
+  el precio mensual y debajo el anual ("or €39.99/year · save 16%"; el periodo se elige en la página
+  de pago), y el **inicio de sesión ahí mismo**
+  (correo → código), que sirve igual para suscribirte que para entrar si ya pagas. El Bundle va como
+  una línea al pie ("Also interested in AI? NoteFlow Bundle brings Cloud and AI together for
+  €7.99/month" → "Choose the Bundle").
 - **Sin claves (`no-keys`):** con la entitlement `cloud`, elección de modo con dos cards (Standard
   preseleccionada); sin ella, en su lugar sale el bloque de planes (ver "Gating por suscripción").
   Standard = un click ("Enable") y directo a desbloqueado. Private = crear **passphrase**
@@ -1612,21 +1632,17 @@ Flujo del panel según estado:
   ningún secreto).
 - **Gating por suscripción:** exigen la entitlement `cloud` **crear las claves** (la elección de
   modo del estado `no-keys` — configurar una nube que no podrías activar no lleva a ninguna parte)
-  y el botón **Enable sync**. En ambos casos, en su lugar: mensaje "requires subscription" + el
-  **mismo bloque de planes** que Ajustes → Suscripción — NoteFlow Cloud y el Bundle con badge "Best
-  value" (si ya pagas AI, en modo **"Upgrade"**: cambio de plan prorrateado con confirmación en la
-  app) —, cada card clickable, y debajo la lista
-  **"What you get"** de Cloud (cifrado en tránsito y en reposo, sync automático, elegir Estándar o
-  Privado E2EE, sin repo de GitHub). El panel Cloud ya no tiene párrafo de introducción propio (lo
-  describe la card del selector). **Unlock, Sync now,
+  y el botón **Enable sync**. En ambos casos, en su lugar, el **mismo detalle del plan** que sin
+  sesión, con **"Continue to payment"** en la caja (abre el checkout de Lemon Squeezy en el navegador;
+  el plan se activa solo tras pagar); delante de Enable, además, "requires subscription". Si ya pagas
+  AI, la caja es la **mejora a Bundle** ("+€2.00/month", "Switch to Bundle" → confirmación con el
+  prorrateo), nunca Cloud suelto. El panel Cloud no tiene párrafo de introducción propio. **Unlock, Sync now,
   Disable y Lock no se bloquean por suscripción** (la nube solo rechaza escrituras), pero cuando la app
   confirma que la suscripción caducó **desactiva Cloud sola** (ver § "Panel de IA", "Se activa solo
   lo que tienes pagado"): tus notas siguen en local y los cambios sin subir se quedan pendientes para
   cuando vuelvas a suscribirte. Mientras Cloud siga activo y la nube rechace las subidas por falta de
   suscripción, "Sync now" baja lo que haya pero **muestra el error de suscripción** en vez de dar todo
   por bueno.
-- **Sin sesión**, el panel ya no se limita a pedirte que inicies sesión: muestra también esos
-  precios, y clicar cualquier card lleva a Ajustes → Suscripción para crear la cuenta sin salir de Ajustes.
 - Antes de activar con GitHub Sync conectado, aviso ámbar: "GitHub Sync quedará en pausa" (solo
   cuando activar Cloud está realmente al alcance, es decir con la entitlement `cloud`). Este aviso es
   del **Enable manual**: la **auto-activación** (al iniciar sesión o al suscribirte con el plan Cloud)
@@ -1697,15 +1713,30 @@ Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
 
 ---
 
-## Cuenta NoteFlow (Settings → Subscription)
+## Cuenta NoteFlow (Settings → Account)
 
-El apartado de Ajustes se llama **"Subscription"/"Suscripción"** (id interno `'account'`) para que
-nadie confunda iniciar sesión con activar la sincronización: el texto sin sesión empieza por "For paid
-users:". Cuenta opcional para las suscripciones (**NoteFlow AI** — €5.99/mes · €49.99/año; **NoteFlow
-Cloud**, con panel en Settings → Sync — €3.99/mes · €39.99/año; **NoteFlow Bundle**, AI + Cloud
-juntos — €7.99/mes · €79.99/año). Los tres son comprables: las tres URLs de checkout están
-pobladas en la build (precios en `.agents/context/monetization.md` § visión, cifras de display en
-`src/lib/subscriptionPlans.ts`). Todo lo gratuito sigue funcionando sin cuenta.
+El apartado de Ajustes se llama **"Account"/"Cuenta"** (id interno `'account'`; hasta 2026-11 se llamaba
+"Subscription"/"Suscripción"). Empieza por **tu plan**, no por precios:
+- **"Your plan: Free"** con badge **Current plan** y lo que incluye gratis: notas ilimitadas en tu
+  equipo, sync con GitHub, el Cerebro y notas relacionadas con IA local, chat con tu propia clave u
+  Ollama; sin sesión, además, **"You don't need an account for any of this."**
+- Debajo, **"Optional upgrades"** como **filas compactas** (no tarjetas grandes): NoteFlow Cloud
+  (€3.99/month), NoteFlow AI (€5.99/month) y NoteFlow Bundle (€7.99/month, "saves €1.99/month vs.
+  buying them separately"), cada una con su precio pequeño y **"View"**, que lleva a su detalle: Cloud
+  y Bundle → Ajustes → Sync con el detalle de Cloud abierto (el Bundle ya elegido); AI → Ajustes → IA
+  con el detalle de NoteFlow AI. Cifras de `src/lib/subscriptionPlans.ts` (`.agents/context/monetization.md`
+  § visión), en el formato del idioma. Todo lo gratuito sigue funcionando sin cuenta.
+- **Sin sesión**, al pie: "Already have a subscription?" + el inicio de sesión (el mismo que en los
+  detalles de los planes).
+- **Si ya pagas un plan** (Cloud o AI): "Your plan: NoteFlow Cloud" con badge **Active** y "Manage
+  subscription", y **ninguna tarjeta de precio**. En su lugar, una fila plegada **"Add NoteFlow AI to
+  your plan"** (o Cloud) con chevron; al abrirla: una frase de valor, "Your subscription becomes the
+  Bundle (Cloud + AI): you never pay for two subscriptions", el diferencial (**"+€4.00/month"** desde
+  Cloud, "+€2.00/month" desde AI, y el anual), "€7.99/month in total · you only pay the prorated part
+  of the current period" y **"Switch to Bundle"** (la confirmación de abajo) o **"Not now"** (la
+  pliega). Si tu suscripción no se puede cambiar desde la app (p. ej. una regalada), la fila ofrece el
+  otro producto como suscripción aparte.
+- **Con los dos** (Bundle): "Your plan: NoteFlow Bundle" y nada que vender.
 
 - **Sign-in sin contraseña:** email → "Send code" → código de acceso por email (8 dígitos) → "Verify &
   sign in" (misma UX de código que el Device Flow de GitHub). "Use a different email" vuelve atrás.
@@ -1716,9 +1747,9 @@ pobladas en la build (precios en `.agents/context/monetization.md` § visión, c
   60 s tras cada envío) para pedir otro código sin volver al paso del email — al llegar el nuevo,
   línea "New code sent — check your inbox.". Los mensajes de error vienen **traducidos** (el
   proceso main manda un código de error, no texto en inglés).
-- **Con sesión:** muestra el email, badges de plan ("NoteFlow AI" / "NoteFlow Cloud" con estado
-  Active/—), **"Manage subscription"** (si aplica, ver abajo), la sección de **planes**, botón
-  "Refresh" (relee las suscripciones), "Sign out" y, separado al final, **"Delete account"**.
+- **Con sesión:** muestra el email, la tarjeta "Your plan" (con **"Manage subscription"** si aplica,
+  ver abajo), las mejoras que tocan, botón "Refresh" (relee las suscripciones), "Sign out" y, separado
+  al final, **"Delete account"**.
 - **"Manage subscription" / "Gestionar suscripción":** solo si la cuenta tiene (o tuvo) una
   suscripción pagada con Lemon Squeezy — en cualquier estado (activa, cancelada, con pago fallido o
   expirada: sigue habiendo facturas); las suscripciones regaladas a mano (comps) no lo ven, y tampoco
@@ -1729,9 +1760,9 @@ pobladas en la build (precios en `.agents/context/monetization.md` § visión, c
   avisa en una línea: "…sign in there with the email you used to subscribe." Es la única vía en la app
   para cancelar o cambiar de plan (antes solo por los correos de LS).
 - **Plan aún sin comprobar:** si la app no ha podido consultar tu plan todavía (arranque sin red,
-  servidor caído) y no tiene uno guardado de la última vez, los badges dicen **"Couldn't check"** y
-  en los gates de IA y Cloud, en vez de las cards de Subscribe o del "requiere suscripción", aparece
-  **"Couldn't verify your plan yet — Retry"** (nunca te ofrece pagar algo que quizá ya pagas). La
+  servidor caído) y no tiene uno guardado de la última vez, la tarjeta "Your plan" y los detalles de
+  IA y Cloud muestran **"Couldn't verify your plan yet — Retry"** en vez de cualquier precio, mejora o
+  "requiere suscripción" (nunca te ofrece pagar algo que quizá ya pagas). La
   app reintenta sola (cada vez más espaciado, al volver de suspensión y al recuperar la red);
   mientras, NoteFlow AI se deja usar (el servidor decide). La última respuesta buena se recuerda,
   así que tras reiniciar el plan se ve al momento.
@@ -1750,27 +1781,15 @@ pobladas en la build (precios en `.agents/context/monetization.md` § visión, c
   salen bajo el botón y la sesión sigue como estaba: sesión no válida ("Sign out, sign in again and
   retry"), suscripción que no se pudo cancelar ("…so nothing was deleted"), o error genérico/de red
   (reintentar). Mismo comportamiento que la app de Android.
-- **Sección de planes:** cards en orden **Bundle → AI → Cloud**, cada una con nombre y precio
-  ("€7.99/month · €79.99/year" para Bundle — con subtítulo "AI + Cloud" y badge **"Best value"** —,
-  €5.99/€49.99 para AI, €3.99/€39.99 para Cloud; cifras de `src/lib/subscriptionPlans.ts`). Un plan
-  solo aparece mientras falte su entitlement (AI si falta `ai`, Cloud si falta `cloud`, Bundle solo
-  si faltan **ambas** — evita pagar dos veces lo mismo); con todo contratado la sección desaparece.
-  **Cada card es clickable** (CTA "Subscribe" con estrella) → abre el checkout de Lemon Squeezy en el
-  navegador; si una build no trae URL para ese producto, la card indica "Coming soon" y queda inerte.
-  **Pasarse al Bundle teniendo ya AI o Cloud:** si pagas **una** de las dos con una suscripción de
-  Lemon Squeezy, la card del Bundle aparece en modo **mejora** (subtítulo "Replaces your current
-  plan", CTA **"Upgrade"**): no abre checkout, sino una **confirmación dentro de la app** ("Upgrade to
-  NoteFlow Bundle?") que explica que es un **cambio de plan de tu suscripción actual, no una
-  segunda**, y que se **prorratea** (se abona lo no usado del periodo actual y se cobra ya solo la
+- **Pasarse al Bundle teniendo ya AI o Cloud:** si pagas **una** de las dos con una suscripción de
+  Lemon Squeezy, "Switch to Bundle" no abre checkout, sino una **confirmación dentro de la app**
+  ("Upgrade to NoteFlow Bundle?") que explica que es un **cambio de plan de tu suscripción actual, no
+  una segunda**, y que se **prorratea** (se abona lo no usado del periodo actual y se cobra ya solo la
   diferencia a la tarjeta guardada; desde la próxima renovación, precio del Bundle con el mismo ciclo
   mensual/anual; la fecha de renovación no cambia). "Confirm upgrade" lo aplica y el Bundle se activa
   en unos segundos. No aparece con una comp, con las dos suscripciones sueltas ni con el plan sin
-  verificar. Igual en los gates de IA y de Cloud (allí junto a la card del otro plan).
-  Debajo, un único hint genérico: el checkout se abre en el navegador y el plan se activa solo tras el pago
-  ("Refresh" si no aparece). Tras pagar AI, **el proveedor NoteFlow AI se activa solo** en
-  Settings → AI.
-  Es **el mismo bloque** (`PlanOffers`) que ves en los gates de Ajustes → IA, del panel de IA del
-  Cerebro y de Settings → Sync → NoteFlow Cloud: allí solo cambia qué planes se ofrecen.
+  verificar. Igual en los detalles de IA y de Cloud. Tras pagar AI, **el proveedor NoteFlow AI se activa
+  solo** en Settings → AI.
 - **Builds sin backend configurado** (`cloudConfig.ts` vacío — no es el caso de las builds
   actuales): el panel solo muestra "NoteFlow account services aren't available in this build yet."
 - Privacidad: la sesión (refresh token cifrado con `safeStorage`) vive en el proceso main y nunca

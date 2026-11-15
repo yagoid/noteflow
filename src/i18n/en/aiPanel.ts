@@ -170,14 +170,15 @@ export const aiPanel = {
     hintAnthropic: 'Claude via the official API (BYO key).',
     hintOpenAiCompat: 'OpenAI-compatible endpoint (BYO key).',
     hintLocal: 'Local / no API key required.',
-    paidLabel: 'Paid',
-    noteflowNeedsSubscription: 'Requires a NoteFlow AI subscription — manage your plan in Settings → Subscription.',
-    goToAccount: 'Go to Subscription',
-    // Two-card selector: the assistant runs on EITHER the managed plan OR a provider of
-    // your own (API key / local model). Badges tell which one is actually in use.
-    chooseSourceDesc: 'Pick one source for the assistant: the managed NoteFlow AI plan, or a provider of your own.',
+    // Three-card selector, all at the same level: the assistant runs on the managed plan,
+    // on your own API key, or on a local model. The "Active" badge only marks a source
+    // that can actually answer (llmConfig.configured); otherwise the status says so.
+    chooseSourceDesc: 'Pick how the assistant runs: the managed NoteFlow AI plan, your own API key, or a model on your computer.',
+    statusReady: 'Chat ready · {provider}',
+    statusNotSetUp: 'Chat not set up — pick one of the options below.',
     badgeActive: 'Active',
-    badgeInactive: 'Inactive',
+    // Back link from the NoteFlow AI plan detail to the three cards.
+    backToOptions: 'AI options',
     noteflowCard: {
       subtitle: 'Managed plan — chat with your notes without any API key.',
       useButton: 'Use NoteFlow AI',
@@ -185,11 +186,15 @@ export const aiPanel = {
       // the real cost of each request, so only a percentage is shown ({percent}: 0-100).
       usage: '{percent}% of this month’s AI allowance used',
     },
-    byoCard: {
-      title: 'Your provider / local AI',
-      subtitle: 'OpenAI, Anthropic, OpenRouter… with your own API key, or a local model (Ollama).',
-      useButton: 'Use this provider',
+    keyCard: {
+      title: 'Your API key',
+      subtitle: 'Anthropic, OpenAI, OpenRouter, DeepSeek… — you pay your provider directly.',
     },
+    localCard: {
+      title: 'Local model',
+      subtitle: 'Runs on your computer with Ollama — private, no account.',
+    },
+    useProviderButton: 'Use this provider',
     // Suffix appended to model options that spend the monthly allowance faster than the
     // recommended model ({mult} = rounded relative cost of a typical message, shown from 2;
     // e.g. "gpt-5.6-sol (≈29× quota)").

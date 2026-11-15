@@ -1923,8 +1923,11 @@ estado/efectos. El `CommandPalette` dispara los mismos eventos de siempre
 (`noteflow:open-shortcuts/-startup/-github-sync/check-for-update/-export/-import`) y el TitleBar
 los reinterpreta para abrir la ventana en la sección correcta (export/import siguen abriendo el
 flujo `ExportImportModal` directo). Mismo bus para cualquier superficie **sin navegación propia**
-que necesite llevar a Ajustes: el panel de IA del Cerebro emite `noteflow:open-account` para abrir
-Ajustes → Suscripción (los paneles que ya viven dentro de Ajustes usan su prop `onNavigate`).
+que necesite llevar a Ajustes: `noteflow:open-account` abre Ajustes → Cuenta (hoy sin emisor: el panel
+de IA del Cerebro lo usaba para iniciar sesión, y desde el rediseño de planes el detalle de NoteFlow AI
+lleva el inicio de sesión inline, `SignInInline`). Los paneles que viven dentro de Ajustes navegan con
+`SettingsNavigate` (`section` + un `SettingsIntent` opcional, p. ej. `{ offer: 'cloud' }` para abrir el
+detalle de un plan; ver `monetization.md` § "Bloque de planes").
 
 **Lenguaje visual compartido (`src/components/Settings/ui.tsx`) — úsalo en cualquier panel nuevo.**
 Los 13 paneles repetían a mano el estilo de sus encabezados y botones, y la jerarquía se había
@@ -3015,7 +3018,7 @@ sin ramificar en cada componente. **Si usas una clase nueva de esas paletas en t
 bloque** (o usa un token del tema: `accent-2`/`accent-3`).
 
 Animaciones propias del config: `animate-shake` (nudge horizontal de 0,28 s para un input que acaba
-de rechazar un valor, p. ej. el código de sign-in en Ajustes → Suscripción; úsalo con `motion-safe:`).
+de rechazar un valor, p. ej. el código de sign-in de `SignInInline` (Ajustes → Cuenta y detalle de los planes); úsalo con `motion-safe:`).
 
 ### Colores del editor (overrides sobre el tema)
 

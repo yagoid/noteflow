@@ -1,42 +1,51 @@
-import { useState } from 'react'
-import { AlertCircle, Check, HelpCircle, Loader, RefreshCw, Sparkles } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { AlertCircle, Check, ExternalLink, HelpCircle, Loader, RefreshCw, Sparkles } from 'lucide-react'
 import type { AccountStatus } from '../../types'
 import {
   SUBSCRIPTION_PRICES,
+  bundleUpgradeDifference,
+  hasKnownEntitlement,
   isBundleUpgradeOffered,
   isPlanOffered,
-  isPlanUnknown,
+  productOffer,
+  yearlySavingsPercent,
   type SubscriptionProduct,
 } from '../../lib/subscriptionPlans'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import { PlanCardBackdrop } from './PlanCardBackdrop'
+import { SignInInline } from './SignInInline'
+import { PLAN_NAMES, PRIMARY_BUTTON, isCheckoutConfigured, usePrice } from './planOffersShared'
 
-// The subscription offer block, shared by every gate that can end in a purchase:
-// Settings → Account, Settings → AI and the brain panel (LlmConfigView) and
-// Settings → Sync → NoteFlow Cloud. One component so the price, the visibility
-// rules and the copy can never drift between those four surfaces.
+// How the paid plans are offered, shared by every surface that can end in a
+// purchase — Settings → Account, Settings → Sync → NoteFlow Cloud, Settings → AI and
+// the brain's AI panel (LlmConfigView) — so prices, visibility rules and copy can't
+// drift between them. Product principle: value first, ONE price after it, the free
+// routes at the same level, and never a price in front of someone who already pays
+// unless they asked (see .agents/context/monetization.md § "Bloque de planes").
+// Visibility rules: src/lib/subscriptionPlans.ts (productOffer & co.); shared
+// non-component helpers (names, price formatting, tags): ./planOffersShared.ts.
 
-const PLAN_NAMES: Record<SubscriptionProduct, string> = {
-  ai: 'NoteFlow AI',
-  cloud: 'NoteFlow Cloud',
-  bundle: 'NoteFlow Bundle',
-}
+const otherProduct = (product: 'ai' | 'cloud'): 'ai' | 'cloud' => (product === 'ai' ? 'cloud' : 'ai')
 
-// Does this build ship a checkout URL for the product? (Set in main; without one
-// the card can only say "coming soon".)
-function isCheckoutConfigured(account: AccountStatus, product: SubscriptionProduct): boolean {
-  if (product === 'ai') return account.aiCheckoutConfigured
-  if (product === 'cloud') return account.cloudCheckoutConfigured
-  return account.bundleCheckoutConfigured
+// Discreet inline link (Bundle line…).
+const LINK_BUTTON = 'underline underline-offset-2 text-text-muted hover:text-text transition-colors'
+
+/** The tag itself (also used for "Free"). */
+export function PlanTag({ children }: { children: ReactNode }) {
+  return (
+    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md border border-solid border-border text-text-muted whitespace-nowrap normal-case">
+      {children}
+    </span>
+  )
 }
 
 /**
  * Neutral state for a signed-in account whose plan was never fetched (offline
- * boot, keychain locked…): instead of Subscribe cards or a "not subscribed"
- * gate, say we couldn't check yet and offer a Retry. Main also retries on its
- * own (backoff, resume, back online) and the status broadcast replaces this
- * block as soon as the plan is known.
+ * boot, keychain locked…): instead of an offer or a "not subscribed" gate, say we
+ * couldn't check yet and offer a Retry. Main also retries on its own (backoff,
+ * resume, back online) and the status broadcast replaces this block as soon as the
+ * plan is known.
  */
 export function PlanUnknownNotice() {
   const t = useT()
@@ -69,290 +78,366 @@ export function PlanUnknownNotice() {
   )
 }
 
-export function PlanOffers({
-  products,
+/**
+ * Adding the missing product to a single AI / Cloud subscription = switching it to
+ * the Bundle: a PLAN CHANGE of that subscription (prorated, via
+ * accountUpgradeToBundle), never a second checkout, which would bill the owned
+ * product twice. Shows the value, the difference (the current billing period is not
+ * known to the client, so both the monthly and the yearly one) and then the
+ * in-app confirmation: there is no checkout page to review the charge.
+ */
+export function BundleUpgradeOffer({
   account,
-  busy = false,
-  showSignInHint = true,
-  showUnknownNotice = true,
-  benefits,
-  onSubscribe,
-  onGoToAccount,
+  current,
+  onDismiss,
 }: {
-  /** Plans to advertise, in the order they should appear (e.g. ['ai', 'bundle']). */
-  products: SubscriptionProduct[]
   account: AccountStatus
-  busy?: boolean
-  /**
-   * "Sign in … to subscribe" line shown under the cards without a session. Turn it
-   * off in gates that already say it in their own words right above the block
-   * (the AI and Cloud ones do). The cards route to Account on their own either way.
-   */
-  showSignInHint?: boolean
-  /**
-   * Signed in with the plan still UNKNOWN, the cards are never shown; by default
-   * the PlanUnknownNotice takes their place. Turn it off where the surface already
-   * reports the unknown state itself (Settings → Account's plan badges).
-   */
-  showUnknownNotice?: boolean
-  /**
-   * "What you get" list under the cards: what the managed plan adds over the free
-   * self-managed route (own provider / GitHub Sync). Set it on the AI and Cloud
-   * gates; omit it in Settings → Subscription, which compares plans, not routes.
-   * Living inside this block, it shows exactly when the cards do.
-   */
-  benefits?: 'ai' | 'cloud'
-  /**
-   * Signed in, the whole card is the checkout button for its product. Omit where the
-   * surface cannot open a checkout — a signed-in card then just shows "coming soon".
-   */
-  onSubscribe?: (product: SubscriptionProduct) => void
-  /** Signed out, the whole card routes here (Settings → Account) to sign in first. */
-  onGoToAccount?: () => void
+  /** The single product the account already pays for. */
+  current: 'ai' | 'cloud'
+  /** "Not now" (folds the offer back). Omit to hide the button. */
+  onDismiss?: () => void
 }) {
   const t = useT()
-  // Bundle-as-upgrade flow (see isBundleUpgradeOffered): there is no checkout
-  // page to review the charge, so the card first opens an in-app confirmation.
-  const [confirmingUpgrade, setConfirmingUpgrade] = useState(false)
-  const [upgradeBusy, setUpgradeBusy] = useState(false)
-  const [upgradeError, setUpgradeError] = useState<string | null>(null)
-  const [upgradeDone, setUpgradeDone] = useState(false)
+  const price = usePrice()
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
 
-  // No Supabase project in this build: nothing is purchasable, so advertising
-  // prices would be a dead end.
-  if (!account.configured) return null
+  if (done) {
+    return (
+      <p role="status" className="flex items-start gap-1.5 text-[11px] font-mono text-text-muted leading-relaxed normal-case">
+        <Check size={12} className="shrink-0 mt-[1px] text-accent" />
+        <span>{t.settings.account.upgradeRequested}</span>
+      </p>
+    )
+  }
+  // Defensive: only ever reachable as a plan change of an upgradable subscription.
+  if (!isBundleUpgradeOffered(account)) return null
 
-  // Plan never fetched: offering a plan the user may already pay for is a
-  // double-billing trap — show the neutral notice instead (or nothing).
-  if (isPlanUnknown(account)) return showUnknownNotice ? <PlanUnknownNotice /> : null
-
-  // With exactly one of AI / Cloud on a Lemon Squeezy subscription, the Bundle is
-  // offered as a PLAN CHANGE of that subscription (prorated) — never as a second
-  // checkout, which would bill the owned product twice.
-  const upgradeOffered = isBundleUpgradeOffered(account)
-  const visible = products.filter(
-    (product) => isPlanOffered(account, product) || (product === 'bundle' && upgradeOffered)
-  )
-  if (visible.length === 0) return null
-  const hasCheckoutCard = visible.some((product) => !(product === 'bundle' && upgradeOffered))
-  const currentPlanName = account.entitlements.ai ? PLAN_NAMES.ai : PLAN_NAMES.cloud
+  const added = otherProduct(current)
 
   async function confirmUpgrade() {
-    setUpgradeBusy(true)
-    setUpgradeError(null)
+    setBusy(true)
+    setError(null)
     try {
       const result = await window.noteflow.accountUpgradeToBundle()
       if (result.ok) {
-        setUpgradeDone(true)
-        setConfirmingUpgrade(false)
+        setDone(true)
+        setConfirming(false)
       } else {
-        setUpgradeError(
-          (result.errorCode && t.settings.account.errors[result.errorCode]) || t.settings.account.couldNotUpgrade
-        )
+        setError((result.errorCode && t.settings.account.errors[result.errorCode]) || t.settings.account.couldNotUpgrade)
       }
     } catch {
       // The IPC invoke itself rejected (handler threw / bridge error).
-      setUpgradeError(t.settings.account.couldNotUpgrade)
+      setError(t.settings.account.couldNotUpgrade)
     } finally {
-      setUpgradeBusy(false)
+      setBusy(false)
     }
   }
 
-  // `normal-case` everywhere: this block also renders inside the brain's AI panel,
-  // whose micro-label style would otherwise uppercase the copy.
-  return (
-    <div className="w-full space-y-3">
-      <div className="flex flex-wrap gap-2.5">
-        {visible.map((product) => {
-          const isBundle = product === 'bundle'
-          // Upgrade card: no checkout URL involved (the plan change runs in main →
-          // Edge Function), so it ignores `configured` / `onSubscribe`.
-          const isUpgrade = isBundle && upgradeOffered
-          const configured = isUpgrade || isCheckoutConfigured(account, product)
-          // The card itself is the call to action. Signed in with a checkout URL it
-          // opens the payment gateway for THIS product (same accountOpenCheckout the
-          // Subscribe button used to fire); signed out it routes to Settings →
-          // Account to sign in first. Signed in but without a checkout URL in this
-          // build ("coming soon") there is nothing to open, so the card stays inert.
-          // The upgrade card opens the in-app confirmation instead.
-          const canUpgrade = isUpgrade && !upgradeDone
-          const canSubscribe = !isUpgrade && account.signedIn && configured && !!onSubscribe
-          const canNavigate = !account.signedIn && !!onGoToAccount
-          const onCardClick = canUpgrade
-            ? () => {
-                setUpgradeError(null)
-                setConfirmingUpgrade(true)
-              }
-            : canSubscribe
-              ? () => onSubscribe!(product)
-              : canNavigate
-                ? onGoToAccount
-                : undefined
-          const comingSoon = account.signedIn && !configured
-
-          const body = (
-            <>
-              <PlanCardBackdrop />
-              <div className="relative flex h-full flex-col gap-0.5">
-                {isBundle && (
-                  <span className="self-start mb-1.5 px-2 py-0.5 rounded-full border border-accent/50 text-accent text-[9px] font-mono font-medium uppercase tracking-[0.14em]">
-                    {t.settings.account.planBestValue}
-                  </span>
-                )}
-                <span className="text-sm font-mono font-semibold text-text normal-case">{PLAN_NAMES[product]}</span>
-                {isBundle && (
-                  <span className="text-[11px] font-mono text-text-muted/70 normal-case">
-                    {t.settings.account.planBundleSubtitle}
-                  </span>
-                )}
-                {isUpgrade && (
-                  <span className="text-[11px] font-mono text-text-muted/70 normal-case">
-                    {t.settings.account.planUpgradeNote}
-                  </span>
-                )}
-                <div className="mt-2 flex items-baseline gap-1">
-                  <span className="text-2xl font-mono font-semibold text-text tracking-tight leading-none normal-case">
-                    {SUBSCRIPTION_PRICES[product].monthly}
-                  </span>
-                  <span className="text-[11px] font-mono text-text-muted normal-case">
-                    {t.settings.account.planPerMonth}
-                  </span>
-                </div>
-                <span className="text-[11px] font-mono text-text-muted/70 normal-case">
-                  {SUBSCRIPTION_PRICES[product].yearly}
-                  {t.settings.account.planPerYear}
-                </span>
-                <div className="mt-auto pt-3">
-                  {canUpgrade ? (
-                    <span className="inline-flex items-center gap-1.5 text-xs font-mono text-accent normal-case">
-                      <Sparkles size={11} />
-                      {t.settings.account.upgrade}
-                    </span>
-                  ) : canSubscribe ? (
-                    <span className="inline-flex items-center gap-1.5 text-xs font-mono text-accent normal-case">
-                      <Sparkles size={11} />
-                      {t.settings.account.subscribe}
-                    </span>
-                  ) : comingSoon ? (
-                    <span className="text-[11px] font-mono text-text-muted/60 normal-case">
-                      {t.settings.account.comingSoon}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-            </>
-          )
-
-          // Same box in both cases; only clickable cards become a <button> (focus +
-          // keyboard). A button can't nest a button, which is why the CTA above is a
-          // plain <span>, not the old inner Subscribe button.
-          // `border-solid` is explicit on purpose: the global `button { border: none }`
-          // reset (index.css) zeroes border-style, so the clickable <button> cards would
-          // otherwise show no border at all — neither the base one nor the hover accent.
-          const box = 'relative flex-1 min-w-[150px] overflow-hidden rounded-lg border border-solid border-border bg-surface-0 px-3.5 py-3 text-left'
-          return onCardClick ? (
-            <button
-              key={product}
-              type="button"
-              onClick={onCardClick}
-              disabled={(canSubscribe && busy) || (canUpgrade && upgradeBusy)}
-              className={`${box} block transition-colors hover:border-accent focus-visible:outline-none focus-visible:border-accent disabled:opacity-60 disabled:cursor-not-allowed`}
-            >
-              {body}
-            </button>
-          ) : (
-            <div key={product} className={box}>
-              {body}
-            </div>
-          )
-        })}
+  // Confirmation: the plan change charges the card on file right away with no
+  // checkout page in between, so the proration is spelled out here and nothing
+  // happens until "Confirm upgrade".
+  if (confirming) {
+    return (
+      <div className="space-y-2 normal-case">
+        <p className="text-xs font-mono font-semibold text-text">{t.settings.account.upgradeConfirmTitle}</p>
+        <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+          {tf(t.settings.account.upgradeConfirmBody, { plan: PLAN_NAMES[current] })}
+        </p>
+        <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+          {tf(t.settings.account.upgradeProration, {
+            monthly: price(SUBSCRIPTION_PRICES.bundle.monthly),
+            yearly: price(SUBSCRIPTION_PRICES.bundle.yearly),
+          })}
+        </p>
+        {error && (
+          <p role="alert" className="flex items-start gap-1.5 text-[11px] font-mono text-red leading-relaxed">
+            <AlertCircle size={12} className="shrink-0 mt-[1px]" />
+            <span>{error}</span>
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button type="button" onClick={confirmUpgrade} disabled={busy} className={PRIMARY_BUTTON}>
+            {busy ? <Loader size={11} className="animate-spin" /> : <Sparkles size={11} />}
+            {t.settings.account.upgradeConfirm}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirming(false)
+              setError(null)
+            }}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-lg text-xs font-mono text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-40"
+          >
+            {t.common.cancel}
+          </button>
+        </div>
       </div>
+    )
+  }
 
-      {/* Upgrade confirmation: the plan change charges the card on file right
-          away with no checkout page in between, so the proration is spelled out
-          here and nothing happens until "Confirm upgrade". */}
-      {upgradeOffered && confirmingUpgrade && !upgradeDone && (
-        <div className="space-y-2 rounded-lg border border-solid border-accent/40 bg-surface-0 px-3.5 py-3 normal-case">
-          <p className="text-xs font-mono font-semibold text-text">{t.settings.account.upgradeConfirmTitle}</p>
-          <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            {tf(t.settings.account.upgradeConfirmBody, { plan: currentPlanName })}
-          </p>
-          <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            {tf(t.settings.account.upgradeProration, {
-              monthly: SUBSCRIPTION_PRICES.bundle.monthly,
-              yearly: SUBSCRIPTION_PRICES.bundle.yearly,
-            })}
-          </p>
-          {upgradeError && (
-            <p role="alert" className="flex items-start gap-1.5 text-[11px] font-mono text-red leading-relaxed">
-              <AlertCircle size={12} className="shrink-0 mt-[1px]" />
-              <span>{upgradeError}</span>
+  return (
+    <div className="space-y-2 normal-case">
+      <p className="text-[11px] font-mono text-text leading-relaxed">{t.settings.plans.addValue[added]}</p>
+      <p className="text-[11px] font-mono text-text-muted leading-relaxed">{t.settings.plans.becomesBundle}</p>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 pt-0.5">
+        <span className="text-lg font-mono font-semibold text-text tracking-tight leading-none">
+          {tf(t.settings.plans.upgradeDifference, { price: price(bundleUpgradeDifference(current, 'monthly')) })}
+        </span>
+        <span className="text-[11px] font-mono text-text-muted/70">
+          {tf(t.settings.plans.upgradeDifferenceYearly, { price: price(bundleUpgradeDifference(current, 'yearly')) })}
+        </span>
+      </div>
+      <p className="text-[11px] font-mono text-text-muted/70 leading-relaxed">
+        {tf(t.settings.plans.upgradeTotal, {
+          monthly: price(SUBSCRIPTION_PRICES.bundle.monthly),
+          yearly: price(SUBSCRIPTION_PRICES.bundle.yearly),
+        })}
+      </p>
+      <div className="flex flex-wrap gap-2 pt-1">
+        <button
+          type="button"
+          onClick={() => {
+            setError(null)
+            setConfirming(true)
+          }}
+          className={PRIMARY_BUTTON}
+        >
+          <Sparkles size={11} />
+          {t.settings.plans.switchToBundle}
+        </button>
+        {onDismiss && (
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="px-3 py-1.5 rounded-lg text-xs font-mono text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+          >
+            {t.settings.plans.notNow}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function BenefitList({ items, muted }: { items: readonly string[]; muted?: string }) {
+  return (
+    <ul className="space-y-1">
+      {items.map((item) => (
+        <li key={item} className="flex items-start gap-2 text-[11px] font-mono text-text-muted leading-relaxed">
+          <Check size={11} className="mt-[3px] shrink-0 text-accent" />
+          <span>{item}</span>
+        </li>
+      ))}
+      {muted && (
+        <li className="flex items-start gap-2 text-[11px] font-mono text-text-muted/70 leading-relaxed">
+          <Check size={11} className="mt-[3px] shrink-0 text-text-muted/60" />
+          <span>{muted}</span>
+        </li>
+      )}
+    </ul>
+  )
+}
+
+/**
+ * Detail of a paid plan (NoteFlow Cloud in Settings → Sync, NoteFlow AI in Settings →
+ * AI / the brain panel): what it includes first, then ONE plan box — the monthly
+ * price with the yearly one (and its saving) under it, the inline sign-in (no trip to
+ * another section) or the checkout button — and the Bundle as a discreet line, never
+ * as a hero card. No in-app period switch: the Lemon Squeezy checkout has its own
+ * Monthly / Yearly selector and the app can't preselect it, so the box says so.
+ * For an account that owns the OTHER product on an upgradable subscription, the box
+ * is the Bundle plan change instead (productOffer 'upgrade'). The two columns grow from
+ * a flex-basis (not a min-width): where the surface is narrow (brain panel, resizable down
+ * to 25% of the window) they wrap into one column and can still shrink to fit, with no
+ * overflow, without depending on the viewport.
+ */
+export function PlanDetail({
+  product,
+  account,
+  bundle: bundleProp,
+  onBundleChange,
+}: {
+  product: 'ai' | 'cloud'
+  account: AccountStatus
+  /** Bundle chosen in the box. Controlled when set (the choice survives a remount, e.g. signing in). */
+  bundle?: boolean
+  onBundleChange?: (bundle: boolean) => void
+}) {
+  const t = useT()
+  const price = usePrice()
+  const [bundleState, setBundleState] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [checkoutError, setCheckoutError] = useState<string | null>(null)
+  const [checkoutOpened, setCheckoutOpened] = useState(false)
+
+  const offer = productOffer(account, product)
+  const bundleOffered = isPlanOffered(account, 'bundle')
+  const wantsBundle = bundleProp ?? bundleState
+  const setBundle = (value: boolean) => {
+    if (onBundleChange) onBundleChange(value)
+    else setBundleState(value)
+    setCheckoutError(null)
+    setCheckoutOpened(false)
+  }
+  const chosen: SubscriptionProduct = wantsBundle && bundleOffered ? 'bundle' : product
+  const other = otherProduct(product)
+
+  // Opens the Lemon Squeezy checkout of the chosen product in the browser (main
+  // tags it with the user id). One checkout URL per product: the payment page has
+  // its own Monthly / Yearly selector (monthly preselected) — see monetization.md
+  // § "Precios".
+  async function openCheckout() {
+    setBusy(true)
+    setCheckoutError(null)
+    try {
+      const result = await window.noteflow.accountOpenCheckout(chosen)
+      if (result.ok) setCheckoutOpened(true)
+      else {
+        setCheckoutError(
+          (result.errorCode && t.settings.account.errors[result.errorCode]) ||
+            result.error ||
+            t.settings.account.couldNotOpenCheckout,
+        )
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const prices = SUBSCRIPTION_PRICES[chosen]
+  let box: ReactNode
+  if (!account.configured) {
+    box = <p className="text-[11px] font-mono text-text-muted leading-relaxed">{t.settings.account.notAvailable}</p>
+  } else if (offer === 'unknown') {
+    // Never an offer on an unknown plan: it may already be paid (double billing).
+    box = <PlanUnknownNotice />
+  } else if (offer === 'owned') {
+    box = (
+      <span className="flex items-center gap-1.5 text-xs font-mono text-accent">
+        <Check size={12} /> {t.settings.plans.inYourPlan}
+      </span>
+    )
+  } else if (offer === 'upgrade') {
+    box = (
+      <div className="rounded-lg border border-solid border-border bg-surface-0 px-3.5 py-3">
+        <p className="mb-2 text-xs font-mono font-semibold text-text">
+          {tf(t.settings.plans.addProduct, { plan: PLAN_NAMES[product] })}
+        </p>
+        <BundleUpgradeOffer account={account} current={other} />
+      </div>
+    )
+  } else if (offer === 'checkout') {
+    const canCheckout = account.signedIn && isCheckoutConfigured(account, chosen)
+    box = (
+      // `border-solid` is explicit: the global `button { border: none }` reset aside,
+      // the backdrop canvas sits under the content.
+      <div className="relative overflow-hidden rounded-lg border border-solid border-border bg-surface-0 px-3.5 py-3">
+        <PlanCardBackdrop />
+        <div className="relative space-y-3">
+          <div className="flex flex-col">
+            <span className="text-sm font-mono font-semibold text-text">{PLAN_NAMES[chosen]}</span>
+            {chosen === 'bundle' && (
+              <span className="text-[11px] font-mono text-text-muted/70">{t.settings.plans.bundleSubtitle}</span>
+            )}
+          </div>
+
+          <div className="space-y-0.5">
+            <div className="flex items-baseline gap-1">
+              <span className="text-2xl font-mono font-semibold text-text tracking-tight leading-none">
+                {price(prices.monthly)}
+              </span>
+              <span className="text-[11px] font-mono text-text-muted">{t.settings.plans.monthSuffix}</span>
+            </div>
+            <p className="text-[11px] font-mono text-text-muted/70">
+              {tf(t.settings.plans.yearlyAlternative, {
+                price: price(prices.yearly),
+                percent: yearlySavingsPercent(chosen),
+              })}
             </p>
+            {/* Owns the other product on a subscription that can't be switched to the
+                Bundle (a comp…): this one is its own subscription — same note as in
+                Settings → Account. */}
+            {hasKnownEntitlement(account, other) && (
+              <p className="text-[11px] font-mono text-text-muted/70">{t.settings.plans.standaloneNote}</p>
+            )}
+          </div>
+
+          {!account.signedIn ? (
+            <div className="space-y-2">
+              <p className="text-[11px] font-mono text-text-muted leading-relaxed">{t.settings.plans.signInToSubscribe}</p>
+              <SignInInline primary />
+            </div>
+          ) : canCheckout ? (
+            <div className="space-y-1.5">
+              <button type="button" onClick={openCheckout} disabled={busy} className={PRIMARY_BUTTON}>
+                {busy ? <Loader size={11} className="animate-spin" /> : <ExternalLink size={11} />}
+                {t.settings.plans.continueToPayment}
+              </button>
+              {checkoutError && (
+                <p role="alert" className="flex items-start gap-1.5 text-[11px] font-mono text-red leading-relaxed">
+                  <AlertCircle size={12} className="shrink-0 mt-[1px]" />
+                  <span>{checkoutError}</span>
+                </p>
+              )}
+              {checkoutOpened && (
+                <p role="status" className="text-[11px] font-mono text-text-muted leading-relaxed">
+                  {t.settings.plans.checkoutOpened}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-[11px] font-mono text-text-muted/60">{t.settings.account.comingSoon}</p>
           )}
-          <div className="flex flex-wrap gap-2 pt-1">
-            <button
-              type="button"
-              onClick={confirmUpgrade}
-              disabled={upgradeBusy}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-accent/15 hover:bg-accent/25 text-accent border border-solid border-accent/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {upgradeBusy ? <Loader size={11} className="animate-spin" /> : <Sparkles size={11} />}
-              {t.settings.account.upgradeConfirm}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setConfirmingUpgrade(false)
-                setUpgradeError(null)
-              }}
-              disabled={upgradeBusy}
-              className="px-3 py-1.5 rounded-lg text-xs font-mono text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-40"
-            >
-              {t.common.cancel}
-            </button>
+
+          <div className="space-y-0.5 text-[10px] font-mono text-text-muted/60 leading-relaxed">
+            <p>{t.settings.plans.periodAtCheckout}</p>
+            <p>{t.settings.plans.paymentNote}</p>
           </div>
         </div>
-      )}
-      {upgradeOffered && upgradeDone && (
-        <p role="status" className="flex items-start gap-1.5 text-[11px] font-mono text-text-muted leading-relaxed normal-case">
-          <Check size={12} className="shrink-0 mt-[1px] text-accent" />
-          <span>{t.settings.account.upgradeRequested}</span>
-        </p>
-      )}
+      </div>
+    )
+  } else {
+    box = null
+  }
 
-      {benefits && (
-        <div className="space-y-1.5 normal-case">
-          <p className="text-[11px] font-mono font-semibold text-text-muted">
-            {t.settings.planBenefits.title}
-          </p>
-          <ul className="space-y-1">
-            {t.settings.planBenefits[benefits].map((benefit) => (
-              <li key={benefit} className="flex items-start gap-2 text-[11px] font-mono text-text-muted leading-relaxed">
-                <Check size={11} className="mt-[3px] shrink-0 text-accent" />
-                <span>{benefit}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+  return (
+    <div className="flex flex-wrap gap-x-6 gap-y-4 normal-case">
+      {/* Value first: what the plan adds over the free route. */}
+      <div className="flex-1 basis-[220px] min-w-0 space-y-2">
+        <p className="text-[11px] font-mono font-semibold text-text-muted">{t.settings.planBenefits.title}</p>
+        <BenefitList items={t.settings.planBenefits[product]} muted={t.settings.planBenefits.keepOnCancel[product]} />
+        {chosen === 'bundle' && (
+          <div className="space-y-1.5 pt-1">
+            <p className="text-[11px] font-mono font-semibold text-text-muted">{PLAN_NAMES[other]}</p>
+            <BenefitList items={t.settings.planBenefits[other]} />
+          </div>
+        )}
+      </div>
 
-      <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed normal-case">
-        {t.settings.account.pricesIncludeVat}
-      </p>
-
-      {account.signedIn ? (
-        hasCheckoutCard && (
-          <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed normal-case">
-            {t.settings.account.subscribeHint}
+      <div className="flex-1 basis-[250px] min-w-0 space-y-2.5">
+        {box}
+        {/* The Bundle as a discreet line (only while it can be a checkout: both
+            products missing, or signed out). */}
+        {offer === 'checkout' && bundleOffered && (
+          <p className="text-[11px] font-mono text-text-muted/80 leading-relaxed">
+            {chosen === 'bundle'
+              ? tf(t.settings.plans.singleLine, {
+                  plan: PLAN_NAMES[product],
+                  price: price(SUBSCRIPTION_PRICES[product].monthly),
+                })
+              : tf(t.settings.plans.bundleLine[product], { price: price(SUBSCRIPTION_PRICES.bundle.monthly) })}{' '}
+            <button type="button" onClick={() => setBundle(chosen !== 'bundle')} className={LINK_BUTTON}>
+              {chosen === 'bundle'
+                ? tf(t.settings.plans.chooseSingle, { plan: PLAN_NAMES[product] })
+                : t.settings.plans.chooseBundle}
+            </button>
           </p>
-        )
-      ) : (
-        showSignInHint && (
-          <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed normal-case">
-            {t.settings.account.signInToSubscribe}
-          </p>
-        )
-      )}
+        )}
+      </div>
     </div>
   )
 }
