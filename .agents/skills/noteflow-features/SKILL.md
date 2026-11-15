@@ -1647,7 +1647,10 @@ activo a la vez.
 - **Si aún no sincronizas nada**, la página es una **elección**: arriba "Only on this device — your
   notes are not syncing yet", y las dos opciones como **dos tarjetas iguales**, ninguna preseleccionada:
   para quién es cada una, tres ventajas, una etiqueta de precio discreta (Cloud "€3.99/month", GitHub
-  "Free") y su botón ("See NoteFlow Cloud" / "Connect with GitHub"). Debajo, "Already have NoteFlow
+  "Free") y su botón ("See NoteFlow Cloud" / "Connect with GitHub"). Las ventajas se leen en paralelo,
+  fila a fila: Cloud = sync automática · cifrada (Standard o Private E2EE) · "30-day history of every
+  section, restorable in the app"; GitHub = repositorio privado tuyo · cada 5 minutos · "Version
+  history kept by Git" (los commits en bruto, en GitHub). Debajo, "Already have NoteFlow
   Cloud? Sign in". Al elegir, se abre ese panel con un enlace "← Sync options" para volver.
 - **Si ya usas uno**, la página empieza con el **selector de dos tarjetas** con **badge de estado**
   (Active / Paused / Inactive / Not connected), con el que está en uso preseleccionado; al pulsar
@@ -1721,7 +1724,8 @@ Los dos modos (se eligen al configurar, con dos cards):
 
 Flujo del panel según estado:
 - **Sin sesión:** el **detalle del plan**: "What's included" (cifrado, sync automático, Estándar o
-  Privado E2EE, sin repo; y "si cancelas, tus notas siguen en tu equipo") y una **caja de plan** con
+  Privado E2EE, historial de versiones de cada sección —30 días, restaurar con un clic—, sin repo; y
+  "si cancelas, tus notas siguen en tu equipo") y una **caja de plan** con
   el precio mensual y debajo el anual ("or €39.99/year · save 16%"; el periodo se elige en la página
   de pago), y el **inicio de sesión ahí mismo**
   (correo → código), que sirve igual para suscribirte que para entrar si ya pagas. El Bundle va como
@@ -1774,6 +1778,55 @@ Flujo del panel según estado:
 
 Detalle técnico (jerarquía de claves, modos managed/e2ee, motor de sync):
 `.agents/context/monetization.md` § 4.
+
+---
+
+## Historial de versiones de una sección (NoteFlow Cloud)
+
+Con NoteFlow Cloud, cada sección guarda **versiones anteriores durante 30 días**, sin que el usuario
+haga nada: el servidor guarda como mucho una cada 10 minutos mientras se edita, y **siempre** una justo
+antes de borrar la sección, de un recorte grande (vaciarla o quitarle más de la mitad) y de una
+restauración. Vale para lo que se edita desde cualquier sitio (app, CLI, móvil). Es la ventaja de
+Cloud frente al GitHub Sync gratuito: historial **por sección, dentro de la app y restaurable**, en
+vez de commits en bruto en GitHub.
+
+- **Dónde se abre:** **"Version history"** en el `⋯` del editor (sección activa) y en el menú del
+  click derecho de la pestaña de una sección. Solo en la ventana principal, y no en notas con
+  contraseña, solo locales ni vinculadas, ni en ventanas sticky o de sección.
+- **Qué muestra:** un modal con dos columnas.
+  - **Izquierda — línea de tiempo** agrupada por días ("Today", "Yesterday", "Wed, Nov 12"): arriba
+    **"Current version"** (lo que tiene ahora la sección) y debajo cada versión con su hora, su tamaño
+    y, si no fue una edición normal, una etiqueta: "Before a big cut", "Before it was deleted" o
+    "Saved before a restore". Flechas ↑/↓ para moverse; Esc cierra.
+  - **Derecha — la versión elegida** ("Written <fecha>"), con un conmutador **Changes | Preview**:
+    *Changes* = diff por líneas contra el texto actual ("Only in this version" / "Added since", las
+    líneas iguales plegadas en "N unchanged lines"; con demasiados cambios muestra la versión tal cual);
+    *Preview* = la versión tal como era (renderizada, o monoespaciada en Modo texto). Avisos si la
+    versión es idéntica a la actual ("Restoring it would change nothing") o está vacía.
+  - **Pie:** "30 days of history · encrypted like your notes" y los botones **Copy**, **Restore as
+    new section** y **Restore this version**.
+- **Restaurar ("Restore this version"):** antes de sustituir nada, guarda el texto actual en el
+  historial ("Saving the current text…"), así que restaurar nunca pierde lo que había. Luego la
+  sección cambia de golpe, como **un solo paso de Ctrl+Z** (se deshace con un Ctrl+Z), y se sincroniza
+  como cualquier edición. Aviso breve en el editor: "Restored the version from Nov 15, 13:50".
+  - Si el texto actual **no se pudo guardar** antes (sync de Cloud desactivado en este equipo, cambios
+    aún sin subir, sin conexión, sin suscripción, claves bloqueadas…), no sustituye en silencio: diálogo
+    "The current text couldn't be saved to the history" con el motivo, que recomienda **Restore as new
+    section** (conserva los dos textos) u ofrece **Replace anyway**.
+- **"Restore as new section":** crea una sección nueva justo detrás de la original, en el mismo modo
+  (texto/markdown), llamada "<Nombre> (version from Nov 15, 13:50)"; la original no se toca.
+- **Estados sin Cloud utilizable:** sin cuenta o sin plan Cloud, el panel **explica la función** ("Go
+  back to any earlier version" — 30 días de historial por sección, cifrado) con el botón **"View
+  NoteFlow Cloud"** (Ajustes → Sync, en el detalle de Cloud). Otros estados: aún sin versiones ("No
+  earlier versions yet — they're saved on their own while you edit with NoteFlow Cloud"), claves de
+  Cloud bloqueadas ("Open Sync settings"), sin conexión (Retry), plan sin verificar, nota sin historial
+  (solo local / con contraseña) y versión caducada (más de 30 días: la lista se refresca).
+- **Límites:** 30 días, hasta 100 versiones / 20 MB por sección. Renombrar la nota deja de mostrar el
+  historial anterior a ese cambio de nombre. Desde la terminal: `noteflow history` (ver la skill
+  `noteflow-cli`).
+
+Detalle técnico: `.agents/context/monetization.md` § 4 "Historial de versiones" y
+`.agents/context/patterns.md` § "Historial de versiones: restaurar una sección".
 
 ---
 

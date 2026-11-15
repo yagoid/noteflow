@@ -24,8 +24,17 @@ Dos áreas de suscripción (mensual/anual), pensadas para el usuario que "no qui
 1. **NoteFlow AI** — LLM gestionado por NoteFlow: sin Ollama, sin comprar API keys de terceros.
    Se suma a las opciones gratuitas existentes (local / key propia), no las sustituye.
 2. **NoteFlow Cloud** — nube de notas superior al GitHub Sync gratuito: sync en tiempo real
-   (push por websocket, no pull cada 5 min), sin fricción de push/pull, más rápido y fiable.
-   Futuro no-foco: historial de versiones y compartir notas entre usuarios en tiempo real.
+   (push por websocket, no pull cada 5 min), sin fricción de push/pull, más rápido y fiable, y con
+   **historial de versiones por sección** dentro de la app (30 días; comparar y restaurar con un clic)
+   frente a los commits en bruto del repo de GitHub (ver § 4 "Historial de versiones").
+   Futuro no-foco: compartir notas entre usuarios en tiempo real.
+
+   **Ventajas de Cloud que comunican la app y la web** (mantener alineadas con
+   `src/i18n/{en,es}/settings.ts` → `planBenefits.cloud`, `sync.choiceCloud.points` y
+   `plans.addValue.cloud`, y con `docs/src/i18n/docs/pricing.{en,es}.ts` → `cloud.bullets` y
+   `compare.rows`): sync automática entre dispositivos · cifrado a elegir (Estándar o Privado de
+   extremo a extremo) · historial de versiones de cada sección, 30 días, restaurable en la app ·
+   nada que configurar (sin repositorio de GitHub).
 
 **Precios (decididos 2026-07, EUR** — publicados en la app (Ajustes → Cuenta y el detalle de cada plan, ver § 3 "Bloque de planes") y en `/pricing` de la web):
 
@@ -308,7 +317,8 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   LS no la da por `cancelled`/`expired`, `DELETE` (= cancelar; el periodo pagado se agota sin más
   cobros); **cualquier** 404 de LS = 502 (key de test o fila de test: nunca borrar a ciegas); 3)
   `DELETE` con service role de
-  `USER_DATA_TABLES` (`files`, `user_keys`, `usage_events`, `subscriptions` — el test las ata a las
+  `USER_DATA_TABLES` (`files`, `file_versions` —justo después de `files`, desde la 0016—, `user_keys`,
+  `usage_events`, `subscriptions` — el test las ata a las
   tablas `on delete cascade` de las migraciones); 4) `DELETE /auth/v1/admin/users/<id>`. Idempotente:
   un reintento ve las suscripciones ya canceladas, los deletes son no-ops, admin 404 = éxito y un
   token cuyo usuario ya no existe (`user_not_found`) responde 200. `feedback` se conserva anónimo
@@ -959,6 +969,9 @@ diferencial de privacidad, no como peaje.
 > usando el CLI y los clientes anteriores). ⚠️ Aplicarla **antes** de publicar la app que la usa; sin
 > ella la app cae a `cloud_upsert_file` (0011) el resto de la sesión — el pull sigue fusionando en tres
 > vías, pero las subidas vuelven a decidirse por `updated_at`.
+> **Historial de versiones (migraciones `0016_cloud_file_versions.sql` +
+> `0017_cloud_file_versions_snapshot.sql`):** **aplicadas al proyecto real el 2026-11-15** y
+> `delete-account` redesplegada (versión 4) — ver "Historial de versiones" abajo.
 > La suscripción manual de pruebas de Cloud que hubo aquí ya no existe (comprobado 2026-10-19).
 > ⚠️ La única fila `provider='manual'` es la **comp del operador**
 > (`provider_ref='operator-comp'`, `expired` desde 2026-11-11, ver § 3 "Cuenta del operador"):
@@ -2218,9 +2231,106 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
   sin invalidar la sesión ya guardada; `--no-pull` lo omite. Con **e2ee** o sin claves no hay pull
   (pediría la passphrase en mitad del login).
 
+### Historial de versiones (migraciones 0016 + 0017) — implementado
+
+Cada fichero sincronizado con Cloud (en la práctica, cada **sección** de una nota y su `note.md`)
+guarda versiones anteriores que el usuario puede ver, comparar con la actual y restaurar. Es la
+ventaja de Cloud frente al GitHub Sync gratuito en este terreno: historial **por sección, dentro de la
+app y restaurable**, frente a los commits en bruto del repo de GitHub.
+
+**Modelo de datos** (`public.file_versions`, 0016):
+```
+file_versions(id identity PK, user_id → auth.users on delete cascade, path_key, path_ct,
+              content_ct, key_ct, updated_at, seq, size, reason, created_at)
++ índice único (user_id, path_key, seq)   -- 0017; sustituye al (user_id, path_key, seq desc) de la 0016
++ índice (created_at)                     -- purga por retención
+```
+- `path_ct`, `content_ct`, `key_ct`: **copia literal** de la fila de `files` sustituida (mismos blobs
+  cifrados; el servidor no descifra nada, también con e2ee). El cliente las descifra igual que una
+  fila de `files` y comprueba que el `path_key` de la fila es el del fichero.
+- `updated_at` = hora de EDICIÓN de ese contenido (la de la fila sustituida); `created_at` = cuándo
+  se sustituyó (la usan la ventana de 10 min y la retención); `seq` = la `seq` (0008) de la fila
+  sustituida, orden fiable de versiones; `size` = `octet_length(content_ct)` (el cliente estima los
+  bytes de texto a partir de él).
+- `reason`: `edit` · `delete` · `shrink` · `manual` (0017).
+- **Fuera de Realtime** (no está en la publicación de la 0006): se lee bajo demanda.
+
+**Reglas de captura** — trigger `files_capture_version` (`AFTER UPDATE … FOR EACH ROW`, `security
+definer`, `search_path = ''`), con la condición `old.deleted = false and old.content_ct <> '' and
+old.content_ct is distinct from new.content_ct`:
+- `edit`: edición normal, **como mucho una por fichero cada 10 min** (una ráfaga de autoguardados
+  deja una sola versión: el contenido de antes de la ráfaga).
+- `delete`: **siempre** antes de un tombstone (`deleted = true`), ignorando la ventana.
+- `shrink`: **siempre** antes de una reducción grande (contenido nuevo < la mitad **y** ≥ 1 KiB
+  menos): vaciados y recortes accidentales. Las reducciones pequeñas cuentan como `edit`.
+- `manual`: la RPC `cloud_snapshot_file` (abajo).
+- No generan versión: un INSERT sin conflicto (fichero nuevo), resucitar un tombstone (no hay
+  contenido que guardar), los cambios que no tocan `content_ct` ni los DELETE físicos.
+- Serialización: cuando corre el trigger ya está tomado el advisory lock por usuario de la 0008, así
+  que la ventana y la poda no tienen carreras ni deadlocks nuevos.
+
+**Límites** (por fichero = `(user_id, path_key)`): **30 días** de retención, **100 versiones** y
+**20 MB** (suma de `size`); se podan las más antiguas y la más reciente se conserva siempre, aunque
+ella sola pase de 20 MB. La retención vive en `public.file_versions_retention()` (la usan la RLS y la
+purga, así no pueden divergir); 100 / 20 MB en `public.file_versions_prune(uuid, text)` (0017, la
+comparten trigger y RPC); 10 min y 1 KiB en el `declare` de `files_capture_version()`. Cambiar un
+límite = migración nueva con `create or replace function` (runbook en `supabase/README.md` § 7.1).
+
+**Acceso, retención y purga:** RLS de **solo lectura**: una única política `select` para
+`authenticated` con `auth.uid() = user_id and created_at > now() - file_versions_retention()`; sin
+políticas ni grants de escritura (solo escriben el trigger, la RPC, la purga y las cascadas). La
+retención la aplica la RLS **al leer**; el borrado físico es `public.purge_file_versions()` (service
+role, devuelve cuántas borró), que **la migración no programa**: ⚠️ **a 2026-11-15 sigue sin
+programar** (`pg_cron`, runbook § 7.1 paso 4). Mientras tanto lo caducado no se ve pero ocupa
+espacio. `delete-account` borra `file_versions` justo después de `files` (y la cascada desde
+`auth.users` también).
+
+**Captura antes de restaurar: RPC `cloud_snapshot_file(p_path_key)` (0017).** Restaurar es, para
+el servidor, una edición normal: dentro de la ventana de 10 min el trigger no guardaría el texto que
+la restauración sustituye. Los clientes llaman antes a `POST /rest/v1/rpc/cloud_snapshot_file`
+`{"p_path_key": …}`, que copia la fila **viva** del propio usuario a `file_versions` con `reason =
+'manual'` y aplica la poda. Devuelve `true` (también si esa `seq` ya estaba guardada: es idempotente
+por el índice único y el `on conflict do nothing`, que también usa el trigger) o `false` (no existe
+o es un tombstone). Es `security definer`: comprueba a mano `auth.uid()` y la misma entitlement que
+el insert de `files` (`cloud`/`bundle` `active`; si no, 42501 → 403) y toma el mismo advisory lock.
+EXECUTE solo para `authenticated`. Contra un servidor sin la 0017 → 404 `PGRST202`.
+
+**Por qué se captura en el servidor** (y no con inserts desde el cliente, como preveía el diseño
+inicial): vale para **todos** los clientes —escritorio, CLI, móvil y versiones antiguas— sin que
+hagan nada, no depende de que un dispositivo conserve la copia y un cliente no se la puede saltar.
+Coste: como mucho una escritura extra cada 10 min por fichero (más los `delete`/`shrink`).
+
+**Clientes:**
+- **Escritorio** (proceso main, `electron/cloudVersions.ts` + lógica pura en
+  `electron/cloudVersionsLogic.ts`; IPC `cloud:versions-list` / `cloud:versions-get` /
+  `cloud:versions-snapshot`, ver `architecture.md`): lista (máx. 200, `seq desc`), descifra una
+  versión y, antes de capturar, sube lo pendiente de ese fichero con
+  `cloudSync.flushPathForSnapshot` (ver `sync.md`). Leer no exige `cloudSync.enabled`; capturar, sí.
+  Panel en `src/components/VersionHistory/` (lógica pura en `src/lib/versionHistory.ts`;
+  restauración en `src/lib/sectionRestore.ts`, ver `patterns.md`). UX en la skill `noteflow-features`.
+- **CLI** (v2.13.0): `noteflow history <título> [sección] [--show n | --restore n [--force]
+  [--dry-run]] [--json]` (ver `patterns.md` § CLI). Si no consigue capturar antes, no restaura salvo
+  con `--force`.
+- **Móvil:** el servidor ya captura sus ediciones; la app móvil aún **no** muestra el historial.
+
+**Alcance v1 y lo que queda fuera:** solo notas normales sincronizadas con Cloud, desde la ventana
+principal. Sin historial en la app ni en el CLI: notas con contraseña (se sincronizan y el servidor
+guarda sus versiones, pero ningún cliente las expone), `localOnly` (no se suben), notas vinculadas
+(fuera del dir de notas) y ventanas sticky. El historial va atado al relPath: **renombrar la nota
+(su carpeta) deja de mostrar el historial anterior**. Tampoco hay restaurar por id en el CLI (los
+índices se desplazan si llega una versión nueva), historial de notas enteras borradas, diffs en el
+servidor (con e2ee no podría haberlos) ni UI en el móvil.
+
+**Despliegue:** 0016 y 0017 **aplicadas en producción el 2026-11-15** (en ese orden, antes de
+publicar ningún cliente que las use) y `delete-account` redesplegada (versión 4, borra
+`file_versions`); probado de punta a punta contra el servidor real. Pendiente del operador:
+programar la purga con `pg_cron`. La política de privacidad (`/privacy`) ya recoge la retención de
+30 días.
+
 ### Futuro (no-foco, solo dejar la puerta abierta)
-- **Historial de versiones:** tabla `file_versions` (insert del cliente en cada push; blobs
-  cifrados, retención N días/versiones). Con E2EE no hay diffs server-side — versiones opacas.
+- **Historial de versiones:** ✅ implementado (ver arriba), capturado en el servidor por trigger en
+  vez de con inserts del cliente. Posibles ampliaciones: UI en el móvil, recuperar notas enteras
+  borradas, restaurar por id en el CLI.
 - **Compartir notas:** re-envolver la clave de la nota para otro usuario + RLS (por eso
   clave-por-nota desde el inicio).
 - **Acceso web:** requeriría crypto client-side en el navegador; posible pero lejos del roadmap.
@@ -2232,7 +2342,7 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
 | **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (0007 aplicada + redeploy hecho):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×2/×6 — ver § 3), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`). **Endurecimiento (desplegado 2026-10-21: 0009 + 0010 + redeploys):** reserva + límite de concurrencia + topes de body/`max_tokens`, allowlist del body, errores del upstream mapeados, `cost_usd`; y en el webhook reembolsos, `test_mode`, validación UUID y reconciliación — ver §§ 2-3. **Cuota por coste real + catálogo renovado (0013, código listo; migración + redeploy pendientes):** presupuesto de $2/usuario/mes medido con `usage.cost`, alias `replaced_by` para modelos retirados, razonamiento inyectado por el servidor — ver § 3 |
 | **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). El producto Cloud (y el Bundle) ya existen en Lemon Squeezy y sus checkout URLs (de live desde 2026-10-19) están pobladas en `cloudConfig.ts` → los planes ofrecen botón Subscribe (ver § 3, "Billing en live mode") |
-| **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
+| **4.3 Futuro** | Compartir notas, ¿acceso web? (el **historial de versiones** ya está hecho dentro de 4.2: migraciones 0016 + 0017 aplicadas el 2026-11-15, panel de escritorio y `noteflow history` en el CLI 2.13.0 — ver § 4) |
 
 ## 6. Fase 4.0 — implementación (parte cliente/repo)
 

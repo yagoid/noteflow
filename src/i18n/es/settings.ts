@@ -141,7 +141,7 @@ export const settings = {
       points: [
         'Sincronización automática entre tus dispositivos',
         'Cifrada: Estándar, o Privada de extremo a extremo',
-        'Ningún repositorio que crear ni mantener',
+        'Historial de 30 días de cada sección, restaurable en la app',
       ],
       cta: 'Ver NoteFlow Cloud',
     },
@@ -394,6 +394,7 @@ export const settings = {
       'Sincronización cifrada a través de los servidores de NoteFlow: cifrada en tránsito y en reposo.',
       'Sincronización automática entre tus dispositivos, sin push ni pull manuales.',
       'Tú eliges el cifrado: Estándar (nada que recordar) o Privado de extremo a extremo, donde solo tú puedes leer tus notas.',
+      'Historial de versiones de cada sección dentro de la app: compara lo que tenías en los últimos 30 días y restáuralo con un clic.',
       'Sin configuración: ningún repositorio de GitHub que crear ni mantener.',
     ],
     keepOnCancel: {
@@ -446,7 +447,7 @@ export const settings = {
     addProduct: 'Añadir {plan} a tu plan',
     addValue: {
       ai: 'Chatea con tus notas sin claves API ni modelos locales, con una asignación mensual incluida.',
-      cloud: 'Sincronización cifrada y automática entre tus dispositivos, sin configurar nada.',
+      cloud: 'Sincronización cifrada y automática entre tus dispositivos, con 30 días de historial de versiones, sin configurar nada.',
     },
     becomesBundle: 'Tu suscripción pasa a Bundle (Cloud + AI): no pagas dos suscripciones.',
     upgradeDifference: '+{price}/mes',

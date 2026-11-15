@@ -26,6 +26,7 @@ export const featuresEn = {
     { id: 'shortcuts', label: 'Shortcuts' },
     { id: 'views', label: 'Views' },
     { id: 'temp', label: 'Temporary notes' },
+    { id: 'history', label: 'Version history' },
     { id: 'encryption', label: 'Encryption' },
     { id: 'ai-hidden', label: 'Hide from AI' },
     { id: 'personalize', label: 'Personalize' },
@@ -261,6 +262,31 @@ export const featuresEn = {
       { title: 'Gone everywhere', desc: 'Deleted from the sync remote too, so they never come back.' },
       { title: 'Change your mind', desc: 'The chevron by <em>Deletes …</em> sets 1–48 h, or makes it permanent.' },
     ],
+  },
+
+  history: {
+    title: 'Version history of every section',
+    lede: 'Overwrote a list, emptied a section, cut the wrong paragraph? With NoteFlow Cloud each section keeps <strong>30 days of earlier versions</strong>, and you get them back without leaving the app.',
+    // Three-step flow drawn as cards (same pieces as `templates`).
+    flowAria: 'How version history works: open it from a section, compare a version with the current text, restore it',
+    steps: [
+      {
+        tag: '01 · open',
+        path: ['⋯', 'Version history'],
+        desc: 'Also in the right-click menu of a section tab.',
+      },
+      {
+        tag: '02 · compare',
+        path: ['Changes · Preview'],
+        desc: 'A timeline by day; see what changed against the current text, or the version as it was.',
+      },
+      {
+        tag: '03 · restore',
+        path: ['Restore this version'],
+        desc: 'Your current text is saved to the history first, and <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it. Or restore it as a new section.',
+      },
+    ],
+    note: 'A <a href="%PRICING_URL%">NoteFlow Cloud</a> feature: versions are saved on the server, encrypted like your notes, whichever device you edit from. Also in the <a href="%CLI_URL%">CLI</a> with <code>noteflow history</code>.',
   },
 
   encryption: {

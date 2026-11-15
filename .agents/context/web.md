@@ -364,11 +364,15 @@ v2.7.0: las filas de `push` y `cloud pull` (fusión por líneas en vez de copia 
 en notas cifradas), las de `add`/`set`/`new`/`section add`, `login`/`cloud login` (flags en dos pasos
 `--no-wait`/`--finish` y `--send-code`/`--code`), `status`/`cloud status` (campo `desktopApp`) y la
 tabla de flags globales (`globalFlags`; la mantiene la web, la skill ya no tiene tabla de flags).
+Además refleja **`history`** (v2.13.0, añadido el 2026-11-15 en el grupo NoteFlow Cloud, con sus
+flags `--show`/`--restore`/`--force`/`--dry-run`/`--json` y las filas de `--json`, `--section`,
+`--dry-run` y `--force` de `globalFlags`), sin subir el badge de versión del hero: el resto de la
+página no se ha revisado contra 2.8-2.13.
 **No** se reflejan en la web: el protocolo para agentes de la skill (checklist inicial, "Sincroniza
 y verifica", "ofrécete a activar el sync") — la web solo enlaza a la skill. Anclas: `#install` `#notes-dir` `#format` `#commands` `#flags`
 `#agents` `#caveats` `#troubleshooting`.
-- Tabla de comandos/flags/ejemplos (38 comandos en 6 grupos, incluido el grupo **NoteFlow Cloud**
-  `cloud login/logout/setup/push/pull/status`): **`src/data/cli.ts`** (estructural,
+- Tabla de comandos/flags/ejemplos (39 comandos en 6 grupos, incluido el grupo **NoteFlow Cloud**
+  `cloud login/logout/setup/push/pull/status` + `history`): **`src/data/cli.ts`** (estructural,
   con `desc: {en,es}` inline por fila).
 - Prosa (instalación, formato v2, avisos PowerShell/app-abierta, troubleshooting): `cli.{en,es}.ts`.
 - **Si cambia el CLI** (`cli/noteflow.js` + su `noteflow help`): reflejar comandos/flags nuevos en
@@ -393,7 +397,7 @@ fidelidad (viven en `ai.en.ts` como constantes exportadas).
 
 ### `/features` — fuente de verdad: **skill `noteflow-features`** (y el código que ella cita)
 Anclas: `#organize` `#templates` `#sticky` `#links` `#snippets` `#shortcuts` `#views` `#temp`
-`#encryption` `#ai-hidden` `#personalize`.
+`#history` `#encryption` `#ai-hidden` `#personalize`.
 
 Todas las secciones siguen el **patrón de bloque visual** (ver "Clips de /features" abajo): lede de 1-2
 frases + clip y/o mock HTML/CSS + 3-4 *facts* de una línea. Los hechos están condensados de la skill; si la
@@ -409,6 +413,7 @@ app cambia, corregir el *fact* (no volver a añadir prosa).
 | `#shortcuts` | Tarjetas por grupo (App / Secciones / Sticky / Editor) en 2 columnas CSS, `dl` teclas \| acción (en <480px la acción va debajo). Datos en `features.{en,es}.ts` como `combos`; si todas las alternativas comparten modificadores se pintan una vez (`Ctrl + Z / Y`). Nota de macOS en una línea | `src/components/Settings/ShortcutsPanel.tsx` |
 | `#views` | 3 tarjetas de una línea (vista de nota / de contenido / cerebro) + dúo de clips `brain` y `floating-sidebar` + nota de una línea del sidebar flotante (Ctrl+' → minimapa → panel al acercar el ratón) | skill (Vista de contenido, Vista de nota, Sidebar fijado / flotante) |
 | `#temp` | Split 3 facts \| clip `quick-capture` (Ctrl+Shift+N → nota temporal, menú *Delete in* → 8 h): Ctrl+Shift+N / botón reloj · borrado también del remoto de sync · chevron de *Deletes …* (1-48 h o permanente) | skill (Notas temporales) |
+| `#history` | Sin clip (no hay grabación del panel). Lede + mini-flujo de **3** tarjetas apiladas (`.nf-flow.is-stacked`: con tres pasos el par lado a lado no cabe junto al TOC): `⋯ → Version history` (también el menú del tab) · `Changes · Preview` · `Restore this version` (antes guarda el texto actual; Ctrl+Z; o como sección nueva), con las etiquetas de la app en ES. Nota de una línea: función de NoteFlow Cloud (enlace a `/pricing#cloud`), cifrado, cualquier dispositivo, y `noteflow history` (enlace a `/cli#commands`) | skill (Historial de versiones) + `src/i18n/{en,es}/versionHistory.ts` (etiquetas) + monetization.md § 4 (30 días) |
 | `#encryption` | Sin clip. Mock interactivo: nota cuyas líneas se barren a pseudo-cifrado (base64 determinista, decorativo) con botón candado; se bloquea sola una vez al entrar en vista (con reduced-motion/sin JS ya sale bloqueada). Facts: AES-256-GCM + PBKDF2 310k · sin backdoor · CLI e índice de IA no las leen | skill / `noteUtils` |
 | `#ai-hidden` | Sin clip. Mock estático: 3 celdas de sección con tallo hacia una caja "índice · chat · grafo · tools"; la oculta (EyeOff, borde discontinuo) queda cortada con ×. 3 facts (superficies de IA · solo afecta a la IA · enlace a `/ai#privacy`). Va **en pareja con `#encryption`** (`.nf-feat-pair`: dos columnas por container query ≥760px, apiladas si no; ambos `section id` se conservan) | skill |
 | `#personalize` | Swatches de los **14 temas (11 dark + 3 light)** con valores reales + split 3 facts (ajustes de Apariencia · ancho legible · índice flotante del editor) \| clip `themes` (Ajustes → Apariencia cambiando de tema en vivo) | `src/lib/themes.ts` (¡los swatches llevan colores literales!) |
@@ -466,8 +471,8 @@ capacidades se autogestionan gratis: IA con Ollama/key propia, nube con GitHub S
 | `#free` | Lo gratis (editor, Cerebro local, IA con key propia/Ollama, cifrado, GitHub Sync, CLI) + callout "los planes suman, no sustituyen" | monetization.md § visión |
 | `#plans` | Grid de 3 cards de precio: AI €5.99/mes · €49.99/año, Cloud €3.99/mes · €39.99/año, Bundle €7.99/mes · €79.99/año (badge "Best value") + alta desde la app + MoR Lemon Squeezy; **precios con IVA incluido** (tax-inclusive pricing activado en Lemon Squeezy; LSSI art. 10.1.f — lo dicen la nota bajo las cards, los bullets de `#ai`/`#cloud` y `/terms` §3); las cifras van también al JSON-LD (`offers`, con `valueAddedTaxIncluded: true`) | monetization.md § visión "Precios" (y `src/lib/subscriptionPlans.ts`) |
 | `#ai` | Plan NoteFlow AI: **modelos curados literales** en dos bloques — "del día a día" (deepseek-v4.1-flash-1017 —recomendado—, gpt-5.6-luna, claude-haiku-5.5, mimo-v2.6-pro) y "avanzado" (gpt-5.6-sol, que gasta la asignación ~30× más rápido) —, **asignación mensual medida por el coste real de cada petición** (sin cifra de tokens ni multiplicadores: no publicar el presupuesto en USD), mensual/anual con **€5.99/mes o €49.99/año** en el bullet, alta vía Settings → Subscription → Subscribe (checkout Lemon Squeezy) | monetization.md § 3 "Cuota por coste" (catálogo vivo = tabla `ai_models`, catálogo actual en `supabase/migrations/0013_ai_cost_quota.sql` — añadir una fila NO actualiza la web: revisar esta lista a mano; el "≈30×" sale del `cost_index` de GET /models) + § visión "Precios" |
-| `#cloud` | Plan NoteFlow Cloud marcado **"Available now"**: sync automática, cifrado **dual** (managed por defecto + E2EE opt-in), bullet con **€3.99/mes o €39.99/año**; se activa sola al pagar y al iniciar sesión con el plan (igual que NoteFlow AI en `#ai`); GitHub Sync sigue gratis | monetization.md § 4 (badge activo, no `--soon`; + § visión "Precios" |
-| `#compare` | Tabla gestionado vs autogestionado (IA, setup, sync, "todo lo demás gratis") | monetization.md §§ 3-4 |
+| `#cloud` | Plan NoteFlow Cloud marcado **"Available now"**: sync automática, cifrado **dual** (managed por defecto + E2EE opt-in), **historial de versiones de cada sección** (30 días, comparar y restaurar en la app; guarda antes el texto actual), bullet con **€3.99/mes o €39.99/año**; se activa sola al pagar y al iniciar sesión con el plan (igual que NoteFlow AI en `#ai`); GitHub Sync sigue gratis | monetization.md § 4 (badge activo, no `--soon`; + § visión "Precios" |
+| `#compare` | Tabla gestionado vs autogestionado (IA, setup, sync, **historial de versiones** —Cloud: por sección, en la app, 30 días, restaurable; GitHub Sync: el historial de Git del repo, en GitHub—, "todo lo demás gratis") | monetization.md §§ 3-4 (y § visión, "Ventajas de Cloud") |
 | `#privacy` | RAG local, al proxy viaja lo mismo que con key propia, `aiHidden`/cifradas nunca salen, IA gestionada ≠ nube de notas | monetization.md § 3 "Privacidad" + `/ai#privacy` |
 
 ### `/privacy`, `/terms` y `/legal-notice` — texto legal canónico (el EN es la fuente; el ES es traducción fiel)

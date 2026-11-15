@@ -4,7 +4,7 @@
   # NoteFlow
 
   **Fast notes for Windows, Linux & macOS developers.**
-  *Local Markdown files, optional sync (private GitHub repo or encrypted NoteFlow Cloud). No telemetry. Just you and your thoughts.*
+  *Local Markdown files, optional sync (private GitHub repo, or encrypted NoteFlow Cloud with version history). No telemetry. Just you and your thoughts.*
 
   [![GitHub Release](https://img.shields.io/github/v/release/yagoid/noteflow?style=flat-square&color=3de8c2)](https://github.com/yagoid/noteflow/releases/latest)
   [![License](https://img.shields.io/github/license/yagoid/noteflow?style=flat-square)](LICENSE)
@@ -30,7 +30,7 @@ Built specifically for software engineers and power users who need something fas
 - **Groups & folders** — color-coded groups with sub-folders (each with its own icon), a sidebar that can stay pinned or float in on hover, a content view per group, templates, tags and a command palette (`Ctrl+P`).
 - **The Brain (AI, optional)** — a local, offline semantic index that surfaces related notes, a 3D graph of your knowledge, and an AI chat that answers from your notes with citations. Bring your own provider (Anthropic, OpenAI, Ollama…) or use NoteFlow AI. Any section can be hidden from the AI.
 - **Encrypted notes** — lock individual notes with a password; stored as ciphertext, no master key, no backdoor.
-- **Sync, your way** — a private GitHub repo you control (Device Flow OAuth, no personal access tokens), or NoteFlow Cloud, an encrypted paid cloud with section-level merging across devices. Or no sync at all.
+- **Sync, your way** — a private GitHub repo you control (Device Flow OAuth, no personal access tokens), or NoteFlow Cloud, an encrypted paid cloud with section-level merging across devices and a 30-day version history of every section that you can compare and restore from the app. Or no sync at all.
 - **Headless CLI** — a zero-dependency Node.js companion CLI that reads/writes the same notes. Works over SSH, on Raspberry Pi, in cron jobs, and with AI agents.
 - **14 themes, EN/ES interface** — dark and light themes (NoteFlow Dark, Tokyo Night, Dracula, Gruvbox, Arctic Day…), selectable fonts, and a built-in "What's new" tour.
 

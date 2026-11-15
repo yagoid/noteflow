@@ -23,6 +23,10 @@ const t = getFeaturesContent(lang);
 // placeholders so the prose stays plain data.
 const aiUrl = getRelativeLocaleUrl(lang, '/ai');
 const cliUrl = getRelativeLocaleUrl(lang, '/cli');
+const pricingUrl = getRelativeLocaleUrl(lang, '/pricing');
+const historyNote = t.history.note
+  .replace('%PRICING_URL%', `${pricingUrl}#cloud`)
+  .replace('%CLI_URL%', `${cliUrl}#commands`);
 const organizeLede = t.organize.lede.replace('%AI_URL%', `${aiUrl}#embeddings`);
 const fillPrivacy = (s: string) =>
   s.replace(/%AI_URL%/g, `${aiUrl}#privacy`).replace(/%CLI_URL%/g, cliUrl);
@@ -444,6 +448,30 @@ const pseudoCipher = (s: string, seed: number) =>
     </div>
   </section>
 
+  <!-- ── Version history (NoteFlow Cloud): lede + three steps as a mini flow + note ── -->
+  <section id="history" data-reveal>
+    <div class="nf-sec-head">{kickerFor('history')}</div>
+    <h2>{t.history.title}</h2>
+    <p class="nf-feat-lede" set:html={t.history.lede} />
+    <ol class="nf-flow is-stacked" aria-label={t.history.flowAria}>
+      {t.history.steps.map((s) => (
+        <li class="nf-flow-step nf-edge">
+          <span class="nf-flow-tag">{s.tag}</span>
+          <span class="nf-flow-path">
+            {s.path.map((p, pi) => (
+              <>
+                {pi > 0 && <span class="nf-flow-arrow" aria-hidden="true">→</span>}
+                <span class={`nf-flow-chip${pi === s.path.length - 1 ? ' is-action' : ''}`}>{p}</span>
+              </>
+            ))}
+          </span>
+          <span class="nf-flow-desc" set:html={s.desc} />
+        </li>
+      ))}
+    </ol>
+    <p class="nf-feat-note" set:html={historyNote} />
+  </section>
+
   <!-- ── Privacy pair: encryption | hide from AI (two columns when there's room) ── -->
   <div class="nf-feat-pair">
     <div class="nf-feat-pair-grid">
@@ -788,7 +816,7 @@ const pseudoCipher = (s: string, seed: number) =>
   }
   .nf-feat-note kbd { font-size: 11px; padding: 1px 6px; }
 
-  /* Templates: two steps as a mini flow — a mono tag, the UI path as chips, one line */
+  /* Templates / version history: steps as a mini flow — a mono tag, the UI path as chips, one line */
   .nf-flow {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -821,6 +849,9 @@ const pseudoCipher = (s: string, seed: number) =>
   @media (min-width: 640px) {
     .nf-flow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 38px; }
     .nf-flow-step + .nf-flow-step::before { content: '→'; top: 50%; left: -29px; transform: translateY(-50%); }
+    /* Three steps (version history) don't fit side by side next to the TOC: keep them stacked */
+    .nf-flow.is-stacked { grid-template-columns: minmax(0, 1fr); gap: 30px; }
+    .nf-flow.is-stacked .nf-flow-step + .nf-flow-step::before { content: '↓'; top: -26px; left: 26px; transform: none; }
   }
   .nf-flow-tag {
     font-family: 'JetBrains Mono', monospace;
