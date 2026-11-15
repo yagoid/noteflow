@@ -14,7 +14,7 @@ import { join } from 'path'
 const SQL = readFileSync(join(__dirname, '../../supabase/migrations/0017_cloud_file_versions_snapshot.sql'), 'utf-8')
 
 /** The SQL without `--` comments, with every whitespace run collapsed to one space. */
-const CODE = SQL.split('\n')
+const CODE = SQL.split(/\r?\n/) // CRLF checkouts (Windows, core.autocrlf) must strip comments too
   .map((line) => line.replace(/--.*$/, ''))
   .join('\n')
   .replace(/\s+/g, ' ')
