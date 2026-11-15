@@ -49,7 +49,10 @@ consumidores** (related ✅, grafo ✅, chat ✅).
   externo y al cambiar el título-alias o `aiHidden`. Las de **texto plano** (`.json`, `.yaml`, código, logs)
   se indexan igual (por defecto, a propósito: un config o un script del proyecto es contexto útil); si meten
   ruido, "Hide from AI" las saca. Como cualquier vinculada, máx. 2 MB (más grande = `tooLarge`, sin contenido
-  nuevo que indexar).
+  nuevo que indexar). Las **temporales** (abiertas desde el sistema con "Abrir con NoteFlow" y no mantenidas,
+  `transient` en el registro) **no se indexan**: `aiNote` devuelve `null` y `aiNotes()` las omite, no se avisa
+  de sus cambios y al descartarlas no se llama a `removeFromIndex` (nunca entraron); al pasar a permanentes
+  ("Keep in NoteFlow" o al organizarlas) se indexan. Las tools del agente sí las ven.
 - **Índice desactualizado (punto ámbar del botón "Reindex" en la vista cerebro):** la verdad vive en
   **main** — `aiIndex` + `electron/ai/indexStaleness.ts` (lógica pura, con tests). Un dir de nota
   entra en pendientes al escribirse (`scheduleIndex`, **antes** del debounce) y solo sale cuando el

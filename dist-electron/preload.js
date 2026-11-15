@@ -43,6 +43,23 @@ const api = {
     linkedAssetDataUri: (id, src) => electron_1.ipcRenderer.invoke('linked:asset-data-uri', id, src),
     // Unwritten edits kept in userData across restarts (null = in sync again).
     linkedSetDraft: (id, draft) => electron_1.ipcRenderer.invoke('linked:set-draft', id, draft),
+    // "Open with NoteFlow": files main linked from the OS (as transient notes) for the main window
+    // to open — taken once —, keeping a transient note, and discarding one the window closed (main
+    // refuses if it has unwritten edits or a sticky / section window shows it).
+    linkedTakeOpenRequests: () => electron_1.ipcRenderer.invoke('linked:take-open-requests'),
+    linkedKeep: (id) => electron_1.ipcRenderer.invoke('linked:keep', id),
+    linkedDiscardTransient: (id) => electron_1.ipcRenderer.invoke('linked:discard-transient', id),
+    onLinkedOpenRequested: (cb) => {
+        const wrapper = () => cb();
+        electron_1.ipcRenderer.on('linked:open-requested', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('linked:open-requested', wrapper);
+    },
+    onLinkedTransientReleased: (cb) => {
+        const wrapper = (_event, noteId) => { if (typeof noteId === 'string')
+            cb(noteId); };
+        electron_1.ipcRenderer.on('linked:transient-released', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('linked:transient-released', wrapper);
+    },
     // Absolute path of a File dropped from the OS (File.path is gone since Electron 32).
     getPathForFile: (file) => {
         try {

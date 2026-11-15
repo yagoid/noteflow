@@ -131,6 +131,8 @@ export interface LinkedNoteWire {
   hash: string | null
   /** Edits not written to the file yet, kept in userData across restarts (see LinkedNoteState). */
   draft?: { body: string; baseHash: string | null }
+  /** Opened from the OS ("Open with NoteFlow") and not kept yet. Only when true. */
+  transient?: boolean
 }
 
 export interface LinkedNoteState {
@@ -145,6 +147,12 @@ export interface LinkedNoteState {
   syncedContent: string
   /** The file changed outside while the note had edits of its own: nothing is written until resolved. */
   conflict?: { diskBody: string; diskHash: string }
+  /**
+   * Opened from the OS ("Open with NoteFlow") and not kept yet: unlinked by itself when closed
+   * (lib/linkedNotes.ts transientNotesToDiscard) and at the next startup, unless it has unsaved
+   * changes. Rename / group / favorite / archive / manual order or "Keep in NoteFlow" keep it.
+   */
+  transient?: boolean
 }
 
 export type LinkedWriteResult =
@@ -677,6 +685,16 @@ declare global {
       linkedRecheck: () => Promise<void>
       linkedAssetDataUri: (id: string, src: string) => Promise<string | null>
       linkedSetDraft: (id: string, draft: { body: string; baseHash: string | null } | null) => Promise<void>
+      /** "Open with NoteFlow": note ids main linked from the OS for the main window to open (taken once) + link errors. */
+      linkedTakeOpenRequests: () => Promise<{ ids: string[]; errors: Array<{ path: string; error: LinkError }> }>
+      /** "Keep in NoteFlow": a transient linked note becomes permanent. */
+      linkedKeep: (id: string) => Promise<LinkedNoteWire | null>
+      /** The main window closed a transient linked note: main unlinks it unless it has unwritten edits or another window shows it. */
+      linkedDiscardTransient: (id: string) => Promise<{ discarded: boolean }>
+      /** Main linked files opened from the OS: take them (linkedTakeOpenRequests). Main window only. */
+      onLinkedOpenRequested: (cb: () => void) => () => void
+      /** A sticky / section window that showed this transient note closed (or left it). Main window only. */
+      onLinkedTransientReleased: (cb: (noteId: string) => void) => () => void
       /** Absolute path of a File dropped from the OS (webUtils.getPathForFile); '' if unknown. */
       getPathForFile: (file: File) => string
       minimize: () => void

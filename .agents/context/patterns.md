@@ -2144,7 +2144,10 @@ Detalles no obvios, todos en `electron/main.ts`:
   muera el proceso, así que vale en cualquier punto de la salida; tras `quit` el lock ya está libre y no
   llegan más `second-instance` (el lanzamiento arranca solo). **AppImage:** `app.relaunch` no sirve (su
   helper vive en el montaje FUSE viejo, que se desmonta al salir); se usa `relaunchAppImageAfterExit`, el
-  `/bin/sh` desacoplado del updater que espera al pid y hace `exec` sin args. No se relanza si el updater
+  `/bin/sh` desacoplado del updater que espera al pid y hace `exec` sin args. Un archivo que el lanzamiento
+  pedía abrir ("Abrir con NoteFlow") viaja en esos args, con las rutas relativas hechas absolutas
+  (`absolutizeFileArgs`, contra el `workingDirectory` del segundo proceso); en AppImage se pierde (sin args) —
+  ver patterns.md § "Notas vinculadas" → "Abrir desde el sistema". No se relanza si el updater
   está saliendo para instalar (`quittingForUpdate`): ya relanza él, y en Windows no hay que arrancar el
   exe viejo debajo del instalador. `activate` (Dock de macOS) durante la salida no relanza. Medido con
   una ventana que tarda ~1 s en cerrarse: el click pierde el lock, y la instancia relanzada arranca
@@ -2323,8 +2326,9 @@ también para un `.md`. Solo conceden:
   (registrado antes que cualquier listener de la página), exige `e.isTrusted` y saca las rutas con
   `webUtils.getPathForFile` (un `File` construido por la página no tiene ruta) → `linked:grant-drop` (`send`,
   no expuesto en `window.noteflow`). El renderer después llama a `linked:link` como siempre;
-- (siguiente) **main a sí mismo** — "Abrir con NoteFlow" (argv / `second-instance` / `open-file`) llamará a
-  `grantLinkPaths` antes de vincular.
+- **main a sí mismo** — "Abrir con NoteFlow" (argv / `second-instance` / `open-file`): main concede y
+  vincula él mismo (`processOpenFiles` → `grantLinkPaths` + `link(…, { transient: true })`); el renderer solo
+  recibe ids de notas ya vinculadas (ver "Abrir desde el sistema / notas temporales").
 Volver a vincular un archivo ya desvinculado exige elegirlo de nuevo. En tests e2e el diálogo se simula
 parcheando `dialog.showOpenDialog` en main y el drop real con CDP `Input.dispatchDragEvent` (eventos
 `isTrusted`; `dragOperationsMask` debe incluir *link*, que es el `dropEffect` del host); no hay hook de test.
@@ -2343,13 +2347,116 @@ contenido (CommonMark). Límite conocido: el parser propio de NoteFlow solo enti
 tres backticks, así que esa copia concreta (contenido con sus propias vallas) en Modo markdown se vería
 imperfecta; en Modo texto (como se crea) y en GitHub es correcta.
 
+**Abrir desde el sistema / notas temporales ("Abrir con NoteFlow").** El SO puede abrir un archivo con
+NoteFlow (Explorador/Finder → "Abrir con", doble clic si el usuario la eligió como predeterminada, `NoteFlow
+x.md` en una terminal). Registro en el SO: `.md`, `.markdown` y `.txt` (ver `release.md` § "Asociaciones de
+archivo"); NoteFlow nunca se pone como predeterminada por sí sola. (No confundir estas notas vinculadas
+**temporales** —`transient`, como la pestaña de vista previa de VS Code— con las notas temporales de 24 h
+—`expiresAt`, autoborrado—: son mecanismos distintos.)
+- **Recepción (main).** Windows/Linux: `process.argv` del primer arranque y el `argv` + `workingDirectory` de
+  `second-instance`; macOS: `app.on('open-file')`, registrado al cargar el módulo (puede llegar antes de
+  `ready`), con `preventDefault`. La extracción es pura y testeada (`electron/openWithArgs.ts`,
+  `tests/electron/openWithArgs.test.ts`): quita `argv[0]` (el exe), los switches (`-x`, `--x`, `--x=y`; en
+  Windows también `/x`, como Chromium), en dev/e2e (`process.defaultApp`, `electron <app> …`) el primer
+  posicional (la ruta de la app; Chromium pone los switches **antes** de los posicionales en el argv reenviado),
+  las rutas excluidas (`process.execPath`, `app.getAppPath()`), convierte `file://` en ruta (el `.desktop` de
+  Linux lanza con `%U`) y descarta otras URL, resuelve las relativas contra el `cwd` (el `workingDirectory`
+  del segundo proceso) y se queda con **archivos regulares existentes** (sin directorios), deduplicados y como
+  mucho 50. **Cualquier extensión** (decisión): el SO solo registra `.md/.markdown/.txt`, pero "Abrir con → Elegir
+  otra aplicación" permite abrir un `.json` o un `.log`, y una vinculada admite cualquier texto; un binario lo
+  rechaza `link` (`binary`) y sale en el aviso de errores.
+- **Vinculación (main).** Las rutas se encolan (`queueOpenFiles`) hasta que `linkedNotes.init` ha cargado el
+  registro; `processOpenFiles` (en serie) las deduplica (`uniqueOpenPaths`, testeada: el mismo archivo
+  puede encolarse dos veces —argv + `second-instance`, o un doble clic repetido durante un arranque lento— y la
+  segunda copia encontraría su concesión de un solo uso ya consumida → falso `notGranted`), las **concede**
+  (`grantLinkPaths`) y las vincula con
+  `link(paths, undefined, { transient: true })`: un archivo nuevo entra como **temporal**; uno ya vinculado
+  se abre tal cual (una permanente sigue permanente). Los ids (en el orden en que se abrieron) y los errores
+  van a una cola `openRequests` y se avisa a la ventana principal (`linked:open-requested`); el renderer los
+  **toma** con `linked:take-open-requests` (solo la ventana principal) al montar —tras la primera `loadNotes`
+  (`notesFirstLoaded`), para que el layout restaurado no los pise— y en cada aviso, así que nada se pierde si
+  llegan antes de que la ventana exista. El renderer nunca pide "vincula esta ruta": ningún canal nuevo acepta
+  rutas. `second-instance` y `open-file` además llaman a `revealMainWindow` (restaurar + rebote de foco en
+  Windows). **Sin el aviso del primer vínculo** (`LinkedNotesHost` no pasa por `start`). Errores (binario, no
+  UTF-8, dentro del dir de notas…) → modal "Some files could not be opened".
+- **Dónde se abre** (`openNotesFromSystem` en el store, `openInActivePane` en `paneUtils.ts`, testeada): el
+  primero **sustituye la nota del panel activo** (mismo `paneId`, el resto del split se queda; una temporal que
+  estuviera ahí se cierra → se descarta), los siguientes se abren al lado (`openInSplit`) hasta 3 paneles en
+  total; los demás quedan en la barra lateral marcados como temporales, sin abrir. Cierra las vistas a pantalla
+  completa (contenido, nota, cerebro).
+- **Durante la salida.** Un `second-instance` con `isQuitting` relanza tras salir (`relaunchAfterQuit`) con
+  el argv, y `absolutizeFileArgs` convierte en absolutas las rutas relativas que sean archivos (el proceso
+  relanzado arranca en NUESTRO directorio); el relanzado las recibe en su `process.argv`. `open-file` durante la
+  salida relanza con `[execPath, ruta]`. Límites: es **una sola vez por salida** (un segundo archivo en la misma
+  salida se pierde) y en **AppImage** el relanzamiento no lleva args (`relaunchAppImageAfterExit`: el helper
+  `/bin/sh` del updater hace `exec` del AppImage sin argumentos), así que un archivo abierto justo mientras la
+  app se cierra **se pierde** (la app arranca sin él). Caso raro: la AppImage no registra asociaciones por sí
+  misma (solo si una herramienta de integración instala su `.desktop`).
+- **Modelo.** `transient: true` en el registro (`LinkedNoteRecord`, `sanitizeLinkedRegistry` solo lo conserva
+  si es `true`; los registros sin el campo son permanentes) → `LinkedNoteWire.transient` →
+  `LinkedNoteState.transient` (`linkedNoteFromWire`; `mergeLinkedWire` y `loadNotes` siguen a main). Nunca se
+  toca el archivo por ser temporal: descartar = `unlink` (registro + caché + borrador).
+- **Cuándo se descarta exactamente.** Lo decide la ventana principal (`LinkedNotesHost`, función pura
+  `transientNotesToDiscard` en `src/lib/linkedNotes.ts`, testeada) y main tiene la última palabra
+  (`canDiscardTransient` en `linkedNotesLogic.ts`, testeada). Se descarta cuando se cumplen **todas**:
+  1. sigue siendo temporal;
+  2. **ya se mostró** desde que llegó: estuvo en un panel de la ventana principal, o en una sticky / ventana de
+     sección que main avisa que la soltó (`linked:transient-released`, al cerrarse esa ventana o al cambiar la
+     de sección a otra nota). Una que nunca se mostró (las sobrantes de una apertura múltiple, o una conservada
+     al arrancar por tener borrador) se queda hasta que se abra y se cierre, o hasta el siguiente arranque;
+  3. **no está en ningún panel** de la ventana principal (abrir otra nota en ese panel, cerrar el panel,
+     `setActiveNote` que colapsa el split…). Abrir la vista de contenido/nota/cerebro NO la cierra (el panel
+     sigue en el layout);
+  4. **nada sin guardar**: sin guardado pendiente en un editor (`hasPendingEdits`, tras `flushPendingEdits`),
+     sin contenido distinto del archivo ni conflicto (`isLinkedDirty`) — en el renderer —, y sin borrador en
+     userData — en main (cubre el borrador que dejó otra ventana);
+  5. ninguna sticky ni ventana de sección la muestra (`isNoteOpenInOtherWindow`: `stickyNoteIds` +
+     `sectionWindows` en main).
+  El renderer re-evalúa (diferido con `setTimeout(0)`) en cada cambio de `openPanes` o `notes` y en cada
+  `linked:transient-released`; `discardTransientNote` va en la cola de escrituras de la nota y vuelve a
+  comprobar que no se reabrió; main (`linked:discard-transient` → `discardTransient`, en la cola `serial` de la
+  nota para que una escritura en vuelo deje antes su borrador) desvincula. Una petición rechazada por main no se
+  repite hasta que la nota cambie o llegue otro `transient-released`. Así, una temporal con cambios sin escribir
+  (conflicto, archivo de solo lectura o ausente, escritura fallida) **no se descarta** al cerrarla: sigue en la
+  barra lateral (temporal + icono ámbar) hasta que se resuelva y se vuelva a cerrar, o hasta que un reintento
+  automático la deje limpia (entonces se descarta, con los cambios ya escritos).
+  **Carrera estrecha asumida:** si una sticky o ventana de sección se cierra justo cuando su última escritura
+  falla (conflicto o archivo de solo lectura), el borrador lo iba a enviar ese renderer, que ya no existe: main
+  no ve borrador, la ventana principal (que no tiene esa edición) la ve limpia y la temporal **se descarta**, y
+  esa edición se pierde. Es la misma pérdida que ya existe para una vinculada permanente en ese caso (su
+  borrador tampoco llega), con la diferencia de que aquí además se desvincula (el archivo sigue intacto, con
+  su versión del disco).
+- **Al salir / reiniciar.** No se hace nada al salir; al arrancar, `linkedNotes.init` (`dropTransientRecords`,
+  testeada) quita del registro —y del orden local— las temporales **sin borrador** y borra su caché (los archivos
+  no se tocan). Las que tienen borrador se conservan, todavía temporales: al cargarse salen sucias o en conflicto
+  (modelo de borradores normal).
+- **Pasa a permanente** con "Keep in NoteFlow" / "Mantener en NoteFlow" (`linked:keep` → `keep`, síncrono; en
+  la cabecera `LinkedNoteHeader` y en la barra compacta de la sticky) y, por decisión, con cualquier acción de
+  **organizar**: renombrar el título-alias, mover a un grupo/carpeta, favorito y archivar (`updateMeta` lo
+  quita si cambia alguno de esos campos; el store sigue a `wire.transient` en `applyLinkedUpdate`/`archiveNote`),
+  y **arrastrarla en el orden manual** (barra lateral y vista de contenido llaman antes a `keepLinkedNote`).
+  **No** la hacen permanente: editar el contenido, cambiar de modo, "Ocultar de la IA", abrirla en sticky,
+  ventana de sección o al lado, duplicarla (la copia es una nota normal), "Volver a localizar…" ni "Mostrar en
+  la carpeta".
+- **Mientras es temporal:** sin sitio en el orden manual (`splitNoteOrder` descarta sus ids; se colocan por el
+  orden por defecto), y no puede estar en grupos/carpetas/favoritos/archivadas (entrar en uno la hace permanente).
+  **IA:** no se indexa (`aiNote` devuelve `null`, `aiNotes()` la omite, `indexChanged` no avisa, y al
+  descartarla no se llama a `onRemoved` porque nunca entró); al hacerse permanente se indexa (`keep` /
+  `updateMeta` → `onIndexChange`). Las tools del agente (`list_notes`/`get_note`) sí la ven: es la nota que el
+  usuario tiene abierta.
+- **UI.** Barra lateral: título en cursiva + etiqueta "temporary"/"temporal" (tooltip con la explicación).
+  Cabecera: "· Temporary" en cursiva + botón "Keep in NoteFlow" (se encoge a su icono en un panel estrecho);
+  barra compacta de la sticky: "· Temporary" + botón con icono `Pin`.
+
 **Dónde vive cada cosa**
 - **Main, puro (testeado):** `electron/linkedNotesLogic.ts` (`tests/electron/linkedNotesLogic.test.ts`) —
   saneo del registro, normalización/dedupe de rutas (`linkedPathKey`: resuelta + minúsculas en Windows/macOS),
   texto vs binario (`decodeLinkedBytes`, `sniffLinkedBytes`), split/reensamblado byte-exacto del archivo
   (`splitLinkedFile`/`splitMarkdownFile`/`assembleMarkdownFile`: BOM, EOL dominante, salto final, frontmatter
   YAML solo en Markdown), decisiones de huella (`decideDiskEvent`, `decideWrite`),
-  nombre de imagen en `assets/` y resolución de rutas relativas de imágenes.
+  nombre de imagen en `assets/` y resolución de rutas relativas de imágenes, y las temporales
+  (`canDiscardTransient`, `dropTransientRecords`). `electron/openWithArgs.ts`
+  (`tests/electron/openWithArgs.test.ts`): qué argumentos de un lanzamiento son archivos a abrir.
 - **Main, IO:** `electron/linkedNotes.ts` (`tests/electron/linkedNotes.test.ts`, con ficheros reales) —
   registro en memoria + `userData/linked-notes.json` (con el orden manual local), caché del último
   contenido en `userData/linked-notes-cache/<id>.md`, borradores `<id>.draft.json`, watchers, escritura
@@ -2434,7 +2541,8 @@ sync (GitHub/Cloud), export, import, CLI ni el watcher del dir de notas las ve *
   version" y la "Mine" de Comparar… (punto de partida del resultado combinado) llevan las del disco; el
   combinado se escribe tal cual lo deja el usuario.
 - **No sync / no index fuera de lo local:** sí entran en el índice semántico local (ver `ai.md`), también
-  las de texto plano (`aiNotes()` las lista todas, sin mirar la extensión). Por defecto no se cambia: un
+  las de texto plano (`aiNotes()` las lista todas, sin mirar la extensión) — salvo las **temporales** (abiertas
+  desde el sistema y no mantenidas), que no se indexan hasta que pasan a permanentes. Por defecto no se cambia: un
   config o un script del proyecto también es contexto útil para el chat; si un `.json` o un log mete ruido,
   el usuario lo saca con "Ocultar de la IA" (`aiHidden` del registro local, como en cualquier vinculada).
 

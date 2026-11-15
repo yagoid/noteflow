@@ -4,6 +4,7 @@ import {
   activeNoteOf,
   closePane,
   focusOrReplace,
+  openInActivePane,
   openInSplit,
   panesForNoteIds,
   primaryPaneForNote,
@@ -167,5 +168,30 @@ describe('panesForNoteIds', () => {
     const l = panesForNoteIds(split(), ['B', 'A', 'C'], makeId)
     expect(ids(l)).toEqual(['p2:B', 'p1:A/a1', 'gen1:C'])
     expect(l.activePaneId).toBe('p2')
+  })
+})
+
+// "Open with NoteFlow": a file opened from the OS goes to the active pane, keeping the split.
+describe('openInActivePane', () => {
+  it('replaces the note of the active pane (same pane id) and keeps the other panes', () => {
+    const layout = split()
+    const out = openInActivePane({ ...layout, activePaneId: 'p2' }, 'C', 'new')
+    expect(out.panes.map((p) => [p.paneId, p.noteId])).toEqual([['p1', 'A'], ['p2', 'C'], ['p3', 'A']])
+    expect(out.activePaneId).toBe('p2')
+    // The section of the replaced note doesn't carry over.
+    expect(openInActivePane({ ...layout, activePaneId: 'p1' }, 'C', 'new').panes[0]).toEqual({ paneId: 'p1', noteId: 'C' })
+  })
+
+  it('focuses a pane already showing the note', () => {
+    const layout = { ...split(), activePaneId: 'p1' }
+    expect(openInActivePane(layout, 'B', 'new')).toEqual({ panes: layout.panes, activePaneId: 'p2' })
+    const onB = { ...split(), activePaneId: 'p2' }
+    expect(openInActivePane(onB, 'B', 'new')).toBe(onB)
+  })
+
+  it('an empty layout (or a stale active id) still opens it', () => {
+    expect(openInActivePane({ panes: [], activePaneId: null }, 'C', 'new')).toEqual({ panes: [{ paneId: 'new', noteId: 'C' }], activePaneId: 'new' })
+    const stale = openInActivePane({ panes: [{ paneId: 'p1', noteId: 'A' }], activePaneId: 'gone' }, 'C', 'new')
+    expect(stale).toEqual({ panes: [{ paneId: 'p1', noteId: 'C' }], activePaneId: 'p1' })
   })
 })

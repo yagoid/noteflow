@@ -29,6 +29,9 @@ exports.isLinkedPath = isLinkedPath;
 exports.link = link;
 exports.relocate = relocate;
 exports.unlink = unlink;
+exports.keep = keep;
+exports.isTransient = isTransient;
+exports.discardTransient = discardTransient;
 exports.updateMeta = updateMeta;
 exports.writeBody = writeBody;
 exports.setDraft = setDraft;
@@ -55,8 +58,8 @@ const drafts = new Map();
 const platform = process.platform;
 const grants = (0, linkedNotesLogic_1.createLinkGrants)(platform);
 /**
- * Paths the USER chose to link (native picker, a real drop from the OS — and later, "Open
- * with NoteFlow"): only those can enter the registry through link / relocate, each once and
+ * Paths the USER chose to link (native picker, a real drop from the OS, a file the OS opened
+ * with NoteFlow): only those can enter the registry through link / relocate, each once and
  * for a limited time (linkedNotesLogic createLinkGrants). Called by main only, never on a
  * renderer's say-so: a compromised renderer must not link (and then rewrite) `.bashrc`,
  * `.git/config` or `~/.ssh/authorized_keys`.
@@ -270,7 +273,16 @@ function toWire(rec) {
         body: rt.body,
         hash: rt.hash,
         ...(draft ? { draft } : {}),
+        ...(rec.transient ? { transient: true } : {}),
     };
+}
+/**
+ * The content / title / AI visibility of a linked note changed: reindex it — unless it's
+ * transient (opened from the OS, not kept): those never enter the semantic index.
+ */
+function indexChanged(rec) {
+    if (!rec.transient)
+        options?.onIndexChange?.(rec.id);
 }
 function find(id) {
     return (0, linkedNotesLogic_1.isLinkedNoteId)(id) ? records.find((r) => r.id === id) : undefined;
@@ -311,7 +323,7 @@ function checkOne(id) {
         if (changed)
             options?.broadcast(rec.path);
         if (contentChanged)
-            options?.onIndexChange?.(rec.id);
+            indexChanged(rec);
     });
 }
 /** Whether `dir` is an existing folder (async: an unreachable drive never blocks main). */
@@ -424,16 +436,29 @@ function init(opts) {
     }
     catch { /* none yet */ }
     const registry = (0, linkedNotesLogic_1.sanitizeLinkedRegistry)(raw, platform);
-    records = registry.notes;
-    localOrder = registry.order;
     runtime.clear();
     drafts.clear();
-    for (const rec of records) {
-        runtime.set(rec.id, checkingRuntime(rec));
+    for (const rec of registry.notes) {
         const draft = readDraft(rec.id);
         if (draft)
             drafts.set(rec.id, draft);
     }
+    // Transient notes ("Open with NoteFlow") were closed with the app: gone, unless they hold
+    // unwritten edits (a draft) — those stay, still transient, until resolved. Files untouched.
+    const cleaned = (0, linkedNotesLogic_1.dropTransientRecords)(registry, (id) => drafts.has(id));
+    records = cleaned.notes;
+    localOrder = cleaned.order;
+    if (cleaned.dropped.length > 0) {
+        for (const id of cleaned.dropped) {
+            try {
+                fs_1.default.rmSync(cacheFile(id), { force: true });
+            }
+            catch { /* ignore */ }
+        }
+        saveRegistry();
+    }
+    for (const rec of records)
+        runtime.set(rec.id, checkingRuntime(rec));
     return recheck();
 }
 function list() {
@@ -512,9 +537,11 @@ function newLinkedId() {
 /**
  * Links text files (Markdown or any other text file) — only paths granted by
  * grantLinkPaths (each consumed here, also when it fails). An already linked file (same path, platform case rules)
- * is returned as `existing` instead of being linked twice.
+ * is returned as `existing` instead of being linked twice (as it is: a permanent note stays
+ * permanent). `transient` (main's "Open with NoteFlow" only — the renderer's `linked:link`
+ * never passes it) links the NEW ones as transient notes.
  */
-async function link(paths, senderId) {
+async function link(paths, senderId, opts = {}) {
     const result = { linked: [], existing: [], errors: [] };
     const list = Array.isArray(paths) ? paths.slice(0, 200) : [];
     let added = false;
@@ -537,13 +564,14 @@ async function link(paths, senderId) {
             title: (0, linkedNotesLogic_1.defaultLinkedTitle)(valid.filePath, platform),
             created: now,
             updated: now,
+            ...(opts.transient ? { transient: true } : {}),
         };
         records.push(rec);
         await serial(rec.id, () => refresh(rec));
         added = true;
         result.linked.push(toWire(rec));
         options?.broadcast(rec.path, senderId);
-        options?.onIndexChange?.(rec.id);
+        indexChanged(rec);
     }
     if (added) {
         saveRegistry();
@@ -575,7 +603,7 @@ async function relocate(id, newPath, senderId) {
         if ((0, linkedNotesLogic_1.linkedPathKey)(oldPath, platform) !== (0, linkedNotesLogic_1.linkedPathKey)(rec.path, platform))
             options?.broadcast(oldPath, senderId);
         options?.broadcast(rec.path, senderId);
-        options?.onIndexChange?.(rec.id);
+        indexChanged(rec);
         return { ok: true, note: toWire(rec) };
     });
 }
@@ -610,8 +638,49 @@ function unlink(id, senderId) {
     saveRegistry();
     void rewatch();
     options?.broadcast(rec.path, senderId);
-    options?.onRemoved?.(rec.id);
+    // A transient note was never indexed: nothing to drop (and no stale mark for nothing).
+    if (!rec.transient)
+        options?.onRemoved?.(rec.id);
     return true;
+}
+/**
+ * "Keep in NoteFlow": a transient note (opened from the OS) becomes a regular linked note —
+ * it stays when closed and across restarts, and enters the semantic index. Synchronous, so a
+ * request queued right after it (the manual order of a dragged note) already sees it kept.
+ */
+function keep(id, senderId) {
+    const rec = find(id);
+    if (!rec)
+        return null;
+    if (rec.transient) {
+        delete rec.transient;
+        saveRegistry();
+        options?.broadcast(rec.path, senderId);
+        indexChanged(rec);
+    }
+    return toWire(rec);
+}
+/** Whether the note is a transient one (opened from the OS, not kept yet). */
+function isTransient(id) {
+    return !!find(id)?.transient;
+}
+/**
+ * Discards a transient note the main window closed: unlinks it (the FILE is never touched) —
+ * only if it's still transient, has no unwritten draft and isn't shown in a sticky or section
+ * window (`openInOtherWindow`, main's window bookkeeping). In the note's queue, so a write in
+ * flight lands (and its draft, if it failed) before the check.
+ */
+function discardTransient(id, openInOtherWindow, senderId) {
+    const rec = find(id);
+    if (!rec?.transient)
+        return Promise.resolve(false);
+    return serial(rec.id, async () => {
+        if (!records.includes(rec))
+            return false;
+        if (!(0, linkedNotesLogic_1.canDiscardTransient)(rec, { hasDraft: drafts.has(rec.id), openInOtherWindow: openInOtherWindow(rec.id) }))
+            return false;
+        return unlink(rec.id, senderId);
+    });
 }
 /** Local metadata of a linked note (title alias, group/folder, flags). Never touches the file. */
 function updateMeta(id, patch, senderId) {
@@ -645,14 +714,23 @@ function updateMeta(id, patch, senderId) {
                 delete rec[flag];
         }
     }
+    // Organizing a transient note (rename, group/folder, favorite, archive) means the user wants
+    // it around: it's kept. Text mode and "Hide from AI" are just how it's shown.
+    const kept = !!rec.transient && JSON.stringify(organizingMeta(rec)) !== JSON.stringify(organizingMeta(JSON.parse(before)));
+    if (kept)
+        delete rec.transient;
     if (JSON.stringify(rec) !== before) {
         rec.updated = new Date().toISOString();
         saveRegistry();
         options?.broadcast(rec.path, senderId);
-        if (reindex)
-            options?.onIndexChange?.(rec.id);
+        if (reindex || kept)
+            indexChanged(rec);
     }
     return toWire(rec);
+}
+/** The metadata whose change keeps a transient note (see updateMeta). */
+function organizingMeta(rec) {
+    return [rec.title, rec.group ?? null, rec.folder ?? null, !!rec.favorited, !!rec.archived];
 }
 /**
  * Atomic replace of `target` by `bytes` (tmp in the same folder + rename), keeping
@@ -709,7 +787,7 @@ function writeBody(id, body, baseHash, senderId) {
             if (changed)
                 options?.broadcast(rec.path);
             if (contentChanged)
-                options?.onIndexChange?.(rec.id);
+                indexChanged(rec);
         };
         if (disk.kind === 'missing') {
             await report();
@@ -772,7 +850,7 @@ function writeBody(id, body, baseHash, senderId) {
         consumeDraft(rec.id, body, written);
         saveRegistry();
         options?.broadcast(rec.path, senderId);
-        options?.onIndexChange?.(rec.id);
+        indexChanged(rec);
         return { ok: true, hash, body: written };
     });
 }
@@ -907,9 +985,10 @@ function mergeNoteOrder(syncedRaw) {
  * with a linked note are kept in the local registry.
  */
 function splitNoteOrder(order) {
-    const known = new Set(records.map((r) => r.id));
+    // Ids of notes unlinked since don't need a place any more; transient ones (opened from the
+    // OS, not kept) don't get one (dragging one keeps it first — the renderer's keepLinkedNote).
+    const known = new Set(records.filter((r) => !r.transient).map((r) => r.id));
     const clean = (0, linkedNotesLogic_1.sanitizeNoteOrder)(order);
-    // Ids of notes unlinked since don't need a place any more.
     for (const key of Object.keys(clean))
         clean[key] = clean[key].filter((id) => !(0, linkedNotesLogic_1.isLinkedNoteId)(id) || known.has(id));
     const { synced, local } = (0, linkedNotesLogic_1.splitLinkedOrder)(clean);
@@ -940,13 +1019,16 @@ function adoptLinkedIdsFromSynced(syncedRaw) {
         saveRegistry();
     return synced;
 }
-/** Notes for the semantic index — one section, the body (cached content when the file can't be read). */
+/**
+ * Notes for the semantic index — one section, the body (cached content when the file can't be
+ * read). Transient notes (opened from the OS, not kept) are left out: null → not indexed.
+ */
 function aiNotes() {
     return records.map((rec) => aiNote(rec.id)).filter((n) => n !== null);
 }
 function aiNote(id) {
     const rec = find(id);
-    if (!rec)
+    if (!rec || rec.transient)
         return null;
     const wire = toWire(rec);
     return {

@@ -313,6 +313,21 @@ cambie fuera de NoteFlow aparece en la nota. Diseño e invariantes técnicos: `p
   Tras vincular se abre la nota. La **primera vez** en el dispositivo un aviso explica que se edita en su
   sitio, que los no-Markdown se abren siempre en Modo texto y que es **solo local** (no se sincroniza con
   NoteFlow Cloud ni GitHub, ni se exporta). No se pueden vincular archivos de dentro de la carpeta de notas.
+- **Abrir desde el sistema ("Abrir con NoteFlow")**: al instalarla, NoteFlow aparece en **"Abrir con…"** del
+  Explorador / Finder / el gestor de archivos para `.md`, `.markdown` y `.txt` (y en la lista de apps
+  predeterminadas; nunca se pone como predeterminada por su cuenta). También vale `NoteFlow archivo.md` desde
+  una terminal, o "Abrir con → Elegir otra aplicación" con cualquier archivo de texto. La ventana pasa al frente
+  y el archivo se abre en el **panel activo** (varios a la vez: el primero ahí y un par más al lado; el resto
+  queda en el sidebar), **sin** el aviso del primer vínculo. Se abre como **nota temporal** (como la pestaña de
+  vista previa de VS Code): en el sidebar, título en *cursiva* + "temporary"; en la cabecera, "· Temporary" y el
+  botón **"Keep in NoteFlow"** (en la sticky, un icono de chincheta). Se va sola —se desvincula; el archivo no
+  se toca— al **cerrarla**: abrir otra nota en ese panel, cerrar el panel, su sticky o su ventana de sección, o
+  salir/reiniciar la app. **Nunca** con cambios sin guardar o un conflicto: se queda (temporal) hasta que se
+  resuelvan, también tras reiniciar. **Editarla no la mantiene**; sí la mantienen "Keep in NoteFlow" y
+  organizarla: renombrarla, moverla a un grupo/carpeta, marcarla como favorita, archivarla o arrastrarla en el
+  orden manual. Mientras es temporal la IA local no la indexa. Si el archivo ya estaba vinculado, se abre esa
+  nota tal cual. Un binario se rechaza con "Some files could not be opened". (No confundir con las notas
+  temporales de 24 h.)
 - **Markdown o texto plano**: un `.md`/`.markdown` funciona como se describe abajo (Modo markdown, imágenes,
   etiquetas…). **Cualquier otro archivo de texto** (`.json`, `.yaml`, `.txt`, `.py`, `.log`…) es **texto
   plano**: se abre **siempre en Modo texto** (textarea en monoespaciada, byte a byte, un `---` inicial de un
@@ -346,7 +361,7 @@ cambie fuera de NoteFlow aparece en la nota. Diseño e invariantes técnicos: `p
   ven también en el editor y en los previews.
 - **Integración**: es una nota más — grupos y carpetas, favoritos, archivar, búsqueda, paneles del split,
   ventana de sección, sticky, vista de nota/contenido, cerebro, Related, chat y tools de la IA (que pueden
-  editar su contenido, nunca crear secciones). **No aplica:** cifrado, notas temporales, export, sync,
+  editar su contenido, nunca crear secciones). **No aplica:** cifrado, notas temporales de 24 h, export, sync,
   CLI. **Duplicate** crea una nota normal (copia del contenido; sus imágenes relativas se copian dentro de la nota;
   un texto plano se copia como **un bloque de código** con su lenguaje —```` ```json ````—, en Modo texto).
   "Save as template" sí (crear desde la plantilla da una nota normal, con la misma regla). La IA local la

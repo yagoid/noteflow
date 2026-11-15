@@ -67,6 +67,31 @@ export function findLinkedNoteByPath<N extends Pick<Note, 'linked'>>(notes: read
   return notes.find((n) => !!n.linked && linkedPathKey(n.linked.path, platform) === key)
 }
 
+/** Opened from the OS ("Open with NoteFlow") and not kept yet: it goes away when closed. */
+export function isTransientLinked(note: Pick<Note, 'linked'> | null | undefined): boolean {
+  return !!note?.linked?.transient
+}
+
+/**
+ * The transient linked notes the main window should discard now (unlink — the file is never
+ * touched): opened from the OS and not kept, already SHOWN since they arrived (in a pane, or
+ * in a sticky / section window that has closed: `shownIds`), no longer in any pane
+ * (`openIds`), and with nothing unsaved — no edit pending in an editor (`isPending`) and no
+ * content that isn't in the file nor a conflict (isLinkedDirty). One with unsaved changes stays
+ * (marked temporary) until they're written or discarded; one never shown yet (the rest of a
+ * multi-file open, one restored with a draft at startup) stays until it's opened and closed.
+ * Main has the last word (canDiscardTransient: no draft in userData, no other window on it).
+ */
+export function transientNotesToDiscard(
+  notes: readonly Note[],
+  state: { openIds: ReadonlySet<string>; shownIds: ReadonlySet<string>; isPending: (id: string) => boolean },
+): string[] {
+  return notes
+    .filter((n) => isTransientLinked(n) && state.shownIds.has(n.id) && !state.openIds.has(n.id)
+      && !isLinkedDirty(n) && !state.isPending(n.id))
+    .map((n) => n.id)
+}
+
 /** Read-only while the file can't be written: missing, read-only, unreadable/too large. */
 export function isLinkedReadOnly(note: Pick<Note, 'linked'> | null | undefined): boolean {
   return !!note?.linked && note.linked.status !== 'ok'
@@ -132,6 +157,7 @@ function linkedNoteFromWireClean(wire: LinkedNoteWire): Note {
       baseHash: wire.hash,
       diskBody: wire.body,
       syncedContent: wire.body,
+      ...(wire.transient ? { transient: true } : {}),
     },
   }
 }
@@ -185,6 +211,9 @@ export function mergeLinkedWire(existing: Note & { linked: LinkedNoteState }, wi
   const status = { status: wire.status, ...(wire.error ? { error: wire.error } : {}) }
   const base = { ...existing.linked, path: wire.path }
   delete base.error
+  // Kept (or not) follows main, like the rest of the metadata.
+  delete base.transient
+  if (wire.transient) base.transient = true
   switch (decision) {
     case 'apply':
       return { note: fresh, decision }

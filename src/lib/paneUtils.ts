@@ -54,6 +54,24 @@ export function focusOrReplace(layout: PaneLayout, noteId: string, newPaneId: st
   return singlePane(layout, noteId, newPaneId)
 }
 
+/**
+ * Opens `noteId` IN the active pane (a file opened from the OS): a pane already showing the
+ * note is focused; otherwise the active pane switches to it (same pane id: the editor stays
+ * mounted) and the other panes of a split stay. An empty layout gets one pane.
+ */
+export function openInActivePane(layout: PaneLayout, noteId: string, newPaneId: string): PaneLayout {
+  const existing = primaryPaneForNote(layout, noteId)
+  if (existing) {
+    return existing.paneId === layout.activePaneId ? layout : { panes: layout.panes, activePaneId: existing.paneId }
+  }
+  const active = getActivePane(layout) ?? layout.panes[0]
+  if (!active) return singlePane(layout, noteId, newPaneId)
+  return {
+    panes: layout.panes.map((p) => (p.paneId === active.paneId ? { paneId: p.paneId, noteId } : p)),
+    activePaneId: active.paneId,
+  }
+}
+
 /** Collapses the layout to ONE pane showing `noteId` (reusing the active pane id when there is one). */
 export function singlePane(layout: PaneLayout, noteId: string, newPaneId: string): PaneLayout {
   const paneId = layout.activePaneId ?? newPaneId

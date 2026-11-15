@@ -98,4 +98,12 @@ export const linked = {
 
   // Compact (sticky)
   readOnlyCompact: 'read-only',
+
+  // Opened from the system ("Open with NoteFlow"): a temporary note until kept
+  openErrorsTitle: 'Some files could not be opened',
+  temporary: 'Temporary',
+  temporaryShort: 'temporary',
+  temporaryHint: 'Opened from your system. It closes by itself when you open another note here or close it (the file is not touched), unless it has unsaved changes. Keep it in NoteFlow to have it stay — renaming, grouping, favoriting or archiving it keeps it too.',
+  keep: 'Keep in NoteFlow',
+  keepHint: 'Keep this file in NoteFlow after you close it',
 }

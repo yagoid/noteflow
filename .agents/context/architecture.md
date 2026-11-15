@@ -33,7 +33,7 @@ noteflow/
 │   │                    #   ficheros reales; ver patterns.md § "Notas vinculadas"
 │   ├── linkedNotesLogic.ts # Pura: saneo del registro, rutas, texto vs binario (NUL/UTF-8), split/reensamblado
 │   │                    #   byte-exacto (BOM/EOL/frontmatter solo en Markdown),
-│   │                    #   decisiones eco/conflicto, nombres en assets/ — testeada
+│   │                    #   decisiones eco/conflicto, nombres en assets/, notas temporales — testeada
 │   ├── welcomeNote.ts   # Nota de bienvenida de la primera ejecución (decisión pura + contenido EN/ES) —
 │   │                    #   testeada; la crea main.ts al arrancar (seedWelcomeNoteIfFirstRun)
 │   ├── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull por carpeta,
@@ -65,6 +65,8 @@ noteflow/
 │   │                    #   allowlist de rutas descargables — testeada; ver patterns.md
 │   ├── relaunchArgs.ts  # Pura: args del relanzamiento tras salir de un lanzamiento que llegó durante la
 │   │                    #   salida (second-instance) — testeada; ver patterns.md § Single instance
+│   ├── openWithArgs.ts  # Pura: qué argumentos de un lanzamiento (argv, second-instance, open-file) son
+│   │                    #   archivos a abrir ("Abrir con NoteFlow") — testeada; ver patterns.md § "Notas vinculadas"
 │   ├── v8Flags.ts       # Pura: valor del switch `js-flags` de los renderers (`--heap-growing-percent=30`,
 │   │                    #   acota el crecimiento del heap de V8/Blink) — testeada; ver patterns.md § Memoria del renderer
 │   ├── feedback.ts      # Formulario de feedback (Ajustes → About): INSERT en public.feedback vía PostgREST,
@@ -381,6 +383,11 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `linked:save-asset` | handle | `(id, name, mime, bytes)` → copia una imagen a `assets/` junto al `.md` → `{relPath}` (`{ok:false, error:'notMarkdown'}` si la nota no es Markdown) |
 | `linked:show-in-folder` | handle | `shell.showItemInFolder` del archivo (o abre su carpeta si falta) |
 | `linked:recheck` | handle | Re-lee (async) todos los vinculados (al enfocar la ventana): estado y contenido; emite lo que cambie y resuelve al terminar (el renderer re-sincroniza entonces las notas con cambios sin escribir) |
+| `linked:take-open-requests` | handle | "Abrir con NoteFlow": → `{ids, errors}` de los archivos que main recibió del SO (argv / `second-instance` / `open-file`), concedió y vinculó él mismo como **temporales** (`transient`); los entrega una vez y vacía la cola. Solo la ventana principal (otra recibe `{ids: [], errors: []}`). No acepta rutas: el renderer nunca puede pedir vincular nada por aquí |
+| `linked:open-requested` | event (main→ventana principal) | Hay archivos abiertos desde el SO en la cola: el renderer los toma con `linked:take-open-requests` (también lo hace al montar, tras la primera `loadNotes`) |
+| `linked:keep` | handle | `(id)` → "Keep in NoteFlow": una vinculada temporal pasa a permanente (quita `transient` del registro, broadcast, se indexa) → wire (`null` si no existe) |
+| `linked:discard-transient` | handle | `(id)` → `{discarded}`: la ventana principal cerró una temporal; main la desvincula (nunca toca el archivo) solo si sigue temporal, **no tiene borrador** y **ninguna sticky ni ventana de sección la muestra**; en la cola de la nota. Solo la ventana principal |
+| `linked:transient-released` | event (main→ventana principal) | `(noteId)`: una sticky o ventana de sección que mostraba esa temporal se cerró (o la de sección pasó a otra nota): la ventana principal re-evalúa si descartarla |
 | esquema `nflinked:` | protocol | `nflinked://n/<id>/<src>` (privilegios `standard` + `secure`, sin fetch) sirve SOLO archivos de imagen cuya ruta es relativa a la carpeta del `.md` de una nota vinculada Markdown (nunca para texto plano); puede subir de carpeta (`../img/x.png`). Rechaza esquemas, unidades, rutas absolutas/UNC, `:` y NUL, antes y después de decodificar `%xx` (previews y NodeView de imagen) |
 | `app:open-notes-folder` | handle | Abre la carpeta en el explorador |
 | `app:choose-notes-dir` | handle | Diálogo para elegir carpeta |
@@ -689,9 +696,12 @@ Estructura de `settings.json`:
 > in-place del apartado "Seguridad" de arriba es solo para `settings.json`).
 > Las **notas vinculadas** (archivos de texto externos editados en su sitio) guardan su estado en
 > `userData/linked-notes.json` (`{version: 1, notes: [{id: 'lnk:…', path, title, group?, folder?,
-> favorited?, archived?, isRawMode?, aiHidden?, created, updated, known?: {hash, size, mtimeMs}}], order:
-> {contextKey: id[]}}` — `order` = listas completas del orden manual de los contextos con alguna vinculada,
-> que nunca van a `note-order.json`; saneado al leer por `sanitizeLinkedRegistry`; tmp + rename, sin secretos),
+> favorited?, archived?, isRawMode?, aiHidden?, created, updated, known?: {hash, size, mtimeMs},
+> transient?: true}], order: {contextKey: id[]}}` — `order` = listas completas del orden manual de los
+> contextos con alguna vinculada, que nunca van a `note-order.json`; `transient` = abierta desde el sistema
+> ("Abrir con NoteFlow") y no mantenida: se descarta al cerrarla y al arrancar (salvo con borrador), sin sitio en
+> el orden ni índice de IA; sin el campo = permanente (registros anteriores incluidos); saneado al leer por
+> `sanitizeLinkedRegistry`; tmp + rename, sin secretos),
 > una **caché del último contenido conocido** por nota en `userData/linked-notes-cache/<id>.md` (para seguir
 > mostrándola si el archivo falta o mientras se lee al arrancar) y, mientras tenga cambios sin escribir
 > (conflicto, archivo de solo lectura o ausente), un **borrador** `<id>.draft.json` (`{body, baseHash}`).

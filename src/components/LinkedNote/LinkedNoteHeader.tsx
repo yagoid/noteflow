@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Undo2, AlertTriangle, CloudOff, FolderOpen, GitCompare, Link2Off, RotateCcw, Save, Search } from 'lucide-react'
+import { Undo2, AlertTriangle, CloudOff, FolderOpen, GitCompare, Link2Off, Pin, RotateCcw, Save, Search } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { ConfirmModal } from '../ConfirmModal'
 import { LinkedConflictModal } from './LinkedConflictModal'
@@ -44,6 +44,7 @@ function useLinkedActions(note: LinkedNote) {
     }
   }
 
+  const keepLinkedNote = useNotesStore((s) => s.keepLinkedNote)
   const discardLinkedChanges = useNotesStore((s) => s.discardLinkedChanges)
   const askDiscard = () => setModal({
     title: t.linked.discardConfirmTitle,
@@ -90,6 +91,7 @@ function useLinkedActions(note: LinkedNote) {
     reload: () => void resolveLinkedConflict(note.id, { kind: 'reload' }),
     openCompare: () => setCompareOpen(true),
     showInFolder: () => void window.noteflow.linkedShowInFolder(note.id),
+    keep: () => void keepLinkedNote(note.id),
     modals,
   }
 }
@@ -142,7 +144,17 @@ export function LinkedNoteHeader({ note }: { note: LinkedNote }) {
         <span className="flex-shrink-0 flex items-center gap-1 text-text-muted/50" title={t.linked.localOnly}>
           · <CloudOff size={11} /> {t.linked.localOnlyShort}
         </span>
+        {/* Opened from the system: goes away when closed, unless kept. */}
+        {linked.transient && (
+          <span className="flex-shrink-0 italic text-text-muted" title={t.linked.temporaryHint}>· {t.linked.temporary}</span>
+        )}
         <span className="flex-1" />
+        {linked.transient && (
+          // Narrow pane: the path gives way first, then this shrinks towards its icon (the row never wraps).
+          <button type="button" onClick={a.keep} title={t.linked.keepHint} aria-label={t.linked.keep} className={`${btn} min-w-0 shrink-[0.01] border border-border text-text hover:bg-surface-3`}>
+            <Pin size={10} className="flex-shrink-0" /> <span className="truncate">{t.linked.keep}</span>
+          </button>
+        )}
         <button type="button" onClick={a.showInFolder} className={quietBtn} title={t.linked.showInFolder} aria-label={t.linked.showInFolder}>
           <FolderOpen size={11} />
         </button>
@@ -200,7 +212,8 @@ export function LinkedNoteHeader({ note }: { note: LinkedNote }) {
 
 /**
  * Compact version for the sticky window: the file name with the full path in the tooltip,
- * the state (read-only / conflict) and, in a conflict, the same three choices.
+ * the state (read-only / conflict, temporary + "Keep in NoteFlow") and, in a conflict, the
+ * same three choices.
  */
 export function LinkedNoteCompactBar({ note }: { note: LinkedNote }) {
   const t = useT()
@@ -215,7 +228,13 @@ export function LinkedNoteCompactBar({ note }: { note: LinkedNote }) {
         <LinkedFileIcon path={linked.path} size={10} className={`flex-shrink-0 ${LINKED_TONE_CLASS[tone]}`} />
         <span className="truncate">{a.file}</span>
         {tone !== 'ok' && <span className={`flex-shrink-0 ${LINKED_TONE_CLASS[tone]}`}>· {linkedStatusLabel(t.linked, linked, dirty)}</span>}
+        {linked.transient && <span className="flex-shrink-0 italic" title={t.linked.temporaryHint}>· {t.linked.temporary}</span>}
         <span className="flex-1" />
+        {linked.transient && (
+          <button type="button" onClick={a.keep} className={quietBtn} title={t.linked.keep} aria-label={t.linked.keep}>
+            <Pin size={10} />
+          </button>
+        )}
         <button type="button" onClick={a.showInFolder} className={quietBtn} title={t.linked.showInFolder} aria-label={t.linked.showInFolder}>
           <FolderOpen size={10} />
         </button>

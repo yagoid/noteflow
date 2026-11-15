@@ -1,0 +1,16 @@
+
+      <!-- "Open with NoteFlow" for the Microsoft Store build (appx.customExtensionsPath in package.json,
+           inserted into <Application><Extensions>). Not build.fileAssociations: that would also reach the
+           NSIS installer, whose stock macro makes the app the default handler (see build/nsis-include.nsh).
+           Packaged apps can never make themselves the default: Windows only lists NoteFlow in "Open with"
+           and in Settings > Default apps. The file arrives as a command-line argument. -->
+      <uap:Extension Category="windows.fileTypeAssociation">
+        <uap:FileTypeAssociation Name="noteflow-text">
+          <uap:DisplayName>Text document</uap:DisplayName>
+          <uap:SupportedFileTypes>
+            <uap:FileType>.md</uap:FileType>
+            <uap:FileType>.markdown</uap:FileType>
+            <uap:FileType>.txt</uap:FileType>
+          </uap:SupportedFileTypes>
+        </uap:FileTypeAssociation>
+      </uap:Extension>

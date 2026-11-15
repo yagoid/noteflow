@@ -88,4 +88,11 @@ export const linked = {
   dropToLink: 'Suelta para vincular el archivo',
 
   readOnlyCompact: 'solo lectura',
+
+  openErrorsTitle: 'No se pudieron abrir algunos archivos',
+  temporary: 'Temporal',
+  temporaryShort: 'temporal',
+  temporaryHint: 'Abierta desde tu sistema. Se cierra sola cuando abres otra nota aquí o la cierras (el archivo no se toca), salvo que tenga cambios sin guardar. Mantenla en NoteFlow para que se quede; renombrarla, moverla a un grupo, marcarla como favorita o archivarla también la mantiene.',
+  keep: 'Mantener en NoteFlow',
+  keepHint: 'Mantener este archivo en NoteFlow después de cerrarlo',
 }

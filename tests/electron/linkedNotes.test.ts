@@ -7,6 +7,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import * as linked from '../../electron/linkedNotes'
+import { linkedCacheFileName } from '../../electron/linkedNotesLogic'
 
 let root: string
 let userData: string
@@ -425,5 +426,115 @@ describe('linkedNotes (IO)', () => {
     expect(linked.__test.watchedDirs()).not.toContain(otherDir)
     expect(linked.__test.watchedDirs()).toContain(project)
     expect(linked.get(noteA.id)?.status).toBe('ok')
+  })
+})
+
+// "Open with NoteFlow": main links the files the OS opened as TRANSIENT notes (closed →
+// unlinked; the file is never touched).
+describe('transient linked notes (IO)', () => {
+  const openWith = (paths: string[]) => { linked.grantLinkPaths(paths); return linked.link(paths, undefined, { transient: true }) }
+  const reindexed: string[] = []
+  const removed: string[] = []
+  const initTracking = () => linked.init({
+    userDataDir: userData,
+    notesDir,
+    broadcast: (filePath, senderId) => broadcasts.push({ filePath, senderId }),
+    onIndexChange: (id) => reindexed.push(id),
+    onRemoved: (id) => removed.push(id),
+  })
+  beforeEach(async () => {
+    reindexed.length = 0
+    removed.length = 0
+    await initTracking()
+  })
+
+  it('links new files as transient and reuses an already linked one as it is', async () => {
+    const a = write('a.md', '# A\n')
+    const b = write('b.txt', 'b\n')
+    const [permanent] = (await link([b])).linked
+    const res = await openWith([a, b])
+    expect(res.linked).toHaveLength(1)
+    expect(res.linked[0]).toMatchObject({ path: a, transient: true })
+    expect(res.existing.map((w) => [w.id, w.transient])).toEqual([[permanent.id, undefined]])
+    // Not indexed while transient (the permanent one was).
+    expect(reindexed).toEqual([permanent.id])
+    expect(linked.aiNotes().map((n) => n.note.noteId)).toEqual([permanent.id])
+    expect(linked.aiNote(res.linked[0].id)).toBeNull()
+    // The registry keeps the flag; the file is untouched.
+    const reg = JSON.parse(fs.readFileSync(path.join(userData, 'linked-notes.json'), 'utf-8'))
+    expect(reg.notes.find((n: { id: string }) => n.id === res.linked[0].id).transient).toBe(true)
+    expect(fs.readFileSync(a, 'utf-8')).toBe('# A\n')
+  })
+
+  it('startup drops the transient notes without a draft and keeps one with unsaved edits', async () => {
+    const a = write('a.md', 'x\n')
+    const b = write('b.md', 'y\n')
+    const [ta] = (await openWith([a])).linked
+    const [tb] = (await openWith([b])).linked
+    linked.setDraft(tb.id, { body: 'edited', baseHash: tb.hash })
+    await initTracking()
+    expect(linked.list().map((n) => n.id)).toEqual([tb.id])
+    expect(linked.get(tb.id)).toMatchObject({ transient: true, draft: { body: 'edited' } })
+    expect(fs.existsSync(path.join(userData, 'linked-notes-cache', linkedCacheFileName(ta.id)))).toBe(false)
+    expect(JSON.parse(fs.readFileSync(path.join(userData, 'linked-notes.json'), 'utf-8')).notes.map((n: { id: string }) => n.id)).toEqual([tb.id])
+    expect(fs.readFileSync(a, 'utf-8')).toBe('x\n')
+    expect(fs.readFileSync(b, 'utf-8')).toBe('y\n')
+  })
+
+  it('a registry written without the flag keeps every note at startup', async () => {
+    fs.writeFileSync(path.join(userData, 'linked-notes.json'), JSON.stringify({ version: 1, notes: [{ id: 'lnk:old', path: write('old.md', 'o\n'), title: 'old' }] }))
+    await initTracking()
+    expect(linked.list().map((n) => [n.id, n.transient])).toEqual([['lnk:old', undefined]])
+  })
+
+  it('"Keep in NoteFlow" makes it permanent: survives a restart and is indexed', async () => {
+    const [t] = (await openWith([write('a.md', 'x\n')])).linked
+    expect(linked.keep(t.id)?.transient).toBeUndefined()
+    expect(linked.isTransient(t.id)).toBe(false)
+    expect(reindexed).toEqual([t.id])
+    await initTracking()
+    expect(linked.list().map((n) => n.id)).toEqual([t.id])
+    expect(linked.keep('lnk:nope')).toBeNull()
+  })
+
+  it('organizing it (rename, group, favorite, archive) keeps it; text mode and "Hide from AI" do not', async () => {
+    const [a, b, c, d, e] = (await openWith(['a.md', 'b.md', 'c.md', 'd.md', 'e.md'].map((n) => write(n, `${n}\n`)))).linked
+    expect(linked.updateMeta(a.id, { isRawMode: true })?.transient).toBe(true)
+    expect(linked.updateMeta(a.id, { aiHidden: true })?.transient).toBe(true)
+    expect(linked.updateMeta(a.id, { title: 'a' })?.transient).toBe(true) // same title: nothing done
+    expect(linked.updateMeta(a.id, { title: 'Renamed' })?.transient).toBeUndefined()
+    expect(linked.updateMeta(b.id, { group: 'g1' })?.transient).toBeUndefined()
+    expect(linked.updateMeta(c.id, { favorited: true })?.transient).toBeUndefined()
+    expect(linked.updateMeta(d.id, { archived: true })?.transient).toBeUndefined()
+    expect(linked.isTransient(e.id)).toBe(true)
+    // Kept → indexed now.
+    expect(reindexed.sort()).toEqual([a.id, b.id, c.id, d.id].sort())
+  })
+
+  it('discards only a transient note without a draft that no other window shows; never the file', async () => {
+    const file = write('a.md', 'x\n')
+    const [t] = (await openWith([file])).linked
+    const [kept] = (await link([write('k.md', 'k\n')])).linked
+    expect(await linked.discardTransient(kept.id, () => false)).toBe(false)
+    expect(await linked.discardTransient(t.id, () => true)).toBe(false) // shown in a sticky
+    linked.setDraft(t.id, { body: 'unsaved', baseHash: t.hash })
+    expect(await linked.discardTransient(t.id, () => false)).toBe(false) // unwritten edits
+    linked.setDraft(t.id, null)
+    expect(await linked.discardTransient(t.id, () => false)).toBe(true)
+    expect(linked.get(t.id)).toBeNull()
+    expect(await linked.discardTransient(t.id, () => false)).toBe(false)
+    expect(fs.readFileSync(file, 'utf-8')).toBe('x\n')
+    // Never indexed: nothing to remove from the index.
+    expect(removed).toEqual([])
+  })
+
+  it('a transient note takes no place in the manual order', async () => {
+    const [t] = (await openWith([write('a.md', 'x\n')])).linked
+    const [kept] = (await link([write('k.md', 'k\n')])).linked
+    linked.splitNoteOrder({ ungrouped: ['n1', t.id, kept.id] })
+    expect(linked.mergeNoteOrder({ ungrouped: ['n1'] })).toEqual({ ungrouped: ['n1', kept.id] })
+    linked.keep(t.id)
+    linked.splitNoteOrder({ ungrouped: ['n1', t.id, kept.id] })
+    expect(linked.mergeNoteOrder({ ungrouped: ['n1'] })).toEqual({ ungrouped: ['n1', t.id, kept.id] })
   })
 })

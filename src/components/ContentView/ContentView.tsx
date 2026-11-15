@@ -81,6 +81,7 @@ export function ContentView({ place, onClose }: ContentViewProps) {
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const createNote = useNotesStore((s) => s.createNote)
   const updateNote = useNotesStore((s) => s.updateNote)
+  const keepLinkedNote = useNotesStore((s) => s.keepLinkedNote)
   const deleteNote = useNotesStore((s) => s.deleteNote)
   const archiveNote = useNotesStore((s) => s.archiveNote)
   const groups = useGroupsStore((s) => s.groups)
@@ -435,7 +436,11 @@ export function ContentView({ place, onClose }: ContentViewProps) {
         // The context's full order (hidden and archived notes keep their place).
         const ids = contextNoteIds(notes, key, { groups, folders, noteOrder })
         const next = moveIdNextTo(ids, draggedId, noteId, mark.position)
-        if (next) void setContextNoteOrder(key, next)
+        // A temporary linked note (opened from the system) is kept before it takes a place.
+        if (next) {
+          const save = () => setContextNoteOrder(key, next)
+          void (notes.find((n) => n.id === draggedId)?.linked?.transient ? keepLinkedNote(draggedId).then(save) : save())
+        }
       },
     }
   })

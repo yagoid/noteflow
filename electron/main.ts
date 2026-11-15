@@ -70,6 +70,7 @@ import {
   type UpdateCheckResult,
 } from './updateAsset'
 import { secondInstanceRelaunchArgs } from './relaunchArgs'
+import { absolutizeFileArgs, launchFilePaths, openTargets, uniqueOpenPaths, type OpenTargetOptions } from './openWithArgs'
 import { rendererJsFlags } from './v8Flags'
 import {
   parseActivityLog,
@@ -95,7 +96,7 @@ import {
 import { sanitizeSnippets } from './snippetsFile'
 import { isGroupsMetadataFile } from './notesWatchFilter'
 import * as linkedNotes from './linkedNotes'
-import { LINKED_ID_PREFIX, isLinkedNoteId, isMarkdownPath } from './linkedNotesLogic'
+import { LINKED_ID_PREFIX, isLinkedNoteId, isMarkdownPath, linkedPathKey } from './linkedNotesLogic'
 
 // Images referenced relatively by a linked note (`assets/x.png` next to an external .md) are
 // served through this scheme: `nflinked://n/<encoded note id>/<encoded relative src>` (the src
@@ -1107,6 +1108,8 @@ const prevBoundsMap = new Map<number, { x: number; y: number; width: number; hei
 
 // Tracks all open sticky windows to cascade their initial positions
 const stickyWindows = new Set<BrowserWindow>()
+// win.id → the note a sticky shows (a transient linked note shown there isn't discarded).
+const stickyNoteIds = new Map<number, string>()
 
 // Tracks currently folded sticky windows to stack their pills vertically
 const foldedWindows = new Set<BrowserWindow>()
@@ -1316,6 +1319,7 @@ function createStickyWindow(
   // even when the window loses focus (CSS border-radius is ignored by DWM).
   win.on('resize', () => applyStickyShape(win))
   stickyKeys.set(win.id, key)
+  stickyNoteIds.set(win.id, noteId)
   win.on('moved', () => scheduleRememberStickyBounds(win))
   win.on('resized', () => scheduleRememberStickyBounds(win))
   win.on('close', () => rememberStickyBoundsNow(win))
@@ -1329,6 +1333,8 @@ function createStickyWindow(
     const running = stickyAnimations.get(win.id)
     if (running) clearInterval(running)
     stickyAnimations.delete(win.id)
+    stickyNoteIds.delete(win.id)
+    releaseTransientNote(noteId)
   })
 
   win.once('ready-to-show', () => {
@@ -1441,7 +1447,9 @@ function createSectionWindow(noteId: string, sectionId: string): BrowserWindow {
   })
 
   win.on('closed', () => {
+    const target = sectionWindows.get(win)
     sectionWindows.delete(win)
+    if (target) releaseTransientNote(target.noteId)
   })
 
   // Same recovery as the main window: reload a crashed/hung renderer, back on the
@@ -1759,9 +1767,9 @@ function showWindow() {
  * the click without effect. While quitting there is nothing to show: the launch
  * is relaunched after this process exits instead (relaunchAfterQuit).
  */
-function revealMainWindow(argv: readonly string[] = []) {
+function revealMainWindow(argv: readonly string[] = [], workingDirectory = process.cwd()) {
   if (isQuitting) {
-    relaunchAfterQuit(argv)
+    relaunchAfterQuit(argv, workingDirectory)
     return
   }
   if (!mainWindow) {
@@ -1800,7 +1808,7 @@ function revealMainWindow(argv: readonly string[] = []) {
  * flag). Skipped when the updater is quitting to install: it relaunches itself,
  * and the Windows installer must not have the old exe started under it.
  */
-function relaunchAfterQuit(argv: readonly string[]) {
+function relaunchAfterQuit(argv: readonly string[], workingDirectory = process.cwd()) {
   if (relaunchAfterQuitScheduled || quittingForUpdate) return
   relaunchAfterQuitScheduled = true
   const appImagePath = process.env.APPIMAGE
@@ -1813,7 +1821,84 @@ function relaunchAfterQuit(argv: readonly string[]) {
     relaunchAppImageAfterExit(appImagePath)
     return
   }
-  app.relaunch({ args: secondInstanceRelaunchArgs(argv) })
+  // A file it asked to open ("Open with NoteFlow", `NoteFlow notes.md`) travels in the args;
+  // a relative one is made absolute: the relaunched process starts in OUR directory.
+  app.relaunch({ args: absolutizeFileArgs(secondInstanceRelaunchArgs(argv), workingDirectory, isExistingFile) })
+}
+
+// ── "Open with NoteFlow" (files from the OS: argv, second-instance, open-file) ─────
+// A file the OS (or a terminal) opens with NoteFlow is linked as a TRANSIENT linked note
+// (closed → unlinked; never the file) and opened in the main window's active pane. Main grants
+// the path itself (linkedNotes.grantLinkPaths: the user chose it in the OS) and links it here —
+// the renderer never asks to link a path of its own. The window takes the resulting note ids
+// with `linked:take-open-requests` (on load, and when nudged by `linked:open-requested`), so
+// nothing is lost if they arrive before it's ready. See patterns.md § "Notas vinculadas" →
+// "Abrir desde el sistema / notas temporales".
+
+function isExistingFile(p: string): boolean {
+  try { return fs.statSync(p).isFile() } catch { return false }
+}
+
+function openTargetOptions(cwd: string): OpenTargetOptions {
+  return { cwd, exclude: [process.execPath, app.getAppPath()], isFile: isExistingFile }
+}
+
+/** The files a launch's argv asks to open (dev / e2e: `electron <app> …`, the app path skipped). */
+function launchFiles(argv: readonly string[], cwd: string): string[] {
+  return launchFilePaths(argv, { ...openTargetOptions(cwd), defaultApp: !!process.defaultApp })
+}
+
+// linkedNotes.init has loaded the registry: files can be linked.
+let linkedNotesReady = false
+const pendingOpenFiles: string[] = []
+let openRequests: { ids: string[]; errors: Array<{ path: string; error: linkedNotes.LinkError }> } = { ids: [], errors: [] }
+let openFilesQueue: Promise<void> = Promise.resolve()
+
+function queueOpenFiles(paths: readonly string[]): void {
+  if (paths.length === 0) return
+  pendingOpenFiles.push(...paths)
+  if (linkedNotesReady) processOpenFiles()
+}
+
+/** Links the pending files (transient, one at a time) and tells the main window to open them. */
+function processOpenFiles(): void {
+  openFilesQueue = openFilesQueue.then(async () => {
+    // Each file once: a second copy would find its single-use grant consumed (`notGranted`).
+    const paths = uniqueOpenPaths(pendingOpenFiles.splice(0))
+    if (paths.length === 0) return
+    linkedNotes.grantLinkPaths(paths)
+    const res = await linkedNotes.link(paths, undefined, { transient: true })
+    // In the order they were opened (an already linked file opens its note, kept or not).
+    const idByKey = new Map([...res.linked, ...res.existing].map((w) => [linkedPathKey(w.path), w.id]))
+    for (const p of paths) {
+      const id = idByKey.get(linkedPathKey(p))
+      if (id && !openRequests.ids.includes(id)) openRequests.ids.push(id)
+    }
+    openRequests.errors.push(...res.errors)
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('linked:open-requested')
+  }).catch((err) => console.error('[linked] open with NoteFlow failed:', String(err)))
+}
+
+/**
+ * A sticky / section window that showed `noteId` closed (or moved to another note): if it's a
+ * transient linked note, the main window decides whether it's closed everywhere now.
+ */
+function releaseTransientNote(noteId: string): void {
+  if (!linkedNotes.isTransient(noteId) || !mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('linked:transient-released', noteId)
+}
+
+/** Whether a sticky or section window shows the note (main's own bookkeeping). */
+function isNoteOpenInOtherWindow(noteId: string): boolean {
+  for (const [winId, id] of stickyNoteIds) {
+    if (id !== noteId) continue
+    const win = BrowserWindow.fromId(winId)
+    if (win && !win.isDestroyed()) return true
+  }
+  for (const [win, target] of sectionWindows) {
+    if (target.noteId === noteId && !win.isDestroyed()) return true
+  }
+  return false
 }
 
 function toggleWindow() {
@@ -2167,6 +2252,20 @@ ipcMain.handle('linked:link', (event, paths: unknown) => linkedNotes.link(paths,
 ipcMain.handle('linked:relocate', (event, id: unknown, newPath: unknown) => linkedNotes.relocate(id, newPath, event.sender.id))
 ipcMain.handle('linked:unlink', (event, id: unknown) => ({ ok: linkedNotes.unlink(id, event.sender.id) }))
 ipcMain.handle('linked:update-meta', (event, id: unknown, patch: unknown) => linkedNotes.updateMeta(id, patch, event.sender.id))
+// "Open with NoteFlow": the notes main linked from the OS for the main window to open (taken
+// once), and the transient ones it closed — discarded only if main agrees (no unwritten draft,
+// not shown in a sticky / section window). Neither takes a path: nothing can be linked here.
+ipcMain.handle('linked:take-open-requests', (event) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return { ids: [], errors: [] }
+  const taken = openRequests
+  openRequests = { ids: [], errors: [] }
+  return taken
+})
+ipcMain.handle('linked:keep', (event, id: unknown) => linkedNotes.keep(id, event.sender.id))
+ipcMain.handle('linked:discard-transient', async (event, id: unknown) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return { discarded: false }
+  return { discarded: await linkedNotes.discardTransient(id, isNoteOpenInOtherWindow, event.sender.id) }
+})
 // (The renderer logs the edit in the activity log itself, like any note edit.)
 ipcMain.handle('linked:write', (event, id: unknown, body: unknown, baseHash: unknown) =>
   linkedNotes.writeBody(id, body, baseHash, event.sender.id))
@@ -4814,7 +4913,10 @@ ipcMain.on('window:open-section-window', (_event, noteId: unknown, sectionId: un
 ipcMain.on('window:section-window-target', (event, noteId: unknown, sectionId: unknown) => {
   if (!isWindowTargetId(noteId) || !isWindowTargetId(sectionId)) return
   const win = BrowserWindow.fromWebContents(event.sender)
-  if (win && sectionWindows.has(win)) sectionWindows.set(win, { noteId, sectionId })
+  const previous = win ? sectionWindows.get(win) : undefined
+  if (win && previous) sectionWindows.set(win, { noteId, sectionId })
+  // Another note in this window: a transient linked note it showed was closed here.
+  if (previous && previous.noteId !== noteId) releaseTransientNote(previous.noteId)
 })
 
 ipcMain.on('window:set-size', (event, width: number, height: number, minW: number, minH: number) => {
@@ -4940,6 +5042,11 @@ app.whenReady().then(async () => {
     onRemoved: (id) => aiIndex.removeFromIndex(linkedNotes.aiIndexKey(id)),
   }).catch((err) => console.error('[linked] initial check failed:', String(err)))
   protocol.handle(LINKED_ASSET_SCHEME, handleLinkedAssetRequest)
+  // "Open with NoteFlow": the files of our own command line (and any that arrived from
+  // second-instance / open-file before the registry was loaded).
+  linkedNotesReady = true
+  queueOpenFiles(launchFiles(process.argv, process.cwd()))
+  processOpenFiles()
 
   githubSync.loadSyncSettings()
   githubSync.setNotesDir(NOTES_DIR)
@@ -5200,7 +5307,23 @@ app.on('will-quit', () => {
   flushActivityLog()
 })
 
-// While quitting, revealMainWindow relaunches after exit with this launch's argv.
-app.on('second-instance', (_event, argv) => {
-  revealMainWindow(argv)
+// While quitting, revealMainWindow relaunches after exit with this launch's argv (its files
+// included, made absolute against its working directory).
+app.on('second-instance', (_event, argv, workingDirectory) => {
+  if (!isQuitting) queueOpenFiles(launchFiles(argv, workingDirectory || process.cwd()))
+  revealMainWindow(argv, workingDirectory || process.cwd())
+})
+
+// macOS: a file opened with NoteFlow (Finder, `open -a NoteFlow x.md`, a drop on the Dock icon)
+// arrives here — also BEFORE 'ready' on a cold start, so this is registered at load. Queued
+// until the linked-notes registry is loaded. While quitting, it's relaunched with the file.
+app.on('open-file', (event, filePath) => {
+  event.preventDefault()
+  if (!gotTheLock) return
+  if (isQuitting) {
+    relaunchAfterQuit([process.execPath, filePath], process.cwd())
+    return
+  }
+  queueOpenFiles(openTargets([filePath], openTargetOptions(process.cwd())))
+  revealMainWindow()
 })

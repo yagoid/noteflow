@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FileSymlink } from 'lucide-react'
-import { useNotesStore } from '../../stores/notesStore'
+import { notesFirstLoaded, useNotesStore } from '../../stores/notesStore'
+import { hasPendingEdits } from '../../lib/pendingEdits'
 import { ConfirmModal } from '../ConfirmModal'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import type { LinkError } from '../../types'
-import { isLinkedDirty } from '../../lib/linkedNotes'
+import { isLinkedDirty, isTransientLinked, transientNotesToDiscard } from '../../lib/linkedNotes'
 import { LINK_FILE_EVENT, dragHasFiles, fileNameOf, linkablePathsOfDrop } from './linkedActions'
 
 // Shown once per device: what linking means (edited in place, local only).
@@ -16,20 +17,24 @@ const NOTICE_SEEN_KEY = 'noteflow-linked-notice-seen'
  * report of files that couldn't be linked (binary, not UTF-8…), and dropping files from
  * the OS anywhere on the window (captured before the editor / sidebar see the drop: a
  * dropped file is linked, never inserted as text). Images keep dropping into the editor.
- * Also re-checks the linked files when the window gets focus (read-only / missing / back).
+ * Also re-checks the linked files when the window gets focus (read-only / missing / back),
+ * opens the files main linked from the OS ("Open with NoteFlow" — no first-link notice) and
+ * discards the transient ones once they're closed (see transientNotesToDiscard).
  */
 export function LinkedNotesHost() {
   const t = useT()
   const linkFiles = useNotesStore((s) => s.linkFiles)
   const [pendingFirst, setPendingFirst] = useState<{ paths?: string[] } | null>(null)
-  const [errors, setErrors] = useState<Array<{ path: string; error: LinkError }> | null>(null)
+  const [errors, setErrors] = useState<{ title: string; list: Array<{ path: string; error: LinkError }> } | null>(null)
+  const tRef = useRef(t)
+  useEffect(() => { tRef.current = t })
   const [dropActive, setDropActive] = useState(false)
 
   const run = useCallback(async (paths?: string[]) => {
     const list = paths ?? await window.noteflow.linkedPickFiles({ multi: true })
     if (list.length === 0) return
     const res = await linkFiles(list)
-    if (res.errors.length > 0) setErrors(res.errors)
+    if (res.errors.length > 0) setErrors({ title: tRef.current.linked.linkErrorsTitle, list: res.errors })
   }, [linkFiles])
 
   const start = useCallback((paths?: string[]) => {
@@ -91,6 +96,62 @@ export function LinkedNotesHost() {
     }
   }, [])
 
+  // "Open with NoteFlow": main linked the files (transient) and queued their ids. Taken once
+  // the first load has set the panes (so the restored layout doesn't replace them), and again
+  // each time main nudges.
+  useEffect(() => {
+    let alive = true
+    const take = async () => {
+      await notesFirstLoaded()
+      const { ids, errors: failed } = await window.noteflow.linkedTakeOpenRequests()
+      if (!alive) return
+      if (ids.length > 0) await useNotesStore.getState().openNotesFromSystem(ids)
+      if (failed.length > 0) setErrors({ title: tRef.current.linked.openErrorsTitle, list: failed })
+    }
+    void take().catch(() => undefined)
+    const off = window.noteflow.onLinkedOpenRequested(() => { void take().catch(() => undefined) })
+    return () => { alive = false; off() }
+  }, [])
+
+  // Transient notes (opened from the OS) go away once closed: no longer in any pane after
+  // having been shown (a pane, or a sticky / section window main says has let it go), with
+  // nothing unsaved. Re-judged when the panes or the notes change.
+  useEffect(() => {
+    const shown = new Set<string>()
+    // Last note object judged per id: an unchanged note refused by main isn't asked again.
+    const asked = new Map<string, unknown>()
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const judge = () => {
+      timer = null
+      const s = useNotesStore.getState()
+      const openIds = new Set(s.openPanes.map((p) => p.noteId))
+      for (const id of openIds) shown.add(id)
+      for (const id of shown) if (!s.notes.some((n) => n.id === id && isTransientLinked(n))) { shown.delete(id); asked.delete(id) }
+      for (const id of transientNotesToDiscard(s.notes, { openIds, shownIds: shown, isPending: hasPendingEdits })) {
+        const note = s.notes.find((n) => n.id === id)
+        if (asked.get(id) === note) continue
+        asked.set(id, note)
+        void s.discardTransientNote(id).catch(() => undefined)
+      }
+    }
+    // Deferred: the store is mid-update when it notifies, and an editor flushes its pending
+    // save as it leaves the note.
+    const schedule = () => { if (!timer) timer = setTimeout(judge, 0) }
+    const unsubscribe = useNotesStore.subscribe((s, prev) => {
+      if (s.openPanes !== prev.openPanes || s.notes !== prev.notes) schedule()
+    })
+    const offReleased = window.noteflow.onLinkedTransientReleased((id) => {
+      shown.add(id)
+      asked.delete(id)
+      schedule()
+    })
+    return () => {
+      if (timer) clearTimeout(timer)
+      unsubscribe()
+      offReleased()
+    }
+  }, [])
+
   // Back to the window: the files may have become read-only, writable again, moved back…
   useEffect(() => {
     const onFocus = () => {
@@ -132,8 +193,8 @@ export function LinkedNotesHost() {
       )}
       {errors && (
         <ConfirmModal
-          title={t.linked.linkErrorsTitle}
-          message={errors.map((e) => tf(t.linked.linkErrorLine, { file: fileNameOf(e.path) || e.path, reason: t.linked.linkError[e.error] })).join('\n')}
+          title={errors.title}
+          message={errors.list.map((e) => tf(t.linked.linkErrorLine, { file: fileNameOf(e.path) || e.path, reason: t.linked.linkError[e.error] })).join('\n')}
           confirmLabel={t.linked.ok}
           hideCancel
           onConfirm={() => setErrors(null)}

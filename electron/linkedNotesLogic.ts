@@ -54,7 +54,8 @@ export function isMarkdownPath(p: unknown): p is string {
 // `.bashrc` or a PowerShell profile would mean code execution. A path can only enter the
 // registry (link / relocate) if main GRANTED it first, from a user action: the native
 // picker (`linked:pick-files`), a real drop from the OS (seen by the preload, isTrusted),
-// or — next — main itself ("Open with NoteFlow"). A grant is single use and expires.
+// or main itself for a file the OS opened with NoteFlow (argv / second-instance / open-file,
+// see openWithArgs.ts). A grant is single use and expires.
 
 /** How long a granted path may wait to be linked (the first-link notice can sit open meanwhile). */
 export const LINK_GRANT_TTL_MS = 5 * 60 * 1000
@@ -113,6 +114,12 @@ export interface LinkedNoteRecord {
   updated: string
   /** Fingerprint of the last content NoteFlow read or wrote. */
   known?: LinkedFingerprint
+  /**
+   * Opened from the OS ("Open with NoteFlow") and not kept yet: unlinked by itself when it's
+   * closed and at the next startup, unless it holds unwritten edits (see canDiscardTransient).
+   * Never indexed for the AI nor placed in the manual order while set.
+   */
+  transient?: boolean
 }
 
 export interface LinkedFingerprint {
@@ -230,6 +237,7 @@ export function sanitizeLinkedRegistry(raw: unknown, platform: Platform = proces
       ...(r.archived === true ? { archived: true } : {}),
       ...(r.isRawMode === true ? { isRawMode: true } : {}),
       ...(r.aiHidden === true ? { aiHidden: true } : {}),
+      ...(r.transient === true ? { transient: true } : {}),
       created,
       updated: isIso(r.updated) ? r.updated : created,
     }
@@ -239,6 +247,47 @@ export function sanitizeLinkedRegistry(raw: unknown, platform: Platform = proces
   }
   const order = raw && typeof raw === 'object' && !Array.isArray(raw) ? sanitizeNoteOrder((raw as { order?: unknown }).order) : {}
   return { version: 1, notes, order }
+}
+
+// ── Transient linked notes ("Open with NoteFlow") ────────────────────────────
+//
+// A file the OS opens with NoteFlow is linked as TRANSIENT, like VS Code's preview tab: it
+// goes away by itself (unlinked — the file is never touched) once it's closed, unless the
+// user keeps it. It's never discarded while it holds edits that aren't in the file (a draft
+// in userData: conflict, read-only / missing file, failed write): those wait until resolved.
+
+/**
+ * Whether main may discard (unlink) a transient linked note now: it is still transient, has
+ * no unwritten draft and isn't shown in a sticky or section window. Whether it's shown in the
+ * main window's panes is the main window's call (it asks only once it closed it there).
+ */
+export function canDiscardTransient(
+  rec: Pick<LinkedNoteRecord, 'transient'> | null | undefined,
+  state: { hasDraft: boolean; openInOtherWindow: boolean },
+): boolean {
+  return !!rec?.transient && !state.hasDraft && !state.openInOtherWindow
+}
+
+/**
+ * Startup cleanup: the transient notes left by the last session (closed with the app) are
+ * dropped from the registry — and from the local manual order —, except those with a draft
+ * (unwritten edits), which stay (still transient) until resolved. Records without the flag
+ * (permanent, or written by an earlier build) are kept as they are.
+ */
+export function dropTransientRecords(
+  registry: Pick<LinkedRegistry, 'notes' | 'order'>,
+  hasDraft: (id: string) => boolean,
+): { notes: LinkedNoteRecord[]; order: Record<string, string[]>; dropped: string[] } {
+  const dropped = registry.notes.filter((r) => r.transient && !hasDraft(r.id)).map((r) => r.id)
+  if (dropped.length === 0) return { notes: registry.notes, order: registry.order, dropped }
+  const gone = new Set(dropped)
+  const order: Record<string, string[]> = {}
+  for (const [key, ids] of Object.entries(registry.order)) {
+    const kept = ids.filter((id) => !gone.has(id))
+    // A local list is only worth keeping while it still holds a linked id (splitLinkedOrder).
+    if (kept.some(isLinkedNoteId)) order[key] = kept
+  }
+  return { notes: registry.notes.filter((r) => !gone.has(r.id)), order, dropped }
 }
 
 /** A `note-order.json`-shaped map (`contextKey → note ids`), with only string ids kept. */

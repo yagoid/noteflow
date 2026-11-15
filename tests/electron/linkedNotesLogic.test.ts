@@ -6,11 +6,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   assembleMarkdownFile,
+  canDiscardTransient,
   createLinkGrants,
   decideDiskEvent,
   decideWrite,
   decodeLinkedBytes,
   defaultLinkedTitle,
+  dropTransientRecords,
   encodeMarkdown,
   hashBytes,
   hasLoneCr,
@@ -399,5 +401,52 @@ describe('markdownImageSrcs', () => {
   it('lists image sources (titles, <…> sources), not code spans nor reference images', () => {
     const md = '![a](img/a.png "T") ![b](<img/b c.png>) ![c](x.png \'t\')\n`![d](d.png)` ![e][ref] [link](l.png)'
     expect(markdownImageSrcs(md)).toEqual(['img/a.png', 'img/b c.png', 'x.png'])
+  })
+})
+
+// "Open with NoteFlow": transient linked notes (closed → unlinked, never the file).
+describe('transient linked notes', () => {
+  it('sanitizing keeps the flag only when true; registries without it stay permanent', () => {
+    const reg = sanitizeLinkedRegistry({
+      notes: [
+        { id: 'lnk:a', path: '/p/a.md', transient: true },
+        { id: 'lnk:b', path: '/p/b.md', transient: 'yes' },
+        { id: 'lnk:c', path: '/p/c.md' },
+      ],
+    }, 'linux')
+    expect(reg.notes.map((n) => [n.id, n.transient])).toEqual([['lnk:a', true], ['lnk:b', undefined], ['lnk:c', undefined]])
+    expect('transient' in reg.notes[1]).toBe(false)
+  })
+
+  it('startup drops the transient notes without a draft (and their place in the local order)', () => {
+    const notes = [
+      { id: 'lnk:keep', path: '/p/k.md', title: 'k', created: 'x', updated: 'x' },
+      { id: 'lnk:gone', path: '/p/g.md', title: 'g', created: 'x', updated: 'x', transient: true },
+      { id: 'lnk:dirty', path: '/p/d.md', title: 'd', created: 'x', updated: 'x', transient: true },
+    ]
+    const order = { ungrouped: ['n1', 'lnk:gone', 'lnk:keep'], 'group:g': ['n2', 'lnk:gone'] }
+    const out = dropTransientRecords({ notes, order }, (id) => id === 'lnk:dirty')
+    expect(out.dropped).toEqual(['lnk:gone'])
+    expect(out.notes.map((n) => n.id)).toEqual(['lnk:keep', 'lnk:dirty'])
+    expect(out.notes[1].transient).toBe(true) // kept, still transient
+    // A local list left without any linked id isn't worth keeping.
+    expect(out.order).toEqual({ ungrouped: ['n1', 'lnk:keep'] })
+  })
+
+  it('startup leaves a registry without transient notes as it was', () => {
+    const reg = { notes: [{ id: 'lnk:a', path: '/p/a.md', title: 'a', created: 'x', updated: 'x' }], order: { ungrouped: ['lnk:a'] } }
+    const out = dropTransientRecords(reg, () => false)
+    expect(out.dropped).toEqual([])
+    expect(out.notes).toBe(reg.notes)
+    expect(out.order).toBe(reg.order)
+  })
+
+  it('main discards only a transient note without a draft that no other window shows', () => {
+    const free = { hasDraft: false, openInOtherWindow: false }
+    expect(canDiscardTransient({ transient: true }, free)).toBe(true)
+    expect(canDiscardTransient({}, free)).toBe(false)
+    expect(canDiscardTransient(undefined, free)).toBe(false)
+    expect(canDiscardTransient({ transient: true }, { ...free, hasDraft: true })).toBe(false)
+    expect(canDiscardTransient({ transient: true }, { ...free, openInOtherWindow: true })).toBe(false)
   })
 })

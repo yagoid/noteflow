@@ -9,6 +9,8 @@ import {
   inlineLinkedImages,
   isLinkedDirty,
   isPlainTextLinked,
+  isTransientLinked,
+  transientNotesToDiscard,
   linkedDraftOf,
   isLinkedReadOnly,
   linkedTagsOf,
@@ -334,5 +336,48 @@ describe('inlineLinkedImages — titles, duplicates and the size budget', () => 
     const fetch = async () => big
     const out = await inlineLinkedImages('![1](a.png) ![2](b.png) ![3](c.png)', fetch, 7000)
     expect(out).toBe(`![1](${big}) ![2](${big}) ![3](c.png)`)
+  })
+})
+
+// "Open with NoteFlow": a transient linked note goes away once closed, never with unsaved changes.
+describe('transient linked notes', () => {
+  const transient = (id: string, over: Partial<LinkedNoteWire> = {}) => linkedNoteFromWire(wire({ id, path: `/p/${id}.md`, transient: true, ...over }))
+  const judge = (notes: Note[], open: string[], shown: string[], pending: string[] = []) =>
+    transientNotesToDiscard(notes, { openIds: new Set(open), shownIds: new Set(shown), isPending: (id) => pending.includes(id) })
+
+  it('the flag comes from main and follows it on every merge', () => {
+    const note = transient('lnk:t')
+    expect(isTransientLinked(note)).toBe(true)
+    expect(isTransientLinked(linkedNoteFromWire(wire()))).toBe(false)
+    expect(note.linked?.transient).toBe(true)
+    // Kept elsewhere (another window, main) → the merge drops the flag, whatever the decision.
+    const kept = mergeLinkedWire(note as Linked, wire({ id: 'lnk:t', path: '/p/lnk:t.md' }), false).note
+    expect(kept.linked?.transient).toBeUndefined()
+    const dirty = withContent(note, 'edited')
+    expect(mergeLinkedWire(dirty, wire({ id: 'lnk:t', path: '/p/lnk:t.md', transient: true }), false).note.linked?.transient).toBe(true)
+  })
+
+  it('is discarded once shown and no longer in any pane', () => {
+    const t = transient('lnk:t')
+    expect(judge([t], [], ['lnk:t'])).toEqual(['lnk:t'])
+    expect(judge([t], ['lnk:t'], ['lnk:t'])).toEqual([]) // still open
+    expect(judge([t], [], [])).toEqual([]) // never shown yet (rest of a multi-file open)
+  })
+
+  it('never while it has unsaved changes, a conflict or an edit pending in an editor', () => {
+    const t = transient('lnk:t')
+    expect(judge([withContent(t, 'not in the file')], [], ['lnk:t'])).toEqual([])
+    const conflicted = { ...t, linked: { ...t.linked!, conflict: { diskBody: 'x', diskHash: 'h2' } } }
+    expect(judge([conflicted], [], ['lnk:t'])).toEqual([])
+    expect(judge([t], [], ['lnk:t'], ['lnk:t'])).toEqual([])
+    // A restored draft (startup) is unsaved too.
+    const restored = linkedNoteFromWire(wire({ id: 'lnk:r', transient: true, draft: { body: 'mine', baseHash: 'h1' } }))
+    expect(judge([restored], [], ['lnk:r'])).toEqual([])
+  })
+
+  it('only transient linked notes: kept linked notes and regular notes stay', () => {
+    const kept = linkedNoteFromWire(wire({ id: 'lnk:k' }))
+    const regular = { ...kept, id: 'n1', linked: undefined } as Note
+    expect(judge([kept, regular, transient('lnk:t')], [], ['lnk:k', 'n1', 'lnk:t'])).toEqual(['lnk:t'])
   })
 })

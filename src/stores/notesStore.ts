@@ -43,7 +43,9 @@ import {
   closePane as closePaneInLayout,
   focusOrReplace,
   getActivePane,
+  openInActivePane,
   openInSplit,
+  primaryPaneForNote,
   panesForNoteIds,
   removeNotesFromLayout,
   reorderPane as reorderPaneInLayout,
@@ -239,6 +241,12 @@ interface NotesState {
   discardLinkedChanges: (id: string) => Promise<void>
   /** Ends a conflict: take the disk version, write ours over it, or write a merged text. */
   resolveLinkedConflict: (id: string, resolution: { kind: 'reload' } | { kind: 'keepMine' } | { kind: 'merged'; body: string }) => Promise<void>
+  /** Opens notes main linked from the OS ("Open with NoteFlow"): the first in the active pane, a few more alongside. */
+  openNotesFromSystem: (ids: string[]) => Promise<void>
+  /** "Keep in NoteFlow": a transient linked note (opened from the OS) becomes permanent. No-op otherwise. */
+  keepLinkedNote: (id: string) => Promise<void>
+  /** The main window closed a transient linked note: unlink it if nothing is unsaved (main has the last word). */
+  discardTransientNote: (id: string) => Promise<boolean>
   pruneEmptyNote: (id: string) => Promise<void>
   encryptNote: (id: string, password: string, options?: EncryptionOptions) => Promise<void>
   unlockNote: (id: string, password: string) => Promise<void>   // temporary in-session unlock
@@ -449,6 +457,11 @@ export async function linkedSectionsForCopy(note: Note): Promise<NoteSection[]> 
   })))
 }
 
+function withoutTransient(linked: LinkedNoteState): LinkedNoteState {
+  const { transient: _transient, ...rest } = linked
+  return rest
+}
+
 /** A linked note keeps exactly its one section: only content / isRawMode / aiHidden may change. */
 function isLinkedSectionsPatch(current: NoteSection[], next: NoteSection[]): boolean {
   return next.length === 1 && next[0].id === LINKED_SECTION_ID && next[0].name === current[0]?.name
@@ -519,6 +532,8 @@ async function applyLinkedUpdate(get: StoreGet, set: StoreSet, id: string, patch
   if (Object.keys(meta).length > 0) {
     const wire = await window.noteflow.linkedUpdateMeta(id, meta)
     if (!wire) { dropNotes(set, new Set([id])); return }
+    // Renaming / grouping / favoriting a transient note keeps it (main decides): follow it.
+    if (linked.transient && !wire.transient) linked = withoutTransient(linked)
   }
   const updated: Note = {
     ...note,
@@ -552,6 +567,17 @@ function dropSessionPasswords(set: StoreSet, ids: string[]): void {
     sessionPasswords: Object.fromEntries(Object.entries(s.sessionPasswords).filter(([id]) => !ids.includes(id))),
   }))
 }
+
+// Resolved once the first loadNotes of this window has settled (its panes are set): what
+// "Open with NoteFlow" waits for, so the restored layout doesn't replace the opened file.
+let resolveFirstLoad: () => void = () => undefined
+const firstLoad = new Promise<void>((resolve) => { resolveFirstLoad = resolve })
+export function notesFirstLoaded(): Promise<void> {
+  return firstLoad
+}
+
+/** Files opened from the OS at once: the first replaces the active pane, the rest open alongside up to this many panes. */
+const MAX_PANES_FROM_SYSTEM = 3
 
 /**
  * Leaving `noteId`: delete it if it's still a blank default note (main window only).
@@ -649,7 +675,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         if (wire.hash !== existing.linked.baseHash || wire.status !== existing.linked.status || wire.path !== existing.linked.path
           || fresh.title !== existing.title || fresh.group !== existing.group || fresh.folder !== existing.folder
           || fresh.favorited !== existing.favorited || fresh.archived !== existing.archived
-          || !!f0.isRawMode !== !!s0?.isRawMode || !!f0.aiHidden !== !!s0?.aiHidden) {
+          || !!f0.isRawMode !== !!s0?.isRawMode || !!f0.aiHidden !== !!s0?.aiHidden
+          || !!fresh.linked?.transient !== !!existing.linked.transient) {
           linkedResync.push(wire.id)
         }
         return existing
@@ -709,6 +736,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     } catch (err) {
       console.error('Failed to load notes:', err)
       set({ isLoading: false })
+    } finally {
+      resolveFirstLoad()
     }
   },
   
@@ -893,6 +922,53 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     await noteWriteQueue.run(id, async () => {
       await window.noteflow.linkedUnlink(id)
       dropNotes(set, new Set([id]))
+    })
+  },
+
+  openNotesFromSystem: async (ids) => {
+    // Linked by main a moment ago: this window may not have heard of them yet.
+    for (const id of ids) {
+      if (!get().notes.some((n) => n.id === id)) await get().syncLinkedNote(id)
+    }
+    const present = ids.filter((id) => get().notes.some((n) => n.id === id))
+    if (present.length === 0) return
+    const [first, ...rest] = present
+    const prev = get().activeNoteId
+    if (prev && prev !== first) maybePruneOnLeave(get, prev)
+    set((s) => {
+      // The first in the active pane (a transient note there is closed → discarded), the next
+      // ones alongside while there's room; the rest wait in the sidebar (marked temporary).
+      let layout = openInActivePane(layoutOf(s), first, newPaneId())
+      for (const id of rest) {
+        if (layout.panes.length >= MAX_PANES_FROM_SYSTEM) break
+        layout = openInSplit(layout, id, undefined, newPaneId())
+      }
+      const firstPane = primaryPaneForNote(layout, first)
+      if (firstPane) layout = { panes: layout.panes, activePaneId: firstPane.paneId }
+      return { ...layoutState(layout), contentPlace: null, noteViewId: null, brainViewOpen: false, contentReturnPlace: null }
+    })
+    saveUiState({ activeNoteId: first })
+  },
+
+  keepLinkedNote: (id) => noteWriteQueue.run(id, async () => {
+    const note = get().notes.find((n) => n.id === id)
+    if (!isLinkedNote(note) || !note.linked.transient) return
+    const wire = await window.noteflow.linkedKeep(id)
+    if (!wire) { dropNotes(set, new Set([id])); return }
+    set((s) => ({ notes: s.notes.map((n) => (n.id === id && n.linked ? { ...n, linked: withoutTransient(n.linked) } : n)) }))
+  }),
+
+  discardTransientNote: (id) => {
+    // An editor's pending save lands first (queued before the check below).
+    flushPendingEdits(id)
+    return noteWriteQueue.run(id, async () => {
+      const note = get().notes.find((n) => n.id === id)
+      if (!isLinkedNote(note) || !note.linked.transient || isLinkedDirty(note) || hasPendingEdits(id)) return false
+      // Opened again while this waited in the queue: the user is back on it.
+      if (get().openPanes.some((p) => p.noteId === id)) return false
+      const { discarded } = await window.noteflow.linkedDiscardTransient(id)
+      if (discarded) dropNotes(set, new Set([id]))
+      return discarded
     })
   },
 
@@ -1107,7 +1183,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     if (note.linked) {
       const wire = await window.noteflow.linkedUpdateMeta(id, { archived: !note.archived })
       if (!wire) { dropNotes(set, new Set([id])); return }
-      set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, archived: wire.archived } : n)) }))
+      // Archiving a transient note keeps it (main decides).
+      set((s) => ({ notes: s.notes.map((n) => (n.id === id && n.linked
+        ? { ...n, archived: wire.archived, linked: wire.transient ? n.linked : withoutTransient(n.linked) }
+        : n)) }))
       return
     }
 

@@ -16,3 +16,10 @@ if [ -f "$CLI_PATH" ]; then
   chmod +x "$CLI_PATH"
   ln -sf "$CLI_PATH" /usr/local/bin/noteflow
 fi
+
+# "Open with NoteFlow": refresh the desktop-entry cache so the MimeType of noteflow.desktop
+# (text/markdown, text/x-markdown, text/plain - package.json linux.mimeTypes) is picked up.
+# This script replaces electron-builder's default after-install, which did it.
+if hash update-desktop-database 2>/dev/null; then
+  update-desktop-database /usr/share/applications || true
+fi

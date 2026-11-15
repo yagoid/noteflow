@@ -503,9 +503,14 @@ npm run dist:store     # = npm run build + electron-builder --win appx --x64 --p
   "nsis":  { "include": "build/nsis-include.nsh" },
   "mac":   { "target": [{ "target": "dmg", "arch": "arm64" }], "icon": "public/icon.icns",
              "category": "public.app-category.productivity", "darkModeSupport": true,
-             "hardenedRuntime": false, "artifactName": "${productName}-${version}-${arch}.${ext}" },
+             "hardenedRuntime": false, "artifactName": "${productName}-${version}-${arch}.${ext}",
+             "fileAssociations": [  // "Abrir con NoteFlow": Editor + Alternate (ver "Asociaciones de archivo")
+               { "ext": ["md", "markdown"], "name": "Markdown document", "role": "Editor", "rank": "Alternate" },
+               { "ext": "txt", "name": "Plain text document", "role": "Editor", "rank": "Alternate" }] },
+  "appx":  { /* identidad de la Store, ver § Microsoft Store */ "customExtensionsPath": "build/appx-extensions.xml" },
   "linux": {
     "target": ["deb", "appimage"], "category": "Utility", "icon": "public/icon.png",
+    "mimeTypes": ["text/markdown", "text/x-markdown", "text/plain"],  // MimeType= del .desktop
     "desktop": { "entry": { "Name": "NoteFlow", "Comment": "Fast notes for software engineers",
                             "Keywords": "notes;markdown;text;", "Categories": "Utility;TextEditor;" } }
   },
@@ -543,6 +548,56 @@ npm run dist:store     # = npm run build + electron-builder --win appx --x64 --p
 
 > **Nota (electron-builder 26+):** las props del `.desktop` de Linux van dentro de
 > `desktop.entry`, NO directamente en `desktop`. Error conocido que rompió el release en v1.2.3.
+
+### Asociaciones de archivo ("Abrir con NoteFlow")
+
+NoteFlow se registra para abrir **`.md`, `.markdown` y `.txt`** y **nunca se pone como predeterminada por sí
+sola**: solo aparece en "Abrir con…" y en la lista de apps predeterminadas; el usuario decide. Lo que recibe la
+app (argv / `second-instance` / `open-file`) y las notas temporales: `patterns.md` § "Notas vinculadas" →
+"Abrir desde el sistema / notas temporales". Qué hace cada target (comprobado en
+`node_modules/app-builder-lib` 26.8.1):
+
+- **NSIS (Windows): a mano en `build/nsis-include.nsh`, NO con `build.fileAssociations`.** El macro de
+  electron-builder (`APP_ASSOCIATE` en `templates/nsis/include/FileAssociation.nsh`) escribe el valor por
+  defecto de `Software\Classes\.<ext>` → NoteFlow pasaría a ser la app por defecto de `.txt`/`.md` donde el
+  usuario nunca eligió una (sin `UserChoice`), y su desinstalación (`APP_UNASSOCIATE`) deja ese valor apuntando
+  a un ProgID borrado. Además `build.fileAssociations` (y `win.fileAssociations`) llegan a la vez a NSIS y a
+  appx (mismo packager de Windows), así que no se puede usar solo para uno. `noteflowRegisterFileTypes`
+  (en `customInstall`, con `SHELL_CONTEXT` = HKCU en la instalación por usuario) escribe: ProgIDs
+  `Software\Classes\NoteFlow.md` / `NoteFlow.txt` (descripción, `DefaultIcon` = `NoteFlow.exe,0`,
+  `shell\open\command` = `"…\NoteFlow.exe" "%1"`); `Software\Classes\.md|.markdown|.txt\OpenWithProgids`
+  (valor `REG_NONE` → "Abrir con"); `Software\Classes\Applications\NoteFlow.exe` (`FriendlyAppName`,
+  `SupportedTypes`, `shell\open\command` → "Elegir otra aplicación"); `Software\NoteFlow\Capabilities`
+  (`FileAssociations`) + `Software\RegisteredApplications\NoteFlow` → Configuración → Aplicaciones
+  predeterminadas; y `SHChangeNotify(SHCNE_ASSOCCHANGED)`. **Nunca** escribe el valor por defecto de `.<ext>`.
+  `noteflowUnregisterFileTypes` (en `customUnInstall`, **salvo en una actualización** —`${isUpdated}`—, para que
+  un `UserChoice` hacia `NoteFlow.md` no se quede un instante sin ProgID) borra exactamente eso y nada de otras
+  apps (las claves `.<ext>\OpenWithProgids` vacías se quedan, como hace VS Code). Sin iconos nuevos.
+- **appx (Microsoft Store): `appx.customExtensionsPath` → `build/appx-extensions.xml`**, un
+  `uap:FileTypeAssociation` (`noteflow-text`) con `.md/.markdown/.txt` dentro de `<Application><Extensions>`.
+  Un paquete MSIX nunca puede hacerse predeterminado; el archivo llega como argumento de línea de comandos.
+- **macOS: `mac.fileAssociations`** → `CFBundleDocumentTypes` del Info.plist: "Markdown document"
+  (`md`, `markdown`) y "Plain text document" (`txt`), `CFBundleTypeRole` **Editor** y `LSHandlerRank`
+  **Alternate** (el `Default` de electron-builder podría reclamar el tipo). Icono = el de la app (no hay
+  `build/md.icns`). Los archivos llegan por `open-file`.
+- **Linux (deb; también el `.desktop` de la AppImage): `linux.mimeTypes`** = `text/markdown`,
+  `text/x-markdown`, `text/plain` → `MimeType=` del `.desktop` (`Exec=… %U`: puede pasar `file://` URIs, que
+  `openWithArgs.ts` convierte). No `fileAssociations` con `mimeType`: además generaría un XML de shared-mime-info
+  que (re)definiría esos tipos estándar. `build/linux-postinstall.sh` / `linux-postremove.sh` (sustituyen al
+  after-install de electron-builder) ejecutan `update-desktop-database` si existe. **Matiz:** en Linux no hay
+  "solo en Abrir con" garantizado — si la distro / el escritorio no fija un predeterminado para `text/plain` o
+  `text/markdown` (`mimeapps.list` / `defaults.list`), GIO (GNOME) o KDE pueden elegir cualquier `.desktop` que
+  declare el tipo, NoteFlow incluido. En las distros habituales (gedit/GNOME Text Editor, Kate…) ya hay uno.
+- **AppImage:** el mismo `.desktop` (si una herramienta de integración lo instala). Un archivo abierto justo
+  mientras la app se cierra se pierde: su relanzamiento (`relaunchAppImageAfterExit`) no lleva argumentos.
+
+**Verificado** (2026-11-15): el instalador NSIS se genera con estas macros (makensis compila) — lo que
+escribe en el registro se inspeccionó en el script del instalador, **sin instalarlo**; el paquete appx se
+genera con el `uap:FileTypeAssociation` en su `AppxManifest.xml` (makeappx lo valida); y el flujo completo
+(argv del primer arranque, `second-instance` con ruta absoluta y relativa, descarte, "Mantener", reinicio,
+conflicto) con Playwright sobre la app compilada. **Sin verificar:** instalarlo de verdad y usar "Abrir con" del
+Explorador / Configuración → Aplicaciones predeterminadas; instalar el appx y abrir un archivo con él; macOS (`open-file`, Info.plist) y deb (`MimeType`, `update-desktop-database`). Probar en el siguiente
+release de cada plataforma.
 
 ## Web pública (GitHub Pages)
 

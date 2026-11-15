@@ -86,6 +86,23 @@ const api = {
   // Unwritten edits kept in userData across restarts (null = in sync again).
   linkedSetDraft: (id: string, draft: { body: string; baseHash: string | null } | null): Promise<void> =>
     ipcRenderer.invoke('linked:set-draft', id, draft),
+  // "Open with NoteFlow": files main linked from the OS (as transient notes) for the main window
+  // to open — taken once —, keeping a transient note, and discarding one the window closed (main
+  // refuses if it has unwritten edits or a sticky / section window shows it).
+  linkedTakeOpenRequests: (): Promise<{ ids: string[]; errors: Array<{ path: string; error: LinkError }> }> =>
+    ipcRenderer.invoke('linked:take-open-requests'),
+  linkedKeep: (id: string): Promise<LinkedNoteWire | null> => ipcRenderer.invoke('linked:keep', id),
+  linkedDiscardTransient: (id: string): Promise<{ discarded: boolean }> => ipcRenderer.invoke('linked:discard-transient', id),
+  onLinkedOpenRequested: (cb: () => void) => {
+    const wrapper = () => cb()
+    ipcRenderer.on('linked:open-requested', wrapper)
+    return () => ipcRenderer.removeListener('linked:open-requested', wrapper)
+  },
+  onLinkedTransientReleased: (cb: (noteId: string) => void) => {
+    const wrapper = (_event: unknown, noteId: unknown) => { if (typeof noteId === 'string') cb(noteId) }
+    ipcRenderer.on('linked:transient-released', wrapper)
+    return () => ipcRenderer.removeListener('linked:transient-released', wrapper)
+  },
   // Absolute path of a File dropped from the OS (File.path is gone since Electron 32).
   getPathForFile: (file: File): string => {
     try { return webUtils.getPathForFile(file) } catch { return '' }

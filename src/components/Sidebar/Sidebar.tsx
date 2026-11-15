@@ -173,10 +173,16 @@ const NoteRow = memo(function NoteRow({
             </span>
           )}
           {note.expiresAt && <span title={formatExpiry(note.expiresAt, t)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
+          {/* Opened from the system and not kept: italic + "temporary" (goes away when closed). */}
           <span className={`text-[13px] font-mono font-medium truncate flex-1
-            ${isActive ? 'text-text' : 'text-text/80'}`}>
+            ${isActive ? 'text-text' : 'text-text/80'} ${note.linked?.transient ? 'italic' : ''}`}>
             {renderHighlightedText(note.title || t.common.untitled, searchQuery)}
           </span>
+          {note.linked?.transient && (
+            <span className="text-[10px] font-mono italic text-text-muted/60 flex-shrink-0" title={t.linked.temporaryHint}>
+              {t.linked.temporaryShort}
+            </span>
+          )}
           <span className="text-xs font-mono text-text-muted/50 flex-shrink-0 ml-1">
             {formatNoteDate(note.updated, t)}
           </span>
@@ -219,6 +225,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setContentView = useNotesStore((s) => s.setContentView)
   const updateNote = useNotesStore((s) => s.updateNote)
+  const keepLinkedNote = useNotesStore((s) => s.keepLinkedNote)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
@@ -685,7 +692,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     if (targetIndex === -1) { setNoteDropTarget(null); return }
     if (position === 'after') targetIndex += 1
     without.splice(targetIndex, 0, draggedId)
-    void setContextNoteOrder(contextKey, without)
+    // A temporary linked note (opened from the system) has no place in the manual order:
+    // dragging it into one keeps it first.
+    const save = () => setContextNoteOrder(contextKey, without)
+    void (rawNotes.find((n) => n.id === draggedId)?.linked?.transient ? keepLinkedNote(draggedId).then(save) : save())
   }
 
   function handleFavoritesReorderDrop(e: React.DragEvent<HTMLLIElement>, targetNote: (typeof rawNotes)[0]) {

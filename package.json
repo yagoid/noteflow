@@ -127,7 +127,8 @@
         "en-US",
         "es-ES"
       ],
-      "artifactName": "${productName}-${version}-Store.${ext}"
+      "artifactName": "${productName}-${version}-Store.${ext}",
+      "customExtensionsPath": "build/appx-extensions.xml"
     },
     "mac": {
       "target": [
@@ -140,7 +141,24 @@
       "category": "public.app-category.productivity",
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "darkModeSupport": true,
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "fileAssociations": [
+        {
+          "ext": [
+            "md",
+            "markdown"
+          ],
+          "name": "Markdown document",
+          "role": "Editor",
+          "rank": "Alternate"
+        },
+        {
+          "ext": "txt",
+          "name": "Plain text document",
+          "role": "Editor",
+          "rank": "Alternate"
+        }
+      ]
     },
     "linux": {
       "target": [
@@ -149,6 +167,11 @@
       ],
       "category": "Utility",
       "icon": "public/icon.png",
+      "mimeTypes": [
+        "text/markdown",
+        "text/x-markdown",
+        "text/plain"
+      ],
       "desktop": {
         "entry": {
           "Name": "NoteFlow",
