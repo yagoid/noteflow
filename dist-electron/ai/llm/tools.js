@@ -223,13 +223,33 @@ const asBool = (v) => (typeof v === 'boolean' ? v : undefined);
 function findNoteDir(ctx, noteId) {
     return noteFormat.listNoteDirs(ctx.notesDir).find((d) => d.endsWith('-' + noteId) || d === noteId) ?? null;
 }
+/** A linked note (external .md) id — mirror of LINKED_ID_PREFIX in electron/linkedNotesLogic.ts. */
+const isLinkedId = (id) => id.startsWith('lnk:');
+/** A note by id: a folder of the notes dir, or a linked note (`linked: true`, `dir` = ''). */
 function loadNote(ctx, noteId) {
+    if (isLinkedId(noteId)) {
+        const note = ctx.linked?.get(noteId) ?? null;
+        return note ? { dir: '', note, linked: true } : null;
+    }
     const dir = findNoteDir(ctx, noteId);
     if (!dir)
         return null;
     const note = noteFormat.parseNoteDir(`${ctx.notesDir}/${dir}`);
     return note ? { dir, note } : null;
 }
+/** Every note: the notes-dir folders, then the linked notes (`dir` = '' for those). */
+function allNotes(ctx) {
+    const out = [];
+    for (const dir of noteFormat.listNoteDirs(ctx.notesDir)) {
+        const note = noteFormat.parseNoteDir(`${ctx.notesDir}/${dir}`);
+        if (note)
+            out.push({ dir, note });
+    }
+    for (const note of ctx.linked?.list() ?? [])
+        out.push({ dir: '', note, linked: true });
+    return out;
+}
+const LINKED_STRUCTURE_ERROR = 'This is a linked note (an external Markdown file): it has exactly one section (the file) — sections cannot be added, deleted or renamed. Edit its content with update_section instead.';
 /** Re-serialize a (mutated) note and write it, deleting any section files that no longer exist. */
 async function writeNoteRecord(ctx, dir, before, after) {
     const beforeFiles = new Set(before.sections.map((s) => `${s.id}.md`));
@@ -249,10 +269,7 @@ function fail(message) {
  *  self-correct in the same step instead of reusing a stale/mistyped id. */
 function listNotesBrief(ctx, cap = 40) {
     const rows = [];
-    for (const dir of noteFormat.listNoteDirs(ctx.notesDir)) {
-        const note = noteFormat.parseNoteDir(`${ctx.notesDir}/${dir}`);
-        if (!note)
-            continue;
+    for (const { note } of allNotes(ctx)) {
         rows.push(`- ${note.title || 'Untitled'} [id=${note.id}]`);
         if (rows.length >= cap)
             break;
@@ -280,6 +297,8 @@ function describeTarget(name, rawInput, ctx) {
     switch (name) {
         case 'delete_note': {
             const found = loadNote(ctx, asStr(input.note_id));
+            if (found?.linked)
+                return `linked note "${found.note.title || 'Untitled'}" (it is only unlinked from NoteFlow — the Markdown file is not deleted)`;
             return found
                 ? `note "${found.note.title || 'Untitled'}"`
                 : `an unknown note (id ${asStr(input.note_id)} not found — it may already be gone)`;
@@ -356,10 +375,7 @@ async function executeTool(name, rawInput, ctx) {
                 const groupFilter = asStr(input.group_id).trim();
                 const includeArchived = asBool(input.include_archived) ?? false;
                 const rows = [];
-                for (const dir of noteFormat.listNoteDirs(ctx.notesDir)) {
-                    const note = noteFormat.parseNoteDir(`${ctx.notesDir}/${dir}`);
-                    if (!note)
-                        continue;
+                for (const { note, linked } of allNotes(ctx)) {
                     if (note.archived && !includeArchived)
                         continue;
                     if (groupFilter && note.group !== groupFilter)
@@ -368,7 +384,7 @@ async function executeTool(name, rawInput, ctx) {
                         continue;
                     const secs = note.encryption ? '(encrypted)' : note.sections.filter((s) => !s.aiHidden).map((s) => `${s.name}#${s.id}`).join(', ');
                     const place = [note.group ? `group=${note.group}` : '', note.folder ? `folder=${note.folder}` : ''].filter(Boolean).join(' ');
-                    rows.push(`- ${note.title || 'Untitled'} [id=${note.id}]${place ? ` ${place}` : ''} :: ${secs}`);
+                    rows.push(`- ${note.title || 'Untitled'} [id=${note.id}]${linked ? ' (linked Markdown file, single section)' : ''}${place ? ` ${place}` : ''} :: ${secs}`);
                     if (rows.length >= 60)
                         break;
                 }
@@ -378,9 +394,11 @@ async function executeTool(name, rawInput, ctx) {
                 const found = loadNote(ctx, asStr(input.note_id));
                 if (!found)
                     return noteNotFound(ctx, asStr(input.note_id));
-                const { note } = found;
+                const { note, linked } = found;
                 if (note.encryption)
                     return ok(`Read "${note.title}"`, `Note "${note.title}" is encrypted; its content is not readable.`);
+                if (linked && note.sections.every((s) => s.aiHidden))
+                    return ok(`Read "${note.title}"`, `Note "${note.title}" is hidden from the AI.`);
                 const body = note.sections
                     .filter((s) => !s.aiHidden) // sections hidden from the AI are never exposed to the model
                     .map((s) => {
@@ -391,7 +409,8 @@ async function executeTool(name, rawInput, ctx) {
                     return `## ${s.name} [section_id=${s.id}]\n${body}`;
                 })
                     .join('\n\n');
-                return ok(`Read "${note.title}"`, `# ${note.title} [id=${note.id}]\n${body}`);
+                const linkedNote = linked ? '\n(Linked note: an external Markdown file with a single section. Edit it with update_section; sections cannot be added, deleted or renamed.)' : '';
+                return ok(`Read "${note.title}"`, `# ${note.title} [id=${note.id}]${linkedNote}\n${body}`);
             }
             case 'list_groups': {
                 const groups = ctx.readGroups();
@@ -459,6 +478,15 @@ async function executeTool(name, rawInput, ctx) {
                     after.folder = input.folder_id.trim() || undefined;
                 if (!after.group)
                     after.folder = undefined; // a folder requires a group
+                if (found.linked) {
+                    // Local metadata only: the title is an alias, the file is never renamed.
+                    ctx.linked?.updateMeta(note.id, {
+                        title: after.title, group: after.group ?? '', folder: after.folder ?? '',
+                        favorited: !!after.favorited, archived: !!after.archived,
+                    });
+                    ctx.onNoteEdited?.(note.id);
+                    return ok(`Updated "${after.title}"`);
+                }
                 await writeNoteRecord(ctx, dir, note, after);
                 return ok(`Updated "${after.title}"`);
             }
@@ -466,6 +494,8 @@ async function executeTool(name, rawInput, ctx) {
                 const found = loadNote(ctx, asStr(input.note_id));
                 if (!found)
                     return noteNotFound(ctx, asStr(input.note_id));
+                if (found.linked)
+                    return fail(LINKED_STRUCTURE_ERROR);
                 if (found.note.encryption)
                     return fail('Cannot edit an encrypted note.');
                 const sid = makeId(6);
@@ -486,6 +516,18 @@ async function executeTool(name, rawInput, ctx) {
                 const sid = asStr(input.section_id);
                 if (!found.note.sections.some((s) => s.id === sid))
                     return sectionNotFound(found.note, sid);
+                if (found.linked) {
+                    if (name === 'rename_section')
+                        return fail(LINKED_STRUCTURE_ERROR);
+                    const section = found.note.sections.find((s) => s.id === sid);
+                    if (section.aiHidden)
+                        return fail('This note is hidden from the AI; it cannot be edited by the assistant.');
+                    const res = await ctx.linked.writeBody(found.note.id, restoreStrippedImages(section.content, asStr(input.content)));
+                    if (!res.ok)
+                        return fail(`Could not write the linked Markdown file: ${res.error}. Nothing was changed.`);
+                    ctx.onNoteEdited?.(found.note.id);
+                    return ok('Updated section');
+                }
                 const after = {
                     ...found.note,
                     sections: found.note.sections.map((s) => s.id !== sid ? s
@@ -529,6 +571,14 @@ async function executeTool(name, rawInput, ctx) {
                 return ok(`Renamed folder`);
             }
             case 'delete_note': {
+                if (isLinkedId(asStr(input.note_id))) {
+                    // A linked note is only unlinked: its Markdown file is never deleted.
+                    const found = loadNote(ctx, asStr(input.note_id));
+                    if (!found)
+                        return noteNotFound(ctx, asStr(input.note_id));
+                    ctx.linked?.unlink(found.note.id);
+                    return ok(`Unlinked "${found.note.title}"`, `Unlinked the linked note "${found.note.title}" from NoteFlow. Its Markdown file was NOT deleted.`);
+                }
                 const dir = findNoteDir(ctx, asStr(input.note_id));
                 if (!dir)
                     return noteNotFound(ctx, asStr(input.note_id));
@@ -541,6 +591,8 @@ async function executeTool(name, rawInput, ctx) {
                 const found = loadNote(ctx, asStr(input.note_id));
                 if (!found)
                     return noteNotFound(ctx, asStr(input.note_id));
+                if (found.linked)
+                    return fail(LINKED_STRUCTURE_ERROR);
                 if (found.note.encryption)
                     return fail('Cannot edit an encrypted note.');
                 const sid = asStr(input.section_id);
@@ -556,11 +608,13 @@ async function executeTool(name, rawInput, ctx) {
                 if (!groups.some((g) => g.id === id))
                     return fail(`No group with id ${id}`);
                 // ungroup every note that lived in this group (keep the note, drop group+folder)
-                for (const dir of noteFormat.listNoteDirs(ctx.notesDir)) {
-                    const note = noteFormat.parseNoteDir(`${ctx.notesDir}/${dir}`);
-                    if (!note || note.group !== id)
+                for (const { dir, note, linked } of allNotes(ctx)) {
+                    if (note.group !== id)
                         continue;
-                    await writeNoteRecord(ctx, dir, note, { ...note, group: undefined, folder: undefined });
+                    if (linked)
+                        ctx.linked?.updateMeta(note.id, { group: '', folder: '' });
+                    else
+                        await writeNoteRecord(ctx, dir, note, { ...note, group: undefined, folder: undefined });
                 }
                 await ctx.writeGroups(groups.filter((g) => g.id !== id));
                 await ctx.writeFolders(ctx.readFolders().filter((f) => f.groupId !== id));
@@ -571,11 +625,13 @@ async function executeTool(name, rawInput, ctx) {
                 const folders = ctx.readFolders();
                 if (!folders.some((f) => f.id === id))
                     return fail(`No folder with id ${id}`);
-                for (const dir of noteFormat.listNoteDirs(ctx.notesDir)) {
-                    const note = noteFormat.parseNoteDir(`${ctx.notesDir}/${dir}`);
-                    if (!note || note.folder !== id)
+                for (const { dir, note, linked } of allNotes(ctx)) {
+                    if (note.folder !== id)
                         continue;
-                    await writeNoteRecord(ctx, dir, note, { ...note, folder: undefined });
+                    if (linked)
+                        ctx.linked?.updateMeta(note.id, { folder: '' });
+                    else
+                        await writeNoteRecord(ctx, dir, note, { ...note, folder: undefined });
                 }
                 await ctx.writeFolders(folders.filter((f) => f.id !== id));
                 return ok(`Deleted folder`);

@@ -42,9 +42,40 @@ const HEADING_RE = /^(#{1,3})\s+(.+)$/
 // A list block: its first non-blank line starts with a bullet or `1.` marker.
 const LIST_MARKER_RE = /^\s*(?:[-*+]|\d+\.)[ \t]/
 
-export function htmlFromMarkdown(md: string): string {
+export interface MarkdownHtmlOptions {
+  /**
+   * Plain Markdown, for linked notes (an external .md edited in place, see
+   * lib/linkedNotes.ts): NoteFlow's own syntax isn't interpreted — kanban
+   * boards, `++underline++`, `==highlight==`, the 📅⏰🔺 task annotations and
+   * section-relation pills all stay text, so editing the file never rewrites
+   * them. The editor of a linked note uses the matching plain schema
+   * (editorExtensions.ts → schemaExtensions({ plain: true })).
+   */
+  plain?: boolean
+  /**
+   * Read-only previews only: maps each image src to its display URL (a linked
+   * note's relative `assets/x.png`). Never for the editor — the mapped URL
+   * would be saved into the Markdown.
+   */
+  imageSrc?: (src: string) => string
+}
+
+// Options of the htmlFromMarkdown call in progress (module state like quoteDepth:
+// the parse is synchronous and the helpers below are many).
+let currentOptions: MarkdownHtmlOptions = {}
+const plainMode = () => !!currentOptions.plain
+const inline = (s: string) => inlineToHtml(s, currentOptions)
+
+export function htmlFromMarkdown(md: string, opts?: MarkdownHtmlOptions): string {
   if (!md.trim()) return '<p></p>'
-  return markdownBlocksToHtml(md)
+  if (!opts?.plain && !opts?.imageSrc) return markdownBlocksToHtml(md)
+  const previous = currentOptions
+  currentOptions = opts
+  try {
+    return markdownBlocksToHtml(md)
+  } finally {
+    currentOptions = previous
+  }
 }
 
 /** htmlFromMarkdown, also for the content of a blockquote (mdBlockquoteToHtml). */
@@ -57,7 +88,7 @@ function markdownBlocksToHtml(md: string): string {
   // go second: their pass needs to know which lines are code (a marker inside a
   // code block is code), and that is only settled once fences are isolated.
   const fenced = isolateCodeFences(src)
-  const protectedSrc = quoteDepth > 0 ? fenced : isolateKanbanBlocks(fenced)
+  const protectedSrc = quoteDepth > 0 || plainMode() ? fenced : isolateKanbanBlocks(fenced)
 
   // Split into "blocks" on blank lines — use exactly \n\n so that multiple
   // consecutive blank lines produce empty blocks, preserving them as <p></p>.
@@ -83,7 +114,7 @@ function blockKind(lines: string[]): BlockKind {
   if (/^```/.test(lines[0])) return 'code'
   if (lines.length === 1 && HEADING_RE.test(lines[0])) return 'heading'
   if (lines.length === 1 && lines[0].trim() === '---') return 'hr'
-  if (quoteDepth === 0 && KANBAN_OPEN_RE.test(lines[0]) && parseKanbanMarkdown(unprotectKanban(lines))) return 'kanban'
+  if (quoteDepth === 0 && !plainMode() && KANBAN_OPEN_RE.test(lines[0]) && parseKanbanMarkdown(unprotectKanban(lines))) return 'kanban'
   const first = lines.find(l => l.trim())
   if (first && LIST_MARKER_RE.test(first)) return 'list'
   if (first && /^\s*>\s?/.test(first)) return 'quote'
@@ -137,12 +168,12 @@ function blockToHtml(block: string): string {
  */
 function mdParagraphBlockToHtml(lines: string[]): string {
   const h = lines.findIndex(l => HEADING_RE.test(l))
-  if (h === -1) return `<p>${lines.map(inlineToHtml).join('<br>')}</p>`
+  if (h === -1) return `<p>${lines.map(inline).join('<br>')}</p>`
   const [, hashes, title] = lines[h].match(HEADING_RE)!
   // The lines above are a block of their own too (a lone `---` is an HR).
   const before = h > 0 ? blockToHtml(lines.slice(0, h).join('\n')) : ''
   const after = h + 1 < lines.length ? blockToHtml(lines.slice(h + 1).join('\n')) : ''
-  return `${before}<h${hashes.length}>${inlineToHtml(title)}</h${hashes.length}>${after}`
+  return `${before}<h${hashes.length}>${inline(title)}</h${hashes.length}>${after}`
 }
 
 /** A block being regrouped by groupBlocks. */
@@ -826,7 +857,10 @@ function parseMdListItems(lines: string[]): { items: MdListItem[]; lead: string[
 
     let item: MdListItem
     if (parsed?.type === 'task') {
-      const { text: cleanText, due, alarm, importance } = extractDeadlineAnnotations(parsed.text)
+      // Plain Markdown (linked notes): 📅⏰🔺 are text, not task attributes.
+      const { text: cleanText, due, alarm, importance } = plainMode()
+        ? { text: parsed.text, due: null, alarm: null, importance: null }
+        : extractDeadlineAnnotations(parsed.text)
       item = { type: 'task', checked: parsed.checked, text: cleanText, due, alarm, importance, children: [] }
     } else if (parsed?.type) {
       item = { type: parsed.type, checked: false, text: parsed.text, due: null, alarm: null, importance: null, children: [] }
@@ -834,7 +868,7 @@ function parseMdListItems(lines: string[]): { items: MdListItem[]; lead: string[
       // Continuation line (soft/hard break inside list item) — append to last item.
       if (stack.length > 0) {
         const node = stack[stack.length - 1].node
-        if (node.type === 'task') {
+        if (node.type === 'task' && !plainMode()) {
           // Recover annotations that an older build appended to the last physical
           // line of a multi-line task instead of the first (they'd otherwise show
           // up as literal "🔺low"/"📅…"/"⏰…" text and the attribute would be lost).
@@ -897,7 +931,7 @@ function renderMdListItems(items: MdListItem[]): string {
 
 function renderMdListItem(item: MdListItem): string {
   const childHtml = renderMdListItems(item.children)
-  const textHtml = item.text.split('\n').map(inlineToHtml).join('<br>')
+  const textHtml = item.text.split('\n').map(inline).join('<br>')
   if (item.type === 'task') {
     const dueAttr   = item.due   ? ` data-due="${item.due}"`     : ''
     const alarmAttr = item.alarm ? ` data-alarm="${item.alarm}"` : ''
@@ -909,7 +943,7 @@ function renderMdListItem(item: MdListItem): string {
 
 function mdListBlockToHtml(lines: string[]): string {
   const { items, lead } = parseMdListItems(lines)
-  const leadHtml = lead.length ? `<p>${lead.map(inlineToHtml).join('<br>')}</p>` : ''
+  const leadHtml = lead.length ? `<p>${lead.map(inline).join('<br>')}</p>` : ''
   return leadHtml + renderMdListItems(items)
 }
 
@@ -995,7 +1029,7 @@ function parseAlign(sep: string): 'left' | 'center' | 'right' | null {
 }
 
 function renderCell(c: string): string {
-  return c.split(/<br\s*\/?>/i).map(inlineToHtml).join('<br>')
+  return c.split(/<br\s*\/?>/i).map(inline).join('<br>')
 }
 
 function mdTableToHtml(lines: string[]): string {

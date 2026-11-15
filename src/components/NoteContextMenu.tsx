@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Archive, Star, StarOff, Trash2, Lock, Unlock, Copy, CopyPlus, Columns2, Share,
   ExternalLink, FolderPlus, FolderMinus, Folder, ChevronRight, LayoutGrid, Eye, EyeOff, AppWindow, Pencil,
+  FolderOpen, Link2Off,
 } from 'lucide-react'
 import { useNotesStore } from '../stores/notesStore'
 import { useGroupsStore } from '../stores/groupsStore'
@@ -12,6 +13,7 @@ import { CustomColorSwatch } from './CustomColorSwatch'
 import { EncryptionModal } from './EncryptionModal'
 import { ContextMenu } from './ContextMenu'
 import { FolderListIcon } from './Sidebar/NoteFolderHeader'
+import { fileNameOf } from './LinkedNote/linkedActions'
 import { useT } from '../i18n/useT'
 import { tf } from '../i18n/format'
 import type { Note, GroupColor } from '../types'
@@ -91,6 +93,17 @@ export function NoteContextMenu({ request, onClose, sectionActions, standalone =
   }, [request, onClose])
 
   const confirmDelete = (note: Note) => {
+    if (note.linked) {
+      // "Delete" of a linked note = unlink: the file itself is never deleted.
+      setModal({
+        title: t.linked.unlinkTitle,
+        message: tf(t.linked.unlinkMessage, { title: note.title || t.common.untitled, file: fileNameOf(note.linked.path) }),
+        confirmLabel: t.linked.unlinkConfirm,
+        danger: false,
+        onConfirm: () => { setModal(null); deleteNote(note.id) },
+      })
+      return
+    }
     setModal({
       title: t.common.deleteNote,
       message: tf(t.common.deleteNoteMessage, { title: note.title || t.common.untitled }),
@@ -234,6 +247,9 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
   // Only offer per-section delete when the menu targets a section and the note
   // has more than one — deleting the lone section would leave an empty note.
   const canDeleteSection = !!currentSection && note.sections.length > 1
+  // A linked note (external .md): one section named after its file — no rename,
+  // duplicate nor delete of it; no export; "delete" unlinks.
+  const isLinked = !!note.linked
   // Locked encrypted notes have no readable content to export or copy.
   const isLocked = !!note.encryption && !sessionPasswords[note.id]
   // The sticky needs readable content; "Open alongside" (main window only) doesn't
@@ -310,7 +326,16 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
             <Copy size={12} />
             {t.noteMenu.duplicateNote}
           </button>
-          {!isLocked && (
+          {isLinked && (
+            <button
+              onClick={() => { onClose(); void window.noteflow.linkedShowInFolder(note.id) }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <FolderOpen size={12} />
+              {t.linked.showInFolder}
+            </button>
+          )}
+          {!isLocked && !isLinked && (
             <button
               onClick={() => {
                 onClose()
@@ -346,7 +371,7 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
         <>
           {/* In a section window only the encryption options can come before it */}
           {(!standalone || !!note.encryption) && <div className="h-px bg-border my-1" />}
-          {sectionActions && !isLocked && (
+          {sectionActions && !isLocked && !isLinked && (
             <button
               onClick={() => { onClose(); sectionActions.rename(currentSection.id) }}
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
@@ -368,7 +393,7 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
               {currentSection.aiHidden ? t.common.showToAI : t.common.hideFromAI}
             </button>
           )}
-          {!isLocked && (
+          {!isLocked && !isLinked && (
             <button
               onClick={() => {
                 onClose()
@@ -698,8 +723,8 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
           }}
           className="w-full text-left px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 flex items-center gap-2 transition-colors"
         >
-          <Trash2 size={12} />
-          {t.common.deleteNote}
+          {isLinked ? <Link2Off size={12} /> : <Trash2 size={12} />}
+          {isLinked ? t.linked.unlink : t.common.deleteNote}
         </button>
       )}
     </ContextMenu>

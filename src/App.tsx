@@ -16,6 +16,7 @@ import { BrainView } from './components/Brain/BrainView'
 import { ContentView } from './components/ContentView/ContentView'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { WhatsNewHost } from './components/WhatsNew/WhatsNewHost'
+import { LinkedNotesHost } from './components/LinkedNote/LinkedNotesHost'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
 import { SectionWindowApp } from './components/SectionWindowApp'
@@ -847,6 +848,8 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
       </div>
 
       <CommandPalette />
+      {/* Linked notes: "Link Markdown file…" picker, .md drops from the OS, file re-checks on focus. */}
+      <LinkedNotesHost />
       {/* "What's new" tour: startup popup + the tour opened from Settings / the palette (main window only). */}
       <WhatsNewHost />
     </div>

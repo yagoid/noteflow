@@ -6,9 +6,11 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { AllSelection, NodeSelection, Selection, TextSelection } from '@tiptap/pm/state'
-import { createDocument, getHTMLFromFragment } from '@tiptap/core'
+import { createDocument, getHTMLFromFragment, getSchema } from '@tiptap/core'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { schemaExtensions } from './editorExtensions'
+import { setLinkedNormalizer } from '../../lib/linkedMarkdown'
+import { linkedImageSrc } from '../../lib/linkedNotes'
 import { EditorToolbar } from './EditorToolbar'
 import { TableContextMenu } from './TableContextMenu'
 import { SearchHighlight } from './SearchHighlightExtension'
@@ -75,6 +77,12 @@ function replaceDocKeepingSelection(editor: TiptapEditor, doc: ProseMirrorNode) 
   editor.view.dispatch(tr)
 }
 
+// Linked notes: how this editor renders and serializes plain Markdown, for the store to keep
+// the file's unchanged blocks verbatim when it writes an edit (lib/linkedMarkdown.ts).
+const plainSchema = getSchema(schemaExtensions({ plain: true }))
+setLinkedNormalizer((md) =>
+  htmlToMarkdown(getHTMLFromFragment(createDocument(htmlFromMarkdown(md, { plain: true }), plainSchema).content, plainSchema)))
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -122,6 +130,10 @@ interface EditorProps {
    *  remounts: snapshotted on unmount, restored on mount if the content is still the
    *  same (components/Editor/undoHistory.ts). Only the main note editor opts in. */
   persistHistory?: boolean
+  /** A linked note (external .md, `noteId` is its id): plain Markdown schema (no NoteFlow-only
+   *  syntax), relative images shown from the file's folder and pasted images copied to its
+   *  assets/ folder. Read once, at mount. */
+  linked?: boolean
 }
 
 export interface EditorHandle {
@@ -143,7 +155,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   caretScrollGap = DEFAULT_CARET_SCROLL_GAP,
   showToc = false,
   persistHistory = false,
+  linked = false,
 }, ref) {
+  // Frozen at mount: the schema can't change under a live editor (it's keyed by section).
+  const [plain] = useState(linked)
   // Debounced save of the content (400 ms after the last change). Registered in
   // lib/pendingEdits while pending, and flushed on unmount (section/note switch,
   // pane closed) instead of firing later from a dead editor.
@@ -220,7 +235,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
         const richHtml = /<(a|strong|em|b|i|table|img|h[1-6]|blockquote)[\s>]/i.test(html)
         if (richHtml || !looksLikeMarkdown(text)) return false
         event.preventDefault()
-        const dom = new window.DOMParser().parseFromString(htmlFromMarkdown(text), 'text/html')
+        const dom = new window.DOMParser().parseFromString(htmlFromMarkdown(text, { plain }), 'text/html')
         const slice = ProseMirrorDOMParser.fromSchema(view.state.schema).parseSlice(dom.body)
         view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView())
         return true
@@ -240,7 +255,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     extensions: [
       // Nodes, marks and attributes: the document schema, shared with the
       // md<->editor round-trip tests (editorExtensions.ts).
-      ...schemaExtensions(),
+      ...schemaExtensions(plain ? { plain, imageSrc: (src) => linkedImageSrc(noteId, src) } : {}),
       History,
       Placeholder.configure({ placeholder }),
       SearchHighlight,
@@ -249,9 +264,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       SlashCommands.configure({
         onLinkSection: () => setLinkPickerOpen(true),
         getLabels: () => getSlashCommands(tRef.current),
+        plain,
       }),
     ],
-    content: htmlFromMarkdown(content),
+    content: htmlFromMarkdown(content, { plain }),
     editable: !readOnly,
     autofocus: autoFocusOnMount,
     onUpdate({ editor }) {
@@ -336,7 +352,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     }
     deferredSyncRef.current = false
     const incoming = contentRef.current
-    const parse = (md: string) => createDocument(htmlFromMarkdown(md), ed.schema)
+    const parse = (md: string) => createDocument(htmlFromMarkdown(md, { plain }), ed.schema)
     let incomingDoc: ProseMirrorNode | null = null
     const parsedIncoming = () => (incomingDoc ??= parse(incoming))
     const result = resolveExternalContent(contentSync, {
@@ -432,10 +448,18 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   const insertImageFiles = useCallback(async (files: File[]) => {
     if (!editor) return
     for (const file of files.filter(f => f.type.startsWith('image/'))) {
+      if (plain) {
+        // Linked note: the image goes to an assets/ folder next to the .md, linked relatively.
+        const saved = await window.noteflow.linkedSaveAsset(noteId, file.name, file.type, new Uint8Array(await file.arrayBuffer()))
+        if (!saved.ok) { console.warn('[linked] image not saved:', saved.error); continue }
+        if (editor.isDestroyed) return
+        editor.chain().focus().setImage({ src: saved.relPath, alt: file.name.replace(/\.[^.]*$/, '') }).run()
+        continue
+      }
       const src = await fileToBase64(file)
       editor.chain().focus().setImage({ src, alt: file.name }).run()
     }
-  }, [editor])
+  }, [editor, plain, noteId])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

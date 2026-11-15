@@ -454,6 +454,9 @@ extensión que cambie el esquema va ahí**. Todo elemento soportado **round-trip
 ciclos) / `inlineElToMd`, bloques en el bucle de `htmlFromMarkdown`/`blockElToMd`. Las mismas
 funciones las usan los previews (vista de nota, tarjeta de preview, panel de la vista de contenido), así que un elemento nuevo aparece también en ellos sin
 código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.css`).
+- **Markdown plano (notas vinculadas):** `htmlFromMarkdown(md, { plain: true })` + `schemaExtensions({ plain:
+  true })` no leen ni producen la sintaxis propia de NoteFlow (kanban, `++`, `==`, 📅⏰🔺, pills de relación):
+  queda como texto. Opción `imageSrc` solo para previews de solo lectura. Detalle en "Notas vinculadas".
 - **Bold neutro + highlight de acento (decisión):** la negrita (`**`) ya **no** usa el color de
   acento (`strong { color: inherit }`); el texto en color de acento es una marca aparte, **highlight**
   `==texto==` → `<mark>` (`@tiptap/extension-highlight`, `multicolor` off; `mark { color: var(--accent);
@@ -2211,6 +2214,8 @@ del otro con su copia vieja. Invariantes actuales (`notesStore.ts`):
   otra ventana) sigue el título editado en otro panel y no lo revierte al perder el foco.
 - **Contenido de la sección abierta:** los editores (rich, raw, sticky) aplican o fusionan el contenido
   externo también con el foco puesto — ver "Sync de contenido externo en los editores".
+- **Notas vinculadas** (`.md` externo): mismo `notes-updated`, pero con la ruta del ARCHIVO; `syncNote` la
+  desvía a `syncLinkedNote` (decisión apply/keep/conflict) — ver "Notas vinculadas".
 - **Riesgo residual asumido:** cambios estructurales simultáneos en dos procesos (p. ej. borrar una
   sección en una ventana mientras la otra escribe `note.md` con la lista vieja en el mismo instante)
   pueden dejar `note.md` con una sección cuyo fichero ya no existe; mismo riesgo que ya había con stickies.
@@ -2247,6 +2252,237 @@ de la sincronización desde otro dispositivo. Los writes propios se marcan en
   estaba en vuelo (unos ms) puede aterrizar tras el `set` y devolver al store la lista vieja (el disco
   queda bien hasta la siguiente acción de grupos, que reescribe la lista vieja desde memoria y deshace
   la anterior); no se protege.
+- **Notas vinculadas:** los `.md` externos vinculados NO pasan por este watcher (viven fuera del dir de
+  notas): `electron/linkedNotes.ts` vigila la carpeta padre de cada uno — ver "Notas vinculadas" abajo.
+
+### Notas vinculadas (archivos Markdown externos editados en su sitio)
+
+Abrir un `.md` existente (README de un proyecto, un doc de Docusaurus/Astro…) como nota y editarlo
+**sin importarlo ni copiarlo**: los cambios van al archivo original (y a su historial de Git) y los
+cambios externos al archivo aparecen en la nota. UX en la skill `noteflow-features` § "Notas vinculadas".
+
+**Dónde vive cada cosa**
+- **Main, puro (testeado):** `electron/linkedNotesLogic.ts` (`tests/electron/linkedNotesLogic.test.ts`) —
+  saneo del registro, normalización/dedupe de rutas (`linkedPathKey`: resuelta + minúsculas en Windows/macOS),
+  split/reensamblado byte-exacto del archivo (`splitMarkdownFile`/`assembleMarkdownFile`: BOM, EOL
+  dominante, salto final, frontmatter YAML), decisiones de huella (`decideDiskEvent`, `decideWrite`),
+  nombre de imagen en `assets/` y resolución de rutas relativas de imágenes.
+- **Main, IO:** `electron/linkedNotes.ts` (`tests/electron/linkedNotes.test.ts`, con ficheros reales) —
+  registro en memoria + `userData/linked-notes.json` (con el orden manual local), caché del último
+  contenido en `userData/linked-notes-cache/<id>.md`, borradores `<id>.draft.json`, watchers, escritura
+  atómica, `assets/`. **Toda lectura de un archivo vinculado es asíncrona** (`fs.promises`) y las
+  lecturas/escrituras de una nota van en serie (`serial`): una unidad de red caída no cuelga el main al
+  arrancar, al enfocar ni al escribir. Canales `linked:*` en `main.ts` (ver `architecture.md`) + esquema
+  `nflinked:` para las imágenes.
+- **Renderer:** `src/lib/linkedNotes.ts` (puro: wire → nota del store, decisión de recarga
+  `decideLinkedReload`/`mergeLinkedWire`, URL de imágenes; `tests/lib/linkedNotes.test.ts`),
+  `src/lib/linkedMarkdown.ts` (puro: conservar el fuente de los bloques no tocados;
+  `tests/lib/linkedMarkdown.test.ts`), rama `applyLinkedUpdate` + acciones `syncLinkedNote` /
+  `linkFiles` / `relocateLinkedNote` / `unlinkNote` / `resolveLinkedConflict` en `notesStore.ts`, y la UI
+  en `src/components/LinkedNote/` (`LinkedNotesHost` — selector, aviso del primer vínculo, drop desde el
+  SO, re-chequeo al enfocar —, `LinkedNoteHeader` + `LinkedNoteCompactBar`, `LinkedConflictModal`).
+
+**Modelo.** Una nota vinculada es un `Note` normal del store con `linked: LinkedNoteState`, id con prefijo
+`lnk:` (`:` nunca aparece en un id nanoid, así que no colisiona) y **una sola sección** (`id: 'body'`,
+nombre = nombre del archivo) cuyo contenido es el cuerpo del archivo (el frontmatter se oculta).
+`filePath` = ruta del `.md` (no una carpeta), `raw` = `''`. Así sale en sidebar, grupos/carpetas,
+favoritos, archivadas, búsqueda, paneles, ventana de sección, sticky, cerebro y chat sin código aparte. Los
+metadatos (título-alias, group/folder, favorited, archived, isRawMode, aiHidden, created/updated, huella
+`known`) viven SOLO en el registro de `userData`: nada en el `.md` ni en el dir de notas, así que ningún
+sync (GitHub/Cloud), export, import, CLI ni el watcher del dir de notas las ve **por construcción**.
+
+**Invariantes**
+- **Nunca se borra ni se mueve el archivo vinculado.** "Borrar nota" = desvincular (`deleteNote` →
+  `unlinkNote` → `linked:unlink`, que solo quita la entrada del registro y su caché; confirm propio que dice
+  que el archivo no se toca). Las tools del agente (`delete_note` → `ctx.linked.unlink`), la multiselección de
+  la vista de contenido, la paleta y el menú contextual pasan por ahí; la poda de notas vacías y el
+  autoborrado de temporales nunca las tocan (no tienen `expiresAt`; `pruneEmptyNote` las salta). Defensa en
+  main: `refuseLinkedTarget` hace que `applyNoteWrite`/`applyNoteDelete`/`fs:read-note-dir` rechacen una
+  ruta `.md`, un id `lnk:` o una ruta registrada — reducida a su basename podría nombrar una entrada del dir
+  de notas (o el propio archivo si estuviera en su raíz). Además no se puede vincular nada dentro del dir de
+  notas (`insideNotesDir`).
+- **Nunca se escribe sin comprobar la huella.** El renderer envía `linked:write(id, body, baseHash)`; main
+  relee el archivo, compara el sha256 de sus bytes con `baseHash` (`decideWrite`) y si difiere **no escribe**:
+  devuelve `conflict` con la versión del disco. La ruta destino sale del registro (por id), no del
+  renderer; `linked:save-asset` solo escribe en `assets/` junto al `.md` registrado. Lo que puede ENTRAR al
+  registro es cualquier `.md`/`.markdown` absoluto existente fuera del dir de notas que el renderer pase a
+  `linked:link`/`linked:relocate` (main no comprueba que venga del selector o de un drop): el renderer no
+  escribe rutas arbitrarias directamente, pero sí puede vincular un `.md` así y luego editarlo.
+- **Escritura atómica y fiel:** tmp en la misma carpeta (`.<nombre>.<rand>.noteflow-tmp`, que se borra ante
+  CUALQUIER fallo al escribirlo o renombrarlo: nunca queda en el proyecto del usuario) + rename sobre el
+  destino real (`realpath`: un symlink se escribe a través, no se reemplaza), conservando el modo POSIX. En
+  Windows, si otro programa tiene el archivo abierto con bloqueo y el rename falla (EPERM/EBUSY/EACCES), se
+  escribe en sitio (ya comprobada la huella). Se conservan BOM, EOL (el dominante si el archivo los mezclaba
+  — solo cambia al editar), presencia del salto final y el **frontmatter byte a byte**. Si los bytes
+  resultantes son idénticos, no se escribe. Ventana residual asumida: un cambio externo entre la relectura y
+  el rename (milisegundos, dentro de la cola serie de la nota) se perdería.
+- **Nada de metadatos de NoteFlow en el archivo**, nunca.
+- **Solo se escribe cuando el usuario edita.** Abrir no guarda (el editor no emite `onUpdate` al montar y el
+  sync externo inicial da `same`); cambiar de modo es solo metadato (`isRawMode` en el registro). Al pasar a
+  Modo texto con la nota limpia, el store sustituye el contenido por el **texto exacto del disco**
+  (`diskBody`) para editar byte a byte.
+- **Conservación del fuente en Modo markdown** (`preserveUnchangedBlocks`): el editor guarda su propia
+  serialización (`*` → `-`, `__x__` → `**x**`…); antes de escribir, el store pone de vuelta el fuente original
+  de cada bloque de nivel superior cuyo render no cambió (diff de bloques por render con
+  `diffSequences`, separadores originales entre bloques originales contiguos) y **solo acepta el resultado si
+  se renderiza exactamente como lo que tiene el editor**; si no, escribe la serialización del editor
+  (corrección primero). El normalizador lo registra `Editor.tsx` (`setLinkedNormalizer`, con el esquema
+  plano real); caché de renders por bloque. Un cambio en un bloque reescribe solo ese bloque (diffs de Git
+  pequeños); el bloque editado sí sale con la sintaxis de NoteFlow, salvo en **listas**: un bloque de lista
+  cambiado se empareja con la lista original a la que sustituye (la k-ésima lista de cada lado dentro del
+  mismo hunk) y `refineListBlock` conserva la línea original de cada ítem cuyo render no cambió (diff por
+  líneas contra la versión del editor del original, cuando esta va línea a línea con él) y escribe los ítems
+  nuevos o editados con el estilo de sus hermanos originales del mismo nivel (`restyleListLine`: el nivel k es
+  la k-ésima sangría de la lista original; toma su sangría y su viñeta, `*`/`+` en vez de `-`), para que en
+  CommonMark (GitHub, Docusaurus) aniden igual que en NoteFlow: `*   foo` / `    *   bar` + un hijo nuevo →
+  `    * baz` (columna de bar), `1. foo` / `   - bar` + hijo → `   - baz`; un nivel más hondo que cualquiera
+  original va en la columna de contenido del anterior. Tras el marcador va siempre UN espacio: NoteFlow lee
+  los espacios de más como texto (el `*   foo` original es el texto "  foo"), así que copiar el hueco
+  cambiaría el texto. Solo si el bloque resultante se renderiza igual que el del editor. (`1)` no es lista para el parser de NoteFlow, así que no
+  aplica.) Las **líneas en blanco del principio y del final del cuerpo** (`withBlankEdges`; p. ej. la que
+  separa el frontmatter del título) no se renderizan, así que **siempre** se conservan las del archivo, también
+  cuando cambia el primer o el último bloque y en el texto de reserva del editor. En un conflicto, "Keep my
+  version" y la "Mine" de Comparar… (punto de partida del resultado combinado) llevan las del disco; el
+  combinado se escribe tal cual lo deja el usuario.
+- **No sync / no index fuera de lo local:** sí entran en el índice semántico local (ver `ai.md`).
+
+**Modo markdown sin extras (sintaxis propia desactivada).** `schemaExtensions({ plain: true })`
+(`editorExtensions.ts`) quita Underline (`++`), Highlight (`==`), KanbanBoard y SectionRelation (y usa el
+`Document` sin grupo `topBlock`); `DeadlineTaskItem` con `plain` no muestra los pickers 📅⏰🔺; el Link acepta
+cualquier esquema salvo `javascript:`/`vbscript:`/`data:` (con la allowlist de TipTap un `vscode://…` perdía la
+URL al guardar). `htmlFromMarkdown(md, { plain: true })` **tampoco interpreta** esa sintaxis al leer: kanban,
+`++`/`==`, anotaciones de tarea y pills de relación quedan como texto (un estado de módulo como `quoteDepth`;
+`inlineToHtml(s, { plain })`), así que el round-trip las conserva literales. Toolbar (botones según el
+esquema), menú `/` (`SlashCommands` con `plain`: solo fragmentos), paste de markdown y fragmentos
+(`snippetSlice` lee en plano si el esquema no tiene `underline`) siguen al esquema. Las alarmas nunca se
+recogen de notas vinculadas (`alarmsOf` en el store). Los previews (vista de nota, hover, panel de la vista
+de contenido) usan `linkedPreviewOptions` (plano + imágenes resueltas).
+
+**Imágenes.** Pegadas/arrastradas en una vinculada → `linked:save-asset` las copia a `assets/` junto al `.md`
+(crea la carpeta; nombre único `<slug>-YYYYMMDD-HHMMSS[-n].<ext>`) y se enlazan con ruta **relativa**
+(`assets/x.png`), en rich y en Modo texto. Las relativas que ya tenga el archivo se muestran resueltas
+respecto a su carpeta sin reescribir el markdown: el NodeView de imagen (`ResizableImage`, opción
+`displaySrc`) y los previews (`htmlFromMarkdown(..., { imageSrc })`, nunca en el editor) usan
+`nflinked://n/<id>/<src codificado en UN segmento>` (así `../` sobrevive a la normalización de URL). Main
+(`protocol.handle` → `resolveLinkedAsset`) sirve solo **archivos de imagen** (por extensión, también la del
+destino resuelto) cuya ruta es **relativa a la carpeta del `.md`** de una nota registrada y **puede subir de
+carpeta** (`../img/x.png`, habitual en docs de proyecto). Rechaza esquemas, unidades (`C:`, `C:foo`), rutas
+absolutas y UNC (`/x`, `\x`, `//host`, `\\host`), cualquier `:` (flujos alternativos de NTFS) y bytes NUL,
+comprobado **antes y después** de decodificar `%xx` (`%2Fetc%2Fa.png`, `C%3A%5Ca.png`). El esquema es
+`standard` + `secure`, sin `supportFetchAPI` (solo lo carga `<img>`); CSP `img-src` incluye `nflinked:`.
+
+**Cambios externos y eco.** Un `fs.watch` por **carpeta padre** (no por archivo: editores y `git checkout`
+guardan con rename atómico), filtrado por nombre (sin distinguir mayúsculas en Windows/macOS), debounce
+200 ms. El eco de nuestras escrituras se descarta **por hash de contenido** (el runtime ya tiene el hash
+escrito → `changed` false), no por ventana de tiempo. Un cambio real actualiza la huella y la caché y hace
+broadcast de `notes-updated` con la **ruta del archivo** (sin `senderId`); en el renderer `syncNote` desvía
+cualquier ruta `.md` a `syncLinkedNote` (las carpetas de nota nunca acaban en `.md`), que en la cola de la
+nota decide con `mergeLinkedWire`: `apply` si la nota no tiene nada propio fuera del disco, `adopt` si el
+disco ya tiene lo que muestra, `keep` (huella conocida, o archivo ausente/ilegible) y `conflict` si hay
+debounce pendiente, contenido distinto de `syncedContent` o ya había conflicto. El editor aplica el contenido
+nuevo por el camino de "Sync de contenido externo en los editores". `loadNotes` (recarga completa) conserva la
+copia del store de las vinculadas y re-sincroniza las que main ve distintas. Al enfocar la ventana principal,
+`linked:recheck` re-lee todos (solo lectura ↔ escribible, desaparecido ↔ de vuelta) y, al terminar, el
+renderer re-sincroniza las notas con cambios sin escribir (eso reintenta la escritura aunque main no viera
+cambio de estado).
+
+**Estados.** `checking` (al arrancar, main carga el registro y la caché de forma síncrona —userData, disco
+local— y lee los archivos en segundo plano sin hacer esperar a las ventanas: hasta que llega la lectura la nota
+se ve con el contenido de la caché, en solo lectura, "Checking the file…"); `ok`; `missing` (movido/borrado:
+contenido de la caché en **solo lectura**, "Volver a localizar…"; si reaparece en la misma ruta vuelve a
+`ok`); `readonly` (sin permiso de escritura —`access W_OK`—: solo lectura); `error` (`tooLarge` > 2 MB,
+`invalidUtf8`, `unreadable`: solo lectura); y `conflict` (estado del renderer). Se vigila (`fs.watch`) la
+carpeta de cada archivo leído en la última comprobación y también la de un archivo ausente (o que ni se pudo
+consultar) **si la carpeta existe**, comprobado de forma asíncrona en `rewatch` — así un archivo que reaparece en
+la misma ruta vuelve a `ok` sin esperar al foco. Una carpeta que no existe o no responde no se vigila (`fs.watch`
+sobre una unidad caída podría bloquear); `recheck` lo reintenta. Mientras está en `checking` no se vigila.
+`rewatch` abre al momento las carpetas ya conocidas (un sondeo lento no las retrasa) y lleva un **contador de
+generación**: solo la llamada más reciente cierra watchers o abre los de carpetas sondeadas, y lo hace con el
+registro tal como está al acabar sus sondeos (una llamada vieja y lenta nunca cierra lo que abrió una nueva ni
+recrea el watcher de una carpeta ya desvinculada). El editor (rich y textarea) se monta en solo lectura en
+cuanto `status !== 'ok'`.
+
+**Copiar una vinculada a una nota normal** (Duplicate, "Save as template"): `linkedSectionsForCopy` convierte cada
+imagen con ruta relativa en un data URI (las notas normales guardan las imágenes en línea), con
+`linked:asset-data-uri` → `assetDataUri` en main: las mismas comprobaciones que `nflinked:` (solo imágenes, solo
+rutas relativas al `.md` registrado), máximo 10 MB por imagen y, además, el `src` pedido tiene que aparecer de
+verdad como imagen en el cuerpo de esa nota (el último leído o el de la caché, o su borrador). Como `../` está
+permitido, esto evita que un fallo del propio código saque imágenes que la nota no muestra; es **defensa en
+profundidad, no una frontera de seguridad**: un renderer comprometido puede meter antes cualquier `src` en el
+cuerpo (`linked:write`) o en el borrador. Una frontera real exigiría acotar `../` (p. ej. a la raíz del repo del
+`.md`), decisión de producto pendiente. El renderer
+(`inlineLinkedImages`) pide las imágenes **de una en una**, cada `src` distinto una sola vez, con un tope total de
+25 MB (decodificados): pasado el tope, las restantes se quedan con su ruta. Reconoce `![alt](src)`,
+`![alt](src "título")` / `'título'` y `![alt](<src con espacios>)` (el mismo análisis en main, `markdownImageSrcs`,
+y en el renderer); el título se descarta porque las notas normales no lo admiten (su parser lo tomaría como parte
+del `src`). Si no se puede, la ruta se queda como estaba.
+
+**Cambios sin escribir (nota "sucia") y borradores.** Sucia = contenido distinto de `syncedContent`, o un
+conflicto abierto (`isLinkedDirty`). Una edición que llega cuando el archivo no se puede escribir (en conflicto
+o con `status !== 'ok'`; p. ej. el último guardado con debounce que el editor vacía al remontarse en solo
+lectura porque cambia su `key`, también en la sticky) **no se descarta**: queda en el store como sucia. La
+cabecera dice entonces "Unsaved changes" (nunca "Up to date"; en solo lectura, "Read-only · Unsaved changes")
+con un aviso, y el icono del sidebar pasa a ámbar. Cuando el archivo vuelve a poder escribirse (`syncLinkedNote`
+tras un evento, o el re-chequeo al enfocar), `retryLinkedWrite` lo escribe en la cola de la nota **con la
+comprobación de huella normal** (si el disco cambió entretanto → conflicto); no lo hace mientras un editor
+tenga un guardado pendiente. Mientras la nota está sucia, el renderer guarda un **borrador** en
+`userData/linked-notes-cache/<id>.draft.json` (`{body, baseHash}`, vía `linked:set-draft`; `null` lo borra al
+quedar sincronizada). Main solo lo borra por su cuenta cuando una escritura **consume** el borrador (escribe
+su mismo contenido, `consumeDraft`); una escritura de otra cosa (el agente, otra ventana, un "Keep my version"
+en otra ventana) lo deja. Además, cada `syncLinkedNote` compara el borrador que main tiene (`wire.draft`) con el
+que esta ventana necesita y, si no coinciden (desapareció o es de otra ventana), lo vuelve a enviar: **con dos
+ventanas con cambios sin escribir en la misma nota, gana el último borrador enviado**. Al arrancar o recargar
+la ventana, `linkedNoteFromWire` restaura el borrador como contenido sucio: si su `baseHash` es el hash actual
+del disco se reintenta la escritura; si no (el archivo cambió desde entonces, o el borrador no tenía base),
+entra en conflicto. El borrador **nunca** se escribe en el `.md` por sí solo: siempre pasa por `linked:write`
+con la huella. `mergeLinkedWire` ignora el borrador (en una ventana que ya tiene la nota manda su propio
+contenido). **Volver a localizar** con cambios sin escribir los conserva: main no borra el borrador y el
+renderer rehace la nota con ellos sobre el hash viejo, así que contra un archivo distinto salen como conflicto y el
+usuario elige (banner / Comparar…); si es el mismo archivo movido con los mismos bytes, el hash coincide y
+`retryLinkedWrite` los escribe sin conflicto (equivale a un guardado normal sobre la misma base). Casos límite
+asumidos: (a) si con dos ventanas sucias una descarta ("Discard my changes"), borra el borrador común; la otra lo
+reenvía en su próxima edición o `syncLinkedNote`, pero si está en conflicto y se cierra la app sin tocarla, sus
+cambios se pierden; (b) si la ventana se cierra justo tras una escritura correcta en Modo markdown con
+conservación de bloques, antes de enviar `null`, el borrador (serialización del editor ≠ texto escrito) no se
+consume y al reiniciar da un falso conflicto, sin pérdida de datos (se resuelve con Reload/Compare). Si `retryLinkedWrite` termina cuando la nota ya fue reemplazada en el store,
+aplica igualmente el resultado (hash base, `diskBody`, `syncedContent`, estado): la propia ventana ignora el
+broadcast de su escritura, y sin eso la siguiente edición daría un falso conflicto.
+
+**Salida para cambios que el archivo no acepta.** Una escritura rechazada guarda la causa real en
+`linked.error` (`tooLarge` si el resultado pasaría de 2 MB, `invalidUtf8`/`unreadable`, o `writeFailed` para
+cualquier otro fallo) y el aviso la muestra. Con cambios sin escribir y sin conflicto, la cabecera (y la barra
+compacta de la sticky) ofrece **"Discard my changes"** (confirm; `discardLinkedChanges`): la nota vuelve al
+último contenido conocido del archivo (`diskBody`: el del disco, o el de la caché si falta) y se re-sincroniza.
+En `tooLarge` el editor queda en solo lectura y esta acción es la salida (decisión: no se permite editar para
+recortar, para no seguir escribiendo contra un límite que la escritura rechazaría igualmente).
+
+**Conflictos — nunca sobrescribir en silencio.** Con `linked.conflict` no se escribe nada (las ediciones
+siguen en memoria y en el borrador de userData). Banner con **Recargar** (toma el disco), **Conservar mi versión** (confirm; escribe
+sobre la versión del disco que el usuario ha visto — si cambió OTRA vez, nuevo conflicto) y **Comparar…**
+(`LinkedConflictModal`: diff lado a lado "En disco" / "Mía" — la mía ya con el fuente conservado — y pestaña
+para editar un resultado combinado y guardarlo). `resolveLinkedConflict` corre en la cola de la nota tras
+vaciar los debounces.
+
+**Orden manual: los ids `lnk:` nunca se sincronizan.** `note-order:set` pasa por
+`linkedNotes.splitNoteOrder` (`splitLinkedOrder`): a `note-order.json` solo van los ids normales, y la lista
+COMPLETA (mezclada) de cada contexto que contiene alguna vinculada se guarda en el registro local
+(`linked-notes.json` → `order`). `note-order:get` las recombina (`mergeLinkedOrder`): la lista sincronizada
+manda en el orden de las notas normales (otro equipo puede haberlas reordenado) y cada vinculada se coloca justo
+detrás de la nota normal que la precedía localmente (al principio si no tenía ninguna; si esa nota ya no está,
+detrás de la anterior que siga presente). Así el orden mezclado vinculadas + normales sigue funcionando en este
+equipo y los demás nunca ven el id. Los ids `lnk:` que una build previa llegara a escribir en el fichero se
+mueven al orden local y el fichero se limpia en el siguiente `note-order:get` (`adoptLinkedIdsFromSynced`).
+Desvincular quita el id del orden local. Group/folder de una vinculada también son locales (registro); en otros
+equipos los contadores de grupo cuentan solo las notas presentes.
+
+**Limitaciones conocidas.** Deshacer del chat no aplica a notas vinculadas (no hay snapshot: `readDiskNote`
+solo lee carpetas). Un `.md` con EOL mezclados se normaliza al EOL dominante en la primera edición. El
+hard link de un archivo se rompe con el rename atómico (se escribe un inodo nuevo). Un `---` inicial seguido
+de un bloque YAML-like se trata como frontmatter (oculto, preservado). Al copiar una vinculada a una nota normal,
+las imágenes **por referencia** (`![alt][ref]` + `[ref]: ruta`) y las de título entre paréntesis
+(`![alt](src (título))`) no se convierten: se quedan con su ruta (rota fuera de la carpeta del `.md`). En el
+editor de la vinculada, una imagen con título no se muestra (el parser de NoteFlow toma el título como parte de
+la ruta), aunque se conserva tal cual en el archivo.
 
 ### Recuperación de fallos del renderer
 `render-process-gone` / `unresponsive` recargan la ventana automáticamente (común tras

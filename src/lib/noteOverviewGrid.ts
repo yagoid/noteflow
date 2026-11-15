@@ -3,7 +3,7 @@
 // (lib/sectionMap.ts) but with the content preview inside. Covered by
 // tests/lib/noteOverviewGrid.test.ts.
 
-import { htmlFromMarkdown } from './markdownHtml'
+import { htmlFromMarkdown, type MarkdownHtmlOptions } from './markdownHtml'
 import { escapeHtml } from './markdownInline'
 
 /** Narrowest column the grid allows (px): as many columns as fit, at least one. */
@@ -321,9 +321,11 @@ export function clipPreviewMarkdown(markdown: string, maxChars = PREVIEW_MAX_CHA
  * the image sources still held so the markdown pass doesn't run its regexes over megabytes
  * of base64 on every hover; the sources go back into the HTML (attribute-escaped) at the end.
  */
-export function sectionPreviewHtml(markdown: string, maxChars = PREVIEW_MAX_CHARS): string {
+export function sectionPreviewHtml(markdown: string, maxChars = PREVIEW_MAX_CHARS, opts?: MarkdownHtmlOptions): string {
   const { text, held } = clipHoldingImages(markdown, maxChars)
-  const html = htmlFromMarkdown(text)
+  // A held data-URI source isn't a path to map (linked notes map relative image paths).
+  const mapSrc = opts?.imageSrc
+  const html = htmlFromMarkdown(text, mapSrc ? { ...opts, imageSrc: (src) => (/[]/.test(src) ? src : mapSrc(src)) } : opts)
   if (held.length === 0) return html
   return restoreHeld(html, held, (s) => escapeHtml(s).replace(/"/g, '&quot;'))
 }

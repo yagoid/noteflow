@@ -2,7 +2,9 @@ import { Fragment, memo, useCallback, useMemo, useRef, useEffect, useLayoutEffec
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Search, PanelLeftClose, PanelLeftOpen, Lock, FolderPlus, X, Plus, Timer, LayoutGrid, Star, MoreHorizontal } from 'lucide-react'
+import { Search, PanelLeftClose, PanelLeftOpen, Lock, FolderPlus, X, Plus, Timer, LayoutGrid, Star, MoreHorizontal, FileSymlink } from 'lucide-react'
+import { LINKED_TONE_CLASS, linkedStatusLabel, linkedTone, requestLinkMarkdown } from '../LinkedNote/linkedActions'
+import { isLinkedDirty } from '../../lib/linkedNotes'
 import { ContextMenu } from '../ContextMenu'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { GroupContextMenu, type GroupContextMenuRequest } from '../GroupContextMenu'
@@ -161,6 +163,14 @@ const NoteRow = memo(function NoteRow({
             />
           )}
           {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
+          {note.linked && (
+            <span
+              title={`${t.linked.linkedNoteBadge}\n${note.linked.path}\n${linkedStatusLabel(t.linked, note.linked, isLinkedDirty(note))}`}
+              className="flex-shrink-0 flex items-center"
+            >
+              <FileSymlink size={10} className={LINKED_TONE_CLASS[linkedTone(note.linked, isLinkedDirty(note))]} aria-label={t.linked.linkedNoteBadge} />
+            </span>
+          )}
           {note.expiresAt && <span title={formatExpiry(note.expiresAt, t)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
           <span className={`text-[13px] font-mono font-medium truncate flex-1
             ${isActive ? 'text-text' : 'text-text/80'}`}>
@@ -1363,6 +1373,14 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
           >
             <Timer size={12} />
             {t.sidebar.tempNote24h}
+          </button>
+          <button
+            onClick={() => { setNewNoteCtx(null); requestLinkMarkdown() }}
+            title={t.linked.linkMarkdownFileDescription}
+            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+          >
+            <FileSymlink size={12} />
+            {t.linked.linkMarkdownFile}
           </button>
         </ContextMenu>
       )}

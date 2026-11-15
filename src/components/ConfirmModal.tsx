@@ -15,6 +15,8 @@ interface ConfirmModalProps {
    * nor the autorepeat of the Enter that opened the modal can confirm.
    */
   confirmOnEnter?: boolean
+  /** Information only: a single button (confirm). Escape / outside click still close it. */
+  hideCancel?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
@@ -26,6 +28,7 @@ export function ConfirmModal({
   cancelLabel,
   danger       = false,
   confirmOnEnter = true,
+  hideCancel = false,
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
@@ -69,12 +72,12 @@ export function ConfirmModal({
 
         {/* Body */}
         <div className="px-4 py-3">
-          <p className="text-xs font-mono text-text-muted leading-relaxed">{message}</p>
+          <p className="text-xs font-mono text-text-muted leading-relaxed whitespace-pre-line break-words">{message}</p>
         </div>
 
         {/* Actions */}
         <div className="flex items-center justify-end gap-2 px-4 pb-4">
-          <button
+          {!hideCancel && <button
             ref={cancelRef}
             onClick={onCancel}
             className="px-3 py-1.5 rounded text-xs font-mono text-text-muted
@@ -82,7 +85,7 @@ export function ConfirmModal({
                        transition-colors focus:outline-none focus:border-text/30"
           >
             {cancelLabel ?? t.common.cancel}
-          </button>
+          </button>}
           <button
             onClick={onConfirm}
             className={`px-3 py-1.5 rounded text-xs font-mono transition-colors focus:outline-none

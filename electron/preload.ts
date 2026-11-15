@@ -1,7 +1,8 @@
-import { contextBridge, ipcRenderer, webFrame } from 'electron'
+import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
 // Type-only import (erased at compile time — the preload runs sandboxed, with
 // no Node/module loading beyond electron itself).
 import type { AccountErrorCode } from './account'
+import type { LinkedNoteWire, LinkedWriteResult, LinkError, LinkedMetaPatch } from './linkedNotes'
 import type { FeedbackSendResult } from './feedbackLogic'
 import type { CliConnectResult, CliConnectStatus } from './cliConnectLogic'
 
@@ -62,6 +63,33 @@ const api = {
   getNotesDir: (): Promise<string> => ipcRenderer.invoke('fs:notes-dir'),
   openNotesFolder: (): Promise<void> => ipcRenderer.invoke('app:open-notes-folder'),
   chooseNotesDir: (): Promise<string | null> => ipcRenderer.invoke('app:choose-notes-dir'),
+
+  // Linked notes (external .md files edited in place — electron/linkedNotes.ts). Main only
+  // writes to files in its registry (by id); paths are validated there.
+  linkedList: (): Promise<LinkedNoteWire[]> => ipcRenderer.invoke('linked:list'),
+  linkedGet: (idOrPath: string): Promise<LinkedNoteWire | null> => ipcRenderer.invoke('linked:get', idOrPath),
+  linkedPickFiles: (opts: { multi: boolean }): Promise<string[]> => ipcRenderer.invoke('linked:pick-files', opts),
+  linkedLink: (paths: string[]): Promise<{ linked: LinkedNoteWire[]; existing: LinkedNoteWire[]; errors: Array<{ path: string; error: LinkError }> }> =>
+    ipcRenderer.invoke('linked:link', paths),
+  linkedRelocate: (id: string, newPath: string): Promise<{ ok: true; note: LinkedNoteWire } | { ok: false; error: LinkError | 'notLinked' }> =>
+    ipcRenderer.invoke('linked:relocate', id, newPath),
+  linkedUnlink: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('linked:unlink', id),
+  linkedUpdateMeta: (id: string, patch: LinkedMetaPatch): Promise<LinkedNoteWire | null> => ipcRenderer.invoke('linked:update-meta', id, patch),
+  linkedWrite: (id: string, body: string, baseHash: string | null): Promise<LinkedWriteResult> =>
+    ipcRenderer.invoke('linked:write', id, body, baseHash),
+  linkedSaveAsset: (id: string, name: string, mime: string, data: Uint8Array): Promise<{ ok: true; relPath: string } | { ok: false; error: string }> =>
+    ipcRenderer.invoke('linked:save-asset', id, name, mime, data),
+  linkedShowInFolder: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('linked:show-in-folder', id),
+  linkedRecheck: (): Promise<void> => ipcRenderer.invoke('linked:recheck'),
+  // A relative image of a linked note as a data URI (copying it into a regular note), or null.
+  linkedAssetDataUri: (id: string, src: string): Promise<string | null> => ipcRenderer.invoke('linked:asset-data-uri', id, src),
+  // Unwritten edits kept in userData across restarts (null = in sync again).
+  linkedSetDraft: (id: string, draft: { body: string; baseHash: string | null } | null): Promise<void> =>
+    ipcRenderer.invoke('linked:set-draft', id, draft),
+  // Absolute path of a File dropped from the OS (File.path is gone since Electron 32).
+  getPathForFile: (file: File): string => {
+    try { return webUtils.getPathForFile(file) } catch { return '' }
+  },
 
   // Settings
   getTheme: (): string | null => ipcRenderer.sendSync('settings:get-theme'),

@@ -1,6 +1,17 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
-import type { Note, NoteSection } from '../types'
+import type { LinkedErrorCode, LinkedMetaPatch, LinkedNoteState, LinkedNoteWire, LinkError, Note, NoteSection } from '../types'
+import {
+  inlineLinkedImages,
+  isLinkedDirty,
+  isLinkedFilePath,
+  isLinkedNote,
+  linkedDraftOf,
+  linkedNoteFromWire,
+  mergeLinkedWire,
+  LINKED_SECTION_ID,
+} from '../lib/linkedNotes'
+import { getLinkedNormalizer, preserveUnchangedBlocks, withBlankEdges } from '../lib/linkedMarkdown'
 import {
   NOTE_MD,
   parseNoteFolder,
@@ -98,6 +109,9 @@ function isPrunable(note: Note): boolean {
 }
 
 const alarmSignature = (note: Note) => JSON.stringify(collectAlarms([note]))
+
+/** Alarms of every note — linked notes are plain Markdown: their 📅⏰ are text, never alarms. */
+const alarmsOf = (notes: Note[]) => collectAlarms(notes.filter((n) => !n.linked))
 
 /**
  * Serializes `next`, computes the minimal multi-file diff against `prev`
@@ -207,6 +221,21 @@ interface NotesState {
   rememberActiveSection: (noteId: string, sectionId: string) => void
   /** Re-reads one note folder from disk. `retried` is internal (one retry after a race with a local write). */
   syncNote: (filePath: string, retried?: boolean) => Promise<void>
+
+  // ── Linked notes (external .md files edited in place — lib/linkedNotes.ts) ──
+  /** Re-reads main's view of a linked note (by id or file path): metadata, status and — unless
+   *  the note has edits of its own not on disk (then: conflict) — the file content. */
+  syncLinkedNote: (idOrPath: string) => Promise<void>
+  /** Links .md files (already linked ones are reused) and opens the first one. */
+  linkFiles: (paths: string[]) => Promise<{ opened: Note | null; linked: number; errors: Array<{ path: string; error: LinkError }> }>
+  /** Points a linked note at another file (keeps title, group, favorite…). */
+  relocateLinkedNote: (id: string, newPath: string) => Promise<{ ok: boolean; error?: LinkError | 'notLinked' }>
+  /** Removes a linked note from NoteFlow. The file is never touched. */
+  unlinkNote: (id: string) => Promise<void>
+  /** Drops a linked note's unwritten changes (no conflict): back to the file's last known content. */
+  discardLinkedChanges: (id: string) => Promise<void>
+  /** Ends a conflict: take the disk version, write ours over it, or write a merged text. */
+  resolveLinkedConflict: (id: string, resolution: { kind: 'reload' } | { kind: 'keepMine' } | { kind: 'merged'; body: string }) => Promise<void>
   pruneEmptyNote: (id: string) => Promise<void>
   encryptNote: (id: string, password: string, options?: EncryptionOptions) => Promise<void>
   unlockNote: (id: string, password: string) => Promise<void>   // temporary in-session unlock
@@ -233,6 +262,7 @@ type NotePatch = Parameters<NotesState['updateNote']>[1]
 async function applyNoteUpdate(get: StoreGet, set: StoreSet, id: string, patch: NotePatch): Promise<void> {
   const note = get().notes.find((n) => n.id === id)
   if (!note) return
+  if (note.linked) return applyLinkedUpdate(get, set, id, patch)
 
   let updated: Note
   let alarmsMayChange = true
@@ -291,10 +321,207 @@ async function applyNoteUpdate(get: StoreGet, set: StoreSet, id: string, patch: 
   // chart. Sync pulls, imports, migration and temp-note expiry never come through this path.
   window.noteflow.recordActivityEdit(id)
   if (alarmsMayChange && windowRole !== 'section') {
-    window.noteflow.scheduleAlarms(collectAlarms(get().notes))
+    window.noteflow.scheduleAlarms(alarmsOf(get().notes))
   }
   // (Safe for unlocked encrypted notes too: syncNote re-decrypts with the session password.)
   if (raced) void get().syncNote(updated.filePath)
+}
+
+// ── Linked notes (an external .md edited in place — lib/linkedNotes.ts) ─────────
+
+/** Original block text → its rendering, across saves (lib/linkedMarkdown.ts). */
+const linkedBlockCache = new Map<string, string>()
+
+/**
+ * The file body to write for `content`. Text mode writes byte for byte; the rich editor's
+ * serialization keeps the original source of every block whose rendering didn't change
+ * (lib/linkedMarkdown.ts), so a small edit is a small diff in the user's Git history.
+ */
+export function linkedBodyToWrite(note: Note & { linked: LinkedNoteState }, content: string, rawMode = !!note.sections[0]?.isRawMode): string {
+  const normalize = getLinkedNormalizer()
+  return rawMode || !normalize ? content : preserveUnchangedBlocks(note.linked.diskBody, content, normalize, linkedBlockCache)
+}
+
+/**
+ * Writes `content` to a linked note's file (hash-checked in main) → the note's new
+ * linked state: synced, in conflict, or with the status that refused the write (the
+ * content then stays unsaved in the store). Null = the note is no longer linked.
+ */
+async function writeLinkedContent(id: string, note: Note & { linked: LinkedNoteState }, content: string, rawMode: boolean): Promise<LinkedNoteState | null> {
+  const linked = note.linked
+  const res = await window.noteflow.linkedWrite(id, linkedBodyToWrite(note, content, rawMode), linked.baseHash)
+  if (res.ok) {
+    const { error: _error, ...rest } = linked
+    return { ...rest, status: 'ok', baseHash: res.hash, diskBody: res.body, syncedContent: content }
+  }
+  if (res.reason === 'conflict') return { ...linked, conflict: { diskBody: res.disk.body, diskHash: res.disk.hash } }
+  if (res.reason === 'notLinked') return null
+  console.warn('[notes] Linked note write refused:', id, res.reason, res.error ?? '')
+  if (res.reason === 'missing' || res.reason === 'readonly') return { ...linked, status: res.reason }
+  // The real cause for the notice (too large, unreadable…); anything else is a failed write.
+  const known: LinkedErrorCode[] = ['tooLarge', 'invalidUtf8', 'unreadable']
+  const error = known.includes(res.error as LinkedErrorCode) ? res.error as LinkedErrorCode : 'writeFailed'
+  return { ...linked, status: 'error', error }
+}
+
+/** The fields a write result decides (what to carry over onto a note replaced meanwhile). */
+function writeOutcome(linked: LinkedNoteState): Pick<LinkedNoteState, 'status' | 'error' | 'baseHash' | 'diskBody' | 'syncedContent' | 'conflict'> {
+  return { status: linked.status, error: linked.error, baseHash: linked.baseHash, diskBody: linked.diskBody, syncedContent: linked.syncedContent, conflict: linked.conflict }
+}
+
+// Last draft this window handed to main per linked note (JSON), to only send changes.
+const sentLinkedDrafts = new Map<string, string>()
+
+/**
+ * Keeps main's userData draft in step with a linked note: its unwritten content while
+ * it's dirty or in conflict, nothing once it's in sync (main also drops it on every
+ * successful write). Survives restarts; never written to the .md by itself.
+ */
+function persistLinkedDraft(note: Note | undefined, mainDraft?: LinkedNoteWire['draft'] | null): void {
+  if (!note?.linked) return
+  const draft = linkedDraftOf(note)
+  const key = JSON.stringify(draft)
+  // main's view (when known): its draft may be gone (consumed by another window's write) or
+  // be another window's — then ours is sent again, whatever we sent before. With two windows
+  // holding unwritten edits of the same note, the last draft sent wins.
+  if (mainDraft !== undefined && JSON.stringify(mainDraft ?? null) !== key) sentLinkedDrafts.delete(note.id)
+  if ((sentLinkedDrafts.get(note.id) ?? 'null') === key) return
+  sentLinkedDrafts.set(note.id, key)
+  void window.noteflow.linkedSetDraft(note.id, draft).catch(() => sentLinkedDrafts.delete(note.id))
+}
+
+/**
+ * The file of a linked note is writable again (or a restored draft is based on the disk
+ * version) while the note still holds unsaved content: write it now — with the regular
+ * hash check, so a file changed meanwhile turns into a conflict instead. Run in the
+ * note's queue; nothing to do while an editor still has a debounced save (it will write).
+ */
+async function retryLinkedWrite(get: StoreGet, set: StoreSet, id: string): Promise<void> {
+  const note = get().notes.find((n) => n.id === id)
+  if (!isLinkedNote(note) || note.linked.status !== 'ok' || note.linked.conflict || !isLinkedDirty(note)) return
+  if (hasPendingEdits(id)) return
+  const content = note.sections[0].content
+  const linked = await writeLinkedContent(id, note, content, !!note.sections[0].isRawMode)
+  if (!linked) { dropNotes(set, new Set([id])); return }
+  let updated: Note | undefined
+  set((s) => ({
+    notes: s.notes.map((n) => {
+      if (n.id !== id || !n.linked) return n
+      // Also onto a note replaced while it was written (another window's sync, a new
+      // edit): its new base hash must land, or the next edit would conflict with our own
+      // write (whose broadcast this window ignores). Its content stays as it is now.
+      updated = n === note ? { ...n, linked } : { ...n, linked: { ...n.linked, ...writeOutcome(linked) } }
+      return updated
+    }),
+  }))
+  persistLinkedDraft(updated)
+}
+
+/**
+ * The sections of a linked note ready to be copied into a REGULAR note (duplicate, save
+ * as template): relative images inlined as data URIs (main reads them with the same
+ * checks as the nflinked: scheme; any it can't read stays as it was).
+ */
+export async function linkedSectionsForCopy(note: Note): Promise<NoteSection[]> {
+  if (!note.linked) return note.sections
+  return Promise.all(note.sections.map(async (s) => ({
+    ...s,
+    content: await inlineLinkedImages(s.content, (src) => window.noteflow.linkedAssetDataUri(note.id, src)),
+  })))
+}
+
+/** A linked note keeps exactly its one section: only content / isRawMode / aiHidden may change. */
+function isLinkedSectionsPatch(current: NoteSection[], next: NoteSection[]): boolean {
+  return next.length === 1 && next[0].id === LINKED_SECTION_ID && next[0].name === current[0]?.name
+}
+
+/** Removes notes from the store (and the panes showing them) — unlinked / gone linked notes. */
+function dropNotes(set: StoreSet, ids: Set<string>): void {
+  if (ids.size === 0) return
+  set((s) => {
+    if (!s.notes.some((n) => ids.has(n.id))) return {}
+    const remaining = s.notes.filter((n) => !ids.has(n.id))
+    const fallback = windowRole === 'section' ? null : remaining.find((n) => !n.archived)?.id ?? remaining[0]?.id ?? null
+    return { notes: remaining, ...layoutState(removeNotesFromLayout(layoutOf(s), ids, fallback, newPaneId())) }
+  })
+}
+
+/**
+ * The write of a linked note (queued like every note write). Metadata (title alias,
+ * favorite, group/folder, text mode, AI visibility) goes to main's registry; a content
+ * edit is written to the file only if the file still holds the version it's based on
+ * (main checks the hash) — otherwise the note enters the conflict state and keeps the
+ * edit in memory. Never while read-only (missing / read-only / unreadable file) nor
+ * during a conflict. Structural section changes are refused.
+ */
+async function applyLinkedUpdate(get: StoreGet, set: StoreSet, id: string, patch: NotePatch): Promise<void> {
+  const note = get().notes.find((n) => n.id === id)
+  if (!note?.linked) return
+  const current = note.sections[0]
+  let next = current
+  if (patch.sections !== undefined) {
+    if (!isLinkedSectionsPatch(note.sections, patch.sections)) {
+      console.warn('[notes] A linked note has exactly one section — refusing a structural change:', id)
+      return
+    }
+    next = patch.sections[0]
+  }
+  const meta: LinkedMetaPatch = {}
+  if (patch.title !== undefined && patch.title !== note.title) meta.title = patch.title
+  if (patch.favorited !== undefined && patch.favorited !== note.favorited) meta.favorited = patch.favorited
+  if ('group' in patch && patch.group !== note.group) meta.group = patch.group ?? ''
+  if ('folder' in patch && patch.folder !== note.folder) meta.folder = patch.folder ?? ''
+  if (!!next.isRawMode !== !!current.isRawMode) meta.isRawMode = !!next.isRawMode
+  if (!!next.aiHidden !== !!current.aiHidden) meta.aiHidden = !!next.aiHidden
+
+  let linked: LinkedNoteState = note.linked
+  let section: NoteSection = { ...next }
+  const contentChanged = next.content !== current.content
+  if (contentChanged) {
+    // Not written while in conflict, nor while the file can't be written (missing,
+    // read-only, unreadable, still being checked — e.g. the last debounced save an
+    // editor flushes as it remounts read-only): the edit stays in the store as
+    // unsaved content (+ a draft in userData) and is written once the file is
+    // writable again (syncLinkedNote → retryLinkedWrite), through the hash check.
+    if (!linked.conflict && linked.status === 'ok') {
+      const written = await writeLinkedContent(id, { ...note, linked }, next.content, !!next.isRawMode)
+      if (!written) { dropNotes(set, new Set([id])); return }
+      linked = written
+    }
+  } else if (meta.isRawMode === true && current.content === linked.syncedContent && linked.diskBody !== current.content) {
+    // Entering text mode on a clean note shows the file's exact text (byte-for-byte editing),
+    // not the rich editor's serialization of it.
+    section = { ...section, content: linked.diskBody }
+    linked = { ...linked, syncedContent: linked.diskBody }
+  }
+
+  if (Object.keys(meta).length > 0) {
+    const wire = await window.noteflow.linkedUpdateMeta(id, meta)
+    if (!wire) { dropNotes(set, new Set([id])); return }
+  }
+  const updated: Note = {
+    ...note,
+    ...(patch.title !== undefined ? { title: patch.title } : {}),
+    ...(patch.favorited !== undefined ? { favorited: patch.favorited } : {}),
+    ...('group' in patch ? { group: patch.group } : {}),
+    ...('folder' in patch ? { folder: patch.folder } : {}),
+    sections: [section],
+    tags: extractTags(section.content),
+    linked,
+    // The file's modification time is the note's "updated" (main reports it on reload).
+    ...(contentChanged ? { updated: new Date().toISOString() } : {}),
+  }
+  if (!updated.group) delete updated.folder
+  let raced = false
+  set((s) => {
+    const latest = s.notes.find((n) => n.id === id)
+    raced = latest !== undefined && latest !== note
+    return { notes: s.notes.map((n) => (n.id === id ? updated : n)) }
+  })
+  if (contentChanged) window.noteflow.recordActivityEdit(id)
+  persistLinkedDraft(updated)
+  // Another window's change landed while we wrote: re-read main's view of the note.
+  if (raced) void get().syncLinkedNote(id)
 }
 
 /** Relocks notes whose session unlock no longer applies (their decryption failed). */
@@ -346,10 +573,12 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // Store snapshot BEFORE the reads: a local write landing while we read/decrypt is
       // newer than the disk copy we got — see keepNotesChangedDuringLoad (lib/reloadGuard).
       const notesBeforeRead = get().notes
-      const [dir, allDirs, uiState] = await Promise.all([
+      const [dir, allDirs, uiState, linkedWires] = await Promise.all([
         window.noteflow.getNotesDir(),
         window.noteflow.readAllNotes(),
         window.noteflow.getUiState(),
+        // Linked notes (external .md files): main's registry, not the notes dir.
+        window.noteflow.linkedList().catch((): LinkedNoteWire[] => []),
       ])
       set({ notesDir: dir })
 
@@ -368,7 +597,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // Safety guard: if we got 0 notes but already had notes in memory, this is
       // likely a transient FS issue (e.g. Windows returning an empty dir on OS
       // wake from sleep). Don't wipe in-memory notes — they're still on disk.
-      if (loaded.length === 0 && get().notes.length > 0) {
+      if (loaded.length === 0 && get().notes.some((n) => !n.linked)) {
         set({ isLoading: false })
         return
       }
@@ -377,12 +606,44 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // re-synced once set, so a newer disk version of them still lands. Computed right
       // before the synchronous set()s below — no await in between.
       const { notes: merged, resync } = keepNotesChangedDuringLoad(
-        notesBeforeRead, get().notes, loaded, (inMemory, read) => noteFingerprint(inMemory) === noteFingerprint(read),
+        notesBeforeRead.filter((n) => !n.linked), get().notes.filter((n) => !n.linked), loaded,
+        (inMemory, read) => noteFingerprint(inMemory) === noteFingerprint(read),
       )
+      // Linked notes already in the store keep their copy (it may hold edits not on disk,
+      // or a conflict) and are re-synced through the linked-note decision when main's view
+      // differs; new ones come in as main describes them; unlinked ones go.
+      const storeLinked = new Map(get().notes.filter(isLinkedNote).map((n) => [n.id, n]))
+      const linkedResync: string[] = []
+      const linkedNotes = linkedWires.map((wire) => {
+        const existing = storeLinked.get(wire.id)
+        if (!existing) {
+          const fresh = linkedNoteFromWire(wire)
+          // A restored draft (unsaved edits from before a restart): retried / judged by the sync.
+          if (isLinkedDirty(fresh)) linkedResync.push(wire.id)
+          return fresh
+        }
+        const fresh = linkedNoteFromWire(wire)
+        const s0 = existing.sections[0]
+        const f0 = fresh.sections[0]
+        if (wire.hash !== existing.linked.baseHash || wire.status !== existing.linked.status || wire.path !== existing.linked.path
+          || fresh.title !== existing.title || fresh.group !== existing.group || fresh.folder !== existing.folder
+          || fresh.favorited !== existing.favorited || fresh.archived !== existing.archived
+          || !!f0.isRawMode !== !!s0?.isRawMode || !!f0.aiHidden !== !!s0?.aiHidden) {
+          linkedResync.push(wire.id)
+        }
+        return existing
+      })
+      // Linked while the list was in flight: not in it yet, keep it.
+      const listed = new Set(linkedWires.map((w) => w.id))
+      const before = new Set(notesBeforeRead.map((n) => n.id))
+      for (const n of storeLinked.values()) if (!listed.has(n.id) && !before.has(n.id)) linkedNotes.push(n)
       // A kept copy of a note whose session password was just dropped (`failed`) still
       // holds the plaintext: lock it like the loaded copy.
-      const notes = relockNotes(merged, failed)
-      const resyncChanged = () => { for (const filePath of resync) void get().syncNote(filePath) }
+      const notes = [...relockNotes(merged, failed), ...linkedNotes]
+      const resyncChanged = () => {
+        for (const filePath of resync) void get().syncNote(filePath)
+        for (const id of linkedResync) void get().syncLinkedNote(id)
+      }
 
       // A section window owns its single pane (SectionWindowApp sets it); it never takes
       // the main window's persisted active note nor schedules alarms.
@@ -423,7 +684,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       resyncChanged()
 
       // Register alarms with main process after notes are loaded
-      window.noteflow.scheduleAlarms(collectAlarms(notes))
+      window.noteflow.scheduleAlarms(alarmsOf(notes))
     } catch (err) {
       console.error('Failed to load notes:', err)
       set({ isLoading: false })
@@ -431,6 +692,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
   
   syncNote: async (filePath: string, retried = false) => {
+    // A linked FILE (external .md): its own sync. Note folders never end in .md.
+    if (isLinkedFilePath(filePath)) return get().syncLinkedNote(filePath)
     try {
       // Store snapshot BEFORE the disk read: if a local write of this note lands while we
       // read (or decrypt, PBKDF2 can take hundreds of ms), our copy may predate it and must
@@ -445,7 +708,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
 
         set((s) => {
           const removedIds = s.notes
-            .filter((n) => n.filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase() === targetFilename)
+            .filter((n) => !n.linked && n.filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase() === targetFilename)
             .map((n) => n.id)
 
           if (removedIds.length === 0) return {}
@@ -508,11 +771,138 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // note edited elsewhere gains/loses a deadline, re-register the full set from here
       // (only when that note's alarms actually changed — this runs on every remote write).
       if (windowRole === 'main' && (!existingNote || alarmSignature(existingNote) !== alarmSignature(incomingNote))) {
-        window.noteflow.scheduleAlarms(collectAlarms(get().notes))
+        window.noteflow.scheduleAlarms(alarmsOf(get().notes))
       }
     } catch (err) {
       console.error('Failed to sync note:', err)
     }
+  },
+
+  // Queued with the note's writes: never interleaves with a write of ours in flight, and
+  // judges the note as those writes left it.
+  syncLinkedNote: async (idOrPath) => {
+    try {
+      const first = await window.noteflow.linkedGet(idOrPath)
+      if (!first) {
+        // No note at that path any more: unlinked (here or in another window) — or relocated
+        // to another file, then it's still linked under its id and is re-read instead.
+        const gone = new Set<string>()
+        for (const n of get().notes.filter((n) => n.linked && (n.id === idOrPath || n.filePath === idOrPath))) {
+          if (n.id !== idOrPath && await window.noteflow.linkedGet(n.id)) void get().syncLinkedNote(n.id)
+          else gone.add(n.id)
+        }
+        dropNotes(set, gone)
+        return
+      }
+      await noteWriteQueue.run(first.id, async () => {
+        const wire = await window.noteflow.linkedGet(first.id)
+        if (!wire) { dropNotes(set, new Set([first.id])); return }
+        let merged: Note | undefined
+        set((s) => {
+          const existing = s.notes.find((n) => n.id === wire.id)
+          if (!existing) {
+            merged = linkedNoteFromWire(wire)
+            return { notes: [merged, ...s.notes] }
+          }
+          if (!isLinkedNote(existing)) return {}
+          merged = mergeLinkedWire(existing, wire, hasPendingEdits(wire.id)).note
+          return { notes: s.notes.map((n) => (n.id === wire.id ? merged! : n)) }
+        })
+        persistLinkedDraft(merged, wire.draft ?? null)
+        // Writable again (or a restored draft) with unsaved content: write it now.
+        await retryLinkedWrite(get, set, wire.id)
+      })
+    } catch (err) {
+      console.error('Failed to sync linked note:', err)
+    }
+  },
+
+  linkFiles: async (paths) => {
+    const res = await window.noteflow.linkedLink(paths)
+    const all = [...res.linked, ...res.existing]
+    if (all.length > 0) {
+      set((s) => {
+        const known = new Set(s.notes.map((n) => n.id))
+        const added = res.linked.filter((w) => !known.has(w.id)).map(linkedNoteFromWire)
+        return added.length > 0 ? { notes: [...added, ...s.notes] } : {}
+      })
+    }
+    const opened = all[0] ? get().notes.find((n) => n.id === all[0].id) ?? null : null
+    if (opened) get().setActiveNote(opened.id)
+    return { opened, linked: res.linked.length, errors: res.errors }
+  },
+
+  relocateLinkedNote: (id, newPath) => noteWriteQueue.run(id, async (): Promise<{ ok: boolean; error?: LinkError | 'notLinked' }> => {
+    const before = get().notes.find((n) => n.id === id)
+    const res = await window.noteflow.linkedRelocate(id, newPath)
+    if (!res.ok) return { ok: false, error: res.error }
+    // Another file now: its content replaces the note's — unless the note held changes that
+    // were never written. Those are kept as a draft over the OLD base: against the new file
+    // they show as a conflict, and the user picks in the banner / Compare… (never lost, never
+    // written to the new file silently).
+    const unsaved = isLinkedNote(before) && isLinkedDirty(before)
+      ? { body: before.sections[0]?.content ?? '', baseHash: before.linked.baseHash }
+      : null
+    const fresh = linkedNoteFromWire(unsaved ? { ...res.note, draft: unsaved } : { ...res.note, draft: undefined })
+    set((s) => ({ notes: s.notes.map((n) => (n.id === id ? fresh : n)) }))
+    persistLinkedDraft(fresh, res.note.draft ?? null)
+    return { ok: true }
+  }),
+
+  discardLinkedChanges: (id) => noteWriteQueue.run(id, async () => {
+    const note = get().notes.find((n) => n.id === id)
+    if (!isLinkedNote(note) || note.linked.conflict || !isLinkedDirty(note)) return
+    // Back to the last content known from the file (the disk's, or the cache's if it's
+    // missing); then main's current view is read in case the file changed meanwhile.
+    // (The status a failed write left is corrected by that sync too.)
+    const linked: LinkedNoteState = { ...note.linked, syncedContent: note.linked.diskBody }
+    const body = note.linked.diskBody
+    let updated: Note | undefined
+    set((s) => ({ notes: s.notes.map((n) => (n.id === id ? (updated = { ...n, sections: [{ ...n.sections[0], content: body }], tags: extractTags(body), linked }) : n)) }))
+    persistLinkedDraft(updated)
+    void get().syncLinkedNote(id)
+  }),
+
+  unlinkNote: async (id) => {
+    flushPendingEdits(id)
+    await noteWriteQueue.run(id, async () => {
+      await window.noteflow.linkedUnlink(id)
+      dropNotes(set, new Set([id]))
+    })
+  },
+
+  resolveLinkedConflict: async (id, resolution) => {
+    // The editors' pending saves land first (in memory: the note is in conflict).
+    flushPendingEdits(id)
+    await noteWriteQueue.run(id, async () => {
+      const note = get().notes.find((n) => n.id === id)
+      if (!note?.linked?.conflict) return
+      const { conflict, ...rest } = note.linked
+      if (resolution.kind === 'reload') {
+        const linked: LinkedNoteState = { ...rest, baseHash: conflict.diskHash, diskBody: conflict.diskBody, syncedContent: conflict.diskBody }
+        const sections = [{ ...note.sections[0], content: conflict.diskBody }]
+        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, sections, tags: extractTags(conflict.diskBody), linked } : n)) }))
+        persistLinkedDraft(get().notes.find((n) => n.id === id))
+        return
+      }
+      // Keep mine / merged: written over the disk version the user saw (if the file changed
+      // AGAIN since, main reports a new conflict instead of overwriting it).
+      const content = resolution.kind === 'merged' ? resolution.body : note.sections[0].content
+      // A merged text is written as typed; "keep mine" like a regular save.
+      // "Keep mine" with the disk's blank edges (they don't render: no diff there).
+      const body = resolution.kind === 'merged'
+        ? content
+        : withBlankEdges(linkedBodyToWrite(note as Note & { linked: LinkedNoteState }, content), conflict.diskBody)
+      const res = await window.noteflow.linkedWrite(id, body, conflict.diskHash)
+      let linked: LinkedNoteState
+      if (res.ok) linked = { ...rest, baseHash: res.hash, diskBody: res.body, syncedContent: content }
+      else if (res.reason === 'conflict') linked = { ...rest, conflict: { diskBody: res.disk.body, diskHash: res.disk.hash } }
+      else linked = { ...note.linked, status: res.reason === 'missing' ? 'missing' : res.reason === 'readonly' ? 'readonly' : 'error' }
+      const sections = [{ ...note.sections[0], content }]
+      set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, sections, tags: extractTags(content), linked } : n)) }))
+      persistLinkedDraft(get().notes.find((n) => n.id === id))
+      if (res.ok) window.noteflow.recordActivityEdit(id)
+    })
   },
 
   // group/folder go in BEFORE the single disk write: assigning them afterwards with
@@ -595,6 +985,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   duplicateNote: async (id) => {
     const source = get().notes.find((n) => n.id === id)
     if (!source) throw new Error(`Note ${id} not found`)
+    // A linked note's copy is a regular note: its relative images become inline data
+    // URIs (regular notes keep images inline; relative paths would point nowhere).
+    const sourceSections = source.linked ? await linkedSectionsForCopy(source) : source.sections
     const newId = nanoid(8)
     const now = new Date().toISOString()
     const draft: Omit<Note, 'filePath' | 'raw'> = {
@@ -609,7 +1002,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       ...(source.group ? { group: source.group } : {}),
       ...(source.folder ? { folder: source.folder } : {}),
       // The copies are new sections of a new note → they share its creation time.
-      sections: source.sections.map((s) => ({ ...s, id: nanoid(8), created: now })),
+      sections: sourceSections.map((s) => ({ ...s, id: nanoid(8), created: now })),
     }
     const dir = get().notesDir
     const filePath = `${dir}/${noteDirname(draft.id, draft.title)}`
@@ -663,6 +1056,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   deleteNote: async (id) => {
     const note = get().notes.find((n) => n.id === id)
     if (!note) return
+    // "Deleting" a linked note only unlinks it: its file is never deleted.
+    if (note.linked) return get().unlinkNote(id)
 
     await window.noteflow.deleteNote(note.filePath)
 
@@ -685,6 +1080,12 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   archiveNote: (id) => noteWriteQueue.run(id, async () => {
     const note = get().notes.find((n) => n.id === id)
     if (!note) return
+    if (note.linked) {
+      const wire = await window.noteflow.linkedUpdateMeta(id, { archived: !note.archived })
+      if (!wire) { dropNotes(set, new Set([id])); return }
+      set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, archived: wire.archived } : n)) }))
+      return
+    }
 
     const updated: Note = { ...note, archived: !note.archived, updated: new Date().toISOString() }
     await writeNoteToDisk(note, updated)
@@ -856,6 +1257,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const note = get().notes.find((n) => n.id === id)
     if (!note) return
     if (note.encryption) return  // never auto-delete encrypted notes
+    if (note.linked) return      // a linked note is a file the user picked: never pruned
     if (!isPrunable(note)) return
     // Typed into again since the prune was queued: a save is on its way.
     if (hasPendingEdits(id)) return
@@ -874,7 +1276,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
 
   encryptNote: (id, password, options) => noteWriteQueue.run(id, async () => {
     const note = get().notes.find((n) => n.id === id)
-    if (!note || note.encryption) return
+    // Linked notes can't be encrypted: their content is a plain file of the user's project.
+    if (!note || note.encryption || note.linked) return
     const encryption = await encryptSections(note.sections, password, options)
     const updated: Note = { ...note, sections: [], encryption, updated: new Date().toISOString() }
     // buildNoteWritePayload deletes the plaintext section files on encrypt

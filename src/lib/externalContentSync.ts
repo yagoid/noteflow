@@ -258,6 +258,16 @@ function myersOps(a: readonly string[], b: readonly string[]): ('match' | 'del' 
   return ops.reverse()
 }
 
+/**
+ * Changed ranges between two sequences of strings (lines, blocks…): each hunk is
+ * a[aStart, aEnd) replaced by b[bStart, bEnd); everything outside the hunks is
+ * equal. Same diff as merge3 (Myers; one hunk past MAX_EDIT_DISTANCE). Used by
+ * linked notes (lib/linkedMarkdown.ts) and their compare view.
+ */
+export function diffSequences(a: readonly string[], b: readonly string[]): Array<{ aStart: number; aEnd: number; bStart: number; bEnd: number }> {
+  return diffLines(a, b).map((h) => ({ aStart: h.baseStart, aEnd: h.baseEnd, bStart: h.sideStart, bEnd: h.sideEnd }))
+}
+
 /** base[from, to) with one side's hunks (all inside that range) applied. */
 function sideVersion(base: readonly string[], side: readonly string[], hunks: Hunk[], from: number, to: number): string[] {
   const out: string[] = []

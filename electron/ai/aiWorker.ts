@@ -19,7 +19,7 @@ import type { FeatureExtractionPipeline } from '@huggingface/transformers'
 import {
   SCHEMA_VERSION,
   type WorkerRequest, type WorkerResponse, type IndexState, type IndexProgress,
-  type RelatedNote, type SemanticHit, type GraphEdge,
+  type RelatedNote, type SemanticHit, type GraphEdge, type DataNote,
 } from './protocol'
 import { listNoteDirs, parseNoteDir } from '../noteFormat'
 
@@ -677,12 +677,13 @@ function hasIndexableContent(s: ParsedSection): boolean {
   return stripNoise(s.content).trim().length > 0
 }
 
-async function handleIndexNote(dirPath: string): Promise<{ ok: boolean; skipped?: boolean }> {
+async function handleIndexNote(dirPath: string, data?: ParsedNote): Promise<{ ok: boolean; skipped?: boolean }> {
   if (!index) throw new Error('Index not initialised')
   // Dormant (model not loaded): don't auto-load it just to index an edit. The next explicit
   // reindex picks up the change. This keeps note saves from waking the heavy model.
   if (!provider.ready) return { ok: true, skipped: true }
-  const parsed = readNoteFolder(dirPath)
+  // `data`: a linked note (external .md) handed over as data; `dirPath` is then its index key.
+  const parsed = data ?? readNoteFolder(dirPath)
   if (!parsed || !parsed.noteId || parsed.encrypted) {
     index.removeNoteByFilePath(dirPath)
     return { ok: true, skipped: true }
@@ -721,18 +722,24 @@ async function handleIndexNote(dirPath: string): Promise<{ ok: boolean; skipped?
 
 const REINDEX_BATCH = 16 // embed many sections per inference call → much better CPU throughput
 
-async function handleReindexAll(notesDir: string): Promise<{ ok: boolean; indexed: number }> {
+async function handleReindexAll(notesDir: string, extra: DataNote[] = []): Promise<{ ok: boolean; indexed: number }> {
   if (!index) throw new Error('Index not initialised')
   await ensureModelLoaded() // reindex needs to embed text → load the model now
   emitState('indexing')
   index.clearAll()
 
-  // 1) Collect every section across all note directories (skip encrypted/empty).
+  // 1) Collect every section across all note directories (skip encrypted/empty), plus the
+  //    linked notes (external .md files) main hands over as data, keyed by `linked://<id>`.
   type Row = { noteId: string; filePath: string; title: string; sectionId: string; sectionName: string; text: string; hash: string }
   const rows: Row[] = []
-  for (const dir of listNoteDirs(notesDir)) {
-    const dirPath = path.join(notesDir, dir)
-    const parsed = readNoteFolder(dirPath)
+  const sources: Array<{ dirPath: string; parsed: ParsedNote | null }> = [
+    ...listNoteDirs(notesDir).map((dir) => {
+      const dirPath = path.join(notesDir, dir)
+      return { dirPath, parsed: readNoteFolder(dirPath) }
+    }),
+    ...extra.map((d) => ({ dirPath: d.key, parsed: d.note as ParsedNote })),
+  ]
+  for (const { dirPath, parsed } of sources) {
     if (!parsed || !parsed.noteId || parsed.encrypted) continue
     for (const s of parsed.sections) {
       if (s.aiHidden) continue          // sections hidden from the AI never enter the index
@@ -807,13 +814,19 @@ parentPort.on('message', async (e: { data: WorkerRequest }) => {
         if (!r.skipped) scheduleModelUnload() // keep the model alive while edits keep arriving
         break
       }
+      case 'index-note-data': {
+        const r = await handleIndexNote(req.payload.key, req.payload.note as ParsedNote)
+        send({ type: 'result', id: req.id, payload: r })
+        if (!r.skipped) scheduleModelUnload()
+        break
+      }
       case 'remove-note': {
         index?.removeNoteByFilePath(req.payload.dirPath)
         send({ type: 'result', id: req.id, payload: { ok: true } })
         break
       }
       case 'reindex-all': {
-        const r = await handleReindexAll(req.payload.notesDir)
+        const r = await handleReindexAll(req.payload.notesDir, req.payload.extra)
         send({ type: 'result', id: req.id, payload: r })
         scheduleModelUnload() // work done + persisted → release the model back to dormant
         break

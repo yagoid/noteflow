@@ -1,6 +1,6 @@
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react'
 import type { NodeViewProps } from '@tiptap/react'
-import Image from '@tiptap/extension-image'
+import Image, { type ImageOptions } from '@tiptap/extension-image'
 import { useState, useRef, useCallback } from 'react'
 import type { CSSProperties } from 'react'
 
@@ -34,9 +34,12 @@ function resizeBounds(wrapper: HTMLElement) {
   return { breakout, colLeft: paraRect.left, colWidth: para.clientWidth, max }
 }
 
-function ResizableImageView({ node, updateAttributes, selected }: NodeViewProps) {
+function ResizableImageView({ node, updateAttributes, selected, extension }: NodeViewProps) {
   const [resizing, setResizing] = useState(false)
   const imgRef = useRef<HTMLImageElement>(null)
+  // Linked notes: a relative `assets/x.png` is shown from the file's folder; the doc keeps the src.
+  const displaySrc = (extension.options as { displaySrc?: ((src: string) => string) | null }).displaySrc
+  const src: string = node.attrs.src ?? ''
 
   const width: number | null = node.attrs.width ?? null
 
@@ -102,7 +105,7 @@ function ResizableImageView({ node, updateAttributes, selected }: NodeViewProps)
     >
       <img
         ref={imgRef}
-        src={node.attrs.src}
+        src={displaySrc ? displaySrc(src) : src}
         alt={node.attrs.alt ?? ''}
         draggable={false}
         style={{
@@ -124,7 +127,11 @@ function ResizableImageView({ node, updateAttributes, selected }: NodeViewProps)
   )
 }
 
-export const ResizableImage = Image.extend({
+export const ResizableImage = Image.extend<ImageOptions & { displaySrc: ((src: string) => string) | null }>({
+  addOptions() {
+    return { ...this.parent?.(), displaySrc: null } as ImageOptions & { displaySrc: ((src: string) => string) | null }
+  },
+
   addAttributes() {
     return {
       ...this.parent?.(),

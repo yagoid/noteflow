@@ -22,8 +22,10 @@ interface OpenPicker {
   id: number
 }
 
-export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) {
+export function DeadlineTaskItemView({ node, updateAttributes, extension }: NodeViewProps) {
   const t = useT()
+  // Plain Markdown (a linked note): a regular checkbox item, no 📅⏰🔺 pickers.
+  const plain = !!(extension.options as { plain?: boolean }).plain
   const { checked, due, alarm, importance } = node.attrs as {
     checked: boolean
     due: string | null
@@ -74,7 +76,7 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
       <div className="task-item-body group">
         <NodeViewContent as="div" className="task-content" />
 
-        <div className="task-actions" contentEditable={false}>
+        {!plain && <div className="task-actions" contentEditable={false}>
           <button
             contentEditable={false}
             className={`task-importance-trigger${importance ? ' has-importance' : ''}`}
@@ -105,7 +107,7 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
               <Calendar size={14} className="task-deadline-icon" />
             )}
           </button>
-        </div>
+        </div>}
       </div>
 
       {picker?.kind === 'deadline' && (

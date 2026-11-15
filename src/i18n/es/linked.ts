@@ -1,0 +1,86 @@
+// Notas vinculadas: una nota respaldada por un archivo Markdown externo, editado en su sitio.
+export const linked = {
+  linkMarkdownFile: 'Vincular archivo Markdown…',
+  linkMarkdownFileDescription: 'Edita un .md existente en su sitio, sin importarlo',
+  linkedNoteBadge: 'Vinculada a un archivo Markdown',
+
+  firstLinkTitle: 'Vincular archivos Markdown',
+  firstLinkMessage:
+    'NoteFlow editará estos archivos donde están: tus cambios se guardan directamente en cada archivo (y aparecen en su proyecto y en su historial de Git), y los cambios hechos fuera de NoteFlow aparecen en la nota.\n\nLas notas vinculadas son solo locales: NO se sincronizan con NoteFlow Cloud ni con GitHub, ni se exportan.',
+  firstLinkConfirm: 'Vincular',
+
+  linkErrorsTitle: 'No se pudieron vincular algunos archivos',
+  linkErrorLine: '{file}: {reason}',
+  linkError: {
+    notMarkdown: 'no es un archivo .md / .markdown',
+    notFound: 'archivo no encontrado',
+    notAFile: 'no es un archivo',
+    insideNotesDir: 'está dentro de la carpeta de notas de NoteFlow',
+    alreadyLinked: 'ya hay otra nota vinculada a él',
+    notLinked: 'la nota ya no está vinculada',
+  },
+  ok: 'Aceptar',
+
+  linkedFile: 'Archivo vinculado',
+  copyPath: 'Clic para copiar la ruta',
+  pathCopied: 'Ruta copiada',
+  localOnly: 'Solo local — no se sincroniza con NoteFlow Cloud ni GitHub',
+  localOnlyShort: 'Solo local',
+  showInFolder: 'Mostrar en carpeta',
+  relocate: 'Volver a localizar…',
+  unlink: 'Desvincular',
+
+  status: {
+    ok: 'Al día',
+    missing: 'Archivo no encontrado',
+    readonly: 'Archivo de solo lectura',
+    error: 'No se puede leer el archivo',
+    conflict: 'Cambiado fuera de NoteFlow',
+    checking: 'Comprobando el archivo…',
+  },
+  unsaved: 'Cambios sin guardar',
+  discard: 'Descartar mis cambios',
+  discardHint: 'Quitar los cambios que no están en el archivo y volver a mostrar su contenido',
+  discardConfirmTitle: '¿Descartar tus cambios?',
+  discardConfirmMessage: 'Se perderán los cambios en "{file}" que no están en el archivo. La nota vuelve a mostrar el contenido del archivo (o su último contenido conocido si falta).',
+  discardConfirm: 'Descartar',
+  unsavedHint: 'Estos cambios aún no están en el archivo: NoteFlow los conserva y los escribe en cuanto se pueda escribir el archivo (si cambió entretanto, eliges qué conservar).',
+  missingHint: 'El archivo se ha movido o borrado. Se muestra su último contenido conocido (solo lectura). Localízalo para seguir editando.',
+  readonlyHint: 'El archivo es de solo lectura: la edición está desactivada hasta que se pueda escribir.',
+  errorHint: {
+    tooLarge: 'El archivo es demasiado grande para editarlo en NoteFlow (más de 2 MB). Se muestra en solo lectura.',
+    invalidUtf8: 'El archivo no es texto UTF-8 válido. Se muestra en solo lectura, con su último contenido legible.',
+    unreadable: 'NoteFlow no puede leer el archivo (¿permisos?). Se muestra en solo lectura.',
+    writeFailed: 'NoteFlow no pudo escribir el archivo. Tus cambios se conservan aquí; lo volverá a intentar cuando vuelvas a la ventana.',
+  },
+
+  conflictHint: 'El archivo ha cambiado fuera de NoteFlow mientras esta nota tenía ediciones sin guardar. No se escribe nada en el archivo hasta que elijas.',
+  reload: 'Recargar',
+  reloadHint: 'Descartar mis cambios y tomar la versión del disco',
+  keepMine: 'Conservar mi versión',
+  keepMineHint: 'Sobrescribir el archivo con mi versión',
+  compare: 'Comparar…',
+  keepMineConfirmTitle: '¿Sobrescribir el archivo?',
+  keepMineConfirmMessage: 'Los cambios hechos en "{file}" fuera de NoteFlow se reemplazarán por tu versión.',
+  keepMineConfirm: 'Sobrescribir',
+
+  compareTitle: 'Comparar versiones — {file}',
+  compareDiff: 'Diferencias',
+  compareMerge: 'Editar resultado combinado',
+  onDisk: 'En disco',
+  mine: 'Mía',
+  noDifferences: 'Las dos versiones son idénticas.',
+  useDisk: 'Usar la del disco',
+  useMine: 'Usar la mía',
+  saveMerged: 'Guardar combinado',
+  cancel: 'Cancelar',
+
+  unlinkTitle: 'Desvincular nota',
+  unlinkMessage: '¿Quitar "{title}" de NoteFlow? El archivo "{file}" NO se borra ni se modifica: puedes volver a vincularlo cuando quieras.',
+  unlinkConfirm: 'Desvincular',
+  unlinkNotes: 'Esto quita {count} nota(s) vinculada(s) de NoteFlow; sus archivos Markdown no se borran.',
+
+  dropToLink: 'Suelta para vincular el archivo Markdown',
+
+  readOnlyCompact: 'solo lectura',
+}

@@ -14,6 +14,7 @@ import { aiPanel } from './aiPanel'
 import { brain } from './brain'
 import { titleBar } from './titleBar'
 import { whatsNew } from './whatsNew'
+import { linked } from './linked'
 
 // English is the source of truth: the shape of this object defines `Messages`,
 // which every other language must mirror exactly (enforced in es/index.ts).
@@ -34,6 +35,7 @@ export const en = {
   brain,
   titleBar,
   whatsNew,
+  linked,
 }
 
 export type Messages = typeof en

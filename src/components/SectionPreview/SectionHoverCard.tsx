@@ -51,7 +51,7 @@ export function SectionHoverCard({ note, section, sectionTagColors }: SectionHov
         <span className="section-hover-name">{section.name}</span>
         <span className="section-hover-note">{note.title || t.common.untitled}</span>
       </div>
-      <SectionCardContent content={section.content} raw={!!section.isRawMode} aiHidden={aiHidden} />
+      <SectionCardContent content={section.content} raw={!!section.isRawMode} aiHidden={aiHidden} linkedNoteId={note.linked ? note.id : undefined} />
       <span className="section-map-corner" aria-hidden />
     </div>
   )

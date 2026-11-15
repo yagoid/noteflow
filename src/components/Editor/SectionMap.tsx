@@ -60,8 +60,10 @@ export interface SectionMapProps {
   onStartRename: (section: NoteSection) => void
   onOpenMenu: (sectionId: string, x: number, y: number) => void
   onCloseMenu: () => void
-  onAdd: () => void
-  onReorder: (draggedId: string, targetId: string) => void
+  /** Absent: no "+" (a linked note has exactly one section). */
+  onAdd?: () => void
+  /** Absent: tabs aren't draggable. */
+  onReorder?: (draggedId: string, targetId: string) => void
 }
 
 /**
@@ -270,7 +272,7 @@ export function SectionMap({
     if (!draggedId) return
     e.preventDefault()
     const reorder = !!drop && drop.sectionId !== draggedId
-    if (reorder) onReorder(draggedId, drop.sectionId)
+    if (reorder) onReorder?.(draggedId, drop.sectionId)
     endDrag(reorder)
   }
 
@@ -341,8 +343,8 @@ export function SectionMap({
         data-section-id={section.id}
         className={className}
         style={style}
-        draggable={!isRenaming}
-        title={t.editor.dragToReorder}
+        draggable={!isRenaming && !!onReorder}
+        title={onReorder ? t.editor.dragToReorder : undefined}
         onDragStart={(e) => handleDragStart(e, section.id)}
         onDragOver={(e) => handleTabDragOver(e, section.id)}
         onDragEnd={() => endDrag()}
@@ -456,14 +458,16 @@ export function SectionMap({
           </button>
         )}
         {pill && breakAfter(shown.length, 'pill')}
-        <button
-          className="section-map-add"
-          onClick={onAdd}
-          title={t.editor.addSection}
-          aria-label={t.editor.addSection}
-        >
-          <Plus size={13} />
-        </button>
+        {onAdd && (
+          <button
+            className="section-map-add"
+            onClick={onAdd}
+            title={t.editor.addSection}
+            aria-label={t.editor.addSection}
+          >
+            <Plus size={13} />
+          </button>
+        )}
       </div>
 
       <div ref={widthProbeRef} className="section-map-width-probe" aria-hidden />

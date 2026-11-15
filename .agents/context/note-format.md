@@ -84,6 +84,10 @@ encryption:
   `parseNoteYaml`/`serializeNoteMd` del CLI): si uno la perdiera al guardar, la nota empezaría a
   sincronizarse. *Duplicate* crea una nota normal (construye el borrador campo a campo); exportar la
   conserva (bundle tal cual), así que una nota solo-local importada en otro equipo sigue siendo solo-local.
+- **Notas vinculadas** (un `.md` externo editado en su sitio): **no usan este formato** ni viven en el dir
+  de notas. El archivo es Markdown del usuario tal cual (su frontmatter, si lo tiene, se preserva y no es de
+  NoteFlow); los metadatos de la nota van en `userData/linked-notes.json`. Ver `patterns.md` § "Notas
+  vinculadas".
 - Tags se extraen del contenido con `#nombre` (`extractTags`).
 - `NOTEFLOW_NOTES_DIR` (env) redirige el dir de notas en app y CLI (testing/scripting).
 - Los parsers toleran BOM UTF-8 (editores externos como Notepad lo añaden).

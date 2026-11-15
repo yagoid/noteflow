@@ -26,6 +26,32 @@ const api = {
     getNotesDir: () => electron_1.ipcRenderer.invoke('fs:notes-dir'),
     openNotesFolder: () => electron_1.ipcRenderer.invoke('app:open-notes-folder'),
     chooseNotesDir: () => electron_1.ipcRenderer.invoke('app:choose-notes-dir'),
+    // Linked notes (external .md files edited in place — electron/linkedNotes.ts). Main only
+    // writes to files in its registry (by id); paths are validated there.
+    linkedList: () => electron_1.ipcRenderer.invoke('linked:list'),
+    linkedGet: (idOrPath) => electron_1.ipcRenderer.invoke('linked:get', idOrPath),
+    linkedPickFiles: (opts) => electron_1.ipcRenderer.invoke('linked:pick-files', opts),
+    linkedLink: (paths) => electron_1.ipcRenderer.invoke('linked:link', paths),
+    linkedRelocate: (id, newPath) => electron_1.ipcRenderer.invoke('linked:relocate', id, newPath),
+    linkedUnlink: (id) => electron_1.ipcRenderer.invoke('linked:unlink', id),
+    linkedUpdateMeta: (id, patch) => electron_1.ipcRenderer.invoke('linked:update-meta', id, patch),
+    linkedWrite: (id, body, baseHash) => electron_1.ipcRenderer.invoke('linked:write', id, body, baseHash),
+    linkedSaveAsset: (id, name, mime, data) => electron_1.ipcRenderer.invoke('linked:save-asset', id, name, mime, data),
+    linkedShowInFolder: (id) => electron_1.ipcRenderer.invoke('linked:show-in-folder', id),
+    linkedRecheck: () => electron_1.ipcRenderer.invoke('linked:recheck'),
+    // A relative image of a linked note as a data URI (copying it into a regular note), or null.
+    linkedAssetDataUri: (id, src) => electron_1.ipcRenderer.invoke('linked:asset-data-uri', id, src),
+    // Unwritten edits kept in userData across restarts (null = in sync again).
+    linkedSetDraft: (id, draft) => electron_1.ipcRenderer.invoke('linked:set-draft', id, draft),
+    // Absolute path of a File dropped from the OS (File.path is gone since Electron 32).
+    getPathForFile: (file) => {
+        try {
+            return electron_1.webUtils.getPathForFile(file);
+        }
+        catch {
+            return '';
+        }
+    },
     // Settings
     getTheme: () => electron_1.ipcRenderer.sendSync('settings:get-theme'),
     setTheme: (id) => electron_1.ipcRenderer.send('settings:set-theme', id),

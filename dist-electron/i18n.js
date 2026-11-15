@@ -36,6 +36,8 @@ const en = {
         importGoogleKeep: 'Import Google Keep export',
         addFilesToProfile: 'Add files to your profile',
         attachFilesToChat: 'Attach files to the chat',
+        linkMarkdownFiles: 'Link Markdown files',
+        relocateMarkdownFile: 'Locate the linked Markdown file',
     },
     chatErrors: {
         quotaExceeded: "This month's NoteFlow AI allowance is used up, or what's left isn't enough for this request — try a cheaper model. It resets on the 1st of next month.",
@@ -80,6 +82,8 @@ const es = {
         importGoogleKeep: 'Importar exportación de Google Keep',
         addFilesToProfile: 'Añadir archivos a tu perfil',
         attachFilesToChat: 'Adjuntar archivos al chat',
+        linkMarkdownFiles: 'Vincular archivos Markdown',
+        relocateMarkdownFile: 'Localizar el archivo Markdown vinculado',
     },
     chatErrors: {
         quotaExceeded: 'La asignación de NoteFlow AI de este mes se ha agotado, o lo que queda no basta para esta petición — prueba con un modelo más barato. Se renueva el día 1 del mes que viene.',

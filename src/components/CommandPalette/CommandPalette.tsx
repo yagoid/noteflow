@@ -7,13 +7,14 @@ import type { Note } from '../../types'
 import {
   Search, Plus, FolderOpen, Keyboard, X,
   Clock, FolderPlus, Upload, Download, RefreshCw, Cloud, Zap, Settings,
-  Brain, MessageSquare, Sparkles, Link2, SlidersHorizontal, AppWindow, GraduationCap,
+  Brain, MessageSquare, Sparkles, Link2, SlidersHorizontal, AppWindow, GraduationCap, FileSymlink,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
 import { escapeRegExp, getNoteSearchIndex, normalize } from '../../lib/searchUtils'
 import { modKey } from '../../lib/platform'
+import { requestLinkMarkdown } from '../LinkedNote/linkedActions'
 
 function HighlightText({ text, query }: { text: string; query: string }) {
   const trimmed = query.trim()
@@ -137,6 +138,15 @@ export function CommandPalette() {
       keywords: 'new temporary note temp auto delete',
       icon: <Clock size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { createTempNote(); setCommandPaletteOpen(false) },
+      category: 'create',
+    },
+    {
+      id: 'link-markdown',
+      label: t.linked.linkMarkdownFile,
+      description: t.linked.linkMarkdownFileDescription,
+      keywords: 'link markdown file md external readme edit in place',
+      icon: <FileSymlink size={ICON_SIZE} className={ICON_CLS} />,
+      action: () => { setCommandPaletteOpen(false); requestLinkMarkdown() },
       category: 'create',
     },
     {

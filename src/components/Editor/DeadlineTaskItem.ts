@@ -1,8 +1,8 @@
-import TaskItem from '@tiptap/extension-task-item'
+import TaskItem, { type TaskItemOptions } from '@tiptap/extension-task-item'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { DeadlineTaskItemView } from './DeadlineTaskItemView'
 
-export const DeadlineTaskItem = TaskItem.extend({
+export const DeadlineTaskItem = TaskItem.extend<TaskItemOptions & { plain: boolean }>({
   // Must keep the same name so TaskList can resolve this node type
   name: 'taskItem',
 
@@ -10,6 +10,8 @@ export const DeadlineTaskItem = TaskItem.extend({
     return {
       ...this.parent?.(),
       nested: false,
+      // Linked notes (plain Markdown): no deadline / alarm / importance pickers.
+      plain: false,
     }
   },
 

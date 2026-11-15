@@ -3,11 +3,14 @@ import { Plus, Code } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
 import { rawPreviewText, sectionCardStats, sectionPreviewHtml } from '../../lib/noteOverviewGrid'
+import { linkedPreviewOptions } from '../../lib/linkedNotes'
 
 interface SectionCardContentProps {
   content: string
   raw: boolean
   aiHidden: boolean
+  /** Id of the linked note (external .md) this section belongs to: plain Markdown + its relative images. */
+  linkedNoteId?: string
 }
 
 // Body + foot of a section card (.note-grid-body / .note-grid-foot in index.css): the
@@ -15,14 +18,14 @@ interface SectionCardContentProps {
 // "Text" / "Hidden from AI" badges. Shared by the note overview cells (SectionCell) and the
 // floating hover card (SectionPreview/SectionHoverCard). The caller sets the CSS vars the
 // classes read (--prose-font-family, --ng-accent-ink) on an ancestor.
-export function SectionCardContent({ content, raw, aiHidden }: SectionCardContentProps) {
+export function SectionCardContent({ content, raw, aiHidden, linkedNoteId }: SectionCardContentProps) {
   const t = useT()
   const hasContent = content.trim().length > 0
   // The same HTML the editor renders, at reading size; only the start of a long section,
   // and only when its content changes.
   const html = useMemo(
-    () => (hasContent && !raw ? sectionPreviewHtml(content) : ''),
-    [content, hasContent, raw],
+    () => (hasContent && !raw ? sectionPreviewHtml(content, undefined, linkedPreviewOptions(linkedNoteId)) : ''),
+    [content, hasContent, raw, linkedNoteId],
   )
   const stats = useMemo(() => sectionCardStats(content), [content])
   const statLabel = stats.kind === 'empty'

@@ -12,7 +12,9 @@ import {
   screen,
   powerMonitor,
   Notification,
+  protocol,
 } from 'electron'
+import { pathToFileURL } from 'url'
 import path from 'path'
 import fs from 'fs'
 import https from 'https'
@@ -91,6 +93,17 @@ import {
 } from './stickyBounds'
 import { sanitizeSnippets } from './snippetsFile'
 import { isGroupsMetadataFile } from './notesWatchFilter'
+import * as linkedNotes from './linkedNotes'
+import { LINKED_ID_PREFIX, isLinkedNoteId, isMarkdownPath } from './linkedNotesLogic'
+
+// Images referenced relatively by a linked note (`assets/x.png` next to an external .md) are
+// served through this scheme: `nflinked://n/<encoded note id>/<encoded relative src>` (the src
+// is ONE encoded segment so `../` survives URL normalization). Registered before `ready`.
+const LINKED_ASSET_SCHEME = 'nflinked'
+protocol.registerSchemesAsPrivileged([
+  // Only <img> loads it: no fetch / CORS / service-worker privileges.
+  { scheme: LINKED_ASSET_SCHEME, privileges: { standard: true, secure: true } },
+])
 
 
 function getIconPath(): string {
@@ -1942,6 +1955,7 @@ function registerGlobalShortcut() {
 
 ipcMain.handle('fs:read-note-dir', (_event, dir: string) => {
   try {
+    refuseLinkedTarget(dir)
     const safeDir = ensureSafeDirname(dir)
     return noteFormat.readNoteDirRecord(NOTES_DIR, safeDir)
   } catch {
@@ -1955,12 +1969,27 @@ interface NoteWritePayload {
   deleteFiles?: string[]
 }
 
+/**
+ * Linked notes (external .md files, linkedNotes.ts) never go through the note-FOLDER
+ * primitives: a linked file's path reduced to its basename would otherwise name an entry of
+ * the notes dir (`notes.md`) — or the linked file itself if it sits in the notes dir root.
+ * Note folders never end in `.md` nor start with the linked id prefix.
+ */
+function refuseLinkedTarget(dirOrPath: unknown): void {
+  if (typeof dirOrPath !== 'string') return
+  const base = path.basename(dirOrPath.replace(/[\\/]+$/, ''))
+  if (base.startsWith(LINKED_ID_PREFIX) || isMarkdownPath(base) || linkedNotes.isLinkedPath(dirOrPath)) {
+    throw new Error('Refusing to treat a linked Markdown file as a note folder')
+  }
+}
+
 // Core note write — shared by the IPC handler and the agentic chat tools.
 // `senderId` (the originating window) is excluded from the broadcast filter; pass undefined
 // (e.g. for tool-driven writes) so every window — including the chat's — refreshes.
 // `durablePush` lands the files on the remote NOW (awaited) instead of via the per-file
 // debounced path — see the comment at the push step for why the chat tools need it.
 function applyNoteWrite(payload: NoteWritePayload, senderId?: number, opts?: { durablePush?: boolean }): void | Promise<void> {
+  refuseLinkedTarget(payload.dir)
   const dir = ensureSafeDirname(payload.dir)
   const dirPath = path.join(NOTES_DIR, dir)
 
@@ -2036,6 +2065,7 @@ function applyNoteWrite(payload: NoteWritePayload, senderId?: number, opts?: { d
 
 // Core note deletion — shared by the IPC handler and the agentic chat tools.
 function applyNoteDelete(dirOrPath: string): void {
+  refuseLinkedTarget(dirOrPath)
   const dir = ensureSafeDirname(dirOrPath)
   const dirPath = path.join(NOTES_DIR, dir)
   markInternalWrite(dir)
@@ -2086,6 +2116,100 @@ ipcMain.handle('fs:read-all-notes', async () => {
 })
 
 ipcMain.handle('fs:notes-dir', () => NOTES_DIR)
+
+// ── Linked notes (external .md files edited in place — linkedNotes.ts) ──────────
+// Writes only ever target files in the registry, resolved there by id (`linked:write`,
+// `linked:save-asset` into the file's assets/). What can ENTER the registry is any existing
+// absolute .md/.markdown path outside the notes dir that the renderer passes to
+// `linked:link` / `linked:relocate` (normally from the native picker or an OS drop, but main
+// doesn't check where it came from): the renderer can't write an arbitrary path directly,
+// though it can link any such .md and then edit it.
+
+ipcMain.handle('linked:list', () => linkedNotes.list())
+ipcMain.handle('linked:get', (_event, idOrPath: unknown) => linkedNotes.get(idOrPath))
+
+ipcMain.handle('linked:pick-files', async (event, opts: unknown) => {
+  const multi = !!(opts && typeof opts === 'object' && (opts as { multi?: unknown }).multi)
+  const parent = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+  const dialogOpts: Electron.OpenDialogOptions = {
+    title: multi ? mainMessages().dialogs.linkMarkdownFiles : mainMessages().dialogs.relocateMarkdownFile,
+    filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }],
+    properties: multi ? ['openFile', 'multiSelections'] : ['openFile'],
+  }
+  const result = parent ? await dialog.showOpenDialog(parent, dialogOpts) : await dialog.showOpenDialog(dialogOpts)
+  return result.canceled ? [] : result.filePaths
+})
+
+ipcMain.handle('linked:link', (event, paths: unknown) => linkedNotes.link(paths, event.sender.id))
+ipcMain.handle('linked:relocate', (event, id: unknown, newPath: unknown) => linkedNotes.relocate(id, newPath, event.sender.id))
+ipcMain.handle('linked:unlink', (event, id: unknown) => ({ ok: linkedNotes.unlink(id, event.sender.id) }))
+ipcMain.handle('linked:update-meta', (event, id: unknown, patch: unknown) => linkedNotes.updateMeta(id, patch, event.sender.id))
+// (The renderer logs the edit in the activity log itself, like any note edit.)
+ipcMain.handle('linked:write', (event, id: unknown, body: unknown, baseHash: unknown) =>
+  linkedNotes.writeBody(id, body, baseHash, event.sender.id))
+ipcMain.handle('linked:save-asset', (_event, id: unknown, name: unknown, mime: unknown, data: unknown) =>
+  linkedNotes.saveAsset(id, name, mime, data))
+ipcMain.handle('linked:asset-data-uri', (_event, id: unknown, src: unknown) => linkedNotes.assetDataUri(id, src))
+ipcMain.handle('linked:set-draft', (_event, id: unknown, draft: unknown) => { linkedNotes.setDraft(id, draft) })
+ipcMain.handle('linked:show-in-folder', (_event, id: unknown) => {
+  const note = isLinkedNoteId(id) ? linkedNotes.get(id) : null
+  if (!note) return { ok: false }
+  // Missing file: open its folder instead (if that still exists).
+  if (fs.existsSync(note.path)) shell.showItemInFolder(note.path)
+  else if (fs.existsSync(path.dirname(note.path))) void shell.openPath(path.dirname(note.path))
+  else return { ok: false }
+  return { ok: true }
+})
+ipcMain.handle('linked:recheck', () => linkedNotes.recheck())
+
+/** Serves `nflinked://n/<id>/<src>`: only images, only relative to a linked file's folder. */
+async function handleLinkedAssetRequest(request: Request): Promise<Response> {
+  try {
+    const url = new URL(request.url)
+    const [, encodedId, encodedSrc] = url.pathname.split('/')
+    const id = decodeURIComponent(encodedId ?? '')
+    const src = decodeURIComponent(encodedSrc ?? '')
+    const file = await linkedNotes.resolveAsset(id, src)
+    if (!file) return new Response(null, { status: 404 })
+    return await net.fetch(pathToFileURL(file).toString())
+  } catch {
+    return new Response(null, { status: 404 })
+  }
+}
+
+/** Linked-note functions the agent's tools need (ToolContext.linked). */
+function linkedToolApi(): agentTools.LinkedToolApi {
+  const asDiskNote = (n: linkedNotes.LinkedNoteWire): noteFormat.DiskNote => ({
+    id: n.id,
+    title: n.title,
+    tags: agentTools.extractTags(n.body),
+    created: n.created,
+    updated: n.updated,
+    ...(n.group ? { group: n.group } : {}),
+    ...(n.folder ? { folder: n.folder } : {}),
+    ...(n.archived ? { archived: true } : {}),
+    ...(n.favorited ? { favorited: true } : {}),
+    sections: [{ id: 'body', name: n.sectionName, content: n.body, ...(n.aiHidden ? { aiHidden: true } : {}) }],
+  })
+  return {
+    list: () => linkedNotes.list().map(asDiskNote),
+    get: (id) => {
+      const n = linkedNotes.get(id)
+      return n ? asDiskNote(n) : null
+    },
+    writeBody: async (id, content) => {
+      const n = linkedNotes.get(id)
+      if (!n) return { ok: false, error: 'not linked' }
+      if (n.status !== 'ok' || !n.hash) return { ok: false, error: `the file is ${n.status === 'readonly' ? 'read-only' : n.status === 'missing' ? 'missing' : n.status === 'checking' ? 'still being read' : 'unreadable'}` }
+      // Based on the version main last read: if the file changed outside since, it's a conflict.
+      const res = await linkedNotes.writeBody(id, content, n.hash)
+      if (res.ok) return { ok: true }
+      return { ok: false, error: res.reason === 'conflict' ? 'the file changed outside NoteFlow' : res.reason }
+    },
+    updateMeta: (id, patch) => { linkedNotes.updateMeta(id, patch) },
+    unlink: (id) => { linkedNotes.unlink(id) },
+  }
+}
 
 ipcMain.handle('app:open-notes-folder', () =>
   shell.openPath(NOTES_DIR).catch(err => console.error('Failed to open notes folder:', err))
@@ -3376,6 +3500,13 @@ function readDiskNote(noteId: string, dirs?: string[]): { dir: string; note: not
   return note ? { dir, note } : null
 }
 
+/** Any note by id for the chat context: a note folder, or a linked note (external .md, one
+ *  section). Undo never uses this — linked notes are edited in place, without chat undo. */
+function readAnyNote(noteId: string, dirs?: string[]): noteFormat.DiskNote | null {
+  if (isLinkedNoteId(noteId)) return linkedToolApi().get(noteId)
+  return readDiskNote(noteId, dirs)?.note ?? null
+}
+
 /** Semantic-search (RAG) blocks for a question: hybrid search hits + a few content-edge
  *  neighbours, read from disk. `skip` leaves out sections already in the prompt. */
 async function buildRagBlocks(
@@ -3408,9 +3539,7 @@ async function buildRagBlocks(
     // The profile note is injected whole as background; skip it in RAG to avoid duplicate
     // content and to keep it out of the cited `sources`.
     if (profile && noteId === profile.noteId) return
-    const dirPath = findNoteDirPath(noteId, dirs)
-    if (!dirPath) return
-    const note = noteFormat.parseNoteDir(dirPath)
+    const note = readAnyNote(noteId, dirs)
     if (!note || note.encryption || note.sections.length === 0) return
     // Sections hidden from the AI never feed the chat context (defence in depth: hidden
     // sections are already kept out of the index, but a neighbour fallback could reach one).
@@ -3468,7 +3597,7 @@ async function buildChatContext(query: string, context: chatContext.ChatContextR
     return { system: withProfile(ragSystem, profile), sources }
   }
 
-  const read = (noteId: string) => readDiskNote(noteId, dirs)?.note ?? null
+  const read = (noteId: string) => readAnyNote(noteId, dirs)
   const explicit = chatContext.buildContextBlocks(context.items, read)
   const wholeNotes = new Set(explicit.included.filter((i) => !i.sectionId).map((i) => i.noteId))
   const sharedSections = new Set(explicit.included.filter((i) => i.sectionId).map((i) => `${i.noteId}:${i.sectionId}`))
@@ -3509,6 +3638,7 @@ function buildToolContext(): agentTools.ToolContext {
     writeFolders: (folders) => applyFoldersSet(folders, undefined, { durablePush: true }),
     search: aiIndex.isEnabled() ? (q, k) => aiIndex.search(q, k) : undefined,
     onNoteEdited: (noteId) => recordNoteEdit(noteId),
+    linked: linkedToolApi(),
   }
 }
 
@@ -4532,14 +4662,32 @@ ipcMain.handle('ui-settings:set', (event, patch: unknown) => {
   getActiveSyncProvider().schedulePush('ui-settings.json', content)
 })
 
+// Linked notes (external .md, this device only) never reach note-order.json: their place in
+// a context's manual order lives in the local registry and is merged back here (see
+// linkedNotesLogic.splitLinkedOrder / mergeLinkedOrder).
+function writeNoteOrderFile(order: unknown): string {
+  const content = JSON.stringify(order, null, 2)
+  markInternalWrite('note-order.json') // see applyGroupsSet
+  fs.writeFileSync(NOTE_ORDER_FILE, content, 'utf-8')
+  return content
+}
+
 ipcMain.handle('note-order:get', () => {
-  try {
-    return JSON.parse(fs.readFileSync(NOTE_ORDER_FILE, 'utf-8'))
-  } catch { return {} }
+  let synced: unknown = {}
+  try { synced = JSON.parse(fs.readFileSync(NOTE_ORDER_FILE, 'utf-8')) } catch { /* none */ }
+  // Linked ids an earlier build wrote to the synced file: moved to the local order, file cleaned.
+  const cleaned = linkedNotes.adoptLinkedIdsFromSynced(synced)
+  if (cleaned) {
+    try { getActiveSyncProvider().schedulePush('note-order.json', writeNoteOrderFile(cleaned)) } catch (err) {
+      console.error('[linked] failed to clean note-order.json:', String(err))
+    }
+    synced = cleaned
+  }
+  return linkedNotes.mergeNoteOrder(synced)
 })
 
 ipcMain.handle('note-order:set', (event, order: unknown) => {
-  const content = JSON.stringify(order, null, 2)
+  const content = JSON.stringify(linkedNotes.splitNoteOrder(order), null, 2)
   markInternalWrite('note-order.json') // see applyGroupsSet
   fs.writeFileSync(NOTE_ORDER_FILE, content, 'utf-8')
   BrowserWindow.getAllWindows().forEach((win) => {
@@ -4735,6 +4883,27 @@ app.whenReady().then(async () => {
   // remote (localOnlyNotes.ts). Both before any sync code runs.
   await seedWelcomeNoteIfFirstRun()
   primeLocalOnlyDirs(NOTES_DIR)
+
+  // Linked notes (external .md files) — before any window can ask for them: registry + content
+  // cache in userData, one watcher per parent folder. Changes reach the windows as
+  // `notes-updated` with the FILE path (the renderer routes .md paths to its linked-note sync)
+  // and the semantic index as data notes (the callbacks run later, never during init).
+  // Not awaited: the files are read in the background (fs.promises) — a network drive that
+  // doesn't answer must not hold the windows back; their notes show as "checking" meanwhile.
+  void linkedNotes.init({
+    userDataDir: app.getPath('userData'),
+    notesDir: NOTES_DIR,
+    broadcast: (filePath, senderId) => {
+      BrowserWindow.getAllWindows().forEach((win) => {
+        if (!win.isDestroyed()) win.webContents.send('notes-updated', filePath, senderId)
+      })
+    },
+    onIndexChange: (id) => {
+      if (aiIndex.isEnabled()) aiIndex.scheduleIndexData(linkedNotes.aiIndexKey(id), () => linkedNotes.aiNote(id))
+    },
+    onRemoved: (id) => aiIndex.removeFromIndex(linkedNotes.aiIndexKey(id)),
+  }).catch((err) => console.error('[linked] initial check failed:', String(err)))
+  protocol.handle(LINKED_ASSET_SCHEME, handleLinkedAssetRequest)
 
   githubSync.loadSyncSettings()
   githubSync.setNotesDir(NOTES_DIR)
@@ -4938,7 +5107,10 @@ app.whenReady().then(async () => {
 
   // Semantic index (AI). init() wires config; primeSettings defers the worker warmup so
   // model loading / reindex doesn't compete with the app's first paint.
-  aiIndex.init({ notesDir: NOTES_DIR, onProgress: emitAiProgress, onState: emitAiState, onStale: emitAiStale })
+  aiIndex.init({
+    notesDir: NOTES_DIR, onProgress: emitAiProgress, onState: emitAiState, onStale: emitAiStale,
+    extraNotes: () => linkedNotes.aiNotes(),
+  })
   aiIndex.primeSettings(readAiSettings())
 
   // The format migration rewrote every note path — the AI index stores stale

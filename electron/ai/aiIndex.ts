@@ -13,7 +13,7 @@ import { IndexStaleness, type StaleInfo } from './indexStaleness'
 import {
   DEFAULT_AI_MODEL,
   type IndexState, type IndexProgress, type RelatedNote, type SemanticHit, type GraphEdge,
-  type WorkerResponse,
+  type WorkerResponse, type DataNote,
 } from './protocol'
 
 export type { StaleInfo } from './indexStaleness'
@@ -39,6 +39,9 @@ let starting: Promise<void> | null = null
 
 let settings: AiSettings = { ...DEFAULT_AI_SETTINGS }
 let notesDir = ''
+// Notes that don't live in the notes dir (linked .md files, electron/linkedNotes.ts), handed
+// to the worker as data on a full reindex.
+let extraNotes: () => DataNote[] = () => []
 let eventSink: {
   progress?: (p: IndexProgress) => void
   state?: (s: IndexState) => void
@@ -155,9 +158,11 @@ export function init(opts: {
   onProgress?: (p: IndexProgress) => void
   onState?: (s: IndexState) => void
   onStale?: (s: StaleInfo) => void
+  extraNotes?: () => DataNote[]
 }): void {
   notesDir = opts.notesDir
   eventSink = { progress: opts.onProgress, state: opts.onState, stale: opts.onStale }
+  if (opts.extraNotes) extraNotes = opts.extraNotes
 }
 
 export function isEnabled(): boolean {
@@ -235,6 +240,31 @@ export function scheduleIndex(dirPath: string): void {
   }, INDEX_DEBOUNCE_MS))
 }
 
+/**
+ * scheduleIndex for a note handed over as data (a linked .md — not a notes-dir folder). Same
+ * debounce, staleness and dormancy rules; the note is read at run time (`read`), null = gone.
+ */
+export function scheduleIndexData(key: string, read: () => DataNote | null): void {
+  if (!settings.enabled) return
+  markStale(key)
+  const timerKey = `data:${key}`
+  const existing = indexTimers.get(timerKey)
+  if (existing) clearTimeout(existing)
+  indexTimers.set(timerKey, setTimeout(async () => {
+    indexTimers.delete(timerKey)
+    if (!child || !ready) return
+    const startedAt = Date.now()
+    try {
+      const data = read()
+      if (data) await request('index-note-data', data)
+      else await request('remove-note', { dirPath: key })
+      clearPending(key, startedAt)
+    } catch (err) {
+      console.error('[aiIndex] index-note-data failed:', String(err))
+    }
+  }, INDEX_DEBOUNCE_MS))
+}
+
 export function removeFromIndex(dirPath: string): void {
   if (!settings.enabled) return
   if (!child || !ready) { markStaleUnknown(); return } // index keeps serving a note that no longer exists
@@ -250,7 +280,9 @@ export function removeFromIndex(dirPath: string): void {
 export async function reindexAll(): Promise<{ ok: boolean; indexed: number }> {
   await ensureStarted()
   const startedAt = Date.now()
-  const res = await (request('reindex-all', { notesDir }) as Promise<{ ok: boolean; indexed: number }>)
+  let extra: DataNote[] = []
+  try { extra = extraNotes() } catch (err) { console.error('[aiIndex] extra notes unavailable:', String(err)) }
+  const res = await (request('reindex-all', { notesDir, extra }) as Promise<{ ok: boolean; indexed: number }>)
   // Everything written before the rebuild started is now in the index; notes touched during it stay.
   clearPendingBefore(startedAt)
   return res

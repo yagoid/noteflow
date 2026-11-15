@@ -55,8 +55,21 @@ export function flankedMarkPairs(md: string, char: '+' | '='): [number, number][
   return [...md.matchAll(MD_MARK_RE[char])].map((m) => [m.index, m.index + m[0].length - 2])
 }
 
+export interface InlineHtmlOptions {
+  /**
+   * Plain Markdown (linked notes, lib/linkedNotes.ts): NoteFlow's own inline syntax —
+   * `++underline++`, `==highlight==` and section-relation links — stays text (a
+   * relation link is a regular link).
+   */
+  plain?: boolean
+  /** Read-only renderers only: maps an image src to its display URL. */
+  imageSrc?: (src: string) => string
+}
+
 /** Convert inline markdown (bold, italic, code, links, etc.) to HTML */
-export function inlineToHtml(s: string): string {
+export function inlineToHtml(s: string, opts?: InlineHtmlOptions): string {
+  const plain = !!opts?.plain
+  const mapSrc = opts?.imageSrc
   // Code spans and the tags generated below are held behind placeholders while
   // the mark regexes run: otherwise `i++` and `j++` in two code spans of one
   // line paired up as an underline across them (misnested HTML, saved back
@@ -81,15 +94,19 @@ export function inlineToHtml(s: string): string {
     // kanban cards and the previews). getAttribute() decodes it back on the way
     // to markdown, so the round-trip is unchanged. `source` puts back a code
     // span (backticks) that happened to sit inside a URL.
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)(?:\{width=(\d+)\})?/g, (m, alt, src, w) => hold(
-      w ? `<img alt="${attr(source(alt))}" src="${attr(source(src))}" width="${w}">`
-        : `<img alt="${attr(source(alt))}" src="${attr(source(src))}">`,
-      m,
-    ))
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)(?:\{width=(\d+)\})?/g, (m, alt, src, w) => {
+      // `src` is &<>-escaped here; the mapper gets (and returns) the decoded value.
+      const shown = mapSrc ? escapeHtml(mapSrc(source(src).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'))) : source(src)
+      return hold(
+        w ? `<img alt="${attr(source(alt))}" src="${attr(shown)}" width="${w}">`
+          : `<img alt="${attr(source(alt))}" src="${attr(shown)}">`,
+        m,
+      )
+    })
     // Section relation: `[Name](noteflow://noteId/sectionId)` → inline pill. Must
     // run BEFORE the generic link regex below (it would otherwise capture it as a
     // plain <a>). Rendered as a span the SectionRelation node parses back.
-    .replace(/\[([^\]]+)\]\(noteflow:\/\/([^/)]+)\/([^)]+)\)/g, (_, name, noteId, sectionId) =>
+    .replace(/\[([^\]]+)\]\(noteflow:\/\/([^/)]+)\/([^)]+)\)/g, (m, name, noteId, sectionId) => plain ? m :
       hold(`<span data-type="section-relation" data-note-id="${attr(source(noteId))}" data-section-id="${attr(source(sectionId))}">`, '[') +
       name +
       hold('</span>', `](noteflow://${noteId}/${sectionId})`))
@@ -100,15 +117,16 @@ export function inlineToHtml(s: string): string {
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/__(.+?)__/g, '<strong>$1</strong>')
     .replace(/~~(.+?)~~/g, '<s>$1</s>')
-    // Underline: `++text++` → <u>. Markdown has no native underline syntax, so
-    // NoteFlow uses `++` (mirrors the `==` highlight convention). Flanking rules
-    // in flankedMarkRe; htmlToMarkdown writes it back through flankedMarkPairs.
-    .replace(UNDERLINE_RE, '<u>$1</u>')
-    // Highlight: `==text==` → <mark>. Non-greedy + global so multiple highlights
-    // on one line round-trip. Same flanking rules as underline.
-    .replace(HIGHLIGHT_RE, '<mark>$1</mark>')
 
-  return restore(out)
+  // Underline: `++text++` → <u>. Markdown has no native underline syntax, so
+  // NoteFlow uses `++` (mirrors the `==` highlight convention). Flanking rules
+  // in flankedMarkRe; htmlToMarkdown writes it back through flankedMarkPairs.
+  // Highlight: `==text==` → <mark>. Non-greedy + global so multiple highlights
+  // on one line round-trip. Same flanking rules as underline.
+  // Neither in plain Markdown (linked notes): they stay text.
+  const marked = plain ? out : out.replace(UNDERLINE_RE, '<u>$1</u>').replace(HIGHLIGHT_RE, '<mark>$1</mark>')
+
+  return restore(marked)
 }
 
 // Remove a matched annotation, closing the gap around it to a single space so

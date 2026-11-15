@@ -23,6 +23,7 @@ Built specifically for software engineers and power users who need something fas
 
 - **Sections inside every note** — split a note into independent sections (each in markdown or plain-text mode), shown as a section map you can reorder, open side by side, or pop out into their own window. Hover a section to preview it.
 - **Markdown-first editor** — headings (with a hover-to-expand table of contents), inline code, code blocks, tables, images, interactive task lists with deadlines, alarms and priority, and in-note kanban boards (stored as plain markdown). Type `/` for commands, links to other notes' sections and your snippets.
+- **Linked Markdown files** — open any existing `.md` (a project README, your docs site) as a note and edit it in place: changes are saved straight into the original file (frontmatter, line endings and untouched blocks kept as they were), and edits made outside NoteFlow show up live, with a compare view if both changed. Local only, never synced.
 - **Snippets** — reusable text from a toolbar button or the `/` menu, with today's date/time in the format you pick (`{date:DD-MM-YYYY}`, `{time:HH:mm}`…).
 - **Quick capture** — summon the app from anywhere with `Ctrl+Shift+Space`, or jot a temporary note (`Ctrl+Shift+N`) that cleans itself up after 24 h.
 - **Floating sticky notes** — launch any note as an always-on-top window and switch between its sections from the title bar.

@@ -27,6 +27,11 @@ noteflow/
 │   ├── migration.ts     # Migración única v1→v2 (flat .md → carpetas), idempotente
 │   ├── localOnlyNotes.ts # Notas solo-locales (`localOnly: true` en note.md): detección + carpetas que el
 │   │                    #   sync puede tocar (listSyncedNoteDirs) — testeada; ver sync.md "Notas solo-locales"
+│   ├── linkedNotes.ts   # Notas vinculadas (`.md` externo editado en su sitio): registro + caché en userData,
+│   │                    #   watchers por carpeta padre, escritura atómica con huella, assets/ — testeado con
+│   │                    #   ficheros reales; ver patterns.md § "Notas vinculadas"
+│   ├── linkedNotesLogic.ts # Pura: saneo del registro, rutas, split/reensamblado byte-exacto (BOM/EOL/frontmatter),
+│   │                    #   decisiones eco/conflicto, nombres en assets/ — testeada
 │   ├── welcomeNote.ts   # Nota de bienvenida de la primera ejecución (decisión pura + contenido EN/ES) —
 │   │                    #   testeada; la crea main.ts al arrancar (seedWelcomeNoteIfFirstRun)
 │   ├── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull por carpeta,
@@ -246,7 +251,14 @@ noteflow/
 │   │   │   ├── SlideVisual.tsx         #   Marco de ventana + <video> / fallback animado + chips de atajos
 │   │   │   ├── WhatsNewTour.tsx        #   El modal (navegación, animaciones, foco, marcado como visto)
 │   │   │   └── WhatsNewHost.tsx        #   Montado en MainApp: disparo de arranque + render del tour
-│   │   ├── ConfirmModal.tsx            # Modal de confirmación genérico
+│   │   ├── LinkedNote/                 # Notas vinculadas (`.md` externo) — ver patterns.md § "Notas vinculadas"
+│   │   │   ├── LinkedNotesHost.tsx     #   (ventana principal) selector "Link Markdown file…", aviso del 1er vínculo,
+│   │   │   │                           #   drop de .md desde el SO (captura), re-chequeo al enfocar
+│   │   │   ├── LinkedNoteHeader.tsx    #   Cabecera en el editor (ruta, estado, acciones, banner de conflicto) +
+│   │   │   │                           #   LinkedNoteCompactBar (sticky)
+│   │   │   ├── LinkedConflictModal.tsx #   "Compare…": diff lado a lado + resultado combinado editable
+│   │   │   └── linkedActions.ts        #   requestLinkMarkdown (evento), tono del estado, helpers de ruta/drop
+│   │   ├── ConfirmModal.tsx            # Modal de confirmación genérico (`hideCancel` = solo informativo)
 │   │   ├── EncryptionModal.tsx         # Modal cifrar/descifrar notas
 │   │   ├── ExportImportModal.tsx       # Modal exportar/importar notas (flujo, lanzado desde DataPanel)
 │   │   ├── StickyApp.tsx               # Ventana sticky flotante (fold/unfold)
@@ -263,6 +275,10 @@ noteflow/
 │   │   ├── miniSidebar.ts        # Lógica pura del sidebar flotante (filas de la mini-vista, ventana,
 │   │   │                         #   ancla/posición del panel, reglas de visibilidad compartidas) — testeado
 │   │   ├── keyedQueue.ts         # Cola serial por clave (escrituras de una nota en orden) — testeada
+│   │   ├── linkedNotes.ts        # Notas vinculadas en el renderer: wire → nota, decisión de recarga
+│   │   │                         #   (apply/adopt/keep/conflict), URL `nflinked:` de imágenes — testeado
+│   │   ├── linkedMarkdown.ts     # Conservar el fuente de los bloques no editados al guardar una vinculada
+│   │   │                         #   (preserveUnchangedBlocks) — testeado
 │   │   ├── syncStatus.ts         # Estado mostrado por el botón de sync (prioridades) + edad relativa — testeado
 │   │   ├── encryptedSession.ts   # Re-descifrado con la contraseña de sesión tras recargar + guarda
 │   │   │                         #   anti-borrado de escrituras de notas cifradas — testeado
@@ -345,6 +361,19 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `fs:write-note` | handle | Escritura multi-archivo de una carpeta: `{dir, files, deleteFiles}` (note.md primero) + 1 broadcast + schedulePush por archivo + scheduleIndex |
 | `fs:delete-note` | handle | Borra la carpeta entera (rmSync recursivo) + broadcast + scheduleDeleteDir en GitHub |
 | `fs:notes-dir` | handle | Devuelve ruta del dir de notas |
+| `linked:list` / `linked:get` | handle | Notas vinculadas (`.md` externos; ver `patterns.md` § "Notas vinculadas") → `LinkedNoteWire[]` / una por id o ruta (`null` = no vinculada): metadatos del registro + `status` (`checking`/`ok`/`missing`/`readonly`/`error`; `checking` = aún sin leer desde el arranque) + cuerpo (del disco, o de la caché si no se puede leer todavía) + `hash` + `draft?` (cambios sin escribir guardados en userData). Toda lectura del archivo en main es asíncrona |
+| `linked:pick-files` | handle | `{multi}` → selector nativo (`.md`/`.markdown`, multiselección o uno para "Volver a localizar…") → rutas |
+| `linked:link` | handle | `(paths)` → `{linked, existing, errors}`: valida (`.md`, existe, es archivo, fuera del dir de notas), deduplica por ruta normalizada (sin distinguir mayúsculas en Windows/macOS) y devuelve la existente en vez de duplicar. Main no comprueba de dónde viene la ruta: el renderer puede vincular cualquier `.md` absoluto así (y luego editarlo) |
+| `linked:relocate` | handle | `(id, newPath)` → reapunta el vínculo conservando título/grupo/favorito… y el borrador de cambios sin escribir (que contra el archivo nuevo sale como conflicto) (`alreadyLinked` si otra nota ya usa esa ruta) |
+| `linked:unlink` | handle | Quita la nota del registro, su caché, su borrador y su sitio en el orden local. **Nunca toca el archivo** |
+| `linked:update-meta` | handle | `(id, patch)` → título-alias, group/folder, favorited, archived, isRawMode, aiHidden (solo registro local) |
+| `linked:write` | handle | `(id, body, baseHash)` → escribe el cuerpo SOLO si el disco tiene `baseHash` (si no: `{ok:false, reason:'conflict', disk}`); atómico (el tmp se borra ante cualquier fallo), conserva BOM/EOL/salto final/frontmatter; la ruta sale del registro (nunca del renderer); borra el borrador solo si escribe su mismo contenido; si la nota se desvinculó mientras tanto no recrea su caché |
+| `linked:set-draft` | handle | `(id, {body, baseHash} \| null)` → guarda/borra el borrador de cambios sin escribir (`userData/linked-notes-cache/<id>.draft.json`). Nunca escribe en el `.md` |
+| `linked:asset-data-uri` | handle | `(id, src)` → una imagen con ruta relativa de una nota vinculada como data URI (`null` si no es imagen, no es relativa al `.md` registrado, no aparece como imagen en el cuerpo de esa nota, falta o pasa de 10 MB). Para copiar la nota a una nota normal (Duplicate, "Save as template") |
+| `linked:save-asset` | handle | `(id, name, mime, bytes)` → copia una imagen a `assets/` junto al `.md` → `{relPath}` |
+| `linked:show-in-folder` | handle | `shell.showItemInFolder` del archivo (o abre su carpeta si falta) |
+| `linked:recheck` | handle | Re-lee (async) todos los vinculados (al enfocar la ventana): estado y contenido; emite lo que cambie y resuelve al terminar (el renderer re-sincroniza entonces las notas con cambios sin escribir) |
+| esquema `nflinked:` | protocol | `nflinked://n/<id>/<src>` (privilegios `standard` + `secure`, sin fetch) sirve SOLO archivos de imagen cuya ruta es relativa a la carpeta del `.md` de una nota vinculada; puede subir de carpeta (`../img/x.png`). Rechaza esquemas, unidades, rutas absolutas/UNC, `:` y NUL, antes y después de decodificar `%xx` (previews y NodeView de imagen) |
 | `app:open-notes-folder` | handle | Abre la carpeta en el explorador |
 | `app:choose-notes-dir` | handle | Diálogo para elegir carpeta |
 | `app:get-login-item` / `app:set-login-item` | handle | Autostart al login (gestiona `.desktop` propio en Linux). **Versión Store** (`IS_STORE_BUILD`, ver `release.md` § Microsoft Store): `get` → siempre `{openAtLogin:false}`, `set` → `{ok:false}` sin escribir `settings.json` |
@@ -364,7 +393,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `groups:get` / `groups:set` | handle | Grupos → `groups.json` (en dir de notas, se sincroniza) |
 | `folders:get` / `folders:set` | handle | Carpetas → `folders.json` (en dir de notas, se sincroniza) |
 | `section-colors:get` / `section-colors:set` | handle | Color por sección → `section-colors.json` (saneado, se sincroniza) |
-| `note-order:get` / `note-order:set` | handle | Orden manual de notas → `note-order.json` (en dir de notas, se sincroniza) |
+| `note-order:get` / `note-order:set` | handle | Orden manual de notas → `note-order.json` (en dir de notas, se sincroniza). Los ids de notas vinculadas (`lnk:`) nunca van al fichero: `set` los separa al orden local de `linked-notes.json` y `get` los recombina (ver `patterns.md` § "Notas vinculadas") |
 | `templates:get` / `templates:set` | handle | Plantillas de nota → `templates.json` (en dir de notas, se sincroniza) |
 | `snippets:get` / `snippets:set` | handle | Fragmentos del toolbar → `snippets.json` (dir de notas, se sincroniza). Main sanea en las dos direcciones (`electron/snippetsFile.ts`); `set` hace broadcast **`snippets-updated`** (no `notes-updated`, que recargaría todas las notas) a las demás ventanas + `schedulePush` |
 | `notes:export` | handle | Exporta a `.noteflow`/`.json`/`.md`/`.txt` (diálogo de guardado) |
@@ -445,7 +474,8 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `ai:profile-get-status` / `ai:profile-set-completed` | handle | `settings.aiProfile` = `{completedAt, noteId?}` (cuestionario mostrado una vez + id de la nota de perfil generada, para enlazar/regenerar sin duplicar). `set-completed(noteId?)`: sin `noteId` = "Not now" (saltado) |
 
 **Eventos main → renderer** (suscripción vía `window.noteflow.on*`):
-`new-note`, `notes-updated` (filePath?, senderId?), `snippets-updated` (sin payload — otra ventana
+`new-note`, `notes-updated` (filePath?, senderId? — `filePath` es la carpeta de una nota, o la ruta del
+`.md` de una **nota vinculada**: `syncNote` desvía las rutas `.md` a `syncLinkedNote`), `snippets-updated` (sin payload — otra ventana
 guardó `snippets.json`), `groups-updated` (sin payload — el watcher vio `groups.json` / `folders.json` /
 `note-order.json` escritos FUERA de la app, p. ej. por el CLI; `App.tsx` (principal y sticky) y
 `SectionWindowApp.tsx` recargan solo `groupsStore.loadGroups()`), `update:download-progress` (percent),
@@ -649,6 +679,15 @@ Estructura de `settings.json`:
 > editó cada día en ESTE dispositivo; se podan los días de más de 120 en cada escritura. Lógica
 > pura en `electron/activityLog.ts`; como no guarda secretos se escribe con tmp + rename (la regla
 > in-place del apartado "Seguridad" de arriba es solo para `settings.json`).
+> Las **notas vinculadas** (`.md` externos editados en su sitio) guardan su estado en
+> `userData/linked-notes.json` (`{version: 1, notes: [{id: 'lnk:…', path, title, group?, folder?,
+> favorited?, archived?, isRawMode?, aiHidden?, created, updated, known?: {hash, size, mtimeMs}}], order:
+> {contextKey: id[]}}` — `order` = listas completas del orden manual de los contextos con alguna vinculada,
+> que nunca van a `note-order.json`; saneado al leer por `sanitizeLinkedRegistry`; tmp + rename, sin secretos),
+> una **caché del último contenido conocido** por nota en `userData/linked-notes-cache/<id>.md` (para seguir
+> mostrándola si el archivo falta o mientras se lee al arrancar) y, mientras tenga cambios sin escribir
+> (conflicto, archivo de solo lectura o ausente), un **borrador** `<id>.draft.json` (`{body, baseHash}`).
+> Local, NO se sincroniza, y nada de esto va al dir de notas (ver `patterns.md` § "Notas vinculadas").
 > `aiChatWindow.bounds` = tamaño/posición de la ventana de chat despegada (se guarda al cerrarla;
 > la posición se descarta si ya no cae en ninguna pantalla). El ancho del sidebar de chat del editor va
 > en `localStorage` (`noteflow-ai-chat-width`), no aquí.

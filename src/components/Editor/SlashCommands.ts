@@ -67,6 +67,8 @@ export function getSlashCommands(t: Messages): SlashCommandLabels {
 
 export interface SlashCommandsOptions {
   onLinkSection: (editor: Editor) => void
+  /** Linked notes (plain Markdown): no "Link section" nor kanban commands — only snippets. */
+  plain: boolean
   // Read fresh labels each time the menu builds its items (see getSlashCommands).
   getLabels: () => SlashCommandLabels
 }
@@ -92,6 +94,7 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
   addOptions() {
     return {
       onLinkSection: () => {},
+      plain: false,
       // English fallback; the editor overrides this with a `useT()`-backed getter.
       getLabels: () => ({
         linkSection: 'Link section',
@@ -117,6 +120,7 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
   addProseMirrorPlugins() {
     const onLinkSection = this.options.onLinkSection
     const getLabels = this.options.getLabels
+    const plain = this.options.plain
     return [
       Suggestion<SlashCommandItem>({
         editor: this.editor,
@@ -129,32 +133,33 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
         },
         items: ({ query, editor }) => {
           const labels = getLabels()
-          const all: SlashCommandItem[] = [
-            {
+          const all: SlashCommandItem[] = []
+          if (!plain) {
+            all.push({
               id: 'link-section',
               title: labels.linkSection,
               description: labels.linkSectionDescription,
               run: (editor) => onLinkSection(editor),
-            },
-          ]
-          // Inside a top-level task list: offer to turn it into a board.
-          if (topLevelTaskList(editor)) {
+            })
+            // Inside a top-level task list: offer to turn it into a board.
+            if (topLevelTaskList(editor)) {
+              all.push({
+                id: 'convert-to-kanban',
+                title: labels.convertToKanban,
+                description: labels.convertToKanbanDescription,
+                keywords: ['kanban', 'board'],
+                run: (editor) => { convertTaskListToBoard(editor, labels.kanbanColumns) },
+              })
+            }
             all.push({
-              id: 'convert-to-kanban',
-              title: labels.convertToKanban,
-              description: labels.convertToKanbanDescription,
+              id: 'kanban',
+              title: labels.kanban,
+              description: labels.kanbanDescription,
+              // `/kanban` and `/board` find it in any UI language.
               keywords: ['kanban', 'board'],
-              run: (editor) => { convertTaskListToBoard(editor, labels.kanbanColumns) },
+              run: (editor) => insertDefaultBoard(editor, labels.kanbanColumns),
             })
           }
-          all.push({
-            id: 'kanban',
-            title: labels.kanban,
-            description: labels.kanbanDescription,
-            // `/kanban` and `/board` find it in any UI language.
-            keywords: ['kanban', 'board'],
-            run: (editor) => insertDefaultBoard(editor, labels.kanbanColumns),
-          })
           // The user's snippets, after the commands and in their configured
           // order. Read fresh on every keystroke (the store follows edits made
           // in the modal or another window); variables expand on insertion.

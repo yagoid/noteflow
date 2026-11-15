@@ -294,7 +294,8 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
   // Add a fresh section and jump straight into the editor on it, so the user
   // writes there rather than landing back on an empty card in the overview.
   const addSection = async () => {
-    if (!note || locked) return
+    // A linked note (external .md) is exactly one section.
+    if (!note || locked || note.linked) return
     const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', created: new Date().toISOString() }
     await mutateSections(note.id, (list) => [...list, newSection])
     openSection(newSection.id)
@@ -338,7 +339,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
 
   const startRename = (sectionId: string) => {
     const section = note?.sections.find((s) => s.id === sectionId)
-    if (!section || locked) return
+    if (!section || locked || note?.linked) return
     clearNameClickTimer()
     renameOpenRef.current = true
     setRenamingId(sectionId)
@@ -735,14 +736,17 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
                           style={{ flex }}
                           onDragOver={handleAddDragOver}
                         >
-                          <button
-                            className="note-grid-add"
-                            onClick={() => void addSection()}
-                            title={t.overview.addSectionTooltip}
-                          >
-                            <Plus size={13} strokeWidth={2.2} />
-                            {t.overview.newSection}
-                          </button>
+                          {/* A linked note (external .md) is exactly one section: no "New section". */}
+                          {!note.linked && (
+                            <button
+                              className="note-grid-add"
+                              onClick={() => void addSection()}
+                              title={t.overview.addSectionTooltip}
+                            >
+                              <Plus size={13} strokeWidth={2.2} />
+                              {t.overview.newSection}
+                            </button>
+                          )}
                           {endDrop && !addStartsRow && (
                             <span className="section-map-drop" data-side="before" aria-hidden />
                           )}
@@ -776,6 +780,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
                           renaming={renamingId === section.id}
                           renameValue={renamingId === section.id ? renameValue : ''}
                           actions={actions}
+                          linkedNoteId={note.linked ? note.id : undefined}
                         />
                         {dropHere && (
                           <span
@@ -898,10 +903,12 @@ interface SectionCellProps {
   renaming: boolean
   renameValue: string
   actions: CellActions
+  /** Set for a linked note (external .md): its preview is plain Markdown with its relative images. */
+  linkedNoteId?: string
 }
 
 const SectionCell = memo(function SectionCell({
-  section, color, ink, isOpen, selected, dragging, renaming, renameValue, actions,
+  section, color, ink, isOpen, selected, dragging, renaming, renameValue, actions, linkedNoteId,
 }: SectionCellProps) {
   const t = useT()
   const label = tf(isOpen ? t.overview.backToSection : t.overview.openSection, { name: section.name })
@@ -966,7 +973,7 @@ const SectionCell = memo(function SectionCell({
       </div>
 
       {/* Body + foot (memoised by content inside), shared with the hover card. */}
-      <SectionCardContent content={section.content} raw={!!section.isRawMode} aiHidden={!!section.aiHidden} />
+      <SectionCardContent content={section.content} raw={!!section.isRawMode} aiHidden={!!section.aiHidden} linkedNoteId={linkedNoteId} />
 
       <button
         className="note-grid-open"

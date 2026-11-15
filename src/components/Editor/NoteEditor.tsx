@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
-import { useNotesStore, saveUiState } from '../../stores/notesStore'
+import { useNotesStore, saveUiState, linkedSectionsForCopy } from '../../stores/notesStore'
 import { useTemplatesStore } from '../../stores/templatesStore'
 import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { Editor } from './Editor'
@@ -11,7 +11,7 @@ import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
   ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer,
-  Share,
+  Share, Link2Off,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
 import { useT } from '../../i18n/useT'
@@ -33,6 +33,9 @@ import {
   createContentSync, mapOffsetThroughChange, needsSave, recordSave, resolveExternalContent, type ContentSync,
 } from '../../lib/externalContentSync'
 import { rawSectionDisplayText, sectionTextForClipboard } from '../../lib/sectionClipboard'
+import { isLinkedNote, isLinkedReadOnly } from '../../lib/linkedNotes'
+import { LinkedNoteHeader } from '../LinkedNote/LinkedNoteHeader'
+import { fileNameOf } from '../LinkedNote/linkedActions'
 
 // ---------------------------------------------------------------------------
 // Confirm modal state type
@@ -194,6 +197,10 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   ) ?? note?.sections[0]
 
   const rawMode = activeSection?.isRawMode ?? false
+  // Linked note (an external .md edited in place): one section, plain Markdown, and
+  // read-only while its file can't be written (missing / read-only / unreadable).
+  const isLinked = isLinkedNote(note)
+  const linkedReadOnly = isLinkedReadOnly(note)
 
   // ── Reset when the active note changes ─────────────────────────────────────
   useEffect(() => {
@@ -471,6 +478,17 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
 
   const openDeleteNoteModal = useCallback(() => {
     if (!note) return
+    if (note.linked) {
+      // "Delete" of a linked note = unlink: the file itself is never deleted.
+      setModal({
+        title: t.linked.unlinkTitle,
+        message: tf(t.linked.unlinkMessage, { title: note.title || t.common.untitled, file: fileNameOf(note.linked.path) }),
+        confirmLabel: t.linked.unlinkConfirm,
+        danger: false,
+        onConfirm: () => { setModal(null); deleteNote(note.id) },
+      })
+      return
+    }
     setModal({
       title: t.common.deleteNote,
       message: tf(t.common.deleteNoteMessage, { title: note.title || t.common.untitled }),
@@ -485,6 +503,14 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     if (imageFiles.length === 0 || !activeSection) return
     let insertText = ''
     for (const file of imageFiles) {
+      if (note?.linked) {
+        // Linked note: copied to an assets/ folder next to the .md, linked relatively.
+        if (linkedReadOnly) return
+        const saved = await window.noteflow.linkedSaveAsset(note.id, file.name, file.type, new Uint8Array(await file.arrayBuffer()))
+        if (saved.ok) insertText += `![${file.name.replace(/\.[^.]*$/, '')}](${saved.relPath})\n`
+        else console.warn('[linked] image not saved:', saved.error)
+        continue
+      }
       const src = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => resolve(reader.result as string)
@@ -574,7 +600,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   useEffect(() => {
     if (!isPaneActive) return
     const handleAddTab = () => {
-      if (!noteRef.current) return
+      // A linked note is one file = one section.
+      if (!noteRef.current || noteRef.current.linked) return
       const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', created: new Date().toISOString() }
       void mutateSections(noteRef.current.id, (sections) => [...sections, newSection])
       setRawContent('')
@@ -583,7 +610,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     }
     const handleCloseTab = () => {
       const n = noteRef.current
-      if (!n || n.sections.length <= 1) return
+      if (!n || n.linked || n.sections.length <= 1) return
       const sectionId = activeSectionIdRef.current
       if (!sectionId) return
       const section = n.sections.find((s) => s.id === sectionId)
@@ -603,7 +630,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
       const section = n.sections.find((s) => s.id === sectionId)
       if (!section) return
       if (!section.isRawMode) {
-        setRawContent(section.content)
+        // A clean linked note shows its file's exact text (the store swaps it in too).
+        setRawContent(n.linked && section.content === n.linked.syncedContent ? n.linked.diskBody : section.content)
         void updateSection(n.id, sectionId, { isRawMode: true })
       } else {
         // A pending raw edit is written first (same write queue, in order). The buffer
@@ -715,7 +743,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     await useTemplatesStore.getState().createTemplate({
       name,
       title: note.title,
-      sections: note.sections.map((s) => ({ ...s })), // createTemplate drops each section's `created`
+      // A linked note's relative images become inline data URIs (a template makes regular notes).
+      sections: (await linkedSectionsForCopy(note)).map((s) => ({ ...s })), // createTemplate drops each section's `created`
     })
     setTemplateNameDraft(null)
   }
@@ -731,7 +760,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     const newRawMode = !rawMode
 
     if (newRawMode) {
-      setRawContent(activeSection.content)
+      // A clean linked note shows its file's exact text (the store swaps it in too).
+      setRawContent(note.linked && activeSection.content === note.linked.syncedContent ? note.linked.diskBody : activeSection.content)
       void updateSection(note.id, activeSection.id, { isRawMode: true })
     } else {
       // Pending raw edit first; never the buffer as such (see handleToggleRaw).
@@ -1183,14 +1213,15 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
               onRenameCommit={handleCommitRename}
               menuSectionId={tabMenu?.noteId === note.id ? tabMenu.sectionId : null}
               onSwitch={handleSwitchSection}
-              onStartRename={handleStartRename}
+              // A linked note's single section is named after its file: no rename, add nor reorder.
+              onStartRename={isLinked ? () => {} : handleStartRename}
               onOpenMenu={(sectionId, x, y) => {
                 setSectionMenuOpen(false)
                 setTabMenu({ x, y, noteId: note.id, sectionId })
               }}
               onCloseMenu={closeTabMenu}
-              onAdd={handleAddSection}
-              onReorder={handleReorderSections}
+              onAdd={isLinked ? undefined : handleAddSection}
+              onReorder={isLinked ? undefined : handleReorderSections}
             />
           </div>
 
@@ -1259,7 +1290,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                       {t.editor.saveAsTemplate}
                     </button>
                   )}
-                  {!standalone && !(note.encryption && !sessionPasswords[note.id]) && (
+                  {!standalone && !isLinked && !(note.encryption && !sessionPasswords[note.id]) && (
                     <button
                       onClick={() => {
                         setSectionMenuOpen(false)
@@ -1300,7 +1331,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                     <Archive size={13} />
                     {note.archived ? t.editor.menu.unarchiveNote : t.editor.menu.archiveNote}
                   </button>
-                  {!note.encryption && (
+                  {!note.encryption && !isLinked && (
                     <button
                       onClick={() => { setSectionMenuOpen(false); setEncryptModalMode('encrypt') }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
@@ -1323,8 +1354,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                     onClick={() => { setSectionMenuOpen(false); openDeleteNoteModal() }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 transition-colors text-left"
                   >
-                    <Trash2 size={13} />
-                    {t.common.deleteNote}
+                    {isLinked ? <Link2Off size={13} /> : <Trash2 size={13} />}
+                    {isLinked ? t.linked.unlink : t.common.deleteNote}
                   </button>
                 </div>
               )}
@@ -1388,6 +1419,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
         {aiChatButton && <AiChatButton className="absolute right-0 top-0 bottom-0" />}
         </div>
 
+        {isLinkedNote(note) && <LinkedNoteHeader note={note} />}
+
         <div
           className={`flex-1 overflow-hidden mr-1 relative${readableWidth ? ' editor-readable' : ''}`}
           style={readableWidth ? { fontSize: `${fontSize}px` } : undefined}
@@ -1397,6 +1430,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
               <textarea
                 ref={setRawTextarea}
                 data-sidebar-anchor
+                readOnly={linkedReadOnly}
                 value={displayContent}
                 onChange={handleRawChange}
                 onBlur={handleRawBlur}
@@ -1413,6 +1447,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                   }, 0)
                 }}
                 onPaste={(e) => {
+                  if (linkedReadOnly) return
                   const imageItems = Array.from(e.clipboardData.items).filter(i => i.type.startsWith('image/'))
                   if (imageItems.length === 0) return
                   e.preventDefault()
@@ -1445,8 +1480,11 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
             <>
               <Editor
                 ref={editorRef}
-                key={`${note.id}-${activeSection?.id ?? 'none'}`}
+                // A linked note turning read-only (or back) remounts the editor with it.
+                key={`${note.id}-${activeSection?.id ?? 'none'}${linkedReadOnly ? '-ro' : ''}`}
                 content={activeSection?.content ?? ''}
+                linked={isLinked}
+                readOnly={linkedReadOnly}
                 onChange={handleSectionContentChange}
                 noteId={note.id}
                 placeholder={tf(t.editor.sectionStartWriting, { name: activeSection?.name ?? t.editor.sectionFallback })}

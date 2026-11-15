@@ -89,9 +89,66 @@ export interface NoteMeta {
 
 export interface Note extends NoteMeta {
   sections: NoteSection[]  // ordered, user-defined content areas
-  raw: string              // content of note.md (frontmatter anchor)
-  filePath: string         // absolute path of the note DIRECTORY
+  raw: string              // content of note.md (frontmatter anchor) — '' for linked notes
+  filePath: string         // absolute path of the note DIRECTORY — of the .md FILE for linked notes
+  /** Present iff this is a linked note (an external .md edited in place — lib/linkedNotes.ts). */
+  linked?: LinkedNoteState
 }
+
+// ── Linked notes (external Markdown files edited in place) ───────────────────
+// Mirror of electron/linkedNotes.ts. A linked note has exactly ONE section (id 'body': the
+// file body, frontmatter hidden); its metadata lives in userData/linked-notes.json, never in
+// the file nor in the notes dir (no sync, export or CLI).
+
+// 'checking' = not read yet since startup (shown from the cache, read-only, until main's async read lands).
+export type LinkedFileStatus = 'ok' | 'missing' | 'readonly' | 'error' | 'checking'
+// writeFailed = the renderer's: a write failed for another reason (the note keeps its unwritten content).
+export type LinkedErrorCode = 'tooLarge' | 'invalidUtf8' | 'unreadable' | 'writeFailed'
+export type LinkError = 'notMarkdown' | 'notFound' | 'notAFile' | 'insideNotesDir' | 'alreadyLinked'
+
+export interface LinkedNoteWire {
+  id: string
+  path: string
+  title: string
+  group?: string
+  folder?: string
+  favorited: boolean
+  archived: boolean
+  isRawMode: boolean
+  aiHidden: boolean
+  created: string
+  updated: string
+  sectionName: string
+  status: LinkedFileStatus
+  error?: LinkedErrorCode
+  body: string
+  hash: string | null
+  /** Edits not written to the file yet, kept in userData across restarts (see LinkedNoteState). */
+  draft?: { body: string; baseHash: string | null }
+}
+
+export interface LinkedNoteState {
+  path: string
+  status: LinkedFileStatus
+  error?: LinkedErrorCode
+  /** Hash of the file version the note's content is based on (null: not read from disk). */
+  baseHash: string | null
+  /** Exact body of that version (what is on disk, frontmatter excluded). */
+  diskBody: string
+  /** The section content that corresponds to that version ("clean" = content === this). */
+  syncedContent: string
+  /** The file changed outside while the note had edits of its own: nothing is written until resolved. */
+  conflict?: { diskBody: string; diskHash: string }
+}
+
+export type LinkedWriteResult =
+  | { ok: true; hash: string; body: string }
+  | { ok: false; reason: 'conflict'; disk: { body: string; hash: string } }
+  | { ok: false; reason: 'missing' | 'readonly' | 'notLinked' | 'error'; error?: string }
+
+export type LinkedMetaPatch = Partial<{
+  title: string; group: string; folder: string; favorited: boolean; archived: boolean; isRawMode: boolean; aiHidden: boolean
+}>
 
 // On-disk folder record as returned by fs:read-all-notes / fs:read-note-dir
 export interface NoteDirRecord {
@@ -599,6 +656,22 @@ declare global {
       getNotesDir: () => Promise<string>
       openNotesFolder: () => Promise<void>
       chooseNotesDir: () => Promise<string | null>
+      // Linked notes (external .md files edited in place). Main writes only registered files.
+      linkedList: () => Promise<LinkedNoteWire[]>
+      linkedGet: (idOrPath: string) => Promise<LinkedNoteWire | null>
+      linkedPickFiles: (opts: { multi: boolean }) => Promise<string[]>
+      linkedLink: (paths: string[]) => Promise<{ linked: LinkedNoteWire[]; existing: LinkedNoteWire[]; errors: Array<{ path: string; error: LinkError }> }>
+      linkedRelocate: (id: string, newPath: string) => Promise<{ ok: true; note: LinkedNoteWire } | { ok: false; error: LinkError | 'notLinked' }>
+      linkedUnlink: (id: string) => Promise<{ ok: boolean }>
+      linkedUpdateMeta: (id: string, patch: LinkedMetaPatch) => Promise<LinkedNoteWire | null>
+      linkedWrite: (id: string, body: string, baseHash: string | null) => Promise<LinkedWriteResult>
+      linkedSaveAsset: (id: string, name: string, mime: string, data: Uint8Array) => Promise<{ ok: true; relPath: string } | { ok: false; error: string }>
+      linkedShowInFolder: (id: string) => Promise<{ ok: boolean }>
+      linkedRecheck: () => Promise<void>
+      linkedAssetDataUri: (id: string, src: string) => Promise<string | null>
+      linkedSetDraft: (id: string, draft: { body: string; baseHash: string | null } | null) => Promise<void>
+      /** Absolute path of a File dropped from the OS (webUtils.getPathForFile); '' if unknown. */
+      getPathForFile: (file: File) => string
       minimize: () => void
       maximize: () => void
       close: () => void

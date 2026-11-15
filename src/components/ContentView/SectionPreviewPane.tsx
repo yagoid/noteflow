@@ -4,6 +4,7 @@ import { ExternalLink, Lock, X } from 'lucide-react'
 import { FolderIcon } from '../Sidebar/NoteFolderHeader'
 import { formatNoteDate } from '../Sidebar/rowText'
 import { rawPreviewText, sectionCardStats, sectionPreviewHtml } from '../../lib/noteOverviewGrid'
+import { linkedPreviewOptions } from '../../lib/linkedNotes'
 import { colorChannels, resolveGroupColor, type TagColorMap } from '../../lib/tagColors'
 import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { useT } from '../../i18n/useT'
@@ -47,11 +48,13 @@ export function SectionPreviewPane({
   const raw = !!section?.isRawMode
   const content = section?.content ?? ''
   const hasContent = content.trim().length > 0
+  // A linked note (external .md): plain Markdown, relative images from its folder.
+  const linkedId = note?.linked ? note.id : null
 
   // Only this section's markdown is rendered, and only when it changes.
   const html = useMemo(
-    () => (hasContent && !raw ? sectionPreviewHtml(content, PREVIEW_PANE_MAX_CHARS) : ''),
-    [content, hasContent, raw],
+    () => (hasContent && !raw ? sectionPreviewHtml(content, PREVIEW_PANE_MAX_CHARS, linkedPreviewOptions(linkedId)) : ''),
+    [content, hasContent, raw, linkedId],
   )
   const stats = useMemo(() => sectionCardStats(content), [content])
   const statLabel = stats.kind === 'empty'

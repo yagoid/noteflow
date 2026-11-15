@@ -37,7 +37,7 @@ import { KanbanBoard } from './KanbanBoard'
 // (tests/lib/editorRoundTrip.test.ts) build the schema from this same list
 // with getSchema(), so they can't drift from what the app parses and saves.
 // Anything added here that changes the schema must round-trip through
-// lib/markdownHtml.ts (see .claude/context/patterns.md).
+// lib/markdownHtml.ts (see .agents/context/patterns.md).
 
 const lowlight = createLowlight(common)
 
@@ -112,19 +112,35 @@ const Quote = Blockquote.extend({
   },
 })
 
+export interface SchemaOptions {
+  /**
+   * Plain Markdown for linked notes (an external .md edited in place,
+   * lib/linkedNotes.ts): no NoteFlow-only syntax — no underline (`++`) nor
+   * highlight (`==`) marks (their toolbar buttons, shortcuts and input rules go
+   * with them), no kanban boards, no section relations, and task items without
+   * deadline / alarm / importance pickers. Pair it with
+   * htmlFromMarkdown(md, { plain: true }), which reads that syntax as text.
+   */
+  plain?: boolean
+  /** Display URL of an image src (linked notes: relative `assets/…` paths). The doc keeps the src. */
+  imageSrc?: ((src: string) => string) | null
+}
+
 /** The schema-defining extensions of the note editor (fresh instances per call). */
-export function schemaExtensions(): Extensions {
+export function schemaExtensions(opts: SchemaOptions = {}): Extensions {
+  const plain = !!opts.plain
   return [
-    TopLevelDocument,
+    // No topBlock group without kanban boards.
+    plain ? Document : TopLevelDocument,
     Paragraph,
     Text,
     Bold,
     Italic,
-    Underline,
+    ...(plain ? [] : [Underline]),
     Strike,
     // `==text==` input rule → <mark>. multicolor off: a single accent-coloured
     // highlight (styled via CSS, no background) — see index.css `.ProseMirror mark`.
-    Highlight,
+    ...(plain ? [] : [Highlight]),
     Code,
     CodeBlock.configure({ lowlight }),
     Heading.configure({ levels: [1, 2, 3] }),
@@ -135,9 +151,15 @@ export function schemaExtensions(): Extensions {
     OrderedList,
     ListItem.extend({ content: LIST_ITEM_CONTENT }),
     TaskList,
-    DeadlineTaskItem.extend({ content: LIST_ITEM_CONTENT }).configure({ nested: true }),
-    Link.configure({ openOnClick: false, autolink: false }),
-    ResizableImage.configure({ inline: true, allowBase64: true }),
+    DeadlineTaskItem.extend({ content: LIST_ITEM_CONTENT }).configure({ nested: true, plain }),
+    // Plain Markdown (an external file) keeps links of any scheme (`vscode://`, `obsidian://`,
+    // a NoteFlow relation link…): TipTap's default allowlist would drop the URL and leave only
+    // the text on the next save. Script-like schemes stay out; clicks never navigate (Editor.tsx
+    // hands them to openUrl, which only opens https).
+    plain
+      ? Link.configure({ openOnClick: false, autolink: false, isAllowedUri: (url) => !/^\s*(javascript|vbscript|data):/i.test(url) })
+      : Link.configure({ openOnClick: false, autolink: false }),
+    ResizableImage.configure({ inline: true, allowBase64: true, displaySrc: opts.imageSrc ?? null }),
     HorizontalRule,
     // resizable:false — column widths can't be stored in portable markdown, so
     // tables fill the available width with evenly distributed columns instead of
@@ -147,7 +169,6 @@ export function schemaExtensions(): Extensions {
     AlignedTableHeader,
     AlignedTableCell,
     LineBreak,
-    SectionRelation,
-    KanbanBoard,
+    ...(plain ? [] : [SectionRelation, KanbanBoard]),
   ]
 }

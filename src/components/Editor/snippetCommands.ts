@@ -13,7 +13,8 @@ import { isInlineSnippet } from '../../lib/snippets'
  * (e.g. under a journal heading) ready to type.
  */
 export function snippetSlice(schema: Schema, markdown: string): Slice {
-  const dom = new window.DOMParser().parseFromString(htmlFromMarkdown(markdown), 'text/html')
+  // A linked note's plain schema (no underline mark) reads NoteFlow's own syntax as text.
+  const dom = new window.DOMParser().parseFromString(htmlFromMarkdown(markdown, { plain: !schema.marks.underline }), 'text/html')
   const parsed = ProseMirrorDOMParser.fromSchema(schema).parseSlice(dom.body)
   const first = parsed.content.firstChild
   if (isInlineSnippet(markdown) && parsed.content.childCount === 1 && first?.isTextblock) {

@@ -10,6 +10,8 @@ import { MENU_ITEM_CLASS } from './contextMenuStyles'
 import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp, Pin, PinOff, Check } from 'lucide-react'
 import { decryptSections } from '../lib/cryptoUtils'
 import { createDebouncedSave, flushPendingEdits } from '../lib/pendingEdits'
+import { isLinkedNote, isLinkedReadOnly } from '../lib/linkedNotes'
+import { LinkedNoteCompactBar } from './LinkedNote/LinkedNoteHeader'
 import {
   isStickyHashFolded,
   menuNavIndex,
@@ -592,6 +594,8 @@ export function StickyApp() {
   // Read-only mode for unlocked encrypted notes (changes can't be persisted
   // since the sticky window's store has no session password for re-encryption)
   const isReadOnly = !!unlockedSections
+  // A linked note (external .md) whose file can't be written right now (missing / read-only).
+  const linkedReadOnly = isLinkedReadOnly(note)
 
   const handleFold = () => {
     window.noteflow.foldToCorner(FOLDED_W, FOLDED_H)
@@ -610,11 +614,13 @@ export function StickyApp() {
   // No "same as the store" check: Editor only calls this for a real change (see
   // its saveContent — the store may not show its last save in flight yet).
   const handleContentChange = (content: string) => {
+    // A read-only linked note still takes the last flushed edit (the store keeps it unsaved).
     if (isReadOnly) return
     void updateSection(note.id, section.id, { content })
   }
 
   const handleRawChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    // A read-only linked note still takes the last flushed edit (the store keeps it unsaved).
     if (isReadOnly) return
     const content = e.target.value
     setRawContent(content)
@@ -680,6 +686,7 @@ export function StickyApp() {
           <span className="text-[10px] font-mono text-amber-400/80">{t.sticky.readOnly}</span>
         </div>
       )}
+      {isLinkedNote(note) && <LinkedNoteCompactBar note={note} />}
       <div className="flex-1 overflow-hidden mr-1" onKeyDown={(e) => e.stopPropagation()}>
         {(section.isRawMode || isReadOnly) ? (
           <textarea
@@ -701,7 +708,7 @@ export function StickyApp() {
                 syncRawFromStoreRef.current()
               }, 0)
             }}
-            readOnly={isReadOnly}
+            readOnly={isReadOnly || linkedReadOnly}
             className={`w-full h-full p-3 bg-transparent text-xs font-mono text-text
                        border-none outline-none resize-none caret-text leading-relaxed
                        ${isReadOnly ? 'select-all cursor-default' : ''}`}
@@ -710,10 +717,12 @@ export function StickyApp() {
         ) : (
           <div className="h-full overflow-y-auto sticky-editor">
             <Editor
-              key={`${note.id}-${section.id}`}
+              key={`${note.id}-${section.id}${linkedReadOnly ? '-ro' : ''}`}
               content={section.content ?? ''}
               onChange={handleContentChange}
               noteId={note.id}
+              linked={!!note.linked}
+              readOnly={linkedReadOnly}
               placeholder={t.sticky.startWriting}
               hideToolbar={true}
               caretScrollGap={STICKY_CARET_SCROLL_GAP}

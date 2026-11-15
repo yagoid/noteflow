@@ -670,14 +670,15 @@ function chunkTextFor(s) {
 function hasIndexableContent(s) {
     return stripNoise(s.content).trim().length > 0;
 }
-async function handleIndexNote(dirPath) {
+async function handleIndexNote(dirPath, data) {
     if (!index)
         throw new Error('Index not initialised');
     // Dormant (model not loaded): don't auto-load it just to index an edit. The next explicit
     // reindex picks up the change. This keeps note saves from waking the heavy model.
     if (!provider.ready)
         return { ok: true, skipped: true };
-    const parsed = readNoteFolder(dirPath);
+    // `data`: a linked note (external .md) handed over as data; `dirPath` is then its index key.
+    const parsed = data ?? readNoteFolder(dirPath);
     if (!parsed || !parsed.noteId || parsed.encrypted) {
         index.removeNoteByFilePath(dirPath);
         return { ok: true, skipped: true };
@@ -712,16 +713,21 @@ async function handleIndexNote(dirPath) {
     return { ok: true };
 }
 const REINDEX_BATCH = 16; // embed many sections per inference call → much better CPU throughput
-async function handleReindexAll(notesDir) {
+async function handleReindexAll(notesDir, extra = []) {
     if (!index)
         throw new Error('Index not initialised');
     await ensureModelLoaded(); // reindex needs to embed text → load the model now
     emitState('indexing');
     index.clearAll();
     const rows = [];
-    for (const dir of (0, noteFormat_1.listNoteDirs)(notesDir)) {
-        const dirPath = path_1.default.join(notesDir, dir);
-        const parsed = readNoteFolder(dirPath);
+    const sources = [
+        ...(0, noteFormat_1.listNoteDirs)(notesDir).map((dir) => {
+            const dirPath = path_1.default.join(notesDir, dir);
+            return { dirPath, parsed: readNoteFolder(dirPath) };
+        }),
+        ...extra.map((d) => ({ dirPath: d.key, parsed: d.note })),
+    ];
+    for (const { dirPath, parsed } of sources) {
         if (!parsed || !parsed.noteId || parsed.encrypted)
             continue;
         for (const s of parsed.sections) {
@@ -799,13 +805,20 @@ parentPort.on('message', async (e) => {
                     scheduleModelUnload(); // keep the model alive while edits keep arriving
                 break;
             }
+            case 'index-note-data': {
+                const r = await handleIndexNote(req.payload.key, req.payload.note);
+                send({ type: 'result', id: req.id, payload: r });
+                if (!r.skipped)
+                    scheduleModelUnload();
+                break;
+            }
             case 'remove-note': {
                 index?.removeNoteByFilePath(req.payload.dirPath);
                 send({ type: 'result', id: req.id, payload: { ok: true } });
                 break;
             }
             case 'reindex-all': {
-                const r = await handleReindexAll(req.payload.notesDir);
+                const r = await handleReindexAll(req.payload.notesDir, req.payload.extra);
                 send({ type: 'result', id: req.id, payload: r });
                 scheduleModelUnload(); // work done + persisted → release the model back to dormant
                 break;

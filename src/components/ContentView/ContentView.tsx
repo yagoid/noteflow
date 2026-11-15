@@ -957,9 +957,13 @@ export function ContentView({ place, onClose }: ContentViewProps) {
         <ConfirmModal
           title={checkedNotes.length === 1 ? t.common.deleteNote : t.overview.deleteNotes}
           message={
-            checkedNotes.length === 1
+            (checkedNotes.length === 1
               ? tf(t.common.deleteNoteMessage, { title: checkedNotes[0]?.title || t.common.untitled })
-              : tf(t.overview.deleteNotesMessage, { count: checkedNotes.length })
+              : tf(t.overview.deleteNotesMessage, { count: checkedNotes.length }))
+            // Linked notes (external .md) are only unlinked: their files stay.
+            + (checkedNotes.some((n) => n.linked)
+              ? `\n\n${tf(t.linked.unlinkNotes, { count: checkedNotes.filter((n) => n.linked).length })}`
+              : '')
           }
           confirmLabel={t.common.delete}
           danger

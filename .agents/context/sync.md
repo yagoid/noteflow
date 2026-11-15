@@ -315,6 +315,14 @@ Dónde se aplica la exclusión (sin journal, sin request, `onComplete` inmediato
   cuanto la edita, y el agente puede usarla para responder "¿cómo hago…?"). Con la IA desactivada por
   defecto, en la primera ejecución no se indexa nada.
 
+> **Notas vinculadas ≠ solo-locales.** Una nota vinculada (un `.md` externo editado en su sitio, ver
+> `patterns.md` § "Notas vinculadas") tampoco se sincroniza nunca, pero por otra vía: **no está en el dir de
+> notas** (archivo del usuario + registro en `userData/linked-notes.json`), así que ningún camino de sync,
+> export, import, CLI ni el watcher del dir de notas la ve, sin flags ni filtros (su grupo/carpeta también
+> van en el registro local). Ni siquiera su **id** sale: `note-order:set` quita los ids `lnk:…` de
+> `note-order.json` y guarda su posición en el orden local del registro (`note-order:get` lo recombina), y
+> los que una build previa llegara a escribir se limpian del fichero al leerlo.
+
 ### GitHub Sync (`electron/githubSync.ts`)
 - **Auth:** Device Flow OAuth — sin client secret; el usuario autoriza en
   `github.com/login/device`. Client ID `Ov23liut9QOJ2pJFF0KR` (público por diseño).

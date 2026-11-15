@@ -76,6 +76,9 @@ export function EditorToolbar({ editor }: ToolbarProps) {
 
   // Inside a top-level task list the kanban button converts it (as the `/` menu does).
   const inTaskList = topLevelTaskList(editor) !== null
+  // A linked note's plain-Markdown schema (editorExtensions.ts) has no underline,
+  // highlight nor kanban board: their buttons go with them.
+  const { marks, nodes } = editor.schema
 
   // 'snippets' = the split button of the snippets (its own component: dropdown + modal).
   const buttons: (ToolbarButton | 'sep' | 'snippets')[] = [
@@ -110,24 +113,24 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       isActive: editor.isActive('italic'),
       title: t.editor.toolbar.italic,
     },
-    {
+    ...(marks.underline ? [{
       icon: <Underline size={14} />,
       action: () => editor.chain().focus().toggleUnderline().run(),
       isActive: editor.isActive('underline'),
       title: t.editor.toolbar.underline,
-    },
+    }] : []),
     {
       icon: <Strikethrough size={14} />,
       action: () => editor.chain().focus().toggleStrike().run(),
       isActive: editor.isActive('strike'),
       title: t.editor.toolbar.strikethrough,
     },
-    {
+    ...(marks.highlight ? [{
       icon: <Highlighter size={14} />,
       action: () => editor.chain().focus().toggleHighlight().run(),
       isActive: editor.isActive('highlight'),
       title: t.editor.toolbar.highlight,
-    },
+    }] : []),
     {
       icon: <Code size={14} />,
       action: () => editor.chain().focus().toggleCode().run(),
@@ -188,14 +191,14 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       isActive: editor.isActive('table'),
       title: editor.isActive('table') ? t.editor.toolbar.deleteTable : t.editor.toolbar.insertTable,
     },
-    {
+    ...(nodes.kanbanBoard ? [{
       icon: <SquareKanban size={14} />,
       action: () => {
         if (inTaskList) convertTaskListToBoard(editor, kanbanDefaultColumns(t))
         else insertDefaultBoard(editor, kanbanDefaultColumns(t))
       },
       title: inTaskList ? t.editor.slash.convertToKanban : t.editor.toolbar.insertKanban,
-    },
+    }] : []),
     'snippets',
     'sep',
     {
