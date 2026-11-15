@@ -1519,7 +1519,8 @@ Settings → Startup:
   secciones plegado del sidebar, el sidebar flotante (`Ctrl+'`, minimapa + peek de grupo colapsado),
   los fragmentos del botón del sello y "And much more"
   (rejilla: notas cifradas, plantillas, temas y acentos, tareas con alarma, vista dividida
-  `Ctrl+Click`, CLI, importar de Notion y Keep). Los clips pueden estar grabados por idioma de la UI.
+  `Ctrl+Click`, CLI, importar de Notion y Keep; cada chip se pulsa y despliega 1–2 frases de qué
+  hace y dónde se encuentra, uno abierto a la vez). Los clips pueden estar grabados por idioma de la UI.
 - **Navegación:** Atrás / Siguiente, puntos de progreso clicables (el activo se estira), contador
   "3 / 13", `←`/`→`, `Enter` (siguiente), `Esc` (cerrar) y **Skip** discreto. La última diapositiva
   termina con **"Start writing"**. Transiciones direccionales con reveal escalonado; con

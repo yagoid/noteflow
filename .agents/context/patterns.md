@@ -2031,7 +2031,14 @@ diapositivas que este dispositivo no ha visto. Piezas:
   emite cada clip a `dist/assets/` y lo referencia con `new URL(…, import.meta.url)` (vale bajo
   `file://`); la CSP de `index.html` tiene `media-src 'self' data:` (los <4 KB se inlinean como
   `data:`). En `more`, sin clip se pinta la rejilla de chips dentro del marco; con clip, la rejilla
-  pasa en lista a la columna de texto. Los clips los graba `scripts/whats-new-capture.cjs` desde la
+  pasa en lista a la columna de texto. Cada chip (`ExtrasGrid`, `SlideVisual.tsx`) es un `<button>`
+  desplegable (`aria-expanded` + `aria-controls`) en **acordeón exclusivo**: despliega 1–2 frases
+  (i18n `whatsNew.extrasInfo.<id>`, mismo `{split}` que la etiqueta; test en `whatsNew.test.ts`) en
+  un panel a todo el ancho bajo la rejilla (filas `0fr → 1fr`; con reduced motion solo fade) que se
+  mantiene a la vista dentro de lo que hace scroll (la columna de texto o la propia rejilla). El
+  estado vive en el componente: cambiar de diapositiva o cerrar el tour lo remonta plegado. Enter/
+  Espacio sobre un chip lo pulsan (el `keydown` del tour deja Enter a cualquier botón que no sea el
+  principal) y el Tab-trap los incluye. Los clips los graba `scripts/whats-new-capture.cjs` desde la
   app real (detalle en `release.md` § "Clips del tour What's new"). El de **`agents`** es el único
   que no abre en NoteFlow: un terminal falso con un agente de IA genérico (una página HTML en una
   ventana extra del Electron lanzado, sin nombre ni estética de ningún producto real) recibe una

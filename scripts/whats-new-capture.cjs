@@ -28,7 +28,7 @@
 //   - Windows open on screen while recording (occlusion detection is disabled so a covered window
 //     still paints). Do not use the mouse/keyboard on them meanwhile.
 //   - Capture = CDP Page.startScreencast (jpeg q92, every frame, timestamped) → ffmpeg concat with
-//     the real frame durations → 30 fps CFR, scaled to 960×600 (16:10), VP9 (crf 32), no audio,
+//     the real frame durations → 30 fps CFR, scaled to 960×600 (16:10), VP9 (crf 32, per clip), no audio,
 //     fade in/out so the loop restarts cleanly. Takes play back ~1.15–1.4× faster than real time.
 //     A fake cursor and keystroke pills are injected into the page ONLY during the capture
 //     (nothing in src/). "windows" records the main window and the sticky separately and composes
@@ -37,14 +37,15 @@
 //     it shows is SIMULATED — the script writes the exact files that command would write (with the
 //     CLI's own note.md serializer) into the temp notes dir, and the app picks them up through its
 //     notes-dir watcher. The real CLI never runs. "brain" dismisses the "Enable local AI" prompt as it
-//     mounts (no embeddings in the temp profile; section links still draw the graph) and cuts the
-//     hidden node-probing step out of the take. "more" is a montage with hard cuts.
+//     mounts (no embeddings in the temp profile), sets up OpenAI with a fake key ON SCREEN while
+//     main's fetch sends api.openai.com to the local mock, and fakes the chat's retrieved sources so
+//     the notes it "used" light up. "more" is a montage with hard cuts.
 //   Shared machinery (launch, overlay, actor, recorder, ffmpeg helpers) lives in lib/capture-kit.cjs
 //   and the demo notebook in lib/demo-notes.cjs (also used by demo-capture.cjs).
 //   Requires: playwright (devDependency) and ffmpeg in the PATH. The output is a set of real
 //   screenshots of the UI: re-record after visible UI changes and review the clips by eye.
 // ─────────────────────────────────────────────────────────────────────────────
-const HELP_LINES = 46
+const HELP_LINES = 47
 
 const fs = require('fs')
 const os = require('os')
@@ -52,7 +53,7 @@ const path = require('path')
 const {
   sleep, rand, startMockLlm, launchElectron, closeApp, injectOverlay, actor, startRecording, writeConcat, ffmpeg,
   probeDuration, sampleFrames, focusEditorEnd, focusLastTask, configureMockLlm, reloadMain,
-  probeBrainNode, makeMask, makeShadow, clipTime,
+  makeMask, makeShadow, clipTime,
 } = require('./lib/capture-kit.cjs')
 const { ID, demoContent, seedNotes } = require('./lib/demo-notes.cjs')
 
@@ -95,11 +96,11 @@ function seedProfile(profileDir, lang, extra = {}) {
   fs.writeFileSync(path.join(profileDir, 'settings.json'), JSON.stringify(settings, null, 2))
 }
 
-async function launchApp(opts, lang, { settings = {}, uiState = {}, extraSections = {}, tweak = null, files = {}, size = { width: 960, height: 600 } } = {}) {
+async function launchApp(opts, lang, { settings = {}, uiState = {}, extraSections = {}, tweak = null, files = {}, size = { width: 960, height: 600 }, full = false } = {}) {
   const ctx = await launchElectron({
     appDir: opts.app, scale: opts.scale, size, tmpPrefix: 'nf-whatsnew-',
     seed: ({ notes, profile }) => {
-      seedNotes(notes, lang, extraSections, tweak)
+      seedNotes(notes, lang, extraSections, tweak, { full })
       for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(notes, name), content)
       seedProfile(profile, lang, { settings, uiState })
     },
@@ -121,17 +122,18 @@ function cropFilter(crop, cssW, cssH, pxW, pxH) {
 }
 
 // Encodes a concat list (or a ready filter graph input) into the final webm + poster.
-function encodeClip({ listPath, frameW, frameH }, crop, outBase, { posterAt, fadeIn = 0.25, fadeOut = 0.45, cssW, cssH } = {}) {
+function encodeClip({ listPath, frameW, frameH }, crop, outBase, { posterAt, fadeIn = 0.25, fadeOut = 0.45, cssW, cssH, crf } = {}) {
   const tmp = outBase + '.tmp.mkv'
   const vf = [cropFilter(crop, cssW, cssH, frameW, frameH), 'fps=30', 'format=yuv420p'].join(',')
   ffmpeg(['-f', 'concat', '-safe', '0', '-i', listPath, '-vf', vf, '-c:v', 'ffv1', '-an', tmp])
-  finishClip(tmp, outBase, { posterAt, fadeIn, fadeOut })
+  finishClip(tmp, outBase, { posterAt, fadeIn, fadeOut, crf })
 }
 
-function finishClip(srcLossless, outBase, { posterAt, fadeIn = 0.25, fadeOut = 0.45 } = {}) {
+// crf: VP9 quality (default 32); a busy clip (the brain's wireframe) raises it to stay in budget.
+function finishClip(srcLossless, outBase, { posterAt, fadeIn = 0.25, fadeOut = 0.45, crf = 32 } = {}) {
   const dur = probeDuration(srcLossless)
   const fades = [fadeIn ? `fade=t=in:st=0:d=${fadeIn}` : null, fadeOut ? `fade=t=out:st=${(dur - fadeOut).toFixed(3)}:d=${fadeOut}` : null].filter(Boolean).join(',') || 'null'
-  ffmpeg(['-i', srcLossless, '-vf', `${fades},format=yuv420p`, '-c:v', 'libvpx-vp9', '-crf', '32', '-b:v', '0', '-row-mt', '1',
+  ffmpeg(['-i', srcLossless, '-vf', `${fades},format=yuv420p`, '-c:v', 'libvpx-vp9', '-crf', String(crf), '-b:v', '0', '-row-mt', '1',
     '-deadline', 'good', '-cpu-used', '1', '-pix_fmt', 'yuv420p', '-an', outBase + '.webm'])
   // Default poster: the settled end state, just before the fade-out starts.
   const at = posterAt != null ? Math.min(posterAt, dur - 0.1) : Math.max(0, dur - fadeOut - 0.08)
@@ -145,7 +147,8 @@ function finishClip(srcLossless, outBase, { posterAt, fadeIn = 0.25, fadeOut = 0
 // ── Per-language strings: demo text typed in the takes + UI labels used as selectors ──
 const TEXT = {
   en: {
-    newSection: 'Checklist', secItems: ['Book the venue', 'Send invites'],
+    // "sections": two sections added with the + of the tab bar (name, then its lines).
+    newSections: [{ name: 'Checklist', lines: ['- Book the venue', 'Send invites'] }, { name: 'Ideas', lines: ['Rooftop dinner after the talks'] }],
     sprint: '## Sprint 14\n\nGoal: ship **wave 1** to the design partners.',
     cards: ['Record the demo video', 'Write the release notes'],
     syncWith: 'Sync with ', linkQuery: 'endp', paletteQuery: 'lisb',
@@ -160,6 +163,7 @@ const TEXT = {
     journalLine: 'Long run by the river, then wrote the launch FAQ.',
     template: { name: 'Weekly 1:1', sections: [['Agenda', '- Wins since last week\n- Blockers\n- Career'], ['Notes', ''], ['Action items', '- [ ] ']] },
     question: 'Summarize the launch plan',
+    apiKey: 'sk-proj-7Hq2xV9m',
     answer: 'The **Q4 launch** ships in three waves, two weeks apart:\n\n1. **Wave 1** — private beta with 50 design partners\n2. **Wave 2** — waitlist + pricing page go live\n3. **Wave 3** — public launch with the press kit\n\nLock down the API *Endpoints* and the design-system *Components* first.',
     // "agents": the fake agent terminal (its CLI output stays in English, like the real CLI).
     agent: {
@@ -174,12 +178,13 @@ const TEXT = {
       enableAi: 'Enable local AI', cancel: 'Cancel', addCard: 'Add card', done: 'Done', expiry: 'Change when this note is deleted',
       hours8: 'Delete in 8 hours from now', connectGh: 'Connect with GitHub',
       sectionOptions: 'Section options', encrypt: 'Encrypt note', templates: 'Templates', newNote: 'New note', appearance: 'Appearance',
-      sidebarSections: 'Sections in the sidebar', sectionsMap: 'Folded map', sectionsRow: 'Scroll row',
+      moreOptions: 'More options', sectionsAsRow: 'As row', newTempNote: 'New temporary note (24h)', addSection: 'Add section (Ctrl+T)',
+      yourKey: 'Your API key', chatTab: 'Chat', save: 'Save',
       insertSnippet: 'Insert snippet: ', chooseSnippet: 'Choose a snippet',
     },
   },
   es: {
-    newSection: 'Pendientes', secItems: ['Reservar sala', 'Enviar invitaciones'],
+    newSections: [{ name: 'Pendientes', lines: ['- Reservar sala', 'Enviar invitaciones'] }, { name: 'Ideas', lines: ['Cena en la azotea después de las charlas'] }],
     sprint: '## Sprint 14\n\nObjetivo: entregar la **oleada 1** a los clientes piloto.',
     cards: ['Grabar el vídeo de demo', 'Escribir las notas de versión'],
     syncWith: 'Coordinar con ', linkQuery: 'endp', paletteQuery: 'lisb',
@@ -194,6 +199,7 @@ const TEXT = {
     journalLine: 'Carrera larga junto al río y después la FAQ del lanzamiento.',
     template: { name: '1:1 semanal', sections: [['Agenda', '- Logros desde la última semana\n- Bloqueos\n- Carrera'], ['Notas', ''], ['Acciones', '- [ ] ']] },
     question: 'Resume el plan de lanzamiento',
+    apiKey: 'sk-proj-7Hq2xV9m',
     answer: 'El **lanzamiento del Q4** sale en tres oleadas, cada dos semanas:\n\n1. **Oleada 1** — beta privada con 50 clientes piloto\n2. **Oleada 2** — lista de espera + página de precios\n3. **Oleada 3** — lanzamiento público con kit de prensa\n\nCierra primero los *Endpoints* de la API y los *Componentes* del sistema de diseño.',
     agent: {
       window: 'Agente IA — ~/proyectos', thinking: 'Pensando…', noteQuery: 'lanzamiento',
@@ -207,7 +213,8 @@ const TEXT = {
       enableAi: 'Activar la IA local', cancel: 'Cancelar', addCard: 'Añadir tarjeta', done: 'Hecho', expiry: 'Cambiar cuándo se elimina esta nota',
       hours8: 'Eliminar dentro de 8 horas', connectGh: 'Conectar con GitHub',
       sectionOptions: 'Opciones de sección', encrypt: 'Cifrar nota', templates: 'Plantillas', newNote: 'Nueva nota', appearance: 'Apariencia',
-      sidebarSections: 'Secciones en la barra lateral', sectionsMap: 'Mapa plegado', sectionsRow: 'Fila con scroll',
+      moreOptions: 'Más opciones', sectionsAsRow: 'En fila', newTempNote: 'Nueva nota temporal (24h)', addSection: 'Añadir sección (Ctrl+T)',
+      yourKey: 'Tu clave API', chatTab: 'Chat', save: 'Guardar',
       insertSnippet: 'Insertar fragmento: ', chooseSnippet: 'Elegir un fragmento',
     },
   },
@@ -229,31 +236,75 @@ AGENTS.appFrom = { x: AGENTS.appTo.x + 150, y: AGENTS.appTo.y + 24 }
 // Takes are played back a bit faster than real time: snappier loops, typing still looks human.
 const DEFAULT_SPEED = 1.15
 
+// "sections": a note exactly as the app creates it (createEmptyNote): today's date as its title
+// and a single empty section named "Note" (defaultSections, not localized).
+const FRESH_NOTE = { id: 'nfresh01', sectionId: 'snote1' }
+function freshNote() {
+  const d = new Date()
+  const title = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+  return { id: FRESH_NOTE.id, title, daysAgo: 0, sections: [{ id: FRESH_NOTE.sectionId, name: 'Note', content: '' }] }
+}
+
+// "brain": the notes the chat "used" for its answer (lit up in the brain, see fakeChatSources).
+const BRAIN_SOURCES = [ID.launch, ID.api, ID.design, ID.okrs]
+
+// "brain": the provider is set up on screen (OpenAI + a fake key) while the main process sends
+// every OpenAI request to the local mock — nothing leaves the machine. Patched in main's global
+// fetch, which the OpenAI-compatible client uses.
+async function routeOpenAiToMock(app, port) {
+  await app.evaluate((_, mock) => {
+    const orig = globalThis.fetch
+    globalThis.fetch = (url, init) => orig(String(url).replace(/^https:\/\/api\.openai\.com\/v1/, mock), init)
+  }, `http://127.0.0.1:${port}/v1`)
+}
+
+// No local AI index in the throwaway profile, so the chat retrieves no sources: as the first
+// streamed delta of each answer reaches the renderer, send it the notes it "used" (the same
+// ai:chat-sources event main sends after retrieval) so they light up in the brain.
+async function fakeChatSources(app, sources) {
+  await app.evaluate(({ BrowserWindow }, sources) => {
+    const proto = Object.getPrototypeOf(BrowserWindow.getAllWindows()[0].webContents)
+    const send = proto.send
+    const seen = new Set()
+    proto.send = function (channel, payload, ...rest) {
+      if (channel === 'ai:chat-delta' && payload && !seen.has(payload.requestId)) {
+        seen.add(payload.requestId)
+        send.call(this, 'ai:chat-sources', { requestId: payload.requestId, sources })
+      }
+      return send.call(this, channel, payload, ...rest)
+    }
+  }, sources)
+}
+
 // Each clip: { launch: launchApp options (or T => options), run(ctx, actor, T) → { rec, cuts?, posterAt? } }
 const CLIPS = {
-  // Ctrl+T → name the tab → write → Ctrl+Tab through the sections.
+  // A brand-new note with only its default "Note" section: the + of the tab bar adds a section
+  // (name it → write in it), then a second one the same way.
   sections: {
-    launch: { size: { width: 800, height: 500 }, uiState: { activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'floating' } },
+    launch: {
+      size: { width: 800, height: 500 },
+      uiState: { activeNoteId: FRESH_NOTE.id, activeSectionId: FRESH_NOTE.sectionId, sidebarMode: 'floating' },
+      tweak: (content) => { content.notes.push(freshNote()) },
+    },
     async run({ page }, a, T) {
-      await a.show(560, 330)
+      await a.show(520, 330)
       const rec = await startRecording(page)
-      await sleep(250)
-      await a.keys('Control+T')
-      await sleep(420)
-      await a.type(T.newSection, { min: 35, max: 75 })
-      await sleep(180)
-      await a.press('Enter')
-      await sleep(250)
-      await page.keyboard.type('- ')
-      await a.type(T.secItems[0], { min: 25, max: 55 })
-      await page.keyboard.press('Enter')
-      await a.type(T.secItems[1], { min: 25, max: 55 })
-      await sleep(350)
-      const posterTs = Date.now() / 1000
-      await sleep(300)
-      for (let i = 0; i < 2; i++) { await a.keys('Control+Tab', null, 650); await sleep(700) }
-      await sleep(250)
-      return { rec: await rec.stop(), posterTs }
+      await sleep(550)
+      for (const sec of T.newSections) {
+        await a.click(page.locator('.section-map-add').first(), { after: 450 })
+        await a.type(sec.name, { min: 35, max: 75 })
+        await sleep(200)
+        await a.press('Enter')
+        await sleep(300)
+        await a.move(520, 330, 500)
+        for (const [i, line] of sec.lines.entries()) {
+          if (i) await page.keyboard.press('Enter')
+          await a.type(line, { min: 25, max: 55 })
+        }
+        await sleep(650)
+      }
+      await sleep(700)
+      return { rec: await rec.stop() }
     },
   },
 
@@ -321,15 +372,14 @@ const CLIPS = {
     },
   },
 
-  // Ctrl+Shift+N → temporary note → a quick line → change when it is deleted.
+  // The sidebar's "New temporary note" button → a quick line → change when it is deleted.
   'quick-capture': {
-    launch: { size: { width: 800, height: 500 }, uiState: { activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'floating' } },
+    launch: { size: { width: 900, height: 563 }, uiState: { activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'pinned', collapsedFolderIds: [ID.fProduct] } },
     async run({ page }, a, T) {
-      await a.show(600, 420)
+      await a.show(520, 330)
       const rec = await startRecording(page)
-      await sleep(250)
-      await a.keys('Control+Shift+N')
-      await sleep(550)
+      await sleep(350)
+      await a.click(page.locator(`button[aria-label="${T.ui.newTempNote}"]`).first(), { after: 600 })
       // The new note's editor autofocuses as it mounts; make sure the caret is in the body
       // (not the title) before typing, whatever the mount timing was.
       await page.waitForFunction(() => {
@@ -342,8 +392,8 @@ const CLIPS = {
       await a.click(page.locator(`button[aria-label="${T.ui.expiry}"]`).first())
       await sleep(400)
       await a.click(page.locator(`button[aria-label="${T.ui.hours8}"]`).first(), { after: 300 })
-      await a.move(560, 330, 500)
-      await sleep(750)
+      await a.move(620, 360, 500)
+      await sleep(900)
       return { rec: await rec.stop() }
     },
   },
@@ -388,16 +438,22 @@ const CLIPS = {
     },
   },
 
-  // Brain view: open it, orbit, hover a note so its links light up, click → preview.
+  // Brain view (the fuller notebook): open it and orbit it; then, in its AI panel, set up a
+  // provider (your own API key → OpenAI + a fake key) and ask — the answer streams in while the
+  // notes it used light up in the brain. Talks to the local mock (routeOpenAiToMock).
   brain: {
-    speed: 1.2,
-    launch: { size: { width: 1040, height: 650 }, uiState: { activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'floating' } },
-    llm: true,
+    speed: 1.3,
+    crf: 43,
+    launch: { size: { width: 1040, height: 650 }, full: true, uiState: { activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'floating' } },
+    llm: 'byo',
     async run(ctx, a, T) {
-      const { page } = ctx
-      await page.evaluate(() => localStorage.setItem('noteflow:brain-split-width', '34'))
-      await reloadMain(ctx)
-      await injectOverlay(page)
+      const { app, page, lang } = ctx
+      await routeOpenAiToMock(app, ctx.llmPort)
+      const notes = demoContent(lang, { full: true }).notes
+      await fakeChatSources(app, BRAIN_SOURCES.map((id) => {
+        const n = notes.find((x) => x.id === id)
+        return { noteId: id, sectionId: n.sections[0].id, title: n.title }
+      }))
       // The "Enable local AI" prompt (no embeddings in this throwaway profile) is dismissed
       // the instant it mounts — the clip shows the brain as it looks once AI is set up.
       await page.evaluate(([title, cancel]) => {
@@ -410,34 +466,48 @@ const CLIPS = {
         })
         mo.observe(document.body, { childList: true, subtree: true })
       }, [T.ui.enableAi, T.ui.cancel])
-      await a.show(560, 320)
+      await a.show(620, 320)
       const rec = await startRecording(page)
       await sleep(250)
-      await a.click(page.locator(`button[title="${T.ui.openBrain}"]`).first(), { after: 1100 })
+      await a.click(page.locator(`button[title="${T.ui.openBrain}"]`).first(), { after: 1300 })
       const cb = await page.evaluate(() => {
         const c = [...document.querySelectorAll('canvas')].sort((x, y) => y.width - x.width)[0]
         const r = c.getBoundingClientRect()
         return { x: r.x, y: r.y, w: r.width, h: r.height }
       })
       const cx = cb.x + cb.w * 0.5, cy = cb.y + cb.h * 0.45
-      await a.move(cx + 40, cy + 30, 450)
-      await page.mouse.wheel(0, -260)
+      // A small turn only: the brain reads best from the side.
+      await a.dragFrom(cx - 30, cy + 20, cx + 30, cy + 26, { ms: 800, after: 450 })
+      // Provider: your own API key → OpenAI → paste the key → Save.
+      await a.click(page.getByText(T.ui.yourKey, { exact: true }).first(), { after: 450 })
+      const select = page.locator('select').last()
+      await a.moveTo(select, { fx: 0.4 })
+      await sleep(140)
+      await page.evaluate(() => window.__nfo.pulse())
+      await select.selectOption('openai')
       await sleep(450)
-      await a.dragFrom(cx + 40, cy + 30, cx + 170, cy + 60, { ms: 900, after: 150 })
-      // Hidden step (cut from the clip): find a note node under the pointer.
-      const cutStart = Date.now() / 1000
-      const hit = await probeBrainNode(page, cb)
-      await page.mouse.move(cx + 170, cy + 60)
-      await sleep(350)
-      const cutEnd = Date.now() / 1000
-      if (hit) {
-        await a.move(hit.x, hit.y, 650)
-        await sleep(750)
-        await a.clickAt(hit.x, hit.y, { ms: 120, after: 1400 })
-      } else {
-        await sleep(1500)
-      }
-      return { rec: await rec.stop(), cuts: [[cutStart, cutEnd]] }
+      // The key field sits below the panel's fold once Base URL shows up: scroll it into view.
+      const keyInput = page.locator('input[type="password"]').first()
+      await keyInput.evaluate((el) => el.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+      await sleep(650)
+      await a.click(keyInput, { fx: 0.3, after: 150 })
+      await a.type(T.apiKey, { min: 14, max: 30 })
+      await sleep(200)
+      await a.click(page.getByRole('button', { name: T.ui.save, exact: true }).first(), { after: 900 })
+      // Ask (the tabs scrolled up with the panel: bring them back first).
+      const chatTab = page.getByRole('button', { name: T.ui.chatTab, exact: true }).first()
+      await chatTab.evaluate((el) => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }))
+      await sleep(600)
+      await a.click(chatTab, { after: 450 })
+      await a.click(page.locator('textarea').last(), { fx: 0.3, after: 120 })
+      await a.type(T.question, { min: 22, max: 48 })
+      await sleep(180)
+      await a.press('Enter', '↵')
+      const tail = T.answer.replace(/[*_`#]/g, '').slice(-14)
+      await page.waitForFunction((tail) => document.body.innerText.includes(tail), tail, { timeout: 20000 }).catch(() => {})
+      await a.move(cx + 60, cy + 120, 800)
+      await sleep(1600)
+      return { rec: await rec.stop() }
     },
   },
 
@@ -627,7 +697,8 @@ const CLIPS = {
   },
 
   // Rest on the folded line under a note → its section map unfolds → click a cell → the note
-  // opens there (its map stays open in the row); then Settings → Appearance, the two styles.
+  // opens there (its map stays open in the row); then the sidebar's ⋯ menu switches the style
+  // to "As row" for real, and every note shows its sections.
   'section-map': {
     speed: 1.2,
     launch: (T) => ({
@@ -638,7 +709,6 @@ const CLIPS = {
       extraSections: { [ID.hiring]: T.hiringExtra.map(([name, content], i) => ({ id: `shirx${i}`, name, content })) },
     }),
     async run({ page, lang }, a, T) {
-      const now = () => Date.now() / 1000
       const { S } = demoContent(lang)
       await a.show(620, 330)
       const rec = await startRecording(page)
@@ -651,27 +721,15 @@ const CLIPS = {
       await sleep(300)
       await a.click(page.locator('.nsm-peek .nsm-cell', { hasText: S.loop }).first(), { after: 900 })
       await a.move(620, 300, 700)
-      await sleep(500)
-      const posterTs = now()
-      await sleep(400)
-      // Settings → Appearance → "Sections in the sidebar" (opening it is cut).
-      const c0 = now()
-      await page.locator(`button[title="${T.ui.settings}"]`).first().click()
-      await page.getByText(T.ui.appearance, { exact: true }).first().click()
-      await sleep(300)
-      await page.getByText(T.ui.sidebarSections, { exact: true }).first().evaluate((el) => el.scrollIntoView({ block: 'center' }))
-      await sleep(350)
-      const row = page.locator('button', { hasText: T.ui.sectionsRow }).first()
-      const rb = await row.boundingBox()
-      await a.show(rb.x + rb.width / 2, rb.y + rb.height + 70)
-      await sleep(80)
-      const cuts = [[c0, now()]]
-      await sleep(250)
-      await a.moveTo(row, { ms: 600 })
-      await sleep(700)
-      await a.moveTo(page.locator('button', { hasText: T.ui.sectionsMap }).first(), { ms: 600 })
       await sleep(900)
-      return { rec: await rec.stop(), cuts, posterTs }
+      // The ⋯ menu at the bottom of the sidebar → Sections → As row: every note shows its row.
+      await a.click(page.locator(`button[aria-label="${T.ui.moreOptions}"]`).last(), { after: 550 })
+      await a.click(page.locator('[role="menu"] [role="menuitemradio"]', { hasText: T.ui.sectionsAsRow }).first(), { after: 900 })
+      await a.move(150, 250, 900)
+      await sleep(500)
+      await a.move(170, 330, 700)
+      await sleep(1100)
+      return { rec: await rec.stop() }
     },
   },
 
@@ -990,7 +1048,9 @@ async function recordClip(opts, id, lang, work) {
   const ctx = await launchApp(opts, lang, launchOpts)
   let result
   try {
-    if (server) await configureMockLlm(ctx, server.address().port)
+    // llm: 'byo' = the take sets the provider up on screen; the mock only answers.
+    if (server) ctx.llmPort = server.address().port
+    if (server && clip.llm !== 'byo') await configureMockLlm(ctx, ctx.llmPort)
     await injectOverlay(ctx.page)
     result = await clip.run(ctx, actor(ctx.page), T)
   } finally {
@@ -1007,10 +1067,10 @@ async function recordClip(opts, id, lang, work) {
     if (clip.composite) {
       const encode = clip.composite === 'agents' ? encodeAgents : encodeWindows
       const tmp = encode({ ...result, speed }, clipWork, outBase, opts.scale)
-      finishClip(tmp, outBase, { posterAt: result.posterAt })
+      finishClip(tmp, outBase, { posterAt: result.posterAt, crf: clip.crf })
     } else {
       const list = writeConcat(result.rec, clipWork, { cuts: result.cuts || [], speed })
-      encodeClip(list, result.crop || null, outBase, { posterAt: result.posterAt, cssW: ctx.size.width, cssH: ctx.size.height })
+      encodeClip(list, result.crop || null, outBase, { posterAt: result.posterAt, cssW: ctx.size.width, cssH: ctx.size.height, crf: clip.crf })
     }
   } finally {
     fs.rmSync(outBase + '.tmp.mkv', { force: true })

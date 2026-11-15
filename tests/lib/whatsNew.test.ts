@@ -157,6 +157,18 @@ describe('the deck (whatsNewSlides.ts)', () => {
     expect(sanitizeSeenIds(WHATS_NEW_SLIDES.map((s) => s.id))).toHaveLength(WHATS_NEW_SLIDES.length)
   })
 
+  it('every "And much more" chip has its unfold text, with only the {split} placeholder', () => {
+    const extras = WHATS_NEW_SLIDES.flatMap((s) => s.extras ?? [])
+    expect(extras.length).toBeGreaterThan(0)
+    for (const extra of extras) {
+      for (const dict of [en, es]) {
+        const info = dict.whatsNew.extrasInfo[extra.id]
+        expect(info.trim(), extra.id).not.toBe('')
+        for (const m of info.matchAll(/\{(\w+)\}/g)) expect(m[1], `${extra.id}: {${m[1]}}`).toBe('split')
+      }
+    }
+  })
+
   it('every {placeholder} of a slide body is one of its shortcut ids', () => {
     for (const slide of WHATS_NEW_SLIDES) {
       const keyIds = new Set(slide.keys.map((k) => k.id))

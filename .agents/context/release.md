@@ -266,6 +266,8 @@ node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|a
 
 - Requiere `playwright` (devDependency) y `ffmpeg` en el PATH. Abre ventanas reales en pantalla
   (~30 s por clip): no usar ratón/teclado sobre ellas mientras graba.
+- En Windows la kit apunta `USERPROFILE` a una carpeta `alex` del dir temporal: el pie del sidebar
+  (nombre de la carpeta home) sale como "alex" y nunca con el usuario real del sistema.
 - Perfil (`--user-data-dir`) y dir de notas (`NOTEFLOW_NOTES_DIR`) **siempre temporales**, con
   `NOTEFLOW_DISABLE_WHATS_NEW=1` y `whatsNewSeen` sembrado para que el tour no tape la toma. Las notas
   demo se siembran **escribiendo carpetas v2 directamente — nunca con el CLI**: `NOTEFLOW_NOTES_DIR`
@@ -274,8 +276,17 @@ node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|a
 - Captura por CDP `Page.startScreencast` a DPR 1.5 (no `recordVideo`, que sale borroso) → 960×600
   VP9; el cursor falso y las pastillas de teclas se inyectan solo en la página durante la toma.
   Revisar los clips a ojo (`--frames <dir>` guarda los frames y 4 PNG de muestra por clip).
-- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~7,9 MB con los pósters, 13 clips × 2
-  idiomas: **en el tope**; antes de añadir otro clip, recortar duración/`crf` o los pósters).
+- Tomas que cambiaron en noviembre de 2026: `sections` empieza en una nota recién creada (solo su
+  sección "Note") y crea dos secciones con el **+** de la barra de pestañas; `brain` usa el cuaderno
+  **completo**, gira un poco el cerebro, configura un proveedor **en pantalla** (Tu clave API → OpenAI +
+  clave falsa) y pregunta — el `fetch` global de main se parchea para mandar `api.openai.com/v1` al
+  mock local (`routeOpenAiToMock`) y, como no hay índice de IA local, `fakeChatSources` reenvía un
+  `ai:chat-sources` con cuatro notas al llegar el primer delta para que se iluminen en el cerebro
+  (opción de clip `llm: 'byo'`: arranca el mock sin configurarlo); `quick-capture` pulsa el botón del
+  temporizador del sidebar (anclado) en vez del atajo; `section-map` cambia el estilo a "En fila"
+  desde el menú ⋯ del pie del sidebar. `crf` por clip (`brain` usa 43 para caber en presupuesto).
+- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~8,7 MB con los pósters — el `brain` del cuaderno completo pesa más —, 13 clips × 2
+  idiomas: **ya por encima del tope**; antes de añadir otro clip, recortar duración/`crf` o los pósters).
 - Composiciones sobre un "escritorio" (fondo degradado + ventanas con esquinas redondeadas y sombra,
   cada superficie grabada por separado con sus tiempos reales): `windows` (ventana principal +
   sticky, `encodeWindows`) y `agents` (`encodeAgents`: un terminal falso con un agente de IA genérico

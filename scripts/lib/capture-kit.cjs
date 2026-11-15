@@ -71,6 +71,14 @@ function startMockLlm(getAnswer) {
 function launchEnv(notes) {
   const env = { ...process.env, NOTEFLOW_NATIVE: '1', NOTEFLOW_NOTES_DIR: notes, NOTEFLOW_DISABLE_WHATS_NEW: '1' }
   delete env.ELECTRON_RUN_AS_NODE
+  // The sidebar footer shows the basename of the home folder (os.homedir()): point it at a demo
+  // "alex" folder in the throwaway dir so public clips never show the real system user name.
+  // Windows only (os.homedir() = USERPROFILE there); elsewhere HOME also moves caches and config.
+  if (process.platform === 'win32') {
+    const home = path.join(path.dirname(notes), 'home', 'alex')
+    fs.mkdirSync(home, { recursive: true })
+    env.USERPROFILE = home
+  }
   return env
 }
 

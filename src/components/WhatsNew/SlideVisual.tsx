@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { keyLabel } from '../../lib/platform'
 import { tf, type Messages } from '../../i18n'
 import { SPLIT_VIEW_COMBO, accentVars, comboText, type SlideExtra, type WhatsNewSlide } from './whatsNewSlides'
@@ -77,28 +78,87 @@ export function SlideFallback({ slide, thumb = false }: { slide: WhatsNewSlide; 
   )
 }
 
-/** Chip grid of the "And much more" slide. `list` = compact column next to a clip. */
-export function ExtrasGrid({ extras, t, list = false }: { extras: SlideExtra[]; t: Messages; list?: boolean }) {
-  return (
-    <div className={`wn-extras${list ? ' is-list' : ''}`}>
-      {extras.map((extra, i) => {
-        const Icon = extra.icon
-        return (
-          <div key={extra.id} className="wn-extra font-mono" style={{ '--i': i, ...accentVars(extra.accent, '--wn-x') } as CSSProperties}>
-            <span className="wn-extra-icon"><Icon size={14} /></span>
-            {/* Plain text inside a chip: "Split view (Ctrl+Click)". */}
-            <span>{tf(t.whatsNew.extras[extra.id], { split: comboText(SPLIT_VIEW_COMBO) })}</span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 // Read once per mount, like the other reduced-motion checks of the app
 // (Settings/ActivityPulse.tsx, Settings/PlanCardBackdrop.tsx).
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+// The `{split}` placeholder of the extras' label and info text.
+const EXTRAS_KEYS = { split: SPLIT_VIEW_COMBO }
+// Must cover the panel's unfold transition (.wn-extra-info).
+const EXTRA_INFO_MS = 240
+
+/**
+ * Chip grid of the "And much more" slide. `list` = compact column next to a clip.
+ * Each chip is a disclosure button: it unfolds a one- or two-line explanation in a
+ * panel under the grid (exclusive: opening one closes the other, clicking the open
+ * one closes it). The state lives here, so a slide change or closing the tour —
+ * both remount the slide — starts with everything folded.
+ */
+export function ExtrasGrid({ extras, t, list = false }: { extras: SlideExtra[]; t: Messages; list?: boolean }) {
+  const panelId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState<SlideExtra['id'] | null>(null)
+  // What the panel shows: the open chip, or the last one while the panel folds away.
+  const [shown, setShown] = useState<SlideExtra['id'] | null>(null)
+  if (open && open !== shown) setShown(open)
+  const shownExtra = extras.find((e) => e.id === shown)
+
+  // Once unfolded, keep the panel in view inside whatever scrolls it (the text
+  // column next to a clip, or the grid itself inside the frame). By hand, not
+  // scrollIntoView: that would also scroll the overflow-hidden boxes around it.
+  useEffect(() => {
+    if (!open) return
+    const timer = window.setTimeout(() => {
+      const panel = panelRef.current
+      const scroller = panel?.closest<HTMLElement>(list ? '.wn-text' : '.wn-extras')
+      if (!panel || !scroller) return
+      const overflow = panel.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom
+      if (overflow > 0) scroller.scrollBy({ top: overflow + 4, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+    }, EXTRA_INFO_MS)
+    return () => window.clearTimeout(timer)
+  }, [open, list])
+
+  return (
+    <div className={`wn-extras${list ? ' is-list' : ''}`}>
+      {extras.map((extra, i) => {
+        const Icon = extra.icon
+        const expanded = open === extra.id
+        return (
+          <button
+            key={extra.id}
+            type="button"
+            className="wn-extra font-mono"
+            style={{ '--i': i, ...accentVars(extra.accent, '--wn-x') } as CSSProperties}
+            aria-expanded={expanded}
+            aria-controls={panelId}
+            onClick={() => setOpen(expanded ? null : extra.id)}
+          >
+            <span className="wn-extra-icon"><Icon size={14} /></span>
+            {/* Plain text inside a chip: "Split view (Ctrl+Click)". */}
+            <span>{tf(t.whatsNew.extras[extra.id], { split: comboText(SPLIT_VIEW_COMBO) })}</span>
+            <ChevronDown size={12} className="wn-extra-chevron" aria-hidden />
+          </button>
+        )
+      })}
+      <div
+        ref={panelRef}
+        id={panelId}
+        className={`wn-extra-info${open ? ' is-open' : ''}`}
+        style={shownExtra ? accentVars(shownExtra.accent, '--wn-x') : undefined}
+        aria-hidden={!open || undefined}
+      >
+        <div className="wn-extra-info-clip">
+          {shownExtra && (
+            <p key={shownExtra.id} className="wn-extra-info-text font-mono">
+              <TextWithKeys template={t.whatsNew.extrasInfo[shownExtra.id]} keys={EXTRAS_KEYS} />
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 interface SlideClipProps {
   slide: WhatsNewSlide

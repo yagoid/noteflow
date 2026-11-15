@@ -25,7 +25,7 @@ export const whatsNew = {
   slides: {
     sections: {
       title: 'Notes that grow sideways',
-      body: 'Every note holds tabbed sections: one project, many pages. {newSection} adds one, {nextSection} jumps between them.',
+      body: 'Every note holds tabbed sections: one project, many pages. Click + in the tab bar (or {newSection}) to add one, name it and start writing; {nextSection} jumps between them.',
     },
     kanban: {
       title: 'A kanban board, right in your note',
@@ -37,7 +37,7 @@ export const whatsNew = {
     },
     'quick-capture': {
       title: 'Capture in a second',
-      body: '{showApp} brings NoteFlow up from anywhere. Need a scratchpad? {tempNote} creates a temporary note that deletes itself after 24 h.',
+      body: 'Need a scratchpad? The timer button in the sidebar ({tempNote}) opens a temporary note: jot it down and it deletes itself after 24 h. Change when from its date, or make it permanent. And {showApp} brings NoteFlow up from anywhere.',
     },
     windows: {
       title: 'Sticky notes and floating windows',
@@ -45,7 +45,7 @@ export const whatsNew = {
     },
     brain: {
       title: 'Meet the Brain',
-      body: 'Every note is a node; every link and related idea, a connection. Explore your knowledge as a living graph, computed on your device.',
+      body: 'Every note is a node and every link a connection, computed on your device. In its AI panel, pick a provider (your API key, a local model or NoteFlow AI) and ask: the notes it uses light up.',
     },
     ai: {
       title: 'AI that knows your notes',
@@ -61,7 +61,7 @@ export const whatsNew = {
     },
     'section-map': {
       title: 'Every section at a glance',
-      body: 'Under each note in the sidebar, a thin line maps its sections: rest the mouse on it to unfold them, click one to jump straight there. Prefer the always-visible row? Switch it in Settings → Appearance → Sections in the sidebar.',
+      body: 'Under each note in the sidebar, a thin line maps its sections: rest the mouse on it to unfold them, click one to jump straight there. Prefer the always-visible row? Switch it from the ⋯ menu at the bottom of the sidebar → Sections.',
     },
     'floating-sidebar': {
       title: 'A sidebar that gets out of the way',
@@ -86,6 +86,18 @@ export const whatsNew = {
     split: 'Split view ({split})',
     cli: 'CLI for your terminal & agents',
     import: 'Import from Notion & Keep',
+  },
+
+  // What each chip of `extras` unfolds when clicked: what it does and where to find
+  // it, in one or two short sentences. Same `{split}` placeholder as above.
+  extrasInfo: {
+    encrypted: "Open a note's ⋯ menu → Encrypt note and choose a password. Right-click it in the sidebar to unlock it or lock it again.",
+    templates: "Turn any note into a template from its ⋯ menu → Save as template. Start new notes from it in Settings → Templates.",
+    themes: 'Pick one of 14 light and dark themes in Settings → Appearance, and fine-tune the accent colour, font and editor colours there.',
+    alarms: "Hover a task and click its calendar icon to set a deadline and an alarm time. You'll get a system notification right on time.",
+    split: '{split} a note in the sidebar (or right-click it → Open alongside) to open it next to the current one.',
+    cli: 'The noteflow command that ships with the app reads and writes your notes from any terminal. AI agents such as Claude Code or Codex get its skill too (Settings → General → Expose CLI skill to AI agents).',
+    import: 'Go to Settings → Data → Import notes and choose Notion or Google Keep: it shows you how to export your notes from there.',
   },
 
   // Settings → Tutorial.

@@ -78,8 +78,8 @@ export const WHATS_NEW_SLIDES: WhatsNewSlide[] = [
   {
     id: 'quick-capture', since: '2.2.0', i18nKey: 'quick-capture', icon: Zap, accent: 'accent-3',
     keys: [
-      { id: 'showApp', combo: ['Ctrl', 'Shift', 'Space'] },
       { id: 'tempNote', combo: ['Ctrl', 'Shift', 'N'] },
+      { id: 'showApp', combo: ['Ctrl', 'Shift', 'Space'] },
     ],
   },
   {

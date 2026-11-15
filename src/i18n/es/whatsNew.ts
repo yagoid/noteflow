@@ -21,7 +21,7 @@ export const whatsNew: Messages['whatsNew'] = {
   slides: {
     sections: {
       title: 'Notas que crecen a lo ancho',
-      body: 'Cada nota guarda secciones en pestañas: un proyecto, muchas páginas. {newSection} crea una y {nextSection} salta entre ellas.',
+      body: 'Cada nota guarda secciones en pestañas: un proyecto, muchas páginas. Pulsa + en la barra de pestañas (o {newSection}) para crear una, ponle nombre y escribe; {nextSection} salta entre ellas.',
     },
     kanban: {
       title: 'Un kanban dentro de tu nota',
@@ -33,7 +33,7 @@ export const whatsNew: Messages['whatsNew'] = {
     },
     'quick-capture': {
       title: 'Captura en un segundo',
-      body: '{showApp} trae NoteFlow desde cualquier sitio. ¿Necesitas un borrador? {tempNote} crea una nota temporal que se borra sola en 24 h.',
+      body: '¿Necesitas un borrador? El botón del temporizador en el sidebar ({tempNote}) abre una nota temporal: apúntalo y se borra sola en 24 h. Cambia cuándo desde su fecha o hazla permanente. Y {showApp} trae NoteFlow desde cualquier sitio.',
     },
     windows: {
       title: 'Sticky notes y ventanas separadas',
@@ -41,7 +41,7 @@ export const whatsNew: Messages['whatsNew'] = {
     },
     brain: {
       title: 'Conoce el Cerebro',
-      body: 'Cada nota es un nodo; cada enlace e idea relacionada, una conexión. Explora tu conocimiento como un grafo vivo, calculado en tu equipo.',
+      body: 'Cada nota es un nodo y cada enlace una conexión, calculado en tu equipo. En su panel de IA elige un proveedor (tu clave API, un modelo local o NoteFlow AI) y pregunta: se iluminan las notas que usa.',
     },
     ai: {
       title: 'IA que conoce tus notas',
@@ -57,7 +57,7 @@ export const whatsNew: Messages['whatsNew'] = {
     },
     'section-map': {
       title: 'Todas tus secciones de un vistazo',
-      body: 'Bajo cada nota del sidebar, una línea fina dibuja sus secciones: deja el ratón encima para desplegarlas y haz clic en una para ir directo. ¿Prefieres la fila siempre visible? Cámbialo en Ajustes → Apariencia → Secciones en la barra lateral.',
+      body: 'Bajo cada nota del sidebar, una línea fina dibuja sus secciones: deja el ratón encima para desplegarlas y haz clic en una para ir directo. ¿Prefieres la fila siempre visible? Cámbialo en el menú ⋯ de abajo del sidebar → Secciones.',
     },
     'floating-sidebar': {
       title: 'Un sidebar que se aparta',
@@ -81,6 +81,16 @@ export const whatsNew: Messages['whatsNew'] = {
     split: 'Vista dividida ({split})',
     cli: 'CLI para tu terminal y agentes',
     import: 'Importar de Notion y Keep',
+  },
+
+  extrasInfo: {
+    encrypted: 'Abre el menú ⋯ de una nota → Cifrar nota y elige una contraseña. Con clic derecho sobre ella en el sidebar la desbloqueas o la vuelves a bloquear.',
+    templates: 'Convierte cualquier nota en plantilla desde su menú ⋯ → Guardar como plantilla. Crea notas nuevas a partir de ella en Ajustes → Plantillas.',
+    themes: 'Elige entre 14 temas claros y oscuros en Ajustes → Apariencia y ajusta ahí el color de acento, la fuente y los colores del editor.',
+    alarms: 'Pasa el ratón por una tarea y pulsa su icono de calendario para ponerle fecha límite y hora de alarma. Te avisará una notificación del sistema a su hora.',
+    split: '{split} sobre una nota del sidebar (o clic derecho → Abrir en paralelo) para abrirla junto a la actual.',
+    cli: 'El comando noteflow, que viene con la app, lee y escribe tus notas desde cualquier terminal. Agentes de IA como Claude Code o Codex reciben también su skill (Ajustes → General → Exponer la skill del CLI a los agentes de IA).',
+    import: 'Ve a Ajustes → Datos → Importar notas y elige Notion o Google Keep: te explica cómo exportar tus notas desde allí.',
   },
 
   settings: {
