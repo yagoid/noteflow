@@ -676,7 +676,24 @@ Pasos del operador:
    alternativa: pegar el fichero en el SQL Editor y registrar la versión con
    `supabase migration repair --status applied 0016`.
 
-2. **Redesplegar `delete-account`** (§ 9): desde este cambio borra también `file_versions` (justo
+2. **Aplicar la migración 0017** (`0017_cloud_file_versions_snapshot.sql`) — **captura antes de
+   restaurar.** Restaurar una versión es, para el servidor, una edición normal: por la ventana de
+   10 min, el contenido que el usuario tenía justo antes podría no quedar en el historial. La 0017
+   añade la RPC `public.cloud_snapshot_file(p_path_key)`, que el cliente llama antes de restaurar:
+   copia la fila viva actual del fichero (solo la del propio usuario) a `file_versions` con
+   `reason = 'manual'` y devuelve `true` (`false` si no existe o es un tombstone). Exige la misma
+   suscripción `cloud`/`bundle` activa que la subida (si no, 403) y toma el advisory lock por usuario
+   de la 0008. También añade `'manual'` al check de `reason`, un índice **único**
+   `(user_id, path_key, seq)` (sustituye al índice de lista de la 0016, que pasa a ser redundante) para
+   que el trigger y la RPC nunca guarden dos veces el mismo contenido, y saca la poda a la función
+   interna `public.file_versions_prune(...)`.
+   Es **aditiva**. ⚠️ **Orden: después de la 0016 y ANTES de publicar el cliente que usa
+   `cloud_snapshot_file`.** Contra un servidor sin la función, el cliente recibe 404 `PGRST202` y
+   restaura igual, sin captura previa: el riesgo es que el contenido de justo antes de restaurar no
+   quede en el historial. Se aplica igual que la 0016 (`supabase db push` / `--include-all`, o el
+   SQL Editor + `supabase migration repair --status applied 0017`).
+
+3. **Redesplegar `delete-account`** (§ 9): desde este cambio borra también `file_versions` (justo
    después de `files`). La cascada desde `auth.users` ya las borraría, pero así el borrado explícito
    no deja nada atrás aunque falle el último paso.
    ⚠️ **Orden: la 0016 aplicada ANTES de este deploy.** Contra un servidor sin la tabla,
@@ -687,7 +704,7 @@ Pasos del operador:
    supabase functions deploy delete-account
    ```
 
-3. **Purga de lo caducado (opcional, `pg_cron`).** La RLS ya **oculta** las versiones de más de 30
+4. **Purga de lo caducado (opcional, `pg_cron`).** La RLS ya **oculta** las versiones de más de 30
    días, pero siguen **ocupando espacio** hasta que alguien las borre; la migración no programa nada.
    Habilitar `pg_cron` (Dashboard → Database → Extensions) y:
 
@@ -701,7 +718,7 @@ Pasos del operador:
    `select * from cron.job;` y el historial en `cron.job_run_details`; quitarlo con
    `select cron.unschedule('purge-file-versions');`.
 
-4. **Vigilar el espacio** (SQL Editor):
+5. **Vigilar el espacio** (SQL Editor):
 
    ```sql
    -- Usuarios con más historial
@@ -721,13 +738,17 @@ Pasos del operador:
      from public.file_versions;
    ```
 
-5. **Ajustar los límites** (siempre en una migración nueva, nunca editando la 0016):
+6. **Ajustar los límites** (siempre en una migración nueva, nunca editando la 0016 ni la 0017):
    - **Retención:** `create or replace function public.file_versions_retention()` con el nuevo
      `interval`. La usan a la vez la RLS y la purga, así que cambian juntas.
-   - **Ventana de 10 min, 100 versiones, 20 MB** (y el umbral de 1 KiB del `'shrink'`): son
-     constantes del `declare` de `public.files_capture_version()`; recrear esa función
-     (`create or replace function`, con el mismo `security definer`, `search_path = ''` y el
-     `revoke execute`) con otros valores. El trigger no hay que tocarlo.
+   - **100 versiones y 20 MB:** desde la 0017 son constantes del `declare` de
+     `public.file_versions_prune(uuid, text)` (la usan el trigger y `cloud_snapshot_file`); recrear
+     esa función (`create or replace function`, con el mismo `security definer`, `search_path = ''`
+     y el `revoke execute ... from public, anon, authenticated, service_role`) con otros valores.
+   - **Ventana de 10 min y umbral de 1 KiB del `'shrink'`:** constantes del `declare` de
+     `public.files_capture_version()`; recrear esa función igual (mismo `security definer`,
+     `search_path = ''` y `revoke execute`), partiendo del cuerpo de la 0017 (con el
+     `on conflict ... do nothing` y la llamada a la poda). El trigger no hay que tocarlo.
    - Bajar un límite **no poda de golpe** lo que ya existe: los de número/tamaño se aplican en la
      siguiente versión que se guarde de cada fichero, y la retención en la siguiente purga (en la
      lectura, la RLS la aplica al instante).
