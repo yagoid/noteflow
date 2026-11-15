@@ -72,10 +72,14 @@ const LEMONSQUEEZY_TIMEOUT_MS = 10_000
  * Every public table holding the user's rows, in deletion order. Each one
  * references auth.users(id) ON DELETE CASCADE (pinned against the migrations
  * by tests/supabase/delete-account.test.ts — a new user table must be added
- * here, or the test fails). `subscriptions` goes last so a failure halfway
- * still leaves the billing link visible to the operator.
+ * here, or the test fails). `file_versions` (NoteFlow Cloud history, captured
+ * by a trigger on every UPDATE of `files` — migration 0016) goes right after
+ * `files`: once the files rows are gone no concurrent upload can update one,
+ * so no new version can appear before `file_versions` is cleared.
+ * `subscriptions` goes last so a failure halfway still leaves the billing link
+ * visible to the operator.
  */
-export const USER_DATA_TABLES = ['files', 'user_keys', 'usage_events', 'subscriptions'] as const
+export const USER_DATA_TABLES = ['files', 'file_versions', 'user_keys', 'usage_events', 'subscriptions'] as const
 
 /**
  * Lemon Squeezy statuses after which LS will never charge again — nothing to

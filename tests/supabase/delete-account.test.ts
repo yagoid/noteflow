@@ -440,6 +440,11 @@ describe('USER_DATA_TABLES mirrors the migrations', () => {
     expect([...USER_DATA_TABLES].sort()).toEqual(tablesReferencingUsers('cascade'))
   })
 
+  it('clears files before file_versions (no upload can then capture a new version) and subscriptions last', () => {
+    expect(USER_DATA_TABLES.slice(0, 2)).toEqual(['files', 'file_versions'])
+    expect(USER_DATA_TABLES[USER_DATA_TABLES.length - 1]).toBe('subscriptions')
+  })
+
   it('keeps only feedback (ON DELETE SET NULL), and nothing references auth.users otherwise', () => {
     expect(tablesReferencingUsers('set null')).toEqual(['feedback'])
     const allRefs = [...sql.matchAll(/references auth\.users\(id\)( on delete (cascade|set null))?/g)]
