@@ -128,6 +128,19 @@ export function recordRawEdit(
   return { undo: [...base.undo, prev].slice(-RAW_UNDO_DEPTH), redo: [], lastPush: now, content: next }
 }
 
+/**
+ * Records `prev` → `next` as an undo step of its OWN, closed on both sides: never
+ * grouped with the edit before it nor with the next keystroke (whatever the timing). For a
+ * replacement that isn't typing — a restored version (components/VersionHistory).
+ */
+export function recordRawStep(history: RawUndoHistory | undefined, prev: string, next: string): RawUndoHistory {
+  const base: RawUndoHistory = history && history.content === prev
+    ? history
+    : { undo: [], redo: [], lastPush: 0, content: prev }
+  // lastPush 0: the next edit opens its own level (now - 0 > RAW_UNDO_GROUP_MS).
+  return { undo: [...base.undo, prev].slice(-RAW_UNDO_DEPTH), redo: [], lastPush: 0, content: next }
+}
+
 /** Ctrl+Z on `current`: the buffer to show and the history after it, or null (nothing
  *  to undo, or the history doesn't belong to this buffer). */
 export function undoRaw(

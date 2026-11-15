@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Archive, Star, StarOff, Trash2, Lock, Unlock, Copy, CopyPlus, Columns2, Share,
   ExternalLink, FolderPlus, FolderMinus, Folder, ChevronRight, LayoutGrid, Eye, EyeOff, AppWindow, Pencil,
-  FolderOpen, Link2Off,
+  FolderOpen, Link2Off, History,
 } from 'lucide-react'
 import { useNotesStore } from '../stores/notesStore'
 import { useGroupsStore } from '../stores/groupsStore'
@@ -36,6 +36,12 @@ export interface NoteSectionMenuActions {
   rename: (sectionId: string) => void
   duplicate: (sectionId: string) => void
   delete: (sectionId: string) => void
+  /**
+   * Opens the section's NoteFlow Cloud version history. Only the main window's editor
+   * passes it, and only for notes that have one (not linked, password-protected nor
+   * local-only); the item is hidden without it.
+   */
+  history?: (sectionId: string) => void
 }
 
 interface NoteContextMenuProps {
@@ -381,6 +387,15 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
             >
               {currentSection.aiHidden ? <Eye size={12} /> : <EyeOff size={12} />}
               {currentSection.aiHidden ? t.common.showToAI : t.common.hideFromAI}
+            </button>
+          )}
+          {sectionActions?.history && !note.encryption && !isLinked && !note.localOnly && (
+            <button
+              onClick={() => { onClose(); sectionActions.history?.(currentSection.id) }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <History size={12} />
+              {t.noteMenu.versionHistory}
             </button>
           )}
           {!isLocked && !isLinked && (

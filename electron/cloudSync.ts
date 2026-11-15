@@ -96,6 +96,9 @@ import {
   metadataPendingForPull,
   planRemoteDelete,
   planLocalPush,
+  planSnapshotFlush,
+  type SnapshotFlushDeps,
+  type SnapshotFlushOutcome,
   planConflictCopy,
   anchorTitle,
   type SectionConflictLabels,
@@ -1227,6 +1230,38 @@ export async function pushPathsNow(
   if (stateChanged) persistState()
   if (pushed > 0 && errors.length === 0) syncError = undefined
   return { pushed, errors }
+}
+
+export type { SnapshotFlushOutcome }
+
+/**
+ * Lands one file's pending upload NOW before a version-history snapshot
+ * (cloudVersions.snapshotSectionVersion) and says where it stands with the
+ * server — decisions in cloudSyncLogic.planSnapshotFlush. Reuses pushPathsNow
+ * (journal, stale flag, the normal CONDITIONAL upload — forced only when the
+ * journal op already was) — no second upload path. An upload already in flight
+ * for the path is awaited first (bounded).
+ */
+export async function flushPathForSnapshot(
+  notesDir: string,
+  relPath: string,
+  opts: Pick<SnapshotFlushDeps, 'inFlightWaitMs' | 'pollMs'> = {}
+): Promise<SnapshotFlushOutcome> {
+  const s = cloudSettings ?? loadCloudSyncSettings()
+  return planSnapshotFlush({
+    ...opts,
+    enabled: s.enabled && isCloudConfigured(),
+    localOnly: isLocalOnlySyncPath(notesDir, relPath),
+    gateOpen: () => {
+      ensureStateOwner()
+      return planLocalPush({ enabled: true, configured: true, initialPullStatus }) === 'push'
+    },
+    inFlight: () => inFlightUploads.has(relPath),
+    timerArmed: () => pushTimers.has(relPath),
+    journalOp: () => getState().ops[relPath],
+    push: () => pushPathsNow(notesDir, [relPath]),
+    entitlementBlocked: () => entitlementBlocked,
+  })
 }
 
 // ── Delete (tombstones) ───────────────────────────────────────────────────────

@@ -49,6 +49,7 @@ const cloudSync = __importStar(require("./cloudSync"));
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
 const cloudKeys = __importStar(require("./cloudKeys"));
 const cloudRealtime = __importStar(require("./cloudRealtime"));
+const cloudVersions = __importStar(require("./cloudVersions"));
 const syncProvider_1 = require("./syncProvider");
 const syncCycle_1 = require("./syncCycle");
 const account = __importStar(require("./account"));
@@ -3107,6 +3108,17 @@ async function cloudManualSync() {
 }
 // Manual sync (same broadcast contract as sync:pull).
 electron_1.ipcMain.handle('cloud:pull', async () => cloudManualSync());
+// Per-section version history (electron/cloudVersions.ts). Never throw: every
+// failure is { ok: false, errorCode }. Restoring a version has no IPC on
+// purpose — the renderer saves the old text as a normal edit, and the server
+// trigger keeps the content it replaces as one more version.
+electron_1.ipcMain.handle('cloud:versions-list', (_event, target) => cloudVersions.listSectionVersions(NOTES_DIR, target));
+electron_1.ipcMain.handle('cloud:versions-get', (_event, target, id) => cloudVersions.getSectionVersion(NOTES_DIR, target, id));
+// Before a restore: keeps the section's CURRENT content as one more version
+// (lands its pending Cloud upload first, then RPC cloud_snapshot_file). Never
+// throws; failures are { ok: false, errorCode } and the renderer asks before
+// replacing anything.
+electron_1.ipcMain.handle('cloud:versions-snapshot', (_event, target) => cloudVersions.snapshotSectionVersion(NOTES_DIR, target));
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 function readSettings() {
     try {

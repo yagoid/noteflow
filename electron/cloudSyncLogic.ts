@@ -793,6 +793,73 @@ export function planRemoteDelete(s: { entitled: boolean; verified: boolean; patc
  */
 export type LocalPushAction = 'ignore' | 'journal' | 'push'
 
+// ── Snapshot of the current content (version history) ────────────────────────
+
+/**
+ * Where one file stands with the server before a version-history snapshot,
+ * after landing its pending upload now (cloudSync.flushPathForSnapshot):
+ *   - 'clean'     nothing pending: the server row is this device's content;
+ *   - 'uploaded'  a pending upload (armed timer / journal upsert) just landed;
+ *   - 'disabled'  Cloud sync off / not configured, or a local-only file: the
+ *                 server may lack the local content even with an empty journal;
+ *   - 'gated'     the first pull hasn't landed: local changes may be unknown
+ *                 to the journal yet (flushPendingLocalChanges finds them then);
+ *   - 'stale'     the server holds a newer version this device hasn't pulled;
+ *   - 'forbidden' the upload was refused (no active Cloud subscription);
+ *   - 'failed'    the upload failed (network / server — it stays journaled), a
+ *                 pending delete of the path, or an in-flight upload that never
+ *                 settled within the wait.
+ */
+export type SnapshotFlushOutcome = 'clean' | 'uploaded' | 'disabled' | 'gated' | 'stale' | 'forbidden' | 'failed'
+
+export interface SnapshotFlushDeps {
+  /** Cloud sync enabled AND configured. */
+  enabled: boolean
+  /** A local-only note's file (never synced). */
+  localOnly: boolean
+  /** The push gate is open (first pull landed for the signed-in account). */
+  gateOpen: () => boolean
+  /** An upload of this path is in flight right now. */
+  inFlight: () => boolean
+  /** A debounced push of this path is armed. */
+  timerArmed: () => boolean
+  /** The journal op of this path, if any. */
+  journalOp: () => { op: string; stale?: true } | undefined
+  /** Uploads the path now (cloudSync.pushPathsNow). */
+  push: () => Promise<{ pushed: number; errors: string[] }>
+  /** The last write was refused for lack of a Cloud subscription. */
+  entitlementBlocked: () => boolean
+  /** Bounded wait for an in-flight upload (defaults: 30 s, polled every 50 ms). */
+  inFlightWaitMs?: number
+  pollMs?: number
+  sleep?: (ms: number) => Promise<void>
+  now?: () => number
+}
+
+export async function planSnapshotFlush(deps: SnapshotFlushDeps): Promise<SnapshotFlushOutcome> {
+  if (!deps.enabled || deps.localOnly) return 'disabled'
+  if (!deps.gateOpen()) return 'gated'
+  // A debounced push that already fired: wait for it to settle (its journal op
+  // completes, or is flagged stale / failed) instead of racing a second upload.
+  const now = deps.now ?? Date.now
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const deadline = now() + (deps.inFlightWaitMs ?? 30_000)
+  while (deps.inFlight()) {
+    if (now() > deadline) return 'failed'
+    await sleep(deps.pollMs ?? 50)
+  }
+  const entry = deps.journalOp()
+  const armed = deps.timerArmed()
+  const pending = armed || entry?.op === 'upsert'
+  if (!pending) return entry ? 'failed' : 'clean' // a pending delete of this path: not capturable
+  // Flagged stale with no new edit since: re-sending would be refused again.
+  if (!armed && entry?.stale) return 'stale'
+  const { pushed, errors } = await deps.push()
+  if (errors.length > 0) return deps.entitlementBlocked() ? 'forbidden' : 'failed'
+  if (pushed > 0) return 'uploaded'
+  return deps.journalOp()?.stale ? 'stale' : 'failed'
+}
+
 export function planLocalPush(s: {
   enabled: boolean
   configured: boolean

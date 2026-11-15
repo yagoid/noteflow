@@ -109,13 +109,15 @@ const NAV: NavGroup[] = [
 
 interface SettingsModalProps {
   initialSection?: SettingsSection
+  /** Intent for the initial section (e.g. Sync → NoteFlow Cloud's plan detail). */
+  initialIntent?: SettingsIntent
   onClose: () => void
   onOpenExportImport: (mode: 'export' | 'import') => void
 }
 
-export function SettingsModal({ initialSection = 'general', onClose, onOpenExportImport }: SettingsModalProps) {
+export function SettingsModal({ initialSection = 'general', initialIntent, onClose, onOpenExportImport }: SettingsModalProps) {
   const [section, setSection] = useState<SettingsSection>(initialSection)
-  const [intent, setIntent] = useState<SettingsIntent | undefined>(undefined)
+  const [intent, setIntent] = useState<SettingsIntent | undefined>(initialIntent)
   const t = useT()
   const navigate: SettingsNavigate = (next, nextIntent) => {
     setSection(next)

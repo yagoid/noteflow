@@ -5,6 +5,7 @@ import {
   isUndoHistoryKeepable,
   pruneUndoHistory,
   recordRawEdit,
+  recordRawStep,
   redoRaw,
   undoRaw,
   RAW_UNDO_DEPTH,
@@ -154,5 +155,25 @@ describe('text-mode undo history', () => {
       text += i
     }
     expect(h!.undo.length).toBe(RAW_UNDO_DEPTH)
+  })
+})
+
+describe('recordRawStep', () => {
+  it('is a step of its own: not grouped with the edit before nor the keystroke after', () => {
+    const typed = recordRawEdit(undefined, 'a', 'ab', 1000)
+    const restored = recordRawStep(typed, 'ab', 'OLD')
+    expect(restored.undo).toEqual(['a', 'ab'])
+    expect(restored.content).toBe('OLD')
+    // A keystroke right after (same millisecond) opens a new level.
+    const after = recordRawEdit(restored, 'OLD', 'OLDx', 1001)
+    expect(after.undo).toEqual(['a', 'ab', 'OLD'])
+    const undone = undoRaw(after, 'OLDx')!
+    expect(undone.content).toBe('OLD')
+    expect(undoRaw(undone.history, 'OLD')!.content).toBe('ab')
+  })
+
+  it('history of another buffer is dropped; redo is cleared', () => {
+    const other: RawUndoHistory = { undo: ['x'], redo: ['y'], lastPush: 5, content: 'z' }
+    expect(recordRawStep(other, 'a', 'b')).toEqual({ undo: ['a'], redo: [], lastPush: 0, content: 'b' })
   })
 })

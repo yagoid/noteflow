@@ -181,19 +181,24 @@ interface Hunk {
 const MAX_EDIT_DISTANCE = 2000
 
 function diffLines(a: readonly string[], b: readonly string[]): Hunk[] {
+  return diffLinesDetailed(a, b).hunks
+}
+
+/** diffLines, also saying whether it fell back to one hunk past MAX_EDIT_DISTANCE. */
+function diffLinesDetailed(a: readonly string[], b: readonly string[]): { hunks: Hunk[]; truncated: boolean } {
   // Edits are usually local: strip the common prefix/suffix first.
   let start = 0
   while (start < a.length && start < b.length && a[start] === b[start]) start++
   let endA = a.length
   let endB = b.length
   while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) { endA--; endB-- }
-  if (start === endA && start === endB) return []
+  if (start === endA && start === endB) return { hunks: [], truncated: false }
   const whole: Hunk[] = [{ baseStart: start, baseEnd: endA, sideStart: start, sideEnd: endB }]
   const n = endA - start
   const m = endB - start
-  if (n === 0 || m === 0) return whole
+  if (n === 0 || m === 0) return { hunks: whole, truncated: false }
   const ops = myersOps(a.slice(start, endA), b.slice(start, endB))
-  if (!ops) return whole
+  if (!ops) return { hunks: whole, truncated: true }
   const hunks: Hunk[] = []
   let open: Hunk | null = null
   let i = start
@@ -210,7 +215,7 @@ function diffLines(a: readonly string[], b: readonly string[]): Hunk[] {
     else open.sideEnd = ++j
   }
   if (open) hunks.push(open)
-  return hunks
+  return { hunks, truncated: false }
 }
 
 /**
@@ -265,7 +270,20 @@ function myersOps(a: readonly string[], b: readonly string[]): ('match' | 'del' 
  * linked notes (lib/linkedMarkdown.ts) and their compare view.
  */
 export function diffSequences(a: readonly string[], b: readonly string[]): Array<{ aStart: number; aEnd: number; bStart: number; bEnd: number }> {
-  return diffLines(a, b).map((h) => ({ aStart: h.baseStart, aEnd: h.baseEnd, bStart: h.sideStart, bEnd: h.sideEnd }))
+  return diffSequencesWithStatus(a, b).hunks
+}
+
+/**
+ * diffSequences, plus `truncated`: the edit distance went past MAX_EDIT_DISTANCE and
+ * the changed middle came back as ONE hunk (correct, but not a readable line diff).
+ * The version history (lib/versionHistory.ts) shows a preview instead then.
+ */
+export function diffSequencesWithStatus(a: readonly string[], b: readonly string[]): {
+  hunks: Array<{ aStart: number; aEnd: number; bStart: number; bEnd: number }>
+  truncated: boolean
+} {
+  const { hunks, truncated } = diffLinesDetailed(a, b)
+  return { hunks: hunks.map((h) => ({ aStart: h.baseStart, aEnd: h.baseEnd, bStart: h.sideStart, bEnd: h.sideEnd })), truncated }
 }
 
 /** base[from, to) with one side's hunks (all inside that range) applied. */

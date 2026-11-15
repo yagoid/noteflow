@@ -13,6 +13,8 @@ export const noteMenu = {
   noteOverview: 'Note overview',
   // Section menu of an editor tab: renames it inline on the tab.
   renameSection: 'Rename section',
+  // Section menu of an editor tab (and the editor's ⋯ menu): NoteFlow Cloud version history.
+  versionHistory: 'Version history',
 
   // AI visibility tooltips for a single section.
   aiShowTooltip: 'The AI will index and use this section again',

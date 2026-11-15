@@ -263,6 +263,12 @@ const api = {
     cloudDisable: () => electron_1.ipcRenderer.invoke('cloud:disable'),
     // Manual Cloud sync ("Sync now"): a full cycle — pull, then journal drain.
     cloudPull: () => electron_1.ipcRenderer.invoke('cloud:pull'),
+    // Per-section version history (metadata + decrypted text — never keys nor
+    // path_keys). Restoring = a normal edit from the renderer, after a snapshot.
+    cloudListVersions: (target) => electron_1.ipcRenderer.invoke('cloud:versions-list', target),
+    cloudGetVersion: (target, id) => electron_1.ipcRenderer.invoke('cloud:versions-get', target, id),
+    // Before a restore: keeps the section's current content as one more version.
+    cloudSnapshotVersion: (target) => electron_1.ipcRenderer.invoke('cloud:versions-snapshot', target),
     onCloudStatusChanged: (cb) => {
         const wrapper = (_event, status) => cb(status);
         electron_1.ipcRenderer.on('cloud:status-changed', wrapper);

@@ -78,11 +78,13 @@ const noteWriteQueue = createKeyedQueue()
 
 /**
  * Runs every pending debounced editor save (lib/pendingEdits) and waits until all
- * queued note writes have reached main. For windows about to close.
+ * queued note writes have reached main. For windows about to close. With `noteId`,
+ * only that note's saves and writes (the version history, before a snapshot).
  */
-export async function settleNoteWrites(): Promise<void> {
-  flushPendingEdits()
-  await noteWriteQueue.idle()
+export async function settleNoteWrites(noteId?: string): Promise<void> {
+  flushPendingEdits(noteId)
+  if (noteId === undefined) await noteWriteQueue.idle()
+  else await noteWriteQueue.idleKey(noteId)
 }
 
 /**
@@ -191,8 +193,11 @@ interface NotesState {
   mutateSections: (noteId: string, fn: (sections: NoteSection[]) => NoteSection[] | null) => Promise<void>
   /** Patches ONE section (content, name, isRawMode, aiHidden…) on the latest state. No-op if it was deleted. */
   updateSection: (noteId: string, sectionId: string, patch: Partial<Omit<NoteSection, 'id'>>) => Promise<void>
-  /** Copies a section (new id, given name) right after the original. Null if missing or the note is locked. */
-  duplicateSection: (noteId: string, sectionId: string, name: string) => Promise<NoteSection | null>
+  /**
+   * Copies a section (new id, given name) right after the original — with `content` instead of
+   * the original's when given (a restored version). Null if missing or the note is locked.
+   */
+  duplicateSection: (noteId: string, sectionId: string, name: string, content?: string) => Promise<NoteSection | null>
   deleteNote: (id: string) => Promise<void>
   archiveNote: (id: string) => Promise<void>
   makeNotePermanent: (id: string) => Promise<void>   // drops expiresAt from a temporary note
@@ -1142,10 +1147,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   // Persists through the same queued write as updateNote, so encryption, tags and the
   // v2 per-section file diff (one new <id>.md + note.md for the order) are handled in
   // one place — and the copy is taken from the latest state, not a stale snapshot.
-  duplicateSection: async (noteId, sectionId, name) => {
+  duplicateSection: async (noteId, sectionId, name, content) => {
     let created: NoteSection | null = null
     await get().mutateSections(noteId, (sections) => {
-      const result = duplicateSectionInList(sections, sectionId, { id: nanoid(8), name, created: new Date().toISOString() })
+      const result = duplicateSectionInList(sections, sectionId, { id: nanoid(8), name, created: new Date().toISOString(), content })
       if (!result) return null
       created = result.section
       return result.sections
