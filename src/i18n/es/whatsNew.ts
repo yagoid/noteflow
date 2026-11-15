@@ -59,13 +59,13 @@ export const whatsNew: Messages['whatsNew'] = {
       title: 'Todas tus secciones de un vistazo',
       body: 'Bajo cada nota del sidebar, una línea fina dibuja sus secciones: deja el ratón encima para desplegarlas y haz clic en una para ir directo. ¿Prefieres la fila siempre visible? Cámbialo en el menú ⋯ de abajo del sidebar → Secciones.',
     },
-    'floating-sidebar': {
-      title: 'Un sidebar que se aparta',
-      body: '{toggle} pliega el sidebar en un minimapa finísimo: acerca el ratón al borde izquierdo y vuelve a aparecer. Déjalo sobre un grupo cerrado para ver sus notas sin abrirlo.',
-    },
     snippets: {
       title: 'Fragmentos a un clic',
       body: 'El botón del sello en la barra de herramientas inserta tu fragmento por defecto en el cursor, con la fecha de hoy. Su flecha muestra el resto y te deja crear los tuyos.',
+    },
+    'linked-files': {
+      title: 'Edita cualquier archivo Markdown en su sitio',
+      body: 'Vincula un .md que ya existe (el README de un proyecto, tu documentación) con clic derecho en el + grande o soltándolo en la ventana. Editas el archivo original: los cambios llegan a su proyecto y a su historial de Git, y lo que cambie fuera aparece aquí. Los archivos vinculados son solo locales.',
     },
     more: {
       title: 'Y mucho más',

@@ -10,8 +10,9 @@
 //             Tip: point it at a clean worktree of HEAD (npm run build there) so a dirty
 //             tree or a parallel build never ends up in the clips.
 //   --only    comma-separated clip ids (default: all). Ids: sections, kanban, links-palette,
-//             quick-capture, windows, brain, ai, agents, sync, section-map, floating-sidebar,
-//             snippets, more.
+//             quick-capture, windows, brain, ai, agents, sync, section-map, snippets, linked-files,
+//             more; floating-sidebar is web-only (no longer in the tour): only with --only, and
+//             with --out pointing outside src/assets (else the app bundles it again).
 //   --lang    en | es | all (default: all).
 //   --out     output dir (default: src/assets/whats-new). Writes <id>.<lang>.webm + .png poster.
 //   --frames  keep the raw captured frames + sample PNGs here (debug); default: temp dir, deleted.
@@ -45,7 +46,7 @@
 //   Requires: playwright (devDependency) and ffmpeg in the PATH. The output is a set of real
 //   screenshots of the UI: re-record after visible UI changes and review the clips by eye.
 // ─────────────────────────────────────────────────────────────────────────────
-const HELP_LINES = 47
+const HELP_LINES = 48
 
 const fs = require('fs')
 const os = require('os')
@@ -59,7 +60,7 @@ const { ID, demoContent, seedNotes } = require('./lib/demo-notes.cjs')
 
 const REPO = path.resolve(__dirname, '..')
 const CLIP_IDS = ['sections', 'kanban', 'links-palette', 'quick-capture', 'windows', 'brain', 'ai', 'agents', 'sync',
-  'section-map', 'floating-sidebar', 'snippets', 'more']
+  'section-map', 'floating-sidebar', 'snippets', 'linked-files', 'more']
 const OUT_W = 960
 const OUT_H = 600 // every clip is 16:10 so the tour modal never jumps
 
@@ -181,6 +182,14 @@ const TEXT = {
       moreOptions: 'More options', sectionsAsRow: 'As row', newTempNote: 'New temporary note (24h)', addSection: 'Add section (Ctrl+T)',
       yourKey: 'Your API key', chatTab: 'Chat', save: 'Save',
       insertSnippet: 'Insert snippet: ', chooseSnippet: 'Choose a snippet',
+      newNoteBtn: 'New note (Ctrl+N)', seeCloud: 'See NoteFlow Cloud', syncOptions: 'Sync options',
+    },
+    // "linked-files": an existing README linked from the + menu, edited, then changed outside.
+    linked: {
+      menu: 'Link Markdown file…', confirm: 'Link',
+      readme: '# Acme API\n\nREST API for the Acme dashboard.\n\n## Setup\n\n1. `npm install`\n2. `npm run dev`\n',
+      newStep: 'Copy .env.example to .env', newStepNeedle: '.env.example',
+      external: '\n## License\n\nMIT\n', externalNeedle: 'License',
     },
   },
   es: {
@@ -216,6 +225,13 @@ const TEXT = {
       moreOptions: 'Más opciones', sectionsAsRow: 'En fila', newTempNote: 'Nueva nota temporal (24h)', addSection: 'Añadir sección (Ctrl+T)',
       yourKey: 'Tu clave API', chatTab: 'Chat', save: 'Guardar',
       insertSnippet: 'Insertar fragmento: ', chooseSnippet: 'Elegir un fragmento',
+      newNoteBtn: 'Nueva nota (Ctrl+N)', seeCloud: 'Ver NoteFlow Cloud', syncOptions: 'Opciones de sincronización',
+    },
+    linked: {
+      menu: 'Vincular archivo Markdown…', confirm: 'Vincular',
+      readme: '# Acme API\n\nAPI REST del panel de Acme.\n\n## Instalación\n\n1. `npm install`\n2. `npm run dev`\n',
+      newStep: 'Copia .env.example a .env', newStepNeedle: '.env.example',
+      external: '\n## Licencia\n\nMIT\n', externalNeedle: 'Licencia',
     },
   },
 }
@@ -676,7 +692,8 @@ const CLIPS = {
     },
   },
 
-  // Settings → Sync: the two backends, nothing connected.
+  // Settings → Sync: the two choices (nothing connected) → NoteFlow Cloud's details → back →
+  // GitHub Sync.
   sync: {
     speed: 1.25,
     launch: { size: { width: 880, height: 550 }, uiState: { activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'floating' } },
@@ -686,12 +703,69 @@ const CLIPS = {
       await sleep(200)
       await a.click(page.locator(`button[title="${T.ui.settings}"]`).first(), { after: 350 })
       await a.click(page.getByText(T.ui.sync, { exact: true }).first(), { after: 900 })
-      await a.click(page.getByText(T.ui.github, { exact: true }).first(), { after: 650 })
-      await a.moveTo(page.getByText(T.ui.connectGh, { exact: true }).first())
+      await a.moveTo(page.getByText(T.ui.cloud, { exact: true }).first(), { ms: 600 })
+      await sleep(500)
+      await a.click(page.getByText(T.ui.seeCloud, { exact: true }).first(), { after: 1000 })
+      await a.move(400, 300, 700)
+      await sleep(900)
+      await a.click(page.getByText(T.ui.syncOptions, { exact: true }).first(), { after: 700 })
+      await a.moveTo(page.getByText(T.ui.github, { exact: true }).first(), { ms: 600 })
+      await sleep(500)
+      await a.moveTo(page.getByText(T.ui.connectGh, { exact: true }).first(), { ms: 500 })
+      await sleep(1100)
+      return { rec: await rec.stop() }
+    },
+  },
+
+  // An existing README (in a throwaway "projects/acme-api" folder) linked from the big +'s context
+  // menu — the native file picker is stubbed in main to return it — then edited in place (the
+  // write lands in the file), then changed on disk from outside: the note reloads live.
+  'linked-files': {
+    speed: 1.2,
+    launch: { size: { width: 900, height: 563 }, uiState: { activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'pinned', collapsedFolderIds: [ID.fProduct] } },
+    async run({ app, page, tmpRoot }, a, T) {
+      const L = T.linked
+      const proj = path.join(tmpRoot, 'projects', 'acme-api')
+      fs.mkdirSync(proj, { recursive: true })
+      const file = path.join(proj, 'README.md')
+      fs.writeFileSync(file, L.readme)
+      await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }) }, file)
+      await a.show(560, 330)
+      const rec = await startRecording(page)
+      await sleep(300)
+      await a.click(page.locator(`button[aria-label^="${T.ui.newNoteBtn}"]`).first(), { button: 'right', after: 550 })
+      await a.click(page.getByText(L.menu, { exact: true }).first(), { after: 900 })
+      // The dialog's button sits over a section-link pill of the note underneath: a real click
+      // there would leave the pointer on it as the dialog closes and pop its hover preview over the
+      // README. So the fake cursor clicks while the real pointer is parked elsewhere.
+      const confirm = page.getByRole('button', { name: L.confirm, exact: true }).first()
+      await a.moveTo(confirm)
+      await sleep(140)
+      await page.mouse.move(600, 470)
+      await page.evaluate(() => window.__nfo.pulse())
+      await confirm.evaluate((b) => b.click())
+      await sleep(300)
+      await a.move(600, 470, 380)
       await sleep(700)
-      await a.click(page.getByText(T.ui.cloud, { exact: true }).first(), { after: 450 })
-      await a.move(845, 120, 500)
-      await sleep(750)
+      // Edit it: a new step at the end of the Setup list, saved straight into the file.
+      await focusEditorEnd(page)
+      await a.move(560, 400, 600)
+      await page.keyboard.press('Enter')
+      // The list ends in inline code (`npm run dev`): don't carry that mark into the new step.
+      await page.evaluate(() => {
+        const ed = [...document.querySelectorAll('.ProseMirror')].find((e) => e.editor).editor
+        ed.view.dispatch(ed.state.tr.setStoredMarks([]))
+      })
+      await a.type(L.newStep, { min: 25, max: 55 })
+      const waitFile = async (needle) => {
+        for (let i = 0; i < 60 && !fs.readFileSync(file, 'utf8').includes(needle); i++) await sleep(100)
+      }
+      await waitFile(L.newStepNeedle)
+      await sleep(900)
+      // Someone else edits the file (another editor, a git pull): the note picks it up live.
+      fs.appendFileSync(file, L.external)
+      await page.waitForFunction((n) => document.body.innerText.includes(n), L.externalNeedle, { timeout: 8000 })
+      await sleep(1600)
       return { rec: await rec.stop() }
     },
   },
@@ -735,7 +809,9 @@ const CLIPS = {
 
   // Ctrl+' folds the sidebar into the minimap → the left edge brings it back as a panel →
   // resting on a collapsed group peeks at its notes.
+  // Web-only (docs/public/clips): no longer a tour slide, so it is not recorded by default.
   'floating-sidebar': {
+    webOnly: true,
     speed: 1.2,
     launch: { size: { width: 900, height: 563 }, uiState: { activeNoteId: ID.launch, activeSectionId: 'sroadm', sidebarMode: 'pinned', collapsedGroupIds: [ID.gWork, ID.gLearn] } },
     async run({ app, page, size, lang }, a) {
@@ -1080,7 +1156,7 @@ async function recordClip(opts, id, lang, work) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2))
-  const ids = opts.only || CLIP_IDS.filter((id) => CLIPS[id])
+  const ids = opts.only || CLIP_IDS.filter((id) => CLIPS[id] && !CLIPS[id].webOnly)
   const langs = opts.lang === 'all' ? ['en', 'es'] : [opts.lang]
   for (const id of ids) if (!CLIPS[id]) throw new Error(`Clip "${id}" is not implemented`)
   if (!fs.existsSync(path.join(opts.app, 'dist', 'index.html')) || !fs.existsSync(path.join(opts.app, 'dist-electron', 'main.js'))) {

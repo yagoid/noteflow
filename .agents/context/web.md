@@ -431,7 +431,11 @@ que la página no sea monótona. Todo grid lleva `minmax(0, 1fr)` para no desbor
   `themes` (este último es el tramo de Ajustes → Apariencia del clip `more` del tour, recortado desde
   5,2 s, 3,7 s). `more` (montaje cifrar + plantilla + tema que abre con el diálogo de cifrado, fuera de
   lugar en `#personalize`) **no se usa en la web y se borró de `public/clips`** (tampoco `sections`, `ai` ni `sync`: solo se copian
-  los clips que usa alguna página). Para refrescar uno: copiar el `.webm` de `src/assets/whats-new/` y
+  los clips que usa alguna página). `floating-sidebar` ya no está en el tour ni en `src/assets/whats-new/`:
+  se graba aparte con `--only floating-sidebar --out <dir>` (ver `release.md`). Los clips `brain`,
+  `quick-capture` y `section-map` del tour se regrabaron en nov. 2026 con otro guion (el cerebro con el
+  panel de IA, el botón de nota temporal, el menú ⋯): las copias de la web siguen siendo las anteriores.
+  Para refrescar uno: copiar el `.webm` de `src/assets/whats-new/` y
   convertir su `.png` a `.webp` (`ffmpeg -i x.png -c:v libwebp -quality 82 x.webp`). Idiomas `en`/`es` (siempre el de la página). Si cambia
   la UI que enseña un clip, hay que regrabarlo (y su póster) y revisar su `clipLabel`.
 - **`FeatureClip.astro`** (props `id`, `lang`, `label` = aria-label i18n que describe lo que pasa en el

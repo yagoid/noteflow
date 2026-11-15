@@ -6,12 +6,12 @@ import {
   Cloud,
   Columns2,
   Download,
+  FileSymlink,
   KanbanSquare,
   LayoutTemplate,
   Link2,
   Lock,
   Palette,
-  PanelLeftOpen,
   PanelsTopLeft,
   Rows3,
   Sparkles,
@@ -94,11 +94,8 @@ export const WHATS_NEW_SLIDES: WhatsNewSlide[] = [
   { id: 'agents', since: '2.2.0', i18nKey: 'agents', icon: Bot, accent: 'accent-3', keys: [] },
   { id: 'sync', since: '2.2.0', i18nKey: 'sync', icon: Cloud, accent: 'cyan', keys: [] },
   { id: 'section-map', since: '2.2.0', i18nKey: 'section-map', icon: Rows3, accent: 'cyan', keys: [] },
-  {
-    id: 'floating-sidebar', since: '2.2.0', i18nKey: 'floating-sidebar', icon: PanelLeftOpen, accent: 'accent-2',
-    keys: [{ id: 'toggle', combo: ['Ctrl', "'"] }],
-  },
   { id: 'snippets', since: '2.2.0', i18nKey: 'snippets', icon: Stamp, accent: 'accent-3', keys: [] },
+  { id: 'linked-files', since: '2.3.0', i18nKey: 'linked-files', icon: FileSymlink, accent: 'cyan', keys: [] },
   {
     id: 'more', since: '2.2.0', i18nKey: 'more', icon: Wand2, accent: 'accent-2', keys: [],
     extras: [

@@ -1512,12 +1512,14 @@ Settings → Startup:
   diapositiva = un clip corto en bucle de la propia app dentro de un marco de ventana (o, si no hay
   clip, un icono animado con anillos y partículas en el color de la diapositiva) + título + texto
   breve + chips de atajos (`Ctrl`/`⌘` según la plataforma). Diapositivas actuales, en orden: secciones
-  en pestañas, el Cerebro, enlazar secciones + paleta, captura rápida (`Ctrl+Shift+Space`, nota
-  temporal), sticky / ventanas separadas, kanban, la IA, tus agentes de IA con el CLI (el clip
+  en pestañas (el `+` de la barra de pestañas), el Cerebro (con su panel de IA: elegir proveedor y
+  preguntar), enlazar secciones + paleta, captura rápida (botón de nota temporal del sidebar,
+  `Ctrl+Shift+Space`), sticky / ventanas separadas, kanban, la IA, tus agentes de IA con el CLI (el clip
   abre en un terminal: el agente ejecuta `noteflow add` y la tarea aparece en vivo en la app), sync
   (GitHub / NoteFlow Cloud), el mapa de
-  secciones plegado del sidebar, el sidebar flotante (`Ctrl+'`, minimapa + peek de grupo colapsado),
-  los fragmentos del botón del sello y "And much more"
+  secciones plegado del sidebar (y cambiarlo a fila desde el menú ⋯ del pie), los fragmentos del
+  botón del sello, los archivos Markdown vinculados (v2.3.0: editar un `.md` externo en su sitio) y
+  "And much more"
   (rejilla: notas cifradas, plantillas, temas y acentos, tareas con alarma, vista dividida
   `Ctrl+Click`, CLI, importar de Notion y Keep; cada chip se pulsa y despliega 1–2 frases de qué
   hace y dónde se encuentra, uno abierto a la vez). Los clips pueden estar grabados por idioma de la UI.

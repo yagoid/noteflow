@@ -255,7 +255,10 @@ candidata desde el checkout (mismo `electron-builder` que la release), no reusa 
 Graba desde la app real (Playwright `_electron` + ffmpeg) los clips en bucle del tour →
 `src/assets/whats-new/<id>.<lang>.webm` + póster `<id>.<lang>.png` (ids fijos: `sections`, `kanban`,
 `links-palette`, `quick-capture`, `windows`, `brain`, `ai`, `agents`, `sync`, `section-map`,
-`floating-sidebar`, `snippets`, `more`; idiomas `en`/`es`).
+`snippets`, `linked-files`, `more`; idiomas `en`/`es`). `floating-sidebar` ya **no** es diapositiva
+del tour: su toma sigue en el script (`webOnly`) solo para la web (`docs/public/clips`), no se graba
+por defecto y hay que pedirla con `--only floating-sidebar --out <dir fuera de src/assets>` (lo que
+haya en `src/assets/whats-new/` se empaqueta en la app).
 Regenerarlos cuando cambie de forma visible la UI que aparece en ellos:
 
 ```bash
@@ -284,8 +287,13 @@ node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|a
   `ai:chat-sources` con cuatro notas al llegar el primer delta para que se iluminen en el cerebro
   (opción de clip `llm: 'byo'`: arranca el mock sin configurarlo); `quick-capture` pulsa el botón del
   temporizador del sidebar (anclado) en vez del atajo; `section-map` cambia el estilo a "En fila"
-  desde el menú ⋯ del pie del sidebar. `crf` por clip (`brain` usa 43 para caber en presupuesto).
-- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~8,7 MB con los pósters — el `brain` del cuaderno completo pesa más —, 13 clips × 2
+  desde el menú ⋯ del pie del sidebar; `sync` recorre la UI nueva de Ajustes → Sincronización (las dos
+  tarjetas → detalle de NoteFlow Cloud → volver → GitHub Sync); `linked-files` (nueva, v2.3.0) vincula un
+  `README.md` de una carpeta temporal `projects/acme-api` desde el menú contextual del `+` grande (el
+  selector nativo se sustituye en main por uno que devuelve ese archivo), lo edita (la toma espera a ver
+  el cambio en el archivo) y luego lo modifica desde fuera para que la nota se recargue en vivo.
+  `crf` por clip (`brain` usa 43 para caber en presupuesto).
+- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~8,8 MB con los pósters — el `brain` del cuaderno completo pesa más —, 13 clips × 2
   idiomas: **ya por encima del tope**; antes de añadir otro clip, recortar duración/`crf` o los pósters).
 - Composiciones sobre un "escritorio" (fondo degradado + ventanas con esquinas redondeadas y sombra,
   cada superficie grabada por separado con sus tiempos reales): `windows` (ventana principal +

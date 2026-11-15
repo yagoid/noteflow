@@ -152,7 +152,7 @@ describe('the deck (whatsNewSlides.ts)', () => {
   it('keeps the fixed ids (stored in settings.json and used by the clip capture script)', () => {
     expect(WHATS_NEW_SLIDES.map((s) => s.id)).toEqual([
       'sections', 'brain', 'links-palette', 'quick-capture', 'windows', 'kanban', 'ai', 'agents', 'sync',
-      'section-map', 'floating-sidebar', 'snippets', 'more',
+      'section-map', 'snippets', 'linked-files', 'more',
     ])
     expect(sanitizeSeenIds(WHATS_NEW_SLIDES.map((s) => s.id))).toHaveLength(WHATS_NEW_SLIDES.length)
   })
