@@ -569,6 +569,35 @@ export interface CloudSyncStatus {
   conflictMerges?: ConflictCopiesNotice
 }
 
+// Per-section version history of NoteFlow Cloud (read-only) — mirror of
+// electron/cloudVersionsLogic.ts. Restoring a version is a normal edit made by
+// the renderer (the server keeps the replaced content as one more version).
+export type CloudVersionReason = 'edit' | 'delete' | 'shrink'
+export interface CloudVersionMeta {
+  id: number         // file_versions id
+  seq: number        // seq of the replaced row (ordering)
+  editedAt: string   // ISO — when that content was written (updated_at)
+  savedAt: string    // ISO — when it was replaced (created_at)
+  size: number       // ESTIMATED plaintext bytes (from the sealed blob length)
+  reason: CloudVersionReason
+}
+export type CloudVersionsErrorCode =
+  | 'not-signed-in'    // no account session
+  | 'locked'           // Cloud keys not unlocked (no DEK in memory; includes no-keys)
+  | 'session-locked'   // the system keychain won't release the saved session
+  | 'unreachable'      // offline / timeout / account service unreachable
+  | 'unavailable'      // server without the history migration, or build without Cloud configured
+  | 'not-found'        // (get) the version no longer exists (pruned / out of retention)
+  | 'unsupported-note' // local-only note, or password-protected (encryption block in note.md)
+  | 'invalid-path'     // malformed input (incl. version id), path outside the notes dir, missing note or unsafe section file
+  | 'decrypt-failed'   // could not decrypt, or the row's path_key is not the requested file's
+  | 'unknown'
+export interface CloudVersionTarget { notePath: string; sectionId: string } // notePath = Note.filePath (ABSOLUTE note folder)
+export type CloudVersionsListResult = { ok: true; versions: CloudVersionMeta[] } | { ok: false; errorCode: CloudVersionsErrorCode }
+export type CloudVersionGetResult =
+  | { ok: true; version: { id: number; seq: number; editedAt: string; reason: CloudVersionReason; content: string } }
+  | { ok: false; errorCode: CloudVersionsErrorCode }
+
 /**
  * Local edits that lost against a remote version this device never saw and
  * were kept as new notes ("conflict copies") by the pull of either backend
@@ -863,6 +892,9 @@ declare global {
         hadDeletions: boolean
         hadMetadataChanges: boolean
       }>
+      // Per-section version history (read-only). Restoring = a normal edit from the renderer.
+      cloudListVersions: (target: CloudVersionTarget) => Promise<CloudVersionsListResult>
+      cloudGetVersion: (target: CloudVersionTarget, id: number) => Promise<CloudVersionGetResult>
       onCloudStatusChanged: (cb: (status: CloudSyncStatus) => void) => () => void
       scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) => void
       // AI / Semantic index

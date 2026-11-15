@@ -26,6 +26,7 @@ import * as cloudSync from './cloudSync'
 import { staleResolvePullDelay, sectionConflictLabels } from './cloudSyncLogic'
 import * as cloudKeys from './cloudKeys'
 import * as cloudRealtime from './cloudRealtime'
+import * as cloudVersions from './cloudVersions'
 import { getActiveSyncProvider, getActiveSyncStatus, type SyncPullResult } from './syncProvider'
 import { createCoalescedRunner, trackInFlight, waitUntil } from './syncCycle'
 import * as account from './account'
@@ -3223,6 +3224,18 @@ async function cloudManualSync(): Promise<SyncPullResult> {
 
 // Manual sync (same broadcast contract as sync:pull).
 ipcMain.handle('cloud:pull', async () => cloudManualSync())
+
+// Per-section version history (read-only; electron/cloudVersions.ts). Never
+// throw: every failure is { ok: false, errorCode }. Restoring a version has no
+// IPC on purpose — the renderer saves the old text as a normal edit, and the
+// server trigger keeps the content it replaces as one more version.
+ipcMain.handle('cloud:versions-list', (_event, target: unknown) =>
+  cloudVersions.listSectionVersions(NOTES_DIR, target)
+)
+
+ipcMain.handle('cloud:versions-get', (_event, target: unknown, id: unknown) =>
+  cloudVersions.getSectionVersion(NOTES_DIR, target, id)
+)
 
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 

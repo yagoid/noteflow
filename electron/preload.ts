@@ -5,6 +5,7 @@ import type { AccountErrorCode } from './account'
 import type { LinkedNoteWire, LinkedWriteResult, LinkError, LinkedMetaPatch } from './linkedNotes'
 import type { FeedbackSendResult } from './feedbackLogic'
 import type { CliConnectResult, CliConnectStatus } from './cliConnectLogic'
+import type { CloudVersionTarget, CloudVersionsListResult, CloudVersionGetResult } from './cloudVersionsLogic'
 
 export type NoteDirRecord = {
   dir: string
@@ -471,6 +472,12 @@ const api = {
     hadDeletions: boolean
     hadMetadataChanges: boolean
   }> => ipcRenderer.invoke('cloud:pull'),
+  // Per-section version history (read-only; metadata + decrypted text — never
+  // keys nor path_keys). Restoring = a normal edit from the renderer.
+  cloudListVersions: (target: CloudVersionTarget): Promise<CloudVersionsListResult> =>
+    ipcRenderer.invoke('cloud:versions-list', target),
+  cloudGetVersion: (target: CloudVersionTarget, id: number): Promise<CloudVersionGetResult> =>
+    ipcRenderer.invoke('cloud:versions-get', target, id),
   onCloudStatusChanged: (
     cb: (status: {
       configured: boolean
