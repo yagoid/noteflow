@@ -168,7 +168,7 @@ export const settings = {
       points: [
         'Automatic sync across your devices',
         'Encrypted — Standard, or Private end-to-end',
-        'No repository to create or maintain',
+        '30-day history of every section, restorable in the app',
       ],
       cta: 'See NoteFlow Cloud',
     },
@@ -487,6 +487,7 @@ export const settings = {
       'Encrypted sync through NoteFlow servers — encrypted in transit and at rest.',
       'Automatic, hands-free sync across your devices — no manual pushes or pulls.',
       'Choose your encryption: Standard (nothing to remember) or Private end-to-end, where only you can read your notes.',
+      'Version history of every section, right in the app: compare what you had in the last 30 days and restore it with a click.',
       'Nothing to set up — no GitHub repository to create or maintain.',
     ],
     // Last line of the list: what happens if the subscription ends.
@@ -554,7 +555,7 @@ export const settings = {
     addProduct: 'Add {plan} to your plan',
     addValue: {
       ai: 'Chat with your notes without API keys or local models — a monthly allowance included.',
-      cloud: 'Encrypted, automatic sync across your devices — nothing to set up.',
+      cloud: 'Encrypted, automatic sync across your devices, with 30 days of version history — nothing to set up.',
     },
     becomesBundle: 'Your subscription becomes the Bundle (Cloud + AI): you never pay for two subscriptions.',
     upgradeDifference: '+{price}/month',

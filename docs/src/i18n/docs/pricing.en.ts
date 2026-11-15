@@ -141,6 +141,7 @@ export const pricingEn = {
     bullets: [
       'Automatic sync across devices — no manual pushes, no waiting on a git flow.',
       'Two encryption modes: managed by default (zero secrets to keep), or opt into strict E2EE where the keys never leave your devices.',
+      '<strong>Version history of every section</strong>, inside the app: earlier versions from the last 30 days are kept automatically, encrypted like your notes. Compare one with the current text and restore it with a click — your current text is saved to the history first.',
       'Monthly or annual subscription — <strong>€3.99/month or €39.99/year</strong>, VAT included, subscribed from inside the app (Settings → Subscription).',
       'Cloud switches itself on as soon as the payment goes through, and whenever you sign in to an account that has it — the first time, you just pick the encryption mode.',
       'For people who don’t want to create and manage a GitHub repo just to sync notes.',
@@ -176,6 +177,11 @@ export const pricingEn = {
         capability: 'Note sync',
         managed: '<strong>NoteFlow Cloud</strong> — automatic, encrypted sync (managed by default, or opt-in E2EE)',
         self: '<strong>GitHub Sync</strong> with your own private repo',
+      },
+      {
+        capability: 'Version history',
+        managed: 'Per section, inside the app — 30 days, compare and restore with a click',
+        self: 'The Git history of your repo, browsed on GitHub',
       },
       {
         capability: 'Everything else',

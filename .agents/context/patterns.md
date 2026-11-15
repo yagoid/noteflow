@@ -1290,6 +1290,43 @@ se desmonte. Cachés a nivel de módulo, una por renderer (la ventana de secció
     panel 1, no en el suyo) y Ctrl+Z sigue funcionando en el panel 1. Cuando el panel 2 ya muestra ese
     mismo texto, también puede deshacer con él (y su edición pasa a ser la del historial).
 
+### Historial de versiones: restaurar una sección (`lib/sectionRestore.ts`)
+Panel `src/components/VersionHistory/` (NoteFlow Cloud; servidor y modelo de datos en
+`monetization.md` § 4 "Historial de versiones", UX en la skill `noteflow-features`). Se abre desde el
+`⋯` del editor (sección activa) y desde el menú contextual del tab (`sectionActions.history` de
+`NoteContextMenu`), solo si `canShowHistory` (`NoteEditor.tsx`): ventana **principal** y no
+`standalone`, y nota no vinculada, sin contraseña y no `localOnly`. Lógica pura en
+`src/lib/versionHistory.ts` (días, diff por líneas, `decideHistoryPanelState`,
+`planRestoreAfterSnapshot`; tests en `tests/lib/versionHistory.test.ts`).
+- **"Restore this version"** escribe por el camino **normal** (`updateSection` del store → disco → la
+  subida condicionada del motor de sync, como cualquier edición), nunca por un IPC propio. Pasos:
+  1. vuelca lo pendiente (`flushPendingEdits` + `settleNoteWrites(noteId)`) y lee el texto de la
+     sección del store;
+  2. lo guarda en el historial (`cloudSnapshotVersion` → `cloud:versions-snapshot`, ver `sync.md`);
+  3. vuelve a volcar y compara con lo leído: si cambió (otra ventana, el CLI, el agente, un pull),
+     captura **una vez más**; si sigue cambiando, o si la captura falló, **no sustituye en silencio**:
+     diálogo "The current text couldn't be saved to the history" con *Restore as new section* o
+     *Replace anyway* (`planRestoreAfterSnapshot`);
+  4. `markForcedRestore` + `updateSection`, **sin ningún `await`** entre la comparación y la escritura.
+- **Marca de restauración forzada** (`sectionRestore.ts`, por ventana, estado de módulo): sin ella el
+  editor abierto trataría la escritura como un **cambio externo** (`lib/externalContentSync`), que se
+  aplica sin paso de undo o se fusiona en tres vías (`merge3`) con una edición en vuelo. Con la marca,
+  el editor de esa sección (modo markdown: `Editor.tsx`; modo texto: `NoteEditor.tsx`) la toma como
+  **sustitución exacta**: descarta su guardado pendiente y su outbox, la adopta como base nueva, la
+  aplica como **un paso propio de Ctrl+Z** y **no** reescribe encima el markdown normalizado (no la
+  vuelve a guardar). Cada editor la aplica como mucho una vez (token por editor) y la marca caduca
+  10 s después de la escritura (`FORCED_RESTORE_TTL_MS`): una actualización posterior que traiga el
+  mismo texto vuelve a ser externa normal. Tests en `tests/lib/sectionRestore.test.ts`.
+- **Limitación de las ventanas sticky / de sección:** la marca no cruza ventanas; las demás reciben la
+  restauración como actualización externa normal por la recarga de notas, así que si en ese momento
+  tienen una edición en vuelo de esa sección **se fusiona** con ella en vez de sustituirse. Por eso el
+  panel solo existe en la ventana principal.
+- **"Restore as new section"**: `duplicateSection(noteId, sectionId, name, content)` → sección nueva
+  justo detrás de la original, mismo `isRawMode`, nombre "X (version from Nov 15, 13:50)" / "X (versión del 15 nov 13:50)"
+  (`restoredSectionName`). No toca la original, así que no hace captura.
+- Tras restaurar, aviso breve en el editor (`restoreNotice`). El historial va atado al relPath: al
+  renombrar la nota (su carpeta) el panel deja de ver las versiones anteriores.
+
 ### Editor: autocierre de paréntesis
 Extensión `components/Editor/AutoCloseBrackets.ts` (registrada en `Editor.tsx`) que envuelve el plugin
 de `src/lib/autoCloseBrackets.ts`; toda la lógica vive en el lib, sin DOM, para testearla contra un
@@ -3305,7 +3342,8 @@ Node.js standalone (sin deps de Electron) que opera directamente sobre los `.md`
 `logout`, `push`, `pull`/`update`, `status`,
 `cloud login/logout/status/setup/push/pull` (cliente NoteFlow Cloud headless — ver
 `monetization.md` § 4 "Cliente CLI (headless)"; con sesión Cloud activa, `push`/`pull`/`status` y el
-sync automático van a Cloud en vez de a GitHub), `migrate`, `self-update`.
+sync automático van a Cloud en vez de a GitHub), `history` (historial de versiones de Cloud, abajo),
+`migrate`, `self-update`.
 Todo se direcciona **por nombre** (título de nota + nombre de sección), nunca por id; los nombres de
 sección **no son únicos** → se desambiguan con un sufijo 1-based `#n` (p. ej. `Tasks#2`). La
 resolución de sección (`matchSectionOrNull`) es única para todos los comandos: **nombre exacto**
@@ -3338,6 +3376,27 @@ fuerza modo texto; `--markdown` y `--rich` (alias histórico, se mantiene) son e
 Las secciones existentes nunca cambian de modo. `migrate` (v1→v2) crea la `Note` de una nota v1 solo
 con cuerpo en modo markdown, igual que `parseLegacyNoteRaw` del escritorio (antes el CLI la ponía en
 modo texto).
+
+**`noteflow history` (v2.13.0, solo NoteFlow Cloud).** `noteflow history <título> [sección]
+[--section s] [--show <n> | --restore <n> [--force] [--dry-run]] [--json]` (`cmdHistory`): lista las
+versiones de una sección que guarda el servidor (`file_versions`, ver `monetization.md` § 4
+"Historial de versiones"), de la más reciente (1) a la más antigua, sin la actual; `--show n` la
+imprime verbatim; `--restore n` la restaura. La sección va por **nombre exacto** (como `set`; se puede
+omitir si la nota tiene una sola). Decisiones:
+- **Antes de restaurar se captura** el contenido actual: si la fila viva de Cloud difiere del disco o
+  hay pendientes en la nota, primero `syncPushNoteFiles` (subida **condicionada**) y recomprueba;
+  luego `POST rpc/cloud_snapshot_file`; vuelve a leer la nota y exige que el fichero siga igual; y solo
+  entonces escribe y sube (condicionado) como una edición normal (bumpea `updated:`).
+- **Si la captura falla** (404 `PGRST202`, 403 `42501`, `false` con la sección local no vacía, subida
+  `stale`, Cloud más nuevo, cambio en disco durante la RPC, red) **no restaura** (exit 1 y el motivo)
+  salvo con `--force`. `--dry-run` no hace ningún POST. `--json` de `--restore` lleva `snapshot: true
+  | false | "skipped"`.
+- Las versiones `size 0` / `content_ct` vacío son marcas de borrado: se listan (`deleted`), no se
+  muestran ni se restauran. `reason` `manual` = "saved before a restore".
+- **Los índices se desplazan** cuando Cloud guarda una versión nueva (también al restaurar): no hay
+  restaurar por id. La skill del CLI pide comprobar con `--show` justo antes de `--restore`.
+- Notas con contraseña y `localOnly` → error explicativo; sin sesión de Cloud → error que manda a
+  `noteflow cloud login`. Tests: `tests/cli/cloudHistory.test.ts`.
 
 **Versionado del CLI y su skill — siempre la misma versión.** `CLI_VERSION` (`cli/noteflow.js`), el
 marcador `// v` de su cabecera y el `version:` del frontmatter de `cli/noteflow-cli/SKILL.md` llevan

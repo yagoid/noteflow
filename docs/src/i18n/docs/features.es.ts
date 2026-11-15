@@ -27,6 +27,7 @@ export const featuresEs: FeaturesContent = {
     { id: 'shortcuts', label: 'Atajos' },
     { id: 'views', label: 'Vistas' },
     { id: 'temp', label: 'Notas temporales' },
+    { id: 'history', label: 'Historial de versiones' },
     { id: 'encryption', label: 'Cifrado' },
     { id: 'ai-hidden', label: 'Ocultar de la IA' },
     { id: 'personalize', label: 'Personalizar' },
@@ -260,6 +261,30 @@ export const featuresEs: FeaturesContent = {
       { title: 'Borradas en todas partes', desc: 'También del remoto de sync, para que no resuciten.' },
       { title: 'Cambia de idea', desc: 'El chevron de <em>Se elimina el …</em> elige 1–48 h, o la hace permanente.' },
     ],
+  },
+
+  history: {
+    title: 'Historial de versiones de cada sección',
+    lede: '¿Pisaste una lista, vaciaste una sección, recortaste el párrafo equivocado? Con NoteFlow Cloud cada sección guarda <strong>30 días de versiones anteriores</strong>, y las recuperas sin salir de la app.',
+    flowAria: 'Cómo funciona el historial de versiones: ábrelo desde una sección, compara una versión con el texto actual y restáurala',
+    steps: [
+      {
+        tag: '01 · abrir',
+        path: ['⋯', 'Historial de versiones'],
+        desc: 'También en el menú contextual de la pestaña de una sección.',
+      },
+      {
+        tag: '02 · comparar',
+        path: ['Cambios · Vista previa'],
+        desc: 'Una línea de tiempo por días; mira qué cambió respecto al texto actual, o la versión tal como era.',
+      },
+      {
+        tag: '03 · restaurar',
+        path: ['Restaurar esta versión'],
+        desc: 'Antes se guarda tu texto actual en el historial, y <kbd>Ctrl</kbd>+<kbd>Z</kbd> lo deshace. O restáurala como sección nueva.',
+      },
+    ],
+    note: 'Una función de <a href="%PRICING_URL%">NoteFlow Cloud</a>: las versiones se guardan en el servidor, cifradas como tus notas, edites desde el dispositivo que edites. También en el <a href="%CLI_URL%">CLI</a> con <code>noteflow history</code>.',
   },
 
   encryption: {

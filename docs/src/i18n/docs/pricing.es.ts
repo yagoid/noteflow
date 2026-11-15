@@ -139,6 +139,7 @@ export const pricingEs: PricingContent = {
     bullets: [
       'Sync automática entre dispositivos — sin pushes manuales, sin esperar a un flujo de git.',
       'Dos modos de cifrado: gestionado por defecto (cero secretos que guardar) u opt-in a E2EE estricto donde las claves nunca salen de tus dispositivos.',
+      '<strong>Historial de versiones de cada sección</strong>, dentro de la app: las versiones anteriores de los últimos 30 días se guardan solas, cifradas como tus notas. Compara una con el texto actual y restáurala con un clic — antes se guarda tu texto actual en el historial.',
       'Suscripción mensual o anual — <strong>€3.99/mes o €39.99/año</strong>, IVA incluido, contratada desde la propia app (Settings → Subscription).',
       'Cloud se activa solo en cuanto se completa el pago, y cada vez que inicias sesión con una cuenta que lo tiene — la primera vez solo eliges el modo de cifrado.',
       'Para quien no quiere crear y mantener un repo de GitHub solo para sincronizar notas.',
@@ -174,6 +175,11 @@ export const pricingEs: PricingContent = {
         capability: 'Sincronización de notas',
         managed: '<strong>NoteFlow Cloud</strong> — sync automática y cifrada (gestionada por defecto, o E2EE opt-in)',
         self: '<strong>GitHub Sync</strong> con tu propio repo privado',
+      },
+      {
+        capability: 'Historial de versiones',
+        managed: 'Por sección, dentro de la app — 30 días, comparar y restaurar con un clic',
+        self: 'El historial de Git de tu repo, consultado en GitHub',
       },
       {
         capability: 'Todo lo demás',

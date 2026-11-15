@@ -86,6 +86,10 @@ noteflow/
 │   │                    #   cache safeStorage) + helper supabaseRest — ver monetization.md § 4
 │   ├── cloudSync.ts     # Motor de sync de NoteFlow Cloud (push/pull/tombstones vía PostgREST)
 │   ├── cloudSyncLogic.ts# Lógica pura del motor (mapeo fila↔fichero, conflictos, cursor) — testeada
+│   ├── cloudVersions.ts # Historial de versiones por sección (lista / descifra / captura antes de
+│   │                    #   restaurar vía RPC cloud_snapshot_file) — ver monetization.md § 4
+│   ├── cloudVersionsLogic.ts # Lógica pura del historial (endpoints, validación del destino, mapeo
+│   │                    #   de filas y de errores HTTP) — testeada (tests/electron/cloudVersions.test.ts)
 │   ├── entitlements.ts  # computeEntitlements(rows) pura ({ai,cloud} desde subscriptions)
 │   └── ai/              # Índice semántico local + LLM ("El Cerebro" Fases 1-3)
 │       ├── protocol.ts  #   Tipos de mensajes worker↔main + constantes (modelo, schema)
@@ -269,6 +273,11 @@ noteflow/
 │   │   │   ├── LinkedConflictModal.tsx #   "Compare…": diff lado a lado + resultado combinado editable
 │   │   │   ├── LinkedFileIcon.tsx      #   Icono por tipo (FileSymlink = Markdown, FileCode = texto plano)
 │   │   │   └── linkedActions.ts        #   requestLinkFile (evento), tono del estado, helpers de ruta/drop
+│   │   ├── VersionHistory/             # Panel "Version history" de una sección (NoteFlow Cloud) — ver patterns.md
+│   │   │   ├── VersionHistoryPanel.tsx #   Modal: línea de tiempo por días, Cambios | Vista previa, Copiar /
+│   │   │   │                           #   Restaurar como sección nueva / Restaurar esta versión, estados sin Cloud
+│   │   │   ├── VersionHistoryParts.tsx #   Piezas de presentación (filas, diff, diálogo de captura fallida)
+│   │   │   └── versionHistoryUi.ts     #   Clases compartidas (solo tokens del tema)
 │   │   ├── ConfirmModal.tsx            # Modal de confirmación genérico (`hideCancel` = solo informativo)
 │   │   ├── EncryptionModal.tsx         # Modal cifrar/descifrar notas
 │   │   ├── ExportImportModal.tsx       # Modal exportar/importar notas (flujo, lanzado desde DataPanel)
@@ -296,6 +305,10 @@ noteflow/
 │   │   ├── encryptedSession.ts   # Re-descifrado con la contraseña de sesión tras recargar + guarda
 │   │   │                         #   anti-borrado de escrituras de notas cifradas — testeado
 │   │   ├── sectionUtils.ts       # Operaciones puras sobre la lista de secciones (patch/move/duplicate/restore)
+│   │   ├── versionHistory.ts     # Historial de versiones: agrupado por días, diff por líneas, nombre de la
+│   │   │                         #   sección restaurada, estado del panel, plan tras la captura — testeado
+│   │   ├── sectionRestore.ts     # Marca de "restauración forzada" por ventana: el editor aplica la versión
+│   │   │                         #   como sustitución exacta y un paso propio de Ctrl+Z (ver patterns.md) — testeado
 │   │   ├── sectionMap.ts         # Mapa de secciones del editor: simulación del wrap/plegado, lado de caída
 │   │   │                         #   al reordenar, contraste de la tinta — testeado
 │   │   ├── sectionInk.ts         # resolveSectionInk: tinta legible sobre un color de sección sólido (lee las
@@ -464,6 +477,9 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `cloud:lock` | handle | Descarta la DEK en memoria y su cache cifrada |
 | `cloud:enable` / `cloud:disable` | handle | Activa/desactiva el motor Cloud (activarlo toma prioridad sobre GitHub Sync — mutuamente excluyentes — y lanza pull inicial + polling); desactivar conserva journal y marcas |
 | `cloud:pull` | handle | Sync manual de la nube ("Sync now"): ciclo completo — pull incremental + drain del journal — por el runner single-flight del auto-sync (mismo contrato de broadcast que `sync:pull`) |
+| `cloud:versions-list` | handle | `(target: {notePath, sectionId})` → `{ok:true, versions: CloudVersionMeta[]}` (máx. 200, `seq` desc; lista vacía = sin versiones) \| `{ok:false, errorCode}` — historial de una sección (`electron/cloudVersions.ts`, ver `monetization.md` § 4). No exige `cloudSync.enabled`; nunca lanza |
+| `cloud:versions-get` | handle | `(target, id)` → `{ok:true, version: {id, seq, editedAt, reason, content}}` \| `{ok:false, errorCode}` (`not-found` = podada o fuera de los 30 días; `decrypt-failed` también si el `path_key` de la fila no es el del fichero) |
+| `cloud:versions-snapshot` | handle | `(target)` → `{ok:true}` \| `{ok:false, errorCode}` — guarda el texto actual de la sección en el historial antes de restaurar: sube lo pendiente de ese fichero (`cloudSync.flushPathForSnapshot`, ver `sync.md`) y llama a la RPC `cloud_snapshot_file`. Códigos propios: `sync-off`, `sync-pending`, `no-subscription` |
 | `ai:get-settings` / `ai:set-settings` | handle | Lee/escribe `settings.ai` (enabled, modelId); `set` aplica al worker y emite estado |
 | `ai:related` | handle | Notas relacionadas con la **sección activa** (centroides + coseno) |
 | `ai:search` | handle | Búsqueda semántica híbrida (vector + FTS5, RRF). La usa el RAG del chat (Fase 3) |
@@ -524,6 +540,13 @@ turno de chat o un undo lea notas; responde `ai:flush-edits-done`), `ai:chat-win
 (`handoff | null` — a la principal: vuelve la conversación de la ventana de chat), `ai:chat-window-command`
 (a la principal), `ai:chat-window-editor-target`, `ai:chat-window-request-close` y `ai:chat-window-ask`
 (a la ventana de chat).
+
+**Eventos internos del renderer** (`window.dispatchEvent(new CustomEvent('noteflow:…'))`, sin IPC):
+la familia `noteflow:open-*` la atiende `TitleBar.tsx` para abrir Ajustes en una sección.
+`noteflow:open-settings` es la genérica: `detail {section, intent?}` abre esa sección del
+`SettingsModal` (con `initialIntent`); la usa el panel de historial de versiones para llevar a Ajustes
+→ Sync en el detalle de NoteFlow Cloud (`{section: 'sync', intent: {offer: 'cloud'}}`: su plan, o el
+desbloqueo de claves), tanto desde la oferta sin Cloud como desde el estado de claves bloqueadas.
 
 ### Modelo de almacenamiento
 

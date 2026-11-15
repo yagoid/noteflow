@@ -182,6 +182,30 @@ condicionada (QA B3)" abajo (allí, con base, **fusiona** en vez de copiar). Mis
 `cloudSyncLogic.ts`, `writeConflictCopy` de `conflictCopy.ts`), misma etiqueta i18n
 (`sync.conflictCopy`, inyectada con `githubSync.setConflictCopyLabel`) y mismo aviso.
 
+📌 **Subir lo pendiente antes de una captura del historial (`flushPathForSnapshot`).** Antes de
+restaurar una versión, el panel de historial pide guardar en el historial el texto **actual** de la
+sección (IPC `cloud:versions-snapshot` → RPC `cloud_snapshot_file`, ver `monetization.md` § 4
+"Historial de versiones"). La RPC copia la fila **del servidor**, así que antes
+`cloudSync.flushPathForSnapshot(notesDir, relPath)` sube lo que este dispositivo tenga pendiente de
+ese fichero. Decide la función pura `planSnapshotFlush` (`cloudSyncLogic.ts`, tests en
+`tests/electron/cloudSnapshotFlush.test.ts`), que devuelve:
+- `clean`: nada pendiente; la fila del servidor ya es el contenido local.
+- `uploaded`: había subida pendiente (timer de debounce armado u `upsert` en el journal) y acaba de
+  subirse con `pushPathsNow`.
+- `disabled`: Cloud desactivado o sin configurar, o fichero `localOnly`.
+- `gated`: la puerta de push sigue cerrada (primer pull sin terminar).
+- `stale`: el servidor tiene una versión más nueva que este dispositivo no ha bajado (y no hay edición
+  nueva desde que se rechazó).
+- `forbidden`: subida rechazada por falta de suscripción.
+- `failed`: error de red o servidor (queda en el journal), un borrado pendiente de esa ruta, o una
+  subida en vuelo que no terminó en 30 s (si hay una en vuelo, primero la espera).
+
+**La captura nunca fuerza una subida:** reutiliza `pushPathsNow` (journal, marca `stale` y la subida
+**condicionada** normal por `cloud_upsert_file_v2`), sin camino propio; solo va forzada si la op del
+journal ya lo era. Cualquier salida distinta de `clean`/`uploaded` se traduce en un error de la
+captura (`sync-off`, `sync-pending`, `no-subscription`…) y el renderer **no** sustituye en silencio:
+ofrece restaurar como sección nueva o sustituir igualmente.
+
 **El CLI** (`cli/noteflow.js`) tiene su propio cliente Cloud headless (`noteflow cloud …`, con
 sesión y cursor propios en `settings.cliAccount`/`cliCloud`, y la misma prioridad Cloud > GitHub):
 ver `monetization.md` § 4 "Cliente CLI (headless)".

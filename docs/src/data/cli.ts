@@ -1,4 +1,4 @@
-// Structural reference data for the /cli page — mirrors the NoteFlow CLI v2.7.0.
+// Structural reference data for the /cli page — mirrors the NoteFlow CLI v2.7.0, plus `history` (v2.13.0).
 // Language-neutral fields (usage, flags, examples, colour tokens) live here once;
 // the short bilingual descriptions are inline per row (the table is ~30 rows with
 // 80% identical structure — two mirror files would drift apart).
@@ -393,6 +393,26 @@ export const cliGroups: CliGroup[] = [
           es: 'Email de la cuenta, modo de claves (estándar/privado), estado del sync y cursor. JSON: <code>{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullSeq, pullCursor } | null, githubConfigured, desktopApp }</code> (<code>desktopApp</code>: ver <code>status</code>).',
         },
       },
+      {
+        id: 'history',
+        usage: 'noteflow history <title> [section] [--show <n> | --restore <n> [--force] [--dry-run]] [--json]',
+        desc: {
+          en: 'Earlier versions of one section, kept by NoteFlow Cloud (needs <code>noteflow cloud login</code>). Without flags it lists them newest first: number (1 = most recent), when that content was written, its size and why it was kept when it isn’t a plain edit (<code>before delete</code>, <code>before a large shrink</code>, <code>saved before a restore</code>). The section goes by its <strong>exact</strong> name and can be left out when the note has only one. Cloud keeps at most one version every 10 minutes per section while you edit — always one before a delete, a large shrink or a restore — for 30 days (up to 100 versions / 20 MB per section). Password-protected and local-only notes have no history.',
+          es: 'Versiones anteriores de una sección, guardadas por NoteFlow Cloud (requiere <code>noteflow cloud login</code>). Sin flags las lista de la más reciente a la más antigua: número (1 = la más reciente), cuándo se escribió ese contenido, su tamaño y, si no es una edición normal, por qué se guardó (<code>before delete</code>, <code>before a large shrink</code>, <code>saved before a restore</code>). La sección va por su nombre <strong>exacto</strong> y se puede omitir si la nota solo tiene una. Cloud guarda como mucho una versión cada 10 minutos por sección mientras editas —siempre una antes de un borrado, de un recorte grande o de una restauración— durante 30 días (hasta 100 versiones / 20 MB por sección). Las notas con contraseña y las solo locales no tienen historial.',
+        },
+        flags: [
+          { flag: '--show <n>', desc: { en: 'Print version <code>n</code> raw to stdout, like <code>read</code>. Changes nothing.', es: 'Imprime la versión <code>n</code> tal cual en stdout, como <code>read</code>. No cambia nada.' } },
+          { flag: '--restore <n>', desc: { en: 'Replace the section with version <code>n</code>. The current content is saved to the history first (uploaded first if Cloud doesn’t have it yet); then the restore is a normal edit that bumps <code>updated:</code> and syncs, so it can be undone the same way. If that save fails (offline, a newer version on Cloud — run <code>noteflow pull</code> —, no subscription…) <strong>nothing</strong> is restored and the error says why. Numbers shift when Cloud saves a new version: check the list or <code>--show</code> right before.', es: 'Sustituye la sección por la versión <code>n</code>. Antes guarda el contenido actual en el historial (si Cloud aún no lo tiene, lo sube primero); después la restauración es una edición normal que actualiza <code>updated:</code> y sincroniza, así que se deshace igual. Si no puede guardarlo (sin conexión, una versión más nueva en Cloud —ejecuta <code>noteflow pull</code>—, sin suscripción…) <strong>no</strong> restaura nada y el error dice por qué. Los números se desplazan cuando Cloud guarda una versión nueva: comprueba la lista o <code>--show</code> justo antes.' } },
+          { flag: '--force', desc: { en: 'With <code>--restore</code>: restore even if the current content could not be saved to the history (it may be lost).', es: 'Con <code>--restore</code>: restaura aunque el contenido actual no se haya podido guardar en el historial (puede perderse).' } },
+          { flag: '--dry-run', desc: { en: 'With <code>--restore</code>: check the version without writing, uploading or saving anything.', es: 'Con <code>--restore</code>: comprueba la versión sin escribir, subir ni guardar nada.' } },
+          { flag: '--json', desc: { en: 'List: <code>{ note, section, versions: [{ index, id, seq, updatedAt, createdAt, size, reason, deleted }] }</code>. <code>--show</code>: <code>{ note, section, index, id, updatedAt, reason, content }</code>. <code>--restore</code> adds <code>restored</code>, <code>unchanged</code> and <code>snapshot</code> (<code>true</code> = saved first, <code>false</code> = not saved, restored with <code>--force</code>, <code>"skipped"</code> = nothing to save).', es: 'Lista: <code>{ note, section, versions: [{ index, id, seq, updatedAt, createdAt, size, reason, deleted }] }</code>. <code>--show</code>: <code>{ note, section, index, id, updatedAt, reason, content }</code>. <code>--restore</code> añade <code>restored</code>, <code>unchanged</code> y <code>snapshot</code> (<code>true</code> = guardado antes, <code>false</code> = no guardado, restaurado con <code>--force</code>, <code>"skipped"</code> = nada que guardar).' } },
+        ],
+        example: [
+          '$ noteflow history "Project Alpha" Tasks',
+          '$ noteflow history "Project Alpha" Tasks --show 2',
+          '$ noteflow history "Project Alpha" Tasks --restore 2',
+        ],
+      },
     ]),
   },
   {
@@ -446,7 +466,7 @@ export interface GlobalFlag {
 export const globalFlags: GlobalFlag[] = [
   {
     flag: '--json',
-    applies: 'list · get · read · path · new · add · set · delete · groups · folders · group create · folder create · status · cloud status · login --no-wait',
+    applies: 'list · get · read · path · new · add · set · delete · history · groups · folders · group create · folder create · status · cloud status · login --no-wait',
     desc: { en: 'Machine-readable JSON output on stdout (info lines go to stderr).', es: 'Salida JSON machine-readable en stdout (las líneas informativas van a stderr).' },
   },
   {
@@ -461,7 +481,7 @@ export const globalFlags: GlobalFlag[] = [
   },
   {
     flag: '--section <name>',
-    applies: 'read · path · get · add · set',
+    applies: 'read · path · get · add · set · history',
     desc: { en: 'Target a section by name.', es: 'Apunta a una sección por nombre.' },
   },
   {
@@ -491,7 +511,7 @@ export const globalFlags: GlobalFlag[] = [
   },
   {
     flag: '--dry-run',
-    applies: 'add · set',
+    applies: 'add · set · history --restore',
     desc: { en: 'Resolve the target without writing or syncing anything — fails exactly like the real run would.', es: 'Resuelve el destino sin escribir ni sincronizar — falla igual que lo haría la ejecución real.' },
   },
   {
@@ -501,8 +521,8 @@ export const globalFlags: GlobalFlag[] = [
   },
   {
     flag: '--force',
-    applies: 'pull',
-    desc: { en: 'GitHub only: overwrite even when the local note is newer.', es: 'Solo GitHub: sobrescribe aunque la nota local sea más nueva.' },
+    applies: 'pull · history --restore',
+    desc: { en: '<code>pull</code> (GitHub only): overwrite even when the local note is newer. <code>history --restore</code>: restore even if the current content could not be saved to the history first.', es: '<code>pull</code> (solo GitHub): sobrescribe aunque la nota local sea más nueva. <code>history --restore</code>: restaura aunque el contenido actual no se haya podido guardar antes en el historial.' },
   },
   {
     flag: '--no-pull',
