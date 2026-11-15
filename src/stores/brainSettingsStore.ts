@@ -6,6 +6,8 @@ const FORCE_2D_KEY = 'noteflow:brain-force-2d'
 // Set once the user has explicitly picked 2D/3D (either via Settings, the low-end
 // prompt, or the legacy force-2D flag). Used to avoid re-nudging on weak machines.
 const CHOSEN_KEY = 'noteflow:brain-3d-chosen'
+// Set once the brain view has auto-opened the Local AI dialog (onboarding nudge shown once).
+const LOCAL_AI_PROMPT_SEEN_KEY = 'noteflow:brain-local-ai-prompt-seen'
 
 // Rough guess at a low-powered device. When the Electron preload exposes real
 // hardware info, trust that (see isLowEndHardware). Otherwise fall back to the
@@ -36,8 +38,11 @@ interface BrainSettingsState {
   lowEnd: boolean
   // Show the one-time "we picked 2D for you" prompt offering to switch to 3D.
   showLowEndPrompt: boolean
+  // Whether the brain view already auto-opened the Local AI dialog once.
+  localAiPromptSeen: boolean
   setPrefer3D: (v: boolean) => void
   dismissLowEndPrompt: () => void
+  markLocalAiPromptSeen: () => void
 }
 
 export const useBrainSettingsStore = create<BrainSettingsState>((set) => ({
@@ -45,6 +50,7 @@ export const useBrainSettingsStore = create<BrainSettingsState>((set) => ({
   prefer3D: chosen ? default3D : lowEnd ? false : default3D,
   lowEnd,
   showLowEndPrompt: lowEnd && !chosen,
+  localAiPromptSeen: localStorage.getItem(LOCAL_AI_PROMPT_SEEN_KEY) === '1',
 
   setPrefer3D: (v) => {
     if (v) localStorage.removeItem(FORCE_2D_KEY)
@@ -60,5 +66,10 @@ export const useBrainSettingsStore = create<BrainSettingsState>((set) => ({
     localStorage.setItem(FORCE_2D_KEY, '1')
     localStorage.setItem(CHOSEN_KEY, '1')
     set({ showLowEndPrompt: false })
+  },
+
+  markLocalAiPromptSeen: () => {
+    localStorage.setItem(LOCAL_AI_PROMPT_SEEN_KEY, '1')
+    set({ localAiPromptSeen: true })
   },
 }))

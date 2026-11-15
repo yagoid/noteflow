@@ -219,6 +219,7 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
   const lockNote = useNotesStore((s) => s.lockNote)
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
   const setNoteView = useNotesStore((s) => s.setNoteView)
+  const noteViewId = useNotesStore((s) => s.noteViewId)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const activeSectionByNote = useNotesStore((s) => s.activeSectionByNote)
 
@@ -356,21 +357,10 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
           </button>
         </>
       )}
-      {/* Section menu only — the note menu doesn't offer it. */}
-      {currentSection && !standalone && (
-        <button
-          onClick={() => { setNoteView(note.id); onClose() }}
-          className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-        >
-          <LayoutGrid size={12} />
-          {t.noteMenu.noteOverview}
-        </button>
-      )}
-
       {currentSection && (
         <>
-          {/* In a section window only the encryption options can come before it */}
-          {(!standalone || !!note.encryption) && <div className="h-px bg-border my-1" />}
+          {/* Only the encryption options can come before the section actions */}
+          {!!note.encryption && <div className="h-px bg-border my-1" />}
           {sectionActions && !isLocked && !isLinked && (
             <button
               onClick={() => { onClose(); sectionActions.rename(currentSection.id) }}
@@ -694,6 +684,16 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
             >
               <AppWindow size={12} />
               {t.noteMenu.openInNewWindow}
+            </button>
+          )}
+          {/* Not from a section window (needs the main shell) nor when this note's view is already open. */}
+          {!standalone && noteViewId !== note.id && (
+            <button
+              onClick={() => { setNoteView(note.id); onClose() }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <LayoutGrid size={12} />
+              {t.noteMenu.noteOverview}
             </button>
           )}
         </>

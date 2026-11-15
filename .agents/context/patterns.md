@@ -263,11 +263,12 @@ mutuamente excluyentes** (contenido / nota / cerebro): los setters (`setContentV
 `setBrainView`) y `setActiveNote` se limpian entre sí, así que abrir una cierra las otras y seleccionar una
 nota devuelve el editor. `App.tsx` la renderiza (`NoteOverview`) con la prioridad de routing (contenido →
 cerebro → nota → editor) y `onClose = closeFullView()`. **Back inteligente:** si `setNoteView` se llama con la
-vista de contenido abierta (menú de sección → "Note overview"), guarda su lugar en `contentReturnPlace` (y lo
+vista de contenido abierta (menú contextual → "Note overview"), guarda su lugar en `contentReturnPlace` (y lo
 conserva si se salta a la vista de otra nota); `closeFullView()` vuelve entonces a la vista de contenido en
 ese lugar, y si no, al editor. Crear/seleccionar una nota, abrir el cerebro o la vista de contenido lo limpian. **Entradas:** el botón `LayoutGrid` de las acciones del mapa de
-secciones de `NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual **de sección**
-(tag de sección en sidebar/vistas o tab del editor; el menú de la nota en sí no lo ofrece). El clic en la
+secciones de `NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual de nota y de
+sección (`NoteContextMenu`: último del bloque de abrir, tras "Open in New Window"; oculto en una ventana de
+sección y si la vista de esa nota ya está abierta). El clic en la
 fila de la nota en el sidebar **no** es una entrada: abre el editor en la primera sección. Sin IPC nuevo.
 
 **Es el mapa de secciones con la vista previa dentro** (`NoteOverview/NoteOverview.tsx`, lógica pura en

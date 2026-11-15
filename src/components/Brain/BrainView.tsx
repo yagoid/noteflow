@@ -76,9 +76,17 @@ export function BrainView({ onClose }: { onClose: () => void }) {
   const [enabling, setEnabling] = useState(false)
   const [enableError, setEnableError] = useState<string | null>(null)
   // The Local AI button always opens this dialog; its content depends on whether
-  // AI is currently on (offer to disable) or off (offer to enable). Auto-opens on
-  // entry when AI is off, as an onboarding nudge.
-  const [showDialog, setShowDialog] = useState(() => !enabled)
+  // AI is currently on (offer to disable) or off (offer to enable). As a one-time
+  // onboarding nudge it auto-opens on the first entry with AI off; the flag is set as
+  // soon as it auto-opens, however the user then closes it. Read from the store's
+  // snapshot (not written during render) so StrictMode's double invocation of the
+  // initializer can't swallow the first auto-open.
+  const [autoOpenDialog] = useState(() => !enabled && !useBrainSettingsStore.getState().localAiPromptSeen)
+  const [showDialog, setShowDialog] = useState(autoOpenDialog)
+  const markLocalAiPromptSeen = useBrainSettingsStore((s) => s.markLocalAiPromptSeen)
+  useEffect(() => {
+    if (autoOpenDialog) markLocalAiPromptSeen()
+  }, [autoOpenDialog, markLocalAiPromptSeen])
   // WebGL support is fixed for the session; the 3D/2D preference is live (Settings → Appearance).
   const [webglSupported] = useState(detectWebGL)
   const prefer3D = useBrainSettingsStore((s) => s.prefer3D)

@@ -87,6 +87,10 @@ consumidores** (related ✅, grafo ✅, chat ✅).
     el cerebro arranca por defecto en 2D y muestra un popup una-vez ofreciendo cambiar a 3D; la
     elección explícita del usuario (o el legacy force-2D) se marca con `localStorage
     'noteflow:brain-3d-chosen'` y ya no vuelve a nudgear.
+    El diálogo de la **IA local** (botón "Local AI" de la cabecera, siempre lo abre) se **auto-abre solo la
+    primera vez** que se entra con la IA local apagada (onboarding una vez): al auto-abrirse se marca
+    `localStorage 'noteflow:brain-local-ai-prompt-seen'` (`brainSettingsStore.markLocalAiPromptSeen`), cierre
+    como cierre el usuario. El popup de gama baja espera a que ese diálogo no esté abierto.
     La detección de gama baja (`isLowEndDevice` en `brainSettingsStore.ts`) usa **hardware real** del
     proceso Electron: el preload expone `window.noteflow.hardware`, leído de forma **síncrona** en
     carga del preload vía `ipcRenderer.sendSync('app:get-hardware')` (el handler en `main.ts` calcula
