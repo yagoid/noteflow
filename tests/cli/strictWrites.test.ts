@@ -162,6 +162,8 @@ describe('per-command flag validation', () => {
     expect(flagError('cloud', 'push', ['--force'])).toContain("Flag --force is not supported by 'cloud push'")
     expect(flagError('new', 'X', ['--tag'])).toContain("Flag --tag is not supported by 'new'")
     expect(flagError('push', undefined, ['--force'])).toContain("by 'push'")
+    expect(flagError('read', 'T', ['--show'])).toContain("Flag --show is not supported by 'read'")
+    expect(flagError('set', 'T', ['--restore'])).toContain("Flag --restore is not supported by 'set'")
   })
 
   it('accepts every documented combination', () => {
@@ -181,6 +183,7 @@ describe('per-command flag validation', () => {
       ['login', undefined, ['--no-pull']], ['login', 'r', ['--no-wait', '--no-pull', '--json']], ['login', undefined, ['--finish', '--no-pull']],
       ['cloud', 'login', ['--send-code']], ['cloud', 'login', ['--code', '--no-pull']], ['cloud', 'status', ['--json']],
       ['pull', undefined, ['--force']], ['update', undefined, ['--force']], ['status', undefined, ['--json']],
+      ['history', 'T', ['--section', '--show', '--restore', '--dry-run', '--force', '--json']],
     ]
     for (const [cmd, sub, seen] of okCombos) expect(flagError(cmd, sub, seen), `${cmd} ${sub ?? ''} ${seen.join(' ')}`).toBeNull()
   })

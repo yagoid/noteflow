@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.12.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.13.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.12.0'
+const CLI_VERSION = '2.13.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -3684,9 +3684,13 @@ function promptLine(question) {
   return readPromptLine(question)
 }
 
-/** Interactive prompt with hidden echo (passphrases). Plain line read when stdin is not a TTY. */
+/**
+ * Interactive prompt with hidden echo (passphrases). Plain line read when stdin
+ * is not a TTY. On STDERR: it runs in the middle of commands whose stdout is
+ * data (`history --show > v.md`, any `--json | jq`), and a prompt is never data.
+ */
 function promptHidden(question) {
-  return readPromptLine(question, { hidden: true })
+  return readPromptLine(question, { hidden: true, output: process.stderr })
 }
 
 /**
@@ -5450,6 +5454,385 @@ async function cmdSet(titleQuery, sectionName, opts) {
   await syncPushNoteFiles(note.dirname, [NOTE_MD, `${sec.id}.md`])
 }
 
+// ── noteflow history (NoteFlow Cloud version history of a section) ───────────
+//
+// The server keeps earlier versions of every synced file in public.file_versions
+// (an AFTER UPDATE trigger on public.files copies the replaced row: at most one
+// per file every 10 min for plain edits, always before a delete or a large
+// shrink; 30 days, 100 versions / 20 MB per file). The rows are the SAME
+// encrypted blobs as `files` (path_ct, content_ct, key_ct); the client reads
+// them (RLS by owner) and can ask for one more: the RPC cloud_snapshot_file
+// (migration 0017) keeps the CURRENT row as a 'manual' version. A restore saves
+// the section's current content that way first (the 10-minute throttle could
+// otherwise skip it), then is a normal edit of the section.
+
+const HISTORY_LIST_LIMIT = 200
+const HISTORY_SNAPSHOT_RPC = 'cloud_snapshot_file'
+// Labels of the non-edit reasons; any other value (a plain 'edit', or a reason a
+// newer server adds) is listed as a plain version.
+const HISTORY_REASON_LABELS = { delete: 'before delete', shrink: 'before a large shrink', manual: 'saved before a restore' }
+const SEALED_OVERHEAD_BYTES = IV_BYTES + 16 // iv + AES-GCM tag (see cloudSeal)
+
+/** Pure: the 1-based version number of --show/--restore, or null if it isn't a positive integer. */
+function parseHistoryIndex(raw) {
+  const s = String(raw ?? '').trim()
+  if (!/^\d+$/.test(s)) return null
+  const n = Number(s)
+  return Number.isSafeInteger(n) && n >= 1 ? n : null
+}
+
+/** Pure: the error of an invalid flag combination of `history`, else null. */
+function historyFlagsError(opts) {
+  if (opts.show !== undefined && opts.restore !== undefined) {
+    return '--show and --restore cannot be combined — show a version first, then restore it'
+  }
+  if (opts.dryRun && opts.restore === undefined) return '--dry-run only applies to --restore'
+  if (opts.force && opts.restore === undefined) return '--force only applies to --restore'
+  for (const flag of ['show', 'restore']) {
+    if (opts[flag] !== undefined && parseHistoryIndex(opts[flag]) === null) {
+      return `--${flag} needs a version number (1 = most recent), got "${opts[flag]}"`
+    }
+  }
+  return null
+}
+
+/**
+ * Pure: content size in bytes from `size` (octet_length of content_ct). A sealed
+ * blob is base64url (no padding) of iv + UTF-8 plaintext + GCM tag, so this is
+ * the plaintext's UTF-8 length — exact for blobs written by NoteFlow clients.
+ */
+function historyContentBytes(storedSize) {
+  const n = Number(storedSize)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.max(0, Math.floor((n * 3) / 4) - SEALED_OVERHEAD_BYTES)
+}
+
+/** Pure: "512 B" / "1.2 KB" / "3.4 MB". */
+function formatHistoryBytes(n) {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Pure: local "YYYY-MM-DD HH:mm" of an ISO timestamp (the raw value if unparseable). */
+function formatHistoryDate(iso) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return String(iso ?? '')
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/**
+ * Pure: file_versions rows → [{ index, id, seq, updatedAt, createdAt, size, reason,
+ * deleted }], newest first by seq (re-sorted: the order never depends on the
+ * server's), index 1-based. `size` = content bytes (historyContentBytes).
+ * `deleted`: an empty content_ct (size 0) — a tombstone row (files blanks
+ * content_ct on delete), not a content: even an empty section seals to a
+ * non-empty blob.
+ */
+function planHistoryVersions(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map(r => ({ r, seq: parseRowSeq(r.seq) }))
+    .sort((a, b) => (b.seq ?? -1) - (a.seq ?? -1))
+    .map(({ r, seq }, i) => ({
+      index: i + 1,
+      id: r.id,
+      seq,
+      updatedAt: r.updated_at,
+      createdAt: r.created_at,
+      size: historyContentBytes(r.size),
+      reason: r.reason,
+      deleted: Number(r.size) === 0,
+    }))
+}
+
+/** Pure: one line of the human version list. */
+function formatHistoryLine(v, indexWidth = 1) {
+  const label = v.deleted ? 'deletion marker (no content)'
+    : Object.hasOwn(HISTORY_REASON_LABELS, v.reason) ? HISTORY_REASON_LABELS[v.reason] : ''
+  const size = (v.deleted ? '-' : formatHistoryBytes(v.size)).padEnd(9)
+  return `    ${String(v.index).padStart(indexWidth)}  ${formatHistoryDate(v.updatedAt)}  ${size}${label ? ` ${label}` : ''}`.trimEnd()
+}
+
+/**
+ * Pure: answer of cloud_snapshot_file → 'saved' (true: the current row has a
+ * version — idempotent) | 'nothing' (false: no live row with content) |
+ * 'forbidden' (403 42501: no active subscription) | 'missing' (404 PGRST202:
+ * server without migration 0017) | 'error'.
+ */
+function classifySnapshot(status, json) {
+  const code = json && typeof json === 'object' ? json.code : undefined
+  if (status === 403 && code === '42501') return 'forbidden'
+  if (status === 404 && code === 'PGRST202') return 'missing'
+  if (status >= 400) return 'error'
+  if (json === true) return 'saved'
+  if (json === false) return 'nothing'
+  return 'error'
+}
+
+/**
+ * Pure: whether a restore may go ahead after the snapshot attempt `outcome`
+ * (classifySnapshot, or 'unsynced' / 'unreachable' from the steps before it).
+ * Only 'saved' — plus 'nothing' when the local section is empty: Cloud has no
+ * content row to keep and there is nothing local to lose. Any other outcome
+ * (also 'changed': the file moved on after it was verified) could lose content
+ * for good. `force` restores anyway.
+ */
+function snapshotAllowsRestore(outcome, localContent, force) {
+  if (outcome === 'saved') return true
+  if (outcome === 'nothing' && localContent === '') return true
+  return !!force
+}
+
+/** Pure: why the current content could not be saved to the history (refusal / warning text). */
+function snapshotFailureReason(outcome, detail) {
+  switch (outcome) {
+    case 'unsynced': return detail || 'it is not on NoteFlow Cloud yet'
+    case 'unreachable': return `NoteFlow Cloud could not be reached (${detail})`
+    case 'nothing': return 'NoteFlow Cloud has no current content of this section to save'
+    case 'forbidden': return 'saving to the history needs an active NoteFlow Cloud subscription'
+    case 'missing': return 'this NoteFlow Cloud server cannot save versions on demand yet'
+    case 'changed': return 'the section changed on disk while it was being saved (another app or command edited it)'
+    default: return `NoteFlow Cloud answered with an error${detail ? ` (${detail})` : ''}`
+  }
+}
+
+/** The section file's current bytes on disk (null if missing) — what an upload sends. */
+function readSectionFileRaw(relPath) {
+  try { return fs.readFileSync(path.join(NOTES_DIR, relPath), 'utf-8') } catch { return null }
+}
+
+/** Live content of one remote file (null: no row / tombstone). Throws on a failed request. */
+async function cloudFetchLiveContent(dek, relPath) {
+  const { entries } = await cloudFetchRemoteRows(dek, [relPath])
+  const entry = entries[0]
+  return entry && !entry.deleted ? entry.content : null
+}
+
+/**
+ * Before a restore: NoteFlow Cloud must hold the section's CURRENT local content
+ * and keep it as a version. (1) If Cloud lacks it (or the note has uploads
+ * pending), the note goes up first through the normal conditional path
+ * (syncPushNoteFiles, never forced), and Cloud is re-checked. (2) The RPC
+ * cloud_snapshot_file keeps the current row as a 'manual' version.
+ * → { outcome, detail?, verified? } — outcome 'saved' is the only full success
+ * (see snapshotAllowsRestore); `verified` = the file's raw content that Cloud
+ * was checked to hold (what the RPC keeps), present once the RPC is reached —
+ * the caller compares it with the disk before writing. Never exits.
+ */
+async function snapshotSectionBeforeRestore(dek, note, relPath, pathKey) {
+  let remote
+  try { remote = await cloudFetchLiveContent(dek, relPath) } catch (e) { return { outcome: 'unreachable', detail: e.message } }
+  let verified = readSectionFileRaw(relPath)
+  if (remote !== verified || pendingUnderDir(getCliCloud().pendingUpserts, note.dirname)) {
+    out('  Uploading the current content first, so the history can keep it…')
+    const files = [NOTE_MD, ...(note.sections || []).map(s => path.basename(s.file || `${s.id}.md`))]
+    await syncPushNoteFiles(note.dirname, files)
+    try { remote = await cloudFetchLiveContent(dek, relPath) } catch (e) { return { outcome: 'unreachable', detail: e.message } }
+    verified = readSectionFileRaw(relPath)
+    if (remote !== verified) {
+      // Still pending = this section's upload failed or was rejected as stale;
+      // not pending = it matched its base, so Cloud's copy is the newer one.
+      const uploadFailed = isPendingUpsert(getCliCloud().pendingUpserts, relPath)
+      return {
+        outcome: 'unsynced',
+        detail: uploadFailed
+          ? 'its upload to NoteFlow Cloud did not go through (see the sync message above)'
+          : "NoteFlow Cloud has a newer version of it — run 'noteflow pull' first",
+      }
+    }
+  }
+  let res
+  try {
+    res = await cloudRestWithRetry(() => cloudRest(`/rest/v1/rpc/${HISTORY_SNAPSHOT_RPC}`, { method: 'POST', body: { p_path_key: pathKey } }))
+  } catch (e) {
+    return { outcome: 'unreachable', detail: e.message, verified }
+  }
+  const outcome = classifySnapshot(res.status, res.json)
+  return { outcome, detail: outcome === 'error' ? `HTTP ${res.status}` : undefined, verified }
+}
+
+/**
+ * GET on file_versions → rows. A server without the table answers 404
+ * (PGRST205): the feature isn't deployed yet — said plainly, exit 1.
+ */
+async function cloudFetchHistoryRows(query) {
+  const res = await cloudRestWithRetry(() => cloudRest(`/rest/v1/file_versions?${query}`))
+  if (res.status === 404) {
+    err('Version history is not available on NoteFlow Cloud yet — nothing was done. Try again after the next NoteFlow update.')
+    exit(1)
+  }
+  if (res.status >= 400) { err(`Could not load the version history from NoteFlow Cloud (HTTP ${res.status})`); exit(1) }
+  return Array.isArray(res.json) ? res.json : []
+}
+
+/**
+ * An encrypted (password-protected) note matching the title, or null. The CLI's
+ * readers skip them (readNoteFolder), so `history` looks for them on its own to
+ * explain why they have no history instead of "No note found".
+ */
+function findEncryptedNoteTitle(titleQuery) {
+  if (!fs.existsSync(NOTES_DIR)) return null
+  const q = titleQuery.toLowerCase()
+  const titles = []
+  for (const e of fs.readdirSync(NOTES_DIR, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue
+    let raw
+    try { raw = fs.readFileSync(path.join(NOTES_DIR, e.name, NOTE_MD), 'utf-8') } catch { continue }
+    const note = parseNoteYaml(splitFrontmatter(raw).frontmatter)
+    if (note.encryption && note.title) titles.push(String(note.title))
+  }
+  return titles.find(t => t.toLowerCase() === q) || titles.find(t => t.toLowerCase().includes(q)) || null
+}
+
+// noteflow history <title> [section] [--section s] [--show <n> | --restore <n> [--dry-run]] [--json]
+// Lists / prints / restores earlier versions of one section kept by NoteFlow Cloud.
+async function cmdHistory(titleQuery, sectionName, opts) {
+  const flagError = historyFlagsError(opts)
+  if (flagError) { err(flagError); exit(1) }
+  // Everything that can be decided locally is checked before asking for the DEK
+  // (an e2ee account would prompt for the passphrase for nothing).
+  if (!cloudActive()) {
+    err("Version history comes from NoteFlow Cloud, which is not active in this CLI — sign in with 'noteflow cloud login'.")
+    exit(1)
+  }
+  if (!findNoteByTitle(titleQuery).length) {
+    const encrypted = findEncryptedNoteTitle(titleQuery)
+    if (encrypted) {
+      err(`"${encrypted}" is password-protected — password-protected notes have no version history.`)
+      exit(1)
+    }
+  }
+  const note = resolveNote(titleQuery)
+  if (isLocalOnlyNoteDir(note.dirname)) {
+    err(`"${note.title}" is a local-only note — it is never synced, so it has no version history.`)
+    exit(1)
+  }
+  let sec
+  if (sectionName) {
+    // Exact name only (like 'set'): --restore overwrites it, so never a loose match.
+    sec = resolveSection(note, sectionName)
+  } else if ((note.sections || []).length === 1) {
+    sec = note.sections[0]
+  } else {
+    err(`"${note.title}" has ${(note.sections || []).length} sections — pick one with --section. Sections: ${sectionNamesOf(note)}.`)
+    exit(1)
+  }
+
+  const fileName = path.basename(sec.file || `${sec.id}.md`)
+  const relPath = `${note.dirname}/${fileName}`
+  const dek = await getCliDek()
+  const pathKey = await derivePathKeyHmac(dek, relPath)
+  const versions = planHistoryVersions(await cloudFetchHistoryRows(
+    `path_key=eq.${encodeURIComponent(pathKey)}&select=id,seq,updated_at,created_at,size,reason&order=seq.desc&limit=${HISTORY_LIST_LIMIT}`
+  ))
+
+  const wanted = opts.show !== undefined ? parseHistoryIndex(opts.show)
+    : opts.restore !== undefined ? parseHistoryIndex(opts.restore) : null
+  if (wanted === null) {
+    if (opts.json) { jsonOut({ note: note.title, section: sec.name, versions }); return }
+    if (!versions.length) {
+      out(`  No versions yet for "${sec.name}" in "${note.title}" — NoteFlow Cloud saves one when the section changes (at most one every 10 minutes, kept 30 days).`)
+      return
+    }
+    const width = String(versions.length).length
+    out(`\n  Version history of "${note.title}" → "${sec.name}" (NoteFlow Cloud, newest first):`)
+    for (const v of versions) out(formatHistoryLine(v, width))
+    out(`\n  Show one:  noteflow history "${note.title}" --section "${sec.name}" --show <n>`)
+    out(`  Restore:   noteflow history "${note.title}" --section "${sec.name}" --restore <n>\n`)
+    return
+  }
+  if (wanted > versions.length) {
+    err(versions.length
+      ? `No version ${wanted} for "${sec.name}" in "${note.title}" — there ${versions.length === 1 ? 'is 1 version' : `are ${versions.length} versions`} (1 = most recent).`
+      : `No versions yet for "${sec.name}" in "${note.title}".`)
+    exit(1)
+  }
+  const v = versions[wanted - 1]
+  const rows = await cloudFetchHistoryRows(
+    `id=eq.${encodeURIComponent(String(v.id))}&select=id,path_key,path_ct,content_ct,key_ct,updated_at,seq,reason`
+  )
+  const row = rows[0]
+  if (!row) { err(`Version ${wanted} is no longer on NoteFlow Cloud (expired?) — run 'noteflow history' again.`); exit(1) }
+  let entry = null
+  if (row.path_key === pathKey) {
+    try { entry = await decryptFileRow(dek, row) } catch { entry = null }
+  }
+  // Defense in depth: never show or restore a blob that isn't this section's.
+  if (!entry || entry.relPath !== relPath) {
+    err(`Version ${wanted} does not belong to "${sec.name}" in "${note.title}" (or cannot be decrypted) — nothing was shown or restored.`)
+    exit(1)
+  }
+  // A tombstone copied into the history (e.g. when a deleted file came back):
+  // its blank content_ct means "deleted", not an empty section — never restore it.
+  if (row.deleted === true || !row.content_ct) {
+    err(`Version ${wanted} is a deletion marker (the section was deleted then) — nothing to show or restore.`)
+    exit(1)
+  }
+  const content = entry.content
+  const when = formatHistoryDate(v.updatedAt)
+
+  if (opts.show !== undefined) {
+    if (opts.json) {
+      jsonOut({ note: note.title, section: sec.name, index: wanted, id: v.id, updatedAt: v.updatedAt, reason: v.reason, content })
+      return
+    }
+    process.stdout.write(content + '\n')
+    return
+  }
+
+  // --restore: re-read the note right before using it (the network round-trips
+  // above leave a window for another writer) and target the section by id.
+  const loadTarget = () => {
+    const n = readNoteFolder(note.dirname)
+    const t = n && (n.sections || []).find(s => s.id === sec.id)
+    if (!t) { err(`Section "${sec.name}" changed on disk while loading its history — nothing was restored. Try again.`); exit(1) }
+    return { fresh: n, target: t }
+  }
+  let { fresh, target } = loadTarget()
+  const result = () => ({
+    note: fresh.title, dirname: fresh.dirname, section: target.name, index: wanted, id: v.id,
+    updatedAt: v.updatedAt, reason: v.reason, bytesWritten: Buffer.byteLength(content, 'utf-8'),
+  })
+  const isUnchanged = () => target.content === content.replace(/\r\n/g, '\n')
+  const reportUnchanged = (snapshot) => {
+    if (opts.json) { jsonOut({ ...result(), restored: false, unchanged: true, bytesWritten: 0, snapshot, ...(opts.dryRun ? { dryRun: true } : {}) }); return }
+    out(`  "${target.name}" already has the content of version ${wanted} (${when}) — nothing to restore`)
+  }
+  if (isUnchanged()) { reportUnchanged('skipped'); return }
+  if (opts.dryRun) {
+    // No request that writes: the snapshot (and any upload) only happen for real.
+    if (opts.json) { jsonOut({ ...result(), restored: false, unchanged: false, snapshot: 'skipped', dryRun: true }); return }
+    out(`  [dry-run] Would save the current content to the history, then restore version ${wanted} (${when}) of "${target.name}" in "${fresh.title}" (${content.length} chars) — nothing written`)
+    return
+  }
+
+  // Keep what is there now before replacing it (see snapshotSectionBeforeRestore).
+  const snap = await snapshotSectionBeforeRestore(dek, fresh, relPath, pathKey)
+  const reloaded = loadTarget() // an upload's reconcile may have pulled into the note
+  fresh = reloaded.fresh
+  target = reloaded.target
+  // What was saved must still be what the restore replaces: an edit landing
+  // during the round-trips (e.g. the desktop app's autosave) is in no version.
+  const outcome = snap.verified !== undefined && readSectionFileRaw(relPath) !== snap.verified ? 'changed' : snap.outcome
+  const saved = outcome === 'saved'
+  const failure = saved ? '' : snapshotFailureReason(outcome, snap.detail)
+  if (!snapshotAllowsRestore(outcome, target.content, opts.force)) {
+    err(`Could not save the current content of "${target.name}" to the history: ${failure} — nothing was restored.`)
+    console.error('  Try again, or add --force to restore anyway without saving it (it may be lost).')
+    exit(1)
+  }
+  const snapshot = saved ? true : outcome === 'nothing' && target.content === '' ? 'skipped' : false
+  if (isUnchanged()) { reportUnchanged(snapshot); return }
+  target.content = content
+  writeNoteFolder(fresh.dirname, fresh)
+  if (opts.json) jsonOut({ ...result(), restored: true, unchanged: false, snapshot })
+  else out(`  Restored version ${wanted} (${when}) of "${target.name}" in "${fresh.title}"  (${content ? lineCount(content) + ' lines' : 'empty'})`)
+  if (saved) out('  The content it replaced was saved to the history first ("saved before a restore").')
+  else if (snapshot === false) console.error(`  Warning: the content it replaced was NOT saved to the history (${failure}) — restored anyway (--force).`)
+  await syncPushNoteFiles(fresh.dirname, [NOTE_MD, `${target.id}.md`])
+}
+
 // noteflow section add <title> <name> [--raw]  — append a new (possibly duplicate-named) section
 // (markdown mode by default, --raw for text mode)
 async function cmdSectionAdd(titleQuery, name, opts) {
@@ -6610,6 +6993,56 @@ function cmdHelp(topic) {
   Title can be partial; duplicate section names take a 1-based suffix ("Tasks#2").
   Section names resolve like in 'read', including the loose word match.
 `,
+    history: `
+  noteflow history <title> [section] [--section s] [--json]
+  noteflow history <title> [section] --show <n> [--json]
+  noteflow history <title> [section] --restore <n> [--force] [--dry-run] [--json]
+
+  Earlier versions of one section, kept by NoteFlow Cloud (needs an active
+  'noteflow cloud login'). Without --show/--restore it lists them, newest first:
+  number (1 = most recent), when that content was written (local time), its size
+  and, when it isn't a plain edit, why it was kept ("before delete", "before a
+  large shrink", "saved before a restore"). The current content is not listed.
+
+    --show <n>      Print version n RAW to stdout (like 'read'); changes nothing
+    --restore <n>   Replace the section with version n. First the section's
+                    current content is saved to the history (uploaded first if
+                    Cloud doesn't have it yet; listed as "saved before a
+                    restore"); then the restore is a normal edit: it bumps
+                    'updated:' and syncs — so it can be undone the same way.
+                    If that save fails (offline, a newer version on Cloud —
+                    run 'noteflow pull' —, no subscription, an older server…)
+                    NOTHING is restored and the error says why.
+    --force         With --restore: restore even if the current content could
+                    not be saved to the history (it may be lost)
+    --dry-run       With --restore: check the version, write and upload nothing
+                    (the save to the history is not attempted either)
+    --json          List: { note, section, versions: [{ index, id, seq,
+                    updatedAt, createdAt, size, reason, deleted }] } (size in
+                    bytes; deleted = a deletion marker: nothing to show/restore;
+                    reason as stored: edit, delete, shrink, manual, …)
+                    --show: { note, section, index, id, updatedAt, reason, content }
+                    --restore: { note, dirname, section, index, id, updatedAt,
+                    reason, bytesWritten, restored, unchanged, snapshot[, dryRun] }
+                    snapshot: true = current content saved first; false = not
+                    saved, restored with --force; "skipped" = nothing to save
+                    (dry run, no change, or an empty section Cloud doesn't hold)
+
+  Section: the EXACT name (like 'set'; "Name#2" for duplicates). It can be left
+  out when the note has a single section. Numbers shift when Cloud saves a new
+  version (a restore adds one), so check the list (or --show) right before
+  --restore.
+
+  What Cloud keeps: at most one version every 10 minutes per section while you
+  edit (always one before a delete, a large shrink or a restore), for 30 days
+  (up to 100 versions / 20 MB per section). Password-protected and local-only
+  notes have no history.
+
+  Examples:
+    noteflow history "Project Alpha" Tasks
+    noteflow history "Project Alpha" Tasks --show 2
+    noteflow history "Project Alpha" Tasks --restore 2
+`,
     touch: `
   noteflow touch <title>
 
@@ -6960,6 +7393,7 @@ function cmdHelp(topic) {
     set <title> <sec>     Overwrite a section's content (--create if it's new)
     path <title> [sec]    Print the absolute path of a section's .md (or the note dir)
     touch <title>         Bump 'updated:' and push (after editing a .md by hand)
+    history <title> [sec] NoteFlow Cloud: list / --show / --restore earlier versions
     delete <title>        Delete a note
     rename <old> <new>    Rename a note
     move <title>          Move a note to a group/folder (--group/--folder/--ungroup)
@@ -6999,10 +7433,11 @@ function cmdHelp(topic) {
 
   Flags (a flag a command doesn't support is an error, never ignored):
     --json                Machine-readable JSON output (info lines go to stderr) —
-                          list/get/read/path/new/add/set/delete, groups/folders,
+                          list/get/read/path/new/add/set/delete/history, groups/folders,
                           group create/folder create, status/cloud status, login --no-wait
     --yes                 Skip confirmation prompts
-    --dry-run             add/set: resolve the target without writing anything
+    --dry-run             add/set/history --restore: resolve the target without
+                          writing anything
     --create              add/set: create a missing section (add: or note) —
                           without it an unknown section name is an error
     --raw                 add/set/new/section add: new section in text mode (as-is);
@@ -7061,7 +7496,7 @@ const BOOLEAN_FLAGS = {
   // cloud login <email> --send-code / --code <code>.
   '--no-wait': ['noWait', true], '--finish': ['finish', true], '--send-code': ['sendCode', true],
 }
-const VALUE_FLAGS = ['--tag', '--title', '--section', '--group', '--folder', '--color', '--text', '--file', '--code']
+const VALUE_FLAGS = ['--tag', '--title', '--section', '--group', '--folder', '--color', '--text', '--file', '--code', '--show', '--restore']
 
 function parseFlags(args) {
   const flags = {}; const positional = []; const seen = []
@@ -7100,6 +7535,7 @@ const COMMAND_FLAGS = {
   new: ['--section', '--group', '--folder', ...RAW_FLAGS, '--json'],
   list: ['--tag', '--group', '--folder', '--archived', '--json'],
   get: ['--section', '--json'], read: ['--section', '--json'], path: ['--section', '--json'],
+  history: ['--section', '--show', '--restore', '--dry-run', '--force', '--json'],
   delete: ['--json'], rename: [], sections: [], touch: [], favorite: [], archive: [],
   'section list': [], 'section add': RAW_FLAGS, 'section rename': [], 'section delete': [],
   move: ['--group', '--folder', '--ungroup'],
@@ -7203,6 +7639,13 @@ async function main() {
       if (!title) { err('Usage: noteflow path <title> [section]'); exit(1) }
       const section = flags.section || positional.slice(1).join(' ')
       cmdPath(title, section, flags)
+      break
+    }
+    case 'history': {
+      const title = positional[0]
+      if (!title) { err('Usage: noteflow history <title> [section] [--show <n> | --restore <n>]'); exit(1) }
+      const section = flags.section || positional.slice(1).join(' ')
+      await cmdHistory(title, section, flags)
       break
     }
     case 'touch': {
@@ -7383,5 +7826,9 @@ if (require.main === module) {
     mergeSectionText, DEFAULT_SECTION_CONFLICT_LABELS, SECTION_CONFLICT_LABEL_TEMPLATES, sectionConflictLabels,
     conflictMarkerLabels, CLOUD_BASE_CONTENT_DIR,
     skillAgentDestDirs, refreshInstalledSkills,
+    // noteflow history (NoteFlow Cloud version history)
+    cmdHistory, parseHistoryIndex, historyFlagsError, historyContentBytes, formatHistoryBytes,
+    formatHistoryDate, planHistoryVersions, formatHistoryLine, classifySnapshot, snapshotAllowsRestore,
+    snapshotFailureReason, HISTORY_SNAPSHOT_RPC,
   }
 }

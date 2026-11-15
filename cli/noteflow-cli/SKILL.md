@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.12.0
+version: 2.13.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -100,6 +100,12 @@ el JSON.
   `Local-only note — not synced`, `push` no las sube y `delete` no las borra del remoto. Lo que tenga que
   llegar a otros dispositivos, escríbelo en otra nota.
 - **`favorite` y `archive` alternan** (toggle): dos veces deshacen el cambio.
+- **`history --restore <n>` reemplaza la sección entera** (como `set`) y **los números se
+  desplazan** cada vez que Cloud guarda una versión nueva (también al restaurar): justo antes de
+  restaurar, comprueba la versión con `--show <n>` (o la lista).
+- **`history --restore --force` puede perder el contenido actual**: sin él, si el CLI no consigue
+  guardarlo antes en el historial, no restaura nada (exit 1 y el motivo). No uses `--force` sin que
+  el usuario lo pida; si el motivo es una versión más nueva en Cloud, haz `noteflow pull` y repite.
 - **`NOTEFLOW_NOTES_DIR=<dir>` solo cambia el directorio de notas, no la sesión de sync**: con sync
   activo, lo que escribas en ese directorio de pruebas se sube a la cuenta real del usuario. Para
   aislarlo, apunta también `APPDATA` (Windows) o `XDG_CONFIG_HOME` (Linux/macOS) a un directorio
@@ -108,8 +114,9 @@ el JSON.
 ## Chuleta de comandos
 
 Detalle de cada uno: **`noteflow help <comando>`**. `--json` (salida para máquina en stdout) existe
-en `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `groups`, `folders`, `group create`,
-`folder create`, `status`, `cloud status` y `login --no-wait`; en los demás es un error.
+en `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `history`, `groups`, `folders`,
+`group create`, `folder create`, `status`, `cloud status` y `login --no-wait`; en los demás es un
+error.
 
 **Leer**
 - `noteflow list [--tag t] [--group g] [--folder f] [--archived] [--json]` — notas (sin las
@@ -129,7 +136,8 @@ en `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `groups`, `fold
   exacto (uno parcial que coincide con una sola nota escribe en ella).
 - `noteflow set "<nota>" "<sección>" (--text t | --file f | --stdin) [--create] [--raw] [--dry-run]
   [--json]` — **reemplaza** la sección (`--create`: la crea si no existe). La nota debe existir.
-- `--dry-run` (en `add`/`set`) valida el destino sin escribir: falla igual que la ejecución real.
+- `--dry-run` (en `add`/`set`/`history --restore`) valida el destino sin escribir: falla igual que
+  la ejecución real.
 - `noteflow new "<título>" [--section s] [--group g [--folder f]] [--raw] [--json]` — nota vacía.
 - `noteflow touch "<nota>"` — tras editar un `.md` a mano: relee la nota, bumpea `updated:` y
   sincroniza.
@@ -138,6 +146,21 @@ en `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `groups`, `fold
 - `noteflow rename "<nota>" "<nuevo título>"` · `noteflow delete "<nota>" --yes [--json]` (alias `rm`).
 - `noteflow move "<nota>" --group g [--folder f]` · `noteflow move "<nota>" --ungroup`.
 - `noteflow favorite "<nota>"` (alias `pin`) · `noteflow archive "<nota>"` — toggles.
+
+**Historial de versiones (solo NoteFlow Cloud)**
+- `noteflow history "<nota>" ["<sección>"] [--section s] [--json]` — versiones anteriores de una
+  sección, la más reciente = 1 (el contenido actual no sale en la lista). Sección con nombre exacto;
+  se puede omitir si la nota tiene una sola.
+- `noteflow history "<nota>" "<sección>" --show <n> [--json]` — imprime la versión `n` verbatim,
+  sin tocar nada.
+- `noteflow history "<nota>" "<sección>" --restore <n> [--force] [--dry-run] [--json]` — la
+  restaura. Antes guarda el contenido actual en el historial (si Cloud aún no lo tiene, lo sube
+  primero; aparece como "saved before a restore") y después es una edición normal (bumpea
+  `updated:` y sincroniza), así que se puede deshacer igual. Si no puede guardarlo, no restaura;
+  `--force` restaura igualmente sin guardarlo. `--dry-run` no sube ni guarda nada.
+- Cloud guarda como mucho una versión cada 10 minutos por sección mientras se edita (siempre una
+  antes de un borrado, de un recorte grande o de una restauración) y durante 30 días. Las notas con
+  contraseña y las solo locales no tienen historial; sin sesión de Cloud el comando falla y lo dice.
 
 **Grupos y carpetas**
 - `noteflow groups [--json]` · `group create "<nombre>" [--color c]` · `group delete "<nombre>"
