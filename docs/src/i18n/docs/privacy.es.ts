@@ -20,7 +20,7 @@ export const privacyEs: LegalContent = {
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Política de<br />privacidad',
-    tagline: 'Última actualización: 14 de noviembre de 2026',
+    tagline: 'Última actualización: 15 de noviembre de 2026',
   },
 
   summary: {
@@ -349,7 +349,7 @@ export const privacyEs: LegalContent = {
           items: [
             'Los <strong>datos de la cuenta</strong> se conservan mientras tu cuenta exista.',
             'Los <strong>registros de medición de IA</strong> se conservan mientras tu cuenta exista, para aplicar la cuota y prevenir abusos.',
-            'Los <strong>datos de la nube (texto cifrado)</strong> se conservan hasta que los borres o elimines tu cuenta. Si tu suscripción caduca, sigues pudiendo descargar y borrar tus datos de la nube.',
+            'Los <strong>datos de la nube (texto cifrado)</strong> se conservan hasta que los borres o elimines tu cuenta. Las <strong>versiones anteriores</strong> de tus notas (contenido que has cambiado o borrado después) se conservan cifradas hasta 30 días para que puedas recuperarlas, y luego se eliminan; al eliminar tu cuenta se borran de inmediato. Si tu suscripción caduca, sigues pudiendo descargar y borrar tus datos de la nube.',
             'Los <strong>comentarios y las denuncias de respuestas de IA</strong> se conservan hasta que se han atendido y mientras sigan siendo útiles para mejorar NoteFlow, y se borran cuando lo pidas. Si eliminas tu cuenta, dejan de estar vinculados a ella; pídenoslo si también quieres que se borren.',
             'Los <strong>registros de seguridad y del servicio</strong> que conserva nuestro proveedor de infraestructura (eventos de inicio de sesión, direcciones IP, marcas de tiempo) se borran automáticamente tras un periodo limitado, de 90 días como máximo.',
           ],

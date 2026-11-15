@@ -24,7 +24,7 @@ export const privacyEn: LegalContent = {
   hero: {
     kicker: 'NoteFlow · Legal',
     h1: 'Privacy<br />Policy',
-    tagline: 'Last updated: November 14, 2026',
+    tagline: 'Last updated: November 15, 2026',
   },
 
   summary: {
@@ -353,7 +353,7 @@ export const privacyEn: LegalContent = {
           items: [
             '<strong>Account data</strong> is kept while your account exists.',
             '<strong>AI metering records</strong> are kept while your account exists, for quota enforcement and abuse prevention.',
-            '<strong>Cloud data (ciphertext)</strong> is kept until you delete it or delete your account. If your subscription lapses, you can still download and delete your cloud data.',
+            '<strong>Cloud data (ciphertext)</strong> is kept until you delete it or delete your account. <strong>Earlier versions</strong> of your notes (content you have since changed or deleted) are kept encrypted for up to 30 days so you can restore them, and are then removed; deleting your account removes them immediately. If your subscription lapses, you can still download and delete your cloud data.',
             '<strong>Feedback and AI-answer reports</strong> are kept until they have been handled and while they remain useful to improve NoteFlow, and are deleted on request at any time. If you delete your account, they are unlinked from it; ask us if you also want them deleted.',
             '<strong>Security and service logs</strong> kept by our infrastructure provider (sign-in events, IP addresses, timestamps) are deleted automatically after a limited period, at most 90 days.',
           ],
