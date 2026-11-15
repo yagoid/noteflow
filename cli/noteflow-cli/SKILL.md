@@ -101,10 +101,11 @@ el JSON.
   llegar a otros dispositivos, escríbelo en otra nota.
 - **`favorite` y `archive` alternan** (toggle): dos veces deshacen el cambio.
 - **`history --restore <n>` reemplaza la sección entera** (como `set`) y **los números se
-  desplazan** cada vez que Cloud guarda una versión nueva: justo antes de restaurar, comprueba la
-  versión con `--show <n>` (o la lista). Si restauras menos de 10 minutos después de la última
-  versión guardada, el contenido que reemplazas puede no quedar en el historial (el CLI lo avisa por
-  stderr): si importa, guárdalo antes con `read`.
+  desplazan** cada vez que Cloud guarda una versión nueva (también al restaurar): justo antes de
+  restaurar, comprueba la versión con `--show <n>` (o la lista).
+- **`history --restore --force` puede perder el contenido actual**: sin él, si el CLI no consigue
+  guardarlo antes en el historial, no restaura nada (exit 1 y el motivo). No uses `--force` sin que
+  el usuario lo pida; si el motivo es una versión más nueva en Cloud, haz `noteflow pull` y repite.
 - **`NOTEFLOW_NOTES_DIR=<dir>` solo cambia el directorio de notas, no la sesión de sync**: con sync
   activo, lo que escribas en ese directorio de pruebas se sube a la cuenta real del usuario. Para
   aislarlo, apunta también `APPDATA` (Windows) o `XDG_CONFIG_HOME` (Linux/macOS) a un directorio
@@ -152,13 +153,14 @@ error.
   se puede omitir si la nota tiene una sola.
 - `noteflow history "<nota>" "<sección>" --show <n> [--json]` — imprime la versión `n` verbatim,
   sin tocar nada.
-- `noteflow history "<nota>" "<sección>" --restore <n> [--dry-run] [--json]` — la restaura: es una
-  edición normal (bumpea `updated:` y sincroniza). Cuando la subida llega, Cloud guarda en el
-  historial la versión que había en Cloud, así que se puede deshacer igual; lo que solo estaba en
-  local (sin sincronizar) no queda guardado.
-- Cloud guarda como mucho una versión cada 10 minutos por sección (siempre una antes de un borrado
-  o de un recorte grande) y durante 30 días. Las notas con contraseña y las solo locales no tienen
-  historial; sin sesión de Cloud el comando falla y lo dice.
+- `noteflow history "<nota>" "<sección>" --restore <n> [--force] [--dry-run] [--json]` — la
+  restaura. Antes guarda el contenido actual en el historial (si Cloud aún no lo tiene, lo sube
+  primero; aparece como "saved before a restore") y después es una edición normal (bumpea
+  `updated:` y sincroniza), así que se puede deshacer igual. Si no puede guardarlo, no restaura;
+  `--force` restaura igualmente sin guardarlo. `--dry-run` no sube ni guarda nada.
+- Cloud guarda como mucho una versión cada 10 minutos por sección mientras se edita (siempre una
+  antes de un borrado, de un recorte grande o de una restauración) y durante 30 días. Las notas con
+  contraseña y las solo locales no tienen historial; sin sesión de Cloud el comando falla y lo dice.
 
 **Grupos y carpetas**
 - `noteflow groups [--json]` · `group create "<nombre>" [--color c]` · `group delete "<nombre>"

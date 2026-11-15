@@ -1,8 +1,9 @@
 // `noteflow history` (cli/noteflow.js): the version history NoteFlow Cloud keeps
 // in public.file_versions — list, --show, --restore — run for real (real crypto,
 // real files, the real sync of a restore) against an IN-MEMORY server behind a
-// `fetch` mock. The server mimics the trigger of the migration: an UPDATE of a
-// `files` row whose content changes copies the replaced row to file_versions.
+// `fetch` mock. The server mimics the trigger of the migration (an UPDATE of a
+// `files` row whose content changes copies the replaced row to file_versions)
+// and the RPC cloud_snapshot_file of 0017 (keeps the current row as 'manual').
 // Notes and settings live in throwaway dirs (NOTEFLOW_NOTES_DIR + APPDATA /
 // XDG_CONFIG_HOME) and no request ever leaves the process — nothing touches the
 // real Cloud.
@@ -50,6 +51,10 @@ class Server {
   /** id asked for → id answered (a server returning the wrong row). */
   redirectId = new Map<number, number>()
   requests: string[] = []
+  /** cloud_snapshot_file: null = the real behaviour; else a canned answer. */
+  snapshotAnswer: { status: number; json: unknown } | null = null
+  /** Runs inside the snapshot RPC (e.g. an autosave landing during the round-trip). */
+  onSnapshot: (() => void) | null = null
   versionQueries: URLSearchParams[] = []
   /** user_keys row of a private (e2ee) account, instead of managed. */
   e2eeKeys: Record<string, unknown> | null = null
@@ -57,16 +62,21 @@ class Server {
 
   get dekBytes(): Uint8Array { return this.dek }
 
+  /** Copies a files row into the history, once per row version (seq). */
+  private capture(old: Row, reason: string): boolean {
+    if (this.versions.some((v) => v.path_key === old.path_key && v.seq === old.seq)) return false
+    this.versions.push({
+      id: ++this.versionId, path_key: old.path_key, path_ct: old.path_ct, content_ct: old.content_ct,
+      key_ct: old.key_ct, updated_at: old.updated_at, seq: old.seq, size: old.content_ct.length,
+      reason, created_at: this.capturedAt,
+    })
+    return true
+  }
+
   /** The trigger: an update that changes content_ct keeps the replaced row. */
   private write(r: Omit<Row, 'seq'>): number {
     const old = this.rows.get(r.path_key)
-    if (this.captureVersions && old && !old.deleted && old.content_ct !== r.content_ct) {
-      this.versions.push({
-        id: ++this.versionId, path_key: old.path_key, path_ct: old.path_ct, content_ct: old.content_ct,
-        key_ct: old.key_ct, updated_at: old.updated_at, seq: old.seq, size: old.content_ct.length,
-        reason: 'edit', created_at: this.capturedAt,
-      })
-    }
+    if (this.captureVersions && old && !old.deleted && old.content_ct !== r.content_ct) this.capture(old, 'edit')
     const seq = ++this.seq
     this.rows.set(r.path_key, { ...r, seq })
     return seq
@@ -102,6 +112,16 @@ class Server {
     const row = this.rows.get(await this.keyOf(relPath))
     if (!row) return undefined
     return this.cli.decryptContent(await this.cli.unwrapKey(row.key_ct, this.dek), row.content_ct)
+  }
+
+  /** [reason, content] of a file's versions, newest first. */
+  async versionsOf(relPath: string): Promise<Array<[string, string]>> {
+    const key = await this.keyOf(relPath)
+    const out: Array<[string, string]> = []
+    for (const v of [...this.versions].filter((x) => x.path_key === key).sort((a, b) => b.seq - a.seq)) {
+      out.push([v.reason, await this.cli.decryptContent(await this.cli.unwrapKey(v.key_ct, this.dek), v.content_ct)])
+    }
+    return out
   }
 
   async versionContents(relPath: string): Promise<string[]> {
@@ -150,6 +170,14 @@ class Server {
       rows = rows.slice(0, Number(u.searchParams.get('limit') || 1000))
       const cols = (u.searchParams.get('select') || '').split(',')
       return { status: 200, json: rows.map((v) => Object.fromEntries(cols.map((c) => [c, v[c as keyof Version]]))) }
+    }
+    if (p === '/rest/v1/rpc/cloud_snapshot_file') {
+      this.onSnapshot?.()
+      if (this.snapshotAnswer) return this.snapshotAnswer
+      const row = this.rows.get(body.p_path_key)
+      if (!row || row.deleted || !row.content_ct) return { status: 200, json: false }
+      this.capture(row, 'manual') // idempotent: true even when that row version is already kept
+      return { status: 200, json: true }
     }
     if (p === '/rest/v1/rpc/cloud_upsert_file_v2') {
       const row = this.rows.get(body.p_path_key)
@@ -286,7 +314,8 @@ describe('pure helpers', () => {
     expect(cli.historyFlagsError({ show: '1', restore: '1' })).toMatch(/cannot be combined/)
     expect(cli.historyFlagsError({ dryRun: true })).toMatch(/only applies to --restore/)
     expect(cli.historyFlagsError({ show: '0' })).toMatch(/needs a version number/)
-    expect(cli.historyFlagsError({ restore: '3', dryRun: true })).toBeNull()
+    expect(cli.historyFlagsError({ restore: '3', dryRun: true, force: true })).toBeNull()
+    expect(cli.historyFlagsError({ show: '1', force: true })).toMatch(/--force only applies to --restore/)
   })
 
   it('the size of a sealed blob gives back the content bytes', async () => {
@@ -297,6 +326,23 @@ describe('pure helpers', () => {
     expect(cli.formatHistoryBytes(512)).toBe('512 B')
     expect(cli.formatHistoryBytes(1229)).toBe('1.2 KB')
     expect(cli.formatHistoryBytes(3 * 1024 * 1024)).toBe('3.0 MB')
+  })
+
+  it('classifies the snapshot answers and when a restore may go ahead', () => {
+    expect(cli.classifySnapshot(200, true)).toBe('saved')
+    expect(cli.classifySnapshot(200, false)).toBe('nothing')
+    expect(cli.classifySnapshot(403, { code: '42501' })).toBe('forbidden')
+    expect(cli.classifySnapshot(403, { code: 'other' })).toBe('error')
+    expect(cli.classifySnapshot(404, { code: 'PGRST202' })).toBe('missing')
+    expect(cli.classifySnapshot(404, null)).toBe('error')
+    expect(cli.classifySnapshot(200, null)).toBe('error')
+    expect(cli.snapshotAllowsRestore('saved', 'x', false)).toBe(true)
+    expect(cli.snapshotAllowsRestore('nothing', '', false)).toBe(true)
+    expect(cli.snapshotAllowsRestore('nothing', 'x', false)).toBe(false)
+    for (const o of ['missing', 'forbidden', 'error', 'unsynced', 'unreachable']) {
+      expect(cli.snapshotAllowsRestore(o, '', false)).toBe(false)
+      expect(cli.snapshotAllowsRestore(o, 'x', true)).toBe(true)
+    }
   })
 
   it('orders by seq (newest first) whatever the server order', () => {
@@ -329,6 +375,22 @@ describe('list', () => {
     expect(q.get('path_key')).toBe(`eq.${await server.keyOf(TASKS)}`)
     expect(q.get('select')!.split(',').sort()).toEqual(['created_at', 'id', 'reason', 'seq', 'size', 'updated_at'])
     expect(q.get('order')).toBe('seq.desc')
+  })
+
+  it("'manual' is labelled; an unknown (future) reason is a plain version, never dropped", async () => {
+    await server.addVersion(noteKey, TASKS, 'manual one', { updatedAt: '2026-11-01T21:00:00.000Z', reason: 'manual' })
+    await server.addVersion(noteKey, TASKS, 'future one', { updatedAt: '2026-11-01T22:00:00.000Z', reason: 'archived-by-ai' })
+    await server.addVersion(noteKey, TASKS, 'proto one', { updatedAt: '2026-11-01T23:00:00.000Z', reason: 'constructor' })
+    await history('Project Alpha', 'Tasks')
+    const lines = logs.filter((l) => /^\s{4}\d/.test(l))
+    expect(lines).toHaveLength(5)
+    expect(lines[0]).toBe(`    1  ${cli.formatHistoryDate('2026-11-01T23:00:00.000Z')}  9 B`)
+    expect(lines[1]).toBe(`    2  ${cli.formatHistoryDate('2026-11-01T22:00:00.000Z')}  10 B`)
+    expect(lines[2]).toBe(`    3  ${cli.formatHistoryDate('2026-11-01T21:00:00.000Z')}  10 B      saved before a restore`)
+    expect(logs.some((l) => l.includes('undefined'))).toBe(false)
+    logs = []
+    await history('Project Alpha', 'Tasks', { json: true })
+    expect(JSON.parse(stdout).versions.map((v: { reason: string }) => v.reason)).toEqual(['constructor', 'archived-by-ai', 'manual', 'edit', 'edit'])
   })
 
   it('--json: { note, section, versions[] } on stdout', async () => {
@@ -396,8 +458,12 @@ describe('--show', () => {
   })
 })
 
+/** POSTs this run made, by path (uploads, RPCs). */
+const posts = () => server.requests.filter((r) => r.startsWith('POST /rest'))
+const UPLOADS = /^POST \/rest\/v1\/(rpc\/cloud_upsert|files)/
+
 describe('--restore', () => {
-  it('replaces the section like an edit: on disk, updated bumped, uploaded — and the replaced content is kept', async () => {
+  it('saves the current content first, then replaces the section like an edit (on disk, updated bumped, uploaded)', async () => {
     const updatedBefore = noteMdUpdated()
     await history('Project Alpha', 'Tasks', { restore: '2' })
     expect(readLocal(TASKS)).toBe('tasks v1')
@@ -405,45 +471,139 @@ describe('--restore', () => {
     expect(Date.parse(noteMdUpdated()!)).toBeGreaterThan(Date.parse(updatedBefore!))
     expect(await server.content(TASKS)).toBe('tasks v1')
     expect(await server.content(`${DIR}/${NOTE_MD}`)).toBe(readLocal(`${DIR}/${NOTE_MD}`))
-    // The server's trigger kept what the restore replaced: the restore is reversible.
-    expect((await server.versionContents(TASKS))[0]).toBe('tasks v3')
+    // The snapshot kept what the restore replaced, before the upload: reversible.
+    expect((await server.versionsOf(TASKS))[0]).toEqual(['manual', 'tasks v3'])
+    expect(posts()[0]).toBe('POST /rest/v1/rpc/cloud_snapshot_file') // nothing to upload first: Cloud had it
     expect(logged(`Restored version 2 (${cli.formatHistoryDate(T0)}) of "Tasks" in "Project Alpha"`)).toBe(true)
-    expect(logged('NoteFlow Cloud keeps the version it replaces in the history (local edits that never synced are not kept)')).toBe(true)
+    expect(logged('The content it replaced was saved to the history first ("saved before a restore").')).toBe(true)
     expect(logged('Synced to NoteFlow Cloud')).toBe(true)
   })
 
-  it('--json result', async () => {
+  it('--json result carries snapshot: true', async () => {
     await history('Project Alpha', 'Tasks', { restore: '1', json: true })
     expect(JSON.parse(stdout)).toEqual({
       note: 'Project Alpha', dirname: DIR, section: 'Tasks', index: 1, id: expect.any(Number), updatedAt: T1,
-      reason: 'edit', bytesWritten: 8, restored: true, unchanged: false,
+      reason: 'edit', bytesWritten: 8, restored: true, unchanged: false, snapshot: true,
     })
     expect(readLocal(TASKS)).toBe('tasks v2')
   })
 
-  it('--dry-run writes and uploads nothing', async () => {
-    const anchorBefore = readLocal(`${DIR}/${NOTE_MD}`)
-    await history('Project Alpha', 'Tasks', { restore: '2', dryRun: true, json: true })
-    expect(JSON.parse(stdout)).toMatchObject({ index: 2, restored: false, unchanged: false, dryRun: true })
-    expect(readLocal(TASKS)).toBe('tasks v3')
-    expect(readLocal(`${DIR}/${NOTE_MD}`)).toBe(anchorBefore)
-    expect(server.requests.some((r) => r.startsWith('POST /rest'))).toBe(false)
+  it('a local edit that never synced is uploaded first, and the snapshot keeps it', async () => {
+    fs.writeFileSync(path.join(notesDir, TASKS), 'tasks local edit')
+    await history('Project Alpha', 'Tasks', { restore: '2' })
+    expect(logged('Uploading the current content first')).toBe(true)
+    expect(readLocal(TASKS)).toBe('tasks v1')
+    expect(await server.content(TASKS)).toBe('tasks v1')
+    expect((await server.versionsOf(TASKS)).slice(0, 2)).toEqual([['manual', 'tasks local edit'], ['edit', 'tasks v3']])
   })
 
-  it('identical content: nothing written, says so', async () => {
+  it('Cloud has a newer version (not pulled yet): refuses, asks for a pull, nothing restored', async () => {
+    await pcSave(note('2026-11-02T08:00:00.000Z', 'tasks v4 from the PC'), ['a'])
+    await failsWith(history('Project Alpha', 'Tasks', { restore: '2' }),
+      `Could not save the current content of "Tasks" to the history: NoteFlow Cloud has a newer version of it — run 'noteflow pull' first — nothing was restored.`)
+    expect(readLocal(TASKS)).toBe('tasks v3')
+    expect(await server.content(TASKS)).toBe('tasks v4 from the PC')
+    expect(server.requests).not.toContain('POST /rest/v1/rpc/cloud_snapshot_file')
+  })
+
+  it('a local edit whose upload comes back stale (Cloud is newer): refuses, the edit stays local and pending', async () => {
+    await pcSave(note('2026-11-02T08:00:00.000Z', 'tasks v4 from the PC'), ['a'])
+    fs.writeFileSync(path.join(notesDir, TASKS), 'tasks local edit')
+    await failsWith(history('Project Alpha', 'Tasks', { restore: '2' }),
+      'Could not save the current content of "Tasks" to the history: its upload to NoteFlow Cloud did not go through (see the sync message above) — nothing was restored.')
+    expect(logged('not uploaded: a newer version is on NoteFlow Cloud')).toBe(true)
+    expect(readLocal(TASKS)).toBe('tasks local edit')
+    expect(await server.content(TASKS)).toBe('tasks v4 from the PC')
+    expect(server.requests).not.toContain('POST /rest/v1/rpc/cloud_snapshot_file')
+    expect(JSON.parse(fs.readFileSync(settingsPath(), 'utf-8')).cliCloud.pendingUpserts).toContain(TASKS)
+  })
+
+  it('the section changes on disk during the snapshot (an autosave): refuses, the new edit is kept', async () => {
+    server.onSnapshot = () => fs.writeFileSync(path.join(notesDir, TASKS), 'autosaved by the app')
+    await failsWith(history('Project Alpha', 'Tasks', { restore: '2' }),
+      'Could not save the current content of "Tasks" to the history: the section changed on disk while it was being saved (another app or command edited it) — nothing was restored.')
+    expect(readLocal(TASKS)).toBe('autosaved by the app')
+    expect(await server.content(TASKS)).toBe('tasks v3')
+    expect(posts().filter((r) => UPLOADS.test(r))).toEqual([])
+  })
+
+  it('… and --force restores over it anyway (snapshot: false)', async () => {
+    server.onSnapshot = () => fs.writeFileSync(path.join(notesDir, TASKS), 'autosaved by the app')
+    await history('Project Alpha', 'Tasks', { restore: '2', force: true, json: true })
+    expect(JSON.parse(stdout)).toMatchObject({ restored: true, snapshot: false })
+    expect(readLocal(TASKS)).toBe('tasks v1')
+  })
+
+  it('a server without the snapshot RPC (404 PGRST202): refuses — nothing on disk, nothing uploaded', async () => {
+    server.snapshotAnswer = { status: 404, json: { code: 'PGRST202', message: 'Could not find the function' } }
+    const anchorBefore = readLocal(`${DIR}/${NOTE_MD}`)
+    await failsWith(history('Project Alpha', 'Tasks', { restore: '2' }),
+      'Could not save the current content of "Tasks" to the history: this NoteFlow Cloud server cannot save versions on demand yet — nothing was restored.')
+    expect(logged('add --force to restore anyway')).toBe(true)
+    expect(readLocal(TASKS)).toBe('tasks v3')
+    expect(readLocal(`${DIR}/${NOTE_MD}`)).toBe(anchorBefore)
+    expect(posts().filter((r) => UPLOADS.test(r))).toEqual([])
+  })
+
+  it('… and restores with --force, warning that the content was not saved (snapshot: false)', async () => {
+    server.snapshotAnswer = { status: 404, json: { code: 'PGRST202' } }
+    await history('Project Alpha', 'Tasks', { restore: '2', force: true, json: true })
+    expect(JSON.parse(stdout)).toMatchObject({ restored: true, snapshot: false })
+    expect(readLocal(TASKS)).toBe('tasks v1')
+    expect(await server.content(TASKS)).toBe('tasks v1')
+    expect(logged('Warning: the content it replaced was NOT saved to the history (this NoteFlow Cloud server cannot save versions on demand yet) — restored anyway (--force).')).toBe(true)
+  })
+
+  it('no active subscription (403 42501): refuses with that reason', async () => {
+    server.snapshotAnswer = { status: 403, json: { code: '42501', message: 'permission denied' } }
+    await failsWith(history('Project Alpha', 'Tasks', { restore: '2' }),
+      'Could not save the current content of "Tasks" to the history: saving to the history needs an active NoteFlow Cloud subscription — nothing was restored.')
+    expect(readLocal(TASKS)).toBe('tasks v3')
+  })
+
+  it('another error status is reported with it', async () => {
+    server.snapshotAnswer = { status: 400, json: { code: 'P0001' } }
+    await failsWith(history('Project Alpha', 'Tasks', { restore: '2' }), 'NoteFlow Cloud answered with an error (HTTP 400)')
+    expect(readLocal(TASKS)).toBe('tasks v3')
+  })
+
+  it('false (Cloud has no content to keep) refuses while the section has content…', async () => {
+    server.snapshotAnswer = { status: 200, json: false }
+    await failsWith(history('Project Alpha', 'Tasks', { restore: '2' }), 'NoteFlow Cloud has no current content of this section to save')
+    expect(readLocal(TASKS)).toBe('tasks v3')
+  })
+
+  it('…but an empty section has nothing to lose: restored, snapshot "skipped"', async () => {
+    fs.writeFileSync(path.join(notesDir, TASKS), '')
+    await cli.syncPushNoteFiles(DIR, [NOTE_MD, 'a.md'])
+    server.snapshotAnswer = { status: 200, json: false }
+    stdout = ''
+    await history('Project Alpha', 'Tasks', { restore: '2', json: true })
+    expect(JSON.parse(stdout)).toMatchObject({ restored: true, snapshot: 'skipped' })
+    expect(readLocal(TASKS)).toBe('tasks v2') // emptying it kept "tasks v3" as version 1
+  })
+
+  it('--dry-run writes and uploads nothing — not even the snapshot', async () => {
+    const anchorBefore = readLocal(`${DIR}/${NOTE_MD}`)
+    fs.writeFileSync(path.join(notesDir, TASKS), 'tasks local edit') // would need an upload for real
+    await history('Project Alpha', 'Tasks', { restore: '2', dryRun: true, json: true })
+    expect(JSON.parse(stdout)).toMatchObject({ index: 2, restored: false, unchanged: false, dryRun: true, snapshot: 'skipped' })
+    expect(readLocal(TASKS)).toBe('tasks local edit')
+    expect(readLocal(`${DIR}/${NOTE_MD}`)).toBe(anchorBefore)
+    expect(posts()).toEqual([])
+  })
+
+  it('identical content: nothing written, nothing saved, says so', async () => {
     await server.addVersion(noteKey, TASKS, 'tasks v3', { updatedAt: '2026-11-01T23:00:00.000Z' })
     const anchorBefore = readLocal(`${DIR}/${NOTE_MD}`)
     await history('Project Alpha', 'Tasks', { restore: '1' })
     expect(logged('already has the content of version 1')).toBe(true)
     expect(readLocal(`${DIR}/${NOTE_MD}`)).toBe(anchorBefore)
-    expect(server.requests.some((r) => r.startsWith('POST /rest'))).toBe(false)
+    expect(posts()).toEqual([])
   })
 
-  it('warns when the newest version is under 10 minutes old (the replaced content may not be kept)', async () => {
-    await server.addVersion(noteKey, TASKS, 'tasks v2.9', { updatedAt: '2026-11-01T23:00:00.000Z', createdAt: new Date().toISOString() })
-    await history('Project Alpha', 'Tasks', { restore: '3' })
-    expect(logged('saved a version less than 10 minutes ago')).toBe(true)
-    expect(readLocal(TASKS)).toBe('tasks v1')
+  it('--force without --restore is an error', async () => {
+    await failsWith(history('Project Alpha', 'Tasks', { force: true }), '--force only applies to --restore')
   })
 })
 

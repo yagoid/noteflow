@@ -183,7 +183,7 @@ describe('per-command flag validation', () => {
       ['login', undefined, ['--no-pull']], ['login', 'r', ['--no-wait', '--no-pull', '--json']], ['login', undefined, ['--finish', '--no-pull']],
       ['cloud', 'login', ['--send-code']], ['cloud', 'login', ['--code', '--no-pull']], ['cloud', 'status', ['--json']],
       ['pull', undefined, ['--force']], ['update', undefined, ['--force']], ['status', undefined, ['--json']],
-      ['history', 'T', ['--section', '--show', '--restore', '--dry-run', '--json']],
+      ['history', 'T', ['--section', '--show', '--restore', '--dry-run', '--force', '--json']],
     ]
     for (const [cmd, sub, seen] of okCombos) expect(flagError(cmd, sub, seen), `${cmd} ${sub ?? ''} ${seen.join(' ')}`).toBeNull()
   })
