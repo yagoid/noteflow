@@ -20,7 +20,7 @@ describe('sanitizeUiSettings (tolerant validation)', () => {
       appFont: 'inter',
       accent: '129 140 248',
       editorColors: { h1: '255 0 0', h2: null },
-      editor: { fontSize: 15, fontFamily: 'mono', readableWidth: false, showToc: false },
+      editor: { fontSize: 15, fontFamily: 'mono', readableWidth: false, showToc: false, moveCheckedToBottom: true },
     }
     expect(sanitizeUiSettings(input)).toEqual(input)
   })
@@ -96,6 +96,8 @@ describe('sanitizeUiSettings (tolerant validation)', () => {
     expect(sanitizeUiSettings({ editor: { readableWidth: 'yes' } })).toEqual({})
     expect(sanitizeUiSettings({ editor: { showToc: 1 } })).toEqual({})
     expect(sanitizeUiSettings({ editor: { showToc: 'no', fontSize: 14 } })).toEqual({ editor: { fontSize: 14 } })
+    expect(sanitizeUiSettings({ editor: { moveCheckedToBottom: 'on' } })).toEqual({})
+    expect(sanitizeUiSettings({ editor: { moveCheckedToBottom: false } })).toEqual({ editor: { moveCheckedToBottom: false } })
   })
 
   it('discards unknown keys everywhere', () => {

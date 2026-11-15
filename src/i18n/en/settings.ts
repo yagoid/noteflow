@@ -124,6 +124,8 @@ export const settings = {
     tocHint: 'Show an outline of the section headings at the right of the editor',
     showToc: 'Show table of contents',
     hideToc: 'Hide table of contents',
+    moveChecked: 'Move checked items to the bottom',
+    moveCheckedHint: 'Checking a task moves it to the end of its list; unchecking it brings it back above the checked ones',
   },
 
   startup: {
@@ -597,6 +599,7 @@ export const settings = {
     codeBlock: 'Code block',
     findInNote: 'Find in note',
     toggleMarkdown: 'Toggle text / markdown mode',
+    moveListItem: 'Move list item up / down (with its sub-items)',
     increaseFontSize: 'Increase font size',
     decreaseFontSize: 'Decrease font size',
     resetFontSize: 'Reset font size',

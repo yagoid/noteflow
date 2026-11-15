@@ -1,7 +1,7 @@
 import { NodeViewWrapper, NodeViewContent } from '@tiptap/react'
 import type { NodeViewProps } from '@tiptap/react'
 import { useState, useRef, useEffect } from 'react'
-import { Calendar, Flag } from 'lucide-react'
+import { Calendar, Flag, GripVertical } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import {
@@ -13,6 +13,10 @@ import {
   type Importance,
 } from './taskBadge'
 import { DeadlinePopover, ImportancePopover } from './TaskPickers'
+import { startTaskDrag } from './taskDrag'
+import { setTaskChecked } from './taskToggle'
+import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
+import { altKey } from '../../lib/platform'
 
 interface OpenPicker {
   kind: 'deadline' | 'importance'
@@ -22,7 +26,7 @@ interface OpenPicker {
   id: number
 }
 
-export function DeadlineTaskItemView({ node, updateAttributes, extension }: NodeViewProps) {
+export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, extension }: NodeViewProps) {
   const t = useT()
   // Plain Markdown (a linked note): a regular checkbox item, no 📅⏰🔺 pickers.
   const plain = !!(extension.options as { plain?: boolean }).plain
@@ -58,6 +62,15 @@ export function DeadlineTaskItemView({ node, updateAttributes, extension }: Node
   }
   const closePicker = () => setPicker(null)
 
+  // Checkbox: with "Move checked items to the bottom" (Settings → Editor) the
+  // task also moves, in the same transaction, and slides there (taskToggle.ts).
+  // The setting is read at click time: no re-render of every task when it changes.
+  function toggleChecked() {
+    const pos = getPos()
+    if (typeof pos !== 'number') return
+    setTaskChecked(editor, pos, !checked, useEditorSettingsStore.getState().moveCheckedToBottom)
+  }
+
   return (
     <NodeViewWrapper
       as="li"
@@ -65,11 +78,30 @@ export function DeadlineTaskItemView({ node, updateAttributes, extension }: Node
       data-type="taskItem"
       data-checked={String(checked)}
     >
+      {/* Drag handle: out of the flow, in the gutter left of the checkbox (index.css),
+          so it never pushes the text. A <button> so ProseMirror's NodeView stopEvent
+          leaves the press alone; mousedown is prevented to keep the editor's focus
+          and selection. Not in read-only editors. */}
+      {editor.isEditable && (
+        <button
+          type="button"
+          className="task-drag-handle"
+          contentEditable={false}
+          tabIndex={-1}
+          title={tf(t.editor.task.dragHandle, { keys: `${altKey}+↑/↓` })}
+          aria-label={tf(t.editor.task.dragHandle, { keys: `${altKey}+↑/↓` })}
+          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={(e) => startTaskDrag(editor, getPos, e.nativeEvent, wrapperRef.current)}
+        >
+          <GripVertical size={12} />
+        </button>
+      )}
+
       <label className="task-checkbox-label" contentEditable={false}>
         <input
           type="checkbox"
           checked={checked}
-          onChange={() => updateAttributes({ checked: !checked })}
+          onChange={toggleChecked}
         />
       </label>
 

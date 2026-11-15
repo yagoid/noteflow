@@ -60,6 +60,7 @@ function buildSections(t: Messages): ShortcutSection[] {
         { keys: ['Ctrl', 'Shift', 'B'], description: s.codeBlock },
         { keys: ['Ctrl', 'F'], description: s.findInNote },
         { keys: ['Ctrl', 'M'], description: s.toggleMarkdown },
+        { keys: ['Alt', '↑/↓'], description: s.moveListItem },
       ],
     },
     {

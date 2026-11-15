@@ -887,6 +887,23 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - Al hacer hover sobre el task item aparecen **dos triggers** a la derecha del texto: un icono de
   **calendario** para el deadline/alarma y un icono de **bandera** para la importancia. Cada uno
   abre su propio picker; los valores asignados quedan visibles de forma permanente.
+- **Reordenar arrastrando:** en hover aparece un asa **⋮⋮** a la izquierda de la casilla (en el
+  margen, sin desplazar el texto; también en stickies y en Readable). Se arrastra desde el asa (no
+  desde el texto) como una tarjeta del kanban: copia flotante, la tarea original atenuada y una
+  línea de acento donde caerá; cerca del borde el editor hace scroll; `Esc` cancela. La tarea viaja
+  **con sus subtareas** y puede soltarse entre cualquier par de tareas, a cualquier nivel, también
+  en otra lista de tareas de la sección (en la mitad inferior de una tarea con subtareas → primera
+  subtarea; tras la última de una sublista con el puntero más a la izquierda → sale al nivel del
+  padre). Nunca dentro de una lista de viñetas/numerada ni dentro de sí misma. Un `Ctrl+Z` deshace.
+- **`Alt+↑` / `Alt+↓`** (⌥ en macOS) mueven el ítem donde está el cursor (tarea, viñeta o numerado,
+  con sus subítems) por encima/debajo de su hermano.
+- **Tareas marcadas al final** (Settings → Editor → *Move checked items to the bottom*, desactivado
+  por defecto, sincronizado): al marcar una tarea con la casilla, se ve el check un instante y baja
+  deslizándose al final de su lista (una subtarea, dentro de su sublista; un padre, con sus hijos).
+  Al desmarcarla vuelve justo encima de las marcadas. Un `Ctrl+Z` deshace marcado + movimiento. No
+  reordena listas al abrir la nota. Sin animación con "reducir movimiento" del sistema. A mano: menú
+  `/` → **Move checked to bottom** dentro de cualquier lista de tareas (también en notas vinculadas).
+- En **modo texto** nada de esto aplica (el markdown se edita tal cual).
 
 ### Tablas
 - Insertables desde la toolbar (3×3 con cabecera por defecto).

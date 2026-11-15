@@ -30,6 +30,10 @@ const READABLE_WIDTH_KEY = 'noteflow-readable-width'
 // so it has no legacy localStorage key: absent from the file = default (on).
 const DEFAULT_SHOW_TOC = true
 
+// "Move checked items to the bottom" of task lists (taskToggle.ts). Same as the
+// TOC: no legacy key; absent from the file = default (off).
+const DEFAULT_MOVE_CHECKED_TO_BOTTOM = false
+
 function clampSize(size: number): number {
   return Math.min(24, Math.max(10, Math.round(size)))
 }
@@ -54,6 +58,8 @@ interface EditorSettingsState {
   setReadableWidth: (v: boolean) => void
   showToc: boolean
   setShowToc: (v: boolean) => void
+  moveCheckedToBottom: boolean
+  setMoveCheckedToBottom: (v: boolean) => void
   /**
    * Re-reads the `editor` slice of ui-settings.json and re-applies it
    * (idempotent, NEVER writes back). Called after a sync pull or when another
@@ -65,7 +71,13 @@ interface EditorSettingsState {
 // Initial values: the synced file wins field by field; fields it doesn't have
 // fall back to the legacy localStorage keys. If legacy had anything the file
 // lacks, seed it once so it starts syncing (mirrors themeStore.initTheme).
-function readInitial(): { fontSize: number; fontFamily: FontFamily; readableWidth: boolean; showToc: boolean } {
+function readInitial(): {
+  fontSize: number
+  fontFamily: FontFamily
+  readableWidth: boolean
+  showToc: boolean
+  moveCheckedToBottom: boolean
+} {
   const ed = readUiSettings().editor ?? {}
   const legacySize = localStorage.getItem(STORAGE_KEY)
   const legacyFamily = localStorage.getItem(FONT_FAMILY_KEY) as FontFamily | null
@@ -76,6 +88,8 @@ function readInitial(): { fontSize: number; fontFamily: FontFamily; readableWidt
   const fontFamily = ed.fontFamily ?? legacyFamily ?? DEFAULT_FONT
   const readableWidth = typeof ed.readableWidth === 'boolean' ? ed.readableWidth : legacyWidth !== '0'
   const showToc = typeof ed.showToc === 'boolean' ? ed.showToc : DEFAULT_SHOW_TOC
+  const moveCheckedToBottom =
+    typeof ed.moveCheckedToBottom === 'boolean' ? ed.moveCheckedToBottom : DEFAULT_MOVE_CHECKED_TO_BOTTOM
 
   // Seed only values that will SURVIVE main's sanitizer (finite size, known
   // family) — an invalid legacy value would be dropped on write, the field
@@ -86,7 +100,7 @@ function readInitial(): { fontSize: number; fontFamily: FontFamily; readableWidt
   if (ed.readableWidth === undefined && legacyWidth !== null) seed.readableWidth = readableWidth
   if (Object.keys(seed).length > 0) void window.noteflow?.setUiSettings?.({ editor: seed })
 
-  return { fontSize, fontFamily, readableWidth, showToc }
+  return { fontSize, fontFamily, readableWidth, showToc, moveCheckedToBottom }
 }
 
 const initial = readInitial()
@@ -128,16 +142,27 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
     set({ showToc: v })
   },
 
+  moveCheckedToBottom: initial.moveCheckedToBottom,
+
+  setMoveCheckedToBottom: (v) => {
+    void window.noteflow?.setUiSettings?.({ editor: { moveCheckedToBottom: v } })
+    set({ moveCheckedToBottom: v })
+  },
+
   reloadUiSettings: () => {
     // Read-only path: fields absent from the file keep the current in-memory
     // value (no legacy fallback, no seed) so a pull can never trigger a write.
     const ed = readUiSettings().editor
     if (!ed) return
-    const patch: Partial<Pick<EditorSettingsState, 'fontSize' | 'fontFamily' | 'readableWidth' | 'showToc'>> = {}
+    const patch: Partial<Pick<
+      EditorSettingsState,
+      'fontSize' | 'fontFamily' | 'readableWidth' | 'showToc' | 'moveCheckedToBottom'
+    >> = {}
     if (typeof ed.fontSize === 'number') patch.fontSize = clampSize(ed.fontSize)
     if (ed.fontFamily) patch.fontFamily = ed.fontFamily
     if (typeof ed.readableWidth === 'boolean') patch.readableWidth = ed.readableWidth
     if (typeof ed.showToc === 'boolean') patch.showToc = ed.showToc
+    if (typeof ed.moveCheckedToBottom === 'boolean') patch.moveCheckedToBottom = ed.moveCheckedToBottom
     set(patch)
   },
 }))

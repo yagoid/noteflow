@@ -768,7 +768,9 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     atenuada; línea neón de drop (`.kanban-drop-line` / `.kanban-column-drop-line`); el hit-test va en
     un bucle rAF que además auto-scrollea el tablero (horizontal) y el editor (vertical) cerca de los
     bordes. Soltar donde ya estaba = no-op sin indicador. `Esc` cancela; el click posterior al drop se
-    traga (capture, una vez). Columnas: se arrastran por la cabecera.
+    traga (capture, una vez). Columnas: se arrastran por la cabecera. Constantes y helpers
+    (umbral, auto-scroll vertical, `verticalScroller`, `swallowNextClick`) compartidos con el drag de
+    tareas en `components/Editor/pointerDrag.ts` (ver "Editor: mover tareas").
     **Coordenadas:** `clientX/Y`, `getBoundingClientRect()` y los px del ghost/indicadores comparten
     espacio (el zoom de UI es nativo, ver "UI text size"), así que se comparan sin conversión.
   - **Ancho (decisión del usuario):** el tablero **no** respeta la columna Readable: el wrapper
@@ -956,6 +958,80 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   - Bloques de código: líneas en blanco finales descartadas al leer.
   - Esquema del editor web móvil: `listItem`/`taskItem` con contenido `paragraph+ list*` y
     Shift+Enter en heading = partir (si su editor lo permite).
+
+### Editor: mover tareas (arrastrar, Alt+↑/↓) y "marcadas al final"
+
+Solo modo markdown (el modo texto no se toca). Toda la lógica de documento está en
+**`src/lib/listItemMove.ts`** (ProseMirror puro: estado/doc → transacción; tests con el esquema real y
+round-trip markdown en `tests/lib/listItemMove.test.ts`). Las alarmas se leen por regex por línea
+(`alarmUtils`), así que mover ítems no las afecta; las anotaciones 📅⏰🔺 van en los atributos del nodo
+y viajan con él.
+
+- **Primitiva `moveListItem(tr, itemPos, slot, replacement?)`:** borra el ítem (con su subárbol) y lo
+  inserta en un hueco `{listPos, index}` de una lista → **una transacción, un Ctrl+Z**. Reglas
+  (`checkItemMove` → `'ok' | 'noop' | 'invalid'`): solo en una lista de su tipo (`taskItem` →
+  `taskList`; nunca en viñetas/numeradas, ver "tareas, viñetas y numeradas nunca son hermanas"),
+  nunca dentro de su propio subárbol, y el hueco justo antes/después de sí mismo es `noop`. Si el
+  ítem era el **único** de su lista, la lista se borra con él (un `taskList` vacío no es válido);
+  si esa lista era lo único de una cita/celda, el movimiento se rechaza. Una selección dentro del
+  ítem viaja con él (mismo offset).
+- **Arrastrar (`components/Editor/taskDrag.ts`):** asa `⋮⋮` (`GripVertical`) en cada tarea
+  (`DeadlineTaskItemView`), **fuera del flujo** (`position: absolute; right: 100%` del `<li>`, que
+  ahora es `position: relative`): en el padding izquierdo del editor para las de primer nivel y en la
+  columna de la casilla del padre para las subtareas, así **no empuja el texto** en Full, Readable ni
+  sticky (en el sticky ocupa justo sus 0.75rem). Visible solo en hover de **su propia fila**
+  (`:hover:not(:has(li:hover))`); no se pinta en editores de solo lectura ni existe en las vistas
+  estáticas (`htmlFromMarkdown`). Es un `<button>` para que el `stopEvent` del NodeView de TipTap deje
+  el press fuera de ProseMirror (por eso su `svg` lleva `pointer-events: none`: con el icono como
+  target, ProseMirror procesaría el mousedown antes que React); `onMouseDown` hace `preventDefault`
+  (el foco y la selección del editor no se mueven). Mecánica **idéntica al kanban** (helpers comunes
+  en **`pointerDrag.ts`**: umbral, auto-scroll vertical, `verticalScroller`, `swallowNextClick`):
+  ghost portalado a `<body>` (copia del `<li>` con subtareas en una tarjeta `.kanban-ghost.task-ghost`,
+  el `checked` de las casillas copiado a mano porque es propiedad, no atributo), origen atenuado
+  (`data-drag-source`), línea neón `.kanban-drop-line.task-drop-line` (`position: fixed`), bucle rAF
+  con hit-test + auto-scroll, `Esc` cancela, el click tras el drop se traga (si no, soltar encima de
+  una casilla la alternaría). No es estado React: los destinos son todas las tareas del documento,
+  así que el controlador es de módulo (un drag a la vez) y recoge al empezar las tareas
+  (`doc.descendants` + `view.nodeDOM`) salvo el subárbol arrastrado.
+  - **Destinos (cualquier nivel):** la tarea más cercana en vertical a su **propia fila** (del `<li>`
+    hasta su primera sublista; desempate por distancia horizontal, p. ej. tablas). Mitad superior →
+    **antes** de ella; mitad inferior → si tiene subtareas, **primera subtarea**; si no, **después**
+    de ella, y si es la última de su sublista y el puntero está a la izquierda de su `<li>` (sobre la
+    casilla del padre), sube de nivel: después del padre. A más de 48 px de toda fila no hay destino.
+    Funciona entre task lists distintas de la nota (el ítem que deja vacía su lista se la lleva).
+  - Si el documento cambia durante el drag (sync externo), el drop se cancela (posiciones viejas).
+  - El wrapper de `Editor.tsx` no interfiere: el drag no usa HTML5 DnD (sus `onDrop`/`onPaste` de
+    imágenes no se disparan) y el asa nunca recibe el foco; `Esc` se captura en `window` (fase de
+    captura) solo mientras hay drag.
+- **Alt+↑ / Alt+↓ (`ListItemMove.ts`, extensión de comportamiento registrada en `Editor.tsx`):** el
+  ítem **más interno** alrededor del caret — tarea, viñeta o numerado — se intercambia con su hermano
+  anterior/siguiente, con su subárbol; en los extremos, fuera de listas, con la selección saliéndose
+  del ítem o en solo lectura no hace nada (la tecla sigue su curso). No chocaba con ningún atajo
+  (ni de la app ni de TipTap). En macOS pisa ⌥↑/⌥↓ (ir al inicio/fin del párrafo) solo dentro de
+  listas. Listado en Ajustes → Atajos. Ojo en tests: `editor.commands.keyboardShortcut` de TipTap
+  reaplica solo los *steps* y pierde la selección que fija el keymap; los tests llaman a
+  `handleKeyDown` como hace la vista.
+- **"Move checked items to the bottom"** (Ajustes → Editor, switch, **desactivado por defecto**;
+  `editorSettingsStore.moveCheckedToBottom`, **sincronizado** en `ui-settings.json` como
+  `editor.moveCheckedToBottom`, igual que `showToc`; ausente = off). Solo actúa al **marcar/desmarcar
+  con la casilla** (`toggleTask` en la misma transacción que el `checked` → un Ctrl+Z); nunca reordena
+  al abrir. Marcar → final de sus hermanas (mismo nivel: una subtarea baja dentro de su sublista, un
+  padre baja con sus hijos). Desmarcar → justo encima de la **primera hermana marcada** (final del
+  bloque de pendientes); sin marcadas, se queda (`sortedIndexOnToggle`). El ajuste se lee al hacer
+  click (`getState()`), no se suscribe cada tarea.
+  - **Animación FLIP solo visual (`taskToggle.ts`):** antes del dispatch se miden los `top` de los
+    `<li>` hermanos; tras él se releen **por índice** desde `view.nodeDOM` (ProseMirror puede recrear
+    el NodeView movido o reutilizar el de un hermano para él: casar por elemento fallaría) con el mapa
+    `movedOrder` (índice nuevo → viejo), se pone a cada uno un `translateY` a su sitio viejo, se
+    mantiene **400 ms** (se ve el check) y desliza 280 ms a su sitio. El NodeView nuevo existe ya tras
+    el dispatch porque `ReactRenderer` lo monta con `flushSync`. Un segundo click a mitad mide las
+    posiciones visibles (con transform) y reinicia. `prefers-reduced-motion` → sin animación.
+  - **Slash `/` "Move checked to bottom"** dentro de cualquier task list (también en notas
+    vinculadas): reordena a mano esa lista (solo sus ítems directos) con las marcadas al final,
+    estable (`sortCheckedToBottom`).
+- **Pendiente/no hecho:** mover con teclado entre niveles (Alt+↑ no sale de la sublista), soltar una
+  tarea como **primera** subtarea de una que aún no tiene ninguna, ni animar el drag/Alt+↑. La clave
+  `moveCheckedToBottom` **no está aún en el espejo móvil** de `uiSettings` (ver `architecture.md`).
 
 ### Editor: imágenes redimensionables y la columna Readable
 La imagen es un nodo **inline** (`ResizableImage.tsx`, `inline: true`, `allowBase64`) dentro de un

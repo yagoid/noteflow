@@ -104,6 +104,8 @@ export const settings = {
     tocHint: 'Muestra un índice con los encabezados de la sección a la derecha del editor',
     showToc: 'Mostrar índice',
     hideToc: 'Ocultar índice',
+    moveChecked: 'Mover las tareas marcadas al final',
+    moveCheckedHint: 'Al marcar una tarea baja al final de su lista; al desmarcarla vuelve encima de las marcadas',
   },
 
   startup: {
@@ -485,6 +487,7 @@ export const settings = {
     codeBlock: 'Bloque de código',
     findInNote: 'Buscar en la nota',
     toggleMarkdown: 'Alternar modo texto / markdown',
+    moveListItem: 'Mover elemento de lista arriba / abajo (con sus subelementos)',
     increaseFontSize: 'Aumentar el tamaño de fuente',
     decreaseFontSize: 'Reducir el tamaño de fuente',
     resetFontSize: 'Restablecer el tamaño de fuente',

@@ -141,7 +141,11 @@ noteflow/
 │   │   │   ├── snippetCommands.ts       #   inserción de un fragmento expandido como markdown (slice inline o de bloques)
 │   │   │   ├── EditorToc.tsx            # Índice flotante H1–H3 (+ useEditorToc.ts: lectura del doc)
 │   │   │   ├── DeadlineTaskItem.ts      # Extensión TipTap: task item con deadline+alarma
-│   │   │   ├── DeadlineTaskItemView.tsx # NodeView React para DeadlineTaskItem
+│   │   │   ├── DeadlineTaskItemView.tsx # NodeView React para DeadlineTaskItem (asa ⋮⋮, casilla, triggers)
+│   │   │   ├── taskDrag.ts              #   arrastrar tareas por el asa (ghost, línea de drop, auto-scroll)
+│   │   │   ├── taskToggle.ts            #   marcar/desmarcar (+ "marcadas al final" con animación FLIP)
+│   │   │   ├── ListItemMove.ts          #   Alt+↑/↓: mover el ítem de lista con sus subítems
+│   │   │   ├── pointerDrag.ts           #   helpers del drag por pointer events (kanban + tareas)
 │   │   │   ├── TaskPickers.tsx          # Pickers de deadline/alarma e importancia (tareas + tarjetas kanban)
 │   │   │   ├── taskBadge.ts             #   helpers compartidos: color/formato del badge, posición del picker
 │   │   │   ├── KanbanBoard.ts           # Nodo TipTap atom del tablero kanban (ver patterns.md)
@@ -238,7 +242,7 @@ noteflow/
 │   │   │   ├── SettingsModal.tsx        #   Contenedor: nav izquierda + panel derecho según sección
 │   │   │   ├── GeneralPanel.tsx         #   Idioma + gráfica de actividad + IA local (toggle/reindex) + perfil + skill del CLI
 │   │   │   ├── AppearancePanel.tsx      #   Tema/fuente/acento/colores del editor/escala + preview
-│   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho
+│   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho / índice / tareas marcadas al final
 │   │   │   ├── TemplatesPanel.tsx       #   Plantillas de nota (listar/usar/renombrar/borrar)
 │   │   │   ├── StartupPanel.tsx         #   Autostart + stickies al arrancar
 │   │   │   ├── SyncPanel.tsx            #   Selector de backend (Cloud/GitHub, excluyentes) + sección GitHub
@@ -317,6 +321,8 @@ noteflow/
 │   │   ├── kanbanOps.ts          #   transformaciones puras del tablero (columnas, tarjetas, columna done,
 │   │   │                         #   conversión con listas de tareas) — testeado
 │   │   ├── kanbanSearch.ts       #   búsqueda en nota dentro de tableros (conteo + resaltado) — testeado
+│   │   ├── listItemMove.ts       # Mover ítems de lista con su subárbol (drag de tareas, Alt+↑/↓, marcadas
+│   │   │                         #   al final, slash) como transacciones ProseMirror — testeado
 │   │   ├── whatsNew.ts           # Lógica pura del tour "What's new" (qué mostrar, saneo, media) — testeado
 │   │   ├── snippets.ts           # Fragmentos: variables {date:FORMATO}, tokenizador de formato estilo
 │   │   │                         #   moment, sugerencias y operaciones de lista — testeado (ver patterns.md)
@@ -553,7 +559,8 @@ Contenido del dir de notas:
   re-sanea ese fichero y borraría la clave. Sintaxis y decisiones en `patterns.md` § "Editor: fragmentos".
 - `ui-settings.json` — apariencia (tema, último tema oscuro/claro `lastDarkThemeId`/`lastLightThemeId`
   para el Light / Dark del ⋯ del footer, fuente de app, acento, colores del editor) + ajustes del
-  editor (tamaño/familia de fuente, ancho legible, índice flotante `showToc`) sincronizados entre dispositivos. Formato y
+  editor (tamaño/familia de fuente, ancho legible, índice flotante `showToc`, tareas marcadas al final
+  `moveCheckedToBottom`) sincronizados entre dispositivos. Formato y
   saneado/merge en `electron/uiSettings.ts` (módulo puro, tests en `tests/electron/uiSettings.test.ts`).
   **Espejo en noteflow-mobile** (`src/core/uiSettings.ts`): su saneador también descarta claves
   desconocidas y el móvil re-sanea el fichero antes de cada escritura (`appearanceStore`), así que un
@@ -565,7 +572,9 @@ Contenido del dir de notas:
   los desktops anteriores a ese cambio y el móvil las borran en su siguiente escritura de
   `ui-settings.json` (de cualquier tipo, no solo de tema); el escritorio cae a la memoria en RAM o a
   NoteFlow Dark / Light, sin errores — ver "Light / Dark recuerda el último tema de cada tipo" en
-  `patterns.md`.
+  `patterns.md`. Igual `editor.moveCheckedToBottom` (pendiente en el espejo móvil): una escritura del
+  móvil lo borra y los desktops vuelven al valor por defecto (desactivado) en su siguiente arranque
+  (`reloadUiSettings` conserva el valor en memoria si la clave falta).
   Claves de override tri-estado: AUSENTE = nunca escrita (los stores caen a las fuentes legacy
   locales y hacen seed una vez), `null` = override borrado explícitamente ("sigue al tema"),
   string = valor. Los stores (`themeStore`, `editorSettingsStore`) siguen dual-escribiendo las

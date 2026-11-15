@@ -7,7 +7,7 @@ import { settingsButtonClass } from './ui'
 export function EditorPanel() {
   const {
     fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily, readableWidth, setReadableWidth,
-    showToc, setShowToc,
+    showToc, setShowToc, moveCheckedToBottom, setMoveCheckedToBottom,
   } = useEditorSettingsStore()
   const t = useT()
 
@@ -89,6 +89,29 @@ export function EditorPanel() {
           <span
             className={`absolute top-[2px] w-4 h-4 bg-white rounded-full shadow transition-all duration-200 ${
               showToc ? 'left-[18px]' : 'left-[2px]'
+            }`}
+          />
+        </button>
+      </section>
+
+      {/* Task lists: checked items go to the bottom */}
+      <section className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-mono font-medium text-text">{t.settings.editor.moveChecked}</p>
+          <p className="text-[11px] font-mono text-text-muted mt-1">{t.settings.editor.moveCheckedHint}</p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={moveCheckedToBottom}
+          aria-label={t.settings.editor.moveChecked}
+          onClick={() => setMoveCheckedToBottom(!moveCheckedToBottom)}
+          className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors ${
+            moveCheckedToBottom ? 'bg-text/70' : 'bg-surface-3 border border-border'
+          }`}
+        >
+          <span
+            className={`absolute top-[2px] w-4 h-4 bg-white rounded-full shadow transition-all duration-200 ${
+              moveCheckedToBottom ? 'left-[18px]' : 'left-[2px]'
             }`}
           />
         </button>

@@ -1,6 +1,7 @@
 // Pure sanitize/merge logic for ui-settings.json — the root-level file of the
 // notes dir that syncs appearance (theme, app font, accent, editor colours) and
-// editor settings (font size/family, readable width, floating TOC) across devices. Lives in
+// editor settings (font size/family, readable width, floating TOC, move checked tasks to the
+// bottom) across devices. Lives in
 // electron/ but imports nothing from Electron (same pure-module pattern as
 // syncState.ts / cloudSyncLogic.ts). Covered by tests/electron/uiSettings.test.ts.
 //
@@ -69,6 +70,8 @@ export interface UiSettings {
     readableWidth?: boolean
     /** Floating table of contents in the note editor (absent = shown). */
     showToc?: boolean
+    /** Checking a task moves it to the bottom of its list (absent = off). */
+    moveCheckedToBottom?: boolean
   }
 }
 
@@ -156,6 +159,10 @@ export function sanitizeUiSettings(raw: unknown): UiSettings {
     }
     if (typeof ed.showToc === 'boolean') {
       cleaned.showToc = ed.showToc
+      hasAny = true
+    }
+    if (typeof ed.moveCheckedToBottom === 'boolean') {
+      cleaned.moveCheckedToBottom = ed.moveCheckedToBottom
       hasAny = true
     }
     if (hasAny) out.editor = cleaned

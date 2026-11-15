@@ -16,6 +16,7 @@ import { TableContextMenu } from './TableContextMenu'
 import { SearchHighlight } from './SearchHighlightExtension'
 import { SlashCommands, getSlashCommands } from './SlashCommands'
 import { AutoCloseBrackets } from './AutoCloseBrackets'
+import { ListItemMove } from './ListItemMove'
 import { SectionLinkPicker } from './SectionLinkPicker'
 import { EditorToc } from './EditorToc'
 import { useTocItems } from './useEditorToc'
@@ -261,6 +262,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       SearchHighlight,
       // `(` → `()` with the caret inside, IDE-style (rules in lib/autoCloseBrackets.ts).
       AutoCloseBrackets,
+      // Alt+↑/↓ moves the list item around the caret (lib/listItemMove.ts).
+      ListItemMove,
       SlashCommands.configure({
         onLinkSection: () => setLinkPickerOpen(true),
         getLabels: () => getSlashCommands(tRef.current),

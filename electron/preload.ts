@@ -30,7 +30,13 @@ export type UiSettingsPayload = {
   appFont?: string | null
   accent?: string | null
   editorColors?: Partial<Record<'h1' | 'h2' | 'h3' | 'italic' | 'inlineCode' | 'codeAccent', string | null>>
-  editor?: { fontSize?: number; fontFamily?: 'inter' | 'mono'; readableWidth?: boolean; showToc?: boolean }
+  editor?: {
+    fontSize?: number
+    fontFamily?: 'inter' | 'mono'
+    readableWidth?: boolean
+    showToc?: boolean
+    moveCheckedToBottom?: boolean
+  }
 }
 
 const api = {

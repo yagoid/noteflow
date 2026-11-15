@@ -31,6 +31,14 @@ import { DEADLINE_POPOVER_SIZE, IMPORTANCE_POPOVER_SIZE, popoverPosition } from 
 import { DeadlinePopover, ImportancePopover } from './TaskPickers'
 import { convertBoardToTaskList } from './kanbanCommands'
 import { CardView, InlineEditor, KanbanMenu, type MenuItem, type PickerKind } from './KanbanParts'
+import {
+  DRAG_THRESHOLD,
+  EDGE_SCROLL_SPEED,
+  EDGE_SCROLL_ZONE,
+  edgeScrollVertical,
+  swallowNextClick,
+  verticalScroller,
+} from './pointerDrag'
 
 // React NodeView of the in-note kanban board (node: KanbanBoard.ts). Every edit
 // is a pure transform from lib/kanbanOps.ts applied to the LIVE node (read from
@@ -84,9 +92,6 @@ interface PendingDrag {
   startY: number
 }
 
-const DRAG_THRESHOLD = 4
-const EDGE_SCROLL_ZONE = 48
-const EDGE_SCROLL_SPEED = 14
 const CARD_GAP = 6
 const COLUMN_GAP = 10
 
@@ -98,15 +103,6 @@ function isTextField(target: EventTarget | null): boolean {
 
 function sameRef(a: CardRef | null, b: CardRef | null): boolean {
   return a === b || (!!a && !!b && a.col === b.col && a.idx === b.idx)
-}
-
-/** Nearest ancestor that scrolls vertically (the editor's scroller). */
-function verticalScroller(el: HTMLElement | null): HTMLElement | null {
-  for (let node = el?.parentElement ?? null; node; node = node.parentElement) {
-    const { overflowY } = getComputedStyle(node)
-    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) return node
-  }
-  return null
 }
 
 // ── Board ────────────────────────────────────────────────────────────────────
@@ -285,12 +281,7 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
         if (x < r.left + EDGE_SCROLL_ZONE) sc.scrollLeft -= EDGE_SCROLL_SPEED
         else if (x > r.right - EDGE_SCROLL_ZONE) sc.scrollLeft += EDGE_SCROLL_SPEED
       }
-      const vs = vScrollerRef.current
-      if (vs) {
-        const r = vs.getBoundingClientRect()
-        if (y < r.top + EDGE_SCROLL_ZONE) vs.scrollTop -= EDGE_SCROLL_SPEED
-        else if (y > r.bottom - EDGE_SCROLL_ZONE) vs.scrollTop += EDGE_SCROLL_SPEED
-      }
+      edgeScrollVertical(vScrollerRef.current, y)
       updateTarget()
       frameRef.current = requestAnimationFrame(loop)
     }
@@ -308,9 +299,7 @@ export function KanbanBoardView({ node, editor, getPos, updateAttributes, delete
     if (!cur) return
     setDragState(null)
     // The click that follows the pointerup must not open a card editor.
-    const swallow = (e: MouseEvent) => { e.stopPropagation(); e.preventDefault() }
-    window.addEventListener('click', swallow, { capture: true, once: true })
-    setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0)
+    swallowNextClick()
     if (!commit) return
     if (cur.kind === 'card' && cur.over) {
       const to = cur.over

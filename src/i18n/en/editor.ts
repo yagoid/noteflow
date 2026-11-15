@@ -134,6 +134,8 @@ export const editor = {
     kanbanDescription: 'Columns and cards you can drag around',
     convertToKanban: 'Convert task list to board',
     convertToKanbanDescription: 'Turn this task list into a kanban board',
+    sortChecked: 'Move checked to bottom',
+    sortCheckedDescription: 'Put the checked tasks of this list at the end',
     noCommands: 'No commands',
     // Heading over the user's snippets in the menu.
     snippetsHeading: 'Snippets',
@@ -169,6 +171,8 @@ export const editor = {
     alarm: 'Alarm',
     clear: 'Clear',
     done: 'Done',
+    // Tooltip of the ⋮⋮ handle left of a task's checkbox ({keys} = Alt+↑/↓).
+    dragHandle: 'Drag to move ({keys})',
   },
 
   // In-note kanban board (KanbanBoardView).

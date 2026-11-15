@@ -570,7 +570,50 @@ button {
   gap: 0.5rem;
   padding: 0.15rem 0;
   list-style: none;
+  /* Anchors the drag handle; lets a sliding task (taskToggle.ts) ride above its neighbours. */
+  position: relative;
 }
+
+/* Drag handle (⋮⋮, DeadlineTaskItemView + taskDrag.ts): out of the flow, in the
+   gutter just left of the checkbox — the editor's left padding for top-level
+   tasks, the parent's checkbox column for subtasks — so it never pushes the
+   text (Full, Readable or sticky). Shown on hover of its own row only (not
+   when hovering a subtask). */
+.task-drag-handle {
+  position: absolute;
+  right: 100%;
+  top: 0.15rem;
+  height: 1lh;
+  width: 0.85rem;
+  margin-right: 0.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: rgb(var(--text-muted));
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+/* The icon never is the event target: ProseMirror's NodeView stopEvent only
+   leaves the press alone when the target is the <button> itself. */
+.task-drag-handle svg { pointer-events: none; }
+.prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper]:hover:not(:has(li[data-node-view-wrapper]:hover)) > .task-drag-handle {
+  opacity: 0.6;
+}
+.prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] > .task-drag-handle:hover {
+  opacity: 1;
+  color: rgb(var(--text));
+}
+.ProseMirror[contenteditable="false"] .task-drag-handle,
+body.task-dragging .task-drag-handle { opacity: 0 !important; }
+/* Sticky: a 0.75rem left padding — the handle fills it, no extra margin. */
+.sticky-editor .task-drag-handle { width: 0.75rem; margin-right: 0; }
+/* The task being dragged stays in place, dimmed (like a kanban card). */
+.prose-editor .ProseMirror ul[data-type="taskList"] li[data-drag-source] { opacity: 0.35; }
 
 .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] > label {
   flex-shrink: 0;
@@ -2449,7 +2492,28 @@ svg.kanban-column-marker.is-done {
 .kanban-ghost .kanban-column { width: 100%; background: rgb(var(--bg-1)); }
 .kanban-ghost .kanban-column .kanban-card { rotate: none; box-shadow: none; border-color: rgb(var(--border)); }
 body.kanban-dragging,
-body.kanban-dragging * { cursor: grabbing !important; user-select: none; }
+body.kanban-dragging *,
+body.task-dragging,
+body.task-dragging * { cursor: grabbing !important; user-select: none; }
+
+/* Task drag (taskDrag.ts): the same neon drop line, fixed to the viewport
+   (left/top/width set inline), and a ghost card holding a copy of the task. */
+.kanban-drop-line.task-drop-line { position: fixed; right: auto; z-index: 10000; }
+.task-ghost.prose-editor .ProseMirror {
+  font-size: var(--prose-font-size, 13px);
+  line-height: 1.75;
+}
+.task-ghost .ProseMirror > ul[data-type="taskList"] {
+  margin: 0;
+  padding: 0.1rem 0.6rem;
+  max-height: 40vh;
+  overflow: hidden;
+  border: 1px solid rgb(var(--accent) / 0.7);
+  border-radius: 6px;
+  background: rgb(var(--bg-1));
+  box-shadow: 0 0 0 1px rgb(var(--accent) / 0.25), 0 14px 34px rgb(0 0 0 / 0.45);
+  rotate: 1deg;
+}
 
 /* Column / card options menu (portalled). Same look as the slash menu. */
 .kanban-menu {

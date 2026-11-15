@@ -114,6 +114,8 @@ export const editor = {
     kanbanDescription: 'Columnas y tarjetas que puedes arrastrar',
     convertToKanban: 'Convertir lista de tareas en tablero',
     convertToKanbanDescription: 'Convierte esta lista de tareas en un tablero kanban',
+    sortChecked: 'Mover marcadas al final',
+    sortCheckedDescription: 'Lleva al final las tareas marcadas de esta lista',
     noCommands: 'Sin comandos',
     snippetsHeading: 'Fragmentos',
     snippet: 'Fragmento',
@@ -144,6 +146,7 @@ export const editor = {
     alarm: 'Alarma',
     clear: 'Quitar',
     done: 'Hecho',
+    dragHandle: 'Arrastra para mover ({keys})',
   },
 
   kanban: {

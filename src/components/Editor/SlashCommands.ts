@@ -13,6 +13,7 @@ import {
   type KanbanDefaultColumns,
 } from './kanbanCommands'
 import { insertSnippet } from './snippetCommands'
+import { sortCheckedToBottom, taskListAround } from '../../lib/listItemMove'
 import { expandSnippet } from '../../lib/snippets'
 import { filterSlashItems, snippetSlashEntries } from '../../lib/slashItems'
 import { useSnippetsStore } from '../../stores/snippetsStore'
@@ -38,6 +39,8 @@ export interface SlashCommandLabels {
   kanbanDescription: string
   convertToKanban: string
   convertToKanbanDescription: string
+  sortChecked: string
+  sortCheckedDescription: string
   /** Column names of a new board (to do / in progress / done). */
   kanbanColumns: KanbanDefaultColumns
   /** Title of a snippet without a name. */
@@ -59,6 +62,8 @@ export function getSlashCommands(t: Messages): SlashCommandLabels {
     kanbanDescription: t.editor.slash.kanbanDescription,
     convertToKanban: t.editor.slash.convertToKanban,
     convertToKanbanDescription: t.editor.slash.convertToKanbanDescription,
+    sortChecked: t.editor.slash.sortChecked,
+    sortCheckedDescription: t.editor.slash.sortCheckedDescription,
     kanbanColumns: kanbanDefaultColumns(t),
     snippetUntitled: t.editor.snippets.untitled,
     snippetDescription: t.editor.slash.snippet,
@@ -67,7 +72,7 @@ export function getSlashCommands(t: Messages): SlashCommandLabels {
 
 export interface SlashCommandsOptions {
   onLinkSection: (editor: Editor) => void
-  /** Linked notes (plain Markdown): no "Link section" nor kanban commands — only snippets. */
+  /** Linked notes (plain Markdown): no "Link section" nor kanban commands — only "Move checked to bottom" and snippets. */
   plain: boolean
   // Read fresh labels each time the menu builds its items (see getSlashCommands).
   getLabels: () => SlashCommandLabels
@@ -103,6 +108,8 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
         kanbanDescription: 'Columns and cards you can drag around',
         convertToKanban: 'Convert task list to board',
         convertToKanbanDescription: 'Turn this task list into a kanban board',
+        sortChecked: 'Move checked to bottom',
+        sortCheckedDescription: 'Put the checked tasks of this list at the end',
         kanbanColumns: ['To do', 'In progress', 'Done'],
         snippetUntitled: 'Untitled snippet',
         snippetDescription: 'Snippet',
@@ -158,6 +165,20 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
               // `/kanban` and `/board` find it in any UI language.
               keywords: ['kanban', 'board'],
               run: (editor) => insertDefaultBoard(editor, labels.kanbanColumns),
+            })
+          }
+          // Inside a task list (any level, also in linked notes): put its checked
+          // tasks at the end, by hand (lib/listItemMove.ts).
+          if (taskListAround(editor.state)) {
+            all.push({
+              id: 'sort-checked',
+              title: labels.sortChecked,
+              description: labels.sortCheckedDescription,
+              keywords: ['sort', 'checked', 'done'],
+              run: (editor) => {
+                const tr = sortCheckedToBottom(editor.state)
+                if (tr) editor.view.dispatch(tr)
+              },
             })
           }
           // The user's snippets, after the commands and in their configured
