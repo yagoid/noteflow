@@ -68,8 +68,8 @@ export const whatsNew = {
       body: "The stamp button in the toolbar drops your default snippet at the cursor, today's date included. Its arrow lists the rest and lets you build your own.",
     },
     'linked-files': {
-      title: 'Edit any Markdown file in place',
-      body: "Link an existing .md (a project's README, your docs) by right-clicking the big + or dropping it on the window. You edit the original file: changes land in its project and Git history, and edits made elsewhere show up here. Linked files stay local.",
+      title: 'Edit any text file in place',
+      body: "Link a Markdown or text file (a project's README, a .txt, a config) by right-clicking the big + or dropping it on the window, or open it from your system (\"Open with\" → NoteFlow). You edit the original: changes land in its project and Git history, and edits made elsewhere show up here. Linked files stay local.",
     },
     more: {
       title: 'And much more',

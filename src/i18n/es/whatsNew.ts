@@ -64,8 +64,8 @@ export const whatsNew: Messages['whatsNew'] = {
       body: 'El botón del sello en la barra de herramientas inserta tu fragmento por defecto en el cursor, con la fecha de hoy. Su flecha muestra el resto y te deja crear los tuyos.',
     },
     'linked-files': {
-      title: 'Edita cualquier archivo Markdown en su sitio',
-      body: 'Vincula un .md que ya existe (el README de un proyecto, tu documentación) con clic derecho en el + grande o soltándolo en la ventana. Editas el archivo original: los cambios llegan a su proyecto y a su historial de Git, y lo que cambie fuera aparece aquí. Los archivos vinculados son solo locales.',
+      title: 'Edita cualquier archivo de texto en su sitio',
+      body: 'Vincula un archivo Markdown o de texto (el README de un proyecto, un .txt, una configuración) con clic derecho en el + grande o soltándolo en la ventana, o ábrelo desde el sistema ("Abrir con" → NoteFlow). Editas el original: los cambios llegan a su proyecto y a su historial de Git, y lo que cambie fuera aparece aquí. Los archivos vinculados son solo locales.',
     },
     more: {
       title: 'Y mucho más',
