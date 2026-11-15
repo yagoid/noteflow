@@ -3,12 +3,17 @@
 // overwrite local edits silently) and image sources.
 import { describe, expect, it } from 'vitest'
 import {
+  codeLanguageOf,
   decideLinkedReload,
+  findLinkedNoteByPath,
   inlineLinkedImages,
   isLinkedDirty,
+  isPlainTextLinked,
   linkedDraftOf,
-  isLinkedFilePath,
   isLinkedReadOnly,
+  linkedTagsOf,
+  plainTextAsCodeBlock,
+  sectionShowsRaw,
   linkedImageSrc,
   linkedNoteFromWire,
   linkedPreviewOptions,
@@ -56,6 +61,48 @@ describe('linkedNoteFromWire', () => {
 
   it('drops a folder without group', () => {
     expect(linkedNoteFromWire(wire({ folder: 'f' })).folder).toBeUndefined()
+  })
+})
+
+describe('plain-text linked files (not Markdown)', () => {
+  const py = wire({ id: 'lnk:py', path: '/p/run.py', title: 'run.py', sectionName: 'run.py', body: '# setup\nimport os  # TODO #later', isRawMode: false })
+
+  it('are always in text mode, even when the registry says otherwise', () => {
+    const note = linkedNoteFromWire(py)
+    expect(isPlainTextLinked(note)).toBe(true)
+    expect(note.sections[0].isRawMode).toBe(true)
+    expect(sectionShowsRaw(note, { isRawMode: false })).toBe(true)
+    // A Markdown file keeps its own mode.
+    const md = linkedNoteFromWire(wire())
+    expect(isPlainTextLinked(md)).toBe(false)
+    expect(md.sections[0].isRawMode).toBeUndefined()
+    expect(sectionShowsRaw(md, md.sections[0])).toBe(false)
+    expect(sectionShowsRaw(null, { isRawMode: true })).toBe(true)
+  })
+
+  it('have no tags (`#` is a comment there), also from a draft', () => {
+    expect(linkedNoteFromWire(py).tags).toEqual([])
+    expect(linkedNoteFromWire({ ...py, draft: { body: '# x #y', baseHash: 'h1' } }).tags).toEqual([])
+    expect(linkedTagsOf('/p/run.py', '#tag')).toEqual([])
+    expect(linkedTagsOf('/p/README.MD', '#tag')).toEqual(['tag'])
+  })
+
+  it('copy into a regular note as one code block with the language of the extension', () => {
+    expect(codeLanguageOf('config.json')).toBe('json')
+    expect(codeLanguageOf('ci.yml')).toBe('yaml')
+    expect(codeLanguageOf('run.py')).toBe('python')
+    expect(codeLanguageOf('notes.txt')).toBe('')
+    expect(codeLanguageOf('Makefile')).toBe('')
+    expect(codeLanguageOf('weird.ext with space')).toBe('')
+    expect(plainTextAsCodeBlock('config.json', '{\n  "a": 1\n}')).toBe('```json\n{\n  "a": 1\n}\n```')
+  })
+
+  it('the code block fence is longer than any fence inside the content', () => {
+    const md = 'Example:\n```js\nx()\n```\n  ````\nend'
+    const block = plainTextAsCodeBlock('README.txt', md)
+    expect(block).toBe('`````\n' + md + '\n`````')
+    // A backtick run inside a line can't close a fence: three are enough.
+    expect(plainTextAsCodeBlock('a.sh', 'echo `date` ``` x')).toBe('```bash\necho `date` ``` x\n```')
   })
 })
 
@@ -129,11 +176,22 @@ describe('mergeLinkedWire', () => {
 })
 
 describe('paths and images', () => {
-  it('a notes-updated path naming an .md is a linked file (note folders never are)', () => {
-    expect(isLinkedFilePath('C:\\p\\README.md')).toBe(true)
-    expect(isLinkedFilePath('/p/x.MARKDOWN')).toBe(true)
-    expect(isLinkedFilePath('C:\\Users\\me\\noteflow-notes\\my-note-abc12345')).toBe(false)
-    expect(isLinkedFilePath(undefined)).toBe(false)
+  it('a notes-updated path is a linked file when a linked note of the store has it (any extension)', () => {
+    const notes = [
+      linkedNoteFromWire(wire({ id: 'lnk:a', path: 'C:\\p\\config.json' })),
+      linkedNoteFromWire(wire({ id: 'lnk:b', path: '/home/u/README.md' })),
+      { linked: undefined, filePath: 'C:\\Users\\me\\noteflow-notes\\my-note-abc12345' } as Note,
+    ]
+    // Windows: case-insensitive, either separator.
+    expect(findLinkedNoteByPath(notes, 'c:/P/CONFIG.json', 'win32')?.id).toBe('lnk:a')
+    expect(findLinkedNoteByPath(notes, 'C:\\p\\config.json', 'linux')?.id).toBe('lnk:a')
+    // Linux: case matters.
+    expect(findLinkedNoteByPath(notes, '/home/u/readme.md', 'linux')).toBeUndefined()
+    expect(findLinkedNoteByPath(notes, '/home/u/README.md', 'linux')?.id).toBe('lnk:b')
+    // A note folder is never a linked file; nor an unknown file.
+    expect(findLinkedNoteByPath(notes, 'C:\\Users\\me\\noteflow-notes\\my-note-abc12345', 'win32')).toBeUndefined()
+    expect(findLinkedNoteByPath(notes, 'C:\\p\\other.md', 'win32')).toBeUndefined()
+    expect(findLinkedNoteByPath(notes, undefined, 'win32')).toBeUndefined()
   })
 
   it('serves relative images through nflinked:, leaves the rest alone', () => {
@@ -199,6 +257,11 @@ describe('unsaved content (dirty) and drafts', () => {
     expect(linkedTone(state, true)).toBe('warn')
     expect(linkedTone(state, false)).toBe('ok')
     expect(linkedTone({ ...state, status: 'checking' }, false)).toBe('ok')
+    // Old Mac line breaks in a plain-text file: readable, kept read-only — not "cannot read".
+    const loneCr: LinkedNoteState = { ...state, path: '/p/a.txt', status: 'error', error: 'loneCr' }
+    expect(linkedStatusLabel(labels, loneCr, false)).toBe('Read-only')
+    expect(linkedTone(loneCr, false)).toBe('warn')
+    expect(linkedTone({ ...state, status: 'error', error: 'binary' }, false)).toBe('error')
   })
 })
 

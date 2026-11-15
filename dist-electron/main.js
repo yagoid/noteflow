@@ -1886,17 +1886,21 @@ electron_1.ipcMain.handle('fs:read-note-dir', (_event, dir) => {
     }
 });
 /**
- * Linked notes (external .md files, linkedNotes.ts) never go through the note-FOLDER
+ * Linked notes (external text files, linkedNotes.ts) never go through the note-FOLDER
  * primitives: a linked file's path reduced to its basename would otherwise name an entry of
- * the notes dir (`notes.md`) — or the linked file itself if it sits in the notes dir root.
- * Note folders never end in `.md` nor start with the linked id prefix.
+ * the notes dir (`notes.md`, `config.json`). What identifies one is the registry (the full
+ * path of a linked file) and the linked id prefix. On top of that, any basename ending in
+ * `.md` is refused (note folders never do). No other extension is: a folder migrated from a
+ * v1 flat note keeps its old file stem, which may hold a dot (`notes.2023`), and a linked
+ * file can never sit inside the notes dir (`insideNotesDir`), so a bare basename can't
+ * reach it anyway.
  */
 function refuseLinkedTarget(dirOrPath) {
     if (typeof dirOrPath !== 'string')
         return;
     const base = path_1.default.basename(dirOrPath.replace(/[\\/]+$/, ''));
     if (base.startsWith(linkedNotesLogic_1.LINKED_ID_PREFIX) || (0, linkedNotesLogic_1.isMarkdownPath)(base) || linkedNotes.isLinkedPath(dirOrPath)) {
-        throw new Error('Refusing to treat a linked Markdown file as a note folder');
+        throw new Error('Refusing to treat a linked file as a note folder');
     }
 }
 // Core note write — shared by the IPC handler and the agentic chat tools.
@@ -2033,25 +2037,44 @@ electron_1.ipcMain.handle('fs:read-all-notes', async () => {
         .filter((rec) => rec !== null);
 });
 electron_1.ipcMain.handle('fs:notes-dir', () => NOTES_DIR);
-// ── Linked notes (external .md files edited in place — linkedNotes.ts) ──────────
+// ── Linked notes (external text files edited in place — linkedNotes.ts) ─────────
 // Writes only ever target files in the registry, resolved there by id (`linked:write`,
-// `linked:save-asset` into the file's assets/). What can ENTER the registry is any existing
-// absolute .md/.markdown path outside the notes dir that the renderer passes to
-// `linked:link` / `linked:relocate` (normally from the native picker or an OS drop, but main
-// doesn't check where it came from): the renderer can't write an arbitrary path directly,
-// though it can link any such .md and then edit it.
+// `linked:save-asset` into a Markdown file's assets/). What can ENTER the registry (via
+// `linked:link` / `linked:relocate`) is only a path the USER chose — granted in main, single
+// use, for a few minutes (linkedNotes.grantLinkPaths): what the native picker returned
+// (`linked:pick-files`), or what the preload saw in a real (isTrusted) drop from the OS
+// (`linked:grant-drop`). Then it must be an existing TEXT file (no NUL byte, valid UTF-8)
+// outside the notes dir. A compromised renderer can't link — and so rewrite — an arbitrary
+// file (`.bashrc`, `.git/config`, `~/.ssh/authorized_keys`): it can't grant a path itself.
 electron_1.ipcMain.handle('linked:list', () => linkedNotes.list());
 electron_1.ipcMain.handle('linked:get', (_event, idOrPath) => linkedNotes.get(idOrPath));
 electron_1.ipcMain.handle('linked:pick-files', async (event, opts) => {
-    const multi = !!(opts && typeof opts === 'object' && opts.multi);
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const multi = !!o.multi;
     const parent = electron_1.BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    const dialogs = mainMessages().dialogs;
+    // Any text file can be linked: "All files" first (the default), Markdown as a shortcut —
+    // first when locating the file of a linked Markdown note (`markdown`).
+    const markdownFilter = { name: dialogs.linkFilterMarkdown, extensions: ['md', 'markdown'] };
+    const allFilter = { name: dialogs.linkFilterAllFiles, extensions: ['*'] };
     const dialogOpts = {
-        title: multi ? mainMessages().dialogs.linkMarkdownFiles : mainMessages().dialogs.relocateMarkdownFile,
-        filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }],
+        title: multi ? dialogs.linkFiles : dialogs.relocateLinkedFile,
+        filters: o.markdown === true ? [markdownFilter, allFilter] : [allFilter, markdownFilter],
         properties: multi ? ['openFile', 'multiSelections'] : ['openFile'],
     };
     const result = parent ? await electron_1.dialog.showOpenDialog(parent, dialogOpts) : await electron_1.dialog.showOpenDialog(dialogOpts);
-    return result.canceled ? [] : result.filePaths;
+    if (result.canceled)
+        return [];
+    // What the user picked may be linked (once, for a few minutes) — nothing else.
+    linkedNotes.grantLinkPaths(result.filePaths);
+    return result.filePaths;
+});
+// Files of a REAL drop from the OS (the preload only sends what an isTrusted drop event
+// carried, with webUtils.getPathForFile — a synthetic File has no path). Not exposed to the
+// page: the renderer only gets to link them afterwards, through `linked:link`.
+electron_1.ipcMain.on('linked:grant-drop', (_event, paths) => {
+    if (Array.isArray(paths))
+        linkedNotes.grantLinkPaths(paths);
 });
 electron_1.ipcMain.handle('linked:link', (event, paths) => linkedNotes.link(paths, event.sender.id));
 electron_1.ipcMain.handle('linked:relocate', (event, id, newPath) => linkedNotes.relocate(id, newPath, event.sender.id));
@@ -2097,7 +2120,8 @@ function linkedToolApi() {
     const asDiskNote = (n) => ({
         id: n.id,
         title: n.title,
-        tags: agentTools.extractTags(n.body),
+        // `#` in a plain-text file (a comment in a .py, a .yaml…) is not a tag.
+        tags: (0, linkedNotesLogic_1.isMarkdownPath)(n.path) ? agentTools.extractTags(n.body) : [],
         created: n.created,
         updated: n.updated,
         ...(n.group ? { group: n.group } : {}),
@@ -2117,7 +2141,7 @@ function linkedToolApi() {
             if (!n)
                 return { ok: false, error: 'not linked' };
             if (n.status !== 'ok' || !n.hash)
-                return { ok: false, error: `the file is ${n.status === 'readonly' ? 'read-only' : n.status === 'missing' ? 'missing' : n.status === 'checking' ? 'still being read' : 'unreadable'}` };
+                return { ok: false, error: `the file is ${n.status === 'readonly' ? 'read-only' : n.status === 'missing' ? 'missing' : n.status === 'checking' ? 'still being read' : n.error === 'loneCr' ? 'read-only in NoteFlow (old Mac line breaks)' : 'unreadable'}` };
             // Based on the version main last read: if the file changed outside since, it's a conflict.
             const res = await linkedNotes.writeBody(id, content, n.hash);
             if (res.ok)
@@ -4779,9 +4803,10 @@ electron_1.app.whenReady().then(async () => {
     // remote (localOnlyNotes.ts). Both before any sync code runs.
     await seedWelcomeNoteIfFirstRun();
     (0, localOnlyNotes_1.primeLocalOnlyDirs)(NOTES_DIR);
-    // Linked notes (external .md files) — before any window can ask for them: registry + content
+    // Linked notes (external text files) — before any window can ask for them: registry + content
     // cache in userData, one watcher per parent folder. Changes reach the windows as
-    // `notes-updated` with the FILE path (the renderer routes .md paths to its linked-note sync)
+    // `notes-updated` with the FILE path (the renderer routes it to its linked-note sync: a
+    // linked note of its store with that path, or one main knows — `linked:get`)
     // and the semantic index as data notes (the callbacks run later, never during init).
     // Not awaited: the files are read in the background (fs.promises) — a network drive that
     // doesn't answer must not hold the windows back; their notes show as "checking" meanwhile.

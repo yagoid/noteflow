@@ -4,7 +4,7 @@ import { ExternalLink, Lock, X } from 'lucide-react'
 import { FolderIcon } from '../Sidebar/NoteFolderHeader'
 import { formatNoteDate } from '../Sidebar/rowText'
 import { rawPreviewText, sectionCardStats, sectionPreviewHtml } from '../../lib/noteOverviewGrid'
-import { linkedPreviewOptions } from '../../lib/linkedNotes'
+import { linkedPreviewOptions, sectionShowsRaw } from '../../lib/linkedNotes'
 import { colorChannels, resolveGroupColor, type TagColorMap } from '../../lib/tagColors'
 import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { useT } from '../../i18n/useT'
@@ -45,7 +45,8 @@ export function SectionPreviewPane({
   const index = note && sectionId ? note.sections.findIndex((s) => s.id === sectionId) : -1
   const section = index === -1 || !note ? null : note.sections[index]
   const locked = Boolean(note?.encryption && note.sections.length === 0)
-  const raw = !!section?.isRawMode
+  // Text mode (also a plain-text linked file): preformatted text, never rendered Markdown.
+  const raw = sectionShowsRaw(note, section)
   const content = section?.content ?? ''
   const hasContent = content.trim().length > 0
   // A linked note (external .md): plain Markdown, relative images from its folder.

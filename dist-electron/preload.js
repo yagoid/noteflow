@@ -26,7 +26,7 @@ const api = {
     getNotesDir: () => electron_1.ipcRenderer.invoke('fs:notes-dir'),
     openNotesFolder: () => electron_1.ipcRenderer.invoke('app:open-notes-folder'),
     chooseNotesDir: () => electron_1.ipcRenderer.invoke('app:choose-notes-dir'),
-    // Linked notes (external .md files edited in place — electron/linkedNotes.ts). Main only
+    // Linked notes (external text files edited in place — electron/linkedNotes.ts). Main only
     // writes to files in its registry (by id); paths are validated there.
     linkedList: () => electron_1.ipcRenderer.invoke('linked:list'),
     linkedGet: (idOrPath) => electron_1.ipcRenderer.invoke('linked:get', idOrPath),
@@ -406,3 +406,19 @@ const api = {
     },
 };
 electron_1.contextBridge.exposeInMainWorld('noteflow', api);
+const dropTarget = globalThis;
+dropTarget.addEventListener('drop', (e) => {
+    if (!e.isTrusted || !e.dataTransfer)
+        return;
+    const paths = [];
+    for (const file of Array.from(e.dataTransfer.files)) {
+        try {
+            const p = electron_1.webUtils.getPathForFile(file);
+            if (p)
+                paths.push(p);
+        }
+        catch { /* not a file from disk */ }
+    }
+    if (paths.length > 0)
+        electron_1.ipcRenderer.send('linked:grant-drop', paths);
+}, true);

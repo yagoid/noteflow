@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Undo2, AlertTriangle, CloudOff, FileSymlink, FolderOpen, GitCompare, Link2Off, RotateCcw, Save, Search } from 'lucide-react'
+import { Undo2, AlertTriangle, CloudOff, FolderOpen, GitCompare, Link2Off, RotateCcw, Save, Search } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { ConfirmModal } from '../ConfirmModal'
 import { LinkedConflictModal } from './LinkedConflictModal'
@@ -7,7 +7,8 @@ import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import type { LinkedNoteState, Note } from '../../types'
 import { LINKED_TONE_CLASS, fileNameOf, linkedStatusLabel, linkedTone, shortenPath } from './linkedActions'
-import { isLinkedDirty } from '../../lib/linkedNotes'
+import { isLinkedDirty, isMarkdownFilePath } from '../../lib/linkedNotes'
+import { LinkedFileIcon } from './LinkedFileIcon'
 
 type LinkedNote = Note & { linked: LinkedNoteState }
 
@@ -28,7 +29,8 @@ function useLinkedActions(note: LinkedNote) {
   })
 
   const relocate = async () => {
-    const [picked] = await window.noteflow.linkedPickFiles({ multi: false })
+    // A Markdown note's picker opens on the Markdown filter; any other on "All files".
+    const [picked] = await window.noteflow.linkedPickFiles({ multi: false, markdown: isMarkdownFilePath(note.linked.path) })
     if (!picked) return
     const res = await relocateLinkedNote(note.id, picked)
     if (!res.ok && res.error) {
@@ -127,7 +129,7 @@ export function LinkedNoteHeader({ note }: { note: LinkedNote }) {
   return (
     <div className="px-4 pb-2 flex-shrink-0">
       <div className="flex items-center gap-1.5 min-w-0 text-[11px] font-mono text-text-muted/80">
-        <FileSymlink size={12} className={`flex-shrink-0 ${LINKED_TONE_CLASS[tone]}`} aria-label={t.linked.linkedFile} />
+        <LinkedFileIcon path={linked.path} size={12} className={`flex-shrink-0 ${LINKED_TONE_CLASS[tone]}`} aria-label={t.linked.linkedFile} />
         <button
           type="button"
           onClick={copyPath}
@@ -210,7 +212,7 @@ export function LinkedNoteCompactBar({ note }: { note: LinkedNote }) {
   return (
     <div className="px-2 py-1 border-b border-border/60 flex flex-col gap-1 flex-shrink-0">
       <div className="flex items-center gap-1 min-w-0 text-[10px] font-mono text-text-muted/70" title={`${linked.path}\n${t.linked.localOnly}${hint ? `\n\n${hint}` : ''}`}>
-        <FileSymlink size={10} className={`flex-shrink-0 ${LINKED_TONE_CLASS[tone]}`} />
+        <LinkedFileIcon path={linked.path} size={10} className={`flex-shrink-0 ${LINKED_TONE_CLASS[tone]}`} />
         <span className="truncate">{a.file}</span>
         {tone !== 'ok' && <span className={`flex-shrink-0 ${LINKED_TONE_CLASS[tone]}`}>· {linkedStatusLabel(t.linked, linked, dirty)}</span>}
         <span className="flex-1" />

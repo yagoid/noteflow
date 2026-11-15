@@ -6,16 +6,16 @@ import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import type { LinkError } from '../../types'
 import { isLinkedDirty } from '../../lib/linkedNotes'
-import { LINK_MARKDOWN_EVENT, dragHasFiles, fileNameOf, markdownPathsOfDrop } from './linkedActions'
+import { LINK_FILE_EVENT, dragHasFiles, fileNameOf, linkablePathsOfDrop } from './linkedActions'
 
 // Shown once per device: what linking means (edited in place, local only).
 const NOTICE_SEEN_KEY = 'noteflow-linked-notice-seen'
 
 /**
- * Main window only. Owns "Link Markdown file…": the file picker, the first-link notice,
- * the report of files that couldn't be linked, and dropping .md files from the OS
- * anywhere on the window (captured before the editor / sidebar see the drop: a dropped
- * .md is linked, never inserted as text). Images keep dropping into the editor as before.
+ * Main window only. Owns "Link file…": the file picker, the first-link notice, the
+ * report of files that couldn't be linked (binary, not UTF-8…), and dropping files from
+ * the OS anywhere on the window (captured before the editor / sidebar see the drop: a
+ * dropped file is linked, never inserted as text). Images keep dropping into the editor.
  * Also re-checks the linked files when the window gets focus (read-only / missing / back).
  */
 export function LinkedNotesHost() {
@@ -41,8 +41,8 @@ export function LinkedNotesHost() {
 
   useEffect(() => {
     const onRequest = (e: Event) => startRef.current((e as CustomEvent<{ paths?: string[] }>).detail?.paths)
-    window.addEventListener(LINK_MARKDOWN_EVENT, onRequest)
-    return () => window.removeEventListener(LINK_MARKDOWN_EVENT, onRequest)
+    window.addEventListener(LINK_FILE_EVENT, onRequest)
+    return () => window.removeEventListener(LINK_FILE_EVENT, onRequest)
   }, [])
 
   // Drops from the OS, in the capture phase (before ProseMirror and the sidebar's handlers).
@@ -70,7 +70,7 @@ export function LinkedNotesHost() {
       if (idle) clearTimeout(idle)
       setDropActive(false)
       if (!dragHasFiles(e.dataTransfer)) return
-      const paths = markdownPathsOfDrop(e.dataTransfer)
+      const paths = linkablePathsOfDrop(e.dataTransfer)
       if (paths.length > 0) {
         e.preventDefault()
         e.stopPropagation()

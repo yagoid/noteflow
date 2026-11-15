@@ -1,14 +1,17 @@
 // Linked notes ("notas vinculadas"): a NoteFlow note backed by an EXTERNAL
-// Markdown file the user picked (README.md of a project, a doc of a
-// Docusaurus/Astro site…). The file is edited in place — never imported, never
+// text file the user picked (README.md of a project, a doc of a Docusaurus/Astro
+// site… or any other text file: config.json, a .yaml, a script, a log). Markdown
+// files (.md/.markdown) get the Markdown editor; any other text file is always
+// edited in text mode, byte-exact. The file is edited in place — never imported, never
 // copied into the notes dir — and nothing of NoteFlow (frontmatter, ids,
 // metadata) is ever written into it. Everything NoteFlow needs (title alias,
 // group/folder, favorite…) lives in a local registry (userData/linked-notes.json,
 // never synced). See .agents/context/patterns.md § "Notas vinculadas".
 //
 // This module is the PURE half (no Electron, no fs): registry sanitizing, path
-// normalization/dedupe, the byte-exact split/reassembly of the file (BOM, EOL,
-// final newline, YAML frontmatter), the fingerprint decisions (own echo vs
+// normalization/dedupe, the text/binary check, the byte-exact split/reassembly of
+// the file (BOM, EOL, final newline, YAML frontmatter of Markdown files), the
+// fingerprint decisions (own echo vs
 // external change, when a write is a conflict) and the assets/ helpers for
 // images. Tested in tests/electron/linkedNotesLogic.test.ts. The IO half is
 // electron/linkedNotes.ts.
@@ -20,8 +23,14 @@ import path from 'path'
 export const LINKED_ID_PREFIX = 'lnk:'
 /** The single section of a linked note (the whole file body). */
 export const LINKED_SECTION_ID = 'body'
-/** Bigger files open read-only (the editor is not meant for multi-megabyte documents). */
+/**
+ * Bigger files open read-only (the editor is not meant for multi-megabyte documents). Also
+ * for plain-text files (logs…): the store keeps several copies of the body (content, disk
+ * body, synced content, draft) and the semantic index embeds all of it — see patterns.md.
+ */
 export const MAX_LINKED_FILE_BYTES = 2 * 1024 * 1024
+/** How much of a file is sniffed for a NUL byte (= binary) when linking a file too big to read whole. */
+export const LINKED_SNIFF_BYTES = 8 * 1024
 /** Upper bound of one image pasted/dropped into a linked note (copied into assets/). */
 export const MAX_LINKED_ASSET_BYTES = 20 * 1024 * 1024
 
@@ -29,15 +38,68 @@ export function isLinkedNoteId(id: unknown): id is string {
   return typeof id === 'string' && id.startsWith(LINKED_ID_PREFIX) && id.length > LINKED_ID_PREFIX.length
 }
 
-/** `.md` / `.markdown`, case-insensitive. */
+/**
+ * `.md` / `.markdown`, case-insensitive. A linked Markdown file gets the Markdown editor and
+ * its YAML frontmatter hidden; any other linked text file is plain text (always text mode,
+ * no frontmatter, no tags, no images).
+ */
 export function isMarkdownPath(p: unknown): p is string {
   return typeof p === 'string' && /\.(md|markdown)$/i.test(p.trim())
+}
+
+// ── Link grants: only files the USER chose can be linked ─────────────────────
+//
+// Any text file can be linked and then edited, so main must not link whatever path a
+// (possibly compromised) renderer sends: `.git/config`, `~/.ssh/authorized_keys`, a
+// `.bashrc` or a PowerShell profile would mean code execution. A path can only enter the
+// registry (link / relocate) if main GRANTED it first, from a user action: the native
+// picker (`linked:pick-files`), a real drop from the OS (seen by the preload, isTrusted),
+// or — next — main itself ("Open with NoteFlow"). A grant is single use and expires.
+
+/** How long a granted path may wait to be linked (the first-link notice can sit open meanwhile). */
+export const LINK_GRANT_TTL_MS = 5 * 60 * 1000
+
+export interface LinkGrants {
+  /** Grants `paths` (each until linked once, or `ttlMs` from `now`). Non-absolute paths are ignored. */
+  grant(paths: readonly unknown[], ttlMs?: number, now?: number): void
+  /** Whether `p` was granted and still is; a granted path is consumed (single use). */
+  consume(p: unknown, now?: number): boolean
+  /** Grants still alive (tests). */
+  size(now?: number): number
+}
+
+/** Grant store keyed by `linkedPathKey` (same case/normalization rules as the registry). */
+export function createLinkGrants(platform: Platform = process.platform): LinkGrants {
+  const mod = pathModule(platform)
+  const expiries = new Map<string, number>()
+  const prune = (now: number) => { for (const [k, until] of expiries) if (until <= now) expiries.delete(k) }
+  return {
+    grant(paths, ttlMs = LINK_GRANT_TTL_MS, now = Date.now()) {
+      prune(now)
+      for (const p of paths.slice(0, 200)) {
+        if (typeof p !== 'string' || !p.trim() || !mod.isAbsolute(p)) continue
+        expiries.set(linkedPathKey(p, platform), now + ttlMs)
+      }
+    },
+    consume(p, now = Date.now()) {
+      prune(now)
+      if (typeof p !== 'string' || !p.trim() || !mod.isAbsolute(p)) return false
+      const key = linkedPathKey(p, platform)
+      if (!expiries.has(key)) return false
+      expiries.delete(key)
+      return true
+    },
+    size(now = Date.now()) {
+      prune(now)
+      return expiries.size
+    },
+  }
 }
 
 /** One entry of userData/linked-notes.json. */
 export interface LinkedNoteRecord {
   id: string
-  /** Absolute path of the .md file as the user picked it. */
+  /** Absolute path of the file as the user picked it (.md or any other text file). */
   path: string
   /** Local alias shown as the note title — editing it never renames the file. */
   title: string
@@ -129,8 +191,9 @@ function sanitizeFingerprint(v: unknown): LinkedFingerprint | undefined {
 }
 
 /**
- * Reads linked-notes.json leniently: entries without a valid linked id or a
- * Markdown absolute path are dropped, the rest keep only known fields with the
+ * Reads linked-notes.json leniently: entries without a valid linked id or an
+ * absolute path are dropped (any file type: since text files other than Markdown
+ * can be linked, a registry written by an earlier build stays valid as is), the rest keep only known fields with the
  * right types, and duplicates (same id, or same file by `linkedPathKey`) keep
  * the first one. A missing or broken file is an empty registry.
  */
@@ -148,7 +211,7 @@ export function sanitizeLinkedRegistry(raw: unknown, platform: Platform = proces
     if (!item || typeof item !== 'object') continue
     const r = item as Record<string, unknown>
     if (!isLinkedNoteId(r.id) || r.id.length > 64) continue
-    if (!isMarkdownPath(r.path) || !mod.isAbsolute(r.path as string)) continue
+    if (typeof r.path !== 'string' || !r.path.trim() || !mod.isAbsolute(r.path)) continue
     const key = linkedPathKey(r.path as string, platform)
     if (ids.has(r.id) || paths.has(key)) continue
     ids.add(r.id)
@@ -236,7 +299,10 @@ export function mergeLinkedOrder(synced: Record<string, string[]>, local: Record
   return out
 }
 
-/** Default title of a linked note: the file name without `.md`/`.markdown`. */
+/**
+ * Default title of a linked note: the file name — without `.md`/`.markdown` for a Markdown
+ * file, with its extension for any other (`config.json`: the type is part of what it is).
+ */
 export function defaultLinkedTitle(filePath: string, platform: Platform = process.platform): string {
   const base = pathModule(platform).basename(filePath)
   return base.replace(/\.(md|markdown)$/i, '') || base
@@ -254,12 +320,18 @@ export function linkedDraftFileName(id: string): string {
 
 // ── File bytes ⇄ editable body (byte-exact) ──────────────────────────────────
 
-export type LinkedDecodeError = 'invalidUtf8'
+/** `binary`: the file has a NUL byte (an image, a PDF, an Office file, UTF-16 text…). */
+export type LinkedDecodeError = 'invalidUtf8' | 'binary'
 
 const UTF8_BOM = [0xef, 0xbb, 0xbf]
 
-/** UTF-8 text of the file (strict: invalid sequences are an error) + whether it had a BOM. */
-export function decodeMarkdownBytes(bytes: Uint8Array): { ok: true; text: string; bom: boolean } | { ok: false; error: LinkedDecodeError } {
+/**
+ * UTF-8 text of the file (strict: invalid sequences are an error) + whether it had a BOM.
+ * A NUL byte anywhere makes it `binary`: text files don't have them, and the textarea
+ * couldn't round-trip one byte-exact.
+ */
+export function decodeLinkedBytes(bytes: Uint8Array): { ok: true; text: string; bom: boolean } | { ok: false; error: LinkedDecodeError } {
+  if (bytes.includes(0)) return { ok: false, error: 'binary' }
   const bom = bytes.length >= 3 && bytes[0] === UTF8_BOM[0] && bytes[1] === UTF8_BOM[1] && bytes[2] === UTF8_BOM[2]
   try {
     const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bom ? bytes.subarray(3) : bytes)
@@ -267,6 +339,31 @@ export function decodeMarkdownBytes(bytes: Uint8Array): { ok: true; text: string
   } catch {
     return { ok: false, error: 'invalidUtf8' }
   }
+}
+
+/**
+ * Whether the START of a file (`head`, e.g. its first LINKED_SNIFF_BYTES) can be text: no NUL
+ * byte (else `binary`) and valid UTF-8 so far (else `invalidUtf8`). A multi-byte character
+ * cut at the end of `head` is fine unless `complete` (head is the whole file). Null = text.
+ * For linking a file too big to read whole (it's then linked read-only, `tooLarge`).
+ */
+export function sniffLinkedBytes(head: Uint8Array, complete = false): LinkedDecodeError | null {
+  if (head.includes(0)) return 'binary'
+  try {
+    new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(head, { stream: !complete })
+    return null
+  } catch {
+    return 'invalidUtf8'
+  }
+}
+
+/**
+ * Whether the text has a lone CR (`\r` not followed by `\n`: old Mac line breaks). A
+ * textarea turns every one into `\n` in its value, so the first edit in text mode would
+ * rewrite all of them — a plain-text linked file with one opens read-only (`loneCr`).
+ */
+export function hasLoneCr(text: string): boolean {
+  return /\r(?!\n)/.test(text)
 }
 
 export function encodeMarkdown(text: string, bom: boolean): Buffer {
@@ -299,12 +396,13 @@ const FRONTMATTER_CLOSE_RE = /^(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/m
  * (`body`) and what must survive an edit untouched. `assembleMarkdownFile(parts,
  * parts.body)` gives back exactly `text` for any file with consistent line
  * endings; a file mixing CRLF and LF is written with its dominant one only when
- * the user edits it.
+ * the user edits it. Without `withFrontmatter` (a linked file that isn't Markdown —
+ * a .yaml starting with `---`…) nothing is taken as frontmatter: it's all body.
  */
-export function splitMarkdownFile(text: string, bom = false): MarkdownFileParts {
+export function splitMarkdownFile(text: string, bom = false, withFrontmatter = true): MarkdownFileParts {
   let frontmatter = ''
   let rest = text
-  const open = FRONTMATTER_OPEN_RE.exec(text)
+  const open = withFrontmatter ? FRONTMATTER_OPEN_RE.exec(text) : null
   if (open) {
     const after = text.slice(open[0].length)
     const close = FRONTMATTER_CLOSE_RE.exec(after)
@@ -325,6 +423,11 @@ export function splitMarkdownFile(text: string, bom = false): MarkdownFileParts 
   const normalized = rest.replace(/\r\n/g, '\n')
   const finalNewline = normalized.endsWith('\n')
   return { bom, eol, frontmatter, finalNewline, body: finalNewline ? normalized.slice(0, -1) : normalized }
+}
+
+/** splitMarkdownFile with the frontmatter rule of the linked file's type (only Markdown has one). */
+export function splitLinkedFile(filePath: string, text: string, bom = false): MarkdownFileParts {
+  return splitMarkdownFile(text, bom, isMarkdownPath(filePath))
 }
 
 /** The file text for an edited `body`: frontmatter verbatim, the file's EOL and final newline. */

@@ -64,11 +64,11 @@ const api = {
   openNotesFolder: (): Promise<void> => ipcRenderer.invoke('app:open-notes-folder'),
   chooseNotesDir: (): Promise<string | null> => ipcRenderer.invoke('app:choose-notes-dir'),
 
-  // Linked notes (external .md files edited in place — electron/linkedNotes.ts). Main only
+  // Linked notes (external text files edited in place — electron/linkedNotes.ts). Main only
   // writes to files in its registry (by id); paths are validated there.
   linkedList: (): Promise<LinkedNoteWire[]> => ipcRenderer.invoke('linked:list'),
   linkedGet: (idOrPath: string): Promise<LinkedNoteWire | null> => ipcRenderer.invoke('linked:get', idOrPath),
-  linkedPickFiles: (opts: { multi: boolean }): Promise<string[]> => ipcRenderer.invoke('linked:pick-files', opts),
+  linkedPickFiles: (opts: { multi: boolean; markdown?: boolean }): Promise<string[]> => ipcRenderer.invoke('linked:pick-files', opts),
   linkedLink: (paths: string[]): Promise<{ linked: LinkedNoteWire[]; existing: LinkedNoteWire[]; errors: Array<{ path: string; error: LinkError }> }> =>
     ipcRenderer.invoke('linked:link', paths),
   linkedRelocate: (id: string, newPath: string): Promise<{ ok: true; note: LinkedNoteWire } | { ok: false; error: LinkError | 'notLinked' }> =>
@@ -631,3 +631,25 @@ const api = {
 }
 
 contextBridge.exposeInMainWorld('noteflow', api)
+
+// Linked notes: the files of a REAL drop from the OS may be linked (main grants them for a few
+// minutes, single use — linkedNotes.grantLinkPaths). Seen here, in the isolated world, before
+// any page listener (capture, registered first): only an isTrusted event — a user's drag, never
+// a synthetic one — and only paths webUtils resolves (a File built by the page has none). The
+// page never gets a way to grant a path itself.
+// (electron/ is compiled without the DOM lib: the minimal shape of what's used here.)
+interface TrustedDropEvent { isTrusted: boolean; dataTransfer: { files: ArrayLike<File> } | null }
+const dropTarget = globalThis as unknown as {
+  addEventListener(type: 'drop', listener: (e: TrustedDropEvent) => void, capture: boolean): void
+}
+dropTarget.addEventListener('drop', (e) => {
+  if (!e.isTrusted || !e.dataTransfer) return
+  const paths: string[] = []
+  for (const file of Array.from(e.dataTransfer.files)) {
+    try {
+      const p = webUtils.getPathForFile(file)
+      if (p) paths.push(p)
+    } catch { /* not a file from disk */ }
+  }
+  if (paths.length > 0) ipcRenderer.send('linked:grant-drop', paths)
+}, true)

@@ -1,10 +1,12 @@
-// Linked notes in the renderer: a NoteFlow note backed by an external Markdown
-// file (electron/linkedNotes.ts). Here: turning main's wire records into store
-// notes, the reload decision when the file changed (apply / keep / conflict) and
-// image sources. Pure — tests in tests/lib/linkedNotes.test.ts. Design and
-// invariants: .agents/context/patterns.md § "Notas vinculadas".
+// Linked notes in the renderer: a NoteFlow note backed by an external text file
+// (electron/linkedNotes.ts) — a Markdown file (.md/.markdown: Markdown editor) or
+// any other text file (plain text: always in text mode, no tags, no images). Here:
+// turning main's wire records into store notes, the reload decision when the file
+// changed (apply / keep / conflict), image sources and copies into regular notes.
+// Pure — tests in tests/lib/linkedNotes.test.ts. Design and invariants:
+// .agents/context/patterns.md § "Notas vinculadas".
 
-import type { LinkedNoteState, LinkedNoteWire, Note } from '../types'
+import type { LinkedNoteState, LinkedNoteWire, Note, NoteSection } from '../types'
 import { extractTags } from './noteUtils'
 
 /** Mirror of LINKED_ID_PREFIX / LINKED_SECTION_ID in electron/linkedNotesLogic.ts. */
@@ -19,9 +21,50 @@ export function isLinkedNote(note: Pick<Note, 'linked'> | null | undefined): not
   return !!note?.linked
 }
 
-/** A `notes-updated` path that names a linked FILE (note folders never end in .md). */
-export function isLinkedFilePath(p: string | null | undefined): boolean {
-  return !!p && /\.(md|markdown)$/i.test(p)
+/** `.md` / `.markdown`, case-insensitive — mirror of isMarkdownPath in electron/linkedNotesLogic.ts. */
+export function isMarkdownFilePath(p: string | null | undefined): boolean {
+  return !!p && /\.(md|markdown)$/i.test(p.trim())
+}
+
+/**
+ * A linked note whose file isn't Markdown (config.json, a .yaml, a script, a log): plain
+ * text. It's ALWAYS in text mode (byte-exact textarea, never the Markdown editor, no
+ * toolbar / slash menu / snippets), has no tags and no images, and its previews show it as
+ * preformatted text.
+ */
+export function isPlainTextLinked(note: Pick<Note, 'linked'> | null | undefined): boolean {
+  return !!note?.linked && !isMarkdownFilePath(note.linked.path)
+}
+
+/** Whether a section shows in text mode: its own flag, or forced (a plain-text linked note). */
+export function sectionShowsRaw(note: Pick<Note, 'linked'> | null | undefined, section: Pick<NoteSection, 'isRawMode'> | null | undefined): boolean {
+  return !!section?.isRawMode || isPlainTextLinked(note)
+}
+
+/** Tags of a linked file's body: only Markdown has them (`#` in a .py or a .yaml is a comment). */
+export function linkedTagsOf(filePath: string, body: string): string[] {
+  return isMarkdownFilePath(filePath) ? extractTags(body) : []
+}
+
+/**
+ * Comparison key of a file path in the renderer: separators unified and, where the file
+ * system ignores case (Windows, macOS — like linkedPathKey in main), lower-cased.
+ */
+export function linkedPathKey(p: string, platform: string): string {
+  const unified = platform === 'win32' ? p.replace(/\//g, '\\') : p
+  const trimmed = unified.length > 1 ? unified.replace(/[\\/]+$/, '') || unified : unified
+  return platform === 'win32' || platform === 'darwin' ? trimmed.toLowerCase() : trimmed
+}
+
+/**
+ * The linked note of `notes` backed by the file at `p` (a `notes-updated` path), by the
+ * store's own record of linked notes — not by extension: any text file can be linked, and
+ * a note FOLDER path never matches one.
+ */
+export function findLinkedNoteByPath<N extends Pick<Note, 'linked'>>(notes: readonly N[], p: string | null | undefined, platform: string): N | undefined {
+  if (!p) return undefined
+  const key = linkedPathKey(p, platform)
+  return notes.find((n) => !!n.linked && linkedPathKey(n.linked.path, platform) === key)
 }
 
 /** Read-only while the file can't be written: missing, read-only, unreadable/too large. */
@@ -56,14 +99,16 @@ export function linkedNoteFromWire(wire: LinkedNoteWire): Note {
   if (wire.hash && draft.baseHash !== wire.hash) {
     linked.conflict = { diskBody: wire.body, diskHash: wire.hash }
   }
-  return { ...note, sections: [{ ...note.sections[0], content: draft.body }], tags: extractTags(draft.body), linked }
+  return { ...note, sections: [{ ...note.sections[0], content: draft.body }], tags: linkedTagsOf(wire.path, draft.body), linked }
 }
 
 function linkedNoteFromWireClean(wire: LinkedNoteWire): Note {
+  // Plain text (not Markdown) is always in text mode, whatever the registry says.
+  const rawMode = wire.isRawMode || !isMarkdownFilePath(wire.path)
   return {
     id: wire.id,
     title: wire.title,
-    tags: extractTags(wire.body),
+    tags: linkedTagsOf(wire.path, wire.body),
     created: wire.created,
     updated: wire.updated,
     archived: wire.archived,
@@ -75,7 +120,7 @@ function linkedNoteFromWireClean(wire: LinkedNoteWire): Note {
       name: wire.sectionName,
       content: wire.body,
       created: wire.created,
-      ...(wire.isRawMode ? { isRawMode: true } : {}),
+      ...(rawMode ? { isRawMode: true } : {}),
       ...(wire.aiHidden ? { aiHidden: true } : {}),
     }],
     raw: '',
@@ -233,4 +278,34 @@ export async function inlineLinkedImages(
     pos = j.end
   }
   return out + md.slice(pos)
+}
+
+// Fence language of a plain-text file copied into a regular note, by extension. Anything
+// else uses the extension itself when it looks like a language id (`toml`, `ini`, `sql`…).
+const CODE_LANGUAGE_BY_EXT: Record<string, string> = {
+  yml: 'yaml', py: 'python', js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'jsx',
+  ts: 'typescript', mts: 'typescript', cts: 'typescript', tsx: 'tsx', rb: 'ruby', rs: 'rust',
+  sh: 'bash', zsh: 'bash', ps1: 'powershell', psm1: 'powershell', bat: 'dos', cmd: 'dos',
+  kt: 'kotlin', cs: 'csharp', 'c++': 'cpp', cc: 'cpp', hpp: 'cpp', h: 'c', htm: 'html',
+  txt: '', log: '', text: '',
+}
+
+/** Code fence language for a file name (`config.json` → `json`, `run.py` → `python`; '' = none). */
+export function codeLanguageOf(fileName: string): string {
+  const ext = /\.([^.\\/]+)$/.exec(fileName)?.[1]?.toLowerCase() ?? ''
+  if (!ext) return ''
+  if (ext in CODE_LANGUAGE_BY_EXT) return CODE_LANGUAGE_BY_EXT[ext]
+  return /^[a-z][a-z0-9+#-]{0,19}$/.test(ext) ? ext : ''
+}
+
+/**
+ * A plain-text file's body as ONE fenced code block (```json … ```), for copying a plain-text
+ * linked note into a regular note (duplicate, save as template). The fence is longer than
+ * any run of backticks at the start of a line of the body, so the content can't close it.
+ */
+export function plainTextAsCodeBlock(fileName: string, body: string): string {
+  let longest = 0
+  for (const m of body.matchAll(/^[ \t]*(`{3,})/gm)) longest = Math.max(longest, m[1].length)
+  const fence = '`'.repeat(Math.max(3, longest + 1))
+  return `${fence}${codeLanguageOf(fileName)}\n${body}\n${fence}`
 }

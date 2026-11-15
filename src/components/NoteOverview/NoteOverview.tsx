@@ -23,6 +23,7 @@ import { primaryPaneForNote } from '../../lib/paneUtils'
 import { reorderDropSide } from '../../lib/sectionMap'
 import { resolveSectionInk } from '../../lib/sectionInk'
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
+import { isPlainTextLinked, sectionShowsRaw } from '../../lib/linkedNotes'
 import {
   gridColumnCount, gridNeighbor, planNoteGrid, sectionCardIsWide, type GridDirection,
 } from '../../lib/noteOverviewGrid'
@@ -780,6 +781,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
                           renaming={renamingId === section.id}
                           renameValue={renamingId === section.id ? renameValue : ''}
                           actions={actions}
+                          raw={sectionShowsRaw(note, section)}
                           linkedNoteId={note.linked ? note.id : undefined}
                         />
                         {dropHere && (
@@ -821,14 +823,17 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
                 </button>
               )}
 
-              <button
-                onClick={toggleSelectedRawMode}
-                title={allRaw ? t.overview.modeEditorTooltip : t.overview.modeRawTooltip}
-                className="note-grid-sbar-btn"
-              >
-                {allRaw ? <Edit3 size={13} /> : <Code size={13} />}
-                {allRaw ? t.overview.modeEditor : t.overview.modeRaw}
-              </button>
+              {/* A plain-text linked file (not Markdown) is always in text mode. */}
+              {!isPlainTextLinked(note) && (
+                <button
+                  onClick={toggleSelectedRawMode}
+                  title={allRaw ? t.overview.modeEditorTooltip : t.overview.modeRawTooltip}
+                  className="note-grid-sbar-btn"
+                >
+                  {allRaw ? <Edit3 size={13} /> : <Code size={13} />}
+                  {allRaw ? t.overview.modeEditor : t.overview.modeRaw}
+                </button>
+              )}
 
               <button
                 onClick={() => setConfirm('delete-sections')}
@@ -903,12 +908,14 @@ interface SectionCellProps {
   renaming: boolean
   renameValue: string
   actions: CellActions
-  /** Set for a linked note (external .md): its preview is plain Markdown with its relative images. */
+  /** Text mode: the section's own flag, or always for a plain-text linked file (sectionShowsRaw). */
+  raw: boolean
+  /** Set for a linked note (external file): a Markdown one previews as plain Markdown with its relative images. */
   linkedNoteId?: string
 }
 
 const SectionCell = memo(function SectionCell({
-  section, color, ink, isOpen, selected, dragging, renaming, renameValue, actions, linkedNoteId,
+  section, color, ink, isOpen, selected, dragging, renaming, renameValue, actions, raw, linkedNoteId,
 }: SectionCellProps) {
   const t = useT()
   const label = tf(isOpen ? t.overview.backToSection : t.overview.openSection, { name: section.name })
@@ -973,7 +980,7 @@ const SectionCell = memo(function SectionCell({
       </div>
 
       {/* Body + foot (memoised by content inside), shared with the hover card. */}
-      <SectionCardContent content={section.content} raw={!!section.isRawMode} aiHidden={!!section.aiHidden} linkedNoteId={linkedNoteId} />
+      <SectionCardContent content={section.content} raw={raw} aiHidden={!!section.aiHidden} linkedNoteId={linkedNoteId} />
 
       <button
         className="note-grid-open"

@@ -1,18 +1,21 @@
-// Notas vinculadas: una nota respaldada por un archivo Markdown externo, editado en su sitio.
+// Notas vinculadas: una nota respaldada por un archivo de texto externo (Markdown o cualquier otro), editado en su sitio.
 export const linked = {
-  linkMarkdownFile: 'Vincular archivo Markdown…',
-  linkMarkdownFileDescription: 'Edita un .md existente en su sitio, sin importarlo',
-  linkedNoteBadge: 'Vinculada a un archivo Markdown',
+  linkFile: 'Vincular archivo…',
+  linkFileDescription: 'Edita un archivo Markdown o de texto existente en su sitio, sin importarlo',
+  linkedNoteBadge: 'Vinculada a un archivo',
 
-  firstLinkTitle: 'Vincular archivos Markdown',
+  firstLinkTitle: 'Vincular archivos',
   firstLinkMessage:
-    'NoteFlow editará estos archivos donde están: tus cambios se guardan directamente en cada archivo (y aparecen en su proyecto y en su historial de Git), y los cambios hechos fuera de NoteFlow aparecen en la nota.\n\nLas notas vinculadas son solo locales: NO se sincronizan con NoteFlow Cloud ni con GitHub, ni se exportan.',
+    'NoteFlow editará estos archivos donde están: tus cambios se guardan directamente en cada archivo (y aparecen en su proyecto y en su historial de Git), y los cambios hechos fuera de NoteFlow aparecen en la nota. Los archivos Markdown se abren en Modo markdown; cualquier otro archivo de texto (.json, .yaml, .txt, código…) se abre siempre en Modo texto, byte a byte.\n\nLas notas vinculadas son solo locales: NO se sincronizan con NoteFlow Cloud ni con GitHub, ni se exportan.',
   firstLinkConfirm: 'Vincular',
 
   linkErrorsTitle: 'No se pudieron vincular algunos archivos',
   linkErrorLine: '{file}: {reason}',
   linkError: {
-    notMarkdown: 'no es un archivo .md / .markdown',
+    invalidPath: 'no es una ruta de archivo',
+    notGranted: 'elígelo con "Vincular archivo…" o suéltalo en la ventana',
+    binary: 'no es un archivo de texto (solo se pueden vincular archivos de texto)',
+    invalidUtf8: 'no es texto UTF-8',
     notFound: 'archivo no encontrado',
     notAFile: 'no es un archivo',
     insideNotesDir: 'está dentro de la carpeta de notas de NoteFlow',
@@ -50,6 +53,8 @@ export const linked = {
   errorHint: {
     tooLarge: 'El archivo es demasiado grande para editarlo en NoteFlow (más de 2 MB). Se muestra en solo lectura.',
     invalidUtf8: 'El archivo no es texto UTF-8 válido. Se muestra en solo lectura, con su último contenido legible.',
+    binary: 'El archivo ya no es un archivo de texto (tiene datos binarios). Se muestra en solo lectura, con su último contenido legible.',
+    loneCr: 'El archivo usa saltos de línea antiguos de Mac (solo CR). NoteFlow lo abre en solo lectura para no reescribirlos.',
     unreadable: 'NoteFlow no puede leer el archivo (¿permisos?). Se muestra en solo lectura.',
     writeFailed: 'NoteFlow no pudo escribir el archivo. Tus cambios se conservan aquí; lo volverá a intentar cuando vuelvas a la ventana.',
   },
@@ -78,9 +83,9 @@ export const linked = {
   unlinkTitle: 'Desvincular nota',
   unlinkMessage: '¿Quitar "{title}" de NoteFlow? El archivo "{file}" NO se borra ni se modifica: puedes volver a vincularlo cuando quieras.',
   unlinkConfirm: 'Desvincular',
-  unlinkNotes: 'Esto quita {count} nota(s) vinculada(s) de NoteFlow; sus archivos Markdown no se borran.',
+  unlinkNotes: 'Esto quita {count} nota(s) vinculada(s) de NoteFlow; sus archivos no se borran.',
 
-  dropToLink: 'Suelta para vincular el archivo Markdown',
+  dropToLink: 'Suelta para vincular el archivo',
 
   readOnlyCompact: 'solo lectura',
 }

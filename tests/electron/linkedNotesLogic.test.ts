@@ -1,16 +1,20 @@
-// Linked notes (external .md files edited in place) — the pure half in main:
-// registry sanitizing, path normalization/dedupe, the byte-exact split/reassembly
-// of the file (BOM, EOL, final newline, YAML frontmatter), the fingerprint
+// Linked notes (external text files edited in place) — the pure half in main:
+// registry sanitizing, path normalization/dedupe, the text/binary check, the
+// byte-exact split/reassembly of the file (BOM, EOL, final newline, YAML
+// frontmatter of Markdown files only), the fingerprint
 // decisions (own echo vs external change, write vs conflict) and the assets/ helpers.
 import { describe, it, expect } from 'vitest'
 import {
   assembleMarkdownFile,
+  createLinkGrants,
   decideDiskEvent,
   decideWrite,
-  decodeMarkdownBytes,
+  decodeLinkedBytes,
   defaultLinkedTitle,
   encodeMarkdown,
   hashBytes,
+  hasLoneCr,
+  LINK_GRANT_TTL_MS,
   isLinkedNoteId,
   isMarkdownPath,
   isPathInside,
@@ -26,6 +30,8 @@ import {
   linkedPathKey,
   resolveLinkedAsset,
   sanitizeLinkedRegistry,
+  sniffLinkedBytes,
+  splitLinkedFile,
   splitMarkdownFile,
 } from '../../electron/linkedNotesLogic'
 
@@ -91,10 +97,82 @@ describe('splitMarkdownFile / assembleMarkdownFile (byte-exact)', () => {
   })
 })
 
-describe('decodeMarkdownBytes / encodeMarkdown', () => {
+describe('splitLinkedFile: frontmatter only in Markdown files', () => {
+  const yaml = '---\r\nname: ci\r\non: [push]\r\n---\r\njobs:\r\n  build: {}\r\n'
+
+  it('a .yaml starting with `---` keeps its header in the editable body', () => {
+    const parts = splitLinkedFile('C:\\p\\.github\\ci.yaml', yaml)
+    expect(parts.frontmatter).toBe('')
+    expect(parts.body).toBe('---\nname: ci\non: [push]\n---\njobs:\n  build: {}')
+    expect(parts.eol).toBe('\r\n')
+    // The same text in a .md: that block is frontmatter (hidden, kept verbatim).
+    expect(splitLinkedFile('/p/doc.md', yaml).frontmatter).toBe('---\r\nname: ci\r\non: [push]\r\n---\r\n')
+  })
+
+  it('round-trips a non-Markdown file byte for byte (BOM + CRLF), and an edit changes only its line', () => {
+    const text = '{\r\n  "a": 1,\r\n  "b": 2\r\n}\r\n'
+    const bytes = encodeMarkdown(text, true)
+    const decoded = decodeLinkedBytes(bytes)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    const parts = splitLinkedFile('/p/config.json', decoded.text, decoded.bom)
+    expect(encodeMarkdown(assembleMarkdownFile(parts, parts.body), decoded.bom).equals(bytes)).toBe(true)
+    const edited = encodeMarkdown(assembleMarkdownFile(parts, parts.body.replace('"b": 2', '"b": 3')), decoded.bom)
+    expect(edited.equals(encodeMarkdown('{\r\n  "a": 1,\r\n  "b": 3\r\n}\r\n', true))).toBe(true)
+  })
+})
+
+describe('link grants (only paths the user chose can be linked)', () => {
+  it('a granted path can be consumed once', () => {
+    const g = createLinkGrants('linux')
+    g.grant(['/p/config.json'], 1000, 0)
+    expect(g.consume('/p/config.json', 10)).toBe(true)
+    expect(g.consume('/p/config.json', 20)).toBe(false)
+  })
+
+  it('nothing is granted by default, nor relative / non-string paths', () => {
+    const g = createLinkGrants('linux')
+    expect(g.consume('/home/u/.bashrc', 0)).toBe(false)
+    g.grant(['relative/a.txt', 42, '', '/ok.txt'], 1000, 0)
+    expect(g.size(0)).toBe(1)
+    expect(g.consume('relative/a.txt', 0)).toBe(false)
+    expect(g.consume(42, 0)).toBe(false)
+  })
+
+  it('expires after its TTL (default LINK_GRANT_TTL_MS)', () => {
+    const g = createLinkGrants('linux')
+    g.grant(['/a.txt'], 1000, 0)
+    expect(g.consume('/a.txt', 1000)).toBe(false)
+    g.grant(['/b.txt'], undefined, 0)
+    expect(g.consume('/b.txt', LINK_GRANT_TTL_MS - 1)).toBe(true)
+    g.grant(['/c.txt'], undefined, 0)
+    expect(g.size(LINK_GRANT_TTL_MS)).toBe(0)
+  })
+
+  it('keys by linkedPathKey: case/separators/.. on Windows, exact case on Linux', () => {
+    const win = createLinkGrants('win32')
+    win.grant(['C:\\Proj\\docs\\..\\Config.JSON'], 1000, 0)
+    expect(win.consume('c:/proj/config.json', 1)).toBe(true)
+    const linux = createLinkGrants('linux')
+    linux.grant(['/home/u/Config.json'], 1000, 0)
+    expect(linux.consume('/home/u/config.json', 1)).toBe(false)
+    expect(linux.consume('/home/u/./Config.json', 1)).toBe(true)
+  })
+})
+
+describe('hasLoneCr (old Mac line breaks)', () => {
+  it('finds a CR not followed by LF, never in CRLF', () => {
+    expect(hasLoneCr('a\rb')).toBe(true)
+    expect(hasLoneCr('a\r\nb\r')).toBe(true)
+    expect(hasLoneCr('a\r\nb\r\n')).toBe(false)
+    expect(hasLoneCr('a\nb')).toBe(false)
+  })
+})
+
+describe('decodeLinkedBytes / sniffLinkedBytes / encodeMarkdown', () => {
   it('keeps the UTF-8 BOM through decode + encode', () => {
     const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('# Hola ñ\n', 'utf-8')])
-    const decoded = decodeMarkdownBytes(bytes)
+    const decoded = decodeLinkedBytes(bytes)
     expect(decoded).toEqual({ ok: true, text: '# Hola ñ\n', bom: true })
     if (!decoded.ok) return
     expect(encodeMarkdown(decoded.text, decoded.bom).equals(bytes)).toBe(true)
@@ -102,13 +180,29 @@ describe('decodeMarkdownBytes / encodeMarkdown', () => {
 
   it('no BOM stays without BOM', () => {
     const bytes = Buffer.from('plain', 'utf-8')
-    const decoded = decodeMarkdownBytes(bytes)
+    const decoded = decodeLinkedBytes(bytes)
     expect(decoded).toEqual({ ok: true, text: 'plain', bom: false })
     expect(encodeMarkdown('plain', false).equals(bytes)).toBe(true)
   })
 
   it('rejects invalid UTF-8 instead of mangling it', () => {
-    expect(decodeMarkdownBytes(Buffer.from([0x61, 0xff, 0xfe, 0x62]))).toEqual({ ok: false, error: 'invalidUtf8' })
+    expect(decodeLinkedBytes(Buffer.from([0x61, 0xff, 0xfe, 0x62]))).toEqual({ ok: false, error: 'invalidUtf8' })
+  })
+
+  it('a NUL byte anywhere makes the file binary (PNG, UTF-16, NUL deep in the file)', () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d])
+    expect(decodeLinkedBytes(png)).toEqual({ ok: false, error: 'binary' })
+    expect(decodeLinkedBytes(Buffer.from('a\u0000b', 'utf16le'))).toEqual({ ok: false, error: 'binary' })
+    expect(decodeLinkedBytes(Buffer.concat([Buffer.from('x'.repeat(20000)), Buffer.from([0])]))).toEqual({ ok: false, error: 'binary' })
+  })
+
+  it('sniffs the start of a big file: NUL = binary, invalid UTF-8, a character cut at the end is fine', () => {
+    expect(sniffLinkedBytes(Buffer.from('plain text\n'), true)).toBeNull()
+    expect(sniffLinkedBytes(Buffer.from([0x61, 0x00, 0x62]))).toBe('binary')
+    expect(sniffLinkedBytes(Buffer.from([0x61, 0xff, 0x62]))).toBe('invalidUtf8')
+    const cut = Buffer.from('añ', 'utf-8').subarray(0, 2) // 'a' + the first byte of 'ñ'
+    expect(sniffLinkedBytes(cut, false)).toBeNull()
+    expect(sniffLinkedBytes(cut, true)).toBe('invalidUtf8')
   })
 
   it('hashes bytes (sha256 hex)', () => {
@@ -134,7 +228,7 @@ describe('fingerprint decisions', () => {
 })
 
 describe('paths', () => {
-  it('recognizes markdown paths', () => {
+  it('recognizes markdown paths (any other linked file is plain text)', () => {
     expect(isMarkdownPath('C:\\a\\README.md')).toBe(true)
     expect(isMarkdownPath('/a/b.MARKDOWN')).toBe(true)
     expect(isMarkdownPath('/a/b.txt')).toBe(false)
@@ -156,9 +250,11 @@ describe('paths', () => {
     expect(isPathInside('/home/u/x.md', '/home/u/noteflow-notes', 'linux')).toBe(false)
   })
 
-  it('default title = file name without extension', () => {
+  it('default title = file name, without the extension only for Markdown', () => {
     expect(defaultLinkedTitle('C:\\p\\README.md', 'win32')).toBe('README')
     expect(defaultLinkedTitle('/p/guide.markdown', 'linux')).toBe('guide')
+    expect(defaultLinkedTitle('C:\\p\\config.json', 'win32')).toBe('config.json')
+    expect(defaultLinkedTitle('/p/.env', 'linux')).toBe('.env')
   })
 
   it('linked ids and their cache file names', () => {
@@ -171,7 +267,7 @@ describe('paths', () => {
 
 describe('sanitizeLinkedRegistry', () => {
   const now = '2026-11-15T10:00:00.000Z'
-  it('drops invalid entries and dedupes by id and by path', () => {
+  it('drops invalid entries and dedupes by id and by path (any text file type is valid)', () => {
     const reg = sanitizeLinkedRegistry({
       version: 1,
       notes: [
@@ -186,9 +282,11 @@ describe('sanitizeLinkedRegistry', () => {
         'junk',
       ],
     }, 'win32', now)
-    expect(reg.notes.map((n) => n.id)).toEqual(['lnk:a', 'lnk:e'])
+    expect(reg.notes.map((n) => n.id)).toEqual(['lnk:a', 'lnk:d', 'lnk:e'])
+    // A title missing from an entry of a non-Markdown file keeps the extension.
+    expect(reg.notes[1]).toMatchObject({ path: 'C:\\p\\notes.txt', title: 'notes.txt' })
     expect(reg.notes[0]).toMatchObject({ title: 'Readme', favorited: true, group: 'g1', folder: 'f1', created: '2026-01-01T00:00:00.000Z', updated: '2026-01-01T00:00:00.000Z' })
-    const e = reg.notes[1]
+    const e = reg.notes[2]
     expect(e.folder).toBeUndefined()
     expect(e.archived).toBeUndefined()
     expect(e.isRawMode).toBe(true)

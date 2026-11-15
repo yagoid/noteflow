@@ -1,14 +1,16 @@
-// Entry points of "Link Markdown file…" (new-note menu, command palette, drop): they
+// Entry points of "Link file…" (new-note menu, command palette, drop): they
 // all go through LinkedNotesHost (mounted once in the main window), which owns the file
 // picker, the first-link notice and the error report.
 
 import type { LinkedNoteState } from '../../types'
 
-export const LINK_MARKDOWN_EVENT = 'noteflow:link-markdown'
+export const LINK_FILE_EVENT = 'noteflow:link-file'
 
 /** Tone of a linked note's state (sidebar icon, header). Quiet when all is well (or just being checked). */
 export function linkedTone(linked: LinkedNoteState, dirty = false): 'ok' | 'warn' | 'error' {
   if (linked.conflict) return 'warn'
+  // Readable, only kept read-only (old Mac line breaks in a plain-text file): not an error.
+  if (linked.status === 'error' && linked.error === 'loneCr') return 'warn'
   if (linked.status === 'missing' || linked.status === 'error') return 'error'
   if (linked.status === 'readonly' || dirty) return 'warn'
   return 'ok'
@@ -25,14 +27,16 @@ export function linkedStatusLabel(
 ): string {
   if (linked.conflict) return labels.status.conflict
   if (linked.status === 'ok') return dirty ? labels.unsaved : labels.status.ok
-  return dirty ? `${labels.status[linked.status]} · ${labels.unsaved}` : labels.status[linked.status]
+  // A lone-CR plain-text file is readable: it's "read-only", not "cannot read".
+  const status = linked.status === 'error' && linked.error === 'loneCr' ? 'readonly' : linked.status
+  return dirty ? `${labels.status[status]} · ${labels.unsaved}` : labels.status[status]
 }
 
 export const LINKED_TONE_CLASS = { ok: 'text-text-muted/70', warn: 'text-amber-400', error: 'text-red/80' } as const
 
-/** Opens the file picker (no `paths`) or links the given .md paths (a drop). */
-export function requestLinkMarkdown(paths?: string[]): void {
-  window.dispatchEvent(new CustomEvent(LINK_MARKDOWN_EVENT, { detail: { paths } }))
+/** Opens the file picker (no `paths`) or links the given file paths (a drop). */
+export function requestLinkFile(paths?: string[]): void {
+  window.dispatchEvent(new CustomEvent(LINK_FILE_EVENT, { detail: { paths } }))
 }
 
 /** `…/folder/file.md` — the end of a long path, which is what tells files apart. */
@@ -52,11 +56,14 @@ export function dragHasFiles(dt: DataTransfer | null): boolean {
   return !!dt && Array.from(dt.types).includes('Files')
 }
 
-/** The .md / .markdown files of a drop, as absolute paths. */
-export function markdownPathsOfDrop(dt: DataTransfer | null): string[] {
+/**
+ * The files of a drop to link, as absolute paths: every file but images (those go into
+ * the editor). Main decides whether each is text — a binary one comes back as an error.
+ */
+export function linkablePathsOfDrop(dt: DataTransfer | null): string[] {
   if (!dt) return []
   return Array.from(dt.files)
-    .filter((f) => /\.(md|markdown)$/i.test(f.name))
+    .filter((f) => !f.type.startsWith('image/'))
     .map((f) => window.noteflow.getPathForFile(f))
     .filter((p) => !!p)
 }

@@ -33,7 +33,7 @@ import {
   createContentSync, mapOffsetThroughChange, needsSave, recordSave, resolveExternalContent, type ContentSync,
 } from '../../lib/externalContentSync'
 import { rawSectionDisplayText, sectionTextForClipboard } from '../../lib/sectionClipboard'
-import { isLinkedNote, isLinkedReadOnly } from '../../lib/linkedNotes'
+import { isLinkedNote, isLinkedReadOnly, isPlainTextLinked, sectionShowsRaw } from '../../lib/linkedNotes'
 import { LinkedNoteHeader } from '../LinkedNote/LinkedNoteHeader'
 import { fileNameOf } from '../LinkedNote/linkedActions'
 
@@ -196,11 +196,16 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     (s) => s.id === activeSectionId,
   ) ?? note?.sections[0]
 
-  const rawMode = activeSection?.isRawMode ?? false
-  // Linked note (an external .md edited in place): one section, plain Markdown, and
-  // read-only while its file can't be written (missing / read-only / unreadable).
+  // Linked note (an external file edited in place): one section, plain Markdown, and
+  // read-only while its file can't be written (missing / read-only / unreadable). A linked
+  // file that isn't Markdown (config.json, a script…) is plain text: always text mode, shown
+  // byte for byte (no `[image]` placeholders), no images, and no way into the Markdown editor.
   const isLinked = isLinkedNote(note)
   const linkedReadOnly = isLinkedReadOnly(note)
+  const plainTextLinked = isPlainTextLinked(note)
+  const rawMode = sectionShowsRaw(note, activeSection)
+  // What the textarea shows for a section's text (see rawSectionDisplayText).
+  const rawDisplay = (text: string) => (plainTextLinked ? text : rawSectionDisplayText(text))
 
   // ── Reset when the active note changes ─────────────────────────────────────
   useEffect(() => {
@@ -341,8 +346,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     }
     const textarea = rawTextareaRef.current
     if (textarea && textarea === document.activeElement) {
-      const before = rawSectionDisplayText(rawContent)
-      const after = rawSectionDisplayText(next)
+      const before = rawDisplay(rawContent)
+      const after = rawDisplay(next)
       rawSelectionRef.current = {
         start: mapOffsetThroughChange(before, after, textarea.selectionStart),
         end: mapOffsetThroughChange(before, after, textarea.selectionEnd),
@@ -502,6 +507,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     const imageFiles = files.filter(f => f.type.startsWith('image/'))
     if (imageFiles.length === 0 || !activeSection) return
     let insertText = ''
+    // A plain-text linked file (not Markdown) takes no images.
+    if (isPlainTextLinked(note)) return
     for (const file of imageFiles) {
       if (note?.linked) {
         // Linked note: copied to an assets/ folder next to the .md, linked relatively.
@@ -628,7 +635,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
       const sectionId = activeSectionIdRef.current
       if (!n || !sectionId) return
       const section = n.sections.find((s) => s.id === sectionId)
-      if (!section) return
+      // A plain-text linked file (not Markdown) has no Markdown mode.
+      if (!section || isPlainTextLinked(n)) return
       if (!section.isRawMode) {
         // A clean linked note shows its file's exact text (the store swaps it in too).
         setRawContent(n.linked && section.content === n.linked.syncedContent ? n.linked.diskBody : section.content)
@@ -732,7 +740,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   }
 
   const handleCopyAllText = () => {
-    const text = sectionTextForClipboard(rawMode, rawContent, editorRef.current?.editor)
+    const text = plainTextLinked ? rawContent : sectionTextForClipboard(rawMode, rawContent, editorRef.current?.editor)
     navigator.clipboard.writeText(text)
   }
 
@@ -756,7 +764,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   }
 
   const handleRawToggle = () => {
-    if (!activeSection) return
+    // A plain-text linked file (not Markdown) has no Markdown mode.
+    if (!activeSection || plainTextLinked) return
     const newRawMode = !rawMode
 
     if (newRawMode) {
@@ -991,6 +1000,13 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
 
   const handleRawChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newDisplay = e.target.value
+    if (plainTextLinked) {
+      // Shown byte for byte: the textarea's text IS the content.
+      recordRawUndo(rawContent, newDisplay)
+      setRawContent(newDisplay)
+      scheduleRawSave(newDisplay)
+      return
+    }
 
     // Restore base64 data URIs from original rawContent (matched in order)
     const origSrcs: string[] = []
@@ -1006,7 +1022,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
     scheduleRawSave(newContent)
   }
 
-  const displayContent = rawSectionDisplayText(rawContent)
+  const displayContent = rawDisplay(rawContent)
 
   const handleRawKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const sectionId = activeSection?.id
@@ -1263,13 +1279,16 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                   className="absolute right-0 top-full mt-1 bg-surface-1 border border-border rounded shadow-lg z-50 py-1 w-56 whitespace-nowrap"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <button
-                    onClick={() => { handleRawToggle(); setSectionMenuOpen(false) }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
-                  >
-                    {rawMode ? <Edit3 size={13} /> : <Eye size={13} />}
-                    {rawMode ? t.editor.menu.editorMode : t.editor.menu.rawMode}
-                  </button>
+                  {/* A plain-text linked file (not Markdown) is always in text mode. */}
+                  {!plainTextLinked && (
+                    <button
+                      onClick={() => { handleRawToggle(); setSectionMenuOpen(false) }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                    >
+                      {rawMode ? <Edit3 size={13} /> : <Eye size={13} />}
+                      {rawMode ? t.editor.menu.editorMode : t.editor.menu.rawMode}
+                    </button>
+                  )}
                   <button
                     onClick={() => { handleCopyAllText(); setSectionMenuOpen(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
@@ -1447,7 +1466,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                   }, 0)
                 }}
                 onPaste={(e) => {
-                  if (linkedReadOnly) return
+                  if (linkedReadOnly || plainTextLinked) return
                   const imageItems = Array.from(e.clipboardData.items).filter(i => i.type.startsWith('image/'))
                   if (imageItems.length === 0) return
                   e.preventDefault()
@@ -1458,12 +1477,16 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                   const files = Array.from(e.dataTransfer.files)
                   if (!files.some(f => f.type.startsWith('image/'))) return
                   e.preventDefault()
+                  // A plain-text linked file takes no images (nor their file paths as text).
+                  if (plainTextLinked) return
                   handleRawImageInsert(files)
                 }}
                 placeholder={tf(t.editor.sectionStartWriting, { name: activeSection?.name ?? t.editor.sectionFallback })}
                 style={{
                   fontSize: `${fontSize}px`,
-                  fontFamily: proseFontStack(fontFamily),
+                  // A plain-text linked file (config, code, logs) reads as code: monospace, like
+                  // the editor's code blocks; its indentation lines up.
+                  fontFamily: plainTextLinked ? "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace" : proseFontStack(fontFamily),
                 }}
                 className={`raw-editor h-full p-4 bg-transparent text-text placeholder-text-muted/30 border-none outline-none resize-none caret-text leading-relaxed w-full ${readableWidth ? 'raw-readable' : ''}`}
                 spellCheck={false}

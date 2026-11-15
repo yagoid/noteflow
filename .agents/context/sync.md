@@ -315,7 +315,7 @@ Dónde se aplica la exclusión (sin journal, sin request, `onComplete` inmediato
   cuanto la edita, y el agente puede usarla para responder "¿cómo hago…?"). Con la IA desactivada por
   defecto, en la primera ejecución no se indexa nada.
 
-> **Notas vinculadas ≠ solo-locales.** Una nota vinculada (un `.md` externo editado en su sitio, ver
+> **Notas vinculadas ≠ solo-locales.** Una nota vinculada (un archivo de texto externo editado en su sitio, ver
 > `patterns.md` § "Notas vinculadas") tampoco se sincroniza nunca, pero por otra vía: **no está en el dir de
 > notas** (archivo del usuario + registro en `userData/linked-notes.json`), así que ningún camino de sync,
 > export, import, CLI ni el watcher del dir de notas la ve, sin flags ni filtros (su grupo/carpeta también

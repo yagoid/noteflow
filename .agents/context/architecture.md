@@ -27,10 +27,12 @@ noteflow/
 │   ├── migration.ts     # Migración única v1→v2 (flat .md → carpetas), idempotente
 │   ├── localOnlyNotes.ts # Notas solo-locales (`localOnly: true` en note.md): detección + carpetas que el
 │   │                    #   sync puede tocar (listSyncedNoteDirs) — testeada; ver sync.md "Notas solo-locales"
-│   ├── linkedNotes.ts   # Notas vinculadas (`.md` externo editado en su sitio): registro + caché en userData,
+│   ├── linkedNotes.ts   # Notas vinculadas (archivo de texto externo editado en su sitio: Markdown o texto
+│   │                    #   plano): validación texto/binario, registro + caché en userData,
 │   │                    #   watchers por carpeta padre, escritura atómica con huella, assets/ — testeado con
 │   │                    #   ficheros reales; ver patterns.md § "Notas vinculadas"
-│   ├── linkedNotesLogic.ts # Pura: saneo del registro, rutas, split/reensamblado byte-exacto (BOM/EOL/frontmatter),
+│   ├── linkedNotesLogic.ts # Pura: saneo del registro, rutas, texto vs binario (NUL/UTF-8), split/reensamblado
+│   │                    #   byte-exacto (BOM/EOL/frontmatter solo en Markdown),
 │   │                    #   decisiones eco/conflicto, nombres en assets/ — testeada
 │   ├── welcomeNote.ts   # Nota de bienvenida de la primera ejecución (decisión pura + contenido EN/ES) —
 │   │                    #   testeada; la crea main.ts al arrancar (seedWelcomeNoteIfFirstRun)
@@ -253,13 +255,14 @@ noteflow/
 │   │   │   ├── SlideVisual.tsx         #   Marco de ventana + <video> / fallback animado + chips de atajos
 │   │   │   ├── WhatsNewTour.tsx        #   El modal (navegación, animaciones, foco, marcado como visto)
 │   │   │   └── WhatsNewHost.tsx        #   Montado en MainApp: disparo de arranque + render del tour
-│   │   ├── LinkedNote/                 # Notas vinculadas (`.md` externo) — ver patterns.md § "Notas vinculadas"
-│   │   │   ├── LinkedNotesHost.tsx     #   (ventana principal) selector "Link Markdown file…", aviso del 1er vínculo,
-│   │   │   │                           #   drop de .md desde el SO (captura), re-chequeo al enfocar
+│   │   ├── LinkedNote/                 # Notas vinculadas (archivo de texto externo) — ver patterns.md § "Notas vinculadas"
+│   │   │   ├── LinkedNotesHost.tsx     #   (ventana principal) selector "Link file…", aviso del 1er vínculo,
+│   │   │   │                           #   drop de archivos (no imágenes) desde el SO (captura), re-chequeo al enfocar
 │   │   │   ├── LinkedNoteHeader.tsx    #   Cabecera en el editor (ruta, estado, acciones, banner de conflicto) +
 │   │   │   │                           #   LinkedNoteCompactBar (sticky)
 │   │   │   ├── LinkedConflictModal.tsx #   "Compare…": diff lado a lado + resultado combinado editable
-│   │   │   └── linkedActions.ts        #   requestLinkMarkdown (evento), tono del estado, helpers de ruta/drop
+│   │   │   ├── LinkedFileIcon.tsx      #   Icono por tipo (FileSymlink = Markdown, FileCode = texto plano)
+│   │   │   └── linkedActions.ts        #   requestLinkFile (evento), tono del estado, helpers de ruta/drop
 │   │   ├── ConfirmModal.tsx            # Modal de confirmación genérico (`hideCancel` = solo informativo)
 │   │   ├── EncryptionModal.tsx         # Modal cifrar/descifrar notas
 │   │   ├── ExportImportModal.tsx       # Modal exportar/importar notas (flujo, lanzado desde DataPanel)
@@ -277,8 +280,10 @@ noteflow/
 │   │   ├── miniSidebar.ts        # Lógica pura del sidebar flotante (filas de la mini-vista, ventana,
 │   │   │                         #   ancla/posición del panel, reglas de visibilidad compartidas) — testeado
 │   │   ├── keyedQueue.ts         # Cola serial por clave (escrituras de una nota en orden) — testeada
-│   │   ├── linkedNotes.ts        # Notas vinculadas en el renderer: wire → nota, decisión de recarga
-│   │   │                         #   (apply/adopt/keep/conflict), URL `nflinked:` de imágenes — testeado
+│   │   ├── linkedNotes.ts        # Notas vinculadas en el renderer: wire → nota, Markdown vs texto plano
+│   │   │                         #   (isPlainTextLinked, sectionShowsRaw), ruta → vinculada (findLinkedNoteByPath),
+│   │   │                         #   decisión de recarga (apply/adopt/keep/conflict), URL `nflinked:` de
+│   │   │                         #   imágenes, bloque de código al copiar texto plano — testeado
 │   │   ├── linkedMarkdown.ts     # Conservar el fuente de los bloques no editados al guardar una vinculada
 │   │   │                         #   (preserveUnchangedBlocks) — testeado
 │   │   ├── syncStatus.ts         # Estado mostrado por el botón de sync (prioridades) + edad relativa — testeado
@@ -363,19 +368,20 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `fs:write-note` | handle | Escritura multi-archivo de una carpeta: `{dir, files, deleteFiles}` (note.md primero) + 1 broadcast + schedulePush por archivo + scheduleIndex |
 | `fs:delete-note` | handle | Borra la carpeta entera (rmSync recursivo) + broadcast + scheduleDeleteDir en GitHub |
 | `fs:notes-dir` | handle | Devuelve ruta del dir de notas |
-| `linked:list` / `linked:get` | handle | Notas vinculadas (`.md` externos; ver `patterns.md` § "Notas vinculadas") → `LinkedNoteWire[]` / una por id o ruta (`null` = no vinculada): metadatos del registro + `status` (`checking`/`ok`/`missing`/`readonly`/`error`; `checking` = aún sin leer desde el arranque) + cuerpo (del disco, o de la caché si no se puede leer todavía) + `hash` + `draft?` (cambios sin escribir guardados en userData). Toda lectura del archivo en main es asíncrona |
-| `linked:pick-files` | handle | `{multi}` → selector nativo (`.md`/`.markdown`, multiselección o uno para "Volver a localizar…") → rutas |
-| `linked:link` | handle | `(paths)` → `{linked, existing, errors}`: valida (`.md`, existe, es archivo, fuera del dir de notas), deduplica por ruta normalizada (sin distinguir mayúsculas en Windows/macOS) y devuelve la existente en vez de duplicar. Main no comprueba de dónde viene la ruta: el renderer puede vincular cualquier `.md` absoluto así (y luego editarlo) |
-| `linked:relocate` | handle | `(id, newPath)` → reapunta el vínculo conservando título/grupo/favorito… y el borrador de cambios sin escribir (que contra el archivo nuevo sale como conflicto) (`alreadyLinked` si otra nota ya usa esa ruta) |
+| `linked:list` / `linked:get` | handle | Notas vinculadas (archivos de texto externos: Markdown o texto plano; ver `patterns.md` § "Notas vinculadas") → `LinkedNoteWire[]` / una por id o ruta (`null` = no vinculada): metadatos del registro (`isRawMode` siempre `true` si no es Markdown) + `status` (`checking`/`ok`/`missing`/`readonly`/`error` —`tooLarge`/`invalidUtf8`/`binary`/`loneCr`/`unreadable`—; `checking` = aún sin leer desde el arranque) + cuerpo (del disco, o de la caché si no se puede leer todavía) + `hash` + `draft?` (cambios sin escribir guardados en userData). Toda lectura del archivo en main es asíncrona |
+| `linked:pick-files` | handle | `{multi, markdown?}` → selector nativo con filtros "All files" y "Markdown" ("All files" primero; "Markdown" primero con `markdown: true`, al localizar una vinculada Markdown), multiselección o uno para "Volver a localizar…" → rutas, que quedan **concedidas** para vincular (`grantLinkPaths`: un solo uso, 5 min) |
+| `linked:grant-drop` | on (preload→main) | `(paths)` → concede las rutas de un drop **real** desde el SO. Lo envía el propio preload (listener `drop` en captura, solo `isTrusted`, rutas de `webUtils.getPathForFile`); no está en `window.noteflow`, la página no puede llamarlo |
+| `linked:link` | handle | `(paths)` → `{linked, existing, errors}`: valida (ruta absoluta —si no `invalidPath`—, **concedida** por el selector o un drop real —si no `notGranted`; la concesión se consume—, existe, es archivo, fuera del dir de notas, y es **texto**: sin byte NUL —si no `binary`— y UTF-8 válido —si no `invalidUtf8`—; entero si cabe en 2 MB, si no sus primeros 8 KB), deduplica por ruta normalizada (sin distinguir mayúsculas en Windows/macOS) y devuelve la existente en vez de duplicar. Una ruta que el usuario no eligió no entra nunca, aunque la pida el renderer (ver `patterns.md` § "Notas vinculadas" → "Solo rutas concedidas") |
+| `linked:relocate` | handle | `(id, newPath)` → `newPath` concedido como en `linked:link` (si no `notGranted`); reapunta el vínculo conservando título/grupo/favorito… y el borrador de cambios sin escribir (que contra el archivo nuevo sale como conflicto) (`alreadyLinked` si otra nota ya usa esa ruta) |
 | `linked:unlink` | handle | Quita la nota del registro, su caché, su borrador y su sitio en el orden local. **Nunca toca el archivo** |
-| `linked:update-meta` | handle | `(id, patch)` → título-alias, group/folder, favorited, archived, isRawMode, aiHidden (solo registro local) |
-| `linked:write` | handle | `(id, body, baseHash)` → escribe el cuerpo SOLO si el disco tiene `baseHash` (si no: `{ok:false, reason:'conflict', disk}`); atómico (el tmp se borra ante cualquier fallo), conserva BOM/EOL/salto final/frontmatter; la ruta sale del registro (nunca del renderer); borra el borrador solo si escribe su mismo contenido; si la nota se desvinculó mientras tanto no recrea su caché |
+| `linked:update-meta` | handle | `(id, patch)` → título-alias, group/folder, favorited, archived, isRawMode (sin efecto en texto plano: siempre Modo texto), aiHidden (solo registro local) |
+| `linked:write` | handle | `(id, body, baseHash)` → escribe el cuerpo SOLO si el disco tiene `baseHash` (si no: `{ok:false, reason:'conflict', disk}`); atómico (el tmp se borra ante cualquier fallo), conserva BOM/EOL/salto final/frontmatter (este solo en Markdown); la ruta sale del registro (nunca del renderer); borra el borrador solo si escribe su mismo contenido; si la nota se desvinculó mientras tanto no recrea su caché |
 | `linked:set-draft` | handle | `(id, {body, baseHash} \| null)` → guarda/borra el borrador de cambios sin escribir (`userData/linked-notes-cache/<id>.draft.json`). Nunca escribe en el `.md` |
-| `linked:asset-data-uri` | handle | `(id, src)` → una imagen con ruta relativa de una nota vinculada como data URI (`null` si no es imagen, no es relativa al `.md` registrado, no aparece como imagen en el cuerpo de esa nota, falta o pasa de 10 MB). Para copiar la nota a una nota normal (Duplicate, "Save as template") |
-| `linked:save-asset` | handle | `(id, name, mime, bytes)` → copia una imagen a `assets/` junto al `.md` → `{relPath}` |
+| `linked:asset-data-uri` | handle | `(id, src)` → una imagen con ruta relativa de una nota vinculada **Markdown** como data URI (`null` si la nota no es Markdown, si no es imagen, no es relativa al `.md` registrado, no aparece como imagen en el cuerpo de esa nota, falta o pasa de 10 MB). Para copiar la nota a una nota normal (Duplicate, "Save as template") |
+| `linked:save-asset` | handle | `(id, name, mime, bytes)` → copia una imagen a `assets/` junto al `.md` → `{relPath}` (`{ok:false, error:'notMarkdown'}` si la nota no es Markdown) |
 | `linked:show-in-folder` | handle | `shell.showItemInFolder` del archivo (o abre su carpeta si falta) |
 | `linked:recheck` | handle | Re-lee (async) todos los vinculados (al enfocar la ventana): estado y contenido; emite lo que cambie y resuelve al terminar (el renderer re-sincroniza entonces las notas con cambios sin escribir) |
-| esquema `nflinked:` | protocol | `nflinked://n/<id>/<src>` (privilegios `standard` + `secure`, sin fetch) sirve SOLO archivos de imagen cuya ruta es relativa a la carpeta del `.md` de una nota vinculada; puede subir de carpeta (`../img/x.png`). Rechaza esquemas, unidades, rutas absolutas/UNC, `:` y NUL, antes y después de decodificar `%xx` (previews y NodeView de imagen) |
+| esquema `nflinked:` | protocol | `nflinked://n/<id>/<src>` (privilegios `standard` + `secure`, sin fetch) sirve SOLO archivos de imagen cuya ruta es relativa a la carpeta del `.md` de una nota vinculada Markdown (nunca para texto plano); puede subir de carpeta (`../img/x.png`). Rechaza esquemas, unidades, rutas absolutas/UNC, `:` y NUL, antes y después de decodificar `%xx` (previews y NodeView de imagen) |
 | `app:open-notes-folder` | handle | Abre la carpeta en el explorador |
 | `app:choose-notes-dir` | handle | Diálogo para elegir carpeta |
 | `app:get-login-item` / `app:set-login-item` | handle | Autostart al login (gestiona `.desktop` propio en Linux). **Versión Store** (`IS_STORE_BUILD`, ver `release.md` § Microsoft Store): `get` → siempre `{openAtLogin:false}`, `set` → `{ok:false}` sin escribir `settings.json` |
@@ -681,7 +687,7 @@ Estructura de `settings.json`:
 > editó cada día en ESTE dispositivo; se podan los días de más de 120 en cada escritura. Lógica
 > pura en `electron/activityLog.ts`; como no guarda secretos se escribe con tmp + rename (la regla
 > in-place del apartado "Seguridad" de arriba es solo para `settings.json`).
-> Las **notas vinculadas** (`.md` externos editados en su sitio) guardan su estado en
+> Las **notas vinculadas** (archivos de texto externos editados en su sitio) guardan su estado en
 > `userData/linked-notes.json` (`{version: 1, notes: [{id: 'lnk:…', path, title, group?, folder?,
 > favorited?, archived?, isRawMode?, aiHidden?, created, updated, known?: {hash, size, mtimeMs}}], order:
 > {contextKey: id[]}}` — `order` = listas completas del orden manual de los contextos con alguna vinculada,

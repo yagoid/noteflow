@@ -232,7 +232,7 @@ Iconos del TitleBar:
 - Botón grande **`+`** (solo icono, sin texto; tooltip "New note (Ctrl+N)…") en el sidebar, bajo el
   buscador. A su derecha, una columna con dos botones-icono apilados de la misma altura total:
   arriba **nuevo grupo** (`FolderPlus`) y debajo **nota temporal** (`Timer`). **Click derecho** sobre
-  el `+` → "Temporary note (24h)" y **"Link Markdown file…"** (ver "Notas vinculadas").
+  el `+` → "Temporary note (24h)" y **"Link file…"** (ver "Notas vinculadas").
 - Desde el tray (menú o `New Note`).
 
 ### Organizar
@@ -294,32 +294,46 @@ Iconos del TitleBar:
 
 ---
 
-## Notas vinculadas (archivos Markdown externos)
+## Notas vinculadas (archivos de texto externos)
 
-Abrir un `.md` que ya existe (el README de un proyecto, una página de un sitio Docusaurus/Astro…) y
-editarlo **donde está**, sin importarlo ni copiarlo: lo que escribes se guarda en el archivo original (y
-aparece en el proyecto y en su historial de Git) y lo que cambie fuera de NoteFlow aparece en la nota.
-Diseño e invariantes técnicos: `patterns.md` § "Notas vinculadas".
+Abrir un archivo de texto que ya existe (el README de un proyecto, una página de un sitio Docusaurus/Astro…,
+o un `config.json`, un `.yaml`, un script, un log) y editarlo **donde está**, sin importarlo ni copiarlo: lo
+que escribes se guarda en el archivo original (y aparece en el proyecto y en su historial de Git) y lo que
+cambie fuera de NoteFlow aparece en la nota. Diseño e invariantes técnicos: `patterns.md` § "Notas vinculadas".
 
-- **Vincular:** click derecho en el `+` grande → **"Link Markdown file…"**, o la paleta (`Ctrl+P` →
-  "Link Markdown file…"): selector nativo (`.md`/`.markdown`, varios a la vez). O **arrastrar** uno o varios
-  `.md` desde el explorador a cualquier parte de la ventana (sale un marco discontinuo "Drop to link the
-  Markdown file"): un `.md` soltado sobre el editor **se vincula**, no se inserta como texto; las imágenes
-  arrastradas al editor siguen insertándose como siempre. Si el archivo ya estaba vinculado se abre esa
-  nota (no se duplica). Tras vincular se abre la nota. La **primera vez** en el dispositivo un aviso explica
-  que se edita en su sitio y que es **solo local** (no se sincroniza con NoteFlow Cloud ni GitHub, ni se
-  exporta). No se pueden vincular archivos de dentro de la carpeta de notas.
+- **Vincular:** click derecho en el `+` grande → **"Link file…"**, o la paleta (`Ctrl+P` → "Link file…"):
+  selector nativo (filtros "All files" —por defecto— y "Markdown", varios a la vez). O **arrastrar** uno o
+  varios archivos desde el explorador a cualquier parte de la ventana (sale un marco discontinuo "Drop to link
+  the file"): un archivo soltado sobre el editor **se vincula**, no se inserta como texto; las imágenes
+  arrastradas al editor siguen insertándose como siempre. Solo **archivos de texto** (UTF-8): un binario (PDF,
+  imagen, Office…) o un texto en otra codificación se rechaza con un aviso ("Some files could not be linked"
+  · "not a text file" / "not UTF-8 text"). Por seguridad solo se vincula lo que el usuario **elige** en el
+  selector o **suelta** desde el sistema (nada que la app pida por su cuenta). Si el archivo ya estaba
+  vinculado se abre esa nota (no se duplica).
+  Tras vincular se abre la nota. La **primera vez** en el dispositivo un aviso explica que se edita en su
+  sitio, que los no-Markdown se abren siempre en Modo texto y que es **solo local** (no se sincroniza con
+  NoteFlow Cloud ni GitHub, ni se exporta). No se pueden vincular archivos de dentro de la carpeta de notas.
+- **Markdown o texto plano**: un `.md`/`.markdown` funciona como se describe abajo (Modo markdown, imágenes,
+  etiquetas…). **Cualquier otro archivo de texto** (`.json`, `.yaml`, `.txt`, `.py`, `.log`…) es **texto
+  plano**: se abre **siempre en Modo texto** (textarea en monoespaciada, byte a byte, un `---` inicial de un
+  `.yaml` se ve tal cual) y no hay forma de pasarlo a Modo markdown (sin opción en el menú ⋯ ni en la vista
+  de nota; `Ctrl+M` no hace nada), ni barra de formato, menú `/` o fragmentos; no admite imágenes; sus `#`
+  no son etiquetas; los previews (hover, vista de nota, vista de contenido, cerebro) lo muestran como texto
+  preformateado. Su título por defecto **conserva la extensión** (`config.json`) y en el sidebar lleva un
+  icono de archivo de código en vez del de vínculo Markdown. Sin resaltado de sintaxis.
 - **Una nota = una sección**: el archivo entero es su única sección, con el nombre del archivo; no se
   pueden añadir, duplicar, renombrar, borrar ni reordenar secciones (sin `+` en el mapa de secciones ni en
   la vista de nota, sin esas opciones en los menús, `Ctrl+T`/`Ctrl+W` no hacen nada). El **título** por
-  defecto es el nombre del archivo sin `.md` y es un **alias local**: editarlo nunca renombra el archivo.
+  defecto es el nombre del archivo (sin `.md` en Markdown) y es un **alias local**: editarlo nunca renombra
+  el archivo.
 - **Cabecera** bajo el título: icono de vínculo, ruta acortada (`…/docs/README.md`; tooltip con la ruta
   completa, click = copiarla), estado (`Up to date`…), "· Local only" (tooltip: no se sincroniza) y tres
   iconos: **Mostrar en carpeta**, **Volver a localizar…** (elige otro archivo y conserva título, grupo,
   favorito…) y **Desvincular**. En la ventana sticky va una barra compacta (nombre del archivo, estado,
-  mostrar en carpeta y, en conflicto, las tres opciones). En el sidebar, un icono de vínculo junto al
-  título (gris si todo va bien; ámbar en solo lectura/conflicto; rojo si falta o no se puede leer).
-- **Modo markdown sin extras**: abre en Modo markdown pero sin la sintaxis propia de NoteFlow — sin
+  mostrar en carpeta y, en conflicto, las tres opciones). En el sidebar, un icono junto al título (vínculo
+  para Markdown, archivo de código para texto plano; gris si todo va bien; ámbar en solo lectura/conflicto;
+  rojo si falta o no se puede leer).
+- **Modo markdown sin extras** (solo `.md`): abre en Modo markdown pero sin la sintaxis propia de NoteFlow — sin
   subrayado/resaltado (`++`/`==`), sin tableros kanban, sin "Link section" y sin fecha/alarma/importancia
   en las tareas (las casillas `- [ ]` normales sí); lo que el archivo ya tenga de esa sintaxis se ve como
   texto y se conserva tal cual. El **Modo texto** sigue disponible para editar byte a byte (muestra el texto
@@ -327,14 +341,16 @@ Diseño e invariantes técnicos: `patterns.md` § "Notas vinculadas".
   markdown, los bloques que no tocaste conservan su escritura original (un cambio pequeño = un diff pequeño).
   El frontmatter YAML (Docusaurus/Astro) no se muestra y se conserva byte a byte; también el BOM, los
   saltos de línea (CRLF/LF) y si acababa o no en salto de línea. NoteFlow nunca añade nada propio al archivo.
-- **Imágenes**: pegadas o arrastradas se copian a una carpeta `assets/` junto al `.md` (se crea si no
+- **Imágenes** (solo `.md`): pegadas o arrastradas se copian a una carpeta `assets/` junto al `.md` (se crea si no
   existe) y se enlazan con ruta relativa (`assets/…png`). Las imágenes relativas que ya tenga el archivo se
   ven también en el editor y en los previews.
 - **Integración**: es una nota más — grupos y carpetas, favoritos, archivar, búsqueda, paneles del split,
   ventana de sección, sticky, vista de nota/contenido, cerebro, Related, chat y tools de la IA (que pueden
   editar su contenido, nunca crear secciones). **No aplica:** cifrado, notas temporales, export, sync,
-  CLI. **Duplicate** crea una nota normal (copia del contenido; sus imágenes relativas se copian dentro de la nota).
-  "Save as template" sí (crear desde la plantilla da una nota normal).
+  CLI. **Duplicate** crea una nota normal (copia del contenido; sus imágenes relativas se copian dentro de la nota;
+  un texto plano se copia como **un bloque de código** con su lenguaje —```` ```json ````—, en Modo texto).
+  "Save as template" sí (crear desde la plantilla da una nota normal, con la misma regla). La IA local la
+  indexa también si es texto plano; para que un `.json` o un log no meta ruido, **"Hide from AI"**.
 - **Desvincular / borrar**: "Delete note" en una vinculada se llama **Unlink** y pide confirmación
   diciendo que el archivo **no se borra ni se toca**; la quita de NoteFlow (se puede volver a vincular).
   Igual desde la multiselección de la vista de contenido (el aviso indica cuántas son vinculadas) y desde
@@ -349,7 +365,9 @@ Diseño e invariantes técnicos: `patterns.md` § "Notas vinculadas".
   solo lectura, mientras se lee el archivo; la app no espera a una unidad de red lenta para abrirse); archivo
   **no encontrado** (movido/borrado: se ve su último contenido en solo lectura con "Locate file…"; si vuelve a
   aparecer en la misma ruta, vuelve a la normalidad), **solo lectura** (sin permiso de escritura), **no se
-  puede leer** (más de 2 MB, no es UTF-8 válido, permisos): siempre en solo lectura con un aviso. Se re-evalúa
+  puede leer** (más de 2 MB —también para texto plano y logs—, no es UTF-8 válido, pasó a ser binario,
+  permisos): siempre en solo lectura con un aviso. Un texto plano con saltos de línea antiguos de Mac (solo
+  CR) se ve, pero en **solo lectura** ("Read-only file") para no reescribirlos. Se re-evalúa
   al volver a la ventana. El estado se refleja en el icono del sidebar.
 - **Cambios sin guardar**: si escribiste algo que aún no está en el archivo (el archivo pasó a solo lectura o
   desapareció justo entonces, o hay un conflicto), la cabecera dice **"Unsaved changes"** (nunca "Up to date")

@@ -90,21 +90,27 @@ export interface NoteMeta {
 export interface Note extends NoteMeta {
   sections: NoteSection[]  // ordered, user-defined content areas
   raw: string              // content of note.md (frontmatter anchor) — '' for linked notes
-  filePath: string         // absolute path of the note DIRECTORY — of the .md FILE for linked notes
-  /** Present iff this is a linked note (an external .md edited in place — lib/linkedNotes.ts). */
+  filePath: string         // absolute path of the note DIRECTORY — of the FILE for linked notes
+  /** Present iff this is a linked note (an external text file edited in place — lib/linkedNotes.ts). */
   linked?: LinkedNoteState
 }
 
-// ── Linked notes (external Markdown files edited in place) ───────────────────
+// ── Linked notes (external text files edited in place) ───────────────────────
 // Mirror of electron/linkedNotes.ts. A linked note has exactly ONE section (id 'body': the
-// file body, frontmatter hidden); its metadata lives in userData/linked-notes.json, never in
-// the file nor in the notes dir (no sync, export or CLI).
+// file body, a Markdown file's frontmatter hidden); its metadata lives in
+// userData/linked-notes.json, never in the file nor in the notes dir (no sync, export or CLI).
+// A file that isn't .md/.markdown is plain text: always in text mode (isRawMode), no tags,
+// no images (lib/linkedNotes.ts isPlainTextLinked).
 
 // 'checking' = not read yet since startup (shown from the cache, read-only, until main's async read lands).
 export type LinkedFileStatus = 'ok' | 'missing' | 'readonly' | 'error' | 'checking'
 // writeFailed = the renderer's: a write failed for another reason (the note keeps its unwritten content).
-export type LinkedErrorCode = 'tooLarge' | 'invalidUtf8' | 'unreadable' | 'writeFailed'
-export type LinkError = 'notMarkdown' | 'notFound' | 'notAFile' | 'insideNotesDir' | 'alreadyLinked'
+// binary = the file has NUL bytes (not a text file); loneCr = a plain-text file with old Mac
+// line breaks (a lone \r), read-only so the textarea never rewrites them.
+export type LinkedErrorCode = 'tooLarge' | 'invalidUtf8' | 'binary' | 'loneCr' | 'unreadable' | 'writeFailed'
+// invalidPath = not an absolute file path; notGranted = not chosen by the user (picker / OS drop);
+// binary / invalidUtf8 = not a (UTF-8) text file.
+export type LinkError = 'invalidPath' | 'notGranted' | 'binary' | 'invalidUtf8' | 'notFound' | 'notAFile' | 'insideNotesDir' | 'alreadyLinked'
 
 export interface LinkedNoteWire {
   id: string
@@ -656,10 +662,11 @@ declare global {
       getNotesDir: () => Promise<string>
       openNotesFolder: () => Promise<void>
       chooseNotesDir: () => Promise<string | null>
-      // Linked notes (external .md files edited in place). Main writes only registered files.
+      // Linked notes (external text files edited in place). Main writes only registered files.
       linkedList: () => Promise<LinkedNoteWire[]>
       linkedGet: (idOrPath: string) => Promise<LinkedNoteWire | null>
-      linkedPickFiles: (opts: { multi: boolean }) => Promise<string[]>
+      /** `markdown`: the Markdown filter first (locating a linked .md); else "All files" first. */
+      linkedPickFiles: (opts: { multi: boolean; markdown?: boolean }) => Promise<string[]>
       linkedLink: (paths: string[]) => Promise<{ linked: LinkedNoteWire[]; existing: LinkedNoteWire[]; errors: Array<{ path: string; error: LinkError }> }>
       linkedRelocate: (id: string, newPath: string) => Promise<{ ok: true; note: LinkedNoteWire } | { ok: false; error: LinkError | 'notLinked' }>
       linkedUnlink: (id: string) => Promise<{ ok: boolean }>

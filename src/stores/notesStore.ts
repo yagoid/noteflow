@@ -2,13 +2,16 @@ import { create } from 'zustand'
 import { nanoid } from 'nanoid'
 import type { LinkedErrorCode, LinkedMetaPatch, LinkedNoteState, LinkedNoteWire, LinkError, Note, NoteSection } from '../types'
 import {
+  findLinkedNoteByPath,
   inlineLinkedImages,
   isLinkedDirty,
-  isLinkedFilePath,
   isLinkedNote,
+  isPlainTextLinked,
   linkedDraftOf,
   linkedNoteFromWire,
+  linkedTagsOf,
   mergeLinkedWire,
+  plainTextAsCodeBlock,
   LINKED_SECTION_ID,
 } from '../lib/linkedNotes'
 import { getLinkedNormalizer, preserveUnchangedBlocks, withBlankEdges } from '../lib/linkedMarkdown'
@@ -339,7 +342,17 @@ const linkedBlockCache = new Map<string, string>()
  */
 export function linkedBodyToWrite(note: Note & { linked: LinkedNoteState }, content: string, rawMode = !!note.sections[0]?.isRawMode): string {
   const normalize = getLinkedNormalizer()
-  return rawMode || !normalize ? content : preserveUnchangedBlocks(note.linked.diskBody, content, normalize, linkedBlockCache)
+  return rawMode || isPlainTextLinked(note) || !normalize ? content : preserveUnchangedBlocks(note.linked.diskBody, content, normalize, linkedBlockCache)
+}
+
+/**
+ * What "Keep my version" (and the "Mine" side of Compare…) writes over the disk version
+ * `diskBody`: like a regular save, with the disk's blank edges (they don't render: no diff
+ * there). A plain-text file (not Markdown) is written exactly as the note has it.
+ */
+export function linkedKeepMineBody(note: Note & { linked: LinkedNoteState }, content: string, diskBody: string): string {
+  if (isPlainTextLinked(note)) return content
+  return withBlankEdges(linkedBodyToWrite(note, content), diskBody)
 }
 
 /**
@@ -359,7 +372,7 @@ async function writeLinkedContent(id: string, note: Note & { linked: LinkedNoteS
   console.warn('[notes] Linked note write refused:', id, res.reason, res.error ?? '')
   if (res.reason === 'missing' || res.reason === 'readonly') return { ...linked, status: res.reason }
   // The real cause for the notice (too large, unreadable…); anything else is a failed write.
-  const known: LinkedErrorCode[] = ['tooLarge', 'invalidUtf8', 'unreadable']
+  const known: LinkedErrorCode[] = ['tooLarge', 'invalidUtf8', 'binary', 'loneCr', 'unreadable']
   const error = known.includes(res.error as LinkedErrorCode) ? res.error as LinkedErrorCode : 'writeFailed'
   return { ...linked, status: 'error', error }
 }
@@ -420,10 +433,16 @@ async function retryLinkedWrite(get: StoreGet, set: StoreSet, id: string): Promi
 /**
  * The sections of a linked note ready to be copied into a REGULAR note (duplicate, save
  * as template): relative images inlined as data URIs (main reads them with the same
- * checks as the nflinked: scheme; any it can't read stays as it was).
+ * checks as the nflinked: scheme; any it can't read stays as it was). A plain-text file
+ * (not Markdown) becomes one fenced code block with its language (```json …```), still in
+ * text mode: as Markdown, a .json or a .py would render as mangled paragraphs.
  */
 export async function linkedSectionsForCopy(note: Note): Promise<NoteSection[]> {
   if (!note.linked) return note.sections
+  if (isPlainTextLinked(note)) {
+    const fileName = note.linked.path.split(/[\\/]/).pop() ?? ''
+    return note.sections.map((s) => ({ ...s, isRawMode: true, content: plainTextAsCodeBlock(fileName, s.content) }))
+  }
   return Promise.all(note.sections.map(async (s) => ({
     ...s,
     content: await inlineLinkedImages(s.content, (src) => window.noteflow.linkedAssetDataUri(note.id, src)),
@@ -466,6 +485,8 @@ async function applyLinkedUpdate(get: StoreGet, set: StoreSet, id: string, patch
     }
     next = patch.sections[0]
   }
+  // A plain-text file (not Markdown) never leaves text mode (no Markdown editor for it).
+  if (isPlainTextLinked(note) && !next.isRawMode) next = { ...next, isRawMode: true }
   const meta: LinkedMetaPatch = {}
   if (patch.title !== undefined && patch.title !== note.title) meta.title = patch.title
   if (patch.favorited !== undefined && patch.favorited !== note.favorited) meta.favorited = patch.favorited
@@ -506,7 +527,7 @@ async function applyLinkedUpdate(get: StoreGet, set: StoreSet, id: string, patch
     ...('group' in patch ? { group: patch.group } : {}),
     ...('folder' in patch ? { folder: patch.folder } : {}),
     sections: [section],
-    tags: extractTags(section.content),
+    tags: linkedTagsOf(linked.path, section.content),
     linked,
     // The file's modification time is the note's "updated" (main reports it on reload).
     ...(contentChanged ? { updated: new Date().toISOString() } : {}),
@@ -692,8 +713,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
   
   syncNote: async (filePath: string, retried = false) => {
-    // A linked FILE (external .md): its own sync. Note folders never end in .md.
-    if (isLinkedFilePath(filePath)) return get().syncLinkedNote(filePath)
+    // A linked FILE (any text file): its own sync. Known by the store's linked notes (a
+    // note folder path never matches one), not by extension.
+    if (findLinkedNoteByPath(get().notes, filePath, window.noteflow.platform)) return get().syncLinkedNote(filePath)
     try {
       // Store snapshot BEFORE the disk read: if a local write of this note lands while we
       // read (or decrypt, PBKDF2 can take hundreds of ms), our copy may predate it and must
@@ -703,6 +725,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // filePath is the absolute path of the note DIRECTORY
       const rec = await window.noteflow.readNoteDir(pathBasename(filePath))
       if (!rec) {
+        // Not a note folder: maybe a file linked in another window that this one doesn't
+        // have yet (main refuses linked files as folders) — main's registry knows.
+        if (!retried && await window.noteflow.linkedGet(filePath).catch(() => null)) return get().syncLinkedNote(filePath)
         const targetFilename = filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase()
         if (!targetFilename) return
 
@@ -858,7 +883,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const linked: LinkedNoteState = { ...note.linked, syncedContent: note.linked.diskBody }
     const body = note.linked.diskBody
     let updated: Note | undefined
-    set((s) => ({ notes: s.notes.map((n) => (n.id === id ? (updated = { ...n, sections: [{ ...n.sections[0], content: body }], tags: extractTags(body), linked }) : n)) }))
+    set((s) => ({ notes: s.notes.map((n) => (n.id === id ? (updated = { ...n, sections: [{ ...n.sections[0], content: body }], tags: linkedTagsOf(linked.path, body), linked }) : n)) }))
     persistLinkedDraft(updated)
     void get().syncLinkedNote(id)
   }),
@@ -881,7 +906,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       if (resolution.kind === 'reload') {
         const linked: LinkedNoteState = { ...rest, baseHash: conflict.diskHash, diskBody: conflict.diskBody, syncedContent: conflict.diskBody }
         const sections = [{ ...note.sections[0], content: conflict.diskBody }]
-        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, sections, tags: extractTags(conflict.diskBody), linked } : n)) }))
+        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, sections, tags: linkedTagsOf(linked.path, conflict.diskBody), linked } : n)) }))
         persistLinkedDraft(get().notes.find((n) => n.id === id))
         return
       }
@@ -889,17 +914,16 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // AGAIN since, main reports a new conflict instead of overwriting it).
       const content = resolution.kind === 'merged' ? resolution.body : note.sections[0].content
       // A merged text is written as typed; "keep mine" like a regular save.
-      // "Keep mine" with the disk's blank edges (they don't render: no diff there).
       const body = resolution.kind === 'merged'
         ? content
-        : withBlankEdges(linkedBodyToWrite(note as Note & { linked: LinkedNoteState }, content), conflict.diskBody)
+        : linkedKeepMineBody(note as Note & { linked: LinkedNoteState }, content, conflict.diskBody)
       const res = await window.noteflow.linkedWrite(id, body, conflict.diskHash)
       let linked: LinkedNoteState
       if (res.ok) linked = { ...rest, baseHash: res.hash, diskBody: res.body, syncedContent: content }
       else if (res.reason === 'conflict') linked = { ...rest, conflict: { diskBody: res.disk.body, diskHash: res.disk.hash } }
       else linked = { ...note.linked, status: res.reason === 'missing' ? 'missing' : res.reason === 'readonly' ? 'readonly' : 'error' }
       const sections = [{ ...note.sections[0], content }]
-      set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, sections, tags: extractTags(content), linked } : n)) }))
+      set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, sections, tags: linkedTagsOf(linked.path, content), linked } : n)) }))
       persistLinkedDraft(get().notes.find((n) => n.id === id))
       if (res.ok) window.noteflow.recordActivityEdit(id)
     })

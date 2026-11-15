@@ -10,7 +10,7 @@ import { MENU_ITEM_CLASS } from './contextMenuStyles'
 import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp, Pin, PinOff, Check } from 'lucide-react'
 import { decryptSections } from '../lib/cryptoUtils'
 import { createDebouncedSave, flushPendingEdits } from '../lib/pendingEdits'
-import { isLinkedNote, isLinkedReadOnly } from '../lib/linkedNotes'
+import { isLinkedNote, isLinkedReadOnly, sectionShowsRaw } from '../lib/linkedNotes'
 import { LinkedNoteCompactBar } from './LinkedNote/LinkedNoteHeader'
 import {
   isStickyHashFolded,
@@ -688,7 +688,8 @@ export function StickyApp() {
       )}
       {isLinkedNote(note) && <LinkedNoteCompactBar note={note} />}
       <div className="flex-1 overflow-hidden mr-1" onKeyDown={(e) => e.stopPropagation()}>
-        {(section.isRawMode || isReadOnly) ? (
+        {/* Text mode — always for a plain-text linked file (not Markdown). */}
+        {(sectionShowsRaw(note, section) || isReadOnly) ? (
           <textarea
             // Per section: a fresh textarea (scroll at the top, no native undo history
             // reaching into the previous section's text).

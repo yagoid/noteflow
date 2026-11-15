@@ -186,7 +186,7 @@ const TEXT = {
     },
     // "linked-files": an existing README linked from the + menu, edited, then changed outside.
     linked: {
-      menu: 'Link Markdown file…', confirm: 'Link',
+      menu: 'Link file…', confirm: 'Link',
       readme: '# Acme API\n\nREST API for the Acme dashboard.\n\n## Setup\n\n1. `npm install`\n2. `npm run dev`\n',
       newStep: 'Copy .env.example to .env', newStepNeedle: '.env.example',
       external: '\n## License\n\nMIT\n', externalNeedle: 'License',
@@ -228,7 +228,7 @@ const TEXT = {
       newNoteBtn: 'Nueva nota (Ctrl+N)', seeCloud: 'Ver NoteFlow Cloud', syncOptions: 'Opciones de sincronización',
     },
     linked: {
-      menu: 'Vincular archivo Markdown…', confirm: 'Vincular',
+      menu: 'Vincular archivo…', confirm: 'Vincular',
       readme: '# Acme API\n\nAPI REST del panel de Acme.\n\n## Instalación\n\n1. `npm install`\n2. `npm run dev`\n',
       newStep: 'Copia .env.example a .env', newStepNeedle: '.env.example',
       external: '\n## Licencia\n\nMIT\n', externalNeedle: 'Licencia',

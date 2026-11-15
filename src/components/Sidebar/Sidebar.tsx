@@ -3,7 +3,8 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { Search, PanelLeftClose, PanelLeftOpen, Lock, FolderPlus, X, Plus, Timer, LayoutGrid, Star, MoreHorizontal, FileSymlink } from 'lucide-react'
-import { LINKED_TONE_CLASS, linkedStatusLabel, linkedTone, requestLinkMarkdown } from '../LinkedNote/linkedActions'
+import { LINKED_TONE_CLASS, linkedStatusLabel, linkedTone, requestLinkFile } from '../LinkedNote/linkedActions'
+import { LinkedFileIcon } from '../LinkedNote/LinkedFileIcon'
 import { isLinkedDirty } from '../../lib/linkedNotes'
 import { ContextMenu } from '../ContextMenu'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
@@ -168,7 +169,7 @@ const NoteRow = memo(function NoteRow({
               title={`${t.linked.linkedNoteBadge}\n${note.linked.path}\n${linkedStatusLabel(t.linked, note.linked, isLinkedDirty(note))}`}
               className="flex-shrink-0 flex items-center"
             >
-              <FileSymlink size={10} className={LINKED_TONE_CLASS[linkedTone(note.linked, isLinkedDirty(note))]} aria-label={t.linked.linkedNoteBadge} />
+              <LinkedFileIcon path={note.linked.path} size={10} className={LINKED_TONE_CLASS[linkedTone(note.linked, isLinkedDirty(note))]} aria-label={t.linked.linkedNoteBadge} />
             </span>
           )}
           {note.expiresAt && <span title={formatExpiry(note.expiresAt, t)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
@@ -1375,12 +1376,12 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
             {t.sidebar.tempNote24h}
           </button>
           <button
-            onClick={() => { setNewNoteCtx(null); requestLinkMarkdown() }}
-            title={t.linked.linkMarkdownFileDescription}
+            onClick={() => { setNewNoteCtx(null); requestLinkFile() }}
+            title={t.linked.linkFileDescription}
             className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
           >
             <FileSymlink size={12} />
-            {t.linked.linkMarkdownFile}
+            {t.linked.linkFile}
           </button>
         </ContextMenu>
       )}

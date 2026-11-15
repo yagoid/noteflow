@@ -4,7 +4,9 @@
 //     drops the registry entry, its cache and its draft);
 //   - a write only happens if the disk still holds the version the edit was
 //     based on (hash), atomically (tmp in the same folder + rename), keeping BOM,
-//     line endings, final newline and YAML frontmatter byte-exact;
+//     line endings, final newline and YAML frontmatter (Markdown only) byte-exact;
+//   - any TEXT file can be linked (no NUL byte, valid UTF-8); one that isn't
+//     Markdown is plain text: always text mode, no frontmatter, no images;
 //   - nothing of NoteFlow is ever written into the file;
 //   - registry + content cache + drafts live in userData, never in the notes dir
 //     (so no sync backend, export, CLI or notes-dir watcher can ever see them).
@@ -15,22 +17,26 @@
 // (`serial`), so a watcher re-read never interleaves with a write.
 
 import fs from 'fs'
+import type { FileHandle } from 'fs/promises'
 import path from 'path'
 import { randomBytes } from 'crypto'
 import {
   LINKED_ID_PREFIX,
   LINKED_SECTION_ID,
+  LINKED_SNIFF_BYTES,
   MAX_LINKED_ASSET_BYTES,
   MAX_LINKED_FILE_BYTES,
   MAX_INLINED_ASSET_BYTES,
   imageMimeOf,
   assembleMarkdownFile,
+  createLinkGrants,
   decideDiskEvent,
   decideWrite,
-  decodeMarkdownBytes,
+  decodeLinkedBytes,
   defaultLinkedTitle,
   encodeMarkdown,
   hashBytes,
+  hasLoneCr,
   isImageFileName,
   isLinkedNoteId,
   isMarkdownPath,
@@ -47,8 +53,9 @@ import {
   sanitizeLinkedDraft,
   sanitizeLinkedRegistry,
   sanitizeNoteOrder,
+  sniffLinkedBytes,
+  splitLinkedFile,
   splitLinkedOrder,
-  splitMarkdownFile,
   type LinkedDraft,
   type LinkedNoteRecord,
 } from './linkedNotesLogic'
@@ -57,7 +64,12 @@ const fsp = fs.promises
 
 /** `checking` = not read yet since startup (shown from the cache, read-only, until the read lands). */
 export type LinkedStatus = 'ok' | 'missing' | 'readonly' | 'error' | 'checking'
-export type LinkedErrorCode = 'tooLarge' | 'invalidUtf8' | 'unreadable'
+/**
+ * `binary` = the file has NUL bytes (it became a binary file, or always was). `loneCr` = a
+ * plain-text (not Markdown) file with old Mac line breaks (a lone `\r`): readable, but the
+ * textarea would turn every one into `\n` on the first edit, so it stays read-only.
+ */
+export type LinkedErrorCode = 'tooLarge' | 'invalidUtf8' | 'binary' | 'loneCr' | 'unreadable'
 
 /** What the renderer gets for a linked note (mirror: LinkedNoteWire in src/types). */
 export interface LinkedNoteWire {
@@ -68,6 +80,7 @@ export interface LinkedNoteWire {
   folder?: string
   favorited: boolean
   archived: boolean
+  /** Always true for a file that isn't Markdown (plain text: text mode only). */
   isRawMode: boolean
   aiHidden: boolean
   created: string
@@ -76,7 +89,7 @@ export interface LinkedNoteWire {
   sectionName: string
   status: LinkedStatus
   error?: LinkedErrorCode
-  /** The editable body (frontmatter hidden), from disk — or from the cache when the file can't be read (yet). */
+  /** The editable body (a Markdown file's frontmatter hidden), from disk — or from the cache when the file can't be read (yet). */
   body: string
   /** Hash of the file bytes `body` comes from; null when it isn't the disk's (cache, unreadable). */
   hash: string | null
@@ -91,7 +104,12 @@ export type LinkedWriteResult =
   | { ok: false; reason: 'conflict'; disk: { body: string; hash: string } }
   | { ok: false; reason: 'missing' | 'readonly' | 'notLinked' | 'error'; error?: LinkedErrorCode | string }
 
-export type LinkError = 'notMarkdown' | 'notFound' | 'notAFile' | 'insideNotesDir' | 'alreadyLinked'
+/**
+ * Why a file can't be linked. `invalidPath` (not an absolute path) replaces the
+ * `notMarkdown` of the first build, when only .md/.markdown could be linked.
+ * `notGranted` = the path wasn't granted by a user action (picker, OS drop): see grantLinkPaths.
+ */
+export type LinkError = 'invalidPath' | 'notGranted' | 'binary' | 'invalidUtf8' | 'notFound' | 'notAFile' | 'insideNotesDir' | 'alreadyLinked'
 
 interface Runtime {
   status: LinkedStatus
@@ -118,6 +136,18 @@ let localOrder: Record<string, string[]> = {}
 const runtime = new Map<string, Runtime>()
 const drafts = new Map<string, LinkedDraft>()
 const platform = process.platform
+const grants = createLinkGrants(platform)
+
+/**
+ * Paths the USER chose to link (native picker, a real drop from the OS — and later, "Open
+ * with NoteFlow"): only those can enter the registry through link / relocate, each once and
+ * for a limited time (linkedNotesLogic createLinkGrants). Called by main only, never on a
+ * renderer's say-so: a compromised renderer must not link (and then rewrite) `.bashrc`,
+ * `.git/config` or `~/.ssh/authorized_keys`.
+ */
+export function grantLinkPaths(paths: readonly unknown[], ttlMs?: number): void {
+  grants.grant(paths, ttlMs)
+}
 
 // ── Per-note serial queue (reads/writes of one note never interleave) ────────
 
@@ -228,7 +258,7 @@ async function readDisk(filePath: string): Promise<DiskRead> {
   if (stat.size > MAX_LINKED_FILE_BYTES) return { kind: 'error', error: 'tooLarge', mtimeMs: stat.mtimeMs }
   let bytes: Buffer
   try { bytes = await fsp.readFile(filePath) } catch { return { kind: 'error', error: 'unreadable', mtimeMs: stat.mtimeMs } }
-  const decoded = decodeMarkdownBytes(bytes)
+  const decoded = decodeLinkedBytes(bytes)
   if (!decoded.ok) return { kind: 'error', error: decoded.error, mtimeMs: stat.mtimeMs }
   return {
     kind: 'ok', bytes, text: decoded.text, bom: decoded.bom, hash: hashBytes(bytes),
@@ -247,8 +277,11 @@ async function refresh(rec: LinkedNoteRecord): Promise<{ changed: boolean; conte
   if (!records.includes(rec)) return { changed: false, contentChanged: false } // unlinked meanwhile
   let next: Runtime
   if (disk.kind === 'ok') {
-    const body = splitMarkdownFile(disk.text, disk.bom).body
-    next = { status: disk.writable ? 'ok' : 'readonly', body, hash: disk.hash, mtimeMs: disk.mtimeMs }
+    const body = splitLinkedFile(rec.path, disk.text, disk.bom).body
+    // Plain text with old Mac line breaks: shown (it's readable), but read-only.
+    next = loneCrPlainText(rec, disk.text)
+      ? { status: 'error', error: 'loneCr', body, hash: disk.hash, mtimeMs: disk.mtimeMs }
+      : { status: disk.writable ? 'ok' : 'readonly', body, hash: disk.hash, mtimeMs: disk.mtimeMs }
     // Echo (our own write coming back, or a touch) = same hash as the last known
     // content: nothing to persist. Anything else is new content from outside.
     if (decideDiskEvent(prev?.hash ?? rec.known?.hash, disk.hash) === 'external' || rec.known?.hash !== disk.hash) {
@@ -270,6 +303,11 @@ async function refresh(rec: LinkedNoteRecord): Promise<{ changed: boolean; conte
   return { changed, contentChanged: !prev || prev.body !== next.body }
 }
 
+/** A plain-text (not Markdown) file with a lone CR: the textarea would rewrite those on edit (hasLoneCr). */
+function loneCrPlainText(rec: LinkedNoteRecord, text: string): boolean {
+  return !isMarkdownPath(rec.path) && hasLoneCr(text)
+}
+
 /** Not read yet since startup: the cached content, read-only, until refresh() lands. */
 function checkingRuntime(rec: LinkedNoteRecord): Runtime {
   return { status: 'checking', body: readCache(rec.id) ?? '', hash: null, mtimeMs: rec.known?.mtimeMs ?? 0 }
@@ -287,7 +325,8 @@ function toWire(rec: LinkedNoteRecord): LinkedNoteWire {
     ...(rec.group && rec.folder ? { folder: rec.folder } : {}),
     favorited: !!rec.favorited,
     archived: !!rec.archived,
-    isRawMode: !!rec.isRawMode,
+    // Plain text (not Markdown) is always shown in text mode, whatever the registry says.
+    isRawMode: !!rec.isRawMode || !isMarkdownPath(rec.path),
     aiHidden: !!rec.aiHidden,
     created: rec.created,
     updated,
@@ -462,8 +501,30 @@ export function isLinkedPath(p: unknown): boolean {
   return typeof p === 'string' && !!p && !!findByPath(p)
 }
 
+/**
+ * Whether the file can be text: no NUL byte and valid UTF-8 — the whole file when it's
+ * within MAX_LINKED_FILE_BYTES, else its first LINKED_SNIFF_BYTES (a bigger text file is
+ * linked, read-only). A file that can't be read now isn't refused (it shows as unreadable).
+ */
+async function sniffLinkTarget(filePath: string, size: number): Promise<LinkError | null> {
+  let handle: FileHandle | null = null
+  try {
+    handle = await fsp.open(filePath, 'r')
+    const complete = size <= MAX_LINKED_FILE_BYTES
+    const buf = Buffer.alloc(complete ? size : LINKED_SNIFF_BYTES)
+    const { bytesRead } = await handle.read(buf, 0, buf.length, 0)
+    return sniffLinkedBytes(buf.subarray(0, bytesRead), complete)
+  } catch {
+    return null
+  } finally {
+    try { await handle?.close() } catch { /* ignore */ }
+  }
+}
+
 async function validateLinkTarget(p: unknown): Promise<{ ok: true; filePath: string } | { ok: false; error: LinkError }> {
-  if (!isMarkdownPath(p) || !path.isAbsolute(p)) return { ok: false, error: 'notMarkdown' }
+  if (typeof p !== 'string' || !p.trim() || !path.isAbsolute(p)) return { ok: false, error: 'invalidPath' }
+  // Only a path the user chose (picker / OS drop / main's own "open with"), once.
+  if (!grants.consume(p)) return { ok: false, error: 'notGranted' }
   const filePath = normalizeLinkedPath(p, platform)
   // Files of the notes dir are already notes (or sync metadata): editing them as
   // linked notes would fight the sync and the regular editor.
@@ -471,6 +532,9 @@ async function validateLinkTarget(p: unknown): Promise<{ ok: true; filePath: str
   let stat: fs.Stats
   try { stat = await fsp.stat(filePath) } catch { return { ok: false, error: 'notFound' } }
   if (!stat.isFile()) return { ok: false, error: 'notAFile' }
+  // Text files only: an image, a PDF or an Office file can't be edited as text.
+  const notText = await sniffLinkTarget(filePath, stat.size)
+  if (notText) return { ok: false, error: notText }
   try {
     if (options && isPathInside(await fsp.realpath(filePath), await fsp.realpath(options.notesDir), platform)) {
       return { ok: false, error: 'insideNotesDir' }
@@ -484,7 +548,8 @@ function newLinkedId(): string {
 }
 
 /**
- * Links Markdown files. An already linked file (same path, platform case rules)
+ * Links text files (Markdown or any other text file) — only paths granted by
+ * grantLinkPaths (each consumed here, also when it fails). An already linked file (same path, platform case rules)
  * is returned as `existing` instead of being linked twice.
  */
 export async function link(paths: unknown, senderId?: number): Promise<{
@@ -523,7 +588,7 @@ export async function link(paths: unknown, senderId?: number): Promise<{
   return result
 }
 
-/** Points a linked note at another file, keeping everything else (title, group, favorite…). */
+/** Points a linked note at another file (a granted path), keeping everything else (title, group, favorite…). */
 export async function relocate(id: unknown, newPath: unknown, senderId?: number): Promise<{ ok: true; note: LinkedNoteWire } | { ok: false; error: LinkError | 'notLinked' }> {
   const rec = find(id)
   if (!rec) return { ok: false, error: 'notLinked' }
@@ -636,7 +701,7 @@ async function replaceFileAtomically(target: string, bytes: Buffer): Promise<voi
 /**
  * Writes an edited body to the linked file — only if the file still has the
  * content the edit was based on (`baseHash`); otherwise reports a conflict with
- * the disk version. Frontmatter, BOM, line endings and final newline are kept.
+ * the disk version. Frontmatter (Markdown), BOM, line endings and final newline are kept.
  * A write of the draft's own content drops the draft (consumeDraft).
  */
 export function writeBody(id: unknown, body: unknown, baseHash: unknown, senderId?: number): Promise<LinkedWriteResult> {
@@ -654,7 +719,9 @@ export function writeBody(id: unknown, body: unknown, baseHash: unknown, senderI
     }
     if (disk.kind === 'missing') { await report(); return { ok: false, reason: 'missing' } }
     if (disk.kind === 'error') { await report(); return { ok: false, reason: 'error', error: disk.error } }
-    const parts = splitMarkdownFile(disk.text, disk.bom)
+    const parts = splitLinkedFile(rec.path, disk.text, disk.bom)
+    // Never rewrite the old Mac line breaks of a plain-text file (it shows read-only).
+    if (loneCrPlainText(rec, disk.text)) { await report(); return { ok: false, reason: 'error', error: 'loneCr' } }
     if (decideWrite(typeof baseHash === 'string' ? baseHash : null, disk.hash) === 'conflict') {
       // Changed outside since the edit's base: never overwrite. Remember the new
       // disk version (other windows reload it if they have nothing pending).
@@ -680,7 +747,7 @@ export function writeBody(id: unknown, body: unknown, baseHash: unknown, senderI
       return { ok: false, reason: 'error', error: String(err) }
     }
     const hash = hashBytes(nextBytes)
-    const written = splitMarkdownFile(nextText, disk.bom).body
+    const written = splitLinkedFile(rec.path, nextText, disk.bom).body
     // Unlinked while the write was in flight: the file has the edit, but nothing of the
     // note (cache, registry entry, draft) is recreated.
     if (!records.includes(rec)) return { ok: false, reason: 'notLinked' }
@@ -720,10 +787,12 @@ export function setDraft(id: unknown, draft: unknown): void {
 /**
  * Copies an image pasted/dropped into a linked note to an `assets/` folder next
  * to the .md (created if needed, unique name) → the RELATIVE path to link it with.
+ * Markdown files only: a plain-text file has no images.
  */
 export async function saveAsset(id: unknown, name: unknown, mime: unknown, data: unknown): Promise<{ ok: true; relPath: string } | { ok: false; error: string }> {
   const rec = find(id)
   if (!rec) return { ok: false, error: 'notLinked' }
+  if (!isMarkdownPath(rec.path)) return { ok: false, error: 'notMarkdown' }
   const rt = runtime.get(rec.id)
   if (rt?.status !== 'ok') return { ok: false, error: rt?.status ?? 'missing' }
   const bytes = data instanceof Uint8Array ? Buffer.from(data) : null
@@ -745,11 +814,12 @@ export async function saveAsset(id: unknown, name: unknown, mime: unknown, data:
 
 /**
  * Absolute path of an image referenced relatively by a linked note (protocol
- * handler), or null. Relative to the .md's folder (`../` may go up), images only.
+ * handler), or null. Relative to the .md's folder (`../` may go up), images only — and
+ * only for a Markdown file (a plain-text linked file shows no images).
  */
 export async function resolveAsset(id: unknown, src: unknown): Promise<string | null> {
   const rec = find(id)
-  if (!rec || typeof src !== 'string') return null
+  if (!rec || typeof src !== 'string' || !isMarkdownPath(rec.path)) return null
   // A literal name with `%xx` in it (rare) first, then its decoded form (`my%20shot.png`).
   for (const decode of [false, true]) {
     const candidate = resolveLinkedAsset(rec.path, src, platform, decode)
@@ -774,7 +844,7 @@ export async function assetDataUri(id: unknown, src: unknown): Promise<string | 
   // boundary: a compromised renderer can put any src in the body (linked:write) or the
   // draft first. A real boundary would mean bounding `../` (e.g. to the file's repo root).
   const rec = find(id)
-  if (!rec || typeof src !== 'string') return null
+  if (!rec || typeof src !== 'string' || !isMarkdownPath(rec.path)) return null
   const wanted = normalizeImageSrc(src)
   const bodies = [runtime.get(rec.id)?.body ?? readCache(rec.id) ?? '', drafts.get(rec.id)?.body ?? '']
   if (!bodies.some((b) => markdownImageSrcs(b).includes(wanted))) return null

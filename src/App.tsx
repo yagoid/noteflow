@@ -848,7 +848,7 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
       </div>
 
       <CommandPalette />
-      {/* Linked notes: "Link Markdown file…" picker, .md drops from the OS, file re-checks on focus. */}
+      {/* Linked notes: "Link file…" picker, text-file drops from the OS, file re-checks on focus. */}
       <LinkedNotesHost />
       {/* "What's new" tour: startup popup + the tour opened from Settings / the palette (main window only). */}
       <WhatsNewHost />

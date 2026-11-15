@@ -14,7 +14,7 @@ import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
 import { escapeRegExp, getNoteSearchIndex, normalize } from '../../lib/searchUtils'
 import { modKey } from '../../lib/platform'
-import { requestLinkMarkdown } from '../LinkedNote/linkedActions'
+import { requestLinkFile } from '../LinkedNote/linkedActions'
 
 function HighlightText({ text, query }: { text: string; query: string }) {
   const trimmed = query.trim()
@@ -142,11 +142,11 @@ export function CommandPalette() {
     },
     {
       id: 'link-markdown',
-      label: t.linked.linkMarkdownFile,
-      description: t.linked.linkMarkdownFileDescription,
-      keywords: 'link markdown file md external readme edit in place',
+      label: t.linked.linkFile,
+      description: t.linked.linkFileDescription,
+      keywords: 'link markdown file md text txt json yaml config code external readme edit in place',
       icon: <FileSymlink size={ICON_SIZE} className={ICON_CLS} />,
-      action: () => { setCommandPaletteOpen(false); requestLinkMarkdown() },
+      action: () => { setCommandPaletteOpen(false); requestLinkFile() },
       category: 'create',
     },
     {

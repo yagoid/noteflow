@@ -223,7 +223,7 @@ const asBool = (v) => (typeof v === 'boolean' ? v : undefined);
 function findNoteDir(ctx, noteId) {
     return noteFormat.listNoteDirs(ctx.notesDir).find((d) => d.endsWith('-' + noteId) || d === noteId) ?? null;
 }
-/** A linked note (external .md) id — mirror of LINKED_ID_PREFIX in electron/linkedNotesLogic.ts. */
+/** A linked note (external text file) id — mirror of LINKED_ID_PREFIX in electron/linkedNotesLogic.ts. */
 const isLinkedId = (id) => id.startsWith('lnk:');
 /** A note by id: a folder of the notes dir, or a linked note (`linked: true`, `dir` = ''). */
 function loadNote(ctx, noteId) {
@@ -237,6 +237,10 @@ function loadNote(ctx, noteId) {
     const note = noteFormat.parseNoteDir(`${ctx.notesDir}/${dir}`);
     return note ? { dir, note } : null;
 }
+/** A linked note whose file isn't Markdown (its single section is named after the file). */
+function isPlainTextLinked(note) {
+    return !/\.(md|markdown)$/i.test(note.sections[0]?.name ?? '');
+}
 /** Every note: the notes-dir folders, then the linked notes (`dir` = '' for those). */
 function allNotes(ctx) {
     const out = [];
@@ -249,7 +253,7 @@ function allNotes(ctx) {
         out.push({ dir: '', note, linked: true });
     return out;
 }
-const LINKED_STRUCTURE_ERROR = 'This is a linked note (an external Markdown file): it has exactly one section (the file) — sections cannot be added, deleted or renamed. Edit its content with update_section instead.';
+const LINKED_STRUCTURE_ERROR = 'This is a linked note (an external file): it has exactly one section (the file) — sections cannot be added, deleted or renamed. Edit its content with update_section instead.';
 /** Re-serialize a (mutated) note and write it, deleting any section files that no longer exist. */
 async function writeNoteRecord(ctx, dir, before, after) {
     const beforeFiles = new Set(before.sections.map((s) => `${s.id}.md`));
@@ -298,7 +302,7 @@ function describeTarget(name, rawInput, ctx) {
         case 'delete_note': {
             const found = loadNote(ctx, asStr(input.note_id));
             if (found?.linked)
-                return `linked note "${found.note.title || 'Untitled'}" (it is only unlinked from NoteFlow — the Markdown file is not deleted)`;
+                return `linked note "${found.note.title || 'Untitled'}" (it is only unlinked from NoteFlow — the file is not deleted)`;
             return found
                 ? `note "${found.note.title || 'Untitled'}"`
                 : `an unknown note (id ${asStr(input.note_id)} not found — it may already be gone)`;
@@ -384,7 +388,7 @@ async function executeTool(name, rawInput, ctx) {
                         continue;
                     const secs = note.encryption ? '(encrypted)' : note.sections.filter((s) => !s.aiHidden).map((s) => `${s.name}#${s.id}`).join(', ');
                     const place = [note.group ? `group=${note.group}` : '', note.folder ? `folder=${note.folder}` : ''].filter(Boolean).join(' ');
-                    rows.push(`- ${note.title || 'Untitled'} [id=${note.id}]${linked ? ' (linked Markdown file, single section)' : ''}${place ? ` ${place}` : ''} :: ${secs}`);
+                    rows.push(`- ${note.title || 'Untitled'} [id=${note.id}]${linked ? ` (linked ${isPlainTextLinked(note) ? 'plain-text' : 'Markdown'} file, single section)` : ''}${place ? ` ${place}` : ''} :: ${secs}`);
                     if (rows.length >= 60)
                         break;
                 }
@@ -409,7 +413,11 @@ async function executeTool(name, rawInput, ctx) {
                     return `## ${s.name} [section_id=${s.id}]\n${body}`;
                 })
                     .join('\n\n');
-                const linkedNote = linked ? '\n(Linked note: an external Markdown file with a single section. Edit it with update_section; sections cannot be added, deleted or renamed.)' : '';
+                const linkedNote = !linked
+                    ? ''
+                    : isPlainTextLinked(note)
+                        ? `\n(Linked note: an external plain-text file (${note.sections[0]?.name ?? ''}), NOT Markdown, with a single section. Edit it with update_section, keeping the file's exact format (no Markdown); sections cannot be added, deleted or renamed.)`
+                        : '\n(Linked note: an external Markdown file with a single section. Edit it with update_section; sections cannot be added, deleted or renamed.)';
                 return ok(`Read "${note.title}"`, `# ${note.title} [id=${note.id}]${linkedNote}\n${body}`);
             }
             case 'list_groups': {
@@ -524,7 +532,7 @@ async function executeTool(name, rawInput, ctx) {
                         return fail('This note is hidden from the AI; it cannot be edited by the assistant.');
                     const res = await ctx.linked.writeBody(found.note.id, restoreStrippedImages(section.content, asStr(input.content)));
                     if (!res.ok)
-                        return fail(`Could not write the linked Markdown file: ${res.error}. Nothing was changed.`);
+                        return fail(`Could not write the linked file: ${res.error}. Nothing was changed.`);
                     ctx.onNoteEdited?.(found.note.id);
                     return ok('Updated section');
                 }
@@ -572,12 +580,12 @@ async function executeTool(name, rawInput, ctx) {
             }
             case 'delete_note': {
                 if (isLinkedId(asStr(input.note_id))) {
-                    // A linked note is only unlinked: its Markdown file is never deleted.
+                    // A linked note is only unlinked: its file is never deleted.
                     const found = loadNote(ctx, asStr(input.note_id));
                     if (!found)
                         return noteNotFound(ctx, asStr(input.note_id));
                     ctx.linked?.unlink(found.note.id);
-                    return ok(`Unlinked "${found.note.title}"`, `Unlinked the linked note "${found.note.title}" from NoteFlow. Its Markdown file was NOT deleted.`);
+                    return ok(`Unlinked "${found.note.title}"`, `Unlinked the linked note "${found.note.title}" from NoteFlow. Its file was NOT deleted.`);
                 }
                 const dir = findNoteDir(ctx, asStr(input.note_id));
                 if (!dir)

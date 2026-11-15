@@ -8,6 +8,7 @@ import type { SectionTagColorMap } from '../../stores/sectionTagColorsStore'
 import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
 import { useThemeStore } from '../../stores/themeStore'
 import { SectionCardContent } from '../NoteOverview/SectionCardContent'
+import { sectionShowsRaw } from '../../lib/linkedNotes'
 import type { Note, NoteSection } from '../../types'
 
 interface SectionHoverCardProps {
@@ -51,7 +52,7 @@ export function SectionHoverCard({ note, section, sectionTagColors }: SectionHov
         <span className="section-hover-name">{section.name}</span>
         <span className="section-hover-note">{note.title || t.common.untitled}</span>
       </div>
-      <SectionCardContent content={section.content} raw={!!section.isRawMode} aiHidden={aiHidden} linkedNoteId={note.linked ? note.id : undefined} />
+      <SectionCardContent content={section.content} raw={sectionShowsRaw(note, section)} aiHidden={aiHidden} linkedNoteId={note.linked ? note.id : undefined} />
       <span className="section-map-corner" aria-hidden />
     </div>
   )

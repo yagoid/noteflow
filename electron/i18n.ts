@@ -36,9 +36,12 @@ export interface DialogMessages {
   importGoogleKeep: string
   addFilesToProfile: string
   attachFilesToChat: string
-  // Linked notes (external .md files): pick files to link / the new location of one.
-  linkMarkdownFiles: string
-  relocateMarkdownFile: string
+  // Linked notes (external text files): pick files to link / the new location of one, and
+  // the picker's filters.
+  linkFiles: string
+  relocateLinkedFile: string
+  linkFilterAllFiles: string
+  linkFilterMarkdown: string
 }
 
 export interface ChatErrorMessages {
@@ -98,8 +101,10 @@ const en: Messages = {
     importGoogleKeep: 'Import Google Keep export',
     addFilesToProfile: 'Add files to your profile',
     attachFilesToChat: 'Attach files to the chat',
-    linkMarkdownFiles: 'Link Markdown files',
-    relocateMarkdownFile: 'Locate the linked Markdown file',
+    linkFiles: 'Link files',
+    relocateLinkedFile: 'Locate the linked file',
+    linkFilterAllFiles: 'All files',
+    linkFilterMarkdown: 'Markdown',
   },
   chatErrors: {
     quotaExceeded: "This month's NoteFlow AI allowance is used up, or what's left isn't enough for this request — try a cheaper model. It resets on the 1st of next month.",
@@ -145,8 +150,10 @@ const es: Messages = {
     importGoogleKeep: 'Importar exportación de Google Keep',
     addFilesToProfile: 'Añadir archivos a tu perfil',
     attachFilesToChat: 'Adjuntar archivos al chat',
-    linkMarkdownFiles: 'Vincular archivos Markdown',
-    relocateMarkdownFile: 'Localizar el archivo Markdown vinculado',
+    linkFiles: 'Vincular archivos',
+    relocateLinkedFile: 'Localizar el archivo vinculado',
+    linkFilterAllFiles: 'Todos los archivos',
+    linkFilterMarkdown: 'Markdown',
   },
   chatErrors: {
     quotaExceeded: 'La asignación de NoteFlow AI de este mes se ha agotado, o lo que queda no basta para esta petición — prueba con un modelo más barato. Se renueva el día 1 del mes que viene.',

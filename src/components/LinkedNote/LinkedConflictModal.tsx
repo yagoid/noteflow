@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { GitCompare, X } from 'lucide-react'
-import { linkedBodyToWrite, useNotesStore } from '../../stores/notesStore'
+import { linkedKeepMineBody, useNotesStore } from '../../stores/notesStore'
 import { diffSequences } from '../../lib/externalContentSync'
-import { withBlankEdges } from '../../lib/linkedMarkdown'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import type { LinkedNoteState, Note } from '../../types'
@@ -49,7 +48,8 @@ export function LinkedConflictModal({ note, onClose }: { note: Note & { linked: 
   // so the diff shows real changes and not the editor's spelling of the same Markdown.
   // With the disk's leading / trailing blank lines (they don't render): the merged text starts
   // from this, so if its start and end aren't touched they don't change in the file.
-  const mine = useMemo(() => withBlankEdges(linkedBodyToWrite(note, note.sections[0]?.content ?? ''), disk), [note, disk])
+  // (A plain-text file, not Markdown: exactly the note's text.)
+  const mine = useMemo(() => linkedKeepMineBody(note, note.sections[0]?.content ?? '', disk), [note, disk])
   const rows = useMemo(() => sideBySide(disk, mine), [disk, mine])
   const [tab, setTab] = useState<'diff' | 'merge'>('diff')
   const [merged, setMerged] = useState(mine)

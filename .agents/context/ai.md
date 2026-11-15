@@ -40,13 +40,16 @@ consumidores** (related ✅, grafo ✅, chat ✅).
   `stripNoise` quita imágenes base64 y trunca a ~2000 chars antes de embeber (crítico: 157s→6.7s).
   Las notas que llegan por **pull** (GitHub/Cloud) también pasan por `scheduleIndex` vía
   `indexPulledNotes` en `main.ts`.
-- **Notas vinculadas (`.md` externo, ver `patterns.md` § "Notas vinculadas"):** no son carpetas del dir
+- **Notas vinculadas (archivo de texto externo —Markdown o texto plano—, ver `patterns.md` § "Notas vinculadas"):** no son carpetas del dir
   de notas, así que el worker las recibe **como datos** (`DataNote` en `protocol.ts`): `index-note-data`
   (vía `aiIndex.scheduleIndexData(key, read)`, mismo debounce/staleness/dormancia que `scheduleIndex`) y el
   campo `extra` de `reindex-all` (`aiIndex.init({ extraNotes })` → `linkedNotes.aiNotes()`). Clave en el
   índice (`file_path`) = `linked://<id>`; `removeFromIndex(key)` al desvincular. Una sola sección (`body`);
   respeta `aiHidden` (del registro local). Las reindexa `linkedNotes.ts` al escribir, al detectar un cambio
-  externo y al cambiar el título-alias o `aiHidden`.
+  externo y al cambiar el título-alias o `aiHidden`. Las de **texto plano** (`.json`, `.yaml`, código, logs)
+  se indexan igual (por defecto, a propósito: un config o un script del proyecto es contexto útil); si meten
+  ruido, "Hide from AI" las saca. Como cualquier vinculada, máx. 2 MB (más grande = `tooLarge`, sin contenido
+  nuevo que indexar).
 - **Índice desactualizado (punto ámbar del botón "Reindex" en la vista cerebro):** la verdad vive en
   **main** — `aiIndex` + `electron/ai/indexStaleness.ts` (lógica pura, con tests). Un dir de nota
   entra en pendientes al escribirse (`scheduleIndex`, **antes** del debounce) y solo sale cuando el
@@ -374,8 +377,9 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   edición de cada nota; los días anteriores salen del log. Tools v1: `list_notes`, `get_note`,
   `list_groups`, `search_notes`, `create_note`, `update_note`, `add_section`, `update_section`,
   `rename_section`, `create_group`, `create_folder`, `rename_group`, `rename_folder`, `delete_*`.
-  Las **notas cifradas** se listan pero no se leen/editan. Las **notas vinculadas** (`.md` externo, id
-  `lnk:`) entran por `ctx.linked` (`LinkedToolApi`, cableado en `main.ts` a `linkedNotes.ts`): se listan,
+  Las **notas cifradas** se listan pero no se leen/editan. Las **notas vinculadas** (archivo externo, id
+  `lnk:`; las de texto plano salen marcadas "plain-text file, NOT Markdown" en `list_notes`/`get_note` y sin
+  etiquetas) entran por `ctx.linked` (`LinkedToolApi`, cableado en `main.ts` a `linkedNotes.ts`): se listan,
   leen y buscan como las demás; `update_section` escribe en el archivo (con la misma comprobación de huella:
   si cambió fuera, la tool falla sin escribir); `update_note` toca solo metadatos locales; `add_section` /
   `rename_section` / `delete_section` fallan (una sola sección); `delete_note` solo **desvincula** (el archivo
