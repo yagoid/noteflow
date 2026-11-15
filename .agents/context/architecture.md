@@ -63,6 +63,8 @@ noteflow/
 │   │                    #   allowlist de rutas descargables — testeada; ver patterns.md
 │   ├── relaunchArgs.ts  # Pura: args del relanzamiento tras salir de un lanzamiento que llegó durante la
 │   │                    #   salida (second-instance) — testeada; ver patterns.md § Single instance
+│   ├── v8Flags.ts       # Pura: valor del switch `js-flags` de los renderers (`--heap-growing-percent=30`,
+│   │                    #   acota el crecimiento del heap de V8/Blink) — testeada; ver patterns.md § Memoria del renderer
 │   ├── feedback.ts      # Formulario de feedback (Ajustes → About): INSERT en public.feedback vía PostgREST,
 │   │                    #   con el token de la sesión si la hay y si no anónimo (no exige cuenta) — migración 0015
 │   ├── feedbackLogic.ts # Pura: validación del payload (tipo, mensaje 1..5000, email opcional laxo), fila a

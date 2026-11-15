@@ -2504,6 +2504,69 @@ fallback **incluye su propia barra arrastrable + minimizar/cerrar** (`window.not
 `.close()`, mismo estilo que el `StickyTitleBar`) además de un botón "Reload"
 (`window.location.reload()`); si no, volveríamos a una ventana inmanejable.
 
+### Memoria del renderer: crecimiento del heap de V8 acotado (`electron/v8Flags.ts`)
+`main.ts` añade el switch de Chromium **`js-flags` = `--heap-growing-percent=30`** en el nivel superior
+del módulo (antes de `ready`), justo después del single-instance lock y solo si se obtuvo. Llega a
+**todos los renderers** (ventana principal, stickies, ventanas de sección, chat) y **solo a ellos**:
+el proceso main no cambia (su V8 ya está inicializado) y tampoco lo reciben el proceso GPU, el
+servicio de red, el `utilityProcess` del índice de IA ni el CLI (que se lanza con su propio argv).
+`rendererJsFlags()` es pura y testeada (`tests/electron/v8Flags.test.ts`): conserva los flags que
+vengan por línea de comandos (separados por espacios o por comas) y no pisa un
+`--heap-growing-percent` explícito. Sirve para probar otro valor sin recompilar:
+`NoteFlow.exe --js-flags=--heap-growing-percent=60` (`=0` vuelve al factor dinámico por defecto de
+V8). Ojo al comparar medidas: un `--js-flags` pasado así en el arranque lo lee también el proceso
+main, cosa que en producción no ocurre.
+
+**Por qué (medido el 2026-11-15, Electron 35.7 / V8 13.4, 48 notas reales, ventana 1440×920;
+"memoria" = working set privado, lo que enseña el Administrador de tareas, sumando los procesos):**
+
+| Escenario | Sin el flag | Con `--heap-growing-percent=30` |
+|---|---|---|
+| Recién arrancada, en reposo | ~170 MB | ~170 MB |
+| Pico tras 60 cambios de sección/nota seguidos | ~500 MB (renderer ~355) | ~300 MB (renderer ~160) |
+| 30 s después, en reposo | ~405 MB (renderer ~270) | ~255 MB (renderer ~120) |
+| GC mayores durante esos 60 cambios | 6 | 63 |
+| Pausa de GC en el hilo principal: total / máxima | 67 ms / 6 ms | 222 ms / 9 ms |
+| Los mismos 60 cambios a ritmo humano (uno cada ~1,6 s): reposo | ~340 MB (renderer ~210) | ~236 MB (renderer ~110) |
+
+- **El heap de JS no era el problema** (15 MB al arrancar, ~26 MB tras navegar). Lo que se inflaba era
+  el **heap de Blink (Oilpan)**: ~8 MB vivos dentro de ~190 MB reservados.
+- **Mecanismo.** V8 programa juntos su heap y el de Blink ("unified heap") y deja crecer el conjunto
+  por un factor dinámico que en heaps pequeños como el nuestro llega a **×4** antes de recolectar.
+  Cada cambio de sección genera mucha basura de Blink (estilo/layout/pintado de las transiciones del
+  mapa de secciones del editor y de la fila de nota del sidebar: 60–100 pasadas de layout y ~3.000
+  repintados por cambio) y, con tan pocos GC, esa basura se acumula. Cuando por fin se recolecta, las
+  páginas vacías pasan al **pool de páginas de Oilpan**, que **no se devuelve al sistema**: así que la
+  memoria en reposo queda fijada por el **pico** de basura, no por lo que la app usa.
+- **Con factor 1,3** (el modo "conservative" que Chrome aplica en equipos con poca memoria) el GC
+  salta más o menos una vez por cambio de sección, la basura no llega a acumularse y el pool se queda
+  en ~6 MB. El coste son GC más frecuentes pero concurrentes/incrementales: pausas de 3–9 ms, por
+  debajo de un fotograma.
+- **Lo que NO devuelve esa memoria una vez inflada** (probado, no reintentar): un GC forzado desde
+  DevTools/CDP (`HeapProfiler.collectGarbage` no es un GC "memory-reducing"), `webFrame.clearCache()`
+  (manda presión de memoria crítica al renderer, pero como la ventana principal lleva
+  `backgroundThrottling: false` Chromium la considera siempre en primer plano y la degrada a
+  moderada), y ocultar la ventana en la bandeja o dejarla minutos en reposo. Por eso la solución es
+  impedir el pico, no limpiar después.
+- **Alternativas descartadas:** `--optimize-for-size` (reposo ~241 MB, pero 330 scavenges y ~900 ms
+  de pausas en la misma prueba, y además cambia decisiones del compilador), `--heap-growing-percent`
+  de 60/100 (reposo ~267/~295 MB), recargar el renderer mientras está oculto (pierde estado de la UI)
+  y reactivar `backgroundThrottling` (está desactivado a propósito en la ventana principal: con él
+  activado el renderer podía caerse tras suspender el equipo o tras mucho rato oculto — comentario en
+  `createWindow`, `electron/main.ts`).
+- **Alcance de lo medido.** Las pausas de GC (3–9 ms) están medidas navegando entre secciones/notas y
+  tecleando. El cerebro 3D, un chat largo en streaming o notas muy grandes no se han medido con el
+  factor fijo; si alguno mostrara tirones, el primer sospechoso es este flag (probar con
+  `--js-flags=--heap-growing-percent=0`).
+- **Suelo en reposo (~170 MB recién arrancada):** renderer ~60–68, proceso GPU ~55, main ~44 (~33
+  tras su primer GC), servicio de red ~7. Es en su mayoría coste fijo de Electron; las notas apenas
+  pesan (heap JS ~15 MB). Cada ventana extra (sticky, sección, chat) es otro renderer.
+- **Cómo medir / comprobar.** El flag está aplicado si la línea de comandos del proceso
+  `--type=renderer` contiene `--js-flags=--heap-growing-percent=30`. Para el desglose por tipo de
+  memoria: `contentTracing` con la categoría `disabled-by-default-memory-infra` (volcado `detailed`)
+  y mirar en el renderer `blink_gc/main/heap` → `allocated_objects_size` (vivo) frente a
+  `committed_size` y `pooled_size`. `app.getAppMetrics()` da el working set por proceso.
+
 ### Ventanas sticky (fold/unfold + shape)
 Stickies = BrowserWindows extra que cargan la app con hash `#sticky?noteId=...&sectionId=...`,
 `alwaysOnTop`. En Windows se usa `win.setShape()` (región redondeada calculada píxel a píxel)

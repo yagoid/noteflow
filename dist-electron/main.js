@@ -72,6 +72,7 @@ const welcomeNote_1 = require("./welcomeNote");
 const tempNoteExpiry_1 = require("./tempNoteExpiry");
 const updateAsset_1 = require("./updateAsset");
 const relaunchArgs_1 = require("./relaunchArgs");
+const v8Flags_1 = require("./v8Flags");
 const activityLog_1 = require("./activityLog");
 const i18n_1 = require("./i18n");
 const settingsFile_1 = require("./settingsFile");
@@ -4747,6 +4748,16 @@ electron_1.ipcMain.on('window:unfold', (event) => {
 const gotTheLock = electron_1.app.requestSingleInstanceLock();
 if (!gotTheLock) {
     electron_1.app.quit();
+}
+// Cap V8's heap growth in the renderers: a fixed 1.3 factor instead of the default of up
+// to x4, which let Blink's heap balloon while navigating (why and numbers in v8Flags.ts).
+// Has to run before 'ready', and only reaches the renderers: this process initialised its
+// V8 before loading this file. After the lock and only when we hold it: a process that
+// loses it has already forwarded its command line to the owner ('second-instance'), whose
+// relaunch keeps unknown switches (secondInstanceRelaunchArgs) — appended here, ours never
+// travels in that argv.
+if (gotTheLock) {
+    electron_1.app.commandLine.appendSwitch('js-flags', (0, v8Flags_1.rendererJsFlags)(electron_1.app.commandLine.getSwitchValue('js-flags')));
 }
 electron_1.app.whenReady().then(async () => {
     // Losing the lock means another instance already owns the app: quit was

@@ -70,6 +70,7 @@ import {
   type UpdateCheckResult,
 } from './updateAsset'
 import { secondInstanceRelaunchArgs } from './relaunchArgs'
+import { rendererJsFlags } from './v8Flags'
 import {
   parseActivityLog,
   pruneActivityLog,
@@ -4859,6 +4860,17 @@ ipcMain.on('window:unfold', (event) => {
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
   app.quit()
+}
+
+// Cap V8's heap growth in the renderers: a fixed 1.3 factor instead of the default of up
+// to x4, which let Blink's heap balloon while navigating (why and numbers in v8Flags.ts).
+// Has to run before 'ready', and only reaches the renderers: this process initialised its
+// V8 before loading this file. After the lock and only when we hold it: a process that
+// loses it has already forwarded its command line to the owner ('second-instance'), whose
+// relaunch keeps unknown switches (secondInstanceRelaunchArgs) — appended here, ours never
+// travels in that argv.
+if (gotTheLock) {
+  app.commandLine.appendSwitch('js-flags', rendererJsFlags(app.commandLine.getSwitchValue('js-flags')))
 }
 
 app.whenReady().then(async () => {
