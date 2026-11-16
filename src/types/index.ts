@@ -509,6 +509,7 @@ export interface CliConnectStatus {
 export type CliConnectError =
   | 'cliMissing' | 'notSignedIn' | 'notConnected' | 'noRepo' | 'mismatch'
   | 'invalidCode' | 'rateLimited' | 'network' | 'failed'
+  | 'originChoicePending' // the backend's origin choice is pending: the app syncs nothing with it yet
 
 // detail = the CLI's own error line (English, shown verbatim like GitHub API errors).
 export type CliConnectResult =
@@ -567,6 +568,18 @@ export interface CloudSyncStatus {
   conflictCopies?: ConflictCopiesNotice
   /** Notes the Cloud pull merged WITH conflict blocks (both versions kept in the note, between ⚠️ markers), until dismissed. */
   conflictMerges?: ConflictCopiesNotice
+  /**
+   * Present while the origin choice is pending: the notes on this device came
+   * from another NoteFlow account (or, `stale`, from GitHub — `staleFrom`) —
+   * nothing syncs until the user chooses. Mirror of CloudOriginChoice in electron/cloudSync.ts.
+   */
+  originChoice?: {
+    previous: { userId: string; email?: string }
+    next: { userId: string; email?: string }
+    stale?: true
+    staleFrom?: { owner: string; repo: string }
+    githubConnected?: true
+  }
 }
 
 // Per-section version history of NoteFlow Cloud — mirror of
@@ -662,9 +675,12 @@ export interface ActiveSyncStatus {
   conflictMerges?: ConflictCopiesNotice
   /**
    * The notes dir came from another remote of the live backend and holds notes:
-   * nothing syncs until the user chooses (OriginChoiceDialog). Labels — GitHub: 'owner/repo'.
+   * nothing syncs until the user chooses (OriginChoiceDialog). Labels — GitHub:
+   * 'owner/repo'; Cloud: the account email. '' = unknown (shown as a generic
+   * text). `stale`: the notes came from the other backend (`previous` names it).
+   * `disconnectsGithub` (Cloud): 'replace' disconnects GitHub Sync.
    */
-  originChoice?: { previous: string; next: string }
+  originChoice?: { previous: string; next: string; stale?: true; disconnectsGithub?: true }
   github?: { owner?: string; repo?: string }
   cloud?: {
     keysState: CloudSyncStatus['keysState']
@@ -817,7 +833,7 @@ declare global {
       parseExternalImport: (source: ImportSource) => Promise<{ ok: boolean; source?: ImportSource; notes?: ExternalNote[]; error?: string; canceled?: boolean }>
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
       // GitHub Sync
-      getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed'; conflictCopies?: ConflictCopiesNotice; conflictMerges?: ConflictCopiesNotice; originChoice?: { previous: { owner: string; repo: string }; next: { owner: string; repo: string } } }>
+      getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed'; conflictCopies?: ConflictCopiesNotice; conflictMerges?: ConflictCopiesNotice; originChoice?: { previous: { owner: string; repo: string }; next: { owner: string; repo: string }; stale?: true; staleFrom?: { email?: string } } }>
       // Backend-tagged status of the live sync provider — drives the titlebar sync button.
       getActiveSyncStatus: () => Promise<ActiveSyncStatus>
       // Clears the session notice of conflict copies made by either backend's pull (titlebar sync card).
@@ -829,6 +845,8 @@ declare global {
       // (local notes moved to a local archive, never deleted) / cancel (= disconnect).
       // error 'archive-failed' (+ detail): nothing was pulled, the choice stays pending.
       resolveGithubOrigin: (choice: OriginChoiceAction) => Promise<{ ok: boolean; error?: string; detail?: string }>
+      // Same for NoteFlow Cloud (notes from another account): cancel = Cloud sync off (still signed in).
+      resolveCloudOrigin: (choice: OriginChoiceAction) => Promise<{ ok: boolean; error?: string; detail?: string }>
       // Local archives of notes set aside by "use only the remote's notes" (userData/notes-archive).
       getNotesArchiveStatus: () => Promise<{ hasArchives: boolean }>
       openNotesArchive: () => Promise<{ ok: boolean }>
@@ -871,6 +889,7 @@ declare global {
         updatedFiles: string[]
         hadDeletions: boolean
         hadMetadataChanges: boolean
+        error?: 'origin-choice-pending'
       }>
       onSyncAuthComplete: (cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string; pendingOriginChoice?: boolean }) => void) => () => void
       onSyncPushState: (cb: (state: 'pushing' | 'idle') => void) => () => void
@@ -907,6 +926,7 @@ declare global {
       cloudEnable: () => Promise<{ ok: boolean; error?: string }>
       cloudDisable: () => Promise<{ ok: boolean }>
       // Manual Cloud sync ("Sync now"): a full cycle — pull, then journal drain.
+      // error 'origin-choice-pending': nothing synced, the origin choice comes first.
       cloudPull: () => Promise<{
         pulled: number
         deleted: number
@@ -914,6 +934,7 @@ declare global {
         updatedFiles: string[]
         hadDeletions: boolean
         hadMetadataChanges: boolean
+        error?: 'origin-choice-pending'
       }>
       // Per-section version history. Restoring = a normal edit from the renderer (after a snapshot).
       cloudListVersions: (target: CloudVersionTarget) => Promise<CloudVersionsListResult>

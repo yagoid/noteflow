@@ -10,6 +10,7 @@ import { CloudPanel } from './CloudPanel'
 import { PlanTag } from './PlanOffers'
 import { useOfferTag } from './planOffersShared'
 import { hasKnownEntitlement } from '../../lib/subscriptionPlans'
+import { originChoiceLabels } from '../../lib/originChoiceLabels'
 import type { SettingsIntent } from './SettingsModal'
 import { settingsButtonClass } from './ui'
 
@@ -21,7 +22,13 @@ interface SyncStatus {
   lastSync?: string
   error?: string
   // The notes dir came from another remote: nothing syncs until the user chooses.
-  originChoice?: { previous: { owner: string; repo: string }; next: { owner: string; repo: string } }
+  // stale: the notes came from NoteFlow Cloud (staleFrom.email names the account).
+  originChoice?: {
+    previous: { owner: string; repo: string }
+    next: { owner: string; repo: string }
+    stale?: true
+    staleFrom?: { email?: string }
+  }
 }
 
 type Step = 'idle' | 'waiting-auth' | 'completing' | 'pulling' | 'mirroring'
@@ -156,7 +163,11 @@ export function SyncPanel({ intent }: { intent?: SettingsIntent }) {
 
       <section>
         {backend === 'cloud' ? (
-          <CloudPanel initialBundle={offer === 'bundle'} />
+          <div className="space-y-4">
+            <CloudOriginNotice />
+            <CloudPanel initialBundle={offer === 'bundle'} />
+            <LocalCopies />
+          </div>
         ) : (
           <div className="space-y-4">
             {/* Paused while NoteFlow Cloud owns the sync loop (config is kept). */}
@@ -176,6 +187,82 @@ export function SyncPanel({ intent }: { intent?: SettingsIntent }) {
       {(backend === 'cloud' ? cloudEnabled && cloudSignedIn : githubConnected) && (
         <CliConnectSection key={backend} backend={backend} />
       )}
+    </div>
+  )
+}
+
+// The notes on this device came from another remote: paused until the user
+// chooses (the dialog lives in the titlebar — it also opens on its own; the
+// button reopens it). Shared by both backends' panels.
+function OriginPendingNotice({ text }: { text: string }) {
+  const t = useT()
+  return (
+    <div className="flex items-start gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
+      <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
+      <div className="flex-1 space-y-1.5">
+        <p>{text}</p>
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new CustomEvent('noteflow:open-origin-choice'))}
+          className="px-2 py-0.5 rounded border border-yellow-500/40 hover:bg-yellow-500/20 transition-colors"
+        >
+          {t.settings.sync.originChoose}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// NoteFlow Cloud's pending origin choice (the notes came from another account,
+// or GitHub's "Use only the notes from …" replaced them). Read from the active
+// status, which already carries the labels — Cloud only asks while enabled,
+// and enabled Cloud is the active backend.
+function CloudOriginNotice() {
+  const t = useT()
+  const [choice, setChoice] = useState<{ previous: string; next: string } | null>(null)
+  useEffect(() => {
+    const refresh = () => {
+      window.noteflow.getActiveSyncStatus().then((s) => {
+        setChoice(s.backend === 'cloud' && s.originChoice ? originChoiceLabels(t.originChoice, 'cloud', s.originChoice) : null)
+      }).catch(() => undefined)
+    }
+    refresh()
+    return window.noteflow.onCloudStatusChanged(refresh)
+  }, [t])
+  if (!choice) return null
+  return <OriginPendingNotice text={tf(t.settings.sync.cloudOriginPending, choice)} />
+}
+
+// Local copies of notes set aside by "Use only the notes from …" (either
+// backend — userData/notes-archive): shown once there is at least one.
+function LocalCopies() {
+  const t = useT()
+  const [hasArchives, setHasArchives] = useState(false)
+  useEffect(() => {
+    const refresh = () => {
+      window.noteflow.getNotesArchiveStatus().then((s) => setHasArchives(s.hasArchives)).catch(() => undefined)
+    }
+    refresh()
+    // A choice made elsewhere (the titlebar dialog) may have just created one.
+    const offSync = window.noteflow.onSyncStatusChanged(refresh)
+    const offCloud = window.noteflow.onCloudStatusChanged(refresh)
+    return () => {
+      offSync()
+      offCloud()
+    }
+  }, [])
+  if (!hasArchives) return null
+  return (
+    <div className="flex items-center gap-3 pt-1">
+      <p className="flex-1 text-[11px] font-mono text-text-muted leading-relaxed">{t.settings.sync.archivesDesc}</p>
+      <button
+        type="button"
+        onClick={() => void window.noteflow.openNotesArchive()}
+        className="flex items-center gap-1.5 flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text transition-colors"
+      >
+        <FolderOpen size={11} />
+        {t.settings.sync.openArchives}
+      </button>
     </div>
   )
 }
@@ -335,13 +422,10 @@ function GitHubSyncSection({
   const [pullResult, setPullResult] = useState<{ pulled: number; errors: string[] } | null>(null)
   const [mirrorResult, setMirrorResult] = useState<MirrorResult | null>(null)
   const [confirmMirror, setConfirmMirror] = useState(false)
-  // Local copies made by "Use only the notes from …" exist (userData/notes-archive).
-  const [hasArchives, setHasArchives] = useState(false)
 
   useEffect(() => {
     const refresh = () => {
       window.noteflow.getSyncStatus().then(setStatus)
-      window.noteflow.getNotesArchiveStatus().then((s) => setHasArchives(s.hasArchives)).catch(() => undefined)
     }
     refresh()
     // Origin choice made (or pending) elsewhere — the titlebar dialog, a restart.
@@ -509,26 +593,21 @@ function GitHubSyncSection({
       )}
 
       {/* The notes dir came from another remote: paused until the user chooses
-          (the dialog lives in the titlebar — it also opens on its own). */}
+          (the dialog lives in the titlebar — it also opens on its own). A
+          stale origin: the notes came from NoteFlow Cloud — named by its account. */}
       {status?.originChoice && (
-        <div className="flex items-start gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
-          <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
-          <div className="flex-1 space-y-1.5">
-            <p>
-              {tf(t.settings.sync.originPending, {
-                previous: `${status.originChoice.previous.owner}/${status.originChoice.previous.repo}`,
-                next: `${status.originChoice.next.owner}/${status.originChoice.next.repo}`,
-              })}
-            </p>
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('noteflow:open-origin-choice'))}
-              className="px-2 py-0.5 rounded border border-yellow-500/40 hover:bg-yellow-500/20 transition-colors"
-            >
-              {t.settings.sync.originChoose}
-            </button>
-          </div>
-        </div>
+        <OriginPendingNotice
+          text={tf(
+            t.settings.sync.originPending,
+            originChoiceLabels(t.originChoice, 'github', {
+              previous: status.originChoice.stale
+                ? status.originChoice.staleFrom?.email ?? ''
+                : `${status.originChoice.previous.owner}/${status.originChoice.previous.repo}`,
+              next: `${status.originChoice.next.owner}/${status.originChoice.next.repo}`,
+              stale: status.originChoice.stale === true,
+            }),
+          )}
+        />
       )}
 
       {/* Error */}
@@ -711,19 +790,7 @@ function GitHubSyncSection({
       )}
 
       {/* Local copies of notes set aside by "Use only the notes from …" */}
-      {hasArchives && (
-        <div className="flex items-center gap-3 pt-1">
-          <p className="flex-1 text-[11px] font-mono text-text-muted leading-relaxed">{t.settings.sync.archivesDesc}</p>
-          <button
-            type="button"
-            onClick={() => void window.noteflow.openNotesArchive()}
-            className="flex items-center gap-1.5 flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text transition-colors"
-          >
-            <FolderOpen size={11} />
-            {t.settings.sync.openArchives}
-          </button>
-        </div>
-      )}
+      <LocalCopies />
 
       {/* Loading spinner for initial status fetch */}
       {!status && (

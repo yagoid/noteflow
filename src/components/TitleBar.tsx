@@ -83,7 +83,9 @@ export function TitleBar() {
     }
   }, [])
 
-  const choiceKey = syncStatus.originChoice ? `${syncStatus.backend}|${syncStatus.originChoice.previous}|${syncStatus.originChoice.next}` : null
+  const choiceKey = syncStatus.originChoice
+    ? `${syncStatus.backend}|${syncStatus.originChoice.stale ? 'stale' : ''}|${syncStatus.originChoice.previous}|${syncStatus.originChoice.next}`
+    : null
   const originDialogOpen = choiceKey !== null && dismissedChoiceKey !== choiceKey
   const reopenOriginChoice = () => setDismissedChoiceKey(null)
 
@@ -93,7 +95,7 @@ export function TitleBar() {
     return () => window.removeEventListener('noteflow:open-origin-choice', openOriginChoice)
   }, [])
 
-  // Only GitHub asks today (NoteFlow Cloud will reuse the dialog with its own IPC).
+  // Routed to the backend that asks (the live one: GitHub, or NoteFlow Cloud when enabled).
   const resolveOrigin = async (choice: OriginChoiceAction): Promise<{ ok: boolean; error?: string }> => {
     // Pending editor saves land first: "replace" moves the notes as they are on disk.
     if (choice !== 'cancel') {
@@ -102,7 +104,9 @@ export function TitleBar() {
         new Promise((resolve) => setTimeout(resolve, 2000)),
       ])
     }
-    const res = await window.noteflow.resolveGithubOrigin(choice)
+    const res = syncStatus.backend === 'cloud'
+      ? await window.noteflow.resolveCloudOrigin(choice)
+      : await window.noteflow.resolveGithubOrigin(choice)
     // Resolved → the refreshed status has no originChoice and the dialog closes.
     await refreshSyncStatus()
     return res
@@ -311,6 +315,8 @@ export function TitleBar() {
         backend={syncStatus.backend}
         previousLabel={syncStatus.originChoice.previous}
         nextLabel={syncStatus.originChoice.next}
+        stale={syncStatus.originChoice.stale === true}
+        disconnectsGithub={syncStatus.originChoice.disconnectsGithub === true}
         onResolve={resolveOrigin}
         onClose={() => setDismissedChoiceKey(choiceKey)}
       />

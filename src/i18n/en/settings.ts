@@ -225,8 +225,11 @@ export const settings = {
     originPending: 'Paused — the notes on this device came from {previous}. Nothing syncs with {next} until you choose how to continue.',
     originChoose: 'Choose…',
     pullOriginPending: 'Nothing was synced: choose first what to do with the notes on this device.',
+    // NoteFlow Cloud (Settings → Sync → NoteFlow Cloud): the notes came from another account
+    // ({previous}: its email or a generic text; {next}: the signed-in account).
+    cloudOriginPending: 'Paused — the notes on this device came from {previous}. Nothing syncs with {next} until you choose how to continue.',
     // Local copies made by "Use only the notes from …" (userData/notes-archive).
-    archivesDesc: 'Notes set aside when you switched to another repository are kept in a folder on this computer.',
+    archivesDesc: 'Notes set aside when you switched to another repository or account are kept in a folder on this computer.',
     openArchives: 'Open local copies',
     // Deletions are skipped whenever a local file can't be read: an incomplete
     // local snapshot would make live notes look deleted.
@@ -273,7 +276,10 @@ export const settings = {
         rateLimited: 'Too many attempts — wait a moment and try again.',
         network: 'Could not reach the server. Check your connection and try again.',
         failed: 'Could not complete the operation on the CLI.',
+        originChoicePending: "Choose first what to do with the notes on this device (Settings → Sync). Until then the app syncs nothing, and the CLI can't be connected either.",
       },
+      // Shown instead of the button while the backend's origin choice is pending.
+      originPending: 'Available once you choose what to do with the notes on this device.',
     },
   },
 

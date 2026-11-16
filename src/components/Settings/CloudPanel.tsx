@@ -215,8 +215,15 @@ export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean 
     setBusy('pull')
     setError(null)
     const result = await window.noteflow.cloudPull()
-    setPullResult({ pulled: result.pulled, errors: result.errors })
     setBusy('idle')
+    // Nothing synced: the notes on this device came from another account — the
+    // choice comes first (the notice above reopens it).
+    if (result.error === 'origin-choice-pending') {
+      setPullResult(null)
+      setError(t.settings.sync.pullOriginPending)
+      return
+    }
+    setPullResult({ pulled: result.pulled, errors: result.errors })
     if (result.pulled > 0) await loadNotes()
   }
 

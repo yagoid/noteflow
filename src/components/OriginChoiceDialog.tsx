@@ -3,14 +3,19 @@ import { ArrowRight, Loader, X } from 'lucide-react'
 import { useT } from '../i18n/useT'
 import { tf } from '../i18n/format'
 import type { OriginChoiceAction } from '../types'
+import { originChoiceLabels } from '../lib/originChoiceLabels'
 
 export interface OriginChoiceDialogProps {
-  /** Which sync backend asks — only changes the labels of the two remotes. */
+  /** Which sync backend asks — its labels, and Cloud's "cancel" (Cloud off, not a disconnect). */
   backend: 'github' | 'cloud'
-  /** The remote the notes on this device came from (GitHub: 'owner/repo'). */
+  /** The remote the notes on this device came from (GitHub: 'owner/repo'; Cloud: email). '' = unknown. */
   previousLabel: string
-  /** The remote just connected. */
+  /** The remote just connected (Cloud: the signed-in account's email). */
   nextLabel: string
+  /** The notes came from the OTHER sync ("use only the notes from …" there): another intro. */
+  stale?: boolean
+  /** Cloud: "use only the account's notes" also disconnects GitHub Sync — said in that option. */
+  disconnectsGithub?: boolean
   /**
    * Applies the choice. `error: 'archive-failed'` = the local notes could not be
    * set aside: nothing was downloaded and the choice stays pending.
@@ -27,12 +32,22 @@ const OPTIONS: OriginChoiceAction[] = ['merge', 'replace', 'cancel']
 /**
  * The notes dir came from another remote than the one just connected (see
  * electron/syncOrigin.ts): merge, use only the remote's notes (the local ones
- * move to a copy on this computer — never deleted) or cancel (disconnect).
- * Shared by GitHub Sync and, later, NoteFlow Cloud. Nothing is preselected and
+ * move to a copy on this computer — never deleted) or cancel (GitHub:
+ * disconnect; NoteFlow Cloud: Cloud off on this device, still signed in).
+ * Shared by GitHub Sync and NoteFlow Cloud. Nothing is preselected and
  * nothing destructive has the focus: the user picks an option, then Continue.
  * Escape / "Decide later" only close the dialog.
  */
-export function OriginChoiceDialog({ backend, previousLabel, nextLabel, onResolve, onClose, busy: externalBusy }: OriginChoiceDialogProps) {
+export function OriginChoiceDialog({
+  backend,
+  previousLabel,
+  nextLabel,
+  stale = false,
+  disconnectsGithub = false,
+  onResolve,
+  onClose,
+  busy: externalBusy,
+}: OriginChoiceDialogProps) {
   const t = useT()
   const m = t.originChoice
   const [selected, setSelected] = useState<OriginChoiceAction | null>(null)
@@ -60,11 +75,16 @@ export function OriginChoiceDialog({ backend, previousLabel, nextLabel, onResolv
   }, [busy, onClose])
 
   const backendLabel = backend === 'cloud' ? m.backendCloud : m.backendGithub
-  const vars = { previous: previousLabel, next: nextLabel }
+  const labels = originChoiceLabels(m, backend, { previous: previousLabel, next: nextLabel, stale })
+  const vars = { previous: labels.previous, next: labels.next }
+  const replaceDesc = tf(m.replaceDesc, vars)
   const optionText: Record<OriginChoiceAction, { title: string; desc: string }> = {
     merge: { title: m.merge, desc: tf(m.mergeDesc, vars) },
-    replace: { title: tf(m.replace, vars), desc: tf(m.replaceDesc, vars) },
-    cancel: { title: m.cancel, desc: tf(m.cancelDesc, vars) },
+    replace: {
+      title: tf(m.replace, vars),
+      desc: backend === 'cloud' && disconnectsGithub ? `${replaceDesc} ${m.replaceDisconnectsGithub}` : replaceDesc,
+    },
+    cancel: { title: m.cancel, desc: backend === 'cloud' ? m.cancelDescCloud : tf(m.cancelDesc, vars) },
   }
 
   const apply = async () => {
@@ -110,18 +130,18 @@ export function OriginChoiceDialog({ backend, previousLabel, nextLabel, onResolv
         </div>
 
         <div className="px-4 py-3 space-y-3">
-          <p className="text-xs font-mono text-text-muted leading-relaxed">{m.intro}</p>
+          <p className="text-xs font-mono text-text-muted leading-relaxed">{stale ? tf(m.introStale, vars) : m.intro}</p>
 
           {/* Previous → new remote */}
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-solid border-border bg-surface-0 text-[11px] font-mono">
             <div className="min-w-0 flex-1">
               <div className="text-text-muted">{m.previousLabel}</div>
-              <div className="text-text truncate" title={previousLabel}>{previousLabel}</div>
+              <div className="text-text truncate" title={labels.previous}>{labels.previous}</div>
             </div>
             <ArrowRight size={12} className="flex-shrink-0 text-text-muted" />
             <div className="min-w-0 flex-1">
               <div className="text-text-muted">{m.nextLabel}</div>
-              <div className="text-text truncate" title={nextLabel}>{nextLabel}</div>
+              <div className="text-text truncate" title={labels.next}>{labels.next}</div>
             </div>
           </div>
           <p className="text-[10px] font-mono text-text-muted/70 -mt-1.5">{backendLabel}</p>

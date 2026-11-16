@@ -34,6 +34,10 @@ export function CliConnectSection({ backend }: { backend: 'cloud' | 'github' }) 
   const [error, setError] = useState<{ message: string; detail?: string } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [confirmGithub, setConfirmGithub] = useState(false)
+  // The backend's origin choice is pending (the notes on this device came from
+  // another remote): the app syncs nothing with it, so the CLI can't be
+  // connected either (main refuses too — 'originChoicePending').
+  const [originPending, setOriginPending] = useState(false)
   const codeInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -49,6 +53,25 @@ export function CliConnectSection({ backend }: { backend: 'cloud' | 'github' }) 
       })
     }
     return () => { alive = false }
+  }, [backend])
+
+  useEffect(() => {
+    let alive = true
+    const refresh = () => {
+      if (backend === 'cloud') {
+        window.noteflow.getCloudStatus().then((c) => { if (alive) setOriginPending(!!c.originChoice) })
+      } else {
+        window.noteflow.getSyncStatus().then((s) => { if (alive) setOriginPending(!!s.originChoice) })
+      }
+    }
+    refresh()
+    const off = backend === 'cloud'
+      ? window.noteflow.onCloudStatusChanged(refresh)
+      : window.noteflow.onSyncStatusChanged(refresh)
+    return () => {
+      alive = false
+      off()
+    }
   }, [backend])
 
   useEffect(() => {
@@ -185,18 +208,24 @@ export function CliConnectSection({ backend }: { backend: 'cloud' | 'github' }) 
           </div>
         )}
 
-        {/* ── Not connected: the button ── */}
+        {/* ── Not connected: the button (disabled while the origin choice is pending) ── */}
         {!cli.connected && status.available && !codeStep && (
-          <button
-            onClick={() => (backend === 'cloud' ? handleSendCode(false) : setConfirmGithub(true))}
-            disabled={busy || !appTarget}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
-          >
-            {step === 'sending' || step === 'connecting'
-              ? <Loader size={11} className="animate-spin" />
-              : <Terminal size={11} />}
-            {tc.connect}
-          </button>
+          <div className="space-y-1.5">
+            <button
+              onClick={() => (backend === 'cloud' ? handleSendCode(false) : setConfirmGithub(true))}
+              disabled={busy || !appTarget || originPending}
+              title={originPending ? tc.originPending : undefined}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
+            >
+              {step === 'sending' || step === 'connecting'
+                ? <Loader size={11} className="animate-spin" />
+                : <Terminal size={11} />}
+              {tc.connect}
+            </button>
+            {originPending && (
+              <p className="text-[11px] font-mono text-text-muted leading-relaxed">{tc.originPending}</p>
+            )}
+          </div>
         )}
 
         {/* ── Cloud, step 2: the emailed code ── */}
