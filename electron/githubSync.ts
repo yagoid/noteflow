@@ -990,16 +990,29 @@ function liveStateRemote(): GithubStateRemote | null {
   return { ...(typeof s.repoId === 'number' ? { repoId: s.repoId } : {}), owner: s.owner, repo: s.repo }
 }
 
+/**
+ * The stamp brought up to date with the live connection when both are the
+ * same repo (sameIdentity): live owner/repo, live repoId (a known one is never
+ * dropped). Another repo, or nothing to change → null.
+ */
+function refreshedStamp(stamp: GithubStateRemote, live: GithubStateRemote): GithubStateRemote | null {
+  if (!sameIdentity({ kind: 'github', ...stamp }, { kind: 'github', ...live })) return null
+  const repoId = live.repoId ?? stamp.repoId
+  const next: GithubStateRemote = { ...(repoId !== undefined ? { repoId } : {}), owner: live.owner, repo: live.repo }
+  return next.repoId === stamp.repoId && next.owner === stamp.owner && next.repo === stamp.repo ? null : next
+}
+
 function persistState(): void {
   const state = getState()
   // A state without the stamp (an earlier build's, or emptied while
   // disconnected) belongs to the live connection — see SyncState.githubRemote.
-  // An existing stamp is never rewritten here: a state of another repo is
-  // discarded by ensureStateOfConnection, not relabelled.
-  if (!state.githubRemote) {
-    const remote = liveStateRemote()
-    if (remote) state.githubRemote = remote
-  }
+  // A stamp of the SAME repo (sameIdentity) is brought up to date — a repoId
+  // it lacked, or the new owner/repo of a rename/transfer (same repoId) — so a
+  // later rename can't make a legitimate journal look like another repo's. A
+  // stamp of another repo is never relabelled: ensureStateOfConnection
+  // discards that state.
+  const remote = liveStateRemote()
+  if (remote) state.githubRemote = state.githubRemote ? refreshedStamp(state.githubRemote, remote) ?? state.githubRemote : remote
   try {
     fs.writeFileSync(getSyncStatePath(), serializeSyncState(state), 'utf-8')
   } catch (err) {
@@ -1270,8 +1283,13 @@ function adoptGithubOrigin(id: Extract<SyncIdentity, { kind: 'github' }>, resetR
     delete next.remoteFormatMigratedAt
     syncSettings = next
   }
-  // No reset: a state without the stamp belongs to this repo — record it now.
-  if (!resetRemote && !getState().githubRemote) persistState()
+  // No reset: a state without the stamp belongs to this repo — record it now (and
+  // bring a stamp of this same repo up to date: repoId, renamed owner/repo).
+  if (!resetRemote) {
+    const stamp = getState().githubRemote
+    const live = liveStateRemote()
+    if (!stamp || (live && refreshedStamp(stamp, live))) persistState()
+  }
   return true
 }
 

@@ -686,6 +686,29 @@ describe('sync-state.json belongs to one repo (switched behind the app by the CL
     expect(readSettings().githubSync.lastSync).toBe(OLD_LAST_SYNC)
   })
 
+  it('a stamp of the same repo is completed (repoId) and follows a rename, so the journal is kept', async () => {
+    writeLocal('mine-1111', files('1111'))
+    addRepo('notes-b', 202)
+    fs.writeFileSync(statePath(), JSON.stringify({
+      version: 1,
+      ops: { 'mine-1111/note.md': { op: 'upsert', queuedAt: OLD_LAST_SYNC, attempts: 1 } },
+      shas: {},
+      githubRemote: { owner: 'me', repo: 'notes-b' }, // stamped before the repoId was known
+    }))
+    const connection = { enabled: true, encryptedToken: Buffer.from('tok').toString('base64'), owner: 'me', repo: 'notes-b', repoId: 202 }
+    writeSettings({ githubSync: connection, syncOrigin: { github: { repoId: 202, owner: 'me', repo: 'notes-b' } } })
+    await freshModule()
+    gh.loadSyncSettings()
+    expect(readState().githubRemote).toEqual({ repoId: 202, owner: 'me', repo: 'notes-b' })
+    // Renamed on GitHub (same repoId): not another repo — the journal stays, the stamp follows.
+    writeSettings({ ...readSettings(), githubSync: { ...connection, repo: 'notes-renamed' } })
+    await freshModule()
+    gh.loadSyncSettings()
+    expect(gh.isOriginGateBlocked()).toBe(false)
+    expect(Object.keys(readState().ops)).toEqual(['mine-1111/note.md'])
+    expect(readState().githubRemote).toEqual({ repoId: 202, owner: 'me', repo: 'notes-renamed' })
+  })
+
   it('a state that cannot be discarded keeps the gate closed', async () => {
     stateOfAWithCliSwitchToB(true)
     env.failSettingsWrites = true
