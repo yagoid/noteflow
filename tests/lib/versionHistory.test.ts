@@ -4,6 +4,7 @@ import {
   buildVersionDiff,
   decideHistoryPanelState,
   formatByteSize,
+  formatVersionDate,
   groupVersionsByDay,
   isEmptyVersion,
   planRestoreAfterSnapshot,
@@ -11,6 +12,7 @@ import {
   shouldListVersions,
   snapshotFailureKey,
   versionReasonTag,
+  versionTimeRange,
   type VersionDiffRow,
 } from '../../src/lib/versionHistory'
 import { diffSequencesWithStatus, diffSequences } from '../../src/lib/externalContentSync'
@@ -102,6 +104,53 @@ describe('restoredSectionName', () => {
   })
   it('a name with braces is kept as is', () => {
     expect(restoredSectionName('{date}', at, { template: '{name} ({date})', dateFormat: 'HH:mm' })).toBe('{date} (13:50)')
+  })
+})
+
+describe('versionTimeRange', () => {
+  const en = { timeFormat: 'HH:mm', otherDayFormat: 'MMM d, HH:mm' }
+  const esOpts = { timeFormat: 'HH:mm', otherDayFormat: 'd MMM HH:mm', locale: es }
+
+  it('same local day: two times', () => {
+    expect(versionTimeRange(local(2026, 11, 16, 11, 25), local(2026, 11, 16, 16, 13), en))
+      .toEqual({ from: '11:25', to: '16:13', sameDay: true })
+  })
+
+  it('replaced on another local day: the replaced side carries the localized date', () => {
+    const edited = local(2026, 11, 15, 18, 2)
+    const saved = local(2026, 11, 16, 9, 0)
+    expect(versionTimeRange(edited, saved, en)).toEqual({ from: '18:02', to: 'Nov 16, 09:00', sameDay: false })
+    expect(versionTimeRange(edited, saved, esOpts)).toEqual({ from: '18:02', to: '16 nov 09:00', sameDay: false })
+  })
+
+  it('midnight is the boundary, in local time', () => {
+    expect(versionTimeRange(local(2026, 11, 15, 23, 59), local(2026, 11, 16, 0, 0), en))
+      .toEqual({ from: '23:59', to: 'Nov 16, 00:00', sameDay: false })
+    expect(versionTimeRange(local(2026, 11, 16, 0, 0), local(2026, 11, 16, 23, 59), en))
+      .toEqual({ from: '00:00', to: '23:59', sameDay: true })
+  })
+
+  it('a missing or invalid savedAt shows only the written time', () => {
+    const edited = local(2026, 11, 16, 11, 25)
+    for (const saved of [undefined, null, '', 'not a date']) {
+      expect(versionTimeRange(edited, saved, en)).toEqual({ from: '11:25', to: null, sameDay: true })
+    }
+  })
+
+  it('an invalid editedAt never throws', () => {
+    expect(versionTimeRange('garbage', local(2026, 11, 16, 16, 13), en)).toEqual({ from: '', to: 'Nov 16, 16:13', sameDay: false })
+  })
+})
+
+describe('formatVersionDate', () => {
+  it('formats a valid ISO date, localized', () => {
+    expect(formatVersionDate(local(2026, 11, 16, 16, 13), 'd MMM HH:mm', es)).toBe('16 nov 16:13')
+  })
+  it('null for missing or unparsable dates', () => {
+    expect(formatVersionDate(undefined, 'HH:mm')).toBeNull()
+    expect(formatVersionDate(null, 'HH:mm')).toBeNull()
+    expect(formatVersionDate('', 'HH:mm')).toBeNull()
+    expect(formatVersionDate('nope', 'HH:mm')).toBeNull()
   })
 })
 

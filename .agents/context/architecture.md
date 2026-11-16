@@ -312,8 +312,9 @@ noteflow/
 │   │   ├── encryptedSession.ts   # Re-descifrado con la contraseña de sesión tras recargar + guarda
 │   │   │                         #   anti-borrado de escrituras de notas cifradas — testeado
 │   │   ├── sectionUtils.ts       # Operaciones puras sobre la lista de secciones (patch/move/duplicate/restore)
-│   │   ├── versionHistory.ts     # Historial de versiones: agrupado por días, diff por líneas, nombre de la
-│   │   │                         #   sección restaurada, estado del panel, plan tras la captura — testeado
+│   │   ├── versionHistory.ts     # Historial de versiones: agrupado por días, horas escrita → reemplazada,
+│   │   │                         #   diff por líneas, nombre de la sección restaurada, estado del panel,
+│   │   │                         #   plan tras la captura — testeado
 │   │   ├── sectionRestore.ts     # Marca de "restauración forzada" por ventana: el editor aplica la versión
 │   │   │                         #   como sustitución exacta y un paso propio de Ctrl+Z (ver patterns.md) — testeado
 │   │   ├── sectionMap.ts         # Mapa de secciones del editor: simulación del wrap/plegado, lado de caída

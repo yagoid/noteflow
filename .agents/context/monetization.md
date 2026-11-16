@@ -2357,6 +2357,10 @@ Coste: como mucho una escritura extra cada 10 min por fichero (más los `delete`
   `cloudSync.flushPathForSnapshot` (ver `sync.md`). Leer no exige `cloudSync.enabled`; capturar, sí.
   Panel en `src/components/VersionHistory/` (lógica pura en `src/lib/versionHistory.ts`;
   restauración en `src/lib/sectionRestore.ts`, ver `patterns.md`). UX en la skill `noteflow-features`.
+  Cada versión muestra **las dos horas**, `editedAt → savedAt` (`versionTimeRange`): solo `editedAt`
+  confundía, porque la versión creada al editar a las 16:13 lleva la hora en que se escribió el texto
+  **anterior** (p. ej. 11:25). La agrupación por días y el nombre de "Restore as new section" siguen
+  usando `editedAt`.
 - **CLI** (v2.13.0): `noteflow history <título> [sección] [--show n | --restore n [--force]
   [--dry-run]] [--json]` (ver `patterns.md` § CLI). Si no consigue capturar antes, no restaura salvo
   con `--force`.

@@ -10,6 +10,10 @@ export const versionHistory = {
   yesterday: 'Ayer',
   dayFormat: "EEE d 'de' MMM",
   timeFormat: 'HH:mm',
+  replacedOtherDayFormat: 'd MMM HH:mm',
+  rowWritten: 'Escrita a las {from}',
+  rowWrittenReplaced: 'Escrita a las {from}, reemplazada a las {to}',
+  rowWrittenReplacedOtherDay: 'Escrita a las {from}, reemplazada el {to}',
   reason: {
     shrink: 'Antes de un recorte grande',
     delete: 'Antes de borrarla',
@@ -33,6 +37,7 @@ export const versionHistory = {
   versionExpiredHint: 'Las versiones se guardan 30 días. La lista se ha actualizado.',
   versionFailed: 'No se pudo abrir esta versión',
   editedAt: 'Escrita {date}',
+  replacedAt: 'reemplazada {date}',
 
   reassurance: '30 días de historial · cifrado igual que tus notas',
   copy: 'Copiar',

@@ -11,8 +11,14 @@ export const versionHistory = {
   yesterday: 'Yesterday',
   // date-fns pattern of a day header older than yesterday ("Nov 12").
   dayFormat: 'EEE, MMM d',
-  // date-fns pattern of a version's time in its row.
+  // date-fns pattern of a version's time in its row: "{written} → {replaced}".
   timeFormat: 'HH:mm',
+  // date-fns pattern of the replaced side when it falls on another day ("11:25 → Nov 16, 09:00").
+  replacedOtherDayFormat: 'MMM d, HH:mm',
+  // Accessible name / tooltip of a row. {from} / {to} are the two sides of the span above.
+  rowWritten: 'Written {from}',
+  rowWrittenReplaced: 'Written {from}, replaced {to}',
+  rowWrittenReplacedOtherDay: 'Written {from}, replaced {to}',
   reason: {
     shrink: 'Before a big cut',
     delete: 'Before it was deleted',
@@ -37,6 +43,8 @@ export const versionHistory = {
   versionExpiredHint: 'Versions are kept for 30 days. The list has been refreshed.',
   versionFailed: 'Couldn’t open this version',
   editedAt: 'Written {date}',
+  // Follows editedAt in the header: "Written Nov 16, 11:25 · replaced Nov 16, 16:13".
+  replacedAt: 'replaced {date}',
 
   // Footer.
   reassurance: '30 days of history · encrypted like your notes',

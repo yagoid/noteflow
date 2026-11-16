@@ -8,7 +8,7 @@ import {
   AlertTriangle, CloudOff, FileQuestion, History, KeyRound, Loader, Lock, RefreshCw, ShieldAlert, Sparkles, WifiOff,
 } from 'lucide-react'
 import { useT } from '../../i18n/useT'
-import { plural } from '../../i18n/format'
+import { plural, tf } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
 import { useLanguageStore } from '../../stores/languageStore'
 import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
@@ -18,6 +18,7 @@ import {
   formatByteSize,
   groupVersionsByDay,
   versionReasonTag,
+  versionTimeRange,
   type HistoryPanelState,
   type SnapshotFailureKey,
 } from '../../lib/versionHistory'
@@ -46,6 +47,7 @@ interface TimelineProps {
 export function VersionTimeline({ versions, selected, onSelect }: TimelineProps) {
   const t = useT()
   const lang = useLanguageStore((s) => s.lang)
+  const dateLocale = useLanguageStore((s) => s.dateLocale)
   const groups = useMemo(() => groupVersionsByDay(versions), [versions])
   const order = useMemo<HistorySelection[]>(() => ['current', ...versions.map((v) => v.id)], [versions])
   const optionRefs = useRef(new Map<HistorySelection, HTMLDivElement>())
@@ -82,7 +84,7 @@ export function VersionTimeline({ versions, selected, onSelect }: TimelineProps)
     if (row && idle) row.focus()
   }, [])
 
-  const option = (id: HistorySelection, children: ReactNode, label: string) => {
+  const option = (id: HistorySelection, children: ReactNode, label: string, title?: string) => {
     const isSelected = id === selected
     return (
       <div
@@ -91,6 +93,7 @@ export function VersionTimeline({ versions, selected, onSelect }: TimelineProps)
         role="option"
         aria-selected={isSelected}
         aria-label={label}
+        title={title}
         tabIndex={isSelected ? 0 : -1}
         onClick={() => move(id)}
         className={`group relative mx-2 px-2.5 py-1.5 rounded-md cursor-pointer outline-none transition-colors
@@ -128,18 +131,33 @@ export function VersionTimeline({ versions, selected, onSelect }: TimelineProps)
           <div key={group.key} role="group" aria-label={dayLabel} className="mt-2.5">
             <div className="px-4 pb-1 text-[10px] font-mono uppercase tracking-widest text-text-muted/80">{dayLabel}</div>
             {group.versions.map((v) => {
-              const time = formatDate(new Date(v.editedAt), t.versionHistory.timeFormat)
+              // Written → replaced: the version holds the text written at `from` until `to`.
+              const range = versionTimeRange(v.editedAt, v.savedAt, {
+                timeFormat: t.versionHistory.timeFormat,
+                otherDayFormat: t.versionHistory.replacedOtherDayFormat,
+                locale: dateLocale,
+              })
+              const spanLabel = range.to === null
+                ? tf(t.versionHistory.rowWritten, { from: range.from })
+                : tf(range.sameDay ? t.versionHistory.rowWrittenReplaced : t.versionHistory.rowWrittenReplacedOtherDay, {
+                  from: range.from,
+                  to: range.to,
+                })
               const tag = versionReasonTag(v.reason)
               return option(
                 v.id,
                 <div className="flex flex-col gap-0.5">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-xs font-mono tabular-nums">{time}</span>
-                    <span className="text-[10.5px] font-mono tabular-nums text-text-muted">{formatByteSize(v.size, lang)}</span>
+                    <span className="min-w-0 truncate text-xs font-mono tabular-nums">
+                      {range.from}
+                      {range.to !== null && <span className="text-text-muted"> → {range.to}</span>}
+                    </span>
+                    <span className="shrink-0 text-[10.5px] font-mono tabular-nums text-text-muted">{formatByteSize(v.size, lang)}</span>
                   </div>
                   {tag && <ReasonTag reason={tag} />}
                 </div>,
-                `${dayLabel} ${time}${tag ? ` · ${t.versionHistory.reason[tag]}` : ''}`,
+                `${dayLabel} · ${spanLabel}${tag ? ` · ${t.versionHistory.reason[tag]}` : ''}`,
+                spanLabel,
               )
             })}
           </div>

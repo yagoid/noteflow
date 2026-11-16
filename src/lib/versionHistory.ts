@@ -3,11 +3,11 @@
 // What the history panel (components/VersionHistory) shows and decides, kept out
 // of the component so it can be tested: grouping by local day, the reason tag,
 // the line diff against the current text with folded context, sizes, the name
-// of a version restored as a new section, which state the panel is in, and which
-// message explains a failed snapshot of the current text. No React, no DOM, no
-// IPC. Tests: tests/lib/versionHistory.test.ts.
+// of a version restored as a new section, the written → replaced time span of a
+// version, which state the panel is in, and which message explains a failed
+// snapshot of the current text. No React, no DOM, no IPC. Tests: tests/lib/versionHistory.test.ts.
 
-import { format, startOfDay, subDays, type Locale } from 'date-fns'
+import { format, isSameDay, startOfDay, subDays, type Locale } from 'date-fns'
 import type {
   CloudVersionMeta,
   CloudVersionReason,
@@ -51,6 +51,45 @@ export function groupVersionsByDay(versions: readonly CloudVersionMeta[], now: D
     group.versions.push(version)
   }
   return [...groups.values()]
+}
+
+/**
+ * An ISO date in a date-fns pattern (localized with `locale`), or null when the
+ * date is missing or unparsable — format() would throw on an Invalid Date.
+ */
+export function formatVersionDate(iso: string | null | undefined, pattern: string, locale?: Locale): string | null {
+  if (!iso) return null
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return null
+  return format(date, pattern, locale ? { locale } : undefined)
+}
+
+export interface VersionTimeRange {
+  /** When the version's text was written (`editedAt`), in `timeFormat`. Empty if unparsable. */
+  from: string
+  /**
+   * When it was replaced and kept (`savedAt`): `timeFormat` on the same local day,
+   * `otherDayFormat` (with the date) on another one. Null if missing or unparsable.
+   */
+  to: string | null
+  /** `savedAt` falls on the same LOCAL day as `editedAt` (true when there's no `to`). */
+  sameDay: boolean
+}
+
+/**
+ * The time span of a version in its timeline row: "11:25 → 16:13", or
+ * "18:02 → 16 nov 09:00" when it was replaced on another local day.
+ */
+export function versionTimeRange(
+  editedAt: string,
+  savedAt: string | null | undefined,
+  opts: { timeFormat: string; otherDayFormat: string; locale?: Locale },
+): VersionTimeRange {
+  const from = formatVersionDate(editedAt, opts.timeFormat, opts.locale) ?? ''
+  if (formatVersionDate(savedAt, opts.timeFormat) === null) return { from, to: null, sameDay: true }
+  const sameDay = from !== '' && isSameDay(new Date(editedAt), new Date(savedAt as string))
+  const to = formatVersionDate(savedAt, sameDay ? opts.timeFormat : opts.otherDayFormat, opts.locale)
+  return { from, to, sameDay }
 }
 
 const TAGGED_REASONS: readonly string[] = ['shrink', 'delete', 'manual']

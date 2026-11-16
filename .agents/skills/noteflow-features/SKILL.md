@@ -1826,10 +1826,14 @@ vez de commits en bruto en GitHub.
   contraseña, solo locales ni vinculadas, ni en ventanas sticky o de sección.
 - **Qué muestra:** un modal con dos columnas.
   - **Izquierda — línea de tiempo** agrupada por días ("Today", "Yesterday", "Wed, Nov 12"): arriba
-    **"Current version"** (lo que tiene ahora la sección) y debajo cada versión con su hora, su tamaño
-    y, si no fue una edición normal, una etiqueta: "Before a big cut", "Before it was deleted" o
-    "Saved before a restore". Flechas ↑/↓ para moverse; Esc cierra.
-  - **Derecha — la versión elegida** ("Written <fecha>"), con un conmutador **Changes | Preview**:
+    **"Current version"** (lo que tiene ahora la sección) y debajo cada versión con **dos horas**,
+    "11:25 → 16:13" (cuándo se escribió ese texto → cuándo se sustituyó y se guardó la copia; la
+    segunda más tenue y con fecha corta si cae otro día, "18:02 → Nov 16, 09:00"; tooltip "Written
+    11:25, replaced 16:13"), su tamaño y, si no fue una edición normal, una etiqueta: "Before a big
+    cut", "Before it was deleted" o "Saved before a restore". Los días agrupan por la hora de
+    escritura. Flechas ↑/↓ para moverse; Esc cierra.
+  - **Derecha — la versión elegida** ("Written Nov 16, 11:25 · replaced Nov 16, 16:13"), con un
+    conmutador **Changes | Preview**:
     *Changes* = diff por líneas contra el texto actual ("Only in this version" / "Added since", las
     líneas iguales plegadas en "N unchanged lines"; con demasiados cambios muestra la versión tal cual);
     *Preview* = la versión tal como era (renderizada, o monoespaciada en Modo texto). Avisos si la

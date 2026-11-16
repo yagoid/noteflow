@@ -22,6 +22,7 @@ import { expireForcedRestore, markForcedRestore } from '../../lib/sectionRestore
 import { OWN_KEYS_PROPS } from '../../lib/keyScope'
 import {
   decideHistoryPanelState,
+  formatVersionDate,
   isEmptyVersion,
   planRestoreAfterSnapshot,
   restoredSectionName,
@@ -31,7 +32,6 @@ import {
 } from '../../lib/versionHistory'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
-import { formatDate } from '../../i18n/formatDate'
 import type { AccountStatus, CloudVersionMeta, CloudVersionReason, CloudVersionsErrorCode, Note } from '../../types'
 import {
   CenteredNote,
@@ -412,7 +412,12 @@ export function VersionHistoryPanel({ note, sectionId, onClose, onRestored }: Ve
 
   const headerTag = selectedMeta ? versionReasonTag(selectedMeta.reason) : null
   const headerEditedAt = version?.editedAt ?? selectedMeta?.editedAt
-  const headerDate = headerEditedAt ? formatDate(new Date(headerEditedAt), vh.noticeDateFormat) : null
+  const headerDate = formatVersionDate(headerEditedAt, vh.noticeDateFormat, dateLocale)
+  // When that text was replaced (and kept): only the list carries it (`savedAt`).
+  const headerSavedDate = formatVersionDate(selectedMeta?.savedAt, vh.noticeDateFormat, dateLocale)
+  const headerLabel = headerDate
+    ? tf(vh.editedAt, { date: headerDate }) + (headerSavedDate ? ` · ${tf(vh.replacedAt, { date: headerSavedDate })}` : '')
+    : ''
   const showViewSwitch = selected !== 'current' && !!version && !versionEmpty
   const restoreLabel = busy === 'capturing' ? vh.savingCurrent : busy === 'restoring' ? vh.restoring : vh.restore
 
@@ -471,7 +476,7 @@ export function VersionHistoryPanel({ note, sectionId, onClose, onRestored }: Ve
                   <div className="flex items-center gap-3 px-5 pt-3 pb-2.5 border-b border-border/70 min-h-[48px]">
                     <div className="flex-1 min-w-0 flex items-center gap-2">
                       <span className="text-xs font-mono text-text truncate">
-                        {selected === 'current' ? vh.currentVersion : headerDate ? tf(vh.editedAt, { date: headerDate }) : ''}
+                        {selected === 'current' ? vh.currentVersion : headerLabel}
                       </span>
                       {headerTag && <ReasonTag reason={headerTag} />}
                     </div>
