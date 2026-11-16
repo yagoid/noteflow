@@ -381,8 +381,8 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   (`writeNoteRecord`) avisan además a `ctx.onNoteEdited(noteId)`, con el que main las apunta en el
   log de actividad por dispositivo (`userData/activity-log.json`, ver `architecture.md`). Estas
   escrituras sí bumpean el `updated` de la nota (`serializeNoteFolder` sin `preserveUpdated`), pero
-  la gráfica de Ajustes → General (`lib/activityPulse.ts`) solo ve por `updated` el **último** día de
-  edición de cada nota; los días anteriores salen del log. Tools v1: `list_notes`, `get_note`,
+  la sección Activity de Ajustes → General (`lib/activitySummary.ts`) solo ve por `updated` el
+  **último** día de edición de cada nota; los días anteriores salen del log. Tools v1: `list_notes`, `get_note`,
   `list_groups`, `search_notes`, `create_note`, `update_note`, `add_section`, `update_section`,
   `rename_section`, `create_group`, `create_folder`, `rename_group`, `rename_folder`, `delete_*`.
   Las **notas cifradas** se listan pero no se leen/editan. Las **notas vinculadas** (archivo externo, id

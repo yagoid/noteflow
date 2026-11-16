@@ -246,7 +246,7 @@ noteflow/
 │   │   ├── syncStatusText.ts            # Etiqueta del estado de sync + "hace x min" (i18n), compartido titlebar/Ajustes
 │   │   ├── Settings/                    # Ventana de Ajustes unificada (overlay split nav+contenido)
 │   │   │   ├── SettingsModal.tsx        #   Contenedor: nav izquierda + panel derecho según sección
-│   │   │   ├── GeneralPanel.tsx         #   Idioma + gráfica de actividad + IA local (toggle/reindex) + perfil + skill del CLI
+│   │   │   ├── GeneralPanel.tsx         #   Idioma + sección Activity (ActivitySummary.tsx) + IA local (toggle/reindex) + perfil + skill del CLI
 │   │   │   ├── AppearancePanel.tsx      #   Tema/fuente/acento/colores del editor/escala + preview
 │   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho / índice / tareas marcadas al final
 │   │   │   ├── TemplatesPanel.tsx       #   Plantillas de nota (listar/usar/renombrar/borrar)
@@ -320,6 +320,8 @@ noteflow/
 │   │   │                         #   vars del tema; mapa del editor + vista de nota)
 │   │   ├── noteOverviewGrid.ts   # Vista de nota: columnas por ancho, filas justificadas, foco por flechas,
 │   │   │                         #   pie de tarjeta (tareas/palabras), recorte del preview — testeado
+│   │   ├── activitySummary.ts    # Ajustes → General → Activity: totales (notas/secciones/palabras/tareas) y
+│   │   │                         #   notas más tocadas en 28 días (log por dispositivo ∪ updated ∪ created) — testeado
 │   │   ├── contentView.ts        # Vista de contenido: lugares (all/fav/none/g:/f:), filtro por lugar y archivadas,
 │   │   │                         #   bloques por fecha, orden "como en el sidebar" (buildNoteList), ruta de la fila,
 │   │   │                         #   selección por defecto y rango — testeado
@@ -510,7 +512,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `ai:chat-confirm` | on | Resuelve la confirmación de una tool destructiva por `toolCallId` (`{toolCallId, approved}`) |
 | `ai:chats-load` / `ai:chats-save` | handle | Historial de chats en `userData/ai-chats.json` (local, NO se sincroniza) |
 | `activity:record-edit` | on | `(noteId)` → apunta que el usuario editó esa nota hoy en el log de actividad por dispositivo (`userData/activity-log.json`). Lo envía `applyNoteUpdate` de `notesStore` (todas las ediciones de usuario: editor, sticky, ventana de sección, overviews, menús); main lo llama también para las ediciones de nota del agente del chat (`ToolContext.onNoteEdited`). Nunca desde sync pull, imports, migración ni autoborrado de notas temporales. Escritura con debounce (2 s) + atómica (tmp + rename), flush en `will-quit` |
-| `activity:get-log` | handle | `{days: Record<'YYYY-MM-DD', noteId[]>}` (podado) — lo lee la gráfica de actividad de Ajustes → General (`ActivityPulse.tsx`) |
+| `activity:get-log` | handle | `{days: Record<'YYYY-MM-DD', noteId[]>}` (podado) — lo lee la sección Activity de Ajustes → General (`ActivitySummary.tsx`: días tocados por nota en las últimas 4 semanas, lógica en `lib/activitySummary.ts`) |
 | `ai:profile-pick-files` / `ai:profile-remove-file` | handle | Segundo cerebro: file picker capado por capacidades del proveedor a una caché en main (solo metadatos al renderer) |
 | `ai:profile-generate` | handle | Segundo cerebro: `{fields[], fileIds[], urls[], locale?}` → prompt + adjuntos nativos → LLM → `{title, sections[]}` (detalle en `ai.md` → Segundo cerebro) |
 | `ai:profile-get-status` / `ai:profile-set-completed` | handle | `settings.aiProfile` = `{completedAt, noteId?}` (cuestionario mostrado una vez + id de la nota de perfil generada, para enlazar/regenerar sin duplicar). `set-completed(noteId?)`: sin `noteId` = "Not now" (saltado) |

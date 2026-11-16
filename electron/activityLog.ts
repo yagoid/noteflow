@@ -1,8 +1,8 @@
-// Per-device log of the notes edited each day — the history behind the "notes
-// edited" half of the activity chart in Settings → General
-// (src/components/Settings/ActivityPulse.tsx). A note's frontmatter only keeps
-// its LAST edit (`updated`), so without this log every earlier editing day is
-// lost; sections created need no log (`section.created` is already full history).
+// Per-device log of the notes edited each day — the history behind the strips of
+// days touched per note in Settings → General → Activity
+// (src/components/Settings/ActivitySummary.tsx, logic in src/lib/activitySummary.ts).
+// A note's frontmatter only keeps its LAST edit (`updated`), so without this log
+// every earlier editing day is lost.
 //
 // Persisted by main in userData/activity-log.json — LOCAL to this device, never in
 // the notes dir, never synced. Only note ids are stored (no titles, no content):
@@ -18,7 +18,10 @@
 import { localDayKey } from './syncHistory'
 
 export const ACTIVITY_LOG_VERSION = 1
-/** Days kept (today included). The chart reads at most 112 days + 6 lead-in days. */
+/**
+ * Days kept (today included). A margin: the Activity summary in Settings → General
+ * only reads the last 28 days (FOCUS_DAYS in src/lib/activitySummary.ts).
+ */
 export const ACTIVITY_LOG_KEEP_DAYS = 120
 /** Sanity caps against a corrupt or hand-edited file. */
 const MAX_ID_LENGTH = 64

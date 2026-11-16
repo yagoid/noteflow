@@ -361,7 +361,8 @@ Decisiones a respetar si se toca:
   es corta). En el formato v2 no hay imágenes como ficheros aparte: todas van inline en el `.md`.
 - **Pie:** `sectionCardStats(md)` → "Empty" / `hechas/total tasks` con ≥ 3 tareas (`- [ ]`/`- [x]` como
   `markdownHtml`, fuera de fences; las tarjetas de kanban cuentan) / nº de palabras (sin sintaxis, URLs de
-  links, anotaciones 📅⏰🔺 ni comentarios HTML). A la derecha, "Text" (modo texto, `isRawMode`) y "Hidden from AI".
+  links, anotaciones 📅⏰🔺 ni comentarios HTML); el conteo en una pasada es `markdownTextStats(md)`, que
+  reutilizan los totales de Ajustes → General → Activity (`lib/activitySummary.ts`). A la derecha, "Text" (modo texto, `isRawMode`) y "Hidden from AI".
 - **Clic, doble clic y nombre:** un `<button class="note-grid-open">` cubre la celda (clic, foco, Intro);
   la cabecera es `pointer-events: none` salvo el `<span>` del nombre. **Doble clic en el nombre = renombrar
   inline** (input con anillo del color de la sección, Enter/blur guarda, Esc cancela, `F2` desde el
@@ -2173,7 +2174,7 @@ diapositivas que este dispositivo no ha visto. Piezas:
   enmascarado). `prefers-reduced-motion`: todo se
   queda en fades de opacidad y los bucles se paran; el clip **no** se reproduce (ni autoplay ni
   loop): se muestra el póster como imagen fija o, sin póster, el fallback estático (`SlideClip`,
-  `matchMedia` leído al montar, como `ActivityPulse`/`PlanCardBackdrop`). Lo mismo en las
+  `matchMedia` leído al montar, como `PlanCardBackdrop`). Lo mismo en las
   miniaturas de Ajustes → Tutorial (no se reproducen al hover). Layout compacto (una columna) por debajo de
   760 px de ancho (ventana mínima 700×500 y zoom de UI). La diapositiva vive en **una celda de
   grid de altura definida** (`.wn-deck`/`.wn-slide` con `grid-template-rows: minmax(0, 1fr)`) y la

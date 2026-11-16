@@ -8,6 +8,7 @@ import {
   clipPreviewMarkdown,
   gridColumnCount,
   gridNeighbor,
+  markdownTextStats,
   planNoteGrid,
   rawPreviewText,
   sectionCardIsWide,
@@ -248,6 +249,17 @@ describe('sectionCardStats', () => {
 
   it('does not take uppercase X or a link right after the box as a task', () => {
     expect(sectionCardStats('- [X] a\n- [x](url)\n- [x]b')).toEqual({ kind: 'words', count: 4 })
+  })
+})
+
+describe('markdownTextStats', () => {
+  it('returns words and tasks together, whatever the task count', () => {
+    expect(markdownTextStats('- [x] Buy milk\n- [ ] Call Ana')).toEqual({ words: 4, done: 1, total: 2 })
+    expect(markdownTextStats('')).toEqual({ words: 0, done: 0, total: 0 })
+  })
+
+  it('handles CRLF line breaks', () => {
+    expect(markdownTextStats('- [x] a\r\n- [x] b\r\nplain words')).toEqual({ words: 4, done: 2, total: 2 })
   })
 })
 

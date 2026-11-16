@@ -8,7 +8,7 @@ import { resolveLang } from '../../i18n'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import type { LanguageSetting } from '../../i18n'
-import { ActivityPulse } from './ActivityPulse'
+import { ActivitySummary } from './ActivitySummary'
 import { settingsButtonClass } from './ui'
 
 const OPTIONS: LanguageSetting[] = ['system', 'en', 'es']
@@ -100,9 +100,9 @@ export function GeneralPanel({ onClose }: { onClose: () => void }) {
         </div>
       </section>
 
-      {/* Decorative chart of recent note activity (header + axis legends included) */}
+      {/* Activity: totals cards + the notes touched on the most days lately */}
       <section className="pt-2">
-        <ActivityPulse />
+        <ActivitySummary />
       </section>
 
       {/* ── Local AI (embeddings index) ─────────────────────────────── */}

@@ -39,22 +39,31 @@ export const settings = {
     spanish: 'Español',
     // Secondary line under the "System" option showing the detected language.
     detected: 'Detected: {lang}',
-    // Decorative activity mirror chart (ActivityPulse): header, legend and axis
-    // labels. The chart itself has no text; these labels live in HTML around the SVG.
+    // Activity section (ActivitySummary): totals cards on top, then the notes
+    // touched on the most days of the last 4 weeks, one strip of days per note.
     activity: {
       title: 'Activity',
-      // Edits come from this device's activity log (plus each note's last edit);
-      // sections created come from the notes themselves, so they are not per device.
-      hint: 'Recent notes edited (tracked on this device) and sections created',
-      // Legend after each window total ("↑ 12 notes edited · ↓ 5 sections created");
-      // the number is rendered separately (coloured), so these forms carry no {count}.
-      notesEdited: { one: 'note edited', other: 'notes edited' },
-      sectionsCreated: { one: 'section created', other: 'sections created' },
-      // Left end of the X axis: the window adapts to the first active day (4–16 weeks),
-      // shown in whole weeks when it is a multiple of 7, in days otherwise.
-      xStartWeeks: { one: '{count} week ago', other: '{count} weeks ago' },
-      xStartDays: { one: '{count} day ago', other: '{count} days ago' },
-      xEnd: 'Today',
+      // Right of the title: month + year of the oldest note ("since Oct 2025").
+      since: 'since {date}',
+      // Card labels under each total; the number is rendered separately, so these
+      // forms carry no {count}.
+      notes: { one: 'note', other: 'notes' },
+      sections: { one: 'section', other: 'sections' },
+      words: { one: 'word', other: 'words' },
+      // Under "70 / 161" (checked / all checklist items).
+      tasksDone: 'tasks done',
+      focusTitle: 'The notes you keep coming back to',
+      focusWindow: 'last 4 weeks',
+      // Right of each strip: days that note was touched in the window.
+      daysTouched: { one: '{count} day', other: '{count} days' },
+      // Native tooltip of each day cell: "<date> · touched" (+ " · today").
+      cellTouched: 'touched',
+      cellUntouched: 'not touched',
+      today: 'today',
+      // After focusTitle: the edit log behind the strips is local to each device.
+      perDevice: 'per device',
+      // Instead of the strips when no note was touched in the window.
+      empty: 'No notes touched in the last 4 weeks',
     },
   },
 

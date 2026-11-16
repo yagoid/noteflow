@@ -207,14 +207,22 @@ function lineWords(line: string): number {
   return text.split(/\s+/).filter((token) => HAS_WORD_RE.test(token)).length
 }
 
+export interface MarkdownTextStats {
+  /** Plain words (see sectionCardStats for what counts). */
+  words: number
+  /** Checked tasks (`- [x]`). */
+  done: number
+  /** All tasks (`- [ ]` / `- [x]`). */
+  total: number
+}
+
 /**
- * What the footer of a section card says: "Empty" for a blank section; the task progress
- * when it has TASK_STATS_MIN or more tasks (`- [ ]` / `- [x]` outside code blocks, kanban
- * cards included); otherwise its word count (words of code blocks count, markdown syntax,
- * HTML comments — e.g. kanban markers — and link targets don't).
+ * Words and task counts of a markdown text, in one pass: tasks are `- [ ]` / `- [x]`
+ * outside code blocks (kanban cards included); words of code blocks count, markdown
+ * syntax, HTML comments — e.g. kanban markers — and link targets don't. Shared by the
+ * section card footer and the Activity totals in Settings → General (lib/activitySummary.ts).
  */
-export function sectionCardStats(markdown: string): SectionCardStats {
-  if (!markdown.trim()) return { kind: 'empty' }
+export function markdownTextStats(markdown: string): MarkdownTextStats {
   const lines = markdown
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/\r\n?/g, '\n')
@@ -237,6 +245,17 @@ export function sectionCardStats(markdown: string): SectionCardStats {
     }
     words += lineWords(line)
   }
+  return { words, done, total }
+}
+
+/**
+ * What the footer of a section card says: "Empty" for a blank section; the task progress
+ * when it has TASK_STATS_MIN or more tasks; otherwise its word count (counting rules in
+ * markdownTextStats).
+ */
+export function sectionCardStats(markdown: string): SectionCardStats {
+  if (!markdown.trim()) return { kind: 'empty' }
+  const { words, done, total } = markdownTextStats(markdown)
   if (total >= TASK_STATS_MIN) return { kind: 'tasks', done, total }
   return { kind: 'words', count: words }
 }

@@ -79,7 +79,7 @@ export function SlideFallback({ slide, thumb = false }: { slide: WhatsNewSlide; 
 }
 
 // Read once per mount, like the other reduced-motion checks of the app
-// (Settings/ActivityPulse.tsx, Settings/PlanCardBackdrop.tsx).
+// (e.g. Settings/PlanCardBackdrop.tsx).
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
