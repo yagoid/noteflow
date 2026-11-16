@@ -837,6 +837,21 @@ function adoptCloudOrigin(id: Extract<SyncIdentity, { kind: 'cloud' }>, opts: { 
  * 'pending'; every change is emitted through the status listener.
  */
 export function refreshCloudOriginGate(): CloudOriginGateState {
+  // An adoption below emits status (initialPullStatus → statusListener →
+  // main reads getCloudSyncStatus) before the new gate is cached: that nested
+  // read gets the cached state instead of deriving (and adopting) again.
+  if (gateRefreshing) return originGate?.state ?? 'unreadable'
+  gateRefreshing = true
+  try {
+    return deriveCloudOriginGate()
+  } finally {
+    gateRefreshing = false
+  }
+}
+
+let gateRefreshing = false
+
+function deriveCloudOriginGate(): CloudOriginGateState {
   const s = cloudSettings ?? loadCloudSyncSettings()
   const userId = account.getUserId()
   let next: NonNullable<typeof originGate>
@@ -904,8 +919,8 @@ export function refreshCloudOriginGate(): CloudOriginGateState {
  * account (ownerMismatch).
  */
 function cloudOriginBlocked(): boolean {
-  if (!originGate || originGate.userId !== account.getUserId()) refreshCloudOriginGate()
-  return originGate!.state !== 'clear' || ownerMismatch()
+  const state = !originGate || originGate.userId !== account.getUserId() ? refreshCloudOriginGate() : originGate.state
+  return state !== 'clear' || ownerMismatch()
 }
 
 /** True while nothing may sync with NoteFlow Cloud (origin choice pending, settings.json unreadable). */
