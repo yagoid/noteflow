@@ -401,7 +401,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 
 | Canal | Tipo | Descripción |
 |---|---|---|
-| `fs:read-all-notes` | handle | Lee TODAS las carpetas de nota en una llamada → `NoteDirRecord[]` (`{dir,path,noteMd,sections:[{file,content}]}`; batch, con reintentos —6 × 800 ms si el listado sale vacío, por el `readdir` vacío transitorio de Windows—, salvo cuando el archivo local acaba de dejar el dir sin notas: `notesDirEmptiedByArchive`, ver `sync.md` "Archivo local") |
+| `fs:read-all-notes` | handle | Lee TODAS las carpetas de nota en una llamada → `NoteDirRecord[]` (`{dir,path,noteMd,sections:[{file,content}]}`; batch, con reintentos —6 × 800 ms si el listado sale vacío, por el `readdir` vacío transitorio de Windows—, salvo cuando el archivo local acaba de dejar el dir sin notas: `notesDirEmptiedByArchive`, que se limpia cuando un guardado o un pull escriben una nota o un listado vuelve a encontrar alguna; ver `sync.md` "Archivo local") |
 | `fs:read-note-dir` | handle | Lee UNA carpeta de nota → `NoteDirRecord \| null` (usado por syncNote) |
 | `fs:write-note` | handle | Escritura multi-archivo de una carpeta: `{dir, files, deleteFiles}` (note.md primero) + 1 broadcast + schedulePush por archivo + scheduleIndex |
 | `fs:delete-note` | handle | Borra la carpeta entera (rmSync recursivo) + broadcast + scheduleDeleteDir en GitHub |

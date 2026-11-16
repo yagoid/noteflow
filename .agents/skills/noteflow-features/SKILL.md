@@ -1950,9 +1950,11 @@ ni baja nada** y abre el mismo diálogo (cuenta anterior → cuenta actual, por 
   sesión).
 Mientras está pendiente: botón de la titlebar en ámbar ("Action needed"); en Ajustes → Sync la tarjeta
 de estado de la vista general dice "Action needed" con el aviso y "Choose…" debajo, "Sync now" queda
-deshabilitado, "Mirror to GitHub" no hace nada y "Connect the CLI too" (fila "noteflow CLI") queda
-deshabilitado con la explicación debajo (en GitHub igual mientras su elección está pendiente). Volver a entrar con
-la **misma** cuenta no pregunta.
+deshabilitado, "Mirror to GitHub" (fila "GitHub Sync · Paused") también, con el mismo aviso como
+tooltip ("Paused — the notes on this device came from … Nothing syncs with … until you choose how to
+continue."), y "Connect the CLI too" (fila "noteflow CLI") queda deshabilitado con la explicación debajo
+(en GitHub igual mientras su elección está pendiente). Volver a entrar con la **misma** cuenta no
+pregunta.
 
 **Cruce entre los dos.** "Use only the notes from …" de un backend sustituye las notas, así que el otro
 deja de reconocerlas: tras usar solo las del repo de GitHub, encender Cloud con tu cuenta de siempre

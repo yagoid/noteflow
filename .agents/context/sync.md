@@ -737,17 +737,27 @@ queda** (apariencia del dispositivo). Las `localOnly` y las vinculadas no se toc
   `removeArchivedNotes`: lógica pura en `src/lib/archivedNotes.ts` (`withoutArchivedNotes`, tests en
   `tests/lib/archivedNotes.test.ts` y `tests/stores/notesStoreArchived.test.ts`) — quita las notas por
   id o por nombre de carpeta (nunca una vinculada; las `localOnly` no vienen en el evento), cierra sus
-  paneles (los demás se quedan; sin ninguno, la ventana principal abre la primera nota que queda y una
-  secundaria se queda vacía), suelta sus desbloqueos de sesión, **descarta** sus guardados con debounce
+  paneles (los demás se quedan; sin ninguno, depende del rol de la ventana — `fallbackToAnotherNote:
+  windowRole !== 'section'` en `removeArchivedNotes` —: la principal abre la primera nota que queda, no
+  archivada si la hay, y una sticky también, si su cierre previo — `closeWindowsShowingNotes` — no llegó
+  a tiempo; solo las de rol `section`, la ventana de sección y la del chat, se quedan vacías), suelta
+  sus desbloqueos de sesión, **descarta** sus guardados con debounce
   (`discardPendingEdits`: no se intenta escribir, así que no hay error) y reprograma las alarmas. Es
   **solo memoria**: no pasa por `deleteNote` ni toca disco o remoto; cualquier escritura posterior de
   esas notas es un no-op porque todos los caminos de escritura buscan antes la nota en el store. No
   queda ninguna lista de ids vetados: si el pull trae una nota con el mismo id, la recarga normal la
   vuelve a añadir. También se emite si el archivo falla **sin** poder deshacerse del todo (las carpetas
   que quedaron en el archivo ya no están en el dir). Y si el archivo dejó el dir **sin ninguna nota**,
-  `fs:read-all-notes` no reintenta (`notesDirEmptiedByArchive`: vacío es la respuesta real) hasta que
-  se escriba una nota o un listado vuelva a encontrar alguna — sin eso, con el store ya vacío, la
-  ventana mostraría "Loading notes…" ~4 s.
+  `fs:read-all-notes` no reintenta (`notesDirEmptiedByArchive`: vacío es la respuesta real) — sin eso,
+  con el store ya vacío, la ventana mostraría "Loading notes…" ~4 s. El flag se limpia en cuanto el dir
+  vuelve a tener notas, por cualquiera de tres caminos: un guardado (`applyNoteWrite`), un pull de
+  cualquiera de los dos backends que escriba alguna carpeta de nota (`broadcastPulledNotes`, si
+  `updatedFiles` no viene vacío — por ahí pasan los pulls de GitHub, también el manual, y los de Cloud;
+  el primer pull del Device Flow no, pero emite una recarga completa) o un `fs:read-all-notes` que
+  encuentre notas. El del pull hace falta porque, cuando no hay
+  borrados ni cambios de metadatos, las notas bajadas se recargan una a una (`notes-updated` con ruta →
+  `syncNote`, que no pasa por `fs:read-all-notes`): sin él el flag seguiría puesto y un `readdir` vacío
+  transitorio posterior (vuelta de suspensión) ya no se reintentaría.
 - **UI de las copias:** Ajustes → Sync muestra "Open local copies" cuando `sync:archives-status` dice que
   hay alguna (`sync:open-archives` → `shell.openPath`; `SyncOriginNotices.tsx`): con un backend activo es
   la fila **"Local copies"** de la lista de datos de la vista general (`LocalCopiesRow`, antes de la fila
