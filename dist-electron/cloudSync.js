@@ -87,6 +87,11 @@ exports.onRemoteConflict = onRemoteConflict;
 exports.hasPendingRemoteMutations = hasPendingRemoteMutations;
 exports.hasPendingPullRetries = hasPendingPullRetries;
 exports.bindCloudSyncToAccount = bindCloudSyncToAccount;
+exports.refreshCloudOriginGate = refreshCloudOriginGate;
+exports.isCloudOriginGateBlocked = isCloudOriginGateBlocked;
+exports.getCloudOriginChoice = getCloudOriginChoice;
+exports.resolveCloudOriginChoice = resolveCloudOriginChoice;
+exports.getStoredCloudOriginIdentity = getStoredCloudOriginIdentity;
 exports.enableCloudSync = enableCloudSync;
 exports.disableCloudSync = disableCloudSync;
 exports.schedulePush = schedulePush;
@@ -116,6 +121,7 @@ const conflictCopy_1 = require("./conflictCopy");
 const cloudBaseStore_1 = require("./cloudBaseStore");
 const syncState_1 = require("./syncState");
 const syncHistory_1 = require("./syncHistory");
+const syncOrigin_1 = require("./syncOrigin");
 // ── Constants ─────────────────────────────────────────────────────────────────
 /**
  * Safety-net cadence of the periodic sync loop. Remote changes normally arrive
@@ -132,6 +138,9 @@ const NOT_SIGNED_IN_ERROR = 'Sign in to your NoteFlow account to use NoteFlow Cl
 // Shown while the pull retry set is non-empty and no fresher error is set — a
 // later successful push must not hide that remote changes are still missing here.
 const PULL_RETRY_PENDING_ERROR = 'Some remote changes could not be applied on this device; they will be retried.';
+// Thrown by the last-moment check of an upload / tombstone while the origin
+// gate is closed (defence in depth: the entry points already refuse).
+const ORIGIN_PENDING_ERROR = 'NoteFlow Cloud is paused until you choose what to do with the notes on this device.';
 // ── Settings helpers ──────────────────────────────────────────────────────────
 function getSettingsPath() {
     return path_1.default.join(electron_1.app.getPath('userData'), 'settings.json');
@@ -281,16 +290,21 @@ function loadCloudSyncSettings() {
     cloudSettings = settings.cloudSync ?? { enabled: false };
     return cloudSettings;
 }
-/** Boot hook: remembers the notes dir (needed to read anchors/journal drains). */
+/** Boot hook: remembers the notes dir (needed to read anchors/journal drains) and derives the origin gate. */
 function initCloudSync(notesDir) {
     notesDirPath = notesDir;
     loadCloudSyncSettings();
+    // The account, the notes or settings.json may have changed since the last
+    // run (another account signed in by the CLI, notes replaced by GitHub's
+    // "use only the notes from …"): a pending choice survives restarts this way.
+    refreshCloudOriginGate();
 }
 function isCloudSyncEnabled() {
     return (cloudSettings ?? loadCloudSyncSettings()).enabled;
 }
 function getCloudSyncStatus() {
     const s = cloudSettings ?? loadCloudSyncSettings();
+    const originChoice = getCloudOriginChoice();
     return {
         configured: (0, cloudConfig_1.isCloudConfigured)(),
         enabled: s.enabled,
@@ -304,6 +318,7 @@ function getCloudSyncStatus() {
         realtimeConnected: cloudRealtime.isCloudRealtimeConnected(),
         conflictCopies,
         conflictMerges,
+        ...(originChoice ? { originChoice } : {}),
     };
 }
 /** main.ts injects the localized "conflict copy" label (electron/i18n.ts), resolved at copy time. */
@@ -365,14 +380,32 @@ function hasPendingPullRetries() {
  * gate closes until the new account's first pull. An unknown owner (state of
  * an earlier build) is adopted without a reset; signed out → no-op. Returns
  * true when the state was reset.
+ *
+ * Before a reset overwrites cloudSync.userId, the previous owner is recorded
+ * as the notes dir's Cloud origin when none was (an install from before the
+ * origin gate: see resolveStoredCloudOrigin) — otherwise the next account
+ * would adopt these notes without asking. If that can't be written, nothing
+ * is reset: the previous owner stays recorded and the origin gate blocks
+ * everything (ownerMismatch) until it can.
+ *
+ * Also re-derives the origin gate (main.ts calls this on every account change).
  */
 function bindCloudSyncToAccount(userId) {
+    const reset = bindStateOwner(userId);
+    refreshCloudOriginGate();
+    return reset;
+}
+function bindStateOwner(userId) {
     if (!userId)
         return false;
     const s = cloudSettings ?? loadCloudSyncSettings();
     if (s.userId === userId)
         return false;
     if ((0, cloudSyncLogic_1.shouldResetCloudState)(s.userId, userId)) {
+        if (!seedCloudOriginFromOwner()) {
+            console.error('[CloudSync] could not record the previous account as the notes dir origin — the account switch waits');
+            return false;
+        }
         resetCloudSyncState(userId);
         return true;
     }
@@ -383,12 +416,31 @@ function bindCloudSyncToAccount(userId) {
         s.pullSeq !== undefined ||
         s.pullCursor !== undefined ||
         Object.keys(getState().ops).length > 0;
-    if (hasState)
-        patchSettings({ userId });
+    if (hasState) {
+        // Best effort: an unwritable settings.json leaves the owner unknown (the
+        // next entry point retries) — it must not make every entry point throw;
+        // the origin gate is what keeps a failed write from opening anything.
+        try {
+            patchSettings({ userId });
+        }
+        catch (err) {
+            console.error('[CloudSync] could not record the sync state owner:', String(err));
+        }
+    }
     return false;
 }
 function ensureStateOwner() {
-    return bindCloudSyncToAccount(account.getUserId());
+    return bindStateOwner(account.getUserId());
+}
+/**
+ * The persisted sync state still belongs to ANOTHER account than the signed-in
+ * one — only possible when bindStateOwner could not record the previous owner
+ * as the origin (and so did not reset). Nothing may act on that state.
+ */
+function ownerMismatch() {
+    const userId = account.getUserId();
+    const owner = (cloudSettings ?? loadCloudSyncSettings()).userId;
+    return !!userId && !!owner && owner !== userId;
 }
 // Bumped by every reset: work that started under one account (a pull, a drain,
 // an upload) captures it at entry and re-checks it after each await, so it
@@ -431,6 +483,271 @@ function resetCloudSyncState(userId) {
     setInitialPullStatus('pending');
     statusListener?.();
 }
+// null = not evaluated yet. `userId` = the account it was computed for (an
+// account switched under a cached gate re-derives it on the next check).
+let originGate = null;
+function sameCloudGate(a, b) {
+    if (!a || !b)
+        return a === b;
+    if (a.state !== b.state || a.userId !== b.userId)
+        return false;
+    const ca = a.choice;
+    const cb = b.choice;
+    if (!ca || !cb)
+        return ca === cb;
+    return (ca.previous.userId === cb.previous.userId && ca.previous.email === cb.previous.email &&
+        ca.next.userId === cb.next.userId && ca.next.email === cb.next.email &&
+        ca.stale === cb.stale && ca.staleFrom?.owner === cb.staleFrom?.owner && ca.staleFrom?.repo === cb.staleFrom?.repo);
+}
+/**
+ * Records the sync state's owner (cloudSync.userId) as the Cloud origin when
+ * no origin was recorded yet — see resolveStoredCloudOrigin. Strict: false
+ * when settings.json can't be read or written (callers must not go on with
+ * anything that loses the previous owner). Nothing to seed → true.
+ */
+function seedCloudOriginFromOwner() {
+    const parsed = (0, syncOrigin_1.readSettingsStrict)(getSettingsPath());
+    if (parsed === null)
+        return false;
+    const stored = (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed);
+    if (!stored?.seeded)
+        return true;
+    return (0, syncOrigin_1.writeSyncOriginFile)(getSettingsPath(), stored.identity);
+}
+/** The signed-in account as an origin identity (its email is only the dialog's label). */
+function signedInCloudIdentity(userId) {
+    const email = account.getAccountStatus().email;
+    return { kind: 'cloud', userId, ...(email ? { email } : {}) };
+}
+// Per-account fields of settings.cloudSync dropped when the dir's origin moves
+// to another account (or a stale one is adopted again). Same set as
+// resetCloudSyncState; encryptedDek / keysMode (cloudKeys.ts) are not touched.
+const PER_ACCOUNT_SYNC_KEYS = ['pullSeq', 'pullCursor', 'lastSync', 'pullRetry', 'basesBootstrapped', 'basesBootstrapPending'];
+/**
+ * Records `id` as this dir's Cloud origin. With `reset` (another account, a
+ * stale origin, or a resolved choice) everything describing the remote state
+ * as this device knew it goes too — the journal (cloud-sync-state.json:
+ * pending ops and three-way bases), the base contents, the note-key cache,
+ * armed push timers, conflict notices — and the in-flight work of the old
+ * state is discarded (stateGeneration), so the next pull is a first sync.
+ *
+ * Strict, in this order (the disk can never hold "origin = B" next to state
+ * that describes A):
+ * 1. cloud-sync-state.json is rewritten empty and that write must succeed
+ *    (unlike persistState, which swallows errors);
+ * 2. ONE read-modify-write of settings.json drops the per-account fields of
+ *    the cloudSync READ FROM THE FILE, sets cloudSync.userId (only with
+ *    `reset` — otherwise bindStateOwner owns it) and syncOrigin.cloud; with
+ *    `markGithubStale` ("use only the notes from <account>" just replaced the
+ *    notes) the same write marks syncOrigin.github stale;
+ * 3. only then the in-memory settings.
+ * Any failure → false; the callers keep the gate closed ('unreadable').
+ */
+function adoptCloudOrigin(id, opts) {
+    const settingsPath = getSettingsPath();
+    if ((0, syncOrigin_1.readSettingsStrict)(settingsPath) === null) {
+        console.error('[CloudSync] could not record the notes dir origin (settings.json unreadable)');
+        return false;
+    }
+    if (opts.reset) {
+        const empty = (0, syncState_1.emptySyncState)();
+        try {
+            fs_1.default.writeFileSync(getSyncStatePath(), (0, syncState_1.serializeSyncState)(empty), 'utf-8');
+        }
+        catch (err) {
+            console.error('[CloudSync] could not reset cloud-sync-state.json — the notes dir origin is not changed:', String(err));
+            return false;
+        }
+        stateGeneration++;
+        syncState = empty;
+        pushTimers.forEach((t) => clearTimeout(t));
+        pushTimers.clear();
+        noteKeyCache.clear();
+        noteKeyCacheDekId = null;
+        entitlementBlocked = false;
+        syncError = undefined;
+        conflictCopies = undefined;
+        conflictMerges = undefined;
+        try {
+            (0, cloudBaseStore_1.clearBaseBlobs)(getBaseStoreDir());
+        }
+        catch { /* orphans only: pruned by the next correct pull */ }
+    }
+    let written;
+    try {
+        const settings = (0, syncOrigin_1.readSettingsStrict)(settingsPath);
+        if (settings === null)
+            throw new Error('settings.json became unreadable');
+        let next = settings;
+        if (opts.reset) {
+            const raw = settings.cloudSync;
+            const fileSync = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
+            for (const key of PER_ACCOUNT_SYNC_KEYS)
+                delete fileSync[key];
+            fileSync.userId = id.userId;
+            next = { ...settings, cloudSync: fileSync };
+        }
+        next = (0, syncOrigin_1.withSyncOrigin)(next, id);
+        if (opts.markGithubStale)
+            next = (0, syncOrigin_1.withOriginMarkedStale)((0, syncOrigin_1.withSeededOrigin)(next, 'github'), 'github');
+        writeSettings(next);
+        written = next;
+    }
+    catch (err) {
+        console.error('[CloudSync] could not record the notes dir origin (settings.json unwritable):', String(err));
+        return false;
+    }
+    if (opts.reset) {
+        cloudSettings = written.cloudSync;
+        setInitialPullStatus('pending');
+    }
+    return true;
+}
+/**
+ * Recomputes the origin gate (see above) and returns its state. Cloud off, not
+ * configured or signed out → 'clear' (nothing would sync anyway). `proceed`
+ * decisions that adopt write right away, before anything is pulled: no origin
+ * at all (first connection — the "unknown owner" rule) without a reset;
+ * "another account / stale origin, but no synced notes on disk" with one.
+ * Becoming blocked cancels armed pushes and puts initialPullStatus back to
+ * 'pending'; every change is emitted through the status listener.
+ */
+function refreshCloudOriginGate() {
+    const s = cloudSettings ?? loadCloudSyncSettings();
+    const userId = account.getUserId();
+    let next;
+    if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)() || !userId) {
+        next = { state: 'clear', userId };
+    }
+    else {
+        const parsed = (0, syncOrigin_1.readSettingsStrict)(getSettingsPath());
+        const stored = parsed === null ? undefined : (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed);
+        if (parsed === null || (stored?.seeded && !(0, syncOrigin_1.writeSyncOriginFile)(getSettingsPath(), stored.identity))) {
+            // Unreadable, or the implicit origin (an earlier build's sync state
+            // owner) could not be recorded before deciding anything.
+            next = { state: 'unreadable', userId };
+        }
+        else {
+            const identity = signedInCloudIdentity(userId);
+            const decision = (0, syncOrigin_1.decideOrigin)({
+                stored: stored?.identity,
+                next: identity,
+                hasLocalNotes: () => (0, syncOrigin_1.hasSyncedLocalNotes)(notesDirPath),
+            });
+            if (decision.action === 'ask') {
+                const prev = decision.previous.kind === 'cloud' ? decision.previous : null;
+                // Stale: the notes on disk came from GitHub — name that repo if it is
+                // the current GitHub origin.
+                const gh = decision.stale ? (0, syncOrigin_1.getStoredIdentity)(parsed, 'github') : undefined;
+                const staleFrom = gh?.kind === 'github' && !gh.stale ? { owner: gh.owner, repo: gh.repo } : undefined;
+                next = {
+                    state: 'ask',
+                    userId,
+                    choice: {
+                        previous: { userId: prev?.userId ?? '', ...(prev?.email ? { email: prev.email } : {}) },
+                        next: { userId, ...(identity.email ? { email: identity.email } : {}) },
+                        ...(decision.stale ? { stale: true } : {}),
+                        ...(staleFrom ? { staleFrom } : {}),
+                    },
+                };
+            }
+            else if (decision.adopt &&
+                !adoptCloudOrigin(identity, { reset: decision.reason === 'changed-empty' || decision.reason === 'stale-empty' })) {
+                // Fail-closed, as in GitHub: an origin that could not be recorded
+                // must not open the gate.
+                next = { state: 'unreadable', userId };
+            }
+            else {
+                next = { state: 'clear', userId };
+            }
+        }
+    }
+    const prev = originGate;
+    originGate = next;
+    if (next.state !== 'clear' && (!prev || prev.state === 'clear')) {
+        // Becoming blocked: nothing armed may fire, and the push gate closes
+        // until a pull succeeds after the resolution.
+        pushTimers.forEach((t) => clearTimeout(t));
+        pushTimers.clear();
+        setInitialPullStatus('pending');
+    }
+    if (!sameCloudGate(prev, next))
+        statusListener?.();
+    return next.state;
+}
+/**
+ * Cached check for the hot paths: closed while the choice is pending or
+ * settings.json is unreadable — re-derived if never computed or computed for
+ * another account — and while the persisted state still belongs to another
+ * account (ownerMismatch).
+ */
+function cloudOriginBlocked() {
+    if (!originGate || originGate.userId !== account.getUserId())
+        refreshCloudOriginGate();
+    return originGate.state !== 'clear' || ownerMismatch();
+}
+/** True while nothing may sync with NoteFlow Cloud (origin choice pending, settings.json unreadable). */
+function isCloudOriginGateBlocked() {
+    return cloudOriginBlocked();
+}
+/** Throws (instead of sending) when the gate closed under an operation already running. */
+function assertOriginOpen() {
+    if (cloudOriginBlocked())
+        throw new Error(ORIGIN_PENDING_ERROR);
+}
+/** The pending origin choice (the account the notes came from → the signed-in one), or null. */
+function getCloudOriginChoice() {
+    if (!originGate || originGate.userId !== account.getUserId())
+        refreshCloudOriginGate();
+    if (originGate?.state !== 'ask' || !originGate.choice)
+        return null;
+    // Live, not cached with the gate: GitHub can be connected / disconnected meanwhile.
+    return githubSync.getSyncStatus().connected ? { ...originGate.choice, githubConnected: true } : originGate.choice;
+}
+/**
+ * The user chose for a pending origin: 'merge' (B gets the local notes on the
+ * first sync's catch-up and the device gets B's) or 'replace' (main.ts already
+ * moved the local notes to the archive: the first sync only downloads).
+ * Adopts the signed-in account as the origin with a reset — 'replace' also
+ * marks the GitHub origin stale in the same write — and opens the gate. The
+ * caller (main.ts) runs the sync cycle. Checks the CACHED state, like GitHub:
+ * after 'replace' archived the notes, re-deriving would adopt on its own
+ * ('changed-empty') — that outcome is accepted as already adopted.
+ */
+function resolveCloudOriginChoice(choice) {
+    const s = cloudSettings ?? loadCloudSyncSettings();
+    if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)())
+        return { ok: false, error: 'not-enabled' };
+    const userId = account.getUserId();
+    if (!userId)
+        return { ok: false, error: 'not-signed-in' };
+    if (!originGate || originGate.userId !== userId)
+        refreshCloudOriginGate();
+    if (originGate?.state === 'unreadable')
+        return { ok: false, error: 'settings-unreadable' };
+    const parsed = (0, syncOrigin_1.readSettingsStrict)(getSettingsPath());
+    if (parsed === null)
+        return { ok: false, error: 'settings-unreadable' };
+    const stored = (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed);
+    const alreadyAdopted = !!stored && !stored.seeded && !stored.identity.stale && stored.identity.userId === userId;
+    if (originGate?.state !== 'ask' && !alreadyAdopted)
+        return { ok: false, error: 'not-pending' };
+    if (!alreadyAdopted) {
+        if (!adoptCloudOrigin(signedInCloudIdentity(userId), { reset: true, markGithubStale: choice === 'replace' })) {
+            return { ok: false, error: 'settings-unwritable' };
+        }
+    }
+    else if (choice === 'replace' && !(0, syncOrigin_1.markSyncOriginStaleFile)(getSettingsPath(), 'github')) {
+        return { ok: false, error: 'settings-unwritable' };
+    }
+    refreshCloudOriginGate(); // same identity now → clear (emits the status change)
+    return { ok: true };
+}
+/** The stored Cloud origin (archive label + manifest of 'replace'), seeded like the gate; null if none. */
+function getStoredCloudOriginIdentity() {
+    const parsed = (0, syncOrigin_1.readSettingsStrict)(getSettingsPath());
+    return parsed ? (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed)?.identity ?? null : null;
+}
 /**
  * Turns Cloud sync on. Requires a signed-in account; the key session may still
  * be locked (pushes gate themselves and drain from the journal after unlock).
@@ -443,7 +760,10 @@ function enableCloudSync() {
         return { ok: false, error: NOT_SIGNED_IN_ERROR };
     ensureStateOwner();
     const userId = account.getUserId();
-    patchSettings(userId ? { enabled: true, userId } : { enabled: true });
+    // Never claim another account's state for this one: if bindStateOwner could
+    // not reset it (the previous owner could not be recorded as the origin), the
+    // owner stays and the origin gate blocks until it can.
+    patchSettings(userId && !ownerMismatch() ? { enabled: true, userId } : { enabled: true });
     // GitHub Sync is now paused (syncProvider gives Cloud priority) and its
     // `lastSync` freezes while notes keep arriving here, so its pull's
     // local-deletion rule ("absent from remote + older than lastSync ⇒ deleted
@@ -455,6 +775,9 @@ function enableCloudSync() {
     githubSync.refreshOriginGate();
     syncError = undefined;
     setInitialPullStatus('pending');
+    // The notes dir may come from another account (or GitHub replaced them):
+    // with a pending choice nothing below — pull, catch-up, drain — moves.
+    refreshCloudOriginGate();
     statusListener?.();
     return { ok: true };
 }
@@ -485,6 +808,7 @@ function disableCloudSync() {
     githubSync.refreshOriginGate();
     syncError = undefined;
     setInitialPullStatus('pending');
+    refreshCloudOriginGate(); // off → clear (a pending choice is dropped, the origin is kept)
     statusListener?.();
     return { ok: true };
 }
@@ -675,6 +999,7 @@ async function uploadFileRowNow(relPath, content, force) {
             const baseSeq = (0, syncState_1.getCloudBase)(getState(), relPath)?.seq ?? null;
             const v2 = await restWithRetry(() => {
                 assertGeneration(gen);
+                assertOriginOpen();
                 return (0, cloudKeys_1.supabaseRest)(`/rest/v1/rpc/${cloudSyncLogic_1.CLOUD_BASE_UPSERT_RPC}`, {
                     method: 'POST',
                     body: {
@@ -711,6 +1036,7 @@ async function uploadFileRowNow(relPath, content, force) {
         }
         const rpc = await restWithRetry(() => {
             assertGeneration(gen);
+            assertOriginOpen();
             return (0, cloudKeys_1.supabaseRest)(`/rest/v1/rpc/${cloudSyncLogic_1.CLOUD_CONDITIONAL_UPSERT_RPC}`, {
                 method: 'POST',
                 body: {
@@ -748,6 +1074,7 @@ async function uploadFileRowNow(relPath, content, force) {
     }
     const res = await restWithRetry(() => {
         assertGeneration(gen);
+        assertOriginOpen();
         return (0, cloudKeys_1.supabaseRest)('/rest/v1/files?on_conflict=user_id,path_key', {
             method: 'POST',
             headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
@@ -803,6 +1130,7 @@ async function removeRemotePaths(relPaths) {
 async function removeRemoteByPathKeys(pathKeys) {
     if (pathKeys.length === 0)
         return;
+    assertOriginOpen(); // defence in depth: the entry points already refuse while the choice is pending
     const filter = `path_key=in.(${pathKeys.map((k) => `"${k}"`).join(',')})`;
     // Entitlements never fetched (offline boot, keychain locked…) or only restored
     // from the on-disk cache are UNVERIFIED: try the tombstone, but NEVER fall back
@@ -889,6 +1217,13 @@ function schedulePush(relPath, content, onStart, onComplete) {
     // new account's first-sync catch-up uploads the folder) — so the op below
     // lands in the journal of the account now signed in.
     ensureStateOwner();
+    // Origin choice pending: the signed-in account is not this dir's remote yet —
+    // nothing is uploaded nor journaled (the resolution resets the journal, and
+    // a merge's first sync uploads every note anyway).
+    if (cloudOriginBlocked()) {
+        onComplete?.('sync-gated:origin-choice');
+        return;
+    }
     if (action() === 'journal') {
         // Gate closed: journal the edit (no timer, no upload — the drain waits for
         // the gate too) so the first pull treats it as a pending local edit
@@ -908,6 +1243,12 @@ function schedulePush(relPath, content, onStart, onComplete) {
  * failures (the journal drain retries it forced).
  */
 function schedulePushUnguarded(relPath, content, onStart, onComplete, opts) {
+    // Unguarded = past the initial-pull gate, never past the origin gate (it
+    // only runs from a pull, which checked it — defence in depth).
+    if (cloudOriginBlocked()) {
+        onComplete?.();
+        return;
+    }
     const existing = pushTimers.get(relPath);
     if (existing)
         clearTimeout(existing);
@@ -921,6 +1262,12 @@ function schedulePushUnguarded(relPath, content, onStart, onComplete, opts) {
         // account's journal and the push gate is closed again — drop silently.
         if (ensureStateOwner())
             return;
+        // Origin choice pending (becoming blocked cancels the timers — defence in
+        // depth): the op stays journaled; the resolution resets the journal.
+        if (cloudOriginBlocked()) {
+            onComplete?.();
+            return;
+        }
         const gen = stateGeneration;
         onStart?.();
         pendingMutations++;
@@ -981,6 +1328,8 @@ async function pushPathsNow(notesDir, relPaths) {
         return { pushed: 0, errors: [] };
     relPaths = relPaths.filter((relPath) => !(0, localOnlyNotes_1.isLocalOnlySyncPath)(notesDir, relPath)); // never synced (localOnlyNotes.ts)
     ensureStateOwner();
+    if (cloudOriginBlocked())
+        return { pushed: 0, errors: [] }; // origin choice pending: not even journaled
     if ((0, cloudSyncLogic_1.planLocalPush)({ enabled: s.enabled, configured: true, initialPullStatus }) === 'journal') {
         let journaled = false;
         const nowIso = new Date().toISOString();
@@ -1062,6 +1411,8 @@ async function flushPathForSnapshot(notesDir, relPath, opts = {}) {
         localOnly: (0, localOnlyNotes_1.isLocalOnlySyncPath)(notesDir, relPath),
         gateOpen: () => {
             ensureStateOwner();
+            if (cloudOriginBlocked())
+                return false; // origin choice pending → 'gated', nothing uploaded
             return (0, cloudSyncLogic_1.planLocalPush)({ enabled: true, configured: true, initialPullStatus }) === 'push';
         },
         inFlight: () => inFlightUploads.has(relPath),
@@ -1080,6 +1431,10 @@ async function scheduleDelete(relPath) {
     if ((0, localOnlyNotes_1.isLocalOnlySyncPath)(notesDirPath, relPath))
         return; // never synced: nothing remote to tombstone
     ensureStateOwner();
+    // Origin choice pending: the signed-in account is not this dir's remote yet —
+    // nothing is tombstoned there (nor journaled: the resolution resets the journal).
+    if (cloudOriginBlocked())
+        return;
     const existing = pushTimers.get(relPath);
     if (existing) {
         clearTimeout(existing);
@@ -1116,6 +1471,8 @@ async function scheduleDeleteDir(dir) {
     if (notesDirPath && (0, localOnlyNotes_1.isLocalOnlyDir)(notesDirPath, dir))
         return;
     ensureStateOwner();
+    if (cloudOriginBlocked())
+        return; // origin choice pending (see scheduleDelete)
     for (const key of [...pushTimers.keys()]) {
         if (key.startsWith(`${dir}/`)) {
             clearTimeout(pushTimers.get(key));
@@ -1583,6 +1940,13 @@ async function pullNotes(notesDir) {
         return empty;
     // Another account's watermark/journal must never drive this pull.
     ensureStateOwner();
+    // The notes dir belongs to another account (or settings.json is unreadable):
+    // no pull until the user chooses. `incomplete` keeps the temporary-note
+    // expiry from treating this as a clean pull; initialPullStatus stays pending.
+    if (refreshCloudOriginGate() !== 'clear' || ownerMismatch())
+        return { ...empty, incomplete: true };
+    // Read AFTER the gate: an adoption with a reset ("changed-empty") just dropped
+    // the previous account's watermark / lastSync.
     const s = cloudSettings ?? loadCloudSyncSettings();
     // Re-checked after every await: a pull that started under another account
     // must persist nothing (watermark, retry set, journal, 'ok', catch-up).
@@ -2214,6 +2578,10 @@ async function retrySyncJournal(notesDir) {
     if (!s.enabled || !(0, cloudConfig_1.isCloudConfigured)())
         return;
     ensureStateOwner();
+    // Re-evaluated (not cached), like the pull: the journal never drains into an
+    // account the notes dir does not belong to.
+    if (refreshCloudOriginGate() !== 'clear' || ownerMismatch())
+        return;
     if (initialPullStatus !== 'ok')
         return;
     if (retryInFlight)

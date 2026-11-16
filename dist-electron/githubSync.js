@@ -957,7 +957,7 @@ function adoptGithubOrigin(id, resetRemote, opts = {}) {
             settings.githubSync = fileSync;
         }
         const adopted = (0, syncOrigin_1.withSyncOrigin)(settings, id);
-        writeSettings(opts.markCloudStale ? (0, syncOrigin_1.withOriginMarkedStale)(adopted, 'cloud') : adopted);
+        writeSettings(opts.markCloudStale ? (0, syncOrigin_1.withOriginMarkedStale)((0, syncOrigin_1.withSeededOrigin)(adopted, 'cloud'), 'cloud') : adopted);
     }
     catch (err) {
         console.error('[GitHubSync] could not record the notes dir origin (settings.json unwritable):', String(err));

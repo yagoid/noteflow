@@ -19,6 +19,7 @@ import {
   writeSyncOriginFile,
   markSyncOriginStaleFile,
   withOriginMarkedStale,
+  withSeededOrigin,
   resolveStoredCloudOrigin,
   type SyncIdentity,
 } from '../../electron/syncOrigin'
@@ -182,6 +183,19 @@ describe('settings helpers', () => {
     expect(withOriginMarkedStale({ syncOrigin: { github: { owner: 'me', repo: 'r' } } }, 'cloud')).toEqual({ syncOrigin: { github: { owner: 'me', repo: 'r' } } })
     expect(withOriginMarkedStale({ theme: 'x' }, 'github')).toEqual({ theme: 'x' })
   })
+  it('withSeededOrigin records an implicit origin (before marking it stale) and leaves recorded ones alone', () => {
+    const cloudOnly = { cloudSync: { userId: 'uA', enabled: false } }
+    expect(withSeededOrigin(cloudOnly, 'cloud')).toEqual({ ...cloudOnly, syncOrigin: { cloud: { userId: 'uA' } } })
+    expect(cloudOnly).toEqual({ cloudSync: { userId: 'uA', enabled: false } }) // input untouched
+    const ghOnly = { githubSync: { owner: 'me', repo: 'r', repoId: 5, encryptedToken: 'x' } }
+    expect(withSeededOrigin(ghOnly, 'github').syncOrigin).toEqual({ github: { repoId: 5, owner: 'me', repo: 'r' } })
+    const recorded = { cloudSync: { userId: 'uB' }, syncOrigin: { cloud: { userId: 'uA' } } }
+    expect(withSeededOrigin(recorded, 'cloud')).toBe(recorded)
+    expect(withSeededOrigin({}, 'cloud')).toEqual({})
+    expect(withSeededOrigin({ githubSync: { enabled: false } }, 'github')).toEqual({ githubSync: { enabled: false } })
+    // Seed + mark: a pre-feature install can't dodge the stale mark.
+    expect(withOriginMarkedStale(withSeededOrigin(cloudOnly, 'cloud'), 'cloud').syncOrigin).toEqual({ cloud: { userId: 'uA', stale: true } })
+  })
   it('resolveStoredCloudOrigin seeds from cloudSync.userId when no origin was ever recorded', () => {
     expect(resolveStoredCloudOrigin({})).toBeUndefined()
     expect(resolveStoredCloudOrigin({ cloudSync: { enabled: true } })).toBeUndefined()
@@ -229,6 +243,10 @@ describe('file wrappers', () => {
     fs.writeFileSync(file, '{ nope')
     expect(markSyncOriginStaleFile(file, 'cloud')).toBe(false)
     expect(fs.readFileSync(file, 'utf-8')).toBe('{ nope')
+    // Implicit origin (pre-feature install): seeded, then marked.
+    fs.writeFileSync(file, JSON.stringify({ cloudSync: { userId: 'uA' } }))
+    expect(markSyncOriginStaleFile(file, 'cloud')).toBe(true)
+    expect(JSON.parse(fs.readFileSync(file, 'utf-8')).syncOrigin).toEqual({ cloud: { userId: 'uA', stale: true } })
   })
   it('hasSyncedLocalNotes: local-only notes do not count; unreadable dir fails closed', () => {
     const dir = path.join(tmp, 'notes')

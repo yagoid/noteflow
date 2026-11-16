@@ -45,6 +45,7 @@ exports.getStoredIdentity = getStoredIdentity;
 exports.resolveStoredCloudOrigin = resolveStoredCloudOrigin;
 exports.withSyncOrigin = withSyncOrigin;
 exports.withOriginMarkedStale = withOriginMarkedStale;
+exports.withSeededOrigin = withSeededOrigin;
 exports.decideOrigin = decideOrigin;
 exports.hasSyncedLocalNotes = hasSyncedLocalNotes;
 exports.readSettingsStrict = readSettingsStrict;
@@ -215,6 +216,28 @@ function withOriginMarkedStale(settings, kind) {
     return { ...settings, [exports.SYNC_ORIGIN_KEY]: { ...origin, [kind]: { ...origin[kind], stale: true } } };
 }
 /**
+ * A copy of `settings` where the backend's origin is RECORDED when it was only
+ * implicit: no `syncOrigin.<kind>` but a connection / sync state that says
+ * where the notes came from — Cloud: `cloudSync.userId` (resolveStoredCloudOrigin);
+ * GitHub: the connected `githubSync` repo. Used right before marking the
+ * other backend's origin stale, so an install from before this feature can't
+ * dodge the mark (and later sync those notes without asking). Nothing to seed
+ * → the same object. Does not mutate the input.
+ */
+function withSeededOrigin(settings, kind) {
+    if (getStoredIdentity(settings, kind))
+        return settings;
+    if (kind === 'cloud') {
+        const seed = resolveStoredCloudOrigin(settings);
+        return seed?.seeded ? withSyncOrigin(settings, seed.identity) : settings;
+    }
+    const gh = settings.githubSync;
+    if (!isObject(gh) || typeof gh.owner !== 'string' || !gh.owner || typeof gh.repo !== 'string' || !gh.repo)
+        return settings;
+    const repoId = typeof gh.repoId === 'number' && Number.isFinite(gh.repoId) ? gh.repoId : undefined;
+    return withSyncOrigin(settings, { kind: 'github', owner: gh.owner, repo: gh.repo, ...(repoId !== undefined ? { repoId } : {}) });
+}
+/**
  * Should syncing with `next` go ahead, or must the user choose first?
  * Asks only when there are synced notes on disk AND either the identity
  * changed or the stored record is stale (the notes came from the other
@@ -285,9 +308,13 @@ function readSettingsStrict(settingsPath) {
 function writeSyncOriginFile(settingsPath, id) {
     return updateSettingsFileStrict(settingsPath, (current) => withSyncOrigin(current, id));
 }
-/** Read-modify-write marking the backend's origin stale (withOriginMarkedStale); same refusals as writeSyncOriginFile. */
+/**
+ * Read-modify-write marking the backend's origin stale — seeded first when it
+ * was only implicit (withSeededOrigin, withOriginMarkedStale); same refusals
+ * as writeSyncOriginFile.
+ */
 function markSyncOriginStaleFile(settingsPath, kind) {
-    return updateSettingsFileStrict(settingsPath, (current) => withOriginMarkedStale(current, kind));
+    return updateSettingsFileStrict(settingsPath, (current) => withOriginMarkedStale(withSeededOrigin(current, kind), kind));
 }
 function updateSettingsFileStrict(settingsPath, update) {
     const current = readSettingsStrict(settingsPath);

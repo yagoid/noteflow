@@ -75,6 +75,7 @@ import {
   readSettingsStrict,
   withSyncOrigin,
   withOriginMarkedStale,
+  withSeededOrigin,
   markSyncOriginStaleFile,
 } from './syncOrigin'
 
@@ -1229,7 +1230,7 @@ function adoptGithubOrigin(id: SyncIdentity, resetRemote: boolean, opts: { markC
       settings.githubSync = fileSync
     }
     const adopted = withSyncOrigin(settings, id)
-    writeSettings(opts.markCloudStale ? withOriginMarkedStale(adopted, 'cloud') : adopted)
+    writeSettings(opts.markCloudStale ? withOriginMarkedStale(withSeededOrigin(adopted, 'cloud'), 'cloud') : adopted)
   } catch (err) {
     console.error('[GitHubSync] could not record the notes dir origin (settings.json unwritable):', String(err))
     return false
