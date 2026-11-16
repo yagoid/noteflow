@@ -588,16 +588,16 @@ Contenido del dir de notas:
   **Espejo en noteflow-mobile** (`src/core/uiSettings.ts`): su saneador también descarta claves
   desconocidas y el móvil re-sanea el fichero antes de cada escritura (`appearanceStore`), así que un
   campo nuevo que no se porte allí se borra en cuanto el móvil guarda su apariencia (p. ej. un cambio de
-  acento). Todo campo nuevo del esquema hay que añadirlo en los dos. **Excepción consciente:** el
-  valor centinela `'text'` de `accent`/`editorColors.*` (color "texto" adaptativo) aún no está en el espejo
-  móvil — riesgos y compatibilidad con versiones anteriores en **Color "texto" adaptativo** de `patterns.md`
-  (sección "Colores del editor"). Tampoco están aún en el espejo móvil `lastDarkThemeId`/`lastLightThemeId`:
-  los desktops anteriores a ese cambio y el móvil las borran en su siguiente escritura de
-  `ui-settings.json` (de cualquier tipo, no solo de tema); el escritorio cae a la memoria en RAM o a
-  NoteFlow Dark / Light, sin errores — ver "Light / Dark recuerda el último tema de cada tipo" en
-  `patterns.md`. Igual `editor.moveCheckedToBottom` (pendiente en el espejo móvil): una escritura del
-  móvil lo borra y los desktops vuelven al valor por defecto (desactivado) en su siguiente arranque
-  (`reloadUiSettings` conserva el valor en memoria si la clave falta).
+  acento). Todo campo nuevo del esquema hay que añadirlo en los dos. **Estado del espejo (2026-11-16):**
+  el móvil ya conoce todas las claves actuales. El centinela `'text'` de `accent`/`editorColors.*` (color
+  "texto" adaptativo) y `lastDarkThemeId`/`lastLightThemeId` llegaron en `09b9e28` (2026-11-14, publicado
+  en la prueba cerrada 5, 1.0.0). `editor.moveCheckedToBottom` llegó en `9345c7d` (2026-11-16), **aún sin
+  publicar**: hasta la siguiente versión del móvil, una escritura de apariencia desde el móvil instalado lo
+  borra y los desktops vuelven al valor por defecto (desactivado) en su siguiente arranque
+  (`reloadUiSettings` conserva el valor en memoria si la clave falta). Los **desktops anteriores** a cada
+  cambio siguen borrando esas claves en cualquier escritura de `ui-settings.json` — detalle en **Color
+  "texto" adaptativo** (sección "Colores del editor") y "Light / Dark recuerda el último tema de cada
+  tipo" de `patterns.md`.
   Claves de override tri-estado: AUSENTE = nunca escrita (los stores caen a las fuentes legacy
   locales y hacen seed una vez), `null` = override borrado explícitamente ("sigue al tema"),
   string = valor. Los stores (`themeStore`, `editorSettingsStore`) siguen dual-escribiendo las

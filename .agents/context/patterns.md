@@ -1031,7 +1031,8 @@ y viajan con él.
     estable (`sortCheckedToBottom`).
 - **Pendiente/no hecho:** mover con teclado entre niveles (Alt+↑ no sale de la sublista), soltar una
   tarea como **primera** subtarea de una que aún no tiene ninguna, ni animar el drag/Alt+↑. La clave
-  `moveCheckedToBottom` **no está aún en el espejo móvil** de `uiSettings` (ver `architecture.md`).
+  `moveCheckedToBottom` ya está en el espejo móvil de `uiSettings` (`9345c7d`, 2026-11-16) pero aún sin
+  publicar: hasta entonces el móvil instalado la borra al escribir su apariencia (ver `architecture.md`).
 
 ### Editor: imágenes redimensionables y la columna Readable
 La imagen es un nodo **inline** (`ResizableImage.tsx`, `inline: true`, `allowBase64`) dentro de un
@@ -1600,7 +1601,8 @@ Piezas: `lib/miniSidebar.ts` (lógica pura con tests en `tests/lib/miniSidebar.t
   el tema saliente si solo llegó por un reload (que nunca escribe). Límites conocidos: un cliente que
   solo escribe `theme` (desktop antiguo, móvil) no actualiza la memoria, así que lo que llegue después
   del fichero puede pisar en memoria un tema que solo vio por reload. Además, los **desktops anteriores
-  a este cambio y el móvil** (espejo `noteflow-mobile` `src/core/uiSettings.ts`, pendiente) no conocen
+  a este cambio y los móviles anteriores a la prueba cerrada 5** (el espejo `noteflow-mobile`
+  `src/core/uiSettings.ts` las conoce desde `09b9e28`, 2026-11-14) no conocen
   las claves: su saneador reconstruye el fichero solo con las que conoce, así que **las borran en su
   siguiente escritura de `ui-settings.json` de cualquier tipo** (tamaño de fuente, `showToc`…, no solo un
   cambio de tema), y el fichero viaja entero con last-write-wins en GitHub y Cloud. El escritorio cae
@@ -3707,10 +3709,10 @@ consumidores que los leen por `getComputedStyle` y parsean canales (vista cerebr
 `--ng-accent-ink` (casillas del overview) se calcula con `resolveSectionInk('--accent')` y el resto usa
 `text-surface-0` o son indicadores sin texto encima.
 
-**Compatibilidad de `'text'` (excepción consciente a "todo campo nuevo en ambos espejos", ver
-`ui-settings.json` en `architecture.md`):**
-- **Móvil (pendiente):** el espejo `noteflow-mobile/src/core/uiSettings.ts` solo acepta tripletes →
-  ignora `'text'` (sigue al tema) y lo borra del fichero en su siguiente escritura de apariencia.
+**Compatibilidad de `'text'` (ver `ui-settings.json` en `architecture.md`):**
+- **Móvil:** el espejo `noteflow-mobile/src/core/uiSettings.ts` lo acepta desde `09b9e28` (2026-11-14,
+  prueba cerrada 5). Un móvil anterior solo acepta tripletes → ignora `'text'` (sigue al tema) y lo
+  borra del fichero en su siguiente escritura de apariencia.
 - **Escritorio anterior a este cambio:** también lo descarta, y es peor que el móvil: su handler
   `ui-settings:set` hace `mergeUiSettings(readUiSettingsFile(), patch)` sobre el fichero **ya saneado**,
   así que **cualquier** escritura (cambiar tema, tamaño de fuente del editor…) reescribe el fichero sin
