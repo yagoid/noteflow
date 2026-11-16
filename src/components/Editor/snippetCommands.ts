@@ -4,9 +4,12 @@ import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { isInlineSnippet } from '../../lib/snippets'
 
 /**
- * The slice an (already expanded) snippet inserts: its markdown goes through the
- * same markdown → HTML → ProseMirror path as a markdown paste (Editor.tsx
- * handlePaste), so headings, lists and checkboxes render. A one-line snippet
+ * The slice an (already expanded) snippet inserts: its markdown goes through
+ * markdown → HTML → ProseMirror like a markdown paste (Editor.tsx handlePaste),
+ * so headings, lists and checkboxes render — but read like a note, not like
+ * pasted text: the user wrote the snippet, so its tables keep their column
+ * widths (htmlFromMarkdown's default columnWidths; a paste turns them off).
+ * Off only in a linked note's plain schema. A one-line snippet
  * without block syntax becomes an OPEN inline slice — it joins the text at the
  * caret instead of splitting the paragraph. A multi-block snippet that ends in a
  * blank line gets a trailing empty paragraph, so the caret lands below it

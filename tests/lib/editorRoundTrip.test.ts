@@ -203,8 +203,8 @@ describe('canonical sections are byte-identical', () => {
 })
 
 // Small fixed blocks for the exhaustive adjacency checks.
-type Kind = 'paragraph' | 'emptyParagraph' | 'heading' | 'hr' | 'code' | 'quote' | 'table' | 'table1' | 'kanban' | ListType
-const KINDS: Kind[] = ['paragraph', 'emptyParagraph', 'heading', 'hr', 'code', 'quote', 'table', 'table1', 'kanban', ...LIST_TYPES]
+type Kind = 'paragraph' | 'emptyParagraph' | 'heading' | 'hr' | 'code' | 'quote' | 'table' | 'table1' | 'tableW' | 'kanban' | ListType
+const KINDS: Kind[] = ['paragraph', 'emptyParagraph', 'heading', 'hr', 'code', 'quote', 'table', 'table1', 'tableW', 'kanban', ...LIST_TYPES]
 
 const tableCell = (type: string, text: string, textAlign: string | null = null): JNode =>
   ({ type, attrs: { colspan: 1, rowspan: 1, colwidth: null, textAlign }, content: text ? [p(t(text))] : [p()] })
@@ -228,6 +228,15 @@ function block(kind: Kind, nestedLast = false): JNode {
       { type: 'tableRow', content: [tableCell('tableHeader', 'h')] },
       { type: 'tableRow', content: [tableCell('tableCell', 'a')] },
     ] }
+    // Column widths (dashes): one column with a width (centred), one without.
+    case 'tableW': {
+      const cell = (type: string, text: string, colwidth: number[] | null, textAlign: string | null) =>
+        ({ type, attrs: { colspan: 1, rowspan: 1, colwidth, textAlign }, content: [p(t(text))] })
+      return { type: 'table', content: [
+        { type: 'tableRow', content: [cell('tableHeader', 'h1', [12], 'center'), cell('tableHeader', 'h2', null, null)] },
+        { type: 'tableRow', content: [cell('tableCell', 'a', [12], 'center'), cell('tableCell', 'b', null, null)] },
+      ] }
+    }
     case 'kanban': return load('<!-- kanban -->\n- Todo\n  - [ ] card\n<!-- /kanban -->').child(0).toJSON() as JNode
     default: {
       const sub = nestedLast ? [list(kind === 'taskList' ? 'bulletList' : 'taskList', [listItem(kind === 'taskList' ? 'bulletList' : 'taskList', p(t('sub')))])] : []
@@ -297,12 +306,16 @@ describe('lossless: documents the editor can hold', () => {
   it(`${SEEDS} random documents`, async () => {
     let checked = 0
     let mixedNeighbours = 0
+    let widthTables = 0
     for (let seed = 1; seed <= SEEDS; seed++) {
       if (seed % 25 === 0) await breathe()
       const doc = docOf(genDoc(makeRng(seed)).content!)
       if (ambiguity(doc)) continue
       expectLossless(doc, `seed ${seed}`)
       checked++
+      let hasWidth = false
+      doc.descendants((n) => { if (n.attrs.colwidth) hasWidth = true })
+      if (hasWidth) widthTables++
       for (let i = 0; i + 1 < doc.childCount; i++) {
         const [x, y] = [doc.child(i).type.name, doc.child(i + 1).type.name]
         if (x !== y && LIST_TYPES.includes(x as ListType) && LIST_TYPES.includes(y as ListType)) mixedNeighbours++
@@ -312,6 +325,8 @@ describe('lossless: documents the editor can hold', () => {
     // the reported bug), or this test silently tests nothing.
     expect(checked).toBeGreaterThan(SEEDS * 0.3)
     expect(mixedNeighbours).toBeGreaterThan(SEEDS * 0.03)
+    // …and tables with column widths among them.
+    expect(widthTables).toBeGreaterThan(SEEDS * 0.02)
   }, 120_000)
 })
 

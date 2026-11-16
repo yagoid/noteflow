@@ -6,17 +6,19 @@ import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import {
   HOVER_GUTTER, columnDropTarget, handleAnchor, columnHandleSpan, columnName, contains, gapPosition, hotLines, hoverZone,
-  nearEdges, pillBox, pillParts, plusBars, rowDropTarget, rowHandleSpan, rowName, selectionStats, visibleBody,
-  type Box, type DropTarget, type TableGeometry,
+  nearEdges, nearGrip, pillBox, pillParts, plusBars, resizeGrips, rowDropTarget, rowHandleSpan, rowName, selectionStats,
+  visibleBody, type Box, type DropTarget, type ResizeGrip, type TableGeometry,
 } from '../../lib/tableControls'
 import type { CellSummary } from '../../lib/tableData'
+import { minWidthForHeader, pxFromWidth, widthFromPx } from '../../lib/tableWidth'
 import { useLanguageStore } from '../../stores/languageStore'
 import {
-  findTablePos, focusCell, getCellSelectionRect, getSelectedCellsData, getTableData, getTableInfo, runTableCommand,
-  selectColumn, selectRow,
+  findTablePos, focusCell, getCellSelectionRect, getColumnWidths, getSelectedCellsData, getTableData, getTableInfo,
+  runTableCommand, selectColumn, selectRow, setColumnWidth,
 } from './tableOps'
-import { measureTable, tableDomAt, tablePosOfDom } from './tableDom'
-import { runTableAction, type TableMenuState } from './tableMenus'
+import { headerMinContentPx, measureTable, tableDomAt, tablePosOfDom } from './tableDom'
+import { runControlCommand, runTableAction, type TableMenuState } from './tableMenus'
+import { columnResizePreview, setColumnResizePreview } from './TableColumnResize'
 import { TableMenu } from './TableMenu'
 import {
   DRAG_THRESHOLD, EDGE_SCROLL_SPEED, EDGE_SCROLL_ZONE, edgeScrollVertical, swallowNextClick, verticalScroller,
@@ -49,6 +51,9 @@ interface Layout {
    * bar makes room for it).
    */
   pill: { geo: TableGeometry; stats: CellSummary; onActive: boolean } | null
+  /** Resize strips on the columns' right edges (none without column widths), and the one the pointer is near. */
+  grips: ResizeGrip[]
+  nearGrip: number | null
 }
 
 interface Press {
@@ -68,6 +73,25 @@ interface Drag extends DropTarget {
   from: number
   table: HTMLTableElement
   label: string
+}
+
+/** A press on a column's resize strip (a drag once it moves past DRAG_THRESHOLD). */
+interface Resize {
+  table: HTMLTableElement
+  col: number
+  /** Pointer x at the press. */
+  x: number
+  /** The column's width when pressed (px, border-box), as shown (never less than its width in dashes). */
+  startPx: number
+  /** The table's font size (px): one dash is half of it. */
+  fontSize: number
+  /** Narrowest width the drag sets (dashes): the header's longest word, never under COLUMN_WIDTH_MIN. */
+  minWidth: number
+  /** Its width in the document (dashes; null = automatic). */
+  base: number | null
+  /** The width shown so far (dashes). */
+  width: number | null
+  dragging: boolean
 }
 
 const sameLayout = (a: Layout | null, b: Layout | null) =>
@@ -127,21 +151,32 @@ const GripV = () => (
  * reorder), and "+" bars on the right / bottom edge that append a column /
  * row. The document and its schema are untouched: no NodeView, no class on
  * ProseMirror's DOM (it would re-read it) — the drag's source dimming and the
- * header's no-drop stripes are overlay boxes too. Geometry and decisions:
- * src/lib/tableControls.ts. Mounted only for an editable editor.
+ * header's no-drop stripes are overlay boxes too. With `columnWidths` (not in
+ * a linked note's plain Markdown), a strip on each column's right edge resizes
+ * it: live through a decoration (TableColumnResize.ts), one setColumnWidth
+ * transaction on release; double click = fit the content. Geometry and
+ * decisions: src/lib/tableControls.ts. Mounted only for an editable editor.
  */
-export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef: RefObject<HTMLDivElement | null> }) {
+export function TableControls({ editor, scrollRef, columnWidths = false }: {
+  editor: Editor
+  scrollRef: RefObject<HTMLDivElement | null>
+  columnWidths?: boolean
+}) {
   const t = useT()
   const [layout, setLayout] = useState<Layout | null>(null)
   const [menu, setMenuState] = useState<TableMenuState | null>(null)
   const [drag, setDragState] = useState<Drag | null>(null)
+  // The column being resized (rendering: its strip in accent, the other controls hidden).
+  const [resizing, setResizing] = useState<{ table: HTMLTableElement; col: number } | null>(null)
   const menuRef = useRef(menu)
   const dragRef = useRef(drag)
+  const resizeRef = useRef<Resize | null>(null)
   const pointerRef = useRef<{ x: number; y: number } | null>(null)
   const pressRef = useRef<Press | null>(null)
   const frameRef = useRef<number | null>(null)
   const loopRef = useRef<number | null>(null)
   const detachRef = useRef<(() => void) | null>(null)
+  const resizeDetachRef = useRef<(() => void) | null>(null)
   const ghostRef = useRef<HTMLDivElement>(null)
   // The pill's rendered width (its content): the row "+" bar starts right of it.
   const [pillWidth, setPillWidth] = useState(0)
@@ -192,9 +227,9 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
       }
     }
 
-    // A drag or an open handle menu keeps its table; else the hovered one; else the selection's.
+    // A resize, a drag or an open handle menu keeps its table; else the hovered one; else the selection's.
     const handleMenu = menuRef.current
-    let table = dragRef.current?.table ?? handleMenu?.table ?? hovered
+    let table = resizeRef.current?.table ?? dragRef.current?.table ?? handleMenu?.table ?? hovered
     if (!table) {
       const pos = findTablePos(editor.state)
       table = pos === null ? null : tableDomAt(view, pos)
@@ -222,11 +257,14 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
       const pillGeo = selTable === table ? geo : selTable && measureTable(selTable)
       if (data && pillGeo) pill = { geo: pillGeo, stats: selectionStats(data.rows, selRect.top), onActive: selTable === table }
     }
+    const rightLimit = Math.min(clip.right, view.dom.getBoundingClientRect().right)
+    // The column "+" bar doesn't depend on the pill (it only shortens the row bar).
+    const grips = columnWidths ? resizeGrips(geo, plusBars(geo, rightLimit).column, rightLimit) : []
     return {
       table,
       geo,
       clip,
-      rightLimit: Math.min(clip.right, view.dom.getBoundingClientRect().right),
+      rightLimit,
       offset: { x: clip.left - cr.left, y: clip.top - cr.top },
       hovered: isHovered,
       hot: isHovered ? hotLines(geo, p!.x, p!.y) : { row: null, col: null },
@@ -234,8 +272,10 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
       selCol,
       selRow,
       pill,
+      grips,
+      nearGrip: isHovered ? nearGrip(grips, p!.x, p!.y) : null,
     }
-  }, [editor, scrollRef])
+  }, [editor, scrollRef, columnWidths])
 
   const schedule = useCallback(() => {
     if (frameRef.current !== null) return
@@ -254,7 +294,7 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
     if (!scroller || !container) return
     const onMove = (e: PointerEvent) => { pointerRef.current = { x: e.clientX, y: e.clientY }; schedule() }
     const onLeave = () => {
-      if (pressRef.current) return
+      if (pressRef.current || resizeRef.current) return
       pointerRef.current = null
       schedule()
     }
@@ -316,8 +356,9 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
       anchor: (geo && handleAnchor(geo, press.kind, press.index)) ?? press.el.getBoundingClientRect(),
       placement: press.kind === 'column' ? 'below' : 'right',
       owner: press.el,
+      columnWidths,
     })
-  }, [selectLine, setMenu])
+  }, [selectLine, setMenu, columnWidths])
 
   // ── Dragging a handle ───────────────────────────────────────────────────
 
@@ -383,7 +424,7 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
   }, [editor, selectLine, setDrag, setMenu, t])
 
   const onHandlePointerDown = (e: React.PointerEvent<HTMLElement>, kind: LineKind, index: number) => {
-    if (e.button !== 0 || !layout || pressRef.current) return
+    if (e.button !== 0 || !layout || pressRef.current || resizeRef.current) return
     const press: Press = {
       kind, index, table: layout.table, el: e.currentTarget, x: e.clientX, y: e.clientY, dragging: false, blocked: false,
     }
@@ -432,9 +473,106 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
   // Unmount mid-drag (note switch, external update…): drop listeners and state.
   useEffect(() => () => {
     detachRef.current?.()
+    resizeDetachRef.current?.()
     if (loopRef.current !== null) cancelAnimationFrame(loopRef.current)
-    document.body.classList.remove('nf-table-grabbing')
-  }, [])
+    document.body.classList.remove('nf-table-grabbing', 'nf-table-resizing')
+    if (!editor.isDestroyed && columnResizePreview(editor.state)) setColumnResizePreview(editor.view, null)
+  }, [editor])
+
+  // ── Resizing a column ────────────────────────────────────────────────────
+
+  /** End a press on a resize strip. A drag drops its live preview and, if `commit` and the width changed, sets it (its own undo step). */
+  const endResize = useCallback((commit: boolean) => {
+    resizeDetachRef.current?.()
+    resizeDetachRef.current = null
+    const cur = resizeRef.current
+    resizeRef.current = null
+    if (!cur?.dragging) return
+    document.body.classList.remove('nf-table-resizing')
+    setResizing(null)
+    // The click that follows the pointerup must not reach what's under it (a cell: the caret).
+    swallowNextClick()
+    if (editor.isDestroyed) return
+    if (columnResizePreview(editor.state)) setColumnResizePreview(editor.view, null)
+    const tablePos = tablePosOfDom(editor.view, cur.table)
+    if (commit && tablePos !== null && cur.width !== null && cur.width !== cur.base) {
+      runControlCommand(editor, setColumnWidth(cur.col, cur.width, { tablePos }))
+    }
+    schedule()
+  }, [editor, schedule])
+
+  const onGripPointerDown = (e: React.PointerEvent<HTMLElement>, col: number) => {
+    if (e.button !== 0 || !layout || pressRef.current || resizeRef.current) return
+    const table = layout.table
+    const tablePos = tablePosOfDom(editor.view, table)
+    const widths = tablePos === null ? null : getColumnWidths(editor.state, { tablePos })
+    const span = layout.geo.cols[col]
+    if (!widths || !span) return
+    // One dash = half the table's font size; an automatic column starts from its measured width.
+    const fontSize = parseFloat(getComputedStyle(table).fontSize) || 16
+    const base = widths[col] ?? null
+    // A header never breaks inside a word (index.css § Tables): narrower than its longest word,
+    // the column would show wider than saved — the drag stops there (and at 10 dashes).
+    const th = table.tBodies[0]?.rows[0]?.cells[col]
+    const minWidth = minWidthForHeader(th ? headerMinContentPx(th) : 0, fontSize)
+    const r: Resize = {
+      table, col, x: e.clientX, fontSize, minWidth, base, width: base, dragging: false,
+      // A width shows wider than saved when its header got a longer word since: start from what shows.
+      startPx: Math.max(base !== null ? pxFromWidth(base, fontSize) : 0, span.end - span.start),
+    }
+    resizeRef.current = r
+    pointerRef.current = { x: e.clientX, y: e.clientY }
+
+    const onMove = (ev: PointerEvent) => {
+      pointerRef.current = { x: ev.clientX, y: ev.clientY }
+      // The button is up but no pointerup came (released outside the window, a window switch…):
+      // drop the press like Esc — no width saved — instead of resizing until the next click.
+      if (!(ev.buttons & 1)) { endResize(false); return }
+      if (!r.dragging) {
+        if (Math.abs(ev.clientX - r.x) < DRAG_THRESHOLD) return
+        r.dragging = true
+        setMenu(null)
+        document.body.classList.add('nf-table-resizing')
+        setResizing({ table, col })
+      }
+      // Whole dashes (0.5em), from the header's longest word (≥ 10) to 80: what shows on release
+      // is exactly what's saved and read back.
+      const width = Math.max(r.minWidth, widthFromPx(r.startPx + ev.clientX - r.x, r.fontSize))
+      if (width === r.width) return
+      const pos = tablePosOfDom(editor.view, table)
+      if (pos === null) { endResize(false); return }
+      r.width = width
+      setColumnResizePreview(editor.view, { tablePos: pos, col, width })
+    }
+    // A click without moving does nothing (a double click resets: onDoubleClick).
+    const onUp = () => endResize(true)
+    const onCancel = () => endResize(false)
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape' || !r.dragging) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      endResize(false)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+    window.addEventListener('keydown', onKey, true)
+    resizeDetachRef.current = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }
+
+  /** Double click on a strip: the column fits its content again (nothing if it already does). */
+  const resetColumnWidth = (col: number) => {
+    if (!layout) return
+    const tablePos = tablePosOfDom(editor.view, layout.table)
+    const widths = tablePos === null ? null : getColumnWidths(editor.state, { tablePos })
+    if (!widths || widths[col] === null || widths[col] === undefined) return
+    runTableAction(editor, layout.table, { type: 'columnWidth', column: col, width: null })
+  }
 
   // ── "+" bars ─────────────────────────────────────────────────────────────
 
@@ -468,14 +606,19 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
   const bars = plusBars(geo, layout.rightLimit, pill && layout.pill!.onActive ? pill : null)
   const m = t.editor.table
   const dragging = drag !== null && drag.table === layout.table
+  const resizingCol = resizing && resizing.table === layout.table ? resizing.col : null
+  const busy = dragging || resizingCol !== null
   // The accent line: the dragged one, else the one whose menu is open, else a whole line the
   // selection covers. Read from state here, so it follows a menu / drag in the same render.
   const lineMenu = menu && menu.table === layout.table && menu.spec.kind !== 'cell' ? menu.spec : null
   const active = dragging ? { kind: drag.kind, index: drag.from } : lineMenu
   const onCol = active ? (active.kind === 'column' ? active.index : null) : layout.selCol
   const onRow = active ? (active.kind === 'row' ? active.index : null) : layout.selRow
-  const shownCol = (i: number) => (!dragging && layout.hot.col === i) || onCol === i
-  const shownRow = (i: number) => (!dragging && layout.hot.row === i) || onRow === i
+  const shownCol = (i: number) => (!busy && layout.hot.col === i) || onCol === i
+  const shownRow = (i: number) => (!busy && layout.hot.row === i) || onRow === i
+  // Resize strips: on the hovered table (or the one being resized), not while reordering or with a
+  // handle menu open (it covers the edges and acts on the line it selected).
+  const grips = resizingCol !== null || (layout.hovered && !dragging && !lineMenu) ? layout.grips : []
 
   let dropLine: React.CSSProperties | null = null
   let source: React.CSSProperties | null = null
@@ -507,7 +650,7 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
   return (
     <>
       <div
-        className={`nf-table-controls${dragging ? ' is-dragging' : ''}`}
+        className={`nf-table-controls${dragging ? ' is-dragging' : ''}${resizingCol !== null ? ' is-resizing' : ''}`}
         style={{ left: offset.x, top: offset.y, width: clip.right - clip.left, height: clip.bottom - clip.top }}
       >
         {source && <div className="nf-table-drag-source" style={source} />}
@@ -557,13 +700,34 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
             </button>
           )
         })}
+        {grips.map(({ col, box, edge }) => (
+          <div
+            key={`w${col}`}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={tf(m.resizeColumn, { n: col + 1 })}
+            title={resizingCol === null ? m.resizeHint : undefined}
+            data-col={col}
+            className={`nf-table-resize${resizingCol === col ? ' is-on' : ''}${resizingCol === null && layout.nearGrip === col ? ' is-near' : ''}`}
+            style={{
+              left: box.left - ox, top: box.top - oy, width: box.right - box.left, height: box.bottom - box.top,
+              '--line': `${edge - box.left}px`,
+            } as React.CSSProperties}
+            onPointerDown={(e) => onGripPointerDown(e, col)}
+            // Keep the editor's focus and selection; no native drag (it would hang a hidden capture window).
+            onMouseDown={(e) => e.preventDefault()}
+            onDragStart={(e) => e.preventDefault()}
+            onDoubleClick={() => resetColumnWidth(col)}
+            onWheel={forwardWheel}
+          />
+        ))}
         {bars.column && (
           <PlusBar
             kind="column"
             box={bars.column}
             origin={{ x: ox, y: oy }}
             label={m.addColumn}
-            shown={layout.near.right && !dragging}
+            shown={layout.near.right && !busy}
             onAdd={() => append('column')}
             onWheel={forwardWheel}
           />
@@ -574,7 +738,7 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
             box={bars.row}
             origin={{ x: ox, y: oy }}
             label={m.addRow}
-            shown={layout.near.bottom && !dragging}
+            shown={layout.near.bottom && !busy}
             onAdd={() => append('row')}
             onWheel={forwardWheel}
           />

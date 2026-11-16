@@ -92,6 +92,45 @@ encryption:
 - `NOTEFLOW_NOTES_DIR` (env) redirige el dir de notas en app y CLI (testing/scripting).
 - Los parsers toleran BOM UTF-8 (editores externos como Notepad lo añaden).
 
+### Tablas: ancho de columna (cuerpo de sección)
+El cuerpo de una sección es Markdown (`lib/markdownHtml.ts`, ver `patterns.md` "Editor: tablas"); no
+toca el frontmatter ni los tres espejos (`noteUtils`/`noteFormat`/CLI no leen tablas). Las tablas son
+pipe-tables GFM y el **ancho de una columna va en su celda de la fila separadora**:
+- **Codificación:** nº de **guiones** de la celda (los `:` son la alineación y no cuentan:
+  `:------------:` = centrada, 12 guiones). **1 guion = 0,5em** del tamaño de letra de la tabla (≈ un
+  carácter medio: "N guiones ≈ N caracteres"; escala igual en editor, sticky, vista previa y tarjeta del
+  resumen). `---` = **automático** (se ajusta al contenido, lo de siempre). Con ancho: **10…80 guiones**
+  (5em…40em): el mínimo es justo el de una columna automática (`min-width: 5em`), así ninguna columna puesta
+  a mano es más estrecha que una automática; 4-9 se leen como automático (y se reescriben `---`), más de 80
+  como 80. El ancho es el de la caja de la celda (border-box, de rejilla a rejilla). Ej.:
+  `| Producto | Precio | Notas |` + `| ------------------------ | ----------: | --- |` = 12em, 5em a la
+  derecha, automática.
+- **Lo que se ve:** la columna mide máx(n guiones, palabra más larga de la cabecera): la cabecera nunca
+  se parte dentro de una palabra (las celdas del cuerpo sí, para no ensanchar la columna). El arrastre no
+  baja de esa palabra, así que lo guardado es lo que se ve; si luego se renombra la cabecera con una palabra
+  más larga, o el ancho se escribió a mano, la columna se ve más ancha que lo guardado (sin cortes) y el
+  markdown no cambia hasta que se vuelva a redimensionar.
+- **Puertas al leer** (por tabla; si falla una, **toda** la tabla es automática): (1) separador con el
+  **espaciado canónico** de NoteFlow `| c1 | c2 | … |` (barras exteriores, un espacio a cada lado de cada
+  celda; se toleran espacios finales; vale para una columna) — lo compacto de una IA (`|------|`), lo
+  indentado o sin barras exteriores no pasa; (2) separador **no alineado con la cabecera**: si sus barras
+  sin escapar (`\|` es texto) caen en las mismas posiciones que las de la cabecera, es una tabla de un
+  formateador (Prettier, VS Code) o de una IA que alinea → automática.
+- **Al escribir** (`tableElToMd`, ancho leído de la celda de cabecera): sin ancho → `---` exactamente como
+  antes (`:---:`, `---:`, `:---`); con ancho n → n guiones con sus `:`. Si con anchos el separador quedara
+  alineado con la cabecera (puerta 2), se **suma 1 guion a la última columna con ancho** (se resta si está
+  en 80): cambio de 0,5em, solo en ese caso, estable desde el primer guardado. Una nota sin anchos se
+  guarda byte a byte como antes.
+- **Contextos que ignoran siempre los anchos:** markdown pegado como texto (`tableClipboard.ts`,
+  `htmlFromMarkdown(…, { columnWidths: false })`), el chat de IA (`ChatView.tsx`, salida de un LLM) y el
+  modo `plain` (notas vinculadas y sus vistas previas: ni se leen ni se escriben, el separador sale `---`).
+  Una IA que escribe en una nota (tools del agente) o el CLI pasan por las mismas puertas: lo típico
+  (alineado o compacto) queda automático. Los **snippets** sí leen anchos (los escribe el usuario: se leen
+  como una nota, salvo en una nota vinculada).
+- **Consecuencia aceptada:** una tabla escrita a mano con separador espaciado, no alineada y con ≥ 10
+  guiones en alguna columna sí toma anchos (es la forma de ponerlos a mano).
+- **Móvil:** aún no lo lee ni lo conserva (ver "⚠ Pendiente portar a móvil" en `patterns.md`).
+
 ### Migración v1 → v2
 - **Local** (`electron/migration.ts` → `migrateNotesDirToV2`): corre al arrancar, ANTES del pull
   inicial y del watcher. Convierte cada `<slug>-<id>.md` plano de la raíz en carpeta (parser

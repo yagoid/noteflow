@@ -114,6 +114,8 @@ export const editor = {
     alignLeft: 'Align left',
     alignCenter: 'Align center',
     alignRight: 'Align right',
+    // The column fits its content again (drops the width set by dragging its edge).
+    resetWidth: 'Reset width',
     sortAsc: 'Sort A → Z',
     sortDesc: 'Sort Z → A',
     sortNumAsc: 'Sort 1 → 9',
@@ -141,6 +143,7 @@ export const editor = {
     onlyHeaderAbove: 'Only the header is above, and it is fixed',
     needsOneColumn: 'A table needs at least one column',
     sortNeedsRows: 'Sorting needs at least two rows below the header',
+    widthAlreadyAuto: 'This column already fits its content',
     // Note at the bottom of the header row's menu.
     headerNote: "The header is fixed: in Markdown it's always the first row, so it can't be moved or deleted.",
     // "+" bars on the right / bottom edge.
@@ -150,6 +153,9 @@ export const editor = {
     columnHandle: 'Column {n}: click for options, drag to move',
     rowHandle: 'Row {n}: click for options, drag to move',
     headerHandle: 'Header (fixed): click for options',
+    // Resize strip on a column's right edge: tooltip, and aria-label ({n} = 1-based column).
+    resizeHint: 'Drag to resize · double-click to fit content',
+    resizeColumn: 'Column {n} width: drag to resize, double-click to fit content',
     // Summary pill under the table while 2+ cells are selected (the header row is never summed).
     statsLabel: 'Selection summary',
     statSum: 'Sum',

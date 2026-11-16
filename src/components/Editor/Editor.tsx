@@ -18,6 +18,7 @@ import { SlashCommands, getSlashCommands } from './SlashCommands'
 import { AutoCloseBrackets } from './AutoCloseBrackets'
 import { ListItemMove } from './ListItemMove'
 import { ActiveTableCell } from './ActiveTableCell'
+import { TableColumnResize } from './TableColumnResize'
 import { TableKeymap } from './TableKeymap'
 import { TableClipboard, handleEditorPaste } from './tableClipboard'
 import { SectionLinkPicker } from './SectionLinkPicker'
@@ -256,6 +257,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       ListItemMove,
       // Outlines the table cell holding the caret (lib/tableActiveCell.ts).
       ActiveTableCell,
+      // Live width of a column while its resize strip is dragged (TableControls.tsx).
+      TableColumnResize,
       // Table chords: move / insert / duplicate / delete rows and columns (lib/tableShortcuts.ts).
       TableKeymap,
       // Copied cells as TSV text; pasted tables normalized for markdown (tableClipboard.ts).
@@ -564,8 +567,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
           />
         </div>
         {tocVisible && <EditorToc editor={editor} items={tocItems} scrollRef={scrollRef} />}
-        {/* Handles, "+" bars and drag-to-reorder over the tables (positioned in this container). */}
-        {!readOnly && <TableControls editor={editor} scrollRef={scrollRef} />}
+        {/* Handles, "+" bars, drag-to-reorder and column resizing over the tables (positioned in this
+            container). No column widths in a linked note's plain Markdown. */}
+        {!readOnly && <TableControls editor={editor} scrollRef={scrollRef} columnWidths={!plain} />}
       </div>
       {!readOnly && <TableContextMenu editor={editor} />}
       {linkPickerOpen && (

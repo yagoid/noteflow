@@ -20,7 +20,7 @@ import {
   deleteColumn, deleteRow, deleteSelectedColumns, deleteSelectedRows, deleteTable, duplicateColumn, duplicateRow,
   findTablePos, focusCell, getCellSelectionRect, getSelectedCellsData, getSelectionCell, getTableData,
   getTableInfo, insertColumnAt, insertRowAt, moveColumn, moveRow, runTableCommand, selectColumn, selectRow,
-  sortRowsByColumn, tableActionCommand,
+  sortRowsByColumn, tableActionCommand, getColumnWidths, setColumnWidth,
   duplicateSelectedRow, insertColumnRight, insertRowBelow, moveSelectedColumn, moveSelectedRow, selectionInTable,
 } from '../../src/components/Editor/tableOps'
 import { load, save, schema } from '../helpers/editorPipeline'
@@ -78,8 +78,11 @@ function checkTables(doc: PMNode): void {
   doc.check()
   doc.descendants((n) => {
     if (n.type.name !== 'table') return true
-    n.forEach((row, _, r) => row.forEach((cell) => {
+    const header = n.firstChild!
+    n.forEach((row, _, r) => row.forEach((cell, __, c) => {
       expect(cell.type.name).toBe(r === 0 ? 'tableHeader' : 'tableCell')
+      // Column invariant: every cell of a column has its header cell's width.
+      expect(cell.attrs.colwidth, `width of cell (${r}, ${c})`).toEqual(header.child(c).attrs.colwidth)
     }))
     return true
   })
@@ -817,10 +820,11 @@ describe('one-column, header-less and merged tables', () => {
     for (const cmd of [
       selectRow(1), moveRow(1, 2), moveColumn(0, 1), duplicateRow(1), insertRowAt(1), insertColumnAt(0),
       sortRowsByColumn(0, 'desc'), clearRow(1), clearSelectedCells, deleteSelectedRows, deleteSelectedColumns,
-      deleteRow(1), deleteColumn(0), alignColumn(0, 'left'), clearColumn(0), focusCell(1, 0),
+      deleteRow(1), deleteColumn(0), alignColumn(0, 'left'), clearColumn(0), focusCell(1, 0), setColumnWidth(0, 12),
       moveSelectedRow(1), moveSelectedColumn(1), insertRowBelow, insertColumnRight, duplicateSelectedRow,
     ]) expectRejected(s, cmd)
     expect(getTableData(s)).toBeNull()
+    expect(getColumnWidths(s)).toBeNull()
   })
 })
 
@@ -951,6 +955,110 @@ describe('runTableCommand / canRunTableCommand', () => {
     const ed = editorOf(T22, false)
     expect(canRunTableCommand(ed, insertRowAt(1, { tablePos: 0 }))).toBe(false)
     expect(runTableCommand(ed, insertRowAt(1, { tablePos: 0 }))).toBe(false)
+    ed.destroy()
+  })
+})
+
+// ── Column widths ────────────────────────────────────────────────────────────
+//
+// Width = dashes of the separator (lib/tableWidth.ts). `apply` / checkTables
+// check the column invariant (every cell carries its header's width) after
+// every command, the round trip and the one undo step.
+
+describe('column widths', () => {
+  // A: 10 dashes; B: 10, centred; C: automatic.
+  const TW = table([['A', 'B', 'C'], ['1', '2', '3'], ['4', '5', '6']], ['----------', ':----------:', '---'])
+  const widthsOf = (state: EditorState) => getColumnWidths(state, { tablePos: 0 })
+  const rowWidths = (state: EditorState, row: number) => {
+    const out: (number[] | null)[] = []
+    state.doc.nodeAt(0)!.child(row).forEach((c) => out.push(c.attrs.colwidth))
+    return out
+  }
+
+  it('loads the widths on every cell; getColumnWidths reads them', () => {
+    const s = stateOf(TW)
+    checkTables(s.doc)
+    expect(widthsOf(s)).toEqual([10, 10, null])
+    expect(widthsOf(stateOf(T44))).toEqual([null, null, null, null])
+  })
+
+  it('setColumnWidth: one transaction (one undo), every cell of the column, saved as dashes', () => {
+    const s = stateOf(TW, '5')
+    const set = apply(s, setColumnWidth(2, 14, { tablePos: 0 }))
+    expect(widthsOf(set)).toEqual([10, 10, 14])
+    expect(save(set.doc).split('\n')[1]).toBe('| ---------- | :----------: | -------------- |')
+    // The selection stays (a caret in "5").
+    expect(headCellText(set)).toBe('5')
+    const reset = apply(s, setColumnWidth(0, null))
+    expect(widthsOf(reset)).toEqual([null, 10, null])
+    expect(save(reset.doc).split('\n')[1]).toBe('| --- | :----------: | --- |')
+  })
+
+  it('setColumnWidth clamps and rounds; already that width → true without a transaction', () => {
+    const s = stateOf(TW)
+    expect(widthsOf(apply(s, setColumnWidth(2, 3, { tablePos: 0 })))).toEqual([10, 10, 10])
+    expect(widthsOf(apply(s, setColumnWidth(2, 9.4, { tablePos: 0 })))).toEqual([10, 10, 10])
+    expect(widthsOf(apply(s, setColumnWidth(2, 500, { tablePos: 0 })))).toEqual([10, 10, 80])
+    expect(widthsOf(apply(s, setColumnWidth(2, 12.4, { tablePos: 0 })))).toEqual([10, 10, 12])
+    expectNoOp(s, setColumnWidth(0, 10, { tablePos: 0 }))
+    expectNoOp(s, setColumnWidth(2, null, { tablePos: 0 }))
+    expectRejected(s, setColumnWidth(3, 12, { tablePos: 0 }))
+    expectRejected(s, setColumnWidth(-1, 12, { tablePos: 0 }))
+    expectRejected(s, setColumnWidth(0, Number.NaN, { tablePos: 0 }))
+    expectRejected(stateOf('text'), setColumnWidth(0, 12))
+  })
+
+  it('setColumnWidth keeps a CellSelection', () => {
+    const s = withCells(stateOf(TW), [0, 1], [2, 1])
+    const set = apply(s, setColumnWidth(1, 20, { tablePos: 0 }))
+    expect(set.selection).toBeInstanceOf(CellSelection)
+    expect(getCellSelectionRect(set)).toEqual({ top: 0, bottom: 3, left: 1, right: 2 })
+  })
+
+  it('moving or duplicating a column carries its width; a new column has none', () => {
+    const s = stateOf(TW)
+    const moved = apply(s, moveColumn(0, 2))
+    expect(widthsOf(moved)).toEqual([10, null, 10])
+    expect(save(moved.doc).split('\n')[1]).toBe('| :----------: | --- | ---------- |')
+    expect(widthsOf(apply(s, duplicateColumn(1)))).toEqual([10, 10, 10, null])
+    expect(widthsOf(apply(s, insertColumnAt(1)))).toEqual([10, null, 10, null])
+    expect(widthsOf(apply(stateOf(TW, '1'), insertColumnRight))).toEqual([10, null, 10, null])
+  })
+
+  it('a new or duplicated row takes its columns\' widths from the header', () => {
+    const s = stateOf(TW, '4')
+    expect(rowWidths(apply(s, insertRowAt(1)), 1)).toEqual([[10], [10], null])
+    expect(rowWidths(apply(s, insertRowBelow), 3)).toEqual([[10], [10], null])
+    expect(rowWidths(apply(s, duplicateRow(0)), 1)).toEqual([[10], [10], null])
+    expect(rowWidths(apply(s, duplicateSelectedRow), 3)).toEqual([[10], [10], null])
+  })
+
+  it('every other command keeps the widths', () => {
+    const s = stateOf(TW, '2')
+    for (const cmd of [
+      moveRow(1, 2), sortRowsByColumn(0, 'desc'), clearRow(1), clearColumn(1), deleteRow(1), deleteColumn(2),
+      alignColumn(2, 'right'), deleteSelectedRows, moveSelectedRow(1),
+    ]) {
+      const next = apply(s, cmd)
+      expect(save(next.doc).split('\n')[1]).toMatch(/^\| ---------- \| :----------: \|/)
+    }
+  })
+
+  it('the columnWidth menu action is setColumnWidth', () => {
+    const s = stateOf(TW)
+    expect(widthsOf(apply(s, tableActionCommand({ type: 'columnWidth', column: 0, width: null }, { tablePos: 0 })))).toEqual([null, 10, null])
+    expect(widthsOf(apply(s, tableActionCommand({ type: 'columnWidth', column: 2, width: 30 })))).toEqual([10, 10, 30])
+  })
+
+  it('Tab in the last cell (prosemirror-tables\' addRowAfter) keeps the widths on the new row', () => {
+    const ed = new Editor({ extensions: schemaExtensions(), content: htmlFromMarkdown(TW) })
+    ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, textPos(ed.state.doc, '6'))))
+    expect(ed.commands.keyboardShortcut('Tab')).toBe(true)
+    checkTables(ed.state.doc)
+    expect(rowWidths(ed.state, 3)).toEqual([[10], [10], null])
+    const md = htmlToMarkdown(ed.getHTML())
+    expect(md.split('\n')[1]).toBe('| ---------- | :----------: | --- |')
+    expect(md.split('\n')).toHaveLength(5)
     ed.destroy()
   })
 })

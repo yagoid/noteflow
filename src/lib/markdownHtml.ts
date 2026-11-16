@@ -33,6 +33,9 @@ import {
   taskAnnotationsToMd,
   type TaskImportance,
 } from './markdownInline'
+import {
+  AUTO_COLUMN_DASHES, COLUMN_WIDTH_ATTR, COLUMN_WIDTH_MAX, COLUMN_WIDTH_VAR, widthFromAttr, widthFromDashes,
+} from './tableWidth'
 
 // Sentinel character used to protect blank lines inside code fences and kanban
 // boards from the \n\n block-splitter. Must not appear in real user content.
@@ -58,17 +61,26 @@ export interface MarkdownHtmlOptions {
    * would be saved into the Markdown.
    */
   imageSrc?: (src: string) => string
+  /**
+   * Read the column widths of pipe tables (the separator's dash count, see
+   * lib/tableWidth.ts and mdTableToHtml) into `data-nf-colw`. Default true;
+   * false where the markdown isn't a note NoteFlow saved: markdown pasted as
+   * text, the AI chat (an LLM's output). Always off with `plain` (an external
+   * file: its separators are written back as `---`).
+   */
+  columnWidths?: boolean
 }
 
 // Options of the htmlFromMarkdown call in progress (module state like quoteDepth:
 // the parse is synchronous and the helpers below are many).
 let currentOptions: MarkdownHtmlOptions = {}
 const plainMode = () => !!currentOptions.plain
+const columnWidthsMode = () => !currentOptions.plain && currentOptions.columnWidths !== false
 const inline = (s: string) => inlineToHtml(s, currentOptions)
 
 export function htmlFromMarkdown(md: string, opts?: MarkdownHtmlOptions): string {
   if (!md.trim()) return '<p></p>'
-  if (!opts?.plain && !opts?.imageSrc) return markdownBlocksToHtml(md)
+  if (!opts?.plain && !opts?.imageSrc && opts?.columnWidths !== false) return markdownBlocksToHtml(md)
   const previous = currentOptions
   currentOptions = opts
   try {
@@ -1050,27 +1062,96 @@ function renderCell(c: string): string {
   return c.split(/<br\s*\/?>/i).map(inline).join('<br>')
 }
 
+// ── Column widths (lib/tableWidth.ts; note-format.md "Tablas: ancho de columna") ──
+//
+// A width is the dash count of the column's separator cell. Only read when the
+// separator is spaced the way NoteFlow writes it and is NOT lined up with the
+// header — what formatters (Prettier, VS Code) and most LLMs write is either
+// compact (`|------|`) or aligned, and those tables stay automatic.
+
+// Gate 1: NoteFlow's spacing — outer pipes, one space on each side of every
+// cell, trailing spaces tolerated (one column too: `| ------ |`).
+const CANONICAL_SEPARATOR_RE = /^\| :?-+:?(?: \| :?-+:?)* \|[ \t]*$/
+
+/** Offsets of the unescaped pipes of a row (`\|` is escaped, as in splitPipeRow). */
+function pipeOffsets(line: string): number[] {
+  const out: number[] = []
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '\\' && line[i + 1] === '|') { i++; continue }
+    if (line[i] === '|') out.push(i)
+  }
+  return out
+}
+
+/** Gate 2: the separator's pipes fall where the header's do (every column as wide in both rows). */
+function linesUp(header: string, sep: string): boolean {
+  const a = pipeOffsets(header)
+  const b = pipeOffsets(sep)
+  return a.length === b.length && a.every((x, i) => x === b[i])
+}
+
+/**
+ * The width of each column of a table's separator row (null = automatic), or
+ * none at all when a gate fails: a separator that isn't spaced canonically, or
+ * one lined up with the header (a formatter's / an LLM's table).
+ */
+function separatorWidths(header: string, sep: string): (number | null)[] {
+  if (!CANONICAL_SEPARATOR_RE.test(sep) || linesUp(header, sep)) return []
+  return sep.trimEnd().slice(2, -2).split(' | ').map(cell => widthFromDashes(cell.replace(/:/g, '').length))
+}
+
+/** A separator cell: the alignment's colons around `---`, or `width` dashes. */
+function separatorCell(align: string | null, width: number | null): string {
+  const dashes = '-'.repeat(width ?? AUTO_COLUMN_DASHES)
+  if (align === 'center') return `:${dashes}:`
+  if (align === 'right') return `${dashes}:`
+  if (align === 'left') return `:${dashes}`
+  return dashes
+}
+
+/**
+ * The separator row for `head` (the header line as written). A table with
+ * widths must never look lined up with its header (gate 2 would drop them on
+ * reading): if it would, its last column with a width gets one dash more (one
+ * less at COLUMN_WIDTH_MAX). Stable: the next save writes the same.
+ */
+function separatorLine(head: string, aligns: (string | null)[], widths: (number | null)[]): string {
+  const line = (w: (number | null)[]) => '| ' + aligns.map((a, i) => separatorCell(a, w[i] ?? null)).join(' | ') + ' |'
+  const sep = line(widths)
+  const last = widths.reduce<number>((at, w, i) => (w !== null ? i : at), -1)
+  if (last < 0 || !linesUp(head, sep)) return sep
+  const nudged = [...widths]
+  nudged[last] = widths[last]! < COLUMN_WIDTH_MAX ? widths[last]! + 1 : widths[last]! - 1
+  return line(nudged)
+}
+
 function mdTableToHtml(lines: string[]): string {
   const header = splitPipeRow(lines[0])
   const aligns = splitPipeRow(lines[1]).map(parseAlign)
+  const widths = columnWidthsMode() ? separatorWidths(lines[0], lines[1]) : []
   // The rows run to the first line without a `|`; whatever is glued below the
   // table (text an LLM wrote right after it…) is a block of its own, not lost.
   let end = 2
   while (end < lines.length && (!lines[end].trim() || /\|/.test(lines[end]))) end++
   const bodyLines = lines.slice(2, end).filter(l => l.trim())
   const rest = end < lines.length ? blockToHtml(lines.slice(end).join('\n')) : ''
-  const styleFor = (i: number) =>
-    aligns[i] ? ` style="text-align:${aligns[i]}"` : ''
+  // Every cell of a column carries its alignment and its width (the editor's
+  // invariant: a cell is laid out on its own attributes).
+  const attrsFor = (i: number) => {
+    const width = widths[i] ?? null
+    const style = [aligns[i] && `text-align:${aligns[i]}`, width && `${COLUMN_WIDTH_VAR}:${width}`].filter(Boolean).join(';')
+    return (width ? ` ${COLUMN_WIDTH_ATTR}="${width}"` : '') + (style ? ` style="${style}"` : '')
+  }
 
   const thead = `<tr>${header.map((c, i) =>
-    `<th${styleFor(i)}>${renderCell(c)}</th>`).join('')}</tr>`
+    `<th${attrsFor(i)}>${renderCell(c)}</th>`).join('')}</tr>`
 
   const tbody = bodyLines.map(l => {
     const cells = splitPipeRow(l)
     while (cells.length < header.length) cells.push('')
     cells.length = header.length
     return `<tr>${cells.map((c, i) =>
-      `<td${styleFor(i)}>${renderCell(c)}</td>`).join('')}</tr>`
+      `<td${attrsFor(i)}>${renderCell(c)}</td>`).join('')}</tr>`
   }).join('')
 
   return `<table>${thead}${tbody}</table>${rest}`
@@ -1118,13 +1199,13 @@ function tableElToMd(tbl: Element): string {
   const cellMd = (c: Element) =>
     escapeCell((isBlockCell(c) ? cellLines(c).join('\n') : inlineElToMd(c)).trim()) || ' '
 
-  const aligns = Array.from(headerRow.children).map(c => {
+  const headerCells = Array.from(headerRow.children)
+  const aligns = headerCells.map(c => {
     const s = (c as HTMLElement).style?.textAlign ?? ''
-    if (s === 'center') return ':---:'
-    if (s === 'right')  return '---:'
-    if (s === 'left')   return ':---'
-    return '---'
+    return s === 'center' || s === 'right' || s === 'left' ? s : null
   })
+  // The column widths (dashes) are read from the header cells.
+  const widths = headerCells.map(c => widthFromAttr(c.getAttribute(COLUMN_WIDTH_ATTR)))
 
   const toLine = (r: Element) =>
     '| ' + Array.from(r.children).map(cellMd).join(' | ') + ' |'
@@ -1132,7 +1213,7 @@ function tableElToMd(tbl: Element): string {
   const head = firstHasTh
     ? toLine(headerRow)
     : '| ' + aligns.map(() => ' ').join(' | ') + ' |'
-  const sep  = '| ' + aligns.join(' | ') + ' |'
+  const sep  = separatorLine(head, aligns, widths)
   const body = rows.slice(firstHasTh ? 1 : 0).map(toLine).join('\n')
 
   // Includes the trailing block separator ('\n\n'); `blockElToMd()` must not add more.

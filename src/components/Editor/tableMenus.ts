@@ -8,7 +8,9 @@ import { isMac } from '../../lib/platform'
 import {
   cellMenu, columnMenu, menuShortcutHints, rowMenu, type Box, type MenuPlacement, type TableAction, type TableMenuEntry,
 } from '../../lib/tableControls'
-import { canRunTableCommand, dispatchOwnUndoStep, getCellSelectionRect, getTableData, tableActionCommand } from './tableOps'
+import {
+  canRunTableCommand, dispatchOwnUndoStep, getCellSelectionRect, getColumnWidths, getTableData, tableActionCommand,
+} from './tableOps'
 import { tablePosOfDom } from './tableDom'
 
 /** Which menu: a column's or a row's handle, or a cell's (right-click, toolbar). */
@@ -28,13 +30,20 @@ export interface TableMenuState {
   placement: MenuPlacement
   /** The element that opened it: pressing it isn't a click outside (the opener toggles the menu). */
   owner?: HTMLElement | null
+  /** Column widths are offered (not in a linked note's plain Markdown): the column menu has "Reset width". */
+  columnWidths?: boolean
 }
 
 /** The table chords as the menus show them (same source as the keymap and Settings → Shortcuts). */
 const HINTS = menuShortcutHints(isMac)
 
-/** The entries of `spec`'s menu on the table at `tablePos`; empty when there's no such table any more. */
-export function tableMenuEntries(editor: Editor, tablePos: number, spec: TableMenuSpec, t: Messages): TableMenuEntry[] {
+/**
+ * The entries of `spec`'s menu on the table at `tablePos`; empty when there's no
+ * such table any more. `columnWidths`: the column menu offers "Reset width".
+ */
+export function tableMenuEntries(
+  editor: Editor, tablePos: number, spec: TableMenuSpec, t: Messages, { columnWidths = false } = {},
+): TableMenuEntry[] {
   const target = { tablePos }
   const can = (action: TableAction) => canRunTableCommand(editor, tableActionCommand(action, target))
   const data = getTableData(editor.state, target)
@@ -44,7 +53,9 @@ export function tableMenuEntries(editor: Editor, tablePos: number, spec: TableMe
     return cellMenu(data, spec, getCellSelectionRect(editor.state, target), can, m, HINTS)
   }
   if (!data) return []
-  return spec.kind === 'column' ? columnMenu(data, spec.index, can, m, HINTS) : rowMenu(spec.index, can, m, HINTS)
+  if (spec.kind === 'row') return rowMenu(spec.index, can, m, HINTS)
+  const widths = columnWidths ? getColumnWidths(editor.state, target) : null
+  return columnMenu(widths ? { ...data, widths } : data, spec.index, can, m, HINTS)
 }
 
 /**

@@ -1,4 +1,5 @@
-import type { Extensions } from '@tiptap/core'
+import { mergeAttributes, type Extensions } from '@tiptap/core'
+import type { DOMOutputSpec } from '@tiptap/pm/model'
 import Document from '@tiptap/extension-document'
 import Paragraph from '@tiptap/extension-paragraph'
 import Text from '@tiptap/extension-text'
@@ -27,6 +28,7 @@ import { DeadlineTaskItem } from './DeadlineTaskItem'
 import { ResizableImage } from './ResizableImage'
 import { SectionRelation } from './SectionRelation'
 import { KanbanBoard } from './KanbanBoard'
+import { COLUMN_WIDTH_ATTR, COLUMN_WIDTH_VAR, widthFromAttr, widthOfColwidth } from '../../lib/tableWidth'
 
 // ── The editor's document schema ─────────────────────────────────────────────
 //
@@ -58,14 +60,56 @@ const textAlignAttribute = {
       attrs.textAlign ? { style: `text-align:${attrs.textAlign}` } : {},
   },
 }
-const AlignedTableCell = TableCell.extend({
-  addAttributes() {
-    return { ...this.parent?.(), ...textAlignAttribute }
+// Column width (lib/tableWidth.ts): prosemirror-tables' `colwidth` array with
+// NoteFlow's meaning — `[n]` = n dashes of the markdown separator (n × 0.5em),
+// not px — and the same on every cell of a column (htmlToMarkdown reads the
+// header cell's). Its HTML is our own `data-nf-colw="n"` + `--nf-colw: n` (the
+// value index.css § Tables sizes the cell from): the `colwidth="…"` px of other
+// ProseMirror editors is no longer read, so a pasted table only keeps widths
+// copied from NoteFlow. Off in the plain schema (linked notes): never read nor
+// written, the separators stay `---`.
+const columnWidthAttribute = (enabled: boolean) => ({
+  colwidth: {
+    default: null as number[] | null,
+    parseHTML: (el: HTMLElement) => {
+      const width = enabled ? widthFromAttr(el.getAttribute(COLUMN_WIDTH_ATTR)) : null
+      return width === null ? null : [width]
+    },
+    renderHTML: (attrs: { colwidth?: unknown }) => {
+      const width = enabled ? widthOfColwidth(attrs.colwidth) : null
+      return width === null ? {} : { [COLUMN_WIDTH_ATTR]: String(width), style: `${COLUMN_WIDTH_VAR}:${width}` }
+    },
   },
 })
-const AlignedTableHeader = TableHeader.extend({
+const alignedTableCell = (widths: boolean) => TableCell.extend({
   addAttributes() {
-    return { ...this.parent?.(), ...textAlignAttribute }
+    return { ...this.parent?.(), ...columnWidthAttribute(widths), ...textAlignAttribute }
+  },
+})
+const alignedTableHeader = (widths: boolean) => TableHeader.extend({
+  addAttributes() {
+    return { ...this.parent?.(), ...columnWidthAttribute(widths), ...textAlignAttribute }
+  },
+})
+
+// TipTap's Table.renderHTML sizes the <table> and its <col>s from `colwidth` in
+// px (`style="width: Npx"` once every column has one): with NoteFlow's widths
+// (dashes) that would break the layout — the <table> is the scroll box, sized
+// to its content (index.css § Tables). It's rendered as TipTap renders a table
+// without widths, whatever the widths: `min-width` of cellMinWidth per column
+// on the <table> and each <col> (the cells size themselves from --nf-colw).
+const NoteTable = Table.extend({
+  renderHTML({ node, HTMLAttributes }) {
+    const min = this.options.cellMinWidth
+    let columns = 0
+    node.firstChild?.forEach((cell) => { columns += Number(cell.attrs.colspan) || 1 })
+    const cols: DOMOutputSpec[] = Array.from({ length: columns }, () => ['col', { style: `min-width: ${min}px` }])
+    return [
+      'table',
+      mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, { style: `min-width: ${columns * min}px` }),
+      ['colgroup', {}, ...cols],
+      ['tbody', 0],
+    ]
   },
 })
 
@@ -161,13 +205,15 @@ export function schemaExtensions(opts: SchemaOptions = {}): Extensions {
       : Link.configure({ openOnClick: false, autolink: false }),
     ResizableImage.configure({ inline: true, allowBase64: true, displaySrc: opts.imageSrc ?? null }),
     HorizontalRule,
-    // resizable:false — column widths can't be stored in portable markdown, so
-    // columns fit their content (index.css § Tables) instead of offering a resize
-    // affordance that silently resets on reload.
-    Table.configure({ resizable: false, HTMLAttributes: { class: 'md-table' } }),
+    // resizable:false — no prosemirror-tables column resizing (its px widths and
+    // TableView wrapper): columns fit their content unless the user gives one a
+    // width, from the table controls (TableControls.tsx resize strips →
+    // tableOps.setColumnWidth), saved as the separator's dash count (see
+    // columnWidthAttribute above and lib/tableWidth.ts).
+    NoteTable.configure({ resizable: false, HTMLAttributes: { class: 'md-table' } }),
     TableRow,
-    AlignedTableHeader,
-    AlignedTableCell,
+    alignedTableHeader(!plain),
+    alignedTableCell(!plain),
     LineBreak,
     ...(plain ? [] : [SectionRelation, KanbanBoard]),
   ]

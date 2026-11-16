@@ -68,7 +68,11 @@ export function expectRoundTrip(ed: Editor): void {
   expect(save(load(md)), md).toBe(md)
 }
 
-/** Every table is a valid markdown table: row 0 header cells, the rest body cells, no spans, rectangular, no nested tables. */
+/**
+ * Every table is a valid markdown table: row 0 header cells, the rest body
+ * cells, no spans, rectangular, no nested tables, and each column's width on
+ * every cell of it (its header cell's).
+ */
 export function checkTables(doc: PMNode): void {
   doc.check()
   doc.descendants((n) => {
@@ -77,8 +81,9 @@ export function checkTables(doc: PMNode): void {
     expect(map.problems ?? null).toBeNull()
     n.forEach((row, _, r) => {
       expect(row.childCount).toBe(map.width)
-      row.forEach((cell) => {
+      row.forEach((cell, __, c) => {
         expect(cell.type.name).toBe(r === 0 ? 'tableHeader' : 'tableCell')
+        expect(cell.attrs.colwidth, `width of cell (${r}, ${c})`).toEqual(n.firstChild!.child(c).attrs.colwidth)
         expect(cell.attrs.colspan).toBe(1)
         expect(cell.attrs.rowspan).toBe(1)
         cell.descendants((inner) => { expect(inner.type.name).not.toBe('table') })

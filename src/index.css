@@ -1964,9 +1964,10 @@ html[data-color-scheme="light"] .section-hover-card {
 }
 
 /* ── Tables ──────────────────────────────────────────────────────────────── */
-/* Content-fitted columns (widths can't be stored in markdown, so none are):
-   each column takes its content's width, between the cells' min-width (an empty
-   cell stays wide enough to click into) and max-width (longer text wraps).
+/* Content-fitted columns by default: each column takes its content's width,
+   between the cells' min-width (an empty cell stays wide enough to click into)
+   and max-width (longer text wraps). A column the user resized has a width
+   (below: [data-nf-colw], saved as the separator's dash count).
    TipTap only wraps a table in a div.tableWrapper when it is resizable
    (editorExtensions.ts keeps resizable:false), so the <table> itself is the
    scroll box: a block as wide as its content up to the available width. Its
@@ -2024,6 +2025,46 @@ html[data-color-scheme="light"] .section-hover-card {
   padding-bottom: 0.4rem;
   min-width: 6.25em;
   max-width: 35em;
+}
+/* A column with a width (lib/tableWidth.ts): every cell of it carries
+   data-nf-colw + --nf-colw = n dashes, and is n × 0.5em of the table's font
+   size wide — border-box, gridline to gridline (padding and the collapsed
+   borders' halves included; Tailwind's preflight makes cells border-box). The
+   header's 0.8em font gets n × 0.625em (= 0.5 / 0.8), so both rows agree.
+   No max-width (none: the auto columns' 28em / 35em don't apply): as in any
+   table layout, the column is max(width, min-content of its cells). Body cells
+   break anywhere (their min-content is a character: long text never widens the
+   column); the header never breaks inside a word (`normal`), so the column is
+   at least its longest header word — a label is never split letter by letter.
+   A resize drag doesn't go below that word (TableControls.tsx); a header renamed
+   later with a longer word, or a width written by hand, shows wider than saved.
+   The *-live pair is the preview while a resize strip is dragged
+   (TableColumnResize.ts): it wins over the cell's own width. */
+.prose-editor .ProseMirror td[data-nf-colw],
+.prose-editor .ProseMirror th[data-nf-colw] {
+  box-sizing: border-box;
+  width: calc(var(--nf-colw) * 0.5em);
+  min-width: calc(var(--nf-colw) * 0.5em);
+  max-width: none;
+  overflow-wrap: anywhere;
+}
+.prose-editor .ProseMirror th[data-nf-colw] {
+  width: calc(var(--nf-colw) * 0.625em);
+  min-width: calc(var(--nf-colw) * 0.625em);
+  overflow-wrap: normal;
+}
+.prose-editor .ProseMirror td[data-nf-colw-live],
+.prose-editor .ProseMirror th[data-nf-colw-live] {
+  box-sizing: border-box;
+  width: calc(var(--nf-colw-live) * 0.5em);
+  min-width: calc(var(--nf-colw-live) * 0.5em);
+  max-width: none;
+  overflow-wrap: anywhere;
+}
+.prose-editor .ProseMirror th[data-nf-colw-live] {
+  width: calc(var(--nf-colw-live) * 0.625em);
+  min-width: calc(var(--nf-colw-live) * 0.625em);
+  overflow-wrap: normal;
 }
 .prose-editor .ProseMirror td p,
 .prose-editor .ProseMirror th p {
@@ -2192,6 +2233,38 @@ html[data-color-scheme="light"] .section-hover-card {
 .nf-table-ghost.is-blocked .nf-table-ghost-note { display: inline; }
 body.nf-table-grabbing,
 body.nf-table-grabbing * { cursor: grabbing !important; user-select: none; }
+/* Resize strip on a column's right edge (lib/tableControls.ts resizeGrips): an
+   invisible 8px band over the gridline; its 2px accent line (at --line, the
+   edge) shows faintly with the pointer near it (.is-near), fully on hover and
+   while dragging (.is-on). */
+.nf-table-resize {
+  position: absolute;
+  cursor: col-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+.nf-table-resize::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--line) - 1px);
+  width: 2px;
+  border-radius: 1px;
+  background: rgb(var(--accent));
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.nf-table-resize.is-near::after { opacity: 0.4; }
+.nf-table-resize:hover::after,
+.nf-table-resize.is-on::after { opacity: 1; }
+/* While one column is resized only its line shows: the other strips slide under a
+   still pointer as the column grows, and the browser keeps them :hover until the
+   next move. */
+.nf-table-controls.is-resizing .nf-table-resize:not(.is-on) { pointer-events: none; }
+.nf-table-controls.is-resizing .nf-table-resize:not(.is-on)::after { opacity: 0; }
+body.nf-table-resizing,
+body.nf-table-resizing * { cursor: col-resize !important; user-select: none; }
 /* Summary pill of a cell selection (2+ cells): under the table, in its bottom
    band (lib/tableControls.ts pillBox: PILL_HEIGHT = 20px). A read-out only:
    pointer-events none, so it can never take a click. One line; a pill wider

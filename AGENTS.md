@@ -47,7 +47,7 @@ La **documentación del proyecto** vive en `.agents/context/*.md` (abajo el mapa
 | Tema | Fichero | Cuándo abrirlo |
 |---|---|---|
 | Estructura de dirs · Arquitectura IPC (handlers/eventos) · modelo de almacenamiento (`settings.json`, dir de notas) | `.agents/context/architecture.md` | Tocar/añadir IPC, ubicar un archivo o dato |
-| Formato v2 (carpeta por nota) · migración v1→v2 · cifrado | `.agents/context/note-format.md` | Tocar el formato de nota (3 espejos), migración o cifrado |
+| Formato v2 (carpeta por nota) · migración v1→v2 · cifrado · ancho de columna de tablas (guiones del separador) | `.agents/context/note-format.md` | Tocar el formato de nota (3 espejos), migración, cifrado o cómo se guarda una tabla |
 | GitHub Sync (push/pull, cola de mutaciones, invariantes) | `.agents/context/sync.md` | Tocar la sincronización con GitHub |
 | "El Cerebro": índice semántico · vista cerebro · LLM/chat agéntico · segundo cerebro · secciones ocultas a la IA | `.agents/context/ai.md` | Tocar embeddings, grafo, chat, tools del agente o perfil |
 | Patrones y decisiones (perf sidebar/búsqueda, imports, overviews, hover, relaciones, editor/markdown, sticky, alarmas, auto-update, macOS, CLI, temas) | `.agents/context/patterns.md` | Entender una decisión de diseño o tocar uno de esos subsistemas |

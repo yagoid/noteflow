@@ -10,8 +10,8 @@
 // - TableClipboard (extension): drops <caption> from pasted HTML, normalizes
 //   the tables of every pasted slice and, after any paste, the tables it
 //   touched — so a pasted table always saves as a markdown pipe table: header
-//   in row 0, no merged cells, rectangular, no nested tables, one alignment per
-//   column (the header cell's).
+//   in row 0, no merged cells, rectangular, no nested tables, one alignment and
+//   one width per column (the header cell's; widths only from NoteFlow's HTML).
 // Decisions: .agents/context/patterns.md ("Editor: teclado y portapapeles de tablas").
 
 import { Extension } from '@tiptap/core'
@@ -26,6 +26,7 @@ import type { EditorView } from '@tiptap/pm/view'
 import { htmlFromMarkdown, looksLikeMarkdown } from '../../lib/markdownHtml'
 import { cellsToTsv, parseDelimited, type TableAlign } from '../../lib/tableData'
 import { isProseMirrorHtml, shouldPasteAsTsv } from '../../lib/tablePaste'
+import { colwidthOf, widthOfColwidth } from '../../lib/tableWidth'
 import { cellText, getSelectedCellsData } from './tableOps'
 
 const roleOf = (n: PMNode) => (n.type.spec as { tableRole?: string }).tableRole
@@ -122,13 +123,32 @@ function flattenTables(content: Fragment, schema: Schema): Fragment {
   return out.length ? Fragment.fromArray(out) : Fragment.from(schema.nodes.paragraph.create())
 }
 
-/** Alignment of each column of `table`: its header cell's. */
-function columnAligns(table: PMNode): TableAlign[] {
+/** What each column of a table keeps when cells are pasted into it: its header cell's alignment and width. */
+export interface ColumnFormat {
+  aligns: TableAlign[]
+  widths: (number | null)[]
+}
+
+/** Alignment and width of each column of `table`: its header cell's. */
+function columnFormat(table: PMNode): ColumnFormat {
   const map = TableMap.get(table)
-  return Array.from({ length: map.width }, (_, c) => {
-    const cell = table.nodeAt(map.map[c])
-    return (cell?.attrs.textAlign as TableAlign | undefined) ?? null
-  })
+  const headers = Array.from({ length: map.width }, (_, c) => table.nodeAt(map.map[c]))
+  return {
+    aligns: headers.map((cell) => (cell?.attrs.textAlign as TableAlign | undefined) ?? null),
+    widths: headers.map((cell, c) => headerWidth(cell, c - map.colCount(map.map[c]))),
+  }
+}
+
+/**
+ * Width (dashes) of the column `offset` columns into a header cell: entry
+ * `offset` of its `colwidth` (one per column it spans). Only NoteFlow widths
+ * exist in the document — the schema reads them from `data-nf-colw` only
+ * (editorExtensions.ts), never the px `colwidth` of other editors — so this
+ * keeps a table copied from NoteFlow as it was.
+ */
+function headerWidth(cell: PMNode | null | undefined, offset: number): number | null {
+  const colwidth = cell?.attrs.colwidth as unknown
+  return Array.isArray(colwidth) ? widthOfColwidth([colwidth[offset]]) : null
 }
 
 /**
@@ -136,11 +156,11 @@ function columnAligns(table: PMNode): TableAlign[] {
  * merged cells expanded (the content stays in the top-left cell, the rest
  * filled with empty cells), ragged rows padded, rows without cells dropped,
  * row 0 = header cells and every other row body cells, tables nested in a
- * cell flattened to text, no column widths, and each cell aligned like its
- * column — `aligns[c]` when given (a table pasted into keeps its own
- * alignments), else the header cell's.
+ * cell flattened to text, and each cell aligned and sized like its column —
+ * `format` when given (a table pasted into keeps its own alignments and widths;
+ * columns it grew take their new header's), else the header cell's.
  */
-export function normalizedTable(table: PMNode, aligns?: readonly TableAlign[]): PMNode | null {
+export function normalizedTable(table: PMNode, format?: ColumnFormat): PMNode | null {
   const schema = table.type.schema
   const types = tableNodeTypes(schema)
   const origin: (PMNode | undefined)[][] = []
@@ -165,14 +185,19 @@ export function normalizedTable(table: PMNode, aligns?: readonly TableAlign[]): 
   const kept = cover.map((cells, r) => (cells.some(Boolean) ? r : -1)).filter((r) => r >= 0)
   const width = Math.max(0, ...kept.map((r) => cover[r].length))
   if (!kept.length || width === 0) return null
+  const head = cover[kept[0]]
   const align = (c: number): TableAlign =>
-    aligns && c < aligns.length ? aligns[c] : ((cover[kept[0]][c]?.attrs.textAlign as TableAlign | undefined) ?? null)
+    format && c < format.aligns.length ? format.aligns[c] : ((head[c]?.attrs.textAlign as TableAlign | undefined) ?? null)
+  // A header cell spanning columns: its colwidth has one entry per column it covers.
+  const colwidth = (c: number): number[] | null => colwidthOf(format && c < format.widths.length
+    ? format.widths[c]
+    : headerWidth(head[c], c - head.indexOf(head[c])))
 
   const rows = kept.map((r, i) => {
     const type = i === 0 ? types.header_cell : types.cell
     return types.row.create(null, Array.from({ length: width }, (_, c) => {
       const cell = origin[r][c]
-      const attrs = { ...(cell?.attrs ?? {}), colspan: 1, rowspan: 1, colwidth: null, textAlign: align(c) }
+      const attrs = { ...(cell?.attrs ?? {}), colspan: 1, rowspan: 1, colwidth: colwidth(c), textAlign: align(c) }
       if (!cell) return type.createAndFill(attrs)!
       return type.create(attrs, flattenTables(cell.content, schema), cell.marks)
     }))
@@ -187,10 +212,10 @@ export function normalizedTable(table: PMNode, aligns?: readonly TableAlign[]): 
  * selection stay); otherwise the table is replaced and a selection inside it
  * goes back to the same cells (a CellSelection) or the start of the head's cell.
  */
-function normalizeTableAt(tr: Transaction, pos: number, aligns?: readonly TableAlign[]): void {
+function normalizeTableAt(tr: Transaction, pos: number, format?: ColumnFormat): void {
   const table = tr.doc.nodeAt(pos)
   if (!table || !isTable(table)) return
-  const next = normalizedTable(table, aligns)
+  const next = normalizedTable(table, format)
   if (!next) return
   const sameShape = next.childCount === table.childCount && next.content.content.every((row, r) =>
     row.childCount === table.child(r).childCount
@@ -284,7 +309,8 @@ function dispatchPaste(view: EditorView, tr: Transaction): void {
  * Insert `cells` into the table around the selection, prosemirror-tables
  * style: from the cursor's cell (the table grows as needed), or into a
  * CellSelection (the cells are clipped / repeated to fill it). The result is
- * normalized in the same transaction, keeping the table's column alignments.
+ * normalized in the same transaction, keeping the table's column alignments
+ * and widths (pasted cells take their destination column's).
  */
 function insertCellsAtSelection(view: EditorView, cells: __Area): void {
   const { state } = view
@@ -301,9 +327,9 @@ function insertCellsAtSelection(view: EditorView, cells: __Area): void {
     start = $cell.start(-1)
     rect = TableMap.get($cell.node(-1)).findCell($cell.pos - start)
   }
-  const aligns = columnAligns(state.doc.nodeAt(start - 1)!)
+  const format = columnFormat(state.doc.nodeAt(start - 1)!)
   __insertCells(state, (tr) => {
-    normalizeTableAt(tr, start - 1, aligns)
+    normalizeTableAt(tr, start - 1, format)
     dispatchPaste(view, tr)
   }, start, rect, cells)
 }
@@ -400,7 +426,8 @@ export function handleEditorPaste(view: EditorView, event: ClipboardEvent, slice
   }
   if (text.trim() && !RICH_HTML.test(html) && looksLikeMarkdown(text)) {
     event.preventDefault()
-    const dom = new window.DOMParser().parseFromString(htmlFromMarkdown(text, { plain }), 'text/html')
+    // Markdown pasted as text didn't come from a NoteFlow note: its separators' dashes aren't widths.
+    const dom = new window.DOMParser().parseFromString(htmlFromMarkdown(text, { plain, columnWidths: false }), 'text/html')
     const md = PMDOMParser.fromSchema(view.state.schema).parseSlice(dom.body)
     if (pasteSliceInTable(view, md)) return true
     view.dispatch(view.state.tr.replaceSelection(md).scrollIntoView())

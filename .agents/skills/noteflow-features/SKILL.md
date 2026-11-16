@@ -930,7 +930,8 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   no hace nada. La fila de cabecera lleva un **candado**: no se arrastra, y si arrastras una fila sobre
   ella la cabecera se raya en rojo y la etiqueta avisa *The header is fixed*.
 - **Menú de columna:** *Insert left / right*, *Duplicate column*, *Move left / right*, *Align column*
-  (izquierda/centro/derecha; persiste vía `:---:` y el menú sigue abierto), *Sort A → Z / Z → A*
+  (izquierda/centro/derecha; persiste vía `:---:` y el menú sigue abierto), *Reset width* (deshabilitada
+  si la columna ya se ajusta a su contenido; no aparece en notas vinculadas), *Sort A → Z / Z → A*
   (*1 → 9 / 9 → 1* si la columna es numérica), *Clear column* (vacía los datos, **no** el nombre de la
   cabecera) y *Delete column* (en rojo). **Menú de fila:** *Insert above / below*, *Duplicate row*,
   *Move up / down*, *Clear row* y *Delete row*; en la cabecera, *Clear header* y una nota explicando que
@@ -955,9 +956,9 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   *Clear N cells* si hay varias celdas seleccionadas; y *Delete table*. Duplicar, alinear y ordenar están
   en los menús de las asas. Clic derecho dentro de la selección de celdas la conserva; fuera, mueve el
   cursor a la celda pulsada.
-- Asas, «+» y clic derecho funcionan también en las **notas sticky** (que no tienen toolbar) y en las
-  **notas vinculadas** editables; nada en solo lectura. Ya no hay hilera de mini-botones de tabla bajo
-  la toolbar.
+- Asas, «+», cambiar el ancho y clic derecho funcionan también en las **notas sticky** (que no tienen
+  toolbar); en las **notas vinculadas** editables todo salvo el ancho de columna; nada en solo lectura.
+  Ya no hay hilera de mini-botones de tabla bajo la toolbar.
 - **Cabecera obligatoria:** no se puede borrar la fila de cabecera ni insertar una fila
   por encima de ella (las pipe-tables de markdown exigen cabecera). Las celdas de cabecera
   vacías muestran el placeholder "Column" (en el mismo estilo de etiqueta, más tenue).
@@ -967,15 +968,28 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   cursor** lleva un contorno fino del color de acento; una **selección de celdas** (arrastrar entre
   celdas o `Shift`+clic) se tiñe de acento con **un único contorno** alrededor del rango, sin la
   selección de texto nativa encima. Igual en todos los temas (solo variables del tema).
-- **Columnas ajustadas al contenido, sin redimensionado:** cada columna toma el ancho de su
-  contenido, con un mínimo (una celda vacía sigue siendo cómoda de clicar) y un máximo (el texto
-  largo salta de línea dentro de la celda). Una tabla estrecha no ocupa todo el ancho; una que no
-  cabe **conserva el ancho natural de sus columnas** (no las estrecha: las etiquetas cortas no se
-  parten en dos líneas) y hace **scroll horizontal** propio, sin desbordar la nota. Igual en el chat
-  de IA, las vistas previas y los stickies; en las tarjetas del resumen de nota (no hacen scroll) las
-  columnas sí se estrechan hasta el mínimo y lo que no cabe se recorta. El ancho de columna NO se
-  puede guardar en markdown portable, así que no se ofrece resize (evita el affordance que se
-  reseteaba al recargar).
+- **Columnas ajustadas al contenido por defecto:** cada columna toma el ancho de su contenido, con un
+  mínimo (una celda vacía sigue siendo cómoda de clicar) y un máximo (el texto largo salta de línea
+  dentro de la celda). Una tabla estrecha no ocupa todo el ancho; una que no cabe **conserva el ancho
+  natural de sus columnas** (no las estrecha: las etiquetas cortas no se parten en dos líneas) y hace
+  **scroll horizontal** propio, sin desbordar la nota. Igual en el chat de IA, las vistas previas y los
+  stickies; en las tarjetas del resumen de nota (no hacen scroll) las columnas automáticas sí se
+  estrechan hasta el mínimo y lo que no cabe se recorta.
+- **Cambiar el ancho de una columna:** al acercar el ratón al **borde derecho** de una columna aparece
+  una línea de acento y el cursor de redimensionar; **arrastrar** cambia el ancho en vivo (a saltos de
+  medio carácter, desde el ancho mínimo de una columna automática —y nunca más estrecha que la palabra más
+  larga de su cabecera, que no se parte— hasta unos 80 caracteres) y al soltar queda guardado — un solo
+  `Ctrl+Z` lo deshace;
+  `Esc` cancela el arrastre. **Doble clic** en el borde, o *Reset width* en el menú de la columna, la
+  devuelve a ajustarse al contenido. Una columna con ancho lo mantiene aunque cambie el texto (una
+  palabra muy larga de una celda se parte en vez de ensancharla; si luego la cabecera recibe una palabra
+  más larga, la columna se ensancha lo justo para no partirla), viaja con ella al moverla o duplicarla y se ve igual
+  en las vistas previas, el resumen y los stickies, porque escala con el tamaño de letra. Se guarda en el
+  propio markdown, en el nº de guiones de la fila separadora (`| ------------ | --- |`): cualquier editor
+  sigue viendo una tabla normal. Las tablas que vienen de fuera (pegadas como texto, las del chat de IA,
+  las formateadas por otra herramienta) entran con columnas automáticas. En las **notas vinculadas** no
+  se ofrece (es un fichero Markdown externo: sus separadores se quedan en `---`). La app móvil aún no lo
+  conserva.
 - **Enter en una celda** crea otra línea en la celda; se guarda como salto de línea (`<br>`) y al
   reabrir es una línea más del mismo párrafo (antes las dos líneas se guardaban pegadas: `ab`).
 - **Atajos de teclado** (con el cursor o una selección de celdas en una tabla; `Mod` = Ctrl, ⌘ en

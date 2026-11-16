@@ -203,6 +203,65 @@ export function plusBars(g: TableGeometry, rightLimit: number, pill: Box | null 
   }
 }
 
+// ── Resizing a column ────────────────────────────────────────────────────────
+
+/** Width of the resize strip centred on a column's right edge (px). */
+export const RESIZE_GRIP = 8
+/** A strip clipped narrower than this isn't drawn. */
+export const MIN_RESIZE_GRIP = 4
+/** The pointer this close to a column's edge (px, either side) shows its accent line faintly. */
+export const RESIZE_NEAR = 12
+
+/** A column's resize strip: its box, and `edge` = the column's right edge (where the accent line goes). */
+export interface ResizeGrip {
+  col: number
+  box: Box
+  edge: number
+}
+
+/**
+ * The resize strip of each column whose right edge shows: RESIZE_GRIP wide,
+ * centred on the edge, as tall as the rows. Never over another control:
+ * - the column handles sit COLUMN_HANDLE_INSET (10px) inside the columns' sides,
+ *   so a half-strip (4px) on each side of an edge never reaches them;
+ * - left of the visible rows' left edge + the row handles' grown part
+ *   (HANDLE_GROWN - HANDLE_GROWN_OFFSET) it's cut (a table scrolled so that an
+ *   edge sits right at its left side);
+ * - right: cut at the visible part of the <table> plus the room before the
+ *   column "+" bar — `columnBar.left` (plusBars), or PLUS_GAP when there's no
+ *   bar —, and at `rightLimit`. So the last column's strip never takes the "+"
+ *   bar's clicks.
+ * Edges scrolled out of the <table>'s view have no strip. Below the rows (the
+ * pill, the row "+" bar) it never reaches.
+ */
+export function resizeGrips(g: TableGeometry, columnBar: Box | null, rightLimit: number): ResizeGrip[] {
+  const v = visibleBody(g)
+  const half = RESIZE_GRIP / 2
+  const minLeft = v.left + (HANDLE_GROWN - HANDLE_GROWN_OFFSET)
+  const maxRight = Math.min(columnBar ? columnBar.left : v.right + PLUS_GAP, rightLimit)
+  const grips: ResizeGrip[] = []
+  g.cols.forEach((c, col) => {
+    const edge = c.end
+    if (edge < g.view.left - 0.5 || edge > g.view.right + 0.5) return
+    const left = Math.max(edge - half, minLeft)
+    const right = Math.min(edge + half, maxRight)
+    if (right - left < MIN_RESIZE_GRIP) return
+    grips.push({ col, edge, box: { left, right, top: v.top, bottom: v.bottom } })
+  })
+  return grips
+}
+
+/** The strip whose column edge is within RESIZE_NEAR of the pointer (inside the rows' height), or null. */
+export function nearGrip(grips: readonly ResizeGrip[], x: number, y: number): number | null {
+  let best: ResizeGrip | null = null
+  for (const grip of grips) {
+    if (y < grip.box.top || y > grip.box.bottom) continue
+    const d = Math.abs(x - grip.edge)
+    if (d <= RESIZE_NEAR && (!best || d < Math.abs(x - best.edge))) best = grip
+  }
+  return best ? best.col : null
+}
+
 // ── Summary pill (count / sum of a cell selection) ───────────────────────────
 
 /** Height of the summary pill (index.css `.nf-table-pill`), and its gap to the row "+" bar beside it. */
@@ -391,6 +450,8 @@ export type TableAction =
   | { type: 'moveColumn'; from: number; to: number }
   | { type: 'sort'; column: number; direction: SortDirection }
   | { type: 'align'; column: number; align: TableAlign }
+  /** Width in dashes (lib/tableWidth.ts), null = fit the content. */
+  | { type: 'columnWidth'; column: number; width: number | null }
   | { type: 'clearRow'; index: number }
   | { type: 'clearColumn'; index: number }
   | { type: 'clearSelection' }
@@ -402,7 +463,7 @@ export type TableMenuIcon =
   | 'insertLeft' | 'insertRight' | 'insertAbove' | 'insertBelow' | 'duplicate'
   | 'moveLeft' | 'moveRight' | 'moveUp' | 'moveDown'
   | 'sortAsc' | 'sortDesc' | 'sortNumAsc' | 'sortNumDesc'
-  | 'clear' | 'delete' | 'deleteTable'
+  | 'resetWidth' | 'clear' | 'delete' | 'deleteTable'
 
 export interface TableMenuItem {
   type: 'item'
@@ -433,6 +494,11 @@ export type CanRun = (action: TableAction) => boolean
 export interface TableMenuData {
   rows: readonly (readonly string[])[]
   aligns: readonly TableAlign[]
+  /**
+   * Each column's width (dashes; null = fits its content). Absent where column
+   * widths aren't offered (a linked note's plain Markdown): no "Reset width".
+   */
+  widths?: readonly (number | null)[]
 }
 
 type TableMessages = Messages['editor']['table']
@@ -445,9 +511,9 @@ function item(
   icon: TableMenuIcon,
   label: string,
   action: TableAction,
-  opts: { reason?: string; danger?: boolean; kbd?: string } = {},
+  opts: { reason?: string; danger?: boolean; kbd?: string; disabled?: boolean } = {},
 ): TableMenuItem {
-  const disabled = !can(action)
+  const disabled = !!opts.disabled || !can(action)
   return {
     type: 'item', id, icon, label, action, disabled,
     ...(disabled && opts.reason ? { reason: opts.reason } : {}),
@@ -505,6 +571,21 @@ const deleteColumnItem = (data: TableMenuData, col: number, can: CanRun, m: Tabl
     kbd,
   })
 
+/**
+ * "Reset width" (the column fits its content again), after Align — only where
+ * widths are offered (`data.widths`). Disabled, with why, on a column that has
+ * no width: setColumnWidth(col, null) would "run" there too (a no-op), so the
+ * width decides, not just the command.
+ */
+function resetWidthItems(data: TableMenuData, col: number, can: CanRun, m: TableMessages): TableMenuItem[] {
+  if (!data.widths) return []
+  const auto = (data.widths[col] ?? null) === null
+  return [item(can, 'resetWidth', 'resetWidth', m.resetWidth, { type: 'columnWidth', column: col, width: null }, {
+    disabled: auto,
+    reason: auto ? m.widthAlreadyAuto : undefined,
+  })]
+}
+
 /** The menu of column `col`'s handle. */
 export function columnMenu(data: TableMenuData, col: number, can: CanRun, m: TableMessages, hints: ShortcutHints = {}): TableMenuEntry[] {
   return [
@@ -517,6 +598,7 @@ export function columnMenu(data: TableMenuData, col: number, can: CanRun, m: Tab
     item(can, 'moveRight', 'moveRight', m.moveRight, { type: 'moveColumn', from: col, to: col + 1 }, { kbd: hints.moveColumnRight }),
     sep(),
     { type: 'align', column: col, current: data.aligns[col] ?? null },
+    ...resetWidthItems(data, col, can, m),
     ...sortItems(data, col, can, m),
     sep(),
     item(can, 'clearColumn', 'clear', m.clearColumn, { type: 'clearColumn', index: col }),

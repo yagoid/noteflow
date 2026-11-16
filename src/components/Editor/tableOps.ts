@@ -15,8 +15,11 @@
 //
 // Invariants (markdown pipe tables, src/lib/markdownHtml.ts): row 0 is the
 // header (tableHeader cells), fixed and mandatory; every other row holds
-// tableCell cells; alignment is per column (the header cell's textAlign is
-// what gets saved; every cell carries it). Structural commands rebuild the
+// tableCell cells; alignment and width are per column (the header cell's
+// textAlign / colwidth are what gets saved; every cell of the column carries
+// them — prosemirror-tables' TableMap reports cells of one column with
+// different widths as a problem, and such a table is rejected like a merged
+// one). Structural commands rebuild the
 // table's rows and normalize cell types to that invariant. Tables with merged
 // cells (only possible from pasted HTML) are rejected by every command.
 // Decisions are documented in .agents/context/patterns.md ("Editor:
@@ -33,6 +36,7 @@ import { closeHistory } from '@tiptap/pm/history'
 import type { EditorView } from '@tiptap/pm/view'
 import { sortOrder, type SortDirection, type TableAlign } from '../../lib/tableData'
 import { insertTableTr, type TableSize } from '../../lib/tableInsert'
+import { clampColumnWidth, colwidthOf, widthOfColwidth } from '../../lib/tableWidth'
 import type { CellRect, TableAction } from '../../lib/tableControls'
 
 /**
@@ -144,6 +148,8 @@ function cellGrid(info: TableInfo): PMNode[][] {
 }
 
 const alignOf = (cell: PMNode) => (cell.attrs.textAlign as TableAlign | undefined) ?? null
+/** A cell's column width in dashes (lib/tableWidth.ts), null = automatic. */
+const widthOf = (cell: PMNode) => widthOfColwidth(cell.attrs.colwidth)
 
 function textData(info: TableInfo, rect: Rect): TableTextData {
   const grid = cellGrid(info)
@@ -158,6 +164,16 @@ function textData(info: TableInfo, rect: Rect): TableTextData {
 export function getTableInfo(state: EditorState, target?: TableTarget): { pos: number; rows: number; columns: number } | null {
   const info = getTable(state, target)
   return info && { pos: info.pos, rows: info.map.height, columns: info.map.width }
+}
+
+/**
+ * The width of each column of the target table (dashes, lib/tableWidth.ts;
+ * null = automatic), read from its header cells: what the column menu and the
+ * resize strips start from.
+ */
+export function getColumnWidths(state: EditorState, target?: TableTarget): (number | null)[] | null {
+  const info = getTable(state, target)
+  return info && cellGrid(info)[0].map(widthOf)
 }
 
 /** Every cell's text of the target table, header row included. */
@@ -441,8 +457,8 @@ export function duplicateColumn(index: number, target?: TableTarget): Command {
 
 /**
  * Insert an empty body row at `index` (1 … rows: nothing goes above the
- * header; `rows` appends). Each new cell takes its column's alignment from the
- * header cell. The selection stays on its cells.
+ * header; `rows` appends). Each new cell takes its column's alignment and
+ * width from the header cell. The selection stays on its cells.
  */
 export function insertRowAt(index: number, target?: TableTarget): Command {
   return (state, dispatch) => {
@@ -451,7 +467,8 @@ export function insertRowAt(index: number, target?: TableTarget): Command {
     if (dispatch) {
       const types = tableNodeTypes(state.schema)
       const grid = cellGrid(info)
-      grid.splice(index, 0, grid[0].map((header) => emptyCell(types.cell, { textAlign: alignOf(header) })))
+      grid.splice(index, 0, grid[0].map((header) =>
+        emptyCell(types.cell, { textAlign: alignOf(header), colwidth: colwidthOf(widthOf(header)) })))
       commit(state, dispatch, info, grid, (r, c) => [r >= index ? r + 1 : r, c], [index, 0])
     }
     return true
@@ -460,8 +477,8 @@ export function insertRowAt(index: number, target?: TableTarget): Command {
 
 /**
  * Insert an empty column at `index` (0 … columns; `columns` appends): a header
- * cell in row 0, body cells below, no alignment (a new column has none until
- * the user sets it). The selection stays on its cells.
+ * cell in row 0, body cells below, no alignment nor width (a new column has
+ * none until the user sets them). The selection stays on its cells.
  */
 export function insertColumnAt(index: number, target?: TableTarget): Command {
   return (state, dispatch) => {
@@ -471,7 +488,7 @@ export function insertColumnAt(index: number, target?: TableTarget): Command {
       const types = tableNodeTypes(state.schema)
       const grid = cellGrid(info).map((row, r) => {
         const next = [...row]
-        next.splice(index, 0, emptyCell(r === 0 ? types.header_cell : types.cell, { textAlign: null }))
+        next.splice(index, 0, emptyCell(r === 0 ? types.header_cell : types.cell, { textAlign: null, colwidth: null }))
         return next
       })
       commit(state, dispatch, info, grid, (r, c) => [r, c >= index ? c + 1 : c], [0, index])
@@ -827,6 +844,36 @@ export function alignColumn(index: number, align: TableAlign, target?: TableTarg
   }
 }
 
+/**
+ * Set the width of column `index` (dashes, lib/tableWidth.ts: rounded and
+ * clamped to 10…80) or make it automatic (`null`): `colwidth` on every cell of
+ * the column (the header cell's is the one saved). Already that width → true
+ * without a transaction. The selection (a CellSelection too) is kept. False
+ * for a width that isn't a number or an index out of range (and, like every
+ * command, for tables with merged cells).
+ */
+export function setColumnWidth(index: number, width: number | null, target?: TableTarget): Command {
+  return (state, dispatch) => {
+    const info = getTable(state, target)
+    if (!info || !inRange(index, 0, info.map.width)) return false
+    const want = width === null ? null : clampColumnWidth(width)
+    if (width !== null && want === null) return false
+    if (dispatch) {
+      const tr = state.tr
+      for (let r = 0; r < info.map.height; r++) {
+        const pos = info.start + info.map.positionAt(r, index, info.node)
+        const cell = state.doc.nodeAt(pos)!
+        // Also a stray non-NoteFlow colwidth (not a width: widthOf null) on an automatic column.
+        if (widthOf(cell) !== want || (want === null && cell.attrs.colwidth !== null)) {
+          tr.setNodeMarkup(pos, undefined, { ...cell.attrs, colwidth: colwidthOf(want) })
+        }
+      }
+      if (tr.docChanged) dispatch(tr)
+    }
+    return true
+  }
+}
+
 /** Put the cursor at the start of cell (row, col). Selection only: no undo step. */
 export function focusCell(row: number, col: number, target?: TableTarget): Command {
   return (state, dispatch) => {
@@ -853,6 +900,7 @@ export function tableActionCommand(action: TableAction, target?: TableTarget): C
     case 'moveColumn': return moveColumn(action.from, action.to, target)
     case 'sort': return sortRowsByColumn(action.column, action.direction, { ...target })
     case 'align': return alignColumn(action.column, action.align, target)
+    case 'columnWidth': return setColumnWidth(action.column, action.width, target)
     case 'clearRow': return clearRow(action.index, target)
     case 'clearColumn': return clearColumn(action.index, target)
     case 'clearSelection': return clearSelectedCells
