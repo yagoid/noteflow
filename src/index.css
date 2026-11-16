@@ -2193,7 +2193,7 @@ body.nf-table-grabbing * { cursor: grabbing !important; user-select: none; }
 /* Menus (handles, right-click, toolbar). */
 .nf-table-menu {
   min-width: 238px;
-  max-width: 300px;
+  max-width: 340px;
   /* Never taller than the window (placeMenu keeps it inside): it scrolls instead. */
   max-height: calc(100vh - 16px);
   overflow-y: auto;
@@ -2234,7 +2234,15 @@ body.nf-table-grabbing * { cursor: grabbing !important; user-select: none; }
 .nf-table-menu-item[aria-disabled] { opacity: 0.38; cursor: not-allowed; }
 .nf-table-menu-item.is-danger,
 .nf-table-menu-item.is-danger .nf-table-menu-icon { color: rgb(var(--red)); }
-.nf-table-menu-item kbd { font-family: inherit; font-size: 10.5px; color: rgb(var(--text-muted)); }
+/* Shortcut hint (lib/tableShortcuts.ts via tableControls menuShortcutHints): muted, right-aligned. */
+.nf-table-menu-item kbd {
+  flex: none;
+  margin-left: 12px;
+  font-family: inherit;
+  font-size: 10.5px;
+  white-space: nowrap;
+  color: rgb(var(--text-muted));
+}
 .nf-table-menu-icon { width: 16px; flex: none; display: grid; place-items: center; color: rgb(var(--text-muted)); }
 .nf-table-menu-label { flex: 1; min-width: 0; }
 .nf-table-menu-align { display: flex; align-items: center; gap: 9px; padding: 3px 5px 3px 9px; font-size: 12px; }

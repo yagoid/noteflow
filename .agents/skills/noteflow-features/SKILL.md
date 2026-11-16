@@ -971,6 +971,41 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   reseteaba al recargar).
 - **Enter en una celda** crea otra línea en la celda; se guarda como salto de línea (`<br>`) y al
   reabrir es una línea más del mismo párrafo (antes las dos líneas se guardaban pegadas: `ab`).
+- **Atajos de teclado** (con el cursor o una selección de celdas en una tabla; `Mod` = Ctrl, ⌘ en
+  macOS): `Alt+↑/↓` mueve la fila (solo filas de cuerpo: la cabecera no se mueve ni nada sube por
+  encima de ella); `Alt+←/→` mueve la columna con su cabecera y su alineación (`⌘⌥←/→` en macOS, donde
+  `⌥←/→` salta palabras); `Mod+Enter` inserta una fila debajo (en la cabecera, justo debajo de ella);
+  `Mod+Shift+Enter` una columna a la derecha; `Mod+D` duplica la fila (la cabecera no); `Mod+Shift+⌫`
+  elimina la(s) fila(s) y `Alt+Shift+⌫` la(s) columna(s). El cursor va a la fila/columna nueva o a la
+  copia; cada atajo se deshace con un solo `Ctrl+Z`. En los bordes (primera fila hacia arriba, última
+  columna a la derecha…) no hacen nada. Fuera de una tabla las teclas siguen como siempre (`Mod+Enter`
+  = salto de línea, `Alt+↑/↓` = mover ítem de lista); dentro de una lista en una celda, `Alt+↑/↓`
+  mueve el ítem, no la fila. `Tab`/`Shift+Tab` = celda siguiente/anterior (`Tab` en la última celda
+  añade una fila); `Enter` = otra línea en la celda. Listados en Ajustes → Atajos → *Tables* y, a la
+  derecha de cada opción, en los menús de las asas y del clic derecho / toolbar. Con un menú de tabla
+  abierto los atajos siguen funcionando (actúan sobre la línea que el menú seleccionó) y, si cambian la
+  tabla, el menú se cierra.
+- **Retroceso/Supr con celdas seleccionadas** las **vacía** (nunca borra filas ni la tabla, aunque
+  estén todas seleccionadas). Borrar la tabla: botón de tabla de la toolbar o clic derecho →
+  *Delete table*.
+- **Copiar/cortar celdas** (selección de celdas): se copian como **texto separado por tabuladores**
+  (una celda sola, su texto tal cual), que cae en celdas al pegar en Excel/Sheets (también con "pegar
+  solo valores"), y como tabla para pegar dentro de NoteFlow (conserva negritas, enlaces…). Cortar
+  vacía las celdas, sin borrar filas.
+- **Pegar desde una hoja de cálculo** (Excel, Google Sheets, Numbers, LibreOffice) o texto con
+  tabuladores: fuera de una tabla crea una **tabla nueva** con la primera fila como cabecera (el texto
+  de las celdas tal cual, sin interpretar `*` ni `|`); dentro de una tabla **rellena las celdas** desde
+  la celda del cursor, ampliando filas/columnas si hace falta (o rellena la selección de celdas). No se
+  pega además la imagen del rango que añade Excel. Prosa con algún tabulador, listas de Word, código
+  indentado, CSV o una tabla markdown no se convierten en tabla por esto. Si la celda de la hoja
+  lleva un enlace o texto con formato parcial, se pega como tabla HTML (siguiente punto) para no
+  perderlo; la negrita de celda entera de Excel/Sheets no se conserva.
+- **Pegar una tabla HTML** (web, Word, Google Docs…): si tiene enlaces, negritas, cursivas… se
+  conservan (dentro o fuera de otra tabla); una tabla sin formato entra igual que desde una hoja de
+  cálculo. En ambos casos se ajusta a lo que markdown puede guardar — la primera
+  fila pasa a ser la cabecera, las celdas combinadas se separan (el contenido queda en la primera), las
+  tablas anidadas pasan a texto, el título (`<caption>`) se descarta y la alineación es una por
+  columna. Dentro de otra tabla, sus celdas entran en las celdas (nunca una tabla dentro de otra).
 - **Pegar markdown con tabla:** en modo markdown, pegar texto que contenga una
   tabla markdown (`| a | b |` + fila separadora `|---|---|`) la convierte en tabla real
   (antes se pegaba como texto literal). El modo texto muestra siempre el fuente tal
@@ -2216,7 +2251,23 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+Shift+B` | Bloque de código |
 | `Ctrl+F` | Buscar dentro de la nota |
 | `Ctrl+M` | Alternar modo texto / modo markdown (también `Ctrl+Shift+E` con el foco en el editor) |
+| `Alt+↑` / `Alt+↓` | Mover el ítem de lista (con sus subítems) |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Fuente: aumentar / disminuir / reset |
+
+### Tablas
+Con el cursor o una selección de celdas en una tabla (`Mod` = `Ctrl`, `⌘` en macOS).
+
+| Atajo | Acción |
+|---|---|
+| `Alt+↑` / `Alt+↓` | Mover la fila arriba / abajo |
+| `Alt+←` / `Alt+→` (macOS `⌘⌥←/→`) | Mover la columna a la izquierda / derecha |
+| `Mod+Enter` | Insertar una fila debajo |
+| `Mod+Shift+Enter` | Insertar una columna a la derecha |
+| `Mod+D` | Duplicar la fila |
+| `Mod+Shift+Backspace` | Eliminar la(s) fila(s) seleccionada(s) |
+| `Alt+Shift+Backspace` | Eliminar la(s) columna(s) seleccionada(s) |
+| `Backspace` / `Delete` | Vaciar las celdas seleccionadas |
+| `Tab` / `Shift+Tab` | Celda siguiente / anterior (`Tab` en la última celda añade una fila) |
 
 ---
 

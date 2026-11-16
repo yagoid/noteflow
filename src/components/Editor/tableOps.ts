@@ -29,6 +29,8 @@ import {
   type Command, type EditorState, type Transaction,
 } from '@tiptap/pm/state'
 import { CellSelection, TableMap, tableNodeTypes, type Rect } from '@tiptap/pm/tables'
+import { closeHistory } from '@tiptap/pm/history'
+import type { EditorView } from '@tiptap/pm/view'
 import { sortOrder, type SortDirection, type TableAlign } from '../../lib/tableData'
 import { insertTableTr, type TableSize } from '../../lib/tableInsert'
 import type { CellRect, TableAction } from '../../lib/tableControls'
@@ -187,23 +189,18 @@ export function findTablePos(state: EditorState): number | null {
 
 /** The rectangle a CellSelection covers (`bottom`/`right` exclusive); null unless the selection is a CellSelection of the target table. */
 export function getCellSelectionRect(state: EditorState, target?: TableTarget): CellRect | null {
-  const sel = state.selection
-  if (!(sel instanceof CellSelection)) return null
-  const info = getTable(state, target)
-  if (!info || sel.$anchorCell.before(-1) !== info.pos) return null
-  const { top, bottom, left, right } = info.map.rectBetween(sel.$anchorCell.pos - info.start, sel.$headCell.pos - info.start)
+  if (!(state.selection instanceof CellSelection)) return null
+  const s = selectionRect(state)
+  if (!s || (target?.tablePos !== undefined && s.info.pos !== target.tablePos)) return null
+  const { top, bottom, left, right } = s.rect
   return { top, bottom, left, right }
 }
 
 /** The cell the selection is in — the cursor's cell, or a CellSelection's head cell — with its table's position. */
 export function getSelectionCell(state: EditorState): { tablePos: number; row: number; col: number } | null {
-  const sel = state.selection
   const info = tableAroundSelection(state)
-  if (!info) return null
-  const cell = sel instanceof CellSelection ? sel.$headCell.pos : cellPosIn(info, sel.$head)
-  if (cell === null) return null
-  const rect = info.map.findCell(cell - info.start)
-  return { tablePos: info.pos, row: rect.top, col: rect.left }
+  const head = info && headCellOf(state, info)
+  return head && { tablePos: info!.pos, row: head[0], col: head[1] }
 }
 
 // ── Rebuilding ───────────────────────────────────────────────────────────────
@@ -483,6 +480,134 @@ export function insertColumnAt(index: number, target?: TableTarget): Command {
   }
 }
 
+// ── Relative to the selection (keyboard shortcuts) ───────────────────────────
+//
+// The commands behind the table chords (TableKeymap.ts): they act on the
+// selection — a CellSelection, or the cell holding the cursor — and put the
+// cursor where the user expects it after the action, in the same transaction.
+
+/** Row and column of the selection's head cell (a CellSelection's $headCell, or the cursor's cell). */
+function headCellOf(state: EditorState, info: TableInfo): Cell | null {
+  const sel = state.selection
+  const pos = sel instanceof CellSelection ? sel.$headCell.pos : cellPosIn(info, sel.$head)
+  if (pos === null) return null
+  const rect = info.map.findCell(pos - info.start)
+  return [rect.top, rect.left]
+}
+
+/** Run `command`, then (same transaction) put the selection `place` returns for the new table. */
+function thenSelect(command: Command, info: TableInfo, place: (tr: Transaction, table: PMNode, map: TableMap) => Selection): Command {
+  return (state, dispatch) => command(state, dispatch && ((tr) => {
+    const table = tr.doc.nodeAt(info.pos)!
+    tr.setSelection(place(tr, table, TableMap.get(table)))
+    dispatch(tr)
+  }))
+}
+
+/** A cursor at the start of cell (row, col) of the new table. */
+function cursorAt(info: TableInfo, [row, col]: Cell): (tr: Transaction, table: PMNode, map: TableMap) => Selection {
+  return (tr, table, map) => Selection.near(tr.doc.resolve(info.start + map.positionAt(row, col, table) + 1))
+}
+
+/**
+ * Whether the selection is in a table: a CellSelection, or a selection whose
+ * both ends are in cells of the same table (merged-cell tables included, which
+ * the commands themselves reject).
+ */
+export function selectionInTable(state: EditorState): boolean {
+  const sel = state.selection
+  if (sel instanceof CellSelection) return true
+  const tableOf = ($pos: ResolvedPos) => {
+    for (let d = $pos.depth; d > 0; d--) {
+      if (roleOf($pos.node(d)) === 'table') return $pos.depth > d + 1 ? $pos.before(d) : null
+    }
+    return null
+  }
+  const table = tableOf(sel.$anchor)
+  return table !== null && table === tableOf(sel.$head)
+}
+
+/**
+ * Move the selected body row one place up (`dir` -1) or down (1). Only when
+ * the selection covers a single body row (the cursor's cell, or a
+ * CellSelection within one row): false for the header, for several rows and
+ * at the top / bottom of the body. The selection follows its cells (moveRow).
+ */
+export function moveSelectedRow(dir: -1 | 1): Command {
+  return (state, dispatch) => {
+    const s = selectionRect(state)
+    if (!s || s.rect.bottom - s.rect.top !== 1) return false
+    return moveRow(s.rect.top, s.rect.top + dir, { tablePos: s.info.pos })(state, dispatch)
+  }
+}
+
+/**
+ * Move the selected column one place left (`dir` -1) or right (1), header
+ * cell included. Only when the selection covers a single column; false for
+ * several and at the first / last column. The selection follows its cells.
+ */
+export function moveSelectedColumn(dir: -1 | 1): Command {
+  return (state, dispatch) => {
+    const s = selectionRect(state)
+    if (!s || s.rect.right - s.rect.left !== 1) return false
+    return moveColumn(s.rect.left, s.rect.left + dir, { tablePos: s.info.pos })(state, dispatch)
+  }
+}
+
+/**
+ * Insert an empty body row below the selection's last row (below the header
+ * when the selection is in it). The cursor goes to the new row, in the head
+ * cell's column.
+ */
+export const insertRowBelow: Command = (state, dispatch) => {
+  const s = selectionRect(state)
+  const head = s && headCellOf(state, s.info)
+  if (!s || !head) return false
+  const index = s.rect.bottom
+  return thenSelect(insertRowAt(index, { tablePos: s.info.pos }), s.info, cursorAt(s.info, [index, head[1]]))(state, dispatch)
+}
+
+/**
+ * Insert an empty column right of the selection's last column. The cursor goes
+ * to the new column, in the head cell's row.
+ */
+export const insertColumnRight: Command = (state, dispatch) => {
+  const s = selectionRect(state)
+  const head = s && headCellOf(state, s.info)
+  if (!s || !head) return false
+  const index = s.rect.right
+  return thenSelect(insertColumnAt(index, { tablePos: s.info.pos }), s.info, cursorAt(s.info, [head[0], index]))(state, dispatch)
+}
+
+/**
+ * Duplicate the head cell's row below it — a body row only (false in the
+ * header: the header is never duplicated). The selection moves to the copy:
+ * a cursor keeps its offset in its cell (the copy has the same content), a
+ * CellSelection within that row becomes the same cells of the copy, and a
+ * CellSelection over several rows a cursor at the start of the head cell's copy.
+ */
+export const duplicateSelectedRow: Command = (state, dispatch) => {
+  const info = tableAroundSelection(state)
+  const head = info && headCellOf(state, info)
+  if (!info || !head || head[0] === 0) return false
+  const [row, col] = head
+  return thenSelect(duplicateRow(row, { tablePos: info.pos }), info, (tr, table, map) => {
+    const posAt = (r: number, c: number) => info.start + map.positionAt(r, c, table)
+    const sel = state.selection
+    if (sel instanceof CellSelection) {
+      const anchor = info.map.findCell(sel.$anchorCell.pos - info.start)
+      if (anchor.top === row) return CellSelection.create(tr.doc, posAt(row + 1, anchor.left), posAt(row + 1, col))
+      return Selection.near(tr.doc.resolve(posAt(row + 1, col) + 1))
+    }
+    const copy = posAt(row + 1, col)
+    const shift = copy - (info.start + info.map.positionAt(row, col, info.node))
+    const oneCell = cellPosIn(info, sel.$anchor) === cellPosIn(info, sel.$head)
+    if (oneCell && sel instanceof TextSelection) return TextSelection.create(tr.doc, sel.anchor + shift, sel.head + shift)
+    if (oneCell && sel instanceof NodeSelection) return NodeSelection.create(tr.doc, sel.from + shift)
+    return Selection.near(tr.doc.resolve(copy + 1))
+  })(state, dispatch)
+}
+
 // ── Sorting ──────────────────────────────────────────────────────────────────
 
 /**
@@ -745,6 +870,22 @@ export function runTableCommand(editor: Editor, command: Command): boolean {
   const ok = command(editor.state, (tr) => editor.view.dispatch(tr))
   if (ok) editor.view.focus()
   return ok
+}
+
+/**
+ * Dispatch `tr` as an undo step of its OWN. prosemirror-history merges adjacent
+ * transactions less than newGroupDelay (500 ms) apart, and a table rebuild is
+ * always adjacent to the last edit in it: without this, a chord or a control
+ * action would come back with one Ctrl+Z together with the typing just before
+ * or after it (or a double click on "+" with both rows). `tr` closes the group
+ * before it; an empty closeHistory transaction right after closes it after
+ * (the history plugin applies that meta before its "no steps" early return).
+ * Used by the table chords (TableKeymap.ts) and the table controls
+ * (tableMenus.ts runControlCommand); runTableCommand keeps the default grouping.
+ */
+export function dispatchOwnUndoStep(view: EditorView, tr: Transaction): void {
+  view.dispatch(closeHistory(tr))
+  view.dispatch(closeHistory(view.state.tr).setMeta('addToHistory', false))
 }
 
 /** Whether a table command can run on the editor now (for enabling menu entries). */

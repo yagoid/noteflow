@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import {
-  focusableItems, placeMenu, stepFocus, type TableAction, type TableMenuIcon,
+  focusableItems, menuKeyAction, placeMenu, stepFocus, type TableAction, type TableMenuIcon,
 } from '../../lib/tableControls'
 import type { TableAlign } from '../../lib/tableData'
 import { tablePosOfDom } from './tableDom'
@@ -57,10 +57,19 @@ export function TableMenu({ editor, menu, onClose }: { editor: Editor; menu: Tab
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
   const [focus, setFocus] = useState(-1)
 
+  // Entries follow every transaction. A document change the menu didn't make
+  // itself (a table chord pressed with the menu open, undo, typing elsewhere, an
+  // external update) closes it: its line index may no longer be that line.
+  const ownChangeRef = useRef(false)
+  const onCloseRef = useRef(onClose)
+  useEffect(() => { onCloseRef.current = onClose })
   useEffect(() => {
-    const bump = () => setVersion((v) => v + 1)
-    editor.on('transaction', bump)
-    return () => { editor.off('transaction', bump) }
+    const onTransaction = ({ transaction }: { transaction: { docChanged: boolean } }) => {
+      if (transaction.docChanged && !ownChangeRef.current) { onCloseRef.current(); return }
+      setVersion((v) => v + 1)
+    }
+    editor.on('transaction', onTransaction)
+    return () => { editor.off('transaction', onTransaction) }
   }, [editor])
 
   const tablePos = tablePosOfDom(editor.view, menu.table)
@@ -81,7 +90,12 @@ export function TableMenu({ editor, menu, onClose }: { editor: Editor; menu: Tab
 
   const run = (action: TableAction) => {
     if (action.type !== 'align') onClose()
-    runTableAction(editor, menu.table, action)
+    ownChangeRef.current = true
+    try {
+      runTableAction(editor, menu.table, action)
+    } finally {
+      ownChangeRef.current = false
+    }
   }
   // The listeners below read these through refs: registered once per menu, not on every render.
   const runRef = useRef(run)
@@ -99,23 +113,21 @@ export function TableMenu({ editor, menu, onClose }: { editor: Editor; menu: Tab
   }, [focus])
 
   useEffect(() => {
+    // Only plain ↑/↓/Enter/Esc are the menu's (lib/tableControls.ts menuKeyAction);
+    // chords (Alt/Ctrl/⌘) go to the editor untouched — and close the menu through
+    // the transaction listener above if they change the document.
     const onKeyDown = (e: KeyboardEvent) => {
-      const swallow = () => { e.preventDefault(); e.stopPropagation() }
-      if (e.key === 'Escape') { swallow(); onClose(); return }
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        swallow()
-        setFocus((f) => stepFocus(f, itemsRef.current.length, e.key === 'ArrowDown' ? 1 : -1))
-        return
-      }
-      if (e.key === 'Enter') {
-        swallow()
+      const action = menuKeyAction(e)
+      if (action === 'pass') return
+      if (action === 'dismiss') { onClose(); return }
+      e.preventDefault()
+      e.stopPropagation()
+      if (action === 'close') onClose()
+      else if (action === 'run') {
         const item = itemsRef.current[focusRef.current]
         if (item) runRef.current(item.action)
         else onClose()
-        return
-      }
-      // Any other key (typing on, Tab, a shortcut) goes to the editor: the menu steps aside.
-      if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) onClose()
+      } else setFocus((f) => stepFocus(f, itemsRef.current.length, action === 'next' ? 1 : -1))
     }
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as Node

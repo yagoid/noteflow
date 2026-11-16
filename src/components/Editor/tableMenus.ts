@@ -3,12 +3,12 @@
 
 import type { Editor } from '@tiptap/core'
 import type { Command } from '@tiptap/pm/state'
-import { closeHistory } from '@tiptap/pm/history'
 import type { Messages } from '../../i18n'
+import { isMac } from '../../lib/platform'
 import {
-  cellMenu, columnMenu, rowMenu, type Box, type MenuPlacement, type TableAction, type TableMenuEntry,
+  cellMenu, columnMenu, menuShortcutHints, rowMenu, type Box, type MenuPlacement, type TableAction, type TableMenuEntry,
 } from '../../lib/tableControls'
-import { canRunTableCommand, getCellSelectionRect, getTableData, tableActionCommand } from './tableOps'
+import { canRunTableCommand, dispatchOwnUndoStep, getCellSelectionRect, getTableData, tableActionCommand } from './tableOps'
 import { tablePosOfDom } from './tableDom'
 
 /** Which menu: a column's or a row's handle, or a cell's (right-click, toolbar). */
@@ -30,6 +30,9 @@ export interface TableMenuState {
   owner?: HTMLElement | null
 }
 
+/** The table chords as the menus show them (same source as the keymap and Settings → Shortcuts). */
+const HINTS = menuShortcutHints(isMac)
+
 /** The entries of `spec`'s menu on the table at `tablePos`; empty when there's no such table any more. */
 export function tableMenuEntries(editor: Editor, tablePos: number, spec: TableMenuSpec, t: Messages): TableMenuEntry[] {
   const target = { tablePos }
@@ -38,34 +41,22 @@ export function tableMenuEntries(editor: Editor, tablePos: number, spec: TableMe
   const m = t.editor.table
   if (spec.kind === 'cell') {
     if (!editor.state.doc.nodeAt(tablePos)) return []
-    return cellMenu(data, spec, getCellSelectionRect(editor.state, target), can, m)
+    return cellMenu(data, spec, getCellSelectionRect(editor.state, target), can, m, HINTS)
   }
   if (!data) return []
-  return spec.kind === 'column' ? columnMenu(data, spec.index, can, m) : rowMenu(spec.index, can, m)
+  return spec.kind === 'column' ? columnMenu(data, spec.index, can, m, HINTS) : rowMenu(spec.index, can, m, HINTS)
 }
 
 /**
- * Run a command of the table controls as an undo step of its OWN, then refocus
- * the editor. prosemirror-history merges adjacent transactions less than
- * newGroupDelay (500 ms) apart, and a table rebuild is always adjacent to the
- * last edit in it: without this, a double click on "+" (two rows) or typing in
- * a cell and then clicking an action would come back with one Ctrl+Z. The
- * action's transaction carries closeHistory (a new group, apart from what came
- * before) and an empty closeHistory transaction follows it (the history plugin
- * applies that meta before its "no steps" early return), so what comes next
- * starts a new group too. Only the controls' path: runTableCommand (keyboard
- * shortcuts) keeps the default grouping. False if it can't run or the editor is
- * read-only.
+ * Run a command of the table controls as an undo step of its OWN
+ * (tableOps.dispatchOwnUndoStep, like the table chords: a double click on "+"
+ * is two steps, typing then an action is two), then refocus the editor. False
+ * if it can't run or the editor is read-only.
  */
 export function runControlCommand(editor: Editor, command: Command): boolean {
   if (!editor.isEditable) return false
   const { view } = editor
-  let dispatched = false
-  const ok = command(view.state, (tr) => {
-    dispatched = true
-    view.dispatch(closeHistory(tr))
-  })
-  if (dispatched) view.dispatch(closeHistory(view.state.tr))
+  const ok = command(view.state, (tr) => dispatchOwnUndoStep(view, tr))
   if (ok) view.focus()
   return ok
 }

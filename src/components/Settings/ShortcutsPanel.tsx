@@ -1,4 +1,5 @@
-import { keyLabel } from '../../lib/platform'
+import { isMac, keyLabel } from '../../lib/platform'
+import { pairKeys, tableShortcuts } from '../../lib/tableShortcuts'
 import { useT } from '../../i18n/useT'
 import { SectionTitle } from './ui'
 import type { Messages } from '../../i18n'
@@ -17,6 +18,7 @@ interface ShortcutSection {
 // change. Key combos stay literal (never translated).
 function buildSections(t: Messages): ShortcutSection[] {
   const s = t.settings.shortcuts
+  const tk = tableShortcuts(isMac)
   return [
     {
       title: s.appSection,
@@ -61,6 +63,22 @@ function buildSections(t: Messages): ShortcutSection[] {
         { keys: ['Ctrl', 'F'], description: s.findInNote },
         { keys: ['Ctrl', 'M'], description: s.toggleMarkdown },
         { keys: ['Alt', '↑/↓'], description: s.moveListItem },
+      ],
+    },
+    {
+      // Chords from lib/tableShortcuts.ts (the keymap binds the same ones).
+      title: s.tablesSection,
+      shortcuts: [
+        { keys: pairKeys(tk.moveRowUp.keys, tk.moveRowDown.keys), description: s.tableMoveRow },
+        { keys: pairKeys(tk.moveColumnLeft.keys, tk.moveColumnRight.keys), description: s.tableMoveColumn },
+        { keys: tk.insertRowBelow.keys, description: s.tableInsertRow },
+        { keys: tk.insertColumnRight.keys, description: s.tableInsertColumn },
+        { keys: tk.duplicateRow.keys, description: s.tableDuplicateRow },
+        { keys: tk.deleteRows.keys, description: s.tableDeleteRows },
+        { keys: tk.deleteColumns.keys, description: s.tableDeleteColumns },
+        { keys: [isMac ? '⌫' : 'Backspace'], description: s.tableClearCells },
+        { keys: ['Tab'], description: s.tableNextCell },
+        { keys: ['Shift', 'Tab'], description: s.tablePrevCell },
       ],
     },
     {

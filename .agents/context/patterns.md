@@ -967,7 +967,8 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
 
 Los comandos que usan **todos** los controles de tabla (asas, menús, «+», arrastre, clic derecho y el
 botón de la toolbar: ver "Editor: controles de tabla"; los comandos de tabla de TipTap/prosemirror-tables
-ya no se usan desde la UI). Dos capas:
+ya no se usan desde la UI).
+Los atajos de teclado y el portapapeles también: ver «Editor: teclado y portapapeles de tablas». Dos capas:
 
 - **`src/components/Editor/tableOps.ts`** — comandos estilo ProseMirror `(state, dispatch?) => boolean`
   (testeables sin vista). Sin `dispatch` solo responden si se pueden ejecutar (habilitar menús); con
@@ -1074,10 +1075,11 @@ el cursor es solo selección, sin paso). Una transacción por comando no basta: 
 adyacente a la última edición en ella (doble clic en «+» = dos filas que volvían con un solo Ctrl+Z;
 escribir en una celda y pulsar una acción enseguida, igual). Por eso todo lo que cambia el documento desde
 los controles (menús de asa, clic derecho, toolbar, «+», soltar un arrastre) pasa por
-`runControlCommand` (`tableMenus.ts`, vía `runTableAction`): marca la transacción con `closeHistory` y
-despacha justo después un `closeHistory(view.state.tr)` vacío (el plugin aplica esa meta antes de su
-salida temprana "sin pasos"), así lo siguiente también abre grupo. **`runTableCommand` no lo hace**
-(conserva la agrupación por defecto para los atajos). Test con el plugin real en
+`runControlCommand` (`tableMenus.ts`, vía `runTableAction`) → `dispatchOwnUndoStep` (`tableOps.ts`,
+el mismo helper que usan los atajos de `TableKeymap.ts`): marca la transacción con `closeHistory` y
+despacha justo después un `closeHistory(view.state.tr)` vacío (`addToHistory: false`; el plugin aplica
+esa meta antes de su salida temprana "sin pasos"), así lo siguiente también abre grupo.
+**`runTableCommand` no lo hace** (conserva la agrupación por defecto). Test con el plugin real en
 `tests/lib/tableControls.test.ts`. Insertar una tabla nueva (selector N×M / `/table`) no pasa por aquí.
 
 - **Piezas:** `components/Editor/TableControls.tsx` (capa única por editor: asas, «+», arrastre, menú de
@@ -1169,10 +1171,31 @@ salida temprana "sin pasos"), así lo siguiente también abre grupo. **`runTable
   se **reconstruyen en cada transacción**; el selector de alineación (`.nf-table-menu-seg`) deja el menú
   abierto y marca la activa (`null` se muestra como izquierda y pulsarla no cambia nada). Imposibles =
   **deshabilitadas, no ocultas** (`aria-disabled`, no `disabled`, para que el `title` con el motivo se
-  vea). Teclado en captura en `window` (el foco sigue en el editor): ↑/↓ recorren las habilitadas,
-  `Enter` ejecuta (sin foco: cierra), `Esc` cierra; ninguna llega a ProseMirror; cualquier otra tecla
-  cierra el menú y sigue al editor. Clic fuera (salvo en su `owner`, que lo alterna), scroll (salvo
-  el del propio menú) o resize cierran. `kbd?` en el tipo de ítem para las pistas de atajos (fase 3); hoy ninguna.
+  vea). Teclado en captura en `window` (el foco sigue en el editor), decidido por `menuKeyAction`
+  (puro, testeado): solo ↑/↓/`Enter`/`Esc` **sin** Alt/Ctrl/⌘/Shift son del menú (↑/↓ recorren las
+  habilitadas, `Enter` ejecuta —sin foco: cierra—, `Esc` cierra; no llegan a ProseMirror). Cualquier tecla
+  con **Alt/Ctrl/⌘** (los atajos de tabla, deshacer, copiar…) pasa **intacta** al editor y el menú
+  sigue abierto; otra tecla (escribir, `Tab`, Shift+flechas) cierra el menú y sigue al editor.
+  **Coexistencia con los atajos (decisión: cerrar, no re-apuntar):** un atajo pulsado con un menú abierto
+  actúa con normalidad sobre la selección (la línea que el menú seleccionó); **cualquier cambio del
+  documento que no haga el propio menú** (el atajo, deshacer, una actualización externa) **cierra el
+  menú**, porque su índice de línea puede haber dejado de ser esa línea (escucha de transacciones de
+  `TableMenu` + bandera de "cambio propio" mientras ejecuta una entrada; alinear, que deja el menú
+  abierto, es cambio propio). Re-apuntarlo exigiría seguir la línea a través de cada transacción:
+  cerrar es más simple y nunca deja un menú mintiendo. Clic fuera (salvo en su `owner`, que lo alterna),
+  scroll (salvo el del propio menú) o resize cierran.
+  **Pistas de atajos (`kbd`, a la derecha, atenuadas):** `menuShortcutHints(mac)` = los acordes de
+  `lib/tableShortcuts.ts` (misma fuente que el keymap y Ajustes → Atajos) escritos con `shortcutText`
+  (`⌘↩` / `Ctrl+Enter`). Solo en entradas que hacen **lo mismo** que su acorde (los acordes actúan sobre
+  la selección y un asa selecciona su línea antes de abrir el menú; un test compara el documento
+  resultante menú ↔ acorde): fila → *Insert below* (`insertRowBelow`), *Duplicate row* (`duplicateRow`,
+  **no** en la cabecera: el acorde no la duplica), *Move up/down* (`moveRowUp/Down`), *Delete row*
+  (`deleteRows`); columna → *Insert right* (`insertColumnRight`), *Move left/right*
+  (`moveColumnLeft/Right`), *Delete column* (`deleteColumns`); celda → *Insert row below*, *Delete row*,
+  *Insert column right*, *Delete column*, pero las de fila solo si la selección es un cursor o cabe en esa
+  fila (y las de columna en esa columna): con varias, el acorde actuaría sobre todas. Sin pista: insertar
+  encima/a la izquierda, duplicar columna, vaciar, ordenar, alinear, *Clear N cells* (`Supr`/`⌫` no es
+  un acorde de `tableShortcuts`) y *Delete table*.
   - **Columna:** "Column · <cabecera>" (o "Column N"); Insert left/right, Duplicate · Move left/right ·
     Align · Sort A→Z/Z→A (1→9/9→1 si `isNumericColumn` del cuerpo) · Clear column (cuerpo) · Delete
     (rojo; deshabilitada en la única columna: "A table needs at least one column").
@@ -1194,6 +1217,159 @@ salida temprana "sin pasos"), así lo siguiente también abre grupo. **`runTable
 - **Estilos** (`index.css`, tras § Tables): solo variables del tema (`--text`, `--accent`, `--red`,
   `--bg-editor`, `--bg-0` para el texto sobre acento, `--bg-1`); el cursor de arrastre en
   `body.nf-table-grabbing`.
+
+### Editor: teclado y portapapeles de tablas
+
+Atajos de tabla y copiar/cortar/pegar alrededor de tablas, solo modo markdown. Formato y esquema
+(`schemaExtensions`) intactos. Ficheros:
+- `src/lib/tableShortcuts.ts` (puro): `tableShortcuts(mac)` → por acción, el nombre de tecla de
+  ProseMirror (`pm`) y las teclas a mostrar (`keys`, con `Mod`/`Alt`/`Shift` que traduce `keyLabel`);
+  `pairKeys` (↑/↓ en una fila) y `shortcutText(keys, mac)` (`⌘⇧↩` / `Ctrl+Shift+Enter`, para menús).
+  Fuente del keymap, de Ajustes → Atajos (`ShortcutsPanel`, sección *Tables*) y de las pistas de los
+  menús de tabla (`menuShortcutHints` en `lib/tableControls.ts`, ver "Editor: controles de tabla").
+- `src/components/Editor/TableKeymap.ts`: extensión de comportamiento (registrada en `Editor.tsx`, no
+  en el esquema). Comandos nuevos en `tableOps.ts` (mismas invariantes: una transacción, cabecera fija):
+  `moveSelectedRow(dir)`, `moveSelectedColumn(dir)`, `insertRowBelow`, `insertColumnRight`,
+  `duplicateSelectedRow` y `selectionInTable`.
+- `src/lib/tablePaste.ts` (puro): `isProseMirrorHtml`, `htmlIsOnlyTable`, `shouldPasteAsTsv`,
+  `isTablePicture`.
+- `src/components/Editor/tableClipboard.ts`: `handleEditorPaste` (el `handlePaste` de `editorProps`
+  de `Editor.tsx`, que ya solo cablea), la extensión `TableClipboard` y `normalizedTable` /
+  `normalizePastedSlice` / `tableFromRows` / `cellSelectionText`.
+
+**Atajos** (`Mod` = Ctrl en Windows/Linux, ⌘ en macOS):
+
+| Acción | Win/Linux | macOS | Comando / por qué |
+|---|---|---|---|
+| Mover fila arriba/abajo | `Alt+↑/↓` | `⌥↑/↓` | `moveSelectedRow`; mismo gesto que mover ítems de lista |
+| Mover columna izq./der. | `Alt+←/→` | `⌘⌥←/→` | `moveSelectedColumn`; en macOS `⌥←/→` es saltar palabra y no se pisa |
+| Insertar fila debajo | `Mod+Enter` | `⌘↩` | `insertRowBelow`; `Mod+Enter` solo se tapa **dentro** de tablas |
+| Insertar columna a la derecha | `Mod+Shift+Enter` | `⌘⇧↩` | `insertColumnRight` |
+| Duplicar fila | `Mod+D` | `⌘D` | `duplicateSelectedRow`; la cabecera no se duplica |
+| Eliminar fila(s) | `Mod+Shift+Backspace` | `⌘⇧⌫` | `deleteSelectedRows` |
+| Eliminar columna(s) | `Alt+Shift+Backspace` | `⌥⇧⌫` | `deleteSelectedColumns`; `Alt` para no chocar con el de filas |
+
+- **Cuándo actúan:** editor editable, selección en una tabla (`selectionInTable`: `CellSelection`, o
+  ancla y cabezal en celdas de la misma tabla), sin composición IME y con el menú `/` cerrado (con él
+  abierto sus teclas ganan: `SuggestionPluginKey`). Fuera de tablas devuelven `false` y nada cambia:
+  `Mod+Enter` sigue siendo el hard break de `LineBreak` (y en un heading lo parte), `Alt+↑/↓` sigue
+  siendo `ListItemMove`.
+- **Dentro de una tabla el acorde es de la tabla:** en los bordes (primera fila de cuerpo + `Alt+↑`,
+  última + `Alt+↓`, primera/última columna, duplicar la cabecera, borrar filas con solo la cabecera,
+  borrar la única columna, tablas con celdas combinadas…) se **consume** sin hacer nada. Excepción:
+  con el cursor en una **lista dentro de una celda**, `Alt+↑/↓` es siempre de la lista (devuelve
+  `false` también en sus extremos; la fila nunca se mueve).
+- **Con `CellSelection`:** mover fila/columna solo si abarca una única fila/columna (una fila entera
+  seleccionada se mueve y sigue seleccionada); si abarca varias, no-op consumido. Insertar: tras la
+  última fila/columna seleccionada (en la cabecera → fila 1). Duplicar: la fila del cabezal; una
+  selección dentro de esa fila pasa a las mismas celdas de la copia.
+- **Cursor** en la misma transacción (`thenSelect` en `tableOps.ts`): fila nueva → en ella, misma
+  columna; columna nueva → en ella, misma fila; duplicar → en la copia con el mismo offset; mover →
+  sigue a su celda; eliminar → lo de `tableOps`.
+- **Un paso de deshacer por acorde, aislado:** el keymap despacha con `dispatchOwnUndoStep`
+  (`tableOps.ts`, compartido con los controles de tabla): `closeHistory` y luego una transacción vacía con
+  `closeHistory` (`addToHistory: false`). Sin eso `prosemirror-history` juntaba
+  el acorde con lo tecleado < 500 ms antes o después (la reconstrucción de la tabla es "adyacente").
+- **`Backspace`/`Delete`/`Mod+Backspace`/`Mod+Delete` con `CellSelection` → vaciar celdas siempre**
+  (`clearSelectedCells`; con celdas combinadas, `deleteCellSelection` de prosemirror-tables), también
+  si están todas seleccionadas: el `deleteTableWhenAllCellsSelected` de TipTap borraba la tabla entera
+  (p. ej. una columna seleccionada en una tabla de una columna). Borrar la tabla sigue en toolbar/menú.
+- **Sin redefinir:** `Tab`/`Shift+Tab` (de TipTap `Table`: celda siguiente/anterior; `Tab` en la
+  última celda añade una fila de **cuerpo**, también en una tabla solo-cabecera) y `Enter` (línea nueva
+  en la celda).
+- **Prioridad `150`** (> 100 de `LineBreak`, `ListItemMove` y `Table`); un test registra la extensión
+  la **primera** de la lista para comprobar que gana por prioridad y no por orden de registro.
+- **Choques revisados:** los handlers globales en captura (`App.tsx`, `SectionWindowApp.tsx`) solo
+  miran Ctrl/Cmd **sin Alt** + letras que no son D; el `onKeyDown` del panel de `NoteEditor` solo
+  `Ctrl+Shift+E` y `Ctrl+±`; los campos del kanban paran sus eventos (`stopEvent`) y un tablero nunca
+  está en una tabla; `AutoCloseBrackets` solo toma `Backspace` dentro de `()` vacío; el menú de Electron
+  es `null`. Riesgo conocido: en Windows `Alt+Shift` es el atajo por defecto para cambiar la
+  distribución de teclado (se dispara al soltar `Alt+Shift` sin otra tecla en medio; con `⌫` no).
+
+**Copiar / cortar una `CellSelection`:** el `text/plain` es **TSV** (`cellsToTsv` sobre
+`getSelectedCellsData`; con celdas combinadas, el texto en su celda superior-izquierda); una sola celda →
+su texto tal cual, sin comillas. Por qué: Excel y Sheets, en pegado normal, leen el `text/html` (la tabla
+que ya pone ProseMirror), así que el texto plano decide el "pegar solo valores" de las hojas de cálculo,
+los editores/terminal/chat y el propio pegado TSV de NoteFlow; TSV cae en celdas en todas las hojas, y
+un trozo de tabla en markdown convertiría su primera fila en cabecera. Va en el `clipboardTextSerializer`
+del plugin de `TableClipboard` (prioridad 150 → antes que el `ClipboardTextSerializer` del core de
+TipTap); para cualquier otra selección devuelve `''` y sigue el de TipTap. El HTML no cambia
+(`data-pm-slice`): pegar en NoteFlow inserta celdas. **Cortar** = el `cut` nativo de ProseMirror
+(`deleteSelection` sobre una `CellSelection` vacía cada celda): las filas quedan, un paso de deshacer.
+
+**Pegar: orden de `handleEditorPaste`** (prop de la vista: corre antes que el `handlePaste` del plugin
+de prosemirror-tables):
+1. Ancestro con `code` → `false` (texto tal cual).
+2. HTML con `data-pm-slice` (copia de NoteFlow) → `pasteSliceInTable`: dentro de una tabla, celdas en
+   celdas (el `handlePaste` de prosemirror-tables reimplementado con `__pastedCells`/`__clipCells`/
+   `__insertCells` para normalizar en la misma transacción); fuera → nativo.
+3. **TSV** (`shouldPasteAsTsv`: `looksLikeTabularText(text)` y HTML vacío, o con una única `<table>` como
+   contenido con texto — fuera `<style>`, `<meta>`, `<col>`/`<colgroup>` y envoltorios sin texto como
+   `<google-sheets-html-origin>` — **sin formato en línea**). Formato en línea = etiquetas `a[href]`,
+   `img`, `b`/`strong`, `i`/`em`, `u`, `s`/`del`/`strike`, `code`, `mark` (salvo el `<b
+   style="font-weight:normal">` envoltorio de Google Docs) y, **fuera de hojas de cálculo**, estilos en
+   línea de negrita (`font-weight` ≥ 600/`bold`), cursiva, subrayado o tachado (así marca Docs). Motivo:
+   Chromium, Word y Docs también ponen TSV en `text/plain` al copiar una tabla, y el texto literal
+   perdía enlaces y negritas (revisión 2026-11); con formato, el HTML va al paso 5 (nativo + normalizado).
+   Hojas de cálculo (`isSpreadsheetHtml`: `<google-sheets-html-origin>`, namespace/`ProgId` de Excel):
+   sus estilos de celda (clases de Excel, `style` del `td` en Sheets) **no** cuentan — siguen por TSV y
+   pierden la negrita de celda entera, que markdown sí guardaría pero el texto literal es más fiable —;
+   un enlace, una imagen o texto enriquecido dentro de una celda sí las mandan al HTML. **No** se fuerza
+   TSV por el marcador de origen: conservar un enlace pesa más que el TSV y el HTML ya se normaliza.
+   → `parseDelimited(text, '\t')`. Fuera de una tabla: tabla nueva con
+   `tableFromRows` (fila 0 = cabecera; texto **literal**, `\n` → hard break, sin pasar por markdown) y
+   `replaceSelectionWith`, como el pegado nativo de un nodo (fuera de una lista igual que el resto).
+   Dentro: rellena desde la celda activa creciendo filas/columnas, o la `CellSelection` (recorta/
+   repite, como prosemirror-tables); la primera fila pegada son **datos**.
+4. Markdown (`looksLikeMarkdown`, sin HTML rico) como antes; dentro de una tabla, una tabla markdown
+   pegada entra como celdas (antes quedaba anidada).
+5. Resto (HTML rico, tablas web/Word/Docs con formato) → nativo (las marcas se conservan); dentro de una
+   tabla, celdas en celdas con sus marcas (normalizadas, alineación de la tabla destino). Una tabla sola
+   rodeada de bloques **vacíos** (el `<br />` que Google Docs pone tras la tabla dentro de su envoltorio
+   `<b id="docs-internal-guid…">`, `<p></p>`, `<p><br></p>`) también entra como celdas: `loneTableSlice`
+   descarta esos bloques antes de `__pastedCells` (que con un bloque de más devuelve null). Con texto
+   **real** alrededor, todo entra en la celda del cursor, delante de lo que tenía, con las tablas
+   aplanadas a texto (nada se pierde, ni de lo pegado ni de la tabla destino).
+
+Las transacciones propias llevan `paste: true` pero **no** `uiEvent: 'paste'`: así las paste rules de
+TipTap no convierten `**x**` ni URLs del texto de las celdas en marcas.
+
+**Normalización** (`normalizedTable`, idempotente: `null` si ya es válida): celdas combinadas expandidas
+(el contenido en la superior-izquierda, el resto vacías), filas irregulares rellenadas, filas sin celdas
+fuera, fila 0 = `tableHeader` (aunque el HTML no tuviera `<thead>`/`<th>`) y el resto `tableCell` (los
+`<th>` de una columna de cabecera pasan a celdas; con varias filas de cabecera solo la 0 lo es), tablas
+anidadas aplanadas a texto (una línea por fila, celdas unidas con ` · `), sin `colwidth`, y la
+alineación de cada celda = la de la **cabecera de su columna** (una cabecera con `colspan` alinea todas
+sus columnas; los `text-align` inline de Sheets en celdas del cuerpo se descartan). Se aplica en
+`TableClipboard`: `transformPastedHTML` quita `<caption>` (ProseMirror lo sacaba como párrafo encima;
+decidido quitarlo para que una tabla web entre como celdas también dentro de otra tabla);
+`transformPasted` normaliza las tablas **cerradas** del slice (las abiertas por los bordes, copias de
+celdas, se dejan); y `appendTransaction`, tras cualquier transacción con `paste`/`uiEvent: 'paste'`,
+normaliza las tablas que toca el cambio (rango del diff del documento; las demás no se tocan) — así las
+filas copiadas de NoteFlow pegadas fuera de una tabla (slice abierto → tabla sin cabecera) quedan con
+cabecera, en el mismo paso de deshacer (transacción añadida). Si solo cambian tipos/atributos,
+`setNodeMarkup` celda a celda (posiciones y selección intactas); si cambia la forma, se reemplaza la
+tabla y la selección vuelve a sus celdas (con su offset si la celda no cambió). Pegando celdas dentro
+de una tabla se conservan las alineaciones de la tabla destino (también sobre la cabecera).
+
+**Qué estaba roto antes (2026-11, comprobado con HTML real de Excel, Sheets y una tabla web):** las
+tablas sin `<th>` (Excel, Sheets, muchas webs) se guardaban con una cabecera **vacía** `|   |   |` y la
+primera fila real como cuerpo; las celdas combinadas daban filas desiguales que al reabrir desplazaban
+celdas; una tabla anidada colaba sus filas en la de fuera (`tableElToMd` usa `querySelectorAll('tr')`);
+`<th>` en filas de cuerpo; TSV pegado dentro de una celda → texto literal con tabuladores; HTML/markdown
+con tabla pegado dentro de una tabla → tabla anidada (markdown destrozado); copiar celdas daba
+`a\n\n\n\nb`; Excel insertaba además la **imagen** del rango; y `Supr` con todas las celdas
+seleccionadas borraba la tabla.
+
+**Imagen del rango (Excel/Numbers):** el `onPaste` del wrapper de `Editor.tsx` no inserta la imagen del
+portapapeles si `isTablePicture(text, html)` (hay `<table` en el HTML o el texto es TSV).
+
+Tests: `tests/lib/tableKeymap.test.ts` y `tests/lib/tableClipboard.test.ts` (TipTap real cableado como
+`Editor.tsx` en `tests/helpers/tableEditor.ts`: teclas por el `handleKeyDown` de ProseMirror y
+`ClipboardEvent` reales por sus handlers de copiar/cortar/pegar; markdown resultante + round-trip +
+un `undo`), fixtures de portapapeles reales en `tests/helpers/clipboardFixtures.ts` (Excel, Sheets,
+tabla web, lista de Word, código de VS Code), `tests/lib/tablePaste.test.ts`,
+`tests/lib/tableShortcuts.test.ts` y los comandos nuevos en `tests/lib/tableOps.test.ts`.
 
 ### Editor: mover tareas (arrastrar, Alt+↑/↓) y "marcadas al final"
 

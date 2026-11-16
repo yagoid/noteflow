@@ -15,7 +15,7 @@ import { en } from '../../src/i18n/en'
 import { es } from '../../src/i18n/es'
 import {
   HANDLE_GROWN, HANDLE_GROWN_OFFSET, HOVER_GUTTER, MENU_MARGIN, MIN_PLUS_SIZE, NEAR_BOTTOM, NEAR_RIGHT, PLUS_GAP, PLUS_SIZE, cellMenu, clipSpan, columnDropTarget,
-  columnHandleSpan, columnMenu, columnName, focusableItems, gapPosition, handleAnchor, hotLines, hoverZone, menuMaxHeight, nearEdges,
+  columnHandleSpan, columnMenu, columnName, focusableItems, gapPosition, handleAnchor, hotLines, menuKeyAction, menuShortcutHints, hoverZone, menuMaxHeight, nearEdges,
   placeMenu, plusBars, rowDropTarget, rowHandleSpan, rowMenu, rowName, stepFocus, visibleBody,
   type Span, type TableAction, type TableGeometry, type TableMenuEntry, type TableMenuItem,
 } from '../../src/lib/tableControls'
@@ -23,6 +23,11 @@ import {
   getCellSelectionRect, getTableData, insertRowAt, runTableCommand, tableActionCommand,
 } from '../../src/components/Editor/tableOps'
 import { runControlCommand } from '../../src/components/Editor/tableMenus'
+import {
+  deleteSelectedColumns, deleteSelectedRows, duplicateSelectedRow, insertColumnRight, insertRowBelow,
+  moveSelectedColumn, moveSelectedRow, selectColumn, selectRow,
+} from '../../src/components/Editor/tableOps'
+import { shortcutText, tableShortcuts } from '../../src/lib/tableShortcuts'
 import { schemaExtensions } from '../../src/components/Editor/editorExtensions'
 import { htmlFromMarkdown } from '../../src/lib/markdownHtml'
 import { load } from '../helpers/editorPipeline'
@@ -472,5 +477,112 @@ describe('runControlCommand: every control action is its own undo step', () => {
     expect(runControlCommand(ed, insertRowAt(0, { tablePos: 0 }))).toBe(false)
     expect(transactions).toBe(0)
     ed.destroy()
+  })
+})
+
+// ── Shortcut hints and keys (phase 3's chords, lib/tableShortcuts.ts) ────────
+
+describe('shortcut hints in the menus', () => {
+  const kbdOf = (entries: TableMenuEntry[]) => Object.fromEntries(
+    entries.filter((e): e is TableMenuItem => e.type === 'item' && !!e.kbd).map((e) => [e.id, e.kbd]),
+  )
+
+  it('come from tableShortcuts, written the platform\'s way', () => {
+    for (const mac of [true, false]) {
+      const hints = menuShortcutHints(mac)
+      const chords = tableShortcuts(mac)
+      expect(Object.keys(hints).sort()).toEqual(Object.keys(chords).sort())
+      for (const [action, chord] of Object.entries(chords)) {
+        expect(hints[action as keyof typeof hints]).toBe(shortcutText(chord.keys, mac))
+      }
+    }
+    expect(menuShortcutHints(true)).toMatchObject({ insertRowBelow: '⌘↩', moveRowUp: '⌥↑', moveColumnLeft: '⌘⌥←', deleteRows: '⌘⇧⌫' })
+    expect(menuShortcutHints(false)).toMatchObject({ insertRowBelow: 'Ctrl+Enter', moveRowUp: 'Alt+↑', moveColumnLeft: 'Alt+←', deleteRows: 'Ctrl+Shift+Backspace' })
+  })
+
+  it('go only on the entries a chord does: row, column and cell menus', () => {
+    const { data, can } = setup(T44)
+    for (const mac of [true, false]) {
+      const h = menuShortcutHints(mac)
+      expect(kbdOf(rowMenu(2, can, m, h))).toEqual({
+        insertBelow: h.insertRowBelow, duplicateRow: h.duplicateRow, moveUp: h.moveRowUp, moveDown: h.moveRowDown, deleteRow: h.deleteRows,
+      })
+      // The chord never duplicates the header.
+      expect(kbdOf(rowMenu(0, can, m, h))).toEqual({
+        insertBelow: h.insertRowBelow, moveUp: h.moveRowUp, moveDown: h.moveRowDown, deleteRow: h.deleteRows,
+      })
+      expect(kbdOf(columnMenu(data, 1, can, m, h))).toEqual({
+        insertRight: h.insertColumnRight, moveLeft: h.moveColumnLeft, moveRight: h.moveColumnRight, deleteColumn: h.deleteColumns,
+      })
+      expect(kbdOf(cellMenu(data, { row: 1, col: 1 }, null, can, m, h))).toEqual({
+        insertRowBelow: h.insertRowBelow, deleteRow: h.deleteRows, insertColumnRight: h.insertColumnRight, deleteColumn: h.deleteColumns,
+      })
+      // A selection over two rows of one column: the chords would act on both rows → no row hints.
+      expect(kbdOf(cellMenu(data, { row: 1, col: 1 }, { top: 1, bottom: 3, left: 1, right: 2 }, can, m, h))).toEqual({
+        insertColumnRight: h.insertColumnRight, deleteColumn: h.deleteColumns,
+      })
+    }
+    // Without hints (the default), none.
+    expect(kbdOf(rowMenu(2, can, m))).toEqual({})
+  })
+
+  it('each hinted entry does what its chord does, with its line selected (as a handle leaves it)', () => {
+    const base = setup(T44).state
+    const withLine = (kind: 'row' | 'column', i: number) => {
+      let next = base
+      ;(kind === 'row' ? selectRow(i, { tablePos: 0 }) : selectColumn(i, { tablePos: 0 }))(base, (tr) => { next = base.apply(tr) })
+      return next
+    }
+    const docAfter = (s: EditorState, cmd: (st: EditorState, d?: (tr: import('@tiptap/pm/state').Transaction) => void) => boolean) => {
+      let doc = s.doc
+      expect(cmd(s, (tr) => { doc = s.apply(tr).doc })).toBe(true)
+      return doc
+    }
+    const viaMenu = (s: EditorState, action: TableAction) => docAfter(s, tableActionCommand(action, { tablePos: 0 }))
+    const r2 = withLine('row', 2)
+    expect(viaMenu(r2, { type: 'insertRow', index: 3 }).eq(docAfter(r2, insertRowBelow))).toBe(true)
+    expect(viaMenu(r2, { type: 'duplicateRow', index: 2 }).eq(docAfter(r2, duplicateSelectedRow))).toBe(true)
+    expect(viaMenu(r2, { type: 'moveRow', from: 2, to: 1 }).eq(docAfter(r2, moveSelectedRow(-1)))).toBe(true)
+    expect(viaMenu(r2, { type: 'moveRow', from: 2, to: 3 }).eq(docAfter(r2, moveSelectedRow(1)))).toBe(true)
+    expect(viaMenu(r2, { type: 'deleteRow', index: 2 }).eq(docAfter(r2, deleteSelectedRows))).toBe(true)
+    const c1 = withLine('column', 1)
+    expect(viaMenu(c1, { type: 'insertColumn', index: 2 }).eq(docAfter(c1, insertColumnRight))).toBe(true)
+    expect(viaMenu(c1, { type: 'moveColumn', from: 1, to: 0 }).eq(docAfter(c1, moveSelectedColumn(-1)))).toBe(true)
+    expect(viaMenu(c1, { type: 'moveColumn', from: 1, to: 2 }).eq(docAfter(c1, moveSelectedColumn(1)))).toBe(true)
+    expect(viaMenu(c1, { type: 'deleteColumn', index: 1 }).eq(docAfter(c1, deleteSelectedColumns))).toBe(true)
+  })
+})
+
+describe('menuKeyAction: only plain ↑/↓/Enter/Esc are the menu\'s', () => {
+  const key = (k: string, mods: Partial<{ altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }> = {}) =>
+    menuKeyAction({ key: k, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...mods })
+
+  it('navigation keys', () => {
+    expect(key('ArrowDown')).toBe('next')
+    expect(key('ArrowUp')).toBe('prev')
+    expect(key('Enter')).toBe('run')
+    expect(key('Escape')).toBe('close')
+  })
+
+  it('the table chords pass through untouched (Alt / Ctrl / ⌘), on both platforms', () => {
+    expect(key('ArrowUp', { altKey: true })).toBe('pass')
+    expect(key('ArrowDown', { altKey: true })).toBe('pass')
+    expect(key('ArrowLeft', { metaKey: true, altKey: true })).toBe('pass')
+    expect(key('Enter', { ctrlKey: true })).toBe('pass')
+    expect(key('Enter', { metaKey: true, shiftKey: true })).toBe('pass')
+    expect(key('d', { ctrlKey: true })).toBe('pass')
+    expect(key('Backspace', { ctrlKey: true, shiftKey: true })).toBe('pass')
+    expect(key('Backspace', { altKey: true, shiftKey: true })).toBe('pass')
+    expect(key('Escape', { ctrlKey: true })).toBe('pass')
+    expect(key('Shift', { shiftKey: true })).toBe('pass')
+    expect(key('Alt', { altKey: true })).toBe('pass')
+  })
+
+  it('anything else closes the menu and goes on to the editor', () => {
+    expect(key('a')).toBe('dismiss')
+    expect(key('Tab')).toBe('dismiss')
+    expect(key('ArrowDown', { shiftKey: true })).toBe('dismiss')
+    expect(key('Enter', { shiftKey: true })).toBe('dismiss')
+    expect(key('ArrowLeft')).toBe('dismiss')
   })
 })

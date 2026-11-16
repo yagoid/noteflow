@@ -16,6 +16,7 @@
 import type { Messages } from '../i18n'
 import { plural, tf } from '../i18n/format'
 import { isNumericColumn, type SortDirection, type TableAlign } from './tableData'
+import { shortcutText, tableShortcuts, type TableShortcutAction } from './tableShortcuts'
 
 // ── Geometry ─────────────────────────────────────────────────────────────────
 
@@ -367,15 +368,36 @@ function item(
   icon: TableMenuIcon,
   label: string,
   action: TableAction,
-  opts: { reason?: string; danger?: boolean } = {},
+  opts: { reason?: string; danger?: boolean; kbd?: string } = {},
 ): TableMenuItem {
   const disabled = !can(action)
   return {
     type: 'item', id, icon, label, action, disabled,
     ...(disabled && opts.reason ? { reason: opts.reason } : {}),
     ...(opts.danger ? { danger: true } : {}),
+    ...(opts.kbd ? { kbd: opts.kbd } : {}),
   }
 }
+
+/**
+ * Shortcut hints of the menus, by table chord: the same chords the keymap binds
+ * and Settings → Shortcuts lists (lib/tableShortcuts.ts), written the platform's
+ * way (`shortcutText`: '⌘↩' / 'Ctrl+Enter').
+ */
+export type ShortcutHints = Partial<Record<TableShortcutAction, string>>
+
+export function menuShortcutHints(mac: boolean): ShortcutHints {
+  const chords = tableShortcuts(mac)
+  const hints: ShortcutHints = {}
+  for (const action of Object.keys(chords) as TableShortcutAction[]) hints[action] = shortcutText(chords[action].keys, mac)
+  return hints
+}
+
+// A hint goes only on an entry that does what its chord does. The chords act on
+// the selection (TableKeymap.ts: moveSelectedRow, insertRowBelow, deleteSelectedRows…)
+// and a handle selects its whole line before its menu opens, so a line's entry
+// and its chord agree — except duplicating the header (the menu allows it, the
+// chord does nothing there). Insert above / left, clear, sort and align have no chord.
 
 const bodyColumn = (data: TableMenuData, col: number) => data.rows.slice(1).map((r) => r[col] ?? '')
 const bodyRows = (data: TableMenuData) => Math.max(0, data.rows.length - 1)
@@ -399,46 +421,48 @@ function sortItems(data: TableMenuData, col: number, can: CanRun, m: TableMessag
   ]
 }
 
-const deleteColumnItem = (data: TableMenuData, col: number, can: CanRun, m: TableMessages) =>
+const deleteColumnItem = (data: TableMenuData, col: number, can: CanRun, m: TableMessages, kbd?: string) =>
   item(can, 'deleteColumn', 'delete', m.deleteColumn, { type: 'deleteColumn', index: col }, {
     danger: true,
     reason: columnCount(data) <= 1 ? m.needsOneColumn : undefined,
+    kbd,
   })
 
 /** The menu of column `col`'s handle. */
-export function columnMenu(data: TableMenuData, col: number, can: CanRun, m: TableMessages): TableMenuEntry[] {
+export function columnMenu(data: TableMenuData, col: number, can: CanRun, m: TableMessages, hints: ShortcutHints = {}): TableMenuEntry[] {
   return [
     { type: 'heading', label: data.rows[0]?.[col]?.trim() ? tf(m.columnTitle, { name: data.rows[0][col].trim() }) : tf(m.columnN, { n: col + 1 }) },
     item(can, 'insertLeft', 'insertLeft', m.insertLeft, { type: 'insertColumn', index: col }),
-    item(can, 'insertRight', 'insertRight', m.insertRight, { type: 'insertColumn', index: col + 1 }),
+    item(can, 'insertRight', 'insertRight', m.insertRight, { type: 'insertColumn', index: col + 1 }, { kbd: hints.insertColumnRight }),
     item(can, 'duplicateColumn', 'duplicate', m.duplicateColumn, { type: 'duplicateColumn', index: col }),
     sep(),
-    item(can, 'moveLeft', 'moveLeft', m.moveLeft, { type: 'moveColumn', from: col, to: col - 1 }),
-    item(can, 'moveRight', 'moveRight', m.moveRight, { type: 'moveColumn', from: col, to: col + 1 }),
+    item(can, 'moveLeft', 'moveLeft', m.moveLeft, { type: 'moveColumn', from: col, to: col - 1 }, { kbd: hints.moveColumnLeft }),
+    item(can, 'moveRight', 'moveRight', m.moveRight, { type: 'moveColumn', from: col, to: col + 1 }, { kbd: hints.moveColumnRight }),
     sep(),
     { type: 'align', column: col, current: data.aligns[col] ?? null },
     ...sortItems(data, col, can, m),
     sep(),
     item(can, 'clearColumn', 'clear', m.clearColumn, { type: 'clearColumn', index: col }),
-    deleteColumnItem(data, col, can, m),
+    deleteColumnItem(data, col, can, m, hints.deleteColumns),
   ]
 }
 
 /** The menu of row `row`'s handle (row 0 = the header: same entries, the impossible ones disabled, plus a note). */
-export function rowMenu(row: number, can: CanRun, m: TableMessages): TableMenuEntry[] {
+export function rowMenu(row: number, can: CanRun, m: TableMessages, hints: ShortcutHints = {}): TableMenuEntry[] {
   const header = row === 0
   const fixed = header ? m.headerFixed : undefined
   const entries: TableMenuEntry[] = [
     { type: 'heading', label: header ? m.header : tf(m.rowN, { n: row }) },
     item(can, 'insertAbove', 'insertAbove', m.insertAbove, { type: 'insertRow', index: row }, { reason: fixed }),
-    item(can, 'insertBelow', 'insertBelow', m.insertBelow, { type: 'insertRow', index: row + 1 }),
-    item(can, 'duplicateRow', 'duplicate', m.duplicateRow, { type: 'duplicateRow', index: row }, { reason: fixed }),
+    item(can, 'insertBelow', 'insertBelow', m.insertBelow, { type: 'insertRow', index: row + 1 }, { kbd: hints.insertRowBelow }),
+    // The chord never duplicates the header (duplicateSelectedRow): no hint there.
+    item(can, 'duplicateRow', 'duplicate', m.duplicateRow, { type: 'duplicateRow', index: row }, { reason: fixed, kbd: header ? undefined : hints.duplicateRow }),
     sep(),
-    item(can, 'moveUp', 'moveUp', m.moveUp, { type: 'moveRow', from: row, to: row - 1 }, { reason: header ? fixed : row === 1 ? m.onlyHeaderAbove : undefined }),
-    item(can, 'moveDown', 'moveDown', m.moveDown, { type: 'moveRow', from: row, to: row + 1 }, { reason: fixed }),
+    item(can, 'moveUp', 'moveUp', m.moveUp, { type: 'moveRow', from: row, to: row - 1 }, { reason: header ? fixed : row === 1 ? m.onlyHeaderAbove : undefined, kbd: hints.moveRowUp }),
+    item(can, 'moveDown', 'moveDown', m.moveDown, { type: 'moveRow', from: row, to: row + 1 }, { reason: fixed, kbd: hints.moveRowDown }),
     sep(),
     item(can, 'clearRow', 'clear', header ? m.clearHeader : m.clearRow, { type: 'clearRow', index: row }),
-    item(can, 'deleteRow', 'delete', m.deleteRow, { type: 'deleteRow', index: row }, { danger: true, reason: fixed }),
+    item(can, 'deleteRow', 'delete', m.deleteRow, { type: 'deleteRow', index: row }, { danger: true, reason: fixed, kbd: hints.deleteRows }),
   ]
   if (header) entries.push(sep(), { type: 'note', text: m.headerNote })
   return entries
@@ -458,20 +482,29 @@ export function cellMenu(
   selection: CellRect | null,
   can: CanRun,
   m: TableMessages,
+  hints: ShortcutHints = {},
 ): TableMenuEntry[] {
   const deleteTable = item(can, 'deleteTable', 'deleteTable', m.deleteTable, { type: 'deleteTable' }, { danger: true })
   if (!data) return [deleteTable]
   const { row, col } = cell
   const fixed = row === 0 ? m.headerFixed : undefined
+  // The chords act on the whole selection (below its last row, every selected
+  // row…), these entries on the clicked cell's row / column: a hint only when
+  // both are the same line — a cursor, or a cell selection within that one row /
+  // column.
+  const oneRow = !selection || selection.bottom - selection.top === 1
+  const oneCol = !selection || selection.right - selection.left === 1
+  const rowHint = (action: TableShortcutAction) => (oneRow ? hints[action] : undefined)
+  const colHint = (action: TableShortcutAction) => (oneCol ? hints[action] : undefined)
   const entries: TableMenuEntry[] = [
     { type: 'heading', label: m.rowGroup },
     item(can, 'insertRowAbove', 'insertAbove', m.insertRowAbove, { type: 'insertRow', index: row }, { reason: fixed }),
-    item(can, 'insertRowBelow', 'insertBelow', m.insertRowBelow, { type: 'insertRow', index: row + 1 }),
-    item(can, 'deleteRow', 'delete', m.deleteRow, { type: 'deleteRow', index: row }, { danger: true, reason: fixed }),
+    item(can, 'insertRowBelow', 'insertBelow', m.insertRowBelow, { type: 'insertRow', index: row + 1 }, { kbd: rowHint('insertRowBelow') }),
+    item(can, 'deleteRow', 'delete', m.deleteRow, { type: 'deleteRow', index: row }, { danger: true, reason: fixed, kbd: rowHint('deleteRows') }),
     { type: 'heading', label: m.columnGroup },
     item(can, 'insertColumnLeft', 'insertLeft', m.insertColumnLeft, { type: 'insertColumn', index: col }),
-    item(can, 'insertColumnRight', 'insertRight', m.insertColumnRight, { type: 'insertColumn', index: col + 1 }),
-    deleteColumnItem(data, col, can, m),
+    item(can, 'insertColumnRight', 'insertRight', m.insertColumnRight, { type: 'insertColumn', index: col + 1 }, { kbd: colHint('insertColumnRight') }),
+    deleteColumnItem(data, col, can, m, colHint('deleteColumns')),
   ]
   const count = selection ? (selection.bottom - selection.top) * (selection.right - selection.left) : 0
   if (count >= 2) {
@@ -479,6 +512,31 @@ export function cellMenu(
   }
   entries.push(sep(), deleteTable)
   return entries
+}
+
+/**
+ * What an open menu does with a key (its listener runs in the capture phase on
+ * `window`; the focus stays in the editor):
+ * - `next` / `prev` / `run` / `close`: plain ↓ / ↑ / Enter / Esc — handled and
+ *   swallowed (they never reach ProseMirror).
+ * - `pass`: anything with Alt / Ctrl / ⌘ (the table chords, undo, copy…) and
+ *   bare modifier presses — untouched, the menu stays; the editor handles the
+ *   key, and a document change it makes closes the menu (TableMenu: the menu's
+ *   line index may be stale after it).
+ * - `dismiss`: any other key (typing on, Tab, Shift+arrows…) — the menu closes
+ *   and the key goes on to the editor.
+ */
+export type MenuKeyAction = 'next' | 'prev' | 'run' | 'close' | 'pass' | 'dismiss'
+
+export function menuKeyAction(e: { key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): MenuKeyAction {
+  if (e.altKey || e.ctrlKey || e.metaKey) return 'pass'
+  if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return 'pass'
+  if (e.key === 'Escape') return 'close'
+  if (e.shiftKey) return 'dismiss'
+  if (e.key === 'ArrowDown') return 'next'
+  if (e.key === 'ArrowUp') return 'prev'
+  if (e.key === 'Enter') return 'run'
+  return 'dismiss'
 }
 
 /** The entries the keyboard walks (↑/↓): enabled items, in order. */

@@ -3,7 +3,6 @@ import type { Editor as TiptapEditor } from '@tiptap/react'
 import History from '@tiptap/extension-history'
 import { closeHistory, redoDepth, undoDepth } from '@tiptap/pm/history'
 import Placeholder from '@tiptap/extension-placeholder'
-import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { AllSelection, NodeSelection, Selection, TextSelection } from '@tiptap/pm/state'
 import { createDocument, getHTMLFromFragment, getSchema } from '@tiptap/core'
@@ -19,13 +18,16 @@ import { SlashCommands, getSlashCommands } from './SlashCommands'
 import { AutoCloseBrackets } from './AutoCloseBrackets'
 import { ListItemMove } from './ListItemMove'
 import { ActiveTableCell } from './ActiveTableCell'
+import { TableKeymap } from './TableKeymap'
+import { TableClipboard, handleEditorPaste } from './tableClipboard'
 import { SectionLinkPicker } from './SectionLinkPicker'
 import { EditorToc } from './EditorToc'
 import { useTocItems } from './useEditorToc'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { TOC_MIN_EDITOR_WIDTH, TOC_RESERVE } from '../../lib/tocUtils'
 import { useEditorSettingsStore, proseFontStack } from '../../stores/editorSettingsStore'
-import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../lib/markdownHtml'
+import { htmlFromMarkdown, htmlToMarkdown } from '../../lib/markdownHtml'
+import { isTablePicture } from '../../lib/tablePaste'
 import { isEditorWidgetTarget, widgetFieldHasFocus } from '../../lib/editorFocus'
 import { createDebouncedSave, type SaveRun } from '../../lib/pendingEdits'
 import { createContentSync, needsSave, recordSave, resolveExternalContent } from '../../lib/externalContentSync'
@@ -221,39 +223,14 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       // stay at ProseMirror's defaults.
       scrollThreshold: { top: caretScrollGap.top, bottom: caretScrollGap.bottom, left: 0, right: 0 },
       scrollMargin: { top: caretScrollGap.top, bottom: caretScrollGap.bottom, left: 5, right: 5 },
-      // Pasting raw markdown source (from VS Code, a terminal, another markdown
-      // editor…) renders it as real formatting — lists, tables, task lists,
-      // headings — instead of literal text. ProseMirror's default would drop it
-      // in verbatim (lists as dashes, tables as `| … |`) or, worse, parse the
-      // syntax-highlighting HTML those editors ship into a mess of empty
-      // paragraphs (the stray blank line after a heading).
-      //
-      // We bail to the native handler when the clipboard carries genuinely rich
-      // HTML (Word, Google Docs, a rendered web page): it has semantic tags a
-      // markdown re-parse of the degraded plain text would lose. Editors that
-      // copy markdown source only ship styled <span>/<div> markup — none of
-      // these tags — so they fall through to our converter.
-      handlePaste: (view, event) => {
-        const text = event.clipboardData?.getData('text/plain') ?? ''
-        if (!text.trim()) return false
-        // Inside a code block markdown is literal source, not formatting — a `#`
-        // comment must stay `#`, not become a heading. Bail to the native handler
-        // (verbatim plain-text paste) whenever any ancestor of the selection is a
-        // code node. We probe `type.spec.code` instead of the node name so this
-        // holds for CodeBlockWithCopy regardless of its registered name.
-        const { $from } = view.state.selection
-        for (let depth = $from.depth; depth >= 0; depth--) {
-          if ($from.node(depth).type.spec.code) return false
-        }
-        const html = event.clipboardData?.getData('text/html') ?? ''
-        const richHtml = /<(a|strong|em|b|i|table|img|h[1-6]|blockquote)[\s>]/i.test(html)
-        if (richHtml || !looksLikeMarkdown(text)) return false
-        event.preventDefault()
-        const dom = new window.DOMParser().parseFromString(htmlFromMarkdown(text, { plain }), 'text/html')
-        const slice = ProseMirrorDOMParser.fromSchema(view.state.schema).parseSlice(dom.body)
-        view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView())
-        return true
-      },
+      // Pasting (tableClipboard.ts, in this order): code keeps the text verbatim;
+      // a NoteFlow copy is pasted as-is (cells into cells); a spreadsheet range
+      // (tab-separated text) becomes a table or fills the cells; raw markdown
+      // source (VS Code, a terminal, another markdown editor) renders as real
+      // formatting instead of literal `| … |` / dashes, unless the clipboard
+      // carries genuinely rich HTML (Word, Google Docs, a web page), which is
+      // pasted natively with its tables normalized for markdown.
+      handlePaste: (view, event, slice) => handleEditorPaste(view, event, slice, { plain }),
       // Una nota arrastrada desde la sidebar lleva nuestro payload propio
       // (`application/x-noteflow-note-id`). Soltarla sobre el editor debe abrirla
       // en un panel dividido — eso lo hace el shell (`<main>` en App.tsx) —, NO
@@ -279,6 +256,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       ListItemMove,
       // Outlines the table cell holding the caret (lib/tableActiveCell.ts).
       ActiveTableCell,
+      // Table chords: move / insert / duplicate / delete rows and columns (lib/tableShortcuts.ts).
+      TableKeymap,
+      // Copied cells as TSV text; pasted tables normalized for markdown (tableClipboard.ts).
+      TableClipboard,
       SlashCommands.configure({
         onLinkSection: () => setLinkPickerOpen(true),
         getLabels: () => getSlashCommands(tRef.current),
@@ -536,6 +517,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
         if (isEditorWidgetTarget(e.target)) return
         const imageItems = Array.from(e.clipboardData.items).filter(i => i.type.startsWith('image/'))
         if (imageItems.length === 0) return
+        // Excel / Numbers add a picture of the copied range: the table is pasted, not the picture.
+        if (isTablePicture(e.clipboardData.getData('text/plain'), e.clipboardData.getData('text/html'))) return
         e.preventDefault()
         insertImageFiles(imageItems.map(i => i.getAsFile()).filter(Boolean) as File[])
       }}
