@@ -391,12 +391,84 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     expect(localDirs()).toEqual(['b-note-3333', 'welcome-9999'])
   })
 
-  it('with NoteFlow Cloud enabled GitHub never asks and never touches syncOrigin.github', async () => {
+  it('with NoteFlow Cloud enabled GitHub never asks; only the explicit connect adopts the connected repo', async () => {
     await connectedToAThenDisconnected()
-    writeSettings({ ...readSettings(), cloudSync: { enabled: true } })
+    // A connection switched behind the app (the CLI) with Cloud on: a refresh
+    // never asks and never rewrites syncOrigin.github.
+    writeSettings({
+      ...readSettings(),
+      cloudSync: { enabled: true },
+      githubSync: { enabled: true, encryptedToken: Buffer.from('tok').toString('base64'), owner: 'me', repo: 'notes-b', repoId: 202 },
+    })
+    await freshModule()
+    gh.loadSyncSettings()
+    expect(gh.refreshOriginGate()).toBe('clear')
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a' })
+    gh.disconnectGitHub()
+    // The user connects B from the app (Device Flow): B becomes the origin.
     const res = await connect('notes-b')
     expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-b' })
     expect(gh.getSyncStatus().originChoice).toBeUndefined()
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 202, owner: 'me', repo: 'notes-b' })
+  })
+
+  it('a stale origin (Cloud replaced the notes) asks even for the same repo, labelled with the Cloud account', async () => {
+    await connectedToAThenDisconnected()
+    // What Cloud's "use only the notes from …" leaves behind.
+    const s = readSettings()
+    writeSettings({
+      ...s,
+      syncOrigin: { github: { ...s.syncOrigin.github, stale: true }, cloud: { userId: 'u-b', email: 'b@x.io' } },
+    })
+    const res = await connect('notes-a')
+    expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-a', pendingOriginChoice: true })
+    await settle()
+    expect(mutations).toEqual([])
+    expect(treeGets).toEqual([])
+    expect(gh.getOriginChoice()).toEqual({
+      previous: { owner: 'me', repo: 'notes-a' },
+      next: { owner: 'me', repo: 'notes-a' },
+      stale: true,
+      staleFrom: { email: 'b@x.io' },
+    })
+    // Merge adopts the same repo again (with the reset) and clears the mark.
+    const merged = await gh.resolveOriginChoice('merge', notesDir)
+    expect(merged.ok).toBe(true)
+    await settle()
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a' })
+    expect(readSettings().syncOrigin.cloud).toEqual({ userId: 'u-b', email: 'b@x.io' }) // merge marks nothing
+    expect(gh.getOriginChoice()).toBeNull()
+  })
+
+  it('a stale origin with no synced notes left is adopted again without asking', async () => {
+    await connectedToAThenDisconnected()
+    for (const d of ['mine-1111', 'a-note-2222']) fs.rmSync(path.join(notesDir, d), { recursive: true })
+    const s = readSettings()
+    writeSettings({ ...s, syncOrigin: { github: { ...s.syncOrigin.github, stale: true } } })
+    const res = await connect('notes-a')
+    expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-a' })
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a' })
+  })
+
+  it('"replace" marks the NoteFlow Cloud origin stale in the same write; "merge" does not', async () => {
+    await connectedToAThenDisconnected()
+    writeSettings({ ...readSettings(), syncOrigin: { ...readSettings().syncOrigin, cloud: { userId: 'u-a', email: 'a@x.io' } } })
+    await connect('notes-b')
+    archiveSyncedNotes({ notesDir, archiveRoot: path.join(env.userData, 'notes-archive'), label: 'github-me-notes-a' })
+    expect((await gh.resolveOriginChoice('replace', notesDir)).ok).toBe(true)
+    await settle()
+    expect(readSettings().syncOrigin).toEqual({
+      github: { repoId: 202, owner: 'me', repo: 'notes-b' },
+      cloud: { userId: 'u-a', email: 'a@x.io', stale: true },
+    })
+  })
+
+  it('the explicit connect with Cloud on clears a stale mark of the same repo', async () => {
+    await connectedToAThenDisconnected()
+    const s = readSettings()
+    writeSettings({ ...s, cloudSync: { enabled: true }, syncOrigin: { github: { ...s.syncOrigin.github, stale: true } } })
+    const res = await connect('notes-a')
+    expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-a' })
     expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a' })
   })
 

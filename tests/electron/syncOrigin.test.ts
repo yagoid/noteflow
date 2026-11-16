@@ -17,6 +17,9 @@ import {
   hasSyncedLocalNotes,
   readSettingsStrict,
   writeSyncOriginFile,
+  markSyncOriginStaleFile,
+  withOriginMarkedStale,
+  resolveStoredCloudOrigin,
   type SyncIdentity,
 } from '../../electron/syncOrigin'
 import { resetLocalOnlyMemory } from '../../electron/localOnlyNotes'
@@ -75,12 +78,32 @@ describe('decideOrigin', () => {
     expect(decideOrigin({ stored: u1, next: u2, hasLocalNotes: notes(true) })).toEqual({ action: 'ask', previous: u1, next: u2 })
     expect(decideOrigin({ stored: u1, next: u1, hasLocalNotes: notes(true) }).action).toBe('proceed')
   })
+  it('the Cloud email is a label: it never changes the comparison, but a new one is recorded', () => {
+    const stored: SyncIdentity = { kind: 'cloud', userId: 'u1', email: 'old@x.io' }
+    expect(sameIdentity(stored, { kind: 'cloud', userId: 'u1', email: 'new@x.io' })).toBe(true)
+    expect(sameIdentity(stored, { kind: 'cloud', userId: 'u2', email: 'old@x.io' })).toBe(false)
+    expect(decideOrigin({ stored, next: { kind: 'cloud', userId: 'u1', email: 'new@x.io' }, hasLocalNotes: notes(true) }))
+      .toEqual({ action: 'proceed', adopt: true, reason: 'same' })
+    expect(decideOrigin({ stored, next: { kind: 'cloud', userId: 'u1', email: 'old@x.io' }, hasLocalNotes: notes(true) }))
+      .toEqual({ action: 'proceed', adopt: false, reason: 'same' })
+    expect(decideOrigin({ stored, next: { kind: 'cloud', userId: 'u1' }, hasLocalNotes: notes(true) }))
+      .toEqual({ action: 'proceed', adopt: false, reason: 'same' })
+  })
+  it('a stale record asks with notes on disk even for the same identity, and is adopted again without them', () => {
+    const staleA: SyncIdentity = { ...A, stale: true }
+    expect(decideOrigin({ stored: staleA, next: A, hasLocalNotes: notes(true) })).toEqual({ action: 'ask', previous: staleA, next: A, stale: true })
+    expect(decideOrigin({ stored: staleA, next: B, hasLocalNotes: notes(true) })).toEqual({ action: 'ask', previous: staleA, next: B, stale: true })
+    expect(decideOrigin({ stored: staleA, next: A, hasLocalNotes: notes(false) })).toEqual({ action: 'proceed', adopt: true, reason: 'stale-empty' })
+    const staleU: SyncIdentity = { kind: 'cloud', userId: 'u1', stale: true }
+    expect(decideOrigin({ stored: staleU, next: { kind: 'cloud', userId: 'u1' }, hasLocalNotes: notes(true) }).action).toBe('ask')
+  })
 })
 
 describe('labels', () => {
   it('identityLabel', () => {
     expect(identityLabel(A)).toBe('me/notes-a')
     expect(identityLabel({ kind: 'cloud', userId: 'abc' })).toBe('abc')
+    expect(identityLabel({ kind: 'cloud', userId: 'abc', email: 'a@x.io' })).toBe('a@x.io')
   })
   it('archive labels are folder-name safe', () => {
     expect(identityArchiveLabel({ kind: 'github', owner: 'Me', repo: 'My Notes!' })).toBe('github-me-my-notes')
@@ -113,6 +136,60 @@ describe('settings helpers', () => {
     // Without a known id the key is simply absent.
     expect(withSyncOrigin({}, { kind: 'github', owner: 'me', repo: 'r' })).toEqual({ syncOrigin: { github: { owner: 'me', repo: 'r' } } })
   })
+  it('reads `stale` (only `true`) and the Cloud email tolerantly', () => {
+    const settings = {
+      syncOrigin: {
+        github: { owner: 'me', repo: 'r', repoId: 7, stale: true },
+        cloud: { userId: 'u1', email: 'a@x.io', stale: true },
+      },
+    }
+    expect(readSyncOrigin(settings)).toEqual({
+      github: { repoId: 7, owner: 'me', repo: 'r', stale: true },
+      cloud: { userId: 'u1', email: 'a@x.io', stale: true },
+    })
+    expect(getStoredIdentity(settings, 'github')).toEqual({ kind: 'github', owner: 'me', repo: 'r', repoId: 7, stale: true })
+    expect(getStoredIdentity(settings, 'cloud')).toEqual({ kind: 'cloud', userId: 'u1', email: 'a@x.io', stale: true })
+    // Anything but `true` means "current"; a non-string / empty email is ignored.
+    const loose = { syncOrigin: { github: { owner: 'me', repo: 'r', stale: 'yes' }, cloud: { userId: 'u1', email: 3, stale: false } } }
+    expect(readSyncOrigin(loose)).toEqual({ github: { owner: 'me', repo: 'r' }, cloud: { userId: 'u1' } })
+    expect(readSyncOrigin({ syncOrigin: { cloud: { userId: 'u1', email: '' } } })).toEqual({ cloud: { userId: 'u1' } })
+  })
+  it('withSyncOrigin writes the email and always clears `stale` (every adoption is current)', () => {
+    const settings = { syncOrigin: { cloud: { userId: 'u1', stale: true }, github: { owner: 'me', repo: 'r', stale: true } } }
+    expect(withSyncOrigin(settings, { kind: 'cloud', userId: 'u2', email: 'b@x.io' }).syncOrigin).toEqual({
+      cloud: { userId: 'u2', email: 'b@x.io' },
+      github: { owner: 'me', repo: 'r', stale: true },
+    })
+    // Even if the identity passed in carries it (a stored identity re-adopted as is).
+    expect(withSyncOrigin(settings, { kind: 'github', owner: 'me', repo: 'r', stale: true }).syncOrigin).toEqual({
+      cloud: { userId: 'u1', stale: true },
+      github: { owner: 'me', repo: 'r' },
+    })
+  })
+  it('withOriginMarkedStale marks an existing record only, keeps its keys and never mutates the input', () => {
+    const settings = { theme: 'carbon', syncOrigin: { github: { repoId: 1, owner: 'me', repo: 'r' }, cloud: { userId: 'u1', email: 'a@x.io' } } }
+    const marked = withOriginMarkedStale(settings, 'github')
+    expect(marked).toEqual({
+      theme: 'carbon',
+      syncOrigin: { github: { repoId: 1, owner: 'me', repo: 'r', stale: true }, cloud: { userId: 'u1', email: 'a@x.io' } },
+    })
+    expect(settings.syncOrigin.github).toEqual({ repoId: 1, owner: 'me', repo: 'r' }) // input untouched
+    expect(withOriginMarkedStale(marked, 'cloud').syncOrigin).toEqual({
+      github: { repoId: 1, owner: 'me', repo: 'r', stale: true },
+      cloud: { userId: 'u1', email: 'a@x.io', stale: true },
+    })
+    // No record for that backend → nothing created.
+    expect(withOriginMarkedStale({ syncOrigin: { github: { owner: 'me', repo: 'r' } } }, 'cloud')).toEqual({ syncOrigin: { github: { owner: 'me', repo: 'r' } } })
+    expect(withOriginMarkedStale({ theme: 'x' }, 'github')).toEqual({ theme: 'x' })
+  })
+  it('resolveStoredCloudOrigin seeds from cloudSync.userId when no origin was ever recorded', () => {
+    expect(resolveStoredCloudOrigin({})).toBeUndefined()
+    expect(resolveStoredCloudOrigin({ cloudSync: { enabled: true } })).toBeUndefined()
+    expect(resolveStoredCloudOrigin({ cloudSync: { userId: 'uA' } })).toEqual({ identity: { kind: 'cloud', userId: 'uA' }, seeded: true })
+    // A recorded origin wins over the sync state's owner (stale included).
+    expect(resolveStoredCloudOrigin({ cloudSync: { userId: 'uB' }, syncOrigin: { cloud: { userId: 'uA', stale: true } } }))
+      .toEqual({ identity: { kind: 'cloud', userId: 'uA', stale: true }, seeded: false })
+  })
 })
 
 describe('file wrappers', () => {
@@ -143,6 +220,15 @@ describe('file wrappers', () => {
     expect(readSettingsStrict(fresh)).toEqual({})
     expect(writeSyncOriginFile(fresh, B)).toBe(true)
     expect(JSON.parse(fs.readFileSync(fresh, 'utf-8')).syncOrigin.github.repoId).toBe(2)
+  })
+  it('markSyncOriginStaleFile: read-modify-write, refuses an unparseable file', () => {
+    const file = path.join(tmp, 'settings.json')
+    fs.writeFileSync(file, JSON.stringify({ cliCloud: { enabled: true }, syncOrigin: { cloud: { userId: 'u1' } } }))
+    expect(markSyncOriginStaleFile(file, 'cloud')).toBe(true)
+    expect(JSON.parse(fs.readFileSync(file, 'utf-8'))).toEqual({ cliCloud: { enabled: true }, syncOrigin: { cloud: { userId: 'u1', stale: true } } })
+    fs.writeFileSync(file, '{ nope')
+    expect(markSyncOriginStaleFile(file, 'cloud')).toBe(false)
+    expect(fs.readFileSync(file, 'utf-8')).toBe('{ nope')
   })
   it('hasSyncedLocalNotes: local-only notes do not count; unreadable dir fails closed', () => {
     const dir = path.join(tmp, 'notes')

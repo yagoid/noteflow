@@ -74,6 +74,8 @@ import {
   hasSyncedLocalNotes,
   readSettingsStrict,
   withSyncOrigin,
+  withOriginMarkedStale,
+  markSyncOriginStaleFile,
 } from './syncOrigin'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -141,6 +143,15 @@ export interface GitHubSyncSettings {
 export interface OriginChoice {
   previous: { owner: string; repo: string }
   next: { owner: string; repo: string }
+  /**
+   * The stored origin is STALE (syncOrigin.ts): NoteFlow Cloud's "use only the
+   * notes from …" replaced the notes on disk, so they came from Cloud — not
+   * from `previous` (which may even be the connected repo). The UI then labels
+   * the previous side with `staleFrom.email` (the recorded Cloud account), or a
+   * generic text when it is unknown.
+   */
+  stale?: true
+  staleFrom?: { email?: string }
 }
 
 export type InitialPullStatus = 'pending' | 'ok' | 'failed'
@@ -1156,7 +1167,8 @@ function sameGate(a: typeof originGate, b: typeof originGate): boolean {
   if (!ca || !cb) return ca === cb
   return (
     ca.previous.owner === cb.previous.owner && ca.previous.repo === cb.previous.repo &&
-    ca.next.owner === cb.next.owner && ca.next.repo === cb.next.repo
+    ca.next.owner === cb.next.owner && ca.next.repo === cb.next.repo &&
+    ca.stale === cb.stale && ca.staleFrom?.email === cb.staleFrom?.email
   )
 }
 
@@ -1181,11 +1193,13 @@ function currentGithubIdentity(s: GitHubSyncSettings): Extract<SyncIdentity, { k
  * 2. ONE read-modify-write of settings.json drops lastSync /
  *    remoteFormatMigratedAt from the githubSync READ FROM THE FILE and sets
  *    syncOrigin.github — no intermediate state, every other key (token,
- *    other backends, the CLI's) kept.
+ *    other backends, the CLI's) kept. With `markCloudStale` ("use only the
+ *    notes from <repo>" just replaced the notes on disk) the same write also
+ *    marks syncOrigin.cloud stale: the notes no longer come from that account.
  * Memory is updated only after both landed. Any failure (unreadable or
  * unwritable file) → false, and the callers keep the gate closed.
  */
-function adoptGithubOrigin(id: SyncIdentity, resetRemote: boolean): boolean {
+function adoptGithubOrigin(id: SyncIdentity, resetRemote: boolean, opts: { markCloudStale?: boolean } = {}): boolean {
   const settingsPath = getSettingsPath()
   if (readSettingsStrict(settingsPath) === null) {
     console.error('[GitHubSync] could not record the notes dir origin (settings.json unreadable)')
@@ -1214,7 +1228,8 @@ function adoptGithubOrigin(id: SyncIdentity, resetRemote: boolean): boolean {
       delete fileSync.remoteFormatMigratedAt
       settings.githubSync = fileSync
     }
-    writeSettings(withSyncOrigin(settings, id))
+    const adopted = withSyncOrigin(settings, id)
+    writeSettings(opts.markCloudStale ? withOriginMarkedStale(adopted, 'cloud') : adopted)
   } catch (err) {
     console.error('[GitHubSync] could not record the notes dir origin (settings.json unwritable):', String(err))
     return false
@@ -1226,6 +1241,30 @@ function adoptGithubOrigin(id: SyncIdentity, resetRemote: boolean): boolean {
     syncSettings = next
   }
   return true
+}
+
+/**
+ * Device Flow completed while NoteFlow Cloud owns the notes dir: the gate never
+ * asks then (GitHub is a write-only mirror), but the user explicitly connected
+ * THIS repo, so it becomes the GitHub origin — clearing a `stale` mark left by
+ * Cloud's "use only the notes from …", and resetting the previous remote's
+ * state when the stored repo was another one or stale (its journal / shas /
+ * lastSync describe a remote these notes no longer match). Only here, never on
+ * a plain refresh: Cloud being on must not rewrite the GitHub origin by itself.
+ * Best effort: a failed write leaves the old record (the gate stays clear while
+ * Cloud is on, and asks again once Cloud is off).
+ */
+function adoptConnectedRepoUnderCloud(): void {
+  const s = syncSettings
+  const identity = s?.enabled && s.encryptedToken ? currentGithubIdentity(s) : null
+  if (!identity) return
+  const parsed = readSettingsStrict(getSettingsPath())
+  if (parsed === null || (parsed.cloudSync as { enabled?: boolean } | undefined)?.enabled !== true) return
+  const stored = getStoredIdentity(parsed, 'github')
+  const reset = !!stored && (stored.stale === true || !sameIdentity(stored, identity))
+  if (!adoptGithubOrigin(identity, reset)) {
+    console.error('[GitHubSync] could not record the connected repo as the notes dir origin (NoteFlow Cloud enabled)')
+  }
 }
 
 /** Records the repo's numeric id in the connection settings when it was missing or changed. */
@@ -1271,14 +1310,22 @@ export function refreshOriginGate(): OriginGateState {
       })
       if (decision.action === 'ask') {
         const prev = decision.previous.kind === 'github' ? decision.previous : null
+        // Stale: the notes on disk came from NoteFlow Cloud (its "use only the
+        // notes from …") — the dialog names that account, not the old repo.
+        const cloudOrigin = decision.stale ? getStoredIdentity(parsed, 'cloud') : undefined
+        const cloudEmail = cloudOrigin?.kind === 'cloud' ? cloudOrigin.email : undefined
         next = {
           state: 'ask',
           choice: {
             previous: { owner: prev?.owner ?? '', repo: prev?.repo ?? '' },
             next: { owner: identity.owner, repo: identity.repo },
+            ...(decision.stale ? { stale: true as const, staleFrom: cloudEmail ? { email: cloudEmail } : {} } : {}),
           },
         }
-      } else if (decision.adopt && !adoptGithubOrigin(identity, decision.reason === 'changed-empty')) {
+      } else if (
+        decision.adopt &&
+        !adoptGithubOrigin(identity, decision.reason === 'changed-empty' || decision.reason === 'stale-empty')
+      ) {
         // Fail-closed: an origin that could not be recorded must not open the
         // gate — for 'changed-empty' the next run would see "another remote,
         // now with notes" (or sync with the previous remote's state); for
@@ -1352,7 +1399,9 @@ export async function resolveOriginChoice(
   if (parsed === null) return { ok: false, error: 'settings-unreadable' }
   const stored = getStoredIdentity(parsed, 'github')
   const connectedIdentity = currentGithubIdentity(s)
-  const alreadyAdopted = !!stored && !!connectedIdentity && sameIdentity(stored, connectedIdentity)
+  // A stale record of the same repo is NOT adopted (the notes on disk came
+  // from Cloud): it must be adopted — with the reset — or the gate stays 'ask'.
+  const alreadyAdopted = !!stored && !stored.stale && !!connectedIdentity && sameIdentity(stored, connectedIdentity)
   if (originGate?.state !== 'ask' && !alreadyAdopted) return { ok: false, error: 'not-pending' }
   if (!alreadyAdopted) {
     const owner = s.owner
@@ -1363,7 +1412,15 @@ export async function resolveOriginChoice(
       if (info.id !== undefined) recordRepoId(owner, repo, info.id)
     } catch { /* offline: stored by name, backfilled by a later pull */ }
     const identity = currentGithubIdentity(syncSettings ?? s)
-    if (!identity || !adoptGithubOrigin(identity, true)) return { ok: false, error: 'settings-unwritable' }
+    // 'replace': the notes on disk now come from this repo only — whatever
+    // NoteFlow Cloud account they came from is no longer their origin.
+    if (!identity || !adoptGithubOrigin(identity, true, { markCloudStale: choice === 'replace' })) {
+      return { ok: false, error: 'settings-unwritable' }
+    }
+  } else if (choice === 'replace' && !markSyncOriginStaleFile(getSettingsPath(), 'cloud')) {
+    // Adopted on its own meanwhile (the archive left no notes: 'changed-empty'),
+    // but the Cloud origin must still stop claiming these notes.
+    return { ok: false, error: 'settings-unwritable' }
   }
   refreshOriginGate() // same identity now → clear (emits the status change)
   const pull = await pullNotes(notesDir)
@@ -1483,6 +1540,7 @@ function schedulePoll(
           // disk: connected, but nothing is pulled or pushed until the user
           // chooses (the gate stays blocked across restarts too).
           notesDirPath = notesDir
+          adoptConnectedRepoUnderCloud()
           if (refreshOriginGate() !== 'clear') {
             onComplete({ ok: true, owner, repo, pendingOriginChoice: true })
             return

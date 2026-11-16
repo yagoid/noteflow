@@ -11,13 +11,21 @@
 // remote's notes / cancel).
 //
 // Shape of `settings.syncOrigin` (Cloud and the CLI read it — keep it stable):
-//   { github?: { repoId: number; owner: string; repo: string },
-//     cloud?:  { userId: string } }
+//   { github?: { repoId: number; owner: string; repo: string; stale?: true },
+//     cloud?:  { userId: string; email?: string; stale?: true } }
 // `github.repoId` is GitHub's numeric repo id (survives renames and transfers);
 // it is always written when known — the app fetches it before adopting an
 // identity, so it is only missing if GET /repos/{owner}/{repo} failed at that
 // moment (the next successful pull backfills it). Comparison: by repoId when
-// both sides have it, else owner/repo case-insensitively.
+// both sides have it, else owner/repo case-insensitively. `cloud.email` is a
+// LABEL only (the dialog shows it); Cloud compares by userId.
+//
+// `stale: true` (only ever written as `true`; absent = current): the notes on
+// disk no longer come from that remote — the OTHER backend's "use only the
+// notes from …" replaced them. A stale record asks before syncing whenever
+// there are synced notes on disk, even with the same identity; without notes
+// it is adopted again ('stale-empty', which resets that remote's state). Every
+// adoption (withSyncOrigin) writes the record without it.
 //
 // Pure decision + pure helpers over a parsed settings object, plus thin file
 // wrappers (fs only, no Electron) — same pattern as syncState.ts. Tested in
@@ -30,10 +38,13 @@ import { listSyncedNoteDirs } from './localOnlyNotes'
 
 export type SyncBackendKind = 'github' | 'cloud'
 
-/** A remote identity a notes dir can be reconciled with. */
+/**
+ * A remote identity a notes dir can be reconciled with. `stale` only appears on
+ * a STORED identity (see the module comment), never on the one being synced.
+ */
 export type SyncIdentity =
-  | { kind: 'github'; owner: string; repo: string; repoId?: number }
-  | { kind: 'cloud'; userId: string }
+  | { kind: 'github'; owner: string; repo: string; repoId?: number; stale?: true }
+  | { kind: 'cloud'; userId: string; email?: string; stale?: true }
 
 /** Stored JSON of one backend (see the module comment for the exact shape). */
 export interface GithubOriginRecord {
@@ -41,9 +52,15 @@ export interface GithubOriginRecord {
   repoId?: number
   owner: string
   repo: string
+  /** The notes on disk were replaced by the other backend's (see the module comment). */
+  stale?: true
 }
 export interface CloudOriginRecord {
   userId: string
+  /** The account's email when it was recorded — a label only, never compared. */
+  email?: string
+  /** The notes on disk were replaced by the other backend's (see the module comment). */
+  stale?: true
 }
 export interface SyncOriginRecord {
   github?: GithubOriginRecord
@@ -78,15 +95,18 @@ function identicalRecord(stored: SyncIdentity, next: SyncIdentity): boolean {
       (next.repoId === undefined || stored.repoId === next.repoId)
     )
   }
-  if (stored.kind === 'cloud' && next.kind === 'cloud') return stored.userId === next.userId
+  if (stored.kind === 'cloud' && next.kind === 'cloud') {
+    // The email is only a label, but refreshing it keeps the dialog's text current.
+    return stored.userId === next.userId && (next.email === undefined || stored.email === next.email)
+  }
   return false
 }
 
 // ── Labels ────────────────────────────────────────────────────────────────────
 
-/** Human-readable label: 'owner/repo' for GitHub, the userId for Cloud (the UI shows its own email). */
+/** Human-readable label: 'owner/repo' for GitHub; for Cloud the recorded email, else the userId. */
 export function identityLabel(id: SyncIdentity): string {
-  return id.kind === 'github' ? `${id.owner}/${id.repo}` : id.userId
+  return id.kind === 'github' ? `${id.owner}/${id.repo}` : id.email || id.userId
 }
 
 /**
@@ -126,9 +146,14 @@ export function readSyncOrigin(settings: Record<string, unknown>): SyncOriginRec
   if (isObject(gh) && typeof gh.owner === 'string' && gh.owner && typeof gh.repo === 'string' && gh.repo) {
     out.github = { owner: gh.owner, repo: gh.repo }
     if (typeof gh.repoId === 'number' && Number.isFinite(gh.repoId)) out.github = { repoId: gh.repoId, ...out.github }
+    if (gh.stale === true) out.github.stale = true
   }
   const cl = raw.cloud
-  if (isObject(cl) && typeof cl.userId === 'string' && cl.userId) out.cloud = { userId: cl.userId }
+  if (isObject(cl) && typeof cl.userId === 'string' && cl.userId) {
+    out.cloud = { userId: cl.userId }
+    if (typeof cl.email === 'string' && cl.email) out.cloud.email = cl.email
+    if (cl.stale === true) out.cloud.stale = true
+  }
   return out
 }
 
@@ -137,16 +162,52 @@ export function getStoredIdentity(settings: Record<string, unknown>, kind: SyncB
   const origin = readSyncOrigin(settings)
   if (kind === 'github') {
     const gh = origin.github
-    return gh ? { kind: 'github', owner: gh.owner, repo: gh.repo, ...(gh.repoId !== undefined ? { repoId: gh.repoId } : {}) } : undefined
+    return gh
+      ? {
+          kind: 'github',
+          owner: gh.owner,
+          repo: gh.repo,
+          ...(gh.repoId !== undefined ? { repoId: gh.repoId } : {}),
+          ...(gh.stale ? { stale: true as const } : {}),
+        }
+      : undefined
   }
   const cl = origin.cloud
-  return cl ? { kind: 'cloud', userId: cl.userId } : undefined
+  return cl
+    ? {
+        kind: 'cloud',
+        userId: cl.userId,
+        ...(cl.email ? { email: cl.email } : {}),
+        ...(cl.stale ? { stale: true as const } : {}),
+      }
+    : undefined
 }
 
 /**
- * A copy of `settings` with the backend's origin set to `id`. Every other key —
- * including the other backend's origin and unknown keys written by a newer
- * client — is preserved. Does not mutate the input.
+ * The Cloud origin of the notes dir, SEEDED from the sync state's owner when
+ * no origin was ever recorded: an install from before this feature that used
+ * Cloud has `settings.cloudSync.userId` (the account its pullSeq / journal
+ * belong to) — that account IS where the notes on disk came from. Without the
+ * seed, a user who signed out of A before updating and then signs in with B
+ * would adopt B without being asked. `seeded: true` = the caller must persist
+ * it (strictly) before anything overwrites cloudSync.userId. Nothing at all
+ * (Cloud never used here) → undefined: the first connection adopts silently.
+ */
+export function resolveStoredCloudOrigin(
+  settings: Record<string, unknown>,
+): { identity: Extract<SyncIdentity, { kind: 'cloud' }>; seeded: boolean } | undefined {
+  const stored = getStoredIdentity(settings, 'cloud')
+  if (stored?.kind === 'cloud') return { identity: stored, seeded: false }
+  const cloudSync = settings.cloudSync
+  const owner = isObject(cloudSync) ? cloudSync.userId : undefined
+  return typeof owner === 'string' && owner ? { identity: { kind: 'cloud', userId: owner }, seeded: true } : undefined
+}
+
+/**
+ * A copy of `settings` with the backend's origin set to `id` — always WITHOUT
+ * `stale` (adopting means the notes on disk now belong to that remote). Every
+ * other key — including the other backend's origin and unknown keys written
+ * by a newer client — is preserved. Does not mutate the input.
  */
 export function withSyncOrigin(settings: Record<string, unknown>, id: SyncIdentity): Record<string, unknown> {
   const current = isObject(settings[SYNC_ORIGIN_KEY]) ? { ...(settings[SYNC_ORIGIN_KEY] as Record<string, unknown>) } : {}
@@ -157,9 +218,22 @@ export function withSyncOrigin(settings: Record<string, unknown>, id: SyncIdenti
       repo: id.repo,
     } satisfies GithubOriginRecord
   } else {
-    current.cloud = { userId: id.userId } satisfies CloudOriginRecord
+    current.cloud = { userId: id.userId, ...(id.email ? { email: id.email } : {}) } satisfies CloudOriginRecord
   }
   return { ...settings, [SYNC_ORIGIN_KEY]: current }
+}
+
+/**
+ * A copy of `settings` with the backend's origin record marked `stale: true`
+ * (the other backend's "use only the notes from …" just replaced the notes on
+ * disk). No record for that backend → nothing is created (a backend never
+ * reconciled here has nothing to protect). Every other key of the record and
+ * of settings is preserved. Does not mutate the input.
+ */
+export function withOriginMarkedStale(settings: Record<string, unknown>, kind: SyncBackendKind): Record<string, unknown> {
+  const origin = settings[SYNC_ORIGIN_KEY]
+  if (!isObject(origin) || !isObject(origin[kind])) return settings
+  return { ...settings, [SYNC_ORIGIN_KEY]: { ...origin, [kind]: { ...origin[kind], stale: true } } }
 }
 
 // ── Decision ──────────────────────────────────────────────────────────────────
@@ -177,19 +251,25 @@ export type OriginDecision =
        *   missing repoId).
        * - `changed-empty`: another remote, but no synced notes on disk — nothing
        *   to protect; the per-remote sync state must be reset by the caller.
+       * - `stale-empty`: the stored record is stale (the other backend replaced
+       *   the notes on disk) and no synced notes are left — adopted again; the
+       *   caller resets the per-remote state exactly as for `changed-empty`.
        */
-      reason: 'no-origin' | 'same' | 'changed-empty'
+      reason: 'no-origin' | 'same' | 'changed-empty' | 'stale-empty'
     }
   | {
       action: 'ask'
       previous: SyncIdentity
       next: SyncIdentity
+      /** The stored record is stale: the notes on disk came from the other backend (the identity may be the same). */
+      stale?: true
     }
 
 /**
  * Should syncing with `next` go ahead, or must the user choose first?
- * Asks ONLY when the identity changed AND there are synced notes on disk.
- * `hasLocalNotes` is lazy — the dir is only listed when the identity changed —
+ * Asks only when there are synced notes on disk AND either the identity
+ * changed or the stored record is stale (the notes came from the other
+ * backend). `hasLocalNotes` is lazy — the dir is only listed when it matters —
  * and must answer true when it can't tell (fail-closed).
  */
 export function decideOrigin(input: {
@@ -199,6 +279,10 @@ export function decideOrigin(input: {
 }): OriginDecision {
   const { stored, next } = input
   if (!stored) return { action: 'proceed', adopt: true, reason: 'no-origin' }
+  if (stored.stale) {
+    if (!input.hasLocalNotes()) return { action: 'proceed', adopt: true, reason: 'stale-empty' }
+    return { action: 'ask', previous: stored, next, stale: true }
+  }
   if (sameIdentity(stored, next)) return { action: 'proceed', adopt: !identicalRecord(stored, next), reason: 'same' }
   if (!input.hasLocalNotes()) return { action: 'proceed', adopt: true, reason: 'changed-empty' }
   return { action: 'ask', previous: stored, next }
@@ -249,11 +333,23 @@ export function readSettingsStrict(settingsPath: string): Record<string, unknown
  * parsed — writing would wipe it.
  */
 export function writeSyncOriginFile(settingsPath: string, id: SyncIdentity): boolean {
+  return updateSettingsFileStrict(settingsPath, (current) => withSyncOrigin(current, id))
+}
+
+/** Read-modify-write marking the backend's origin stale (withOriginMarkedStale); same refusals as writeSyncOriginFile. */
+export function markSyncOriginStaleFile(settingsPath: string, kind: SyncBackendKind): boolean {
+  return updateSettingsFileStrict(settingsPath, (current) => withOriginMarkedStale(current, kind))
+}
+
+function updateSettingsFileStrict(
+  settingsPath: string,
+  update: (current: Record<string, unknown>) => Record<string, unknown>,
+): boolean {
   const current = readSettingsStrict(settingsPath)
   if (current === null) return false
   try {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
-    writeSettingsFile(settingsPath, withSyncOrigin(current, id))
+    writeSettingsFile(settingsPath, update(current))
     return true
   } catch {
     return false
