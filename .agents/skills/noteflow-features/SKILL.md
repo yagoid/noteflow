@@ -921,14 +921,22 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - El clic derecho mueve el cursor a la celda pulsada, así las acciones actúan donde clicas.
 - **Cabecera obligatoria:** no se puede borrar la fila de cabecera ni insertar una fila
   por encima de ella (las pipe-tables de markdown exigen cabecera). Las celdas de cabecera
-  vacías muestran el placeholder "Column".
+  vacías muestran el placeholder "Column" (en el mismo estilo de etiqueta, más tenue).
+- **Aspecto (prototipo aprobado 2026-11, cabecera "Etiqueta"):** la cabecera es una **etiqueta
+  pequeña en mayúsculas, gris (texto atenuado) y con tracking**, sin fondo ni color de acento; filas
+  sin cebreado, solo la rejilla fina del borde del tema. Con el editor enfocado, la **celda del
+  cursor** lleva un contorno fino del color de acento; una **selección de celdas** (arrastrar entre
+  celdas o `Shift`+clic) se tiñe de acento con **un único contorno** alrededor del rango, sin la
+  selección de texto nativa encima. Igual en todos los temas (solo variables del tema).
 - **Columnas ajustadas al contenido, sin redimensionado:** cada columna toma el ancho de su
   contenido, con un mínimo (una celda vacía sigue siendo cómoda de clicar) y un máximo (el texto
   largo salta de línea dentro de la celda). Una tabla estrecha no ocupa todo el ancho; una que no
-  cabe estrecha sus columnas hasta el mínimo y después hace **scroll horizontal** propio, sin
-  desbordar la nota. Igual en el chat de IA, las vistas previas y los stickies (en las tarjetas del
-  resumen de nota la tabla se recorta, no hace scroll). El ancho de columna NO se puede guardar en
-  markdown portable, así que no se ofrece resize (evita el affordance que se reseteaba al recargar).
+  cabe **conserva el ancho natural de sus columnas** (no las estrecha: las etiquetas cortas no se
+  parten en dos líneas) y hace **scroll horizontal** propio, sin desbordar la nota. Igual en el chat
+  de IA, las vistas previas y los stickies; en las tarjetas del resumen de nota (no hacen scroll) las
+  columnas sí se estrechan hasta el mínimo y lo que no cabe se recorta. El ancho de columna NO se
+  puede guardar en markdown portable, así que no se ofrece resize (evita el affordance que se
+  reseteaba al recargar).
 - **Enter en una celda** crea otra línea en la celda; se guarda como salto de línea (`<br>`) y al
   reabrir es una línea más del mismo párrafo (antes las dos líneas se guardaban pegadas: `ab`).
 - **Pegar markdown con tabla:** en modo markdown, pegar texto que contenga una

@@ -1100,12 +1100,37 @@ columna (`:---:`), saltos de celda como `<br>`, sin anchos guardados; `Table` de
   `canInsertTableHere` (fuera de listas y tablas); también en notas vinculadas (es markdown estándar).
 - **CSS (`index.css` § Tables):** sin `div.tableWrapper` (TipTap solo lo crea con `resizable: true`
   vía `TableView`; `renderWrapper` cambiaría la salida de `getHTML()`), el propio `<table>` es
-  `display: block; width: max-content; max-width: 100%; overflow-x: auto` — sus filas van en una caja
-  de tabla anónima con layout automático: columnas al ancho del contenido entre `min-width: 5em` y
-  `max-width: 28em` de las celdas (`overflow-wrap: break-word`); si no cabe, las columnas se estrechan
-  hasta el mínimo y luego scroll horizontal. Mismas reglas en chat (`.chat-md`), previews
-  (`.note-preview`) y stickies; en las tarjetas del resumen (`.note-grid-body`, sin puntero) la tabla
-  se recorta (`overflow: hidden`). **Readable:** `.ProseMirror > table` lleva
+  `display: block; width: max-content; max-width: 100%; overflow-x: auto` (la caja de scroll) y el
+  **`<tbody>` es la caja de tabla** (`display: table; width: max-content`): TipTap pone todas las filas
+  (cabecera incluida) en el `<tbody>` (antes va un `<colgroup>` que queda en su propia caja anónima,
+  sin alto) y el parser HTML lo añade al HTML estático del chat y las previews. Columnas al ancho del
+  contenido entre `min-width: 5em` y `max-width: 28em` de las celdas (`overflow-wrap: break-word`;
+  Chromium respeta ambos en celdas); si no cabe, **conserva esos anchos y hace scroll horizontal**.
+  Hasta 2026-11 las filas iban en la caja de tabla anónima del `<table>` en bloque, que hace
+  shrink-to-fit al ancho disponible: estrechaba las columnas hasta el mínimo antes de hacer scroll
+  ("Known / issues" en dos líneas, filas altas). Mismas reglas en chat (`.chat-md`), previews
+  (`.note-preview`) y stickies; en las tarjetas del resumen (`.note-grid-body`, sin puntero ni scroll)
+  el `<tbody>` vuelve a `table-row-group` (las columnas se estrechan para enseñar más) y la tabla se
+  recorta (`overflow: hidden`). **Aspecto** (prototipo aprobado: cabecera "Etiqueta"): `th` en
+  `--text-muted`, `0.8em`, `600`, mayúsculas con `letter-spacing: 0.07em`, sin fondo (fuera el
+  `--bg-2` + `--cyan` y el cebreado de filas de antes); sus `min/max-width` van en `6.25em/35em`
+  (= 5em/28em ÷ 0.8) para que la columna mida igual que con celdas del cuerpo; en el chat el `th` va a
+  9px enteros (regla de px enteros del chat). **Celda activa:** el DOM no marca dónde está un cursor
+  de texto (prosemirror-tables solo marca `.selectedCell` en una CellSelection; `:focus-within` no
+  sirve porque el foco es la raíz contenteditable), así que `Editor/ActiveTableCell.ts` (extensión de
+  comportamiento registrada en `Editor.tsx`, no en el esquema) pone una decoración de nodo
+  `nf-active-cell` en la celda que contiene toda la selección (`activeCellRange` en
+  `src/lib/tableActiveCell.ts`, test en `tests/lib/tableActiveCell.test.ts`; nada en una CellSelection,
+  entre celdas o fuera de tablas) y el CSS la contornea (`inset 1.5px` de `--accent`) solo con
+  `.ProseMirror-focused`. **Rango (`.selectedCell`):** tinte `--accent / 0.13` + un único contorno de
+  `1.5px` alrededor del rectángulo, sin plugin: como una CellSelection es siempre rectangular (sin
+  celdas combinadas en markdown), una celda está en un borde si el vecino de ese lado no está
+  seleccionado (`:has()` sin anidar), y cada borde activa una sombra `inset` vía variables
+  `--nf-sel-t/r/b/l`. El `::selection` transparente de `.ProseMirror-hideselection` se refuerza
+  con la especificidad del editor **solo dentro de `table`** (la regla que inyecta TipTap perdía por
+  especificidad contra el `::selection` propio y dejaba un resaltado de texto suelto dentro del
+  rango; se acota a tablas porque toda NodeSelection pone esa clase y los pills de relación entre
+  secciones dependen de ese tinte para verse seleccionados). **Readable:** `.ProseMirror > table` lleva
   `min-width: min(--readable-col, 100%)` + márgenes `auto`: una tabla estrecha queda en el borde
   izquierdo de la columna; una ancha crece centrada hacia los márgenes. Ese `min-width` va con
   `!important` para ganar al `min-width` inline que escribe `renderHTML` de TipTap (cellMinWidth × columnas).
