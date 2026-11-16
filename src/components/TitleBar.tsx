@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { Brain, Download, Minus, RefreshCw, Settings, Square, X } from 'lucide-react'
-import { useNotesStore } from '../stores/notesStore'
+import { useNotesStore, settleNoteWrites } from '../stores/notesStore'
 import { useT } from '../i18n/useT'
 import { tf } from '../i18n/format'
-import type { ActiveSyncStatus } from '../types'
+import type { ActiveSyncStatus, OriginChoiceAction } from '../types'
 import { ExportImportModal } from './ExportImportModal'
 import { SettingsModal } from './Settings/SettingsModal'
 import { SyncStatusButton } from './SyncStatusButton'
+import { OriginChoiceDialog } from './OriginChoiceDialog'
 import type { SettingsIntent, SettingsSection } from './Settings/SettingsModal'
 
 export function TitleBar() {
@@ -30,6 +31,11 @@ export function TitleBar() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
   const [settingsIntent, setSettingsIntent] = useState<SettingsIntent | undefined>(undefined)
+  // Origin choice dialog (the notes dir came from another remote — see
+  // OriginChoiceDialog): open while a choice is pending unless the user closed
+  // it for THAT choice ("Decide later"); a new choice opens it again. Reopened
+  // from the sync button or Settings → Sync (event 'noteflow:open-origin-choice').
+  const [dismissedChoiceKey, setDismissedChoiceKey] = useState<string | null>(null)
 
   const refreshSyncStatus = () => window.noteflow.getActiveSyncStatus().then(setSyncStatus)
 
@@ -76,6 +82,31 @@ export function TitleBar() {
       unsubCloud()
     }
   }, [])
+
+  const choiceKey = syncStatus.originChoice ? `${syncStatus.backend}|${syncStatus.originChoice.previous}|${syncStatus.originChoice.next}` : null
+  const originDialogOpen = choiceKey !== null && dismissedChoiceKey !== choiceKey
+  const reopenOriginChoice = () => setDismissedChoiceKey(null)
+
+  useEffect(() => {
+    const openOriginChoice = () => setDismissedChoiceKey(null)
+    window.addEventListener('noteflow:open-origin-choice', openOriginChoice)
+    return () => window.removeEventListener('noteflow:open-origin-choice', openOriginChoice)
+  }, [])
+
+  // Only GitHub asks today (NoteFlow Cloud will reuse the dialog with its own IPC).
+  const resolveOrigin = async (choice: OriginChoiceAction): Promise<{ ok: boolean; error?: string }> => {
+    // Pending editor saves land first: "replace" moves the notes as they are on disk.
+    if (choice !== 'cancel') {
+      await Promise.race([
+        settleNoteWrites().catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ])
+    }
+    const res = await window.noteflow.resolveGithubOrigin(choice)
+    // Resolved → the refreshed status has no originChoice and the dialog closes.
+    await refreshSyncStatus()
+    return res
+  }
 
   useEffect(() => {
     // Optional `detail.noteId` preselects that note instead of the active one.
@@ -219,6 +250,7 @@ export function TitleBar() {
               void window.noteflow.dismissConflictCopies()
             }}
             onOpenSettings={() => openSettings('sync')}
+            onChooseOrigin={reopenOriginChoice}
           />
         )}
         <button
@@ -272,6 +304,15 @@ export function TitleBar() {
           setExportNoteId(undefined)
           setExportImportModal(mode)
         }}
+      />
+    )}
+    {originDialogOpen && syncStatus.originChoice && syncStatus.backend !== 'none' && (
+      <OriginChoiceDialog
+        backend={syncStatus.backend}
+        previousLabel={syncStatus.originChoice.previous}
+        nextLabel={syncStatus.originChoice.next}
+        onResolve={resolveOrigin}
+        onClose={() => setDismissedChoiceKey(choiceKey)}
       />
     )}
     </>

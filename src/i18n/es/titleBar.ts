@@ -25,6 +25,7 @@ export const titleBar = {
     statusBlocked: 'Detenido',
     statusPending: 'Esperando',
     statusUnsynced: 'Sin subir',
+    statusChoice: 'Requiere acción',
     lastSync: 'Última sinc.',
     never: 'Nunca',
     justNow: 'justo ahora',
@@ -41,6 +42,8 @@ export const titleBar = {
     lastSyncs: { one: 'última sinc.', other: 'últimas {count} sinc.' },
     filesToday: { one: '{count} archivo hoy', other: '{count} archivos hoy' },
     blockedNotice: 'Los cambios no se subirán hasta que una sincronización salga bien.',
+    choiceNotice: 'Sincronización en pausa: las notas de este dispositivo vienen de {previous}, no de {next}. Elige cómo continuar.',
+    choiceAction: 'Elegir…',
     unsyncedNotice: 'Hay cambios locales que aún no se han subido. Haz clic para sincronizar ahora o se subirán en la próxima sincronización automática.',
     conflictCopiesNotice: {
       one: 'Tus cambios en {count} nota chocaron con cambios hechos en otro dispositivo y se guardaron como copia en conflicto:',
@@ -65,6 +68,7 @@ export const titleBar = {
     clickToSync: 'Clic para sincronizar',
     clickToRetry: 'Clic para reintentar',
     unlockHint: 'Desbloquéalo en Ajustes → Sincronización',
+    choiceHint: 'Clic para elegir qué hacer con tus notas',
   },
 
   errorTitle: 'Algo salió mal',

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, Cloud, CloudOff, ExternalLink, Github, HardDrive, Loader, Pause, RefreshCw, Unlink, UploadCloud } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, Cloud, CloudOff, ExternalLink, FolderOpen, Github, HardDrive, Loader, Pause, RefreshCw, Unlink, UploadCloud } from 'lucide-react'
 import type { AccountStatus } from '../../types'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
@@ -20,6 +20,8 @@ interface SyncStatus {
   repo?: string
   lastSync?: string
   error?: string
+  // The notes dir came from another remote: nothing syncs until the user chooses.
+  originChoice?: { previous: { owner: string; repo: string }; next: { owner: string; repo: string } }
 }
 
 type Step = 'idle' | 'waiting-auth' | 'completing' | 'pulling' | 'mirroring'
@@ -333,9 +335,17 @@ function GitHubSyncSection({
   const [pullResult, setPullResult] = useState<{ pulled: number; errors: string[] } | null>(null)
   const [mirrorResult, setMirrorResult] = useState<MirrorResult | null>(null)
   const [confirmMirror, setConfirmMirror] = useState(false)
+  // Local copies made by "Use only the notes from …" exist (userData/notes-archive).
+  const [hasArchives, setHasArchives] = useState(false)
 
   useEffect(() => {
-    window.noteflow.getSyncStatus().then(setStatus)
+    const refresh = () => {
+      window.noteflow.getSyncStatus().then(setStatus)
+      window.noteflow.getNotesArchiveStatus().then((s) => setHasArchives(s.hasArchives)).catch(() => undefined)
+    }
+    refresh()
+    // Origin choice made (or pending) elsewhere — the titlebar dialog, a restart.
+    return window.noteflow.onSyncStatusChanged(refresh)
   }, [])
 
   // Keep the selector badge in sync: main only broadcasts sync:status-changed
@@ -402,6 +412,11 @@ function GitHubSyncSection({
       setError(t.settings.sync.pullCloudEnabled)
       return
     }
+    if (result.error === 'origin-choice-pending') {
+      setError(t.settings.sync.pullOriginPending)
+      setStatus(await window.noteflow.getSyncStatus())
+      return
+    }
     setPullResult(result)
     if (result.pulled > 0) await loadNotes()
     const updated = await window.noteflow.getSyncStatus()
@@ -442,6 +457,7 @@ function GitHubSyncSection({
       case 'in-progress': return t.settings.sync.mirrorInProgress
       case 'token': return t.settings.sync.mirrorTokenError
       case 'not-connected': return t.settings.sync.notConnected
+      case 'origin-choice-pending': return t.settings.sync.mirrorOriginPending
       // Per-file failures (GitHub API messages) are listed below the message.
       default: return t.settings.sync.mirrorFailed
     }
@@ -490,6 +506,29 @@ function GitHubSyncSection({
         <p className="text-[11px] font-mono text-text-muted">
           {tf(t.settings.sync.lastSync, { time: new Date(status.lastSync).toLocaleString() })}
         </p>
+      )}
+
+      {/* The notes dir came from another remote: paused until the user chooses
+          (the dialog lives in the titlebar — it also opens on its own). */}
+      {status?.originChoice && (
+        <div className="flex items-start gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
+          <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
+          <div className="flex-1 space-y-1.5">
+            <p>
+              {tf(t.settings.sync.originPending, {
+                previous: `${status.originChoice.previous.owner}/${status.originChoice.previous.repo}`,
+                next: `${status.originChoice.next.owner}/${status.originChoice.next.repo}`,
+              })}
+            </p>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('noteflow:open-origin-choice'))}
+              className="px-2 py-0.5 rounded border border-yellow-500/40 hover:bg-yellow-500/20 transition-colors"
+            >
+              {t.settings.sync.originChoose}
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Error */}
@@ -593,7 +632,7 @@ function GitHubSyncSection({
         <div className="flex gap-2">
           {/* Hidden while Cloud owns the sync loop: pulling the paused repo could
               bring back notes deleted under Cloud (main refuses it too). */}
-          {!cloudEnabled && (
+          {!cloudEnabled && !status.originChoice && (
             <button
               onClick={handlePull}
               disabled={isLoading}
@@ -667,6 +706,21 @@ function GitHubSyncSection({
               <Github size={11} />
             )}
             {t.settings.sync.connectWithGitHub}
+          </button>
+        </div>
+      )}
+
+      {/* Local copies of notes set aside by "Use only the notes from …" */}
+      {hasArchives && (
+        <div className="flex items-center gap-3 pt-1">
+          <p className="flex-1 text-[11px] font-mono text-text-muted leading-relaxed">{t.settings.sync.archivesDesc}</p>
+          <button
+            type="button"
+            onClick={() => void window.noteflow.openNotesArchive()}
+            className="flex items-center gap-1.5 flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text transition-colors"
+          >
+            <FolderOpen size={11} />
+            {t.settings.sync.openArchives}
           </button>
         </div>
       )}

@@ -220,6 +220,14 @@ export const settings = {
     mirrorCloudInitialPullPending: 'NoteFlow Cloud has not finished downloading your notes on this device yet. Try mirroring again once it has.',
     mirrorInProgress: 'A mirror is already running.',
     mirrorTokenError: 'Could not read the GitHub token. Please reconnect GitHub.',
+    // The notes dir came from another remote than the connected repo (OriginChoiceDialog).
+    mirrorOriginPending: 'Choose first what to do with the notes on this device.',
+    originPending: 'Paused — the notes on this device came from {previous}. Nothing syncs with {next} until you choose how to continue.',
+    originChoose: 'Choose…',
+    pullOriginPending: 'Nothing was synced: choose first what to do with the notes on this device.',
+    // Local copies made by "Use only the notes from …" (userData/notes-archive).
+    archivesDesc: 'Notes set aside when you switched to another repository are kept in a folder on this computer.',
+    openArchives: 'Open local copies',
     // Deletions are skipped whenever a local file can't be read: an incomplete
     // local snapshot would make live notes look deleted.
     mirrorDeletionsSkipped: 'Nothing was deleted from the repository: some local files could not be read.',
