@@ -1926,11 +1926,16 @@ function cloudActive() {
 // pushed straight away, mixing the notes of the previous remote into the new
 // one. Shared with the desktop app — on Windows it is the same settings.json —
 // so the shape is a contract (see electron/syncOrigin.ts):
-//   syncOrigin: { github?: { repoId?: number, owner, repo, stale?: true },
-//                 cloud?:  { userId, email?: string, stale?: true } }
+//   syncOrigin: { github?: { repoId?: number, owner, repo, stale?: true, notesDir?: string },
+//                 cloud?:  { userId, email?: string, stale?: true, notesDir?: string } }
 // `stale: true` = the dir was replaced under the OTHER backend (a "use only the
 // remote's notes" in the app): it no longer belongs to that identity. The CLI
 // never writes it; every adoption rewrites the record without it.
+// `notesDir` = the notes dir the record describes (absent = the default one):
+// a record only counts for its own dir (originScope / originPlacement below).
+// The pure functions here answer exactly like the app's for the same input
+// (tests/cli/syncOrigin.test.ts runs both over one grid); what differs on
+// purpose is said where it happens (withSyncOrigin, the gates).
 // When the identity changes and there are synced notes on disk, nothing syncs
 // with that backend until the user chooses: `noteflow origin merge` (or
 // `login --merge` / `cloud login --merge`), or cancel with logout. "Use only the
@@ -1956,36 +1961,47 @@ function sameIdentity(a, b) {
   return false
 }
 
-/** Every stored field already equals the new identity's (nothing to rewrite). Cloud: also the email label. */
+/**
+ * Every stored field already equals the new identity's (nothing to rewrite).
+ * Cloud: also the email label. And the record's notes dir, when `next` carries
+ * one (the app tags it; the CLI's gates don't — see evaluateGithubOrigin).
+ */
 function identicalOriginRecord(stored, next) {
+  const sameDir = next.notesDir === undefined || stored.notesDir === next.notesDir
   if (stored.kind === 'github' && next.kind === 'github') {
     return stored.owner === next.owner && stored.repo === next.repo &&
-      (next.repoId === undefined || stored.repoId === next.repoId)
+      (next.repoId === undefined || stored.repoId === next.repoId) && sameDir
   }
   if (stored.kind === 'cloud' && next.kind === 'cloud') {
-    return stored.userId === next.userId && (next.email === undefined || stored.email === next.email)
+    return stored.userId === next.userId && (next.email === undefined || stored.email === next.email) && sameDir
   }
   return false
 }
 
 /**
- * Pure mirror of electron/syncOrigin.ts decideOrigin, plus the `stale` rule:
- * a stale stored origin with synced notes on disk asks even when it matches
- * `next`; without notes it is adopted with the per-remote reset
- * (`changed-empty`). Asks ONLY when the identity changed (or is stale) AND
- * there are synced notes; `hasLocalNotes` is lazy and must answer true when it
- * can't tell (fail-closed). → { action: 'proceed', adopt, reason:
- * 'no-origin' | 'same' | 'changed-empty' } | { action: 'ask', previous, next }.
+ * Pure mirror of electron/syncOrigin.ts decideOrigin (without its `dirs`: the
+ * gates apply the notes dir rule first — originPlacement). A stale stored
+ * origin with synced notes on disk asks even when it matches `next`; without
+ * notes it is adopted with the per-remote reset (`stale-empty`). Asks ONLY when
+ * the identity changed (or is stale) AND there are synced notes; `hasLocalNotes`
+ * is lazy and must answer true when it can't tell (fail-closed).
+ * → { action: 'proceed', adopt, reason: 'no-origin' | 'same' | 'changed-empty' |
+ * 'stale-empty' } | { action: 'ask', previous, next, stale?: true }.
  */
 function decideOrigin({ stored, next, hasLocalNotes }) {
   if (!stored) return { action: 'proceed', adopt: true, reason: 'no-origin' }
   if (stored.stale) {
-    if (hasLocalNotes()) return { action: 'ask', previous: stored, next }
-    return { action: 'proceed', adopt: true, reason: 'changed-empty' }
+    if (!hasLocalNotes()) return { action: 'proceed', adopt: true, reason: 'stale-empty' }
+    return { action: 'ask', previous: stored, next, stale: true }
   }
   if (sameIdentity(stored, next)) return { action: 'proceed', adopt: !identicalOriginRecord(stored, next), reason: 'same' }
   if (!hasLocalNotes()) return { action: 'proceed', adopt: true, reason: 'changed-empty' }
   return { action: 'ask', previous: stored, next }
+}
+
+/** A `proceed` that adopts in ANOTHER remote's place: the previous remote's CLI state must be reset first. */
+function originAdoptionResets(reason) {
+  return reason === 'changed-empty' || reason === 'stale-empty'
 }
 
 /** Pure, tolerant parse of `settings.syncOrigin` (malformed entries ignored) — mirror of readSyncOrigin + `stale`/`email`. */
@@ -2019,17 +2035,20 @@ function getStoredIdentity(settings, kind) {
 
 /**
  * Pure: a copy of `settings` with the backend's origin set to `id`, WITHOUT
- * `stale`. Every other key — the other backend's record, unknown keys of
- * syncOrigin and of settings — is kept. Re-adopting the SAME identity also keeps
- * the unknown fields of its record (and a repoId / email `id` lacks); another
- * identity gets a fresh record with the known fields only. Does not mutate.
+ * `stale` and with `id.notesDir` normalized. Every other key — the other
+ * backend's record, unknown keys of syncOrigin and of settings — is kept.
+ * Another identity (or none stored) gets a fresh record with the known fields
+ * only, exactly the app's. On purpose NOT like the app: re-adopting the SAME
+ * identity also keeps the unknown fields of its record and a repoId / email /
+ * notesDir that `id` lacks (the app writes a fresh record every time). Does
+ * not mutate.
  */
 function withSyncOrigin(settings, id) {
   const current = isPlainObject(settings[SYNC_ORIGIN_KEY]) ? { ...settings[SYNC_ORIGIN_KEY] } : {}
   const prevId = getStoredIdentity(settings, id.kind)
   const extra = prevId && sameIdentity(prevId, id) && isPlainObject(current[id.kind]) ? { ...current[id.kind] } : {}
   delete extra.stale
-  const notesDir = typeof id.notesDir === 'string' && id.notesDir ? id.notesDir
+  const notesDir = typeof id.notesDir === 'string' && id.notesDir ? normalizeNotesDir(id.notesDir)
     : typeof extra.notesDir === 'string' && extra.notesDir ? extra.notesDir : undefined
   delete extra.notesDir
   const dirField = notesDir ? { notesDir } : {}
@@ -2120,6 +2139,17 @@ function originRecordDir(stored) {
 }
 
 /**
+ * Pure mirror of electron/syncOrigin.ts originScope: does the stored record of
+ * a backend apply to `dirs.current`? With a record: when its notes dir (absent
+ * = `dirs.default`) is the current one. Without one: only the default dir may
+ * start recording. 'foreign' = neither use nor write a record for this dir.
+ */
+function originScope(stored, dirs) {
+  const recordDir = stored && stored.notesDir ? stored.notesDir : dirs.default
+  return sameNotesDir(recordDir, dirs.current, dirs.platform) ? 'own' : 'foreign'
+}
+
+/**
  * Where the stored origin stands for THIS process's notes dir:
  *  'here'     — the record describes this dir: the normal rules apply;
  *  'elsewhere'— it describes another dir (an override, or the default seen from
@@ -2130,8 +2160,9 @@ function originRecordDir(stored) {
  *               dir with a "foreign" record, i.e. unprotected).
  */
 function originPlacement(stored) {
-  if (stored) return sameNotesDir(originRecordDir(stored), NOTES_DIR) ? 'here' : 'elsewhere'
-  return sameNotesDir(DEFAULT_NOTES_DIR, NOTES_DIR) ? 'none-here' : 'none-elsewhere'
+  const own = originScope(stored, { current: NOTES_DIR, default: DEFAULT_NOTES_DIR }) === 'own'
+  if (stored) return own ? 'here' : 'elsewhere'
+  return own ? 'none-here' : 'none-elsewhere'
 }
 
 /** The identity `id` as it is written by an adoption: tagged with this process's notes dir. */
@@ -2245,7 +2276,8 @@ function adoptCloudOrigin(id, resetRemote) {
  * cloudSync) and the notes on disk — never cached, so a change made by the app
  * is seen. With `write`, `proceed` decisions that adopt are written NOW, before
  * anything syncs (a failure blocks). → { state, … }:
- *  'clear' (reason: 'not-connected' | 'cloud-mirror' | 'no-origin' | 'same' | 'changed-empty')
+ *  'clear' (reason: 'not-connected' | 'cloud-mirror' | 'other-dir' | 'no-origin' | 'same' |
+ *           'changed-empty' | 'stale-empty')
  *  'ask' (previous, next) | 'unreadable' | 'unwritable' (error).
  * With the desktop app on NoteFlow Cloud (`cloudSync.enabled`) GitHub is its
  * mirror and the dir belongs to the Cloud account: clear, syncOrigin.github untouched.
@@ -2261,10 +2293,13 @@ function evaluateGithubOrigin({ write = true } = {}) {
   // nothing written, no reset, no choice — see originPlacement.
   const placement = originPlacement(stored)
   if (placement === 'elsewhere' || placement === 'none-elsewhere') return { state: 'clear', reason: 'other-dir', stored, next }
+  // `next` goes in WITHOUT this notes dir: a record of this same repo that has
+  // no `notesDir` yet (the default dir's) is left as it is — the app rewrites
+  // it to add the field, the CLI only when it adopts for another reason.
   const decision = decideOrigin({ stored, next, hasLocalNotes: hasSyncedLocalNotes })
   if (decision.action === 'ask') return { state: 'ask', previous: decision.previous, next, stored }
   if (decision.adopt && write) {
-    const res = adoptGithubOrigin(next, decision.reason === 'changed-empty')
+    const res = adoptGithubOrigin(next, originAdoptionResets(decision.reason))
     if (!res.ok) return { state: 'unwritable', error: res.error, stored, next }
   }
   return { state: 'clear', reason: decision.reason, adopt: decision.adopt, stored, next }
@@ -2306,7 +2341,7 @@ function evaluateCloudOrigin({ write = true, presumedOwner } = {}) {
   const decision = decideOrigin({ stored, next, hasLocalNotes: hasSyncedLocalNotes })
   if (decision.action === 'ask') return { state: 'ask', previous: decision.previous, next, stored, seeded }
   if (decision.adopt && write) {
-    const res = adoptCloudOrigin(next, decision.reason === 'changed-empty')
+    const res = adoptCloudOrigin(next, originAdoptionResets(decision.reason))
     if (!res.ok) return { state: 'unwritable', error: res.error, stored, next }
   }
   return { state: 'clear', reason: decision.reason, adopt: decision.adopt, stored, next, seeded }
@@ -6898,7 +6933,7 @@ function githubOriginAfterLogin(opts) {
     const placement = originPlacement(stored)
     if (next && (placement === 'here' || placement === 'none-here')) {
       const decision = decideOrigin({ stored, next, hasLocalNotes: () => false })
-      const res = decision.adopt ? adoptGithubOrigin(next, decision.reason === 'changed-empty') : { ok: true }
+      const res = decision.adopt ? adoptGithubOrigin(next, originAdoptionResets(decision.reason)) : { ok: true }
       if (!res.ok) console.error(`  Warning: ${res.error}`)
     }
     return true
@@ -8652,5 +8687,6 @@ if (require.main === module) {
     adoptGithubOrigin, adoptCloudOrigin, originStatusJson, cmdOrigin, cmdStatus, cmdCloudStatus,
     cmdCloudPull, cmdDelete, cmdSectionDelete, cmdMigrate, finishCloudLogin, cmdLogin, cmdLoginFinish,
     GITHUB_BASES_PATH, SETTINGS_PATH, NOTES_DIR, DEFAULT_NOTES_DIR, sameNotesDir, normalizeNotesDir,
+    originScope, originPlacement, withNotesDir,
   }
 }

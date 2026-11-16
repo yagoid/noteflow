@@ -224,13 +224,27 @@ Por eso su `lastSync` obedece al mismo invariante que la regla de borrado del pu
 tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`). En concreto:
 - **Origen del dir de notas** (desde CLI 2.14.0; la regla de la app está en § "Origen del dir de
   notas" abajo): el CLI lee y escribe el mismo `settings.syncOrigin` (en Windows, el de la app). Lleva
-  un espejo puro de `electron/syncOrigin.ts` (`sameIdentity`, `decideOrigin`, `readSyncOrigin`,
-  `getStoredIdentity`, `withSyncOrigin`, `readSettingsStrict`, `hasSyncedLocalNotes`; paridad en
-  `tests/cli/syncOrigin.test.ts`), incluidas las partes aditivas del contrato, que la app también
-  implementa (§ "Origen del dir de notas"): `stale: true` (origen guardado `stale` + notas sincronizables ⇒
-  preguntar aunque la identidad coincida; sin notas ⇒ adoptar con el reseteo de `changed-empty`; el CLI
-  **nunca** lo escribe —solo la app, en su "usar solo lo remoto"— y toda adopción lo quita),
-  `cloud.email` (etiqueta de los mensajes) y **`notesDir`** (abajo).
+  un espejo puro de `electron/syncOrigin.ts` (`sameIdentity`, `decideOrigin`, `originScope`,
+  `readSyncOrigin`, `getStoredIdentity`, `withSyncOrigin`, `normalizeNotesDir`, `sameNotesDir`,
+  `readSettingsStrict`, `hasSyncedLocalNotes`), incluidas las partes aditivas del contrato, que la app
+  también implementa (§ "Origen del dir de notas"): `stale: true` (origen guardado `stale` + notas
+  sincronizables ⇒ preguntar aunque la identidad coincida, con `stale: true` en la decisión; sin notas ⇒
+  adoptar con reseteo, `stale-empty`; el CLI **nunca** lo escribe —solo la app, en su "usar solo lo
+  remoto"— y toda adopción lo quita), `cloud.email` (etiqueta de los mensajes) y **`notesDir`** (abajo).
+  **Paridad CLI ↔ app** (`tests/cli/syncOrigin.test.ts`): las mismas entradas pasan por los dos módulos
+  y se comparan las respuestas — rejilla de identidades guardadas (con `stale` / `email` / `notesDir`) ×
+  identidad que entra × notas en disco × dir actual/por defecto/plataforma; ajustes válidos y
+  malformados; ida y vuelta (lo que adopta uno lo lee el otro sin preguntar ni reescribir; la marca
+  `stale` de la app cierra la puerta del CLI y la adopción del CLI la limpia para la app); y las **dos
+  puertas del CLI sobre un `settings.json` real** frente a la decisión de la app para ese mismo fichero
+  y dir. Diferencias **deliberadas**, fijadas en ese test: (1) `withSyncOrigin` al readoptar la
+  **misma** identidad — el CLI conserva lo que la identidad nueva no trae (`repoId`, `email`, `notesDir`,
+  campos desconocidos) y la app escribe un registro nuevo; (2) la app etiqueta la identidad con su dir
+  (`next.notesDir`) y por eso reescribe un registro de la misma identidad **sin** `notesDir` para
+  añadírselo, mientras que la puerta del CLI lo deja como está (ambos lo leen como del dir por defecto);
+  (3) la regla del dir va **antes** de `decideOrigin` en el CLI (`originPlacement` → `other-dir`) y
+  **dentro** en la app (`dirs` → `foreign-dir`): mismo resultado; (4) la siembra de Cloud del CLI conoce
+  además su propio dueño (`cliCloud.userId`, y el de la sesión anterior en `cloud login`).
   **A qué dir pertenece cada registro (`notesDir`, contrato compartido con la app):** `syncOrigin` vive
   en `settings.json`, que `NOTEFLOW_NOTES_DIR` no aísla, pero describe UN dir. Cada registro
   (`github`/`cloud`) lleva `notesDir` = `path.resolve` del dir con el que se adoptó (sin separador

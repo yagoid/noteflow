@@ -689,7 +689,7 @@ describe('NoteFlow Cloud: signed in to another account with notes from the previ
   it('a stale Cloud origin without notes is adopted with the reset', () => {
     writeSettings({ cliAccount: account('u1', 'a@x.io'), cliCloud: { enabled: true, userId: 'u1', pullSeq: 9 }, syncOrigin: { cloud: { userId: 'u1', stale: true } } })
     load()
-    expect(cli.evaluateCloudOrigin()).toMatchObject({ state: 'clear', reason: 'changed-empty' })
+    expect(cli.evaluateCloudOrigin()).toMatchObject({ state: 'clear', reason: 'stale-empty' })
     const s = readSettings()
     expect(s.syncOrigin.cloud).toEqual({ userId: 'u1', email: 'a@x.io', ...HERE() })
     expect(s.cliCloud).toEqual({ enabled: true, userId: 'u1' })
