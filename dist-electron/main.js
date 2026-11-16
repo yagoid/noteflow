@@ -71,6 +71,7 @@ const migration_1 = require("./migration");
 const localOnlyNotes_1 = require("./localOnlyNotes");
 const notesArchive = __importStar(require("./notesArchive"));
 const syncOrigin_1 = require("./syncOrigin");
+const originChoiceKey_1 = require("./originChoiceKey");
 const welcomeNote_1 = require("./welcomeNote");
 const tempNoteExpiry_1 = require("./tempNoteExpiry");
 const updateAsset_1 = require("./updateAsset");
@@ -2933,7 +2934,7 @@ function archiveFailure(err) {
 // - cancel: GitHub → disconnect; Cloud → Cloud sync off (signed in, notes and
 //   stored origin untouched).
 let resolveOriginInFlight = false;
-electron_1.ipcMain.handle('sync:resolve-origin', async (_event, choice, backend) => {
+electron_1.ipcMain.handle('sync:resolve-origin', async (_event, choice, backend, key) => {
     if (choice !== 'merge' && choice !== 'replace' && choice !== 'cancel')
         return { ok: false, error: 'invalid' };
     if (backend !== undefined && backend !== 'github' && backend !== 'cloud')
@@ -2941,9 +2942,13 @@ electron_1.ipcMain.handle('sync:resolve-origin', async (_event, choice, backend)
     if (resolveOriginInFlight)
         return { ok: false, error: 'busy' };
     if (backend === 'cloud')
-        return resolveCloudOrigin(choice);
-    if (!githubSync.getOriginChoice())
+        return resolveCloudOrigin(choice, key);
+    // The answer is for the choice the user saw (`key`, originChoiceKey.ts): if
+    // another one is pending now — or none — nothing is applied.
+    const pendingGithub = githubSync.getOriginChoice();
+    if (!(0, originChoiceKey_1.originChoiceStillPending)(key, pendingGithub ? (0, originChoiceKey_1.githubOriginChoiceKey)(pendingGithub) : null)) {
         return { ok: false, error: 'not-pending' };
+    }
     if (choice === 'cancel') {
         disconnectGithubSync();
         return { ok: true };
@@ -3013,9 +3018,10 @@ electron_1.ipcMain.handle('sync:resolve-origin', async (_event, choice, backend)
  *   session, the notes and the stored origin stay: turning Cloud on by hand
  *   asks again. A NEW sign-in still switches on what is paid (and asks).
  */
-async function resolveCloudOrigin(choice) {
+async function resolveCloudOrigin(choice, key) {
     const chosen = cloudSync.getCloudOriginChoice();
-    if (!chosen)
+    // Only the choice the user saw (`key`): another account signed in meanwhile → not this one.
+    if (!chosen || !(0, originChoiceKey_1.originChoiceStillPending)(key, (0, originChoiceKey_1.cloudOriginChoiceKey)(chosen)))
         return { ok: false, error: 'not-pending' };
     if (choice === 'cancel') {
         cloudSync.disableCloudSync();

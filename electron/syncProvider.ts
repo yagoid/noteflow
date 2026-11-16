@@ -22,6 +22,7 @@ import * as githubSync from './githubSync'
 import * as cloudSync from './cloudSync'
 import type { SyncHistoryEntry } from './syncHistory'
 import type { ConflictCopiesNotice } from './conflictCopy'
+import { cloudOriginChoiceKey, githubOriginChoiceKey } from './originChoiceKey'
 
 /** Result shape shared by both backends' pullNotes (paths in updatedFiles are note DIRS). */
 export interface SyncPullResult {
@@ -162,10 +163,12 @@ export interface ActiveSyncStatus {
    * text). `stale`: the notes came from the OTHER backend (its "use only the
    * notes from …") — `previous` then names that one (Cloud account email /
    * 'owner/repo'). `disconnectsGithub` (Cloud only): "use only the account's
-   * notes" disconnects the connected GitHub Sync. Absent otherwise.
-   * Backend-agnostic (`backend` says which one asks).
+   * notes" disconnects the connected GitHub Sync. `key`: opaque id of this
+   * choice — the renderer sends it back with the answer, and a choice that
+   * changed meanwhile answers 'not-pending' (originChoiceKey.ts). Absent
+   * otherwise. Backend-agnostic (`backend` says which one asks).
    */
-  originChoice?: { previous: string; next: string; stale?: true; disconnectsGithub?: true }
+  originChoice?: { previous: string; next: string; key: string; stale?: true; disconnectsGithub?: true }
   /** Present only when backend === 'github'. */
   github?: { owner?: string; repo?: string }
   /** Present only when backend === 'cloud'. */
@@ -230,6 +233,7 @@ function githubOriginLabels(choice: githubSync.OriginChoice): OriginChoiceLabels
   return {
     previous: choice.stale ? choice.staleFrom?.email ?? '' : `${choice.previous.owner}/${choice.previous.repo}`,
     next: `${choice.next.owner}/${choice.next.repo}`,
+    key: githubOriginChoiceKey(choice),
     ...(choice.stale ? { stale: true as const } : {}),
   }
 }
@@ -242,6 +246,7 @@ function cloudOriginLabels(choice: cloudSync.CloudOriginChoice): OriginChoiceLab
   return {
     previous,
     next: choice.next.email ?? '',
+    key: cloudOriginChoiceKey(choice),
     ...(choice.stale ? { stale: true as const } : {}),
     ...(choice.githubConnected ? { disconnectsGithub: true as const } : {}),
   }

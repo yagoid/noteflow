@@ -58,6 +58,7 @@ import { migrateNotesDirToV2 } from './migration'
 import { primeLocalOnlyDirs, listSyncedNoteDirs } from './localOnlyNotes'
 import * as notesArchive from './notesArchive'
 import { defaultNotesDir, identityArchiveLabel, type SyncIdentity } from './syncOrigin'
+import { cloudOriginChoiceKey, githubOriginChoiceKey, originChoiceStillPending } from './originChoiceKey'
 import { planWelcomeNote, isSyncConfigured, buildWelcomeNote, WELCOME_SEEDED_KEY } from './welcomeNote'
 import { shouldRunExpiryCheck, type ExpiryTrigger, type SyncBackendId } from './tempNoteExpiry'
 import {
@@ -3034,12 +3035,17 @@ function archiveFailure(err: unknown): ResolveOriginResult {
 // - cancel: GitHub → disconnect; Cloud → Cloud sync off (signed in, notes and
 //   stored origin untouched).
 let resolveOriginInFlight = false
-ipcMain.handle('sync:resolve-origin', async (_event, choice: unknown, backend: unknown): Promise<ResolveOriginResult> => {
+ipcMain.handle('sync:resolve-origin', async (_event, choice: unknown, backend: unknown, key: unknown): Promise<ResolveOriginResult> => {
   if (choice !== 'merge' && choice !== 'replace' && choice !== 'cancel') return { ok: false, error: 'invalid' }
   if (backend !== undefined && backend !== 'github' && backend !== 'cloud') return { ok: false, error: 'invalid' }
   if (resolveOriginInFlight) return { ok: false, error: 'busy' }
-  if (backend === 'cloud') return resolveCloudOrigin(choice)
-  if (!githubSync.getOriginChoice()) return { ok: false, error: 'not-pending' }
+  if (backend === 'cloud') return resolveCloudOrigin(choice, key)
+  // The answer is for the choice the user saw (`key`, originChoiceKey.ts): if
+  // another one is pending now — or none — nothing is applied.
+  const pendingGithub = githubSync.getOriginChoice()
+  if (!originChoiceStillPending(key, pendingGithub ? githubOriginChoiceKey(pendingGithub) : null)) {
+    return { ok: false, error: 'not-pending' }
+  }
   if (choice === 'cancel') {
     disconnectGithubSync()
     return { ok: true }
@@ -3105,9 +3111,10 @@ ipcMain.handle('sync:resolve-origin', async (_event, choice: unknown, backend: u
  *   session, the notes and the stored origin stay: turning Cloud on by hand
  *   asks again. A NEW sign-in still switches on what is paid (and asks).
  */
-async function resolveCloudOrigin(choice: 'merge' | 'replace' | 'cancel'): Promise<ResolveOriginResult> {
+async function resolveCloudOrigin(choice: 'merge' | 'replace' | 'cancel', key: unknown): Promise<ResolveOriginResult> {
   const chosen = cloudSync.getCloudOriginChoice()
-  if (!chosen) return { ok: false, error: 'not-pending' }
+  // Only the choice the user saw (`key`): another account signed in meanwhile → not this one.
+  if (!chosen || !originChoiceStillPending(key, cloudOriginChoiceKey(chosen))) return { ok: false, error: 'not-pending' }
   if (choice === 'cancel') {
     cloudSync.disableCloudSync()
     stopCloudAutoSync()

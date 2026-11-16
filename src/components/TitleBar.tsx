@@ -104,9 +104,12 @@ export function TitleBar() {
         new Promise((resolve) => setTimeout(resolve, 2000)),
       ])
     }
+    // The key of the choice on screen: main refuses it ('not-pending') if the
+    // pending choice changed meanwhile — the refreshed status then shows the new one.
+    const key = syncStatus.originChoice?.key
     const res = syncStatus.backend === 'cloud'
-      ? await window.noteflow.resolveCloudOrigin(choice)
-      : await window.noteflow.resolveGithubOrigin(choice)
+      ? await window.noteflow.resolveCloudOrigin(choice, key)
+      : await window.noteflow.resolveGithubOrigin(choice, key)
     // Resolved → the refreshed status has no originChoice and the dialog closes.
     await refreshSyncStatus()
     return res

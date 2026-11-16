@@ -678,9 +678,10 @@ export interface ActiveSyncStatus {
    * nothing syncs until the user chooses (OriginChoiceDialog). Labels — GitHub:
    * 'owner/repo'; Cloud: the account email. '' = unknown (shown as a generic
    * text). `stale`: the notes came from the other backend (`previous` names it).
-   * `disconnectsGithub` (Cloud): 'replace' disconnects GitHub Sync.
+   * `disconnectsGithub` (Cloud): 'replace' disconnects GitHub Sync. `key`: opaque id
+   * of the choice — sent back with the answer (main refuses a choice that changed).
    */
-  originChoice?: { previous: string; next: string; stale?: true; disconnectsGithub?: true }
+  originChoice?: { previous: string; next: string; key: string; stale?: true; disconnectsGithub?: true }
   github?: { owner?: string; repo?: string }
   cloud?: {
     keysState: CloudSyncStatus['keysState']
@@ -844,9 +845,10 @@ declare global {
       // The notes dir came from another remote than the connected repo: merge / replace
       // (local notes moved to a local archive, never deleted) / cancel (= disconnect).
       // error 'archive-failed' (+ detail): nothing was pulled, the choice stays pending.
-      resolveGithubOrigin: (choice: OriginChoiceAction) => Promise<{ ok: boolean; error?: string; detail?: string }>
+      // key = originChoice.key of the choice on screen ('not-pending' if it changed meanwhile).
+      resolveGithubOrigin: (choice: OriginChoiceAction, key?: string) => Promise<{ ok: boolean; error?: string; detail?: string }>
       // Same for NoteFlow Cloud (notes from another account): cancel = Cloud sync off (still signed in).
-      resolveCloudOrigin: (choice: OriginChoiceAction) => Promise<{ ok: boolean; error?: string; detail?: string }>
+      resolveCloudOrigin: (choice: OriginChoiceAction, key?: string) => Promise<{ ok: boolean; error?: string; detail?: string }>
       // Local archives of notes set aside by "use only the remote's notes" (userData/notes-archive).
       getNotesArchiveStatus: () => Promise<{ hasArchives: boolean }>
       openNotesArchive: () => Promise<{ ok: boolean }>

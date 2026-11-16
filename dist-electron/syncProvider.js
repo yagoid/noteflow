@@ -57,6 +57,7 @@ exports.getActiveSyncProvider = getActiveSyncProvider;
 exports.getActiveSyncStatus = getActiveSyncStatus;
 const githubSync = __importStar(require("./githubSync"));
 const cloudSync = __importStar(require("./cloudSync"));
+const originChoiceKey_1 = require("./originChoiceKey");
 exports.githubProvider = {
     id: 'github',
     isConnected: () => githubSync.getSyncStatus().connected,
@@ -139,6 +140,7 @@ function githubOriginLabels(choice) {
     return {
         previous: choice.stale ? choice.staleFrom?.email ?? '' : `${choice.previous.owner}/${choice.previous.repo}`,
         next: `${choice.next.owner}/${choice.next.repo}`,
+        key: (0, originChoiceKey_1.githubOriginChoiceKey)(choice),
         ...(choice.stale ? { stale: true } : {}),
     };
 }
@@ -150,6 +152,7 @@ function cloudOriginLabels(choice) {
     return {
         previous,
         next: choice.next.email ?? '',
+        key: (0, originChoiceKey_1.cloudOriginChoiceKey)(choice),
         ...(choice.stale ? { stale: true } : {}),
         ...(choice.githubConnected ? { disconnectsGithub: true } : {}),
     };
