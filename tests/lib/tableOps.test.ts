@@ -20,6 +20,7 @@ import {
   deleteSelectedColumns, deleteSelectedRows, duplicateColumn, duplicateRow, getSelectedCellsData,
   getTableData, getTableInfo, insertColumnAt, insertRowAt, moveColumn, moveRow, runTableCommand,
   selectColumn, selectRow, sortRowsByColumn,
+  duplicateSelectedRow, insertColumnRight, insertRowBelow, moveSelectedColumn, moveSelectedRow, selectionInTable,
 } from '../../src/components/Editor/tableOps'
 import { load, save, schema } from '../helpers/editorPipeline'
 
@@ -664,8 +665,110 @@ describe('one-column, header-less and merged tables', () => {
     for (const cmd of [
       selectRow(1), moveRow(1, 2), moveColumn(0, 1), duplicateRow(1), insertRowAt(1), insertColumnAt(0),
       sortRowsByColumn(0, 'desc'), clearRow(1), clearSelectedCells, deleteSelectedRows, deleteSelectedColumns,
+      moveSelectedRow(1), moveSelectedColumn(1), insertRowBelow, insertColumnRight, duplicateSelectedRow,
     ]) expectRejected(s, cmd)
     expect(getTableData(s)).toBeNull()
+  })
+})
+
+// ── Relative to the selection (keyboard shortcuts) ───────────────────────────
+
+describe('moveSelectedRow / moveSelectedColumn', () => {
+  it('move the cursor\'s body row / column one place; the cursor follows its cell', () => {
+    let s = stateOf(T44, 'b')
+    s = apply(s, moveSelectedRow(1))
+    expect(getTableData(s)!.rows.map((r) => r[1])).toEqual(['Name', 'a', 'b', 'c'])
+    expect(headCellText(s)).toBe('b')
+    s = apply(fresh(s), moveSelectedColumn(-1))
+    expect(getTableData(s)!.rows[0]).toEqual(['Name', 'N', 'Score', 'Note'])
+    expect(aligns(s)[0]).toEqual(['center', null, 'right', 'left'])
+    expect(headCellText(s)).toBe('b')
+  })
+
+  it('a CellSelection within one row / column moves; over several → false', () => {
+    const s = stateOf(T44)
+    const row = withCells(s, [2, 0], [2, 3])
+    const moved = apply(row, moveSelectedRow(-1))
+    expect((moved.selection as CellSelection).isRowSelection()).toBe(true)
+    expect(getSelectedCellsData(moved)!.rows).toEqual([['2', 'a', '9,5', '']])
+    expectRejected(withCells(s, [1, 0], [2, 0]), moveSelectedRow(1))
+    expectRejected(withCells(s, [1, 0], [1, 1]), moveSelectedColumn(1))
+    apply(withCells(s, [0, 1], [3, 1]), moveSelectedColumn(1))
+  })
+
+  it('the header row, the first body row up, the last row down, the edge columns → false', () => {
+    expectRejected(stateOf(T44, 'Name'), moveSelectedRow(1))
+    expectRejected(stateOf(T44, 'Name'), moveSelectedRow(-1))
+    expectRejected(stateOf(T44, 'b'), moveSelectedRow(-1))
+    expectRejected(stateOf(T44, 'c'), moveSelectedRow(1))
+    expectRejected(stateOf(T44, 'N'), moveSelectedColumn(-1))
+    expectRejected(stateOf(T44, 'Note'), moveSelectedColumn(1))
+    expectRejected(stateOf(`text\n\n${T44}`, 'text'), moveSelectedRow(1))
+  })
+})
+
+describe('insertRowBelow / insertColumnRight', () => {
+  it('insert below the selection\'s last row / right of its last column; cursor in the new cell', () => {
+    let s = apply(stateOf(T44, 'b'), insertRowBelow)
+    expect(getTableData(s)!.rows[2]).toEqual(['', '', '', ''])
+    expect(aligns(s)[2]).toEqual([null, 'center', 'right', 'left'])
+    expect(s.selection.$head.parent.textContent).toBe('')
+    expect(getSelectedCellsData(s)!.aligns).toEqual(['center'])
+
+    s = apply(withCells(stateOf(T44), [1, 0], [2, 2]), insertRowBelow)
+    expect(getTableData(s)!.rows.map((r) => r[0])).toEqual(['N', '1', '2', '', '3'])
+
+    s = apply(stateOf(T44, 'Score'), insertColumnRight)
+    expect(getTableData(s)!.rows[0]).toEqual(['N', 'Name', 'Score', '', 'Note'])
+    expect(s.selection.$head.node(-1).type.name).toBe('tableHeader')
+    expect(getSelectedCellsData(s)!.rows).toEqual([['']])
+  })
+
+  it('in the header, the row goes right below it', () => {
+    const s = apply(stateOf(T44, 'Name'), insertRowBelow)
+    expect(getTableData(s)!.rows[1]).toEqual(['', '', '', ''])
+    expect(s.selection.$head.node(-2)).toBe(s.doc.nodeAt(0)!.child(1))
+  })
+
+  it('outside a table → false', () => {
+    expectRejected(stateOf(`text\n\n${T22}`, 'text'), insertRowBelow)
+    expectRejected(stateOf(`text\n\n${T22}`, 'text'), insertColumnRight)
+  })
+})
+
+describe('duplicateSelectedRow', () => {
+  it('copies the cursor\'s row below it; the cursor goes to the copy, same offset', () => {
+    const s = stateOf(T44, 'b')
+    const offset = s.selection.$head.parentOffset
+    const next = apply(s, duplicateSelectedRow)
+    expect(getTableData(next)!.rows.slice(1, 3)).toEqual([['1', 'b', '10', 'x'], ['1', 'b', '10', 'x']])
+    expect(next.selection.$head.node(-2)).toBe(next.doc.nodeAt(0)!.child(2))
+    expect(next.selection.$head.parentOffset).toBe(offset)
+  })
+
+  it('a CellSelection in one row → the same cells of the copy; over several rows → the head cell of the copy', () => {
+    const one = apply(withCells(stateOf(T44), [3, 1], [3, 2]), duplicateSelectedRow)
+    expect(getSelectedCellsData(one)!.rows).toEqual([['c', '']])
+    expect(one.selection).toBeInstanceOf(CellSelection)
+    const many = apply(withCells(stateOf(T44), [1, 0], [2, 3]), duplicateSelectedRow)
+    expect(getTableData(many)!.rows.map((r) => r[0])).toEqual(['N', '1', '2', '2', '3'])
+    expect(many.selection).toBeInstanceOf(TextSelection)
+    expect(many.selection.$head.node(-2)).toBe(many.doc.nodeAt(0)!.child(3))
+  })
+
+  it('the header is never duplicated → false', () => {
+    expectRejected(stateOf(T44, 'Name'), duplicateSelectedRow)
+  })
+})
+
+describe('selectionInTable', () => {
+  it('a cursor or a CellSelection in a table; not outside, nor a selection leaving it', () => {
+    expect(selectionInTable(stateOf(T22, 'A'))).toBe(true)
+    expect(selectionInTable(withCells(stateOf(T22), [0, 0], [1, 1]))).toBe(true)
+    const mixed = stateOf(`text\n\n${T22}`)
+    expect(selectionInTable(stateOf(`text\n\n${T22}`, 'text'))).toBe(false)
+    const across = mixed.apply(mixed.tr.setSelection(TextSelection.create(mixed.doc, 1, textPos(mixed.doc, 'A'))))
+    expect(selectionInTable(across)).toBe(false)
   })
 })
 
