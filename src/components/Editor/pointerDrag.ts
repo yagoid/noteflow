@@ -1,6 +1,7 @@
 // Shared bits of the editor's own pointer-event drag & drop (kanban cards and
-// columns in KanbanBoardView.tsx, task items in taskDrag.ts). HTML5 DnD is not
-// used: ProseMirror intercepts the drop and the native ghost looks bad.
+// columns in KanbanBoardView.tsx, task items in taskDrag.ts, table rows and
+// columns in TableControls.tsx). HTML5 DnD is not used: ProseMirror intercepts
+// the drop and the native ghost looks bad.
 //
 // Coordinates: the UI text size is a native page zoom, so pointer client
 // coords, getBoundingClientRect() and the ghost's / indicators' CSS px all

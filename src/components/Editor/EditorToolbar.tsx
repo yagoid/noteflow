@@ -18,23 +18,12 @@ import {
   Link,
   Undo2,
   Redo2,
-  ArrowUp,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  Plus,
-  Minus,
-  Trash2,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
   SquareKanban,
 } from 'lucide-react'
-import { setColumnAlign, getColumnAlign } from './tableUtils'
 import { convertTaskListToBoard, insertDefaultBoard, kanbanDefaultColumns, topLevelTaskList } from './kanbanCommands'
 import { useT } from '../../i18n/useT'
 import { SnippetsButton } from './SnippetsButton'
-import { TableSizePicker } from './TableSizePicker'
+import { TableButton } from './TableButton'
 
 interface ToolbarProps {
   editor: Editor
@@ -81,7 +70,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
   const { marks, nodes } = editor.schema
 
   // 'snippets' = the split button of the snippets (its own component: dropdown + modal);
-  // 'table' = the table button with its size picker (TableSizePicker).
+  // 'table' = the table button (TableButton: the table's menu inside one, else the size picker).
   const buttons: (ToolbarButton | 'sep' | 'snippets' | 'table')[] = [
     {
       icon: <Heading1 size={14} />,
@@ -179,7 +168,6 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       isActive: editor.isActive('link'),
       title: t.editor.toolbar.insertLink,
     },
-    // Always inserts (size picker); deleting a table lives in the table row below and its right-click menu.
     'table',
     ...(nodes.kanbanBoard ? [{
       icon: <SquareKanban size={14} />,
@@ -211,7 +199,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
             return <div key={`sep-${i}`} className="w-px h-4 bg-border mx-1" />
           }
           if (btn === 'snippets') return <SnippetsButton key="snippets" editor={editor} />
-          if (btn === 'table') return <TableSizePicker key="table" editor={editor} />
+          if (btn === 'table') return <TableButton key="table" editor={editor} />
           return (
             <button
               key={btn.title}
@@ -258,101 +246,6 @@ export function EditorToolbar({ editor }: ToolbarProps) {
           </button>
         </div>
       )}
-
-      {editor.isActive('table') && (() => {
-        // The header row must stay at row 0 — markdown tables require a header.
-        // Block actions that would remove it or push a body row above it.
-        const inHeader = editor.isActive('tableHeader')
-        const align = getColumnAlign(editor)
-        return (
-        <div className="flex items-center gap-1 px-3 py-1.5 border-t border-border flex-wrap">
-          <span className="text-[10px] uppercase tracking-wider text-text-muted/60 mr-1">{t.editor.table.label}</span>
-          <TableOpButton
-            title={inHeader ? t.editor.table.addRowAboveBlocked : t.editor.table.addRowAbove}
-            disabled={inHeader}
-            onClick={() => editor.chain().focus().addRowBefore().run()}
-          >
-            <Plus size={11} /> {t.editor.table.row} <ArrowUp size={11} />
-          </TableOpButton>
-          <TableOpButton title={t.editor.table.addRowBelow} onClick={() => editor.chain().focus().addRowAfter().run()}>
-            <Plus size={11} /> {t.editor.table.row} <ArrowDown size={11} />
-          </TableOpButton>
-          <TableOpButton
-            title={inHeader ? t.editor.table.deleteRowBlocked : t.editor.table.deleteRow}
-            disabled={inHeader}
-            onClick={() => editor.chain().focus().deleteRow().run()}
-          >
-            <Minus size={11} /> {t.editor.table.row}
-          </TableOpButton>
-          <div className="w-px h-4 bg-border mx-1" />
-          <TableOpButton title={t.editor.table.addColLeft} onClick={() => editor.chain().focus().addColumnBefore().run()}>
-            <Plus size={11} /> {t.editor.table.col} <ArrowLeft size={11} />
-          </TableOpButton>
-          <TableOpButton title={t.editor.table.addColRight} onClick={() => editor.chain().focus().addColumnAfter().run()}>
-            <Plus size={11} /> {t.editor.table.col} <ArrowRight size={11} />
-          </TableOpButton>
-          <TableOpButton title={t.editor.table.deleteCol} onClick={() => editor.chain().focus().deleteColumn().run()}>
-            <Minus size={11} /> {t.editor.table.col}
-          </TableOpButton>
-          <div className="w-px h-4 bg-border mx-1" />
-          <TableOpButton
-            title={t.editor.table.alignLeft}
-            isActive={align === 'left' || align === null}
-            onClick={() => setColumnAlign(editor, 'left')}
-          >
-            <AlignLeft size={11} />
-          </TableOpButton>
-          <TableOpButton
-            title={t.editor.table.alignCenter}
-            isActive={align === 'center'}
-            onClick={() => setColumnAlign(editor, 'center')}
-          >
-            <AlignCenter size={11} />
-          </TableOpButton>
-          <TableOpButton
-            title={t.editor.table.alignRight}
-            isActive={align === 'right'}
-            onClick={() => setColumnAlign(editor, 'right')}
-          >
-            <AlignRight size={11} />
-          </TableOpButton>
-          <div className="w-px h-4 bg-border mx-1" />
-          <TableOpButton title={t.editor.table.deleteWholeTable} onClick={() => editor.chain().focus().deleteTable().run()}>
-            <Trash2 size={11} /> {t.editor.table.tableWord}
-          </TableOpButton>
-        </div>
-        )
-      })()}
     </div>
-  )
-}
-
-interface TableOpButtonProps {
-  title: string
-  onClick: () => void
-  children: React.ReactNode
-  disabled?: boolean
-  isActive?: boolean
-}
-
-function TableOpButton({ title, onClick, children, disabled, isActive }: TableOpButtonProps) {
-  return (
-    <button
-      onMouseDown={(e) => {
-        e.preventDefault()
-        if (!disabled) onClick()
-      }}
-      title={title}
-      disabled={disabled}
-      className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-mono transition-colors
-        ${disabled
-          ? 'text-text-muted/30 cursor-not-allowed'
-          : isActive
-            ? 'bg-surface-3 text-text'
-            : 'text-text-muted hover:text-text hover:bg-surface-3'
-        }`}
-    >
-      {children}
-    </button>
   )
 }

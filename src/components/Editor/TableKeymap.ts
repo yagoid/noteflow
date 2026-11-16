@@ -1,12 +1,11 @@
 import { Extension } from '@tiptap/core'
-import { closeHistory } from '@tiptap/pm/history'
 import type { Command, EditorState, Transaction } from '@tiptap/pm/state'
 import { CellSelection, deleteCellSelection } from '@tiptap/pm/tables'
 import { SuggestionPluginKey } from '@tiptap/suggestion'
 import { isMac } from '../../lib/platform'
 import { tableShortcuts, type TableShortcutAction } from '../../lib/tableShortcuts'
 import {
-  clearSelectedCells, deleteSelectedColumns, deleteSelectedRows, duplicateSelectedRow,
+  clearSelectedCells, deleteSelectedColumns, deleteSelectedRows, dispatchOwnUndoStep, duplicateSelectedRow,
   insertColumnRight, insertRowBelow, moveSelectedColumn, moveSelectedRow, selectionInTable,
 } from './tableOps'
 
@@ -69,11 +68,7 @@ export const TableKeymap = Extension.create({
     }
     // Each chord is an undo step of its own: closed before (not merged with the
     // typing just before it) and after (nor with the typing that follows).
-    const dispatch = (tr: Transaction) => {
-      const { view } = this.editor
-      view.dispatch(closeHistory(tr).scrollIntoView())
-      view.dispatch(closeHistory(view.state.tr).setMeta('addToHistory', false))
-    }
+    const dispatch = (tr: Transaction) => dispatchOwnUndoStep(this.editor.view, tr.scrollIntoView())
     const chord = (action: TableShortcutAction) => () => {
       const state = active()
       if (!state) return false

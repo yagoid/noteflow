@@ -903,8 +903,10 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - En **modo texto** nada de esto aplica (el markdown se edita tal cual).
 
 ### Tablas
-- **Botón de tabla de la toolbar = siempre insertar** (también con el cursor dentro de una tabla;
-  antes ahí borraba la tabla). Abre un **selector de tamaño**: rejilla 8×8 donde el ratón resalta
+- **Botón de tabla de la toolbar:** fuera de una tabla (tooltip *Insert table*) abre el **selector de
+  tamaño**; con el cursor o una selección **dentro de una tabla** (tooltip *Table options*, botón
+  resaltado) abre el **menú de la tabla** sobre la celda activa, bajo el botón (el mismo del clic
+  derecho, con *Delete table*). Pulsarlo otra vez cierra lo abierto. Selector de tamaño: rejilla 8×8 donde el ratón resalta
   filas × columnas y el clic inserta; con teclado, flechas mueven la selección, `Enter` inserta y `Esc`
   cierra devolviendo el foco al editor. La etiqueta muestra `filas × columnas` (p. ej. `3 × 4`) y las
   **filas incluyen la de cabecera** (3 × 4 = cabecera + 2 filas, 4 columnas). Arranca en 3 × 3. Se
@@ -917,11 +919,38 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   cursor está en una **lista** o en una **tabla**, el botón la inserta **justo después** de la lista /
   tabla más externa (nunca anidada); dentro de una cita se queda en la cita. Con un tablero kanban
   seleccionado, va detrás del tablero en vez de sustituirlo.
-- Siempre con **fila de cabecera**. Borrar una tabla: botón *Table* (papelera) de la fila contextual o clic
-  derecho → *Delete table*.
-- Toolbar contextual y menú de clic derecho para añadir/eliminar filas y columnas,
-  y alinear la columna (izquierda/centro/derecha — persiste vía `:---:` en markdown).
-- El clic derecho mueve el cursor a la celda pulsada, así las acciones actúan donde clicas.
+- Siempre con **fila de cabecera**. Borrar una tabla: clic derecho o botón de tabla de la toolbar →
+  *Delete table*.
+- **Asas en el borde** (prototipo aprobado 2026-11): al pasar el ratón por una celda aparece una pestaña
+  fina sobre el **borde superior de su columna** y otra en el **borde izquierdo de su fila** (cabecera
+  incluida); crecen y muestran un grip al acercarse. **Clic** = selecciona la columna/fila entera y abre
+  su menú (el asa queda en color de acento; otro clic lo cierra). **Arrastrar** el asa reordena: una
+  línea de acento marca el hueco de destino, la línea arrastrada se atenúa y una etiqueta sigue al
+  puntero; al soltar, la línea queda seleccionada en su sitio nuevo. `Esc` cancela; soltar donde estaba
+  no hace nada. La fila de cabecera lleva un **candado**: no se arrastra, y si arrastras una fila sobre
+  ella la cabecera se raya en rojo y la etiqueta avisa *The header is fixed*.
+- **Menú de columna:** *Insert left / right*, *Duplicate column*, *Move left / right*, *Align column*
+  (izquierda/centro/derecha; persiste vía `:---:` y el menú sigue abierto), *Sort A → Z / Z → A*
+  (*1 → 9 / 9 → 1* si la columna es numérica), *Clear column* (vacía los datos, **no** el nombre de la
+  cabecera) y *Delete column* (en rojo). **Menú de fila:** *Insert above / below*, *Duplicate row*,
+  *Move up / down*, *Clear row* y *Delete row*; en la cabecera, *Clear header* y una nota explicando que
+  es fija. Lo imposible sale **deshabilitado, no oculto**, con el motivo al pasar el ratón (mover la
+  cabecera, insertar encima de ella, borrar la única columna, ordenar con menos de dos filas…).
+  Teclado: ↑/↓ recorren las opciones, `Enter` ejecuta, `Esc` cierra. Cada acción = un solo `Ctrl+Z`.
+- **Barras «+»:** al acercar el ratón al borde derecho (o inferior) de la tabla aparece una barra fina
+  con «+» que **añade una columna (o fila) al final** y pone el cursor en su primera celda. Solo ocupan
+  hueco de la propia tabla (su margen inferior, el margen derecho del editor): nunca tapan el párrafo
+  siguiente ni las celdas, así un clic ahí siempre pone el cursor. Por eso, en el editor, debajo de cada
+  tabla queda algo más de aire que en las vistas de solo lectura. Si no hay sitio (p. ej. una tabla ancha
+  en una sticky estrecha) la barra se adelgaza o no aparece; añadir sigue en los menús.
+- **Clic derecho** en una celda (y el botón de tabla de la toolbar dentro de una tabla): menú **corto**
+  — *Row*: insertar encima/debajo y eliminar; *Column*: insertar a la izquierda/derecha y eliminar;
+  *Clear N cells* si hay varias celdas seleccionadas; y *Delete table*. Duplicar, alinear y ordenar están
+  en los menús de las asas. Clic derecho dentro de la selección de celdas la conserva; fuera, mueve el
+  cursor a la celda pulsada.
+- Asas, «+» y clic derecho funcionan también en las **notas sticky** (que no tienen toolbar) y en las
+  **notas vinculadas** editables; nada en solo lectura. Ya no hay hilera de mini-botones de tabla bajo
+  la toolbar.
 - **Cabecera obligatoria:** no se puede borrar la fila de cabecera ni insertar una fila
   por encima de ella (las pipe-tables de markdown exigen cabecera). Las celdas de cabecera
   vacías muestran el placeholder "Column" (en el mismo estilo de etiqueta, más tenue).
@@ -952,9 +981,13 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   columna a la derecha…) no hacen nada. Fuera de una tabla las teclas siguen como siempre (`Mod+Enter`
   = salto de línea, `Alt+↑/↓` = mover ítem de lista); dentro de una lista en una celda, `Alt+↑/↓`
   mueve el ítem, no la fila. `Tab`/`Shift+Tab` = celda siguiente/anterior (`Tab` en la última celda
-  añade una fila); `Enter` = otra línea en la celda. Listados en Ajustes → Atajos → *Tables*.
+  añade una fila); `Enter` = otra línea en la celda. Listados en Ajustes → Atajos → *Tables* y, a la
+  derecha de cada opción, en los menús de las asas y del clic derecho / toolbar. Con un menú de tabla
+  abierto los atajos siguen funcionando (actúan sobre la línea que el menú seleccionó) y, si cambian la
+  tabla, el menú se cierra.
 - **Retroceso/Supr con celdas seleccionadas** las **vacía** (nunca borra filas ni la tabla, aunque
-  estén todas seleccionadas). Borrar la tabla: toolbar o clic derecho.
+  estén todas seleccionadas). Borrar la tabla: botón de tabla de la toolbar o clic derecho →
+  *Delete table*.
 - **Copiar/cortar celdas** (selección de celdas): se copian como **texto separado por tabuladores**
   (una celda sola, su texto tal cual), que cae en celdas al pegar en Excel/Sheets (también con "pegar
   solo valores"), y como tabla para pegar dentro de NoteFlow (conserva negritas, enlaces…). Cortar

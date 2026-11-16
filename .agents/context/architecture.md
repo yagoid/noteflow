@@ -166,9 +166,12 @@ noteflow/
 │   │   │   ├── SectionLinkPicker.tsx    # Buscador de secciones del comando "Link section"
 │   │   │   ├── CodeBlockWithCopy.tsx    # NodeView: code block con botón copiar
 │   │   │   ├── ResizableImage.tsx       # NodeView: imagen redimensionable
-│   │   │   ├── TableContextMenu.tsx     # Menú contextual de tablas
-│   │   │   ├── tableUtils.ts            #   alineación por columna (getColumnAlign/setColumnAlign)
-│   │   │   ├── tableOps.ts              #   comandos de tabla sin UI: mover/ordenar/duplicar/vaciar… (ver patterns.md)
+│   │   │   ├── tableOps.ts              # Comandos de tabla (una transacción): mover/ordenar/duplicar/vaciar/borrar… (ver patterns.md)
+│   │   │   ├── TableControls.tsx        #   capa sobre las tablas: asas de fila/columna, barras «+», arrastrar para reordenar
+│   │   │   ├── TableMenu.tsx            #   menú de tabla común (asas, clic derecho, toolbar) + tableMenus.ts (entradas)
+│   │   │   ├── TableContextMenu.tsx     #   clic derecho en una celda
+│   │   │   ├── TableButton.tsx          #   botón de la toolbar: menú de la tabla o TableSizePicker.tsx (insertar)
+│   │   │   ├── tableDom.ts              #   <table> del DOM ↔ tablePos, medir filas/columnas
 │   │   │   ├── TableKeymap.ts           #   atajos de tabla (Alt+↑/↓, Mod+Enter, Mod+D…; acordes en lib/tableShortcuts.ts)
 │   │   │   ├── tableClipboard.ts        #   copiar celdas como TSV, handlePaste del editor, normalizar tablas pegadas
 │   │   │   ├── SearchHighlightExtension.ts # Resaltado de matches de búsqueda in-note
@@ -358,6 +361,8 @@ noteflow/
 │   │   ├── kanbanSearch.ts       #   búsqueda en nota dentro de tableros (conteo + resaltado) — testeado
 │   │   ├── tableData.ts          # Tablas sobre string[][]: números, orden, resumen, copiar md/TSV, parsear
 │   │   │                         #   TSV/CSV pegado, detector de TSV (ver patterns.md) — testeado
+│   │   ├── tableControls.ts      # Controles de tabla (puro): geometría de asas/«+», destino al arrastrar,
+│   │   │                         #   posición y entradas de los menús (ver patterns.md) — testeado
 │   │   ├── tableShortcuts.ts     # Acordes de los atajos de tabla por plataforma (keymap + Ajustes) — testeado
 │   │   ├── tablePaste.ts         # Decisiones de pegado (¿copia de ProseMirror?, ¿rango de hoja de cálculo?,
 │   │   │                         #   ¿imagen de una tabla?) — testeado

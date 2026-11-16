@@ -1,16 +1,17 @@
-// ── Table operations (document commands, no UI) ──────────────────────────────
+// ── Table operations (document commands) ─────────────────────────────────────
 //
 // ProseMirror-style commands — `(state, dispatch?) => boolean` — for the note
 // editor's tables, testable without a view. Without `dispatch` a command only
 // answers whether it can run (to enable / disable a menu entry); with it, it
 // dispatches ONE transaction (one Ctrl+Z). runTableCommand / canRunTableCommand
-// adapt them to a TipTap Editor.
+// adapt them to a TipTap Editor; tableActionCommand maps the table controls'
+// menu actions (src/lib/tableControls.ts) to them.
 //
 // Which table: commands that take indices act on `target.tablePos` (the
 // position right before the table node, for handles drawn on a given table)
-// or, by default, on the innermost table around the selection (like
-// setColumnAlign in tableUtils.ts). Commands named "Selected" always act on the
-// selection: a CellSelection, or the cell holding the cursor.
+// or, by default, on the innermost table around the selection. Commands named
+// "Selected" always act on the selection: a CellSelection, or the cell holding
+// the cursor.
 //
 // Invariants (markdown pipe tables, src/lib/markdownHtml.ts): row 0 is the
 // header (tableHeader cells), fixed and mandatory; every other row holds
@@ -18,8 +19,8 @@
 // what gets saved; every cell carries it). Structural commands rebuild the
 // table's rows and normalize cell types to that invariant. Tables with merged
 // cells (only possible from pasted HTML) are rejected by every command.
-// Decisions are documented in .agents/context/patterns.md ("Operaciones de
-// tabla").
+// Decisions are documented in .agents/context/patterns.md ("Editor:
+// operaciones de tabla").
 
 import type { Editor } from '@tiptap/core'
 import { Fragment, type Node as PMNode, type NodeType, type ResolvedPos } from '@tiptap/pm/model'
@@ -28,7 +29,11 @@ import {
   type Command, type EditorState, type Transaction,
 } from '@tiptap/pm/state'
 import { CellSelection, TableMap, tableNodeTypes, type Rect } from '@tiptap/pm/tables'
+import { closeHistory } from '@tiptap/pm/history'
+import type { EditorView } from '@tiptap/pm/view'
 import { sortOrder, type SortDirection, type TableAlign } from '../../lib/tableData'
+import { insertTableTr, type TableSize } from '../../lib/tableInsert'
+import type { CellRect, TableAction } from '../../lib/tableControls'
 
 /**
  * Fewest columns a table may be left with by deleteSelectedColumns: the limit
@@ -165,6 +170,37 @@ export function getTableData(state: EditorState, target?: TableTarget): TableTex
 export function getSelectedCellsData(state: EditorState): TableTextData | null {
   const s = selectionRect(state)
   return s && textData(s.info, s.rect)
+}
+
+/**
+ * Position of the innermost table around the selection, merged cells or not
+ * (only deleteTable acts on those). Null outside tables.
+ */
+export function findTablePos(state: EditorState): number | null {
+  const sel = state.selection
+  if (sel instanceof CellSelection) return sel.$anchorCell.before(-1)
+  if (sel instanceof NodeSelection && roleOf(sel.node) === 'table') return sel.from
+  const { $from } = sel
+  for (let d = $from.depth; d > 0; d--) {
+    if (roleOf($from.node(d)) === 'table') return $from.before(d)
+  }
+  return null
+}
+
+/** The rectangle a CellSelection covers (`bottom`/`right` exclusive); null unless the selection is a CellSelection of the target table. */
+export function getCellSelectionRect(state: EditorState, target?: TableTarget): CellRect | null {
+  if (!(state.selection instanceof CellSelection)) return null
+  const s = selectionRect(state)
+  if (!s || (target?.tablePos !== undefined && s.info.pos !== target.tablePos)) return null
+  const { top, bottom, left, right } = s.rect
+  return { top, bottom, left, right }
+}
+
+/** The cell the selection is in — the cursor's cell, or a CellSelection's head cell — with its table's position. */
+export function getSelectionCell(state: EditorState): { tablePos: number; row: number; col: number } | null {
+  const info = tableAroundSelection(state)
+  const head = info && headCellOf(state, info)
+  return head && { tablePos: info!.pos, row: head[0], col: head[1] }
 }
 
 // ── Rebuilding ───────────────────────────────────────────────────────────────
@@ -632,12 +668,16 @@ export function clearRow(index: number, target?: TableTarget): Command {
   }
 }
 
-/** Empty every cell of column `index` (header included). Nothing to clear → true, no transaction. */
+/**
+ * Empty the body cells of column `index`: its header cell (the column's name)
+ * stays — clearRow(0) clears the header. False without body rows. Nothing to
+ * clear → true, no transaction.
+ */
 export function clearColumn(index: number, target?: TableTarget): Command {
   return (state, dispatch) => {
     const info = getTable(state, target)
-    if (!info || !inRange(index, 0, info.map.width)) return false
-    return clearRect(info, { left: index, right: index + 1, top: 0, bottom: info.map.height })(state, dispatch)
+    if (!info || !inRange(index, 0, info.map.width) || info.map.height < 2) return false
+    return clearRect(info, { left: index, right: index + 1, top: 1, bottom: info.map.height })(state, dispatch)
   }
 }
 
@@ -654,6 +694,44 @@ export const clearSelectedCells: Command = (state, dispatch) => {
 // ── Deleting ─────────────────────────────────────────────────────────────────
 
 /**
+ * Delete rows `top` … `bottom - 1` (body rows only: `top` ≥ 1). The cursor
+ * lands at the start of the cell that takes the first deleted row's place (or
+ * the last row's), in column `col`.
+ */
+function deleteRows(info: TableInfo, top: number, bottom: number, col: number): Command {
+  return (state, dispatch) => {
+    const count = bottom - top
+    if (top < 1 || count <= 0) return false
+    if (dispatch) {
+      const grid = cellGrid(info)
+      grid.splice(top, count)
+      const mapCell: CellMapper = (r, c) => (r < top ? [r, c] : r >= bottom ? [r - count, c] : null)
+      commit(state, dispatch, info, grid, mapCell, [Math.min(top, grid.length - 1), col])
+    }
+    return true
+  }
+}
+
+/**
+ * Delete columns `left` … `right - 1`; false if that would leave fewer than
+ * MIN_TABLE_COLUMNS. The cursor lands at the start of the cell that takes the
+ * first deleted column's place (or the last column's), in row `row`.
+ */
+function deleteColumns(info: TableInfo, left: number, right: number, row: number): Command {
+  return (state, dispatch) => {
+    const count = right - left
+    if (count <= 0 || info.map.width - count < MIN_TABLE_COLUMNS) return false
+    if (dispatch) {
+      const grid = cellGrid(info).map((cells) => cells.filter((_, c) => c < left || c >= right))
+      const mapCell: CellMapper = (r, c) => (c < left ? [r, c] : c >= right ? [r, c - count] : null)
+      const width = info.map.width - count
+      commit(state, dispatch, info, grid, mapCell, [row, Math.min(left, width - 1)])
+    }
+    return true
+  }
+}
+
+/**
  * Delete the rows the selection covers (CellSelection or cursor's cell). The
  * header can't go: with a mix only the body rows are deleted; with only the
  * header selected it's false. Deleting every body row is fine (a header-only
@@ -663,17 +741,7 @@ export const clearSelectedCells: Command = (state, dispatch) => {
 export const deleteSelectedRows: Command = (state, dispatch) => {
   const s = selectionRect(state)
   if (!s) return false
-  const { info, rect } = s
-  const top = Math.max(rect.top, 1)
-  const count = rect.bottom - top
-  if (count <= 0) return false
-  if (dispatch) {
-    const grid = cellGrid(info)
-    grid.splice(top, count)
-    const mapCell: CellMapper = (r, c) => (r < top ? [r, c] : r >= rect.bottom ? [r - count, c] : null)
-    commit(state, dispatch, info, grid, mapCell, [Math.min(top, grid.length - 1), rect.left])
-  }
-  return true
+  return deleteRows(s.info, Math.max(s.rect.top, 1), s.rect.bottom, s.rect.left)(state, dispatch)
 }
 
 /**
@@ -686,16 +754,112 @@ export const deleteSelectedRows: Command = (state, dispatch) => {
 export const deleteSelectedColumns: Command = (state, dispatch) => {
   const s = selectionRect(state)
   if (!s) return false
-  const { info, rect } = s
-  const count = rect.right - rect.left
-  if (info.map.width - count < MIN_TABLE_COLUMNS) return false
-  if (dispatch) {
-    const grid = cellGrid(info).map((row) => row.filter((_, c) => c < rect.left || c >= rect.right))
-    const mapCell: CellMapper = (r, c) => (c < rect.left ? [r, c] : c >= rect.right ? [r, c - count] : null)
-    const width = info.map.width - count
-    commit(state, dispatch, info, grid, mapCell, [rect.top, Math.min(rect.left, width - 1)])
+  return deleteColumns(s.info, s.rect.left, s.rect.right, s.rect.top)(state, dispatch)
+}
+
+/**
+ * Delete body row `index` (≥ 1: the header can't go). A selection in other
+ * rows follows its cells; one in the deleted row → cursor at the start of the
+ * first cell of the row taking its place (or of the new last row).
+ */
+export function deleteRow(index: number, target?: TableTarget): Command {
+  return (state, dispatch) => {
+    const info = getTable(state, target)
+    if (!info || !inRange(index, 1, info.map.height)) return false
+    return deleteRows(info, index, index + 1, 0)(state, dispatch)
   }
-  return true
+}
+
+/**
+ * Delete column `index`; false if it's the only one (MIN_TABLE_COLUMNS). A
+ * selection in other columns follows its cells; one in the deleted column →
+ * cursor at the start of the header cell of the column taking its place.
+ */
+export function deleteColumn(index: number, target?: TableTarget): Command {
+  return (state, dispatch) => {
+    const info = getTable(state, target)
+    if (!info || !inRange(index, 0, info.map.width)) return false
+    return deleteColumns(info, index, index + 1, 0)(state, dispatch)
+  }
+}
+
+/**
+ * Delete the whole table (merged cells or not); the cursor goes to the nearest
+ * valid position where it was. A table that was the document's only block
+ * leaves an empty paragraph.
+ */
+export function deleteTable(target?: TableTarget): Command {
+  return (state, dispatch) => {
+    const pos = target?.tablePos ?? findTablePos(state)
+    if (pos === null || !Number.isInteger(pos) || pos < 0 || pos >= state.doc.content.size) return false
+    const node = state.doc.nodeAt(pos)
+    if (!node || roleOf(node) !== 'table') return false
+    if (dispatch) {
+      const tr = state.tr.delete(pos, pos + node.nodeSize)
+      tr.setSelection(Selection.near(tr.doc.resolve(Math.min(pos, tr.doc.content.size))))
+      dispatch(tr.scrollIntoView())
+    }
+    return true
+  }
+}
+
+// ── Alignment / caret ────────────────────────────────────────────────────────
+
+/**
+ * Align column `index`: every cell of it gets `align` (the header cell's is
+ * the one saved as `:---:`; the rest render the same). Already aligned → true
+ * without a transaction. The selection (a CellSelection too) is kept.
+ */
+export function alignColumn(index: number, align: TableAlign, target?: TableTarget): Command {
+  return (state, dispatch) => {
+    const info = getTable(state, target)
+    if (!info || !inRange(index, 0, info.map.width)) return false
+    if (dispatch) {
+      const tr = state.tr
+      for (let r = 0; r < info.map.height; r++) {
+        const pos = info.start + info.map.positionAt(r, index, info.node)
+        const cell = state.doc.nodeAt(pos)!
+        if (alignOf(cell) !== align) tr.setNodeMarkup(pos, undefined, { ...cell.attrs, textAlign: align })
+      }
+      if (tr.docChanged) dispatch(tr)
+    }
+    return true
+  }
+}
+
+/** Put the cursor at the start of cell (row, col). Selection only: no undo step. */
+export function focusCell(row: number, col: number, target?: TableTarget): Command {
+  return (state, dispatch) => {
+    const info = getTable(state, target)
+    if (!info || !inRange(row, 0, info.map.height) || !inRange(col, 0, info.map.width)) return false
+    if (dispatch) {
+      const pos = info.start + info.map.positionAt(row, col, info.node)
+      dispatch(state.tr.setSelection(Selection.near(state.doc.resolve(pos + 1))).scrollIntoView())
+    }
+    return true
+  }
+}
+
+// ── Menu actions ─────────────────────────────────────────────────────────────
+
+/** The command behind a table-controls menu action (src/lib/tableControls.ts), on the target table. */
+export function tableActionCommand(action: TableAction, target?: TableTarget): Command {
+  switch (action.type) {
+    case 'insertRow': return insertRowAt(action.index, target)
+    case 'insertColumn': return insertColumnAt(action.index, target)
+    case 'duplicateRow': return duplicateRow(action.index, target)
+    case 'duplicateColumn': return duplicateColumn(action.index, target)
+    case 'moveRow': return moveRow(action.from, action.to, target)
+    case 'moveColumn': return moveColumn(action.from, action.to, target)
+    case 'sort': return sortRowsByColumn(action.column, action.direction, { ...target })
+    case 'align': return alignColumn(action.column, action.align, target)
+    case 'clearRow': return clearRow(action.index, target)
+    case 'clearColumn': return clearColumn(action.index, target)
+    case 'clearSelection': return clearSelectedCells
+    case 'deleteRow': return deleteRow(action.index, target)
+    case 'deleteColumn': return deleteColumn(action.index, target)
+    case 'deleteTable': return deleteTable(target)
+  }
 }
 
 // ── TipTap adapters ──────────────────────────────────────────────────────────
@@ -708,7 +872,33 @@ export function runTableCommand(editor: Editor, command: Command): boolean {
   return ok
 }
 
+/**
+ * Dispatch `tr` as an undo step of its OWN. prosemirror-history merges adjacent
+ * transactions less than newGroupDelay (500 ms) apart, and a table rebuild is
+ * always adjacent to the last edit in it: without this, a chord or a control
+ * action would come back with one Ctrl+Z together with the typing just before
+ * or after it (or a double click on "+" with both rows). `tr` closes the group
+ * before it; an empty closeHistory transaction right after closes it after
+ * (the history plugin applies that meta before its "no steps" early return).
+ * Used by the table chords (TableKeymap.ts) and the table controls
+ * (tableMenus.ts runControlCommand); runTableCommand keeps the default grouping.
+ */
+export function dispatchOwnUndoStep(view: EditorView, tr: Transaction): void {
+  view.dispatch(closeHistory(tr))
+  view.dispatch(closeHistory(view.state.tr).setMeta('addToHistory', false))
+}
+
 /** Whether a table command can run on the editor now (for enabling menu entries). */
 export function canRunTableCommand(editor: Editor, command: Command): boolean {
   return editor.isEditable && command(editor.state)
+}
+
+/**
+ * Insert a new table with a header row (`rows` counts it) and put the caret in
+ * its first header cell. Inside a list or another table it lands right after
+ * the outermost one (lib/tableInsert.ts tableInsertPos). One transaction = one undo step.
+ */
+export function insertNewTable(editor: Editor, size: TableSize): void {
+  editor.view.dispatch(insertTableTr(editor.state, size))
+  editor.commands.focus()
 }

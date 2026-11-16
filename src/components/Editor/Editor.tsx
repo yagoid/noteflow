@@ -12,6 +12,7 @@ import { setLinkedNormalizer } from '../../lib/linkedMarkdown'
 import { linkedImageSrc } from '../../lib/linkedNotes'
 import { EditorToolbar } from './EditorToolbar'
 import { TableContextMenu } from './TableContextMenu'
+import { TableControls } from './TableControls'
 import { SearchHighlight } from './SearchHighlightExtension'
 import { SlashCommands, getSlashCommands } from './SlashCommands'
 import { AutoCloseBrackets } from './AutoCloseBrackets'
@@ -563,6 +564,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
           />
         </div>
         {tocVisible && <EditorToc editor={editor} items={tocItems} scrollRef={scrollRef} />}
+        {/* Handles, "+" bars and drag-to-reorder over the tables (positioned in this container). */}
+        {!readOnly && <TableControls editor={editor} scrollRef={scrollRef} />}
       </div>
       {!readOnly && <TableContextMenu editor={editor} />}
       {linkPickerOpen && (
