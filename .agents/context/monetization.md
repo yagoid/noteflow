@@ -1865,7 +1865,8 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   / usar solo las de la cuenta, archivando las locales / apagar Cloud). Detalle completo en `sync.md`
   "Origen del dir de notas" → "Puerta de NoteFlow Cloud". Puntos que tocan esta sección:
   - **Siembra:** sin `syncOrigin.cloud` pero con `cloudSync.userId` (instalación previa), ese userId es
-    el origen; `bindCloudSyncToAccount` lo registra **antes** del reset que sobrescribe `cloudSync.userId`.
+    el origen; `bindCloudSyncToAccount` lo registra **antes** del reset que sobrescribe `cloudSync.userId`
+    (siempre para el dir de notas por defecto, aunque el proceso use `NOTEFLOW_NOTES_DIR`).
     Si no puede escribirlo, no resetea y todo queda bloqueado (estado de otra cuenta = puerta cerrada).
     Sin origen ni dueño → se adopta sin preguntar (= "Dueño desconocido").
   - **Auto-activación** (login con suscripción, o compra con sesión): `applyAccountTransition` →

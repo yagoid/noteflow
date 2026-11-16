@@ -391,7 +391,7 @@ borra: las notas en disco siguen viniendo de ese repo.
 - distinta **sin** notas sincronizables → `proceed` + adoptar (`changed-empty`);
 - distinta **con** notas → `ask`.
 "Notas sincronizables" = `listSyncedNoteDirs(notesDir)` no vacío (las `localOnly` no cuentan; las
-vinculadas no están en el dir). `hasLocalNotes` es perezoso (solo se lista si la identidad cambió) y
+vinculadas no están en el dir). `hasLocalNotes` es perezoso (solo se lista si la identidad cambió o el registro está `stale`) y
 **fail-closed** (`hasSyncedLocalNotes`: dir ilegible o desconocido = "hay notas"; dir inexistente = no).
 Helpers: `sameIdentity`, `identityLabel` (`owner/repo`; Cloud: email o userId), `identityArchiveLabel`
 (`github-owner-repo` / `cloud-<8 chars del userId>`, saneado para nombre de carpeta), `readSyncOrigin`,
@@ -416,7 +416,11 @@ Electron; `main.ts` lo usa para `NOTES_DIR`, así que no hay dos copias de la ru
   registraría el remoto nuevo y el dir real quedaría sin protección. En la práctica solo el dir por defecto
   tiene registros.
 - `stale` solo se marca en el registro del otro backend si es del mismo dir que el `replace`; la siembra de
-  Cloud desde `cloudSync.userId` (abajo) y la de GitHub desde `githubSync` solo ocurren en el dir por defecto.
+  Cloud desde `cloudSync.userId` al evaluar la puerta (abajo) y la de GitHub desde `githubSync` solo
+  ocurren en el dir por defecto. Excepción deliberada: la siembra **previa a un reset de dueño**
+  (`bindCloudSyncToAccount`) graba siempre el dueño que se va **para el dir por defecto**, también desde un
+  override — allí ese registro es ajeno y no cambia nada, pero al volver al dir por defecto protege sus
+  notas (peor caso, una pregunta de más; nunca una subida).
 - Efecto aceptado: con override se siguen compartiendo `githubSync`/`cloudSync`/`lastSync`/journal
   (`NOTEFLOW_NOTES_DIR` no aísla los ajustes); el origen solo protege el dir al que pertenece. Las puertas
   toman el dir actual de `setNotesDir`/`initCloudSync` (antes de eso asumen el por defecto).
@@ -456,7 +460,10 @@ Las rutas calientes usan el valor cacheado (`originGateBlocked()`).
   journal (subidas/borrados pendientes) y los shas del repo ANTERIOR, y la app abierta con su `lastSync`
   viejo en memoria. Por eso `sync-state.json` lleva estampado el repo que describe (`{repoId?, owner,
   repo}`, como el `cli-github-state.json` del CLI): `persistState` lo rellena si falta (con la conexión
-  viva; nunca reescribe uno existente) y la adopción con reset lo escribe. Al principio de
+  viva) y completa uno del **mismo** repo según `sameIdentity` (el `repoId` que le faltaba, el
+  owner/repo nuevo de un renombrado con el mismo `repoId`) — así un renombrado posterior no descarta un
+  journal legítimo —, pero **nunca** relabela uno de otro repo; la adopción con reset lo escribe y la sin
+  reset lo completa. Al principio de
   `refreshOriginGate` (y por tanto de `pullNotes`, `retrySyncJournal`, `pushAllNotes`),
   `ensureStateOfConnection` compara la marca con la conexión viva (`sameIdentity`) y, si no coincide,
   **descarta** el estado en el orden estricto de `adoptGithubOrigin`: (1) journal y shas vacíos con
@@ -507,7 +514,11 @@ reentrada):
 - `cancel` → `disconnectGithubSync()` (lo mismo que `sync:disconnect`, incluido
   `cliConnect.cleanupAfterAppGithubDisconnect()`); notas y origen intactos.
 - El IPC acepta un segundo argumento `backend?: 'github' | 'cloud'` (por defecto `'github'`; la guarda de
-  reentrada es común): si ese backend no tiene elección pendiente → `not-pending` (también `cancel`).
+  reentrada es común): si ese backend no tiene elección pendiente → `not-pending` (también `cancel`). Y un
+  tercero, `key`: la clave opaca de la elección que el usuario tiene en pantalla
+  (`ActiveSyncStatus.originChoice.key`, `electron/originChoiceKey.ts` — GitHub: los dos repos y `stale`;
+  Cloud: las dos cuentas, `stale` y `staleFrom`); si la elección pendiente ya no es esa (otra cuenta, el
+  CLI cambió el repo…) → `not-pending` y no se aplica nada. Sin `key` (llamadas antiguas) no se comprueba.
   Con un registro `stale` del mismo repo, `resolveOriginChoice` no lo da por adoptado
   (`alreadyAdopted` exige `!stale` y que el registro sea de este dir): lo adopta con reset.
 
@@ -527,7 +538,9 @@ tests e2e en `tests/electron/syncOriginCloud.test.ts` con un Cloud simulado de d
   adoptaría B sin preguntar). Si la siembra no se puede escribir, **no resetea**: el dueño sigue siendo A y
   todo queda bloqueado (`ownerMismatch()`: estado de otra cuenta = puerta cerrada; `enableCloudSync` no
   fija `userId` en ese caso) hasta que se pueda. Sin origen y sin `cloudSync.userId` → `no-origin`,
-  adopta sin preguntar (= "Dueño desconocido"). La siembra solo ocurre en el dir por defecto.
+  adopta sin preguntar (= "Dueño desconocido"). Al evaluar la puerta solo se siembra en el dir por
+  defecto; la siembra previa al reset de dueño graba siempre para el dir por defecto (ver "Un registro por
+  dir de notas").
 - **Bloqueada** (`ask`, `unreadable` o `ownerMismatch`): nada de Cloud se mueve. `pullNotes` devuelve un
   resultado vacío con `incomplete: true` (sin tocar `lastSync` ni poner `initialPullStatus = 'ok'`, así
   que tampoco hay catch-up); `retrySyncJournal` no drena; `schedulePush` (`onComplete('sync-gated:origin-choice')`),
@@ -625,7 +638,7 @@ queda** (apariencia del dispositivo). Las `localOnly` y las vinculadas no se toc
 nextLabel, stale?, disconnectsGithub?, onResolve(choice) → Promise<{ok, error?}>, onClose, busy? }`),
 montado por `TitleBar.tsx`, que resuelve con `resolveGithubOrigin` o `resolveCloudOrigin` según
 `syncStatus.backend`: se abre solo cuando aparece una elección nueva en `ActiveSyncStatus.originChoice`
-(`{previous, next, stale?, disconnectsGithub?}`, etiquetas — GitHub `owner/repo`, Cloud el email; `''` =
+(`{previous, next, key, stale?, disconnectsGithub?}` — `key` vuelve con la respuesta —, etiquetas — GitHub `owner/repo`, Cloud el email; `''` =
 desconocida → texto genérico de `src/lib/originChoiceLabels.ts`; la clave de "Decide later" incluye
 backend, `stale` y etiquetas), se reabre desde el botón de sync (estado `choice` de
 `src/lib/syncStatus.ts`, prioridad justo tras `syncing` y antes de "locked": icono de aviso ámbar, píldora
