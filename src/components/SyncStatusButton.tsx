@@ -13,6 +13,7 @@ import {
   SYNC_CHART_MAX_BARS,
   type SyncDisplayState,
 } from '../lib/syncStatus'
+import { originChoiceLabels } from '../lib/originChoiceLabels'
 import { formatSyncAge, syncStateLabel } from './syncStatusText'
 
 // Hover delay before the status card opens — short, but enough that sweeping the
@@ -385,7 +386,10 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
           className="mx-3 mb-2 px-2 py-1.5 rounded border border-solid border-amber-400/30 bg-amber-400/10
                      text-amber-400 leading-snug break-words"
         >
-          <div>{tf(s.choiceNotice, { previous: status.originChoice.previous, next: status.originChoice.next })}</div>
+          {/* '' from main = a remote whose name is unknown → the generic text, as in the dialog */}
+          <div>
+            {tf(s.choiceNotice, originChoiceLabels(t.originChoice, isCloud ? 'cloud' : 'github', status.originChoice))}
+          </div>
           <div className="flex justify-end mt-1">
             <button
               onClick={onChooseOrigin}
