@@ -117,3 +117,16 @@ export function syncMapModel(input: {
       input.provider === 'github' ? 'cloud-inactive' : input.githubConnected ? 'github-mirror' : null,
   }
 }
+
+/**
+ * The row of the overview's "Other providers": the provider that is NOT carrying
+ * the notes. Under Cloud, GitHub Sync is either a connected mirror paused while
+ * Cloud owns the sync loop, or simply not connected (shown anyway so its detail
+ * can be browsed without turning Cloud off); under GitHub, Cloud is inactive.
+ */
+export type OtherProviderRow = 'github-paused' | 'github-not-connected' | 'cloud-inactive'
+
+export function otherProviderRow(provider: 'cloud' | 'github', githubConnected: boolean): OtherProviderRow {
+  if (provider === 'github') return 'cloud-inactive'
+  return githubConnected ? 'github-paused' : 'github-not-connected'
+}

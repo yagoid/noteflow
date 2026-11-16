@@ -220,6 +220,11 @@ export const settings = {
     repoName: 'Repository name',
     repoHint: "Will be created as private if it doesn't exist.",
     connectWithGitHub: 'Connect with GitHub',
+    // GitHub's detail opened from the Cloud overview ("View GitHub Sync") while
+    // Cloud is on: informative only — connecting here would pull the repo over
+    // the notes Cloud is keeping, so the setup form is replaced by this notice.
+    githubCloudActiveTitle: 'NoteFlow Cloud is in use',
+    githubCloudActiveNotice: 'To switch to GitHub Sync, turn off NoteFlow Cloud first, at the bottom of the sync overview. Turning it off deletes nothing: your notes stay on this device.',
     // While a backend is active (SyncOverview / SyncMap): the status card, the
     // informative sync map, the data list, "Other providers" and the footer.
     overview: {
@@ -277,6 +282,9 @@ export const settings = {
       otherProvidersTitle: 'Other providers',
       githubPausedDesc: '{repo} · settings kept.',
       cloudInactiveDesc: 'Encrypted, with 30-day history. Turning it on pauses GitHub Sync.',
+      // Cloud on, GitHub never connected: shown anyway, to browse its detail.
+      githubNotConnectedDesc: 'Your notes in a repository of your GitHub account. To use it, turn off NoteFlow Cloud.',
+      viewGithub: 'View GitHub Sync',
       // Footer: what turning it off does (nothing is deleted) + the action.
       footerCloud: 'Turning it off deletes nothing: your notes stay on this device.',
       footerCloudGithub: 'Turning it off deletes nothing: your notes stay here and GitHub Sync resumes.',

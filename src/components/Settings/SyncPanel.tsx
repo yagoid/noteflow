@@ -24,7 +24,9 @@ type View = 'overview' | Backend | 'choose'
 // - A backend in use → its overview (SyncOverview, via CloudPanel or
 //   GitHubOverview): status card + map, its data list, the other provider as a
 //   row ("Other providers") and the turn-off action in the footer. The other
-//   backend's detail opens from that row, with a link back.
+//   backend's detail opens from that row, with a link back — including GitHub's
+//   while Cloud is on and GitHub was never connected: then GitHubSetup is only
+//   informative (no connect) until Cloud is turned off.
 export function SyncPanel({ intent }: { intent?: SettingsIntent }) {
   const t = useT()
   const [cloudEnabled, setCloudEnabled] = useState(false)
@@ -109,6 +111,7 @@ export function SyncPanel({ intent }: { intent?: SettingsIntent }) {
           // Turning Cloud off keeps the user on its detail (to turn it back on),
           // with a link back to GitHub's overview if GitHub takes over.
           onTurnOff={() => setView('cloud')}
+          onViewGithub={() => setView('github')}
         />
       ) : effective === 'overview' ? (
         <GitHubOverview
@@ -120,7 +123,9 @@ export function SyncPanel({ intent }: { intent?: SettingsIntent }) {
           onViewCloud={() => setView('cloud')}
         />
       ) : (
-        <GitHubSetup onConnectedChange={setGithubConnected} />
+        // Under a live Cloud (opened from its "Other providers" row) it stays
+        // informative; Cloud turned off from elsewhere → the normal setup.
+        <GitHubSetup cloudEnabled={cloudEnabled} onConnectedChange={setGithubConnected} />
       )}
     </div>
   )

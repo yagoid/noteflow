@@ -1999,9 +1999,15 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
        conserva su visibilidad) → Open on GitHub, "History in Git" → `…/commits`, y la fila del CLI.
     5. **"Other providers"**: con Cloud activo y GitHub conectado, la fila GitHub Sync "Paused"
        (`GitHubPausedRow`: Mirror to GitHub con su ConfirmModal + Disconnect); con Cloud activo sin
-       GitHub, **no se muestra** (conectar GitHub con Cloud activo hace el pull inicial de
-       `initiateDeviceFlow`, ver `sync.md`); con GitHub activo, NoteFlow Cloud "Inactive" → "See NoteFlow
-       Cloud" abre el detalle de Cloud (plan / inicio de sesión / Enable) con "← Sync options" de vuelta.
+       GitHub, la fila GitHub Sync "Not connected" (`GitHubNotConnectedRow`) → "View GitHub Sync" abre
+       el detalle de GitHub **sin apagar Cloud**, en modo solo informativo (`GitHubSetup` con
+       `cloudEnabled`: audiencia + puntos de la tarjeta del selector y el aviso "NoteFlow Cloud is in
+       use — turn it off first, deletes nothing"; **sin** formulario ni botón de conectar, porque
+       conectar GitHub con Cloud activo hace el pull inicial de `initiateDeviceFlow`, ver `sync.md`).
+       Si Cloud se apaga desde fuera estando ahí, la vista pasa en vivo al setup normal. Qué fila sale
+       lo decide `otherProviderRow` (`src/lib/syncOverview.ts`, testeado). Con GitHub activo,
+       NoteFlow Cloud "Inactive" → "See NoteFlow Cloud" abre el detalle de Cloud (plan / inicio de
+       sesión / Enable). Ambos detalles llevan "← Sync options" de vuelta a la vista general.
     6. **Pie** (`mt-auto`): texto de que apagarlo no borra nada (verificado: `disableCloudSync` solo
        pone `enabled = false`; `disconnectGitHub` solo borra la config local, ni notas ni repo) y el
        botón destructivo "Turn off NoteFlow Cloud" / "Disconnect GitHub" (sin confirmación, como antes).
@@ -2051,7 +2057,7 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   `bundleCheckoutConfigured`.
 - **Exclusión mutua (visual):** la vista general la comunica (solo un backend activo; con Cloud
   activo GitHub es la fila "Paused" de "Other providers" — "owner/repo · settings kept" — y el nodo
-  discontinuo del mapa; con GitHub activo, Cloud sale "Inactive" con "Turning it on pauses GitHub
+  discontinuo del mapa, o la fila "Not connected" que solo lleva a su detalle informativo; con GitHub activo, Cloud sale "Inactive" con "Turning it on pauses GitHub
   Sync"). A la inversa, en el detalle de Cloud con GitHub conectado, Cloud desbloqueado pero no
   habilitado **y entitlement `cloud`** (o sea, justo cuando activar Cloud está al alcance), aviso de
   que activar Cloud pausará GitHub. El routing real sigue siendo `syncProvider.ts` — la UI solo lo

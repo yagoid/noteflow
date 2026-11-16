@@ -5,6 +5,7 @@ import {
   githubCommitsUrl,
   githubRepoUrl,
   isLinkActive,
+  otherProviderRow,
   overviewBadge,
   platformName,
   repoSlug,
@@ -142,5 +143,17 @@ describe('syncMapModel', () => {
     const m = syncMapModel({ ...base, provider: 'github', badge: 'synced', githubConnected: true })
     expect(m.peersRealtime).toBe(false)
     expect(m.secondary).toBe('cloud-inactive')
+  })
+})
+
+describe('otherProviderRow', () => {
+  it('under Cloud, shows GitHub paused when connected and not connected otherwise', () => {
+    expect(otherProviderRow('cloud', true)).toBe('github-paused')
+    expect(otherProviderRow('cloud', false)).toBe('github-not-connected')
+  })
+
+  it('under GitHub, always shows the inactive Cloud', () => {
+    expect(otherProviderRow('github', true)).toBe('cloud-inactive')
+    expect(otherProviderRow('github', false)).toBe('cloud-inactive')
   })
 })

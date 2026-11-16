@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react'
 import { Check, Cloud, CloudOff, Copy, History, KeyRound, Loader, Lock, ShieldAlert, ShieldCheck } from 'lucide-react'
 import type { AccountStatus, CloudSyncStatus } from '../../types'
 import { hasKnownEntitlement, isPlanUnknown } from '../../lib/subscriptionPlans'
+import { otherProviderRow } from '../../lib/syncOverview'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { PlanDetail, PlanUnknownNotice } from './PlanOffers'
-import { GitHubPausedRow } from './GitHubSync'
+import { GitHubNotConnectedRow, GitHubPausedRow } from './GitHubSync'
 import { SyncOverview } from './SyncOverview'
 import { SettingsRow, StatusBadge, settingsButtonClass, settingsDangerButtonClass, settingsGhostButtonClass } from './ui'
 
@@ -40,9 +41,17 @@ interface CloudPanelProps {
   onGithubConnectedChange: (connected: boolean) => void
   /** "Turn off NoteFlow Cloud" was clicked — SyncPanel keeps the user on the Cloud detail. */
   onTurnOff?: () => void
+  /** "View GitHub Sync" on the not-connected GitHub row: its (informative) detail, Cloud stays on. */
+  onViewGithub?: () => void
 }
 
-export function CloudPanel({ initialBundle = false, githubConnected, onGithubConnectedChange, onTurnOff }: CloudPanelProps) {
+export function CloudPanel({
+  initialBundle = false,
+  githubConnected,
+  onGithubConnectedChange,
+  onTurnOff,
+  onViewGithub,
+}: CloudPanelProps) {
   const t = useT()
   const loadNotes = useNotesStore((s) => s.loadNotes)
 
@@ -695,7 +704,13 @@ export function CloudPanel({ initialBundle = false, githubConnected, onGithubCon
             />
           </>
         }
-        otherProviders={githubConnected ? <GitHubPausedRow onConnectedChange={onGithubConnectedChange} /> : undefined}
+        otherProviders={
+          otherProviderRow('cloud', githubConnected) === 'github-paused' ? (
+            <GitHubPausedRow onConnectedChange={onGithubConnectedChange} />
+          ) : (
+            onViewGithub && <GitHubNotConnectedRow onView={onViewGithub} />
+          )
+        }
         footerText={githubConnected ? o.footerCloudGithub : o.footerCloud}
         footerAction={
           <button onClick={handleDisable} disabled={isLoading} className={settingsDangerButtonClass}>

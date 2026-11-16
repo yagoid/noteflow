@@ -1678,7 +1678,12 @@ activo a la vez.
        abre los commits del repo) y **noteflow CLI**.
   5. **"Other providers"**: con Cloud activo y GitHub conectado, **GitHub Sync "Paused"**
      ("owner/repo · settings kept") con **Mirror to GitHub** (pide confirmación) y **Disconnect**; con
-     Cloud activo y sin GitHub, la sección no sale. Con GitHub activo, **NoteFlow Cloud "Inactive"**
+     Cloud activo y sin GitHub, **GitHub Sync "Not connected"** ("Your notes in a repository of your
+     GitHub account. To use it, turn off NoteFlow Cloud.") → **View GitHub Sync** abre su detalle sin
+     apagar Cloud, para curiosear: qué ofrece (los puntos de la tarjeta del selector) y el aviso
+     "NoteFlow Cloud is in use" (para cambiar, apaga Cloud primero al pie de la vista general; no borra
+     nada). No hay botón de conectar mientras Cloud está activo; si Cloud se apaga, ese detalle pasa a
+     ser el formulario de conexión normal. Con GitHub activo, **NoteFlow Cloud "Inactive"**
      ("Encrypted, with 30-day history. Turning it on pauses GitHub Sync.") → **See NoteFlow Cloud** abre
      el detalle de Cloud (plan, inicio de sesión, Enable) con "← Sync options" para volver.
   6. **Pie**: "Turning it off deletes nothing: your notes stay on this device." (con GitHub conectado:

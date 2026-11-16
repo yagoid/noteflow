@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BookMarked, Cloud, ExternalLink, GitCommitHorizontal, Github, Loader, Unlink, UploadCloud } from 'lucide-react'
+import { BookMarked, Check, Cloud, ExternalLink, GitCommitHorizontal, Github, Info, Loader, Unlink, UploadCloud } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
@@ -20,7 +20,18 @@ type SetupStep = 'idle' | 'waiting-auth' | 'completing'
 // GitHub Sync while NOT connected (the detail picked from the chooser, or what
 // stays after disconnecting): repository name → device-flow authorization.
 // Once connected, SyncPanel moves to the overview (GitHubOverview).
-export function GitHubSetup({ onConnectedChange }: { onConnectedChange: (connected: boolean) => void }) {
+// Opened from the Cloud overview while Cloud is on (`cloudEnabled`), it is
+// informative only: what GitHub Sync offers + "turn off Cloud first", with no
+// way to connect — the device flow ends in an initial pull of the repo that
+// could bring back notes deleted under Cloud (see .agents/context/sync.md).
+// Cloud turned off meanwhile → the normal setup form, live.
+export function GitHubSetup({
+  cloudEnabled = false,
+  onConnectedChange,
+}: {
+  cloudEnabled?: boolean
+  onConnectedChange: (connected: boolean) => void
+}) {
   const t = useT()
   const loadNotes = useNotesStore((s) => s.loadNotes)
   const [step, setStep] = useState<SetupStep>('idle')
@@ -78,6 +89,8 @@ export function GitHubSetup({ onConnectedChange }: { onConnectedChange: (connect
   }
 
   const isLoading = step !== 'idle'
+
+  if (cloudEnabled && step === 'idle' && !userCode) return <GitHubInfoWhileCloud />
 
   return (
     <div className="space-y-4">
@@ -177,6 +190,39 @@ export function GitHubSetup({ onConnectedChange }: { onConnectedChange: (connect
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+// GitHubSetup while NoteFlow Cloud is on: what GitHub Sync offers (the chooser's
+// card copy) and why it can't be connected from here.
+function GitHubInfoWhileCloud() {
+  const t = useT()
+  const sync = t.settings.sync
+  return (
+    <div className="space-y-4 pt-1">
+      <div className="space-y-2">
+        <p className="flex items-center gap-2 text-xs font-mono font-semibold text-text">
+          <Github size={13} className="text-text-muted" />
+          {sync.githubTitle}
+        </p>
+        <p className="text-[11px] font-mono text-text-muted leading-relaxed">{sync.choiceGithub.audience}</p>
+        <ul className="space-y-1">
+          {sync.choiceGithub.points.map((point) => (
+            <li key={point} className="flex items-start gap-2 text-[11px] font-mono text-text-muted leading-relaxed">
+              <Check size={11} className="mt-[3px] shrink-0 text-accent" />
+              <span>{point}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div role="note" className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border border-solid border-accent/30 bg-accent/10">
+        <Info size={13} className="mt-px shrink-0 text-accent" />
+        <div className="space-y-1">
+          <p className="text-xs font-mono font-semibold text-text">{sync.githubCloudActiveTitle}</p>
+          <p className="text-[11px] font-mono text-text-muted leading-relaxed">{sync.githubCloudActiveNotice}</p>
+        </div>
+      </div>
     </div>
   )
 }
@@ -333,6 +379,29 @@ export function GitHubPausedRow({ onConnectedChange }: { onConnectedChange: (con
         />
       )}
     </>
+  )
+}
+
+// "Other providers" of the Cloud overview while GitHub Sync was never connected:
+// shown anyway so its detail can be browsed without turning Cloud off.
+export function GitHubNotConnectedRow({ onView }: { onView: () => void }) {
+  const t = useT()
+  const o = t.settings.sync.overview
+  return (
+    <SettingsRow
+      icon={<Github size={14} />}
+      title={t.settings.sync.githubTitle}
+      badge={<StatusBadge tone="neutral">{t.settings.sync.notConnected}</StatusBadge>}
+      description={o.githubNotConnectedDesc}
+      action={
+        <button
+          onClick={onView}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono whitespace-nowrap ${settingsButtonClass}`}
+        >
+          {o.viewGithub}
+        </button>
+      }
+    />
   )
 }
 

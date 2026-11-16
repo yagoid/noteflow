@@ -184,6 +184,8 @@ export const settings = {
     repoName: 'Nombre del repositorio',
     repoHint: 'Se creará como privado si no existe.',
     connectWithGitHub: 'Conectar con GitHub',
+    githubCloudActiveTitle: 'NoteFlow Cloud está en uso',
+    githubCloudActiveNotice: 'Para cambiar a GitHub Sync, desactiva primero NoteFlow Cloud, al pie de la vista general de sincronización. Desactivarlo no borra nada: tus notas se quedan en este equipo.',
     overview: {
       lastSyncAgo: 'Última sincronización {time}',
       neverSynced: 'Aún sin sincronizar',
@@ -230,6 +232,8 @@ export const settings = {
       otherProvidersTitle: 'Otros proveedores',
       githubPausedDesc: '{repo} · configuración guardada.',
       cloudInactiveDesc: 'Cifrado y con historial de 30 días. Activarlo pausa GitHub Sync.',
+      githubNotConnectedDesc: 'Tus notas en un repositorio de tu cuenta de GitHub. Para usarlo, desactiva NoteFlow Cloud.',
+      viewGithub: 'Ver GitHub Sync',
       footerCloud: 'Desactivarlo no borra nada: tus notas se quedan en este equipo.',
       footerCloudGithub: 'Desactivarlo no borra nada: tus notas siguen aquí y GitHub Sync se reanuda.',
       turnOffCloud: 'Desactivar NoteFlow Cloud',
