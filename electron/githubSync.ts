@@ -14,6 +14,7 @@ import {
 import { isLocalOnlyDir, isLocalOnlyNoteMd, isLocalOnlySyncPath, listSyncedNoteDirs } from './localOnlyNotes'
 import {
   type SyncState,
+  type GithubStateRemote,
   emptySyncState,
   parseSyncState,
   serializeSyncState,
@@ -982,9 +983,25 @@ function getState(): SyncState {
   return syncState
 }
 
+/** The live connection as the repo a sync-state.json belongs to (null when not connected). */
+function liveStateRemote(): GithubStateRemote | null {
+  const s = syncSettings
+  if (!s?.owner || !s.repo) return null
+  return { ...(typeof s.repoId === 'number' ? { repoId: s.repoId } : {}), owner: s.owner, repo: s.repo }
+}
+
 function persistState(): void {
+  const state = getState()
+  // A state without the stamp (an earlier build's, or emptied while
+  // disconnected) belongs to the live connection — see SyncState.githubRemote.
+  // An existing stamp is never rewritten here: a state of another repo is
+  // discarded by ensureStateOfConnection, not relabelled.
+  if (!state.githubRemote) {
+    const remote = liveStateRemote()
+    if (remote) state.githubRemote = remote
+  }
   try {
-    fs.writeFileSync(getSyncStatePath(), serializeSyncState(getState()), 'utf-8')
+    fs.writeFileSync(getSyncStatePath(), serializeSyncState(state), 'utf-8')
   } catch (err) {
     // Never let state persistence block sync itself.
     console.error('[GitHubSync] failed to persist sync-state.json:', String(err))
@@ -1221,25 +1238,15 @@ function currentGithubIdentity(s: GitHubSyncSettings): Extract<SyncIdentity, { k
  * Memory is updated only after both landed. Any failure (unreadable or
  * unwritable file) → false, and the callers keep the gate closed.
  */
-function adoptGithubOrigin(id: SyncIdentity, resetRemote: boolean, opts: { markCloudStale?: boolean } = {}): boolean {
+function adoptGithubOrigin(id: Extract<SyncIdentity, { kind: 'github' }>, resetRemote: boolean, opts: { markCloudStale?: boolean } = {}): boolean {
   const settingsPath = getSettingsPath()
   if (readSettingsStrict(settingsPath) === null) {
     console.error('[GitHubSync] could not record the notes dir origin (settings.json unreadable)')
     return false
   }
-  if (resetRemote) {
-    const empty = emptySyncState()
-    try {
-      fs.writeFileSync(getSyncStatePath(), serializeSyncState(empty), 'utf-8')
-    } catch (err) {
-      console.error('[GitHubSync] could not reset sync-state.json — the notes dir origin is not changed:', String(err))
-      return false
-    }
-    syncState = empty
-    pushTimers.forEach((t) => clearTimeout(t))
-    pushTimers.clear()
-    conflictCopies = undefined
-    conflictMerges = undefined
+  if (resetRemote && !resetStateStrict(stateRemoteOf(id))) {
+    console.error('[GitHubSync] could not reset sync-state.json — the notes dir origin is not changed')
+    return false
   }
   try {
     const settings = readSettingsStrict(settingsPath)
@@ -1263,6 +1270,80 @@ function adoptGithubOrigin(id: SyncIdentity, resetRemote: boolean, opts: { markC
     delete next.remoteFormatMigratedAt
     syncSettings = next
   }
+  // No reset: a state without the stamp belongs to this repo — record it now.
+  if (!resetRemote && !getState().githubRemote) persistState()
+  return true
+}
+
+function stateRemoteOf(id: Extract<SyncIdentity, { kind: 'github' }>): GithubStateRemote {
+  return { ...(typeof id.repoId === 'number' ? { repoId: id.repoId } : {}), owner: id.owner, repo: id.repo }
+}
+
+/**
+ * Rewrites sync-state.json empty (journal, shas) stamped with `remote` — a
+ * write that must succeed (unlike persistState, which swallows errors) — and
+ * only then drops the in-memory state, armed push timers and conflict notices.
+ */
+function resetStateStrict(remote: GithubStateRemote | undefined): boolean {
+  const empty: SyncState = { ...emptySyncState(), ...(remote ? { githubRemote: remote } : {}) }
+  try {
+    fs.writeFileSync(getSyncStatePath(), serializeSyncState(empty), 'utf-8')
+  } catch (err) {
+    console.error('[GitHubSync] could not reset sync-state.json:', String(err))
+    return false
+  }
+  syncState = empty
+  pushTimers.forEach((t) => clearTimeout(t))
+  pushTimers.clear()
+  conflictCopies = undefined
+  conflictMerges = undefined
+  return true
+}
+
+/**
+ * The journal and sha cache must describe the CONNECTED repo. The CLI shares
+ * settings.json on Windows and can switch both the connection and the origin
+ * behind the app (`noteflow origin merge` / `login --merge`) without passing
+ * through adoptGithubOrigin: the gate then sees "same identity" while
+ * sync-state.json still holds the previous repo's pending uploads / deletes
+ * and shas. A state stamped with another repo (SyncState.githubRemote) is
+ * discarded, strict and in adoptGithubOrigin's order:
+ * 1. sync-state.json rewritten empty — still stamped with the OLD repo, so a
+ *    failure further down is redone on the next check;
+ * 2. ONE read-modify-write of settings.json drops lastSync /
+ *    remoteFormatMigratedAt from the githubSync READ FROM THE FILE (with the
+ *    old repo's lastSync the pull's deletion rule could delete local notes);
+ * 3. memory: syncSettings reloaded from disk, and the state stamped with the
+ *    live repo.
+ * An unstamped state (an earlier build's) belongs to the live connection.
+ * false = could not discard → the gate stays 'unreadable'.
+ */
+function ensureStateOfConnection(identity: Extract<SyncIdentity, { kind: 'github' }>): boolean {
+  const stamp = getState().githubRemote
+  if (!stamp || sameIdentity({ kind: 'github', ...stamp }, identity)) return true
+  console.warn('[GitHubSync] sync-state.json belonged to another repo (switched behind the app) — discarding it')
+  const settingsPath = getSettingsPath()
+  if (readSettingsStrict(settingsPath) === null) return false
+  if (!resetStateStrict(stamp)) return false
+  let fresh: Record<string, unknown>
+  try {
+    const settings = readSettingsStrict(settingsPath)
+    if (settings === null) throw new Error('settings.json became unreadable')
+    if (settings.githubSync && typeof settings.githubSync === 'object') {
+      const fileSync = { ...(settings.githubSync as GitHubSyncSettings) }
+      delete fileSync.lastSync
+      delete fileSync.remoteFormatMigratedAt
+      settings.githubSync = fileSync
+    }
+    writeSettings(settings)
+    fresh = settings
+  } catch (err) {
+    console.error('[GitHubSync] could not drop the previous repo lastSync (settings.json unwritable):', String(err))
+    return false
+  }
+  syncSettings = (fresh.githubSync as GitHubSyncSettings | undefined) ?? { enabled: false }
+  getState().githubRemote = stateRemoteOf(identity)
+  persistState()
   return true
 }
 
@@ -1322,6 +1403,8 @@ export function refreshOriginGate(): OriginGateState {
   const identity = s.enabled && s.encryptedToken ? currentGithubIdentity(s) : null
   if (!identity) {
     next = { state: 'clear' } // not connected: nothing would sync anyway
+  } else if (!ensureStateOfConnection(identity)) {
+    next = { state: 'unreadable' } // another repo's journal / lastSync could not be discarded
   } else {
     const parsed = readSettingsStrict(getSettingsPath())
     if (parsed === null) {

@@ -633,3 +633,72 @@ describe('the origin belongs to one notes dir (NOTEFLOW_NOTES_DIR)', () => {
     expect(localDirs()).toEqual(['a-note-2222', 'mine-1111', 'welcome-9999'])
   })
 })
+
+describe('sync-state.json belongs to one repo (switched behind the app by the CLI)', () => {
+  const OLD_LAST_SYNC = '2026-11-01T00:00:00.000Z'
+  const statePath = () => path.join(env.userData, 'sync-state.json')
+  const readState = () => JSON.parse(fs.readFileSync(statePath(), 'utf-8'))
+
+  /** The app's journal and shas for repo A, and the CLI's `origin merge` to B (connection + origin). */
+  function stateOfAWithCliSwitchToB(stamped: boolean) {
+    writeLocal('mine-1111', files('1111'))
+    addRepo('notes-a', 101)
+    addRepo('notes-b', 202, { 'shared-5555': files('5555') })
+    fs.writeFileSync(statePath(), JSON.stringify({
+      version: 1,
+      ops: {
+        'shared-5555': { op: 'deleteDir', queuedAt: OLD_LAST_SYNC, attempts: 1 },
+        'mine-1111/note.md': { op: 'upsert', queuedAt: OLD_LAST_SYNC, attempts: 1 },
+      },
+      shas: { 'shared-5555/note.md': 'a'.repeat(40) },
+      ...(stamped ? { githubRemote: { repoId: 101, owner: 'me', repo: 'notes-a' } } : {}),
+    }))
+    writeSettings({
+      githubSync: { enabled: true, encryptedToken: Buffer.from('tok').toString('base64'), owner: 'me', repo: 'notes-b', repoId: 202, lastSync: OLD_LAST_SYNC },
+      syncOrigin: { github: { repoId: 202, owner: 'me', repo: 'notes-b' } },
+    })
+  }
+
+  it('a state stamped with A is discarded before anything syncs with B (journal, shas, lastSync)', async () => {
+    stateOfAWithCliSwitchToB(true)
+    await freshModule()
+    gh.loadSyncSettings()
+    expect(gh.isOriginGateBlocked()).toBe(false)
+    expect(readState()).toEqual({ version: 1, ops: {}, shas: {}, githubRemote: { repoId: 202, owner: 'me', repo: 'notes-b' } })
+    expect(readSettings().githubSync.lastSync).toBeUndefined()
+    expect(gh.getSyncStatus().lastSync).toBeUndefined() // memory reloaded too
+    await gh.retrySyncJournal(notesDir)
+    await gh.pullNotes(notesDir)
+    await settle()
+    expect(mutations.filter((m) => m.startsWith('DELETE'))).toEqual([]) // A's deleteDir never ran against B
+    expect(remoteDirs('notes-b')).toContain('shared-5555')
+    expect(localDirs()).toContain('shared-5555')
+  })
+
+  it('an unstamped state (earlier build) belongs to the live connection and is stamped', async () => {
+    stateOfAWithCliSwitchToB(false)
+    await freshModule()
+    gh.loadSyncSettings()
+    expect(gh.isOriginGateBlocked()).toBe(false)
+    const state = readState()
+    expect(Object.keys(state.ops).sort()).toEqual(['mine-1111/note.md', 'shared-5555'])
+    expect(state.githubRemote).toEqual({ repoId: 202, owner: 'me', repo: 'notes-b' })
+    expect(readSettings().githubSync.lastSync).toBe(OLD_LAST_SYNC)
+  })
+
+  it('a state that cannot be discarded keeps the gate closed', async () => {
+    stateOfAWithCliSwitchToB(true)
+    env.failSettingsWrites = true
+    await freshModule()
+    gh.loadSyncSettings()
+    expect(gh.isOriginGateBlocked()).toBe(true)
+    expect((await gh.pullNotes(notesDir)).incomplete).toBe(true)
+    expect(treeGets).toEqual([])
+    expect(readSettings().githubSync.lastSync).toBe(OLD_LAST_SYNC)
+    expect(readState().githubRemote.repo).toBe('notes-a') // redone on the next check
+    env.failSettingsWrites = false
+    expect(gh.refreshOriginGate()).toBe('clear')
+    expect(readState().githubRemote.repo).toBe('notes-b')
+    expect(readSettings().githubSync.lastSync).toBeUndefined()
+  })
+})
