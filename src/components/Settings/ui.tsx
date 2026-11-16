@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import type { StatusTone } from '../../lib/syncOverview'
+import { TONE_BADGE } from './statusTone'
 
 // Shared building blocks for the Settings panels. Everything here is expressed in
 // theme tokens only (surface-*, border, text, text-muted) so it holds up across the
@@ -41,3 +43,74 @@ export function SectionTitle({ children, action }: SectionTitleProps) {
     </div>
   )
 }
+
+// ── Lists of rows (Settings → Sync and any panel with a list of facts/actions) ──
+
+/** Small status pill ("Synced", "Paused", "Included"…), optionally with a leading dot. */
+export function StatusBadge({ tone, dot = false, children }: { tone: StatusTone; dot?: boolean; children: ReactNode }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-[5px] flex-shrink-0 whitespace-nowrap px-1.5 py-0.5 rounded-md text-[10px] font-mono ${TONE_BADGE[tone]}`}
+    >
+      {dot && <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0" />}
+      {children}
+    </span>
+  )
+}
+
+/** A titled list section: 12px heading + a bordered list of SettingsRow. */
+export function SettingsListSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-2 text-xs font-mono font-semibold text-text">{title}</h3>
+      <div className="rounded-[10px] border border-solid border-border bg-surface-2/25 divide-y divide-border">
+        {children}
+      </div>
+    </section>
+  )
+}
+
+interface SettingsRowProps {
+  icon: ReactNode
+  title: ReactNode
+  /** Optional badge right after the title. */
+  badge?: ReactNode
+  description?: ReactNode
+  /** Right-hand actions (buttons, a badge). */
+  action?: ReactNode
+  /** Expanded content under the row (an in-progress flow, results, errors). */
+  children?: ReactNode
+}
+
+/** One row of a SettingsListSection: icon box, title (+ badge), description and actions. */
+export function SettingsRow({ icon, title, badge, description, action, children }: SettingsRowProps) {
+  return (
+    <div className="px-3.5 py-3">
+      <div className="flex items-center gap-3">
+        <div className="w-7 h-7 rounded-lg bg-surface-2 text-text/80 flex items-center justify-center flex-shrink-0">
+          {icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-xs font-mono font-semibold text-text truncate">{title}</span>
+            {badge}
+          </div>
+          {description && (
+            <div className="text-[11px] font-mono text-text-muted leading-normal">{description}</div>
+          )}
+        </div>
+        {action && <div className="flex items-center gap-2 flex-shrink-0">{action}</div>}
+      </div>
+      {children && <div className="mt-3 pl-10 space-y-3">{children}</div>}
+    </div>
+  )
+}
+
+// Ghost (text-only) button of a row, and the destructive variant (red on hover/always).
+export const settingsGhostButtonClass =
+  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-text-muted hover:text-text hover:bg-surface-2 ' +
+  'transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap'
+
+export const settingsDangerButtonClass =
+  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-red hover:bg-red/10 ' +
+  'transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap'

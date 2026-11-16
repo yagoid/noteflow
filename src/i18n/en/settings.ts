@@ -146,19 +146,11 @@ export const settings = {
   },
 
   sync: {
-    // Backend selector (the two sync backends are mutually exclusive).
-    chooseBackendDesc: 'Choose how your notes sync across devices. Only one backend can be active at a time.',
-    cloudCardDesc: 'Encrypted sync through NoteFlow servers. Nothing to set up — requires a subscription.',
-    cloudCardDescOwned: 'Encrypted sync through NoteFlow servers. Nothing to set up — included in your plan.',
     githubTitle: 'GitHub Sync',
-    githubCardDesc: 'Sync through a private GitHub repository of your own. Free, needs a GitHub account.',
-    // Backend status badges.
-    badgeActive: 'Active',
+    // Badges of the inactive backend in the overview's "Other providers" (the two
+    // sync backends are mutually exclusive — Cloud wins, see electron/syncProvider.ts).
     badgePaused: 'Paused',
     badgeInactive: 'Inactive',
-    // Shown in the GitHub subsection while NoteFlow Cloud is enabled — the
-    // sync router gives Cloud priority (see electron/syncProvider.ts).
-    pausedByCloud: 'GitHub Sync is paused while NoteFlow Cloud is enabled. Your GitHub configuration is kept — disable NoteFlow Cloud to resume syncing through GitHub.',
     // First-run chooser (no backend in use yet): both options side by side, at the
     // same level — the paid one is not preselected, and its price is just a tag.
     localOnly: 'Only on this device — your notes are not syncing yet.',
@@ -182,10 +174,10 @@ export const settings = {
       cta: 'Connect with GitHub',
     },
     haveCloud: 'Already have NoteFlow Cloud?',
-    // Back link from the Cloud / GitHub detail to the chooser.
+    // Back link from the Cloud / GitHub detail to the overview (or the chooser).
     backToOptions: 'Sync options',
+    // CLI row badges.
     connected: 'Connected',
-    // Also used as the GitHub badge in the backend selector.
     notConnected: 'Not connected',
     lastSync: 'Last sync: {time}',
     authFailed: 'Authorization failed',
@@ -228,18 +220,82 @@ export const settings = {
     repoName: 'Repository name',
     repoHint: "Will be created as private if it doesn't exist.",
     connectWithGitHub: 'Connect with GitHub',
-    // "Connect the CLI too" — below the backend panel. Gives the bundled
+    // While a backend is active (SyncOverview / SyncMap): the status card, the
+    // informative sync map, the data list, "Other providers" and the footer.
+    overview: {
+      // Status card: one line of facts next to the badge.
+      lastSyncAgo: 'Last sync {time}',
+      neverSynced: 'Not synced yet',
+      realtimeOn: 'Real time connected',
+      realtimeOff: 'Real time disconnected',
+      pendingChanges: { one: '{count} pending change', other: '{count} pending changes' },
+      noPendingChanges: 'No pending changes',
+      everyMinutes: 'every {minutes} min',
+      openRepo: 'Open {repo} on GitHub',
+      // Cloud enabled but no encryption keys yet (the mode choice shows below).
+      badgeSetup: 'Setup needed',
+      // Sync map (informative only — the label of each node, and the same state in words).
+      mapThisComputer: 'This computer',
+      mapOtherDevices: 'Other devices',
+      mapRealtime: 'in real time',
+      mapEncrypted: 'encrypted',
+      mapCli: 'noteflow CLI',
+      mapCliConnected: 'connected',
+      mapCliOff: 'not connected',
+      // Microsoft Store build: it ships without the CLI.
+      mapCliUnavailable: 'not included',
+      mapGithubMirror: 'paused · manual mirror',
+      mapCloudInactive: 'not active',
+      mapAriaCloud: 'This computer syncs encrypted with NoteFlow Cloud ({status}), which reaches your other devices {peers}.',
+      mapAriaGithub: 'This computer syncs {cadence} with the GitHub repository {repo} ({status}), which reaches your other devices.',
+      mapAriaCliOn: 'The noteflow CLI is connected.',
+      mapAriaCliOff: 'The noteflow CLI is not connected.',
+      mapAriaGithubMirror: 'GitHub Sync is paused, as a manual mirror.',
+      mapAriaCloudInactive: 'NoteFlow Cloud is not active.',
+      // Data list — NoteFlow Cloud.
+      securityTitle: 'Security and data',
+      encryptionStandardTitle: 'Standard encryption',
+      encryptionStandardDesc: 'NoteFlow holds the key: unlocking is automatic on all your devices.',
+      encryptionPrivateTitle: 'Private encryption (E2EE)',
+      encryptionPrivateDesc: 'End to end: only you hold the key, behind your passphrase.',
+      // Pre-dual-mode device whose mode is not known yet.
+      encryptionUnknownTitle: 'Encryption',
+      encryptionUnknownDesc: 'Your notes are encrypted before they leave this device.',
+      historyTitle: 'Version history',
+      historyDesc: "30 days per section, restorable from each section's menu.",
+      included: 'Included',
+      // Data list — GitHub Sync. NoteFlow creates the repository as private, but
+      // an existing one keeps its own visibility: never claim it is private.
+      repoDataTitle: 'Repository and data',
+      repoTitle: 'Your repository',
+      repoDesc: "In your GitHub account — NoteFlow's servers keep no copy.",
+      openOnGithub: 'Open on GitHub',
+      gitHistoryTitle: 'History in Git',
+      gitHistoryDesc: 'Every change uploaded from here is a commit in the repository.',
+      viewCommits: 'View commits',
+      // Other providers.
+      otherProvidersTitle: 'Other providers',
+      githubPausedDesc: '{repo} · settings kept.',
+      cloudInactiveDesc: 'Encrypted, with 30-day history. Turning it on pauses GitHub Sync.',
+      // Footer: what turning it off does (nothing is deleted) + the action.
+      footerCloud: 'Turning it off deletes nothing: your notes stay on this device.',
+      footerCloudGithub: 'Turning it off deletes nothing: your notes stay here and GitHub Sync resumes.',
+      turnOffCloud: 'Turn off NoteFlow Cloud',
+      footerGithub: 'Disconnecting deletes nothing: your notes stay here and in the repository.',
+      disconnectGithub: 'Disconnect GitHub',
+    },
+    // "noteflow CLI" row of the overview's data list. Gives the bundled
     // `noteflow` CLI its OWN access to the backend in use (electron/cliConnect.ts).
     cli: {
-      title: 'Command line (CLI)',
+      title: 'noteflow CLI',
       // Microsoft Store build: it ships without the CLI — shown instead of the whole section.
       storeUnavailable: "The Microsoft Store version of NoteFlow doesn't include the noteflow CLI. To use it from the terminal or with AI agents, install NoteFlow from GitHub.",
-      descCloud: 'Sign the noteflow CLI in to NoteFlow Cloud with {email}, so notes written from the terminal or by AI agents can sync too. The CLI gets its own session — the app stays signed in.',
+      descCloud: 'Its own session with {email}, for the terminal and AI agents.',
       // Account keys in private (e2ee) mode: the CLI can only sync once unlocked with the passphrase.
       e2eeNotice: 'Your account uses private (E2EE) encryption: the CLI can only sync after unlocking it with your passphrase. It asks for it on each run in a terminal, or reads it from the NOTEFLOW_CLOUD_PASSPHRASE environment variable — without either, the CLI (and AI agents using it) cannot sync.',
-      descGithub: 'Let the noteflow CLI sync with {repo} too, so notes written from the terminal or by AI agents can sync. No new authorization needed.',
+      descGithub: 'Gets a copy of the token to sync this same repository.',
       connect: 'Connect the CLI too',
-      connectedTo: 'CLI connected ({target})',
+      connectedTo: 'Connected with {target}.',
       disconnect: 'Disconnect CLI',
       // Cloud, step 2: the code the CLI asked for.
       codeSent: 'We emailed a sign-in code to {email}. Enter it to connect the CLI:',
@@ -308,17 +364,9 @@ export const settings = {
     unlockFailed: 'Could not unlock.',
     // Silent unlock (state: locked + managed/unknown mode) — never asks for a secret.
     unlocking: 'Unlocking…',
-    // Unlocked controls.
-    syncEnabled: 'Sync enabled',
+    // Unlocked, not enabled (the detail).
     syncDisabled: 'Sync disabled',
-    // Local changes the journal still holds (e.g. pushes that failed offline):
-    // shown instead of "Already up to date" while > 0.
-    pendingChanges: {
-      one: '{count} local change not uploaded yet — "Sync now" retries it.',
-      other: '{count} local changes not uploaded yet — "Sync now" retries them.',
-    },
     enableSync: 'Enable sync',
-    disableSync: 'Disable sync',
     enableFailed: 'Could not enable cloud sync.',
     lock: 'Lock',
     // Encryption-mode badge (state: unlocked).

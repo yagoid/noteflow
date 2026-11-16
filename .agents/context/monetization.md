@@ -1947,14 +1947,19 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
 - **Sesión bloqueada ≠ sign-out:** `status.sessionLocked` (llavero del sistema bloqueado, ver § 2)
   mantiene `signedIn` e identidad, así que ni `planAccountTransition` ni la baseline de auto-activación
   lo ven como un cierre de sesión — no se apaga Cloud ni se suelta la DEK ni se vuelve a BYO.
-- **UI:** el badge de la tarjeta Cloud (`SyncPanel.tsx`) se deriva de `enabled && signedIn` — con lo
-  anterior ese caso ya no debería darse, pero el badge no puede mentir. No hizo falta copy nuevo: el
+- **UI:** la vista general de Cloud (`CloudPanel.tsx` → `SyncOverview`) solo se pinta con sesión
+  (sin sesión el panel es el detalle del plan aunque `enabled` siguiera a true) — con lo anterior ese
+  caso ya no debería darse, pero la UI no puede mentir. No hizo falta copy nuevo: el
   "sin sesión" lo cubren el detalle del plan con su inicio de sesión inline (`PlanDetail`, en Cloud y
   en NoteFlow AI) y la línea de estado "Chat not set up" de `LlmConfigView`.
 
 ### Settings UI (tramo 4 — implementado)
-- **Ubicación:** la página **Settings → Sync** (`SyncPanel.tsx`). La vista se resuelve **una sola
-  vez** cuando llegan ambos status y nunca vuelve a pisar la elección del usuario:
+- **Ubicación:** la página **Settings → Sync** (`SyncPanel.tsx`). La vista (`'overview' | 'cloud' |
+  'github' | 'choose'`) se resuelve **una vez** cuando llegan ambos status; después solo cambia por un
+  clic del usuario, salvo dos transiciones derivadas en el render (`effective`): un detalle cuyo backend
+  queda en uso (Cloud activado desde su detalle, GitHub conectado desde su setup) **pasa a ser** la vista
+  general, y una vista general sin nada en uso (apagado desde fuera, p. ej. al cerrar sesión) cae en la
+  elección:
   - **Nada en uso** (Cloud no activado y GitHub no conectado) → **elección** (`SyncChooser`): línea de
     estado "Only on this device", y NoteFlow Cloud y GitHub Sync como **dos cards iguales** (para quién
     es, 3 viñetas, etiqueta de precio discreta — Cloud con `useOfferTag`, GitHub "Free" — y su botón
@@ -1962,17 +1967,51 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
     o sea en el paywall). Debajo, sin sesión, "Already have NoteFlow Cloud? Sign in" (lleva al detalle
     de Cloud, que tiene el inicio de sesión). Al elegir, el panel del backend con un enlace "← Sync
     options".
-  - **Un backend en uso** → el **selector de dos tarjetas** de siempre (patrón visual de las cards de
-    modo de cifrado: `aria-pressed` + `border-accent bg-accent/[0.08]`), cada una con un **badge de
-    estado** derivado del estado real (Active / Paused / Inactive / Not connected), preseleccionando
-    el que está en uso (Cloud enabled → Cloud; si no, GitHub).
+  - **Un backend en uso** → su **vista general** (rediseño 2026-11; ya no hay selector de dos
+    tarjetas: cambiar de backend casi nunca se hace). Shell común `SyncOverview.tsx`, que rellenan
+    `CloudPanel` (Cloud `enabled`, tiene prioridad) o `GitHubOverview` (`GitHubSync.tsx`), de arriba
+    abajo:
+    1. **Tarjeta de estado** (`bg-surface-0`): icono del proveedor (Cloud tintado con accent), nombre
+       + `StatusBadge` con el estado real (`getSyncDisplayState` de `src/lib/syncStatus.ts` — el mismo
+       del botón de la titlebar —, salvo Cloud sin claves → "Setup needed"; lógica en
+       `src/lib/syncOverview.ts`), una línea de datos (Cloud: última sync relativa · Realtime
+       conectado/desconectado · cambios pendientes; GitHub: `owner/repo` ↗ · cada N min (intervalo
+       real del autosync) · última sync) y **Sync now** (botón primario `PRIMARY_BUTTON`; Cloud →
+       `cloudPull`, deshabilitado sin claves desbloqueadas; GitHub → `pullNotes`). El status vivo lo
+       da el hook `src/components/useActiveSyncStatus.ts` (compartido con `TitleBar`), re-leído cada
+       30 s (Realtime no emite evento).
+    2. Debajo, el **mapa de sync** (`SyncMap.tsx`), **solo informativo** (divs, `role="img"` +
+       `aria-label` que cuenta el mismo estado en palabras): Este equipo (SO real vía
+       `window.noteflow.platform`) —[🔒 cifrado / cada N min]— proveedor (borde accent + halo) — Otros
+       dispositivos (Cloud: "en tiempo real" o el intervalo si Realtime está caído) y, con un conector
+       en L, el CLI. Debajo de Este equipo, discontinuo: GitHub "en pausa · espejo manual" (solo con
+       Cloud activo y GitHub conectado) o NoteFlow Cloud "no activo" (con GitHub activo). Conectores
+       accent si el proveedor sincroniza; discontinuos si está bloqueado / sin claves / con error / CLI
+       sin conectar (`syncMapModel`, testeado). Responsive: rejilla de 5 columnas en `fr` con las
+       proporciones del diseño; los nodos truncan su texto si el panel es estrecho.
+    3. Avisos del proveedor justo bajo la tarjeta: error, resultado del pull y, en Cloud, el bloque de
+       claves (onboarding sin claves, "Unlocking…" en managed, formulario de desbloqueo e2ee).
+    4. **"Security and data"** (Cloud) / **"Repository and data"** (GitHub): lista de filas
+       (`SettingsListSection` + `SettingsRow` de `ui.tsx`). Cloud: cifrado estándar/privado (con
+       "Switch to private/standard mode" y Lock en e2ee — los formularios de cambio de modo se despliegan
+       en la propia fila), "Version history" (badge "Included") y la fila del CLI. GitHub: "Your
+       repository" (no dice "privado": NoteFlow lo crea privado si no existía, pero uno existente
+       conserva su visibilidad) → Open on GitHub, "History in Git" → `…/commits`, y la fila del CLI.
+    5. **"Other providers"**: con Cloud activo y GitHub conectado, la fila GitHub Sync "Paused"
+       (`GitHubPausedRow`: Mirror to GitHub con su ConfirmModal + Disconnect); con Cloud activo sin
+       GitHub, **no se muestra** (conectar GitHub con Cloud activo hace el pull inicial de
+       `initiateDeviceFlow`, ver `sync.md`); con GitHub activo, NoteFlow Cloud "Inactive" → "See NoteFlow
+       Cloud" abre el detalle de Cloud (plan / inicio de sesión / Enable) con "← Sync options" de vuelta.
+    6. **Pie** (`mt-auto`): texto de que apagarlo no borra nada (verificado: `disableCloudSync` solo
+       pone `enabled = false`; `disconnectGitHub` solo borra la config local, ni notas ni repo) y el
+       botón destructivo "Turn off NoteFlow Cloud" / "Disconnect GitHub" (sin confirmación, como antes).
+       Al apagar Cloud se queda en su detalle (para reactivarlo); al desconectar GitHub, en su setup.
   - `SettingsIntent { offer: 'cloud' | 'bundle' }` (filas de Ajustes → Cuenta) abre directamente el
-    detalle de Cloud (con el Bundle elegido para `'bundle'`).
-  Debajo se renderiza SOLO el panel del backend seleccionado: `src/components/Settings/CloudPanel.tsx`
-  o el componente interno `GitHubSyncSection` de `SyncPanel.tsx`. `CloudPanel` no repite su título.
+    detalle de Cloud (con el Bundle elegido para `'bundle'`) si Cloud no está activo.
+  `CloudPanel` decide su layout por su propio status: `enabled` → vista general; si no → el detalle.
   Textos vía i18n `t.settings.cloud.*` + `t.settings.sync.*` (`localOnly`, `chooseIntro`,
-  `choiceCloud`/`choiceGithub`, `haveCloud`, `backToOptions`, `chooseBackendDesc`, `cloudCardDesc`,
-  `githubTitle`, `githubCardDesc`, `badgeActive`/`badgePaused`/`badgeInactive`, `pausedByCloud`).
+  `choiceCloud`/`choiceGithub`, `haveCloud`, `backToOptions`, `githubTitle`,
+  `badgePaused`/`badgeInactive`, y el grupo `overview.*` de la vista general).
 - **El panel renderiza según `keysState` + cuenta:** sin sesión → el detalle del plan (`PlanDetail`,
   con el inicio de sesión inline en la caja); `no-keys` **sin entitlement `cloud`** → el mismo detalle
   (ver "Gating" abajo), sin onboarding;
@@ -1981,12 +2020,13 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   confirmación, mínimo 8 chars) → `cloudSetup` → el **recovery code se muestra UNA vez** en un
   bloque ámbar que oculta el resto del panel hasta pulsar "I have saved my recovery code" (vive solo
   en estado local del componente, con botón Copy y aviso rojo de irrecuperabilidad); `locked` → un
-  único input acepta passphrase O recovery (el backend distingue) → `cloudUnlock`; `unlocked` →
-  badge enabled/disabled + Last sync + `syncError` (rojo, accionable) + línea ámbar
-  `pendingChanges` ("N local changes not uploaded yet"; con ella el resultado del pull no dice
-  "Already up to date"; el panel re-lee el status también en cada `sync:push-state` idle, porque un push
-  fallido no emite `cloud:status-changed`) + botones Enable/Disable, Sync now (`cloudPull` → ciclo
-  completo pull + drain, resultado tipo GitHub) y Lock.
+  único input acepta passphrase O recovery (el backend distingue) → `cloudUnlock`; `unlocked` y
+  activo → la vista general (arriba): `syncError` (rojo) bajo la tarjeta, cambios pendientes en su
+  línea de datos (con ellos el resultado del pull no dice "Already up to date"; el panel re-lee el
+  status también en cada `sync:push-state` idle, porque un push fallido no emite
+  `cloud:status-changed`), Sync now (`cloudPull` → ciclo completo pull + drain, resultado tipo
+  GitHub), Lock en la fila de cifrado y Turn off en el pie; `unlocked` sin activar → el detalle:
+  "Sync disabled" + badge de modo, Enable (o el gate) y Lock.
 - **Gating (decisión):** en la UI se gatean por entitlement `cloud` **el setup/onboarding** (estado
   `no-keys`) y **Enable sync** (estado `unlocked` + disabled). En ambos casos se muestra el MISMO
   bloque (constante `subscriptionGate` de `CloudPanel.tsx`, para que no se separen): el
@@ -2009,19 +2049,22 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   RLS de `user_keys`). El IPC `account:open-checkout` acepta `'ai' | 'cloud' | 'bundle'` y
   `AccountStatus` expone `aiCheckoutConfigured` / `cloudCheckoutConfigured` /
   `bundleCheckoutConfigured`.
-- **Exclusión mutua (visual):** el selector de dos tarjetas ya la comunica (solo un backend
-  activo; badge "Paused" en GitHub mientras Cloud esté enabled). Además, dentro del panel de
-  GitHub sigue el aviso ámbar "paused while NoteFlow Cloud is enabled" (la config se conserva) y,
-  a la inversa, con GitHub conectado, Cloud desbloqueado pero no habilitado **y entitlement
-  `cloud`** (o sea, justo cuando activar Cloud está al alcance), aviso de que activar Cloud pausará
-  GitHub. El routing real sigue siendo `syncProvider.ts` — la UI solo lo comunica.
+- **Exclusión mutua (visual):** la vista general la comunica (solo un backend activo; con Cloud
+  activo GitHub es la fila "Paused" de "Other providers" — "owner/repo · settings kept" — y el nodo
+  discontinuo del mapa; con GitHub activo, Cloud sale "Inactive" con "Turning it on pauses GitHub
+  Sync"). A la inversa, en el detalle de Cloud con GitHub conectado, Cloud desbloqueado pero no
+  habilitado **y entitlement `cloud`** (o sea, justo cuando activar Cloud está al alcance), aviso de
+  que activar Cloud pausará GitHub. El routing real sigue siendo `syncProvider.ts` — la UI solo lo
+  comunica.
 - Al abrir el panel de Cloud se llama `cloudRefreshKeysMode()` (detecta un cambio de modo hecho en
-  otro dispositivo). Con Cloud activo, el panel de GitHub **oculta "Sincronizar ahora"** (solo queda
+  otro dispositivo). Con Cloud activo, GitHub **no ofrece "Sincronizar ahora"** (su fila solo tiene
   "Espejar en GitHub" + "Desconectar").
 - **Reactividad:** `CloudPanel` se suscribe a `onCloudStatusChanged` + `onAccountStatusChanged`;
-  `SyncPanel` a `onCloudStatusChanged` (badges + aviso de pausa). El estado *connected* de GitHub
-  lo sube `GitHubSyncSection` al padre vía callback: `sync:status-changed` solo se emite para el
-  initial pull (`githubSync.onStatusChanged`), no en connect/disconnect.
+  `SyncPanel` a `onCloudStatusChanged` (qué vista general toca); la tarjeta de estado, al status
+  unificado vía `useActiveSyncStatus`. El estado *connected* de GitHub lo suben al padre por callback
+  `GitHubSetup` (al conectar) y `useGitHubSync` (al desconectar, desde la vista general o la fila
+  "Paused"): `sync:status-changed` solo se emite para el initial pull (`githubSync.onStatusChanged`)
+  y en `sync:disconnect`, no al conectar.
 
 ### Cliente CLI (headless) — implementado
 

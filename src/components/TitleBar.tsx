@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { Brain, Download, Minus, RefreshCw, Settings, Square, X } from 'lucide-react'
 import { useNotesStore } from '../stores/notesStore'
 import { useT } from '../i18n/useT'
 import { tf } from '../i18n/format'
-import type { ActiveSyncStatus } from '../types'
 import { ExportImportModal } from './ExportImportModal'
 import { SettingsModal } from './Settings/SettingsModal'
 import { SyncStatusButton } from './SyncStatusButton'
+import { useActiveSyncStatus } from './useActiveSyncStatus'
 import type { SettingsIntent, SettingsSection } from './Settings/SettingsModal'
 
 export function TitleBar() {
@@ -22,16 +22,11 @@ export function TitleBar() {
   const [exportNoteId, setExportNoteId] = useState<string | undefined>(undefined)
   // Backend-tagged status of whichever sync provider is live (GitHub or NoteFlow
   // Cloud — they are mutually exclusive). The button routes to the active one.
-  const [syncStatus, setSyncStatus] = useState<ActiveSyncStatus>({ backend: 'none', active: false, initialPullStatus: 'pending', pendingUploads: 0, pendingChanges: 0 })
+  const { status: syncStatus, pushing, refresh: refreshSyncStatus } = useActiveSyncStatus()
   const [syncing, setSyncing] = useState(false)
-  const [pushing, setPushing] = useState(false)
-  // Latest 'sync:push-state' received — see the onSyncPushState handler.
-  const pushStateRef = useRef<'pushing' | 'idle'>('idle')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
   const [settingsIntent, setSettingsIntent] = useState<SettingsIntent | undefined>(undefined)
-
-  const refreshSyncStatus = () => window.noteflow.getActiveSyncStatus().then(setSyncStatus)
 
   const openSettings = (section: SettingsSection, intent?: SettingsIntent) => {
     setSettingsSection(section)
@@ -45,35 +40,12 @@ export function TitleBar() {
         setUpdateInfo({ latestVersion: result.latestVersion, downloadUrl: result.downloadUrl })
       }
     })
-    refreshSyncStatus()
+    // The sync status (and its subscriptions) lives in useActiveSyncStatus.
     const unsubProgress = window.noteflow.onUpdateProgress((percent) => setDownloadProgress(percent))
     const unsubInstalling = window.noteflow.onUpdateInstalling(() => setInstalling(true))
-    const unsubNotes = window.noteflow.onNotesUpdated(() => refreshSyncStatus())
-    const unsubPush = window.noteflow.onSyncPushState((state) => {
-      pushStateRef.current = state
-      if (state === 'pushing') setPushing(true)
-      // Refresh on every transition (not just 'idle') so the status card's
-      // pending-uploads count tracks files as they start and finish. 'idle' is
-      // applied together with the fresh status: dropping `pushing` first would
-      // show the previous status — whose journal still counts the upload or
-      // delete that just landed — as "not uploaded" for a moment. The ref keeps
-      // a 'pushing' that arrived meanwhile from being overwritten.
-      window.noteflow.getActiveSyncStatus().then((status) => {
-        setSyncStatus(status)
-        setPushing(pushStateRef.current === 'pushing')
-      })
-    })
-    const unsubStatus = window.noteflow.onSyncStatusChanged(() => refreshSyncStatus())
-    // Cloud emits its own status-changed event (enable/disable, unlock, pull) —
-    // refresh from the same unified getter so the button tracks the live backend.
-    const unsubCloud = window.noteflow.onCloudStatusChanged(() => refreshSyncStatus())
     return () => {
       unsubProgress()
       unsubInstalling()
-      unsubNotes()
-      unsubPush()
-      unsubStatus()
-      unsubCloud()
     }
   }, [])
 
@@ -128,7 +100,7 @@ export function TitleBar() {
       window.removeEventListener('noteflow:open-settings', openSettingsAt)
       window.removeEventListener('noteflow:sync-notes', doSync)
     }
-  }, [])
+  }, [refreshSyncStatus])
 
   const handleSync = async () => {
     if (syncing) return
@@ -207,7 +179,7 @@ export function TitleBar() {
           <Brain size={13} />
           <span className="leading-none">brain</span>
         </button>
-        {syncStatus.active && (
+        {syncStatus?.active && (
           <SyncStatusButton
             status={syncStatus}
             syncing={syncing}
