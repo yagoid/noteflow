@@ -712,6 +712,7 @@ export interface UiSettings {
     readableWidth?: boolean
     showToc?: boolean
     moveCheckedToBottom?: boolean
+    showTaskProgress?: boolean
   }
 }
 

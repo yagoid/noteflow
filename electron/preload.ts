@@ -37,6 +37,7 @@ export type UiSettingsPayload = {
     readableWidth?: boolean
     showToc?: boolean
     moveCheckedToBottom?: boolean
+    showTaskProgress?: boolean
   }
 }
 

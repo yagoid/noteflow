@@ -113,6 +113,9 @@ export const settings = {
     hideToc: 'Ocultar índice',
     moveChecked: 'Mover las tareas marcadas al final',
     moveCheckedHint: 'Al marcar una tarea baja al final de su lista; al desmarcarla vuelve encima de las marcadas',
+    taskProgress: 'Progreso de las checklists',
+    taskProgressHint: 'Muestra en el margen cuántas tareas de cada lista están hechas',
+    taskProgressReadableOnly: 'Solo disponible con el ancho Legible',
   },
 
   startup: {

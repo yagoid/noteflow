@@ -200,6 +200,9 @@ export const editor = {
     clear: 'Quitar',
     done: 'Hecho',
     dragHandle: 'Arrastra para mover ({keys})',
+    progressCount: '{done} de {total}',
+    progressPartial: '{progress} tareas hechas · {percent} %',
+    progressComplete: '{progress} · lista completa',
   },
 
   kanban: {
