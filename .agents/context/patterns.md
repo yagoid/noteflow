@@ -960,6 +960,90 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   - Esquema del editor web móvil: `listItem`/`taskItem` con contenido `paragraph+ list*` y
     Shift+Enter en heading = partir (si su editor lo permite).
 
+### Editor: operaciones de tabla (lógica sin UI)
+
+Base para menús/asas/atajos de tablas que aún **no tienen UI** (el toolbar y `TableContextMenu`
+siguen usando los comandos de TipTap/prosemirror-tables y `tableUtils.ts`, sin cambios). Dos capas:
+
+- **`src/components/Editor/tableOps.ts`** — comandos estilo ProseMirror `(state, dispatch?) => boolean`
+  (testeables sin vista). Sin `dispatch` solo responden si se pueden ejecutar (habilitar menús); con
+  él despachan **una sola transacción** (un Ctrl+Z). `runTableCommand(editor, cmd)` /
+  `canRunTableCommand(editor, cmd)` los adaptan a un `Editor` de TipTap (false si es de solo lectura;
+  tras ejecutar, devuelve el foco). Exports: `selectRow`, `selectColumn` (CellSelection), `moveRow`,
+  `moveColumn`, `duplicateRow`, `duplicateColumn`, `insertRowAt`, `insertColumnAt`,
+  `sortRowsByColumn`, `clearRow`, `clearColumn`, `clearSelectedCells`, `deleteSelectedRows`,
+  `deleteSelectedColumns`; lectura: `getTableInfo`, `getTableData`, `getSelectedCellsData` (texto +
+  alineación por columna) y `cellText`; `MIN_TABLE_COLUMNS`.
+  - **Qué tabla:** los comandos con índices actúan sobre `{ tablePos }` (posición justo antes del nodo
+    tabla, pensado para asas pintadas sobre una tabla concreta) o, por defecto, sobre la tabla **más
+    interna** alrededor de la selección (como `setColumnAlign`). Los `…Selected…` actúan siempre sobre
+    la selección: una `CellSelection` o la celda del cursor.
+  - **Invariantes:** fila 0 = cabecera (`tableHeader`), fija y obligatoria; resto = `tableCell`. Los
+    comandos estructurales **reconstruyen las filas** de la tabla en una transacción y normalizan los
+    tipos de celda a ese invariante (una tabla HTML pegada cuya fila 0 no era cabecera la gana al
+    primer cambio). Tablas con celdas combinadas (solo vía HTML pegado): todos los comandos → false.
+  - **Selección resultante:** sigue a sus celdas (mover, ordenar, insertar y duplicar no la sacan de
+    la celda en la que estaba; con contenido idéntico conserva el offset). Una `CellSelection` pasa a
+    ser el rectángulo que envuelve **todas** sus celdas mapeadas (no solo las esquinas): una
+    fila/columna entera sigue entera tras ordenar o mover, y una fila/columna insertada o duplicada
+    dentro de la selección se suma a ella. **Nunca crece sobre celdas no seleccionadas:** si ese
+    rectángulo incluiría el destino de alguna celda que no estaba seleccionada (dos filas
+    seleccionadas que un orden o un `moveRow` separan), la selección pasa a **cursor al inicio de la
+    celda donde acabó el cabezal** — así un "eliminar filas" posterior no borra filas ajenas. Una
+    celda vaciada → cursor al inicio de la celda. Si las celdas desaparecen (eliminar) →
+    cursor al inicio de la celda que ocupa su lugar (o la última fila/columna), misma columna/fila.
+    Una selección fuera de la tabla se mapea con la transacción.
+  - **Decisiones:** mover fila solo entre filas de cuerpo (`from`/`to` ≥ 1, `to` = índice final);
+    `from === to` o fuera de rango → false. Al mover/duplicar una columna su alineación viaja con ella
+    (cada celda lleva `textAlign`). Duplicar fila → copia debajo (la cabecera duplicada es una fila de
+    cuerpo con el mismo contenido y atributos); duplicar columna → copia a la derecha. Insertar fila en
+    `1…filas` (en 0 → false); sus celdas heredan la alineación de la **celda de cabecera** de su
+    columna. Insertar columna en `0…columnas`: sin alineación (`null`) hasta que el usuario la ponga.
+    Ordenar: solo filas de cuerpo, posible con ≥ 2; ya ordenado → true sin transacción. Vaciar
+    fila/columna/selección: cada celda queda con un párrafo vacío y sus atributos (la cabecera también
+    se puede vaciar); nada que vaciar → true sin transacción. Eliminar filas: si la selección incluye
+    la cabecera se eliminan **solo las de cuerpo**; si solo cubre la cabecera → false; eliminar todas
+    las de cuerpo está permitido (tabla solo-cabecera, válida en markdown). Eliminar columnas: false si
+    quedarían menos de **`MIN_TABLE_COLUMNS` = 2**, porque una tabla pipe de **1 columna no se relee
+    como tabla** (`TABLE_SEPARATOR_RE` exige ≥ 2 celdas: al reabrir la nota vuelve como texto). Ojo:
+    el borrado de columna del toolbar/menú contextual (prosemirror-tables) sí permite llegar a 1.
+- **`src/lib/tableData.ts`** — funciones puras sobre `string[][]` (sin ProseMirror):
+  - `parseCellNumber`: signo opcional (`+`, `-`, `−`) y **un** separador decimal `.` o `,`
+    (`3,5`, `-.5`); sin separadores de miles, exponentes, espacios, `%` ni moneda. El punto siempre es
+    decimal; la coma también **salvo la forma `1,234`** (1-3 cifras sin 0 inicial + coma + 3 cifras),
+    que en inglés son miles → no es número (conservador: mejor texto que un valor mal leído).
+    `isNumericColumn`: ≥ 1 celda no vacía y todas las no vacías numéricas.
+  - `sortOrder(values, dir, locale?)` → permutación: numérico si `isNumericColumn`, si no
+    `Intl.Collator(locale, { numeric: true, sensitivity: 'accent' })` (sin mayúsculas, con acentos;
+    "item 2" < "item 10"). Vacías siempre al final (también en desc). Estable en ambos sentidos: los
+    empates conservan el orden original (desc **no** es el reverse de asc). El comando usa el texto de
+    la celda (`cellText`: bloques y hard breaks unidos con `\n`).
+  - `summarizeCells(rows)` → `{ count, filled, numeric, sum, average }`; `sum`/`average` null sin
+    números; la suma se redondea a los decimales máximos de las entradas (0.1 + 0.2 = 0.3).
+  - `cellsToMarkdown(rows, aligns?)`: tabla pipe como la escribe `tableElToMd` (fila 0 = cabecera,
+    `|` → `\|`, saltos → `<br>`, vacía → espacio, filas irregulares rellenadas). El texto va tal cual,
+    así que markdown dentro (`**x**`) vuelve a ser markdown. Con 1 columna es GFM válido pero NoteFlow
+    no lo lee como tabla (ver arriba).
+  - `cellsToTsv(rows)`: tabuladores y `\n`; una celda con tab, salto o `"` va entre comillas estilo
+    Excel (comillas internas duplicadas).
+  - `parseDelimited(text, delimiter?)`: RFC 4180 (comillas, `""`, saltos entrecomillados, CRLF/CR/LF →
+    `\n`, líneas en blanco finales fuera, en medio se conservan como fila vacía). Tolerante: texto tras
+    la comilla de cierre se queda en el campo; una comilla de apertura sin cierre es literal. Filas
+    irregulares **rellenadas** con `''` hasta la más ancha. Delimitador por defecto `detectDelimiter`
+    (tab si la primera fila tiene alguno; si no `;` si hay más que comas; si no `,`).
+  - `looksLikeTabularText(text)`: detector **solo de TSV** (rango de hoja de cálculo): ≥ 2 filas,
+    ≥ 2 columnas, todas las filas con el mismo nº de celdas, ninguna columna enteramente vacía (el
+    código indentado con tabs tiene la primera vacía), la primera columna no son todo marcadores de
+    lista (listas copiadas de Word: `1.⇥Texto`, `•⇥Texto`) y no es una tabla pipe
+    (`containsMarkdownTable`). El detector **nunca** da true con CSV (la prosa con comas/`;` es
+    demasiado común): leer texto pegado como CSV es decisión explícita del llamador vía
+    `parseDelimited` (que entonces detecta `,`/`;`, o recibe el delimitador). El conteo de
+    `detectDelimiter` usa las mismas reglas de comillas que el parser (una `"` solo abre campo al
+    inicio: `55"` es texto).
+- Tests: `tests/lib/tableOps.test.ts` (esquema real + `load`/`save` del harness de round-trip, entorno
+  happy-dom: markdown resultante, round-trip sin pérdida, una transacción = un `undo`, invariante de
+  cabecera, selección válida, rechazos y consulta sin `dispatch`) y `tests/lib/tableData.test.ts`.
+
 ### Editor: mover tareas (arrastrar, Alt+↑/↓) y "marcadas al final"
 
 Solo modo markdown (el modo texto no se toca). Toda la lógica de documento está en
