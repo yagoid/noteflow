@@ -162,8 +162,8 @@ export function schemaExtensions(opts: SchemaOptions = {}): Extensions {
     ResizableImage.configure({ inline: true, allowBase64: true, displaySrc: opts.imageSrc ?? null }),
     HorizontalRule,
     // resizable:false — column widths can't be stored in portable markdown, so
-    // tables fill the available width with evenly distributed columns instead of
-    // offering a resize affordance that silently resets on reload.
+    // columns fit their content (index.css § Tables) instead of offering a resize
+    // affordance that silently resets on reload.
     Table.configure({ resizable: false, HTMLAttributes: { class: 'md-table' } }),
     TableRow,
     AlignedTableHeader,

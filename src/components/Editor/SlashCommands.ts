@@ -13,9 +13,11 @@ import {
   type KanbanDefaultColumns,
 } from './kanbanCommands'
 import { insertSnippet } from './snippetCommands'
+import { insertNewTable } from './tableCommands'
 import { sortCheckedToBottom, taskListAround } from '../../lib/listItemMove'
 import { expandSnippet } from '../../lib/snippets'
-import { filterSlashItems, snippetSlashEntries } from '../../lib/slashItems'
+import { filterSlashItems, snippetSlashEntries, TABLE_SLASH_KEYWORDS } from '../../lib/slashItems'
+import { DEFAULT_TABLE_SIZE, canInsertTableHere } from '../../lib/tableInsert'
 import { useSnippetsStore } from '../../stores/snippetsStore'
 import { useLanguageStore } from '../../stores/languageStore'
 
@@ -41,6 +43,8 @@ export interface SlashCommandLabels {
   convertToKanbanDescription: string
   sortChecked: string
   sortCheckedDescription: string
+  table: string
+  tableDescription: string
   /** Column names of a new board (to do / in progress / done). */
   kanbanColumns: KanbanDefaultColumns
   /** Title of a snippet without a name. */
@@ -64,6 +68,8 @@ export function getSlashCommands(t: Messages): SlashCommandLabels {
     convertToKanbanDescription: t.editor.slash.convertToKanbanDescription,
     sortChecked: t.editor.slash.sortChecked,
     sortCheckedDescription: t.editor.slash.sortCheckedDescription,
+    table: t.editor.slash.table,
+    tableDescription: t.editor.slash.tableDescription,
     kanbanColumns: kanbanDefaultColumns(t),
     snippetUntitled: t.editor.snippets.untitled,
     snippetDescription: t.editor.slash.snippet,
@@ -72,7 +78,7 @@ export function getSlashCommands(t: Messages): SlashCommandLabels {
 
 export interface SlashCommandsOptions {
   onLinkSection: (editor: Editor) => void
-  /** Linked notes (plain Markdown): no "Link section" nor kanban commands — only "Move checked to bottom" and snippets. */
+  /** Linked notes (plain Markdown): no "Link section" nor kanban commands — only "Table", "Move checked to bottom" and snippets. */
   plain: boolean
   // Read fresh labels each time the menu builds its items (see getSlashCommands).
   getLabels: () => SlashCommandLabels
@@ -110,6 +116,8 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
         convertToKanbanDescription: 'Turn this task list into a kanban board',
         sortChecked: 'Move checked to bottom',
         sortCheckedDescription: 'Put the checked tasks of this list at the end',
+        table: 'Table',
+        tableDescription: 'A 3 × 3 table with a header row',
         kanbanColumns: ['To do', 'In progress', 'Done'],
         snippetUntitled: 'Untitled snippet',
         snippetDescription: 'Snippet',
@@ -165,6 +173,18 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
               // `/kanban` and `/board` find it in any UI language.
               keywords: ['kanban', 'board'],
               run: (editor) => insertDefaultBoard(editor, labels.kanbanColumns),
+            })
+          }
+          // A pipe table is plain Markdown: also in linked notes. Only offered
+          // where it can go at the caret — not inside a list nor another table
+          // (lib/tableInsert.ts); the toolbar button inserts after those instead.
+          if (canInsertTableHere(editor.state.selection)) {
+            all.push({
+              id: 'table',
+              title: labels.table,
+              description: labels.tableDescription,
+              keywords: TABLE_SLASH_KEYWORDS,
+              run: (editor) => insertNewTable(editor, DEFAULT_TABLE_SIZE),
             })
           }
           // Inside a task list (any level, also in linked notes): put its checked

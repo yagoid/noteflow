@@ -152,3 +152,23 @@ export const FAT_SECTION = [
   "",
   "- Resultados en `necs/src/debug/fat_5_10_3_clock_sync/results/<fecha>/` (summary.txt con el resumen).",
 ].join('\n')
+
+/** A table left with one column (Delete column down to one), next to a two-column one and a rule. */
+export const ONE_COLUMN_TABLE_SECTION = [
+  'Texto | con barra',
+  '',
+  '| Pendiente |',
+  '| :---: |',
+  '| revisar<br>el PR |',
+  '| a \\| b |',
+  '',
+  '| Campo | Valor |',
+  '| --- | ---: |',
+  '| a | 1 |',
+  '',
+  '---',
+  '',
+  '> | Cita |',
+  '> | --- |',
+  '> | x |',
+].join('\n')

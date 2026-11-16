@@ -85,7 +85,6 @@ export const editor = {
     blockquote: 'Blockquote',
     insertLink: 'Insert link',
     insertTable: 'Insert table',
-    deleteTable: 'Delete table',
     insertKanban: 'Insert kanban board',
     undo: 'Undo (Ctrl+Z)',
     redo: 'Redo (Ctrl+Y)',
@@ -117,6 +116,25 @@ export const editor = {
     deleteTableMenu: 'Delete table',
   },
 
+  // Size picker of the toolbar's table button. Rows always include the header
+  // row (a markdown table needs one): 3 × 4 = the header + 2 rows, 4 columns.
+  tablePicker: {
+    // Visible size of the highlighted grid: rows × columns.
+    size: '{rows} × {cols}',
+    rowsPlural: {
+      one: '{count} row',
+      other: '{count} rows',
+    },
+    colsPlural: {
+      one: '{count} column',
+      other: '{count} columns',
+    },
+    // Screen-reader text of the highlighted size; {rows}/{cols} are the phrases above.
+    sizeDescription: '{rows} × {cols}, header row included',
+    // Muted line under the size.
+    hint: 'Rows × columns, header included',
+  },
+
   // In-note find bar (markdown + text mode).
   search: {
     findInNote: 'Find in note',
@@ -136,6 +154,8 @@ export const editor = {
     convertToKanbanDescription: 'Turn this task list into a kanban board',
     sortChecked: 'Move checked to bottom',
     sortCheckedDescription: 'Put the checked tasks of this list at the end',
+    table: 'Table',
+    tableDescription: 'A 3 × 3 table with a header row',
     noCommands: 'No commands',
     // Heading over the user's snippets in the menu.
     snippetsHeading: 'Snippets',

@@ -211,7 +211,8 @@ function genCode(rng: Rng): JNode {
 }
 
 function genTable(rng: Rng): JNode {
-  const cols = 2 + rng.int(2)
+  // 1-3 columns: deleting columns can leave a table with only one.
+  const cols = 1 + rng.int(3)
   const aligns = Array.from({ length: cols }, () => rng.pick([null, 'left', 'center', 'right']))
   // A markdown table always has a header row and one alignment per column;
   // cells are one line (a break inside one is written as `<br>`; at its edges
@@ -332,7 +333,9 @@ function lastLine(block: PMNode): PMNode | null {
 // empty `- ` marker), quote, fence, kanban marker, horizontal rule.
 const BLOCK_SYNTAX_RE = /^(?:\s*#{1,3}\s+\S|\s*(?:[-*+]|\d+\.)(?:[ \t]|$)|\s*>|```|<!--|\s*---\s*$)/
 // A table separator row: it turns a line with a `|` right above it into a table.
-const TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-{3,}:?\s*\|/
+// Also a one-column one (`| --- |`, `|---`, `--- |`): any dash cell with a pipe
+// next to it (a bare `---` is an HR, in BLOCK_SYNTAX_RE).
+const TABLE_SEPARATOR_RE = /^\s*(?:\|\s*:?-{3,}|:?-{3,}:?\s*\|)/
 
 /** Continuation lines (after a hard break) that read as block syntax. The
  *  first line of a textblock is safe — the parser has already read it — except
@@ -519,6 +522,10 @@ const MD_LINES = [
   '  1. nested ol', '  continued', 'lazy continuation',
   '> quote', '>', '> - q item', '> > nested', '>no space', '> ```', '> # q heading',
   '| a | b |', '| --- | --- |', '| 1 | 2 |', '|---|:-:|',
+  // Prose with a pipe above a rule / a dash line: never a table. (No one-cell
+  // pipe lines here: glued above `| 1 | 2 |` they'd make a one-column table
+  // whose wider rows drop their extra cells, as in GFM — see MD_SNIPPETS.)
+  'a | b', '- - -',
   '```', '```js', 'const x = 1', '```   ',
   '<!-- kanban -->', '<!-- kanban done="Done" -->', '- Todo', '  - [ ] card', '  - [x] card 📅2026-10-12',
   '- Done', '<!-- /kanban -->',
@@ -527,6 +534,10 @@ const MD_LINES = [
 
 const MD_SNIPPETS = [
   '| h1 | h2 |\n| :--- | ---: |\n| a | b |\n| c<br>d | e |',
+  // One-column tables end in a line of text, so no two-cell row is glued to them.
+  '| h |\n| :---: |\n| a |\n| b<br>c |\nafter',
+  '|   |\n|---\n| a \\| b |\nafter',
+  '> | h |\n> | --- |\n> | a |\n> after',
   '```py\ndef f():\n\n    return 1\n```',
   '<!-- kanban done="Done" -->\n- Todo\n  - [ ] one 📅2026-10-12 🔺high\n    - sub\n- Done\n  - [x] two\n<!-- /kanban -->',
   '- [ ] **5.9.3 (tamper).**\n\n- **B42.** texto\n\n- [ ] **5.4.3**\n  - Esperar',

@@ -951,7 +951,9 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   - Citas recursivas (`mdBlockquoteToHtml` + `quoteDepth`: sin tableros dentro) y el serializador de
     citas que quita solo el último separador.
   - Tablas: líneas pegadas bajo la tabla como bloque propio (`mdTableToHtml`) y `cellLines`/
-    `isBlockCell` al serializar celdas.
+    `isBlockCell` al serializar celdas; tablas de una columna (`isTableStart` +
+    `TABLE_SEPARATOR_1COL_RE`, ver "Editor: tablas"): sin portar, el móvil las lee como un párrafo
+    de texto.
   - Headings pegados (`mdParagraphBlockToHtml`), `headingElToMd` (breaks → espacio; heading vacío →
     párrafo vacío).
   - Tareas: `- [x](url)` no es tarea, `- [ ]foo` es viñeta; marcador vacío `emptyMarkerIsItem` y
@@ -1146,6 +1148,76 @@ párrafo; el ancho redimensionado es el atributo `width` (`![alt](src){width=N}`
   breakout exige la misma estructura que el selector CSS (`.ProseMirror > p > .node-image > .nf-image`;
   una imagen dentro de un enlace, p. ej., no rompe la columna). Imágenes antiguas con un `width` mayor
   que la columna (antes se veían acotadas) ahora rompen la columna al abrirlas en Readable.
+
+### Editor: tablas (inserción y columnas ajustadas al contenido)
+Formato y esquema intactos: pipe-table GFM con cabecera obligatoria en la fila 0, alineación por
+columna (`:---:`), saltos de celda como `<br>`, sin anchos guardados; `Table` de TipTap con
+`resizable: false` (`editorExtensions.ts`).
+- **Insertar (`src/lib/tableInsert.ts`, pura; tests en `tests/lib/tableInsert.test.ts` sobre el esquema
+  real):** `insertTableTr(state, size)` = una transacción (un `Ctrl+Z`), siempre con cabecera y
+  `rows` **contando** la cabecera; caret en la primera celda de cabecera. `tableInsertPos(selection)`
+  decide dónde: `null` = en la selección (mismos pasos que `insertTable` de TipTap: sustituye un
+  párrafo vacío o parte el bloque); dentro de una **lista** (un ítem solo admite `paragraph+ list*`,
+  ProseMirror partiría la lista) o de una **tabla** (la celda es `block+`: anidaría una tabla que
+  `tableElToMd` no sabe escribir) → justo **después de la lista/tabla más externa** (dentro de una cita
+  sigue en la cita, que sí se serializa con `> | … |`); con una NodeSelection de bloque (tablero
+  kanban) → detrás del nodo en vez de sustituirlo. Mínimo **1 columna** (`TABLE_MIN_COLS`; la
+  rejilla del selector arranca en 1×1).
+- **Tablas de una columna (`isTableStart` en `markdownHtml.ts`, única función que decide si un par
+  cabecera + separador abre tabla; la usan `blockKind` y `containsMarkdownTable` → pegado vía
+  `looksLikeMarkdown`).** Separador de 2+ celdas: `TABLE_SEPARATOR_RE`, sin cambios. Separador de
+  **una** celda (`TABLE_SEPARATOR_1COL_RE`): `| --- |`, `|---|`, `| :---: |`, `|---`, `--- |`… — con
+  **al menos un `|`** (un `---` a secas es HR, nunca separador) y **solo bajo una cabecera de una
+  celda** (`splitPipeRow(cabecera).length === 1`, como en GFM: cabecera y separador con el mismo nº
+  de celdas), así una línea de prosa con `|` encima de `| --- |` sigue siendo prosa. El serializador
+  no cambia: una columna sale `| H |\n| --- |\n| a |`. Hasta 2026-11 el separador exigía dos celdas y
+  una tabla que se quedaba en una columna (borrando columnas; `deleteColumn` de prosemirror-tables
+  no deja borrar la última) volvía como texto al reabrir. Filas **más anchas que la cabecera**:
+  `mdTableToHtml` descarta las celdas sobrantes (como GFM, en cualquier ancho; el editor no las
+  escribe nunca, solo pasa con markdown escrito a mano).
+- **Toolbar:** el botón de tabla **siempre inserta** (`TableSizePicker.tsx`: rejilla 8×8, mismo patrón
+  que `SnippetsButton` — portal `fixed z-50`, mousedown + `preventDefault` para no perder la selección,
+  cierre por clic fuera; teclas en fase de captura en `window` porque el foco sigue en el editor:
+  flechas/`Enter`/`Esc`, con `stopPropagation` para que no lleguen a ProseMirror). Borrar sigue en la
+  fila contextual y el menú de clic derecho. **Slash:** `/table` (keywords sin traducir
+  `TABLE_SLASH_KEYWORDS` = `table`/`tabla`/`grid`) inserta 3×3; solo se ofrece donde
+  `canInsertTableHere` (fuera de listas y tablas); también en notas vinculadas (es markdown estándar).
+- **CSS (`index.css` § Tables):** sin `div.tableWrapper` (TipTap solo lo crea con `resizable: true`
+  vía `TableView`; `renderWrapper` cambiaría la salida de `getHTML()`), el propio `<table>` es
+  `display: block; width: max-content; max-width: 100%; overflow-x: auto` (la caja de scroll) y el
+  **`<tbody>` es la caja de tabla** (`display: table; width: max-content`): TipTap pone todas las filas
+  (cabecera incluida) en el `<tbody>` (antes va un `<colgroup>` que queda en su propia caja anónima,
+  sin alto) y el parser HTML lo añade al HTML estático del chat y las previews. Columnas al ancho del
+  contenido entre `min-width: 5em` y `max-width: 28em` de las celdas (`overflow-wrap: break-word`;
+  Chromium respeta ambos en celdas); si no cabe, **conserva esos anchos y hace scroll horizontal**.
+  Hasta 2026-11 las filas iban en la caja de tabla anónima del `<table>` en bloque, que hace
+  shrink-to-fit al ancho disponible: estrechaba las columnas hasta el mínimo antes de hacer scroll
+  ("Known / issues" en dos líneas, filas altas). Mismas reglas en chat (`.chat-md`), previews
+  (`.note-preview`) y stickies; en las tarjetas del resumen (`.note-grid-body`, sin puntero ni scroll)
+  el `<tbody>` vuelve a `table-row-group` (las columnas se estrechan para enseñar más) y la tabla se
+  recorta (`overflow: hidden`). **Aspecto** (prototipo aprobado: cabecera "Etiqueta"): `th` en
+  `--text-muted`, `0.8em`, `600`, mayúsculas con `letter-spacing: 0.07em`, sin fondo (fuera el
+  `--bg-2` + `--cyan` y el cebreado de filas de antes); sus `min/max-width` van en `6.25em/35em`
+  (= 5em/28em ÷ 0.8) para que la columna mida igual que con celdas del cuerpo; en el chat el `th` va a
+  9px enteros (regla de px enteros del chat). **Celda activa:** el DOM no marca dónde está un cursor
+  de texto (prosemirror-tables solo marca `.selectedCell` en una CellSelection; `:focus-within` no
+  sirve porque el foco es la raíz contenteditable), así que `Editor/ActiveTableCell.ts` (extensión de
+  comportamiento registrada en `Editor.tsx`, no en el esquema) pone una decoración de nodo
+  `nf-active-cell` en la celda que contiene toda la selección (`activeCellRange` en
+  `src/lib/tableActiveCell.ts`, test en `tests/lib/tableActiveCell.test.ts`; nada en una CellSelection,
+  entre celdas o fuera de tablas) y el CSS la contornea (`inset 1.5px` de `--accent`) solo con
+  `.ProseMirror-focused`. **Rango (`.selectedCell`):** tinte `--accent / 0.13` + un único contorno de
+  `1.5px` alrededor del rectángulo, sin plugin: como una CellSelection es siempre rectangular (sin
+  celdas combinadas en markdown), una celda está en un borde si el vecino de ese lado no está
+  seleccionado (`:has()` sin anidar), y cada borde activa una sombra `inset` vía variables
+  `--nf-sel-t/r/b/l`. El `::selection` transparente de `.ProseMirror-hideselection` se refuerza
+  con la especificidad del editor **solo dentro de `table`** (la regla que inyecta TipTap perdía por
+  especificidad contra el `::selection` propio y dejaba un resaltado de texto suelto dentro del
+  rango; se acota a tablas porque toda NodeSelection pone esa clase y los pills de relación entre
+  secciones dependen de ese tinte para verse seleccionados). **Readable:** `.ProseMirror > table` lleva
+  `min-width: min(--readable-col, 100%)` + márgenes `auto`: una tabla estrecha queda en el borde
+  izquierdo de la columna; una ancha crece centrada hacia los márgenes. Ese `min-width` va con
+  `!important` para ganar al `min-width` inline que escribe `renderHTML` de TipTap (cellMinWidth × columnas).
 
 ### Editor: mapa de secciones (pestañas que bajan de fila)
 Las pestañas de sección del editor no son una tira con scroll horizontal: son un **mapa de secciones**

@@ -845,7 +845,7 @@ En ambos modos el `.md` de la sección guarda markdown (el editor serializa con 
 | Lista de tareas | `- [ ] tarea` | Toolbar |
 | Tablero kanban | `<!-- kanban -->` … `<!-- /kanban -->` | `/kanban` · Toolbar |
 | Cita / Blockquote | `> texto` | Toolbar |
-| Tabla | — | Toolbar (menú contextual para filas/columnas) |
+| Tabla | Pipe-table GFM (`\| a \| b \|` + `\|---\|---\|`) | `/table` · Toolbar (selector de tamaño; menú contextual para filas/columnas) |
 | Link | `[texto](url)` | Toolbar |
 | Imagen | `![alt](src)` | Drag & drop / Paste |
 | Separador | `---` | — |
@@ -903,16 +903,43 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - En **modo texto** nada de esto aplica (el markdown se edita tal cual).
 
 ### Tablas
-- Insertables desde la toolbar (3×3 con cabecera por defecto).
+- **Botón de tabla de la toolbar = siempre insertar** (también con el cursor dentro de una tabla;
+  antes ahí borraba la tabla). Abre un **selector de tamaño**: rejilla 8×8 donde el ratón resalta
+  filas × columnas y el clic inserta; con teclado, flechas mueven la selección, `Enter` inserta y `Esc`
+  cierra devolviendo el foco al editor. La etiqueta muestra `filas × columnas` (p. ej. `3 × 4`) y las
+  **filas incluyen la de cabecera** (3 × 4 = cabecera + 2 filas, 4 columnas). Arranca en 3 × 3. Se
+  puede elegir **una sola columna** (1 × 1 incluido); una tabla que se queda en una columna al borrar
+  columnas sigue siendo tabla al reabrir la nota.
+- **`/table`** (o `/tabla`, `/grid`, en cualquier idioma) inserta una tabla 3×3 con cabecera. También
+  en notas vinculadas (una pipe-table es markdown estándar). **No se ofrece** dentro de una lista ni
+  dentro de otra tabla (markdown no puede guardar ahí una tabla).
+- **Dónde cae la tabla nueva:** en el cursor (sustituye un párrafo vacío o parte el párrafo). Si el
+  cursor está en una **lista** o en una **tabla**, el botón la inserta **justo después** de la lista /
+  tabla más externa (nunca anidada); dentro de una cita se queda en la cita. Con un tablero kanban
+  seleccionado, va detrás del tablero en vez de sustituirlo.
+- Siempre con **fila de cabecera**. Borrar una tabla: botón *Table* (papelera) de la fila contextual o clic
+  derecho → *Delete table*.
 - Toolbar contextual y menú de clic derecho para añadir/eliminar filas y columnas,
   y alinear la columna (izquierda/centro/derecha — persiste vía `:---:` en markdown).
 - El clic derecho mueve el cursor a la celda pulsada, así las acciones actúan donde clicas.
 - **Cabecera obligatoria:** no se puede borrar la fila de cabecera ni insertar una fila
   por encima de ella (las pipe-tables de markdown exigen cabecera). Las celdas de cabecera
-  vacías muestran el placeholder "Column".
-- **Sin redimensionado de columnas:** las tablas ocupan el ancho disponible con columnas
-  equitativas. El ancho de columna NO se puede guardar en markdown portable, así que no se
-  ofrece resize (evita el affordance que se reseteaba al recargar la nota).
+  vacías muestran el placeholder "Column" (en el mismo estilo de etiqueta, más tenue).
+- **Aspecto (prototipo aprobado 2026-11, cabecera "Etiqueta"):** la cabecera es una **etiqueta
+  pequeña en mayúsculas, gris (texto atenuado) y con tracking**, sin fondo ni color de acento; filas
+  sin cebreado, solo la rejilla fina del borde del tema. Con el editor enfocado, la **celda del
+  cursor** lleva un contorno fino del color de acento; una **selección de celdas** (arrastrar entre
+  celdas o `Shift`+clic) se tiñe de acento con **un único contorno** alrededor del rango, sin la
+  selección de texto nativa encima. Igual en todos los temas (solo variables del tema).
+- **Columnas ajustadas al contenido, sin redimensionado:** cada columna toma el ancho de su
+  contenido, con un mínimo (una celda vacía sigue siendo cómoda de clicar) y un máximo (el texto
+  largo salta de línea dentro de la celda). Una tabla estrecha no ocupa todo el ancho; una que no
+  cabe **conserva el ancho natural de sus columnas** (no las estrecha: las etiquetas cortas no se
+  parten en dos líneas) y hace **scroll horizontal** propio, sin desbordar la nota. Igual en el chat
+  de IA, las vistas previas y los stickies; en las tarjetas del resumen de nota (no hacen scroll) las
+  columnas sí se estrechan hasta el mínimo y lo que no cabe se recorta. El ancho de columna NO se
+  puede guardar en markdown portable, así que no se ofrece resize (evita el affordance que se
+  reseteaba al recargar).
 - **Enter en una celda** crea otra línea en la celda; se guarda como salto de línea (`<br>`) y al
   reabrir es una línea más del mismo párrafo (antes las dos líneas se guardaban pegadas: `ab`).
 - **Pegar markdown con tabla:** en modo markdown, pegar texto que contenga una
@@ -1037,8 +1064,10 @@ Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del m
   ancho del área del editor) y `Readable` (columna de lectura centrada de ~72 caracteres, estilo
   Obsidian/iA Writer).
 - En modo `Readable` se centran los bloques de texto (párrafos, headings, listas, citas,
-  separadores) **y los bloques de código**; las **tablas** siguen a ancho completo (los **tableros
-  kanban** van más allá: ocupan el editor de borde a borde). Las **imágenes** viven en la columna:
+  separadores) **y los bloques de código**; las **tablas** empiezan en el borde izquierdo de la
+  columna y, si su contenido es más ancho, crecen centradas sobre ella hasta el ancho del editor
+  y, si aun así no caben, hacen scroll horizontal; los **tableros kanban** van más allá y ocupan el
+  editor de borde a borde. Las **imágenes** viven en la columna:
   mientras caben (sin redimensionar, o redimensionadas hasta el ancho de la columna) quedan
   alineadas a la izquierda de la columna, como en `Full`; si el usuario las **agranda más allá de
   la columna** con el tirador, **rompen los márgenes**, creciendo centradas sobre la columna (media

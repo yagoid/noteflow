@@ -192,6 +192,10 @@ button {
 .chat-md.prose-editor .ProseMirror table {
   font-size: 11px;
 }
+/* The header label's 0.8em (§ Tables) rounded to a whole pixel. */
+.chat-md.prose-editor .ProseMirror th {
+  font-size: 9px;
+}
 .chat-md.prose-editor .ProseMirror img {
   max-width: 100%;
   height: auto;
@@ -258,9 +262,10 @@ button {
 }
 
 /* Readable line-length column (optional, toggled in Editor settings).
-   Text-level blocks and code blocks are constrained and centered; tables stay
-   full-width, and images live inside their paragraph's column but a resized one
-   can grow past it (see .nf-image.is-sized below).
+   Text-level blocks and code blocks are constrained and centered; tables start
+   at the column but a wide one can grow past it (see the table rule below), and
+   images live inside their paragraph's column but a resized one can grow past
+   it (see .nf-image.is-sized below).
    The column width is derived from the BODY font size (not each element's own
    font), so larger headings share the exact same column — otherwise their `ch`
    would scale up and effectively break out. ~72 mono chars at the base size. */
@@ -281,6 +286,17 @@ button {
 .editor-readable .prose-editor .ProseMirror > blockquote,
 .editor-readable .prose-editor .ProseMirror > hr {
   max-width: var(--readable-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* A top-level table (content-fitted, see § Tables) is a centred box at least as
+   wide as the column: a narrow one sits at the column's left edge, under the
+   text; a wider one grows centred into the gutters, up to the editor's width
+   (then it scrolls). !important beats the min-width TipTap writes inline on the
+   table (its cellMinWidth × columns, far below the column). */
+.editor-readable .prose-editor .ProseMirror > table {
+  min-width: min(var(--readable-col), 100%) !important;
   margin-left: auto;
   margin-right: auto;
 }
@@ -1718,7 +1734,12 @@ html[data-color-scheme="light"] .nsm-peek {
 .note-grid-body .prose-editor .ProseMirror pre code { font-size: 11px; }
 .note-grid-body .prose-editor .ProseMirror blockquote { margin: 3px 0; padding-left: 8px; border-left-width: 2px; }
 .note-grid-body .prose-editor .ProseMirror hr { margin: 6px 0; }
-.note-grid-body .prose-editor .ProseMirror table { font-size: 10px; }
+/* Cards don't scroll (pointer-events: none): a table wider than the card is clipped. */
+.note-grid-body .prose-editor .ProseMirror table { font-size: 10px; overflow: hidden; }
+/* …and, since it can't scroll, its columns still squeeze to fit the card (down
+   to their min-width) before clipping: the rows go back in an anonymous table
+   box, which shrinks to the card, instead of § Tables' content-sized <tbody>. */
+.note-grid-body .prose-editor .ProseMirror table > tbody { display: table-row-group; }
 /* Raw sections: the text as is, in the editor's font (like the raw textarea). */
 .note-grid-raw {
   margin: 0;
@@ -1943,46 +1964,105 @@ html[data-color-scheme="light"] .section-hover-card {
 }
 
 /* ── Tables ──────────────────────────────────────────────────────────────── */
+/* Content-fitted columns (widths can't be stored in markdown, so none are):
+   each column takes its content's width, between the cells' min-width (an empty
+   cell stays wide enough to click into) and max-width (longer text wraps).
+   TipTap only wraps a table in a div.tableWrapper when it is resizable
+   (editorExtensions.ts keeps resizable:false), so the <table> itself is the
+   scroll box: a block as wide as its content up to the available width. Its
+   rows' table box is the <tbody> (TipTap renders every row in it, the header
+   row included; the parser adds one to the static HTML of the chat and the
+   previews), sized to its content: a table that doesn't fit keeps its columns'
+   natural widths and scrolls horizontally instead of squeezing them first —
+   an anonymous table box would shrink-to-fit the block. The same rules serve
+   the editor, the chat and the previews (the overview cards opt out below). */
 .prose-editor .ProseMirror table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 0.75rem 0;
-  table-layout: fixed;
-  width: 100%;
   font-variant-numeric: tabular-nums;
-  overflow: hidden;
+}
+.prose-editor .ProseMirror table > tbody {
+  display: table;
+  width: max-content;
+  border-collapse: collapse;
 }
 .prose-editor .ProseMirror th,
 .prose-editor .ProseMirror td {
   border: 1px solid rgb(var(--border));
-  padding: 0.35rem 0.6rem;
+  padding: 0.36rem 0.6rem;
   vertical-align: top;
   position: relative;
-  min-width: 4rem;
+  min-width: 5em;
+  max-width: 28em;
+  overflow-wrap: break-word;
+  transition: background-color 0.1s;
 }
+/* Header = a small grey label (uppercase, tracked), no fill: the table reads as
+   data, not as a coloured band. min/max-width are rescaled by 1/0.8 so a header
+   cell keeps the body cells' limits in the body font. */
 .prose-editor .ProseMirror th {
-  background: rgb(var(--bg-2));
-  color: rgb(var(--cyan));
+  color: rgb(var(--text-muted));
+  font-size: 0.8em;
   font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
   text-align: left;
-}
-.prose-editor .ProseMirror tr:nth-child(even) td {
-  background: rgb(var(--bg-1) / 0.4);
+  padding-top: 0.5rem;
+  padding-bottom: 0.4rem;
+  min-width: 6.25em;
+  max-width: 35em;
 }
 .prose-editor .ProseMirror td p,
 .prose-editor .ProseMirror th p {
   margin: 0;
 }
-.prose-editor .ProseMirror .selectedCell {
-  background: rgb(var(--accent) / 0.15);
+/* The cell holding the caret (ActiveTableCell.ts decorates it), while the editor
+   has focus. */
+.prose-editor .ProseMirror.ProseMirror-focused .nf-active-cell {
+  box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
 }
-.prose-editor .ProseMirror .tableWrapper {
-  overflow-x: auto;
+/* A CellSelection (prosemirror-tables marks its cells .selectedCell): an accent
+   tint plus one accent outline around the whole range. The range is always a
+   rectangle (no merged cells in markdown tables), so a cell is on its edge when
+   the neighbour on that side is not selected; each edge sets one inset shadow. */
+.prose-editor .ProseMirror .selectedCell {
+  background: rgb(var(--accent) / 0.13);
+  box-shadow: var(--nf-sel-t, 0 0 #0000), var(--nf-sel-r, 0 0 #0000),
+    var(--nf-sel-b, 0 0 #0000), var(--nf-sel-l, 0 0 #0000);
+}
+.prose-editor .ProseMirror tr:first-child > .selectedCell,
+.prose-editor .ProseMirror tr:not(:has(> .selectedCell)) + tr > .selectedCell {
+  --nf-sel-t: inset 0 1.5px 0 0 rgb(var(--accent));
+}
+.prose-editor .ProseMirror tr:not(:has(+ tr > .selectedCell)) > .selectedCell {
+  --nf-sel-b: inset 0 -1.5px 0 0 rgb(var(--accent));
+}
+.prose-editor .ProseMirror .selectedCell:first-child,
+.prose-editor .ProseMirror :not(.selectedCell) + .selectedCell {
+  --nf-sel-l: inset 1.5px 0 0 0 rgb(var(--accent));
+}
+.prose-editor .ProseMirror .selectedCell:not(:has(+ .selectedCell)) {
+  --nf-sel-r: inset -1.5px 0 0 0 rgb(var(--accent));
+}
+/* During a CellSelection ProseMirror sets .ProseMirror-hideselection to hide the
+   leftover native selection; TipTap's injected `::selection` rule for it loses on
+   specificity to the editor's own ::selection (§ Selection), so a stray text
+   highlight showed inside the range. Scoped to tables: any NodeSelection also sets
+   hideselection, and inline atoms without their own selected style (section
+   relation pills) rely on that ::selection tint to show they are selected.
+   `table`, not `.selectedCell`: the DOM range also crosses unselected cells. */
+.prose-editor .ProseMirror.ProseMirror-hideselection table ::selection {
+  background: transparent;
 }
 /* Guide text in empty header cells so they never look like blank grey bars.
    An empty ProseMirror textblock renders as <p><br class="ProseMirror-trailingBreak"></p>. */
 .prose-editor .ProseMirror th > p:has(> br.ProseMirror-trailingBreak:only-child)::before {
   content: 'Column';
-  color: rgb(var(--text-muted) / 0.45);
+  color: rgb(var(--text-muted) / 0.5);
   font-weight: 400;
   pointer-events: none;
   float: left;
