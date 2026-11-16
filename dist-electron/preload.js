@@ -432,6 +432,14 @@ const api = {
         electron_1.ipcRenderer.on('notes-updated', wrapper);
         return () => electron_1.ipcRenderer.removeListener('notes-updated', wrapper);
     },
+    // Main moved these notes to the local archive ("use only the notes from …"): the window
+    // drops them from memory. Sent right before the path-less `notes-updated` of the archive.
+    onNotesArchived: (cb) => {
+        const strings = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
+        const wrapper = (_event, payload) => cb({ noteIds: strings(payload?.noteIds), dirs: strings(payload?.dirs) });
+        electron_1.ipcRenderer.on('notes-archived', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('notes-archived', wrapper);
+    },
     // Whether the main window can be seen (shown and not minimised). The page cannot tell by itself:
     // that window runs with backgroundThrottling off, so `document.hidden` never changes. Only the
     // main window emits it.

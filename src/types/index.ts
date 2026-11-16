@@ -715,6 +715,17 @@ export interface UiSettings {
   }
 }
 
+/**
+ * Payload of main's `notes-archived` broadcast: the notes "use only the notes from …" moved
+ * out of the notes dir into the local archive (sync.md "Origen del dir de notas").
+ */
+export interface NotesArchivedEvent {
+  /** Ids of the archived notes (one may be missing when its note.md could not be read). */
+  noteIds: string[]
+  /** Their folder names inside the notes dir. */
+  dirs: string[]
+}
+
 // Extend window with our electron bridge
 declare global {
   interface Window {
@@ -777,6 +788,12 @@ declare global {
       setSectionWindowTarget: (noteId: string, sectionId: string) => void
       onNewNote: (cb: () => void) => () => void
       onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => () => void
+      /**
+       * Main moved these notes to the local archive ("use only the notes from …"): drop them
+       * from memory (notesStore.removeArchivedNotes) — never a delete. Arrives right before the
+       * archive's path-less `notes-updated`.
+       */
+      onNotesArchived: (cb: (event: NotesArchivedEvent) => void) => () => void
       /** Main window shown / hidden / minimised / restored. `document.hidden` can't tell (backgroundThrottling is off). */
       onWindowVisibility: (cb: (visible: boolean) => void) => () => void
       windowId: () => number

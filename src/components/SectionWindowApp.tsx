@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Lock, Minus, Square, X } from 'lucide-react'
-import { closeWindowAfterSaving, useNotesStore } from '../stores/notesStore'
+import { bindArchivedNotes, closeWindowAfterSaving, useNotesStore } from '../stores/notesStore'
 import { useGroupsStore } from '../stores/groupsStore'
 import { useTemplatesStore } from '../stores/templatesStore'
 import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
@@ -82,12 +82,15 @@ export function SectionWindowApp() {
         useEditorSettingsStore.getState().reloadUiSettings()
       }
     })
+    // Notes moved to the local archive leave this window's store too — see App.tsx.
+    const unbindArchived = bindArchivedNotes()
     // Groups metadata changed outside the app (CLI) — see App.tsx.
     const unbindGroups = window.noteflow.onGroupsUpdated?.(() => {
       void useGroupsStore.getState().loadGroups()
     })
     return () => {
       unbind()
+      unbindArchived()
       unbindGroups?.()
     }
   }, [loadNotes])

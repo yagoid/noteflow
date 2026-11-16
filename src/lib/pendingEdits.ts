@@ -10,7 +10,8 @@
 // Every pending save registers here so those paths can flush it first.
 
 // `flush` is the owning slot's flush: it unregisters the entry and stops its timer.
-type Entry = { noteId: string; flush: () => void }
+// `cancel` is the owning slot's cancel: the same, without running the save.
+type Entry = { noteId: string; flush: () => void; cancel: () => void }
 
 /**
  * How a scheduled save runs: its debounce elapsed (`'timer'`), or it was run early
@@ -65,7 +66,7 @@ export function createDebouncedSave(): DebouncedSave {
       else clear()
       save = nextSave
       pendingTarget = target
-      entry = { noteId, flush }
+      entry = { noteId, flush, cancel: clear }
       pending.add(entry)
       timer = setTimeout(() => runNow('timer'), delayMs)
     },
@@ -79,6 +80,18 @@ export function createDebouncedSave(): DebouncedSave {
 export function flushPendingEdits(noteId?: string): void {
   for (const entry of [...pending]) {
     if (noteId === undefined || entry.noteId === noteId) entry.flush()
+  }
+}
+
+/**
+ * Drops every pending save of `noteId` WITHOUT running it. Only for a note that
+ * no longer exists for this window (main moved it to the local archive): its
+ * save has nowhere to land, and running it would only attempt a write main
+ * refuses. Anything else must flush — a dropped save is lost text.
+ */
+export function discardPendingEdits(noteId: string): void {
+  for (const entry of [...pending]) {
+    if (entry.noteId === noteId) entry.cancel()
   }
 }
 

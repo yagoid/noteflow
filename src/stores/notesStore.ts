@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
-import type { LinkedErrorCode, LinkedMetaPatch, LinkedNoteState, LinkedNoteWire, LinkError, Note, NoteSection } from '../types'
+import type { LinkedErrorCode, LinkedMetaPatch, LinkedNoteState, LinkedNoteWire, LinkError, Note, NoteSection, NotesArchivedEvent } from '../types'
 import {
   findLinkedNoteByPath,
   inlineLinkedImages,
@@ -31,7 +31,8 @@ import { collectAlarms } from '../lib/alarmUtils'
 import { getNoteSearchIndex } from '../lib/searchUtils'
 import { duplicateSectionInList, patchSectionInList } from '../lib/sectionUtils'
 import { createKeyedQueue } from '../lib/keyedQueue'
-import { flushPendingEdits, hasPendingEdits } from '../lib/pendingEdits'
+import { discardPendingEdits, flushPendingEdits, hasPendingEdits } from '../lib/pendingEdits'
+import { withoutArchivedNotes } from '../lib/archivedNotes'
 import { hoursFromNow, TEMP_NOTE_DEFAULT_HOURS } from '../lib/dateUtils'
 import { isUnsafeEncryptedSectionsWrite, redecryptWithSession, relockNotes } from '../lib/encryptedSession'
 import { keepNotesChangedDuringLoad } from '../lib/reloadGuard'
@@ -231,6 +232,9 @@ interface NotesState {
   rememberActiveSection: (noteId: string, sectionId: string) => void
   /** Re-reads one note folder from disk. `retried` is internal (one retry after a race with a local write). */
   syncNote: (filePath: string, retried?: boolean) => Promise<void>
+  // Main moved these notes to the local archive ("use only the notes from …"): they leave
+  // the store and its panes. Memory only — never a delete on disk or on the remote.
+  removeArchivedNotes: (event: NotesArchivedEvent) => void
 
   // ── Linked notes (external .md files edited in place — lib/linkedNotes.ts) ──
   /** Re-reads main's view of a linked note (by id or file path): metadata, status and — unless
@@ -581,6 +585,16 @@ export function notesFirstLoaded(): Promise<void> {
   return firstLoad
 }
 
+/**
+ * Subscribes this window's store to main's `notes-archived` broadcast. Every window that
+ * loads the notes binds it next to its `notes-updated` listener: the reload that follows
+ * the archive can't drop the notes by itself (loadNotes ignores an empty result while the
+ * store holds notes). → the unsubscribe function.
+ */
+export function bindArchivedNotes(): () => void {
+  return window.noteflow.onNotesArchived((event) => useNotesStore.getState().removeArchivedNotes(event))
+}
+
 /** Files opened from the OS at once: the first replaces the active pane, the rest open alongside up to this many panes. */
 const MAX_PANES_FROM_SYSTEM = 3
 
@@ -649,6 +663,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // Safety guard: if we got 0 notes but already had notes in memory, this is
       // likely a transient FS issue (e.g. Windows returning an empty dir on OS
       // wake from sleep). Don't wipe in-memory notes — they're still on disk.
+      // (When main's local archive empties the dir, its notes leave the store
+      // explicitly first — removeArchivedNotes — so this guard doesn't keep them.)
       if (loaded.length === 0 && get().notes.some((n) => !n.linked)) {
         set({ isLoading: false })
         return
@@ -835,6 +851,26 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     } catch (err) {
       console.error('Failed to sync note:', err)
     }
+  },
+
+  // See lib/archivedNotes.ts. Not a deletion: nothing is sent to main, so nothing is
+  // removed from disk nor from the remote. Later writes of these notes are no-ops (every
+  // write path looks the note up in the store first); a pull that brings one back adds it
+  // again through the regular reload.
+  removeArchivedNotes: (event) => {
+    const s = get()
+    const removal = withoutArchivedNotes(
+      { notes: s.notes, layout: layoutOf(s), sessionPasswords: s.sessionPasswords },
+      event,
+      { fallbackToAnotherNote: windowRole !== 'section', newPaneId: newPaneId() },
+    )
+    if (!removal) return
+    // Their debounced saves have nowhere to land: main refuses to recreate an archived
+    // note, so they are dropped instead of flushed (no write attempt, no error).
+    for (const id of removal.removed) discardPendingEdits(id)
+    set({ notes: removal.notes, ...layoutState(removal.layout), sessionPasswords: removal.sessionPasswords })
+    // Their alarms go with them (the main window owns alarm scheduling).
+    if (windowRole === 'main') window.noteflow.scheduleAlarms(alarmsOf(removal.notes))
   },
 
   // Queued with the note's writes: never interleaves with a write of ours in flight, and

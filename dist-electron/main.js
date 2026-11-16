@@ -2034,6 +2034,7 @@ function applyNoteWrite(payload, senderId, opts) {
     if (writes.length === 0)
         throw new Error('Empty note write');
     fs_1.default.mkdirSync(dirPath, { recursive: true });
+    notesDirEmptiedByArchive = false; // the dir holds a note again
     markInternalWrite(dir);
     for (const [f] of writes)
         markInternalWrite(`${dir}/${f}`);
@@ -2124,6 +2125,31 @@ function notesArchiveRoot() {
 // Note folders moved to the archive this session: a write to one of them that
 // would recreate it is refused (applyNoteWrite).
 const archivedNoteDirs = new Set();
+// The archive left the notes dir without a single note: an empty listing is the
+// truth, not the transient empty readdir fs:read-all-notes retries for (~4 s).
+// Cleared as soon as a note is written or a listing finds notes again.
+let notesDirEmptiedByArchive = false;
+/**
+ * Note folders that just left the notes dir for the local archive: late writes
+ * to them are refused, the AI index forgets them and every window is told which
+ * notes are gone (`notes-archived`) so it drops them from memory. The path-less
+ * `notes-updated` that follows can't do that part: the renderer ignores an
+ * EMPTY reload while it holds notes (a transient empty readdir on Windows) —
+ * and an emptied dir is what "use only the remote's notes" leaves until the
+ * pull brings something. Nothing is deleted here, on disk or remotely.
+ */
+function forgetArchivedNoteDirs(dirs, noteIds) {
+    for (const dir of dirs) {
+        archivedNoteDirs.add(dir);
+        aiIndex.removeFromIndex(path_1.default.join(NOTES_DIR, dir));
+    }
+    const ids = [...new Set(noteIds)];
+    if (dirs.length === 0 && ids.length === 0)
+        return;
+    if (noteFormat.listNoteDirs(NOTES_DIR).length === 0)
+        notesDirEmptiedByArchive = true;
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-archived', { noteIds: ids, dirs }));
+}
 /** Closes the sticky and section windows showing any of `noteIds`; resolves once closed (bounded). */
 function closeWindowsShowingNotes(noteIds, timeoutMs = 2000) {
     const targets = [];
@@ -2164,26 +2190,28 @@ class OriginSwitchAbortedError extends Error {
  * — see notesArchive.ts — and brings the app's state in line: the editors'
  * pending saves land first (they are archived with the note), windows showing
  * those notes are closed, the watcher ignores the moves, the AI index forgets
- * them and every window reloads. Throws NotesArchiveError when nothing could be
- * moved (everything undone): the caller must not pull then. `stillValid` is
- * checked right before the (synchronous) archive, after the waits for windows
- * and pending saves: if the switch is no longer what the user chose, nothing
- * is moved (OriginSwitchAbortedError).
+ * them, every window drops them from memory (forgetArchivedNoteDirs) and
+ * reloads. Throws NotesArchiveError when nothing could be moved (everything
+ * undone): the caller must not pull then. `stillValid` is checked right before
+ * the (synchronous) archive, after the waits for windows and pending saves: if
+ * the switch is no longer what the user chose, nothing is moved
+ * (OriginSwitchAbortedError).
  */
 async function archiveLocalNotesForOriginSwitch(label, origin, opts = {}) {
     const before = (0, localOnlyNotes_1.listSyncedNoteDirs)(NOTES_DIR);
-    const ids = new Set();
+    const idByDir = new Map();
     for (const dir of before) {
         const note = noteFormat.parseNoteDir(path_1.default.join(NOTES_DIR, dir));
         if (note)
-            ids.add(note.id);
+            idByDir.set(dir, note.id);
     }
-    await closeWindowsShowingNotes(ids);
+    await closeWindowsShowingNotes(new Set(idByDir.values()));
     await flushMainWindowEdits();
     if (opts.stillValid && !opts.stillValid())
         throw new OriginSwitchAbortedError();
     // The watcher must not echo the moves back as external edits.
-    for (const dir of (0, localOnlyNotes_1.listSyncedNoteDirs)(NOTES_DIR)) {
+    const candidates = (0, localOnlyNotes_1.listSyncedNoteDirs)(NOTES_DIR);
+    for (const dir of candidates) {
         markInternalWrite(dir);
         try {
             for (const f of fs_1.default.readdirSync(path_1.default.join(NOTES_DIR, dir)))
@@ -2197,21 +2225,31 @@ async function archiveLocalNotesForOriginSwitch(label, origin, opts = {}) {
     // of their single section: those entries stay in the filtered groups.json /
     // folders.json / section-colors.json.
     const linked = linkedNotes.list();
-    const result = notesArchive.archiveSyncedNotes({
-        notesDir: NOTES_DIR,
-        archiveRoot: notesArchiveRoot(),
-        label,
-        origin,
-        keep: {
-            groupIds: linked.map((n) => n.group).filter((g) => typeof g === 'string'),
-            folderIds: linked.map((n) => n.folder).filter((f) => typeof f === 'string'),
-            sectionNames: linked.map((n) => n.sectionName).filter((name) => typeof name === 'string'),
-        },
-    });
-    for (const dir of result.movedDirs) {
-        archivedNoteDirs.add(dir);
-        aiIndex.removeFromIndex(path_1.default.join(NOTES_DIR, dir));
+    const knownIds = (dirs) => dirs.map((dir) => idByDir.get(dir)).filter((id) => !!id);
+    let result;
+    try {
+        result = notesArchive.archiveSyncedNotes({
+            notesDir: NOTES_DIR,
+            archiveRoot: notesArchiveRoot(),
+            label,
+            origin,
+            keep: {
+                groupIds: linked.map((n) => n.group).filter((g) => typeof g === 'string'),
+                folderIds: linked.map((n) => n.folder).filter((f) => typeof f === 'string'),
+                sectionNames: linked.map((n) => n.sectionName).filter((name) => typeof name === 'string'),
+            },
+        });
     }
+    catch (err) {
+        // The undo failed half way: the folders that stayed in the archive are gone
+        // from the notes dir all the same (the caller reloads the windows).
+        if (err instanceof notesArchive.NotesArchiveError && !err.rolledBack) {
+            const stranded = candidates.filter((dir) => !fs_1.default.existsSync(path_1.default.join(NOTES_DIR, dir, noteFormat.NOTE_MD)));
+            forgetArchivedNoteDirs(stranded, knownIds(stranded));
+        }
+        throw err;
+    }
+    forgetArchivedNoteDirs(result.movedDirs, [...result.movedNoteIds, ...knownIds(result.movedDirs)]);
     if (result.movedFiles.length > 0)
         aiIndex.markStaleUnknown();
     console.log(`[Sync] archived ${result.movedDirs.length} note(s) and ${result.movedFiles.length} metadata file(s) to ${result.archiveDir}`);
@@ -2242,14 +2280,18 @@ electron_1.ipcMain.handle('fs:read-all-notes', async () => {
     // On Windows, readdirSync can return [] without throwing when the filesystem
     // isn't ready yet (e.g. OS waking from sleep, app starting at boot).
     // Retry so we don't mistake a transient empty result for no notes.
+    // Not after the local archive emptied the dir: then empty is the real answer.
+    const attempts = notesDirEmptiedByArchive ? 1 : 6;
     let dirs = [];
-    for (let attempt = 0; attempt < 6; attempt++) {
+    for (let attempt = 0; attempt < attempts; attempt++) {
         if (attempt > 0)
             await new Promise((r) => setTimeout(r, 800));
         dirs = noteFormat.listNoteDirs(NOTES_DIR);
         if (dirs.length > 0)
             break;
     }
+    if (dirs.length > 0)
+        notesDirEmptiedByArchive = false;
     return dirs
         .map((dir) => noteFormat.readNoteDirRecord(NOTES_DIR, dir))
         .filter((rec) => rec !== null);
