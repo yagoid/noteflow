@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { EditorState } from '@tiptap/pm/state'
 import {
   cellsToMarkdown, cellsToTsv, detectDelimiter, isNumericColumn, looksLikeTabularText,
-  parseCellNumber, parseDelimited, sortOrder, summarizeCells,
+  formatCellNumber, parseCellNumber, parseDelimited, sortOrder, summarizeCells,
 } from '../../src/lib/tableData'
 import { containsMarkdownTable } from '../../src/lib/markdownHtml'
 import { getTableData } from '../../src/components/Editor/tableOps'
@@ -74,21 +74,49 @@ describe('sortOrder', () => {
 })
 
 describe('summarizeCells', () => {
-  it('counts, sum and average of the numeric cells', () => {
+  it('counts, sum, average, min and max of the numeric cells', () => {
     expect(summarizeCells([['1', '2,5'], ['x', ''], ['-0.5']])).toEqual({
-      count: 5, filled: 4, numeric: 3, sum: 3, average: 1,
+      count: 5, filled: 4, numeric: 3, sum: 3, average: 1, min: -0.5, max: 2.5, decimals: 1,
     })
   })
 
   it('rounds the sum to the inputs\' decimals', () => {
     expect(summarizeCells([['0.1', '0.2']]).sum).toBe(0.3)
     expect(summarizeCells([['0,1'], ['0,2'], ['-0,3']]).sum).toBe(0)
+    expect(summarizeCells([['3,50'], ['1']]).decimals).toBe(2)
   })
 
-  it('no numbers → null sum and average', () => {
-    expect(summarizeCells([['a', ''], ['1,234']])).toEqual({ count: 3, filled: 2, numeric: 0, sum: null, average: null })
-    expect(summarizeCells([])).toEqual({ count: 0, filled: 0, numeric: 0, sum: null, average: null })
-    expect(summarizeCells([['7']])).toEqual({ count: 1, filled: 1, numeric: 1, sum: 7, average: 7 })
+  it('no numbers → null sum, average, min and max', () => {
+    const none = { sum: null, average: null, min: null, max: null, decimals: 0 }
+    expect(summarizeCells([['a', ''], ['1,234']])).toEqual({ count: 3, filled: 2, numeric: 0, ...none })
+    expect(summarizeCells([])).toEqual({ count: 0, filled: 0, numeric: 0, ...none })
+    expect(summarizeCells([['7']])).toEqual({ count: 1, filled: 1, numeric: 1, sum: 7, average: 7, min: 7, max: 7, decimals: 0 })
+    expect(summarizeCells([['-0'], ['x']])).toMatchObject({ min: 0, max: 0 })
+  })
+})
+
+describe('formatCellNumber', () => {
+  it('English: point decimal, comma grouping', () => {
+    expect(formatCellNumber(1234.5, 'en', 2)).toBe('1,234.50')
+    expect(formatCellNumber(12345, 'en', 0)).toBe('12,345')
+    expect(formatCellNumber(7, 'en', 1)).toBe('7.0')
+    expect(formatCellNumber(10 / 3, 'en', 2, 0)).toBe('3.33')
+    expect(formatCellNumber(7.5, 'en', 2, 0)).toBe('7.5')
+    expect(formatCellNumber(-2.25, 'en', 2)).toBe('-2.25')
+  })
+
+  it('Spanish: comma decimal, point grouping from 5 digits (es-ES leaves 4-digit numbers ungrouped)', () => {
+    expect(formatCellNumber(1234.5, 'es', 2)).toBe('1234,50')
+    expect(formatCellNumber(12345, 'es', 0)).toBe('12.345')
+    expect(formatCellNumber(1234567.25, 'es', 2)).toBe('1.234.567,25')
+    expect(formatCellNumber(10 / 3, 'es', 2, 0)).toBe('3,33')
+    expect(formatCellNumber(7.5, 'es', 2, 0)).toBe('7,5')
+  })
+
+  it('never "-0"; out-of-range decimals clamped', () => {
+    expect(formatCellNumber(-0.001, 'en', 2, 0)).toBe('0')
+    expect(formatCellNumber(-0.001, 'es', 2)).toBe('0,00')
+    expect(formatCellNumber(1.5, 'en', -1)).toBe('2')
   })
 })
 

@@ -15,7 +15,8 @@ import { en } from '../../src/i18n/en'
 import { es } from '../../src/i18n/es'
 import {
   HANDLE_GROWN, HANDLE_GROWN_OFFSET, HOVER_GUTTER, MENU_MARGIN, MIN_PLUS_SIZE, NEAR_BOTTOM, NEAR_RIGHT, PLUS_GAP, PLUS_SIZE, cellMenu, clipSpan, columnDropTarget,
-  columnHandleSpan, columnMenu, columnName, focusableItems, gapPosition, handleAnchor, hotLines, menuKeyAction, menuShortcutHints, hoverZone, menuMaxHeight, nearEdges,
+  columnHandleSpan, columnMenu, columnName, focusableItems, gapPosition, handleAnchor, hotLines, menuKeyAction, menuShortcutHints, pillBox, pillParts, selectionStats,
+  PILL_BAR_GAP, PILL_HEIGHT, MIN_ROW_BAR_WIDTH, type Box, hoverZone, menuMaxHeight, nearEdges,
   placeMenu, plusBars, rowDropTarget, rowHandleSpan, rowMenu, rowName, stepFocus, visibleBody,
   type Span, type TableAction, type TableGeometry, type TableMenuEntry, type TableMenuItem,
 } from '../../src/lib/tableControls'
@@ -584,5 +585,94 @@ describe('menuKeyAction: only plain ↑/↓/Enter/Esc are the menu\'s', () => {
     expect(key('ArrowDown', { shiftKey: true })).toBe('dismiss')
     expect(key('Enter', { shiftKey: true })).toBe('dismiss')
     expect(key('ArrowLeft')).toBe('dismiss')
+  })
+})
+
+// ── Summary pill ─────────────────────────────────────────────────────────────
+
+describe('selectionStats: the header row is never summed', () => {
+  it('a block that starts below the header counts all its cells', () => {
+    expect(selectionStats([['1', '2'], ['x', '']], 1)).toMatchObject({ count: 4, filled: 3, numeric: 2, sum: 3 })
+  })
+
+  it('a block from the header into the body (a whole column, a range) leaves the header row out', () => {
+    // A whole numeric column with a numeric-looking header: "2024" isn't summed nor counted.
+    expect(selectionStats([['2024'], ['10'], ['5']], 0)).toMatchObject({ count: 2, filled: 2, numeric: 2, sum: 15, min: 5, max: 10 })
+    expect(selectionStats([['Qty', 'Price'], ['3', '1,5']], 0)).toMatchObject({ count: 2, numeric: 2, sum: 4.5 })
+  })
+
+  it('a header-only block counts its cells, never as numbers', () => {
+    expect(selectionStats([['Name', '2024', '']], 0)).toEqual({
+      count: 3, filled: 2, numeric: 0, sum: null, average: null, min: null, max: null, decimals: 0,
+    })
+  })
+})
+
+describe('pillParts', () => {
+  const parts = (rows: string[][], top: number, msgs = m, lang = 'en') =>
+    pillParts(selectionStats(rows, top), msgs, lang).map((p) => (p.value === undefined ? p.label : `${p.label} ${p.value}`))
+
+  it('numbers: Sum, Average, Min, Max, then "N numbers · M cells"', () => {
+    expect(parts([['1200'], ['34,5'], ['x']], 1)).toEqual([
+      'Sum 1,234.5', 'Average 617.25', 'Min 34.5', 'Max 1,200.0', '2 numbers · 3 cells',
+    ])
+    expect(parts([['1200'], ['34,5'], ['x']], 1, es.editor.table, 'es')).toEqual([
+      'Suma 1234,5', 'Media 617,25', 'Mín 34,5', 'Máx 1200,0', '2 números · 3 celdas',
+    ])
+  })
+
+  it('a single number: only Sum (no average / min / max)', () => {
+    expect(parts([['7'], ['x']], 1)).toEqual(['Sum 7', '1 number · 2 cells'])
+    expect(parts([['7'], ['x']], 1, es.editor.table, 'es')).toEqual(['Suma 7', '1 número · 2 celdas'])
+  })
+
+  it('no numbers: "M cells · K with text"; header-only blocks too', () => {
+    expect(parts([['a', ''], ['b', 'c']], 1)).toEqual(['4 cells', '3 with text'])
+    expect(parts([['Name', '2024']], 0)).toEqual(['2 cells', '2 with text'])
+    expect(parts([['Nombre', '']], 0, es.editor.table, 'es')).toEqual(['2 celdas', '1 con texto'])
+  })
+
+  it('parts are keyed for the DOM (data-part)', () => {
+    expect(pillParts(selectionStats([['1'], ['2']], 1), m, 'en').map((p) => p.key)).toEqual(['sum', 'average', 'min', 'max', 'counts'])
+    expect(pillParts(selectionStats([['a'], ['b']], 1), m, 'en').map((p) => p.key)).toEqual(['cells', 'filled'])
+  })
+})
+
+describe('pill and row "+" bar in the band below the table', () => {
+  const intersects = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+
+  it('the pill sits at the rows\' left edge, inside the band, never over the next block', () => {
+    for (const room of [21, 22, 24, 28, 40]) {
+      const g = geo({}, 290 + room)
+      const nextBlock = { left: 0, right: 1000, top: g.roomBottom, bottom: g.roomBottom + 20 }
+      const pill = pillBox(g, 1000, 150)
+      if (room < PILL_HEIGHT + 2) { expect(pill, `room ${room}`).toBeNull(); continue }
+      expect(pill!.top, `room ${room}`).toBeGreaterThan(290)
+      expect(pill!.bottom, `room ${room}`).toBeLessThan(g.roomBottom)
+      expect(pill!.bottom - pill!.top).toBe(PILL_HEIGHT)
+      expect(intersects(pill!, nextBlock)).toBe(false)
+      expect(pill).toMatchObject({ left: 100, right: 250 })
+    }
+  })
+
+  it('below the table\'s own scrollbar; wider than a narrow table up to the editor\'s edge', () => {
+    const scrolling = geo({ right: 300, bottom: 296 }, 296 + 28)
+    expect(pillBox(scrolling, 1000, 80)!.top).toBeGreaterThan(296)
+    expect(pillBox(geo(), 1000, 500)).toMatchObject({ left: 100, right: 600 })
+    expect(pillBox(geo(), 520, 500)).toMatchObject({ left: 100, right: 520 })
+  })
+
+  it('the row bar takes only the width right of the pill, or none if too little is left', () => {
+    const g = geo({}, 290 + 28)
+    const pill = pillBox(g, 1000, 150)!
+    const { row } = plusBars(g, 1000, pill)
+    expect(row).toMatchObject({ left: pill.right + PILL_BAR_GAP, right: 400 })
+    expect(intersects(row!, pill)).toBe(false)
+    // A pill reaching close to (or past) the table's right edge: no row bar.
+    expect(plusBars(g, 1000, pillBox(g, 1000, 300 - PILL_BAR_GAP - MIN_ROW_BAR_WIDTH + 1)).row).toBeNull()
+    expect(plusBars(g, 1000, pillBox(g, 1000, 300 - PILL_BAR_GAP - MIN_ROW_BAR_WIDTH)).row).not.toBeNull()
+    expect(plusBars(g, 1000, pillBox(g, 1000, 500)).row).toBeNull()
+    // No pill: the full width.
+    expect(plusBars(g, 1000).row).toMatchObject({ left: 100, right: 400 })
   })
 })

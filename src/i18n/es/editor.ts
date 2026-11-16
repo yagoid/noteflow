@@ -122,6 +122,14 @@ export const editor = {
     columnHandle: 'Columna {n}: clic para opciones, arrastrar para mover',
     rowHandle: 'Fila {n}: clic para opciones, arrastrar para mover',
     headerHandle: 'Cabecera (fija): clic para opciones',
+    statsLabel: 'Resumen de la selección',
+    statSum: 'Suma',
+    statAverage: 'Media',
+    statMin: 'Mín',
+    statMax: 'Máx',
+    statNumbers: { one: '{count} número', other: '{count} números' },
+    statCells: { one: '{count} celda', other: '{count} celdas' },
+    statWithText: '{count} con texto',
   },
 
   tablePicker: {

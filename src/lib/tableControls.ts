@@ -15,7 +15,9 @@
 
 import type { Messages } from '../i18n'
 import { plural, tf } from '../i18n/format'
-import { isNumericColumn, type SortDirection, type TableAlign } from './tableData'
+import {
+  formatCellNumber, isNumericColumn, summarizeCells, type CellSummary, type SortDirection, type TableAlign,
+} from './tableData'
 import { shortcutText, tableShortcuts, type TableShortcutAction } from './tableShortcuts'
 
 // ── Geometry ─────────────────────────────────────────────────────────────────
@@ -187,14 +189,89 @@ function fitBar(from: number, to: number): Span | null {
  *   a thinner bar in the padding, or none if there isn't MIN_PLUS_SIZE.
  * Either is null when there's no room for it.
  */
-export function plusBars(g: TableGeometry, rightLimit: number): { column: Box | null; row: Box | null } {
+export function plusBars(g: TableGeometry, rightLimit: number, pill: Box | null = null): { column: Box | null; row: Box | null } {
   const v = visibleBody(g)
   const x = fitBar(v.right, rightLimit)
   const y = fitBar(Math.max(v.bottom, g.view.bottom), g.roomBottom)
+  // The summary pill shares the band below the rows: the row bar takes only
+  // what's right of it, if that's still a usable bar.
+  const rowLeft = pill ? Math.max(v.left, pill.right + PILL_BAR_GAP) : v.left
+  const row = y && v.right - rowLeft >= MIN_ROW_BAR_WIDTH ? { left: rowLeft, right: v.right, top: y.start, bottom: y.end } : null
   return {
     column: x && { left: x.start, right: x.end, top: v.top, bottom: v.bottom },
-    row: y && { left: v.left, right: v.right, top: y.start, bottom: y.end },
+    row,
   }
+}
+
+// ── Summary pill (count / sum of a cell selection) ───────────────────────────
+
+/** Height of the summary pill (index.css `.nf-table-pill`), and its gap to the row "+" bar beside it. */
+export const PILL_HEIGHT = 20
+export const PILL_BAR_GAP = 6
+/** Narrowest the row "+" bar is still drawn when the pill takes the start of the band. */
+export const MIN_ROW_BAR_WIDTH = 32
+
+/**
+ * Where the summary pill goes: in the same band below the rows as the row "+"
+ * bar (below the table's own scrollbar, inside its margin box up to
+ * `roomBottom`: never over the next block), at the rows' visible left edge,
+ * as wide as `width` (its measured content) up to `rightLimit` — the band is
+ * free to the right of a narrow table too. Null when the band can't hold
+ * PILL_HEIGHT with 1px to spare at each end (the pill isn't drawn: it is a
+ * read-out, nothing is lost).
+ */
+export function pillBox(g: TableGeometry, rightLimit: number, width: number): Box | null {
+  const v = visibleBody(g)
+  const top0 = Math.max(v.bottom, g.view.bottom)
+  const avail = g.roomBottom - top0
+  if (avail < PILL_HEIGHT + 2) return null
+  const top = top0 + Math.min(PLUS_GAP, avail - PILL_HEIGHT - 1)
+  const right = Math.max(v.left, Math.min(v.left + width, rightLimit))
+  return { left: v.left, right, top, bottom: top + PILL_HEIGHT }
+}
+
+/**
+ * The cells the summary counts, from the selected block (`rows`, row-major;
+ * `top` = its first row in the table). The header is never summed: a block
+ * that starts at the header and goes on into the body (a whole column, a range
+ * from the header down) leaves the header row out entirely; a header-only
+ * block keeps its cells — counted as cells / with text, never as numbers.
+ */
+export function selectionStats(rows: readonly (readonly string[])[], top: number): CellSummary {
+  if (top !== 0) return summarizeCells(rows)
+  if (rows.length > 1) return summarizeCells(rows.slice(1))
+  const s = summarizeCells(rows)
+  return { ...s, numeric: 0, sum: null, average: null, min: null, max: null, decimals: 0 }
+}
+
+/** One part of the pill: a label with its value (`Sum <b>12</b>`), or plain text. */
+export interface PillPart {
+  key: 'sum' | 'average' | 'min' | 'max' | 'counts' | 'cells' | 'filled'
+  label: string
+  value?: string
+}
+
+/**
+ * What the pill says, in the UI language (`lang`: numbers formatted by
+ * formatCellNumber). With numbers: Sum; with 2+ also Average, Min and Max; then
+ * "N numbers · M cells". Without: "M cells", "K with text".
+ */
+export function pillParts(s: CellSummary, m: TableMessages, lang: string): PillPart[] {
+  const cells = plural(m.statCells, s.count)
+  if (s.numeric === 0 || s.sum === null) {
+    return [{ key: 'cells', label: cells }, { key: 'filled', label: tf(m.statWithText, { count: s.filled }) }]
+  }
+  const num = (n: number) => formatCellNumber(n, lang, s.decimals)
+  const parts: PillPart[] = [{ key: 'sum', label: m.statSum, value: num(s.sum) }]
+  if (s.numeric > 1) {
+    parts.push(
+      { key: 'average', label: m.statAverage, value: formatCellNumber(s.average!, lang, 2, 0) },
+      { key: 'min', label: m.statMin, value: num(s.min!) },
+      { key: 'max', label: m.statMax, value: num(s.max!) },
+    )
+  }
+  parts.push({ key: 'counts', label: `${plural(m.statNumbers, s.numeric)} · ${cells}` })
+  return parts
 }
 
 // ── Dragging a handle ────────────────────────────────────────────────────────

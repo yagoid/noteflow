@@ -943,6 +943,13 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   siguiente ni las celdas, así un clic ahí siempre pone el cursor. Por eso, en el editor, debajo de cada
   tabla queda algo más de aire que en las vistas de solo lectura. Si no hay sitio (p. ej. una tabla ancha
   en una sticky estrecha) la barra se adelgaza o no aparece; añadir sigue en los menús.
+- **Resumen de la selección:** con **2 o más celdas** seleccionadas (un rango, una fila o una columna
+  entera) aparece bajo la tabla una pastilla con la **suma**, y si hay 2+ números también la **media**,
+  el **mínimo** y el **máximo**, seguidos de "N números · M celdas"; sin números, "M celdas · K con
+  texto". Los números salen con el formato del idioma de la app (`1,234.5` / `1234,5`). La **cabecera
+  nunca se suma**: al seleccionar una columna entera solo cuentan sus datos; seleccionar solo celdas de
+  la cabecera las cuenta como celdas. Es solo informativa (no se pulsa ni se copia); comparte el hueco
+  bajo la tabla con la barra «+», que se acorta a su derecha.
 - **Clic derecho** en una celda (y el botón de tabla de la toolbar dentro de una tabla): menú **corto**
   — *Row*: insertar encima/debajo y eliminar; *Column*: insertar a la izquierda/derecha y eliminar;
   *Clear N cells* si hay varias celdas seleccionadas; y *Delete table*. Duplicar, alinear y ordenar están

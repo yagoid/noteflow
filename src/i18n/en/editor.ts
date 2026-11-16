@@ -150,6 +150,15 @@ export const editor = {
     columnHandle: 'Column {n}: click for options, drag to move',
     rowHandle: 'Row {n}: click for options, drag to move',
     headerHandle: 'Header (fixed): click for options',
+    // Summary pill under the table while 2+ cells are selected (the header row is never summed).
+    statsLabel: 'Selection summary',
+    statSum: 'Sum',
+    statAverage: 'Average',
+    statMin: 'Min',
+    statMax: 'Max',
+    statNumbers: { one: '{count} number', other: '{count} numbers' },
+    statCells: { one: '{count} cell', other: '{count} cells' },
+    statWithText: '{count} with text',
   },
 
   // Size picker of the toolbar's table button. Rows always include the header
