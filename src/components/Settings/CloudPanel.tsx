@@ -292,7 +292,7 @@ export function CloudPanel({ initialBundle = false, githubConnected, onGithubCon
               {recoveryCode}
             </span>
           </div>
-          <p className="text-[11px] font-mono text-red-400 leading-relaxed">
+          <p className="text-[11px] font-mono text-red leading-relaxed">
             {t.settings.cloud.recoveryWarning}
           </p>
           <div className="flex gap-2">

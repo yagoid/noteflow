@@ -284,6 +284,7 @@ export function GitHubPausedRow({ onConnectedChange }: { onConnectedChange: (con
   const gh = useGitHubSync(onConnectedChange)
   const repo = repoSlug(gh.status?.owner, gh.status?.repo) ?? ''
   const busy = gh.busy !== 'idle'
+  const pausedError = gh.error ?? gh.status?.error
 
   return (
     <>
@@ -309,9 +310,9 @@ export function GitHubPausedRow({ onConnectedChange }: { onConnectedChange: (con
           </>
         }
       >
-        {gh.error || gh.mirrorResult ? (
+        {pausedError || gh.mirrorResult ? (
           <>
-            {gh.error && <ErrorNotice>{gh.error}</ErrorNotice>}
+            {pausedError && <ErrorNotice>{pausedError}</ErrorNotice>}
             {gh.mirrorResult && <MirrorResultNotice gh={gh} result={gh.mirrorResult} />}
           </>
         ) : null}

@@ -3502,7 +3502,7 @@ en pausa). Compacta en reposo (badge Connected / Not connected + botón) y se de
 fila mientras hay un flujo (código por email, aviso e2ee, errores); IO en `electron/cliConnect.ts`, reglas
 puras en `electron/cliConnectLogic.ts` (tests en `tests/electron/cliConnectLogic.test.ts`). El estado
 se lee del `settings.json` **del CLI** (`cliSettingsPath`, espejo de `getSettingsDir()`), así que un CLI
-conectado desde la terminal también sale como "CLI connected (…)".
+conectado desde la terminal también sale como conectado ("Connected with {target}." en la fila del CLI).
 **Versión Microsoft Store:** no lleva CLI (sin `PATH`; en Windows el CLI solo llega con el instalador NSIS),
 así que `CliConnectRow` muestra solo una explicación —nunca el estado/Desconectar de un `cliAccount`
 heredado de una instalación directa— y `cliConnect.ts` responde `cliMissing`. Ver `release.md` § Microsoft Store.
