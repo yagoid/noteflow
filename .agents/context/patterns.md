@@ -951,7 +951,9 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   - Citas recursivas (`mdBlockquoteToHtml` + `quoteDepth`: sin tableros dentro) y el serializador de
     citas que quita solo el último separador.
   - Tablas: líneas pegadas bajo la tabla como bloque propio (`mdTableToHtml`) y `cellLines`/
-    `isBlockCell` al serializar celdas.
+    `isBlockCell` al serializar celdas; tablas de una columna (`isTableStart` +
+    `TABLE_SEPARATOR_1COL_RE`, ver "Editor: tablas"): sin portar, el móvil las lee como un párrafo
+    de texto.
   - Headings pegados (`mdParagraphBlockToHtml`), `headingElToMd` (breaks → espacio; heading vacío →
     párrafo vacío).
   - Tareas: `- [x](url)` no es tarea, `- [ ]foo` es viñeta; marcador vacío `emptyMarkerIsItem` y
@@ -1075,10 +1077,20 @@ columna (`:---:`), saltos de celda como `<br>`, sin anchos guardados; `Table` de
   ProseMirror partiría la lista) o de una **tabla** (la celda es `block+`: anidaría una tabla que
   `tableElToMd` no sabe escribir) → justo **después de la lista/tabla más externa** (dentro de una cita
   sigue en la cita, que sí se serializa con `> | … |`); con una NodeSelection de bloque (tablero
-  kanban) → detrás del nodo en vez de sustituirlo. Mínimo **2 columnas** (`TABLE_MIN_COLS`):
-  `TABLE_SEPARATOR_RE` de `markdownHtml.ts` exige dos celdas, así que una tabla de una columna
-  (`| --- |`) vuelve como texto al reabrir — limitación del parser conocida (borrar columnas hasta
-  dejar una en una tabla existente también la pierde al recargar).
+  kanban) → detrás del nodo en vez de sustituirlo. Mínimo **1 columna** (`TABLE_MIN_COLS`; la
+  rejilla del selector arranca en 1×1).
+- **Tablas de una columna (`isTableStart` en `markdownHtml.ts`, única función que decide si un par
+  cabecera + separador abre tabla; la usan `blockKind` y `containsMarkdownTable` → pegado vía
+  `looksLikeMarkdown`).** Separador de 2+ celdas: `TABLE_SEPARATOR_RE`, sin cambios. Separador de
+  **una** celda (`TABLE_SEPARATOR_1COL_RE`): `| --- |`, `|---|`, `| :---: |`, `|---`, `--- |`… — con
+  **al menos un `|`** (un `---` a secas es HR, nunca separador) y **solo bajo una cabecera de una
+  celda** (`splitPipeRow(cabecera).length === 1`, como en GFM: cabecera y separador con el mismo nº
+  de celdas), así una línea de prosa con `|` encima de `| --- |` sigue siendo prosa. El serializador
+  no cambia: una columna sale `| H |\n| --- |\n| a |`. Hasta 2026-11 el separador exigía dos celdas y
+  una tabla que se quedaba en una columna (borrando columnas; `deleteColumn` de prosemirror-tables
+  no deja borrar la última) volvía como texto al reabrir. Filas **más anchas que la cabecera**:
+  `mdTableToHtml` descarta las celdas sobrantes (como GFM, en cualquier ancho; el editor no las
+  escribe nunca, solo pasa con markdown escrito a mano).
 - **Toolbar:** el botón de tabla **siempre inserta** (`TableSizePicker.tsx`: rejilla 8×8, mismo patrón
   que `SnippetsButton` — portal `fixed z-50`, mousedown + `preventDefault` para no perder la selección,
   cierre por clic fuera; teclas en fase de captura en `window` porque el foco sigue en el editor:

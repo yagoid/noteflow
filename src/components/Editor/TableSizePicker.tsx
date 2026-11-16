@@ -121,7 +121,6 @@ export function TableSizePicker({ editor }: { editor: Editor }) {
               <div key={r} className="flex gap-[3px]">
                 {CELLS.map((c) => {
                   const on = r < size.rows && c < size.cols
-                  // The first column picks 2: a one-column table wouldn't reload (TABLE_MIN_COLS).
                   const cell = clampTableSize({ rows: r + 1, cols: c + 1 })
                   return (
                     <div

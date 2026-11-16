@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { htmlFromMarkdown } from '../../src/lib/markdownHtml'
+import { containsMarkdownTable, htmlFromMarkdown, looksLikeMarkdown } from '../../src/lib/markdownHtml'
 
 // These tests exercise the markdown → HTML direction (a pure, node-safe string
 // transform). The inverse `htmlToMarkdown` relies on the DOM (`DOMParser`) and
@@ -400,6 +400,67 @@ describe('htmlFromMarkdown — blockquote content', () => {
   it('reads paragraphs and soft breaks as before', () => {
     expect(htmlFromMarkdown('> a\n> b\n>\n> c')).toBe('<blockquote><p>a<br>b</p><p>c</p></blockquote>')
     expect(htmlFromMarkdown('>')).toBe('<blockquote><p></p></blockquote>')
+  })
+})
+
+// A one-column pipe table (what's left after deleting columns down to one) is
+// a table, in every separator spelling with a pipe; a bare `---` never is (an
+// HR), nor is a one-column separator below a header with more than one cell.
+describe('htmlFromMarkdown — one-column tables', () => {
+  it('reads the separators a one-column table can have', () => {
+    for (const sep of ['| --- |', '|---|', '| :---: |', '|:---|', '| ---: |', '| --- ', '|---', '--- |', '---|', '  | --- |  ']) {
+      expect(htmlFromMarkdown(`| H |\n${sep}\n| a |`), sep).toMatch(/^<table><tr><th[^>]*>H<\/th><\/tr><tr><td[^>]*>a<\/td><\/tr><\/table>$/)
+      expect(containsMarkdownTable(`| H |\n${sep}`), sep).toBe(true)
+    }
+  })
+
+  it('keeps header-only tables, rows, alignment, <br> and escaped pipes', () => {
+    expect(htmlFromMarkdown('|   |\n| --- |')).toBe('<table><tr><th></th></tr></table>')
+    expect(htmlFromMarkdown('| H |\n| --- |\n| a |\n| b |'))
+      .toBe('<table><tr><th>H</th></tr><tr><td>a</td></tr><tr><td>b</td></tr></table>')
+    expect(htmlFromMarkdown('| H |\n| :---: |\n| a |'))
+      .toBe('<table><tr><th style="text-align:center">H</th></tr><tr><td style="text-align:center">a</td></tr></table>')
+    expect(htmlFromMarkdown('| H |\n| --- |\n| a<br>b |')).toBe('<table><tr><th>H</th></tr><tr><td>a<br>b</td></tr></table>')
+    expect(htmlFromMarkdown('| a \\| b |\n| --- |')).toBe('<table><tr><th>a | b</th></tr></table>')
+    expect(htmlFromMarkdown('H |\n|---')).toBe('<table><tr><th>H</th></tr></table>')
+  })
+
+  it('reads one inside a blockquote', () => {
+    expect(htmlFromMarkdown('> | H |\n> | --- |\n> | a |'))
+      .toBe('<blockquote><table><tr><th>H</th></tr><tr><td>a</td></tr></table></blockquote>')
+  })
+
+  it('does not turn prose with a pipe and a rule or a dash line into a table', () => {
+    const notTables = [
+      'a | b\n---', // setext underline / HR below a line with a pipe
+      'prose with a | pipe\n---',
+      '| H |\n---', // a bare HR right below a table-ish line
+      '| H |\n   ---   ',
+      'text |\n- - -',
+      'text |\n--',
+      'a | b\n| --- |', // a one-cell separator below a two-cell header
+      'a | b | c\n|---|',
+      'a | b\n--- |',
+      'no pipe\n| --- |', // the header needs a pipe
+      '| H |\n| - |', // fewer than 3 dashes
+      '| H |\n| --- | x',
+    ]
+    for (const md of notTables) {
+      expect(htmlFromMarkdown(md), md).not.toContain('<table>')
+      expect(containsMarkdownTable(md), md).toBe(false)
+    }
+    expect(looksLikeMarkdown('a | b\n---')).toBe(false)
+    expect(looksLikeMarkdown('prose with a | pipe\n| --- |')).toBe(false)
+    expect(looksLikeMarkdown('| H |\n| --- |\n| a |')).toBe(true)
+  })
+
+  it('reads two-or-more-column tables exactly as before', () => {
+    expect(htmlFromMarkdown('| a | b |\n| :--- | ---: |\n| 1 | 2 |')).toBe(
+      '<table><tr><th style="text-align:left">a</th><th style="text-align:right">b</th></tr>' +
+      '<tr><td style="text-align:left">1</td><td style="text-align:right">2</td></tr></table>')
+    // A two-cell separator below a one-cell header is a table, as it always was.
+    expect(htmlFromMarkdown('a |\n--- | ---')).toBe('<table><tr><th>a</th></tr></table>')
+    expect(containsMarkdownTable('x | y\n---|---')).toBe(true)
   })
 })
 

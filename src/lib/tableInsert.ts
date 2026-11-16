@@ -22,11 +22,10 @@ export interface TableSize {
 export const TABLE_PICKER_MAX = 8
 
 /**
- * Fewest columns of a new table. A one-column pipe table (`| --- |` separator)
- * isn't read back as a table by lib/markdownHtml.ts (its separator pattern needs
- * two cells), so it would come back as plain text after a save.
+ * Fewest columns of a new table. A one-column pipe table (`| H |` + `| --- |`)
+ * is read back as a table by lib/markdownHtml.ts, so one column is allowed.
  */
-export const TABLE_MIN_COLS = 2
+export const TABLE_MIN_COLS = 1
 
 /** What `/table` inserts, and where the picker's highlight starts. */
 export const DEFAULT_TABLE_SIZE: TableSize = { rows: 3, cols: 3 }

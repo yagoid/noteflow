@@ -904,8 +904,9 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   antes ahí borraba la tabla). Abre un **selector de tamaño**: rejilla 8×8 donde el ratón resalta
   filas × columnas y el clic inserta; con teclado, flechas mueven la selección, `Enter` inserta y `Esc`
   cierra devolviendo el foco al editor. La etiqueta muestra `filas × columnas` (p. ej. `3 × 4`) y las
-  **filas incluyen la de cabecera** (3 × 4 = cabecera + 2 filas, 4 columnas). Arranca en 3 × 3. Mínimo
-  **2 columnas** (una tabla de una sola columna no se relee como tabla al reabrir la nota).
+  **filas incluyen la de cabecera** (3 × 4 = cabecera + 2 filas, 4 columnas). Arranca en 3 × 3. Se
+  puede elegir **una sola columna** (1 × 1 incluido); una tabla que se queda en una columna al borrar
+  columnas sigue siendo tabla al reabrir la nota.
 - **`/table`** (o `/tabla`, `/grid`, en cualquier idioma) inserta una tabla 3×3 con cabecera. También
   en notas vinculadas (una pipe-table es markdown estándar). **No se ofrece** dentro de una lista ni
   dentro de otra tabla (markdown no puede guardar ahí una tabla).

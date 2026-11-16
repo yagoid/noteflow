@@ -66,11 +66,13 @@ describe('moveTableSize', () => {
     expect(moveTableSize({ rows: 3, cols: 3 }, 'ArrowUp')).toEqual({ rows: 2, cols: 3 })
   })
 
-  it('clamps rows to 1…max and columns to 2…max', () => {
-    expect(TABLE_MIN_COLS).toBe(2)
+  it('clamps rows and columns to 1…max', () => {
+    expect(TABLE_MIN_COLS).toBe(1)
     expect(moveTableSize({ rows: 1, cols: 2 }, 'ArrowUp')).toEqual({ rows: 1, cols: 2 })
-    expect(moveTableSize({ rows: 1, cols: 2 }, 'ArrowLeft')).toEqual({ rows: 1, cols: 2 })
-    expect(clampTableSize({ rows: 0, cols: 1 })).toEqual({ rows: 1, cols: 2 })
+    expect(moveTableSize({ rows: 1, cols: 2 }, 'ArrowLeft')).toEqual({ rows: 1, cols: 1 })
+    expect(moveTableSize({ rows: 1, cols: 1 }, 'ArrowLeft')).toEqual({ rows: 1, cols: 1 })
+    expect(clampTableSize({ rows: 0, cols: 0 })).toEqual({ rows: 1, cols: 1 })
+    expect(clampTableSize({ rows: 2, cols: 1 })).toEqual({ rows: 2, cols: 1 })
     expect(clampTableSize({ rows: 9, cols: 12 })).toEqual({ rows: TABLE_PICKER_MAX, cols: TABLE_PICKER_MAX })
     const max = { rows: TABLE_PICKER_MAX, cols: TABLE_PICKER_MAX }
     expect(moveTableSize(max, 'ArrowDown')).toEqual(max)
@@ -130,6 +132,11 @@ describe('insertTableTr', () => {
   it('makes a one-row table a lone header row that reloads as a table', () => {
     const { md } = inserted(stateAt(''), { rows: 1, cols: 2 })
     expect(md).toBe('|   |   |\n| --- | --- |')
+  })
+
+  it('makes one-column tables that reload as tables', () => {
+    expect(inserted(stateAt(''), { rows: 1, cols: 1 }).md).toBe('|   |\n| --- |')
+    expect(inserted(stateAt(''), { rows: 3, cols: 1 }).md).toBe('|   |\n| --- |\n|   |\n|   |')
   })
 
   it('splits the paragraph at the caret', () => {

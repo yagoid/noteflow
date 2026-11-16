@@ -118,10 +118,10 @@ function blockKind(lines: string[]): BlockKind {
   const first = lines.find(l => l.trim())
   if (first && LIST_MARKER_RE.test(first)) return 'list'
   if (first && /^\s*>\s?/.test(first)) return 'quote'
-  // Strict detection: line 1 must contain a |, line 2 must be a separator
-  // row with only |, :, -, spaces; every cell ≥3 dashes; ≥2 cells. This
-  // avoids reinterpreting paragraphs that contain literal | characters.
-  if (lines.length >= 2 && /\|/.test(lines[0]) && TABLE_SEPARATOR_RE.test(lines[1])) return 'table'
+  // Strict detection (isTableStart): line 1 must contain a |, line 2 must be
+  // a separator row. This avoids reinterpreting paragraphs that contain
+  // literal | characters.
+  if (lines.length >= 2 && isTableStart(lines[0], lines[1])) return 'table'
   return 'paragraph'
 }
 
@@ -971,14 +971,32 @@ function mdBlockquoteToHtml(lines: string[]): string {
 
 // A markdown table separator row: only |, :, -, spaces; each cell ≥3 dashes;
 // ≥2 cells. Strict (≥3 dashes) so paragraphs with literal | aren't mistaken
-// for tables. Shared by block parsing and the paste handler.
+// for tables.
 const TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
+
+// The separator row of a one-column table (`| --- |`, `|:---:|`, `|---`,
+// `--- |`…): one cell and at least one pipe — a bare `---` is a horizontal
+// rule, never a separator.
+const TABLE_SEPARATOR_1COL_RE = /^\s*(?:\|\s*:?-{3,}:?\s*\|?|:?-{3,}:?\s*\|)\s*$/
+
+/**
+ * Whether `header` + `sep` start a pipe table: the header has a `|` and `sep`
+ * is a separator row. A one-column separator only counts below a one-cell
+ * header (as in GFM, both rows have the same number of cells), so a line of
+ * prose with a `|` stays prose above a `| --- |`. Shared by block parsing and
+ * the paste handler (containsMarkdownTable).
+ */
+function isTableStart(header: string, sep: string): boolean {
+  if (!/\|/.test(header)) return false
+  if (TABLE_SEPARATOR_RE.test(sep)) return true
+  return TABLE_SEPARATOR_1COL_RE.test(sep) && splitPipeRow(header).length === 1
+}
 
 /** True if the text has a header line immediately followed by a separator row. */
 export function containsMarkdownTable(md: string): boolean {
   const lines = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
   for (let i = 0; i < lines.length - 1; i++) {
-    if (/\|/.test(lines[i]) && TABLE_SEPARATOR_RE.test(lines[i + 1])) return true
+    if (isTableStart(lines[i], lines[i + 1])) return true
   }
   return false
 }

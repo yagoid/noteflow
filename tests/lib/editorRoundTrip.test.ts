@@ -203,8 +203,11 @@ describe('canonical sections are byte-identical', () => {
 })
 
 // Small fixed blocks for the exhaustive adjacency checks.
-type Kind = 'paragraph' | 'emptyParagraph' | 'heading' | 'hr' | 'code' | 'quote' | 'table' | 'kanban' | ListType
-const KINDS: Kind[] = ['paragraph', 'emptyParagraph', 'heading', 'hr', 'code', 'quote', 'table', 'kanban', ...LIST_TYPES]
+type Kind = 'paragraph' | 'emptyParagraph' | 'heading' | 'hr' | 'code' | 'quote' | 'table' | 'table1' | 'kanban' | ListType
+const KINDS: Kind[] = ['paragraph', 'emptyParagraph', 'heading', 'hr', 'code', 'quote', 'table', 'table1', 'kanban', ...LIST_TYPES]
+
+const tableCell = (type: string, text: string, textAlign: string | null = null): JNode =>
+  ({ type, attrs: { colspan: 1, rowspan: 1, colwidth: null, textAlign }, content: text ? [p(t(text))] : [p()] })
 
 function block(kind: Kind, nestedLast = false): JNode {
   switch (kind) {
@@ -221,6 +224,10 @@ function block(kind: Kind, nestedLast = false): JNode {
         { type: 'tableRow', content: [cell('tableCell', 'a'), cell('tableCell', 'b')] },
       ] }
     }
+    case 'table1': return { type: 'table', content: [
+      { type: 'tableRow', content: [tableCell('tableHeader', 'h')] },
+      { type: 'tableRow', content: [tableCell('tableCell', 'a')] },
+    ] }
     case 'kanban': return load('<!-- kanban -->\n- Todo\n  - [ ] card\n<!-- /kanban -->').child(0).toJSON() as JNode
     default: {
       const sub = nestedLast ? [list(kind === 'taskList' ? 'bulletList' : 'taskList', [listItem(kind === 'taskList' ? 'bulletList' : 'taskList', p(t('sub')))])] : []
@@ -306,6 +313,65 @@ describe('lossless: documents the editor can hold', () => {
     expect(checked).toBeGreaterThan(SEEDS * 0.3)
     expect(mixedNeighbours).toBeGreaterThan(SEEDS * 0.03)
   }, 120_000)
+})
+
+// A table left with one column (Delete column down to one) used to come back as
+// plain text: its `| --- |` separator wasn't read as one.
+describe('one-column tables', () => {
+  const row = (...cells: JNode[]): JNode => ({ type: 'tableRow', content: cells })
+  const table = (...rows: JNode[]): JNode => ({ type: 'table', content: rows })
+  const H = (text: string, align: string | null = null) => tableCell('tableHeader', text, align)
+  const D = (text: string, align: string | null = null) => tableCell('tableCell', text, align)
+
+  it('round-trip byte for byte: header only, rows, alignment, <br>, pipes, empty header, in a quote', () => {
+    const cases: [string, JNode[], string][] = [
+      ['header only', [table(row(H('H')))], '| H |\n| --- |'],
+      ['header + rows', [table(row(H('H')), row(D('a')), row(D('b')))], '| H |\n| --- |\n| a |\n| b |'],
+      ['centered', [table(row(H('H', 'center')), row(D('a', 'center')))], '| H |\n| :---: |\n| a |'],
+      ['right', [table(row(H('H', 'right')), row(D('a', 'right')))], '| H |\n| ---: |\n| a |'],
+      ['a <br> in a cell', [table(row(H('H')), row({ ...D(''), content: [p(t('a'), br, t('b'))] }))], '| H |\n| --- |\n| a<br>b |'],
+      ['a pipe in a cell', [table(row(H('a | b')), row(D('c')))], '| a \\| b |\n| --- |\n| c |'],
+      ['empty header', [table(row(H('')), row(D('a')))], '|   |\n| --- |\n| a |'],
+      ['in a quote', [{ type: 'blockquote', content: [table(row(H('H')), row(D('a')))] }], '> | H |\n> | --- |\n> | a |'],
+      ['between text', [p(t('before')), table(row(H('H')), row(D('a'))), p(t('after'))], 'before\n\n| H |\n| --- |\n| a |\n\nafter'],
+    ]
+    for (const [label, content, md] of cases) {
+      const doc = docOf(content)
+      expect(save(doc), label).toBe(md)
+      expectLossless(doc, label)
+    }
+  })
+
+  it('tables of 2+ columns are written exactly as before', () => {
+    expect(save(docOf([table(row(H('a'), H('b')), row(D('1'), D('2')))]))).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |')
+    expect(save(docOf([table(
+      row(H('a', 'left'), H('b', 'center'), H('c', 'right')),
+      row(D('1', 'left'), D('', 'center'), D('x | y', 'right')),
+    )]))).toBe('| a | b | c |\n| :--- | :---: | ---: |\n| 1 |   | x \\| y |')
+  })
+
+  it('Delete column down to one column keeps the table after a reload', () => {
+    const ed = new Editor({ extensions: schemaExtensions(), content: htmlFromMarkdown('| h1 | h2 |\n| --- | --- |\n| a | b |') })
+    let pos = -1
+    ed.state.doc.descendants((n, at) => { if (pos < 0 && n.isText && n.text === 'h2') pos = at })
+    ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, pos)))
+    expect(ed.commands.deleteColumn()).toBe(true)
+    const md = htmlToMarkdown(ed.getHTML())
+    expect(md).toBe('| h1 |\n| --- |\n| a |')
+    expect(load(md).toJSON()).toEqual(ed.state.doc.toJSON())
+    // The last column can't be deleted (prosemirror-tables refuses it).
+    expect(ed.commands.deleteColumn()).toBe(false)
+    ed.destroy()
+  })
+
+  it('prose with a pipe above a rule or a dash line stays prose', () => {
+    for (const md of ['a | b\n\n---', 'a | b\n---', 'text |\n- - -', 'prose with a | pipe\n| --- |']) {
+      const doc = load(md)
+      let tables = 0
+      doc.descendants((n) => { if (n.type.name === 'table') tables++ })
+      expect(tables, md).toBe(0)
+    }
+  })
 })
 
 describe('stable: any markdown', () => {
