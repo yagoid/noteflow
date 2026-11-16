@@ -162,6 +162,8 @@ noteflow/
 │   │   │   ├── CodeBlockWithCopy.tsx    # NodeView: code block con botón copiar
 │   │   │   ├── ResizableImage.tsx       # NodeView: imagen redimensionable
 │   │   │   ├── TableContextMenu.tsx     # Menú contextual de tablas
+│   │   │   ├── tableUtils.ts            #   alineación por columna (getColumnAlign/setColumnAlign)
+│   │   │   ├── tableOps.ts              #   comandos de tabla sin UI: mover/ordenar/duplicar/vaciar… (ver patterns.md)
 │   │   │   ├── SearchHighlightExtension.ts # Resaltado de matches de búsqueda in-note
 │   │   │   ├── InNoteSearchBar.tsx      # Barra búsqueda dentro de la nota (modo markdown)
 │   │   │   └── RawNoteSearchBar.tsx     # Barra búsqueda dentro de la nota (modo texto, `isRawMode`)
@@ -341,6 +343,8 @@ noteflow/
 │   │   ├── kanbanOps.ts          #   transformaciones puras del tablero (columnas, tarjetas, columna done,
 │   │   │                         #   conversión con listas de tareas) — testeado
 │   │   ├── kanbanSearch.ts       #   búsqueda en nota dentro de tableros (conteo + resaltado) — testeado
+│   │   ├── tableData.ts          # Tablas sobre string[][]: números, orden, resumen, copiar md/TSV, parsear
+│   │   │                         #   TSV/CSV pegado, detector de TSV (ver patterns.md) — testeado
 │   │   ├── listItemMove.ts       # Mover ítems de lista con su subárbol (drag de tareas, Alt+↑/↓, marcadas
 │   │   │                         #   al final, slash) como transacciones ProseMirror — testeado
 │   │   ├── whatsNew.ts           # Lógica pura del tour "What's new" (qué mostrar, saneo, media) — testeado
