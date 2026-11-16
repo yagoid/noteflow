@@ -362,8 +362,10 @@ se escribe siempre que se conoce — la app lo obtiene **antes** de adoptar (Dev
 pull: el mismo `GET /repos/{o}/{r}` de la rama por defecto, cacheado **por repo**, sin request extra) —,
 así que solo falta si ese GET falló en ese momento (el siguiente pull OK lo rellena). También se guarda
 en `settings.githubSync.repoId`. **Comparación:** por `repoId` si ambos lados lo tienen; si no,
-`owner/repo` sin distinguir mayúsculas. Escrituras con read-modify-write sobre el fichero
-(`writeSyncOriginFile`, rechaza escribir si el fichero existe y no parsea). `disconnectGitHub` **no** lo
+`owner/repo` sin distinguir mayúsculas. Escrituras con read-modify-write sobre el fichero, que
+rechazan escribir si el fichero existe y no parsea: GitHub escribe el origen con `withSyncOrigin` dentro
+de `adoptGithubOrigin` (la misma escritura que limpia `githubSync`, ver abajo); `writeSyncOriginFile`
+queda exportado para los backends que solo necesiten fijar el origen (Cloud, CLI). `disconnectGitHub` **no** lo
 borra: las notas en disco siguen viniendo de ese repo.
 
 **Decisión pura** (`electron/syncOrigin.ts`, sin Electron, agnóstica del backend; tests en
