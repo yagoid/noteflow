@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Check, Cloud, CloudOff, Copy, KeyRound, Loader, Lock, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { Check, Cloud, CloudOff, Copy, History, KeyRound, Loader, Lock, ShieldAlert, ShieldCheck } from 'lucide-react'
 import type { AccountStatus, CloudSyncStatus } from '../../types'
 import { hasKnownEntitlement, isPlanUnknown } from '../../lib/subscriptionPlans'
+import { otherProviderRow } from '../../lib/syncOverview'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { PlanDetail, PlanUnknownNotice } from './PlanOffers'
-import { settingsButtonClass } from './ui'
+import { GitHubNotConnectedRow, GitHubPausedRow } from './GitHubSync'
+import { SyncOverview } from './SyncOverview'
+import { SettingsRow, StatusBadge, settingsButtonClass, settingsDangerButtonClass, settingsGhostButtonClass } from './ui'
 
 // UI-only floor (the backend imposes no minimum); the passphrase only wraps
 // the DEK so any reasonable floor works.
@@ -25,13 +28,35 @@ type Busy = 'idle' | 'setup' | 'unlock' | 'pull' | 'toggle' | 'upgrade' | 'downg
 // private mode" (managed → e2ee) and "switch to standard mode" (e2ee →
 // managed, which invalidates the passphrase and recovery code — warned before
 // confirming, never silent).
-export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean }) {
+//
+// While Cloud is ENABLED the panel is the sync overview (SyncOverview: status
+// card + map, "Security and data", the paused GitHub mirror, Turn off); the key
+// states that block syncing (onboarding, unlock) show right under the card.
+// Not enabled, it is the detail: plan / sign-in, keys, Enable.
+interface CloudPanelProps {
+  initialBundle?: boolean
+  /** GitHub Sync is connected (SyncPanel owns this state). */
+  githubConnected: boolean
+  /** A disconnect from the paused GitHub row. */
+  onGithubConnectedChange: (connected: boolean) => void
+  /** "Turn off NoteFlow Cloud" was clicked — SyncPanel keeps the user on the Cloud detail. */
+  onTurnOff?: () => void
+  /** "View GitHub Sync" on the not-connected GitHub row: its (informative) detail, Cloud stays on. */
+  onViewGithub?: () => void
+}
+
+export function CloudPanel({
+  initialBundle = false,
+  githubConnected,
+  onGithubConnectedChange,
+  onTurnOff,
+  onViewGithub,
+}: CloudPanelProps) {
   const t = useT()
   const loadNotes = useNotesStore((s) => s.loadNotes)
 
   const [status, setStatus] = useState<CloudSyncStatus | null>(null)
   const [account, setAccount] = useState<AccountStatus | null>(null)
-  const [githubConnected, setGithubConnected] = useState(false)
   const [busy, setBusy] = useState<Busy>('idle')
   const [error, setError] = useState<string | null>(null)
   const [pullResult, setPullResult] = useState<{ pulled: number; errors: string[] } | null>(null)
@@ -78,11 +103,6 @@ export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean 
   useEffect(() => {
     window.noteflow.getAccountStatus().then(setAccount)
     return window.noteflow.onAccountStatusChanged(setAccount)
-  }, [])
-
-  // GitHub Sync state, only to warn about the mutual exclusion before enabling.
-  useEffect(() => {
-    window.noteflow.getSyncStatus().then((s) => setGithubConnected(s.connected))
   }, [])
 
   // Managed keys unlock silently (the main process also tries at boot, on
@@ -205,6 +225,7 @@ export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean 
   }
 
   async function handleDisable() {
+    onTurnOff?.()
     setBusy('toggle')
     setError(null)
     await window.noteflow.cloudDisable()
@@ -233,8 +254,9 @@ export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean 
     })
   }
 
-  // No title or intro here: SyncPanel already names the panel (its backend card or
-  // the chooser), and the pitch (encryption included) lives in the plan detail's
+  // No title or intro in the detail: SyncPanel already names it (the chooser /
+  // the "Other providers" row that leads here; the overview has its own status
+  // card), and the pitch (encryption included) lives in the plan detail's
   // "What's included" column.
 
   // ── Initial status fetch ──
@@ -279,7 +301,7 @@ export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean 
               {recoveryCode}
             </span>
           </div>
-          <p className="text-[11px] font-mono text-red-400 leading-relaxed">
+          <p className="text-[11px] font-mono text-red leading-relaxed">
             {t.settings.cloud.recoveryWarning}
           </p>
           <div className="flex gap-2">
@@ -331,176 +353,388 @@ export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean 
     <PlanDetail product="cloud" account={account} bundle={offerBundle} onBundleChange={setOfferBundle} />
   )
 
-  return (
-    <div className="space-y-4">
-      {/* Error (local or engine syncError — e.g. an expired subscription) */}
-      {(error || status.error) && (
-        <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs font-mono text-red-400">
-          {error ?? status.error}
-        </div>
+  // ── Blocks shared by the overview (Cloud enabled) and the detail (not enabled) ──
+
+  // Error (local or engine syncError — e.g. an expired subscription)
+  const errorBlock = (error || status.error) && (
+    <div className="px-3 py-2 bg-red/10 border border-red/30 rounded-lg text-xs font-mono text-red">
+      {error ?? status.error}
+    </div>
+  )
+
+  // Result of "Sync now" — not "Already up to date" while changes are still pending.
+  const pullResultBlock = pullResult && (pullResult.pulled > 0 || pullResult.errors.length > 0 || status.pendingChanges === 0) && (
+    <div className={`px-3 py-2 rounded-lg text-xs font-mono ${
+      pullResult.errors.length > 0
+        ? 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
+        : 'bg-green-500/10 border border-green-500/30 text-green-400'
+    }`}>
+      {pullResult.pulled > 0
+        ? plural(t.settings.sync.pulled, pullResult.pulled)
+        : pullResult.errors.length === 0 && t.settings.sync.alreadyUpToDate}
+      {pullResult.errors.length > 0 && (
+        <div className="mt-1 text-[11px] text-red">{pullResult.errors.join(', ')}</div>
       )}
+    </div>
+  )
 
-      {/* ── No keys yet + no entitlement: the paywall replaces the onboarding.
-             Creating key material here would only set up a cloud the user
-             cannot enable; nothing is uploaded yet, so nothing to recover ── */}
-      {status.keysState === 'no-keys' && !cloudEntitled && subscriptionGate}
-
-      {/* ── Onboarding (no keys yet): choose the encryption mode — two cards,
-             Standard (managed) preselected and recommended ── */}
-      {status.keysState === 'no-keys' && cloudEntitled && (
-        <div className="space-y-3">
-          <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            {t.settings.cloud.chooseModeDesc}
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => setSetupMode('standard')}
-              aria-pressed={setupMode === 'standard'}
-              className={`text-left p-3 rounded-xl border transition-colors ${
-                setupMode === 'standard' ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
-              }`}
-            >
-              <div className="flex items-center gap-2 flex-wrap">
-                <Cloud size={12} className={setupMode === 'standard' ? 'text-accent' : 'text-text-muted'} />
-                <span className="text-xs font-mono font-semibold text-text">
-                  {t.settings.cloud.modeStandardTitle}
-                </span>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-accent/15 text-accent">
-                  {t.settings.cloud.modeStandardBadge}
-                </span>
-              </div>
-              <p className="text-[11px] font-mono text-text-muted mt-1.5 leading-relaxed">
-                {t.settings.cloud.modeStandardDesc}
-              </p>
-            </button>
-            <button
-              type="button"
-              onClick={() => setSetupMode('private')}
-              aria-pressed={setupMode === 'private'}
-              className={`text-left p-3 rounded-xl border transition-colors ${
-                setupMode === 'private' ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={12} className={setupMode === 'private' ? 'text-accent' : 'text-text-muted'} />
-                <span className="text-xs font-mono font-semibold text-text">
-                  {t.settings.cloud.modePrivateTitle}
-                </span>
-              </div>
-              <p className="text-[11px] font-mono text-text-muted mt-1.5 leading-relaxed">
-                {t.settings.cloud.modePrivateDesc}
-              </p>
-            </button>
+  // ── Onboarding (no keys yet): choose the encryption mode — two cards,
+  //    Standard (managed) preselected and recommended ──
+  const onboarding = (
+    <div className="space-y-3">
+      <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+        {t.settings.cloud.chooseModeDesc}
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => setSetupMode('standard')}
+          aria-pressed={setupMode === 'standard'}
+          className={`text-left p-3 rounded-xl border transition-colors ${
+            setupMode === 'standard' ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
+          }`}
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <Cloud size={12} className={setupMode === 'standard' ? 'text-accent' : 'text-text-muted'} />
+            <span className="text-xs font-mono font-semibold text-text">
+              {t.settings.cloud.modeStandardTitle}
+            </span>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-accent/15 text-accent">
+              {t.settings.cloud.modeStandardBadge}
+            </span>
           </div>
+          <p className="text-[11px] font-mono text-text-muted mt-1.5 leading-relaxed">
+            {t.settings.cloud.modeStandardDesc}
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSetupMode('private')}
+          aria-pressed={setupMode === 'private'}
+          className={`text-left p-3 rounded-xl border transition-colors ${
+            setupMode === 'private' ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={12} className={setupMode === 'private' ? 'text-accent' : 'text-text-muted'} />
+            <span className="text-xs font-mono font-semibold text-text">
+              {t.settings.cloud.modePrivateTitle}
+            </span>
+          </div>
+          <p className="text-[11px] font-mono text-text-muted mt-1.5 leading-relaxed">
+            {t.settings.cloud.modePrivateDesc}
+          </p>
+        </button>
+      </div>
 
-          {setupMode === 'standard' ? (
-            <button
-              onClick={handleSetupManaged}
-              disabled={isLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {busy === 'setup' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
-              {t.settings.cloud.modeStandardEnable}
-            </button>
-          ) : (
-            <>
-              <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-                {t.settings.cloud.setupDesc}
-              </p>
-              <div>
-                <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-                  {t.settings.cloud.passphrase}
-                </label>
-                <input
-                  type="password"
-                  value={passphrase}
-                  onChange={(e) => setPassphrase(e.target.value)}
-                  disabled={isLoading}
-                  className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-                  {t.settings.cloud.confirmPassphrase}
-                </label>
-                <input
-                  type="password"
-                  value={confirmPassphrase}
-                  onChange={(e) => setConfirmPassphrase(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleSetup() }}
-                  disabled={isLoading}
-                  className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
-                />
-              </div>
-              <button
-                onClick={handleSetup}
-                disabled={isLoading || !passphrase || !confirmPassphrase}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {busy === 'setup' ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
-                {t.settings.cloud.createPassphrase}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── Locked + managed (or unknown) mode: silent auto-unlock in progress —
-             NEVER ask a managed user for a secret (retry polled in the effect
-             above; unknown mode resolves to e2ee via the same probe) ── */}
-      {status.keysState === 'locked' && status.keysMode !== 'e2ee' && (
-        <div className="flex items-center gap-2 text-text-muted">
-          <Loader size={12} className="animate-spin" />
-          <span className="text-xs font-mono">{t.settings.cloud.unlocking}</span>
-        </div>
-      )}
-
-      {/* ── Locked + e2ee: unlock with passphrase or recovery code ── */}
-      {status.keysState === 'locked' && status.keysMode === 'e2ee' && (
-        <div className="space-y-3">
+      {setupMode === 'standard' ? (
+        <button
+          onClick={handleSetupManaged}
+          disabled={isLoading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {busy === 'setup' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
+          {t.settings.cloud.modeStandardEnable}
+        </button>
+      ) : (
+        <>
           <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            {t.settings.cloud.lockedDesc}
+            {t.settings.cloud.setupDesc}
           </p>
           <div>
             <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-              {t.settings.cloud.passphraseOrRecovery}
+              {t.settings.cloud.passphrase}
             </label>
             <input
               type="password"
-              value={secret}
-              onChange={(e) => setSecret(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleUnlock() }}
+              value={passphrase}
+              onChange={(e) => setPassphrase(e.target.value)}
+              disabled={isLoading}
+              className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
+              {t.settings.cloud.confirmPassphrase}
+            </label>
+            <input
+              type="password"
+              value={confirmPassphrase}
+              onChange={(e) => setConfirmPassphrase(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSetup() }}
               disabled={isLoading}
               className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
             />
           </div>
           <button
-            onClick={handleUnlock}
-            disabled={isLoading || !secret.trim()}
+            onClick={handleSetup}
+            disabled={isLoading || !passphrase || !confirmPassphrase}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {busy === 'unlock' ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
-            {t.settings.cloud.unlock}
+            {busy === 'setup' ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
+            {t.settings.cloud.createPassphrase}
           </button>
-        </div>
+        </>
       )}
+    </div>
+  )
 
-      {/* ── Unlocked: sync controls ── */}
+  // ── Key states: no keys yet (onboarding, or the paywall without the
+  //    entitlement — creating key material would only set up a cloud the user
+  //    cannot enable; nothing is uploaded yet, so nothing to recover), locked +
+  //    managed/unknown (silent auto-unlock — NEVER ask a managed user for a
+  //    secret; retry polled in the effect above, unknown mode resolves to e2ee
+  //    via the same probe) and locked + e2ee (passphrase or recovery code) ──
+  const keysBlock =
+    status.keysState === 'no-keys' ? (
+      cloudEntitled ? onboarding : subscriptionGate
+    ) : status.keysState === 'locked' && status.keysMode !== 'e2ee' ? (
+      <div className="flex items-center gap-2 text-text-muted">
+        <Loader size={12} className="animate-spin" />
+        <span className="text-xs font-mono">{t.settings.cloud.unlocking}</span>
+      </div>
+    ) : status.keysState === 'locked' ? (
+      <div className="space-y-3">
+        <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+          {t.settings.cloud.lockedDesc}
+        </p>
+        <div>
+          <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
+            {t.settings.cloud.passphraseOrRecovery}
+          </label>
+          <input
+            type="password"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleUnlock() }}
+            disabled={isLoading}
+            className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+          />
+        </div>
+        <button
+          onClick={handleUnlock}
+          disabled={isLoading || !secret.trim()}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {busy === 'unlock' ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
+          {t.settings.cloud.unlock}
+        </button>
+      </div>
+    ) : null
+
+  // ── Standard → Private upgrade form (managed only) ──
+  const upgradeForm = (
+    <>
+      <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+        {t.settings.cloud.upgradeDesc}
+      </p>
+      <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
+        {t.settings.cloud.upgradeNotice}
+      </div>
+      <div>
+        <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
+          {t.settings.cloud.passphrase}
+        </label>
+        <input
+          type="password"
+          value={passphrase}
+          onChange={(e) => setPassphrase(e.target.value)}
+          disabled={isLoading}
+          className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+        />
+      </div>
+      <div>
+        <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
+          {t.settings.cloud.confirmPassphrase}
+        </label>
+        <input
+          type="password"
+          value={confirmPassphrase}
+          onChange={(e) => setConfirmPassphrase(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleUpgrade() }}
+          disabled={isLoading}
+          className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+        />
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={handleUpgrade}
+          disabled={isLoading || !passphrase || !confirmPassphrase}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {busy === 'upgrade' ? <Loader size={11} className="animate-spin" /> : <ShieldCheck size={11} />}
+          {t.settings.cloud.upgradeSubmit}
+        </button>
+        <button
+          onClick={() => {
+            setShowUpgrade(false)
+            setPassphrase('')
+            setConfirmPassphrase('')
+            setError(null)
+          }}
+          disabled={isLoading}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
+        >
+          {t.common.cancel}
+        </button>
+      </div>
+    </>
+  )
+
+  // ── Private → Standard downgrade confirmation (e2ee only) — explicit, never
+  //    silent: standard mode weakens the privacy guarantee and invalidates the
+  //    passphrase + recovery code ──
+  const downgradeForm = (
+    <>
+      <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+        {t.settings.cloud.downgradeDesc}
+      </p>
+      <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
+        {t.settings.cloud.downgradeNotice}
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={handleDowngrade}
+          disabled={isLoading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {busy === 'downgrade' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
+          {t.settings.cloud.downgradeSubmit}
+        </button>
+        <button
+          onClick={() => { setShowDowngrade(false); setError(null) }}
+          disabled={isLoading}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
+        >
+          {t.common.cancel}
+        </button>
+      </div>
+    </>
+  )
+
+  const switchToPrivateButton = (
+    <button
+      onClick={() => { setShowUpgrade(true); setError(null) }}
+      disabled={isLoading}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono whitespace-nowrap ${settingsButtonClass}`}
+    >
+      <ShieldCheck size={11} />
+      {t.settings.cloud.switchToPrivate}
+    </button>
+  )
+
+  const switchToStandardButton = (
+    <button
+      onClick={() => { setShowDowngrade(true); setError(null) }}
+      disabled={isLoading}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono whitespace-nowrap ${settingsButtonClass}`}
+    >
+      <Cloud size={11} />
+      {t.settings.cloud.switchToStandard}
+    </button>
+  )
+
+  // ── Cloud enabled: the sync overview ──
+  if (status.enabled) {
+    const o = t.settings.sync.overview
+    const unlocked = status.keysState === 'unlocked'
+    // Lock only makes sense for e2ee (and for pre-dual-mode devices whose mode
+    // is still unknown): a signed-in managed session re-unlocks itself
+    // silently, so offering Lock there would be a no-op loop.
+    const lockButton = unlocked && status.keysMode !== 'managed' && (
+      <button onClick={handleLock} disabled={isLoading} className={settingsGhostButtonClass}>
+        <Lock size={11} />
+        {t.settings.cloud.lock}
+      </button>
+    )
+    const encryptionRow = (unlocked || status.keysMode !== null) && (
+      <SettingsRow
+        icon={<ShieldCheck size={14} />}
+        title={
+          status.keysMode === 'e2ee' ? o.encryptionPrivateTitle
+          : status.keysMode === 'managed' ? o.encryptionStandardTitle
+          : o.encryptionUnknownTitle
+        }
+        description={
+          status.keysMode === 'e2ee' ? o.encryptionPrivateDesc
+          : status.keysMode === 'managed' ? o.encryptionStandardDesc
+          : o.encryptionUnknownDesc
+        }
+        action={
+          unlocked && (
+            <>
+              {lockButton}
+              {status.keysMode === 'managed' && !showUpgrade && switchToPrivateButton}
+              {status.keysMode === 'e2ee' && !showDowngrade && switchToStandardButton}
+            </>
+          )
+        }
+      >
+        {unlocked && status.keysMode === 'managed' && showUpgrade ? upgradeForm
+          : unlocked && status.keysMode === 'e2ee' && showDowngrade ? downgradeForm
+          : null}
+      </SettingsRow>
+    )
+
+    const notices = (errorBlock || pullResultBlock || keysBlock) && (
+      <div className="space-y-3">
+        {errorBlock}
+        {pullResultBlock}
+        {keysBlock}
+      </div>
+    )
+
+    return (
+      <SyncOverview
+        provider="cloud"
+        syncing={busy === 'pull'}
+        canSync={unlocked && !isLoading}
+        onSync={handlePull}
+        githubConnected={githubConnected}
+        notices={notices}
+        dataTitle={o.securityTitle}
+        dataRows={
+          <>
+            {encryptionRow}
+            <SettingsRow
+              icon={<History size={14} />}
+              title={o.historyTitle}
+              description={o.historyDesc}
+              action={<StatusBadge tone="neutral">{o.included}</StatusBadge>}
+            />
+          </>
+        }
+        otherProviders={
+          otherProviderRow('cloud', githubConnected) === 'github-paused' ? (
+            <GitHubPausedRow onConnectedChange={onGithubConnectedChange} />
+          ) : (
+            onViewGithub && <GitHubNotConnectedRow onView={onViewGithub} />
+          )
+        }
+        footerText={githubConnected ? o.footerCloudGithub : o.footerCloud}
+        footerAction={
+          <button onClick={handleDisable} disabled={isLoading} className={settingsDangerButtonClass}>
+            {busy === 'toggle' ? <Loader size={12} className="animate-spin" /> : <CloudOff size={12} />}
+            {o.turnOffCloud}
+          </button>
+        }
+      />
+    )
+  }
+
+  // ── Cloud not enabled: the detail (keys, enable, mode switches) ──
+  return (
+    <div className="space-y-4">
+      {errorBlock}
+
+      {keysBlock}
+
+      {/* ── Unlocked: enable + mode controls ── */}
       {status.keysState === 'unlocked' && (
         <>
           <div className="flex items-center gap-2 flex-wrap">
-            {status.enabled ? (
-              <>
-                <Cloud size={12} className="text-green-400" />
-                <span className="text-xs font-mono text-green-400">{t.settings.cloud.syncEnabled}</span>
-              </>
-            ) : (
-              <>
-                <CloudOff size={12} className="text-text-muted" />
-                <span className="text-xs font-mono text-text-muted">{t.settings.cloud.syncDisabled}</span>
-              </>
-            )}
+            <CloudOff size={12} className="text-text-muted" />
+            <span className="text-xs font-mono text-text-muted">{t.settings.cloud.syncDisabled}</span>
             {/* Active encryption-mode badge (null on pre-dual-mode devices until
                 the next unlock backfills it — no badge is better than a wrong one) */}
             {status.keysMode !== null && (
@@ -517,33 +751,11 @@ export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean 
             </p>
           )}
 
-          {/* Local changes not uploaded yet (journal) — a successful pull clears
-              the error but not these, so they are never shown as "up to date" */}
-          {status.enabled && status.pendingChanges > 0 && (
-            <p className="text-[11px] font-mono text-yellow-400">
-              {plural(t.settings.cloud.pendingChanges, status.pendingChanges)}
-            </p>
-          )}
-
-          {/* Pull result */}
-          {pullResult && (pullResult.pulled > 0 || pullResult.errors.length > 0 || status.pendingChanges === 0) && (
-            <div className={`px-3 py-2 rounded-lg text-xs font-mono ${
-              pullResult.errors.length > 0
-                ? 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
-                : 'bg-green-500/10 border border-green-500/30 text-green-400'
-            }`}>
-              {pullResult.pulled > 0
-                ? plural(t.settings.sync.pulled, pullResult.pulled)
-                : pullResult.errors.length === 0 && t.settings.sync.alreadyUpToDate}
-              {pullResult.errors.length > 0 && (
-                <div className="mt-1 text-[11px] text-red-400">{pullResult.errors.join(', ')}</div>
-              )}
-            </div>
-          )}
+          {pullResultBlock}
 
           {/* Mutual-exclusion heads-up shown BEFORE enabling Cloud over GitHub —
               only when enabling is actually within reach (entitlement present) */}
-          {!status.enabled && githubConnected && cloudEntitled && (
+          {githubConnected && cloudEntitled && (
             <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
               {t.settings.cloud.willPauseGitHub}
             </div>
@@ -551,7 +763,7 @@ export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean 
 
           {/* Gate in front of Enable sync — it replaces the button (the other
               controls of this state stay open, see the constant above). */}
-          {!status.enabled && !cloudEntitled && (
+          {!cloudEntitled && (
             <div className="space-y-3">
               {!planUnknown && (
                 <p className="text-[11px] font-mono text-text-muted leading-relaxed">
@@ -563,40 +775,17 @@ export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean 
           )}
 
           <div className="flex gap-2 flex-wrap">
-            {status.enabled ? (
-              <>
-                <button
-                  onClick={handlePull}
-                  disabled={isLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
-                >
-                  {busy === 'pull' ? <Loader size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-                  {t.settings.sync.syncNow}
-                </button>
-                <button
-                  onClick={handleDisable}
-                  disabled={isLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
-                >
-                  <CloudOff size={11} />
-                  {t.settings.cloud.disableSync}
-                </button>
-              </>
-            ) : (
-              cloudEntitled && (
-                <button
-                  onClick={handleEnable}
-                  disabled={isLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40"
-                >
-                  {busy === 'toggle' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
-                  {t.settings.cloud.enableSync}
-                </button>
-              )
+            {cloudEntitled && (
+              <button
+                onClick={handleEnable}
+                disabled={isLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40"
+              >
+                {busy === 'toggle' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
+                {t.settings.cloud.enableSync}
+              </button>
             )}
-            {/* Lock only makes sense for e2ee (and for pre-dual-mode devices whose
-                mode is still unknown): a signed-in managed session re-unlocks
-                itself silently, so offering Lock there would be a no-op loop. */}
+            {/* Lock: e2ee / unknown mode only (see the overview above). */}
             {status.keysMode !== 'managed' && (
               <button
                 onClick={handleLock}
@@ -609,120 +798,12 @@ export function CloudPanel({ initialBundle = false }: { initialBundle?: boolean 
             )}
           </div>
 
-          {/* ── Standard → Private upgrade (managed only) ── */}
           {status.keysMode === 'managed' && (
-            <div className="space-y-3">
-              {!showUpgrade ? (
-                <button
-                  onClick={() => { setShowUpgrade(true); setError(null) }}
-                  disabled={isLoading}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
-                >
-                  <ShieldCheck size={11} />
-                  {t.settings.cloud.switchToPrivate}
-                </button>
-              ) : (
-                <>
-                  <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-                    {t.settings.cloud.upgradeDesc}
-                  </p>
-                  <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
-                    {t.settings.cloud.upgradeNotice}
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-                      {t.settings.cloud.passphrase}
-                    </label>
-                    <input
-                      type="password"
-                      value={passphrase}
-                      onChange={(e) => setPassphrase(e.target.value)}
-                      disabled={isLoading}
-                      className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-                      {t.settings.cloud.confirmPassphrase}
-                    </label>
-                    <input
-                      type="password"
-                      value={confirmPassphrase}
-                      onChange={(e) => setConfirmPassphrase(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleUpgrade() }}
-                      disabled={isLoading}
-                      className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleUpgrade}
-                      disabled={isLoading || !passphrase || !confirmPassphrase}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {busy === 'upgrade' ? <Loader size={11} className="animate-spin" /> : <ShieldCheck size={11} />}
-                      {t.settings.cloud.upgradeSubmit}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowUpgrade(false)
-                        setPassphrase('')
-                        setConfirmPassphrase('')
-                        setError(null)
-                      }}
-                      disabled={isLoading}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
-                    >
-                      {t.common.cancel}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            <div className="space-y-3">{showUpgrade ? upgradeForm : switchToPrivateButton}</div>
           )}
 
-          {/* ── Private → Standard downgrade (e2ee only) — explicit confirmation,
-                 never silent: standard mode weakens the privacy guarantee and
-                 invalidates the passphrase + recovery code ── */}
           {status.keysMode === 'e2ee' && (
-            <div className="space-y-3 pt-3 border-t border-border">
-              {!showDowngrade ? (
-                <button
-                  onClick={() => { setShowDowngrade(true); setError(null) }}
-                  disabled={isLoading}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
-                >
-                  <Cloud size={11} />
-                  {t.settings.cloud.switchToStandard}
-                </button>
-              ) : (
-                <>
-                  <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-                    {t.settings.cloud.downgradeDesc}
-                  </p>
-                  <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
-                    {t.settings.cloud.downgradeNotice}
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleDowngrade}
-                      disabled={isLoading}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono settings-btn bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {busy === 'downgrade' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
-                      {t.settings.cloud.downgradeSubmit}
-                    </button>
-                    <button
-                      onClick={() => { setShowDowngrade(false); setError(null) }}
-                      disabled={isLoading}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
-                    >
-                      {t.common.cancel}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            <div className="space-y-3 pt-3 border-t border-border">{showDowngrade ? downgradeForm : switchToStandardButton}</div>
           )}
         </>
       )}

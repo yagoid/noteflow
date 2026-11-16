@@ -242,6 +242,8 @@ noteflow/
 │   │   ├── TitleBar.tsx                 # Barra de título personalizada (frameless);
 │   │   │                                #   el ⚙ abre la ventana de Ajustes (SettingsModal)
 │   │   ├── SyncStatusButton.tsx         # Botón ☁ de la titlebar + tarjeta de estado al hover
+│   │   ├── useActiveSyncStatus.ts       # Hook: status del backend activo (sync:get-active-status) + push-state; titlebar y Ajustes → Sync
+│   │   ├── syncStatusText.ts            # Etiqueta del estado de sync + "hace x min" (i18n), compartido titlebar/Ajustes
 │   │   ├── Settings/                    # Ventana de Ajustes unificada (overlay split nav+contenido)
 │   │   │   ├── SettingsModal.tsx        #   Contenedor: nav izquierda + panel derecho según sección
 │   │   │   ├── GeneralPanel.tsx         #   Idioma + gráfica de actividad + IA local (toggle/reindex) + perfil + skill del CLI
@@ -249,9 +251,12 @@ noteflow/
 │   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho / índice / tareas marcadas al final
 │   │   │   ├── TemplatesPanel.tsx       #   Plantillas de nota (listar/usar/renombrar/borrar)
 │   │   │   ├── StartupPanel.tsx         #   Autostart + stickies al arrancar
-│   │   │   ├── SyncPanel.tsx            #   Selector de backend (Cloud/GitHub, excluyentes) + sección GitHub
-│   │   │   ├── CliConnectSection.tsx    #   "Connect the CLI too" bajo el panel del backend (Cloud: código; GitHub: copia del token)
-│   │   │   ├── CloudPanel.tsx           #   NoteFlow Cloud (cifrado, suscripción) — ver monetization.md
+│   │   │   ├── SyncPanel.tsx            #   Enrutado de vistas: elección inicial / vista general del backend activo / detalle
+│   │   │   ├── SyncOverview.tsx         #   Vista general con backend activo: tarjeta de estado + mapa, lista de datos, otros proveedores, pie
+│   │   │   ├── SyncMap.tsx              #   Mapa de sync informativo (role=img; lógica pura en src/lib/syncOverview.ts)
+│   │   │   ├── GitHubSync.tsx           #   GitHub: setup (device flow), vista general y fila "Paused" (en la de Cloud); estado en useGitHubSync.ts
+│   │   │   ├── CliConnectRow.tsx        #   Fila "noteflow CLI" (Cloud: código; GitHub: copia del token); estado en useCliConnect.ts
+│   │   │   ├── CloudPanel.tsx           #   NoteFlow Cloud (cifrado, suscripción): vista general si está activo, si no el detalle — ver monetization.md
 │   │   │   ├── AccountPanel.tsx         #   Cuenta NoteFlow (OTP, entitlements) — ver monetization.md
 │   │   │   ├── AiPanel.tsx              #   Solo el proveedor del LLM (LlmConfigView embebido)
 │   │   │   ├── DataPanel.tsx            #   Export/Import (lanza ExportImportModal) + dir de notas
@@ -412,7 +417,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `app:choose-notes-dir` | handle | Diálogo para elegir carpeta |
 | `app:get-login-item` / `app:set-login-item` | handle | Autostart al login (gestiona `.desktop` propio en Linux). **Versión Store** (`IS_STORE_BUILD`, ver `release.md` § Microsoft Store): `get` → siempre `{openAtLogin:false}`, `set` → `{ok:false}` sin escribir `settings.json` |
 | `app:get-version` | handle | Versión actual de la app (`app.getVersion()`) — la usa el panel About |
-| `app:get-distribution` | handle | `'store' \| 'direct'`: `'store'` si corre desde el paquete MSIX de la Microsoft Store (`process.windowsStore`). Lo usan Ajustes → About (updates), Startup (autostart), General (skill del CLI) y Sync (`CliConnectSection`) para mostrar una explicación en vez de controles que ahí no funcionan |
+| `app:get-distribution` | handle | `'store' \| 'direct'`: `'store'` si corre desde el paquete MSIX de la Microsoft Store (`process.windowsStore`). Lo usan Ajustes → About (updates), Startup (autostart), General (skill del CLI) y Sync (`useCliConnect` / `CliConnectRow`) para mostrar una explicación en vez de controles que ahí no funcionan |
 | `app:check-update` | handle | Consulta la última release en la API de GitHub → `{hasUpdate, latestVersion?, downloadUrl?, error?}` (`error: true` = el chequeo falló, no "al día"). **Versión Store** (`IS_STORE_BUILD`, ver `release.md` § Microsoft Store): cortocircuita a `{hasUpdate:false}` sin consultar |
 | `app:download-and-install` | handle | Descarga el instalador (allowlist de hosts) e instala; emite progreso. **Versión Store** (`IS_STORE_BUILD`, ver `release.md` § Microsoft Store): se niega (`{success:false}`) sin descargar |
 | `app:open-url` | handle | Abre URL externa (solo https, validada) |

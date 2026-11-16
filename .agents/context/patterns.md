@@ -3494,14 +3494,17 @@ y al humano solo le queda autorizar en GitHub o dar el código del email:
   backend que usa en la app. Protocolo del agente en la skill (`cli/noteflow-cli/SKILL.md`
   § "Ofrécete a activar el sync"). Tests en `tests/cli/agentLogin.test.ts`.
 
-**Conectar también el CLI desde la app (Ajustes → Sync, CLI v2.10.0).** Debajo del panel del backend
-seleccionado, `CliConnectSection` (solo si ese backend está conectado en la app: Cloud activo con
-sesión, o GitHub conectado) da al CLI **su propio** acceso; IO en `electron/cliConnect.ts`, reglas
+**Conectar también el CLI desde la app (Ajustes → Sync, CLI v2.10.0).** La fila "noteflow CLI" de la
+lista de datos de la vista general (`CliConnectRow`, estado en el hook `useCliConnect`, que también
+alimenta el nodo CLI del mapa) da al CLI **su propio** acceso al backend activo (Cloud activo con
+sesión, o GitHub conectado sin Cloud; solo existe en la vista general, así que nunca para el backend
+en pausa). Compacta en reposo (badge Connected / Not connected + botón) y se despliega en la misma
+fila mientras hay un flujo (código por email, aviso e2ee, errores); IO en `electron/cliConnect.ts`, reglas
 puras en `electron/cliConnectLogic.ts` (tests en `tests/electron/cliConnectLogic.test.ts`). El estado
 se lee del `settings.json` **del CLI** (`cliSettingsPath`, espejo de `getSettingsDir()`), así que un CLI
-conectado desde la terminal también sale como "CLI connected (…)".
+conectado desde la terminal también sale como conectado ("Connected with {target}." en la fila del CLI).
 **Versión Microsoft Store:** no lleva CLI (sin `PATH`; en Windows el CLI solo llega con el instalador NSIS),
-así que `CliConnectSection` muestra solo una explicación —nunca el estado/Desconectar de un `cliAccount`
+así que `CliConnectRow` muestra solo una explicación —nunca el estado/Desconectar de un `cliAccount`
 heredado de una instalación directa— y `cliConnect.ts` responde `cliMissing`. Ver `release.md` § Microsoft Store.
 - **Cloud (código, sin cambios en el servidor):** la app ejecuta el CLI empaquetado
   (`resources/cli/noteflow.js`; en dev `cli/noteflow.js`) con `process.execPath` +

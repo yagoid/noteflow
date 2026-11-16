@@ -352,7 +352,8 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
     resuelve **una vez** (`viewOf`) cuando la config está disponible (lazy init desde
     `useAiChatStore.getState()`, o una suscripción al store si aún no ha cargado) y **no se mueve solo**
     — que main active NoteFlow AI tras suscribirse no debe sacar al usuario de la vista en la que está
-    (mismo contrato que `view` en `SyncPanel`). Activo `noteflow` (o `initialOffer` desde Ajustes →
+    (como `view` en `SyncPanel`, que solo pasa sola de un detalle a la vista general cuando ese backend
+    queda en uso). Activo `noteflow` (o `initialOffer` desde Ajustes →
     Cuenta) → `'noteflow'`; nada configurado → `null` (ninguna card elegida); si no, la card del preset
     activo (`needsKey` → `'key'`, si no → `'local'`).
   - En las cards BYO hay un `byoId` local al que se enlaza el `<select>`, que solo lista los presets de

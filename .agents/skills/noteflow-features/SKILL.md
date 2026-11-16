@@ -1640,7 +1640,7 @@ teclas salen como en la plataforma (`⌘`/`⌃` en macOS).
 
 ---
 
-## Settings → Sync: elegir backend
+## Settings → Sync: elegir backend y vista general
 
 **NoteFlow Cloud** y **GitHub Sync** son **mutuamente excluyentes**: solo un backend puede estar
 activo a la vez.
@@ -1652,16 +1652,51 @@ activo a la vez.
   section, restorable in the app"; GitHub = repositorio privado tuyo · cada 5 minutos · "Version
   history kept by Git" (los commits en bruto, en GitHub). Debajo, "Already have NoteFlow
   Cloud? Sign in". Al elegir, se abre ese panel con un enlace "← Sync options" para volver.
-- **Si ya usas uno**, la página empieza con el **selector de dos tarjetas** con **badge de estado**
-  (Active / Paused / Inactive / Not connected), con el que está en uso preseleccionado; al pulsar
-  otra, debajo se muestra **solo el panel de ese backend**. A partir de ahí manda la elección del
-  usuario. Con Cloud activado, GitHub queda **en pausa** (badge amarillo + aviso ámbar en su panel; la
-  config de GitHub se conserva).
+- **Si ya usas uno** (Cloud activado, o GitHub conectado), la página es su **vista general** (sin
+  selector de backend: cambiarlo casi nunca se hace). De arriba abajo, cabe sin scroll en la ventana
+  de Ajustes en el caso habitual:
+  1. **Tarjeta de estado**: icono + nombre del proveedor y un **badge con el estado real** (Synced,
+     Syncing, Uploading, Not uploaded, Locked, Error…, como el botón ☁ de la titlebar; Cloud sin
+     claves aún: "Setup needed"), una línea de datos — Cloud: "Last sync 2 min ago · Real time
+     connected · No pending changes" (o "N pending changes"); GitHub: `owner/repo` ↗ (abre el repo en el
+     navegador) · "every 5 min" · "Last sync 3 min ago" — y el botón primario **Sync now**.
+  2. Dentro de la tarjeta, un **mapa de sync solo informativo** (no se pulsa): Este equipo (con su SO)
+     → el proveedor (resaltado; con Cloud el enlace lleva el chip "🔒 encrypted", con GitHub "every 5
+     min") → Otros dispositivos ("in real time" con Cloud) y el CLI noteflow ("connected" / "not
+     connected", atenuado si no). Debajo de Este equipo, en discontinuo, el backend que no está en uso:
+     GitHub "paused · manual mirror" (solo si está conectado) o NoteFlow Cloud "not active". Los
+     enlaces se ven discontinuos si el proveedor está bloqueado o con error.
+  3. Si Cloud necesita algo (crear las claves, desbloquear con la passphrase), aparece **justo debajo
+     de la tarjeta**.
+  4. **"Security and data"** (Cloud) / **"Repository and data"** (GitHub), una lista de filas:
+     - Cloud: **Standard encryption** / **Private encryption (E2EE)** con su botón "Switch to private
+       mode" / "Switch to standard mode" (el formulario se abre en la propia fila; en privado también
+       **Lock**), **Version history** ("30 days per section, restorable from each section's menu",
+       badge "Included") y **noteflow CLI**.
+     - GitHub: **Your repository** ("In your GitHub account — NoteFlow's servers keep no copy" → "Open
+       on GitHub"), **History in Git** ("Every change uploaded from here is a commit" → "View commits",
+       abre los commits del repo) y **noteflow CLI**.
+  5. **"Other providers"**: con Cloud activo y GitHub conectado, **GitHub Sync "Paused"**
+     ("owner/repo · settings kept") con **Mirror to GitHub** (pide confirmación) y **Disconnect**; con
+     Cloud activo y sin GitHub, **GitHub Sync "Not connected"** ("Your notes in a repository of your
+     GitHub account. To use it, turn off NoteFlow Cloud.") → **View GitHub Sync** abre su detalle sin
+     apagar Cloud, para curiosear: qué ofrece (los puntos de la tarjeta del selector) y el aviso
+     "NoteFlow Cloud is in use" (para cambiar, apaga Cloud primero al pie de la vista general; no borra
+     nada). No hay botón de conectar mientras Cloud está activo; si Cloud se apaga, ese detalle pasa a
+     ser el formulario de conexión normal. Con GitHub activo, **NoteFlow Cloud "Inactive"**
+     ("Encrypted, with 30-day history. Turning it on pauses GitHub Sync.") → **See NoteFlow Cloud** abre
+     el detalle de Cloud (plan, inicio de sesión, Enable) con "← Sync options" para volver.
+  6. **Pie**: "Turning it off deletes nothing: your notes stay on this device." (con GitHub conectado:
+     "…stay here and GitHub Sync resumes.") + **Turn off NoteFlow Cloud** en rojo; con GitHub,
+     "Disconnecting deletes nothing: your notes stay here and in the repository." + **Disconnect
+     GitHub**. Es cierto: apagar Cloud no borra notas locales ni las de la nube, y desconectar GitHub
+     no toca las notas ni el repo. Al apagar Cloud te quedas en su detalle (para volver a activarlo);
+     al desconectar GitHub, en su formulario de conexión.
 
-**Command line (CLI) — "Connect the CLI too".** Debajo de todo, si el backend seleccionado está
-conectado en la app (Cloud activo con sesión, o GitHub conectado), una sección da al CLI `noteflow` su
-propio acceso a ese backend, para que lo que se escribe desde la terminal o por agentes de IA también
-se sincronice:
+**noteflow CLI — "Connect the CLI too".** La fila **noteflow CLI** de la lista de la vista general da
+al CLI `noteflow` su propio acceso al backend activo, para que lo que se escribe desde la terminal o por
+agentes de IA también se sincronice. En reposo es compacta (badge **Connected** / **Not connected**,
+una línea y el botón); el flujo se despliega en la misma fila:
 - **Cloud:** el botón envía un código al email de la cuenta de la app; aparece un campo inline para
   el código ("Connect CLI", "Send a new code", Cancel; código inválido/caducado se muestra inline). El
   CLI inicia **su propia** sesión (la app sigue con la suya) y no hace pull. Si la cuenta usa cifrado
@@ -1669,9 +1704,10 @@ se sincronice:
   ejecución o `NOTEFLOW_CLOUD_PASSPHRASE`).
 - **GitHub:** sin código; antes de copiar el token, un diálogo avisa de que el CLI lo guarda en
   base64, sin el cifrado del llavero del sistema ("Copy token").
-- **Conectado:** "CLI connected (email)" / "CLI connected (owner/repo)" + **Disconnect CLI**, que solo
+- **Conectado:** "Connected with email" / "Connected with owner/repo" + **Disconnect CLI**, que solo
   quita lo del CLI (nunca la conexión de la app). Si el CLI ya estaba conectado desde la terminal,
-  sale igual como conectado. Detalle técnico en `.agents/context/patterns.md` § CLI.
+  sale igual como conectado. En la versión de la Microsoft Store (sin CLI) la fila solo lo explica.
+  Detalle técnico en `.agents/context/patterns.md` § CLI.
 
 ## NoteFlow Cloud (Settings → Sync)
 
@@ -1745,11 +1781,12 @@ Flujo del panel según estado:
 - **Bloqueado (`locked`):** en modo managed el panel se desbloquea solo (spinner "unlocking…",
   reintento silencioso cada 10 s — típico de un arranque offline); en modo private, un único
   input acepta **passphrase o recovery code** → "Unlock".
-- **Desbloqueado:** badge del modo activo (Standard / Private E2EE), badge Sync enabled/disabled,
-  "Last sync", línea ámbar "N local changes not uploaded yet" si el journal tiene cambios sin subir
-  (entonces el resultado no dice "Already up to date"), botones **Enable/Disable sync**, **Sync now**
-  (ciclo completo: pull + reintento de lo pendiente de subir; resultado tipo GitHub) y **Lock** (solo
-  en modo private — en managed se re-desbloquearía solo). En managed,
+- **Desbloqueado y activo:** la vista general (arriba): cambios sin subir en la línea de datos de la
+  tarjeta (entonces el resultado no dice "Already up to date"), **Sync now** (ciclo completo: pull +
+  reintento de lo pendiente de subir; resultado tipo GitHub), **Lock** en la fila de cifrado (solo en
+  modo private — en managed se re-desbloquearía solo) y **Turn off NoteFlow Cloud** en el pie.
+  **Desbloqueado sin activar:** el detalle, con "Sync disabled" + badge del modo, **Enable sync** (o
+  el bloque de planes) y Lock. En managed,
   botón **"Switch to private mode"**: upgrade a E2EE (pide passphrase, muestra el
   recovery code una vez y borra la copia del servidor), con aviso de que las notas ya
   sincronizadas pudieron ser técnicamente accesibles hasta ese momento. En private, botón
@@ -1832,7 +1869,8 @@ Detalle técnico: `.agents/context/monetization.md` § 4 "Historial de versiones
 
 ## GitHub Sync
 
-Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
+Settings → Sync ("Connect with GitHub" en la elección inicial; conectado, su vista general — ver
+"Settings → Sync: elegir backend y vista general").
 
 ### Conectar
 1. Introduce el nombre del repositorio privado donde se guardarán las notas.
@@ -1873,11 +1911,11 @@ Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
 - El repositorio se crea como **privado** automáticamente si no existe.
 
 ### Panel de sync
-- Estado (conectado / subiendo / error), cuenta y repo vinculados.
+- Vista general: estado real, repo vinculado (↗), cadencia y última sync, mapa informativo.
 - "Sync now" para sync manual (primero reintenta las subidas/borrados pendientes del journal, luego
-  pull) · "Disconnect" para desconectar.
-- **"Mirror to GitHub" / "Espejar en GitHub"** — botón que aparece entre los dos anteriores **solo
-  con NoteFlow Cloud activado** (es entonces cuando GitHub queda en pausa como espejo de solo
+  pull) · "Disconnect GitHub" en el pie para desconectar.
+- **"Mirror to GitHub" / "Espejar en GitHub"** — botón de la fila "GitHub Sync · Paused" de la vista
+  general de Cloud, así que **solo con NoteFlow Cloud activado** (es entonces cuando GitHub queda en pausa como espejo de solo
   escritura y el repo se va quedando obsoleto: no le llegan los borrados ni las notas que Cloud
   trae de otros dispositivos). Pide confirmación y deja el repo como **copia exacta** de lo que hay
   en este dispositivo: sube lo que falte o difiera y **borra del repo** lo que ya no exista aquí
@@ -1885,7 +1923,8 @@ Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
   terminar informa de cuántos ficheros subió y borró.
 
 ### Privacidad
-- Repo siempre **privado**. Token cifrado con el SO (`safeStorage`), nunca sale de la máquina.
+- El repo se crea **privado** si no existía (uno que ya existía conserva su visibilidad, por eso la
+  app no lo llama "privado"). Token cifrado con el SO (`safeStorage`), nunca sale de la máquina.
 - Sin servidor intermedio — comunicación directa con la API de GitHub. Sin telemetría.
 
 ---

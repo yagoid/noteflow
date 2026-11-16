@@ -9,11 +9,11 @@ import type { ActiveSyncStatus } from '../types'
 import {
   getSyncDisplayState,
   pendingChangeCount,
-  relativeAge,
   syncChartBars,
   SYNC_CHART_MAX_BARS,
   type SyncDisplayState,
 } from '../lib/syncStatus'
+import { formatSyncAge, syncStateLabel } from './syncStatusText'
 
 // Hover delay before the status card opens — short, but enough that sweeping the
 // cursor along the titlebar towards the window controls doesn't flash it.
@@ -51,19 +51,6 @@ const PILL_STYLE: Record<SyncDisplayState, { dot: string; text: string }> = {
   blocked: { dot: 'bg-amber-400', text: 'text-amber-400' },
   pending: { dot: 'bg-text-muted', text: 'text-text-muted' },
   unsynced: { dot: 'bg-amber-400', text: 'text-amber-400' },
-}
-
-function stateLabel(state: SyncDisplayState, s: SyncMessages): string {
-  switch (state) {
-    case 'syncing': return s.statusSyncing
-    case 'uploading': return s.statusUploading
-    case 'locked': return s.statusLocked
-    case 'blocked': return s.statusBlocked
-    case 'error': return s.statusError
-    case 'pending': return s.statusPending
-    case 'unsynced': return s.statusUnsynced
-    case 'synced': return s.statusSynced
-  }
 }
 
 interface SyncStatusButtonProps {
@@ -113,7 +100,7 @@ export function SyncStatusButton({
   const s = t.titleBar.sync
   const state = getSyncDisplayState(status, syncing, pushing)
   const backendName = status.backend === 'cloud' ? s.backendCloud : s.backendGithub
-  const ariaVars = { backend: backendName, status: stateLabel(state, s) }
+  const ariaVars = { backend: backendName, status: syncStateLabel(state, s) }
   const hint = clickHint(state, s)
   const copyCount = status.conflictCopies?.count ?? 0
   const mergeCount = status.conflictMerges?.count ?? 0
@@ -283,15 +270,7 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
   const title = repoName || backendName
   const titleTooltip = repoName && status.github?.owner ? `${status.github.owner}/${repoName}` : title
 
-  const relative = (iso: string) => {
-    const age = relativeAge(iso, now)
-    switch (age.unit) {
-      case 'now': return s.justNow
-      case 'minutes': return tf(s.minutesAgo, { count: age.count })
-      case 'hours': return tf(s.hoursAgo, { count: age.count })
-      case 'days': return plural(s.daysAgo, age.count)
-    }
-  }
+  const relative = (iso: string) => formatSyncAge(iso, now, s)
   const exactTime = (iso: string) => {
     const d = new Date(iso)
     const sameDay = d.toDateString() === new Date(now).toDateString()
@@ -331,7 +310,7 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
           className={`flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 rounded-full border border-solid border-border bg-surface-0 ${pill.text}`}
         >
           <span className={`w-1.5 h-1.5 rounded-full ${pill.dot}`} />
-          {stateLabel(state, s)}
+          {syncStateLabel(state, s)}
         </span>
       </div>
 

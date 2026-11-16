@@ -6,15 +6,19 @@
 `getActiveSyncProvider()`, que devuelve el backend activo — **NoteFlow Cloud si
 `settings.cloudSync.enabled` (prioridad), GitHub en caso contrario**. Son **mutuamente
 excluyentes**: esta función es la única fuente de verdad (el tick del autosync de GitHub se salta
-si Cloud está habilitado), y la página Settings → Sync lo comunica visualmente (selector de dos
-tarjetas con badges de estado + aviso "paused" en el panel de GitHub con Cloud activo — tramo 4,
-ver `monetization.md` § 4 "Settings UI").
+si Cloud está habilitado), y la página Settings → Sync lo comunica visualmente (vista general del
+backend activo; con Cloud activo, GitHub conectado sale en "Other providers" con badge "Paused" y
+el mapa lo dibuja como espejo en pausa, y GitHub sin conectar sale como "Not connected" con acceso a
+un detalle solo informativo — ver `monetization.md` § 4 "Settings UI").
 ⚠️ Exclusión mutua = **enrutado**, no "GitHub no escribe nunca": con Cloud activo **`sync:pull` se
 rechaza** en `main.ts` (`{…SyncPullResult vacío, error: 'cloud-enabled'}`) y el botón "Sincronizar
-ahora" de Settings → Sync → GitHub se oculta: un pull del repo pausado podía resucitar notas borradas
-bajo Cloud. Todos los demás pulls de GitHub ya se saltan con Cloud activo (tick del autosync,
+ahora" de Settings → Sync solo lo ofrece la tarjeta del backend activo (con Cloud activo, GitHub es una
+fila "Paused" con "Mirror to GitHub" + "Disconnect"): un pull del repo pausado podía resucitar notas
+borradas bajo Cloud. Todos los demás pulls de GitHub ya se saltan con Cloud activo (tick del autosync,
 arranque, `sync:pull-active`) — **excepto** el pull inicial de `initiateDeviceFlow` al conectar
-GitHub (pendiente de decidir). La única forma de refrescar el repo con Cloud activo es **"Espejar en
+GitHub (pendiente de decidir en main; la UI no ofrece conectar GitHub con Cloud activo: desde la vista
+general de Cloud, GitHub sin conectar solo abre un detalle informativo — `GitHubSetup` con
+`cloudEnabled` — sin formulario ni botón de conectar, que pide apagar Cloud primero). La única forma de refrescar el repo con Cloud activo es **"Espejar en
 GitHub"** (`mirrorToGitHub`, abajo), que lo deja exacto.
 
 **Cerrar sesión de la cuenta NoteFlow apaga Cloud** (`enabled = false` vía `disableCloudSync()`,
@@ -34,7 +38,8 @@ onStart?, onComplete?)`, `pushPathsNow(notesDir, relPaths)`, `scheduleDelete(rel
 (Device Flow, migración remota v2, claves E2EE/unlock) queda FUERA de la interfaz — sus IPC
 propios llaman a los módulos directamente.
 
-**Botón de sync de la titlebar** (`TitleBar.tsx`): NO está cableado a GitHub. Consume
+**Botón de sync de la titlebar** (`TitleBar.tsx`): NO está cableado a GitHub. Consume (vía el hook
+`src/components/useActiveSyncStatus.ts`, que comparte con la tarjeta de estado de Ajustes → Sync)
 `sync:get-active-status` (helper `getActiveSyncStatus()` en `syncProvider.ts`, espejo de
 `getActiveSyncProvider()`) → status normalizado y etiquetado con `backend` (`'github'|'cloud'|'none'`),
 y su sync manual va por `sync:pull-active` (Cloud si `enabled`, GitHub si no). **El sync manual no es
