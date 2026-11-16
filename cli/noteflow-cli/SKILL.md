@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.13.0
+version: 2.14.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -178,6 +178,10 @@ error.
 - `noteflow cloud login <email> --send-code` → `noteflow cloud login <email> --code <código>` —
   NoteFlow Cloud en dos pasos (`--no-pull` igual). También `cloud logout`, `cloud status [--json]`,
   `cloud setup`, `cloud push`, `cloud pull`.
+- `noteflow origin [--json]` — de qué repo/cuenta vienen las notas de este directorio y si hay una
+  elección pendiente; `noteflow origin merge [--no-pull]` la resuelve fusionando (y `--merge` en
+  `login` / `cloud login`). **Solo con el permiso del usuario**: ver [Notas de otro repo o
+  cuenta](#notas-de-otro-repo-o-cuenta-sync-en-espera).
 - `noteflow migrate` — migración única de notas antiguas (un `.md` plano por nota) al formato de
   carpetas.
 - `noteflow self-update` — actualiza el script del CLI y esta skill donde ya esté instalada.
@@ -219,6 +223,10 @@ code no dice si subió**. Tras cada una, busca la línea de sync en stdout y std
 - `Sync failed: …`, `Cloud sync failed: …`, `changed on GitHub since your last pull — not
   uploaded`, `not uploaded: a newer version is on NoteFlow Cloud` o `Conflict: local changes kept
   as "…"` → al terminar, `noteflow pull` y luego `noteflow push`.
+- `Not synced to GitHub: the notes here belong to …` / `Not synced to NoteFlow Cloud: …` (o
+  `Not deleted on …`) → el sync de ese backend está **en espera** por el origen de las notas: el
+  cambio quedó en local y no sirve `pull`/`push` (salen con exit 1). Ver [Notas de otro repo o
+  cuenta](#notas-de-otro-repo-o-cuenta-sync-en-espera).
 - Ninguna línea de sync → comprueba `noteflow status --json`. Si hay sync, al terminar `noteflow
   pull` y luego `noteflow push`. Si no lo hay y aún no lo ofreciste en esta conversación,
   [ofrécete a activarlo](#ofrécete-a-activar-el-sync); si no, avisa al usuario de que el cambio
@@ -244,6 +252,37 @@ for the ⚠️ markers`: dile al usuario qué nota es (o deja tú la versión bu
 lo pidió) y sincroniza. Solo las notas **cifradas** (y pocos casos más) siguen creando una copia de
 conflicto. **Nunca** des el trabajo por sincronizado sin ver la confirmación, no reintentes en bucle
 y no uses `--force`.
+
+## Notas de otro repo o cuenta (sync en espera)
+
+El CLI recuerda con qué repo de GitHub (por su id: un repo renombrado es el mismo) y con qué cuenta de
+NoteFlow Cloud se sincronizó el directorio de notas (`syncOrigin` en `settings.json`, compartido con la
+app de escritorio). Si se conecta **otro** repo o **otra** cuenta y en disco hay notas sincronizables
+del anterior, **no mezcla nada por su cuenta**:
+
+- `login` / `cloud login` guardan la conexión o la sesión pero **no** hacen el pull inicial, y lo
+  explican: `Sync with GitHub is on hold: the notes in <dir> come from <owner/repo>, but this CLI is
+  connected to <owner/repo>. Nothing was synced.` (en Cloud, `… come from the NoteFlow account <email>`
+  o `another NoteFlow account`).
+- `push` y `pull` salen con **exit 1** con ese mismo mensaje y las opciones; las escrituras se guardan
+  en local con `Not synced to …` y los borrados se quedan en local (`Not deleted on …`).
+- `noteflow status --json` lo dice en `github.origin` / `cloud.origin`: `pending: true`, `previous`,
+  `next` y `resolve` (las opciones). `noteflow origin --json` muestra los dos backends.
+
+Qué hacer: **para y pregunta al usuario** (no decidas tú: mezcla las notas de dos remotos). Explícale
+las tres opciones con los nombres del mensaje:
+1. **Fusionar** — las notas locales se quedan y se sincronizan con el remoto nuevo: con su permiso,
+   `noteflow origin merge` (hace el pull; luego `noteflow push` sube las locales que falten). Si aún
+   estás haciendo el login, `--merge` en `login` / `login --no-wait` / `cloud login --code` hace lo
+   mismo.
+2. **Cancelar** — `noteflow logout` (GitHub) o `noteflow cloud logout`: desconecta; las notas y su
+   origen quedan intactos.
+3. **Usar solo las notas del remoto nuevo** — no existe en el CLI: se hace en la app de escritorio
+   (Ajustes → Sync), que antes aparta las notas locales en una copia.
+
+Sin notas sincronizables en disco (o sin origen guardado aún) el remoto nuevo se adopta solo, sin
+preguntar. Si el aviso dice `settings.json can't be read`, el fichero de ajustes está dañado: díselo
+al usuario; no lo borres tú.
 
 ## Ofrécete a activar el sync
 
@@ -289,13 +328,16 @@ autorizar de nuevo); después `status --json` ya sale conectado.
    el código (en escritorio el navegador se abre solo) y pídele que te avise al autorizar. Ejecuta
    `noteflow login --finish` **solo cuando lo confirme**: espera hasta que autorice o caduque el
    código. Si el timeout de tu herramienta lo corta, relanza `--finish` (el login pendiente se
-   conserva). Debe acabar en `Connected to <usuario>/<repo>` y el pull inicial. Si caducó, vuelve a
-   empezar con `--no-wait` solo si el usuario quiere.
+   conserva). Debe acabar en `Connected to <usuario>/<repo>` y el pull inicial. Si en vez del pull
+   dice `Sync with GitHub is on hold`, sigue [Notas de otro repo o
+   cuenta](#notas-de-otro-repo-o-cuenta-sync-en-espera) (y no hagas el `push` del paso 5 hasta
+   resolverlo). Si caducó, vuelve a empezar con `--no-wait` solo si el usuario quiere.
 4. **NoteFlow Cloud:** confirma el email, `noteflow cloud login <email> --send-code` y, con el código
    que te dé, `noteflow cloud login <email> --code <código>`. Si es inválido o caducó, pídele que lo
    revise y reintenta `--code`; tras 2–3 fallos, un `--send-code` nuevo (con `429 Too many attempts`,
    espera antes de reenviar). Luego mira la línea `Cloud keys:`:
-   - `standard (managed)` → el login ya hizo el primer pull.
+   - `standard (managed)` → el login ya hizo el primer pull (salvo `Sync with NoteFlow Cloud is on
+     hold`: ver [Notas de otro repo o cuenta](#notas-de-otro-repo-o-cuenta-sync-en-espera)).
    - `No Cloud keys yet` → `noteflow cloud setup` **solo si el usuario lo confirma** (crea las
      claves de la cuenta en modo estándar) y después `noteflow pull`.
    - `private (e2ee)` → **no** pidas ni manejes la passphrase: que el usuario ejecute `noteflow

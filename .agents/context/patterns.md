@@ -3464,16 +3464,17 @@ y al humano solo le queda autorizar en GitHub o dar el código del email:
   (inválido/caducado → exit 1, reintentable con el mismo código o con un `--send-code` nuevo). La
   validación de flags (`planCloudLogin`: email obligatorio como argumento, `--send-code` ⊕ `--code`)
   es pura; `sendCloudOtp`/`verifyCloudOtp` son comunes, y lo que pasa tras obtener la sesión
-  (`finishCloudLogin`: `saveCliAccount`, `bindCliCloudToAccount`, `patchCliCloud`, línea `Cloud
-  keys:`, pull en managed, `--no-pull`) es **la misma función** para el flujo interactivo y `--code`.
+  (`finishCloudLogin`: `saveCliAccount`, puerta del origen del dir de notas y `--merge` (v2.14.0),
+  `bindCliCloudToAccount`, `patchCliCloud`, línea `Cloud keys:`, pull en managed, `--no-pull`) es **la
+  misma función** para el flujo interactivo y `--code`.
 - **GitHub:** `login [repo] --no-wait` pide el device code, lo imprime (abre el navegador
   best-effort; con `--json`, `{ verificationUri, userCode, expiresAt, repo }`) y guarda la concesión
   pendiente en `settings.cliGithubLogin` (`{ deviceCode, userCode, verificationUri, interval,
-  expiresAt, repo, owner?, noPull? }`, clave propia del CLI, `writeSettings` → 0600). `login --finish` la
+  expiresAt, repo, owner?, noPull?, merge? }`, clave propia del CLI, `writeSettings` → 0600). `login --finish` la
   valida (`checkPendingGithubLogin`: ausente/mal formada o caducada → exit 1 pidiendo `--no-wait`
   otra vez), hace el polling con el **primer intento inmediato** (respeta `interval`/`slow_down`) y
-  sigue por `completeGithubLogin`, el mismo final que el login interactivo (owner, `ensureRepo`, reglas
-  `sameRepo`/`clearGithubBases`, `pullAfterLogin`). El pendiente se borra en cuanto el polling
+  sigue por `completeGithubLogin`, el mismo final que el login interactivo (owner, `ensureRepo` → `repoId`,
+  reglas `sameRepo`/`clearGithubBases`, puerta del origen `githubOriginAfterLogin`, `pullAfterLogin`). El pendiente se borra en cuanto el polling
   termina (token concedido, caducado o error definitivo como `access_denied`). Un fallo de red
   **durante el polling** (o que el timeout de la herramienta del agente corte el comando) lo
   conserva y basta repetir `--finish`. Uno **después** de recibir el token (`GET /user`,
@@ -3493,6 +3494,14 @@ y al humano solo le queda autorizar en GitHub o dar el código del email:
   otro fichero y esta es la única forma de saberlo. Así el agente propone al usuario el mismo
   backend que usa en la app. Protocolo del agente en la skill (`cli/noteflow-cli/SKILL.md`
   § "Ofrécete a activar el sync"). Tests en `tests/cli/agentLogin.test.ts`.
+
+**Origen del dir de notas en el CLI (v2.14.0).** Cambiar de repo (`login`) o de cuenta (`cloud login`)
+con notas sincronizables del anterior en disco ya no sincroniza: guarda la conexión, no hace el pull y
+explica; `push`/`pull` salen con exit 1 y las escrituras quedan en local con una línea `Not synced to …`
+hasta que se resuelve con `noteflow origin merge` / `--merge`, o se cancela con `logout` / `cloud logout`
+(no interactivo a propósito: lo usan agentes y scripts; "usar solo lo remoto" es de la app). Detalle de la
+puerta GitHub en `sync.md` § "El CLI con GitHub"; la de Cloud en `monetization.md` § "Cliente CLI
+(headless)"; protocolo del agente en la skill (§ "Notas de otro repo o cuenta").
 
 **Conectar también el CLI desde la app (Ajustes → Sync, CLI v2.10.0).** Debajo del panel del backend
 seleccionado, `CliConnectSection` (solo si ese backend está conectado en la app: Cloud activo con
