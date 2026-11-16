@@ -222,6 +222,69 @@ Support/NoteFlow`: ficheros distintos, ver `architecture.md` § Modelo de almace
 Por eso su `lastSync` obedece al mismo invariante que la regla de borrado del pull de la app
 ("ausente del remoto + `updated <= lastSync` ⇒ borrada"): `lastSync` solo avanza cuando el repo
 tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`). En concreto:
+- **Origen del dir de notas** (desde CLI 2.14.0; la regla de la app está en § "Origen del dir de
+  notas" abajo): el CLI lee y escribe el mismo `settings.syncOrigin` (en Windows, el de la app). Lleva
+  un espejo puro de `electron/syncOrigin.ts` (`sameIdentity`, `decideOrigin`, `readSyncOrigin`,
+  `getStoredIdentity`, `withSyncOrigin`, `readSettingsStrict`, `hasSyncedLocalNotes`; paridad en
+  `tests/cli/syncOrigin.test.ts`), incluidas las partes aditivas del contrato, que la app también
+  implementa (§ "Origen del dir de notas"): `stale: true` (origen guardado `stale` + notas sincronizables ⇒
+  preguntar aunque la identidad coincida; sin notas ⇒ adoptar con el reseteo de `changed-empty`; el CLI
+  **nunca** lo escribe —solo la app, en su "usar solo lo remoto"— y toda adopción lo quita),
+  `cloud.email` (etiqueta de los mensajes) y **`notesDir`** (abajo).
+  **A qué dir pertenece cada registro (`notesDir`, contrato compartido con la app):** `syncOrigin` vive
+  en `settings.json`, que `NOTEFLOW_NOTES_DIR` no aísla, pero describe UN dir. Cada registro
+  (`github`/`cloud`) lleva `notesDir` = `path.resolve` del dir con el que se adoptó (sin separador
+  final; lo escribe **toda** adopción, también la siembra de Cloud); un registro sin él (anterior a esto)
+  es del **dir por defecto** (el de sin `NOTEFLOW_NOTES_DIR`). Comparación `sameNotesDir`: resueltas,
+  sin mayúsculas en win32/darwin, exacta en linux, sin `realpath`. Antes de `decideOrigin`
+  (`originPlacement`): registro de **otro** dir ⇒ `proceed` **sin** adoptar, sin escribir, sin reseteo y
+  sin elección pendiente (`origin merge` → nada que resolver; `origin` dice de qué dir es); **sin**
+  registro y dir actual ≠ por defecto ⇒ igual, sin escribir (si no, un override vacío dejaría al dir real
+  con un registro "ajeno", sin protección). Así un `NOTEFLOW_NOTES_DIR=<vacío> noteflow pull` ya no adopta
+  B con reseteo para que luego el dir real, con las notas de A, suba a B sin preguntar. En la práctica
+  solo el dir por defecto tiene registro. Efecto aceptado: con override se siguen compartiendo
+  `githubSync`/`cliCloud`/`lastSync` (ya conocido). `withSyncOrigin` conserva las claves
+  desconocidas de `syncOrigin` y de settings y, al readoptar la **misma** identidad, los campos extra
+  del registro (y un `repoId`/`email` que la identidad nueva no traiga); otra identidad ⇒ registro
+  nuevo solo con los campos conocidos.
+  **Puerta** = `evaluateGithubOrigin()`, derivada en cada llamada (sin caché: ve lo que la app haya
+  cambiado). Identidad = `settings.githubSync` (`owner`/`repo` + `repoId` si está guardado: `login`
+  lo toma de la respuesta del `GET /repos/{o}/{r}` que ya hace `ensureRepo`, o del `POST /user/repos`
+  si lo crea; push/pull no hacen GET extra). `settings.json` ilegible ⇒ `unreadable` (en la práctica un
+  fichero corrupto ya hace que el CLI no vea la conexión — `readSettings` devuelve `{}` y sale `Not
+  connected` —, así que cubre la carrera y `origin merge`); `cloudSync.enabled` (la app usa Cloud,
+  GitHub es su espejo) ⇒ abierta **sin tocar** `syncOrigin.github`. Las decisiones `proceed` que adoptan
+  se escriben ya, con `adoptGithubOrigin` (mismo orden estricto que la app: settings legible →
+  `cli-github-state.json` reescrito `{}` con una escritura que propaga errores → **un** read-modify-write
+  de settings que quita `lastSync`/`remoteFormatMigratedAt` del `githubSync` **leído del fichero** y fija
+  el origen; rechaza si el `githubSync` releído ya no es la conexión evaluada); un fallo ⇒
+  `unwritable`, cerrada. **Dónde se comprueba:** `cmdPush` y `cmdMigrate` (exit 1 antes de cualquier
+  petición; `migrate` no migra ni en local), `cmdPull` (lanza `Error`, que `pullAfterLogin` captura),
+  `syncPushNoteFiles` (no sube; una línea `Not synced to GitHub: … run 'noteflow origin' to resolve`, el
+  comando no falla), `cmdDelete` (la puerta se evalúa **antes** de borrar la carpeta: borrar la última
+  nota no puede convertir "notas de otro remoto" en "sin notas ⇒ adoptar"; cerrada ⇒ borrado solo local,
+  `Not deleted on GitHub`) y `cmdSectionDelete` (no borra en remoto; ya avisó el push). `group/folder
+  delete` solo tocan GitHub vía `syncPushNoteFiles`. Con el CLI enrutado a Cloud (`cloudActive()`)
+  GitHub no se evalúa.
+  **`login`** guarda la conexión y llama a `githubOriginAfterLogin`: con `cloudSync.enabled` adopta el
+  repo sin preguntar (y limpia su `stale`, como el Device Flow de la app en ese estado); con el CLI en
+  Cloud no evalúa; cerrada ⇒ **sin** pull, explica (`Sync with GitHub is on hold: the notes in <dir>
+  come from <prev>, but this CLI is connected to <next>. Nothing was synced.` + opciones) y sale con 0
+  (el login sí se hizo); `--merge` adopta y sigue con el pull (con `--no-wait` se guarda, igual que
+  `noPull`, como `merge: true` en el grant pendiente `cliGithubLogin` y lo aplica `--finish`). **Resolver:** `noteflow origin merge` (backend activo, mismo enrutado que
+  `push/pull`; si `githubSync` no tiene `repoId` lo pide antes con `GET /repos/{o}/{r}` — como
+  `resolveOriginChoice` de la app — y lo guarda también en `githubSync.repoId`, reevaluando: con el id el
+  repo puede resultar el mismo, renombrado ⇒ nada que resolver; si el GET falla, por nombre; adopta con
+  reseteo y hace el pull best-effort, `--no-pull` lo omite; nada pendiente ⇒ lo dice y sale 0), `noteflow logout` para cancelar (`logout` no borra `syncOrigin`, igual que la app) o
+  la app de escritorio para "usar solo lo remoto" (el CLI no archiva). `noteflow origin [--json]` y
+  `status --json` (`github.origin`) enseñan el estado **sin** adoptar nada. Tests e2e (GitHub y Cloud
+  simulados): `tests/cli/originGate.test.ts`.
+  **En Windows** `origin merge` / `login --merge` escriben el origen en el `settings.json` compartido, así
+  que resuelven **también** la elección pendiente de la app. El CLI no resetea el `sync-state.json` de la
+  app (journal y shas del repo anterior); lo descarta la propia app: ese estado va estampado con su repo
+  (`githubRemote`) y, si no coincide con la conexión viva, `ensureStateOfConnection` lo vacía antes de
+  drenar nada (§ "Origen del dir de notas" → "El estado es de un repo"). Al revés no hace falta: el
+  `cli-github-state.json` del CLI ya va por `owner`/`repo` (`loadGithubBases` ignora el de otro repo).
 - `login` **no** escribe `lastSync` (re-login al mismo repo conserva el estado previo; otro repo
   empieza limpio) y hace un primer `pull` automático (salvo `--no-pull` o Cloud activo en el CLI).
 - **Todo** `pull` de GitHub (`pull`, su alias `update`, `--force` y el de tras el login) lo escribe
@@ -670,8 +733,12 @@ el error y no se cierra. Con Cloud: "Cancel" explica que apaga NoteFlow Cloud en
 sesión sigue), "Use only the notes from …" avisa si desconectará GitHub Sync, y con `stale` la intro dice
 que las notas vienen ahora de otra sincronización.
 
-**Fuera de alcance (pendiente):** restaurar una copia desde la app y preguntar al desconectar. La puerta
-del CLI la implementa el propio CLI (ver su sección) con la misma forma de `syncOrigin`.
+**Estado y fuera de alcance.** Cubiertos: GitHub Sync y NoteFlow Cloud en la app (las dos puertas de
+arriba) y el CLI (2.14.0, GitHub y Cloud, con su propio espejo de la decisión y la misma forma de
+`syncOrigin`: ver "El CLI con GitHub" arriba y `monetization.md` § "Cliente CLI (headless)"). En el CLI
+**no existe** "usar solo lo remoto" (ni archivo local): solo `noteflow origin merge` / `--merge`, o
+cancelar con `logout` / `cloud logout`; esa opción es de la app. **Fuera de v1 (pendiente):** restaurar una
+copia desde la app y preguntar al desconectar.
 
 ### GitHub Sync (`electron/githubSync.ts`)
 - **Auth:** Device Flow OAuth — sin client secret; el usuario autoriza en

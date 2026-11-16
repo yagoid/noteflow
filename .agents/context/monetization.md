@@ -2143,6 +2143,41 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
     es esconder notas antiguas (intactas en remoto), no destruir datos. Nada más queda ligado a la cuenta en disco: la DEK, las claves por
   nota y el access token viven solo en memoria del proceso. La app de escritorio hace el mismo
   reinicio con `settings.cloudSync.userId` (ver "Dueño de la cuenta" en "Sync engine").
+- **Origen del dir de notas (CLI 2.14.0):** identidad `{kind:'cloud', userId: cliAccount.userId,
+  email}` frente a `settings.syncOrigin.cloud` (compartido con la app en Windows; espejo puro y regla
+  en `sync.md` § "El CLI con GitHub" y § "Origen del dir de notas"). Sin `syncOrigin.cloud` el origen
+  se **siembra** con el dueño previo (`cloudOriginSeed`: `settings.cloudSync.userId` de la app, si no
+  `cliCloud.userId`, si no —en `cloud login`— el `userId` de la sesión anterior, el mismo
+  `presumedOwner` de `cliCloudForUser`) y se persiste antes de decidir; sin ninguno se adopta la cuenta
+  que entra. Regla de `notesDir` (en `sync.md` § "El CLI con GitHub"): un registro de otro dir de
+  notas no se usa ni se reescribe y, con `NOTEFLOW_NOTES_DIR` distinto del dir por defecto, **no** se
+  siembra ni se escribe nada (el estado Cloud de settings es del dir por defecto). ⚠️ Residual (solo en
+  el CLI — divergencia conocida y aceptada con la app): sin `syncOrigin.cloud` todavía (settings
+  anteriores a CLI 2.14.0), un `cloud login` a otra cuenta **bajo override** deja la puerta abierta y
+  `bindCliCloudToAccount` reescribe `cliCloud.userId` con la cuenta nueva: se pierde la fuente de la
+  siembra y, al volver al dir por defecto (sin `cloudSync.userId` de la app), la cuenta nueva se adopta
+  sin preguntar. Estrecho (cambio de cuenta bajo override antes de que ningún sync del dir por defecto
+  haya escrito el registro). La app cierra su caso equivalente grabando al dueño que se va como origen
+  **del dir por defecto** antes del reset, también desde un override (`bindCloudSyncToAccount`; `sync.md`
+  § "Un registro por dir de notas"); el CLI no persiste esa siembra antes de su bind. Otra cuenta + notas
+  sincronizables ⇒ puerta cerrada (`evaluateCloudOrigin`): ni pull
+  (`cloudPullNow`/`cloudEnsureReconciled` lanzan), ni push (`cmdCloudPush`/`cmdCloudPull` y `history
+  --restore` —este antes de cualquier petición; listar, `--show` y `--dry-run` sí— salen con exit 1; `syncPushNoteFiles` y los borrados se quedan en local con `Not synced to
+  NoteFlow Cloud` / `Not deleted on NoteFlow Cloud`) y, sobre todo, **ni `bindCliCloudToAccount`**: la
+  puerta va antes, así el cursor y las bases de la cuenta anterior siguen intactos y `cloud logout`
+  cancela sin perder nada. `cloud login` a otra cuenta (`finishCloudLogin`) guarda la sesión, activa
+  `cliCloud.enabled`, informa de las claves y **no** hace ni el reseteo ni el pull: explica y sale con 0.
+  Adopción estricta (`adoptCloudOrigin`, mismo orden que la de GitHub): settings legible → borrar
+  `cli-cloud-state.json` propagando errores (`cli-cloud-base-content/` best-effort: queda sin
+  referencias y la poda de un pull lo limpia) → **una** escritura de settings con `cliCloud =
+  cliCloudReset(…)` (el reseteo de `cliCloudForUser` al cambiar de cuenta, extraído) y `syncOrigin.cloud
+  = {userId, email, notesDir}`; rechaza si `cliAccount` cambió entretanto. ⚠️ Residual: si falla esa
+  escritura de settings tras borrar `cli-cloud-state.json`, el origen sigue siendo el anterior y la puerta
+  cerrada, pero `cliCloud.basesBootstrapped: true` queda sin bases (sin bootstrap, las subidas de esas
+  notas caen a la regla por timestamp hasta el siguiente pull que las fije). Resolver: `cloud login
+  --merge` (solo en el paso `--code` o interactivo; con `--send-code` es error),
+  `noteflow origin merge` (con Cloud activo en el CLI) o `cloud logout`. `cloud status --json` lo
+  muestra en `cloud.origin`.
 - **DEK por invocación, jamás cacheada en disco** (ni la passphrase): managed → `cloud-keys/unlock`
   en cada run; e2ee → passphrase de `NOTEFLOW_CLOUD_PASSPHRASE` o prompt interactivo con eco oculto
   (un input de 30 chars normalizados del alfabeto se trata como recovery code). En e2ee la máquina
