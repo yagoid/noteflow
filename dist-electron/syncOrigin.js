@@ -263,14 +263,22 @@ function resolveStoredCloudOrigin(settings, dirs) {
  * `stale` (adopting means the notes on disk now belong to that remote), and
  * with `id.notesDir` (normalized) as the record's dir when given. Every other
  * key — including the other backend's origin and unknown keys written by a
- * newer client — is preserved. Does not mutate the input.
+ * newer client — is preserved. The backend's own record is written fresh, with
+ * one exception: a GitHub `id` WITHOUT `repoId` (GET /repos failed when it was
+ * built) that is the same repo as the stored record keeps the stored `repoId`
+ * — re-adopting a repo must not forget the id that tells it from a namesake.
+ * Does not mutate the input.
  */
 function withSyncOrigin(settings, id) {
     const current = isObject(settings[exports.SYNC_ORIGIN_KEY]) ? { ...settings[exports.SYNC_ORIGIN_KEY] } : {};
     const dir = id.notesDir ? { notesDir: normalizeNotesDir(id.notesDir) } : {};
     if (id.kind === 'github') {
+        const stored = getStoredIdentity(settings, 'github');
+        const repoId = typeof id.repoId === 'number'
+            ? id.repoId
+            : stored?.kind === 'github' && sameIdentity(stored, id) ? stored.repoId : undefined;
         current.github = {
-            ...(typeof id.repoId === 'number' ? { repoId: id.repoId } : {}),
+            ...(typeof repoId === 'number' ? { repoId } : {}),
             owner: id.owner,
             repo: id.repo,
             ...dir,

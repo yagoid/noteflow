@@ -406,6 +406,21 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-renamed', notesDir: ND })
   })
 
+  it('re-adopting the same repo while its id is unknown keeps the recorded repoId', async () => {
+    writeLocal('mine-1111', files('1111'))
+    // A record from before `notesDir` (or the CLI's) and a connection whose
+    // GET /repos failed: no repoId on the live side.
+    writeSettings({
+      githubSync: { enabled: true, encryptedToken: Buffer.from('tok').toString('base64'), owner: 'me', repo: 'notes-a' },
+      syncOrigin: { github: { owner: 'me', repo: 'notes-a', repoId: 111 } },
+    })
+    env.offline = true
+    await freshModule()
+    gh.loadSyncSettings() // same repo by name → no question; the record gains this dir
+    expect(gh.getOriginChoice()).toBeNull()
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 111, owner: 'me', repo: 'notes-a', notesDir: ND })
+  })
+
   it('another repo with no synced notes on disk: no question, the origin moves and the old state is reset', async () => {
     await connectedToAThenDisconnected()
     for (const d of ['mine-1111', 'a-note-2222']) fs.rmSync(path.join(notesDir, d), { recursive: true })

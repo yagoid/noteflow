@@ -172,6 +172,35 @@ describe('settings helpers', () => {
       github: { owner: 'me', repo: 'r' },
     })
   })
+  it('withSyncOrigin keeps the stored repoId when the SAME repo is re-adopted without one (GET /repos failed)', () => {
+    const stored = { syncOrigin: { github: { owner: 'me', repo: 'notes-a', repoId: 111 } } }
+    // What the gate adopts to add the notes dir while the connection has no repoId yet.
+    expect(withSyncOrigin(stored, { kind: 'github', owner: 'me', repo: 'notes-a', notesDir: '/n' }).syncOrigin).toEqual({
+      github: { repoId: 111, owner: 'me', repo: 'notes-a', notesDir: normalizeNotesDir('/n') },
+    })
+    // Names are case-insensitive; the new spelling is recorded.
+    expect(withSyncOrigin(stored, { kind: 'github', owner: 'ME', repo: 'Notes-A' }).syncOrigin).toEqual({
+      github: { repoId: 111, owner: 'ME', repo: 'Notes-A' },
+    })
+    // `stale` is never kept: an adoption always clears it.
+    const stale = { syncOrigin: { github: { owner: 'me', repo: 'notes-a', repoId: 111, stale: true, notesDir: normalizeNotesDir('/n') } } }
+    expect(withSyncOrigin(stale, { kind: 'github', owner: 'me', repo: 'notes-a' }).syncOrigin).toEqual({
+      github: { repoId: 111, owner: 'me', repo: 'notes-a' },
+    })
+    // A known repoId always wins; another repo never inherits the stored one.
+    expect(withSyncOrigin(stored, { kind: 'github', owner: 'me', repo: 'notes-a', repoId: 222 }).syncOrigin).toEqual({
+      github: { repoId: 222, owner: 'me', repo: 'notes-a' },
+    })
+    expect(withSyncOrigin(stored, { kind: 'github', owner: 'me', repo: 'notes-b' }).syncOrigin).toEqual({
+      github: { owner: 'me', repo: 'notes-b' },
+    })
+    // A malformed stored id is not a repoId.
+    expect(withSyncOrigin({ syncOrigin: { github: { owner: 'me', repo: 'notes-a', repoId: 'x' } } }, { kind: 'github', owner: 'me', repo: 'notes-a' }).syncOrigin)
+      .toEqual({ github: { owner: 'me', repo: 'notes-a' } })
+    // The record then compares by id again: the same name with another id is another repo.
+    const kept = withSyncOrigin(stored, { kind: 'github', owner: 'me', repo: 'notes-a' })
+    expect(sameIdentity(getStoredIdentity(kept, 'github')!, { kind: 'github', owner: 'me', repo: 'notes-a', repoId: 999 })).toBe(false)
+  })
   it('withOriginMarkedStale marks an existing record only, keeps its keys and never mutates the input', () => {
     const settings = { theme: 'carbon', syncOrigin: { github: { repoId: 1, owner: 'me', repo: 'r' }, cloud: { userId: 'u1', email: 'a@x.io' } } }
     const marked = withOriginMarkedStale(settings, 'github')

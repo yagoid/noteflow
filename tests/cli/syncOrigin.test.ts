@@ -8,9 +8,9 @@
 // identities, `stale`, the Cloud `email` label and the per-record `notesDir`.
 // Then the round trip: what one side writes, the other reads and decides on.
 // Where the two differ ON PURPOSE the test says so and pins both behaviours:
-//  - withSyncOrigin re-adopting the SAME identity: the CLI keeps what the new
-//    id lacks (repoId / email / notesDir / unknown fields), the app writes a
-//    fresh record;
+//  - withSyncOrigin re-adopting the SAME identity: both keep a recorded repoId
+//    the new id lacks; the CLI also keeps the email / notesDir / unknown fields
+//    it lacks, the app writes the rest of the record fresh;
 //  - the gates: the app tags the identity it syncs with its notes dir, so it
 //    rewrites a same-identity record to add a missing `notesDir`; the CLI
 //    leaves that record alone (both read it as the default dir's);
@@ -201,12 +201,13 @@ describe('parity with electron/syncOrigin.ts — pure functions', () => {
   })
 
   // Re-adopting the SAME identity is where the two differ on purpose: the CLI
-  // keeps every field of the stored record that the new id doesn't carry.
+  // keeps every field of the stored record that the new id doesn't carry; the
+  // app only the repoId (which both keep — never a difference).
   function cliKeepsMore(s: Settings, id: Id): boolean {
     const stored = app.getStoredIdentity(s, id.kind)
     if (!stored || !app.sameIdentity(stored, id)) return false
     const record = (s.syncOrigin as Record<string, Record<string, unknown>>)[id.kind]
-    return Object.keys(record).some((k) => k !== 'stale' && (id as unknown as Record<string, unknown>)[k] === undefined)
+    return Object.keys(record).some((k) => k !== 'stale' && k !== 'repoId' && (id as unknown as Record<string, unknown>)[k] === undefined)
   }
 
   it('withSyncOrigin over settings × identities: the same record, stale dropped, notesDir normalized', () => {
@@ -224,7 +225,7 @@ describe('parity with electron/syncOrigin.ts — pure functions', () => {
     expect(kept).toBeGreaterThan(0)
   })
 
-  it('…except re-adopting the same identity: the CLI keeps what the id lacks, the app writes a fresh record', () => {
+  it('…except re-adopting the same identity: both keep the repoId the id lacks; the CLI also the rest, the app writes it fresh', () => {
     const cli = loadCli(path.join(tmp, 'notes'))
     const s = {
       syncOrigin: {
@@ -232,10 +233,15 @@ describe('parity with electron/syncOrigin.ts — pure functions', () => {
         cloud: { userId: 'u1', email: 'a@x.io', stale: true, notesDir: DIR_A, label: 'acct' },
       },
     }
-    // The same repo by name, an id without repoId / notesDir.
-    expect((app.withSyncOrigin(s, GH('ana', 'notes')).syncOrigin as { github: unknown }).github).toEqual({ owner: 'ana', repo: 'notes' })
+    // The same repo by name, an id without repoId / notesDir (GET /repos failed):
+    // neither side forgets the recorded repoId — and neither keeps `stale`.
+    expect((app.withSyncOrigin(s, GH('ana', 'notes')).syncOrigin as { github: unknown }).github).toEqual({ owner: 'ana', repo: 'notes', repoId: 7 })
     expect(cli.withSyncOrigin(s, GH('ana', 'notes')).syncOrigin.github)
       .toEqual({ owner: 'ana', repo: 'notes', repoId: 7, notesDir: DIR_A, label: 'mine' })
+    // The repoId is kept for the same repo only: another one starts without it on both sides.
+    for (const side of [app, cli]) {
+      expect((side.withSyncOrigin(s, GH('bob', 'notes')).syncOrigin as { github: unknown }).github).toEqual({ owner: 'bob', repo: 'notes' })
+    }
     // The same account, an id without email / notesDir.
     expect((app.withSyncOrigin(s, CL('u1')).syncOrigin as { cloud: unknown }).cloud).toEqual({ userId: 'u1' })
     expect(cli.withSyncOrigin(s, CL('u1')).syncOrigin.cloud).toEqual({ userId: 'u1', email: 'a@x.io', notesDir: DIR_A, label: 'acct' })
