@@ -117,6 +117,17 @@ function parseSyncState(raw) {
     }
     if (obj.emptyFileRepairDone === true)
         state.emptyFileRepairDone = true;
+    const remote = obj.githubRemote;
+    if (typeof remote === 'object' && remote !== null && !Array.isArray(remote)) {
+        const { owner, repo, repoId } = remote;
+        if (typeof owner === 'string' && owner && typeof repo === 'string' && repo) {
+            state.githubRemote = {
+                ...(typeof repoId === 'number' && Number.isFinite(repoId) ? { repoId } : {}),
+                owner,
+                repo,
+            };
+        }
+    }
     return state;
 }
 function serializeSyncState(state) {
@@ -128,6 +139,7 @@ function serializeSyncState(state) {
         shas: state.shas,
         ...(Object.keys(bases).length > 0 ? { bases } : {}),
         ...(state.emptyFileRepairDone === true ? { emptyFileRepairDone: true } : {}),
+        ...(state.githubRemote ? { githubRemote: state.githubRemote } : {}),
     });
 }
 // ── Journal transitions ───────────────────────────────────────────────────────

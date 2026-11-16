@@ -89,6 +89,24 @@ export interface SyncState {
    * back (shouldHoldBackEmptyUpload).
    */
   emptyFileRepairDone?: true
+  /**
+   * GitHub only: the repo this journal and sha cache describe, stamped on every
+   * persist (and by the adoption that resets them). The CLI can switch the
+   * connection AND the origin behind the app (shared settings.json on
+   * Windows: `noteflow origin merge`), so before using the state the app
+   * compares this with the live connection (sameIdentity) and discards a
+   * state of another repo — its pending ops must never run against the new
+   * one. Absent = a state from before the stamp: it belongs to the live
+   * connection and is stamped on the next persist.
+   */
+  githubRemote?: GithubStateRemote
+}
+
+/** The repo a GitHub sync-state.json belongs to (repoId when known). */
+export interface GithubStateRemote {
+  repoId?: number
+  owner: string
+  repo: string
 }
 
 /**
@@ -165,6 +183,18 @@ export function parseSyncState(raw: string | null | undefined): SyncState {
 
   if (obj.emptyFileRepairDone === true) state.emptyFileRepairDone = true
 
+  const remote = obj.githubRemote
+  if (typeof remote === 'object' && remote !== null && !Array.isArray(remote)) {
+    const { owner, repo, repoId } = remote as Record<string, unknown>
+    if (typeof owner === 'string' && owner && typeof repo === 'string' && repo) {
+      state.githubRemote = {
+        ...(typeof repoId === 'number' && Number.isFinite(repoId) ? { repoId } : {}),
+        owner,
+        repo,
+      }
+    }
+  }
+
   return state
 }
 
@@ -177,6 +207,7 @@ export function serializeSyncState(state: SyncState): string {
     shas: state.shas,
     ...(Object.keys(bases).length > 0 ? { bases } : {}),
     ...(state.emptyFileRepairDone === true ? { emptyFileRepairDone: true } : {}),
+    ...(state.githubRemote ? { githubRemote: state.githubRemote } : {}),
   })
 }
 

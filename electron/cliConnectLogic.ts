@@ -46,6 +46,7 @@ export type CliConnectError =
   | 'rateLimited' // Cloud: 429
   | 'network'
   | 'failed'
+  | 'originChoicePending' // main.ts: the backend's origin choice is pending (nothing syncs with it yet)
 
 /** Mirror in src/types/index.ts. `detail` = the CLI's own (English) error line, when there is one. */
 export type CliConnectResult =

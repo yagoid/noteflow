@@ -253,6 +253,13 @@ const api = {
     initialPullStatus: 'pending' | 'ok' | 'failed'
     conflictCopies?: { count: number; titles: string[]; at: string }
     conflictMerges?: { count: number; titles: string[]; at: string }
+    originChoice?: {
+      previous: { owner: string; repo: string }
+      next: { owner: string; repo: string }
+      // The notes came from NoteFlow Cloud (its 'replace'): staleFrom.email names that account.
+      stale?: true
+      staleFrom?: { email?: string }
+    }
   }> => ipcRenderer.invoke('sync:get-status'),
   // Clears the session notice of conflict copies made by the pull of either
   // backend, and of their merges with conflict markers (titlebar sync status card).
@@ -272,6 +279,7 @@ const api = {
     filesToday?: number
     conflictCopies?: { count: number; titles: string[]; at: string }
     conflictMerges?: { count: number; titles: string[]; at: string }
+    originChoice?: { previous: string; next: string; key: string; stale?: true; disconnectsGithub?: true }
     github?: { owner?: string; repo?: string }
     cloud?: {
       keysState: 'unlocked' | 'locked' | 'no-keys'
@@ -285,6 +293,21 @@ const api = {
     ipcRenderer.invoke('sync:initiate', repo),
   cancelGitHubAuth: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:cancel-auth'),
   disconnectGitHub: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:disconnect'),
+  // The notes dir came from another remote than the connected repo: the user's
+  // choice (merge / use only the repo's notes — local ones moved to a local
+  // archive, never deleted / cancel = disconnect).
+  // `key` = ActiveSyncStatus.originChoice.key of the choice on screen: main answers
+  // 'not-pending' if the pending choice is no longer that one.
+  resolveGithubOrigin: (choice: 'merge' | 'replace' | 'cancel', key?: string): Promise<{ ok: boolean; error?: string; detail?: string }> =>
+    ipcRenderer.invoke('sync:resolve-origin', choice, 'github', key),
+  // Same for NoteFlow Cloud (the notes came from another account): merge / use
+  // only the account's notes (local ones archived; GitHub Sync disconnected if
+  // connected) / cancel = Cloud sync off (still signed in, notes untouched).
+  resolveCloudOrigin: (choice: 'merge' | 'replace' | 'cancel', key?: string): Promise<{ ok: boolean; error?: string; detail?: string }> =>
+    ipcRenderer.invoke('sync:resolve-origin', choice, 'cloud', key),
+  // Local archives of notes set aside by "use only the remote's notes" (userData/notes-archive).
+  getNotesArchiveStatus: (): Promise<{ hasArchives: boolean }> => ipcRenderer.invoke('sync:archives-status'),
+  openNotesArchive: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:open-archives'),
   // Manual GitHub pull. Refused with error: 'cloud-enabled' while NoteFlow
   // Cloud owns the sync loop (nothing is pulled then).
   pullNotes: (): Promise<{
@@ -294,7 +317,7 @@ const api = {
     updatedFiles: string[]
     hadDeletions: boolean
     hadMetadataChanges: boolean
-    error?: 'cloud-enabled'
+    error?: 'cloud-enabled' | 'origin-choice-pending'
   }> => ipcRenderer.invoke('sync:pull'),
   // Mirror local → repo (only available while NoteFlow Cloud is enabled; main
   // rejects it otherwise with error: 'cloud-required', and with
@@ -308,7 +331,7 @@ const api = {
     errors: string[]
     /** Codes for OUR user-facing notices — the renderer localizes them. */
     warnings: Array<'deletions-skipped-unreadable'>
-    error?: 'cloud-required' | 'cloud-initial-pull-pending' | 'not-connected' | 'in-progress' | 'token'
+    error?: 'cloud-required' | 'cloud-initial-pull-pending' | 'not-connected' | 'in-progress' | 'token' | 'origin-choice-pending'
   }> => ipcRenderer.invoke('sync:mirror-to-github'),
   // Manual sync routed to the LIVE backend (Cloud when enabled, else GitHub):
   // drains the backend's journal of pending uploads/deletions too, not just a pull.
@@ -319,6 +342,7 @@ const api = {
     updatedFiles: string[]
     hadDeletions: boolean
     hadMetadataChanges: boolean
+    error?: 'origin-choice-pending'
   }> => ipcRenderer.invoke('sync:pull-active'),
   // Settings → Sync → "Connect the CLI too" (electron/cliConnect.ts). Cloud:
   // the CLI's own login with an emailed code (to the app account's email);
@@ -331,9 +355,9 @@ const api = {
   cliConnectGithubConnect: (): Promise<CliConnectResult> => ipcRenderer.invoke('cli-connect:github-connect'),
   cliConnectGithubDisconnect: (): Promise<CliConnectResult> => ipcRenderer.invoke('cli-connect:github-disconnect'),
   onSyncAuthComplete: (
-    cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void
+    cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string; pendingOriginChoice?: boolean }) => void
   ) => {
-    const wrapper = (_event: any, result: { ok: boolean; owner?: string; repo?: string; error?: string }) => cb(result)
+    const wrapper = (_event: any, result: { ok: boolean; owner?: string; repo?: string; error?: string; pendingOriginChoice?: boolean }) => cb(result)
     ipcRenderer.on('sync-auth-complete', wrapper)
     return () => ipcRenderer.removeListener('sync-auth-complete', wrapper)
   },
@@ -438,6 +462,13 @@ const api = {
     realtimeConnected: boolean
     conflictCopies?: { count: number; titles: string[]; at: string }
     conflictMerges?: { count: number; titles: string[]; at: string }
+    originChoice?: {
+      previous: { userId: string; email?: string }
+      next: { userId: string; email?: string }
+      stale?: true
+      staleFrom?: { owner: string; repo: string }
+      githubConnected?: true
+    }
   }> => ipcRenderer.invoke('cloud:get-status'),
   cloudSetup: (passphrase: string): Promise<{ ok: boolean; recoveryCode?: string; error?: string }> =>
     ipcRenderer.invoke('cloud:setup', passphrase),
@@ -471,6 +502,7 @@ const api = {
     updatedFiles: string[]
     hadDeletions: boolean
     hadMetadataChanges: boolean
+    error?: 'origin-choice-pending'
   }> => ipcRenderer.invoke('cloud:pull'),
   // Per-section version history (metadata + decrypted text — never keys nor
   // path_keys). Restoring = a normal edit from the renderer, after a snapshot.

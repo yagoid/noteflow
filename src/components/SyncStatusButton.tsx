@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Clock, Cloud, CloudOff, CloudUpload, Github, Lock, RefreshCw, Settings, Zap } from 'lucide-react'
+import { AlertTriangle, Clock, Cloud, CloudOff, CloudUpload, Github, Lock, RefreshCw, Settings, Zap } from 'lucide-react'
 import { useT } from '../i18n/useT'
 import { plural, tf } from '../i18n/format'
 import { formatDate } from '../i18n/formatDate'
@@ -46,6 +46,7 @@ const PILL_STYLE: Record<SyncDisplayState, { dot: string; text: string }> = {
   synced: { dot: 'bg-green-400', text: 'text-green-400' },
   uploading: { dot: 'bg-green-400 animate-pulse', text: 'text-green-400' },
   syncing: { dot: 'bg-accent animate-pulse', text: 'text-accent' },
+  choice: { dot: 'bg-amber-400', text: 'text-amber-400' },
   error: { dot: 'bg-amber-400', text: 'text-amber-400' },
   locked: { dot: 'bg-amber-400', text: 'text-amber-400' },
   blocked: { dot: 'bg-amber-400', text: 'text-amber-400' },
@@ -65,6 +66,8 @@ interface SyncStatusButtonProps {
   onOpenSettings: () => void
   /** Clears the conflict notice: copies and merges with markers (either backend). */
   onDismissConflictCopies: () => void
+  /** Opens the origin choice (OriginChoiceDialog) — the click action in the 'choice' state. */
+  onChooseOrigin: () => void
 }
 
 // How many conflict-copy titles the card lists before "+N more".
@@ -73,6 +76,7 @@ const CONFLICT_TITLES_SHOWN = 3
 /** What a click on the titlebar button does in each state (null while one is running). */
 function clickHint(state: SyncDisplayState, s: SyncMessages): string | null {
   if (state === 'locked') return s.unlockHint
+  if (state === 'choice') return s.choiceHint
   if (state === 'blocked') return s.clickToRetry
   if (state === 'syncing' || state === 'uploading') return null
   return s.clickToSync
@@ -95,6 +99,7 @@ export function SyncStatusButton({
   onRefresh,
   onOpenSettings,
   onDismissConflictCopies,
+  onChooseOrigin,
 }: SyncStatusButtonProps) {
   const t = useT()
   const s = t.titleBar.sync
@@ -198,8 +203,8 @@ export function SyncStatusButton({
           doesn't reliably fire mouse events itself. */}
       <div ref={wrapperRef} className="flex h-full" onMouseEnter={scheduleOpen} onMouseLeave={scheduleClose}>
         <button
-          onClick={onSync}
-          disabled={syncing || pushing}
+          onClick={state === 'choice' ? onChooseOrigin : onSync}
+          disabled={syncing || (pushing && state !== 'choice')}
           className="relative flex items-center gap-1 px-2 h-full text-text-muted hover:text-text transition-colors disabled:opacity-60"
           aria-label={ariaLabel}
         >
@@ -209,6 +214,8 @@ export function SyncStatusButton({
           )}
           {state === 'syncing' ? (
             <RefreshCw size={13} className="animate-spin text-text" />
+          ) : state === 'choice' ? (
+            <AlertTriangle size={13} className="text-amber-400" />
           ) : state === 'uploading' ? (
             <Cloud size={13} className="animate-pulse text-green-400" />
           ) : state === 'locked' || state === 'blocked' ? (
@@ -242,6 +249,10 @@ export function SyncStatusButton({
                 onOpenSettings()
               }}
               onDismissConflictCopies={onDismissConflictCopies}
+              onChooseOrigin={() => {
+                close()
+                onChooseOrigin()
+              }}
             />
           </div>,
           document.body,
@@ -257,10 +268,11 @@ interface SyncStatusCardProps {
   now: number
   onOpenSettings: () => void
   onDismissConflictCopies: () => void
+  onChooseOrigin: () => void
 }
 
 // The card body — pure presentation of the status snapshot.
-function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDismissConflictCopies }: SyncStatusCardProps) {
+function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDismissConflictCopies, onChooseOrigin }: SyncStatusCardProps) {
   const t = useT()
   const s = t.titleBar.sync
   const pill = PILL_STYLE[state]
@@ -362,6 +374,24 @@ function SyncStatusCard({ status, state, backendName, now, onOpenSettings, onDis
               className="px-1.5 py-0.5 rounded border border-solid border-amber-400/40 hover:bg-amber-400/20 transition-colors"
             >
               {s.conflictCopiesDismiss}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* The notes dir came from another remote: nothing syncs until the user chooses */}
+      {status.originChoice && (
+        <div
+          className="mx-3 mb-2 px-2 py-1.5 rounded border border-solid border-amber-400/30 bg-amber-400/10
+                     text-amber-400 leading-snug break-words"
+        >
+          <div>{tf(s.choiceNotice, { previous: status.originChoice.previous, next: status.originChoice.next })}</div>
+          <div className="flex justify-end mt-1">
+            <button
+              onClick={onChooseOrigin}
+              className="px-1.5 py-0.5 rounded border border-solid border-amber-400/40 hover:bg-amber-400/20 transition-colors"
+            >
+              {s.choiceAction}
             </button>
           </div>
         </div>

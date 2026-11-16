@@ -141,7 +141,10 @@ Iconos del TitleBar:
   sincronizando · nube ámbar = error · nube tachada ámbar = bloqueado (claves de Cloud sin
   desbloquear o primer pull fallido) · nube con flecha ámbar = **cambios sin subir** (el journal del
   backend aún tiene subidas/borrados que no llegaron, p. ej. pushes que fallaron sin red: nunca se
-  muestra "Synced" mientras queden). **Click** = sync manual **completo**: baja lo remoto **y
+  muestra "Synced" mientras queden) · **triángulo ámbar** = **hay que elegir** (píldora "Action needed":
+  las notas de este dispositivo vienen de otro repo que el conectado y no se sincroniza nada hasta
+  elegir; el click abre ese diálogo en vez de sincronizar, y la tarjeta lo explica con un botón
+  "Choose…" — ver "GitHub Sync" → "Conectar a otro repositorio"). **Click** = sync manual **completo**: baja lo remoto **y
   reintenta lo pendiente de subir** (Cloud: el mismo ciclo que el auto-sync; GitHub: drena su journal y
   luego hace pull) — no hay que esperar al tick de 5 min. **Hover** (~450 ms) abre una
   mini-tarjeta flotante (`SyncStatusButton.tsx`, sin tooltip nativo; ~208 px) bajo el botón:
@@ -1903,6 +1906,52 @@ Settings → Sync ("Connect with GitHub" en la elección inicial; conectado, su 
   plantillas ni fragmentos), con la copia en `<dir de ajustes del CLI>/github-metadata-backups/`, y
   avisa de que un `noteflow push` suba la unión.
 - El repositorio se crea como **privado** automáticamente si no existe.
+
+### Conectar a otro repositorio (las notas vienen de otro sitio)
+La app recuerda de qué repo vienen las notas de este dispositivo (el "origen", local, en `settings.json`;
+desconectar no lo olvida). Si conectas un repo **distinto** y hay notas que se sincronizarían (la nota
+de bienvenida, solo-local, no cuenta), **no sube ni baja nada** y abre un diálogo "Your notes came from
+somewhere else" con el repo anterior → el nuevo y tres opciones, **ninguna preseleccionada** (se elige
+una y luego "Continue"):
+- **Merge both** — lo de siempre: tus notas suben al repo nuevo y bajan las suyas.
+- **Use only the notes from <repo>** — tus notas se **mueven a una copia en este ordenador** (nada se
+  borra ni se sube; con sus grupos, carpetas, orden, colores de sección, plantillas y fragmentos; la
+  apariencia se queda) y se bajan las del repo nuevo. Las copias se abren desde Ajustes → Sync → GitHub →
+  **"Open local copies"** (aparece cuando existe alguna). Si no se pueden mover (p. ej. un programa tiene
+  bloqueada la carpeta), no se baja nada, tus notas quedan intactas y el diálogo muestra el error.
+- **Cancel** — desconecta el repo nuevo; todo queda como estaba.
+"Decide later" (o Escape) solo cierra el diálogo: mientras tanto el sync está **en pausa** (botón de la
+titlebar en ámbar, aviso en Ajustes → Sync → GitHub con "Choose…" para reabrirlo; sobrevive a reiniciar
+la app). Reconectar al **mismo** repo (aunque lo hayas renombrado) o conectar un repo cuando no hay notas
+sincronizables no pregunta. La primera conexión (sin origen guardado) tampoco. Con NoteFlow Cloud
+activado GitHub nunca pregunta (el dueño de las notas es la cuenta de Cloud). También lo detecta al
+arrancar si el CLI dejó la app conectada a otro repo. Aún no se puede restaurar una copia desde la app.
+
+**Lo mismo con NoteFlow Cloud (cambiar de cuenta).** La app recuerda también con qué **cuenta** de
+NoteFlow se sincronizaron las notas de este dispositivo. Si inicias sesión con **otra** cuenta y Cloud se
+activa (solo, porque la cuenta lo tiene pagado, o a mano) habiendo notas que se sincronizarían, **no sube
+ni baja nada** y abre el mismo diálogo (cuenta anterior → cuenta actual, por email):
+- **Merge both** — tus notas suben a la cuenta actual y bajan las suyas.
+- **Use only the notes from <email>** — tus notas pasan a la copia local (Ajustes → Sync → NoteFlow Cloud
+  → "Open local copies") y se bajan las de la cuenta. Si GitHub Sync estaba conectado, **se desconecta**
+  (el diálogo lo avisa): su repo tenía las notas que acabas de apartar.
+- **Cancel** — "Turn off NoteFlow Cloud on this device": apaga Cloud, sigues con la sesión iniciada y tus
+  notas quedan como estaban. No vuelve a preguntar hasta que enciendas Cloud tú (o vuelvas a iniciar
+  sesión).
+Mientras está pendiente: botón de la titlebar en ámbar ("Action needed"), aviso con "Choose…" en Ajustes →
+Sync → NoteFlow Cloud, "Sync now" / "Mirror to GitHub" no hacen nada y "Connect the CLI too" queda
+deshabilitado con la explicación (en GitHub igual mientras su elección está pendiente). Volver a entrar con
+la **misma** cuenta no pregunta.
+
+**Cruce entre los dos.** "Use only the notes from …" de un backend sustituye las notas, así que el otro
+deja de reconocerlas: tras usar solo las del repo de GitHub, encender Cloud con tu cuenta de siempre
+**pregunta** si hay notas (sin notas, se re-adopta solo); y al revés, tras usar solo las de la cuenta de
+Cloud, reconectar el mismo repo pregunta. El diálogo dice entonces que tus notas "now come from" la otra
+sincronización.
+
+**Un origen por carpeta de notas.** El origen guardado es el de la carpeta de notas normal; si arrancas
+con otra carpeta (`NOTEFLOW_NOTES_DIR`), allí no se pregunta ni se guarda nada, y al volver a la carpeta
+normal se pregunta si toca.
 
 ### Panel de sync
 - Vista general: estado real, repo vinculado (↗), cadencia y última sync, mapa informativo.

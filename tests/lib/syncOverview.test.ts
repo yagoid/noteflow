@@ -27,6 +27,12 @@ describe('overviewBadge', () => {
     expect(overviewBadge('syncing', 'no-keys')).toBe('syncing')
     expect(overviewBadge('error', 'unlocked')).toBe('error')
   })
+
+  it('keeps a pending origin choice whatever the keys state', () => {
+    expect(overviewBadge('choice', undefined)).toBe('choice')
+    expect(overviewBadge('choice', 'no-keys')).toBe('choice')
+    expect(overviewBadge('choice', 'locked')).toBe('choice')
+  })
 })
 
 describe('badgeTone', () => {
@@ -36,6 +42,7 @@ describe('badgeTone', () => {
       uploading: 'ok',
       syncing: 'info',
       error: 'error',
+      choice: 'warn',
       locked: 'warn',
       blocked: 'warn',
       unsynced: 'warn',
@@ -50,7 +57,7 @@ describe('badgeTone', () => {
 
 describe('isLinkActive', () => {
   it('is inactive only while nothing can sync until the user acts', () => {
-    for (const badge of ['locked', 'setup', 'blocked', 'error'] as const) {
+    for (const badge of ['choice', 'locked', 'setup', 'blocked', 'error'] as const) {
       expect(isLinkActive(badge)).toBe(false)
     }
     for (const badge of ['synced', 'uploading', 'syncing', 'pending', 'unsynced'] as const) {
@@ -131,6 +138,15 @@ describe('syncMapModel', () => {
     expect(m.mainActive).toBe(false)
     expect(m.peersActive).toBe(false)
     expect(m.cliActive).toBe(false)
+  })
+
+  it('a pending origin choice dashes every link: nothing syncs until the user chooses', () => {
+    for (const provider of ['cloud', 'github'] as const) {
+      const m = syncMapModel({ ...base, provider, badge: 'choice' })
+      expect(m.mainActive).toBe(false)
+      expect(m.peersActive).toBe(false)
+      expect(m.cliActive).toBe(false)
+    }
   })
 
   it('an unconnected CLI dashes only its own link', () => {

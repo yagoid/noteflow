@@ -13,6 +13,9 @@ export type StatusTone = 'ok' | 'warn' | 'error' | 'info' | 'neutral'
  * The status card's badge: the titlebar's display state, except a Cloud with
  * no keys yet (onboarding pending), which reads "Setup needed" rather than the
  * "Locked" the titlebar shows for every key state that blocks a manual sync.
+ * A pending origin choice ('choice' — the notes on this device came from
+ * another remote) outranks the key states, as in the titlebar: the card reads
+ * "Action needed", never "Synced".
  */
 export type OverviewBadge = SyncDisplayState | 'setup'
 
@@ -33,6 +36,7 @@ export function badgeTone(badge: OverviewBadge): StatusTone {
       return 'info'
     case 'error':
       return 'error'
+    case 'choice':
     case 'locked':
     case 'blocked':
     case 'unsynced':
@@ -45,12 +49,12 @@ export function badgeTone(badge: OverviewBadge): StatusTone {
 
 /**
  * Whether the provider is effectively carrying the notes: everything except the
- * states where nothing can sync until the user acts (keys locked / not set up,
- * a failed first pull, an error). Drives the map's connectors (solid accent
- * vs dashed).
+ * states where nothing can sync until the user acts (a pending origin choice,
+ * keys locked / not set up, a failed first pull, an error). Drives the map's
+ * connectors (solid accent vs dashed).
  */
 export function isLinkActive(badge: OverviewBadge): boolean {
-  return badge !== 'locked' && badge !== 'setup' && badge !== 'blocked' && badge !== 'error'
+  return badge !== 'choice' && badge !== 'locked' && badge !== 'setup' && badge !== 'blocked' && badge !== 'error'
 }
 
 /** Product name of the OS the app runs on (`process.platform`), for the map's "This computer" node. */

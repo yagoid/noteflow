@@ -37,6 +37,13 @@ describe('getSyncDisplayState', () => {
     expect(getSyncDisplayState(broken, false, true)).toBe('uploading')
   })
 
+  it('a pending origin choice is never shown as synced or pending — only a running sync outranks it', () => {
+    const choice = { originChoice: { previous: 'me/notes-a', next: 'me/notes-b' } }
+    expect(getSyncDisplayState(github({ ...choice, initialPullStatus: 'pending' }), false, false)).toBe('choice')
+    expect(getSyncDisplayState(github({ ...choice, error: 'boom', pendingChanges: 3 }), false, true)).toBe('choice')
+    expect(getSyncDisplayState(github(choice), true, false)).toBe('syncing')
+  })
+
   it('locked Cloud keys (locked or no-keys) outrank a failed first pull', () => {
     expect(getSyncDisplayState(cloud('locked', { initialPullStatus: 'failed' }), false, false)).toBe('locked')
     expect(getSyncDisplayState(cloud('no-keys'), false, false)).toBe('locked')
