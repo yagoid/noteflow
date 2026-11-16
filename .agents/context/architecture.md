@@ -302,6 +302,8 @@ noteflow/
 │   │   ├── cryptoUtils.ts        # Cifrado AES-256-GCM + PBKDF2 (WebCrypto)
 │   │   ├── alarmUtils.ts         # Recolección de alarmas/deadlines (líneas de tarea, también indentadas) — testeado
 │   │   ├── paneUtils.ts          # Modelo puro de paneles del split (abrir/cerrar/reordenar/enfocar) — testeado
+│   │   ├── archivedNotes.ts      # Notas que main movió al archivo local (`notes-archived`): cuáles salen del
+│   │   │                         #   store y dónde queda el editor (puro; solo memoria, nunca borra) — testeado
 │   │   ├── tocUtils.ts           # Lógica pura del índice flotante del editor (entradas, activo) — testeado
 │   │   ├── folderIcons.ts        # Set curado de iconos de carpeta (clave estable → icono lucide) +
 │   │   │                         #   resolveFolderIcon — testeado
@@ -399,7 +401,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 
 | Canal | Tipo | Descripción |
 |---|---|---|
-| `fs:read-all-notes` | handle | Lee TODAS las carpetas de nota en una llamada → `NoteDirRecord[]` (`{dir,path,noteMd,sections:[{file,content}]}`; batch, con reintentos) |
+| `fs:read-all-notes` | handle | Lee TODAS las carpetas de nota en una llamada → `NoteDirRecord[]` (`{dir,path,noteMd,sections:[{file,content}]}`; batch, con reintentos —6 × 800 ms si el listado sale vacío, por el `readdir` vacío transitorio de Windows—, salvo cuando el archivo local acaba de dejar el dir sin notas: `notesDirEmptiedByArchive`, ver `sync.md` "Archivo local") |
 | `fs:read-note-dir` | handle | Lee UNA carpeta de nota → `NoteDirRecord \| null` (usado por syncNote) |
 | `fs:write-note` | handle | Escritura multi-archivo de una carpeta: `{dir, files, deleteFiles}` (note.md primero) + 1 broadcast + schedulePush por archivo + scheduleIndex |
 | `fs:delete-note` | handle | Borra la carpeta entera (rmSync recursivo) + broadcast + scheduleDeleteDir en GitHub |
@@ -461,7 +463,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `window:set-always-on-top` | on | Alterna `alwaysOnTop` de la ventana emisora (sticky; chincheta de la ventana de chat) |
 | `window:fold-to-corner` / `window:unfold` | on | Anima el plegado/desplegado de stickies |
 | `sync:get-status` | handle | Estado del sync **GitHub** (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`, `conflictCopies?`, `conflictMerges?`, `originChoice?: {previous: {owner, repo}, next: {owner, repo}, stale?, staleFrom?: {email?}}` — presente mientras el dir de notas viene de otro repo y no se ha elegido, ver `sync.md` "Origen del dir de notas") |
-| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, history?: [{at, files, ok}], filesToday?, conflictCopies?: {count, titles, at}, conflictMerges?: {count, titles, at}, originChoice?: {previous, next}, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (`originChoice` = etiquetas legibles — GitHub `owner/repo` — de una elección de origen pendiente del backend activo; espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`; `conflictCopies` = aviso de copias de conflicto del backend activo, sea Cloud o GitHub; `conflictMerges` = notas fusionadas con marcas de conflicto ⚠️, mismo formato) |
+| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, history?: [{at, files, ok}], filesToday?, conflictCopies?: {count, titles, at}, conflictMerges?: {count, titles, at}, originChoice?: {previous, next, key, stale?, disconnectsGithub?}, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (`originChoice` = elección de origen pendiente del backend activo: `previous`/`next` son etiquetas legibles — GitHub `owner/repo`, Cloud el email de la cuenta; `''` = desconocida → el renderer pone un texto genérico —, `key` = clave opaca que vuelve con la respuesta a `sync:resolve-origin`, `stale` = las notas vienen del OTRO backend (`previous` lo nombra), `disconnectsGithub` (solo Cloud) = "usar solo lo remoto" desconecta GitHub Sync; espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`; `conflictCopies` = aviso de copias de conflicto del backend activo, sea Cloud o GitHub; `conflictMerges` = notas fusionadas con marcas de conflicto ⚠️, mismo formato) |
 | `sync:dismiss-conflict-copies` | handle | Descarta el aviso de **copias de conflicto** y de **fusiones con marcas** (`conflictMerges`) de la tarjeta del botón de sync (limpia el de **ambos** backends — `cloudSync`/`githubSync.dismissConflictCopies()` — y emite `cloud:status-changed` + `sync:status-changed`); las copias siguen siendo notas |
 | `sync:initiate` | handle | Inicia Device Flow OAuth (recibe `repo`); al completar → `sync-auth-complete` (`{ok, owner?, repo?, error?, pendingOriginChoice?}`) + autosync. Con `pendingOriginChoice: true` no hubo pull ni push ni migración: falta la elección de origen |
 | `sync:resolve-origin` | handle | `(choice: 'merge' \| 'replace' \| 'cancel', backend?: 'github' \| 'cloud', key?: string)` → `{ok, error?, detail?}` (`backend` por defecto `'github'`; una sola guarda de reentrada para los dos; `key` = `ActiveSyncStatus.originChoice.key` de la elección en pantalla — si la pendiente ya es otra → `not-pending`). Resuelve la elección de origen pendiente de ese backend; si no tiene ninguna → `not-pending` (también con `cancel`). GitHub: `merge` = connect de siempre (pull + subir todo), `replace` = archiva lo local en `userData/notes-archive/` y luego pull (si el archivo falla → `error: 'archive-failed'`, sin pull, sigue pendiente), `cancel` = lo mismo que `sync:disconnect`. Cloud: `merge` = adopta la cuenta y lanza un ciclo (primer sync: baja la cuenta y sube lo local), `replace` = archiva, adopta, desconecta GitHub si estaba conectado y ciclo (solo baja), `cancel` = Cloud off (como "Turn off": `stopCloudAutoSync` + `dropRestoreSurface('cloud')`; sesión, notas y origen intactos). Otros `error`: `invalid`, `busy`, `settings-unreadable`, `settings-unwritable`, `not-connected` (GitHub), `not-enabled`/`not-signed-in` (Cloud) — ver `sync.md` "Origen del dir de notas". Preload: `resolveGithubOrigin(choice, key?)` / `resolveCloudOrigin(choice, key?)` |
@@ -529,7 +531,14 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 
 **Eventos main → renderer** (suscripción vía `window.noteflow.on*`):
 `new-note`, `notes-updated` (filePath?, senderId? — `filePath` es la carpeta de una nota, o la ruta del
-`.md` de una **nota vinculada**: `syncNote` desvía las rutas `.md` a `syncLinkedNote`), `snippets-updated` (sin payload — otra ventana
+`.md` de una **nota vinculada**: `syncNote` desvía las rutas `.md` a `syncLinkedNote`),
+`notes-archived` (`{noteIds: string[], dirs: string[]}` — "usar solo las notas de…" movió esas notas al
+archivo local `userData/notes-archive/`; va a todas las ventanas justo **antes** del `notes-updated` sin
+ruta del archivo. `onNotesArchived` → `notesStore.removeArchivedNotes` (vía `bindArchivedNotes()` en
+`App.tsx` — `MainApp`, que respalda la ventana principal y las sticky —, `SectionWindowApp.tsx` y
+`AiChatWindowApp.tsx`) las quita **solo de
+memoria**, nunca borra: la recarga no puede hacerlo porque `loadNotes` ignora un resultado vacío con
+notas en el store — ver `sync.md` "Archivo local"), `snippets-updated` (sin payload — otra ventana
 guardó `snippets.json`), `groups-updated` (sin payload — el watcher vio `groups.json` / `folders.json` /
 `note-order.json` escritos FUERA de la app, p. ej. por el CLI; `App.tsx` (principal y sticky) y
 `SectionWindowApp.tsx` recargan solo `groupsStore.loadGroups()`), `update:download-progress` (percent),

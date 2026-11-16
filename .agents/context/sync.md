@@ -238,13 +238,22 @@ tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`).
   `stale` de la app cierra la puerta del CLI y la adopción del CLI la limpia para la app); y las **dos
   puertas del CLI sobre un `settings.json` real** frente a la decisión de la app para ese mismo fichero
   y dir. Diferencias **deliberadas**, fijadas en ese test: (1) `withSyncOrigin` al readoptar la
-  **misma** identidad — el CLI conserva lo que la identidad nueva no trae (`repoId`, `email`, `notesDir`,
-  campos desconocidos) y la app escribe un registro nuevo; (2) la app etiqueta la identidad con su dir
+  **misma** identidad — los dos conservan el `repoId` guardado si la identidad nueva no lo trae (no es
+  diferencia: perderlo dejaría el repo comparándose solo por nombre) y ninguno conserva `stale`; el CLI
+  conserva además el `email`, el `notesDir` y los campos desconocidos que falten, y la app escribe el
+  resto del registro nuevo; (2) la app etiqueta la identidad con su dir
   (`next.notesDir`) y por eso reescribe un registro de la misma identidad **sin** `notesDir` para
   añadírselo, mientras que la puerta del CLI lo deja como está (ambos lo leen como del dir por defecto);
   (3) la regla del dir va **antes** de `decideOrigin` en el CLI (`originPlacement` → `other-dir`) y
   **dentro** en la app (`dirs` → `foreign-dir`): mismo resultado; (4) la siembra de Cloud del CLI conoce
   además su propio dueño (`cliCloud.userId`, y el de la sesión anterior en `cloud login`).
+  **Seguridad de estos tests:** los que vacían, archivan o borran en un dir de notas
+  (`tests/cli/syncOrigin.test.ts`, `tests/cli/originGate.test.ts`, `tests/electron/syncOriginGithub.test.ts`,
+  `tests/electron/syncOriginCloud.test.ts`) derivan ese dir del temporal del test de forma **explícita**
+  (`defaultNotesDir(home)`), nunca de `os.homedir()` — el mock del home solo sirve para que el módulo
+  bajo prueba vea ese mismo dir como "por defecto" — y pasan por `assertInsideTmp`
+  (`tests/helpers/tmpGuard.ts`) antes de cualquier `rmSync`/escritura: si el mock dejara de aplicar, el
+  test falla en vez de tocar `~/noteflow-notes`.
   **A qué dir pertenece cada registro (`notesDir`, contrato compartido con la app):** `syncOrigin` vive
   en `settings.json`, que `NOTEFLOW_NOTES_DIR` no aísla, pero describe UN dir. Cada registro
   (`github`/`cloud`) lleva `notesDir` = `path.resolve` del dir con el que se adoptó (sin separador
@@ -451,8 +460,10 @@ notesDir?: string }, cloud?: { userId: string; email?: string; stale?: true; not
 `repoId` = `id` numérico de la API de GitHub (sobrevive a renombrar/transferir el repo);
 se escribe siempre que se conoce — la app lo obtiene **antes** de adoptar (Device Flow: `ensureRepo`;
 pull: el mismo `GET /repos/{o}/{r}` de la rama por defecto, cacheado **por repo**, sin request extra) —,
-así que solo falta si ese GET falló en ese momento (el siguiente pull OK lo rellena). También se guarda
-en `settings.githubSync.repoId`. **Comparación:** por `repoId` si ambos lados lo tienen; si no,
+así que solo falta si ese GET falló en ese momento (el siguiente pull OK lo rellena). Readoptar el
+**mismo** repo con una identidad que aún no lo trae (p. ej. para añadir el `notesDir` a un registro
+anterior) **conserva el `repoId` ya guardado** (`withSyncOrigin`; el resto del registro se escribe
+nuevo y `stale` nunca se conserva). También se guarda en `settings.githubSync.repoId`. **Comparación:** por `repoId` si ambos lados lo tienen; si no,
 `owner/repo` sin distinguir mayúsculas. Escrituras con read-modify-write sobre el fichero, que
 rechazan escribir si el fichero existe y no parsea: GitHub escribe el origen con `withSyncOrigin` dentro
 de `adoptGithubOrigin` (la misma escritura que limpia `githubSync`, ver abajo); `writeSyncOriginFile`
@@ -707,11 +718,36 @@ queda** (apariencia del dispositivo). Las `localOnly` y las vinculadas no se toc
   (`flushMainWindowEdits`; el renderer además hace `settleNoteWrites()` antes de invocar), marca los
   movimientos como escrituras internas para el watcher, pasa los `group`/`folder`/`sectionName` de las vinculadas
   como `keep` (`KeepRefs.groupIds/folderIds/sectionNames`), archiva, quita cada carpeta del índice semántico (`aiIndex.removeFromIndex`; metadatos →
-  `markStaleUnknown`) y emite `notes-updated` sin ruta (recarga notas, grupos, alarmas). **Un guardado
+  `markStaleUnknown`), emite **`notes-archived`** (abajo) y después `notes-updated` sin ruta (recarga
+  notas, grupos, alarmas). **Un guardado
   tardío no recrea una nota archivada:** `applyNoteWrite` rechaza escribir en una carpeta archivada en
   esta sesión mientras no exista (si un pull la trae de vuelta, se escribe normal). Notas temporales:
   `checkExpiredNotes` solo recorre el dir; las archivadas ya no están. Journal/timers/caché de shas: los
   resetea la resolución.
+- **Las notas archivadas salen de la memoria de cada ventana (`notes-archived`).** La recarga sin ruta
+  no basta: `loadNotes` ignora a propósito un resultado **vacío** mientras el store tiene notas (un
+  `readdir` vacío transitorio en Windows; además `fs:read-all-notes` reintenta 6×800 ms antes de dar
+  vacío), y un dir vacío es justo lo que deja el archivo cuando el remoto nuevo no trae nada (repo o
+  cuenta nuevos) o el pull falla — la barra lateral seguía mostrando las notas archivadas y el editor
+  la que estaba abierta. Por eso `forgetArchivedNoteDirs` (`main.ts`) emite a **todas** las ventanas
+  `notes-archived` `{noteIds, dirs}` (ids de `ArchiveResult.movedNoteIds` + los leídos antes de archivar;
+  `dirs` = nombres de carpeta, por si un id no se pudo leer) **antes** del `notes-updated`, y cada ventana
+  que carga notas (`bindArchivedNotes()` de `notesStore`, enlazado en `MainApp` — principal y sticky —,
+  `SectionWindowApp` y `AiChatWindowApp`) llama a
+  `removeArchivedNotes`: lógica pura en `src/lib/archivedNotes.ts` (`withoutArchivedNotes`, tests en
+  `tests/lib/archivedNotes.test.ts` y `tests/stores/notesStoreArchived.test.ts`) — quita las notas por
+  id o por nombre de carpeta (nunca una vinculada; las `localOnly` no vienen en el evento), cierra sus
+  paneles (los demás se quedan; sin ninguno, la ventana principal abre la primera nota que queda y una
+  secundaria se queda vacía), suelta sus desbloqueos de sesión, **descarta** sus guardados con debounce
+  (`discardPendingEdits`: no se intenta escribir, así que no hay error) y reprograma las alarmas. Es
+  **solo memoria**: no pasa por `deleteNote` ni toca disco o remoto; cualquier escritura posterior de
+  esas notas es un no-op porque todos los caminos de escritura buscan antes la nota en el store. No
+  queda ninguna lista de ids vetados: si el pull trae una nota con el mismo id, la recarga normal la
+  vuelve a añadir. También se emite si el archivo falla **sin** poder deshacerse del todo (las carpetas
+  que quedaron en el archivo ya no están en el dir). Y si el archivo dejó el dir **sin ninguna nota**,
+  `fs:read-all-notes` no reintenta (`notesDirEmptiedByArchive`: vacío es la respuesta real) hasta que
+  se escriba una nota o un listado vuelva a encontrar alguna — sin eso, con el store ya vacío, la
+  ventana mostraría "Loading notes…" ~4 s.
 - **UI de las copias:** Ajustes → Sync muestra "Open local copies" cuando `sync:archives-status` dice que
   hay alguna (`sync:open-archives` → `shell.openPath`; `SyncOriginNotices.tsx`): con un backend activo es
   la fila **"Local copies"** de la lista de datos de la vista general (`LocalCopiesRow`, antes de la fila
@@ -735,7 +771,10 @@ backend activo, así que vive en la vista general (`SyncOverview.tsx`, que lee e
 pasa tal cual por `overviewBadge`; tono `warn`; `isLinkActive` = false → el mapa pinta todos los enlaces
 discontinuos — `src/lib/syncOverview.ts`, testeado), **"Sync now" queda deshabilitado** y justo debajo de
 la tarjeta sale el aviso ámbar con el botón "Choose…" (`OriginPendingNotice` en `SyncOriginNotices.tsx`,
-texto `settings.sync.originPending` para los dos backends). Un pull o un espejo que se cuelen igualmente
+texto `settings.sync.originPending` para los dos backends). Con la elección de **Cloud** pendiente, el
+"Mirror to GitHub" de la fila de GitHub en pausa (`GitHubPausedRow`, que lee el mismo
+`ActiveSyncStatus.originChoice`) también queda deshabilitado, con ese texto como tooltip — antes abría
+la confirmación y main lo rechazaba. Un pull o un espejo que se cuelen igualmente
 responden `origin-choice-pending` y se muestran como error (`pullOriginPending` / `mirrorOriginPending`).
 La fila "noteflow CLI" deshabilita "Connect the CLI too" (`useCliConnect.originPending`, leído de
 `getCloudStatus()` / `getSyncStatus()` y sus eventos) con `settings.sync.cli.originPending` como tooltip
