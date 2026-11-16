@@ -771,7 +771,8 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     bordes. Soltar donde ya estaba = no-op sin indicador. `Esc` cancela; el click posterior al drop se
     traga (capture, una vez). Columnas: se arrastran por la cabecera. Constantes y helpers
     (umbral, auto-scroll vertical, `verticalScroller`, `swallowNextClick`) compartidos con el drag de
-    tareas en `components/Editor/pointerDrag.ts` (ver "Editor: mover tareas").
+    tareas y el de asas de tabla en `components/Editor/pointerDrag.ts` (ver "Editor: mover tareas" y
+    "Editor: controles de tabla").
     **Coordenadas:** `clientX/Y`, `getBoundingClientRect()` y los px del ghost/indicadores comparten
     espacio (el zoom de UI es nativo, ver "UI text size"), así que se comparan sin conversión.
   - **Ancho (decisión del usuario):** el tablero **no** respeta la columna Readable: el wrapper
@@ -962,10 +963,11 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   - Esquema del editor web móvil: `listItem`/`taskItem` con contenido `paragraph+ list*` y
     Shift+Enter en heading = partir (si su editor lo permite).
 
-### Editor: operaciones de tabla (lógica sin UI)
+### Editor: operaciones de tabla
 
-Base para menús/asas/atajos de tablas que aún **no tienen UI** (el toolbar y `TableContextMenu`
-siguen usando los comandos de TipTap/prosemirror-tables y `tableUtils.ts`, sin cambios). Dos capas:
+Los comandos que usan **todos** los controles de tabla (asas, menús, «+», arrastre, clic derecho y el
+botón de la toolbar: ver "Editor: controles de tabla"; los comandos de tabla de TipTap/prosemirror-tables
+ya no se usan desde la UI). Dos capas:
 
 - **`src/components/Editor/tableOps.ts`** — comandos estilo ProseMirror `(state, dispatch?) => boolean`
   (testeables sin vista). Sin `dispatch` solo responden si se pueden ejecutar (habilitar menús); con
@@ -973,12 +975,18 @@ siguen usando los comandos de TipTap/prosemirror-tables y `tableUtils.ts`, sin c
   `canRunTableCommand(editor, cmd)` los adaptan a un `Editor` de TipTap (false si es de solo lectura;
   tras ejecutar, devuelve el foco). Exports: `selectRow`, `selectColumn` (CellSelection), `moveRow`,
   `moveColumn`, `duplicateRow`, `duplicateColumn`, `insertRowAt`, `insertColumnAt`,
-  `sortRowsByColumn`, `clearRow`, `clearColumn`, `clearSelectedCells`, `deleteSelectedRows`,
-  `deleteSelectedColumns`; lectura: `getTableInfo`, `getTableData`, `getSelectedCellsData` (texto +
-  alineación por columna) y `cellText`; `MIN_TABLE_COLUMNS`.
+  `sortRowsByColumn`, `alignColumn`, `clearRow`, `clearColumn`, `clearSelectedCells`, `deleteRow`,
+  `deleteColumn`, `deleteSelectedRows`, `deleteSelectedColumns`, `deleteTable`, `focusCell` (cursor al
+  inicio de una celda, solo selección); lectura: `getTableInfo`, `getTableData`, `getSelectedCellsData`
+  (texto + alineación por columna), `getCellSelectionRect` (rectángulo de una CellSelection de esa
+  tabla), `getSelectionCell` (celda del cursor o cabeza de la CellSelection + `tablePos`), `findTablePos`
+  (tabla más interna alrededor de la selección, **también con celdas combinadas**) y `cellText`;
+  `MIN_TABLE_COLUMNS`. `tableActionCommand(action, target)` traduce una acción de menú
+  (`TableAction` de `lib/tableControls.ts`) a su comando; `insertNewTable(editor, size)` inserta (toolbar
+  y `/table`; antes vivía en `tableCommands.ts`, eliminado junto con `tableUtils.ts`).
   - **Qué tabla:** los comandos con índices actúan sobre `{ tablePos }` (posición justo antes del nodo
     tabla, pensado para asas pintadas sobre una tabla concreta) o, por defecto, sobre la tabla **más
-    interna** alrededor de la selección (como `setColumnAlign`). Los `…Selected…` actúan siempre sobre
+    interna** alrededor de la selección. Los `…Selected…` actúan siempre sobre
     la selección: una `CellSelection` o la celda del cursor.
   - **Invariantes:** fila 0 = cabecera (`tableHeader`), fija y obligatoria; resto = `tableCell`. Los
     comandos estructurales **reconstruyen las filas** de la tabla en una transacción y normalizan los
@@ -1002,15 +1010,22 @@ siguen usando los comandos de TipTap/prosemirror-tables y `tableUtils.ts`, sin c
     `1…filas` (en 0 → false); sus celdas heredan la alineación de la **celda de cabecera** de su
     columna. Insertar columna en `0…columnas`: sin alineación (`null`) hasta que el usuario la ponga.
     Ordenar: solo filas de cuerpo, posible con ≥ 2; ya ordenado → true sin transacción. Vaciar
-    fila/columna/selección: cada celda queda con un párrafo vacío y sus atributos (la cabecera también
-    se puede vaciar); nada que vaciar → true sin transacción. Eliminar filas: si la selección incluye
+    fila/columna/selección: cada celda queda con un párrafo vacío y sus atributos; nada que vaciar →
+    true sin transacción. La cabecera se vacía con `clearRow(0)` o una selección; **`clearColumn` deja
+    intacta su celda de cabecera** (el nombre de la columna: "Vaciar columna" vacía sus datos) y es
+    false sin filas de cuerpo. Alinear columna (`alignColumn`): `textAlign` en todas sus celdas (se
+    guarda el de la cabecera), conserva la selección, ya alineada → true sin transacción. Eliminar por
+    índice: `deleteRow(i)` solo filas de cuerpo (`i` ≥ 1), `deleteColumn(i)` nunca la última; la
+    selección que estaba en la línea borrada va al inicio de la primera celda de la fila / la celda de
+    cabecera de la columna que ocupa su lugar. `deleteTable` borra el nodo entero (con celdas combinadas
+    también), cursor en la posición válida más cercana; si era el único bloque queda un párrafo vacío.
+    Eliminar filas: si la selección incluye
     la cabecera se eliminan **solo las de cuerpo**; si solo cubre la cabecera → false; eliminar todas
     las de cuerpo está permitido (tabla solo-cabecera, válida en markdown). Eliminar columnas: false si
     quedarían menos de **`MIN_TABLE_COLUMNS` = 1**, es decir, si la selección cubre **todas** las
     columnas: el límite solo existe para no dejar la tabla sin columnas. Bajar hasta **1 columna** está
     permitido porque una tabla pipe de una columna se relee como tabla (`isTableStart`, ver «Tablas de
-    una columna» más abajo) — igual que el borrado de columna del toolbar/menú contextual
-    (prosemirror-tables), que tampoco deja borrar la última.
+    una columna» más abajo).
 - **`src/lib/tableData.ts`** — funciones puras sobre `string[][]` (sin ProseMirror):
   - `parseCellNumber`: signo opcional (`+`, `-`, `−`) y **un** separador decimal `.` o `,`
     (`3,5`, `-.5`); sin separadores de miles, exponentes, espacios, `%` ni moneda. El punto siempre es
@@ -1047,6 +1062,118 @@ siguen usando los comandos de TipTap/prosemirror-tables y `tableUtils.ts`, sin c
 - Tests: `tests/lib/tableOps.test.ts` (esquema real + `load`/`save` del harness de round-trip, entorno
   happy-dom: markdown resultante, round-trip sin pérdida, una transacción = un `undo`, invariante de
   cabecera, selección válida, rechazos y consulta sin `dispatch`) y `tests/lib/tableData.test.ts`.
+
+### Editor: controles de tabla (asas, menús, «+», arrastre)
+
+UI de las tablas sobre los comandos de "Editor: operaciones de tabla" (prototipo aprobado 2026-11:
+asas "pestaña en el borde", «+» "al acercarse"). **Formato y esquema intactos**: sin NodeView de tabla,
+sin clases en el DOM de ProseMirror (un cambio de atributo en una celda dispara su relectura del DOM),
+cabecera fija en la fila 0. Toda acción es **un paso de deshacer propio** (seleccionar una línea o poner
+el cursor es solo selección, sin paso). Una transacción por comando no basta: prosemirror-history
+**fusiona** transacciones adyacentes a menos de 500 ms (`newGroupDelay`) y reconstruir la tabla siempre es
+adyacente a la última edición en ella (doble clic en «+» = dos filas que volvían con un solo Ctrl+Z;
+escribir en una celda y pulsar una acción enseguida, igual). Por eso todo lo que cambia el documento desde
+los controles (menús de asa, clic derecho, toolbar, «+», soltar un arrastre) pasa por
+`runControlCommand` (`tableMenus.ts`, vía `runTableAction`): marca la transacción con `closeHistory` y
+despacha justo después un `closeHistory(view.state.tr)` vacío (el plugin aplica esa meta antes de su
+salida temprana "sin pasos"), así lo siguiente también abre grupo. **`runTableCommand` no lo hace**
+(conserva la agrupación por defecto para los atajos). Test con el plugin real en
+`tests/lib/tableControls.test.ts`. Insertar una tabla nueva (selector N×M / `/table`) no pasa por aquí.
+
+- **Piezas:** `components/Editor/TableControls.tsx` (capa única por editor: asas, «+», arrastre, menú de
+  asa), `TableMenu.tsx` (el menú común) + `tableMenus.ts` (entradas sobre el editor vivo:
+  `tableMenuEntries`, `runTableAction`), `TableContextMenu.tsx` (clic derecho), `TableButton.tsx`
+  (botón de la toolbar) + `TableSizePicker.tsx` (solo el panel N×M), `tableDom.ts` (DOM ↔ posición y
+  medidas). **Lógica pura** en `src/lib/tableControls.ts` (tests en `tests/lib/tableControls.test.ts`,
+  los de menús con el esquema real): geometría (`visibleBody`, `hoverZone`, `hotLines`, `nearEdges`,
+  `columnHandleSpan`/`rowHandleSpan`, `plusBars`), destino del arrastre (`columnDropTarget`,
+  `rowDropTarget`, `gapPosition`), `placeMenu`, y menús (`columnMenu`, `rowMenu`, `cellMenu`,
+  `focusableItems`, `stepFocus`, `columnName`/`rowName`). Los menús reciben `can(action)` =
+  `canRunTableCommand(tableActionCommand(action, { tablePos }))`: **el habilitado lo deciden los
+  comandos**, la lib solo añade el motivo (`title`) cuando sale deshabilitado.
+- **Montaje:** `Editor.tsx` monta `TableControls` en el contenedor `relative` que envuelve el scroller
+  (junto al TOC) y `TableContextMenu`, ambos solo si `!readOnly` (y comprueban `editor.isEditable`). Por
+  tanto **sí en stickies** (sin toolbar: asas, «+» y clic derecho son su única vía) y **sí en notas
+  vinculadas** (esquema `plain` con las mismas tablas: todo es GFM estándar, pipe + alineación); nada
+  en vinculadas de solo lectura, ni en previews/resumen/chat (no usan `Editor`).
+- **Capa (`.nf-table-controls`):** `absolute`, del tamaño de la caja visible del scroller (`clientWidth/
+  Height`, sin la barra de scroll), `overflow: hidden`, `pointer-events: none` salvo asas/«+» visibles;
+  `z-index: 5` (debajo del TOC, `z-10`). **Tabla activa:** la del arrastre o la del menú de asa abierto;
+  si no, la que está bajo el puntero **incluidos sus gutters** (`hoverZone`: el borde de asas y la franja
+  de las «+», para que pasar de la tabla al asa no la oculte); si no, la que contiene la selección.
+  Tablas con celdas combinadas (HTML pegado): sin asas (los comandos las rechazan); su clic derecho solo
+  ofrece *Delete table*. **Medidas** sobre celdas y `<tbody>` (sin `div.tableWrapper` la `<table>` es la
+  caja de scroll horizontal): columnas = celdas de la fila 0, filas = `tr`, `body` = `<tbody>`,
+  `view` = `<table>`; lo visible de las filas es `body ∩ view` en horizontal. Recalcula en un rAF con
+  `pointermove`, `scroll` en captura sobre el contenedor (scroll del editor **y** scroll horizontal de
+  cada tabla), `ResizeObserver` (scroller y `view.dom`), `resize` y cada transacción del editor.
+  **DOM ↔ documento:** `tablePosOfDom` (`posAtDOM` + verificación con `nodeDOM`, con barrido de respaldo)
+  y `tableDomAt` (`nodeDOM`); el `tablePos` se **resuelve de nuevo en cada acción**.
+- **Asas** (`.nf-table-handle-col[data-col=i]` / `.nf-table-handle-row[data-row=i]`, `<button>`): pestaña
+  de 7px sobre el borde superior de la columna / izquierdo de la fila (inset 10px / 6px de los extremos),
+  que crece a 15px y muestra el grip al pasar; posición en px + `--edge` (borde de las filas) para que el
+  crecimiento sea CSS. Solo se ven las de la **columna y fila bajo el puntero** (`.is-hot`, cada eje por
+  separado: sobre un asa de columna solo esa columna) y la de la línea **seleccionada** en acento
+  (`.is-on`: la arrastrada; si no, la del menú de asa abierto; si no, la columna/fila entera que cubre la
+  selección). Arrastre y menú se leen del estado en el render (no del layout medido en un rAF), para que
+  el acento cambie en el mismo render al abrir otro menú. Las de columnas
+  desplazadas fuera de la `<table>` se recortan a su rect visible (y desaparecen si quedan < 6px); las
+  de fila van en el borde izquierdo **visible** de la tabla. Clic = `selectColumn`/`selectRow` (sin
+  `scrollIntoView`: la cabeza de una columna alta puede quedar muy abajo) + su menú; clic en la misma asa
+  con el menú abierto lo cierra. La cabecera lleva candado y no se arrastra (solo abre su menú). Rueda
+  sobre asas/«+» → se reenvía al scroller (están fuera de él).
+- **Barras «+»** (`.nf-table-plus-col` / `.nf-table-plus-row`, visibles con `.is-shown`): 18px a 5px del
+  borde derecho / inferior, a todo lo alto / ancho visible; aparecen con el puntero a < 56px del borde
+  derecho o < 28px del inferior (`nearEdges`). Clic = `insertColumnAt(columnas)` / `insertRowAt(filas)` +
+  cursor en la primera celda nueva. **Sin sitio a la derecha** (tabla ancha que llena el editor y hace
+  scroll, o el padding estrecho de una sticky): la barra de columna **se desliza hacia dentro** lo justo
+  para caber antes del borde visible del scroller (`plusBars`, `clip.right − 18 − 2`), montada sobre el
+  último trozo visible de la tabla: sigue visible y clicable y sigue añadiendo la columna **al final**.
+  La de fila no se ajusta (el editor hace scroll vertical y su padding inferior deja sitio).
+- **Arrastre** (pointer events + `pointerDrag.ts`, como el kanban): umbral `DRAG_THRESHOLD`; al empezar
+  se selecciona la línea (así, tras soltar, `moveRow`/`moveColumn` la deja **seleccionada** en su sitio
+  nuevo). Ghost portalado a `<body>` (`.nf-table-ghost`, `transform` sin re-render) con la etiqueta
+  (cabecera de la columna o primera celda no vacía de la fila; "Column N"/"Row N"). En la capa:
+  `.nf-table-drop-line` en el hueco más cercano, `.nf-table-drag-source` atenúa la línea origen (caja
+  encima, no clase en la celda). Soltar en sus propios huecos = no-op sin indicador. Fila sobre la
+  cabecera: **bloqueado** (sin línea, `.nf-table-no-drop` raya la fila 0 y el ghost pasa a
+  `.is-blocked` con "The header is fixed"); soltar ahí no hace nada. `Esc` cancela; el clic posterior
+  se traga (`swallowNextClick`). Bucle rAF: auto-scroll horizontal de la propia `<table>` (columnas) y
+  vertical del scroller (`verticalScroller` + `edgeScrollVertical`), y nuevo hit-test.
+- **Menús (`TableMenu`, `.nf-table-menu`, `role="menu"`, entradas `[data-entry=<id>]`):** portal
+  `fixed z-50` con el fondo de popover de `TableSizePicker`/`SnippetsButton`; **nunca más alto que la
+  ventana** (`max-height: calc(100vh - 16px)`, scroll dentro: una sticky abre a 300×300 y el menú de
+  celda mide ~460px) y `placeMenu` coloca con esa altura recortada (`menuMaxHeight`), así el final
+  (Sort, Clear N cells, Delete table) nunca queda fuera; `placeMenu`: el de columna
+  bajo el asa (encima si no cabe), el de fila a su derecha (a la izquierda si no cabe), el de clic
+  derecho en el puntero, el de la toolbar bajo el botón; siempre dentro de la ventana (8px). Las entradas
+  se **reconstruyen en cada transacción**; el selector de alineación (`.nf-table-menu-seg`) deja el menú
+  abierto y marca la activa (`null` se muestra como izquierda y pulsarla no cambia nada). Imposibles =
+  **deshabilitadas, no ocultas** (`aria-disabled`, no `disabled`, para que el `title` con el motivo se
+  vea). Teclado en captura en `window` (el foco sigue en el editor): ↑/↓ recorren las habilitadas,
+  `Enter` ejecuta (sin foco: cierra), `Esc` cierra; ninguna llega a ProseMirror; cualquier otra tecla
+  cierra el menú y sigue al editor. Clic fuera (salvo en su `owner`, que lo alterna), scroll (salvo
+  el del propio menú) o resize cierran. `kbd?` en el tipo de ítem para las pistas de atajos (fase 3); hoy ninguna.
+  - **Columna:** "Column · <cabecera>" (o "Column N"); Insert left/right, Duplicate · Move left/right ·
+    Align · Sort A→Z/Z→A (1→9/9→1 si `isNumericColumn` del cuerpo) · Clear column (cuerpo) · Delete
+    (rojo; deshabilitada en la única columna: "A table needs at least one column").
+  - **Fila:** "Row N"; Insert above/below, Duplicate · Move up/down · Clear row · Delete. **Cabecera**
+    ("Header"): mismas entradas con insertar encima / mover / eliminar deshabilitadas ("The header is
+    fixed"), "Clear header", y la nota del candado. Duplicarla sí está permitido (la copia es fila de
+    cuerpo, regla de `tableOps`).
+  - **Celda** (clic derecho y toolbar): grupo Row (Insert row above/below, Duplicate, Delete), grupo
+    Column (Insert left/right, Duplicate, Delete, Align, Sort by this column…), "Clear N cells" con una
+    CellSelection de 2+ celdas, y Delete table (rojo).
+- **Clic derecho:** sobre una celda de una CellSelection la **conserva** (su `mousedown` derecho se para
+  en captura en `view.dom` antes de que el navegador/ProseMirror muevan el cursor); en cualquier otra
+  celda, el cursor va al punto pulsado (`posAtCoords`) y el menú actúa en esa celda.
+- **Toolbar (`TableButton`):** con la selección en una tabla (`findTablePos`), tooltip "Table options" y
+  abre el menú de celda sobre la celda activa (`getSelectionCell`) bajo el botón — así *Delete table*
+  sigue accesible desde la toolbar; fuera, "Insert table" y el selector N×M. Pulsarlo de nuevo cierra lo
+  abierto. Se quitó la hilera contextual de mini-botones (`+ Row ↑`, `− Col`…) y `tableUtils.ts`.
+- **Estilos** (`index.css`, tras § Tables): solo variables del tema (`--text`, `--accent`, `--red`,
+  `--bg-editor`, `--bg-0` para el texto sobre acento, `--bg-1`); el cursor de arrastre en
+  `body.nf-table-grabbing`.
 
 ### Editor: mover tareas (arrastrar, Alt+↑/↓) y "marcadas al final"
 
@@ -1177,11 +1304,12 @@ columna (`:---:`), saltos de celda como `<br>`, sin anchos guardados; `Table` de
   no deja borrar la última) volvía como texto al reabrir. Filas **más anchas que la cabecera**:
   `mdTableToHtml` descarta las celdas sobrantes (como GFM, en cualquier ancho; el editor no las
   escribe nunca, solo pasa con markdown escrito a mano).
-- **Toolbar:** el botón de tabla **siempre inserta** (`TableSizePicker.tsx`: rejilla 8×8, mismo patrón
-  que `SnippetsButton` — portal `fixed z-50`, mousedown + `preventDefault` para no perder la selección,
-  cierre por clic fuera; teclas en fase de captura en `window` porque el foco sigue en el editor:
-  flechas/`Enter`/`Esc`, con `stopPropagation` para que no lleguen a ProseMirror). Borrar sigue en la
-  fila contextual y el menú de clic derecho. **Slash:** `/table` (keywords sin traducir
+- **Toolbar:** fuera de una tabla el botón de tabla **inserta** (`TableSizePicker.tsx`, abierto por
+  `TableButton.tsx`: rejilla 8×8, mismo patrón que `SnippetsButton` — portal `fixed z-50`, mousedown +
+  `preventDefault` para no perder la selección, cierre por clic fuera; teclas en fase de captura en
+  `window` porque el foco sigue en el editor: flechas/`Enter`/`Esc`, con `stopPropagation` para que no
+  lleguen a ProseMirror); dentro de una tabla abre el menú de la tabla (ver "Editor: controles de
+  tabla"), que incluye *Delete table*. **Slash:** `/table` (keywords sin traducir
   `TABLE_SLASH_KEYWORDS` = `table`/`tabla`/`grid`) inserta 3×3; solo se ofrece donde
   `canInsertTableHere` (fuera de listas y tablas); también en notas vinculadas (es markdown estándar).
 - **CSS (`index.css` § Tables):** sin `div.tableWrapper` (TipTap solo lo crea con `resizable: true`

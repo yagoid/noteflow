@@ -2069,6 +2069,158 @@ html[data-color-scheme="light"] .section-hover-card {
   height: 0;
 }
 
+/* ── Table controls (Editor/TableControls.tsx, TableMenu.tsx) ─────────────────
+   One overlay per editor, over its scroller's visible box (it clips to it),
+   above the text but below the TOC (z-10). Positions come from
+   lib/tableControls.ts in px; --edge = the rows' top (column handles) or left
+   (row handles) edge, so the hover growth stays pure CSS. Handles: a 7px tab
+   on the edge (inset 10px / 6px from the line's ends) that grows to 15px and
+   shows its grip on hover; only the hovered cell's two are shown (.is-hot),
+   plus the selected line's, in accent (.is-on). */
+.nf-table-controls {
+  position: absolute;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+}
+.nf-table-handle {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 4px;
+  background: rgb(var(--text) / 0.22);
+  color: rgb(var(--bg-editor));
+  cursor: grab;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s, background-color 0.12s, color 0.12s, height 0.12s, width 0.12s, top 0.12s, left 0.12s;
+}
+.nf-table-handle > svg { opacity: 0; transition: opacity 0.12s; }
+.nf-table-handle.is-hot,
+.nf-table-handle.is-on { opacity: 1; pointer-events: auto; }
+.nf-table-handle-col { top: calc(var(--edge) - 4px); height: 7px; }
+.nf-table-handle-row { left: calc(var(--edge) - 4px); width: 7px; }
+.nf-table-handle-col:hover,
+.nf-table-handle-col.is-on { top: calc(var(--edge) - 8px); height: 15px; }
+.nf-table-handle-row:hover,
+.nf-table-handle-row.is-on { left: calc(var(--edge) - 8px); width: 15px; }
+.nf-table-handle:hover > svg,
+.nf-table-handle.is-on > svg { opacity: 1; }
+.nf-table-handle:hover { background: rgb(var(--text) / 0.4); }
+.nf-table-handle.is-on { background: rgb(var(--accent)); color: rgb(var(--bg-0)); }
+/* The header row is fixed: its handle only opens its menu (lock, no grip). */
+.nf-table-handle-row.is-header { cursor: pointer; }
+/* "+" bars: 18px, 5px off the right / bottom edge, shown near that edge. */
+.nf-table-plus {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: rgb(var(--text-muted));
+  background: rgb(var(--text) / 0.06);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s, background-color 0.12s, color 0.12s;
+}
+.nf-table-plus.is-shown { opacity: 1; pointer-events: auto; }
+.nf-table-plus:hover { background: rgb(var(--accent) / 0.16); color: rgb(var(--accent)); }
+/* Dragging a handle: drop line on the nearest gap, the dragged line dimmed, the
+   header striped when a row is over it (nothing goes above it). */
+.nf-table-drop-line {
+  position: absolute;
+  border-radius: 3px;
+  background: rgb(var(--accent));
+  box-shadow: 0 0 0 2px rgb(var(--bg-editor));
+}
+.nf-table-drag-source {
+  position: absolute;
+  background: linear-gradient(rgb(var(--text) / 0.05), rgb(var(--text) / 0.05)), rgb(var(--bg-editor) / 0.6);
+}
+.nf-table-no-drop {
+  position: absolute;
+  background-image: repeating-linear-gradient(135deg, rgb(var(--red) / 0.16) 0 5px, transparent 5px 10px);
+}
+.nf-table-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 10000;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 280px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  font: 500 12px/1.4 var(--app-font-family, monospace);
+  color: rgb(var(--text));
+  background: rgb(var(--bg-1));
+  border: 1px solid rgb(var(--accent) / 0.6);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+}
+.nf-table-ghost-icon { display: grid; color: rgb(var(--text-muted)); }
+.nf-table-ghost-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nf-table-ghost-note { display: none; color: rgb(var(--red)); font-size: 11px; white-space: nowrap; }
+.nf-table-ghost.is-blocked { border-color: rgb(var(--red) / 0.8); }
+.nf-table-ghost.is-blocked .nf-table-ghost-note { display: inline; }
+body.nf-table-grabbing,
+body.nf-table-grabbing * { cursor: grabbing !important; user-select: none; }
+/* Menus (handles, right-click, toolbar). */
+.nf-table-menu {
+  min-width: 238px;
+  max-width: 300px;
+  /* Never taller than the window (placeMenu keeps it inside): it scrolls instead. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  color: rgb(var(--text));
+}
+.nf-table-menu-heading {
+  padding: 7px 9px 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(var(--text-muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nf-table-menu-heading:not(:first-child) {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgb(var(--text) / 0.08);
+}
+.nf-table-menu-sep { height: 1px; margin: 4px 6px; background: rgb(var(--text) / 0.08); }
+.nf-table-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  text-align: left;
+  color: rgb(var(--text));
+}
+.nf-table-menu-item:not([aria-disabled]):hover,
+.nf-table-menu-item.is-focused { background: rgb(var(--text) / 0.08); }
+.nf-table-menu-item[aria-disabled] { opacity: 0.38; cursor: not-allowed; }
+.nf-table-menu-item.is-danger,
+.nf-table-menu-item.is-danger .nf-table-menu-icon { color: rgb(var(--red)); }
+.nf-table-menu-item kbd { font-family: inherit; font-size: 10.5px; color: rgb(var(--text-muted)); }
+.nf-table-menu-icon { width: 16px; flex: none; display: grid; place-items: center; color: rgb(var(--text-muted)); }
+.nf-table-menu-label { flex: 1; min-width: 0; }
+.nf-table-menu-align { display: flex; align-items: center; gap: 9px; padding: 3px 5px 3px 9px; font-size: 12px; }
+.nf-table-menu-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 7px; background: rgb(var(--text) / 0.07); }
+.nf-table-menu-seg button { display: grid; place-items: center; padding: 3px 8px; border-radius: 5px; color: rgb(var(--text-muted)); }
+.nf-table-menu-seg button:hover { color: rgb(var(--text)); }
+.nf-table-menu-seg button.is-on { background: rgb(var(--bg-editor)); color: rgb(var(--text)); box-shadow: 0 1px 2px rgb(0 0 0 / 0.18); }
+.nf-table-menu-note { display: flex; gap: 8px; padding: 6px 9px 7px; font-size: 11px; line-height: 1.45; color: rgb(var(--text-muted)); }
+.nf-table-menu-note svg { flex: none; margin-top: 2px; }
+
 /* ── Section relations (inline cross-section links) ──────────────────────────
    Styled by attribute so they look identical in the editor (interactive NodeView)
    and in read-only previews (htmlFromMarkdown emits the bare span). */

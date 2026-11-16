@@ -16,10 +16,11 @@ import { CellSelection, TableMap } from '@tiptap/pm/tables'
 import { schemaExtensions } from '../../src/components/Editor/editorExtensions'
 import { htmlFromMarkdown, htmlToMarkdown } from '../../src/lib/markdownHtml'
 import {
-  MIN_TABLE_COLUMNS, canRunTableCommand, cellText, clearColumn, clearRow, clearSelectedCells,
-  deleteSelectedColumns, deleteSelectedRows, duplicateColumn, duplicateRow, getSelectedCellsData,
-  getTableData, getTableInfo, insertColumnAt, insertRowAt, moveColumn, moveRow, runTableCommand,
-  selectColumn, selectRow, sortRowsByColumn,
+  MIN_TABLE_COLUMNS, alignColumn, canRunTableCommand, cellText, clearColumn, clearRow, clearSelectedCells,
+  deleteColumn, deleteRow, deleteSelectedColumns, deleteSelectedRows, deleteTable, duplicateColumn, duplicateRow,
+  findTablePos, focusCell, getCellSelectionRect, getSelectedCellsData, getSelectionCell, getTableData,
+  getTableInfo, insertColumnAt, insertRowAt, moveColumn, moveRow, runTableCommand, selectColumn, selectRow,
+  sortRowsByColumn, tableActionCommand,
 } from '../../src/components/Editor/tableOps'
 import { load, save, schema } from '../helpers/editorPipeline'
 
@@ -521,12 +522,17 @@ describe('clearRow / clearColumn / clearSelectedCells', () => {
     expect(cellPos(cleared, 1, 2) + 2).toBe(cleared.selection.head)
   })
 
-  it('clears the header row (it stays a header) and a column', () => {
+  it('clears the header row (it stays a header); a column keeps its header cell', () => {
     const s = stateOf(T44, 'b')
     expect(save(apply(s, clearRow(0)).doc).split('\n')[0]).toBe('|   |   |   |   |')
     const col = apply(s, clearColumn(1))
-    expect(getTableData(col)?.rows.map((r) => r[1])).toEqual(['', '', '', ''])
+    expect(getTableData(col)?.rows.map((r) => r[1])).toEqual(['Name', '', '', ''])
     expect(getTableData(col)?.aligns[1]).toBe('center')
+  })
+
+  it('a header-only table has no column cells to clear → false; an already empty column → no-op', () => {
+    expectRejected(stateOf(HEADER_ONLY), clearColumn(0, { tablePos: 0 }))
+    expectNoOp(stateOf(table([['A', 'B'], ['', '2']]), 'A'), clearColumn(0))
   })
 
   it('clears a CellSelection and keeps it; or the cursor\'s cell', () => {
@@ -627,6 +633,152 @@ describe('deleteSelectedColumns', () => {
   })
 })
 
+describe('deleteRow / deleteColumn (by index)', () => {
+  it('deletes a body row; a selection elsewhere follows its cells', () => {
+    const s = stateOf(T44, 'y')
+    const del = apply(s, deleteRow(1, { tablePos: 0 }))
+    expect(getTableData(del)?.rows.map((r) => r[0])).toEqual(['N', '2', '3'])
+    expect(headCellText(del)).toBe('y')
+  })
+
+  it('a selection in the deleted row → cursor at the start of the row taking its place', () => {
+    const s = run(stateOf(T44), selectRow(2))
+    const del = apply(s, deleteRow(2))
+    expect(getTableData(del)?.rows.map((r) => r[0])).toEqual(['N', '1', '3'])
+    expect(del.selection.empty).toBe(true)
+    expect(del.selection.head).toBe(cellPos(del, 2, 0) + 2)
+    // The last row: the cursor goes to the new last row.
+    const last = apply(run(stateOf(T44), selectRow(3)), deleteRow(3))
+    expect(last.selection.head).toBe(cellPos(last, 2, 0) + 2)
+  })
+
+  it('the header row can\'t be deleted; out of range → false; every body row may go', () => {
+    expectRejected(stateOf(T44, 'b'), deleteRow(0))
+    expectRejected(stateOf(T44, 'b'), deleteRow(4))
+    const one = apply(stateOf(T22, 'A'), deleteRow(1))
+    expect(save(one.doc)).toBe(table([['A', 'B']]))
+  })
+
+  it('deletes a column, alignment and all; a selection in it → the header cell taking its place', () => {
+    const s = run(stateOf(T44), selectColumn(1))
+    const del = apply(s, deleteColumn(1))
+    expect(save(del.doc)).toBe(table(
+      [['N', 'Score', 'Note'], ['1', '10', 'x'], ['2', '9,5', ''], ['3', '', 'y']],
+      ['---', '---:', ':---'],
+    ))
+    expect(del.selection.head).toBe(cellPos(del, 0, 1) + 2)
+    const lastCol = apply(stateOf(T44, 'x'), deleteColumn(3))
+    expect(getTableData(lastCol)?.rows[0]).toEqual(['N', 'Name', 'Score'])
+    expect(lastCol.selection.head).toBe(cellPos(lastCol, 0, 2) + 2)
+  })
+
+  it('never deletes the only column; out of range → false', () => {
+    expectRejected(stateOf(table([['H'], ['a']]), 'a'), deleteColumn(0))
+    expectRejected(stateOf(T22, 'A'), deleteColumn(2))
+    expect(save(apply(stateOf(T22, 'A'), deleteColumn(0)).doc)).toBe(table([['B'], ['2']]))
+  })
+})
+
+describe('deleteTable', () => {
+  it('deletes the table in one step; the cursor goes next to where it was', () => {
+    const s = stateOf(`before\n\n${T22}\n\nafter`, '1')
+    const del = apply(s, deleteTable())
+    expect(save(del.doc)).toBe('before\n\nafter')
+    expect(del.selection.$head.parent.textContent).toBe('after')
+  })
+
+  it('by position, and a table that was the only block leaves an empty paragraph', () => {
+    const del = apply(stateOf(T22), deleteTable({ tablePos: 0 }))
+    expect(del.doc.childCount).toBe(1)
+    expect(del.doc.firstChild!.type.name).toBe('paragraph')
+  })
+
+  it('also a table with merged cells; outside a table or not at a table → false', () => {
+    const doc = docOf({ type: 'table', content: [
+      jRow({ ...jCell('tableHeader', 'wide'), attrs: { colspan: 2 } }),
+      jRow(jCell('tableCell', '1'), jCell('tableCell', '2')),
+    ] })
+    const s = stateOf(doc, '1')
+    expect(deleteTable()(s)).toBe(true)
+    const trs: Transaction[] = []
+    deleteTable()(s, (tr) => trs.push(tr))
+    expect(trs).toHaveLength(1)
+    expect(s.apply(trs[0]).doc.firstChild!.type.name).toBe('paragraph')
+    expectRejected(stateOf(`x\n\n${T22}`, 'x'), deleteTable())
+    expectRejected(stateOf(`x\n\n${T22}`, 'x'), deleteTable({ tablePos: 0 }))
+  })
+})
+
+describe('alignColumn', () => {
+  it('aligns every cell of the column; saved as the separator, one undo step', () => {
+    const s = stateOf(T44, 'b')
+    const aligned = apply(s, alignColumn(0, 'center', { tablePos: 0 }))
+    expect(aligns(aligned).map((r) => r[0])).toEqual(['center', 'center', 'center', 'center'])
+    expect(save(aligned.doc).split('\n')[1]).toBe('| :---: | :---: | ---: | :--- |')
+    expect(headCellText(aligned)).toBe('b')
+    const cleared = apply(s, alignColumn(1, null))
+    expect(save(cleared.doc).split('\n')[1]).toBe('| --- | --- | ---: | :--- |')
+  })
+
+  it('keeps a CellSelection; already aligned → no-op; out of range → false', () => {
+    const s = run(stateOf(T44), selectColumn(2))
+    const aligned = apply(s, alignColumn(2, 'left'))
+    expect(aligned.selection).toBeInstanceOf(CellSelection)
+    expect(getCellSelectionRect(aligned)).toEqual({ top: 0, bottom: 4, left: 2, right: 3 })
+    expectNoOp(s, alignColumn(2, 'right'))
+    expectRejected(s, alignColumn(4, 'left'))
+  })
+})
+
+describe('focusCell / findTablePos / getCellSelectionRect / getSelectionCell', () => {
+  it('focusCell puts the cursor at the start of a cell (selection only)', () => {
+    const s = stateOf(T44, 'b')
+    const next = run(s, focusCell(3, 1, { tablePos: 0 }))
+    expect(next.selection.head).toBe(cellPos(next, 3, 1) + 2)
+    expect(next.doc.eq(s.doc)).toBe(true)
+    expectRejected(s, focusCell(4, 0))
+  })
+
+  it('reads where the selection is', () => {
+    const s = stateOf(`x\n\n${T44}`, 'b')
+    const tablePos = findTablePos(s)!
+    expect(s.doc.nodeAt(tablePos)!.type.name).toBe('table')
+    expect(getSelectionCell(s)).toEqual({ tablePos, row: 1, col: 1 })
+    expect(getCellSelectionRect(s)).toBeNull()
+    const cells = withCells(s, [3, 2], [1, 1], tablePos)
+    expect(getCellSelectionRect(cells, { tablePos })).toEqual({ top: 1, bottom: 4, left: 1, right: 3 })
+    expect(getSelectionCell(cells)).toEqual({ tablePos, row: 1, col: 1 })
+    expect(getCellSelectionRect(cells, { tablePos: 0 })).toBeNull()
+    expect(findTablePos(stateOf(`x\n\n${T44}`, 'x'))).toBeNull()
+    expect(getSelectionCell(stateOf(`x\n\n${T44}`, 'x'))).toBeNull()
+  })
+})
+
+describe('tableActionCommand', () => {
+  it('maps every menu action to its command on the target table', () => {
+    const s = stateOf(`x\n\n${T44}`, 'x')
+    const tablePos = findTablePos(stateOf(`x\n\n${T44}`, 'b'))!
+    const target = { tablePos }
+    const md = (action: Parameters<typeof tableActionCommand>[0]) =>
+      save(apply(s, tableActionCommand(action, target)).doc).split('\n').slice(2)
+    expect(md({ type: 'insertRow', index: 4 })).toHaveLength(6)
+    expect(md({ type: 'insertColumn', index: 0 })[0]).toBe('|   | N | Name | Score | Note |')
+    expect(md({ type: 'duplicateRow', index: 3 }).at(-1)).toBe('| 3 | c |   | y |')
+    expect(md({ type: 'duplicateColumn', index: 0 })[0]).toBe('| N | N | Name | Score | Note |')
+    expect(md({ type: 'moveRow', from: 3, to: 1 })[2]).toBe('| 3 | c |   | y |')
+    expect(md({ type: 'moveColumn', from: 0, to: 3 })[0]).toBe('| Name | Score | Note | N |')
+    expect(md({ type: 'sort', column: 1, direction: 'asc' })[2]).toBe('| 2 | a | 9,5 |   |')
+    expect(md({ type: 'align', column: 0, align: 'right' })[1]).toBe('| ---: | :---: | ---: | :--- |')
+    expect(md({ type: 'clearRow', index: 1 })[2]).toBe('|   |   |   |   |')
+    expect(md({ type: 'clearColumn', index: 0 }).map((l) => l.split('|')[1].trim())).toEqual(['N', '---', '', '', ''])
+    expect(md({ type: 'deleteRow', index: 1 })).toHaveLength(4)
+    expect(md({ type: 'deleteColumn', index: 3 })[0]).toBe('| N | Name | Score |')
+    expect(save(apply(s, tableActionCommand({ type: 'deleteTable' }, target)).doc)).toBe('x')
+    expect(tableActionCommand({ type: 'clearSelection' }, target)(s)).toBe(false)
+    expect(tableActionCommand({ type: 'clearSelection' })(withCells(s, [1, 0], [2, 1], tablePos))).toBe(true)
+  })
+})
+
 // ── Unusual tables ───────────────────────────────────────────────────────────
 
 describe('one-column, header-less and merged tables', () => {
@@ -664,6 +816,7 @@ describe('one-column, header-less and merged tables', () => {
     for (const cmd of [
       selectRow(1), moveRow(1, 2), moveColumn(0, 1), duplicateRow(1), insertRowAt(1), insertColumnAt(0),
       sortRowsByColumn(0, 'desc'), clearRow(1), clearSelectedCells, deleteSelectedRows, deleteSelectedColumns,
+      deleteRow(1), deleteColumn(0), alignColumn(0, 'left'), clearColumn(0), focusCell(1, 0),
     ]) expectRejected(s, cmd)
     expect(getTableData(s)).toBeNull()
   })

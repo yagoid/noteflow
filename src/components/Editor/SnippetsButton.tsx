@@ -23,7 +23,7 @@ const fromKeyboard = (e: React.MouseEvent) => e.detail === 0
 // snippet at the caret (variables expanded at click time), the chevron opens the
 // list of every snippet + "Configure snippets…". With no snippets the main part
 // opens the configuration modal directly. mousedown + preventDefault everywhere
-// so the editor keeps its selection (same as the link input / TableOpButton).
+// so the editor keeps its selection (same as the link input).
 export function SnippetsButton({ editor }: { editor: Editor }) {
   const t = useT()
   const lang = useLanguageStore((s) => s.lang)

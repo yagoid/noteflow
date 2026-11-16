@@ -13,7 +13,7 @@ import {
   type KanbanDefaultColumns,
 } from './kanbanCommands'
 import { insertSnippet } from './snippetCommands'
-import { insertNewTable } from './tableCommands'
+import { insertNewTable } from './tableOps'
 import { sortCheckedToBottom, taskListAround } from '../../lib/listItemMove'
 import { expandSnippet } from '../../lib/snippets'
 import { filterSlashItems, snippetSlashEntries, TABLE_SLASH_KEYWORDS } from '../../lib/slashItems'

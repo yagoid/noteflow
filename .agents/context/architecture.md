@@ -166,9 +166,12 @@ noteflow/
 │   │   │   ├── SectionLinkPicker.tsx    # Buscador de secciones del comando "Link section"
 │   │   │   ├── CodeBlockWithCopy.tsx    # NodeView: code block con botón copiar
 │   │   │   ├── ResizableImage.tsx       # NodeView: imagen redimensionable
-│   │   │   ├── TableContextMenu.tsx     # Menú contextual de tablas
-│   │   │   ├── tableUtils.ts            #   alineación por columna (getColumnAlign/setColumnAlign)
-│   │   │   ├── tableOps.ts              #   comandos de tabla sin UI: mover/ordenar/duplicar/vaciar… (ver patterns.md)
+│   │   │   ├── tableOps.ts              # Comandos de tabla (una transacción): mover/ordenar/duplicar/vaciar/borrar… (ver patterns.md)
+│   │   │   ├── TableControls.tsx        #   capa sobre las tablas: asas de fila/columna, barras «+», arrastrar para reordenar
+│   │   │   ├── TableMenu.tsx            #   menú de tabla común (asas, clic derecho, toolbar) + tableMenus.ts (entradas)
+│   │   │   ├── TableContextMenu.tsx     #   clic derecho en una celda
+│   │   │   ├── TableButton.tsx          #   botón de la toolbar: menú de la tabla o TableSizePicker.tsx (insertar)
+│   │   │   ├── tableDom.ts              #   <table> del DOM ↔ tablePos, medir filas/columnas
 │   │   │   ├── SearchHighlightExtension.ts # Resaltado de matches de búsqueda in-note
 │   │   │   ├── InNoteSearchBar.tsx      # Barra búsqueda dentro de la nota (modo markdown)
 │   │   │   └── RawNoteSearchBar.tsx     # Barra búsqueda dentro de la nota (modo texto, `isRawMode`)
@@ -356,6 +359,8 @@ noteflow/
 │   │   ├── kanbanSearch.ts       #   búsqueda en nota dentro de tableros (conteo + resaltado) — testeado
 │   │   ├── tableData.ts          # Tablas sobre string[][]: números, orden, resumen, copiar md/TSV, parsear
 │   │   │                         #   TSV/CSV pegado, detector de TSV (ver patterns.md) — testeado
+│   │   ├── tableControls.ts      # Controles de tabla (puro): geometría de asas/«+», destino al arrastrar,
+│   │   │                         #   posición y entradas de los menús (ver patterns.md) — testeado
 │   │   ├── listItemMove.ts       # Mover ítems de lista con su subárbol (drag de tareas, Alt+↑/↓, marcadas
 │   │   │                         #   al final, slash) como transacciones ProseMirror — testeado
 │   │   ├── whatsNew.ts           # Lógica pura del tour "What's new" (qué mostrar, saneo, media) — testeado

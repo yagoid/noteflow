@@ -1,5 +1,5 @@
 // Inserting a new table in the note editor: the toolbar's size picker
-// (components/Editor/TableSizePicker.tsx) and the `/table` slash command
+// (components/Editor/TableSizePicker.tsx, opened by TableButton.tsx) and the `/table` slash command
 // (components/Editor/SlashCommands.ts). Pure ProseMirror — a state in, a
 // transaction out — plus the picker's keyboard moves. Covered on the editor's
 // real schema by tests/lib/tableInsert.test.ts.

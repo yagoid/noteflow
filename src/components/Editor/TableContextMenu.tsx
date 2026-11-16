@@ -1,137 +1,74 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { Editor } from '@tiptap/react'
-import {
-  Plus,
-  Minus,
-  Trash2,
-  ArrowUp,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-} from 'lucide-react'
-import { setColumnAlign } from './tableUtils'
-import { useT } from '../../i18n/useT'
+import { CellSelection } from '@tiptap/pm/tables'
+import { getCellSelectionRect } from './tableOps'
+import { cellIndexOf, tablePosOfDom } from './tableDom'
+import type { TableMenuState } from './tableMenus'
+import { TableMenu } from './TableMenu'
 
-interface Props {
-  editor: Editor
+/** The table cell (and its table) an event happened in, if it's one of this editor's. */
+function cellAt(editor: Editor, target: EventTarget | null) {
+  const el = target instanceof Element ? target.closest('td, th') : null
+  if (!(el instanceof HTMLTableCellElement)) return null
+  const table = el.closest('table')
+  if (!table || !editor.view.dom.contains(table)) return null
+  const index = cellIndexOf(el)
+  return index && { table, ...index }
 }
 
-interface MenuPos {
-  x: number
-  y: number
+/** Whether the selection is a CellSelection of `table` that covers cell (row, col). */
+function inCellSelection(editor: Editor, table: HTMLTableElement, row: number, col: number): boolean {
+  if (!(editor.state.selection instanceof CellSelection)) return false
+  const tablePos = tablePosOfDom(editor.view, table)
+  const rect = tablePos === null ? null : getCellSelectionRect(editor.state, { tablePos })
+  return !!rect && row >= rect.top && row < rect.bottom && col >= rect.left && col < rect.right
 }
 
-export function TableContextMenu({ editor }: Props) {
-  const t = useT()
-  const [pos, setPos] = useState<MenuPos | null>(null)
+/**
+ * Right-click on a table cell: the cell's menu (TableMenu: its row, its column,
+ * "Clear N cells" for a selection of 2+ cells, Delete table). Right-clicking
+ * inside the current cell selection keeps it (its right mousedown is stopped
+ * before the browser / ProseMirror move the caret); anywhere else the caret
+ * goes to the clicked spot first, so "the cell" is the one under the pointer.
+ */
+export function TableContextMenu({ editor }: { editor: Editor }) {
+  const [menu, setMenu] = useState<TableMenuState | null>(null)
+  const close = useCallback(() => setMenu(null), [])
 
   useEffect(() => {
     const dom = editor.view.dom
-    const handleContextMenu = (e: MouseEvent) => {
-      if (!editor.isEditable) return
-      const target = e.target as HTMLElement | null
-      if (!target || !target.closest('table')) return
-      e.preventDefault()
-      // Move the cursor to the right-clicked cell so menu actions (add/delete
-      // row/col, alignment) act on the cell under the pointer, not wherever the
-      // caret happened to be.
-      const at = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
-      if (at) editor.commands.setTextSelection(at.pos)
-      setPos({ x: e.clientX, y: e.clientY })
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 2 || !editor.isEditable) return
+      const cell = cellAt(editor, e.target)
+      if (cell && inCellSelection(editor, cell.table, cell.row, cell.col)) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
     }
-    dom.addEventListener('contextmenu', handleContextMenu)
-    return () => dom.removeEventListener('contextmenu', handleContextMenu)
+    const onContextMenu = (e: MouseEvent) => {
+      if (!editor.isEditable) return
+      const cell = cellAt(editor, e.target)
+      if (!cell) return
+      e.preventDefault()
+      if (!inCellSelection(editor, cell.table, cell.row, cell.col)) {
+        const at = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
+        if (at) editor.commands.setTextSelection(at.pos)
+      }
+      setMenu({
+        key: `cell:${e.clientX},${e.clientY}`,
+        table: cell.table,
+        spec: { kind: 'cell', row: cell.row, col: cell.col },
+        anchor: { left: e.clientX, top: e.clientY, right: e.clientX, bottom: e.clientY },
+        placement: 'point',
+      })
+    }
+    dom.addEventListener('mousedown', onMouseDown, true)
+    dom.addEventListener('contextmenu', onContextMenu)
+    return () => {
+      dom.removeEventListener('mousedown', onMouseDown, true)
+      dom.removeEventListener('contextmenu', onContextMenu)
+    }
   }, [editor])
 
-  useEffect(() => {
-    if (!pos) return
-    const close = () => setPos(null)
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close()
-    }
-    window.addEventListener('mousedown', close)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('mousedown', close)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [pos])
-
-  if (!pos) return null
-
-  const run = (fn: () => void) => () => {
-    fn()
-    setPos(null)
-  }
-
-  // Clamp to viewport so the menu doesn't overflow the window edges.
-  const MENU_W = 180
-  const MENU_H = 360
-  const left = Math.min(pos.x, window.innerWidth - MENU_W - 4)
-  const top  = Math.min(pos.y, window.innerHeight - MENU_H - 4)
-
-  // The header row must stay at row 0 (markdown tables require a header), so
-  // block actions that would remove it or push a body row above it.
-  const inHeader = editor.isActive('tableHeader')
-
-  return (
-    <div
-      className="fixed z-50 bg-surface-2 border border-border rounded-lg shadow-lg py-1 text-xs font-mono"
-      style={{ left, top, minWidth: MENU_W }}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      <MenuItem disabled={inHeader} onClick={run(() => editor.chain().focus().addRowBefore().run())}>
-        <Plus size={11} /> {t.editor.table.row} <ArrowUp size={11} />
-      </MenuItem>
-      <MenuItem onClick={run(() => editor.chain().focus().addRowAfter().run())}>
-        <Plus size={11} /> {t.editor.table.row} <ArrowDown size={11} />
-      </MenuItem>
-      <MenuItem disabled={inHeader} onClick={run(() => editor.chain().focus().deleteRow().run())}>
-        <Minus size={11} /> {t.editor.table.row}
-      </MenuItem>
-      <div className="my-1 border-t border-border" />
-      <MenuItem onClick={run(() => editor.chain().focus().addColumnBefore().run())}>
-        <Plus size={11} /> {t.editor.table.col} <ArrowLeft size={11} />
-      </MenuItem>
-      <MenuItem onClick={run(() => editor.chain().focus().addColumnAfter().run())}>
-        <Plus size={11} /> {t.editor.table.col} <ArrowRight size={11} />
-      </MenuItem>
-      <MenuItem onClick={run(() => editor.chain().focus().deleteColumn().run())}>
-        <Minus size={11} /> {t.editor.table.col}
-      </MenuItem>
-      <div className="my-1 border-t border-border" />
-      <MenuItem onClick={run(() => setColumnAlign(editor, 'left'))}>
-        <AlignLeft size={11} /> {t.editor.table.alignLeftMenu}
-      </MenuItem>
-      <MenuItem onClick={run(() => setColumnAlign(editor, 'center'))}>
-        <AlignCenter size={11} /> {t.editor.table.alignCenterMenu}
-      </MenuItem>
-      <MenuItem onClick={run(() => setColumnAlign(editor, 'right'))}>
-        <AlignRight size={11} /> {t.editor.table.alignRightMenu}
-      </MenuItem>
-      <div className="my-1 border-t border-border" />
-      <MenuItem onClick={run(() => editor.chain().focus().deleteTable().run())}>
-        <Trash2 size={11} /> {t.editor.table.deleteTableMenu}
-      </MenuItem>
-    </div>
-  )
-}
-
-function MenuItem({ onClick, children, disabled }: { onClick: () => void; children: React.ReactNode; disabled?: boolean }) {
-  return (
-    <button
-      onClick={disabled ? undefined : onClick}
-      disabled={disabled}
-      className={`flex items-center gap-1.5 w-full px-3 py-1.5 text-left transition-colors
-        ${disabled
-          ? 'text-text-muted/30 cursor-not-allowed'
-          : 'text-text-muted hover:text-text hover:bg-surface-3'
-        }`}
-    >
-      {children}
-    </button>
-  )
+  return menu && <TableMenu key={menu.key} editor={editor} menu={menu} onClose={close} />
 }
