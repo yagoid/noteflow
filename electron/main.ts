@@ -518,6 +518,10 @@ function indexPulledNotes(result: SyncPullResult): void {
 
 /** Renderer reload for the files of a pull, the same for both backends. */
 function broadcastPulledNotes(result: SyncPullResult, opts: { manual: boolean }): void {
+  // The pull wrote note folders: the dir the local archive had emptied holds notes
+  // again. Cleared here because the per-note reload below never goes through
+  // fs:read-all-notes, the other place that notices.
+  if (result.updatedFiles.length > 0) notesDirEmptiedByArchive = false
   // A manual sync also reloads everything when the pull brought nothing: it
   // covers files already on disk (written by an auto-sync) whose event the UI
   // missed — a manual sync should always bring the store in sync with disk.
@@ -2209,7 +2213,8 @@ const archivedNoteDirs = new Set<string>()
 
 // The archive left the notes dir without a single note: an empty listing is the
 // truth, not the transient empty readdir fs:read-all-notes retries for (~4 s).
-// Cleared as soon as a note is written or a listing finds notes again.
+// Cleared as soon as a note is written — by a save (applyNoteWrite) or by a pull
+// of either backend (broadcastPulledNotes) — or a listing finds notes again.
 let notesDirEmptiedByArchive = false
 
 /**
