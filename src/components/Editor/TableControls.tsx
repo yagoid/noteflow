@@ -6,11 +6,14 @@ import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import {
   HOVER_GUTTER, columnDropTarget, handleAnchor, columnHandleSpan, columnName, contains, gapPosition, hotLines, hoverZone,
-  nearEdges, plusBars, rowDropTarget, rowHandleSpan, rowName, visibleBody, type Box, type DropTarget,
-  type TableGeometry,
+  nearEdges, pillBox, pillParts, plusBars, rowDropTarget, rowHandleSpan, rowName, selectionStats, visibleBody,
+  type Box, type DropTarget, type TableGeometry,
 } from '../../lib/tableControls'
+import type { CellSummary } from '../../lib/tableData'
+import { useLanguageStore } from '../../stores/languageStore'
 import {
-  findTablePos, focusCell, getCellSelectionRect, getTableData, getTableInfo, runTableCommand, selectColumn, selectRow,
+  findTablePos, focusCell, getCellSelectionRect, getSelectedCellsData, getTableData, getTableInfo, runTableCommand,
+  selectColumn, selectRow,
 } from './tableOps'
 import { measureTable, tableDomAt, tablePosOfDom } from './tableDom'
 import { runTableAction, type TableMenuState } from './tableMenus'
@@ -39,6 +42,13 @@ interface Layout {
    *  itself is decided at render: an open handle menu or a drag wins over it. */
   selCol: number | null
   selRow: number | null
+  /**
+   * The summary pill: a CellSelection of 2+ cells (lib/tableControls.ts
+   * selectionStats), under ITS table — the one holding the selection, which may
+   * not be the hovered one. `onActive`: that table is `table` (then the row "+"
+   * bar makes room for it).
+   */
+  pill: { geo: TableGeometry; stats: CellSummary; onActive: boolean } | null
 }
 
 interface Press {
@@ -133,6 +143,18 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
   const loopRef = useRef<number | null>(null)
   const detachRef = useRef<(() => void) | null>(null)
   const ghostRef = useRef<HTMLDivElement>(null)
+  // The pill's rendered width (its content): the row "+" bar starts right of it.
+  const [pillWidth, setPillWidth] = useState(0)
+  const pillObserverRef = useRef<ResizeObserver | null>(null)
+  const pillRef = useCallback((el: HTMLDivElement | null) => {
+    pillObserverRef.current?.disconnect()
+    pillObserverRef.current = null
+    if (!el) return
+    const ro = new ResizeObserver(() => setPillWidth(el.offsetWidth))
+    ro.observe(el)
+    pillObserverRef.current = ro
+  }, [])
+  const lang = useLanguageStore((s) => s.lang)
 
   const setDrag = useCallback((next: Drag | null) => {
     dragRef.current = next
@@ -189,6 +211,17 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
     const w = geo.cols.length
     const selCol = rect && rect.right - rect.left === 1 && rect.top === 0 && rect.bottom === h ? rect.left : null
     const selRow = rect && rect.bottom - rect.top === 1 && rect.left === 0 && rect.right === w ? rect.top : null
+
+    // The summary pill of a CellSelection of 2+ cells, on the selection's table; none while dragging.
+    let pill: Layout['pill'] = null
+    const selPos = dragRef.current ? null : findTablePos(editor.state)
+    const selRect = selPos === null ? null : getCellSelectionRect(editor.state, { tablePos: selPos })
+    if (selPos !== null && selRect && (selRect.bottom - selRect.top) * (selRect.right - selRect.left) >= 2) {
+      const data = getSelectedCellsData(editor.state)
+      const selTable = tableDomAt(view, selPos)
+      const pillGeo = selTable === table ? geo : selTable && measureTable(selTable)
+      if (data && pillGeo) pill = { geo: pillGeo, stats: selectionStats(data.rows, selRect.top), onActive: selTable === table }
+    }
     return {
       table,
       geo,
@@ -200,6 +233,7 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
       near: isHovered ? nearEdges(geo, p!.x, p!.y) : { right: false, bottom: false },
       selCol,
       selRow,
+      pill,
     }
   }, [editor, scrollRef])
 
@@ -429,7 +463,9 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
   const ox = clip.left
   const oy = clip.top
   const vis = visibleBody(geo)
-  const bars = plusBars(geo, layout.rightLimit)
+  const pillGeo = layout.pill && !drag ? layout.pill.geo : null
+  const pill = pillGeo && pillBox(pillGeo, layout.rightLimit, pillWidth)
+  const bars = plusBars(geo, layout.rightLimit, pill && layout.pill!.onActive ? pill : null)
   const m = t.editor.table
   const dragging = drag !== null && drag.table === layout.table
   // The accent line: the dragged one, else the one whose menu is open, else a whole line the
@@ -544,6 +580,23 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
           />
         )}
         {dropLine && <div className="nf-table-drop-line" style={dropLine} />}
+        {pill && (
+          <div
+            ref={pillRef}
+            className="nf-table-pill"
+            role="status"
+            aria-live="polite"
+            aria-label={m.statsLabel}
+            style={{ left: pill.left - ox, top: pill.top - oy, maxWidth: layout.rightLimit - pill.left }}
+          >
+            {pillParts(layout.pill!.stats, m, lang).map((part) => (
+              <span key={part.key} className="nf-table-pill-part" data-part={part.key}>
+                {part.label}
+                {part.value !== undefined && <> <b>{part.value}</b></>}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       {drag && createPortal(
         <div ref={ghostRef} className={`nf-table-ghost${drag.blocked ? ' is-blocked' : ''}`} aria-hidden>

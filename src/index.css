@@ -1986,11 +1986,13 @@ html[data-color-scheme="light"] .section-hover-card {
   font-variant-numeric: tabular-nums;
 }
 /* The editable editor (note editor, stickies) keeps a deeper bottom margin: it's
-   the room of the table controls' "+" row bar (Editor/TableControls.tsx, sized
-   from this measured margin by lib/tableControls.ts plusBars), so the bar never
-   sits over the next block. Permanent, not on hover: no reflow while pointing. */
+   the room of the table controls' "+" row bar and summary pill
+   (Editor/TableControls.tsx, placed in this measured margin by
+   lib/tableControls.ts plusBars / pillBox), so neither sits over the next block.
+   28px: the 20px pill fits even below a table's 6px horizontal scrollbar.
+   Permanent, not on hover: no reflow while pointing. */
 .prose-editor .ProseMirror[contenteditable="true"] table {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.75rem;
 }
 .prose-editor .ProseMirror table > tbody {
   display: table;
@@ -2190,6 +2192,34 @@ html[data-color-scheme="light"] .section-hover-card {
 .nf-table-ghost.is-blocked .nf-table-ghost-note { display: inline; }
 body.nf-table-grabbing,
 body.nf-table-grabbing * { cursor: grabbing !important; user-select: none; }
+/* Summary pill of a cell selection (2+ cells): under the table, in its bottom
+   band (lib/tableControls.ts pillBox: PILL_HEIGHT = 20px). A read-out only:
+   pointer-events none, so it can never take a click. One line; a pill wider
+   than the room left is cut. */
+.nf-table-pill {
+  position: absolute;
+  box-sizing: border-box;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 0 12px;
+  padding: 0 9px;
+  overflow: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+  border-radius: 7px;
+  border: 1px solid rgb(var(--border));
+  background: rgb(var(--bg-1));
+  color: rgb(var(--text-muted));
+  font: 11px/1 var(--app-font-family, monospace);
+  font-variant-numeric: tabular-nums;
+}
+.nf-table-pill-part { flex: none; }
+.nf-table-pill b {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  color: rgb(var(--text));
+}
 /* Menus (handles, right-click, toolbar). */
 .nf-table-menu {
   min-width: 238px;

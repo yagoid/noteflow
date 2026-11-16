@@ -106,11 +106,17 @@ export interface CellSummary {
   sum: number | null
   /** Mean of the numeric cells (unrounded); null when there are none. */
   average: number | null
+  /** Smallest / largest numeric cell; null when there are none. */
+  min: number | null
+  max: number | null
+  /** Most decimals any numeric cell is written with (`3,50` → 2): how to show sum / min / max. */
+  decimals: number
 }
 
 /** Count / sum / average of a block of cells (any shape; rows may be ragged). */
 export function summarizeCells(rows: readonly (readonly string[])[]): CellSummary {
   let count = 0, filled = 0, numeric = 0, sum = 0, decimals = 0
+  let min = Infinity, max = -Infinity
   for (const row of rows) {
     for (const cell of row) {
       count++
@@ -120,12 +126,39 @@ export function summarizeCells(rows: readonly (readonly string[])[]): CellSummar
       if (n === null) continue
       numeric++
       sum += n
+      min = Math.min(min, n)
+      max = Math.max(max, n)
       decimals = Math.max(decimals, decimalsOf(cell))
     }
   }
-  if (numeric === 0) return { count, filled, numeric, sum: null, average: null }
+  if (numeric === 0) return { count, filled, numeric, sum: null, average: null, min: null, max: null, decimals: 0 }
   const rounded = Number(sum.toFixed(Math.min(decimals, 20)))
-  return { count, filled, numeric, sum: Object.is(rounded, -0) ? 0 : rounded, average: sum / numeric }
+  const noNegZero = (n: number) => (Object.is(n, -0) ? 0 : n)
+  return { count, filled, numeric, sum: noNegZero(rounded), average: sum / numeric, min: noNegZero(min), max: noNegZero(max), decimals }
+}
+
+const numberFormats = new Map<string, Intl.NumberFormat>()
+
+/**
+ * `n` written for the UI language (`es` → es-ES, otherwise en-US: decimal
+ * comma and point, each locale's own grouping), with `minDecimals` …
+ * `maxDecimals` decimals. The table summary pill: sum / min / max with the
+ * inputs' decimals (`CellSummary.decimals`, so 2,50 + 1 shows 3,50), the
+ * average with up to 2.
+ */
+export function formatCellNumber(n: number, lang: string, maxDecimals: number, minDecimals = maxDecimals): string {
+  const locale = lang === 'es' ? 'es-ES' : 'en-US'
+  const max = Math.min(Math.max(maxDecimals, 0), 20)
+  const min = Math.min(Math.max(minDecimals, 0), max)
+  const key = `${locale}:${min}:${max}`
+  let fmt = numberFormats.get(key)
+  if (!fmt) {
+    fmt = new Intl.NumberFormat(locale, { minimumFractionDigits: min, maximumFractionDigits: max })
+    numberFormats.set(key, fmt)
+  }
+  const text = fmt.format(n)
+  // -0 (an average or a rounding that ends at zero) shows as 0.
+  return /^-0([.,]0*)?$/.test(text) ? text.slice(1) : text
 }
 
 // ── Copy: markdown / TSV ─────────────────────────────────────────────────────

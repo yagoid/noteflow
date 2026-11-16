@@ -1038,8 +1038,11 @@ Los atajos de teclado y el portapapeles también: ver «Editor: teclado y portap
     "item 2" < "item 10"). Vacías siempre al final (también en desc). Estable en ambos sentidos: los
     empates conservan el orden original (desc **no** es el reverse de asc). El comando usa el texto de
     la celda (`cellText`: bloques y hard breaks unidos con `\n`).
-  - `summarizeCells(rows)` → `{ count, filled, numeric, sum, average }`; `sum`/`average` null sin
-    números; la suma se redondea a los decimales máximos de las entradas (0.1 + 0.2 = 0.3).
+  - `summarizeCells(rows)` → `{ count, filled, numeric, sum, average, min, max, decimals }`;
+    `sum`/`average`/`min`/`max` null sin números; la suma se redondea a los decimales máximos de las
+    entradas (0.1 + 0.2 = 0.3), que van en `decimals` (para mostrarlos). `formatCellNumber(n, lang,
+    maxDec, minDec?)`: `es` → es-ES (coma decimal; es-ES no agrupa números de 4 cifras: `1234,5`,
+    `12.345`), resto → en-US (`1,234.5`); nunca `-0` (formateadores cacheados, como `versionHistory`).
   - `cellsToMarkdown(rows, aligns?)`: tabla pipe como la escribe `tableElToMd` (fila 0 = cabecera,
     `|` → `\|`, saltos → `<br>`, vacía → espacio, filas irregulares rellenadas). El texto va tal cual,
     así que markdown dentro (`**x**`) vuelve a ser markdown. Con 1 columna sale `| a |\n| --- |`, que
@@ -1140,9 +1143,13 @@ esa meta antes de su salida temprana "sin pasos"), así lo siguiente también ab
     barra de scroll horizontal propia de la tabla (no la tapa) y dentro de su **margen inferior medido**:
     `roomBottom` = fondo de la `<table>` + su `margin-bottom` calculado, recortado al `top` del siguiente
     hermano (`measureTable`). Para que quepa entera, el editor editable reserva ese margen **siempre**
-    (`.prose-editor .ProseMirror[contenteditable="true"] table { margin-bottom: 1.5rem }`, 0.75rem en el
+    (`.prose-editor .ProseMirror[contenteditable="true"] table { margin-bottom: 1.75rem }`, 0.75rem en el
     resto: chat, previews, solo lectura) — permanente, así no hay saltos de layout al pasar el ratón:
-    24px → barra de 18 a 5px; con barra de scroll (6px) → 16px a 1px.
+    28px → barra de 18 a 5px; con barra de scroll (6px) → 18px a 3px. 1.75rem (no 1.5) para que la
+    pastilla de resumen (20px, abajo) quepa también bajo la barra de scroll de una tabla ancha. Con la
+    pastilla visible, la barra de fila **solo ocupa el ancho a la derecha de la pastilla** (desde su borde
+    + `PILL_BAR_GAP` 6px hasta el borde derecho visible de las filas) y no se dibuja si quedan menos de
+    `MIN_ROW_BAR_WIDTH` (32px): las dos nunca se pisan.
   - **Columna:** a la derecha de las filas visibles, hasta `rightLimit` = borde derecho del
     `.ProseMirror` (su padding derecho) recortado al borde visible del scroller. **Nunca encima de las
     celdas**: una tabla ancha que llena el editor la lleva en el padding (24px en el editor → completa; 12px
@@ -1151,6 +1158,27 @@ esa meta antes de su salida temprana "sin pasos"), así lo siguiente también ab
     (44px); el TOC (`z-10`) queda por encima de la capa (`z-5`).
   - Tests: `tests/lib/tableControls.test.ts` fija que la barra de fila nunca corta el rect del bloque
     siguiente y queda dentro de la franja, y que la de columna nunca empieza antes del borde de las filas.
+- **Pastilla de resumen** (`.nf-table-pill`, prototipo variante "B · Bajo la tabla"): con una
+  `CellSelection` de **2+ celdas** (rango, fila o columna entera, por asas o Shift/arrastre) en el editor
+  editable; oculta durante un arrastre de asa y en tablas con celdas combinadas (solo vía HTML pegado:
+  `getSelectedCellsData` devuelve null). Va bajo **la tabla de la selección** (aunque el puntero
+  esté sobre otra), en la misma franja inferior que la barra «+» de fila (`pillBox`: `[max(fondo de las
+  filas, fondo de la <table>), roomBottom]`, mismo `PLUS_GAP`), alineada con el borde izquierdo visible
+  de las filas (como el prototipo: su `margin-left` de 24px compensaba el padding de su envoltorio), una
+  línea, `PILL_HEIGHT` 20px; puede pasar del ancho de una tabla estrecha hasta `rightLimit` (en esa
+  franja no hay otro contenido) y si aun así no cabe se recorta. **Si la franja no tiene 22px** (20 +
+  1px a cada lado; p. ej. un margen de otro tamaño) **no se dibuja**: es solo una lectura, no se pierde
+  nada. `pointer-events: none` (nunca se come un clic), `role="status"` + `aria-live="polite"`, sin
+  copiar al pulsar (el prototipo no lo tiene). Sigue scroll/resize/ediciones como las asas (mismo
+  `compute()` en rAF, sin transiciones de posición); su ancho se mide con un `ResizeObserver` para
+  recortar la barra «+». Contenido (`pillParts`, partes `.nf-table-pill-part[data-part=…]`, valor en
+  `<b>`): con números `sum` (Sum), y con 2+ también `average` (Average, hasta 2 decimales), `min`, `max`
+  (los decimales máximos de las entradas), luego `counts` ("N numbers · M cells"); sin números `cells`
+  ("M cells") y `filled` ("K with text"); números en el idioma de la UI (`formatCellNumber`).
+  **Regla de la cabecera** (`selectionStats`, testeada): la fila de cabecera **nunca se suma**; si la
+  selección empieza en la cabecera y sigue en el cuerpo (columna entera, rango desde arriba) la fila 0
+  se **excluye** también de los recuentos; solo una selección de solo cabecera (2+ celdas) la cuenta,
+  como celdas / con texto, nunca como números. Se calcula con `getSelectedCellsData` + `summarizeCells`.
 - **Arrastre** (pointer events + `pointerDrag.ts`, como el kanban): umbral `DRAG_THRESHOLD`; al empezar
   se selecciona la línea (así, tras soltar, `moveRow`/`moveColumn` la deja **seleccionada** en su sitio
   nuevo). Ghost portalado a `<body>` (`.nf-table-ghost`, `transform` sin re-render) con la etiqueta
