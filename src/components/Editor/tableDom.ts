@@ -50,9 +50,17 @@ export function measureTable(table: HTMLTableElement): TableGeometry | null {
   const rows = Array.from(tbody.rows)
   const head = rows[0] ? Array.from(rows[0].cells) : []
   if (!head.length) return null
+  const view = boxOf(table.getBoundingClientRect())
+  // The room below the table that is the table's own: its bottom margin (index.css
+  // reserves one big enough for the "+" bar in the editable editor), never past the
+  // next block's top (margins collapse, or a negative one could pull it up).
+  const next = table.nextElementSibling
+  const marginBottom = parseFloat(getComputedStyle(table).marginBottom) || 0
+  const roomBottom = Math.min(view.bottom + marginBottom, next ? next.getBoundingClientRect().top : Infinity)
   return {
     body: boxOf(tbody.getBoundingClientRect()),
-    view: boxOf(table.getBoundingClientRect()),
+    view,
+    roomBottom: Math.max(view.bottom, roomBottom),
     cols: head.map((c) => { const r = c.getBoundingClientRect(); return { start: r.left, end: r.right } }),
     rows: rows.map((tr) => { const r = tr.getBoundingClientRect(); return { start: r.top, end: r.bottom } }),
   }

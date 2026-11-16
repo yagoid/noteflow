@@ -938,13 +938,16 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   cabecera, insertar encima de ella, borrar la única columna, ordenar con menos de dos filas…).
   Teclado: ↑/↓ recorren las opciones, `Enter` ejecuta, `Esc` cierra. Cada acción = un solo `Ctrl+Z`.
 - **Barras «+»:** al acercar el ratón al borde derecho (o inferior) de la tabla aparece una barra fina
-  con «+» que **añade una columna (o fila) al final** y pone el cursor en su primera celda. En una tabla
-  ancha que llena el editor, la barra derecha se monta sobre el borde visible de la tabla para seguir a
-  la vista.
-- **Clic derecho** en una celda: menú corto con grupo *Row* (insertar encima/debajo, duplicar,
-  eliminar), grupo *Column* (insertar izquierda/derecha, duplicar, eliminar, alinear, *Sort by this
-  column…*), *Clear N cells* si hay varias celdas seleccionadas, y *Delete table*. Clic derecho dentro
-  de la selección de celdas la conserva; fuera, mueve el cursor a la celda pulsada.
+  con «+» que **añade una columna (o fila) al final** y pone el cursor en su primera celda. Solo ocupan
+  hueco de la propia tabla (su margen inferior, el margen derecho del editor): nunca tapan el párrafo
+  siguiente ni las celdas, así un clic ahí siempre pone el cursor. Por eso, en el editor, debajo de cada
+  tabla queda algo más de aire que en las vistas de solo lectura. Si no hay sitio (p. ej. una tabla ancha
+  en una sticky estrecha) la barra se adelgaza o no aparece; añadir sigue en los menús.
+- **Clic derecho** en una celda (y el botón de tabla de la toolbar dentro de una tabla): menú **corto**
+  — *Row*: insertar encima/debajo y eliminar; *Column*: insertar a la izquierda/derecha y eliminar;
+  *Clear N cells* si hay varias celdas seleccionadas; y *Delete table*. Duplicar, alinear y ordenar están
+  en los menús de las asas. Clic derecho dentro de la selección de celdas la conserva; fuera, mueve el
+  cursor a la celda pulsada.
 - Asas, «+» y clic derecho funcionan también en las **notas sticky** (que no tienen toolbar) y en las
   **notas vinculadas** editables; nada en solo lectura. Ya no hay hilera de mini-botones de tabla bajo
   la toolbar.

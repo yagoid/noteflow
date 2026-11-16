@@ -134,10 +134,6 @@ export const editor = {
     insertRowBelow: 'Insert row below',
     insertColumnLeft: 'Insert column left',
     insertColumnRight: 'Insert column right',
-    sortByAsc: 'Sort by this column A → Z',
-    sortByDesc: 'Sort by this column Z → A',
-    sortByNumAsc: 'Sort by this column 1 → 9',
-    sortByNumDesc: 'Sort by this column 9 → 1',
     clearCells: { one: 'Clear {count} cell', other: 'Clear {count} cells' },
     deleteTable: 'Delete table',
     // Why an entry is disabled (its tooltip).

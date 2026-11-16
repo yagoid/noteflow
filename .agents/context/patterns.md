@@ -1100,7 +1100,8 @@ salida temprana "sin pasos"), así lo siguiente también abre grupo. **`runTable
   Height`, sin la barra de scroll), `overflow: hidden`, `pointer-events: none` salvo asas/«+» visibles;
   `z-index: 5` (debajo del TOC, `z-10`). **Tabla activa:** la del arrastre o la del menú de asa abierto;
   si no, la que está bajo el puntero **incluidos sus gutters** (`hoverZone`: el borde de asas y la franja
-  de las «+», para que pasar de la tabla al asa no la oculte); si no, la que contiene la selección.
+  de las «+», para que pasar de la tabla al asa no la oculte; por abajo, nunca más allá de `roomBottom`:
+  la primera línea del bloque siguiente no cuenta como la tabla); si no, la que contiene la selección.
   Tablas con celdas combinadas (HTML pegado): sin asas (los comandos las rechazan); su clic derecho solo
   ofrece *Delete table*. **Medidas** sobre celdas y `<tbody>` (sin `div.tableWrapper` la `<table>` es la
   caja de scroll horizontal): columnas = celdas de la fila 0, filas = `tr`, `body` = `<tbody>`,
@@ -1112,7 +1113,11 @@ salida temprana "sin pasos"), así lo siguiente también abre grupo. **`runTable
 - **Asas** (`.nf-table-handle-col[data-col=i]` / `.nf-table-handle-row[data-row=i]`, `<button>`): pestaña
   de 7px sobre el borde superior de la columna / izquierdo de la fila (inset 10px / 6px de los extremos),
   que crece a 15px y muestra el grip al pasar; posición en px + `--edge` (borde de las filas) para que el
-  crecimiento sea CSS. Solo se ven las de la **columna y fila bajo el puntero** (`.is-hot`, cada eje por
+  crecimiento sea CSS. **La posición no se anima** (`left`/`top` y el largo, sin transición: las asas
+  siguen a las celdas al instante con scroll, resize o ediciones); solo el crecer (un `translate` desde
+  `--edge` + el grosor), la opacidad y los colores. Los menús de asa se anclan en el rect **calculado**
+  del asa crecida (`handleAnchor`, `HANDLE_GROWN`/`HANDLE_GROWN_OFFSET`), no en su rect del DOM, que
+  podía estar a media transición y abría el menú desplazado encima de su propia asa. Solo se ven las de la **columna y fila bajo el puntero** (`.is-hot`, cada eje por
   separado: sobre un asa de columna solo esa columna) y la de la línea **seleccionada** en acento
   (`.is-on`: la arrastrada; si no, la del menú de asa abierto; si no, la columna/fila entera que cubre la
   selección). Arrastre y menú se leen del estado en el render (no del layout medido en un rAF), para que
@@ -1122,14 +1127,28 @@ salida temprana "sin pasos"), así lo siguiente también abre grupo. **`runTable
   `scrollIntoView`: la cabeza de una columna alta puede quedar muy abajo) + su menú; clic en la misma asa
   con el menú abierto lo cierra. La cabecera lleva candado y no se arrastra (solo abre su menú). Rueda
   sobre asas/«+» → se reenvía al scroller (están fuera de él).
-- **Barras «+»** (`.nf-table-plus-col` / `.nf-table-plus-row`, visibles con `.is-shown`): 18px a 5px del
-  borde derecho / inferior, a todo lo alto / ancho visible; aparecen con el puntero a < 56px del borde
+- **Barras «+»** (`.nf-table-plus-col` / `.nf-table-plus-row`, visibles con `.is-shown`; puede faltar la
+  que no tiene sitio): a todo lo alto / ancho visible; aparecen con el puntero a < 56px del borde
   derecho o < 28px del inferior (`nearEdges`). Clic = `insertColumnAt(columnas)` / `insertRowAt(filas)` +
-  cursor en la primera celda nueva. **Sin sitio a la derecha** (tabla ancha que llena el editor y hace
-  scroll, o el padding estrecho de una sticky): la barra de columna **se desliza hacia dentro** lo justo
-  para caber antes del borde visible del scroller (`plusBars`, `clip.right − 18 − 2`), montada sobre el
-  último trozo visible de la tabla: sigue visible y clicable y sigue añadiendo la columna **al final**.
-  La de fila no se ajusta (el editor hace scroll vertical y su padding inferior deja sitio).
+  cursor en la primera celda nueva. **Regla: solo en sitio que es de la tabla**, nunca encima de otro
+  contenido (una barra encima de la primera línea del párrafo siguiente se comía el clic que debía poner
+  el cursor). `plusBars` (`fitBar`): hasta 18px de grueso y 5px de separación, **encogidas** a lo que
+  quepa con ≥ 1px libre a cada lado; < `MIN_PLUS_SIZE` (8px) → sin barra (añadir sigue en los menús).
+  - **Fila:** en la franja `[max(fondo de las filas, fondo de la <table>), roomBottom]` — debajo de la
+    barra de scroll horizontal propia de la tabla (no la tapa) y dentro de su **margen inferior medido**:
+    `roomBottom` = fondo de la `<table>` + su `margin-bottom` calculado, recortado al `top` del siguiente
+    hermano (`measureTable`). Para que quepa entera, el editor editable reserva ese margen **siempre**
+    (`.prose-editor .ProseMirror[contenteditable="true"] table { margin-bottom: 1.5rem }`, 0.75rem en el
+    resto: chat, previews, solo lectura) — permanente, así no hay saltos de layout al pasar el ratón:
+    24px → barra de 18 a 5px; con barra de scroll (6px) → 16px a 1px.
+  - **Columna:** a la derecha de las filas visibles, hasta `rightLimit` = borde derecho del
+    `.ProseMirror` (su padding derecho) recortado al borde visible del scroller. **Nunca encima de las
+    celdas**: una tabla ancha que llena el editor la lleva en el padding (24px en el editor → completa; 12px
+    en una sticky → 10px), o sin barra si no hay 8px. Hasta 2026-11 se deslizaba sobre la última columna
+    visible y robaba los clics de esas celdas. Con el TOC visible el padding derecho es su reserva
+    (44px); el TOC (`z-10`) queda por encima de la capa (`z-5`).
+  - Tests: `tests/lib/tableControls.test.ts` fija que la barra de fila nunca corta el rect del bloque
+    siguiente y queda dentro de la franja, y que la de columna nunca empieza antes del borde de las filas.
 - **Arrastre** (pointer events + `pointerDrag.ts`, como el kanban): umbral `DRAG_THRESHOLD`; al empezar
   se selecciona la línea (así, tras soltar, `moveRow`/`moveColumn` la deja **seleccionada** en su sitio
   nuevo). Ghost portalado a `<body>` (`.nf-table-ghost`, `transform` sin re-render) con la etiqueta
@@ -1161,9 +1180,10 @@ salida temprana "sin pasos"), así lo siguiente también abre grupo. **`runTable
     ("Header"): mismas entradas con insertar encima / mover / eliminar deshabilitadas ("The header is
     fixed"), "Clear header", y la nota del candado. Duplicarla sí está permitido (la copia es fila de
     cuerpo, regla de `tableOps`).
-  - **Celda** (clic derecho y toolbar): grupo Row (Insert row above/below, Duplicate, Delete), grupo
-    Column (Insert left/right, Duplicate, Delete, Align, Sort by this column…), "Clear N cells" con una
-    CellSelection de 2+ celdas, y Delete table (rojo).
+  - **Celda** (clic derecho y toolbar) — **corto a propósito** (lo pidió el usuario; la lista completa
+    vive en las asas): grupo Row (Insert row above/below, Delete row), grupo Column (Insert column
+    left/right, Delete column), "Clear N cells" con una CellSelection de 2+ celdas, y Delete table (rojo).
+    Sin duplicar, alinear ni ordenar.
 - **Clic derecho:** sobre una celda de una CellSelection la **conserva** (su `mousedown` derecho se para
   en captura en `view.dom` antes de que el navegador/ProseMirror muevan el cursor); en cualquier otra
   celda, el cursor va al punto pulsado (`posAtCoords`) y el menú actúa en esa celda.

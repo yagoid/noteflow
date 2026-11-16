@@ -147,7 +147,9 @@ export function TableMenu({ editor, menu, onClose }: { editor: Editor; menu: Tab
     <div
       ref={ref}
       role="menu"
-      className="nf-table-menu fixed z-50 bg-surface-2 border border-border rounded-lg shadow-xl animate-in fade-in zoom-in duration-100"
+      // No `duration-*` here: with the default `transition-property: all` it would animate
+      // left/top from the hidden first render at (0, 0) to the measured spot (the menu "flew in").
+      className="nf-table-menu fixed z-50 bg-surface-2 border border-border rounded-lg shadow-xl"
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
       onMouseDown={(e) => e.preventDefault()}
       onContextMenu={(e) => e.preventDefault()}

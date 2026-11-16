@@ -49,6 +49,12 @@ export interface TableGeometry {
   cols: Span[]
   /** y extent of each row (header first). */
   rows: Span[]
+  /**
+   * Lowest y the controls may reach below the rows without covering anything
+   * that isn't the table: the bottom of the table's own margin box, capped at
+   * the top of the next block (measured: tableDom.ts measureTable).
+   */
+  roomBottom: number
 }
 
 /** Column handles: inset from the column's sides (px). Row handles: from the row's top / bottom. */
@@ -56,9 +62,11 @@ export const COLUMN_HANDLE_INSET = 10
 export const ROW_HANDLE_INSET = 6
 /** A handle clipped shorter than this (a column almost scrolled out of view) isn't drawn. */
 export const MIN_HANDLE_LENGTH = 6
-/** "+" bars: gap from the table's edge and thickness (px). */
+/** "+" bars: gap from the table's edge and thickness (px), at most — they shrink to the room there is. */
 export const PLUS_GAP = 5
 export const PLUS_SIZE = 18
+/** A "+" bar with less room than this isn't drawn (rows / columns can still be added from the menus). */
+export const MIN_PLUS_SIZE = 8
 /** The "+" bars show when the pointer is this close to the right / bottom edge (px, from inside). */
 export const NEAR_RIGHT = 56
 export const NEAR_BOTTOM = 28
@@ -87,7 +95,8 @@ export function hoverZone(g: TableGeometry): Box {
     left: v.left - HOVER_GUTTER.left,
     top: v.top - HOVER_GUTTER.top,
     right: v.right + HOVER_GUTTER.right,
-    bottom: v.bottom + HOVER_GUTTER.bottom,
+    // Not into the next block: hovering its first line isn't hovering the table.
+    bottom: Math.max(v.bottom, Math.min(v.bottom + HOVER_GUTTER.bottom, g.roomBottom)),
   }
 }
 
@@ -133,21 +142,57 @@ export function rowHandleSpan(g: TableGeometry, i: number): Span | null {
   return clipSpan(r.start + ROW_HANDLE_INSET, r.end - ROW_HANDLE_INSET, -Infinity, Infinity, 1)
 }
 
+/** A handle when grown (hovered / selected): HANDLE_GROWN thick, starting HANDLE_GROWN_OFFSET outside the rows' edge (index.css `.nf-table-handle-*`). */
+export const HANDLE_GROWN = 15
+export const HANDLE_GROWN_OFFSET = 8
+
 /**
- * Where the "+" bars go. Column bar: right of the visible rows, as tall as the
- * rows. When there's no room for it before `clip.right` (the scroller's
- * visible right edge — a wide table that fills the editor and scrolls), it
- * slides left just enough to fit, over the table's last visible pixels: it
- * stays visible and clickable, and still appends a column at the END of the
- * table. Row bar: below the rows, as wide as their visible part (not clamped:
- * the editor scrolls vertically, and its bottom padding always leaves room).
+ * The rect of column / row `index`'s handle in its grown state, computed from
+ * the geometry (not read from the DOM, where it may be mid-transition): what a
+ * handle's menu is anchored on. Null when the handle isn't drawn.
  */
-export function plusBars(g: TableGeometry, clip: Box): { column: Box; row: Box } {
+export function handleAnchor(g: TableGeometry, kind: 'column' | 'row', index: number): Box | null {
   const v = visibleBody(g)
-  const colLeft = Math.max(v.left, Math.min(v.right + PLUS_GAP, clip.right - PLUS_SIZE - 2))
+  if (kind === 'column') {
+    const span = columnHandleSpan(g, index)
+    return span && { left: span.start, right: span.end, top: v.top - HANDLE_GROWN_OFFSET, bottom: v.top - HANDLE_GROWN_OFFSET + HANDLE_GROWN }
+  }
+  const span = rowHandleSpan(g, index)
+  return span && { left: v.left - HANDLE_GROWN_OFFSET, right: v.left - HANDLE_GROWN_OFFSET + HANDLE_GROWN, top: span.start, bottom: span.end }
+}
+
+/**
+ * A bar in the free band [`from`, `to`]: up to PLUS_GAP off the edge and
+ * PLUS_SIZE thick, shrunk to fit with ≥ 1px to spare at each end; null when
+ * thinner than MIN_PLUS_SIZE.
+ */
+function fitBar(from: number, to: number): Span | null {
+  const avail = to - from
+  const size = Math.min(PLUS_SIZE, avail - 2)
+  if (size < MIN_PLUS_SIZE) return null
+  const start = from + Math.min(PLUS_GAP, avail - size - 1)
+  return { start, end: start + size }
+}
+
+/**
+ * Where the "+" bars go — only in room that belongs to no other content, so
+ * they never take a click meant for the text around the table:
+ * - Row bar: below the rows and below the table's own horizontal scrollbar
+ *   (`view.bottom`), inside the table's margin box up to `roomBottom` (never
+ *   over the next block); as wide as the visible rows.
+ * - Column bar: right of the visible rows, up to `rightLimit` (the editor's
+ *   free strip: its right padding, cut at the scroller's visible edge); as tall
+ *   as the rows. Never over the cells: a wide table that fills the editor gets
+ *   a thinner bar in the padding, or none if there isn't MIN_PLUS_SIZE.
+ * Either is null when there's no room for it.
+ */
+export function plusBars(g: TableGeometry, rightLimit: number): { column: Box | null; row: Box | null } {
+  const v = visibleBody(g)
+  const x = fitBar(v.right, rightLimit)
+  const y = fitBar(Math.max(v.bottom, g.view.bottom), g.roomBottom)
   return {
-    column: { left: colLeft, right: colLeft + PLUS_SIZE, top: v.top, bottom: v.bottom },
-    row: { left: v.left, right: v.right, top: v.bottom + PLUS_GAP, bottom: v.bottom + PLUS_GAP + PLUS_SIZE },
+    column: x && { left: x.start, right: x.end, top: v.top, bottom: v.bottom },
+    row: y && { left: v.left, right: v.right, top: y.start, bottom: y.end },
   }
 }
 
@@ -345,14 +390,12 @@ export function rowName(data: TableMenuData, row: number, m: TableMessages): str
   return data.rows[row]?.find((v) => v.trim())?.trim() || tf(m.rowN, { n: row })
 }
 
-function sortItems(data: TableMenuData, col: number, can: CanRun, m: TableMessages, long: boolean): TableMenuItem[] {
+function sortItems(data: TableMenuData, col: number, can: CanRun, m: TableMessages): TableMenuItem[] {
   const numeric = isNumericColumn(bodyColumn(data, col))
   const reason = bodyRows(data) < 2 ? m.sortNeedsRows : undefined
-  const asc = long ? (numeric ? m.sortByNumAsc : m.sortByAsc) : (numeric ? m.sortNumAsc : m.sortAsc)
-  const desc = long ? (numeric ? m.sortByNumDesc : m.sortByDesc) : (numeric ? m.sortNumDesc : m.sortDesc)
   return [
-    item(can, 'sortAsc', numeric ? 'sortNumAsc' : 'sortAsc', asc, { type: 'sort', column: col, direction: 'asc' }, { reason }),
-    item(can, 'sortDesc', numeric ? 'sortNumDesc' : 'sortDesc', desc, { type: 'sort', column: col, direction: 'desc' }, { reason }),
+    item(can, 'sortAsc', numeric ? 'sortNumAsc' : 'sortAsc', numeric ? m.sortNumAsc : m.sortAsc, { type: 'sort', column: col, direction: 'asc' }, { reason }),
+    item(can, 'sortDesc', numeric ? 'sortNumDesc' : 'sortDesc', numeric ? m.sortNumDesc : m.sortDesc, { type: 'sort', column: col, direction: 'desc' }, { reason }),
   ]
 }
 
@@ -374,7 +417,7 @@ export function columnMenu(data: TableMenuData, col: number, can: CanRun, m: Tab
     item(can, 'moveRight', 'moveRight', m.moveRight, { type: 'moveColumn', from: col, to: col + 1 }),
     sep(),
     { type: 'align', column: col, current: data.aligns[col] ?? null },
-    ...sortItems(data, col, can, m, false),
+    ...sortItems(data, col, can, m),
     sep(),
     item(can, 'clearColumn', 'clear', m.clearColumn, { type: 'clearColumn', index: col }),
     deleteColumnItem(data, col, can, m),
@@ -403,9 +446,11 @@ export function rowMenu(row: number, can: CanRun, m: TableMessages): TableMenuEn
 
 /**
  * The menu of a cell (right-click, or the toolbar's table button on the active
- * cell): its row and column, "Clear N cells" when a CellSelection of 2+ cells
- * is `selection`, and Delete table. Without `data` (a table the commands
- * can't edit: merged cells from pasted HTML) only Delete table.
+ * cell) — short on purpose, the full lists live in the handles' menus: insert
+ * a row above / below and delete it, insert a column left / right and delete
+ * it, "Clear N cells" when a CellSelection of 2+ cells is `selection`, and
+ * Delete table. Without `data` (a table the commands can't edit: merged cells
+ * from pasted HTML) only Delete table.
  */
 export function cellMenu(
   data: TableMenuData | null,
@@ -422,15 +467,11 @@ export function cellMenu(
     { type: 'heading', label: m.rowGroup },
     item(can, 'insertRowAbove', 'insertAbove', m.insertRowAbove, { type: 'insertRow', index: row }, { reason: fixed }),
     item(can, 'insertRowBelow', 'insertBelow', m.insertRowBelow, { type: 'insertRow', index: row + 1 }),
-    item(can, 'duplicateRow', 'duplicate', m.duplicateRow, { type: 'duplicateRow', index: row }, { reason: fixed }),
     item(can, 'deleteRow', 'delete', m.deleteRow, { type: 'deleteRow', index: row }, { danger: true, reason: fixed }),
     { type: 'heading', label: m.columnGroup },
     item(can, 'insertColumnLeft', 'insertLeft', m.insertColumnLeft, { type: 'insertColumn', index: col }),
     item(can, 'insertColumnRight', 'insertRight', m.insertColumnRight, { type: 'insertColumn', index: col + 1 }),
-    item(can, 'duplicateColumn', 'duplicate', m.duplicateColumn, { type: 'duplicateColumn', index: col }),
     deleteColumnItem(data, col, can, m),
-    { type: 'align', column: col, current: data.aligns[col] ?? null },
-    ...sortItems(data, col, can, m, true),
   ]
   const count = selection ? (selection.bottom - selection.top) * (selection.right - selection.left) : 0
   if (count >= 2) {

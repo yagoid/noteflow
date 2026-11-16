@@ -5,7 +5,7 @@ import { Lock, Plus } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import {
-  HOVER_GUTTER, columnDropTarget, columnHandleSpan, columnName, contains, gapPosition, hotLines, hoverZone,
+  HOVER_GUTTER, columnDropTarget, handleAnchor, columnHandleSpan, columnName, contains, gapPosition, hotLines, hoverZone,
   nearEdges, plusBars, rowDropTarget, rowHandleSpan, rowName, visibleBody, type Box, type DropTarget,
   type TableGeometry,
 } from '../../lib/tableControls'
@@ -27,6 +27,8 @@ interface Layout {
   geo: TableGeometry
   /** The scroller's visible box (the overlay clips to it). */
   clip: Box
+  /** How far right the "+" column bar may reach: the editor's right padding, cut at `clip`. */
+  rightLimit: number
   /** Its offset inside the positioned container the overlay lives in. */
   offset: { x: number; y: number }
   /** The pointer is over this table (or its gutters): hot handles and "+" bars may show. */
@@ -63,6 +65,36 @@ const sameLayout = (a: Layout | null, b: Layout | null) =>
 
 /** Ghost label: long cell texts are cut. */
 const shorten = (s: string) => (s.length > 34 ? `${s.slice(0, 33)}…` : s)
+
+/** A "+" bar (lib/tableControls.ts plusBars): only in room that is the table's own; its icon fits its thickness. */
+function PlusBar({ kind, box, origin, label, shown, onAdd, onWheel }: {
+  kind: LineKind
+  box: Box
+  origin: { x: number; y: number }
+  label: string
+  shown: boolean
+  onAdd: () => void
+  onWheel: (e: React.WheelEvent) => void
+}) {
+  const width = box.right - box.left
+  const height = box.bottom - box.top
+  const icon = Math.max(6, Math.min(14, (kind === 'column' ? width : height) - 2))
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label={label}
+      title={label}
+      className={`nf-table-plus nf-table-plus-${kind === 'column' ? 'col' : 'row'}${shown ? ' is-shown' : ''}`}
+      style={{ left: box.left - origin.x, top: box.top - origin.y, width, height }}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onAdd}
+      onWheel={onWheel}
+    >
+      <Plus size={icon} aria-hidden />
+    </button>
+  )
+}
 
 const GripH = () => (
   <svg width="12" height="7" viewBox="0 0 12 7" fill="currentColor" aria-hidden>
@@ -161,6 +193,7 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
       table,
       geo,
       clip,
+      rightLimit: Math.min(clip.right, view.dom.getBoundingClientRect().right),
       offset: { x: clip.left - cr.left, y: clip.top - cr.top },
       hovered: isHovered,
       hot: isHovered ? hotLines(geo, p!.x, p!.y) : { row: null, col: null },
@@ -240,11 +273,13 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
     const open = menuRef.current
     if (open && open.key === key && open.table === press.table) { setMenu(null); return }
     selectLine(press.kind, press.index, press.table)
+    const geo = measureTable(press.table)
     setMenu({
       key,
       table: press.table,
       spec: { kind: press.kind, index: press.index },
-      anchor: press.el.getBoundingClientRect(),
+      // The handle's computed grown rect, not its live DOM rect (which may be mid-grow).
+      anchor: (geo && handleAnchor(geo, press.kind, press.index)) ?? press.el.getBoundingClientRect(),
       placement: press.kind === 'column' ? 'below' : 'right',
       owner: press.el,
     })
@@ -394,7 +429,7 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
   const ox = clip.left
   const oy = clip.top
   const vis = visibleBody(geo)
-  const bars = plusBars(geo, clip)
+  const bars = plusBars(geo, layout.rightLimit)
   const m = t.editor.table
   const dragging = drag !== null && drag.table === layout.table
   // The accent line: the dragged one, else the one whose menu is open, else a whole line the
@@ -486,32 +521,28 @@ export function TableControls({ editor, scrollRef }: { editor: Editor; scrollRef
             </button>
           )
         })}
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label={m.addColumn}
-          title={m.addColumn}
-          className={`nf-table-plus nf-table-plus-col${layout.near.right && !dragging ? ' is-shown' : ''}`}
-          style={{ left: bars.column.left - ox, top: bars.column.top - oy, width: bars.column.right - bars.column.left, height: bars.column.bottom - bars.column.top }}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => append('column')}
-          onWheel={forwardWheel}
-        >
-          <Plus size={14} aria-hidden />
-        </button>
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label={m.addRow}
-          title={m.addRow}
-          className={`nf-table-plus nf-table-plus-row${layout.near.bottom && !dragging ? ' is-shown' : ''}`}
-          style={{ left: bars.row.left - ox, top: bars.row.top - oy, width: bars.row.right - bars.row.left, height: bars.row.bottom - bars.row.top }}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => append('row')}
-          onWheel={forwardWheel}
-        >
-          <Plus size={14} aria-hidden />
-        </button>
+        {bars.column && (
+          <PlusBar
+            kind="column"
+            box={bars.column}
+            origin={{ x: ox, y: oy }}
+            label={m.addColumn}
+            shown={layout.near.right && !dragging}
+            onAdd={() => append('column')}
+            onWheel={forwardWheel}
+          />
+        )}
+        {bars.row && (
+          <PlusBar
+            kind="row"
+            box={bars.row}
+            origin={{ x: ox, y: oy }}
+            label={m.addRow}
+            shown={layout.near.bottom && !dragging}
+            onAdd={() => append('row')}
+            onWheel={forwardWheel}
+          />
+        )}
         {dropLine && <div className="nf-table-drop-line" style={dropLine} />}
       </div>
       {drag && createPortal(

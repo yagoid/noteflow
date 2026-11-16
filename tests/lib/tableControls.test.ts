@@ -14,8 +14,8 @@ import { CellSelection, TableMap } from '@tiptap/pm/tables'
 import { en } from '../../src/i18n/en'
 import { es } from '../../src/i18n/es'
 import {
-  HOVER_GUTTER, MENU_MARGIN, NEAR_BOTTOM, NEAR_RIGHT, PLUS_GAP, PLUS_SIZE, cellMenu, clipSpan, columnDropTarget,
-  columnHandleSpan, columnMenu, columnName, focusableItems, gapPosition, hotLines, hoverZone, menuMaxHeight, nearEdges,
+  HANDLE_GROWN, HANDLE_GROWN_OFFSET, HOVER_GUTTER, MENU_MARGIN, MIN_PLUS_SIZE, NEAR_BOTTOM, NEAR_RIGHT, PLUS_GAP, PLUS_SIZE, cellMenu, clipSpan, columnDropTarget,
+  columnHandleSpan, columnMenu, columnName, focusableItems, gapPosition, handleAnchor, hotLines, hoverZone, menuMaxHeight, nearEdges,
   placeMenu, plusBars, rowDropTarget, rowHandleSpan, rowMenu, rowName, stepFocus, visibleBody,
   type Span, type TableAction, type TableGeometry, type TableMenuEntry, type TableMenuItem,
 } from '../../src/lib/tableControls'
@@ -38,9 +38,9 @@ function spans(start: number, sizes: number[]): Span[] {
 }
 
 /** 3 columns of 100px from x=100, 3 rows of 30px from y=200; `view` = the table's scroll box. */
-function geo(view?: Partial<TableGeometry['view']>): TableGeometry {
+function geo(view?: Partial<TableGeometry['view']>, roomBottom = 290 + 24): TableGeometry {
   const body = { left: 100, top: 200, right: 400, bottom: 290 }
-  return { body, view: { ...body, ...view }, cols: spans(100, [100, 100, 100]), rows: spans(200, [30, 30, 30]) }
+  return { body, view: { ...body, ...view }, cols: spans(100, [100, 100, 100]), rows: spans(200, [30, 30, 30]), roomBottom }
 }
 
 describe('geometry', () => {
@@ -52,7 +52,7 @@ describe('geometry', () => {
   })
 
   it('the hover zone takes in the handles\' and "+" bars\' gutters', () => {
-    expect(hoverZone(geo())).toEqual({
+    expect(hoverZone(geo({}, 400))).toEqual({
       left: 100 - HOVER_GUTTER.left, top: 200 - HOVER_GUTTER.top,
       right: 400 + HOVER_GUTTER.right, bottom: 290 + HOVER_GUTTER.bottom,
     })
@@ -92,18 +92,73 @@ describe('geometry', () => {
     expect(clipSpan(0, 10, 7, 20)).toBeNull()
   })
 
-  it('"+" bars: outside the right / bottom edge; with no room on the right, slid in to stay visible', () => {
-    const clip = { left: 0, top: 0, right: 800, bottom: 600 }
-    expect(plusBars(geo(), clip)).toEqual({
-      column: { left: 405, right: 405 + PLUS_SIZE, top: 200, bottom: 290 },
-      row: { left: 100, right: 400, top: 295, bottom: 295 + PLUS_SIZE },
+  it('menus anchor on the handle\'s computed grown rect (not a live, maybe mid-transition, DOM rect)', () => {
+    expect(handleAnchor(geo(), 'column', 1)).toEqual({
+      left: 210, right: 290, top: 200 - HANDLE_GROWN_OFFSET, bottom: 200 - HANDLE_GROWN_OFFSET + HANDLE_GROWN,
     })
-    // A wide table filling the editor: its scroll box ends 4px before the scroller's edge.
-    const wide = geo({ right: 396 })
-    const bars = plusBars(wide, { ...clip, right: 400 })
-    expect(bars.column.right).toBeLessThanOrEqual(400 - 2)
-    expect(bars.column.left).toBe(400 - 2 - PLUS_SIZE)
-    expect(bars.row).toEqual({ left: 100, right: 396, top: 295, bottom: 295 + PLUS_SIZE })
+    expect(handleAnchor(geo(), 'row', 2)).toEqual({
+      left: 100 - HANDLE_GROWN_OFFSET, right: 100 - HANDLE_GROWN_OFFSET + HANDLE_GROWN, top: 266, bottom: 284,
+    })
+    // Scrolled table: column cut to the scroll box, rows on its visible left edge.
+    const scrolled = { ...geo({ left: 100, right: 250 }), body: { left: 40, top: 200, right: 340, bottom: 290 } }
+    expect(handleAnchor(scrolled, 'row', 0)).toMatchObject({ left: 100 - HANDLE_GROWN_OFFSET })
+    expect(handleAnchor(geo({ right: 250 }), 'column', 1)).toMatchObject({ left: 210, right: 250 })
+    expect(handleAnchor(geo({ right: 250 }), 'column', 2)).toBeNull()
+  })
+
+  describe('"+" bars: only in room that is the table\'s own', () => {
+    const inside = (bar: { top: number; bottom: number } | null, from: number, to: number) =>
+      !!bar && bar.top > from && bar.bottom < to
+    const intersects = (a: { left: number; top: number; right: number; bottom: number }, b: typeof a) =>
+      a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+
+    it('full size with the editor\'s reserved margin (24px) and its right padding (24px)', () => {
+      expect(plusBars(geo(), 424)).toEqual({
+        column: { left: 400 + PLUS_GAP, right: 400 + PLUS_GAP + PLUS_SIZE, top: 200, bottom: 290 },
+        row: { left: 100, right: 400, top: 290 + PLUS_GAP, bottom: 290 + PLUS_GAP + PLUS_SIZE },
+      })
+    })
+
+    it('the row bar never reaches the next block, whatever the room below', () => {
+      // The next block's rect: it starts where the table's room ends (or above it).
+      for (const room of [0, 4, 9, 10, 12, 18, 24, 40]) {
+        const g = geo({}, 290 + room)
+        const nextBlock = { left: 0, right: 1000, top: g.roomBottom, bottom: g.roomBottom + 20 }
+        const { row } = plusBars(g, 424)
+        if (room - 2 < MIN_PLUS_SIZE) { expect(row, `room ${room}`).toBeNull(); continue }
+        expect(inside(row, 290, g.roomBottom), `room ${room}`).toBe(true)
+        expect(intersects(row!, nextBlock), `room ${room}`).toBe(false)
+        expect(row!.bottom - row!.top).toBe(Math.min(PLUS_SIZE, room - 2))
+      }
+    })
+
+    it('below the table\'s own horizontal scrollbar, never over it', () => {
+      // A scrolling table: its scroll box ends 6px below the rows (the scrollbar).
+      const g = geo({ right: 300, bottom: 296 }, 296 + 24)
+      const { row } = plusBars(g, 424)
+      expect(row!.top).toBeGreaterThan(296)
+      expect(row!.bottom).toBeLessThan(320)
+      expect(row).toMatchObject({ left: 100, right: 300 })
+    })
+
+    it('the column bar never covers the cells: thinner in a narrow padding, gone without room', () => {
+      // A wide table filling the editor: rows visible up to x=396, editor content ends there.
+      const wide = geo({ right: 396 })
+      for (const limit of [396, 400, 404, 406, 408, 420, 440]) {
+        const { column } = plusBars(wide, limit)
+        if (limit - 396 - 2 < MIN_PLUS_SIZE) { expect(column, `limit ${limit}`).toBeNull(); continue }
+        expect(column!.left, `limit ${limit}`).toBeGreaterThan(396)
+        expect(column!.right, `limit ${limit}`).toBeLessThan(limit)
+      }
+      // A sticky's 12px padding: a 10px bar.
+      expect(plusBars(wide, 396 + 12).column).toMatchObject({ left: 397, right: 407 })
+    })
+
+    it('the hover zone stops at the table\'s room: the next block\'s first line isn\'t the table', () => {
+      expect(hoverZone(geo({}, 290 + 24)).bottom).toBe(314)
+      expect(hoverZone(geo({}, 290 + 100)).bottom).toBe(290 + HOVER_GUTTER.bottom)
+      expect(hoverZone(geo({}, 290)).bottom).toBe(290)
+    })
   })
 })
 
@@ -282,19 +337,22 @@ describe('row menu', () => {
 })
 
 describe('cell menu (right-click / toolbar)', () => {
-  it('row and column groups, align, sort, Delete table', () => {
+  it('short: insert / delete row and column, Delete table (duplicate, align and sort live in the handles)', () => {
     const { data, can } = setup(T44)
     const menu = cellMenu(data, { row: 2, col: 2 }, null, can, m)
     expect(ids(menu)).toEqual([
-      'heading', 'insertRowAbove', 'insertRowBelow', 'duplicateRow', 'deleteRow',
-      'heading', 'insertColumnLeft', 'insertColumnRight', 'duplicateColumn', 'deleteColumn', 'align',
-      'sortAsc', 'sortDesc', 'separator', 'deleteTable',
+      'heading', 'insertRowAbove', 'insertRowBelow', 'deleteRow',
+      'heading', 'insertColumnLeft', 'insertColumnRight', 'deleteColumn',
+      'separator', 'deleteTable',
     ])
     expect(menu.filter((e) => e.type === 'heading')).toEqual([
       { type: 'heading', label: 'Row' }, { type: 'heading', label: 'Column' },
     ])
-    expect(byId(menu, 'sortAsc').label).toBe('Sort by this column 1 → 9')
+    expect(menu.some((e) => e.type === 'align')).toBe(false)
+    expect(byId(menu, 'insertRowAbove').action).toEqual({ type: 'insertRow', index: 2 })
+    expect(byId(menu, 'insertColumnRight').action).toEqual({ type: 'insertColumn', index: 3 })
     expect(byId(menu, 'deleteRow').action).toEqual({ type: 'deleteRow', index: 2 })
+    expect(byId(menu, 'deleteColumn').action).toEqual({ type: 'deleteColumn', index: 2 })
     expect(byId(menu, 'deleteTable')).toMatchObject({ danger: true, disabled: false, action: { type: 'deleteTable' } })
     expect(disabledIds(menu)).toEqual([])
   })
@@ -304,6 +362,12 @@ describe('cell menu (right-click / toolbar)', () => {
     const menu = cellMenu(data, { row: 0, col: 0 }, null, can, m)
     expect(disabledIds(menu)).toEqual(['insertRowAbove', 'deleteRow'])
     expect(byId(menu, 'insertRowAbove').reason).toBe(m.headerFixed)
+    expect(byId(menu, 'deleteRow').reason).toBe(m.headerFixed)
+    // The only column of a table can't go.
+    const one = setup(table([['H'], ['a']]))
+    const single = cellMenu(one.data, { row: 1, col: 0 }, null, one.can, m)
+    expect(disabledIds(single)).toEqual(['deleteColumn'])
+    expect(byId(single, 'deleteColumn').reason).toBe(m.needsOneColumn)
   })
 
   it('"Clear N cells" only for a cell selection of 2+ cells', () => {
@@ -331,7 +395,7 @@ describe('cell menu (right-click / toolbar)', () => {
     const { data, can } = setup(T44)
     const menu = cellMenu(data, { row: 1, col: 1 }, null, can, es.editor.table)
     expect(byId(menu, 'insertColumnLeft').label).toBe('Insertar columna a la izquierda')
-    expect(byId(menu, 'sortAsc').label).toBe('Ordenar por esta columna A → Z')
+    expect(byId(menu, 'deleteTable').label).toBe('Eliminar tabla')
   })
 })
 

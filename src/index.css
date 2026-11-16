@@ -1985,6 +1985,13 @@ html[data-color-scheme="light"] .section-hover-card {
   margin: 0.75rem 0;
   font-variant-numeric: tabular-nums;
 }
+/* The editable editor (note editor, stickies) keeps a deeper bottom margin: it's
+   the room of the table controls' "+" row bar (Editor/TableControls.tsx, sized
+   from this measured margin by lib/tableControls.ts plusBars), so the bar never
+   sits over the next block. Permanent, not on hover: no reflow while pointing. */
+.prose-editor .ProseMirror[contenteditable="true"] table {
+  margin-bottom: 1.5rem;
+}
 .prose-editor .ProseMirror table > tbody {
   display: table;
   width: max-content;
@@ -2073,7 +2080,10 @@ html[data-color-scheme="light"] .section-hover-card {
    One overlay per editor, over its scroller's visible box (it clips to it),
    above the text but below the TOC (z-10). Positions come from
    lib/tableControls.ts in px; --edge = the rows' top (column handles) or left
-   (row handles) edge, so the hover growth stays pure CSS. Handles: a 7px tab
+   (row handles) edge, so the hover growth stays pure CSS. The position (left/top,
+   and the length along the line) is never transitioned: handles track the cells
+   instantly on scroll / resize / edits; only the grow animates (a translate off
+   --edge + the thickness), and opacity / colours. Handles: a 7px tab
    on the edge (inset 10px / 6px from the line's ends) that grows to 15px and
    shows its grip on hover; only the hovered cell's two are shown (.is-hot),
    plus the selected line's, in accent (.is-on). */
@@ -2094,28 +2104,42 @@ html[data-color-scheme="light"] .section-hover-card {
   cursor: grab;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s, background-color 0.12s, color 0.12s, height 0.12s, width 0.12s, top 0.12s, left 0.12s;
+  transition: opacity 0.12s, background-color 0.12s, color 0.12s, transform 0.12s;
 }
 .nf-table-handle > svg { opacity: 0; transition: opacity 0.12s; }
 .nf-table-handle.is-hot,
 .nf-table-handle.is-on { opacity: 1; pointer-events: auto; }
-.nf-table-handle-col { top: calc(var(--edge) - 4px); height: 7px; }
-.nf-table-handle-row { left: calc(var(--edge) - 4px); width: 7px; }
+.nf-table-handle-col {
+  top: var(--edge);
+  height: 7px;
+  transform: translateY(-4px);
+  transition-property: opacity, background-color, color, transform, height;
+}
+.nf-table-handle-row {
+  left: var(--edge);
+  width: 7px;
+  transform: translateX(-4px);
+  transition-property: opacity, background-color, color, transform, width;
+}
+/* Grown: 15px from 8px off the edge (lib/tableControls.ts HANDLE_GROWN_*: the menus anchor on it). */
 .nf-table-handle-col:hover,
-.nf-table-handle-col.is-on { top: calc(var(--edge) - 8px); height: 15px; }
+.nf-table-handle-col.is-on { transform: translateY(-8px); height: 15px; }
 .nf-table-handle-row:hover,
-.nf-table-handle-row.is-on { left: calc(var(--edge) - 8px); width: 15px; }
+.nf-table-handle-row.is-on { transform: translateX(-8px); width: 15px; }
 .nf-table-handle:hover > svg,
 .nf-table-handle.is-on > svg { opacity: 1; }
 .nf-table-handle:hover { background: rgb(var(--text) / 0.4); }
 .nf-table-handle.is-on { background: rgb(var(--accent)); color: rgb(var(--bg-0)); }
 /* The header row is fixed: its handle only opens its menu (lock, no grip). */
 .nf-table-handle-row.is-header { cursor: pointer; }
-/* "+" bars: 18px, 5px off the right / bottom edge, shown near that edge. */
+/* "+" bars: up to 18px, up to 5px off the right / bottom edge, shown near that
+   edge; only in room that is the table's own (its bottom margin, the editor's
+   right padding), shrunk to fit — never over the next block or the cells. */
 .nf-table-plus {
   position: absolute;
   display: grid;
   place-items: center;
+  overflow: hidden;
   border-radius: 6px;
   color: rgb(var(--text-muted));
   background: rgb(var(--text) / 0.06);
