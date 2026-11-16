@@ -434,3 +434,89 @@ describe('the cursor after pasting a new table', () => {
     expect(headCell(ed)).toEqual([1, 1])
   })
 })
+
+// ── Column widths ────────────────────────────────────────────────────────────
+
+describe('column widths when pasting', () => {
+  // A: 10 dashes; B: 12, centred; C: automatic.
+  const TW = [
+    '| A | B | C |',
+    '| ---------- | :------------: | --- |',
+    '| a1 | b1 | c1 |',
+    '| a2 | b2 | c2 |',
+  ].join('\n')
+  const sepOf = (md: string) => rowsOf(md)[1]
+
+  it('cells copied in NoteFlow keep their widths in a new table (the HTML carries data-nf-colw)', () => {
+    const ed = makeEditor(TW + '\n\nafter')
+    selectCells(ed, [1, 0], [2, 1])
+    const data = copy(ed)
+    expect(data.html).toContain('data-nf-colw="10"')
+    caretIn(ed, 'after')
+    const md = pasteChecked(ed, data)
+    expect(md).toContain('| a1 | b1 |\n| ---------- | :------------: |\n| a2 | b2 |')
+  })
+
+  it('pasted into a table, cells follow their destination column\'s width', () => {
+    // a1 (10 dashes) into the automatic column C, c1 (automatic) into column A.
+    const ed = makeEditor(TW)
+    selectCells(ed, [1, 0], [1, 0])
+    const fromA = copy(ed)
+    caretInCell(ed, 2, 2)
+    expect(sepOf(pasteChecked(ed, fromA))).toBe('| ---------- | :------------: | --- |')
+    const ed2 = makeEditor(TW)
+    selectCells(ed2, [1, 2], [1, 2])
+    const fromC = copy(ed2)
+    caretInCell(ed2, 2, 0)
+    const md = pasteChecked(ed2, fromC)
+    expect(sepOf(md)).toBe('| ---------- | :------------: | --- |')
+    expect(rowsOf(md)[3]).toBe('| c1 | b2 | c2 |')
+  })
+
+  it('a spreadsheet range (TSV) into a table with widths keeps them', () => {
+    const ed = makeEditor(TW)
+    caretInCell(ed, 2, 0)
+    const md = pasteChecked(ed, { text: 'x\ty\nz\tw' })
+    expect(sepOf(md)).toBe('| ---------- | :------------: | --- |')
+  })
+
+  it('markdown pasted as text never brings widths (its dashes aren\'t NoteFlow\'s)', () => {
+    const ed = makeEditor('')
+    expect(pasteChecked(ed, { text: '| a | b |\n| ---------- | :------: |\n| 1 | 2 |' })).toBe('| a | b |\n| --- | :---: |\n| 1 | 2 |')
+  })
+
+  it('the px colwidth of another editor\'s HTML is dropped; NoteFlow\'s data-nf-colw is kept', () => {
+    const foreign = '<table><tbody><tr><th colwidth="150"><p><strong>a</strong></p></th><th colwidth="90"><p>b</p></th></tr>'
+      + '<tr><td colwidth="150"><p>1</p></td><td colwidth="90"><p>2</p></td></tr></tbody></table>'
+    expect(pasteChecked(makeEditor(''), { html: foreign, text: 'a\tb\n1\t2' })).toBe('| **a** | b |\n| --- | --- |\n| 1 | 2 |')
+    const own = foreign.replace(/colwidth="150"/g, 'data-nf-colw="20"').replace(/colwidth="90"/g, '')
+    expect(sepOf(pasteChecked(makeEditor(''), { html: own, text: 'a\tb\n1\t2' }))).toBe('| -------------------- | --- |')
+  })
+})
+
+describe('normalizedTable: column widths', () => {
+  const schema = getSchema(schemaExtensions())
+  const cell = (type: 'tableHeader' | 'tableCell', text: string, attrs: Record<string, unknown> = {}) =>
+    schema.nodes[type].create(attrs, schema.nodes.paragraph.create(null, schema.text(text)))
+  const widthsOf = (table: ReturnType<typeof tableFromRows>) => {
+    const out: unknown[][] = []
+    table.forEach((row) => { const r: unknown[] = []; row.forEach((c) => r.push(c.attrs.colwidth)); out.push(r) })
+    return out
+  }
+
+  it('every cell takes its header\'s width', () => {
+    const table = schema.nodes.table.create(null, [
+      schema.nodes.tableRow.create(null, [cell('tableHeader', 'a', { colwidth: [14] }), cell('tableHeader', 'b')]),
+      schema.nodes.tableRow.create(null, [cell('tableCell', '1'), cell('tableCell', '2', { colwidth: [30] })]),
+    ])
+    expect(widthsOf(normalizedTable(table)!)).toEqual([[[14], null], [[14], null]])
+  })
+
+  it('a header spanning columns gives each column its own entry', () => {
+    const table = schema.nodes.table.create(null, [
+      schema.nodes.tableRow.create(null, [cell('tableHeader', 'wide', { colspan: 2, colwidth: [12, 20] })]),
+      schema.nodes.tableRow.create(null, [cell('tableCell', '1'), cell('tableCell', '2')]),
+    ])
+    expect(widthsOf(normalizedTable(table)!)).toEqual([[[12], [20]], [[12], [20]]])
+  })
+})

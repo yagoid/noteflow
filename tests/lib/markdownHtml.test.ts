@@ -469,3 +469,70 @@ describe('htmlFromMarkdown — code block trailing blank lines', () => {
     expect(htmlFromMarkdown('```\na\n\n\n```')).toBe('<pre><code class="language-">a</code></pre>')
   })
 })
+
+// Column widths (lib/tableWidth.ts, note-format.md "Tablas: ancho de columna"):
+// the dash count of a separator cell, read only from a separator spaced the way
+// NoteFlow writes it and not lined up with the header. The writer side
+// (htmlToMarkdown) needs a DOM: tests/lib/tableWidth.test.ts.
+describe('htmlFromMarkdown — column widths', () => {
+  const cell = (tag: string, text: string, width: number | null, align: string | null = null) => {
+    const style = [align && `text-align:${align}`, width && `--nf-colw:${width}`].filter(Boolean).join(';')
+    return `<${tag}${width ? ` data-nf-colw="${width}"` : ''}${style ? ` style="${style}"` : ''}>${text}</${tag}>`
+  }
+
+  it('puts the width on every cell of its column (alignment kept), automatic columns untouched', () => {
+    expect(htmlFromMarkdown('| Product | Price | Notes |\n| ------------------------ | ----------: | --- |\n| a | 1 | x |')).toBe(
+      `<table><tr>${cell('th', 'Product', 24)}${cell('th', 'Price', 10, 'right')}${cell('th', 'Notes', null)}</tr>`
+      + `<tr>${cell('td', 'a', 24)}${cell('td', '1', 10, 'right')}${cell('td', 'x', null)}</tr></table>`)
+  })
+
+  it('a one-column table, centred: the colons are alignment, not dashes', () => {
+    expect(htmlFromMarkdown('| Task |\n| :--------------: |\n| a |')).toBe(
+      `<table><tr>${cell('th', 'Task', 14, 'center')}</tr><tr>${cell('td', 'a', 14, 'center')}</tr></table>`)
+  })
+
+  it('clamps: 3-9 dashes are automatic, 10 kept, more than 80 are 80', () => {
+    const widths = (sep: string) => htmlFromMarkdown(`| a | b |\n${sep}\n| 1 | 2 |`).match(/data-nf-colw="\d+"/g)
+    expect(widths('| ---- | ----- |')).toBeNull()
+    expect(widths('| --------- | :-------: |')).toBeNull()
+    // (th + td of the first column; the second is automatic.)
+    expect(widths('| ---------- | --- |')).toEqual(['data-nf-colw="10"', 'data-nf-colw="10"'])
+    expect(widths(`| ${'-'.repeat(200)} | ${'-'.repeat(80)} |`)).toEqual(Array(4).fill('data-nf-colw="80"'))
+  })
+
+  it('gate 1: only a canonically spaced separator (compact, indented or without outer pipes → automatic)', () => {
+    for (const sep of ['|----------|---|', '|---------- | --- |', ' | ---------- | --- |', '---------- | ---', '| ---------- | --- ', '|  ---------- | --- |', '| ----------  | --- |']) {
+      expect(htmlFromMarkdown(`| a | b |\n${sep}\n| 1 | 2 |`), sep).not.toContain('data-nf-colw')
+      expect(htmlFromMarkdown(`| a | b |\n${sep}\n| 1 | 2 |`), sep).toContain('<table>')
+    }
+    // Trailing spaces are fine.
+    expect(htmlFromMarkdown('| a | b |\n| ---------- | --- |   \n| 1 | 2 |')).toContain('data-nf-colw="10"')
+  })
+
+  it('gate 2: a separator lined up with its header (a formatter, an LLM) is automatic', () => {
+    const prettier = '| Name         | Description |\n| ------------ | ----------- |\n| a            | b           |'
+    expect(htmlFromMarkdown(prettier)).not.toContain('data-nf-colw')
+    expect(htmlFromMarkdown('| Name | Description |\n| ---- | ----------- |')).not.toContain('data-nf-colw')
+    // Escaped pipes count as text: lined up still.
+    expect(htmlFromMarkdown('| a \\| b | c      |\n| ------ | ------ |')).not.toContain('data-nf-colw')
+    // One column off by a dash is not lined up.
+    expect(htmlFromMarkdown('| Name         | Description |\n| ------------ | ------------ |')).toContain('data-nf-colw="12"')
+  })
+
+  it('in a quote', () => {
+    expect(htmlFromMarkdown('> | H | I |\n> | ---------- | --- |\n> | a | b |')).toContain(cell('td', 'a', 10))
+  })
+
+  it('columnWidths: false (pasted markdown, the AI chat) and plain read every column as automatic', () => {
+    const md = '| a | b |\n| ---------- | :--------: |\n| 1 | 2 |'
+    const auto = '<table><tr><th>a</th><th style="text-align:center">b</th></tr><tr><td>1</td><td style="text-align:center">2</td></tr></table>'
+    expect(htmlFromMarkdown(md, { columnWidths: false })).toBe(auto)
+    expect(htmlFromMarkdown(md, { plain: true })).toBe(auto)
+    expect(htmlFromMarkdown(md, { plain: true, columnWidths: true })).toBe(auto)
+    expect(htmlFromMarkdown(md)).toContain('data-nf-colw="10"')
+  })
+
+  it('tables without widths read exactly as before', () => {
+    expect(htmlFromMarkdown('| a | b |\n| --- | --- |\n| 1 | 2 |')).toBe('<table><tr><th>a</th><th>b</th></tr><tr><td>1</td><td>2</td></tr></table>')
+  })
+})

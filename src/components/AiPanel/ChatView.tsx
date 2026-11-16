@@ -161,11 +161,12 @@ function ChatActivityIndicator() {
 
 // Assistant replies arrive as Markdown (headings, code, tables, lists…). Render
 // them through the same markdown→HTML pipeline the editor uses, scaled down to
-// the chat panel via the `chat-md` scope (see index.css).
+// the chat panel via the `chat-md` scope (see index.css). An LLM's table
+// separators aren't column widths: its columns always fit their content.
 function MarkdownMessage({ content }: { content: string }) {
   // Hide the trailing suggestion marker/block live while streaming (the store keeps the
   // raw content until the turn finishes; suggestions become chips below the chat).
-  const html = useMemo(() => htmlFromMarkdown(splitSuggestions(content).visible), [content])
+  const html = useMemo(() => htmlFromMarkdown(splitSuggestions(content).visible, { columnWidths: false }), [content])
   // Rendered outside the editor that defines --prose-font-family: set it here so the
   // reply follows the editor font setting instead of the CSS fallback (JetBrains Mono).
   const proseFont = proseFontStack(useEditorSettingsStore((s) => s.fontFamily))

@@ -72,3 +72,47 @@ export function cellIndexOf(cell: HTMLTableCellElement): { row: number; col: num
   if (!(tr instanceof HTMLTableRowElement)) return null
   return { row: tr.sectionRowIndex, col: cell.cellIndex }
 }
+
+// Elements that end a word inside a cell (a line break, a block).
+const WORD_BREAK_TAGS = new Set(['BR', 'P', 'DIV', 'LI', 'UL', 'OL', 'PRE', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'])
+
+/**
+ * A header cell's min-content width (px) with its words unbroken: its widest
+ * word (measured with a Range over the rendered text, marks spanning text nodes
+ * included) plus its horizontal padding and borders. What a header with a column
+ * width never shrinks below (index.css § Tables: `overflow-wrap: normal` in th),
+ * read without touching the cell (ProseMirror re-reads a cell whose DOM changes).
+ */
+export function headerMinContentPx(cell: HTMLElement): number {
+  const doc = cell.ownerDocument
+  const walker = doc.createTreeWalker(cell, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
+  const range = doc.createRange()
+  let widest = 0
+  let start: [Node, number] | null = null
+  let end: [Node, number] | null = null
+  const flush = () => {
+    if (start && end) {
+      range.setStart(...start)
+      range.setEnd(...end)
+      widest = Math.max(widest, range.getBoundingClientRect().width)
+    }
+    start = end = null
+  }
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      if (WORD_BREAK_TAGS.has((node as Element).tagName)) flush()
+      continue
+    }
+    const text = node.textContent ?? ''
+    for (let i = 0; i < text.length; i++) {
+      if (/\s/.test(text[i])) { flush(); continue }
+      if (!start) start = [node, i]
+      end = [node, i + 1]
+    }
+  }
+  flush()
+  const cs = getComputedStyle(cell)
+  const px = (v: string) => parseFloat(v) || 0
+  // Collapsed borders: a cell's box holds half of each (measured in Chromium: matches the column to 0.01px).
+  return widest + px(cs.paddingLeft) + px(cs.paddingRight) + (px(cs.borderLeftWidth) + px(cs.borderRightWidth)) / 2
+}

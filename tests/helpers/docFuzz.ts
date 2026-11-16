@@ -13,9 +13,14 @@
 // NOT avoided silently: the generator makes them too, and `ambiguity()` names
 // them, so a test can skip exactly those and nothing else. Keep that list in
 // sync with "Ambigüedades del formato" in .claude/context/patterns.md.
+//
+// Needs a DOM (ambiguity() serializes tables with htmlToMarkdown): only for
+// test files with `// @vitest-environment happy-dom`.
 
-import type { Node as PMNode } from '@tiptap/pm/model'
+import { getHTMLFromFragment } from '@tiptap/core'
+import { Fragment, type Node as PMNode } from '@tiptap/pm/model'
 import { createBoard, normalizeBoard } from '../../src/lib/kanbanOps'
+import { htmlToMarkdown } from '../../src/lib/markdownHtml'
 import type { KanbanBoardData } from '../../src/lib/kanban'
 
 // ── PRNG ─────────────────────────────────────────────────────────────────────
@@ -214,14 +219,18 @@ function genTable(rng: Rng): JNode {
   // 1-3 columns: deleting columns can leave a table with only one.
   const cols = 1 + rng.int(3)
   const aligns = Array.from({ length: cols }, () => rng.pick([null, 'left', 'center', 'right']))
+  // Columns with and without a width (dashes, 10…80; the edges more often),
+  // the same on every cell of the column (lib/tableWidth.ts).
+  const widths = Array.from({ length: cols }, () =>
+    (rng.chance(0.4) ? [rng.chance(0.3) ? rng.pick([10, 11, 79, 80]) : 10 + rng.int(71)] : null))
   // A markdown table always has a header row and one alignment per column;
   // cells are one line (a break inside one is written as `<br>`; at its edges
   // the serializer trims it), with no merged cells.
   const row = (cell: 'tableHeader' | 'tableCell'): JNode => ({
     type: 'tableRow',
-    content: aligns.map((textAlign) => ({
+    content: aligns.map((textAlign, c) => ({
       type: cell,
-      attrs: { colspan: 1, rowspan: 1, colwidth: null, textAlign },
+      attrs: { colspan: 1, rowspan: 1, colwidth: widths[c], textAlign },
       // Enter in a cell starts a second paragraph (ambiguity() names it).
       content: Array.from({ length: rng.chance(0.03) ? 2 : 1 }, () =>
         paragraph(inline(rng, { breaks: 'inner', atoms: false, empty: 0.15 }))),
@@ -365,6 +374,40 @@ function textLines(textblock: PMNode): { text: string; plain: string | null }[] 
   return lines
 }
 
+/** Offsets of the unescaped pipes of a markdown row (`\|` is text). */
+function pipeOffsets(line: string): number[] {
+  const out: number[] = []
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '\\' && line[i + 1] === '|') { i++; continue }
+    if (line[i] === '|') out.push(i)
+  }
+  return out
+}
+
+/**
+ * Whether a table with column widths would be written with its separator lined
+ * up with the header line: the header as the serializer writes it, against the
+ * separator its widths spell (n dashes, `---` without one, alignment colons).
+ */
+function widthsLineUp(table: PMNode): boolean {
+  const header = table.firstChild
+  if (!header) return false
+  const cells: { align: string | null; width: number | null }[] = []
+  header.forEach((cell) => {
+    const w = cell.attrs.colwidth as number[] | null
+    cells.push({ align: cell.attrs.textAlign as string | null, width: w ? w[0] : null })
+  })
+  if (cells.every((c) => c.width === null)) return false
+  const head = htmlToMarkdown(getHTMLFromFragment(Fragment.from(table), table.type.schema)).split('\n')[0]
+  const sep = '| ' + cells.map(({ align, width }) => {
+    const dashes = '-'.repeat(width ?? 3)
+    return align === 'center' ? `:${dashes}:` : align === 'right' ? `${dashes}:` : align === 'left' ? `:${dashes}` : dashes
+  }).join(' | ') + ' |'
+  const a = pipeOffsets(head)
+  const b = pipeOffsets(sep)
+  return a.length === b.length && a.every((x, i) => x === b[i])
+}
+
 /** The list that holds the item lastLine() ends in. */
 function lastList(list: PMNode): PMNode {
   const item = list.lastChild!
@@ -408,6 +451,11 @@ export function ambiguity(doc: PMNode): string | null {
       flag('list item with more than one paragraph')
     }
     if (inCell && node.type.name === 'paragraph' && parent!.childCount > 1) flag('table cell with more than one paragraph')
+    // A table with widths whose separator, as is, would line up with its header
+    // row (gate 2 of the width format reads that as a formatter's table): the
+    // writer adds a dash to its last column with a width (takes one at 80), so
+    // it comes back half an em wider — stable from the first save.
+    if (node.type.name === 'table' && widthsLineUp(node)) flag('table with widths lined up with its header')
     // An empty bullet item is `- `. Below a sibling the parser reads it as a
     // blank line (legacy "- " lines from the YAML era): it becomes a hard break
     // of the item above (and the text of a bullet item starting with a break,
@@ -521,7 +569,7 @@ const MD_LINES = [
   '- [ ] t 🔺high', '  - nested', '    - [ ] deep', '   - three spaces', ' - one space', '\t- tab',
   '  1. nested ol', '  continued', 'lazy continuation',
   '> quote', '>', '> - q item', '> > nested', '>no space', '> ```', '> # q heading',
-  '| a | b |', '| --- | --- |', '| 1 | 2 |', '|---|:-:|',
+  '| a | b |', '| --- | --- |', '| 1 | 2 |', '|---|:-:|', '| ---------- | :---: |',
   // Prose with a pipe above a rule / a dash line: never a table. (No one-cell
   // pipe lines here: glued above `| 1 | 2 |` they'd make a one-column table
   // whose wider rows drop their extra cells, as in GFM — see MD_SNIPPETS.)
@@ -538,6 +586,17 @@ const MD_SNIPPETS = [
   '| h |\n| :---: |\n| a |\n| b<br>c |\nafter',
   '|   |\n|---\n| a \\| b |\nafter',
   '> | h |\n> | --- |\n> | a |\n> after',
+  // Column widths (dashes): NoteFlow's spacing, a formatter's (lined up, no
+  // widths), compact (no widths), a width over 80 and 4-9 dashes (automatic).
+  // At most two cells, like every row here: a wider row glued under a narrower
+  // table drops its extra cells (as in GFM).
+  '| h1 | h2 |\n| ---------- | :--------: |\n| a | b |',
+  '| h1 | h2 |\n| ---------- | --- |\n| a | b |',
+  '| Name   | Notes  |\n| ------ | -----: |\n| a      | b      |',
+  '| h1 | h2 |\n|------------|-----|\n| a | b |',
+  `| h |\n| ${'-'.repeat(90)} |\n| a |\nafter`,
+  '> | h |\n> | :------------: |\n> | a |\n> after',
+  '> | h |\n> | --------- |\n> | a |\n> after',
   '```py\ndef f():\n\n    return 1\n```',
   '<!-- kanban done="Done" -->\n- Todo\n  - [ ] one 📅2026-10-12 🔺high\n    - sub\n- Done\n  - [x] two\n<!-- /kanban -->',
   '- [ ] **5.9.3 (tamper).**\n\n- **B42.** texto\n\n- [ ] **5.4.3**\n  - Esperar',

@@ -182,7 +182,8 @@ function alignToSep(align: TableAlign | undefined): string {
  * A GFM pipe table of `rows`, written the way NoteFlow saves tables
  * (tableElToMd): row 0 is the header, `aligns[i]` the alignment of column i
  * (missing = none), `|` escaped as `\|`, line breaks as `<br>`, empty cells as
- * one space. Ragged rows are padded. Cell text is written as-is, so markdown
+ * one space. No column widths: every separator cell is `---` (with the
+ * alignment's colons). Ragged rows are padded. Cell text is written as-is, so markdown
  * in it (`**x**`) is markdown again when pasted. '' for no cells. A
  * single-column table (`| a |` / `| --- |`) is read back as a table too
  * (isTableStart in lib/markdownHtml.ts).

@@ -18,10 +18,11 @@ import {
   columnHandleSpan, columnMenu, columnName, focusableItems, gapPosition, handleAnchor, hotLines, menuKeyAction, menuShortcutHints, pillBox, pillParts, selectionStats,
   PILL_BAR_GAP, PILL_HEIGHT, MIN_ROW_BAR_WIDTH, type Box, hoverZone, menuMaxHeight, nearEdges,
   placeMenu, plusBars, rowDropTarget, rowHandleSpan, rowMenu, rowName, stepFocus, visibleBody,
+  RESIZE_GRIP, RESIZE_NEAR, nearGrip, resizeGrips,
   type Span, type TableAction, type TableGeometry, type TableMenuEntry, type TableMenuItem,
 } from '../../src/lib/tableControls'
 import {
-  getCellSelectionRect, getTableData, insertRowAt, runTableCommand, tableActionCommand,
+  getCellSelectionRect, getColumnWidths, getTableData, insertRowAt, runTableCommand, setColumnWidth, tableActionCommand,
 } from '../../src/components/Editor/tableOps'
 import { runControlCommand } from '../../src/components/Editor/tableMenus'
 import {
@@ -32,6 +33,8 @@ import { shortcutText, tableShortcuts } from '../../src/lib/tableShortcuts'
 import { schemaExtensions } from '../../src/components/Editor/editorExtensions'
 import { htmlFromMarkdown } from '../../src/lib/markdownHtml'
 import { load } from '../helpers/editorPipeline'
+import { pxFromWidth, widthFromPx } from '../../src/lib/tableWidth'
+import { TableColumnResize, columnResizePreview, setColumnResizePreview } from '../../src/components/Editor/TableColumnResize'
 
 // ── Geometry fixtures ────────────────────────────────────────────────────────
 
@@ -674,5 +677,185 @@ describe('pill and row "+" bar in the band below the table', () => {
     expect(plusBars(g, 1000, pillBox(g, 1000, 500)).row).toBeNull()
     // No pill: the full width.
     expect(plusBars(g, 1000).row).toMatchObject({ left: 100, right: 400 })
+  })
+})
+
+// ── Column widths: resize strips, px ↔ dashes, "Reset width", live preview ───
+
+describe('resize strips', () => {
+  // geo(): 3 columns of 100px from x=100 (edges at 200, 300, 400), rows y 200…290.
+  const rightLimit = 460
+
+  it('one per column, centred on its right edge, as tall as the rows', () => {
+    const g = geo()
+    const grips = resizeGrips(g, plusBars(g, rightLimit).column, rightLimit)
+    expect(grips.map((r) => r.col)).toEqual([0, 1, 2])
+    expect(grips[0]).toEqual({ col: 0, edge: 200, box: { left: 196, right: 204, top: 200, bottom: 290 } })
+    expect(grips[1].box).toEqual({ left: 296, right: 304, top: 200, bottom: 290 })
+    expect(RESIZE_GRIP).toBe(8)
+  })
+
+  it('never over the column handles (inset 10px from the columns\' sides)', () => {
+    const g = geo()
+    for (const grip of resizeGrips(g, plusBars(g, rightLimit).column, rightLimit)) {
+      for (let i = 0; i < g.cols.length; i++) {
+        const h = columnHandleSpan(g, i)!
+        expect(grip.box.right <= h.start || grip.box.left >= h.end, `strip ${grip.col} vs handle ${i}`).toBe(true)
+      }
+    }
+  })
+
+  it('the last column\'s strip stops where the column "+" bar starts (or PLUS_GAP past the edge without one)', () => {
+    const g = geo()
+    const bar = plusBars(g, rightLimit).column!
+    expect(bar.left).toBe(400 + PLUS_GAP)
+    const last = resizeGrips(g, bar, rightLimit).at(-1)!
+    expect(last.box.right).toBeLessThanOrEqual(bar.left)
+    expect(last.box.right).toBe(404)
+    // A cramped bar starts sooner: the strip shrinks with it.
+    const cramped = plusBars(g, 412).column!
+    expect(cramped.left).toBeLessThan(400 + PLUS_GAP)
+    expect(resizeGrips(g, cramped, 412).at(-1)!.box.right).toBeLessThanOrEqual(cramped.left)
+    // No bar (no room): up to PLUS_GAP past the edge, and never past rightLimit.
+    expect(resizeGrips(g, null, rightLimit).at(-1)!.box.right).toBe(404)
+    expect(resizeGrips(g, null, 402).at(-1)!.box.right).toBe(402)
+    // Clipped below MIN_RESIZE_GRIP: no strip.
+    expect(resizeGrips(g, null, 399.5).map((r) => r.col)).toEqual([0, 1])
+  })
+
+  it('clipped to the visible part of a table scrolled sideways; edges out of view have none', () => {
+    // The scroll box shows x 100…250 of a body that starts at 40 (edges at 140, 240, 340).
+    const scrolled = { ...geo({ left: 100, right: 250 }), body: { left: 40, top: 200, right: 340, bottom: 290 }, cols: spans(40, [100, 100, 100]) }
+    const grips = resizeGrips(scrolled, plusBars(scrolled, rightLimit).column, rightLimit)
+    expect(grips.map((r) => r.col)).toEqual([0, 1])
+    expect(grips[0].box).toEqual({ left: 136, right: 144, top: 200, bottom: 290 })
+    // Edge 240 with the view ending at 250: the strip may reach PLUS_GAP past the view.
+    expect(grips[1].box.right).toBeLessThanOrEqual(250 + PLUS_GAP)
+  })
+
+  it('never over the row handles: cut at the rows\' left edge + the handles\' grown part', () => {
+    // An edge 3px inside the scroll box's left side.
+    const scrolled = { ...geo({ left: 100, right: 400 }), body: { left: 3, top: 200, right: 303, bottom: 290 }, cols: spans(3, [100, 100, 100]) }
+    const grips = resizeGrips(scrolled, null, rightLimit)
+    const rowHandleRight = 100 - HANDLE_GROWN_OFFSET + HANDLE_GROWN
+    expect(grips.every((r) => r.box.left >= rowHandleRight)).toBe(true)
+    expect(grips.map((r) => r.col)).toEqual([1, 2])
+  })
+
+  it('never below the rows (the pill and the row "+" bar live there)', () => {
+    const g = geo()
+    for (const grip of resizeGrips(g, null, rightLimit)) expect(grip.box.bottom).toBe(visibleBody(g).bottom)
+  })
+
+  it('nearGrip: the strip whose edge is within RESIZE_NEAR of the pointer, inside the rows', () => {
+    const g = geo()
+    const grips = resizeGrips(g, null, rightLimit)
+    expect(nearGrip(grips, 200, 250)).toBe(0)
+    expect(nearGrip(grips, 200 + RESIZE_NEAR, 250)).toBe(0)
+    expect(nearGrip(grips, 200 + RESIZE_NEAR + 1, 250)).toBeNull()
+    expect(nearGrip(grips, 296, 210)).toBe(1)
+    expect(nearGrip(grips, 300, 195)).toBeNull()
+  })
+})
+
+describe('resize: px ↔ dashes', () => {
+  it('the start of a drag converts the measured width; the drag snaps to whole dashes, 10…80', () => {
+    // 15px font: a dash is 7.5px.
+    expect(widthFromPx(100, 15)).toBe(13)
+    expect(widthFromPx(100 + 4, 15)).toBe(14)
+    // Below the minimum (5em, the narrowest automatic column) it stays there.
+    expect(widthFromPx(30, 15)).toBe(10)
+    expect(widthFromPx(74, 15)).toBe(10)
+    expect(widthFromPx(80, 15)).toBe(11)
+    expect(widthFromPx(1000, 15)).toBe(80)
+    expect(pxFromWidth(widthFromPx(187, 15), 15)).toBe(187.5)
+  })
+})
+
+describe('column menu: Reset width', () => {
+  const TW = table([['A', 'B'], ['1', '2']], ['------------', '---'])
+
+  it('after Align, enabled on a column with a width', () => {
+    const { state, can } = setup(TW)
+    const data = { ...getTableData(state, { tablePos: 0 })!, widths: getColumnWidths(state, { tablePos: 0 })! }
+    const menu = columnMenu(data, 0, can, m)
+    expect(ids(menu).slice(8, 11)).toEqual(['align', 'resetWidth', 'sortAsc'])
+    expect(byId(menu, 'resetWidth')).toMatchObject({
+      label: 'Reset width', icon: 'resetWidth', disabled: false, action: { type: 'columnWidth', column: 0, width: null },
+    })
+    expect(byId(menu, 'resetWidth').reason).toBeUndefined()
+    expect(byId(menu, 'resetWidth').kbd).toBeUndefined()
+  })
+
+  it('disabled, with why, on a column that already fits its content', () => {
+    const { state, can } = setup(TW)
+    const data = { ...getTableData(state, { tablePos: 0 })!, widths: getColumnWidths(state, { tablePos: 0 })! }
+    expect(byId(columnMenu(data, 1, can, m), 'resetWidth')).toMatchObject({ disabled: true, reason: 'This column already fits its content' })
+    expect(byId(columnMenu(data, 1, can, es.editor.table), 'resetWidth')).toMatchObject({ label: 'Restablecer ancho', reason: 'La columna ya se ajusta a su contenido' })
+  })
+
+  it('hidden where widths aren\'t offered (no `widths`: a linked note\'s plain Markdown)', () => {
+    const { data, can } = setup(TW)
+    expect(ids(columnMenu(data, 0, can, m))).not.toContain('resetWidth')
+  })
+
+  it('running it resets the width: one undo step', () => {
+    const ed = new Editor({ extensions: [...schemaExtensions(), History], content: htmlFromMarkdown(TW) })
+    expect(runControlCommand(ed, tableActionCommand({ type: 'columnWidth', column: 0, width: null }, { tablePos: 0 }))).toBe(true)
+    expect(getColumnWidths(ed.state, { tablePos: 0 })).toEqual([null, null])
+    expect(undoDepth(ed.state)).toBe(1)
+    expect(undo(ed.state, ed.view.dispatch)).toBe(true)
+    expect(getColumnWidths(ed.state, { tablePos: 0 })).toEqual([12, null])
+    ed.destroy()
+  })
+})
+
+describe('live resize preview (TableColumnResize)', () => {
+  const TW = table([['A', 'B'], ['1', '2'], ['3', '4']], ['------------', '---'])
+  const editor = () => new Editor({ extensions: [...schemaExtensions(), History, TableColumnResize], content: htmlFromMarkdown(TW) })
+
+  it('decorates every cell of the column, without touching the document or the history', () => {
+    const ed = editor()
+    const doc = ed.state.doc
+    let updates = 0
+    ed.on('update', () => { updates++ })
+    setColumnResizePreview(ed.view, { tablePos: 0, col: 1, width: 20 })
+    expect(columnResizePreview(ed.state)).toEqual({ tablePos: 0, col: 1, width: 20 })
+    expect(ed.state.doc).toBe(doc)
+    expect(undoDepth(ed.state)).toBe(0)
+    expect(updates).toBe(0)
+    const live = Array.from(ed.view.dom.querySelectorAll('[data-nf-colw-live]'))
+    expect(live.map((c) => c.textContent)).toEqual(['B', '2', '4'])
+    expect((live[0] as HTMLElement).style.getPropertyValue('--nf-colw-live').trim()).toBe('20')
+    // The cell's own width (column A) is untouched, and stays after the preview goes.
+    setColumnResizePreview(ed.view, { tablePos: 0, col: 0, width: 30 })
+    setColumnResizePreview(ed.view, null)
+    expect(ed.view.dom.querySelectorAll('[data-nf-colw-live]')).toHaveLength(0)
+    const own = Array.from(ed.view.dom.querySelectorAll('[data-nf-colw]'))
+    expect(own.map((c) => c.getAttribute('data-nf-colw'))).toEqual(['12', '12', '12'])
+    expect((own[0] as HTMLElement).style.getPropertyValue('--nf-colw').trim()).toBe('12')
+    ed.destroy()
+  })
+
+  it('a release commits one transaction (one undo step) with setColumnWidth', () => {
+    const ed = editor()
+    setColumnResizePreview(ed.view, { tablePos: 0, col: 1, width: 20 })
+    setColumnResizePreview(ed.view, null)
+    expect(runControlCommand(ed, setColumnWidth(1, 20, { tablePos: 0 }))).toBe(true)
+    expect(getColumnWidths(ed.state, { tablePos: 0 })).toEqual([12, 20])
+    expect(undoDepth(ed.state)).toBe(1)
+    ed.destroy()
+  })
+
+  it('follows its table through edits above it; dropped when the table goes', () => {
+    const ed = editor()
+    setColumnResizePreview(ed.view, { tablePos: 0, col: 1, width: 20 })
+    ed.view.dispatch(ed.state.tr.insert(0, ed.schema.nodes.paragraph.create(null, ed.schema.text('x'))))
+    expect(columnResizePreview(ed.state)!.tablePos).toBe(3)
+    expect(ed.view.dom.querySelectorAll('[data-nf-colw-live]')).toHaveLength(3)
+    const table = ed.state.doc.nodeAt(3)!
+    ed.view.dispatch(ed.state.tr.delete(3, 3 + table.nodeSize))
+    expect(columnResizePreview(ed.state)).toBeNull()
+    ed.destroy()
   })
 })

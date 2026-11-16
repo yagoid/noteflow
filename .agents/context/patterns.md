@@ -892,7 +892,7 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   Invariantes: **(a) sin pérdida** — todo documento que el editor puede tener vuelve igual
   (`load(save(D))` igual a `D` y el markdown es punto fijo): fuzz de documentos generados con PRNG
   con semilla (`helpers/docFuzz.ts`: marcas, breaks al inicio/medio/final y rachas de 1-3, párrafos
-  vacíos, headings, HR, código, citas, tablas, tableros, las tres listas anidadas hasta 3 niveles y
+  vacíos, headings, HR, código, citas, tablas —con columnas con y sin ancho—, tableros, las tres listas anidadas hasta 3 niveles y
   mezcladas, atributos de tarea), más barridos exhaustivos de **todo par de tipos de bloque** en ambos
   órdenes con 0-2 breaks y de **listas anidadas de todo par de tipos** con 0-3 breaks; **(b) estable**
   — markdown arbitrario (líneas de toda sintaxis, también malformada, pegadas o separadas) llega a un
@@ -936,6 +936,9 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     texto, aunque sea la primera línea: al guardar se normaliza lo de debajo (indentación de listas,
     líneas en blanco) y puede pasar a ser un tablero válido. Es lo que hace que markdown ambiguo
     necesite **dos** guardados para el punto fijo.
+  - **Tabla con anchos cuyo separador quedaría alineado con la cabecera** (puerta 2 del ancho, ver
+    `note-format.md`): el escritor suma un guion a la última columna con ancho (resta en 80) → vuelve
+    0,5em más ancha (más estrecha en 80), estable desde ahí.
   - Otras, ya documentadas arriba: fences anidados, `++`/`==` literales, líneas en blanco al final de
     un bloque de código, espacios finales del código.
 - Estos elementos son **markdown plano** en el cuerpo del `.md`: no tocan el frontmatter ni los tres
@@ -955,6 +958,13 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     `isBlockCell` al serializar celdas; tablas de una columna (`isTableStart` +
     `TABLE_SEPARATOR_1COL_RE`, ver "Editor: tablas"): sin portar, el móvil las lee como un párrafo
     de texto.
+  - **Ancho de columna** (`note-format.md` "Tablas: ancho de columna", desktop 2026-11): el móvil lee como
+    tabla un separador con cualquier nº de guiones pero **ignora el ancho** y, al guardar una edición,
+    **reescribe todos los separadores con `---`** (borra los anchos puestos en el escritorio). Portar
+    `separatorWidths`/`separatorLine`/`pipeOffsets` (las dos puertas y el +1 guion), `data-nf-colw` en
+    `mdTableToHtml` y su lectura en `tableElToMd`, el atributo `colwidth` con semántica de guiones en el
+    esquema del editor web (y `NoteTable` si usa la tabla de TipTap), y el CSS de `[data-nf-colw]`; sin
+    UI de redimensionado no hace falta la franja, pero sí conservar el ancho al guardar.
   - Headings pegados (`mdParagraphBlockToHtml`), `headingElToMd` (breaks → espacio; heading vacío →
     párrafo vacío).
   - Tareas: `- [x](url)` no es tarea, `- [ ]foo` es viñeta; marcador vacío `emptyMarkerIsItem` y
@@ -977,8 +987,9 @@ Los atajos de teclado y el portapapeles también: ver «Editor: teclado y portap
   tras ejecutar, devuelve el foco). Exports: `selectRow`, `selectColumn` (CellSelection), `moveRow`,
   `moveColumn`, `duplicateRow`, `duplicateColumn`, `insertRowAt`, `insertColumnAt`,
   `sortRowsByColumn`, `alignColumn`, `clearRow`, `clearColumn`, `clearSelectedCells`, `deleteRow`,
-  `deleteColumn`, `deleteSelectedRows`, `deleteSelectedColumns`, `deleteTable`, `focusCell` (cursor al
-  inicio de una celda, solo selección); lectura: `getTableInfo`, `getTableData`, `getSelectedCellsData`
+  `deleteColumn`, `deleteSelectedRows`, `deleteSelectedColumns`, `deleteTable`, `setColumnWidth`,
+  `focusCell` (cursor al inicio de una celda, solo selección); lectura: `getTableInfo`, `getTableData`,
+  `getColumnWidths` (ancho de cada columna en guiones, de la cabecera; null = automática), `getSelectedCellsData`
   (texto + alineación por columna), `getCellSelectionRect` (rectángulo de una CellSelection de esa
   tabla), `getSelectionCell` (celda del cursor o cabeza de la CellSelection + `tablePos`), `findTablePos`
   (tabla más interna alrededor de la selección, **también con celdas combinadas**) y `cellText`;
@@ -992,7 +1003,9 @@ Los atajos de teclado y el portapapeles también: ver «Editor: teclado y portap
   - **Invariantes:** fila 0 = cabecera (`tableHeader`), fija y obligatoria; resto = `tableCell`. Los
     comandos estructurales **reconstruyen las filas** de la tabla en una transacción y normalizan los
     tipos de celda a ese invariante (una tabla HTML pegada cuya fila 0 no era cabecera la gana al
-    primer cambio). Tablas con celdas combinadas (solo vía HTML pegado): todos los comandos → false.
+    primer cambio). Alineación y **ancho** son por columna: toda celda lleva los de su cabecera (ver
+    "Editor: tablas"; una columna con anchos distintos es un problema del `TableMap` y la tabla se
+    rechazaría). Tablas con celdas combinadas (solo vía HTML pegado): todos los comandos → false.
   - **Selección resultante:** sigue a sus celdas (mover, ordenar, insertar y duplicar no la sacan de
     la celda en la que estaba; con contenido idéntico conserva el offset). Una `CellSelection` pasa a
     ser el rectángulo que envuelve **todas** sus celdas mapeadas (no solo las esquinas): una
@@ -1005,11 +1018,18 @@ Los atajos de teclado y el portapapeles también: ver «Editor: teclado y portap
     cursor al inicio de la celda que ocupa su lugar (o la última fila/columna), misma columna/fila.
     Una selección fuera de la tabla se mapea con la transacción.
   - **Decisiones:** mover fila solo entre filas de cuerpo (`from`/`to` ≥ 1, `to` = índice final);
-    `from === to` o fuera de rango → false. Al mover/duplicar una columna su alineación viaja con ella
-    (cada celda lleva `textAlign`). Duplicar fila → copia debajo (la cabecera duplicada es una fila de
-    cuerpo con el mismo contenido y atributos); duplicar columna → copia a la derecha. Insertar fila en
-    `1…filas` (en 0 → false); sus celdas heredan la alineación de la **celda de cabecera** de su
-    columna. Insertar columna en `0…columnas`: sin alineación (`null`) hasta que el usuario la ponga.
+    `from === to` o fuera de rango → false. Al mover/duplicar una columna su alineación y su ancho viajan
+    con ella (cada celda lleva `textAlign` y `colwidth`). Duplicar fila → copia debajo (la cabecera
+    duplicada es una fila de cuerpo con el mismo contenido y atributos); duplicar columna → copia a la
+    derecha. Insertar fila en `1…filas` (en 0 → false); sus celdas heredan la alineación y el ancho de la
+    **celda de cabecera** de su columna. Insertar columna en `0…columnas`: sin alineación ni ancho (`null`)
+    hasta que el usuario los ponga. La fila que añade `Tab` en la última celda (`addRowAfter` de
+    prosemirror-tables, sin atributos) recibe el ancho de su columna del `fixTables` de prosemirror-tables
+    en la misma transacción (test en `tableOps.test.ts`; la alineación, como antes, no).
+    **`setColumnWidth(col, width | null, target?)`**: `colwidth` en todas las celdas de la columna, una
+    transacción con `setNodeMarkup` (conserva la selección, también una CellSelection); el ancho se
+    redondea y acota a 10…80 (`clampColumnWidth`); ya en ese valor → true sin transacción; no numérico o
+    índice fuera de rango → false.
     Ordenar: solo filas de cuerpo, posible con ≥ 2; ya ordenado → true sin transacción. Vaciar
     fila/columna/selección: cada celda queda con un párrafo vacío y sus atributos; nada que vaciar →
     true sin transacción. La cabecera se vacía con `clearRow(0)` o una selección; **`clearColumn` deja
@@ -1091,7 +1111,7 @@ esa meta antes de su salida temprana "sin pasos"), así lo siguiente también ab
   (botón de la toolbar) + `TableSizePicker.tsx` (solo el panel N×M), `tableDom.ts` (DOM ↔ posición y
   medidas). **Lógica pura** en `src/lib/tableControls.ts` (tests en `tests/lib/tableControls.test.ts`,
   los de menús con el esquema real): geometría (`visibleBody`, `hoverZone`, `hotLines`, `nearEdges`,
-  `columnHandleSpan`/`rowHandleSpan`, `plusBars`), destino del arrastre (`columnDropTarget`,
+  `columnHandleSpan`/`rowHandleSpan`, `plusBars`, `resizeGrips`/`nearGrip`), destino del arrastre (`columnDropTarget`,
   `rowDropTarget`, `gapPosition`), `placeMenu`, y menús (`columnMenu`, `rowMenu`, `cellMenu`,
   `focusableItems`, `stepFocus`, `columnName`/`rowName`). Los menús reciben `can(action)` =
   `canRunTableCommand(tableActionCommand(action, { tablePos }))`: **el habilitado lo deciden los
@@ -1099,10 +1119,13 @@ esa meta antes de su salida temprana "sin pasos"), así lo siguiente también ab
 - **Montaje:** `Editor.tsx` monta `TableControls` en el contenedor `relative` que envuelve el scroller
   (junto al TOC) y `TableContextMenu`, ambos solo si `!readOnly` (y comprueban `editor.isEditable`). Por
   tanto **sí en stickies** (sin toolbar: asas, «+» y clic derecho son su única vía) y **sí en notas
-  vinculadas** (esquema `plain` con las mismas tablas: todo es GFM estándar, pipe + alineación); nada
-  en vinculadas de solo lectura, ni en previews/resumen/chat (no usan `Editor`).
+  vinculadas** (esquema `plain` con las mismas tablas: todo es GFM estándar, pipe + alineación) **salvo
+  el ancho de columna**: `TableControls` recibe `columnWidths={!plain}` y en `plain` no hay franjas de
+  redimensionado ni *Reset width* (el ancho es sintaxis propia de NoteFlow); nada en vinculadas de solo
+  lectura, ni en previews/resumen/chat (no usan `Editor`).
 - **Capa (`.nf-table-controls`):** `absolute`, del tamaño de la caja visible del scroller (`clientWidth/
-  Height`, sin la barra de scroll), `overflow: hidden`, `pointer-events: none` salvo asas/«+» visibles;
+  Height`, sin la barra de scroll), `overflow: hidden`, `pointer-events: none` salvo asas/«+» visibles y
+  las franjas de redimensionar (solo existen con el puntero sobre la tabla);
   `z-index: 5` (debajo del TOC, `z-10`). **Tabla activa:** la del arrastre o la del menú de asa abierto;
   si no, la que está bajo el puntero **incluidos sus gutters** (`hoverZone`: el borde de asas y la franja
   de las «+», para que pasar de la tabla al asa no la oculte; por abajo, nunca más allá de `roomBottom`:
@@ -1179,6 +1202,42 @@ esa meta antes de su salida temprana "sin pasos"), así lo siguiente también ab
   selección empieza en la cabecera y sigue en el cuerpo (columna entera, rango desde arriba) la fila 0
   se **excluye** también de los recuentos; solo una selección de solo cabecera (2+ celdas) la cuenta,
   como celdas / con texto, nunca como números. Se calcula con `getSelectedCellsData` + `summarizeCells`.
+- **Redimensionar columna (franjas `.nf-table-resize[data-col=i]`, `role="separator"`):** con
+  `columnWidths`, en la tabla bajo el puntero (o la que se está redimensionando), nunca durante un
+  arrastre de reordenar ni con un menú de asa abierto. Una franja invisible de `RESIZE_GRIP` (8px)
+  centrada en el **borde derecho** de cada columna, a lo alto de las filas visibles (`resizeGrips`):
+  recortada a la parte visible de la `<table>` con scroll horizontal (un borde fuera de la vista no tiene
+  franja), a la izquierda nunca sobre las asas de fila (borde visible + parte crecida del asa), y a la
+  derecha nunca sobre la barra «+» de columna (hasta su `left`, o `PLUS_GAP` sin barra, y `rightLimit`);
+  las asas de columna van 10px hacia dentro, así que los 4px de cada lado no las tocan; bajo las filas
+  (pastilla, «+» de fila) no llega. Cursor `col-resize`; su `::after` es una línea de acento de 2px en el
+  borde (`--line`): tenue con el puntero a ≤ `RESIZE_NEAR` (12px) del borde (`.is-near`, `nearGrip`),
+  entera con hover o al arrastrar (`.is-on`); `title` "Drag to resize · double-click to fit content".
+  Pierde un clic en los 4px junto al borde de cada celda (para poner el cursor ahí, clic un poco más
+  dentro): mismo compromiso que cualquier tirador de columna.
+  - **Arrastre** (pointer events, como el de reordenar; `mousedown` y `dragstart` con `preventDefault`):
+    umbral `DRAG_THRESHOLD` en x; ancho de partida = el **medido** en pantalla (≥ el guardado en guiones:
+    una cabecera con una palabra más larga lo ensancha); el nuevo ancho = `widthFromPx(partida + dx,
+    font-size de la tabla)`, a pasos de **1 guion**, hasta 80 y **nunca por debajo de la palabra más larga
+    de la cabecera** (`minWidthForHeader` sobre `headerMinContentPx` de `tableDom.ts`: un `Range` por
+    palabra —también a través de marcas— + padding + medio borde a cada lado, sin tocar la celda; redondeado
+    hacia arriba, mínimo 10), así lo que se ve al soltar es exactamente lo que se guarda. **En vivo por decoración** (`Editor/TableColumnResize.ts`, extensión de comportamiento
+    registrada en `Editor.tsx`, patrón de `ActiveTableCell.ts`): estado de plugin
+    `{ tablePos, col, width } | null` cambiado con transacciones **solo-meta** (`setColumnResizePreview`,
+    `addToHistory: false`: ni documento, ni guardado, ni historial) que pone `data-nf-colw-live` /
+    `--nf-colw-live` en las celdas de la columna (sigue a su tabla con el mapping; se descarta si la tabla
+    desaparece). **Nombres propios, no `data-nf-colw`:** al quitar una decoración ProseMirror borra los
+    atributos y propiedades de estilo que puso, y con los mismos nombres se llevaba el ancho real de la
+    celda tras un arrastre cancelado. Al soltar: se quita la vista previa y, si el ancho cambió, **una**
+    transacción `setColumnWidth` vía `runControlCommand` (paso de deshacer propio). `Esc` cancela, y también
+    un `pointermove` con el botón ya suelto (`buttons & 1` = 0: se perdió el `pointerup` al soltar fuera de
+    la ventana o al cambiar de ventana; sin esto seguiría redimensionando hasta el siguiente clic); clic sin
+    mover = nada; el clic posterior a un arrastre se traga. Durante el arrastre: `body.nf-table-resizing`
+    (cursor en toda la ventana), la capa lleva `.is-resizing` (asas, «+» y las otras franjas ocultas o
+    inertes: el navegador deja una franja vecina en `:hover` si se desliza bajo un puntero quieto).
+  - **Doble clic** en la franja = `setColumnWidth(col, null)` (un paso; si ya es automática, nada).
+  - Comprobado en la app real (Electron oculto con eventos de entrada sintéticos): ancho en vivo, guardado
+    en guiones al soltar, un `Ctrl+Z`, `Esc`, clic sin mover, doble clic y el menú.
 - **Arrastre** (pointer events + `pointerDrag.ts`, como el kanban): umbral `DRAG_THRESHOLD`; al empezar
   se selecciona la línea (así, tras soltar, `moveRow`/`moveColumn` la deja **seleccionada** en su sitio
   nuevo). Ghost portalado a `<body>` (`.nf-table-ghost`, `transform` sin re-render) con la etiqueta
@@ -1225,8 +1284,12 @@ esa meta antes de su salida temprana "sin pasos"), así lo siguiente también ab
   encima/a la izquierda, duplicar columna, vaciar, ordenar, alinear, *Clear N cells* (`Supr`/`⌫` no es
   un acorde de `tableShortcuts`) y *Delete table*.
   - **Columna:** "Column · <cabecera>" (o "Column N"); Insert left/right, Duplicate · Move left/right ·
-    Align · Sort A→Z/Z→A (1→9/9→1 si `isNumericColumn` del cuerpo) · Clear column (cuerpo) · Delete
-    (rojo; deshabilitada en la única columna: "A table needs at least one column").
+    Align · *Reset width* (`data-entry="resetWidth"`, acción `{ type: 'columnWidth', width: null }`, sin
+    pista de atajo; solo con `columnWidths` —`TableMenuState.columnWidths` → `TableMenuData.widths`—,
+    oculta en `plain`; **deshabilitada si la columna no tiene ancho**, "This column already fits its
+    content": aquí decide el ancho y no el comando, porque `setColumnWidth(col, null)` "puede" correr
+    —no-op— también en una automática) · Sort A→Z/Z→A (1→9/9→1 si `isNumericColumn` del cuerpo) · Clear
+    column (cuerpo) · Delete (rojo; deshabilitada en la única columna: "A table needs at least one column").
   - **Fila:** "Row N"; Insert above/below, Duplicate · Move up/down · Clear row · Delete. **Cabecera**
     ("Header"): mismas entradas con insertar encima / mover / eliminar deshabilitadas ("The header is
     fixed"), "Clear header", y la nota del candado. Duplicarla sí está permitido (la copia es fila de
@@ -1366,9 +1429,14 @@ TipTap no convierten `**x**` ni URLs del texto de las celdas en marcas.
 (el contenido en la superior-izquierda, el resto vacías), filas irregulares rellenadas, filas sin celdas
 fuera, fila 0 = `tableHeader` (aunque el HTML no tuviera `<thead>`/`<th>`) y el resto `tableCell` (los
 `<th>` de una columna de cabecera pasan a celdas; con varias filas de cabecera solo la 0 lo es), tablas
-anidadas aplanadas a texto (una línea por fila, celdas unidas con ` · `), sin `colwidth`, y la
-alineación de cada celda = la de la **cabecera de su columna** (una cabecera con `colspan` alinea todas
-sus columnas; los `text-align` inline de Sheets en celdas del cuerpo se descartan). Se aplica en
+anidadas aplanadas a texto (una línea por fila, celdas unidas con ` · `), y la alineación y el **ancho**
+de cada celda = los de la **cabecera de su columna** (una cabecera con `colspan` alinea todas sus columnas
+y da a cada una su entrada de `colwidth`; los `text-align` inline de Sheets en celdas del cuerpo se
+descartan). Los anchos solo existen si el HTML es de NoteFlow (`data-nf-colw`, ver "Editor: tablas"): el
+`colwidth` en px de otro editor ProseMirror no se lee, así que copiar/pegar una tabla dentro de la app
+conserva anchos y lo de fuera llega automático; el markdown pegado como texto, nunca (`columnWidths:
+false`). Pegando celdas **dentro** de una tabla, cada celda toma la alineación y el ancho de su columna
+destino (`columnFormat` de la tabla destino; columnas que crezca el pegado: las de su nueva cabecera). Se aplica en
 `TableClipboard`: `transformPastedHTML` quita `<caption>` (ProseMirror lo sacaba como párrafo encima;
 decidido quitarlo para que una tabla web entre como celdas también dentro de otra tabla);
 `transformPasted` normaliza las tablas **cerradas** del slice (las abiertas por los bordes, copias de
@@ -1378,7 +1446,7 @@ filas copiadas de NoteFlow pegadas fuera de una tabla (slice abierto → tabla s
 cabecera, en el mismo paso de deshacer (transacción añadida). Si solo cambian tipos/atributos,
 `setNodeMarkup` celda a celda (posiciones y selección intactas); si cambia la forma, se reemplaza la
 tabla y la selección vuelve a sus celdas (con su offset si la celda no cambió). Pegando celdas dentro
-de una tabla se conservan las alineaciones de la tabla destino (también sobre la cabecera).
+de una tabla se conservan las alineaciones y los anchos de la tabla destino (también sobre la cabecera).
 
 **Qué estaba roto antes (2026-11, comprobado con HTML real de Excel, Sheets y una tabla web):** las
 tablas sin `<th>` (Excel, Sheets, muchas webs) se guardaban con una cabecera **vacía** `|   |   |` y la
@@ -1502,10 +1570,35 @@ párrafo; el ancho redimensionado es el atributo `width` (`![alt](src){width=N}`
   una imagen dentro de un enlace, p. ej., no rompe la columna). Imágenes antiguas con un `width` mayor
   que la columna (antes se veían acotadas) ahora rompen la columna al abrirlas en Readable.
 
-### Editor: tablas (inserción y columnas ajustadas al contenido)
-Formato y esquema intactos: pipe-table GFM con cabecera obligatoria en la fila 0, alineación por
-columna (`:---:`), saltos de celda como `<br>`, sin anchos guardados; `Table` de TipTap con
-`resizable: false` (`editorExtensions.ts`).
+### Editor: tablas (inserción, columnas ajustadas al contenido y ancho de columna)
+Pipe-table GFM con cabecera obligatoria en la fila 0, alineación por columna (`:---:`), saltos de
+celda como `<br>` y **ancho de columna opcional en el nº de guiones del separador** (formato y puertas en
+`note-format.md` "Tablas: ancho de columna"); `Table` de TipTap con `resizable: false`
+(`editorExtensions.ts`: sin el redimensionado de prosemirror-tables ni su `TableView`; el ancho se pone
+desde la capa de controles, ver "Editor: controles de tabla").
+- **Ancho de columna — modelo (`src/lib/tableWidth.ts`, pura; tests en `tests/lib/tableWidth.test.ts` y
+  `markdownHtml.test.ts`):** esquema sin cambios: el `colwidth` de las celdas (array `[n]` de
+  prosemirror-tables) con **semántica NoteFlow: n = guiones** (10…80), no px; `null` = automática.
+  **Invariante:** toda celda de una columna lleva el `colwidth` de su celda de cabecera (lo que se guarda);
+  prosemirror-tables trata celdas de una columna con anchos distintos como un problema del `TableMap`
+  (`fixTables` las "arregla" y `tableOps` rechaza la tabla como si tuviera celdas combinadas), así que todo
+  lo que construye celdas lo respeta. HTML propio: `data-nf-colw="n"` (único origen al parsear: el
+  `colwidth="…"` en px de otros editores ProseMirror **ya no se lee**) + `style="--nf-colw: n"` (valor del
+  CSS). Lo emiten `mdTableToHtml` (en cada celda de la columna; vistas previas, resumen, solo lectura) y el
+  `renderHTML` del atributo en las celdas del editor (`columnWidthAttribute`, fusionado por TipTap con el
+  `style` de `textAlign`); `tableElToMd` lo lee de la celda de cabecera. En el esquema `plain` el atributo
+  ni se lee ni se escribe. Helpers: `widthFromDashes` (lectura: ≤9 → null, >80 → 80), `clampColumnWidth`
+  (comandos/arrastre: redondea y acota a 10…80), `minWidthForHeader` (mínimo del arrastre), `widthOfColwidth`, `widthFromPx`/`pxFromWidth` (1 guion =
+  0,5 × font-size).
+- **`<table>` sin anchos en px (`NoteTable`, `editorExtensions.ts`):** el `renderHTML` de TipTap ponía
+  `style="width: Npx"` en la `<table>` cuando todas las columnas tienen `colwidth` (y `width` en cada
+  `<col>`): con guiones como unidad rompía la caja de scroll (`width: max-content`). `NoteTable` siempre
+  renderiza como TipTap lo hace **sin** anchos (`min-width` de `cellMinWidth` × columnas en la `<table>` y
+  en cada `<col>`), así el HTML de una tabla sin anchos no cambia (y `tableElToMd` ignora el `colgroup`).
+- **Opción `columnWidths` de `htmlFromMarkdown`** (`MarkdownHtmlOptions`, por defecto true; siempre off con
+  `plain`): false en el pegado de markdown como texto y en el chat. Los **snippets** sí leen anchos
+  (`snippetCommands.ts`: los escribe el usuario, se leen como una nota; solo off en el esquema `plain`).
+  Ver contextos en `note-format.md`.
 - **Insertar (`src/lib/tableInsert.ts`, pura; tests en `tests/lib/tableInsert.test.ts` sobre el esquema
   real):** `insertTableTr(state, size)` = una transacción (un `Ctrl+Z`), siempre con cabecera y
   `rows` **contando** la cabecera; caret en la primera celda de cabecera. `tableInsertPos(selection)`
@@ -1536,20 +1629,37 @@ columna (`:---:`), saltos de celda como `<br>`, sin anchos guardados; `Table` de
   tabla"), que incluye *Delete table*. **Slash:** `/table` (keywords sin traducir
   `TABLE_SLASH_KEYWORDS` = `table`/`tabla`/`grid`) inserta 3×3; solo se ofrece donde
   `canInsertTableHere` (fuera de listas y tablas); también en notas vinculadas (es markdown estándar).
+- **CSS del ancho (`index.css` § Tables, tras el `th`):** `td[data-nf-colw]`/`th[data-nf-colw]` →
+  `width = min-width = var(--nf-colw) × 0.5em` (en el `th`, que va a `0.8em`, × `0.625em`, para que ambas
+  filas midan lo mismo), `max-width: none` (sin el 28em/35em de las automáticas), `box-sizing:
+  border-box`. Como en cualquier tabla, la columna mide máx(`width`, min-content de sus celdas): el `td`
+  lleva `overflow-wrap: anywhere` (su min-content es un carácter: un texto largo nunca ensancha la columna)
+  y el `th` `overflow-wrap: normal` (su min-content es su palabra más larga: **la cabecera nunca se parte
+  letra a letra**). Resultado: máx(n guiones, palabra más larga de la cabecera). Hasta el 2026-11-16 el
+  mínimo era 6 guiones con `max-width` y `anywhere` también en el `th`, y una columna «Seats» a 3em dejaba
+  «SE / AT / S». Medido en Chromium (Electron): la celda mide exactamente n × 0,5 × font-size (también 80 =
+  40em y en las tarjetas del resumen, `.note-grid-body`, 10px), un cuerpo con una palabra larga no la
+  ensancha, y una cabecera con una palabra más ancha que n mide su min-content (a 0,01px de
+  `headerMinContentPx`). Caso residual aceptado: cabecera renombrada luego con una palabra más larga, o
+  ancho escrito a mano → se ve más ancha que lo guardado, sin cortes. Igual con una **imagen en línea** en
+  una celda más ancha que la columna: su min-content la ensancha por encima de lo guardado (el markdown no
+  cambia). Y con una cabecera **vacía**: su placeholder «Column» es un `::before` que el `Range` de
+  `headerMinContentPx` no mide; con letra pequeña puede verse un par de px más ancha. El par `data-nf-colw-live` /
+  `--nf-colw-live` (vista previa del arrastre) va después y gana al ancho propio.
 - **CSS (`index.css` § Tables):** sin `div.tableWrapper` (TipTap solo lo crea con `resizable: true`
   vía `TableView`; `renderWrapper` cambiaría la salida de `getHTML()`), el propio `<table>` es
   `display: block; width: max-content; max-width: 100%; overflow-x: auto` (la caja de scroll) y el
   **`<tbody>` es la caja de tabla** (`display: table; width: max-content`): TipTap pone todas las filas
   (cabecera incluida) en el `<tbody>` (antes va un `<colgroup>` que queda en su propia caja anónima,
-  sin alto) y el parser HTML lo añade al HTML estático del chat y las previews. Columnas al ancho del
+  sin alto) y el parser HTML lo añade al HTML estático del chat y las previews. Columnas sin ancho: al del
   contenido entre `min-width: 5em` y `max-width: 28em` de las celdas (`overflow-wrap: break-word`;
   Chromium respeta ambos en celdas); si no cabe, **conserva esos anchos y hace scroll horizontal**.
   Hasta 2026-11 las filas iban en la caja de tabla anónima del `<table>` en bloque, que hace
   shrink-to-fit al ancho disponible: estrechaba las columnas hasta el mínimo antes de hacer scroll
   ("Known / issues" en dos líneas, filas altas). Mismas reglas en chat (`.chat-md`), previews
   (`.note-preview`) y stickies; en las tarjetas del resumen (`.note-grid-body`, sin puntero ni scroll)
-  el `<tbody>` vuelve a `table-row-group` (las columnas se estrechan para enseñar más) y la tabla se
-  recorta (`overflow: hidden`). **Aspecto** (prototipo aprobado: cabecera "Etiqueta"): `th` en
+  el `<tbody>` vuelve a `table-row-group` (las columnas automáticas se estrechan para enseñar más; las de
+  ancho lo conservan) y la tabla se recorta (`overflow: hidden`). **Aspecto** (prototipo aprobado: cabecera "Etiqueta"): `th` en
   `--text-muted`, `0.8em`, `600`, mayúsculas con `letter-spacing: 0.07em`, sin fondo (fuera el
   `--bg-2` + `--cyan` y el cebreado de filas de antes); sus `min/max-width` van en `6.25em/35em`
   (= 5em/28em ÷ 0.8) para que la columna mida igual que con celdas del cuerpo; en el chat el `th` va a

@@ -4,7 +4,7 @@ import type { Editor } from '@tiptap/react'
 import {
   AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowDown01, ArrowDown10, ArrowDownAZ, ArrowDownZA,
   ArrowLeft, ArrowRight, ArrowUp, BetweenHorizontalEnd, BetweenHorizontalStart, BetweenVerticalEnd,
-  BetweenVerticalStart, Copy, Eraser, Lock, Table as TableIcon, Trash2, type LucideIcon,
+  BetweenVerticalStart, Copy, Eraser, FoldHorizontal, Lock, Table as TableIcon, Trash2, type LucideIcon,
 } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import {
@@ -28,6 +28,7 @@ const ICONS: Record<TableMenuIcon, LucideIcon> = {
   sortDesc: ArrowDownZA,
   sortNumAsc: ArrowDown01,
   sortNumDesc: ArrowDown10,
+  resetWidth: FoldHorizontal,
   clear: Eraser,
   delete: Trash2,
   deleteTable: TableIcon,
@@ -73,7 +74,7 @@ export function TableMenu({ editor, menu, onClose }: { editor: Editor; menu: Tab
   }, [editor])
 
   const tablePos = tablePosOfDom(editor.view, menu.table)
-  const entries = tablePos === null ? [] : tableMenuEntries(editor, tablePos, menu.spec, t)
+  const entries = tablePos === null ? [] : tableMenuEntries(editor, tablePos, menu.spec, t, { columnWidths: !!menu.columnWidths })
   const items = focusableItems(entries)
   const empty = entries.length === 0
 
