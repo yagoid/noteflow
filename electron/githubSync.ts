@@ -1186,19 +1186,41 @@ function resetRemoteState(): void {
     delete next.lastSync
     delete next.remoteFormatMigratedAt
     syncSettings = next
-    const settings = readSettings()
-    settings.githubSync = syncSettings
-    writeSettings(settings)
+    // Strict read: the lenient readSettings() answers {} for an unreadable file,
+    // and writing that back would wipe every other key.
+    const settings = readSettingsStrict(getSettingsPath())
+    if (settings !== null) {
+      settings.githubSync = syncSettings
+      writeSettings(settings)
+    }
   }
 }
 
-/** Writes the connected repo as this dir's GitHub origin (+ resets the per-remote state when it changed). */
+/**
+ * Records the connected repo as this dir's GitHub origin; with `resetRemote`
+ * (the identity changed) the previous remote's state is dropped FIRST, so a
+ * crash in between can never leave "origin = B" next to A's journal/SHAs/
+ * lastSync (the next run would see the same identity and keep them). Returns
+ * false — nothing written, and the callers keep the gate closed — when
+ * settings.json can't be read or written.
+ */
 function adoptGithubOrigin(id: SyncIdentity, resetRemote: boolean): boolean {
+  if (readSettingsStrict(getSettingsPath()) === null) {
+    console.error('[GitHubSync] could not record the notes dir origin (settings.json unreadable)')
+    return false
+  }
+  if (resetRemote) {
+    try {
+      resetRemoteState()
+    } catch (err) {
+      console.error('[GitHubSync] could not reset the previous remote state:', String(err))
+      return false
+    }
+  }
   if (!writeSyncOriginFile(getSettingsPath(), id)) {
     console.error('[GitHubSync] could not record the notes dir origin (settings.json unreadable or unwritable)')
     return false
   }
-  if (resetRemote) resetRemoteState()
   return true
 }
 
@@ -1221,8 +1243,9 @@ function recordRepoId(owner: string, repo: string, id: number): void {
  * feature) and "another remote but no synced notes on disk" (which also
  * resets the previous remote's state). With NoteFlow Cloud enabled GitHub is a
  * write-only mirror and the dir belongs to the Cloud account: never asks and
- * never touches syncOrigin.github. Fail-closed: an unreadable settings.json
- * blocks ('unreadable'), a notes dir that can't be listed counts as "has notes".
+ * never touches syncOrigin.github. Fail-closed: an unreadable settings.json,
+ * or an adoption that could not be written, blocks ('unreadable' — retried on
+ * the next evaluation); a notes dir that can't be listed counts as "has notes".
  */
 export function refreshOriginGate(): OriginGateState {
   const s = syncSettings ?? loadSyncSettings()
@@ -1251,8 +1274,13 @@ export function refreshOriginGate(): OriginGateState {
             next: { owner: identity.owner, repo: identity.repo },
           },
         }
+      } else if (decision.adopt && !adoptGithubOrigin(identity, decision.reason === 'changed-empty')) {
+        // Fail-closed: an origin that could not be recorded must not open the
+        // gate — for 'changed-empty' the next run would see "another remote,
+        // now with notes" (or sync with the previous remote's state); for
+        // 'no-origin' nothing would remember which remote these notes are from.
+        next = { state: 'unreadable' }
       } else {
-        if (decision.adopt) adoptGithubOrigin(identity, decision.reason === 'changed-empty')
         next = { state: 'clear' }
       }
     }
@@ -1883,6 +1911,10 @@ export async function pullNotes(notesDir: string): Promise<{
   if (refreshOriginGate() !== 'clear') {
     return { pulled: 0, deleted: 0, errors: [], updatedFiles: [], hadDeletions: false, hadMetadataChanges: false, incomplete: true }
   }
+  // Re-read AFTER the gate: if it just adopted another remote ("changed-empty")
+  // it reset lastSync / needsFullReconcile — the snapshot `s` still holds the
+  // previous remote's lastSync, which would arm the deletion rule against it.
+  const live = syncSettings ?? s
   let pulled = 0
   let deleted = 0
   // Files this pull changed on disk (written or removed) — for the activity history.
@@ -1894,10 +1926,10 @@ export async function pullNotes(notesDir: string): Promise<{
   // SyncPullResult.incomplete). Deliberately NOT an `errors` entry: those are shown
   // verbatim in Settings → Sync, and a transient GET failure isn't user-actionable.
   let incomplete = false
-  const previousLastSync = s.lastSync
+  const previousLastSync = live.lastSync
   // Read the one-shot reconcile flag BEFORE the pull touches the settings: this
   // pull must not trust `lastSync` (GitHub was paused while Cloud was on).
-  const needsFullReconcile = s.needsFullReconcile === true
+  const needsFullReconcile = live.needsFullReconcile === true
   const state = getState()
   let stateChanged = false
   notesDirPath = notesDir
@@ -2286,7 +2318,7 @@ export async function pullNotes(notesDir: string): Promise<{
     // `cloudEnabled` is read fail-closed and as late as possible, so Cloud being
     // switched on mid-pull still disarms the rule.
     const cloudEnabled = isCloudSyncEnabledFailClosed()
-    const lastSyncTime = s.lastSync ? new Date(s.lastSync).getTime() : null
+    const lastSyncTime = live.lastSync ? new Date(live.lastSync).getTime() : null
     const runDeletionRule = shouldRunDeletionRule(lastSyncTime, needsFullReconcile, cloudEnabled, remoteIsV2, truncated)
     if (runDeletionRule && lastSyncTime !== null) { // null already excluded above; repeated for narrowing
       for (const dir of listNoteDirs(notesDir)) {

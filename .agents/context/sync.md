@@ -401,13 +401,19 @@ Las rutas calientes usan el valor cacheado (`originGateBlocked()`).
   cuenta como pull limpio para la caducidad de notas temporales). `SyncStatus.originChoice` =
   `{previous: {owner, repo}, next: {owner, repo}}` solo en `ask`; el cambio se emite por el
   `statusListener` (→ `sync:status-changed`).
-- **`unreadable`** (`settings.json` existe y no parsea): bloquea sin diálogo; un error de lectura nunca
-  "abre" la puerta.
+- **`unreadable`** (`settings.json` existe y no parsea, **o** una adopción no se pudo escribir — EPERM,
+  disco lleno, el CLI escribiendo a la vez, que `writeSettingsFile` no es atómico): bloquea sin diálogo y
+  se reintenta en la siguiente evaluación; un error de lectura o escritura nunca "abre" la puerta (vale
+  para `changed-empty` y también para `no-origin`).
 - **Con NoteFlow Cloud habilitado** GitHub es espejo de solo escritura y el dueño del dir es la cuenta de
   Cloud: la puerta es `clear` y **no toca** `syncOrigin.github`.
 - **Adopciones `proceed` se escriben YA** (en la decisión, antes del pull): un crash a mitad no puede
   parecer luego un cambio de identidad. `changed-empty` y la resolución **resetean el estado del remoto
-  anterior** (`resetRemoteState`): journal + caché de shas (`sync-state.json` — un `deleteDir` pendiente
+  anterior** (`resetRemoteState`) **antes** de escribir el origen (un crash entre medias nunca deja
+  "origen = B" junto al estado de A; `adoptGithubOrigin` comprueba antes que `settings.json` se lee y el
+  reset escribe con lectura estricta para no vaciar el fichero). `pullNotes` relee `syncSettings` tras
+  evaluar la puerta (si esta adoptó dentro del propio pull, `lastSync`/`needsFullReconcile` ya son los
+  reseteados, no los del remoto anterior). Se resetea: journal + caché de shas (`sync-state.json` — un `deleteDir` pendiente
   de A nunca debe ejecutarse contra B, y los shas de A no son base para B), timers de push, avisos de
   conflicto, `lastSync` (con el `lastSync` de B que dejó el CLI, la regla de borrado del pull **borraría**
   las notas locales que B no tiene) y `remoteFormatMigratedAt`.
@@ -423,7 +429,11 @@ reentrada):
 - `merge` → `githubSync.resolveOriginChoice('merge')`: adopta el origen (el usuario consintió), resetea
   el estado del remoto anterior, abre la puerta, `pullNotes` y `pushAllNotes` en segundo plano (el
   connect de siempre); `main.ts` hace `broadcastPullResult`, autosync, drain y migración v2.
-- `replace` → primero `archiveLocalNotesForOriginSwitch(label)` en `main.ts` (abajo); si falla →
+- `replace` → primero `archiveLocalNotesForOriginSwitch(label, origin, {stillValid})` en `main.ts`
+  (abajo). Tras las esperas (ventanas, guardados pendientes: hasta ~3,5 s) y justo antes del archivo
+  síncrono, `stillValid` re-comprueba que la elección sigue pendiente y es la misma (mismo
+  `previous`/`next`, conectado, Cloud apagado); si no → `error: 'not-pending'` sin mover nada. Si el
+  archivo falla →
   `{ok:false, error:'archive-failed', detail}` **sin pull** y la puerta sigue pendiente. Si va bien,
   `resolveOriginChoice('replace')` = lo mismo que `merge` **sin** `pushAllNotes`. `resolveOriginChoice`
   comprueba el estado **cacheado** (re-derivarlo tras archivar daría "sin notas" → `changed-empty`) y
@@ -443,7 +453,8 @@ de notas, qué se movió/filtró/copió — para un futuro "restaurar"). **`ui-s
 queda** (apariencia del dispositivo). Las `localOnly` y las vinculadas no se tocan.
 - **Metadatos que también describen notas que se quedan:** los grupos/carpetas de una nota `localOnly`
   o de una **vinculada** (su `group`/`folder` va en `linked-notes.json` pero el id apunta a
-  `groups.json`/`folders.json`), su sitio en `note-order.json` o los colores de sus secciones. Mover el
+  `groups.json`/`folders.json`), su sitio en `note-order.json` o los colores de sus secciones (en una
+  vinculada, su única sección = nombre del fichero, `sectionName`). Mover el
   fichero entero los dejaría colgando, así que se **archiva el original completo** y se deja en su sitio
   una **versión filtrada** con solo las entradas que usan las notas que se quedan (una carpeta conservada
   arrastra su grupo; `filterMetadataForKept`/`collectKeptRefs`, puros). Nada usado → no queda fichero.
@@ -461,8 +472,8 @@ queda** (apariencia del dispositivo). Las `localOnly` y las vinculadas no se toc
   backend): cierra las stickies y ventanas de sección de esas notas (con `close()`, su `beforeunload`
   vuelca lo pendiente) y espera, vuelca los guardados pendientes de la ventana principal
   (`flushMainWindowEdits`; el renderer además hace `settleNoteWrites()` antes de invocar), marca los
-  movimientos como escrituras internas para el watcher, pasa los `group`/`folder` de las vinculadas como
-  `keep`, archiva, quita cada carpeta del índice semántico (`aiIndex.removeFromIndex`; metadatos →
+  movimientos como escrituras internas para el watcher, pasa los `group`/`folder`/`sectionName` de las vinculadas
+  como `keep` (`KeepRefs.groupIds/folderIds/sectionNames`), archiva, quita cada carpeta del índice semántico (`aiIndex.removeFromIndex`; metadatos →
   `markStaleUnknown`) y emite `notes-updated` sin ruta (recarga notas, grupos, alarmas). **Un guardado
   tardío no recrea una nota archivada:** `applyNoteWrite` rechaza escribir en una carpeta archivada en
   esta sesión mientras no exista (si un pull la trae de vuelta, se escribe normal). Notas temporales:

@@ -171,6 +171,11 @@ function collectKeptRefs(notesDir, keptDirs, extra, foldersJson) {
     for (const id of extra?.noteIds ?? [])
         if (id)
             kept.noteIds.add(id);
+    for (const name of extra?.sectionNames ?? []) {
+        const key = typeof name === 'string' ? name.trim().toLowerCase() : '';
+        if (key)
+            kept.sectionNames.add(key);
+    }
     if (foldersJson !== null) {
         try {
             const folders = JSON.parse(foldersJson);

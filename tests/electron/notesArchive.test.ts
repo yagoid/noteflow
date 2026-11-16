@@ -110,10 +110,10 @@ describe('archiveSyncedNotes', () => {
     writeRoot('groups.json', [{ id: 'g-a', name: 'A' }, { id: 'g-w', name: 'W' }, { id: 'g-l', name: 'Linked' }, { id: 'g-f', name: 'Of linked folder' }])
     writeRoot('folders.json', [{ id: 'f-w', name: 'FW', groupId: 'g-w' }, { id: 'f-l', name: 'FL', groupId: 'g-f' }, { id: 'f-x', name: 'FX', groupId: 'g-a' }])
     writeRoot('note-order.json', { ungrouped: ['aaaa1111', 'cccc3333'], 'group:g-a': ['aaaa1111'] })
-    writeRoot('section-colors.json', { work: '--accent', tips: '#ff0000' })
+    writeRoot('section-colors.json', { work: '--accent', tips: '#ff0000', 'readme.md': '#00ff00', other: '--accent-2' })
     const originals = Object.fromEntries(['groups.json', 'folders.json', 'note-order.json', 'section-colors.json'].map((f) => [f, fs.readFileSync(path.join(notesDir, f), 'utf-8')]))
 
-    const res = archiveSyncedNotes({ notesDir, archiveRoot, label: 'github-x', now: NOW, keep: { groupIds: ['g-l'], folderIds: ['f-l'] } })
+    const res = archiveSyncedNotes({ notesDir, archiveRoot, label: 'github-x', now: NOW, keep: { groupIds: ['g-l'], folderIds: ['f-l'], sectionNames: [' README.md '] } })
 
     expect(res.filteredFiles.sort()).toEqual(['folders.json', 'groups.json', 'note-order.json', 'section-colors.json'])
     // The originals are archived complete…
@@ -124,7 +124,8 @@ describe('archiveSyncedNotes', () => {
     expect(readJson(path.join(notesDir, 'groups.json')).map((g: { id: string }) => g.id)).toEqual(['g-w', 'g-l', 'g-f'])
     expect(readJson(path.join(notesDir, 'folders.json')).map((f: { id: string }) => f.id)).toEqual(['f-w', 'f-l'])
     expect(readJson(path.join(notesDir, 'note-order.json'))).toEqual({ ungrouped: ['cccc3333'] })
-    expect(readJson(path.join(notesDir, 'section-colors.json'))).toEqual({ tips: '#ff0000' })
+    // A linked note's single section (its file name) keeps its colour too.
+    expect(readJson(path.join(notesDir, 'section-colors.json'))).toEqual({ tips: '#ff0000', 'readme.md': '#00ff00' })
   })
 
   it('an empty notes dir (or only local-only notes) archives nothing but still writes a manifest', () => {

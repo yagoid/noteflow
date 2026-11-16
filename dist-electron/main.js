@@ -2140,15 +2140,25 @@ function closeWindowsShowingNotes(noteIds, timeoutMs = 2000) {
         }
     });
 }
+/** The switch that asked for the archive was no longer pending when it was about to run. */
+class OriginSwitchAbortedError extends Error {
+    constructor() {
+        super('the origin choice changed before the notes were archived');
+        this.name = 'OriginSwitchAbortedError';
+    }
+}
 /**
  * Moves the notes that would sync (and their metadata) to a new local archive
  * — see notesArchive.ts — and brings the app's state in line: the editors'
  * pending saves land first (they are archived with the note), windows showing
  * those notes are closed, the watcher ignores the moves, the AI index forgets
  * them and every window reloads. Throws NotesArchiveError when nothing could be
- * moved (everything undone): the caller must not pull then.
+ * moved (everything undone): the caller must not pull then. `stillValid` is
+ * checked right before the (synchronous) archive, after the waits for windows
+ * and pending saves: if the switch is no longer what the user chose, nothing
+ * is moved (OriginSwitchAbortedError).
  */
-async function archiveLocalNotesForOriginSwitch(label, origin) {
+async function archiveLocalNotesForOriginSwitch(label, origin, opts = {}) {
     const before = (0, localOnlyNotes_1.listSyncedNoteDirs)(NOTES_DIR);
     const ids = new Set();
     for (const dir of before) {
@@ -2158,6 +2168,8 @@ async function archiveLocalNotesForOriginSwitch(label, origin) {
     }
     await closeWindowsShowingNotes(ids);
     await flushMainWindowEdits();
+    if (opts.stillValid && !opts.stillValid())
+        throw new OriginSwitchAbortedError();
     // The watcher must not echo the moves back as external edits.
     for (const dir of (0, localOnlyNotes_1.listSyncedNoteDirs)(NOTES_DIR)) {
         markInternalWrite(dir);
@@ -2169,8 +2181,9 @@ async function archiveLocalNotesForOriginSwitch(label, origin) {
     }
     for (const f of notesArchive.ARCHIVED_METADATA_FILES)
         markInternalWrite(f);
-    // Linked notes (outside the notes dir) keep their group/folder: those
-    // entries stay in the filtered groups.json / folders.json.
+    // Linked notes (outside the notes dir) keep their group/folder and the colour
+    // of their single section: those entries stay in the filtered groups.json /
+    // folders.json / section-colors.json.
     const linked = linkedNotes.list();
     const result = notesArchive.archiveSyncedNotes({
         notesDir: NOTES_DIR,
@@ -2180,6 +2193,7 @@ async function archiveLocalNotesForOriginSwitch(label, origin) {
         keep: {
             groupIds: linked.map((n) => n.group).filter((g) => typeof g === 'string'),
             folderIds: linked.map((n) => n.folder).filter((f) => typeof f === 'string'),
+            sectionNames: linked.map((n) => n.sectionName).filter((name) => typeof name === 'string'),
         },
     });
     for (const dir of result.movedDirs) {
@@ -2906,10 +2920,28 @@ electron_1.ipcMain.handle('sync:resolve-origin', async (_event, choice) => {
         if (choice === 'replace') {
             const previous = githubSync.getStoredOriginIdentity();
             const label = previous ? (0, syncOrigin_1.identityArchiveLabel)(previous) : 'github';
+            const chosen = githubSync.getOriginChoice();
+            // Up to ~3.5 s of waits (windows closing, pending saves) happen before the
+            // archive: by then a disconnect, Cloud being enabled or another
+            // connection may have changed what the user answered to.
+            const stillValid = () => {
+                if (cloudSync.isCloudSyncEnabled() || !githubSync.getSyncStatus().connected)
+                    return false;
+                if (githubSync.refreshOriginGate() !== 'ask')
+                    return false;
+                const now = githubSync.getOriginChoice();
+                return !!now &&
+                    now.previous.owner === chosen.previous.owner && now.previous.repo === chosen.previous.repo &&
+                    now.next.owner === chosen.next.owner && now.next.repo === chosen.next.repo;
+            };
             try {
-                await archiveLocalNotesForOriginSwitch(label, previous ?? undefined);
+                await archiveLocalNotesForOriginSwitch(label, previous ?? undefined, { stillValid });
             }
             catch (err) {
+                if (err instanceof OriginSwitchAbortedError) {
+                    emitSyncStatusChanged();
+                    return { ok: false, error: 'not-pending' };
+                }
                 const detail = err instanceof notesArchive.NotesArchiveError && !err.rolledBack
                     ? `${err.message} — kept in ${err.archiveDir}: ${err.stranded.join('; ')}`
                     : err instanceof Error ? err.message : String(err);

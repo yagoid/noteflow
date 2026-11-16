@@ -94,7 +94,17 @@ function fakeRequest(opts: { hostname: string; method: string; path: string }, c
 
 vi.mock('https', () => ({ default: { request: fakeRequest }, request: fakeRequest }))
 
-const env = { userData: '' }
+const env = { userData: '', failSettingsWrites: false }
+// settings.json writes fail on demand (EPERM, disk full, a lock held by the CLI…).
+vi.mock('../../electron/settingsFile', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../electron/settingsFile')>()
+  return {
+    writeSettingsFile: (file: string, data: Record<string, unknown>) => {
+      if (env.failSettingsWrites) throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+      return actual.writeSettingsFile(file, data)
+    },
+  }
+})
 vi.mock('electron', () => ({
   app: { getPath: () => env.userData },
   safeStorage: { isEncryptionAvailable: () => false, encryptString: () => Buffer.from(''), decryptString: () => '' },
@@ -171,6 +181,7 @@ beforeEach(async () => {
   notesDir = path.join(tmp, 'notes')
   fs.mkdirSync(env.userData, { recursive: true })
   fs.mkdirSync(notesDir, { recursive: true })
+  env.failSettingsWrites = false
   repos.clear()
   mutations.length = 0
   treeGets.length = 0
@@ -377,6 +388,45 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-b' })
     expect(gh.getSyncStatus().originChoice).toBeUndefined()
     expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a' })
+  })
+
+  it('an origin that cannot be recorded keeps the gate closed (changed-empty and no-origin), with no requests', async () => {
+    await connectedToAThenDisconnected()
+    for (const d of ['mine-1111', 'a-note-2222']) fs.rmSync(path.join(notesDir, d), { recursive: true })
+    // The CLI left the app connected to B (with B's lastSync); no synced notes on disk.
+    writeSettings({
+      ...readSettings(),
+      githubSync: { enabled: true, encryptedToken: Buffer.from('tok').toString('base64'), owner: 'me', repo: 'notes-b', repoId: 202, lastSync: '2026-11-01T00:00:00.000Z' },
+    })
+    env.failSettingsWrites = true
+    await freshModule()
+    gh.loadSyncSettings()
+    expect(gh.isOriginGateBlocked()).toBe(true)
+    expect(gh.getSyncStatus().originChoice).toBeUndefined() // nothing to ask: just blocked
+    expect((await gh.pullNotes(notesDir)).incomplete).toBe(true)
+    expect(treeGets).toEqual([])
+    expect(readSettings().syncOrigin.github.repo).toBe('notes-a')
+    // Once settings.json is writable again the next evaluation adopts B and syncs.
+    env.failSettingsWrites = false
+    const pull = await gh.pullNotes(notesDir)
+    expect(pull.errors).toEqual([])
+    expect(treeGets).toEqual(['notes-b'])
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 202, owner: 'me', repo: 'notes-b' })
+    expect(readSettings().githubSync.lastSync).not.toBe('2026-11-01T00:00:00.000Z') // B's stale lastSync was dropped
+    expect(localDirs()).toEqual(['b-note-3333', 'welcome-9999'])
+
+    // no-origin: a live connection from before this feature, origin never recorded.
+    const s = readSettings()
+    delete s.syncOrigin
+    writeSettings(s)
+    treeGets.length = 0
+    env.failSettingsWrites = true
+    await freshModule()
+    gh.loadSyncSettings()
+    expect(gh.isOriginGateBlocked()).toBe(true)
+    expect((await gh.pullNotes(notesDir)).incomplete).toBe(true)
+    expect(treeGets).toEqual([])
+    expect(mutations).toEqual([])
   })
 
   it('an unreadable settings.json blocks syncing (fail-closed) without asking', async () => {

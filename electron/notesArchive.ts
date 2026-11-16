@@ -86,6 +86,8 @@ export interface KeepRefs {
   groupIds?: Iterable<string>
   folderIds?: Iterable<string>
   noteIds?: Iterable<string>
+  /** Section names (any case/spacing — normalized here like the section-colors.json keys). */
+  sectionNames?: Iterable<string>
 }
 
 /** File-system primitives (injectable for tests: EXDEV, EBUSY…). */
@@ -213,6 +215,10 @@ export function collectKeptRefs(
   for (const id of extra?.groupIds ?? []) if (id) kept.groupIds.add(id)
   for (const id of extra?.folderIds ?? []) if (id) kept.folderIds.add(id)
   for (const id of extra?.noteIds ?? []) if (id) kept.noteIds.add(id)
+  for (const name of extra?.sectionNames ?? []) {
+    const key = typeof name === 'string' ? name.trim().toLowerCase() : ''
+    if (key) kept.sectionNames.add(key)
+  }
   if (foldersJson !== null) {
     try {
       const folders = JSON.parse(foldersJson) as unknown
@@ -335,7 +341,7 @@ export interface ArchiveOptions {
   label: string
   /** Stored as is in the manifest. */
   origin?: unknown
-  /** Extra references to keep in the filtered metadata (linked notes' groups/folders). */
+  /** Extra references to keep in the filtered metadata (linked notes' groups/folders/section names). */
   keep?: KeepRefs
   now?: Date
   /** Test hook. */

@@ -627,13 +627,13 @@ export interface SyncHistoryEntry {
   ok: boolean
 }
 
+/** The user's answer when the notes dir came from another remote (merge / use only the remote's notes / cancel). */
+export type OriginChoiceAction = 'merge' | 'replace' | 'cancel'
+
 // Backend-tagged snapshot of the LIVE sync provider (see electron/syncProvider.ts):
 // Cloud wins when enabled, else GitHub, else 'none'. Drives the titlebar sync
 // button (and its hover status card) so it routes to whichever backend is
 // active. Never carries key material.
-/** The user's answer when the notes dir came from another remote (merge / use only the remote's notes / cancel). */
-export type OriginChoiceAction = 'merge' | 'replace' | 'cancel'
-
 export interface ActiveSyncStatus {
   backend: 'github' | 'cloud' | 'none'
   active: boolean
