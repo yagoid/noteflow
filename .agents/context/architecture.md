@@ -49,6 +49,10 @@ noteflow/
 │   ├── cloudBaseStore.ts # Almacén direccionado por contenido del texto de las bases de sección de Cloud
 │   │                    #   (userData/cloud-base-content/<sha256>) para el diff3 de mergeSectionText — ver monetization.md
 │   ├── mirrorPlan.ts    # Lógica pura del espejo local→GitHub (plan + allowlist de borrado) — ver sync.md
+│   ├── syncOrigin.ts    # Origen del dir de notas por backend (settings.syncOrigin): decisión pura proceed/ask,
+│   │                    #   comparación de identidades, etiquetas, RMW del settings — testeada; ver sync.md "Origen del dir de notas"
+│   ├── notesArchive.ts  # Archivo local de las notas sincronizables ("usar solo las del remoto"): mover sin
+│   │                    #   borrar, EXDEV, rollback, metadatos filtrados, manifest — testeado; ver sync.md
 │   ├── syncHistory.ts   # Lógica pura del historial de actividad en memoria (gráfica de la tarjeta de sync) — ver sync.md
 │   ├── activityLog.ts   # Lógica pura del log de ediciones por día y dispositivo (userData/activity-log.json):
 │   │                    #   parse/dedupe/poda — testeada; lo persiste main (canales activity:*)
@@ -242,6 +246,8 @@ noteflow/
 │   │   ├── TitleBar.tsx                 # Barra de título personalizada (frameless);
 │   │   │                                #   el ⚙ abre la ventana de Ajustes (SettingsModal)
 │   │   ├── SyncStatusButton.tsx         # Botón ☁ de la titlebar + tarjeta de estado al hover
+│   │   ├── OriginChoiceDialog.tsx       # Diálogo "tus notas vienen de otro remoto" (fusionar / solo las del
+│   │                                    #   remoto / cancelar), por backend; lo monta TitleBar — ver sync.md
 │   │   ├── Settings/                    # Ventana de Ajustes unificada (overlay split nav+contenido)
 │   │   │   ├── SettingsModal.tsx        #   Contenedor: nav izquierda + panel derecho según sección
 │   │   │   ├── GeneralPanel.tsx         #   Idioma + gráfica de actividad + IA local (toggle/reindex) + perfil + skill del CLI
@@ -445,19 +451,21 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `window:set-size` | on | Redimensiona la ventana (usado por sticky) |
 | `window:set-always-on-top` | on | Alterna `alwaysOnTop` de la ventana emisora (sticky; chincheta de la ventana de chat) |
 | `window:fold-to-corner` / `window:unfold` | on | Anima el plegado/desplegado de stickies |
-| `sync:get-status` | handle | Estado del sync **GitHub** (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`, `conflictCopies?`, `conflictMerges?`) |
-| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, history?: [{at, files, ok}], filesToday?, conflictCopies?: {count, titles, at}, conflictMerges?: {count, titles, at}, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`; `conflictCopies` = aviso de copias de conflicto del backend activo, sea Cloud o GitHub; `conflictMerges` = notas fusionadas con marcas de conflicto ⚠️, mismo formato) |
+| `sync:get-status` | handle | Estado del sync **GitHub** (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`, `conflictCopies?`, `conflictMerges?`, `originChoice?: {previous: {owner, repo}, next: {owner, repo}}` — presente mientras el dir de notas viene de otro repo y no se ha elegido, ver `sync.md` "Origen del dir de notas") |
+| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar y su tarjeta de estado: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, pendingUploads, autoSyncIntervalMs?, history?: [{at, files, ok}], filesToday?, conflictCopies?: {count, titles, at}, conflictMerges?: {count, titles, at}, originChoice?: {previous, next}, github?: {owner, repo}, cloud?: {keysState, keysMode, realtimeConnected}}` (`originChoice` = etiquetas legibles — GitHub `owner/repo` — de una elección de origen pendiente del backend activo; espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`; `conflictCopies` = aviso de copias de conflicto del backend activo, sea Cloud o GitHub; `conflictMerges` = notas fusionadas con marcas de conflicto ⚠️, mismo formato) |
 | `sync:dismiss-conflict-copies` | handle | Descarta el aviso de **copias de conflicto** y de **fusiones con marcas** (`conflictMerges`) de la tarjeta del botón de sync (limpia el de **ambos** backends — `cloudSync`/`githubSync.dismissConflictCopies()` — y emite `cloud:status-changed` + `sync:status-changed`); las copias siguen siendo notas |
-| `sync:initiate` | handle | Inicia Device Flow OAuth (recibe `repo`); al completar → `sync-auth-complete` + autosync |
+| `sync:initiate` | handle | Inicia Device Flow OAuth (recibe `repo`); al completar → `sync-auth-complete` (`{ok, owner?, repo?, error?, pendingOriginChoice?}`) + autosync. Con `pendingOriginChoice: true` no hubo pull ni push ni migración: falta la elección de origen |
+| `sync:resolve-origin` | handle | `(choice: 'merge' \| 'replace' \| 'cancel')` → `{ok, error?, detail?}`. Resuelve la elección de origen pendiente de GitHub: `merge` = connect de siempre (pull + subir todo), `replace` = archiva lo local en `userData/notes-archive/` y luego pull (si el archivo falla → `error: 'archive-failed'`, sin pull, sigue pendiente), `cancel` = lo mismo que `sync:disconnect`. Otros `error`: `invalid`, `busy`, `not-pending`, `settings-unreadable`, `settings-unwritable`, `not-connected` — ver `sync.md` "Origen del dir de notas" |
+| `sync:archives-status` / `sync:open-archives` | handle | `{hasArchives}` = existe alguna copia en `userData/notes-archive/` (carpetas con `manifest.json`) / abre esa carpeta con `shell.openPath` (`{ok}`) — Ajustes → Sync → GitHub |
 | `sync:cancel-auth` | handle | Cancela un Device Flow en curso |
 | `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings y emite `sync:status-changed` (`disconnectGitHub` solo lo emite si cambia `initialPullStatus`). Después borra la copia del token del CLI (`cliGithubToken`) si quedó huérfana (`cliConnect.cleanupAfterAppGithubDisconnect`; en Windows el `githubSync` borrado era también el del CLI) |
 | `cli-connect:get-status` | handle | Ajustes → Sync → "Connect the CLI too": qué tiene el CLI, leído de **su** `settings.json` → `{available, cloud: {connected, email?}, github: {connected, owner?, repo?, canDisconnect}}` (`available` = se encontró el CLI empaquetado; siempre `false` en la versión Store, donde la UI ni muestra la sección). Cloud = presencia de `cliAccount` (nunca se lee su refresh token). Detalle en `patterns.md` § CLI "Conectar también el CLI" |
 | `cli-connect:cloud-send-code` / `cli-connect:cloud-verify` | handle | Cloud, pasos 1 y 2: ejecuta el CLI empaquetado (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`) con `cloud login <email> --send-code` y `cloud login <email> --code <código> --no-pull`. El email es el de la cuenta de la app (lo pone main); el código se valida en main (`^\d{6,10}$` tras quitar espacios/guiones) antes de llegar al argv → `{ok:true, status} \| {ok:false, error, detail?}` (`error`: `invalidCode`/`rateLimited`/`network`/`notSignedIn`/`cliMissing`/`failed`; `detail` = línea `Error:` del CLI) |
 | `cli-connect:cloud-disconnect` | handle | `cloud logout` del CLI (revoca solo su sesión, `scope=local`) |
 | `cli-connect:github-connect` / `cli-connect:github-disconnect` | handle | GitHub: copia owner/repo/token de la app al CLI (`githubSync.getConnectionForCli()`, tras confirmar en la UI) o lo quita. **Nunca** escribe el `githubSync` del fichero en Windows (es el de la app): ahí usa la clave propia del CLI `cliGithubToken`. `error: 'notConnected' \| 'noRepo' \| 'mismatch' \| 'failed'` |
-| `sync:pull` | handle | Sync manual de **GitHub** (Settings → Sync → GitHub "Sync now"): drena el journal y luego pull. Rechazado con Cloud activo (`error: 'cloud-enabled'`, ver `sync.md`) |
+| `sync:pull` | handle | Sync manual de **GitHub** (Settings → Sync → GitHub "Sync now"): drena el journal y luego pull. Rechazado con Cloud activo (`error: 'cloud-enabled'`, ver `sync.md`); con una elección de origen pendiente no sincroniza nada (`error: 'origin-choice-pending'`) |
 | `sync:pull-active` | handle | Sync manual enrutado al backend **activo** (Cloud si `enabled`, GitHub si no): pull **y** drain del journal (ver `sync.md`) — lo usa el botón de la titlebar |
-| `sync:mirror-to-github` | handle | **Espejo local → repo**: deja GitHub como copia exacta del disco (sube lo que difiere, borra lo que ya no existe). **Solo con Cloud habilitado** (gate en `main.ts`; si no → `{ok:false, error:'cloud-required'}`). No cambia nada local — ver `sync.md` |
+| `sync:mirror-to-github` | handle | **Espejo local → repo**: deja GitHub como copia exacta del disco (sube lo que difiere, borra lo que ya no existe). **Solo con Cloud habilitado** (gate en `main.ts`; si no → `{ok:false, error:'cloud-required'}`; `'origin-choice-pending'` es defensa en profundidad del motor, no se da con Cloud activo). No cambia nada local — ver `sync.md` |
 | `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsKnown, entitlementsFetchedAt, sessionLocked, aiCheckoutConfigured, cloudCheckoutConfigured, bundleCheckoutConfigured, hasBillingSubscription, bundleUpgradeAvailable}`; `entitlementsKnown: false` = desconocidas, no "sin plan" (ver `monetization.md` § 2); `hasBillingSubscription` = tiene/tuvo una suscripción de Lemon Squeezy, gate de "Manage subscription"; `bundleUpgradeAvailable` = una sola de AI/Cloud vía una sola suscripción de LS activa → el Bundle se ofrece como cambio de plan) — **nunca** tokens |
 | `account:request-otp` | handle | Envía el código OTP (8 dígitos) por email (Supabase GoTrue, `create_user: true`) |
 | `account:verify-otp` | handle | Verifica `(email, code)` → guarda sesión (refresh token cifrado en `settings.account`) + primer fetch de entitlements |
@@ -666,7 +674,12 @@ Estructura de `settings.json`:
     "encryptedToken": "<cifrado con safeStorage o base64 fallback>",
     "owner": "username",
     "repo": "noteflow-notes",
+    "repoId": 123456789,
     "lastSync": "2026-03-25T10:00:00.000Z"
+  },
+  "syncOrigin": {
+    "github": { "repoId": 123456789, "owner": "username", "repo": "noteflow-notes" },
+    "cloud": { "userId": "<uuid de auth.users>" }
   },
   "account": {
     "email": "user@example.com",
@@ -717,6 +730,16 @@ Estructura de `settings.json`:
 > fusiona el patch tal cual, sin sanear: el renderer valida al leer): nota/sección activas, grupos y
 > carpetas colapsados y `sidebarMode` (`'pinned'` | `'floating'`, ausente = fijado; ver `patterns.md`
 > "Sidebar flotante").
+> `syncOrigin` = **origen del dir de notas** por backend: el remoto con el que este dispositivo
+> reconcilió por última vez sus notas (GitHub: `repoId` numérico de la API — sobrevive a renombrados —
+> + `owner`/`repo`; Cloud: `userId`). Lo escriben la app (y lo leerán Cloud y el CLI) con
+> read-modify-write sobre el fichero; **`disconnectGitHub` no lo borra**. Un cambio de identidad con
+> notas sincronizables en disco bloquea el sync hasta que el usuario elige (ver `sync.md` "Origen del
+> dir de notas"). `githubSync.repoId` = id numérico del repo conectado (se guarda al conectar; las
+> conexiones anteriores lo reciben en su siguiente pull).
+> Las **copias locales** de "Usar solo las notas del remoto" viven en `userData/notes-archive/<etiqueta>-<ISO
+> con ':'→'-'>/` (`manifest.json` + `notes/` con las carpetas de nota y los json movidos) — fuera del dir
+> de notas, nunca se sincronizan ni se borran solas (`electron/notesArchive.ts`).
 > Los **journals de sync** viven en `userData/sync-state.json` (GitHub) y
 > `userData/cloud-sync-state.json` (NoteFlow Cloud; guarda también las **bases** de la fusión en tres
 > vías por fichero, ver `monetization.md` § 4) — estado LOCAL del dispositivo, nunca en el dir
