@@ -18,7 +18,6 @@ import {
   Link,
   Undo2,
   Redo2,
-  Table as TableIcon,
   ArrowUp,
   ArrowDown,
   ArrowLeft,
@@ -35,6 +34,7 @@ import { setColumnAlign, getColumnAlign } from './tableUtils'
 import { convertTaskListToBoard, insertDefaultBoard, kanbanDefaultColumns, topLevelTaskList } from './kanbanCommands'
 import { useT } from '../../i18n/useT'
 import { SnippetsButton } from './SnippetsButton'
+import { TableSizePicker } from './TableSizePicker'
 
 interface ToolbarProps {
   editor: Editor
@@ -80,8 +80,9 @@ export function EditorToolbar({ editor }: ToolbarProps) {
   // highlight nor kanban board: their buttons go with them.
   const { marks, nodes } = editor.schema
 
-  // 'snippets' = the split button of the snippets (its own component: dropdown + modal).
-  const buttons: (ToolbarButton | 'sep' | 'snippets')[] = [
+  // 'snippets' = the split button of the snippets (its own component: dropdown + modal);
+  // 'table' = the table button with its size picker (TableSizePicker).
+  const buttons: (ToolbarButton | 'sep' | 'snippets' | 'table')[] = [
     {
       icon: <Heading1 size={14} />,
       action: () => editor.chain().focus().toggleHeading({ level: 1 }).run(),
@@ -178,19 +179,8 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       isActive: editor.isActive('link'),
       title: t.editor.toolbar.insertLink,
     },
-    {
-      icon: <TableIcon size={14} />,
-      action: () => {
-        if (editor.isActive('table')) {
-          editor.chain().focus().deleteTable().run()
-        } else {
-          editor.chain().focus()
-            .insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
-        }
-      },
-      isActive: editor.isActive('table'),
-      title: editor.isActive('table') ? t.editor.toolbar.deleteTable : t.editor.toolbar.insertTable,
-    },
+    // Always inserts (size picker); deleting a table lives in the table row below and its right-click menu.
+    'table',
     ...(nodes.kanbanBoard ? [{
       icon: <SquareKanban size={14} />,
       action: () => {
@@ -221,6 +211,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
             return <div key={`sep-${i}`} className="w-px h-4 bg-border mx-1" />
           }
           if (btn === 'snippets') return <SnippetsButton key="snippets" editor={editor} />
+          if (btn === 'table') return <TableSizePicker key="table" editor={editor} />
           return (
             <button
               key={btn.title}

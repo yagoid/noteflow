@@ -258,9 +258,10 @@ button {
 }
 
 /* Readable line-length column (optional, toggled in Editor settings).
-   Text-level blocks and code blocks are constrained and centered; tables stay
-   full-width, and images live inside their paragraph's column but a resized one
-   can grow past it (see .nf-image.is-sized below).
+   Text-level blocks and code blocks are constrained and centered; tables start
+   at the column but a wide one can grow past it (see the table rule below), and
+   images live inside their paragraph's column but a resized one can grow past
+   it (see .nf-image.is-sized below).
    The column width is derived from the BODY font size (not each element's own
    font), so larger headings share the exact same column — otherwise their `ch`
    would scale up and effectively break out. ~72 mono chars at the base size. */
@@ -281,6 +282,17 @@ button {
 .editor-readable .prose-editor .ProseMirror > blockquote,
 .editor-readable .prose-editor .ProseMirror > hr {
   max-width: var(--readable-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* A top-level table (content-fitted, see § Tables) is a centred box at least as
+   wide as the column: a narrow one sits at the column's left edge, under the
+   text; a wider one grows centred into the gutters, up to the editor's width
+   (then it scrolls). !important beats the min-width TipTap writes inline on the
+   table (its cellMinWidth × columns, far below the column). */
+.editor-readable .prose-editor .ProseMirror > table {
+  min-width: min(var(--readable-col), 100%) !important;
   margin-left: auto;
   margin-right: auto;
 }
@@ -1718,7 +1730,8 @@ html[data-color-scheme="light"] .nsm-peek {
 .note-grid-body .prose-editor .ProseMirror pre code { font-size: 11px; }
 .note-grid-body .prose-editor .ProseMirror blockquote { margin: 3px 0; padding-left: 8px; border-left-width: 2px; }
 .note-grid-body .prose-editor .ProseMirror hr { margin: 6px 0; }
-.note-grid-body .prose-editor .ProseMirror table { font-size: 10px; }
+/* Cards don't scroll (pointer-events: none): a table wider than the card is clipped. */
+.note-grid-body .prose-editor .ProseMirror table { font-size: 10px; overflow: hidden; }
 /* Raw sections: the text as is, in the editor's font (like the raw textarea). */
 .note-grid-raw {
   margin: 0;
@@ -1943,13 +1956,23 @@ html[data-color-scheme="light"] .section-hover-card {
 }
 
 /* ── Tables ──────────────────────────────────────────────────────────────── */
+/* Content-fitted columns (widths can't be stored in markdown, so none are):
+   each column takes its content's width, between the cells' min-width (an empty
+   cell stays wide enough to click into) and max-width (longer text wraps). The
+   <table> is a block box — its rows sit in an anonymous table box inside — so
+   it can scroll by itself: as wide as its content up to the available width;
+   past that the columns shrink (wrapping) down to their minimum, then it
+   scrolls horizontally. TipTap only wraps a table in a div.tableWrapper when it
+   is resizable (editorExtensions.ts keeps resizable:false), so the scroll lives
+   on the table — the same rules serve the editor, the chat and the previews. */
 .prose-editor .ProseMirror table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 0.75rem 0;
-  table-layout: fixed;
-  width: 100%;
   font-variant-numeric: tabular-nums;
-  overflow: hidden;
 }
 .prose-editor .ProseMirror th,
 .prose-editor .ProseMirror td {
@@ -1957,7 +1980,9 @@ html[data-color-scheme="light"] .section-hover-card {
   padding: 0.35rem 0.6rem;
   vertical-align: top;
   position: relative;
-  min-width: 4rem;
+  min-width: 5em;
+  max-width: 28em;
+  overflow-wrap: break-word;
 }
 .prose-editor .ProseMirror th {
   background: rgb(var(--bg-2));
@@ -1974,9 +1999,6 @@ html[data-color-scheme="light"] .section-hover-card {
 }
 .prose-editor .ProseMirror .selectedCell {
   background: rgb(var(--accent) / 0.15);
-}
-.prose-editor .ProseMirror .tableWrapper {
-  overflow-x: auto;
 }
 /* Guide text in empty header cells so they never look like blank grey bars.
    An empty ProseMirror textblock renders as <p><br class="ProseMirror-trailingBreak"></p>. */

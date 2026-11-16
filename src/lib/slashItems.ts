@@ -18,6 +18,9 @@ export interface SlashMatchable {
  */
 export const SNIPPET_SLASH_KEYWORDS = ['snippets', 'fragmentos']
 
+/** Untranslated words of the "Table" command: `/table`, `/tabla` and `/grid` find it in any UI language. */
+export const TABLE_SLASH_KEYWORDS = ['table', 'tabla', 'grid']
+
 /**
  * Items matching the typed `/query`: case-insensitive substring of the title, or
  * a keyword starting with it. An empty query keeps every item. Order is kept.

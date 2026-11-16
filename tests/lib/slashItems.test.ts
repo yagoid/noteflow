@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { filterSlashItems, snippetSlashEntries, SNIPPET_SLASH_KEYWORDS } from '../../src/lib/slashItems'
+import { filterSlashItems, snippetSlashEntries, SNIPPET_SLASH_KEYWORDS, TABLE_SLASH_KEYWORDS } from '../../src/lib/slashItems'
 import type { Snippet } from '../../src/types'
 
 // Saturday 7 November 2026, 09:05:03 local time (months are 0-based in Date).
@@ -38,6 +38,15 @@ describe('filterSlashItems', () => {
     for (const q of ['snippet', 'snippets', 'fragmento', 'fragmentos', 'Snip']) {
       expect(filterSlashItems(items, q).map((i) => i.title)).toEqual(['Daily log'])
     }
+  })
+
+  it('finds the table command with /table, /tabla and /grid whatever the UI language', () => {
+    // Spanish UI: the title alone wouldn't match `/table` nor `/grid`.
+    const withTable = [...items, { title: 'Tabla', keywords: TABLE_SLASH_KEYWORDS }]
+    for (const q of ['table', 'tabla', 'grid', 'TAB']) {
+      expect(filterSlashItems(withTable, q).map((i) => i.title)).toContain('Tabla')
+    }
+    expect(filterSlashItems(withTable, 'grid').map((i) => i.title)).toEqual(['Tabla'])
   })
 })
 

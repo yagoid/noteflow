@@ -69,7 +69,6 @@ export const editor = {
     blockquote: 'Cita',
     insertLink: 'Insertar enlace',
     insertTable: 'Insertar tabla',
-    deleteTable: 'Eliminar tabla',
     insertKanban: 'Insertar tablero kanban',
     undo: 'Deshacer (Ctrl+Z)',
     redo: 'Rehacer (Ctrl+Y)',
@@ -99,6 +98,20 @@ export const editor = {
     deleteTableMenu: 'Eliminar tabla',
   },
 
+  tablePicker: {
+    size: '{rows} × {cols}',
+    rowsPlural: {
+      one: '{count} fila',
+      other: '{count} filas',
+    },
+    colsPlural: {
+      one: '{count} columna',
+      other: '{count} columnas',
+    },
+    sizeDescription: '{rows} × {cols}, fila de encabezado incluida',
+    hint: 'Filas × columnas, encabezado incluido',
+  },
+
   search: {
     findInNote: 'Buscar en la nota',
     matchCase: 'Distinguir mayúsculas',
@@ -116,6 +129,8 @@ export const editor = {
     convertToKanbanDescription: 'Convierte esta lista de tareas en un tablero kanban',
     sortChecked: 'Mover marcadas al final',
     sortCheckedDescription: 'Lleva al final las tareas marcadas de esta lista',
+    table: 'Tabla',
+    tableDescription: 'Una tabla de 3 × 3 con fila de encabezado',
     noCommands: 'Sin comandos',
     snippetsHeading: 'Fragmentos',
     snippet: 'Fragmento',

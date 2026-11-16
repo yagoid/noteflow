@@ -1063,6 +1063,41 @@ párrafo; el ancho redimensionado es el atributo `width` (`![alt](src){width=N}`
   una imagen dentro de un enlace, p. ej., no rompe la columna). Imágenes antiguas con un `width` mayor
   que la columna (antes se veían acotadas) ahora rompen la columna al abrirlas en Readable.
 
+### Editor: tablas (inserción y columnas ajustadas al contenido)
+Formato y esquema intactos: pipe-table GFM con cabecera obligatoria en la fila 0, alineación por
+columna (`:---:`), saltos de celda como `<br>`, sin anchos guardados; `Table` de TipTap con
+`resizable: false` (`editorExtensions.ts`).
+- **Insertar (`src/lib/tableInsert.ts`, pura; tests en `tests/lib/tableInsert.test.ts` sobre el esquema
+  real):** `insertTableTr(state, size)` = una transacción (un `Ctrl+Z`), siempre con cabecera y
+  `rows` **contando** la cabecera; caret en la primera celda de cabecera. `tableInsertPos(selection)`
+  decide dónde: `null` = en la selección (mismos pasos que `insertTable` de TipTap: sustituye un
+  párrafo vacío o parte el bloque); dentro de una **lista** (un ítem solo admite `paragraph+ list*`,
+  ProseMirror partiría la lista) o de una **tabla** (la celda es `block+`: anidaría una tabla que
+  `tableElToMd` no sabe escribir) → justo **después de la lista/tabla más externa** (dentro de una cita
+  sigue en la cita, que sí se serializa con `> | … |`); con una NodeSelection de bloque (tablero
+  kanban) → detrás del nodo en vez de sustituirlo. Mínimo **2 columnas** (`TABLE_MIN_COLS`):
+  `TABLE_SEPARATOR_RE` de `markdownHtml.ts` exige dos celdas, así que una tabla de una columna
+  (`| --- |`) vuelve como texto al reabrir — limitación del parser conocida (borrar columnas hasta
+  dejar una en una tabla existente también la pierde al recargar).
+- **Toolbar:** el botón de tabla **siempre inserta** (`TableSizePicker.tsx`: rejilla 8×8, mismo patrón
+  que `SnippetsButton` — portal `fixed z-50`, mousedown + `preventDefault` para no perder la selección,
+  cierre por clic fuera; teclas en fase de captura en `window` porque el foco sigue en el editor:
+  flechas/`Enter`/`Esc`, con `stopPropagation` para que no lleguen a ProseMirror). Borrar sigue en la
+  fila contextual y el menú de clic derecho. **Slash:** `/table` (keywords sin traducir
+  `TABLE_SLASH_KEYWORDS` = `table`/`tabla`/`grid`) inserta 3×3; solo se ofrece donde
+  `canInsertTableHere` (fuera de listas y tablas); también en notas vinculadas (es markdown estándar).
+- **CSS (`index.css` § Tables):** sin `div.tableWrapper` (TipTap solo lo crea con `resizable: true`
+  vía `TableView`; `renderWrapper` cambiaría la salida de `getHTML()`), el propio `<table>` es
+  `display: block; width: max-content; max-width: 100%; overflow-x: auto` — sus filas van en una caja
+  de tabla anónima con layout automático: columnas al ancho del contenido entre `min-width: 5em` y
+  `max-width: 28em` de las celdas (`overflow-wrap: break-word`); si no cabe, las columnas se estrechan
+  hasta el mínimo y luego scroll horizontal. Mismas reglas en chat (`.chat-md`), previews
+  (`.note-preview`) y stickies; en las tarjetas del resumen (`.note-grid-body`, sin puntero) la tabla
+  se recorta (`overflow: hidden`). **Readable:** `.ProseMirror > table` lleva
+  `min-width: min(--readable-col, 100%)` + márgenes `auto`: una tabla estrecha queda en el borde
+  izquierdo de la columna; una ancha crece centrada hacia los márgenes. Ese `min-width` va con
+  `!important` para ganar al `min-width` inline que escribe `renderHTML` de TipTap (cellMinWidth × columnas).
+
 ### Editor: mapa de secciones (pestañas que bajan de fila)
 Las pestañas de sección del editor no son una tira con scroll horizontal: son un **mapa de secciones**
 (`Editor/SectionMap.tsx`, lógica pura en `src/lib/sectionMap.ts` con test en `tests/lib/sectionMap.test.ts`,
