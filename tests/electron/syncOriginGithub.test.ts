@@ -78,6 +78,10 @@ function fakeRequest(opts: { hostname: string; method: string; path: string }, c
   req.destroy = () => {}
   req.write = (s: string) => { payload += s }
   req.end = () => {
+    if (env.offline) {
+      setImmediate(() => req.emit('error', Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' })))
+      return
+    }
     setImmediate(() => {
       const [status, json] = opts.hostname === 'github.com'
         ? answerAuth(opts.path)
@@ -94,13 +98,17 @@ function fakeRequest(opts: { hostname: string; method: string; path: string }, c
 
 vi.mock('https', () => ({ default: { request: fakeRequest }, request: fakeRequest }))
 
-const env = { userData: '', failSettingsWrites: false }
+const env = { userData: '', failSettingsWrites: false, failSettingsWritesLeft: 0, offline: false }
 // settings.json writes fail on demand (EPERM, disk full, a lock held by the CLI…).
 vi.mock('../../electron/settingsFile', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../electron/settingsFile')>()
   return {
     writeSettingsFile: (file: string, data: Record<string, unknown>) => {
       if (env.failSettingsWrites) throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+      if (env.failSettingsWritesLeft > 0) {
+        env.failSettingsWritesLeft--
+        throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+      }
       return actual.writeSettingsFile(file, data)
     },
   }
@@ -182,6 +190,8 @@ beforeEach(async () => {
   fs.mkdirSync(env.userData, { recursive: true })
   fs.mkdirSync(notesDir, { recursive: true })
   env.failSettingsWrites = false
+  env.failSettingsWritesLeft = 0
+  env.offline = false
   repos.clear()
   mutations.length = 0
   treeGets.length = 0
@@ -427,6 +437,62 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     expect((await gh.pullNotes(notesDir)).incomplete).toBe(true)
     expect(treeGets).toEqual([])
     expect(mutations).toEqual([])
+  })
+
+  it('a merge whose first settings write fails never leaves the old lastSync next to the new origin', async () => {
+    await connectedToAThenDisconnected()
+    // The CLI left the app connected to B, with B's (old) lastSync: every local
+    // note is "older than lastSync" and absent from B.
+    const OLD_LAST_SYNC = '2026-11-01T00:00:00.000Z'
+    writeSettings({
+      ...readSettings(),
+      githubSync: { enabled: true, encryptedToken: Buffer.from('tok').toString('base64'), owner: 'me', repo: 'notes-b', repoId: 202, lastSync: OLD_LAST_SYNC },
+    })
+    await freshModule()
+    gh.loadSyncSettings()
+    expect(gh.getOriginChoice()?.next.repo).toBe('notes-b')
+
+    env.failSettingsWritesLeft = 1 // first write fails (EPERM), then writes work
+    expect(await gh.resolveOriginChoice('merge', notesDir)).toEqual({ ok: false, error: 'settings-unwritable' })
+    expect(readSettings().syncOrigin.github.repo).toBe('notes-a')
+    expect(gh.getOriginChoice()).not.toBeNull()
+
+    env.offline = true // the retry adopts B, but its pull fails
+    const retry = await gh.resolveOriginChoice('merge', notesDir)
+    expect(retry.ok && retry.pull.errors.length).toBeGreaterThan(0)
+    expect(readSettings().syncOrigin.github.repo).toBe('notes-b')
+    expect(readSettings().githubSync.lastSync).toBeUndefined()
+    expect(readSettings().githubSync.encryptedToken).toBeTruthy()
+
+    // Restart, online: same identity, and no deletion rule armed with B's old lastSync.
+    env.offline = false
+    await settle()
+    await freshModule()
+    gh.loadSyncSettings()
+    const pull = await gh.pullNotes(notesDir)
+    expect(pull.errors).toEqual([])
+    expect(pull.deleted).toBe(0)
+    expect(localDirs()).toEqual(['a-note-2222', 'b-note-3333', 'mine-1111', 'welcome-9999'])
+  })
+
+  it('a sync-state.json that cannot be reset blocks the gate and keeps the old origin', async () => {
+    await connectedToAThenDisconnected()
+    for (const d of ['mine-1111', 'a-note-2222']) fs.rmSync(path.join(notesDir, d), { recursive: true })
+    writeSettings({
+      ...readSettings(),
+      githubSync: { enabled: true, encryptedToken: Buffer.from('tok').toString('base64'), owner: 'me', repo: 'notes-b', repoId: 202 },
+    })
+    // sync-state.json can't be written (a directory in its place: EISDIR — like an antivirus lock).
+    const statePath = path.join(env.userData, 'sync-state.json')
+    fs.rmSync(statePath, { force: true })
+    fs.mkdirSync(statePath)
+    await freshModule()
+    gh.loadSyncSettings()
+    expect(gh.isOriginGateBlocked()).toBe(true)
+    expect(readSettings().syncOrigin.github.repo).toBe('notes-a')
+    expect((await gh.pullNotes(notesDir)).incomplete).toBe(true)
+    expect(treeGets).toEqual([])
+    fs.rmdirSync(statePath)
   })
 
   it('an unreadable settings.json blocks syncing (fail-closed) without asking', async () => {

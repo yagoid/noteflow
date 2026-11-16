@@ -409,14 +409,20 @@ Las rutas calientes usan el valor cacheado (`originGateBlocked()`).
   Cloud: la puerta es `clear` y **no toca** `syncOrigin.github`.
 - **Adopciones `proceed` se escriben YA** (en la decisión, antes del pull): un crash a mitad no puede
   parecer luego un cambio de identidad. `changed-empty` y la resolución **resetean el estado del remoto
-  anterior** (`resetRemoteState`) **antes** de escribir el origen (un crash entre medias nunca deja
-  "origen = B" junto al estado de A; `adoptGithubOrigin` comprueba antes que `settings.json` se lee y el
-  reset escribe con lectura estricta para no vaciar el fichero). `pullNotes` relee `syncSettings` tras
-  evaluar la puerta (si esta adoptó dentro del propio pull, `lastSync`/`needsFullReconcile` ya son los
-  reseteados, no los del remoto anterior). Se resetea: journal + caché de shas (`sync-state.json` — un `deleteDir` pendiente
-  de A nunca debe ejecutarse contra B, y los shas de A no son base para B), timers de push, avisos de
-  conflicto, `lastSync` (con el `lastSync` de B que dejó el CLI, la regla de borrado del pull **borraría**
-  las notas locales que B no tiene) y `remoteFormatMigratedAt`.
+  anterior**: journal + caché de shas (`sync-state.json` — un `deleteDir` pendiente de A nunca debe
+  ejecutarse contra B, y los shas de A no son base para B), timers de push, avisos de conflicto,
+  `lastSync` (con el `lastSync` de B que dejó el CLI, la regla de borrado del pull **borraría** las notas
+  locales que B no tiene) y `remoteFormatMigratedAt`. Todo en `adoptGithubOrigin`, **estricto** y en este
+  orden: (1) `sync-state.json` se reescribe vacío y la escritura **tiene que** salir bien (no usa
+  `persistState`, que se traga el error); (2) **un solo read-modify-write** de `settings.json` quita
+  `lastSync`/`remoteFormatMigratedAt` del `githubSync` **leído del fichero** y escribe
+  `syncOrigin.github` a la vez (sin estado intermedio; token y claves ajenas intactos); (3) solo entonces
+  se actualiza la memoria. Cualquier fallo (fichero ilegible o no escribible, también en el primer paso) →
+  `false` → la puerta queda `unreadable` y se reintenta desde lo que diga el disco. Así el disco nunca
+  tiene "origen = B" junto al journal, los shas o el `lastSync` de A. Si el paso 1 sale bien y el 2
+  falla, el journal de A ya se perdió pero el origen sigue siendo A y la puerta cerrada (se rehace en el
+  siguiente intento). `pullNotes` relee `syncSettings` tras evaluar la puerta (si esta adoptó dentro del
+  propio pull, `lastSync`/`needsFullReconcile` ya son los reseteados, no los del remoto anterior).
 
 **Flujo del Device Flow** (`schedulePoll`): token → `validateToken` → `ensureRepo` (devuelve el
 `repoId`) → guarda `settings.githubSync` → evalúa la puerta. Si no es `clear` →
@@ -782,7 +788,7 @@ diálogo y `archiveLocalNotesForOriginSwitch`.
   borra **nada** — gana la edición remota y la nota vuelve en el siguiente pull.
 - **Journal + sha cache (`electron/syncState.ts` + `userData/sync-state.json`):** estado LOCAL de
   durabilidad (deliberadamente fuera del dir de notas — no debe sincronizarse; se limpia en
-  `disconnectGitHub()` y cuando el dir cambia de origen (`resetRemoteState`, ver "Origen del dir de notas"); corrupto/ausente degrada a estado vacío, nunca bloquea el sync). Dos mapas y un flag:
+  `disconnectGitHub()` y cuando el dir cambia de origen (`adoptGithubOrigin`, ver "Origen del dir de notas"); corrupto/ausente degrada a estado vacío, nunca bloquea el sync). Dos mapas y un flag:
   - **`ops` (journal de mutaciones remotas pendientes):** cada push debounced se apunta como
     `upsert` **al armar el timer** (sobrevive a cerrar la app durante el debounce) — keyed por
     relPath; `scheduleDelete`/`scheduleDeleteDir` como `delete`/`deleteDir` (este último descarta

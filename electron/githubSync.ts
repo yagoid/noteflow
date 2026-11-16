@@ -73,7 +73,7 @@ import {
   sameIdentity,
   hasSyncedLocalNotes,
   readSettingsStrict,
-  writeSyncOriginFile,
+  withSyncOrigin,
 } from './syncOrigin'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1166,60 +1166,64 @@ function currentGithubIdentity(s: GitHubSyncSettings): Extract<SyncIdentity, { k
 }
 
 /**
- * The connected repo is another remote than the one this notes dir was
- * reconciled with: everything that describes the previous remote goes — the
- * journal and SHA cache (sync-state.json: pending deletes for repo A must
- * never run against B, A's blob shas are no base for B), pending push timers,
- * the conflict notices, `lastSync` (with it the pull's deletion rule could
- * delete local notes absent from the new repo) and `remoteFormatMigratedAt`.
- */
-function resetRemoteState(): void {
-  pushTimers.forEach((t) => clearTimeout(t))
-  pushTimers.clear()
-  syncState = emptySyncState()
-  persistState()
-  conflictCopies = undefined
-  conflictMerges = undefined
-  const latest = syncSettings
-  if (latest && (latest.lastSync !== undefined || latest.remoteFormatMigratedAt !== undefined)) {
-    const next: GitHubSyncSettings = { ...latest }
-    delete next.lastSync
-    delete next.remoteFormatMigratedAt
-    syncSettings = next
-    // Strict read: the lenient readSettings() answers {} for an unreadable file,
-    // and writing that back would wipe every other key.
-    const settings = readSettingsStrict(getSettingsPath())
-    if (settings !== null) {
-      settings.githubSync = syncSettings
-      writeSettings(settings)
-    }
-  }
-}
-
-/**
- * Records the connected repo as this dir's GitHub origin; with `resetRemote`
- * (the identity changed) the previous remote's state is dropped FIRST, so a
- * crash in between can never leave "origin = B" next to A's journal/SHAs/
- * lastSync (the next run would see the same identity and keep them). Returns
- * false — nothing written, and the callers keep the gate closed — when
- * settings.json can't be read or written.
+ * Records the connected repo as this dir's GitHub origin. With `resetRemote`
+ * (the identity changed) everything that describes the previous remote goes
+ * too: the journal and SHA cache (sync-state.json: pending deletes for repo A
+ * must never run against B, A's blob shas are no base for B), pending push
+ * timers, the conflict notices, `lastSync` (with it the pull's deletion rule
+ * could delete local notes absent from the new repo) and
+ * `remoteFormatMigratedAt`.
+ *
+ * Strict, so the disk can never hold "origin = B" next to the previous
+ * remote's state (the next run would see the same identity and keep it):
+ * 1. sync-state.json is rewritten empty and the write must succeed (unlike
+ *    persistState, which swallows errors);
+ * 2. ONE read-modify-write of settings.json drops lastSync /
+ *    remoteFormatMigratedAt from the githubSync READ FROM THE FILE and sets
+ *    syncOrigin.github — no intermediate state, every other key (token,
+ *    other backends, the CLI's) kept.
+ * Memory is updated only after both landed. Any failure (unreadable or
+ * unwritable file) → false, and the callers keep the gate closed.
  */
 function adoptGithubOrigin(id: SyncIdentity, resetRemote: boolean): boolean {
-  if (readSettingsStrict(getSettingsPath()) === null) {
+  const settingsPath = getSettingsPath()
+  if (readSettingsStrict(settingsPath) === null) {
     console.error('[GitHubSync] could not record the notes dir origin (settings.json unreadable)')
     return false
   }
   if (resetRemote) {
+    const empty = emptySyncState()
     try {
-      resetRemoteState()
+      fs.writeFileSync(getSyncStatePath(), serializeSyncState(empty), 'utf-8')
     } catch (err) {
-      console.error('[GitHubSync] could not reset the previous remote state:', String(err))
+      console.error('[GitHubSync] could not reset sync-state.json — the notes dir origin is not changed:', String(err))
       return false
     }
+    syncState = empty
+    pushTimers.forEach((t) => clearTimeout(t))
+    pushTimers.clear()
+    conflictCopies = undefined
+    conflictMerges = undefined
   }
-  if (!writeSyncOriginFile(getSettingsPath(), id)) {
-    console.error('[GitHubSync] could not record the notes dir origin (settings.json unreadable or unwritable)')
+  try {
+    const settings = readSettingsStrict(settingsPath)
+    if (settings === null) throw new Error('settings.json became unreadable')
+    if (resetRemote && settings.githubSync && typeof settings.githubSync === 'object') {
+      const fileSync = { ...(settings.githubSync as GitHubSyncSettings) }
+      delete fileSync.lastSync
+      delete fileSync.remoteFormatMigratedAt
+      settings.githubSync = fileSync
+    }
+    writeSettings(withSyncOrigin(settings, id))
+  } catch (err) {
+    console.error('[GitHubSync] could not record the notes dir origin (settings.json unwritable):', String(err))
     return false
+  }
+  if (resetRemote && syncSettings) {
+    const next: GitHubSyncSettings = { ...syncSettings }
+    delete next.lastSync
+    delete next.remoteFormatMigratedAt
+    syncSettings = next
   }
   return true
 }
