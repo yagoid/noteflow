@@ -1895,6 +1895,32 @@ sincronizables no pregunta. La primera conexión (sin origen guardado) tampoco. 
 activado GitHub nunca pregunta (el dueño de las notas es la cuenta de Cloud). También lo detecta al
 arrancar si el CLI dejó la app conectada a otro repo. Aún no se puede restaurar una copia desde la app.
 
+**Lo mismo con NoteFlow Cloud (cambiar de cuenta).** La app recuerda también con qué **cuenta** de
+NoteFlow se sincronizaron las notas de este dispositivo. Si inicias sesión con **otra** cuenta y Cloud se
+activa (solo, porque la cuenta lo tiene pagado, o a mano) habiendo notas que se sincronizarían, **no sube
+ni baja nada** y abre el mismo diálogo (cuenta anterior → cuenta actual, por email):
+- **Merge both** — tus notas suben a la cuenta actual y bajan las suyas.
+- **Use only the notes from <email>** — tus notas pasan a la copia local (Ajustes → Sync → NoteFlow Cloud
+  → "Open local copies") y se bajan las de la cuenta. Si GitHub Sync estaba conectado, **se desconecta**
+  (el diálogo lo avisa): su repo tenía las notas que acabas de apartar.
+- **Cancel** — "Turn off NoteFlow Cloud on this device": apaga Cloud, sigues con la sesión iniciada y tus
+  notas quedan como estaban. No vuelve a preguntar hasta que enciendas Cloud tú (o vuelvas a iniciar
+  sesión).
+Mientras está pendiente: botón de la titlebar en ámbar ("Action needed"), aviso con "Choose…" en Ajustes →
+Sync → NoteFlow Cloud, "Sync now" / "Mirror to GitHub" no hacen nada y "Connect the CLI too" queda
+deshabilitado con la explicación (en GitHub igual mientras su elección está pendiente). Volver a entrar con
+la **misma** cuenta no pregunta.
+
+**Cruce entre los dos.** "Use only the notes from …" de un backend sustituye las notas, así que el otro
+deja de reconocerlas: tras usar solo las del repo de GitHub, encender Cloud con tu cuenta de siempre
+**pregunta** si hay notas (sin notas, se re-adopta solo); y al revés, tras usar solo las de la cuenta de
+Cloud, reconectar el mismo repo pregunta. El diálogo dice entonces que tus notas "now come from" la otra
+sincronización.
+
+**Un origen por carpeta de notas.** El origen guardado es el de la carpeta de notas normal; si arrancas
+con otra carpeta (`NOTEFLOW_NOTES_DIR`), allí no se pregunta ni se guarda nada, y al volver a la carpeta
+normal se pregunta si toca.
+
 ### Panel de sync
 - Estado (conectado / subiendo / error), cuenta y repo vinculados.
 - "Sync now" para sync manual (primero reintenta las subidas/borrados pendientes del journal, luego

@@ -803,7 +803,10 @@ es **un preset más**, no una implementación nueva.
   reflejar por primera vez su propia entitlement `true` (en un login, la activación es cosa del punto
   1, no de la baseline). Activar Cloud pausa GitHub Sync (exclusión mutua, ver § 4 "Settings UI" →
   "Exclusión mutua"); el desbloqueo de claves lo resuelve el flujo normal (`runCloudSyncCycle`: auto-unlock
-  managed; e2ee → formulario de passphrase; sin claves aún → setup en la tarjeta Cloud).
+  managed; e2ee → formulario de passphrase; sin claves aún → setup en la tarjeta Cloud). Si las notas
+  en disco vienen de **otra** cuenta, la activación pasa por la puerta de origen y el ciclo no sube ni
+  baja nada hasta que el usuario elige (§ 4 "Sync engine" → "Origen del dir de notas — la puerta de
+  Cloud").
   3. **Al confirmar la pérdida (decisión 2026-11, antes "nunca apaga nada"):** cuando una observación
      **fresca** (`entitlementsKnown && !account.areEntitlementsFromCache()`: respuesta del servidor en
      este proceso) dice que falta una entitlement y su superficie está encendida, se apaga **igual
@@ -1852,6 +1855,31 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   cambia la DEK en uso (se compara una huella sha-256, nunca se guarda otra copia de la DEK): las
   claves de nota de una DEK nunca se envuelven con otra. Las claves no se tocan (lock es acción
   aparte).
+- **Origen del dir de notas — la puerta de Cloud (`syncOrigin.cloud`).** El dueño protege el
+  **estado** (journal, `pullSeq`): al entrar B se resetea lo de A. Pero no protegía las **notas en
+  disco**: tras el reset, el primer sync de B subía en el catch-up todas las notas que vinieron de A. Ahora
+  el dir recuerda la cuenta con la que se reconcilió (`syncOrigin.cloud = {userId, email, notesDir}`) y,
+  con otra cuenta (o un origen `stale`: el "usar solo las del repo" de GitHub sustituyó las notas) **y
+  notas sincronizables en disco**, Cloud no mueve nada —ni pull, ni catch-up, ni drain, ni subidas, ni
+  tombstones, ni espejo, ni ciclo/tiempo real— hasta que el usuario elige en el diálogo de origen (fusionar
+  / usar solo las de la cuenta, archivando las locales / apagar Cloud). Detalle completo en `sync.md`
+  "Origen del dir de notas" → "Puerta de NoteFlow Cloud". Puntos que tocan esta sección:
+  - **Siembra:** sin `syncOrigin.cloud` pero con `cloudSync.userId` (instalación previa), ese userId es
+    el origen; `bindCloudSyncToAccount` lo registra **antes** del reset que sobrescribe `cloudSync.userId`.
+    Si no puede escribirlo, no resetea y todo queda bloqueado (estado de otra cuenta = puerta cerrada).
+    Sin origen ni dueño → se adopta sin preguntar (= "Dueño desconocido").
+  - **Auto-activación** (login con suscripción, o compra con sesión): `applyAccountTransition` →
+    `enableCloudSync` evalúa la puerta; si pregunta, `runCloudSyncCycle` sale pronto y nada sube ni baja
+    antes de elegir (el diálogo se abre solo, y la titlebar muestra "Action needed").
+  - **"Cancel" del diálogo = Cloud off** (`disableCloudSync` + `stopCloudAutoSync` +
+    `dropRestoreSurface('cloud')`), con la sesión iniciada y notas y origen intactos. No se reactiva solo:
+    una sesión restaurada al arrancar no es un login (`lastAccountSnapshot`), la baseline de entitlements
+    no ve una transición `false→true` (y Cloud off no es una pérdida), y `dropRestoreSurface` borra la
+    mitad Cloud de un registro `accountRestore` pendiente (si no, unas entitlements que llegaran tarde lo
+    encenderían y volvería a preguntar). Vuelve a preguntar si el usuario enciende Cloud a mano, o en un
+    **login nuevo** (que reactiva lo pagado por diseño — aceptado: es el momento de volver a decidir).
+  - **"Usar solo las de la cuenta"** marca `syncOrigin.github` `stale` y desconecta GitHub Sync si
+    estaba conectado (su repo tiene las notas apartadas).
 - **Tiempo real (tramo 3, implementado):** `electron/cloudRealtime.ts` abre un **WebSocket puro**
   (el `WebSocket` global de Node 22 — sin `@supabase/supabase-js` ni `ws`) contra Supabase
   Realtime (protocolo Phoenix, vsn=1.0.0) y se une a un canal con `postgres_changes` sobre
