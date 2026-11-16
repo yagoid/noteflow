@@ -7,9 +7,12 @@ import { settingsButtonClass } from './ui'
 export function EditorPanel() {
   const {
     fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily, readableWidth, setReadableWidth,
-    showToc, setShowToc, moveCheckedToBottom, setMoveCheckedToBottom,
+    showToc, setShowToc, moveCheckedToBottom, setMoveCheckedToBottom, showTaskProgress, setShowTaskProgress,
   } = useEditorSettingsStore()
   const t = useT()
+  // The progress rails live in the Readable column's margin: with Full width the
+  // switch is disabled and shown off, without touching the stored value.
+  const taskProgressOn = readableWidth && showTaskProgress
 
   return (
     <div className="settings-rows space-y-6">
@@ -112,6 +115,32 @@ export function EditorPanel() {
           <span
             className={`absolute top-[2px] w-4 h-4 bg-white rounded-full shadow transition-all duration-200 ${
               moveCheckedToBottom ? 'left-[18px]' : 'left-[2px]'
+            }`}
+          />
+        </button>
+      </section>
+
+      {/* Task lists: progress rail in the left margin (Readable width only) */}
+      <section className="flex items-center justify-between gap-4">
+        <div>
+          <p className={`text-xs font-mono font-medium text-text${readableWidth ? '' : ' opacity-50'}`}>{t.settings.editor.taskProgress}</p>
+          <p className="text-[11px] font-mono text-text-muted mt-1">
+            {readableWidth ? t.settings.editor.taskProgressHint : t.settings.editor.taskProgressReadableOnly}
+          </p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={taskProgressOn}
+          aria-label={t.settings.editor.taskProgress}
+          disabled={!readableWidth}
+          onClick={() => setShowTaskProgress(!showTaskProgress)}
+          className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            taskProgressOn ? 'bg-text/70' : 'bg-surface-3 border border-border'
+          }`}
+        >
+          <span
+            className={`absolute top-[2px] w-4 h-4 bg-white rounded-full shadow transition-all duration-200 ${
+              taskProgressOn ? 'left-[18px]' : 'left-[2px]'
             }`}
           />
         </button>

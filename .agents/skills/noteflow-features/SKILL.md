@@ -1171,6 +1171,19 @@ Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del m
 - Preferencia en `editorSettingsStore` junto a fuente/tamaño, **sincronizada** en `ui-settings.json`
   (`localStorage` `noteflow-readable-width` queda solo como dual-write legacy/seed).
 
+### Progreso de las checklists (riel en el margen)
+- Con ancho **Readable**, cada checklist de 2 o más tareas lleva a su **izquierda**, en el margen, un
+  **riel** vertical fino que va de la primera a la última tarea. El tramo hecho se rellena desde arriba
+  en el verde de las casillas, con un remate circular y una etiqueta pequeña («3/8», «✓» al 100 %) que
+  baja con el avance. Cuenta también las subtareas; un párrafo o heading entre medias empieza otro bloque.
+- Al pasar el ratón: «3 de 8 tareas hechas · 38 %» o «lista completa». Al completar la lista hace un
+  pequeño rebote (sin animaciones si el sistema pide reducir movimiento).
+- Solo si cabe en el margen (deja sitio al asa de arrastre): si la ventana es estrecha, la fuente grande
+  o el índice quita sitio, se esconde. Nunca mueve el texto. No sale en notas flotantes, vistas previas
+  ni el chat de IA.
+- Ajustes → Editor → **Checklist progress** (activado por defecto, sincronizado). Con ancho `Full` el
+  interruptor queda deshabilitado («solo con Readable») y conserva su valor.
+
 ### Índice flotante (table of contents)
 - En el borde derecho del editor hay un **indicador discreto**: una rayita corta por encabezado
   (H1 más larga, H3 más corta), con la del encabezado en el que estás más marcada. Solo aparece si la

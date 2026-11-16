@@ -809,6 +809,129 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   }
 }
 
+/* ── Checklist progress rail (Editor/TaskProgress.ts, lib/taskProgress.ts) ─────
+   A widget decoration, first child of each top-level checklist <ul>, so the <ul>
+   anchors it: it runs from the first task row to the last one (top/bottom), in
+   the left gutter at right: 100% + 24px (TASK_PROGRESS_OFFSET: room for the ⋮⋮
+   drag handle), 44px wide (TASK_PROGRESS_WIDTH). Only in the main editor with
+   Readable width and the setting on (NoteEditor's .task-progress-on), and only
+   while the measured gutter holds it (.is-fit); otherwise it fades out — it
+   never pushes the text. --h = share of done tasks (set inline). */
+.task-progress { display: none; }
+.editor-readable.task-progress-on .prose-editor .ProseMirror > ul[data-type="taskList"] {
+  position: relative;
+}
+.editor-readable.task-progress-on .prose-editor .ProseMirror > ul[data-type="taskList"] > .task-progress {
+  display: block;
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  right: calc(100% + 24px);
+  width: 44px;
+  pointer-events: none;
+  user-select: none;
+  color: rgb(var(--text-muted));
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.22s, visibility 0.22s;
+}
+.editor-readable.task-progress-on .prose-editor .ProseMirror > ul[data-type="taskList"] > .task-progress.is-fit {
+  opacity: 1;
+  visibility: visible;
+}
+.task-progress-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: rgb(var(--text-muted) / 0.18);
+  pointer-events: auto;
+  cursor: default;
+}
+/* A wider hover target than the 3px line. */
+.task-progress-rail::before {
+  content: '';
+  position: absolute;
+  inset: 0 -5px;
+}
+.task-progress-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--h, 0%);
+  border-radius: 3px;
+  background: rgb(var(--accent-2));
+  transition: height 0.55s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+.task-progress-cap {
+  position: absolute;
+  right: -2px;
+  top: clamp(0px, calc(var(--h, 0%) - 3.5px), calc(100% - 7px));
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--bg-editor));
+  border: 2px solid rgb(var(--accent-2));
+  box-sizing: border-box;
+  transition: top 0.55s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+/* The label rides with the fill, left of the rail. */
+.task-progress-tag {
+  position: absolute;
+  right: 9px;
+  top: clamp(7px, var(--h, 0%), calc(100% - 7px));
+  transform: translateY(-50%);
+  font: 500 10.5px var(--app-font-family, 'JetBrains Mono', monospace);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: default;
+  transition: top 0.55s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+.task-progress.is-done .task-progress-tag { color: rgb(var(--accent-2)); }
+/* Hover tooltip («3 of 8 tasks done · 38%»), just above the label. */
+.task-progress-tip {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  top: clamp(7px, var(--h, 0%), calc(100% - 7px));
+  transform: translateY(calc(-100% - 9px));
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s, transform 0.12s;
+  background: rgb(var(--bg-0));
+  color: rgb(var(--text));
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: 11px var(--app-font-family, 'JetBrains Mono', monospace);
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.5);
+}
+.task-progress-tip b { color: rgb(var(--accent-2)); font-weight: 500; }
+.task-progress:hover .task-progress-tip {
+  opacity: 1;
+  transform: translateY(calc(-100% - 6px));
+}
+/* Brief bounce when the list reaches 100 % (not when it mounts complete). */
+.task-progress.is-pop .task-progress-tag,
+.task-progress.is-pop .task-progress-cap {
+  animation: task-progress-pop 0.6s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+@keyframes task-progress-pop {
+  40% { scale: 1.2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-progress,
+  .task-progress * { transition: none !important; animation: none !important; }
+}
+
 /* Date badge pill */
 .task-badge {
   font-size: 0.68rem;

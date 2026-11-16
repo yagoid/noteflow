@@ -135,6 +135,10 @@ export const settings = {
     hideToc: 'Hide table of contents',
     moveChecked: 'Move checked items to the bottom',
     moveCheckedHint: 'Checking a task moves it to the end of its list; unchecking it brings it back above the checked ones',
+    taskProgress: 'Checklist progress',
+    taskProgressHint: 'Shows in the margin how many tasks of each checklist are done',
+    // Shown instead of the hint while the content width is Full (the switch is disabled).
+    taskProgressReadableOnly: 'Only available with the Readable width',
   },
 
   startup: {
