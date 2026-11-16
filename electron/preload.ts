@@ -253,7 +253,13 @@ const api = {
     initialPullStatus: 'pending' | 'ok' | 'failed'
     conflictCopies?: { count: number; titles: string[]; at: string }
     conflictMerges?: { count: number; titles: string[]; at: string }
-    originChoice?: { previous: { owner: string; repo: string }; next: { owner: string; repo: string } }
+    originChoice?: {
+      previous: { owner: string; repo: string }
+      next: { owner: string; repo: string }
+      // The notes came from NoteFlow Cloud (its 'replace'): staleFrom.email names that account.
+      stale?: true
+      staleFrom?: { email?: string }
+    }
   }> => ipcRenderer.invoke('sync:get-status'),
   // Clears the session notice of conflict copies made by the pull of either
   // backend, and of their merges with conflict markers (titlebar sync status card).
@@ -273,7 +279,7 @@ const api = {
     filesToday?: number
     conflictCopies?: { count: number; titles: string[]; at: string }
     conflictMerges?: { count: number; titles: string[]; at: string }
-    originChoice?: { previous: string; next: string }
+    originChoice?: { previous: string; next: string; stale?: true; disconnectsGithub?: true }
     github?: { owner?: string; repo?: string }
     cloud?: {
       keysState: 'unlocked' | 'locked' | 'no-keys'
@@ -291,7 +297,12 @@ const api = {
   // choice (merge / use only the repo's notes — local ones moved to a local
   // archive, never deleted / cancel = disconnect).
   resolveGithubOrigin: (choice: 'merge' | 'replace' | 'cancel'): Promise<{ ok: boolean; error?: string; detail?: string }> =>
-    ipcRenderer.invoke('sync:resolve-origin', choice),
+    ipcRenderer.invoke('sync:resolve-origin', choice, 'github'),
+  // Same for NoteFlow Cloud (the notes came from another account): merge / use
+  // only the account's notes (local ones archived; GitHub Sync disconnected if
+  // connected) / cancel = Cloud sync off (still signed in, notes untouched).
+  resolveCloudOrigin: (choice: 'merge' | 'replace' | 'cancel'): Promise<{ ok: boolean; error?: string; detail?: string }> =>
+    ipcRenderer.invoke('sync:resolve-origin', choice, 'cloud'),
   // Local archives of notes set aside by "use only the remote's notes" (userData/notes-archive).
   getNotesArchiveStatus: (): Promise<{ hasArchives: boolean }> => ipcRenderer.invoke('sync:archives-status'),
   openNotesArchive: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:open-archives'),
@@ -329,6 +340,7 @@ const api = {
     updatedFiles: string[]
     hadDeletions: boolean
     hadMetadataChanges: boolean
+    error?: 'origin-choice-pending'
   }> => ipcRenderer.invoke('sync:pull-active'),
   // Settings → Sync → "Connect the CLI too" (electron/cliConnect.ts). Cloud:
   // the CLI's own login with an emailed code (to the app account's email);
@@ -448,6 +460,13 @@ const api = {
     realtimeConnected: boolean
     conflictCopies?: { count: number; titles: string[]; at: string }
     conflictMerges?: { count: number; titles: string[]; at: string }
+    originChoice?: {
+      previous: { userId: string; email?: string }
+      next: { userId: string; email?: string }
+      stale?: true
+      staleFrom?: { owner: string; repo: string }
+      githubConnected?: true
+    }
   }> => ipcRenderer.invoke('cloud:get-status'),
   cloudSetup: (passphrase: string): Promise<{ ok: boolean; recoveryCode?: string; error?: string }> =>
     ipcRenderer.invoke('cloud:setup', passphrase),
@@ -481,6 +500,7 @@ const api = {
     updatedFiles: string[]
     hadDeletions: boolean
     hadMetadataChanges: boolean
+    error?: 'origin-choice-pending'
   }> => ipcRenderer.invoke('cloud:pull'),
   // Per-section version history (metadata + decrypted text — never keys nor
   // path_keys). Restoring = a normal edit from the renderer, after a snapshot.

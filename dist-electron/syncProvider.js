@@ -105,6 +105,7 @@ function getActiveSyncStatus(pendingUploads) {
             filesToday: cloudSync.getSyncFilesToday(),
             conflictCopies: c.conflictCopies,
             conflictMerges: c.conflictMerges,
+            ...(c.originChoice ? { originChoice: cloudOriginLabels(c.originChoice) } : {}),
             cloud: {
                 keysState: c.keysState,
                 keysMode: c.keysMode,
@@ -127,16 +128,29 @@ function getActiveSyncStatus(pendingUploads) {
             filesToday: githubSync.getSyncFilesToday(),
             conflictCopies: g.conflictCopies,
             conflictMerges: g.conflictMerges,
-            ...(g.originChoice
-                ? {
-                    originChoice: {
-                        previous: `${g.originChoice.previous.owner}/${g.originChoice.previous.repo}`,
-                        next: `${g.originChoice.next.owner}/${g.originChoice.next.repo}`,
-                    },
-                }
-                : {}),
+            ...(g.originChoice ? { originChoice: githubOriginLabels(g.originChoice) } : {}),
             github: { owner: g.owner, repo: g.repo },
         };
     }
     return { backend: 'none', active: false, initialPullStatus: 'pending', pendingUploads, pendingChanges: 0 };
+}
+/** GitHub: 'owner/repo' on both sides; a stale origin names the Cloud account the notes came from. */
+function githubOriginLabels(choice) {
+    return {
+        previous: choice.stale ? choice.staleFrom?.email ?? '' : `${choice.previous.owner}/${choice.previous.repo}`,
+        next: `${choice.next.owner}/${choice.next.repo}`,
+        ...(choice.stale ? { stale: true } : {}),
+    };
+}
+/** Cloud: account emails ('' = unknown); a stale origin names the GitHub repo the notes came from. */
+function cloudOriginLabels(choice) {
+    const previous = choice.stale
+        ? choice.staleFrom ? `${choice.staleFrom.owner}/${choice.staleFrom.repo}` : ''
+        : choice.previous.email ?? '';
+    return {
+        previous,
+        next: choice.next.email ?? '',
+        ...(choice.stale ? { stale: true } : {}),
+        ...(choice.githubConnected ? { disconnectsGithub: true } : {}),
+    };
 }

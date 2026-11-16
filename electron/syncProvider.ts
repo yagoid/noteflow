@@ -157,10 +157,15 @@ export interface ActiveSyncStatus {
   /**
    * The notes dir belongs to another remote of the live backend and holds
    * notes: nothing syncs until the user chooses (merge / use only the remote's
-   * notes / cancel). Human-readable labels — GitHub: 'owner/repo'. Absent
-   * otherwise. Backend-agnostic (`backend` says which one asks).
+   * notes / cancel). Human-readable labels — GitHub: 'owner/repo'; Cloud: the
+   * account email. `previous` is '' when unknown (the renderer shows a generic
+   * text). `stale`: the notes came from the OTHER backend (its "use only the
+   * notes from …") — `previous` then names that one (Cloud account email /
+   * 'owner/repo'). `disconnectsGithub` (Cloud only): "use only the account's
+   * notes" disconnects the connected GitHub Sync. Absent otherwise.
+   * Backend-agnostic (`backend` says which one asks).
    */
-  originChoice?: { previous: string; next: string }
+  originChoice?: { previous: string; next: string; stale?: true; disconnectsGithub?: true }
   /** Present only when backend === 'github'. */
   github?: { owner?: string; repo?: string }
   /** Present only when backend === 'cloud'. */
@@ -188,6 +193,7 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       filesToday: cloudSync.getSyncFilesToday(),
       conflictCopies: c.conflictCopies,
       conflictMerges: c.conflictMerges,
+      ...(c.originChoice ? { originChoice: cloudOriginLabels(c.originChoice) } : {}),
       cloud: {
         keysState: c.keysState,
         keysMode: c.keysMode,
@@ -210,16 +216,33 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       filesToday: githubSync.getSyncFilesToday(),
       conflictCopies: g.conflictCopies,
       conflictMerges: g.conflictMerges,
-      ...(g.originChoice
-        ? {
-            originChoice: {
-              previous: `${g.originChoice.previous.owner}/${g.originChoice.previous.repo}`,
-              next: `${g.originChoice.next.owner}/${g.originChoice.next.repo}`,
-            },
-          }
-        : {}),
+      ...(g.originChoice ? { originChoice: githubOriginLabels(g.originChoice) } : {}),
       github: { owner: g.owner, repo: g.repo },
     }
   }
   return { backend: 'none', active: false, initialPullStatus: 'pending', pendingUploads, pendingChanges: 0 }
+}
+
+type OriginChoiceLabels = NonNullable<ActiveSyncStatus['originChoice']>
+
+/** GitHub: 'owner/repo' on both sides; a stale origin names the Cloud account the notes came from. */
+function githubOriginLabels(choice: githubSync.OriginChoice): OriginChoiceLabels {
+  return {
+    previous: choice.stale ? choice.staleFrom?.email ?? '' : `${choice.previous.owner}/${choice.previous.repo}`,
+    next: `${choice.next.owner}/${choice.next.repo}`,
+    ...(choice.stale ? { stale: true as const } : {}),
+  }
+}
+
+/** Cloud: account emails ('' = unknown); a stale origin names the GitHub repo the notes came from. */
+function cloudOriginLabels(choice: cloudSync.CloudOriginChoice): OriginChoiceLabels {
+  const previous = choice.stale
+    ? choice.staleFrom ? `${choice.staleFrom.owner}/${choice.staleFrom.repo}` : ''
+    : choice.previous.email ?? ''
+  return {
+    previous,
+    next: choice.next.email ?? '',
+    ...(choice.stale ? { stale: true as const } : {}),
+    ...(choice.githubConnected ? { disconnectsGithub: true as const } : {}),
+  }
 }

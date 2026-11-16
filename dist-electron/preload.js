@@ -181,7 +181,11 @@ const api = {
     // The notes dir came from another remote than the connected repo: the user's
     // choice (merge / use only the repo's notes — local ones moved to a local
     // archive, never deleted / cancel = disconnect).
-    resolveGithubOrigin: (choice) => electron_1.ipcRenderer.invoke('sync:resolve-origin', choice),
+    resolveGithubOrigin: (choice) => electron_1.ipcRenderer.invoke('sync:resolve-origin', choice, 'github'),
+    // Same for NoteFlow Cloud (the notes came from another account): merge / use
+    // only the account's notes (local ones archived; GitHub Sync disconnected if
+    // connected) / cancel = Cloud sync off (still signed in, notes untouched).
+    resolveCloudOrigin: (choice) => electron_1.ipcRenderer.invoke('sync:resolve-origin', choice, 'cloud'),
     // Local archives of notes set aside by "use only the remote's notes" (userData/notes-archive).
     getNotesArchiveStatus: () => electron_1.ipcRenderer.invoke('sync:archives-status'),
     openNotesArchive: () => electron_1.ipcRenderer.invoke('sync:open-archives'),

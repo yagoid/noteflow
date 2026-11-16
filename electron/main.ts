@@ -686,6 +686,15 @@ async function runCloudSyncCycle(): Promise<void> {
  */
 async function runCloudSyncCycleOnce({ manual }: CloudSyncCycleFlags): Promise<SyncPullResult | null> {
   if (!cloudSync.isCloudSyncEnabled()) return null
+  // The notes dir belongs to another NoteFlow account (origin choice pending)
+  // or settings.json is unreadable: nothing moves — no unlock, pull nor drain
+  // (the engine refuses too). Re-derived, not cached: the CLI may have
+  // switched the session behind the app.
+  cloudSync.refreshCloudOriginGate()
+  if (cloudSync.isCloudOriginGateBlocked()) {
+    emitCloudStatusChanged()
+    return null
+  }
   // Locked keys: managed sessions re-unlock silently (e.g. the boot attempt
   // ran offline); e2ee stays locked until the user types the passphrase.
   // Pending ops stay journaled and drain after unlock either way.
@@ -775,12 +784,15 @@ function onCloudRemoteChange(): void {
 }
 
 // Reconciles the Realtime subscription with the current state: it runs only
-// while Cloud sync is enabled, there is a session AND the keys are unlocked
-// (events are useless while a pull can't decrypt anyway). Both start and stop
-// are idempotent, so calling this on every status transition is safe.
+// while Cloud sync is enabled, there is a session, the keys are unlocked
+// (events are useless while a pull can't decrypt anyway) AND the origin gate
+// is open (a pending origin choice must not trigger cycles — the cycle would
+// stand down anyway). The gate's transitions emit cloud:status-changed, which
+// lands here. Both start and stop are idempotent, so calling this on every
+// status transition is safe.
 function syncCloudRealtimeState(): void {
   const status = cloudSync.getCloudSyncStatus()
-  if (status.enabled && status.signedIn && status.keysState === 'unlocked') {
+  if (status.enabled && status.signedIn && status.keysState === 'unlocked' && !cloudSync.isCloudOriginGateBlocked()) {
     cloudRealtime.startCloudRealtime(onCloudRemoteChange)
   } else {
     cloudRealtime.stopCloudRealtime()
@@ -2991,26 +3003,48 @@ ipcMain.handle('sync:disconnect', () => {
   return { ok: true }
 })
 
-// The notes dir came from another remote than the connected repo and holds
-// notes (githubSync's origin gate): the user's choice.
+type ResolveOriginResult = {
+  ok: boolean
+  error?: 'invalid' | 'busy' | 'not-pending' | 'archive-failed' | githubSync.ResolveOriginError | cloudSync.ResolveCloudOriginError
+  detail?: string
+}
+
+/** archiveLocalNotesForOriginSwitch failed: the IPC answer (and the UI reload if notes moved anyway). */
+function archiveFailure(err: unknown): ResolveOriginResult {
+  if (err instanceof OriginSwitchAbortedError) return { ok: false, error: 'not-pending' }
+  const detail = err instanceof notesArchive.NotesArchiveError && !err.rolledBack
+    ? `${err.message} — kept in ${err.archiveDir}: ${err.stranded.join('; ')}`
+    : err instanceof Error ? err.message : String(err)
+  console.error('[Sync] archiving the local notes failed:', detail)
+  // Some notes may already be in the archive (undo failed): reload the UI.
+  if (err instanceof notesArchive.NotesArchiveError && !err.rolledBack) {
+    BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
+  }
+  return { ok: false, error: 'archive-failed', detail }
+}
+
+// The notes dir came from another remote than the live backend's and holds
+// notes (the origin gate of githubSync / cloudSync): the user's choice.
+// `backend` defaults to 'github' (the original contract); the reentrancy guard
+// is shared — one choice at a time, whichever backend asks. A backend with no
+// choice pending answers 'not-pending' (cancel included).
 // - merge: today's connect — pull, then every local note goes up.
 // - replace: the local notes are moved to the local archive first (never
 //   deleted); if that fails nothing is pulled and the choice stays pending.
 //   Then pull only.
-// - cancel: disconnect (notes and stored origin untouched).
+// - cancel: GitHub → disconnect; Cloud → Cloud sync off (signed in, notes and
+//   stored origin untouched).
 let resolveOriginInFlight = false
-ipcMain.handle('sync:resolve-origin', async (_event, choice: unknown): Promise<{
-  ok: boolean
-  error?: 'invalid' | 'busy' | 'not-pending' | 'archive-failed' | githubSync.ResolveOriginError
-  detail?: string
-}> => {
+ipcMain.handle('sync:resolve-origin', async (_event, choice: unknown, backend: unknown): Promise<ResolveOriginResult> => {
   if (choice !== 'merge' && choice !== 'replace' && choice !== 'cancel') return { ok: false, error: 'invalid' }
+  if (backend !== undefined && backend !== 'github' && backend !== 'cloud') return { ok: false, error: 'invalid' }
   if (resolveOriginInFlight) return { ok: false, error: 'busy' }
+  if (backend === 'cloud') return resolveCloudOrigin(choice)
+  if (!githubSync.getOriginChoice()) return { ok: false, error: 'not-pending' }
   if (choice === 'cancel') {
     disconnectGithubSync()
     return { ok: true }
   }
-  if (!githubSync.getOriginChoice()) return { ok: false, error: 'not-pending' }
   resolveOriginInFlight = true
   try {
     if (choice === 'replace') {
@@ -3031,20 +3065,8 @@ ipcMain.handle('sync:resolve-origin', async (_event, choice: unknown): Promise<{
       try {
         await archiveLocalNotesForOriginSwitch(label, previous ?? undefined, { stillValid })
       } catch (err) {
-        if (err instanceof OriginSwitchAbortedError) {
-          emitSyncStatusChanged()
-          return { ok: false, error: 'not-pending' }
-        }
-        const detail = err instanceof notesArchive.NotesArchiveError && !err.rolledBack
-          ? `${err.message} — kept in ${err.archiveDir}: ${err.stranded.join('; ')}`
-          : err instanceof Error ? err.message : String(err)
-        console.error('[Sync] archiving the local notes failed:', detail)
-        // Some notes may already be in the archive (undo failed): reload the UI.
-        if (err instanceof notesArchive.NotesArchiveError && !err.rolledBack) {
-          BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
-        }
         emitSyncStatusChanged()
-        return { ok: false, error: 'archive-failed', detail }
+        return archiveFailure(err)
       }
     }
     const res = await githubSync.resolveOriginChoice(choice, NOTES_DIR)
@@ -3067,6 +3089,81 @@ ipcMain.handle('sync:resolve-origin', async (_event, choice: unknown): Promise<{
     resolveOriginInFlight = false
   }
 })
+
+/**
+ * NoteFlow Cloud's origin choice (cloudSync's origin gate: the notes dir came
+ * from another account, or GitHub's "use only the notes from …" replaced them).
+ * - merge: adopt the signed-in account (reset of the per-account state) and run
+ *   a cycle — its first sync downloads the account's notes and the catch-up
+ *   uploads every local note.
+ * - replace: archive the local notes (label of where they came from), adopt
+ *   (marking the GitHub origin stale in the same write), disconnect GitHub if
+ *   it is connected (its repo holds the notes that were just set aside) and
+ *   run a cycle — pull only, nothing synced is left to upload.
+ * - cancel: Cloud sync off — exactly what "Turn off" in Settings does (the
+ *   autosync stops and the Cloud half of a pending restore record is dropped,
+ *   so entitlements landing later don't switch it back on and ask again). The
+ *   session, the notes and the stored origin stay: turning Cloud on by hand
+ *   asks again. A NEW sign-in still switches on what is paid (and asks).
+ */
+async function resolveCloudOrigin(choice: 'merge' | 'replace' | 'cancel'): Promise<ResolveOriginResult> {
+  const chosen = cloudSync.getCloudOriginChoice()
+  if (!chosen) return { ok: false, error: 'not-pending' }
+  if (choice === 'cancel') {
+    cloudSync.disableCloudSync()
+    stopCloudAutoSync()
+    dropRestoreSurface('cloud')
+    emitCloudStatusChanged()
+    emitSyncStatusChanged() // GitHub's gate depends on Cloud being on
+    return { ok: true }
+  }
+  resolveOriginInFlight = true
+  try {
+    if (choice === 'replace') {
+      // The archive is named after where the notes came from: the previous
+      // account, or — for a stale origin — the GitHub repo that replaced them.
+      const from: SyncIdentity | null = chosen.stale
+        ? chosen.staleFrom ? { kind: 'github', owner: chosen.staleFrom.owner, repo: chosen.staleFrom.repo } : null
+        : cloudSync.getStoredCloudOriginIdentity()
+      const label = from ? identityArchiveLabel(from) : 'previous-sync'
+      // Up to ~3.5 s of waits (windows closing, pending saves) happen before
+      // the archive: a sign-out, another account or Cloud turned off may have
+      // changed what the user answered to.
+      const stillValid = (): boolean => {
+        if (!cloudSync.isCloudSyncEnabled() || account.getUserId() !== chosen.next.userId) return false
+        if (cloudSync.refreshCloudOriginGate() !== 'ask') return false
+        const now = cloudSync.getCloudOriginChoice()
+        return !!now &&
+          now.previous.userId === chosen.previous.userId && now.next.userId === chosen.next.userId &&
+          now.stale === chosen.stale
+      }
+      try {
+        await archiveLocalNotesForOriginSwitch(label, from ?? undefined, { stillValid })
+      } catch (err) {
+        emitCloudStatusChanged()
+        return archiveFailure(err)
+      }
+    }
+    const res = cloudSync.resolveCloudOriginChoice(choice)
+    if (!res.ok) {
+      emitCloudStatusChanged()
+      return { ok: false, error: res.error }
+    }
+    // Its repo still holds the notes that were just set aside: GitHub Sync is
+    // disconnected (incl. the CLI's copy of the token); its origin was marked
+    // stale by the adoption, so reconnecting it with notes on disk asks.
+    if (choice === 'replace' && githubSync.getSyncStatus().connected) disconnectGithubSync()
+    emitCloudStatusChanged() // the gate is open: realtime joins (syncCloudRealtimeState)
+    startCloudAutoSync()
+    // unlock → pull (first sync of the account) → catch-up → drain. A manual
+    // cycle: it pulls even with the keys still locked (the error shows), and
+    // its notes broadcast reloads everything.
+    await cloudManualSync()
+    return { ok: true }
+  } finally {
+    resolveOriginInFlight = false
+  }
+}
 
 // Settings → Sync: is there any local archive (copies of notes set aside by
 // "use only the remote's notes")? And open its folder.
@@ -3146,6 +3243,11 @@ ipcMain.handle('sync:mirror-to-github', async () => {
   if (!cloudSync.isCloudSyncEnabled()) {
     return { ok: false, pushed: 0, deleted: 0, skipped: 0, errors: [], warnings: [], error: 'cloud-required' }
   }
+  // The notes on disk may belong to another account (origin choice pending):
+  // mirroring them would push them to the repo as if they were this account's.
+  if (cloudSync.isCloudOriginGateBlocked()) {
+    return { ok: false, pushed: 0, deleted: 0, skipped: 0, errors: [], warnings: [], error: 'origin-choice-pending' }
+  }
   if (cloudSync.getCloudSyncStatus().initialPullStatus !== 'ok' || cloudSync.hasPendingPullRetries()) {
     return { ok: false, pushed: 0, deleted: 0, skipped: 0, errors: [], warnings: [], error: 'cloud-initial-pull-pending' }
   }
@@ -3173,15 +3275,24 @@ function cliConnectEmail(): string | null {
   return status.signedIn && status.email ? status.email : null
 }
 
+// While the backend's origin choice is pending the app itself syncs nothing
+// with it: the CLI must not get access either (it would sync these notes with
+// that remote on its own, behind the user's pending answer).
+function cloudOriginPendingForCli(): boolean {
+  return !!cloudSync.getCloudOriginChoice() || (cloudSync.isCloudSyncEnabled() && cloudSync.isCloudOriginGateBlocked())
+}
+
 ipcMain.handle('cli-connect:cloud-send-code', async () => {
   const email = cliConnectEmail()
   if (!email) return { ok: false, error: 'notSignedIn' }
+  if (cloudOriginPendingForCli()) return { ok: false, error: 'originChoicePending' }
   return cliConnect.cloudSendCode(email)
 })
 
 ipcMain.handle('cli-connect:cloud-verify', async (_event, code: unknown) => {
   const email = cliConnectEmail()
   if (!email) return { ok: false, error: 'notSignedIn' }
+  if (cloudOriginPendingForCli()) return { ok: false, error: 'originChoicePending' }
   // Digits (spaces/dashes tolerated, like the CLI's normalizeOtpCode) — anything
   // else never reaches the CLI's argv.
   const clean = typeof code === 'string' ? code.replace(/[\s-]/g, '') : ''
@@ -3192,6 +3303,7 @@ ipcMain.handle('cli-connect:cloud-verify', async (_event, code: unknown) => {
 ipcMain.handle('cli-connect:cloud-disconnect', async () => cliConnect.cloudDisconnect())
 
 ipcMain.handle('cli-connect:github-connect', () => {
+  if (githubSync.getOriginChoice() || githubSync.isOriginGateBlocked()) return { ok: false, error: 'originChoicePending' }
   const connection = githubSync.getConnectionForCli()
   if (!connection) return { ok: false, error: 'notConnected' }
   return cliConnect.githubConnect(connection)
@@ -3437,8 +3549,11 @@ ipcMain.handle('cloud:disable', () => {
 // result (empty when the cycle stood down: Cloud just disabled, or writes
 // still in flight after the settle timeout — the status then shows them as
 // pending changes).
-async function cloudManualSync(): Promise<SyncPullResult> {
+async function cloudManualSync(): Promise<SyncPullResult & { error?: 'origin-choice-pending' }> {
   const result = await cloudSyncCycle.run({ manual: true })
+  // Nothing was synced: the notes dir came from another account — the user
+  // has to choose first (the cycle stood down at the origin gate).
+  if (cloudSync.getCloudOriginChoice()) return { ...(result ?? emptyPullResult()), error: 'origin-choice-pending' }
   return result ?? emptyPullResult()
 }
 
