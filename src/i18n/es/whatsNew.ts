@@ -67,6 +67,10 @@ export const whatsNew: Messages['whatsNew'] = {
       title: 'Edita cualquier archivo de texto en su sitio',
       body: 'Vincula un archivo Markdown o de texto (el README de un proyecto, un .txt, una configuración) con clic derecho en el + grande o soltándolo en la ventana, o ábrelo desde el sistema ("Abrir con" → NoteFlow). Editas el original: los cambios llegan a su proyecto y a su historial de Git, y lo que cambie fuera aparece aquí. Los archivos vinculados son solo locales.',
     },
+    'checked-tasks': {
+      title: 'Las tareas hechas bajan al final',
+      body: 'Ajustes → Editor reúne cómo escribes: tamaño de letra, tipografía, ancho de lectura y el índice. Activa "Mover las tareas marcadas al final" y al marcar una tarea baja al final de su lista; al desmarcarla vuelve encima de las hechas.',
+    },
     more: {
       title: 'Y mucho más',
       body: 'Pequeños detalles que marcan la diferencia. Los irás encontrando por el camino.',

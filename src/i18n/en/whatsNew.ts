@@ -71,6 +71,10 @@ export const whatsNew = {
       title: 'Edit any text file in place',
       body: "Link a Markdown or text file (a project's README, a .txt, a config) by right-clicking the big + or dropping it on the window, or open it from your system (\"Open with\" → NoteFlow). You edit the original: changes land in its project and Git history, and edits made elsewhere show up here. Linked files stay local.",
     },
+    'checked-tasks': {
+      title: 'Done tasks drop to the bottom',
+      body: 'Settings → Editor gathers how you write: font size, typeface, reading width and the table of contents. Turn on "Move checked items to the bottom" and ticking a task slides it to the end of its list; untick it and it comes back above the done ones.',
+    },
     more: {
       title: 'And much more',
       body: 'Small things that make a big difference. You will run into them as you go.',

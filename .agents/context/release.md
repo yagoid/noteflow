@@ -255,7 +255,7 @@ candidata desde el checkout (mismo `electron-builder` que la release), no reusa 
 Graba desde la app real (Playwright `_electron` + ffmpeg) los clips en bucle del tour →
 `src/assets/whats-new/<id>.<lang>.webm` + póster `<id>.<lang>.png` (ids fijos: `sections`, `kanban`,
 `links-palette`, `quick-capture`, `windows`, `brain`, `ai`, `agents`, `sync`, `section-map`,
-`snippets`, `linked-files`, `more`; idiomas `en`/`es`). `floating-sidebar` ya **no** es diapositiva
+`snippets`, `linked-files`, `checked-tasks`, `more`; idiomas `en`/`es`). `floating-sidebar` ya **no** es diapositiva
 del tour: su toma sigue en el script (`webOnly`) solo para la web (`docs/public/clips`), no se graba
 por defecto y hay que pedirla con `--only floating-sidebar --out <dir fuera de src/assets>` (lo que
 haya en `src/assets/whats-new/` se empaqueta en la app).
@@ -291,9 +291,12 @@ node scripts/whats-new-capture.cjs --app <dir> [--only brain,ai] [--lang en|es|a
   tarjetas → detalle de NoteFlow Cloud → volver → GitHub Sync); `linked-files` (nueva, v2.3.0) vincula un
   `README.md` de una carpeta temporal `projects/acme-api` desde el menú contextual del `+` grande (el
   selector nativo se sustituye en main por uno que devuelve ese archivo), lo edita (la toma espera a ver
-  el cambio en el archivo) y luego lo modifica desde fuera para que la nota se recargue en vivo.
+  el cambio en el archivo) y luego lo modifica desde fuera para que la nota se recargue en vivo;
+  `checked-tasks` (nueva, v2.3.0) abre Ajustes → Editor, pasa por sus filas, activa "Mover las tareas
+  marcadas al final", cierra y marca dos tareas de Tareas (sembradas con las abiertas primero) para
+  que se vea cómo bajan.
   `crf` por clip (`brain` usa 43 para caber en presupuesto).
-- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~8,8 MB con los pósters — el `brain` del cuaderno completo pesa más —, 13 clips × 2
+- Presupuesto: ≤ ~700 KB por clip y ≤ ~8 MB el directorio (hoy ~9,6 MB con los pósters — el `brain` del cuaderno completo pesa más —, 14 clips × 2
   idiomas: **ya por encima del tope**; antes de añadir otro clip, recortar duración/`crf` o los pósters).
 - Composiciones sobre un "escritorio" (fondo degradado + ventanas con esquinas redondeadas y sombra,
   cada superficie grabada por separado con sus tiempos reales): `windows` (ventana principal +

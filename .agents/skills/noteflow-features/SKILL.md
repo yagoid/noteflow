@@ -1568,7 +1568,7 @@ Settings → Startup:
   abre en un terminal: el agente ejecuta `noteflow add` y la tarea aparece en vivo en la app), sync
   (GitHub / NoteFlow Cloud), el mapa de
   secciones plegado del sidebar (y cambiarlo a fila desde el menú ⋯ del pie), los fragmentos del
-  botón del sello, los archivos vinculados (v2.3.0: editar un `.md` o cualquier archivo de texto externo en su sitio, vincularlo desde el `+` o abrirlo desde el sistema) y
+  botón del sello, los archivos vinculados (v2.3.0: editar un `.md` o cualquier archivo de texto externo en su sitio, vincularlo desde el `+` o abrirlo desde el sistema), mover las tareas marcadas al final (v2.3.0: Ajustes → Editor) y
   "And much more"
   (rejilla: notas cifradas, plantillas, temas y acentos, tareas con alarma, vista dividida
   `Ctrl+Click`, CLI, importar de Notion y Keep; cada chip se pulsa y despliega 1–2 frases de qué

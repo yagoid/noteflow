@@ -60,7 +60,7 @@ const { ID, demoContent, seedNotes } = require('./lib/demo-notes.cjs')
 
 const REPO = path.resolve(__dirname, '..')
 const CLIP_IDS = ['sections', 'kanban', 'links-palette', 'quick-capture', 'windows', 'brain', 'ai', 'agents', 'sync',
-  'section-map', 'floating-sidebar', 'snippets', 'linked-files', 'more']
+  'section-map', 'floating-sidebar', 'snippets', 'linked-files', 'checked-tasks', 'more']
 const OUT_W = 960
 const OUT_H = 600 // every clip is 16:10 so the tour modal never jumps
 
@@ -183,6 +183,8 @@ const TEXT = {
       yourKey: 'Your API key', chatTab: 'Chat', save: 'Save',
       insertSnippet: 'Insert snippet: ', chooseSnippet: 'Choose a snippet',
       newNoteBtn: 'New note (Ctrl+N)', seeCloud: 'See NoteFlow Cloud', syncOptions: 'Sync options',
+      editorNav: 'Editor', editorRows: ['Font size', 'Editor font', 'Content width', 'Table of contents'],
+      moveChecked: 'Move checked items to the bottom',
     },
     // "linked-files": an existing README linked from the + menu, edited, then changed outside.
     linked: {
@@ -226,6 +228,8 @@ const TEXT = {
       yourKey: 'Tu clave API', chatTab: 'Chat', save: 'Guardar',
       insertSnippet: 'Insertar fragmento: ', chooseSnippet: 'Elegir un fragmento',
       newNoteBtn: 'Nueva nota (Ctrl+N)', seeCloud: 'Ver NoteFlow Cloud', syncOptions: 'Opciones de sincronización',
+      editorNav: 'Editor', editorRows: ['Tamaño de fuente', 'Fuente del editor', 'Ancho del contenido', 'Índice'],
+      moveChecked: 'Mover las tareas marcadas al final',
     },
     linked: {
       menu: 'Vincular archivo…', confirm: 'Vincular',
@@ -766,6 +770,49 @@ const CLIPS = {
       fs.appendFileSync(file, L.external)
       await page.waitForFunction((n) => document.body.innerText.includes(n), L.externalNeedle, { timeout: 8000 })
       await sleep(1600)
+      return { rec: await rec.stop() }
+    },
+  },
+
+  // Settings → Editor: a quick look over its rows (size, font, width, table of contents), then
+  // "Move checked items to the bottom" switched on for real; back in the note, ticking two tasks
+  // slides each one to the end of the list. The Tasks list is reordered (open tasks first) so the
+  // move reads clearly.
+  'checked-tasks': {
+    speed: 1.2,
+    launch: (T) => ({
+      size: { width: 900, height: 563 },
+      uiState: { activeNoteId: ID.launch, activeSectionId: 'stasks', sidebarMode: 'floating' },
+      tweak: ({ notes }) => {
+        const sec = notes.find((n) => n.id === ID.launch).sections.find((x) => x.id === 'stasks')
+        const lines = sec.content.split('\n')
+        const open = lines.filter((l) => l.startsWith('- [ ]'))
+        const done = lines.filter((l) => l.startsWith('- [x]'))
+        sec.content = [...open, ...done, ...lines.filter((l) => !l.startsWith('- ['))].join('\n')
+      },
+    }),
+    async run({ page }, a, T) {
+      await a.show(560, 330)
+      const rec = await startRecording(page)
+      await sleep(400)
+      await a.click(page.locator(`button[title="${T.ui.settings}"]`).first(), { after: 450 })
+      await a.click(page.locator('nav').getByText(T.ui.editorNav, { exact: true }).first(), { after: 700 })
+      // A glance over everything the panel sets…
+      for (const row of T.ui.editorRows) {
+        await a.moveTo(page.getByText(row, { exact: true }).first(), { fx: 0.3, ms: 420 })
+        await sleep(330)
+      }
+      // …then the one this slide is about.
+      await a.moveTo(page.getByText(T.ui.moveChecked, { exact: true }).first(), { fx: 0.3, ms: 450 })
+      await sleep(450)
+      await a.click(page.locator(`button[role="switch"][aria-label="${T.ui.moveChecked}"]`).first(), { after: 1000 })
+      const close = page.getByText(T.ui.settings, { exact: true }).first()
+        .locator('xpath=ancestor::div[contains(@class,"justify-between")][1]/button')
+      await a.click(close, { after: 700 })
+      // Tick the first two open tasks: each one slides to the end of the list.
+      const open = page.locator('li[data-type="taskItem"][data-checked="false"] .task-checkbox-label').first()
+      await a.click(open, { after: 1500 })
+      await a.click(open, { after: 1700 })
       return { rec: await rec.stop() }
     },
   },
