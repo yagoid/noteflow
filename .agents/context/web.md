@@ -366,12 +366,14 @@ en notas cifradas), las de `add`/`set`/`new`/`section add`, `login`/`cloud login
 tabla de flags globales (`globalFlags`; la mantiene la web, la skill ya no tiene tabla de flags).
 Además refleja **`history`** (v2.13.0, añadido el 2026-11-15 en el grupo NoteFlow Cloud, con sus
 flags `--show`/`--restore`/`--force`/`--dry-run`/`--json` y las filas de `--json`, `--section`,
-`--dry-run` y `--force` de `globalFlags`), sin subir el badge de versión del hero: el resto de la
-página no se ha revisado contra 2.8-2.13.
+`--dry-run` y `--force` de `globalFlags`) y **`origin`** (v2.14.0, 2026-11-16: fila nueva en el grupo
+"GitHub sync" — cubre los dos backends —, `--merge` en las filas de `login`/`cloud login` y en
+`globalFlags`, `origin merge` en `--no-pull`, campo `origin` en el JSON de `status`/`cloud status`), sin
+subir el badge de versión del hero: el resto de la página no se ha revisado contra 2.8-2.14.
 **No** se reflejan en la web: el protocolo para agentes de la skill (checklist inicial, "Sincroniza
 y verifica", "ofrécete a activar el sync") — la web solo enlaza a la skill. Anclas: `#install` `#notes-dir` `#format` `#commands` `#flags`
 `#agents` `#caveats` `#troubleshooting`.
-- Tabla de comandos/flags/ejemplos (39 comandos en 6 grupos, incluido el grupo **NoteFlow Cloud**
+- Tabla de comandos/flags/ejemplos (40 comandos en 6 grupos, incluido el grupo **NoteFlow Cloud**
   `cloud login/logout/setup/push/pull/status` + `history`): **`src/data/cli.ts`** (estructural,
   con `desc: {en,es}` inline por fila).
 - Prosa (instalación, formato v2, avisos PowerShell/app-abierta, troubleshooting): `cli.{en,es}.ts`.

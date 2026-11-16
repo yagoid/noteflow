@@ -12,6 +12,7 @@ type SyncMessages = Messages['titleBar']['sync']
 export function syncStateLabel(state: SyncDisplayState, s: SyncMessages): string {
   switch (state) {
     case 'syncing': return s.statusSyncing
+    case 'choice': return s.statusChoice
     case 'uploading': return s.statusUploading
     case 'locked': return s.statusLocked
     case 'blocked': return s.statusBlocked

@@ -803,7 +803,10 @@ es **un preset más**, no una implementación nueva.
   reflejar por primera vez su propia entitlement `true` (en un login, la activación es cosa del punto
   1, no de la baseline). Activar Cloud pausa GitHub Sync (exclusión mutua, ver § 4 "Settings UI" →
   "Exclusión mutua"); el desbloqueo de claves lo resuelve el flujo normal (`runCloudSyncCycle`: auto-unlock
-  managed; e2ee → formulario de passphrase; sin claves aún → setup en la tarjeta Cloud).
+  managed; e2ee → formulario de passphrase; sin claves aún → setup en la tarjeta Cloud). Si las notas
+  en disco vienen de **otra** cuenta, la activación pasa por la puerta de origen y el ciclo no sube ni
+  baja nada hasta que el usuario elige (§ 4 "Sync engine" → "Origen del dir de notas — la puerta de
+  Cloud").
   3. **Al confirmar la pérdida (decisión 2026-11, antes "nunca apaga nada"):** cuando una observación
      **fresca** (`entitlementsKnown && !account.areEntitlementsFromCache()`: respuesta del servidor en
      este proceso) dice que falta una entitlement y su superficie está encendida, se apaga **igual
@@ -1852,6 +1855,32 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted, seq,
   cambia la DEK en uso (se compara una huella sha-256, nunca se guarda otra copia de la DEK): las
   claves de nota de una DEK nunca se envuelven con otra. Las claves no se tocan (lock es acción
   aparte).
+- **Origen del dir de notas — la puerta de Cloud (`syncOrigin.cloud`).** El dueño protege el
+  **estado** (journal, `pullSeq`): al entrar B se resetea lo de A. Pero no protegía las **notas en
+  disco**: tras el reset, el primer sync de B subía en el catch-up todas las notas que vinieron de A. Ahora
+  el dir recuerda la cuenta con la que se reconcilió (`syncOrigin.cloud = {userId, email, notesDir}`) y,
+  con otra cuenta (o un origen `stale`: el "usar solo las del repo" de GitHub sustituyó las notas) **y
+  notas sincronizables en disco**, Cloud no mueve nada —ni pull, ni catch-up, ni drain, ni subidas, ni
+  tombstones, ni espejo, ni ciclo/tiempo real— hasta que el usuario elige en el diálogo de origen (fusionar
+  / usar solo las de la cuenta, archivando las locales / apagar Cloud). Detalle completo en `sync.md`
+  "Origen del dir de notas" → "Puerta de NoteFlow Cloud". Puntos que tocan esta sección:
+  - **Siembra:** sin `syncOrigin.cloud` pero con `cloudSync.userId` (instalación previa), ese userId es
+    el origen; `bindCloudSyncToAccount` lo registra **antes** del reset que sobrescribe `cloudSync.userId`
+    (siempre para el dir de notas por defecto, aunque el proceso use `NOTEFLOW_NOTES_DIR`).
+    Si no puede escribirlo, no resetea y todo queda bloqueado (estado de otra cuenta = puerta cerrada).
+    Sin origen ni dueño → se adopta sin preguntar (= "Dueño desconocido").
+  - **Auto-activación** (login con suscripción, o compra con sesión): `applyAccountTransition` →
+    `enableCloudSync` evalúa la puerta; si pregunta, `runCloudSyncCycle` sale pronto y nada sube ni baja
+    antes de elegir (el diálogo se abre solo, y la titlebar muestra "Action needed").
+  - **"Cancel" del diálogo = Cloud off** (`disableCloudSync` + `stopCloudAutoSync` +
+    `dropRestoreSurface('cloud')`), con la sesión iniciada y notas y origen intactos. No se reactiva solo:
+    una sesión restaurada al arrancar no es un login (`lastAccountSnapshot`), la baseline de entitlements
+    no ve una transición `false→true` (y Cloud off no es una pérdida), y `dropRestoreSurface` borra la
+    mitad Cloud de un registro `accountRestore` pendiente (si no, unas entitlements que llegaran tarde lo
+    encenderían y volvería a preguntar). Vuelve a preguntar si el usuario enciende Cloud a mano, o en un
+    **login nuevo** (que reactiva lo pagado por diseño — aceptado: es el momento de volver a decidir).
+  - **"Usar solo las de la cuenta"** marca `syncOrigin.github` `stale` y desconecta GitHub Sync si
+    estaba conectado (su repo tiene las notas apartadas).
 - **Tiempo real (tramo 3, implementado):** `electron/cloudRealtime.ts` abre un **WebSocket puro**
   (el `WebSocket` global de Node 22 — sin `@supabase/supabase-js` ni `ws`) contra Supabase
   Realtime (protocolo Phoenix, vsn=1.0.0) y se une a un canal con `postgres_changes` sobre
@@ -1989,14 +2018,23 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
        accent si el proveedor sincroniza; discontinuos si está bloqueado / sin claves / con error / CLI
        sin conectar (`syncMapModel`, testeado). Responsive: rejilla de 5 columnas en `fr` con las
        proporciones del diseño; los nodos truncan su texto si el panel es estrecho.
-    3. Avisos del proveedor justo bajo la tarjeta: error, resultado del pull y, en Cloud, el bloque de
-       claves (onboarding sin claves, "Unlocking…" en managed, formulario de desbloqueo e2ee).
+    3. Avisos justo bajo la tarjeta. Primero, si la **elección de origen** del backend activo está
+       pendiente (las notas vienen de otro repo/cuenta — `sync.md` "Origen del dir de notas"): la
+       insignia de la tarjeta dice "Action needed" (estado `choice`), "Sync now" queda deshabilitado, el
+       mapa pinta los enlaces discontinuos y sale el aviso ámbar con "Choose…" (`OriginPendingNotice`,
+       reabre el `OriginChoiceDialog` de la titlebar). Después, los del proveedor: error, resultado del
+       pull y, en Cloud, el bloque de claves (onboarding sin claves, "Unlocking…" en managed,
+       formulario de desbloqueo e2ee).
     4. **"Security and data"** (Cloud) / **"Repository and data"** (GitHub): lista de filas
        (`SettingsListSection` + `SettingsRow` de `ui.tsx`). Cloud: cifrado estándar/privado (con
        "Switch to private/standard mode" y Lock en e2ee — los formularios de cambio de modo se despliegan
        en la propia fila), "Version history" (badge "Included") y la fila del CLI. GitHub: "Your
        repository" (no dice "privado": NoteFlow lo crea privado si no existía, pero uno existente
        conserva su visibilidad) → Open on GitHub, "History in Git" → `…/commits`, y la fila del CLI.
+       En ambos, justo antes de la fila del CLI, la fila **"Local copies"** → "Open local copies"
+       (`LocalCopiesRow`) cuando existe alguna copia de "Use only the notes from …"; y la fila del CLI
+       deshabilita "Connect the CLI too" (con la explicación debajo) mientras la elección de origen está
+       pendiente.
     5. **"Other providers"**: con Cloud activo y GitHub conectado, la fila GitHub Sync "Paused"
        (`GitHubPausedRow`: Mirror to GitHub con su ConfirmModal + Disconnect); con Cloud activo sin
        GitHub, la fila GitHub Sync "Not connected" (`GitHubNotConnectedRow`) → "View GitHub Sync" abre
@@ -2105,6 +2143,41 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
     es esconder notas antiguas (intactas en remoto), no destruir datos. Nada más queda ligado a la cuenta en disco: la DEK, las claves por
   nota y el access token viven solo en memoria del proceso. La app de escritorio hace el mismo
   reinicio con `settings.cloudSync.userId` (ver "Dueño de la cuenta" en "Sync engine").
+- **Origen del dir de notas (CLI 2.14.0):** identidad `{kind:'cloud', userId: cliAccount.userId,
+  email}` frente a `settings.syncOrigin.cloud` (compartido con la app en Windows; espejo puro y regla
+  en `sync.md` § "El CLI con GitHub" y § "Origen del dir de notas"). Sin `syncOrigin.cloud` el origen
+  se **siembra** con el dueño previo (`cloudOriginSeed`: `settings.cloudSync.userId` de la app, si no
+  `cliCloud.userId`, si no —en `cloud login`— el `userId` de la sesión anterior, el mismo
+  `presumedOwner` de `cliCloudForUser`) y se persiste antes de decidir; sin ninguno se adopta la cuenta
+  que entra. Regla de `notesDir` (en `sync.md` § "El CLI con GitHub"): un registro de otro dir de
+  notas no se usa ni se reescribe y, con `NOTEFLOW_NOTES_DIR` distinto del dir por defecto, **no** se
+  siembra ni se escribe nada (el estado Cloud de settings es del dir por defecto). ⚠️ Residual (solo en
+  el CLI — divergencia conocida y aceptada con la app): sin `syncOrigin.cloud` todavía (settings
+  anteriores a CLI 2.14.0), un `cloud login` a otra cuenta **bajo override** deja la puerta abierta y
+  `bindCliCloudToAccount` reescribe `cliCloud.userId` con la cuenta nueva: se pierde la fuente de la
+  siembra y, al volver al dir por defecto (sin `cloudSync.userId` de la app), la cuenta nueva se adopta
+  sin preguntar. Estrecho (cambio de cuenta bajo override antes de que ningún sync del dir por defecto
+  haya escrito el registro). La app cierra su caso equivalente grabando al dueño que se va como origen
+  **del dir por defecto** antes del reset, también desde un override (`bindCloudSyncToAccount`; `sync.md`
+  § "Un registro por dir de notas"); el CLI no persiste esa siembra antes de su bind. Otra cuenta + notas
+  sincronizables ⇒ puerta cerrada (`evaluateCloudOrigin`): ni pull
+  (`cloudPullNow`/`cloudEnsureReconciled` lanzan), ni push (`cmdCloudPush`/`cmdCloudPull` y `history
+  --restore` —este antes de cualquier petición; listar, `--show` y `--dry-run` sí— salen con exit 1; `syncPushNoteFiles` y los borrados se quedan en local con `Not synced to
+  NoteFlow Cloud` / `Not deleted on NoteFlow Cloud`) y, sobre todo, **ni `bindCliCloudToAccount`**: la
+  puerta va antes, así el cursor y las bases de la cuenta anterior siguen intactos y `cloud logout`
+  cancela sin perder nada. `cloud login` a otra cuenta (`finishCloudLogin`) guarda la sesión, activa
+  `cliCloud.enabled`, informa de las claves y **no** hace ni el reseteo ni el pull: explica y sale con 0.
+  Adopción estricta (`adoptCloudOrigin`, mismo orden que la de GitHub): settings legible → borrar
+  `cli-cloud-state.json` propagando errores (`cli-cloud-base-content/` best-effort: queda sin
+  referencias y la poda de un pull lo limpia) → **una** escritura de settings con `cliCloud =
+  cliCloudReset(…)` (el reseteo de `cliCloudForUser` al cambiar de cuenta, extraído) y `syncOrigin.cloud
+  = {userId, email, notesDir}`; rechaza si `cliAccount` cambió entretanto. ⚠️ Residual: si falla esa
+  escritura de settings tras borrar `cli-cloud-state.json`, el origen sigue siendo el anterior y la puerta
+  cerrada, pero `cliCloud.basesBootstrapped: true` queda sin bases (sin bootstrap, las subidas de esas
+  notas caen a la regla por timestamp hasta el siguiente pull que las fije). Resolver: `cloud login
+  --merge` (solo en el paso `--code` o interactivo; con `--send-code` es error),
+  `noteflow origin merge` (con Cloud activo en el CLI) o `cloud logout`. `cloud status --json` lo
+  muestra en `cloud.origin`.
 - **DEK por invocación, jamás cacheada en disco** (ni la passphrase): managed → `cloud-keys/unlock`
   en cada run; e2ee → passphrase de `NOTEFLOW_CLOUD_PASSPHRASE` o prompt interactivo con eco oculto
   (un input de 30 chars normalizados del alfabeto se trata como recovery code). En e2ee la máquina

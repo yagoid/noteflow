@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.13.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.14.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.13.0'
+const CLI_VERSION = '2.14.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -43,9 +43,10 @@ const CLOUD_METADATA_FILES = ['groups.json', 'folders.json', 'section-colors.jso
 // ── Paths ────────────────────────────────────────────────────────────────────
 
 // NOTEFLOW_NOTES_DIR overrides the default location (scripting / testing)
-const NOTES_DIR = process.env.NOTEFLOW_NOTES_DIR || (process.platform === 'linux'
+const DEFAULT_NOTES_DIR = process.platform === 'linux'
   ? path.join(os.homedir(), '.local', 'share', 'noteflow-notes')
-  : path.join(os.homedir(), 'noteflow-notes'))
+  : path.join(os.homedir(), 'noteflow-notes')
+const NOTES_DIR = process.env.NOTEFLOW_NOTES_DIR || DEFAULT_NOTES_DIR
 
 function getSettingsDir() {
   if (process.platform === 'win32')
@@ -192,8 +193,12 @@ function getToken() {
 // every grant, so a shared session would sign the app and the CLI out of each
 // other on every refresh. The refresh token is stored base64-encoded — same
 // trade-off as the CLI's GitHub token (a plain Node process has no safeStorage).
-// Sole exception, read-only: readDesktopAppInfo() checks whether the app HAS a
-// session (and its email) for the `status --json` hint — never its token.
+// Exceptions, all read-only (never its tokens): readDesktopAppInfo() checks
+// whether the app HAS a session (and its email) for the `status --json` hint;
+// `cloudSync.enabled` (the app syncs with Cloud, GitHub is its mirror) is read
+// by githubConditionalActive, evaluateGithubOrigin and githubOriginAfterLogin;
+// `cloudSync.userId` (the app's Cloud owner) seeds the notes dir origin in
+// cloudOriginSeed.
 
 function getCliAccount() {
   const a = readSettings().cliAccount
@@ -323,6 +328,15 @@ function cliCloudForUser(c, userId, presumedOwner) {
   if (!userId) return c
   const owner = c.userId || presumedOwner
   if (!owner || owner === userId) return c.userId === userId ? c : { ...c, userId }
+  return cliCloudReset(c, userId)
+}
+
+/**
+ * Pure: `c` rebound to `userId` with everything that described another
+ * account's sync dropped (an account switch in cliCloudForUser; also the
+ * adoption of a new notes dir origin, adoptCloudOrigin). `enabled` is kept.
+ */
+function cliCloudReset(c, userId) {
   const next = { ...c, userId }
   delete next.pullSeq
   delete next.pullCursor
@@ -1906,6 +1920,541 @@ function cloudActive() {
   return !!(getCliCloud().enabled && getCliAccount())
 }
 
+// ── Origin of the notes dir (settings.syncOrigin) ─────────────────────────────
+// Which remote this notes dir was last reconciled with, per backend. Without it
+// a `login` to another repo (or a `cloud login` to another account) pulled and
+// pushed straight away, mixing the notes of the previous remote into the new
+// one. Shared with the desktop app — on Windows it is the same settings.json —
+// so the shape is a contract (see electron/syncOrigin.ts):
+//   syncOrigin: { github?: { repoId?: number, owner, repo, stale?: true, notesDir?: string },
+//                 cloud?:  { userId, email?: string, stale?: true, notesDir?: string } }
+// `stale: true` = the dir was replaced under the OTHER backend (a "use only the
+// remote's notes" in the app): it no longer belongs to that identity. The CLI
+// never writes it; every adoption rewrites the record without it.
+// `notesDir` = the notes dir the record describes (absent = the default one):
+// a record only counts for its own dir (originScope / originPlacement below).
+// The pure functions here answer exactly like the app's for the same input
+// (tests/cli/syncOrigin.test.ts runs both over one grid); what differs on
+// purpose is said where it happens (withSyncOrigin, the gates).
+// When the identity changes and there are synced notes on disk, nothing syncs
+// with that backend until the user chooses: `noteflow origin merge` (or
+// `login --merge` / `cloud login --merge`), or cancel with logout. "Use only the
+// remote's notes" (moving the local notes aside) is the desktop app's.
+
+const SYNC_ORIGIN_KEY = 'syncOrigin'
+
+function isPlainObject(v) {
+  return !!v && typeof v === 'object' && !Array.isArray(v)
+}
+
+/**
+ * Pure mirror of electron/syncOrigin.ts sameIdentity: GitHub by numeric repoId
+ * when BOTH sides carry it (survives renames), else owner/repo
+ * case-insensitively; Cloud by userId; different kinds never match.
+ */
+function sameIdentity(a, b) {
+  if (a.kind === 'github' && b.kind === 'github') {
+    if (typeof a.repoId === 'number' && typeof b.repoId === 'number') return a.repoId === b.repoId
+    return a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase()
+  }
+  if (a.kind === 'cloud' && b.kind === 'cloud') return a.userId === b.userId
+  return false
+}
+
+/**
+ * Every stored field already equals the new identity's (nothing to rewrite).
+ * Cloud: also the email label. And the record's notes dir, when `next` carries
+ * one (the app tags it; the CLI's gates don't — see evaluateGithubOrigin).
+ */
+function identicalOriginRecord(stored, next) {
+  const sameDir = next.notesDir === undefined || stored.notesDir === next.notesDir
+  if (stored.kind === 'github' && next.kind === 'github') {
+    return stored.owner === next.owner && stored.repo === next.repo &&
+      (next.repoId === undefined || stored.repoId === next.repoId) && sameDir
+  }
+  if (stored.kind === 'cloud' && next.kind === 'cloud') {
+    return stored.userId === next.userId && (next.email === undefined || stored.email === next.email) && sameDir
+  }
+  return false
+}
+
+/**
+ * Pure mirror of electron/syncOrigin.ts decideOrigin (without its `dirs`: the
+ * gates apply the notes dir rule first — originPlacement). A stale stored
+ * origin with synced notes on disk asks even when it matches `next`; without
+ * notes it is adopted with the per-remote reset (`stale-empty`). Asks ONLY when
+ * the identity changed (or is stale) AND there are synced notes; `hasLocalNotes`
+ * is lazy and must answer true when it can't tell (fail-closed).
+ * → { action: 'proceed', adopt, reason: 'no-origin' | 'same' | 'changed-empty' |
+ * 'stale-empty' } | { action: 'ask', previous, next, stale?: true }.
+ */
+function decideOrigin({ stored, next, hasLocalNotes }) {
+  if (!stored) return { action: 'proceed', adopt: true, reason: 'no-origin' }
+  if (stored.stale) {
+    if (!hasLocalNotes()) return { action: 'proceed', adopt: true, reason: 'stale-empty' }
+    return { action: 'ask', previous: stored, next, stale: true }
+  }
+  if (sameIdentity(stored, next)) return { action: 'proceed', adopt: !identicalOriginRecord(stored, next), reason: 'same' }
+  if (!hasLocalNotes()) return { action: 'proceed', adopt: true, reason: 'changed-empty' }
+  return { action: 'ask', previous: stored, next }
+}
+
+/** A `proceed` that adopts in ANOTHER remote's place: the previous remote's CLI state must be reset first. */
+function originAdoptionResets(reason) {
+  return reason === 'changed-empty' || reason === 'stale-empty'
+}
+
+/** Pure, tolerant parse of `settings.syncOrigin` (malformed entries ignored) — mirror of readSyncOrigin + `stale`/`email`. */
+function readSyncOrigin(settings) {
+  const raw = isPlainObject(settings) ? settings[SYNC_ORIGIN_KEY] : undefined
+  if (!isPlainObject(raw)) return {}
+  const out = {}
+  const gh = raw.github
+  if (isPlainObject(gh) && typeof gh.owner === 'string' && gh.owner && typeof gh.repo === 'string' && gh.repo) {
+    out.github = { owner: gh.owner, repo: gh.repo }
+    if (typeof gh.repoId === 'number' && Number.isFinite(gh.repoId)) out.github = { repoId: gh.repoId, ...out.github }
+    if (gh.stale === true) out.github.stale = true
+    if (typeof gh.notesDir === 'string' && gh.notesDir) out.github.notesDir = gh.notesDir
+  }
+  const cl = raw.cloud
+  if (isPlainObject(cl) && typeof cl.userId === 'string' && cl.userId) {
+    out.cloud = { userId: cl.userId }
+    if (typeof cl.email === 'string' && cl.email) out.cloud.email = cl.email
+    if (cl.stale === true) out.cloud.stale = true
+    if (typeof cl.notesDir === 'string' && cl.notesDir) out.cloud.notesDir = cl.notesDir
+  }
+  return out
+}
+
+/** Pure: the identity stored for one backend ('github' | 'cloud'), or undefined. */
+function getStoredIdentity(settings, kind) {
+  const origin = readSyncOrigin(settings)
+  if (kind === 'github') return origin.github ? { kind: 'github', ...origin.github } : undefined
+  return origin.cloud ? { kind: 'cloud', ...origin.cloud } : undefined
+}
+
+/**
+ * Pure: a copy of `settings` with the backend's origin set to `id`, WITHOUT
+ * `stale` and with `id.notesDir` normalized. Every other key — the other
+ * backend's record, unknown keys of syncOrigin and of settings — is kept.
+ * Another identity (or none stored) gets a fresh record with the known fields
+ * only, exactly the app's. On purpose NOT like the app: re-adopting the SAME
+ * identity also keeps the unknown fields of its record and a repoId / email /
+ * notesDir that `id` lacks (the app writes a fresh record every time). Does
+ * not mutate.
+ */
+function withSyncOrigin(settings, id) {
+  const current = isPlainObject(settings[SYNC_ORIGIN_KEY]) ? { ...settings[SYNC_ORIGIN_KEY] } : {}
+  const prevId = getStoredIdentity(settings, id.kind)
+  const extra = prevId && sameIdentity(prevId, id) && isPlainObject(current[id.kind]) ? { ...current[id.kind] } : {}
+  delete extra.stale
+  const notesDir = typeof id.notesDir === 'string' && id.notesDir ? normalizeNotesDir(id.notesDir)
+    : typeof extra.notesDir === 'string' && extra.notesDir ? extra.notesDir : undefined
+  delete extra.notesDir
+  const dirField = notesDir ? { notesDir } : {}
+  if (id.kind === 'github') {
+    const repoId = typeof id.repoId === 'number' ? id.repoId : (Number.isFinite(extra.repoId) ? extra.repoId : undefined)
+    delete extra.repoId
+    current.github = { ...extra, ...(repoId !== undefined ? { repoId } : {}), owner: id.owner, repo: id.repo, ...dirField }
+  } else {
+    const email = typeof id.email === 'string' && id.email ? id.email : (typeof extra.email === 'string' && extra.email ? extra.email : undefined)
+    delete extra.email
+    current.cloud = { ...extra, userId: id.userId, ...(email ? { email } : {}), ...dirField }
+  }
+  return { ...settings, [SYNC_ORIGIN_KEY]: current }
+}
+
+/**
+ * Pure: who the notes dir belonged to on Cloud before syncOrigin existed — the
+ * desktop app's Cloud owner (`cloudSync.userId`, same file on Windows), else
+ * the owner of the CLI's own Cloud state (`cliCloud.userId`), else
+ * `presumedOwner` (at `cloud login`: the account signed in before it, the same
+ * fallback as cliCloudForUser). undefined = unknown → the account adopts it.
+ */
+function cloudOriginSeed(settings, presumedOwner) {
+  const app = isPlainObject(settings.cloudSync) ? settings.cloudSync.userId : undefined
+  if (typeof app === 'string' && app) return app
+  const cli = isPlainObject(settings.cliCloud) ? settings.cliCloud.userId : undefined
+  if (typeof cli === 'string' && cli) return cli
+  return typeof presumedOwner === 'string' && presumedOwner ? presumedOwner : undefined
+}
+
+/** settings.json parsed, or null when it exists but can't be read/parsed (or isn't an object). Missing → {}. */
+function readSettingsStrict(settingsPath = SETTINGS_PATH) {
+  let raw
+  try { raw = fs.readFileSync(settingsPath, 'utf-8') } catch (e) { return e && e.code === 'ENOENT' ? {} : null }
+  try {
+    const parsed = JSON.parse(raw)
+    return isPlainObject(parsed) ? parsed : null
+  } catch { return null }
+}
+
+/**
+ * Does `dir` hold notes that would sync (folders with a note.md, minus the
+ * local-only ones — listSyncedNoteDirs over any dir)? Fail-closed: a dir that
+ * exists but can't be listed answers true; one that doesn't exist yet holds no
+ * notes. A note.md that can't be read counts as synced (isLocalOnlyNoteDir).
+ */
+function hasSyncedNotesIn(dir) {
+  let entries
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch (e) { return !(e && e.code === 'ENOENT') }
+  try {
+    return entries.some(e => {
+      if (!e.isDirectory()) return false
+      const noteMd = path.join(dir, e.name, NOTE_MD)
+      if (!fs.existsSync(noteMd)) return false
+      try { return !isLocalOnlyNoteMd(fs.readFileSync(noteMd, 'utf-8')) } catch { return true }
+    })
+  } catch { return true }
+}
+
+/** Synced notes in this process's notes dir (the gate's `hasLocalNotes`; fail-closed). */
+function hasSyncedLocalNotes() {
+  return hasSyncedNotesIn(NOTES_DIR)
+}
+
+/** How a notes dir is stored in an origin record: absolute (path.resolve), no trailing separator. */
+function normalizeNotesDir(dir) {
+  const resolved = path.resolve(dir)
+  const root = path.parse(resolved).root
+  return resolved.length > root.length ? resolved.replace(/[\\/]+$/, '') : resolved
+}
+
+/**
+ * Same notes dir? Both resolved, trailing separators dropped; case-insensitive
+ * on win32 and darwin, exact on linux. No realpath (symlinks are not followed).
+ */
+function sameNotesDir(a, b, platform = process.platform) {
+  const na = normalizeNotesDir(a), nb = normalizeNotesDir(b)
+  return platform === 'win32' || platform === 'darwin' ? na.toLowerCase() === nb.toLowerCase() : na === nb
+}
+
+/**
+ * Which notes dir an origin record describes: its `notesDir`, or — a record
+ * written before that field existed — the DEFAULT dir (the one without
+ * NOTEFLOW_NOTES_DIR).
+ */
+function originRecordDir(stored) {
+  return stored && stored.notesDir ? stored.notesDir : DEFAULT_NOTES_DIR
+}
+
+/**
+ * Pure mirror of electron/syncOrigin.ts originScope: does the stored record of
+ * a backend apply to `dirs.current`? With a record: when its notes dir (absent
+ * = `dirs.default`) is the current one. Without one: only the default dir may
+ * start recording. 'foreign' = neither use nor write a record for this dir.
+ */
+function originScope(stored, dirs) {
+  const recordDir = stored && stored.notesDir ? stored.notesDir : dirs.default
+  return sameNotesDir(recordDir, dirs.current, dirs.platform) ? 'own' : 'foreign'
+}
+
+/**
+ * Where the stored origin stands for THIS process's notes dir:
+ *  'here'     — the record describes this dir: the normal rules apply;
+ *  'elsewhere'— it describes another dir (an override, or the default seen from
+ *               an override): not used, never rewritten, no reset, no choice;
+ *  'none-here'— no record and this is the default dir: adopt as usual;
+ *  'none-elsewhere' — no record and this is NOT the default dir: proceed
+ *               without writing (a record for an override would leave the real
+ *               dir with a "foreign" record, i.e. unprotected).
+ */
+function originPlacement(stored) {
+  const own = originScope(stored, { current: NOTES_DIR, default: DEFAULT_NOTES_DIR }) === 'own'
+  if (stored) return own ? 'here' : 'elsewhere'
+  return own ? 'none-here' : 'none-elsewhere'
+}
+
+/** The identity `id` as it is written by an adoption: tagged with this process's notes dir. */
+function withNotesDir(id) {
+  return { ...id, notesDir: normalizeNotesDir(NOTES_DIR) }
+}
+
+/** The CLI's GitHub connection (settings.githubSync) as an origin identity, or null when not connected. */
+function githubConnectionIdentity(sync) {
+  if (!isPlainObject(sync) || !sync.enabled || !sync.encryptedToken) return null
+  if (typeof sync.owner !== 'string' || !sync.owner || typeof sync.repo !== 'string' || !sync.repo) return null
+  return {
+    kind: 'github', owner: sync.owner, repo: sync.repo,
+    ...(typeof sync.repoId === 'number' && Number.isFinite(sync.repoId) ? { repoId: sync.repoId } : {}),
+  }
+}
+
+/** Exactly the same connection (names and repoId) — the one an evaluation looked at is still there. */
+function sameGithubConnection(a, b) {
+  return !!a && !!b && a.owner === b.owner && a.repo === b.repo && a.repoId === b.repoId
+}
+
+/** The CLI's Cloud session (settings.cliAccount) as an origin identity, or null when signed out. */
+function cloudAccountIdentity(account) {
+  if (!isPlainObject(account) || !account.refreshToken || typeof account.userId !== 'string' || !account.userId) return null
+  return { kind: 'cloud', userId: account.userId, ...(typeof account.email === 'string' && account.email ? { email: account.email } : {}) }
+}
+
+/**
+ * Records `id` as the GitHub origin. With `resetRemote` (another remote) the
+ * previous remote's state goes too — same order as the app's adoptGithubOrigin,
+ * strict, so the disk never holds "origin = B" next to A's state:
+ *  1. settings.json readable;
+ *  2. cli-github-state.json rewritten empty, the write MUST succeed (A's shas
+ *     are no base for B; saveGithubBases swallows errors, so not that one);
+ *  3. ONE read-modify-write of settings.json (re-read right before) drops
+ *     lastSync / remoteFormatMigratedAt from the githubSync READ FROM THE FILE
+ *     and sets syncOrigin.github — every other key (the app's) kept.
+ * Refuses when githubSync no longer is the connection evaluated (the desktop
+ * app or another CLI reconnected meanwhile). → { ok } | { ok: false, error }.
+ */
+function adoptGithubOrigin(id, resetRemote) {
+  const first = readSettingsStrict()
+  if (first === null) return { ok: false, error: `${SETTINGS_PATH} can't be read` }
+  if (!sameGithubConnection(githubConnectionIdentity(first.githubSync), id)) {
+    return { ok: false, error: 'the GitHub connection changed meanwhile — run the command again' }
+  }
+  if (resetRemote) {
+    try {
+      const dir = path.dirname(GITHUB_BASES_PATH)
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+      fs.writeFileSync(GITHUB_BASES_PATH, '{}', 'utf-8')
+    } catch (e) {
+      return { ok: false, error: `could not reset ${GITHUB_BASES_PATH} (${e.message})` }
+    }
+  }
+  try {
+    const settings = readSettingsStrict()
+    if (settings === null) throw new Error(`${SETTINGS_PATH} became unreadable`)
+    if (!sameGithubConnection(githubConnectionIdentity(settings.githubSync), id)) {
+      throw new Error('the GitHub connection changed meanwhile — run the command again')
+    }
+    if (resetRemote) {
+      const fileSync = { ...settings.githubSync }
+      delete fileSync.lastSync
+      delete fileSync.remoteFormatMigratedAt
+      settings.githubSync = fileSync
+    }
+    writeSettings(withSyncOrigin(settings, withNotesDir(id)))
+  } catch (e) {
+    return { ok: false, error: `could not record the notes dir origin in settings.json (${e.message})` }
+  }
+  return { ok: true }
+}
+
+/**
+ * Records `id` as the Cloud origin; with `resetRemote` the previous account's
+ * CLI state goes too, strict and in the same order as adoptGithubOrigin:
+ * settings.json readable → cli-cloud-state.json deleted (must succeed; the base
+ * contents are best effort — unreferenced, a pull prunes them) → ONE write of
+ * settings.json resetting cliCloud as an account switch does (cliCloudReset)
+ * and setting syncOrigin.cloud. Refuses when the signed-in account changed.
+ */
+function adoptCloudOrigin(id, resetRemote) {
+  const signedIn = s => { const a = cloudAccountIdentity(s.cliAccount); return !!a && a.userId === id.userId }
+  const first = readSettingsStrict()
+  if (first === null) return { ok: false, error: `${SETTINGS_PATH} can't be read` }
+  if (!signedIn(first)) return { ok: false, error: 'the NoteFlow Cloud session changed meanwhile — run the command again' }
+  if (resetRemote) {
+    try { fs.unlinkSync(CLOUD_BASES_PATH) } catch (e) {
+      if (!e || e.code !== 'ENOENT') return { ok: false, error: `could not reset ${CLOUD_BASES_PATH} (${e && e.message})` }
+    }
+    cloudBaseDelta.clear()
+    cloudBasesCache = null
+    try { fs.rmSync(CLOUD_BASE_CONTENT_DIR, { recursive: true, force: true }) } catch { /* unreferenced now */ }
+  }
+  try {
+    const settings = readSettingsStrict()
+    if (settings === null) throw new Error(`${SETTINGS_PATH} became unreadable`)
+    if (!signedIn(settings)) throw new Error('the NoteFlow Cloud session changed meanwhile — run the command again')
+    if (resetRemote) settings.cliCloud = cliCloudReset(isPlainObject(settings.cliCloud) ? settings.cliCloud : { enabled: false }, id.userId)
+    writeSettings(withSyncOrigin(settings, withNotesDir(id)))
+  } catch (e) {
+    return { ok: false, error: `could not record the notes dir origin in settings.json (${e.message})` }
+  }
+  return { ok: true }
+}
+
+/**
+ * The GitHub origin gate, derived from settings.json (connection, syncOrigin,
+ * cloudSync) and the notes on disk — never cached, so a change made by the app
+ * is seen. With `write`, `proceed` decisions that adopt are written NOW, before
+ * anything syncs (a failure blocks). → { state, … }:
+ *  'clear' (reason: 'not-connected' | 'cloud-mirror' | 'other-dir' | 'no-origin' | 'same' |
+ *           'changed-empty' | 'stale-empty')
+ *  'ask' (previous, next) | 'unreadable' | 'unwritable' (error).
+ * With the desktop app on NoteFlow Cloud (`cloudSync.enabled`) GitHub is its
+ * mirror and the dir belongs to the Cloud account: clear, syncOrigin.github untouched.
+ */
+function evaluateGithubOrigin({ write = true } = {}) {
+  const settings = readSettingsStrict()
+  if (settings === null) return { state: 'unreadable' }
+  const next = githubConnectionIdentity(settings.githubSync)
+  const stored = getStoredIdentity(settings, 'github')
+  if (!next) return { state: 'clear', reason: 'not-connected', stored }
+  if (isPlainObject(settings.cloudSync) && settings.cloudSync.enabled === true) return { state: 'clear', reason: 'cloud-mirror', stored, next }
+  // A record of ANOTHER notes dir (or none, outside the default dir): not used,
+  // nothing written, no reset, no choice — see originPlacement.
+  const placement = originPlacement(stored)
+  if (placement === 'elsewhere' || placement === 'none-elsewhere') return { state: 'clear', reason: 'other-dir', stored, next }
+  // `next` goes in WITHOUT this notes dir: a record of this same repo that has
+  // no `notesDir` yet (the default dir's) is left as it is — the app rewrites
+  // it to add the field, the CLI only when it adopts for another reason.
+  const decision = decideOrigin({ stored, next, hasLocalNotes: hasSyncedLocalNotes })
+  if (decision.action === 'ask') return { state: 'ask', previous: decision.previous, next, stored }
+  if (decision.adopt && write) {
+    const res = adoptGithubOrigin(next, originAdoptionResets(decision.reason))
+    if (!res.ok) return { state: 'unwritable', error: res.error, stored, next }
+  }
+  return { state: 'clear', reason: decision.reason, adopt: decision.adopt, stored, next }
+}
+
+/**
+ * The Cloud origin gate (same states as evaluateGithubOrigin) for the CLI's
+ * signed-in account. No syncOrigin.cloud yet → seeded from the previous owner
+ * (cloudOriginSeed) and, with `write`, persisted before anything can overwrite
+ * that owner; with no owner known at all the account is adopted.
+ */
+function evaluateCloudOrigin({ write = true, presumedOwner } = {}) {
+  const settings = readSettingsStrict()
+  if (settings === null) return { state: 'unreadable' }
+  const next = cloudAccountIdentity(settings.cliAccount)
+  let stored = getStoredIdentity(settings, 'cloud')
+  if (!next) return { state: 'clear', reason: 'not-signed-in', stored }
+  // As GitHub: a record of another notes dir (or none outside the default dir —
+  // there is no seeding either: the settings' Cloud state is the default dir's).
+  const placement = originPlacement(stored)
+  if (placement === 'elsewhere' || placement === 'none-elsewhere') return { state: 'clear', reason: 'other-dir', stored, next }
+  let seeded = false
+  if (!stored) {
+    const seed = cloudOriginSeed(settings, presumedOwner)
+    if (seed) {
+      stored = { kind: 'cloud', userId: seed }
+      seeded = true
+      if (write) {
+        const fresh = readSettingsStrict()
+        try {
+          if (fresh === null) throw new Error(`${SETTINGS_PATH} became unreadable`)
+          if (!getStoredIdentity(fresh, 'cloud')) writeSettings(withSyncOrigin(fresh, withNotesDir(stored)))
+        } catch (e) {
+          return { state: 'unwritable', error: `could not record the notes dir origin in settings.json (${e.message})`, stored, next }
+        }
+      }
+    }
+  }
+  const decision = decideOrigin({ stored, next, hasLocalNotes: hasSyncedLocalNotes })
+  if (decision.action === 'ask') return { state: 'ask', previous: decision.previous, next, stored, seeded }
+  if (decision.adopt && write) {
+    const res = adoptCloudOrigin(next, originAdoptionResets(decision.reason))
+    if (!res.ok) return { state: 'unwritable', error: res.error, stored, next }
+  }
+  return { state: 'clear', reason: decision.reason, adopt: decision.adopt, stored, next, seeded }
+}
+
+/** How an identity reads in messages: 'owner/repo', or the Cloud account's email when known. */
+function originLabel(id) {
+  if (!id) return 'an unknown remote'
+  if (id.kind === 'github') return `${id.owner}/${id.repo}`
+  return id.email ? `the NoteFlow account ${id.email}` : 'another NoteFlow account'
+}
+
+/** One line: why the backend is on hold (no resolution hints). */
+function originHoldReason(backend, gate) {
+  const name = backend === 'github' ? 'GitHub' : 'NoteFlow Cloud'
+  if (gate.state === 'unreadable') return `sync with ${name} is on hold: ${SETTINGS_PATH} can't be read, so the origin of the notes can't be checked — fix or remove that file`
+  if (gate.state === 'unwritable') return `sync with ${name} is on hold: ${gate.error}`
+  const where = `the notes in ${NOTES_DIR}`
+  const from = gate.previous && gate.previous.stale
+    ? `no longer belong to ${originLabel(gate.previous)} (they were replaced while syncing with the other backend)`
+    : `come from ${originLabel(gate.previous)}`
+  const to = backend === 'github' ? `this CLI is connected to ${originLabel(gate.next)}` : `this CLI is signed in to ${originLabel(gate.next)}`
+  return `sync with ${name} is on hold: ${where} ${from}, but ${to}`
+}
+
+/** How to resolve a pending choice (empty for unreadable/unwritable). */
+function originResolveHints(backend, gate) {
+  if (gate.state !== 'ask') return []
+  const target = originLabel(gate.next)
+  const logout = backend === 'github' ? 'noteflow logout' : 'noteflow cloud logout'
+  const remote = backend === 'github' ? target : 'that account'
+  // `origin merge` resolves the backend push/pull route to (Cloud while active, else GitHub).
+  const active = cloudActive() ? 'cloud' : 'github'
+  const merge = backend === active ? 'noteflow origin merge'
+    : `'noteflow origin merge' once ${backend === 'github' ? 'GitHub' : 'NoteFlow Cloud'} is this CLI's active sync backend`
+  return [
+    `Merge (keep the local notes and sync them with ${target}): ${merge}`,
+    `Cancel: ${logout}  (disconnects; the notes and their origin stay as they are)`,
+    `Use only ${remote}'s notes: choose it in the desktop app (Settings > Sync) — it first moves the local notes to a local copy`,
+  ]
+}
+
+function capitalized(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/** Prints the full hold explanation (stderr for refusals, stdout for an informational login). */
+function printOriginHold(backend, gate, { toStderr = true } = {}) {
+  const hints = originResolveHints(backend, gate).map(l => `    ${l}`)
+  const first = `${capitalized(originHoldReason(backend, gate))}. Nothing was synced.`
+  if (toStderr) {
+    err(first)
+    for (const l of hints) console.error(l)
+  } else {
+    out(`  ${first}`)
+    for (const l of hints) out(l)
+  }
+}
+
+/** The one-line notice of a command whose automatic sync was skipped (the local change already landed). */
+function originSkipNotice(backend, gate) {
+  const name = backend === 'github' ? 'GitHub' : 'NoteFlow Cloud'
+  const why = gate.state === 'ask' ? `the notes here belong to ${originLabel(gate.previous)}` : `settings.json can't be ${gate.state === 'unreadable' ? 'read' : 'written'}`
+  return `  Not synced to ${name}: ${why} — saved locally; run 'noteflow origin' to resolve`
+}
+
+/** push/pull/migrate (GitHub): blocked → full explanation on stderr and exit 1, before any request. */
+function requireGithubOrigin() {
+  const gate = evaluateGithubOrigin()
+  if (gate.state === 'clear') return
+  printOriginHold('github', gate)
+  exit(1)
+}
+
+/** push/pull/history --restore (Cloud): same as requireGithubOrigin. */
+function requireCloudOrigin() {
+  const gate = evaluateCloudOrigin()
+  if (gate.state === 'clear') return
+  printOriginHold('cloud', gate)
+  exit(1)
+}
+
+/** Defense in depth inside the Cloud engine (pull/reconcile): throws instead of exiting. */
+function assertCloudOriginClear() {
+  const gate = evaluateCloudOrigin()
+  if (gate.state !== 'clear') throw new Error(`${capitalized(originHoldReason('cloud', gate))} — run 'noteflow origin'`)
+}
+
+/** Pure: an identity's stored fields (without `kind`) for JSON output, or null. */
+function identityFields(id) {
+  if (!id) return null
+  const fields = { ...id }
+  delete fields.kind
+  return fields
+}
+
+/** Pure: the `origin` block of status --json for one backend's gate (labels, not ids, for previous/next). */
+function originStatusJson(backend, gate) {
+  const pending = gate.state === 'ask'
+  const blocked = gate.state !== 'clear'
+  return {
+    state: pending ? 'pending' : gate.state,
+    pending,
+    blocked,
+    stored: identityFields(gate.stored),
+    ...(gate.seeded ? { seeded: true } : {}),
+    ...(gate.reason === 'other-dir' ? { otherNotesDir: true } : {}),
+    ...(pending ? { previous: originLabel(gate.previous), next: originLabel(gate.next) } : {}),
+    ...(blocked ? { reason: originHoldReason(backend, gate) } : {}),
+    ...(pending ? { resolve: originResolveHints(backend, gate) } : {}),
+  }
+}
+
 // ── Groups ────────────────────────────────────────────────────────────────────
 
 function readGroups() {
@@ -2555,17 +3104,22 @@ function githubAuthPost(authPath, params) {
  * Creates the private notes repo only when GitHub says it doesn't exist (404).
  * Any other failure (network, 401, 5xx…) propagates: guessing "missing" there
  * would create a stray repo and point the sync at it.
+ * Returns the repo's numeric GitHub id (from that same GET, or from the
+ * creation's answer) — the identity of the notes dir origin, which survives
+ * renames — or undefined when the answer didn't carry it.
  */
 async function ensureRepo(token, owner, repo) {
+  const idOf = info => (info && typeof info.id === 'number' && Number.isFinite(info.id) ? info.id : undefined)
   try {
-    await githubRequest(token, 'GET', `/repos/${owner}/${repo}`)
+    return idOf(await githubRequest(token, 'GET', `/repos/${owner}/${repo}`))
   } catch (e) {
     if (e.status !== 404) throw new Error(`Could not check the repo ${owner}/${repo}: ${e.message}`)
     out(`  Creating private repo ${owner}/${repo}...`)
-    await githubRequest(token, 'POST', '/user/repos', {
+    const created = await githubRequest(token, 'POST', '/user/repos', {
       name: repo, private: true, description: 'NoteFlow notes — auto-synced', auto_init: true,
     })
     await new Promise(r => setTimeout(r, 1500))
+    return idOf(created)
   }
 }
 
@@ -3035,6 +3589,10 @@ async function syncPushNoteFiles(dirname, files) {
     // Cloud takes priority: never double-push to GitHub while Cloud is active
     // (mirror of the desktop app's syncProvider routing). Sync errors are
     // reported but never abort the local mutation, which already landed.
+    // Notes dir origin (see evaluateCloudOrigin): checked before anything —
+    // also before bindCliCloudToAccount, whose reset must wait for the choice.
+    const gate = evaluateCloudOrigin()
+    if (gate.state !== 'clear') { out(originSkipNotice('cloud', gate)); return { conflicted: false } }
     const relPaths = files.map(f => `${dirname}/${f}`)
     const uploaded = [], stale = []
     // What this command changed: note.md always (it carries the new `updated`,
@@ -3091,6 +3649,8 @@ async function syncPushNoteFiles(dirname, files) {
   if (!sync.enabled || !sync.owner || !sync.repo) return { conflicted: false }
   const token = getToken()
   if (!token) return { conflicted: false }
+  const gate = evaluateGithubOrigin()
+  if (gate.state !== 'clear') { out(originSkipNotice('github', gate)); return { conflicted: false } }
   const bases = loadGithubBases(sync)
   let conflicted = false
   try {
@@ -3949,6 +4509,7 @@ async function cloudTombstoneRelPaths(relPaths) {
 // until it ran, no file has a base and an upload would fall back to the
 // timestamp rule — the very LWW clobber the per-file merge fixes.
 async function cloudEnsureReconciled() {
+  assertCloudOriginClear() // before the account binding: its reset waits for the origin choice
   bindCliCloudToAccount() // another account's cursor ≠ reconciled
   const c = getCliCloud()
   const reconciled = c.pullSeq !== undefined || c.pullCursor || c.lastSync
@@ -4186,6 +4747,7 @@ function indexBasesByDir(bases) {
 
 /** Incremental pull — same grouping/conflict/tombstone/loose-section rules as the app's cloudSync.pullNotes. */
 async function cloudPullNow() {
+  assertCloudOriginClear() // notes dir origin pending (or unrecordable): nothing is pulled
   bindCliCloudToAccount()
   const c = getCliCloud()
   const dek = await getCliDek()
@@ -4650,6 +5212,7 @@ function planCloudLogin(emailArg, opts = {}) {
   const email = (emailArg || '').trim()
   const hasCode = opts.code !== undefined
   if (opts.sendCode && hasCode) return { error: '--send-code and --code cannot be used together' }
+  if (opts.sendCode && opts.merge) return { error: '--merge goes with the sign-in step: noteflow cloud login <email> --code <code> --merge' }
   if (!opts.sendCode && !hasCode) {
     if (email && !email.includes('@')) return { error: 'A valid email is required' }
     return { mode: 'interactive', email }
@@ -4768,9 +5331,25 @@ async function finishCloudLogin(session, email, opts) {
     userId: session.user.id,
     refreshToken: Buffer.from(session.refresh_token).toString('base64'),
   })
+  const presumedOwner = previousAccount ? previousAccount.userId : undefined
+  // Notes dir origin first (see evaluateCloudOrigin): another account with
+  // synced notes on disk holds the sync until the user chooses. While on hold
+  // nothing below may touch the previous account's state (the binding reset,
+  // the first pull), so a `cloud logout` cancels with everything intact.
+  let gate = evaluateCloudOrigin({ presumedOwner })
+  if (gate.state === 'ask' && opts.merge) {
+    const res = adoptCloudOrigin(gate.next, true)
+    if (!res.ok) {
+      err(`Signed in, but the notes could not be merged: ${res.error}. Nothing was synced — retry with 'noteflow origin merge'`)
+      exit(1)
+    }
+    out(`  Merged: the notes in ${NOTES_DIR} now sync with ${originLabel(gate.next)} (--merge)`)
+    gate = { state: 'clear' }
+  }
+  const onHold = gate.state !== 'clear'
   // Before any pull (the managed auto-pull below, or a later `noteflow pull`):
   // a cursor kept by `cloud logout` only resumes for the SAME account.
-  if (bindCliCloudToAccount(previousAccount ? previousAccount.userId : undefined)) {
+  if (!onHold && bindCliCloudToAccount(presumedOwner)) {
     out('  Reset the Cloud sync cursor (it belonged to another account) — the next pull downloads everything')
   }
   patchCliCloud({ enabled: true })
@@ -4790,6 +5369,12 @@ async function finishCloudLogin(session, email, opts) {
       }
     }
   } catch { /* informational only */ }
+
+  if (onHold) {
+    // Signed in, nothing pulled: the first pull waits for the origin choice.
+    printOriginHold('cloud', gate, { toStderr: false })
+    return
+  }
 
   // Managed keys unlock silently (no passphrase prompt), so the first pull can
   // run right away — best-effort: the session is already saved and a failure
@@ -4842,6 +5427,7 @@ async function cmdCloudStatus(opts) {
   }
   const gh = getSyncSettings()
   const noteCount = listLocalNoteDirs().length
+  const origin = evaluateCloudOrigin({ write: false }) // status only reports: nothing adopted here
   if (opts.json) {
     jsonOut({
       notesDir: NOTES_DIR,
@@ -4851,6 +5437,7 @@ async function cmdCloudStatus(opts) {
             email: account.email, enabled: !!c.enabled, keysMode, lastSync: c.lastSync || null,
             pullSeq: typeof c.pullSeq === 'number' ? c.pullSeq : null,
             pullCursor: c.pullCursor || null, // legacy: only until the first seq pull
+            origin: originStatusJson('cloud', origin),
           }
         : null,
       githubConfigured: !!(gh.enabled && gh.owner && gh.repo),
@@ -4872,6 +5459,7 @@ async function cmdCloudStatus(opts) {
     if (c.lastSync) out(`  Last sync: ${c.lastSync}`)
     if (typeof c.pullSeq === 'number') out(`  Cursor:    seq ${c.pullSeq}`)
     else if (c.pullCursor) out(`  Cursor:    ${c.pullCursor} (legacy — next pull reconciles fully)`)
+    printOriginStatusLines('cloud', origin)
   }
   out(`  Notes:     ${noteCount} in ${NOTES_DIR}`)
   if (gh.enabled && gh.owner && gh.repo) {
@@ -4901,6 +5489,7 @@ async function cmdCloudSetup() {
 async function cmdCloudPush() {
   if (!cloudActive()) { err('Not connected to NoteFlow Cloud. Run: noteflow cloud login'); exit(1) }
   if (!fs.existsSync(NOTES_DIR)) { out('  No notes to push'); return }
+  requireCloudOrigin()
   await cloudEnsureReconciled()
   const dek = await getCliDek()
 
@@ -4961,6 +5550,7 @@ async function cmdCloudPush() {
 // noteflow cloud pull (also plain `noteflow pull` while Cloud is active)
 async function cmdCloudPull() {
   if (!cloudActive()) { err('Not connected to NoteFlow Cloud. Run: noteflow cloud login'); exit(1) }
+  requireCloudOrigin()
   out('  Pulling from NoteFlow Cloud...')
   const { pulled, deleted, errors } = await cloudPullNow()
   out(`  Done: ${pulled} pulled, ${deleted} deleted, ${errors} errors`)
@@ -5241,6 +5831,12 @@ async function cmdDelete(titleQuery, opts) {
     }
   }
   const localOnlyNote = isLocalOnlyNoteDir(note.dirname) // read before the folder is gone
+  // The notes dir origin is judged BEFORE the folder goes: deleting the last
+  // note must not turn "notes from another remote" into "no notes → adopt".
+  // On hold, the deletion stays local (like the automatic push): nothing is
+  // deleted on a remote the notes may not belong to.
+  const remoteGate = localOnlyNote ? null : cloudActive() ? evaluateCloudOrigin()
+    : githubConnectionIdentity(getSyncSettings()) && getToken() ? evaluateGithubOrigin() : null
   fs.rmSync(note.filePath, { recursive: true, force: true })
   if (opts.json) jsonOut({ deleted: true, note: note.title })
   else out(`  Deleted "${note.title}"`)
@@ -5248,6 +5844,8 @@ async function cmdDelete(titleQuery, opts) {
 
   // Remove the note from the remote too — Cloud (tombstones) takes priority.
   if (cloudActive()) {
+    const gate = remoteGate
+    if (gate.state !== 'clear') { out(originSkipNotice('cloud', gate).replace('Not synced to', 'Not deleted on')); return }
     try {
       const dek = await getCliDek()
       // path_key is opaque by design — list + decrypt to find the dir's rows.
@@ -5266,7 +5864,10 @@ async function cmdDelete(titleQuery, opts) {
   const sync = getSyncSettings()
   if (sync.enabled && sync.owner && sync.repo) {
     const token = getToken()
-    if (token) {
+    const gate = remoteGate
+    if (gate && gate.state !== 'clear') {
+      out(originSkipNotice('github', gate).replace('Not synced to', 'Not deleted on'))
+    } else if (token) {
       const bases = loadGithubBases(sync)
       try {
         const blobs = await listRemoteTree(token, sync.owner, sync.repo)
@@ -5696,6 +6297,10 @@ async function cmdHistory(titleQuery, sectionName, opts) {
     err("Version history comes from NoteFlow Cloud, which is not active in this CLI — sign in with 'noteflow cloud login'.")
     exit(1)
   }
+  // A restore writes to NoteFlow Cloud (snapshot + upload): not while the notes
+  // dir origin is on hold — refused before any request. Listing, --show and a
+  // --dry-run only read.
+  if (opts.restore !== undefined && !opts.dryRun) requireCloudOrigin()
   if (!findNoteByTitle(titleQuery).length) {
     const encrypted = findEncryptedNoteTitle(titleQuery)
     if (encrypted) {
@@ -5876,6 +6481,8 @@ async function cmdSectionDelete(titleQuery, name, opts) {
   if (isLocalOnlyNoteDir(note.dirname)) return // never synced: nothing to remove remotely
   // Remove the section's file from the remote too, or a pull would resurrect it
   if (cloudActive()) {
+    // Origin on hold: syncPushNoteFiles above already said nothing was synced.
+    if (evaluateCloudOrigin().state !== 'clear') return
     try { await cloudTombstoneRelPaths([`${note.dirname}/${removedFile}`]) }
     catch (e) { err(`Cloud delete failed: ${e.message}`) }
     return
@@ -5888,7 +6495,8 @@ async function cmdSectionDelete(titleQuery, name, opts) {
   const sync = getSyncSettings()
   if (sync.enabled && sync.owner && sync.repo) {
     const token = getToken()
-    if (token) {
+    // Origin on hold: syncPushNoteFiles above already said nothing was synced.
+    if (token && evaluateGithubOrigin().state === 'clear') {
       const bases = loadGithubBases(sync)
       try {
         const res = await removeRemoteFile(token, sync.owner, sync.repo, `${note.dirname}/${removedFile}`, `delete section: ${sec.name}`, bases)
@@ -6217,6 +6825,7 @@ async function cmdLogin(repoName, opts = {}) {
       interval: intervalSec, expiresAt, repo,
       ...(target.owner ? { owner: target.owner } : {}),
       ...(opts.noPull ? { noPull: true } : {}),
+      ...(opts.merge ? { merge: true } : {}),
     })
     out(`  Authorize in the browser, then run: noteflow login --finish  (the code expires at ${expiresAt})`)
     if (opts.json) jsonOut({ verificationUri: data.verification_uri, userCode: data.user_code, expiresAt, repo })
@@ -6258,7 +6867,7 @@ async function cmdLoginFinish(repoArg, opts) {
       : "Authorization expired. Run 'noteflow login --no-wait' again")
     exit(1)
   }
-  await completeGithubLogin(result.token, target, { ...opts, noPull: opts.noPull || pending.noPull })
+  await completeGithubLogin(result.token, target, { ...opts, noPull: opts.noPull || pending.noPull, merge: opts.merge || pending.merge === true })
 }
 
 /**
@@ -6274,7 +6883,9 @@ async function completeGithubLogin(token, target, opts) {
   const ownerError = loginOwnerError(target, user.login)
   if (ownerError) { err(ownerError); exit(1) }
   const { repo } = target
-  await ensureRepo(token, user.login, repo)
+  // The repo's numeric id (from ensureRepo's own GET — no extra request) is the
+  // notes dir origin's identity: a renamed repo keeps it and doesn't ask.
+  const repoId = await ensureRepo(token, user.login, repo)
   const settings = readSettings()
   // No fresh `lastSync` here: nothing has been synced yet, and on Windows this
   // settings.json is the desktop app's too (on Linux/macOS the app keeps its
@@ -6292,13 +6903,55 @@ async function completeGithubLogin(token, target, opts) {
     enabled: true,
     encryptedToken: Buffer.from(token).toString('base64'),
     owner: user.login, repo,
+    ...(repoId !== undefined ? { repoId } : {}),
   }
   delete settings.cliGithubLogin // a grant used (or superseded) — nothing left to finish
   delete settings.cliGithubToken // githubSync now holds a token the CLI reads — the app's copy is stale
   writeSettings(settings)
   out(`  Connected to ${user.login}/${repo}`)
-  await pullAfterLogin(opts)
+  if (githubOriginAfterLogin(opts)) await pullAfterLogin(opts)
   out('')
+}
+
+/**
+ * The notes dir origin right after `login` saved the connection. Returns
+ * whether the first pull may run. Rules (mirror of the app's Device Flow):
+ *  - the desktop app on NoteFlow Cloud (`cloudSync.enabled`): GitHub is its
+ *    mirror, never asks — but an explicit connect adopts the repo (clearing a
+ *    `stale`), as the app's Device Flow does in that state;
+ *  - the CLI routed to Cloud (cloudActive): GitHub is paused, not evaluated
+ *    (pullAfterLogin says so);
+ *  - otherwise the gate (evaluateGithubOrigin). On hold: the connection stays
+ *    saved, nothing is pulled, and it says how to resolve; `--merge` adopts the
+ *    repo right away (exit 1 if that can't be written).
+ */
+function githubOriginAfterLogin(opts) {
+  const settings = readSettingsStrict()
+  if (settings && isPlainObject(settings.cloudSync) && settings.cloudSync.enabled === true) {
+    const next = githubConnectionIdentity(settings.githubSync)
+    const stored = getStoredIdentity(settings, 'github')
+    const placement = originPlacement(stored)
+    if (next && (placement === 'here' || placement === 'none-here')) {
+      const decision = decideOrigin({ stored, next, hasLocalNotes: () => false })
+      const res = decision.adopt ? adoptGithubOrigin(next, originAdoptionResets(decision.reason)) : { ok: true }
+      if (!res.ok) console.error(`  Warning: ${res.error}`)
+    }
+    return true
+  }
+  if (cloudActive()) return true
+  const gate = evaluateGithubOrigin()
+  if (gate.state === 'clear') return true
+  if (gate.state === 'ask' && opts.merge) {
+    const res = adoptGithubOrigin(gate.next, true)
+    if (!res.ok) {
+      err(`Connected, but the notes could not be merged: ${res.error}. Nothing was synced — retry with 'noteflow origin merge'`)
+      exit(1)
+    }
+    out(`  Merged: the notes in ${NOTES_DIR} now sync with ${originLabel(gate.next)} (--merge)`)
+    return true
+  }
+  printOriginHold('github', gate, { toStderr: false })
+  return false
 }
 
 /**
@@ -6356,6 +7009,7 @@ async function cmdPush() {
   const token = getToken()
   if (!token) { err('Token unavailable (encrypted by desktop app). Run: noteflow login'); exit(1) }
   if (!fs.existsSync(NOTES_DIR)) { out('  No notes to push'); return }
+  requireGithubOrigin() // notes dir origin on hold → exit 1 before any request
   // Taken BEFORE reading the disk (like the app's push): a note written while
   // this runs must end up with `updated` > lastSync, never below it.
   const startedAt = new Date().toISOString()
@@ -6526,6 +7180,13 @@ async function cmdPull(opts = {}) {
   if (!sync.enabled || !sync.owner || !sync.repo) throw new Error('Not connected. Run: noteflow login')
   const token = getToken()
   if (!token) throw new Error('Token unavailable (encrypted by desktop app). Run: noteflow login')
+  // Notes dir origin on hold → nothing is pulled. Thrown, not exit(): see pullAfterLogin.
+  const gate = evaluateGithubOrigin()
+  if (gate.state !== 'clear') {
+    const hints = originResolveHints('github', gate)
+    const reason = originHoldReason('github', gate)
+    throw new Error(`${capitalized(reason)}. Nothing was pulled.${hints.map(h => `\n    ${h}`).join('')}`)
+  }
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
   const force = opts.force === true
   const startedAt = new Date().toISOString() // before reading the disk — see cmdPush
@@ -6660,6 +7321,10 @@ async function cmdPull(opts = {}) {
 // connected. The desktop app runs the same migration automatically on startup.
 async function cmdMigrate() {
   if (!fs.existsSync(NOTES_DIR)) { out('  No notes directory'); return }
+  // It uploads the new layout and deletes the flat files on GitHub: with the
+  // notes dir origin on hold, refuse up front (nothing migrated, not even locally).
+  const migrateSync = getSyncSettings()
+  if (migrateSync.enabled && migrateSync.owner && migrateSync.repo && getToken()) requireGithubOrigin()
   const flat = fs.readdirSync(NOTES_DIR).filter(f => f.endsWith('.md') && f !== 'README.md' &&
     fs.statSync(path.join(NOTES_DIR, f)).isFile())
 
@@ -6840,12 +7505,14 @@ function cmdStatus(opts) {
   const sync = getSyncSettings()
   const noteCount = listLocalNoteDirs().length
   const groups = readGroups()
+  const origin = evaluateGithubOrigin({ write: false }) // status only reports: nothing adopted here
   if (opts.json) {
     jsonOut({
       notesDir: NOTES_DIR, noteCount,
       github: sync.enabled && sync.owner && sync.repo ? {
         owner: sync.owner, repo: sync.repo, lastSync: sync.lastSync,
         tokenAccessible: !!getToken(),
+        origin: originStatusJson('github', origin),
       } : null,
       groups: groups.length,
       desktopApp: readDesktopAppInfo(),
@@ -6859,10 +7526,132 @@ function cmdStatus(opts) {
     const tokenOk = !!getToken()
     out(`  GitHub:    ${sync.owner}/${sync.repo} ${tokenOk ? '(connected)' : '(token inaccessible — run: noteflow login)'}`)
     if (sync.lastSync) out(`  Last sync: ${sync.lastSync}`)
+    printOriginStatusLines('github', origin)
   } else {
     out('  GitHub:    not connected')
   }
   out('')
+}
+
+/** `status` text: the origin line(s) of a backend — only when sync is on hold. */
+function printOriginStatusLines(backend, gate) {
+  if (gate.state === 'clear') return
+  const reason = originHoldReason(backend, gate)
+  out(`  Origin:    ACTION NEEDED — ${reason.replace(/^sync with [^:]+ is on hold: /, '')}`)
+  for (const h of originResolveHints(backend, gate)) out(`             ${h}`)
+}
+
+// noteflow origin [--json]       state of the notes dir origin, both backends
+// noteflow origin merge [--no-pull]  resolve a pending choice of the active backend
+async function cmdOrigin(sub, opts) {
+  if (sub === undefined) { cmdOriginStatus(opts); return }
+  if (sub === 'merge') { await cmdOriginMerge(opts); return }
+  err('Usage: noteflow origin [--json]  |  noteflow origin merge [--no-pull]')
+  exit(1)
+}
+
+function cmdOriginStatus(opts) {
+  // Read-only: no adoption is written here (the next sync does it).
+  const gh = evaluateGithubOrigin({ write: false })
+  const cl = evaluateCloudOrigin({ write: false })
+  const ghSync = getSyncSettings()
+  const ghConnected = !!(ghSync.enabled && ghSync.owner && ghSync.repo)
+  const active = cloudActive() ? 'cloud' : ghConnected ? 'github' : null
+  const localNotes = hasSyncedLocalNotes()
+  if (opts.json) {
+    jsonOut({
+      notesDir: NOTES_DIR, localNotes, activeBackend: active,
+      github: { connected: identityFields(gh.next), mirror: gh.reason === 'cloud-mirror', ...originStatusJson('github', gh) },
+      cloud: { signedIn: identityFields(cl.next), ...originStatusJson('cloud', cl) },
+    })
+    return
+  }
+  out(`\n  Notes dir origin — ${NOTES_DIR} (${localNotes ? 'has synced notes' : 'no synced notes'})`)
+  const row = (backend, gate, current, extra) => {
+    const name = backend === 'github' ? 'GitHub:' : 'Cloud: '
+    const stored = gate.stored
+      ? `${originLabel(gate.stored)}${gate.stored.stale ? ' (stale)' : ''}${gate.seeded ? ' (previous owner)' : ''}` +
+        (gate.reason === 'other-dir' ? ` (recorded for another notes dir: ${originRecordDir(gate.stored)})` : '')
+      : gate.reason === 'other-dir' ? `none (only the default notes dir ${DEFAULT_NOTES_DIR} keeps one)` : 'none'
+    const now = current ? originLabel(current) : backend === 'github' ? 'not connected' : 'not signed in'
+    const state = gate.state === 'clear' ? 'OK' : 'ACTION NEEDED'
+    out(`  ${name}  origin ${stored} · ${backend === 'github' ? 'connected to' : 'signed in to'} ${now}${extra} — ${state}`)
+    if (gate.state !== 'clear') {
+      out(`           ${originHoldReason(backend, gate)}`)
+      for (const h of originResolveHints(backend, gate)) out(`           ${h}`)
+    }
+  }
+  row('github', gh, gh.next, gh.reason === 'cloud-mirror' ? " (mirror of the desktop app's NoteFlow Cloud)" : '')
+  row('cloud', cl, cl.next, '')
+  if (active) out(`  Active backend: ${active === 'cloud' ? 'NoteFlow Cloud' : 'GitHub'} ('noteflow origin merge' resolves this one)`)
+  out('')
+}
+
+/**
+ * GET /repos/{o}/{r} → its numeric id, patched into the CURRENT githubSync
+ * (re-read; only if it still is connection `id`). Returns whether it was saved.
+ * Never throws: offline / no token / unwritable = stays by name.
+ */
+async function recordGithubRepoId(id) {
+  const token = getToken()
+  if (!token) return false
+  let repoId
+  try {
+    const info = await githubRequest(token, 'GET', `/repos/${id.owner}/${id.repo}`)
+    repoId = info && typeof info.id === 'number' && Number.isFinite(info.id) ? info.id : undefined
+  } catch { return false }
+  if (repoId === undefined) return false
+  try {
+    const settings = readSettingsStrict()
+    if (!settings || !sameGithubConnection(githubConnectionIdentity(settings.githubSync), id)) return false
+    settings.githubSync = { ...settings.githubSync, repoId }
+    writeSettings(settings)
+    return true
+  } catch { return false }
+}
+
+/**
+ * Resolves a pending origin choice of the ACTIVE backend (Cloud when
+ * cloudActive, else GitHub — the push/pull routing) without a new login:
+ * adopts the remote (strict, with the per-remote reset) and runs its pull
+ * (best effort, like the one after login; --no-pull skips it). Nothing pending
+ * → says so, exit 0. Uploading the local notes is `noteflow push`, as always.
+ */
+async function cmdOriginMerge(opts) {
+  const backend = cloudActive() ? 'cloud' : 'github'
+  let gate = backend === 'cloud' ? evaluateCloudOrigin() : evaluateGithubOrigin()
+  if (gate.state === 'ask' && backend === 'github' && gate.next.repoId === undefined) {
+    // As the app's resolveOriginChoice: record the repo's numeric id first, so
+    // the adopted origin survives renames (best effort — without it, by name).
+    // With the id the repo may turn out to be the origin, renamed: re-evaluate.
+    if (await recordGithubRepoId(gate.next)) gate = evaluateGithubOrigin()
+  }
+  if (gate.state === 'unreadable' || gate.state === 'unwritable') {
+    err(`${capitalized(originHoldReason(backend, gate))}. Nothing was merged`)
+    exit(1)
+  }
+  if (gate.state !== 'ask') {
+    const what = gate.next ? originLabel(gate.next) : backend === 'github' ? 'GitHub (not connected)' : 'NoteFlow Cloud (not signed in)'
+    out(`  Nothing to resolve: no origin choice is pending for ${what}`)
+    return
+  }
+  const res = backend === 'cloud' ? adoptCloudOrigin(gate.next, true) : adoptGithubOrigin(gate.next, true)
+  if (!res.ok) { err(`Could not merge: ${res.error}. Nothing was synced`); exit(1) }
+  out(`  Merged: the notes in ${NOTES_DIR} now sync with ${originLabel(gate.next)}`)
+  if (backend === 'github') {
+    await pullAfterLogin(opts)
+  } else if (opts.noPull) {
+    out("  Skipped the pull (--no-pull). Run 'noteflow pull' to download the notes")
+  } else {
+    try {
+      await cmdCloudPull()
+    } catch (e) {
+      if (e instanceof CliExit) throw e
+      err(`Pull failed: ${e.message}`)
+      out("  The merge holds. Run 'noteflow pull' to retry")
+    }
+  }
+  out("  Local notes the remote doesn't have yet go up with 'noteflow push'")
 }
 
 function cmdHelp(topic) {
@@ -7211,9 +8000,9 @@ function cmdHelp(topic) {
     noteflow rename "Projct Alpha" "Project Alpha"
 `,
     login: `
-  noteflow login [repo] [--no-pull]
-  noteflow login [repo] --no-wait [--no-pull] [--json]
-  noteflow login --finish [--no-pull]
+  noteflow login [repo] [--no-pull] [--merge]
+  noteflow login [repo] --no-wait [--no-pull] [--merge] [--json]
+  noteflow login --finish [--no-pull] [--merge]
 
   Connects GitHub sync with the Device Flow: open the URL, enter the code, and
   the CLI saves its own token (the desktop app's one is not readable here),
@@ -7244,6 +8033,17 @@ function cmdHelp(topic) {
   Options:
     --no-pull   Connect only, skip the first pull (with --no-wait it carries
                 over to --finish)
+    --merge     If the notes here come from ANOTHER repo, merge them into this
+                one without stopping (see below; with --no-wait it carries over)
+
+  Notes from another repo: the CLI remembers which repo the notes dir was synced
+  with (shared with the desktop app). Connecting a different repo while there
+  are synced notes on disk saves the connection but pulls nothing, and every
+  sync with GitHub (push, pull, the automatic push of each edit, remote deletes)
+  stays on hold until you choose: 'noteflow origin merge' (or --merge here) to
+  keep the local notes and sync them with the new repo, or 'noteflow logout' to
+  cancel. Using only the new repo's notes is done in the desktop app. A renamed
+  repo is the same repo. See 'noteflow help origin'.
 
   The CLI keeps its own token base64-encoded (not encrypted) in its settings.json:
   %APPDATA%\\noteflow\\settings.json on Windows, ~/.config/noteflow/settings.json
@@ -7264,6 +8064,9 @@ function cmdHelp(topic) {
   noteflow cloud login <email> --code <code>
                                   Non-interactive step 2: verify it (no new email;
                                   a wrong/expired code exits 1 and can be retried)
+  noteflow cloud login ... --merge
+                                  Notes here from ANOTHER account: merge them into
+                                  this one without stopping (see 'help origin')
   noteflow cloud logout           Sign out (keeps notes and the sync cursor: signing
                                   back in with the same account resumes from it)
   noteflow cloud status [--json]  Account, keys mode and sync state
@@ -7275,6 +8078,8 @@ function cmdHelp(topic) {
   to upload). While signed in with Cloud enabled, plain 'noteflow push', 'pull',
   'status' and the automatic after-command sync use Cloud INSTEAD of GitHub.
   The first push runs an automatic initial pull to reconcile with the remote.
+  Signing in to ANOTHER account while synced notes from the previous one are on
+  disk signs in but syncs nothing until you choose ('noteflow help origin').
 
   Sync is per file (each section is a file): edits to different sections on two
   devices merge; if both changed the SAME section, the note keeps the remote
@@ -7309,10 +8114,15 @@ function cmdHelp(topic) {
   isolate a test).
 
   --json (GitHub): { notesDir, noteCount, github: { owner, repo, lastSync,
-                   tokenAccessible } | null, groups, desktopApp }
+                   tokenAccessible, origin } | null, groups, desktopApp }
   --json (Cloud):  { notesDir, noteCount, cloud: { email, enabled, keysMode,
-                   lastSync, pullSeq, pullCursor } | null, githubConfigured,
-                   desktopApp }
+                   lastSync, pullSeq, pullCursor, origin } | null,
+                   githubConfigured, desktopApp }
+
+  origin                  The notes dir origin of that backend ('noteflow help
+                          origin'): { state, pending, blocked, stored, seeded?,
+                          previous?, next?, reason?, resolve? }. pending: true =
+                          sync is on hold until you choose — 'resolve' lists how.
 
   tokenAccessible: false  GitHub is set up, but the token belongs to the desktop
                           app (encrypted, unreadable here): run 'noteflow login'
@@ -7355,6 +8165,39 @@ function cmdHelp(topic) {
 
   Commands that write already push the files they touch; a sync failure there
   does NOT change the exit code (the local change is saved), so read the output.
+  While the notes dir origin is on hold ('noteflow help origin') push and pull
+  exit 1 without syncing, and the automatic push says "Not synced to …".
+`,
+    origin: `
+  noteflow origin [--json]
+  noteflow origin merge [--no-pull]
+
+  The CLI remembers, per backend, which remote the notes dir was last synced
+  with — the GitHub repo (by its id, so a renamed repo is the same one) and the
+  NoteFlow Cloud account. It is the 'syncOrigin' of settings.json, shared with
+  the desktop app. When you connect ANOTHER repo/account while synced notes
+  from the previous one are on disk, the CLI does not mix them on its own: the
+  login is saved, but nothing syncs with that backend — push and pull exit 1,
+  edits are saved locally with "Not synced to …", deletions stay local — until
+  you choose:
+    noteflow origin merge   Keep the local notes and sync them with the new
+                            remote, then pull it (--no-pull skips the pull).
+                            'noteflow push' uploads the local notes it lacks.
+                            Same as 'login --merge' / 'cloud login --merge'.
+    noteflow logout         Cancel (GitHub): disconnect. Notes and origin stay
+    noteflow cloud logout   as they are (Cloud) — log back in to the old one.
+    Desktop app             "Use only the remote's notes" (Settings > Sync)
+                            moves the local notes to a local copy first; the
+                            CLI does not do that.
+  With no synced notes on disk (or no origin recorded yet) the new remote is
+  adopted without asking. 'origin merge' resolves the ACTIVE backend (Cloud
+  while signed in with Cloud enabled, else GitHub); with nothing pending it says
+  so and exits 0. If settings.json can't be read, sync stays on hold too.
+
+  'noteflow origin' shows both backends: recorded origin, current connection
+  and whether a choice is pending. --json: { notesDir, localNotes,
+  activeBackend, github: { connected, mirror, state, pending, blocked, stored,
+  … }, cloud: { signedIn, state, pending, blocked, stored, … } }.
 `,
     migrate: `
   noteflow migrate
@@ -7419,6 +8262,7 @@ function cmdHelp(topic) {
     login [repo]          GitHub: connect your notes repo and pull it
                           [--no-pull: connect only, skip the first pull]
                           [--no-wait, then --finish: two steps, no waiting] — 'noteflow help login'
+                          [--merge: notes here from another repo → merge them]
     cloud login           NoteFlow Cloud: sign in with your NoteFlow account
                           (encrypted; takes priority over GitHub) — 'noteflow help cloud'
                           [<email> --send-code, then <email> --code <code>: no prompts]
@@ -7427,6 +8271,8 @@ function cmdHelp(topic) {
     pull / update         Download remote changes from the active backend
                           [--force: GitHub only — overwrite even if local is newer]
     status / cloud status Show GitHub / NoteFlow Cloud sync status
+    origin [merge]        Which remote the notes dir belongs to; 'merge' resolves
+                          a pending choice after switching repo/account — 'noteflow help origin'
     migrate               One-time migration: flat .md notes → folder format v2
     self-update           Update this CLI script (and its installed agent skill)
     version / --version   Print the CLI version
@@ -7434,7 +8280,7 @@ function cmdHelp(topic) {
   Flags (a flag a command doesn't support is an error, never ignored):
     --json                Machine-readable JSON output (info lines go to stderr) —
                           list/get/read/path/new/add/set/delete/history, groups/folders,
-                          group create/folder create, status/cloud status, login --no-wait
+                          group create/folder create, status/cloud status, origin, login --no-wait
     --yes                 Skip confirmation prompts
     --dry-run             add/set/history --restore: resolve the target without
                           writing anything
@@ -7495,6 +8341,8 @@ const BOOLEAN_FLAGS = {
   // Non-interactive two-step sign-ins (agents): login --no-wait / --finish,
   // cloud login <email> --send-code / --code <code>.
   '--no-wait': ['noWait', true], '--finish': ['finish', true], '--send-code': ['sendCode', true],
+  // Notes dir origin: merge the local notes into the new remote without asking.
+  '--merge': ['merge', true],
 }
 const VALUE_FLAGS = ['--tag', '--title', '--section', '--group', '--folder', '--color', '--text', '--file', '--code', '--show', '--restore']
 
@@ -7543,13 +8391,14 @@ const COMMAND_FLAGS = {
   folders: ['--group', '--json'], 'folder list': ['--group', '--json'], 'folder create': ['--group', '--json'],
   'folder rename': ['--group'], 'folder delete': ['--group'],
   // --json only with --no-wait (loginFlagsError): the other forms print no JSON.
-  login: ['--no-pull', '--no-wait', '--finish', '--json'], logout: [],
+  login: ['--no-pull', '--no-wait', '--finish', '--merge', '--json'], logout: [],
   push: [], pull: ['--force'], status: ['--json'], migrate: [], 'self-update': [],
-  'cloud login': ['--no-pull', '--send-code', '--code'], 'cloud logout': [], 'cloud status': ['--json'],
+  'cloud login': ['--no-pull', '--send-code', '--code', '--merge'], 'cloud logout': [], 'cloud status': ['--json'],
   'cloud setup': [], 'cloud push': [], 'cloud pull': [],
+  origin: ['--json'], 'origin merge': ['--no-pull'],
 }
 const COMMAND_ALIASES = { rm: 'delete', pin: 'favorite', update: 'pull' }
-const SUBCOMMAND_PARENTS = ['section', 'group', 'folder', 'cloud']
+const SUBCOMMAND_PARENTS = ['section', 'group', 'folder', 'cloud', 'origin']
 
 /**
  * Pure: the first flag in `seen` that `cmd [sub]` doesn't support → its error
@@ -7559,7 +8408,8 @@ const SUBCOMMAND_PARENTS = ['section', 'group', 'folder', 'cloud']
 function unsupportedFlagError(cmd, sub, seen) {
   const base = COMMAND_ALIASES[cmd] || cmd
   let key = base, label = cmd
-  if (SUBCOMMAND_PARENTS.includes(base)) {
+  // A parent run bare (`noteflow origin`) checks its own entry, if it has one.
+  if (SUBCOMMAND_PARENTS.includes(base) && sub !== undefined) {
     key = `${base} ${sub === 'rm' ? 'delete' : sub}`
     label = `${cmd} ${sub}`
   }
@@ -7755,6 +8605,7 @@ async function main() {
       else { err('Usage: noteflow cloud login|logout|status|setup|push|pull'); exit(1) }
       break
     }
+    case 'origin':        await cmdOrigin(positional[0], flags); break
     case 'migrate':       await cmdMigrate(); break
     case 'self-update':   await cmdSelfUpdate(); break
     case 'status':  if (cloudActive()) await cmdCloudStatus(flags); else cmdStatus(flags); break
@@ -7830,5 +8681,12 @@ if (require.main === module) {
     cmdHistory, parseHistoryIndex, historyFlagsError, historyContentBytes, formatHistoryBytes,
     formatHistoryDate, planHistoryVersions, formatHistoryLine, classifySnapshot, snapshotAllowsRestore,
     snapshotFailureReason, HISTORY_SNAPSHOT_RPC,
+    // Notes dir origin (mirror of electron/syncOrigin.ts + the CLI's gates)
+    sameIdentity, decideOrigin, readSyncOrigin, getStoredIdentity, withSyncOrigin, readSettingsStrict,
+    hasSyncedLocalNotes, cloudOriginSeed, cliCloudReset, evaluateGithubOrigin, evaluateCloudOrigin,
+    adoptGithubOrigin, adoptCloudOrigin, originStatusJson, cmdOrigin, cmdStatus, cmdCloudStatus,
+    cmdCloudPull, cmdDelete, cmdSectionDelete, cmdMigrate, finishCloudLogin, cmdLogin, cmdLoginFinish,
+    GITHUB_BASES_PATH, SETTINGS_PATH, NOTES_DIR, DEFAULT_NOTES_DIR, sameNotesDir, normalizeNotesDir,
+    originScope, originPlacement, withNotesDir,
   }
 }

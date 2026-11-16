@@ -60,7 +60,7 @@ entretanto). La línea de identidad del pie del sidebar
 y solo refresca con `sync-auth-complete`, `sync:status-changed` y `cloud:status-changed` (por eso
 `sync:disconnect` emite `sync:status-changed`). El botón y su **tarjeta de estado al hover** viven
 en `SyncStatusButton.tsx` (sin `title` nativo; `aria-label` con resumen); la prioridad del estado
-mostrado (syncing → uploading → locked → blocked → error → pending → **unsynced** → synced) es lógica
+mostrado (syncing → **choice** (elección de origen pendiente, ver "Origen del dir de notas") → uploading → locked → blocked → error → pending → **unsynced** → synced) es lógica
 pura en `src/lib/syncStatus.ts` (testeada). Además de lo normalizado, el status lleva `pendingUploads`
 (`pendingPushFiles` + `pendingRemoteDeletes` de `main.ts`, que se lo pasa a
 `getActiveSyncStatus(pendingUploads)`: subidas y borrados **en vuelo** — las ediciones aún dentro del
@@ -222,6 +222,92 @@ Support/NoteFlow`: ficheros distintos, ver `architecture.md` § Modelo de almace
 Por eso su `lastSync` obedece al mismo invariante que la regla de borrado del pull de la app
 ("ausente del remoto + `updated <= lastSync` ⇒ borrada"): `lastSync` solo avanza cuando el repo
 tiene **todo** lo que hay en disco (`nextGithubLastSync`/`writeGithubLastSync`). En concreto:
+- **Origen del dir de notas** (desde CLI 2.14.0; la regla de la app está en § "Origen del dir de
+  notas" abajo): el CLI lee y escribe el mismo `settings.syncOrigin` (en Windows, el de la app). Lleva
+  un espejo puro de `electron/syncOrigin.ts` (`sameIdentity`, `decideOrigin`, `originScope`,
+  `readSyncOrigin`, `getStoredIdentity`, `withSyncOrigin`, `normalizeNotesDir`, `sameNotesDir`,
+  `readSettingsStrict`, `hasSyncedLocalNotes`), incluidas las partes aditivas del contrato, que la app
+  también implementa (§ "Origen del dir de notas"): `stale: true` (origen guardado `stale` + notas
+  sincronizables ⇒ preguntar aunque la identidad coincida, con `stale: true` en la decisión; sin notas ⇒
+  adoptar con reseteo, `stale-empty`; el CLI **nunca** lo escribe —solo la app, en su "usar solo lo
+  remoto"— y toda adopción lo quita), `cloud.email` (etiqueta de los mensajes) y **`notesDir`** (abajo).
+  **Paridad CLI ↔ app** (`tests/cli/syncOrigin.test.ts`): las mismas entradas pasan por los dos módulos
+  y se comparan las respuestas — rejilla de identidades guardadas (con `stale` / `email` / `notesDir`) ×
+  identidad que entra × notas en disco × dir actual/por defecto/plataforma; ajustes válidos y
+  malformados; ida y vuelta (lo que adopta uno lo lee el otro sin preguntar ni reescribir; la marca
+  `stale` de la app cierra la puerta del CLI y la adopción del CLI la limpia para la app); y las **dos
+  puertas del CLI sobre un `settings.json` real** frente a la decisión de la app para ese mismo fichero
+  y dir. Diferencias **deliberadas**, fijadas en ese test: (1) `withSyncOrigin` al readoptar la
+  **misma** identidad — los dos conservan el `repoId` guardado si la identidad nueva no lo trae (no es
+  diferencia: perderlo dejaría el repo comparándose solo por nombre) y ninguno conserva `stale`; el CLI
+  conserva además el `email`, el `notesDir` y los campos desconocidos que falten, y la app escribe el
+  resto del registro nuevo; (2) la app etiqueta la identidad con su dir
+  (`next.notesDir`) y por eso reescribe un registro de la misma identidad **sin** `notesDir` para
+  añadírselo, mientras que la puerta del CLI lo deja como está (ambos lo leen como del dir por defecto);
+  (3) la regla del dir va **antes** de `decideOrigin` en el CLI (`originPlacement` → `other-dir`) y
+  **dentro** en la app (`dirs` → `foreign-dir`): mismo resultado; (4) la siembra de Cloud del CLI conoce
+  además su propio dueño (`cliCloud.userId`, y el de la sesión anterior en `cloud login`).
+  **Seguridad de estos tests:** los que vacían, archivan o borran en un dir de notas
+  (`tests/cli/syncOrigin.test.ts`, `tests/cli/originGate.test.ts`, `tests/electron/syncOriginGithub.test.ts`,
+  `tests/electron/syncOriginCloud.test.ts`) derivan ese dir del temporal del test de forma **explícita**
+  (`defaultNotesDir(home)`), nunca de `os.homedir()` — el mock del home solo sirve para que el módulo
+  bajo prueba vea ese mismo dir como "por defecto" — y pasan por `assertInsideTmp`
+  (`tests/helpers/tmpGuard.ts`) antes de cualquier `rmSync`/escritura: si el mock dejara de aplicar, el
+  test falla en vez de tocar `~/noteflow-notes`.
+  **A qué dir pertenece cada registro (`notesDir`, contrato compartido con la app):** `syncOrigin` vive
+  en `settings.json`, que `NOTEFLOW_NOTES_DIR` no aísla, pero describe UN dir. Cada registro
+  (`github`/`cloud`) lleva `notesDir` = `path.resolve` del dir con el que se adoptó (sin separador
+  final; lo escribe **toda** adopción, también la siembra de Cloud); un registro sin él (anterior a esto)
+  es del **dir por defecto** (el de sin `NOTEFLOW_NOTES_DIR`). Comparación `sameNotesDir`: resueltas,
+  sin mayúsculas en win32/darwin, exacta en linux, sin `realpath`. Antes de `decideOrigin`
+  (`originPlacement`): registro de **otro** dir ⇒ `proceed` **sin** adoptar, sin escribir, sin reseteo y
+  sin elección pendiente (`origin merge` → nada que resolver; `origin` dice de qué dir es); **sin**
+  registro y dir actual ≠ por defecto ⇒ igual, sin escribir (si no, un override vacío dejaría al dir real
+  con un registro "ajeno", sin protección). Así un `NOTEFLOW_NOTES_DIR=<vacío> noteflow pull` ya no adopta
+  B con reseteo para que luego el dir real, con las notas de A, suba a B sin preguntar. En la práctica
+  solo el dir por defecto tiene registro. Efecto aceptado: con override se siguen compartiendo
+  `githubSync`/`cliCloud`/`lastSync` (ya conocido). `withSyncOrigin` conserva las claves
+  desconocidas de `syncOrigin` y de settings y, al readoptar la **misma** identidad, los campos extra
+  del registro (y un `repoId`/`email` que la identidad nueva no traiga); otra identidad ⇒ registro
+  nuevo solo con los campos conocidos.
+  **Puerta** = `evaluateGithubOrigin()`, derivada en cada llamada (sin caché: ve lo que la app haya
+  cambiado). Identidad = `settings.githubSync` (`owner`/`repo` + `repoId` si está guardado: `login`
+  lo toma de la respuesta del `GET /repos/{o}/{r}` que ya hace `ensureRepo`, o del `POST /user/repos`
+  si lo crea; push/pull no hacen GET extra). `settings.json` ilegible ⇒ `unreadable` (en la práctica un
+  fichero corrupto ya hace que el CLI no vea la conexión — `readSettings` devuelve `{}` y sale `Not
+  connected` —, así que cubre la carrera y `origin merge`); `cloudSync.enabled` (la app usa Cloud,
+  GitHub es su espejo) ⇒ abierta **sin tocar** `syncOrigin.github`. Las decisiones `proceed` que adoptan
+  se escriben ya, con `adoptGithubOrigin` (mismo orden estricto que la app: settings legible →
+  `cli-github-state.json` reescrito `{}` con una escritura que propaga errores → **un** read-modify-write
+  de settings que quita `lastSync`/`remoteFormatMigratedAt` del `githubSync` **leído del fichero** y fija
+  el origen; rechaza si el `githubSync` releído ya no es la conexión evaluada); un fallo ⇒
+  `unwritable`, cerrada. **Dónde se comprueba:** `cmdPush` y `cmdMigrate` (exit 1 antes de cualquier
+  petición; `migrate` no migra ni en local), `cmdPull` (lanza `Error`, que `pullAfterLogin` captura),
+  `syncPushNoteFiles` (no sube; una línea `Not synced to GitHub: … run 'noteflow origin' to resolve`, el
+  comando no falla), `cmdDelete` (la puerta se evalúa **antes** de borrar la carpeta: borrar la última
+  nota no puede convertir "notas de otro remoto" en "sin notas ⇒ adoptar"; cerrada ⇒ borrado solo local,
+  `Not deleted on GitHub`) y `cmdSectionDelete` (no borra en remoto; ya avisó el push). `group/folder
+  delete` solo tocan GitHub vía `syncPushNoteFiles`. Con el CLI enrutado a Cloud (`cloudActive()`)
+  GitHub no se evalúa.
+  **`login`** guarda la conexión y llama a `githubOriginAfterLogin`: con `cloudSync.enabled` adopta el
+  repo sin preguntar (y limpia su `stale`, como el Device Flow de la app en ese estado); con el CLI en
+  Cloud no evalúa; cerrada ⇒ **sin** pull, explica (`Sync with GitHub is on hold: the notes in <dir>
+  come from <prev>, but this CLI is connected to <next>. Nothing was synced.` + opciones) y sale con 0
+  (el login sí se hizo); `--merge` adopta y sigue con el pull (con `--no-wait` se guarda, igual que
+  `noPull`, como `merge: true` en el grant pendiente `cliGithubLogin` y lo aplica `--finish`). **Resolver:** `noteflow origin merge` (backend activo, mismo enrutado que
+  `push/pull`; si `githubSync` no tiene `repoId` lo pide antes con `GET /repos/{o}/{r}` — como
+  `resolveOriginChoice` de la app — y lo guarda también en `githubSync.repoId`, reevaluando: con el id el
+  repo puede resultar el mismo, renombrado ⇒ nada que resolver; si el GET falla, por nombre; adopta con
+  reseteo y hace el pull best-effort, `--no-pull` lo omite; nada pendiente ⇒ lo dice y sale 0), `noteflow logout` para cancelar (`logout` no borra `syncOrigin`, igual que la app) o
+  la app de escritorio para "usar solo lo remoto" (el CLI no archiva). `noteflow origin [--json]` y
+  `status --json` (`github.origin`) enseñan el estado **sin** adoptar nada. Tests e2e (GitHub y Cloud
+  simulados): `tests/cli/originGate.test.ts`.
+  **En Windows** `origin merge` / `login --merge` escriben el origen en el `settings.json` compartido, así
+  que resuelven **también** la elección pendiente de la app. El CLI no resetea el `sync-state.json` de la
+  app (journal y shas del repo anterior); lo descarta la propia app: ese estado va estampado con su repo
+  (`githubRemote`) y, si no coincide con la conexión viva, `ensureStateOfConnection` lo vacía antes de
+  drenar nada (§ "Origen del dir de notas" → "El estado es de un repo"). Al revés no hace falta: el
+  `cli-github-state.json` del CLI ya va por `owner`/`repo` (`loadGithubBases` ignora el de otro repo).
 - `login` **no** escribe `lastSync` (re-login al mismo repo conserva el estado previo; otro repo
   empieza limpio) y hace un primer `pull` automático (salvo `--no-pull` o Cloud activo en el CLI).
 - **Todo** `pull` de GitHub (`pull`, su alias `update`, `--force` y el de tras el login) lo escribe
@@ -352,6 +438,371 @@ Dónde se aplica la exclusión (sin journal, sin request, `onComplete` inmediato
 > `note-order.json` y guarda su posición en el orden local del registro (`note-order:get` lo recombina), y
 > los que una build previa llegara a escribir se limpian del fichero al leerlo.
 
+### Origen del dir de notas (`settings.syncOrigin`) — preguntar antes de mezclar remotos
+
+**Problema que resuelve.** El dir de notas no sabía de qué remoto venía: conectar GitHub al repo A,
+desconectar (`disconnectGitHub` deja las notas en disco) y conectar al repo B hacía `pullNotes` +
+`pushAllNotes` y **subía las notas de A a B sin preguntar**; en NoteFlow Cloud, cerrar sesión con la
+cuenta A y entrar con B (con la auto-activación de lo pagado) subía las notas de A a B. Ahora cada backend
+recuerda la identidad con la que este dispositivo reconcilió el dir y, si la identidad **cambia (o el
+registro está `stale`) y hay notas sincronizables en disco**, no sincroniza nada hasta que el usuario
+elige.
+
+**Dato** (`userData/settings.json`, local, nunca en el dir de notas; forma estable — la app y el CLI la
+leen y escriben): `syncOrigin: { github?: { repoId?: number; owner: string; repo: string; stale?: true;
+notesDir?: string }, cloud?: { userId: string; email?: string; stale?: true; notesDir?: string } }`.
+- `cloud.email` = email de la cuenta al registrarla: **solo etiqueta** del diálogo, nunca se compara.
+- `stale` (solo se escribe `true`; ausente = vigente): las notas en disco **ya no vienen** de ese remoto —
+  el "usar solo las de…" del **otro** backend las sustituyó (ver "Cruce entre backends"). Toda adopción
+  (`withSyncOrigin`) escribe el registro sin él. El CLI nunca lo escribe (solo lo lee).
+- `notesDir` = el dir de notas que describe el registro (`path.resolve`, sin separador final), escrito en
+  toda adopción/resolución; ausente = el **dir por defecto** (ver "Un registro por dir de notas").
+`repoId` = `id` numérico de la API de GitHub (sobrevive a renombrar/transferir el repo);
+se escribe siempre que se conoce — la app lo obtiene **antes** de adoptar (Device Flow: `ensureRepo`;
+pull: el mismo `GET /repos/{o}/{r}` de la rama por defecto, cacheado **por repo**, sin request extra) —,
+así que solo falta si ese GET falló en ese momento (el siguiente pull OK lo rellena). Readoptar el
+**mismo** repo con una identidad que aún no lo trae (p. ej. para añadir el `notesDir` a un registro
+anterior) **conserva el `repoId` ya guardado** (`withSyncOrigin`; el resto del registro se escribe
+nuevo y `stale` nunca se conserva). También se guarda en `settings.githubSync.repoId`. **Comparación:** por `repoId` si ambos lados lo tienen; si no,
+`owner/repo` sin distinguir mayúsculas. Escrituras con read-modify-write sobre el fichero, que
+rechazan escribir si el fichero existe y no parsea: GitHub escribe el origen con `withSyncOrigin` dentro
+de `adoptGithubOrigin` (la misma escritura que limpia `githubSync`, ver abajo); `writeSyncOriginFile`
+queda exportado para los backends que solo necesiten fijar el origen (Cloud, CLI). `disconnectGitHub` **no** lo
+borra: las notas en disco siguen viniendo de ese repo.
+
+**Decisión pura** (`electron/syncOrigin.ts`, sin Electron, agnóstica del backend; tests en
+`tests/electron/syncOrigin.test.ts`): `decideOrigin({ stored, next, hasLocalNotes, dirs? })` →
+- con `dirs` (`{current, default}`) y el registro de **otro** dir — o sin registro fuera del dir por
+  defecto → `proceed` **sin** adoptar (`foreign-dir`): nada se usa, escribe ni resetea;
+- sin origen guardado → `proceed` + adoptar, **sin diálogo** (primera conexión, o instalación previa a
+  esta feature con conexión viva — mismo criterio que el "Dueño desconocido" de Cloud en
+  `monetization.md`);
+- registro `stale` **con** notas → `ask` (con `stale: true`, **aunque la identidad coincida**); **sin**
+  notas → `proceed` + adoptar (`stale-empty`, con el mismo reset del estado del remoto que `changed-empty`);
+- misma identidad → `proceed` (adopta solo para refrescar un renombrado, un `repoId` o un `email` que
+  faltaba o cambió, o el `notesDir` de un registro anterior a él);
+- distinta **sin** notas sincronizables → `proceed` + adoptar (`changed-empty`);
+- distinta **con** notas → `ask`.
+"Notas sincronizables" = `listSyncedNoteDirs(notesDir)` no vacío (las `localOnly` no cuentan; las
+vinculadas no están en el dir). `hasLocalNotes` es perezoso (solo se lista si la identidad cambió o el registro está `stale`) y
+**fail-closed** (`hasSyncedLocalNotes`: dir ilegible o desconocido = "hay notas"; dir inexistente = no).
+Helpers: `sameIdentity`, `identityLabel` (`owner/repo`; Cloud: email o userId), `identityArchiveLabel`
+(`github-owner-repo` / `cloud-<8 chars del userId>`, saneado para nombre de carpeta), `readSyncOrigin`,
+`getStoredIdentity`, `withSyncOrigin`, `withOriginMarkedStale`, `withSeededOrigin`,
+`resolveStoredCloudOrigin` (puros sobre un objeto settings), `defaultNotesDir`, `normalizeNotesDir`,
+`sameNotesDir`, `originScope`, `readSettingsStrict`, `writeSyncOriginFile`, `markSyncOriginStaleFile`.
+
+**Un registro por dir de notas (`notesDir`).** `settings.json` lo comparten todos los dirs a los que un
+proceso puede apuntar (`NOTEFLOW_NOTES_DIR`, y el CLI en Windows), pero el origen describe UN dir. Antes
+de esto, un override vacío conectado a B daba `changed-empty`, adoptaba B, y el dir real —con notas de A—
+veía luego "misma identidad" y sincronizaba con B sin preguntar. Regla (la aplican las dos puertas de la
+app y el CLI): el registro de un backend solo cuenta si `sameNotesDir(record.notesDir ?? defaultNotesDir(),
+dirActual)`. `sameNotesDir`: `path.resolve` de ambos, sin separadores finales; sin distinguir mayúsculas
+en win32 y darwin, exacto en linux; **sin** `realpath`. `defaultNotesDir()` (en `syncOrigin.ts`, sin
+Electron; `main.ts` lo usa para `NOTES_DIR`, así que no hay dos copias de la ruta) = linux
+`~/.local/share/noteflow-notes`, resto `~/noteflow-notes`.
+- Registro del dir actual → todo como siempre (y la adopción escribe `notesDir`).
+- Registro de **otro** dir → no se usa ni se reescribe: `foreign-dir` (`proceed` sin adoptar, sin el reset
+  de `changed-empty`, sin elección pendiente — `resolveOriginChoice`/`resolveCloudOriginChoice` →
+  `not-pending`). Al volver al dir real, registro A vs conexión B con notas → `ask`.
+- **Sin registro y dir actual ≠ dir por defecto** → `proceed` sin escribir: si no, un override vacío
+  registraría el remoto nuevo y el dir real quedaría sin protección. En la práctica solo el dir por defecto
+  tiene registros.
+- `stale` solo se marca en el registro del otro backend si es del mismo dir que el `replace`; la siembra de
+  Cloud desde `cloudSync.userId` al evaluar la puerta (abajo) y la de GitHub desde `githubSync` solo
+  ocurren en el dir por defecto. Excepción deliberada: la siembra **previa a un reset de dueño**
+  (`bindCloudSyncToAccount`) graba siempre el dueño que se va **para el dir por defecto**, también desde un
+  override — allí ese registro es ajeno y no cambia nada, pero al volver al dir por defecto protege sus
+  notas (peor caso, una pregunta de más; nunca una subida).
+- Efecto aceptado: con override se siguen compartiendo `githubSync`/`cloudSync`/`lastSync`/journal
+  (`NOTEFLOW_NOTES_DIR` no aísla los ajustes); el origen solo protege el dir al que pertenece. Las puertas
+  toman el dir actual de `setNotesDir`/`initCloudSync` (antes de eso asumen el por defecto).
+
+**La puerta de GitHub es un ESTADO derivado, no un flag** (`refreshOriginGate()` en `githubSync.ts`):
+se calcula de (conexión `settings.githubSync`, `syncOrigin.github`, notas en disco, `cloudSync.enabled`,
+el dir de notas)
+→ `'clear' | 'ask' | 'unreadable'`. Una sola fuente de verdad, sobrevive a un reinicio sola y detecta
+la conexión cambiada **por el CLI** (en Windows comparte `settings.json` y su `login` puede dejar
+`githubSync` en otro repo sin pasar por la app). Se cachea en memoria y se recalcula en
+`loadSyncSettings` (arranque — `main.ts` llama antes a `setNotesDir`), al final del Device Flow, al
+activar/desactivar Cloud (`enableCloudSync`/`disableCloudSync`), en la resolución, en `disconnectGitHub`
+y al inicio de `pullNotes`, `retrySyncJournal` (el tick drena **antes** de hacer pull) y `pushAllNotes`.
+Las rutas calientes usan el valor cacheado (`originGateBlocked()`).
+- **Bloqueada** (`ask` o `unreadable`): ni pull, ni push (`schedulePush`, `schedulePushUnguarded`,
+  `pushPathsNow`, `pushAllNotes`), ni borrados (`scheduleDelete`/`scheduleDeleteDir`: no-op **sin
+  journal** — la resolución resetea el journal), ni drain, ni espejo (`error: 'origin-choice-pending'`),
+  ni `migrateRemoteToV2IfNeeded`. Chequeo **dentro del motor** (defensa en profundidad) además de los call
+  sites de `main.ts`. Al pasar a bloqueada se cancelan los timers de push y `initialPullStatus` vuelve a
+  `'pending'` (se queda ahí: el timeout del arranque en modo startup **no** la pone en `'failed'` si la
+  causa es la puerta). Un `pullNotes` bloqueado devuelve un resultado vacío con `incomplete: true` (no
+  cuenta como pull limpio para la caducidad de notas temporales). `SyncStatus.originChoice` =
+  `{previous: {owner, repo}, next: {owner, repo}}` solo en `ask`; el cambio se emite por el
+  `statusListener` (→ `sync:status-changed`).
+- **`unreadable`** (`settings.json` existe y no parsea, **o** una adopción no se pudo escribir — EPERM,
+  disco lleno, el CLI escribiendo a la vez, que `writeSettingsFile` no es atómico): bloquea sin diálogo y
+  se reintenta en la siguiente evaluación; un error de lectura o escritura nunca "abre" la puerta (vale
+  para `changed-empty` y también para `no-origin`).
+- **Con NoteFlow Cloud habilitado** GitHub es espejo de solo escritura y el dueño del dir es la cuenta de
+  Cloud: la puerta es `clear` y un refresco **no toca** `syncOrigin.github`. Excepción: el **Device Flow
+  explícito** (conectar GitHub desde la app con Cloud activo, `adoptConnectedRepoUnderCloud`) adopta el
+  repo conectado y le quita el `stale` (con reset del estado del remoto si el registro guardado era otro
+  repo o estaba `stale`); un registro de otro dir no se toca.
+- **El estado es de un repo (`sync-state.json` → `githubRemote`).** El CLI comparte `settings.json` en
+  Windows y su `noteflow origin merge` / `login --merge` puede cambiar a la vez la conexión y
+  `syncOrigin.github` **sin pasar por `adoptGithubOrigin`**: la puerta vería "misma identidad" con el
+  journal (subidas/borrados pendientes) y los shas del repo ANTERIOR, y la app abierta con su `lastSync`
+  viejo en memoria. Por eso `sync-state.json` lleva estampado el repo que describe (`{repoId?, owner,
+  repo}`, como el `cli-github-state.json` del CLI): `persistState` lo rellena si falta (con la conexión
+  viva) y completa uno del **mismo** repo según `sameIdentity` (el `repoId` que le faltaba, el
+  owner/repo nuevo de un renombrado con el mismo `repoId`) — así un renombrado posterior no descarta un
+  journal legítimo —, pero **nunca** relabela uno de otro repo; la adopción con reset lo escribe y la sin
+  reset lo completa. Al principio de
+  `refreshOriginGate` (y por tanto de `pullNotes`, `retrySyncJournal`, `pushAllNotes`),
+  `ensureStateOfConnection` compara la marca con la conexión viva (`sameIdentity`) y, si no coincide,
+  **descarta** el estado en el orden estricto de `adoptGithubOrigin`: (1) journal y shas vacíos con
+  escritura que propaga errores (todavía marcados con el repo VIEJO, para que un fallo posterior se
+  rehaga), (2) un solo read-modify-write que quita `lastSync`/`remoteFormatMigratedAt` del `githubSync`
+  leído del fichero, (3) memoria: `syncSettings` recargado del disco y la marca pasa al repo vivo. Si falla
+  → la puerta queda `unreadable`. Un estado **sin** marca (de una build anterior) pertenece a la conexión
+  viva y se estampa al persistir. (Cloud no lo necesita: su journal va ligado a `cloudSync.userId` y
+  `bindCloudSyncToAccount` lo compara con la sesión **de la app**; el CLI usa su propia sesión y estado.)
+- **Adopciones `proceed` se escriben YA** (en la decisión, antes del pull): un crash a mitad no puede
+  parecer luego un cambio de identidad. `changed-empty` y la resolución **resetean el estado del remoto
+  anterior**: journal + caché de shas (`sync-state.json` — un `deleteDir` pendiente de A nunca debe
+  ejecutarse contra B, y los shas de A no son base para B), timers de push, avisos de conflicto,
+  `lastSync` (con el `lastSync` de B que dejó el CLI, la regla de borrado del pull **borraría** las notas
+  locales que B no tiene) y `remoteFormatMigratedAt`. Todo en `adoptGithubOrigin`, **estricto** y en este
+  orden: (1) `sync-state.json` se reescribe vacío (estampado con el repo nuevo) y la escritura **tiene que**
+  salir bien (no usa `persistState`, que se traga el error); (2) **un solo read-modify-write** de
+  `settings.json` quita `lastSync`/`remoteFormatMigratedAt` del `githubSync` **leído del fichero** y
+  escribe `syncOrigin.github` a la vez (sin estado intermedio; token y claves ajenas intactos — y, en un
+  `replace`, marca `syncOrigin.cloud` `stale` en esa misma escritura); (3) solo entonces
+  se actualiza la memoria. Cualquier fallo (fichero ilegible o no escribible, también en el primer paso) →
+  `false` → la puerta queda `unreadable` y se reintenta desde lo que diga el disco. Así el disco nunca
+  tiene "origen = B" junto al journal, los shas o el `lastSync` de A. Si el paso 1 sale bien y el 2
+  falla, el journal de A ya se perdió pero el origen sigue siendo A y la puerta cerrada (se rehace en el
+  siguiente intento). `pullNotes` relee `syncSettings` tras evaluar la puerta (si esta adoptó dentro del
+  propio pull, `lastSync`/`needsFullReconcile` ya son los reseteados, no los del remoto anterior).
+
+**Flujo del Device Flow** (`schedulePoll`): token → `validateToken` → `ensureRepo` (devuelve el
+`repoId`) → guarda `settings.githubSync` → evalúa la puerta. Si no es `clear` →
+`onComplete({ ok: true, owner, repo, pendingOriginChoice: true })` **sin** pull ni push; `sync:initiate`
+emite `sync:status-changed`, arranca el autosync (el tick se salta solo) y **no** lanza la migración v2.
+Si es `clear`, el flujo de siempre (pull + `pushAllNotes` en segundo plano).
+
+**Resolución** (IPC `sync:resolve-origin`, `choice: 'merge' | 'replace' | 'cancel'`; guarda de
+reentrada):
+- `merge` → `githubSync.resolveOriginChoice('merge')`: adopta el origen (el usuario consintió), resetea
+  el estado del remoto anterior, abre la puerta, `pullNotes` y `pushAllNotes` en segundo plano (el
+  connect de siempre); `main.ts` hace `broadcastPullResult`, autosync, drain y migración v2.
+- `replace` → primero `archiveLocalNotesForOriginSwitch(label, origin, {stillValid})` en `main.ts`
+  (abajo). Tras las esperas (ventanas, guardados pendientes: hasta ~3,5 s) y justo antes del archivo
+  síncrono, `stillValid` re-comprueba que la elección sigue pendiente y es la misma (mismo
+  `previous`/`next`, conectado, Cloud apagado); si no → `error: 'not-pending'` sin mover nada. Si el
+  archivo falla →
+  `{ok:false, error:'archive-failed', detail}` **sin pull** y la puerta sigue pendiente. Si va bien,
+  `resolveOriginChoice('replace')` = lo mismo que `merge` **sin** `pushAllNotes`. `resolveOriginChoice`
+  comprueba el estado **cacheado** (re-derivarlo tras archivar daría "sin notas" → `changed-empty`) y
+  acepta también que la puerta ya se resolviera sola con el repo conectado adoptado.
+- `cancel` → `disconnectGithubSync()` (lo mismo que `sync:disconnect`, incluido
+  `cliConnect.cleanupAfterAppGithubDisconnect()`); notas y origen intactos.
+- El IPC acepta un segundo argumento `backend?: 'github' | 'cloud'` (por defecto `'github'`; la guarda de
+  reentrada es común): si ese backend no tiene elección pendiente → `not-pending` (también `cancel`). Y un
+  tercero, `key`: la clave opaca de la elección que el usuario tiene en pantalla
+  (`ActiveSyncStatus.originChoice.key`, `electron/originChoiceKey.ts` — GitHub: los dos repos y `stale`;
+  Cloud: las dos cuentas, `stale` y `staleFrom`); si la elección pendiente ya no es esa (otra cuenta, el
+  CLI cambió el repo…) → `not-pending` y no se aplica nada. Sin `key` (llamadas antiguas) no se comprueba.
+  Con un registro `stale` del mismo repo, `resolveOriginChoice` no lo da por adoptado
+  (`alreadyAdopted` exige `!stale` y que el registro sea de este dir): lo adopta con reset.
+
+**Puerta de NoteFlow Cloud** (`refreshCloudOriginGate()` en `cloudSync.ts`, mismo modelo que GitHub;
+tests e2e en `tests/electron/syncOriginCloud.test.ts` con un Cloud simulado de dos cuentas):
+- **Estado derivado y cacheado** `'clear' | 'ask' | 'unreadable'` de (`cloudSync.enabled`,
+  `account.getUserId()` de la app, `syncOrigin.cloud`, notas en disco, dir de notas). Cloud apagado, no
+  configurado o sin sesión → `clear`. Se recalcula en `initCloudSync` (arranque),
+  `bindCloudSyncToAccount` (cada cambio de cuenta), `enableCloudSync`/`disableCloudSync`, la resolución y
+  al inicio de `pullNotes`/`retrySyncJournal`; las rutas calientes usan el cacheado
+  (`cloudOriginBlocked()`, que lo re-deriva si se calculó para otra cuenta). Guarda de reentrada: el
+  `statusListener` que emite una adopción no vuelve a derivarla.
+- **Siembra** (instalaciones previas): sin `syncOrigin.cloud` pero con `settings.cloudSync.userId` (el
+  dueño del journal/`pullSeq`), el origen guardado ES ese userId y se persiste (estricto) antes de decidir
+  (`resolveStoredCloudOrigin`). `bindCloudSyncToAccount` siembra **antes** de que `resetCloudSyncState`
+  sobrescriba `cloudSync.userId` (si no, quien cerró sesión con A antes de actualizar y entra con B
+  adoptaría B sin preguntar). Si la siembra no se puede escribir, **no resetea**: el dueño sigue siendo A y
+  todo queda bloqueado (`ownerMismatch()`: estado de otra cuenta = puerta cerrada; `enableCloudSync` no
+  fija `userId` en ese caso) hasta que se pueda. Sin origen y sin `cloudSync.userId` → `no-origin`,
+  adopta sin preguntar (= "Dueño desconocido"). Al evaluar la puerta solo se siembra en el dir por
+  defecto; la siembra previa al reset de dueño graba siempre para el dir por defecto (ver "Un registro por
+  dir de notas").
+- **Bloqueada** (`ask`, `unreadable` o `ownerMismatch`): nada de Cloud se mueve. `pullNotes` devuelve un
+  resultado vacío con `incomplete: true` (sin tocar `lastSync` ni poner `initialPullStatus = 'ok'`, así
+  que tampoco hay catch-up); `retrySyncJournal` no drena; `schedulePush` (`onComplete('sync-gated:origin-choice')`),
+  `schedulePushUnguarded`, `pushPathsNow`, los timers al dispararse, `scheduleDelete`/`scheduleDeleteDir`
+  son no-op **sin journal** (la resolución resetea el journal); `flushPathForSnapshot` → `'gated'` (el
+  snapshot del historial de versiones responde error, sin RPC); y, como defensa en profundidad,
+  `uploadFileRow`/`removeRemoteByPathKeys` comprueban la puerta justo antes de enviar. Al pasar a bloqueada
+  se cancelan los timers de push y `initialPullStatus` vuelve a `'pending'`. En `main.ts`:
+  `runCloudSyncCycleOnce` re-deriva la puerta y sale pronto (emite estado, ni unlock ni pull ni drain), el
+  tiempo real no arranca (`syncCloudRealtimeState`), "Mirror to GitHub" → `'origin-choice-pending'` y el
+  pull manual (`cloud:pull`/`sync:pull-active`) → `error: 'origin-choice-pending'`.
+  `CloudSyncStatus.originChoice` = `{previous:{userId,email?}, next:{userId,email?}, stale?, staleFrom?:
+  {owner,repo}, githubConnected?}` solo en `ask` (`githubConnected` se calcula al leer, no se cachea).
+- **Adopción estricta** (`adoptCloudOrigin`), mismo orden que GitHub: (1) settings legible; (2) con reset:
+  `cloud-sync-state.json` reescrito vacío con escritura que propaga errores (journal + bases), base
+  contents (`clearBaseBlobs`), caché de claves de nota, timers, avisos de conflicto, `stateGeneration++`
+  (lo que estuviera en vuelo no persiste nada); (3) **una** read-modify-write de `settings.json` que quita
+  `pullSeq/pullCursor/lastSync/pullRetry/basesBootstrapped/basesBootstrapPending` del `cloudSync` leído
+  del fichero, fija `cloudSync.userId` y escribe `syncOrigin.cloud = {userId, email, notesDir}` sin
+  `stale` — en un `replace`, marcando además `syncOrigin.github` `stale` en esa misma escritura —;
+  (4) memoria e `initialPullStatus = 'pending'`. Fallo → `false` → `unreadable`. Reset siempre, salvo
+  `same` no-stale y `no-origin` (que tampoco tocan `cloudSync.userId`: eso es de `bindStateOwner`).
+  Encaja con el reset por cambio de cuenta de `bindCloudSyncToAccount` (ver `monetization.md` "Dueño de la
+  cuenta"): la adopción es idempotente con él.
+- **Resolución** (`sync:resolve-origin(choice, 'cloud')` → `resolveCloudOrigin` en `main.ts`):
+  `merge` → `resolveCloudOriginChoice('merge')` (adopta con reset) + ciclo manual: unlock → pull (primer
+  sync de la cuenta) → el catch-up sube todo lo local → drain. `replace` →
+  `archiveLocalNotesForOriginSwitch` con etiqueta `identityArchiveLabel` de donde venían las notas (la
+  cuenta anterior; con `stale`, el repo `staleFrom`) y `stillValid` = Cloud encendido, misma sesión y
+  misma elección pendiente; error → `archive-failed`, nada adoptado ni bajado; OK → adopta (marca GitHub
+  `stale`), `disconnectGithubSync()` si GitHub estaba conectado (su repo tiene las notas apartadas; incluye
+  la limpieza del CLI) y ciclo (solo baja: no queda nada sincronizable que subir). `cancel` →
+  `disableCloudSync()` + `stopCloudAutoSync()` + `dropRestoreSurface('cloud')`: sesión, notas y origen
+  intactos; no vuelve a preguntar hasta que el usuario encienda Cloud a mano (o un login nuevo reactive lo
+  pagado, ver `monetization.md`).
+- **"Connect the CLI too"** (`cli-connect:*`) se rechaza con `originChoicePending` mientras la elección del
+  backend correspondiente está pendiente (GitHub: también con su puerta cerrada); la UI deshabilita el botón
+  con la explicación.
+
+**Cruce entre backends (`stale`).** El "usar solo las notas de…" de un backend sustituye las notas en
+disco, así que el origen del **otro** deja de ser verdad: `replace` de GitHub marca `syncOrigin.cloud`
+`stale` y `replace` de Cloud marca `syncOrigin.github` `stale`, siempre en la misma escritura que la
+adopción (sembrando antes el registro implícito de una instalación previa — `withSeededOrigin` —, y solo
+si es del mismo dir). `merge` no marca nada. Después, ese backend pregunta con notas en disco **aunque
+la identidad sea la misma** (encender Cloud con la cuenta de siempre, reconectar el mismo repo), y sin
+notas se re-adopta con reset (`stale-empty`: sin él, el `pullSeq` de la cuenta saltaría sus notas, que ya
+no están en disco). Las etiquetas del diálogo nombran de dónde vienen las notas: GitHub `stale` →
+`staleFrom.email` (la cuenta de Cloud); Cloud `stale` → `staleFrom` = `owner/repo` del `syncOrigin.github`
+vigente. Desconocido → `''` y el renderer pone un texto genérico ("another sync" / "another NoteFlow
+account").
+
+**Archivo local** (`electron/notesArchive.ts`, sin Electron, root inyectado — `main.ts` usa
+`userData/notes-archive`; tests en `tests/electron/notesArchive.test.ts`):
+`archiveSyncedNotes({ notesDir, archiveRoot, label, origin?, keep?, now? })` →
+`{ archiveDir, movedDirs, movedNoteIds, movedFiles, filteredFiles, copiedFiles }` (lanza
+`NotesArchiveError` con `rolledBack`/`stranded`/`archiveDir`), `listArchives(root)` (más reciente
+primero), `hasArchives(root)`. Mueve a `<root>/<label>-<ISO ':'→'-'>/notes/` las carpetas de
+`listSyncedNoteDirs` y los json `groups`, `folders`, `section-colors`, `note-order`, `templates`,
+`snippets` (`ARCHIVED_METADATA_FILES`), y escribe `manifest.json` (versión, fecha, etiqueta, origen, dir
+de notas, qué se movió/filtró/copió — para un futuro "restaurar"). **`ui-settings.json` se copia y se
+queda** (apariencia del dispositivo). Las `localOnly` y las vinculadas no se tocan.
+- **Metadatos que también describen notas que se quedan:** los grupos/carpetas de una nota `localOnly`
+  o de una **vinculada** (su `group`/`folder` va en `linked-notes.json` pero el id apunta a
+  `groups.json`/`folders.json`), su sitio en `note-order.json` o los colores de sus secciones (en una
+  vinculada, su única sección = nombre del fichero, `sectionName`). Mover el
+  fichero entero los dejaría colgando, así que se **archiva el original completo** y se deja en su sitio
+  una **versión filtrada** con solo las entradas que usan las notas que se quedan (una carpeta conservada
+  arrastra su grupo; `filterMetadataForKept`/`collectKeptRefs`, puros). Nada usado → no queda fichero.
+  Efecto aceptado: en el primer pull del repo nuevo (sin base) esas entradas se **unen** con las del repo
+  y se suben (son solo nombres/colores de grupo — el mismo tipo de referencia inofensiva que ya se
+  documenta para la nota de bienvenida en "Notas solo-locales").
+- **Antipérdida:** síncrono (nada más del proceso main escribe el dir mientras corre). Por elemento,
+  `rename`; si `EXDEV` (otro volumen) → copia recursiva + verificación byte a byte + borrar el origen (si
+  ese borrado falla a medias, restaura el origen desde la copia verificada). Cualquier fallo (EBUSY/EPERM
+  de Windows…) **deshace todo** en orden inverso (un fichero filtrado se sustituye al devolver el original:
+  `rename` de fichero reemplaza) y lanza; con el rollback completo se retiran las carpetas vacías del
+  archivo. Si el propio rollback falla, no se borra nada más: el error lista "original → copia en el
+  archivo" y lo movido queda en el archivo.
+- **Orquestación en `main.ts`** (`archiveLocalNotesForOriginSwitch(label, origin)`, reutilizable por
+  backend): cierra las stickies y ventanas de sección de esas notas (con `close()`, su `beforeunload`
+  vuelca lo pendiente) y espera, vuelca los guardados pendientes de la ventana principal
+  (`flushMainWindowEdits`; el renderer además hace `settleNoteWrites()` antes de invocar), marca los
+  movimientos como escrituras internas para el watcher, pasa los `group`/`folder`/`sectionName` de las vinculadas
+  como `keep` (`KeepRefs.groupIds/folderIds/sectionNames`), archiva, quita cada carpeta del índice semántico (`aiIndex.removeFromIndex`; metadatos →
+  `markStaleUnknown`), emite **`notes-archived`** (abajo) y después `notes-updated` sin ruta (recarga
+  notas, grupos, alarmas). **Un guardado
+  tardío no recrea una nota archivada:** `applyNoteWrite` rechaza escribir en una carpeta archivada en
+  esta sesión mientras no exista (si un pull la trae de vuelta, se escribe normal). Notas temporales:
+  `checkExpiredNotes` solo recorre el dir; las archivadas ya no están. Journal/timers/caché de shas: los
+  resetea la resolución.
+- **Las notas archivadas salen de la memoria de cada ventana (`notes-archived`).** La recarga sin ruta
+  no basta: `loadNotes` ignora a propósito un resultado **vacío** mientras el store tiene notas (un
+  `readdir` vacío transitorio en Windows; además `fs:read-all-notes` reintenta 6×800 ms antes de dar
+  vacío), y un dir vacío es justo lo que deja el archivo cuando el remoto nuevo no trae nada (repo o
+  cuenta nuevos) o el pull falla — la barra lateral seguía mostrando las notas archivadas y el editor
+  la que estaba abierta. Por eso `forgetArchivedNoteDirs` (`main.ts`) emite a **todas** las ventanas
+  `notes-archived` `{noteIds, dirs}` (ids de `ArchiveResult.movedNoteIds` + los leídos antes de archivar;
+  `dirs` = nombres de carpeta, por si un id no se pudo leer) **antes** del `notes-updated`, y cada ventana
+  que carga notas (`bindArchivedNotes()` de `notesStore`, enlazado en `MainApp` — principal y sticky —,
+  `SectionWindowApp` y `AiChatWindowApp`) llama a
+  `removeArchivedNotes`: lógica pura en `src/lib/archivedNotes.ts` (`withoutArchivedNotes`, tests en
+  `tests/lib/archivedNotes.test.ts` y `tests/stores/notesStoreArchived.test.ts`) — quita las notas por
+  id o por nombre de carpeta (nunca una vinculada; las `localOnly` no vienen en el evento), cierra sus
+  paneles (los demás se quedan; sin ninguno, depende del rol de la ventana — `fallbackToAnotherNote:
+  windowRole !== 'section'` en `removeArchivedNotes` —: la principal abre la primera nota que queda, no
+  archivada si la hay, y una sticky también, si su cierre previo — `closeWindowsShowingNotes` — no llegó
+  a tiempo; solo las de rol `section`, la ventana de sección y la del chat, se quedan vacías), suelta
+  sus desbloqueos de sesión, **descarta** sus guardados con debounce
+  (`discardPendingEdits`: no se intenta escribir, así que no hay error) y reprograma las alarmas. Es
+  **solo memoria**: no pasa por `deleteNote` ni toca disco o remoto; cualquier escritura posterior de
+  esas notas es un no-op porque todos los caminos de escritura buscan antes la nota en el store. No
+  queda ninguna lista de ids vetados: si el pull trae una nota con el mismo id, la recarga normal la
+  vuelve a añadir. También se emite si el archivo falla **sin** poder deshacerse del todo (las carpetas
+  que quedaron en el archivo ya no están en el dir). Y si el archivo dejó el dir **sin ninguna nota**,
+  `fs:read-all-notes` no reintenta (`notesDirEmptiedByArchive`: vacío es la respuesta real) — sin eso,
+  con el store ya vacío, la ventana mostraría "Loading notes…" ~4 s. El flag se limpia en cuanto el dir
+  vuelve a tener notas, por cualquiera de tres caminos: un guardado (`applyNoteWrite`), un pull de
+  cualquiera de los dos backends que escriba alguna carpeta de nota (`broadcastPulledNotes`, si
+  `updatedFiles` no viene vacío — por ahí pasan los pulls de GitHub, también el manual, y los de Cloud;
+  el primer pull del Device Flow no, pero emite una recarga completa) o un `fs:read-all-notes` que
+  encuentre notas. El del pull hace falta porque, cuando no hay
+  borrados ni cambios de metadatos, las notas bajadas se recargan una a una (`notes-updated` con ruta →
+  `syncNote`, que no pasa por `fs:read-all-notes`): sin él el flag seguiría puesto y un `readdir` vacío
+  transitorio posterior (vuelta de suspensión) ya no se reintentaría.
+- **UI de las copias:** Ajustes → Sync muestra "Open local copies" cuando `sync:archives-status` dice que
+  hay alguna (`sync:open-archives` → `shell.openPath`; `SyncOriginNotices.tsx`): con un backend activo es
+  la fila **"Local copies"** de la lista de datos de la vista general (`LocalCopiesRow`, antes de la fila
+  del CLI); sin vista general (selector inicial, detalle de Cloud o de GitHub) es una línea al pie
+  (`LocalCopies`) — las copias sobreviven a la conexión que las creó. Se relee con cada
+  `sync:status-changed` / `cloud:status-changed`. Restaurar desde la app **no existe** todavía (el
+  manifest lo permitirá).
+
+**Renderer:** `OriginChoiceDialog.tsx` (genérico: `{ backend: 'github'|'cloud', previousLabel,
+nextLabel, stale?, disconnectsGithub?, onResolve(choice) → Promise<{ok, error?}>, onClose, busy? }`),
+montado por `TitleBar.tsx`, que resuelve con `resolveGithubOrigin` o `resolveCloudOrigin` según
+`syncStatus.backend`: se abre solo cuando aparece una elección nueva en `ActiveSyncStatus.originChoice`
+(`{previous, next, key, stale?, disconnectsGithub?}` — `key` vuelve con la respuesta —, etiquetas — GitHub `owner/repo`, Cloud el email; `''` =
+desconocida → texto genérico de `src/lib/originChoiceLabels.ts`; la clave de "Decide later" incluye
+backend, `stale` y etiquetas), se reabre desde el botón de sync (estado `choice` de
+`src/lib/syncStatus.ts`, prioridad justo tras `syncing` y antes de "locked": icono de aviso ámbar, píldora
+"Action needed", nunca "Synced"; el clic abre el diálogo; vale para los dos backends) o desde Ajustes
+(evento `noteflow:open-origin-choice`). **En Ajustes → Sync** la elección pendiente es siempre la del
+backend activo, así que vive en la vista general (`SyncOverview.tsx`, que lee el mismo
+`ActiveSyncStatus` que la titlebar): la insignia de la tarjeta de estado dice "Action needed" (`choice`
+pasa tal cual por `overviewBadge`; tono `warn`; `isLinkActive` = false → el mapa pinta todos los enlaces
+discontinuos — `src/lib/syncOverview.ts`, testeado), **"Sync now" queda deshabilitado** y justo debajo de
+la tarjeta sale el aviso ámbar con el botón "Choose…" (`OriginPendingNotice` en `SyncOriginNotices.tsx`,
+texto `settings.sync.originPending` para los dos backends). Con la elección de **Cloud** pendiente, el
+"Mirror to GitHub" de la fila de GitHub en pausa (`GitHubPausedRow`, que lee el mismo
+`ActiveSyncStatus.originChoice`) también queda deshabilitado, con ese texto como tooltip — antes abría
+la confirmación y main lo rechazaba. Un pull o un espejo que se cuelen igualmente
+responden `origin-choice-pending` y se muestran como error (`pullOriginPending` / `mirrorOriginPending`).
+La fila "noteflow CLI" deshabilita "Connect the CLI too" (`useCliConnect.originPending`, leído de
+`getCloudStatus()` / `getSyncStatus()` y sus eventos) con `settings.sync.cli.originPending` como tooltip
+y como línea bajo la fila. `useGitHubSync` escucha `sync:status-changed` y avisa a `SyncPanel` si GitHub
+quedó desconectado desde fuera (el "Cancel" del diálogo, o el `replace` de Cloud).
+Tres opciones sin preselección ni foco en ninguna (el foco va al propio diálogo) +
+"Continue"; Escape / "Decide later" solo cierran (la elección sigue pendiente). Con `archive-failed` muestra
+el error y no se cierra. Con Cloud: "Cancel" explica que apaga NoteFlow Cloud en este dispositivo (la
+sesión sigue), "Use only the notes from …" avisa si desconectará GitHub Sync, y con `stale` la intro dice
+que las notas vienen ahora de otra sincronización.
+
+**Estado y fuera de alcance.** Cubiertos: GitHub Sync y NoteFlow Cloud en la app (las dos puertas de
+arriba) y el CLI (2.14.0, GitHub y Cloud, con su propio espejo de la decisión y la misma forma de
+`syncOrigin`: ver "El CLI con GitHub" arriba y `monetization.md` § "Cliente CLI (headless)"). En el CLI
+**no existe** "usar solo lo remoto" (ni archivo local): solo `noteflow origin merge` / `--merge`, o
+cancelar con `logout` / `cloud logout`; esa opción es de la app. **Fuera de v1 (pendiente):** restaurar una
+copia desde la app y preguntar al desconectar.
+
 ### GitHub Sync (`electron/githubSync.ts`)
 - **Auth:** Device Flow OAuth — sin client secret; el usuario autoriza en
   `github.com/login/device`. Client ID `Ov23liut9QOJ2pJFF0KR` (público por diseño).
@@ -361,7 +812,8 @@ Dónde se aplica la exclusión (sin journal, sin request, `onComplete` inmediato
   de metadatos y README en la raíz. Las rutas relativas se codifican **por segmento**
   (`encodeRemotePath`). Push/delete por archivo siguen usando la **Contents API** (acepta rutas
   con `/`); el **listado** usa la **Git Trees API** (`GET /git/trees/{branch}?recursive=1`,
-  `default_branch` cacheado).
+  `default_branch` cacheado **por repo** junto con el `id` numérico — `getRepoInfo`; antes era un
+  valor global que sobrevivía a un cambio de repo hecho por el CLI).
 - **Push:** `schedulePush(relPath, content, onStart?, onEnd?)` — debounce 5s **keyed por ruta
   relativa** (dos archivos de la misma nota debouncen independientes); llamado desde
   `fs:write-note` (por cada archivo escrito), `groups:set`, `folders:set`, `section-colors:set`,
@@ -637,7 +1089,7 @@ Dónde se aplica la exclusión (sin journal, sin request, `onComplete` inmediato
   borra **nada** — gana la edición remota y la nota vuelve en el siguiente pull.
 - **Journal + sha cache (`electron/syncState.ts` + `userData/sync-state.json`):** estado LOCAL de
   durabilidad (deliberadamente fuera del dir de notas — no debe sincronizarse; se limpia en
-  `disconnectGitHub()`; corrupto/ausente degrada a estado vacío, nunca bloquea el sync). Dos mapas y un flag:
+  `disconnectGitHub()` y cuando el dir cambia de origen (`adoptGithubOrigin`, ver "Origen del dir de notas"); corrupto/ausente degrada a estado vacío, nunca bloquea el sync). Dos mapas y un flag:
   - **`ops` (journal de mutaciones remotas pendientes):** cada push debounced se apunta como
     `upsert` **al armar el timer** (sobrevive a cerrar la app durante el debounce) — keyed por
     relPath; `scheduleDelete`/`scheduleDeleteDir` como `delete`/`deleteDir` (este último descarta
@@ -889,7 +1341,8 @@ Dónde se aplica la exclusión (sin journal, sin request, `onComplete` inmediato
     **CLI con GitHub** fusiona igual en su push (`githubResolveConflictDir`, mismo planificador; ver "El
     CLI con GitHub" arriba).
 - **Repo:** se crea automáticamente con `private: true` + `auto_init: true` si no existe.
-- **initialPullStatus** (`pending|ok|failed`) gatea pushes hasta que el primer pull tenga éxito.
+- **initialPullStatus** (`pending|ok|failed`) gatea pushes hasta que el primer pull tenga éxito. Se
+  queda en `pending` mientras haya una elección de origen pendiente (ver "Origen del dir de notas").
 - **Catch-up de subida (`flushPendingLocalChanges`) — dos niveles de filtro:**
   1. **Puerta por carpeta:** se salta la nota cuyo `note.md updated <= lastSync` (o cuyo `updated` no
      sea parseable). Es lo único que distingue "hay algo que subir": el timestamp **no dice qué

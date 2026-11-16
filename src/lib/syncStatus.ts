@@ -6,6 +6,8 @@ import type { ActiveSyncStatus, SyncHistoryEntry } from '../types'
 
 /**
  * What the sync indicator shows, in priority order: a manual sync in progress,
+ * then a pending origin choice (the notes dir came from another remote:
+ * nothing syncs until the user chooses — never shown as synced or pending),
  * then an upload in flight, then the states that block syncing (Cloud keys
  * locked, failed first pull), then a plain error, then "first pull not done
  * yet", then local changes the backend does not have yet (its journal — e.g.
@@ -14,6 +16,7 @@ import type { ActiveSyncStatus, SyncHistoryEntry } from '../types'
  */
 export type SyncDisplayState =
   | 'syncing'
+  | 'choice'
   | 'uploading'
   | 'locked'
   | 'blocked'
@@ -28,6 +31,7 @@ export function getSyncDisplayState(
   pushing: boolean,
 ): SyncDisplayState {
   if (syncing) return 'syncing'
+  if (status.originChoice) return 'choice'
   if (pushing) return 'uploading'
   // Cloud keys not in memory (locked / no-keys): a manual pull can't run until
   // the user unlocks in Settings.

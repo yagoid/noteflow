@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo, startTransition } from 'react'
-import { useNotesStore, setWindowRole, settleNoteWrites, type OpenPane } from './stores/notesStore'
+import { useNotesStore, bindArchivedNotes, setWindowRole, settleNoteWrites, type OpenPane } from './stores/notesStore'
 import { useGroupsStore } from './stores/groupsStore'
 import { useTemplatesStore } from './stores/templatesStore'
 import { useSectionTagColorsStore } from './stores/sectionTagColorsStore'
@@ -335,10 +335,15 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
         useEditorSettingsStore.getState().reloadUiSettings()
       }
     })
+    // Notes main moved to the local archive leave the store right away (the reload
+    // that follows would keep them when the notes dir ended up empty). MainApp also
+    // backs the sticky windows, so this covers them too.
+    const unbindArchived = bindArchivedNotes()
 
     return () => {
       unbindNew()
       unbindUpdate()
+      unbindArchived()
     }
   }, [createNote, loadNotes, loadGroups, loadTemplates, loadSectionTagColors])
 

@@ -37,6 +37,8 @@ export const titleBar = {
     statusPending: 'Pending',
     // Local changes the backend doesn't have yet (e.g. pushes that failed offline).
     statusUnsynced: 'Not uploaded',
+    // The notes dir came from another remote: nothing syncs until the user chooses.
+    statusChoice: 'Action needed',
     // Data rows.
     lastSync: 'Last sync',
     never: 'Never',
@@ -56,6 +58,9 @@ export const titleBar = {
     filesToday: { one: '{count} file today', other: '{count} files today' },
     // Blocked first pull (shown above the error message, if any).
     blockedNotice: 'Changes won’t upload until a sync succeeds.',
+    // 'choice' state: card notice + its button (opens OriginChoiceDialog).
+    choiceNotice: 'Sync is paused: the notes on this device came from {previous}, not {next}. Choose how to continue.',
+    choiceAction: 'Choose…',
     // 'unsynced' state: some local changes haven't reached the backend yet.
     unsyncedNotice: 'Some local changes haven’t been uploaded yet. Click to sync now, or they’ll go up on the next automatic sync.',
     // The pull (NoteFlow Cloud or GitHub) kept local edits that conflicted with
@@ -91,6 +96,7 @@ export const titleBar = {
     clickToSync: 'Click to sync now',
     clickToRetry: 'Click to retry',
     unlockHint: 'Unlock in Settings → Sync',
+    choiceHint: 'Click to choose what to do with your notes',
   },
 
   // Crash fallback (ErrorBoundary).

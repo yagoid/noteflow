@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createDebouncedSave, flushPendingEdits, hasPendingEdits } from '../../src/lib/pendingEdits'
+import { createDebouncedSave, discardPendingEdits, flushPendingEdits, hasPendingEdits } from '../../src/lib/pendingEdits'
 
 describe('pendingEdits', () => {
   beforeEach(() => { vi.useFakeTimers() })
@@ -56,6 +56,31 @@ describe('pendingEdits', () => {
     slot.flush()
     vi.advanceTimersByTime(1000)
     expect(saves).toEqual([])
+  })
+
+  it('discardPendingEdits(noteId) drops the saves of that note without running them — not the others', () => {
+    const title = createDebouncedSave()
+    const body = createDebouncedSave()
+    const other = createDebouncedSave()
+    const saves: string[] = []
+    title.schedule('n1', 300, () => saves.push('n1 title'), 'n1/title')
+    body.schedule('n1', 400, () => saves.push('n1 body'), 'n1/s1')
+    other.schedule('n2', 400, () => saves.push('n2'))
+    discardPendingEdits('n1')
+    expect(saves).toEqual([])
+    expect(hasPendingEdits('n1')).toBe(false)
+    expect(title.isPending()).toBe(false)
+    expect(body.isPending()).toBe(false)
+    expect(hasPendingEdits('n2')).toBe(true)
+    // Neither the timer nor a later flush (an editor unmounting) runs a dropped save.
+    title.flush()
+    flushPendingEdits('n1')
+    vi.advanceTimersByTime(1000)
+    expect(saves).toEqual(['n2'])
+    // The slot is usable again (the same note back after a pull).
+    body.schedule('n1', 400, () => saves.push('n1 again'))
+    vi.advanceTimersByTime(400)
+    expect(saves).toEqual(['n2', 'n1 again'])
   })
 
   it('tells the save whether its timer elapsed or it was flushed', () => {

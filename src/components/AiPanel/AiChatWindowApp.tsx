@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { History, Loader2, PanelRightClose, Pin, Plus, Sparkles, X } from 'lucide-react'
 import { useAiChatStore } from '../../stores/aiChatStore'
-import { useNotesStore } from '../../stores/notesStore'
+import { bindArchivedNotes, useNotesStore } from '../../stores/notesStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { useThemeStore } from '../../stores/themeStore'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
@@ -51,7 +51,7 @@ export function AiChatWindowApp() {
     ])
     void loadAll()
     const currentWindowId = typeof window.noteflow?.windowId === 'function' ? window.noteflow.windowId() : null
-    return window.noteflow.onNotesUpdated((filePath, senderId) => {
+    const unbindUpdate = window.noteflow.onNotesUpdated((filePath, senderId) => {
       if (currentWindowId !== null && senderId === currentWindowId) return
       if (filePath) {
         void useNotesStore.getState().syncNote(filePath)
@@ -61,6 +61,12 @@ export function AiChatWindowApp() {
         useEditorSettingsStore.getState().reloadUiSettings()
       }
     })
+    // Notes moved to the local archive leave this window's store too — see App.tsx.
+    const unbindArchived = bindArchivedNotes()
+    return () => {
+      unbindUpdate()
+      unbindArchived()
+    }
   }, [])
 
   // Chat: provider config, history, stream listeners, then the conversation handed over by main.

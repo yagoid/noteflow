@@ -1,4 +1,4 @@
-// Structural reference data for the /cli page — mirrors the NoteFlow CLI v2.7.0, plus `history` (v2.13.0).
+// Structural reference data for the /cli page — mirrors the NoteFlow CLI v2.7.0, plus `history` (v2.13.0) and `origin` / `--merge` (v2.14.0).
 // Language-neutral fields (usage, flags, examples, colour tokens) live here once;
 // the short bilingual descriptions are inline per row (the table is ~30 rows with
 // 80% identical structure — two mirror files would drift apart).
@@ -305,10 +305,10 @@ export const cliGroups: CliGroup[] = [
     commands: g('accent-2', [
       {
         id: 'login',
-        usage: 'noteflow login [repo-name] [--no-pull] [--no-wait | --finish]',
+        usage: 'noteflow login [repo-name] [--no-pull] [--merge] [--no-wait | --finish]',
         desc: {
-          en: 'Connect to GitHub via Device Flow OAuth — it prints a code and a URL to authorize from any browser (perfect for headless boxes). Default repo: <code>noteflow-notes</code> — a bare name is a repo of whichever account you authorize with (created if missing); to connect an <strong>existing</strong> repo pass <code>owner/repo</code>, and authorizing with another account then fails without creating or saving anything. Once connected it <strong>pulls the repo’s notes automatically</strong> (local notes that are newer are kept), so a fresh machine is ready right away; <code>--no-pull</code> connects only. Skipped while NoteFlow Cloud is the active backend. The CLI keeps its own token, separate from the desktop app’s. For AI agents and scripts it also runs in two steps that never block: <code>--no-wait</code> prints the URL and code (<code>--json</code>: <code>{ verificationUri, userCode, expiresAt, repo }</code>) and exits; once you authorize, <code>--finish</code> completes the same login.',
-          es: 'Conecta con GitHub vía Device Flow OAuth — muestra un código y una URL para autorizar desde cualquier navegador (ideal en headless). Repo por defecto: <code>noteflow-notes</code> — un nombre a secas es un repo de la cuenta con la que autorices (se crea si falta); para conectar un repo <strong>existente</strong> pasa <code>owner/repo</code>, y autorizar con otra cuenta falla entonces sin crear ni guardar nada. Al conectar <strong>baja automáticamente las notas del repo</strong> (se conservan las locales más recientes), así una máquina nueva queda lista al momento; <code>--no-pull</code> solo conecta. Se omite mientras NoteFlow Cloud es el backend activo. El CLI guarda su propio token, separado del de la app de escritorio. Para agentes de IA y scripts también va en dos pasos que nunca bloquean: <code>--no-wait</code> muestra la URL y el código (<code>--json</code>: <code>{ verificationUri, userCode, expiresAt, repo }</code>) y sale; cuando autorizas, <code>--finish</code> completa el mismo login.',
+          en: 'Connect to GitHub via Device Flow OAuth — it prints a code and a URL to authorize from any browser (perfect for headless boxes). Default repo: <code>noteflow-notes</code> — a bare name is a repo of whichever account you authorize with (created if missing); to connect an <strong>existing</strong> repo pass <code>owner/repo</code>, and authorizing with another account then fails without creating or saving anything. Once connected it <strong>pulls the repo’s notes automatically</strong> (local notes that are newer are kept), so a fresh machine is ready right away; <code>--no-pull</code> connects only. Skipped while NoteFlow Cloud is the active backend. The CLI keeps its own token, separate from the desktop app’s. For AI agents and scripts it also runs in two steps that never block: <code>--no-wait</code> prints the URL and code (<code>--json</code>: <code>{ verificationUri, userCode, expiresAt, repo }</code>) and exits; once you authorize, <code>--finish</code> completes the same login. Connecting <strong>another</strong> repo while notes synced with the previous one are on disk saves the connection but pulls nothing (sync waits — see <code>origin</code>); <code>--merge</code> merges them into the new repo right away.',
+          es: 'Conecta con GitHub vía Device Flow OAuth — muestra un código y una URL para autorizar desde cualquier navegador (ideal en headless). Repo por defecto: <code>noteflow-notes</code> — un nombre a secas es un repo de la cuenta con la que autorices (se crea si falta); para conectar un repo <strong>existente</strong> pasa <code>owner/repo</code>, y autorizar con otra cuenta falla entonces sin crear ni guardar nada. Al conectar <strong>baja automáticamente las notas del repo</strong> (se conservan las locales más recientes), así una máquina nueva queda lista al momento; <code>--no-pull</code> solo conecta. Se omite mientras NoteFlow Cloud es el backend activo. El CLI guarda su propio token, separado del de la app de escritorio. Para agentes de IA y scripts también va en dos pasos que nunca bloquean: <code>--no-wait</code> muestra la URL y el código (<code>--json</code>: <code>{ verificationUri, userCode, expiresAt, repo }</code>) y sale; cuando autorizas, <code>--finish</code> completa el mismo login. Conectar <strong>otro</strong> repo con notas sincronizadas con el anterior en disco guarda la conexión pero no baja nada (el sync espera — ver <code>origin</code>); <code>--merge</code> las fusiona con el repo nuevo directamente.',
         },
         example: ['$ noteflow login --no-wait --json', '$ noteflow login --finish'],
       },
@@ -333,6 +333,15 @@ export const cliGroups: CliGroup[] = [
           es: 'Baja las notas del repo (alias: <code>update</code>). Solo sobreescribe una nota local cuando el <code>updated</code> remoto es más reciente.',
         },
       },
+      {
+        id: 'origin',
+        usage: 'noteflow origin [--json] | origin merge [--no-pull]',
+        desc: {
+          en: 'The CLI remembers which GitHub repo (by its id, so a renamed repo is the same one) and which NoteFlow Cloud account the notes folder was synced with — shared with the desktop app. After switching to <strong>another</strong> repo or account with synced notes on disk it never mixes them on its own: <code>push</code>/<code>pull</code> exit 1, edits stay local (<code>Not synced to …</code>) until you choose. <code>origin</code> shows the state of both backends (<code>--json</code> for agents); <code>origin merge</code> keeps the local notes, syncs them with the new remote and pulls it (<code>--no-pull</code> skips the pull; then <code>push</code> uploads what it lacks). To cancel, <code>logout</code> / <code>cloud logout</code>; to keep only the remote’s notes, use the desktop app (it moves the local ones to a local copy first).',
+          es: 'El CLI recuerda con qué repo de GitHub (por su id, así que un repo renombrado es el mismo) y con qué cuenta de NoteFlow Cloud se sincronizó la carpeta de notas — compartido con la app de escritorio. Al cambiar a <strong>otro</strong> repo o cuenta con notas sincronizadas en disco nunca las mezcla por su cuenta: <code>push</code>/<code>pull</code> salen con exit 1 y las ediciones se quedan en local (<code>Not synced to …</code>) hasta que eliges. <code>origin</code> muestra el estado de los dos backends (<code>--json</code> para agentes); <code>origin merge</code> conserva las notas locales, las sincroniza con el remoto nuevo y baja sus notas (<code>--no-pull</code> omite el pull; luego <code>push</code> sube lo que le falte). Para cancelar, <code>logout</code> / <code>cloud logout</code>; para quedarte solo con las notas del remoto, usa la app de escritorio (antes aparta las locales en una copia).',
+        },
+        example: ['$ noteflow origin --json', '$ noteflow origin merge'],
+      },
     ]),
   },
   {
@@ -342,10 +351,10 @@ export const cliGroups: CliGroup[] = [
     commands: g('accent', [
       {
         id: 'cloud-login',
-        usage: 'noteflow cloud login [email] [--no-pull] [--send-code | --code <code>]',
+        usage: 'noteflow cloud login [email] [--no-pull] [--merge] [--send-code | --code <code>]',
         desc: {
-          en: 'Sign in to your NoteFlow account with a one-time code sent to your email. The CLI keeps its own session, separate from the desktop app’s. With standard (managed) keys it then pulls your notes automatically (<code>--no-pull</code> skips it); with private (e2ee) keys, run <code>noteflow pull</code> afterwards. While signed in with Cloud enabled, <code>push</code>, <code>pull</code>, <code>status</code> and the automatic after-command sync use NoteFlow Cloud <strong>instead of</strong> GitHub. Without a terminal (AI agents, scripts) sign in in two steps, no prompts: <code>&lt;email&gt; --send-code</code> emails the code and exits, then <code>&lt;email&gt; --code &lt;code&gt;</code> verifies it (a wrong or expired code can be retried without a new email).',
-          es: 'Inicia sesión en tu cuenta NoteFlow con un código de acceso que recibes por email. El CLI guarda su propia sesión, separada de la de la app de escritorio. Con claves estándar (managed) baja después tus notas automáticamente (<code>--no-pull</code> lo omite); con claves privadas (e2ee), ejecuta <code>noteflow pull</code> a continuación. Con sesión y Cloud habilitado, <code>push</code>, <code>pull</code>, <code>status</code> y el sync automático tras cada comando usan NoteFlow Cloud <strong>en vez de</strong> GitHub. Sin terminal (agentes de IA, scripts) se entra en dos pasos, sin prompts: <code>&lt;email&gt; --send-code</code> envía el código y sale, y <code>&lt;email&gt; --code &lt;código&gt;</code> lo verifica (un código erróneo o caducado se puede reintentar sin pedir otro email).',
+          en: 'Sign in to your NoteFlow account with a one-time code sent to your email. The CLI keeps its own session, separate from the desktop app’s. With standard (managed) keys it then pulls your notes automatically (<code>--no-pull</code> skips it); with private (e2ee) keys, run <code>noteflow pull</code> afterwards. While signed in with Cloud enabled, <code>push</code>, <code>pull</code>, <code>status</code> and the automatic after-command sync use NoteFlow Cloud <strong>instead of</strong> GitHub. Without a terminal (AI agents, scripts) sign in in two steps, no prompts: <code>&lt;email&gt; --send-code</code> emails the code and exits, then <code>&lt;email&gt; --code &lt;code&gt;</code> verifies it (a wrong or expired code can be retried without a new email). Signing in to <strong>another</strong> account while notes synced with the previous one are on disk signs in but syncs nothing until you choose (see <code>origin</code>); <code>--merge</code> merges them right away.',
+          es: 'Inicia sesión en tu cuenta NoteFlow con un código de acceso que recibes por email. El CLI guarda su propia sesión, separada de la de la app de escritorio. Con claves estándar (managed) baja después tus notas automáticamente (<code>--no-pull</code> lo omite); con claves privadas (e2ee), ejecuta <code>noteflow pull</code> a continuación. Con sesión y Cloud habilitado, <code>push</code>, <code>pull</code>, <code>status</code> y el sync automático tras cada comando usan NoteFlow Cloud <strong>en vez de</strong> GitHub. Sin terminal (agentes de IA, scripts) se entra en dos pasos, sin prompts: <code>&lt;email&gt; --send-code</code> envía el código y sale, y <code>&lt;email&gt; --code &lt;código&gt;</code> lo verifica (un código erróneo o caducado se puede reintentar sin pedir otro email). Entrar con <strong>otra</strong> cuenta con notas sincronizadas con la anterior en disco inicia sesión pero no sincroniza nada hasta que eliges (ver <code>origin</code>); <code>--merge</code> las fusiona directamente.',
         },
         example: [
           '$ noteflow cloud login me@example.com',
@@ -389,8 +398,8 @@ export const cliGroups: CliGroup[] = [
         id: 'cloud-status',
         usage: 'noteflow cloud status [--json]',
         desc: {
-          en: 'Account email, keys mode (standard/private), sync state and cursor. JSON shape: <code>{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullSeq, pullCursor } | null, githubConfigured, desktopApp }</code> (<code>desktopApp</code>: see <code>status</code>).',
-          es: 'Email de la cuenta, modo de claves (estándar/privado), estado del sync y cursor. JSON: <code>{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullSeq, pullCursor } | null, githubConfigured, desktopApp }</code> (<code>desktopApp</code>: ver <code>status</code>).',
+          en: 'Account email, keys mode (standard/private), sync state and cursor. JSON shape: <code>{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullSeq, pullCursor, origin } | null, githubConfigured, desktopApp }</code> (<code>desktopApp</code>, <code>origin</code>: see <code>status</code>).',
+          es: 'Email de la cuenta, modo de claves (estándar/privado), estado del sync y cursor. JSON: <code>{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullSeq, pullCursor, origin } | null, githubConfigured, desktopApp }</code> (<code>desktopApp</code>, <code>origin</code>: ver <code>status</code>).',
         },
       },
       {
@@ -440,8 +449,8 @@ export const cliGroups: CliGroup[] = [
         id: 'status',
         usage: 'noteflow status [--json]',
         desc: {
-          en: 'Show note count, notes directory, groups, GitHub state and last sync. JSON shape: <code>{ notesDir, noteCount, github: { owner, repo, lastSync, tokenAccessible }, groups, desktopApp }</code>. <code>desktopApp</code> tells an agent what the desktop app uses so it can offer the same backend: <code>{ cloudSignedIn, cloudSyncEnabled, cloudEmail?, github: { owner, repo } | null }</code>, or <code>null</code> if the app’s settings aren’t found (the app’s sessions and tokens are never shared).',
-          es: 'Muestra número de notas, directorio, grupos, estado de GitHub y última sync. JSON: <code>{ notesDir, noteCount, github: { owner, repo, lastSync, tokenAccessible }, groups, desktopApp }</code>. <code>desktopApp</code> le dice a un agente qué usa la app de escritorio para proponer el mismo backend: <code>{ cloudSignedIn, cloudSyncEnabled, cloudEmail?, github: { owner, repo } | null }</code>, o <code>null</code> si no se encuentran los ajustes de la app (sus sesiones y tokens nunca se comparten).',
+          en: 'Show note count, notes directory, groups, GitHub state and last sync. JSON shape: <code>{ notesDir, noteCount, github: { owner, repo, lastSync, tokenAccessible, origin }, groups, desktopApp }</code>; <code>origin.pending: true</code> means sync waits for a choice after switching repo or account, and <code>origin.resolve</code> lists the options (see <code>origin</code>). <code>desktopApp</code> tells an agent what the desktop app uses so it can offer the same backend: <code>{ cloudSignedIn, cloudSyncEnabled, cloudEmail?, github: { owner, repo } | null }</code>, or <code>null</code> if the app’s settings aren’t found (the app’s sessions and tokens are never shared).',
+          es: 'Muestra número de notas, directorio, grupos, estado de GitHub y última sync. JSON: <code>{ notesDir, noteCount, github: { owner, repo, lastSync, tokenAccessible, origin }, groups, desktopApp }</code>; <code>origin.pending: true</code> indica que el sync espera una elección tras cambiar de repo o cuenta, y <code>origin.resolve</code> lista las opciones (ver <code>origin</code>). <code>desktopApp</code> le dice a un agente qué usa la app de escritorio para proponer el mismo backend: <code>{ cloudSignedIn, cloudSyncEnabled, cloudEmail?, github: { owner, repo } | null }</code>, o <code>null</code> si no se encuentran los ajustes de la app (sus sesiones y tokens nunca se comparten).',
         },
       },
       {
@@ -466,7 +475,7 @@ export interface GlobalFlag {
 export const globalFlags: GlobalFlag[] = [
   {
     flag: '--json',
-    applies: 'list · get · read · path · new · add · set · delete · history · groups · folders · group create · folder create · status · cloud status · login --no-wait',
+    applies: 'list · get · read · path · new · add · set · delete · history · groups · folders · group create · folder create · status · cloud status · origin · login --no-wait',
     desc: { en: 'Machine-readable JSON output on stdout (info lines go to stderr).', es: 'Salida JSON machine-readable en stdout (las líneas informativas van a stderr).' },
   },
   {
@@ -526,8 +535,13 @@ export const globalFlags: GlobalFlag[] = [
   },
   {
     flag: '--no-pull',
-    applies: 'login · cloud login',
+    applies: 'login · cloud login · origin merge',
     desc: { en: 'Connect without the initial pull.', es: 'Conecta sin el pull inicial.' },
+  },
+  {
+    flag: '--merge',
+    applies: 'login · cloud login',
+    desc: { en: 'If the notes here were synced with another repo/account, merge them into the new one instead of waiting for <code>noteflow origin merge</code>.', es: 'Si las notas de aquí se sincronizaron con otro repo/cuenta, fusionarlas con el nuevo en vez de esperar a <code>noteflow origin merge</code>.' },
   },
   {
     flag: '--no-wait / --finish',
