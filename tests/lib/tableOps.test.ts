@@ -609,10 +609,21 @@ describe('deleteSelectedColumns', () => {
     expect(del.selection.head).toBe(cellPos(del, 0, 1) + 2)
   })
 
-  it(`never leaves fewer than ${MIN_TABLE_COLUMNS} columns`, () => {
-    expectRejected(stateOf(T22, 'A'), deleteSelectedColumns)
-    expectRejected(withCells(stateOf(T44), [0, 0], [0, 2]), deleteSelectedColumns)
-    expect(deleteSelectedColumns(withCells(stateOf(T44), [0, 0], [0, 1]))).toBe(true)
+  it('goes down to one column, which still saves and reloads as a table', () => {
+    expect(MIN_TABLE_COLUMNS).toBe(1)
+    // `apply` checks the markdown round trip of the resulting document.
+    const del = apply(stateOf(T22, 'A'), deleteSelectedColumns)
+    expect(save(del.doc)).toBe(table([['B'], ['2']]))
+    expect(getTableData(stateOf(save(del.doc)), { tablePos: 0 })?.rows).toEqual([['B'], ['2']])
+    expect(del.selection.head).toBe(cellPos(del, 0, 0) + 2)
+    const three = apply(withCells(stateOf(T44), [0, 0], [0, 2]), deleteSelectedColumns)
+    expect(save(three.doc)).toBe(table([['Note'], ['x'], [''], ['y']], [':---']))
+  })
+
+  it('never deletes every column', () => {
+    expectRejected(withCells(stateOf(T22), [0, 0], [0, 1]), deleteSelectedColumns)
+    expectRejected(withCells(stateOf(T44), [1, 0], [2, 3]), deleteSelectedColumns)
+    expectRejected(stateOf(table([['H'], ['a']]), 'a'), deleteSelectedColumns)
   })
 })
 
@@ -623,9 +634,10 @@ describe('one-column, header-less and merged tables', () => {
     jRow(jCell('tableHeader', 'H')), jRow(jCell('tableCell', 'b')), jRow(jCell('tableCell', 'a')),
   ] })
 
-  it('a one-column table (not representable in markdown) still sorts and grows', () => {
-    // `| H |` / `| --- |` doesn't load back as a table: checked on the document.
-    const sorted = apply(stateOf(oneCol), sortRowsByColumn(0, 'asc'), { lossless: false })
+  it('a one-column table sorts and grows, and its only column can\'t be deleted', () => {
+    // `| H |` / `| --- |` loads back as a table: `apply` checks the round trip.
+    const sorted = apply(stateOf(oneCol), sortRowsByColumn(0, 'asc'))
+    expect(save(sorted.doc)).toBe(table([['H'], ['a'], ['b']]))
     expect(getTableData(sorted)?.rows).toEqual([['H'], ['a'], ['b']])
     const wider = apply(stateOf(oneCol), insertColumnAt(1))
     expect(getTableData(wider)?.rows).toEqual([['H', ''], ['b', ''], ['a', '']])

@@ -31,12 +31,13 @@ import { CellSelection, TableMap, tableNodeTypes, type Rect } from '@tiptap/pm/t
 import { sortOrder, type SortDirection, type TableAlign } from '../../lib/tableData'
 
 /**
- * Fewest columns a table may be left with by deleteSelectedColumns. A
- * one-column pipe table (`| a |` / `| --- |`) isn't read back as a table by
- * the markdown loader (TABLE_SEPARATOR_RE needs 2+ cells): it would come back
- * as plain text after saving and reopening the note.
+ * Fewest columns a table may be left with by deleteSelectedColumns: the limit
+ * only keeps the table from ending up with no columns. A one-column pipe table
+ * (`| a |` / `| --- |`) is read back as a table by the markdown loader
+ * (isTableStart in lib/markdownHtml.ts), so it survives saving and reopening
+ * the note.
  */
-export const MIN_TABLE_COLUMNS = 2
+export const MIN_TABLE_COLUMNS = 1
 
 export interface TableTarget {
   /** Position right before the table node. Default: the innermost table around the selection. */
@@ -549,9 +550,10 @@ export const deleteSelectedRows: Command = (state, dispatch) => {
 
 /**
  * Delete the columns the selection covers (CellSelection or cursor's cell).
- * False if that would leave fewer than MIN_TABLE_COLUMNS columns. The cursor
- * lands at the start of the cell that takes the first deleted column's place
- * (or the last column's), same row.
+ * False if that would leave fewer than MIN_TABLE_COLUMNS columns, i.e. if it
+ * would delete every column: a table can go down to one column, not to none.
+ * The cursor lands at the start of the cell that takes the first deleted
+ * column's place (or the last column's), same row.
  */
 export const deleteSelectedColumns: Command = (state, dispatch) => {
   const s = selectionRect(state)

@@ -1006,9 +1006,11 @@ siguen usando los comandos de TipTap/prosemirror-tables y `tableUtils.ts`, sin c
     se puede vaciar); nada que vaciar → true sin transacción. Eliminar filas: si la selección incluye
     la cabecera se eliminan **solo las de cuerpo**; si solo cubre la cabecera → false; eliminar todas
     las de cuerpo está permitido (tabla solo-cabecera, válida en markdown). Eliminar columnas: false si
-    quedarían menos de **`MIN_TABLE_COLUMNS` = 2**, porque una tabla pipe de **1 columna no se relee
-    como tabla** (`TABLE_SEPARATOR_RE` exige ≥ 2 celdas: al reabrir la nota vuelve como texto). Ojo:
-    el borrado de columna del toolbar/menú contextual (prosemirror-tables) sí permite llegar a 1.
+    quedarían menos de **`MIN_TABLE_COLUMNS` = 1**, es decir, si la selección cubre **todas** las
+    columnas: el límite solo existe para no dejar la tabla sin columnas. Bajar hasta **1 columna** está
+    permitido porque una tabla pipe de una columna se relee como tabla (`isTableStart`, ver «Tablas de
+    una columna» más abajo) — igual que el borrado de columna del toolbar/menú contextual
+    (prosemirror-tables), que tampoco deja borrar la última.
 - **`src/lib/tableData.ts`** — funciones puras sobre `string[][]` (sin ProseMirror):
   - `parseCellNumber`: signo opcional (`+`, `-`, `−`) y **un** separador decimal `.` o `,`
     (`3,5`, `-.5`); sin separadores de miles, exponentes, espacios, `%` ni moneda. El punto siempre es
@@ -1024,8 +1026,8 @@ siguen usando los comandos de TipTap/prosemirror-tables y `tableUtils.ts`, sin c
     números; la suma se redondea a los decimales máximos de las entradas (0.1 + 0.2 = 0.3).
   - `cellsToMarkdown(rows, aligns?)`: tabla pipe como la escribe `tableElToMd` (fila 0 = cabecera,
     `|` → `\|`, saltos → `<br>`, vacía → espacio, filas irregulares rellenadas). El texto va tal cual,
-    así que markdown dentro (`**x**`) vuelve a ser markdown. Con 1 columna es GFM válido pero NoteFlow
-    no lo lee como tabla (ver arriba).
+    así que markdown dentro (`**x**`) vuelve a ser markdown. Con 1 columna sale `| a |\n| --- |`, que
+    NoteFlow también lee como tabla (`isTableStart`).
   - `cellsToTsv(rows)`: tabuladores y `\n`; una celda con tab, salto o `"` va entre comillas estilo
     Excel (comillas internas duplicadas).
   - `parseDelimited(text, delimiter?)`: RFC 4180 (comillas, `""`, saltos entrecomillados, CRLF/CR/LF →

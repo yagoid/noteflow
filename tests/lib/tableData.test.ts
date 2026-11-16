@@ -116,11 +116,13 @@ describe('cellsToMarkdown', () => {
     expect(readBack(md)?.rows).toEqual([['', '']])
   })
 
-  it('no cells → empty string; one column is GFM the editor does not read as a table', () => {
+  it('no cells → empty string; one column is a table the editor reads back', () => {
     expect(cellsToMarkdown([])).toBe('')
     expect(cellsToMarkdown([[]])).toBe('')
-    expect(cellsToMarkdown([['a'], ['b']])).toBe('| a |\n| --- |\n| b |')
-    expect(containsMarkdownTable(cellsToMarkdown([['a'], ['b']]))).toBe(false)
+    const md = cellsToMarkdown([['a'], ['b']])
+    expect(md).toBe('| a |\n| --- |\n| b |')
+    expect(containsMarkdownTable(md)).toBe(true)
+    expect(readBack(md)?.rows).toEqual([['a'], ['b']])
   })
 })
 

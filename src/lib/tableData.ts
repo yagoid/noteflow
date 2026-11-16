@@ -151,8 +151,8 @@ function alignToSep(align: TableAlign | undefined): string {
  * (missing = none), `|` escaped as `\|`, line breaks as `<br>`, empty cells as
  * one space. Ragged rows are padded. Cell text is written as-is, so markdown
  * in it (`**x**`) is markdown again when pasted. '' for no cells. A
- * single-column table is valid GFM, but NoteFlow's own reader needs 2+ columns
- * to see a table (TABLE_SEPARATOR_RE).
+ * single-column table (`| a |` / `| --- |`) is read back as a table too
+ * (isTableStart in lib/markdownHtml.ts).
  */
 export function cellsToMarkdown(
   rows: readonly (readonly string[])[],
