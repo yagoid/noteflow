@@ -635,9 +635,13 @@ queda** (apariencia del dispositivo). Las `localOnly` y las vinculadas no se toc
   esta sesión mientras no exista (si un pull la trae de vuelta, se escribe normal). Notas temporales:
   `checkExpiredNotes` solo recorre el dir; las archivadas ya no están. Journal/timers/caché de shas: los
   resetea la resolución.
-- **UI de las copias:** Ajustes → Sync → GitHub y → NoteFlow Cloud muestran "Open local copies" cuando
-  `sync:archives-status` dice que hay alguna (`sync:open-archives` → `shell.openPath`). Restaurar desde
-  la app **no existe** todavía (el manifest lo permitirá).
+- **UI de las copias:** Ajustes → Sync muestra "Open local copies" cuando `sync:archives-status` dice que
+  hay alguna (`sync:open-archives` → `shell.openPath`; `SyncOriginNotices.tsx`): con un backend activo es
+  la fila **"Local copies"** de la lista de datos de la vista general (`LocalCopiesRow`, antes de la fila
+  del CLI); sin vista general (selector inicial, detalle de Cloud o de GitHub) es una línea al pie
+  (`LocalCopies`) — las copias sobreviven a la conexión que las creó. Se relee con cada
+  `sync:status-changed` / `cloud:status-changed`. Restaurar desde la app **no existe** todavía (el
+  manifest lo permitirá).
 
 **Renderer:** `OriginChoiceDialog.tsx` (genérico: `{ backend: 'github'|'cloud', previousLabel,
 nextLabel, stale?, disconnectsGithub?, onResolve(choice) → Promise<{ok, error?}>, onClose, busy? }`),
@@ -648,8 +652,19 @@ desconocida → texto genérico de `src/lib/originChoiceLabels.ts`; la clave de 
 backend, `stale` y etiquetas), se reabre desde el botón de sync (estado `choice` de
 `src/lib/syncStatus.ts`, prioridad justo tras `syncing` y antes de "locked": icono de aviso ámbar, píldora
 "Action needed", nunca "Synced"; el clic abre el diálogo; vale para los dos backends) o desde Ajustes
-(evento `noteflow:open-origin-choice`: aviso ámbar con botón "Choose…" en Ajustes → Sync → GitHub y →
-NoteFlow Cloud). Tres opciones sin preselección ni foco en ninguna (el foco va al propio diálogo) +
+(evento `noteflow:open-origin-choice`). **En Ajustes → Sync** la elección pendiente es siempre la del
+backend activo, así que vive en la vista general (`SyncOverview.tsx`, que lee el mismo
+`ActiveSyncStatus` que la titlebar): la insignia de la tarjeta de estado dice "Action needed" (`choice`
+pasa tal cual por `overviewBadge`; tono `warn`; `isLinkActive` = false → el mapa pinta todos los enlaces
+discontinuos — `src/lib/syncOverview.ts`, testeado), **"Sync now" queda deshabilitado** y justo debajo de
+la tarjeta sale el aviso ámbar con el botón "Choose…" (`OriginPendingNotice` en `SyncOriginNotices.tsx`,
+texto `settings.sync.originPending` para los dos backends). Un pull o un espejo que se cuelen igualmente
+responden `origin-choice-pending` y se muestran como error (`pullOriginPending` / `mirrorOriginPending`).
+La fila "noteflow CLI" deshabilita "Connect the CLI too" (`useCliConnect.originPending`, leído de
+`getCloudStatus()` / `getSyncStatus()` y sus eventos) con `settings.sync.cli.originPending` como tooltip
+y como línea bajo la fila. `useGitHubSync` escucha `sync:status-changed` y avisa a `SyncPanel` si GitHub
+quedó desconectado desde fuera (el "Cancel" del diálogo, o el `replace` de Cloud).
+Tres opciones sin preselección ni foco en ninguna (el foco va al propio diálogo) +
 "Continue"; Escape / "Decide later" solo cierran (la elección sigue pendiente). Con `archive-failed` muestra
 el error y no se cierra. Con Cloud: "Cancel" explica que apaga NoteFlow Cloud en este dispositivo (la
 sesión sigue), "Use only the notes from …" avisa si desconectará GitHub Sync, y con `stale` la intro dice

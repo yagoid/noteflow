@@ -58,10 +58,10 @@ export const titleBar = {
     filesToday: { one: '{count} file today', other: '{count} files today' },
     // Blocked first pull (shown above the error message, if any).
     blockedNotice: 'Changes won’t upload until a sync succeeds.',
-    // 'unsynced' state: some local changes haven't reached the backend yet.
     // 'choice' state: card notice + its button (opens OriginChoiceDialog).
     choiceNotice: 'Sync is paused: the notes on this device came from {previous}, not {next}. Choose how to continue.',
     choiceAction: 'Choose…',
+    // 'unsynced' state: some local changes haven't reached the backend yet.
     unsyncedNotice: 'Some local changes haven’t been uploaded yet. Click to sync now, or they’ll go up on the next automatic sync.',
     // The pull (NoteFlow Cloud or GitHub) kept local edits that conflicted with
     // changes from another device as new notes (conflict copies): card notice

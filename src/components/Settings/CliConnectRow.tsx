@@ -10,7 +10,8 @@ import type { CliConnect } from './useCliConnect'
 // useCliConnect). Compact while idle — badge Connected / Not connected, one line
 // and the Connect / Disconnect button — and it unfolds under the same row while
 // a flow is in progress: the emailed code (Cloud), the e2ee notice, errors. The
-// GitHub token copy is confirmed in a modal first.
+// GitHub token copy is confirmed in a modal first. While the backend's origin
+// choice is pending, Connect is disabled with the reason under the row.
 export function CliConnectRow({ cli }: { cli: CliConnect }) {
   const t = useT()
   const tc = t.settings.sync.cli
@@ -64,7 +65,8 @@ export function CliConnectRow({ cli }: { cli: CliConnect }) {
       action = (
         <button
           onClick={() => (backend === 'cloud' ? void cli.sendCode(false) : cli.setConfirmGithub(true))}
-          disabled={busy || !appTarget}
+          disabled={busy || !appTarget || cli.originPending}
+          title={cli.originPending ? tc.originPending : undefined}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono whitespace-nowrap ${settingsButtonClass}`}
         >
           {step === 'sending' || step === 'connecting'
@@ -76,7 +78,9 @@ export function CliConnectRow({ cli }: { cli: CliConnect }) {
     }
   }
 
-  const expanded = showE2eeNotice || (!cli.connected && codeStep) || !!error
+  // The Connect button is off while the backend's origin choice is pending: say why under the row.
+  const showOriginPending = !cli.connected && status.available && !codeStep && cli.originPending
+  const expanded = showOriginPending || showE2eeNotice || (!cli.connected && codeStep) || !!error
 
   return (
     <>
@@ -93,6 +97,10 @@ export function CliConnectRow({ cli }: { cli: CliConnect }) {
       >
         {expanded ? (
           <>
+            {showOriginPending && (
+              <p className="text-[11px] font-mono text-text-muted leading-relaxed">{tc.originPending}</p>
+            )}
+
             {showE2eeNotice && (
               <div className="flex items-start gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
                 <KeyRound size={12} className="flex-shrink-0 mt-0.5" />

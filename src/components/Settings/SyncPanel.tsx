@@ -7,6 +7,7 @@ import { GitHubOverview, GitHubSetup } from './GitHubSync'
 import { PlanTag } from './PlanOffers'
 import { useOfferTag } from './planOffersShared'
 import type { SettingsIntent } from './SettingsModal'
+import { LocalCopies } from './SyncOriginNotices'
 import { settingsButtonClass } from './ui'
 
 type Backend = 'cloud' | 'github'
@@ -27,6 +28,11 @@ type View = 'overview' | Backend | 'choose'
 //   backend's detail opens from that row, with a link back — including GitHub's
 //   while Cloud is on and GitHub was never connected: then GitHubSetup is only
 //   informative (no connect) until Cloud is turned off.
+// - A pending origin choice (the notes on this device came from another remote)
+//   always belongs to the backend in use, so its notice lives in the overview
+//   (SyncOverview). The local copies made by "Use only the notes from …" outlive
+//   the connection: the overview lists them as a row, and the chooser and the
+//   details show the same access at the bottom (LocalCopies).
 export function SyncPanel({ intent }: { intent?: SettingsIntent }) {
   const t = useT()
   const [cloudEnabled, setCloudEnabled] = useState(false)
@@ -127,6 +133,7 @@ export function SyncPanel({ intent }: { intent?: SettingsIntent }) {
         // informative; Cloud turned off from elsewhere → the normal setup.
         <GitHubSetup cloudEnabled={cloudEnabled} onConnectedChange={setGithubConnected} />
       )}
+      {effective !== 'overview' && <LocalCopies />}
     </div>
   )
 }
@@ -178,6 +185,7 @@ function SyncChooser({ account, onPick }: { account: AccountStatus | null; onPic
           </button>
         </p>
       )}
+      <LocalCopies />
     </div>
   )
 }

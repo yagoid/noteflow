@@ -1664,7 +1664,11 @@ activo a la vez.
      GitHub "paused · manual mirror" (solo si está conectado) o NoteFlow Cloud "not active". Los
      enlaces se ven discontinuos si el proveedor está bloqueado o con error.
   3. Si Cloud necesita algo (crear las claves, desbloquear con la passphrase), aparece **justo debajo
-     de la tarjeta**.
+     de la tarjeta**. Ahí sale también, lo primero, el aviso ámbar **"Paused — the notes on this device
+     came from … Nothing syncs with … until you choose how to continue."** con el botón **Choose…**
+     cuando las notas vienen de otro repo o de otra cuenta (ver "GitHub Sync" → "Conectar a otro
+     repositorio"): el badge de la tarjeta dice entonces **Action needed**, **Sync now** queda
+     deshabilitado y el mapa pinta los enlaces discontinuos.
   4. **"Security and data"** (Cloud) / **"Repository and data"** (GitHub), una lista de filas:
      - Cloud: **Standard encryption** / **Private encryption (E2EE)** con su botón "Switch to private
        mode" / "Switch to standard mode" (el formulario se abre en la propia fila; en privado también
@@ -1673,6 +1677,11 @@ activo a la vez.
      - GitHub: **Your repository** ("In your GitHub account — NoteFlow's servers keep no copy" → "Open
        on GitHub"), **History in Git** ("Every change uploaded from here is a commit" → "View commits",
        abre los commits del repo) y **noteflow CLI**.
+     - En ambos, justo antes de **noteflow CLI**: **Local copies** → "Open local copies", solo si
+       existe alguna copia de "Use only the notes from …" (sin backend activo, la misma opción sale al
+       pie del selector o del detalle). Y **noteflow CLI** deshabilita "Connect the CLI too" (con
+       "Available once you choose what to do with the notes on this device." debajo) mientras haya que
+       elegir.
   5. **"Other providers"**: con Cloud activo y GitHub conectado, **GitHub Sync "Paused"**
      ("owner/repo · settings kept") con **Mirror to GitHub** (pide confirmación) y **Disconnect**; con
      Cloud activo y sin GitHub, **GitHub Sync "Not connected"** ("Your notes in a repository of your
@@ -1916,13 +1925,14 @@ una y luego "Continue"):
 - **Merge both** — lo de siempre: tus notas suben al repo nuevo y bajan las suyas.
 - **Use only the notes from <repo>** — tus notas se **mueven a una copia en este ordenador** (nada se
   borra ni se sube; con sus grupos, carpetas, orden, colores de sección, plantillas y fragmentos; la
-  apariencia se queda) y se bajan las del repo nuevo. Las copias se abren desde Ajustes → Sync → GitHub →
-  **"Open local copies"** (aparece cuando existe alguna). Si no se pueden mover (p. ej. un programa tiene
+  apariencia se queda) y se bajan las del repo nuevo. Las copias se abren desde Ajustes → Sync → fila
+  **"Local copies"** → **"Open local copies"** (aparece cuando existe alguna; sin backend activo, al pie
+  del selector o del detalle). Si no se pueden mover (p. ej. un programa tiene
   bloqueada la carpeta), no se baja nada, tus notas quedan intactas y el diálogo muestra el error.
 - **Cancel** — desconecta el repo nuevo; todo queda como estaba.
 "Decide later" (o Escape) solo cierra el diálogo: mientras tanto el sync está **en pausa** (botón de la
-titlebar en ámbar, aviso en Ajustes → Sync → GitHub con "Choose…" para reabrirlo; sobrevive a reiniciar
-la app). Reconectar al **mismo** repo (aunque lo hayas renombrado) o conectar un repo cuando no hay notas
+titlebar en ámbar; en Ajustes → Sync la tarjeta de estado dice "Action needed", "Sync now" queda
+deshabilitado y bajo la tarjeta hay un aviso con "Choose…" para reabrirlo; sobrevive a reiniciar la app). Reconectar al **mismo** repo (aunque lo hayas renombrado) o conectar un repo cuando no hay notas
 sincronizables no pregunta. La primera conexión (sin origen guardado) tampoco. Con NoteFlow Cloud
 activado GitHub nunca pregunta (el dueño de las notas es la cuenta de Cloud). También lo detecta al
 arrancar si el CLI dejó la app conectada a otro repo. Aún no se puede restaurar una copia desde la app.
@@ -1932,15 +1942,16 @@ NoteFlow se sincronizaron las notas de este dispositivo. Si inicias sesión con 
 activa (solo, porque la cuenta lo tiene pagado, o a mano) habiendo notas que se sincronizarían, **no sube
 ni baja nada** y abre el mismo diálogo (cuenta anterior → cuenta actual, por email):
 - **Merge both** — tus notas suben a la cuenta actual y bajan las suyas.
-- **Use only the notes from <email>** — tus notas pasan a la copia local (Ajustes → Sync → NoteFlow Cloud
-  → "Open local copies") y se bajan las de la cuenta. Si GitHub Sync estaba conectado, **se desconecta**
+- **Use only the notes from <email>** — tus notas pasan a la copia local (Ajustes → Sync → "Local
+  copies" → "Open local copies") y se bajan las de la cuenta. Si GitHub Sync estaba conectado, **se desconecta**
   (el diálogo lo avisa): su repo tenía las notas que acabas de apartar.
 - **Cancel** — "Turn off NoteFlow Cloud on this device": apaga Cloud, sigues con la sesión iniciada y tus
   notas quedan como estaban. No vuelve a preguntar hasta que enciendas Cloud tú (o vuelvas a iniciar
   sesión).
-Mientras está pendiente: botón de la titlebar en ámbar ("Action needed"), aviso con "Choose…" en Ajustes →
-Sync → NoteFlow Cloud, "Sync now" / "Mirror to GitHub" no hacen nada y "Connect the CLI too" queda
-deshabilitado con la explicación (en GitHub igual mientras su elección está pendiente). Volver a entrar con
+Mientras está pendiente: botón de la titlebar en ámbar ("Action needed"); en Ajustes → Sync la tarjeta
+de estado de la vista general dice "Action needed" con el aviso y "Choose…" debajo, "Sync now" queda
+deshabilitado, "Mirror to GitHub" no hace nada y "Connect the CLI too" (fila "noteflow CLI") queda
+deshabilitado con la explicación debajo (en GitHub igual mientras su elección está pendiente). Volver a entrar con
 la **misma** cuenta no pregunta.
 
 **Cruce entre los dos.** "Use only the notes from …" de un backend sustituye las notas, así que el otro
@@ -1956,7 +1967,8 @@ normal se pregunta si toca.
 ### Panel de sync
 - Vista general: estado real, repo vinculado (↗), cadencia y última sync, mapa informativo.
 - "Sync now" para sync manual (primero reintenta las subidas/borrados pendientes del journal, luego
-  pull) · "Disconnect GitHub" en el pie para desconectar.
+  pull; deshabilitado mientras haya que elegir qué hacer con las notas de otro repo) · "Disconnect
+  GitHub" en el pie para desconectar.
 - **"Mirror to GitHub" / "Espejar en GitHub"** — botón de la fila "GitHub Sync · Paused" de la vista
   general de Cloud, así que **solo con NoteFlow Cloud activado** (es entonces cuando GitHub queda en pausa como espejo de solo
   escritura y el repo se va quedando obsoleto: no le llegan los borrados ni las notas que Cloud

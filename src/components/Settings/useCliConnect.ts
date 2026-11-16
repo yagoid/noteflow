@@ -17,6 +17,8 @@ export type CliConnectStep = 'idle' | 'sending' | 'code' | 'verifying' | 'resend
 // terminal shows up as connected too.
 // Microsoft Store build: it ships no CLI (`isStore`), so the row only explains
 // that — never the connected state of a CLI from a direct install sharing settings.json.
+// While the backend's origin choice is pending (`originPending`) the CLI can't
+// be connected: the row disables the button and says why.
 export function useCliConnect(backend: 'cloud' | 'github') {
   const t = useT()
   const tc = t.settings.sync.cli
@@ -32,6 +34,29 @@ export function useCliConnect(backend: 'cloud' | 'github') {
   const [error, setError] = useState<{ message: string; detail?: string } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [confirmGithub, setConfirmGithub] = useState(false)
+  // The backend's origin choice is pending (the notes on this device came from
+  // another remote): the app syncs nothing with it, so the CLI can't be
+  // connected either (main refuses too — 'originChoicePending').
+  const [originPending, setOriginPending] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    const refresh = () => {
+      if (backend === 'cloud') {
+        window.noteflow.getCloudStatus().then((c) => { if (alive) setOriginPending(!!c.originChoice) })
+      } else {
+        window.noteflow.getSyncStatus().then((s) => { if (alive) setOriginPending(!!s.originChoice) })
+      }
+    }
+    refresh()
+    const off = backend === 'cloud'
+      ? window.noteflow.onCloudStatusChanged(refresh)
+      : window.noteflow.onSyncStatusChanged(refresh)
+    return () => {
+      alive = false
+      off()
+    }
+  }, [backend])
 
   useEffect(() => {
     let alive = true
@@ -136,6 +161,8 @@ export function useCliConnect(backend: 'cloud' | 'github') {
     error,
     notice,
     confirmGithub,
+    /** The backend's origin choice is pending: connecting the CLI is off until the user chooses. */
+    originPending,
     /** The CLI holds its own access to this backend (false on the Store build and while loading). */
     connected,
     setConfirmGithub,

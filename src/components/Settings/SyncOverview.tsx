@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Cloud, ExternalLink, Github, Loader, RefreshCw } from 'lucide-react'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import { originChoiceLabels } from '../../lib/originChoiceLabels'
 import { getSyncDisplayState, pendingChangeCount } from '../../lib/syncStatus'
 import {
   autoSyncMinutes,
@@ -17,6 +18,7 @@ import { useActiveSyncStatus } from '../useActiveSyncStatus'
 import { CliConnectRow } from './CliConnectRow'
 import { PRIMARY_BUTTON } from './planOffersShared'
 import { SyncMap } from './SyncMap'
+import { LocalCopiesRow, OriginPendingNotice } from './SyncOriginNotices'
 import { SettingsListSection, StatusBadge } from './ui'
 import { useCliConnect } from './useCliConnect'
 
@@ -50,10 +52,14 @@ interface SyncOverviewProps {
  * Settings → Sync while a backend is active (NoteFlow Cloud enabled, or GitHub
  * Sync connected): the status card (provider, live badge, one line of facts,
  * "Sync now" and the informative sync map), the provider's data list ending in
- * the CLI row, "Other providers" and a footer with the reassurance + the
- * destructive action. The provider panels (CloudPanel / GitHubOverview) own
- * the actions and fill the slots; this shell reads the live status (the same
- * one as the titlebar button) and the CLI state.
+ * the local copies (once there is one) and the CLI row, "Other providers" and a
+ * footer with the reassurance + the destructive action. The provider panels
+ * (CloudPanel / GitHubOverview) own the actions and fill the slots; this shell
+ * reads the live status (the same one as the titlebar button) and the CLI state.
+ * While the live backend's origin choice is pending (the notes on this device
+ * came from another remote — electron/syncOrigin.ts) nothing syncs: the badge
+ * reads "Action needed", "Sync now" is off and a notice right under the card
+ * reopens the choice (OriginChoiceDialog, mounted by the titlebar).
  */
 export function SyncOverview({
   provider,
@@ -84,6 +90,8 @@ export function SyncOverview({
   const minutes = autoSyncMinutes(status?.autoSyncIntervalMs)
   const repo = repoSlug(status?.github?.owner, status?.github?.repo)
   const lastSync = status?.lastSync ? tf(o.lastSyncAgo, { time: formatSyncAge(status.lastSync, live.now, s) }) : o.neverSynced
+  // Labels of the pending origin choice ('' from main = unknown → a generic text).
+  const originChoice = status?.originChoice ? originChoiceLabels(t.originChoice, provider, status.originChoice) : null
 
   let facts: ReactNode = t.common.loading
   if (status && provider === 'cloud') {
@@ -152,7 +160,7 @@ export function SyncOverview({
             </div>
             <div className="text-[11px] font-mono text-text-muted leading-normal">{facts}</div>
           </div>
-          <button onClick={() => void handleSync()} disabled={syncing || !canSync} className={`${PRIMARY_BUTTON} flex-shrink-0 whitespace-nowrap`}>
+          <button onClick={() => void handleSync()} disabled={syncing || !canSync || !!originChoice} className={`${PRIMARY_BUTTON} flex-shrink-0 whitespace-nowrap`}>
             {syncing ? <Loader size={12} className="animate-spin" /> : <RefreshCw size={12} />}
             {t.settings.sync.syncNow}
           </button>
@@ -178,10 +186,13 @@ export function SyncOverview({
         )}
       </section>
 
+      {originChoice && <OriginPendingNotice text={tf(t.settings.sync.originPending, originChoice)} />}
+
       {notices}
 
       <SettingsListSection title={dataTitle}>
         {dataRows}
+        <LocalCopiesRow />
         <CliConnectRow cli={cli} />
       </SettingsListSection>
 

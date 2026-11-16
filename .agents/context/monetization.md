@@ -2018,14 +2018,23 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
        accent si el proveedor sincroniza; discontinuos si está bloqueado / sin claves / con error / CLI
        sin conectar (`syncMapModel`, testeado). Responsive: rejilla de 5 columnas en `fr` con las
        proporciones del diseño; los nodos truncan su texto si el panel es estrecho.
-    3. Avisos del proveedor justo bajo la tarjeta: error, resultado del pull y, en Cloud, el bloque de
-       claves (onboarding sin claves, "Unlocking…" en managed, formulario de desbloqueo e2ee).
+    3. Avisos justo bajo la tarjeta. Primero, si la **elección de origen** del backend activo está
+       pendiente (las notas vienen de otro repo/cuenta — `sync.md` "Origen del dir de notas"): la
+       insignia de la tarjeta dice "Action needed" (estado `choice`), "Sync now" queda deshabilitado, el
+       mapa pinta los enlaces discontinuos y sale el aviso ámbar con "Choose…" (`OriginPendingNotice`,
+       reabre el `OriginChoiceDialog` de la titlebar). Después, los del proveedor: error, resultado del
+       pull y, en Cloud, el bloque de claves (onboarding sin claves, "Unlocking…" en managed,
+       formulario de desbloqueo e2ee).
     4. **"Security and data"** (Cloud) / **"Repository and data"** (GitHub): lista de filas
        (`SettingsListSection` + `SettingsRow` de `ui.tsx`). Cloud: cifrado estándar/privado (con
        "Switch to private/standard mode" y Lock en e2ee — los formularios de cambio de modo se despliegan
        en la propia fila), "Version history" (badge "Included") y la fila del CLI. GitHub: "Your
        repository" (no dice "privado": NoteFlow lo crea privado si no existía, pero uno existente
        conserva su visibilidad) → Open on GitHub, "History in Git" → `…/commits`, y la fila del CLI.
+       En ambos, justo antes de la fila del CLI, la fila **"Local copies"** → "Open local copies"
+       (`LocalCopiesRow`) cuando existe alguna copia de "Use only the notes from …"; y la fila del CLI
+       deshabilita "Connect the CLI too" (con la explicación debajo) mientras la elección de origen está
+       pendiente.
     5. **"Other providers"**: con Cloud activo y GitHub conectado, la fila GitHub Sync "Paused"
        (`GitHubPausedRow`: Mirror to GitHub con su ConfirmModal + Disconnect); con Cloud activo sin
        GitHub, la fila GitHub Sync "Not connected" (`GitHubNotConnectedRow`) → "View GitHub Sync" abre
