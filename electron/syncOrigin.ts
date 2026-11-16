@@ -27,11 +27,25 @@
 // it is adopted again ('stale-empty', which resets that remote's state). Every
 // adoption (withSyncOrigin) writes the record without it.
 //
+// `notesDir`: the notes dir the record describes — `path.resolve`d, no
+// trailing separator, written by every adoption / resolution. A record without
+// it belongs to the DEFAULT notes dir (defaultNotesDir: the one used without
+// NOTEFLOW_NOTES_DIR). settings.json is shared by every notes dir a process
+// can point at (NOTEFLOW_NOTES_DIR, and the CLI on Windows), so a record only
+// counts for its own dir (sameNotesDir): for any other dir it is neither used
+// nor rewritten — the decision is 'proceed' without adopting ('foreign-dir'),
+// nothing is reset and nothing is pending. A dir other than the default
+// without a record doesn't write one either: an empty override would
+// otherwise record the new remote and leave the real dir unprotected. So in
+// practice only the default dir has records. `stale` marks and the Cloud
+// seed (below) follow the same rule.
+//
 // Pure decision + pure helpers over a parsed settings object, plus thin file
 // wrappers (fs only, no Electron) — same pattern as syncState.ts. Tested in
 // tests/electron/syncOrigin.test.ts.
 
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { writeSettingsFile } from './settingsFile'
 import { listSyncedNoteDirs } from './localOnlyNotes'
@@ -41,10 +55,13 @@ export type SyncBackendKind = 'github' | 'cloud'
 /**
  * A remote identity a notes dir can be reconciled with. `stale` only appears on
  * a STORED identity (see the module comment), never on the one being synced.
+ * `notesDir`: on a stored identity, the dir its record describes (absent = the
+ * default dir); on the identity being adopted, the dir to record it for.
+ * Never part of the comparison (sameIdentity).
  */
 export type SyncIdentity =
-  | { kind: 'github'; owner: string; repo: string; repoId?: number; stale?: true }
-  | { kind: 'cloud'; userId: string; email?: string; stale?: true }
+  | { kind: 'github'; owner: string; repo: string; repoId?: number; stale?: true; notesDir?: string }
+  | { kind: 'cloud'; userId: string; email?: string; stale?: true; notesDir?: string }
 
 /** Stored JSON of one backend (see the module comment for the exact shape). */
 export interface GithubOriginRecord {
@@ -54,6 +71,8 @@ export interface GithubOriginRecord {
   repo: string
   /** The notes on disk were replaced by the other backend's (see the module comment). */
   stale?: true
+  /** The notes dir this record describes (absent = the default dir). */
+  notesDir?: string
 }
 export interface CloudOriginRecord {
   userId: string
@@ -61,6 +80,8 @@ export interface CloudOriginRecord {
   email?: string
   /** The notes on disk were replaced by the other backend's (see the module comment). */
   stale?: true
+  /** The notes dir this record describes (absent = the default dir). */
+  notesDir?: string
 }
 export interface SyncOriginRecord {
   github?: GithubOriginRecord
@@ -69,6 +90,57 @@ export interface SyncOriginRecord {
 
 /** Key of the origin record inside settings.json. */
 export const SYNC_ORIGIN_KEY = 'syncOrigin'
+
+// ── Notes dir of a record ─────────────────────────────────────────────────────
+
+/**
+ * The notes dir used when NOTEFLOW_NOTES_DIR is not set — main.ts' NOTES_DIR
+ * falls back to it, and a record without `notesDir` belongs to it. Linux
+ * follows XDG (~/.local/share, deliberately not $XDG_DATA_HOME: snap/flatpak
+ * runtimes point it inside their sandbox); everything else ~/noteflow-notes.
+ */
+export function defaultNotesDir(home: string = os.homedir(), platform: NodeJS.Platform | string = process.platform): string {
+  return platform === 'linux' ? path.join(home, '.local', 'share', 'noteflow-notes') : path.join(home, 'noteflow-notes')
+}
+
+/** `path.resolve`d, without trailing separators (a root keeps its own). */
+export function normalizeNotesDir(dir: string): string {
+  const resolved = path.resolve(dir)
+  const root = path.parse(resolved).root
+  let out = resolved
+  while (out.length > root.length && /[\\/]$/.test(out)) out = out.slice(0, -1)
+  return out
+}
+
+/**
+ * Same notes dir? Resolved, no trailing separators; case-insensitive on
+ * win32 and darwin (their default filesystems), exact elsewhere. No realpath:
+ * symlinks are not followed (two names of one folder count as two dirs).
+ */
+export function sameNotesDir(a: string, b: string, platform: NodeJS.Platform | string = process.platform): boolean {
+  const na = normalizeNotesDir(a)
+  const nb = normalizeNotesDir(b)
+  return platform === 'win32' || platform === 'darwin' ? na.toLowerCase() === nb.toLowerCase() : na === nb
+}
+
+/** The notes dir a process is syncing and the default one (see the module comment). */
+export interface NotesDirContext {
+  current: string
+  default: string
+  /** For tests; process.platform otherwise. */
+  platform?: NodeJS.Platform | string
+}
+
+/**
+ * Does the stored record of a backend apply to the current notes dir? With a
+ * record: when its `notesDir` (absent = the default dir) is the current one.
+ * Without one: only the default dir may start recording (see the module
+ * comment). 'foreign' = neither use nor write a record for this dir.
+ */
+export function originScope(stored: SyncIdentity | undefined, dirs: NotesDirContext): 'own' | 'foreign' {
+  const recordDir = stored ? stored.notesDir ?? dirs.default : dirs.default
+  return sameNotesDir(recordDir, dirs.current, dirs.platform) ? 'own' : 'foreign'
+}
 
 // ── Comparison ────────────────────────────────────────────────────────────────
 
@@ -88,16 +160,19 @@ export function sameIdentity(a: SyncIdentity, b: SyncIdentity): boolean {
 
 /** Whether every stored field already equals the new identity's (nothing to rewrite). */
 function identicalRecord(stored: SyncIdentity, next: SyncIdentity): boolean {
+  // A record written before `notesDir` existed gets it on its next adoption.
+  const sameDir = next.notesDir === undefined || stored.notesDir === next.notesDir
   if (stored.kind === 'github' && next.kind === 'github') {
     return (
       stored.owner === next.owner &&
       stored.repo === next.repo &&
-      (next.repoId === undefined || stored.repoId === next.repoId)
+      (next.repoId === undefined || stored.repoId === next.repoId) &&
+      sameDir
     )
   }
   if (stored.kind === 'cloud' && next.kind === 'cloud') {
     // The email is only a label, but refreshing it keeps the dialog's text current.
-    return stored.userId === next.userId && (next.email === undefined || stored.email === next.email)
+    return stored.userId === next.userId && (next.email === undefined || stored.email === next.email) && sameDir
   }
   return false
 }
@@ -147,12 +222,14 @@ export function readSyncOrigin(settings: Record<string, unknown>): SyncOriginRec
     out.github = { owner: gh.owner, repo: gh.repo }
     if (typeof gh.repoId === 'number' && Number.isFinite(gh.repoId)) out.github = { repoId: gh.repoId, ...out.github }
     if (gh.stale === true) out.github.stale = true
+    if (typeof gh.notesDir === 'string' && gh.notesDir) out.github.notesDir = gh.notesDir
   }
   const cl = raw.cloud
   if (isObject(cl) && typeof cl.userId === 'string' && cl.userId) {
     out.cloud = { userId: cl.userId }
     if (typeof cl.email === 'string' && cl.email) out.cloud.email = cl.email
     if (cl.stale === true) out.cloud.stale = true
+    if (typeof cl.notesDir === 'string' && cl.notesDir) out.cloud.notesDir = cl.notesDir
   }
   return out
 }
@@ -169,6 +246,7 @@ export function getStoredIdentity(settings: Record<string, unknown>, kind: SyncB
           repo: gh.repo,
           ...(gh.repoId !== undefined ? { repoId: gh.repoId } : {}),
           ...(gh.stale ? { stale: true as const } : {}),
+          ...(gh.notesDir ? { notesDir: gh.notesDir } : {}),
         }
       : undefined
   }
@@ -179,6 +257,7 @@ export function getStoredIdentity(settings: Record<string, unknown>, kind: SyncB
         userId: cl.userId,
         ...(cl.email ? { email: cl.email } : {}),
         ...(cl.stale ? { stale: true as const } : {}),
+        ...(cl.notesDir ? { notesDir: cl.notesDir } : {}),
       }
     : undefined
 }
@@ -192,33 +271,45 @@ export function getStoredIdentity(settings: Record<string, unknown>, kind: SyncB
  * would adopt B without being asked. `seeded: true` = the caller must persist
  * it (strictly) before anything overwrites cloudSync.userId. Nothing at all
  * (Cloud never used here) → undefined: the first connection adopts silently.
+ * With `dirs`, the seed only happens for the DEFAULT notes dir (the sync state
+ * in settings.json is that dir's), recorded as its `notesDir`; any other dir
+ * gets no seed.
  */
 export function resolveStoredCloudOrigin(
   settings: Record<string, unknown>,
+  dirs?: NotesDirContext,
 ): { identity: Extract<SyncIdentity, { kind: 'cloud' }>; seeded: boolean } | undefined {
   const stored = getStoredIdentity(settings, 'cloud')
   if (stored?.kind === 'cloud') return { identity: stored, seeded: false }
+  if (dirs && originScope(undefined, dirs) === 'foreign') return undefined
   const cloudSync = settings.cloudSync
   const owner = isObject(cloudSync) ? cloudSync.userId : undefined
-  return typeof owner === 'string' && owner ? { identity: { kind: 'cloud', userId: owner }, seeded: true } : undefined
+  if (typeof owner !== 'string' || !owner) return undefined
+  return {
+    identity: { kind: 'cloud', userId: owner, ...(dirs ? { notesDir: normalizeNotesDir(dirs.current) } : {}) },
+    seeded: true,
+  }
 }
 
 /**
  * A copy of `settings` with the backend's origin set to `id` — always WITHOUT
- * `stale` (adopting means the notes on disk now belong to that remote). Every
- * other key — including the other backend's origin and unknown keys written
- * by a newer client — is preserved. Does not mutate the input.
+ * `stale` (adopting means the notes on disk now belong to that remote), and
+ * with `id.notesDir` (normalized) as the record's dir when given. Every other
+ * key — including the other backend's origin and unknown keys written by a
+ * newer client — is preserved. Does not mutate the input.
  */
 export function withSyncOrigin(settings: Record<string, unknown>, id: SyncIdentity): Record<string, unknown> {
   const current = isObject(settings[SYNC_ORIGIN_KEY]) ? { ...(settings[SYNC_ORIGIN_KEY] as Record<string, unknown>) } : {}
+  const dir = id.notesDir ? { notesDir: normalizeNotesDir(id.notesDir) } : {}
   if (id.kind === 'github') {
     current.github = {
       ...(typeof id.repoId === 'number' ? { repoId: id.repoId } : {}),
       owner: id.owner,
       repo: id.repo,
+      ...dir,
     } satisfies GithubOriginRecord
   } else {
-    current.cloud = { userId: id.userId, ...(id.email ? { email: id.email } : {}) } satisfies CloudOriginRecord
+    current.cloud = { userId: id.userId, ...(id.email ? { email: id.email } : {}), ...dir } satisfies CloudOriginRecord
   }
   return { ...settings, [SYNC_ORIGIN_KEY]: current }
 }
@@ -227,12 +318,19 @@ export function withSyncOrigin(settings: Record<string, unknown>, id: SyncIdenti
  * A copy of `settings` with the backend's origin record marked `stale: true`
  * (the other backend's "use only the notes from …" just replaced the notes on
  * disk). No record for that backend → nothing is created (a backend never
- * reconciled here has nothing to protect). Every other key of the record and
- * of settings is preserved. Does not mutate the input.
+ * reconciled here has nothing to protect). With `dirs`, only a record of the
+ * same notes dir as the "replace" is marked (another dir's notes were not
+ * touched). Every other key of the record and of settings is preserved. Does
+ * not mutate the input.
  */
-export function withOriginMarkedStale(settings: Record<string, unknown>, kind: SyncBackendKind): Record<string, unknown> {
+export function withOriginMarkedStale(
+  settings: Record<string, unknown>,
+  kind: SyncBackendKind,
+  dirs?: NotesDirContext,
+): Record<string, unknown> {
   const origin = settings[SYNC_ORIGIN_KEY]
   if (!isObject(origin) || !isObject(origin[kind])) return settings
+  if (dirs && originScope(getStoredIdentity(settings, kind), dirs) === 'foreign') return settings
   return { ...settings, [SYNC_ORIGIN_KEY]: { ...origin, [kind]: { ...origin[kind], stale: true } } }
 }
 
@@ -242,19 +340,32 @@ export function withOriginMarkedStale(settings: Record<string, unknown>, kind: S
  * where the notes came from — Cloud: `cloudSync.userId` (resolveStoredCloudOrigin);
  * GitHub: the connected `githubSync` repo. Used right before marking the
  * other backend's origin stale, so an install from before this feature can't
- * dodge the mark (and later sync those notes without asking). Nothing to seed
- * → the same object. Does not mutate the input.
+ * dodge the mark (and later sync those notes without asking). With `dirs`,
+ * only for the default notes dir (whose state settings.json holds), recorded
+ * with it as `notesDir`. Nothing to seed → the same object. Does not mutate
+ * the input.
  */
-export function withSeededOrigin(settings: Record<string, unknown>, kind: SyncBackendKind): Record<string, unknown> {
+export function withSeededOrigin(
+  settings: Record<string, unknown>,
+  kind: SyncBackendKind,
+  dirs?: NotesDirContext,
+): Record<string, unknown> {
   if (getStoredIdentity(settings, kind)) return settings
+  if (dirs && originScope(undefined, dirs) === 'foreign') return settings
   if (kind === 'cloud') {
-    const seed = resolveStoredCloudOrigin(settings)
+    const seed = resolveStoredCloudOrigin(settings, dirs)
     return seed?.seeded ? withSyncOrigin(settings, seed.identity) : settings
   }
   const gh = settings.githubSync
   if (!isObject(gh) || typeof gh.owner !== 'string' || !gh.owner || typeof gh.repo !== 'string' || !gh.repo) return settings
   const repoId = typeof gh.repoId === 'number' && Number.isFinite(gh.repoId) ? gh.repoId : undefined
-  return withSyncOrigin(settings, { kind: 'github', owner: gh.owner, repo: gh.repo, ...(repoId !== undefined ? { repoId } : {}) })
+  return withSyncOrigin(settings, {
+    kind: 'github',
+    owner: gh.owner,
+    repo: gh.repo,
+    ...(repoId !== undefined ? { repoId } : {}),
+    ...(dirs ? { notesDir: dirs.current } : {}),
+  })
 }
 
 // ── Decision ──────────────────────────────────────────────────────────────────
@@ -275,8 +386,11 @@ export type OriginDecision =
        * - `stale-empty`: the stored record is stale (the other backend replaced
        *   the notes on disk) and no synced notes are left — adopted again; the
        *   caller resets the per-remote state exactly as for `changed-empty`.
+       * - `foreign-dir` (adopt: false): the stored record describes ANOTHER
+       *   notes dir — or there is none and this is not the default dir:
+       *   nothing is used, written nor reset for this dir (module comment).
        */
-      reason: 'no-origin' | 'same' | 'changed-empty' | 'stale-empty'
+      reason: 'no-origin' | 'same' | 'changed-empty' | 'stale-empty' | 'foreign-dir'
     }
   | {
       action: 'ask'
@@ -292,13 +406,18 @@ export type OriginDecision =
  * changed or the stored record is stale (the notes came from the other
  * backend). `hasLocalNotes` is lazy — the dir is only listed when it matters —
  * and must answer true when it can't tell (fail-closed).
+ * With `dirs`, a record of another notes dir (or none, outside the default
+ * dir) gives 'foreign-dir': proceed, adopt nothing, reset nothing. `next`
+ * should then carry `notesDir: dirs.current`, so every adoption records it.
  */
 export function decideOrigin(input: {
   stored: SyncIdentity | undefined
   next: SyncIdentity
   hasLocalNotes: () => boolean
+  dirs?: NotesDirContext
 }): OriginDecision {
   const { stored, next } = input
+  if (input.dirs && originScope(stored, input.dirs) === 'foreign') return { action: 'proceed', adopt: false, reason: 'foreign-dir' }
   if (!stored) return { action: 'proceed', adopt: true, reason: 'no-origin' }
   if (stored.stale) {
     if (!input.hasLocalNotes()) return { action: 'proceed', adopt: true, reason: 'stale-empty' }
@@ -360,10 +479,11 @@ export function writeSyncOriginFile(settingsPath: string, id: SyncIdentity): boo
 /**
  * Read-modify-write marking the backend's origin stale — seeded first when it
  * was only implicit (withSeededOrigin, withOriginMarkedStale); same refusals
- * as writeSyncOriginFile.
+ * as writeSyncOriginFile. With `dirs`, a record of another notes dir is left
+ * alone (and nothing is seeded outside the default dir).
  */
-export function markSyncOriginStaleFile(settingsPath: string, kind: SyncBackendKind): boolean {
-  return updateSettingsFileStrict(settingsPath, (current) => withOriginMarkedStale(withSeededOrigin(current, kind), kind))
+export function markSyncOriginStaleFile(settingsPath: string, kind: SyncBackendKind, dirs?: NotesDirContext): boolean {
+  return updateSettingsFileStrict(settingsPath, (current) => withOriginMarkedStale(withSeededOrigin(current, kind, dirs), kind, dirs))
 }
 
 function updateSettingsFileStrict(

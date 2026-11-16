@@ -509,15 +509,25 @@ function seedCloudOriginFromOwner() {
     const parsed = (0, syncOrigin_1.readSettingsStrict)(getSettingsPath());
     if (parsed === null)
         return false;
-    const stored = (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed);
+    const stored = (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed, notesDirContext());
     if (!stored?.seeded)
         return true;
     return (0, syncOrigin_1.writeSyncOriginFile)(getSettingsPath(), stored.identity);
 }
-/** The signed-in account as an origin identity (its email is only the dialog's label). */
+/**
+ * The notes dir this process syncs and the default one: a stored origin only
+ * counts for its own dir (syncOrigin.ts, `notesDir`) — and the seed from
+ * cloudSync.userId only happens for the default dir. main.ts sets the notes dir
+ * at boot (initCloudSync); until then the default is assumed.
+ */
+function notesDirContext() {
+    const def = (0, syncOrigin_1.defaultNotesDir)();
+    return { current: notesDirPath ?? def, default: def };
+}
+/** The signed-in account as an origin identity (its email is only the dialog's label), for the current notes dir. */
 function signedInCloudIdentity(userId) {
     const email = account.getAccountStatus().email;
-    return { kind: 'cloud', userId, ...(email ? { email } : {}) };
+    return { kind: 'cloud', userId, ...(email ? { email } : {}), notesDir: (0, syncOrigin_1.normalizeNotesDir)(notesDirContext().current) };
 }
 // Per-account fields of settings.cloudSync dropped when the dir's origin moves
 // to another account (or a stale one is adopted again). Same set as
@@ -588,8 +598,10 @@ function adoptCloudOrigin(id, opts) {
             next = { ...settings, cloudSync: fileSync };
         }
         next = (0, syncOrigin_1.withSyncOrigin)(next, id);
-        if (opts.markGithubStale)
-            next = (0, syncOrigin_1.withOriginMarkedStale)((0, syncOrigin_1.withSeededOrigin)(next, 'github'), 'github');
+        if (opts.markGithubStale) {
+            const dirs = notesDirContext();
+            next = (0, syncOrigin_1.withOriginMarkedStale)((0, syncOrigin_1.withSeededOrigin)(next, 'github', dirs), 'github', dirs);
+        }
         writeSettings(next);
         written = next;
     }
@@ -636,7 +648,7 @@ function deriveCloudOriginGate() {
     }
     else {
         const parsed = (0, syncOrigin_1.readSettingsStrict)(getSettingsPath());
-        const stored = parsed === null ? undefined : (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed);
+        const stored = parsed === null ? undefined : (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed, notesDirContext());
         if (parsed === null || (stored?.seeded && !(0, syncOrigin_1.writeSyncOriginFile)(getSettingsPath(), stored.identity))) {
             // Unreadable, or the implicit origin (an earlier build's sync state
             // owner) could not be recorded before deciding anything.
@@ -648,6 +660,7 @@ function deriveCloudOriginGate() {
                 stored: stored?.identity,
                 next: identity,
                 hasLocalNotes: () => (0, syncOrigin_1.hasSyncedLocalNotes)(notesDirPath),
+                dirs: notesDirContext(),
             });
             if (decision.action === 'ask') {
                 const prev = decision.previous.kind === 'cloud' ? decision.previous : null;
@@ -742,8 +755,10 @@ function resolveCloudOriginChoice(choice) {
     const parsed = (0, syncOrigin_1.readSettingsStrict)(getSettingsPath());
     if (parsed === null)
         return { ok: false, error: 'settings-unreadable' };
-    const stored = (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed);
-    const alreadyAdopted = !!stored && !stored.seeded && !stored.identity.stale && stored.identity.userId === userId;
+    const stored = (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed, notesDirContext());
+    // Another notes dir's record never resolves anything here (foreign-dir: no choice for this dir).
+    const ownRecord = !!stored && (0, syncOrigin_1.originScope)(stored.identity, notesDirContext()) === 'own';
+    const alreadyAdopted = ownRecord && !stored.seeded && !stored.identity.stale && stored.identity.userId === userId;
     if (originGate?.state !== 'ask' && !alreadyAdopted)
         return { ok: false, error: 'not-pending' };
     if (!alreadyAdopted) {
@@ -751,7 +766,7 @@ function resolveCloudOriginChoice(choice) {
             return { ok: false, error: 'settings-unwritable' };
         }
     }
-    else if (choice === 'replace' && !(0, syncOrigin_1.markSyncOriginStaleFile)(getSettingsPath(), 'github')) {
+    else if (choice === 'replace' && !(0, syncOrigin_1.markSyncOriginStaleFile)(getSettingsPath(), 'github', notesDirContext())) {
         return { ok: false, error: 'settings-unwritable' };
     }
     refreshCloudOriginGate(); // same identity now → clear (emits the status change)
@@ -760,7 +775,7 @@ function resolveCloudOriginChoice(choice) {
 /** The stored Cloud origin (archive label + manifest of 'replace'), seeded like the gate; null if none. */
 function getStoredCloudOriginIdentity() {
     const parsed = (0, syncOrigin_1.readSettingsStrict)(getSettingsPath());
-    return parsed ? (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed)?.identity ?? null : null;
+    return parsed ? (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed, notesDirContext())?.identity ?? null : null;
 }
 /**
  * Turns Cloud sync on. Requires a signed-in account; the key session may still

@@ -762,14 +762,13 @@ function stopCloudAutoSync() {
 // process.windowsStore only inside a packaged Windows Store app.
 const IS_STORE_BUILD = process.windowsStore === true;
 const OLD_NOTES_DIR = path_1.default.join(os_1.default.homedir(), 'scratch-notes');
-// On Linux, follow XDG Base Directory Specification using ~/.local/share as base.
-// We intentionally avoid process.env.XDG_DATA_HOME because snap/flatpak runtimes
-// override it to their sandboxed paths, which would make notes inaccessible outside
-// the dev environment.
+// The default location (syncOrigin.defaultNotesDir — the sync engines use it too:
+// an origin record without `notesDir` belongs to it). On Linux it follows the XDG
+// Base Directory Specification using ~/.local/share as base, deliberately not
+// process.env.XDG_DATA_HOME: snap/flatpak runtimes override it to their sandboxed
+// paths, which would make notes inaccessible outside the dev environment.
 // NOTEFLOW_NOTES_DIR overrides the location (testing / scripting; mirrors the CLI).
-const NOTES_DIR = process.env.NOTEFLOW_NOTES_DIR || (process.platform === 'linux'
-    ? path_1.default.join(os_1.default.homedir(), '.local', 'share', 'noteflow-notes')
-    : path_1.default.join(os_1.default.homedir(), 'noteflow-notes'));
+const NOTES_DIR = process.env.NOTEFLOW_NOTES_DIR || (0, syncOrigin_1.defaultNotesDir)();
 // Migrate old ~/scratch-notes → new NOTES_DIR
 if (fs_1.default.existsSync(OLD_NOTES_DIR) && !fs_1.default.existsSync(NOTES_DIR)) {
     fs_1.default.mkdirSync(path_1.default.dirname(NOTES_DIR), { recursive: true });

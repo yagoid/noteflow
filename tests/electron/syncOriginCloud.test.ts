@@ -16,7 +16,21 @@ import os from 'node:os'
 import path from 'node:path'
 import { serializeNoteFolder, type DiskNote } from '../../electron/noteFormat'
 import { archiveSyncedNotes } from '../../electron/notesArchive'
-import { identityArchiveLabel } from '../../electron/syncOrigin'
+import { defaultNotesDir, identityArchiveLabel, normalizeNotesDir } from '../../electron/syncOrigin'
+
+// The notes dir of every test is the DEFAULT one (an origin record only counts
+// for its own dir — syncOrigin.ts `notesDir`): the home dir points at the temp dir.
+const savedHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE }
+function pointHomeAt(dir: string) {
+  process.env.HOME = dir
+  process.env.USERPROFILE = dir
+}
+function restoreHome() {
+  for (const [k, v] of Object.entries(savedHome)) {
+    if (v === undefined) delete process.env[k]
+    else process.env[k] = v
+  }
+}
 import { generateDek, generateNoteKey, unwrapKey, decryptContent } from '../../electron/cloudCrypto'
 import { buildFileUpsertRow } from '../../electron/cloudSyncLogic'
 import { clearRestoreSurface, planAccountTransition } from '../../electron/accountTransition'
@@ -208,6 +222,8 @@ function files(id: string, opts: { localOnly?: boolean; body?: string } = {}): R
 
 let tmp: string
 let notesDir: string
+/** notesDir as the origin records store it. */
+let ND: string
 let cloud: typeof import('../../electron/cloudSync')
 let gh: typeof import('../../electron/githubSync')
 
@@ -289,7 +305,9 @@ async function cycle() {
 beforeEach(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'noteflow-origin-cloud-'))
   env.userData = path.join(tmp, 'userData')
-  notesDir = path.join(tmp, 'notes')
+  pointHomeAt(tmp)
+  notesDir = defaultNotesDir()
+  ND = normalizeNotesDir(notesDir)
   fs.mkdirSync(env.userData, { recursive: true })
   fs.mkdirSync(notesDir, { recursive: true })
   env.userId = null
@@ -313,6 +331,7 @@ afterEach(async () => {
   if (cloud) await settle()
   vi.useRealTimers()
   vi.restoreAllMocks()
+  restoreHome()
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -332,7 +351,7 @@ async function syncedWithAThenSignedOut() {
   expect(cloud.enableCloudSync().ok).toBe(true)
   const pull = await cycle()
   expect(pull.errors).toEqual([])
-  expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, email: A.email }) // first connection: adopted silently
+  expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, email: A.email, notesDir: ND }) // first connection: adopted silently
   expect(await serverDirs(A.id, A.dek)).toEqual(['a-note-2222', 'mine-1111'])
   expect(localDirs()).toEqual(['a-note-2222', 'mine-1111', 'welcome-9999'])
   // An offline edit: journaled for A, never uploaded.
@@ -383,7 +402,7 @@ describe('NoteFlow Cloud asks before mixing notes from another account', () => {
     expect(requests).toEqual([])
     expect(journalKeys()).toEqual([]) // not even journaled
     expect(cloud.getCloudSyncStatus().initialPullStatus).toBe('pending')
-    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, email: A.email })
+    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, email: A.email, notesDir: ND })
     expect(localDirs()).toEqual(['a-note-2222', 'mine-1111', 'welcome-9999'])
   })
 
@@ -392,7 +411,7 @@ describe('NoteFlow Cloud asks before mixing notes from another account', () => {
     await signInBWithAutoActivation()
     // What main.ts' sync:resolve-origin does for 'replace'.
     const previous = cloud.getStoredCloudOriginIdentity()!
-    expect(previous).toEqual({ kind: 'cloud', userId: A.id, email: A.email })
+    expect(previous).toEqual({ kind: 'cloud', userId: A.id, email: A.email, notesDir: ND })
     const archive = archiveSyncedNotes({
       notesDir,
       archiveRoot: path.join(env.userData, 'notes-archive'),
@@ -409,7 +428,7 @@ describe('NoteFlow Cloud asks before mixing notes from another account', () => {
     expect(localDirs()).toEqual(['b-note-3333', 'welcome-9999'])
     expect(path.basename(archive.archiveDir)).toMatch(/^cloud-aaaaaaaa-/)
     expect(fs.readdirSync(path.join(archive.archiveDir, 'notes')).sort()).toEqual(['a-note-2222', 'groups.json', 'mine-1111'])
-    expect(readSettings().syncOrigin.cloud).toEqual({ userId: B.id, email: B.email })
+    expect(readSettings().syncOrigin.cloud).toEqual({ userId: B.id, email: B.email, notesDir: ND })
     expect(readSettings().cloudSync.userId).toBe(B.id)
     expect(cloud.getCloudSyncStatus().initialPullStatus).toBe('ok')
   })
@@ -422,7 +441,7 @@ describe('NoteFlow Cloud asks before mixing notes from another account', () => {
     expect(pull.errors).toEqual([])
     expect(await serverDirs(B.id, B.dek)).toEqual(['a-note-2222', 'b-note-3333', 'mine-1111'])
     expect(localDirs()).toEqual(['a-note-2222', 'b-note-3333', 'mine-1111', 'welcome-9999'])
-    expect(readSettings().syncOrigin.cloud).toEqual({ userId: B.id, email: B.email })
+    expect(readSettings().syncOrigin.cloud).toEqual({ userId: B.id, email: B.email, notesDir: ND })
     // Nothing of A moved: its pending offline edit was dropped with its journal.
     expect(mutations.filter((m) => m.user === A.id)).toEqual([])
   })
@@ -459,7 +478,7 @@ describe('NoteFlow Cloud asks before mixing notes from another account', () => {
     expect(cloud.getCloudOriginChoice()).toBeNull()
     await cycle()
     expect(requests).toEqual([])
-    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, email: A.email })
+    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, email: A.email, notesDir: ND })
     expect(localDirs()).toEqual(['a-note-2222', 'mine-1111', 'welcome-9999'])
     // Turning Cloud on by hand asks again.
     expect(cloud.enableCloudSync().ok).toBe(true)
@@ -491,7 +510,7 @@ describe('NoteFlow Cloud asks before mixing notes from another account', () => {
     await seedServer(B.id, B.dek, 'b-note-3333', files('3333'))
     await boot()
     await signInBWithAutoActivation()
-    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id }) // recorded before the reset
+    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, notesDir: ND }) // recorded before the reset
     expect(readSettings().cloudSync.userId).toBe(B.id)
     expect(readSettings().cloudSync.pullSeq).toBeUndefined()
     expect(cloud.getCloudOriginChoice()).toEqual({ previous: { userId: A.id }, next: { userId: B.id, email: B.email } })
@@ -517,7 +536,7 @@ describe('NoteFlow Cloud asks before mixing notes from another account', () => {
     // Writable again: the next entry point records A, resets onto B and asks.
     env.failSettingsWrites = false
     expect((await cloud.pullNotes(notesDir)).incomplete).toBe(true)
-    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id })
+    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, notesDir: ND })
     expect(readSettings().cloudSync.userId).toBe(B.id)
     expect(cloud.getCloudOriginChoice()?.previous.userId).toBe(A.id)
     expect(requests).toEqual([])
@@ -528,7 +547,7 @@ describe('NoteFlow Cloud asks before mixing notes from another account', () => {
     for (const d of ['mine-1111', 'a-note-2222']) fs.rmSync(path.join(notesDir, d), { recursive: true })
     await signInBWithAutoActivation()
     expect(cloud.getCloudOriginChoice()).toBeNull()
-    expect(readSettings().syncOrigin.cloud).toEqual({ userId: B.id, email: B.email })
+    expect(readSettings().syncOrigin.cloud).toEqual({ userId: B.id, email: B.email, notesDir: ND })
     expect((await cycle()).errors).toEqual([])
     expect(localDirs()).toEqual(['b-note-3333', 'welcome-9999'])
     expect(mutations.filter((m) => m.user === B.id && m.kind !== 'upsert')).toEqual([])
@@ -538,15 +557,15 @@ describe('NoteFlow Cloud asks before mixing notes from another account', () => {
 describe('crossing with GitHub Sync (stale origins)', () => {
   it('Cloud "replace" with GitHub connected marks syncOrigin.github stale; reconnecting that repo with notes asks', async () => {
     await syncedWithAThenSignedOut()
-    writeSettings({ ...readSettings(), githubSync: githubConnection, syncOrigin: { ...readSettings().syncOrigin, github: { repoId: 101, owner: 'me', repo: 'notes-x' } } })
+    writeSettings({ ...readSettings(), githubSync: githubConnection, syncOrigin: { ...readSettings().syncOrigin, github: { repoId: 101, owner: 'me', repo: 'notes-x', notesDir: ND } } })
     await boot()
     await signInBWithAutoActivation()
     expect(cloud.getCloudOriginChoice()?.githubConnected).toBe(true)
     archiveSyncedNotes({ notesDir, archiveRoot: path.join(env.userData, 'notes-archive'), label: 'cloud-aaaaaaaa' })
     expect(cloud.resolveCloudOriginChoice('replace')).toEqual({ ok: true })
     expect(readSettings().syncOrigin).toEqual({
-      cloud: { userId: B.id, email: B.email },
-      github: { repoId: 101, owner: 'me', repo: 'notes-x', stale: true },
+      cloud: { userId: B.id, email: B.email, notesDir: ND },
+      github: { repoId: 101, owner: 'me', repo: 'notes-x', stale: true, notesDir: ND },
     })
     await cycle()
     expect(localDirs()).toEqual(['b-note-3333', 'welcome-9999'])
@@ -572,7 +591,7 @@ describe('crossing with GitHub Sync (stale origins)', () => {
     await seedServer(A.id, A.dek, 'a-note-2222', files('2222'))
     writeSettings({
       cloudSync: { enabled: false, userId: A.id, pullSeq: seqCounter, lastSync: '2026-11-01T00:00:00.000Z', basesBootstrapped: true },
-      syncOrigin: { cloud: { userId: A.id, email: A.email, stale: true }, github: { repoId: 101, owner: 'me', repo: 'notes-x' } },
+      syncOrigin: { cloud: { userId: A.id, email: A.email, stale: true, notesDir: ND }, github: { repoId: 101, owner: 'me', repo: 'notes-x', notesDir: ND } },
     })
     await boot()
     signIn(A)
@@ -590,7 +609,7 @@ describe('crossing with GitHub Sync (stale origins)', () => {
     // would otherwise skip A's notes, which are no longer on disk.
     fs.rmSync(path.join(notesDir, 'repo-note-4444'), { recursive: true })
     expect(cloud.refreshCloudOriginGate()).toBe('clear')
-    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, email: A.email })
+    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, email: A.email, notesDir: ND })
     expect(readSettings().cloudSync.pullSeq).toBeUndefined()
     expect((await cycle()).errors).toEqual([])
     expect(localDirs()).toEqual(['a-note-2222'])
@@ -638,6 +657,49 @@ describe('fail-closed', () => {
     expect(requests).toEqual([])
     env.failSettingsWrites = false
     expect(cloud.refreshCloudOriginGate()).toBe('clear')
-    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, email: A.email })
+    expect(readSettings().syncOrigin.cloud).toEqual({ userId: A.id, email: A.email, notesDir: ND })
+  })
+})
+
+describe('the origin belongs to one notes dir (NOTEFLOW_NOTES_DIR)', () => {
+  it('an empty override dir signed in with B records and resolves nothing; the real dir then asks', async () => {
+    await syncedWithAThenSignedOut()
+    const realDir = notesDir
+    const recorded = readSettings().syncOrigin
+    const override = path.join(tmp, 'override-notes')
+    fs.mkdirSync(override)
+    notesDir = override
+    await boot()
+    await signInBWithAutoActivation()
+    expect(cloud.getCloudOriginChoice()).toBeNull() // no question for this dir
+    expect(readSettings().syncOrigin).toEqual(recorded) // nothing written
+    expect((await cycle()).errors).toEqual([])
+    expect(localDirs()).toEqual(['b-note-3333'])
+    expect(mutations.filter((m) => m.user === B.id)).toEqual([]) // nothing of the real dir went up
+    expect(readSettings().syncOrigin).toEqual(recorded)
+    expect(cloud.resolveCloudOriginChoice('merge')).toEqual({ ok: false, error: 'not-pending' })
+
+    // Back to the real dir (B still signed in, Cloud on): its notes came from A — it asks.
+    notesDir = realDir
+    await boot()
+    expect(cloud.getCloudOriginChoice()).toEqual({ previous: { userId: A.id, email: A.email }, next: { userId: B.id, email: B.email } })
+    requests.length = 0
+    expect((await cycle()).incomplete).toBe(true)
+    expect(requests).toEqual([])
+    expect(localDirs()).toEqual(['a-note-2222', 'mine-1111', 'welcome-9999'])
+  })
+
+  it('the Cloud seed from cloudSync.userId only happens for the default dir', async () => {
+    writeSettings({ cloudSync: { enabled: true, userId: A.id, pullSeq: 3 } })
+    const override = path.join(tmp, 'override-notes')
+    fs.mkdirSync(override)
+    writeLocal('mine-1111', files('1111')) // the real dir has notes; the override is empty
+    notesDir = override
+    env.userId = A.id
+    env.email = A.email
+    env.dek = A.dek
+    await boot()
+    expect(cloud.refreshCloudOriginGate()).toBe('clear')
+    expect(readSettings().syncOrigin).toBeUndefined()
   })
 })

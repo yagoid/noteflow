@@ -898,10 +898,26 @@ function sameGate(a, b) {
         ca.next.owner === cb.next.owner && ca.next.repo === cb.next.repo &&
         ca.stale === cb.stale && ca.staleFrom?.email === cb.staleFrom?.email);
 }
+/**
+ * The notes dir this process syncs and the default one: a stored origin only
+ * counts for its own dir (syncOrigin.ts, `notesDir`). main.ts sets the notes
+ * dir before anything syncs; until then the default is assumed.
+ */
+function notesDirContext() {
+    const def = (0, syncOrigin_1.defaultNotesDir)();
+    return { current: notesDirPath ?? def, default: def };
+}
+/** The connected repo as an origin identity — recorded for the current notes dir when adopted. */
 function currentGithubIdentity(s) {
     if (!s.owner || !s.repo)
         return null;
-    return { kind: 'github', owner: s.owner, repo: s.repo, ...(typeof s.repoId === 'number' ? { repoId: s.repoId } : {}) };
+    return {
+        kind: 'github',
+        owner: s.owner,
+        repo: s.repo,
+        ...(typeof s.repoId === 'number' ? { repoId: s.repoId } : {}),
+        notesDir: (0, syncOrigin_1.normalizeNotesDir)(notesDirContext().current),
+    };
 }
 /**
  * Records the connected repo as this dir's GitHub origin. With `resetRemote`
@@ -957,7 +973,8 @@ function adoptGithubOrigin(id, resetRemote, opts = {}) {
             settings.githubSync = fileSync;
         }
         const adopted = (0, syncOrigin_1.withSyncOrigin)(settings, id);
-        writeSettings(opts.markCloudStale ? (0, syncOrigin_1.withOriginMarkedStale)((0, syncOrigin_1.withSeededOrigin)(adopted, 'cloud'), 'cloud') : adopted);
+        const dirs = notesDirContext();
+        writeSettings(opts.markCloudStale ? (0, syncOrigin_1.withOriginMarkedStale)((0, syncOrigin_1.withSeededOrigin)(adopted, 'cloud', dirs), 'cloud', dirs) : adopted);
     }
     catch (err) {
         console.error('[GitHubSync] could not record the notes dir origin (settings.json unwritable):', String(err));
@@ -991,6 +1008,10 @@ function adoptConnectedRepoUnderCloud() {
     if (parsed === null || parsed.cloudSync?.enabled !== true)
         return;
     const stored = (0, syncOrigin_1.getStoredIdentity)(parsed, 'github');
+    // Another notes dir's record is neither used nor rewritten; outside the
+    // default dir no record is started (syncOrigin.ts, `notesDir`).
+    if ((0, syncOrigin_1.originScope)(stored, notesDirContext()) === 'foreign')
+        return;
     const reset = !!stored && (stored.stale === true || !(0, syncOrigin_1.sameIdentity)(stored, identity));
     if (!adoptGithubOrigin(identity, reset)) {
         console.error('[GitHubSync] could not record the connected repo as the notes dir origin (NoteFlow Cloud enabled)');
@@ -1040,6 +1061,7 @@ function refreshOriginGate() {
                 stored: (0, syncOrigin_1.getStoredIdentity)(parsed, 'github'),
                 next: identity,
                 hasLocalNotes: () => (0, syncOrigin_1.hasSyncedLocalNotes)(notesDirPath),
+                dirs: notesDirContext(),
             });
             if (decision.action === 'ask') {
                 const prev = decision.previous.kind === 'github' ? decision.previous : null;
@@ -1131,7 +1153,9 @@ async function resolveOriginChoice(choice, notesDir) {
     const connectedIdentity = currentGithubIdentity(s);
     // A stale record of the same repo is NOT adopted (the notes on disk came
     // from Cloud): it must be adopted — with the reset — or the gate stays 'ask'.
-    const alreadyAdopted = !!stored && !stored.stale && !!connectedIdentity && (0, syncOrigin_1.sameIdentity)(stored, connectedIdentity);
+    // Another notes dir's record never resolves anything here (foreign-dir: no choice for this dir).
+    const ownRecord = (0, syncOrigin_1.originScope)(stored, notesDirContext()) === 'own';
+    const alreadyAdopted = !!stored && ownRecord && !stored.stale && !!connectedIdentity && (0, syncOrigin_1.sameIdentity)(stored, connectedIdentity);
     if (originGate?.state !== 'ask' && !alreadyAdopted)
         return { ok: false, error: 'not-pending' };
     if (!alreadyAdopted) {
@@ -1151,7 +1175,7 @@ async function resolveOriginChoice(choice, notesDir) {
             return { ok: false, error: 'settings-unwritable' };
         }
     }
-    else if (choice === 'replace' && !(0, syncOrigin_1.markSyncOriginStaleFile)(getSettingsPath(), 'cloud')) {
+    else if (choice === 'replace' && !(0, syncOrigin_1.markSyncOriginStaleFile)(getSettingsPath(), 'cloud', notesDirContext())) {
         // Adopted on its own meanwhile (the archive left no notes: 'changed-empty'),
         // but the Cloud origin must still stop claiming these notes.
         return { ok: false, error: 'settings-unwritable' };

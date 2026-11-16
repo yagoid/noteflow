@@ -21,6 +21,11 @@ import {
   withOriginMarkedStale,
   withSeededOrigin,
   resolveStoredCloudOrigin,
+  defaultNotesDir,
+  normalizeNotesDir,
+  sameNotesDir,
+  originScope,
+  type NotesDirContext,
   type SyncIdentity,
 } from '../../electron/syncOrigin'
 import { resetLocalOnlyMemory } from '../../electron/localOnlyNotes'
@@ -203,6 +208,75 @@ describe('settings helpers', () => {
     // A recorded origin wins over the sync state's owner (stale included).
     expect(resolveStoredCloudOrigin({ cloudSync: { userId: 'uB' }, syncOrigin: { cloud: { userId: 'uA', stale: true } } }))
       .toEqual({ identity: { kind: 'cloud', userId: 'uA', stale: true }, seeded: false })
+  })
+})
+
+describe('notes dir of a record (`notesDir`)', () => {
+  const home = path.resolve('/home/me')
+  const DEF = defaultNotesDir(home, 'win32')
+  const OTHER = path.resolve('/tmp/empty-notes')
+  const atDefault: NotesDirContext = { current: DEF, default: DEF, platform: 'win32' }
+  const atOther: NotesDirContext = { current: OTHER, default: DEF, platform: 'win32' }
+
+  it('defaultNotesDir: XDG on linux, ~/noteflow-notes elsewhere', () => {
+    expect(defaultNotesDir(home, 'linux')).toBe(path.join(home, '.local', 'share', 'noteflow-notes'))
+    expect(defaultNotesDir(home, 'darwin')).toBe(path.join(home, 'noteflow-notes'))
+    expect(defaultNotesDir(home, 'win32')).toBe(path.join(home, 'noteflow-notes'))
+  })
+  it('normalizeNotesDir resolves and drops trailing separators', () => {
+    expect(normalizeNotesDir(`${DEF}${path.sep}${path.sep}`)).toBe(DEF)
+    expect(normalizeNotesDir(path.join(DEF, 'x', '..'))).toBe(DEF)
+    expect(normalizeNotesDir(path.parse(DEF).root)).toBe(path.parse(DEF).root)
+  })
+  it('sameNotesDir: case-insensitive on win32 / darwin, exact on linux; trailing separators ignored', () => {
+    const upper = DEF.toUpperCase()
+    expect(sameNotesDir(DEF, `${upper}${path.sep}`, 'win32')).toBe(true)
+    expect(sameNotesDir(DEF, upper, 'darwin')).toBe(true)
+    expect(sameNotesDir(DEF, upper, 'linux')).toBe(DEF === upper)
+    expect(sameNotesDir(DEF, `${DEF}${path.sep}`, 'linux')).toBe(true)
+    expect(sameNotesDir(DEF, OTHER, 'win32')).toBe(false)
+  })
+  it('originScope: a record counts for its own dir only (absent notesDir = the default dir)', () => {
+    expect(originScope(A, atDefault)).toBe('own')
+    expect(originScope(A, atOther)).toBe('foreign')
+    expect(originScope({ ...A, notesDir: OTHER }, atOther)).toBe('own')
+    expect(originScope({ ...A, notesDir: OTHER }, atDefault)).toBe('foreign')
+    // No record: only the default dir may start one.
+    expect(originScope(undefined, atDefault)).toBe('own')
+    expect(originScope(undefined, atOther)).toBe('foreign')
+  })
+  it('decideOrigin: another dir\'s record (or none outside the default dir) → proceed, nothing adopted', () => {
+    const next: SyncIdentity = { ...B, notesDir: OTHER }
+    let listed = 0
+    const probe = () => { listed++; return true }
+    expect(decideOrigin({ stored: A, next, hasLocalNotes: probe, dirs: atOther })).toEqual({ action: 'proceed', adopt: false, reason: 'foreign-dir' })
+    expect(decideOrigin({ stored: { ...A, stale: true }, next, hasLocalNotes: probe, dirs: atOther }).reason).toBe('foreign-dir')
+    expect(decideOrigin({ stored: undefined, next, hasLocalNotes: probe, dirs: atOther })).toEqual({ action: 'proceed', adopt: false, reason: 'foreign-dir' })
+    expect(listed).toBe(0)
+    // Its own dir: as always (and the record gains its notesDir on adoption).
+    expect(decideOrigin({ stored: A, next: { ...B, notesDir: DEF }, hasLocalNotes: notes(true), dirs: atDefault }).action).toBe('ask')
+    expect(decideOrigin({ stored: undefined, next: { ...B, notesDir: DEF }, hasLocalNotes: notes(true), dirs: atDefault }).reason).toBe('no-origin')
+    expect(decideOrigin({ stored: A, next: { ...A, notesDir: DEF }, hasLocalNotes: notes(true), dirs: atDefault }))
+      .toEqual({ action: 'proceed', adopt: true, reason: 'same' })
+    expect(decideOrigin({ stored: { ...A, notesDir: DEF }, next: { ...A, notesDir: DEF }, hasLocalNotes: notes(true), dirs: atDefault }))
+      .toEqual({ action: 'proceed', adopt: false, reason: 'same' })
+  })
+  it('records read and write their notesDir (normalized)', () => {
+    const written = withSyncOrigin({}, { kind: 'cloud', userId: 'u1', notesDir: `${DEF}${path.sep}` })
+    expect(written.syncOrigin).toEqual({ cloud: { userId: 'u1', notesDir: DEF } })
+    expect(getStoredIdentity(written, 'cloud')).toEqual({ kind: 'cloud', userId: 'u1', notesDir: DEF })
+    expect(readSyncOrigin({ syncOrigin: { github: { owner: 'me', repo: 'r', notesDir: 7 } } })).toEqual({ github: { owner: 'me', repo: 'r' } })
+  })
+  it('stale marks and the Cloud seed follow the same rule', () => {
+    const settings = { cloudSync: { userId: 'uA' }, syncOrigin: { github: { owner: 'me', repo: 'r' } } }
+    // The GitHub record (default dir) is not marked by a "replace" in another dir.
+    expect(withOriginMarkedStale(settings, 'github', atOther)).toBe(settings)
+    expect(withOriginMarkedStale(settings, 'github', atDefault).syncOrigin).toEqual({ github: { owner: 'me', repo: 'r', stale: true } })
+    // The seed from cloudSync.userId only for the default dir.
+    expect(resolveStoredCloudOrigin(settings, atOther)).toBeUndefined()
+    expect(resolveStoredCloudOrigin(settings, atDefault)).toEqual({ identity: { kind: 'cloud', userId: 'uA', notesDir: DEF }, seeded: true })
+    expect(withSeededOrigin(settings, 'cloud', atOther)).toBe(settings)
+    expect(withSeededOrigin({ githubSync: { owner: 'me', repo: 'r' } }, 'github', atOther)).toEqual({ githubSync: { owner: 'me', repo: 'r' } })
   })
 })
 

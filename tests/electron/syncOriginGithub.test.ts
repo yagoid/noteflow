@@ -14,7 +14,21 @@ import os from 'node:os'
 import path from 'node:path'
 import { serializeNoteFolder, type DiskNote } from '../../electron/noteFormat'
 import { archiveSyncedNotes, NotesArchiveError } from '../../electron/notesArchive'
-import { identityArchiveLabel } from '../../electron/syncOrigin'
+import { defaultNotesDir, identityArchiveLabel, normalizeNotesDir } from '../../electron/syncOrigin'
+
+// The notes dir of every test is the DEFAULT one (an origin record only counts
+// for its own dir — syncOrigin.ts `notesDir`): the home dir points at the temp dir.
+const savedHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE }
+function pointHomeAt(dir: string) {
+  process.env.HOME = dir
+  process.env.USERPROFILE = dir
+}
+function restoreHome() {
+  for (const [k, v] of Object.entries(savedHome)) {
+    if (v === undefined) delete process.env[k]
+    else process.env[k] = v
+  }
+}
 
 // ── Simulated GitHub (several repos of user "me") ─────────────────────────────
 
@@ -137,6 +151,8 @@ function files(id: string, opts: { localOnly?: boolean } = {}): Record<string, s
 
 let tmp: string
 let notesDir: string
+/** notesDir as the origin records store it. */
+let ND: string
 let gh: typeof import('../../electron/githubSync')
 
 const flush = async () => {
@@ -186,7 +202,9 @@ async function freshModule() {
 beforeEach(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'noteflow-origin-gh-'))
   env.userData = path.join(tmp, 'userData')
-  notesDir = path.join(tmp, 'notes')
+  pointHomeAt(tmp)
+  notesDir = defaultNotesDir()
+  ND = normalizeNotesDir(notesDir)
   fs.mkdirSync(env.userData, { recursive: true })
   fs.mkdirSync(notesDir, { recursive: true })
   env.failSettingsWrites = false
@@ -207,6 +225,7 @@ afterEach(async () => {
   await settle()
   await settle()
   vi.useRealTimers()
+  restoreHome()
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -224,7 +243,7 @@ async function connectedToAThenDisconnected() {
   const res = await connect('notes-a')
   expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-a' })
   await settle()
-  expect(readSettings().syncOrigin).toEqual({ github: { repoId: 101, owner: 'me', repo: 'notes-a' } })
+  expect(readSettings().syncOrigin).toEqual({ github: { repoId: 101, owner: 'me', repo: 'notes-a', notesDir: ND } })
   expect(remoteDirs('notes-a')).toEqual(['a-note-2222', 'mine-1111'])
   expect(localDirs()).toEqual(['a-note-2222', 'mine-1111', 'welcome-9999'])
   gh.disconnectGitHub()
@@ -269,7 +288,7 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     expect(localDirs()).toEqual(['b-note-3333', 'welcome-9999'])
     expect(path.basename(archive.archiveDir)).toMatch(/^github-me-notes-a-/)
     expect(fs.readdirSync(path.join(archive.archiveDir, 'notes')).sort()).toEqual(['a-note-2222', 'groups.json', 'mine-1111'])
-    expect(readSettings().syncOrigin).toEqual({ github: { repoId: 202, owner: 'me', repo: 'notes-b' } })
+    expect(readSettings().syncOrigin).toEqual({ github: { repoId: 202, owner: 'me', repo: 'notes-b', notesDir: ND } })
     expect(gh.getSyncStatus().originChoice).toBeUndefined()
     expect(gh.getSyncStatus().initialPullStatus).toBe('ok')
   })
@@ -283,7 +302,7 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     expect(remoteDirs('notes-b')).toEqual(['a-note-2222', 'b-note-3333', 'mine-1111'])
     expect(localDirs()).toEqual(['a-note-2222', 'b-note-3333', 'mine-1111', 'welcome-9999'])
     expect(mutations.some((m) => m.includes('welcome-9999'))).toBe(false)
-    expect(readSettings().syncOrigin.github).toEqual({ repoId: 202, owner: 'me', repo: 'notes-b' })
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 202, owner: 'me', repo: 'notes-b', notesDir: ND })
   })
 
   it('"cancel" (disconnect) leaves notes and origin untouched', async () => {
@@ -294,7 +313,7 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     expect(mutations).toEqual([])
     expect(localDirs()).toEqual(['a-note-2222', 'mine-1111', 'welcome-9999'])
     expect(readSettings().githubSync).toBeUndefined()
-    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a' })
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a', notesDir: ND })
     expect(gh.getSyncStatus().originChoice).toBeUndefined()
   })
 
@@ -378,7 +397,7 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     repos.set('notes-renamed', a)
     const res = await connect('notes-renamed')
     expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-renamed' })
-    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-renamed' })
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-renamed', notesDir: ND })
   })
 
   it('another repo with no synced notes on disk: no question, the origin moves and the old state is reset', async () => {
@@ -403,13 +422,13 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     await freshModule()
     gh.loadSyncSettings()
     expect(gh.refreshOriginGate()).toBe('clear')
-    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a' })
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a', notesDir: ND })
     gh.disconnectGitHub()
     // The user connects B from the app (Device Flow): B becomes the origin.
     const res = await connect('notes-b')
     expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-b' })
     expect(gh.getSyncStatus().originChoice).toBeUndefined()
-    expect(readSettings().syncOrigin.github).toEqual({ repoId: 202, owner: 'me', repo: 'notes-b' })
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 202, owner: 'me', repo: 'notes-b', notesDir: ND })
   })
 
   it('a stale origin (Cloud replaced the notes) asks even for the same repo, labelled with the Cloud account', async () => {
@@ -418,7 +437,7 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     const s = readSettings()
     writeSettings({
       ...s,
-      syncOrigin: { github: { ...s.syncOrigin.github, stale: true }, cloud: { userId: 'u-b', email: 'b@x.io' } },
+      syncOrigin: { github: { ...s.syncOrigin.github, stale: true }, cloud: { userId: 'u-b', email: 'b@x.io', notesDir: ND } },
     })
     const res = await connect('notes-a')
     expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-a', pendingOriginChoice: true })
@@ -435,8 +454,8 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     const merged = await gh.resolveOriginChoice('merge', notesDir)
     expect(merged.ok).toBe(true)
     await settle()
-    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a' })
-    expect(readSettings().syncOrigin.cloud).toEqual({ userId: 'u-b', email: 'b@x.io' }) // merge marks nothing
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a', notesDir: ND })
+    expect(readSettings().syncOrigin.cloud).toEqual({ userId: 'u-b', email: 'b@x.io', notesDir: ND }) // merge marks nothing
     expect(gh.getOriginChoice()).toBeNull()
   })
 
@@ -447,19 +466,19 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     writeSettings({ ...s, syncOrigin: { github: { ...s.syncOrigin.github, stale: true } } })
     const res = await connect('notes-a')
     expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-a' })
-    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a' })
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a', notesDir: ND })
   })
 
   it('"replace" marks the NoteFlow Cloud origin stale in the same write; "merge" does not', async () => {
     await connectedToAThenDisconnected()
-    writeSettings({ ...readSettings(), syncOrigin: { ...readSettings().syncOrigin, cloud: { userId: 'u-a', email: 'a@x.io' } } })
+    writeSettings({ ...readSettings(), syncOrigin: { ...readSettings().syncOrigin, cloud: { userId: 'u-a', email: 'a@x.io', notesDir: ND } } })
     await connect('notes-b')
     archiveSyncedNotes({ notesDir, archiveRoot: path.join(env.userData, 'notes-archive'), label: 'github-me-notes-a' })
     expect((await gh.resolveOriginChoice('replace', notesDir)).ok).toBe(true)
     await settle()
     expect(readSettings().syncOrigin).toEqual({
-      github: { repoId: 202, owner: 'me', repo: 'notes-b' },
-      cloud: { userId: 'u-a', email: 'a@x.io', stale: true },
+      github: { repoId: 202, owner: 'me', repo: 'notes-b', notesDir: ND },
+      cloud: { userId: 'u-a', email: 'a@x.io', stale: true, notesDir: ND },
     })
   })
 
@@ -469,7 +488,7 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     writeSettings({ ...s, cloudSync: { enabled: true }, syncOrigin: { github: { ...s.syncOrigin.github, stale: true } } })
     const res = await connect('notes-a')
     expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-a' })
-    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a' })
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 101, owner: 'me', repo: 'notes-a', notesDir: ND })
   })
 
   it('an origin that cannot be recorded keeps the gate closed (changed-empty and no-origin), with no requests', async () => {
@@ -493,7 +512,7 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     const pull = await gh.pullNotes(notesDir)
     expect(pull.errors).toEqual([])
     expect(treeGets).toEqual(['notes-b'])
-    expect(readSettings().syncOrigin.github).toEqual({ repoId: 202, owner: 'me', repo: 'notes-b' })
+    expect(readSettings().syncOrigin.github).toEqual({ repoId: 202, owner: 'me', repo: 'notes-b', notesDir: ND })
     expect(readSettings().githubSync.lastSync).not.toBe('2026-11-01T00:00:00.000Z') // B's stale lastSync was dropped
     expect(localDirs()).toEqual(['b-note-3333', 'welcome-9999'])
 
@@ -578,5 +597,39 @@ describe('GitHub Sync asks before mixing notes from another repo', () => {
     expect((await gh.pullNotes(notesDir)).incomplete).toBe(true)
     expect(treeGets).toEqual([])
     expect(gh.getSyncStatus().originChoice).toBeUndefined()
+  })
+})
+
+describe('the origin belongs to one notes dir (NOTEFLOW_NOTES_DIR)', () => {
+  it('an empty override dir connected to B records and resolves nothing; the real dir then asks', async () => {
+    await connectedToAThenDisconnected()
+    const realDir = notesDir
+    const recorded = readSettings().syncOrigin
+    // Another process / run with NOTEFLOW_NOTES_DIR pointing at an empty folder.
+    const override = path.join(tmp, 'override-notes')
+    fs.mkdirSync(override)
+    notesDir = override
+    await freshModule()
+    gh.loadSyncSettings()
+    const res = await connect('notes-b')
+    expect(res).toEqual({ ok: true, owner: 'me', repo: 'notes-b' }) // no question for this dir
+    await settle()
+    expect(readSettings().syncOrigin).toEqual(recorded) // nothing written (nor reset into B)
+    expect(localDirs()).toEqual(['b-note-3333'])
+    expect(remoteDirs('notes-b')).toEqual(['b-note-3333']) // nothing of the real dir went up
+    expect(await gh.resolveOriginChoice('merge', override)).toEqual({ ok: false, error: 'not-pending' })
+
+    // Back to the real dir (still connected to B): its notes came from A — it asks.
+    notesDir = realDir
+    await freshModule()
+    gh.loadSyncSettings()
+    expect(gh.getOriginChoice()).toEqual({ previous: { owner: 'me', repo: 'notes-a' }, next: { owner: 'me', repo: 'notes-b' } })
+    mutations.length = 0
+    treeGets.length = 0
+    expect((await gh.pullNotes(notesDir)).incomplete).toBe(true)
+    await settle()
+    expect(mutations).toEqual([])
+    expect(treeGets).toEqual([])
+    expect(localDirs()).toEqual(['a-note-2222', 'mine-1111', 'welcome-9999'])
   })
 })

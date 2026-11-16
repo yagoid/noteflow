@@ -57,7 +57,7 @@ import * as importers from './importers'
 import { migrateNotesDirToV2 } from './migration'
 import { primeLocalOnlyDirs, listSyncedNoteDirs } from './localOnlyNotes'
 import * as notesArchive from './notesArchive'
-import { identityArchiveLabel, type SyncIdentity } from './syncOrigin'
+import { defaultNotesDir, identityArchiveLabel, type SyncIdentity } from './syncOrigin'
 import { planWelcomeNote, isSyncConfigured, buildWelcomeNote, WELCOME_SEEDED_KEY } from './welcomeNote'
 import { shouldRunExpiryCheck, type ExpiryTrigger, type SyncBackendId } from './tempNoteExpiry'
 import {
@@ -834,14 +834,13 @@ const IS_STORE_BUILD = process.windowsStore === true
 
 const OLD_NOTES_DIR = path.join(os.homedir(), 'scratch-notes')
 
-// On Linux, follow XDG Base Directory Specification using ~/.local/share as base.
-// We intentionally avoid process.env.XDG_DATA_HOME because snap/flatpak runtimes
-// override it to their sandboxed paths, which would make notes inaccessible outside
-// the dev environment.
+// The default location (syncOrigin.defaultNotesDir — the sync engines use it too:
+// an origin record without `notesDir` belongs to it). On Linux it follows the XDG
+// Base Directory Specification using ~/.local/share as base, deliberately not
+// process.env.XDG_DATA_HOME: snap/flatpak runtimes override it to their sandboxed
+// paths, which would make notes inaccessible outside the dev environment.
 // NOTEFLOW_NOTES_DIR overrides the location (testing / scripting; mirrors the CLI).
-const NOTES_DIR = process.env.NOTEFLOW_NOTES_DIR || (process.platform === 'linux'
-  ? path.join(os.homedir(), '.local', 'share', 'noteflow-notes')
-  : path.join(os.homedir(), 'noteflow-notes'))
+const NOTES_DIR = process.env.NOTEFLOW_NOTES_DIR || defaultNotesDir()
 
 // Migrate old ~/scratch-notes → new NOTES_DIR
 if (fs.existsSync(OLD_NOTES_DIR) && !fs.existsSync(NOTES_DIR)) {
