@@ -52,8 +52,10 @@ const archivedEvent = (notes: Note[]): NotesArchivedEvent => ({
 
 /** Every call the store makes to main, by name. */
 let calls: string[]
-/** What the notes dir holds (fs:read-all-notes). */
+/** What the notes dir holds (fs:read-all-notes, fs:read-note-dir). */
 let disk: Note[]
+/** Set by a test to answer fs:read-all-notes itself (a read still in flight). */
+let readAllNotes: (() => Promise<NoteDirRecord[]>) | null
 let archivedListener: ((event: NotesArchivedEvent) => void) | null
 
 // Calls that would change the disk or a remote: none may happen here.
@@ -62,9 +64,14 @@ const MUTATING = ['writeNote', 'deleteNote', 'linkedWrite', 'linkedUpdateMeta', 
 function installBridge() {
   const known: Record<string, (...args: unknown[]) => unknown> = {
     getNotesDir: async () => NOTES_DIR,
-    readAllNotes: async () => disk.map(record),
+    readAllNotes: () => (readAllNotes ? readAllNotes() : Promise.resolve(disk.map(record))),
+    readNoteDir: async (dir) => {
+      const note = disk.find((n) => noteDirname(n.id, n.title) === dir)
+      return note ? record(note) : null
+    },
     getUiState: async () => ({}),
     linkedList: async () => [linkedWire],
+    linkedGet: async (idOrPath) => (idOrPath === linkedWire.id || idOrPath === linkedWire.path ? linkedWire : null),
     scheduleAlarms: () => undefined,
     setUiState: async () => undefined,
     onNotesArchived: (cb) => {
@@ -84,11 +91,14 @@ function installBridge() {
 
 const state = () => useNotesStore.getState()
 const ids = () => state().notes.map((n) => n.id)
+/** Lets the store's fire-and-forget work (the per-note re-syncs after a reload) finish. */
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   calls = []
   disk = []
+  readAllNotes = null
   archivedListener = null
   installBridge()
   setWindowRole('main')
@@ -166,6 +176,31 @@ describe('notesStore.removeArchivedNotes', () => {
     await state().loadNotes()
     expect(ids()).toEqual(['lnk:abc'])
     expect(state().activeNoteId).toBe('lnk:abc')
+    expect(calls.filter((c) => MUTATING.includes(c))).toEqual([])
+  })
+
+  it('a reload already in flight with the old listing does not bring them back', async () => {
+    // The reload read the notes dir BEFORE the archive moved the notes out; its answer
+    // reaches the store after `notes-archived` did.
+    let answer!: (records: NoteDirRecord[]) => void
+    readAllNotes = () => new Promise((resolve) => { answer = resolve })
+    const loading = state().loadNotes()
+    const listedBeforeArchive = [...synced, welcome].map(record)
+
+    disk = [welcome] // what the archive leaves in the notes dir
+    state().removeArchivedNotes(archivedEvent(synced))
+    expect(ids()).toEqual(['w1', 'lnk:abc'])
+
+    answer(listedBeforeArchive)
+    await loading
+    expect(ids()).toEqual(['w1', 'lnk:abc'])
+
+    // Each note dropped meanwhile is re-read on its own: its folder is gone, it stays out.
+    await settle()
+    expect(calls.filter((c) => c === 'readNoteDir')).toHaveLength(synced.length)
+    expect(ids()).toEqual(['w1', 'lnk:abc'])
+    expect(state().openPanes).toEqual([{ paneId: 'p1', noteId: 'w1' }])
+    expect(state().activeNoteId).toBe('w1')
     expect(calls.filter((c) => MUTATING.includes(c))).toEqual([])
   })
 
