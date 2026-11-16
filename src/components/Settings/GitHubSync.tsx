@@ -4,7 +4,9 @@ import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { githubCommitsUrl, githubRepoUrl, repoSlug } from '../../lib/syncOverview'
+import { originChoiceLabels } from '../../lib/originChoiceLabels'
 import { ConfirmModal } from '../ConfirmModal'
+import { useActiveSyncStatus } from '../useActiveSyncStatus'
 import { SyncOverview } from './SyncOverview'
 import {
   SettingsRow,
@@ -323,14 +325,21 @@ export function GitHubOverview({
 // GitHub Sync while NoteFlow Cloud owns the sync loop — a row of the Cloud
 // overview's "Other providers": paused, config kept, with the write-only
 // "Mirror to GitHub" (confirmed: it overwrites the repo) and Disconnect.
-// Rendered only while GitHub is connected.
+// Rendered only while GitHub is connected. While Cloud's origin choice is
+// pending main refuses the mirror (the notes on disk may be another account's),
+// so the button is off — same criterion and text as the overview's "Sync now".
 export function GitHubPausedRow({ onConnectedChange }: { onConnectedChange: (connected: boolean) => void }) {
   const t = useT()
   const o = t.settings.sync.overview
   const gh = useGitHubSync(onConnectedChange)
+  const live = useActiveSyncStatus()
   const repo = repoSlug(gh.status?.owner, gh.status?.repo) ?? ''
   const busy = gh.busy !== 'idle'
   const pausedError = gh.error ?? gh.status?.error
+  const pendingChoice = live.status?.backend === 'cloud' ? live.status.originChoice : undefined
+  const originPending = pendingChoice
+    ? tf(t.settings.sync.originPending, originChoiceLabels(t.originChoice, 'cloud', pendingChoice))
+    : null
 
   return (
     <>
@@ -343,7 +352,8 @@ export function GitHubPausedRow({ onConnectedChange }: { onConnectedChange: (con
           <>
             <button
               onClick={() => gh.setConfirmMirror(true)}
-              disabled={busy}
+              disabled={busy || !!originPending}
+              title={originPending ?? undefined}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono whitespace-nowrap ${settingsButtonClass}`}
             >
               {gh.busy === 'mirroring' ? <Loader size={11} className="animate-spin" /> : <UploadCloud size={11} />}

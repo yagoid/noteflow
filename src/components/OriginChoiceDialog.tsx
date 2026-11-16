@@ -178,7 +178,7 @@ export function OriginChoiceDialog({
           </div>
 
           {error && (
-            <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-[11px] font-mono text-red-400 leading-relaxed">
+            <div className="px-3 py-2 bg-red/10 border border-red/30 rounded-lg text-[11px] font-mono text-red leading-relaxed">
               {error}
             </div>
           )}
