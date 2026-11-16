@@ -689,17 +689,39 @@ describe('the origin belongs to one notes dir (NOTEFLOW_NOTES_DIR)', () => {
     expect(localDirs()).toEqual(['a-note-2222', 'mine-1111', 'welcome-9999'])
   })
 
-  it('the Cloud seed from cloudSync.userId only happens for the default dir', async () => {
-    writeSettings({ cloudSync: { enabled: true, userId: A.id, pullSeq: 3 } })
+  it('evaluating the gate in an override never seeds; a reset of the owner there still records it for the default dir', async () => {
+    // An install from before the gate: A's sync state, no syncOrigin. The real
+    // (default) dir has A's notes; the override is empty.
+    writeSettings({ cloudSync: { enabled: true, userId: A.id, pullSeq: 3, lastSync: '2026-11-01T00:00:00.000Z' } })
+    await seedServer(B.id, B.dek, 'b-note-3333', files('3333'))
+    writeLocal('mine-1111', files('1111'))
+    const realDir = notesDir
     const override = path.join(tmp, 'override-notes')
     fs.mkdirSync(override)
-    writeLocal('mine-1111', files('1111')) // the real dir has notes; the override is empty
     notesDir = override
     env.userId = A.id
     env.email = A.email
     env.dek = A.dek
     await boot()
     expect(cloud.refreshCloudOriginGate()).toBe('clear')
-    expect(readSettings().syncOrigin).toBeUndefined()
+    expect(readSettings().syncOrigin).toBeUndefined() // the gate in an override writes nothing
+
+    // B signs in while the override runs: the reset of A's state records A
+    // first — for the DEFAULT dir (foreign here, so it changes nothing in the override).
+    signOut()
+    signIn(B)
+    expect(readSettings().syncOrigin).toEqual({ cloud: { userId: A.id, notesDir: ND } })
+    expect(readSettings().cloudSync.userId).toBe(B.id)
+    expect(cloud.enableCloudSync().ok).toBe(true)
+    expect(cloud.getCloudOriginChoice()).toBeNull()
+
+    // Back in the default dir (B signed in, Cloud on), with A's notes: it asks, nothing goes up.
+    notesDir = realDir
+    await boot()
+    expect(cloud.getCloudOriginChoice()).toEqual({ previous: { userId: A.id }, next: { userId: B.id, email: B.email } })
+    requests.length = 0
+    expect((await cycle()).incomplete).toBe(true)
+    expect(requests).toEqual([])
+    expect(mutations.filter((m) => m.user === B.id)).toEqual([])
   })
 })

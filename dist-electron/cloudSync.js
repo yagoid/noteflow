@@ -501,15 +501,21 @@ function sameCloudGate(a, b) {
 }
 /**
  * Records the sync state's owner (cloudSync.userId) as the Cloud origin when
- * no origin was recorded yet — see resolveStoredCloudOrigin. Strict: false
- * when settings.json can't be read or written (callers must not go on with
- * anything that loses the previous owner). Nothing to seed → true.
+ * no origin was recorded yet — see resolveStoredCloudOrigin — right before a
+ * reset overwrites that owner. Always for the DEFAULT notes dir (the one whose
+ * state settings.json holds), whatever dir this process syncs: in an override
+ * (NOTEFLOW_NOTES_DIR) that record is foreign and ignored, but back in the
+ * default dir it still protects the notes that came from the owner that left
+ * (worst case one question too many, never an upload). Strict: false when
+ * settings.json can't be read or written (callers must not go on with anything
+ * that loses the previous owner). Nothing to seed → true.
  */
 function seedCloudOriginFromOwner() {
     const parsed = (0, syncOrigin_1.readSettingsStrict)(getSettingsPath());
     if (parsed === null)
         return false;
-    const stored = (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed, notesDirContext());
+    const def = (0, syncOrigin_1.defaultNotesDir)();
+    const stored = (0, syncOrigin_1.resolveStoredCloudOrigin)(parsed, { current: def, default: def });
     if (!stored?.seeded)
         return true;
     return (0, syncOrigin_1.writeSyncOriginFile)(getSettingsPath(), stored.identity);
@@ -793,6 +799,11 @@ function enableCloudSync() {
     // not reset it (the previous owner could not be recorded as the origin), the
     // owner stays and the origin gate blocks until it can.
     patchSettings(userId && !ownerMismatch() ? { enabled: true, userId } : { enabled: true });
+    // The notes dir may come from another account (or GitHub replaced them):
+    // with a pending choice nothing below — pull, catch-up, drain — moves.
+    // Derived BEFORE anything emits: a status broadcast with the gate still
+    // cached as 'clear' would start Realtime for an instant (syncCloudRealtimeState).
+    refreshCloudOriginGate();
     // GitHub Sync is now paused (syncProvider gives Cloud priority) and its
     // `lastSync` freezes while notes keep arriving here, so its pull's
     // local-deletion rule ("absent from remote + older than lastSync ⇒ deleted
@@ -804,9 +815,6 @@ function enableCloudSync() {
     githubSync.refreshOriginGate();
     syncError = undefined;
     setInitialPullStatus('pending');
-    // The notes dir may come from another account (or GitHub replaced them):
-    // with a pending choice nothing below — pull, catch-up, drain — moves.
-    refreshCloudOriginGate();
     statusListener?.();
     return { ok: true };
 }
