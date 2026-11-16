@@ -17,6 +17,7 @@ import path from 'node:path'
 import { serializeNoteFolder, type DiskNote } from '../../electron/noteFormat'
 import { archiveSyncedNotes } from '../../electron/notesArchive'
 import { defaultNotesDir, identityArchiveLabel, normalizeNotesDir } from '../../electron/syncOrigin'
+import { assertInsideTmp } from '../helpers/tmpGuard'
 
 // The notes dir of every test is the DEFAULT one (an origin record only counts
 // for its own dir — syncOrigin.ts `notesDir`): the home dir points at the temp dir.
@@ -306,7 +307,12 @@ beforeEach(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'noteflow-origin-cloud-'))
   env.userData = path.join(tmp, 'userData')
   pointHomeAt(tmp)
-  notesDir = defaultNotesDir()
+  // The dir these tests write, archive and delete from is derived from the temp
+  // dir EXPLICITLY, never through os.homedir(). The engines do resolve their
+  // default dir through it: if HOME / USERPROFILE stopped reaching them, fail
+  // here, before anything is touched.
+  notesDir = assertInsideTmp(defaultNotesDir(tmp), tmp)
+  expect(defaultNotesDir()).toBe(notesDir)
   ND = normalizeNotesDir(notesDir)
   fs.mkdirSync(env.userData, { recursive: true })
   fs.mkdirSync(notesDir, { recursive: true })

@@ -16,6 +16,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { gitBlobSha } from '../../electron/mirrorPlan'
+import { assertInsideTmp } from '../helpers/tmpGuard'
 
 const require = createRequire(import.meta.url)
 const CLI_PATH = require.resolve('../../cli/noteflow.js')
@@ -167,7 +168,9 @@ beforeEach(() => {
   // os.homedir() is mocked (not HOME/USERPROFILE: afterEach swaps process.env
   // for a plain object, whose writes no longer reach the real environment).
   vi.spyOn(nodeOs, 'homedir').mockReturnValue(homeDir)
-  notesDir = defaultNotesDir()
+  // Derived from the throwaway home explicitly (never through os.homedir()):
+  // the commands under test write, archive and delete notes in it.
+  notesDir = assertInsideTmp(defaultNotesDir(), tmp)
   configDir = path.join(tmp, 'config')
   fs.mkdirSync(path.join(configDir, 'noteflow'), { recursive: true })
   fs.mkdirSync(notesDir, { recursive: true })

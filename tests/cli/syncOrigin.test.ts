@@ -21,6 +21,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import * as app from '../../electron/syncOrigin'
+import { assertInsideTmp } from '../helpers/tmpGuard'
 
 const require = createRequire(import.meta.url)
 const CLI_PATH = require.resolve('../../cli/noteflow.js')
@@ -483,17 +484,23 @@ describe("the gates over one settings.json: the CLI's state = the app's decision
    */
   function boot(where: 'default' | 'override'): string {
     home = path.join(tmp, 'home')
-    // os.homedir() is mocked (not HOME / USERPROFILE): the app's module and the
-    // CLI both read it from the same `os` object.
+    // os.homedir() is mocked (not HOME / USERPROFILE) so the CLI — which reads
+    // it at load — takes the throwaway home's default dir as its own.
     vi.spyOn(nodeOs, 'homedir').mockReturnValue(home)
     fs.mkdirSync(path.join(tmp, 'config', 'noteflow'), { recursive: true })
-    const notesDir = where === 'default' ? app.defaultNotesDir() : path.join(tmp, 'override-notes')
+    // The dir the tests empty and fill (setNotes) is derived from the throwaway
+    // home EXPLICITLY, never through os.homedir(): if the mock stopped reaching
+    // a module, that would be the real ~/noteflow-notes.
+    const notesDir = assertInsideTmp(where === 'default' ? defaultDir() : path.join(tmp, 'override-notes'), tmp)
     cli = loadCli(notesDir)
+    assertInsideTmp(cli.SETTINGS_PATH, tmp)
     return notesDir
   }
-  const defaultDir = () => app.defaultNotesDir()
-  const writeSettings = (s: Settings) => fs.writeFileSync(cli.SETTINGS_PATH, JSON.stringify(s))
+  /** The default notes dir under the throwaway home (explicit — see boot). */
+  const defaultDir = () => app.defaultNotesDir(home)
+  const writeSettings = (s: Settings) => fs.writeFileSync(assertInsideTmp(cli.SETTINGS_PATH, tmp), JSON.stringify(s))
   function setNotes(dir: string, synced: boolean) {
+    assertInsideTmp(dir, tmp) // before the rmSync: only ever a dir of this test
     fs.rmSync(dir, { recursive: true, force: true })
     fs.mkdirSync(dir, { recursive: true })
     if (!synced) return
@@ -529,7 +536,9 @@ describe("the gates over one settings.json: the CLI's state = the app's decision
 
   it("the default notes dir is the same one (a record without notesDir belongs to it on both sides)", () => {
     boot('override')
+    // Both sides resolve it from os.homedir(): the mocked home reaches the two.
     expect(cli.DEFAULT_NOTES_DIR).toBe(defaultDir())
+    expect(app.defaultNotesDir()).toBe(defaultDir())
     expect(cli.DEFAULT_NOTES_DIR.startsWith(home)).toBe(true)
   })
 
