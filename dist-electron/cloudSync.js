@@ -450,6 +450,9 @@ function enableCloudSync() {
     // remotely") stops being sound. Flag it so the next GitHub pull reconciles
     // instead of deleting. No-op if GitHub isn't connected.
     githubSync.markNeedsFullReconcile();
+    // GitHub's origin gate depends on whether Cloud owns the notes dir (with Cloud
+    // on GitHub never asks): re-derive it now that the flag changed.
+    githubSync.refreshOriginGate();
     syncError = undefined;
     setInitialPullStatus('pending');
     statusListener?.();
@@ -477,6 +480,9 @@ function disableCloudSync() {
     // also covers users whose Cloud was enabled by an earlier build (no flag was
     // ever set for them) — there is no startup backfill.
     githubSync.markNeedsFullReconcile();
+    // GitHub's origin gate depends on whether Cloud owns the notes dir (with Cloud
+    // on GitHub never asks): re-derive it now that the flag changed.
+    githubSync.refreshOriginGate();
     syncError = undefined;
     setInitialPullStatus('pending');
     statusListener?.();

@@ -66,6 +66,15 @@ import { type GithubMergeFile, planGithubDirMerge } from './githubMerge'
 import { planGithubMetadataPull } from './githubMetadata'
 import { type ConflictCopiesNotice, type WrittenConflictCopy, appendConflictCopyNotice, writeConflictCopy } from './conflictCopy'
 import { type SyncHistoryEntry, createSyncHistory } from './syncHistory'
+import {
+  type SyncIdentity,
+  decideOrigin,
+  getStoredIdentity,
+  sameIdentity,
+  hasSyncedLocalNotes,
+  readSettingsStrict,
+  writeSyncOriginFile,
+} from './syncOrigin'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -116,6 +125,22 @@ export interface GitHubSyncSettings {
    * existing settings.json files keep behaving exactly as before.
    */
   needsFullReconcile?: boolean
+  /**
+   * GitHub's numeric id of the connected repo (survives renames/transfers) —
+   * the identity compared with `settings.syncOrigin.github` (syncOrigin.ts).
+   * Set at connect; connections from before it get it on their next pull.
+   */
+  repoId?: number
+}
+
+/**
+ * The notes dir belongs to another remote than the connected repo and holds
+ * notes that would sync: nothing syncs until the user chooses (merge / use
+ * only the remote's notes / cancel) — see refreshOriginGate.
+ */
+export interface OriginChoice {
+  previous: { owner: string; repo: string }
+  next: { owner: string; repo: string }
 }
 
 export type InitialPullStatus = 'pending' | 'ok' | 'failed'
@@ -140,6 +165,8 @@ export interface SyncStatus {
    * `conflictCopies`, dismissed together. Same notice as NoteFlow Cloud.
    */
   conflictMerges?: ConflictCopiesNotice
+  /** Present while the origin choice is pending (nothing syncs until resolved). */
+  originChoice?: OriginChoice
 }
 
 // ── Settings helpers ──────────────────────────────────────────────────────────
@@ -345,21 +372,25 @@ async function validateToken(token: string): Promise<string> {
   return user.login
 }
 
-async function ensureRepo(token: string, owner: string, repo: string): Promise<void> {
+/** Returns GitHub's numeric id of the repo (undefined if the answer lacks it). */
+async function ensureRepo(token: string, owner: string, repo: string): Promise<number | undefined> {
   try {
-    await githubRequest(token, 'GET', `/repos/${owner}/${repo}`)
+    const info = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}`)) as RepoApiInfo
+    return rememberRepoInfo(owner, repo, info).id
   } catch {
-    await githubRequest(token, 'POST', '/user/repos', {
+    const created = (await githubRequest(token, 'POST', '/user/repos', {
       name: repo,
       private: true,
       description: 'NoteFlow notes — auto-synced',
       auto_init: true,
-    })
+    })) as RepoApiInfo
+    const id = rememberRepoInfo(owner, repo, created ?? {}).id
     // Brief pause for GitHub to initialize the repo
     await new Promise((r) => setTimeout(r, 1500))
 
     // Replace default README with informative content
     await upsertRemoteFile(token, owner, repo, 'README.md', README_CONTENT)
+    return id
   }
 }
 
@@ -376,14 +407,42 @@ interface TreeBlob {
   sha: string
 }
 
-// Cached per connection; reset on disconnect
-let cachedDefaultBranch: string | null = null
+interface RepoApiInfo {
+  id?: unknown
+  default_branch?: string
+}
+
+interface RepoInfo {
+  /** 'owner/repo' lowercased — the cache answers only for the repo it was fetched for. */
+  key: string
+  branch: string
+  id?: number
+}
+
+// GET /repos/{owner}/{repo} answer (default branch + numeric id), cached per
+// repo — keyed, so a connection switched behind the app's back (the CLI shares
+// settings.json on Windows) never uses another repo's branch. Reset on disconnect.
+let cachedRepoInfo: RepoInfo | null = null
+
+const repoCacheKey = (owner: string, repo: string): string => `${owner}/${repo}`.toLowerCase()
+
+function rememberRepoInfo(owner: string, repo: string, info: RepoApiInfo): RepoInfo {
+  cachedRepoInfo = {
+    key: repoCacheKey(owner, repo),
+    branch: info.default_branch || 'main',
+    ...(typeof info.id === 'number' && Number.isFinite(info.id) ? { id: info.id } : {}),
+  }
+  return cachedRepoInfo
+}
+
+async function getRepoInfo(token: string, owner: string, repo: string): Promise<RepoInfo> {
+  if (cachedRepoInfo && cachedRepoInfo.key === repoCacheKey(owner, repo)) return cachedRepoInfo
+  const info = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}`)) as RepoApiInfo
+  return rememberRepoInfo(owner, repo, info ?? {})
+}
 
 async function getDefaultBranch(token: string, owner: string, repo: string): Promise<string> {
-  if (cachedDefaultBranch) return cachedDefaultBranch
-  const info = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}`)) as { default_branch?: string }
-  cachedDefaultBranch = info.default_branch || 'main'
-  return cachedDefaultBranch
+  return (await getRepoInfo(token, owner, repo)).branch
 }
 
 /**
@@ -970,6 +1029,9 @@ let deviceFlow: DeviceFlowState | null = null
 export function loadSyncSettings(): GitHubSyncSettings {
   const settings = readSettings()
   syncSettings = (settings.githubSync as GitHubSyncSettings) ?? { enabled: false }
+  // The connection may have changed since the last run (the CLI shares this
+  // settings.json on Windows and can point githubSync at another repo).
+  refreshOriginGate()
   return syncSettings
 }
 
@@ -985,6 +1047,7 @@ export function getSyncStatus(): SyncStatus {
     initialPullStatus,
     conflictCopies,
     conflictMerges,
+    ...(originGate?.state === 'ask' && originGate.choice ? { originChoice: originGate.choice } : {}),
   }
 }
 
@@ -1068,12 +1131,238 @@ export function onStatusChanged(cb: () => void): void {
   statusListener = cb
 }
 
+// ── Origin of the notes dir (syncOrigin.ts) ───────────────────────────────────
+// The notes dir remembers the remote it was reconciled with
+// (settings.syncOrigin.github). When the connected repo is ANOTHER one and the
+// dir holds notes that would sync, nothing syncs until the user chooses
+// (resolveOriginChoice / disconnect). The gate is a STATE derived from
+// (connection, stored origin, local notes, Cloud enabled) — not a flag — so it
+// survives restarts on its own and also catches a connection switched by the
+// CLI. Cached here; recomputed at load, at the end of the Device Flow, when
+// Cloud is toggled, on resolution and at the start of every pull / journal
+// drain / full push. Every engine entry point checks it (defence in depth on
+// top of main.ts' call sites): while blocked there is no pull, push, delete,
+// drain, mirror nor remote migration, and initialPullStatus stays 'pending'.
+
+type OriginGateState = 'clear' | 'ask' | 'unreadable'
+// null = not evaluated yet (evaluated lazily by the first check).
+let originGate: { state: OriginGateState; choice?: OriginChoice } | null = null
+
+function sameGate(a: typeof originGate, b: typeof originGate): boolean {
+  if (!a || !b) return a === b
+  if (a.state !== b.state) return false
+  const ca = a.choice
+  const cb = b.choice
+  if (!ca || !cb) return ca === cb
+  return (
+    ca.previous.owner === cb.previous.owner && ca.previous.repo === cb.previous.repo &&
+    ca.next.owner === cb.next.owner && ca.next.repo === cb.next.repo
+  )
+}
+
+function currentGithubIdentity(s: GitHubSyncSettings): Extract<SyncIdentity, { kind: 'github' }> | null {
+  if (!s.owner || !s.repo) return null
+  return { kind: 'github', owner: s.owner, repo: s.repo, ...(typeof s.repoId === 'number' ? { repoId: s.repoId } : {}) }
+}
+
+/**
+ * The connected repo is another remote than the one this notes dir was
+ * reconciled with: everything that describes the previous remote goes — the
+ * journal and SHA cache (sync-state.json: pending deletes for repo A must
+ * never run against B, A's blob shas are no base for B), pending push timers,
+ * the conflict notices, `lastSync` (with it the pull's deletion rule could
+ * delete local notes absent from the new repo) and `remoteFormatMigratedAt`.
+ */
+function resetRemoteState(): void {
+  pushTimers.forEach((t) => clearTimeout(t))
+  pushTimers.clear()
+  syncState = emptySyncState()
+  persistState()
+  conflictCopies = undefined
+  conflictMerges = undefined
+  const latest = syncSettings
+  if (latest && (latest.lastSync !== undefined || latest.remoteFormatMigratedAt !== undefined)) {
+    const next: GitHubSyncSettings = { ...latest }
+    delete next.lastSync
+    delete next.remoteFormatMigratedAt
+    syncSettings = next
+    const settings = readSettings()
+    settings.githubSync = syncSettings
+    writeSettings(settings)
+  }
+}
+
+/** Writes the connected repo as this dir's GitHub origin (+ resets the per-remote state when it changed). */
+function adoptGithubOrigin(id: SyncIdentity, resetRemote: boolean): boolean {
+  if (!writeSyncOriginFile(getSettingsPath(), id)) {
+    console.error('[GitHubSync] could not record the notes dir origin (settings.json unreadable or unwritable)')
+    return false
+  }
+  if (resetRemote) resetRemoteState()
+  return true
+}
+
+/** Records the repo's numeric id in the connection settings when it was missing or changed. */
+function recordRepoId(owner: string, repo: string, id: number): void {
+  const s = syncSettings
+  if (!s || s.repoId === id) return
+  if (!s.owner || !s.repo || repoCacheKey(s.owner, s.repo) !== repoCacheKey(owner, repo)) return
+  syncSettings = { ...s, repoId: id }
+  const settings = readSettings()
+  settings.githubSync = syncSettings
+  writeSettings(settings)
+}
+
+/**
+ * Recomputes the origin gate (see above) and returns its state. `proceed`
+ * decisions that adopt the identity write it right away — before anything is
+ * pulled — so a crash mid-sync can't later look like an identity change:
+ * no stored origin (first connection, or an install from before this
+ * feature) and "another remote but no synced notes on disk" (which also
+ * resets the previous remote's state). With NoteFlow Cloud enabled GitHub is a
+ * write-only mirror and the dir belongs to the Cloud account: never asks and
+ * never touches syncOrigin.github. Fail-closed: an unreadable settings.json
+ * blocks ('unreadable'), a notes dir that can't be listed counts as "has notes".
+ */
+export function refreshOriginGate(): OriginGateState {
+  const s = syncSettings ?? loadSyncSettings()
+  let next: NonNullable<typeof originGate>
+  const identity = s.enabled && s.encryptedToken ? currentGithubIdentity(s) : null
+  if (!identity) {
+    next = { state: 'clear' } // not connected: nothing would sync anyway
+  } else {
+    const parsed = readSettingsStrict(getSettingsPath())
+    if (parsed === null) {
+      next = { state: 'unreadable' }
+    } else if ((parsed.cloudSync as { enabled?: boolean } | undefined)?.enabled === true) {
+      next = { state: 'clear' }
+    } else {
+      const decision = decideOrigin({
+        stored: getStoredIdentity(parsed, 'github'),
+        next: identity,
+        hasLocalNotes: () => hasSyncedLocalNotes(notesDirPath),
+      })
+      if (decision.action === 'ask') {
+        const prev = decision.previous.kind === 'github' ? decision.previous : null
+        next = {
+          state: 'ask',
+          choice: {
+            previous: { owner: prev?.owner ?? '', repo: prev?.repo ?? '' },
+            next: { owner: identity.owner, repo: identity.repo },
+          },
+        }
+      } else {
+        if (decision.adopt) adoptGithubOrigin(identity, decision.reason === 'changed-empty')
+        next = { state: 'clear' }
+      }
+    }
+  }
+  const prev = originGate
+  originGate = next
+  if (next.state !== 'clear' && (!prev || prev.state === 'clear')) {
+    // Becoming blocked: nothing armed may fire, and the push gate closes until
+    // a pull succeeds after the resolution (its catch-up re-queues the edits).
+    pushTimers.forEach((t) => clearTimeout(t))
+    pushTimers.clear()
+    setInitialPullStatus('pending')
+  }
+  if (!sameGate(prev, next)) statusListener?.()
+  return next.state
+}
+
+/** Cached gate check for the hot paths (evaluated once if never computed). */
+function originGateBlocked(): boolean {
+  if (!originGate) refreshOriginGate()
+  return originGate!.state !== 'clear'
+}
+
+/** True while nothing may sync with GitHub (origin choice pending, or settings.json unreadable). */
+export function isOriginGateBlocked(): boolean {
+  return originGateBlocked()
+}
+
+/** The pending origin choice (previous origin → connected repo), or null. */
+export function getOriginChoice(): OriginChoice | null {
+  if (!originGate) refreshOriginGate()
+  return originGate?.state === 'ask' && originGate.choice ? originGate.choice : null
+}
+
+/** The stored GitHub origin of the notes dir (label and manifest of the archive), or null. */
+export function getStoredOriginIdentity(): SyncIdentity | null {
+  const parsed = readSettingsStrict(getSettingsPath())
+  return parsed ? getStoredIdentity(parsed, 'github') ?? null : null
+}
+
+export type ResolveOriginError = 'not-connected' | 'not-pending' | 'settings-unreadable' | 'settings-unwritable'
+
+/**
+ * The user chose for a pending origin: 'merge' (today's connect: pull, then
+ * upload every local note) or 'replace' (main.ts already moved the local notes
+ * to the archive: pull only). Adopts the connected repo as the origin, resets
+ * the previous remote's state, opens the gate and runs the pull. Fails without
+ * touching anything when the gate is not pending.
+ */
+export async function resolveOriginChoice(
+  choice: 'merge' | 'replace',
+  notesDir: string,
+): Promise<{ ok: true; pull: Awaited<ReturnType<typeof pullNotes>> } | { ok: false; error: ResolveOriginError }> {
+  const s = syncSettings ?? loadSyncSettings()
+  if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return { ok: false, error: 'not-connected' }
+  notesDirPath = notesDir
+  // The CACHED state, not a re-derived one: after 'replace' archived the local
+  // notes, re-deriving would find no notes and adopt the repo on its own
+  // ("changed-empty", which also resets the per-remote state). That outcome is
+  // accepted below too (the origin already is the connected repo) — e.g. a
+  // tick that re-derived the gate between the archive and this call.
+  if (!originGate) refreshOriginGate()
+  if (originGate?.state === 'unreadable') return { ok: false, error: 'settings-unreadable' }
+  const parsed = readSettingsStrict(getSettingsPath())
+  if (parsed === null) return { ok: false, error: 'settings-unreadable' }
+  const stored = getStoredIdentity(parsed, 'github')
+  const connectedIdentity = currentGithubIdentity(s)
+  const alreadyAdopted = !!stored && !!connectedIdentity && sameIdentity(stored, connectedIdentity)
+  if (originGate?.state !== 'ask' && !alreadyAdopted) return { ok: false, error: 'not-pending' }
+  if (!alreadyAdopted) {
+    const owner = s.owner
+    const repo = s.repo
+    // The numeric id makes the stored origin survive renames; best effort.
+    try {
+      const info = await getRepoInfo(decryptToken(s.encryptedToken), owner, repo)
+      if (info.id !== undefined) recordRepoId(owner, repo, info.id)
+    } catch { /* offline: stored by name, backfilled by a later pull */ }
+    const identity = currentGithubIdentity(syncSettings ?? s)
+    if (!identity || !adoptGithubOrigin(identity, true)) return { ok: false, error: 'settings-unwritable' }
+  }
+  refreshOriginGate() // same identity now → clear (emits the status change)
+  const pull = await pullNotes(notesDir)
+  if (choice === 'merge') {
+    // As the Device Flow does: every local note goes up, in the background.
+    pushAllNotes(notesDir).catch((err) => {
+      console.error('[GitHubSync] pushAll after the origin choice failed:', String(err))
+    })
+  }
+  return { ok: true, pull }
+}
+
 // Starts Device Flow. Returns the user_code to display + verification URL to open.
 // onComplete is called when auth succeeds or fails (from background polling).
+/**
+ * Result of a Device Flow. `pendingOriginChoice`: connected, but the notes dir
+ * belongs to another remote and holds notes — nothing was pulled or pushed;
+ * the user must choose first (resolveOriginChoice / disconnect).
+ */
+export interface DeviceFlowResult {
+  ok: boolean
+  owner?: string
+  repo?: string
+  error?: string
+  pendingOriginChoice?: boolean
+}
+
 export async function initiateDeviceFlow(
   repo: string,
   notesDir: string,
-  onComplete: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void
+  onComplete: (result: DeviceFlowResult) => void
 ): Promise<{ ok: boolean; userCode?: string; verificationUri?: string; error?: string }> {
   // Cancel any existing flow
   cancelDeviceFlow()
@@ -1113,7 +1402,7 @@ export async function initiateDeviceFlow(
 
 function schedulePoll(
   notesDir: string,
-  onComplete: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void
+  onComplete: (result: DeviceFlowResult) => void
 ): void {
   if (!deviceFlow) return
 
@@ -1143,19 +1432,29 @@ function schedulePoll(
 
         try {
           const owner = await validateToken(token)
-          await ensureRepo(token, owner, repo)
+          const repoId = await ensureRepo(token, owner, repo)
 
           syncSettings = {
             enabled: true,
             encryptedToken: encryptToken(token),
             owner,
             repo,
+            ...(repoId !== undefined ? { repoId } : {}),
           }
           syncError = undefined
 
           const settings = readSettings()
           settings.githubSync = syncSettings
           writeSettings(settings)
+
+          // Another remote than the one this notes dir came from, with notes on
+          // disk: connected, but nothing is pulled or pushed until the user
+          // chooses (the gate stays blocked across restarts too).
+          notesDirPath = notesDir
+          if (refreshOriginGate() !== 'clear') {
+            onComplete({ ok: true, owner, repo, pendingOriginChoice: true })
+            return
+          }
 
           await pullNotes(notesDir)
           onComplete({ ok: true, owner, repo })
@@ -1204,15 +1503,18 @@ export function disconnectGitHub(): void {
   syncError = undefined
   conflictCopies = undefined // the notice belongs to the repo we disconnect from
   conflictMerges = undefined
-  cachedDefaultBranch = null
+  cachedRepoInfo = null
   // Drop the journal + SHA cache — they describe the repo we just disconnected from.
   syncState = emptySyncState()
   persistState()
   setInitialPullStatus('pending')
 
+  // settings.syncOrigin is deliberately KEPT: the notes on disk still came from
+  // that repo, and reconnecting to another one must ask (syncOrigin.ts).
   const settings = readSettings()
   delete settings.githubSync
   writeSettings(settings)
+  refreshOriginGate() // not connected → clear (emits if it was pending)
 }
 
 /** Groups notes-dir-relative paths by their note folder ('<dir>/<file>' → '<dir>'). */
@@ -1563,6 +1865,24 @@ export async function pullNotes(notesDir: string): Promise<{
       hadMetadataChanges: false,
     }
   }
+  notesDirPath = notesDir
+  // The repo's numeric id first (the same GET the tree listing needs for the
+  // default branch — cached, so no extra request): the origin gate compares by
+  // id, which survives a renamed repo. Offline it fails here and the gate
+  // compares by name; the listing below then fails the same way.
+  let repoInfoError: unknown
+  try {
+    const info = await getRepoInfo(token, s.owner, s.repo)
+    if (info.id !== undefined) recordRepoId(s.owner, s.repo, info.id)
+  } catch (err) {
+    repoInfoError = err
+  }
+  // The notes dir belongs to another remote (or settings.json is unreadable):
+  // no pull until the user chooses. `incomplete` keeps the temporary-note
+  // expiry from treating this as a clean pull; initialPullStatus stays pending.
+  if (refreshOriginGate() !== 'clear') {
+    return { pulled: 0, deleted: 0, errors: [], updatedFiles: [], hadDeletions: false, hadMetadataChanges: false, incomplete: true }
+  }
   let pulled = 0
   let deleted = 0
   // Files this pull changed on disk (written or removed) — for the activity history.
@@ -1592,6 +1912,7 @@ export async function pullNotes(notesDir: string): Promise<{
   let conflictMergesMade = 0
 
   try {
+    if (repoInfoError !== undefined) throw repoInfoError
     const { blobs, truncated } = await fetchRemoteTree(token, s.owner, s.repo)
     // A truncated listing may be missing note folders entirely.
     if (truncated) incomplete = true
@@ -2158,6 +2479,8 @@ function listLocalSyncPaths(notesDir: string): string[] {
 export async function pushAllNotes(notesDir: string): Promise<{ pushed: number; errors: string[] }> {
   const s = syncSettings ?? loadSyncSettings()
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return { pushed: 0, errors: [] }
+  notesDirPath = notesDir
+  if (refreshOriginGate() !== 'clear') return { pushed: 0, errors: [] } // origin choice pending
 
   // Cancel any debounced pushes queued by flushPendingLocalChanges — pushAllNotes
   // does the same work synchronously, so leaving timers active would double-push
@@ -2218,7 +2541,7 @@ export async function pushAllNotes(notesDir: string): Promise<{ pushed: number; 
 // ── Mirror local → remote ─────────────────────────────────────────────────────
 
 /** Guard failure of a mirror run — the renderer localizes these codes. */
-export type MirrorFailureCode = 'not-connected' | 'in-progress' | 'token'
+export type MirrorFailureCode = 'not-connected' | 'in-progress' | 'token' | 'origin-choice-pending'
 
 /**
  * Things the mirror decided NOT to do, as codes the renderer localizes. Kept
@@ -2299,6 +2622,8 @@ export async function mirrorToGitHub(notesDir: string): Promise<MirrorResult> {
   // Reentrancy guard: a double click must not run two passes (they would fight
   // over the same paths in the mutation queue).
   if (mirrorInFlight) return { ok: false, ...idle, error: 'in-progress' }
+  // Never with Cloud enabled (the only case the mirror runs), but defence in depth.
+  if (originGateBlocked()) return { ok: false, ...idle, error: 'origin-choice-pending' }
 
   let token: string
   try {
@@ -2510,6 +2835,7 @@ export async function pushPathsNow(notesDir: string, relPaths: string[]): Promis
   const s = syncSettings ?? loadSyncSettings()
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return { pushed: 0, errors: [] }
   if (initialPullStatus !== 'ok') return { pushed: 0, errors: [] }
+  if (originGateBlocked()) return { pushed: 0, errors: [] }
 
   let token: string
   try {
@@ -2578,7 +2904,7 @@ export function schedulePush(relPath: string, content: string, onStart?: () => v
   // local file could overwrite a newer remote version (data loss). The on-disk
   // write already happened in the caller, so no data is lost by deferring.
   // Pending changes are flushed automatically when pullNotes transitions to 'ok'.
-  if (initialPullStatus !== 'ok') {
+  if (initialPullStatus !== 'ok' || originGateBlocked()) {
     console.warn(`[GitHubSync] Push deferred for ${relPath}: initialPullStatus=${initialPullStatus}`)
     onComplete?.(`sync-gated:${initialPullStatus}`)
     return
@@ -2590,6 +2916,12 @@ export function schedulePush(relPath: string, content: string, onStart?: () => v
 function schedulePushUnguarded(relPath: string, content: string, onStart?: () => void, onComplete?: (error?: string) => void): void {
   const s = syncSettings ?? loadSyncSettings()
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
+    onComplete?.()
+    return
+  }
+  // Unguarded = past the initial-pull gate, never past the origin gate (it
+  // only runs from a pull, which checked it — defence in depth).
+  if (originGateBlocked()) {
     onComplete?.()
     return
   }
@@ -2717,6 +3049,9 @@ export async function scheduleDelete(relPath: string): Promise<void> {
   const s = syncSettings ?? loadSyncSettings()
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return
   if (isLocalOnlySyncPath(notesDirPath, relPath)) return // never synced: nothing remote to delete
+  // Origin choice pending: the connected repo is not this dir's remote yet —
+  // nothing is deleted there (nor journaled: the resolution resets the journal).
+  if (originGateBlocked()) return
 
   // Cancel any pending push for this file before deleting
   const existing = pushTimers.get(relPath)
@@ -2816,6 +3151,7 @@ export async function scheduleDeleteDir(dir: string): Promise<void> {
   // Never synced: nothing remote to delete. The folder is usually gone by now —
   // isLocalOnlyDir answers from its memory of local-only folders.
   if (notesDirPath && isLocalOnlyDir(notesDirPath, dir)) return
+  if (originGateBlocked()) return // origin choice pending (see scheduleDelete)
 
   // Cancel any pending pushes for files inside this dir
   for (const key of [...pushTimers.keys()]) {
@@ -2875,6 +3211,9 @@ let retryInFlight = false
 export async function retrySyncJournal(notesDir: string): Promise<void> {
   const s = syncSettings ?? loadSyncSettings()
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return
+  notesDirPath = notesDir
+  // Re-evaluated (not cached): the tick drains BEFORE it pulls.
+  if (refreshOriginGate() !== 'clear') return
   if (initialPullStatus !== 'ok') return
   if (retryInFlight) return
 
@@ -2975,6 +3314,7 @@ export async function migrateRemoteToV2IfNeeded(notesDir: string): Promise<boole
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return false
   if (s.remoteFormatMigratedAt) return false
   if (initialPullStatus !== 'ok') return false
+  if (originGateBlocked()) return false
   if (remoteMigrationInFlight) return false
   remoteMigrationInFlight = true
 

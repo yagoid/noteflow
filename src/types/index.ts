@@ -631,6 +631,9 @@ export interface SyncHistoryEntry {
 // Cloud wins when enabled, else GitHub, else 'none'. Drives the titlebar sync
 // button (and its hover status card) so it routes to whichever backend is
 // active. Never carries key material.
+/** The user's answer when the notes dir came from another remote (merge / use only the remote's notes / cancel). */
+export type OriginChoiceAction = 'merge' | 'replace' | 'cancel'
+
 export interface ActiveSyncStatus {
   backend: 'github' | 'cloud' | 'none'
   active: boolean
@@ -657,6 +660,11 @@ export interface ActiveSyncStatus {
   conflictCopies?: ConflictCopiesNotice
   /** Notes the live backend's pulls merged WITH conflict blocks (either backend), until dismissed with `conflictCopies`. */
   conflictMerges?: ConflictCopiesNotice
+  /**
+   * The notes dir came from another remote of the live backend and holds notes:
+   * nothing syncs until the user chooses (OriginChoiceDialog). Labels — GitHub: 'owner/repo'.
+   */
+  originChoice?: { previous: string; next: string }
   github?: { owner?: string; repo?: string }
   cloud?: {
     keysState: CloudSyncStatus['keysState']
@@ -809,7 +817,7 @@ declare global {
       parseExternalImport: (source: ImportSource) => Promise<{ ok: boolean; source?: ImportSource; notes?: ExternalNote[]; error?: string; canceled?: boolean }>
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
       // GitHub Sync
-      getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed'; conflictCopies?: ConflictCopiesNotice; conflictMerges?: ConflictCopiesNotice }>
+      getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed'; conflictCopies?: ConflictCopiesNotice; conflictMerges?: ConflictCopiesNotice; originChoice?: { previous: { owner: string; repo: string }; next: { owner: string; repo: string } } }>
       // Backend-tagged status of the live sync provider — drives the titlebar sync button.
       getActiveSyncStatus: () => Promise<ActiveSyncStatus>
       // Clears the session notice of conflict copies made by either backend's pull (titlebar sync card).
@@ -817,6 +825,13 @@ declare global {
       initiateGitHubAuth: (repo: string) => Promise<{ ok: boolean; userCode?: string; verificationUri?: string; error?: string }>
       cancelGitHubAuth: () => Promise<{ ok: boolean }>
       disconnectGitHub: () => Promise<{ ok: boolean }>
+      // The notes dir came from another remote than the connected repo: merge / replace
+      // (local notes moved to a local archive, never deleted) / cancel (= disconnect).
+      // error 'archive-failed' (+ detail): nothing was pulled, the choice stays pending.
+      resolveGithubOrigin: (choice: OriginChoiceAction) => Promise<{ ok: boolean; error?: string; detail?: string }>
+      // Local archives of notes set aside by "use only the remote's notes" (userData/notes-archive).
+      getNotesArchiveStatus: () => Promise<{ hasArchives: boolean }>
+      openNotesArchive: () => Promise<{ ok: boolean }>
       // Manual GitHub pull — refused with error 'cloud-enabled' while NoteFlow Cloud is enabled.
       pullNotes: () => Promise<{
         pulled: number
@@ -825,7 +840,7 @@ declare global {
         updatedFiles: string[]
         hadDeletions: boolean
         hadMetadataChanges: boolean
-        error?: 'cloud-enabled'
+        error?: 'cloud-enabled' | 'origin-choice-pending'
       }>
       // Mirror local → repo: leaves the repo as an exact copy of the local state
       // (uploads what differs, deletes what is gone). Only while Cloud is enabled.
@@ -837,7 +852,7 @@ declare global {
         // errors: raw GitHub API failures (verbatim) · warnings: our own codes, localized here
         errors: string[]
         warnings: Array<'deletions-skipped-unreadable'>
-        error?: 'cloud-required' | 'cloud-initial-pull-pending' | 'not-connected' | 'in-progress' | 'token'
+        error?: 'cloud-required' | 'cloud-initial-pull-pending' | 'not-connected' | 'in-progress' | 'token' | 'origin-choice-pending'
       }>
       // Settings → Sync → "Connect the CLI too" — the CLI gets its own access
       // to the backend the app uses (main picks the email / token).
@@ -857,7 +872,7 @@ declare global {
         hadDeletions: boolean
         hadMetadataChanges: boolean
       }>
-      onSyncAuthComplete: (cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void) => () => void
+      onSyncAuthComplete: (cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string; pendingOriginChoice?: boolean }) => void) => () => void
       onSyncPushState: (cb: (state: 'pushing' | 'idle') => void) => () => void
       onSyncStatusChanged: (cb: () => void) => () => void
       // NoteFlow account (Supabase Auth + entitlements)

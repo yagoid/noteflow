@@ -178,6 +178,13 @@ const api = {
     initiateGitHubAuth: (repo) => electron_1.ipcRenderer.invoke('sync:initiate', repo),
     cancelGitHubAuth: () => electron_1.ipcRenderer.invoke('sync:cancel-auth'),
     disconnectGitHub: () => electron_1.ipcRenderer.invoke('sync:disconnect'),
+    // The notes dir came from another remote than the connected repo: the user's
+    // choice (merge / use only the repo's notes — local ones moved to a local
+    // archive, never deleted / cancel = disconnect).
+    resolveGithubOrigin: (choice) => electron_1.ipcRenderer.invoke('sync:resolve-origin', choice),
+    // Local archives of notes set aside by "use only the remote's notes" (userData/notes-archive).
+    getNotesArchiveStatus: () => electron_1.ipcRenderer.invoke('sync:archives-status'),
+    openNotesArchive: () => electron_1.ipcRenderer.invoke('sync:open-archives'),
     // Manual GitHub pull. Refused with error: 'cloud-enabled' while NoteFlow
     // Cloud owns the sync loop (nothing is pulled then).
     pullNotes: () => electron_1.ipcRenderer.invoke('sync:pull'),

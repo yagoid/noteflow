@@ -127,6 +127,14 @@ function getActiveSyncStatus(pendingUploads) {
             filesToday: githubSync.getSyncFilesToday(),
             conflictCopies: g.conflictCopies,
             conflictMerges: g.conflictMerges,
+            ...(g.originChoice
+                ? {
+                    originChoice: {
+                        previous: `${g.originChoice.previous.owner}/${g.originChoice.previous.repo}`,
+                        next: `${g.originChoice.next.owner}/${g.originChoice.next.repo}`,
+                    },
+                }
+                : {}),
             github: { owner: g.owner, repo: g.repo },
         };
     }

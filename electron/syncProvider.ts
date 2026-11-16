@@ -154,6 +154,13 @@ export interface ActiveSyncStatus {
    * dismissed with `conflictCopies`.
    */
   conflictMerges?: ConflictCopiesNotice
+  /**
+   * The notes dir belongs to another remote of the live backend and holds
+   * notes: nothing syncs until the user chooses (merge / use only the remote's
+   * notes / cancel). Human-readable labels — GitHub: 'owner/repo'. Absent
+   * otherwise. Backend-agnostic (`backend` says which one asks).
+   */
+  originChoice?: { previous: string; next: string }
   /** Present only when backend === 'github'. */
   github?: { owner?: string; repo?: string }
   /** Present only when backend === 'cloud'. */
@@ -203,6 +210,14 @@ export function getActiveSyncStatus(pendingUploads: number): ActiveSyncStatus {
       filesToday: githubSync.getSyncFilesToday(),
       conflictCopies: g.conflictCopies,
       conflictMerges: g.conflictMerges,
+      ...(g.originChoice
+        ? {
+            originChoice: {
+              previous: `${g.originChoice.previous.owner}/${g.originChoice.previous.repo}`,
+              next: `${g.originChoice.next.owner}/${g.originChoice.next.repo}`,
+            },
+          }
+        : {}),
       github: { owner: g.owner, repo: g.repo },
     }
   }

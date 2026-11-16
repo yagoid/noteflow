@@ -69,6 +69,8 @@ const uiSettings_1 = require("./uiSettings");
 const importers = __importStar(require("./importers"));
 const migration_1 = require("./migration");
 const localOnlyNotes_1 = require("./localOnlyNotes");
+const notesArchive = __importStar(require("./notesArchive"));
+const syncOrigin_1 = require("./syncOrigin");
 const welcomeNote_1 = require("./welcomeNote");
 const tempNoteExpiry_1 = require("./tempNoteExpiry");
 const updateAsset_1 = require("./updateAsset");
@@ -2004,6 +2006,12 @@ function applyNoteWrite(payload, senderId, opts) {
     refuseLinkedTarget(payload.dir);
     const dir = ensureSafeDirname(payload.dir);
     const dirPath = path_1.default.join(NOTES_DIR, dir);
+    // A late save (a debounced editor, a sticky closing) of a note just moved to
+    // the local archive must not recreate it — see archiveLocalNotesForOriginSwitch.
+    // Once the folder exists again (a pull brought that note back), writes go through.
+    if (archivedNoteDirs.has(dir) && !fs_1.default.existsSync(dirPath)) {
+        throw new Error('This note was moved to the local copies folder');
+    }
     // Validate everything before touching disk
     const writes = Object.entries(payload.files ?? {}).map(([f, content]) => {
         if (typeof content !== 'string')
@@ -2091,6 +2099,98 @@ function applyNoteDelete(dirOrPath) {
     });
     scheduleRemoteDelete('dir', dir);
     aiIndex.removeFromIndex(dirPath);
+}
+// ── Archive of the local notes on an origin switch (notesArchive.ts) ─────────
+// "Use only the remote's notes": the notes that would sync are MOVED to
+// userData/notes-archive/<label>-<ISO>/ (never deleted) before the first pull
+// from the new remote. Backend-agnostic: GitHub calls it today, NoteFlow Cloud
+// will with its own label.
+/** Root of the local archives (outside the notes dir — never synced). */
+function notesArchiveRoot() {
+    return path_1.default.join(electron_1.app.getPath('userData'), 'notes-archive');
+}
+// Note folders moved to the archive this session: a write to one of them that
+// would recreate it is refused (applyNoteWrite).
+const archivedNoteDirs = new Set();
+/** Closes the sticky and section windows showing any of `noteIds`; resolves once closed (bounded). */
+function closeWindowsShowingNotes(noteIds, timeoutMs = 2000) {
+    const targets = [];
+    for (const [winId, noteId] of stickyNoteIds) {
+        const win = electron_1.BrowserWindow.fromId(winId);
+        if (win && !win.isDestroyed() && noteIds.has(noteId))
+            targets.push(win);
+    }
+    for (const [win, target] of sectionWindows) {
+        if (!win.isDestroyed() && noteIds.has(target.noteId))
+            targets.push(win);
+    }
+    if (targets.length === 0)
+        return Promise.resolve();
+    return new Promise((resolve) => {
+        let left = targets.length;
+        const timer = setTimeout(resolve, timeoutMs);
+        const done = () => { if (--left === 0) {
+            clearTimeout(timer);
+            resolve();
+        } };
+        for (const win of targets) {
+            win.once('closed', done);
+            // close (not destroy): their beforeunload flushes the pending edits first.
+            win.close();
+        }
+    });
+}
+/**
+ * Moves the notes that would sync (and their metadata) to a new local archive
+ * — see notesArchive.ts — and brings the app's state in line: the editors'
+ * pending saves land first (they are archived with the note), windows showing
+ * those notes are closed, the watcher ignores the moves, the AI index forgets
+ * them and every window reloads. Throws NotesArchiveError when nothing could be
+ * moved (everything undone): the caller must not pull then.
+ */
+async function archiveLocalNotesForOriginSwitch(label, origin) {
+    const before = (0, localOnlyNotes_1.listSyncedNoteDirs)(NOTES_DIR);
+    const ids = new Set();
+    for (const dir of before) {
+        const note = noteFormat.parseNoteDir(path_1.default.join(NOTES_DIR, dir));
+        if (note)
+            ids.add(note.id);
+    }
+    await closeWindowsShowingNotes(ids);
+    await flushMainWindowEdits();
+    // The watcher must not echo the moves back as external edits.
+    for (const dir of (0, localOnlyNotes_1.listSyncedNoteDirs)(NOTES_DIR)) {
+        markInternalWrite(dir);
+        try {
+            for (const f of fs_1.default.readdirSync(path_1.default.join(NOTES_DIR, dir)))
+                markInternalWrite(`${dir}/${f}`);
+        }
+        catch { /* ignore */ }
+    }
+    for (const f of notesArchive.ARCHIVED_METADATA_FILES)
+        markInternalWrite(f);
+    // Linked notes (outside the notes dir) keep their group/folder: those
+    // entries stay in the filtered groups.json / folders.json.
+    const linked = linkedNotes.list();
+    const result = notesArchive.archiveSyncedNotes({
+        notesDir: NOTES_DIR,
+        archiveRoot: notesArchiveRoot(),
+        label,
+        origin,
+        keep: {
+            groupIds: linked.map((n) => n.group).filter((g) => typeof g === 'string'),
+            folderIds: linked.map((n) => n.folder).filter((f) => typeof f === 'string'),
+        },
+    });
+    for (const dir of result.movedDirs) {
+        archivedNoteDirs.add(dir);
+        aiIndex.removeFromIndex(path_1.default.join(NOTES_DIR, dir));
+    }
+    if (result.movedFiles.length > 0)
+        aiIndex.markStaleUnknown();
+    console.log(`[Sync] archived ${result.movedDirs.length} note(s) and ${result.movedFiles.length} metadata file(s) to ${result.archiveDir}`);
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+    return result;
 }
 electron_1.ipcMain.handle('fs:write-note', (event, payload) => {
     try {
@@ -2739,6 +2839,14 @@ electron_1.ipcMain.handle('sync:get-active-status', () => {
 electron_1.ipcMain.handle('sync:initiate', async (_event, repo) => {
     return githubSync.initiateDeviceFlow(repo, NOTES_DIR, (result) => {
         electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('sync-auth-complete', result));
+        if (result.ok && result.pendingOriginChoice) {
+            // Connected, but the notes dir came from another remote: nothing was
+            // pulled; the renderer shows the choice (sync:resolve-origin). The tick
+            // re-checks the gate on its own; no migration until it is resolved.
+            emitSyncStatusChanged();
+            startAutoSync();
+            return;
+        }
         if (result.ok) {
             electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
             startAutoSync();
@@ -2759,7 +2867,8 @@ electron_1.ipcMain.handle('sync:cancel-auth', () => {
     githubSync.cancelDeviceFlow();
     return { ok: true };
 });
-electron_1.ipcMain.handle('sync:disconnect', () => {
+/** Disconnects GitHub Sync (Settings "Disconnect", and "Cancel" of the origin choice). */
+function disconnectGithubSync() {
     stopAutoSync();
     githubSync.disconnectGitHub();
     // On Windows the CLI shares this settings.json: its copy of the token
@@ -2768,7 +2877,84 @@ electron_1.ipcMain.handle('sync:disconnect', () => {
     // The renderer's sync surfaces (titlebar button, sidebar identity line) follow this event;
     // disconnectGitHub only emits it when initialPullStatus actually changes.
     emitSyncStatusChanged();
+}
+electron_1.ipcMain.handle('sync:disconnect', () => {
+    disconnectGithubSync();
     return { ok: true };
+});
+// The notes dir came from another remote than the connected repo and holds
+// notes (githubSync's origin gate): the user's choice.
+// - merge: today's connect — pull, then every local note goes up.
+// - replace: the local notes are moved to the local archive first (never
+//   deleted); if that fails nothing is pulled and the choice stays pending.
+//   Then pull only.
+// - cancel: disconnect (notes and stored origin untouched).
+let resolveOriginInFlight = false;
+electron_1.ipcMain.handle('sync:resolve-origin', async (_event, choice) => {
+    if (choice !== 'merge' && choice !== 'replace' && choice !== 'cancel')
+        return { ok: false, error: 'invalid' };
+    if (resolveOriginInFlight)
+        return { ok: false, error: 'busy' };
+    if (choice === 'cancel') {
+        disconnectGithubSync();
+        return { ok: true };
+    }
+    if (!githubSync.getOriginChoice())
+        return { ok: false, error: 'not-pending' };
+    resolveOriginInFlight = true;
+    try {
+        if (choice === 'replace') {
+            const previous = githubSync.getStoredOriginIdentity();
+            const label = previous ? (0, syncOrigin_1.identityArchiveLabel)(previous) : 'github';
+            try {
+                await archiveLocalNotesForOriginSwitch(label, previous ?? undefined);
+            }
+            catch (err) {
+                const detail = err instanceof notesArchive.NotesArchiveError && !err.rolledBack
+                    ? `${err.message} — kept in ${err.archiveDir}: ${err.stranded.join('; ')}`
+                    : err instanceof Error ? err.message : String(err);
+                console.error('[Sync] archiving the local notes failed:', detail);
+                // Some notes may already be in the archive (undo failed): reload the UI.
+                if (err instanceof notesArchive.NotesArchiveError && !err.rolledBack) {
+                    electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+                }
+                emitSyncStatusChanged();
+                return { ok: false, error: 'archive-failed', detail };
+            }
+        }
+        const res = await githubSync.resolveOriginChoice(choice, NOTES_DIR);
+        if (!res.ok) {
+            emitSyncStatusChanged();
+            return { ok: false, error: res.error };
+        }
+        broadcastPullResult(res.pull, 'github', { manual: true });
+        startAutoSync();
+        githubSync.retrySyncJournal(NOTES_DIR).catch((err) => {
+            console.error('[Sync] journal retry after the origin choice failed:', String(err));
+        });
+        githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).then((didMigrate) => {
+            if (didMigrate)
+                electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+        }).catch((err) => {
+            console.error('[Sync] remote format migration failed:', String(err));
+        });
+        return { ok: true };
+    }
+    finally {
+        resolveOriginInFlight = false;
+    }
+});
+// Settings → Sync: is there any local archive (copies of notes set aside by
+// "use only the remote's notes")? And open its folder.
+electron_1.ipcMain.handle('sync:archives-status', () => {
+    return { hasArchives: notesArchive.hasArchives(notesArchiveRoot()) };
+});
+electron_1.ipcMain.handle('sync:open-archives', async () => {
+    const root = notesArchiveRoot();
+    if (!notesArchive.hasArchives(root))
+        return { ok: false };
+    const error = await electron_1.shell.openPath(root);
+    return error ? { ok: false } : { ok: true };
 });
 // Manual GitHub sync + its broadcast (shared by sync:pull and sync:pull-active).
 // Drains the journal first, like the autosync tick (startAutoSync): pushes
@@ -2813,7 +2999,10 @@ electron_1.ipcMain.handle('sync:pull', async () => {
             error: 'cloud-enabled',
         };
     }
-    return githubManualPull();
+    const result = await githubManualPull();
+    // Nothing was synced: the notes dir came from another remote (the engine's
+    // origin gate) — the user has to choose first.
+    return githubSync.getOriginChoice() ? { ...result, error: 'origin-choice-pending' } : result;
 });
 // Mirror local → repo: leaves the GitHub repo as an exact copy of what is on
 // disk (uploads what differs, deletes what is gone). Offered ONLY while NoteFlow
@@ -4954,8 +5143,9 @@ electron_1.app.whenReady().then(async () => {
     linkedNotesReady = true;
     queueOpenFiles(launchFiles(process.argv, process.cwd()));
     processOpenFiles();
-    githubSync.loadSyncSettings();
+    // Notes dir first: loading the settings derives the origin gate, which may list it.
     githubSync.setNotesDir(NOTES_DIR);
+    githubSync.loadSyncSettings();
     githubSync.onStatusChanged(() => emitSyncStatusChanged());
     // Held-back conditional push (the file changed on GitHub) → pull soon.
     githubSync.onRemoteConflict(() => scheduleGithubConflictPull());
@@ -5081,7 +5271,8 @@ electron_1.app.whenReady().then(async () => {
             await Promise.race([
                 runInitialPull(),
                 new Promise((resolve) => setTimeout(() => {
-                    if (githubSync.getSyncStatus().initialPullStatus === 'pending') {
+                    // A pending origin choice is not a failed pull: it stays 'pending'.
+                    if (githubSync.getSyncStatus().initialPullStatus === 'pending' && !githubSync.isOriginGateBlocked()) {
                         console.warn('[Startup] initial pull timeout — proceeding with local data');
                         githubSync.setInitialPullStatus('failed');
                     }
