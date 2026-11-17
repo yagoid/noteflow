@@ -10,17 +10,16 @@ exports.completeText = completeText;
 /** Context sent with each request (characters of plain text around the caret). */
 exports.AUTOCOMPLETE_BEFORE_CHARS = 1500;
 exports.AUTOCOMPLETE_AFTER_CHARS = 200;
-// ECHO: chat models (and the gateways in front of them) drop the leading space of a reply,
-// so "…la idea es" + "que empecemos" can't be told from "…a menu" + "do". Asking for the
-// last word to be repeated makes the boundary explicit: cleanSuggestion strips the echo and
-// keeps whatever follows it verbatim (" que…" vs "do…").
+// Same prompt as the benchmark. An earlier variant asked the model to echo the last word
+// (to make the word boundary explicit): measured, it made Haiku spend the whole token cap
+// reasoning half the time and put a blank line after the echo the rest — always empty.
+// cleanSuggestion still strips an echo if one shows up and fixes the leading space.
 const SYSTEM = [
     'You are an inline autocomplete engine inside a note-taking app.',
     'Continue the user\'s text from the exact position marked <CURSOR/>.',
-    'Start your reply by repeating, exactly as written, the last word (or word fragment) before the cursor, then continue from it.',
-    'After that word write ONLY the continuation: at most one sentence (or the rest of the current list item), in the same language and tone as the text.',
-    'Never repeat anything else that is already written, never explain, never use quotes or markdown fences.',
-    'If the text before the cursor ends in the middle of a word, finish that word.',
+    'Reply with ONLY the continuation: at most one sentence (or the rest of the current list item), in the same language and tone as the text.',
+    'Never repeat text that is already written, never explain, never use quotes or markdown fences.',
+    'If the text before the cursor ends in the middle of a word, finish that word; otherwise start with a space when one is needed.',
     'Do not run into the text after the cursor.',
 ].join(' ');
 /**
