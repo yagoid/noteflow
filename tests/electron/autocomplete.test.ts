@@ -35,7 +35,104 @@ describe('cleanSuggestion — spacing', () => {
   })
 })
 
-describe('cleanSuggestion — middle of a word', () => {
+describe('cleanSuggestion — reply marker ("+" glued, "_" new word)', () => {
+  const partial = (before: string, raw: string) => cleanSuggestion(before, raw, null, { partial: true })
+
+  it('"+" glues the reply to the half-typed word', () => {
+    expect(cleanSuggestion('Mañana voy al dentis', '+ta por la tarde', 'stop')).toBe('ta por la tarde')
+    expect(cleanSuggestion('Mañana voy al dentis', '+ ta por la tarde', 'stop')).toBe('ta por la tarde')
+    expect(cleanSuggestion('Mañana voy al dentis', '  +ta por la tarde', 'stop')).toBe('ta por la tarde')
+    // No evidence in the text is needed (unlike the unmarked fallback), not even for one letter.
+    expect(cleanSuggestion('We should probably resched', '+ule the meeting', 'stop')).toBe('ule the meeting')
+    expect(cleanSuggestion('Vamos a l', '+a playa mañana', 'stop')).toBe('a playa mañana')
+  })
+
+  it('"_" starts a new word: one space, whether or not the model sent one after the marker', () => {
+    expect(cleanSuggestion('Mañana voy', '_al dentista', 'stop')).toBe(' al dentista')
+    expect(cleanSuggestion('Mañana voy', '_ al dentista', 'stop')).toBe(' al dentista')
+    expect(cleanSuggestion('Hay que revisar', '_ el orden', 'stop')).toBe(' el orden')
+    // Even when the joined word is known from the text (the fallback would have joined).
+    expect(cleanSuggestion('Ir al dentista. Mañana voy al dentis', '_ta por la tarde', 'stop')).toBe(' ta por la tarde')
+  })
+
+  it('"_" puts no space before closing punctuation', () => {
+    expect(cleanSuggestion('Compré pan', '_, leche y huevos', 'stop')).toBe(', leche y huevos')
+    expect(cleanSuggestion('Compré pan', '_ . Luego fui a casa', 'stop')).toBe('. Luego fui a casa')
+  })
+
+  it('adds no space when the text already ends with one, a line break, or is empty', () => {
+    expect(cleanSuggestion('Mañana voy ', '_al dentista', 'stop')).toBe('al dentista')
+    expect(cleanSuggestion('Mañana voy ', '_ al dentista', 'stop')).toBe('al dentista')
+    expect(cleanSuggestion('Mañana voy ', '+al dentista', 'stop')).toBe('al dentista')
+    expect(cleanSuggestion('Lista de hoy:\n', '_comprar pan', 'stop')).toBe('comprar pan')
+    expect(cleanSuggestion('', '_Hola', 'stop')).toBe('Hola')
+  })
+
+  it('"+" with nothing to glue to (the text does not end in a letter or digit) is a new word', () => {
+    expect(cleanSuggestion('Hola.', '+Luego nos vemos', 'stop')).toBe(' Luego nos vemos')
+    expect(cleanSuggestion('Compré pan,', '+ leche y huevos', 'stop')).toBe(' leche y huevos')
+    expect(cleanSuggestion('Compré pan', '+, leche y huevos', 'stop')).toBe(', leche y huevos')
+    expect(cleanSuggestion('Hola. ', '+Luego nos vemos', 'stop')).toBe('Luego nos vemos')
+    // Digits and accented letters are a word to glue to.
+    expect(cleanSuggestion('Quedamos en 202', '+6 para cenar', 'stop')).toBe('6 para cenar')
+    expect(cleanSuggestion('Fui a la reunió', '+n de ayer', 'stop')).toBe('n de ayer')
+  })
+
+  it('"_": an echo is only dropped when it stops at a word boundary', () => {
+    expect(cleanSuggestion('Compré la', '_lavadora nueva ayer', 'stop')).toBe(' lavadora nueva ayer')
+    expect(cleanSuggestion('Hola.', '+Hola.mente no es eco', 'stop')).toBe(' Hola.mente no es eco')
+    // A real echo still goes: followed by a space, punctuation or nothing.
+    expect(cleanSuggestion('Compré la', '_la lavadora nueva', 'stop')).toBe(' lavadora nueva')
+    expect(cleanSuggestion('Compré la', '_Compré la, y luego', 'stop')).toBe(', y luego')
+    expect(cleanSuggestion('Compré la', '_la', 'stop')).toBe('')
+    // "+" keeps cutting inside the word: that is what finishing it means.
+    expect(cleanSuggestion('Compré la', '+lavadora nueva', 'stop')).toBe('vadora nueva')
+    // Streaming: "_la" may still be an echo, "_lavadora …" no longer is.
+    expect(cleanSuggestion('Compré la', '_la', null, { partial: true })).toBe('')
+    expect(cleanSuggestion('Compré la', '_lavadora nueva ay', null, { partial: true })).toBe(' lavadora nueva')
+  })
+
+  it('without a marker the old spacing rules still apply (older proxy)', () => {
+    expect(cleanSuggestion('Mañana voy', 'al dentista', 'stop')).toBe(' al dentista')
+    expect(cleanSuggestion('Ir al dentista. Mañana voy al dentis', ' ta por la tarde', 'stop')).toBe('ta por la tarde')
+    expect(cleanSuggestion('Mañana voy al dentis', 'ta por la tarde', 'stop')).toBe(' ta por la tarde')
+  })
+
+  it('a marker alone is an empty suggestion', () => {
+    expect(cleanSuggestion('Mañana voy', '+', 'stop')).toBe('')
+    expect(cleanSuggestion('Mañana voy', '_', 'stop')).toBe('')
+    expect(cleanSuggestion('Mañana voy', ' _  ', 'stop')).toBe('')
+    expect(cleanSuggestion('Mañana voy', '_\ny luego', 'stop')).toBe('')
+  })
+
+  it('only the first character is a marker: later "+" and "_" are text', () => {
+    expect(cleanSuggestion('El total es', '_2 + 2 y snake_case', 'stop')).toBe(' 2 + 2 y snake_case')
+    expect(cleanSuggestion('El total es', '+_x', 'stop')).toBe('_x')
+    expect(cleanSuggestion('El total es', 'a + b_c', 'stop')).toBe(' a + b_c')
+  })
+
+  it('the rest of the cleaning is unchanged: echo, first line, token cap, word cap', () => {
+    expect(cleanSuggestion('Notas\nMañana voy al', '_voy al dentista', 'stop')).toBe(' dentista')
+    expect(cleanSuggestion('Hay que comprar toma', '+tomates y cebollas', 'stop')).toBe('tes y cebollas')
+    expect(cleanSuggestion('Mañana voy', '_al dentista\ny luego al cine', 'stop')).toBe(' al dentista')
+    expect(cleanSuggestion('Mañana voy', '_al dentista por la tar', 'length')).toBe(' al dentista por la')
+    expect(cleanSuggestion('Lista', '_uno dos tres cuatro cinco seis siete ocho nueve diez once doce trece', 'stop'))
+      .toBe(' uno dos tres cuatro cinco seis siete ocho nueve diez once doce')
+  })
+
+  it('partial: nothing until the marker is known and a whole word follows it', () => {
+    expect(partial('Mañana voy', ' ')).toBe('')
+    expect(partial('Mañana voy', '_')).toBe('')
+    expect(partial('Mañana voy', '_ ')).toBe('')
+    expect(partial('Mañana voy', '+')).toBe('')
+    expect(partial('Mañana voy', '_al')).toBe('')
+    expect(partial('Mañana voy', '_al den')).toBe(' al')
+    expect(partial('Mañana voy', '_ al dentista por')).toBe(' al dentista')
+    expect(partial('We should probably resched', '+ule the mee')).toBe('ule the')
+  })
+})
+
+describe('cleanSuggestion — middle of a word (no marker: fallback heuristic)', () => {
   const note = 'Llamar al dentista para pedir cita.\nMañana voy al dentis'
 
   it('joins when the finished word already appears in the text (even if the model sent a space)', () => {

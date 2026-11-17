@@ -17,7 +17,9 @@ import {
 // shows the answer dimmed there as it streams in — a widget decoration, never part of the
 // document. Tab inserts it (as its own undo step), Esc or any other edit / caret
 // move drops it; typing the characters it starts with keeps the rest. One request in flight
-// per editor: any edit or caret move cancels it.
+// per editor: any edit or caret move cancels it. While autocomplete is on, a Tab with no
+// suggestion in a plain paragraph (also inside a quote) does nothing — it would leave the
+// editor otherwise; Shift+Tab still does.
 //
 // Never asked for: code blocks, tables, a non-empty selection, a caret that isn't at the end
 // of a paragraph, too little text, an open "/" menu, an IME composition, a read-only or
@@ -67,6 +69,19 @@ function completionPos(state: EditorState): number | null {
   return $pos.pos
 }
 
+/** Caret (or a selection) inside a paragraph that hangs from the document, directly or
+ *  through blockquotes: where suggestions show up and Tab has no job of its own (list and
+ *  task items, table cells, code blocks and the kanban board handle it; a board is an
+ *  atom, never a text parent). */
+function inPlainParagraph(state: EditorState): boolean {
+  const { $from, $to } = state.selection
+  if ($from.parent.type.name !== 'paragraph' || !$from.sameParent($to)) return false
+  for (let depth = $from.depth - 1; depth > 0; depth--) {
+    if ($from.node(depth).type.name !== 'blockquote') return false
+  }
+  return true
+}
+
 /** A user edit — not undo/redo, a paste or drop, an external content sync
  *  (preventUpdate / addToHistory:false) nor this plugin's own transactions. Not enough on
  *  its own to arm a request: commands (a snippet, a "/" command, ticking a checkbox) pass
@@ -90,8 +105,9 @@ export interface AiGhostTextOptions {
 export const AiGhostText = Extension.create<AiGhostTextOptions>({
   name: 'aiGhostText',
 
-  // Above every keymap (tables 150, brackets 200, lists): Tab must reach us first,
-  // but only while a suggestion is on screen — otherwise it falls through untouched.
+  // Above every keymap (tables 150, brackets 200, lists): Tab must reach us first. It is
+  // ours while a suggestion is on screen and, with autocomplete on, in a plain paragraph
+  // (swallowed); everywhere else it falls through untouched.
   priority: 1000,
 
   addOptions() {
@@ -218,9 +234,18 @@ export const AiGhostText = Extension.create<AiGhostTextOptions>({
             return false
           },
           handleKeyDown(view, event) {
+            if (view.composing) return false
+            const plainTab = event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey
             const ghost = ghostKey.getState(view.state)?.ghost
-            if (!ghost || view.composing) return false
-            if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+            if (!ghost) {
+              // No suggestion (it may have just gone away): with autocomplete on, a Tab in a
+              // plain paragraph is swallowed instead of moving the focus out of the editor,
+              // where the user would keep typing into nothing.
+              if (!plainTab || slashMenuOpen(view.state) || !inPlainParagraph(view.state)) return false
+              const { enabled, available } = useAiAutocompleteStore.getState()
+              return enabled && available && isAllowed()
+            }
+            if (plainTab) {
               // Its own undo step (the history group is closed before and after: one Ctrl+Z
               // removes the suggestion only, not the typing around it). It carries our meta,
               // so it doesn't count as typing: no new request until the user types again.

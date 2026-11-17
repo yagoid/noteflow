@@ -914,7 +914,13 @@ En ambos modos el `.md` de la sección guarda markdown (el editor serializa con 
 - **Tab** la acepta (un solo `Ctrl+Z` la deshace); **Esc** la descarta; cualquier otra edición o
   mover el cursor también la descarta. Si tecleas justo lo que la sugerencia empieza diciendo, se
   conserva el resto. Tras aceptar con Tab no llega otra sugerencia hasta que vuelves a teclear.
-- Sin sugerencia visible, Tab hace lo de siempre (sangrar listas, saltar de celda en tablas…).
+- Sin sugerencia visible, Tab hace lo de siempre en listas, tareas, tablas y bloques de código
+  (sangrar, saltar de celda…). Con el autocompletado activo, **Tab no sale del editor desde un
+  párrafo** (normal o dentro de una cita): no hace nada, así no se escribe fuera al pulsarlo cuando
+  la sugerencia acaba de desaparecer. **Shift+Tab sí** sale, como siempre. Con el autocompletado
+  apagado, Tab se comporta como siempre.
+- Limitación conocida: si una sugerencia empezara de verdad por `+` o `_`, ese primer carácter
+  puede perderse (se usa internamente como marcador de "pegado a la palabra" / "palabra nueva").
 - **Nunca** se usa en notas cifradas, secciones ocultas a la IA ("Hide from AI"), notas vinculadas,
   bloques de código, tablas, con texto seleccionado, con el menú `/` abierto, en modo texto, ni con
   menos de ~20 caracteres escritos.

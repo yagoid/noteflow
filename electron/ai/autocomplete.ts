@@ -17,9 +17,21 @@ const WORD_START = /^[\p{L}\p{N}¿¡(["“«]/u
 const CLOSING_PUNCTUATION = /^[,;:.!?)\]”»…]/u
 const TRAILING_LETTERS = /[\p{L}\p{M}]+$/u
 const LEADING_LETTERS = /^[\p{L}\p{M}]+/u
+const WORD_CHAR_END = /[\p{L}\p{M}\p{N}]$/u
+const WORD_CHAR_START = /^[\p{L}\p{M}\p{N}]/u
 
 /**
- * Was the caret left in the MIDDLE of a word that `head` (the reply's first word) finishes?
+ * The reply's first character, set by the proxy's prompt: "+" = the reply finishes the word
+ * the caret was left in (glued, no space), "_" = the reply starts a new word. The model
+ * sometimes puts a space after it ("_ el orden"). A "+" when the text does not end in a
+ * letter or digit is read as "_". Known limit: a reply WITHOUT a marker that really starts
+ * with "+" or "_" loses that character.
+ */
+const REPLY_MARKER = /^([+_])\s*/
+
+/**
+ * Fallback for a reply WITHOUT the marker (an older proxy, a model that skips it): was the
+ * caret left in the MIDDLE of a word that `head` (the reply's first word) finishes?
  *
  * The model's own leading space can't be trusted either way: it sometimes sends " ta mañana"
  * after "dentis" (a space too many) and sometimes "al dentista" after "voy" (a space too few),
@@ -42,13 +54,15 @@ export function finishesLastWord(before: string, head: string): boolean {
 /**
  * Turns the model's raw reply into the text to insert at the caret: first line only,
  * echo of the text before the cursor removed (longest suffix of the current line that
- * starts at a word boundary and prefixes the reply), spacing fixed (see finishesLastWord),
- * a reply cut by the token cap trimmed back to its last whole word, and at most
+ * starts at a word boundary and prefixes the reply), spacing fixed (the reply's leading
+ * marker — see REPLY_MARKER — decides it; without one, see finishesLastWord), a reply cut
+ * by the token cap trimmed back to its last whole word, and at most
  * AUTOCOMPLETE_MAX_WORDS words.
  *
  * With `partial` (the reply is still streaming) it returns only what is already safe to
  * show: the last word is held back until the next one starts (it may be half a token),
- * and nothing is shown while the reply could still turn out to be an echo of the line.
+ * nothing is shown while the reply could still turn out to be an echo of the line, nor
+ * before the marker has some text after it.
  */
 export function cleanSuggestion(
   before: string,
@@ -67,14 +81,27 @@ export function cleanSuggestion(
 
   const endsWithSpace = before === '' || /\s$/.test(before)
   const line = before.slice(before.lastIndexOf('\n') + 1).trimEnd()
-  const reply = text.trimStart()
-  const modelSpace = text !== reply
+  const unmarked = text.trimStart()
+  // Only the reply's first non-blank character can be the marker; a marker alone is empty.
+  const sent = (REPLY_MARKER.exec(unmarked)?.[1] ?? null) as '+' | '_' | null
+  // "+" needs a word to be glued to: after punctuation ("Hola." + "+Luego") it is a new word.
+  const marker = sent === '+' && !WORD_CHAR_END.test(before) ? '_' : sent
+  const reply = sent ? unmarked.replace(REPLY_MARKER, '') : unmarked
+  if (!reply) return ''
+  const modelSpace = text !== unmarked
   let rest: string | null = null
   for (let i = 0; i < line.length; i++) {
     if (i > 0 && !/\s/.test(line[i - 1])) continue
     if (/\s/.test(line[i])) continue
     const suffix = line.slice(i)
-    if (reply.startsWith(suffix)) { rest = reply.slice(suffix.length); break }
+    if (reply.startsWith(suffix)) {
+      const after = reply.slice(suffix.length)
+      // A new word that merely starts like the line's last one is not an echo
+      // ("Compré la" + "_lavadora"): with "_" the echo must stop at a word boundary.
+      if (marker === '_' && WORD_CHAR_START.test(after)) continue
+      rest = after
+      break
+    }
     // Still streaming and everything so far repeats the line: wait for more.
     if (opts.partial && !lineDone && suffix.startsWith(reply)) return ''
   }
@@ -83,8 +110,10 @@ export function cleanSuggestion(
     out = endsWithSpace ? rest.trimStart() : rest
   } else if (endsWithSpace) {
     out = reply
-  } else if (CLOSING_PUNCTUATION.test(reply)) {
-    out = reply // "hola" + ", que tal": never a space before closing punctuation
+  } else if (marker === '+' || CLOSING_PUNCTUATION.test(reply)) {
+    out = reply // glued to the half-typed word; "hola" + ", que tal": never a space before closing punctuation
+  } else if (marker === '_') {
+    out = ` ${reply}`
   } else if (WORD_END.test(before) && WORD_START.test(reply)) {
     out = finishesLastWord(before, LEADING_LETTERS.exec(reply)?.[0] ?? '') ? reply : ` ${reply}`
   } else {

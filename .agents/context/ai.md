@@ -751,24 +751,40 @@ y sus handlers en `main.ts`; renderer `components/Editor/AiGhostText.ts` (extens
   de armar peticiones hasta entonces (`aiAutocompleteStore.blockedUntil`; cualquier
   `ai:autocomplete-changed` lo pone a 0 y main vuelve a decidir).
 - **`cleanSuggestion(before, raw, finishReason, {partial?})` (pura):** primera línea solamente; quita
-  el marcador `<CURSOR/>` y un **eco** del final de la línea actual (sufijo más largo que empiece en
+  la marca `<CURSOR/>`, el **marcador de respuesta** (`+`/`_`, ver abajo) y un **eco** del final de la línea actual (sufijo más largo que empiece en
   límite de palabra y sea prefijo de la respuesta); arregla el espacio inicial; si `finish_reason ===
   'length'` recorta a la última palabra entera; tope de **12 palabras** (`AUTOCOMPLETE_MAX_WORDS`),
   prefiriendo cortar en puntuación si quedan ≥ 4 palabras. **Con `partial`** (stream abierto) devuelve
   solo lo seguro de pintar: retiene la última palabra hasta que empieza la siguiente (o llega un salto
-  de línea) y no devuelve nada mientras la respuesta aún podría ser un eco. Al pasar de 12 palabras el
+  de línea) y no devuelve nada mientras la respuesta aún podría ser un eco, ni antes de conocer el
+  marcador y tener texto detrás. Al pasar de 12 palabras el
   texto puede **encogerse una vez** (corte en puntuación): el final manda.
-- **Espacio inicial y mitad de palabra (heurística, `finishesLastWord`):** el espacio inicial del
-  modelo no es fiable en ningún sentido (a veces sobra: "dentis" → " ta mañana"; a veces falta:
-  "voy" → "al dentista") y la respuesta no permite distinguirlo. Regla: si el texto acaba en
+- **Espacio inicial y mitad de palabra — protocolo de marcador (`REPLY_MARKER`):** el espacio
+  inicial del modelo no es fiable (Haiku no lo manda nunca), así que el prompt del proxy
+  (`AUTOCOMPLETE_SYSTEM_PROMPT`, ver `monetization.md`) le obliga a empezar la respuesta con un
+  carácter: **`+`** = termina la palabra a medias → se une **sin espacio**; **`_`** = palabra nueva →
+  **un espacio delante**, salvo antes de puntuación de cierre. Si `before` ya acaba en espacio/salto
+  o está vacío, nunca se añade espacio (con cualquiera de los dos). `cleanSuggestion` solo mira el
+  **primer carácter no blanco** de la respuesta; quita el marcador y los espacios que le sigan (a
+  veces llega `"_ el orden"`); un `+`/`_` más adelante es texto; una respuesta que se queda solo en
+  el marcador es vacía. El eco se busca después de quitar el marcador (`"+tomates"` tras "toma" →
+  "tes"). Dos salvaguardas: un **`+` sin palabra a la que pegarse** (`before` no acaba en letra ni
+  dígito: "Hola." + `+Luego`) se trata como `_` → "Hola. Luego"; y **con `_` el eco solo se quita
+  si termina en límite de palabra** ("Compré la" + `_lavadora` → " lavadora", no "vadora"; con `+`
+  sí se corta dentro de la palabra, que es justo terminarla). **Limitación:** una respuesta **sin**
+  marcador que empiece de verdad por `+` o `_` (proxy antiguo, p. ej. `_cursiva_`) pierde ese
+  carácter, porque se lee como marcador.
+- **Respaldo sin marcador (heurística, `finishesLastWord`):** con un proxy antiguo o si el modelo
+  se salta el marcador, la respuesta no permite distinguir los dos casos (a veces sobra el espacio:
+  "dentis" → " ta mañana"; a veces falta: "voy" → "al dentista"). Regla: si el texto acaba en
   letra/dígito/puntuación de cierre y la respuesta empieza por letra, **se pone un espacio** (caso
   normal: el usuario paró tras una palabra entera) **salvo evidencia en el propio texto** de que
   estaba a media palabra: el fragmento final + la primera palabra de la respuesta ("dentis" + "ta")
   ya aparece antes como palabra entera **y** el fragmento solo ("dentis") no. Nunca se une con
   fragmentos de una letra (a/y/o/e…) ni si la respuesta empieza en mayúscula. Además: nunca espacio
   antes de puntuación de cierre (`, . ; : ! ? ) ]`), y tras un eco se respeta lo que queda tal cual.
-  **Limitación conocida:** una palabra a medias que no aparezca antes en los 1500 caracteres de
-  contexto se sigue separando con espacio.
+  **Limitación conocida (solo del respaldo):** una palabra a medias que no aparezca antes en los
+  1500 caracteres de contexto se separa con espacio.
 - **Renderer (`AiGhostText`, prioridad 1000, registrada siempre en `Editor.tsx`; inerte con el ajuste
   apagado):** estado del plugin `{ghost, typed}`. `typed` sube con cada transacción que **parece
   tecleo** (`isTyping`: cambia el doc y no es undo/redo —`isHistoryTransaction`—, ni pegado/drop
@@ -795,8 +811,27 @@ y sus handlers en `main.ts`; renderer `components/Editor/AiGhostText.ts` (extens
   !activeSection?.aiHidden`, leída en vivo): **notas cifradas, secciones `aiHidden` y notas
   vinculadas**. Solo existe en el **Modo markdown** (el modo texto no usa TipTap) y solo en
   `NoteEditor` (las sticky no pasan la prop → `false`).
-- **Convivencia con otras teclas:** sin sugerencia visible el plugin no toca Tab/Esc (listas, celdas
-  de tabla, menú `/`). No se pide con el menú `/` abierto, y `AutoCloseBrackets` deja el cursor
+- **Tab sin sugerencia (no se escapa del editor):** en un párrafo normal Tab no tiene función y el
+  navegador saca el foco del editor (a un botón de la barra); con el autocompletado es fácil
+  pulsarlo justo cuando la sugerencia acaba de desaparecer y seguir tecleando fuera. Por eso, con el
+  autocompletado **activo** (`enabled` + `available` + `isAllowed()`; el bloqueo temporal por cuota
+  no cuenta), un Tab **sin modificadores** con el cursor o la selección en un **párrafo normal**
+  (`inPlainParagraph`: hijo directo del documento o dentro de una cita —`blockquote`—, donde también
+  hay sugerencias) **se consume sin hacer nada**: desde un párrafo, Tab ya no sale del editor;
+  **Shift+Tab sí** (no se toca: sigue siendo la salida por teclado hacia atrás). No aplica dentro
+  de ítems de lista/tarea, tablas, bloques de código, encabezados ni con el kanban seleccionado
+  (ahí Tab sigue como siempre), ni con el menú `/` abierto, ni durante una composición IME. Con el
+  autocompletado apagado (o contenido no permitido a la IA) Tab se comporta
+  exactamente como antes.
+- **Convivencia con otras teclas:** fuera de ese caso, sin sugerencia visible el plugin no toca
+  Tab/Esc (listas, celdas de tabla, menú `/` — que no usa Tab —; los snippets se insertan desde su
+  botón/modal, sin Tab). No se pide con el menú `/` abierto, y `AutoCloseBrackets` deja el cursor
   antes del `)` (no es final de párrafo → no se pide).
-- **Pendiente:** el servidor (ruta `/autocomplete` + campo `autocomplete` de `/usage`) se implementó
-  en paralelo; **el flujo de extremo a extremo contra el proxy desplegado no está verificado**.
+- **Estado de verificación (2026-11-17):** el servidor (ruta `/autocomplete` + campo `autocomplete`
+  de `/usage`) está **desplegado en producción** con el prompt de marcador (mediciones de coste y
+  calidad en `monetization.md` § Autocompletado). **Probado en la app real** (perfil dev) de extremo
+  a extremo: texto fantasma, Tab/Esc, undo, tecleo coincidente, exclusiones (mitad de párrafo,
+  Backspace, menú `/`, bloque de código, checkbox), apagar/encender en vivo, Tab en párrafo que ya
+  no escapa y sangrado en listas. **Sin probar a mano:** notas cifradas, secciones `aiHidden`,
+  tablas, IME, stickies y el borrado de cuenta con la tabla nueva. **Fallo residual conocido:**
+  "presu" → `+uesto` en ~1 de cada 3 (el modelo se come una letra; no tiene arreglo en el prompt).

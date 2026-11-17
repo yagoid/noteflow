@@ -992,13 +992,43 @@ export const AUTOCOMPLETE_MAX_BODY_BYTES = 32 * 1024
 /** Marks the caret inside the user message. */
 export const AUTOCOMPLETE_CURSOR_MARK = '<CURSOR/>'
 
-export const AUTOCOMPLETE_SYSTEM_PROMPT =
-  "You are an inline autocomplete engine inside a note-taking app. Continue the user's text from the exact position marked <CURSOR/>. " +
-  'Reply with ONLY the continuation, and keep it SHORT: the next 3 to 10 words, just enough to finish the current clause or list item, in the same language and tone as the text. ' +
-  'Answer immediately, without thinking it through. ' +
-  'Never repeat text that is already written, never explain, never use quotes or markdown fences. ' +
-  'If the text before the cursor ends in the middle of a word, finish that word; otherwise start with a space when one is needed. ' +
-  'Do not run into the text after the cursor.'
+/**
+ * Marker protocol: the model never sends a reliable leading space, so the reply
+ * must START with one character the CLIENT interprets and strips (cleanSuggestion
+ * in electron/ai/autocomplete.ts): "+" = glued to the half-typed word, "_" = a
+ * new word. The five examples are part of what makes the model comply.
+ *
+ * The user message (buildAutocompleteUserMessage) carries the note in <note>
+ * and the line being written again in <line>: that repetition is what keeps the
+ * model on the half-typed word and on the line's language in mixed-language notes.
+ */
+export const AUTOCOMPLETE_SYSTEM_PROMPT = [
+  'You are an inline autocomplete engine inside a note-taking app.',
+  'You get the note so far in <note> (the cursor is at <CURSOR/>) and, repeated in <line>, the line being written up to the cursor. Continue that line.',
+  'Your reply MUST start with one marker character: "+" if <line> stops in the middle of a word and you are finishing that word (your text is glued to it with no space), or "_" if you start a new word. After "_" the first thing you write is always a whole new word, never the rest of the previous one.',
+  'After the marker write ONLY the continuation, and keep it SHORT: the next 3 to 10 words, just enough to finish the current clause or list item.',
+  'Write in the language of <line>, in its tone, whatever the language of the rest of the note.',
+  'Answer immediately, without thinking it through.',
+  'Never repeat text that is already written (not even the last word), never explain or comment on the text, never use quotes or markdown fences.',
+  'Do not run into the text after the cursor.',
+  'Examples (<line> → reply):',
+  '"We should probably resched" → "+ule the meeting for next week"',
+  '"We should probably" → "_reschedule the meeting for next week"',
+  '"Hay que comprar toma" → "+tes y cebollas para la cena"',
+  '"Hay que comprar" → "_tomates y cebollas para la cena"',
+  '"No pude ir porque" → "_estaba enfermo ese día"',
+].join('\n')
+
+/**
+ * The user message of a suggestion (pass the trimmed context):
+ * `<note>\n${before}<CURSOR/>${after}\n</note>\n<line>${line}</line>`, where
+ * `line` is `before` from its last line break to its end (the whole of `before`
+ * when it has none, empty when `before` ends in a line break).
+ */
+export function buildAutocompleteUserMessage(before: string, after: string): string {
+  const line = before.slice(before.lastIndexOf('\n') + 1)
+  return `<note>\n${before}${AUTOCOMPLETE_CURSOR_MARK}${after}\n</note>\n<line>${line}</line>`
+}
 
 const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff
 const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff
@@ -1055,7 +1085,7 @@ export function buildAutocompleteBody(before: string, after: string, model: stri
     model,
     messages: [
       { role: 'system', content: AUTOCOMPLETE_SYSTEM_PROMPT },
-      { role: 'user', content: `${before}${AUTOCOMPLETE_CURSOR_MARK}${after}` },
+      { role: 'user', content: buildAutocompleteUserMessage(before, after) },
     ],
     stream: true,
     max_tokens: AUTOCOMPLETE_MAX_TOKENS,

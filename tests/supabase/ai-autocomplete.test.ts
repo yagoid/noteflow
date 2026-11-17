@@ -23,6 +23,7 @@ import {
   autocompletePricing,
   autocompleteUsageUnits,
   buildAutocompleteBody,
+  buildAutocompleteUserMessage,
   decideAutocompleteQuota,
   estimateInputTokens,
   legacyUsageUnits,
@@ -159,7 +160,7 @@ describe('buildAutocompleteBody (the whole upstream request is server-built)', (
       model: 'anthropic/claude-haiku-5.5',
       messages: [
         { role: 'system', content: AUTOCOMPLETE_SYSTEM_PROMPT },
-        { role: 'user', content: 'Buy mil<CURSOR/> and eggs' },
+        { role: 'user', content: '<note>\nBuy mil<CURSOR/> and eggs\n</note>\n<line>Buy mil</line>' },
       ],
       stream: true,
       max_tokens: 48,
@@ -180,13 +181,40 @@ describe('buildAutocompleteBody (the whole upstream request is server-built)', (
     expect(AUTOCOMPLETE_SYSTEM_PROMPT).toContain(AUTOCOMPLETE_CURSOR_MARK)
     const only = buildAutocompleteBody('abc', '', 'x/y') as { model: string; messages: Array<{ content: string }> }
     expect(only.model).toBe('x/y')
-    expect(only.messages[1].content).toBe('abc<CURSOR/>')
+    expect(only.messages[1].content).toBe('<note>\nabc<CURSOR/>\n</note>\n<line>abc</line>')
+    expect(only.messages[1].content).toBe(buildAutocompleteUserMessage('abc', ''))
   })
 
-  it('pins the prompt (the one validated in the spike: short, same language, no thinking)', () => {
-    expect(AUTOCOMPLETE_SYSTEM_PROMPT).toBe(
-      "You are an inline autocomplete engine inside a note-taking app. Continue the user's text from the exact position marked <CURSOR/>. Reply with ONLY the continuation, and keep it SHORT: the next 3 to 10 words, just enough to finish the current clause or list item, in the same language and tone as the text. Answer immediately, without thinking it through. Never repeat text that is already written, never explain, never use quotes or markdown fences. If the text before the cursor ends in the middle of a word, finish that word; otherwise start with a space when one is needed. Do not run into the text after the cursor."
-    )
+  it('repeats in <line> the line being written: `before` from its last line break', () => {
+    // No line break: the whole of `before`.
+    expect(buildAutocompleteUserMessage('Hay que comprar toma', ''))
+      .toBe('<note>\nHay que comprar toma<CURSOR/>\n</note>\n<line>Hay que comprar toma</line>')
+    // Several lines: only the last one; `after` (with its own line breaks) never reaches <line>.
+    expect(buildAutocompleteUserMessage('# Shopping\n\nWe need milk.\nHay que comprar toma', '\nNext line\nLast'))
+      .toBe('<note>\n# Shopping\n\nWe need milk.\nHay que comprar toma<CURSOR/>\nNext line\nLast\n</note>\n<line>Hay que comprar toma</line>')
+    // Spaces of the line are kept as typed.
+    expect(buildAutocompleteUserMessage('uno\n  - dos ', '')).toBe('<note>\nuno\n  - dos <CURSOR/>\n</note>\n<line>  - dos </line>')
+    // `before` ends in a line break: the line is still empty.
+    expect(buildAutocompleteUserMessage('Lista de hoy:\n', 'x')).toBe('<note>\nLista de hoy:\n<CURSOR/>x\n</note>\n<line></line>')
+  })
+
+  it('pins the prompt (marker protocol: "+" glued to the half-typed word, "_" a new word)', () => {
+    expect(AUTOCOMPLETE_SYSTEM_PROMPT.split('\n')).toEqual([
+      'You are an inline autocomplete engine inside a note-taking app.',
+      'You get the note so far in <note> (the cursor is at <CURSOR/>) and, repeated in <line>, the line being written up to the cursor. Continue that line.',
+      'Your reply MUST start with one marker character: "+" if <line> stops in the middle of a word and you are finishing that word (your text is glued to it with no space), or "_" if you start a new word. After "_" the first thing you write is always a whole new word, never the rest of the previous one.',
+      'After the marker write ONLY the continuation, and keep it SHORT: the next 3 to 10 words, just enough to finish the current clause or list item.',
+      'Write in the language of <line>, in its tone, whatever the language of the rest of the note.',
+      'Answer immediately, without thinking it through.',
+      'Never repeat text that is already written (not even the last word), never explain or comment on the text, never use quotes or markdown fences.',
+      'Do not run into the text after the cursor.',
+      'Examples (<line> → reply):',
+      '"We should probably resched" → "+ule the meeting for next week"',
+      '"We should probably" → "_reschedule the meeting for next week"',
+      '"Hay que comprar toma" → "+tes y cebollas para la cena"',
+      '"Hay que comprar" → "_tomates y cebollas para la cena"',
+      '"No pude ir porque" → "_estaba enfermo ese día"',
+    ])
   })
 
   it('a worst-case request stays a tiny fraction of the budget', () => {
@@ -196,8 +224,10 @@ describe('buildAutocompleteBody (the whole upstream request is server-built)', (
       DEFAULT_AUTOCOMPLETE_MODEL
     )
     const { costUsd } = autocompleteCharge(null, worst, AUTOCOMPLETE_FALLBACK_PRICE)
-    // What the "no reservation" design rests on: ≤ ~$0.0002 per suggestion.
-    expect(costUsd).toBeLessThan(0.0002)
+    // What the "no reservation" design rests on: ≤ ~$0.0003 per suggestion. This is the
+    // worst case since <line> repeats the line being written: a `before` without a single
+    // line break is sent twice (it was < $0.0002 before that repetition).
+    expect(costUsd).toBeLessThan(0.0003)
   })
 })
 
