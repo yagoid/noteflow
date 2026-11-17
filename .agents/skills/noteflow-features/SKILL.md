@@ -196,13 +196,13 @@ Iconos del TitleBar:
   solo notas que siguen en el store (las borradas no tienen título). El log solo existe desde que
   el dispositivo empezó a registrar; antes solo se conoce la **última** edición de cada nota.
   Ranking: más días primero, luego la tocada más recientemente. Colores solo de tokens del tema;
-  `ActivitySummary.tsx` + `src/lib/activitySummary.ts`; bajo la sección, en filas título + descripción + control: **Local AI**
-  (toggle de embeddings; activada, botón "Reindex all notes" con progreso), **Profile** (botón "Open
-  profile setup" → abre el cerebro en la pestaña Profile y cierra Ajustes) y **Expose CLI skill to AI
-  agents** (toggle: copia la skill del CLI a `~/.claude/skills` y `~/.agents/skills`, y a Windsurf si
-  está instalado)), **Appearance** (tema/fuente/acento/colores del editor/escala/secciones del sidebar/vista cerebro),
+  `ActivitySummary.tsx` + `src/lib/activitySummary.ts`), **Appearance** (tema/fuente/acento/colores del editor/escala/secciones del sidebar/vista cerebro),
   **Editor** (fuente/tamaño/ancho/índice/tareas marcadas al final/qué abre el clic en una nota) — grupo **Preferences** —; **Sync** (NoteFlow Cloud + GitHub),
-  **AI** (solo el proveedor del LLM), **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
+  **AI** (sección **Assistant** con el proveedor del LLM y sección **Your notes and AI**: **Local AI**
+  —toggle de embeddings; activada, "N notes" y botón "Reindex" con progreso—, **Profile** —"Redo
+  questionnaire" → abre el cerebro en la pestaña Profile y cierra Ajustes— y **CLI skill** —toggle:
+  copia la skill del CLI a `~/.claude/skills` y `~/.agents/skills`, y a Windsurf si está instalado),
+  **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
   de notas), **Startup** (autostart + stickies), **Templates** (plantillas de nota) — grupo **Your
   notes** —; y **Tutorial** (el tour "What's new", ver abajo), **Keyboard shortcuts** y **About**
   (versión + updates + **Send feedback** + enlaces: repo de GitHub y **Latest release notes**, que abre
@@ -1271,10 +1271,10 @@ derivado reconstruible desde los `.md`.
 - **Activación:** flag `settings.ai.enabled` (default **off**). La **UI definitiva de activación
   está en la vista cerebro** (ver abajo): con la IA off el cerebro muestra solo la estructura y un
   CTA "Activar IA local"; al activar descarga un modelo pequeño (~una vez) e indexa con barra de
-  progreso. También hay un toggle **"Local AI"** en Settings → General.
+  progreso. También hay un toggle **"Local AI"** en Settings → AI ("Your notes and AI").
 - **Panel Related:** al cambiar de sección/nota, el panel actualiza las relacionadas; click en un
   resultado navega a esa sección. Las notas **cifradas se omiten** (no entran al índice).
-- **Reindexar:** botón "Reindex all notes" en Settings → General (debajo del toggle "Local AI", muestra progreso); el índice también
+- **Reindexar:** botón "Reindex" en Settings → AI (junto al toggle "Local AI", muestra progreso); el índice también
   se mantiene al día solo al guardar (incremental, debounce).
 - Roadmap: este índice alimenta la **vista cerebro** (Fase 2 ✅) y el **chat RAG** (Fase 3 ✅, ver
   "Panel de IA" más abajo). Un índice, tres consumidores. Detalle técnico en `.agents/context/ai.md`.
@@ -1375,7 +1375,7 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   cualquier nota/sección como origen. Necesita la IA local (embeddings) activada.
 - **Profile:** cuestionario del **segundo cerebro** — **no aparece solo**: al entrar al cerebro
   siempre aterrizas en el chat (o en el proveedor, si aún no configuraste ninguno) y el cuestionario
-  se abre cuando pulsas la pestaña **Profile** (o desde la paleta / Ajustes → General, botón "Open profile setup"). Pensado para
+  se abre cuando pulsas la pestaña **Profile** (o desde la paleta / Ajustes → IA, botón "Redo questionnaire"). Pensado para
   **cualquier persona** (no solo
   perfiles técnicos) y para **mínimo esfuerzo**, organizado en **secciones**: *Professional* (a qué
   te dedicas, herramientas, en qué te enfocas), *Personal*, *Your style* y *Working with the AI*
@@ -1396,23 +1396,28 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   quedan en una sección final de baja relevancia y la IA tiene **prohibido sacarlos a colación** en
   conversaciones que no vienen a cuento (te recomienda directo, sin "como te gusta tal película…").
   La app nunca procesa los documentos: se los pasa directamente al modelo.
-- **⚙ Settings (proveedor):** arriba, una **línea de estado honesta**: "Chat ready · <proveedor>" solo
-  si el proveedor activo puede responder; si no (p. ej. recién instalada: Anthropic elegido **sin
-  clave**), **"Chat not set up"** y ninguna opción marcada como activa. Debajo, **tres cards al mismo
-  nivel** — **NoteFlow AI** (etiqueta "€5.99/month"; "In your plan" si lo tienes; "Add to your plan" si
-  pagas Cloud), **Your API key** ("Free" — pagas a tu proveedor) y **Local model** ("Free", Ollama) —;
-  la del proveedor en uso lleva el badge **Active** (solo si de verdad funciona). Al pulsar una, debajo
-  solo su sección. En el panel del Cerebro, estrecho, las cards se apilan.
-  - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow),
-    modelos curados (el recomendado marcado "(Recommended)"; los que gastan la asignación al menos el
-    doble de rápido, con sufijo "(≈N× quota)" — hoy ≈2× y ≈29×; el campo "Model" es de **solo
-    lectura**, se elige haciendo clic en uno de los modelos) y **barra de consumo mensual** en
-    porcentaje ("N% of this month’s AI allowance used": la asignación se mide por el coste real de
-    cada petición, así que los modelos caros la gastan antes). La lista de
-    modelos la sirve el servidor: los modelos nuevos **aparecen solos** (sin actualizar la app; "Load"
-    fuerza el refresco), se recuerda entre arranques y offline, y tu modelo elegido no cambia. Botón "Use NoteFlow
-    AI" para activarlo (o check "Active" si ya lo es). **Sin el plan** (sin sesión o sin suscripción),
-    elegir la card abre el **detalle del plan** en lugar de las cards (enlace "← AI options"): a la
+- **⚙ Settings (proveedor):** sección **Assistant** con un resumen a la derecha del título: "Answers
+  with <modelo>" solo si el proveedor activo puede responder; si no (p. ej. recién instalada: Anthropic
+  elegido **sin clave**), **"Not set up"**. Debajo, **una lista con borde y tres filas con radio** —
+  **NoteFlow AI** (etiqueta "€5.99/month"; "In your plan" si lo tienes; "Add to your plan" si pagas
+  Cloud), **Your API key** ("Free" — pagas a tu proveedor) y **Local model** ("Free", Ollama) —; la del
+  proveedor en uso lleva la pastilla verde **"In use · <proveedor>"** (solo si de verdad funciona). La
+  fila elegida (al abrir: la que está en uso, o NoteFlow AI si no hay nada configurado) se despliega
+  con un **formulario de etiquetas a la izquierda** (Model, Connection, etc.). **Todos los campos se
+  ven y se guardan antes de activar** la fuente: si la elegida no es la que usa el chat, un pie
+  discontinuo dice "The chat now uses X." con el botón **"Use <proveedor>"**. En el panel del Cerebro,
+  estrecho, las etiquetas van encima de cada control.
+  - **Model:** un desplegable con una fila por modelo (radio, nombre, chip "Recommended" y chip
+    "≈N× quota" amarillo, rojo desde ≈10×). **Connection:** botón "Test" con el resultado al lado
+    ("✓ Responds" o el error).
+  - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow).
+    Filas **Quota** (barra de consumo mensual en porcentaje, "N% of this month’s AI allowance used":
+    la asignación se mide por el coste real de cada petición, así que los modelos caros la gastan
+    antes), **Model** (solo los modelos curados: sin texto libre — hoy ≈2× y ≈29× en los chips) y
+    **Connection**. La lista de modelos la sirve el servidor: los modelos nuevos **aparecen solos** (sin
+    actualizar la app), se recuerda entre arranques y offline, y tu modelo elegido no cambia. **Sin el
+    plan** (sin sesión o sin suscripción), la fila muestra **Plan** con el precio y "View plan", que abre
+    el **detalle del plan** en lugar de la lista (enlace "← AI options"): a la
     izquierda **"What's included"** (sin Ollama ni API keys, modelos eficientes con tools e imágenes,
     asignación mensual con consumo visible, catálogo siempre al día, y "si cancelas, vuelves a tu
     propia clave o a un modelo local"); a la derecha **una caja de plan** con el precio mensual y
@@ -1440,14 +1445,14 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     de subir no se pierden y GitHub Sync se reanuda si lo tenías conectado) y el asistente vuelve a tu
     último proveedor propio. Si no se pudo verificar el plan (sin red), no se apaga nada. Volver a
     suscribirte con la app abierta lo reactiva solo.
-  - **Your API key / Local model (gratis):** "Your API key" lista los proveedores con clave
-    (Anthropic/Claude, OpenAI, DeepSeek, MiniMax, Moonshot, OpenRouter, OpenCode Zen) y "Local model"
-    los que no la necesitan (**Ollama** preseleccionado, o Custom OpenAI-compatible). Eliges proveedor,
-    pegas tu **API key** si hace falta, ajustas Base URL y modelo, y pruebas la conexión. **Cada
-    proveedor recuerda su propia key/modelo** — cambiar de proveedor no las mezcla. Las claves se
-    guardan cifradas y nunca salen de tu máquina. Si el proveedor elegido no es el activo, la sección
-    solo muestra el desplegable + un botón **"Use this provider"**: los campos (key, Base URL, modelo)
-    aparecen al activarlo, porque siempre editan la config del **proveedor activo**.
+  - **Your API key / Local model (gratis):** "Your API key" lista en **Provider** los proveedores con
+    clave (Anthropic/Claude, OpenAI, DeepSeek, MiniMax, Moonshot, OpenRouter, OpenCode Zen) y "Local
+    model" en **Server** los que no la necesitan (**Ollama** preseleccionado, o Custom
+    OpenAI-compatible). Pegas tu **API key** si hace falta (guardada se ve enmascarada con ✓ y
+    "Change"/"Remove"), ajustas la URL, eliges el modelo (o "Type another model…"; "Load list" /
+    "Detect" lo pide al proveedor) y pruebas la conexión. **Cada proveedor recuerda su propia
+    key/modelo/URL** — cambiar de proveedor no las mezcla, y editar uno que no está en uso no toca el
+    que usa el chat. Las claves se guardan cifradas y nunca salen de tu máquina.
 
 > **Dos interruptores independientes:** la **IA local** (embeddings, se activa en el cerebro) da
 > contexto RAG y conexiones de contenido; el **proveedor LLM** (Ajustes) da el chat. El chat funciona

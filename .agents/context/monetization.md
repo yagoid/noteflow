@@ -701,17 +701,18 @@ es **un preset más**, no una implementación nueva.
   texto crudo (es una API key mala).
   Capabilities: imágenes **según el modelo activo** (`modelMeta`; los text-only las desactivan);
   PDF no (anthropic-only).
-- **UI:** `LlmConfigView` presenta las fuentes del asistente como **tres cards al mismo nivel**
-  (**NoteFlow AI** con su etiqueta de precio, **Your API key** "Free", **Local model** "Free"), con una
-  línea de estado honesta encima ("Chat not set up" si el proveedor activo no puede responder: una
-  instalación nueva, Anthropic sin clave, no marca ninguna card como activa), y debajo solo la
-  sección de la elegida. El preset **NoteFlow AI no aparece en ningún `<select>`** (se filtra por id).
-  Su sección: barra de consumo mensual + botón "Use NoteFlow AI" (`changeProvider('noteflow')`)
-  **solo con entitlement `ai`**; sin sesión o sin entitlement, elegir la card abre el **detalle del
-  plan** (`PlanDetail`, ver "Bloque de planes"), con el inicio de sesión dentro. Si la suscripción caduca teniéndolo activo, main lo devuelve solo a
+- **UI:** `LlmConfigView` presenta las fuentes del asistente como **una lista con tres filas con
+  radio** (**NoteFlow AI** con su etiqueta de precio, **Your API key** "Free", **Local model** "Free"),
+  con un resumen honesto junto al título ("Not set up" si el proveedor activo no puede responder: una
+  instalación nueva, Anthropic sin clave, no lleva la pastilla "In use"); la fila elegida se despliega
+  con su formulario. El preset **NoteFlow AI no aparece en ningún `<select>`** (se filtra por id).
+  Su formulario: cuota mensual + modelo + conexión, y el pie "Use NoteFlow AI" (`setLlmConfig({ active:
+  'noteflow' })`) **solo con entitlement `ai`** (o plan sin verificar); sin sesión o sin entitlement,
+  la fila muestra "Plan" con el precio y "View plan", que abre el **detalle del plan** (`PlanDetail`,
+  ver "Bloque de planes"), con el inicio de sesión dentro. Si la suscripción caduca teniéndolo activo, main lo devuelve solo a
   BYO en cuanto lo confirma un fetch fresco de entitlements (ver "Auto-activación…" → "Al confirmar
-  la pérdida"); hasta entonces el chat ve el 403 del proxy con su motivo. Detalle del selector, del estado de vista `view` (`Source | null`) y
-  de por qué los campos BYO se ocultan hasta activar el proveedor: `.agents/context/ai.md` § LLM.
+  la pérdida"); hasta entonces el chat ve el 403 del proxy con su motivo. Detalle del selector, del estado de vista `view` y de cómo se editan
+  los campos de un proveedor antes de activarlo (parámetro `preset` de `ai:llm-*`): `.agents/context/ai.md` § LLM.
   **Reactividad de la config LLM en el renderer:** el store `aiChatStore` (`llmConfig`/`presets`/
   `models`) se recarga con `loadConfig()` ante `onAccountStatusChanged` (y `onAiLlmPresetsChanged`)
   a nivel de **ventana**, no de panel: `App.tsx` (ventana principal, salvo sticky) y
