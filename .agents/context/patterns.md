@@ -1548,13 +1548,19 @@ y viajan con él.
 Cada tarea (`DeadlineTaskItemView`, salvo `plain`) tiene **un único botón** (`.task-meta-trigger`) dentro
 de `.task-actions` (el bloque que el modo Readable saca al margen): sin valores, un icono `CalendarClock`
 visible solo en hover; con valores, los **chips** (punto `task-importance-dot` + `task-badge` 📅/⏰)
-siempre visibles. Abre/cierra `TaskMenuPopover` (`TaskPickers.tsx`); el NodeView guarda el elemento
+siempre visibles. Abre/cierra `TaskMenuPopover` (`TaskPickers.tsx`). Cerrar pulsando el trigger
+también pasa por el `close()` del menú: `useDismiss(..., closeOnTrigger)` trata el `mousedown` en el
+trigger como un cierre más, y el NodeView anota en ese `mousedown` si el menú estaba abierto
+(`openOnPress`) para que el `click` siguiente no lo reabra. El NodeView guarda el elemento
 trigger en estado (no un ref leído en render). El formato markdown no cambia (`📅`/`⏰`/`🔺` del nodo).
 
 - **En vivo, salvo los campos nativos:** importancia, atajos de fecha y los "Clear" llaman a
   `updateAttributes` al momento (los chips se actualizan detrás). Los inputs `type=date`/`type=time`
-  llevan un **borrador** que solo se escribe en `blur`, `Enter` y **al cerrar** (Done, Esc, clic fuera:
-  `close()` confirma explícitamente, no se confía en el blur al desmontar). Motivo: Chromium emite
+  llevan un **borrador** que solo se escribe en `blur`, `Enter` y **al cerrar** (Done, Esc, clic fuera
+  y también **volver a pulsar el trigger**: `close()` confirma explícitamente, no se confía en el blur
+  al desmontar). Excepción: un `change` con el input **sin foco** viene del selector nativo (abierto con
+  `showPicker()` desde el icono, `tabIndex=-1`) y es un valor final → se escribe al momento (mismas
+  validaciones), así los chips se actualizan al elegir en el calendario. Motivo del borrador: Chromium emite
   `input` por segmento tecleado — años parciales (`0002-…`, `0202-…`) y horas intermedias (cambiar
   la alarma de 18:00 a 14:30 pasa por 14:00, 14:03…) —; cada escritura guarda la nota y
   `applyNoteUpdate` → `scheduleAlarms` → `checkAlarms()` (main) dispararía al instante una alarma
@@ -1594,7 +1600,8 @@ trigger en estado (no un ref leído en render). El formato markdown no cambia (`
   inputs heredan el `color-scheme` del tema (no se fuerza `dark`) y ocultan el indicador nativo: el
   icono del campo llama a `showPicker()`.
 - Las **tarjetas kanban** siguen con sus dos triggers y pickers separados (`DeadlinePopover`,
-  `ImportancePopover`); `useDismiss` es común (ahora informa del motivo: `'outside' | 'escape'`).
+  `ImportancePopover`); `useDismiss` es común (informa del motivo: `'outside' | 'escape' | 'trigger'`;
+  sin `closeOnTrigger`, como en esos pickers, el `mousedown` en el trigger se deja al propio trigger).
 - Tests: `tests/components/taskBadge.test.ts` (atajos, `isCommittableDue`, posición) y
   `tests/components/taskMenuPopover.test.ts` (happy-dom: importancia, atajo, borradores de fecha/hora
   que solo se escriben en blur/Enter/cierre, quitar y foco, cierre por Esc/clic fuera/trigger).

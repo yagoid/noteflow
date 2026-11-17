@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
 import { AlarmClock, Ban, Calendar, CalendarRange, Sun, Sunrise, X } from 'lucide-react'
@@ -22,20 +22,27 @@ import {
 // place, applied live. DeadlinePopover / ImportancePopover are the two separate
 // pickers of kanban cards (KanbanBoardView), positioned at `pos` (compute it with
 // popoverPosition from taskBadge.ts). All are portalled to <body> and
-// `position: fixed`; they close on click outside (except on their trigger,
-// which toggles them itself) and on Escape.
+// `position: fixed`; they close on click outside and on Escape. A press on the
+// trigger is left to the trigger (the kanban pickers' toggles them), unless
+// `closeOnTrigger`: then it closes like any other dismiss (the task menu, which
+// must write its field drafts on every close path).
 
-type DismissReason = 'outside' | 'escape'
+type DismissReason = 'outside' | 'escape' | 'trigger'
 
 function useDismiss(
   popoverRef: React.RefObject<HTMLDivElement | null>,
   trigger: HTMLElement | null,
   onClose: (reason: DismissReason) => void,
+  closeOnTrigger = false,
 ) {
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as Node
-      if (popoverRef.current?.contains(target) || trigger?.contains(target)) return
+      if (popoverRef.current?.contains(target)) return
+      if (trigger?.contains(target)) {
+        if (closeOnTrigger) onClose('trigger')
+        return
+      }
       onClose('outside')
     }
     // Capture phase on window: the note editor stops keydown propagation (React
@@ -50,7 +57,7 @@ function useDismiss(
       document.removeEventListener('mousedown', onMouseDown)
       window.removeEventListener('keydown', onKeyDown, true)
     }
-  }, [popoverRef, trigger, onClose])
+  }, [popoverRef, trigger, onClose, closeOnTrigger])
 }
 
 interface DeadlinePopoverProps {
@@ -225,15 +232,15 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
   }, [due, alarm])
   const closed = useRef(false)
 
-  /** Writes the valid field drafts that differ from the task. */
-  function commitDrafts() {
+  /** Writes the valid field drafts (or the values given) that differ from the task. */
+  function commitDrafts(values = { due: draftDue, alarm: draftAlarm }) {
     const patch: Partial<TaskMenuValues> = {}
     let nextDue = written.current.due
-    if (isCommittableDue(draftDue) && draftDue !== nextDue) {
-      patch.due = draftDue
-      nextDue = draftDue
+    if (isCommittableDue(values.due) && values.due !== nextDue) {
+      patch.due = values.due
+      nextDue = values.due
     }
-    if (nextDue && draftAlarm && draftAlarm !== written.current.alarm) patch.alarm = draftAlarm
+    if (nextDue && values.alarm && values.alarm !== written.current.alarm) patch.alarm = values.alarm
     if (patch.due === undefined && patch.alarm === undefined) return
     written.current = { ...written.current, ...patch }
     onChange(patch)
@@ -252,8 +259,11 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
   useLayoutEffect(() => {
     closeRef.current = close
   })
+  // The trigger is a dismiss too (closeOnTrigger): closing from it must go
+  // through close() as well, or a value picked in the native calendar and not
+  // yet written would be lost (the NodeView's click then doesn't reopen it).
   const dismiss = useCallback((reason: DismissReason) => closeRef.current(reason === 'escape'), [])
-  useDismiss(popoverRef, trigger, dismiss)
+  useDismiss(popoverRef, trigger, dismiss, true)
 
   // A clear button disappears once used: keep the focus in the menu (on "Done")
   // so Tab stays trapped and keys like Delete don't reach the app.
@@ -271,6 +281,17 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
     if (!isCommittableDue(draftDue)) setDraftDue(written.current.due ?? '')
     if (!draftAlarm) setDraftAlarm(written.current.alarm ?? '')
   }
+  // A change while the input doesn't have the focus comes from the native
+  // picker (opened with showPicker from the field's icon): that's a final
+  // value, written at once. With the focus, it's typing: draft only.
+  function onFieldChange(e: ChangeEvent<HTMLInputElement>, field: 'due' | 'alarm') {
+    const value = e.target.value
+    if (field === 'due') setDraftDue(value)
+    else setDraftAlarm(value)
+    if (e.target === document.activeElement) return
+    commitDrafts(field === 'due' ? { due: value, alarm: draftAlarm } : { due: draftDue, alarm: value })
+  }
+
   // The alarm needs a date: the task's, or a valid one being typed.
   const alarmEnabled = !!due || isCommittableDue(draftDue)
 
@@ -464,7 +485,7 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
               type="date"
               aria-label={t.editor.task.date}
               value={draftDue}
-              onChange={(e) => setDraftDue(e.target.value)}
+              onChange={(e) => onFieldChange(e, 'due')}
               // An incomplete/emptied date isn't written ("Clear" removes the deadline).
               onBlur={onFieldBlur}
             />
@@ -486,7 +507,7 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
               aria-label={t.editor.task.alarm}
               value={draftAlarm}
               disabled={!alarmEnabled}
-              onChange={(e) => setDraftAlarm(e.target.value)}
+              onChange={(e) => onFieldChange(e, 'alarm')}
               onBlur={onFieldBlur}
             />
             {alarm && due && (

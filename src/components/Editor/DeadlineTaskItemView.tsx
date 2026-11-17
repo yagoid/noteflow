@@ -33,6 +33,10 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
   const [menuTrigger, setMenuTrigger] = useState<HTMLElement | null>(null)
   const [isSticky, setIsSticky] = useState(false)
   const wrapperRef = useRef<HTMLElement>(null)
+  // Whether the menu was open when the trigger was pressed: that press already
+  // closed it (through the menu's own close, which writes its field drafts), so
+  // the click that follows must not reopen it.
+  const openOnPress = useRef(false)
 
   // Detect if we're inside a sticky-editor
   useEffect(() => {
@@ -104,9 +108,13 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
           <button
             contentEditable={false}
             className={`task-meta-trigger${due || importance ? ' has-value' : ''}${menuTrigger ? ' is-open' : ''}`}
+            onMouseDown={() => { openOnPress.current = !!menuTrigger }}
             onClick={(e) => {
-              const trigger = e.currentTarget
-              setMenuTrigger((open) => (open ? null : trigger))
+              if (openOnPress.current) {
+                openOnPress.current = false
+                return
+              }
+              setMenuTrigger(e.currentTarget)
             }}
             title={triggerTitle}
             aria-label={triggerTitle}

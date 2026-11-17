@@ -886,7 +886,8 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   `📅 fecha ⏰hora`), y clicar en ellos abre el mismo menú. El botón alterna el menú (abrir/cerrar).
 - **Menú de tarea** (popover pequeño; importancia, atajos y "Clear" se aplican **en vivo** y los
   chips se actualizan detrás; los campos de fecha y hora se guardan al salir del campo, con `Enter` o
-  al cerrar el menú, nunca a medio teclear):
+  al cerrar el menú —también si se cierra volviendo a pulsar el botón—, nunca a medio teclear; lo
+  elegido en el calendario nativo se guarda al momento):
   - **Importance**: fila segmentada `⊘ · Low · Medium · High`; la opción elegida toma su color.
     `←/→` la recorren (y la eligen); al abrir, el foco está en la opción actual.
   - **Deadline**: atajos **Today / Tomorrow / Next week** (el lunes siguiente) con el día que

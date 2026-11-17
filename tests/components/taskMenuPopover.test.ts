@@ -106,22 +106,62 @@ describe('TaskMenuPopover', () => {
     expect(onClose).toHaveBeenCalledWith(true)
   })
 
-  it('writes the field drafts when it closes from a click outside, before closing', () => {
+  it('writes the field draft when it closes from a click outside, before closing', () => {
     const { menu, onChange, onClose } = mount(none)
-    setInput(menu.querySelector<HTMLInputElement>('input[type="date"]')!, '2026-11-17')
-    setInput(menu.querySelector<HTMLInputElement>('input[type="time"]')!, '09:15')
+    const date = menu.querySelector<HTMLInputElement>('input[type="date"]')!
+    act(() => date.focus())
+    setInput(date, '2026-11-17')
     act(() => {
       document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
     })
     expect(onChange).toHaveBeenCalledTimes(1)
-    expect(onChange).toHaveBeenCalledWith({ due: '2026-11-17', alarm: '09:15' })
+    expect(onChange).toHaveBeenCalledWith({ due: '2026-11-17' })
     expect(onChange.mock.invocationCallOrder[0]).toBeLessThan(onClose.mock.invocationCallOrder[0])
     expect(onClose).toHaveBeenCalledWith(false)
   })
 
+  it('writes the field draft when it closes from its trigger', () => {
+    const { menu, onChange, onClose } = mount({ due: '2026-11-17', alarm: null, importance: null })
+    const time = menu.querySelector<HTMLInputElement>('input[type="time"]')!
+    act(() => time.focus())
+    setInput(time, '09:15')
+    act(() => {
+      trigger!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    })
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith({ alarm: '09:15' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onClose).toHaveBeenCalledWith(false)
+  })
+
+  it('writes a value from the native picker (input without focus) at once, and only once', () => {
+    const { menu, onChange, onClose } = mount({ due: '2026-11-17', alarm: '18:00', importance: null })
+    // showPicker() is opened from the field's icon: the input itself never has the focus.
+    setInput(menu.querySelector<HTMLInputElement>('input[type="date"]')!, '2026-11-20')
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith({ due: '2026-11-20' })
+    setInput(menu.querySelector<HTMLInputElement>('input[type="time"]')!, '14:30')
+    expect(onChange).toHaveBeenCalledTimes(2)
+    expect(onChange).toHaveBeenLastCalledWith({ alarm: '14:30' })
+    // Closing from the trigger right after doesn't write them again.
+    act(() => {
+      trigger!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    })
+    expect(onClose).toHaveBeenCalledWith(false)
+    expect(onChange).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not write an invalid value from the native picker', () => {
+    const { menu, onChange } = mount(none)
+    setInput(menu.querySelector<HTMLInputElement>('input[type="date"]')!, '')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it('enables the alarm as soon as a valid date is typed', () => {
     const { menu } = mount(none)
-    setInput(menu.querySelector<HTMLInputElement>('input[type="date"]')!, '2026-11-17')
+    const date = menu.querySelector<HTMLInputElement>('input[type="date"]')!
+    act(() => date.focus())
+    setInput(date, '2026-11-17')
     expect(menu.querySelector<HTMLInputElement>('input[type="time"]')!.disabled).toBe(false)
   })
 
@@ -167,10 +207,10 @@ describe('TaskMenuPopover', () => {
     expect(onClose).toHaveBeenCalledWith(false)
   })
 
-  it('ignores a click on its trigger (the trigger toggles it)', () => {
-    const { onClose } = mount(none)
+  it('ignores a press inside itself', () => {
+    const { menu, onClose } = mount(none)
     act(() => {
-      trigger!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      menu.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
     })
     expect(onClose).not.toHaveBeenCalled()
   })
