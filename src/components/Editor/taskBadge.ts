@@ -82,31 +82,76 @@ export function popoverPosition(
 const MENU_GAP = 6
 const MENU_MARGIN = 8
 
+/** Which side of its trigger the task menu opened on. */
+export type TaskMenuSide = 'below' | 'above'
+
+export interface TaskMenuPlacement {
+  top: number
+  left: number
+  side: TaskMenuSide
+}
+
+// The menu's size as laid out: never larger than the viewport minus the margins
+// (its CSS max-width/max-height, where it scrolls).
+function cappedSize(menu: { width: number; height: number }, viewport: { width: number; height: number }) {
+  return {
+    width: Math.min(menu.width, viewport.width - 2 * MENU_MARGIN),
+    height: Math.min(menu.height, viewport.height - 2 * MENU_MARGIN),
+  }
+}
+
+function clampInto(v: number, max: number): number {
+  return Math.max(MENU_MARGIN, Math.min(v, max))
+}
+
 /**
- * Where to place the task menu (TaskMenuPopover, `position: fixed`) of a
+ * Where to open the task menu (TaskMenuPopover, `position: fixed`) of a
  * trigger, given its measured size: right edges aligned (the trigger sits at
  * the end of the task line, often in the right gutter), below the trigger, or
  * above when it doesn't fit below and there's more room up there. Always kept
  * inside the viewport with a small margin: a menu larger than the viewport
  * (a 200x200 sticky) is capped like its CSS max-width/max-height (100vw/100vh
  * minus twice the margin, where it scrolls) and pinned to the top-left margin.
+ * Only decided when the menu opens (and on window resize): while it's open,
+ * followTaskMenu keeps it where it is.
  */
 export function taskMenuPosition(
   trigger: { top: number; bottom: number; right: number },
   menu: { width: number; height: number },
   viewport: { width: number; height: number },
-): { top: number; left: number } {
-  const size = {
-    width: Math.min(menu.width, viewport.width - 2 * MENU_MARGIN),
-    height: Math.min(menu.height, viewport.height - 2 * MENU_MARGIN),
-  }
+): TaskMenuPlacement {
+  const size = cappedSize(menu, viewport)
   const below = trigger.bottom + MENU_GAP
   const above = trigger.top - MENU_GAP - size.height
   const fitsBelow = below + size.height <= viewport.height - MENU_MARGIN
-  const top = fitsBelow || trigger.top < viewport.height - trigger.bottom ? below : above
-  const clamp = (v: number, max: number) => Math.max(MENU_MARGIN, Math.min(v, max))
+  const side: TaskMenuSide = fitsBelow || trigger.top < viewport.height - trigger.bottom ? 'below' : 'above'
   return {
-    top: clamp(top, viewport.height - MENU_MARGIN - size.height),
-    left: clamp(trigger.right - size.width, viewport.width - MENU_MARGIN - size.width),
+    top: clampInto(side === 'below' ? below : above, viewport.height - MENU_MARGIN - size.height),
+    left: clampInto(trigger.right - size.width, viewport.width - MENU_MARGIN - size.width),
+    side,
+  }
+}
+
+/**
+ * Where the open task menu goes after a re-render or a scroll, given where it
+ * opened (taskMenuPosition). Picking a value turns the trigger's icon into
+ * chips and changes its width (and the menu's height may change too, e.g.
+ * "Clear all" appears): re-aligning it would make it jump. So it keeps its
+ * `left`, and vertically only follows the trigger (scroll): below, its top
+ * stays under the trigger's bottom; above, its BOTTOM edge stays over the
+ * trigger's top, so growing taller doesn't push it against the trigger. Only
+ * clamped when it would leave the window.
+ */
+export function followTaskMenu(
+  placed: { left: number; side: TaskMenuSide },
+  trigger: { top: number; bottom: number },
+  menu: { width: number; height: number },
+  viewport: { width: number; height: number },
+): { top: number; left: number } {
+  const size = cappedSize(menu, viewport)
+  const top = placed.side === 'below' ? trigger.bottom + MENU_GAP : trigger.top - MENU_GAP - size.height
+  return {
+    top: clampInto(top, viewport.height - MENU_MARGIN - size.height),
+    left: clampInto(placed.left, viewport.width - MENU_MARGIN - size.width),
   }
 }

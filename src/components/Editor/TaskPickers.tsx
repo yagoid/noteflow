@@ -8,6 +8,7 @@ import { OWN_KEYS_PROPS } from '../../lib/keyScope'
 import {
   IMPORTANCE_VALUES,
   QUICK_DUE_VALUES,
+  followTaskMenu,
   isCommittableDue,
   localISO,
   quickDueDate,
@@ -15,6 +16,7 @@ import {
   todayISO,
   type Importance,
   type QuickDue,
+  type TaskMenuPlacement,
 } from './taskBadge'
 
 // The task pickers. TaskMenuPopover is the single menu of a task list item
@@ -196,8 +198,8 @@ const QUICK_DUE_ICONS: Record<QuickDue, ComponentType<{ size?: number; className
  * Importance, the shortcuts and clearing are written at once (the chips next to
  * the task update live); the native date/time fields keep a draft that is
  * written on blur, Enter and when the menu closes ("Done", Escape, a click
- * outside). Placed with taskMenuPosition from its measured size, re-placed on
- * scroll/resize.
+ * outside). Placed with taskMenuPosition from its measured size when it opens
+ * (and on resize); followTaskMenu keeps it there, following the trigger on scroll.
  */
 export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onClose }: TaskMenuPopoverProps) {
   const t = useT()
@@ -295,26 +297,33 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
   // The alarm needs a date: the task's, or a valid one being typed.
   const alarmEnabled = !!due || isCommittableDue(draftDue)
 
-  // Measure and place it before paint, on every render (its trigger changes width
-  // as the chips update) and whenever the page scrolls or the window resizes.
+  // Measured and placed before paint. The position is decided when it opens
+  // (and again on window resize); after that, on every render (the trigger
+  // changes width as the chips update, the menu may change height) and on
+  // scroll it only follows the trigger vertically, so it never jumps sideways.
+  const placed = useRef<TaskMenuPlacement | null>(null)
   useLayoutEffect(() => {
     const el = popoverRef.current
     if (!el) return
-    const place = () => {
-      const { top, left } = taskMenuPosition(
-        trigger.getBoundingClientRect(),
-        { width: el.offsetWidth, height: el.offsetHeight },
-        { width: window.innerWidth, height: window.innerHeight },
-      )
+    const place = (reopen: boolean) => {
+      const rect = trigger.getBoundingClientRect()
+      const size = { width: el.offsetWidth, height: el.offsetHeight }
+      const viewport = { width: window.innerWidth, height: window.innerHeight }
+      const { top, left } =
+        reopen || !placed.current
+          ? (placed.current = taskMenuPosition(rect, size, viewport))
+          : followTaskMenu(placed.current, rect, size, viewport)
       el.style.top = `${top}px`
       el.style.left = `${left}px`
     }
-    place()
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
+    const onResize = () => place(true)
+    const onScroll = () => place(false)
+    place(false)
+    window.addEventListener('resize', onResize)
+    window.addEventListener('scroll', onScroll, true)
     return () => {
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('scroll', onScroll, true)
     }
   })
 

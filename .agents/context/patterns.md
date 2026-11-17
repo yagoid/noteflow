@@ -1584,12 +1584,18 @@ trigger en estado (no un ref leído en render). El formato markdown no cambia (`
 - **Atajos de fecha** (`quickDueDate` en `taskBadge.ts`, testeado): today, tomorrow y "next week" =
   el lunes siguiente (desde un lunes, +7; desde un domingo, mañana). Fechas **locales** (`localISO`).
   El día de referencia se fija al abrir el menú.
-- **Posición:** `taskMenuPosition` (puro, testeado) con el tamaño **medido** en `useLayoutEffect`
-  (antes del pintado, en cada render — el ancho del botón cambia con los chips — y en scroll/resize
-  con captura): bordes derechos alineados con el botón (que suele estar en el margen derecho), debajo
-  o encima si no cabe y hay más sitio arriba, siempre dentro de la ventana con 8 px de margen. Nunca
-  mayor que la ventana: `max-width`/`max-height: calc(100v* - 16px)` con scroll vertical (un sticky
-  puede medir 200×200) y `container-type: inline-size` — por debajo de ~230 px de contenido la fila de
+- **Posición:** se decide **una vez al abrir** con `taskMenuPosition` (puro, testeado) y el tamaño
+  **medido** en `useLayoutEffect` (antes del pintado): bordes derechos alineados con el botón (que suele
+  estar en el margen derecho), debajo o encima si no cabe y hay más sitio arriba, siempre dentro de la
+  ventana con 8 px de margen. Devuelve también el lado (`side`), que se guarda en un ref. Después, en
+  cada render y en scroll (con captura), `followTaskMenu` (puro, testeado) **no re-alinea en
+  horizontal** (mantiene el `left`): al elegir un valor el botón pasa de icono a chips y cambia de
+  ancho, y en Legible `.task-actions` está anclado por la izquierda, así que su borde derecho se mueve
+  y el menú saltaba. En vertical solo sigue al botón: debajo, el top va a `trigger.bottom + 6`;
+  encima, el **borde inferior** queda fijo sobre `trigger.top` (si el menú crece, p. ej. aparece
+  "Clear all", crece hacia arriba). Solo se clampa si se saldría de la ventana. En resize de la ventana
+  se recalcula entero con `taskMenuPosition`. Nunca mayor que la ventana: `max-width`/`max-height:
+  calc(100v* - 16px)` con scroll vertical (un sticky puede medir 200×200) y `container-type: inline-size` — por debajo de ~230 px de contenido la fila de
   importancia queda en solo puntos (la etiqueta sigue en `title`/`aria-label`) y fecha/alarma se apilan.
 - **Teclado y foco:** al abrir, foco en la opción de importancia seleccionada (radiogroup con
   *roving tabindex*; `←/→/↑/↓` mueven y eligen). `Tab` queda atrapado en el menú. `Esc` (listener en

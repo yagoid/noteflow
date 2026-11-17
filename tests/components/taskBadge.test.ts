@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  followTaskMenu,
   isCommittableDue,
   localISO,
   quickDueDate,
@@ -51,11 +52,11 @@ describe('taskMenuPosition', () => {
   const size = { width: 272, height: 300 }
 
   it('opens below the trigger, right edges aligned', () => {
-    expect(taskMenuPosition({ top: 100, bottom: 120, right: 900 }, size, viewport)).toEqual({ top: 126, left: 628 })
+    expect(taskMenuPosition({ top: 100, bottom: 120, right: 900 }, size, viewport)).toEqual({ top: 126, left: 628, side: 'below' })
   })
 
   it('flips above when it does not fit below and there is more room above', () => {
-    expect(taskMenuPosition({ top: 600, bottom: 620, right: 900 }, size, viewport)).toEqual({ top: 294, left: 628 })
+    expect(taskMenuPosition({ top: 600, bottom: 620, right: 900 }, size, viewport)).toEqual({ top: 294, left: 628, side: 'above' })
   })
 
   it('stays below, clamped into the window, when there is more room below', () => {
@@ -66,13 +67,60 @@ describe('taskMenuPosition', () => {
   it('in a window smaller than the menu (a 200x200 sticky) it is capped and pinned to the margin', () => {
     const sticky = { width: 200, height: 200 }
     // Measured already capped by the CSS max-width/max-height (184x184)…
-    expect(taskMenuPosition({ top: 40, bottom: 60, right: 190 }, { width: 184, height: 184 }, sticky)).toEqual({ top: 8, left: 8 })
+    expect(taskMenuPosition({ top: 40, bottom: 60, right: 190 }, { width: 184, height: 184 }, sticky)).toMatchObject({ top: 8, left: 8 })
     // …or not: same result.
-    expect(taskMenuPosition({ top: 150, bottom: 170, right: 190 }, { width: 272, height: 300 }, sticky)).toEqual({ top: 8, left: 8 })
+    expect(taskMenuPosition({ top: 150, bottom: 170, right: 190 }, { width: 272, height: 300 }, sticky)).toMatchObject({ top: 8, left: 8 })
   })
 
   it('never leaves the window horizontally', () => {
     expect(taskMenuPosition({ top: 100, bottom: 120, right: 100 }, size, viewport).left).toBe(8)
     expect(taskMenuPosition({ top: 100, bottom: 120, right: 1200 }, size, viewport).left).toBe(720)
+  })
+})
+
+describe('followTaskMenu', () => {
+  const viewport = { width: 1000, height: 800 }
+  const size = { width: 272, height: 300 }
+
+  it('keeps its left when the trigger grows to the right (icon to chips)', () => {
+    const placed = taskMenuPosition({ top: 100, bottom: 120, right: 900 }, size, viewport)
+    // The wider trigger's right edge moved to 960: a fresh placement would move
+    // the menu to left 688; following it keeps 628.
+    expect(taskMenuPosition({ top: 100, bottom: 120, right: 960 }, size, viewport).left).toBe(688)
+    expect(followTaskMenu(placed, { top: 100, bottom: 120 }, size, viewport)).toEqual({ top: 126, left: 628 })
+  })
+
+  it('below the trigger, its top follows the trigger on scroll', () => {
+    const placed = taskMenuPosition({ top: 100, bottom: 120, right: 900 }, size, viewport)
+    expect(followTaskMenu(placed, { top: 60, bottom: 80 }, size, viewport)).toEqual({ top: 86, left: 628 })
+  })
+
+  it('above the trigger, its bottom edge stays put when it grows taller', () => {
+    const placed = taskMenuPosition({ top: 600, bottom: 620, right: 900 }, size, viewport)
+    expect(placed.side).toBe('above')
+    const taller = followTaskMenu(placed, { top: 600, bottom: 620 }, { width: 272, height: 340 }, viewport)
+    expect(taller.top + 340).toBe(placed.top + 300) // bottom = trigger.top - gap = 594
+    expect(taller.left).toBe(placed.left)
+  })
+
+  it('above the trigger, it follows the trigger on scroll', () => {
+    const placed = taskMenuPosition({ top: 600, bottom: 620, right: 900 }, size, viewport)
+    expect(followTaskMenu(placed, { top: 550, bottom: 570 }, size, viewport).top).toBe(placed.top - 50)
+  })
+
+  it('is clamped into the window only when it would leave it', () => {
+    const below = taskMenuPosition({ top: 100, bottom: 120, right: 900 }, size, viewport)
+    // Scrolled so far the trigger is near the bottom: kept inside.
+    expect(followTaskMenu(below, { top: 700, bottom: 720 }, size, viewport).top).toBe(492) // 800 - 8 - 300
+    const above = taskMenuPosition({ top: 600, bottom: 620, right: 900 }, size, viewport)
+    expect(followTaskMenu(above, { top: 100, bottom: 120 }, size, viewport).top).toBe(8)
+    // A narrower window pulls the kept left back in.
+    expect(followTaskMenu(below, { top: 100, bottom: 120 }, size, { width: 800, height: 800 }).left).toBe(520)
+  })
+
+  it('in a 200x200 sticky it stays pinned to the margin', () => {
+    const sticky = { width: 200, height: 200 }
+    const placed = taskMenuPosition({ top: 40, bottom: 60, right: 190 }, { width: 184, height: 184 }, sticky)
+    expect(followTaskMenu(placed, { top: 40, bottom: 60 }, { width: 184, height: 184 }, sticky)).toEqual({ top: 8, left: 8 })
   })
 })
