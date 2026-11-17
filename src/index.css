@@ -764,6 +764,47 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   padding: 3px;
 }
 
+/* The single trigger of a task list item (DeadlineTaskItemView): the chips of
+   the values set (importance dot + date badge), or a hover-only icon when there
+   are none. Opens the task menu (.task-menu). The two classes above remain for
+   the kanban card's separate triggers. */
+.task-meta-trigger {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 3px;
+  border-radius: 5px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background-color 0.12s ease;
+  line-height: 1;
+}
+.group:hover .task-meta-trigger,
+.task-meta-trigger.has-value,
+.task-meta-trigger.is-open,
+.task-meta-trigger:focus-visible {
+  opacity: 1;
+}
+.task-meta-trigger:hover,
+.task-meta-trigger.is-open {
+  background: rgb(var(--text) / 0.07);
+}
+.task-meta-trigger:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
+}
+.task-meta-icon {
+  color: rgb(var(--text-muted));
+  opacity: 0.6;
+}
+.task-meta-trigger:hover .task-meta-icon,
+.task-meta-trigger.is-open .task-meta-icon {
+  opacity: 1;
+}
+
 /* ── Readable mode: pull the deadline trigger OUT of the reading column ───────
    In .editor-readable the taskList <ul> is centered with max-width:--readable-col
    and margin:auto, leaving free space to the right of the column. Instead of
@@ -807,6 +848,129 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   .editor-readable .editor-has-toc .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions {
     transform: translateX(min(0px, calc((100cqw - var(--readable-col)) / 2 - var(--toc-reserve) - 100%)));
   }
+}
+
+/* ── Checklist progress rail (Editor/TaskProgress.ts, lib/taskProgress.ts) ─────
+   A widget decoration, first child of each top-level checklist <ul>, so the <ul>
+   anchors it: it runs from the first task row to the last one (top/bottom), in
+   the left gutter at right: 100% + 24px (TASK_PROGRESS_OFFSET: room for the ⋮⋮
+   drag handle), 44px wide (TASK_PROGRESS_WIDTH). Only in the main editor with
+   Readable width and the setting on (NoteEditor's .task-progress-on), and only
+   while the measured gutter holds it (.is-fit); otherwise it fades out — it
+   never pushes the text. --h = share of done tasks (set inline). */
+.task-progress { display: none; }
+.editor-readable.task-progress-on .prose-editor .ProseMirror > ul[data-type="taskList"] {
+  position: relative;
+}
+.editor-readable.task-progress-on .prose-editor .ProseMirror > ul[data-type="taskList"] > .task-progress {
+  display: block;
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  right: calc(100% + 24px);
+  width: 44px;
+  pointer-events: none;
+  user-select: none;
+  color: rgb(var(--text-muted));
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.22s, visibility 0.22s;
+}
+.editor-readable.task-progress-on .prose-editor .ProseMirror > ul[data-type="taskList"] > .task-progress.is-fit {
+  opacity: 1;
+  visibility: visible;
+}
+.task-progress-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: rgb(var(--text-muted) / 0.18);
+  pointer-events: auto;
+  cursor: default;
+}
+/* A wider hover target than the 3px line. */
+.task-progress-rail::before {
+  content: '';
+  position: absolute;
+  inset: 0 -5px;
+}
+.task-progress-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--h, 0%);
+  border-radius: 3px;
+  background: rgb(var(--accent-2));
+  transition: height 0.55s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+.task-progress-cap {
+  position: absolute;
+  right: -2px;
+  top: clamp(0px, calc(var(--h, 0%) - 3.5px), calc(100% - 7px));
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--bg-editor));
+  border: 2px solid rgb(var(--accent-2));
+  box-sizing: border-box;
+  transition: top 0.55s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+/* The label rides with the fill, left of the rail. */
+.task-progress-tag {
+  position: absolute;
+  right: 9px;
+  top: clamp(7px, var(--h, 0%), calc(100% - 7px));
+  transform: translateY(-50%);
+  font: 500 10.5px var(--app-font-family, 'JetBrains Mono', monospace);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: default;
+  transition: top 0.55s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+.task-progress.is-done .task-progress-tag { color: rgb(var(--accent-2)); }
+/* Hover tooltip («3 of 8 tasks done · 38%»), just above the label. */
+.task-progress-tip {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  top: clamp(7px, var(--h, 0%), calc(100% - 7px));
+  transform: translateY(calc(-100% - 9px));
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s, transform 0.12s;
+  background: rgb(var(--bg-0));
+  color: rgb(var(--text));
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: 11px var(--app-font-family, 'JetBrains Mono', monospace);
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.5);
+}
+.task-progress-tip b { color: rgb(var(--accent-2)); font-weight: 500; }
+.task-progress:hover .task-progress-tip {
+  opacity: 1;
+  transform: translateY(calc(-100% - 6px));
+}
+/* Brief bounce when the list reaches 100 % (not when it mounts complete). */
+.task-progress.is-pop .task-progress-tag,
+.task-progress.is-pop .task-progress-cap {
+  animation: task-progress-pop 0.6s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+@keyframes task-progress-pop {
+  40% { scale: 1.2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-progress,
+  .task-progress * { transition: none !important; animation: none !important; }
 }
 
 /* Date badge pill */
@@ -973,6 +1137,251 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   color: rgb(var(--red));
   border-color: rgb(var(--red) / 0.45);
 }
+
+/* ── Task menu (TaskMenuPopover) ─────────────────────────────────────────────
+   The single menu of a task list item: importance (segmented row), deadline
+   (shortcuts + date + alarm) and clearing. Portalled to <body>, `position:
+   fixed`; top/left are set from JS (taskMenuPosition). Same surface as the
+   other menus (.cv-menu): bg-2, hairline ring, soft drop shadow. */
+.task-menu {
+  position: fixed;
+  z-index: 9999;
+  width: 272px;
+  /* Never larger than the window (a sticky can be 200x200): it scrolls instead,
+     and below ~230px of content the rows compact (container queries below). */
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  container-type: inline-size;
+  outline: none;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgb(var(--bg-2));
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 16px 32px -12px rgb(0 0 0 / 0.6);
+  color: rgb(var(--text));
+  font-family: var(--app-font-family, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  line-height: 1.3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: task-menu-in 120ms ease-out;
+}
+html[data-color-scheme="light"] .task-menu {
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 16px 32px -12px rgb(0 0 0 / 0.22);
+}
+.task-menu > * { flex-shrink: 0; }
+@keyframes task-menu-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+.task-menu button { font: inherit; cursor: pointer; }
+.task-menu button:focus-visible,
+.task-menu input:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
+}
+
+.task-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.task-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 16px;
+  padding: 0 2px;
+}
+.task-menu-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(var(--text-muted));
+}
+.task-menu-head-action {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.task-menu-head-action:hover {
+  color: rgb(var(--red));
+  background: rgb(var(--red) / 0.1);
+}
+
+/* Importance: segmented row; the chosen option takes its level's color. */
+.task-menu-seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgb(var(--text) / 0.06);
+}
+.task-menu-seg-opt {
+  --c: var(--text-muted);
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: rgb(var(--text-muted));
+  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+.task-menu-seg-opt--none { flex: 0 0 30px; padding: 0; }
+.task-menu-seg-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.task-menu-seg-opt--low { --c: var(--accent-2); }
+.task-menu-seg-opt--medium { --c: var(--accent-3); }
+.task-menu-seg-opt--high { --c: var(--red); }
+.task-menu-seg-opt:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.05); }
+.task-menu-seg-opt.is-on {
+  color: rgb(var(--text));
+  background: rgb(var(--c) / 0.15);
+  box-shadow: inset 0 0 0 1px rgb(var(--c) / 0.5);
+}
+.task-menu-seg-opt--none.is-on {
+  background: rgb(var(--bg-editor));
+  box-shadow: inset 0 0 0 1px rgb(var(--border));
+}
+.task-menu-seg-opt .task-importance-dot { width: 7px; height: 7px; }
+
+/* Deadline shortcuts: menu rows, the weekday/date they stand for on the right. */
+.task-menu-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.task-menu-quick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  text-align: left;
+  color: rgb(var(--text));
+  transition: background-color 0.12s ease;
+}
+.task-menu-quick-row:hover { background: rgb(var(--text) / 0.07); }
+.task-menu-quick-row.is-on { background: rgb(var(--accent) / 0.13); }
+.task-menu-quick-icon { flex: none; }
+.task-menu-quick-row--today .task-menu-quick-icon { color: rgb(var(--accent-3)); }
+.task-menu-quick-row--tomorrow .task-menu-quick-icon { color: rgb(var(--accent-2)); }
+.task-menu-quick-row--nextWeek .task-menu-quick-icon { color: rgb(var(--purple)); }
+.task-menu-quick-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-menu-quick-hint {
+  flex: none;
+  font-size: 11px;
+  color: rgb(var(--text-muted));
+  font-variant-numeric: tabular-nums;
+}
+.task-menu-quick-row.is-on .task-menu-quick-hint { color: rgb(var(--accent)); }
+
+/* Date + alarm fields side by side. The native picker indicator is hidden: the
+   leading icon opens the picker instead (showPicker). */
+.task-menu-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 6px;
+  margin-top: 2px;
+}
+/* Narrow menu (small sticky windows): importance as dots only (the options keep
+   their label as tooltip/aria-label) and the date/alarm fields stacked. */
+@container (max-width: 230px) {
+  .task-menu-seg-text { display: none; }
+  .task-menu-seg-opt--none { flex: 1 1 0; }
+  .task-menu-fields { grid-template-columns: minmax(0, 1fr); }
+}
+.task-menu-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 6px 0 4px;
+  border-radius: 7px;
+  background: rgb(var(--text) / 0.06);
+  transition: box-shadow 0.12s ease, opacity 0.12s ease;
+}
+.task-menu-field:focus-within { box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.55); }
+.task-menu-field.is-disabled { opacity: 0.45; }
+.task-menu-field-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.task-menu-field-icon:hover:not(:disabled) { color: rgb(var(--text)); background: rgb(var(--text) / 0.07); }
+.task-menu-field-icon:disabled { cursor: default; }
+.task-menu-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: rgb(var(--text));
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.task-menu-field input:focus-visible { box-shadow: none; }
+.task-menu-field input::-webkit-calendar-picker-indicator { display: none; }
+.task-menu-field input::-webkit-datetime-edit-fields-wrapper { padding: 0; }
+.task-menu-field input:disabled { cursor: default; }
+.task-menu-field-clear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.task-menu-field-clear:hover { color: rgb(var(--red)); background: rgb(var(--red) / 0.1); }
+
+.task-menu-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid rgb(var(--border) / 0.8);
+}
+.task-menu-clear-all {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.task-menu-clear-all:hover { color: rgb(var(--red)); background: rgb(var(--red) / 0.1); }
+.task-menu-done {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.14);
+  transition: background-color 0.12s ease;
+}
+.task-menu-done:hover { background: rgb(var(--accent) / 0.22); }
 
 /* Selection */
 .prose-editor .ProseMirror ::selection {
@@ -2007,7 +2416,7 @@ html[data-color-scheme="light"] .section-hover-card {
   vertical-align: top;
   position: relative;
   min-width: 5em;
-  max-width: 28em;
+  max-width: 22em;
   overflow-wrap: break-word;
   transition: background-color 0.1s;
 }
@@ -2024,14 +2433,14 @@ html[data-color-scheme="light"] .section-hover-card {
   padding-top: 0.5rem;
   padding-bottom: 0.4rem;
   min-width: 6.25em;
-  max-width: 35em;
+  max-width: 27.5em;
 }
 /* A column with a width (lib/tableWidth.ts): every cell of it carries
    data-nf-colw + --nf-colw = n dashes, and is n × 0.5em of the table's font
    size wide — border-box, gridline to gridline (padding and the collapsed
    borders' halves included; Tailwind's preflight makes cells border-box). The
    header's 0.8em font gets n × 0.625em (= 0.5 / 0.8), so both rows agree.
-   No max-width (none: the auto columns' 28em / 35em don't apply): as in any
+   No max-width (none: the auto columns' 22em / 27.5em don't apply): as in any
    table layout, the column is max(width, min-content of its cells). Body cells
    break anywhere (their min-content is a character: long text never widens the
    column); the header never breaks inside a word (`normal`), so the column is

@@ -30,6 +30,7 @@ import { MINI_SIDEBAR_RESERVE } from './lib/miniSidebar'
 import { ownsKeys } from './lib/keyScope'
 import { flushPendingEdits } from './lib/pendingEdits'
 import { useT } from './i18n/useT'
+import { useNavHistory, useSwallowMouseHistoryButtons } from './components/useNavHistory'
 
 const SIDEBAR_MIN = 180
 const SIDEBAR_MAX = 480
@@ -65,6 +66,9 @@ export function App() {
     window.addEventListener('beforeunload', flush)
     return () => window.removeEventListener('beforeunload', flush)
   }, [])
+  // No window lets the mouse's back / forward buttons run Chromium's history navigation;
+  // the main window turns them into its own back / forward (useNavHistory in MainApp).
+  useSwallowMouseHistoryButtons()
   if (route === 'section') {
     return (
       <ErrorBoundary>
@@ -218,6 +222,9 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
   }, [isSticky])
 
   useSyncChatEditorTarget(!isSticky)
+
+  // Back / forward between notes and views (mouse side buttons, Alt+←/→, ⌘[ / ⌘]). Main window only.
+  useNavHistory(!isSticky)
 
   // ── NoteFlow AI model catalog: main downloads it in the background; when it changes,
   // re-pull presets + LLM config (only if already loaded — a later first load gets it fresh).

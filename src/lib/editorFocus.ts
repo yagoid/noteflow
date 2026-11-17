@@ -3,13 +3,13 @@
 
 /**
  * Editor UI that is NOT ProseMirror text: NodeView widgets with their own fields
- * (the kanban board) and the popups they portal to <body> (kanban menu, task
- * deadline/importance pickers). Events born there must not drive the editor's
- * own wrapper handlers (image paste/drop, Ctrl+Shift+B…), which act on the
+ * (the kanban board) and the popups they portal to <body> (kanban menu, kanban
+ * card deadline/importance pickers, the task item menu). Events born there must
+ * not drive the editor's own wrapper handlers (image paste/drop, Enter…), which act on the
  * ProseMirror selection — possibly a NodeSelection on the very board.
  */
 export const EDITOR_WIDGET_SELECTOR =
-  '[data-kanban-interactive], .kanban-menu, .task-deadline-popover, .task-importance-popover'
+  '[data-kanban-interactive], .kanban-menu, .task-deadline-popover, .task-importance-popover, .task-menu'
 
 interface ClosestTarget {
   closest(selector: string): unknown

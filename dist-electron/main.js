@@ -84,6 +84,7 @@ const i18n_1 = require("./i18n");
 const settingsFile_1 = require("./settingsFile");
 const whatsNewSeen_1 = require("./whatsNewSeen");
 const stickyBounds_1 = require("./stickyBounds");
+const windowPlacement_1 = require("./windowPlacement");
 const snippetsFile_1 = require("./snippetsFile");
 const notesWatchFilter_1 = require("./notesWatchFilter");
 const linkedNotes = __importStar(require("./linkedNotes"));
@@ -1339,7 +1340,9 @@ function loadSectionWindow(win, noteId, sectionId) {
         win.loadFile(path_1.default.join(__dirname, '../dist/index.html'), { hash });
     }
 }
-function createSectionWindow(noteId, sectionId) {
+// `nearCursor`: a note dragged out of a window — open where it was dropped (the pointer is
+// still there) instead of cascading. An existing window on that section is only focused.
+function createSectionWindow(noteId, sectionId, nearCursor = false) {
     for (const [existing, target] of sectionWindows) {
         if (existing.isDestroyed())
             continue;
@@ -1355,13 +1358,14 @@ function createSectionWindow(noteId, sectionId) {
     const HEIGHT = 680;
     // Cascade from the last open section window so new ones don't stack exactly.
     const last = [...sectionWindows.keys()].filter((w) => !w.isDestroyed()).pop();
-    const position = last
-        ? (() => { const [x, y] = last.getPosition(); return { x: x + 30, y: y + 30 }; })()
-        : {};
+    const cursor = nearCursor ? electron_1.screen.getCursorScreenPoint() : null;
+    const bounds = cursor
+        ? (0, windowPlacement_1.placeWindowAtPoint)(cursor, { width: WIDTH, height: HEIGHT }, electron_1.screen.getDisplayNearestPoint(cursor).workArea)
+        : last
+            ? (() => { const [x, y] = last.getPosition(); return { x: x + 30, y: y + 30, width: WIDTH, height: HEIGHT }; })()
+            : { width: WIDTH, height: HEIGHT };
     const win = new electron_1.BrowserWindow({
-        width: WIDTH,
-        height: HEIGHT,
-        ...position,
+        ...bounds,
         minWidth: 420,
         minHeight: 320,
         frame: false,
@@ -3671,7 +3675,13 @@ function writeLlmSettings(next) {
     settings.aiLlm = next;
     writeSettings(settings);
 }
-electron_1.ipcMain.handle('ai:llm-get-config', () => llm.toPublic(readLlmSettings()));
+// `preset` (optional): read that preset's OWN config instead of the active one — Settings → AI
+// shows every source's fields before it is activated (llm.toPublicFor). An unknown id falls
+// back to the active config. Without it, the behaviour is unchanged.
+electron_1.ipcMain.handle('ai:llm-get-config', (_event, preset) => {
+    const cfg = readLlmSettings();
+    return llm.isKnownPreset(preset) ? llm.toPublicFor(cfg, preset) : llm.toPublic(cfg);
+});
 // The managed preset carries the EFFECTIVE model catalog (cached from the proxy, else
 // the backup constants) — see refreshManagedCatalog below. The renderer asks for the
 // presets whenever the assistant or Settings → AI loads, so that is also when a stale
@@ -3741,7 +3751,19 @@ async function runManagedCatalogRefresh() {
 }
 electron_1.ipcMain.handle('ai:llm-set-config', (_event, patch) => {
     let cfg = readLlmSettings();
-    cfg.byPreset = { ...cfg.byPreset };
+    // `preset` given: the field edits go to THAT preset (Settings → AI edits a source before
+    // activating it). It never switches the active provider — `active` is ignored on this path,
+    // and neither the BYO memory (withActiveProvider) nor a pending restore (dropRestoreSurface)
+    // is touched. An unknown id is refused outright rather than mapped through presetOf's fallback.
+    if (patch.preset !== undefined) {
+        if (!llm.isKnownPreset(patch.preset)) {
+            console.warn(`[LLM] ignored an edit for unknown preset "${String(patch.preset)}"`);
+            return llm.toPublic(cfg);
+        }
+        cfg = llm.withPresetFields(cfg, patch.preset, patch);
+        writeLlmSettings(cfg);
+        return llm.toPublicFor(cfg, patch.preset);
+    }
     // withActiveProvider remembers the BYO provider being left behind when the
     // managed plan takes over — a later sign-out reverts to it. Picking a provider
     // by hand is also an explicit decision that overrules a pending restore.
@@ -3749,53 +3771,42 @@ electron_1.ipcMain.handle('ai:llm-set-config', (_event, patch) => {
         cfg = llm.withActiveProvider(cfg, patch.active);
         dropRestoreSurface('ai');
     }
-    // All field edits apply to the ACTIVE preset, so each provider keeps its own key/model/baseUrl.
-    const id = cfg.active;
-    const ps = { ...(cfg.byPreset[id] ?? {}) };
-    // A model outside a curated catalog (managed plan) is dropped, not stored: the renderer
-    // already offers those presets a read-only field, and persisting one would make the saved
-    // config diverge from the model actually used (see llm.acceptsModel).
-    if (patch.model !== undefined && llm.acceptsModel(id, patch.model))
-        ps.model = patch.model;
-    // A base URL is only stored for presets that allow editing it. The pinned ones (above all the
-    // managed `noteflow`, whose credential is the Supabase access token) ignore it: a stored URL
-    // there could send the token to another host. effectiveBaseUrl enforces the same rule on read.
-    if (patch.baseUrl !== undefined) {
-        if (llm.acceptsBaseUrl(id))
-            ps.baseUrl = patch.baseUrl;
-        else
-            console.warn(`[LLM] ignored a baseUrl for preset "${id}" (its endpoint is fixed)`);
-    }
-    if (patch.clearKey)
-        ps.encryptedApiKey = undefined;
-    else if (typeof patch.apiKey === 'string' && patch.apiKey.length > 0)
-        ps.encryptedApiKey = llm.encryptSecret(patch.apiKey);
-    cfg.byPreset[id] = ps;
+    // Without `preset`, field edits apply to the ACTIVE preset (each provider keeps its own
+    // key/model/baseUrl). withPresetFields drops a model outside a curated catalog and a base
+    // URL on a pinned preset (see llm.acceptsModel / llm.acceptsBaseUrl).
+    cfg = llm.withPresetFields(cfg, cfg.active, patch);
     writeLlmSettings(cfg);
     return llm.toPublic(cfg);
 });
-electron_1.ipcMain.handle('ai:llm-list-models', async () => {
+/** Config to list models of / test: the active one, or — with a known `preset` id — that
+ *  preset's own config seen as active (in memory only, never persisted). */
+function llmConfigFor(preset) {
+    const cfg = readLlmSettings();
+    return llm.isKnownPreset(preset) ? llm.asActivePreset(cfg, preset) : cfg;
+}
+electron_1.ipcMain.handle('ai:llm-list-models', async (_event, preset) => {
+    const cfg = llmConfigFor(preset);
     // NoteFlow AI: "Load" re-downloads the catalog (forced) and answers with the effective
     // one — on a failure the cached catalog stays in force and only the error is reported.
-    if (readLlmSettings().active === 'noteflow') {
+    if (cfg.active === 'noteflow') {
         const res = await refreshManagedCatalog(true);
         return res.ok
             ? { ok: true, models: [...llm.effectiveManagedCatalog().models] }
             : { ok: false, models: [], error: res.error };
     }
     try {
-        const models = await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings(), mainMessages().chatErrors)).listModels();
+        const models = await llm.getProvider(await llm.resolveConfigAsync(cfg, mainMessages().chatErrors)).listModels();
         return { ok: true, models };
     }
     catch (err) {
         return { ok: false, models: [], error: err instanceof Error ? err.message : String(err) };
     }
 });
-electron_1.ipcMain.handle('ai:llm-test', async () => {
+electron_1.ipcMain.handle('ai:llm-test', async (_event, preset) => {
     try {
         // resolveConfigAsync throws for the NoteFlow AI preset without a signed-in
         // session — surface that through the same {ok, error} contract as test().
-        return await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings(), mainMessages().chatErrors)).test();
+        return await llm.getProvider(await llm.resolveConfigAsync(llmConfigFor(preset), mainMessages().chatErrors)).test();
     }
     catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -5254,10 +5265,10 @@ electron_1.ipcMain.on('window:open-sticky', (_event, noteId, sectionId) => {
     createStickyWindow(noteId, sectionId);
 });
 const isWindowTargetId = (v) => typeof v === 'string' && v.length > 0 && v.length <= 128;
-electron_1.ipcMain.on('window:open-section-window', (_event, noteId, sectionId) => {
+electron_1.ipcMain.on('window:open-section-window', (_event, noteId, sectionId, nearCursor) => {
     if (!isWindowTargetId(noteId) || !isWindowTargetId(sectionId))
         return;
-    createSectionWindow(noteId, sectionId);
+    createSectionWindow(noteId, sectionId, nearCursor === true);
 });
 electron_1.ipcMain.on('window:section-window-target', (event, noteId, sectionId) => {
     if (!isWindowTargetId(noteId) || !isWindowTargetId(sectionId))

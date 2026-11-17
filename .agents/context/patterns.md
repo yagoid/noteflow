@@ -269,7 +269,16 @@ ese lugar, y si no, al editor. Crear/seleccionar una nota, abrir el cerebro o la
 secciones de `NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual de nota y de
 sección (`NoteContextMenu`: último del bloque de abrir, tras "Open in New Window"; oculto en una ventana de
 sección y si la vista de esa nota ya está abierta). El clic en la
-fila de la nota en el sidebar **no** es una entrada: abre el editor en la primera sección. Sin IPC nuevo.
+fila de la nota en el sidebar **solo** es una entrada con el ajuste Settings → Editor → "Clicking a note
+opens" = `Note overview` (`editorSettingsStore.noteClickOpens`, sincronizado en `ui-settings.json` como
+`editor.noteClickOpens: 'editor' | 'overview'`, ausente = `'editor'`) y si la nota tiene **más de una
+sección**: `openInOverviewIfPreferred` de `Sidebar.tsx` hace `setOpenNoteIds([id])` + `setActiveNote(id)`
++ `setNoteView(id)` — la nota queda activa, así que el "back" va a **su** editor (y `contentReturnPlace`
+queda vacío porque `setActiveNote` ya cerró la vista de contenido). Lo usan `rowHandlers.click` (fila del
+sidebar y del `GroupPeek`, también con Enter) y `openSelectedSearchResult` (Enter en la búsqueda). El ajuste
+se lee con `getState()` en el clic (no suscribe el sidebar). No afecta a `sectionClick` (celdas/pestañas),
+Ctrl/Cmd+clic (split), notas de una sección ni bloqueadas (`sections: []`). Por defecto (`'editor'`) el
+clic abre el editor en la primera sección. Sin IPC nuevo.
 
 **Es el mapa de secciones con la vista previa dentro** (`NoteOverview/NoteOverview.tsx`, lógica pura en
 `src/lib/noteOverviewGrid.ts` con test en `tests/lib/noteOverviewGrid.test.ts`, estilos `.note-grid*` en
@@ -760,8 +769,9 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     valores de atributo — `src`/`alt`/`href`/ids de relación — y una URL no puede inyectar atributos;
     `getAttribute` lo decodifica al volver a markdown, round-trip intacto) (negrita, links, highlight, pills de relación: click en una
     pill navega con `navigateToSection`; click en un link lo abre el handler de links de `Editor.tsx`).
-    Chips 📅/⏰/🔺 con las mismas clases (`task-badge`, `task-importance-dot`) y los **mismos pickers** que
-    las tareas (`TaskPickers.tsx` + helpers `taskBadge.ts`, extraídos de `DeadlineTaskItemView`). `extra`
+    Chips 📅/⏰/🔺 con las mismas clases (`task-badge`, `task-importance-dot`) que las tareas y dos
+    pickers separados (`DeadlinePopover`/`ImportancePopover` de `TaskPickers.tsx` + helpers `taskBadge.ts`);
+    las tareas usan en cambio el menú único `TaskMenuPopover` (ver "Editor: menú de tarea"). `extra`
     se conserva sin editar: chip "≡ n" con tooltip (editable en modo texto).
   - **Drag & drop** propio con pointer events (sin dependencia nueva; HTML5 DnD descartado: el drop lo
     intercepta ProseMirror y el ghost nativo es feo). Umbral 4 px; ghost portalado a `<body>`
@@ -1542,6 +1552,118 @@ y viajan con él.
   `moveCheckedToBottom` ya está en el espejo móvil de `uiSettings` (`9345c7d`, 2026-11-16) pero aún sin
   publicar: hasta entonces el móvil instalado la borra al escribir su apariencia (ver `architecture.md`).
 
+### Editor: menú de tarea (importancia + deadline en un solo botón)
+
+Cada tarea (`DeadlineTaskItemView`, salvo `plain`) tiene **un único botón** (`.task-meta-trigger`) dentro
+de `.task-actions` (el bloque que el modo Readable saca al margen): sin valores, un icono `CalendarClock`
+visible solo en hover; con valores, los **chips** (punto `task-importance-dot` + `task-badge` 📅/⏰)
+siempre visibles. Abre/cierra `TaskMenuPopover` (`TaskPickers.tsx`). Cerrar pulsando el trigger
+también pasa por el `close()` del menú: `useDismiss(..., closeOnTrigger)` trata el `mousedown` en el
+trigger como un cierre más, y el NodeView anota en ese `mousedown` si el menú estaba abierto
+(`openOnPress`) para que el `click` siguiente no lo reabra. El NodeView guarda el elemento
+trigger en estado (no un ref leído en render). El formato markdown no cambia (`📅`/`⏰`/`🔺` del nodo).
+
+- **En vivo, salvo los campos nativos:** importancia, atajos de fecha y los "Clear" llaman a
+  `updateAttributes` al momento (los chips se actualizan detrás). Los inputs `type=date`/`type=time`
+  llevan un **borrador** que solo se escribe en `blur`, `Enter` y **al cerrar** (Done, Esc, clic fuera
+  y también **volver a pulsar el trigger**: `close()` confirma explícitamente, no se confía en el blur
+  al desmontar). Excepción: un `change` con el input **sin foco** viene del selector nativo (abierto con
+  `showPicker()` desde el icono, `tabIndex=-1`) y es un valor final → se escribe al momento (mismas
+  validaciones), así los chips se actualizan al elegir en el calendario. Motivo del borrador: Chromium emite
+  `input` por segmento tecleado — años parciales (`0002-…`, `0202-…`) y horas intermedias (cambiar
+  la alarma de 18:00 a 14:30 pasa por 14:00, 14:03…) —; cada escritura guarda la nota y
+  `applyNoteUpdate` → `scheduleAlarms` → `checkAlarms()` (main) dispararía al instante una alarma
+  "vencida" falsa con una hora intermedia ya pasada, además de writes/undo/sync de más. Solo se
+  escribe lo válido (`isCommittableDue`: año ≥ 1900; hora no vacía y con fecha); un borrador inválido
+  vuelve al valor de la tarea en el blur. Vaciar un campo no borra nada: quitar es explícito ("Clear"
+  del deadline → `due`+`alarm` a null; `×` de la alarma; "Clear all"). La alarma se habilita en cuanto
+  hay fecha (la de la tarea o una válida en el borrador). Un ref `written` (lo que tiene la tarea,
+  actualizado al confirmar) y `closed` evitan escribir dos veces cuando blur y cierre coinciden. Los
+  borradores se re-sincronizan cuando cambian los atributos (patrón "ajustar estado en render", no un
+  effect).
+- **Atajos de fecha** (`quickDueDate` en `taskBadge.ts`, testeado): today, tomorrow y "next week" =
+  el lunes siguiente (desde un lunes, +7; desde un domingo, mañana). Fechas **locales** (`localISO`).
+  El día de referencia se fija al abrir el menú.
+- **Posición:** se decide **una vez al abrir** con `taskMenuPosition` (puro, testeado) y el tamaño
+  **medido** en `useLayoutEffect` (antes del pintado): bordes derechos alineados con el botón (que suele
+  estar en el margen derecho), debajo o encima si no cabe y hay más sitio arriba, siempre dentro de la
+  ventana con 8 px de margen. Devuelve también el lado (`side`), que se guarda en un ref. Después, en
+  cada render y en scroll (con captura), `followTaskMenu` (puro, testeado) **no re-alinea en
+  horizontal** (mantiene el `left`): al elegir un valor el botón pasa de icono a chips y cambia de
+  ancho, y en Legible `.task-actions` está anclado por la izquierda, así que su borde derecho se mueve
+  y el menú saltaba. En vertical solo sigue al botón: debajo, el top va a `trigger.bottom + 6`;
+  encima, el **borde inferior** queda fijo sobre `trigger.top` (si el menú crece, p. ej. aparece
+  "Clear all", crece hacia arriba). Solo se clampa si se saldría de la ventana. En resize de la ventana
+  se recalcula entero con `taskMenuPosition`. Nunca mayor que la ventana: `max-width`/`max-height:
+  calc(100v* - 16px)` con scroll vertical (un sticky puede medir 200×200) y `container-type: inline-size` — por debajo de ~230 px de contenido la fila de
+  importancia queda en solo puntos (la etiqueta sigue en `title`/`aria-label`) y fecha/alarma se apilan.
+- **Teclado y foco:** al abrir, foco en la opción de importancia seleccionada (radiogroup con
+  *roving tabindex*; `←/→/↑/↓` mueven y eligen). `Tab` queda atrapado en el menú. `Esc` (listener en
+  captura de `window`, `useDismiss`, con callback estable vía ref para no re-suscribirse en cada
+  render), `Enter` en un campo o *Done* cierran y devuelven el foco al editor (`editor.view.focus()`);
+  el clic fuera cierra sin mover el foco. El foco no cae nunca en `<body>` con el menú abierto: la raíz
+  es enfocable (`tabIndex=-1`, un clic en su fondo lo deja dentro) y los botones que desaparecen al
+  usarse ("Clear", `×`, "Clear all") pasan el foco a *Done*. El menú **es dueño de sus
+  teclas**: `stopPropagation` de todo keydown (si no, p. ej. `Delete` con un botón enfocado llegaría al
+  listener de `window` de `NoteEditor` que ofrece borrar la nota) + `OWN_KEYS_PROPS` (los
+  aceleradores en captura se apartan). `.task-menu` está en `EDITOR_WIDGET_SELECTOR`
+  (`lib/editorFocus.ts`): sus eventos, que burbujean por el árbol React hasta `Editor.tsx`, no deben
+  disparar los handlers del wrapper del editor (Enter tras una regla horizontal, pegar imágenes…).
+- **Estilo** (`.task-menu*` en `index.css`): superficie como `.cv-menu` (`--bg-2`, anillo `--border`,
+  sombra más suave en tema claro), etiquetas de sección en versalitas `--text-muted`, fila segmentada
+  como `.cv-seg` donde la opción elegida se tiñe con su color (`--c`: accent-2/accent-3/red). Los
+  inputs heredan el `color-scheme` del tema (no se fuerza `dark`) y ocultan el indicador nativo: el
+  icono del campo llama a `showPicker()`.
+- Las **tarjetas kanban** siguen con sus dos triggers y pickers separados (`DeadlinePopover`,
+  `ImportancePopover`); `useDismiss` es común (informa del motivo: `'outside' | 'escape' | 'trigger'`;
+  sin `closeOnTrigger`, como en esos pickers, el `mousedown` en el trigger se deja al propio trigger).
+- Tests: `tests/components/taskBadge.test.ts` (atajos, `isCommittableDue`, posición) y
+  `tests/components/taskMenuPopover.test.ts` (happy-dom: importancia, atajo, borradores de fecha/hora
+  que solo se escriben en blur/Enter/cierre, quitar y foco, cierre por Esc/clic fuera/trigger).
+
+### Editor: progreso de las checklists (riel en el margen izquierdo)
+
+Variante «D · Riel» del prototipo (lado izquierdo, color `--accent-2` de las casillas). Lógica pura en
+**`src/lib/taskProgress.ts`** (tests en `tests/lib/taskProgress.test.ts`, incluidos 3 sobre un `Editor`
+real); el plugin en **`src/components/Editor/TaskProgress.ts`**; estilos en `src/index.css` §
+«Checklist progress rail».
+
+- **Qué cuenta:** `taskProgressBlocks(doc)` → cada `taskList` **hijo directo del doc** con ≥ 2 tareas
+  (`TASK_PROGRESS_MIN_TASKS`); total y hechas incluyen las subtareas anidadas. Un párrafo o heading entre
+  dos listas las separa (son nodos distintos); las listas dentro de citas, tablas, kanban u otras listas
+  no son bloques.
+- **Por qué widget decoration (y no overlay React ni CSS puro):** los contadores CSS no pueden dividir
+  (no hay altura de relleno proporcional) y un overlay tipo `TableControls` tendría que medir la
+  posición vertical de cada lista en cada cambio y seguir el scroll. El widget va en `listPos + 1`
+  (**primer hijo del `ul`**, `side: -1`, `ignoreSelection`, `stopEvent`, `contenteditable=false`,
+  `aria-hidden`), así el `ul` (`position: relative`) lo ancla: la vertical sale **solo con CSS**
+  (`top`/`bottom` respecto al ul) y el scroll es nativo. Nada lo serializa (el markdown sale del modelo)
+  y la lógica de tareas (`taskDrag`, `taskToggle`, `listItemMove`) localiza los ítems por posición, no
+  por los hijos del `ul`.
+- **Animación sin recrear DOM:** `spec.key = task-progress-<índice del bloque>` estable → ProseMirror
+  reutiliza el nodo del widget; el estado del plugin solo se recalcula con `docChanged` y la plugin view
+  repinta en sitio `--h`, la etiqueta («3/8» o «✓»), `is-done` y el tooltip. El rebote (`is-pop`) solo
+  si la fracción guardada en `dataset.p` era < 1 y pasa a 1 (no al montar una lista ya completa).
+  Transiciones de 0,55 s; `prefers-reduced-motion` las quita.
+- **«Cabe» = una medición por editor:** gutter = borde izquierdo del primer `ul` de bloque − content-box
+  del `.ProseMirror` (todas las listas de primer nivel comparten columna). `fitsTaskProgressRail` exige
+  24 (sitio para el asa ⋮⋮) + 44 (riel + etiqueta) + 10 = **78 px**. Se mide en un
+  `requestAnimationFrame`, disparado por un `ResizeObserver` sobre `view.dom` (ventana, sidebar flotante,
+  padding del índice) y sobre cada `ul` de bloque (Legible/Completo, tamaño de fuente). El resultado va
+  como clase `is-fit` en cada widget (no en `view.dom`, cuyo `class` reescribe ProseMirror). Sin
+  `is-fit` se desvanece (opacity/visibility); nunca empuja texto ni crea scroll horizontal.
+- **Dónde sale:** la extensión solo se instala en el `<Editor>` principal de `NoteEditor` (prop
+  `taskProgress`); sticky, `.note-preview` y el chat de IA no la llevan. Además el CSS solo la muestra
+  bajo `.editor-readable.task-progress-on` (clase que `NoteEditor` pone si `readableWidth &&
+  showTaskProgress`), así el ajuste y el ancho no necesitan reconfigurar el plugin.
+- **Ajuste `showTaskProgress`** (por defecto `true`: es aditivo, vive en el margen y solo en Legible) en
+  `editorSettingsStore`, sincronizado en `ui-settings.json` como `showToc`/`moveCheckedToBottom`
+  (saneador en `electron/uiSettings.ts`). En Ajustes → Editor el interruptor queda deshabilitado con
+  ancho Completo (pista «Solo disponible con el ancho Legible») sin tocar el valor guardado.
+- **Tooltip:** textos de `editor.task.progress*` vía `useLanguageStore.getState().dict` + `tf` (el
+  plugin vive fuera de React); suscrito al idioma para refrescarse al cambiarlo. Sale encima de la
+  etiqueta y puede tapar un poco la fila anterior.
+
 ### Editor: imágenes redimensionables y la columna Readable
 La imagen es un nodo **inline** (`ResizableImage.tsx`, `inline: true`, `allowBase64`) dentro de un
 párrafo; el ancho redimensionado es el atributo `width` (`![alt](src){width=N}`). Estructura DOM:
@@ -1631,7 +1753,7 @@ desde la capa de controles, ver "Editor: controles de tabla").
   `canInsertTableHere` (fuera de listas y tablas); también en notas vinculadas (es markdown estándar).
 - **CSS del ancho (`index.css` § Tables, tras el `th`):** `td[data-nf-colw]`/`th[data-nf-colw]` →
   `width = min-width = var(--nf-colw) × 0.5em` (en el `th`, que va a `0.8em`, × `0.625em`, para que ambas
-  filas midan lo mismo), `max-width: none` (sin el 28em/35em de las automáticas), `box-sizing:
+  filas midan lo mismo), `max-width: none` (sin el 22em/27.5em de las automáticas), `box-sizing:
   border-box`. Como en cualquier tabla, la columna mide máx(`width`, min-content de sus celdas): el `td`
   lleva `overflow-wrap: anywhere` (su min-content es un carácter: un texto largo nunca ensancha la columna)
   y el `th` `overflow-wrap: normal` (su min-content es su palabra más larga: **la cabecera nunca se parte
@@ -1652,7 +1774,7 @@ desde la capa de controles, ver "Editor: controles de tabla").
   **`<tbody>` es la caja de tabla** (`display: table; width: max-content`): TipTap pone todas las filas
   (cabecera incluida) en el `<tbody>` (antes va un `<colgroup>` que queda en su propia caja anónima,
   sin alto) y el parser HTML lo añade al HTML estático del chat y las previews. Columnas sin ancho: al del
-  contenido entre `min-width: 5em` y `max-width: 28em` de las celdas (`overflow-wrap: break-word`;
+  contenido entre `min-width: 5em` y `max-width: 22em` de las celdas (28em hasta el 2026-11-17; `overflow-wrap: break-word`;
   Chromium respeta ambos en celdas); si no cabe, **conserva esos anchos y hace scroll horizontal**.
   Hasta 2026-11 las filas iban en la caja de tabla anónima del `<table>` en bloque, que hace
   shrink-to-fit al ancho disponible: estrechaba las columnas hasta el mínimo antes de hacer scroll
@@ -1661,8 +1783,8 @@ desde la capa de controles, ver "Editor: controles de tabla").
   el `<tbody>` vuelve a `table-row-group` (las columnas automáticas se estrechan para enseñar más; las de
   ancho lo conservan) y la tabla se recorta (`overflow: hidden`). **Aspecto** (prototipo aprobado: cabecera "Etiqueta"): `th` en
   `--text-muted`, `0.8em`, `600`, mayúsculas con `letter-spacing: 0.07em`, sin fondo (fuera el
-  `--bg-2` + `--cyan` y el cebreado de filas de antes); sus `min/max-width` van en `6.25em/35em`
-  (= 5em/28em ÷ 0.8) para que la columna mida igual que con celdas del cuerpo; en el chat el `th` va a
+  `--bg-2` + `--cyan` y el cebreado de filas de antes); sus `min/max-width` van en `6.25em/27.5em`
+  (= 5em/22em ÷ 0.8) para que la columna mida igual que con celdas del cuerpo; en el chat el `th` va a
   9px enteros (regla de px enteros del chat). **Celda activa:** el DOM no marca dónde está un cursor
   de texto (prosemirror-tables solo marca `.selectedCell` en una CellSelection; `:focus-within` no
   sirve porque el foco es la raíz contenteditable), así que `Editor/ActiveTableCell.ts` (extensión de
@@ -2293,7 +2415,7 @@ cabecera, clamp al viewport: sube si no cabe abajo).
   `Folder`+nombre de carpeta si viene de una; secciones según el ajuste "Sections in the sidebar", como el
   sidebar y en compacto, ver "Sidebar: item de nota" → `GroupPeek`). Clicks = los
   `rowHandlers` estables del sidebar (`click`/`sectionClick`: Ctrl/Cmd → split; si no, editor en la
-  primera sección / en esa sección…); `RowHandlers.click` acepta también `KeyboardEvent` porque Enter lo reutiliza.
+  primera sección — o la vista de nota, según "Clicking a note opens" — / en esa sección…); `RowHandlers.click` acepta también `KeyboardEvent` porque Enter lo reutiliza.
   `formatNoteDate`/`renderHighlightedText` viven en `Sidebar/rowText.tsx` (compartidos).
 - **Rendimiento:** el estado abierto/cerrado vive en `GroupPeek` (montado una vez en `Sidebar`); las
   cabeceras solo reciben `onPeekHover`/`onPeekLeave` estables (`useCallback([])` → `peekRef`, un
@@ -2421,7 +2543,8 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
 - **Sin secciones** (p. ej. nota cifrada y bloqueada: `sections: []`) → no se pinta nada (igual en
   `SectionTabsRow`). Desbloqueada, sus secciones están en memoria y se ve como cualquier otra.
 - **Clics:** fila → `handlers.click` (editor en la **primera sección**, vía el mismo `openAtSection` que
-  `sectionClick`; sin secciones → solo `setActiveNote`); celda (mapa abierto,
+  `sectionClick`; sin secciones → solo `setActiveNote`; con "Clicking a note opens" = `Note overview` y
+  más de una sección → vista de nota, ver "Vista de nota"); celda (mapa abierto,
   búsqueda o peek) → `handlers.sectionClick` (Ctrl/Cmd → panel al lado; resto igual que antes); clic
   derecho en celda → menú de sección. Preview de sección al hover en todas las celdas salvo la abierta
   (ya está en el editor). Los **segmentos no llevan preview**: el peek (140 ms) se adelanta al preview
@@ -3745,6 +3868,57 @@ paneles, cada uno en su sección. La lógica de layout es pura y testeada (`test
     sucio a limpio escribe el borrador (debounce o blur), así que una actualización saltada nunca se queda sin reaplicar
     (un renombrado remoto concurrente con un borrador sucio es last-writer-wins).
 
+### Historial de navegación (Atrás / Adelante) (`lib/navHistory.ts` + `stores/navHistoryStore.ts`)
+Los botones laterales del ratón, `Alt+←/→` (Windows/Linux) y `⌘[` / `⌘]` (macOS: `⌥←/→` es saltar
+palabra) navegan como un navegador. Solo la ventana principal.
+- **Lógica pura** (`lib/navHistory.ts`, tests en `tests/lib/navHistory.test.ts`): pila `entries` +
+  `index` (tope `NAV_HISTORY_LIMIT` = 50, se caen las más viejas). `pushLocation` ignora la misma
+  ubicación, **reescribe** la entrada actual si es el mismo sitio con otra sección (sin truncar el
+  forward, como un `replaceState`) y si no trunca el forward y añade. `stepHistory` purga primero
+  (`purgeLocations`: quita lo que ya no existe y funde las copias consecutivas que queden) y salta
+  las entradas `skip`. Invariante: `index` = -1 **solo** con el historial vacío; si la purga se lleva
+  la entrada actual pasa a la superviviente anterior, o a la siguiente si no hay anterior (con -1 y
+  entradas, el siguiente push haría `slice(0, 0)` y borraría todo).
+- **Ubicación** (`NavLocation`): `note` (nota del **panel activo** + su sección: `pane.sectionId`, si
+  no `activeSectionByNote`), `overview` (vista de nota), `content` (vista de contenido con su `place`)
+  y `brain`. Prioridad igual que el render de `App`: `contentPlace` → `brainViewOpen` → `noteViewId` →
+  editor. Cambiar de pestaña en la misma nota NO crea entrada (actualiza la actual): Atrás vuelve a la
+  nota en la sección donde se dejó.
+- **Grabación sin instrumentar botones:** `startNavHistory()` se suscribe a `useNotesStore` (la fuente
+  única de qué muestra el área principal) y en cada cambio deriva `currentLocation`; sale barato si no
+  cambió (corre en cada guardado). Ignora ubicaciones de notas que el store no tiene (estados de
+  transición). Un paso atrás/adelante pone el flag `navigating` mientras aplica, para no grabarse a sí
+  mismo; los ajustes asíncronos posteriores (el editor fijando la sección) caen en "mismo sitio" y
+  solo reescriben la entrada.
+- **Aplicar:** `note` → `openNoteInActivePane(noteId, sectionId)` (acción nueva del store: la nota
+  **en el panel activo**, conservando el resto del split; si ya está en otro panel, lo enfoca; misma
+  danza `pendingInitialSectionId` + `noteflow:request-section` que `navigateToSection`); `overview` →
+  `setNoteView`; `content` → `setContentView`; `brain` → `setBrainView(true)`.
+- **Split (decisión):** el historial es uno solo y sigue al panel activo; enfocar otro panel también
+  crea entrada. Atrás cambia la nota del panel activo (o enfoca el panel que ya la muestra); **no**
+  restaura layouts de split cerrados/colapsados.
+- **Validez al navegar:** nota borrada/podada/archivada fuera, o grupo/carpeta inexistente
+  (`placeExists`) → se purga; nota cifrada **bloqueada** (sin `sessionPasswords`) → se salta pero se
+  conserva (vuelve a ser alcanzable al desbloquearla). La purga es perezosa (al pulsar), no en cada
+  cambio de `notes`.
+- **Captura (`components/useNavHistory.ts`):** `useSwallowMouseHistoryButtons()` (en `App`, **todas**
+  las ventanas) hace `preventDefault` de `mousedown`/`mouseup`/`auxclick` con `button` 3/4 en captura,
+  para que Chromium nunca haga su navegación de historial (sacaría a la ventana de su ruta hash,
+  `#ai-chat`, `#section-window`…). `useNavHistory(!isSticky)` (en `MainApp`) navega en el `mouseup`
+  (captura) y escucha las teclas en **burbuja** saltándose `e.defaultPrevented`: dentro de una tabla
+  `Alt+←/→` es mover columna (`TableKeymap` lo consume) y gana la tabla; también respeta `ownsKeys`.
+- **Nada por debajo de un overlay (`lib/overlays.ts` → `hasOpenOverlay()`):** ni ratón ni teclado
+  navegan con un diálogo, menú o menú contextual abierto. Se lee del DOM (sin estado por modal):
+  `[aria-modal="true"]` (Confirm, Encryption, Snippets, historial de versiones, What's new…),
+  `[role="menu"]` (desplegables), `[data-overlay]` (lo pone el `ContextMenu` compartido: menús de nota,
+  grupo, carpeta, pie del sidebar) y los modales `fixed inset-0` con fondo `bg-black/…` (Ajustes,
+  paleta, Export/Import, diálogos del editor; misma regla que espera `WhatsNewHost`). Para el ratón se
+  mira también en el `mousedown`: un menú que se cierra con cualquier `mousedown` ya no está en el
+  `mouseup`. Un modal nuevo debe llevar `aria-modal="true"` o ese fondo; un menú, `role="menu"` u
+  `OVERLAY_PROPS`.
+  No se toca main: en Windows el renderer recibe los botones X1/X2 como `button` 3/4 y Electron no
+  navega por `app-command` por defecto (escucharlo además duplicaría cada paso).
+
 ### Ventanas de sección ("Open in new window")
 BrowserWindows extra (`createSectionWindow()` en main) que cargan la app con
 `#section-window?noteId=…&sectionId=…` → `SectionWindowApp`: barra de título propia (Nota · Sección,
@@ -3756,7 +3930,25 @@ la misma, que ya muestra la nota completa con sus tabs; se abre en la sección e
 —`activeSectionByNote[noteId]` si sigue existiendo, si no la primera—, mismo orden que `NoteEditor`) y
 la paleta (sección del panel activo, `getActiveSectionTarget()`); a
 propósito NO desde el menú ⋯ del editor, y nunca para notas cifradas (ver "Sync entre ventanas":
-si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
+si llega una, `EncryptedReadOnlyView` la muestra en solo lectura). La sección "en que se abriría la
+nota" la calcula `noteOpenSectionId()` (`src/lib/noteDragOut.ts`), compartida por el menú de nota y el
+arrastre de abajo.
+- **Arrastrar una nota fuera de la ventana** (`src/components/openNoteWindowOnDragOut.ts`): en el
+  `dragend` de una fila de nota de la barra lateral (`handleNoteDragEnd`) o de la vista de contenido
+  (listener `dragend` en captura de `ContentView`, que corre antes que el de la fila y ya limpiaba
+  `dragIdsRef`), si `dataTransfer.dropEffect === 'none'` (nadie aceptó el drop: ni un destino nuestro
+  ni otra app) y el punto de suelta cae fuera de la ventana (`isDragEndOutsideWindow`: deben coincidir
+  el test de viewport —`clientX/Y` fuera de `innerWidth/Height`— y el de pantalla —`screenX/Y` fuera
+  de `window.screenX/Y + outerWidth/Height`—; un dragend todo a 0,0 se trata como no fiable), abre la
+  ventana de sección con `openSectionWindow(noteId, sectionId, { nearCursor: true })`. Solo con UNA
+  nota (multiselección de la vista de contenido → nada) y nunca cifradas. Con `nearCursor`, main la
+  coloca con `screen.getCursorScreenPoint()` (el puntero sigue donde se soltó; en DIP, sin depender
+  del zoom de "UI text size" que escala las coords del DOM) y `placeWindowAtPoint()`
+  (`electron/windowPlacement.ts`: centrada en el puntero, barra de título bajo él, dentro del
+  `workArea` de `getDisplayNearestPoint`); si ya hay ventana en esa nota+sección solo se enfoca (no se
+  mueve). Límites: cancelar con Esc fuera de la ventana también da `dropEffect 'none'` → abre;
+  si la plataforma da el dragend a 0,0 (el mismo caso que cubre `SidebarShell`) → nunca abre; si otra app acepta texto (`text/plain`;
+  en macOS el Finder/escritorio crea un clipping) no se abre ventana.
 - **Una por nota+sección:** main guarda `sectionWindows: Map<BrowserWindow, {noteId, sectionId}>`; el
   renderer informa de la sección actual (`window:section-window-target`) y la refleja en el hash
   (`history.replaceState`), así reabrir la misma sección enfoca la ventana y una recarga vuelve a ella.
@@ -3959,15 +4151,16 @@ abrir el dmg en Finder** (no reemplazo automático). Qué cambió y qué NO:
 
 ### CLI companion (`cli/noteflow.js`)
 Node.js standalone (sin deps de Electron) que opera directamente sobre los `.md`. Comandos:
-`add`, `new`, `list`, `get`, `read`, `set`, `path`, `touch`, `delete`, `rename`, `move`, `sections`,
-`section add/rename/delete`, `favorite` (alias `pin`), `archive`, `groups`, `group create/delete`,
+`add`, `new`, `list`, `get`, `read`, `set`, `path`, `touch`, `delete`, `rename`, `move`, `sections`
+(= `section list`), `section add/rename/delete`, `favorite` (alias `pin`), `archive`, `groups`, `group create/delete`,
 `folders`, `folder create/rename/delete`, `login` (también en dos pasos: `--no-wait`/`--finish`),
 `logout`, `push`, `pull`/`update`, `status`,
 `cloud login/logout/status/setup/push/pull` (cliente NoteFlow Cloud headless — ver
 `monetization.md` § 4 "Cliente CLI (headless)"; con sesión Cloud activa, `push`/`pull`/`status` y el
 sync automático van a Cloud en vez de a GitHub), `history` (historial de versiones de Cloud, abajo),
 `migrate`, `self-update`.
-Todo se direcciona **por nombre** (título de nota + nombre de sección), nunca por id; los nombres de
+Todo se direcciona **por nombre** (título de nota + nombre de sección), no por id: el nombre de carpeta o el id solo sirven para distinguir títulos repetidos (los títulos
+tampoco son únicos: ver "Resolución de nota por título" abajo); los nombres de
 sección **no son únicos** → se desambiguan con un sufijo 1-based `#n` (p. ej. `Tasks#2`). La
 resolución de sección (`matchSectionOrNull`) es única para todos los comandos: **nombre exacto**
 (case-insensitive) + `#n`, y varios homónimos sin `#n` **fallan en vez de adivinar**. La coincidencia
@@ -3982,7 +4175,8 @@ estrictos:** sin match exacto **fallan** (exit 1, nada escrito; `failUnknownSect
 laxos y después los parecidos por ortografía (`editDistance`, distancia OSA ≤1 para ≤4 letras, ≤2
 para más; nada por ortografía con <3 letras) — **solo se sugieren**, nunca se usan. Con `--json` el
 error sale **además en stdout** como `{ error, code: "section_not_found", note, section, sections,
-suggestions }` (es el único error del CLI en JSON: la vía de autocorrección de un agente); `--dry-run`
+suggestions }` (con el de nota inexistente, `note_not_found` — ver "Resolución de nota por título" abajo —,
+son los únicos errores del CLI en JSON: la vía de autocorrección de un agente); `--dry-run`
 lo reproduce. **`--create`** = "crea lo que falte" (en `add`, nota de `--title` y/o sección; en
 `set`, solo la sección — la nota tiene que existir); al crear con parecidas lo avisa por stderr
 (`similarSectionsNote`: `Note: no section named "EN" — created it. Similar existing: …`; `would
@@ -3999,6 +4193,94 @@ fuerza modo texto; `--markdown` y `--rich` (alias histórico, se mantiene) son e
 Las secciones existentes nunca cambian de modo. `migrate` (v1→v2) crea la `Note` de una nota v1 solo
 con cuerpo en modo markdown, igual que `parseLegacyNoteRaw` del escritorio (antes el CLI la ponía en
 modo texto).
+
+**Resolución de nota por título (v2.15.0).** `matchNotesByTitle` (pura; `findNoteByTitle` la aplica a
+`loadAllNotes()`), en este orden: (1) **todas** las notas cuyo título es exactamente la consulta
+(sin distinguir mayúsculas) — los títulos **no son únicos** (la app permite varias `Untitled`), así
+que pueden ser varias; (2) la nota cuyo **nombre de carpeta** (`dirname`, `<slug>-<id>`, con o sin
+`/` final, sin distinguir mayúsculas — tal como lo imprimen `list` y "Multiple matches") o cuyo `id`
+es la consulta; (3) las que contienen la consulta. Varias coincidencias —parciales **o del mismo
+título**— son siempre el error `Multiple matches — be more specific:` (`failIfAmbiguousNote`, exit 1,
+nada escrito), que lista `título [archived]  (dirname/)` y termina con `To pick one, pass its folder
+name (in parentheses) instead of the title.`: **nunca se elige una** (antes `notes.find` devolvía la
+primera homónima en silencio, y `get --json` la primera de cualquier lista ambigua). Todos los
+comandos pasan por `resolveNote` (se quitaron las seis copias del bloque en `get`/`delete`/`favorite`/
+`archive`/`rename`/`sections`); `add --title` usa `findNoteByTitle` + `failIfAmbiguousNote` porque con
+`--create` cero coincidencias no es un error. Decisiones:
+- **El título exacto va antes que el nombre de carpeta** (regla documentada "el título exacto gana",
+  sin excepciones); solo una nota titulada igual que el `dirname` o el `id` de otra tapa a esa otra, y
+  sigue siendo alcanzable por su título o su otro identificador.
+- **Las archivadas cuentan** para la ambigüedad y se resuelven como cualquiera (el CLI las lee, las
+  escribe y `archive` es un toggle: hay que poder resolverlas para desarchivarlas); el listado las
+  marca `[archived]`. Las **cifradas** siguen fuera (`readNoteFolder` las descarta).
+- **La nota diaria nunca falla por ambigua:** `findTodayNote` toma la más reciente por `updated:`
+  entre las candidatas (ahora también entre varias con el título exacto de hoy).
+- **`new` y `rename` permiten el duplicado y avisan** por stderr (`duplicateTitleNote`: `Note: another
+  note is already titled "X" — the title alone is now ambiguous; use the folder name to tell them
+  apart (this one: <dirname>)`). `add --title X --create` no puede duplicar: solo crea con cero
+  coincidencias (ni exacta, ni carpeta, ni parcial).
+- **Nota inexistente → sugerencias** (`failUnknownNote` → `noteSuggestions`, hasta 3 títulos, mismo
+  criterio que las secciones): títulos con todas las palabras de la consulta (sin acentos/mayúsculas/
+  stopwords: `reunion` → `Reunión de equipo`), títulos a ≤1-2 erratas de la consulta entera
+  (`editDistance`, `maxNameEdits`), y títulos donde cada palabra de la consulta es una errata de una
+  suya. Mensajes: `No note found: "resetas". Did you mean "Recetas"?` (sin parecidas, el de siempre,
+  `No note found: "x"`) y, en `add --title`, `Note "X" not found. Did you mean "Y"? Pass --create …`.
+  Con `--json` sale además en stdout `{ error, code: "note_not_found", note, suggestions }` (usa el
+  global `jsonMode`, así vale para todo comando con `--json`).
+Tests: `tests/cli/noteResolution.test.ts`.
+
+**Lector/escritor de escalares YAML (v2.15.0).** El CLI no usa js-yaml: escribe con `q()` (escalar
+entre comillas dobles) y lee con `unquote()`, que son **inversos exactos** y coinciden con lo que
+lee/escribe js-yaml en la app. Antes `unquote` solo quitaba las comillas exteriores, así que cada
+lectura+escritura duplicaba las barras de un título o nombre de sección con `"` o `\`
+(`"a/b: \"c\""` → `"a/b: \\\"c\\\""` → …) y la nota dejaba de encontrarse por su título. `unquote`
+deshace **todos** los escapes de comillas dobles de YAML 1.2 (los que js-yaml puede emitir: `\\ \" \/
+\0 \a \b \t \n \v \f \r \e \N \_ \L \P`, espacio/tab escapados y `\xXX`, `\uXXXX`, `\UXXXXXXXX`), `''`
+→ `'` en comillas simples, ignora un comentario tras la comilla de cierre y deja tal cual lo que no
+entiende (escape desconocido; valor mal cerrado → regla antigua de quitar las comillas exteriores).
+`q()` escapa además los caracteres de control y separadores de línea (`\n`, `\r`, `\t`, `\xXX`,
+`\uXXXX`): un salto de línea crudo rompía el lector por líneas y js-yaml rechaza los demás. Los
+espejos textuales de fusión de anclas (`yamlScalarValue` → `anchorTitle`, `fmStringList`,
+`sectionItemFile`) usan el mismo `unquote` (antes `JSON.parse` con caída al `unquote` roto: solo
+cambia para escapes que JSON no conoce, ahora como js-yaml). De paso: `tags` en lista de bloque (como
+la escribe js-yaml: `tags:` + `  - item`) se leía como vacía y el CLI la reescribía `tags: []`; ahora
+se lee, y la lista en flujo se parte por las comas **fuera** de comillas. Las notas ya corrompidas no
+se reparan (no se puede saber el título original). Tests: `tests/cli/yamlScalarRoundTrip.test.ts`.
+
+**Claves de frontmatter que el CLI conserva (v2.15.0).** Toda escritura del CLI regenera `note.md`
+entero con `serializeNoteMd` a partir de lo que guardó `parseNoteYaml`, así que una clave que el lector
+lee pero el escritor no emite se destruye en silencio. Pasaba con `expiresAt` (la nota temporal se
+volvía permanente con cualquier `add`/`set`/`touch`/`rename`/…) y con el `pinned` heredado (se perdía
+el favorito); ahora se escriben `expiresAt` (misma posición que la app) y `favorited` si
+`favorited ?? pinned`. Auditadas las demás claves que escribe la app (`id`, `title`, `tags`, `created`,
+`updated`, `formatVersion`, `sections[]` con `id`/`name`/`file`/`isRawMode`/`aiHidden`/`created`,
+`archived`, `favorited`, `group`, `folder`, `localOnly`): ya se conservaban; `encryption` no aplica (el
+CLI no lee ni escribe notas cifradas). No hay conservación genérica de claves desconocidas a propósito:
+eran dos claves escalares, la app tampoco conserva las que no conoce, y el test de paridad obliga a
+añadir cada clave nueva (ver `note-format.md`). Tests: `tests/cli/frontmatterPreservation.test.ts`.
+
+**`--json` y sync (v2.15.0).** `new --json` volvía antes de `syncPushNoteFiles` y la nota creada se
+quedaba solo en local; ahora sincroniza como sin `--json` y como `add`/`set --json`: stdout lleva solo
+el documento JSON y las líneas de sync van a stderr (`out()` con `jsonMode`). Era el único comando con
+ese `return` temprano (`delete --json` ya seguía hasta el borrado remoto; los `return` tras `jsonOut` de
+`add`/`set`/`history --restore` son de `--dry-run` o "sin cambios"). `group create`/`folder create` no
+suben nada **con ni sin** `--json`: solo escriben `groups.json`/`folders.json`, que viajan con el
+siguiente `push`. Test (vía `main()`, exportado para tests): `tests/cli/cloudThreeWayPull.test.ts`.
+
+**Superficie de comandos (v2.15.0).** Un **comando desconocido** ya no vuelca la ayuda en stdout:
+`unknownCommandError` (pura; `KNOWN_COMMANDS` = primeras palabras de `COMMAND_FLAGS` + alias + `help`/
+`version`) da `Unknown command: lsit. Did you mean 'list'?` (el más cercano por `editDistance`, misma
+tolerancia que los nombres) + `Run 'noteflow help' for the list of commands`, todo por stderr, exit 1,
+y se comprueba **antes** de validar los flags; `noteflow` sin argumentos sigue mostrando la ayuda.
+**`sections` y `section list` son el mismo comando** (`cmdSections`) y aceptan `--json`: array de `{
+id, name, lines, mode: "markdown" | "text", isRawMode, aiHidden }` (mismos nombres que
+`get`/`read`/`path --json` y que `note.md`). Los recuentos de líneas pasan por `linesLabel` (`1 line` /
+`N lines`). **Aviso de app abierta** (`warnIfDesktopRunning`): solo si el dir de notas del CLI es el
+por defecto (`desktopAppSharesNotesDir` = `sameNotesDir(NOTES_DIR, DEFAULT_NOTES_DIR)`) — la app
+instalada siempre usa el por defecto (`NOTEFLOW_NOTES_DIR || defaultNotesDir()`), así que con un
+override (tests, scripts) el aviso era falso; una app lanzada a mano con el mismo override no se
+detecta (la lista de procesos no enseña su entorno). `NOTEFLOW_NO_APP_CHECK` lo sigue silenciando.
+Tests: `tests/cli/commandSurface.test.ts`.
 
 **`noteflow history` (v2.13.0, solo NoteFlow Cloud).** `noteflow history <título> [sección]
 [--section s] [--show <n> | --restore <n> [--force] [--dry-run]] [--json]` (`cmdHistory`): lista las
@@ -4244,8 +4526,8 @@ arranque (fire-and-forget, best-effort): cada destino va en su propio try/catch 
 impide los demás) y copia solo si el contenido difiere (auto-cura y recoge updates sin reescribir en
 vano). Controlado por el setting local `exposeSkillToAgents` (default `true`) en `settings.json`; al
 desactivarlo borra nuestro `SKILL.md` en todos los destinos y la carpeta `noteflow-cli` si queda vacía
-(nunca toca nada más). Toggle **"Expose CLI skill to AI agents"** en Settings → General
-(`GeneralPanel.tsx`), IPC `app:get-skill-sync` / `app:set-skill-sync`. En la **versión Microsoft Store**
+(nunca toca nada más). Toggle **"CLI skill"** en Settings → AI, sección "Your notes and AI"
+(`Settings/AiPanel.tsx`), IPC `app:get-skill-sync` / `app:set-skill-sync`. En la **versión Microsoft Store**
 (sin CLI) `syncSkillToAgentDirs()` no hace nada —ni instala ni borra: la skill podría ser de una
 instalación directa—, `app:set-skill-sync` se niega y el toggle se sustituye por una explicación
 (ver `release.md` § Microsoft Store).

@@ -190,6 +190,20 @@ export function GitHubSetup({
             )}
             {t.settings.sync.connectWithGitHub}
           </button>
+          <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed">
+            {t.settings.sync.noAccountPrefix}
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault()
+                window.noteflow.openUrl('https://github.com/signup')
+              }}
+              className="text-text-muted hover:text-text underline underline-offset-2"
+            >
+              {t.settings.sync.noAccountLink}
+            </a>
+            {t.settings.sync.noAccountSuffix}
+          </p>
         </div>
       )}
     </div>

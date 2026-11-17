@@ -1,30 +1,15 @@
 import { NodeViewWrapper, NodeViewContent } from '@tiptap/react'
 import type { NodeViewProps } from '@tiptap/react'
 import { useState, useRef, useEffect } from 'react'
-import { Calendar, Flag, GripVertical } from 'lucide-react'
+import { CalendarClock, GripVertical } from 'lucide-react'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
-import {
-  DEADLINE_POPOVER_SIZE,
-  IMPORTANCE_POPOVER_SIZE,
-  badgeColorClass,
-  formatBadgeDate,
-  popoverPosition,
-  type Importance,
-} from './taskBadge'
-import { DeadlinePopover, ImportancePopover } from './TaskPickers'
+import { badgeColorClass, formatBadgeDate, type Importance } from './taskBadge'
+import { TaskMenuPopover } from './TaskPickers'
 import { startTaskDrag } from './taskDrag'
 import { setTaskChecked } from './taskToggle'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { altKey } from '../../lib/platform'
-
-interface OpenPicker {
-  kind: 'deadline' | 'importance'
-  trigger: HTMLElement
-  pos: { top: number; left: number }
-  /** Bumped on every open so a re-open re-seeds the picker's drafts. */
-  id: number
-}
 
 export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, extension }: NodeViewProps) {
   const t = useT()
@@ -43,12 +28,15 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
     high: t.editor.task.importanceHigh,
   }
 
-  // The open picker (deadline or importance) and the trigger it hangs from.
-  // Pickers live in TaskPickers.tsx (shared with kanban cards).
-  const [picker, setPicker] = useState<OpenPicker | null>(null)
+  // The trigger the task menu (importance + deadline, TaskPickers.tsx) hangs
+  // from while it's open — the single button right of the text.
+  const [menuTrigger, setMenuTrigger] = useState<HTMLElement | null>(null)
   const [isSticky, setIsSticky] = useState(false)
   const wrapperRef = useRef<HTMLElement>(null)
-  const pickerSeq = useRef(0)
+  // Whether the menu was open when the trigger was pressed: that press already
+  // closed it (through the menu's own close, which writes its field drafts), so
+  // the click that follows must not reopen it.
+  const openOnPress = useRef(false)
 
   // Detect if we're inside a sticky-editor
   useEffect(() => {
@@ -56,11 +44,17 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
     if (el) setIsSticky(!!el.closest('.sticky-editor'))
   }, [])
 
-  function openPicker(kind: OpenPicker['kind'], trigger: HTMLElement) {
-    const size = kind === 'deadline' ? DEADLINE_POPOVER_SIZE : IMPORTANCE_POPOVER_SIZE
-    setPicker({ kind, trigger, pos: popoverPosition(trigger, size), id: ++pickerSeq.current })
+  // Closed from the keyboard (Escape/Enter/"Done"): the focus goes back to the
+  // text, where it was before opening. A click outside leaves it where it lands.
+  function closeMenu(fromKeyboard: boolean) {
+    setMenuTrigger(null)
+    if (fromKeyboard && editor.isEditable) editor.view.focus()
   }
-  const closePicker = () => setPicker(null)
+
+  const triggerTitle = [
+    importance && tf(t.editor.task.importanceTooltip, { level: importanceLabels[importance] }),
+    due && `${tf(t.editor.task.deadlineTooltip, { date: due })}${alarm ? ' ⏰' + alarm : ''}`,
+  ].filter(Boolean).join(' · ') || t.editor.task.menu
 
   // Checkbox: with "Move checked items to the bottom" (Settings → Editor) the
   // task also moves, in the same transaction, and slides there (taskToggle.ts).
@@ -109,60 +103,47 @@ export function DeadlineTaskItemView({ node, editor, getPos, updateAttributes, e
         <NodeViewContent as="div" className="task-content" />
 
         {!plain && <div className="task-actions" contentEditable={false}>
+          {/* One trigger for importance + deadline: the chips of the values set
+              (always visible), or a hover-only icon when there are none. */}
           <button
             contentEditable={false}
-            className={`task-importance-trigger${importance ? ' has-importance' : ''}`}
-            onClick={(e) => openPicker('importance', e.currentTarget)}
-            title={importance ? tf(t.editor.task.importanceTooltip, { level: importanceLabels[importance] }) : t.editor.task.setImportance}
+            className={`task-meta-trigger${due || importance ? ' has-value' : ''}${menuTrigger ? ' is-open' : ''}`}
+            onMouseDown={() => { openOnPress.current = !!menuTrigger }}
+            onClick={(e) => {
+              if (openOnPress.current) {
+                openOnPress.current = false
+                return
+              }
+              setMenuTrigger(e.currentTarget)
+            }}
+            title={triggerTitle}
+            aria-label={triggerTitle}
+            aria-haspopup="dialog"
+            aria-expanded={!!menuTrigger}
             type="button"
           >
-            {importance ? (
+            {importance && (
               <span className={`task-importance-dot task-importance-dot--${importance}`} />
-            ) : (
-              <Flag size={14} className="task-importance-icon" />
             )}
-          </button>
-
-          <button
-            contentEditable={false}
-            className={`task-deadline-trigger${due ? ' has-due' : ''}`}
-            onClick={(e) => openPicker('deadline', e.currentTarget)}
-            title={due ? `${tf(t.editor.task.deadlineTooltip, { date: due })}${alarm ? ' ⏰' + alarm : ''}` : t.editor.task.setDeadline}
-            type="button"
-          >
-            {due ? (
+            {due && (
               <span className={`task-badge ${badgeColorClass(due)}`}>
                 📅 {formatBadgeDate(due)}
                 {alarm && !isSticky && <> ⏰{alarm}</>}
               </span>
-            ) : (
-              <Calendar size={14} className="task-deadline-icon" />
             )}
+            {!due && !importance && <CalendarClock size={14} className="task-meta-icon" />}
           </button>
         </div>}
       </div>
 
-      {picker?.kind === 'deadline' && (
-        <DeadlinePopover
-          // Re-seed the drafts each time it's (re)opened from the trigger.
-          key={picker.id}
-          pos={picker.pos}
-          trigger={picker.trigger}
+      {menuTrigger && (
+        <TaskMenuPopover
+          trigger={menuTrigger}
           due={due}
           alarm={alarm}
-          onCommit={(nextDue, nextAlarm) => { updateAttributes({ due: nextDue, alarm: nextAlarm }); closePicker() }}
-          onClear={() => { updateAttributes({ due: null, alarm: null }); closePicker() }}
-          onClose={closePicker}
-        />
-      )}
-
-      {picker?.kind === 'importance' && (
-        <ImportancePopover
-          pos={picker.pos}
-          trigger={picker.trigger}
           importance={importance}
-          onSelect={(value) => { updateAttributes({ importance: value }); closePicker() }}
-          onClose={closePicker}
+          onChange={(patch) => updateAttributes(patch)}
+          onClose={closeMenu}
         />
       )}
     </NodeViewWrapper>

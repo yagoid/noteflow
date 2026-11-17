@@ -113,6 +113,13 @@ export const settings = {
     hideToc: 'Ocultar índice',
     moveChecked: 'Mover las tareas marcadas al final',
     moveCheckedHint: 'Al marcar una tarea baja al final de su lista; al desmarcarla vuelve encima de las marcadas',
+    taskProgress: 'Progreso de las checklists',
+    taskProgressHint: 'Muestra en el margen cuántas tareas de cada lista están hechas',
+    taskProgressReadableOnly: 'Solo disponible con el ancho Legible',
+    noteClickOpens: 'Al pulsar una nota se abre',
+    noteClickOpensHint: 'En las notas con más de una sección, desde la barra lateral. Las notas con una sola sección siempre se abren en el editor',
+    noteClickEditor: 'Editor',
+    noteClickOverview: 'Vista de la nota',
   },
 
   startup: {
@@ -198,6 +205,9 @@ export const settings = {
     repoName: 'Nombre del repositorio',
     repoHint: 'Se creará como privado si no existe.',
     connectWithGitHub: 'Conectar con GitHub',
+    noAccountPrefix: '¿No tienes cuenta de GitHub? La sincronización con GitHub necesita una. ',
+    noAccountLink: 'Créala gratis',
+    noAccountSuffix: ' y vuelve aquí para conectar.',
     githubCloudActiveTitle: 'NoteFlow Cloud está en uso',
     githubCloudActiveNotice: 'Para cambiar a GitHub Sync, desactiva primero NoteFlow Cloud, al pie de la vista general de sincronización. Desactivarlo no borra nada: tus notas se quedan en este equipo.',
     overview: {
@@ -349,17 +359,17 @@ export const settings = {
   },
 
   ai: {
+    notesTitle: 'Tus notas y la IA',
     localAi: 'IA local',
-    localAiHint:
-      'Indexa tus notas en este dispositivo para potenciar las notas relacionadas, el grafo del cerebro y el contexto del chat. Funciona totalmente sin conexión; las notas cifradas se omiten.',
+    localAiHint: 'Indexa tus notas en este dispositivo para las notas relacionadas, el grafo del cerebro y el contexto del chat. Sin conexión; las notas cifradas se omiten.',
     enableLocalAi: 'Activar IA local',
     disableLocalAi: 'Desactivar IA local',
-    reindexAll: 'Reindexar todas las notas',
+    reindex: 'Reindexar',
     downloadingModel: 'Descargando modelo…',
     profile: 'Perfil',
-    openProfileSetup: 'Abrir configuración del perfil',
-    profileHint: 'Vuelve a hacer el cuestionario para actualizar la nota de perfil que el asistente usa como contexto.',
-    exposeSkill: 'Exponer la skill del CLI a los agentes de IA',
+    redoQuestionnaire: 'Rehacer cuestionario',
+    profileHint: 'Actualiza la nota de perfil que el asistente usa como contexto.',
+    cliSkill: 'Skill del CLI',
     exposeSkillHint:
       'Instala la skill de NoteFlow en ~/.claude/skills y ~/.agents/skills para que Claude Code, Codex, Gemini CLI, Copilot, Cursor y otros agentes compatibles con el estándar Agent Skills gestionen tus notas a través del CLI.',
     exposeSkillTooltip: 'Exponer la skill del CLI',
@@ -532,6 +542,7 @@ export const settings = {
     searchAllNotes: 'Buscar en todas las notas',
     toggleSidebar: 'Fijar / desfijar barra lateral',
     openSideBySide: 'Abrir nota en paralelo (sobre un tag de sección: esa sección en un panel nuevo)',
+    navigateBackForward: 'Atrás / adelante entre notas y vistas (también los botones laterales del ratón)',
     newSectionShortcut: 'Nueva sección',
     deleteSectionShortcut: 'Eliminar sección',
     nextSection: 'Sección siguiente',

@@ -116,10 +116,12 @@ debajo, sus **secciones** en el lenguaje del mapa de secciones del editor:
   ni otra abren la nota (con teclado, el foco pasa a la que aparece). Al cambiar a otra nota, el mapa
   vuelve a plegado. Si una búsqueda coincide con secciones de la nota, se ven todas (ninguna coincidencia
   queda escondida); en el despliegue flotante también se ven siempre todas.
-- **Clic en la fila** (fuera de las celdas): abre la nota en el editor **en su primera sección**,
-  tenga las secciones que tenga (la vista de nota ya no se abre al pulsar la nota; ver "Cómo entrar" en
-  [Vista de nota](#vista-de-nota-note-overview)). Una nota cifrada y bloqueada se abre sin más (pide
-  desbloquear).
+- **Clic en la fila** (fuera de las celdas): por defecto abre la nota en el editor **en su primera
+  sección**, tenga las secciones que tenga. Con Settings → Editor → **Clicking a note opens** en
+  `Note overview`, una nota con **más de una sección** abre en su
+  [Vista de nota](#vista-de-nota-note-overview); las de una sola sección siguen yendo al editor. Una
+  nota cifrada y bloqueada se abre sin más en el editor (pide desbloquear). El clic en una **celda**
+  de sección va siempre a esa sección en el editor, sea cual sea el ajuste.
 - **Buscando:** las notas cuyas secciones coinciden muestran el mapa desplegado sin apuntar a nada; con
   `#sección`, solo las secciones que encajan (como antes); con texto, todas, las coincidentes teñidas de
   su color y el resto atenuadas, con el término resaltado. Si la nota solo coincide por el título, se
@@ -194,13 +196,13 @@ Iconos del TitleBar:
   solo notas que siguen en el store (las borradas no tienen título). El log solo existe desde que
   el dispositivo empezó a registrar; antes solo se conoce la **última** edición de cada nota.
   Ranking: más días primero, luego la tocada más recientemente. Colores solo de tokens del tema;
-  `ActivitySummary.tsx` + `src/lib/activitySummary.ts`; bajo la sección, en filas título + descripción + control: **Local AI**
-  (toggle de embeddings; activada, botón "Reindex all notes" con progreso), **Profile** (botón "Open
-  profile setup" → abre el cerebro en la pestaña Profile y cierra Ajustes) y **Expose CLI skill to AI
-  agents** (toggle: copia la skill del CLI a `~/.claude/skills` y `~/.agents/skills`, y a Windsurf si
-  está instalado)), **Appearance** (tema/fuente/acento/colores del editor/escala/secciones del sidebar/vista cerebro),
-  **Editor** (fuente/tamaño/ancho) — grupo **Preferences** —; **Sync** (NoteFlow Cloud + GitHub),
-  **AI** (solo el proveedor del LLM), **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
+  `ActivitySummary.tsx` + `src/lib/activitySummary.ts`), **Appearance** (tema/fuente/acento/colores del editor/escala/secciones del sidebar/vista cerebro),
+  **Editor** (fuente/tamaño/ancho/índice/tareas marcadas al final/qué abre el clic en una nota) — grupo **Preferences** —; **Sync** (NoteFlow Cloud + GitHub),
+  **AI** (sección **Assistant** con el proveedor del LLM y sección **Your notes and AI**: **Local AI**
+  —toggle de embeddings; activada, "N notes" y botón "Reindex" con progreso—, **Profile** —"Redo
+  questionnaire" → abre el cerebro en la pestaña Profile y cierra Ajustes— y **CLI skill** —toggle:
+  copia la skill del CLI a `~/.claude/skills` y `~/.agents/skills`, y a Windsurf si está instalado),
+  **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
   de notas), **Startup** (autostart + stickies), **Templates** (plantillas de nota) — grupo **Your
   notes** —; y **Tutorial** (el tour "What's new", ver abajo), **Keyboard shortcuts** y **About**
   (versión + updates + **Send feedback** + enlaces: repo de GitHub y **Latest release notes**, que abre
@@ -395,6 +397,23 @@ cambie fuera de NoteFlow aparece en la nota. Diseño e invariantes técnicos: `p
 
 ---
 
+## Atrás / Adelante (navegación tipo navegador)
+
+- Los **botones laterales del ratón** (atrás/adelante), `Alt+←/→` en Windows/Linux y `⌘[` / `⌘]` en
+  macOS recorren las ubicaciones visitadas en la ventana principal: notas abiertas en el editor, la
+  **vista de nota**, la **vista de contenido** (con su lugar: todo, favoritas, un grupo o carpeta) y
+  la **vista cerebro**. Adelante deshace el Atrás; navegar a algo nuevo tras un Atrás descarta lo
+  que había delante. Hasta 50 entradas.
+- Cambiar de pestaña dentro de la misma nota no añade un paso: Atrás vuelve a la nota anterior **en
+  la sección donde la dejaste**.
+- Con paneles en paralelo, el historial sigue al **panel activo**: Atrás cambia la nota de ese panel
+  (o enfoca el panel que ya la muestra) y deja los demás como están.
+- Las notas borradas desaparecen del historial; las cifradas bloqueadas se saltan.
+- Con un diálogo, la paleta, Ajustes o un menú/menú contextual abierto no navega (no cambia la nota
+  por debajo).
+- Dentro de una tabla `Alt+←/→` sigue siendo mover columna. Las ventanas de sección, sticky y chat no
+  tienen historial (los botones del ratón no hacen nada allí).
+
 ## Vista en paralelo (split)
 
 - `Ctrl+Click` sobre una nota, o "Open alongside" en el menú contextual, abre una **segunda nota
@@ -412,7 +431,13 @@ cambie fuera de NoteFlow aparece en la nota. Diseño e invariantes técnicos: `p
 ## Abrir sección en otra ventana
 
 - Menú contextual de una **sección** → "Open in New Window", o paleta de comandos → "Open section in
-  new window" (actúa sobre la sección del panel activo). No está en el menú ⋯ del editor.
+  new window" (actúa sobre la sección del panel activo). No está en el menú ⋯ del editor. El menú
+  contextual de una **nota** también lo ofrece (en la sección en que se abriría la nota).
+- **Arrastrar una nota fuera de la ventana** (desde la barra lateral o la vista de todo el contenido) y
+  soltarla fuera de NoteFlow abre esa nota en ventana nueva, **cerca del punto donde se soltó** (en la
+  sección en que se abriría la nota). Soltarla dentro sigue igual (sobre el editor → en paralelo). No
+  hace nada si otra app acepta el drop (p. ej. un editor de texto que inserta el id), con varias notas
+  seleccionadas a la vez ni con notas cifradas.
 - **No disponible para notas cifradas** (se edita en la ventana principal). Si una ventana ya abierta
   muestra una nota que se cifra después, pasa a solo lectura (pide la contraseña para verla).
 - Abre una ventana **solo-editor** (sin sidebar): barra de título propia con "Nota · Sección" y
@@ -620,9 +645,13 @@ una nota con muchas secciones o reorganizarla. Es una de las vistas full-area mu
 **Cómo entrar:**
 - Botón **⊞** (icono de cuadrícula) de las acciones del mapa de secciones del editor, justo **al lado
   de la estrella de favoritos**.
-- **Click derecho** sobre un **tag de sección** (sidebar / vistas) o un **tab del editor** →
-  **"Note overview"** (el menú de la nota en sí no lo ofrece).
-- Pulsar la nota en el sidebar **no** la abre: va al editor, a la primera sección.
+- **Click derecho** sobre una **nota** o un **tag de sección** (sidebar / vistas), o sobre un **tab
+  del editor** → **"Note overview"** (no en una ventana de sección ni si la vista de esa nota ya está
+  abierta).
+- **Pulsar la nota en el sidebar** (o en el peek de un grupo, o `Intro` sobre un resultado de
+  búsqueda), solo si Settings → Editor → **Clicking a note opens** está en `Note overview` y la nota
+  tiene **más de una sección**. Por defecto (`Editor`) pulsar la nota va al editor, a la primera
+  sección. Abierta así, la nota queda activa: salir de la vista vuelve a su editor.
 
 **Cómo salir:** `Esc` (si no hay selección), el botón **⊞ activo** de la cabecera (resaltado en el
 color de acento: "estás en la vista de nota"; vuelve al editor, o a la vista de contenido —en el mismo
@@ -878,12 +907,29 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - **Deadline**: fecha límite (se muestra junto al checkbox).
 - **Alarm**: notificación nativa del sistema en ese momento (el proceso principal la dispara,
   funciona aunque la ventana esté oculta; incluye las ya vencidas al registrar).
-- **Importancia/prioridad**: grado Low / Medium / High. Se elige en un picker y queda visible
-  como un **punto de color** sin texto (Low → verde, Medium → amarillo, High → rojo), para que
-  ocupe poco. Persiste en markdown con el marcador ` 🔺{level}` (low|medium|high), tras `📅`/`⏰`.
-- Al hacer hover sobre el task item aparecen **dos triggers** a la derecha del texto: un icono de
-  **calendario** para el deadline/alarma y un icono de **bandera** para la importancia. Cada uno
-  abre su propio picker; los valores asignados quedan visibles de forma permanente.
+- **Importancia/prioridad**: grado Low / Medium / High. Queda visible como un **punto de color**
+  sin texto (Low → verde, Medium → amarillo, High → rojo), para que ocupe poco. Persiste en markdown
+  con el marcador ` 🔺{level}` (low|medium|high), tras `📅`/`⏰`.
+- **Un solo botón por tarea** a la derecha del texto: sin valores es un icono de calendario-reloj
+  que aparece en hover; con valores muestra **siempre** sus chips (punto de importancia + badge
+  `📅 fecha ⏰hora`), y clicar en ellos abre el mismo menú. El botón alterna el menú (abrir/cerrar).
+- **Menú de tarea** (popover pequeño; importancia, atajos y "Clear" se aplican **en vivo** y los
+  chips se actualizan detrás; los campos de fecha y hora se guardan al salir del campo, con `Enter` o
+  al cerrar el menú —también si se cierra volviendo a pulsar el botón—, nunca a medio teclear; lo
+  elegido en el calendario nativo se guarda al momento):
+  - **Importance**: fila segmentada `⊘ · Low · Medium · High`; la opción elegida toma su color.
+    `←/→` la recorren (y la eligen); al abrir, el foco está en la opción actual.
+  - **Deadline**: atajos **Today / Tomorrow / Next week** (el lunes siguiente) con el día que
+    representan a la derecha (resaltado si es el deadline actual), y debajo los campos **fecha** y
+    **alarma** (hora; deshabilitada hasta que hay fecha, con `×` para quitarla). Clicar el icono de cada campo
+    abre el selector nativo. "Clear" junto al título quita deadline + alarma (cambiar la fecha
+    conserva la alarma).
+  - Pie: **Clear all** (quita todo; solo si hay algo) y **Done**. `Esc`, `Enter` en un campo o
+    *Done* cierran y devuelven el foco al texto; un clic fuera cierra sin moverlo. `Tab` no sale del
+    menú. Se coloca alineado a la derecha del botón, debajo (o encima si no cabe) y nunca se sale de
+    la ventana (en un sticky pequeño hace scroll, la importancia queda en solo puntos y fecha/alarma
+    se apilan); sigue al botón si se hace scroll.
+- Las **tarjetas kanban** mantienen sus dos triggers propios (fecha y bandera) con pickers separados.
 - **Reordenar arrastrando:** en hover aparece un asa **⋮⋮** a la izquierda de la casilla (en el
   margen, sin desplazar el texto; también en stickies y en Readable). Se arrastra desde el asa (no
   desde el texto) como una tarjeta del kanban: copia flotante, la tarea original atenuada y una
@@ -1161,7 +1207,7 @@ Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del m
   párrafo de primer nivel (no las de listas, citas o tablas). El ancho de columna se deriva del tamaño de fuente base del cuerpo (no del de
   cada elemento), así los headings comparten la misma columna. Aplica a ambos modos (markdown y
   texto); no afecta a los stickies.
-- En `Readable`, las acciones de cada tarea (importancia + deadline/badge) se sacan al margen
+- En `Readable`, las acciones de cada tarea (el botón de importancia + deadline con sus chips) se sacan al margen
   derecho, fuera de la columna, cuando el editor mide ≥ 58em (container query en `src/index.css`).
   Si el bloque no cabe en el margen (badge con fecha + alarma), se desplaza hacia la izquierda
   solapando el final de la columna en vez de provocar scroll horizontal; el contenedor de scroll
@@ -1170,6 +1216,19 @@ Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del m
   índice (se desplazan a la izquierda antes de llegar a ellas).
 - Preferencia en `editorSettingsStore` junto a fuente/tamaño, **sincronizada** en `ui-settings.json`
   (`localStorage` `noteflow-readable-width` queda solo como dual-write legacy/seed).
+
+### Progreso de las checklists (riel en el margen)
+- Con ancho **Readable**, cada checklist de 2 o más tareas lleva a su **izquierda**, en el margen, un
+  **riel** vertical fino que va de la primera a la última tarea. El tramo hecho se rellena desde arriba
+  en el verde de las casillas, con un remate circular y una etiqueta pequeña («3/8», «✓» al 100 %) que
+  baja con el avance. Cuenta también las subtareas; un párrafo o heading entre medias empieza otro bloque.
+- Al pasar el ratón: «3 de 8 tareas hechas · 38 %» o «lista completa». Al completar la lista hace un
+  pequeño rebote (sin animaciones si el sistema pide reducir movimiento).
+- Solo si cabe en el margen (deja sitio al asa de arrastre): si la ventana es estrecha, la fuente grande
+  o el índice quita sitio, se esconde. Nunca mueve el texto. No sale en notas flotantes, vistas previas
+  ni el chat de IA.
+- Ajustes → Editor → **Checklist progress** (activado por defecto, sincronizado). Con ancho `Full` el
+  interruptor queda deshabilitado («solo con Readable») y conserva su valor.
 
 ### Índice flotante (table of contents)
 - En el borde derecho del editor hay un **indicador discreto**: una rayita corta por encabezado
@@ -1189,6 +1248,16 @@ Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del m
 - Settings → Editor → **Table of contents** (switch, activado por defecto); se sincroniza con el resto
   de ajustes del editor.
 
+### Qué abre el clic en una nota (Editor / Note overview)
+- Settings → Editor → **Clicking a note opens**: selector `Editor / Note overview` (por defecto
+  `Editor`, el comportamiento de siempre). Con `Note overview`, pulsar en la barra lateral una nota con
+  **más de una sección** abre su [vista de nota](#vista-de-nota-note-overview) en vez del editor.
+- Aplica al clic en la fila de la nota del sidebar, en el peek de un grupo y a `Intro` sobre un
+  resultado de búsqueda. **No** cambia: el clic en una celda/pestaña de sección (va a esa sección en el
+  editor), `Ctrl/Cmd+clic` (abre la nota al lado en el editor), las notas de una sola sección ni las
+  cifradas bloqueadas (siempre al editor).
+- Se sincroniza con el resto de ajustes del editor.
+
 ---
 
 ## Local AI — "Related notes" (Fase 1 de "El Cerebro")
@@ -1202,10 +1271,10 @@ derivado reconstruible desde los `.md`.
 - **Activación:** flag `settings.ai.enabled` (default **off**). La **UI definitiva de activación
   está en la vista cerebro** (ver abajo): con la IA off el cerebro muestra solo la estructura y un
   CTA "Activar IA local"; al activar descarga un modelo pequeño (~una vez) e indexa con barra de
-  progreso. También hay un toggle **"Local AI"** en Settings → General.
+  progreso. También hay un toggle **"Local AI"** en Settings → AI ("Your notes and AI").
 - **Panel Related:** al cambiar de sección/nota, el panel actualiza las relacionadas; click en un
   resultado navega a esa sección. Las notas **cifradas se omiten** (no entran al índice).
-- **Reindexar:** botón "Reindex all notes" en Settings → General (debajo del toggle "Local AI", muestra progreso); el índice también
+- **Reindexar:** botón "Reindex" en Settings → AI (junto al toggle "Local AI", muestra progreso); el índice también
   se mantiene al día solo al guardar (incremental, debounce).
 - Roadmap: este índice alimenta la **vista cerebro** (Fase 2 ✅) y el **chat RAG** (Fase 3 ✅, ver
   "Panel de IA" más abajo). Un índice, tres consumidores. Detalle técnico en `.agents/context/ai.md`.
@@ -1306,7 +1375,7 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   cualquier nota/sección como origen. Necesita la IA local (embeddings) activada.
 - **Profile:** cuestionario del **segundo cerebro** — **no aparece solo**: al entrar al cerebro
   siempre aterrizas en el chat (o en el proveedor, si aún no configuraste ninguno) y el cuestionario
-  se abre cuando pulsas la pestaña **Profile** (o desde la paleta / Ajustes → General, botón "Open profile setup"). Pensado para
+  se abre cuando pulsas la pestaña **Profile** (o desde la paleta / Ajustes → IA, botón "Redo questionnaire"). Pensado para
   **cualquier persona** (no solo
   perfiles técnicos) y para **mínimo esfuerzo**, organizado en **secciones**: *Professional* (a qué
   te dedicas, herramientas, en qué te enfocas), *Personal*, *Your style* y *Working with the AI*
@@ -1327,23 +1396,28 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
   quedan en una sección final de baja relevancia y la IA tiene **prohibido sacarlos a colación** en
   conversaciones que no vienen a cuento (te recomienda directo, sin "como te gusta tal película…").
   La app nunca procesa los documentos: se los pasa directamente al modelo.
-- **⚙ Settings (proveedor):** arriba, una **línea de estado honesta**: "Chat ready · <proveedor>" solo
-  si el proveedor activo puede responder; si no (p. ej. recién instalada: Anthropic elegido **sin
-  clave**), **"Chat not set up"** y ninguna opción marcada como activa. Debajo, **tres cards al mismo
-  nivel** — **NoteFlow AI** (etiqueta "€5.99/month"; "In your plan" si lo tienes; "Add to your plan" si
-  pagas Cloud), **Your API key** ("Free" — pagas a tu proveedor) y **Local model** ("Free", Ollama) —;
-  la del proveedor en uso lleva el badge **Active** (solo si de verdad funciona). Al pulsar una, debajo
-  solo su sección. En el panel del Cerebro, estrecho, las cards se apilan.
-  - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow),
-    modelos curados (el recomendado marcado "(Recommended)"; los que gastan la asignación al menos el
-    doble de rápido, con sufijo "(≈N× quota)" — hoy ≈2× y ≈29×; el campo "Model" es de **solo
-    lectura**, se elige haciendo clic en uno de los modelos) y **barra de consumo mensual** en
-    porcentaje ("N% of this month’s AI allowance used": la asignación se mide por el coste real de
-    cada petición, así que los modelos caros la gastan antes). La lista de
-    modelos la sirve el servidor: los modelos nuevos **aparecen solos** (sin actualizar la app; "Load"
-    fuerza el refresco), se recuerda entre arranques y offline, y tu modelo elegido no cambia. Botón "Use NoteFlow
-    AI" para activarlo (o check "Active" si ya lo es). **Sin el plan** (sin sesión o sin suscripción),
-    elegir la card abre el **detalle del plan** en lugar de las cards (enlace "← AI options"): a la
+- **⚙ Settings (proveedor):** sección **Assistant** con un resumen a la derecha del título: "Answers
+  with <modelo>" solo si el proveedor activo puede responder; si no (p. ej. recién instalada: Anthropic
+  elegido **sin clave**), **"Not set up"**. Debajo, **una lista con borde y tres filas con radio** —
+  **NoteFlow AI** (etiqueta "€5.99/month"; "In your plan" si lo tienes; "Add to your plan" si pagas
+  Cloud), **Your API key** ("Free" — pagas a tu proveedor) y **Local model** ("Free", Ollama) —; la del
+  proveedor en uso lleva la pastilla verde **"In use · <proveedor>"** (solo si de verdad funciona). La
+  fila elegida (al abrir: la que está en uso, o NoteFlow AI si no hay nada configurado) se despliega
+  con un **formulario de etiquetas a la izquierda** (Model, Connection, etc.). **Todos los campos se
+  ven y se guardan antes de activar** la fuente: si la elegida no es la que usa el chat, un pie
+  discontinuo dice "The chat now uses X." con el botón **"Use <proveedor>"**. En el panel del Cerebro,
+  estrecho, las etiquetas van encima de cada control.
+  - **Model:** un desplegable con una fila por modelo (radio, nombre, chip "Recommended" y chip
+    "≈N× quota" amarillo, rojo desde ≈10×). **Connection:** botón "Test" con el resultado al lado
+    ("✓ Responds" o el error).
+  - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow).
+    Filas **Quota** (barra de consumo mensual en porcentaje, "N% of this month’s AI allowance used":
+    la asignación se mide por el coste real de cada petición, así que los modelos caros la gastan
+    antes), **Model** (solo los modelos curados: sin texto libre — hoy ≈2× y ≈29× en los chips) y
+    **Connection**. La lista de modelos la sirve el servidor: los modelos nuevos **aparecen solos** (sin
+    actualizar la app), se recuerda entre arranques y offline, y tu modelo elegido no cambia. **Sin el
+    plan** (sin sesión o sin suscripción), la fila muestra **Plan** con el precio y "View plan", que abre
+    el **detalle del plan** en lugar de la lista (enlace "← AI options"): a la
     izquierda **"What's included"** (sin Ollama ni API keys, modelos eficientes con tools e imágenes,
     asignación mensual con consumo visible, catálogo siempre al día, y "si cancelas, vuelves a tu
     propia clave o a un modelo local"); a la derecha **una caja de plan** con el precio mensual y
@@ -1371,14 +1445,14 @@ La mitad izquierda de la vista cerebro. Su UI sigue el idioma de la app (EN/ES).
     de subir no se pierden y GitHub Sync se reanuda si lo tenías conectado) y el asistente vuelve a tu
     último proveedor propio. Si no se pudo verificar el plan (sin red), no se apaga nada. Volver a
     suscribirte con la app abierta lo reactiva solo.
-  - **Your API key / Local model (gratis):** "Your API key" lista los proveedores con clave
-    (Anthropic/Claude, OpenAI, DeepSeek, MiniMax, Moonshot, OpenRouter, OpenCode Zen) y "Local model"
-    los que no la necesitan (**Ollama** preseleccionado, o Custom OpenAI-compatible). Eliges proveedor,
-    pegas tu **API key** si hace falta, ajustas Base URL y modelo, y pruebas la conexión. **Cada
-    proveedor recuerda su propia key/modelo** — cambiar de proveedor no las mezcla. Las claves se
-    guardan cifradas y nunca salen de tu máquina. Si el proveedor elegido no es el activo, la sección
-    solo muestra el desplegable + un botón **"Use this provider"**: los campos (key, Base URL, modelo)
-    aparecen al activarlo, porque siempre editan la config del **proveedor activo**.
+  - **Your API key / Local model (gratis):** "Your API key" lista en **Provider** los proveedores con
+    clave (Anthropic/Claude, OpenAI, DeepSeek, MiniMax, Moonshot, OpenRouter, OpenCode Zen) y "Local
+    model" en **Server** los que no la necesitan (**Ollama** preseleccionado, o Custom
+    OpenAI-compatible). Pegas tu **API key** si hace falta (guardada se ve enmascarada con ✓ y
+    "Change"/"Remove"), ajustas la URL, eliges el modelo (o "Type another model…"; "Load list" /
+    "Detect" lo pide al proveedor) y pruebas la conexión. **Cada proveedor recuerda su propia
+    key/modelo/URL** — cambiar de proveedor no las mezcla, y editar uno que no está en uso no toca el
+    que usa el chat. Las claves se guardan cifradas y nunca salen de tu máquina.
 
 > **Dos interruptores independientes:** la **IA local** (embeddings, se activa en el cerebro) da
 > contexto RAG y conexiones de contenido; el **proveedor LLM** (Ajustes) da el chat. El chat funciona
@@ -2244,6 +2318,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+Shift+F` | Buscar en todas las notas (sidebar) |
 | `Ctrl+'` | Fijar / desfijar sidebar (fijado ⇄ flotante; en la vista cerebro, mostrar/ocultar sus notas) |
 | `Ctrl+Click` | Abrir nota en paralelo (sobre un tag de sección: esa sección en un panel nuevo) |
+| `Alt+←/→` (macOS `⌘[` / `⌘]`) · botones laterales del ratón | Atrás / adelante entre notas y vistas |
 
 ### Secciones
 | Atajo | Acción |

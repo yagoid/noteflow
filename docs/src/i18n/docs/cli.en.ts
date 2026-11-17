@@ -98,6 +98,7 @@ export const cliEn = {
     title: 'Command reference',
     intro: [
       'Everything is addressed <strong>by name</strong>: note titles plus section names — you never touch ids. Titles can be partial (on multiple matches the CLI lists them and asks for precision), and duplicate section names are targeted with a 1-based suffix like <code>"Tasks#2"</code>. Quote names containing spaces.',
+      'Titles aren’t unique: when several notes share the same title, the CLI never picks one — it lists them with their folder name (<code>&lt;slug&gt;-&lt;id&gt;</code>, the <code>dirname</code> of <code>list --json</code>), and that folder name works anywhere a title does. A title that matches nothing fails with a <code>Did you mean "…"?</code> suggestion.',
     ],
     colCommand: 'Command',
     colDesc: 'What it does',
@@ -122,7 +123,7 @@ export const cliEn = {
       },
       {
         name: 'NOTEFLOW_NO_APP_CHECK',
-        desc: 'Set to <code>1</code> to silence the stderr warning when mutating groups/folders while the desktop app is running.',
+        desc: 'Set to <code>1</code> to silence the stderr warning when mutating groups/folders while the desktop app is running (it only shows when the CLI works on the default notes directory, the one the app uses).',
       },
       {
         name: 'NOTEFLOW_CLOUD_PASSPHRASE',

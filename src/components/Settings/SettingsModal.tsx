@@ -204,8 +204,8 @@ export function SettingsModal({ initialSection = 'general', initialIntent, onClo
             {/* Opaque background (the window's own colour): lets Chromium scroll this on the
                 compositor on standard-DPI screens instead of repainting it on every scroll frame. */}
             <div ref={contentRef} className="settings-content flex-1 overflow-y-auto px-5 py-5 bg-surface-1">
-              {section === 'general' && <GeneralPanel onClose={onClose} />}
-              {section === 'ai' && <AiPanel intent={intent} />}
+              {section === 'general' && <GeneralPanel />}
+              {section === 'ai' && <AiPanel intent={intent} onClose={onClose} />}
               {section === 'sync' && <SyncPanel intent={intent} />}
               {section === 'account' && <AccountPanel onNavigate={navigate} />}
               {section === 'appearance' && <AppearancePanel />}

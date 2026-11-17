@@ -368,8 +368,11 @@ Además refleja **`history`** (v2.13.0, añadido el 2026-11-15 en el grupo NoteF
 flags `--show`/`--restore`/`--force`/`--dry-run`/`--json` y las filas de `--json`, `--section`,
 `--dry-run` y `--force` de `globalFlags`) y **`origin`** (v2.14.0, 2026-11-16: fila nueva en el grupo
 "GitHub sync" — cubre los dos backends —, `--merge` en las filas de `login`/`cloud login` y en
-`globalFlags`, `origin merge` en `--no-pull`, campo `origin` en el JSON de `status`/`cloud status`), sin
-subir el badge de versión del hero: el resto de la página no se ha revisado contra 2.8-2.14.
+`globalFlags`, `origin merge` en `--no-pull`, campo `origin` en el JSON de `status`/`cloud status`) y
+**v2.15.0** (2026-11-17: `--json` en la fila `sections` y en `globalFlags`, aviso de título duplicado en
+`new`/`rename`, párrafo de la intro de comandos sobre títulos repetidos → nombre de carpeta y `Did you
+mean`, y la nota de `NOTEFLOW_NO_APP_CHECK`), sin
+subir el badge de versión del hero: el resto de la página no se ha revisado contra 2.8-2.15.
 **No** se reflejan en la web: el protocolo para agentes de la skill (checklist inicial, "Sincroniza
 y verifica", "ofrécete a activar el sync") — la web solo enlaza a la skill. Anclas: `#install` `#notes-dir` `#format` `#commands` `#flags`
 `#agents` `#caveats` `#troubleshooting`.

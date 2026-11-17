@@ -130,7 +130,8 @@ const api = {
     // Window controls
     openSticky: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-sticky', noteId, sectionId),
     // Editor-only window for one section (focuses an existing window already on it).
-    openSectionWindow: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-section-window', noteId, sectionId),
+    // `nearCursor`: opened where the pointer is (a note dropped outside the window).
+    openSectionWindow: (noteId, sectionId, opts) => electron_1.ipcRenderer.send('window:open-section-window', noteId, sectionId, opts?.nearCursor === true),
     // A section window reports the section it's on, so re-opening it focuses this window.
     setSectionWindowTarget: (noteId, sectionId) => electron_1.ipcRenderer.send('window:section-window-target', noteId, sectionId),
     minimize: () => electron_1.ipcRenderer.send('window:minimize'),
@@ -313,7 +314,9 @@ const api = {
         return () => electron_1.ipcRenderer.removeListener('ai:index-stale', wrapper);
     },
     // AI / LLM provider (chat + second brain)
-    aiLlmGetConfig: () => electron_1.ipcRenderer.invoke('ai:llm-get-config'),
+    // `preset` (optional, on these four): work on that preset's own config instead of the active
+    // one — Settings → AI edits a source before activating it. Never switches the provider.
+    aiLlmGetConfig: (preset) => electron_1.ipcRenderer.invoke('ai:llm-get-config', preset),
     aiLlmPresets: () => electron_1.ipcRenderer.invoke('ai:llm-presets'),
     // NoteFlow AI's model catalog changed (downloaded from the proxy) → re-pull the presets.
     onAiLlmPresetsChanged: (cb) => {
@@ -322,8 +325,8 @@ const api = {
         return () => electron_1.ipcRenderer.removeListener('ai:llm-presets-changed', wrapper);
     },
     aiLlmSetConfig: (patch) => electron_1.ipcRenderer.invoke('ai:llm-set-config', patch),
-    aiLlmListModels: () => electron_1.ipcRenderer.invoke('ai:llm-list-models'),
-    aiLlmTest: () => electron_1.ipcRenderer.invoke('ai:llm-test'),
+    aiLlmListModels: (preset) => electron_1.ipcRenderer.invoke('ai:llm-list-models', preset),
+    aiLlmTest: (preset) => electron_1.ipcRenderer.invoke('ai:llm-test', preset),
     // NoteFlow AI managed plan: monthly consumption (abstract units: only used/limit matters).
     // Null on any failure — the UI just hides the usage bar.
     aiLlmUsage: () => electron_1.ipcRenderer.invoke('ai:llm-usage'),

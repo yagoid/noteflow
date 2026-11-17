@@ -64,6 +64,8 @@ noteflow/
 │   ├── stickyBounds.ts  # Pura: geometría y estado plegado recordados de las stickies
 │   │                    #   (settings.stickyBounds, por PC): saneo/LRU/visibilidad en displays —
 │   │                    #   testeada; ver patterns.md § Ventanas sticky
+│   ├── windowPlacement.ts # Pura: placeWindowAtPoint (ventana de sección abierta donde se soltó una
+│   │                    #   nota arrastrada fuera) — testeada; ver patterns.md § Ventanas de sección
 │   ├── tempNoteExpiry.ts # Lógica pura: cuándo puede correr el autoborrado de notas temporales
 │   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
 │   ├── updateAsset.ts   # Lógica pura del auto-update: qué asset/URL ofrecer por plataforma y
@@ -133,7 +135,7 @@ noteflow/
 │   │   ├── snippetsStore.ts          # Fragmentos del toolbar — snippets.json (IPC, carga perezosa, autoguardado)
 │   │   ├── themeStore.ts             # Tema/fuente/acento/colores editor + último tema oscuro/claro — SINCRONIZADO en ui-settings.json (IPC sendSync); escala de UI y estilo de secciones del sidebar en localStorage (por dispositivo)
 │   │   ├── languageStore.ts          # Idioma UI (i18n) — settings.json vía IPC; dict de src/i18n; cambio en caliente vía broadcast
-│   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible/índice (TOC) del editor — SINCRONIZADO en ui-settings.json (IPC)
+│   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible/índice (TOC)/tareas marcadas al final/qué abre el clic en una nota — SINCRONIZADO en ui-settings.json (IPC)
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
 │   │   ├── aiStore.ts                # Estado del índice IA (enabled, related, grafo, progreso) vía IPC ai:*
 │   │   ├── whatsNewStore.ts          # Tour "What's new": ids vistos (settings.json vía IPC whats-new:*) + tour abierto
@@ -149,14 +151,14 @@ noteflow/
 │   │   │   ├── SnippetsButton.tsx       #   botón partido de fragmentos (insertar el por defecto / elegir) + SnippetsModal.tsx
 │   │   │   ├── snippetCommands.ts       #   inserción de un fragmento expandido como markdown (slice inline o de bloques)
 │   │   │   ├── EditorToc.tsx            # Índice flotante H1–H3 (+ useEditorToc.ts: lectura del doc)
-│   │   │   ├── DeadlineTaskItem.ts      # Extensión TipTap: task item con deadline+alarma
-│   │   │   ├── DeadlineTaskItemView.tsx # NodeView React para DeadlineTaskItem (asa ⋮⋮, casilla, triggers)
+│   │   │   ├── DeadlineTaskItem.ts      # Extensión TipTap: task item con deadline+alarma+importancia
+│   │   │   ├── DeadlineTaskItemView.tsx # NodeView React para DeadlineTaskItem (asa ⋮⋮, casilla, botón único → menú de tarea)
 │   │   │   ├── taskDrag.ts              #   arrastrar tareas por el asa (ghost, línea de drop, auto-scroll)
 │   │   │   ├── taskToggle.ts            #   marcar/desmarcar (+ "marcadas al final" con animación FLIP)
 │   │   │   ├── ListItemMove.ts          #   Alt+↑/↓: mover el ítem de lista con sus subítems
 │   │   │   ├── pointerDrag.ts           #   helpers del drag por pointer events (kanban + tareas)
-│   │   │   ├── TaskPickers.tsx          # Pickers de deadline/alarma e importancia (tareas + tarjetas kanban)
-│   │   │   ├── taskBadge.ts             #   helpers compartidos: color/formato del badge, posición del picker
+│   │   │   ├── TaskPickers.tsx          # Menú de tarea (importancia + deadline/alarma) + pickers separados de las tarjetas kanban
+│   │   │   ├── taskBadge.ts             #   helpers compartidos: color/formato del badge, atajos de fecha, posición de pickers/menú (testeado)
 │   │   │   ├── KanbanBoard.ts           # Nodo TipTap atom del tablero kanban (ver patterns.md)
 │   │   │   ├── KanbanBoardView.tsx      #   NodeView React: columnas, drag & drop, menús, búsqueda
 │   │   │   ├── KanbanParts.tsx          #   piezas: tarjeta, editor inline, menú de opciones
@@ -262,7 +264,7 @@ noteflow/
 │   │   │   ├── SettingsModal.tsx        #   Contenedor: nav izquierda + panel derecho según sección
 │   │   │   ├── GeneralPanel.tsx         #   Idioma + sección Activity (ActivitySummary.tsx) + IA local (toggle/reindex) + perfil + skill del CLI
 │   │   │   ├── AppearancePanel.tsx      #   Tema/fuente/acento/colores del editor/escala + preview
-│   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho / índice / tareas marcadas al final
+│   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho / índice / tareas marcadas al final / qué abre el clic en una nota
 │   │   │   ├── TemplatesPanel.tsx       #   Plantillas de nota (listar/usar/renombrar/borrar)
 │   │   │   ├── StartupPanel.tsx         #   Autostart + stickies al arrancar
 │   │   │   ├── SyncPanel.tsx            #   Enrutado de vistas: elección inicial / vista general del backend activo / detalle
@@ -309,6 +311,7 @@ noteflow/
 │   │   ├── cryptoUtils.ts        # Cifrado AES-256-GCM + PBKDF2 (WebCrypto)
 │   │   ├── alarmUtils.ts         # Recolección de alarmas/deadlines (líneas de tarea, también indentadas) — testeado
 │   │   ├── paneUtils.ts          # Modelo puro de paneles del split (abrir/cerrar/reordenar/enfocar) — testeado
+│   │   ├── noteDragOut.ts        # Puro: sección en que se abre una nota + ¿dragend fuera de la ventana? — testeado
 │   │   ├── archivedNotes.ts      # Notas que main movió al archivo local (`notes-archived`): cuáles salen del
 │   │   │                         #   store y dónde queda el editor (puro; solo memoria, nunca borra) — testeado
 │   │   ├── tocUtils.ts           # Lógica pura del índice flotante del editor (entradas, activo) — testeado
@@ -472,7 +475,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `app:get-hardware` | on (sync) | Núcleos, modelo/velocidad de CPU y RAM (`os`); el preload lo lee una vez al cargar → `window.noteflow.hardware` (ver `ai.md`) |
 | `app:get-user-name` | on (sync) | Nombre de la carpeta home (`path.basename(os.homedir())`); el preload lo lee una vez → `window.noteflow.systemUserName` (línea de identidad del pie del sidebar) |
 | `window:open-sticky` | on | Abre ventana sticky flotante |
-| `window:open-section-window` | on | `(noteId, sectionId)` → abre una ventana solo-editor (`#section-window?…`, `SectionWindowApp`); si una ventana de sección ya muestra esa nota+sección, la enfoca |
+| `window:open-section-window` | on | `(noteId, sectionId, nearCursor?)` → abre una ventana solo-editor (`#section-window?…`, `SectionWindowApp`); si una ventana de sección ya muestra esa nota+sección, la enfoca. `nearCursor` (nota arrastrada fuera de la ventana) la coloca en el puntero en vez de en cascada |
 | `window:section-window-target` | on | La ventana de sección informa de la nota+sección que muestra (para el "enfocar si ya existe" del canal anterior y la recarga tras crash) |
 | `window:set-size` | on | Redimensiona la ventana (usado por sticky) |
 | `window:set-always-on-top` | on | Alterna `alwaysOnTop` de la ventana emisora (sticky; chincheta de la ventana de chat) |
@@ -520,9 +523,9 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `ai:graph` | handle | Aristas de contenido nota-a-nota (centroides por nota + coseno) para la vista cerebro (Fase 2) |
 | `ai:reindex-all` | handle | Reindexa TODAS las secciones en background (lotes de 16) con progreso |
 | `ai:get-stale` | handle | `{stale, count}`: si el índice va por detrás de las notas (main lleva la cuenta, persistida). Se emite además por el evento `ai:index-stale` — detalle en `ai.md` |
-| `ai:llm-get-config` / `ai:llm-set-config` | handle | Lee/escribe `settings.aiLlm` (config del LLM por proveedor). `get` saneado (sin key); `set` aplica al **preset activo** (clave/modelo/baseUrl por proveedor) y cifra la key con `safeStorage`. El `baseUrl` se **ignora** (no se persiste) en presets con `editableBaseUrl: false` — sobre todo `noteflow`, cuya credencial es el token de Supabase; `effectiveBaseUrl` aplica la misma regla al leer |
+| `ai:llm-get-config` / `ai:llm-set-config` | handle | Lee/escribe `settings.aiLlm` (config del LLM por proveedor). `get` saneado (sin key); `set` aplica al **preset activo** (clave/modelo/baseUrl por proveedor) y cifra la key con `safeStorage`. Ambos aceptan un **`preset` opcional** (id conocido, `llm.isKnownPreset`): `get` devuelve la vista propia de ese preset (`llm.toPublicFor`, sin `lastByoProvider` si no es el activo) y `set` edita **solo** `byPreset[preset]` sin cambiar `active` (ignora `active` en el patch; no toca `lastByoProvider` ni la restauración pendiente) — Ajustes → IA edita una fuente antes de activarla. Un id desconocido se rechaza. El `baseUrl` se **ignora** (no se persiste) en presets con `editableBaseUrl: false` — sobre todo `noteflow`, cuya credencial es el token de Supabase; `effectiveBaseUrl` aplica la misma regla al leer |
 | `ai:llm-presets` | handle | Catálogo de presets de proveedor (`electron/ai/llm/presets.ts`, vía `llm.listPresets()`): el preset `noteflow` lleva el **catálogo efectivo** de modelos (el descargado del proxy y cacheado en `settings.aiManagedCatalog`, o las constantes de respaldo) — ver `ai.md` |
-| `ai:llm-list-models` / `ai:llm-test` | handle | Lista modelos del proveedor activo / valida conexión+credenciales. Con `noteflow` activo, `list-models` **re-descarga el catálogo** del proxy (forzado) y devuelve el efectivo; si falla, la caché sigue vigente y solo se informa del error |
+| `ai:llm-list-models` / `ai:llm-test` | handle | Lista modelos del proveedor activo / valida conexión+credenciales. Con `preset` opcional (id conocido) trabajan sobre ese preset como si fuera el activo, en una copia en memoria (`llm.asActivePreset`, nunca se persiste). Con `noteflow` (activo o pasado como `preset`), `list-models` **re-descarga el catálogo** del proxy (forzado) y devuelve el efectivo; si falla, la caché sigue vigente y solo se informa del error |
 | `ai:chat` | handle | Chat **agéntico** con streaming: contexto RAG + bucle de tool-calling, emite por eventos, admite `attachmentIds[]` (detalle en `ai.md` → Chat agéntico). `context?: {allNotes, items[], openNote?}` (solo sidebar del editor / ventana de chat): notas/secciones explícitas y RAG solo con `allNotes`; sin `context` = cerebro (ver `ai.md` → Chat en el editor) |
 | `ai:chat-undo` | handle | `(toolCallId, force?)` → deshace una edición de nota del agente desde el snapshot en memoria de main → `{ok:true} \| {ok:false, reason:'modified'\|'unavailable'\|'conflict'\|'encryption'\|'error'}` (`modified` = la nota cambió tras la edición; la UI confirma y reintenta con `force`. `conflict` = habría que re-crear la nota o una sección borrada después; `encryption` = se cifró/descifró después; ninguno se puede forzar) |
 | `ai:flush-edits-done` | on | `(token)` — la ventana principal confirma que escribió sus guardados pendientes (respuesta al evento `ai:flush-edits`) |
@@ -624,19 +627,25 @@ Contenido del dir de notas:
 - `ui-settings.json` — apariencia (tema, último tema oscuro/claro `lastDarkThemeId`/`lastLightThemeId`
   para el Light / Dark del ⋯ del footer, fuente de app, acento, colores del editor) + ajustes del
   editor (tamaño/familia de fuente, ancho legible, índice flotante `showToc`, tareas marcadas al final
-  `moveCheckedToBottom`) sincronizados entre dispositivos. Formato y
-  saneado/merge en `electron/uiSettings.ts` (módulo puro, tests en `tests/electron/uiSettings.test.ts`).
+  `moveCheckedToBottom`, riel de progreso de las checklists `showTaskProgress`, qué abre el clic del
+  sidebar en una nota con varias secciones `noteClickOpens: 'editor' | 'overview'`) sincronizados entre
+  dispositivos. Formato y saneado/merge en `electron/uiSettings.ts` (módulo puro, tests en `tests/electron/uiSettings.test.ts`).
   **Espejo en noteflow-mobile** (`src/core/uiSettings.ts`): su saneador también descarta claves
   desconocidas y el móvil re-sanea el fichero antes de cada escritura (`appearanceStore`), así que un
   campo nuevo que no se porte allí se borra en cuanto el móvil guarda su apariencia (p. ej. un cambio de
-  acento). Todo campo nuevo del esquema hay que añadirlo en los dos. **Estado del espejo (2026-11-16):**
-  el móvil ya conoce todas las claves actuales. El centinela `'text'` de `accent`/`editorColors.*` (color
+  acento). Todo campo nuevo del esquema hay que añadirlo en los dos. **Estado del espejo (2026-11-17):**
+  el móvil conoce todas las claves actuales salvo `editor.showTaskProgress` (ver abajo) y
+  **`editor.noteClickOpens`** (2026-11-17, **pendiente de portar**): hasta entonces cualquier escritura de
+  apariencia desde el móvil la borra y los desktops vuelven a `'editor'` (el predeterminado) en su
+  siguiente arranque. El centinela `'text'` de `accent`/`editorColors.*` (color
   "texto" adaptativo) y `lastDarkThemeId`/`lastLightThemeId` llegaron en `09b9e28` (2026-11-14, publicado
   en la prueba cerrada 5, 1.0.0). `editor.moveCheckedToBottom` llegó en `9345c7d` (2026-11-16), **aún sin
   publicar**: hasta la siguiente versión del móvil, una escritura de apariencia desde el móvil instalado lo
   borra y los desktops vuelven al valor por defecto (desactivado) en su siguiente arranque
-  (`reloadUiSettings` conserva el valor en memoria si la clave falta). Los **desktops anteriores** a cada
-  cambio siguen borrando esas claves en cualquier escritura de `ui-settings.json` — detalle en **Color
+  (`reloadUiSettings` conserva el valor en memoria si la clave falta). `editor.showTaskProgress`
+  (por defecto **activado**) es posterior y el móvil **aún no lo conoce**: hasta portarlo a su saneador,
+  una escritura de apariencia desde el móvil lo borra y un "desactivado" vuelve a activado. Los
+  **desktops anteriores** a cada cambio siguen borrando esas claves en cualquier escritura de `ui-settings.json` — detalle en **Color
   "texto" adaptativo** (sección "Colores del editor") y "Light / Dark recuerda el último tema de cada
   tipo" de `patterns.md`.
   Claves de override tri-estado: AUSENTE = nunca escrita (los stores caen a las fuentes legacy

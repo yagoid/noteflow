@@ -695,8 +695,8 @@ const PeekRow = memo(function PeekRow({
         title={t.sidebar.openSideBySide}
       >
         <div className="flex items-center gap-1 min-w-0">
-          {note.encryption && <Lock size={8} className="text-amber-400 flex-shrink-0" />}
-          {note.expiresAt && <span title={formatExpiry(note.expiresAt, t)} className="flex-shrink-0 flex items-center"><Timer size={8} className="text-text-muted/60" /></span>}
+          {note.encryption && <Lock size={10} className="text-amber-400 flex-shrink-0" />}
+          {note.expiresAt && <span title={formatExpiry(note.expiresAt, t)} className="flex-shrink-0 flex items-center"><Timer size={10} className="text-text-muted/60" /></span>}
           <span className={`min-w-0 flex-1 truncate text-[11.5px] font-mono font-medium
             ${isActive ? 'text-text' : 'text-text/80'}`}>
             {renderHighlightedText(note.title || t.common.untitled, textQuery)}

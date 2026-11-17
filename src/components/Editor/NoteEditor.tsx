@@ -114,7 +114,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
 
   // Editor font size (from shared store)
-  const { fontSize, changeFontSize, resetFontSize, fontFamily, readableWidth, showToc } = useEditorSettingsStore()
+  const { fontSize, changeFontSize, resetFontSize, fontFamily, readableWidth, showToc, showTaskProgress } = useEditorSettingsStore()
 
   // Raw (markdown source) mode buffer
   const [rawContent, setRawContent] = useState('')
@@ -1555,7 +1555,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
         {isLinkedNote(note) && <LinkedNoteHeader note={note} />}
 
         <div
-          className={`flex-1 overflow-hidden mr-1 relative${readableWidth ? ' editor-readable' : ''}`}
+          // task-progress-on: shows the checklist progress rails (Editor/TaskProgress.ts, Readable only).
+          className={`flex-1 overflow-hidden mr-1 relative${readableWidth ? ' editor-readable' : ''}${readableWidth && showTaskProgress ? ' task-progress-on' : ''}`}
           style={readableWidth ? { fontSize: `${fontSize}px` } : undefined}
         >
           {rawMode ? (
@@ -1631,6 +1632,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                 showToc={showToc}
                 persistHistory
                 aiAutocomplete={!isLinked && !note.encryption && !activeSection?.aiHidden}
+                taskProgress
               />
               {searchOpen && (
                 <InNoteSearchBar

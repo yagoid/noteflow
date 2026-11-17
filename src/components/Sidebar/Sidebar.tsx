@@ -10,6 +10,7 @@ import { ContextMenu } from '../ContextMenu'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { GroupContextMenu, type GroupContextMenuRequest } from '../GroupContextMenu'
 import { FolderContextMenu, type FolderContextMenuRequest } from '../FolderContextMenu'
+import { openNoteWindowOnDragOut } from '../openNoteWindowOnDragOut'
 import { colorChannels, NEW_GROUP_COLOR, resolveGroupColor } from '../../lib/tagColors'
 import { ALL_PLACE, groupPlace } from '../../lib/contentView'
 import {
@@ -33,6 +34,7 @@ import { RowShiftFlip } from './NoteSectionFlip'
 import { resolveOpenSectionId } from '../../lib/sectionLine'
 import { useOpenNoteSection } from './useOpenNoteSection'
 import { useThemeStore, type SidebarSectionsStyle } from '../../stores/themeStore'
+import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { GroupPeek, type GroupPeekController } from './GroupPeek'
 import { SidebarFooterMenu } from './SidebarFooterMenu'
 import { SidebarIdentity } from './SidebarIdentity'
@@ -64,7 +66,7 @@ interface RowHandlers {
   reorderDragLeave: (noteId: string) => void
   drop: (e: React.DragEvent<HTMLLIElement>, note: Note, contextKey: string, inFavorites: boolean) => void
   dragStart: (e: React.DragEvent<HTMLButtonElement>, noteId: string, contextKey: string) => void
-  dragEnd: () => void
+  dragEnd: (e: React.DragEvent<HTMLButtonElement>) => void
   // Also fired by Enter in the collapsed-group peek (GroupPeek) â€” only the modifiers are read.
   click: (e: React.MouseEvent | React.KeyboardEvent, note: Note) => void
   contextMenu: (e: React.MouseEvent, note: Note) => void
@@ -163,16 +165,16 @@ const NoteRow = memo(function NoteRow({
               style={{ '--g': colorChannels(groupColor) } as React.CSSProperties}
             />
           )}
-          {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
+          {note.encryption && <Lock size={11} className="text-amber-400 flex-shrink-0" />}
           {note.linked && (
             <span
               title={`${t.linked.linkedNoteBadge}\n${note.linked.path}\n${linkedStatusLabel(t.linked, note.linked, isLinkedDirty(note))}`}
               className="flex-shrink-0 flex items-center"
             >
-              <LinkedFileIcon path={note.linked.path} size={10} className={LINKED_TONE_CLASS[linkedTone(note.linked, isLinkedDirty(note))]} aria-label={t.linked.linkedNoteBadge} />
+              <LinkedFileIcon path={note.linked.path} size={12} className={LINKED_TONE_CLASS[linkedTone(note.linked, isLinkedDirty(note))]} aria-label={t.linked.linkedNoteBadge} />
             </span>
           )}
-          {note.expiresAt && <span title={formatExpiry(note.expiresAt, t)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
+          {note.expiresAt && <span title={formatExpiry(note.expiresAt, t)} className="flex-shrink-0 flex items-center"><Timer size={11} className="text-text-muted/60" /></span>}
           {/* Opened from the system and not kept: italic + "temporary" (goes away when closed). */}
           <span className={`text-[13px] font-mono font-medium truncate flex-1
             ${isActive ? 'text-text' : 'text-text/80'} ${note.linked?.transient ? 'italic' : ''}`}>
@@ -229,6 +231,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
+  const setNoteView = useNotesStore((s) => s.setNoteView)
   const createNote = useNotesStore((s) => s.createNote)
   const createTempNote = useNotesStore((s) => s.createTempNote)
 
@@ -325,7 +328,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     reorderDragLeave: (id) => rowApiRef.current.reorderDragLeave(id),
     drop: (e, note, ck, fav) => rowApiRef.current.drop(e, note, ck, fav),
     dragStart: (e, id, ck) => rowApiRef.current.dragStart(e, id, ck),
-    dragEnd: () => rowApiRef.current.dragEnd(),
+    dragEnd: (e) => rowApiRef.current.dragEnd(e),
     click: (e, note) => rowApiRef.current.click(e, note),
     contextMenu: (e, note) => rowApiRef.current.contextMenu(e, note),
     sectionClick: (e, note, sid) => rowApiRef.current.sectionClick(e, note, sid),
@@ -539,9 +542,23 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     })
   }
 
+  // Settings → Editor → "Clicking a note opens": a note with MORE than one section can open in
+  // the note overview instead of the editor (single-section and locked notes — `sections: []` —
+  // always open the editor). Activates the note first, as a normal click does, so the overview's
+  // "back" lands on its editor. Read at click time: no sidebar re-render when the setting changes.
+  function openInOverviewIfPreferred(note: Note | undefined): boolean {
+    if (!note || note.sections.length <= 1) return false
+    if (useEditorSettingsStore.getState().noteClickOpens !== 'overview') return false
+    setOpenNoteIds([note.id])
+    setActiveNote(note.id)
+    setNoteView(note.id)
+    return true
+  }
+
   function openSelectedSearchResult() {
     const targetId = activeSearchNoteId ?? visibleNoteIds[0]
     if (!targetId) return
+    if (openInOverviewIfPreferred(rawNotes.find((n) => n.id === targetId))) return
     setOpenNoteIds([targetId])
     setActiveNote(targetId)
   }
@@ -586,7 +603,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     }))
   }
 
-  function handleNoteDragEnd() {
+  function handleNoteDragEnd(e: React.DragEvent<HTMLButtonElement>) {
+    // Released outside the window (no drop target took it): the note opens in its own window.
+    const noteId = draggingNoteIdRef.current
+    if (noteId) openNoteWindowOnDragOut(e, noteId)
     draggingNoteContextRef.current = null
     draggingNoteIdRef.current = null
     setNoteDropTarget(null)
@@ -1008,7 +1028,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
       drop: (e, note, contextKey, inFavorites) =>
         inFavorites ? handleFavoritesReorderDrop(e, note) : handleNoteReorderDrop(e, note, contextKey),
       dragStart: (e, noteId, contextKey) => handleNoteDragStart(e, noteId, contextKey),
-      dragEnd: () => handleNoteDragEnd(),
+      dragEnd: (e) => handleNoteDragEnd(e),
       contextMenu: (e, note) => {
         e.preventDefault()
         setContextMenu({ x: e.clientX, y: e.clientY, noteId: note.id, sectionId: null })
@@ -1023,10 +1043,11 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
           openNoteInSplit(note.id)
           return
         }
-        // Clicking the note itself opens it in the editor at its FIRST section, whatever the
-        // section count (the note overview stays reachable from the editor's overview button
-        // and the section context menu). A locked encrypted note has no sections yet
-        // (`sections: []`): just open it so the editor shows the unlock prompt.
+        // Clicking the note itself opens it in the editor at its FIRST section — or, with
+        // "Clicking a note opens: Note overview" and more than one section, in the note
+        // overview. A locked encrypted note has no sections yet (`sections: []`): just open
+        // it so the editor shows the unlock prompt.
+        if (openInOverviewIfPreferred(note)) return
         const firstSectionId = note.sections[0]?.id
         if (firstSectionId) {
           openAtSection(note, firstSectionId)

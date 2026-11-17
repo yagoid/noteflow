@@ -34,6 +34,14 @@ const DEFAULT_SHOW_TOC = true
 // TOC: no legacy key; absent from the file = default (off).
 const DEFAULT_MOVE_CHECKED_TO_BOTTOM = false
 
+// Progress rail in the left margin of each checklist (TaskProgress.ts), Readable
+// width only. Purely additive: no legacy key; absent from the file = default (on).
+const DEFAULT_SHOW_TASK_PROGRESS = true
+/** What a sidebar click opens on a note with more than one section (Sidebar.tsx). */
+export type NoteClickOpens = 'editor' | 'overview'
+// No legacy key either; absent from the file = the editor (the original behaviour).
+const DEFAULT_NOTE_CLICK_OPENS: NoteClickOpens = 'editor'
+
 function clampSize(size: number): number {
   return Math.min(24, Math.max(10, Math.round(size)))
 }
@@ -60,6 +68,10 @@ interface EditorSettingsState {
   setShowToc: (v: boolean) => void
   moveCheckedToBottom: boolean
   setMoveCheckedToBottom: (v: boolean) => void
+  showTaskProgress: boolean
+  setShowTaskProgress: (v: boolean) => void
+  noteClickOpens: NoteClickOpens
+  setNoteClickOpens: (v: NoteClickOpens) => void
   /**
    * Re-reads the `editor` slice of ui-settings.json and re-applies it
    * (idempotent, NEVER writes back). Called after a sync pull or when another
@@ -77,6 +89,8 @@ function readInitial(): {
   readableWidth: boolean
   showToc: boolean
   moveCheckedToBottom: boolean
+  showTaskProgress: boolean
+  noteClickOpens: NoteClickOpens
 } {
   const ed = readUiSettings().editor ?? {}
   const legacySize = localStorage.getItem(STORAGE_KEY)
@@ -90,6 +104,9 @@ function readInitial(): {
   const showToc = typeof ed.showToc === 'boolean' ? ed.showToc : DEFAULT_SHOW_TOC
   const moveCheckedToBottom =
     typeof ed.moveCheckedToBottom === 'boolean' ? ed.moveCheckedToBottom : DEFAULT_MOVE_CHECKED_TO_BOTTOM
+  const showTaskProgress =
+    typeof ed.showTaskProgress === 'boolean' ? ed.showTaskProgress : DEFAULT_SHOW_TASK_PROGRESS
+  const noteClickOpens = ed.noteClickOpens ?? DEFAULT_NOTE_CLICK_OPENS
 
   // Seed only values that will SURVIVE main's sanitizer (finite size, known
   // family) — an invalid legacy value would be dropped on write, the field
@@ -100,7 +117,7 @@ function readInitial(): {
   if (ed.readableWidth === undefined && legacyWidth !== null) seed.readableWidth = readableWidth
   if (Object.keys(seed).length > 0) void window.noteflow?.setUiSettings?.({ editor: seed })
 
-  return { fontSize, fontFamily, readableWidth, showToc, moveCheckedToBottom }
+  return { fontSize, fontFamily, readableWidth, showToc, moveCheckedToBottom, showTaskProgress, noteClickOpens }
 }
 
 const initial = readInitial()
@@ -149,6 +166,20 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
     set({ moveCheckedToBottom: v })
   },
 
+  showTaskProgress: initial.showTaskProgress,
+
+  setShowTaskProgress: (v) => {
+    void window.noteflow?.setUiSettings?.({ editor: { showTaskProgress: v } })
+    set({ showTaskProgress: v })
+  },
+
+  noteClickOpens: initial.noteClickOpens,
+
+  setNoteClickOpens: (v) => {
+    void window.noteflow?.setUiSettings?.({ editor: { noteClickOpens: v } })
+    set({ noteClickOpens: v })
+  },
+
   reloadUiSettings: () => {
     // Read-only path: fields absent from the file keep the current in-memory
     // value (no legacy fallback, no seed) so a pull can never trigger a write.
@@ -156,13 +187,16 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
     if (!ed) return
     const patch: Partial<Pick<
       EditorSettingsState,
-      'fontSize' | 'fontFamily' | 'readableWidth' | 'showToc' | 'moveCheckedToBottom'
+      'fontSize' | 'fontFamily' | 'readableWidth' | 'showToc' | 'moveCheckedToBottom' | 'showTaskProgress'
+      | 'noteClickOpens'
     >> = {}
     if (typeof ed.fontSize === 'number') patch.fontSize = clampSize(ed.fontSize)
     if (ed.fontFamily) patch.fontFamily = ed.fontFamily
     if (typeof ed.readableWidth === 'boolean') patch.readableWidth = ed.readableWidth
     if (typeof ed.showToc === 'boolean') patch.showToc = ed.showToc
     if (typeof ed.moveCheckedToBottom === 'boolean') patch.moveCheckedToBottom = ed.moveCheckedToBottom
+    if (typeof ed.showTaskProgress === 'boolean') patch.showTaskProgress = ed.showTaskProgress
+    if (ed.noteClickOpens) patch.noteClickOpens = ed.noteClickOpens
     set(patch)
   },
 }))

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
+import { OVERLAY_PROPS } from '../lib/overlays'
 
 // Context menu that measures its own size after rendering and shifts itself back
 // into the viewport when it would overflow — the menu's height varies (encryption
@@ -7,7 +8,8 @@ import { useLayoutEffect, useRef, useState } from 'react'
 // `placement="above"` opens it upwards: `y` is then its BOTTOM edge (e.g. a button's top
 // for a menu anchored at the bottom of the window). Positioning only knows `x`/`y` and the
 // measured size: don't move the menu with a CSS transform in `className` (the overflow
-// clamp would not see it).
+// clamp would not see it). Marked as an open overlay (lib/overlays.ts): back / forward
+// doesn't navigate under it.
 export function ContextMenu({ x, y, className, children, placement = 'below' }: {
   x: number
   y: number
@@ -38,6 +40,7 @@ export function ContextMenu({ x, y, className, children, placement = 'below' }: 
   return (
     <div
       ref={ref}
+      {...OVERLAY_PROPS}
       className={className}
       style={{ left: pos.left, top: pos.top }}
       onClick={(e) => e.stopPropagation()}

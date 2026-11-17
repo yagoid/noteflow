@@ -30,6 +30,8 @@ function buildSections(t: Messages): ShortcutSection[] {
         { keys: ['Ctrl', 'Shift', 'F'], description: s.searchAllNotes },
         { keys: ['Ctrl', '\''], description: s.toggleSidebar },
         { keys: ['Ctrl', 'Click'], description: s.openSideBySide },
+        // ⌥←/→ is the word jump on macOS, so there it's ⌘[ / ⌘] (components/useNavHistory.ts).
+        { keys: isMac ? ['Cmd', '[ / ]'] : ['Alt', '←/→'], description: s.navigateBackForward },
       ],
     },
     {

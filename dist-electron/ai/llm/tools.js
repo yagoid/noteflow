@@ -44,7 +44,8 @@ exports.executeTool = executeTool;
 // so it can be unit-tested and never reaches into Electron globals directly.
 const node_crypto_1 = require("node:crypto");
 const noteFormat = __importStar(require("../../noteFormat"));
-// ── ID + slug helpers (mirror src/lib/noteUtils.ts so dir names / ids match the renderer) ──
+// ── ID helper (mirrors src/lib/noteUtils.ts so ids match the renderer). The dir name of a new
+// note comes from noteFormat.noteDirname — the one slug rule shared with the renderer and the CLI.
 const ID_ALPHABET = 'useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict';
 function makeId(size = 8) {
     const bytes = (0, node_crypto_1.randomBytes)(size);
@@ -52,10 +53,6 @@ function makeId(size = 8) {
     for (let i = 0; i < size; i++)
         id += ID_ALPHABET[bytes[i] & 63];
     return id;
-}
-function noteDirname(id, title) {
-    const slug = title.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 40);
-    return `${slug ? `${slug}-` : ''}${id}`;
 }
 function defaultNoteTitle() {
     const d = new Date();
@@ -461,7 +458,7 @@ async function executeTool(name, rawInput, ctx) {
                     ...(groupId ? { group: groupId } : {}), ...(folderId ? { folder: folderId } : {}),
                     sections,
                 };
-                const dir = noteDirname(id, title);
+                const dir = noteFormat.noteDirname(id, title);
                 const { files } = noteFormat.serializeNoteFolder(note);
                 await ctx.writeNote({ dir, files });
                 return { ...ok(`Created note "${title}"`, `Created note "${title}" with id ${id} and ${sections.length} section(s).`), noteId: id };

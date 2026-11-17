@@ -712,6 +712,9 @@ export interface UiSettings {
     readableWidth?: boolean
     showToc?: boolean
     moveCheckedToBottom?: boolean
+    showTaskProgress?: boolean
+    /** Sidebar click on a multi-section note: editor (absent) or note overview. */
+    noteClickOpens?: 'editor' | 'overview'
   }
 }
 
@@ -784,7 +787,8 @@ declare global {
       foldToCorner: (width: number, height: number) => void
       unfold: () => void
       openSticky: (noteId: string, sectionId: string) => void
-      openSectionWindow: (noteId: string, sectionId: string) => void
+      /** Editor-only window for a note, on `sectionId`. `nearCursor`: opened at the pointer (note dragged out of the window). */
+      openSectionWindow: (noteId: string, sectionId: string, opts?: { nearCursor?: boolean }) => void
       setSectionWindowTarget: (noteId: string, sectionId: string) => void
       onNewNote: (cb: () => void) => () => void
       onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => () => void
@@ -974,14 +978,17 @@ declare global {
       aiGetStale: () => Promise<IndexStaleInfo>
       onAiIndexStale: (cb: (info: IndexStaleInfo) => void) => () => void
       // AI / LLM provider (chat + second brain)
-      aiLlmGetConfig: () => Promise<LlmConfigPublic>
+      // `preset` (optional on get/set/list/test): that preset's OWN config instead of the active
+      // one (its `active` field is then that preset's id, without lastByoProvider). With `preset`,
+      // set-config only edits fields — it never switches the active provider.
+      aiLlmGetConfig: (preset?: string) => Promise<LlmConfigPublic>
       aiLlmPresets: () => Promise<LlmPreset[]>
       // Fired when NoteFlow AI's model catalog (the managed preset's suggestedModels/modelMeta)
       // changes after main downloads it from the proxy — re-pull aiLlmPresets/aiLlmGetConfig
       onAiLlmPresetsChanged: (cb: () => void) => () => void
-      aiLlmSetConfig: (patch: { active?: string; model?: string; baseUrl?: string; apiKey?: string; clearKey?: boolean }) => Promise<LlmConfigPublic>
-      aiLlmListModels: () => Promise<{ ok: boolean; models: string[]; error?: string }>
-      aiLlmTest: () => Promise<{ ok: boolean; error?: string }>
+      aiLlmSetConfig: (patch: { active?: string; model?: string; baseUrl?: string; apiKey?: string; clearKey?: boolean; preset?: string }) => Promise<LlmConfigPublic>
+      aiLlmListModels: (preset?: string) => Promise<{ ok: boolean; models: string[]; error?: string }>
+      aiLlmTest: (preset?: string) => Promise<{ ok: boolean; error?: string }>
       // NoteFlow AI managed plan: monthly consumption (null on any failure). Abstract units —
       // only used/limit (the share of the monthly allowance spent) is meaningful.
       aiLlmUsage: () => Promise<{ used: number; limit: number } | null>

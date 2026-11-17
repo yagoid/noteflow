@@ -11,6 +11,10 @@ exports.resolveConfigAsync = resolveConfigAsync;
 exports.fetchManagedCatalog = fetchManagedCatalog;
 exports.providerCapabilities = providerCapabilities;
 exports.toPublic = toPublic;
+exports.isKnownPreset = isKnownPreset;
+exports.asActivePreset = asActivePreset;
+exports.toPublicFor = toPublicFor;
+exports.withPresetFields = withPresetFields;
 exports.notConfiguredMessage = notConfiguredMessage;
 exports.getProvider = getProvider;
 const presets_1 = require("./presets");
@@ -214,6 +218,53 @@ function toPublic(cfg) {
             ? { lastByoProvider: cfg.lastByoProvider }
             : {}),
     };
+}
+// ── Editing a preset that is NOT the active one ──────────────────────────────
+// Settings → AI shows every source's fields (key, URL, model, test) before the user
+// activates it. The store is already per preset (cfg.byPreset[id]), so the IPC handlers
+// take an optional `preset` id and work on THAT preset's own state — never on `active`.
+/** Whether a renderer-supplied id names a known preset. Unknown ids are rejected, not
+ *  mapped through presetOf's Anthropic fallback (that would edit the wrong provider). */
+function isKnownPreset(id) {
+    return typeof id === 'string' && presets_1.PRESETS.some((p) => p.id === id);
+}
+/** The config seen as if `presetId` were active — an in-memory copy for resolving/listing/
+ *  testing that preset. Never persist it: it would switch the provider in use. */
+function asActivePreset(cfg, presetId) {
+    return { ...cfg, active: presetId };
+}
+/** toPublic for any preset. For the active one it IS toPublic; for another one it is that
+ *  preset's own view (`active` = that preset's id) WITHOUT lastByoProvider, which only
+ *  describes the active configuration. */
+function toPublicFor(cfg, presetId) {
+    if (presetId === cfg.active)
+        return toPublic(cfg);
+    const view = toPublic(asActivePreset(cfg, presetId));
+    delete view.lastByoProvider;
+    return view;
+}
+/**
+ * Applies field edits to ONE preset's own state (byPreset[presetId]) and returns the new
+ * config. Never touches `active` nor `lastByoProvider`. The guards are those of `presetId`:
+ * a model outside a curated catalog is dropped (acceptsModel — stored and used must never
+ * diverge) and a base URL is only stored for presets that allow editing it (acceptsBaseUrl —
+ * a stored URL on the managed preset could send the account token to another host).
+ */
+function withPresetFields(cfg, presetId, patch) {
+    const ps = { ...(cfg.byPreset[presetId] ?? {}) };
+    if (patch.model !== undefined && acceptsModel(presetId, patch.model))
+        ps.model = patch.model;
+    if (patch.baseUrl !== undefined) {
+        if (acceptsBaseUrl(presetId))
+            ps.baseUrl = patch.baseUrl;
+        else
+            console.warn(`[LLM] ignored a baseUrl for preset "${presetId}" (its endpoint is fixed)`);
+    }
+    if (patch.clearKey)
+        ps.encryptedApiKey = undefined;
+    else if (typeof patch.apiKey === 'string' && patch.apiKey.length > 0)
+        ps.encryptedApiKey = (0, secret_1.encryptSecret)(patch.apiKey);
+    return { ...cfg, byPreset: { ...cfg.byPreset, [presetId]: ps } };
 }
 /** User-facing reason why toPublic().configured is false — tailored for the managed preset. */
 function notConfiguredMessage(cfg) {

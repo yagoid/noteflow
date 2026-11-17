@@ -175,6 +175,7 @@ describe('per-command flag validation', () => {
       ['list', undefined, ['--tag', '--group', '--folder', '--archived', '--json']],
       ['get', 'T', ['--section', '--json']], ['read', 'T', ['--section', '--json']], ['path', 'T', ['--section', '--json']],
       ['delete', 'T', ['--yes', '--json']], ['rm', 'T', ['--yes']],
+      ['sections', 'T', ['--json']], ['section', 'list', ['--json']],
       ['section', 'add', ['--raw']], ['section', 'delete', ['--yes']], ['section', 'rm', ['--yes']],
       ['move', 'T', ['--group', '--folder']], ['move', 'T', ['--ungroup']],
       ['groups', undefined, ['--json']], ['group', 'create', ['--color', '--json']], ['group', 'delete', ['--yes']],
@@ -189,14 +190,14 @@ describe('per-command flag validation', () => {
   })
 
   it('--json only where the command really prints JSON', () => {
-    for (const [cmd, sub] of [['sections', 'T'], ['touch', 'T'], ['move', 'T'], ['push', undefined], ['section', 'add'],
+    for (const [cmd, sub] of [['touch', 'T'], ['move', 'T'], ['push', undefined], ['section', 'add'],
       ['group', 'delete'], ['folder', 'rename'], ['cloud', 'push'], ['rename', 'T'], ['pull', undefined]] as [string, string | undefined][]) {
       expect(flagError(cmd, sub, ['--json']), `${cmd} ${sub ?? ''}`).toContain('Flag --json is not supported')
     }
     ok(['new', 'Doc'])
-    const r = run(['sections', 'Doc', '--json'])
+    const r = run(['touch', 'Doc', '--json'])
     expect(r.status).toBe(1)
-    expect(r.stderr).toContain("Flag --json is not supported by 'sections'")
+    expect(r.stderr).toContain("Flag --json is not supported by 'touch'")
     // login: only --no-wait prints JSON (checked before any request)
     expect(cli.loginFlagsError({ json: true })).toContain("--json only works with 'login --no-wait'")
     expect(cli.loginFlagsError({ json: true, finish: true })).toContain('--json only works')

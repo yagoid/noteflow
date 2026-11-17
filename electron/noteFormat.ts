@@ -294,12 +294,16 @@ export function newNoteId(): string {
 
 /**
  * Directory name for a note: '<slug>-<id>' (slug frozen at creation time).
+ * Accents are transliterated before filtering (NFD, combining marks dropped):
+ * 'Reunión' → 'reunion', 'Cumpleaños' → 'cumpleanos'.
  * ⚠️ Mirror of noteDirname in src/lib/noteUtils.ts and cli/noteflow.js — keep
  * the slug rule identical in all three.
  */
 export function noteDirname(id: string, title: string): string {
   const slug = title
     .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9\s-]/g, '')
     .trim()
     .replace(/\s+/g, '-')

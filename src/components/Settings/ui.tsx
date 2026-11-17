@@ -58,11 +58,15 @@ export function StatusBadge({ tone, dot = false, children }: { tone: StatusTone;
   )
 }
 
-/** A titled list section: 12px heading + a bordered list of SettingsRow. */
-export function SettingsListSection({ title, children }: { title: string; children: ReactNode }) {
+/** A titled list section: 12px heading (+ an optional muted summary on its right, e.g.
+ *  Settings → AI's "Answers with <model>") + a bordered list of SettingsRow. */
+export function SettingsListSection({ title, summary, children }: { title: string; summary?: ReactNode; children: ReactNode }) {
   return (
     <section>
-      <h3 className="mb-2 text-xs font-mono font-semibold text-text">{title}</h3>
+      <div className="mb-2 flex items-baseline justify-between gap-3 min-w-0">
+        <h3 className="text-xs font-mono font-semibold text-text flex-shrink-0">{title}</h3>
+        {summary && <span className="text-[11px] font-mono text-text-muted truncate">{summary}</span>}
+      </div>
       <div className="rounded-[10px] border border-solid border-border bg-surface-2/25 divide-y divide-border">
         {children}
       </div>
@@ -103,6 +107,29 @@ export function SettingsRow({ icon, title, badge, description, action, children 
       </div>
       {children && <div className="mt-3 pl-10 space-y-3">{children}</div>}
     </div>
+  )
+}
+
+/** On/off switch of a settings row (Local AI, CLI skill…). `title` doubles as the accessible name. */
+export function SettingsToggle({ on, title, onToggle }: { on: boolean; title: string; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={title}
+      onClick={onToggle}
+      title={title}
+      className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors ${
+        on ? 'bg-text/70' : 'bg-surface-3 border border-border'
+      }`}
+    >
+      <span
+        className={`absolute top-[2px] w-4 h-4 bg-white rounded-full shadow transition-all duration-200 ${
+          on ? 'left-[18px]' : 'left-[2px]'
+        }`}
+      />
+    </button>
   )
 }
 

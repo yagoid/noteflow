@@ -35,7 +35,9 @@ La **documentación del proyecto** vive en `.agents/context/*.md` (abajo el mapa
   porque la sección no existe, reintenta con el nombre sugerido; **nunca `--create`**. Solo añadir: no
   crear secciones, ni reordenar ni tachar (si la checklist no cierra la sección, insértalo en su sitio con
   `noteflow path` + editar + `noteflow touch`). Di en tu respuesta qué ítem añadiste; sin CLI a mano,
-  indícalo ahí.
+  indícalo ahí. Para usar el CLI sigue la skill `noteflow-cli`: con sync, `noteflow pull` antes de
+  escribir y, tras el `add`, mira su línea de sync; si no dice `Synced to …`, haz `noteflow pull` y
+  luego `noteflow push` sin preguntar (con Cloud el pull fusiona, no pisa lo local).
 - Los **mensajes de commit van en inglés**.
 - **Compatibilidad con Claude:** los enlaces bajo `.claude/` apuntan a la fuente canónica de
   `.agents/`. No los compruebes ni repares de forma preventiva. Solo si un acceso falla o un enlace
@@ -50,7 +52,7 @@ La **documentación del proyecto** vive en `.agents/context/*.md` (abajo el mapa
 | Formato v2 (carpeta por nota) · migración v1→v2 · cifrado · ancho de columna de tablas (guiones del separador) | `.agents/context/note-format.md` | Tocar el formato de nota (3 espejos), migración, cifrado o cómo se guarda una tabla |
 | GitHub Sync (push/pull, cola de mutaciones, invariantes) | `.agents/context/sync.md` | Tocar la sincronización con GitHub |
 | "El Cerebro": índice semántico · vista cerebro · LLM/chat agéntico · segundo cerebro · secciones ocultas a la IA | `.agents/context/ai.md` | Tocar embeddings, grafo, chat, tools del agente o perfil |
-| Patrones y decisiones (perf sidebar/búsqueda, imports, overviews, hover, relaciones, editor/markdown, sticky, alarmas, auto-update, macOS, CLI, temas) | `.agents/context/patterns.md` | Entender una decisión de diseño o tocar uno de esos subsistemas |
+| Patrones y decisiones (perf sidebar/búsqueda, imports, overviews, hover, relaciones, editor/markdown, sticky, alarmas, auto-update, macOS, CLI, temas, historial atrás/adelante) | `.agents/context/patterns.md` | Entender una decisión de diseño o tocar uno de esos subsistemas |
 | Release · electron-builder · CI/CD · artefactos · tareas frecuentes | `.agents/context/release.md` | Hacer un release, tocar build/CI o tareas de mantenimiento |
 | Web pública (Astro en `docs/`): landing + páginas `/cli` `/ai` `/features` · inventario contenido↔fuente de verdad · estética "The Brain" · i18n EN/ES | `.agents/context/web.md` | Tocar la web, o al cambiar app/CLI/IA algo que la web documenta |
 | Monetización (Fase 4; 4.0 cuenta+entitlements implementada en cliente): cuenta NoteFlow · IA gestionada (proxy) · nube E2EE · pagos MoR · Supabase | `.agents/context/monetization.md` | Trabajar en suscripciones, cuenta, proxy LLM o NoteFlow Cloud |

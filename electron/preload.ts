@@ -37,6 +37,8 @@ export type UiSettingsPayload = {
     readableWidth?: boolean
     showToc?: boolean
     moveCheckedToBottom?: boolean
+    showTaskProgress?: boolean
+    noteClickOpens?: 'editor' | 'overview'
   }
 }
 
@@ -179,8 +181,9 @@ const api = {
   // Window controls
   openSticky: (noteId: string, sectionId: string) => ipcRenderer.send('window:open-sticky', noteId, sectionId),
   // Editor-only window for one section (focuses an existing window already on it).
-  openSectionWindow: (noteId: string, sectionId: string) =>
-    ipcRenderer.send('window:open-section-window', noteId, sectionId),
+  // `nearCursor`: opened where the pointer is (a note dropped outside the window).
+  openSectionWindow: (noteId: string, sectionId: string, opts?: { nearCursor?: boolean }) =>
+    ipcRenderer.send('window:open-section-window', noteId, sectionId, opts?.nearCursor === true),
   // A section window reports the section it's on, so re-opening it focuses this window.
   setSectionWindowTarget: (noteId: string, sectionId: string) =>
     ipcRenderer.send('window:section-window-target', noteId, sectionId),
@@ -560,7 +563,9 @@ const api = {
   },
 
   // AI / LLM provider (chat + second brain)
-  aiLlmGetConfig: () => ipcRenderer.invoke('ai:llm-get-config'),
+  // `preset` (optional, on these four): work on that preset's own config instead of the active
+  // one — Settings → AI edits a source before activating it. Never switches the provider.
+  aiLlmGetConfig: (preset?: string) => ipcRenderer.invoke('ai:llm-get-config', preset),
   aiLlmPresets: () => ipcRenderer.invoke('ai:llm-presets'),
   // NoteFlow AI's model catalog changed (downloaded from the proxy) → re-pull the presets.
   onAiLlmPresetsChanged: (cb: () => void) => {
@@ -568,10 +573,10 @@ const api = {
     ipcRenderer.on('ai:llm-presets-changed', wrapper)
     return () => ipcRenderer.removeListener('ai:llm-presets-changed', wrapper)
   },
-  aiLlmSetConfig: (patch: { active?: string; model?: string; baseUrl?: string; apiKey?: string; clearKey?: boolean }) =>
+  aiLlmSetConfig: (patch: { active?: string; model?: string; baseUrl?: string; apiKey?: string; clearKey?: boolean; preset?: string }) =>
     ipcRenderer.invoke('ai:llm-set-config', patch),
-  aiLlmListModels: () => ipcRenderer.invoke('ai:llm-list-models'),
-  aiLlmTest: () => ipcRenderer.invoke('ai:llm-test'),
+  aiLlmListModels: (preset?: string) => ipcRenderer.invoke('ai:llm-list-models', preset),
+  aiLlmTest: (preset?: string) => ipcRenderer.invoke('ai:llm-test', preset),
   // NoteFlow AI managed plan: monthly consumption (abstract units: only used/limit matters).
   // Null on any failure — the UI just hides the usage bar.
   aiLlmUsage: (): Promise<{ used: number; limit: number } | null> => ipcRenderer.invoke('ai:llm-usage'),

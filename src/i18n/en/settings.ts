@@ -135,6 +135,14 @@ export const settings = {
     hideToc: 'Hide table of contents',
     moveChecked: 'Move checked items to the bottom',
     moveCheckedHint: 'Checking a task moves it to the end of its list; unchecking it brings it back above the checked ones',
+    taskProgress: 'Checklist progress',
+    taskProgressHint: 'Shows in the margin how many tasks of each checklist are done',
+    // Shown instead of the hint while the content width is Full (the switch is disabled).
+    taskProgressReadableOnly: 'Only available with the Readable width',
+    noteClickOpens: 'Clicking a note opens',
+    noteClickOpensHint: 'For notes with more than one section, from the sidebar. Notes with a single section always open in the editor',
+    noteClickEditor: 'Editor',
+    noteClickOverview: 'Note overview',
   },
 
   startup: {
@@ -243,6 +251,11 @@ export const settings = {
     repoName: 'Repository name',
     repoHint: "Will be created as private if it doesn't exist.",
     connectWithGitHub: 'Connect with GitHub',
+    // Under the connect button, for people without a GitHub account. The link sits between
+    // prefix and suffix (opens github.com/signup in the browser).
+    noAccountPrefix: "Don't have a GitHub account? GitHub Sync needs one. ",
+    noAccountLink: 'Create one for free',
+    noAccountSuffix: ', then come back here and connect.',
     // GitHub's detail opened from the Cloud overview ("View GitHub Sync") while
     // Cloud is on: informative only — connecting here would pull the repo over
     // the notes Cloud is keeping, so the setup form is replaced by this notice.
@@ -435,17 +448,18 @@ export const settings = {
   },
 
   ai: {
+    // Settings → AI, section under the assistant: what the AI does with your notes.
+    notesTitle: 'Your notes and AI',
     localAi: 'Local AI',
-    localAiHint:
-      'Index your notes on this device to power Related notes, the brain graph and chat context. Runs fully offline; encrypted notes are skipped.',
+    localAiHint: 'Indexes your notes on this device for Related notes, the brain graph and chat context. Offline; encrypted notes are skipped.',
     enableLocalAi: 'Enable local AI',
     disableLocalAi: 'Disable local AI',
-    reindexAll: 'Reindex all notes',
+    reindex: 'Reindex',
     downloadingModel: 'Downloading model…',
     profile: 'Profile',
-    openProfileSetup: 'Open profile setup',
-    profileHint: 'Re-run the questionnaire to refresh the profile note the assistant uses for context.',
-    exposeSkill: 'Expose CLI skill to AI agents',
+    redoQuestionnaire: 'Redo questionnaire',
+    profileHint: 'Refreshes the profile note the assistant uses for context.',
+    cliSkill: 'CLI skill',
     exposeSkillHint:
       'Installs the NoteFlow skill into ~/.claude/skills and ~/.agents/skills so Claude Code, Codex, Gemini CLI, Copilot, Cursor and other Agent Skills-compatible agents can drive your notes via the CLI.',
     exposeSkillTooltip: 'Expose the CLI skill',
@@ -666,6 +680,7 @@ export const settings = {
     searchAllNotes: 'Search all notes',
     toggleSidebar: 'Pin / unpin sidebar',
     openSideBySide: 'Open note side by side (on a section tag: that section in a new pane)',
+    navigateBackForward: 'Go back / forward between notes and views (also the mouse side buttons)',
     newSectionShortcut: 'New section',
     deleteSectionShortcut: 'Delete section',
     nextSection: 'Next section',
