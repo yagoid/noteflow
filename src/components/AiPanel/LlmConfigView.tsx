@@ -363,7 +363,7 @@ export function LlmConfigView({
           {rows.map((row) => {
             const picked = view === row.id
             return (
-              <div key={row.id} className={picked ? 'bg-text/[0.06]' : ''}>
+              <div key={row.id} className={picked ? 'bg-text/[0.05]' : ''}>
                 <button
                   type="button"
                   role="radio"

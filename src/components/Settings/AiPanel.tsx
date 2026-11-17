@@ -73,12 +73,7 @@ function NotesAndAiSection({ onClose }: { onClose: () => void }) {
   return (
     <SettingsListSection title={t.settings.ai.notesTitle}>
       <NotesRow label={t.settings.ai.localAi} description={t.settings.ai.localAiHint}>
-        <div className="flex flex-wrap items-center gap-2.5">
-          <SettingsToggle
-            on={enabled}
-            title={enabled ? t.settings.ai.disableLocalAi : t.settings.ai.enableLocalAi}
-            onToggle={() => void setEnabled(!enabled)}
-          />
+        <div className="flex items-center gap-2.5">
           {enabled && (
             <>
               <span className="text-[11px] font-mono text-text-muted tabular-nums">
@@ -92,6 +87,11 @@ function NotesAndAiSection({ onClose }: { onClose: () => void }) {
               </button>
             </>
           )}
+          <SettingsToggle
+            on={enabled}
+            title={enabled ? t.settings.ai.disableLocalAi : t.settings.ai.enableLocalAi}
+            onToggle={() => void setEnabled(!enabled)}
+          />
         </div>
       </NotesRow>
 
@@ -117,15 +117,14 @@ function NotesAndAiSection({ onClose }: { onClose: () => void }) {
   )
 }
 
-/** One "label | control + description" row of the section (the assistant form's 112px grid). */
+/** One "label | description | control" row of the section (the assistant form's 112px label
+ *  column); the control sits at the end of the same line. */
 function NotesRow({ label, description, children }: { label: string; description: string; children?: ReactNode }) {
   return (
-    <div className="grid grid-cols-[112px_minmax(0,1fr)] items-start gap-3 px-3.5 py-3">
-      <span className="text-xs font-mono font-semibold text-text pt-0.5">{label}</span>
-      <div className="min-w-0 flex flex-col gap-1.5">
-        {children}
-        <p className="text-[11px] font-mono text-text-muted leading-relaxed">{description}</p>
-      </div>
+    <div className="grid grid-cols-[112px_minmax(0,1fr)_auto] items-center gap-3 px-3.5 py-3">
+      <span className="text-xs font-mono font-semibold text-text">{label}</span>
+      <p className="min-w-0 text-[11px] font-mono text-text-muted leading-relaxed">{description}</p>
+      {children ? <div className="flex items-center justify-end">{children}</div> : <span />}
     </div>
   )
 }
