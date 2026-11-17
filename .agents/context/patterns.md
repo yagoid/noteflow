@@ -769,8 +769,9 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
     valores de atributo — `src`/`alt`/`href`/ids de relación — y una URL no puede inyectar atributos;
     `getAttribute` lo decodifica al volver a markdown, round-trip intacto) (negrita, links, highlight, pills de relación: click en una
     pill navega con `navigateToSection`; click en un link lo abre el handler de links de `Editor.tsx`).
-    Chips 📅/⏰/🔺 con las mismas clases (`task-badge`, `task-importance-dot`) y los **mismos pickers** que
-    las tareas (`TaskPickers.tsx` + helpers `taskBadge.ts`, extraídos de `DeadlineTaskItemView`). `extra`
+    Chips 📅/⏰/🔺 con las mismas clases (`task-badge`, `task-importance-dot`) que las tareas y dos
+    pickers separados (`DeadlinePopover`/`ImportancePopover` de `TaskPickers.tsx` + helpers `taskBadge.ts`);
+    las tareas usan en cambio el menú único `TaskMenuPopover` (ver "Editor: menú de tarea"). `extra`
     se conserva sin editar: chip "≡ n" con tooltip (editable en modo texto).
   - **Drag & drop** propio con pointer events (sin dependencia nueva; HTML5 DnD descartado: el drop lo
     intercepta ProseMirror y el ghost nativo es feo). Umbral 4 px; ghost portalado a `<body>`
@@ -1550,6 +1551,69 @@ y viajan con él.
   tarea como **primera** subtarea de una que aún no tiene ninguna, ni animar el drag/Alt+↑. La clave
   `moveCheckedToBottom` ya está en el espejo móvil de `uiSettings` (`9345c7d`, 2026-11-16) pero aún sin
   publicar: hasta entonces el móvil instalado la borra al escribir su apariencia (ver `architecture.md`).
+
+### Editor: menú de tarea (importancia + deadline en un solo botón)
+
+Cada tarea (`DeadlineTaskItemView`, salvo `plain`) tiene **un único botón** (`.task-meta-trigger`) dentro
+de `.task-actions` (el bloque que el modo Readable saca al margen): sin valores, un icono `CalendarClock`
+visible solo en hover; con valores, los **chips** (punto `task-importance-dot` + `task-badge` 📅/⏰)
+siempre visibles. Abre/cierra `TaskMenuPopover` (`TaskPickers.tsx`). Cerrar pulsando el trigger
+también pasa por el `close()` del menú: `useDismiss(..., closeOnTrigger)` trata el `mousedown` en el
+trigger como un cierre más, y el NodeView anota en ese `mousedown` si el menú estaba abierto
+(`openOnPress`) para que el `click` siguiente no lo reabra. El NodeView guarda el elemento
+trigger en estado (no un ref leído en render). El formato markdown no cambia (`📅`/`⏰`/`🔺` del nodo).
+
+- **En vivo, salvo los campos nativos:** importancia, atajos de fecha y los "Clear" llaman a
+  `updateAttributes` al momento (los chips se actualizan detrás). Los inputs `type=date`/`type=time`
+  llevan un **borrador** que solo se escribe en `blur`, `Enter` y **al cerrar** (Done, Esc, clic fuera
+  y también **volver a pulsar el trigger**: `close()` confirma explícitamente, no se confía en el blur
+  al desmontar). Excepción: un `change` con el input **sin foco** viene del selector nativo (abierto con
+  `showPicker()` desde el icono, `tabIndex=-1`) y es un valor final → se escribe al momento (mismas
+  validaciones), así los chips se actualizan al elegir en el calendario. Motivo del borrador: Chromium emite
+  `input` por segmento tecleado — años parciales (`0002-…`, `0202-…`) y horas intermedias (cambiar
+  la alarma de 18:00 a 14:30 pasa por 14:00, 14:03…) —; cada escritura guarda la nota y
+  `applyNoteUpdate` → `scheduleAlarms` → `checkAlarms()` (main) dispararía al instante una alarma
+  "vencida" falsa con una hora intermedia ya pasada, además de writes/undo/sync de más. Solo se
+  escribe lo válido (`isCommittableDue`: año ≥ 1900; hora no vacía y con fecha); un borrador inválido
+  vuelve al valor de la tarea en el blur. Vaciar un campo no borra nada: quitar es explícito ("Clear"
+  del deadline → `due`+`alarm` a null; `×` de la alarma; "Clear all"). La alarma se habilita en cuanto
+  hay fecha (la de la tarea o una válida en el borrador). Un ref `written` (lo que tiene la tarea,
+  actualizado al confirmar) y `closed` evitan escribir dos veces cuando blur y cierre coinciden. Los
+  borradores se re-sincronizan cuando cambian los atributos (patrón "ajustar estado en render", no un
+  effect).
+- **Atajos de fecha** (`quickDueDate` en `taskBadge.ts`, testeado): today, tomorrow y "next week" =
+  el lunes siguiente (desde un lunes, +7; desde un domingo, mañana). Fechas **locales** (`localISO`).
+  El día de referencia se fija al abrir el menú.
+- **Posición:** `taskMenuPosition` (puro, testeado) con el tamaño **medido** en `useLayoutEffect`
+  (antes del pintado, en cada render — el ancho del botón cambia con los chips — y en scroll/resize
+  con captura): bordes derechos alineados con el botón (que suele estar en el margen derecho), debajo
+  o encima si no cabe y hay más sitio arriba, siempre dentro de la ventana con 8 px de margen. Nunca
+  mayor que la ventana: `max-width`/`max-height: calc(100v* - 16px)` con scroll vertical (un sticky
+  puede medir 200×200) y `container-type: inline-size` — por debajo de ~230 px de contenido la fila de
+  importancia queda en solo puntos (la etiqueta sigue en `title`/`aria-label`) y fecha/alarma se apilan.
+- **Teclado y foco:** al abrir, foco en la opción de importancia seleccionada (radiogroup con
+  *roving tabindex*; `←/→/↑/↓` mueven y eligen). `Tab` queda atrapado en el menú. `Esc` (listener en
+  captura de `window`, `useDismiss`, con callback estable vía ref para no re-suscribirse en cada
+  render), `Enter` en un campo o *Done* cierran y devuelven el foco al editor (`editor.view.focus()`);
+  el clic fuera cierra sin mover el foco. El foco no cae nunca en `<body>` con el menú abierto: la raíz
+  es enfocable (`tabIndex=-1`, un clic en su fondo lo deja dentro) y los botones que desaparecen al
+  usarse ("Clear", `×`, "Clear all") pasan el foco a *Done*. El menú **es dueño de sus
+  teclas**: `stopPropagation` de todo keydown (si no, p. ej. `Delete` con un botón enfocado llegaría al
+  listener de `window` de `NoteEditor` que ofrece borrar la nota) + `OWN_KEYS_PROPS` (los
+  aceleradores en captura se apartan). `.task-menu` está en `EDITOR_WIDGET_SELECTOR`
+  (`lib/editorFocus.ts`): sus eventos, que burbujean por el árbol React hasta `Editor.tsx`, no deben
+  disparar los handlers del wrapper del editor (Enter tras una regla horizontal, pegar imágenes…).
+- **Estilo** (`.task-menu*` en `index.css`): superficie como `.cv-menu` (`--bg-2`, anillo `--border`,
+  sombra más suave en tema claro), etiquetas de sección en versalitas `--text-muted`, fila segmentada
+  como `.cv-seg` donde la opción elegida se tiñe con su color (`--c`: accent-2/accent-3/red). Los
+  inputs heredan el `color-scheme` del tema (no se fuerza `dark`) y ocultan el indicador nativo: el
+  icono del campo llama a `showPicker()`.
+- Las **tarjetas kanban** siguen con sus dos triggers y pickers separados (`DeadlinePopover`,
+  `ImportancePopover`); `useDismiss` es común (informa del motivo: `'outside' | 'escape' | 'trigger'`;
+  sin `closeOnTrigger`, como en esos pickers, el `mousedown` en el trigger se deja al propio trigger).
+- Tests: `tests/components/taskBadge.test.ts` (atajos, `isCommittableDue`, posición) y
+  `tests/components/taskMenuPopover.test.ts` (happy-dom: importancia, atajo, borradores de fecha/hora
+  que solo se escriben en blur/Enter/cierre, quitar y foco, cierre por Esc/clic fuera/trigger).
 
 ### Editor: progreso de las checklists (riel en el margen izquierdo)
 
