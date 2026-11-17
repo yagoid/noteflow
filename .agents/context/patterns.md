@@ -1753,7 +1753,7 @@ desde la capa de controles, ver "Editor: controles de tabla").
   `canInsertTableHere` (fuera de listas y tablas); también en notas vinculadas (es markdown estándar).
 - **CSS del ancho (`index.css` § Tables, tras el `th`):** `td[data-nf-colw]`/`th[data-nf-colw]` →
   `width = min-width = var(--nf-colw) × 0.5em` (en el `th`, que va a `0.8em`, × `0.625em`, para que ambas
-  filas midan lo mismo), `max-width: none` (sin el 28em/35em de las automáticas), `box-sizing:
+  filas midan lo mismo), `max-width: none` (sin el 22em/27.5em de las automáticas), `box-sizing:
   border-box`. Como en cualquier tabla, la columna mide máx(`width`, min-content de sus celdas): el `td`
   lleva `overflow-wrap: anywhere` (su min-content es un carácter: un texto largo nunca ensancha la columna)
   y el `th` `overflow-wrap: normal` (su min-content es su palabra más larga: **la cabecera nunca se parte
@@ -1774,7 +1774,7 @@ desde la capa de controles, ver "Editor: controles de tabla").
   **`<tbody>` es la caja de tabla** (`display: table; width: max-content`): TipTap pone todas las filas
   (cabecera incluida) en el `<tbody>` (antes va un `<colgroup>` que queda en su propia caja anónima,
   sin alto) y el parser HTML lo añade al HTML estático del chat y las previews. Columnas sin ancho: al del
-  contenido entre `min-width: 5em` y `max-width: 28em` de las celdas (`overflow-wrap: break-word`;
+  contenido entre `min-width: 5em` y `max-width: 22em` de las celdas (28em hasta el 2026-11-17; `overflow-wrap: break-word`;
   Chromium respeta ambos en celdas); si no cabe, **conserva esos anchos y hace scroll horizontal**.
   Hasta 2026-11 las filas iban en la caja de tabla anónima del `<table>` en bloque, que hace
   shrink-to-fit al ancho disponible: estrechaba las columnas hasta el mínimo antes de hacer scroll
@@ -1783,8 +1783,8 @@ desde la capa de controles, ver "Editor: controles de tabla").
   el `<tbody>` vuelve a `table-row-group` (las columnas automáticas se estrechan para enseñar más; las de
   ancho lo conservan) y la tabla se recorta (`overflow: hidden`). **Aspecto** (prototipo aprobado: cabecera "Etiqueta"): `th` en
   `--text-muted`, `0.8em`, `600`, mayúsculas con `letter-spacing: 0.07em`, sin fondo (fuera el
-  `--bg-2` + `--cyan` y el cebreado de filas de antes); sus `min/max-width` van en `6.25em/35em`
-  (= 5em/28em ÷ 0.8) para que la columna mida igual que con celdas del cuerpo; en el chat el `th` va a
+  `--bg-2` + `--cyan` y el cebreado de filas de antes); sus `min/max-width` van en `6.25em/27.5em`
+  (= 5em/22em ÷ 0.8) para que la columna mida igual que con celdas del cuerpo; en el chat el `th` va a
   9px enteros (regla de px enteros del chat). **Celda activa:** el DOM no marca dónde está un cursor
   de texto (prosemirror-tables solo marca `.selectedCell` en una CellSelection; `:focus-within` no
   sirve porque el foco es la raíz contenteditable), así que `Editor/ActiveTableCell.ts` (extensión de

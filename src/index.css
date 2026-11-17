@@ -2416,7 +2416,7 @@ html[data-color-scheme="light"] .section-hover-card {
   vertical-align: top;
   position: relative;
   min-width: 5em;
-  max-width: 28em;
+  max-width: 22em;
   overflow-wrap: break-word;
   transition: background-color 0.1s;
 }
@@ -2433,14 +2433,14 @@ html[data-color-scheme="light"] .section-hover-card {
   padding-top: 0.5rem;
   padding-bottom: 0.4rem;
   min-width: 6.25em;
-  max-width: 35em;
+  max-width: 27.5em;
 }
 /* A column with a width (lib/tableWidth.ts): every cell of it carries
    data-nf-colw + --nf-colw = n dashes, and is n × 0.5em of the table's font
    size wide — border-box, gridline to gridline (padding and the collapsed
    borders' halves included; Tailwind's preflight makes cells border-box). The
    header's 0.8em font gets n × 0.625em (= 0.5 / 0.8), so both rows agree.
-   No max-width (none: the auto columns' 28em / 35em don't apply): as in any
+   No max-width (none: the auto columns' 22em / 27.5em don't apply): as in any
    table layout, the column is max(width, min-content of its cells). Body cells
    break anywhere (their min-content is a character: long text never widens the
    column); the header never breaks inside a word (`normal`), so the column is
