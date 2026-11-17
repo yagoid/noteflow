@@ -205,6 +205,9 @@ export const settings = {
     repoName: 'Nombre del repositorio',
     repoHint: 'Se creará como privado si no existe.',
     connectWithGitHub: 'Conectar con GitHub',
+    noAccountPrefix: '¿No tienes cuenta de GitHub? La sincronización con GitHub necesita una. ',
+    noAccountLink: 'Créala gratis',
+    noAccountSuffix: ' y vuelve aquí para conectar.',
     githubCloudActiveTitle: 'NoteFlow Cloud está en uso',
     githubCloudActiveNotice: 'Para cambiar a GitHub Sync, desactiva primero NoteFlow Cloud, al pie de la vista general de sincronización. Desactivarlo no borra nada: tus notas se quedan en este equipo.',
     overview: {

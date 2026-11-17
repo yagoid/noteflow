@@ -251,6 +251,11 @@ export const settings = {
     repoName: 'Repository name',
     repoHint: "Will be created as private if it doesn't exist.",
     connectWithGitHub: 'Connect with GitHub',
+    // Under the connect button, for people without a GitHub account. The link sits between
+    // prefix and suffix (opens github.com/signup in the browser).
+    noAccountPrefix: "Don't have a GitHub account? GitHub Sync needs one. ",
+    noAccountLink: 'Create one for free',
+    noAccountSuffix: ', then come back here and connect.',
     // GitHub's detail opened from the Cloud overview ("View GitHub Sync") while
     // Cloud is on: informative only — connecting here would pull the repo over
     // the notes Cloud is keeping, so the setup form is replaced by this notice.
