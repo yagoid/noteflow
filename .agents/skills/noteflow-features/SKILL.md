@@ -884,19 +884,21 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - **Un solo botón por tarea** a la derecha del texto: sin valores es un icono de calendario-reloj
   que aparece en hover; con valores muestra **siempre** sus chips (punto de importancia + badge
   `📅 fecha ⏰hora`), y clicar en ellos abre el mismo menú. El botón alterna el menú (abrir/cerrar).
-- **Menú de tarea** (popover pequeño, se aplica **en vivo**: cada cambio se escribe al momento y los
-  chips se actualizan detrás):
+- **Menú de tarea** (popover pequeño; importancia, atajos y "Clear" se aplican **en vivo** y los
+  chips se actualizan detrás; los campos de fecha y hora se guardan al salir del campo, con `Enter` o
+  al cerrar el menú, nunca a medio teclear):
   - **Importance**: fila segmentada `⊘ · Low · Medium · High`; la opción elegida toma su color.
     `←/→` la recorren (y la eligen); al abrir, el foco está en la opción actual.
   - **Deadline**: atajos **Today / Tomorrow / Next week** (el lunes siguiente) con el día que
     representan a la derecha (resaltado si es el deadline actual), y debajo los campos **fecha** y
-    **alarma** (hora; deshabilitada sin fecha, con `×` para quitarla). Clicar el icono de cada campo
+    **alarma** (hora; deshabilitada hasta que hay fecha, con `×` para quitarla). Clicar el icono de cada campo
     abre el selector nativo. "Clear" junto al título quita deadline + alarma (cambiar la fecha
     conserva la alarma).
   - Pie: **Clear all** (quita todo; solo si hay algo) y **Done**. `Esc`, `Enter` en un campo o
     *Done* cierran y devuelven el foco al texto; un clic fuera cierra sin moverlo. `Tab` no sale del
     menú. Se coloca alineado a la derecha del botón, debajo (o encima si no cabe) y nunca se sale de
-    la ventana; sigue al botón si se hace scroll.
+    la ventana (en un sticky pequeño hace scroll, la importancia queda en solo puntos y fecha/alarma
+    se apilan); sigue al botón si se hace scroll.
 - Las **tarjetas kanban** mantienen sus dos triggers propios (fecha y bandera) con pickers separados.
 - **Reordenar arrastrando:** en hover aparece un asa **⋮⋮** a la izquierda de la casilla (en el
   margen, sin desplazar el texto; también en stickies y en Readable). Se arrastra desde el asa (no

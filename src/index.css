@@ -1024,7 +1024,14 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   position: fixed;
   z-index: 9999;
   width: 272px;
+  /* Never larger than the window (a sticky can be 200x200): it scrolls instead,
+     and below ~230px of content the rows compact (container queries below). */
   max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  container-type: inline-size;
+  outline: none;
   padding: 10px;
   border-radius: 10px;
   background: rgb(var(--bg-2));
@@ -1041,6 +1048,7 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
 html[data-color-scheme="light"] .task-menu {
   box-shadow: 0 0 0 1px rgb(var(--border)), 0 16px 32px -12px rgb(0 0 0 / 0.22);
 }
+.task-menu > * { flex-shrink: 0; }
 @keyframes task-menu-in {
   from { opacity: 0; transform: translateY(-3px); }
   to { opacity: 1; transform: none; }
@@ -1109,6 +1117,7 @@ html[data-color-scheme="light"] .task-menu {
   transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
 }
 .task-menu-seg-opt--none { flex: 0 0 30px; padding: 0; }
+.task-menu-seg-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .task-menu-seg-opt--low { --c: var(--accent-2); }
 .task-menu-seg-opt--medium { --c: var(--accent-3); }
 .task-menu-seg-opt--high { --c: var(--red); }
@@ -1164,6 +1173,13 @@ html[data-color-scheme="light"] .task-menu {
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
   gap: 6px;
   margin-top: 2px;
+}
+/* Narrow menu (small sticky windows): importance as dots only (the options keep
+   their label as tooltip/aria-label) and the date/alarm fields stacked. */
+@container (max-width: 230px) {
+  .task-menu-seg-text { display: none; }
+  .task-menu-seg-opt--none { flex: 1 1 0; }
+  .task-menu-fields { grid-template-columns: minmax(0, 1fr); }
 }
 .task-menu-field {
   display: flex;

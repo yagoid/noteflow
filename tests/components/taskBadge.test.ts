@@ -63,6 +63,14 @@ describe('taskMenuPosition', () => {
     expect(pos.top).toBe(92) // 800 - 8 - 700
   })
 
+  it('in a window smaller than the menu (a 200x200 sticky) it is capped and pinned to the margin', () => {
+    const sticky = { width: 200, height: 200 }
+    // Measured already capped by the CSS max-width/max-height (184x184)…
+    expect(taskMenuPosition({ top: 40, bottom: 60, right: 190 }, { width: 184, height: 184 }, sticky)).toEqual({ top: 8, left: 8 })
+    // …or not: same result.
+    expect(taskMenuPosition({ top: 150, bottom: 170, right: 190 }, { width: 272, height: 300 }, sticky)).toEqual({ top: 8, left: 8 })
+  })
+
   it('never leaves the window horizontally', () => {
     expect(taskMenuPosition({ top: 100, bottom: 120, right: 100 }, size, viewport).left).toBe(8)
     expect(taskMenuPosition({ top: 100, bottom: 120, right: 1200 }, size, viewport).left).toBe(720)

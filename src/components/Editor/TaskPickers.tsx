@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
 import { AlarmClock, Ban, Calendar, CalendarRange, Sun, Sunrise, X } from 'lucide-react'
@@ -167,7 +167,8 @@ export interface TaskMenuValues {
 
 interface TaskMenuPopoverProps extends TaskMenuValues {
   trigger: HTMLElement
-  /** Writes a change right away: the menu has no draft to confirm. */
+  /** Writes a change to the task (importance, shortcuts and clearing at once;
+   *  the date/alarm fields on blur, Enter or closing). */
   onChange: (patch: Partial<TaskMenuValues>) => void
   /** `fromKeyboard`: closed with Escape/Enter or "Done" — hand the focus back to the text. */
   onClose: (fromKeyboard: boolean) => void
@@ -184,10 +185,12 @@ const QUICK_DUE_ICONS: Record<QuickDue, ComponentType<{ size?: number; className
 
 /**
  * The single menu of a task list item: importance (a segmented row, none/low/
- * medium/high), deadline (shortcuts + date) and its alarm, plus clearing. Every
- * change is written to the task at once (so the chips next to the task update
- * live); "Done", Escape or a click outside just close it. Placed with
- * taskMenuPosition from its measured size, re-placed on scroll/resize.
+ * medium/high), deadline (shortcuts + date) and its alarm, plus clearing.
+ * Importance, the shortcuts and clearing are written at once (the chips next to
+ * the task update live); the native date/time fields keep a draft that is
+ * written on blur, Enter and when the menu closes ("Done", Escape, a click
+ * outside). Placed with taskMenuPosition from its measured size, re-placed on
+ * scroll/resize.
  */
 export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onClose }: TaskMenuPopoverProps) {
   const t = useT()
@@ -199,9 +202,13 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
   // The day the shortcuts count from, fixed while the menu is open.
   const [now] = useState(() => new Date())
 
-  // The inputs keep their own draft: a native date input reports partial years
-  // while typing, and a time input reports '' until it's complete. Only valid
-  // values are written; the drafts follow the task when it changes.
+  const doneRef = useRef<HTMLButtonElement>(null)
+
+  // The native date/time inputs keep a draft, written only on blur, Enter or
+  // close: Chromium reports every segment typed (partial years like 0002; an
+  // alarm going 18:00 -> 14:00 -> 14:03 -> 14:30), and each write saves the note
+  // and reschedules alarms, so an intermediate time already past would fire a
+  // false "overdue" alarm. The drafts follow the task when it changes.
   const [draftDue, setDraftDue] = useState(due ?? '')
   const [draftAlarm, setDraftAlarm] = useState(alarm ?? '')
   const [synced, setSynced] = useState({ due, alarm })
@@ -210,8 +217,62 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
     setDraftDue(due ?? '')
     setDraftAlarm(alarm ?? '')
   }
+  // What the task holds, updated at once on commit so a blur right after a
+  // close (or the reverse) never writes the same value twice.
+  const written = useRef({ due, alarm })
+  useLayoutEffect(() => {
+    written.current = { due, alarm }
+  }, [due, alarm])
+  const closed = useRef(false)
 
-  useDismiss(popoverRef, trigger, (reason) => onClose(reason === 'escape'))
+  /** Writes the valid field drafts that differ from the task. */
+  function commitDrafts() {
+    const patch: Partial<TaskMenuValues> = {}
+    let nextDue = written.current.due
+    if (isCommittableDue(draftDue) && draftDue !== nextDue) {
+      patch.due = draftDue
+      nextDue = draftDue
+    }
+    if (nextDue && draftAlarm && draftAlarm !== written.current.alarm) patch.alarm = draftAlarm
+    if (patch.due === undefined && patch.alarm === undefined) return
+    written.current = { ...written.current, ...patch }
+    onChange(patch)
+  }
+
+  /** Every close goes through here: the field drafts are written first. */
+  function close(fromKeyboard: boolean) {
+    if (closed.current) return
+    closed.current = true
+    commitDrafts()
+    onClose(fromKeyboard)
+  }
+  // useDismiss gets a stable callback (no re-subscribing on every render) that
+  // reaches the latest close, and so the latest drafts.
+  const closeRef = useRef(close)
+  useLayoutEffect(() => {
+    closeRef.current = close
+  })
+  const dismiss = useCallback((reason: DismissReason) => closeRef.current(reason === 'escape'), [])
+  useDismiss(popoverRef, trigger, dismiss)
+
+  // A clear button disappears once used: keep the focus in the menu (on "Done")
+  // so Tab stays trapped and keys like Delete don't reach the app.
+  function clearAndKeepFocus(patch: Partial<TaskMenuValues>) {
+    const { due: nextDue = written.current.due, alarm: nextAlarm = written.current.alarm } = patch
+    written.current = { due: nextDue, alarm: nextAlarm }
+    onChange(patch)
+    doneRef.current?.focus()
+  }
+
+  // On blur, write the field if valid, else show the task's value again.
+  function onFieldBlur() {
+    if (closed.current) return
+    commitDrafts()
+    if (!isCommittableDue(draftDue)) setDraftDue(written.current.due ?? '')
+    if (!draftAlarm) setDraftAlarm(written.current.alarm ?? '')
+  }
+  // The alarm needs a date: the task's, or a valid one being typed.
+  const alarmEnabled = !!due || isCommittableDue(draftDue)
 
   // Measure and place it before paint, on every render (its trigger changes width
   // as the chips update) and whenever the page scrolls or the window resizes.
@@ -276,10 +337,10 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
       }
       return
     }
-    // Enter in a field: its value is already written, so it just closes.
+    // Enter in a field: write it and close.
     if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
       e.preventDefault()
-      onClose(true)
+      close(true)
     }
   }
 
@@ -303,7 +364,6 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
     }
   }
 
-  const clearDue = () => onChange({ due: null, alarm: null })
 
   return createPortal(
     <div
@@ -311,6 +371,8 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
       className="task-menu"
       role="dialog"
       aria-label={t.editor.task.menu}
+      // Focusable root: a click on the menu's background keeps the focus inside.
+      tabIndex={-1}
       contentEditable={false}
       onKeyDown={onKeyDown}
       {...OWN_KEYS_PROPS}
@@ -335,14 +397,14 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
                 aria-checked={on}
                 tabIndex={on ? 0 : -1}
                 className={`task-menu-seg-opt task-menu-seg-opt--${level ?? 'none'}${on ? ' is-on' : ''}`}
-                title={level ? undefined : t.editor.task.importanceNone}
-                aria-label={level ? undefined : t.editor.task.importanceNone}
+                title={level ? importanceLabels[level] : t.editor.task.importanceNone}
+                aria-label={level ? importanceLabels[level] : t.editor.task.importanceNone}
                 onClick={() => onChange({ importance: level })}
               >
                 {level ? (
                   <>
                     <span className={`task-importance-dot task-importance-dot--${level}`} />
-                    {importanceLabels[level]}
+                    <span className="task-menu-seg-text">{importanceLabels[level]}</span>
                   </>
                 ) : (
                   <Ban size={12} />
@@ -357,7 +419,11 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
         <div className="task-menu-head">
           <span className="task-menu-label">{t.editor.task.deadline}</span>
           {due && (
-            <button type="button" className="task-menu-head-action" onClick={clearDue}>
+            <button
+              type="button"
+              className="task-menu-head-action"
+              onClick={() => clearAndKeepFocus({ due: null, alarm: null })}
+            >
               {t.editor.task.clear}
             </button>
           )}
@@ -398,23 +464,18 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
               type="date"
               aria-label={t.editor.task.date}
               value={draftDue}
-              onChange={(e) => {
-                const value = e.target.value
-                setDraftDue(value)
-                if (isCommittableDue(value) && value !== due) onChange({ due: value })
-              }}
-              // An incomplete/emptied date isn't written: back to the task's value
-              // ("Clear" removes the deadline).
-              onBlur={() => setDraftDue(due ?? '')}
+              onChange={(e) => setDraftDue(e.target.value)}
+              // An incomplete/emptied date isn't written ("Clear" removes the deadline).
+              onBlur={onFieldBlur}
             />
           </div>
-          <div className={`task-menu-field${due ? '' : ' is-disabled'}`}>
+          <div className={`task-menu-field${alarmEnabled ? '' : ' is-disabled'}`}>
             <button
               type="button"
               tabIndex={-1}
               className="task-menu-field-icon"
               aria-label={t.editor.task.alarm}
-              disabled={!due}
+              disabled={!alarmEnabled}
               onClick={() => openPicker(timeRef.current)}
             >
               <AlarmClock size={13} />
@@ -424,13 +485,9 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
               type="time"
               aria-label={t.editor.task.alarm}
               value={draftAlarm}
-              disabled={!due}
-              onChange={(e) => {
-                const value = e.target.value
-                setDraftAlarm(value)
-                if (value && value !== alarm) onChange({ alarm: value })
-              }}
-              onBlur={() => setDraftAlarm(alarm ?? '')}
+              disabled={!alarmEnabled}
+              onChange={(e) => setDraftAlarm(e.target.value)}
+              onBlur={onFieldBlur}
             />
             {alarm && due && (
               <button
@@ -438,7 +495,7 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
                 className="task-menu-field-clear"
                 title={t.editor.task.removeAlarm}
                 aria-label={t.editor.task.removeAlarm}
-                onClick={() => onChange({ alarm: null })}
+                onClick={() => clearAndKeepFocus({ alarm: null })}
               >
                 <X size={12} />
               </button>
@@ -452,14 +509,14 @@ export function TaskMenuPopover({ trigger, due, alarm, importance, onChange, onC
           <button
             type="button"
             className="task-menu-clear-all"
-            onClick={() => onChange({ due: null, alarm: null, importance: null })}
+            onClick={() => clearAndKeepFocus({ due: null, alarm: null, importance: null })}
           >
             {t.editor.task.clearAll}
           </button>
         ) : (
           <span />
         )}
-        <button type="button" className="task-menu-done" onClick={() => onClose(true)}>
+        <button ref={doneRef} type="button" className="task-menu-done" onClick={() => close(true)}>
           {t.editor.task.done}
         </button>
       </div>

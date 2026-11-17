@@ -67,13 +67,70 @@ describe('TaskMenuPopover', () => {
     expect(Object.keys(onChange.mock.calls[0][0])).toEqual(['due'])
   })
 
-  it('does not write the partial years a date input reports while typing', () => {
+  it('writes the date field on blur, never the partial years typed on the way', () => {
     const { menu, onChange } = mount(none)
     const date = menu.querySelector<HTMLInputElement>('input[type="date"]')!
+    act(() => date.focus())
     setInput(date, '0002-11-17')
-    expect(onChange).not.toHaveBeenCalled()
     setInput(date, '2026-11-17')
+    expect(onChange).not.toHaveBeenCalled()
+    act(() => date.blur())
+    expect(onChange).toHaveBeenCalledTimes(1)
     expect(onChange).toHaveBeenCalledWith({ due: '2026-11-17' })
+  })
+
+  it('drops an incomplete date on blur', () => {
+    const { menu, onChange } = mount(none)
+    const date = menu.querySelector<HTMLInputElement>('input[type="date"]')!
+    act(() => date.focus())
+    setInput(date, '0202-11-17')
+    act(() => date.blur())
+    expect(onChange).not.toHaveBeenCalled()
+    expect(date.value).toBe('')
+  })
+
+  it('writes only the final alarm, on Enter, and closes', () => {
+    const { menu, onChange, onClose } = mount({ due: '2026-11-17', alarm: '18:00', importance: null })
+    const time = menu.querySelector<HTMLInputElement>('input[type="time"]')!
+    act(() => time.focus())
+    // Chromium reports every segment typed: 18:00 → 14:00 → 14:03 → 14:30.
+    setInput(time, '14:00')
+    setInput(time, '14:03')
+    setInput(time, '14:30')
+    expect(onChange).not.toHaveBeenCalled()
+    act(() => {
+      time.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith({ alarm: '14:30' })
+    expect(onClose).toHaveBeenCalledWith(true)
+  })
+
+  it('writes the field drafts when it closes from a click outside, before closing', () => {
+    const { menu, onChange, onClose } = mount(none)
+    setInput(menu.querySelector<HTMLInputElement>('input[type="date"]')!, '2026-11-17')
+    setInput(menu.querySelector<HTMLInputElement>('input[type="time"]')!, '09:15')
+    act(() => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    })
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith({ due: '2026-11-17', alarm: '09:15' })
+    expect(onChange.mock.invocationCallOrder[0]).toBeLessThan(onClose.mock.invocationCallOrder[0])
+    expect(onClose).toHaveBeenCalledWith(false)
+  })
+
+  it('enables the alarm as soon as a valid date is typed', () => {
+    const { menu } = mount(none)
+    setInput(menu.querySelector<HTMLInputElement>('input[type="date"]')!, '2026-11-17')
+    expect(menu.querySelector<HTMLInputElement>('input[type="time"]')!.disabled).toBe(false)
+  })
+
+  it('keeps the focus in the menu (on "Done") when a clear button goes away', () => {
+    const { menu } = mount({ due: '2026-11-17', alarm: '09:00', importance: 'low' })
+    const clear = menu.querySelector<HTMLButtonElement>('.task-menu-field-clear')!
+    act(() => clear.focus())
+    act(() => clear.click())
+    expect(document.activeElement).toBe(menu.querySelector('.task-menu-done'))
   })
 
   it('disables the alarm without a deadline', () => {
@@ -89,16 +146,25 @@ describe('TaskMenuPopover', () => {
     expect(onChange).toHaveBeenLastCalledWith({ due: null, alarm: null, importance: null })
   })
 
-  it('closes on Escape (back to the text) and on a click outside (focus stays)', () => {
+  it('closes once on Escape, back to the text', () => {
     const { onClose } = mount(none)
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     })
-    expect(onClose).toHaveBeenLastCalledWith(true)
+    expect(onClose).toHaveBeenCalledWith(true)
+    // Until the parent unmounts it, later dismiss events are ignored.
     act(() => {
       document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
     })
-    expect(onClose).toHaveBeenLastCalledWith(false)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes on a click outside without moving the focus', () => {
+    const { onClose } = mount(none)
+    act(() => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    })
+    expect(onClose).toHaveBeenCalledWith(false)
   })
 
   it('ignores a click on its trigger (the trigger toggles it)', () => {

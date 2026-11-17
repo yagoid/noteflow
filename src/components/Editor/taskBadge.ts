@@ -87,13 +87,19 @@ const MENU_MARGIN = 8
  * trigger, given its measured size: right edges aligned (the trigger sits at
  * the end of the task line, often in the right gutter), below the trigger, or
  * above when it doesn't fit below and there's more room up there. Always kept
- * inside the viewport with a small margin.
+ * inside the viewport with a small margin: a menu larger than the viewport
+ * (a 200x200 sticky) is capped like its CSS max-width/max-height (100vw/100vh
+ * minus twice the margin, where it scrolls) and pinned to the top-left margin.
  */
 export function taskMenuPosition(
   trigger: { top: number; bottom: number; right: number },
-  size: { width: number; height: number },
+  menu: { width: number; height: number },
   viewport: { width: number; height: number },
 ): { top: number; left: number } {
+  const size = {
+    width: Math.min(menu.width, viewport.width - 2 * MENU_MARGIN),
+    height: Math.min(menu.height, viewport.height - 2 * MENU_MARGIN),
+  }
   const below = trigger.bottom + MENU_GAP
   const above = trigger.top - MENU_GAP - size.height
   const fitsBelow = below + size.height <= viewport.height - MENU_MARGIN
