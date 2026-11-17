@@ -8688,5 +8688,7 @@ if (require.main === module) {
     cmdCloudPull, cmdDelete, cmdSectionDelete, cmdMigrate, finishCloudLogin, cmdLogin, cmdLoginFinish,
     GITHUB_BASES_PATH, SETTINGS_PATH, NOTES_DIR, DEFAULT_NOTES_DIR, sameNotesDir, normalizeNotesDir,
     originScope, originPlacement, withNotesDir,
+    // Spike only (scripts/spike-autocomplete-bench.cjs): reuse the session refresh.
+    getCloudAccessToken,
   }
 }
