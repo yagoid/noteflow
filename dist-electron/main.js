@@ -62,6 +62,7 @@ const llm = __importStar(require("./ai/llm"));
 const agentTools = __importStar(require("./ai/llm/tools"));
 const chatUndo = __importStar(require("./ai/chatUndo"));
 const chatContext = __importStar(require("./ai/chatContext"));
+const aiAutocomplete = __importStar(require("./ai/autocomplete"));
 const managedErrors_1 = require("./ai/llm/managedErrors");
 const entitlementsRetry_1 = require("./entitlementsRetry");
 const noteFormat = __importStar(require("./noteFormat"));
@@ -4283,6 +4284,52 @@ function friendlyChatError(raw, sentImages, managed) {
 }
 electron_1.ipcMain.on('ai:chat-cancel', (_event, requestId) => {
     chatAborts.get(requestId)?.abort();
+});
+// ── SPIKE: inline AI autocomplete (throwaway prototype, dev flag only) ─────────
+// One short completion per request, only through the managed NoteFlow AI plan. The
+// renderer extension (src/components/Editor/AiGhostText.ts) is off unless
+// localStorage['nf.spike.autocomplete'] holds a model id.
+const completeAborts = new Map();
+electron_1.ipcMain.handle('ai:complete', async (_event, req) => {
+    const r = (req ?? {});
+    if (typeof r.requestId !== 'string' || typeof r.before !== 'string')
+        return { error: 'invalid request' };
+    const requestId = r.requestId;
+    const stored = readLlmSettings();
+    if (stored.active !== 'noteflow')
+        return { error: 'autocomplete spike needs the NoteFlow AI provider active' };
+    const controller = new AbortController();
+    completeAborts.set(requestId, controller);
+    let model = '';
+    try {
+        const resolved = await llm.resolveConfigAsync(stored, mainMessages().chatErrors);
+        model = typeof r.model === 'string' && llm.acceptsModel('noteflow', r.model) ? r.model.trim() : resolved.model;
+        const result = await aiAutocomplete.completeText({
+            baseUrl: resolved.baseUrl,
+            token: resolved.apiKey,
+            model,
+            before: r.before,
+            after: typeof r.after === 'string' ? r.after : '',
+            signal: controller.signal,
+        });
+        console.log(`[spike:autocomplete] ${model} ${result.ms}ms ttft=${result.ttftMs ?? '-'}ms chars=${result.text.length} finish=${result.finishReason ?? '-'}${result.reasoned ? ' reasoned' : ''}`);
+        return { text: result.text, ms: result.ms, ttftMs: result.ttftMs };
+    }
+    catch (err) {
+        if (controller.signal.aborted)
+            return { error: 'aborted' };
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.startsWith('HTTP 401'))
+            account.invalidateAccessToken();
+        console.log(`[spike:autocomplete] ${model || '?'} failed: ${message}`);
+        return { error: message };
+    }
+    finally {
+        completeAborts.delete(requestId);
+    }
+});
+electron_1.ipcMain.on('ai:complete-cancel', (_event, requestId) => {
+    completeAborts.get(requestId)?.abort();
 });
 electron_1.ipcMain.on('ai:chat-confirm', (_event, payload) => {
     const resolve = chatConfirms.get(payload?.toolCallId);

@@ -381,6 +381,9 @@ const api = {
     aiChatPickFiles: () => electron_1.ipcRenderer.invoke('ai:chat-pick-files'),
     aiChatRemoveFile: (id) => electron_1.ipcRenderer.invoke('ai:chat-remove-file', id),
     aiChatCancel: (requestId) => electron_1.ipcRenderer.send('ai:chat-cancel', requestId),
+    // SPIKE: inline AI autocomplete (dev flag only — see src/components/Editor/AiGhostText.ts)
+    aiComplete: (req) => electron_1.ipcRenderer.invoke('ai:complete', req),
+    aiCompleteCancel: (requestId) => electron_1.ipcRenderer.send('ai:complete-cancel', requestId),
     aiChatConfirm: (toolCallId, approved) => electron_1.ipcRenderer.send('ai:chat-confirm', { toolCallId, approved }),
     onAiChatToolCall: (cb) => {
         const wrapper = (_event, p) => cb(p);

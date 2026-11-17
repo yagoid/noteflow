@@ -631,6 +631,9 @@ const api = {
   aiChatPickFiles: () => ipcRenderer.invoke('ai:chat-pick-files'),
   aiChatRemoveFile: (id: string) => ipcRenderer.invoke('ai:chat-remove-file', id),
   aiChatCancel: (requestId: string) => ipcRenderer.send('ai:chat-cancel', requestId),
+  // SPIKE: inline AI autocomplete (dev flag only — see src/components/Editor/AiGhostText.ts)
+  aiComplete: (req: { requestId: string; before: string; after: string; model?: string }) => ipcRenderer.invoke('ai:complete', req),
+  aiCompleteCancel: (requestId: string) => ipcRenderer.send('ai:complete-cancel', requestId),
   aiChatConfirm: (toolCallId: string, approved: boolean) =>
     ipcRenderer.send('ai:chat-confirm', { toolCallId, approved }),
   onAiChatToolCall: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown; label: string }) => void) => {

@@ -16,6 +16,7 @@ import { TableControls } from './TableControls'
 import { SearchHighlight } from './SearchHighlightExtension'
 import { SlashCommands, getSlashCommands } from './SlashCommands'
 import { AutoCloseBrackets } from './AutoCloseBrackets'
+import { AiGhostText } from './AiGhostText'
 import { ListItemMove } from './ListItemMove'
 import { ActiveTableCell } from './ActiveTableCell'
 import { TableColumnResize } from './TableColumnResize'
@@ -149,6 +150,9 @@ interface EditorProps {
    *  syntax), relative images shown from the file's folder and pasted images copied to its
    *  assets/ folder. Read once, at mount. */
   linked?: boolean
+  /** SPIKE (AiGhostText.ts): whether this content may be sent to the AI for inline
+   *  autocomplete — false for encrypted notes and sections hidden from the AI. Read live. */
+  aiAutocomplete?: boolean
 }
 
 export interface EditorHandle {
@@ -171,7 +175,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   showToc = false,
   persistHistory = false,
   linked = false,
+  aiAutocomplete = false,
 }, ref) {
+  const aiAutocompleteRef = useRef(aiAutocomplete)
+  useEffect(() => { aiAutocompleteRef.current = aiAutocomplete }, [aiAutocomplete])
   // Frozen at mount: the schema can't change under a live editor (it's keyed by section).
   const [plain] = useState(linked)
   // Debounced save of the content (400 ms after the last change). Registered in
@@ -263,6 +270,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       TableKeymap,
       // Copied cells as TSV text; pasted tables normalized for markdown (tableClipboard.ts).
       TableClipboard,
+      // SPIKE: AI ghost-text autocomplete, inert without its localStorage dev flag.
+      AiGhostText.configure({ isAllowed: () => aiAutocompleteRef.current }),
       SlashCommands.configure({
         onLinkSection: () => setLinkPickerOpen(true),
         getLabels: () => getSlashCommands(tRef.current),

@@ -1630,6 +1630,7 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                 currentSectionId={activeSection?.id ?? null}
                 showToc={showToc}
                 persistHistory
+                aiAutocomplete={!isLinked && !note.encryption && !activeSection?.aiHidden}
               />
               {searchOpen && (
                 <InNoteSearchBar

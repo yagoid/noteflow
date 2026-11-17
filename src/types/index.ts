@@ -1022,6 +1022,11 @@ declare global {
       aiChatPickFiles: () => Promise<{ ok: boolean; canceled?: boolean; files?: ChatAttachment[]; errors?: string[] }>
       aiChatRemoveFile: (id: string) => Promise<{ ok: boolean }>
       aiChatCancel: (requestId: string) => void
+      // SPIKE: inline AI autocomplete (dev flag only — components/Editor/AiGhostText.ts).
+      // Only answers with the NoteFlow AI provider active; `model` overrides the active model.
+      aiComplete: (req: { requestId: string; before: string; after: string; model?: string }) =>
+        Promise<{ text: string; ms: number; ttftMs: number | null } | { error: string }>
+      aiCompleteCancel: (requestId: string) => void
       aiChatConfirm: (toolCallId: string, approved: boolean) => void
       onAiChatToolCall: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown; label: string }) => void) => () => void
       onAiChatToolResult: (cb: (p: { requestId: string; toolCallId: string; status: ChatToolActivity['status']; summary: string; undoable?: boolean }) => void) => () => void
