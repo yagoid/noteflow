@@ -163,16 +163,16 @@ const NoteRow = memo(function NoteRow({
               style={{ '--g': colorChannels(groupColor) } as React.CSSProperties}
             />
           )}
-          {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
+          {note.encryption && <Lock size={11} className="text-amber-400 flex-shrink-0" />}
           {note.linked && (
             <span
               title={`${t.linked.linkedNoteBadge}\n${note.linked.path}\n${linkedStatusLabel(t.linked, note.linked, isLinkedDirty(note))}`}
               className="flex-shrink-0 flex items-center"
             >
-              <LinkedFileIcon path={note.linked.path} size={10} className={LINKED_TONE_CLASS[linkedTone(note.linked, isLinkedDirty(note))]} aria-label={t.linked.linkedNoteBadge} />
+              <LinkedFileIcon path={note.linked.path} size={12} className={LINKED_TONE_CLASS[linkedTone(note.linked, isLinkedDirty(note))]} aria-label={t.linked.linkedNoteBadge} />
             </span>
           )}
-          {note.expiresAt && <span title={formatExpiry(note.expiresAt, t)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
+          {note.expiresAt && <span title={formatExpiry(note.expiresAt, t)} className="flex-shrink-0 flex items-center"><Timer size={11} className="text-text-muted/60" /></span>}
           {/* Opened from the system and not kept: italic + "temporary" (goes away when closed). */}
           <span className={`text-[13px] font-mono font-medium truncate flex-1
             ${isActive ? 'text-text' : 'text-text/80'} ${note.linked?.transient ? 'italic' : ''}`}>
