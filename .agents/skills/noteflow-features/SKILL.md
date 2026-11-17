@@ -412,7 +412,13 @@ cambie fuera de NoteFlow aparece en la nota. Diseño e invariantes técnicos: `p
 ## Abrir sección en otra ventana
 
 - Menú contextual de una **sección** → "Open in New Window", o paleta de comandos → "Open section in
-  new window" (actúa sobre la sección del panel activo). No está en el menú ⋯ del editor.
+  new window" (actúa sobre la sección del panel activo). No está en el menú ⋯ del editor. El menú
+  contextual de una **nota** también lo ofrece (en la sección en que se abriría la nota).
+- **Arrastrar una nota fuera de la ventana** (desde la barra lateral o la vista de todo el contenido) y
+  soltarla fuera de NoteFlow abre esa nota en ventana nueva, **cerca del punto donde se soltó** (en la
+  sección en que se abriría la nota). Soltarla dentro sigue igual (sobre el editor → en paralelo). No
+  hace nada si otra app acepta el drop (p. ej. un editor de texto que inserta el id), con varias notas
+  seleccionadas a la vez ni con notas cifradas.
 - **No disponible para notas cifradas** (se edita en la ventana principal). Si una ventana ya abierta
   muestra una nota que se cifra después, pasa a solo lectura (pide la contraseña para verla).
 - Abre una ventana **solo-editor** (sin sidebar): barra de título propia con "Nota · Sección" y

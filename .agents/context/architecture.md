@@ -64,6 +64,8 @@ noteflow/
 │   ├── stickyBounds.ts  # Pura: geometría y estado plegado recordados de las stickies
 │   │                    #   (settings.stickyBounds, por PC): saneo/LRU/visibilidad en displays —
 │   │                    #   testeada; ver patterns.md § Ventanas sticky
+│   ├── windowPlacement.ts # Pura: placeWindowAtPoint (ventana de sección abierta donde se soltó una
+│   │                    #   nota arrastrada fuera) — testeada; ver patterns.md § Ventanas de sección
 │   ├── tempNoteExpiry.ts # Lógica pura: cuándo puede correr el autoborrado de notas temporales
 │   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
 │   ├── updateAsset.ts   # Lógica pura del auto-update: qué asset/URL ofrecer por plataforma y
@@ -309,6 +311,7 @@ noteflow/
 │   │   ├── cryptoUtils.ts        # Cifrado AES-256-GCM + PBKDF2 (WebCrypto)
 │   │   ├── alarmUtils.ts         # Recolección de alarmas/deadlines (líneas de tarea, también indentadas) — testeado
 │   │   ├── paneUtils.ts          # Modelo puro de paneles del split (abrir/cerrar/reordenar/enfocar) — testeado
+│   │   ├── noteDragOut.ts        # Puro: sección en que se abre una nota + ¿dragend fuera de la ventana? — testeado
 │   │   ├── archivedNotes.ts      # Notas que main movió al archivo local (`notes-archived`): cuáles salen del
 │   │   │                         #   store y dónde queda el editor (puro; solo memoria, nunca borra) — testeado
 │   │   ├── tocUtils.ts           # Lógica pura del índice flotante del editor (entradas, activo) — testeado
@@ -472,7 +475,7 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `app:get-hardware` | on (sync) | Núcleos, modelo/velocidad de CPU y RAM (`os`); el preload lo lee una vez al cargar → `window.noteflow.hardware` (ver `ai.md`) |
 | `app:get-user-name` | on (sync) | Nombre de la carpeta home (`path.basename(os.homedir())`); el preload lo lee una vez → `window.noteflow.systemUserName` (línea de identidad del pie del sidebar) |
 | `window:open-sticky` | on | Abre ventana sticky flotante |
-| `window:open-section-window` | on | `(noteId, sectionId)` → abre una ventana solo-editor (`#section-window?…`, `SectionWindowApp`); si una ventana de sección ya muestra esa nota+sección, la enfoca |
+| `window:open-section-window` | on | `(noteId, sectionId, nearCursor?)` → abre una ventana solo-editor (`#section-window?…`, `SectionWindowApp`); si una ventana de sección ya muestra esa nota+sección, la enfoca. `nearCursor` (nota arrastrada fuera de la ventana) la coloca en el puntero en vez de en cascada |
 | `window:section-window-target` | on | La ventana de sección informa de la nota+sección que muestra (para el "enfocar si ya existe" del canal anterior y la recarga tras crash) |
 | `window:set-size` | on | Redimensiona la ventana (usado por sticky) |
 | `window:set-always-on-top` | on | Alterna `alwaysOnTop` de la ventana emisora (sticky; chincheta de la ventana de chat) |

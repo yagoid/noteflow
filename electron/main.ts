@@ -97,6 +97,7 @@ import {
   type StickyRectKind,
   type StickyBoundsPatch,
 } from './stickyBounds'
+import { placeWindowAtPoint } from './windowPlacement'
 import { sanitizeSnippets } from './snippetsFile'
 import { isGroupsMetadataFile } from './notesWatchFilter'
 import * as linkedNotes from './linkedNotes'
@@ -1420,7 +1421,9 @@ function loadSectionWindow(win: BrowserWindow, noteId: string, sectionId: string
   }
 }
 
-function createSectionWindow(noteId: string, sectionId: string): BrowserWindow {
+// `nearCursor`: a note dragged out of a window — open where it was dropped (the pointer is
+// still there) instead of cascading. An existing window on that section is only focused.
+function createSectionWindow(noteId: string, sectionId: string, nearCursor = false): BrowserWindow {
   for (const [existing, target] of sectionWindows) {
     if (existing.isDestroyed()) continue
     if (target.noteId === noteId && target.sectionId === sectionId) {
@@ -1435,14 +1438,15 @@ function createSectionWindow(noteId: string, sectionId: string): BrowserWindow {
   const HEIGHT = 680
   // Cascade from the last open section window so new ones don't stack exactly.
   const last = [...sectionWindows.keys()].filter((w) => !w.isDestroyed()).pop()
-  const position = last
-    ? (() => { const [x, y] = last.getPosition(); return { x: x + 30, y: y + 30 } })()
-    : {}
+  const cursor = nearCursor ? screen.getCursorScreenPoint() : null
+  const bounds = cursor
+    ? placeWindowAtPoint(cursor, { width: WIDTH, height: HEIGHT }, screen.getDisplayNearestPoint(cursor).workArea)
+    : last
+      ? (() => { const [x, y] = last.getPosition(); return { x: x + 30, y: y + 30, width: WIDTH, height: HEIGHT } })()
+      : { width: WIDTH, height: HEIGHT }
 
   const win = new BrowserWindow({
-    width: WIDTH,
-    height: HEIGHT,
-    ...position,
+    ...bounds,
     minWidth: 420,
     minHeight: 320,
     frame: false,
@@ -5312,9 +5316,9 @@ ipcMain.on('window:open-sticky', (_event, noteId: string, sectionId: string) => 
 
 const isWindowTargetId = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 128
 
-ipcMain.on('window:open-section-window', (_event, noteId: unknown, sectionId: unknown) => {
+ipcMain.on('window:open-section-window', (_event, noteId: unknown, sectionId: unknown, nearCursor: unknown) => {
   if (!isWindowTargetId(noteId) || !isWindowTargetId(sectionId)) return
-  createSectionWindow(noteId, sectionId)
+  createSectionWindow(noteId, sectionId, nearCursor === true)
 })
 
 ipcMain.on('window:section-window-target', (event, noteId: unknown, sectionId: unknown) => {

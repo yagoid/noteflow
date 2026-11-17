@@ -784,7 +784,8 @@ declare global {
       foldToCorner: (width: number, height: number) => void
       unfold: () => void
       openSticky: (noteId: string, sectionId: string) => void
-      openSectionWindow: (noteId: string, sectionId: string) => void
+      /** Editor-only window for a note, on `sectionId`. `nearCursor`: opened at the pointer (note dragged out of the window). */
+      openSectionWindow: (noteId: string, sectionId: string, opts?: { nearCursor?: boolean }) => void
       setSectionWindowTarget: (noteId: string, sectionId: string) => void
       onNewNote: (cb: () => void) => () => void
       onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => () => void

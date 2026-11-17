@@ -130,7 +130,8 @@ const api = {
     // Window controls
     openSticky: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-sticky', noteId, sectionId),
     // Editor-only window for one section (focuses an existing window already on it).
-    openSectionWindow: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-section-window', noteId, sectionId),
+    // `nearCursor`: opened where the pointer is (a note dropped outside the window).
+    openSectionWindow: (noteId, sectionId, opts) => electron_1.ipcRenderer.send('window:open-section-window', noteId, sectionId, opts?.nearCursor === true),
     // A section window reports the section it's on, so re-opening it focuses this window.
     setSectionWindowTarget: (noteId, sectionId) => electron_1.ipcRenderer.send('window:section-window-target', noteId, sectionId),
     minimize: () => electron_1.ipcRenderer.send('window:minimize'),
