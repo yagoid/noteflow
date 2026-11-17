@@ -3745,6 +3745,46 @@ paneles, cada uno en su sección. La lógica de layout es pura y testeada (`test
     sucio a limpio escribe el borrador (debounce o blur), así que una actualización saltada nunca se queda sin reaplicar
     (un renombrado remoto concurrente con un borrador sucio es last-writer-wins).
 
+### Historial de navegación (Atrás / Adelante) (`lib/navHistory.ts` + `stores/navHistoryStore.ts`)
+Los botones laterales del ratón, `Alt+←/→` (Windows/Linux) y `⌘[` / `⌘]` (macOS: `⌥←/→` es saltar
+palabra) navegan como un navegador. Solo la ventana principal.
+- **Lógica pura** (`lib/navHistory.ts`, tests en `tests/lib/navHistory.test.ts`): pila `entries` +
+  `index` (tope `NAV_HISTORY_LIMIT` = 50, se caen las más viejas). `pushLocation` ignora la misma
+  ubicación, **reescribe** la entrada actual si es el mismo sitio con otra sección (sin truncar el
+  forward, como un `replaceState`) y si no trunca el forward y añade. `stepHistory` purga primero
+  (`purgeLocations`: quita lo que ya no existe y funde las copias consecutivas que queden) y salta
+  las entradas `skip`.
+- **Ubicación** (`NavLocation`): `note` (nota del **panel activo** + su sección: `pane.sectionId`, si
+  no `activeSectionByNote`), `overview` (vista de nota), `content` (vista de contenido con su `place`)
+  y `brain`. Prioridad igual que el render de `App`: `contentPlace` → `brainViewOpen` → `noteViewId` →
+  editor. Cambiar de pestaña en la misma nota NO crea entrada (actualiza la actual): Atrás vuelve a la
+  nota en la sección donde se dejó.
+- **Grabación sin instrumentar botones:** `startNavHistory()` se suscribe a `useNotesStore` (la fuente
+  única de qué muestra el área principal) y en cada cambio deriva `currentLocation`; sale barato si no
+  cambió (corre en cada guardado). Ignora ubicaciones de notas que el store no tiene (estados de
+  transición). Un paso atrás/adelante pone el flag `navigating` mientras aplica, para no grabarse a sí
+  mismo; los ajustes asíncronos posteriores (el editor fijando la sección) caen en "mismo sitio" y
+  solo reescriben la entrada.
+- **Aplicar:** `note` → `openNoteInActivePane(noteId, sectionId)` (acción nueva del store: la nota
+  **en el panel activo**, conservando el resto del split; si ya está en otro panel, lo enfoca; misma
+  danza `pendingInitialSectionId` + `noteflow:request-section` que `navigateToSection`); `overview` →
+  `setNoteView`; `content` → `setContentView`; `brain` → `setBrainView(true)`.
+- **Split (decisión):** el historial es uno solo y sigue al panel activo; enfocar otro panel también
+  crea entrada. Atrás cambia la nota del panel activo (o enfoca el panel que ya la muestra); **no**
+  restaura layouts de split cerrados/colapsados.
+- **Validez al navegar:** nota borrada/podada/archivada fuera, o grupo/carpeta inexistente
+  (`placeExists`) → se purga; nota cifrada **bloqueada** (sin `sessionPasswords`) → se salta pero se
+  conserva (vuelve a ser alcanzable al desbloquearla). La purga es perezosa (al pulsar), no en cada
+  cambio de `notes`.
+- **Captura (`components/useNavHistory.ts`):** `useSwallowMouseHistoryButtons()` (en `App`, **todas**
+  las ventanas) hace `preventDefault` de `mousedown`/`mouseup`/`auxclick` con `button` 3/4 en captura,
+  para que Chromium nunca haga su navegación de historial (sacaría a la ventana de su ruta hash,
+  `#ai-chat`, `#section-window`…). `useNavHistory(!isSticky)` (en `MainApp`) navega en el `mouseup`
+  (captura) y escucha las teclas en **burbuja** saltándose `e.defaultPrevented`: dentro de una tabla
+  `Alt+←/→` es mover columna (`TableKeymap` lo consume) y gana la tabla; también respeta `ownsKeys`.
+  No se toca main: en Windows el renderer recibe los botones X1/X2 como `button` 3/4 y Electron no
+  navega por `app-command` por defecto (escucharlo además duplicaría cada paso).
+
 ### Ventanas de sección ("Open in new window")
 BrowserWindows extra (`createSectionWindow()` en main) que cargan la app con
 `#section-window?noteId=…&sectionId=…` → `SectionWindowApp`: barra de título propia (Nota · Sección,
