@@ -359,17 +359,17 @@ export const settings = {
   },
 
   ai: {
+    notesTitle: 'Tus notas y la IA',
     localAi: 'IA local',
-    localAiHint:
-      'Indexa tus notas en este dispositivo para potenciar las notas relacionadas, el grafo del cerebro y el contexto del chat. Funciona totalmente sin conexión; las notas cifradas se omiten.',
+    localAiHint: 'Indexa tus notas en este dispositivo para las notas relacionadas, el grafo del cerebro y el contexto del chat. Sin conexión; las notas cifradas se omiten.',
     enableLocalAi: 'Activar IA local',
     disableLocalAi: 'Desactivar IA local',
-    reindexAll: 'Reindexar todas las notas',
+    reindex: 'Reindexar',
     downloadingModel: 'Descargando modelo…',
     profile: 'Perfil',
-    openProfileSetup: 'Abrir configuración del perfil',
-    profileHint: 'Vuelve a hacer el cuestionario para actualizar la nota de perfil que el asistente usa como contexto.',
-    exposeSkill: 'Exponer la skill del CLI a los agentes de IA',
+    redoQuestionnaire: 'Rehacer cuestionario',
+    profileHint: 'Actualiza la nota de perfil que el asistente usa como contexto.',
+    cliSkill: 'Skill del CLI',
     exposeSkillHint:
       'Instala la skill de NoteFlow en ~/.claude/skills y ~/.agents/skills para que Claude Code, Codex, Gemini CLI, Copilot, Cursor y otros agentes compatibles con el estándar Agent Skills gestionen tus notas a través del CLI.',
     exposeSkillTooltip: 'Exponer la skill del CLI',

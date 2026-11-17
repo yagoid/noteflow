@@ -166,25 +166,27 @@ export const aiPanel = {
   },
 
   provider: {
-    provider: 'Provider',
-    hintAnthropic: 'Claude via the official API (BYO key).',
-    hintOpenAiCompat: 'OpenAI-compatible endpoint (BYO key).',
-    hintLocal: 'Local / no API key required.',
-    // Three-card selector, all at the same level: the assistant runs on the managed plan,
-    // on your own API key, or on a local model. The "Active" badge only marks a source
-    // that can actually answer (llmConfig.configured); otherwise the status says so.
-    chooseSourceDesc: 'Pick how the assistant runs: the managed NoteFlow AI plan, your own API key, or a model on your computer.',
-    statusReady: 'Chat ready · {provider}',
-    statusNotSetUp: 'Chat not set up — pick one of the options below.',
-    badgeActive: 'Active',
-    // Back link from the NoteFlow AI plan detail to the three cards.
+    // Settings → AI "Assistant" section (also the brain panel's settings tab): one bordered
+    // list with the three sources (NoteFlow AI, your API key, a local model). The picked row
+    // unfolds into a label + control form; the source in use carries the "In use" pill.
+    assistantTitle: 'Assistant',
+    // Summary on the right of the section title: the model that answers, or not set up.
+    summaryReady: 'Answers with {model}',
+    summaryNotSetUp: 'Not set up',
+    // Green pill on the source in use (only when it can really answer).
+    inUse: 'In use · {provider}',
+    // Footer of a picked source that is not the one in use, next to the "Use …" button.
+    chatUses: 'The chat now uses {provider}.',
+    chatHasNoModel: "The chat doesn't have a model yet.",
+    useProvider: 'Use {provider}',
+    // Back link from the NoteFlow AI plan detail to the sources.
     backToOptions: 'AI options',
     noteflowCard: {
       subtitle: 'Managed plan — chat with your notes without any API key.',
-      useButton: 'Use NoteFlow AI',
       // Monthly consumption line under the progress bar. The allowance is measured by
       // the real cost of each request, so only a percentage is shown ({percent}: 0-100).
       usage: '{percent}% of this month’s AI allowance used',
+      viewPlan: 'View plan',
     },
     keyCard: {
       title: 'Your API key',
@@ -194,24 +196,32 @@ export const aiPanel = {
       title: 'Local model',
       subtitle: 'Runs on your computer with Ollama — private, no account.',
     },
-    useProviderButton: 'Use this provider',
-    // Suffix appended to model options that spend the monthly allowance faster than the
-    // recommended model ({mult} = rounded relative cost of a typical message, shown from 2;
-    // e.g. "gpt-5.6-sol (≈29× quota)").
-    modelQuotaSuffix: '(≈{mult}× quota)',
-    // Appended in parentheses to the recommended model's option ("deepseek-v4.1-flash-1017 (Recommended)").
-    modelRecommended: 'Recommended',
-    baseUrl: 'Base URL',
+    // Labels of the form rows.
+    quota: 'Quota',
+    plan: 'Plan',
+    provider: 'Provider',
+    server: 'Server',
+    url: 'URL',
     apiKey: 'API key',
-    keySaved: 'Key saved',
     model: 'Model',
-    // Helper under the Model label when the active preset serves a curated catalog
-    // (NoteFlow AI): the field is read-only and the choice is made with the chips.
-    modelCuratedHint: 'Managed plan — pick one of the models below.',
-    load: 'Load',
+    connection: 'Connection',
+    hintAnthropic: 'Claude via the official API.',
+    hintOpenAiCompat: 'OpenAI-compatible endpoint.',
+    keySaved: 'Saved',
+    changeKey: 'Change',
+    // Model picker (a dropdown). Chips on each option: the recommended model, and how many
+    // times faster than it a model spends the monthly allowance ({mult}, shown from 2).
+    modelRecommended: 'Recommended',
+    modelQuotaChip: '≈{mult}× quota',
+    chooseModel: 'Choose a model',
+    noModels: 'No models listed yet.',
+    otherModel: 'Type another model…',
+    loadList: 'Load list',
+    // "Load list" for a local server (Ollama / custom): asks it which models it has.
+    detect: 'Detect',
+    test: 'Test',
+    testOk: '✓ Responds',
     error: 'Error',
-    testConnection: 'Test connection',
-    connected: '✓ Connected',
   },
 
   profile: {

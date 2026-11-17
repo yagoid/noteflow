@@ -3,7 +3,7 @@
 // Each preset keeps its own baseUrl/model/key, so switching providers never mixes credentials.
 import type { LlmConfigStored, LlmConfigPublic, ResolvedLlmConfig, LlmProvider, ProviderCapabilities } from './types'
 import { presetOf, PRESETS as ALL_PRESETS, type LlmPreset } from './presets'
-import { decryptSecret } from './secret'
+import { decryptSecret, encryptSecret } from './secret'
 import { AnthropicProvider } from './anthropic'
 import { OpenAiCompatibleProvider } from './openaiCompatible'
 // No import cycle: account.ts only pulls ./secret and leaf modules (cloudConfig, entitlements*,
@@ -214,6 +214,60 @@ export function toPublic(cfg: LlmConfigStored): LlmConfigPublic {
       ? { lastByoProvider: cfg.lastByoProvider }
       : {}),
   }
+}
+
+// ── Editing a preset that is NOT the active one ──────────────────────────────
+// Settings → AI shows every source's fields (key, URL, model, test) before the user
+// activates it. The store is already per preset (cfg.byPreset[id]), so the IPC handlers
+// take an optional `preset` id and work on THAT preset's own state — never on `active`.
+
+/** Whether a renderer-supplied id names a known preset. Unknown ids are rejected, not
+ *  mapped through presetOf's Anthropic fallback (that would edit the wrong provider). */
+export function isKnownPreset(id: unknown): id is string {
+  return typeof id === 'string' && ALL_PRESETS.some((p) => p.id === id)
+}
+
+/** The config seen as if `presetId` were active — an in-memory copy for resolving/listing/
+ *  testing that preset. Never persist it: it would switch the provider in use. */
+export function asActivePreset(cfg: LlmConfigStored, presetId: string): LlmConfigStored {
+  return { ...cfg, active: presetId }
+}
+
+/** toPublic for any preset. For the active one it IS toPublic; for another one it is that
+ *  preset's own view (`active` = that preset's id) WITHOUT lastByoProvider, which only
+ *  describes the active configuration. */
+export function toPublicFor(cfg: LlmConfigStored, presetId: string): LlmConfigPublic {
+  if (presetId === cfg.active) return toPublic(cfg)
+  const view = toPublic(asActivePreset(cfg, presetId))
+  delete view.lastByoProvider
+  return view
+}
+
+/** Field edits of ai:llm-set-config (everything but the provider switch). */
+export interface LlmFieldPatch {
+  model?: string
+  baseUrl?: string
+  apiKey?: string
+  clearKey?: boolean
+}
+
+/**
+ * Applies field edits to ONE preset's own state (byPreset[presetId]) and returns the new
+ * config. Never touches `active` nor `lastByoProvider`. The guards are those of `presetId`:
+ * a model outside a curated catalog is dropped (acceptsModel — stored and used must never
+ * diverge) and a base URL is only stored for presets that allow editing it (acceptsBaseUrl —
+ * a stored URL on the managed preset could send the account token to another host).
+ */
+export function withPresetFields(cfg: LlmConfigStored, presetId: string, patch: LlmFieldPatch): LlmConfigStored {
+  const ps = { ...(cfg.byPreset[presetId] ?? {}) }
+  if (patch.model !== undefined && acceptsModel(presetId, patch.model)) ps.model = patch.model
+  if (patch.baseUrl !== undefined) {
+    if (acceptsBaseUrl(presetId)) ps.baseUrl = patch.baseUrl
+    else console.warn(`[LLM] ignored a baseUrl for preset "${presetId}" (its endpoint is fixed)`)
+  }
+  if (patch.clearKey) ps.encryptedApiKey = undefined
+  else if (typeof patch.apiKey === 'string' && patch.apiKey.length > 0) ps.encryptedApiKey = encryptSecret(patch.apiKey)
+  return { ...cfg, byPreset: { ...cfg.byPreset, [presetId]: ps } }
 }
 
 /** User-facing reason why toPublic().configured is false — tailored for the managed preset. */

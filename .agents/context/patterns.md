@@ -4367,8 +4367,8 @@ arranque (fire-and-forget, best-effort): cada destino va en su propio try/catch 
 impide los demás) y copia solo si el contenido difiere (auto-cura y recoge updates sin reescribir en
 vano). Controlado por el setting local `exposeSkillToAgents` (default `true`) en `settings.json`; al
 desactivarlo borra nuestro `SKILL.md` en todos los destinos y la carpeta `noteflow-cli` si queda vacía
-(nunca toca nada más). Toggle **"Expose CLI skill to AI agents"** en Settings → General
-(`GeneralPanel.tsx`), IPC `app:get-skill-sync` / `app:set-skill-sync`. En la **versión Microsoft Store**
+(nunca toca nada más). Toggle **"CLI skill"** en Settings → AI, sección "Your notes and AI"
+(`Settings/AiPanel.tsx`), IPC `app:get-skill-sync` / `app:set-skill-sync`. En la **versión Microsoft Store**
 (sin CLI) `syncSkillToAgentDirs()` no hace nada —ni instala ni borra: la skill podría ser de una
 instalación directa—, `app:set-skill-sync` se niega y el toggle se sustituye por una explicación
 (ver `release.md` § Microsoft Store).

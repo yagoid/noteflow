@@ -448,17 +448,18 @@ export const settings = {
   },
 
   ai: {
+    // Settings → AI, section under the assistant: what the AI does with your notes.
+    notesTitle: 'Your notes and AI',
     localAi: 'Local AI',
-    localAiHint:
-      'Index your notes on this device to power Related notes, the brain graph and chat context. Runs fully offline; encrypted notes are skipped.',
+    localAiHint: 'Indexes your notes on this device for Related notes, the brain graph and chat context. Offline; encrypted notes are skipped.',
     enableLocalAi: 'Enable local AI',
     disableLocalAi: 'Disable local AI',
-    reindexAll: 'Reindex all notes',
+    reindex: 'Reindex',
     downloadingModel: 'Downloading model…',
     profile: 'Profile',
-    openProfileSetup: 'Open profile setup',
-    profileHint: 'Re-run the questionnaire to refresh the profile note the assistant uses for context.',
-    exposeSkill: 'Expose CLI skill to AI agents',
+    redoQuestionnaire: 'Redo questionnaire',
+    profileHint: 'Refreshes the profile note the assistant uses for context.',
+    cliSkill: 'CLI skill',
     exposeSkillHint:
       'Installs the NoteFlow skill into ~/.claude/skills and ~/.agents/skills so Claude Code, Codex, Gemini CLI, Copilot, Cursor and other Agent Skills-compatible agents can drive your notes via the CLI.',
     exposeSkillTooltip: 'Expose the CLI skill',

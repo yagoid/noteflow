@@ -236,8 +236,8 @@ consumidores** (related ✅, grafo ✅, chat ✅).
       ficheros), así que no hay que regrabarlo.
 - **Activación:** flag `settings.ai.enabled` (default `false`). **UI principal de activación: el
   overlay/CTA dentro de la vista cerebro** (con IA off el cerebro muestra solo estructura; activar
-  desde ahí descarga el modelo + reindexa con barra de progreso). También hay toggle + "Reindex all"
-  en **Settings → General** (`Settings/GeneralPanel.tsx`; Settings → AI solo lleva el proveedor LLM). Arranque del worker diferido ~4s tras el boot
+  desde ahí descarga el modelo + reindexa con barra de progreso). También hay toggle + "Reindex"
+  en **Settings → AI**, sección "Your notes and AI" (`Settings/AiPanel.tsx`, bajo el proveedor LLM). Arranque del worker diferido ~4s tras el boot
   (`primeSettings`).
 - **Deps nativas (IMPRESCINDIBLE):** `better-sqlite3` + `onnxruntime-node` + `sqlite-vec` son
   binarios nativos. `package.json` lleva **`"postinstall": "electron-builder install-app-deps"`**
@@ -288,7 +288,7 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   con `isManagedAiUsable`: cubre el arranque —el refresh de entitlements diferido de `initAccount`
   emite un cambio de estado—, el inicio de sesión y la llegada de entitlements) y en cada lectura de
   `ai:llm-presets` (al abrir el asistente o Ajustes → IA), con **throttle de 10 min tras un éxito** y
-  single-flight; y **forzado** al pulsar "Load" con `noteflow` activo (`ai:llm-list-models`) y
+  single-flight; y **forzado** por `ai:llm-list-models` con `noteflow` (la UI ya no ofrece "Load" en el catálogo curado) y
   cuando el chat recibe un 400 `model_not_allowed` del proxy (`friendlyChatError`: el modelo se
   retiró en el servidor pero seguía en la caché — así solo falla ese mensaje). Un 401 al descargar
   invalida el access token (`invalidateAccessToken`), como el resto de llamadas a la cuenta. Lo valida (`sanitizeManagedCatalog`: **todo o nada** — un id vacío, un
@@ -308,8 +308,8 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   `llm/index.ts` lo inyecta en el preset (`livePreset` = `withManagedCatalog(presetOf(id))`), así que
   `effectiveModel`, `acceptsModel`, `providerCapabilities` (vía `toPublic`) y `ai:llm-presets`
   (`listPresets`) usan **el mismo** catálogo: un modelo nuevo aparece en el picker con su etiqueta
-  (`LlmConfigView.modelLabel`: nombre sin prefijo de proveedor + " (Recommended)" si `recommended` +
-  "(≈N× quota)" si `costIndex >= 2`) sin release. Invariantes: refrescar **nunca** toca el modelo
+  (`LlmConfigView` → `ModelPicker`: nombre sin prefijo de proveedor + chip "Recommended" si
+  `recommended` + chip "≈N× quota" si `costIndex >= 2`) sin release. Invariantes: refrescar **nunca** toca el modelo
   guardado (`aiLlm`), y un fallo de red / respuesta inválida **nunca** vacía ni pisa la caché buena.
   Qué pasa si el modelo guardado sale del catálogo: lo de arriba (fallback **en memoria** al primero
   del catálogo, que es el recomendado). El `replaced_by` de `ai_models` (0013) **no** llega al cliente:
@@ -318,51 +318,68 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   catálogo hardcodeado; ninguna release pública los lleva); este cliente ni siquiera las envía,
   porque su `effectiveModel` ya cae al primero. Tests: `tests/electron/managedCatalog.test.ts`.
 - **UI del proveedor (`LlmConfigView`, embebida en Settings → IA y en la pestaña "settings" del panel
-  del cerebro):** arriba una **línea de estado honesta** — "Chat ready · <proveedor>" solo si
-  `llmConfig.configured` (el proveedor activo puede responder: clave guardada si la necesita, modelo,
-  y para `noteflow` sesión + entitlement); si no, "Chat not set up". Una instalación nueva queda en
-  Anthropic **sin clave** → "Chat not set up" y **ninguna** card marcada como activa. Debajo, **tres
-  cards al mismo nivel** (`SourceCard`): **NoteFlow AI** (gestionado; etiqueta de precio
+  del cerebro; rediseño "lista con formulario", 2026-11):** sección **"Assistant"**
+  (`SettingsListSection` de `Settings/ui.tsx`, con resumen a la derecha del título: "Answers with
+  <modelo>" solo si `llmConfig.configured` — el proveedor activo puede responder: clave guardada si la
+  necesita, modelo, y para `noteflow` sesión + entitlement —; si no, "Not set up"). Debajo, **un solo
+  bloque con borde y tres filas con radio** (`role="radiogroup"`): **NoteFlow AI** (etiqueta de precio
   `useOfferTag`: "€5.99/month", "In your plan" o "Add to your plan"), **Your API key** (presets con
-  `needsKey`; etiqueta "Free", "pagas a tu proveedor") y **Local model** (presets sin clave: Ollama,
-  Custom; "Free"). El badge "Active" solo sale en la card del proveedor activo **y** configurado
-  (sustituye a la etiqueta). Las cards son el mismo recuadro que las de Settings → Sync (borde,
-  fondo `surface-0`, borde de acento al pasar por encima y `border-accent bg-accent/[0.08]` la elegida),
-  con el contenido alineado arriba (un `<button>` centra su contenido en vertical por defecto: la card
-  es una columna flex `justify-start`) y en rejilla (misma altura por fila): tres columnas en Ajustes
-  (`embedded`, `sm:grid-cols-3`) y **una por fila, a ancho completo**, en el panel del cerebro
-  (`embedded` false: estrecho y redimensionable). **Radios:** manda el lenguaje del panel del cerebro (`Card` de
-  `AiPanel/ui.tsx`: `rounded-xl` en cajas, `rounded-lg` en controles) — se usa igual en Ajustes, y
-  **Settings → Sync/Cloud se alinearon a él** (2026-07). Debajo se pinta **solo** la sección de la card
-  elegida. NoteFlow AI **no aparece en ningún `<select>`**; su sección (con entitlement `ai`, o con el
-  plan sin verificar → `PlanUnknownNotice`) es la barra de consumo mensual + el botón "Use NoteFlow AI"
-  o el check "Active". **Sin el plan** (sin sesión, sin entitlement, o con solo Cloud), elegir NoteFlow
-  AI sustituye las cards por el **detalle del plan** (`PlanDetail product="ai"`, con enlace "← AI
-  options"; ver `monetization.md` § "Bloque de planes"). La barra muestra un **porcentaje** ("N% of
-  this month’s AI allowance used", `usagePercent`: `used/limit` con suelo, 100 % solo al agotarla):
-  `GET /usage` devuelve unidades abstractas (límite 3.000.000, la escala de la antigua cuota de tokens)
-  y solo el cociente significa algo.
-  - **Campo "Model":** texto libre en los presets BYO, pero **solo lectura** (`disabled` + hint
-    `modelCuratedHint`) en los de catálogo curado (`preset.modelMeta`) — ahí se elige con los chips.
-    Si fuera editable, teclear un id que no está en el catálogo lo persistiría en `ps.model` mientras
-    `effectiveModel` sigue resolviendo al primer modelo curado: guardado y usado divergirían (y el
-    input "saltaría" a cada tecla). Main aplica la misma regla como defensa en profundidad:
-    `ai:llm-set-config` descarta un `model` que `llm.acceptsModel()` rechace.
-  - `view` (`'noteflow' | 'key' | 'local' | null`) es **estado de vista**, no el proveedor activo: se
-    resuelve **una vez** (`viewOf`) cuando la config está disponible (lazy init desde
+  `needsKey`; "Free") y **Local model** (presets sin clave: Ollama, Custom; "Free"). Dos estados
+  **independientes**: la fila **elegida** (`view`, estado de vista) se despliega dentro de sí misma con
+  un **formulario etiqueta + control** (`FormRow`: rejilla `112px | control` en Ajustes; en el panel
+  estrecho del cerebro —sin `embedded`— la etiqueta va encima del control), y la fuente **en uso**
+  (`llmConfig.active`, solo si `configured`) lleva la pastilla verde **"In use · <proveedor>"**
+  (`StatusBadge tone="ok"`; en el panel estrecho, bajo la descripción). Una instalación nueva queda
+  en Anthropic **sin clave** → "Not set up" y ninguna pastilla.
+  - **Formularios:** NoteFlow AI con plan (o sin verificar → fila "Plan" con `PlanUnknownNotice`):
+    **Quota** (barra + "N% of this month's AI allowance used", `usagePercent`: `used/limit` con suelo,
+    100 % solo al agotarla; `GET /usage` devuelve unidades abstractas), **Model**, **Connection**.
+    NoteFlow AI **sin el plan** (sin sesión, sin entitlement, o con solo Cloud): fila **Plan** con el
+    precio + "View plan", que sustituye la lista por el **detalle del plan** (`PlanDetail product="ai"`,
+    enlace "← AI options"; ver `monetization.md` § "Bloque de planes"); `initialOffer` (Ajustes →
+    Cuenta → "View") abre ese detalle directamente. Your API key: **Provider** (`<select>` con los
+    presets de clave + pista Anthropic/OpenAI-compatible), **API key** (guardada: `••••••••` ✓ "Saved"
+    + "Change"/"Remove"; sin guardar: input + "Save"), **URL** (solo presets con `editableBaseUrl`),
+    **Model**, **Connection**. Local model: **Server** (Ollama/Custom), **URL**, **Model**,
+    **Connection**. NoteFlow AI **no aparece en ningún `<select>`**.
+  - **Los campos se ven siempre, también antes de activar la fuente.** Cada edición va al **propio**
+    preset mostrado con el parámetro `preset` de `ai:llm-set-config` (`aiChatStore.setLlmConfig({…,
+    preset})`): main edita `byPreset[preset]` (`llm.withPresetFields`, con los guards
+    `acceptsModel`/`acceptsBaseUrl` de **ese** id) y **nunca** cambia `active`, `lastByoProvider` ni la
+    restauración pendiente. Las vistas de los presets no activos se leen con
+    `ai:llm-get-config(preset)` (`llm.toPublicFor`; su `active` es el id del preset y no llevan
+    `lastByoProvider`) y se guardan en estado local (`presetViews`); el store solo re-lee `llmConfig`
+    (de main) si el preset editado es el activo. "Load list"/"Detect" y "Test" pasan también el
+    `preset` (`ai:llm-list-models(preset)` / `ai:llm-test(preset)`: config resuelta en una copia en
+    memoria, `llm.asActivePreset`). Mientras el proveedor elegido no sea el activo, un **pie con borde
+    discontinuo** dice "The chat now uses X." (o "The chat doesn't have a model yet.") con el botón
+    primario **"Use <proveedor>"** (`setLlmConfig({ active })`, el único camino que cambia de proveedor;
+    con NoteFlow AI sin plan no se ofrece). Cambiar el `<select>` ya **no** activa el proveedor.
+  - **Model** (`ModelPicker`): desplegable propio; cada fila con radio, nombre sin prefijo de proveedor
+    (`modelDisplayName`), chip de acento "Recommended" y chip "≈N× quota" amarillo desde ≈2× y rojo
+    desde ≈10× (`quotaChipTone`, `src/lib/llmSources.ts`). Opciones: `modelOptions` — en un preset de
+    **catálogo curado** (`preset.modelMeta`, hoy solo `noteflow`) exactamente el catálogo, sin texto
+    libre ni botón de carga (main lo refresca solo: lectura de presets con throttle y el 400
+    `model_not_allowed` del chat); en el resto, sugeridos + listados + el guardado, con "Type another
+    model…" (texto libre) y "Load list" (con clave) / "Detect" (local). Main aplica la misma regla del
+    catálogo como defensa en profundidad: `ai:llm-set-config` descarta un `model` que
+    `llm.acceptsModel()` rechace.
+  - **Connection:** botón "Test" + resultado en línea ("✓ Responds" o el error).
+  - `view` (`'noteflow' | 'key' | 'local'`) es **estado de vista**, no el proveedor activo: se resuelve
+    **una vez** (`initialSource`) cuando la config está disponible (lazy init desde
     `useAiChatStore.getState()`, o una suscripción al store si aún no ha cargado) y **no se mueve solo**
-    — que main active NoteFlow AI tras suscribirse no debe sacar al usuario de la vista en la que está
-    (como `view` en `SyncPanel`, que solo pasa sola de un detalle a la vista general cuando ese backend
-    queda en uso). Activo `noteflow` (o `initialOffer` desde Ajustes →
-    Cuenta) → `'noteflow'`; nada configurado → `null` (ninguna card elegida); si no, la card del preset
-    activo (`needsKey` → `'key'`, si no → `'local'`).
-  - En las cards BYO hay un `byoId` local al que se enlaza el `<select>`, que solo lista los presets de
-    esa card (`fitsSource`). `byoFor` elige el activo si pertenece a la card, si no `lastByoProvider` si
-    pertenece, y si no el de la card (**Anthropic** en "Your API key", **Ollama** en "Local model").
-    **baseUrl / API key / modelo / test solo se muestran cuando `byoId === llmConfig.active`**:
-    esos campos escriben sobre la config del **proveedor activo**, así que editarlos sin activar el
-    proveedor elegido corrompería la config del otro. Mientras no coincidan, solo se ofrece el `<select>`
-    + botón "Use this provider" (`setLlmConfig({ active })`).
+    — que main active NoteFlow AI tras suscribirse no debe sacar al usuario de la fila en la que está
+    (como `view` en `SyncPanel`). Activo `noteflow`, `initialOffer` o **nada configurado** → NoteFlow
+    AI; si no, la fila del preset activo (`needsKey` → `'key'`, si no → `'local'`). Cada fila BYO
+    apunta a un preset (`byoIds`, `byoPresetFor`): el activo si pertenece a la fila, si no
+    `lastByoProvider` si pertenece, y si no el de la fila (**Anthropic** / **Ollama**). Helpers puros en
+    `src/lib/llmSources.ts` (tests: `tests/lib/llmSources.test.ts`; los de main en
+    `tests/electron/llmPresetEdit.test.ts`).
+  - Debajo, en Ajustes → IA, la sección **"Your notes and AI"** (`Settings/AiPanel.tsx`, mismo
+    formulario de etiquetas): **Local AI** (toggle; activa: "N notes" —notas sin cifrar del store— o el
+    progreso/descarga del modelo, y "Reindex"), **Profile** ("Redo questionnaire" → abre el cerebro en
+    la pestaña Profile y cierra Ajustes) y **CLI skill** (toggle; en la build de la Store, el texto
+    explicativo sin toggle). Antes vivían en Ajustes → General.
 - **RAG (`ai:chat` en main):** embebe la pregunta vía `aiIndex.search` (híbrido) → expande vecinos
   con `aiIndex.graph` → lee secciones de disco (`noteFormat.parseNoteDir`) → monta system prompt con
   contexto → stream. Emite `ai:chat-sources` (notas usadas) antes de los deltas. **Privacidad:** solo
@@ -441,7 +458,7 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
 - **Historial de chats:** sesiones en `userData/ai-chats.json` (local), gestionadas por `aiChatStore`
   (crear/abrir/borrar; se persiste al terminar cada respuesta). Selector de modelo en el chat
   (cambia el modelo del preset activo; con NoteFlow AI, si el elegido tiene `costIndex >= 2`, un badge
-  rojo "xN" a su izquierda con tooltip — `ChatView`, mismo umbral que `modelLabel`). Textos del panel vía i18n (`src/i18n/{en,es}/aiPanel.ts`).
+  rojo "xN" a su izquierda con tooltip — `ChatView`, mismo umbral que el chip "≈N× quota" de `quotaChipTone`). Textos del panel vía i18n (`src/i18n/{en,es}/aiPanel.ts`).
   Los **listeners del stream** (`aiChatStore.initListeners`) los monta **`App` una vez por ventana**
   (no `AiPanel`): la misma conversación corre en el cerebro y en el sidebar del editor, y una
   respuesta sigue llegando aunque se cambie de vista. `AiPanel` solo recarga config + sesiones.
@@ -452,12 +469,12 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   auto-routing de primera vez). **Auto-routing de primera vez (`AiPanel`):** solo enruta a
   `settings` cuando **no hay proveedor configurado** (onboarding); con proveedor el panel aterriza
   **siempre en `chat`**. La pestaña `profile` **nunca se abre sola** — se llega pulsándola, desde la
-  paleta o desde Settings → General ("Open profile setup"). El comando inline **"Ask AI"** pasa un `prompt`: `openAiPanel`
+  paleta o desde Settings → AI ("Redo questionnaire"). El comando inline **"Ask AI"** pasa un `prompt`: `openAiPanel`
   arranca un chat nuevo y deja `pendingPrompt`, que `ChatView` auto-envía en cuanto hay proveedor
   configurado (si no, queda en cola). Sin IPC nuevo — es routing in-renderer vía store.
 - **Segundo cerebro (cuestionario de baja fricción):** el `ProfileFlow` vive en la pestaña
   **Profile** del panel de IA y **solo se abre a petición del usuario** (pestaña, paleta de comandos
-  o Settings → General); no hay auto-apertura al entrar al cerebro. La UI es **data-driven** desde
+  o Settings → AI); no hay auto-apertura al entrar al cerebro. La UI es **data-driven** desde
   `profileQuestions.ts` (`PROFILE_SECTIONS` → secciones **Professional / Personal / Your style /
   Working with the AI**; campos tipo `chips`/`tags`/`text`/**`choice`** — `PROFILE_FIELDS` los aplana).
   **Diseño indirecto > directo:** la mayor señal viene de **preguntas-proxy de baja fricción**

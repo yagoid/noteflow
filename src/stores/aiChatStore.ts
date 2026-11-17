@@ -46,6 +46,8 @@ interface LlmConfigPatch {
   baseUrl?: string
   apiKey?: string
   clearKey?: boolean
+  /** Edit THIS preset's own fields instead of the active one's (never switches the provider). */
+  preset?: string
 }
 
 interface AiChatState {
@@ -180,6 +182,19 @@ export const useAiChatStore = create<AiChatState>((set, get) => {
   },
 
   setLlmConfig: async (patch) => {
+    // Editing one provider's own fields (Settings → AI shows every source's fields, active or
+    // not): main answers with THAT preset's view, never a provider switch. llmConfig is only
+    // re-read when the edited preset is the one in use — from main, so a stale `active` here
+    // can never paint another preset's view as the active config.
+    if (patch.preset !== undefined) {
+      const view = await window.noteflow.aiLlmSetConfig(patch)
+      if (patch.preset === get().llmConfig?.active) {
+        const cfg = await window.noteflow.aiLlmGetConfig()
+        set({ llmConfig: cfg })
+        if (patch.apiKey && cfg.configured) void get().refreshModels()
+      }
+      return view
+    }
     const switching = patch.active !== undefined && patch.active !== get().llmConfig?.active
     const cfg = await window.noteflow.aiLlmSetConfig(patch)
     set({ llmConfig: cfg, ...(switching ? { models: [] } : {}) })
