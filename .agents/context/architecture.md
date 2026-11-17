@@ -104,6 +104,7 @@ noteflow/
 │       ├── aiWorker.ts  #   utilityProcess: embeddings (Transformers.js) + SQLite index
 │       ├── chatContext.ts #  Contexto explícito del chat del editor → bloques del prompt (puro, testeado)
 │       ├── chatUndo.ts  #   Deshacer ediciones del agente: snapshots/huella/plan (puro, testeado)
+│       ├── autocomplete.ts #  Autocompletado del editor: petición SSE a <ai-proxy>/autocomplete, cleanSuggestion y backoff (puro, testeado)
 │       └── llm/         #   Proveedor LLM (Fase 3, corre en main; key NUNCA va al renderer)
 │           ├── presets.ts          #     Catálogo de proveedores (anthropic | openai-compatible)
 │           ├── managedCatalog.ts   #     Catálogo de modelos de NoteFlow AI (del proxy, cacheado; puro, testeado)
@@ -138,6 +139,7 @@ noteflow/
 │   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible/índice (TOC)/tareas marcadas al final/qué abre el clic en una nota — SINCRONIZADO en ui-settings.json (IPC)
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
 │   │   ├── aiStore.ts                # Estado del índice IA (enabled, related, grafo, progreso) vía IPC ai:*
+│   │   ├── aiAutocompleteStore.ts    # Autocompletado con IA del editor: interruptor (settings.json local vía IPC ai:autocomplete-*), plan usable y bloqueo temporal
 │   │   ├── whatsNewStore.ts          # Tour "What's new": ids vistos (settings.json vía IPC whats-new:*) + tour abierto
 │   │   ├── identityStore.ts          # Cuenta (sesión + plan) y backend de sync vivo para la línea de identidad del pie del sidebar (account:/sync:/cloud: status, ref-count connectIdentity)
 │   │   └── aiChatStore.ts            # Estado del chat/LLM (config por proveedor, modelos, mensajes, sesiones) vía IPC ai:llm-*/ai:chat*/ai:chats-*
@@ -165,6 +167,7 @@ noteflow/
 │   │   │   ├── kanbanCommands.ts        #   insertar tablero, lista de tareas ↔ tablero
 │   │   │   ├── SectionRelation.ts       # Nodo inline atom de relación sección↔sección (+ SectionRelationView.tsx)
 │   │   │   ├── SlashCommands.ts         # Menú `/` (@tiptap/suggestion) + SlashCommandMenu.tsx
+│   │   │   ├── AiGhostText.ts           # Autocompletado con IA: texto fantasma en el cursor (Tab acepta, Esc descarta) — ver ai.md
 │   │   │   ├── SectionLinkPicker.tsx    # Buscador de secciones del comando "Link section"
 │   │   │   ├── CodeBlockWithCopy.tsx    # NodeView: code block con botón copiar
 │   │   │   ├── ResizableImage.tsx       # NodeView: imagen redimensionable
@@ -348,6 +351,8 @@ noteflow/
 │   │   │                         #   selección por defecto y rango — testeado
 │   │   ├── sidebarGroups.ts      # Modelo de la lista del sidebar: orden base (created desc) + agrupado
 │   │   │                         #   grupo→carpeta con noteOrder (buildSidebarItems) — testeado vía contentView
+│   │   ├── aiAutocomplete.ts     # Reglas puras del autocompletado con IA en el renderer (pausa, contexto mínimo,
+│   │   │                         #   cuándo pedir, recorte al teclear) — testeado
 │   │   ├── aiGroup.ts            # AI_GROUP_NAME ('IA Generated', el grupo fijo del perfil de IA) + isAiGroupName
 │   │   │                         #   (lo leen ProfileFlow y el grafo del cerebro)
 │   │   ├── searchUtils.ts        # Helpers de búsqueda (normalización, matching)
@@ -541,6 +546,10 @@ propio preload (zoom nativo del "UI text size", ver `patterns.md` → "UI text s
 | `ai:chat-cancel` | on | Aborta un `ai:chat` en vuelo por `requestId` (AbortController); también resuelve confirmaciones pendientes |
 | `ai:chat-confirm` | on | Resuelve la confirmación de una tool destructiva por `toolCallId` (`{toolCallId, approved}`) |
 | `ai:chats-load` / `ai:chats-save` | handle | Historial de chats en `userData/ai-chats.json` (local, NO se sincroniza) |
+| `ai:llm-usage` | handle | Consumo mensual del plan NoteFlow AI (`GET <ai-proxy>/usage`): `{used, limit, autocomplete?: {used, limit}}` o `null` ante cualquier fallo. `autocomplete` (la parte que puede gastar el autocompletado) falta si el proxy no lo informa |
+| `ai:autocomplete-get` / `ai:autocomplete-set` | handle | Autocompletado con IA del editor: `{enabled, available}` — `enabled` = `settings.aiAutocomplete.enabled` (local, off por defecto), `available` = plan NoteFlow AI usable (`isManagedAiUsable`). `set(enabled)` persiste, aborta lo que haya en vuelo al apagar y emite el evento `ai:autocomplete-changed` a todas las ventanas (también se emite en cada cambio de estado de la cuenta) |
+| `ai:complete` | handle | `({requestId, before, after})` → una sugerencia para el texto alrededor del cursor vía `POST <ai-proxy>/autocomplete` (el servidor fija prompt y modelo). Emite `ai:complete-partial` (`{requestId, text}`, texto limpio acumulado) al remitente según llega el stream y resuelve `{ok: true, text}` o `{ok: false, reason, retryAt?}` (fallos silenciosos; `retryAt` = no volver a pedir hasta entonces). Comprueba el ajuste y el plan antes de enviar — ver `ai.md` § "Autocompletado con IA" |
+| `ai:complete-cancel` | on | Aborta un `ai:complete` en vuelo por `requestId` |
 | `activity:record-edit` | on | `(noteId)` → apunta que el usuario editó esa nota hoy en el log de actividad por dispositivo (`userData/activity-log.json`). Lo envía `applyNoteUpdate` de `notesStore` (todas las ediciones de usuario: editor, sticky, ventana de sección, overviews, menús); main lo llama también para las ediciones de nota del agente del chat (`ToolContext.onNoteEdited`). Nunca desde sync pull, imports, migración ni autoborrado de notas temporales. Escritura con debounce (2 s) + atómica (tmp + rename), flush en `will-quit` |
 | `activity:get-log` | handle | `{days: Record<'YYYY-MM-DD', noteId[]>}` (podado) — lo lee la sección Activity de Ajustes → General (`ActivitySummary.tsx`: días tocados por nota en las últimas 4 semanas, lógica en `lib/activitySummary.ts`) |
 | `ai:profile-pick-files` / `ai:profile-remove-file` | handle | Segundo cerebro: file picker capado por capacidades del proveedor a una caché en main (solo metadatos al renderer) |
@@ -754,6 +763,7 @@ Estructura de `settings.json`:
     "models": [{ "id": "deepseek/deepseek-v4.1-flash-1017", "costIndex": 1, "images": true, "recommended": true }],
     "updatedAt": "2026-10-24T10:00:00.000Z"
   },
+  "aiAutocomplete": { "enabled": false },
   "aiProfile": { "completedAt": "2026-06-14T10:00:00.000Z", "noteId": "abc12345" },
   "whatsNewSeen": ["sections", "kanban", "links-palette"],
   "welcomeNoteSeeded": true,
@@ -768,6 +778,9 @@ Estructura de `settings.json`:
 > `aiManagedCatalog` es la **caché** del catálogo de modelos de NoteFlow AI que sirve el proxy
 > (`GET /models`); no es configuración del usuario (su modelo elegido sigue en `aiLlm`) y nunca se
 > pisa con una descarga fallida o inválida (ver `ai.md`).
+> `aiAutocomplete.enabled` es el interruptor del **autocompletado con IA** del editor: local a
+> propósito (es una decisión de privacidad por dispositivo — activa el envío del texto cercano al
+> cursor a NoteFlow AI), apagado por defecto (ver `ai.md` § "Autocompletado con IA").
 > `uiState` es estado de UI **local** de este dispositivo (`getUiState`/`setUiState`; el handler
 > fusiona el patch tal cual, sin sanear: el renderer valida al leer): nota/sección activas, grupos y
 > carpetas colapsados y `sidebarMode` (`'pinned'` | `'floating'`, ausente = fijado; ver `patterns.md`

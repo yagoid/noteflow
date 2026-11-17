@@ -382,6 +382,14 @@ button {
   height: 0;
 }
 
+/* AI autocomplete suggestion at the caret (AiGhostText.ts): a widget, not document text. */
+.prose-editor .ProseMirror .nf-ai-ghost {
+  color: rgb(var(--text-muted));
+  opacity: 0.75;
+  pointer-events: none;
+  user-select: none;
+}
+
 .prose-editor .ProseMirror h1,
 .prose-editor .ProseMirror h2,
 .prose-editor .ProseMirror h3 {

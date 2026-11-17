@@ -1,7 +1,8 @@
 // Pure, runtime-agnostic logic for the NoteFlow AI proxy (managed LLM plan).
 // Deliberately uses ONLY standard Web/JS APIs — no Deno.* — so it runs
 // unchanged in the Edge Function (Deno) and under vitest on Node. Covered by
-// tests/supabase/ai-proxy.test.ts. Same philosophy as billing-webhook/logic.ts.
+// tests/supabase/ai-proxy.test.ts (and ai-autocomplete.test.ts for the inline
+// autocomplete section at the end). Same philosophy as billing-webhook/logic.ts.
 
 // ── Model catalog ─────────────────────────────────────────────────────────────
 // The catalog of the managed plan (which models it serves, their list price,
@@ -930,4 +931,320 @@ export function mapUpstreamError(status: number, bodyText: string): MappedUpstre
     return badRequest('This model does not accept image input (image_url).', 'image_input_unsupported')
   }
   return generic
+}
+
+// ── Inline autocomplete (POST /autocomplete, migration 0018) ──────────────────
+// Ghost-text suggestions in the editor. The client only sends the text around
+// the cursor ({ before, after }); the SERVER builds the whole upstream request
+// (system prompt, model, max_tokens, temperature, streaming, usage accounting,
+// reasoning off) — nothing of that can be chosen by the client. Metering is
+// different from the chat on purpose: a suggestion costs ~$0.0001, so there is
+// NO reservation row (no usage_events row at all — one row per suggestion would
+// eat the database); the spend is added to one AGGREGATED row per user and day
+// (public.ai_autocomplete_daily) and it counts inside the monthly budget.
+// Autocomplete may spend at most a SHARE of that budget (a ceiling, not a
+// reserve: the chat can still use 100 % of it).
+
+/** Model used when AI_AUTOCOMPLETE_MODEL is not set. */
+export const DEFAULT_AUTOCOMPLETE_MODEL = 'anthropic/claude-haiku-5.5'
+
+/** Parses the AI_AUTOCOMPLETE_MODEL env value: a blank / missing value → the default. */
+export function parseAutocompleteModel(raw: string | undefined | null): string {
+  const model = (raw ?? '').trim()
+  return model || DEFAULT_AUTOCOMPLETE_MODEL
+}
+
+/** Default share of the monthly budget autocomplete may spend. */
+export const DEFAULT_AUTOCOMPLETE_SHARE = 0.3
+
+/** A usable share: a finite number in (0, 1]. */
+function isValidShare(share: number): boolean {
+  return Number.isFinite(share) && share > 0 && share <= 1
+}
+
+/**
+ * Parses the AI_AUTOCOMPLETE_SHARE env value: a number in (0, 1] ("0.3" = 30 %
+ * of the monthly budget). Anything else (blank, non-numeric, ≤ 0, > 1) falls
+ * back to DEFAULT_AUTOCOMPLETE_SHARE — a typo must neither turn the ceiling
+ * off nor block autocomplete for everyone.
+ */
+export function parseAutocompleteShare(raw: string | undefined | null): number {
+  if (raw === null || raw === undefined || raw.trim() === '') return DEFAULT_AUTOCOMPLETE_SHARE
+  const n = Number(raw)
+  return isValidShare(n) ? n : DEFAULT_AUTOCOMPLETE_SHARE
+}
+
+/** Output cap of a suggestion (the prompt asks for 3-10 words). */
+export const AUTOCOMPLETE_MAX_TOKENS = 48
+export const AUTOCOMPLETE_TEMPERATURE = 0.2
+/** Text kept BEFORE the cursor: its last N UTF-16 code units. */
+export const AUTOCOMPLETE_MAX_BEFORE_CHARS = 2_000
+/** Text kept AFTER the cursor: its first N UTF-16 code units. */
+export const AUTOCOMPLETE_MAX_AFTER_CHARS = 300
+/**
+ * Max body of POST /autocomplete (bytes). The context is trimmed server-side
+ * anyway, so this only bounds what the isolate reads: 32 KiB is several times
+ * the trimmed context even for 3-byte scripts with JSON escaping. A client
+ * that sends the whole note gets 413 — it must trim before sending.
+ */
+export const AUTOCOMPLETE_MAX_BODY_BYTES = 32 * 1024
+
+/** Marks the caret inside the user message. */
+export const AUTOCOMPLETE_CURSOR_MARK = '<CURSOR/>'
+
+/**
+ * Marker protocol: the model never sends a reliable leading space, so the reply
+ * must START with one character the CLIENT interprets and strips (cleanSuggestion
+ * in electron/ai/autocomplete.ts): "+" = glued to the half-typed word, "_" = a
+ * new word. The five examples are part of what makes the model comply.
+ *
+ * The user message (buildAutocompleteUserMessage) carries the note in <note>
+ * and the line being written again in <line>: that repetition is what keeps the
+ * model on the half-typed word and on the line's language in mixed-language notes.
+ */
+export const AUTOCOMPLETE_SYSTEM_PROMPT = [
+  'You are an inline autocomplete engine inside a note-taking app.',
+  'You get the note so far in <note> (the cursor is at <CURSOR/>) and, repeated in <line>, the line being written up to the cursor. Continue that line.',
+  'Your reply MUST start with one marker character: "+" if <line> stops in the middle of a word and you are finishing that word (your text is glued to it with no space), or "_" if you start a new word. After "_" the first thing you write is always a whole new word, never the rest of the previous one.',
+  'After the marker write ONLY the continuation, and keep it SHORT: the next 3 to 10 words, just enough to finish the current clause or list item.',
+  'Write in the language of <line>, in its tone, whatever the language of the rest of the note.',
+  'Answer immediately, without thinking it through.',
+  'Never repeat text that is already written (not even the last word), never explain or comment on the text, never use quotes or markdown fences.',
+  'Do not run into the text after the cursor.',
+  'Examples (<line> → reply):',
+  '"We should probably resched" → "+ule the meeting for next week"',
+  '"We should probably" → "_reschedule the meeting for next week"',
+  '"Hay que comprar toma" → "+tes y cebollas para la cena"',
+  '"Hay que comprar" → "_tomates y cebollas para la cena"',
+  '"No pude ir porque" → "_estaba enfermo ese día"',
+].join('\n')
+
+/**
+ * The user message of a suggestion (pass the trimmed context):
+ * `<note>\n${before}<CURSOR/>${after}\n</note>\n<line>${line}</line>`, where
+ * `line` is `before` from its last line break to its end (the whole of `before`
+ * when it has none, empty when `before` ends in a line break).
+ */
+export function buildAutocompleteUserMessage(before: string, after: string): string {
+  const line = before.slice(before.lastIndexOf('\n') + 1)
+  return `<note>\n${before}${AUTOCOMPLETE_CURSOR_MARK}${after}\n</note>\n<line>${line}</line>`
+}
+
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff
+
+/**
+ * Server-side trim of the context: the LAST AUTOCOMPLETE_MAX_BEFORE_CHARS of
+ * `before` and the FIRST AUTOCOMPLETE_MAX_AFTER_CHARS of `after` — what bounds
+ * the input cost of a suggestion whatever the client sends. A cut never leaves
+ * half a surrogate pair (the orphan half is dropped).
+ */
+export function trimAutocompleteContext(before: string, after: string): { before: string; after: string } {
+  let b = before.length > AUTOCOMPLETE_MAX_BEFORE_CHARS ? before.slice(-AUTOCOMPLETE_MAX_BEFORE_CHARS) : before
+  if (b !== before && isLowSurrogate(b.charCodeAt(0))) b = b.slice(1)
+  let a = after.length > AUTOCOMPLETE_MAX_AFTER_CHARS ? after.slice(0, AUTOCOMPLETE_MAX_AFTER_CHARS) : after
+  if (a !== after && isHighSurrogate(a.charCodeAt(a.length - 1))) a = a.slice(0, -1)
+  return { before: b, after: a }
+}
+
+export type AutocompleteRequest = { ok: true; before: string; after: string } | { ok: false }
+
+/**
+ * Validates the raw body of POST /autocomplete — `{ "before": string,
+ * "after"?: string }` — and returns the context ALREADY TRIMMED. Not ok (→ 400
+ * invalid_request) when the body is not a JSON object, `before` is not a
+ * string or is blank (nothing to continue), or `after` is present and is not a
+ * string (null counts as absent). Every other field is ignored: the client
+ * chooses nothing about the upstream request.
+ */
+export function parseAutocompleteRequest(rawBody: string): AutocompleteRequest {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawBody)
+  } catch {
+    return { ok: false }
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: false }
+  const { before, after } = parsed as Record<string, unknown>
+  if (typeof before !== 'string' || before.trim() === '') return { ok: false }
+  if (after !== undefined && after !== null && typeof after !== 'string') return { ok: false }
+  return { ok: true, ...trimAutocompleteContext(before, typeof after === 'string' ? after : '') }
+}
+
+/**
+ * The WHOLE upstream request of a suggestion (pass the trimmed context). Fixed
+ * by the server: system prompt, model, max_tokens, temperature, streaming,
+ * `usage: { include: true }` (the final SSE chunk carries the tokens and their
+ * cost) and reasoning turned OFF — `reasoning: { effort: 'none' }`, OpenRouter's
+ * unified switch (the same field the proxy injects for the chat). Without it
+ * the model sometimes "thinks", spends the 48 tokens on reasoning and returns
+ * an empty suggestion.
+ */
+export function buildAutocompleteBody(before: string, after: string, model: string): Record<string, unknown> {
+  return {
+    model,
+    messages: [
+      { role: 'system', content: AUTOCOMPLETE_SYSTEM_PROMPT },
+      { role: 'user', content: buildAutocompleteUserMessage(before, after) },
+    ],
+    stream: true,
+    max_tokens: AUTOCOMPLETE_MAX_TOKENS,
+    temperature: AUTOCOMPLETE_TEMPERATURE,
+    reasoning: { effort: 'none' },
+    usage: { include: true },
+  }
+}
+
+export type AutocompleteQuotaDecision = 'ok' | 'quota' | 'autocomplete_quota'
+
+/**
+ * May this user get a suggestion? (all amounts in USD of the current month)
+ *   - 'quota'              the WHOLE monthly budget is spent (`used >= limit`;
+ *                          `used` = chat + pending reservations + autocomplete)
+ *                          → 429 monthly_quota_exceeded;
+ *   - 'autocomplete_quota' autocomplete alone reached its ceiling
+ *                          (`autocompleteUsed >= limit × share`) → 429
+ *                          autocomplete_quota_exceeded;
+ *   - 'ok'                 otherwise.
+ * No estimate is added (unlike computeQuota): a suggestion costs ~$0.0001, so
+ * the possible overshoot is the handful of requests in flight when the ceiling
+ * is reached. Malformed amounts count as 0; a malformed share as the default.
+ */
+export function decideAutocompleteQuota(
+  used: number,
+  autocompleteUsed: number,
+  limitUsd: number,
+  share: number
+): AutocompleteQuotaDecision {
+  const safeUsed = Number.isFinite(used) && used > 0 ? used : 0
+  const safeAuto = Number.isFinite(autocompleteUsed) && autocompleteUsed > 0 ? autocompleteUsed : 0
+  const safeShare = isValidShare(share) ? share : DEFAULT_AUTOCOMPLETE_SHARE
+  if (safeUsed >= limitUsd) return 'quota'
+  if (safeAuto >= limitUsd * safeShare) return 'autocomplete_quota'
+  return 'ok'
+}
+
+export interface AutocompleteBudget {
+  /** USD spent this month in total (chat, pending reservations and autocomplete). */
+  used: number
+  /** USD spent this month by autocomplete alone (already inside `used`). */
+  autocompleteUsed: number
+}
+
+/**
+ * Validates the jsonb returned by the get_autocomplete_budget RPC
+ * (`{ used, autocomplete_used }`, numbers — a numeric string is accepted).
+ * Null when malformed: the caller treats it as an RPC failure, never as "no
+ * spend".
+ */
+export function parseAutocompleteBudget(payload: unknown): AutocompleteBudget | null {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const p = payload as Record<string, unknown>
+  const used = nonNegativeNumber(p.used)
+  const autocompleteUsed = nonNegativeNumber(p.autocomplete_used)
+  return used === null || autocompleteUsed === null ? null : { used, autocompleteUsed }
+}
+
+/**
+ * The `autocomplete` block of GET /usage, in the SAME legacy units as the
+ * top-level {used, limit}: `limit` = the share of LEGACY_USAGE_UNITS (900,000
+ * at 30 %), `used` = the autocomplete spend scaled exactly like the total
+ * (spend / monthly budget × LEGACY_USAGE_UNITS) — so used / limit is the
+ * fraction of the autocomplete ceiling spent, and `used` is directly
+ * comparable with the top-level `used` (it is a part of it).
+ */
+export function autocompleteUsageUnits(
+  autocompleteUsedUsd: number,
+  limitUsd: number,
+  share: number
+): { used: number; limit: number } {
+  return {
+    used: legacyUsageUnits(autocompleteUsedUsd, limitUsd).used,
+    limit: Math.round((isValidShare(share) ? share : DEFAULT_AUTOCOMPLETE_SHARE) * LEGACY_USAGE_UNITS),
+  }
+}
+
+/** List price of a model, USD per 1M input / output tokens. */
+export interface ModelPrice {
+  priceInUsd: number
+  priceOutUsd: number
+}
+
+/**
+ * public.ai_models rows → list prices by id, from ANY row with both prices —
+ * enabled or not: the autocomplete model does not have to be offered in the
+ * chat catalog to be priced. Malformed rows are skipped; a repeated id keeps
+ * its first occurrence.
+ */
+export function modelPricesFromRows(rows: unknown): Record<string, ModelPrice> {
+  const prices: Record<string, ModelPrice> = {}
+  if (!Array.isArray(rows)) return prices
+  for (const row of rows) {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) continue
+    const r = row as Record<string, unknown>
+    const id = typeof r.id === 'string' ? r.id.trim() : ''
+    const priceInUsd = nonNegativeNumber(r.price_in_usd)
+    const priceOutUsd = nonNegativeNumber(r.price_out_usd)
+    // '__proto__' would hit the prototype setter of the plain object.
+    if (!id || id === '__proto__' || priceInUsd === null || priceOutUsd === null) continue
+    if (Object.prototype.hasOwnProperty.call(prices, id)) continue
+    prices[id] = { priceInUsd, priceOutUsd }
+  }
+  return prices
+}
+
+/** Same map, from a catalog (the backup one, when the table cannot be read). */
+export function modelPricesFromCatalog(catalog: ModelCatalog): Record<string, ModelPrice> {
+  const prices: Record<string, ModelPrice> = {}
+  for (const m of catalog) {
+    if (m.id !== '__proto__' && !Object.prototype.hasOwnProperty.call(prices, m.id)) {
+      prices[m.id] = { priceInUsd: m.priceInUsd, priceOutUsd: m.priceOutUsd }
+    }
+  }
+  return prices
+}
+
+/**
+ * Last-resort price of a suggestion, used only when BOTH fail: OpenRouter did
+ * not report `usage.cost` and the autocomplete model has no priced row in
+ * public.ai_models. It is the list price of DEFAULT_AUTOCOMPLETE_MODEL
+ * (anthropic/claude-haiku-5.5: $0.10 in / $0.50 out per 1M tokens, 2026-10-24).
+ * If AI_AUTOCOMPLETE_MODEL points at a pricier model, give it a row in
+ * ai_models (it may stay `enabled = false`) so this is never what prices it.
+ */
+export const AUTOCOMPLETE_FALLBACK_PRICE: ModelPrice = { priceInUsd: 0.1, priceOutUsd: 0.5 }
+
+/** List price of the autocomplete model: its ai_models row, else AUTOCOMPLETE_FALLBACK_PRICE. */
+export function autocompletePricing(model: string, prices: Readonly<Record<string, ModelPrice>>): ModelPrice {
+  return Object.prototype.hasOwnProperty.call(prices, model) ? prices[model] : AUTOCOMPLETE_FALLBACK_PRICE
+}
+
+export interface AutocompleteCharge {
+  tokensIn: number
+  tokensOut: number
+  costUsd: number
+}
+
+/**
+ * What a served suggestion adds to the user's daily row. With a usage block:
+ * its tokens, and OpenRouter's `usage.cost` (else those tokens × the list
+ * price). WITHOUT one (stream cut, usage chunk lost) the request most likely
+ * billed anyway, so it is ESTIMATED: input ≈ bytes of the upstream body / 4,
+ * output = the whole AUTOCOMPLETE_MAX_TOKENS, at the list price. Token counts
+ * are non-negative integers.
+ */
+export function autocompleteCharge(
+  usage: TokenUsage | null,
+  upstreamBody: Record<string, unknown>,
+  price: ModelPrice
+): AutocompleteCharge {
+  const whole = (n: number) => (Number.isFinite(n) && n > 0 ? Math.round(n) : 0)
+  const tokensIn = usage ? whole(usage.tokensIn) : estimateInputTokens(upstreamBody)
+  const tokensOut = usage ? whole(usage.tokensOut) : AUTOCOMPLETE_MAX_TOKENS
+  const reported = usage && usage.cost !== null && Number.isFinite(usage.cost) && usage.cost >= 0 ? usage.cost : null
+  return {
+    tokensIn,
+    tokensOut,
+    costUsd: reported ?? (tokensIn * price.priceInUsd + tokensOut * price.priceOutUsd) / 1_000_000,
+  }
 }

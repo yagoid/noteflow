@@ -11,10 +11,16 @@
 //                                  OpenRouter → settle
 //   GET  <fn>/models             → auth + entitlement → model catalog (ids +
 //                                  vision / recommended / cost_index per model)
-//   GET  <fn>/usage              → auth only → { used, limit } monthly quota in
+//   GET  <fn>/usage              → auth only → { used, limit, autocomplete:
+//                                  { used, limit } } monthly quota in
 //                                  LEGACY_USAGE_UNITS (no entitlement gate:
 //                                  showing consumption is harmless and useful
 //                                  after expiration)
+//   POST <fn>/autocomplete       → auth + entitlement + small body cap + budget
+//                                  check (no reservation) → OpenRouter → SSE
+//                                  passthrough → cost added to the user's daily
+//                                  row. Body { before, after? }: the SERVER
+//                                  builds the whole upstream request.
 //
 // Auth: `Authorization: Bearer <Supabase access token>` — the user JWT the
 // desktop app mints from its account session. Deploy WITH JWT verification
@@ -39,6 +45,18 @@
 // point. An upstream that fails before generating (fetch throws / non-OK
 // status) did not bill, so the reservation is RELEASED (settled to 0).
 //
+// Inline autocomplete (migration 0018) is metered differently, on purpose: a
+// suggestion costs ~$0.0001, so it gets NO reservation and NO usage_events row
+// (it must not take an AI_MAX_INFLIGHT slot, block the chat or fill the
+// database). Before forwarding, the RPC get_autocomplete_budget returns what
+// the user spent this month (total + autocomplete alone) and
+// decideAutocompleteQuota answers 429 when the whole budget is spent or when
+// autocomplete reached its ceiling (AI_AUTOCOMPLETE_SHARE of the budget — a
+// ceiling, not a reserve). When the stream ends, the real cost is ADDED to the
+// user's row of the day in public.ai_autocomplete_daily (RPC
+// record_autocomplete_cost) — and get_month_cost / reserve_ai_cost count that
+// table too, so autocomplete spends the same monthly budget as the chat.
+//
 // Model catalog = table public.ai_models (migrations 0012 + 0013), read with
 // the service role and cached in memory for CATALOG_TTL_MS (getModelCatalog).
 // It is the allowlist (plus the retired-id → successor aliases, from
@@ -59,6 +77,11 @@
 //                        see applyAllowedModelsOverride)
 //   AI_MAX_INFLIGHT      optional cap on simultaneous requests per user
 //                        (default 3)
+//   AI_AUTOCOMPLETE_MODEL optional OpenRouter id of the autocomplete model
+//                        (default anthropic/claude-haiku-5.5; it does not have
+//                        to be enabled in the chat catalog)
+//   AI_AUTOCOMPLETE_SHARE optional share of the monthly budget autocomplete may
+//                        spend, in (0, 1] (default 0.3)
 //   SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY  injected
 
 import {
@@ -87,12 +110,27 @@ import {
   createSseUsageScanner,
   computeCostUsd,
   mapUpstreamError,
+  parseAutocompleteModel,
+  parseAutocompleteShare,
+  parseAutocompleteRequest,
+  parseAutocompleteBudget,
+  buildAutocompleteBody,
+  decideAutocompleteQuota,
+  autocompleteUsageUnits,
+  autocompletePricing,
+  autocompleteCharge,
+  modelPricesFromRows,
+  modelPricesFromCatalog,
   MAX_BODY_BYTES,
+  AUTOCOMPLETE_MAX_BODY_BYTES,
   RESERVATION_STALE_MINUTES,
   type TokenUsage,
   type ReserveResult,
   type ModelCatalog,
   type ModelAliases,
+  type ModelPrice,
+  type AutocompleteBudget,
+  type AutocompleteCharge,
 } from './logic.ts'
 
 // Minimal surface of the globals we use (this file is deployed to Deno; it is
@@ -302,13 +340,85 @@ async function reserveCost(
   }
 }
 
-/** What the table yields: the enabled models + the raw `replaced_by` edges. */
+/**
+ * RPC get_autocomplete_budget (migration 0018): USD the user spent this month,
+ * in total and by autocomplete alone. Read-only — no lock, no reservation.
+ * Null on any failure (transport, non-OK — e.g. the migration is not applied —
+ * or a malformed answer).
+ */
+async function fetchAutocompleteBudget(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  userId: string
+): Promise<AutocompleteBudget | null> {
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/rpc/get_autocomplete_budget`, {
+      method: 'POST',
+      headers: serviceHeaders(serviceRoleKey),
+      body: JSON.stringify({ p_user_id: userId }),
+    })
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      console.error(`ai-proxy: get_autocomplete_budget failed (${res.status}): ${detail}`)
+      return null
+    }
+    const budget = parseAutocompleteBudget(await res.json().catch(() => null))
+    if (!budget) console.error('ai-proxy: get_autocomplete_budget returned a malformed result')
+    return budget
+  } catch (err) {
+    console.error('ai-proxy: get_autocomplete_budget failed:', err)
+    return null
+  }
+}
+
+/**
+ * RPC record_autocomplete_cost (migration 0018): adds one served suggestion to
+ * the user's row of the day. Best-effort, like settleReservation: the response
+ * is already served, so a failure is only logged (that suggestion goes
+ * unmetered).
+ */
+async function recordAutocompleteCost(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  userId: string,
+  charge: AutocompleteCharge
+): Promise<void> {
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/rpc/record_autocomplete_cost`, {
+      method: 'POST',
+      headers: serviceHeaders(serviceRoleKey),
+      body: JSON.stringify({
+        p_user_id: userId,
+        p_tokens_in: charge.tokensIn,
+        p_tokens_out: charge.tokensOut,
+        p_cost_usd: charge.costUsd,
+      }),
+    })
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      console.error(`ai-proxy: record_autocomplete_cost failed (${res.status}): ${detail}`)
+    }
+  } catch (err) {
+    console.error('ai-proxy: record_autocomplete_cost failed:', err)
+  }
+}
+
+/**
+ * What the table yields: the enabled models, the raw `replaced_by` edges and
+ * the list prices of EVERY priced row (disabled ones too — the autocomplete
+ * model is priced from here without being offered in the chat).
+ */
 interface CatalogSource {
   models: ModelCatalog
   aliasEdges: ModelAliases
+  prices: Readonly<Record<string, ModelPrice>>
 }
 
-const FALLBACK_SOURCE: CatalogSource = { models: FALLBACK_MODEL_CATALOG, aliasEdges: FALLBACK_MODEL_ALIASES }
+const FALLBACK_SOURCE: CatalogSource = {
+  models: FALLBACK_MODEL_CATALOG,
+  aliasEdges: FALLBACK_MODEL_ALIASES,
+  prices: modelPricesFromCatalog(FALLBACK_MODEL_CATALOG),
+}
 
 // Per-isolate catalog cache. `catalogState` is what requests use until it
 // expires; `lastGoodCatalog` is the last catalog actually read from the table,
@@ -336,7 +446,7 @@ async function readModelCatalog(supabaseUrl: string, serviceRoleKey: string): Pr
       const rows: unknown = await res.json().catch(() => null)
       const fromTable = catalogFromRows(rows)
       if (fromTable) {
-        catalog = { models: fromTable, aliasEdges: aliasEdgesFromRows(rows) }
+        catalog = { models: fromTable, aliasEdges: aliasEdgesFromRows(rows), prices: modelPricesFromRows(rows) }
         lastGoodCatalog = catalog
       } else {
         // Readable but empty / all disabled / all malformed: that is the
@@ -366,12 +476,157 @@ function getModelCatalog(supabaseUrl: string, serviceRoleKey: string): Promise<C
   return catalogLoad
 }
 
+/**
+ * POST /autocomplete, once the caller is authenticated and entitled: small
+ * body cap → { before, after } → budget check (no reservation) → OpenRouter →
+ * SSE passthrough, with the cost added to the user's daily row when the stream
+ * ends. The whole upstream request is built here (buildAutocompleteBody).
+ */
+async function handleAutocomplete(
+  req: Request,
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  userId: string,
+  prices: Readonly<Record<string, ModelPrice>>
+): Promise<Response> {
+  // ── Body: hard size cap (declared and counted), then { before, after? } ────
+  const tooLarge = () =>
+    json(
+      413,
+      openAiErrorBody(
+        `Autocomplete request too large (max ${Math.round(AUTOCOMPLETE_MAX_BODY_BYTES / 1024)} KB).`,
+        'invalid_request_error',
+        'request_too_large'
+      )
+    )
+  const invalid = (message: string) => json(400, openAiErrorBody(message, 'invalid_request_error', 'invalid_request'))
+  if (isDeclaredBodyTooLarge(req.headers.get('Content-Length'), AUTOCOMPLETE_MAX_BODY_BYTES)) return tooLarge()
+  let rawBody: string
+  try {
+    const read = await readBodyWithLimit(req.body, AUTOCOMPLETE_MAX_BODY_BYTES)
+    if (!read.ok) return tooLarge()
+    rawBody = read.text
+  } catch {
+    return invalid('Could not read the request body.')
+  }
+  const request = parseAutocompleteRequest(rawBody)
+  if (!request.ok) {
+    return invalid('Expected a JSON body { "before": string, "after"?: string } with a non-empty `before`.')
+  }
+
+  const openrouterKey = Deno.env.get('OPENROUTER_API_KEY')
+  if (!openrouterKey) {
+    console.error('ai-proxy: OPENROUTER_API_KEY is not set')
+    return json(500, openAiErrorBody('NoteFlow AI is not configured.', 'server_error', 'not_configured'))
+  }
+
+  // ── Budget: the whole monthly budget, then autocomplete's own ceiling.
+  //    A read, not a reservation (see the header). ───────────────────────────
+  const budget = await fetchAutocompleteBudget(supabaseUrl, serviceRoleKey, userId)
+  if (!budget) {
+    return json(500, openAiErrorBody('Could not check your usage quota. Try again.', 'server_error', 'quota_check_failed'))
+  }
+  const limitUsd = parseMonthlyBudgetUsd(Deno.env.get('AI_MONTHLY_BUDGET_USD'))
+  const share = parseAutocompleteShare(Deno.env.get('AI_AUTOCOMPLETE_SHARE'))
+  const decision = decideAutocompleteQuota(budget.used, budget.autocompleteUsed, limitUsd, share)
+  if (decision === 'quota') {
+    return json(
+      429,
+      openAiErrorBody(
+        "This month's NoteFlow AI allowance is used up. It resets on the 1st of next month.",
+        'quota_error',
+        'monthly_quota_exceeded'
+      )
+    )
+  }
+  if (decision === 'autocomplete_quota') {
+    return json(
+      429,
+      openAiErrorBody(
+        "This month's autocomplete allowance is used up. It resets on the 1st of next month.",
+        'quota_error',
+        'autocomplete_quota_exceeded'
+      )
+    )
+  }
+
+  // ── Forward: the server-built request (model, prompt, caps, reasoning off) ─
+  const model = parseAutocompleteModel(Deno.env.get('AI_AUTOCOMPLETE_MODEL'))
+  const upstreamBody = buildAutocompleteBody(request.before, request.after, model)
+  let upstream: Response
+  try {
+    upstream = await fetch(OPENROUTER_CHAT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openrouterKey}`,
+        'HTTP-Referer': 'https://yagoid.github.io/noteflow',
+        'X-Title': 'NoteFlow',
+      },
+      body: JSON.stringify(upstreamBody),
+    })
+  } catch (err) {
+    // Never reached OpenRouter (or no answer) → nothing recorded.
+    console.error('ai-proxy: autocomplete upstream fetch failed:', err)
+    const mapped = mapUpstreamError(502, '')
+    return json(mapped.status, mapped.body)
+  }
+  if (!upstream.ok) {
+    // Rejected before generating → not billed → nothing recorded. The raw
+    // detail is logged, never relayed (see mapUpstreamError).
+    const detail = await upstream.text().catch(() => '')
+    const mapped = mapUpstreamError(upstream.status, detail)
+    if (mapped.outOfCredit) console.error(`ai-proxy: OPENROUTER OUT OF CREDIT (402): ${detail}`)
+    else console.error(`ai-proxy: autocomplete upstream error (${upstream.status}): ${detail}`)
+    return json(mapped.status, mapped.body)
+  }
+  if (!upstream.body) {
+    return json(502, openAiErrorBody('Upstream returned no stream.', 'server_error', 'upstream_error'))
+  }
+
+  // ── Passthrough one branch of the tee, meter the other ─────────────────────
+  const [clientBranch, meterBranch] = upstream.body.tee()
+  const price = autocompletePricing(model, prices)
+  const metering = (async () => {
+    const scanner = createSseUsageScanner()
+    const reader = meterBranch.getReader()
+    const decoder = new TextDecoder()
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        scanner.push(decoder.decode(value, { stream: true }))
+      }
+    } catch (err) {
+      // Upstream cut. A client abort (the user kept typing — the common case)
+      // does NOT land here: the other tee branch keeps the upstream running,
+      // so the usage chunk still arrives and the suggestion is metered.
+      console.error('ai-proxy: autocomplete metering stream error:', err)
+    }
+    const { usage } = scanner.end()
+    if (!usage) console.error('ai-proxy: autocomplete answer without usage — recording an estimate')
+    await recordAutocompleteCost(supabaseUrl, serviceRoleKey, userId, autocompleteCharge(usage, upstreamBody, price))
+  })()
+  // Keep the isolate alive until the cost is recorded (best-effort otherwise).
+  if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime) EdgeRuntime.waitUntil(metering)
+  else metering.catch(() => {})
+
+  return new Response(clientBranch, {
+    status: 200,
+    headers: {
+      'Content-Type': upstream.headers.get('Content-Type') ?? 'text/event-stream',
+      'Cache-Control': 'no-cache',
+    },
+  })
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   const pathname = new URL(req.url).pathname
   const isModels = req.method === 'GET' && pathname.endsWith('/models')
   const isChat = req.method === 'POST' && pathname.endsWith('/chat/completions')
   const isUsage = req.method === 'GET' && pathname.endsWith('/usage')
-  if (!isModels && !isChat && !isUsage) {
+  const isAutocomplete = req.method === 'POST' && pathname.endsWith('/autocomplete')
+  if (!isModels && !isChat && !isUsage && !isAutocomplete) {
     return json(404, openAiErrorBody('Not found.', 'invalid_request_error', 'not_found'))
   }
 
@@ -414,12 +669,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
   //    LEGACY_USAGE_UNITS (limit 3,000,000 — what internal/QA builds of main
   //    from before the DB catalog render as "3M tokens"; used = the share of
   //    the budget spent, so the percentage is exact).
+  //    `autocomplete` is the part of it spent by inline autocomplete against
+  //    its ceiling (same units: limit = AI_AUTOCOMPLETE_SHARE × 3,000,000).
   if (isUsage) {
+    const limitUsd = parseMonthlyBudgetUsd(Deno.env.get('AI_MONTHLY_BUDGET_USD'))
+    const budget = await fetchAutocompleteBudget(supabaseUrl, serviceRoleKey, userId)
+    if (budget) {
+      const share = parseAutocompleteShare(Deno.env.get('AI_AUTOCOMPLETE_SHARE'))
+      return json(200, {
+        ...legacyUsageUnits(budget.used, limitUsd),
+        autocomplete: autocompleteUsageUnits(budget.autocompleteUsed, limitUsd, share),
+      })
+    }
+    // Migration 0018 not applied yet (or the RPC failed): the plain {used,
+    // limit} of before, so the chat's usage bar does not depend on it.
     const usedUsd = await fetchMonthCost(supabaseUrl, serviceRoleKey, userId)
     if (usedUsd === null) {
       return json(500, openAiErrorBody('Could not read your usage. Try again.', 'server_error', 'usage_check_failed'))
     }
-    return json(200, legacyUsageUnits(usedUsd, parseMonthlyBudgetUsd(Deno.env.get('AI_MONTHLY_BUDGET_USD'))))
+    return json(200, legacyUsageUnits(usedUsd, limitUsd))
   }
 
   // ── Entitlement: 'ai' or 'bundle' active (service role query, RLS bypassed,
@@ -441,6 +709,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
         'subscription_required'
       )
     )
+  }
+
+  // ── Inline autocomplete: its own pipeline from here (server-built request,
+  //    no reservation). Its model is priced from the table's rows, enabled or
+  //    not, and is not subject to the chat allowlist / AI_ALLOWED_MODELS. ─────
+  if (isAutocomplete) {
+    const { prices } = await getModelCatalog(supabaseUrl, serviceRoleKey)
+    return handleAutocomplete(req, supabaseUrl, serviceRoleKey, userId, prices)
   }
 
   // ── Model catalog (table → cache → backup) and the emergency override.

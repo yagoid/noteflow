@@ -902,6 +902,33 @@ En ambos modos el `.md` de la sección guarda markdown (el editor serializa con 
   vacío autoinsertado `(|)` borra los dos. Los `)` escritos a mano no se saltan ni se borran.
 - Funciona también en bloques de código y código inline. Un solo `Ctrl+Z` deshace el par.
 
+### Autocompletado con IA (modo markdown, Beta)
+- **Solo con plan NoteFlow AI** (da igual qué proveedor use el chat) y **apagado por defecto**. Se
+  activa en **Ajustes → IA → "Your notes and AI" → Autocomplete** (etiqueta "Beta"); sin plan el
+  interruptor sale deshabilitado con "Requires an active NoteFlow AI plan". Es un ajuste **de este
+  dispositivo** (no se sincroniza): al activarlo, mientras escribes se envía el texto cercano al
+  cursor a NoteFlow AI. Activarlo o desactivarlo aplica al momento, sin recargar.
+- Tras una pausa breve al teclear (~0,4 s) con el cursor al **final de un párrafo** (también dentro
+  de un ítem de lista), aparece una continuación corta (hasta ~12 palabras) como **texto fantasma**
+  atenuado, que se va pintando según llega.
+- **Tab** la acepta (un solo `Ctrl+Z` la deshace); **Esc** la descarta; cualquier otra edición o
+  mover el cursor también la descarta. Si tecleas justo lo que la sugerencia empieza diciendo, se
+  conserva el resto. Tras aceptar con Tab no llega otra sugerencia hasta que vuelves a teclear.
+- Sin sugerencia visible, Tab hace lo de siempre en listas, tareas, tablas y bloques de código
+  (sangrar, saltar de celda…). Con el autocompletado activo, **Tab no sale del editor desde un
+  párrafo** (normal o dentro de una cita): no hace nada, así no se escribe fuera al pulsarlo cuando
+  la sugerencia acaba de desaparecer. **Shift+Tab sí** sale, como siempre. Con el autocompletado
+  apagado, Tab se comporta como siempre.
+- Limitación conocida: si una sugerencia empezara de verdad por `+` o `_`, ese primer carácter
+  puede perderse (se usa internamente como marcador de "pegado a la palabra" / "palabra nueva").
+- **Nunca** se usa en notas cifradas, secciones ocultas a la IA ("Hide from AI"), notas vinculadas,
+  bloques de código, tablas, con texto seleccionado, con el menú `/` abierto, en modo texto, ni con
+  menos de ~20 caracteres escritos.
+- El autocompletado gasta de la asignación mensual de NoteFlow AI, con un **techo propio (30 %)**:
+  con el interruptor activo, la fila muestra una barra con el porcentaje de ese techo usado este
+  mes. Al agotarlo (o al agotar la asignación total) las sugerencias dejan de aparecer, sin avisos
+  en el editor.
+
 ### Tareas con deadline, alarma e importancia
 Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - **Deadline**: fecha límite (se muestra junto al checkbox).
@@ -2348,6 +2375,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+F` | Buscar dentro de la nota |
 | `Ctrl+M` | Alternar modo texto / modo markdown (también `Ctrl+Shift+E` con el foco en el editor) |
 | `Alt+↑` / `Alt+↓` | Mover el ítem de lista (con sus subítems) |
+| `Tab` / `Esc` (con sugerencia de IA visible) | Aceptar / descartar el autocompletado con IA |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Fuente: aumentar / disminuir / reset |
 
 ### Tablas

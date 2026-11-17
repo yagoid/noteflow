@@ -65,6 +65,8 @@ function buildSections(t: Messages): ShortcutSection[] {
         { keys: ['Ctrl', 'F'], description: s.findInNote },
         { keys: ['Ctrl', 'M'], description: s.toggleMarkdown },
         { keys: ['Alt', '↑/↓'], description: s.moveListItem },
+        { keys: ['Tab'], description: s.acceptAiSuggestion },
+        { keys: ['Esc'], description: s.dismissAiSuggestion },
       ],
     },
     {

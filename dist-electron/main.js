@@ -62,6 +62,7 @@ const llm = __importStar(require("./ai/llm"));
 const agentTools = __importStar(require("./ai/llm/tools"));
 const chatUndo = __importStar(require("./ai/chatUndo"));
 const chatContext = __importStar(require("./ai/chatContext"));
+const aiAutocomplete = __importStar(require("./ai/autocomplete"));
 const managedErrors_1 = require("./ai/llm/managedErrors");
 const entitlementsRetry_1 = require("./entitlementsRetry");
 const noteFormat = __importStar(require("./noteFormat"));
@@ -453,6 +454,8 @@ function handleAccountStatusChanged() {
     // arriving) → refresh NoteFlow AI's model catalog in the background (throttled).
     if (status.signedIn && (0, entitlementsRetry_1.isManagedAiUsable)(status))
         void refreshManagedCatalog();
+    // Inline autocomplete follows the plan too (its Settings row and the editor's ghost text).
+    handleAutocompleteAccountChange();
     emitAccountStatusChanged();
 }
 // Notes that arrive from a pull are content the semantic index has never seen. Schedule the
@@ -3814,7 +3817,9 @@ electron_1.ipcMain.handle('ai:llm-test', async (_event, preset) => {
 // Monthly consumption of the managed NoteFlow AI plan, read from the proxy's GET /usage
 // endpoint with a fresh access token. The proxy meters a USD budget but reports it in
 // abstract units (limit 3,000,000 — the old token-quota scale, kept for pre-b74fad0 builds), so only
-// used/limit (the share of the allowance spent) is meaningful. Returns
+// used/limit (the share of the allowance spent) is meaningful. `autocomplete` is the part
+// of that allowance inline autocomplete may spend (its own used/limit); a proxy that
+// doesn't send it yet leaves the field out (unknown). Returns
 // null on ANY failure (no session, offline, non-200) — the UI simply hides the
 // usage bar, it never surfaces an error for this.
 electron_1.ipcMain.handle('ai:llm-usage', async () => {
@@ -3831,7 +3836,8 @@ electron_1.ipcMain.handle('ai:llm-usage', async () => {
         const body = (await res.json().catch(() => null));
         if (!body || typeof body.used !== 'number' || typeof body.limit !== 'number')
             return null;
-        return { used: body.used, limit: body.limit };
+        const autocomplete = aiAutocomplete.parseAutocompleteUsage(body.autocomplete);
+        return { used: body.used, limit: body.limit, ...(autocomplete ? { autocomplete } : {}) };
     }
     catch {
         return null;
@@ -4294,6 +4300,133 @@ function friendlyChatError(raw, sentImages, managed) {
 }
 electron_1.ipcMain.on('ai:chat-cancel', (_event, requestId) => {
     chatAborts.get(requestId)?.abort();
+});
+// ── Inline AI autocomplete (ghost text in the editor) ──────────────────────────
+// Only with a usable NoteFlow AI plan, whatever provider the chat uses: the request goes
+// straight to the proxy's POST /autocomplete with the account's access token, and the
+// SERVER picks prompt + model (electron/ai/autocomplete.ts; context in ai.md). The switch
+// is settings.aiAutocomplete.enabled — LOCAL (a per-device privacy choice), off by default.
+// The renderer extension (src/components/Editor/AiGhostText.ts) applies the content
+// exclusions; this handler re-checks the switch and the plan before anything leaves.
+// Keyed by `<webContents id>:<requestId>`: request ids are only unique per window.
+const completeAborts = new Map();
+/** Windows whose 'destroyed' already aborts their requests in flight. */
+const completeSenders = new Set();
+/** No requests before this (epoch ms; Infinity = not again this session). See autocompleteBackoffMs. */
+let autocompleteBlockedUntil = 0;
+/** Identity + plan the block above belongs to: a change drops a timed block. */
+let autocompleteAccountKey = '';
+const AUTOCOMPLETE_TIMEOUT_MS = 20000;
+function readAutocompleteEnabled() {
+    return readSettings().aiAutocomplete?.enabled === true;
+}
+function autocompleteStatus() {
+    return { enabled: readAutocompleteEnabled(), available: (0, entitlementsRetry_1.isManagedAiUsable)(account.getAccountStatus()) };
+}
+function emitAutocompleteStatus() {
+    const status = autocompleteStatus();
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('ai:autocomplete-changed', status));
+}
+/** Account status changed: forget a timed block of the previous identity/plan and tell the windows. */
+function handleAutocompleteAccountChange() {
+    const status = account.getAccountStatus();
+    const key = status.signedIn ? `${status.email ?? ''}|${status.entitlementsKnown ? String(status.entitlements.ai) : '?'}` : '';
+    if (key !== autocompleteAccountKey) {
+        autocompleteAccountKey = key;
+        autocompleteBlockedUntil = aiAutocomplete.blockedUntilAfterAccountChange(autocompleteBlockedUntil);
+    }
+    emitAutocompleteStatus();
+}
+electron_1.ipcMain.handle('ai:autocomplete-get', () => autocompleteStatus());
+electron_1.ipcMain.handle('ai:autocomplete-set', (_event, enabled) => {
+    const settings = readSettings();
+    settings.aiAutocomplete = { enabled: enabled === true };
+    writeSettings(settings);
+    if (enabled !== true)
+        completeAborts.forEach((controller) => controller.abort());
+    emitAutocompleteStatus();
+    return autocompleteStatus();
+});
+electron_1.ipcMain.handle('ai:complete', async (event, req) => {
+    const r = (req ?? {});
+    if (typeof r.requestId !== 'string' || typeof r.before !== 'string' || !r.before.trim()) {
+        return { ok: false, reason: 'error' };
+    }
+    const requestId = r.requestId;
+    if (!readAutocompleteEnabled())
+        return { ok: false, reason: 'disabled' };
+    if (!(0, entitlementsRetry_1.isManagedAiUsable)(account.getAccountStatus()))
+        return { ok: false, reason: 'unavailable' };
+    if (Date.now() < autocompleteBlockedUntil)
+        return { ok: false, reason: 'unavailable', retryAt: autocompleteBlockedUntil };
+    const sender = event.sender;
+    const senderId = sender.id;
+    const abortKey = `${senderId}:${requestId}`;
+    const controller = new AbortController();
+    completeAborts.set(abortKey, controller);
+    // A window that goes away takes its requests in flight with it.
+    if (!completeSenders.has(senderId)) {
+        completeSenders.add(senderId);
+        sender.once('destroyed', () => {
+            completeSenders.delete(senderId);
+            for (const [key, pending] of completeAborts) {
+                if (key.startsWith(`${senderId}:`))
+                    pending.abort();
+            }
+        });
+    }
+    // A timeout is a failure (transient backoff), not a cancellation by the user.
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, AUTOCOMPLETE_TIMEOUT_MS);
+    let token = '';
+    try {
+        const tokenResult = await account.getAccessTokenResult();
+        if (!tokenResult.ok)
+            throw new aiAutocomplete.AutocompleteRequestError(0, `no_token_${tokenResult.reason}`);
+        if (controller.signal.aborted && !timedOut)
+            return { ok: false, reason: 'aborted' };
+        token = tokenResult.token;
+        const text = await aiAutocomplete.completeText({
+            baseUrl: cloudConfig_1.AI_PROXY_URL,
+            token,
+            before: r.before,
+            after: typeof r.after === 'string' ? r.after : '',
+            signal: controller.signal,
+            onPartial: (partial) => {
+                if (!controller.signal.aborted && !sender.isDestroyed()) {
+                    sender.send('ai:complete-partial', { requestId, text: partial });
+                }
+            },
+        });
+        return { ok: true, text };
+    }
+    catch (err) {
+        if (controller.signal.aborted && !timedOut)
+            return { ok: false, reason: 'aborted' };
+        const failed = err instanceof aiAutocomplete.AutocompleteRequestError;
+        const status = failed ? err.status : 0;
+        const code = failed ? err.code : '';
+        if (status === 401 && token)
+            account.invalidateAccessToken(token);
+        // Our local view of the plan may be stale — re-check it (never throws), like the chat does.
+        if (status === 403)
+            void account.refreshEntitlements();
+        autocompleteBlockedUntil = aiAutocomplete.blockedUntilAfterFailure(autocompleteBlockedUntil, status, code, Date.now());
+        // A proxy without the route yet (404/405) is expected: stay silent about it.
+        if (status !== 404 && status !== 405) {
+            console.warn(`[Autocomplete] request failed: ${timedOut ? 'timed out' : err instanceof Error ? err.message : String(err)}`);
+        }
+        return Date.now() < autocompleteBlockedUntil
+            ? { ok: false, reason: 'unavailable', retryAt: autocompleteBlockedUntil }
+            : { ok: false, reason: 'error' };
+    }
+    finally {
+        clearTimeout(timeout);
+        completeAborts.delete(abortKey);
+    }
+});
+electron_1.ipcMain.on('ai:complete-cancel', (event, requestId) => {
+    completeAborts.get(`${event.sender.id}:${requestId}`)?.abort();
 });
 electron_1.ipcMain.on('ai:chat-confirm', (_event, payload) => {
     const resolve = chatConfirms.get(payload?.toolCallId);

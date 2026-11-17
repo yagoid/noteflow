@@ -111,7 +111,7 @@ export function SettingsRow({ icon, title, badge, description, action, children 
 }
 
 /** On/off switch of a settings row (Local AI, CLI skill…). `title` doubles as the accessible name. */
-export function SettingsToggle({ on, title, onToggle }: { on: boolean; title: string; onToggle: () => void }) {
+export function SettingsToggle({ on, title, onToggle, disabled = false }: { on: boolean; title: string; onToggle: () => void; disabled?: boolean }) {
   return (
     <button
       type="button"
@@ -119,8 +119,9 @@ export function SettingsToggle({ on, title, onToggle }: { on: boolean; title: st
       aria-checked={on}
       aria-label={title}
       onClick={onToggle}
+      disabled={disabled}
       title={title}
-      className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors ${
+      className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
         on ? 'bg-text/70' : 'bg-surface-3 border border-border'
       }`}
     >

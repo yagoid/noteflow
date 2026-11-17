@@ -76,10 +76,19 @@ const LEMONSQUEEZY_TIMEOUT_MS = 10_000
  * by a trigger on every UPDATE of `files` — migration 0016) goes right after
  * `files`: once the files rows are gone no concurrent upload can update one,
  * so no new version can appear before `file_versions` is cleared.
+ * `ai_autocomplete_daily` (per-day totals of the inline autocomplete, migration
+ * 0018) sits next to `usage_events`, the other NoteFlow AI metering table.
  * `subscriptions` goes last so a failure halfway still leaves the billing link
  * visible to the operator.
  */
-export const USER_DATA_TABLES = ['files', 'file_versions', 'user_keys', 'usage_events', 'subscriptions'] as const
+export const USER_DATA_TABLES = [
+  'files',
+  'file_versions',
+  'user_keys',
+  'usage_events',
+  'ai_autocomplete_daily',
+  'subscriptions',
+] as const
 
 /**
  * Lemon Squeezy statuses after which LS will never charge again — nothing to

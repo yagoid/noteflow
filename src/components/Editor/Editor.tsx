@@ -16,6 +16,7 @@ import { TableControls } from './TableControls'
 import { SearchHighlight } from './SearchHighlightExtension'
 import { SlashCommands, getSlashCommands } from './SlashCommands'
 import { AutoCloseBrackets } from './AutoCloseBrackets'
+import { AiGhostText } from './AiGhostText'
 import { ListItemMove } from './ListItemMove'
 import { ActiveTableCell } from './ActiveTableCell'
 import { TableColumnResize } from './TableColumnResize'
@@ -154,6 +155,10 @@ interface EditorProps {
    *  syntax), relative images shown from the file's folder and pasted images copied to its
    *  assets/ folder. Read once, at mount. */
   linked?: boolean
+  /** Whether this content may be sent to NoteFlow AI for inline autocomplete (AiGhostText.ts)
+   *  — false for encrypted notes, sections hidden from the AI and linked notes. Read live;
+   *  the feature's own switch (Settings → AI) is checked by the extension. */
+  aiAutocomplete?: boolean
 }
 
 export interface EditorHandle {
@@ -177,7 +182,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   persistHistory = false,
   taskProgress = false,
   linked = false,
+  aiAutocomplete = false,
 }, ref) {
+  const aiAutocompleteRef = useRef(aiAutocomplete)
+  useEffect(() => { aiAutocompleteRef.current = aiAutocomplete }, [aiAutocomplete])
   // Frozen at mount: the schema can't change under a live editor (it's keyed by section).
   const [plain] = useState(linked)
   // Frozen at mount too: the extension list is built once.
@@ -271,6 +279,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       TableKeymap,
       // Copied cells as TSV text; pasted tables normalized for markdown (tableClipboard.ts).
       TableClipboard,
+      // AI autocomplete as ghost text (Tab accepts): inert unless switched on in Settings → AI.
+      AiGhostText.configure({ isAllowed: () => aiAutocompleteRef.current }),
       SlashCommands.configure({
         onLinkSection: () => setLinkPickerOpen(true),
         getLabels: () => getSlashCommands(tRef.current),
