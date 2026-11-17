@@ -242,6 +242,17 @@ export const editor = {
     alarm: 'Alarm',
     clear: 'Clear',
     done: 'Done',
+    // The single per-task trigger and the menu it opens (TaskMenuPopover):
+    // tooltip of the empty trigger + accessible name of the menu.
+    menu: 'Importance and deadline',
+    importance: 'Importance',
+    importanceNone: 'None',
+    deadline: 'Deadline',
+    quickToday: 'Today',
+    quickTomorrow: 'Tomorrow',
+    quickNextWeek: 'Next week',
+    removeAlarm: 'Remove alarm',
+    clearAll: 'Clear all',
     // Tooltip of the ⋮⋮ handle left of a task's checkbox ({keys} = Alt+↑/↓).
     dragHandle: 'Drag to move ({keys})',
   },

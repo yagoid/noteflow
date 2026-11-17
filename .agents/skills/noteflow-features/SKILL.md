@@ -878,12 +878,26 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - **Deadline**: fecha límite (se muestra junto al checkbox).
 - **Alarm**: notificación nativa del sistema en ese momento (el proceso principal la dispara,
   funciona aunque la ventana esté oculta; incluye las ya vencidas al registrar).
-- **Importancia/prioridad**: grado Low / Medium / High. Se elige en un picker y queda visible
-  como un **punto de color** sin texto (Low → verde, Medium → amarillo, High → rojo), para que
-  ocupe poco. Persiste en markdown con el marcador ` 🔺{level}` (low|medium|high), tras `📅`/`⏰`.
-- Al hacer hover sobre el task item aparecen **dos triggers** a la derecha del texto: un icono de
-  **calendario** para el deadline/alarma y un icono de **bandera** para la importancia. Cada uno
-  abre su propio picker; los valores asignados quedan visibles de forma permanente.
+- **Importancia/prioridad**: grado Low / Medium / High. Queda visible como un **punto de color**
+  sin texto (Low → verde, Medium → amarillo, High → rojo), para que ocupe poco. Persiste en markdown
+  con el marcador ` 🔺{level}` (low|medium|high), tras `📅`/`⏰`.
+- **Un solo botón por tarea** a la derecha del texto: sin valores es un icono de calendario-reloj
+  que aparece en hover; con valores muestra **siempre** sus chips (punto de importancia + badge
+  `📅 fecha ⏰hora`), y clicar en ellos abre el mismo menú. El botón alterna el menú (abrir/cerrar).
+- **Menú de tarea** (popover pequeño, se aplica **en vivo**: cada cambio se escribe al momento y los
+  chips se actualizan detrás):
+  - **Importance**: fila segmentada `⊘ · Low · Medium · High`; la opción elegida toma su color.
+    `←/→` la recorren (y la eligen); al abrir, el foco está en la opción actual.
+  - **Deadline**: atajos **Today / Tomorrow / Next week** (el lunes siguiente) con el día que
+    representan a la derecha (resaltado si es el deadline actual), y debajo los campos **fecha** y
+    **alarma** (hora; deshabilitada sin fecha, con `×` para quitarla). Clicar el icono de cada campo
+    abre el selector nativo. "Clear" junto al título quita deadline + alarma (cambiar la fecha
+    conserva la alarma).
+  - Pie: **Clear all** (quita todo; solo si hay algo) y **Done**. `Esc`, `Enter` en un campo o
+    *Done* cierran y devuelven el foco al texto; un clic fuera cierra sin moverlo. `Tab` no sale del
+    menú. Se coloca alineado a la derecha del botón, debajo (o encima si no cabe) y nunca se sale de
+    la ventana; sigue al botón si se hace scroll.
+- Las **tarjetas kanban** mantienen sus dos triggers propios (fecha y bandera) con pickers separados.
 - **Reordenar arrastrando:** en hover aparece un asa **⋮⋮** a la izquierda de la casilla (en el
   margen, sin desplazar el texto; también en stickies y en Readable). Se arrastra desde el asa (no
   desde el texto) como una tarjeta del kanban: copia flotante, la tarea original atenuada y una
@@ -1161,7 +1175,7 @@ Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del m
   párrafo de primer nivel (no las de listas, citas o tablas). El ancho de columna se deriva del tamaño de fuente base del cuerpo (no del de
   cada elemento), así los headings comparten la misma columna. Aplica a ambos modos (markdown y
   texto); no afecta a los stickies.
-- En `Readable`, las acciones de cada tarea (importancia + deadline/badge) se sacan al margen
+- En `Readable`, las acciones de cada tarea (el botón de importancia + deadline con sus chips) se sacan al margen
   derecho, fuera de la columna, cuando el editor mide ≥ 58em (container query en `src/index.css`).
   Si el bloque no cabe en el margen (badge con fecha + alarma), se desplaza hacia la izquierda
   solapando el final de la columna en vez de provocar scroll horizontal; el contenedor de scroll

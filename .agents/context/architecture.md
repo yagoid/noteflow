@@ -149,14 +149,14 @@ noteflow/
 │   │   │   ├── SnippetsButton.tsx       #   botón partido de fragmentos (insertar el por defecto / elegir) + SnippetsModal.tsx
 │   │   │   ├── snippetCommands.ts       #   inserción de un fragmento expandido como markdown (slice inline o de bloques)
 │   │   │   ├── EditorToc.tsx            # Índice flotante H1–H3 (+ useEditorToc.ts: lectura del doc)
-│   │   │   ├── DeadlineTaskItem.ts      # Extensión TipTap: task item con deadline+alarma
-│   │   │   ├── DeadlineTaskItemView.tsx # NodeView React para DeadlineTaskItem (asa ⋮⋮, casilla, triggers)
+│   │   │   ├── DeadlineTaskItem.ts      # Extensión TipTap: task item con deadline+alarma+importancia
+│   │   │   ├── DeadlineTaskItemView.tsx # NodeView React para DeadlineTaskItem (asa ⋮⋮, casilla, botón único → menú de tarea)
 │   │   │   ├── taskDrag.ts              #   arrastrar tareas por el asa (ghost, línea de drop, auto-scroll)
 │   │   │   ├── taskToggle.ts            #   marcar/desmarcar (+ "marcadas al final" con animación FLIP)
 │   │   │   ├── ListItemMove.ts          #   Alt+↑/↓: mover el ítem de lista con sus subítems
 │   │   │   ├── pointerDrag.ts           #   helpers del drag por pointer events (kanban + tareas)
-│   │   │   ├── TaskPickers.tsx          # Pickers de deadline/alarma e importancia (tareas + tarjetas kanban)
-│   │   │   ├── taskBadge.ts             #   helpers compartidos: color/formato del badge, posición del picker
+│   │   │   ├── TaskPickers.tsx          # Menú de tarea (importancia + deadline/alarma) + pickers separados de las tarjetas kanban
+│   │   │   ├── taskBadge.ts             #   helpers compartidos: color/formato del badge, atajos de fecha, posición de pickers/menú (testeado)
 │   │   │   ├── KanbanBoard.ts           # Nodo TipTap atom del tablero kanban (ver patterns.md)
 │   │   │   ├── KanbanBoardView.tsx      #   NodeView React: columnas, drag & drop, menús, búsqueda
 │   │   │   ├── KanbanParts.tsx          #   piezas: tarjeta, editor inline, menú de opciones

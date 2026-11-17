@@ -764,6 +764,47 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   padding: 3px;
 }
 
+/* The single trigger of a task list item (DeadlineTaskItemView): the chips of
+   the values set (importance dot + date badge), or a hover-only icon when there
+   are none. Opens the task menu (.task-menu). The two classes above remain for
+   the kanban card's separate triggers. */
+.task-meta-trigger {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 3px;
+  border-radius: 5px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background-color 0.12s ease;
+  line-height: 1;
+}
+.group:hover .task-meta-trigger,
+.task-meta-trigger.has-value,
+.task-meta-trigger.is-open,
+.task-meta-trigger:focus-visible {
+  opacity: 1;
+}
+.task-meta-trigger:hover,
+.task-meta-trigger.is-open {
+  background: rgb(var(--text) / 0.07);
+}
+.task-meta-trigger:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
+}
+.task-meta-icon {
+  color: rgb(var(--text-muted));
+  opacity: 0.6;
+}
+.task-meta-trigger:hover .task-meta-icon,
+.task-meta-trigger.is-open .task-meta-icon {
+  opacity: 1;
+}
+
 /* ── Readable mode: pull the deadline trigger OUT of the reading column ───────
    In .editor-readable the taskList <ul> is centered with max-width:--readable-col
    and margin:auto, leaving free space to the right of the column. Instead of
@@ -973,6 +1014,235 @@ body.task-dragging .task-drag-handle { opacity: 0 !important; }
   color: rgb(var(--red));
   border-color: rgb(var(--red) / 0.45);
 }
+
+/* ── Task menu (TaskMenuPopover) ─────────────────────────────────────────────
+   The single menu of a task list item: importance (segmented row), deadline
+   (shortcuts + date + alarm) and clearing. Portalled to <body>, `position:
+   fixed`; top/left are set from JS (taskMenuPosition). Same surface as the
+   other menus (.cv-menu): bg-2, hairline ring, soft drop shadow. */
+.task-menu {
+  position: fixed;
+  z-index: 9999;
+  width: 272px;
+  max-width: calc(100vw - 16px);
+  padding: 10px;
+  border-radius: 10px;
+  background: rgb(var(--bg-2));
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 16px 32px -12px rgb(0 0 0 / 0.6);
+  color: rgb(var(--text));
+  font-family: var(--app-font-family, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  line-height: 1.3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: task-menu-in 120ms ease-out;
+}
+html[data-color-scheme="light"] .task-menu {
+  box-shadow: 0 0 0 1px rgb(var(--border)), 0 16px 32px -12px rgb(0 0 0 / 0.22);
+}
+@keyframes task-menu-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+.task-menu button { font: inherit; cursor: pointer; }
+.task-menu button:focus-visible,
+.task-menu input:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px rgb(var(--accent));
+}
+
+.task-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.task-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 16px;
+  padding: 0 2px;
+}
+.task-menu-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(var(--text-muted));
+}
+.task-menu-head-action {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.task-menu-head-action:hover {
+  color: rgb(var(--red));
+  background: rgb(var(--red) / 0.1);
+}
+
+/* Importance: segmented row; the chosen option takes its level's color. */
+.task-menu-seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgb(var(--text) / 0.06);
+}
+.task-menu-seg-opt {
+  --c: var(--text-muted);
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: rgb(var(--text-muted));
+  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+.task-menu-seg-opt--none { flex: 0 0 30px; padding: 0; }
+.task-menu-seg-opt--low { --c: var(--accent-2); }
+.task-menu-seg-opt--medium { --c: var(--accent-3); }
+.task-menu-seg-opt--high { --c: var(--red); }
+.task-menu-seg-opt:hover { color: rgb(var(--text)); background: rgb(var(--text) / 0.05); }
+.task-menu-seg-opt.is-on {
+  color: rgb(var(--text));
+  background: rgb(var(--c) / 0.15);
+  box-shadow: inset 0 0 0 1px rgb(var(--c) / 0.5);
+}
+.task-menu-seg-opt--none.is-on {
+  background: rgb(var(--bg-editor));
+  box-shadow: inset 0 0 0 1px rgb(var(--border));
+}
+.task-menu-seg-opt .task-importance-dot { width: 7px; height: 7px; }
+
+/* Deadline shortcuts: menu rows, the weekday/date they stand for on the right. */
+.task-menu-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.task-menu-quick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  text-align: left;
+  color: rgb(var(--text));
+  transition: background-color 0.12s ease;
+}
+.task-menu-quick-row:hover { background: rgb(var(--text) / 0.07); }
+.task-menu-quick-row.is-on { background: rgb(var(--accent) / 0.13); }
+.task-menu-quick-icon { flex: none; }
+.task-menu-quick-row--today .task-menu-quick-icon { color: rgb(var(--accent-3)); }
+.task-menu-quick-row--tomorrow .task-menu-quick-icon { color: rgb(var(--accent-2)); }
+.task-menu-quick-row--nextWeek .task-menu-quick-icon { color: rgb(var(--purple)); }
+.task-menu-quick-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-menu-quick-hint {
+  flex: none;
+  font-size: 11px;
+  color: rgb(var(--text-muted));
+  font-variant-numeric: tabular-nums;
+}
+.task-menu-quick-row.is-on .task-menu-quick-hint { color: rgb(var(--accent)); }
+
+/* Date + alarm fields side by side. The native picker indicator is hidden: the
+   leading icon opens the picker instead (showPicker). */
+.task-menu-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 6px;
+  margin-top: 2px;
+}
+.task-menu-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 6px 0 4px;
+  border-radius: 7px;
+  background: rgb(var(--text) / 0.06);
+  transition: box-shadow 0.12s ease, opacity 0.12s ease;
+}
+.task-menu-field:focus-within { box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.55); }
+.task-menu-field.is-disabled { opacity: 0.45; }
+.task-menu-field-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.task-menu-field-icon:hover:not(:disabled) { color: rgb(var(--text)); background: rgb(var(--text) / 0.07); }
+.task-menu-field-icon:disabled { cursor: default; }
+.task-menu-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: rgb(var(--text));
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.task-menu-field input:focus-visible { box-shadow: none; }
+.task-menu-field input::-webkit-calendar-picker-indicator { display: none; }
+.task-menu-field input::-webkit-datetime-edit-fields-wrapper { padding: 0; }
+.task-menu-field input:disabled { cursor: default; }
+.task-menu-field-clear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.task-menu-field-clear:hover { color: rgb(var(--red)); background: rgb(var(--red) / 0.1); }
+
+.task-menu-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid rgb(var(--border) / 0.8);
+}
+.task-menu-clear-all {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: rgb(var(--text-muted));
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.task-menu-clear-all:hover { color: rgb(var(--red)); background: rgb(var(--red) / 0.1); }
+.task-menu-done {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.14);
+  transition: background-color 0.12s ease;
+}
+.task-menu-done:hover { background: rgb(var(--accent) / 0.22); }
 
 /* Selection */
 .prose-editor .ProseMirror ::selection {
