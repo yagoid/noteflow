@@ -20,7 +20,7 @@ export type NavLocation =
 
 export interface NavHistory {
   entries: NavLocation[]
-  /** Current entry; -1 only when there is no current one (empty history). */
+  /** Current entry; -1 only when the history is empty (never with entries: a push would drop them all). */
   index: number
 }
 
@@ -72,7 +72,8 @@ export function pushLocation(history: NavHistory, loc: NavLocation, limit = NAV_
  * Drops the entries `keep` rejects (a deleted note, a removed group…) and merges the
  * consecutive entries that became the same place (A, deleted, A → A; the later one wins, so
  * its section is kept). The index follows its entry; when that one is dropped it moves to the
- * closest surviving entry before it (or -1 if none survives before it).
+ * closest surviving entry before it, or after it when none survives before (-1 only when
+ * nothing survives).
  */
 export function purgeLocations(history: NavHistory, keep: (loc: NavLocation) => boolean): NavHistory {
   const entries: NavLocation[] = []
@@ -92,6 +93,7 @@ export function purgeLocations(history: NavHistory, keep: (loc: NavLocation) => 
     }
     if (i <= history.index) index = entries.length - 1
   })
+  if (index < 0 && entries.length > 0) index = 0
   return changed ? { entries, index } : history
 }
 

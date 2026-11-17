@@ -98,10 +98,17 @@ describe('purgeLocations', () => {
     expect(show(purgeLocations(h, notDeleted(['X'])))).toBe('A [B] C')
   })
 
-  it('with nothing surviving before the current one, the index is -1', () => {
-    const h: NavHistory = { entries: [note('X'), note('C')], index: 0 }
+  it('with nothing surviving before the current one, the closest one after becomes current', () => {
+    const h: NavHistory = { entries: [note('X'), note('C'), note('D')], index: 0 }
     const purged = purgeLocations(h, notDeleted(['X']))
-    expect(purged).toEqual({ entries: [note('C')], index: -1 })
+    expect(show(purged)).toBe('[C] D')
+    // A push right after keeps the entries behind the new one (never slice(0, 0)).
+    expect(show(pushLocation(purged, note('E')))).toBe('C [E]')
+  })
+
+  it('with nothing surviving at all, the history is empty (index -1)', () => {
+    const h: NavHistory = { entries: [note('X'), overview('X')], index: 1 }
+    expect(purgeLocations(h, notDeleted(['X']))).toEqual({ entries: [], index: -1 })
   })
 
   it('overviews of a deleted note go too; returns the same object when nothing changes', () => {

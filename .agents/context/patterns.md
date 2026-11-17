@@ -3753,7 +3753,9 @@ palabra) navegan como un navegador. Solo la ventana principal.
   ubicación, **reescribe** la entrada actual si es el mismo sitio con otra sección (sin truncar el
   forward, como un `replaceState`) y si no trunca el forward y añade. `stepHistory` purga primero
   (`purgeLocations`: quita lo que ya no existe y funde las copias consecutivas que queden) y salta
-  las entradas `skip`.
+  las entradas `skip`. Invariante: `index` = -1 **solo** con el historial vacío; si la purga se lleva
+  la entrada actual pasa a la superviviente anterior, o a la siguiente si no hay anterior (con -1 y
+  entradas, el siguiente push haría `slice(0, 0)` y borraría todo).
 - **Ubicación** (`NavLocation`): `note` (nota del **panel activo** + su sección: `pane.sectionId`, si
   no `activeSectionByNote`), `overview` (vista de nota), `content` (vista de contenido con su `place`)
   y `brain`. Prioridad igual que el render de `App`: `contentPlace` → `brainViewOpen` → `noteViewId` →
@@ -3782,6 +3784,15 @@ palabra) navegan como un navegador. Solo la ventana principal.
   `#ai-chat`, `#section-window`…). `useNavHistory(!isSticky)` (en `MainApp`) navega en el `mouseup`
   (captura) y escucha las teclas en **burbuja** saltándose `e.defaultPrevented`: dentro de una tabla
   `Alt+←/→` es mover columna (`TableKeymap` lo consume) y gana la tabla; también respeta `ownsKeys`.
+- **Nada por debajo de un overlay (`lib/overlays.ts` → `hasOpenOverlay()`):** ni ratón ni teclado
+  navegan con un diálogo, menú o menú contextual abierto. Se lee del DOM (sin estado por modal):
+  `[aria-modal="true"]` (Confirm, Encryption, Snippets, historial de versiones, What's new…),
+  `[role="menu"]` (desplegables), `[data-overlay]` (lo pone el `ContextMenu` compartido: menús de nota,
+  grupo, carpeta, pie del sidebar) y los modales `fixed inset-0` con fondo `bg-black/…` (Ajustes,
+  paleta, Export/Import, diálogos del editor; misma regla que espera `WhatsNewHost`). Para el ratón se
+  mira también en el `mousedown`: un menú que se cierra con cualquier `mousedown` ya no está en el
+  `mouseup`. Un modal nuevo debe llevar `aria-modal="true"` o ese fondo; un menú, `role="menu"` u
+  `OVERLAY_PROPS`.
   No se toca main: en Windows el renderer recibe los botones X1/X2 como `button` 3/4 y Electron no
   navega por `app-command` por defecto (escucharlo además duplicaría cada paso).
 

@@ -407,6 +407,8 @@ cambie fuera de NoteFlow aparece en la nota. Diseño e invariantes técnicos: `p
 - Con paneles en paralelo, el historial sigue al **panel activo**: Atrás cambia la nota de ese panel
   (o enfoca el panel que ya la muestra) y deja los demás como están.
 - Las notas borradas desaparecen del historial; las cifradas bloqueadas se saltan.
+- Con un diálogo, la paleta, Ajustes o un menú/menú contextual abierto no navega (no cambia la nota
+  por debajo).
 - Dentro de una tabla `Alt+←/→` sigue siendo mover columna. Las ventanas de sección, sticky y chat no
   tienen historial (los botones del ratón no hacen nada allí).
 
