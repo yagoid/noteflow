@@ -33,6 +33,7 @@ import { RowShiftFlip } from './NoteSectionFlip'
 import { resolveOpenSectionId } from '../../lib/sectionLine'
 import { useOpenNoteSection } from './useOpenNoteSection'
 import { useThemeStore, type SidebarSectionsStyle } from '../../stores/themeStore'
+import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { GroupPeek, type GroupPeekController } from './GroupPeek'
 import { SidebarFooterMenu } from './SidebarFooterMenu'
 import { SidebarIdentity } from './SidebarIdentity'
@@ -229,6 +230,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
+  const setNoteView = useNotesStore((s) => s.setNoteView)
   const createNote = useNotesStore((s) => s.createNote)
   const createTempNote = useNotesStore((s) => s.createTempNote)
 
@@ -539,9 +541,23 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     })
   }
 
+  // Settings → Editor → "Clicking a note opens": a note with MORE than one section can open in
+  // the note overview instead of the editor (single-section and locked notes — `sections: []` —
+  // always open the editor). Activates the note first, as a normal click does, so the overview's
+  // "back" lands on its editor. Read at click time: no sidebar re-render when the setting changes.
+  function openInOverviewIfPreferred(note: Note | undefined): boolean {
+    if (!note || note.sections.length <= 1) return false
+    if (useEditorSettingsStore.getState().noteClickOpens !== 'overview') return false
+    setOpenNoteIds([note.id])
+    setActiveNote(note.id)
+    setNoteView(note.id)
+    return true
+  }
+
   function openSelectedSearchResult() {
     const targetId = activeSearchNoteId ?? visibleNoteIds[0]
     if (!targetId) return
+    if (openInOverviewIfPreferred(rawNotes.find((n) => n.id === targetId))) return
     setOpenNoteIds([targetId])
     setActiveNote(targetId)
   }
@@ -1023,10 +1039,11 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
           openNoteInSplit(note.id)
           return
         }
-        // Clicking the note itself opens it in the editor at its FIRST section, whatever the
-        // section count (the note overview stays reachable from the editor's overview button
-        // and the section context menu). A locked encrypted note has no sections yet
-        // (`sections: []`): just open it so the editor shows the unlock prompt.
+        // Clicking the note itself opens it in the editor at its FIRST section — or, with
+        // "Clicking a note opens: Note overview" and more than one section, in the note
+        // overview. A locked encrypted note has no sections yet (`sections: []`): just open
+        // it so the editor shows the unlock prompt.
+        if (openInOverviewIfPreferred(note)) return
         const firstSectionId = note.sections[0]?.id
         if (firstSectionId) {
           openAtSection(note, firstSectionId)

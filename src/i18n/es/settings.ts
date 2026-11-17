@@ -113,6 +113,10 @@ export const settings = {
     hideToc: 'Ocultar índice',
     moveChecked: 'Mover las tareas marcadas al final',
     moveCheckedHint: 'Al marcar una tarea baja al final de su lista; al desmarcarla vuelve encima de las marcadas',
+    noteClickOpens: 'Al pulsar una nota se abre',
+    noteClickOpensHint: 'En las notas con más de una sección, desde la barra lateral. Las notas con una sola sección siempre se abren en el editor',
+    noteClickEditor: 'Editor',
+    noteClickOverview: 'Vista de la nota',
   },
 
   startup: {

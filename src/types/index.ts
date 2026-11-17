@@ -712,6 +712,8 @@ export interface UiSettings {
     readableWidth?: boolean
     showToc?: boolean
     moveCheckedToBottom?: boolean
+    /** Sidebar click on a multi-section note: editor (absent) or note overview. */
+    noteClickOpens?: 'editor' | 'overview'
   }
 }
 

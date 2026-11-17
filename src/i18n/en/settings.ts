@@ -135,6 +135,10 @@ export const settings = {
     hideToc: 'Hide table of contents',
     moveChecked: 'Move checked items to the bottom',
     moveCheckedHint: 'Checking a task moves it to the end of its list; unchecking it brings it back above the checked ones',
+    noteClickOpens: 'Clicking a note opens',
+    noteClickOpensHint: 'For notes with more than one section, from the sidebar. Notes with a single section always open in the editor',
+    noteClickEditor: 'Editor',
+    noteClickOverview: 'Note overview',
   },
 
   startup: {

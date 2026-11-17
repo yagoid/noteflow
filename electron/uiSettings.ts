@@ -1,7 +1,7 @@
 // Pure sanitize/merge logic for ui-settings.json — the root-level file of the
 // notes dir that syncs appearance (theme, app font, accent, editor colours) and
 // editor settings (font size/family, readable width, floating TOC, move checked tasks to the
-// bottom) across devices. Lives in
+// bottom, what a sidebar click opens on a multi-section note) across devices. Lives in
 // electron/ but imports nothing from Electron (same pure-module pattern as
 // syncState.ts / cloudSyncLogic.ts). Covered by tests/electron/uiSettings.test.ts.
 //
@@ -72,6 +72,11 @@ export interface UiSettings {
     showToc?: boolean
     /** Checking a task moves it to the bottom of its list (absent = off). */
     moveCheckedToBottom?: boolean
+    /**
+     * What a click on a note in the sidebar opens when the note has more than one
+     * section: its editor or the note overview (absent = 'editor').
+     */
+    noteClickOpens?: 'editor' | 'overview'
   }
 }
 
@@ -163,6 +168,10 @@ export function sanitizeUiSettings(raw: unknown): UiSettings {
     }
     if (typeof ed.moveCheckedToBottom === 'boolean') {
       cleaned.moveCheckedToBottom = ed.moveCheckedToBottom
+      hasAny = true
+    }
+    if (ed.noteClickOpens === 'editor' || ed.noteClickOpens === 'overview') {
+      cleaned.noteClickOpens = ed.noteClickOpens
       hasAny = true
     }
     if (hasAny) out.editor = cleaned
