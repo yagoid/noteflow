@@ -1,4 +1,5 @@
-// Structural reference data for the /cli page — mirrors the NoteFlow CLI v2.7.0, plus `history` (v2.13.0) and `origin` / `--merge` (v2.14.0).
+// Structural reference data for the /cli page — mirrors the NoteFlow CLI v2.7.0, plus `history` (v2.13.0), `origin` / `--merge` (v2.14.0)
+// and `sections --json` / same-titled notes addressed by folder name (v2.15.0).
 // Language-neutral fields (usage, flags, examples, colour tokens) live here once;
 // the short bilingual descriptions are inline per row (the table is ~30 rows with
 // 80% identical structure — two mirror files would drift apart).
@@ -62,8 +63,8 @@ export const cliGroups: CliGroup[] = [
         id: 'new',
         usage: 'noteflow new <title> [options]',
         desc: {
-          en: 'Create an empty note.',
-          es: 'Crea una nota vacía.',
+          en: 'Create an empty note. A title another note already has is allowed (titles aren’t unique) with a notice on stderr — from then on, tell them apart by folder name.',
+          es: 'Crea una nota vacía. Un título que ya tiene otra nota está permitido (los títulos no son únicos) con un aviso por stderr — a partir de ahí, distínguelas por nombre de carpeta.',
         },
         flags: [
           { flag: '--section <name>', desc: { en: 'Name of the first section. Default: <code>Note</code>.', es: 'Nombre de la primera sección. Default: <code>Note</code>.' } },
@@ -165,8 +166,8 @@ export const cliGroups: CliGroup[] = [
         id: 'rename',
         usage: 'noteflow rename <current-title> <new-title>',
         desc: {
-          en: 'Update the note’s <code>title</code> field. The folder name on disk doesn’t change (it contains the id).',
-          es: 'Actualiza el campo <code>title</code> de la nota. El nombre de la carpeta en disco no cambia (contiene el id).',
+          en: 'Update the note’s <code>title</code> field. The folder name on disk doesn’t change (it contains the id). Renaming onto a title another note already has works, with a notice on stderr.',
+          es: 'Actualiza el campo <code>title</code> de la nota. El nombre de la carpeta en disco no cambia (contiene el id). Renombrar a un título que ya tiene otra nota funciona, con un aviso por stderr.',
         },
       },
       {
@@ -194,11 +195,15 @@ export const cliGroups: CliGroup[] = [
     commands: g('purple', [
       {
         id: 'sections',
-        usage: 'noteflow sections <title>',
+        usage: 'noteflow sections <title> [--json]',
         desc: {
-          en: 'List a note’s sections with name, line count and mode (text/markdown). <code>section list</code> is an alias.',
-          es: 'Lista las secciones de una nota con nombre, número de líneas y modo (texto/markdown). <code>section list</code> es un alias.',
+          en: 'List a note’s sections with name, line count and mode (text/markdown). <code>section list</code> is an alias — the same command.',
+          es: 'Lista las secciones de una nota con nombre, número de líneas y modo (texto/markdown). <code>section list</code> es un alias — el mismo comando.',
         },
+        flags: [
+          { flag: '--json', desc: { en: 'JSON array, one object per section: <code>{ id, name, lines, mode, isRawMode, aiHidden }</code> (<code>mode</code> is <code>"markdown"</code> or <code>"text"</code>).', es: 'Array JSON, un objeto por sección: <code>{ id, name, lines, mode, isRawMode, aiHidden }</code> (<code>mode</code> es <code>"markdown"</code> o <code>"text"</code>).' } },
+        ],
+        example: ['$ noteflow sections "Project Alpha" --json | jq -r \'.[].name\''],
       },
       {
         id: 'section-add',
@@ -382,16 +387,16 @@ export const cliGroups: CliGroup[] = [
         id: 'cloud-push',
         usage: 'noteflow cloud push',
         desc: {
-          en: 'Encrypt (AES-256-GCM, client-side) and upload what changed since the last sync — pending uploads and every file that differs from the version last synced — plus the metadata files; it prints how many were unchanged. Each upload carries the server version it was made on, so a file someone changed meanwhile is not overwritten (<code>not uploaded: a newer version is on NoteFlow Cloud</code> — run <code>noteflow pull</code>). The first push runs an automatic initial pull to reconcile with the remote. Uploading requires an active NoteFlow Cloud subscription.',
-          es: 'Cifra (AES-256-GCM, en el cliente) y sube lo que cambió desde el último sync — las subidas pendientes y cada fichero que difiere de la versión sincronizada — más los metadatos; indica cuántos no cambiaron. Cada subida lleva la versión del servidor sobre la que se hizo, así que un fichero que otro cambió entretanto no se pisa (<code>not uploaded: a newer version is on NoteFlow Cloud</code> — ejecuta <code>noteflow pull</code>). El primer push ejecuta un pull inicial automático de reconciliación. Subir requiere una suscripción NoteFlow Cloud activa.',
+          en: 'Encrypt (AES-256-GCM, client-side) and upload what changed since the last sync — pending uploads and every file that differs from the version last synced — plus the metadata files; it prints how many were unchanged. Each upload carries the server version it was made on, so a file someone changed meanwhile is not overwritten (<code>not uploaded: a newer version is on NoteFlow Cloud</code> — run <code>noteflow pull</code>, then <code>noteflow push</code>). The first push runs an automatic initial pull to reconcile with the remote. Uploading requires an active NoteFlow Cloud subscription.',
+          es: 'Cifra (AES-256-GCM, en el cliente) y sube lo que cambió desde el último sync — las subidas pendientes y cada fichero que difiere de la versión sincronizada — más los metadatos; indica cuántos no cambiaron. Cada subida lleva la versión del servidor sobre la que se hizo, así que un fichero que otro cambió entretanto no se pisa (<code>not uploaded: a newer version is on NoteFlow Cloud</code> — ejecuta <code>noteflow pull</code> y luego <code>noteflow push</code>). El primer push ejecuta un pull inicial automático de reconciliación. Subir requiere una suscripción NoteFlow Cloud activa.',
         },
       },
       {
         id: 'cloud-pull',
         usage: 'noteflow cloud pull',
         desc: {
-          en: 'Download and decrypt remote changes (incremental), merged <strong>section by section</strong>: a section you edited here and another edited elsewhere are both kept, no copy. If both sides changed the same section, it is merged <strong>line by line</strong> inside the note; only if they changed the same lines are both versions kept between ⚠️ markers (<code>Merged with conflicts: "…"</code>). Encrypted notes still get a conflict copy (<code>Conflict: local changes kept as "…"</code>). Remote deletions only apply when the local copy hasn’t changed since the last sync. Notes this CLI hasn’t synced with the per-file rule yet still follow the note’s <code>updated</code> timestamp; the first run after updating the CLI re-reads the cloud once to cover them.',
-          es: 'Baja y descifra los cambios remotos (incremental), combinados <strong>sección a sección</strong>: una sección que editaste aquí y otra editada en otro sitio se conservan las dos, sin copia. Si los dos lados cambiaron la misma sección, se fusiona <strong>línea a línea</strong> dentro de la nota; solo si cambiaron las mismas líneas se guardan las dos versiones entre marcas ⚠️ (<code>Merged with conflicts: "…"</code>). Las notas cifradas siguen creando una copia en conflicto (<code>Conflict: local changes kept as "…"</code>). Los borrados remotos solo se aplican si la copia local no cambió desde el último sync. Las notas que este CLI aún no ha sincronizado con la regla por fichero siguen el <code>updated</code> de la nota; la primera ejecución tras actualizar el CLI relee la nube una vez para cubrirlas.',
+          en: 'Download and decrypt remote changes (incremental), merged <strong>section by section</strong>: a section you edited here and another edited elsewhere are both kept, no copy. If both sides changed the same section, it is merged <strong>line by line</strong> inside the note; only if they changed the same lines are both versions kept between ⚠️ markers (<code>Merged with conflicts: "…"</code>). Encrypted notes still get a conflict copy (<code>Conflict: local changes kept as "…"</code>). The local changes it merged are uploaded right away, and it says how many files went up (<code>Uploaded N files with pending local changes</code>). Remote deletions only apply when the local copy hasn’t changed since the last sync. Notes this CLI hasn’t synced with the per-file rule yet still follow the note’s <code>updated</code> timestamp; the first run after updating the CLI re-reads the cloud once to cover them.',
+          es: 'Baja y descifra los cambios remotos (incremental), combinados <strong>sección a sección</strong>: una sección que editaste aquí y otra editada en otro sitio se conservan las dos, sin copia. Si los dos lados cambiaron la misma sección, se fusiona <strong>línea a línea</strong> dentro de la nota; solo si cambiaron las mismas líneas se guardan las dos versiones entre marcas ⚠️ (<code>Merged with conflicts: "…"</code>). Las notas cifradas siguen creando una copia en conflicto (<code>Conflict: local changes kept as "…"</code>). Los cambios locales que fusiona se suben en el momento, y dice cuántos ficheros subió (<code>Uploaded N files with pending local changes</code>). Los borrados remotos solo se aplican si la copia local no cambió desde el último sync. Las notas que este CLI aún no ha sincronizado con la regla por fichero siguen el <code>updated</code> de la nota; la primera ejecución tras actualizar el CLI relee la nube una vez para cubrirlas.',
         },
       },
       {
@@ -475,7 +480,7 @@ export interface GlobalFlag {
 export const globalFlags: GlobalFlag[] = [
   {
     flag: '--json',
-    applies: 'list · get · read · path · new · add · set · delete · history · groups · folders · group create · folder create · status · cloud status · origin · login --no-wait',
+    applies: 'list · get · read · path · sections · new · add · set · delete · history · groups · folders · group create · folder create · status · cloud status · origin · login --no-wait',
     desc: { en: 'Machine-readable JSON output on stdout (info lines go to stderr).', es: 'Salida JSON machine-readable en stdout (las líneas informativas van a stderr).' },
   },
   {

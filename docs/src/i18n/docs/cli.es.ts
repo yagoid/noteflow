@@ -96,6 +96,7 @@ export const cliEs: CliContent = {
     title: 'Referencia de comandos',
     intro: [
       'Todo se direcciona <strong>por nombre</strong>: título de nota + nombre de sección — nunca tocas ids. Los títulos pueden ser parciales (con varios matches el CLI los lista y pide precisión), y los nombres de sección duplicados se apuntan con un sufijo 1-based tipo <code>"Tasks#2"</code>. Entrecomilla los nombres con espacios.',
+      'Los títulos no son únicos: si varias notas tienen el mismo título, el CLI nunca elige una — las lista con su nombre de carpeta (<code>&lt;slug&gt;-&lt;id&gt;</code>, el <code>dirname</code> de <code>list --json</code>), y ese nombre de carpeta vale en cualquier sitio donde va un título. Un título que no coincide con nada falla con una sugerencia <code>Did you mean "…"?</code>.',
     ],
     colCommand: 'Comando',
     colDesc: 'Qué hace',
@@ -120,7 +121,7 @@ export const cliEs: CliContent = {
       },
       {
         name: 'NOTEFLOW_NO_APP_CHECK',
-        desc: 'Ponla a <code>1</code> para silenciar el aviso por stderr al mutar grupos/carpetas con la app de escritorio abierta.',
+        desc: 'Ponla a <code>1</code> para silenciar el aviso por stderr al mutar grupos/carpetas con la app de escritorio abierta (solo sale cuando el CLI trabaja en el directorio de notas por defecto, el que usa la app).',
       },
       {
         name: 'NOTEFLOW_CLOUD_PASSPHRASE',

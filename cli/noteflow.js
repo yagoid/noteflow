@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.14.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.15.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.14.0'
+const CLI_VERSION = '2.15.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -62,8 +62,21 @@ function nanoid(n) {
   return randomBytes(n).toString('base64url').slice(0, n)
 }
 
+const YAML_WRITE_ESCAPES = { '\\': '\\\\', '"': '\\"', '\n': '\\n', '\r': '\\r', '\t': '\\t' }
+
+/**
+ * A string as a one-line YAML double-quoted scalar. `\` and `"` are escaped,
+ * and so is every control character / line separator (as \n, \r, \t, \xXX or
+ * \uXXXX): raw, a newline would break the line-based reader and js-yaml (the
+ * desktop app) rejects the other control characters. unquote() is its exact
+ * inverse — keep the two in sync.
+ */
 function q(s) {
-  return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
+  return '"' + String(s).replace(/[\\"\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, c => {
+    if (YAML_WRITE_ESCAPES[c]) return YAML_WRITE_ESCAPES[c]
+    const code = c.charCodeAt(0)
+    return code < 0x100 ? '\\x' + code.toString(16).padStart(2, '0') : '\\u' + code.toString(16).padStart(4, '0')
+  }) + '"'
 }
 
 function getTodayTitle() {
@@ -71,8 +84,16 @@ function getTodayTitle() {
   return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`
 }
 
+/**
+ * Directory name for a note: '<slug>-<id>' (slug frozen at creation time).
+ * Accents are transliterated before filtering (NFD, combining marks dropped):
+ * 'Reunión' → 'reunion', 'Cumpleaños' → 'cumpleanos'.
+ * ⚠️ Mirror of noteDirname in src/lib/noteUtils.ts and electron/noteFormat.ts —
+ * keep the slug rule identical in all three.
+ */
 function noteDirname(id, title) {
-  const slug = title.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 40)
+  const slug = title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 40)
   return `${slug ? slug + '-' : ''}${id}`
 }
 
@@ -114,6 +135,9 @@ function toJson(value) {
 function jsonOut(value) { process.stdout.write(toJson(value) + '\n') }
 
 function lineCount(content) { return content ? content.split('\n').length : 0 }
+
+/** '1 line' / 'N lines' — every message that counts lines goes through here. */
+function linesLabel(n) { return `${n} ${n === 1 ? 'line' : 'lines'}` }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
@@ -449,10 +473,7 @@ function planConflictCopy(candidates, local, server) {
 
 /** A one-line YAML scalar as written by js-yaml (plain, "double" or 'single' quoted). */
 function yamlScalarValue(raw) {
-  const v = raw.trim()
-  if (v.startsWith('"')) { try { return String(JSON.parse(v)) } catch { return unquote(v) } }
-  if (v.startsWith("'") && v.endsWith("'") && v.length >= 2) return v.slice(1, -1).replace(/''/g, "'")
-  return v
+  return unquote(raw)
 }
 
 /** Title of a note.md (same default as the parsers: 'Untitled'). Mirror of anchorTitle. */
@@ -2549,11 +2570,62 @@ function splitFrontmatter(raw) {
   return { frontmatter: s.slice(4, end), body: s.slice(end + 5) }
 }
 
+// Escapes of a YAML double-quoted scalar (YAML 1.2 §5.7) — every one js-yaml,
+// the desktop app's writer, can emit: \0 \a \b \t \n \v \f \r \e \" \/ \\,
+// \N (next line), \_ (no-break space), \L / \P (line / paragraph separator), an
+// escaped space or tab, and the numeric \xXX, \uXXXX and \UXXXXXXXX.
+const YAML_READ_ESCAPES = {
+  '0': '\0', a: '\x07', b: '\b', t: '\t', '\t': '\t', n: '\n', v: '\v', f: '\f', r: '\r', e: '\x1b',
+  ' ': ' ', '"': '"', '/': '/', '\\': '\\',
+  N: String.fromCharCode(0x85), _: String.fromCharCode(0xa0), L: String.fromCharCode(0x2028), P: String.fromCharCode(0x2029),
+}
+const YAML_HEX_ESCAPES = { x: 2, u: 4, U: 8 }
+
+/**
+ * Decodes a one-line YAML scalar the way js-yaml (the desktop app) loads it —
+ * the exact inverse of q(), so reading a note.md and writing it back never
+ * changes a title, a section name or a tag:
+ *  - "double quoted": the escapes above are undone ('\\' → '\', '\"' → '"'…).
+ *    It used to drop only the outer quotes, so every read + write doubled the
+ *    backslashes ('a "b"' → 'a \"b\"' → 'a \\\"b\\\"' …);
+ *  - 'single quoted': '' → ';
+ *  - anything else (a plain scalar) is returned as is, trimmed.
+ * A trailing ` # comment` after the closing quote is ignored, like in YAML.
+ * Text this reader can't make sense of (an unknown escape, bad hex digits) is
+ * kept verbatim rather than dropped, and a value that doesn't close its quote
+ * where it should falls back to the old rule (outer quotes off) — best effort
+ * for hand-edited files, never an exception.
+ */
 function unquote(s) {
   s = s.trim()
-  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))
-    return s.slice(1, -1)
-  return s
+  const quote = s[0]
+  if (quote !== '"' && quote !== "'") return s
+  let out = ''
+  for (let i = 1; i < s.length; i++) {
+    const ch = s[i]
+    if (quote === "'") {
+      if (ch !== "'") { out += ch; continue }
+      if (s[i + 1] === "'") { out += "'"; i++; continue }
+    } else if (ch === '\\') {
+      const next = s[i + 1]
+      if (next === undefined) break // a lone trailing backslash: the quote never closes
+      i++
+      const digits = YAML_HEX_ESCAPES[next]
+      if (digits) {
+        const hex = s.slice(i + 1, i + 1 + digits)
+        if (hex.length === digits && /^[0-9a-fA-F]+$/.test(hex) && parseInt(hex, 16) <= 0x10ffff) {
+          out += String.fromCodePoint(parseInt(hex, 16))
+          i += digits
+        } else out += '\\' + next
+      } else out += Object.hasOwn(YAML_READ_ESCAPES, next) ? YAML_READ_ESCAPES[next] : '\\' + next
+      continue
+    } else if (ch !== '"') { out += ch; continue }
+    // The closing quote: nothing may follow it but a comment.
+    const rest = s.slice(i + 1)
+    if (rest === '' || /^\s+#/.test(rest)) return out
+    break
+  }
+  return s.length >= 2 && s.endsWith(quote) ? s.slice(1, -1) : s
 }
 
 function parseNoteYaml(yamlStr) {
@@ -2611,8 +2683,22 @@ function parseNoteYaml(yamlStr) {
       if (sec) note.sections.push(sec)
       continue
     }
+    if (key === 'tags' && val === '') {
+      // Block list, the layout js-yaml (the desktop app) writes: 'tags:' + '  - item' lines.
+      const items = []
+      i++
+      while (i < lines.length) {
+        const item = lines[i].match(/^\s*-\s+(.*)$/)
+        if (item) items.push(unquote(item[1]))
+        else if (lines[i].trim()) break
+        i++
+      }
+      note.tags = items.filter(Boolean)
+      continue
+    }
     if (val.startsWith('[')) {
-      note[key] = val === '[]' ? [] : val.slice(1, -1).split(',').map(s => unquote(s.trim())).filter(Boolean)
+      // Split on the commas OUTSIDE quotes: a quoted item may contain one.
+      note[key] = val === '[]' ? [] : splitFlowItems(val.slice(1, -1)).map(unquote).filter(Boolean)
     } else if (val === 'true' || val === 'false') {
       note[key] = val === 'true'
     } else {
@@ -2647,9 +2733,14 @@ function serializeNoteMd(note, opts = {}) {
     if (s.created) y += `    created: ${q(s.created)}\n`
   }
   if (note.archived)   y += 'archived: true\n'
-  if (note.favorited)  y += 'favorited: true\n'
+  // `pinned` is the old name of `favorited` (the app reads `favorited ?? pinned`
+  // and writes `favorited`): a note that still carries it stays a favorite.
+  if (note.favorited ?? note.pinned) y += 'favorited: true\n'
   if (note.group)    y += `group: ${q(note.group)}\n`
   if (note.folder)   y += `folder: ${q(note.folder)}\n`
+  // Temporary note (the app deletes it at that time): the CLI never sets it,
+  // but a write must not drop it — the note would silently become permanent.
+  if (typeof note.expiresAt === 'string' && note.expiresAt) y += `expiresAt: ${q(note.expiresAt)}\n`
   if (note.localOnly === true) y += 'localOnly: true\n'
   return `---\n${y}---\n`
 }
@@ -2734,16 +2825,33 @@ function sectionFilePath(note, sec) {
   return path.join(path.resolve(note.filePath), path.basename(sec.file || `${sec.id}.md`))
 }
 
-function findNoteByTitle(titleQuery) {
-  const notes = loadAllNotes()
+/**
+ * Pure: the notes a title query designates, in this order —
+ *  1. every note whose title is exactly the query (case-insensitive). Titles
+ *     are NOT unique in NoteFlow (several 'Untitled'…), so this can be more
+ *     than one: callers treat that as ambiguous, they never pick one;
+ *  2. the note whose FOLDER NAME is the query ('<slug>-<id>', with or without a
+ *     trailing slash — what `list` and "Multiple matches" print) or whose id is:
+ *     the way to tell same-titled notes apart;
+ *  3. the notes whose title contains the query.
+ * Archived notes count like any other (they can be read, written and
+ * unarchived by title).
+ */
+function matchNotesByTitle(notes, titleQuery) {
   const q = titleQuery.toLowerCase()
-  // Exact match first
-  const exact = notes.find(n => n.title && n.title.toLowerCase() === q)
-  if (exact) return [exact]
-  // Partial
+  const exact = notes.filter(n => n.title && n.title.toLowerCase() === q)
+  if (exact.length) return exact
+  const folderName = q.replace(/[\\/]+$/, '')
+  const byFolder = notes.filter(n => (n.dirname && n.dirname.toLowerCase() === folderName) || (n.id && n.id === titleQuery))
+  if (byFolder.length) return byFolder
   return notes.filter(n => n.title && n.title.toLowerCase().includes(q))
 }
 
+function findNoteByTitle(titleQuery) {
+  return matchNotesByTitle(loadAllNotes(), titleQuery)
+}
+
+/** Today's daily note: with several candidates, the most recently updated (it never fails as ambiguous). */
 function findTodayNote() {
   const today = getTodayTitle()
   const matches = findNoteByTitle(today)
@@ -2752,27 +2860,98 @@ function findTodayNote() {
   return matches.sort((a, b) => (b.updated || '').localeCompare(a.updated || ''))[0]
 }
 
+/**
+ * Pure: up to 3 titles to offer as "Did you mean" when no note matches a title
+ * query — same criteria as the section suggestions (sectionSuggestions), in
+ * this order: titles holding every word of the query (accents, case and filler
+ * words ignored: 'reunion equipo' → 'Reunión de equipo'), titles within a
+ * couple of typos of the whole query ('resetas' → 'Recetas'), then titles where
+ * each word of the query is a typo of one of theirs ('Proyecta Alpha' →
+ * 'Proyecto Alpha 2026'). Suggestions only — no command acts on them.
+ */
+function noteSuggestions(notes, titleQuery) {
+  // One entry per title, case-insensitively (the first seen): 'Ideas' and 'ideas' resolve alike.
+  const seen = new Set()
+  const titles = notes.map(n => n.title).filter(t => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()))
+  const q = plainName(titleQuery)
+  const wanted = [...sectionTokens(titleQuery)]
+  const byWords = fuzzySectionMatches(titles.map(name => ({ name })), titleQuery).map(s => s.name)
+  const maxEdits = maxNameEdits(q)
+  const byTypo = maxEdits
+    ? titles.map(t => ({ t, d: editDistance(q, plainName(t)) })).filter(x => x.d <= maxEdits).sort((a, b) => a.d - b.d).map(x => x.t)
+    : []
+  const byWordTypo = titles.filter(t => {
+    const have = [...sectionTokens(t)]
+    return wanted.length > 0 && wanted.every(w => have.some(h => editDistance(w, h) <= maxNameEdits(w)))
+  })
+  return [...new Set([...byWords, ...byTypo, ...byWordTypo])].slice(0, 3)
+}
+
+/** ' Did you mean "X"?' / ' Did you mean one of: "X", "Y"?' / '' — the hint appended to a "not found" error. */
+function didYouMean(suggestions) {
+  if (!suggestions.length) return ''
+  return suggestions.length === 1 ? ` Did you mean "${suggestions[0]}"?`
+    : ` Did you mean one of: ${suggestions.map(n => `"${n}"`).join(', ')}?`
+}
+
+/**
+ * Exits because no note matches `titleQuery`, suggesting the similar titles.
+ * `message` builds the error line from the "Did you mean" hint. With --json the
+ * same facts also go to stdout as { error, code: "note_not_found", note,
+ * suggestions } — the counterpart of failUnknownSection's "section_not_found".
+ */
+function failUnknownNote(titleQuery, message = hint => `No note found: "${titleQuery}"${hint && '.' + hint}`) {
+  const suggestions = noteSuggestions(loadAllNotes(), titleQuery)
+  const text = message(didYouMean(suggestions))
+  err(text)
+  if (jsonMode) jsonOut({ error: text, code: 'note_not_found', note: titleQuery, suggestions })
+  exit(1)
+}
+
 function extractUpdatedTimestamp(content) {
   const match = content.match(/^updated:\s*['"]?([^'">\n]+)['"]?\s*$/m)
   return match ? match[1].trim() : null
 }
 
-// ── Note / section resolution by name (no opaque ids on the CLI surface) ───────
+// ── Note / section resolution by name (folder name / id only for duplicates) ───
 
-/** Resolves a single note by (partial) title, exiting with a helpful error on 0/many matches. */
+/**
+ * Resolves a single note by title (exact, else its folder name / id, else
+ * partial — see matchNotesByTitle), exiting with a helpful error on 0/many matches.
+ */
 function resolveNote(titleQuery) {
   const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
+  if (!matches.length) failUnknownNote(titleQuery)
   failIfAmbiguousNote(matches)
   return matches[0]
 }
 
-/** Several (partial) title matches: list them and exit 1 — never pick one. */
+/**
+ * Several matches — partial ones, or notes sharing the very same title: list
+ * them and exit 1, never pick one. The folder name in parentheses is unique and
+ * resolves like a title (matchNotesByTitle), which is the only way to tell
+ * same-titled notes apart.
+ */
 function failIfAmbiguousNote(matches) {
   if (matches.length <= 1) return
   out('  Multiple matches — be more specific:')
-  matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`))
+  matches.forEach(n => out(`    ${n.title}${n.archived ? ' [archived]' : ''}  (${n.dirname}/)`))
+  out('  To pick one, pass its folder name (in parentheses) instead of the title.')
   exit(1)
+}
+
+/**
+ * stderr line for `new` / `rename` when OTHER notes already carry that exact
+ * title (case-insensitive) — allowed, like in the app, but from then on the
+ * title alone is ambiguous. Returns '' when there is none. `others` must not
+ * include the note being created / renamed.
+ */
+function duplicateTitleNote(others, title, dirname) {
+  const q = title.toLowerCase()
+  const twins = others.filter(n => n.title && n.title.toLowerCase() === q)
+  if (!twins.length) return ''
+  const what = twins.length === 1 ? 'another note is' : `${twins.length} other notes are`
+  return `  Note: ${what} already titled "${title}" — the title alone is now ambiguous; use the folder name to tell them apart (this one: ${dirname})`
 }
 
 function sectionNamesOf(note) {
@@ -2904,15 +3083,27 @@ function editDistance(a, b) {
  * acts on them. Unique names, in note order within each tier.
  */
 function sectionSuggestions(sections, name) {
-  const plain = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
-  const q = plain(name)
+  const q = plainName(name)
   const loose = looseSectionMatches(sections, name).map(s => s.name)
-  // Very short queries ('EN') would "match" half the alphabet by spelling.
-  const maxEdits = q.length < 3 ? 0 : q.length <= 4 ? 1 : 2
+  const maxEdits = maxNameEdits(q)
   const typos = maxEdits
-    ? (sections || []).map(s => s.name).filter(n => editDistance(q, plain(n)) <= maxEdits)
+    ? (sections || []).map(s => s.name).filter(n => editDistance(q, plainName(n)) <= maxEdits)
     : []
   return [...new Set([...loose, ...typos])]
+}
+
+/** A name for spelling comparisons: diacritics stripped, lowercased, trimmed. */
+function plainName(s) {
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+}
+
+/**
+ * Typos tolerated when suggesting a name for `plain` (see plainName): none
+ * under 3 letters — very short queries ('EN') would "match" half the alphabet
+ * by spelling — 1 up to 4 letters, 2 beyond.
+ */
+function maxNameEdits(plain) {
+  return plain.length < 3 ? 0 : plain.length <= 4 ? 1 : 2
 }
 
 /**
@@ -2926,10 +3117,7 @@ function sectionSuggestions(sections, name) {
 function failUnknownSection(note, baseName, opts) {
   const sections = (note.sections || []).map(s => s.name)
   const suggestions = sectionSuggestions(note.sections, baseName)
-  const didYouMean = !suggestions.length ? ''
-    : suggestions.length === 1 ? ` Did you mean "${suggestions[0]}"?`
-      : ` Did you mean one of: ${suggestions.map(n => `"${n}"`).join(', ')}?`
-  const message = `No section named "${baseName}" in "${note.title}".${didYouMean}`
+  const message = `No section named "${baseName}" in "${note.title}".${didYouMean(suggestions)}`
   err(message)
   console.error(`  Existing: ${sectionNamesOf(note)}`)
   console.error('  Use the exact name, or pass --create to create it.')
@@ -3347,8 +3535,8 @@ async function upsertRemoteFile(token, owner, repo, relPath, content, bases = nu
       planConditionalUpsert(bases[relPath], sha === undefined ? null : sha, local) === 'conflict') {
     return 'conflict'
   }
-  const titleMatch = content.match(/^title:\s*['"]?(.+?)['"]?\s*$/m)
-  const label = titleMatch ? titleMatch[1].trim() : relPath.replace(/\.md$/, '')
+  const titleMatch = content.match(/^title:[ \t]*(\S.*)$/m)
+  const label = titleMatch ? unquote(titleMatch[1]) : relPath.replace(/\.md$/, '')
   try {
     await githubRequest(token, 'PUT', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`, {
       message: sha ? `update: ${label}` : `add: ${label}`,
@@ -4444,7 +4632,10 @@ async function cloudPushFile(dek, noteKey, relPath, { force = false } = {}) {
   return 'uploaded'
 }
 
-const STALE_UPLOAD_HINT = "not uploaded: a newer version is on NoteFlow Cloud — run 'noteflow pull'"
+// Same remedy wherever it is printed (after a command, in `push`, in the
+// pull's own re-upload): the pull merges the newer version and re-uploads what
+// is pending; the push after it uploads whatever is still left.
+const STALE_UPLOAD_HINT = "not uploaded: a newer version is on NoteFlow Cloud — run 'noteflow pull', then 'noteflow push'"
 
 /**
  * All non-deleted remote rows decrypted to (relPath, pathKey) — whole-note
@@ -5143,6 +5334,10 @@ async function cloudPullNow() {
   // the server (a section kept local, the merged note.md…) with base = the seq
   // just reconciled — sections first, note.md last (planThreeWayDir's order).
   // Rejected (stale: another device wrote meanwhile) or failed → stays pending.
+  // The files that land are counted (`uploaded` of the result): nothing else
+  // says so, and "0 pulled" alone reads as "my change is still not uploaded".
+  // Kept folders and conflict copies above print their own line — not counted.
+  let reUploaded = 0
   const reUploadDirs = new Map()
   for (const u of reUploads) {
     const dir = noteDirOf(u.relPath)
@@ -5164,6 +5359,7 @@ async function cloudPullNow() {
     }
     if (stale.length) out(`  ${dir}/: ${stale.length} file(s) ${STALE_UPLOAD_HINT}`)
     flushCliCloudBasesBestEffort()
+    reUploaded += uploaded.length
     if (uploaded.length) {
       patchCliCloud({
         pendingUpserts: storedPendingUpserts(nextPendingUpserts(getCliCloud().pendingUpserts, [], uploaded)),
@@ -5174,7 +5370,7 @@ async function cloudPullNow() {
   // Bases of the kept-folder / conflict-copy uploads above; only once they are
   // saved, drop the base contents no section base references any more.
   if (flushCliCloudBasesBestEffort()) pruneCliBaseContents()
-  return { pulled, deleted, errors }
+  return { pulled, deleted, errors, uploaded: reUploaded }
 }
 
 // ── NoteFlow Cloud: commands ──────────────────────────────────────────────────
@@ -5552,8 +5748,11 @@ async function cmdCloudPull() {
   if (!cloudActive()) { err('Not connected to NoteFlow Cloud. Run: noteflow cloud login'); exit(1) }
   requireCloudOrigin()
   out('  Pulling from NoteFlow Cloud...')
-  const { pulled, deleted, errors } = await cloudPullNow()
+  const { pulled, deleted, errors, uploaded } = await cloudPullNow()
   out(`  Done: ${pulled} pulled, ${deleted} deleted, ${errors} errors`)
+  // The pull re-uploads the pending local edits it merged: say so, or a
+  // "0 pulled" after a rejected upload looks like the edit never went up.
+  if (uploaded > 0) out(`  Uploaded ${uploaded} ${uploaded === 1 ? 'file' : 'files'} with pending local changes`)
 }
 
 // ── Confirm prompt ────────────────────────────────────────────────────────────
@@ -5578,9 +5777,21 @@ function isDesktopAppRunning() {
   } catch { return false }
 }
 
+/**
+ * Pure: can a running desktop app be working on the notes dir this CLI uses?
+ * The installed app always opens the DEFAULT notes dir (it only looks elsewhere
+ * when launched with NOTEFLOW_NOTES_DIR itself, which the process list doesn't
+ * show), so in an override dir — tests, scripts — the warning would be a false
+ * alarm. NOTEFLOW_NO_APP_CHECK still silences it everywhere.
+ */
+function desktopAppSharesNotesDir(notesDir = NOTES_DIR, defaultDir = DEFAULT_NOTES_DIR, platform = process.platform) {
+  return sameNotesDir(notesDir, defaultDir, platform)
+}
+
 /** Warn (to stderr) before mutating shared metadata the desktop app may clobber. */
 function warnIfDesktopRunning(opts) {
   if ((opts && opts.json) || process.env.NOTEFLOW_NO_APP_CHECK) return
+  if (!desktopAppSharesNotesDir()) return
   if (isDesktopAppRunning())
     console.error('  ⚠ NoteFlow desktop appears to be running — v2.1.0 and older may overwrite group/folder changes made here. Close or update it first, or these changes may be lost on its next sync.')
 }
@@ -5602,18 +5813,19 @@ async function cmdAdd(positionalText, opts) {
   // The target (note + group/folder) is resolved BEFORE reading the content, so
   // a wrong name fails fast — before stdin is consumed and before any write
   // (also under --dry-run, which must fail exactly like the real run).
-  // --title resolves like every other note command: an exact title wins, a
-  // partial one is fine when unique, several matches exit listing them.
+  // --title resolves like every other note command: an exact title wins (the
+  // folder name / id works too), a partial one is fine when unique, several
+  // matches — same-titled notes included — exit listing them.
   let existing = null
   if (opts.title) {
     const matches = findNoteByTitle(opts.title)
     failIfAmbiguousNote(matches) // also with --create: a near-miss must not spawn a sibling note
     existing = matches[0] || null
     // No match → creating a brand-new note is opt-in (--create), so a typo in
-    // --title fails loudly instead of silently spawning a stray note.
+    // --title fails loudly instead of silently spawning a stray note. --create
+    // only ever creates when NOTHING matched, so it can't duplicate a title.
     if (!existing && !opts.create) {
-      err(`Note "${opts.title}" not found. Pass --create to create it, or use 'noteflow new'.`)
-      exit(1)
+      failUnknownNote(opts.title, hint => `Note "${opts.title}" not found.${hint} Pass --create to create it, or use 'noteflow new'.`)
     }
   } else {
     existing = findTodayNote() // the daily note keeps its auto-create behavior
@@ -5727,9 +5939,15 @@ async function cmdNew(title, opts) {
     ...(folderId ? { folder: folderId } : {}),
   }
   const dirname = noteDirname(id, title)
+  // Same-titled notes are allowed (the app allows them too), but said out loud:
+  // from now on the title alone no longer designates one note.
+  const duplicateNote = duplicateTitleNote(loadAllNotes(), title, dirname)
   const written = writeNoteFolder(dirname, note)
-  if (opts.json) { jsonOut({ id, title, dirname }); return }
-  out(`  Created "${title}"  →  ${dirname}/`)
+  if (opts.json) jsonOut({ id, title, dirname })
+  else out(`  Created "${title}"  →  ${dirname}/`)
+  if (duplicateNote) console.error(duplicateNote)
+  // Also with --json (it used to return before this, leaving the note local
+  // only): the sync lines go to stderr there, like 'add --json' / 'set --json'.
   await syncPushNoteFiles(dirname, written)
 }
 
@@ -5778,14 +5996,7 @@ function cmdList(opts) {
 
 // noteflow get <title> [--section <s>] [--json]
 function cmdGet(titleQuery, opts) {
-  const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
-  if (matches.length > 1 && !opts.json) {
-    out(`  Multiple matches — be more specific:`)
-    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`))
-    exit(1)
-  }
-  const note = matches[0]
+  const note = resolveNote(titleQuery) // also with --json: several matches used to return the first one
 
   if (opts.json) {
     const result = {
@@ -5814,14 +6025,7 @@ function cmdGet(titleQuery, opts) {
 
 // noteflow delete <title> [--yes] [--json]
 async function cmdDelete(titleQuery, opts) {
-  const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
-  if (matches.length > 1) {
-    out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`))
-    exit(1)
-  }
-  const note = matches[0]
+  const note = resolveNote(titleQuery)
   if (!opts.yes) {
     const ok = await confirm(`Delete "${note.title}"?`)
     if (!ok) {
@@ -5891,13 +6095,7 @@ async function cmdDelete(titleQuery, opts) {
 
 // noteflow favorite <title>
 async function cmdFavorite(titleQuery) {
-  const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
-  if (matches.length > 1) {
-    out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); exit(1)
-  }
-  const note = matches[0]
+  const note = resolveNote(titleQuery)
   note.favorited = !(note.favorited || note.pinned)
   delete note.pinned
   writeNoteFolder(note.dirname, note)
@@ -5907,13 +6105,7 @@ async function cmdFavorite(titleQuery) {
 
 // noteflow archive <title>
 async function cmdArchive(titleQuery) {
-  const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
-  if (matches.length > 1) {
-    out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); exit(1)
-  }
-  const note = matches[0]
+  const note = resolveNote(titleQuery)
   note.archived = !note.archived
   writeNoteFolder(note.dirname, note)
   out(`  "${note.title}" ${note.archived ? 'archived' : 'unarchived'}`)
@@ -5922,33 +6114,32 @@ async function cmdArchive(titleQuery) {
 
 // noteflow rename <old-title> <new-title>
 async function cmdRename(oldTitle, newTitle) {
-  const matches = findNoteByTitle(oldTitle)
-  if (!matches.length) { err(`No note found: "${oldTitle}"`); exit(1) }
-  if (matches.length > 1) {
-    out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); exit(1)
-  }
-  const note = matches[0]
+  const note = resolveNote(oldTitle)
+  // Allowed, like `new`, but said out loud (see duplicateTitleNote).
+  const duplicateNote = duplicateTitleNote(loadAllNotes().filter(n => n.dirname !== note.dirname), newTitle, note.dirname)
   note.title = newTitle
   // The directory name is frozen at creation — only note.md changes
   writeNoteFolder(note.dirname, note)
   out(`  Renamed to "${newTitle}"`)
+  if (duplicateNote) console.error(duplicateNote)
   await syncPushNoteFiles(note.dirname, [NOTE_MD])
 }
 
-// noteflow sections <title>
-function cmdSections(titleQuery) {
-  const matches = findNoteByTitle(titleQuery)
-  if (!matches.length) { err(`No note found: "${titleQuery}"`); exit(1) }
-  if (matches.length > 1) {
-    out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); exit(1)
+// noteflow sections <title> [--json]   (same command: noteflow section list <title>)
+function cmdSections(titleQuery, opts = {}) {
+  const note = resolveNote(titleQuery)
+  if (opts.json) {
+    // Same field names as the sections of get/read/path --json (id, name,
+    // isRawMode) and of note.md (aiHidden), plus what the human listing shows.
+    jsonOut((note.sections || []).map(s => ({
+      id: s.id, name: s.name, lines: lineCount(s.content),
+      mode: s.isRawMode ? 'text' : 'markdown', isRawMode: s.isRawMode === true, aiHidden: s.aiHidden === true,
+    })))
+    return
   }
-  const note = matches[0]
   out(`\n  Sections of "${note.title}":`)
   for (const s of note.sections || []) {
-    const lines = lineCount(s.content)
-    out(`    ${s.name}  (${lines} lines${s.isRawMode ? ', text' : ', markdown'}${s.aiHidden ? ', hidden from AI' : ''})`)
+    out(`    ${s.name}  (${linesLabel(lineCount(s.content))}${s.isRawMode ? ', text' : ', markdown'}${s.aiHidden ? ', hidden from AI' : ''})`)
   }
   out('')
 }
@@ -6051,7 +6242,7 @@ async function cmdSet(titleQuery, sectionName, opts) {
   if (createdSection) out(`  Created section "${sec.name}"`)
   if (similarNote) console.error(similarNote)
   if (opts.json) jsonOut({ note: note.title, dirname: note.dirname, section: sec.name, createdNote: false, createdSection, bytesWritten })
-  else out(`  Set "${note.title}" → "${sec.name}"  (${content ? lineCount(content) + ' lines' : 'empty'})`)
+  else out(`  Set "${note.title}" → "${sec.name}"  (${content ? linesLabel(lineCount(content)) : 'empty'})`)
   await syncPushNoteFiles(note.dirname, [NOTE_MD, `${sec.id}.md`])
 }
 
@@ -6432,7 +6623,7 @@ async function cmdHistory(titleQuery, sectionName, opts) {
   target.content = content
   writeNoteFolder(fresh.dirname, fresh)
   if (opts.json) jsonOut({ ...result(), restored: true, unchanged: false, snapshot })
-  else out(`  Restored version ${wanted} (${when}) of "${target.name}" in "${fresh.title}"  (${content ? lineCount(content) + ' lines' : 'empty'})`)
+  else out(`  Restored version ${wanted} (${when}) of "${target.name}" in "${fresh.title}"  (${content ? linesLabel(lineCount(content)) : 'empty'})`)
   if (saved) out('  The content it replaced was saved to the history first ("saved before a restore").')
   else if (snapshot === false) console.error(`  Warning: the content it replaced was NOT saved to the history (${failure}) — restored anyway (--force).`)
   await syncPushNoteFiles(fresh.dirname, [NOTE_MD, `${target.id}.md`])
@@ -7695,10 +7886,15 @@ function cmdHelp(topic) {
   The mode flags only apply to a section created now; existing ones keep theirs.
 
   --title resolves like the other note commands: an exact title wins, a partial
-  one works when it matches a single note, and several matches are an error that
-  lists them (nothing written — also with --create). An unknown --group/--folder
-  is an error too (exit 1, nothing written). Changing an existing note's group
-  without --folder takes it to the new group's root, like 'move'.
+  one works when it matches a single note, and several matches — also notes
+  with the very same title — are an error that lists them (nothing written,
+  also with --create); pass the folder name it shows to pick one. A title that
+  matches nothing fails with "Did you mean" suggestions (with --json also on
+  stdout: { error, code: "note_not_found", note, suggestions }) unless --create,
+  which only creates when nothing matched — it never duplicates a title. An
+  unknown --group/--folder is an error too (exit 1, nothing written). Changing
+  an existing note's group without --folder takes it to the new group's root,
+  like 'move'.
 
   --json result: { note, dirname, section, createdNote, createdSection,
   bytesWritten } (--dry-run adds "dryRun": true; dirname is null for a note that
@@ -7896,10 +8092,16 @@ function cmdHelp(topic) {
     noteflow set "Project Alpha" "Tasks#2" --file todo.txt   # 2nd 'Tasks' section
 `,
     section: `
-  noteflow section list   <title>
+  noteflow sections       <title> [--json]
+  noteflow section list   <title> [--json]   (alias: the same command as 'sections')
   noteflow section add    <title> <name> [--raw]
   noteflow section rename <title> <old> <new>
   noteflow section delete <title> <name> [--yes]
+
+  'sections' / 'section list' print each section's name, line count and mode
+  (text / markdown), plus "hidden from AI" when it is. --json prints an array,
+  one object per section in note order: { id, name, lines, mode ("markdown" |
+  "text"), isRawMode, aiHidden }.
 
   Manage a note's sections by name (no ids needed). Section names are NOT unique;
   disambiguate duplicates with a 1-based suffix, e.g. "Tasks#2". 'delete' refuses
@@ -7955,6 +8157,8 @@ function cmdHelp(topic) {
   Creates a new empty note with the given title. Optionally place it in a group
   (and a folder of that group) and name its first section. The section is in
   markdown mode (rendered); --raw makes it text mode. --json prints the note.
+  A title another note already has is allowed (titles are not unique) but
+  warned about on stderr: from then on, tell them apart by folder name.
 
   Examples:
     noteflow new "Sprint 14"
@@ -7994,7 +8198,9 @@ function cmdHelp(topic) {
   noteflow rename <old> <new>
 
   Changes a note's title. The on-disk folder name is kept as-is (only the title
-  in the note's metadata changes). Old title can be partial.
+  in the note's metadata changes). Old title can be partial. A new title that
+  another note already has is allowed (titles are not unique) but warned about
+  on stderr: from then on, tell them apart by folder name ('noteflow list').
 
   Example:
     noteflow rename "Projct Alpha" "Project Alpha"
@@ -8082,11 +8288,14 @@ function cmdHelp(topic) {
   disk signs in but syncs nothing until you choose ('noteflow help origin').
 
   Sync is per file (each section is a file): edits to different sections on two
-  devices merge; if both changed the SAME section, the note keeps the remote
-  version and yours goes to a conflict copy holding only those sections
-  ("Conflict: local changes kept as …"). An upload made on a stale copy is
-  rejected ("not uploaded: a newer version is on NoteFlow Cloud") — run
-  'noteflow pull', which merges it, then 'noteflow push'.
+  devices merge. If both changed the SAME section, it is merged line by line
+  inside the note; only when both changed the same lines are both versions
+  kept there, between ⚠️ markers ("Merged with conflicts: …"). A conflict copy
+  ("Conflict: local changes kept as …") is left for encrypted notes and the
+  few cases that can't be merged. An upload made on a stale copy is rejected
+  ("not uploaded: a newer version is on NoteFlow Cloud"): run 'noteflow pull',
+  then 'noteflow push' — the pull merges it and uploads what was pending
+  ("Uploaded N files with pending local changes"), the push whatever is left.
 
   Encryption modes:
     standard (managed)  'noteflow cloud setup' — nothing to remember.
@@ -8156,9 +8365,12 @@ function cmdHelp(topic) {
 
   Uploads every note to the active backend (NoteFlow Cloud when signed in, else
   GitHub). Ends with "Done: N pushed, E errors". On GitHub a note that changed
-  remotely since your last pull is never overwritten: the note takes the GitHub
-  version and your local one is kept as a conflict copy ("Conflict: local
-  changes kept as …"); if that can't be resolved it says "changed on GitHub
+  remotely since your last pull is never overwritten: it is merged line by line
+  with the GitHub version and the result uploaded; only when both sides
+  changed the same lines are both versions kept in the note, between ⚠️
+  markers ("Merged with conflicts: …"). A conflict copy ("Conflict: local
+  changes kept as …") is left for encrypted notes and the few cases that
+  can't be merged; if that can't be resolved either it says "changed on GitHub
   since your last pull — not uploaded" — run 'noteflow pull', then push again.
   If any file fails, the last-sync time is not advanced — run 'noteflow push'
   again.
@@ -8244,7 +8456,7 @@ function cmdHelp(topic) {
     archive <title>       Toggle archive on a note
 
   Section commands:
-    sections <title>            List sections of a note
+    sections <title>                List sections of a note (alias: section list)
     section add <title> <name>      Add a section
     section rename <title> <o> <n>  Rename a section
     section delete <title> <name>   Delete a section
@@ -8279,8 +8491,9 @@ function cmdHelp(topic) {
 
   Flags (a flag a command doesn't support is an error, never ignored):
     --json                Machine-readable JSON output (info lines go to stderr) —
-                          list/get/read/path/new/add/set/delete/history, groups/folders,
-                          group create/folder create, status/cloud status, origin, login --no-wait
+                          list/get/read/path/new/add/set/delete/history,
+                          sections (section list), groups/folders, group create/folder create,
+                          status/cloud status, origin, login --no-wait
     --yes                 Skip confirmation prompts
     --dry-run             add/set/history --restore: resolve the target without
                           writing anything
@@ -8298,6 +8511,15 @@ function cmdHelp(topic) {
     noteflow touch "<title>"                  …bump 'updated:' and sync
     Section names must be exact: an unknown one fails with "Did you mean" and the
     existing names (also as JSON with --json) — add --create only for a NEW one.
+
+  Note titles (every command that takes <title>, and add --title):
+    The exact title wins; a partial one works when it matches a single note.
+    Titles are NOT unique: several matches — also notes with the very same
+    title — are an error that lists them, never a guess. Pass the folder name
+    it shows in parentheses (the one 'list' prints, e.g. project-alpha-Ab12Cd34)
+    instead of the title to pick one; a note id works too. A title that matches
+    nothing fails with "Did you mean" suggestions (with --json also on stdout:
+    { error, code: "note_not_found", note, suggestions }).
 
   AI agent integration:
     NoteFlow ships with an AI agent skill that teaches LLMs how to use this CLI.
@@ -8384,8 +8606,8 @@ const COMMAND_FLAGS = {
   list: ['--tag', '--group', '--folder', '--archived', '--json'],
   get: ['--section', '--json'], read: ['--section', '--json'], path: ['--section', '--json'],
   history: ['--section', '--show', '--restore', '--dry-run', '--force', '--json'],
-  delete: ['--json'], rename: [], sections: [], touch: [], favorite: [], archive: [],
-  'section list': [], 'section add': RAW_FLAGS, 'section rename': [], 'section delete': [],
+  delete: ['--json'], rename: [], sections: ['--json'], touch: [], favorite: [], archive: [],
+  'section list': ['--json'], 'section add': RAW_FLAGS, 'section rename': [], 'section delete': [],
   move: ['--group', '--folder', '--ungroup'],
   groups: ['--json'], 'group create': ['--color', '--json'], 'group delete': [],
   folders: ['--group', '--json'], 'folder list': ['--group', '--json'], 'folder create': ['--group', '--json'],
@@ -8420,6 +8642,29 @@ function unsupportedFlagError(cmd, sub, seen) {
   return `Flag ${bad} is not supported by '${label}' — nothing was done (see 'noteflow help ${base}')`
 }
 
+// Every first word main() dispatches on (the keys of COMMAND_FLAGS, their
+// aliases, help and version) — what an unknown command is compared against.
+const KNOWN_COMMANDS = [...new Set([
+  ...Object.keys(COMMAND_FLAGS).map(key => key.split(' ')[0]),
+  ...Object.keys(COMMAND_ALIASES), 'help', 'version',
+])]
+
+/**
+ * Pure: the error of a command main() doesn't know, or null when it does.
+ * Suggests the closest command by spelling ('lsit' → 'list'; same typo
+ * tolerance as the name suggestions, see maxNameEdits) when there is one.
+ */
+function unknownCommandError(cmd) {
+  if (KNOWN_COMMANDS.includes(cmd)) return null
+  const typed = String(cmd).toLowerCase()
+  let best = null
+  for (const known of KNOWN_COMMANDS) {
+    const d = editDistance(typed, known)
+    if (d <= maxNameEdits(typed) && (!best || d < best.d)) best = { known, d }
+  }
+  return `Unknown command: ${cmd}${best ? `. Did you mean '${best.known}'?` : ''}`
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -8433,6 +8678,10 @@ async function main() {
 
   if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') { cmdHelp(args[1]); return }
   if (cmd === 'version' || cmd === '--version' || cmd === '-v') { out(`noteflow CLI v${CLI_VERSION}`); return }
+
+  // An unknown command is just that — on stderr, before its flags are judged
+  // (it used to print the whole help to stdout first).
+  failIfUnknownCommand(cmd)
 
   const { flags, positional, seen } = parseFlags(args.slice(1))
   if (flags.json) jsonMode = true // reroute informational out() lines to stderr
@@ -8473,8 +8722,8 @@ async function main() {
     }
     case 'sections': {
       const title = positional.join(' ')
-      if (!title) { err('Usage: noteflow sections <title>'); exit(1) }
-      cmdSections(title)
+      if (!title) { err('Usage: noteflow sections <title> [--json]'); exit(1) }
+      cmdSections(title, flags)
       break
     }
     case 'read': {
@@ -8515,8 +8764,8 @@ async function main() {
       const sub = positional[0]
       if (sub === 'list') {
         const title = positional.slice(1).join(' ')
-        if (!title) { err('Usage: noteflow section list <title>'); exit(1) }
-        cmdSections(title)
+        if (!title) { err('Usage: noteflow section list <title> [--json]'); exit(1) }
+        cmdSections(title, flags)
       } else if (sub === 'add') {
         const title = positional[1]
         const name = positional.slice(2).join(' ')
@@ -8610,10 +8859,20 @@ async function main() {
     case 'self-update':   await cmdSelfUpdate(); break
     case 'status':  if (cloudActive()) await cmdCloudStatus(flags); else cmdStatus(flags); break
     default:
+      // Unreachable while KNOWN_COMMANDS covers every case above (failIfUnknownCommand).
       err(`Unknown command: ${cmd}`)
-      cmdHelp()
+      console.error("  Run 'noteflow help' for the list of commands")
       exit(1)
   }
+}
+
+/** Exits 1 on a command main() doesn't know: the error (with the closest command, if any) on stderr — no help dump. */
+function failIfUnknownCommand(cmd) {
+  const message = unknownCommandError(cmd)
+  if (!message) return
+  err(message)
+  console.error("  Run 'noteflow help' for the list of commands")
+  exit(1)
 }
 
 if (require.main === module) {
@@ -8688,5 +8947,12 @@ if (require.main === module) {
     cmdCloudPull, cmdDelete, cmdSectionDelete, cmdMigrate, finishCloudLogin, cmdLogin, cmdLoginFinish,
     GITHUB_BASES_PATH, SETTINGS_PATH, NOTES_DIR, DEFAULT_NOTES_DIR, sameNotesDir, normalizeNotesDir,
     originScope, originPlacement, withNotesDir,
+    // YAML scalar writer / reader (exact inverses), the folder-name slug and
+    // the pure note / command resolution helpers
+    yamlQuote: q, unquote, noteDirname, matchNotesByTitle, noteSuggestions, duplicateTitleNote,
+    unknownCommandError, desktopAppSharesNotesDir, linesLabel,
+    // The whole command line (process.argv), for tests that need the real
+    // --json routing (stdout vs stderr) against the in-memory Cloud server.
+    main,
   }
 }

@@ -35,7 +35,9 @@ La **documentación del proyecto** vive en `.agents/context/*.md` (abajo el mapa
   porque la sección no existe, reintenta con el nombre sugerido; **nunca `--create`**. Solo añadir: no
   crear secciones, ni reordenar ni tachar (si la checklist no cierra la sección, insértalo en su sitio con
   `noteflow path` + editar + `noteflow touch`). Di en tu respuesta qué ítem añadiste; sin CLI a mano,
-  indícalo ahí.
+  indícalo ahí. Para usar el CLI sigue la skill `noteflow-cli`: con sync, `noteflow pull` antes de
+  escribir y, tras el `add`, mira su línea de sync; si no dice `Synced to …`, haz `noteflow pull` y
+  luego `noteflow push` sin preguntar (con Cloud el pull fusiona, no pisa lo local).
 - Los **mensajes de commit van en inglés**.
 - **Compatibilidad con Claude:** los enlaces bajo `.claude/` apuntan a la fuente canónica de
   `.agents/`. No los compruebes ni repares de forma preventiva. Solo si un acceso falla o un enlace

@@ -296,6 +296,7 @@ describe('the real case: the CLI edits a section offline while the PC edited ano
     const pcAnchorSeq = server.seq // pcSave writes note.md last
     const res = await cli.cloudPullNow()
     expect(res.errors).toBe(0)
+    expect(res.uploaded).toBe(2) // a.md + the merged note.md
     expect(otherDirs()).toEqual([]) // no conflict copy
     expect(readLocal(`${DIR}/a.md`)).toBe('a CLI')
     expect(readLocal(`${DIR}/b.md`)).toBe('b PC #pc')
@@ -387,6 +388,65 @@ describe('the real case (2026-11-06): `noteflow add` appends a line on top of a 
   })
 })
 
+describe('`noteflow pull` reports the pending local changes it re-uploads', () => {
+  const UPLOADED_LINE = /Uploaded \d+ files? with pending local changes/
+  const doneLine = () => logs.find((l) => /Done: \d+ pulled, \d+ deleted, \d+ errors/.test(l))
+
+  it('a rejected (stale) upload: the pull after it says how many files it uploaded, after an unchanged "Done:" line', async () => {
+    // Same case as above: the push of `noteflow add` goes stale.
+    await pcSave(note(T_PC, { ...BASE, b: 'b v1\n- [ ] desktop' }), ['b'])
+    fs.writeFileSync(localPath(`${DIR}/b.md`), 'b v1\n- [ ] desktop')
+    cliEdit('b', 'b v1\n- [ ] desktop\n- [ ] cli', T_CLI)
+    await cli.syncPushNoteFiles(DIR, [NOTE_MD, 'b.md'])
+    expect(logs.some((l) => l.includes("not uploaded: a newer version is on NoteFlow Cloud — run 'noteflow pull', then 'noteflow push'"))).toBe(true)
+    logs.length = 0
+    await cli.cmdCloudPull()
+    expect(await server.content(`${DIR}/b.md`)).toBe('b v1\n- [ ] desktop\n- [ ] cli')
+    expect(readSettings().cliCloud.pendingUpserts).toBeUndefined()
+    // b.md + note.md went up; the line comes right after "Done: …".
+    expect(doneLine()).toMatch(/^ {2}Done: \d+ pulled, 0 deleted, 0 errors$/)
+    expect(logs[logs.indexOf(doneLine() as string) + 1]).toBe('  Uploaded 2 files with pending local changes')
+    // Nothing left: the push that follows uploads no note file, and a second pull stays quiet.
+    server.calls = []
+    await cli.cmdCloudPush()
+    expect(server.calls.filter((c) => !c.startsWith('plain'))).toEqual([])
+    logs.length = 0
+    await cli.cmdCloudPull()
+    expect(doneLine()).toBe('  Done: 0 pulled, 0 deleted, 0 errors')
+    expect(logs.some((l) => UPLOADED_LINE.test(l))).toBe(false)
+  })
+
+  it('counts files, in the singular for one; a pull with nothing pending reports 0', async () => {
+    // Both sides changed only the note's tags: note.md alone is rejected, then merged and re-uploaded.
+    await pcSave(note(T_PC, BASE, { tags: ['dev', 'pc'] }), [])
+    fs.writeFileSync(localPath(ANCHOR), serializeNoteFolder(note(T_CLI, BASE, { tags: ['dev', 'cli'] }), { preserveUpdated: true }).files[NOTE_MD])
+    await cli.syncPushNoteFiles(DIR, [NOTE_MD])
+    expect(readSettings().cliCloud.pendingUpserts).toEqual([ANCHOR])
+    logs.length = 0
+    await cli.cmdCloudPull()
+    expect(logs).toContain('  Uploaded 1 file with pending local changes')
+    expect([...(fmOf((await server.content(ANCHOR)) as string).tags as string[])].sort()).toEqual(['cli', 'dev', 'pc'])
+    // A plain download (the PC edits C, nothing pending here): nothing uploaded.
+    await pcSave(note('2026-11-03T09:00:00.000Z', { ...BASE, c: 'c PC' }, { tags: ['dev', 'pc', 'cli'] }), ['c'])
+    const res = await cli.cloudPullNow()
+    expect(res).toMatchObject({ pulled: 1, deleted: 0, errors: 0, uploaded: 0 })
+    expect(readLocal(`${DIR}/c.md`)).toBe('c PC')
+  })
+
+  it('a note kept over a remote delete and re-uploaded has its own line and is not counted', async () => {
+    for (const f of ['a.md', 'b.md', 'c.md', NOTE_MD]) await server.tombstone(`${DIR}/${f}`, T_PC)
+    server.failUploads = true
+    cliEdit('a', 'a CLI', T_CLI)
+    await cli.syncPushNoteFiles(DIR, [NOTE_MD, 'a.md'])
+    server.failUploads = false
+    logs.length = 0
+    const res = await cli.cloudPullNow()
+    expect(logs.some((l) => l.includes(`Kept ${DIR}/`) && l.includes('uploaded again'))).toBe(true)
+    expect(await server.content(`${DIR}/a.md`)).toBe('a CLI')
+    expect(res.uploaded).toBe(0)
+  })
+})
+
 describe('base content store (cli-cloud-base-content/)', () => {
   it('the first pull stores the content of every section base (note.md excluded)', () => {
     const bases = cli.cliCloudBasesSnapshot()
@@ -448,7 +508,7 @@ describe('uploads with a base (cloud_upsert_file_v2)', () => {
     expect(server.calls.filter((c) => c.startsWith('v2')).length).toBe(2) // a.md + note.md, never b/c
     expect(await server.content(`${DIR}/a.md`)).toBe('a CLI')
     expect(await server.content(`${DIR}/b.md`)).toBe('b PC') // untouched b never went up
-    expect(logs.some((l) => l.includes("not uploaded: a newer version is on NoteFlow Cloud — run 'noteflow pull'"))).toBe(true)
+    expect(logs.some((l) => l.includes("not uploaded: a newer version is on NoteFlow Cloud — run 'noteflow pull', then 'noteflow push'"))).toBe(true)
     const c = readSettings().cliCloud
     expect(c.pendingUpserts).toEqual([ANCHOR])
     expect(c.lastSync).toBe(lastSync) // a stale upload is not a sync
@@ -607,5 +667,70 @@ describe('account switch', () => {
     const next = cli.cliCloudForUser(c, 'b')
     expect(next.basesBootstrapped).toBeUndefined()
     expect(next.basesBootstrapPending).toBeUndefined()
+  })
+})
+
+// The bug: cmdNew returned right after printing the JSON, before the push, so
+// `new --json` left the note on this machine only (unlike `new` and
+// `add --json` / `set --json`). Driven through main() for the real --json
+// routing: stdout carries the JSON document and nothing else.
+describe('`noteflow new --json` syncs the note it creates', () => {
+  const savedArgv = process.argv
+  let stdout: string
+  let stdoutLines: string[] // console.log — must stay empty in --json mode
+  let stderr: string[]
+
+  async function runMain(args: string[]) {
+    stdout = ''
+    stdoutLines = []
+    stderr = []
+    vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { stdoutLines.push(a.join(' ')) })
+    vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { stderr.push(a.join(' ')) })
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => { stdout += String(chunk); return true })
+    process.argv = [process.execPath, CLI_PATH, ...args]
+    try { await cli.main() } finally { process.argv = savedArgv }
+  }
+
+  afterEach(() => { process.argv = savedArgv })
+
+  it('uploads note.md + its section; stdout is one JSON document, the sync line goes to stderr', async () => {
+    await runMain(['new', 'Sprint 14', '--section', 'Tasks', '--json'])
+    expect(stdoutLines).toEqual([])
+    expect(stdout.endsWith('\n')).toBe(true)
+    expect(stdout.trim().split('\n')).toHaveLength(1)
+    const created = JSON.parse(stdout) as { id: string; title: string; dirname: string }
+    expect(Object.keys(created)).toEqual(['id', 'title', 'dirname'])
+    expect(created).toMatchObject({ title: 'Sprint 14', dirname: `sprint-14-${created.id}` })
+    expect(stderr).toEqual(['  Synced to NoteFlow Cloud'])
+
+    // The note is on the server: its anchor and its (empty) section file.
+    const remoteAnchor = await server.content(`${created.dirname}/${NOTE_MD}`)
+    expect(remoteAnchor).toBe(readLocal(`${created.dirname}/${NOTE_MD}`))
+    const fm = fmOf(remoteAnchor as string) as { title: string; sections: { id: string; name: string }[] }
+    expect(fm.title).toBe('Sprint 14')
+    expect(fm.sections.map((s) => s.name)).toEqual(['Tasks'])
+    expect(await server.content(`${created.dirname}/${fm.sections[0].id}.md`)).toBe('')
+    expect(readSettings().cliCloud.pendingUpserts).toBeUndefined()
+  })
+
+  it('same upload as `new` without --json (whose lines all go to stdout)', async () => {
+    await runMain(['new', 'Sprint 15'])
+    expect(stdout).toBe('')
+    expect(stderr).toEqual([])
+    expect(stdoutLines).toHaveLength(2)
+    expect(stdoutLines[0]).toMatch(/^ {2}Created "Sprint 15" {2}→ {2}sprint-15-[0-9A-Za-z_-]{8}\/$/)
+    expect(stdoutLines[1]).toBe('  Synced to NoteFlow Cloud')
+    const dir = otherDirs().find((d) => d.startsWith('sprint-15-')) as string
+    expect(await server.content(`${dir}/${NOTE_MD}`)).toBe(readLocal(`${dir}/${NOTE_MD}`))
+  })
+
+  it('a failed upload still prints the JSON alone on stdout and leaves the note pending', async () => {
+    server.failUploads = true
+    await runMain(['new', 'Offline note', '--json'])
+    expect(stdoutLines).toEqual([])
+    const created = JSON.parse(stdout) as { dirname: string }
+    expect(await server.content(`${created.dirname}/${NOTE_MD}`)).toBeUndefined()
+    expect(readSettings().cliCloud.pendingUpserts).toContain(`${created.dirname}/${NOTE_MD}`)
+    expect(stderr.length).toBeGreaterThan(0) // the reason, never on stdout
   })
 })

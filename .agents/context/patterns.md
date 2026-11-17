@@ -4082,15 +4082,16 @@ abrir el dmg en Finder** (no reemplazo automático). Qué cambió y qué NO:
 
 ### CLI companion (`cli/noteflow.js`)
 Node.js standalone (sin deps de Electron) que opera directamente sobre los `.md`. Comandos:
-`add`, `new`, `list`, `get`, `read`, `set`, `path`, `touch`, `delete`, `rename`, `move`, `sections`,
-`section add/rename/delete`, `favorite` (alias `pin`), `archive`, `groups`, `group create/delete`,
+`add`, `new`, `list`, `get`, `read`, `set`, `path`, `touch`, `delete`, `rename`, `move`, `sections`
+(= `section list`), `section add/rename/delete`, `favorite` (alias `pin`), `archive`, `groups`, `group create/delete`,
 `folders`, `folder create/rename/delete`, `login` (también en dos pasos: `--no-wait`/`--finish`),
 `logout`, `push`, `pull`/`update`, `status`,
 `cloud login/logout/status/setup/push/pull` (cliente NoteFlow Cloud headless — ver
 `monetization.md` § 4 "Cliente CLI (headless)"; con sesión Cloud activa, `push`/`pull`/`status` y el
 sync automático van a Cloud en vez de a GitHub), `history` (historial de versiones de Cloud, abajo),
 `migrate`, `self-update`.
-Todo se direcciona **por nombre** (título de nota + nombre de sección), nunca por id; los nombres de
+Todo se direcciona **por nombre** (título de nota + nombre de sección), no por id: el nombre de carpeta o el id solo sirven para distinguir títulos repetidos (los títulos
+tampoco son únicos: ver "Resolución de nota por título" abajo); los nombres de
 sección **no son únicos** → se desambiguan con un sufijo 1-based `#n` (p. ej. `Tasks#2`). La
 resolución de sección (`matchSectionOrNull`) es única para todos los comandos: **nombre exacto**
 (case-insensitive) + `#n`, y varios homónimos sin `#n` **fallan en vez de adivinar**. La coincidencia
@@ -4105,7 +4106,8 @@ estrictos:** sin match exacto **fallan** (exit 1, nada escrito; `failUnknownSect
 laxos y después los parecidos por ortografía (`editDistance`, distancia OSA ≤1 para ≤4 letras, ≤2
 para más; nada por ortografía con <3 letras) — **solo se sugieren**, nunca se usan. Con `--json` el
 error sale **además en stdout** como `{ error, code: "section_not_found", note, section, sections,
-suggestions }` (es el único error del CLI en JSON: la vía de autocorrección de un agente); `--dry-run`
+suggestions }` (con el de nota inexistente, `note_not_found` — ver "Resolución de nota por título" abajo —,
+son los únicos errores del CLI en JSON: la vía de autocorrección de un agente); `--dry-run`
 lo reproduce. **`--create`** = "crea lo que falte" (en `add`, nota de `--title` y/o sección; en
 `set`, solo la sección — la nota tiene que existir); al crear con parecidas lo avisa por stderr
 (`similarSectionsNote`: `Note: no section named "EN" — created it. Similar existing: …`; `would
@@ -4122,6 +4124,94 @@ fuerza modo texto; `--markdown` y `--rich` (alias histórico, se mantiene) son e
 Las secciones existentes nunca cambian de modo. `migrate` (v1→v2) crea la `Note` de una nota v1 solo
 con cuerpo en modo markdown, igual que `parseLegacyNoteRaw` del escritorio (antes el CLI la ponía en
 modo texto).
+
+**Resolución de nota por título (v2.15.0).** `matchNotesByTitle` (pura; `findNoteByTitle` la aplica a
+`loadAllNotes()`), en este orden: (1) **todas** las notas cuyo título es exactamente la consulta
+(sin distinguir mayúsculas) — los títulos **no son únicos** (la app permite varias `Untitled`), así
+que pueden ser varias; (2) la nota cuyo **nombre de carpeta** (`dirname`, `<slug>-<id>`, con o sin
+`/` final, sin distinguir mayúsculas — tal como lo imprimen `list` y "Multiple matches") o cuyo `id`
+es la consulta; (3) las que contienen la consulta. Varias coincidencias —parciales **o del mismo
+título**— son siempre el error `Multiple matches — be more specific:` (`failIfAmbiguousNote`, exit 1,
+nada escrito), que lista `título [archived]  (dirname/)` y termina con `To pick one, pass its folder
+name (in parentheses) instead of the title.`: **nunca se elige una** (antes `notes.find` devolvía la
+primera homónima en silencio, y `get --json` la primera de cualquier lista ambigua). Todos los
+comandos pasan por `resolveNote` (se quitaron las seis copias del bloque en `get`/`delete`/`favorite`/
+`archive`/`rename`/`sections`); `add --title` usa `findNoteByTitle` + `failIfAmbiguousNote` porque con
+`--create` cero coincidencias no es un error. Decisiones:
+- **El título exacto va antes que el nombre de carpeta** (regla documentada "el título exacto gana",
+  sin excepciones); solo una nota titulada igual que el `dirname` o el `id` de otra tapa a esa otra, y
+  sigue siendo alcanzable por su título o su otro identificador.
+- **Las archivadas cuentan** para la ambigüedad y se resuelven como cualquiera (el CLI las lee, las
+  escribe y `archive` es un toggle: hay que poder resolverlas para desarchivarlas); el listado las
+  marca `[archived]`. Las **cifradas** siguen fuera (`readNoteFolder` las descarta).
+- **La nota diaria nunca falla por ambigua:** `findTodayNote` toma la más reciente por `updated:`
+  entre las candidatas (ahora también entre varias con el título exacto de hoy).
+- **`new` y `rename` permiten el duplicado y avisan** por stderr (`duplicateTitleNote`: `Note: another
+  note is already titled "X" — the title alone is now ambiguous; use the folder name to tell them
+  apart (this one: <dirname>)`). `add --title X --create` no puede duplicar: solo crea con cero
+  coincidencias (ni exacta, ni carpeta, ni parcial).
+- **Nota inexistente → sugerencias** (`failUnknownNote` → `noteSuggestions`, hasta 3 títulos, mismo
+  criterio que las secciones): títulos con todas las palabras de la consulta (sin acentos/mayúsculas/
+  stopwords: `reunion` → `Reunión de equipo`), títulos a ≤1-2 erratas de la consulta entera
+  (`editDistance`, `maxNameEdits`), y títulos donde cada palabra de la consulta es una errata de una
+  suya. Mensajes: `No note found: "resetas". Did you mean "Recetas"?` (sin parecidas, el de siempre,
+  `No note found: "x"`) y, en `add --title`, `Note "X" not found. Did you mean "Y"? Pass --create …`.
+  Con `--json` sale además en stdout `{ error, code: "note_not_found", note, suggestions }` (usa el
+  global `jsonMode`, así vale para todo comando con `--json`).
+Tests: `tests/cli/noteResolution.test.ts`.
+
+**Lector/escritor de escalares YAML (v2.15.0).** El CLI no usa js-yaml: escribe con `q()` (escalar
+entre comillas dobles) y lee con `unquote()`, que son **inversos exactos** y coinciden con lo que
+lee/escribe js-yaml en la app. Antes `unquote` solo quitaba las comillas exteriores, así que cada
+lectura+escritura duplicaba las barras de un título o nombre de sección con `"` o `\`
+(`"a/b: \"c\""` → `"a/b: \\\"c\\\""` → …) y la nota dejaba de encontrarse por su título. `unquote`
+deshace **todos** los escapes de comillas dobles de YAML 1.2 (los que js-yaml puede emitir: `\\ \" \/
+\0 \a \b \t \n \v \f \r \e \N \_ \L \P`, espacio/tab escapados y `\xXX`, `\uXXXX`, `\UXXXXXXXX`), `''`
+→ `'` en comillas simples, ignora un comentario tras la comilla de cierre y deja tal cual lo que no
+entiende (escape desconocido; valor mal cerrado → regla antigua de quitar las comillas exteriores).
+`q()` escapa además los caracteres de control y separadores de línea (`\n`, `\r`, `\t`, `\xXX`,
+`\uXXXX`): un salto de línea crudo rompía el lector por líneas y js-yaml rechaza los demás. Los
+espejos textuales de fusión de anclas (`yamlScalarValue` → `anchorTitle`, `fmStringList`,
+`sectionItemFile`) usan el mismo `unquote` (antes `JSON.parse` con caída al `unquote` roto: solo
+cambia para escapes que JSON no conoce, ahora como js-yaml). De paso: `tags` en lista de bloque (como
+la escribe js-yaml: `tags:` + `  - item`) se leía como vacía y el CLI la reescribía `tags: []`; ahora
+se lee, y la lista en flujo se parte por las comas **fuera** de comillas. Las notas ya corrompidas no
+se reparan (no se puede saber el título original). Tests: `tests/cli/yamlScalarRoundTrip.test.ts`.
+
+**Claves de frontmatter que el CLI conserva (v2.15.0).** Toda escritura del CLI regenera `note.md`
+entero con `serializeNoteMd` a partir de lo que guardó `parseNoteYaml`, así que una clave que el lector
+lee pero el escritor no emite se destruye en silencio. Pasaba con `expiresAt` (la nota temporal se
+volvía permanente con cualquier `add`/`set`/`touch`/`rename`/…) y con el `pinned` heredado (se perdía
+el favorito); ahora se escriben `expiresAt` (misma posición que la app) y `favorited` si
+`favorited ?? pinned`. Auditadas las demás claves que escribe la app (`id`, `title`, `tags`, `created`,
+`updated`, `formatVersion`, `sections[]` con `id`/`name`/`file`/`isRawMode`/`aiHidden`/`created`,
+`archived`, `favorited`, `group`, `folder`, `localOnly`): ya se conservaban; `encryption` no aplica (el
+CLI no lee ni escribe notas cifradas). No hay conservación genérica de claves desconocidas a propósito:
+eran dos claves escalares, la app tampoco conserva las que no conoce, y el test de paridad obliga a
+añadir cada clave nueva (ver `note-format.md`). Tests: `tests/cli/frontmatterPreservation.test.ts`.
+
+**`--json` y sync (v2.15.0).** `new --json` volvía antes de `syncPushNoteFiles` y la nota creada se
+quedaba solo en local; ahora sincroniza como sin `--json` y como `add`/`set --json`: stdout lleva solo
+el documento JSON y las líneas de sync van a stderr (`out()` con `jsonMode`). Era el único comando con
+ese `return` temprano (`delete --json` ya seguía hasta el borrado remoto; los `return` tras `jsonOut` de
+`add`/`set`/`history --restore` son de `--dry-run` o "sin cambios"). `group create`/`folder create` no
+suben nada **con ni sin** `--json`: solo escriben `groups.json`/`folders.json`, que viajan con el
+siguiente `push`. Test (vía `main()`, exportado para tests): `tests/cli/cloudThreeWayPull.test.ts`.
+
+**Superficie de comandos (v2.15.0).** Un **comando desconocido** ya no vuelca la ayuda en stdout:
+`unknownCommandError` (pura; `KNOWN_COMMANDS` = primeras palabras de `COMMAND_FLAGS` + alias + `help`/
+`version`) da `Unknown command: lsit. Did you mean 'list'?` (el más cercano por `editDistance`, misma
+tolerancia que los nombres) + `Run 'noteflow help' for the list of commands`, todo por stderr, exit 1,
+y se comprueba **antes** de validar los flags; `noteflow` sin argumentos sigue mostrando la ayuda.
+**`sections` y `section list` son el mismo comando** (`cmdSections`) y aceptan `--json`: array de `{
+id, name, lines, mode: "markdown" | "text", isRawMode, aiHidden }` (mismos nombres que
+`get`/`read`/`path --json` y que `note.md`). Los recuentos de líneas pasan por `linesLabel` (`1 line` /
+`N lines`). **Aviso de app abierta** (`warnIfDesktopRunning`): solo si el dir de notas del CLI es el
+por defecto (`desktopAppSharesNotesDir` = `sameNotesDir(NOTES_DIR, DEFAULT_NOTES_DIR)`) — la app
+instalada siempre usa el por defecto (`NOTEFLOW_NOTES_DIR || defaultNotesDir()`), así que con un
+override (tests, scripts) el aviso era falso; una app lanzada a mano con el mismo override no se
+detecta (la lista de procesos no enseña su entorno). `NOTEFLOW_NO_APP_CHECK` lo sigue silenciando.
+Tests: `tests/cli/commandSurface.test.ts`.
 
 **`noteflow history` (v2.13.0, solo NoteFlow Cloud).** `noteflow history <título> [sección]
 [--section s] [--show <n> | --restore <n> [--force] [--dry-run]] [--json]` (`cmdHistory`): lista las

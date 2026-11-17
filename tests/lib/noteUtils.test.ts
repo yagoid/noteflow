@@ -320,6 +320,12 @@ describe('noteDirname / sectionFilename / pathBasename', () => {
     expect(noteDirname('abc123', 'My Great Note!')).toBe('my-great-note-abc123')
   })
 
+  it('transliterates accents instead of dropping the letter', () => {
+    expect(noteDirname('abc123', 'Reunión 12 nov')).toBe('reunion-12-nov-abc123')
+    expect(noteDirname('abc123', 'Cumpleaños')).toBe('cumpleanos-abc123')
+    expect(noteDirname('abc123', 'Ñandú & café')).toBe('nandu-cafe-abc123')
+  })
+
   it('omits the slug when the title yields nothing usable', () => {
     expect(noteDirname('abc123', '!!!')).toBe('abc123')
   })

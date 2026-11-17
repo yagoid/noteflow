@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.14.0
+version: 2.15.0
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -11,12 +11,14 @@ de escritorio NoteFlow (los mismos ficheros). Esta guía recoge **lo que el CLI 
 solo**. La sintaxis completa de cada comando está en **`noteflow help <comando>`** (y en
 https://yagoid.github.io/noteflow/cli).
 
-**Si un comando falla, lee el error: dice qué hacer.** Nota o sección inexistente (`Did you mean
-"…"?` + las existentes), título ambiguo (lista las coincidencias), grupo o carpeta inexistente, flag
-desconocido o que ese comando no admite (p. ej. `--dry-run` en `delete`), flags incompatibles o uso
-incorrecto salen con exit 1 sin escribir nada. Corrige con lo que te dice y
+**Si un comando falla, lee el error: dice qué hacer.** Nota inexistente (`Did you mean "…"?` con
+los títulos parecidos), sección inexistente (`Did you mean "…"?` + las existentes), título ambiguo
+(lista las coincidencias con su nombre de carpeta), grupo o carpeta inexistente, comando desconocido
+(`Did you mean '…'?`), flag desconocido o que ese comando no admite (p. ej. `--dry-run` en `delete`),
+flags incompatibles o uso incorrecto salen con exit 1 sin escribir nada. Corrige con lo que te dice y
 reintenta. Los datos van a stdout y los avisos y errores a stderr; con `--json`, stdout lleva solo
-el JSON.
+el JSON (y, si la nota o la sección no existe, el error también en JSON: `{ error, code:
+"note_not_found" | "section_not_found", …, suggestions }`).
 
 ## Checklist para agentes (en cada tarea)
 
@@ -43,11 +45,13 @@ el JSON.
 
 ## Modelo mental
 
-- **Nota = título + secciones** (pestañas). Todo se direcciona **por nombre**, nunca por id:
+- **Nota = título + secciones** (pestañas). Todo se direcciona **por nombre**, no por id (el nombre de carpeta o el id solo sirven para distinguir títulos repetidos):
   `noteflow read "<título>" "<sección>"`. En todos los comandos (también `add --title`) el título
   exacto gana y uno parcial vale si solo coincide con una nota; con varias, el comando falla y las
-  lista. Los nombres de sección pueden repetirse: elige uno con sufijo 1-based,
-  `"Tasks#2"`. Entrecomilla los nombres con espacios.
+  lista. **Los títulos pueden repetirse**: con varias notas del mismo título también falla (nunca
+  elige una); pasa entonces, en lugar del título, el **nombre de carpeta** que el error muestra entre
+  paréntesis (`<slug>-<id>`, el `dirname` de `list --json`), que es único. Los nombres de sección
+  pueden repetirse: elige uno con sufijo 1-based, `"Tasks#2"`. Entrecomilla los nombres con espacios.
 - **Organización: grupos → carpetas → notas.** Una carpeta vive siempre dentro de un grupo (un solo
   nivel); una nota puede no tener grupo.
 - **Nota diaria:** `noteflow add "<texto>"` sin `--title` escribe en la nota de hoy (título
@@ -72,6 +76,9 @@ el JSON.
 - **Windows: `noteflow.cmd` trunca en silencio el contenido multilínea** en el primer salto de línea
   (y descarta los flags que vienen detrás). Contenido no trivial (varias líneas, comillas,
   caracteres raros) → **`--file <ruta>`** o **`--stdin`**, en cualquier sistema.
+- **Windows, Git Bash: un argumento que empieza por `/` se convierte en ruta** (`"/Ruta"` llega como
+  `C:/Program Files/Git/Ruta`, sea título, sección o texto). Antepón `MSYS_NO_PATHCONV=1` al comando;
+  con él, las rutas de `--file` tienen que ser de Windows (`pwd -W`).
 - **Tras editar un `.md` obtenido con `path`, `noteflow touch "<título>"` es obligatorio**: sin él
   el cambio queda solo en local y no se sincroniza.
 - **`touch` y cualquier escritura borran los `.md` sueltos** de la carpeta de la nota (todo lo que
@@ -81,8 +88,9 @@ el JSON.
 - **App de escritorio abierta en v2.1.0 o anterior ⇒ se pierden los grupos y carpetas creados,
   renombrados o borrados desde el CLI**: esas versiones reescriben `groups.json`/`folders.json`
   desde memoria. Las posteriores recargan los cambios del CLI. Los cambios de nota sí sobreviven
-  siempre. El CLI avisa por stderr si ve la app abierta: si no sabes su versión, pide al usuario
-  que la cierre antes o que haga esos cambios desde la app.
+  siempre. El CLI avisa por stderr si ve la app abierta (solo cuando trabaja en el directorio de
+  notas por defecto, el de la app; con `NOTEFLOW_NOTES_DIR` no): si no sabes su versión, pide al
+  usuario que la cierre antes o que haga esos cambios desde la app.
 - **`pull --force` pisa notas locales más nuevas** (con GitHub, también los cambios sin subir de
   `groups.json`/`folders.json`, que el `pull` normal conserva). No lo uses sin que el usuario lo pida,
   aunque el pull diga `skipped (local is newer — use --force to override)`: eso es normal y el `push`
@@ -114,14 +122,15 @@ el JSON.
 ## Chuleta de comandos
 
 Detalle de cada uno: **`noteflow help <comando>`**. `--json` (salida para máquina en stdout) existe
-en `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `history`, `groups`, `folders`,
-`group create`, `folder create`, `status`, `cloud status` y `login --no-wait`; en los demás es un
-error.
+en `list`, `get`, `read`, `path`, `sections`, `new`, `add`, `set`, `delete`, `history`, `groups`,
+`folders`, `group create`, `folder create`, `status`, `cloud status` y `login --no-wait`; en los
+demás es un error.
 
 **Leer**
 - `noteflow list [--tag t] [--group g] [--folder f] [--archived] [--json]` — notas (sin las
   archivadas salvo `--archived`); el JSON incluye los nombres de sección.
-- `noteflow sections "<nota>"` — secciones y su modo (`text` / `markdown`). Alias: `section list`.
+- `noteflow sections "<nota>" [--json]` — secciones, sus líneas y su modo (`text` / `markdown`).
+  Alias: `section list`. El JSON es un array de `{ id, name, lines, mode, isRawMode, aiHidden }`.
 - `noteflow read "<nota>" ["<sección>"] [--section s] [--json]` — contenido **verbatim**, apto para
   pipe y para procesar (sin sección: la nota entera como markdown).
 - `noteflow get "<nota>" [--section s] [--json]` — lo mismo, decorado para humanos: no lo uses para
@@ -139,6 +148,8 @@ error.
 - `--dry-run` (en `add`/`set`/`history --restore`) valida el destino sin escribir: falla igual que
   la ejecución real.
 - `noteflow new "<título>" [--section s] [--group g [--folder f]] [--raw] [--json]` — nota vacía.
+  Si ya hay otra con ese título la crea igual y avisa por stderr (`another note is already titled
+  …`): a partir de ahí distínguelas por nombre de carpeta. `rename` avisa igual.
 - `noteflow touch "<nota>"` — tras editar un `.md` a mano: relee la nota, bumpea `updated:` y
   sincroniza.
 - `noteflow section add "<nota>" "<nombre>" [--raw]` · `section rename "<nota>" "<viejo>"
@@ -235,6 +246,11 @@ code no dice si subió**. Tras cada una, busca la línea de sync en stdout y std
 Ese `pull` + `push` está bien si acaban en `Done: …` con `0 errors` (cuando lo muestran) y sin
 `changed on GitHub`, `not uploaded` ni líneas `Error:`. Aparte, sigue valiendo el `pull` al
 empezar (con sync) y el `push` tras activar el sync (salvo e2ee o sin claves).
+
+Con Cloud, ese `pull` ya **vuelve a subir** lo que tenías pendiente una vez fusionado, y lo dice bajo
+su `Done: …`: `Uploaded N files with pending local changes` (`1 file` si es uno). Un `Done: 0 pulled`
+no significa que tu cambio siga sin subir: `pulled` solo cuenta las notas que cambiaron en disco. El
+`push` de después es entonces rápido (esos ficheros ya no vuelven a subir); hazlo igualmente.
 
 **Si no se puede sincronizar** (siguen los errores, no hay red, la sesión caducó, conflicto…):
 díselo al usuario al final de tu respuesta, de forma explícita: qué notas quedaron solo en local, el

@@ -2218,7 +2218,8 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
     fallback avisa una vez por invocación); la re-subida de la carpeta conservada tras un tombstone va
     **forzada**; una subida
     rechazada (stale) se informa como `not uploaded: a newer version is on NoteFlow Cloud — run
-    'noteflow pull'` (no como fallo), no bumpea `lastSync` y queda en `pendingUpserts`. Cuando el
+    'noteflow pull', then 'noteflow push'` (`STALE_UPLOAD_HINT`, el mismo remedio que el aviso de
+    GitHub; no como fallo), no bumpea `lastSync` y queda en `pendingUpserts`. Cuando el
     pull aplica una carpeta **entera** (y pide también sus secciones listadas con subida pendiente)
     o deja una sección igual al servidor, quita esas entradas de `pendingUpserts`
     (`dropReconciledPending`, en la misma escritura que avanza `pullSeq`);
@@ -2285,7 +2286,13 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
     y se suben después con `cloudPushFile` (base = la seq recién reconciliada; un fichero que ya estaba en
     `forceUpserts` sube **forzado** venga por donde venga, como el `force` que conserva el journal de la
     app); lo que llega sale de
-    las listas, lo `stale` queda con el mensaje de siempre. **Drain del pull:** las entradas pendientes
+    las listas, lo `stale` queda con el mensaje de siempre. **Lo que llega se cuenta** (CLI 2.14.1):
+    `cloudPullNow` devuelve `uploaded` (ficheros de este bloque subidos bien; no las carpetas
+    conservadas sobre un tombstone ni las copias de conflicto, que ya tienen su línea) y
+    `cmdCloudPull` imprime, tras su `Done: N pulled, D deleted, E errors` (formato intacto) y solo si
+    es > 0, `Uploaded N files with pending local changes` (`1 file` en singular). Sin esa línea, un
+    `Done: 0 pulled` tras un rechazo parecía "sigue sin subir" (`pulled` solo cuenta carpetas cuyo
+    disco cambió). **Drain del pull:** las entradas pendientes
     de la carpeta que el lote no tocó (sección editada offline cuya fila no se movió) también se
     suben ahí (secciones antes que el `note.md`), equivalente al drain que la app ejecuta justo
     después del pull.
@@ -2327,8 +2334,8 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
     secciones) apunta todas como pendientes → una sección que el otro dispositivo cambió y este no tocó
     se fusiona en dos vías sin contenido de base (con una sola línea cambiada, sale con marcas ⚠️;
     conservador; `set`/`add` solo apuntan la sección escrita y fusionan limpio). Cuando el
-    CLI reescribe un `note.md` en **su** formato (`serializeNoteMd`: comillas, `tags` en flow, sin
-    `expiresAt`), el hash del ancla cambia aunque no haya edición real: frente a la app, la rama
+    CLI reescribe un `note.md` en **su** formato (`serializeNoteMd`: comillas, `tags` en flow; desde
+    2026-11-17 conserva `expiresAt`, antes lo quitaba), el hash del ancla cambia aunque no haya edición real: frente a la app, la rama
     "ambos cambiaron" (base = ancla remota + OR de `aiHidden`/`favorited` + unión de `tags`) corre
     más a menudo — conservador (no pierde contenido de secciones; ver la fusión de campo limitada en
     los residuales de "Fusión en tres vías"). Un `note.md` con YAML que el lector de bloques no

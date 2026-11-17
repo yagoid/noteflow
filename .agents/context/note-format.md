@@ -56,6 +56,22 @@ encryption:
   hashAlg: SHA-256     # omitido si es el default
 ```
 
+- **Nombre de carpeta** (`noteDirname(id, title)` → `<slug>-<id>`, o solo `<id>` si el slug queda
+  vacío). Slug: título en minúsculas → **transliteración de acentos** (`normalize('NFD')` y fuera las
+  marcas diacríticas U+0300–U+036F: `Reunión 12 nov` → `reunion-12-nov`, `Cumpleaños` → `cumpleanos`)
+  → fuera todo lo que no sea `[a-z0-9\s-]` → trim → espacios a `-` → primeros 40 caracteres. Las letras
+  sin descomposición (`ß`, `ø`…) se siguen descartando. **Tres espejos con la misma regla**
+  (`src/lib/noteUtils.ts`, `electron/noteFormat.ts`, `cli/noteflow.js`; paridad en
+  `tests/cli/commandSurface.test.ts`); la tool `create_note` del agente llama a
+  `noteFormat.noteDirname` (antes tenía una copia). Hasta 2026-11-17 (CLI < 2.15.0) las letras
+  acentuadas se **descartaban** (`reunin-12-nov`, `cumpleaos`): esas carpetas se quedan como están —
+  el slug se congela al crear, no hay renombrado ni migración, y nada depende de que el slug coincida
+  con el título (la identidad es el `id`).
+- **Escalares YAML en el CLI:** el CLI no usa js-yaml; escribe título, nombres de sección y tags
+  entre comillas dobles (`q()`) y los lee con `unquote()`, inversos exactos entre sí y compatibles con
+  js-yaml en ambos sentidos para escalares de una línea (un título con salto de línea, que la app
+  escribe como bloque `|-`, el CLI sigue sin leerlo bien: limitación anterior) (detalle y escapes soportados en `patterns.md` § CLI "Lector/escritor de
+  escalares YAML"). Un título con `"` o `\` es válido en los tres clientes.
 - Marcador de versión: `<notesDir>/.noteflow-format` (contenido `2`).
 - En memoria el `Note` sigue hidratado (`sections[].content`); `Note.filePath` = **directorio**;
   `Note.raw` = contenido de `note.md`. La UI (editor, sidebar, stickies) no cambió.
@@ -84,6 +100,20 @@ encryption:
   `parseNoteYaml`/`serializeNoteMd` del CLI): si uno la perdiera al guardar, la nota empezaría a
   sincronizarse. *Duplicate* crea una nota normal (construye el borrador campo a campo); exportar la
   conserva (bundle tal cual), así que una nota solo-local importada en otro equipo sigue siendo solo-local.
+- **`expiresAt`** (clave de primer nivel, ISO 8601; nota temporal): la escribe solo la app, después de
+  `folder` y antes de `localOnly`. Los **tres espejos** la conservan en el round-trip; el CLI no tiene
+  comando para ponerla ni quitarla, pero `serializeNoteMd` la reescribe tal cual (entre comillas, como
+  `created`). Hasta 2026-11-17 el CLI la **perdía** en cualquier escritura (`add`, `set`, `touch`,
+  `rename`, `section …`, `favorite`, `archive`, `move`, `group`/`folder delete`) y la nota temporal pasaba
+  a ser permanente; las notas que ya la perdieron no se recuperan. **Regla al añadir una clave a
+  `note.md`:** el CLI reescribe el fichero entero desde lo que su lector guardó y **no conserva claves
+  desconocidas** (la app tampoco: `serializeNoteFolder` escribe una lista fija), así que toda clave nueva
+  hay que añadirla también a `serializeNoteMd`; `tests/cli/frontmatterPreservation.test.ts` escribe una
+  nota con todas las claves opcionales usando el serializador de la app, le pasa los comandos de
+  escritura del CLI y compara con el parser de la app — añade ahí la clave nueva.
+- **`pinned`** (nombre antiguo de `favorited`): los tres espejos lo leen como `favorited ?? pinned` y
+  escriben solo `favorited`. El CLI lo perdía al reescribir una nota que aún lo llevara (dejaba de ser
+  favorita); corregido a la vez que `expiresAt`.
 - **Notas vinculadas** (un archivo de texto externo —Markdown o texto plano— editado en su sitio): **no usan
   este formato** ni viven en el dir de notas. El archivo es del usuario tal cual (el frontmatter de un `.md`,
   si lo tiene, se preserva y no es de NoteFlow); los metadatos de la nota van en `userData/linked-notes.json`. Ver `patterns.md` § "Notas
