@@ -1,7 +1,8 @@
 // Pure sanitize/merge logic for ui-settings.json — the root-level file of the
 // notes dir that syncs appearance (theme, app font, accent, editor colours) and
 // editor settings (font size/family, readable width, floating TOC, move checked tasks to the
-// bottom, checklist progress rail) across devices. Lives in
+// bottom, checklist progress rail, what a sidebar click opens on a multi-section note) across
+// devices. Lives in
 // electron/ but imports nothing from Electron (same pure-module pattern as
 // syncState.ts / cloudSyncLogic.ts). Covered by tests/electron/uiSettings.test.ts.
 //
@@ -74,6 +75,11 @@ export interface UiSettings {
     moveCheckedToBottom?: boolean
     /** Progress rail in the left margin of each checklist, Readable width only (absent = shown). */
     showTaskProgress?: boolean
+    /**
+     * What a click on a note in the sidebar opens when the note has more than one
+     * section: its editor or the note overview (absent = 'editor').
+     */
+    noteClickOpens?: 'editor' | 'overview'
   }
 }
 
@@ -169,6 +175,10 @@ export function sanitizeUiSettings(raw: unknown): UiSettings {
     }
     if (typeof ed.showTaskProgress === 'boolean') {
       cleaned.showTaskProgress = ed.showTaskProgress
+      hasAny = true
+    }
+    if (ed.noteClickOpens === 'editor' || ed.noteClickOpens === 'overview') {
+      cleaned.noteClickOpens = ed.noteClickOpens
       hasAny = true
     }
     if (hasAny) out.editor = cleaned

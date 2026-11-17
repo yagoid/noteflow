@@ -139,6 +139,10 @@ export const settings = {
     taskProgressHint: 'Shows in the margin how many tasks of each checklist are done',
     // Shown instead of the hint while the content width is Full (the switch is disabled).
     taskProgressReadableOnly: 'Only available with the Readable width',
+    noteClickOpens: 'Clicking a note opens',
+    noteClickOpensHint: 'For notes with more than one section, from the sidebar. Notes with a single section always open in the editor',
+    noteClickEditor: 'Editor',
+    noteClickOverview: 'Note overview',
   },
 
   startup: {

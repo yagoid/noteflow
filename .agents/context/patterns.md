@@ -269,7 +269,16 @@ ese lugar, y si no, al editor. Crear/seleccionar una nota, abrir el cerebro o la
 secciones de `NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual de nota y de
 sección (`NoteContextMenu`: último del bloque de abrir, tras "Open in New Window"; oculto en una ventana de
 sección y si la vista de esa nota ya está abierta). El clic en la
-fila de la nota en el sidebar **no** es una entrada: abre el editor en la primera sección. Sin IPC nuevo.
+fila de la nota en el sidebar **solo** es una entrada con el ajuste Settings → Editor → "Clicking a note
+opens" = `Note overview` (`editorSettingsStore.noteClickOpens`, sincronizado en `ui-settings.json` como
+`editor.noteClickOpens: 'editor' | 'overview'`, ausente = `'editor'`) y si la nota tiene **más de una
+sección**: `openInOverviewIfPreferred` de `Sidebar.tsx` hace `setOpenNoteIds([id])` + `setActiveNote(id)`
++ `setNoteView(id)` — la nota queda activa, así que el "back" va a **su** editor (y `contentReturnPlace`
+queda vacío porque `setActiveNote` ya cerró la vista de contenido). Lo usan `rowHandlers.click` (fila del
+sidebar y del `GroupPeek`, también con Enter) y `openSelectedSearchResult` (Enter en la búsqueda). El ajuste
+se lee con `getState()` en el clic (no suscribe el sidebar). No afecta a `sectionClick` (celdas/pestañas),
+Ctrl/Cmd+clic (split), notas de una sección ni bloqueadas (`sections: []`). Por defecto (`'editor'`) el
+clic abre el editor en la primera sección. Sin IPC nuevo.
 
 **Es el mapa de secciones con la vista previa dentro** (`NoteOverview/NoteOverview.tsx`, lógica pura en
 `src/lib/noteOverviewGrid.ts` con test en `tests/lib/noteOverviewGrid.test.ts`, estilos `.note-grid*` en
@@ -2336,7 +2345,7 @@ cabecera, clamp al viewport: sube si no cabe abajo).
   `Folder`+nombre de carpeta si viene de una; secciones según el ajuste "Sections in the sidebar", como el
   sidebar y en compacto, ver "Sidebar: item de nota" → `GroupPeek`). Clicks = los
   `rowHandlers` estables del sidebar (`click`/`sectionClick`: Ctrl/Cmd → split; si no, editor en la
-  primera sección / en esa sección…); `RowHandlers.click` acepta también `KeyboardEvent` porque Enter lo reutiliza.
+  primera sección — o la vista de nota, según "Clicking a note opens" — / en esa sección…); `RowHandlers.click` acepta también `KeyboardEvent` porque Enter lo reutiliza.
   `formatNoteDate`/`renderHighlightedText` viven en `Sidebar/rowText.tsx` (compartidos).
 - **Rendimiento:** el estado abierto/cerrado vive en `GroupPeek` (montado una vez en `Sidebar`); las
   cabeceras solo reciben `onPeekHover`/`onPeekLeave` estables (`useCallback([])` → `peekRef`, un
@@ -2464,7 +2473,8 @@ editor en pequeño, la abierta en sólido con la tinta de `resolveSectionInk` v�
 - **Sin secciones** (p. ej. nota cifrada y bloqueada: `sections: []`) → no se pinta nada (igual en
   `SectionTabsRow`). Desbloqueada, sus secciones están en memoria y se ve como cualquier otra.
 - **Clics:** fila → `handlers.click` (editor en la **primera sección**, vía el mismo `openAtSection` que
-  `sectionClick`; sin secciones → solo `setActiveNote`); celda (mapa abierto,
+  `sectionClick`; sin secciones → solo `setActiveNote`; con "Clicking a note opens" = `Note overview` y
+  más de una sección → vista de nota, ver "Vista de nota"); celda (mapa abierto,
   búsqueda o peek) → `handlers.sectionClick` (Ctrl/Cmd → panel al lado; resto igual que antes); clic
   derecho en celda → menú de sección. Preview de sección al hover en todas las celdas salvo la abierta
   (ya está en el editor). Los **segmentos no llevan preview**: el peek (140 ms) se adelanta al preview

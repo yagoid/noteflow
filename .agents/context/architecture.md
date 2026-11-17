@@ -133,7 +133,7 @@ noteflow/
 │   │   ├── snippetsStore.ts          # Fragmentos del toolbar — snippets.json (IPC, carga perezosa, autoguardado)
 │   │   ├── themeStore.ts             # Tema/fuente/acento/colores editor + último tema oscuro/claro — SINCRONIZADO en ui-settings.json (IPC sendSync); escala de UI y estilo de secciones del sidebar en localStorage (por dispositivo)
 │   │   ├── languageStore.ts          # Idioma UI (i18n) — settings.json vía IPC; dict de src/i18n; cambio en caliente vía broadcast
-│   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible/índice (TOC) del editor — SINCRONIZADO en ui-settings.json (IPC)
+│   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible/índice (TOC)/tareas marcadas al final/qué abre el clic en una nota — SINCRONIZADO en ui-settings.json (IPC)
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
 │   │   ├── aiStore.ts                # Estado del índice IA (enabled, related, grafo, progreso) vía IPC ai:*
 │   │   ├── whatsNewStore.ts          # Tour "What's new": ids vistos (settings.json vía IPC whats-new:*) + tour abierto
@@ -262,7 +262,7 @@ noteflow/
 │   │   │   ├── SettingsModal.tsx        #   Contenedor: nav izquierda + panel derecho según sección
 │   │   │   ├── GeneralPanel.tsx         #   Idioma + sección Activity (ActivitySummary.tsx) + IA local (toggle/reindex) + perfil + skill del CLI
 │   │   │   ├── AppearancePanel.tsx      #   Tema/fuente/acento/colores del editor/escala + preview
-│   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho / índice / tareas marcadas al final
+│   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho / índice / tareas marcadas al final / qué abre el clic en una nota
 │   │   │   ├── TemplatesPanel.tsx       #   Plantillas de nota (listar/usar/renombrar/borrar)
 │   │   │   ├── StartupPanel.tsx         #   Autostart + stickies al arrancar
 │   │   │   ├── SyncPanel.tsx            #   Enrutado de vistas: elección inicial / vista general del backend activo / detalle
@@ -624,13 +624,17 @@ Contenido del dir de notas:
 - `ui-settings.json` — apariencia (tema, último tema oscuro/claro `lastDarkThemeId`/`lastLightThemeId`
   para el Light / Dark del ⋯ del footer, fuente de app, acento, colores del editor) + ajustes del
   editor (tamaño/familia de fuente, ancho legible, índice flotante `showToc`, tareas marcadas al final
-  `moveCheckedToBottom`, riel de progreso de las checklists `showTaskProgress`) sincronizados entre
+  `moveCheckedToBottom`, riel de progreso de las checklists `showTaskProgress`, qué abre el clic del
+  sidebar en una nota con varias secciones `noteClickOpens: 'editor' | 'overview'`) sincronizados entre
   dispositivos. Formato y saneado/merge en `electron/uiSettings.ts` (módulo puro, tests en `tests/electron/uiSettings.test.ts`).
   **Espejo en noteflow-mobile** (`src/core/uiSettings.ts`): su saneador también descarta claves
   desconocidas y el móvil re-sanea el fichero antes de cada escritura (`appearanceStore`), así que un
   campo nuevo que no se porte allí se borra en cuanto el móvil guarda su apariencia (p. ej. un cambio de
-  acento). Todo campo nuevo del esquema hay que añadirlo en los dos. **Estado del espejo (2026-11-16):**
-  el móvil conoce todas las claves actuales salvo `editor.showTaskProgress` (ver abajo). El centinela `'text'` de `accent`/`editorColors.*` (color
+  acento). Todo campo nuevo del esquema hay que añadirlo en los dos. **Estado del espejo (2026-11-17):**
+  el móvil conoce todas las claves actuales salvo `editor.showTaskProgress` (ver abajo) y
+  **`editor.noteClickOpens`** (2026-11-17, **pendiente de portar**): hasta entonces cualquier escritura de
+  apariencia desde el móvil la borra y los desktops vuelven a `'editor'` (el predeterminado) en su
+  siguiente arranque. El centinela `'text'` de `accent`/`editorColors.*` (color
   "texto" adaptativo) y `lastDarkThemeId`/`lastLightThemeId` llegaron en `09b9e28` (2026-11-14, publicado
   en la prueba cerrada 5, 1.0.0). `editor.moveCheckedToBottom` llegó en `9345c7d` (2026-11-16), **aún sin
   publicar**: hasta la siguiente versión del móvil, una escritura de apariencia desde el móvil instalado lo

@@ -116,6 +116,10 @@ export const settings = {
     taskProgress: 'Progreso de las checklists',
     taskProgressHint: 'Muestra en el margen cuántas tareas de cada lista están hechas',
     taskProgressReadableOnly: 'Solo disponible con el ancho Legible',
+    noteClickOpens: 'Al pulsar una nota se abre',
+    noteClickOpensHint: 'En las notas con más de una sección, desde la barra lateral. Las notas con una sola sección siempre se abren en el editor',
+    noteClickEditor: 'Editor',
+    noteClickOverview: 'Vista de la nota',
   },
 
   startup: {

@@ -38,6 +38,7 @@ export type UiSettingsPayload = {
     showToc?: boolean
     moveCheckedToBottom?: boolean
     showTaskProgress?: boolean
+    noteClickOpens?: 'editor' | 'overview'
   }
 }
 

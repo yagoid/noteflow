@@ -116,10 +116,12 @@ debajo, sus **secciones** en el lenguaje del mapa de secciones del editor:
   ni otra abren la nota (con teclado, el foco pasa a la que aparece). Al cambiar a otra nota, el mapa
   vuelve a plegado. Si una búsqueda coincide con secciones de la nota, se ven todas (ninguna coincidencia
   queda escondida); en el despliegue flotante también se ven siempre todas.
-- **Clic en la fila** (fuera de las celdas): abre la nota en el editor **en su primera sección**,
-  tenga las secciones que tenga (la vista de nota ya no se abre al pulsar la nota; ver "Cómo entrar" en
-  [Vista de nota](#vista-de-nota-note-overview)). Una nota cifrada y bloqueada se abre sin más (pide
-  desbloquear).
+- **Clic en la fila** (fuera de las celdas): por defecto abre la nota en el editor **en su primera
+  sección**, tenga las secciones que tenga. Con Settings → Editor → **Clicking a note opens** en
+  `Note overview`, una nota con **más de una sección** abre en su
+  [Vista de nota](#vista-de-nota-note-overview); las de una sola sección siguen yendo al editor. Una
+  nota cifrada y bloqueada se abre sin más en el editor (pide desbloquear). El clic en una **celda**
+  de sección va siempre a esa sección en el editor, sea cual sea el ajuste.
 - **Buscando:** las notas cuyas secciones coinciden muestran el mapa desplegado sin apuntar a nada; con
   `#sección`, solo las secciones que encajan (como antes); con texto, todas, las coincidentes teñidas de
   su color y el resto atenuadas, con el término resaltado. Si la nota solo coincide por el título, se
@@ -199,7 +201,7 @@ Iconos del TitleBar:
   profile setup" → abre el cerebro en la pestaña Profile y cierra Ajustes) y **Expose CLI skill to AI
   agents** (toggle: copia la skill del CLI a `~/.claude/skills` y `~/.agents/skills`, y a Windsurf si
   está instalado)), **Appearance** (tema/fuente/acento/colores del editor/escala/secciones del sidebar/vista cerebro),
-  **Editor** (fuente/tamaño/ancho) — grupo **Preferences** —; **Sync** (NoteFlow Cloud + GitHub),
+  **Editor** (fuente/tamaño/ancho/índice/tareas marcadas al final/qué abre el clic en una nota) — grupo **Preferences** —; **Sync** (NoteFlow Cloud + GitHub),
   **AI** (solo el proveedor del LLM), **Account** (cuenta NoteFlow) — grupo **Services** —; **Data** (export/import + carpeta
   de notas), **Startup** (autostart + stickies), **Templates** (plantillas de nota) — grupo **Your
   notes** —; y **Tutorial** (el tour "What's new", ver abajo), **Keyboard shortcuts** y **About**
@@ -620,9 +622,13 @@ una nota con muchas secciones o reorganizarla. Es una de las vistas full-area mu
 **Cómo entrar:**
 - Botón **⊞** (icono de cuadrícula) de las acciones del mapa de secciones del editor, justo **al lado
   de la estrella de favoritos**.
-- **Click derecho** sobre un **tag de sección** (sidebar / vistas) o un **tab del editor** →
-  **"Note overview"** (el menú de la nota en sí no lo ofrece).
-- Pulsar la nota en el sidebar **no** la abre: va al editor, a la primera sección.
+- **Click derecho** sobre una **nota** o un **tag de sección** (sidebar / vistas), o sobre un **tab
+  del editor** → **"Note overview"** (no en una ventana de sección ni si la vista de esa nota ya está
+  abierta).
+- **Pulsar la nota en el sidebar** (o en el peek de un grupo, o `Intro` sobre un resultado de
+  búsqueda), solo si Settings → Editor → **Clicking a note opens** está en `Note overview` y la nota
+  tiene **más de una sección**. Por defecto (`Editor`) pulsar la nota va al editor, a la primera
+  sección. Abierta así, la nota queda activa: salir de la vista vuelve a su editor.
 
 **Cómo salir:** `Esc` (si no hay selección), el botón **⊞ activo** de la cabecera (resaltado en el
 color de acento: "estás en la vista de nota"; vuelve al editor, o a la vista de contenido —en el mismo
@@ -1201,6 +1207,16 @@ Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del m
   ni en modo texto.
 - Settings → Editor → **Table of contents** (switch, activado por defecto); se sincroniza con el resto
   de ajustes del editor.
+
+### Qué abre el clic en una nota (Editor / Note overview)
+- Settings → Editor → **Clicking a note opens**: selector `Editor / Note overview` (por defecto
+  `Editor`, el comportamiento de siempre). Con `Note overview`, pulsar en la barra lateral una nota con
+  **más de una sección** abre su [vista de nota](#vista-de-nota-note-overview) en vez del editor.
+- Aplica al clic en la fila de la nota del sidebar, en el peek de un grupo y a `Intro` sobre un
+  resultado de búsqueda. **No** cambia: el clic en una celda/pestaña de sección (va a esa sección en el
+  editor), `Ctrl/Cmd+clic` (abre la nota al lado en el editor), las notas de una sola sección ni las
+  cifradas bloqueadas (siempre al editor).
+- Se sincroniza con el resto de ajustes del editor.
 
 ---
 

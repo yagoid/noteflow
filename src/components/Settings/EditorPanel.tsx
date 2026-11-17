@@ -8,6 +8,7 @@ export function EditorPanel() {
   const {
     fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily, readableWidth, setReadableWidth,
     showToc, setShowToc, moveCheckedToBottom, setMoveCheckedToBottom, showTaskProgress, setShowTaskProgress,
+    noteClickOpens, setNoteClickOpens,
   } = useEditorSettingsStore()
   const t = useT()
   // The progress rails live in the Readable column's margin: with Full width the
@@ -143,6 +144,22 @@ export function EditorPanel() {
               taskProgressOn ? 'left-[18px]' : 'left-[2px]'
             }`}
           />
+        </button>
+      </section>
+
+      {/* Sidebar click on a multi-section note: editor or note overview */}
+      <section className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-mono font-medium text-text">{t.settings.editor.noteClickOpens}</p>
+          <p className="text-[11px] font-mono text-text-muted mt-1">{t.settings.editor.noteClickOpensHint}</p>
+        </div>
+        <button
+          onClick={() => setNoteClickOpens(noteClickOpens === 'overview' ? 'editor' : 'overview')}
+          className="flex items-center gap-0.5 text-[11px] font-mono px-2 py-1 rounded-lg border border-border settings-btn bg-surface-2 text-text-muted hover:text-text transition-colors flex-shrink-0"
+        >
+          <span className={noteClickOpens === 'editor' ? 'text-text' : ''}>{t.settings.editor.noteClickEditor}</span>
+          <span className="opacity-30 px-0.5">/</span>
+          <span className={noteClickOpens === 'overview' ? 'text-text' : ''}>{t.settings.editor.noteClickOverview}</span>
         </button>
       </section>
     </div>

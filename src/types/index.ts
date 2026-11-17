@@ -713,6 +713,8 @@ export interface UiSettings {
     showToc?: boolean
     moveCheckedToBottom?: boolean
     showTaskProgress?: boolean
+    /** Sidebar click on a multi-section note: editor (absent) or note overview. */
+    noteClickOpens?: 'editor' | 'overview'
   }
 }
 
