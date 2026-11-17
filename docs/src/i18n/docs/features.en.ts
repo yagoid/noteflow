@@ -174,7 +174,7 @@ export const featuresEn = {
     title: 'The full keyboard map',
     lede: 'Also inside the app, in <strong>Settings → Keyboard shortcuts</strong>.',
     macNote:
-      'On macOS <kbd>Ctrl</kbd> is <strong>⌘</strong> — except <kbd>Ctrl</kbd>+<kbd>Tab</kbd> between sections, which stays <strong>⌃ Control</strong>.',
+      'On macOS <kbd>Ctrl</kbd> is <strong>⌘</strong> — except <kbd>Ctrl</kbd>+<kbd>Tab</kbd> between sections, which stays <strong>⌃ Control</strong>, and <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> (back / forward), which is <kbd>⌘</kbd>+<kbd>[</kbd>/<kbd>]</kbd>.',
     groups: [
       {
         label: 'App',
@@ -186,6 +186,7 @@ export const featuresEn = {
           { combos: [['Ctrl', 'Shift', 'F']], desc: 'Search all notes' },
           { combos: [['Ctrl', "'"]], desc: 'Pin / unpin the sidebar' },
           { combos: [['Ctrl', 'Click']], desc: 'Open a note in split view' },
+          { combos: [['Alt', '←'], ['Alt', '→']], desc: 'Back / forward between notes and views (also the mouse side buttons)' },
         ],
       },
       {

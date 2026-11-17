@@ -173,7 +173,7 @@ export const featuresEs: FeaturesContent = {
     title: 'El mapa de teclado completo',
     lede: 'También dentro de la app, en <strong>Ajustes → Atajos de teclado</strong>.',
     macNote:
-      'En macOS <kbd>Ctrl</kbd> es <strong>⌘</strong> — salvo <kbd>Ctrl</kbd>+<kbd>Tab</kbd> entre secciones, que sigue siendo <strong>⌃ Control</strong>.',
+      'En macOS <kbd>Ctrl</kbd> es <strong>⌘</strong> — salvo <kbd>Ctrl</kbd>+<kbd>Tab</kbd> entre secciones, que sigue siendo <strong>⌃ Control</strong>, y <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> (atrás / adelante), que es <kbd>⌘</kbd>+<kbd>[</kbd>/<kbd>]</kbd>.',
     groups: [
       {
         label: 'App',
@@ -185,6 +185,7 @@ export const featuresEs: FeaturesContent = {
           { combos: [['Ctrl', 'Shift', 'F']], desc: 'Buscar en todas las notas' },
           { combos: [['Ctrl', "'"]], desc: 'Fijar / desfijar el sidebar' },
           { combos: [['Ctrl', 'Click']], desc: 'Abrir una nota en vista dividida' },
+          { combos: [['Alt', '←'], ['Alt', '→']], desc: 'Atrás / adelante entre notas y vistas (también los botones laterales del ratón)' },
         ],
       },
       {

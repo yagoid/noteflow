@@ -542,6 +542,7 @@ export const settings = {
     searchAllNotes: 'Buscar en todas las notas',
     toggleSidebar: 'Fijar / desfijar barra lateral',
     openSideBySide: 'Abrir nota en paralelo (sobre un tag de sección: esa sección en un panel nuevo)',
+    navigateBackForward: 'Atrás / adelante entre notas y vistas (también los botones laterales del ratón)',
     newSectionShortcut: 'Nueva sección',
     deleteSectionShortcut: 'Eliminar sección',
     nextSection: 'Sección siguiente',

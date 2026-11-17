@@ -679,6 +679,7 @@ export const settings = {
     searchAllNotes: 'Search all notes',
     toggleSidebar: 'Pin / unpin sidebar',
     openSideBySide: 'Open note side by side (on a section tag: that section in a new pane)',
+    navigateBackForward: 'Go back / forward between notes and views (also the mouse side buttons)',
     newSectionShortcut: 'New section',
     deleteSectionShortcut: 'Delete section',
     nextSection: 'Next section',

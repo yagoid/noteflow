@@ -217,6 +217,12 @@ interface NotesState {
   closeFullView: () => void   // smart back: returns to the content view (same place) if we came from it
   /** Opens a note — or one of its sections, in a pane of its own — alongside the current panes. */
   openNoteInSplit: (id: string, sectionId?: string) => void
+  /**
+   * Shows a note (on `sectionId` when given) IN the active pane, keeping the other panes of a
+   * split; a pane already showing the note is focused instead. Closes any full-area view.
+   * Back / forward navigation (stores/navHistoryStore.ts).
+   */
+  openNoteInActivePane: (id: string, sectionId?: string) => void
   closePane: (paneId: string) => void
   focusPane: (paneId: string) => void
   reorderPane: (paneId: string, targetIndex: number) => void
@@ -1339,6 +1345,27 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       contentPlace: null, noteViewId: null, brainViewOpen: false, contentReturnPlace: null,
     }))
     saveUiState({ activeNoteId: id, ...(section ? { activeSectionId: section } : {}) })
+  },
+  openNoteInActivePane: (id, sectionId) => {
+    const target = get().notes.find((n) => n.id === id)
+    if (!target) return
+    const section = sectionId && target.sections.some((s) => s.id === sectionId) ? sectionId : undefined
+    const prev = get().activeNoteId
+    if (prev && prev !== id) maybePruneOnLeave(get, prev)
+    // Same section dance as navigateToSection: stashed for an editor that (re)mounts or
+    // switches note, re-requested on the next tick for one that only starts listening then.
+    if (section) set({ pendingInitialSectionId: section })
+    set((s) => ({
+      ...layoutState(openInActivePane(layoutOf(s), id, newPaneId())),
+      contentPlace: null, noteViewId: null, brainViewOpen: false, contentReturnPlace: null,
+    }))
+    saveUiState({ activeNoteId: id, ...(section ? { activeSectionId: section } : {}) })
+    if (!section) return
+    const request = () => window.dispatchEvent(
+      new CustomEvent('noteflow:request-section', { detail: { noteId: id, sectionId: section } }),
+    )
+    request()
+    setTimeout(request, 0)
   },
   closePane: (paneId) => {
     set((s) => {

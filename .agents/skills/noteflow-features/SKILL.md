@@ -397,6 +397,23 @@ cambie fuera de NoteFlow aparece en la nota. Diseño e invariantes técnicos: `p
 
 ---
 
+## Atrás / Adelante (navegación tipo navegador)
+
+- Los **botones laterales del ratón** (atrás/adelante), `Alt+←/→` en Windows/Linux y `⌘[` / `⌘]` en
+  macOS recorren las ubicaciones visitadas en la ventana principal: notas abiertas en el editor, la
+  **vista de nota**, la **vista de contenido** (con su lugar: todo, favoritas, un grupo o carpeta) y
+  la **vista cerebro**. Adelante deshace el Atrás; navegar a algo nuevo tras un Atrás descarta lo
+  que había delante. Hasta 50 entradas.
+- Cambiar de pestaña dentro de la misma nota no añade un paso: Atrás vuelve a la nota anterior **en
+  la sección donde la dejaste**.
+- Con paneles en paralelo, el historial sigue al **panel activo**: Atrás cambia la nota de ese panel
+  (o enfoca el panel que ya la muestra) y deja los demás como están.
+- Las notas borradas desaparecen del historial; las cifradas bloqueadas se saltan.
+- Con un diálogo, la paleta, Ajustes o un menú/menú contextual abierto no navega (no cambia la nota
+  por debajo).
+- Dentro de una tabla `Alt+←/→` sigue siendo mover columna. Las ventanas de sección, sticky y chat no
+  tienen historial (los botones del ratón no hacen nada allí).
+
 ## Vista en paralelo (split)
 
 - `Ctrl+Click` sobre una nota, o "Open alongside" en el menú contextual, abre una **segunda nota
@@ -2296,6 +2313,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+Shift+F` | Buscar en todas las notas (sidebar) |
 | `Ctrl+'` | Fijar / desfijar sidebar (fijado ⇄ flotante; en la vista cerebro, mostrar/ocultar sus notas) |
 | `Ctrl+Click` | Abrir nota en paralelo (sobre un tag de sección: esa sección en un panel nuevo) |
+| `Alt+←/→` (macOS `⌘[` / `⌘]`) · botones laterales del ratón | Atrás / adelante entre notas y vistas |
 
 ### Secciones
 | Atajo | Acción |
