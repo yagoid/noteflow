@@ -318,7 +318,7 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   cobros); **cualquier** 404 de LS = 502 (key de test o fila de test: nunca borrar a ciegas); 3)
   `DELETE` con service role de
   `USER_DATA_TABLES` (`files`, `file_versions` —justo después de `files`, desde la 0016—, `user_keys`,
-  `usage_events`, `subscriptions` — el test las ata a las
+  `usage_events`, `ai_autocomplete_daily` —desde la 0018—, `subscriptions` — el test las ata a las
   tablas `on delete cascade` de las migraciones); 4) `DELETE /auth/v1/admin/users/<id>`. Idempotente:
   un reintento ve las suscripciones ya canceladas, los deletes son no-ops, admin 404 = éxito y un
   token cuyo usuario ya no existe (`user_not_found`) responde 200. `feedback` se conserva anónimo
@@ -418,7 +418,8 @@ es **un preset más**, no una implementación nueva.
 
 - **Servidor — Edge Function `supabase/functions/ai-proxy`** (Deno, cero dependencias; lógica pura
   en `logic.ts`, testeada en `tests/supabase/ai-proxy.test.ts`) exponiendo `POST
-  .../ai-proxy/chat/completions` + `GET .../ai-proxy/models` OpenAI-compatible. Pipeline por
+  .../ai-proxy/chat/completions` + `GET .../ai-proxy/models` OpenAI-compatible (más `GET /usage` y
+  `POST /autocomplete`, propios de NoteFlow — ver sus apartados abajo). Pipeline del chat por
   request (orden del código **desde la 0009**; la versión desplegada hoy comprueba la cuota antes
   de leer el body y mide solo al final — ver "Coste acotado"): resuelve el access token del caller
   a `user_id` vía `/auth/v1/user` (401 si inválido) → entitlement `ai`/`bundle` activo consultando
@@ -455,8 +456,9 @@ es **un preset más**, no una implementación nueva.
   diferencia del webhook). Env: `OPENROUTER_API_KEY` (secreto), `AI_MONTHLY_BUDGET_USD`
   (presupuesto mensual por usuario en **USD de coste real**, default 2, admite decimales; un valor
   inválido → default; `AI_MONTHLY_TOKENS` ya no se lee), `AI_ALLOWED_MODELS` (opcional:
-  **restricción de emergencia** del catálogo — ver "Catálogo de modelos en BD") y `AI_MAX_INFLIGHT`
-  (default 3).
+  **restricción de emergencia** del catálogo — ver "Catálogo de modelos en BD"), `AI_MAX_INFLIGHT`
+  (default 3) y, para el autocompletado, `AI_AUTOCOMPLETE_MODEL` y `AI_AUTOCOMPLETE_SHARE` (ver
+  "Autocompletado en el editor").
 - **Catálogo de modelos en BD (migraciones 0012 + 0013; desplegado el 2026-10-24 con `ai-proxy`
   v11):** el catálogo del plan es la tabla `public.ai_models` (`id` text PK,
   `images` **sin default**, `enabled`, `sort_order`, `created_at`; de la 0013: `price_in_usd` /
@@ -584,7 +586,8 @@ es **un preset más**, no una implementación nueva.
     los dos.
   - **Unidad en BD:** columna `usage_events.quota_usd` (estimación mientras `pending`, coste real al
     liquidar, 0 al liberar). Consumo del mes = `sum(coalesce(quota_usd, cost_usd, 0))` (RPC
-    `get_month_cost` y la suma de `reserve_ai_cost`): **sin backfill** — las filas anteriores a la
+    `get_month_cost` y la suma de `reserve_ai_cost`; desde la 0018 ambas suman además el gasto de
+    autocompletado del mes, `ai_autocomplete_daily.cost_usd`): **sin backfill** — las filas anteriores a la
     0013 cuentan por su `cost_usd` (que se guarda desde la 0009), así que el gasto de este mes ya
     hecho cuenta; las reservas pendientes de la función vieja (sin `quota_usd` ni `cost_usd`)
     cuentan 0. `get_month_usage`/`reserve_ai_usage` y las columnas viejas **no se borran**.
@@ -632,9 +635,96 @@ es **un preset más**, no una implementación nueva.
     `quota_multiplier`, que la 0013 siembra **realista** (= `cost_index`: deepseek 1, luna 2, haiku 1,
     mimo 2, sol 30) para que sol no salga a ×1. Después, publicar la app con el catálogo nuevo de
     respaldo.
+- **Autocompletado en el editor — `POST .../ai-proxy/autocomplete` (migración 0018; implementado en
+  servidor, **sin desplegar**; el cliente está en `.agents/context/ai.md`):** sugerencias de texto
+  fantasma mientras se escribe, solo para quien tiene NoteFlow AI (mismo auth + entitlement
+  `ai`/`bundle` que el chat: 401 / 403 `subscription_required`).
+  - **Contrato:** `Authorization: Bearer <access token>`, body JSON `{ "before": string, "after"?:
+    string }` (texto antes y después del cursor; cualquier otro campo se ignora). **El servidor
+    construye la petición entera** (`buildAutocompleteBody`): prompt de sistema
+    (`AUTOCOMPLETE_SYSTEM_PROMPT`: continuar desde `<CURSOR/>`, solo la continuación, 3-10 palabras,
+    mismo idioma), mensaje de usuario `${before}<CURSOR/>${after}`, modelo, `max_tokens = 48`
+    (`AUTOCOMPLETE_MAX_TOKENS`), `temperature 0.2`, `stream: true`, `usage: {include: true}` y
+    **razonamiento desactivado** (`reasoning: {effort: 'none'}` — Haiku a veces razonaba, agotaba los
+    48 tokens y devolvía vacío). El cliente no elige nada de eso. Respuesta 200: el SSE de OpenRouter
+    en passthrough (`chat.completion.chunk`, igual que `/chat/completions`), sin cabeceras
+    `X-NoteFlow-Tokens-*`.
+  - **Recorte en el servidor** (`parseAutocompleteRequest` → `trimAutocompleteContext`): `before` a
+    sus **últimos 2.000** caracteres y `after` a sus **primeros 300** (sin partir un par
+    sustituto); es lo que acota el coste de entrada mande lo que mande el cliente. Tope de body
+    **32 KiB** (`AUTOCOMPLETE_MAX_BODY_BYTES`, por `Content-Length` y contando al leer) → 413
+    `request_too_large`: el cliente debe recortar antes de enviar, no mandar la nota entera.
+  - **Errores** (OpenAI-shaped, como el resto del proxy): 400 `invalid_request` (JSON inválido,
+    `before` ausente / no string / solo espacios, `after` presente y no string — `null` cuenta como
+    ausente) · 413 `request_too_large` · **429 `autocomplete_quota_exceeded`** (techo del
+    autocompletado alcanzado) · **429 `monthly_quota_exceeded`** (presupuesto total agotado) · 500
+    `quota_check_failed` (falló la RPC; p. ej. migración sin aplicar) / `not_configured` · upstream
+    por `mapUpstreamError` (502 `upstream_error`, o 400 `context_length_exceeded`). Nunca 429
+    `too_many_concurrent_requests`.
+  - **Modelo:** env `AI_AUTOCOMPLETE_MODEL` (default `anthropic/claude-haiku-5.5`,
+    `parseAutocompleteModel`). **No pasa por el catálogo del chat**: se usa aunque no esté `enabled`
+    en `ai_models` y no le afecta `AI_ALLOWED_MODELS`. Coste (`autocompleteCharge`): `usage.cost` de
+    OpenRouter; si no viene, tokens reales × el precio de lista de **su fila de `ai_models`**
+    (`modelPricesFromRows`: cualquier fila con precios, habilitada o no; con la tabla ilegible, el
+    catálogo de respaldo); sin fila, `AUTOCOMPLETE_FALLBACK_PRICE` (0,10 / 0,50 USD por 1M: el precio
+    de lista de Haiku 5.5). Si se cambia el modelo por uno más caro, darle fila en `ai_models`
+    (puede quedarse `enabled = false`).
+  - **Techo del 30 %, no reserva:** el autocompletado puede gastar como máximo
+    `AI_AUTOCOMPLETE_SHARE` (default `0.3`; rango (0, 1], un valor inválido → default;
+    `parseAutocompleteShare`) del presupuesto mensual. El chat sigue pudiendo usar el 100 %, y el
+    gasto de autocompletado **cuenta dentro del presupuesto total**: la 0018 redefine
+    `get_month_cost` y `reserve_ai_cost` (misma firma) para sumar también
+    `ai_autocomplete_daily.cost_usd` del mes. Decisión pura `decideAutocompleteQuota(used,
+    autocompleteUsed, limit, share)`: `used >= limit` → `'quota'` (gana); `autocompleteUsed >= limit
+    × share` → `'autocomplete_quota'`; si no `'ok'`. Con $2 y 30 % son $0,60 ≈ 7.500 sugerencias al
+    mes a ~$0,00008.
+  - **Tabla agregada, no una fila por sugerencia:** `public.ai_autocomplete_daily (user_id, day,
+    requests, tokens_in, tokens_out, cost_usd; PK (user_id, day))` — **una fila por usuario y día
+    UTC**, con RLS de solo lectura del propio usuario (como `usage_events`) y FK `on delete cascade`
+    (por eso está en `USER_DATA_TABLES` de `delete-account`). Motivo: un usuario genera cientos de
+    sugerencias al día y el plan gratis de Supabase da 500 MB; `usage_events` no recibe **ninguna**
+    fila del autocompletado. La escribe la RPC `record_autocomplete_cost(p_user_id, p_tokens_in,
+    p_tokens_out, p_cost_usd)` (upsert que suma; security definer, solo service role).
+  - **Por qué sin reserva:** el chat reserva antes de reenviar porque una petición puede costar
+    céntimos o dólares; aquí la más cara posible (contexto recortado + 48 tokens de salida) cuesta
+    ≤ ~$0,0002 (lo fija un test). Basta una **lectura previa** — RPC `get_autocomplete_budget(p_user_id)`
+    → jsonb `{used, autocomplete_used}` en USD, sin lock ni fila `pending` — y sumar el coste real al
+    terminar. Así ninguna sugerencia ocupa hueco de `AI_MAX_INFLIGHT`, ni toma el advisory lock del
+    usuario (teclear no serializa ni retrasa el chat), y cada petición es una lectura + un upsert.
+    **Exceso posible:** las peticiones en vuelo cuando se alcanza el techo × ≤ $0,0002; sobre el
+    techo del 30 % ese exceso sale del presupuesto del chat, no del operador.
+  - **Medición:** `tee()` + `createSseUsageScanner` como el chat; al acabar el stream,
+    `record_autocomplete_cost`. **Abortar en el cliente** (lo habitual: el usuario sigue tecleando)
+    no cancela el upstream, así que la sugerencia se genera entera (≤ 48 tokens) y **se cobra**. Si
+    el stream acaba sin `usage`, se registra una **estimación** (entrada ≈ bytes del body / 4,
+    salida = los 48 tokens, a precio de lista; sin consulta a `/generation`). Si el upstream falla
+    antes de generar (fetch que lanza, respuesta no-OK, sin stream) **no se registra nada**. Un
+    fallo de la RPC al registrar solo se loguea (esa sugerencia queda sin medir).
+  - **`GET /usage`:** añade `autocomplete: {used, limit}` en las mismas unidades legacy
+    (`autocompleteUsageUnits`): `limit = round(share × 3.000.000)` (900.000 al 30 %) y `used`
+    escalado como el total (`gasto de autocompletado / presupuesto × 3.000.000`), así que
+    `used / limit` es la fracción del techo gastada y `used` es comparable con el `used` de arriba
+    (es parte de él). Si `get_autocomplete_budget` falla (migración sin aplicar), `/usage` cae a
+    `get_month_cost` y responde el `{used, limit}` de siempre **sin** el campo: el cliente debe
+    tratarlo como opcional.
+  - **Despliegue (pendiente), en este orden:** (1) aplicar `0018_ai_autocomplete.sql` — sola **no
+    rompe** el proxy desplegado: `get_month_cost` y `reserve_ai_cost` conservan firma y forma del
+    resultado (lo fija `tests/supabase/ai-autocomplete.test.ts`) y con la tabla vacía devuelven lo
+    mismo; (2) `supabase functions deploy ai-proxy`; (3) `supabase functions deploy delete-account`
+    (borra también `ai_autocomplete_daily`; **desplegada antes que la migración respondería 500
+    `delete_failed`**); (4) opcional `supabase secrets set AI_AUTOCOMPLETE_MODEL=… AI_AUTOCOMPLETE_SHARE=…`.
+    La función nueva sin la migración: 500 `quota_check_failed` en `/autocomplete`; chat y `/usage`
+    siguen funcionando.
+  - ⚠️ **A verificar tras desplegar** (no se puede probar sin la función desplegada): que
+    `reasoning: {effort: 'none'}` desactiva de verdad el razonamiento de Haiku en OpenRouter —
+    comprobar en una sugerencia real que `usage.completion_tokens_details.reasoning_tokens` es 0 y
+    que no llegan sugerencias vacías; si no, probar `reasoning: {enabled: false}` en
+    `buildAutocompleteBody`. La migración sí se ha **ejecutado** contra un Postgres en memoria
+    (PGlite, con stubs de `auth` y de los roles) al escribirla; no contra el proyecto real.
 - **Endpoint `GET .../ai-proxy/usage`:** devuelve `{used, limit}` en **unidades legacy** (ver "Cuota
   por coste real": solo el cociente significa algo) tras resolver el token a `user_id`, **sin gate
-  de entitlement** (ver el consumo es inocuo y sigue siendo útil tras caducar la suscripción). Lo
+  de entitlement** (ver el consumo es inocuo y sigue siendo útil tras caducar la suscripción).
+  Desde la 0018 añade `autocomplete: {used, limit}` (ver "Autocompletado en el editor"). Lo
   consume el IPC `ai:llm-usage` (main pide un access token fresco; devuelve `null` ante cualquier
   fallo — la UI solo oculta la barra) que alimenta la barra de consumo de la **sección NoteFlow AI**
   de `LlmConfigView`, que desde esta versión muestra un **porcentaje** ("N% of this month’s AI

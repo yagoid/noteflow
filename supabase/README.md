@@ -375,7 +375,9 @@ y luego `expired`; el Bundle cubre ambas entitlements entretanto, sin duplicar a
 ## 6. NoteFlow AI (proxy LLM)
 
 La Edge Function `supabase/functions/ai-proxy` expone un endpoint OpenAI-compatible
-(`POST .../ai-proxy/chat/completions` + `GET .../ai-proxy/models`) que valida la sesión de Supabase
+(`POST .../ai-proxy/chat/completions` + `GET .../ai-proxy/models`; además `GET .../ai-proxy/usage` y,
+desde la migración 0018, `POST .../ai-proxy/autocomplete` — ver "Autocompletado en el editor" más
+abajo) que valida la sesión de Supabase
 del usuario, comprueba el entitlement `ai`/`bundle` y la cuota mensual, y reenvía a **OpenRouter**
 con la única key del servidor. El consumo se registra en `usage_events` (migración 0003) leyendo el
 bloque `usage` que OpenRouter añade al final del stream. Desde la **migración 0013** la cuota es un
@@ -546,6 +548,59 @@ un máximo de peticiones simultáneas), que se **liquida** con el coste real al 
      from public.usage_events
     where at >= date_trunc('month', now())
     group by model order by usd desc nulls last;
+   ```
+
+   **Autocompletado en el editor (migración 0018).** La función expone además `POST
+   .../ai-proxy/autocomplete` (body `{ "before": string, "after"?: string }`; mismo token y
+   entitlement que el chat): el servidor construye la petición entera (prompt, modelo, 48 tokens de
+   salida, razonamiento desactivado) y devuelve el SSE de OpenRouter. Puede gastar como máximo una
+   fracción del presupuesto mensual del usuario (**techo, no reserva**: el chat puede usar el 100 %,
+   y lo que gasta el autocompletado cuenta dentro del total). No escribe en `usage_events`: suma en
+   `public.ai_autocomplete_daily`, **una fila por usuario y día** (detalle y motivos en
+   `.agents/context/monetization.md` § 3 "Autocompletado en el editor"). Pasos, **en este orden**:
+
+   ```bash
+   # 1. La migración (SQL Editor o `supabase db push`). Sola NO rompe el proxy desplegado:
+   #    get_month_cost / reserve_ai_cost conservan su firma.
+   #    supabase/migrations/0018_ai_autocomplete.sql
+   # 2. La función:
+   supabase functions deploy ai-proxy
+   # 3. delete-account borra también ai_autocomplete_daily: redesplegarla DESPUÉS de la migración
+   #    (antes respondería 500 delete_failed a todo el mundo — ver § 9).
+   supabase functions deploy delete-account
+   # 4. Opcionales (estos son los defaults):
+   supabase secrets set AI_AUTOCOMPLETE_MODEL=anthropic/claude-haiku-5.5
+   supabase secrets set AI_AUTOCOMPLETE_SHARE=0.3   # fracción del presupuesto, en (0, 1]
+   ```
+
+   - `AI_AUTOCOMPLETE_MODEL` **no** tiene que estar `enabled` en `ai_models` ni le afecta
+     `AI_ALLOWED_MODELS`. Si se cambia por un modelo más caro, darle una fila con precios en
+     `ai_models` (puede quedarse `enabled = false`): es el precio de respaldo cuando OpenRouter no
+     informa `usage.cost`; sin fila se usa el de Haiku 5.5 (0,10 / 0,50 USD por 1M).
+   - Errores propios: 429 `autocomplete_quota_exceeded` (techo alcanzado), 429
+     `monthly_quota_exceeded` (presupuesto total agotado), 400 `invalid_request`, 413
+     `request_too_large` (body > 32 KiB). `GET .../ai-proxy/usage` añade `autocomplete: {used,
+     limit}` en las mismas unidades escaladas (`limit` = fracción × 3.000.000).
+   - ⚠️ **Tras desplegar, comprobar el razonamiento:** la función manda `reasoning: {effort:
+     "none"}` para que Haiku no gaste los 48 tokens pensando y devuelva vacío. Verificarlo con una
+     sugerencia real (que no lleguen vacías, y que en el último chunk del SSE
+     `usage.completion_tokens_details.reasoning_tokens` sea 0). Si
+     sigue razonando, cambiarlo por `reasoning: {enabled: false}` en `buildAutocompleteBody`
+     (`functions/ai-proxy/logic.ts`) y redesplegar.
+
+   ```sql
+   -- Gasto de autocompletado por mes
+   select date_trunc('month', day) as mes, round(sum(cost_usd), 4) as usd,
+          sum(requests) as sugerencias, count(distinct user_id) as usuarios
+     from public.ai_autocomplete_daily
+    group by 1 order by 1 desc;
+
+   -- Top usuarios del mes en curso (y qué parte de su presupuesto de $2 es autocompletado)
+   select user_id, round(sum(cost_usd), 4) as usd, sum(requests) as sugerencias,
+          round(sum(cost_usd) / nullif(sum(requests), 0), 6) as usd_por_sugerencia
+     from public.ai_autocomplete_daily
+    where day >= date_trunc('month', now() at time zone 'utc')::date
+    group by user_id order by usd desc limit 20;
    ```
 
 4. **Checkout de Lemon Squeezy:** copiar la URL de compra de la variante del producto AI
@@ -809,7 +864,8 @@ también ofrece la vía por email.
    `provider='lemonsqueezy'`, también las `expired` aquí: un reembolso total la expira sin
    cancelarla en LS). Si alguna no se puede cancelar → **502 `{error:"billing_cancel_failed"}` y no
    se borra nada**. La cancelación es la normal de LS: no hay más cobros y el periodo pagado se agota.
-3. Borra sus filas de `files`, `file_versions`, `user_keys`, `usage_events` y `subscriptions`
+3. Borra sus filas de `files`, `file_versions`, `user_keys`, `usage_events`,
+   `ai_autocomplete_daily` y `subscriptions`
    (service role, filtro explícito por `user_id`; `file_versions` justo después de `files`, para que
    ninguna subida concurrente genere versiones nuevas). NoteFlow Cloud no usa Storage: los blobs
    cifrados viven en `files` (y su historial en `file_versions`, migración 0016).
@@ -853,8 +909,9 @@ Pasos del operador:
    supabase functions deploy billing-webhook --no-verify-jwt
    ```
 
-3. **Desplegar la función** — CON verificación de JWT (el default). ⚠️ **Antes, la migración 0016
-   aplicada** (§ 7.1): la función borra también `file_versions`, y contra un servidor sin esa tabla
+3. **Desplegar la función** — CON verificación de JWT (el default). ⚠️ **Antes, las migraciones
+   0016 y 0018 aplicadas** (§ 7.1 y § 6): la función borra también `file_versions` y
+   `ai_autocomplete_daily`, y contra un servidor sin alguna de esas tablas
    responde 500 `delete_failed` a todo el mundo:
 
    ```bash
