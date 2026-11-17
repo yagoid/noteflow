@@ -378,8 +378,10 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   - Debajo, en Ajustes → IA, la sección **"Your notes and AI"** (`Settings/AiPanel.tsx`, mismo
     formulario de etiquetas): **Local AI** (toggle; activa: "N notes" —notas sin cifrar del store— o el
     progreso/descarga del modelo, y "Reindex"), **Profile** ("Redo questionnaire" → abre el cerebro en
-    la pestaña Profile y cierra Ajustes) y **CLI skill** (toggle; en la build de la Store, el texto
-    explicativo sin toggle). Antes vivían en Ajustes → General.
+    la pestaña Profile y cierra Ajustes), **Autocomplete** (toggle "Beta" del autocompletado del
+    editor; ver § "Autocompletado con IA en el editor") y **CLI skill** (toggle; en la build de la
+    Store, el texto explicativo sin toggle). Local AI, Profile y CLI skill antes vivían en Ajustes →
+    General.
 - **RAG (`ai:chat` en main):** embebe la pregunta vía `aiIndex.search` (híbrido) → expande vecinos
   con `aiIndex.graph` → lee secciones de disco (`noteFormat.parseNoteDir`) → monta system prompt con
   contexto → stream. Emite `ai:chat-sources` (notas usadas) antes de los deltas. **Privacidad:** solo
@@ -697,3 +699,104 @@ tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventan
   (chat nuevo con "Todas las notas" activado, el alcance del "Ask AI" del cerebro; sin proveedor, queda
   como borrador). Si la principal se destruye, la de chat también; tras una recarga de la principal,
   `ai:chat-window-is-open` restaura el `detached`.
+
+### Autocompletado con IA en el editor (texto fantasma)
+Continuación corta del texto en el cursor, pintada atenuada; **Tab** la inserta. Piezas: main
+`electron/ai/autocomplete.ts` (petición + lógica pura, tests en `tests/electron/autocomplete.test.ts`)
+y sus handlers en `main.ts`; renderer `components/Editor/AiGhostText.ts` (extensión TipTap),
+`stores/aiAutocompleteStore.ts` y `lib/aiAutocomplete.ts` (reglas puras, tests en
+`tests/lib/aiAutocomplete.test.ts`); UI del ajuste en `Settings/AiPanel.tsx` (`AutocompleteRow`).
+- **Solo con el plan NoteFlow AI, independiente del proveedor del chat.** No pasa por
+  `settings.aiLlm` ni por `llm/`: main llama directo a **`POST <AI_PROXY_URL>/autocomplete`** con el
+  access token de la cuenta (`account.getAccessTokenResult`; 401 → `invalidateAccessToken(token)`) y
+  body `{before, after?}`. **Prompt, modelo, `max_tokens` y temperatura los fija el servidor** (el
+  cliente no elige modelo); el proxy aplica además un **techo propio** al autocompletado (30 % de la
+  asignación mensual). Respuesta: SSE estilo `chat.completion.chunk`. Contexto enviado: hasta 1500
+  caracteres antes del cursor y 200 después (texto plano de la sección abierta).
+- **Ajuste: `settings.aiAutocomplete.enabled`, LOCAL (`settings.json` de `userData`), apagado por
+  defecto.** Es una decisión de privacidad por dispositivo (activa el envío de texto mientras se
+  escribe), por eso no va en `ui-settings.json`. IPC `ai:autocomplete-get` / `ai:autocomplete-set` →
+  `{enabled, available}` (`available` = `isManagedAiUsable(getAccountStatus())`: sesión + entitlement
+  `ai` o entitlements aún desconocidas — el proxy es el juez). Main emite **`ai:autocomplete-changed`**
+  a todas las ventanas al cambiar el ajuste y en cada cambio de estado de la cuenta
+  (`handleAutocompleteAccountChange`, desde `handleAccountStatusChanged`); `aiAutocompleteStore` lo
+  refleja (carga perezosa con el primer editor de la ventana o al abrir Ajustes → IA), así que
+  activar/desactivar aplica a los editores abiertos sin recargar (al apagar: se cancela lo que haya
+  en vuelo y se borra la sugerencia visible).
+- **UI (Ajustes → IA → "Your notes and AI", fila "Autocomplete" con pastilla "Beta"):** texto de
+  ayuda (envío del texto cercano al cursor; nunca en notas cifradas ni secciones ocultas a la IA),
+  toggle, y sin plan usable la línea "Requires an active NoteFlow AI plan" con el toggle
+  deshabilitado (si quedó activo de antes sí se puede **apagar**). Con el ajuste activo y plan: barra
+  + "N% of this month's autocomplete allowance used" (`autocompleteUsagePercent`), del campo
+  `autocomplete: {used, limit}` de `GET /usage` (IPC `ai:llm-usage`; `parseAutocompleteUsage`: si el
+  proxy no lo manda o viene mal formado → desconocido, la barra no se pinta). Al agotarlo, texto de
+  aviso en amarillo.
+- **Flujo (`ai:complete`, invoke `{requestId, before, after}`):** main comprueba, en este orden, el
+  ajuste (`disabled`), el plan (`unavailable`) y el bloqueo temporal (`unavailable` + `retryAt`) —
+  **defensa en profundidad: con el ajuste apagado no sale nada aunque el renderer pida** —; pide el
+  token y streamea. Cada vez que cambia el texto limpio acumulado lo manda al remitente por el evento
+  **`ai:complete-partial`** (`{requestId, text}`: el texto **completo** hasta ahora, no un delta) y
+  resuelve con `{ok: true, text}` (final) o `{ok: false, reason, retryAt?}`. `ai:complete-cancel`
+  aborta por `requestId` (las peticiones en vuelo se guardan por `<id del webContents>:<requestId>` y
+  se abortan si su ventana se destruye); un **timeout de 20 s** cuenta como fallo transitorio (backoff
+  de 1 min), no como cancelación. **Los fallos son silenciosos** (no hay
+  strings de error: por eso `electron/i18n.ts` no tiene claves de esto); como mucho un
+  `console.warn('[Autocomplete] request failed: …')`, y ni eso para 404/405.
+- **Backoff (`autocompleteBackoffMs`, puro):** 429 con `autocomplete_quota_exceeded` o
+  `monthly_quota_exceeded` → **30 min** sin pedir; **404/405** (proxy sin la ruta) → **no se
+  reintenta en la sesión** (`Infinity`); 403 → 10 min + `refreshEntitlements()`; red / 5xx / 429 sin
+  código de cuota / sin token → 1 min; 401, 400 y 413 → sin pausa. El bloqueo vive en memoria en main
+  (`autocompleteBlockedUntil`; se pierde al reiniciar) y un cambio de identidad o de entitlement `ai`
+  borra los bloqueos **temporales** (no el de ruta inexistente). El renderer recibe el `retryAt` y deja
+  de armar peticiones hasta entonces (`aiAutocompleteStore.blockedUntil`; cualquier
+  `ai:autocomplete-changed` lo pone a 0 y main vuelve a decidir).
+- **`cleanSuggestion(before, raw, finishReason, {partial?})` (pura):** primera línea solamente; quita
+  el marcador `<CURSOR/>` y un **eco** del final de la línea actual (sufijo más largo que empiece en
+  límite de palabra y sea prefijo de la respuesta); arregla el espacio inicial; si `finish_reason ===
+  'length'` recorta a la última palabra entera; tope de **12 palabras** (`AUTOCOMPLETE_MAX_WORDS`),
+  prefiriendo cortar en puntuación si quedan ≥ 4 palabras. **Con `partial`** (stream abierto) devuelve
+  solo lo seguro de pintar: retiene la última palabra hasta que empieza la siguiente (o llega un salto
+  de línea) y no devuelve nada mientras la respuesta aún podría ser un eco. Al pasar de 12 palabras el
+  texto puede **encogerse una vez** (corte en puntuación): el final manda.
+- **Espacio inicial y mitad de palabra (heurística, `finishesLastWord`):** el espacio inicial del
+  modelo no es fiable en ningún sentido (a veces sobra: "dentis" → " ta mañana"; a veces falta:
+  "voy" → "al dentista") y la respuesta no permite distinguirlo. Regla: si el texto acaba en
+  letra/dígito/puntuación de cierre y la respuesta empieza por letra, **se pone un espacio** (caso
+  normal: el usuario paró tras una palabra entera) **salvo evidencia en el propio texto** de que
+  estaba a media palabra: el fragmento final + la primera palabra de la respuesta ("dentis" + "ta")
+  ya aparece antes como palabra entera **y** el fragmento solo ("dentis") no. Nunca se une con
+  fragmentos de una letra (a/y/o/e…) ni si la respuesta empieza en mayúscula. Además: nunca espacio
+  antes de puntuación de cierre (`, . ; : ! ? ) ]`), y tras un eco se respeta lo que queda tal cual.
+  **Limitación conocida:** una palabra a medias que no aparezca antes en los 1500 caracteres de
+  contexto se sigue separando con espacio.
+- **Renderer (`AiGhostText`, prioridad 1000, registrada siempre en `Editor.tsx`; inerte con el ajuste
+  apagado):** estado del plugin `{ghost, typed}`. `typed` sube con cada transacción que **parece
+  tecleo** (`isTyping`: cambia el doc y no es undo/redo —`isHistoryTransaction`—, ni pegado/drop
+  —meta `uiEvent`—, ni sync de contenido externo —`preventUpdate` / `addToHistory: false`—, ni una
+  transacción del propio plugin) **y además** viene de texto tecleado: el plugin marca
+  `handleTextInput` (ProseMirror aplica el texto de forma síncrona justo después, también cuando lo
+  toma una input rule o el autocierre de paréntesis), de modo que insertar un snippet, ejecutar un
+  comando `/` o marcar un checkbox **no** arman petición (no pasan por `handleTextInput`); borrar
+  (Backspace) tampoco. Solo eso arma el temporizador de **400 ms** (`AUTOCOMPLETE_PAUSE_MS`). Por eso **aceptar con Tab no encadena otra petición** (su transacción
+  lleva el meta del plugin) y una edición del chat o de otro dispositivo tampoco dispara. Una sola
+  petición en vuelo por editor: cualquier cambio de doc o de selección la cancela. La sugerencia es
+  un **widget decoration** (`span.nf-ai-ghost`, estilos en `index.css`: color `--text-muted`, sin
+  estilos inline), nunca texto del documento. **Tab** (sin modificadores, solo con sugerencia
+  visible) inserta como **paso de undo propio** (`dispatchOwnUndoStep` de `tableOps.ts`: cierra el
+  grupo de historial antes y después, así un Ctrl+Z quita solo la sugerencia aunque se tecleara justo
+  antes); **Esc** descarta; teclear lo que la sugerencia
+  empieza diciendo conserva el resto (`remainingSuggestion`); cualquier otra edición o movimiento la
+  borra. Un solo listener IPC de `ai:complete-partial` por ventana (mapa `requestId → handler`).
+- **Exclusiones (no se pide):** selección no vacía; cursor que no esté al **final de un párrafo** no
+  vacío; dentro de `codeBlock` o `table`; menos de 20 caracteres antes del cursor
+  (`hasEnoughContext`); menú `/` abierto (`SuggestionPluginKey` activo); composición IME
+  (`view.composing`); editor sin foco o no editable; y el contenido que la IA no debe ver, vía la prop
+  `aiAutocomplete` de `Editor` (`NoteEditor` la pasa como `!isLinked && !note.encryption &&
+  !activeSection?.aiHidden`, leída en vivo): **notas cifradas, secciones `aiHidden` y notas
+  vinculadas**. Solo existe en el **Modo markdown** (el modo texto no usa TipTap) y solo en
+  `NoteEditor` (las sticky no pasan la prop → `false`).
+- **Convivencia con otras teclas:** sin sugerencia visible el plugin no toca Tab/Esc (listas, celdas
+  de tabla, menú `/`). No se pide con el menú `/` abierto, y `AutoCloseBrackets` deja el cursor
+  antes del `)` (no es final de párrafo → no se pide).
+- **Pendiente:** el servidor (ruta `/autocomplete` + campo `autocomplete` de `/usage`) se implementó
+  en paralelo; **el flujo de extremo a extremo contra el proxy desplegado no está verificado**.

@@ -1,72 +1,54 @@
 import { Extension } from '@tiptap/core'
-import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state'
+import { Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
+import { isHistoryTransaction } from '@tiptap/pm/history'
+import { SuggestionPluginKey } from '@tiptap/suggestion'
+import { dispatchOwnUndoStep } from './tableOps'
+import { useAiAutocompleteStore } from '../../stores/aiAutocompleteStore'
+import {
+  AUTOCOMPLETE_AFTER_CHARS, AUTOCOMPLETE_BEFORE_CHARS, AUTOCOMPLETE_PAUSE_MS,
+  canRequestCompletion, hasEnoughContext, remainingSuggestion,
+} from '../../lib/aiAutocomplete'
 
-// SPIKE (throwaway prototype, not a shipped feature): AI autocomplete as ghost text.
+// Inline AI autocomplete as ghost text (NoteFlow AI plan only; off by default — the switch
+// is in Settings → AI, a local setting read live from aiAutocompleteStore).
 //
-// Off unless localStorage['nf.spike.autocomplete'] holds a NoteFlow AI model id
-// ('deepseek/deepseek-v4.1-flash-1017' or 'anthropic/claude-haiku-5.5') when the
-// editor mounts: without the flag the plugin isn't even registered. After a typing
-// pause it asks main (`ai:complete`) for one sentence and shows it dimmed at the
-// caret — a widget decoration, never part of the document. Tab inserts it (one
-// undo step), Esc or any other edit / caret move drops it; typing the characters it
-// starts with keeps the rest. Counters live in window.__nfSpikeStats.
+// After a typing pause it asks main (`ai:complete`) to continue the text at the caret and
+// shows the answer dimmed there as it streams in — a widget decoration, never part of the
+// document. Tab inserts it (as its own undo step), Esc or any other edit / caret
+// move drops it; typing the characters it starts with keeps the rest. One request in flight
+// per editor: any edit or caret move cancels it.
+//
+// Never asked for: code blocks, tables, a non-empty selection, a caret that isn't at the end
+// of a paragraph, too little text, an open "/" menu, an IME composition, a read-only or
+// unfocused editor — nor content the AI must not see (`isAllowed`: encrypted notes, sections
+// hidden from the AI, linked notes). Main re-checks the switch and the plan.
 
-export const AI_AUTOCOMPLETE_FLAG = 'nf.spike.autocomplete'
-
-const PAUSE_MS = 600
-const MIN_PREVIOUS_CHARS = 20
-const BEFORE_CHARS = 1500
-const AFTER_CHARS = 200
-
-interface GhostState {
+interface Ghost {
   text: string
   pos: number
 }
+interface GhostState {
+  ghost: Ghost | null
+  /** Bumped by every transaction that looks like the user typing: what arms a request. */
+  typed: number
+}
 type GhostMeta = { type: 'set'; text: string; pos: number } | { type: 'clear' }
 
-interface SpikeStats {
-  startedAt: number
-  requests: number
-  shown: number
-  accepted: number
-  dismissed: number
-  cancelledInFlight: number
-  empty: number
-  errors: number
-  acceptedChars: number
-  totalMs: number
-  /** Requests per hour since the first one of this session. */
-  requestsPerHour: () => number
-}
+const ghostKey = new PluginKey<GhostState>('aiGhostText')
 
-const ghostKey = new PluginKey<GhostState | null>('aiGhostText')
+let requestSeq = 0
 
-function flagModel(): string | null {
-  try {
-    return localStorage.getItem(AI_AUTOCOMPLETE_FLAG)?.trim() || null
-  } catch {
-    return null
+// One IPC listener per window, whatever the number of editors: the text so far of each
+// request in flight goes to the editor that asked for it.
+const partialHandlers = new Map<string, (text: string) => void>()
+let partialsSubscribed = false
+function onPartial(id: string, handler: (text: string) => void): void {
+  if (!partialsSubscribed) {
+    partialsSubscribed = true
+    window.noteflow.onAiCompletePartial(({ requestId, text }) => partialHandlers.get(requestId)?.(text))
   }
-}
-
-function stats(): SpikeStats {
-  const w = window as unknown as { __nfSpikeStats?: SpikeStats }
-  if (!w.__nfSpikeStats) {
-    const s: SpikeStats = {
-      startedAt: 0, requests: 0, shown: 0, accepted: 0, dismissed: 0, cancelledInFlight: 0,
-      empty: 0, errors: 0, acceptedChars: 0, totalMs: 0,
-      requestsPerHour: () => (s.startedAt ? s.requests / Math.max((Date.now() - s.startedAt) / 3_600_000, 1 / 60) : 0),
-    }
-    w.__nfSpikeStats = s
-  }
-  return w.__nfSpikeStats
-}
-
-function log(message: string) {
-  const s = stats()
-  // Deliberate: the spike's whole point is to read these numbers in DevTools.
-  console.info(`[spike:autocomplete] ${message} · session: ${s.requests} req, ${s.shown} shown, ${s.accepted} accepted, ${s.dismissed} dismissed, ${s.cancelledInFlight} cancelled`)
+  partialHandlers.set(id, handler)
 }
 
 /** Caret position worth completing at: empty selection at the end of a non-empty
@@ -85,8 +67,23 @@ function completionPos(state: EditorState): number | null {
   return $pos.pos
 }
 
+/** A user edit — not undo/redo, a paste or drop, an external content sync
+ *  (preventUpdate / addToHistory:false) nor this plugin's own transactions. Not enough on
+ *  its own to arm a request: commands (a snippet, a "/" command, ticking a checkbox) pass
+ *  it too, so the view also requires the edit to come from typed text (handleTextInput). */
+function isTyping(tr: Transaction): boolean {
+  if (!tr.docChanged || tr.getMeta(ghostKey)) return false
+  if (tr.getMeta('addToHistory') === false || tr.getMeta('preventUpdate') || tr.getMeta('uiEvent')) return false
+  return !isHistoryTransaction(tr)
+}
+
+/** The "/" menu (SlashCommands) is open: its keys and its text are not ours. */
+function slashMenuOpen(state: EditorState): boolean {
+  return (SuggestionPluginKey.getState(state) as { active?: boolean } | undefined)?.active === true
+}
+
 export interface AiGhostTextOptions {
-  /** False for content the AI must never see (encrypted note, section hidden from the AI). Read live. */
+  /** False for content the AI must never see (encrypted note, section hidden from the AI, linked note). Read live. */
   isAllowed: () => boolean
 }
 
@@ -101,152 +98,168 @@ export const AiGhostText = Extension.create<AiGhostTextOptions>({
     return { isAllowed: () => false }
   },
 
+  // Load the switch (and follow its changes) with the first editor of the window.
+  onCreate() {
+    void useAiAutocompleteStore.getState().ensureLoaded()
+  },
+
   addProseMirrorPlugins() {
-    if (!flagModel()) return []
     const isAllowed = this.options.isAllowed
 
     let timer: ReturnType<typeof setTimeout> | null = null
-    let inFlight: { id: string } | null = null
-    let seq = 0
-    // Set by the Tab handler so the view doesn't count an accepted suggestion as dismissed.
-    let justAccepted = false
-    let shownMs = 0
+    let inFlight: { id: string; pos: number; doc: EditorState['doc'] } | null = null
+    // True from handleTextInput until the end of the task: ProseMirror applies typed text
+    // synchronously right after calling it (also when an input rule or the bracket
+    // auto-close takes it over), so the next doc change is the user's keystroke.
+    // Commands never go through handleTextInput.
+    let textInput = false
 
     const cancelPending = () => {
       if (timer) { clearTimeout(timer); timer = null }
       if (inFlight) {
         window.noteflow.aiCompleteCancel(inFlight.id)
+        partialHandlers.delete(inFlight.id)
         inFlight = null
-        stats().cancelledInFlight++
-        log('request cancelled (kept typing / moved)')
+      }
+    }
+
+    const setGhost = (view: EditorView, meta: GhostMeta) => {
+      view.dispatch(view.state.tr.setMeta(ghostKey, meta).setMeta('addToHistory', false))
+    }
+
+    /** Shows `text` for the request in flight, if the note and the caret are still where it was asked. */
+    const showSuggestion = (view: EditorView, id: string, text: string) => {
+      if (inFlight?.id !== id || view.isDestroyed) return
+      if (view.state.doc !== inFlight.doc || completionPos(view.state) !== inFlight.pos) return
+      const current = ghostKey.getState(view.state)?.ghost
+      if (!text) {
+        if (current) setGhost(view, { type: 'clear' })
+      } else if (current?.text !== text) {
+        setGhost(view, { type: 'set', text, pos: inFlight.pos })
       }
     }
 
     const request = (view: EditorView) => {
       timer = null
-      const model = flagModel()
-      if (!model || !isAllowed() || view.isDestroyed || !view.editable || !view.hasFocus() || view.composing) return
+      const store = useAiAutocompleteStore.getState()
+      if (!canRequestCompletion(store, Date.now()) || !isAllowed()) return
+      if (view.isDestroyed || !view.editable || !view.hasFocus() || view.composing) return
       const state = view.state
-      if (ghostKey.getState(state)) return
+      if (ghostKey.getState(state)?.ghost || slashMenuOpen(state)) return
       const pos = completionPos(state)
       if (pos === null) return
-      const before = state.doc.textBetween(0, pos, '\n', '\n').slice(-BEFORE_CHARS)
-      if (before.trim().length < MIN_PREVIOUS_CHARS) return
-      const after = state.doc.textBetween(pos, state.doc.content.size, '\n', '\n').slice(0, AFTER_CHARS)
+      const before = state.doc.textBetween(0, pos, '\n', '\n').slice(-AUTOCOMPLETE_BEFORE_CHARS)
+      if (!hasEnoughContext(before)) return
+      const after = state.doc.textBetween(pos, state.doc.content.size, '\n', '\n').slice(0, AUTOCOMPLETE_AFTER_CHARS)
 
-      const id = `ac-${Date.now()}-${++seq}`
-      const doc = state.doc
-      const s = stats()
-      if (!s.startedAt) s.startedAt = Date.now()
-      s.requests++
-      inFlight = { id }
-      const startedAt = performance.now()
-      void window.noteflow.aiComplete({ requestId: id, before, after, model }).then((res) => {
-        if (inFlight?.id !== id) return // superseded: already counted as cancelled
+      const id = `ac-${Date.now()}-${++requestSeq}`
+      inFlight = { id, pos, doc: state.doc }
+      // The text so far, as it streams in.
+      onPartial(id, (text) => showSuggestion(view, id, text))
+      void window.noteflow.aiComplete({ requestId: id, before, after }).then((res) => {
+        partialHandlers.delete(id)
+        if (inFlight?.id !== id) return // superseded or cancelled
+        if (res.ok) {
+          showSuggestion(view, id, res.text)
+        } else {
+          // Failures are silent. Main says how long to stop asking (quota, no plan, no route…).
+          if (res.retryAt !== undefined) useAiAutocompleteStore.getState().blockUntil(res.retryAt)
+          if (!view.isDestroyed && ghostKey.getState(view.state)?.ghost) setGhost(view, { type: 'clear' })
+        }
         inFlight = null
-        const ms = Math.round(performance.now() - startedAt)
-        if ('error' in res) {
-          s.errors++
-          log(`error after ${ms} ms: ${res.error}`)
-          return
-        }
-        s.totalMs += ms
-        if (!res.text) {
-          s.empty++
-          log(`empty suggestion in ${ms} ms (ttft ${res.ttftMs ?? '-'} ms)`)
-          return
-        }
-        // The note changed or the caret moved while waiting: the suggestion no longer fits.
-        if (view.isDestroyed || view.state.doc !== doc || completionPos(view.state) !== pos) return
-        shownMs = ms
-        s.shown++
-        log(`suggestion shown in ${ms} ms (ttft ${res.ttftMs ?? '-'} ms, ${res.text.length} chars, ${model})`)
-        view.dispatch(view.state.tr.setMeta(ghostKey, { type: 'set', text: res.text, pos } satisfies GhostMeta).setMeta('addToHistory', false))
-      }).catch((err: unknown) => {
+      }).catch(() => {
+        partialHandlers.delete(id)
         if (inFlight?.id === id) inFlight = null
-        s.errors++
-        log(`error: ${err instanceof Error ? err.message : String(err)}`)
       })
     }
 
     return [
-      new Plugin<GhostState | null>({
+      new Plugin<GhostState>({
         key: ghostKey,
         state: {
-          init: () => null,
+          init: () => ({ ghost: null, typed: 0 }),
           apply(tr, value, _oldState, newState) {
+            const typed = isTyping(tr) ? value.typed + 1 : value.typed
+            const next = (ghost: Ghost | null): GhostState =>
+              ghost === value.ghost && typed === value.typed ? value : { ghost, typed }
             const meta = tr.getMeta(ghostKey) as GhostMeta | undefined
-            if (meta) return meta.type === 'set' ? { text: meta.text, pos: meta.pos } : null
-            if (!value) return null
-            if (!tr.docChanged && !tr.selectionSet) return value
+            if (meta) return next(meta.type === 'set' ? { text: meta.text, pos: meta.pos } : null)
+            const ghost = value.ghost
+            if (!ghost) return next(null)
+            if (!tr.docChanged && !tr.selectionSet) return next(ghost)
             // Typing exactly what the suggestion starts with keeps the rest of it.
             const sel = newState.selection
-            if (tr.docChanged && sel.empty && sel.from > value.pos && tr.mapping.map(value.pos, -1) === value.pos
-              && tr.doc.content.size - tr.before.content.size === sel.from - value.pos
-              && sel.$from.sameParent(tr.doc.resolve(value.pos))) {
-              const typed = tr.doc.textBetween(value.pos, sel.from, '\n', '\n')
-              if (typed.length < value.text.length && value.text.startsWith(typed) && completionPos(newState) === sel.from) {
-                return { text: value.text.slice(typed.length), pos: sel.from }
-              }
+            if (tr.docChanged && sel.empty && sel.from > ghost.pos && tr.mapping.map(ghost.pos, -1) === ghost.pos
+              && tr.doc.content.size - tr.before.content.size === sel.from - ghost.pos
+              && sel.$from.sameParent(tr.doc.resolve(ghost.pos))) {
+              const rest = remainingSuggestion(ghost.text, tr.doc.textBetween(ghost.pos, sel.from, '\n', '\n'))
+              if (rest !== null && completionPos(newState) === sel.from) return next({ text: rest, pos: sel.from })
             }
-            if (!tr.docChanged && sel.empty && sel.from === value.pos) return value
-            return null
+            if (!tr.docChanged && sel.empty && sel.from === ghost.pos) return next(ghost)
+            return next(null)
           },
         },
         props: {
           decorations(state) {
-            const ghost = ghostKey.getState(state)
+            const ghost = ghostKey.getState(state)?.ghost
             if (!ghost) return null
             return DecorationSet.create(state.doc, [
               Decoration.widget(ghost.pos, () => {
                 const span = document.createElement('span')
                 span.className = 'nf-ai-ghost'
                 span.textContent = ghost.text
-                span.style.color = 'rgb(var(--text-muted))'
-                span.style.opacity = '0.75'
-                span.style.pointerEvents = 'none'
                 return span
               }, { side: 1, key: `ghost:${ghost.text}`, ignoreSelection: true }),
             ])
           },
+          handleTextInput() {
+            textInput = true
+            void Promise.resolve().then(() => { textInput = false })
+            return false
+          },
           handleKeyDown(view, event) {
-            const ghost = ghostKey.getState(view.state)
+            const ghost = ghostKey.getState(view.state)?.ghost
             if (!ghost || view.composing) return false
             if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
-              justAccepted = true
-              const s = stats()
-              s.accepted++
-              s.acceptedChars += ghost.text.length
-              log(`ACCEPTED (${ghost.text.length} chars, arrived in ${shownMs} ms)`)
-              // One transaction = one undo step.
-              view.dispatch(view.state.tr.insertText(ghost.text, ghost.pos).setMeta(ghostKey, { type: 'clear' } satisfies GhostMeta).scrollIntoView())
+              // Its own undo step (the history group is closed before and after: one Ctrl+Z
+              // removes the suggestion only, not the typing around it). It carries our meta,
+              // so it doesn't count as typing: no new request until the user types again.
+              dispatchOwnUndoStep(view, view.state.tr.insertText(ghost.text, ghost.pos).setMeta(ghostKey, { type: 'clear' } satisfies GhostMeta).scrollIntoView())
               return true
             }
             if (event.key === 'Escape') {
-              view.dispatch(view.state.tr.setMeta(ghostKey, { type: 'clear' } satisfies GhostMeta).setMeta('addToHistory', false))
+              cancelPending()
+              setGhost(view, { type: 'clear' })
               return true
             }
             return false
           },
         },
-        view() {
+        view(editorView) {
+          // Switched off (Settings → AI, any window) or the plan went away: drop everything now.
+          const offStore = useAiAutocompleteStore.subscribe((s) => {
+            if (s.enabled && s.available) return
+            cancelPending()
+            if (!editorView.isDestroyed && ghostKey.getState(editorView.state)?.ghost) setGhost(editorView, { type: 'clear' })
+          })
           return {
             update(view, prevState) {
-              const prevGhost = ghostKey.getState(prevState)
-              const ghost = ghostKey.getState(view.state)
-              if (prevGhost && !ghost) {
-                if (justAccepted) justAccepted = false
-                else { stats().dismissed++; log('dismissed') }
-              }
               const docChanged = view.state.doc !== prevState.doc
               const moved = !view.state.selection.eq(prevState.selection)
               if (!docChanged && !moved) return
               cancelPending()
-              // Only typing arms a request (not clicking around), and never over a live suggestion.
-              if (docChanged && !ghost) timer = setTimeout(() => request(view), PAUSE_MS)
+              // Only typed text arms a request (not clicking around, undo, a paste, a snippet,
+              // a "/" command, a ticked checkbox, an accepted suggestion or a synced edit),
+              // and never over a live suggestion.
+              const now = ghostKey.getState(view.state)
+              const typed = textInput && now !== undefined && now.typed !== ghostKey.getState(prevState)?.typed
+              if (typed && !now.ghost && isAllowed() && canRequestCompletion(useAiAutocompleteStore.getState(), Date.now())) {
+                timer = setTimeout(() => request(view), AUTOCOMPLETE_PAUSE_MS)
+              }
             },
             destroy() {
               cancelPending()
+              offStore()
             },
           }
         },

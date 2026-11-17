@@ -578,8 +578,10 @@ const api = {
   aiLlmListModels: (preset?: string) => ipcRenderer.invoke('ai:llm-list-models', preset),
   aiLlmTest: (preset?: string) => ipcRenderer.invoke('ai:llm-test', preset),
   // NoteFlow AI managed plan: monthly consumption (abstract units: only used/limit matters).
-  // Null on any failure — the UI just hides the usage bar.
-  aiLlmUsage: (): Promise<{ used: number; limit: number } | null> => ipcRenderer.invoke('ai:llm-usage'),
+  // Null on any failure — the UI just hides the usage bar. `autocomplete` = the share inline
+  // autocomplete may spend (absent with a proxy that doesn't report it yet).
+  aiLlmUsage: (): Promise<{ used: number; limit: number; autocomplete?: { used: number; limit: number } } | null> =>
+    ipcRenderer.invoke('ai:llm-usage'),
   aiChatsLoad: () => ipcRenderer.invoke('ai:chats-load'),
   aiChatsSave: (sessions: unknown) => ipcRenderer.invoke('ai:chats-save', sessions),
 
@@ -636,8 +638,23 @@ const api = {
   aiChatPickFiles: () => ipcRenderer.invoke('ai:chat-pick-files'),
   aiChatRemoveFile: (id: string) => ipcRenderer.invoke('ai:chat-remove-file', id),
   aiChatCancel: (requestId: string) => ipcRenderer.send('ai:chat-cancel', requestId),
-  // SPIKE: inline AI autocomplete (dev flag only — see src/components/Editor/AiGhostText.ts)
-  aiComplete: (req: { requestId: string; before: string; after: string; model?: string }) => ipcRenderer.invoke('ai:complete', req),
+  // Inline AI autocomplete (ghost text, src/components/Editor/AiGhostText.ts). The switch is a
+  // local setting; `available` = the account has a usable NoteFlow AI plan.
+  aiAutocompleteGet: (): Promise<{ enabled: boolean; available: boolean }> => ipcRenderer.invoke('ai:autocomplete-get'),
+  aiAutocompleteSet: (enabled: boolean): Promise<{ enabled: boolean; available: boolean }> =>
+    ipcRenderer.invoke('ai:autocomplete-set', enabled),
+  onAiAutocompleteChanged: (cb: (status: { enabled: boolean; available: boolean }) => void) => {
+    const wrapper = (_event: Electron.IpcRendererEvent, status: { enabled: boolean; available: boolean }) => cb(status)
+    ipcRenderer.on('ai:autocomplete-changed', wrapper)
+    return () => ipcRenderer.removeListener('ai:autocomplete-changed', wrapper)
+  },
+  // One suggestion: the text so far arrives by onAiCompletePartial, the final one as the result.
+  aiComplete: (req: { requestId: string; before: string; after: string }) => ipcRenderer.invoke('ai:complete', req),
+  onAiCompletePartial: (cb: (p: { requestId: string; text: string }) => void) => {
+    const wrapper = (_event: Electron.IpcRendererEvent, p: { requestId: string; text: string }) => cb(p)
+    ipcRenderer.on('ai:complete-partial', wrapper)
+    return () => ipcRenderer.removeListener('ai:complete-partial', wrapper)
+  },
   aiCompleteCancel: (requestId: string) => ipcRenderer.send('ai:complete-cancel', requestId),
   aiChatConfirm: (toolCallId: string, approved: boolean) =>
     ipcRenderer.send('ai:chat-confirm', { toolCallId, approved }),

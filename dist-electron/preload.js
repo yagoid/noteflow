@@ -328,7 +328,8 @@ const api = {
     aiLlmListModels: (preset) => electron_1.ipcRenderer.invoke('ai:llm-list-models', preset),
     aiLlmTest: (preset) => electron_1.ipcRenderer.invoke('ai:llm-test', preset),
     // NoteFlow AI managed plan: monthly consumption (abstract units: only used/limit matters).
-    // Null on any failure — the UI just hides the usage bar.
+    // Null on any failure — the UI just hides the usage bar. `autocomplete` = the share inline
+    // autocomplete may spend (absent with a proxy that doesn't report it yet).
     aiLlmUsage: () => electron_1.ipcRenderer.invoke('ai:llm-usage'),
     aiChatsLoad: () => electron_1.ipcRenderer.invoke('ai:chats-load'),
     aiChatsSave: (sessions) => electron_1.ipcRenderer.invoke('ai:chats-save', sessions),
@@ -384,8 +385,22 @@ const api = {
     aiChatPickFiles: () => electron_1.ipcRenderer.invoke('ai:chat-pick-files'),
     aiChatRemoveFile: (id) => electron_1.ipcRenderer.invoke('ai:chat-remove-file', id),
     aiChatCancel: (requestId) => electron_1.ipcRenderer.send('ai:chat-cancel', requestId),
-    // SPIKE: inline AI autocomplete (dev flag only — see src/components/Editor/AiGhostText.ts)
+    // Inline AI autocomplete (ghost text, src/components/Editor/AiGhostText.ts). The switch is a
+    // local setting; `available` = the account has a usable NoteFlow AI plan.
+    aiAutocompleteGet: () => electron_1.ipcRenderer.invoke('ai:autocomplete-get'),
+    aiAutocompleteSet: (enabled) => electron_1.ipcRenderer.invoke('ai:autocomplete-set', enabled),
+    onAiAutocompleteChanged: (cb) => {
+        const wrapper = (_event, status) => cb(status);
+        electron_1.ipcRenderer.on('ai:autocomplete-changed', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:autocomplete-changed', wrapper);
+    },
+    // One suggestion: the text so far arrives by onAiCompletePartial, the final one as the result.
     aiComplete: (req) => electron_1.ipcRenderer.invoke('ai:complete', req),
+    onAiCompletePartial: (cb) => {
+        const wrapper = (_event, p) => cb(p);
+        electron_1.ipcRenderer.on('ai:complete-partial', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:complete-partial', wrapper);
+    },
     aiCompleteCancel: (requestId) => electron_1.ipcRenderer.send('ai:complete-cancel', requestId),
     aiChatConfirm: (toolCallId, approved) => electron_1.ipcRenderer.send('ai:chat-confirm', { toolCallId, approved }),
     onAiChatToolCall: (cb) => {

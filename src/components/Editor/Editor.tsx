@@ -155,8 +155,9 @@ interface EditorProps {
    *  syntax), relative images shown from the file's folder and pasted images copied to its
    *  assets/ folder. Read once, at mount. */
   linked?: boolean
-  /** SPIKE (AiGhostText.ts): whether this content may be sent to the AI for inline
-   *  autocomplete — false for encrypted notes and sections hidden from the AI. Read live. */
+  /** Whether this content may be sent to NoteFlow AI for inline autocomplete (AiGhostText.ts)
+   *  — false for encrypted notes, sections hidden from the AI and linked notes. Read live;
+   *  the feature's own switch (Settings → AI) is checked by the extension. */
   aiAutocomplete?: boolean
 }
 
@@ -278,7 +279,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       TableKeymap,
       // Copied cells as TSV text; pasted tables normalized for markdown (tableClipboard.ts).
       TableClipboard,
-      // SPIKE: AI ghost-text autocomplete, inert without its localStorage dev flag.
+      // AI autocomplete as ghost text (Tab accepts): inert unless switched on in Settings → AI.
       AiGhostText.configure({ isAllowed: () => aiAutocompleteRef.current }),
       SlashCommands.configure({
         onLinkSection: () => setLinkPickerOpen(true),

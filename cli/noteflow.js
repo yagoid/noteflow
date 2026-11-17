@@ -8947,8 +8947,6 @@ if (require.main === module) {
     cmdCloudPull, cmdDelete, cmdSectionDelete, cmdMigrate, finishCloudLogin, cmdLogin, cmdLoginFinish,
     GITHUB_BASES_PATH, SETTINGS_PATH, NOTES_DIR, DEFAULT_NOTES_DIR, sameNotesDir, normalizeNotesDir,
     originScope, originPlacement, withNotesDir,
-    // Spike only (scripts/spike-autocomplete-bench.cjs): reuse the session refresh.
-    getCloudAccessToken,
     // YAML scalar writer / reader (exact inverses), the folder-name slug and
     // the pure note / command resolution helpers
     yamlQuote: q, unquote, noteDirname, matchNotesByTitle, noteSuggestions, duplicateTitleNote,

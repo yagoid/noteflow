@@ -3,7 +3,7 @@ import { ArrowLeft, Check, ChevronDown, Cpu, KeyRound, Loader2, RefreshCw, Spark
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
-import type { AccountStatus, LlmConfigPublic, LlmPreset } from '../../types'
+import type { AccountStatus, AiUsage, LlmConfigPublic, LlmPreset } from '../../types'
 import { hasKnownEntitlement, isPlanUnknown } from '../../lib/subscriptionPlans'
 import {
   byoPresetFor, fitsSource, initialSource, modelDisplayName, modelOptions, quotaChipTone, sourceOfPreset, usagePercent,
@@ -50,7 +50,7 @@ export function LlmConfigView({
   const activeModelsLoading = useAiChatStore((s) => s.modelsLoading)
 
   const [account, setAccount] = useState<AccountStatus | null>(null)
-  const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null)
+  const [usage, setUsage] = useState<AiUsage | null>(null)
   const [offerBundle, setOfferBundle] = useState(initialOffer === 'bundle')
   // Settings → Account's "View" on NoteFlow AI lands on the plan detail (when there is no plan).
   const [planOpen, setPlanOpen] = useState(!!initialOffer)

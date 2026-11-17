@@ -1,55 +1,74 @@
 "use strict";
-// SPIKE (throwaway prototype, not a shipped feature): inline AI autocomplete through the
-// managed NoteFlow AI proxy. One short streamed /chat/completions request per suggestion.
-// Benchmarked by scripts/spike-autocomplete-bench.cjs (same request shape; the prompt here
-// additionally asks the model to echo the last word — see ECHO below).
+// Inline AI autocomplete (ghost text in the editor) through the managed NoteFlow AI
+// proxy: one short streamed request per suggestion to POST <ai-proxy>/autocomplete.
+// The SERVER owns the prompt, the model and max_tokens; the client only sends the plain
+// text around the caret and cleans what comes back. No electron imports — the pure
+// pieces (cleanSuggestion, the backoff rules) are covered by
+// tests/electron/autocomplete.test.ts. Wired to IPC in main.ts (`ai:complete`).
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AUTOCOMPLETE_AFTER_CHARS = exports.AUTOCOMPLETE_BEFORE_CHARS = void 0;
+exports.AutocompleteRequestError = exports.AUTOCOMPLETE_TRANSIENT_BACKOFF_MS = exports.AUTOCOMPLETE_NO_PLAN_BACKOFF_MS = exports.AUTOCOMPLETE_QUOTA_BACKOFF_MS = exports.AUTOCOMPLETE_MAX_WORDS = exports.AUTOCOMPLETE_AFTER_CHARS = exports.AUTOCOMPLETE_BEFORE_CHARS = void 0;
+exports.finishesLastWord = finishesLastWord;
 exports.cleanSuggestion = cleanSuggestion;
+exports.autocompleteBackoffMs = autocompleteBackoffMs;
+exports.blockedUntilAfterFailure = blockedUntilAfterFailure;
+exports.blockedUntilAfterAccountChange = blockedUntilAfterAccountChange;
+exports.parseAutocompleteUsage = parseAutocompleteUsage;
 exports.completeText = completeText;
 /** Context sent with each request (characters of plain text around the caret). */
 exports.AUTOCOMPLETE_BEFORE_CHARS = 1500;
 exports.AUTOCOMPLETE_AFTER_CHARS = 200;
-// Same prompt as the benchmark. An earlier variant asked the model to echo the last word
-// (to make the word boundary explicit): measured, it made Haiku spend the whole token cap
-// reasoning half the time and put a blank line after the echo the rest — always empty.
-// cleanSuggestion still strips an echo if one shows up and fixes the leading space.
-const SYSTEM = [
-    'You are an inline autocomplete engine inside a note-taking app.',
-    'Continue the user\'s text from the exact position marked <CURSOR/>.',
-    'Reply with ONLY the continuation, and keep it SHORT: the next 3 to 10 words, just enough to finish the current clause or list item, in the same language and tone as the text.',
-    'Answer immediately, without thinking it through.',
-    'Never repeat text that is already written, never explain, never use quotes or markdown fences.',
-    'If the text before the cursor ends in the middle of a word, finish that word; otherwise start with a space when one is needed.',
-    'Do not run into the text after the cursor.',
-].join(' ');
-/**
- * Output cap per model. The proxy drops the client's `reasoning` knob, and DeepSeek
- * reasons before answering (measured: ~85 reasoning tokens on average, up to ~210), so
- * a tight cap comes back EMPTY — it needs room for reasoning + the sentence.
- */
-function maxTokensFor(model) {
-    return model.startsWith('deepseek/') ? 400 : Number(process.env.NF_SPIKE_MAX_TOKENS) || 64;
-}
+/** Max words shown. Longer replies are cut at the last clause boundary inside the cap. */
+exports.AUTOCOMPLETE_MAX_WORDS = 12;
 const WORD_END = /[\p{L}\p{N},;:.!?)\]"”»]$/u;
 const WORD_START = /^[\p{L}\p{N}¿¡(["“«]/u;
+const CLOSING_PUNCTUATION = /^[,;:.!?)\]”»…]/u;
+const TRAILING_LETTERS = /[\p{L}\p{M}]+$/u;
+const LEADING_LETTERS = /^[\p{L}\p{M}]+/u;
+/**
+ * Was the caret left in the MIDDLE of a word that `head` (the reply's first word) finishes?
+ *
+ * The model's own leading space can't be trusted either way: it sometimes sends " ta mañana"
+ * after "dentis" (a space too many) and sometimes "al dentista" after "voy" (a space too few),
+ * and nothing in the reply tells the two apart. So the default is the common case — the user
+ * paused after a whole word, the reply is a new word — and a join only happens on evidence
+ * from the user's own text: the joined word (`dentis` + `ta`) already appears earlier as a
+ * whole word while the fragment alone (`dentis`) never does. Single-letter fragments are
+ * never joined (a / y / o / e / I are words), and neither is a capitalised reply.
+ */
+function finishesLastWord(before, head) {
+    const fragment = TRAILING_LETTERS.exec(before)?.[0] ?? '';
+    if (fragment.length < 2 || !head || head !== head.toLowerCase())
+        return false;
+    const known = new Set((before.slice(0, before.length - fragment.length).toLowerCase().match(/[\p{L}\p{M}]+/gu) ?? []));
+    const f = fragment.toLowerCase();
+    return !known.has(f) && known.has(f + head);
+}
 /**
  * Turns the model's raw reply into the text to insert at the caret: first line only,
  * echo of the text before the cursor removed (longest suffix of the current line that
- * starts at a word boundary and prefixes the reply), spacing fixed, and a reply cut
- * by the token cap trimmed back to its last whole word.
+ * starts at a word boundary and prefixes the reply), spacing fixed (see finishesLastWord),
+ * a reply cut by the token cap trimmed back to its last whole word, and at most
+ * AUTOCOMPLETE_MAX_WORDS words.
+ *
+ * With `partial` (the reply is still streaming) it returns only what is already safe to
+ * show: the last word is held back until the next one starts (it may be half a token),
+ * and nothing is shown while the reply could still turn out to be an echo of the line.
  */
-function cleanSuggestion(before, raw, finishReason) {
+function cleanSuggestion(before, raw, finishReason, opts = {}) {
     let text = raw.replace(/<CURSOR\/>/g, '').replace(/^\s*\n/, '');
     const nl = text.indexOf('\n');
-    if (nl >= 0)
+    const lineDone = nl >= 0;
+    if (lineDone)
         text = text.slice(0, nl);
+    // The last word may be incomplete: the stream is still open, or the token cap cut it.
+    const openEnd = !lineDone && !/\s$/.test(text) && (opts.partial === true || finishReason === 'length');
     text = text.trimEnd();
     if (!text.trim())
         return '';
     const endsWithSpace = before === '' || /\s$/.test(before);
     const line = before.slice(before.lastIndexOf('\n') + 1).trimEnd();
     const reply = text.trimStart();
+    const modelSpace = text !== reply;
     let rest = null;
     for (let i = 0; i < line.length; i++) {
         if (i > 0 && !/\s/.test(line[i - 1]))
@@ -61,6 +80,9 @@ function cleanSuggestion(before, raw, finishReason) {
             rest = reply.slice(suffix.length);
             break;
         }
+        // Still streaming and everything so far repeats the line: wait for more.
+        if (opts.partial && !lineDone && suffix.startsWith(reply))
+            return '';
     }
     let out;
     if (rest !== null) {
@@ -69,51 +91,113 @@ function cleanSuggestion(before, raw, finishReason) {
     else if (endsWithSpace) {
         out = reply;
     }
-    else if (text !== reply) {
-        out = text; // the model sent its own leading space
+    else if (CLOSING_PUNCTUATION.test(reply)) {
+        out = reply; // "hola" + ", que tal": never a space before closing punctuation
+    }
+    else if (WORD_END.test(before) && WORD_START.test(reply)) {
+        out = finishesLastWord(before, LEADING_LETTERS.exec(reply)?.[0] ?? '') ? reply : ` ${reply}`;
     }
     else {
-        out = WORD_END.test(before) && WORD_START.test(reply) ? ` ${reply}` : reply;
+        out = modelSpace ? ` ${reply}` : reply;
     }
-    if (finishReason === 'length') {
+    if (openEnd) {
         const cut = out.search(/\s+\S*$/);
         if (cut > 0)
             out = out.slice(0, cut);
+        else if (opts.partial)
+            return ''; // a single, possibly unfinished word
     }
     out = shorten(out.trimEnd());
     return out.trim() ? out : '';
 }
-/** Max words shown. Longer replies are cut at the last clause boundary inside the cap. */
-const MAX_WORDS = 12;
 function shorten(text) {
     const words = text.match(/\s*\S+/g) ?? [];
-    if (words.length <= MAX_WORDS)
+    if (words.length <= exports.AUTOCOMPLETE_MAX_WORDS)
         return text;
-    const capped = words.slice(0, MAX_WORDS).join('');
+    const capped = words.slice(0, exports.AUTOCOMPLETE_MAX_WORDS).join('');
     // Prefer ending on punctuation (after at least 4 words) over a hard word cut.
     let best = -1;
     for (const hit of capped.matchAll(/[,;:.!?](?=\s|$)/g))
         best = hit.index + 1;
     return best > 0 && capped.slice(0, best).trim().split(/\s+/).length >= 4 ? capped.slice(0, best) : capped;
 }
-/** One streamed completion. Throws `HTTP <status> <code>` on a rejected request. */
+// ── Backoff after a failed request ─────────────────────────────────────────────
+/** After a quota 429 (autocomplete ceiling or the whole monthly allowance): no requests for a while. */
+exports.AUTOCOMPLETE_QUOTA_BACKOFF_MS = 30 * 60000;
+/** No plan (403): wait, unless the account changes first (main resets the gate then). */
+exports.AUTOCOMPLETE_NO_PLAN_BACKOFF_MS = 10 * 60000;
+/** Transient trouble (network, 5xx, a rate-limit 429): a short breather, not one failure per typing pause. */
+exports.AUTOCOMPLETE_TRANSIENT_BACKOFF_MS = 60000;
+/**
+ * How long to stop asking after a rejected request, in ms. `status` 0 = the request never
+ * got an answer (network). Infinity = not again in this app session (a proxy without the
+ * route answers 404/405). 0 = no pause: a 401 (the caller drops the token; the next request
+ * mints a fresh one) and the request-specific 400/413.
+ */
+function autocompleteBackoffMs(status, code) {
+    if (status === 404 || status === 405)
+        return Infinity;
+    if (status === 429) {
+        return code === 'autocomplete_quota_exceeded' || code === 'monthly_quota_exceeded'
+            ? exports.AUTOCOMPLETE_QUOTA_BACKOFF_MS
+            : exports.AUTOCOMPLETE_TRANSIENT_BACKOFF_MS;
+    }
+    if (status === 403)
+        return exports.AUTOCOMPLETE_NO_PLAN_BACKOFF_MS;
+    if (status === 401 || status === 400 || status === 413)
+        return 0;
+    return exports.AUTOCOMPLETE_TRANSIENT_BACKOFF_MS;
+}
+/** Next `blockedUntil` (epoch ms, Infinity = session) after a failure at `now`. Never shortens a longer block. */
+function blockedUntilAfterFailure(blockedUntil, status, code, now) {
+    const backoff = autocompleteBackoffMs(status, code);
+    return backoff > 0 ? Math.max(blockedUntil, now + backoff) : blockedUntil;
+}
+/**
+ * The account changed (another user, a plan that arrived or lapsed): timed blocks belonged
+ * to the previous state and are dropped; a missing route stays missing for the session.
+ */
+function blockedUntilAfterAccountChange(blockedUntil) {
+    return blockedUntil === Infinity ? Infinity : 0;
+}
+/**
+ * The `autocomplete` field of the proxy's GET /usage body ({used, limit}), or null when it
+ * is absent (an older proxy) or malformed — "unknown", never an error.
+ */
+function parseAutocompleteUsage(raw) {
+    if (!raw || typeof raw !== 'object')
+        return null;
+    const o = raw;
+    if (typeof o.used !== 'number' || typeof o.limit !== 'number')
+        return null;
+    if (!Number.isFinite(o.used) || !Number.isFinite(o.limit) || o.used < 0 || o.limit <= 0)
+        return null;
+    return { used: o.used, limit: o.limit };
+}
+// ── The request ────────────────────────────────────────────────────────────────
+/** A request the proxy rejected (or, with status 0, a failure mid-stream / on the network). */
+class AutocompleteRequestError extends Error {
+    constructor(status, code) {
+        super(`HTTP ${status}${code ? ` ${code}` : ''}`);
+        this.status = status;
+        this.code = code;
+        this.name = 'AutocompleteRequestError';
+    }
+}
+exports.AutocompleteRequestError = AutocompleteRequestError;
+/**
+ * One streamed completion. `onPartial` receives the cleaned text that is safe to show so
+ * far, each time it changes; the promise resolves with the final cleaned suggestion ('' =
+ * nothing worth showing). Throws AutocompleteRequestError on a rejected request and the
+ * fetch's own error on abort / network failure.
+ */
 async function completeText(opts) {
     const before = opts.before.slice(-exports.AUTOCOMPLETE_BEFORE_CHARS);
     const after = opts.after.slice(0, exports.AUTOCOMPLETE_AFTER_CHARS);
-    const t0 = Date.now();
-    const res = await fetch(`${opts.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    const res = await (opts.fetchImpl ?? fetch)(`${opts.baseUrl.replace(/\/+$/, '')}/autocomplete`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${opts.token}` },
-        body: JSON.stringify({
-            model: opts.model,
-            stream: true,
-            max_tokens: maxTokensFor(opts.model),
-            temperature: 0.2,
-            messages: [
-                { role: 'system', content: SYSTEM },
-                { role: 'user', content: `${before}<CURSOR/>${after}` },
-            ],
-        }),
+        body: JSON.stringify(after ? { before, after } : { before }),
         signal: opts.signal,
     });
     if (!res.ok || !res.body) {
@@ -123,15 +207,14 @@ async function completeText(opts) {
             code = String(JSON.parse(detail).error?.code ?? '');
         }
         catch { /* not JSON */ }
-        throw new Error(`HTTP ${res.status}${code ? ` ${code}` : ''}`);
+        throw new AutocompleteRequestError(res.status, code);
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
     let raw = '';
-    let ttftMs = null;
+    let shown = '';
     let finishReason = null;
-    let reasoned = false;
     let finished = false;
     try {
         while (!finished) {
@@ -158,18 +241,21 @@ async function completeText(opts) {
                     continue;
                 }
                 if (json.error)
-                    throw new Error(`Stream error ${String(json.error.code ?? '')}`);
+                    throw new AutocompleteRequestError(0, String(json.error.code ?? 'stream_error'));
                 const choice = json.choices?.[0];
                 if (!choice)
                     continue;
                 if (choice.finish_reason)
                     finishReason = choice.finish_reason;
-                if (choice.delta?.reasoning)
-                    reasoned = true;
                 if (choice.delta?.content) {
-                    if (ttftMs === null)
-                        ttftMs = Date.now() - t0;
                     raw += choice.delta.content;
+                    if (opts.onPartial) {
+                        const partial = cleanSuggestion(before, raw, null, { partial: true });
+                        if (partial && partial !== shown) {
+                            shown = partial;
+                            opts.onPartial(partial);
+                        }
+                    }
                 }
             }
         }
@@ -178,5 +264,7 @@ async function completeText(opts) {
         void reader.cancel().catch(() => { });
         throw err;
     }
-    return { text: cleanSuggestion(before, raw, finishReason), ms: Date.now() - t0, ttftMs, finishReason, reasoned };
+    if (finished)
+        void reader.cancel().catch(() => { });
+    return cleanSuggestion(before, raw, finishReason);
 }

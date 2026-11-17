@@ -236,6 +236,29 @@ export interface AiSettings {
   chunking: 'section'
 }
 
+/** Inline AI autocomplete: the local switch + whether the account's NoteFlow AI plan is usable. */
+export interface AiAutocompleteStatus {
+  enabled: boolean
+  available: boolean
+}
+
+/**
+ * Answer to one autocomplete request. Failures are silent by design (no suggestion shows):
+ * `retryAt` (epoch ms, Infinity = not in this session) tells the editor to stop asking until
+ * then — quota spent, no plan, a proxy without the route, or transient trouble.
+ */
+export type AiCompleteResult =
+  | { ok: true; text: string }
+  | { ok: false; reason: 'disabled' | 'unavailable' | 'aborted' | 'error'; retryAt?: number }
+
+/** Monthly consumption of the NoteFlow AI plan (abstract units: only used/limit matters). */
+export interface AiUsage {
+  used: number
+  limit: number
+  /** The part inline autocomplete may spend. Absent = the proxy doesn't report it. */
+  autocomplete?: { used: number; limit: number }
+}
+
 // A note surfaced as semantically related to the active section (powers the panel)
 export interface RelatedNote {
   noteId: string
@@ -991,7 +1014,8 @@ declare global {
       aiLlmTest: (preset?: string) => Promise<{ ok: boolean; error?: string }>
       // NoteFlow AI managed plan: monthly consumption (null on any failure). Abstract units —
       // only used/limit (the share of the monthly allowance spent) is meaningful.
-      aiLlmUsage: () => Promise<{ used: number; limit: number } | null>
+      // `autocomplete`: the share inline autocomplete may spend (absent = the proxy doesn't say).
+      aiLlmUsage: () => Promise<AiUsage | null>
       aiChatsLoad: () => Promise<ChatSession[]>
       aiChatsSave: (sessions: ChatSession[]) => Promise<{ ok: boolean; error?: string }>
       // Per-device activity log (userData/activity-log.json, local, not synced): local day
@@ -1029,10 +1053,16 @@ declare global {
       aiChatPickFiles: () => Promise<{ ok: boolean; canceled?: boolean; files?: ChatAttachment[]; errors?: string[] }>
       aiChatRemoveFile: (id: string) => Promise<{ ok: boolean }>
       aiChatCancel: (requestId: string) => void
-      // SPIKE: inline AI autocomplete (dev flag only — components/Editor/AiGhostText.ts).
-      // Only answers with the NoteFlow AI provider active; `model` overrides the active model.
-      aiComplete: (req: { requestId: string; before: string; after: string; model?: string }) =>
-        Promise<{ text: string; ms: number; ttftMs: number | null } | { error: string }>
+      // Inline AI autocomplete (ghost text in the editor — components/Editor/AiGhostText.ts).
+      // The switch is a LOCAL setting (settings.json → aiAutocomplete); main also pushes the
+      // status when the account's plan changes.
+      aiAutocompleteGet: () => Promise<AiAutocompleteStatus>
+      aiAutocompleteSet: (enabled: boolean) => Promise<AiAutocompleteStatus>
+      onAiAutocompleteChanged: (cb: (status: AiAutocompleteStatus) => void) => () => void
+      // One suggestion for the text around the caret (the server picks prompt and model).
+      // The text so far arrives by onAiCompletePartial; the result carries the final one.
+      aiComplete: (req: { requestId: string; before: string; after: string }) => Promise<AiCompleteResult>
+      onAiCompletePartial: (cb: (p: { requestId: string; text: string }) => void) => () => void
       aiCompleteCancel: (requestId: string) => void
       aiChatConfirm: (toolCallId: string, approved: boolean) => void
       onAiChatToolCall: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown; label: string }) => void) => () => void
