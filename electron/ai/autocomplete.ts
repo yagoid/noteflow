@@ -14,7 +14,8 @@ export const AUTOCOMPLETE_AFTER_CHARS = 200
 const SYSTEM = [
   'You are an inline autocomplete engine inside a note-taking app.',
   'Continue the user\'s text from the exact position marked <CURSOR/>.',
-  'Reply with ONLY the continuation: at most one sentence (or the rest of the current list item), in the same language and tone as the text.',
+  'Reply with ONLY the continuation, and keep it SHORT: the next 3 to 10 words, just enough to finish the current clause or list item, in the same language and tone as the text.',
+  'Answer immediately, without thinking it through.',
   'Never repeat text that is already written, never explain, never use quotes or markdown fences.',
   'If the text before the cursor ends in the middle of a word, finish that word; otherwise start with a space when one is needed.',
   'Do not run into the text after the cursor.',
@@ -26,7 +27,7 @@ const SYSTEM = [
  * a tight cap comes back EMPTY — it needs room for reasoning + the sentence.
  */
 function maxTokensFor(model: string): number {
-  return model.startsWith('deepseek/') ? 400 : 64
+  return model.startsWith('deepseek/') ? 400 : Number(process.env.NF_SPIKE_MAX_TOKENS) || 64
 }
 
 const WORD_END = /[\p{L}\p{N},;:.!?)\]"”»]$/u
@@ -69,8 +70,21 @@ export function cleanSuggestion(before: string, raw: string, finishReason: strin
     const cut = out.search(/\s+\S*$/)
     if (cut > 0) out = out.slice(0, cut)
   }
-  out = out.trimEnd().slice(0, 240)
+  out = shorten(out.trimEnd())
   return out.trim() ? out : ''
+}
+
+/** Max words shown. Longer replies are cut at the last clause boundary inside the cap. */
+const MAX_WORDS = 12
+
+function shorten(text: string): string {
+  const words = text.match(/\s*\S+/g) ?? []
+  if (words.length <= MAX_WORDS) return text
+  const capped = words.slice(0, MAX_WORDS).join('')
+  // Prefer ending on punctuation (after at least 4 words) over a hard word cut.
+  let best = -1
+  for (const hit of capped.matchAll(/[,;:.!?](?=\s|$)/g)) best = hit.index + 1
+  return best > 0 && capped.slice(0, best).trim().split(/\s+/).length >= 4 ? capped.slice(0, best) : capped
 }
 
 export interface AutocompleteResult {
