@@ -21,6 +21,7 @@ import { ActiveTableCell } from './ActiveTableCell'
 import { TableColumnResize } from './TableColumnResize'
 import { TableKeymap } from './TableKeymap'
 import { TableClipboard, handleEditorPaste } from './tableClipboard'
+import { TaskProgress } from './TaskProgress'
 import { SectionLinkPicker } from './SectionLinkPicker'
 import { EditorToc } from './EditorToc'
 import { useTocItems } from './useEditorToc'
@@ -145,6 +146,10 @@ interface EditorProps {
    *  remounts: snapshotted on unmount, restored on mount if the content is still the
    *  same (components/Editor/undoHistory.ts). Only the main note editor opts in. */
   persistHistory?: boolean
+  /** Progress rail in the left margin of each checklist (TaskProgress.ts). Only the main
+   *  note editor opts in (not sticky windows); the CSS shows it only in Readable width
+   *  with the setting on. Read once, at mount. */
+  taskProgress?: boolean
   /** A linked note (external .md, `noteId` is its id): plain Markdown schema (no NoteFlow-only
    *  syntax), relative images shown from the file's folder and pasted images copied to its
    *  assets/ folder. Read once, at mount. */
@@ -170,10 +175,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   caretScrollGap = DEFAULT_CARET_SCROLL_GAP,
   showToc = false,
   persistHistory = false,
+  taskProgress = false,
   linked = false,
 }, ref) {
   // Frozen at mount: the schema can't change under a live editor (it's keyed by section).
   const [plain] = useState(linked)
+  // Frozen at mount too: the extension list is built once.
+  const [withTaskProgress] = useState(taskProgress)
   // Debounced save of the content (400 ms after the last change). Registered in
   // lib/pendingEdits while pending, and flushed on unmount (section/note switch,
   // pane closed) instead of firing later from a dead editor.
@@ -268,6 +276,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
         getLabels: () => getSlashCommands(tRef.current),
         plain,
       }),
+      // Checklist progress rails in the left margin (lib/taskProgress.ts).
+      ...(withTaskProgress ? [TaskProgress] : []),
     ],
     content: htmlFromMarkdown(content, { plain }),
     editable: !readOnly,

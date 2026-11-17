@@ -1599,6 +1599,49 @@ trigger en estado (no un ref leído en render). El formato markdown no cambia (`
   `tests/components/taskMenuPopover.test.ts` (happy-dom: importancia, atajo, borradores de fecha/hora
   que solo se escriben en blur/Enter/cierre, quitar y foco, cierre por Esc/clic fuera/trigger).
 
+### Editor: progreso de las checklists (riel en el margen izquierdo)
+
+Variante «D · Riel» del prototipo (lado izquierdo, color `--accent-2` de las casillas). Lógica pura en
+**`src/lib/taskProgress.ts`** (tests en `tests/lib/taskProgress.test.ts`, incluidos 3 sobre un `Editor`
+real); el plugin en **`src/components/Editor/TaskProgress.ts`**; estilos en `src/index.css` §
+«Checklist progress rail».
+
+- **Qué cuenta:** `taskProgressBlocks(doc)` → cada `taskList` **hijo directo del doc** con ≥ 2 tareas
+  (`TASK_PROGRESS_MIN_TASKS`); total y hechas incluyen las subtareas anidadas. Un párrafo o heading entre
+  dos listas las separa (son nodos distintos); las listas dentro de citas, tablas, kanban u otras listas
+  no son bloques.
+- **Por qué widget decoration (y no overlay React ni CSS puro):** los contadores CSS no pueden dividir
+  (no hay altura de relleno proporcional) y un overlay tipo `TableControls` tendría que medir la
+  posición vertical de cada lista en cada cambio y seguir el scroll. El widget va en `listPos + 1`
+  (**primer hijo del `ul`**, `side: -1`, `ignoreSelection`, `stopEvent`, `contenteditable=false`,
+  `aria-hidden`), así el `ul` (`position: relative`) lo ancla: la vertical sale **solo con CSS**
+  (`top`/`bottom` respecto al ul) y el scroll es nativo. Nada lo serializa (el markdown sale del modelo)
+  y la lógica de tareas (`taskDrag`, `taskToggle`, `listItemMove`) localiza los ítems por posición, no
+  por los hijos del `ul`.
+- **Animación sin recrear DOM:** `spec.key = task-progress-<índice del bloque>` estable → ProseMirror
+  reutiliza el nodo del widget; el estado del plugin solo se recalcula con `docChanged` y la plugin view
+  repinta en sitio `--h`, la etiqueta («3/8» o «✓»), `is-done` y el tooltip. El rebote (`is-pop`) solo
+  si la fracción guardada en `dataset.p` era < 1 y pasa a 1 (no al montar una lista ya completa).
+  Transiciones de 0,55 s; `prefers-reduced-motion` las quita.
+- **«Cabe» = una medición por editor:** gutter = borde izquierdo del primer `ul` de bloque − content-box
+  del `.ProseMirror` (todas las listas de primer nivel comparten columna). `fitsTaskProgressRail` exige
+  24 (sitio para el asa ⋮⋮) + 44 (riel + etiqueta) + 10 = **78 px**. Se mide en un
+  `requestAnimationFrame`, disparado por un `ResizeObserver` sobre `view.dom` (ventana, sidebar flotante,
+  padding del índice) y sobre cada `ul` de bloque (Legible/Completo, tamaño de fuente). El resultado va
+  como clase `is-fit` en cada widget (no en `view.dom`, cuyo `class` reescribe ProseMirror). Sin
+  `is-fit` se desvanece (opacity/visibility); nunca empuja texto ni crea scroll horizontal.
+- **Dónde sale:** la extensión solo se instala en el `<Editor>` principal de `NoteEditor` (prop
+  `taskProgress`); sticky, `.note-preview` y el chat de IA no la llevan. Además el CSS solo la muestra
+  bajo `.editor-readable.task-progress-on` (clase que `NoteEditor` pone si `readableWidth &&
+  showTaskProgress`), así el ajuste y el ancho no necesitan reconfigurar el plugin.
+- **Ajuste `showTaskProgress`** (por defecto `true`: es aditivo, vive en el margen y solo en Legible) en
+  `editorSettingsStore`, sincronizado en `ui-settings.json` como `showToc`/`moveCheckedToBottom`
+  (saneador en `electron/uiSettings.ts`). En Ajustes → Editor el interruptor queda deshabilitado con
+  ancho Completo (pista «Solo disponible con el ancho Legible») sin tocar el valor guardado.
+- **Tooltip:** textos de `editor.task.progress*` vía `useLanguageStore.getState().dict` + `tf` (el
+  plugin vive fuera de React); suscrito al idioma para refrescarse al cambiarlo. Sale encima de la
+  etiqueta y puede tapar un poco la fila anterior.
+
 ### Editor: imágenes redimensionables y la columna Readable
 La imagen es un nodo **inline** (`ResizableImage.tsx`, `inline: true`, `allowBase64`) dentro de un
 párrafo; el ancho redimensionado es el atributo `width` (`![alt](src){width=N}`). Estructura DOM:

@@ -209,6 +209,9 @@ export const editor = {
     removeAlarm: 'Quitar alarma',
     clearAll: 'Quitar todo',
     dragHandle: 'Arrastra para mover ({keys})',
+    progressCount: '{done} de {total}',
+    progressPartial: '{progress} tareas hechas · {percent} %',
+    progressComplete: '{progress} · lista completa',
   },
 
   kanban: {

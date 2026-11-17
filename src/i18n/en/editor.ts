@@ -255,6 +255,11 @@ export const editor = {
     clearAll: 'Clear all',
     // Tooltip of the ⋮⋮ handle left of a task's checkbox ({keys} = Alt+↑/↓).
     dragHandle: 'Drag to move ({keys})',
+    // Tooltip of a checklist's progress rail (TaskProgress.ts): {progress} is
+    // shown in bold and replaced by `progressCount`.
+    progressCount: '{done} of {total}',
+    progressPartial: '{progress} tasks done · {percent}%',
+    progressComplete: '{progress} · list complete',
   },
 
   // In-note kanban board (KanbanBoardView).

@@ -624,19 +624,21 @@ Contenido del dir de notas:
 - `ui-settings.json` — apariencia (tema, último tema oscuro/claro `lastDarkThemeId`/`lastLightThemeId`
   para el Light / Dark del ⋯ del footer, fuente de app, acento, colores del editor) + ajustes del
   editor (tamaño/familia de fuente, ancho legible, índice flotante `showToc`, tareas marcadas al final
-  `moveCheckedToBottom`) sincronizados entre dispositivos. Formato y
-  saneado/merge en `electron/uiSettings.ts` (módulo puro, tests en `tests/electron/uiSettings.test.ts`).
+  `moveCheckedToBottom`, riel de progreso de las checklists `showTaskProgress`) sincronizados entre
+  dispositivos. Formato y saneado/merge en `electron/uiSettings.ts` (módulo puro, tests en `tests/electron/uiSettings.test.ts`).
   **Espejo en noteflow-mobile** (`src/core/uiSettings.ts`): su saneador también descarta claves
   desconocidas y el móvil re-sanea el fichero antes de cada escritura (`appearanceStore`), así que un
   campo nuevo que no se porte allí se borra en cuanto el móvil guarda su apariencia (p. ej. un cambio de
   acento). Todo campo nuevo del esquema hay que añadirlo en los dos. **Estado del espejo (2026-11-16):**
-  el móvil ya conoce todas las claves actuales. El centinela `'text'` de `accent`/`editorColors.*` (color
+  el móvil conoce todas las claves actuales salvo `editor.showTaskProgress` (ver abajo). El centinela `'text'` de `accent`/`editorColors.*` (color
   "texto" adaptativo) y `lastDarkThemeId`/`lastLightThemeId` llegaron en `09b9e28` (2026-11-14, publicado
   en la prueba cerrada 5, 1.0.0). `editor.moveCheckedToBottom` llegó en `9345c7d` (2026-11-16), **aún sin
   publicar**: hasta la siguiente versión del móvil, una escritura de apariencia desde el móvil instalado lo
   borra y los desktops vuelven al valor por defecto (desactivado) en su siguiente arranque
-  (`reloadUiSettings` conserva el valor en memoria si la clave falta). Los **desktops anteriores** a cada
-  cambio siguen borrando esas claves en cualquier escritura de `ui-settings.json` — detalle en **Color
+  (`reloadUiSettings` conserva el valor en memoria si la clave falta). `editor.showTaskProgress`
+  (por defecto **activado**) es posterior y el móvil **aún no lo conoce**: hasta portarlo a su saneador,
+  una escritura de apariencia desde el móvil lo borra y un "desactivado" vuelve a activado. Los
+  **desktops anteriores** a cada cambio siguen borrando esas claves en cualquier escritura de `ui-settings.json` — detalle en **Color
   "texto" adaptativo** (sección "Colores del editor") y "Light / Dark recuerda el último tema de cada
   tipo" de `patterns.md`.
   Claves de override tri-estado: AUSENTE = nunca escrita (los stores caen a las fuentes legacy
