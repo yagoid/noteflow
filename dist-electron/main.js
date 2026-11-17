@@ -83,6 +83,7 @@ const i18n_1 = require("./i18n");
 const settingsFile_1 = require("./settingsFile");
 const whatsNewSeen_1 = require("./whatsNewSeen");
 const stickyBounds_1 = require("./stickyBounds");
+const windowPlacement_1 = require("./windowPlacement");
 const snippetsFile_1 = require("./snippetsFile");
 const notesWatchFilter_1 = require("./notesWatchFilter");
 const linkedNotes = __importStar(require("./linkedNotes"));
@@ -1338,7 +1339,9 @@ function loadSectionWindow(win, noteId, sectionId) {
         win.loadFile(path_1.default.join(__dirname, '../dist/index.html'), { hash });
     }
 }
-function createSectionWindow(noteId, sectionId) {
+// `nearCursor`: a note dragged out of a window — open where it was dropped (the pointer is
+// still there) instead of cascading. An existing window on that section is only focused.
+function createSectionWindow(noteId, sectionId, nearCursor = false) {
     for (const [existing, target] of sectionWindows) {
         if (existing.isDestroyed())
             continue;
@@ -1354,13 +1357,14 @@ function createSectionWindow(noteId, sectionId) {
     const HEIGHT = 680;
     // Cascade from the last open section window so new ones don't stack exactly.
     const last = [...sectionWindows.keys()].filter((w) => !w.isDestroyed()).pop();
-    const position = last
-        ? (() => { const [x, y] = last.getPosition(); return { x: x + 30, y: y + 30 }; })()
-        : {};
+    const cursor = nearCursor ? electron_1.screen.getCursorScreenPoint() : null;
+    const bounds = cursor
+        ? (0, windowPlacement_1.placeWindowAtPoint)(cursor, { width: WIDTH, height: HEIGHT }, electron_1.screen.getDisplayNearestPoint(cursor).workArea)
+        : last
+            ? (() => { const [x, y] = last.getPosition(); return { x: x + 30, y: y + 30, width: WIDTH, height: HEIGHT }; })()
+            : { width: WIDTH, height: HEIGHT };
     const win = new electron_1.BrowserWindow({
-        width: WIDTH,
-        height: HEIGHT,
-        ...position,
+        ...bounds,
         minWidth: 420,
         minHeight: 320,
         frame: false,
@@ -5207,10 +5211,10 @@ electron_1.ipcMain.on('window:open-sticky', (_event, noteId, sectionId) => {
     createStickyWindow(noteId, sectionId);
 });
 const isWindowTargetId = (v) => typeof v === 'string' && v.length > 0 && v.length <= 128;
-electron_1.ipcMain.on('window:open-section-window', (_event, noteId, sectionId) => {
+electron_1.ipcMain.on('window:open-section-window', (_event, noteId, sectionId, nearCursor) => {
     if (!isWindowTargetId(noteId) || !isWindowTargetId(sectionId))
         return;
-    createSectionWindow(noteId, sectionId);
+    createSectionWindow(noteId, sectionId, nearCursor === true);
 });
 electron_1.ipcMain.on('window:section-window-target', (event, noteId, sectionId) => {
     if (!isWindowTargetId(noteId) || !isWindowTargetId(sectionId))

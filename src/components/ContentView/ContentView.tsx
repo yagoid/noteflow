@@ -9,6 +9,7 @@ import { GroupContextMenu, type GroupContextMenuRequest } from '../GroupContextM
 import { FolderContextMenu, type FolderContextMenuRequest } from '../FolderContextMenu'
 import { ConfirmModal } from '../ConfirmModal'
 import { SelectionBar } from '../SelectionBar'
+import { openNoteWindowOnDragOut } from '../openNoteWindowOnDragOut'
 import { sidebarAnchorRef } from '../Sidebar/sidebarAnchor'
 import { formatNoteDate } from '../Sidebar/rowText'
 import { PlacesRail, type RailEdit, type RailGroup } from './PlacesRail'
@@ -320,8 +321,15 @@ export function ContentView({ place, onClose }: ContentViewProps) {
     setRowDrop(null)
   }, [])
   // Safety net: the source row may unmount mid-drag (moved out of the list) and never get its dragend.
+  // Capture phase, so it runs before the row's own dragend: the drag-out is handled here.
   useEffect(() => {
-    const onEnd = () => { if (dragIdsRef.current) endDrag() }
+    const onEnd = (e: globalThis.DragEvent) => {
+      const ids = dragIdsRef.current
+      if (!ids) return
+      // One note released outside the window (no drop target took it): it opens in its own window.
+      if (e.type === 'dragend' && ids.length === 1) openNoteWindowOnDragOut(e, ids[0])
+      endDrag()
+    }
     window.addEventListener('dragend', onEnd, true)
     window.addEventListener('drop', onEnd)
     return () => {

@@ -8,6 +8,7 @@ import { useNotesStore } from '../stores/notesStore'
 import { useGroupsStore } from '../stores/groupsStore'
 import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
 import { colorChannels, normalizeTagColorKey, resolveGroupColor, TAG_COLOR_VARS } from '../lib/tagColors'
+import { noteOpenSectionId } from '../lib/noteDragOut'
 import { ConfirmModal } from './ConfirmModal'
 import { CustomColorSwatch } from './CustomColorSwatch'
 import { EncryptionModal } from './EncryptionModal'
@@ -264,10 +265,7 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
   const canOpenSticky = !isLocked
   const canOpenAlongside = !standalone
   // Section the note opens on when clicked (same order as NoteEditor: last active, else first).
-  const remembered = activeSectionByNote[note.id]
-  const noteOpenSectionId = remembered && note.sections.some((s) => s.id === remembered)
-    ? remembered
-    : note.sections[0]?.id
+  const openSectionId = noteOpenSectionId(note, activeSectionByNote[note.id])
   const currentSectionColor = currentSection
     ? sectionTagColors[normalizeTagColorKey(currentSection.name)]
     : undefined
@@ -691,7 +689,7 @@ function NoteMenuBody({ request, onClose, sectionActions, standalone, onRenameNo
               onClick={() => {
                 // A note has no window of its own: the section window shows the whole note
                 // (tabs included), opened on the section the note would open on here.
-                const targetSectionId = currentSection?.id ?? noteOpenSectionId
+                const targetSectionId = currentSection?.id ?? openSectionId
                 if (targetSectionId) window.noteflow.openSectionWindow(note.id, targetSectionId)
                 onClose()
               }}

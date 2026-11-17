@@ -10,6 +10,7 @@ import { ContextMenu } from '../ContextMenu'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { GroupContextMenu, type GroupContextMenuRequest } from '../GroupContextMenu'
 import { FolderContextMenu, type FolderContextMenuRequest } from '../FolderContextMenu'
+import { openNoteWindowOnDragOut } from '../openNoteWindowOnDragOut'
 import { colorChannels, NEW_GROUP_COLOR, resolveGroupColor } from '../../lib/tagColors'
 import { ALL_PLACE, groupPlace } from '../../lib/contentView'
 import {
@@ -65,7 +66,7 @@ interface RowHandlers {
   reorderDragLeave: (noteId: string) => void
   drop: (e: React.DragEvent<HTMLLIElement>, note: Note, contextKey: string, inFavorites: boolean) => void
   dragStart: (e: React.DragEvent<HTMLButtonElement>, noteId: string, contextKey: string) => void
-  dragEnd: () => void
+  dragEnd: (e: React.DragEvent<HTMLButtonElement>) => void
   // Also fired by Enter in the collapsed-group peek (GroupPeek) â€” only the modifiers are read.
   click: (e: React.MouseEvent | React.KeyboardEvent, note: Note) => void
   contextMenu: (e: React.MouseEvent, note: Note) => void
@@ -327,7 +328,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     reorderDragLeave: (id) => rowApiRef.current.reorderDragLeave(id),
     drop: (e, note, ck, fav) => rowApiRef.current.drop(e, note, ck, fav),
     dragStart: (e, id, ck) => rowApiRef.current.dragStart(e, id, ck),
-    dragEnd: () => rowApiRef.current.dragEnd(),
+    dragEnd: (e) => rowApiRef.current.dragEnd(e),
     click: (e, note) => rowApiRef.current.click(e, note),
     contextMenu: (e, note) => rowApiRef.current.contextMenu(e, note),
     sectionClick: (e, note, sid) => rowApiRef.current.sectionClick(e, note, sid),
@@ -602,7 +603,10 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
     }))
   }
 
-  function handleNoteDragEnd() {
+  function handleNoteDragEnd(e: React.DragEvent<HTMLButtonElement>) {
+    // Released outside the window (no drop target took it): the note opens in its own window.
+    const noteId = draggingNoteIdRef.current
+    if (noteId) openNoteWindowOnDragOut(e, noteId)
     draggingNoteContextRef.current = null
     draggingNoteIdRef.current = null
     setNoteDropTarget(null)
@@ -1024,7 +1028,7 @@ export function Sidebar({ pinned, onTogglePinned, hideOnly = false, onMiniRows }
       drop: (e, note, contextKey, inFavorites) =>
         inFavorites ? handleFavoritesReorderDrop(e, note) : handleNoteReorderDrop(e, note, contextKey),
       dragStart: (e, noteId, contextKey) => handleNoteDragStart(e, noteId, contextKey),
-      dragEnd: () => handleNoteDragEnd(),
+      dragEnd: (e) => handleNoteDragEnd(e),
       contextMenu: (e, note) => {
         e.preventDefault()
         setContextMenu({ x: e.clientX, y: e.clientY, noteId: note.id, sectionId: null })

@@ -3879,7 +3879,25 @@ la misma, que ya muestra la nota completa con sus tabs; se abre en la sección e
 —`activeSectionByNote[noteId]` si sigue existiendo, si no la primera—, mismo orden que `NoteEditor`) y
 la paleta (sección del panel activo, `getActiveSectionTarget()`); a
 propósito NO desde el menú ⋯ del editor, y nunca para notas cifradas (ver "Sync entre ventanas":
-si llega una, `EncryptedReadOnlyView` la muestra en solo lectura).
+si llega una, `EncryptedReadOnlyView` la muestra en solo lectura). La sección "en que se abriría la
+nota" la calcula `noteOpenSectionId()` (`src/lib/noteDragOut.ts`), compartida por el menú de nota y el
+arrastre de abajo.
+- **Arrastrar una nota fuera de la ventana** (`src/components/openNoteWindowOnDragOut.ts`): en el
+  `dragend` de una fila de nota de la barra lateral (`handleNoteDragEnd`) o de la vista de contenido
+  (listener `dragend` en captura de `ContentView`, que corre antes que el de la fila y ya limpiaba
+  `dragIdsRef`), si `dataTransfer.dropEffect === 'none'` (nadie aceptó el drop: ni un destino nuestro
+  ni otra app) y el punto de suelta cae fuera de la ventana (`isDragEndOutsideWindow`: deben coincidir
+  el test de viewport —`clientX/Y` fuera de `innerWidth/Height`— y el de pantalla —`screenX/Y` fuera
+  de `window.screenX/Y + outerWidth/Height`—; un dragend todo a 0,0 se trata como no fiable), abre la
+  ventana de sección con `openSectionWindow(noteId, sectionId, { nearCursor: true })`. Solo con UNA
+  nota (multiselección de la vista de contenido → nada) y nunca cifradas. Con `nearCursor`, main la
+  coloca con `screen.getCursorScreenPoint()` (el puntero sigue donde se soltó; en DIP, sin depender
+  del zoom de "UI text size" que escala las coords del DOM) y `placeWindowAtPoint()`
+  (`electron/windowPlacement.ts`: centrada en el puntero, barra de título bajo él, dentro del
+  `workArea` de `getDisplayNearestPoint`); si ya hay ventana en esa nota+sección solo se enfoca (no se
+  mueve). Límites: cancelar con Esc fuera de la ventana también da `dropEffect 'none'` → abre;
+  si la plataforma da el dragend a 0,0 (el mismo caso que cubre `SidebarShell`) → nunca abre; si otra app acepta texto (`text/plain`;
+  en macOS el Finder/escritorio crea un clipping) no se abre ventana.
 - **Una por nota+sección:** main guarda `sectionWindows: Map<BrowserWindow, {noteId, sectionId}>`; el
   renderer informa de la sección actual (`window:section-window-target`) y la refleja en el hash
   (`history.replaceState`), así reabrir la misma sección enfoca la ventana y una recarga vuelve a ella.
