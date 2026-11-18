@@ -2450,6 +2450,24 @@ body.nf-table-resizing * { cursor: col-resize !important; user-select: none; }
 .prose-editor .ProseMirror > .node-drawingBlock {
   margin: 0.9rem 0;
 }
+/* In the readable width a drawing keeps to the reading column, like text and code
+   blocks (a wide one is scaled down to fit; boards are the only full-bleed block). */
+.editor-readable .prose-editor .ProseMirror > .node-drawingBlock {
+  max-width: var(--readable-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+/* A drawing holding search matches (what it says matched): the block is the match. */
+.prose-editor .ProseMirror > .node-drawingBlock.nf-search-match {
+  background: none;
+}
+.node-drawingBlock.nf-search-match .drawing-card {
+  box-shadow: 0 0 0 2px rgb(var(--accent) / 0.35);
+}
+.node-drawingBlock.nf-search-match-active .drawing-card {
+  border-color: rgb(var(--accent));
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.6);
+}
 .drawing-card {
   position: relative;
   border: 1px solid rgb(var(--border));
@@ -2572,6 +2590,13 @@ div[data-type="drawing"] > pre[data-drawing-fallback] > code {
   padding: 0;
   font-size: inherit;
   color: inherit;
+}
+/* A pencil in front says it is a drawing (no words: the previews have no i18n). */
+div[data-type="drawing"]:not(.drawing-node *) > pre[data-drawing-fallback]::before {
+  content: "¸E";
+  float: left;
+  margin-right: 0.5em;
+  opacity: 0.55;
 }
 div[data-type="drawing"]:not(.drawing-node *) {
   margin: 0.6em 0;

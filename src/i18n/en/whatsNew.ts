@@ -75,6 +75,10 @@ export const whatsNew = {
       title: 'Done tasks drop to the bottom',
       body: 'Settings → Editor gathers how you write: font size, typeface, reading width and the table of contents. Turn on "Move checked items to the bottom" and ticking a task slides it to the end of its list; untick it and it comes back above the done ones.',
     },
+    drawings: {
+      title: 'Draw inside your notes',
+      body: 'Type /draw to open a canvas and sketch with shapes, arrows and text; press Done and the drawing sits in the note, stored as plain text that syncs like everything else. Diagrams written as Mermaid — by you, the AI or the CLI — are drawn too, and you can keep editing them by hand.',
+    },
     more: {
       title: 'And much more',
       body: 'Small things that make a big difference. You will run into them as you go.',

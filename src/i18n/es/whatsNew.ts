@@ -71,6 +71,10 @@ export const whatsNew: Messages['whatsNew'] = {
       title: 'Las tareas hechas bajan al final',
       body: 'Ajustes → Editor reúne cómo escribes: tamaño de letra, tipografía, ancho de lectura y el índice. Activa "Mover las tareas marcadas al final" y al marcar una tarea baja al final de su lista; al desmarcarla vuelve encima de las hechas.',
     },
+    drawings: {
+      title: 'Dibuja dentro de tus notas',
+      body: 'Escribe /draw para abrir un lienzo y esbozar con formas, flechas y texto; pulsa Hecho y el dibujo queda en la nota, guardado como texto plano que sincroniza como todo lo demás. Los diagramas escritos en Mermaid —por ti, por la IA o por el CLI— también se dibujan, y puedes seguir editándolos a mano.',
+    },
     more: {
       title: 'Y mucho más',
       body: 'Pequeños detalles que marcan la diferencia. Los irás encontrando por el camino.',

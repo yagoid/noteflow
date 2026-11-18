@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.14.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.14.1 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.14.0'
+const CLI_VERSION = '2.14.1'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'

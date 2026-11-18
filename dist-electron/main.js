@@ -79,6 +79,7 @@ const relaunchArgs_1 = require("./relaunchArgs");
 const openWithArgs_1 = require("./openWithArgs");
 const v8Flags_1 = require("./v8Flags");
 const navigationGuard_1 = require("./navigationGuard");
+const drawingText_1 = require("./drawingText");
 const activityLog_1 = require("./activityLog");
 const i18n_1 = require("./i18n");
 const settingsFile_1 = require("./settingsFile");
@@ -3854,7 +3855,7 @@ const CHAT_SYSTEM_BASE = "You are NoteFlow's assistant — a second brain over t
     'marker entirely. Never mention the marker or these suggestions in the visible part of your answer.';
 const chatAborts = new Map();
 function stripBase64(text) {
-    return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]');
+    return (0, drawingText_1.collapseDrawings)(text, 'marker').replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]');
 }
 function findNoteDirPath(noteId, dirs) {
     const match = dirs.find((d) => d.endsWith('-' + noteId));
@@ -3988,8 +3989,9 @@ function chatContextGuide(allNotes) {
         'When the user asks you to change the open note or a shared section, just do it with the tools, without ' +
         'asking for confirmation, then briefly say what you changed: the editor shows your edits live and the ' +
         'user can undo each one from the chat. update_section REPLACES the whole section: send its complete new ' +
-        'content and keep everything the user did not ask to change (images appear as [image] placeholders — ' +
-        'keep them where they are; the app restores them). Never rewrite a section marked as truncated with ' +
+        'content and keep everything the user did not ask to change (images appear as [image] placeholders and ' +
+        'hand-made drawings as a `[drawing #n: …]` line — keep them where they are; the app restores them, and ' +
+        'you cannot modify such a drawing). ' + agentTools.DRAWING_HOWTO + ' Never rewrite a section marked as truncated with ' +
         'update_section (the part you cannot see would be lost): add a section or tell the user instead.');
 }
 /** Build the chat context for a question. Returns the augmented system prompt + the source notes

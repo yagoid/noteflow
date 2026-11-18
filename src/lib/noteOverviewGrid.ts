@@ -5,6 +5,7 @@
 
 import { htmlFromMarkdown, type MarkdownHtmlOptions } from './markdownHtml'
 import { escapeHtml } from './markdownInline'
+import { mapDrawingBlocks, sceneSummary } from './drawing/drawingCollapse'
 
 /** Narrowest column the grid allows (px): as many columns as fit, at least one. */
 export const NOTE_GRID_MIN_COLUMN = 220
@@ -218,12 +219,14 @@ export interface MarkdownTextStats {
 
 /**
  * Words and task counts of a markdown text, in one pass: tasks are `- [ ]` / `- [x]`
- * outside code blocks (kanban cards included); words of code blocks count, markdown
+ * outside code blocks (kanban cards included); words of code blocks count (a Mermaid
+ * drawing is one), a scene drawing counts the words of its labels, markdown
  * syntax, HTML comments — e.g. kanban markers — and link targets don't. Shared by the
  * section card footer and the Activity totals in Settings → General (lib/activitySummary.ts).
  */
 export function markdownTextStats(markdown: string): MarkdownTextStats {
-  const lines = markdown
+  // A drawing counts the words it says (its labels), on a line that can't pass for a task.
+  const lines = mapDrawingBlocks(markdown, (block) => (block.kind === 'excalidraw' ? [`| ${sceneSummary(block)}`] : null))
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/\r\n?/g, '\n')
     .split('\n')
@@ -294,8 +297,43 @@ function restoreHeld(text: string, held: readonly string[], escape: (s: string) 
   })
 }
 
+// A drawing block is held the same way while clipping — one line standing for the whole
+// block (marker, fence, scene) and counting PREVIEW_DRAWING_CHARS — so the cut never falls
+// inside one: half a drawing is an invalid block, which would render as a long JSON code
+// block. Its own pair of private-use characters (U+E012/U+E013); a text that already holds
+// one of them is clipped the old way.
+export const PREVIEW_DRAWING_CHARS = 400
+const DRAWING_HOLD = String.fromCharCode(0xe012)
+const DRAWING_PAD = String.fromCharCode(0xe013)
+const DRAWING_HELD_RE = new RegExp(`^${DRAWING_HOLD}(\\d+)${DRAWING_PAD}*${DRAWING_HOLD}$`, 'gm')
+const DRAWING_CUT_RE = new RegExp(`\\n?${DRAWING_HOLD}[^\\n]*$`)
+
+function holdDrawings(markdown: string): { text: string; drawings: string[] } {
+  const drawings: string[] = []
+  if (markdown.includes(DRAWING_HOLD) || markdown.includes(DRAWING_PAD)) return { text: markdown, drawings }
+  const text = mapDrawingBlocks(markdown, (_block, _n, lines) => {
+    const token = `${DRAWING_HOLD}${drawings.push(lines.join('\n')) - 1}`
+    return [`${token}${DRAWING_PAD.repeat(Math.max(0, PREVIEW_DRAWING_CHARS - token.length - 1))}${DRAWING_HOLD}`]
+  })
+  return { text, drawings }
+}
+
+/** Puts the held drawings back; one the cut left without its end is dropped. */
+function restoreDrawings(text: string, drawings: readonly string[]): string {
+  if (drawings.length === 0) return text
+  return text
+    .replace(DRAWING_HELD_RE, (m, i: string) => drawings[Number(i)] ?? m)
+    .replace(DRAWING_CUT_RE, '')
+}
+
 /** `clipPreviewMarkdown` with the values still held (`held[i]` ↔ placeholder i). */
-function clipHoldingImages(markdown: string, maxChars: number): { text: string; held: string[] } {
+function clipHoldingImages(source: string, maxChars: number): { text: string; held: string[] } {
+  const { text: markdown, drawings } = holdDrawings(source)
+  const clipped = clipHoldingImagesOnly(markdown, maxChars)
+  return { text: restoreDrawings(clipped.text, drawings), held: clipped.held }
+}
+
+function clipHoldingImagesOnly(markdown: string, maxChars: number): { text: string; held: string[] } {
   const held: string[] = []
   const hold = (value: string, pad = 0) => {
     const token = `${IMAGE_HOLD}${held.push(value) - 1}`
@@ -326,10 +364,12 @@ function clipHoldingImages(markdown: string, maxChars: number): { text: string; 
  * huge DOM per card: up to `maxChars`, preferably at a block boundary (blank line) or else
  * a line break, closing a code fence the cut left open (or the rest of the preview would
  * render as code-fence text). A pasted image counts PREVIEW_IMAGE_CHARS, not its data URI's
- * length, and the cut never splits one (an image left without its `)` is dropped). Short
+ * length, and the cut never splits one (an image left without its `)` is dropped); a
+ * drawing block counts PREVIEW_DRAWING_CHARS and is kept whole or left out. Short
  * markdown is returned as is. The cards render through sectionPreviewHtml (same clipping).
  */
 export function clipPreviewMarkdown(markdown: string, maxChars = PREVIEW_MAX_CHARS): string {
+  // (A scene is long: with its drawings held, a text over the limit may well fit.)
   if (markdown.length <= maxChars) return markdown
   const { text, held } = clipHoldingImages(markdown, maxChars)
   return restoreHeld(text, held)

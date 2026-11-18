@@ -30,6 +30,7 @@
  * section files (the ciphertext contains the whole sections array as JSON).
  */
 
+import { stripDrawings } from './drawing/drawingCollapse'
 import yaml from 'js-yaml'
 import { nanoid } from 'nanoid'
 import type { Note, NoteEncryption, NoteMeta, NoteSection, NoteWritePayload } from '../types'
@@ -403,7 +404,8 @@ export function extractTitle(content: string): string {
 }
 
 export function extractTags(content: string): string[] {
-  const matches = content.match(/#([a-zA-Z][a-zA-Z0-9_-]*)/g)
+  // Nothing inside a drawing block is a tag: a scene is full of `#e03131` colours.
+  const matches = stripDrawings(content).match(/#([a-zA-Z][a-zA-Z0-9_-]*)/g)
   if (!matches) return []
   return [...new Set(matches.map((m) => m.slice(1).toLowerCase()))]
 }

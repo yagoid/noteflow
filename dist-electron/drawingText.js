@@ -1,0 +1,277 @@
+"use strict";
+// Drawing blocks as TEXT in the main process and the AI worker: what a model and the
+// semantic index see of a drawing, and how a section a model rewrote gets its drawings back.
+//
+// A drawing block is plain markdown in a section (format: src/lib/drawing/drawingBlock.ts,
+// .agents/context/note-format.md): two comment markers around one code fence — `mermaid`
+// (the source, text) or `excalidraw` (the scene: one JSON object per line). A scene must
+// never reach a model nor an embedding as JSON: it is collapsed to one numbered line,
+// `[drawing #n: label · label ; A → B]`.
+//
+// ⚠ MIRROR of src/lib/drawing/drawingCollapse.ts (+ the parts of drawingBlock.ts it needs:
+// block matching, scene validity, drawingText). electron/ can't import from src/, so the
+// logic is repeated here, self-contained. tests/lib/drawingCollapse.test.ts runs both on
+// random documents and fails on any difference: change them together.
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.collapseDrawings = collapseDrawings;
+exports.stripDrawings = stripDrawings;
+exports.restoreCollapsedDrawings = restoreCollapsedDrawings;
+const OPEN_HINT_RE = /^<!--[ \t]*drawing/m;
+const DRAWING_OPEN_RE = /^<!--[ \t]*drawing(?:[ \t]+(.*?))?[ \t]*-->[ \t]*$/;
+const DRAWING_CLOSE_RE = /^<!--[ \t]*\/drawing[ \t]*-->[ \t]*$/;
+const DRAWING_FENCE_RE = /^(`{3,})(mermaid|excalidraw)[ \t]*$/;
+const BACKTICK_LINE_RE = /^(`{3,})[ \t]*$/;
+const CONFLICT_MARKER_RE = /^>[ \t]*⚠/;
+const FENCE_OPEN_RE = /^```/;
+const FENCE_CLOSE_RE = /^```[ \t]*$/;
+const SCENE_VERSION = 2;
+const isRecord = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isElement = (v) => isRecord(v) && typeof v.id === 'string' && v.id !== '' && typeof v.type === 'string' && v.type !== '';
+const isDataUrl = (v) => typeof v === 'string' && v.startsWith('data:');
+const isLaterVersion = (version) => typeof version === 'number' && version > SCENE_VERSION;
+function parseJsonObject(text) {
+    try {
+        const v = JSON.parse(text);
+        return isRecord(v) ? v : null;
+    }
+    catch {
+        return null;
+    }
+}
+function elementsOfDocument(doc) {
+    if (doc.type !== 'excalidraw' || !Array.isArray(doc.elements) || isLaterVersion(doc.version))
+        return null;
+    const ids = new Set();
+    const elements = [];
+    for (const el of doc.elements) {
+        if (!isElement(el) || ids.has(el.id))
+            return null;
+        ids.add(el.id);
+        elements.push(el);
+    }
+    if (doc.files !== undefined && doc.files !== null) {
+        if (!isRecord(doc.files))
+            return null;
+        for (const file of Object.values(doc.files)) {
+            if (!isRecord(file) || !isDataUrl(file.dataURL) || typeof file.mimeType !== 'string')
+                return null;
+        }
+    }
+    return elements;
+}
+/** The elements of a scene body, or null when it isn't a valid scene (parseSceneBody). */
+function sceneElements(body) {
+    const lines = body.filter((l) => l.trim() !== '');
+    if (lines.length === 0)
+        return null;
+    const header = parseJsonObject(lines[0]);
+    if (!header) {
+        const doc = parseJsonObject(body.join('\n'));
+        return doc ? elementsOfDocument(doc) : null;
+    }
+    if (header.type !== 'excalidraw' || isLaterVersion(header.version))
+        return null;
+    if (header.appState !== undefined && !isRecord(header.appState))
+        return null;
+    if (Array.isArray(header.elements))
+        return lines.length === 1 ? elementsOfDocument(header) : null;
+    const elements = [];
+    const ids = new Set();
+    const files = new Set();
+    for (const line of lines.slice(1)) {
+        const obj = parseJsonObject(line);
+        if (!obj)
+            return null;
+        if (isElement(obj)) {
+            if (ids.has(obj.id))
+                return null;
+            ids.add(obj.id);
+            elements.push(obj);
+            continue;
+        }
+        const file = obj.file;
+        if (Object.keys(obj).length !== 1 || !isRecord(file))
+            return null;
+        if (typeof file.id !== 'string' || !file.id || !isDataUrl(file.dataURL) || typeof file.mimeType !== 'string')
+            return null;
+        if (files.has(file.id))
+            return null;
+        files.add(file.id);
+    }
+    return elements;
+}
+function matchDrawingBlock(lines, start) {
+    const open = lines[start]?.match(DRAWING_OPEN_RE);
+    if (!open || (open[1] ?? '').includes('-->'))
+        return null;
+    let i = start + 1;
+    while (i < lines.length && lines[i].trim() === '')
+        i++;
+    const fence = lines[i]?.match(DRAWING_FENCE_RE);
+    if (!fence)
+        return null;
+    const bodyStart = i + 1;
+    let bodyEnd = -1;
+    for (let j = bodyStart; j < lines.length; j++) {
+        const m = lines[j].match(BACKTICK_LINE_RE);
+        if (m && m[1].length >= fence[1].length) {
+            bodyEnd = j;
+            break;
+        }
+    }
+    if (bodyEnd === -1)
+        return null;
+    let end = bodyEnd + 1;
+    while (end < lines.length && lines[end].trim() === '')
+        end++;
+    if (end >= lines.length || !DRAWING_CLOSE_RE.test(lines[end]))
+        return null;
+    const body = lines.slice(bodyStart, bodyEnd);
+    if (fence[2] === 'mermaid') {
+        return body.some((l) => CONFLICT_MARKER_RE.test(l)) ? null : { kind: 'mermaid', elements: [], end };
+    }
+    const elements = sceneElements(body);
+    return elements ? { kind: 'excalidraw', elements, end } : null;
+}
+const oneLine = (s) => s.replace(/\s+/g, ' ').trim();
+/** Labels and connections of a scene, one per line (drawingText of drawingBlock.ts). */
+function sceneText(elements) {
+    const live = elements.filter((el) => el.isDeleted !== true);
+    const str = (v) => (typeof v === 'string' ? v : '');
+    const textOf = (el) => oneLine(str(el.originalText) || str(el.text));
+    const labelOf = new Map();
+    for (const el of live) {
+        const container = str(el.containerId);
+        if (el.type === 'text' && container && textOf(el) && !labelOf.has(container))
+            labelOf.set(container, textOf(el));
+    }
+    const nameOf = (id) => {
+        if (typeof id !== 'string')
+            return '';
+        const el = live.find((e) => e.id === id);
+        if (!el)
+            return '';
+        return el.type === 'text' ? textOf(el) : labelOf.get(el.id) ?? '';
+    };
+    const boundId = (binding) => (isRecord(binding) ? binding.elementId : undefined);
+    const labels = [];
+    const links = [];
+    for (const el of live) {
+        if (el.type === 'text') {
+            if (textOf(el))
+                labels.push(textOf(el));
+            continue;
+        }
+        if (el.type !== 'arrow' && el.type !== 'line')
+            continue;
+        const from = nameOf(boundId(el.startBinding));
+        const to = nameOf(boundId(el.endBinding));
+        if (!from || !to)
+            continue;
+        const start = el.startArrowhead != null;
+        const end = el.endArrowhead != null;
+        const label = labelOf.get(el.id);
+        const link = start && end ? `${from} ↔ ${to}` : end ? `${from} → ${to}` : start ? `${to} → ${from}` : `${from} — ${to}`;
+        links.push(label ? `${link}: ${label}` : link);
+    }
+    return [...labels, ...links];
+}
+function sceneSummary(elements) {
+    const parts = sceneText(elements).filter(Boolean);
+    const links = parts.filter((p) => / (?:→|↔|—) /.test(p));
+    const labels = parts.filter((p) => !links.includes(p));
+    return [labels.join(' · '), links.join(' ; ')].filter(Boolean).join(' ; ');
+}
+function mapDrawingBlocks(md, replace) {
+    if (!OPEN_HINT_RE.test(md))
+        return md;
+    const raw = md.split('\n');
+    const lines = raw.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
+    const eol = raw.length > 1 && raw[0].endsWith('\r') ? '\r' : '';
+    const out = [];
+    let inFence = false;
+    let count = 0;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (inFence) {
+            if (FENCE_CLOSE_RE.test(line))
+                inFence = false;
+            out.push(raw[i]);
+            continue;
+        }
+        const match = line.startsWith('<!--') ? matchDrawingBlock(lines, i) : null;
+        if (match) {
+            const replaced = replace(match, ++count, lines.slice(i, match.end + 1));
+            if (replaced)
+                for (const l of replaced)
+                    out.push(l + eol);
+            else
+                for (let k = i; k <= match.end; k++)
+                    out.push(raw[k]);
+            if (match.end === lines.length - 1 && out.length > 0 && eol)
+                out[out.length - 1] = out[out.length - 1].slice(0, -1);
+            i = match.end;
+            continue;
+        }
+        if (FENCE_OPEN_RE.test(line))
+            inFence = true;
+        out.push(raw[i]);
+    }
+    return out.join('\n');
+}
+/**
+ * The markdown with its SCENE blocks collapsed (Mermaid source blocks are text: they stay):
+ * 'text' = one line with what the drawing says; 'marker' = the numbered `[drawing #n: …]`
+ * line a model sees (restoreCollapsedDrawings puts the block back).
+ */
+function collapseDrawings(md, mode) {
+    let scenes = 0;
+    return mapDrawingBlocks(md, (block) => {
+        if (block.kind !== 'excalidraw')
+            return null;
+        scenes++;
+        const summary = sceneSummary(block.elements);
+        if (mode === 'marker')
+            return [summary ? `[drawing #${scenes}: ${summary}]` : `[drawing #${scenes}]`];
+        return summary ? [summary] : [];
+    });
+}
+/** The markdown without any drawing block (tags: nothing inside a drawing is a `#tag`). */
+function stripDrawings(md) {
+    return mapDrawingBlocks(md, () => []);
+}
+const MARKER_LINE_RE = /^[ \t]*\[drawing #(\d+)(?::[^\n]*)?\][ \t]*$/;
+/**
+ * Undo collapseDrawings(…, 'marker') on a text a model rewrote: each `[drawing #n…]` line
+ * becomes the n-th scene block of `original` again, whatever the model did to the summary
+ * after the number. A marker whose number has no block, or a second marker with the same
+ * number, is removed. A scene the model left out is gone — the same rule as an image it
+ * leaves out (restoreStrippedImages).
+ */
+function restoreCollapsedDrawings(original, next) {
+    const scenes = [];
+    mapDrawingBlocks(original, (block, _n, lines) => {
+        if (block.kind === 'excalidraw')
+            scenes.push(lines);
+        return null;
+    });
+    if (!/\[drawing #\d+/.test(next))
+        return next;
+    const used = new Set();
+    const out = [];
+    for (const raw of next.split('\n')) {
+        const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+        const m = line.match(MARKER_LINE_RE);
+        if (!m) {
+            out.push(raw);
+            continue;
+        }
+        const n = Number(m[1]);
+        const scene = scenes[n - 1];
+        if (!scene || used.has(n))
+            continue;
+        used.add(n);
+        out.push(...scene);
+    }
+    return out.join('\n');
+}

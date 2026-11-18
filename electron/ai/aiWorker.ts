@@ -22,6 +22,7 @@ import {
   type RelatedNote, type SemanticHit, type GraphEdge, type DataNote,
 } from './protocol'
 import { listNoteDirs, parseNoteDir } from '../noteFormat'
+import { collapseDrawings } from '../drawingText'
 
 // Transformers.js is ESM-only. A plain dynamic import() would be down-levelled to
 // require() by tsc (module: CommonJS) and crash. This Function wrapper preserves a
@@ -661,9 +662,12 @@ async function ensureModelLoaded(): Promise<boolean> {
 }
 
 // Strip base64 data URIs (embedded images) — huge, zero semantic value, and catastrophically
-// slow to embed/tokenize if left in (a single pasted image can take tens of seconds).
+// slow to embed/tokenize if left in (a single pasted image can take tens of seconds). And
+// the scene of a drawing block: JSON with no meaning for an embedding — it is indexed by
+// what it says (`[drawing #n: labels ; A → B]`, drawingText.ts), first, so that an image
+// stored inside a scene goes with it.
 function stripNoise(text: string): string {
-  return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]')
+  return collapseDrawings(text, 'marker').replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]')
 }
 
 function chunkTextFor(s: ParsedSection): string {

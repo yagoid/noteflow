@@ -5,6 +5,20 @@ import { randomBytes } from 'node:crypto'
 import * as noteFormat from '../../noteFormat'
 import type { DiskNote, DiskSection } from '../../noteFormat'
 import type { ToolSchema } from './types'
+import { collapseDrawings, restoreCollapsedDrawings, stripDrawings } from '../../drawingText'
+
+/**
+ * How the model writes a drawing (tool descriptions + the chat's system prompt). Only the
+ * Mermaid variant: a scene is made by hand in the app's canvas, and the model never sees its JSON.
+ */
+export const DRAWING_HOWTO =
+  'To add a diagram or drawing to a note, write a drawing block in the section markdown: a line ' +
+  '`<!-- drawing -->`, then a ```mermaid code fence with the Mermaid source, then a line `<!-- /drawing -->` ' +
+  '— each on its own line, starting at column 0 (never indented, never inside a list or a quote), with a ' +
+  'blank line before and after the block. The app draws it; flowchart, sequenceDiagram, classDiagram, ' +
+  'erDiagram and stateDiagram stay editable as shapes, other Mermaid types are shown as a picture. You may ' +
+  'rewrite a Mermaid drawing block freely. A drawing the user edited by hand is shown to you as a ' +
+  '`[drawing #n: …]` line instead: you cannot change it, only keep that line (or drop it to delete the drawing).'
 
 // ── ID + slug helpers (mirror src/lib/noteUtils.ts so dir names / ids match the renderer) ──
 const ID_ALPHABET = 'useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict'
@@ -28,15 +42,17 @@ function defaultNoteTitle(): string {
 
 /** Hashtags in `content` — mirror of extractTags in src/lib/noteUtils.ts (tags are derived data). */
 export function extractTags(content: string): string[] {
-  const matches = content.match(/#([a-zA-Z][a-zA-Z0-9_-]*)/g)
+  const matches = stripDrawings(content).match(/#([a-zA-Z][a-zA-Z0-9_-]*)/g)
   if (!matches) return []
   return [...new Set(matches.map((m) => m.slice(1).toLowerCase()))]
 }
 
 const DATA_URI_RE = /data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi
 
+/** What the model reads of a section: scene drawings as `[drawing #n: …]` markers
+ *  (drawingText.ts), pasted images as `[image]`. */
 function stripBase64(text: string): string {
-  return text.replace(DATA_URI_RE, '[image]')
+  return collapseDrawings(text, 'marker').replace(DATA_URI_RE, '[image]')
 }
 
 /**
@@ -45,11 +61,20 @@ function stripBase64(text: string): string {
  * original images back, matched BY POSITION (n-th placeholder ← n-th image of the original): if
  * the model reorders or drops images, the wrong one may land in a slot. Placeholders beyond the
  * original's image count are removed (they would only be broken images).
+ *
+ * Scene drawings come back the same way but BY NUMBER: the model saw each one as a
+ * `[drawing #n: …]` line, and that line becomes the original block again
+ * (restoreCollapsedDrawings). A drawing whose marker the model left out is removed with the
+ * rest of what it rewrote — the same as an image it leaves out; the chat's undo brings it
+ * back. Mermaid source drawings are text the model reads and may rewrite freely.
  */
 export function restoreStrippedImages(original: string, next: string): string {
-  const uris = original.match(DATA_URI_RE) ?? []
+  // The images the model saw: those of the text with its scenes collapsed (a picture
+  // stored inside a scene is not one of them — it comes back with its drawing).
+  const uris = collapseDrawings(original, 'marker').match(DATA_URI_RE) ?? []
   let i = 0
-  return next.replace(/!\[([^\]]*)\]\(\[image\]\)/g, (_m, alt: string) => (i < uris.length ? `![${alt}](${uris[i++]})` : ''))
+  const withImages = next.replace(/!\[([^\]]*)\]\(\[image\]\)/g, (_m, alt: string) => (i < uris.length ? `![${alt}](${uris[i++]})` : ''))
+  return restoreCollapsedDrawings(original, withImages)
 }
 
 const DEFAULT_GROUP_COLOR = '#64748b'
@@ -182,12 +207,12 @@ export const TOOLS: ToolSchema[] = [
   },
   {
     name: 'add_section',
-    description: 'Append a new section to an existing note.',
+    description: 'Append a new section to an existing note. ' + DRAWING_HOWTO,
     inputSchema: obj({ note_id: str('The note id.'), name: str('Section name.'), content: str('Markdown content.'), raw: bool('Text mode: the section shows its content as plain text, exactly as written, without rendering markdown. Default false = markdown mode (content is rendered). Only set true if the user explicitly wants plain/unrendered text.') }, ['note_id', 'name']),
   },
   {
     name: 'update_section',
-    description: "Replace a section's content. Read the note first to get the section id.",
+    description: "Replace a section's content. Read the note first to get the section id. Keep every `[image]` and `[drawing #n: …]` line you were shown exactly where it should stay: the app puts the picture / drawing back from it (you cannot change a drawing shown that way; leaving its line out deletes it).",
     inputSchema: obj({ note_id: str('The note id.'), section_id: str('The section id.'), content: str('New Markdown content.') }, ['note_id', 'section_id', 'content']),
   },
   {

@@ -1,3 +1,5 @@
+import { collapseDrawings } from './drawing/drawingCollapse'
+
 /** Normalize a string: lowercase + strip diacritical marks (accents) */
 export function normalize(s: string): string {
   return s
@@ -66,7 +68,9 @@ export function getNoteSearchIndex(note: NoteForSearch): NoteSearchIndex {
     title: normalize(note.title ?? ''),
     tags: note.tags.map(normalize),
     sectionNames: note.sections.map((s) => normalize(s.name)),
-    sectionContents: note.sections.map((s) => normalize(s.content)),
+    // The one place the searchable text of a section is built (sidebar, palette, content
+    // view): a drawing is searched by what it says, never by the JSON of its scene.
+    sectionContents: note.sections.map((s) => normalize(collapseDrawings(s.content, 'text'))),
   }
   searchIndexCache.set(note as object, idx)
   return idx
