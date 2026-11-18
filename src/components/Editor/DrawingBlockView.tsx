@@ -5,6 +5,7 @@ import { Pencil, PenTool, Workflow } from 'lucide-react'
 import { getKanbanAttr, setKanbanAttr } from '../../lib/kanban'
 import {
   drawingFromHtmlData,
+  drawingHtmlDataToMarkdown,
   drawingText,
   type DrawingHtmlData,
 } from '../../lib/drawing/drawingBlock'
@@ -13,7 +14,9 @@ import { blockToScene, sceneHasImages } from '../../lib/drawing/drawingScene'
 import { THEMES } from '../../lib/themes'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
-import { useDrawingEditorStore } from '../../stores/drawingEditorStore'
+import {
+  appendDrawingToSection, useDrawingEditorStore, writeDrawingToSection, type DrawingTarget,
+} from '../../stores/drawingEditorStore'
 import { getWindowRole } from '../../stores/notesStore'
 import { useThemeStore } from '../../stores/themeStore'
 import { DRAWING_EDIT_EVENT, DRAWING_NODE_NAME, consumeOpenOnInsert } from './drawingCommands'
@@ -95,13 +98,34 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
   }, [canPreview, block, seen, data, dark])
 
   /** The live node (never a stale closure): null if it is gone or no longer a drawing. */
-  const liveData = useCallback((): DrawingHtmlData | null => {
-    const pos = getPos()
-    const live = typeof pos === 'number' ? editor.state.doc.nodeAt(pos) : null
-    return live?.type.name === DRAWING_NODE_NAME ? live.attrs.drawing as DrawingHtmlData : null
+  const livePos = useCallback((): number | null => {
+    if (editor.isDestroyed) return null
+    try {
+      const pos = getPos()
+      return typeof pos === 'number' && editor.state.doc.nodeAt(pos)?.type.name === DRAWING_NODE_NAME ? pos : null
+    } catch {
+      return null // the node view is gone
+    }
   }, [editor, getPos])
+  const liveData = useCallback((): DrawingHtmlData | null => {
+    const pos = livePos()
+    return pos === null ? null : editor.state.doc.nodeAt(pos)!.attrs.drawing as DrawingHtmlData
+  }, [editor, livePos])
 
-  const edit = useCallback(async () => {
+  /** Which one this is among the identical drawing blocks of the document (0-based). */
+  const ordinalOf = useCallback((): number => {
+    const pos = livePos()
+    let ordinal = 0
+    if (pos === null) return 0
+    editor.state.doc.forEach((node, offset) => {
+      if (offset >= pos || node.type.name !== DRAWING_NODE_NAME) return
+      const d = node.attrs.drawing as DrawingHtmlData
+      if (d.kind === data.kind && d.attrs === data.attrs && d.body === data.body) ordinal++
+    })
+    return ordinal
+  }, [data, editor, livePos])
+
+  const edit = useCallback(async (insertedNow = false) => {
     if (busyRef.current || !canEdit || !block) return
     busyRef.current = true
     setNotice('')
@@ -119,21 +143,48 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
         setNotice(t.drawing.mermaidImageOnly)
         return
       }
-      const result = await useDrawingEditorStore.getState().edit({ block, scene, isNew: scene.elements.length === 0 })
-      const live = liveData()
-      if (!live) return
-      const wasEmpty = block.kind === 'excalidraw' && block.scene.elements.length === 0
-      if (result.type === 'saved' && !result.empty) {
-        updateAttributes({ drawing: { kind: 'excalidraw', attrs: live.attrs, body: result.lines.join('\n') } satisfies DrawingHtmlData })
-      } else if (result.type === 'saved' || wasEmpty) {
-        // Nothing drawn: an empty block has no reason to stay in the note.
-        deleteNode()
+      const store = useDrawingEditorStore.getState()
+      // Where this drawing lives, by identity (the node view may not outlive the canvas).
+      const home = (editor.storage as Record<string, { target?: { noteId: string; sectionId: string | null } } | undefined>)[DRAWING_NODE_NAME]?.target
+      const target: DrawingTarget | null = home?.noteId && home.sectionId
+        ? { noteId: home.noteId, sectionId: home.sectionId, opened: data, ordinal: ordinalOf() }
+        : null
+      const result = await store.edit({ block, scene, target })
+
+      // The node as it is NOW, and only if it is still the block that was opened: a sync
+      // pull, the AI or another window may have replaced it (ProseMirror can even reuse this
+      // node view for another drawing), and the editor itself may be gone (another note or
+      // section on screen). Nothing is ever written over a block that isn't the opened one.
+      const pos = livePos()
+      const live = pos === null ? null : editor.state.doc.nodeAt(pos)!.attrs.drawing as DrawingHtmlData
+      const same = !!live && live.kind === data.kind && live.attrs === data.attrs && live.body === data.body
+
+      if (result.type === 'unchanged') {
+        // Nothing drawn in a block inserted for this session: it has no reason to stay.
+        if (insertedNow && same) deleteNode()
+        if (same) editor.commands.focus()
+        return
       }
-      editor.commands.focus()
+      const drawn: DrawingHtmlData | null = result.empty ? null : { kind: 'excalidraw', attrs: data.attrs, body: result.lines.join('\n') }
+      if (same) {
+        // One transaction on the live node: undoable with Ctrl+Z, autosaved like any edit.
+        if (drawn) updateAttributes({ drawing: drawn })
+        else deleteNode()
+        editor.commands.focus()
+        return
+      }
+      // Not through this editor: write into the section itself, if the block is still there.
+      const outcome = target ? await writeDrawingToSection(target, drawn) : 'gone'
+      if (outcome === 'saved' || !drawn) return
+      // Changed or removed meanwhile: the work is never dropped silently.
+      if (await store.askConflict(outcome === 'changed')) {
+        if (outcome === 'changed' && target) await appendDrawingToSection(target, drawn)
+        else await navigator.clipboard.writeText(drawingHtmlDataToMarkdown(drawn)).catch(() => {})
+      }
     } finally {
       busyRef.current = false
     }
-  }, [block, canEdit, deleteNode, editor, liveData, t, updateAttributes])
+  }, [block, canEdit, data, deleteNode, editor, livePos, ordinalOf, t, updateAttributes])
 
   // Enter on the selected node (DrawingBlock.ts keymap) and the insert command reach the
   // view through a DOM event on its wrapper.
@@ -149,7 +200,7 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
   }, [])
   // Just inserted by the slash command: straight to the canvas.
   useEffect(() => {
-    if (consumeOpenOnInsert()) void editRef.current()
+    if (consumeOpenOnInsert()) void editRef.current(true)
   }, [])
 
   // ── Height: the marker's `height` attribute, or the drawing's own up to a cap ──

@@ -51,6 +51,7 @@ export function insertDrawing(editor: Editor) {
   if (!inserted) openOnInsert = false
 }
 
+
 /** Open the overlay of the drawing node at `pos` (Enter on the selected node). */
 export function editDrawingAt(editor: Editor, pos: number): boolean {
   const dom = editor.view.nodeDOM(pos)

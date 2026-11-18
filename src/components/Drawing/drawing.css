@@ -6,7 +6,10 @@
   background: rgb(var(--bg-editor));
 }
 
-.nf-drawing .excalidraw.excalidraw {
+/* (Excalidraw mounts its dialogs in <body>, outside `.nf-drawing`: its modal container
+   gets the same tokens. It only exists while the canvas is open.) */
+.nf-drawing .excalidraw.excalidraw,
+.excalidraw.excalidraw-modal-container {
   --ui-font: var(--app-font-family), system-ui, sans-serif;
 
   /* Accent: selected tool, primary buttons, focus rings, links. */

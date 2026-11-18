@@ -21,4 +21,12 @@ export const drawing = {
   discardMessage: 'Se perderán los cambios que has hecho en este dibujo.',
   discardConfirm: 'Descartar',
   discardKeep: 'Seguir editando',
+
+  // La nota cambió con el lienzo abierto (sync, otra ventana).
+  conflictTitle: 'La nota ha cambiado mientras dibujabas',
+  conflictMessage: 'Este dibujo se ha cambiado o eliminado en la nota entretanto, así que tu versión no se ha guardado encima. Puedes conservarla como un dibujo nuevo junto a él.',
+  conflictMessageGone: 'La nota en la que estaba este dibujo ya no está abierta, así que tu versión no se ha podido guardar. Puedes copiarla y pegarla en una nota en modo texto.',
+  conflictInsert: 'Insertar como dibujo nuevo',
+  conflictCopy: 'Copiar el dibujo',
+  conflictDiscard: 'Descartar mi versión',
 }

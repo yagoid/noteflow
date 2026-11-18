@@ -85,5 +85,11 @@ export async function sceneToSvg(scene: ExcalidrawScene, opts: { dark?: boolean 
     a.removeAttribute('target')
   })
   svg.querySelectorAll('script, foreignObject, iframe').forEach((node: Element) => node.remove())
+  // Event handlers and styles that fetch: nothing in a preview runs or loads anything.
+  svg.querySelectorAll('*').forEach((node: Element) => {
+    for (const attr of Array.from(node.attributes)) {
+      if (/^on/i.test(attr.name) || (attr.name === 'style' && /url\s*\(/i.test(attr.value))) node.removeAttribute(attr.name)
+    }
+  })
   return svg.outerHTML
 }

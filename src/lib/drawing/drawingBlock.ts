@@ -194,12 +194,15 @@ function sceneFromDocument(doc: Record<string, unknown>): DrawingSceneData | nul
   if (doc.files !== undefined && doc.files !== null) {
     if (!isRecord(doc.files)) return null
     for (const [id, file] of Object.entries(doc.files)) {
-      if (!isRecord(file) || typeof file.dataURL !== 'string' || typeof file.mimeType !== 'string') return null
+      if (!isRecord(file) || !isDataUrl(file.dataURL) || typeof file.mimeType !== 'string') return null
       scene.files[id] = { ...file, id } as DrawingFile
     }
   }
   return scene
 }
+
+/** An image of a scene is embedded data, never a link to fetch. */
+const isDataUrl = (v: unknown): v is string => typeof v === 'string' && v.startsWith('data:')
 
 function isElement(v: unknown): v is DrawingElement {
   return isRecord(v) && typeof v.id === 'string' && v.id !== '' && typeof v.type === 'string' && v.type !== ''
@@ -219,7 +222,8 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
  * blank lines ignored; or, as a convenience for pasted scenes, a whole Excalidraw
  * document (`{"type":"excalidraw","elements":[…],…}`, any layout). null when
  * anything is off: a line that isn't a JSON object, no header, a header of a later format
- * version, an element without `id`/`type`, a duplicated id, an unknown kind of line.
+ * version, an element without `id`/`type`, a duplicated id, an unknown kind of line, a
+ * file whose `dataURL` isn't a `data:` URL.
  */
 export function parseSceneBody(body: readonly string[]): DrawingSceneData | null {
   const lines = body.filter((l) => l.trim() !== '')
@@ -247,7 +251,7 @@ export function parseSceneBody(body: readonly string[]): DrawingSceneData | null
     }
     const file = obj.file
     if (Object.keys(obj).length !== 1 || !isRecord(file)) return null
-    if (typeof file.id !== 'string' || !file.id || typeof file.dataURL !== 'string' || typeof file.mimeType !== 'string') return null
+    if (typeof file.id !== 'string' || !file.id || !isDataUrl(file.dataURL) || typeof file.mimeType !== 'string') return null
     if (scene.files[file.id]) return null
     scene.files[file.id] = file as DrawingFile
   }

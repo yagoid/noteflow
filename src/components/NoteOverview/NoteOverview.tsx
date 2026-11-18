@@ -22,7 +22,7 @@ import { moveSectionInList, moveSectionToEnd } from '../../lib/sectionUtils'
 import { primaryPaneForNote } from '../../lib/paneUtils'
 import { reorderDropSide } from '../../lib/sectionMap'
 import { resolveSectionInk } from '../../lib/sectionInk'
-import { OWN_KEYS_PROPS } from '../../lib/keyScope'
+import { OWN_KEYS_PROPS, ownsKeys } from '../../lib/keyScope'
 import { isPlainTextLinked, sectionShowsRaw } from '../../lib/linkedNotes'
 import {
   gridColumnCount, gridNeighbor, planNoteGrid, sectionCardIsWide, type GridDirection,
@@ -240,7 +240,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
-      if (isEditing) return
+      if (isEditing || ownsKeys(e.target)) return
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
         e.preventDefault()
         toggleSelectAll()

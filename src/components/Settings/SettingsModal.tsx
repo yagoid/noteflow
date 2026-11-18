@@ -29,6 +29,7 @@ import { AboutPanel } from './AboutPanel'
 import { AiPanel } from './AiPanel'
 import { TemplatesPanel } from './TemplatesPanel'
 import { TutorialPanel } from './TutorialPanel'
+import { ownsKeys } from '../../lib/keyScope'
 
 export type SettingsSection =
   | 'general'
@@ -133,6 +134,7 @@ export function SettingsModal({ initialSection = 'general', initialIntent, onClo
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (ownsKeys(e.target)) return
       if (e.key === 'Escape') {
         e.preventDefault()
         onClose()

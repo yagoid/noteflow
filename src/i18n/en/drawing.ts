@@ -21,4 +21,12 @@ export const drawing = {
   discardMessage: 'The changes you made to this drawing will be lost.',
   discardConfirm: 'Discard',
   discardKeep: 'Keep editing',
+
+  // The note changed under the open canvas (sync, another window).
+  conflictTitle: 'The note changed while you were drawing',
+  conflictMessage: 'This drawing was changed or removed in the note in the meantime, so your version was not saved over it. You can keep it as a new drawing next to it.',
+  conflictMessageGone: 'The note this drawing was in is no longer open, so your version could not be saved. You can copy it and paste it into a note in text mode.',
+  conflictInsert: 'Insert as a new drawing',
+  conflictCopy: 'Copy the drawing',
+  conflictDiscard: 'Discard my version',
 }

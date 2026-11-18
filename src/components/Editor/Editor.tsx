@@ -36,6 +36,7 @@ import { pendingForcedRestore } from '../../lib/sectionRestore'
 import { restoreEditorHistory, snapshotEditorHistory } from '../../lib/editorHistory'
 import { canKeepUndoHistory, richUndoHistory } from './undoHistory'
 import { useT } from '../../i18n/useT'
+import { DRAWING_NODE_NAME } from './drawingCommands'
 
 /**
  * Replaces the editor's document with `doc` (external content) without emitting
@@ -410,6 +411,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     return () => observer.disconnect()
     // `editor` is a dep because the scroller only mounts once the editor exists.
   }, [showToc, editor])
+
+  // Tell the drawing node which section this editor shows (DrawingBlock.ts storage): a
+  // drawing session saves there by identity if this editor is gone when it ends.
+  useEffect(() => {
+    const storage = (editor?.storage as Record<string, { target?: unknown } | undefined> | undefined)?.[DRAWING_NODE_NAME]
+    if (storage) storage.target = noteId ? { noteId, sectionId: currentSectionId ?? null } : null
+  }, [editor, noteId, currentSectionId])
 
   // Open links in external browser on click
   useEffect(() => {

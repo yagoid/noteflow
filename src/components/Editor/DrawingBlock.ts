@@ -31,6 +31,12 @@ export const DrawingBlock = Node.create({
   selectable: true,
   draggable: false,
 
+  // The section this editor shows (set by Editor.tsx): a drawing session writes to it by
+  // identity when its node view is gone (see stores/drawingEditorStore.ts).
+  addStorage() {
+    return { target: null as { noteId: string; sectionId: string | null } | null }
+  },
+
   addAttributes() {
     return {
       drawing: {
