@@ -85,18 +85,52 @@ for (const [name, impl] of [['renderer (drawingCollapse.ts)', renderer], ['main 
       expect(impl.restoreCollapsedDrawings(original, rewritten)).toBe(`New intro\n\n${second}\n\nMoved\n\n${SCENE}\n\nNew end`)
     })
 
-    it('a scene the model leaves out is removed; unknown or repeated markers are dropped', () => {
-      expect(impl.restoreCollapsedDrawings(original, 'Only text now')).toBe('Only text now')
-      expect(impl.restoreCollapsedDrawings(original, `a\n[drawing #1]\n[drawing #1]\n[drawing #9: x]\nb`)).toBe(`a\n${SCENE}\nb`)
+    it('a scene the model leaves out is KEPT: appended at the end of the section', () => {
+      expect(impl.restoreCollapsedDrawings(original, 'Only text now')).toBe(`Only text now\n\n${SCENE}\n\n${second}`)
+      expect(impl.restoreCollapsedDrawings(original, `Kept one\n\n[drawing #2]\n\nEnd\n`)).toBe(`Kept one\n\n${second}\n\nEnd\n\n${SCENE}`)
+      expect(impl.restoreCollapsedDrawings(original, '')).toBe(`${SCENE}\n\n${second}`)
     })
 
-    it('a marker inside a sentence is not a marker; Mermaid blocks pass through as the model wrote them', () => {
-      const next = `See [drawing #1: Idea] above\n\n${MERMAID.replace('A[Start]', 'A[Changed]')}`
-      expect(impl.restoreCollapsedDrawings(original, next)).toBe(next)
+    it('a repeated marker of the same scene is dropped; a number with no scene is left as the text it is', () => {
+      const out = impl.restoreCollapsedDrawings(original, `a\n[drawing #1]\n[drawing #1]\n[drawing #9: mine]\n[drawing #2]\nb`)
+      expect(out).toBe(`a\n\n${SCENE}\n\n[drawing #9: mine]\n\n${second}\n\nb`)
     })
 
-    it('never invents a drawing in a text that had none', () => {
-      expect(impl.restoreCollapsedDrawings('plain', 'x\n[drawing #1: a]\ny')).toBe('x\ny')
+    it('a marker inside a list item, a quote or a sentence still brings its drawing back, as a block of its own', () => {
+      expect(impl.restoreCollapsedDrawings(original, `- first\n- [drawing #1: Idea]\n- last\n\n[drawing #2]`))
+        .toBe(`- first\n\n${SCENE}\n\n- last\n\n${second}`)
+      expect(impl.restoreCollapsedDrawings(original, `> [drawing #1]\n\n  [drawing #2]  `)).toBe(`${SCENE}\n\n${second}`)
+      expect(impl.restoreCollapsedDrawings(original, `See [drawing #1: Idea] above and [drawing #2].`))
+        .toBe(`See  above and .\n\n${SCENE}\n\n${second}`)
+    })
+
+    it('a marker inside a code fence of the new text is not consumed there: the drawing is kept at the end', () => {
+      const next = `Doc\n\n${F}\n[drawing #1: example]\n${F}\n\n[drawing #2]`
+      expect(impl.restoreCollapsedDrawings(original, next)).toBe(`Doc\n\n${F}\n[drawing #1: example]\n${F}\n\n${second}\n\n${SCENE}`)
+    })
+
+    it('a text whose original has no scene is returned untouched, marker-looking lines included', () => {
+      for (const next of ['x\n[drawing #1: a]\ny', '- [drawing #2]', '[drawing #1]']) {
+        expect(impl.restoreCollapsedDrawings('plain', next)).toBe(next)
+        expect(impl.restoreCollapsedDrawings(MERMAID, next)).toBe(next)
+      }
+    })
+
+    it('Mermaid blocks pass through as the model wrote them', () => {
+      const next = `[drawing #1]\n\n[drawing #2]\n\n${MERMAID.replace('A[Start]', 'A[Changed]')}`
+      expect(impl.restoreCollapsedDrawings(original, next)).toBe(`${SCENE}\n\n${second}\n\n${MERMAID.replace('A[Start]', 'A[Changed]')}`)
+    })
+
+    it('a label with brackets gives a marker that still comes back whole', () => {
+      const bracket = scene(['{"id":"t","type":"text","x":0,"y":0,"width":1,"height":1,"containerId":null,"text":"arr[0] = [x]"}'])
+      const seenB = impl.collapseDrawings(`a\n\n${bracket}\n\nb`, 'marker')
+      expect(seenB).toBe('a\n\n[drawing #1: arr(0) = (x)]\n\nb')
+      expect(impl.restoreCollapsedDrawings(`a\n\n${bracket}\n\nb`, seenB)).toBe(`a\n\n${bracket}\n\nb`)
+    })
+
+    it('writes the line endings of the new text (CRLF)', () => {
+      const crlf = (s: string) => s.replace(/\n/g, '\r\n')
+      expect(impl.restoreCollapsedDrawings(original, crlf('Intro\n\n[drawing #1]\n\nEnd\n'))).toBe(crlf(`Intro\n\n${SCENE}\n\nEnd\n\n${second}`))
     })
   })
 }
@@ -131,11 +165,25 @@ describe('renderer and main give the same output (parity fuzz)', () => {
       }
       return el
     })
-    const block: DrawingBlock = { kind: 'excalidraw', attrs: pick(['', 'height="200"']), scene: { appState: {}, elements, files: {} } }
+    const withImage = r() < 0.2
+    if (withImage) elements.push({ id: 'img', type: 'image', x: 0, y: 0, width: 5, height: 5, fileId: 'f1' })
+    const files = withImage ? { f1: { id: 'f1', mimeType: 'image/png', dataURL: pick(['data:image/png;base64,AAAA', 'https://example.com/x.png']) } } : {}
+    const block: DrawingBlock = { kind: 'excalidraw', attrs: pick(['', 'height="200"']), scene: { appState: {}, elements, files } }
     let md = serializeDrawingMarkdown(block)
-    // Sometimes broken: both sides must agree it is not a drawing.
-    if (r() < 0.15) md = md.replace('"type":"excalidraw"', pick(['"type":"other"', '"type":"excalidraw","version":3', '"type":"excalidraw"}x']))
-    if (r() < 0.1) md = md.replace('\n<!-- /drawing -->', '')
+    const lines = md.split('\n')
+    const shape = r()
+    if (shape < 0.12) {
+      // A whole Excalidraw document in the fence (one line, or pretty-printed).
+      const doc = { type: 'excalidraw', version: pick([2, 2, 3]), elements: elements.filter((e) => !e.isDeleted), appState: {}, files }
+      md = [lines[0], lines[1], ...JSON.stringify(doc, null, pick([0, 2])).split('\n'), lines[lines.length - 2], lines[lines.length - 1]].join('\n')
+    } else if (shape < 0.22) {
+      // A fence of four or more backticks.
+      const ticks = '`'.repeat(4 + Math.floor(r() * 2))
+      md = [lines[0], `${ticks}excalidraw`, ...lines.slice(2, -2), ticks, lines[lines.length - 1]].join('\n')
+    } else if (shape < 0.3 && lines.length > 5) {
+      // A duplicated element line (same id twice): not a scene.
+      md = [...lines.slice(0, 4), lines[3], ...lines.slice(4)].join('\n')
+    }
     return md
   }
 

@@ -69,14 +69,35 @@ describe('what update_section writes (restoreStrippedImages)', () => {
     expect(parseDrawingMarkdown(added.split('\n\n')[1])).toEqual({ kind: 'mermaid', attrs: '', source: 'sequenceDiagram\n  A->>B: hi' })
   })
 
-  it('a scene whose marker the model leaves out is removed (as an image it leaves out)', () => {
+  it('a scene whose marker the model leaves out is NOT deleted: it is kept at the end of the section', () => {
     const out = restoreStrippedImages(SECTION, 'Rewritten from scratch')
-    expect(out).toBe('Rewritten from scratch')
+    expect(out).toBe(`Rewritten from scratch\n\n${SCENE}`)
+    // …while an image it leaves out is gone, as before.
+    expect(out).not.toContain(IMG)
   })
 
-  it('a made-up or repeated marker never creates a drawing', () => {
-    expect(restoreStrippedImages(SECTION, 'a\n[drawing #2: invented]\n[drawing #1]\n[drawing #1]\nb')).toBe(`a\n${SCENE}\nb`)
-    expect(restoreStrippedImages('no drawings', 'x\n[drawing #1: invented]\ny')).toBe('x\ny')
+  it('a marker put in a list item or mid-sentence still restores the drawing as its own block', () => {
+    const out = restoreStrippedImages(SECTION, '- step one\n- [drawing #1: Billing service]\n- step two')
+    expect(out).toBe(`- step one\n\n${SCENE}\n\n- step two`)
+    expect((htmlFromMarkdown(out).match(/data-type="drawing"/g) ?? []).length).toBe(1)
+  })
+
+  it('a made-up marker is left as text and a repeated one never duplicates the drawing', () => {
+    expect(restoreStrippedImages(SECTION, 'a\n[drawing #2: invented]\n[drawing #1]\n[drawing #1]\nb')).toBe(`a\n[drawing #2: invented]\n\n${SCENE}\n\nb`)
+  })
+
+  it('a note without drawings keeps a line that merely looks like a marker', () => {
+    expect(restoreStrippedImages('no drawings', 'x\n[drawing #1: my own text]\ny')).toBe('x\n[drawing #1: my own text]\ny')
+  })
+
+  it('the dataURL inside an INVALID drawing block does not take the slot of the next image', () => {
+    const broken = SCENE.replace('"type":"excalidraw"', '"type":"other"')
+    const section = `${broken}\n\n![after](${IMG})`
+    const seen = stripBase64(section)
+    expect(seen).toContain('![after]([image])')
+    const out = restoreStrippedImages(section, 'New text\n\n![after]([image])')
+    expect(out).toBe(`New text\n\n![after](${IMG})`)
+    expect(out).not.toContain(INNER)
   })
 })
 
@@ -85,6 +106,7 @@ describe('instructions to the model', () => {
     expect(DRAWING_HOWTO).toContain('<!-- drawing -->')
     expect(DRAWING_HOWTO).toContain('<!-- /drawing -->')
     expect(DRAWING_HOWTO).toContain('mermaid')
+    expect(DRAWING_HOWTO).toMatch(/cannot change nor delete/)
     const example = `Text\n\n<!-- drawing -->\n${F}mermaid\nflowchart LR\n  A --> B\n${F}\n<!-- /drawing -->\n\nMore`
     expect(htmlFromMarkdown(example)).toContain('data-kind="mermaid"')
   })

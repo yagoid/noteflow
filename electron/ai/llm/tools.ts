@@ -18,7 +18,8 @@ export const DRAWING_HOWTO =
   'blank line before and after the block. The app draws it; flowchart, sequenceDiagram, classDiagram, ' +
   'erDiagram and stateDiagram stay editable as shapes, other Mermaid types are shown as a picture. You may ' +
   'rewrite a Mermaid drawing block freely. A drawing the user edited by hand is shown to you as a ' +
-  '`[drawing #n: …]` line instead: you cannot change it, only keep that line (or drop it to delete the drawing).'
+  '`[drawing #n: …]` line instead: you cannot change nor delete it — keep that line where the drawing should ' +
+  'stay (if you leave it out, the app keeps the drawing at the end of the section).'
 
 // ── ID + slug helpers (mirror src/lib/noteUtils.ts so dir names / ids match the renderer) ──
 const ID_ALPHABET = 'useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict'
@@ -47,6 +48,8 @@ export function extractTags(content: string): string[] {
   return [...new Set(matches.map((m) => m.slice(1).toLowerCase()))]
 }
 
+/** A pasted image as the editor stores it: `![alt](data:…)`. Group 1 = the data URI. */
+const MD_IMAGE_DATA_URI_RE = /!\[[^\]\n]*\]\((data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+)\)/gi
 const DATA_URI_RE = /data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi
 
 /** What the model reads of a section: scene drawings as `[drawing #n: …]` markers
@@ -62,16 +65,18 @@ function stripBase64(text: string): string {
  * the model reorders or drops images, the wrong one may land in a slot. Placeholders beyond the
  * original's image count are removed (they would only be broken images).
  *
- * Scene drawings come back the same way but BY NUMBER: the model saw each one as a
- * `[drawing #n: …]` line, and that line becomes the original block again
- * (restoreCollapsedDrawings). A drawing whose marker the model left out is removed with the
- * rest of what it rewrote — the same as an image it leaves out; the chat's undo brings it
- * back. Mermaid source drawings are text the model reads and may rewrite freely.
+ * Scene drawings come back BY NUMBER: the model saw each one as a `[drawing #n: …]` line,
+ * and that marker — wherever the model put it — becomes the original block again
+ * (restoreCollapsedDrawings). Unlike an image, a scene the model left out is NOT removed:
+ * it can't recreate one, so it is kept at the end of the section. Mermaid source drawings
+ * are text the model reads and may rewrite freely.
  */
 export function restoreStrippedImages(original: string, next: string): string {
-  // The images the model saw: those of the text with its scenes collapsed (a picture
-  // stored inside a scene is not one of them — it comes back with its drawing).
-  const uris = collapseDrawings(original, 'marker').match(DATA_URI_RE) ?? []
+  // The images the model saw as `![alt]([image])`: the markdown images of the text with
+  // its scenes collapsed. A data URI anywhere else is not one of them — a picture stored
+  // inside a scene comes back with its drawing, and the `dataURL` of an INVALID drawing
+  // block (shown as text) must not take the slot of the next image.
+  const uris = Array.from(collapseDrawings(original, 'marker').matchAll(MD_IMAGE_DATA_URI_RE), (m) => m[1])
   let i = 0
   const withImages = next.replace(/!\[([^\]]*)\]\(\[image\]\)/g, (_m, alt: string) => (i < uris.length ? `![${alt}](${uris[i++]})` : ''))
   return restoreCollapsedDrawings(original, withImages)
@@ -212,7 +217,7 @@ export const TOOLS: ToolSchema[] = [
   },
   {
     name: 'update_section',
-    description: "Replace a section's content. Read the note first to get the section id. Keep every `[image]` and `[drawing #n: …]` line you were shown exactly where it should stay: the app puts the picture / drawing back from it (you cannot change a drawing shown that way; leaving its line out deletes it).",
+    description: "Replace a section's content. Read the note first to get the section id. Keep every `[image]` and `[drawing #n: …]` line you were shown exactly where it should stay: the app puts the picture / drawing back from it (you cannot change nor delete a drawing shown that way: one whose line you leave out is kept at the end of the section).",
     inputSchema: obj({ note_id: str('The note id.'), section_id: str('The section id.'), content: str('New Markdown content.') }, ['note_id', 'section_id', 'content']),
   },
   {

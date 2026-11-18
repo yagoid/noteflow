@@ -616,9 +616,14 @@ tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventan
   dentro de una escena se vaya con ella. Los bloques **Mermaid** se ven tal cual (son texto, pequeño y
   editable). **Escritura:** `restoreStrippedImages` devuelve a cada línea `[drawing #n…]` del contenido
   nuevo el bloque n-ésimo del original — **por número**, no por posición, y sea cual sea el resumen que
-  deje el modelo —; un marcador repetido o inventado se elimina, y un dibujo cuyo marcador el modelo
-  **omite se borra** (la misma regla que una imagen omitida; el «deshacer» del chat lo devuelve). Las
-  imágenes se emparejan contra el texto ya colapsado. `aiHidden` y notas cifradas, sin cambios. El modelo
+  deje el modelo, y **esté donde esté en la línea** (un ítem de lista, una cita, en mitad de una frase: el
+  dibujo vuelve como bloque propio en ese punto) —. Un dibujo de escena **nunca se pierde** al reescribir:
+  si el modelo omite su marcador (o solo lo escribe dentro de un fence) se **conserva al final de la
+  sección** — el modelo no puede recrearlo; borrarlo es cosa del usuario. Solo se tocan marcadores de
+  dibujos que la sección original tiene de verdad: un número sin dibujo es texto del usuario y se queda;
+  uno repetido se descarta; en una sección sin dibujos no se toca nada. Las imágenes (que sí se pierden
+  si el modelo las omite) se emparejan solo contra las imágenes markdown `![alt](data:…)` del texto ya
+  colapsado: el `dataURL` de un bloque de dibujo inválido no ocupa el hueco de la siguiente imagen. `aiHidden` y notas cifradas, sin cambios. El modelo
   sabe crear dibujos por `DRAWING_HOWTO` (`tools.ts`): va en la descripción de `add_section`, en la de
   `update_section` (conservar los marcadores) y en la guía de contexto del chat — marcador + fence
   `mermaid` + cierre, en líneas propias y sin indentar; flowchart / sequence / class / ER / state quedan

@@ -6,7 +6,6 @@ import { Pencil, PenTool, Workflow } from 'lucide-react'
 import { getKanbanAttr, setKanbanAttr } from '../../lib/kanban'
 import {
   drawingFromHtmlData,
-  drawingHtmlDataToMarkdown,
   drawingText,
   type DrawingHtmlData,
 } from '../../lib/drawing/drawingBlock'
@@ -16,7 +15,7 @@ import { THEMES } from '../../lib/themes'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import {
-  appendDrawingToSection, useDrawingEditorStore, writeDrawingToSection, type DrawingTarget,
+  saveDrawingElsewhere, useDrawingEditorStore, writeDrawingToSection, type DrawingTarget,
 } from '../../stores/drawingEditorStore'
 import { getWindowRole } from '../../stores/notesStore'
 import { useThemeStore } from '../../stores/themeStore'
@@ -113,7 +112,12 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
     return pos === null ? null : editor.state.doc.nodeAt(pos)!.attrs.drawing as DrawingHtmlData
   }, [editor, livePos])
 
-  /** Which one this is among the identical drawing blocks of the document (0-based). */
+  /**
+   * Which one this is among the identical drawing blocks of the document (0-based). Only
+   * the document's direct children are looked at: a drawing can't be nested — the node is
+   * in the `topBlock` group, which only the document accepts (editorExtensions.ts →
+   * TopLevelDocument), and markdownHtml reads drawings at the top level only.
+   */
   const ordinalOf = useCallback((): number => {
     const pos = livePos()
     let ordinal = 0
@@ -187,14 +191,10 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
         editor.commands.focus()
         return
       }
-      // Not through this editor: write into the section itself, if the block is still there.
-      const outcome = target ? await writeDrawingToSection(target, drawn) : 'gone'
-      if (outcome === 'saved' || !drawn) return
-      // Changed or removed meanwhile: the work is never dropped silently.
-      if (await store.askConflict(outcome === 'changed')) {
-        if (outcome === 'changed' && target) await appendDrawingToSection(target, drawn)
-        else await navigator.clipboard.writeText(drawingHtmlDataToMarkdown(drawn)).catch(() => {})
-      }
+      // Not through this editor: into the section itself, if the block is still there —
+      // and if it isn't, or the write fails, the user is asked (never dropped silently).
+      if (drawn) await saveDrawingElsewhere(target, drawn)
+      else if (target) await writeDrawingToSection(target, null).catch(() => undefined) // emptied: nothing to lose
     } finally {
       busyRef.current = false
     }

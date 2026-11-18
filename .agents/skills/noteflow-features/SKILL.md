@@ -1134,13 +1134,16 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   paleta, vista de contenido). Nunca por sus datos internos: buscar un color o un identificador no lo
   encuentra. El recuento de palabras cuenta sus etiquetas, y nada de un dibujo crea `#tags` ni alarmas.
 - **IA:** el asistente ve un dibujo hecho a mano como una línea `[drawing #1: etiquetas ; A → B]` (no puede
-  modificarlo; si reescribe la sección lo conserva, y si lo quita se puede deshacer desde el chat) y un
+  modificarlo ni borrarlo: si reescribe la sección y se lo deja fuera, el dibujo se conserva al final de
+  la sección) y un
   diagrama Mermaid como su texto, que sí puede cambiar. Puede **crear** diagramas: escribe un bloque
   Mermaid y la app lo dibuja.
 - **Si la nota cambia mientras dibujas** (una sincronización, la IA, otra ventana, o cambias de nota desde
   la bandeja): al pulsar Hecho el dibujo se guarda en su nota igualmente; si justo ese dibujo fue
-  modificado o borrado entretanto, la app avisa y ofrece insertar tu versión como un dibujo nuevo. Cerrar
-  la ventana con el lienzo abierto guarda lo dibujado.
+  modificado o borrado entretanto, la app avisa y ofrece insertar tu versión como un dibujo nuevo. Al
+  cerrar la ventana con el lienzo abierto la app intenta guardar lo dibujado (mejor esfuerzo, como el
+  resto de cambios pendientes: en una nota cifrada puede no llegar a escribirse). Si el guardado falla,
+  avisa y ofrece reintentar o copiar el dibujo.
 - **No hay imágenes dentro de un dibujo** (pegar o soltar una imagen en el lienzo no hace nada) ni exportar
   a PNG/SVG todavía. El CLI y la app móvil lo ven como texto.
 

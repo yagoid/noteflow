@@ -2603,7 +2603,7 @@ div[data-type="drawing"] > pre[data-drawing-fallback] > code {
 }
 /* A pencil in front says it is a drawing (no words: the previews have no i18n). */
 div[data-type="drawing"]:not(.drawing-node *) > pre[data-drawing-fallback]::before {
-  content: "¸E";
+  content: "\270E";
   float: left;
   margin-right: 0.5em;
   opacity: 0.55;

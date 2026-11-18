@@ -4353,12 +4353,14 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
     exactamente el bloque abierto (`kind` + `attrs` + `body`) → `updateAttributes` (una transacción: un
     solo Ctrl+Z); (2) si no, se escribe en la sección a través del store (`writeDrawingToSection` →
     `replaceDrawing` sobre el markdown, tras `flushPendingEdits`), que solo sustituye el bloque que sigue
-    siendo el abierto; (3) si ya no existe o cambió, **se pregunta** (`askConflict`): insertarlo como
-    bloque nuevo al final de su sección, o —si la sección ya no existe— copiar su markdown; nunca se pisa
-    lo que hay ni se descarta sin avisar. Al cerrar o recargar la ventana con el lienzo abierto y
+    siendo el abierto; (3) si ya no existe o cambió, **se pregunta** (`saveDrawingElsewhere` → `ask`):
+    insertarlo como bloque nuevo al final de su sección, o —si la sección ya no existe— copiar su
+    markdown; si la escritura a disco **falla**, reintentar o copiar; si falla el portapapeles, se dice.
+    Solo un «descartar» explícito lo pierde; nunca se pisa lo que hay. Al cerrar o recargar la ventana con el lienzo abierto y
     cambios (`beforeunload`: cierre del SO, salir, reinicio por actualización) `flushOpenDrawing` lo vuelca
-    por la vía (2) —y como bloque nuevo si el original cambió—, igual de «mejor esfuerzo» que el resto de
-    guardados pendientes de `App.tsx`.
+    por la vía (2) —y como bloque nuevo si el original cambió, o si quedaba una de esas preguntas sin
+    responder—, igual de «mejor esfuerzo» que el resto de guardados pendientes de `App.tsx` (en una nota
+    cifrada puede no llegar: la escritura espera antes al cifrado).
   - **Sin entrada hasta que las fuentes están:** Excalidraw re-mide un texto cuando llega su fuente; si la
     primera acción del usuario fuese anterior, la referencia tendría las medidas viejas y «Hecho»
     escribiría sin cambios reales. El lienzo se muestra pero no acepta puntero ni teclas hasta cargar las
@@ -4391,7 +4393,7 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
 - **Otras ventanas:** sticky → la tarjeta con el texto del dibujo, sin vista previa ni edición (no carga
   Excalidraw). Vistas de solo lectura (`htmlFromMarkdown` + `innerHTML`: vista de nota, hover card, vista
   de contenido, historial, chat) → el `<pre data-drawing-fallback>` con `drawingText`, con borde
-  discontinuo y un lápiz delante (`index.css`). Ventana de sección → igual que la principal.
+  discontinuo y un lápiz delante (`index.css`, `content: "\270E"` — el escape CSS, no el carácter). Ventana de sección → igual que la principal.
 - **El dibujo como texto (`lib/drawing/drawingCollapse.ts`, espejo `electron/drawingText.ts`):** todo lo
   que lee el markdown de una sección sin renderizarlo ve lo que el dibujo DICE, nunca el JSON de la
   escena. `collapseDrawings(md, 'text')` (una línea `etiqueta · etiqueta ; A → B`) alimenta el índice de

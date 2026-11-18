@@ -66,7 +66,8 @@ export function sceneSummary(block: DrawingBlock): string {
 
 /** The one-line stand-in of the n-th scene block for a model: `[drawing #2: A · B ; A → B]`. */
 export function drawingMarker(block: DrawingBlock, n: number): string {
-  const summary = sceneSummary(block)
+  // (Brackets of a label become parentheses: the marker must stay one `[…]`.)
+  const summary = sceneSummary(block).replace(/\[/g, '(').replace(/\]/g, ')')
   return summary ? `[drawing #${n}: ${summary}]` : `[drawing #${n}]`
 }
 
@@ -93,14 +94,23 @@ export function stripDrawings(md: string): string {
   return mapDrawingBlocks(md, () => [])
 }
 
-const MARKER_LINE_RE = /^[ \t]*\[drawing #(\d+)(?::[^\n]*)?\][ \t]*$/
+const MARKER_RE = /\[drawing #(\d+)(?::[^\]\n]*)?\]/g
+// What is left of a line once its markers are out is dropped when it is only a list or
+// quote prefix (the model put the marker in an item of its own).
+const LINE_PREFIX_RE = /^[ \t>]*(?:(?:[-*+]|\d+\.)[ \t]+(?:\[[ x]\][ \t]*)?)?/
 
 /**
- * Undo collapseDrawings(…, 'marker') on a text a model rewrote: each `[drawing #n…]` line
- * becomes the n-th scene block of `original` again, whatever the model did to the summary
- * after the number. A marker whose number has no block, or a second marker with the same
- * number, is removed. A scene the model left out is gone — the same rule as an image it
- * leaves out (restoreStrippedImages).
+ * Undo collapseDrawings(…, 'marker') on a text a model rewrote. The model can't recreate a
+ * scene, so a scene is never lost here:
+ *   - a `[drawing #n…]` marker — alone on its line or anywhere in one (a list item, a
+ *     quote, mid-sentence) — becomes the n-th scene block of `original` again, as a block
+ *     of its own at that place (the rest of the line stays above it);
+ *   - a scene whose marker the model left out (or only wrote inside a code fence) is kept:
+ *     appended at the end of the section. Deleting a drawing is the user's job;
+ *   - only markers of scenes `original` really has are touched: a number with no scene is
+ *     the user's own text and stays; a second marker of the same scene is dropped; a text
+ *     whose original had no scene is returned as it is.
+ * Line endings follow `next`.
  */
 export function restoreCollapsedDrawings(original: string, next: string): string {
   const scenes: string[][] = []
@@ -108,18 +118,55 @@ export function restoreCollapsedDrawings(original: string, next: string): string
     if (block.kind === 'excalidraw') scenes.push(lines)
     return null
   })
-  if (!/\[drawing #\d+/.test(next)) return next
+  if (scenes.length === 0) return next
+  const eol = next.includes('\r\n') ? '\r' : ''
   const used = new Set<number>()
   const out: string[] = []
+  let blankDue = false
+  const push = (raw: string) => {
+    if (blankDue && raw.trim() !== '') out.push(eol)
+    blankDue = false
+    out.push(raw)
+  }
+  const pushScene = (n: number) => {
+    if (out.length > 0 && out[out.length - 1].trim() !== '') out.push(eol)
+    for (const line of scenes[n - 1]) out.push(line + eol)
+    blankDue = true
+    used.add(n)
+  }
+  let inFence = false
   for (const raw of next.split('\n')) {
     const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw
-    const m = line.match(MARKER_LINE_RE)
-    if (!m) { out.push(raw); continue }
-    const n = Number(m[1])
-    const scene = scenes[n - 1]
-    if (!scene || used.has(n)) continue
-    used.add(n)
-    out.push(...scene)
+    if (inFence) {
+      if (FENCE_CLOSE_RE.test(line)) inFence = false
+      push(raw)
+      continue
+    }
+    if (FENCE_OPEN_RE.test(line)) {
+      inFence = true
+      push(raw)
+      continue
+    }
+    const found: number[] = []
+    const rest = line.replace(MARKER_RE, (marker, digits: string) => {
+      const n = Number(digits)
+      if (!scenes[n - 1]) return marker
+      if (!used.has(n) && !found.includes(n)) found.push(n)
+      return ''
+    })
+    if (rest === line) {
+      push(raw)
+      continue
+    }
+    if (rest.replace(LINE_PREFIX_RE, '').trim() !== '') push(rest.replace(/[ \t]+$/, '') + eol)
+    for (const n of found) pushScene(n)
   }
+  for (let n = 1; n <= scenes.length; n++) {
+    if (used.has(n)) continue
+    // At the end of the text, after one blank line (not glued to its last line).
+    while (out.length > 0 && out[out.length - 1].trim() === '') out.pop()
+    pushScene(n)
+  }
+  if (out.length > 0 && out[out.length - 1].endsWith('\r')) out[out.length - 1] = out[out.length - 1].slice(0, -1)
   return out.join('\n')
 }

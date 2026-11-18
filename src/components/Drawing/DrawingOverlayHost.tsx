@@ -19,7 +19,7 @@ const NO_DRAG = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
 export function DrawingOverlayHost() {
   const t = useT()
   const session = useDrawingEditorStore((s) => s.session)
-  const conflict = useDrawingEditorStore((s) => s.conflict)
+  const prompt = useDrawingEditorStore((s) => s.prompt)
 
   useEffect(() => {
     useDrawingEditorStore.getState().setAvailable(true)
@@ -38,18 +38,26 @@ export function DrawingOverlayHost() {
   const open = !!session
   useEffect(() => (open ? claimKeys() : undefined), [open])
 
-  // The note changed while the canvas was open: the work is never dropped silently.
-  if (conflict) {
+  // A drawing that could not simply be saved (the note changed under the canvas, the disk
+  // or the clipboard failed): the work is never dropped without asking.
+  if (prompt) {
+    const d = t.drawing
+    const text = {
+      changed: { title: d.conflictTitle, message: d.conflictMessage, confirm: d.conflictInsert, cancel: d.conflictDiscard },
+      gone: { title: d.conflictTitle, message: d.conflictMessageGone, confirm: d.conflictCopy, cancel: d.conflictDiscard },
+      'write-failed': { title: d.saveFailedTitle, message: d.saveFailedMessage, confirm: d.tryAgain, cancel: d.conflictCopy },
+      'copy-failed': { title: d.copyFailedTitle, message: d.copyFailedMessage, confirm: d.tryAgain, cancel: d.conflictDiscard },
+    }[prompt.kind]
     return (
-      <div data-drawing-conflict="" style={NO_DRAG}>
+      <div data-drawing-conflict={prompt.kind} style={NO_DRAG}>
         <ConfirmModal
-          title={t.drawing.conflictTitle}
-          message={conflict.canInsert ? t.drawing.conflictMessage : t.drawing.conflictMessageGone}
-          confirmLabel={conflict.canInsert ? t.drawing.conflictInsert : t.drawing.conflictCopy}
-          cancelLabel={t.drawing.conflictDiscard}
+          title={text.title}
+          message={text.message}
+          confirmLabel={text.confirm}
+          cancelLabel={text.cancel}
           confirmOnEnter={false}
-          onConfirm={() => conflict.resolve(true)}
-          onCancel={() => conflict.resolve(false)}
+          onConfirm={() => prompt.resolve(true)}
+          onCancel={() => prompt.resolve(false)}
         />
       </div>
     )

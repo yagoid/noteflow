@@ -29,4 +29,11 @@ export const drawing = {
   conflictInsert: 'Insertar como dibujo nuevo',
   conflictCopy: 'Copiar el dibujo',
   conflictDiscard: 'Descartar mi versión',
+
+  // El dibujo no se ha podido escribir.
+  saveFailedTitle: 'No se ha podido guardar el dibujo',
+  saveFailedMessage: 'Ha fallado la escritura de la nota en disco. Puedes volver a intentarlo, o copiar el dibujo y pegarlo más tarde en una nota en modo texto.',
+  copyFailedTitle: 'No se ha podido copiar el dibujo',
+  copyFailedMessage: 'El portapapeles no ha aceptado el dibujo. Vuelve a intentarlo; si lo descartas, esta versión del dibujo se pierde.',
+  tryAgain: 'Reintentar',
 }

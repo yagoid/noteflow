@@ -4109,7 +4109,7 @@ function chatContextGuide(allNotes: boolean): string {
     'user can undo each one from the chat. update_section REPLACES the whole section: send its complete new ' +
     'content and keep everything the user did not ask to change (images appear as [image] placeholders and ' +
     'hand-made drawings as a `[drawing #n: …]` line — keep them where they are; the app restores them, and ' +
-    'you cannot modify such a drawing). ' + agentTools.DRAWING_HOWTO + ' Never rewrite a section marked as truncated with ' +
+    'you cannot modify nor delete such a drawing). ' + agentTools.DRAWING_HOWTO + ' Never rewrite a section marked as truncated with ' +
     'update_section (the part you cannot see would be lost): add a section or tell the user instead.'
   )
 }

@@ -29,4 +29,11 @@ export const drawing = {
   conflictInsert: 'Insert as a new drawing',
   conflictCopy: 'Copy the drawing',
   conflictDiscard: 'Discard my version',
+
+  // The drawing could not be written.
+  saveFailedTitle: 'The drawing could not be saved',
+  saveFailedMessage: 'Writing the note to disk failed. You can try again, or copy the drawing and paste it into a note in text mode later.',
+  copyFailedTitle: 'The drawing could not be copied',
+  copyFailedMessage: 'The clipboard did not accept the drawing. Try again; if you discard it, this version of the drawing is lost.',
+  tryAgain: 'Try again',
 }
