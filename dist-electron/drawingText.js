@@ -245,18 +245,24 @@ function stripDrawings(md) {
 }
 // The marker as a model may write it back: any case, loose spacing (`[Drawing #1]`,
 // `[drawing  #2]`, `[drawing#2]`), with or without the summary, brackets escaped or not.
-const MARKER_RE = /\\?\[\s*drawing\s*#\s*(\d+)\s*(?::[^\]\n]*)?\\?\]/gi;
+// Groups: 1 / 3 = the spaces around it, 2 = the number.
+const MARKER_RE = /([ \t]*)\\?\[\s*drawing\s*#\s*(\d+)\s*(?::[^\]\n]*)?\\?\]([ \t]*)/gi;
 // What is left of a line once its markers are out is dropped when it is only a quote,
 // heading or list prefix (the model put the marker in a line of its own kind).
-const LINE_PREFIX_RE = /^[ \t>]*(?:#{1,6}[ \t]*|(?:[-*+]|\d+\.)[ \t]+(?:\[[ x]\][ \t]*)?)?/;
+const LINE_PREFIX_RE = /^[ \t>]*(?:#{1,6}[ \t]*|(?:[-*+]|\d+\.)(?:[ \t]+(?:\[[ x]\][ \t]*)?)?)?/;
 // Structures a block can't be dropped into: a table row, a kanban board.
 const TABLE_ROW_RE = /^[ \t]*\|/;
 const BOARD_OPEN_RE = /^<!--[ \t]*kanban(?:[ \t][^\n]*)?-->[ \t]*$/;
 const BOARD_CLOSE_RE = /^<!--[ \t]*\/kanban[ \t]*-->[ \t]*$/;
-/** A line with its markers taken out: no doubled spaces where one was, no trailing ones. */
-function tidyLine(line) {
-    const indent = line.match(/^[ \t]*/)[0];
-    return indent + line.slice(indent.length).replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+$/, '');
+/**
+ * What a marker leaves in its line once taken out: one space where it sat between two
+ * words, nothing at the start or the end of the line. Only the marker's own gap is
+ * touched — the rest of the line (inline code, aligned text) keeps its spacing.
+ */
+function markerGap(before, after, atStart, atEnd) {
+    if (atStart || atEnd)
+        return '';
+    return before && after ? ' ' : before + after;
 }
 /**
  * Undo collapseDrawings(…, 'marker') on a text a model rewrote. The model can't recreate a
@@ -270,8 +276,10 @@ function tidyLine(line) {
  *     appended at the end of the section — after closing a fence the model left open, so
  *     the drawing isn't swallowed by the code. Deleting a drawing is the user's job;
  *   - only markers of scenes `original` really has are touched: a number with no scene is
- *     the user's own text and stays; a second marker of the same scene is dropped; a text
- *     whose original had no scene is returned as it is.
+ *     the user's own text and stays; so does a marker-looking text that was already written
+ *     in `original` ("see [Drawing #1] of the spec": the collapse never emits that spelling
+ *     nor a marker the section already holds); a second marker of the same scene is
+ *     dropped; a text whose original had no scene is returned as it is.
  * Line endings follow `next`.
  */
 function restoreCollapsedDrawings(original, next) {
@@ -283,6 +291,8 @@ function restoreCollapsedDrawings(original, next) {
     });
     if (scenes.length === 0)
         return next;
+    // Marker-looking texts the user wrote in the section itself: never taken for a marker.
+    const literal = new Set((original.match(MARKER_RE) ?? []).map((m) => m.trim()));
     const eol = next.includes('\r\n') ? '\r' : '';
     const used = new Set();
     const out = [];
@@ -331,24 +341,24 @@ function restoreCollapsedDrawings(original, next) {
         if (!inBoard && BOARD_OPEN_RE.test(line))
             inBoard = true;
         const found = [];
-        const rest = line.replace(MARKER_RE, (marker, digits) => {
+        const rest = line.replace(MARKER_RE, (marker, before, digits, after, offset) => {
             const n = Number(digits);
-            if (!scenes[n - 1])
+            if (!scenes[n - 1] || literal.has(marker.trim()))
                 return marker;
             if (!used.has(n) && !found.includes(n) && !deferred.includes(n))
                 found.push(n);
-            return '';
+            return markerGap(before, after, line.slice(0, offset).trim() === '', line.slice(offset + marker.length).trim() === '');
         });
         if (rest === line) {
             push(raw);
         }
         else if (isRow || inBoard) {
-            push(tidyLine(rest) + eol);
+            push(rest + eol);
             deferred.push(...found);
         }
         else {
             if (rest.replace(LINE_PREFIX_RE, '').trim() !== '')
-                push(tidyLine(rest) + eol);
+                push(rest + eol);
             for (const n of found)
                 pushScene(n);
         }

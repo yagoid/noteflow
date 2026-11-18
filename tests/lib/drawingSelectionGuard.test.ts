@@ -6,9 +6,11 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { Editor } from '@tiptap/core'
+import History from '@tiptap/extension-history'
 import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import { schemaExtensions } from '../../src/components/Editor/editorExtensions'
 import { DRAWING_NODE_NAME } from '../../src/components/Editor/DrawingBlock'
+import { leaveSelectedDrawing } from '../../src/components/Editor/drawingCommands'
 import { htmlFromMarkdown, htmlToMarkdown } from '../../src/lib/markdownHtml'
 
 const F = '```'
@@ -18,7 +20,7 @@ let editor: Editor | null = null
 afterEach(() => { editor?.destroy(); editor = null })
 
 function open(md: string): Editor {
-  editor = new Editor({ element: document.createElement('div'), extensions: schemaExtensions(), content: htmlFromMarkdown(md) })
+  editor = new Editor({ element: document.createElement('div'), extensions: [...schemaExtensions(), History], content: htmlFromMarkdown(md) })
   return editor
 }
 const types = (e: Editor) => { const out: string[] = []; e.state.doc.forEach((n) => { out.push(n.type.name) }); return out }
@@ -31,6 +33,12 @@ const inputText = (e: Editor, text: string) => {
   const handled = e.view.someProp('handleTextInput', (f) => f(e.view, from, to, text))
   if (!handled) e.view.dispatch(e.state.tr.insertText(text, from, to))
 }
+/** The `keypress` of a key that types `ch` (with its charCode, which ProseMirror goes by). */
+const keypress = (ch: string, init: KeyboardEventInit = {}) => {
+  const event = new KeyboardEvent('keypress', { key: ch, ...init })
+  Object.defineProperty(event, 'charCode', { value: ch.charCodeAt(0) })
+  return event
+}
 /**
  * Typing as the browser delivers it, one key at a time: the `keypress` of a printable key
  * (ProseMirror runs handleKeyPress), then the character itself through the text-input
@@ -38,7 +46,7 @@ const inputText = (e: Editor, text: string) => {
  */
 const typeText = (e: Editor, text: string) => {
   for (const ch of text) {
-    e.view.someProp('handleKeyPress', (f) => f(e.view, new KeyboardEvent('keypress', { key: ch })))
+    e.view.someProp('handleKeyPress', (f) => f(e.view, keypress(ch)))
     inputText(e, ch)
   }
 }
@@ -89,32 +97,105 @@ describe('typing with a drawing selected', () => {
     }
   })
 
-  it('a paste with nothing in it, or a composition that writes nothing, leaves no paragraph behind', async () => {
-    // Before a list: an empty paragraph left there would change the markdown.
-    const doc = `${DRAWING}\n\n- item`
-    const empty = open(doc)
-    selectDrawing(empty)
-    domEvent(empty, 'paste', pasteEvent([]))
-    expect(types(empty)).toEqual([DRAWING_NODE_NAME, 'bulletList'])
+  // Before a list: an empty paragraph left there would change the markdown.
+  const BEFORE_LIST = `${DRAWING}\n\n- item`
+  const caretIntoList = (e: Editor) => e.commands.setTextSelection(e.state.doc.content.size - 2)
+
+  it('a paste with nothing to paste does not touch the document', () => {
+    const e = open(BEFORE_LIST)
+    selectDrawing(e)
+    domEvent(e, 'paste', pasteEvent([]))
+    expect(types(e)).toEqual([DRAWING_NODE_NAME, 'bulletList'])
+    expect(e.state.selection instanceof NodeSelection).toBe(true)
+  })
+
+  it('a paste or a composition that ends up writing nothing: the paragraph goes when the caret leaves it, and undo has nothing to undo', () => {
+    for (const [type, event] of [['paste', pasteEvent(['text/plain'])], ['compositionstart', new Event('compositionstart')]] as const) {
+      const e = open(BEFORE_LIST)
+      selectDrawing(e)
+      domEvent(e, type, event)
+      // The caret waits there (whatever comes later — an async insert — finds it)…
+      expect(types(e), type).toEqual([DRAWING_NODE_NAME, 'paragraph', 'bulletList'])
+      expect(e.can().undo(), type).toBe(false)
+      // …and nothing came: leaving it takes it out again, with no phantom undo step.
+      caretIntoList(e)
+      expect(types(e), type).toEqual([DRAWING_NODE_NAME, 'bulletList'])
+      expect(md(e), type).toBe(BEFORE_LIST)
+      expect(e.can().undo(), type).toBe(false)
+      editor?.destroy()
+    }
+  })
+
+  it('selecting the drawing again also removes the unused paragraph', () => {
+    const e = open(BEFORE_LIST)
+    selectDrawing(e)
+    domEvent(e, 'paste', pasteEvent(['text/plain']))
+    selectDrawing(e)
+    expect(types(e)).toEqual([DRAWING_NODE_NAME, 'bulletList'])
+    expect(e.state.selection instanceof NodeSelection).toBe(true)
+  })
+
+  it('a paragraph that was written into stays, and typing + undo leaves no orphan', () => {
+    const e = open(BEFORE_LIST)
+    selectDrawing(e)
+    typeText(e, 'hi')
+    caretIntoList(e)
+    expect(md(e)).toBe(`${DRAWING}\n\nhi\n\n- item`)
+
+    const u = open(BEFORE_LIST)
+    selectDrawing(u)
+    typeText(u, 'x')
+    u.commands.undo()
+    caretIntoList(u)
+    expect(md(u)).toBe(BEFORE_LIST)
+  })
+
+  it('a key press that types nothing (Alt+letter, a control character) makes no paragraph', () => {
+    const e = open(BEFORE_LIST)
+    selectDrawing(e)
+    e.view.someProp('handleKeyPress', (f) => f(e.view, keypress('f', { altKey: true })))
+    e.view.someProp('handleKeyPress', (f) => f(e.view, keypress('\r')))
+    expect(types(e)).toEqual([DRAWING_NODE_NAME, 'bulletList'])
+    // AltGr (Ctrl+Alt) does type: @ # [ on many layouts.
+    e.view.someProp('handleKeyPress', (f) => f(e.view, keypress('@', { altKey: true, ctrlKey: true })))
+    expect(types(e)).toEqual([DRAWING_NODE_NAME, 'paragraph', 'bulletList'])
+  })
+
+  // The regression: an image pasted (or dropped) with a drawing selected is READ
+  // asynchronously and inserted later at whatever is selected then. Nothing may have
+  // restored the node selection meanwhile, and the insert itself steps off a drawing.
+  it('pasted files with a later, asynchronous insert: the image lands below, the drawing stays', async () => {
+    const IMG = 'data:image/png;base64,iVBORw0KGgo='
+    const insertImageLater = async (e: Editor) => {
+      await later() // the FileReader
+      await later()
+      leaveSelectedDrawing(e) // what Editor.tsx → insertImageFiles does before setImage
+      e.chain().setImage({ src: IMG, alt: 'shot' }).run()
+    }
+    // Files only (a screenshot): the guard leaves the selection alone; the insert moves off.
+    const files = open(`Intro\n\n${DRAWING}`)
+    selectDrawing(files)
+    domEvent(files, 'paste', pasteEvent(['Files']))
+    expect(files.state.selection instanceof NodeSelection).toBe(true)
+    await insertImageLater(files)
+    expect(types(files)).toEqual(['paragraph', DRAWING_NODE_NAME, 'paragraph'])
+    expect(md(files)).toBe(`Intro\n\n${DRAWING}\n\n![shot](${IMG})`)
     editor?.destroy()
 
-    const nothing = open(doc)
-    selectDrawing(nothing)
-    domEvent(nothing, 'paste', pasteEvent(['text/plain']))
-    expect(types(nothing)).toEqual([DRAWING_NODE_NAME, 'paragraph', 'bulletList'])
-    await later() // …but nothing was inserted
-    expect(types(nothing)).toEqual([DRAWING_NODE_NAME, 'bulletList'])
-    expect(nothing.state.selection instanceof NodeSelection).toBe(true)
-    expect(md(nothing)).toBe(doc)
+    // Files + text types (some apps): the guard's paragraph is still there when the image arrives.
+    const both = open(`Intro\n\n${DRAWING}`)
+    selectDrawing(both)
+    domEvent(both, 'paste', pasteEvent(['text/html', 'Files']))
+    await insertImageLater(both)
+    expect(md(both)).toBe(`Intro\n\n${DRAWING}\n\n![shot](${IMG})`)
     editor?.destroy()
 
-    const cancelled = open(doc)
-    selectDrawing(cancelled)
-    domEvent(cancelled, 'compositionstart', new Event('compositionstart'))
-    domEvent(cancelled, 'compositionend', new Event('compositionend'))
-    await later()
-    expect(md(cancelled)).toBe(doc)
-    expect(types(cancelled)).toEqual([DRAWING_NODE_NAME, 'bulletList'])
+    // A drop never went through the guard at all: same protection at the insert.
+    const dropped = open(`${DRAWING}\n\n- item`)
+    selectDrawing(dropped)
+    await insertImageLater(dropped)
+    expect(types(dropped)).toEqual([DRAWING_NODE_NAME, 'paragraph', 'bulletList'])
+    expect(md(dropped)).toContain(DRAWING)
   })
 
   it('does nothing in a read-only editor', () => {
@@ -122,7 +203,7 @@ describe('typing with a drawing selected', () => {
     e.setEditable(false)
     selectDrawing(e)
     domEvent(e, 'paste', pasteEvent(['text/plain']))
-    e.view.someProp('handleKeyPress', (f) => f(e.view, new KeyboardEvent('keypress', { key: 'x' })))
+    e.view.someProp('handleKeyPress', (f) => f(e.view, keypress('x')))
     expect(types(e)).toEqual(['paragraph', DRAWING_NODE_NAME])
   })
 

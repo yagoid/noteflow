@@ -141,7 +141,7 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
     editor.state.doc.forEach((node, offset) => {
       if (offset >= pos || node.type.name !== DRAWING_NODE_NAME) return
       const d = node.attrs.drawing as DrawingHtmlData
-      if (d.kind === data.kind && d.attrs === data.attrs && d.body === data.body) ordinal++
+      if (d.kind === data.kind && d.body === data.body) ordinal++
     })
     return ordinal
   }, [data, editor, livePos])
@@ -178,7 +178,9 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
       // section on screen). Nothing is ever written over a block that isn't the opened one.
       const pos = livePos()
       const live = pos === null ? null : editor.state.doc.nodeAt(pos)!.attrs.drawing as DrawingHtmlData
-      const same = !!live && live.kind === data.kind && live.attrs === data.attrs && live.body === data.body
+      // (Its attributes may differ — resized from another window meanwhile: still the same
+      // drawing, and the attributes it has now are the ones kept.)
+      const same = !!live && live.kind === data.kind && live.body === data.body
 
       if (result.type === 'unchanged') {
         // Nothing drawn in a block inserted for this session: it has no reason to stay.
@@ -186,7 +188,7 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
         if (same) editor.commands.focus()
         return
       }
-      const drawn: DrawingHtmlData | null = result.empty ? null : { kind: 'excalidraw', attrs: data.attrs, body: result.lines.join('\n') }
+      const drawn: DrawingHtmlData | null = result.empty ? null : { kind: 'excalidraw', attrs: live && same ? live.attrs : data.attrs, body: result.lines.join('\n') }
       if (same) {
         // One transaction on the live node: undoable with Ctrl+Z, autosaved like any edit.
         if (drawn) updateAttributes({ drawing: drawn })
@@ -255,13 +257,17 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
   const drag = (e: React.PointerEvent, onMove: (ev: PointerEvent) => void, onEnd: () => void) => {
     e.preventDefault()
     e.stopPropagation()
+    // pointercancel too (a touch taken over by the system, the window losing the pointer):
+    // the drag ends there instead of following the pointer forever.
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
       onEnd()
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
   const commitSize = (key: 'width' | 'height', px: number | null) => {
     const live = liveData()

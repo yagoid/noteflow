@@ -40,6 +40,21 @@ describe('stored size (marker attributes)', () => {
     expect(withDrawingSize('height="300"', 'width', null)).toBe('height="300"')
   })
 
+  it('reads a size written by hand (unquoted, another case) and never leaves two of them', () => {
+    for (const typed of ['width=900', 'WIDTH="900"', "Width='900'", 'width = 900']) {
+      expect(storedDrawingWidth(typed), typed).toBe(900)
+      expect(withDrawingSize(typed, 'width', 640), typed).toBe('width="640"')
+      expect(withDrawingSize(typed, 'width', null), typed).toBe('')
+    }
+    expect(withDrawingSize('height="300" width=900 foo=bar', 'width', 640)).toBe('height="300" foo=bar width="640"')
+    expect(withDrawingSize('WIDTH=700 width="800" height=300', 'width', 640)).toBe('width="640" height=300')
+    expect(withDrawingSize('width="800" Width=700', 'height', 320)).toBe('width="800" Width=700 height="320"')
+    expect(storedDrawingHeight('HEIGHT=320')).toBe(320)
+    // Another attribute that merely ends in the same letters is not it.
+    expect(storedDrawingWidth('maxwidth=900')).toBeNull()
+    expect(withDrawingSize('maxwidth=900', 'width', 640)).toBe('maxwidth=900 width="640"')
+  })
+
   it('round-trips through the markdown of the note, next to height', () => {
     const md = block('height="300" width="900"')
     expect(parseDrawingMarkdown(md)!.attrs).toBe('height="300" width="900"')

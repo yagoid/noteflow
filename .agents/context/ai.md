@@ -620,8 +620,10 @@ tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventan
   dibujo vuelve como bloque propio en ese punto; dentro de una **fila de tabla o de un tablero kanban** se
   coloca justo DESPUÉS de la tabla / tablero para no partirlos) —. El marcador se reconoce con
   mayúsculas, espacios de más o de menos y corchetes escapados (`[Drawing #1]`, `[drawing#2]`,
-  `[drawing #1]`), y al sacarlo de una línea no quedan restos (ni `##` ni viñetas huérfanas ni dobles
-  espacios). Un dibujo de escena **nunca se pierde** al reescribir:
+  `\[drawing #1\]`), y al sacarlo de una línea no quedan restos (ni `##` ni viñetas huérfanas; solo se
+  ajusta el hueco del propio marcador, el resto de la línea conserva sus espacios). Un texto con forma de
+  marcador que **ya estaba escrito en la sección original** («see [Drawing #1] of the spec») es del
+  usuario y no se consume. Un dibujo de escena **nunca se pierde** al reescribir:
   si el modelo omite su marcador (o solo lo escribe dentro de un fence) se **conserva al final de la
   sección** (cerrando antes un fence que el modelo dejara abierto, para que no quede dentro del código) — el modelo no puede recrearlo; borrarlo es cosa del usuario. Solo se tocan marcadores de
   dibujos que la sección original tiene de verdad: un número sin dibujo es texto del usuario y se queda;

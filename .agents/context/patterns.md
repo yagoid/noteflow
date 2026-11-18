@@ -4305,14 +4305,22 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   defecto ProseMirror reemplaza el nodo de una selección de nodo por lo que se escribe o se pega — con un
   dibujo al final de la sección, escribir lo borraba. El guard **mueve primero la selección** a un
   párrafo vacío justo debajo (`caretBesideDrawing`; reutiliza el que ya hubiera) en los eventos que
-  anuncian entrada — `handleKeyPress` (tecla imprimible), `paste` con contenido, `compositionstart` — y
-  deja que la entrada siga desde ahí; solo Backspace / Supr borran el dibujo. ⚠️ No basta con
+  anuncian entrada — `handleKeyPress` (tecla que escribe: no `Alt`+letra ni un carácter de control; AltGr
+  sí), `paste` con texto o HTML, `compositionstart` — y deja que la entrada siga desde ahí; solo Backspace / Supr borran el dibujo. ⚠️ No basta con
   `handleTextInput`: el plugin de **input rules de TipTap va siempre primero** en esa cadena y, con una
   selección de nodo, toma el texto de los bloques de ARRIBA como «texto antes del cursor»: una tecla que
   completa una regla (`*` tras «see *note», `#` + espacio…) sustituía ese rango y el dibujo con él. Con
   el cursor ya en su propio párrafo, las reglas solo ven ese párrafo (y siguen funcionando: `- ` crea una
-  lista debajo). Un pegado o una composición que al final no escriben nada no dejan el párrafo (se
-  retira); no actúa con el editor en solo lectura. Tests con las input rules reales en
+  lista debajo). **Sin temporizadores:** la posición del párrafo que crea el guard vive en el estado del
+  plugin (mapeada por cada transacción) y un `appendTransaction` lo retira cuando la selección sale de él
+  todavía vacío (pegado o composición que no escriben nada); crearlo y retirarlo quedan **fuera del
+  historial** (no dejan un Ctrl+Z que no deshace nada). ⚠️ Un `setTimeout` que lo retirase rompía el
+  pegado de imágenes: `insertImageFiles` (`Editor.tsx`) lee el fichero de forma **asíncrona** e inserta
+  después sobre la selección que haya entonces — con la selección de nodo ya restaurada, la imagen
+  sustituía al dibujo. Por eso los **ficheros** pegados o soltados no pasan por el guard: es la propia
+  inserción la que, justo antes de `setImage`, sale del dibujo seleccionado (`leaveSelectedDrawing`, en
+  `drawingCommands.ts`) — la regla para cualquier inserción que llegue de fuera de la entrada de
+  ProseMirror. No actúa con el editor en solo lectura. Tests con las input rules reales en
   `tests/lib/drawingSelectionGuard.test.ts`. **Bordes de la
   sección:** con el dibujo seleccionado, ↓/→ al final del documento y ↑/← al principio crean el párrafo
   que falta; `Ctrl+End` / `Ctrl+Home` pasan al otro lado de un dibujo final / inicial. Tras «Hecho» de un
@@ -4342,8 +4350,10 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   limita a su columna. Una ventana más estrecha que el `width` guardado solo lo recorta en pantalla
   (`min()` en CSS): el atributo no se reescribe. Asas: una en cada lado (`drawingWidthFromDrag` replica
   la geometría del CSS para que el asa siga al cursor; doble clic = quitar `width`) y la inferior para el
-  alto. Un arrastre solo cambia estado local: **una transacción al soltar** (un Ctrl+Z), y el SVG no se
-  regenera (su caché es por contenido). Alto: con `height`, fijo; sin él y sin `width`, el propio del
+  alto. Un arrastre solo cambia estado local: **una transacción al soltar** (un Ctrl+Z; `pointercancel`
+  termina el arrastre igual que `pointerup`), y el SVG no se regenera (su caché es por contenido). Un
+  tamaño escrito a mano de otra forma (`width=900`, `WIDTH="900"`) se lee igual y, al redimensionar, se
+  sustituye por la forma canónica: el marcador nunca queda con dos `width`. Alto: con `height`, fijo; sin él y sin `width`, el propio del
   dibujo hasta 360 px; sin él y con `width`, sigue la proporción del dibujo (`aspect-ratio`), así una
   tarjeta más ancha muestra el dibujo más grande. Sticky y vistas de solo lectura no cambian.
 - **Insertar:** `/draw` y el botón «Insert drawing» del toolbar (`EditorToolbar.tsx`, tras el del kanban)
@@ -4375,8 +4385,9 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
     OTRO dibujo en esa posición. Por eso la sesión guarda su destino **por identidad** (`DrawingTarget`:
     nota, sección, el bloque tal como se abrió y su ordinal entre idénticos — el editor se lo da al nodo
     en `editor.storage.drawingBlock.target`) y «Hecho» sigue este orden: (1) si el nodo vivo sigue siendo
-    exactamente el bloque abierto (`kind` + `attrs` + `body`) → `updateAttributes` (una transacción: un
-    solo Ctrl+Z); (2) si no, se escribe en la sección a través del store (`writeDrawingToSection` →
+    el bloque abierto (`kind` + `body`; los **atributos no son identidad**: redimensionado mientras tanto
+    desde otra ventana sigue siendo el mismo dibujo, y lo que se escribe conserva los `attrs` que el
+    bloque tiene AHORA, por las tres vías) → `updateAttributes` (una transacción: un solo Ctrl+Z); (2) si no, se escribe en la sección a través del store (`writeDrawingToSection` →
     `replaceDrawing` sobre el markdown, tras `flushPendingEdits`), que solo sustituye el bloque que sigue
     siendo el abierto; (3) si ya no existe o cambió, **se pregunta** (`saveDrawingElsewhere` → `ask`):
     insertarlo como bloque nuevo al final de su sección, o —si la sección ya no existe— copiar su

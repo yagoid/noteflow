@@ -15,8 +15,13 @@ export const DRAWING_MAX_HEIGHT = 1600
 /** Height cap of a drawing with no stored size. */
 export const DRAWING_DEFAULT_MAX_HEIGHT = 360
 
+// A size as someone may have typed it in the marker: any case, quoted or not
+// (`width=900`, `WIDTH="900"`). Groups: 1 = leading space, 2 / 3 / 4 = the value.
+const looseAttr = (key: string) => new RegExp(`(^|\\s)${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"']+))`, 'gi')
+
 function storedPx(attrs: string, key: string, min: number, max: number): number | null {
-  const raw = getKanbanAttr(attrs, key)
+  const loose = looseAttr(key).exec(attrs)
+  const raw = getKanbanAttr(attrs, key) ?? (loose ? loose[2] ?? loose[3] ?? loose[4] ?? null : null)
   if (raw === null || !/^\d+(?:\.\d+)?$/.test(raw.trim())) return null
   const n = Math.round(Number(raw))
   return n >= min ? Math.min(n, max) : null
@@ -29,7 +34,14 @@ export const storedDrawingHeight = (attrs: string) => storedPx(attrs, 'height', 
 
 /** The marker attributes with a size set (null removes it); every other attribute untouched. */
 export function withDrawingSize(attrs: string, key: 'width' | 'height', px: number | null): string {
-  return setKanbanAttr(attrs, key, px === null ? null : String(Math.round(px)))
+  // Any hand-written spelling of the same attribute goes first (all but the canonical
+  // `key="…"`, edited in place): the marker never ends up with two of them.
+  let canonical = false
+  const cleaned = attrs.replace(looseAttr(key), (match: string, lead: string) => {
+    if (!canonical && match.slice(lead.length).startsWith(`${key}="`)) { canonical = true; return match }
+    return ''
+  }).trim()
+  return setKanbanAttr(cleaned, key, px === null ? null : String(Math.round(px)))
 }
 
 export interface WidthDrag {

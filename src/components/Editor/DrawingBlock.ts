@@ -139,38 +139,62 @@ export const DrawingBlock = Node.create({
   // event (it only runs when no rule fired).
   addProseMirrorPlugins() {
     type View = import('@tiptap/pm/view').EditorView
-    /** The paragraph the guard made for input that then never came (removed again). */
-    let made: { view: View; pos: number } | null = null
+    // The paragraph the guard made for input that is about to come: its position, kept in
+    // the plugin state and mapped through every transaction. If the selection leaves it
+    // while it is still empty — a paste that inserted nothing, a cancelled composition, a
+    // key that typed nothing — it is taken out again (an empty paragraph before a list or a
+    // table would change the note's markdown). No timers: whatever inserts something later
+    // (an image read asynchronously) still finds the caret in it. Making and removing it
+    // stay out of the undo history, so neither leaves a step that undoes nothing.
+    const guardKey = new PluginKey<number | null>('drawingBlockGuard')
+    const emptyParagraphAt = (doc: import('@tiptap/pm/model').Node, pos: number | null): boolean => {
+      if (pos === null || pos < 0 || pos > doc.content.size) return false
+      const node = doc.nodeAt(pos)
+      return !!node && node.type.name === 'paragraph' && node.content.size === 0
+    }
     const moveBelow = (view: View): boolean => {
       const pos = selectedDrawingPos(view.state.selection)
       if (pos === null || !view.editable) return false
       const before = view.state.doc.childCount
-      view.dispatch(caretBesideDrawing(view.state.tr, pos, 'after', '', true))
-      made = view.state.doc.childCount > before ? { view, pos: view.state.selection.from - 1 } : null
+      const tr = caretBesideDrawing(view.state.tr, pos, 'after', '', true)
+      const madeOne = tr.doc.childCount > before
+      if (madeOne) tr.setMeta(guardKey, tr.selection.from - 1).setMeta('addToHistory', false)
+      view.dispatch(tr)
       return true
     }
-    /** Nothing was written into the paragraph the guard made: take it out again (an empty
-     *  paragraph before a list or a table would change the note's markdown). */
-    const dropIfUnused = () => {
-      const m = made
-      made = null
-      if (!m || m.view.isDestroyed) return
-      const { state } = m.view
-      const node = state.doc.nodeAt(m.pos)
-      if (!node || node.type.name !== 'paragraph' || node.content.size > 0) return
-      if (state.selection.from !== m.pos + 1 || !state.selection.empty) return
-      const drawing = m.pos > 0 ? state.doc.resolve(m.pos).nodeBefore : null
-      if (drawing?.type.name !== DRAWING_NODE_NAME) return
-      const tr = state.tr.delete(m.pos, m.pos + node.nodeSize)
-      m.view.dispatch(tr.setSelection(NodeSelection.create(tr.doc, m.pos - drawing.nodeSize)).setMeta('addToHistory', false))
-    }
     return [
-      new Plugin({
-        key: new PluginKey('drawingBlockGuard'),
+      new Plugin<number | null>({
+        key: guardKey,
+        state: {
+          init: () => null,
+          apply(tr, made, _old, state) {
+            const set = tr.getMeta(guardKey) as number | null | undefined
+            if (set !== undefined) return set
+            if (made === null) return null
+            const pos = tr.mapping.map(made)
+            const node = pos <= state.doc.content.size ? state.doc.nodeAt(pos) : null
+            if (!node || node.type.name !== 'paragraph') return null
+            // Written into and left: it is the user's paragraph now.
+            const inside = state.selection.from >= pos && state.selection.to <= pos + node.nodeSize
+            return node.content.size > 0 && !inside ? null : pos
+          },
+        },
+        appendTransaction(_trs, _old, state) {
+          const made = guardKey.getState(state) ?? null
+          if (!emptyParagraphAt(state.doc, made) || made === null) return null
+          const node = state.doc.nodeAt(made)!
+          if (state.selection.from >= made && state.selection.to <= made + node.nodeSize) return null
+          return state.tr.delete(made, made + node.nodeSize).setMeta(guardKey, null).setMeta('addToHistory', false)
+        },
         props: {
-          // A printable key (ProseMirror only calls this for those): before any text input
-          // handling, input rules included.
-          handleKeyPress: (view) => { moveBelow(view); made = null; return false },
+          // A key that types a character (not Alt+letter, not a control character): before
+          // any text input handling, input rules included. AltGr — Ctrl+Alt, how many
+          // layouts type @ # [ — does type.
+          handleKeyPress: (view, event) => {
+            if (event.charCode < 32 || (event.altKey && !event.ctrlKey) || event.metaKey) return false
+            moveBelow(view)
+            return false
+          },
           handleTextInput: (view, _from, _to, text) => {
             const pos = selectedDrawingPos(view.state.selection)
             if (pos === null || !view.editable) return false
@@ -179,17 +203,16 @@ export const DrawingBlock = Node.create({
           },
           handleDOMEvents: {
             // Before the editor's own paste / IME handling, which then act on the caret in
-            // the new paragraph instead of on the selected node. Only when there is
-            // something to put there; a paste or a composition that ends up writing
-            // nothing leaves no paragraph behind.
+            // the new paragraph instead of on the selected node. Text and HTML only: pasted
+            // or dropped FILES (images) are inserted by Editor.tsx after reading them, and
+            // it steps off a selected drawing itself at that moment (leaveSelectedDrawing).
             paste: (view, event) => {
               const data = (event as ClipboardEvent).clipboardData
-              const hasContent = !!data && (data.files.length > 0 || Array.from(data.types).length > 0)
-              if (hasContent && moveBelow(view)) setTimeout(dropIfUnused, 0)
+              const types = data ? Array.from(data.types) : []
+              if (types.some((t) => t === 'text/plain' || t === 'text/html')) moveBelow(view)
               return false
             },
             compositionstart: (view) => { moveBelow(view); return false },
-            compositionend: () => { setTimeout(dropIfUnused, 0); return false },
           },
         },
       }),

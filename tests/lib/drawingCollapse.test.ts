@@ -136,6 +136,26 @@ for (const [name, impl] of [['renderer (drawingCollapse.ts)', renderer], ['main 
       expect(impl.restoreCollapsedDrawings(original, '  - nested [drawing #1]   item\n\n[drawing #2]')).toBe(`  - nested item\n\n${SCENE}\n\n${second}`)
     })
 
+    it('only the gap of the marker is tidied: the rest of the line keeps its spacing, inline code included', () => {
+      expect(impl.restoreCollapsedDrawings(original, 'Run `a  b`  then [drawing #1] see   `x   y`\n\n[drawing #2]'))
+        .toBe(`Run \`a  b\`  then see   \`x   y\`\n\n${SCENE}\n\n${second}`)
+      expect(impl.restoreCollapsedDrawings(original, 'col  one    col two [drawing #1]\n\n[drawing #2]'))
+        .toBe(`col  one    col two\n\n${SCENE}\n\n${second}`)
+    })
+
+    it('a marker-looking text the section already had is the user\'s: it stays, and the drawings are still kept', () => {
+      const own = `See [Drawing #1] of the spec\n\n${SCENE}\n\nAnd \\[drawing #2\\] too\n\n${second}`
+      const view = impl.collapseDrawings(own, 'marker')
+      // Untouched by the model: exactly what it was.
+      expect(impl.restoreCollapsedDrawings(own, view)).toBe(own)
+      // The model drops the real markers: the literals are not taken for them.
+      expect(impl.restoreCollapsedDrawings(own, 'See [Drawing #1] of the spec\n\nAnd \\[drawing #2\\] too'))
+        .toBe(`See [Drawing #1] of the spec\n\nAnd \\[drawing #2\\] too\n\n${SCENE}\n\n${second}`)
+      // Another spelling of the same number, not in the original, is a marker as always.
+      expect(impl.restoreCollapsedDrawings(own, 'See [Drawing #1] of the spec\n\n[drawing #1]\n\n[drawing #2]'))
+        .toBe(`See [Drawing #1] of the spec\n\n${SCENE}\n\n${second}`)
+    })
+
     it('a marker inside a code fence of the new text is not consumed there: the drawing is kept at the end', () => {
       const next = `Doc\n\n${F}\n[drawing #1: example]\n${F}\n\n[drawing #2]`
       expect(impl.restoreCollapsedDrawings(original, next)).toBe(`Doc\n\n${F}\n[drawing #1: example]\n${F}\n\n${second}\n\n${SCENE}`)

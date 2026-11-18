@@ -81,6 +81,18 @@ export function caretBesideDrawing(tr: Transaction, pos: number, side: 'after' |
   return tr.setSelection(TextSelection.create(tr.doc, pos + 1 + text.length))
 }
 
+/**
+ * Before inserting something at the selection from outside ProseMirror's own input (an
+ * image read from a pasted or dropped file): if a drawing is node-selected, the insert
+ * would REPLACE it — step into a paragraph right below it first. True if it moved.
+ */
+export function leaveSelectedDrawing(editor: Editor): boolean {
+  const pos = selectedDrawingPos(editor.state.selection)
+  if (pos === null || editor.isDestroyed) return false
+  editor.view.dispatch(caretBesideDrawing(editor.state.tr, pos, 'after', '', true))
+  return true
+}
+
 /** The drawing node the selection is on as a whole (a node selection), if any. */
 export function selectedDrawingPos(selection: unknown): number | null {
   return selection instanceof NodeSelection && selection.node.type.name === DRAWING_NODE_NAME ? selection.from : null

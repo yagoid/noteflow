@@ -49,8 +49,15 @@ describe('replaceDrawing', () => {
     const next = data([el('mine', 3)])
     expect(replaceDrawing(md.replace(el('a', 1), el('a', 77)), o, next)).toBeNull() // edited remotely
     expect(replaceDrawing(`Intro\n\nMiddle\n\n${B}`, o, next)).toBeNull()           // deleted
-    expect(replaceDrawing(md.replace('<!-- drawing -->', '<!-- drawing height="90" -->'), o, next)).toBeNull() // attributes changed
     expect(replaceDrawing('', o, next)).toBeNull()
+  })
+
+  it('a block only resized meanwhile is still the same drawing: written, with the size it has now', () => {
+    const resized = md.replace('<!-- drawing -->', '<!-- drawing width="900" height="90" -->')
+    const out = replaceDrawing(resized, opened(md, 0), data([el('a', 1), el('mine', 3)]))!
+    expect(out).toContain(scene([el('a', 1), el('mine', 3)], 'width="900" height="90"'))
+    expect(out).not.toContain('<!-- drawing -->')
+    expect(countDrawing(resized, opened(md, 0))).toBe(1)
   })
 
   it('is not fooled by another drawing taking its place in the document', () => {

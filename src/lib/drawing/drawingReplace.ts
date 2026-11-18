@@ -11,10 +11,13 @@ import {
 } from './drawingBlock'
 import { mapDrawingBlocks } from './drawingCollapse'
 
+// Identity is the variant and the content. The marker attributes (width, height) are not
+// part of it: resized meanwhile from another window, it is still the same drawing — and
+// what is written keeps the attributes the block has NOW.
 const sameBlock = (block: DrawingBlock, data: DrawingHtmlData) =>
-  block.kind === data.kind && block.attrs === data.attrs && drawingBodyLines(block).join('\n') === data.body
+  block.kind === data.kind && drawingBodyLines(block).join('\n') === data.body
 
-/** How many drawing blocks of `md` are exactly `opened` (same variant, attributes and content). */
+/** How many drawing blocks of `md` are `opened` (same variant and content). */
 export function countDrawing(md: string, opened: DrawingHtmlData): number {
   let count = 0
   mapDrawingBlocks(md, (block) => { if (sameBlock(block, opened)) count++; return null })
@@ -22,7 +25,8 @@ export function countDrawing(md: string, opened: DrawingHtmlData): number {
 }
 
 /**
- * `md` with the block that is still exactly `opened` replaced by `next` (null = removed),
+ * `md` with the block that is still `opened` replaced by `next` (null = removed) — with
+ * the attributes that block has now, not the ones of `next` —,
  * or null when there is no such block any more — it was changed or deleted meanwhile, and
  * nothing may be written over whatever is there now. With several identical blocks,
  * `ordinal` (0-based, among the identical ones) says which; past the last, the last.
@@ -36,7 +40,7 @@ export function replaceDrawing(md: string, opened: DrawingHtmlData, next: Drawin
     if (!sameBlock(block, opened)) return null
     seen++
     if (seen !== target) return null
-    return next ? drawingHtmlDataToMarkdown(next).split('\n') : []
+    return next ? drawingHtmlDataToMarkdown({ ...next, attrs: block.attrs }).split('\n') : []
   })
 }
 
