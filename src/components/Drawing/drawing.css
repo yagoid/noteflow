@@ -1,0 +1,47 @@
+/* Excalidraw inside NoteFlow (drawing overlay). Loaded with the lazy overlay chunk.
+   Maps Excalidraw's own tokens to the active NoteFlow theme; the doubled class beats
+   `.excalidraw.theme--dark` whatever the order the two stylesheets load in. */
+.nf-drawing {
+  /* The canvas itself is transparent (viewBackgroundColor), so this is the paper. */
+  background: rgb(var(--bg-editor));
+}
+
+/* (Excalidraw mounts its dialogs in <body>, outside `.nf-drawing`: its modal container
+   gets the same tokens. It only exists while the canvas is open.) */
+.nf-drawing .excalidraw.excalidraw,
+.excalidraw.excalidraw-modal-container {
+  --ui-font: var(--app-font-family), system-ui, sans-serif;
+
+  /* Accent: selected tool, primary buttons, focus rings, links. */
+  --color-primary: rgb(var(--accent));
+  --color-primary-darker: color-mix(in srgb, rgb(var(--accent)) 86%, rgb(var(--text)));
+  --color-primary-darkest: color-mix(in srgb, rgb(var(--accent)) 72%, rgb(var(--text)));
+  --color-primary-hover: color-mix(in srgb, rgb(var(--accent)) 86%, rgb(var(--text)));
+  --color-primary-light: rgb(var(--accent) / 0.22);
+  --color-primary-light-darker: rgb(var(--accent) / 0.32);
+  --color-brand-hover: color-mix(in srgb, rgb(var(--accent)) 86%, rgb(var(--text)));
+  --color-brand-active: color-mix(in srgb, rgb(var(--accent)) 72%, rgb(var(--text)));
+  --color-surface-primary-container: rgb(var(--accent) / 0.22);
+  --color-on-primary-container: rgb(var(--text));
+  --color-selection: rgb(var(--accent));
+  --select-highlight-color: rgb(var(--accent));
+
+  /* Surfaces and ink. */
+  --default-bg-color: rgb(var(--bg-editor));
+  --island-bg-color: rgb(var(--bg-2));
+  --color-surface-lowest: rgb(var(--bg-1));
+  --color-surface-low: rgb(var(--bg-2));
+  --color-surface-mid: rgb(var(--bg-2));
+  --color-surface-high: rgb(var(--bg-3));
+  --color-on-surface: rgb(var(--text));
+}
+
+/* Cosmetic only: the triggers of what DrawingOverlay.closeForbiddenUi() undoes anyway
+   (Excalidraw 0.18 has no prop for them) — the library sidebar, and in the "more tools"
+   menu the web embed and the Mermaid dialog (both carry this test id) with the
+   "Generate" heading above the latter. */
+.nf-drawing .excalidraw .default-sidebar-trigger,
+.nf-drawing .excalidraw [data-testid="toolbar-embeddable"],
+.nf-drawing .excalidraw .App-toolbar__extra-tools-dropdown div[style*="font-weight"] {
+  display: none;
+}

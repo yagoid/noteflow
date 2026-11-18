@@ -5,6 +5,7 @@ exports.sanitizeContextRequest = sanitizeContextRequest;
 exports.stripBase64 = stripBase64;
 exports.buildContextBlocks = buildContextBlocks;
 exports.describeOpenNote = describeOpenNote;
+const drawingText_1 = require("../drawingText");
 exports.CONTEXT_ITEM_MAX_CHARS = 12000;
 exports.CONTEXT_TOTAL_MAX_CHARS = 40000;
 exports.CONTEXT_MAX_ITEMS = 30;
@@ -42,8 +43,10 @@ function sanitizeContextRequest(raw) {
     }
     return out;
 }
+/** What a model sees of a section: pasted images as `[image]`, scene drawings as their
+ *  one-line `[drawing #n: …]` marker (drawingText.ts) — never base64 nor scene JSON. */
 function stripBase64(text) {
-    return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]');
+    return (0, drawingText_1.collapseDrawings)(text, 'marker').replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]');
 }
 const TRUNCATED_MARK = '\n[…truncated — this section is longer than shown: do not rewrite it whole with update_section]';
 function clip(text, max) {

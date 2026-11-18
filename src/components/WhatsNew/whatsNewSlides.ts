@@ -13,6 +13,7 @@ import {
   ListChecks,
   Lock,
   Palette,
+  PenTool,
   PanelsTopLeft,
   Rows3,
   Sparkles,
@@ -98,6 +99,7 @@ export const WHATS_NEW_SLIDES: WhatsNewSlide[] = [
   { id: 'snippets', since: '2.2.0', i18nKey: 'snippets', icon: Stamp, accent: 'accent-3', keys: [] },
   { id: 'linked-files', since: '2.3.0', i18nKey: 'linked-files', icon: FileSymlink, accent: 'cyan', keys: [] },
   { id: 'checked-tasks', since: '2.3.0', i18nKey: 'checked-tasks', icon: ListChecks, accent: 'accent-2', keys: [] },
+  { id: 'drawings', since: '2.3.0', i18nKey: 'drawings', icon: PenTool, accent: 'accent', keys: [] },
   {
     id: 'more', since: '2.2.0', i18nKey: 'more', icon: Wand2, accent: 'accent-2', keys: [],
     extras: [

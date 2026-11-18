@@ -77,6 +77,8 @@ import {
 import { secondInstanceRelaunchArgs } from './relaunchArgs'
 import { absolutizeFileArgs, launchFilePaths, openTargets, uniqueOpenPaths, type OpenTargetOptions } from './openWithArgs'
 import { rendererJsFlags } from './v8Flags'
+import { externalUrlToOpen, navigationAllowed } from './navigationGuard'
+import { collapseDrawings } from './drawingText'
 import {
   parseActivityLog,
   pruneActivityLog,
@@ -4003,7 +4005,7 @@ const CHAT_SYSTEM_BASE =
 const chatAborts = new Map<string, AbortController>()
 
 function stripBase64(text: string): string {
-  return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]')
+  return collapseDrawings(text, 'marker').replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]')
 }
 
 function findNoteDirPath(noteId: string, dirs: string[]): string | null {
@@ -4131,8 +4133,9 @@ function chatContextGuide(allNotes: boolean): string {
     'When the user asks you to change the open note or a shared section, just do it with the tools, without ' +
     'asking for confirmation, then briefly say what you changed: the editor shows your edits live and the ' +
     'user can undo each one from the chat. update_section REPLACES the whole section: send its complete new ' +
-    'content and keep everything the user did not ask to change (images appear as [image] placeholders — ' +
-    'keep them where they are; the app restores them). Never rewrite a section marked as truncated with ' +
+    'content and keep everything the user did not ask to change (images appear as [image] placeholders and ' +
+    'hand-made drawings as a `[drawing #n: …]` line — keep them where they are; the app restores them, and ' +
+    'you cannot modify nor delete such a drawing). ' + agentTools.DRAWING_HOWTO + ' Never rewrite a section marked as truncated with ' +
     'update_section (the part you cannot see would be lost): add a section or tell the user instead.'
   )
 }
@@ -5566,6 +5569,30 @@ if (!gotTheLock) {
 if (gotTheLock) {
   app.commandLine.appendSwitch('js-flags', rendererJsFlags(app.commandLine.getSwitchValue('js-flags')))
 }
+
+// No window of the app ever shows remote content (navigationGuard.ts). The renderer opens
+// links through `app:open-url`; these hooks catch what bypasses it — `target="_blank"` /
+// `window.open()` of a third-party component (the drawing canvas) or a plain `<a href>` in
+// rendered markup. On every webContents, so new kinds of window are covered by default.
+app.on('web-contents-created', (_event, contents) => {
+  contents.setWindowOpenHandler(({ url }) => {
+    const external = externalUrlToOpen(url)
+    if (external) {
+      shell.openExternal(external).catch((err) => {
+        console.error('Failed to open external URL:', err)
+      })
+    } else {
+      console.warn('[Security] Blocked window.open:', url)
+    }
+    return { action: 'deny' }
+  })
+  contents.on('will-navigate', (event, url) => {
+    // (The detached DevTools of `npm run dev` is a webContents too: its own business.)
+    if (contents.getURL().startsWith('devtools://') || navigationAllowed(contents.getURL(), url)) return
+    event.preventDefault()
+    console.warn('[Security] Blocked navigation:', url)
+  })
+})
 
 app.whenReady().then(async () => {
   // Losing the lock means another instance already owns the app: quit was

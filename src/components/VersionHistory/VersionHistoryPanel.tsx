@@ -19,7 +19,7 @@ import { useLanguageStore } from '../../stores/languageStore'
 import { flushPendingEdits } from '../../lib/pendingEdits'
 import { sameContent } from '../../lib/externalContentSync'
 import { expireForcedRestore, markForcedRestore } from '../../lib/sectionRestore'
-import { OWN_KEYS_PROPS } from '../../lib/keyScope'
+import { OWN_KEYS_PROPS, ownsKeys } from '../../lib/keyScope'
 import {
   decideHistoryPanelState,
   formatVersionDate,
@@ -229,7 +229,7 @@ export function VersionHistoryPanel({ note, sectionId, onClose, onRestored }: Ve
     }
   })
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => documentKeyRef.current(e)
+    const onKey = (e: KeyboardEvent) => { if (!ownsKeys(e.target)) documentKeyRef.current(e) }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [])

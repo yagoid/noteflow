@@ -601,7 +601,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
-      if (e.key === 'Delete' && !isEditing) {
+      // (ownsKeys: a surface that owns the keyboard — the drawing overlay — uses Delete itself.)
+      if (e.key === 'Delete' && !isEditing && !ownsKeys(e.target)) {
         e.preventDefault()
         openDeleteNoteModal()
       }

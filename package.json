@@ -66,9 +66,14 @@
     "three": "^0.169.0",
     "zustand": "^5.0.11"
   },
+  "overrides": {
+    "mermaid": "11.12.1"
+  },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
     "@eslint/js": "^9.39.1",
+    "@excalidraw/excalidraw": "0.18.1",
+    "@excalidraw/mermaid-to-excalidraw": "2.2.2",
     "@types/adm-zip": "^0.5.8",
     "@types/better-sqlite3": "^7.6.13",
     "@types/d3-force": "^3.0.10",

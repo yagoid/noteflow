@@ -39,6 +39,7 @@ import { pendingForcedRestore } from '../../lib/sectionRestore'
 import { restoreEditorHistory, snapshotEditorHistory } from '../../lib/editorHistory'
 import { canKeepUndoHistory, richUndoHistory } from './undoHistory'
 import { useT } from '../../i18n/useT'
+import { DRAWING_NODE_NAME, leaveSelectedDrawing } from './drawingCommands'
 
 /**
  * Replaces the editor's document with `doc` (external content) without emitting
@@ -442,6 +443,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
     // `editor` is a dep because the scroller only mounts once the editor exists.
   }, [showToc, editor])
 
+  // Tell the drawing node which section this editor shows (DrawingBlock.ts storage): a
+  // drawing session saves there by identity if this editor is gone when it ends.
+  useEffect(() => {
+    const storage = (editor?.storage as Record<string, { target?: unknown } | undefined> | undefined)?.[DRAWING_NODE_NAME]
+    if (storage) storage.target = noteId ? { noteId, sectionId: currentSectionId ?? null } : null
+  }, [editor, noteId, currentSectionId])
+
   // Open links in external browser on click
   useEffect(() => {
     if (!editor) return
@@ -505,10 +513,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
         const saved = await window.noteflow.linkedSaveAsset(noteId, file.name, file.type, new Uint8Array(await file.arrayBuffer()))
         if (!saved.ok) { console.warn('[linked] image not saved:', saved.error); continue }
         if (editor.isDestroyed) return
+        leaveSelectedDrawing(editor)
         editor.chain().focus().setImage({ src: saved.relPath, alt: file.name.replace(/\.[^.]*$/, '') }).run()
         continue
       }
       const src = await fileToBase64(file)
+      if (editor.isDestroyed) return
+      // The file was read asynchronously: whatever is selected NOW must not be replaced if
+      // it is a drawing (pasted or dropped with the block selected) — the image goes below.
+      leaveSelectedDrawing(editor)
       editor.chain().focus().setImage({ src, alt: file.name }).run()
     }
   }, [editor, plain, noteId])

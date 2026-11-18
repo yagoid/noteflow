@@ -60,7 +60,9 @@ const { ID, demoContent, seedNotes } = require('./lib/demo-notes.cjs')
 
 const REPO = path.resolve(__dirname, '..')
 const CLIP_IDS = ['sections', 'kanban', 'links-palette', 'quick-capture', 'windows', 'brain', 'ai', 'agents', 'sync',
-  'section-map', 'floating-sidebar', 'snippets', 'linked-files', 'checked-tasks', 'more']
+  'section-map', 'floating-sidebar', 'snippets', 'linked-files', 'checked-tasks', 'drawings', 'more']
+// 'drawings' has no take in CLIPS yet (its slide shows the animated fallback): it is listed so the
+// seeded profile counts the slide as seen; `--only drawings` says it is not implemented.
 const OUT_W = 960
 const OUT_H = 600 // every clip is 16:10 so the tour modal never jumps
 

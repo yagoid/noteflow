@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Guía del CLI de NoteFlow para agentes de IA. Úsala cuando necesites leer, crear, editar u organizar las notas del usuario (secciones, grupos, carpetas) desde la terminal, sincronizarlas con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 2.16.0
+version: 2.16.1
 ---
 
 # NoteFlow CLI — guía para agentes
@@ -206,6 +206,34 @@ noteflow add "- [ ] Revisar logs" --title "Proyecto Alpha" --section "Tasks"
 noteflow set "Proyecto Alpha" "Resumen" --file resumen.md --create  # sección nueva
 git log --oneline -5 | noteflow add --stdin --section "Log" --create --raw
 ```
+
+## Dibujos y diagramas
+
+Una sección puede llevar **dibujos**: un bloque de markdown que la app de escritorio pinta. Para **añadir un
+diagrama** escribe un bloque con el fuente **Mermaid** — tres partes, cada una en su línea, en columna 0
+(nunca indentado, ni dentro de una lista o una cita) y con una línea en blanco antes y después:
+
+````markdown
+<!-- drawing -->
+```mermaid
+flowchart TD
+  A[Idea] --> B{¿Merece la pena?}
+  B -- Sí --> C[Escribir la nota]
+```
+<!-- /drawing -->
+````
+
+- Es contenido **multilínea**: pásalo con `--file` o `--stdin` (nunca como argumento; ver *Windows* arriba).
+  `noteflow add --file diagrama.md --title "<nota>" --section "<sección>"`.
+- Quedan **editables como formas** en la app: `flowchart`, `sequenceDiagram`, `classDiagram`, `erDiagram` y
+  `stateDiagram`. El resto de tipos de Mermaid (gantt, pie, mindmap…) se muestran como imagen.
+- Un bloque Mermaid lo puedes **reescribir** libremente (es texto).
+- Si el fence es `excalidraw` en vez de `mermaid`, es un dibujo que el usuario hizo o retocó a mano: su
+  contenido es la escena, **un objeto JSON por línea**. **No lo edites ni lo regeneres**: consérvalo byte a
+  byte (al reescribir la sección con `set`, cópialo tal cual; mejor aún, edita el `.md` in situ). Un bloque
+  roto deja de verse como dibujo y aparece como texto y código.
+- `read`, `show` y `search` devuelven el markdown tal cual: en una sección con un dibujo `excalidraw` verás (y
+  buscarás en) ese JSON. Ignóralo como contenido: lo que el dibujo *dice* son los `"text"` de sus elementos.
 
 ## Editar una sección
 

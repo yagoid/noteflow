@@ -10,6 +10,7 @@ import { NoteEditor } from './Editor/NoteEditor'
 import { useT } from '../i18n/useT'
 import { decryptSections } from '../lib/cryptoUtils'
 import { ownsKeys } from '../lib/keyScope'
+import { DrawingOverlayHost } from './Drawing/DrawingOverlayHost'
 import type { Note, NoteSection } from '../types'
 
 // The window's single pane. Fixed: there is exactly one editor per section window.
@@ -200,6 +201,8 @@ export function SectionWindowApp() {
           <NoteEditor noteId={note.id} paneId={SECTION_WINDOW_PANE_ID} standalone />
         )}
       </main>
+      {/* Drawing blocks can be edited here too (the overlay, lazy-loaded on first use). */}
+      <DrawingOverlayHost />
     </div>
   )
 }

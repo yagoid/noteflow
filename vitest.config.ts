@@ -10,5 +10,8 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     include: ['tests/**/*.test.ts'],
+    // Excalidraw (tests/lib/drawingExcalidrawRoundTrip.test.ts) imports JSON and CSS the
+    // way a bundler resolves them: let Vite transform it instead of Node loading it raw.
+    server: { deps: { inline: [/@excalidraw\//, 'open-color'] } },
   },
 })

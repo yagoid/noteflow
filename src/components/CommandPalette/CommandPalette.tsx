@@ -15,6 +15,7 @@ import { tf, plural } from '../../i18n/format'
 import { escapeRegExp, getNoteSearchIndex, normalize } from '../../lib/searchUtils'
 import { modKey } from '../../lib/platform'
 import { requestLinkFile } from '../LinkedNote/linkedActions'
+import { ownsKeys } from '../../lib/keyScope'
 
 function HighlightText({ text, query }: { text: string; query: string }) {
   const trimmed = query.trim()
@@ -95,7 +96,7 @@ export function CommandPalette() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return
+      if (e.defaultPrevented || ownsKeys(e.target)) return
       if (e.key === 'Escape' && commandPaletteOpen) {
         if (mode !== 'search') {
           setMode('search')

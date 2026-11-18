@@ -886,6 +886,7 @@ En ambos modos el `.md` de la sección guarda markdown (el editor serializa con 
 | Lista numerada | `1. item` | Toolbar |
 | Lista de tareas | `- [ ] tarea` | Toolbar |
 | Tablero kanban | `<!-- kanban -->` … `<!-- /kanban -->` | `/kanban` · Toolbar |
+| Dibujo | `<!-- drawing -->` + fence `mermaid` o `excalidraw` + `<!-- /drawing -->` | `/draw` |
 | Cita / Blockquote | `> texto` | Toolbar |
 | Tabla | Pipe-table GFM (`\| a \| b \|` + `\|---\|---\|`) | `/table` · Toolbar (selector de tamaño; menú contextual para filas/columnas) |
 | Link | `[texto](url)` | Toolbar |
@@ -1185,6 +1186,56 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - La búsqueda en la nota (`Ctrl+F`) también encuentra y resalta texto dentro de las tarjetas y los
   títulos de columna. Los previews de sección (hover, vistas de grupo/nota) y el chat de IA lo
   muestran como un mini tablero de solo lectura.
+
+### Dibujo dentro de la nota (Excalidraw)
+- En el editor en **modo markdown**, el botón **Insertar dibujo** de la toolbar (tras el del kanban) o `/draw` (también `/drawing`, `/canvas`, `/dibujo`, `/lienzo`,
+  `/excalidraw`, en cualquier idioma) inserta un dibujo y abre el **lienzo** a pantalla completa
+  (Excalidraw: formas, flechas, texto, lápiz; sin imágenes, sin librería online, sin incrustar webs ni
+  IA). **Hecho** (o `Ctrl+Shift+Enter`) guarda y cierra; **Cancelar** cierra y, si hubo cambios, pregunta
+  antes de descartarlos. `Esc` es del lienzo (deseleccionar, salir de una herramienta), no lo cierra. Un
+  dibujo nuevo que se cierra vacío desaparece de la nota.
+- En la nota el dibujo se ve como una **tarjeta con su vista previa** (se genera al mostrarse, no se
+  guarda ninguna imagen). Para editarlo: **doble clic**, el botón **Editar** de la tarjeta (aparece al
+  pasar el ratón o con el bloque seleccionado) o `Enter` con el bloque seleccionado. Un clic lo
+  **selecciona** (borde de acento): `Backspace`/`Supr` lo borran y `Ctrl+Z` lo devuelve. Escribir o pegar
+  con el dibujo seleccionado **no lo sustituye**: el texto va a un párrafo nuevo debajo. Si el dibujo es lo
+  último (o lo primero) de la sección, `↓` / `↑` con él seleccionado o `Ctrl+End` / `Ctrl+Home` dejan el
+  cursor al otro lado. El asa del borde inferior cambia el **alto** de la vista previa
+  y las de los lados el **ancho**: más ancha que la columna de lectura, la tarjeta sobresale centrada por
+  los dos márgenes (como las imágenes) hasta el ancho del editor, y el dibujo se ve más grande; doble clic
+  en un asa lateral vuelve al ancho del texto. Cada cambio de tamaño es un solo paso de `Ctrl+Z`.
+- Abrir el lienzo y cerrarlo sin cambiar nada **no modifica la nota** (ni un byte).
+- **Diagramas Mermaid:** un bloque escrito como texto Mermaid (lo que escriben la IA o el CLI, o tú en
+  modo texto) se ve dibujado. Se puede abrir en el lienzo: mientras no cambies nada sigue siendo Mermaid;
+  si lo cambias y pulsas Hecho pasa a ser un dibujo y deja de poder editarse como texto (el lienzo lo
+  avisa). Los tipos que Mermaid solo sabe dibujar como una imagen (gantt, pie, mindmap, journey,
+  gitGraph, timeline) se muestran pero **no se pueden editar como dibujo**: se cambia su texto en modo
+  texto. Si el Mermaid no es válido, la tarjeta muestra el código y el error; el bloque no se toca.
+- En **modo texto** se ve tal cual es en disco: dos marcadores `<!-- drawing -->` / `<!-- /drawing -->`
+  alrededor de un bloque de código `mermaid` (el texto) o `excalidraw` (la escena, un elemento por
+  línea). Si ese texto se rompe (p. ej. un conflicto de sync dentro), deja de ser un dibujo y se ve como
+  texto y código normales, con todo su contenido; al arreglarlo vuelve a ser un dibujo.
+- **Dónde se puede editar:** ventana principal y ventana de sección. En las **sticky** y en las vistas de
+  solo lectura (vista de nota, tarjeta de vista previa, vista de contenido, historial de versiones, chat)
+  el dibujo se muestra como su **texto** (etiquetas y conexiones «A → B», o el Mermaid), sin imagen. En
+  notas vinculadas (Markdown plano) el bloque es texto y código, como cualquier otra sintaxis propia.
+- **Búsqueda:** un dibujo se busca por lo que dice (sus etiquetas y conexiones, o el texto Mermaid), en la
+  búsqueda de la nota (`Ctrl+F`: el bloque entero se resalta como coincidencia) y en la global (sidebar,
+  paleta, vista de contenido). Nunca por sus datos internos: buscar un color o un identificador no lo
+  encuentra. El recuento de palabras cuenta sus etiquetas, y nada de un dibujo crea `#tags` ni alarmas.
+- **IA:** el asistente ve un dibujo hecho a mano como una línea `[drawing #1: etiquetas ; A → B]` (no puede
+  modificarlo ni borrarlo: si reescribe la sección y se lo deja fuera, el dibujo se conserva al final de
+  la sección) y un
+  diagrama Mermaid como su texto, que sí puede cambiar. Puede **crear** diagramas: escribe un bloque
+  Mermaid y la app lo dibuja.
+- **Si la nota cambia mientras dibujas** (una sincronización, la IA, otra ventana, o cambias de nota desde
+  la bandeja): al pulsar Hecho el dibujo se guarda en su nota igualmente; si justo ese dibujo fue
+  modificado o borrado entretanto, la app avisa y ofrece insertar tu versión como un dibujo nuevo. Al
+  cerrar la ventana con el lienzo abierto la app intenta guardar lo dibujado (mejor esfuerzo, como el
+  resto de cambios pendientes: en una nota cifrada puede no llegar a escribirse). Si el guardado falla,
+  avisa y ofrece reintentar o copiar el dibujo.
+- **No hay imágenes dentro de un dibujo** (pegar o soltar una imagen en el lienzo no hace nada) ni exportar
+  a PNG/SVG todavía. El CLI y la app móvil lo ven como texto.
 
 ### Fragmentos (Snippets) — botón del toolbar y menú `/`
 Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del momento.
@@ -2406,6 +2457,15 @@ Con el cursor o una selección de celdas en una tabla (`Mod` = `Ctrl`, `⌘` en 
 | `Alt+Shift+Backspace` | Eliminar la(s) columna(s) seleccionada(s) |
 | `Backspace` / `Delete` | Vaciar las celdas seleccionadas |
 | `Tab` / `Shift+Tab` | Celda siguiente / anterior (`Tab` en la última celda añade una fila) |
+
+### Dibujos
+| Atajo | Acción |
+|---|---|
+| `Enter` | Editar el dibujo seleccionado (abre el lienzo) |
+| `Ctrl+Shift+Enter` | En el lienzo: guardar el dibujo y cerrar |
+
+Dentro del lienzo mandan los atajos de Excalidraw (su diálogo de ayuda los lista); los de NoteFlow
+no actúan mientras está abierto.
 
 ---
 

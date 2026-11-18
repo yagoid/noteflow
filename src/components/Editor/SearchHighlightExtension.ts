@@ -6,6 +6,8 @@ import type { EditorState, Transaction } from '@tiptap/pm/state'
 import { buildSearchRegex } from '../../lib/searchUtils'
 import { countKanbanMatches } from '../../lib/kanbanSearch'
 import { KANBAN_NODE_NAME, normalizeBoard } from '../../lib/kanbanOps'
+import { drawingFromHtmlData, drawingText, type DrawingHtmlData } from '../../lib/drawing/drawingBlock'
+import { DRAWING_NODE_NAME } from './drawingCommands'
 
 interface Match {
   from: number
@@ -13,6 +15,8 @@ interface Match {
   /** Set for a match inside an atom kanban board (from/to = the whole node):
    *  its running number among that board's matches. The NodeView paints it. */
   boardIndex?: number
+  /** Set for a match inside an atom drawing block (from/to = the whole node). */
+  drawing?: boolean
 }
 
 /** Decoration spec the kanban NodeView reads to highlight its own matches. */
@@ -43,6 +47,14 @@ function findMatches(doc: ProseMirrorNode, regex: RegExp | null): Match[] {
       for (let i = 0; i < count; i++) matches.push({ from: pos, to: pos + node.nodeSize, boardIndex: i })
       return false
     }
+    // Drawings are atoms too: what they say (drawingText — labels and connections, or
+    // the Mermaid source), never the JSON of the scene. A match is the whole block.
+    if (node.type.name === DRAWING_NODE_NAME) {
+      const block = drawingFromHtmlData(node.attrs.drawing as DrawingHtmlData)
+      const count = block ? (drawingText(block).match(regex) ?? []).filter((m) => m.length > 0).length : 0
+      for (let i = 0; i < count; i++) matches.push({ from: pos, to: pos + node.nodeSize, drawing: true })
+      return false
+    }
     if (!node.isText) return
     const text = node.text ?? ''
     regex.lastIndex = 0
@@ -62,7 +74,9 @@ function findMatches(doc: ProseMirrorNode, regex: RegExp | null): Match[] {
 // the selection alone: the board paints it and InNoteSearchBar scrolls the
 // active `.nf-search-match-active` element into view.
 function selectMatch(tr: Transaction, match: Match) {
-  if (match.boardIndex !== undefined) return
+  // …and so does one inside a drawing: the block itself is the match (marked by a node
+  // decoration, which the search bar scrolls to).
+  if (match.boardIndex !== undefined || match.drawing) return
   tr.setSelection(TextSelection.create(tr.doc, match.from, match.to))
   tr.scrollIntoView()
 }
@@ -168,7 +182,15 @@ export const SearchHighlight = Extension.create<unknown, SearchHighlightStorage>
             // One node decoration per board carrying the query; the NodeView
             // re-renders when it changes and highlights inside its cards.
             const boards = new Map<number, KanbanSearchSpec & { to: number }>()
+            // A drawing with matches is marked as a whole (several matches, one block).
+            const drawings = new Map<number, { to: number; active: boolean }>()
             s.matches.forEach((m, i) => {
+              if (m.drawing) {
+                const d = drawings.get(m.from) ?? { to: m.to, active: false }
+                if (i === s.activeIndex) d.active = true
+                drawings.set(m.from, d)
+                return
+              }
               if (m.boardIndex === undefined) {
                 decos.push(Decoration.inline(m.from, m.to, {
                   class:
@@ -183,6 +205,9 @@ export const SearchHighlight = Extension.create<unknown, SearchHighlightStorage>
               if (i === s.activeIndex) board.active = m.boardIndex
               boards.set(m.from, board)
             })
+            for (const [from, { to, active }] of drawings) {
+              decos.push(Decoration.node(from, to, { class: active ? 'nf-search-match nf-search-match-active' : 'nf-search-match' }))
+            }
             for (const [from, { to, ...kanbanSearch }] of boards) {
               decos.push(Decoration.node(from, to, {}, { kanbanSearch }))
             }

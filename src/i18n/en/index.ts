@@ -17,6 +17,7 @@ import { whatsNew } from './whatsNew'
 import { linked } from './linked'
 import { versionHistory } from './versionHistory'
 import { originChoice } from './originChoice'
+import { drawing } from './drawing'
 
 // English is the source of truth: the shape of this object defines `Messages`,
 // which every other language must mirror exactly (enforced in es/index.ts).
@@ -40,6 +41,7 @@ export const en = {
   linked,
   versionHistory,
   originChoice,
+  drawing,
 }
 
 export type Messages = typeof en

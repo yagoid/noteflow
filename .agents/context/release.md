@@ -255,7 +255,11 @@ candidata desde el checkout (mismo `electron-builder` que la release), no reusa 
 Graba desde la app real (Playwright `_electron` + ffmpeg) los clips en bucle del tour →
 `src/assets/whats-new/<id>.<lang>.webm` + póster `<id>.<lang>.png` (ids fijos: `sections`, `kanban`,
 `links-palette`, `quick-capture`, `windows`, `brain`, `ai`, `agents`, `sync`, `section-map`,
-`snippets`, `linked-files`, `checked-tasks`, `more`; idiomas `en`/`es`). `floating-sidebar` ya **no** es diapositiva
+`snippets`, `linked-files`, `checked-tasks`, `drawings`, `more`; idiomas `en`/`es`). ⚠️ **`drawings` (bloque de
+dibujo, `since: 2.3.0`) está PENDIENTE DE GRABAR antes de publicar la 2.3.0:** la diapositiva existe y hoy
+muestra el fallback animado; el id está en `CLIP_IDS` pero aún no tiene toma en `CLIPS` (ni
+`src/assets/whats-new/drawings.*`), así que no se graba por defecto y `--only drawings` falla con «not
+implemented». Falta escribir la toma (`/draw` → dibujar → Hecho → tarjeta) y grabarla en `en`/`es`. `floating-sidebar` ya **no** es diapositiva
 del tour: su toma sigue en el script (`webOnly`) solo para la web (`docs/public/clips`), no se graba
 por defecto y hay que pedirla con `--only floating-sidebar --out <dir fuera de src/assets>` (lo que
 haya en `src/assets/whats-new/` se empaqueta en la app).

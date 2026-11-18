@@ -37,7 +37,7 @@ consumidores** (related ✅, grafo ✅, chat ✅).
   debounce 2.5s, una vez por nota) y `fs:delete-note` (`removeFromIndex(dirPath)`). El worker
   **lee la carpeta de la nota desde disco** (`noteFormat.parseNoteDir`); `notes.file_path` en la
   DB guarda el path del DIRECTORIO. Hash por sección para no re-embeber lo que no cambió.
-  `stripNoise` quita imágenes base64 y trunca a ~2000 chars antes de embeber (crítico: 157s→6.7s).
+  `stripNoise` colapsa las escenas de los dibujos a su marcador de texto, quita imágenes base64 y trunca a ~2000 chars antes de embeber (crítico: 157s→6.7s).
   Las notas que llegan por **pull** (GitHub/Cloud) también pasan por `scheduleIndex` vía
   `indexPulledNotes` en `main.ts`.
 - **Notas vinculadas (archivo de texto externo —Markdown o texto plano—, ver `patterns.md` § "Notas vinculadas"):** no son carpetas del dir
@@ -626,6 +626,37 @@ tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventan
   máx. 1,5 s), así el modelo lee la versión actual. Las ediciones de la IA llegan al editor por el
   broadcast `notes-updated` sin senderId → `syncNote` → sync de contenido externo (aplica o fusiona sin
   pisar lo tecleado; ver `patterns.md`).
+- **Dibujos y la IA** (`electron/drawingText.ts`, espejo de `src/lib/drawing/drawingCollapse.ts`; formato en
+  `note-format.md` § «Bloque de dibujo»). Ni el modelo ni los embeddings ven nunca el JSON de una escena:
+  `collapseDrawings(texto, 'marker')` sustituye cada bloque `excalidraw` por una línea numerada
+  `[drawing #n: etiqueta · etiqueta ; A → B]` en `stripNoise` (índice semántico, `aiWorker.ts`), en
+  `chatContext.stripBase64` (contexto del chat), en el `stripBase64` de `tools.ts` (`get_note`,
+  `search_notes`) y en el de `main.ts`. Se colapsa ANTES de quitar el base64, para que una imagen guardada
+  dentro de una escena se vaya con ella. Los bloques **Mermaid** se ven tal cual (son texto, pequeño y
+  editable). **Escritura:** `restoreStrippedImages` devuelve a cada línea `[drawing #n…]` del contenido
+  nuevo el bloque que el colapso numeró así en el original — **por número**, no por posición, y sea cual sea el resumen que
+  deje el modelo, y **esté donde esté en la línea** (un ítem de lista, una cita, en mitad de una frase: el
+  dibujo vuelve como bloque propio en ese punto; dentro de una **fila de tabla o de un tablero kanban** se
+  coloca justo DESPUÉS de la tabla / tablero para no partirlos) —. El marcador se reconoce con
+  mayúsculas, espacios de más o de menos y corchetes escapados (`[Drawing #1]`, `[drawing#2]`,
+  `\[drawing #1\]`), y al sacarlo de una línea no quedan restos (ni `##` ni viñetas huérfanas; solo se
+  ajusta el hueco del propio marcador; el resto de la línea conserva sus espacios y su sangría). **Los
+  números saltan los que el usuario ya usa:** si la sección contiene un texto con forma de marcador
+  («see [Drawing #1] of the spec»), ese número no se asigna a ninguna escena (`sceneNumbering`: 1, 2, 3…
+  saltando los ocupados; colapso y restauración numeran desde la misma sección). Así un texto del usuario
+  nunca se toma por un dibujo y `restore(original, collapse(original))` es siempre `original` (test de
+  propiedad). Un dibujo de escena **nunca se pierde** al reescribir:
+  si el modelo omite su marcador (o solo lo escribe dentro de un fence) se **conserva al final de la
+  sección** (cerrando antes un fence que el modelo dejara abierto, para que no quede dentro del código) — el modelo no puede recrearlo; borrarlo es cosa del usuario. Solo se tocan marcadores de
+  dibujos que la sección original tiene de verdad: un número sin dibujo es texto del usuario y se queda;
+  uno repetido se descarta; en una sección sin dibujos no se toca nada. Las imágenes (que sí se pierden
+  si el modelo las omite) se emparejan solo contra las imágenes markdown `![alt](data:…)` del texto ya
+  colapsado: el `dataURL` de un bloque de dibujo inválido no ocupa el hueco de la siguiente imagen. `aiHidden` y notas cifradas, sin cambios. El modelo
+  sabe crear dibujos por `DRAWING_HOWTO` (`tools.ts`): va en la descripción de `add_section`, en la de
+  `update_section` (conservar los marcadores) y en la guía de contexto del chat — marcador + fence
+  `mermaid` + cierre, en líneas propias y sin indentar; flowchart / sequence / class / ER / state quedan
+  editables; no puede modificar un dibujo hecho a mano. Tests: `tests/electron/drawingAi.test.ts` y la
+  paridad en `tests/lib/drawingCollapse.test.ts`.
 - **Imágenes en `update_section`:** el modelo solo ve `[image]`; `restoreStrippedImages` (en `tools.ts`)
   devuelve los data URIs originales a los `![alt]([image])` del contenido nuevo **emparejando por
   posición** (n-ésimo placeholder ← n-ésima imagen del original): si el modelo reordena o quita imágenes,

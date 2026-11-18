@@ -4,6 +4,7 @@
 // stripped, capped per item and in total, each block tagged with the note/section ids so the model
 // can edit them with the tools without looking them up first.
 import type { DiskNote } from '../noteFormat'
+import { collapseDrawings } from '../drawingText'
 
 export type ChatContextItem =
   | { kind: 'section'; noteId: string; sectionId: string }
@@ -48,8 +49,10 @@ export function sanitizeContextRequest(raw: unknown): ChatContextRequest | null 
   return out
 }
 
+/** What a model sees of a section: pasted images as `[image]`, scene drawings as their
+ *  one-line `[drawing #n: …]` marker (drawingText.ts) — never base64 nor scene JSON. */
 export function stripBase64(text: string): string {
-  return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]')
+  return collapseDrawings(text, 'marker').replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]')
 }
 
 const TRUNCATED_MARK = '\n[…truncated — this section is longer than shown: do not rewrite it whole with update_section]'

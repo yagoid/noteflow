@@ -55,6 +55,7 @@ const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const sqliteVec = __importStar(require("sqlite-vec"));
 const protocol_1 = require("./protocol");
 const noteFormat_1 = require("../noteFormat");
+const drawingText_1 = require("../drawingText");
 // Transformers.js is ESM-only. A plain dynamic import() would be down-levelled to
 // require() by tsc (module: CommonJS) and crash. This Function wrapper preserves a
 // real runtime dynamic import.
@@ -657,9 +658,12 @@ async function ensureModelLoaded() {
     return index.ensure(currentModelId, provider.dim) || index.isEmpty();
 }
 // Strip base64 data URIs (embedded images) — huge, zero semantic value, and catastrophically
-// slow to embed/tokenize if left in (a single pasted image can take tens of seconds).
+// slow to embed/tokenize if left in (a single pasted image can take tens of seconds). And
+// the scene of a drawing block: JSON with no meaning for an embedding — it is indexed by
+// what it says (`[drawing #n: labels ; A → B]`, drawingText.ts), first, so that an image
+// stored inside a scene goes with it.
 function stripNoise(text) {
-    return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]');
+    return (0, drawingText_1.collapseDrawings)(text, 'marker').replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]');
 }
 function chunkTextFor(s) {
     return stripNoise(`${s.name}\n${s.content}`).trim();

@@ -2,6 +2,7 @@ import type { Editor } from '@tiptap/core'
 import { DOMParser as ProseMirrorDOMParser, Fragment, Slice, type Schema } from '@tiptap/pm/model'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { isInlineSnippet } from '../../lib/snippets'
+import { stepOffSelectedDrawing } from './drawingCommands'
 
 /**
  * The slice an (already expanded) snippet inserts: its markdown goes through
@@ -56,6 +57,7 @@ export function insertSnippet(editor: Editor, markdown: string): void {
       return
     }
   }
-  view.dispatch(state.tr.replaceSelection(snippetSlice(state.schema, markdown)).scrollIntoView())
+  // (A node-selected drawing is never replaced: the snippet goes to a paragraph below it.)
+  view.dispatch(stepOffSelectedDrawing(state.tr).replaceSelection(snippetSlice(state.schema, markdown)).scrollIntoView())
   view.focus()
 }
