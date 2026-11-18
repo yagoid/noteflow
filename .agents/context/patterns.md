@@ -4275,8 +4275,8 @@ hay que mantener en sync: `skillAgentDestDirs()` de `electron/main.ts`, `skillAg
 
 Dibujos dentro de la nota: formato en disco (`note-format.md` § "Bloque de dibujo"), vista previa en el
 editor, lienzo de Excalidraw a pantalla completa y `/draw`. Producto/UX en la skill `noteflow-features`.
-**Pendiente (fase 3):** búsqueda, recuento de palabras, contexto de la IA, miniatura en las vistas de solo
-lectura, CLI y móvil.
+La IA: `ai.md` § «Dibujos y la IA». **Pendiente:** miniatura (imagen) en las vistas de solo lectura, exportar
+a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
 
 - **Formato + round-trip (`src/lib/drawing/drawingBlock.ts`, puro, sin importar Excalidraw):** bloque
   `<!-- drawing -->` + un fence `mermaid` (fuente) o `excalidraw` (escena, un elemento JSON por línea,
@@ -4329,7 +4329,34 @@ lectura, CLI y móvil.
   - **Mermaid:** se convierte en memoria; sin cambios sigue siendo fuente byte a byte; con cambios pasa a
     `excalidraw` conservando los atributos (el overlay lo avisa). Si la conversión da una **imagen**
     (gantt, pie, mindmap, journey, gitGraph, timeline) no se abre el lienzo: se explica en la tarjeta.
-  - **Bloque vacío:** si tras cerrar no hay elementos, el nodo se borra (un `/draw` cerrado sin dibujar).
+  - **Bloque vacío:** solo se elimina el bloque **recién insertado en esa sesión** (`/draw` cerrado sin
+    dibujar) o uno que el usuario vació y guardó; cancelar sobre un bloque vacío que ya existía (escrito
+    por el CLI o la IA) no lo toca.
+  - **El trabajo del lienzo nunca se pierde en silencio** (`stores/drawingEditorStore.ts`,
+    `lib/drawing/drawingReplace.ts`). El `<Editor>` lleva `key` por nota+sección, así que cualquier cosa
+    que cambie lo que hay en pantalla (bandeja → nota nueva, abrir un archivo vinculado, archivar, un
+    pull, la IA) desmonta el NodeView con el lienzo abierto; y `replaceDocKeepingSelection` puede dejar
+    OTRO dibujo en esa posición. Por eso la sesión guarda su destino **por identidad** (`DrawingTarget`:
+    nota, sección, el bloque tal como se abrió y su ordinal entre idénticos — el editor se lo da al nodo
+    en `editor.storage.drawingBlock.target`) y «Hecho» sigue este orden: (1) si el nodo vivo sigue siendo
+    exactamente el bloque abierto (`kind` + `attrs` + `body`) → `updateAttributes` (una transacción: un
+    solo Ctrl+Z); (2) si no, se escribe en la sección a través del store (`writeDrawingToSection` →
+    `replaceDrawing` sobre el markdown, tras `flushPendingEdits`), que solo sustituye el bloque que sigue
+    siendo el abierto; (3) si ya no existe o cambió, **se pregunta** (`askConflict`): insertarlo como
+    bloque nuevo al final de su sección, o —si la sección ya no existe— copiar su markdown; nunca se pisa
+    lo que hay ni se descarta sin avisar. Al cerrar o recargar la ventana con el lienzo abierto y
+    cambios (`beforeunload`: cierre del SO, salir, reinicio por actualización) `flushOpenDrawing` lo vuelca
+    por la vía (2) —y como bloque nuevo si el original cambió—, igual de «mejor esfuerzo» que el resto de
+    guardados pendientes de `App.tsx`.
+  - **Sin entrada hasta que las fuentes están:** Excalidraw re-mide un texto cuando llega su fuente; si la
+    primera acción del usuario fuese anterior, la referencia tendría las medidas viejas y «Hecho»
+    escribiría sin cambios reales. El lienzo se muestra pero no acepta puntero ni teclas hasta cargar las
+    fuentes de la escena (`data-drawing-ready`).
+  - **Sin imágenes en v1:** además de `tools.image: false`, se cancela pegar o soltar ficheros sobre el
+    lienzo y se retira cualquier elemento imagen que no estuviera ya en la escena.
+  - **Diálogos de Excalidraw** (Help, confirmación de «Clear canvas», su paleta): se montan en `<body>`,
+    fuera del overlay. La trampa de foco los cuenta como parte del lienzo (`.excalidraw-modal-container`)
+    y `drawing.css` les da los mismos tokens del tema.
   - **Lo que Excalidraw 0.18 no deja quitar por props** (librería, diálogo Mermaid/IA, diálogos de
     exportar, herramientas incrustar-web / imagen / marco de IA) se deshace en `onChange` en cuanto aparece
     en su estado (`closeForbiddenUi`), lo abra el menú, un atajo o su paleta de comandos; `drawing.css`
@@ -4340,7 +4367,9 @@ lectura, CLI y móvil.
   para cualquier destino, también `<body>`; lo respetan los atajos de captura (`App.tsx`,
   `SectionWindowApp`, `NoteEditor` Ctrl+Tab, `ContentView`) y el `Supr` = «borrar nota» de `NoteEditor`
   (listener de `window` que antes no lo miraba). El overlay devuelve el foco al lienzo si sale de él
-  (`focusin`). `Ctrl+Shift+Enter` = Hecho; `Esc` es de Excalidraw. Un listener nuevo de `window` que
+  (`focusin`). `Ctrl+Shift+Enter` = Hecho; `Esc` es de Excalidraw. También consultan `ownsKeys` el Esc de
+  `CommandPalette`, `SettingsModal` y `VersionHistoryPanel` y el Ctrl+A de `NoteOverview` (pueden quedar
+  montados detrás del lienzo si la pantalla cambia con él abierto). Un listener nuevo de `window` que
   actúe con teclas sueltas debe consultar `ownsKeys`.
 - **Ninguna ventana muestra contenido remoto (`electron/navigationGuard.ts` + `main.ts`,
   `web-contents-created`):** `setWindowOpenHandler` siempre deniega (y abre en el navegador del sistema
@@ -4351,7 +4380,21 @@ lectura, CLI y móvil.
 - **Otras ventanas:** sticky → la tarjeta con el texto del dibujo, sin vista previa ni edición (no carga
   Excalidraw). Vistas de solo lectura (`htmlFromMarkdown` + `innerHTML`: vista de nota, hover card, vista
   de contenido, historial, chat) → el `<pre data-drawing-fallback>` con `drawingText`, con borde
-  discontinuo (`index.css`). Ventana de sección → igual que la principal.
+  discontinuo y un lápiz delante (`index.css`). Ventana de sección → igual que la principal.
+- **El dibujo como texto (`lib/drawing/drawingCollapse.ts`, espejo `electron/drawingText.ts`):** todo lo
+  que lee el markdown de una sección sin renderizarlo ve lo que el dibujo DICE, nunca el JSON de la
+  escena. `collapseDrawings(md, 'text')` (una línea `etiqueta · etiqueta ; A → B`) alimenta el índice de
+  búsqueda global (`searchUtils.getNoteSearchIndex`, el único sitio donde se construye el texto buscable:
+  sidebar, paleta, vista de contenido) y el recuento de palabras (`markdownTextStats`, en una línea que
+  no puede pasar por tarea); `stripDrawings` deja los dibujos fuera de los tags (`extractTags` y su
+  espejo en `electron/ai/llm/tools.ts`: una escena está llena de colores `#e03131`); las alarmas leen el
+  markdown crudo, donde ninguna línea de un dibujo empieza por `- [ ]`. Búsqueda en la nota
+  (`SearchHighlightExtension`): cuenta las coincidencias en `drawingText` del nodo y el bloque entero es
+  el match (decoración de nodo `nf-search-match[-active]`, a la que la barra hace scroll). Los Mermaid
+  son texto y no se colapsan. Recorte de previews (`clipHoldingImages`): cada dibujo se retiene tras una
+  línea-ficha de `PREVIEW_DRAWING_CHARS` (400) para que el corte nunca caiga dentro (medio dibujo sería
+  un bloque inválido: un bloque de código de JSON). El espejo de electron repite el reconocimiento del
+  bloque y `drawingText`; `tests/lib/drawingCollapse.test.ts` compara ambos sobre documentos aleatorios.
 - **Dependencias fijadas a versión exacta, en `devDependencies`:** `@excalidraw/excalidraw` 0.18.1 y
   `@excalidraw/mermaid-to-excalidraw` 2.2.2, más `overrides.mermaid = 11.12.1` en `package.json`. Van en
   `devDependencies` porque solo las usa el renderer (Vite las mete en `dist/`) y electron-builder copia al
@@ -4361,8 +4404,9 @@ lectura, CLI y móvil.
   elementos editables (el conversor no encuentra sus nodos en el SVG y cae a una imagen, sin error
   visible). Al subir cualquiera de los tres, volver a comprobar los tipos.
 - **Carga perezosa:** la única puerta al paquete es `loadExcalidraw()` (`src/lib/drawing/excalidrawAssets.ts`)
-  y el `React.lazy` de `components/Drawing/DrawingOverlayHost.tsx` (montado solo en `MainApp`). Nada de
-  Excalidraw ni de Mermaid entra en el bundle inicial ni en las ventanas sticky / de sección. No
+  y el `React.lazy` de `components/Drawing/DrawingOverlayHost.tsx` (montado en `MainApp` —no en sticky— y
+  en `SectionWindowApp`). Nada de Excalidraw ni de Mermaid entra en el bundle inicial de ninguna ventana:
+  la principal y la de sección lo cargan al mostrarse o editarse un dibujo; una sticky, nunca. No
   importarlo de forma estática desde código que cargue al arrancar.
 - **Fuentes autoalojadas sin versionar binarios:** el plugin `noteflow:excalidraw-fonts` de
   `vite.config.ts` las sirve desde `node_modules` en dev (middleware `/excalidraw/fonts`) y las emite

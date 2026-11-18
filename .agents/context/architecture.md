@@ -68,6 +68,8 @@ noteflow/
 │   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
 │   ├── updateAsset.ts   # Lógica pura del auto-update: qué asset/URL ofrecer por plataforma y
 │   │                    #   allowlist de rutas descargables — testeada; ver patterns.md
+│   ├── drawingText.ts   # Pura: dibujos como texto para la IA (marcador `[drawing #n: …]`, restauración en
+│   │                    #   update_section, tags) — ESPEJO de src/lib/drawing/drawingCollapse.ts, con test de paridad
 │   ├── navigationGuard.ts # Pura: ninguna ventana abre ni navega a contenido remoto (setWindowOpenHandler +
 │   │                    #   will-navigate en todo webContents) — testeada; ver patterns.md § "Bloque de dibujo"
 │   ├── relaunchArgs.ts  # Pura: args del relanzamiento tras salir de un lanzamiento que llegó durante la
@@ -387,7 +389,9 @@ noteflow/
 │   │   │                         #   testeado, ver note-format.md), excalidrawAssets.ts (ruta de fuentes +
 │   │   │                         #   loadExcalidraw, la única puerta al paquete), drawingScene.ts (restore, Mermaid →
 │   │   │                         #   escena, escena → SVG; imports dinámicos), drawingPreview.ts (vista previa cacheada +
-│   │   │                         #   registro de fuentes) y excalidrawFontFaces.ts (GENERADO: scripts/gen-excalidraw-font-faces.cjs)
+│   │   │                         #   registro de fuentes), excalidrawFontFaces.ts (GENERADO: scripts/gen-excalidraw-font-faces.cjs),
+│   │   │                         #   drawingCollapse.ts (el dibujo como texto: búsqueda, recuentos, tags — espejo en
+│   │   │                         #   electron/drawingText.ts) y drawingReplace.ts (guardar un dibujo en el markdown por identidad)
 │   │   └── themes.ts             # Definición de los 14 temas (CSS vars)
 │   ├── i18n/                     # Sistema i18n propio (EN/ES, sin deps): en/ = fuente de verdad
 │   │                            #   del tipo Messages, es/ forzado a paridad; format.ts (tf/plural),

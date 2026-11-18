@@ -1127,8 +1127,20 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   solo lectura (vista de nota, tarjeta de vista previa, vista de contenido, historial de versiones, chat)
   el dibujo se muestra como su **texto** (etiquetas y conexiones «A → B», o el Mermaid), sin imagen. En
   notas vinculadas (Markdown plano) el bloque es texto y código, como cualquier otra sintaxis propia.
-- Aún **no** entra en la búsqueda, el recuento de palabras ni el contexto de la IA; el CLI y la app móvil
-  lo ven como texto.
+- **Búsqueda:** un dibujo se busca por lo que dice (sus etiquetas y conexiones, o el texto Mermaid), en la
+  búsqueda de la nota (`Ctrl+F`: el bloque entero se resalta como coincidencia) y en la global (sidebar,
+  paleta, vista de contenido). Nunca por sus datos internos: buscar un color o un identificador no lo
+  encuentra. El recuento de palabras cuenta sus etiquetas, y nada de un dibujo crea `#tags` ni alarmas.
+- **IA:** el asistente ve un dibujo hecho a mano como una línea `[drawing #1: etiquetas ; A → B]` (no puede
+  modificarlo; si reescribe la sección lo conserva, y si lo quita se puede deshacer desde el chat) y un
+  diagrama Mermaid como su texto, que sí puede cambiar. Puede **crear** diagramas: escribe un bloque
+  Mermaid y la app lo dibuja.
+- **Si la nota cambia mientras dibujas** (una sincronización, la IA, otra ventana, o cambias de nota desde
+  la bandeja): al pulsar Hecho el dibujo se guarda en su nota igualmente; si justo ese dibujo fue
+  modificado o borrado entretanto, la app avisa y ofrece insertar tu versión como un dibujo nuevo. Cerrar
+  la ventana con el lienzo abierto guarda lo dibujado.
+- **No hay imágenes dentro de un dibujo** (pegar o soltar una imagen en el lienzo no hace nada) ni exportar
+  a PNG/SVG todavía. El CLI y la app móvil lo ven como texto.
 
 ### Fragmentos (Snippets) — botón del toolbar y menú `/`
 Texto reutilizable que se inserta en el cursor con un clic, con fecha/hora del momento.

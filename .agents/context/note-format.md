@@ -174,7 +174,8 @@ flowchart TD
      Excalidraw regenera al cargar con `restoreElements`; así un elemento que vuelve a su sitio da la misma
      línea). `seed` e `index` sí se guardan. `boundElements: null` se escribe `[]` (es lo que Excalidraw
      deja al cargar; si no, la línea cambiaría solo por reabrir).
-  3. **Una línea `{"file":{…}}` por imagen** que use algún elemento (`fileId`), ordenadas por id, sin
+  3. **Una línea `{"file":{…}}` por imagen** que use algún elemento (`fileId`), ordenadas por id (su
+     `dataURL` debe ser una URL `data:`; si no, el bloque es inválido), sin
      `lastRetrieved`. Las imágenes sin usar se descartan.
   - **Redondeo:** los enteros no se tocan; `x`, `y`, `width`, `height`, `points`, `gap` y `fontSize` a
     **2 decimales**; cualquier otro número fraccionario (ángulo en radianes, `focus`/`fixedPoint` de los
@@ -216,9 +217,14 @@ flowchart TD
   solo reescribe el bloque si el usuario cambió la escena (ver `patterns.md` § «Bloque de dibujo»): abrir y
   cerrar no canoniza un bloque escrito a mano.
 - **Texto legible:** `drawingText(block)` (fuente → el Mermaid; escena → etiquetas y conexiones «A → B»).
-  Hoy solo lo usan el texto de respaldo del bloque y `editor.getText()`; aún no está cableado a búsqueda /
-  IA / recuento.
-- **Móvil y CLI:** no lo conocen; lo ven como comentario + bloque de código y lo conservan como texto.
+  De él salen el texto de respaldo del bloque, la búsqueda (en nota y global), el recuento de palabras y
+  lo que ve la IA (`[drawing #n: …]`); los tags ignoran los dibujos enteros. Ver `patterns.md` § «Bloque
+  de dibujo» → «El dibujo como texto» y `ai.md` § «Dibujos y la IA».
+- **CLI:** no conoce el formato (lee y escribe el markdown tal cual); su skill explica cómo añadir un
+  diagrama Mermaid y que un bloque `excalidraw` no se edita a mano.
+- **Móvil:** aún no lo conoce. Su conversor (espejo antiguo de `markdownHtml.ts`) lo lee como párrafo +
+  bloque de código + párrafo y, al guardar la sección, lo reescribe con una línea en blanco entre
+  marcador y fence (el escritorio lo tolera y lo normaliza); un fence de 4+ backticks no lo conserva.
 
 ### Migración v1 → v2
 - **Local** (`electron/migration.ts` → `migrateNotesDirToV2`): corre al arrancar, ANTES del pull
