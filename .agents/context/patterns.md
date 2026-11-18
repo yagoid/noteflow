@@ -4271,29 +4271,87 @@ hay que mantener en sync: `skillAgentDestDirs()` de `electron/main.ts`, `skillAg
   `self-update` la skill de `main` dura hasta el siguiente arranque de una app más antigua, que la
   devuelve a la suya (el `noteflow.js` actualizado se queda) — desfase temporal y aceptado.
 
-### Bloque de dibujo (Excalidraw) — base técnica y formato (Fases 0-1)
+### Bloque de dibujo (Excalidraw)
 
-Está montada la base técnica y el **formato en disco** (`note-format.md` § "Bloque de dibujo"); **no hay
-UI de usuario todavía** (ni vista previa, ni overlay real, ni comando). Lo que existe:
+Dibujos dentro de la nota: formato en disco (`note-format.md` § "Bloque de dibujo"), vista previa en el
+editor, lienzo de Excalidraw a pantalla completa y `/draw`. Producto/UX en la skill `noteflow-features`.
+**Pendiente (fase 3):** búsqueda, recuento de palabras, contexto de la IA, miniatura en las vistas de solo
+lectura, CLI y móvil.
 
 - **Formato + round-trip (`src/lib/drawing/drawingBlock.ts`, puro, sin importar Excalidraw):** bloque
   `<!-- drawing -->` + un fence `mermaid` (fuente) o `excalidraw` (escena, un elemento JSON por línea,
   canónica) + `<!-- /drawing -->`. En `markdownHtml.ts` es la **primera** pre-pasada
   (`isolateDrawingBlocks`, sobre el texto crudo, antes de `isolateCodeFences`): el dibujo es dueño de su
   fence, y la pasada de fences lo partiría en comentario / código / comentario. Cada dibujo válido se
-  sustituye por una línea-ranura (`\x00drawing:N\x00`, el bloque parseado queda en `drawingSlots`) que
+  sustituye por una línea-ranura (`\x00drawing:N\x00`; el prefijo se elige en cada parse para que ninguna
+  línea del propio texto pueda pasar por ranura; el bloque parseado queda en `drawingSlots`) que
   las pasadas siguientes (fences, kanban, corte en bloques) llevan como bloque opaco; `pairFences` /
   `fenceBlockEnd` (extraídas de `isolateCodeFences`) deciden qué líneas son código, y se recalculan tras
-  sacar cada dibujo. Un marcador dentro de un bloque de código, de una cita o en modo `plain` no es un
-  dibujo. HTML intermedio: `div[data-type="drawing"]` con `data-kind`, `data-attrs` y `data-body` (el
+  sacar cada dibujo. Un marcador dentro de un bloque de código — también el bloque de un fence que nunca
+  se cierra, que se pinta como código hasta su final —, de una cita o en modo `plain` no es un dibujo. HTML intermedio: `div[data-type="drawing"]` con `data-kind`, `data-attrs` y `data-body` (el
   contenido del fence; fuente de verdad de la vuelta) y un `<pre data-drawing-fallback>` con
   `drawingText` que nunca se lee de vuelta. **Inválido = no se toca** (`parseDrawingMarkdown` → `null`): la
   región se pinta y se guarda como antes de existir el bloque. Tests: `tests/lib/drawingBlock.test.ts`
   (incluye la fusión con `mergeSectionText`) y `drawingEditorRoundTrip.test.ts` (esquema real).
-- **Nodo de esquema mínimo (`components/Editor/DrawingBlock.ts`):** átomo `topBlock` sin NodeView. Existe
-  solo para que el editor **no pierda el bloque**: sin un nodo para ese `div`, ProseMirror lo descarta al
-  abrir la nota y el guardado borraría el dibujo. Hoy muestra el `<pre>` de respaldo, no editable; la fase
-  2 le pone la vista previa y el overlay. Fuera del esquema `plain`.
+- **Nodo + NodeView (`components/Editor/DrawingBlock.ts`, `DrawingBlockView.tsx`, `drawingCommands.ts`):**
+  átomo `topBlock` (fuera del esquema `plain`) cuyo único atributo `drawing` es `{ kind, attrs, body }`
+  (`body` = contenido del fence). Sin el nodo, ProseMirror descartaría el `div` y el guardado borraría el
+  dibujo. Todo cambio es UN `updateAttributes` / `deleteNode` sobre el nodo **vivo** (`getPos()` +
+  `doc.nodeAt`, nunca un cierre viejo) → una transacción, deshacible, que autoguarda. Un clic selecciona
+  (`.drawing-node.is-selected`, borde de acento); `Enter` con el nodo seleccionado y la inserción llegan a
+  la vista por un evento DOM en su contenedor (`DRAWING_EDIT_EVENT`). `stopEvent` solo retiene los
+  eventos de `[data-drawing-interactive]` (botón Editar, asa de alto).
+- **Vista previa (`lib/drawing/drawingPreview.ts`):** SVG **inline** del exportador de Excalidraw
+  (`exportToSvg` con `skipInliningFonts`), generado al mostrarse — nada se guarda en la nota. El chunk de
+  Excalidraw (y Mermaid, en un bloque fuente) solo se pide cuando el bloque entra en pantalla
+  (`IntersectionObserver`, margen 200 px) y **nunca en una sticky** (`getWindowRole()`); hasta entonces, y
+  si falla, la tarjeta muestra `drawingText`. Caché por contenido (`tema + kind + body`, 40 entradas): ni
+  el scroll, ni cambiar de sección, ni deshacer regeneran. Al SVG se le quitan `href` de los `<a>`,
+  `script`, `foreignObject` e `iframe` antes de insertarlo (un clic en un `<a>` navegaría la ventana).
+  **Fuentes:** como el SVG no las incrusta, el documento registra las caras de Excalidraw con la API
+  `FontFace` (carga perezosa por subconjunto) desde `lib/drawing/excalidrawFontFaces.ts`, tabla
+  **generada** del propio paquete (`node scripts/gen-excalidraw-font-faces.cjs`; familia, fichero, peso y
+  `unicode-range`). `tests/lib/excalidrawFontFaces.test.ts` falla si la tabla no corresponde a la versión
+  instalada: regenerarla al subir Excalidraw. Alto: atributo `height` del marcador (asa inferior, una
+  transacción al soltar) o el propio del dibujo hasta 360 px.
+- **Lienzo (`components/Drawing/DrawingOverlay.tsx` + `DrawingOverlayHost.tsx` + `stores/drawingEditorStore.ts`):**
+  la vista del nodo y el overlay viven en árboles React distintos; el store guarda UNA sesión
+  (`edit()` devuelve una promesa que resuelve al cerrar). El host se monta en `MainApp` (no sticky) y en
+  `SectionWindowApp`; `available` dice si esta ventana puede editar (si no, no hay botón ni `/draw`).
+  - **Carga:** siempre por `restoreScene` (el `restore` de Excalidraw) → `initialData`; nunca
+    `updateScene` con elementos crudos. `refreshDimensions` solo si hay un texto sin tamaño.
+  - **«Hecho» escribe solo si el usuario cambió la escena.** Excalidraw toca una escena por el mero hecho
+    de cargarla (texto re-medido al llegar su fuente, flechas enlazadas re-encaminadas), así que la
+    referencia NO es el texto guardado: es la escena tal como está en la **primera acción del usuario**
+    sobre el lienzo (`pointerdown` / `keydown` / pegar / soltar, en captura). Sin acción → no se escribe;
+    acción que deja la escena igual (clic, seleccionar) → tampoco. Así abrir y cerrar no cambia ni un
+    byte ni canoniza un bloque escrito a mano. Verificado en la app real (fichero y `mtime` intactos).
+  - **Mermaid:** se convierte en memoria; sin cambios sigue siendo fuente byte a byte; con cambios pasa a
+    `excalidraw` conservando los atributos (el overlay lo avisa). Si la conversión da una **imagen**
+    (gantt, pie, mindmap, journey, gitGraph, timeline) no se abre el lienzo: se explica en la tarjeta.
+  - **Bloque vacío:** si tras cerrar no hay elementos, el nodo se borra (un `/draw` cerrado sin dibujar).
+  - **Lo que Excalidraw 0.18 no deja quitar por props** (librería, diálogo Mermaid/IA, diálogos de
+    exportar, herramientas incrustar-web / imagen / marco de IA) se deshace en `onChange` en cuanto aparece
+    en su estado (`closeForbiddenUi`), lo abra el menú, un atajo o su paleta de comandos; `drawing.css`
+    solo oculta los disparadores. `validateEmbeddable={false}`, `aiEnabled={false}`, y `onLinkOpen`
+    encamina los hipervínculos de elementos por `window.noteflow.openUrl`.
+  - **Estado guardado:** `viewBackgroundColor` siempre; la rejilla solo si está activa.
+- **Teclado:** `claimKeys()` (`lib/keyScope.ts`) — mientras el overlay está abierto `ownsKeys()` es `true`
+  para cualquier destino, también `<body>`; lo respetan los atajos de captura (`App.tsx`,
+  `SectionWindowApp`, `NoteEditor` Ctrl+Tab, `ContentView`) y el `Supr` = «borrar nota» de `NoteEditor`
+  (listener de `window` que antes no lo miraba). El overlay devuelve el foco al lienzo si sale de él
+  (`focusin`). `Ctrl+Shift+Enter` = Hecho; `Esc` es de Excalidraw. Un listener nuevo de `window` que
+  actúe con teclas sueltas debe consultar `ownsKeys`.
+- **Ninguna ventana muestra contenido remoto (`electron/navigationGuard.ts` + `main.ts`,
+  `web-contents-created`):** `setWindowOpenHandler` siempre deniega (y abre en el navegador del sistema
+  solo `https:`, la misma regla que `app:open-url`); `will-navigate` cancela todo lo que no sea el mismo
+  documento (recarga o cambio de hash). Cubre el Help de Excalidraw, sus enlaces y cualquier `<a href>`
+  en HTML renderizado; los enlaces del editor siguen yendo por `openUrl`. Testeado
+  (`tests/electron/navigationGuard.test.ts`) y comprobado en la app.
+- **Otras ventanas:** sticky → la tarjeta con el texto del dibujo, sin vista previa ni edición (no carga
+  Excalidraw). Vistas de solo lectura (`htmlFromMarkdown` + `innerHTML`: vista de nota, hover card, vista
+  de contenido, historial, chat) → el `<pre data-drawing-fallback>` con `drawingText`, con borde
+  discontinuo (`index.css`). Ventana de sección → igual que la principal.
 - **Dependencias fijadas a versión exacta, en `devDependencies`:** `@excalidraw/excalidraw` 0.18.1 y
   `@excalidraw/mermaid-to-excalidraw` 2.2.2, más `overrides.mermaid = 11.12.1` en `package.json`. Van en
   `devDependencies` porque solo las usa el renderer (Vite las mete en `dist/`) y electron-builder copia al
@@ -4325,22 +4383,10 @@ UI de usuario todavía** (ni vista previa, ni overlay real, ni comando). Lo que 
   worker no arranca desde `file://`, así que incrusta el fichero de fuente entero y deja dos
   `console.error`. Con `skipInliningFonts` no hay errores ni se carga el chunk de recorte (1,8 MB).
   No añadir `'unsafe-eval'` por esto.
-- **Teclado:** el overlay lleva `data-own-keys` (`lib/keyScope.ts`), con lo que los atajos globales se
-  apartan mientras el foco está dentro. ⚠️ Si el foco cae en `<body>` (p. ej. tras un `blur`), el
-  handler de captura de `App.tsx` vuelve a actuar (Ctrl+N crea una nota detrás del overlay): pendiente
-  de resolver antes de exponerlo a usuarios (fase 2: guard global de teclado).
-- ⚠️ **Enlaces externos del lienzo (pendiente, fase 2, toca `electron/`):** el diálogo Help y los
-  hipervínculos de elementos de Excalidraw usan `target="_blank"` / `window.open`. `electron/` no tiene
-  `setWindowOpenHandler` ni `will-navigate`, y la CSP no gobierna ventanas nuevas: hoy abrirían una
-  ventana de Electron con la web. Hay que resolverlo antes de exponer la función.
-- ⚠️ **Biblioteca online (pendiente, fase 2):** el disparador de la librería de Excalidraw solo está
-  oculto por CSS (`.default-sidebar-trigger` en `drawing.css`); el panel y su «browse libraries» siguen
-  existiendo. Quitarlo de verdad (o cortar su salida a red) antes de exponer la función. Igual el listener
-  de `noteflow:dev-open-drawing`, que hoy también escucha en producción: ponerlo tras `import.meta.env.DEV`.
-- **Entrada actual:** comando de la paleta «Drawing canvas (dev)», solo con `import.meta.env.DEV`
-  (dispara `noteflow:dev-open-drawing`; el cierre emite `noteflow:dev-drawing-closed` con la escena
-  serializada con `serializeAsJSON`). Tema: `components/Drawing/drawing.css` mapea los tokens de
-  Excalidraw (`--color-primary*`, `--island-bg-color`, `--color-surface-*`…) al tema activo.
+- **Tema:** `components/Drawing/drawing.css` mapea los tokens de Excalidraw (`--color-primary*`,
+  `--island-bg-color`, `--color-surface-*`…) al tema activo; lienzo transparente sobre `--bg-editor`.
+- **Pruebas automatizadas de la app:** se conduce la UI real con Playwright (`/draw`, doble clic,
+  botones `[data-drawing-done]` / `[data-drawing-cancel]`); no hay ningún gancho de pruebas en el código.
 
 ## Temas
 

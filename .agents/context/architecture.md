@@ -68,6 +68,8 @@ noteflow/
 │   │                    #   (con sync, solo tras un pull limpio) — testeada; ver patterns.md
 │   ├── updateAsset.ts   # Lógica pura del auto-update: qué asset/URL ofrecer por plataforma y
 │   │                    #   allowlist de rutas descargables — testeada; ver patterns.md
+│   ├── navigationGuard.ts # Pura: ninguna ventana abre ni navega a contenido remoto (setWindowOpenHandler +
+│   │                    #   will-navigate en todo webContents) — testeada; ver patterns.md § "Bloque de dibujo"
 │   ├── relaunchArgs.ts  # Pura: args del relanzamiento tras salir de un lanzamiento que llegó durante la
 │   │                    #   salida (second-instance) — testeada; ver patterns.md § Single instance
 │   ├── openWithArgs.ts  # Pura: qué argumentos de un lanzamiento (argv, second-instance, open-file) son
@@ -138,6 +140,7 @@ noteflow/
 │   │   ├── aiStore.ts                # Estado del índice IA (enabled, related, grafo, progreso) vía IPC ai:*
 │   │   ├── whatsNewStore.ts          # Tour "What's new": ids vistos (settings.json vía IPC whats-new:*) + tour abierto
 │   │   ├── identityStore.ts          # Cuenta (sesión + plan) y backend de sync vivo para la línea de identidad del pie del sidebar (account:/sync:/cloud: status, ref-count connectIdentity)
+│   │   ├── drawingEditorStore.ts     # Sesión del lienzo de dibujo de esta ventana (NodeView → overlay), `available`
 │   │   └── aiChatStore.ts            # Estado del chat/LLM (config por proveedor, modelos, mensajes, sesiones) vía IPC ai:llm-*/ai:chat*/ai:chats-*
 │   ├── components/
 │   │   ├── Editor/
@@ -161,8 +164,9 @@ noteflow/
 │   │   │   ├── KanbanBoardView.tsx      #   NodeView React: columnas, drag & drop, menús, búsqueda
 │   │   │   ├── KanbanParts.tsx          #   piezas: tarjeta, editor inline, menú de opciones
 │   │   │   ├── kanbanCommands.ts        #   insertar tablero, lista de tareas ↔ tablero
-│   │   │   ├── DrawingBlock.ts          # Nodo atom del bloque de dibujo: solo esquema (sin NodeView), para que el
-│   │   │   │                            #   editor conserve el bloque al abrir/guardar (ver patterns.md)
+│   │   │   ├── DrawingBlock.ts          # Nodo atom del bloque de dibujo (atributo { kind, attrs, body }) + Enter = editar
+│   │   │   ├── DrawingBlockView.tsx     #   NodeView: tarjeta con vista previa perezosa (SVG inline), Editar, asa de alto
+│   │   │   ├── drawingCommands.ts       #   insertDrawing (`/draw`), evento de edición
 │   │   │   ├── SectionRelation.ts       # Nodo inline atom de relación sección↔sección (+ SectionRelationView.tsx)
 │   │   │   ├── SlashCommands.ts         # Menú `/` (@tiptap/suggestion) + SlashCommandMenu.tsx
 │   │   │   ├── SectionLinkPicker.tsx    # Buscador de secciones del comando "Link section"
@@ -300,11 +304,10 @@ noteflow/
 │   │   │   │                           #   Restaurar como sección nueva / Restaurar esta versión, estados sin Cloud
 │   │   │   ├── VersionHistoryParts.tsx #   Piezas de presentación (filas, diff, diálogo de captura fallida)
 │   │   │   └── versionHistoryUi.ts     #   Clases compartidas (solo tokens del tema)
-│   │   ├── Drawing/                    # Bloque de dibujo con Excalidraw — Fase 0 (spike), ver patterns.md
-│   │   │   ├── DrawingOverlayHost.tsx  #   Montado en MainApp: escucha el evento de apertura y carga el overlay con React.lazy
-│   │   │   ├── DrawingOverlay.tsx      #   (chunk perezoso) <Excalidraw> con idioma/tema de NoteFlow, UI recortada, cierre → escena JSON
-│   │   │   ├── drawingEvents.ts        #   Eventos de apertura/cierre (entrada solo de desarrollo desde la paleta)
-│   │   │   └── drawing.css             #   Tokens de Excalidraw → tema activo
+│   │   ├── Drawing/                    # Lienzo de los bloques de dibujo (Excalidraw) — ver patterns.md § "Bloque de dibujo"
+│   │   │   ├── DrawingOverlayHost.tsx  #   Montado en MainApp (no sticky) y SectionWindowApp: pinta la sesión de drawingEditorStore, React.lazy
+│   │   │   ├── DrawingOverlay.tsx      #   (chunk perezoso) <Excalidraw> con idioma/tema de NoteFlow, UI recortada; Hecho solo escribe si cambió
+│   │   │   └── drawing.css             #   Tokens de Excalidraw → tema activo + disparadores ocultos
 │   │   ├── ConfirmModal.tsx            # Modal de confirmación genérico (`hideCancel` = solo informativo)
 │   │   ├── EncryptionModal.tsx         # Modal cifrar/descifrar notas
 │   │   ├── ExportImportModal.tsx       # Modal exportar/importar notas (flujo, lanzado desde DataPanel)
@@ -355,7 +358,8 @@ noteflow/
 │   │   ├── aiGroup.ts            # AI_GROUP_NAME ('IA Generated', el grupo fijo del perfil de IA) + isAiGroupName
 │   │   │                         #   (lo leen ProfileFlow y el grafo del cerebro)
 │   │   ├── searchUtils.ts        # Helpers de búsqueda (normalización, matching)
-│   │   ├── keyScope.ts           # OWN_KEYS_PROPS/ownsKeys: campos que los atajos globales (capture) respetan
+│   │   ├── keyScope.ts           # OWN_KEYS_PROPS/ownsKeys: campos que los atajos globales (capture) respetan;
+│   │   │                         #   claimKeys(): una superficie a ventana completa (lienzo de dibujo) se queda todo el teclado
 │   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 vars del tema o hex libre);
 │   │   │                         #   normalizeGroupColor (validación) y colorChannels (TODO render de
 │   │   │                         #   color de grupo/sección debe pasar por él, no interpolar `var(...)`)
@@ -381,8 +385,9 @@ noteflow/
 │   │   ├── drawing/              # Bloque de dibujo: drawingBlock.ts (formato en la nota: parse/serialize de las
 │   │   │                         #   variantes mermaid / excalidraw, md↔HTML, drawingText; puro, sin Excalidraw —
 │   │   │                         #   testeado, ver note-format.md), excalidrawAssets.ts (ruta de fuentes +
-│   │   │                         #   loadExcalidraw, la única puerta al paquete) y drawingScene.ts (escena → SVG,
-│   │   │                         #   Mermaid → escena; imports dinámicos)
+│   │   │                         #   loadExcalidraw, la única puerta al paquete), drawingScene.ts (restore, Mermaid →
+│   │   │                         #   escena, escena → SVG; imports dinámicos), drawingPreview.ts (vista previa cacheada +
+│   │   │                         #   registro de fuentes) y excalidrawFontFaces.ts (GENERADO: scripts/gen-excalidraw-font-faces.cjs)
 │   │   └── themes.ts             # Definición de los 14 temas (CSS vars)
 │   ├── i18n/                     # Sistema i18n propio (EN/ES, sin deps): en/ = fuente de verdad
 │   │                            #   del tipo Messages, es/ forzado a paridad; format.ts (tf/plural),
