@@ -28,6 +28,7 @@ import { DeadlineTaskItem } from './DeadlineTaskItem'
 import { ResizableImage } from './ResizableImage'
 import { SectionRelation } from './SectionRelation'
 import { KanbanBoard } from './KanbanBoard'
+import { DrawingBlock } from './DrawingBlock'
 import { COLUMN_WIDTH_ATTR, COLUMN_WIDTH_VAR, widthFromAttr, widthOfColwidth } from '../../lib/tableWidth'
 
 // ── The editor's document schema ─────────────────────────────────────────────
@@ -215,6 +216,6 @@ export function schemaExtensions(opts: SchemaOptions = {}): Extensions {
     alignedTableHeader(!plain),
     alignedTableCell(!plain),
     LineBreak,
-    ...(plain ? [] : [SectionRelation, KanbanBoard]),
+    ...(plain ? [] : [SectionRelation, KanbanBoard, DrawingBlock]),
   ]
 }

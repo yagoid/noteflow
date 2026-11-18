@@ -131,6 +131,76 @@ pipe-tables GFM y el **ancho de una columna va en su celda de la fila separadora
   guiones en alguna columna sí toma anchos (es la forma de ponerlos a mano).
 - **Móvil:** aún no lo lee ni lo conserva (ver "⚠ Pendiente portar a móvil" en `patterns.md`).
 
+### Bloque de dibujo (cuerpo de sección)
+Como el kanban, vive en el Markdown de la sección (`src/lib/drawing/drawingBlock.ts`, integrado en
+`lib/markdownHtml.ts`); **no** toca el frontmatter ni los tres espejos. Son dos marcadores de comentario
+HTML en columna 0 alrededor de **un único code fence**, cuyo lenguaje dice la variante:
+
+````
+<!-- drawing -->
+```mermaid
+flowchart TD
+  A[Idea] --> B{Worth it?}
+```
+<!-- /drawing -->
+````
+
+````
+<!-- drawing height="320" -->
+```excalidraw
+{"type":"excalidraw","version":2,"appState":{"viewBackgroundColor":"transparent"}}
+{"id":"a1","type":"rectangle","x":10,"y":20,"width":120,"height":60,"angle":0,"seed":1}
+{"id":"a2","type":"text","x":20,"y":30,"width":40,"height":20,"containerId":"a1","text":"Idea"}
+{"file":{"id":"f1","mimeType":"image/png","created":1,"dataURL":"data:image/png;base64,…"}}
+```
+<!-- /drawing -->
+````
+
+- **Fuente (`mermaid`):** el texto Mermaid tal cual (lo que escriben la IA y el CLI). Se conserva byte a
+  byte, líneas en blanco incluidas.
+- **Escena (`excalidraw`):** un objeto JSON **por línea**, para que el diff de git y la fusión por líneas
+  del sync (`mergeSectionText`) trabajen por elemento. Serialización **canónica** (`serializeSceneBody`:
+  la misma escena da siempre los mismos bytes):
+  1. **Cabecera** `{"type":"excalidraw","version":2,"appState":{…}}`. Del `appState` solo se guardan
+     `gridModeEnabled`, `gridSize`, `gridStep` y `viewBackgroundColor` (los no nulos; sin ninguno se omite
+     `appState`). Nada del estado de sesión (zoom, selección, herramienta…).
+  2. **Una línea por elemento** no borrado, en el orden de la escena (orden Z). Claves: `id`, `type`, `x`,
+     `y`, `width`, `height` y luego el resto en orden alfabético; objetos anidados con claves ordenadas.
+     **Se omiten** `isDeleted`, `version`, `versionNonce` y `updated` (contabilidad de colaboración que
+     Excalidraw regenera al cargar con `restoreElements`; así un elemento que vuelve a su sitio da la misma
+     línea). `seed` e `index` sí se guardan.
+  3. **Una línea `{"file":{…}}` por imagen** que use algún elemento (`fileId`), ordenadas por id, sin
+     `lastRetrieved`. Las imágenes sin usar se descartan.
+  - **Redondeo:** los enteros no se tocan; `x`, `y`, `width`, `height`, `points`, `gap` y `fontSize` a
+    **2 decimales**; cualquier otro número fraccionario (ángulo en radianes, `focus`/`fixedPoint` de los
+    enlaces, `pressures`, `lineHeight`…) a **4**.
+- **Atributos del marcador de apertura:** cadena opaca `clave="valor"` conservada en el round-trip (misma
+  sintaxis que el kanban: `getKanbanAttr`/`setKanbanAttr`). Reservado `height` para la vista previa.
+- **Longitud del fence:** tres backticks, o uno más que la línea de solo-backticks más larga del contenido
+  (un Mermaid con una línea ` ``` ` no rompe el bloque). El fence se cierra en la primera línea formada solo
+  por al menos tantos backticks como la de apertura.
+- **Tolerado al leer** (y normalizado al guardar): líneas en blanco entre marcador y fence y entre líneas de
+  la escena, CRLF, claves en cualquier orden, decimales de más, y un **documento Excalidraw entero** pegado
+  en el fence (`{"type":"excalidraw","elements":[…],"files":{…}}`, en una o varias líneas).
+- **Validez — si falla algo, NO es un dibujo** (`parseDrawingMarkdown` → `null`) y la región se pinta y se
+  guarda exactamente como antes de existir el bloque (dos comentarios como texto y un bloque de código
+  normal), sin reescribir nada: falta un marcador o el fence, hay texto entre marcador y fence, el lenguaje
+  no es `mermaid`/`excalidraw`, marcador o fence indentados; en una escena, cualquier línea que no sea un
+  objeto JSON, sin cabecera o con otro `type`, elemento sin `id`/`type`, `id` repetido, línea desconocida;
+  en una fuente, una línea de marca de conflicto de sync (`> ⚠…`). **Es la red de seguridad ante conflictos
+  de sync:** el bloque de conflicto cae dentro del fence, el dibujo pasa a ser texto con las dos versiones
+  visibles, y al resolverlo a mano (también en modo texto) vuelve a ser un dibujo.
+- **Dónde se lee:** solo en el nivel superior de la sección. No dentro de una cita ni de un bloque de
+  código, ni en modo `plain` (notas vinculadas: se queda como texto y código). Sí en markdown pegado y en
+  el chat de IA (`columnWidths: false`), igual que el kanban.
+- **Fusión por líneas (límites conocidos, cubiertos por tests):** ediciones de elementos distintos y no
+  contiguos fusionan limpio; elementos añadidos al final en los dos lados se conservan (los del remoto
+  primero); el mismo elemento editado en los dos lados, o **dos elementos contiguos** editados cada uno en
+  un lado, dan conflicto → texto.
+- **Texto legible:** `drawingText(block)` (fuente → el Mermaid; escena → etiquetas y conexiones «A → B»).
+  Aún no está cableado a búsqueda / IA / recuento.
+- **Móvil y CLI:** no lo conocen; lo ven como comentario + bloque de código y lo conservan como texto.
+
 ### Migración v1 → v2
 - **Local** (`electron/migration.ts` → `migrateNotesDirToV2`): corre al arrancar, ANTES del pull
   inicial y del watcher. Convierte cada `<slug>-<id>.md` plano de la raíz en carpeta (parser

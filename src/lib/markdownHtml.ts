@@ -26,6 +26,14 @@ import {
   serializeKanbanMarkdown,
 } from './kanban'
 import {
+  DRAWING_OPEN_RE,
+  drawingHtmlDataFromElement,
+  drawingHtmlDataToMarkdown,
+  drawingToHtml,
+  matchDrawingBlock,
+  type DrawingBlock,
+} from './drawing/drawingBlock'
+import {
   escapeHtml,
   extractDeadlineAnnotations,
   flankedMarkPairs,
@@ -40,6 +48,11 @@ import {
 // Sentinel character used to protect blank lines inside code fences and kanban
 // boards from the \n\n block-splitter. Must not appear in real user content.
 const FENCE_BLANK = '\x00'
+// A drawing block (lib/drawing/drawingBlock.ts) while the text goes through the
+// block splitter: one line holding its index in `drawingSlots` (isolateDrawingBlocks).
+// eslint-disable-next-line no-control-regex
+const DRAWING_SLOT_RE = /^\x00drawing:(\d+)\x00$/
+const drawingSlotLine = (index: number) => `\x00drawing:${index}\x00`
 
 const HEADING_RE = /^(#{1,3})\s+(.+)$/
 // A list block: its first non-blank line starts with a bullet or `1.` marker.
@@ -49,7 +62,7 @@ export interface MarkdownHtmlOptions {
   /**
    * Plain Markdown, for linked notes (an external .md edited in place, see
    * lib/linkedNotes.ts): NoteFlow's own syntax isn't interpreted — kanban
-   * boards, `++underline++`, `==highlight==`, the 📅⏰🔺 task annotations and
+   * boards, drawing blocks, `++underline++`, `==highlight==`, the 📅⏰🔺 task annotations and
    * section-relation pills all stay text, so editing the file never rewrites
    * them. The editor of a linked note uses the matching plain schema
    * (editorExtensions.ts → schemaExtensions({ plain: true })).
@@ -95,34 +108,52 @@ function markdownBlocksToHtml(md: string): string {
   // Normalise line endings
   const src = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
-  // Isolate closed code fences as their own blocks and protect the blank lines
-  // inside them before splitting on \n\n (see isolateCodeFences). Kanban boards
-  // go second: their pass needs to know which lines are code (a marker inside a
-  // code block is code), and that is only settled once fences are isolated.
-  const fenced = isolateCodeFences(src)
-  const protectedSrc = quoteDepth > 0 || plainMode() ? fenced : isolateKanbanBlocks(fenced)
+  // NoteFlow's own blocks are only read at the top level of a note (not in a
+  // quote, not in plain mode).
+  const ownBlocks = quoteDepth === 0 && !plainMode()
+  const outerSlots = drawingSlots
+  if (ownBlocks) drawingSlots = []
+  try {
+    // Drawing blocks go first: each one owns a code fence, so it must be taken
+    // out (as a one-line slot) before the fence pass splits it in three.
+    const drawn = ownBlocks ? isolateDrawingBlocks(src) : src
 
-  // Split into "blocks" on blank lines — use exactly \n\n so that multiple
-  // consecutive blank lines produce empty blocks, preserving them as <p></p>.
-  const blocks = groupBlocks(protectedSrc.split(/\n\n/))
+    // Isolate closed code fences as their own blocks and protect the blank lines
+    // inside them before splitting on \n\n (see isolateCodeFences). Kanban boards
+    // go last: their pass needs to know which lines are code (a marker inside a
+    // code block is code), and that is only settled once fences are isolated.
+    const fenced = isolateCodeFences(drawn)
+    const protectedSrc = ownBlocks ? isolateKanbanBlocks(fenced) : fenced
 
-  return blocks.map(blockToHtml).join('') || '<p></p>'
+    // Split into "blocks" on blank lines — use exactly \n\n so that multiple
+    // consecutive blank lines produce empty blocks, preserving them as <p></p>.
+    const blocks = groupBlocks(protectedSrc.split(/\n\n/))
+
+    return blocks.map(blockToHtml).join('') || '<p></p>'
+  } finally {
+    drawingSlots = outerSlots
+  }
 }
+
+// The drawing blocks of the top-level parse in progress, by slot index (module
+// state like quoteDepth: the parse is synchronous).
+let drawingSlots: DrawingBlock[] = []
 
 // > 0 while parsing the content of a blockquote: no kanban boards there (the
 // schema keeps them at the top level, so a board in a quote would be moved out
 // of it); its markers stay quoted text, as they always were.
 let quoteDepth = 0
 
-type BlockKind = 'code' | 'heading' | 'hr' | 'kanban' | 'list' | 'quote' | 'table' | 'paragraph'
+type BlockKind = 'code' | 'drawing' | 'heading' | 'hr' | 'kanban' | 'list' | 'quote' | 'table' | 'paragraph'
 
 /**
- * What a \n\n block renders as. Order matters: code fence → heading → HR →
- * kanban → list → blockquote → table → paragraph (a `>` prefix can't be
- * confused with list markers; a block that starts with the kanban marker but
- * isn't a valid board falls through to the other kinds, as it always has).
+ * What a \n\n block renders as. Order matters: drawing slot → code fence →
+ * heading → HR → kanban → list → blockquote → table → paragraph (a `>` prefix
+ * can't be confused with list markers; a block that starts with the kanban marker
+ * but isn't a valid board falls through to the other kinds, as it always has).
  */
 function blockKind(lines: string[]): BlockKind {
+  if (lines.length === 1 && drawingSlotOf(lines[0])) return 'drawing'
   if (/^```/.test(lines[0])) return 'code'
   if (lines.length === 1 && HEADING_RE.test(lines[0])) return 'heading'
   if (lines.length === 1 && lines[0].trim() === '---') return 'hr'
@@ -141,9 +172,18 @@ function unprotectKanban(lines: string[]): string {
   return lines.map(l => (l === FENCE_BLANK ? '' : l)).join('\n')
 }
 
+/** The drawing a slot line stands for (isolateDrawingBlocks), if it is one. */
+function drawingSlotOf(line: string): DrawingBlock | undefined {
+  const m = line.match(DRAWING_SLOT_RE)
+  return m ? drawingSlots[Number(m[1])] : undefined
+}
+
 function blockToHtml(block: string): string {
   const lines = block.split('\n')
   switch (blockKind(lines)) {
+    // Drawing block (taken out by isolateDrawingBlocks; see drawing/drawingBlock.ts).
+    case 'drawing':
+      return drawingToHtml(drawingSlotOf(lines[0])!)
     case 'code': {
       const lang = lines[0].slice(3).trim()
       // Trailing blank lines go, as htmlToMarkdown drops them (code.trimEnd()):
@@ -330,8 +370,37 @@ const FENCE_CLOSE_RE = /^```[ \t]*$/
  */
 function isolateCodeFences(src: string): string {
   const lines = src.split('\n')
+  const { closerOf, inPair } = pairFences(lines)
 
-  // Pair openers with closers; `inPair` marks the lines strictly inside a pair.
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const close = closerOf.get(i)
+    if (close === undefined) {
+      out.push(lines[i])
+      continue
+    }
+
+    ensureBlockStart(out)
+    const { end, last } = fenceBlockEnd(lines, close, inPair)
+
+    out.push(lines[i])
+    // Every empty line up to `last` is inside a pair (else the block would end there).
+    for (let k = i + 1; k < last; k++) out.push(lines[k] === '' ? FENCE_BLANK : lines[k])
+    out.push(lines[last])
+
+    // Content glued after the closing line starts a new block.
+    if (last < end) out.push('')
+    i = last
+  }
+
+  return out.join('\n')
+}
+
+/**
+ * Pair fence openers with closers (see isolateCodeFences): opener line → closer
+ * line, and `inPair`, the lines strictly inside a pair.
+ */
+function pairFences(lines: string[]): { closerOf: Map<number, number>; inPair: boolean[] } {
   const closerOf = new Map<number, number>()
   const inPair: boolean[] = new Array(lines.length).fill(false)
   for (let i = 0; i < lines.length; i++) {
@@ -356,37 +425,81 @@ function isolateCodeFences(src: string): string {
     while (runEnd + 1 < lines.length && FENCE_CLOSE_RE.test(lines[runEnd + 1])) runEnd++
     i = runEnd + 1 === lines.length || lines[runEnd + 1] === '' ? runEnd : close
   }
+  return { closerOf, inPair }
+}
 
-  const out: string[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const close = closerOf.get(i)
-    if (close === undefined) {
-      out.push(lines[i])
-      continue
-    }
-
-    ensureBlockStart(out)
-
-    // The block ends right before the first empty line outside any pair; the
-    // code ends on the last closing line within that block.
-    let end = close
-    while (end + 1 < lines.length && (lines[end + 1] !== '' || inPair[end + 1])) end++
-    let last = close
-    for (let k = close + 1; k <= end; k++) {
-      if (FENCE_CLOSE_RE.test(lines[k])) last = k
-    }
-
-    out.push(lines[i])
-    // Every empty line up to `last` is inside a pair (else the block would end there).
-    for (let k = i + 1; k < last; k++) out.push(lines[k] === '' ? FENCE_BLANK : lines[k])
-    out.push(lines[last])
-
-    // Content glued after the closing line starts a new block.
-    if (last < end) out.push('')
-    i = last
+/**
+ * Where the code block of a fence pair ends: its \n\n block ends (`end`) right
+ * before the first empty line outside any pair; the code ends on the `last`
+ * closing line within that block.
+ */
+function fenceBlockEnd(lines: string[], close: number, inPair: boolean[]): { end: number; last: number } {
+  let end = close
+  while (end + 1 < lines.length && (lines[end + 1] !== '' || inPair[end + 1])) end++
+  let last = close
+  for (let k = close + 1; k <= end; k++) {
+    if (FENCE_CLOSE_RE.test(lines[k])) last = k
   }
+  return { end, last }
+}
 
-  return out.join('\n')
+/**
+ * First pre-pass of htmlFromMarkdown, on the raw text: replaces each drawing
+ * block (drawing/drawingBlock.ts: marker, one code fence, marker) by a one-line
+ * slot that the passes below carry as an opaque block, and keeps the parsed
+ * block in `drawingSlots`. It runs before isolateCodeFences because a drawing
+ * owns its fence — that pass would split the region into comment / code / comment.
+ *
+ * An opening marker counts only outside code: not on a line that a code block
+ * of the text as it stands would hold (the same pairing and extent
+ * isolateCodeFences applies; a drawing's own fence starts after its marker, so
+ * it never hides it). The region must parse as a drawing (matchDrawingBlock) —
+ * otherwise nothing is touched and it renders exactly as before: the markers as
+ * text and the fence as an ordinary code block. Like boards, a block boundary is
+ * ensured on both sides, and a drawing with a line starting with ``` glued right
+ * after its closing marker is left as text (splitting that line off would turn
+ * an unpaired fence into a code block).
+ *
+ * One drawing per round: taking a drawing out can change how the fences after it
+ * pair (its fence may be longer than three backticks, which the fence pass
+ * doesn't pair), so the code lines are settled again before looking for the next.
+ */
+function isolateDrawingBlocks(src: string): string {
+  if (!/^<!--[ \t]*drawing/m.test(src)) return src
+  let lines = src.split('\n')
+  for (let from = 0; from < lines.length;) {
+    const { closerOf, inPair } = pairFences(lines)
+    const inCode: boolean[] = new Array(lines.length).fill(false)
+    for (const [open, close] of closerOf) {
+      const { last } = fenceBlockEnd(lines, close, inPair)
+      for (let k = open; k <= last; k++) inCode[k] = true
+    }
+
+    let found = false
+    for (let i = from; i < lines.length; i++) {
+      if (inCode[i] || !DRAWING_OPEN_RE.test(lines[i])) continue
+      const match = matchDrawingBlock(lines, i)
+      if (!match) continue
+      const after = lines[match.end + 1]
+      const out = lines.slice(0, i)
+      ensureBlockStart(out)
+      out.push(drawingSlotLine(drawingSlots.length))
+      // Content glued after the closing marker starts a new block.
+      if (after !== undefined && after !== '') out.push('')
+      const next = out.concat(lines.slice(match.end + 1))
+      // (A fence glued there that is paired once the drawing is out is fine: the
+      // fence pass gives it its own block anyway.)
+      if (after !== undefined && FENCE_OPEN_RE.test(after) && !pairFences(next).closerOf.has(out.length)) continue
+
+      drawingSlots.push(match.block)
+      from = out.length
+      lines = next
+      found = true
+      break
+    }
+    if (!found) break
+  }
+  return lines.join('\n')
 }
 
 /**
@@ -536,6 +649,11 @@ function blockElToMd(el: Element): string {
   // serializeKanbanMarkdown ends on the closing marker; add the block separator.
   if (tag === 'div' && el.getAttribute('data-type') === 'kanban') {
     return serializeKanbanMarkdown(kanbanDataFromElement(el)) + '\n\n'
+  }
+  // Drawing block: likewise rebuilt from its data-* attributes (drawingBlock.ts);
+  // its children are only a fallback rendering.
+  if (tag === 'div' && el.getAttribute('data-type') === 'drawing') {
+    return drawingHtmlDataToMarkdown(drawingHtmlDataFromElement(el)) + '\n\n'
   }
   let out = ''
   for (const c of el.childNodes) {
@@ -1031,6 +1149,7 @@ export function looksLikeMarkdown(md: string): boolean {
     if (/^\s*>\s/.test(line)) return true               // blockquote
     if (/^\s*(```|~~~)/.test(line)) return true         // code fence
     if (KANBAN_OPEN_RE.test(line)) return true           // kanban board
+    if (DRAWING_OPEN_RE.test(line)) return true          // drawing block
   }
   return containsMarkdownTable(src)
 }

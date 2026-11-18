@@ -4271,12 +4271,33 @@ hay que mantener en sync: `skillAgentDestDirs()` de `electron/main.ts`, `skillAg
   `self-update` la skill de `main` dura hasta el siguiente arranque de una app más antigua, que la
   devuelve a la suya (el `noteflow.js` actualizado se queda) — desfase temporal y aceptado.
 
-### Bloque de dibujo (Excalidraw) — base técnica (Fase 0, spike)
+### Bloque de dibujo (Excalidraw) — base técnica y formato (Fases 0-1)
 
-Solo está montada la base: **no hay bloque en la nota ni entrada de usuario todavía**. Lo que existe:
+Está montada la base técnica y el **formato en disco** (`note-format.md` § "Bloque de dibujo"); **no hay
+UI de usuario todavía** (ni vista previa, ni overlay real, ni comando). Lo que existe:
 
-- **Dependencias fijadas a versión exacta:** `@excalidraw/excalidraw` 0.18.1 y
-  `@excalidraw/mermaid-to-excalidraw` 2.2.2, más `overrides.mermaid = 11.12.1` en `package.json`.
+- **Formato + round-trip (`src/lib/drawing/drawingBlock.ts`, puro, sin importar Excalidraw):** bloque
+  `<!-- drawing -->` + un fence `mermaid` (fuente) o `excalidraw` (escena, un elemento JSON por línea,
+  canónica) + `<!-- /drawing -->`. En `markdownHtml.ts` es la **primera** pre-pasada
+  (`isolateDrawingBlocks`, sobre el texto crudo, antes de `isolateCodeFences`): el dibujo es dueño de su
+  fence, y la pasada de fences lo partiría en comentario / código / comentario. Cada dibujo válido se
+  sustituye por una línea-ranura (`\x00drawing:N\x00`, el bloque parseado queda en `drawingSlots`) que
+  las pasadas siguientes (fences, kanban, corte en bloques) llevan como bloque opaco; `pairFences` /
+  `fenceBlockEnd` (extraídas de `isolateCodeFences`) deciden qué líneas son código, y se recalculan tras
+  sacar cada dibujo. Un marcador dentro de un bloque de código, de una cita o en modo `plain` no es un
+  dibujo. HTML intermedio: `div[data-type="drawing"]` con `data-kind`, `data-attrs` y `data-body` (el
+  contenido del fence; fuente de verdad de la vuelta) y un `<pre data-drawing-fallback>` con
+  `drawingText` que nunca se lee de vuelta. **Inválido = no se toca** (`parseDrawingMarkdown` → `null`): la
+  región se pinta y se guarda como antes de existir el bloque. Tests: `tests/lib/drawingBlock.test.ts`
+  (incluye la fusión con `mergeSectionText`) y `drawingEditorRoundTrip.test.ts` (esquema real).
+- **Nodo de esquema mínimo (`components/Editor/DrawingBlock.ts`):** átomo `topBlock` sin NodeView. Existe
+  solo para que el editor **no pierda el bloque**: sin un nodo para ese `div`, ProseMirror lo descarta al
+  abrir la nota y el guardado borraría el dibujo. Hoy muestra el `<pre>` de respaldo, no editable; la fase
+  2 le pone la vista previa y el overlay. Fuera del esquema `plain`.
+- **Dependencias fijadas a versión exacta, en `devDependencies`:** `@excalidraw/excalidraw` 0.18.1 y
+  `@excalidraw/mermaid-to-excalidraw` 2.2.2, más `overrides.mermaid = 11.12.1` en `package.json`. Van en
+  `devDependencies` porque solo las usa el renderer (Vite las mete en `dist/`) y electron-builder copia al
+  `app.asar` todo `node_modules` de producción: en `dependencies` añadían ~167 MB al instalador.
   ⚠️ El override no es decorativo: el conversor declara `mermaid ^11.12.1` y con el 11.17.x que
   resuelve npm los diagramas de clases, ER, estados y los flowcharts con `subgraph` dejan de salir como
   elementos editables (el conversor no encuentra sus nodos en el SVG y cae a una imagen, sin error
@@ -4295,8 +4316,10 @@ Solo está montada la base: **no hay bloque en la nota ni entrada de usuario tod
 - **Fallback a CDN parcheado en build:** Excalidraw añade siempre `https://esm.sh/…` como última fuente
   de cada `FontFace`, sin opción para quitarlo. La CSP lo bloquea (no hay red), pero Chromium
   comprueba todas las fuentes al crear la cara: ~230 violaciones `font-src` al abrir el lienzo. El
-  mismo plugin reescribe ese literal para que apunte a la ruta local (`transform`, también sobre el
-  pre-bundle de dev) y **rompe el build si el patrón deja de existir** tras una subida de versión.
+  mismo plugin reescribe ese literal para que apunte a la ruta local (`transform`). **Garantía, solo en
+  build de producción** (`generateBundle`): el build falla si la reescritura no se aplicó ninguna vez o si
+  algún chunk emitido contiene `https://esm.sh/` — cubre que el literal cambie de forma, de módulo o
+  aparezca otro. En dev (pre-bundle de Vite) la reescritura es de mejor esfuerzo y nada la comprueba.
 - **CSP sin cambios.** Consecuencia conocida: `exportToSvg` con fuentes incrustadas funciona bajo
   `file://`, pero el recorte de glifos usa `new Function` (bloqueado por `script-src 'self'`) y su
   worker no arranca desde `file://`, así que incrusta el fichero de fuente entero y deja dos
@@ -4305,7 +4328,15 @@ Solo está montada la base: **no hay bloque en la nota ni entrada de usuario tod
 - **Teclado:** el overlay lleva `data-own-keys` (`lib/keyScope.ts`), con lo que los atajos globales se
   apartan mientras el foco está dentro. ⚠️ Si el foco cae en `<body>` (p. ej. tras un `blur`), el
   handler de captura de `App.tsx` vuelve a actuar (Ctrl+N crea una nota detrás del overlay): pendiente
-  de resolver antes de exponerlo a usuarios.
+  de resolver antes de exponerlo a usuarios (fase 2: guard global de teclado).
+- ⚠️ **Enlaces externos del lienzo (pendiente, fase 2, toca `electron/`):** el diálogo Help y los
+  hipervínculos de elementos de Excalidraw usan `target="_blank"` / `window.open`. `electron/` no tiene
+  `setWindowOpenHandler` ni `will-navigate`, y la CSP no gobierna ventanas nuevas: hoy abrirían una
+  ventana de Electron con la web. Hay que resolverlo antes de exponer la función.
+- ⚠️ **Biblioteca online (pendiente, fase 2):** el disparador de la librería de Excalidraw solo está
+  oculto por CSS (`.default-sidebar-trigger` en `drawing.css`); el panel y su «browse libraries» siguen
+  existiendo. Quitarlo de verdad (o cortar su salida a red) antes de exponer la función. Igual el listener
+  de `noteflow:dev-open-drawing`, que hoy también escucha en producción: ponerlo tras `import.meta.env.DEV`.
 - **Entrada actual:** comando de la paleta «Drawing canvas (dev)», solo con `import.meta.env.DEV`
   (dispara `noteflow:dev-open-drawing`; el cierre emite `noteflow:dev-drawing-closed` con la escena
   serializada con `serializeAsJSON`). Tema: `components/Drawing/drawing.css` mapea los tokens de

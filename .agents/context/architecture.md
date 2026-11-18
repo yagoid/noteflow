@@ -161,6 +161,8 @@ noteflow/
 │   │   │   ├── KanbanBoardView.tsx      #   NodeView React: columnas, drag & drop, menús, búsqueda
 │   │   │   ├── KanbanParts.tsx          #   piezas: tarjeta, editor inline, menú de opciones
 │   │   │   ├── kanbanCommands.ts        #   insertar tablero, lista de tareas ↔ tablero
+│   │   │   ├── DrawingBlock.ts          # Nodo atom del bloque de dibujo: solo esquema (sin NodeView), para que el
+│   │   │   │                            #   editor conserve el bloque al abrir/guardar (ver patterns.md)
 │   │   │   ├── SectionRelation.ts       # Nodo inline atom de relación sección↔sección (+ SectionRelationView.tsx)
 │   │   │   ├── SlashCommands.ts         # Menú `/` (@tiptap/suggestion) + SlashCommandMenu.tsx
 │   │   │   ├── SectionLinkPicker.tsx    # Buscador de secciones del comando "Link section"
@@ -376,8 +378,11 @@ noteflow/
 │   │   ├── whatsNew.ts           # Lógica pura del tour "What's new" (qué mostrar, saneo, media) — testeado
 │   │   ├── snippets.ts           # Fragmentos: variables {date:FORMATO}, tokenizador de formato estilo
 │   │   │                         #   moment, sugerencias y operaciones de lista — testeado (ver patterns.md)
-│   │   ├── drawing/              # Excalidraw (spike): excalidrawAssets.ts (ruta de fuentes + loadExcalidraw, la
-│   │   │                         #   única puerta al paquete) y drawingScene.ts (escena → SVG, Mermaid → escena)
+│   │   ├── drawing/              # Bloque de dibujo: drawingBlock.ts (formato en la nota: parse/serialize de las
+│   │   │                         #   variantes mermaid / excalidraw, md↔HTML, drawingText; puro, sin Excalidraw —
+│   │   │                         #   testeado, ver note-format.md), excalidrawAssets.ts (ruta de fuentes +
+│   │   │                         #   loadExcalidraw, la única puerta al paquete) y drawingScene.ts (escena → SVG,
+│   │   │                         #   Mermaid → escena; imports dinámicos)
 │   │   └── themes.ts             # Definición de los 14 temas (CSS vars)
 │   ├── i18n/                     # Sistema i18n propio (EN/ES, sin deps): en/ = fuente de verdad
 │   │                            #   del tipo Messages, es/ forzado a paridad; format.ts (tf/plural),
