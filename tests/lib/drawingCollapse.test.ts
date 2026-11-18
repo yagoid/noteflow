@@ -101,7 +101,39 @@ for (const [name, impl] of [['renderer (drawingCollapse.ts)', renderer], ['main 
         .toBe(`- first\n\n${SCENE}\n\n- last\n\n${second}`)
       expect(impl.restoreCollapsedDrawings(original, `> [drawing #1]\n\n  [drawing #2]  `)).toBe(`${SCENE}\n\n${second}`)
       expect(impl.restoreCollapsedDrawings(original, `See [drawing #1: Idea] above and [drawing #2].`))
-        .toBe(`See  above and .\n\n${SCENE}\n\n${second}`)
+        .toBe(`See above and .\n\n${SCENE}\n\n${second}`)
+    })
+
+    it('a marker in a table row or a kanban board never splits it: the drawing goes right after', () => {
+      const table = '| Step | Picture |\n| --- | --- |\n| one | [drawing #1: Idea] |\n| two | - |'
+      expect(impl.restoreCollapsedDrawings(original, `${table}\n\nAfter\n\n[drawing #2]`))
+        .toBe(`| Step | Picture |\n| --- | --- |\n| one | |\n| two | - |\n\n${SCENE}\n\nAfter\n\n${second}`)
+      // The table ends the text.
+      expect(impl.restoreCollapsedDrawings(original, `${table}\n[drawing #2]`.replace('\n[drawing #2]', '')))
+        .toBe(`| Step | Picture |\n| --- | --- |\n| one | |\n| two | - |\n\n${SCENE}\n\n${second}`)
+      const board = '<!-- kanban done="Done" -->\n- Todo\n  - [ ] review [drawing #1]\n- Done\n<!-- /kanban -->'
+      expect(impl.restoreCollapsedDrawings(original, `${board}\n\n[drawing #2]`))
+        .toBe(`<!-- kanban done="Done" -->\n- Todo\n  - [ ] review\n- Done\n<!-- /kanban -->\n\n${SCENE}\n\n${second}`)
+    })
+
+    it('a fence the model never closed does not swallow the drawings it left out', () => {
+      const out = impl.restoreCollapsedDrawings(original, `Text\n\n${F}js\nconst a = 1`)
+      expect(out).toBe(`Text\n\n${F}js\nconst a = 1\n${F}\n\n${SCENE}\n\n${second}`)
+      // Nothing left out: the text is not touched.
+      const kept = `[drawing #1]\n\n[drawing #2]\n\n${F}js\nopen`
+      expect(impl.restoreCollapsedDrawings(original, kept)).toBe(`${SCENE}\n\n${second}\n\n${F}js\nopen`)
+    })
+
+    it('reads the marker however the model wrote it: case, spacing, escaped brackets', () => {
+      for (const marker of ['[Drawing #1]', '[DRAWING #1: Idea]', '[drawing  #1]', '[drawing#1]', '[ drawing # 1 : x ]', '\\[drawing #1\\]', '\\[drawing #1: Idea · Done\\]']) {
+        expect(impl.restoreCollapsedDrawings(original, `a\n\n${marker}\n\n[drawing #2]\n\nb`), marker).toBe(`a\n\n${SCENE}\n\n${second}\n\nb`)
+      }
+    })
+
+    it('leaves no debris where a marker was: heading marks, list bullets, doubled spaces', () => {
+      expect(impl.restoreCollapsedDrawings(original, '## [drawing #1: Idea]\n\n1. [drawing #2]\n\nend')).toBe(`${SCENE}\n\n${second}\n\nend`)
+      expect(impl.restoreCollapsedDrawings(original, '## Diagram [drawing #1] here\n\n[drawing #2]')).toBe(`## Diagram here\n\n${SCENE}\n\n${second}`)
+      expect(impl.restoreCollapsedDrawings(original, '  - nested [drawing #1]   item\n\n[drawing #2]')).toBe(`  - nested item\n\n${SCENE}\n\n${second}`)
     })
 
     it('a marker inside a code fence of the new text is not consumed there: the drawing is kept at the end', () => {
@@ -201,6 +233,19 @@ describe('renderer and main give the same output (parity fuzz)', () => {
       expect(main.stripDrawings(md), md).toBe(renderer.stripDrawings(md))
       const seen = renderer.collapseDrawings(md, 'marker')
       expect(main.restoreCollapsedDrawings(md, seen), md).toBe(renderer.restoreCollapsedDrawings(md, seen))
+      // Markers in the shapes and places a model may put them.
+      const wild = seen.split('\n').map((l) => {
+        if (!/^\[drawing #\d+/.test(l)) return l
+        const pickOne = r()
+        if (pickOne < 0.15) return `- ${l}`
+        if (pickOne < 0.3) return `| a | ${l} |`
+        if (pickOne < 0.4) return `## ${l.replace('[drawing', '[Drawing ')}`
+        if (pickOne < 0.5) return l.replace('[', '\\[').replace(/\]$/, '\\]')
+        if (pickOne < 0.6) return `${F}\n${l}`
+        if (pickOne < 0.7) return `<!-- kanban -->\n- Todo\n  - [ ] ${l}\n<!-- /kanban -->`
+        return l
+      }).join('\n')
+      expect(main.restoreCollapsedDrawings(md, wild), md).toBe(renderer.restoreCollapsedDrawings(md, wild))
       const shuffled = seen.split('\n').reverse().join('\n')
       expect(main.restoreCollapsedDrawings(md, shuffled), md).toBe(renderer.restoreCollapsedDrawings(md, shuffled))
     }

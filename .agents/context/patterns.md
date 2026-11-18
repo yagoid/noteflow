@@ -4303,15 +4303,24 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   eventos de `[data-drawing-interactive]` (botón Editar, asa de alto).
   **Un dibujo seleccionado nunca se sustituye al teclear** (plugin `drawingBlockGuard` del nodo): por
   defecto ProseMirror reemplaza el nodo de una selección de nodo por lo que se escribe o se pega — con un
-  dibujo al final de la sección, escribir lo borraba. `handleTextInput` y los eventos `paste` /
-  `compositionstart` llevan el cursor a un párrafo justo debajo (`caretBesideDrawing`; reutiliza el
-  párrafo vacío que ya hubiera) y el texto va ahí; solo Backspace / Supr lo borran. **Bordes de la
+  dibujo al final de la sección, escribir lo borraba. El guard **mueve primero la selección** a un
+  párrafo vacío justo debajo (`caretBesideDrawing`; reutiliza el que ya hubiera) en los eventos que
+  anuncian entrada — `handleKeyPress` (tecla imprimible), `paste` con contenido, `compositionstart` — y
+  deja que la entrada siga desde ahí; solo Backspace / Supr borran el dibujo. ⚠️ No basta con
+  `handleTextInput`: el plugin de **input rules de TipTap va siempre primero** en esa cadena y, con una
+  selección de nodo, toma el texto de los bloques de ARRIBA como «texto antes del cursor»: una tecla que
+  completa una regla (`*` tras «see *note», `#` + espacio…) sustituía ese rango y el dibujo con él. Con
+  el cursor ya en su propio párrafo, las reglas solo ven ese párrafo (y siguen funcionando: `- ` crea una
+  lista debajo). Un pegado o una composición que al final no escriben nada no dejan el párrafo (se
+  retira); no actúa con el editor en solo lectura. Tests con las input rules reales en
+  `tests/lib/drawingSelectionGuard.test.ts`. **Bordes de la
   sección:** con el dibujo seleccionado, ↓/→ al final del documento y ↑/← al principio crean el párrafo
   que falta; `Ctrl+End` / `Ctrl+Home` pasan al otro lado de un dibujo final / inicial. Tras «Hecho» de un
   dibujo recién insertado el cursor queda en el párrafo de debajo, no en el nodo. La tarjeta no es texto
   seleccionable (`user-select: none` y `::selection` transparente: el tinte de selección del editor se
   pintaba detrás del texto del SVG con el nodo seleccionado). ⚠️ El **kanban** tiene el mismo reemplazo al
-  teclear con el tablero seleccionado por su asa (comprobado; sin tocar).
+  teclear con el tablero seleccionado por su asa, también con teclas que completan una input rule
+  (comprobado sobre el esquema real; sin tocar en esta rama).
 - **Vista previa (`lib/drawing/drawingPreview.ts`):** SVG **inline** del exportador de Excalidraw
   (`exportToSvg` con `skipInliningFonts`), generado al mostrarse — nada se guarda en la nota. El chunk de
   Excalidraw (y Mermaid, en un bloque fuente) solo se pide cuando el bloque entra en pantalla

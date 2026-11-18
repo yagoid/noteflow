@@ -55,20 +55,22 @@ export function insertDrawing(editor: Editor) {
 /**
  * Puts the caret in a text block right after (or before) the drawing at `pos`, creating an
  * empty paragraph there when the drawing ends (starts) the document or the neighbour isn't
- * a text block. `text` is typed into it. A drawing is an atom: without this there is no
+ * a text block. `text` is typed into it; `fresh` asks for an empty paragraph of its own
+ * even if a paragraph with text follows. A drawing is an atom: without this there is no
  * place for the caret next to one at the edge of a section, and typing with it selected
  * would REPLACE it.
  */
-export function caretBesideDrawing(tr: Transaction, pos: number, side: 'after' | 'before', text = ''): Transaction {
+export function caretBesideDrawing(tr: Transaction, pos: number, side: 'after' | 'before', text = '', fresh = false): Transaction {
   const node = tr.doc.nodeAt(pos)
   if (!node || node.type.name !== DRAWING_NODE_NAME) return tr
   const paragraph = tr.doc.type.schema.nodes.paragraph
   if (side === 'after') {
     const at = pos + node.nodeSize
     const next = tr.doc.nodeAt(at)
-    // An empty paragraph already there is the place; anything else gets a new one (text
-    // typed over a selected drawing must not land inside the next block's content).
-    if (!(next?.type === paragraph && (next.content.size === 0 || !text))) tr.insert(at, paragraph.create())
+    // An empty paragraph already there is the place; anything else gets a new one when
+    // something is about to be written (`text`, or `fresh`: typed / pasted next) — it must
+    // not land inside the next block's content.
+    if (!(next?.type === paragraph && (next.content.size === 0 || (!text && !fresh)))) tr.insert(at, paragraph.create())
     if (text) tr.insertText(text, at + 1)
     return tr.setSelection(TextSelection.create(tr.doc, at + 1 + text.length))
   }

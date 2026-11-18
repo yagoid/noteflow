@@ -224,19 +224,34 @@ export function stripDrawings(md: string): string {
   return mapDrawingBlocks(md, () => [])
 }
 
-const MARKER_RE = /\[drawing #(\d+)(?::[^\]\n]*)?\]/g
-// What is left of a line once its markers are out is dropped when it is only a list or
-// quote prefix (the model put the marker in an item of its own).
-const LINE_PREFIX_RE = /^[ \t>]*(?:(?:[-*+]|\d+\.)[ \t]+(?:\[[ x]\][ \t]*)?)?/
+// The marker as a model may write it back: any case, loose spacing (`[Drawing #1]`,
+// `[drawing  #2]`, `[drawing#2]`), with or without the summary, brackets escaped or not.
+const MARKER_RE = /\\?\[\s*drawing\s*#\s*(\d+)\s*(?::[^\]\n]*)?\\?\]/gi
+// What is left of a line once its markers are out is dropped when it is only a quote,
+// heading or list prefix (the model put the marker in a line of its own kind).
+const LINE_PREFIX_RE = /^[ \t>]*(?:#{1,6}[ \t]*|(?:[-*+]|\d+\.)[ \t]+(?:\[[ x]\][ \t]*)?)?/
+// Structures a block can't be dropped into: a table row, a kanban board.
+const TABLE_ROW_RE = /^[ \t]*\|/
+const BOARD_OPEN_RE = /^<!--[ \t]*kanban(?:[ \t][^\n]*)?-->[ \t]*$/
+const BOARD_CLOSE_RE = /^<!--[ \t]*\/kanban[ \t]*-->[ \t]*$/
+
+/** A line with its markers taken out: no doubled spaces where one was, no trailing ones. */
+function tidyLine(line: string): string {
+  const indent = line.match(/^[ \t]*/)![0]
+  return indent + line.slice(indent.length).replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+$/, '')
+}
 
 /**
  * Undo collapseDrawings(…, 'marker') on a text a model rewrote. The model can't recreate a
  * scene, so a scene is never lost here:
  *   - a `[drawing #n…]` marker — alone on its line or anywhere in one (a list item, a
- *     quote, mid-sentence) — becomes the n-th scene block of `original` again, as a block
- *     of its own at that place (the rest of the line stays above it);
+ *     quote, a heading, mid-sentence) — becomes the n-th scene block of `original` again,
+ *     as a block of its own at that place (the rest of the line stays above it);
+ *   - inside a table row or a kanban board the block would break the structure: it goes
+ *     right AFTER the table / board;
  *   - a scene whose marker the model left out (or only wrote inside a code fence) is kept:
- *     appended at the end of the section. Deleting a drawing is the user's job;
+ *     appended at the end of the section — after closing a fence the model left open, so
+ *     the drawing isn't swallowed by the code. Deleting a drawing is the user's job;
  *   - only markers of scenes `original` really has are touched: a number with no scene is
  *     the user's own text and stays; a second marker of the same scene is dropped; a text
  *     whose original had no scene is returned as it is.
@@ -259,12 +274,20 @@ export function restoreCollapsedDrawings(original: string, next: string): string
     out.push(raw)
   }
   const pushScene = (n: number) => {
+    if (used.has(n)) return
     if (out.length > 0 && out[out.length - 1].trim() !== '') out.push(eol)
     for (const line of scenes[n - 1]) out.push(line + eol)
     blankDue = true
     used.add(n)
   }
+  // Scenes whose marker sat in a table row / a board: placed once that structure ends.
+  let deferred: number[] = []
+  const flush = () => {
+    for (const n of deferred) pushScene(n)
+    deferred = []
+  }
   let inFence = false
+  let inBoard = false
   for (const raw of next.split('\n')) {
     const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw
     if (inFence) {
@@ -272,29 +295,46 @@ export function restoreCollapsedDrawings(original: string, next: string): string
       push(raw)
       continue
     }
+    const isRow = TABLE_ROW_RE.test(line)
+    if (deferred.length > 0 && !inBoard && !isRow) flush()
     if (FENCE_OPEN_RE.test(line)) {
       inFence = true
       push(raw)
       continue
     }
+    if (!inBoard && BOARD_OPEN_RE.test(line)) inBoard = true
     const found: number[] = []
     const rest = line.replace(MARKER_RE, (marker, digits: string) => {
       const n = Number(digits)
       if (!scenes[n - 1]) return marker
-      if (!used.has(n) && !found.includes(n)) found.push(n)
+      if (!used.has(n) && !found.includes(n) && !deferred.includes(n)) found.push(n)
       return ''
     })
     if (rest === line) {
       push(raw)
-      continue
+    } else if (isRow || inBoard) {
+      push(tidyLine(rest) + eol)
+      deferred.push(...found)
+    } else {
+      if (rest.replace(LINE_PREFIX_RE, '').trim() !== '') push(tidyLine(rest) + eol)
+      for (const n of found) pushScene(n)
     }
-    if (rest.replace(LINE_PREFIX_RE, '').trim() !== '') push(rest.replace(/[ \t]+$/, '') + eol)
-    for (const n of found) pushScene(n)
+    if (inBoard && BOARD_CLOSE_RE.test(line)) {
+      inBoard = false
+      flush()
+    }
   }
+  flush()
+  let closed = !inFence
   for (let n = 1; n <= scenes.length; n++) {
     if (used.has(n)) continue
-    // At the end of the text, after one blank line (not glued to its last line).
+    // At the end of the text, after one blank line (not glued to its last line) — and
+    // outside a code fence the model never closed.
     while (out.length > 0 && out[out.length - 1].trim() === '') out.pop()
+    if (!closed) {
+      out.push('```' + eol)
+      closed = true
+    }
     pushScene(n)
   }
   if (out.length > 0 && out[out.length - 1].endsWith('\r')) out[out.length - 1] = out[out.length - 1].slice(0, -1)

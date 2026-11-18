@@ -127,28 +127,69 @@ export const DrawingBlock = Node.create({
   // Backspace / Delete remove it. The text goes to a paragraph right below it. (The
   // default of ProseMirror for a node selection is to replace the node — with a drawing
   // ending a section, Ctrl+End and typing wiped it.)
+  //
+  // The guard moves the SELECTION first — into an empty paragraph below the drawing — on
+  // the DOM events that announce input (keypress of a printable key, paste with content,
+  // compositionstart), and lets the input go on from there. It must not wait for
+  // handleTextInput: TipTap's input-rules plugin is always first in that chain, and with a
+  // node selection it reads the text of the blocks ABOVE as "text before the caret" — a
+  // key completing a rule (`*` after "see *note", `#` + space…) replaced that range and
+  // the drawing with it. Once the caret is in a paragraph of its own, rules see only that
+  // paragraph. The handleTextInput below is kept for input that arrives with no such
+  // event (it only runs when no rule fired).
   addProseMirrorPlugins() {
-    const moveBelow = (view: import('@tiptap/pm/view').EditorView): boolean => {
+    type View = import('@tiptap/pm/view').EditorView
+    /** The paragraph the guard made for input that then never came (removed again). */
+    let made: { view: View; pos: number } | null = null
+    const moveBelow = (view: View): boolean => {
       const pos = selectedDrawingPos(view.state.selection)
-      if (pos === null) return false
-      view.dispatch(caretBesideDrawing(view.state.tr, pos, 'after'))
+      if (pos === null || !view.editable) return false
+      const before = view.state.doc.childCount
+      view.dispatch(caretBesideDrawing(view.state.tr, pos, 'after', '', true))
+      made = view.state.doc.childCount > before ? { view, pos: view.state.selection.from - 1 } : null
       return true
+    }
+    /** Nothing was written into the paragraph the guard made: take it out again (an empty
+     *  paragraph before a list or a table would change the note's markdown). */
+    const dropIfUnused = () => {
+      const m = made
+      made = null
+      if (!m || m.view.isDestroyed) return
+      const { state } = m.view
+      const node = state.doc.nodeAt(m.pos)
+      if (!node || node.type.name !== 'paragraph' || node.content.size > 0) return
+      if (state.selection.from !== m.pos + 1 || !state.selection.empty) return
+      const drawing = m.pos > 0 ? state.doc.resolve(m.pos).nodeBefore : null
+      if (drawing?.type.name !== DRAWING_NODE_NAME) return
+      const tr = state.tr.delete(m.pos, m.pos + node.nodeSize)
+      m.view.dispatch(tr.setSelection(NodeSelection.create(tr.doc, m.pos - drawing.nodeSize)).setMeta('addToHistory', false))
     }
     return [
       new Plugin({
         key: new PluginKey('drawingBlockGuard'),
         props: {
+          // A printable key (ProseMirror only calls this for those): before any text input
+          // handling, input rules included.
+          handleKeyPress: (view) => { moveBelow(view); made = null; return false },
           handleTextInput: (view, _from, _to, text) => {
             const pos = selectedDrawingPos(view.state.selection)
-            if (pos === null) return false
+            if (pos === null || !view.editable) return false
             view.dispatch(caretBesideDrawing(view.state.tr, pos, 'after', text).scrollIntoView())
             return true
           },
           handleDOMEvents: {
-            // Before the editor's own paste / drop / IME handling: they then act on the
-            // caret in the new paragraph instead of on the selected node.
-            paste: (view) => { moveBelow(view); return false },
+            // Before the editor's own paste / IME handling, which then act on the caret in
+            // the new paragraph instead of on the selected node. Only when there is
+            // something to put there; a paste or a composition that ends up writing
+            // nothing leaves no paragraph behind.
+            paste: (view, event) => {
+              const data = (event as ClipboardEvent).clipboardData
+              const hasContent = !!data && (data.files.length > 0 || Array.from(data.types).length > 0)
+              if (hasContent && moveBelow(view)) setTimeout(dropIfUnused, 0)
+              return false
+            },
             compositionstart: (view) => { moveBelow(view); return false },
+            compositionend: () => { setTimeout(dropIfUnused, 0); return false },
           },
         },
       }),

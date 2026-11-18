@@ -617,9 +617,13 @@ tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventan
   editable). **Escritura:** `restoreStrippedImages` devuelve a cada línea `[drawing #n…]` del contenido
   nuevo el bloque n-ésimo del original — **por número**, no por posición, y sea cual sea el resumen que
   deje el modelo, y **esté donde esté en la línea** (un ítem de lista, una cita, en mitad de una frase: el
-  dibujo vuelve como bloque propio en ese punto) —. Un dibujo de escena **nunca se pierde** al reescribir:
+  dibujo vuelve como bloque propio en ese punto; dentro de una **fila de tabla o de un tablero kanban** se
+  coloca justo DESPUÉS de la tabla / tablero para no partirlos) —. El marcador se reconoce con
+  mayúsculas, espacios de más o de menos y corchetes escapados (`[Drawing #1]`, `[drawing#2]`,
+  `[drawing #1]`), y al sacarlo de una línea no quedan restos (ni `##` ni viñetas huérfanas ni dobles
+  espacios). Un dibujo de escena **nunca se pierde** al reescribir:
   si el modelo omite su marcador (o solo lo escribe dentro de un fence) se **conserva al final de la
-  sección** — el modelo no puede recrearlo; borrarlo es cosa del usuario. Solo se tocan marcadores de
+  sección** (cerrando antes un fence que el modelo dejara abierto, para que no quede dentro del código) — el modelo no puede recrearlo; borrarlo es cosa del usuario. Solo se tocan marcadores de
   dibujos que la sección original tiene de verdad: un número sin dibujo es texto del usuario y se queda;
   uno repetido se descarta; en una sección sin dibujos no se toca nada. Las imágenes (que sí se pierden
   si el modelo las omite) se emparejan solo contra las imágenes markdown `![alt](data:…)` del texto ya
