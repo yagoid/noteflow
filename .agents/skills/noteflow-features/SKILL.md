@@ -1047,7 +1047,7 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
   Ya no hay hilera de mini-botones de tabla bajo la toolbar.
 - **Cabecera obligatoria:** no se puede borrar la fila de cabecera ni insertar una fila
   por encima de ella (las pipe-tables de markdown exigen cabecera). Las celdas de cabecera
-  vacías muestran el placeholder "Column" (en el mismo estilo de etiqueta, más tenue).
+  vacías se quedan vacías (sin texto guía).
 - **Aspecto (prototipo aprobado 2026-11, cabecera "Etiqueta"):** la cabecera es una **etiqueta
   pequeña en mayúsculas, gris (texto atenuado) y con tracking**, sin fondo ni color de acento; filas
   sin cebreado, solo la rejilla fina del borde del tema. Con el editor enfocado, la **celda del

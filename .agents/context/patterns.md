@@ -1798,8 +1798,8 @@ desde la capa de controles, ver "Editor: controles de tabla").
   `headerMinContentPx`). Caso residual aceptado: cabecera renombrada luego con una palabra más larga, o
   ancho escrito a mano → se ve más ancha que lo guardado, sin cortes. Igual con una **imagen en línea** en
   una celda más ancha que la columna: su min-content la ensancha por encima de lo guardado (el markdown no
-  cambia). Y con una cabecera **vacía**: su placeholder «Column» es un `::before` que el `Range` de
-  `headerMinContentPx` no mide; con letra pequeña puede verse un par de px más ancha. El par `data-nf-colw-live` /
+  cambia). Las cabeceras **vacías** se quedan vacías: el placeholder «Column» (un `::before` en inglés fijo,
+  de cuando la cabecera era una barra gris) se quitó el 2026-11-18. El par `data-nf-colw-live` /
   `--nf-colw-live` (vista previa del arrastre) va después y gana al ancho propio.
 - **CSS (`index.css` § Tables):** sin `div.tableWrapper` (TipTap solo lo crea con `resizable: true`
   vía `TableView`; `renderWrapper` cambiaría la salida de `getHTML()`), el propio `<table>` es

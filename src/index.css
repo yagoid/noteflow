@@ -2533,16 +2533,8 @@ html[data-color-scheme="light"] .section-hover-card {
 .prose-editor .ProseMirror.ProseMirror-hideselection table ::selection {
   background: transparent;
 }
-/* Guide text in empty header cells so they never look like blank grey bars.
-   An empty ProseMirror textblock renders as <p><br class="ProseMirror-trailingBreak"></p>. */
-.prose-editor .ProseMirror th > p:has(> br.ProseMirror-trailingBreak:only-child)::before {
-  content: 'Column';
-  color: rgb(var(--text-muted) / 0.5);
-  font-weight: 400;
-  pointer-events: none;
-  float: left;
-  height: 0;
-}
+/* Empty header cells stay empty: no guide text (the old "Column" placeholder
+   filled the grey header bars of the previous look; the label header has no fill). */
 
 /* ── Table controls (Editor/TableControls.tsx, TableMenu.tsx) ─────────────────
    One overlay per editor, over its scroller's visible box (it clips to it),
