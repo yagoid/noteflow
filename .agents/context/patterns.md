@@ -4271,6 +4271,46 @@ hay que mantener en sync: `skillAgentDestDirs()` de `electron/main.ts`, `skillAg
   `self-update` la skill de `main` dura hasta el siguiente arranque de una app más antigua, que la
   devuelve a la suya (el `noteflow.js` actualizado se queda) — desfase temporal y aceptado.
 
+### Bloque de dibujo (Excalidraw) — base técnica (Fase 0, spike)
+
+Solo está montada la base: **no hay bloque en la nota ni entrada de usuario todavía**. Lo que existe:
+
+- **Dependencias fijadas a versión exacta:** `@excalidraw/excalidraw` 0.18.1 y
+  `@excalidraw/mermaid-to-excalidraw` 2.2.2, más `overrides.mermaid = 11.12.1` en `package.json`.
+  ⚠️ El override no es decorativo: el conversor declara `mermaid ^11.12.1` y con el 11.17.x que
+  resuelve npm los diagramas de clases, ER, estados y los flowcharts con `subgraph` dejan de salir como
+  elementos editables (el conversor no encuentra sus nodos en el SVG y cae a una imagen, sin error
+  visible). Al subir cualquiera de los tres, volver a comprobar los tipos.
+- **Carga perezosa:** la única puerta al paquete es `loadExcalidraw()` (`src/lib/drawing/excalidrawAssets.ts`)
+  y el `React.lazy` de `components/Drawing/DrawingOverlayHost.tsx` (montado solo en `MainApp`). Nada de
+  Excalidraw ni de Mermaid entra en el bundle inicial ni en las ventanas sticky / de sección. No
+  importarlo de forma estática desde código que cargue al arrancar.
+- **Fuentes autoalojadas sin versionar binarios:** el plugin `noteflow:excalidraw-fonts` de
+  `vite.config.ts` las sirve desde `node_modules` en dev (middleware `/excalidraw/fonts`) y las emite
+  en `dist/excalidraw/fonts/**` al compilar (por tanto también en `npm run dist`). Sin Xiaolai (CJK,
+  12,7 MB): el texto CJK cae a una fuente del sistema y deja errores `ERR_FILE_NOT_FOUND` en consola.
+- **`window.EXCALIDRAW_ASSET_PATH` debe ser una URL absoluta** (`new URL('excalidraw/', location.href)`):
+  Excalidraw resuelve las rutas que empiezan por `/` o `./` contra `location.origin`, que empaquetado
+  es `file://` a secas (la raíz del disco). Hay que fijarlo **antes** de evaluar el módulo.
+- **Fallback a CDN parcheado en build:** Excalidraw añade siempre `https://esm.sh/…` como última fuente
+  de cada `FontFace`, sin opción para quitarlo. La CSP lo bloquea (no hay red), pero Chromium
+  comprueba todas las fuentes al crear la cara: ~230 violaciones `font-src` al abrir el lienzo. El
+  mismo plugin reescribe ese literal para que apunte a la ruta local (`transform`, también sobre el
+  pre-bundle de dev) y **rompe el build si el patrón deja de existir** tras una subida de versión.
+- **CSP sin cambios.** Consecuencia conocida: `exportToSvg` con fuentes incrustadas funciona bajo
+  `file://`, pero el recorte de glifos usa `new Function` (bloqueado por `script-src 'self'`) y su
+  worker no arranca desde `file://`, así que incrusta el fichero de fuente entero y deja dos
+  `console.error`. Con `skipInliningFonts` no hay errores ni se carga el chunk de recorte (1,8 MB).
+  No añadir `'unsafe-eval'` por esto.
+- **Teclado:** el overlay lleva `data-own-keys` (`lib/keyScope.ts`), con lo que los atajos globales se
+  apartan mientras el foco está dentro. ⚠️ Si el foco cae en `<body>` (p. ej. tras un `blur`), el
+  handler de captura de `App.tsx` vuelve a actuar (Ctrl+N crea una nota detrás del overlay): pendiente
+  de resolver antes de exponerlo a usuarios.
+- **Entrada actual:** comando de la paleta «Drawing canvas (dev)», solo con `import.meta.env.DEV`
+  (dispara `noteflow:dev-open-drawing`; el cierre emite `noteflow:dev-drawing-closed` con la escena
+  serializada con `serializeAsJSON`). Tema: `components/Drawing/drawing.css` mapea los tokens de
+  Excalidraw (`--color-primary*`, `--island-bg-color`, `--color-surface-*`…) al tema activo.
+
 ## Temas
 
 14 temas en `src/lib/themes.ts` (cada uno = set de CSS vars). Default: `noteflow-dark`.

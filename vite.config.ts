@@ -1,9 +1,76 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import fs from 'fs'
 import path from 'path'
 
+// Excalidraw (drawing blocks) loads its canvas fonts at runtime from
+// `window.EXCALIDRAW_ASSET_PATH` + `fonts/<Family>/<file>.woff2` and falls back to a CDN
+// (esm.sh) when a file is missing. The app is offline-first, so the fonts ship with it:
+// served straight from node_modules in dev, emitted as `dist/excalidraw/fonts/**` on build
+// (nothing binary is versioned). The path is set in src/lib/drawing/excalidrawAssets.ts.
+// Xiaolai (CJK, 12.7 MB) is left out on purpose.
+const EXCALIDRAW_FONTS_DIR = path.resolve(__dirname, 'node_modules/@excalidraw/excalidraw/dist/prod/fonts')
+const EXCALIDRAW_FONTS_URL = 'excalidraw/fonts'
+const EXCALIDRAW_SKIPPED_FAMILIES = new Set(['Xiaolai'])
+
+function listExcalidrawFonts(): string[] {
+  const out: string[] = []
+  for (const family of fs.readdirSync(EXCALIDRAW_FONTS_DIR, { withFileTypes: true })) {
+    if (!family.isDirectory() || EXCALIDRAW_SKIPPED_FAMILIES.has(family.name)) continue
+    for (const file of fs.readdirSync(path.join(EXCALIDRAW_FONTS_DIR, family.name))) {
+      if (file.endsWith('.woff2')) out.push(`${family.name}/${file}`)
+    }
+  }
+  return out
+}
+
+// Excalidraw 0.18 always appends a CDN copy (`https://esm.sh/@excalidraw/excalidraw@…/dist/prod/`)
+// as the last source of every font face, with no option to turn it off. Under the app's CSP
+// that never reaches the network, but Chromium checks every source when the face is created,
+// so opening the canvas logged ~230 "Refused to load the font" violations. Point that
+// fallback at the self-hosted path instead (a harmless duplicate of the first source).
+const EXCALIDRAW_CDN_FALLBACK = /`https:\/\/esm\.sh\/\$\{[\s\S]*?\}\/dist\/prod\/`/
+const EXCALIDRAW_LOCAL_FALLBACK = '(typeof window.EXCALIDRAW_ASSET_PATH==="string"?window.EXCALIDRAW_ASSET_PATH:window.location.href)'
+
+function excalidrawFonts(): Plugin {
+  return {
+    name: 'noteflow:excalidraw-fonts',
+    transform(code, id) {
+      // Build: the package's own chunk. Dev: Vite's pre-bundled copy (node_modules/.vite/deps/chunk-*.js).
+      const inPackage = id.includes('@excalidraw/excalidraw')
+      if (!code.includes('https://esm.sh/') || !(inPackage || id.includes('/.vite/deps/'))) return null
+      if (!EXCALIDRAW_CDN_FALLBACK.test(code)) {
+        // An Excalidraw upgrade changed the code: fail loudly rather than ship the CDN fallback back.
+        if (inPackage) this.error(`Excalidraw CDN font fallback not found in ${id}: update EXCALIDRAW_CDN_FALLBACK in vite.config.ts`)
+        return null
+      }
+      return { code: code.replace(EXCALIDRAW_CDN_FALLBACK, EXCALIDRAW_LOCAL_FALLBACK), map: null }
+    },
+    configureServer(server) {
+      const known = new Set(listExcalidrawFonts())
+      server.middlewares.use(`/${EXCALIDRAW_FONTS_URL}`, (req, res) => {
+        const rel = decodeURIComponent((req.url ?? '').split('?')[0]).replace(/^\/+/, '')
+        // Always answer here (never fall through to the SPA fallback, which would serve
+        // index.html with a 200 for a missing font).
+        if (!known.has(rel)) { res.statusCode = 404; res.end(); return }
+        res.setHeader('Content-Type', 'font/woff2')
+        fs.createReadStream(path.join(EXCALIDRAW_FONTS_DIR, rel)).pipe(res)
+      })
+    },
+    generateBundle() {
+      for (const rel of listExcalidrawFonts()) {
+        this.emitFile({
+          type: 'asset',
+          fileName: `${EXCALIDRAW_FONTS_URL}/${rel}`,
+          source: fs.readFileSync(path.join(EXCALIDRAW_FONTS_DIR, rel)),
+        })
+      }
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), excalidrawFonts()],
   base: './',
   resolve: {
     alias: {

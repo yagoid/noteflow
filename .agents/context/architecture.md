@@ -298,6 +298,11 @@ noteflow/
 │   │   │   │                           #   Restaurar como sección nueva / Restaurar esta versión, estados sin Cloud
 │   │   │   ├── VersionHistoryParts.tsx #   Piezas de presentación (filas, diff, diálogo de captura fallida)
 │   │   │   └── versionHistoryUi.ts     #   Clases compartidas (solo tokens del tema)
+│   │   ├── Drawing/                    # Bloque de dibujo con Excalidraw — Fase 0 (spike), ver patterns.md
+│   │   │   ├── DrawingOverlayHost.tsx  #   Montado en MainApp: escucha el evento de apertura y carga el overlay con React.lazy
+│   │   │   ├── DrawingOverlay.tsx      #   (chunk perezoso) <Excalidraw> con idioma/tema de NoteFlow, UI recortada, cierre → escena JSON
+│   │   │   ├── drawingEvents.ts        #   Eventos de apertura/cierre (entrada solo de desarrollo desde la paleta)
+│   │   │   └── drawing.css             #   Tokens de Excalidraw → tema activo
 │   │   ├── ConfirmModal.tsx            # Modal de confirmación genérico (`hideCancel` = solo informativo)
 │   │   ├── EncryptionModal.tsx         # Modal cifrar/descifrar notas
 │   │   ├── ExportImportModal.tsx       # Modal exportar/importar notas (flujo, lanzado desde DataPanel)
@@ -371,6 +376,8 @@ noteflow/
 │   │   ├── whatsNew.ts           # Lógica pura del tour "What's new" (qué mostrar, saneo, media) — testeado
 │   │   ├── snippets.ts           # Fragmentos: variables {date:FORMATO}, tokenizador de formato estilo
 │   │   │                         #   moment, sugerencias y operaciones de lista — testeado (ver patterns.md)
+│   │   ├── drawing/              # Excalidraw (spike): excalidrawAssets.ts (ruta de fuentes + loadExcalidraw, la
+│   │   │                         #   única puerta al paquete) y drawingScene.ts (escena → SVG, Mermaid → escena)
 │   │   └── themes.ts             # Definición de los 14 temas (CSS vars)
 │   ├── i18n/                     # Sistema i18n propio (EN/ES, sin deps): en/ = fuente de verdad
 │   │                            #   del tipo Messages, es/ forzado a paridad; format.ts (tf/plural),

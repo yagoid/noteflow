@@ -16,6 +16,7 @@ import { BrainView } from './components/Brain/BrainView'
 import { ContentView } from './components/ContentView/ContentView'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { WhatsNewHost } from './components/WhatsNew/WhatsNewHost'
+import { DrawingOverlayHost } from './components/Drawing/DrawingOverlayHost'
 import { LinkedNotesHost } from './components/LinkedNote/LinkedNotesHost'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
@@ -857,6 +858,8 @@ function MainApp({ isSticky }: { isSticky: boolean }) {
       <LinkedNotesHost />
       {/* "What's new" tour: startup popup + the tour opened from Settings / the palette (main window only). */}
       <WhatsNewHost />
+      {/* Drawing block (spike): the Excalidraw overlay, lazy-loaded on first open (main window only). */}
+      <DrawingOverlayHost />
     </div>
     </HoverPreviewProvider>
     </ErrorBoundary>

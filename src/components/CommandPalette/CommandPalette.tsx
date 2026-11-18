@@ -7,7 +7,7 @@ import type { Note } from '../../types'
 import {
   Search, Plus, FolderOpen, Keyboard, X,
   Clock, FolderPlus, Upload, Download, RefreshCw, Cloud, Zap, Settings,
-  Brain, MessageSquare, Sparkles, Link2, SlidersHorizontal, AppWindow, GraduationCap, FileSymlink,
+  Brain, MessageSquare, Sparkles, Link2, SlidersHorizontal, AppWindow, GraduationCap, FileSymlink, PenTool,
 } from 'lucide-react'
 import { formatDate } from '../../i18n/formatDate'
 import { useT } from '../../i18n/useT'
@@ -15,6 +15,7 @@ import { tf, plural } from '../../i18n/format'
 import { escapeRegExp, getNoteSearchIndex, normalize } from '../../lib/searchUtils'
 import { modKey } from '../../lib/platform'
 import { requestLinkFile } from '../LinkedNote/linkedActions'
+import { requestDevDrawing } from '../Drawing/drawingEvents'
 
 function HighlightText({ text, query }: { text: string; query: string }) {
   const trimmed = query.trim()
@@ -310,6 +311,18 @@ export function CommandPalette() {
       },
       category: 'action',
     },
+    // Development only (dropped from production builds): the drawing-block spike overlay.
+    ...(import.meta.env.DEV
+      ? [{
+          id: 'dev-drawing',
+          label: t.drawing.devCommand.label,
+          description: t.drawing.devCommand.description,
+          keywords: 'drawing draw canvas excalidraw sketch diagram dev',
+          icon: <PenTool size={ICON_SIZE} className={ICON_CLS} />,
+          action: () => { setCommandPaletteOpen(false); requestDevDrawing() },
+          category: 'action' as const,
+        }]
+      : []),
   ]
 
   const q = query.toLowerCase().trim()

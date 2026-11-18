@@ -20,6 +20,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
+    "@excalidraw/excalidraw": "0.18.1",
+    "@excalidraw/mermaid-to-excalidraw": "2.2.2",
     "@huggingface/transformers": "^4.2.0",
     "@tiptap/core": "^2.27.2",
     "@tiptap/extension-blockquote": "^2.27.2",
@@ -65,6 +67,9 @@
     "sqlite-vec": "^0.1.9",
     "three": "^0.169.0",
     "zustand": "^5.0.11"
+  },
+  "overrides": {
+    "mermaid": "11.12.1"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
