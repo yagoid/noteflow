@@ -19,9 +19,12 @@ import {
   Undo2,
   Redo2,
   SquareKanban,
+  PenTool,
 } from 'lucide-react'
 import { convertTaskListToBoard, insertDefaultBoard, kanbanDefaultColumns, topLevelTaskList } from './kanbanCommands'
 import { useT } from '../../i18n/useT'
+import { insertDrawing } from './drawingCommands'
+import { useDrawingEditorStore } from '../../stores/drawingEditorStore'
 import { SnippetsButton } from './SnippetsButton'
 import { TableButton } from './TableButton'
 
@@ -68,6 +71,8 @@ export function EditorToolbar({ editor }: ToolbarProps) {
   // A linked note's plain-Markdown schema (editorExtensions.ts) has no underline,
   // highlight nor kanban board: their buttons go with them.
   const { marks, nodes } = editor.schema
+  // A drawing needs the canvas: only where this window can open it (not in a sticky).
+  const canDraw = useDrawingEditorStore((s) => s.available)
 
   // 'snippets' = the split button of the snippets (its own component: dropdown + modal);
   // 'table' = the table button (TableButton: the table's menu inside one, else the size picker).
@@ -177,6 +182,12 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       },
       title: inTaskList ? t.editor.slash.convertToKanban : t.editor.toolbar.insertKanban,
     }] : []),
+    // Same command as `/draw`: inserts the block and opens the canvas.
+    ...(nodes.drawingBlock && canDraw ? [{
+      icon: <PenTool size={14} />,
+      action: () => insertDrawing(editor),
+      title: t.editor.toolbar.insertDrawing,
+    }] : []),
     'snippets',
     'sep',
     {
@@ -205,6 +216,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
               key={btn.title}
               onClick={btn.action}
               title={btn.title}
+              aria-label={btn.title}
               className={`p-1.5 rounded text-xs transition-colors font-mono
                 ${btn.isActive
                   ? 'bg-surface-3 text-text'

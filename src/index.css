@@ -2451,7 +2451,7 @@ body.nf-table-resizing * { cursor: col-resize !important; user-select: none; }
   margin: 0.9rem 0;
 }
 /* In the readable width a drawing keeps to the reading column, like text and code
-   blocks (a wide one is scaled down to fit; boards are the only full-bleed block). */
+   blocks — unless it has a width of its own (see `.drawing-card.is-sized` below). */
 .editor-readable .prose-editor .ProseMirror > .node-drawingBlock {
   max-width: var(--readable-col);
   margin-left: auto;
@@ -2538,6 +2538,53 @@ body.nf-table-resizing * { cursor: col-resize !important; user-select: none; }
 .drawing-preview > svg a {
   pointer-events: none;
 }
+/* A drawing with a width (the `width` attribute of its marker, --drawing-w): the images'
+   rule ("Image breakout" above). Narrower than its column it sits left-aligned in it;
+   wider, in the Readable width, it grows centred on the column — each side half, into
+   the gutters — up to the editor's content width (100cqw of the .editor-readable
+   container minus the ProseMirror paddings and the 6px scrollbar). A window narrower
+   than the stored width just caps it: the attribute is not rewritten. Everywhere else
+   (Full width, section window without the readable column) it is capped by its column.
+   The handle's drag mirrors this geometry (lib/drawing/drawingSize.ts). */
+.drawing-card.is-sized {
+  width: min(var(--drawing-w), 100%);
+}
+.editor-readable .prose-editor .ProseMirror > .node-drawingBlock .drawing-card.is-sized {
+  --drawing-shown: min(var(--drawing-w), max(100%, 100cqw - var(--pm-pad-l) - var(--pm-pad-r) - 6px));
+  width: var(--drawing-shown);
+  margin-left: min(0px, (100% - var(--drawing-shown)) / 2);
+}
+.drawing-card.is-resizing {
+  transition: none;
+}
+/* Side handles: the whole edge is the grip; a short bar shows on hover / selection. */
+.drawing-resize-x {
+  position: absolute;
+  top: 1.8rem;
+  bottom: 8px;
+  width: 7px;
+  cursor: ew-resize;
+}
+.drawing-resize-left { left: 0; }
+.drawing-resize-right { right: 0; }
+.drawing-resize-x::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 3px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 2px;
+  background: rgb(var(--text-muted) / 0.45);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.drawing-node:hover .drawing-resize-x::after,
+.drawing-node.is-selected .drawing-resize-x::after {
+  opacity: 1;
+}
+
 /* The card is an atom, not text: its labels are never text-selected (a node selection
    spans the node's DOM, and the browser painted its ::selection behind the SVG text). */
 .drawing-card {

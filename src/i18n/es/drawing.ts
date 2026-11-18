@@ -7,6 +7,7 @@ export const drawing = {
   edit: 'Editar',
   editHint: 'Editar el dibujo (doble clic, o Enter con el bloque seleccionado)',
   resize: 'Arrastra para cambiar la altura',
+  resizeWidth: 'Arrastra para cambiar el ancho (doble clic: volver al ancho del texto)',
   loading: 'Cargando lienzo…',
   empty: 'Dibujo vacío',
   previewError: 'No se ha podido mostrar este dibujo: {error}',

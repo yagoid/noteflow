@@ -182,7 +182,10 @@ flowchart TD
     enlaces, `pressures`, `lineHeight`…) a **4**.
 - **Atributos del marcador de apertura:** cadena opaca `clave="valor"` conservada en el round-trip (misma
   sintaxis que el kanban: `getKanbanAttr`/`setKanbanAttr`). `height` = alto en px de la vista previa (80…1600;
-  sin él, el alto propio del dibujo hasta 360 px). Un marcador cuyos atributos contengan `-->` **no** es un
+  sin él, el alto propio del dibujo hasta 360 px, o el que dé su proporción si hay `width`). `width` = ancho
+  en px de la tarjeta (160…4000; sin él, el de la columna de lectura; más ancho que la columna, sobresale
+  centrada como las imágenes; en pantalla nunca pasa del ancho del editor, sin reescribir el atributo).
+  Valores no numéricos o fuera de mínimo se ignoran. Ej.: `<!-- drawing width="900" height="320" -->`. Un marcador cuyos atributos contengan `-->` **no** es un
   marcador de apertura (el comentario HTML acabaría ahí): la región se queda como texto.
 - **Longitud del fence:** tres backticks, o uno más que la línea de solo-backticks más larga del contenido
   (un Mermaid con una línea ` ``` ` no rompe el bloque). El fence se cierra en la primera línea formada solo

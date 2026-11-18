@@ -3,7 +3,6 @@ import type { NodeViewProps } from '@tiptap/react'
 import { Selection } from '@tiptap/pm/state'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pencil, PenTool, Workflow } from 'lucide-react'
-import { getKanbanAttr, setKanbanAttr } from '../../lib/kanban'
 import {
   drawingFromHtmlData,
   drawingText,
@@ -11,6 +10,10 @@ import {
 } from '../../lib/drawing/drawingBlock'
 import { cachedDrawingPreview, drawingPreview, type DrawingPreview } from '../../lib/drawing/drawingPreview'
 import { blockToScene, sceneHasImages } from '../../lib/drawing/drawingScene'
+import {
+  DRAWING_DEFAULT_MAX_HEIGHT, DRAWING_MAX_HEIGHT, DRAWING_MIN_HEIGHT,
+  drawingWidthFromDrag, storedDrawingHeight, storedDrawingWidth, withDrawingSize,
+} from '../../lib/drawing/drawingSize'
 import { THEMES } from '../../lib/themes'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
@@ -31,9 +34,8 @@ import { DRAWING_EDIT_EVENT, DRAWING_NODE_NAME, caretBesideDrawing, consumeOpenO
 // ONE updateAttributes / deleteNode on the live node → one undoable transaction that
 // autosaves like any edit. Closing the overlay without changes writes nothing.
 
-const DEFAULT_MAX_HEIGHT = 360
-const MIN_HEIGHT = 80
-const MAX_HEIGHT = 1600
+/** The scrollbar of the editor's scroller (`::-webkit-scrollbar` in index.css): left out by the CSS cap. */
+const SCROLLBAR_WIDTH = 6
 
 type PreviewState =
   | { status: 'idle' | 'loading' }
@@ -48,9 +50,23 @@ function svgSize(svg: string): { width: number; height: number } | null {
   return width > 0 && height > 0 ? { width, height } : null
 }
 
-function storedHeight(attrs: string): number | null {
-  const n = Number(getKanbanAttr(attrs, 'height'))
-  return Number.isFinite(n) && n >= MIN_HEIGHT ? Math.min(Math.round(n), MAX_HEIGHT) : null
+/**
+ * Where the card can grow (the same terms as the CSS, `.drawing-card.is-sized`): in the
+ * Readable width it may break out of the reading column, centred on it, up to the
+ * editor's content width — 100cqw of the `.editor-readable` container minus the
+ * ProseMirror paddings and the scrollbar; elsewhere it is capped by its own column.
+ */
+function widthBounds(card: HTMLElement): { column: { left: number; width: number }; max: number } | null {
+  const wrapper = card.parentElement
+  if (!wrapper) return null
+  const rect = wrapper.getBoundingClientRect()
+  const column = { left: rect.left, width: rect.width }
+  const pm = card.closest('.ProseMirror')
+  const container = card.closest('.editor-readable')
+  if (!pm || !container) return { column, max: column.width }
+  const style = getComputedStyle(pm)
+  const cap = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - SCROLLBAR_WIDTH
+  return { column, max: Math.max(column.width, cap) }
 }
 
 export function DrawingBlockView({ node, editor, getPos, selected, updateAttributes, deleteNode }: NodeViewProps) {
@@ -217,31 +233,77 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
     if (consumeOpenOnInsert()) void editRef.current(true)
   }, [])
 
-  // ── Height: the marker's `height` attribute, or the drawing's own up to a cap ──
+  // ── Size: the marker's `width` / `height` attributes (lib/drawing/drawingSize.ts) ──
+  // No width = the reading column. No height = the drawing's own height (capped) when it
+  // has no width either; with a width, the height follows the drawing's proportions, so a
+  // wider card shows a bigger drawing. A drag only changes local state: ONE transaction
+  // when the pointer is released (one Ctrl+Z), and the SVG is never regenerated.
   const preview = state.status === 'ready' ? state.preview : null
   const natural = preview && !preview.empty ? svgSize(preview.svg) : null
-  const height = dragHeight ?? storedHeight(data.attrs) ?? (natural ? Math.min(natural.height, DEFAULT_MAX_HEIGHT) : null)
+  const [dragWidth, setDragWidth] = useState<number | null>(null)
+  const width = dragWidth ?? storedDrawingWidth(data.attrs)
+  const fixedHeight = dragHeight ?? storedDrawingHeight(data.attrs)
+  const previewStyle: React.CSSProperties | undefined = fixedHeight
+    ? { height: fixedHeight }
+    : !natural
+      ? undefined
+      : width
+        ? { aspectRatio: `${natural.width} / ${natural.height}`, maxHeight: DRAWING_MAX_HEIGHT }
+        : { height: Math.min(natural.height, DRAWING_DEFAULT_MAX_HEIGHT) }
 
-  const onResizeStart = (e: React.PointerEvent) => {
-    if (!editor.isEditable || height === null) return
+  /** Drags of the handles: pointer captured on the window until release. */
+  const drag = (e: React.PointerEvent, onMove: (ev: PointerEvent) => void, onEnd: () => void) => {
     e.preventDefault()
     e.stopPropagation()
-    const startY = e.clientY
-    const startHeight = height
-    let last = startHeight
-    const onMove = (ev: PointerEvent) => {
-      last = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.round(startHeight + ev.clientY - startY)))
-      setDragHeight(last)
-    }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
-      setDragHeight(null)
-      const live = liveData()
-      if (live && last !== startHeight) updateAttributes({ drawing: { ...live, attrs: setKanbanAttr(live.attrs, 'height', String(last)) } })
+      onEnd()
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+  }
+  const commitSize = (key: 'width' | 'height', px: number | null) => {
+    const live = liveData()
+    if (live) updateAttributes({ drawing: { ...live, attrs: withDrawingSize(live.attrs, key, px) } })
+  }
+
+  const onResizeStart = (e: React.PointerEvent) => {
+    const el = rootRef.current?.querySelector<HTMLElement>('.drawing-preview')
+    if (!editor.isEditable || !el) return
+    const startY = e.clientY
+    const startHeight = Math.round(el.getBoundingClientRect().height)
+    let last = startHeight
+    drag(e, (ev) => {
+      last = Math.max(DRAWING_MIN_HEIGHT, Math.min(DRAWING_MAX_HEIGHT, Math.round(startHeight + ev.clientY - startY)))
+      setDragHeight(last)
+    }, () => {
+      setDragHeight(null)
+      if (last !== startHeight) commitSize('height', last)
+    })
+  }
+
+  const onWidthStart = (side: 'left' | 'right') => (e: React.PointerEvent) => {
+    const card = rootRef.current
+    const bounds = card ? widthBounds(card) : null
+    if (!editor.isEditable || !card || !bounds) return
+    const rect = card.getBoundingClientRect()
+    const start = { left: rect.left, right: rect.right }
+    const startX = e.clientX
+    let last: number | null = null
+    drag(e, (ev) => {
+      last = drawingWidthFromDrag({ side, dx: ev.clientX - startX, start, column: bounds.column, max: bounds.max })
+      setDragWidth(last)
+    }, () => {
+      setDragWidth(null)
+      if (last !== null && last !== storedDrawingWidth(data.attrs)) commitSize('width', last)
+    })
+  }
+  /** Double click on a side handle: back to the width of the column. */
+  const resetWidth = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (storedDrawingWidth(data.attrs) !== null) commitSize('width', null)
   }
 
   const Icon = data.kind === 'mermaid' ? Workflow : PenTool
@@ -252,7 +314,12 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
 
   return (
     <NodeViewWrapper className={`drawing-node${selected ? ' is-selected' : ''}`} data-drawing-kind={data.kind}>
-      <div ref={rootRef} className="drawing-card" onDoubleClick={() => { void edit() }}>
+      <div
+        ref={rootRef}
+        className={`drawing-card${width ? ' is-sized' : ''}${dragWidth !== null || dragHeight !== null ? ' is-resizing' : ''}`}
+        style={width ? { '--drawing-w': `${width}px` } as React.CSSProperties : undefined}
+        onDoubleClick={() => { void edit() }}
+      >
         <div className="drawing-header" contentEditable={false}>
           <Icon size={12} />
           <span className="drawing-label">{label}</span>
@@ -272,7 +339,7 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
         {preview && !preview.empty ? (
           <div
             className="drawing-preview"
-            style={height ? { height } : undefined}
+            style={previewStyle}
             // Excalidraw's own SVG export of the scene (links and scripts stripped in sceneToSvg).
             dangerouslySetInnerHTML={{ __html: preview.svg }}
           />
@@ -283,12 +350,24 @@ export function DrawingBlockView({ node, editor, getPos, selected, updateAttribu
         )}
         {message && <div className="drawing-message" contentEditable={false}>{message}</div>}
         {preview && !preview.empty && editor.isEditable && (
-          <div
-            className="drawing-resize"
-            data-drawing-interactive=""
-            title={t.drawing.resize}
-            onPointerDown={onResizeStart}
-          />
+          <>
+            <div
+              className="drawing-resize"
+              data-drawing-interactive=""
+              title={t.drawing.resize}
+              onPointerDown={onResizeStart}
+            />
+            {(['left', 'right'] as const).map((side) => (
+              <div
+                key={side}
+                className={`drawing-resize-x drawing-resize-${side}`}
+                data-drawing-interactive=""
+                title={t.drawing.resizeWidth}
+                onPointerDown={onWidthStart(side)}
+                onDoubleClick={resetWidth}
+              />
+            ))}
+          </>
         )}
       </div>
     </NodeViewWrapper>

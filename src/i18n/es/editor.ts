@@ -71,6 +71,7 @@ export const editor = {
     insertTable: 'Insertar tabla',
     tableOptions: 'Opciones de la tabla',
     insertKanban: 'Insertar tablero kanban',
+    insertDrawing: 'Insertar dibujo',
     undo: 'Deshacer (Ctrl+Z)',
     redo: 'Rehacer (Ctrl+Y)',
     set: 'Aplicar',

@@ -4323,8 +4323,24 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   `FontFace` (carga perezosa por subconjunto) desde `lib/drawing/excalidrawFontFaces.ts`, tabla
   **generada** del propio paquete (`node scripts/gen-excalidraw-font-faces.cjs`; familia, fichero, peso y
   `unicode-range`). `tests/lib/excalidrawFontFaces.test.ts` falla si la tabla no corresponde a la versión
-  instalada: regenerarla al subir Excalidraw. Alto: atributo `height` del marcador (asa inferior, una
-  transacción al soltar) o el propio del dibujo hasta 360 px.
+  instalada: regenerarla al subir Excalidraw.
+- **Tamaño de la tarjeta (`lib/drawing/drawingSize.ts`, puro y testeado):** atributos `width` / `height` del
+  marcador, en px. **Ancho = la regla de las imágenes** (`ResizableImage.tsx` + «Image breakout» de
+  `index.css`, mismas variables `--pm-pad-*` y `100cqw`): sin `width` la tarjeta es la columna de lectura;
+  con él (`.drawing-card.is-sized`, `--drawing-w`) queda alineada a la izquierda mientras cabe en la
+  columna y, al superarla en «ancho legible», crece **centrada** sobre ella —mitad por cada lado, hacia
+  los márgenes— hasta el ancho de contenido del editor. Fuera de `.editor-readable` (ancho completo) se
+  limita a su columna. Una ventana más estrecha que el `width` guardado solo lo recorta en pantalla
+  (`min()` en CSS): el atributo no se reescribe. Asas: una en cada lado (`drawingWidthFromDrag` replica
+  la geometría del CSS para que el asa siga al cursor; doble clic = quitar `width`) y la inferior para el
+  alto. Un arrastre solo cambia estado local: **una transacción al soltar** (un Ctrl+Z), y el SVG no se
+  regenera (su caché es por contenido). Alto: con `height`, fijo; sin él y sin `width`, el propio del
+  dibujo hasta 360 px; sin él y con `width`, sigue la proporción del dibujo (`aspect-ratio`), así una
+  tarjeta más ancha muestra el dibujo más grande. Sticky y vistas de solo lectura no cambian.
+- **Insertar:** `/draw` y el botón «Insert drawing» del toolbar (`EditorToolbar.tsx`, tras el del kanban)
+  llaman al mismo `insertDrawing`. El botón solo existe donde hay nodo de dibujo en el esquema (no en
+  notas vinculadas) y un lienzo en la ventana (`drawingEditorStore.available`: no en sticky); en modo
+  texto no hay toolbar.
 - **Lienzo (`components/Drawing/DrawingOverlay.tsx` + `DrawingOverlayHost.tsx` + `stores/drawingEditorStore.ts`):**
   la vista del nodo y el overlay viven en árboles React distintos; el store guarda UNA sesión
   (`edit()` devuelve una promesa que resuelve al cerrar). El host se monta en `MainApp` (no sticky) y en
