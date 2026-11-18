@@ -19,8 +19,9 @@
 //   POST <fn>/autocomplete       → auth + entitlement + small body cap + budget
 //                                  check (no reservation) → OpenRouter → SSE
 //                                  passthrough → cost added to the user's daily
-//                                  row. Body { before, after? }: the SERVER
-//                                  builds the whole upstream request.
+//                                  row. Body { before, after?, title?,
+//                                  section?, sections? }: the SERVER builds
+//                                  the whole upstream request.
 //
 // Auth: `Authorization: Bearer <Supabase access token>` — the user JWT the
 // desktop app mints from its account session. Deploy WITH JWT verification
@@ -552,7 +553,7 @@ async function handleAutocomplete(
 
   // ── Forward: the server-built request (model, prompt, caps, reasoning off) ─
   const model = parseAutocompleteModel(Deno.env.get('AI_AUTOCOMPLETE_MODEL'))
-  const upstreamBody = buildAutocompleteBody(request.before, request.after, model)
+  const upstreamBody = buildAutocompleteBody(request.before, request.after, model, request.about)
   let upstream: Response
   try {
     upstream = await fetch(OPENROUTER_CHAT_URL, {

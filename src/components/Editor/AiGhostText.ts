@@ -7,13 +7,14 @@ import { dispatchOwnUndoStep } from './tableOps'
 import { useAiAutocompleteStore } from '../../stores/aiAutocompleteStore'
 import {
   AUTOCOMPLETE_AFTER_CHARS, AUTOCOMPLETE_BEFORE_CHARS, AUTOCOMPLETE_PAUSE_MS,
-  canRequestCompletion, hasEnoughContext, remainingSuggestion,
+  canRequestCompletion, hasEnoughContext, remainingSuggestion, type AutocompleteNoteContext,
 } from '../../lib/aiAutocomplete'
 
 // Inline AI autocomplete as ghost text (NoteFlow AI plan only; off by default — the switch
 // is in Settings → AI, a local setting read live from aiAutocompleteStore).
 //
-// After a typing pause it asks main (`ai:complete`) to continue the text at the caret and
+// After a typing pause it asks main (`ai:complete`) to continue the text at the caret (the
+// request also says what the note is about: title and section names, `getNoteContext`) and
 // shows the answer dimmed there as it streams in — a widget decoration, never part of the
 // document. Tab inserts it (as its own undo step), Esc or any other edit / caret
 // move drops it; typing the characters it starts with keeps the rest. One request in flight
@@ -100,6 +101,9 @@ function slashMenuOpen(state: EditorState): boolean {
 export interface AiGhostTextOptions {
   /** False for content the AI must never see (encrypted note, section hidden from the AI, linked note). Read live. */
   isAllowed: () => boolean
+  /** What the note is about (title, active section, names of the other sections — never one
+   *  hidden from the AI), sent with each request. Read live, when asking. Null = nothing. */
+  getNoteContext: () => AutocompleteNoteContext | null
 }
 
 export const AiGhostText = Extension.create<AiGhostTextOptions>({
@@ -111,7 +115,7 @@ export const AiGhostText = Extension.create<AiGhostTextOptions>({
   priority: 1000,
 
   addOptions() {
-    return { isAllowed: () => false }
+    return { isAllowed: () => false, getNoteContext: () => null }
   },
 
   // Load the switch (and follow its changes) with the first editor of the window.
@@ -121,6 +125,7 @@ export const AiGhostText = Extension.create<AiGhostTextOptions>({
 
   addProseMirrorPlugins() {
     const isAllowed = this.options.isAllowed
+    const getNoteContext = this.options.getNoteContext
 
     let timer: ReturnType<typeof setTimeout> | null = null
     let inFlight: { id: string; pos: number; doc: EditorState['doc'] } | null = null
@@ -172,7 +177,7 @@ export const AiGhostText = Extension.create<AiGhostTextOptions>({
       inFlight = { id, pos, doc: state.doc }
       // The text so far, as it streams in.
       onPartial(id, (text) => showSuggestion(view, id, text))
-      void window.noteflow.aiComplete({ requestId: id, before, after }).then((res) => {
+      void window.noteflow.aiComplete({ requestId: id, before, after, ...(getNoteContext() ?? {}) }).then((res) => {
         partialHandlers.delete(id)
         if (inFlight?.id !== id) return // superseded or cancelled
         if (res.ok) {

@@ -35,6 +35,7 @@ import {
 } from '../../lib/externalContentSync'
 import { rawSectionDisplayText, sectionTextForClipboard } from '../../lib/sectionClipboard'
 import { isLinkedNote, isLinkedReadOnly, isPlainTextLinked, sectionShowsRaw } from '../../lib/linkedNotes'
+import { autocompleteNoteContext } from '../../lib/aiAutocomplete'
 import { LinkedNoteHeader } from '../LinkedNote/LinkedNoteHeader'
 import { VersionHistoryPanel, type VersionRestoreResult } from '../VersionHistory/VersionHistoryPanel'
 import { fileNameOf } from '../LinkedNote/linkedActions'
@@ -1632,6 +1633,8 @@ export function NoteEditor({ noteId, paneId, standalone = false, aiChatButton = 
                 showToc={showToc}
                 persistHistory
                 aiAutocomplete={!isLinked && !note.encryption && !activeSection?.aiHidden}
+                // Names only, and never the one of a section hidden from the AI.
+                aiNoteContext={autocompleteNoteContext(note.title, note.sections, activeSection?.id)}
                 taskProgress
               />
               {searchOpen && (

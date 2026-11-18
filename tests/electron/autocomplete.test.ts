@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
-  AUTOCOMPLETE_BEFORE_CHARS, AUTOCOMPLETE_MAX_WORDS, AUTOCOMPLETE_NO_PLAN_BACKOFF_MS,
-  AUTOCOMPLETE_QUOTA_BACKOFF_MS, AUTOCOMPLETE_TRANSIENT_BACKOFF_MS, AutocompleteRequestError,
+  AUTOCOMPLETE_BEFORE_CHARS, AUTOCOMPLETE_MAX_SECTIONS, AUTOCOMPLETE_MAX_WORDS, AUTOCOMPLETE_NO_PLAN_BACKOFF_MS,
+  AUTOCOMPLETE_QUOTA_BACKOFF_MS, AUTOCOMPLETE_SECTION_CHARS, AUTOCOMPLETE_SECTION_NAME_CHARS,
+  AUTOCOMPLETE_TITLE_CHARS, AUTOCOMPLETE_TRANSIENT_BACKOFF_MS, AutocompleteRequestError,
   autocompleteBackoffMs, blockedUntilAfterAccountChange, blockedUntilAfterFailure, cleanSuggestion,
-  completeText, finishesLastWord, parseAutocompleteUsage,
+  completeText, finishesLastWord, noteContextFields, parseAutocompleteUsage,
 } from '../../electron/ai/autocomplete'
 
 describe('cleanSuggestion — spacing', () => {
@@ -305,6 +306,33 @@ describe('parseAutocompleteUsage', () => {
   })
 })
 
+describe('noteContextFields (title / section / sections of the request body)', () => {
+  it('keeps trimmed strings and leaves out what is missing', () => {
+    expect(noteContextFields(' Viaje ', ' Hoy ', [' Ideas ', 'Tareas'])).toEqual({
+      title: 'Viaje', section: 'Hoy', sections: ['Ideas', 'Tareas'],
+    })
+    expect(noteContextFields('Viaje', '', [])).toEqual({ title: 'Viaje' })
+    expect(noteContextFields(undefined, undefined, undefined)).toEqual({})
+  })
+
+  it('ignores values of the wrong type (they come over IPC)', () => {
+    expect(noteContextFields(42, { name: 'x' }, 'Ideas')).toEqual({})
+    expect(noteContextFields(null, ['a'], [1, null, 'Ideas', {}, '  '])).toEqual({ sections: ['Ideas'] })
+  })
+
+  it('caps every name and the number of sections', () => {
+    const fields = noteContextFields('t'.repeat(500), 's'.repeat(500), Array.from({ length: 50 }, (_, i) => `${i}-${'n'.repeat(200)}`))
+    expect(fields.title).toHaveLength(AUTOCOMPLETE_TITLE_CHARS)
+    expect(fields.section).toHaveLength(AUTOCOMPLETE_SECTION_CHARS)
+    expect(fields.sections).toHaveLength(AUTOCOMPLETE_MAX_SECTIONS)
+    expect(fields.sections!.every((n) => n.length === AUTOCOMPLETE_SECTION_NAME_CHARS)).toBe(true)
+    // The worst-case body stays far below the proxy's 32 KiB limit, even in a 3-byte script.
+    const worst = noteContextFields('語'.repeat(500), '語'.repeat(500), Array.from({ length: 50 }, (_, i) => `${i}${'語'.repeat(200)}`))
+    const body = JSON.stringify({ before: '語'.repeat(AUTOCOMPLETE_BEFORE_CHARS), after: '語'.repeat(200), ...worst })
+    expect(new TextEncoder().encode(body).length).toBeLessThan(16 * 1024)
+  })
+})
+
 describe('completeText', () => {
   const sse = (frames: string[]): Response =>
     new Response(frames.map((f) => `data: ${f}\n\n`).join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } })
@@ -347,6 +375,36 @@ describe('completeText', () => {
     }) as unknown as typeof fetch
     await completeText({ baseUrl: 'https://p', token: 't', before: 'Texto de prueba', after: '', signal: new AbortController().signal, fetchImpl })
     expect(JSON.parse(sent)).toEqual({ before: 'Texto de prueba' })
+  })
+
+  it('sends the note context (title, section, other sections) next to the text', async () => {
+    let sent = ''
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      sent = String(init.body)
+      return sse([delta('_hola', 'stop'), '[DONE]'])
+    }) as unknown as typeof fetch
+    await completeText({
+      baseUrl: 'https://p', token: 't', before: 'Texto de prueba', after: '',
+      title: 'Viaje a Japón', section: 'Presupuesto', sections: ['Ideas', 'Tareas'],
+      signal: new AbortController().signal, fetchImpl,
+    })
+    expect(JSON.parse(sent)).toEqual({
+      before: 'Texto de prueba', title: 'Viaje a Japón', section: 'Presupuesto', sections: ['Ideas', 'Tareas'],
+    })
+  })
+
+  it('a note context with nothing usable sends the same body as before', async () => {
+    let sent = ''
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      sent = String(init.body)
+      return sse([delta('_hola', 'stop'), '[DONE]'])
+    }) as unknown as typeof fetch
+    await completeText({
+      baseUrl: 'https://p', token: 't', before: 'Texto de prueba', after: 'fin',
+      title: '  ', section: 7, sections: [null, ''],
+      signal: new AbortController().signal, fetchImpl,
+    })
+    expect(JSON.parse(sent)).toEqual({ before: 'Texto de prueba', after: 'fin' })
   })
 
   it('throws the status and the error code of a rejected request', async () => {

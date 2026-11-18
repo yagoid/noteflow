@@ -17,6 +17,7 @@ import { SearchHighlight } from './SearchHighlightExtension'
 import { SlashCommands, getSlashCommands } from './SlashCommands'
 import { AutoCloseBrackets } from './AutoCloseBrackets'
 import { AiGhostText } from './AiGhostText'
+import type { AutocompleteNoteContext } from '../../lib/aiAutocomplete'
 import { ListItemMove } from './ListItemMove'
 import { ActiveTableCell } from './ActiveTableCell'
 import { TableColumnResize } from './TableColumnResize'
@@ -159,6 +160,10 @@ interface EditorProps {
    *  — false for encrypted notes, sections hidden from the AI and linked notes. Read live;
    *  the feature's own switch (Settings → AI) is checked by the extension. */
   aiAutocomplete?: boolean
+  /** What the note is about, sent with each autocomplete request (title, active section and
+   *  the names of the other sections — lib/aiAutocomplete.ts → autocompleteNoteContext).
+   *  Read live. */
+  aiNoteContext?: AutocompleteNoteContext | null
 }
 
 export interface EditorHandle {
@@ -183,9 +188,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   taskProgress = false,
   linked = false,
   aiAutocomplete = false,
+  aiNoteContext = null,
 }, ref) {
   const aiAutocompleteRef = useRef(aiAutocomplete)
   useEffect(() => { aiAutocompleteRef.current = aiAutocomplete }, [aiAutocomplete])
+  const aiNoteContextRef = useRef(aiNoteContext)
+  useEffect(() => { aiNoteContextRef.current = aiNoteContext }, [aiNoteContext])
   // Frozen at mount: the schema can't change under a live editor (it's keyed by section).
   const [plain] = useState(linked)
   // Frozen at mount too: the extension list is built once.
@@ -280,7 +288,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       // Copied cells as TSV text; pasted tables normalized for markdown (tableClipboard.ts).
       TableClipboard,
       // AI autocomplete as ghost text (Tab accepts): inert unless switched on in Settings → AI.
-      AiGhostText.configure({ isAllowed: () => aiAutocompleteRef.current }),
+      AiGhostText.configure({
+        isAllowed: () => aiAutocompleteRef.current,
+        getNoteContext: () => aiNoteContextRef.current,
+      }),
       SlashCommands.configure({
         onLinkSection: () => setLinkPickerOpen(true),
         getLabels: () => getSlashCommands(tRef.current),

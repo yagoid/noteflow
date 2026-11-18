@@ -935,7 +935,9 @@ export function mapUpstreamError(status: number, bodyText: string): MappedUpstre
 
 // ── Inline autocomplete (POST /autocomplete, migration 0018) ──────────────────
 // Ghost-text suggestions in the editor. The client only sends the text around
-// the cursor ({ before, after }); the SERVER builds the whole upstream request
+// the cursor ({ before, after }) and, optionally, what the note is about
+// ({ title, section, sections } — names only, sanitized and capped here); the
+// SERVER builds the whole upstream request
 // (system prompt, model, max_tokens, temperature, streaming, usage accounting,
 // reasoning off) — nothing of that can be chosen by the client. Metering is
 // different from the chat on purpose: a suggestion costs ~$0.0001, so there is
@@ -981,10 +983,18 @@ export const AUTOCOMPLETE_TEMPERATURE = 0.2
 export const AUTOCOMPLETE_MAX_BEFORE_CHARS = 2_000
 /** Text kept AFTER the cursor: its first N UTF-16 code units. */
 export const AUTOCOMPLETE_MAX_AFTER_CHARS = 300
+/** Caps of the optional <about> block (UTF-16 code units, after sanitizing). */
+export const AUTOCOMPLETE_MAX_TITLE_CHARS = 200
+export const AUTOCOMPLETE_MAX_SECTION_CHARS = 120
+/** Names of the OTHER sections of the note: at most this many… */
+export const AUTOCOMPLETE_MAX_SECTIONS = 30
+/** …of at most this many characters each. */
+export const AUTOCOMPLETE_MAX_SECTION_NAME_CHARS = 80
 /**
  * Max body of POST /autocomplete (bytes). The context is trimmed server-side
- * anyway, so this only bounds what the isolate reads: 32 KiB is several times
- * the trimmed context even for 3-byte scripts with JSON escaping. A client
+ * anyway, so this only bounds what the isolate reads: 32 KiB is still about
+ * twice the trimmed context plus the capped <about> names (~5.1k characters in
+ * all) for 3-byte scripts. A client
  * that sends the whole note gets 413 — it must trim before sending.
  */
 export const AUTOCOMPLETE_MAX_BODY_BYTES = 32 * 1024
@@ -1001,10 +1011,14 @@ export const AUTOCOMPLETE_CURSOR_MARK = '<CURSOR/>'
  * The user message (buildAutocompleteUserMessage) carries the note in <note>
  * and the line being written again in <line>: that repetition is what keeps the
  * model on the half-typed word and on the line's language in mixed-language notes.
+ * When the client says what the note is about, an <about> block goes first
+ * (title, section being written, names of the other sections): it is what lets
+ * the model resolve references to the title or to another section.
  */
 export const AUTOCOMPLETE_SYSTEM_PROMPT = [
   'You are an inline autocomplete engine inside a note-taking app.',
   'You get the note so far in <note> (the cursor is at <CURSOR/>) and, repeated in <line>, the line being written up to the cursor. Continue that line.',
+  '<about>, when present, gives the title of the note, the section being written and the names of its other sections: use it to understand what the note is about and what is being referred to.',
   'Your reply MUST start with one marker character: "+" if <line> stops in the middle of a word and you are finishing that word (your text is glued to it with no space), or "_" if you start a new word. After "_" the first thing you write is always a whole new word, never the rest of the previous one.',
   'After the marker write ONLY the continuation, and keep it SHORT: the next 3 to 10 words, just enough to finish the current clause or list item.',
   'Write in the language of <line>, in its tone, whatever the language of the rest of the note.',
@@ -1024,14 +1038,77 @@ export const AUTOCOMPLETE_SYSTEM_PROMPT = [
  * `<note>\n${before}<CURSOR/>${after}\n</note>\n<line>${line}</line>`, where
  * `line` is `before` from its last line break to its end (the whole of `before`
  * when it has none, empty when `before` ends in a line break).
+ *
+ * With `about` (pass it sanitized) this goes first, only the lines that have a
+ * value: `<about>\nTitle: …\nSection: …\nOther sections: a, b, c\n</about>\n`.
+ * Without it (or with nothing in it) the message is exactly the one above.
  */
-export function buildAutocompleteUserMessage(before: string, after: string): string {
+export function buildAutocompleteUserMessage(before: string, after: string, about?: AutocompleteAbout | null): string {
   const line = before.slice(before.lastIndexOf('\n') + 1)
-  return `<note>\n${before}${AUTOCOMPLETE_CURSOR_MARK}${after}\n</note>\n<line>${line}</line>`
+  const message = `<note>\n${before}${AUTOCOMPLETE_CURSOR_MARK}${after}\n</note>\n<line>${line}</line>`
+  const lines: string[] = []
+  if (about?.title) lines.push(`Title: ${about.title}`)
+  if (about?.section) lines.push(`Section: ${about.section}`)
+  if (about && about.sections.length > 0) lines.push(`Other sections: ${about.sections.join(', ')}`)
+  return lines.length > 0 ? `<about>\n${lines.join('\n')}\n</about>\n${message}` : message
 }
 
 const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff
 const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff
+
+/** What the note is about, ALREADY SANITIZED (sanitizeAutocompleteAbout). '' / [] = not given. */
+export interface AutocompleteAbout {
+  title: string
+  /** Name of the section being written. */
+  section: string
+  /** Names of the OTHER sections of the note. */
+  sections: string[]
+}
+
+/**
+ * One name of the <about> block: a single line (line breaks, tabs and any other
+ * control or blank run → one space), without "<" / ">" (a name must not be
+ * able to close or open the tags of the message), trimmed and cut to `max`
+ * UTF-16 code units (never half a surrogate pair). Not a string → ''.
+ */
+function sanitizeAboutName(value: unknown, max: number): string {
+  if (typeof value !== 'string') return ''
+  let text = value.replace(/[<>]/g, '').replace(/[\s\p{Cc}]+/gu, ' ').trim()
+  if (text.length > max) {
+    text = text.slice(0, max)
+    if (isHighSurrogate(text.charCodeAt(text.length - 1))) text = text.slice(0, -1)
+    text = text.trimEnd()
+  }
+  return text
+}
+
+/**
+ * Sanitizes the optional `title` / `section` / `sections` of the body. A value
+ * of the wrong type is IGNORED (never a 400: the block is a hint, and an older
+ * client sends none of it). `sections` keeps its first AUTOCOMPLETE_MAX_SECTIONS
+ * usable names: non-strings, blanks, duplicates and the section being written
+ * itself are dropped. Null when nothing is left.
+ */
+export function sanitizeAutocompleteAbout(title: unknown, section: unknown, sections: unknown): AutocompleteAbout | null {
+  const about: AutocompleteAbout = {
+    title: sanitizeAboutName(title, AUTOCOMPLETE_MAX_TITLE_CHARS),
+    section: sanitizeAboutName(section, AUTOCOMPLETE_MAX_SECTION_CHARS),
+    sections: [],
+  }
+  if (Array.isArray(sections)) {
+    // The section being written may be longer than a name of the list: compare it cut alike.
+    const current = sanitizeAboutName(section, AUTOCOMPLETE_MAX_SECTION_NAME_CHARS)
+    const seen = new Set<string>(current ? [current] : [])
+    for (const item of sections) {
+      if (about.sections.length >= AUTOCOMPLETE_MAX_SECTIONS) break
+      const name = sanitizeAboutName(item, AUTOCOMPLETE_MAX_SECTION_NAME_CHARS)
+      if (!name || seen.has(name)) continue
+      seen.add(name)
+      about.sections.push(name)
+    }
+  }
+  return about.title || about.section || about.sections.length > 0 ? about : null
+}
 
 /**
  * Server-side trim of the context: the LAST AUTOCOMPLETE_MAX_BEFORE_CHARS of
@@ -1047,15 +1124,21 @@ export function trimAutocompleteContext(before: string, after: string): { before
   return { before: b, after: a }
 }
 
-export type AutocompleteRequest = { ok: true; before: string; after: string } | { ok: false }
+export type AutocompleteRequest =
+  | { ok: true; before: string; after: string; about?: AutocompleteAbout }
+  | { ok: false }
 
 /**
  * Validates the raw body of POST /autocomplete — `{ "before": string,
- * "after"?: string }` — and returns the context ALREADY TRIMMED. Not ok (→ 400
+ * "after"?: string, "title"?: string, "section"?: string, "sections"?:
+ * string[] }` — and returns the context ALREADY TRIMMED. Not ok (→ 400
  * invalid_request) when the body is not a JSON object, `before` is not a
  * string or is blank (nothing to continue), or `after` is present and is not a
- * string (null counts as absent). Every other field is ignored: the client
- * chooses nothing about the upstream request.
+ * string (null counts as absent). `title` / `section` / `sections` (what the
+ * note is about) are optional and never make the request invalid: they come
+ * back sanitized in `about`, which is ABSENT when nothing usable was sent (an
+ * older client). Every other field is ignored: the client chooses nothing
+ * about the upstream request.
  */
 export function parseAutocompleteRequest(rawBody: string): AutocompleteRequest {
   let parsed: unknown
@@ -1065,14 +1148,20 @@ export function parseAutocompleteRequest(rawBody: string): AutocompleteRequest {
     return { ok: false }
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: false }
-  const { before, after } = parsed as Record<string, unknown>
+  const { before, after, title, section, sections } = parsed as Record<string, unknown>
   if (typeof before !== 'string' || before.trim() === '') return { ok: false }
   if (after !== undefined && after !== null && typeof after !== 'string') return { ok: false }
-  return { ok: true, ...trimAutocompleteContext(before, typeof after === 'string' ? after : '') }
+  const about = sanitizeAutocompleteAbout(title, section, sections)
+  return {
+    ok: true,
+    ...trimAutocompleteContext(before, typeof after === 'string' ? after : ''),
+    ...(about ? { about } : {}),
+  }
 }
 
 /**
- * The WHOLE upstream request of a suggestion (pass the trimmed context). Fixed
+ * The WHOLE upstream request of a suggestion (pass the trimmed context and, if
+ * any, the sanitized `about` of parseAutocompleteRequest). Fixed
  * by the server: system prompt, model, max_tokens, temperature, streaming,
  * `usage: { include: true }` (the final SSE chunk carries the tokens and their
  * cost) and reasoning turned OFF — `reasoning: { effort: 'none' }`, OpenRouter's
@@ -1080,12 +1169,17 @@ export function parseAutocompleteRequest(rawBody: string): AutocompleteRequest {
  * the model sometimes "thinks", spends the 48 tokens on reasoning and returns
  * an empty suggestion.
  */
-export function buildAutocompleteBody(before: string, after: string, model: string): Record<string, unknown> {
+export function buildAutocompleteBody(
+  before: string,
+  after: string,
+  model: string,
+  about?: AutocompleteAbout | null
+): Record<string, unknown> {
   return {
     model,
     messages: [
       { role: 'system', content: AUTOCOMPLETE_SYSTEM_PROMPT },
-      { role: 'user', content: buildAutocompleteUserMessage(before, after) },
+      { role: 'user', content: buildAutocompleteUserMessage(before, after, about) },
     ],
     stream: true,
     max_tokens: AUTOCOMPLETE_MAX_TOKENS,
