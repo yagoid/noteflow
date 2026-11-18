@@ -143,17 +143,46 @@ for (const [name, impl] of [['renderer (drawingCollapse.ts)', renderer], ['main 
         .toBe(`col  one    col two\n\n${SCENE}\n\n${second}`)
     })
 
-    it('a marker-looking text the section already had is the user\'s: it stays, and the drawings are still kept', () => {
+    it('a number the user already wrote in the section is never the number of a scene', () => {
       const own = `See [Drawing #1] of the spec\n\n${SCENE}\n\nAnd \\[drawing #2\\] too\n\n${second}`
       const view = impl.collapseDrawings(own, 'marker')
-      // Untouched by the model: exactly what it was.
+      // 1 and 2 are the user's: the scenes go by 3 and 4.
+      expect(view).toBe(`See [Drawing #1] of the spec\n\n[drawing #3: ${SUMMARY}]\n\nAnd \\[drawing #2\\] too\n\n[drawing #4: Done]`)
       expect(impl.restoreCollapsedDrawings(own, view)).toBe(own)
-      // The model drops the real markers: the literals are not taken for them.
+      // The model drops the real markers: the user's texts are not taken for them.
       expect(impl.restoreCollapsedDrawings(own, 'See [Drawing #1] of the spec\n\nAnd \\[drawing #2\\] too'))
         .toBe(`See [Drawing #1] of the spec\n\nAnd \\[drawing #2\\] too\n\n${SCENE}\n\n${second}`)
-      // Another spelling of the same number, not in the original, is a marker as always.
-      expect(impl.restoreCollapsedDrawings(own, 'See [Drawing #1] of the spec\n\n[drawing #1]\n\n[drawing #2]'))
-        .toBe(`See [Drawing #1] of the spec\n\n${SCENE}\n\n${second}`)
+      // …and it may rewrite its own however it likes.
+      expect(impl.restoreCollapsedDrawings(own, 'See [Drawing #1] of the spec\n\n[Drawing #4]\n\n\\[drawing #3\\]'))
+        .toBe(`See [Drawing #1] of the spec\n\n${second}\n\n${SCENE}`)
+    })
+
+    it('a text identical to the marker the collapse would write does not break the way back', () => {
+      const own = `[drawing #1: ${SUMMARY}]\n\n${SCENE}\n\ntext [drawing #2: Done] text\n\n${second}`
+      expect(impl.restoreCollapsedDrawings(own, impl.collapseDrawings(own, 'marker'))).toBe(own)
+    })
+
+    it('the way back of an untouched view is the section itself, whatever marker-looking texts it has', () => {
+      let seed = 7
+      const r = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+      const pick = <T,>(xs: T[]) => xs[Math.floor(r() * xs.length)]
+      const TEXTS = ['Plain text', 'See [Drawing #1] of the spec', '- \\[drawing #2\\]', '[drawing #3]', `[drawing #1: ${SUMMARY}]`, '## [DRAWING#2: x] title', '| a | [drawing #4: Done] |\n| --- | --- |', '  indented [drawing  #5] end', `${F}\n[drawing #1]\n${F}`, MERMAID]
+      for (let n = 0; n < 300; n++) {
+        const parts: string[] = []
+        const count = 1 + Math.floor(r() * 7)
+        for (let k = 0; k < count; k++) parts.push(r() < 0.45 ? pick([SCENE, second, scene([])]) : pick(TEXTS))
+        const doc = parts.join('\n\n')
+        const view = impl.collapseDrawings(doc, 'marker')
+        expect(view, doc).not.toContain('excalidraw')
+        expect(impl.restoreCollapsedDrawings(doc, view), doc).toBe(doc)
+      }
+    })
+
+    it('a marker opening an indented line leaves the indentation of what follows', () => {
+      expect(impl.restoreCollapsedDrawings(original, '- item\n  [drawing #1] continues here\n\n[drawing #2]'))
+        .toBe(`- item\n  continues here\n\n${SCENE}\n\n${second}`)
+      expect(impl.restoreCollapsedDrawings(original, '\t[drawing #1]\tcode-like\n\n[drawing #2]'))
+        .toBe(`\tcode-like\n\n${SCENE}\n\n${second}`)
     })
 
     it('a marker inside a code fence of the new text is not consumed there: the drawing is kept at the end', () => {

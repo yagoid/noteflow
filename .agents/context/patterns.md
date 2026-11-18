@@ -4303,27 +4303,46 @@ a PNG/SVG, salida colapsada en el CLI, la web `docs/` y la app móvil.
   eventos de `[data-drawing-interactive]` (botón Editar, asa de alto).
   **Un dibujo seleccionado nunca se sustituye al teclear** (plugin `drawingBlockGuard` del nodo): por
   defecto ProseMirror reemplaza el nodo de una selección de nodo por lo que se escribe o se pega — con un
-  dibujo al final de la sección, escribir lo borraba. El guard **mueve primero la selección** a un
-  párrafo vacío justo debajo (`caretBesideDrawing`; reutiliza el que ya hubiera) en los eventos que
-  anuncian entrada — `handleKeyPress` (tecla que escribe: no `Alt`+letra ni un carácter de control; AltGr
-  sí), `paste` con texto o HTML, `compositionstart` — y deja que la entrada siga desde ahí; solo Backspace / Supr borran el dibujo. ⚠️ No basta con
-  `handleTextInput`: el plugin de **input rules de TipTap va siempre primero** en esa cadena y, con una
-  selección de nodo, toma el texto de los bloques de ARRIBA como «texto antes del cursor»: una tecla que
-  completa una regla (`*` tras «see *note», `#` + espacio…) sustituía ese rango y el dibujo con él. Con
-  el cursor ya en su propio párrafo, las reglas solo ven ese párrafo (y siguen funcionando: `- ` crea una
-  lista debajo). **Sin temporizadores:** la posición del párrafo que crea el guard vive en el estado del
-  plugin (mapeada por cada transacción) y un `appendTransaction` lo retira cuando la selección sale de él
-  todavía vacío (pegado o composición que no escriben nada); crearlo y retirarlo quedan **fuera del
-  historial** (no dejan un Ctrl+Z que no deshace nada). ⚠️ Un `setTimeout` que lo retirase rompía el
-  pegado de imágenes: `insertImageFiles` (`Editor.tsx`) lee el fichero de forma **asíncrona** e inserta
-  después sobre la selección que haya entonces — con la selección de nodo ya restaurada, la imagen
-  sustituía al dibujo. Por eso los **ficheros** pegados o soltados no pasan por el guard: es la propia
-  inserción la que, justo antes de `setImage`, sale del dibujo seleccionado (`leaveSelectedDrawing`, en
-  `drawingCommands.ts`) — la regla para cualquier inserción que llegue de fuera de la entrada de
-  ProseMirror. No actúa con el editor en solo lectura. Tests con las input rules reales en
-  `tests/lib/drawingSelectionGuard.test.ts`. **Bordes de la
+  dibujo al final de la sección, escribir lo borraba. El guard crea un párrafo justo debajo
+  (`caretBesideDrawing`; reutiliza uno vacío que ya hubiera) y **mueve ahí la selección** solo en los
+  eventos que con seguridad van a insertar algo, y deja que la entrada siga desde ahí; solo Backspace /
+  Supr borran el dibujo:
+  - `handleKeyPress`, con **la misma condición con la que ProseMirror escribe** (`editHandlers.keypress`
+    de `prosemirror-view`): PM solo llama a `handleKeyPress` si hay `charCode` y no es Ctrl sin Alt (ni
+    Cmd en macOS), y con una selección de nodo **escribe él mismo el carácter** salvo que sea un salto de
+    línea. ⚠️ No excluir `Alt`: Option+tecla en macOS (`altKey` sin `ctrlKey`) y AltGr escriben
+    `[ ] { } # @ | ~`; excluirlo no evitaba la escritura, solo que la selección se moviera antes, y la
+    tecla que completaba una input rule volvía a llevarse el dibujo.
+  - `paste` con `text/plain` o `text/html` **no vacíos** (un pegado vacío no toca nada).
+  - `compositionstart` (IME).
+
+  ⚠️ No basta con `handleTextInput`: el plugin de **input rules de TipTap va siempre primero** en esa
+  cadena y, con una selección de nodo, toma el texto de los bloques de ARRIBA como «texto antes del
+  cursor»: una tecla que completa una regla (`*` tras «see *note», `#` + espacio…) sustituía ese rango y
+  el dibujo con él. Con el cursor ya en su propio párrafo, las reglas solo ven ese párrafo (y siguen
+  funcionando: `- ` crea una lista debajo).
+  **No hay párrafo «temporal».** Crear el párrafo es una edición normal: una transacción raíz con
+  `docChanged` (TipTap emite `update` → `onUpdate` guarda: lo guardado es siempre lo que muestra el
+  editor) y **dentro del historial**, abriendo grupo propio (`closeHistory`) al que se une la entrada que
+  sigue — **un solo Ctrl+Z** quita el texto y el párrafo. Nada lo retira después: ni temporizadores ni
+  `appendTransaction`. Se probaron y descartaron los dos: un `setTimeout` restauraba la selección de
+  nodo antes de que llegara una imagen leída de forma asíncrona (la imagen sustituía al dibujo), y una
+  retirada por `appendTransaction` colgada de una transacción de solo selección **no emite `update`**
+  (TipTap solo lo emite si la transacción raíz cambia el documento): el markdown guardado se quedaba con
+  el párrafo que el editor ya no tenía. Una composición cancelada puede dejar un párrafo vacío: aceptado
+  (se deshace; al final de la sección no se serializa).
+  **Inserciones que no vienen de la entrada de ProseMirror** (regla general): antes de insertar sobre la
+  selección hay que salir del dibujo seleccionado — `leaveSelectedDrawing(editor)` o, dentro de una
+  transacción / comando, `stepOffSelectedDrawing(tr)` (`drawingCommands.ts`). Lo hacen
+  `insertImageFiles` (`Editor.tsx`: imágenes pegadas o soltadas, que se leen de forma asíncrona y por eso
+  no pasan por el guard), `insertSnippet` (`snippetCommands.ts`) e `insertSectionRelation`
+  (`SectionRelation.ts`). El guard no actúa con el editor en solo lectura. Tests sobre el editor real
+  (input rules e historial cargados, eventos `update` contados y markdown emitido comparado con el del
+  editor) en `tests/lib/drawingSelectionGuard.test.ts`. **Bordes de la
   sección:** con el dibujo seleccionado, ↓/→ al final del documento y ↑/← al principio crean el párrafo
-  que falta; `Ctrl+End` / `Ctrl+Home` pasan al otro lado de un dibujo final / inicial. Tras «Hecho» de un
+  que falta; `Ctrl+End` / `Ctrl+Home` pasan al otro lado de un dibujo final / inicial. Ese párrafo también
+  es una edición normal y se queda; como un párrafo vacío inicial o final no se serializa, navegar no
+  cambia el markdown guardado (test). Tras «Hecho» de un
   dibujo recién insertado el cursor queda en el párrafo de debajo, no en el nodo. La tarjeta no es texto
   seleccionable (`user-select: none` y `::selection` transparente: el tinte de selección del editor se
   pintaba detrás del texto del SVG con el nodo seleccionado). ⚠️ El **kanban** tiene el mismo reemplazo al

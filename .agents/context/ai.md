@@ -615,15 +615,18 @@ tests en `tests/lib/chatContext.test.ts`), `AiPanel/AiChatWindowApp.tsx` (ventan
   `search_notes`) y en el de `main.ts`. Se colapsa ANTES de quitar el base64, para que una imagen guardada
   dentro de una escena se vaya con ella. Los bloques **Mermaid** se ven tal cual (son texto, pequeño y
   editable). **Escritura:** `restoreStrippedImages` devuelve a cada línea `[drawing #n…]` del contenido
-  nuevo el bloque n-ésimo del original — **por número**, no por posición, y sea cual sea el resumen que
+  nuevo el bloque que el colapso numeró así en el original — **por número**, no por posición, y sea cual sea el resumen que
   deje el modelo, y **esté donde esté en la línea** (un ítem de lista, una cita, en mitad de una frase: el
   dibujo vuelve como bloque propio en ese punto; dentro de una **fila de tabla o de un tablero kanban** se
   coloca justo DESPUÉS de la tabla / tablero para no partirlos) —. El marcador se reconoce con
   mayúsculas, espacios de más o de menos y corchetes escapados (`[Drawing #1]`, `[drawing#2]`,
   `\[drawing #1\]`), y al sacarlo de una línea no quedan restos (ni `##` ni viñetas huérfanas; solo se
-  ajusta el hueco del propio marcador, el resto de la línea conserva sus espacios). Un texto con forma de
-  marcador que **ya estaba escrito en la sección original** («see [Drawing #1] of the spec») es del
-  usuario y no se consume. Un dibujo de escena **nunca se pierde** al reescribir:
+  ajusta el hueco del propio marcador; el resto de la línea conserva sus espacios y su sangría). **Los
+  números saltan los que el usuario ya usa:** si la sección contiene un texto con forma de marcador
+  («see [Drawing #1] of the spec»), ese número no se asigna a ninguna escena (`sceneNumbering`: 1, 2, 3…
+  saltando los ocupados; colapso y restauración numeran desde la misma sección). Así un texto del usuario
+  nunca se toma por un dibujo y `restore(original, collapse(original))` es siempre `original` (test de
+  propiedad). Un dibujo de escena **nunca se pierde** al reescribir:
   si el modelo omite su marcador (o solo lo escribe dentro de un fence) se **conserva al final de la
   sección** (cerrando antes un fence que el modelo dejara abierto, para que no quede dentro del código) — el modelo no puede recrearlo; borrarlo es cosa del usuario. Solo se tocan marcadores de
   dibujos que la sección original tiene de verdad: un número sin dibujo es texto del usuario y se queda;

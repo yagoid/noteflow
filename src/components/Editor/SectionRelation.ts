@@ -1,6 +1,7 @@
 import { Node, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { SectionRelationView } from './SectionRelationView'
+import { stepOffSelectedDrawing } from './drawingCommands'
 
 // Inline atom node for a section→section relation. It serializes to a span the
 // markdown layer (markdownHtml.ts) reads/writes as `[Name](noteflow://noteId/sectionId)`,
@@ -71,6 +72,8 @@ export const SectionRelation = Node.create({
         (attrs) =>
         ({ chain }) =>
           chain()
+            // A node-selected drawing is never replaced: the link goes to a paragraph below it.
+            .command(({ tr }) => { stepOffSelectedDrawing(tr); return true })
             .insertContent({ type: this.name, attrs })
             // A trailing space so the caret leaves the atom and typing continues normally.
             .insertContent(' ')

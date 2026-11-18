@@ -83,14 +83,21 @@ export function caretBesideDrawing(tr: Transaction, pos: number, side: 'after' |
 
 /**
  * Before inserting something at the selection from outside ProseMirror's own input (an
- * image read from a pasted or dropped file): if a drawing is node-selected, the insert
- * would REPLACE it — step into a paragraph right below it first. True if it moved.
+ * image read from a pasted or dropped file, a snippet or a section link from the
+ * toolbar): if a drawing is node-selected, the insert would REPLACE it — step into a
+ * paragraph right below it first. True if it moved.
  */
 export function leaveSelectedDrawing(editor: Editor): boolean {
   const pos = selectedDrawingPos(editor.state.selection)
   if (pos === null || editor.isDestroyed) return false
   editor.view.dispatch(caretBesideDrawing(editor.state.tr, pos, 'after', '', true))
   return true
+}
+
+/** The same on a transaction being built (a command, or an insert made in the same step). */
+export function stepOffSelectedDrawing(tr: Transaction): Transaction {
+  const pos = selectedDrawingPos(tr.selection)
+  return pos === null ? tr : caretBesideDrawing(tr, pos, 'after', '', true)
 }
 
 /** The drawing node the selection is on as a whole (a node selection), if any. */

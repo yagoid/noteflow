@@ -199,21 +199,46 @@ function mapDrawingBlocks(md: string, replace: (block: Matched, index: number, l
   return out.join('\n')
 }
 
+// The marker as a model may write it back: any case, loose spacing (`[Drawing #1]`,
+// `[drawing  #2]`, `[drawing#2]`), with or without the summary, brackets escaped or not.
+// Groups: 1 / 3 = the spaces around it, 2 = the number.
+const MARKER_RE = /([ \t]*)\\?\[\s*drawing\s*#\s*(\d+)\s*(?::[^\]\n]*)?\\?\]([ \t]*)/gi
+
+/**
+ * The number each scene of `md` goes by in the marker view, in order: 1, 2, 3… SKIPPING
+ * every number a marker-looking text of the section itself already uses ("see
+ * [Drawing #1] of the spec" → the first scene is #2). A marker and a text of the user are
+ * then never the same thing: the view of a section goes back to that section exactly, and
+ * a text the user wrote is never taken for a drawing. Collapse and restore both number
+ * from the same section, so they agree.
+ */
+function sceneNumbering(md: string): () => number {
+  const taken = new Set<number>()
+  const text = mapDrawingBlocks(md, (block) => (block.kind === 'excalidraw' ? [] : null))
+  for (const m of text.matchAll(MARKER_RE)) taken.add(Number(m[2]))
+  let n = 0
+  return () => {
+    do n++
+    while (taken.has(n))
+    return n
+  }
+}
+
 /**
  * The markdown with its SCENE blocks collapsed (Mermaid source blocks are text: they stay):
  * 'text' = one line with what the drawing says; 'marker' = the numbered `[drawing #n: …]`
- * line a model sees (restoreCollapsedDrawings puts the block back).
+ * line a model sees (restoreCollapsedDrawings puts the block back; numbers: sceneNumbering).
  */
 export function collapseDrawings(md: string, mode: 'text' | 'marker'): string {
-  let scenes = 0
+  const number = mode === 'marker' ? sceneNumbering(md) : null
   return mapDrawingBlocks(md, (block) => {
     if (block.kind !== 'excalidraw') return null
-    scenes++
     const summary = sceneSummary(block.elements)
-    if (mode === 'marker') {
+    if (number) {
+      const n = number()
       // (Brackets of a label become parentheses: the marker must stay one `[…]`.)
       const safe = summary.replace(/\[/g, '(').replace(/\]/g, ')')
-      return [safe ? `[drawing #${scenes}: ${safe}]` : `[drawing #${scenes}]`]
+      return [safe ? `[drawing #${n}: ${safe}]` : `[drawing #${n}]`]
     }
     return summary ? [summary] : []
   })
@@ -224,10 +249,6 @@ export function stripDrawings(md: string): string {
   return mapDrawingBlocks(md, () => [])
 }
 
-// The marker as a model may write it back: any case, loose spacing (`[Drawing #1]`,
-// `[drawing  #2]`, `[drawing#2]`), with or without the summary, brackets escaped or not.
-// Groups: 1 / 3 = the spaces around it, 2 = the number.
-const MARKER_RE = /([ \t]*)\\?\[\s*drawing\s*#\s*(\d+)\s*(?::[^\]\n]*)?\\?\]([ \t]*)/gi
 // What is left of a line once its markers are out is dropped when it is only a quote,
 // heading or list prefix (the model put the marker in a line of its own kind).
 const LINE_PREFIX_RE = /^[ \t>]*(?:#{1,6}[ \t]*|(?:[-*+]|\d+\.)(?:[ \t]+(?:\[[ x]\][ \t]*)?)?)?/
@@ -238,11 +259,13 @@ const BOARD_CLOSE_RE = /^<!--[ \t]*\/kanban[ \t]*-->[ \t]*$/
 
 /**
  * What a marker leaves in its line once taken out: one space where it sat between two
- * words, nothing at the start or the end of the line. Only the marker's own gap is
- * touched — the rest of the line (inline code, aligned text) keeps its spacing.
+ * words, nothing at the end of the line, and at its start only the indentation the line
+ * had (`before`, there). Only the marker's own gap is touched — the rest of the line
+ * (inline code, aligned text) keeps its spacing.
  */
 function markerGap(before: string, after: string, atStart: boolean, atEnd: boolean): string {
-  if (atStart || atEnd) return ''
+  if (atEnd) return ''
+  if (atStart) return before
   return before && after ? ' ' : before + after
 }
 
@@ -258,21 +281,21 @@ function markerGap(before: string, after: string, atStart: boolean, atEnd: boole
  *     appended at the end of the section — after closing a fence the model left open, so
  *     the drawing isn't swallowed by the code. Deleting a drawing is the user's job;
  *   - only markers of scenes `original` really has are touched: a number with no scene is
- *     the user's own text and stays; so does a marker-looking text that was already written
- *     in `original` ("see [Drawing #1] of the spec": the collapse never emits that spelling
- *     nor a marker the section already holds); a second marker of the same scene is
- *     dropped; a text whose original had no scene is returned as it is.
+ *     the user's own text and stays — and a number the user already wrote in `original`
+ *     ("see [Drawing #1] of the spec") is never the number of a scene (sceneNumbering); a
+ *     second marker of the same scene is dropped; a text whose original had no scene is
+ *     returned as it is.
  * Line endings follow `next`.
  */
 export function restoreCollapsedDrawings(original: string, next: string): string {
-  const scenes: string[][] = []
+  // By the number the collapse gave each one (insertion order = document order).
+  const scenes = new Map<number, string[]>()
+  const number = sceneNumbering(original)
   mapDrawingBlocks(original, (block, _n, lines) => {
-    if (block.kind === 'excalidraw') scenes.push(lines)
+    if (block.kind === 'excalidraw') scenes.set(number(), lines)
     return null
   })
-  if (scenes.length === 0) return next
-  // Marker-looking texts the user wrote in the section itself: never taken for a marker.
-  const literal = new Set((original.match(MARKER_RE) ?? []).map((m) => m.trim()))
+  if (scenes.size === 0) return next
   const eol = next.includes('\r\n') ? '\r' : ''
   const used = new Set<number>()
   const out: string[] = []
@@ -285,7 +308,7 @@ export function restoreCollapsedDrawings(original: string, next: string): string
   const pushScene = (n: number) => {
     if (used.has(n)) return
     if (out.length > 0 && out[out.length - 1].trim() !== '') out.push(eol)
-    for (const line of scenes[n - 1]) out.push(line + eol)
+    for (const line of scenes.get(n)!) out.push(line + eol)
     blankDue = true
     used.add(n)
   }
@@ -315,7 +338,7 @@ export function restoreCollapsedDrawings(original: string, next: string): string
     const found: number[] = []
     const rest = line.replace(MARKER_RE, (marker: string, before: string, digits: string, after: string, offset: number) => {
       const n = Number(digits)
-      if (!scenes[n - 1] || literal.has(marker.trim())) return marker
+      if (!scenes.has(n)) return marker
       if (!used.has(n) && !found.includes(n) && !deferred.includes(n)) found.push(n)
       return markerGap(before, after, line.slice(0, offset).trim() === '', line.slice(offset + marker.length).trim() === '')
     })
@@ -335,7 +358,7 @@ export function restoreCollapsedDrawings(original: string, next: string): string
   }
   flush()
   let closed = !inFence
-  for (let n = 1; n <= scenes.length; n++) {
+  for (const n of scenes.keys()) {
     if (used.has(n)) continue
     // At the end of the text, after one blank line (not glued to its last line) — and
     // outside a code fence the model never closed.
