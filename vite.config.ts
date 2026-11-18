@@ -29,22 +29,30 @@ function listExcalidrawFonts(): string[] {
 // that never reaches the network, but Chromium checks every source when the face is created,
 // so opening the canvas logged ~230 "Refused to load the font" violations. Point that
 // fallback at the self-hosted path instead (a harmless duplicate of the first source).
-const EXCALIDRAW_CDN_FALLBACK = /`https:\/\/esm\.sh\/\$\{[\s\S]*?\}\/dist\/prod\/`/
+//
+// What a production build guarantees (generateBundle below): the rewrite was applied at least
+// once AND no emitted chunk mentions the CDN — so an Excalidraw upgrade that renames, moves or
+// reshapes the fallback breaks `npm run build` instead of shipping it back. In dev the rewrite is
+// best effort (Vite's pre-bundled copy); nothing checks it there.
+const EXCALIDRAW_CDN = 'https://esm.sh/'
+const EXCALIDRAW_CDN_FALLBACK = /`https:\/\/esm\.sh\/\$\{[\s\S]*?\}\/dist\/prod\/`/g
 const EXCALIDRAW_LOCAL_FALLBACK = '(typeof window.EXCALIDRAW_ASSET_PATH==="string"?window.EXCALIDRAW_ASSET_PATH:window.location.href)'
 
 function excalidrawFonts(): Plugin {
+  let patched = 0
   return {
     name: 'noteflow:excalidraw-fonts',
+    buildStart() {
+      patched = 0
+    },
     transform(code, id) {
       // Build: the package's own chunk. Dev: Vite's pre-bundled copy (node_modules/.vite/deps/chunk-*.js).
-      const inPackage = id.includes('@excalidraw/excalidraw')
-      if (!code.includes('https://esm.sh/') || !(inPackage || id.includes('/.vite/deps/'))) return null
-      if (!EXCALIDRAW_CDN_FALLBACK.test(code)) {
-        // An Excalidraw upgrade changed the code: fail loudly rather than ship the CDN fallback back.
-        if (inPackage) this.error(`Excalidraw CDN font fallback not found in ${id}: update EXCALIDRAW_CDN_FALLBACK in vite.config.ts`)
-        return null
-      }
-      return { code: code.replace(EXCALIDRAW_CDN_FALLBACK, EXCALIDRAW_LOCAL_FALLBACK), map: null }
+      if (!code.includes(EXCALIDRAW_CDN) || !(id.includes('@excalidraw/excalidraw') || id.includes('/.vite/deps/'))) return null
+      let count = 0
+      const out = code.replace(EXCALIDRAW_CDN_FALLBACK, () => { count++; return EXCALIDRAW_LOCAL_FALLBACK })
+      if (count === 0) return null
+      patched += count
+      return { code: out, map: null }
     },
     configureServer(server) {
       const known = new Set(listExcalidrawFonts())
@@ -57,7 +65,15 @@ function excalidrawFonts(): Plugin {
         fs.createReadStream(path.join(EXCALIDRAW_FONTS_DIR, rel)).pipe(res)
       })
     },
-    generateBundle() {
+    generateBundle(_options, bundle) {
+      if (patched === 0) {
+        this.error('Excalidraw CDN font fallback was not rewritten in any module: update EXCALIDRAW_CDN_FALLBACK in vite.config.ts')
+      }
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type === 'chunk' && chunk.code.includes(EXCALIDRAW_CDN)) {
+          this.error(`${chunk.fileName} still references ${EXCALIDRAW_CDN}: update EXCALIDRAW_CDN_FALLBACK in vite.config.ts`)
+        }
+      }
       for (const rel of listExcalidrawFonts()) {
         this.emitFile({
           type: 'asset',
