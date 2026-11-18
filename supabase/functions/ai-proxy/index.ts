@@ -479,7 +479,7 @@ function getModelCatalog(supabaseUrl: string, serviceRoleKey: string): Promise<C
 
 /**
  * POST /autocomplete, once the caller is authenticated and entitled: small
- * body cap → { before, after } → budget check (no reservation) → OpenRouter →
+ * body cap → { before, after, about? } → budget check (no reservation) → OpenRouter →
  * SSE passthrough, with the cost added to the user's daily row when the stream
  * ends. The whole upstream request is built here (buildAutocompleteBody).
  */
@@ -490,7 +490,8 @@ async function handleAutocomplete(
   userId: string,
   prices: Readonly<Record<string, ModelPrice>>
 ): Promise<Response> {
-  // ── Body: hard size cap (declared and counted), then { before, after? } ────
+  // ── Body: hard size cap (declared and counted), then { before, after?,
+  //    title?, section?, sections? } (the last three never invalidate it) ───
   const tooLarge = () =>
     json(
       413,
@@ -512,7 +513,9 @@ async function handleAutocomplete(
   }
   const request = parseAutocompleteRequest(rawBody)
   if (!request.ok) {
-    return invalid('Expected a JSON body { "before": string, "after"?: string } with a non-empty `before`.')
+    return invalid(
+      'Expected a JSON body { "before": string, "after"?: string, "title"?: string, "section"?: string, "sections"?: string[] } with a non-empty `before`.'
+    )
   }
 
   const openrouterKey = Deno.env.get('OPENROUTER_API_KEY')

@@ -677,11 +677,13 @@ es **un preset más**, no una implementación nueva.
     campos son opcionales y **un valor de tipo incorrecto se ignora, nunca es 400** (es una pista,
     no parte de lo que se continúa); `parseAutocompleteRequest` devuelve `about` solo si queda algo.
     Saneado de cada nombre: **una sola línea** (saltos, tabuladores, caracteres de control y rachas
-    de espacios → un espacio; trim), **sin `<` ni `>`** (un nombre no debe poder cerrar ni abrir las
+    de espacios → un espacio; trim), sin caracteres de formato Unicode (`\p{Cf}`: ancho cero,
+    marcas bidi) ni sustitutos sueltos, **sin `<` ni `>`** (un nombre no debe poder cerrar ni abrir las
     etiquetas del mensaje: `</about>`, `<note>`…), y recorte a `title` ≤ **200**, `section` ≤
     **120** y `sections` ≤ **30** nombres de ≤ **80** caracteres (sin partir un par sustituto). De
     `sections` se descartan los no-string, los vacíos, los duplicados (comparados ya saneados) y el
-    propio `section`. Medido en laboratorio (13 casos × 3 contra Haiku): 18/39 → 27/38 aciertos
+    propio `section`. Medido en laboratorio (13 casos × 3 contra Haiku): 18/39 → 27/38 aciertos (una
+    petición de la segunda tanda falló por un error de red del proxy, HTTP 520)
     (referencias al título 0/9 → 6/9, a otras secciones 3/9 → 9/9) por ~100 tokens más en una nota
     normal (+8 % de coste). El cliente no manda nombres de secciones ocultas a la IA (`ai.md`).
   - **Errores** (OpenAI-shaped, como el resto del proxy): 400 `invalid_request` (JSON inválido,
@@ -725,7 +727,9 @@ es **un preset más**, no una implementación nueva.
     cita el comentario de la migración 0018 —, ≤ ~$0,0003 al repetir la línea, ≤ ~$0,00045 con
     `<about>`). **La cota vale para texto
     latino y no es estricta para CJK:** el recorte es por caracteres (UTF-16) y un carácter CJK
-    son más tokens que uno latino, así que un contexto lleno de CJK puede pasarla. Basta una **lectura previa** — RPC `get_autocomplete_budget(p_user_id)`
+    son más tokens que uno latino, así que un contexto lleno de CJK puede pasarla — y eso incluye el bloque `<about>`: sus topes
+    también son por caracteres, así que un título y unos nombres de sección en CJK suman más tokens
+    que los ~2.830 caracteres latinos del test. Basta una **lectura previa** — RPC `get_autocomplete_budget(p_user_id)`
     → jsonb `{used, autocomplete_used}` en USD, sin lock ni fila `pending` — y sumar el coste real al
     terminar. Así ninguna sugerencia ocupa hueco de `AI_MAX_INFLIGHT`, ni toma el advisory lock del
     usuario (teclear no serializa ni retrasa el chat), y cada petición es una lectura + un upsert.

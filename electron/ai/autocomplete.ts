@@ -24,6 +24,21 @@ export interface AutocompleteNoteFields {
   sections?: string[]
 }
 
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff
+
+/** The first `max` UTF-16 code units of `text`, never ending in half a surrogate pair. */
+export function sliceStart(text: string, max: number): string {
+  const cut = text.slice(0, max)
+  return isHighSurrogate(cut.charCodeAt(cut.length - 1)) ? cut.slice(0, -1) : cut
+}
+
+/** The last `max` UTF-16 code units of `text`, never starting in half a surrogate pair. */
+export function sliceEnd(text: string, max: number): string {
+  const cut = text.slice(-max)
+  return isLowSurrogate(cut.charCodeAt(0)) ? cut.slice(1) : cut
+}
+
 /**
  * The `title` / `section` / `sections` fields of the request body out of untrusted values
  * (they come over IPC): only strings, trimmed and capped — a request must stay far below
@@ -31,7 +46,7 @@ export interface AutocompleteNoteFields {
  * nothing in it is absent, so a note without any of it sends the same body as before.
  */
 export function noteContextFields(title: unknown, section: unknown, sections: unknown): AutocompleteNoteFields {
-  const name = (value: unknown, max: number) => (typeof value === 'string' ? value.trim().slice(0, max) : '')
+  const name = (value: unknown, max: number) => (typeof value === 'string' ? sliceStart(value.trim(), max) : '')
   const fields: AutocompleteNoteFields = {}
   const t = name(title, AUTOCOMPLETE_TITLE_CHARS)
   if (t) fields.title = t
@@ -260,8 +275,10 @@ export async function completeText(opts: {
   onPartial?: (text: string) => void
   fetchImpl?: typeof fetch
 }): Promise<string> {
-  const before = opts.before.slice(-AUTOCOMPLETE_BEFORE_CHARS)
-  const after = opts.after.slice(0, AUTOCOMPLETE_AFTER_CHARS)
+  // The renderer already cut both to these lengths: an orphan half of a surrogate pair at
+  // the outer edge (an emoji right at the cut) is dropped here either way.
+  const before = sliceEnd(opts.before, AUTOCOMPLETE_BEFORE_CHARS)
+  const after = sliceStart(opts.after, AUTOCOMPLETE_AFTER_CHARS)
   const about = noteContextFields(opts.title, opts.section, opts.sections)
   const res = await (opts.fetchImpl ?? fetch)(`${opts.baseUrl.replace(/\/+$/, '')}/autocomplete`, {
     method: 'POST',

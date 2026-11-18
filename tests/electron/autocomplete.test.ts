@@ -4,7 +4,7 @@ import {
   AUTOCOMPLETE_QUOTA_BACKOFF_MS, AUTOCOMPLETE_SECTION_CHARS, AUTOCOMPLETE_SECTION_NAME_CHARS,
   AUTOCOMPLETE_TITLE_CHARS, AUTOCOMPLETE_TRANSIENT_BACKOFF_MS, AutocompleteRequestError,
   autocompleteBackoffMs, blockedUntilAfterAccountChange, blockedUntilAfterFailure, cleanSuggestion,
-  completeText, finishesLastWord, noteContextFields, parseAutocompleteUsage,
+  completeText, finishesLastWord, noteContextFields, parseAutocompleteUsage, sliceEnd, sliceStart,
 } from '../../electron/ai/autocomplete'
 
 describe('cleanSuggestion — spacing', () => {
@@ -320,6 +320,26 @@ describe('noteContextFields (title / section / sections of the request body)', (
     expect(noteContextFields(null, ['a'], [1, null, 'Ideas', {}, '  '])).toEqual({ sections: ['Ideas'] })
   })
 
+  it('a cut never leaves half a surrogate pair', () => {
+    const fields = noteContextFields(
+      't'.repeat(AUTOCOMPLETE_TITLE_CHARS - 1) + '😀x',
+      's'.repeat(AUTOCOMPLETE_SECTION_CHARS - 1) + '😀x',
+      ['n'.repeat(AUTOCOMPLETE_SECTION_NAME_CHARS - 1) + '😀x', 'n'.repeat(AUTOCOMPLETE_SECTION_NAME_CHARS - 2) + '😀x'],
+    )
+    expect(fields.title).toBe('t'.repeat(AUTOCOMPLETE_TITLE_CHARS - 1))
+    expect(fields.section).toBe('s'.repeat(AUTOCOMPLETE_SECTION_CHARS - 1))
+    // The second name fits its whole emoji right at the edge.
+    expect(fields.sections).toEqual([
+      'n'.repeat(AUTOCOMPLETE_SECTION_NAME_CHARS - 1),
+      'n'.repeat(AUTOCOMPLETE_SECTION_NAME_CHARS - 2) + '😀',
+    ])
+    expect(sliceStart('ab😀', 3)).toBe('ab')
+    expect(sliceStart('ab😀', 4)).toBe('ab😀')
+    expect(sliceEnd('😀ab', 3)).toBe('ab')
+    expect(sliceEnd('😀ab', 4)).toBe('😀ab')
+    expect(sliceEnd('ab', 10)).toBe('ab')
+  })
+
   it('caps every name and the number of sections', () => {
     const fields = noteContextFields('t'.repeat(500), 's'.repeat(500), Array.from({ length: 50 }, (_, i) => `${i}-${'n'.repeat(200)}`))
     expect(fields.title).toHaveLength(AUTOCOMPLETE_TITLE_CHARS)
@@ -375,6 +395,21 @@ describe('completeText', () => {
     }) as unknown as typeof fetch
     await completeText({ baseUrl: 'https://p', token: 't', before: 'Texto de prueba', after: '', signal: new AbortController().signal, fetchImpl })
     expect(JSON.parse(sent)).toEqual({ before: 'Texto de prueba' })
+  })
+
+  it('never sends half a surrogate pair at the cut of before / after', async () => {
+    let sent = ''
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      sent = String(init.body)
+      return sse([delta('_hola', 'stop'), '[DONE]'])
+    }) as unknown as typeof fetch
+    await completeText({
+      baseUrl: 'https://p', token: 't',
+      before: 'z😀' + 'a'.repeat(AUTOCOMPLETE_BEFORE_CHARS - 1),
+      after: 'b'.repeat(199) + '😀z',
+      signal: new AbortController().signal, fetchImpl,
+    })
+    expect(JSON.parse(sent)).toEqual({ before: 'a'.repeat(AUTOCOMPLETE_BEFORE_CHARS - 1), after: 'b'.repeat(199) })
   })
 
   it('sends the note context (title, section, other sections) next to the text', async () => {

@@ -9,6 +9,8 @@
 // (`ai:complete`).
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AutocompleteRequestError = exports.AUTOCOMPLETE_TRANSIENT_BACKOFF_MS = exports.AUTOCOMPLETE_NO_PLAN_BACKOFF_MS = exports.AUTOCOMPLETE_QUOTA_BACKOFF_MS = exports.AUTOCOMPLETE_MAX_WORDS = exports.AUTOCOMPLETE_SECTION_NAME_CHARS = exports.AUTOCOMPLETE_MAX_SECTIONS = exports.AUTOCOMPLETE_SECTION_CHARS = exports.AUTOCOMPLETE_TITLE_CHARS = exports.AUTOCOMPLETE_AFTER_CHARS = exports.AUTOCOMPLETE_BEFORE_CHARS = void 0;
+exports.sliceStart = sliceStart;
+exports.sliceEnd = sliceEnd;
 exports.noteContextFields = noteContextFields;
 exports.finishesLastWord = finishesLastWord;
 exports.cleanSuggestion = cleanSuggestion;
@@ -25,6 +27,18 @@ exports.AUTOCOMPLETE_TITLE_CHARS = 200;
 exports.AUTOCOMPLETE_SECTION_CHARS = 120;
 exports.AUTOCOMPLETE_MAX_SECTIONS = 30;
 exports.AUTOCOMPLETE_SECTION_NAME_CHARS = 80;
+const isHighSurrogate = (code) => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code) => code >= 0xdc00 && code <= 0xdfff;
+/** The first `max` UTF-16 code units of `text`, never ending in half a surrogate pair. */
+function sliceStart(text, max) {
+    const cut = text.slice(0, max);
+    return isHighSurrogate(cut.charCodeAt(cut.length - 1)) ? cut.slice(0, -1) : cut;
+}
+/** The last `max` UTF-16 code units of `text`, never starting in half a surrogate pair. */
+function sliceEnd(text, max) {
+    const cut = text.slice(-max);
+    return isLowSurrogate(cut.charCodeAt(0)) ? cut.slice(1) : cut;
+}
 /**
  * The `title` / `section` / `sections` fields of the request body out of untrusted values
  * (they come over IPC): only strings, trimmed and capped — a request must stay far below
@@ -32,7 +46,7 @@ exports.AUTOCOMPLETE_SECTION_NAME_CHARS = 80;
  * nothing in it is absent, so a note without any of it sends the same body as before.
  */
 function noteContextFields(title, section, sections) {
-    const name = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+    const name = (value, max) => (typeof value === 'string' ? sliceStart(value.trim(), max) : '');
     const fields = {};
     const t = name(title, exports.AUTOCOMPLETE_TITLE_CHARS);
     if (t)
@@ -257,8 +271,10 @@ exports.AutocompleteRequestError = AutocompleteRequestError;
  * fetch's own error on abort / network failure.
  */
 async function completeText(opts) {
-    const before = opts.before.slice(-exports.AUTOCOMPLETE_BEFORE_CHARS);
-    const after = opts.after.slice(0, exports.AUTOCOMPLETE_AFTER_CHARS);
+    // The renderer already cut both to these lengths: an orphan half of a surrogate pair at
+    // the outer edge (an emoji right at the cut) is dropped here either way.
+    const before = sliceEnd(opts.before, exports.AUTOCOMPLETE_BEFORE_CHARS);
+    const after = sliceStart(opts.after, exports.AUTOCOMPLETE_AFTER_CHARS);
     const about = noteContextFields(opts.title, opts.section, opts.sections);
     const res = await (opts.fetchImpl ?? fetch)(`${opts.baseUrl.replace(/\/+$/, '')}/autocomplete`, {
         method: 'POST',

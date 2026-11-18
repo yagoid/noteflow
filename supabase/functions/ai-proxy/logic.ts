@@ -1068,12 +1068,16 @@ export interface AutocompleteAbout {
 /**
  * One name of the <about> block: a single line (line breaks, tabs and any other
  * control or blank run → one space), without "<" / ">" (a name must not be
- * able to close or open the tags of the message), trimmed and cut to `max`
- * UTF-16 code units (never half a surrogate pair). Not a string → ''.
+ * able to close or open the tags of the message), without Unicode format
+ * characters (\p{Cf}: zero-width, bidi marks — invisible, and able to reorder
+ * or disguise what follows) nor lone surrogates (a client that cut a pair in
+ * half), trimmed and cut to `max` UTF-16 code units (never half a surrogate
+ * pair). Not a string → ''.
  */
 function sanitizeAboutName(value: unknown, max: number): string {
   if (typeof value !== 'string') return ''
-  let text = value.replace(/[<>]/g, '').replace(/[\s\p{Cc}]+/gu, ' ').trim()
+  // With the `u` flag a surrogate range only matches LONE halves: whole pairs are one code point.
+  let text = value.replace(/[<>\p{Cf}\uD800-\uDFFF]/gu, '').replace(/[\s\p{Cc}]+/gu, ' ').trim()
   if (text.length > max) {
     text = text.slice(0, max)
     if (isHighSurrogate(text.charCodeAt(text.length - 1))) text = text.slice(0, -1)

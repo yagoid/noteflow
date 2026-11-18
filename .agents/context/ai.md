@@ -717,7 +717,8 @@ y sus handlers en `main.ts`; renderer `components/Editor/AiGhostText.ts` (extens
 - **Contexto de la nota (`title`, `section`, `sections`):** el título de la nota, el nombre de la
   sección activa y los nombres de las **demás** secciones. Con solo los 1500 caracteres el modelo no
   sabía de qué iba la nota ni a qué se refería una mención a otra sección; medido en laboratorio (13
-  casos × 3 contra Haiku): 18/39 aciertos sin el bloque, 27/38 con él (referencias al título 0/9 →
+  casos × 3 contra Haiku): 18/39 aciertos sin el bloque, 27/38 con él (una petición de la segunda tanda falló por un error
+  de red del proxy, HTTP 520; referencias al título 0/9 →
   6/9, a otras secciones 3/9 → 9/9) por ~100 tokens más (+8 % de coste). Lo calcula la función pura
   **`autocompleteNoteContext(title, sections, activeSectionId)`** (`lib/aiAutocomplete.ts`, con
   test): nombres en el orden de la nota, sin vacíos, sin repetidos y sin el de la sección activa.

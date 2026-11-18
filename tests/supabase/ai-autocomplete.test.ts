@@ -194,6 +194,20 @@ describe('sanitizeAutocompleteAbout (title / section / sections of the body)', (
     expect(JSON.stringify(about)).not.toMatch(/[<>]/)
   })
 
+  it('removes Unicode format characters (zero-width, bidi marks) and lone surrogates', () => {
+    expect(sanitizeAutocompleteAbout('Via​je‮ a‍ Japón﻿', '⁦Hoy⁩', ['​', 'a­b'])).toEqual({
+      title: 'Viaje a Japón',
+      section: 'Hoy',
+      sections: ['ab'],
+    })
+    // A half pair is dropped whatever the length; a whole pair is kept.
+    expect(sanitizeAutocompleteAbout('a\ud83d b', 'x\ude00', ['\ud83d', 'ok 😀'])).toEqual({
+      title: 'a b',
+      section: 'x',
+      sections: ['ok 😀'],
+    })
+  })
+
   it('caps the lengths (never half a surrogate pair, no trailing space left by the cut)', () => {
     const about = sanitizeAutocompleteAbout('t'.repeat(500), 's'.repeat(500), ['n'.repeat(500)])!
     expect(about.title).toHaveLength(AUTOCOMPLETE_MAX_TITLE_CHARS)
