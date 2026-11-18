@@ -49,10 +49,10 @@ import {
 // boards from the \n\n block-splitter. Must not appear in real user content.
 const FENCE_BLANK = '\x00'
 // A drawing block (lib/drawing/drawingBlock.ts) while the text goes through the
-// block splitter: one line holding its index in `drawingSlots` (isolateDrawingBlocks).
-// eslint-disable-next-line no-control-regex
-const DRAWING_SLOT_RE = /^\x00drawing:(\d+)\x00$/
-const drawingSlotLine = (index: number) => `\x00drawing:${index}\x00`
+// block splitter: one line `<token><index>\x00`, its index in `drawingSlots`
+// (isolateDrawingBlocks). The token is chosen for each parse (drawingSlotToken) so
+// that no line of the text itself can pass for a slot.
+const DRAWING_SLOT_STEM = '\x00drawing'
 
 const HEADING_RE = /^(#{1,3})\s+(.+)$/
 // A list block: its first non-blank line starts with a bullet or `1.` marker.
@@ -112,7 +112,15 @@ function markdownBlocksToHtml(md: string): string {
   // quote, not in plain mode).
   const ownBlocks = quoteDepth === 0 && !plainMode()
   const outerSlots = drawingSlots
-  if (ownBlocks) drawingSlots = []
+  const outerToken = drawingSlotToken
+  if (ownBlocks) {
+    drawingSlots = []
+    // `\x00drawing:` unless the text holds that very sequence (it can't be typed, but a
+    // file can carry anything): then the first `\x00drawing<n>:` it doesn't hold.
+    let token = `${DRAWING_SLOT_STEM}:`
+    for (let n = 1; src.includes(token); n++) token = `${DRAWING_SLOT_STEM}${n}:`
+    drawingSlotToken = token
+  }
   try {
     // Drawing blocks go first: each one owns a code fence, so it must be taken
     // out (as a one-line slot) before the fence pass splits it in three.
@@ -132,12 +140,15 @@ function markdownBlocksToHtml(md: string): string {
     return blocks.map(blockToHtml).join('') || '<p></p>'
   } finally {
     drawingSlots = outerSlots
+    drawingSlotToken = outerToken
   }
 }
 
 // The drawing blocks of the top-level parse in progress, by slot index (module
 // state like quoteDepth: the parse is synchronous).
 let drawingSlots: DrawingBlock[] = []
+let drawingSlotToken = `${DRAWING_SLOT_STEM}:`
+const drawingSlotLine = (index: number) => `${drawingSlotToken}${index}\x00`
 
 // > 0 while parsing the content of a blockquote: no kanban boards there (the
 // schema keeps them at the top level, so a board in a quote would be moved out
@@ -175,8 +186,9 @@ function unprotectKanban(lines: string[]): string {
 
 /** The drawing a slot line stands for (isolateDrawingBlocks), if it is one. */
 function drawingSlotOf(line: string): DrawingBlock | undefined {
-  const m = line.match(DRAWING_SLOT_RE)
-  return m ? drawingSlots[Number(m[1])] : undefined
+  if (!line.startsWith(drawingSlotToken) || !line.endsWith('\x00')) return undefined
+  const index = line.slice(drawingSlotToken.length, -1)
+  return /^\d+$/.test(index) ? drawingSlots[Number(index)] : undefined
 }
 
 function blockToHtml(block: string): string {
@@ -452,9 +464,9 @@ function fenceBlockEnd(lines: string[], close: number, inPair: boolean[]): { end
  * owns its fence — that pass would split the region into comment / code / comment.
  *
  * An opening marker counts only outside code: not on a line that a code block
- * of the text as it stands would hold (the same pairing and extent
- * isolateCodeFences applies; a drawing's own fence starts after its marker, so
- * it never hides it). The region must parse as a drawing (matchDrawingBlock) —
+ * of the text as it stands would hold — the pairing and extent isolateCodeFences
+ * applies, plus the block of a fence that is never closed, which renders as code
+ * to its end (a drawing's own fence starts after its marker, so it never hides it). The region must parse as a drawing (matchDrawingBlock) —
  * otherwise nothing is touched and it renders exactly as before: the markers as
  * text and the fence as an ordinary code block. Like boards, a block boundary is
  * ensured on both sides, and a drawing with a line starting with ``` glued right
@@ -474,6 +486,12 @@ function isolateDrawingBlocks(src: string): string {
     for (const [open, close] of closerOf) {
       const { last } = fenceBlockEnd(lines, close, inPair)
       for (let k = open; k <= last; k++) inCode[k] = true
+    }
+    // An opener with no closer is code as well when it starts a block: blockKind reads
+    // the whole \n\n block as a code block (the rule of codeBlockLines).
+    for (let i = 0; i < lines.length; i++) {
+      if (inCode[i] || !FENCE_OPEN_RE.test(lines[i]) || (i > 0 && lines[i - 1] !== '')) continue
+      for (let k = i; k < lines.length && lines[k] !== ''; k++) inCode[k] = true
     }
 
     let found = false

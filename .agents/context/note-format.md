@@ -157,25 +157,32 @@ flowchart TD
 ````
 
 - **Fuente (`mermaid`):** el texto Mermaid tal cual (lo que escriben la IA y el CLI). Se conserva byte a
-  byte, líneas en blanco incluidas.
+  byte, líneas en blanco incluidas — con una salvedad: un fuente que sea **una única línea en blanco** se
+  guarda vacío (fence sin contenido).
 - **Escena (`excalidraw`):** un objeto JSON **por línea**, para que el diff de git y la fusión por líneas
   del sync (`mergeSectionText`) trabajen por elemento. Serialización **canónica** (`serializeSceneBody`:
   la misma escena da siempre los mismos bytes):
-  1. **Cabecera** `{"type":"excalidraw","version":2,"appState":{…}}`. Del `appState` solo se guardan
+  1. **Cabecera** `{"type":"excalidraw","version":2,"appState":{…}}`. `version` es la del formato: una
+     cabecera con `version` **mayor que 2** NO es un dibujo para este build (el bloque se queda como texto,
+     intacto) — así un cliente antiguo nunca reescribe un formato futuro. Sin `version` o con una menor,
+     se lee. Del `appState` solo se guardan
      `gridModeEnabled`, `gridSize`, `gridStep` y `viewBackgroundColor` (los no nulos; sin ninguno se omite
      `appState`). Nada del estado de sesión (zoom, selección, herramienta…).
   2. **Una línea por elemento** no borrado, en el orden de la escena (orden Z). Claves: `id`, `type`, `x`,
      `y`, `width`, `height` y luego el resto en orden alfabético; objetos anidados con claves ordenadas.
      **Se omiten** `isDeleted`, `version`, `versionNonce` y `updated` (contabilidad de colaboración que
      Excalidraw regenera al cargar con `restoreElements`; así un elemento que vuelve a su sitio da la misma
-     línea). `seed` e `index` sí se guardan.
+     línea). `seed` e `index` sí se guardan. `boundElements: null` se escribe `[]` (es lo que Excalidraw
+     deja al cargar; si no, la línea cambiaría solo por reabrir).
   3. **Una línea `{"file":{…}}` por imagen** que use algún elemento (`fileId`), ordenadas por id, sin
      `lastRetrieved`. Las imágenes sin usar se descartan.
   - **Redondeo:** los enteros no se tocan; `x`, `y`, `width`, `height`, `points`, `gap` y `fontSize` a
     **2 decimales**; cualquier otro número fraccionario (ángulo en radianes, `focus`/`fixedPoint` de los
     enlaces, `pressures`, `lineHeight`…) a **4**.
 - **Atributos del marcador de apertura:** cadena opaca `clave="valor"` conservada en el round-trip (misma
-  sintaxis que el kanban: `getKanbanAttr`/`setKanbanAttr`). Reservado `height` para la vista previa.
+  sintaxis que el kanban: `getKanbanAttr`/`setKanbanAttr`). `height` = alto en px de la vista previa (80…1600;
+  sin él, el alto propio del dibujo hasta 360 px). Un marcador cuyos atributos contengan `-->` **no** es un
+  marcador de apertura (el comentario HTML acabaría ahí): la región se queda como texto.
 - **Longitud del fence:** tres backticks, o uno más que la línea de solo-backticks más larga del contenido
   (un Mermaid con una línea ` ``` ` no rompe el bloque). El fence se cierra en la primera línea formada solo
   por al menos tantos backticks como la de apertura.
@@ -185,20 +192,32 @@ flowchart TD
 - **Validez — si falla algo, NO es un dibujo** (`parseDrawingMarkdown` → `null`) y la región se pinta y se
   guarda exactamente como antes de existir el bloque (dos comentarios como texto y un bloque de código
   normal), sin reescribir nada: falta un marcador o el fence, hay texto entre marcador y fence, el lenguaje
-  no es `mermaid`/`excalidraw`, marcador o fence indentados; en una escena, cualquier línea que no sea un
-  objeto JSON, sin cabecera o con otro `type`, elemento sin `id`/`type`, `id` repetido, línea desconocida;
+  no es `mermaid`/`excalidraw`, marcador o fence indentados, atributos con `-->`; en una escena, cualquier
+  línea que no sea un objeto JSON, sin cabecera, con otro `type` o con `version` > 2, elemento sin
+  `id`/`type`, `id` repetido, línea desconocida;
   en una fuente, una línea de marca de conflicto de sync (`> ⚠…`). **Es la red de seguridad ante conflictos
   de sync:** el bloque de conflicto cae dentro del fence, el dibujo pasa a ser texto con las dos versiones
   visibles, y al resolverlo a mano (también en modo texto) vuelve a ser un dibujo.
 - **Dónde se lee:** solo en el nivel superior de la sección. No dentro de una cita ni de un bloque de
-  código, ni en modo `plain` (notas vinculadas: se queda como texto y código). Sí en markdown pegado y en
+  código — incluido el bloque de un fence **sin cerrar**, que se pinta como código hasta su final: un dibujo
+  pegado debajo (sin línea en blanco) sigue siendo código, como siempre —, ni en modo `plain` (notas vinculadas: se queda como texto y código). Sí en markdown pegado y en
   el chat de IA (`columnWidths: false`), igual que el kanban.
 - **Fusión por líneas (límites conocidos, cubiertos por tests):** ediciones de elementos distintos y no
   contiguos fusionan limpio; elementos añadidos al final en los dos lados se conservan (los del remoto
   primero); el mismo elemento editado en los dos lados, o **dos elementos contiguos** editados cada uno en
-  un lado, dan conflicto → texto.
+  un lado, dan conflicto → texto. ⚠️ **Dos dispositivos que crean un dibujo en el mismo punto** de la
+  sección (donde la base no tenía nada) se fusionan en **un solo bloque** con los elementos de ambos, sin
+  aviso: marcadores, fence y cabecera son líneas idénticas en los dos lados y la fusión las toma una vez.
+  No se pierde ningún elemento, pero los dos dibujos quedan superpuestos en el mismo lienzo.
+- **Cargar y guardar (editor):** una escena se carga SIEMPRE por el `restore` de Excalidraw
+  (`lib/drawing/drawingScene.ts` → `restoreScene`), nunca con los elementos crudos; `refreshDimensions` solo
+  si algún texto viene sin tamaño (escrito a mano: Excalidraw lo descartaría por invisible) — nunca para una
+  escena que escribió Excalidraw, porque re-mediría el texto con las métricas de cada plataforma. El editor
+  solo reescribe el bloque si el usuario cambió la escena (ver `patterns.md` § «Bloque de dibujo»): abrir y
+  cerrar no canoniza un bloque escrito a mano.
 - **Texto legible:** `drawingText(block)` (fuente → el Mermaid; escena → etiquetas y conexiones «A → B»).
-  Aún no está cableado a búsqueda / IA / recuento.
+  Hoy solo lo usan el texto de respaldo del bloque y `editor.getText()`; aún no está cableado a búsqueda /
+  IA / recuento.
 - **Móvil y CLI:** no lo conocen; lo ven como comentario + bloque de código y lo conservan como texto.
 
 ### Migración v1 → v2

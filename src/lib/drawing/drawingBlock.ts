@@ -79,6 +79,12 @@ const CONFLICT_MARKER_RE = /^>[ \t]*⚠/
 
 // ── Scene body (the content of the `excalidraw` fence) ───────────────────────
 
+/** Version of the scene format written in the header. A block whose header says a later one
+ *  is not a drawing for this build (it stays text): an older client must not rewrite a format
+ *  it doesn't know. */
+const SCENE_VERSION = 2
+const isLaterVersion = (version: unknown) => typeof version === 'number' && version > SCENE_VERSION
+
 /** The only app state a note keeps: the look of the canvas, nothing of the session. */
 const APP_STATE_KEYS = ['gridModeEnabled', 'gridSize', 'gridStep', 'viewBackgroundColor'] as const
 
@@ -155,7 +161,7 @@ export function serializeSceneBody(scene: DrawingSceneData): string[] {
   for (const key of APP_STATE_KEYS) {
     if (scene.appState[key] !== undefined && scene.appState[key] !== null) appState[key] = scene.appState[key]
   }
-  const header: Record<string, unknown> = { type: 'excalidraw', version: 2 }
+  const header: Record<string, unknown> = { type: 'excalidraw', version: SCENE_VERSION }
   if (Object.keys(appState).length > 0) header.appState = appState
   const lines = [canonicalLine(header, ['type', 'version', 'appState'], NO_KEYS)]
 
@@ -177,7 +183,7 @@ export function serializeSceneBody(scene: DrawingSceneData): string[] {
 }
 
 function sceneFromDocument(doc: Record<string, unknown>): DrawingSceneData | null {
-  if (doc.type !== 'excalidraw' || !Array.isArray(doc.elements)) return null
+  if (doc.type !== 'excalidraw' || !Array.isArray(doc.elements) || isLaterVersion(doc.version)) return null
   const scene: DrawingSceneData = { appState: isRecord(doc.appState) ? doc.appState : {}, elements: [], files: {} }
   const ids = new Set<string>()
   for (const el of doc.elements) {
@@ -212,8 +218,8 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
  * Read the content of an `excalidraw` fence. Line format (see serializeSceneBody),
  * blank lines ignored; or, as a convenience for pasted scenes, a whole Excalidraw
  * document (`{"type":"excalidraw","elements":[…],…}`, any layout). null when
- * anything is off: a line that isn't a JSON object, no header, an element without
- * `id`/`type`, a duplicated id, an unknown kind of line.
+ * anything is off: a line that isn't a JSON object, no header, a header of a later format
+ * version, an element without `id`/`type`, a duplicated id, an unknown kind of line.
  */
 export function parseSceneBody(body: readonly string[]): DrawingSceneData | null {
   const lines = body.filter((l) => l.trim() !== '')
@@ -224,7 +230,7 @@ export function parseSceneBody(body: readonly string[]): DrawingSceneData | null
     const doc = parseJsonObject(body.join('\n'))
     return doc ? sceneFromDocument(doc) : null
   }
-  if (header.type !== 'excalidraw') return null
+  if (header.type !== 'excalidraw' || isLaterVersion(header.version)) return null
   if (header.appState !== undefined && !isRecord(header.appState)) return null
   if (Array.isArray(header.elements)) return lines.length === 1 ? sceneFromDocument(header) : null
 
@@ -258,7 +264,9 @@ export function parseSceneBody(body: readonly string[]): DrawingSceneData | null
  */
 export function matchDrawingBlock(lines: readonly string[], start: number): { block: DrawingBlock; end: number } | null {
   const open = lines[start]?.match(DRAWING_OPEN_RE)
-  if (!open) return null
+  // `-->` inside the attributes: the comment ends there for any HTML reader, and the
+  // attributes couldn't be written back verbatim. Not a marker.
+  if (!open || (open[1] ?? '').includes('-->')) return null
   let i = start + 1
   while (i < lines.length && lines[i].trim() === '') i++
   const fence = lines[i]?.match(DRAWING_FENCE_RE)
@@ -314,14 +322,15 @@ function blockMarkdown(kind: DrawingKind, rawAttrs: string, body: readonly strin
     if (m) ticks = Math.max(ticks, m[1].length + 1)
   }
   const fence = '`'.repeat(ticks)
-  const attrs = rawAttrs.replace(/\s*\n\s*/g, ' ').replace(/-->/g, '--&gt;').trim()
+  const attrs = rawAttrs.replace(/\s*\n\s*/g, ' ').trim()
   return [attrs ? `<!-- drawing ${attrs} -->` : '<!-- drawing -->', `${fence}${kind}`, ...body, fence, '<!-- /drawing -->'].join('\n')
 }
 
 /**
  * Serialize a block to markdown, from the opening to the closing marker (no
- * trailing newline). Always re-parses with parseDrawingMarkdown, except a
- * Mermaid source carrying a sync conflict marker line (never produced by a parse).
+ * trailing newline). Always re-parses with parseDrawingMarkdown, except what a parse
+ * never produces: a Mermaid source carrying a sync conflict marker line, attributes
+ * holding `-->` (they are written as given: opaque).
  */
 export function serializeDrawingMarkdown(block: DrawingBlock): string {
   return blockMarkdown(block.kind, block.attrs, drawingBodyLines(block))
@@ -379,9 +388,20 @@ export function drawingFromHtmlData(data: DrawingHtmlData): DrawingBlock | null 
  * doesn't parse is written as it came rather than dropped.
  */
 export function drawingHtmlDataToMarkdown(data: DrawingHtmlData): string {
+  // Every save of a section comes through here for each of its drawings (parse + canonical
+  // re-serialization of the whole scene): the same data always gives the same text.
+  const key = `${data.kind}\n${data.attrs}\n${data.body}`
+  const hit = markdownCache.get(key)
+  if (hit !== undefined) return hit
   const block = drawingFromHtmlData(data)
-  return block ? serializeDrawingMarkdown(block) : blockMarkdown(data.kind, data.attrs, data.body.split('\n'))
+  const md = block ? serializeDrawingMarkdown(block) : blockMarkdown(data.kind, data.attrs, data.body.split('\n'))
+  markdownCache.set(key, md)
+  while (markdownCache.size > MARKDOWN_CACHE_LIMIT) markdownCache.delete(markdownCache.keys().next().value as string)
+  return md
 }
+
+const MARKDOWN_CACHE_LIMIT = 24
+const markdownCache = new Map<string, string>()
 
 // ── Readable text (search, AI context, word count) ───────────────────────────
 

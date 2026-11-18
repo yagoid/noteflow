@@ -31,7 +31,7 @@ function listExcalidrawFonts(): string[] {
 // fallback at the self-hosted path instead (a harmless duplicate of the first source).
 //
 // What a production build guarantees (generateBundle below): the rewrite was applied at least
-// once AND no emitted chunk mentions the CDN — so an Excalidraw upgrade that renames, moves or
+// once AND no emitted script (chunks, and workers emitted as assets) mentions the CDN — so an Excalidraw upgrade that renames, moves or
 // reshapes the fallback breaks `npm run build` instead of shipping it back. In dev the rewrite is
 // best effort (Vite's pre-bundled copy); nothing checks it there.
 const EXCALIDRAW_CDN = 'https://esm.sh/'
@@ -69,9 +69,13 @@ function excalidrawFonts(): Plugin {
       if (patched === 0) {
         this.error('Excalidraw CDN font fallback was not rewritten in any module: update EXCALIDRAW_CDN_FALLBACK in vite.config.ts')
       }
-      for (const chunk of Object.values(bundle)) {
-        if (chunk.type === 'chunk' && chunk.code.includes(EXCALIDRAW_CDN)) {
-          this.error(`${chunk.fileName} still references ${EXCALIDRAW_CDN}: update EXCALIDRAW_CDN_FALLBACK in vite.config.ts`)
+      // Chunks, and the scripts emitted as assets (workers).
+      for (const file of Object.values(bundle)) {
+        const code = file.type === 'chunk' ? file.code
+          : /\.m?js$/.test(file.fileName) ? (typeof file.source === 'string' ? file.source : Buffer.from(file.source).toString('utf8'))
+            : ''
+        if (code.includes(EXCALIDRAW_CDN)) {
+          this.error(`${file.fileName} still references ${EXCALIDRAW_CDN}: update EXCALIDRAW_CDN_FALLBACK in vite.config.ts`)
         }
       }
       for (const rel of listExcalidrawFonts()) {
