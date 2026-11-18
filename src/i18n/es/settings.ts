@@ -372,7 +372,7 @@ export const settings = {
     autocomplete: 'Autocompletado',
     autocompleteBeta: 'Beta',
     autocompleteHint:
-      'Sugiere cómo continuar mientras escribes: Tab acepta, Esc descarta. Mientras está activo, el texto cercano al cursor se envía a NoteFlow AI según escribes. Nunca se usa en notas cifradas ni en secciones ocultas a la IA.',
+      'Sugiere cómo continuar mientras escribes: Tab acepta, Esc descarta. Mientras está activo, el texto cercano al cursor se envía a NoteFlow AI según escribes, junto con el título de la nota y los nombres de sus secciones. Nunca se usa en notas cifradas ni en secciones ocultas a la IA.',
     autocompleteNeedsPlan: 'Requiere un plan de NoteFlow AI activo.',
     enableAutocomplete: 'Activar el autocompletado con IA',
     disableAutocomplete: 'Desactivar el autocompletado con IA',

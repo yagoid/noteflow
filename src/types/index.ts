@@ -1062,7 +1062,12 @@ declare global {
       onAiAutocompleteChanged: (cb: (status: AiAutocompleteStatus) => void) => () => void
       // One suggestion for the text around the caret (the server picks prompt and model).
       // The text so far arrives by onAiCompletePartial; the result carries the final one.
-      aiComplete: (req: { requestId: string; before: string; after: string }) => Promise<AiCompleteResult>
+      // `title` / `section` / `sections`: what the note is about (lib/aiAutocomplete.ts →
+      // autocompleteNoteContext; never the name of a section hidden from the AI).
+      aiComplete: (req: {
+        requestId: string; before: string; after: string
+        title?: string; section?: string; sections?: string[]
+      }) => Promise<AiCompleteResult>
       onAiCompletePartial: (cb: (p: { requestId: string; text: string }) => void) => () => void
       aiCompleteCancel: (requestId: string) => void
       aiChatConfirm: (toolCallId: string, approved: boolean) => void

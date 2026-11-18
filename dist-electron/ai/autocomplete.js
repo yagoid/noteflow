@@ -2,11 +2,16 @@
 // Inline AI autocomplete (ghost text in the editor) through the managed NoteFlow AI
 // proxy: one short streamed request per suggestion to POST <ai-proxy>/autocomplete.
 // The SERVER owns the prompt, the model and max_tokens; the client only sends the plain
-// text around the caret and cleans what comes back. No electron imports — the pure
-// pieces (cleanSuggestion, the backoff rules) are covered by
-// tests/electron/autocomplete.test.ts. Wired to IPC in main.ts (`ai:complete`).
+// text around the caret plus what the note is about (its title, the name of the section
+// being written and the names of its other sections) and cleans what comes back. No
+// electron imports — the pure pieces (cleanSuggestion, noteContextFields, the backoff
+// rules) are covered by tests/electron/autocomplete.test.ts. Wired to IPC in main.ts
+// (`ai:complete`).
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AutocompleteRequestError = exports.AUTOCOMPLETE_TRANSIENT_BACKOFF_MS = exports.AUTOCOMPLETE_NO_PLAN_BACKOFF_MS = exports.AUTOCOMPLETE_QUOTA_BACKOFF_MS = exports.AUTOCOMPLETE_MAX_WORDS = exports.AUTOCOMPLETE_AFTER_CHARS = exports.AUTOCOMPLETE_BEFORE_CHARS = void 0;
+exports.AutocompleteRequestError = exports.AUTOCOMPLETE_TRANSIENT_BACKOFF_MS = exports.AUTOCOMPLETE_NO_PLAN_BACKOFF_MS = exports.AUTOCOMPLETE_QUOTA_BACKOFF_MS = exports.AUTOCOMPLETE_MAX_WORDS = exports.AUTOCOMPLETE_SECTION_NAME_CHARS = exports.AUTOCOMPLETE_MAX_SECTIONS = exports.AUTOCOMPLETE_SECTION_CHARS = exports.AUTOCOMPLETE_TITLE_CHARS = exports.AUTOCOMPLETE_AFTER_CHARS = exports.AUTOCOMPLETE_BEFORE_CHARS = void 0;
+exports.sliceStart = sliceStart;
+exports.sliceEnd = sliceEnd;
+exports.noteContextFields = noteContextFields;
 exports.finishesLastWord = finishesLastWord;
 exports.cleanSuggestion = cleanSuggestion;
 exports.autocompleteBackoffMs = autocompleteBackoffMs;
@@ -17,6 +22,52 @@ exports.completeText = completeText;
 /** Context sent with each request (characters of plain text around the caret). */
 exports.AUTOCOMPLETE_BEFORE_CHARS = 1500;
 exports.AUTOCOMPLETE_AFTER_CHARS = 200;
+/** Caps of the note context, the same the proxy applies (it sanitizes the names again). */
+exports.AUTOCOMPLETE_TITLE_CHARS = 200;
+exports.AUTOCOMPLETE_SECTION_CHARS = 120;
+exports.AUTOCOMPLETE_MAX_SECTIONS = 30;
+exports.AUTOCOMPLETE_SECTION_NAME_CHARS = 80;
+const isHighSurrogate = (code) => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code) => code >= 0xdc00 && code <= 0xdfff;
+/** The first `max` UTF-16 code units of `text`, never ending in half a surrogate pair. */
+function sliceStart(text, max) {
+    const cut = text.slice(0, max);
+    return isHighSurrogate(cut.charCodeAt(cut.length - 1)) ? cut.slice(0, -1) : cut;
+}
+/** The last `max` UTF-16 code units of `text`, never starting in half a surrogate pair. */
+function sliceEnd(text, max) {
+    const cut = text.slice(-max);
+    return isLowSurrogate(cut.charCodeAt(0)) ? cut.slice(1) : cut;
+}
+/**
+ * The `title` / `section` / `sections` fields of the request body out of untrusted values
+ * (they come over IPC): only strings, trimmed and capped — a request must stay far below
+ * the proxy's body limit however long the names are —, blank ones left out. A field with
+ * nothing in it is absent, so a note without any of it sends the same body as before.
+ */
+function noteContextFields(title, section, sections) {
+    const name = (value, max) => (typeof value === 'string' ? sliceStart(value.trim(), max) : '');
+    const fields = {};
+    const t = name(title, exports.AUTOCOMPLETE_TITLE_CHARS);
+    if (t)
+        fields.title = t;
+    const s = name(section, exports.AUTOCOMPLETE_SECTION_CHARS);
+    if (s)
+        fields.section = s;
+    if (Array.isArray(sections)) {
+        const names = [];
+        for (const item of sections) {
+            if (names.length >= exports.AUTOCOMPLETE_MAX_SECTIONS)
+                break;
+            const n = name(item, exports.AUTOCOMPLETE_SECTION_NAME_CHARS);
+            if (n)
+                names.push(n);
+        }
+        if (names.length > 0)
+            fields.sections = names;
+    }
+    return fields;
+}
 /** Max words shown. Longer replies are cut at the last clause boundary inside the cap. */
 exports.AUTOCOMPLETE_MAX_WORDS = 12;
 const WORD_END = /[\p{L}\p{N},;:.!?)\]"”»]$/u;
@@ -220,12 +271,15 @@ exports.AutocompleteRequestError = AutocompleteRequestError;
  * fetch's own error on abort / network failure.
  */
 async function completeText(opts) {
-    const before = opts.before.slice(-exports.AUTOCOMPLETE_BEFORE_CHARS);
-    const after = opts.after.slice(0, exports.AUTOCOMPLETE_AFTER_CHARS);
+    // The renderer already cut both to these lengths: an orphan half of a surrogate pair at
+    // the outer edge (an emoji right at the cut) is dropped here either way.
+    const before = sliceEnd(opts.before, exports.AUTOCOMPLETE_BEFORE_CHARS);
+    const after = sliceStart(opts.after, exports.AUTOCOMPLETE_AFTER_CHARS);
+    const about = noteContextFields(opts.title, opts.section, opts.sections);
     const res = await (opts.fetchImpl ?? fetch)(`${opts.baseUrl.replace(/\/+$/, '')}/autocomplete`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${opts.token}` },
-        body: JSON.stringify(after ? { before, after } : { before }),
+        body: JSON.stringify({ before, ...(after ? { after } : {}), ...about }),
         signal: opts.signal,
     });
     if (!res.ok || !res.body) {

@@ -649,7 +649,10 @@ const api = {
     return () => ipcRenderer.removeListener('ai:autocomplete-changed', wrapper)
   },
   // One suggestion: the text so far arrives by onAiCompletePartial, the final one as the result.
-  aiComplete: (req: { requestId: string; before: string; after: string }) => ipcRenderer.invoke('ai:complete', req),
+  aiComplete: (req: {
+    requestId: string; before: string; after: string
+    title?: string; section?: string; sections?: string[]
+  }) => ipcRenderer.invoke('ai:complete', req),
   onAiCompletePartial: (cb: (p: { requestId: string; text: string }) => void) => {
     const wrapper = (_event: Electron.IpcRendererEvent, p: { requestId: string; text: string }) => cb(p)
     ipcRenderer.on('ai:complete-partial', wrapper)

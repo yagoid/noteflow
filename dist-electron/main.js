@@ -4391,6 +4391,10 @@ electron_1.ipcMain.handle('ai:complete', async (event, req) => {
             token,
             before: r.before,
             after: typeof r.after === 'string' ? r.after : '',
+            // What the note is about (names only; completeText validates and caps them).
+            title: r.title,
+            section: r.section,
+            sections: r.sections,
             signal: controller.signal,
             onPartial: (partial) => {
                 if (!controller.signal.aborted && !sender.isDestroyed()) {

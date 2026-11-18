@@ -709,10 +709,33 @@ y sus handlers en `main.ts`; renderer `components/Editor/AiGhostText.ts` (extens
 - **Solo con el plan NoteFlow AI, independiente del proveedor del chat.** No pasa por
   `settings.aiLlm` ni por `llm/`: main llama directo a **`POST <AI_PROXY_URL>/autocomplete`** con el
   access token de la cuenta (`account.getAccessTokenResult`; 401 → `invalidateAccessToken(token)`) y
-  body `{before, after?}`. **Prompt, modelo, `max_tokens` y temperatura los fija el servidor** (el
-  cliente no elige modelo); el proxy aplica además un **techo propio** al autocompletado (30 % de la
-  asignación mensual). Respuesta: SSE estilo `chat.completion.chunk`. Contexto enviado: hasta 1500
-  caracteres antes del cursor y 200 después (texto plano de la sección abierta).
+  body `{before, after?, title?, section?, sections?}`. **Prompt, modelo, `max_tokens` y temperatura
+  los fija el servidor** (el cliente no elige modelo); el proxy aplica además un **techo propio** al
+  autocompletado (30 % de la asignación mensual). Respuesta: SSE estilo `chat.completion.chunk`.
+  Contexto enviado: hasta 1500 caracteres antes del cursor y 200 después (texto plano de la sección
+  abierta) **más el contexto de la nota** (solo nombres, ver el punto siguiente).
+- **Contexto de la nota (`title`, `section`, `sections`):** el título de la nota, el nombre de la
+  sección activa y los nombres de las **demás** secciones. Con solo los 1500 caracteres el modelo no
+  sabía de qué iba la nota ni a qué se refería una mención a otra sección; medido contra la ruta real
+  `/autocomplete` en producción (2026-11-18, 13 casos × 3): **21/39 aciertos sin el bloque, 31/39
+  con él** (referencias al título 3/9 → 5/9, a otras secciones 4/9 → 9/9, dato lejano 5/12 → 8/12),
+  sin respuestas vacías, por ~60 tokens de entrada más (+4 % de coste; cifras en `monetization.md`
+  § Autocompletado). **Decisión: el contexto se queda en 1500 caracteres** — con 3000 más
+  título/secciones salió 30/39 (por la ruta del chat) a un 25 % más de coste: mejora dentro del
+  ruido. Lo calcula la función pura
+  **`autocompleteNoteContext(title, sections, activeSectionId)`** (`lib/aiAutocomplete.ts`, con
+  test): nombres en el orden de la nota, sin vacíos, sin repetidos y sin el de la sección activa.
+  **Privacidad: el nombre de una sección `aiHidden` no sale nunca** — ni en `sections` ni como
+  `section` (ahí el autocompletado tampoco corre) —; de una sección oculta no viaja ni el contenido
+  ni el nombre. `NoteEditor` lo pasa a `Editor` por la prop `aiNoteContext` y la extensión lo lee
+  **en vivo al pedir** (opción `getNoteContext` de `AiGhostText`, vía ref: renombrar la nota o una
+  sección aplica a la siguiente petición sin remontar el editor). Main no confía en lo que llega por
+  IPC: `noteContextFields` (pura, en `electron/ai/autocomplete.ts`) deja solo strings, recorta
+  (título 200, sección 120, 30 nombres de 80 — los mismos topes que el proxy, para que el body quede
+  muy por debajo de sus 32 KiB) y **omite los campos vacíos**, así que una nota sin nada de eso manda
+  el body de siempre. El saneado de verdad (una línea, sin `<`/`>`) lo hace el proxy
+  (`monetization.md` § Autocompletado). Contra un proxy que aún no conozca los campos no pasa nada:
+  los ignora.
 - **Ajuste: `settings.aiAutocomplete.enabled`, LOCAL (`settings.json` de `userData`), apagado por
   defecto.** Es una decisión de privacidad por dispositivo (activa el envío de texto mientras se
   escribe), por eso no va en `ui-settings.json`. IPC `ai:autocomplete-get` / `ai:autocomplete-set` →
@@ -724,14 +747,15 @@ y sus handlers en `main.ts`; renderer `components/Editor/AiGhostText.ts` (extens
   activar/desactivar aplica a los editores abiertos sin recargar (al apagar: se cancela lo que haya
   en vuelo y se borra la sugerencia visible).
 - **UI (Ajustes → IA → "Your notes and AI", fila "Autocomplete" con pastilla "Beta"):** texto de
-  ayuda (envío del texto cercano al cursor; nunca en notas cifradas ni secciones ocultas a la IA),
+  ayuda (envío del texto cercano al cursor, del título de la nota y de los nombres de sus secciones;
+  nunca en notas cifradas ni secciones ocultas a la IA),
   toggle, y sin plan usable la línea "Requires an active NoteFlow AI plan" con el toggle
   deshabilitado (si quedó activo de antes sí se puede **apagar**). Con el ajuste activo y plan: barra
   + "N% of this month's autocomplete allowance used" (`autocompleteUsagePercent`), del campo
   `autocomplete: {used, limit}` de `GET /usage` (IPC `ai:llm-usage`; `parseAutocompleteUsage`: si el
   proxy no lo manda o viene mal formado → desconocido, la barra no se pinta). Al agotarlo, texto de
   aviso en amarillo.
-- **Flujo (`ai:complete`, invoke `{requestId, before, after}`):** main comprueba, en este orden, el
+- **Flujo (`ai:complete`, invoke `{requestId, before, after, title?, section?, sections?}`):** main comprueba, en este orden, el
   ajuste (`disabled`), el plan (`unavailable`) y el bloqueo temporal (`unavailable` + `retryAt`) —
   **defensa en profundidad: con el ajuste apagado no sale nada aunque el renderer pida** —; pide el
   token y streamea. Cada vez que cambia el texto limpio acumulado lo manda al remitente por el evento
@@ -832,6 +856,8 @@ y sus handlers en `main.ts`; renderer `components/Editor/AiGhostText.ts` (extens
   calidad en `monetization.md` § Autocompletado). **Probado en la app real** (perfil dev) de extremo
   a extremo: texto fantasma, Tab/Esc, undo, tecleo coincidente, exclusiones (mitad de párrafo,
   Backspace, menú `/`, bloque de código, checkbox), apagar/encender en vivo, Tab en párrafo que ya
-  no escapa y sangrado en listas. **Sin probar a mano:** notas cifradas, secciones `aiHidden`,
+  no escapa y sangrado en listas. El **contexto de la nota** (`title` / `section` / `sections`,
+  2026-11-18) tiene el proxy con el bloque `<about>` **desplegado en producción** y medido contra la
+  ruta real, pero **aún no se ha probado en la app real**. **Sin probar a mano:** notas cifradas, secciones `aiHidden`,
   tablas, IME, stickies y el borrado de cuenta con la tabla nueva. **Fallo residual conocido:**
   "presu" → `+uesto` en ~1 de cada 3 (el modelo se come una letra; no tiene arreglo en el prompt).

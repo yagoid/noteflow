@@ -19,8 +19,9 @@
 //   POST <fn>/autocomplete       → auth + entitlement + small body cap + budget
 //                                  check (no reservation) → OpenRouter → SSE
 //                                  passthrough → cost added to the user's daily
-//                                  row. Body { before, after? }: the SERVER
-//                                  builds the whole upstream request.
+//                                  row. Body { before, after?, title?,
+//                                  section?, sections? }: the SERVER builds
+//                                  the whole upstream request.
 //
 // Auth: `Authorization: Bearer <Supabase access token>` — the user JWT the
 // desktop app mints from its account session. Deploy WITH JWT verification
@@ -478,7 +479,7 @@ function getModelCatalog(supabaseUrl: string, serviceRoleKey: string): Promise<C
 
 /**
  * POST /autocomplete, once the caller is authenticated and entitled: small
- * body cap → { before, after } → budget check (no reservation) → OpenRouter →
+ * body cap → { before, after, about? } → budget check (no reservation) → OpenRouter →
  * SSE passthrough, with the cost added to the user's daily row when the stream
  * ends. The whole upstream request is built here (buildAutocompleteBody).
  */
@@ -489,7 +490,8 @@ async function handleAutocomplete(
   userId: string,
   prices: Readonly<Record<string, ModelPrice>>
 ): Promise<Response> {
-  // ── Body: hard size cap (declared and counted), then { before, after? } ────
+  // ── Body: hard size cap (declared and counted), then { before, after?,
+  //    title?, section?, sections? } (the last three never invalidate it) ───
   const tooLarge = () =>
     json(
       413,
@@ -511,7 +513,9 @@ async function handleAutocomplete(
   }
   const request = parseAutocompleteRequest(rawBody)
   if (!request.ok) {
-    return invalid('Expected a JSON body { "before": string, "after"?: string } with a non-empty `before`.')
+    return invalid(
+      'Expected a JSON body { "before": string, "after"?: string, "title"?: string, "section"?: string, "sections"?: string[] } with a non-empty `before`.'
+    )
   }
 
   const openrouterKey = Deno.env.get('OPENROUTER_API_KEY')
@@ -552,7 +556,7 @@ async function handleAutocomplete(
 
   // ── Forward: the server-built request (model, prompt, caps, reasoning off) ─
   const model = parseAutocompleteModel(Deno.env.get('AI_AUTOCOMPLETE_MODEL'))
-  const upstreamBody = buildAutocompleteBody(request.before, request.after, model)
+  const upstreamBody = buildAutocompleteBody(request.before, request.after, model, request.about)
   let upstream: Response
   try {
     upstream = await fetch(OPENROUTER_CHAT_URL, {

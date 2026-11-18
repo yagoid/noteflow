@@ -641,10 +641,15 @@ es **un preset más**, no una implementación nueva.
   fantasma mientras se escribe, solo para quien tiene NoteFlow AI (mismo auth + entitlement
   `ai`/`bundle` que el chat: 401 / 403 `subscription_required`).
   - **Contrato:** `Authorization: Bearer <access token>`, body JSON `{ "before": string, "after"?:
-    string }` (texto antes y después del cursor; cualquier otro campo se ignora). **El servidor
+    string, "title"?: string, "section"?: string, "sections"?: string[] }` (texto antes y después
+    del cursor y, opcional, **de qué va la nota**: su título, el nombre de la sección que se está
+    escribiendo y los nombres de las **otras** secciones; cualquier otro campo se ignora). **El servidor
     construye la petición entera** (`buildAutocompleteBody`): prompt de sistema
     (`AUTOCOMPLETE_SYSTEM_PROMPT`: continuar la línea de `<line>`, solo la continuación, 3-10
-    palabras, en el idioma de `<line>` aunque el resto de la nota esté en otro, con 5 ejemplos;
+    palabras, en el idioma de `<line>` aunque el resto de la nota esté en otro, con 5 ejemplos; su
+    **tercera línea** explica el bloque `<about>` — "`<about>`, when present, gives the title of the
+    note, the section being written and the names of its other sections: use it to understand what
+    the note is about and what is being referred to." —;
     **protocolo de marcador**: la
     respuesta debe empezar por `+` si termina la palabra que quedó a medias —va pegada, sin espacio—
     o por `_` si empieza palabra nueva, porque el modelo nunca manda un espacio inicial fiable. **El
@@ -653,7 +658,10 @@ es **un preset más**, no una implementación nueva.
     `<note>\n${before}<CURSOR/>${after}\n</note>\n<line>${line}</line>`, donde `line` es el `before`
     ya recortado desde su último salto de línea hasta el final (todo `before` si no tiene saltos;
     vacío si acaba en salto) — repetir la línea en curso es lo que mantiene al modelo en la palabra
-    a medias y en el idioma de esa línea en notas con idiomas mezclados —, modelo, `max_tokens = 48`
+    a medias y en el idioma de esa línea en notas con idiomas mezclados —; si el cliente mandó
+    contexto de la nota, **delante** va `<about>\nTitle: …\nSection: …\nOther sections: a, b,
+    c\n</about>\n` (solo las líneas con valor; sin datos el mensaje es **idéntico** al de un cliente
+    antiguo) —, modelo, `max_tokens = 48`
     (`AUTOCOMPLETE_MAX_TOKENS`), `temperature 0.2`, `stream: true`, `usage: {include: true}` y
     **razonamiento desactivado** (`reasoning: {effort: 'none'}` — Haiku a veces razonaba, agotaba los
     48 tokens y devolvía vacío). El cliente no elige nada de eso. Respuesta 200: el SSE de OpenRouter
@@ -664,6 +672,26 @@ es **un preset más**, no una implementación nueva.
     sustituto); es lo que acota el coste de entrada mande lo que mande el cliente. Tope de body
     **32 KiB** (`AUTOCOMPLETE_MAX_BODY_BYTES`, por `Content-Length` y contando al leer) → 413
     `request_too_large`: el cliente debe recortar antes de enviar, no mandar la nota entera.
+  - **Contexto de la nota — bloque `<about>` (`sanitizeAutocompleteAbout`; **desplegado en
+    producción el 2026-11-18**, desde el commit `0a2d6ed`):** ampliación **compatible** del contrato. Los tres
+    campos son opcionales y **un valor de tipo incorrecto se ignora, nunca es 400** (es una pista,
+    no parte de lo que se continúa); `parseAutocompleteRequest` devuelve `about` solo si queda algo.
+    Saneado de cada nombre: **una sola línea** (saltos, tabuladores, caracteres de control y rachas
+    de espacios → un espacio; trim), sin caracteres de formato Unicode (`\p{Cf}`: ancho cero,
+    marcas bidi) ni sustitutos sueltos, **sin `<` ni `>`** (un nombre no debe poder cerrar ni abrir las
+    etiquetas del mensaje: `</about>`, `<note>`…), y recorte a `title` ≤ **200**, `section` ≤
+    **120** y `sections` ≤ **30** nombres de ≤ **80** caracteres (sin partir un par sustituto). De
+    `sections` se descartan los no-string, los vacíos, los duplicados (comparados ya saneados) y el
+    propio `section`. **Medido contra la ruta real `/autocomplete` (producción, 2026-11-18, 13
+    casos × 3, notas de 1.800-3.400 caracteres):** sin título/secciones **21/39** aciertos (título
+    3/9, otras secciones 4/9, dato lejano 5/12); con título/secciones **31/39** (título 5/9, otras
+    secciones 9/9, dato lejano 8/12), sin respuestas vacías. Coste medio medido: **$0,000123 →
+    $0,000128** por sugerencia (~1.100 → ~1.160 tokens de entrada), es decir ~4.700 sugerencias al
+    mes con el techo de $0,60. **Decisión: el contexto se queda en 1.500 caracteres** — probar 3.000
+    con título/secciones dio 30/39 (por la ruta del chat) a $0,00016: mejora dentro del ruido por un
+    25 % más de coste. Sin probar todavía en la app real. (Referencia previa, por la **ruta del
+    chat** y no por `/autocomplete`: 18/39 → 27/38 — una petición de la segunda tanda falló por un
+    error de red del proxy, HTTP 520 —, título 0/9 → 6/9, otras secciones 3/9 → 9/9.) El cliente no manda nombres de secciones ocultas a la IA (`ai.md`).
   - **Errores** (OpenAI-shaped, como el resto del proxy): 400 `invalid_request` (JSON inválido,
     `before` ausente / no string / solo espacios, `after` presente y no string — `null` cuenta como
     ausente) · 413 `request_too_large` · **429 `autocomplete_quota_exceeded`** (techo del
@@ -688,7 +716,9 @@ es **un preset más**, no una implementación nueva.
     autocompleteUsed, limit, share)`: `used >= limit` → `'quota'` (gana); `autocompleteUsed >= limit
     × share` → `'autocomplete_quota'`; si no `'ok'`. Con $2 y 30 % son $0,60 ≈ 10.000 sugerencias al
     mes a ~$0,00006 (coste real medido en producción el 2026-11-17 con el prompt de marcador:
-    ~520-580 tokens de entrada por sugerencia).
+    ~520-580 tokens de entrada por sugerencia, con contextos cortos). Con notas de 1.800-3.400
+    caracteres, que llenan el contexto, la medición del 2026-11-18 da ~$0,000128 (~1.160 tokens de
+    entrada, bloque `<about>` incluido): **~4.700 sugerencias al mes**.
   - **Tabla agregada, no una fila por sugerencia:** `public.ai_autocomplete_daily (user_id, day,
     requests, tokens_in, tokens_out, cost_usd; PK (user_id, day))` — **una fila por usuario y día
     UTC**, con RLS de solo lectura del propio usuario (como `usage_events`) y FK `on delete cascade`
@@ -698,15 +728,20 @@ es **un preset más**, no una implementación nueva.
     p_tokens_out, p_cost_usd)` (upsert que suma; security definer, solo service role).
   - **Por qué sin reserva:** el chat reserva antes de reenviar porque una petición puede costar
     céntimos o dólares; aquí la más cara posible (contexto recortado + 48 tokens de salida) cuesta
-    ≤ ~$0,0003 (lo fija un test; el peor caso es un `before` de 2.000 caracteres sin ningún salto de
-    línea, que viaja dos veces — en `<note>` y en `<line>` —; antes de repetir la línea era
-    ≤ ~$0,0002, cifra que aún cita el comentario de la migración 0018). **La cota vale para texto
+    ≤ ~$0,00045 (lo fija un test, que hoy da **$0,00042**: ~3.965 tokens de entrada estimados; el
+    peor caso es un `before` de 2.000 caracteres sin ningún salto de línea, que viaja dos veces — en
+    `<note>` y en `<line>` —, más un bloque `<about>` con todos sus topes llenos, ~2.830 caracteres,
+    que por sí solo añade ~$0,00014. Historia de la cota: ≤ ~$0,0002 al principio — cifra que aún
+    cita el comentario de la migración 0018 —, ≤ ~$0,0003 al repetir la línea, ≤ ~$0,00045 con
+    `<about>`). **La cota vale para texto
     latino y no es estricta para CJK:** el recorte es por caracteres (UTF-16) y un carácter CJK
-    son más tokens que uno latino, así que un contexto lleno de CJK puede pasarla. Basta una **lectura previa** — RPC `get_autocomplete_budget(p_user_id)`
+    son más tokens que uno latino, así que un contexto lleno de CJK puede pasarla — y eso incluye el bloque `<about>`: sus topes
+    también son por caracteres, así que un título y unos nombres de sección en CJK suman más tokens
+    que los ~2.830 caracteres latinos del test. Basta una **lectura previa** — RPC `get_autocomplete_budget(p_user_id)`
     → jsonb `{used, autocomplete_used}` en USD, sin lock ni fila `pending` — y sumar el coste real al
     terminar. Así ninguna sugerencia ocupa hueco de `AI_MAX_INFLIGHT`, ni toma el advisory lock del
     usuario (teclear no serializa ni retrasa el chat), y cada petición es una lectura + un upsert.
-    **Exceso posible:** las peticiones en vuelo cuando se alcanza el techo × ≤ $0,0003; sobre el
+    **Exceso posible:** las peticiones en vuelo cuando se alcanza el techo × ≤ $0,00045; sobre el
     techo del 30 % ese exceso sale del presupuesto del chat, no del operador.
   - **Medición:** `tee()` + `createSseUsageScanner` como el chat; al acabar el stream,
     `record_autocomplete_cost`. **Abortar en el cliente** (lo habitual: el usuario sigue tecleando)
@@ -737,7 +772,9 @@ es **un preset más**, no una implementación nueva.
     - Las peticiones **abortadas por el cliente** sí se registran en `ai_autocomplete_daily`
       (3 de 3).
     - `GET /usage` devuelve el campo `autocomplete`; el chat sigue funcionando.
-    - **Coste real:** ~$0,00006 por sugerencia (~520-580 tokens de entrada) con el prompt actual.
+    - **Coste real:** ~$0,00006 por sugerencia (~520-580 tokens de entrada) con el prompt de
+      marcador y contextos cortos; el 2026-11-18, con `<about>` y notas de 1.800-3.400 caracteres,
+      ~$0,000128 (~1.160 tokens de entrada).
     - **Calidad:** 66 de 69 respuestas limpias en casos difíciles (mitad de palabra ES/EN, idiomas
       mezclados, listas). **Fallo residual conocido:** "presu" → `+uesto` en ~1 de cada 3 (desliz
       del modelo, se come una letra; sin solución en el prompt).

@@ -463,7 +463,7 @@ export const settings = {
     autocomplete: 'Autocomplete',
     autocompleteBeta: 'Beta',
     autocompleteHint:
-      'Suggests how to continue as you write: Tab accepts, Esc dismisses. While it is on, the text near your cursor is sent to NoteFlow AI as you type. Never used in encrypted notes or in sections hidden from the AI.',
+      'Suggests how to continue as you write: Tab accepts, Esc dismisses. While it is on, the text near your cursor is sent to NoteFlow AI as you type, along with the note’s title and the names of its sections. Never used in encrypted notes or in sections hidden from the AI.',
     autocompleteNeedsPlan: 'Requires an active NoteFlow AI plan.',
     enableAutocomplete: 'Enable AI autocomplete',
     disableAutocomplete: 'Disable AI autocomplete',

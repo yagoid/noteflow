@@ -1,13 +1,68 @@
 // Inline AI autocomplete (ghost text in the editor) through the managed NoteFlow AI
 // proxy: one short streamed request per suggestion to POST <ai-proxy>/autocomplete.
 // The SERVER owns the prompt, the model and max_tokens; the client only sends the plain
-// text around the caret and cleans what comes back. No electron imports — the pure
-// pieces (cleanSuggestion, the backoff rules) are covered by
-// tests/electron/autocomplete.test.ts. Wired to IPC in main.ts (`ai:complete`).
+// text around the caret plus what the note is about (its title, the name of the section
+// being written and the names of its other sections) and cleans what comes back. No
+// electron imports — the pure pieces (cleanSuggestion, noteContextFields, the backoff
+// rules) are covered by tests/electron/autocomplete.test.ts. Wired to IPC in main.ts
+// (`ai:complete`).
 
 /** Context sent with each request (characters of plain text around the caret). */
 export const AUTOCOMPLETE_BEFORE_CHARS = 1500
 export const AUTOCOMPLETE_AFTER_CHARS = 200
+
+/** Caps of the note context, the same the proxy applies (it sanitizes the names again). */
+export const AUTOCOMPLETE_TITLE_CHARS = 200
+export const AUTOCOMPLETE_SECTION_CHARS = 120
+export const AUTOCOMPLETE_MAX_SECTIONS = 30
+export const AUTOCOMPLETE_SECTION_NAME_CHARS = 80
+
+/** What the note is about, as it travels in the request body (every field optional). */
+export interface AutocompleteNoteFields {
+  title?: string
+  section?: string
+  sections?: string[]
+}
+
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff
+
+/** The first `max` UTF-16 code units of `text`, never ending in half a surrogate pair. */
+export function sliceStart(text: string, max: number): string {
+  const cut = text.slice(0, max)
+  return isHighSurrogate(cut.charCodeAt(cut.length - 1)) ? cut.slice(0, -1) : cut
+}
+
+/** The last `max` UTF-16 code units of `text`, never starting in half a surrogate pair. */
+export function sliceEnd(text: string, max: number): string {
+  const cut = text.slice(-max)
+  return isLowSurrogate(cut.charCodeAt(0)) ? cut.slice(1) : cut
+}
+
+/**
+ * The `title` / `section` / `sections` fields of the request body out of untrusted values
+ * (they come over IPC): only strings, trimmed and capped — a request must stay far below
+ * the proxy's body limit however long the names are —, blank ones left out. A field with
+ * nothing in it is absent, so a note without any of it sends the same body as before.
+ */
+export function noteContextFields(title: unknown, section: unknown, sections: unknown): AutocompleteNoteFields {
+  const name = (value: unknown, max: number) => (typeof value === 'string' ? sliceStart(value.trim(), max) : '')
+  const fields: AutocompleteNoteFields = {}
+  const t = name(title, AUTOCOMPLETE_TITLE_CHARS)
+  if (t) fields.title = t
+  const s = name(section, AUTOCOMPLETE_SECTION_CHARS)
+  if (s) fields.section = s
+  if (Array.isArray(sections)) {
+    const names: string[] = []
+    for (const item of sections) {
+      if (names.length >= AUTOCOMPLETE_MAX_SECTIONS) break
+      const n = name(item, AUTOCOMPLETE_SECTION_NAME_CHARS)
+      if (n) names.push(n)
+    }
+    if (names.length > 0) fields.sections = names
+  }
+  return fields
+}
 
 /** Max words shown. Longer replies are cut at the last clause boundary inside the cap. */
 export const AUTOCOMPLETE_MAX_WORDS = 12
@@ -212,16 +267,23 @@ export async function completeText(opts: {
   token: string
   before: string
   after: string
+  /** What the note is about (untrusted: see noteContextFields). Never from content the AI must not see. */
+  title?: unknown
+  section?: unknown
+  sections?: unknown
   signal: AbortSignal
   onPartial?: (text: string) => void
   fetchImpl?: typeof fetch
 }): Promise<string> {
-  const before = opts.before.slice(-AUTOCOMPLETE_BEFORE_CHARS)
-  const after = opts.after.slice(0, AUTOCOMPLETE_AFTER_CHARS)
+  // The renderer already cut both to these lengths: an orphan half of a surrogate pair at
+  // the outer edge (an emoji right at the cut) is dropped here either way.
+  const before = sliceEnd(opts.before, AUTOCOMPLETE_BEFORE_CHARS)
+  const after = sliceStart(opts.after, AUTOCOMPLETE_AFTER_CHARS)
+  const about = noteContextFields(opts.title, opts.section, opts.sections)
   const res = await (opts.fetchImpl ?? fetch)(`${opts.baseUrl.replace(/\/+$/, '')}/autocomplete`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${opts.token}` },
-    body: JSON.stringify(after ? { before, after } : { before }),
+    body: JSON.stringify({ before, ...(after ? { after } : {}), ...about }),
     signal: opts.signal,
   })
   if (!res.ok || !res.body) {

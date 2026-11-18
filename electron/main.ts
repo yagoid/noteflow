@@ -4484,7 +4484,10 @@ ipcMain.handle('ai:autocomplete-set', (_event, enabled: unknown) => {
 })
 
 ipcMain.handle('ai:complete', async (event, req: unknown): Promise<AutocompleteResult> => {
-  const r = (req ?? {}) as { requestId?: unknown; before?: unknown; after?: unknown }
+  const r = (req ?? {}) as {
+    requestId?: unknown; before?: unknown; after?: unknown
+    title?: unknown; section?: unknown; sections?: unknown
+  }
   if (typeof r.requestId !== 'string' || typeof r.before !== 'string' || !r.before.trim()) {
     return { ok: false, reason: 'error' }
   }
@@ -4522,6 +4525,10 @@ ipcMain.handle('ai:complete', async (event, req: unknown): Promise<AutocompleteR
       token,
       before: r.before,
       after: typeof r.after === 'string' ? r.after : '',
+      // What the note is about (names only; completeText validates and caps them).
+      title: r.title,
+      section: r.section,
+      sections: r.sections,
       signal: controller.signal,
       onPartial: (partial) => {
         if (!controller.signal.aborted && !sender.isDestroyed()) {

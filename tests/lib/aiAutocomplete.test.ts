@@ -1,8 +1,64 @@
 import { describe, it, expect } from 'vitest'
 import {
   AUTOCOMPLETE_MIN_PREVIOUS_CHARS, AUTOCOMPLETE_PAUSE_MS,
-  autocompleteUsagePercent, canRequestCompletion, hasEnoughContext, remainingSuggestion,
+  autocompleteNoteContext, autocompleteUsagePercent, canRequestCompletion, hasEnoughContext, remainingSuggestion,
 } from '../../src/lib/aiAutocomplete'
+
+describe('autocompleteNoteContext', () => {
+  const sections = [
+    { id: 'a', name: 'Ideas' },
+    { id: 'b', name: 'Presupuesto' },
+    { id: 'c', name: 'Diario', aiHidden: true },
+    { id: 'd', name: 'Tareas', aiHidden: false },
+  ]
+
+  it('gives the title, the active section and the names of the others, in note order', () => {
+    expect(autocompleteNoteContext('Viaje a Japón', sections, 'b')).toEqual({
+      title: 'Viaje a Japón',
+      section: 'Presupuesto',
+      sections: ['Ideas', 'Tareas'],
+    })
+  })
+
+  it('never gives the name of a section hidden from the AI', () => {
+    for (const active of ['a', 'b', 'd']) {
+      const context = autocompleteNoteContext('T', sections, active)
+      expect(context.sections).not.toContain('Diario')
+      expect(context.section).not.toBe('Diario')
+    }
+    // Not even as the section being written (autocomplete does not run there anyway).
+    expect(autocompleteNoteContext('T', sections, 'c')).toEqual({
+      title: 'T',
+      section: '',
+      sections: ['Ideas', 'Presupuesto', 'Tareas'],
+    })
+    // A hidden section that shares its name with a visible one: the visible one is listed once.
+    const twins = [{ id: '1', name: 'Notas', aiHidden: true }, { id: '2', name: 'Notas' }, { id: '3', name: 'Hoy' }]
+    expect(autocompleteNoteContext('T', twins, '3').sections).toEqual(['Notas'])
+  })
+
+  it('leaves out blank names, repeated ones and the active section’s own name', () => {
+    const messy = [
+      { id: '1', name: ' Hoy ' },
+      { id: '2', name: '   ' },
+      { id: '3', name: 'Hoy' },
+      { id: '4', name: 'Mañana' },
+      { id: '5', name: 'Mañana' },
+      { id: '6', name: '' },
+    ]
+    expect(autocompleteNoteContext('  Semana  ', messy, '1')).toEqual({
+      title: 'Semana',
+      section: 'Hoy',
+      sections: ['Mañana'],
+    })
+  })
+
+  it('an unknown or missing active section sends no section name', () => {
+    expect(autocompleteNoteContext('T', sections, null)).toEqual({ title: 'T', section: '', sections: ['Ideas', 'Presupuesto', 'Tareas'] })
+    expect(autocompleteNoteContext('T', sections, 'zz').section).toBe('')
+    expect(autocompleteNoteContext('', [], undefined)).toEqual({ title: '', section: '', sections: [] })
+  })
+})
 
 describe('canRequestCompletion', () => {
   const now = 1_000_000

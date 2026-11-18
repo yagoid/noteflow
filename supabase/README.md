@@ -551,7 +551,8 @@ un máximo de peticiones simultáneas), que se **liquida** con el coste real al 
    ```
 
    **Autocompletado en el editor (migración 0018).** La función expone además `POST
-   .../ai-proxy/autocomplete` (body `{ "before": string, "after"?: string }`; mismo token y
+   .../ai-proxy/autocomplete` (body `{ "before": string, "after"?: string, "title"?: string, "section"?:
+   string, "sections"?: string[] }` — los tres últimos, opcionales, dicen de qué va la nota —; mismo token y
    entitlement que el chat): el servidor construye la petición entera (prompt, modelo, 48 tokens de
    salida, razonamiento desactivado) y devuelve el SSE de OpenRouter. Puede gastar como máximo una
    fracción del presupuesto mensual del usuario (**techo, no reserva**: el chat puede usar el 100 %,

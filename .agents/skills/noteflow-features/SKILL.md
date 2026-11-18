@@ -919,8 +919,9 @@ En ambos modos el `.md` de la sección guarda markdown (el editor serializa con 
 - **Solo con plan NoteFlow AI** (da igual qué proveedor use el chat) y **apagado por defecto**. Se
   activa en **Ajustes → IA → "Your notes and AI" → Autocomplete** (etiqueta "Beta"); sin plan el
   interruptor sale deshabilitado con "Requires an active NoteFlow AI plan". Es un ajuste **de este
-  dispositivo** (no se sincroniza): al activarlo, mientras escribes se envía el texto cercano al
-  cursor a NoteFlow AI. Activarlo o desactivarlo aplica al momento, sin recargar.
+  dispositivo** (no se sincroniza): al activarlo, mientras escribes se envía a NoteFlow AI el texto
+  cercano al cursor, junto con el **título de la nota y los nombres de sus secciones** (para que la
+  sugerencia sepa de qué va la nota; el nombre de una sección oculta a la IA no se envía). Activarlo o desactivarlo aplica al momento, sin recargar.
 - Tras una pausa breve al teclear (~0,4 s) con el cursor al **final de un párrafo** (también dentro
   de un ítem de lista), aparece una continuación corta (hasta ~12 palabras) como **texto fantasma**
   atenuado, que se va pintando según llega.
