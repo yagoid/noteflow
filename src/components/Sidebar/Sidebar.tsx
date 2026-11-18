@@ -155,7 +155,6 @@ const NoteRow = memo(function NoteRow({
           ...(isActive ? { background: 'rgb(var(--text) / 0.07)' } : {}),
           ...(isSearchTarget && !isActive ? { background: 'rgb(var(--text) / 0.06)' } : {}),
         }}
-        title={t.sidebar.openSideBySide}
       >
         <div className="flex items-center gap-1 min-w-0">
           {inFavorites && groupColor && (

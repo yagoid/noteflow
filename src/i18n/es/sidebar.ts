@@ -5,7 +5,6 @@ export const sidebar = {
   expiresInHours: 'caduca en {h}h',
   expiresInDays: 'caduca en {d}d',
 
-  openSideBySide: 'Ctrl/Cmd + clic para abrir en paralelo',
   sectionsSummary: 'Secciones: {names}',
   moreSections: '+{count}',
   showAllSections: { one: 'Mostrar {count} sección más', other: 'Mostrar {count} secciones más' },

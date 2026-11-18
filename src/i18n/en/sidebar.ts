@@ -8,8 +8,6 @@ export const sidebar = {
   expiresInHours: 'expires in {h}h',
   expiresInDays: 'expires in {d}d',
 
-  // Note row.
-  openSideBySide: 'Ctrl/Cmd + click to open side by side',
   // Accessible name of a note row's folded section line ({names} = comma-separated).
   sectionsSummary: 'Sections: {names}',
   // Open note's section map, capped at two rows: the cell that unfolds the rest ({count} =

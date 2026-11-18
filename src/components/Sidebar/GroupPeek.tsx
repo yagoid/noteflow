@@ -694,7 +694,6 @@ const PeekRow = memo(function PeekRow({
           ...(isActive ? { background: 'rgb(var(--text) / 0.07)' } : {}),
           ...(isSelected && !isActive ? { background: 'rgb(var(--text) / 0.06)' } : {}),
         }}
-        title={t.sidebar.openSideBySide}
       >
         <div className="flex items-center gap-1 min-w-0">
           {note.encryption && <Lock size={10} className="text-amber-400 flex-shrink-0" />}

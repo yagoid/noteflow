@@ -85,9 +85,8 @@ export function SectionCell({
       data-flip={section.id}
       className={className}
       style={style}
-      // The open section is already in the editor: no preview, just its name (the empty
-      // title also hides the row's own "Ctrl/Cmd + click" tooltip).
-      {...(active ? { title: '' } : previewProps(noteId, section.id, { placement: previewPlacement }))}
+      // The open section is already in the editor: no preview.
+      {...(active ? {} : previewProps(noteId, section.id, { placement: previewPlacement }))}
       aria-current={active ? 'true' : undefined}
       onClick={(e) => onClick(e, section.id)}
       onContextMenu={(e) => onContextMenu(e, section.id)}
